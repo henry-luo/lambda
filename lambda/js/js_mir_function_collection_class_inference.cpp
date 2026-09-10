@@ -96,12 +96,6 @@ bool jm_is_recursive_call(JsCallNode* call, JsFuncCollected* fc) {
 
 bool jm_call_result_uses_native_register(JsMirTranspiler* mt, JsCallNode* call, JsFuncCollected* fc) {
     if (!mt || !call || !fc) return false;
-    // non-tail self recursion is deliberately routed through js_call_function, so
-    // the MIR result is a boxed Item even when the function has a native body.
-    if (mt->current_fc && fc == mt->current_fc &&
-        (!mt->tco_func || !mt->in_tail_position || !jm_is_recursive_call(call, mt->tco_func))) {
-        return false;
-    }
     // A known native body is not enough: an unmatched direct call is lowered
     // through the boxed entry, whose slow lane can return any JavaScript value.
     // Reporting the inferred raw return here would make its caller unbox an
@@ -1646,7 +1640,7 @@ MIR_reg_t jm_build_args_array(JsMirTranspiler* mt, JsAstNode* first_arg, int arg
     if (mt->in_generator) {
         JsAstNode* chk = first_arg;
         while (chk) {
-            if (jm_has_yield(mt, chk) || (mt->in_async && jm_count_awaits(mt, chk) > 0)) {
+            if (jm_can_suspend(mt, chk)) {
                 has_yield_in_args = true;
                 break;
             }
@@ -1731,7 +1725,7 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
     int arr_spill_slot = -1;
     if (mt->in_generator) {
         JsAstNode* cy = first_arg;
-        while (cy) { if (jm_has_yield(mt, cy)) { arr_spill_slot = jm_gen_spill_save(mt, array); break; } cy = cy->next; }
+        while (cy) { if (jm_can_suspend(mt, cy)) { arr_spill_slot = jm_gen_spill_save(mt, array); break; } cy = cy->next; }
     }
 
     JsAstNode* arg = first_arg;
@@ -1741,7 +1735,7 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
             MIR_reg_t src_raw = jm_transpile_box_item(mt, spread->argument);
             jm_emit_error_lane_propagate_check(mt);
             // Generator spill: restore array after yield in spread argument
-            if (arr_spill_slot >= 0 && jm_has_yield(mt, spread->argument)) {
+            if (arr_spill_slot >= 0 && jm_can_suspend(mt, spread->argument)) {
                 jm_gen_spill_load(mt, array, arr_spill_slot);
             }
             // Convert any iterable to array first
@@ -1773,7 +1767,7 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
             MIR_reg_t val = jm_transpile_box_item(mt, arg);
             jm_emit_error_lane_propagate_check(mt);
             // Generator spill: restore array after yield in argument
-            if (arr_spill_slot >= 0 && jm_has_yield(mt, arg)) {
+            if (arr_spill_slot >= 0 && jm_can_suspend(mt, arg)) {
                 jm_gen_spill_load(mt, array, arr_spill_slot);
             }
             jm_callr_2(mt, "js_array_push", MIR_T_I64, array, val);

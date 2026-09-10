@@ -183,6 +183,34 @@ typedef enum JsSuspensionKind {
     JS_SUSPENSION_AWAIT,
 } JsSuspensionKind;
 
+// A suspension is lowered into this body when it descends from it with no
+// function boundary in between. The indexed owner is the usual answer, but its
+// span-based recovery pulls a computed class-member key into the *method's*
+// function even though the key is a child of the member and is evaluated in the
+// enclosing scope. Trusting structure as well keeps that key's `await` inside
+// the budget of the function that actually lowers it.
+static bool jm_suspension_is_lowered_here(const AstIndex* index,
+        AstNodeId node_id, AstNodeId root_id) {
+    AstNodeId id = node_id;
+    AstNode* from = NULL;
+    while (id != AST_NODE_ID_INVALID && id != root_id) {
+        AstNode* node = index->nodes[id];
+        if (from && ast_index_node_is_function(node)) {
+            // A computed method key is an AST child of the method node, yet it
+            // is evaluated — and lowered — in the enclosing scope. The walk
+            // passes through that one edge instead of stopping at it; every
+            // other function edge ends the search.
+            if (node->node_type != AST_NODE_METHOD ||
+                    ((AstMethodNode*)node)->key != from) {
+                return false;
+            }
+        }
+        from = node;
+        id = ast_index_parent_id(index, id);
+    }
+    return id == root_id;
+}
+
 static int jm_count_indexed_suspensions(JsMirTranspiler* mt, JsAstNode* root,
         JsSuspensionKind kind) {
     if (!mt || !mt->tp || !root) return 0;
@@ -193,22 +221,28 @@ static int jm_count_indexed_suspensions(JsMirTranspiler* mt, JsAstNode* root,
     int count = 0;
     for (uint32_t i = 0; i < index->count; i++) {
         AstNode* node = index->nodes[i];
-        if (!node || index->owner_functions[i] != owner ||
-                !ast_index_node_descends(index, i, root_id)) continue;
-        if (kind == JS_SUSPENSION_YIELD &&
-                node->node_type == JS_AST_NODE_YIELD_EXPRESSION) {
+        if (!node) continue;
+        bool owned_here = index->owner_functions[i] == owner &&
+            ast_index_node_descends(index, i, root_id);
+        if (!owned_here && !jm_suspension_is_lowered_here(index, i, root_id)) continue;
+        bool is_suspension =
+            (kind == JS_SUSPENSION_YIELD &&
+             node->node_type == JS_AST_NODE_YIELD_EXPRESSION) ||
+            (kind == JS_SUSPENSION_AWAIT &&
+             node->node_type == JS_AST_NODE_AWAIT_EXPRESSION);
+        if (is_suspension) {
             count++;
-            // A yield in an array-pattern element resumes through both
-            // iterator-result branches for every enclosing pattern level.
+            // A suspension in an array-pattern element resumes through both
+            // iterator-result branches for every enclosing pattern level. This
+            // holds for `await` in a destructuring default exactly as it does
+            // for `yield`; counting it only for yield left the await copies
+            // with no resume state.
             AstNodeId parent_id = i;
             while (parent_id != root_id && parent_id != AST_NODE_ID_INVALID) {
                 parent_id = ast_index_parent_id(index, parent_id);
                 AstNode* parent = parent_id < index->count ? index->nodes[parent_id] : NULL;
                 if (parent && parent->node_type == JS_AST_NODE_ARRAY_PATTERN) count++;
             }
-        } else if (kind == JS_SUSPENSION_AWAIT &&
-                node->node_type == JS_AST_NODE_AWAIT_EXPRESSION) {
-            count++;
         }
         if (kind == JS_SUSPENSION_AWAIT &&
                 node->node_type == JS_AST_NODE_FOR_OF_STATEMENT &&
@@ -219,9 +253,114 @@ static int jm_count_indexed_suspensions(JsMirTranspiler* mt, JsAstNode* root,
     return count;
 }
 
+// `break`/`continue` inline every enclosing finally body at the jump site
+// (jm_emit_abrupt_jump_cleanup), so one `yield`/`await` written inside a
+// `finally` is lowered once per such site in addition to the finally block
+// itself. The resume-state budget is fixed before the body is lowered, so
+// those extra suspension points must be counted here; otherwise the later
+// copies find no state left and silently fail to suspend — a generator drops
+// the yield, and an async function's `await` evaluates to the raw promise.
+// This is the same silent-truncation shape as the two §9.3 caps.
+#define JM_FINALLY_INLINE_DEPTH 32
+
+typedef struct JmFinallyInlineScan {
+    JsSuspensionKind kind;
+    JsAstNode* finalizers[JM_FINALLY_INLINE_DEPTH];
+    bool inlining[JM_FINALLY_INLINE_DEPTH];
+    int depth;
+    int expanding;   // >0 while walking an inlined copy
+    int extra;
+} JmFinallyInlineScan;
+
+static void jm_scan_finally_inlines(JmFinallyInlineScan* scan, JsAstNode* node);
+
+static void jm_scan_finally_inline_child(JsAstNode* child, void* opaque) {
+    jm_scan_finally_inlines((JmFinallyInlineScan*)opaque, child);
+}
+
+static void jm_scan_finally_inlines(JmFinallyInlineScan* scan, JsAstNode* node) {
+    if (!node) return;
+    switch (node->node_type) {
+    case JS_AST_NODE_FUNCTION_DECLARATION:
+    case JS_AST_NODE_FUNCTION_EXPRESSION:
+    case JS_AST_NODE_ARROW_FUNCTION:
+        // A nested function owns its own state machine and its own budget.
+        return;
+    case JS_AST_NODE_TRY_STATEMENT: {
+        JsTryNode* tried = (JsTryNode*)node;
+        bool pushed = tried->finalizer && scan->depth < JM_FINALLY_INLINE_DEPTH;
+        if (pushed) {
+            scan->finalizers[scan->depth] = (JsAstNode*)tried->finalizer;
+            scan->inlining[scan->depth] = false;
+            scan->depth++;
+        }
+        jm_scan_finally_inlines(scan, (JsAstNode*)tried->block);
+        jm_scan_finally_inlines(scan, (JsAstNode*)tried->handler);
+        if (pushed) scan->depth--;
+        // The finalizer's own lowering happens with this try already popped,
+        // which is also why a `break` inside it cannot re-inline it.
+        jm_scan_finally_inlines(scan, (JsAstNode*)tried->finalizer);
+        return;
+    }
+    case JS_AST_NODE_BREAK_STATEMENT:
+    case JS_AST_NODE_CONTINUE_STATEMENT:
+        for (int d = scan->depth - 1; d >= 0; d--) {
+            if (scan->inlining[d]) continue;
+            scan->inlining[d] = true;
+            scan->expanding++;
+            jm_scan_finally_inlines(scan, scan->finalizers[d]);
+            scan->expanding--;
+            scan->inlining[d] = false;
+        }
+        return;
+    case JS_AST_NODE_YIELD_EXPRESSION:
+        if (scan->expanding > 0 && scan->kind == JS_SUSPENSION_YIELD) scan->extra++;
+        break;
+    case JS_AST_NODE_AWAIT_EXPRESSION:
+        if (scan->expanding > 0 && scan->kind == JS_SUSPENSION_AWAIT) scan->extra++;
+        break;
+    default:
+        break;
+    }
+    js_ast_visit_children(node, jm_scan_finally_inline_child, scan);
+}
+
+static int jm_count_finally_inline_suspensions(JsAstNode* root,
+        JsSuspensionKind kind) {
+    JmFinallyInlineScan scan = {};
+    scan.kind = kind;
+    jm_scan_finally_inlines(&scan, root);
+    return scan.extra;
+}
+
+int jm_count_finally_inline_yields(JsAstNode* root) {
+    return jm_count_finally_inline_suspensions(root, JS_SUSPENSION_YIELD);
+}
+
+int jm_count_finally_inline_awaits(JsAstNode* root) {
+    return jm_count_finally_inline_suspensions(root, JS_SUSPENSION_AWAIT);
+}
+
+// Reserve a spill slot without storing to it. Unlike jm_gen_spill_save this
+// respects the fixed spill region and reports exhaustion, so a caller that can
+// degrade (rather than corrupt the slot past it) has that option.
+int jm_gen_spill_reserve(JsMirTranspiler* mt) {
+    if (!mt || !mt->gen_env_reg) return -1;
+    if (mt->gen_active_iterator_slot >= 0 &&
+            mt->gen_spill_slot_next >= mt->gen_active_iterator_slot) return -1;
+    return mt->gen_spill_slot_next++;
+}
+
 // Generator yield spill: save a temporary register to an env slot before a yield-containing
 // sub-expression, so that its value survives the yield suspend/resume cycle.
 // Returns the allocated env slot index.
+// Store into an already-reserved slot. A loop-carried value re-stores into the
+// same home each iteration rather than consuming a new slot per back edge.
+void jm_gen_spill_save_at(JsMirTranspiler* mt, MIR_reg_t reg, int slot) {
+    if (!mt || slot < 0) return;
+    jm_emit_store_i64(mt, slot * (int)sizeof(uint64_t), mt->gen_env_reg, reg);
+}
+
 int jm_gen_spill_save(JsMirTranspiler* mt, MIR_reg_t reg) {
     int slot = mt->gen_spill_slot_next++;
     jm_emit_store_i64(mt, slot * (int)sizeof(uint64_t), mt->gen_env_reg, reg);
@@ -237,6 +376,18 @@ void jm_gen_spill_load(JsMirTranspiler* mt, MIR_reg_t reg, int slot) {
 // Check if an expression subtree contains a yield (for generator spill decisions)
 bool jm_has_yield(JsMirTranspiler* mt, JsAstNode* node) {
     return jm_count_yields(mt, node) > 0;
+}
+
+// A spill decision asks "can this subtree suspend", not "does it contain a
+// yield". Inside an async body an `await` returns from the state machine
+// exactly as a yield does, so an accumulator (object/array under construction,
+// evaluated key, iterator cursor, left operand) left in a raw MIR register
+// across one is lost on resume. Asking jm_has_yield instead was only ever
+// survivable because `await` had a fast path that usually did not suspend.
+bool jm_can_suspend(JsMirTranspiler* mt, JsAstNode* node) {
+    if (!mt || !node || !mt->in_generator) return false;
+    return jm_count_yields(mt, node) > 0 ||
+        (mt->in_async && jm_count_awaits(mt, node) > 0);
 }
 
 // Check if an expression subtree contains an optional chain (?.),
@@ -740,6 +891,7 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
     JsAstFunctionFacts facts = js_ast_collect_function_facts(fn->params, fn->body);
     analysis->js_has_direct_eval = facts.has_direct_eval;
     analysis->js_has_direct_super_call = facts.has_direct_super_call;
+    analysis->js_has_lexical_super_call = facts.has_lexical_super_call;
     analysis->js_first_direct_super_call_start = facts.first_direct_super_call_start;
 
     // Collect all identifier references in the body

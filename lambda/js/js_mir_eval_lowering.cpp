@@ -138,15 +138,15 @@ static JsDynFuncCacheState* js_dynfunc_cache_state_ensure(void) {
     if (!js_runtime_state.dynamic_function_cache_state) {
         // Dynamic Function construction is a cold compilation boundary. The
         // resulting cache remains entirely context-local and lock-free.
-        js_runtime_state.dynamic_function_cache_state = mem_calloc(1,
+        js_runtime_state.dynamic_function_cache_state = (JsDynFuncCacheState*)mem_calloc(1,
             sizeof(JsDynFuncCacheState), MEM_CAT_JS_RUNTIME);
     }
-    return (JsDynFuncCacheState*)js_runtime_state.dynamic_function_cache_state;
+    return js_runtime_state.dynamic_function_cache_state;
 }
 
 JS_FORWARD_STATIC_EXPRESSION(JsDynFuncCacheState*, js_dynfunc_cache_state_current, (void),
     js_active_runtime_state ?
-        (JsDynFuncCacheState*)js_runtime_state.dynamic_function_cache_state : NULL)
+        js_runtime_state.dynamic_function_cache_state : NULL)
 
 #define js_dynfunc_cache_state (*js_dynfunc_cache_state_current())
 #define js_dynfunc_cache_entries (js_dynfunc_cache_state.entries)
@@ -858,8 +858,11 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
 
     if (!transpile_js_mir_ast(mt)) {
         log_error("js-new-function: collection/allocation failed");
+        bool syntax_error = tp->has_errors;
         (void)js_mir_compile_unit_fail(ctx, mt, tp, source,
             js_current_runtime(), context, true);
+        // analysis can discover strict-parameter errors after parsing succeeds.
+        if (syntax_error) return js_dynamic_function_throw_syntax_error("Invalid function source");
         return ItemNull;
     }
 
@@ -937,8 +940,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
 
 extern "C" void js_dynfunc_cache_destroy_context(JsRuntimeState* runtime_state) {
     if (!runtime_state || !runtime_state->dynamic_function_cache_state) return;
-    js_dynfunc_cache_entries_clear((JsDynFuncCacheState*)
-        runtime_state->dynamic_function_cache_state);
+    js_dynfunc_cache_entries_clear(runtime_state->dynamic_function_cache_state);
     mem_free(runtime_state->dynamic_function_cache_state);
     runtime_state->dynamic_function_cache_state = NULL;
 }

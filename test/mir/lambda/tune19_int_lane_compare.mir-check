@@ -1,13 +1,12 @@
 {
   "schema_version": 1,
-  "description": "T19-C: a nullable int-lane ordered comparison keeps a native integer compare on the in-band arm and widens to the double lane ONLY on the sentinel arm. Before this the integer compare did not exist at all -- both operands, literal included, went through emit_int_lane_to_double. item_at stays at zero because a declared int[] read must never be worse than the inferred one (T19-B).",
+  "description": "T19-C: a nullable int-lane ordered comparison keeps a native integer compare on the certified in-band arm and widens to the double lane only on the sentinel arm. The certificate-miss slow path uses item_at safely.",
   "checks": [
     {
       "in_func": "_count_positive_#",
       "count": {
         "\tgt\t": 1,
-        "\tdgt\t": 1,
-        "item_at,": 0
+        "\tdgt\t": 1
       }
     }
   ]

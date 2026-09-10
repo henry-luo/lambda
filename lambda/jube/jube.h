@@ -547,6 +547,87 @@ struct JubeHostRootAPI {
     int (*persistent_root_unregister)(void* session, uint64_t* slot);
 };
 
+// A hosted module's fixed cache values share one session-bound persistent-root
+// protocol.  The values retain their native all-zero absence sentinel.
+typedef struct JubePersistentValueSlots {
+    void* session;
+    const JubeHostRootAPI* roots;
+    Item* values;
+    int value_count;
+    int registered_count;
+} JubePersistentValueSlots;
+
+static inline void jube_persistent_value_slots_reset(JubePersistentValueSlots* slots) {
+    if (!slots || !slots->values) return;
+    for (int i = 0; i < slots->value_count; i++) slots->values[i] = (Item){0};
+}
+
+static inline bool jube_persistent_value_slots_attached(const JubePersistentValueSlots* slots) {
+    return slots && slots->session && slots->roots && slots->values && slots->value_count > 0 &&
+        slots->registered_count == slots->value_count;
+}
+
+static inline int jube_persistent_value_slots_attach(JubePersistentValueSlots* slots,
+        void* session, const JubeHostRootAPI* roots, Item* values, int value_count) {
+    if (!slots || !session || !roots || !values || value_count <= 0 ||
+            !roots->persistent_root_register || !roots->persistent_root_unregister) return -1;
+    if (jube_persistent_value_slots_attached(slots)) {
+        return slots->session == session && slots->roots == roots && slots->values == values &&
+            slots->value_count == value_count ? 0 : -1;
+    }
+    if (slots->session || slots->roots || slots->values || slots->value_count ||
+            slots->registered_count) return -1;
+    slots->session = session;
+    slots->roots = roots;
+    slots->values = values;
+    slots->value_count = value_count;
+    jube_persistent_value_slots_reset(slots);
+    for (; slots->registered_count < value_count; slots->registered_count++) {
+        if (roots->persistent_root_register(session,
+                &values[slots->registered_count].item) == 0) continue;
+        while (slots->registered_count > 0) {
+            slots->registered_count--;
+            roots->persistent_root_unregister(session, &values[slots->registered_count].item);
+        }
+        jube_persistent_value_slots_reset(slots);
+        slots->session = NULL;
+        slots->roots = NULL;
+        slots->values = NULL;
+        slots->value_count = 0;
+        return -1;
+    }
+    return 0;
+}
+
+static inline void jube_persistent_value_slots_detach(JubePersistentValueSlots* slots) {
+    if (!slots) return;
+    if (slots->session && slots->roots && slots->roots->persistent_root_unregister && slots->values) {
+        while (slots->registered_count > 0) {
+            slots->registered_count--;
+            slots->roots->persistent_root_unregister(slots->session,
+                &slots->values[slots->registered_count].item);
+        }
+    }
+    jube_persistent_value_slots_reset(slots);
+    slots->session = NULL;
+    slots->roots = NULL;
+    slots->values = NULL;
+    slots->value_count = 0;
+    slots->registered_count = 0;
+}
+
+// Host shutdown can release a session root registry before module shutdown.
+// In that order, clear stale module bookkeeping without a late host callback.
+static inline void jube_persistent_value_slots_forget(JubePersistentValueSlots* slots) {
+    if (!slots) return;
+    jube_persistent_value_slots_reset(slots);
+    slots->session = NULL;
+    slots->roots = NULL;
+    slots->values = NULL;
+    slots->value_count = 0;
+    slots->registered_count = 0;
+}
+
 // Language-neutral projection of Lambda Item/container mechanics.  The
 // session is an opaque host token valid only during an active guest execution
 // on this thread.  JavaScript property/prototype/coercion semantics are

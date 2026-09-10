@@ -234,6 +234,9 @@ JsTryContext* jm_try_context_push(JsMirTranspiler* mt) {
     if (!context) return NULL;
     memset(context, 0, sizeof(*context));
     context->end_label_error_lane_state = JS_ERROR_LANE_UNREACHABLE;
+    context->has_return_spill = -1;
+    context->return_val_spill = -1;
+    context->loop_depth_at_push = mt->loop_depth;
     mt->try_ctx_depth++;
     return context;
 }
@@ -373,10 +376,10 @@ JsMirTranspiler* jm_create_mir_transpiler(
 void jm_destroy_mir_transpiler(JsMirTranspiler* mt) {
     jm_cleanup_mir_transpiler_state(mt);
     if (mt && mt->func_em) { mem_free(mt->func_em); mt->func_em = NULL; }
-    // §9.3: the capture list and its save journal are separate allocations now
+    // §9.3: one closure tracker owns both the active list and save journal.
     if (mt) {
         if (mt->last_closure.captures) mem_free(mt->last_closure.captures);
-        if (mt->closure_journal) mem_free(mt->closure_journal);
+        if (mt->last_closure.journal) mem_free(mt->last_closure.journal);
         if (mt->tdz_closure_captures) mem_free(mt->tdz_closure_captures);
         if (mt->gen_state_labels) mem_free(mt->gen_state_labels);
         mt->gen_state_labels = NULL;
@@ -385,8 +388,9 @@ void jm_destroy_mir_transpiler(JsMirTranspiler* mt) {
         mt->tdz_closure_capture_capacity = 0;
         mt->last_closure.captures = NULL;
         mt->last_closure.capacity = 0;
-        mt->closure_journal = NULL;
-        mt->closure_journal_capacity = 0;
+        mt->last_closure.journal = NULL;
+        mt->last_closure.journal_capacity = 0;
+        mt->last_closure.journal_count = 0;
     }
     mem_free(mt);
 }
@@ -655,6 +659,14 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
         em_store_frame_top(&mt->func_em->em, mt->func_em->em.frame.runtime,
             offsetof(Context, side_root_top), mt->func_em->em.frame.root_base);
     }
+    if (mt->func_em->em.frame.return_lane_kind == RETURN_LANE_ERROR) {
+        pair_item = mt->func_em->em.frame.return_reg;
+        pair_companion = mt->func_em->em.frame.error_return_reg;
+        if (em_returns_companion_slot(mt->func_em->em.frame.plan.companion)) {
+            em_store_frame_top(&mt->func_em->em, mt->func_em->em.frame.runtime,
+                offsetof(Context, mir_companion_slot), pair_companion);
+        }
+    }
     if (em_returns_result_pair(mt->func_em->em.frame.plan.companion)) {
         em_emit_insn(&mt->func_em->em, MIR_new_ret_insn(mt->ctx, 2,
             MIR_new_reg_op(mt->ctx, pair_item),
@@ -692,11 +704,7 @@ void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn) {
             em_emit_insn(&mt->func_em->em, insn);
             return;
         }
-        MIR_insn_code_t move = mt->func_em->em.frame.return_type == MIR_T_D ? MIR_DMOV : MIR_MOV;
-        em_emit_insn(&mt->func_em->em, MIR_new_insn(mt->ctx, move,
-            MIR_new_reg_op(mt->ctx, mt->func_em->em.frame.return_reg), insn->ops[0]));
-        em_emit_insn(&mt->func_em->em, MIR_new_insn(mt->ctx, MIR_JMP,
-            MIR_new_label_op(mt->ctx, mt->func_em->em.frame.return_label)));
+        em_stage_function_return(&mt->func_em->em, insn->ops[0]);
         jm_error_lane_set_state(mt, JS_ERROR_LANE_UNREACHABLE);
         _MIR_free_insn(mt->ctx, insn);
         return;
@@ -996,55 +1004,58 @@ bool jm_closure_tracker_reserve(JsClosureTracker* tracker, int n) {
 }
 
 // Push the live captures onto the journal and record where they start.
-void jm_save_last_closure_snapshot(JsMirTranspiler* mt,
-        JsMirLastClosureSnapshot* snapshot) {
-    if (!mt || !snapshot) return;
-    snapshot->has_env = mt->last_closure.has_env;
-    snapshot->env_reg = mt->last_closure.env_reg;
-    snapshot->capture_count = mt->last_closure.count;
-    snapshot->journal_mark = mt->closure_journal_count;
-    int needed = mt->closure_journal_count + mt->last_closure.count;
-    if (needed > mt->closure_journal_capacity) {
-        int capacity = mt->closure_journal_capacity ? mt->closure_journal_capacity : 16;
+void jm_closure_checkpoint_save(JsMirTranspiler* mt,
+        JsClosureCheckpoint* checkpoint) {
+    if (!mt || !checkpoint) return;
+    checkpoint->has_env = mt->last_closure.has_env;
+    checkpoint->env_reg = mt->last_closure.env_reg;
+    checkpoint->capture_count = mt->last_closure.count;
+    checkpoint->journal_mark = mt->last_closure.journal_count;
+    int needed = mt->last_closure.journal_count + mt->last_closure.count;
+    if (needed > mt->last_closure.journal_capacity) {
+        int capacity = mt->last_closure.journal_capacity
+            ? mt->last_closure.journal_capacity : 16;
         while (capacity < needed) capacity *= 2;
-        JsClosureCapture* grown = (JsClosureCapture*)mem_realloc(mt->closure_journal,
+        JsClosureCapture* grown = (JsClosureCapture*)mem_realloc(
+            mt->last_closure.journal,
             (size_t)capacity * sizeof(JsClosureCapture), MEM_CAT_JS_RUNTIME);
-        if (!grown) { snapshot->capture_count = 0; return; }
-        mt->closure_journal = grown;
-        mt->closure_journal_capacity = capacity;
+        if (!grown) { checkpoint->capture_count = 0; return; }
+        mt->last_closure.journal = grown;
+        mt->last_closure.journal_capacity = capacity;
     }
     for (int i = 0; i < mt->last_closure.count; i++) {
         JsClosureCapture entry = mt->last_closure.captures[i];
         entry.name = jm_persist_name(entry.name);
-        mt->closure_journal[mt->closure_journal_count++] = entry;
+        mt->last_closure.journal[mt->last_closure.journal_count++] = entry;
     }
 }
 
-void jm_clear_last_closure_snapshot(JsMirTranspiler* mt) {
+void jm_closure_tracker_clear(JsMirTranspiler* mt) {
     if (!mt) return;
     mt->last_closure.has_env = false;
     mt->last_closure.env_reg = 0;
     mt->last_closure.count = 0;
 }
 
-// Copy the saved captures back and drop them from the journal.
-void jm_restore_last_closure_snapshot(JsMirTranspiler* mt,
-        const JsMirLastClosureSnapshot* snapshot) {
-    if (!mt || !snapshot) return;
-    mt->last_closure.has_env = snapshot->has_env;
-    mt->last_closure.env_reg = snapshot->env_reg;
-    if (!jm_closure_tracker_reserve(&mt->last_closure, snapshot->capture_count)) {
+// Roll back the live tracker to a checkpoint and truncate its journal.
+void jm_closure_checkpoint_rollback(JsMirTranspiler* mt,
+        const JsClosureCheckpoint* checkpoint) {
+    if (!mt || !checkpoint) return;
+    mt->last_closure.has_env = checkpoint->has_env;
+    mt->last_closure.env_reg = checkpoint->env_reg;
+    if (!jm_closure_tracker_reserve(&mt->last_closure, checkpoint->capture_count)) {
         mt->last_closure.count = 0;
         return;
     }
-    mt->last_closure.count = snapshot->capture_count;
-    for (int i = 0; i < snapshot->capture_count; i++) {
-        JsClosureCapture entry = mt->closure_journal[snapshot->journal_mark + i];
+    mt->last_closure.count = checkpoint->capture_count;
+    for (int i = 0; i < checkpoint->capture_count; i++) {
+        JsClosureCapture entry = mt->last_closure.journal[
+            checkpoint->journal_mark + i];
         entry.name = jm_persist_name(entry.name);
         mt->last_closure.captures[i] = entry;
     }
-    if (snapshot->journal_mark < mt->closure_journal_count) {
-        mt->closure_journal_count = snapshot->journal_mark;
+    if (checkpoint->journal_mark < mt->last_closure.journal_count) {
+        mt->last_closure.journal_count = checkpoint->journal_mark;
     }
 }
 

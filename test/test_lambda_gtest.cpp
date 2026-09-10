@@ -267,6 +267,16 @@ INSTANTIATE_TEST_SUITE_P(
 // Negative Tests - verify transpiler reports errors gracefully without crashing
 //==============================================================================
 
+TEST(LambdaTypedPathTests, PreservesSnapshotsAndRejectsInvalidWrites) {
+    test_lambda_script_against_file("test/mir/lambda/typed_path_store.ls",
+        "test/mir/lambda/typed_path_store.txt", true);
+}
+
+TEST(LambdaTypedPathTests, ReusesFullArrayContractsAcrossCalls) {
+    test_lambda_script_against_file("test/mir/lambda/typed_array_reuse.ls",
+        "test/mir/lambda/typed_array_reuse.txt", true);
+}
+
 // Helper to test that a script reports type errors but doesn't crash
 // Note: Lambda currently exits with code 0 even on type errors (errors are reported to stderr)
 void test_lambda_script_expects_error(const char* script_path) {
@@ -377,6 +387,18 @@ TEST(LambdaNegativeTests, test_type_enforcement_typed_map_write) {
 
 TEST(LambdaNegativeTests, test_type_enforcement_typed_array_write) {
     test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_array_write.ls");
+}
+
+TEST(LambdaNegativeTests, test_type_enforcement_nested_array_write) {
+    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_nested_array_write.ls");
+}
+
+TEST(LambdaNegativeTests, test_type_enforcement_ndim_array_write) {
+    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_ndim_array_write.ls");
+}
+
+TEST(LambdaNegativeTests, test_type_enforcement_mask_array_write) {
+    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_mask_array_write.ls");
 }
 
 TEST(LambdaNegativeTests, test_type_enforcement_dynamic_arity) {

@@ -743,6 +743,13 @@ extern "C" void js_release_global_var_module_bindings_from(
 }
 
 static void js_sync_global_var_module_binding(Item object, Item key, Item value) {
+    // A store observer must never force the global object into existence. The
+    // realm bootstrap itself stores properties, and js_get_global_this() called
+    // from inside a half-built intrinsic re-enters constructor population on a
+    // prototype chain that is not yet linked — an unbounded walk. Before
+    // globalThis exists no store can be targeting it, so there is nothing to
+    // sync: read the slot instead of building it.
+    if (!js_is_global_this_object_value(object)) return;
     js_global_var_binding_refresh();
     JsGlobalEnvironment* environment = js_global_environment_current();
     if (!environment || object.item != js_global_environment_slot(environment,
@@ -1259,9 +1266,11 @@ extern "C" Item js_proxy_revocable(Item target, Item handler) {
     JsFunction* fn = js_alloc_gc_function_object();
     if (!fn) return ItemError;
     revoke_root.set((Item){.function = (Function*)fn});
-    fn->func_ptr = NULL;
-    fn->param_count = 0;
-    fn->formal_length = 0;
+    JsCallableCode* code = js_fn_code_ensure(fn);
+    if (!code) return ItemError;
+    code->func_ptr = NULL;
+    code->param_count = 0;
+    code->formal_length = 0;
     js_fn_native_ensure(fn)->call = js_proxy_revoke_call_body;
     js_fn_native_ensure(fn)->policy = JS_NATIVE_CALL_BODY;
     fn->name = heap_create_name("", 0);
@@ -3808,7 +3817,6 @@ typedef struct JsPredictedShape {
 
 // One realm's literal sites are few; a bounded linear scan beats a hash table
 // and the caller memoizes the resolved TypeMap in a register per function.
-#define JS_PREDICTED_SHAPE_LIMIT 512
 
 static uint64_t js_predicted_shape_descriptor(uint32_t module_id,
         uint32_t first_key_index, uint32_t key_count) {
@@ -3855,8 +3863,8 @@ static TypeMap* js_predicted_shape_build(uint32_t first_key_index,
     tm->length = (int)key_count;
     tm->byte_size = (int64_t)key_count * (int64_t)sizeof(void*);
     tm->js_meta = js_class_meta_for_id((JsClass)JS_CLASS_OBJECT);
-    // Shared across every evaluation of the site, so a NULL downgrade must be
-    // refused (shape_entry_retag_is_safe); upgrades stay in place.
+    // the initial blueprint may learn non-null lanes. Publishing null seals
+    // it as an immutable transition root before any sibling can reinterpret it.
     tm->is_shared_constructor_shape = true;
     tm->is_private_clone = false;
     tm->is_transition_shared_shape = false;
@@ -3917,8 +3925,15 @@ static TypeMap* js_predicted_shape_resolve(uint32_t first_key_index,
     return shape;
 }
 
-// MIR entry: allocate an object literal's instance on its predicted shape, with
-// every slot reserved so an unwritten field is absent rather than null.
+// Pool-owned metadata, independent of GC and of any observed receiver. MIR
+// resolves this compile-selected recipe per activation, never learns an IC.
+extern "C" void* js_literal_shape(int64_t first_key_index, int64_t key_count) {
+    if (first_key_index < 0 || first_key_index >= JS_PREDICTED_SHAPE_LIMIT ||
+            key_count <= 0 || key_count > JS_PREDICTED_SHAPE_MAX_SLOTS) return NULL;
+    return js_predicted_shape_resolve((uint32_t)first_key_index, (uint32_t)key_count);
+}
+
+// MIR entry: allocate a literal on its predicted shape before field evaluation.
 extern "C" Item js_new_object_shaped(int64_t first_key_index,
         int64_t key_count) {
     if (first_key_index < 0 || key_count <= 0) return js_new_object();
@@ -3937,56 +3952,48 @@ static bool js_shape_write_same_size_slot(TypeMap* tm, ShapeEntry* entry,
         void* data, Item value);
 static inline bool js_named_fast_store_can_write_same_slot(ShapeEntry* entry,
         Item value);
+static inline bool js_named_fast_store_same_slot(ShapeEntry* entry, void* data,
+        Item value);
 
-// T10-2: initialize a predicted shape's still-unwritten slot in place.
-//
-// A predicted slot exists from allocation but stays NULL-typed until its first
-// write, so CreateDataProperty on it is an INITIALIZATION, not a redefinition.
-// Sending it down the descriptor path clones the shape and detaches the
-// instance from the very shape the compiled guard compares against, which is
-// what made the guard miss every time.
-//
-// The retag is the NULL -> T upgrade shape_entry_retag_is_safe sanctions. Only
-// the T -> NULL downgrade is refused on a shared shape, because that one would
-// make the collector skip a sibling instance's live pointer. The upgrade is
-// safe in this direction: a sibling that has not yet written this slot holds
-// the zero word, which every admitted lane reads as its own zero (a null
-// container, integer 0), and no literal exposes an instance before all of its
-// slots are written.
-extern "C" bool js_predicted_slot_initialize(Item target, NameRef key,
-        Item value) {
-    if (get_type_id(target) != LMD_TYPE_MAP || !target.map) return false;
+// initialize a default data slot without allocating a property descriptor.
+// Once a literal stores an observable null, its blueprint must join the
+// immutable transition graph: a later NULL -> T retag would reinterpret that
+// earlier instance's null bytes as T (D3.4.5-D3.4.6).
+extern "C" Item js_predicted_slot_initialize(Item target, NameRef key,
+        Item value, bool* handled) {
+    *handled = false;
+    if (get_type_id(target) != LMD_TYPE_MAP || !target.map) return ItemNull;
     Map* m = target.map;
-    if (m->map_kind != MAP_KIND_PLAIN || !m->data) return false;
+    if (m->map_kind != MAP_KIND_PLAIN || m->is_static || !m->data) return ItemNull;
     TypeMap* tm = (TypeMap*)m->type;
-    // Only a predicted shape: its contiguous pointer-width slots are what make
-    // an in-place retag a layout no-op rather than a repack.
-    if (!tm || !tm->is_shared_constructor_shape ||
-            typemap_fixed_slot_prefix_count(tm) <= 0) return false;
-    if (!key || property_key_kind(key) != NAME_KEY_STRING) return false;
+    if (!typemap_is_shared_shape(tm) ||
+            typemap_fixed_slot_prefix_count(tm) <= 0) return ItemNull;
+    if (!key || property_key_kind(key) != NAME_KEY_STRING) return ItemNull;
     NameId name_id = property_key_id(key);
-    if (name_id == NAME_ID_NONE) return false;
+    if (name_id == NAME_ID_NONE) return ItemNull;
     ShapeEntry* e = typemap_hash_lookup_by_name_id(tm, name_id,
         property_key_hash(key));
-    if (!e || e->flags != 0 || !e->type) return false;
-    if (!typemap_entry_uses_fixed_slot(tm, e)) return false;
-    // A null value needs no retag -- the zeroed slot already reads as null --
-    // and leaving it to the ordinary path keeps one rule here, not two.
-    if (get_type_id(value) == LMD_TYPE_NULL) return false;
-    if (!shape_entry_storage_fits_data(e, m->data_cap)) return false;
-    // Two admissible cases, and no third. A NULL slot is the first write to
-    // this field: retag it, which is the safe direction. An already-typed slot
-    // is admitted only when the value needs NO retag -- the shape is shared by
-    // every instance of the site, so retagging INT to STRING here would have a
-    // sibling's integer read back as a pointer. A cross-type write instead
-    // falls through to the ordinary path, which clones and detaches.
-    //
-    // Refusing the already-typed case outright was a 9.7x regression: only the
-    // first instance took this path, and every later one landed in the
-    // descriptor slow path because its key now exists in the shape.
-    if (e->type->type_id != LMD_TYPE_NULL &&
-            !js_named_fast_store_can_write_same_slot(e, value)) return false;
-    return js_shape_write_same_size_slot(tm, e, m->data, value);
+    if (!e || e->flags != 0 || !e->type ||
+            !typemap_entry_uses_fixed_slot(tm, e) ||
+            !shape_entry_storage_fits_data(e, m->data_cap) ||
+            map_ctor_offset_is_reserved(m, e->byte_offset)) return ItemNull;
+
+    *handled = true;
+    if (get_type_id(value) == LMD_TYPE_NULL && tm->is_shared_constructor_shape) {
+        tm->is_shared_constructor_shape = false;
+        tm->is_transition_shared_shape = true;
+    }
+    if (js_named_fast_store_can_write_same_slot(e, value) &&
+            js_named_fast_store_same_slot(e, m->data, value)) return ItemNull;
+
+    // only the unpublished, null-free blueprint may still learn a field type.
+    if (tm->is_shared_constructor_shape && e->type->type_id == LMD_TYPE_NULL &&
+            js_shape_write_same_size_slot(tm, e, m->data, value)) return ItemNull;
+
+    // reuse Lambda's storage/transition writer for incompatible lanes. It
+    // preserves siblings and caches the new shape instead of cloning a
+    // throwaway descriptor and a private TypeMap on every literal evaluation.
+    return fn_map_set(target, (Item){.item = s2it(key)}, value);
 }
 
 // T10-2 item 2: guarded direct-slot read.
@@ -4111,14 +4118,24 @@ Item js_map_shape_lookup_ext(Map* m, const char* key_str, int key_len, bool* out
 }
 
 // P10d: Interned __proto__ key — avoid heap_create_name on every prototype lookup.
-// Initialized lazily on first use.
-#define js_proto_key_item (js_runtime_state.intrinsic_slots->proto_key)
-void js_reset_proto_key() { js_proto_key_item = (Item){0}; }
+// Initialized lazily on first use and owned by the dynamic realm slot store.
+static Item* js_proto_key_slot(void) {
+    return js_realm_slot(&js_runtime_state.realm_slots, JS_REALM_SLOT_PROTO_KEY);
+}
+
+void js_reset_proto_key() {
+    Item* slot = js_realm_slot_existing(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_PROTO_KEY);
+    if (slot) *slot = (Item){0};
+}
+
 static Item js_get_proto_key() {
-    if (js_proto_key_item.item == 0) {
-        js_proto_key_item.item = s2it(heap_create_name("__proto__", 9));
+    Item* slot = js_proto_key_slot();
+    if (!slot) return ItemNull;
+    if (slot->item == 0) {
+        slot->item = s2it(heap_create_name("__proto__", 9));
     }
-    return js_proto_key_item;
+    return *slot;
 }
 
 // Forward declaration for builtin method lookup (extern — used by js_globals.cpp too)
@@ -5573,7 +5590,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
                 // The kernel's IS_ACCESSOR fast-path above handles all FUNC accessors.
             }
             // Annex B legacy RegExp static properties ($1-$9, input, lastMatch, etc.)
-            if (fn->intrinsic_class == JS_CLASS_REGEXP) {
+            if (js_fn_intrinsic_class(fn) == JS_CLASS_REGEXP) {
                 if (str_key->len == 2 && str_key->chars[0] == '$' &&
                     str_key->chars[1] >= '1' && str_key->chars[1] <= '9') {
                     int gi = str_key->chars[1] - '1'; // $1 → index 0
@@ -5636,18 +5653,18 @@ extern "C" Item js_get_key_core(Item object, Item key,
                     // plain Map only worked while the removed name dispatcher
                     // pretended it was callable; publish the real capability
                     // object required by D6.2.2v2.
-                    fn->prototype = fn->intrinsic_class == JS_CLASS_FUNCTION
+                    fn->prototype = js_fn_intrinsic_class(fn) == JS_CLASS_FUNCTION
                         ? js_new_native_function(js_function_prototype_call_target)
-                        : fn->intrinsic_class == JS_CLASS_REGEXP
+                        : js_fn_intrinsic_class(fn) == JS_CLASS_REGEXP
                             ? js_new_object()
-                        : (fn->intrinsic_class != JS_CLASS_NONE
-                            ? js_new_object_with_class(fn->intrinsic_class)
+                        : (js_fn_intrinsic_class(fn) != JS_CLASS_NONE
+                            ? js_new_object_with_class(js_fn_intrinsic_class(fn))
                             : js_new_object());
                     js_function_root_item_if_needed(fn, &fn->prototype);
                     // Stamp built-in constructor prototypes so type-specific
                     // builtin method resolution works without public markers.
-                    if (fn->intrinsic_class != JS_CLASS_NONE) {
-                        JsClass cls = (JsClass)fn->intrinsic_class;
+                    if (js_fn_intrinsic_class(fn) != JS_CLASS_NONE) {
+                        JsClass cls = (JsClass)js_fn_intrinsic_class(fn);
                         const char* nm = js_class_to_name(cls);
                         int nl = (int)strlen(nm);
                         js_materialize_builtin_proto_specs(fn->prototype, nm, nl);
@@ -9976,9 +9993,9 @@ struct JsCallAdapterSpan {
 };
 
 static int js_invoke_formal_count(const JsFunction* fn) {
-    return fn->param_count < 0 ? -fn->param_count : fn->param_count;
+    return js_fn_param_count(fn) < 0 ? -js_fn_param_count(fn) : js_fn_param_count(fn);
 }
-JS_FORWARD_STATIC_EXPRESSION(bool, js_invoke_needs_adapter, (const JsFunction* fn, int arg_count), (fn->param_count < 0 || arg_count < js_invoke_formal_count(fn)))
+JS_FORWARD_STATIC_EXPRESSION(bool, js_invoke_needs_adapter, (const JsFunction* fn, int arg_count), (js_fn_param_count(fn) < 0 || arg_count < js_invoke_formal_count(fn)))
 
 #define JS_GLOBAL_UNARY_BODY(body_name, expression) \
     Item body_name(Item callee, Item this_value, Item* args, int argc, \
@@ -10101,7 +10118,7 @@ Item js_intrinsic_global_print_body(Item callee, Item this_value, Item* args,
 static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
         uint64_t* scalar_result_home) {
 
-    if (fn->body_kind == JS_FUNCTION_BODY_AST) {
+    if (js_fn_body_kind(fn) == JS_FUNCTION_BODY_AST) {
         if (fn->flags & JS_FUNC_FLAG_GENERATOR) {
             extern Item js_interp_create_generator(JsFunction*, Item*, int);
             return js_interp_create_generator(fn, args, arg_count);
@@ -10126,7 +10143,7 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
 
 
     // Rest params: negative param_count signals last param is ...rest
-    bool has_rest = (fn->param_count < 0);
+    bool has_rest = (js_fn_param_count(fn) < 0);
     int real_param_count = js_invoke_formal_count(fn);
     int dispatch_limit = (fn->flags & JS_FUNC_FLAG_MIR_CONTEXT_ABI)
         ? JS_MIR_CONTEXT_CALL_MAX_ARITY
@@ -10155,7 +10172,7 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
             js_array_push(adapter.invoke_items[regular_count],
                 args[regular_count + i]);
         }
-    } else if (arg_count < fn->param_count) {
+    } else if (arg_count < js_fn_param_count(fn)) {
         for (int i = 0; i < effective_count; i++) {
             adapter.invoke_items[i] = (i < arg_count && args) ? args[i]
                 : make_js_undefined();
@@ -10182,11 +10199,11 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
     // func_ptr was 0x1b, causing an unrecoverable jump to that address).
     // Treat <0x10000 (typical unmapped low range on macOS / Linux) as
     // corrupt and return undefined rather than crash.
-    if (fn->func_ptr && (uintptr_t)fn->func_ptr < 0x10000) {
+    if (js_fn_func_ptr(fn) && (uintptr_t)js_fn_func_ptr(fn) < 0x10000) {
         static int p0_corrupt_log = 0;
         if (p0_corrupt_log < 3) {
             log_error("js_invoke_fn: corrupt func_ptr=%p on fn=%p name=%.*s — returning undefined",
-                (void*)fn->func_ptr, (void*)fn,
+                (void*)js_fn_func_ptr(fn), (void*)fn,
                 fn->name ? (int)fn->name->len : 6,
                 fn->name ? fn->name->chars : "(anon)");
             p0_corrupt_log++;
@@ -10198,34 +10215,34 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
     // was created. Dynamic dispatch is the one adaptation boundary; generated
     // direct calls already carry this same pointer in a register.
     if (fn->flags & JS_FUNC_FLAG_MIR_CONTEXT_ABI) {
-        if (!fn->runtime_context) {
+        if (!js_fn_runtime_context(fn)) {
             log_error("js_invoke_fn: context wrapper missing context owner");
             return ItemError;
         }
-        if (!js_mir_owner_is_current(fn->runtime_context, "js-invoke-fn")) {
+        if (!js_mir_owner_is_current(js_fn_runtime_context(fn), "js-invoke-fn")) {
             return ItemError;
         }
-        if (!fn->func_ptr) return make_js_undefined();
-        Context* runtime = fn->runtime_context;
+        if (!js_fn_func_ptr(fn)) return make_js_undefined();
+        Context* runtime = js_fn_runtime_context(fn);
         Item env = fn->env ? (Item){.item = (uint64_t)fn->env} : ItemNull;
         return fn->env
-            ? js_invoke_mir_context_by_count<true>(fn->func_ptr, runtime,
+            ? js_invoke_mir_context_by_count<true>(js_fn_func_ptr(fn), runtime,
                 effective_args, effective_count, env)
-            : js_invoke_mir_context_by_count<false>(fn->func_ptr, runtime,
+            : js_invoke_mir_context_by_count<false>(js_fn_func_ptr(fn), runtime,
                 effective_args, effective_count, ItemNull);
     }
 
     if (fn->flags & JS_FUNC_FLAG_MIR_PUBLIC_ABI) {
-        if (!fn->func_ptr) return make_js_undefined();
+        if (!js_fn_func_ptr(fn)) return make_js_undefined();
         Item env = fn->env ? (Item){.item = (uint64_t)fn->env} : ItemNull;
         return fn->env
-            ? js_invoke_public_by_count<true>(fn->func_ptr, effective_args,
+            ? js_invoke_public_by_count<true>(js_fn_func_ptr(fn), effective_args,
                 effective_count, env)
-            : js_invoke_public_by_count<false>(fn->func_ptr, effective_args,
+            : js_invoke_public_by_count<false>(js_fn_func_ptr(fn), effective_args,
                 effective_count, ItemNull);
     }
 
-    if (!fn->func_ptr) return make_js_undefined(); // stub function
+    if (!js_fn_func_ptr(fn)) return make_js_undefined(); // stub function
     int native_count = effective_count + (fn->env ? 1 : 0);
     if (native_count > LAMBDA_MAX_FUNCTION_ARGS) {
         log_error("js_invoke_fn: hosted callback arity %d exceeds native ABI limit %d",
@@ -10233,7 +10250,7 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
         return ItemError;
     }
     Item env_item = (Item){.item = (uint64_t)(uintptr_t)fn->env};
-    return lambda_hosted_item_invoke_by_count((void*)fn->func_ptr,
+    return lambda_hosted_item_invoke_by_count((void*)js_fn_func_ptr(fn),
         effective_args, effective_count, fn->env != NULL, env_item);
 }
 
@@ -10248,20 +10265,22 @@ static Item js_invoke_fn_raw_or_async(JsFunction* fn, Item* args, int arg_count,
         return js_invoke_fn_raw(fn, args, arg_count, scalar_result_home);
     }
 
-    if (fn->body_kind == JS_FUNCTION_BODY_AST) {
+    if (js_fn_body_kind(fn) == JS_FUNCTION_BODY_AST) {
         extern Item js_interp_start_async_function(JsFunction*, Item*, int);
         return js_interp_start_async_function(fn, args, arg_count);
     }
 
-    // no-await async functions lower to a direct Promise.resolve return, so the
-    // call wrapper must provide the async-function Promise resource up front.
+    // Every compiled async body publishes its own result promise: a state
+    // machine returns its activation's, an await-less body returns
+    // js_async_wrap_return's. Minting a second one here and joining the two
+    // with a `.then` cost every async call an extra microtask tick.
+    Item result = js_invoke_fn_raw(fn, args, arg_count, scalar_result_home);
+    if (!item_is_error(result)) return result;
+    // A throw before the body could build its promise still has to surface as
+    // a rejected one, so the resource is created only on that path.
     RootFrame async_roots(1);
     Rooted<Item> async_promise_root(async_roots, js_promise_async_function_start());
-    // Adapter construction can allocate a rest array; keep the promise exact
-    // until the async-finishing helper has taken ownership of it.
-    Item result = js_invoke_fn_raw(fn, args, arg_count, scalar_result_home);
-    int64_t had_exception = item_is_error(result) ? 1 : 0;
-    return js_promise_async_function_finish(async_promise_root.get(), result, had_exception);
+    return js_promise_async_function_finish(async_promise_root.get(), result, 1);
 }
 
 static Item js_invoke_fn_with_source(JsFunction* fn, Item* args, int arg_count,
@@ -10552,9 +10571,9 @@ extern "C" Item js_finalization_registry_unregister(Item this_val, Item unregist
 static int js_resolve_ta_type_from_ctor(Item ctor) {
     if (get_type_id(ctor) != LMD_TYPE_FUNC) return -1;
     JsFunction* fn = (JsFunction*)ctor.function;
-    if (!fn || fn->intrinsic_class != JS_CLASS_TYPED_ARRAY ||
-            fn->typed_array_element_type_plus_one == 0) return -1;
-    return (int)fn->typed_array_element_type_plus_one - 1;
+    if (!fn || js_fn_intrinsic_class(fn) != JS_CLASS_TYPED_ARRAY ||
+            js_fn_typed_array_element_type_plus_one(fn) == 0) return -1;
+    return (int)js_fn_typed_array_element_type_plus_one(fn) - 1;
 }
 
 enum JsIndexedIntrinsicOp : int {
@@ -13810,6 +13829,42 @@ Item js_intrinsic_262_realm_regexp_get_hasindices_body(Item callee,
         "RegExp.prototype getter called on incompatible receiver");
 }
 
+// GetThisEnvironment (ES2024 9.1.2.4). An arrow function has no this-binding of
+// its own, so a `super()` written inside one belongs to the nearest enclosing
+// activation that does have one. Reading the *current* activation instead made
+// every arrow-hosted super() miss the derived constructor: the call either
+// reported "may only be called once" (the arrow's activation is not a derived
+// constructor) or left the constructor's `this` unbound, so its implicit return
+// threw "Must call super constructor before accessing 'this'".
+static bool js_activation_callee_is_arrow(JsCallActivation* activation) {
+    if (!activation) return false;
+    Item* callee_home = activation->items[JS_CALL_ACTIVATION_CALLEE];
+    Item callee = callee_home ? *callee_home : ItemNull;
+    if (get_type_id(callee) != LMD_TYPE_FUNC) return false;
+    JsFunction* fn = (JsFunction*)callee.function;
+    return fn && (fn->flags & JS_FUNC_FLAG_ARROW) != 0;
+}
+
+static JsCallActivation* js_this_binding_activation(void) {
+    JsCallActivation* activation = js_call_activation_current();
+    if (!activation || activation->derived_constructor) return activation;
+    // An arrow is the only construct that can host a `super()` belonging to an
+    // enclosing derived constructor -- `super()` is a SyntaxError anywhere
+    // else -- so nothing but an arrow may claim another frame's binding. The
+    // arrow need not be called by that constructor: `for (x of it) return;`
+    // runs super() through the iterator's own return() method, several
+    // unrelated frames deep, so scan the chain instead of the adjacent call.
+    if (!js_activation_callee_is_arrow(activation)) return activation;
+    for (JsCallActivation* scan = activation->previous; scan; scan = scan->previous) {
+        if (scan->derived_constructor) return scan;
+    }
+    return activation;
+}
+
+static Item* js_activation_super_this_home(JsCallActivation* activation) {
+    return activation ? activation->items[JS_CALL_ACTIVATION_SUPER_THIS] : NULL;
+}
+
 static void js_super_this_binding_push(Item initial_this) {
     JsCallActivation* activation = js_call_activation_current();
     activation->derived_constructor = true;
@@ -13850,27 +13905,37 @@ static Item js_super_this_binding_finish(Item result) {
 extern "C" Item js_super_bind_this(Item this_val, Item construct_result) {
     if (item_is_error(construct_result)) return construct_result;
     Item bound_this = js_is_object_value(construct_result) ? construct_result : this_val;
-    JsCallActivation* activation = js_call_activation_current();
-    if (!activation->derived_constructor) {
+    JsCallActivation* activation = js_this_binding_activation();
+    if (!activation || !activation->derived_constructor) {
         return js_throw_super_called_twice();
     }
     if (activation->super_this_bound) {
         return js_throw_super_called_twice();
     }
+    Item* super_this_home = js_activation_super_this_home(activation);
     if (!js_is_object_value(bound_this) &&
         (bound_this.item == 0 || bound_this.item == ITEM_JS_UNDEFINED || bound_this.item == ITEM_NULL) &&
-        js_is_object_value(js_super_this_value)) {
-        bound_this = js_super_this_value;
+        super_this_home && js_is_object_value(*super_this_home)) {
+        bound_this = *super_this_home;
     }
     activation->super_this_bound = true;
+    if (super_this_home) *super_this_home = bound_this;
+    // The derived constructor reads `this` through its own activation's home,
+    // which outlives the arrow that ran super(); the arrow reads through the
+    // running frame. Publish to both, or the constructor still sees TDZ once
+    // the arrow's activation is popped.
+    Item* owner_this_home = activation->items[JS_CALL_ACTIVATION_THIS];
+    if (owner_this_home) *owner_this_home = bound_this;
     js_super_this_value = bound_this;
     js_current_this = bound_this;
     return bound_this;
 }
 
 extern "C" Item js_get_super_this_value(void) {
-    if (js_call_activation_current()->derived_constructor) {
-        return js_super_this_value;
+    JsCallActivation* activation = js_this_binding_activation();
+    if (activation && activation->derived_constructor) {
+        Item* home = js_activation_super_this_home(activation);
+        if (home) return *home;
     }
     return js_get_this();
 }
@@ -14132,7 +14197,7 @@ static bool js_call_use_common_lane(JsFunction* fn) {
         (fn->flags & (JS_FUNC_FLAG_HAS_BOUND_THIS | JS_FUNC_FLAG_GENERATOR |
             JS_FUNC_FLAG_ASYNC_GEN | JS_FUNC_FLAG_DERIVED_CTOR |
             JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) || js_fn_with(fn)->depth > 0 ||
-        (fn->flags & JS_FUNC_FLAG_USES_WITH) || fn->eval_initializer_context ||
+        (fn->flags & JS_FUNC_FLAG_USES_WITH) || js_fn_eval_initializer_context(fn) ||
         js_fn_eval_origin(fn)->source) {
         // The former call-lane classifier also disabled this shortcut for
         // derived constructors; preserve that invariant so super() still
@@ -14144,7 +14209,7 @@ static bool js_call_use_common_lane(JsFunction* fn) {
     // Recheck caller-dynamic facts at the edge: classifier metadata never
     // authorizes skipping caller with-scope isolation.
     return js_with_depth_active() == 0 && js_fn_with(fn)->depth == 0 &&
-        !(fn->flags & JS_FUNC_FLAG_USES_WITH) && !fn->eval_initializer_context &&
+        !(fn->flags & JS_FUNC_FLAG_USES_WITH) && !js_fn_eval_initializer_context(fn) &&
         !js_function_has_vm_stack_source(fn);
 }
 
@@ -14262,8 +14327,8 @@ Item js_native_construct_via_call_body(Item callee, Item* args, int argc,
     // receiver_root. That explicit result still receives newTarget.prototype;
     // limiting the step to catalog intrinsics stranded host instances away
     // from their real methods after receiver/name dispatch was deleted.
-    int default_class = fn && fn->intrinsic_class != JS_CLASS_NONE
-        ? fn->intrinsic_class : JS_CLASS_OBJECT;
+    int default_class = fn && js_fn_intrinsic_class(fn) != JS_CLASS_NONE
+        ? js_fn_intrinsic_class(fn) : JS_CLASS_OBJECT;
     return js_apply_constructed_default_prototype(result,
         target_root.get(), default_class);
 }
@@ -14503,8 +14568,8 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         uses_local_result_home = true;
     }
 
-    if (!fn || (!fn->func_ptr && !js_fn_native(fn)->call &&
-            fn->body_kind != JS_FUNCTION_BODY_AST)) {
+    if (!fn || (!js_fn_func_ptr(fn) && !js_fn_native(fn)->call &&
+            js_fn_body_kind(fn) != JS_FUNCTION_BODY_AST)) {
         log_error("js_call_function: null function pointer");
         return ItemNull;
     }
@@ -14535,7 +14600,8 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
 
     // Bind 'this' for the duration of this call
     bool prev_eval_initializer_context = js_eval_initializer_context;
-    js_eval_initializer_context = prev_eval_initializer_context || fn->eval_initializer_context;
+    js_eval_initializer_context = prev_eval_initializer_context ||
+        js_fn_eval_initializer_context(fn);
     if (install_this) {
         // Native bodies implement their own [[Call]] semantics and must see the
         // exact receiver. Applying OrdinaryCallBindThis here turned null and
@@ -14555,8 +14621,8 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         construct_target_root.get());
     // Switch to callee's module vars if it belongs to a different module
     RuntimeModuleStateScope module_state(context);
-    if (fn->module_state_id != UINT32_MAX &&
-            !module_state.activate(fn->module_state_id)) {
+    if (js_fn_module_state_id(fn) != UINT32_MAX &&
+            !module_state.activate(js_fn_module_state_id(fn))) {
         return js_throw_type_error("function module state is unavailable");
     }
     Item prev_global = ItemNull;
@@ -14908,8 +14974,10 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this,
     if (!bound) return ItemError;
     bound_root.set((Item){.function = (Function*)bound});
     bound = (JsFunction*)bound_root.get().function;
-    bound->param_count = -1;
-    bound->formal_length = 0;
+    JsCallableCode* bound_code = js_fn_code_ensure(bound);
+    if (!bound_code) return ItemError;
+    bound_code->param_count = -1;
+    bound_code->formal_length = 0;
     bound->flags = JS_FUNC_FLAG_HAS_BOUND_THIS;
     js_fn_bound_ensure(bound)->target = func_root.get();
     bound->construct = js_is_constructor_internal(func_root.get())
@@ -26780,7 +26848,8 @@ static Item js_array_intrinsic_algorithm_into(Item arr,
 // =============================================================================
 
 // backing store for user-defined Math properties (e.g. Math.sumPrecise polyfill)
-#define js_math_object (js_runtime_state.intrinsic_slots->math)
+#define js_math_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_MATH_OBJECT))
 
 // Root-range cleanup clears the context-owned slots to zero. Treat that
 // representation like ItemNull so a later realm rebuilds its namespace
@@ -26841,7 +26910,8 @@ static Item js_get_math_object() {
 JS_FORWARD_ITEM(js_get_math_object_value, (void), js_get_math_object, ())
 
 // v18n: JSON and console as global objects for bare identifier resolution
-#define js_json_object (js_runtime_state.intrinsic_slots->json)
+#define js_json_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_JSON_OBJECT))
 void js_reset_json_object() { js_json_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_json_object_value() {
@@ -26860,7 +26930,8 @@ extern "C" Item js_get_json_object_value() {
 // =============================================================================
 // CSS Namespace Object (CSS.supports, CSS.escape)
 // =============================================================================
-#define js_css_namespace_object (js_runtime_state.intrinsic_slots->css)
+#define js_css_namespace_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_CSS_NAMESPACE_OBJECT))
 extern "C" void js_reset_css_namespace_object() { js_css_namespace_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_css_object_value() {
@@ -27021,7 +27092,8 @@ static Item js_intl_segmenter_construct_body(Item callee, Item* args, int argc,
         target_root.get(), JS_CLASS_OBJECT);
 }
 
-#define js_intl_object (js_runtime_state.intrinsic_slots->intl)
+#define js_intl_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_INTL_OBJECT))
 extern "C" void js_reset_intl_object() { js_intl_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_intl_object_value() {
@@ -27066,7 +27138,8 @@ extern "C" Item js_get_intl_object_value() {
     return intl_root.get();
 }
 
-#define js_console_object (js_runtime_state.intrinsic_slots->console)
+#define js_console_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_CONSOLE_OBJECT))
 void js_reset_console_object() { js_console_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_console_object_value() {
@@ -27123,8 +27196,10 @@ extern "C" Item js_get_console_object_value() {
 }
 
 // test262 host object $262 — provides detachArrayBuffer for typed array tests
-#define js_262_object (js_runtime_state.intrinsic_slots->test262)
-#define js_262_eval_script_active (js_runtime_state.test262_agent->eval_script_active)
+#define js_262_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_TEST262_OBJECT))
+#define js_262_eval_script_active (js_runtime_state.test262_agent ? \
+    js_runtime_state.test262_agent->eval_script_active : 0)
 #define js_262_agent_object (js_runtime_state.test262_agent->object)
 #define js_262_agent_callbacks (js_runtime_state.test262_agent->callbacks)
 #define js_262_agent_report_values (js_runtime_state.test262_agent->report_values)
@@ -27232,6 +27307,7 @@ static bool js_262_agent_remove_report(int index, Item* report,
 }
 
 static void js_262_agent_reset_state() {
+    if (!js_runtime_state.test262_agent) return;
     js_262_agent_object = (Item){.item = ITEM_NULL};
     root_vector_clear(&js_262_agent_callbacks);
     js_262_agent_report_rows_clear(js_runtime_state.test262_agent);
@@ -27251,19 +27327,22 @@ extern "C" int64_t js_262_eval_script_is_active() {
 }
 
 extern "C" int js_262_agent_current_slot_for_atomics() {
-    return js_262_agent_current_slot;
+    return js_runtime_state.test262_agent ? js_262_agent_current_slot : -1;
 }
 
 static Item js_262_eval_script(Item code) {
-    int64_t saved = js_262_eval_script_active;
-    js_262_eval_script_active = 1;
+    JsTest262AgentState* agent = js_test262_agent_state_ensure(&js_runtime_state);
+    if (!agent) return ItemError;
+    int64_t saved = agent->eval_script_active;
+    agent->eval_script_active = 1;
     Item result = js_builtin_eval(code, 1);
-    js_262_eval_script_active = saved;
+    agent->eval_script_active = saved;
     return result;
 }
 
 static Item js_262_agent_start(Item code) {
-    js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
+    if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
+    js_root_vector_ensure_registered(&js_runtime_state.test262_agent->roots);
     RootFrame roots(1);
     Rooted<Item> code_root(roots, code);
     int64_t slot = root_vector_count(&js_262_agent_callbacks);
@@ -27277,7 +27356,8 @@ static Item js_262_agent_start(Item code) {
 }
 
 static Item js_262_agent_receive_broadcast(Item callback) {
-    js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
+    if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
+    js_root_vector_ensure_registered(&js_runtime_state.test262_agent->roots);
     if (js_262_agent_current_slot < 0 || js_262_agent_current_slot >=
             root_vector_count(&js_262_agent_callbacks)) {
         return make_js_undefined();
@@ -27292,7 +27372,8 @@ static Item js_262_agent_receive_broadcast(Item callback) {
 }
 
 static Item js_262_agent_broadcast(Item value) {
-    js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
+    if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
+    js_root_vector_ensure_registered(&js_runtime_state.test262_agent->roots);
     int64_t callback_count = root_vector_count(&js_262_agent_callbacks);
     for (int64_t i = 0; i < callback_count; i++) {
         Item callback = js_262_agent_callback_at(i);
@@ -27308,7 +27389,8 @@ static Item js_262_agent_broadcast(Item value) {
 }
 
 static Item js_262_agent_report(Item value) {
-    js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
+    if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
+    js_root_vector_ensure_registered(&js_runtime_state.test262_agent->roots);
     JS_ASSIGN_OR_RETURN(report, js_to_string(value));
     int waiter_id = js_atomics_report_waiter_for_agent(
         js_262_agent_current_slot, report);
@@ -27317,7 +27399,8 @@ static Item js_262_agent_report(Item value) {
 }
 
 static Item js_262_agent_get_report() {
-    js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
+    if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
+    js_root_vector_ensure_registered(&js_runtime_state.test262_agent->roots);
     if (!js_262_agent_report_rows_ensure() || !js_262_agent_report_rows ||
             js_262_agent_report_rows->length == 0) return ItemNull;
     int ready_offset = -1;
@@ -27357,7 +27440,8 @@ static Item js_262_agent_sleep(Item ms) {
 }
 
 static Item js_262_get_agent_object() {
-    js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
+    if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
+    js_root_vector_ensure_registered(&js_runtime_state.test262_agent->roots);
     if (!js_namespace_cache_is_empty(js_262_agent_object)) return js_262_agent_object;
     js_262_agent_object = js_new_object();
 #define JS_262_AGENT_METHODS(M) \
@@ -27394,7 +27478,8 @@ extern "C" Item js_get_262_object_value() {
 }
 
 // v25: Reflect global object for bare identifier resolution
-#define js_reflect_object (js_runtime_state.intrinsic_slots->reflect)
+#define js_reflect_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_REFLECT_OBJECT))
 void js_reset_reflect_object() { js_reflect_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_reflect_object_value() {
@@ -27412,7 +27497,8 @@ extern "C" Item js_get_reflect_object_value() {
 }
 
 // Atomics namespace object
-#define js_atomics_object (js_runtime_state.intrinsic_slots->atomics)
+#define js_atomics_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_ATOMICS_OBJECT))
 void js_reset_atomics_object() { js_atomics_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_atomics_object_value() {
@@ -27827,6 +27913,14 @@ static void js_set_prototype_fresh(Item object, Item prototype) {
     js_set_prototype_impl(object, prototype, /*fresh_object=*/true);
 }
 
+// A chain link whose [[GetPrototypeOf]] is not the ordinary internal method:
+// a Proxy, or any exotic carrier that supplies its own prototype accessor.
+static bool js_prototype_walk_stops_here(Item value) {
+    if (js_is_proxy(value)) return true;
+    const JsClassMeta* meta = js_object_meta(value);
+    return meta && meta->ops && meta->ops->get_prototype_of;
+}
+
 static void js_set_prototype_impl(Item object, Item prototype,
         bool fresh_object) {
     // D3.4.7: prototype metadata is not a substitute for a rooted edge. The
@@ -27880,6 +27974,14 @@ static void js_set_prototype_impl(Item object, Item prototype,
                 log_error("js-set-prototype: cannot retain prototype mutation path");
                 return;
             }
+            // ES2024 10.1.2.1 step 8.c.i: the acyclicity walk stops at the
+            // first object whose [[GetPrototypeOf]] is not the ordinary one.
+            // Advancing through a Proxy here would call its trap — observable
+            // user code at a point the spec runs none, and one that throws for
+            // any handler with a getPrototypeOf stub (so `Object.create(proxy)`
+            // threw outright) — and it reports cycles the spec deliberately
+            // leaves undetected when a Proxy shadows the link.
+            if (js_prototype_walk_stops_here(current.get())) break;
             current.set(js_get_prototype_of(current.get()));
             if (item_is_error(current.get())) {
                 root_vector_destroy(&path);
@@ -28595,9 +28697,54 @@ extern "C" Item js_gen_await_result(Item value, int64_t next_state) {
 //   gen → %GeneratorFunction%.prototype.prototype → %GeneratorPrototype% → %IteratorPrototype% → Object.prototype
 // The test262 test does Object.getPrototypeOf(Object.getPrototypeOf(gen)) to get %GeneratorPrototype%.
 // We implement two shared levels: a direct proto (depth 1) and the shared prototype (depth 2, has toStringTag).
-#define js_generator_proto_depth2_cache (js_runtime_state.iterators->generator_proto_depth2)
-#define js_async_generator_proto_depth2_cache (js_runtime_state.iterators->async_generator_proto_depth2)
-#define js_async_iterator_proto_cache (js_runtime_state.iterators->async_iterator_prototype)
+enum JsIteratorCacheSlot {
+    JS_ITERATOR_CACHE_GENERATOR_DEPTH2,
+    JS_ITERATOR_CACHE_ASYNC_GENERATOR_DEPTH2,
+    JS_ITERATOR_CACHE_ASYNC_ITERATOR,
+    JS_ITERATOR_CACHE_GENERATOR_RETURN,
+    JS_ITERATOR_CACHE_GENERATOR_THROW,
+    JS_ITERATOR_CACHE_ITERATOR,
+    JS_ITERATOR_CACHE_ARRAY_ITERATOR,
+    JS_ITERATOR_CACHE_STRING_ITERATOR,
+    JS_ITERATOR_CACHE_MAP_ITERATOR,
+    JS_ITERATOR_CACHE_SET_ITERATOR,
+    JS_ITERATOR_CACHE_REGEXP_ITERATOR,
+};
+
+static Item* js_iterator_cache_item(JsIteratorCacheSlot slot) {
+    if (!js_active_runtime_state) return NULL;
+    JsRealmSlotId realm_slot = JS_REALM_SLOT_COUNT;
+    switch (slot) {
+    case JS_ITERATOR_CACHE_GENERATOR_DEPTH2:
+        realm_slot = JS_REALM_SLOT_GENERATOR_PROTO_DEPTH2; break;
+    case JS_ITERATOR_CACHE_ASYNC_GENERATOR_DEPTH2:
+        realm_slot = JS_REALM_SLOT_ASYNC_GENERATOR_PROTO_DEPTH2; break;
+    case JS_ITERATOR_CACHE_ASYNC_ITERATOR:
+        realm_slot = JS_REALM_SLOT_ASYNC_ITERATOR_PROTOTYPE; break;
+    case JS_ITERATOR_CACHE_GENERATOR_RETURN:
+        realm_slot = JS_REALM_SLOT_GENERATOR_RETURN_MARKER; break;
+    case JS_ITERATOR_CACHE_GENERATOR_THROW:
+        realm_slot = JS_REALM_SLOT_GENERATOR_THROW_MARKER; break;
+    case JS_ITERATOR_CACHE_ITERATOR:
+        realm_slot = JS_REALM_SLOT_ITERATOR_PROTOTYPE; break;
+    case JS_ITERATOR_CACHE_ARRAY_ITERATOR:
+        realm_slot = JS_REALM_SLOT_ARRAY_ITERATOR_PROTOTYPE; break;
+    case JS_ITERATOR_CACHE_STRING_ITERATOR:
+        realm_slot = JS_REALM_SLOT_STRING_ITERATOR_PROTOTYPE; break;
+    case JS_ITERATOR_CACHE_MAP_ITERATOR:
+        realm_slot = JS_REALM_SLOT_MAP_ITERATOR_PROTOTYPE; break;
+    case JS_ITERATOR_CACHE_SET_ITERATOR:
+        realm_slot = JS_REALM_SLOT_SET_ITERATOR_PROTOTYPE; break;
+    case JS_ITERATOR_CACHE_REGEXP_ITERATOR:
+        realm_slot = JS_REALM_SLOT_REGEXP_ITERATOR_PROTOTYPE; break;
+    }
+    return realm_slot == JS_REALM_SLOT_COUNT ? NULL :
+        js_realm_slot(&js_runtime_state.realm_slots, realm_slot);
+}
+
+#define js_generator_proto_depth2_cache (*js_iterator_cache_item(JS_ITERATOR_CACHE_GENERATOR_DEPTH2))
+#define js_async_generator_proto_depth2_cache (*js_iterator_cache_item(JS_ITERATOR_CACHE_ASYNC_GENERATOR_DEPTH2))
+#define js_async_iterator_proto_cache (*js_iterator_cache_item(JS_ITERATOR_CACHE_ASYNC_ITERATOR))
 
 static Item js_get_async_iterator_proto() {
     if (!js_iterator_state_ensure_roots()) return ItemNull;
@@ -28727,7 +28874,7 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
     gen->ast_loop_continuations = NULL;
     gen->ast_list_continuation = NULL;
     gen->ast_array_binding_continuations = NULL;
-    gen->ast_resumable_loop_active = false;
+    gen->ast_try_continuations = NULL;
     gen->ast_pending_resume_yield = 0;
     gen->ast_pending_resume_input = ItemNull;
     gen->ast_initialized = false;
@@ -28813,12 +28960,14 @@ extern "C" JsGeneratorStateRecord* js_generator_get_ast_state(Item generator) {
     return js_get_generator(generator);
 }
 
-#define js_gen_return_signal_marker (js_runtime_state.iterators->generator_return_marker)
-#define js_gen_throw_signal_marker (js_runtime_state.iterators->generator_throw_marker)
+#define js_gen_return_signal_marker (*js_iterator_cache_item(JS_ITERATOR_CACHE_GENERATOR_RETURN))
+#define js_gen_throw_signal_marker (*js_iterator_cache_item(JS_ITERATOR_CACHE_GENERATOR_THROW))
 
 static bool js_iterator_state_ensure_roots(void) {
-    return js_active_runtime_state &&
-        js_root_range_ensure_registered(&js_runtime_state.iterators->roots);
+    // Iterator prototypes and generator markers are realm singletons. Their
+    // exact roots are now owned by JsRealmSlots, so no secondary lazy record
+    // or fixed root span is needed (D5.3.5; JSCU29).
+    return js_active_runtime_state != NULL;
 }
 
 static Item js_get_gen_return_signal_marker() {
@@ -28830,10 +28979,16 @@ static Item js_get_gen_return_signal_marker() {
 }
 
 extern "C" Item js_gen_return_signal(Item value) {
-    Item signal = js_array_new(2);
-    js_array_store_owned(signal.array, 0, value);
-    signal.array->items[1] = js_get_gen_return_signal_marker();
-    return signal;
+    // The marker is created lazily, so reading it can allocate and collect.
+    // Both the incoming value and the fresh array must be rooted across that
+    // call, exactly as js_gen_throw_signal does below.
+    RootFrame roots(3);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> signal_root(roots, js_array_new(2));
+    if (get_type_id(signal_root.get()) != LMD_TYPE_ARRAY) return ItemError;
+    js_array_store_owned(signal_root.get().array, 0, value_root.get());
+    signal_root.get().array->items[1] = js_get_gen_return_signal_marker();
+    return signal_root.get();
 }
 
 extern "C" int64_t js_gen_is_return_signal(Item value) {
@@ -29409,20 +29564,26 @@ extern "C" bool js_is_async_generator(Item obj) {
 // For objects with [Symbol.iterator]: calls it and returns the result.
 // =============================================================================
 
-#define js_iterator_proto_cache (js_runtime_state.iterators->iterator_prototype)
-#define js_array_iterator_proto_cache (js_runtime_state.iterators->array_iterator_prototype)
-#define js_string_iterator_proto_cache (js_runtime_state.iterators->string_iterator_prototype)
-#define js_map_iterator_proto_cache (js_runtime_state.iterators->map_iterator_prototype)
-#define js_set_iterator_proto_cache (js_runtime_state.iterators->set_iterator_prototype)
-#define js_regexp_string_iterator_proto_cache (js_runtime_state.iterators->regexp_string_iterator_prototype)
+#define js_iterator_proto_cache (*js_iterator_cache_item(JS_ITERATOR_CACHE_ITERATOR))
+#define js_array_iterator_proto_cache (*js_iterator_cache_item(JS_ITERATOR_CACHE_ARRAY_ITERATOR))
+#define js_string_iterator_proto_cache (*js_iterator_cache_item(JS_ITERATOR_CACHE_STRING_ITERATOR))
+#define js_map_iterator_proto_cache (*js_iterator_cache_item(JS_ITERATOR_CACHE_MAP_ITERATOR))
+#define js_set_iterator_proto_cache (*js_iterator_cache_item(JS_ITERATOR_CACHE_SET_ITERATOR))
+#define js_regexp_string_iterator_proto_cache (*js_iterator_cache_item(JS_ITERATOR_CACHE_REGEXP_ITERATOR))
 
 extern "C" void js_iterator_proto_cache_reset(void) {
-    js_iterator_proto_cache = (Item){0};
-    js_array_iterator_proto_cache = (Item){0};
-    js_string_iterator_proto_cache = (Item){0};
-    js_map_iterator_proto_cache = (Item){0};
-    js_set_iterator_proto_cache = (Item){0};
-    js_regexp_string_iterator_proto_cache = (Item){0};
+    const JsRealmSlotId slots[] = {
+        JS_REALM_SLOT_ITERATOR_PROTOTYPE,
+        JS_REALM_SLOT_ARRAY_ITERATOR_PROTOTYPE,
+        JS_REALM_SLOT_STRING_ITERATOR_PROTOTYPE,
+        JS_REALM_SLOT_MAP_ITERATOR_PROTOTYPE,
+        JS_REALM_SLOT_SET_ITERATOR_PROTOTYPE,
+        JS_REALM_SLOT_REGEXP_ITERATOR_PROTOTYPE,
+    };
+    for (int i = 0; i < (int)(sizeof(slots) / sizeof(slots[0])); i++) {
+        Item* cache = js_realm_slot_existing(&js_runtime_state.realm_slots, slots[i]);
+        if (cache) *cache = (Item){0};
+    }
 }
 
 static Item js_make_iterator_proto(Item* cache, JsBuiltinOwner next_owner,
@@ -30673,13 +30834,9 @@ static void js_promise_resolve_with_value(JsPromise* p, Item value);
 static void js_promise_schedule_unhandled_check(JsPromise* p);
 static void js_promise_mark_rejection_handled(JsPromise* p);
 
-// Forward declarations for promise microtask helpers
-static Item js_promise_microtask_resolve(Item next_promise_item, Item value);
-static Item js_promise_microtask_reject(Item next_promise_item, Item reason);
 static Item js_promise_async_hook_run(Item resource, Item job);
 static Item js_resolve_callback(Item resolving_state_item, Item value);
 static Item js_reject_callback(Item resolving_state_item, Item reason);
-static void js_promise_enqueue_handler(Item handler, Item result, Item next_promise_item);
 static void js_promise_enqueue_passthrough(Item next_promise_item, JsPromiseState state, Item result, Item domain);
 enum JsPromiseCapabilityAction {
     JS_PROMISE_CAPABILITY_RESOLVE,
@@ -30789,44 +30946,6 @@ static bool js_promise_add_reaction(JsPromise* promise, Item on_fulfilled,
     return true;
 }
 
-static void js_promise_adopt_native(JsPromise* target, JsPromise* source) {
-    if (!target || !source) return;
-    if (target == source) {
-        Item error = js_promise_make_type_error("Chaining cycle detected for promise", 35);
-        js_promise_settle(target, JS_PROMISE_REJECTED, error);
-        return;
-    }
-    RootFrame roots(7);
-    Rooted<Item> target_root(roots, js_promise_to_item(target));
-    Rooted<Item> source_root(roots, js_promise_to_item(source));
-    Rooted<Item> resolve_base_root(roots, ItemNull);
-    Rooted<Item> reject_base_root(roots, ItemNull);
-    Rooted<Item> resolve_root(roots, ItemNull);
-    Rooted<Item> reject_root(roots, ItemNull);
-    js_promise_mark_rejection_handled(source);
-    source = js_get_promise(source_root.get());
-    target = js_get_promise(target_root.get());
-    if (!source || !target) return;
-    if (source->state != JS_PROMISE_PENDING) {
-        JsNativeP2 reaction = source->state == JS_PROMISE_FULFILLED
-            ? js_promise_microtask_resolve : js_promise_microtask_reject;
-        resolve_base_root.set(js_new_native_function(reaction));
-        Item target_item = target_root.get();
-        resolve_root.set(js_bind_function(resolve_base_root.get(), ItemNull, &target_item, 1));
-        // adopted-promise reactions must execute under the target promise resource.
-        js_promise_enqueue_handler(resolve_root.get(), source->result, target_root.get());
-        return;
-    }
-    resolve_base_root.set(js_new_native_function(js_promise_microtask_resolve));
-    reject_base_root.set(js_new_native_function(js_promise_microtask_reject));
-    Item target_item = target_root.get();
-    resolve_root.set(js_bind_function(resolve_base_root.get(), ItemNull, &target_item, 1));
-    // The resolve callback had no owner while reject construction allocated,
-    // allowing both adoption edges to alias the recycled reject function.
-    reject_root.set(js_bind_function(reject_base_root.get(), ItemNull, &target_item, 1));
-    js_promise_add_reaction(source, resolve_root.get(), reject_root.get(),
-        target_root.get(), ItemNull);
-}
 
 // PromiseResolveThenableJob: invoke the captured then method asynchronously.
 // Bound args: promise_item, thenable, then_fn.
@@ -30882,11 +31001,18 @@ static void js_promise_resolve_with_value(JsPromise* p, Item value) {
     p = js_get_promise(promise_root.get());
     if (!p || p->state != JS_PROMISE_PENDING) return;
 
+    // A native promise is an object with a callable `then`, so ResolvePromise
+    // hands it to PromiseResolveThenableJob like any other thenable: one tick
+    // for the job, one more for the reaction it registers. Short-cutting that
+    // to a single enqueued handler settled every adopted promise a tick early,
+    // which is observable against a parallel `.then` chain.
     JsPromise* native_promise = js_get_promise(value_root.get());
-    if (native_promise) {
-        js_promise_adopt_native(p, native_promise);
+    if (native_promise == p) {
+        Item error = js_promise_make_type_error("Chaining cycle detected for promise", 35);
+        js_promise_settle(js_get_promise(promise_root.get()), JS_PROMISE_REJECTED, error);
         return;
     }
+    if (native_promise) js_promise_mark_rejection_handled(native_promise);
 
     if (js_is_object_value(value_root.get())) {
         Item then_fn = js_get_name_key(value_root.get(), "then", 4);
@@ -30933,35 +31059,33 @@ static Item js_promise_microtask_run(Item handler, Item result, Item next_promis
     return ItemNull;
 }
 
-// Bound resolve/reject settle functions for promise chaining.
-// When a then() handler returns a pending promise, these are registered as then
-// handlers on that returned promise. When it settles, they settle the next promise.
-static Item js_promise_microtask_resolve(Item next_promise_item, Item value) {
-    JsPromise* next = js_get_promise(next_promise_item);
-    if (next) js_promise_resolve_with_value(next, value);
-    return ItemNull;
-}
-
-static Item js_promise_microtask_reject(Item next_promise_item, Item reason) {
-    JsPromise* next = js_get_promise(next_promise_item);
-    if (next) js_promise_settle(next, JS_PROMISE_REJECTED, reason);
-    return ItemNull;
-}
-
 extern "C" Item js_promise_async_function_start(void) {
     Item promise = js_promise_create_pending();
     js_async_hooks_emit_before_resource(promise);
     return promise;
 }
 
+// An await-less async body owns its result promise. It must be a *fresh*
+// promise even when the body returns one (`f() === Promise.resolve(v)` is
+// false), and resolving it with the returned value is what keeps the spec's
+// timing: a plain value settles it now, a thenable adopts it later. Handing
+// back `Promise.resolve(v)` instead collapsed those two cases into one
+// already-settled promise.
+extern "C" Item js_async_wrap_return(Item value) {
+    RootFrame roots(2);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> promise_root(roots, js_promise_create_pending());
+    if (!js_get_promise(promise_root.get())) return ItemError;
+    js_async_hooks_emit_before_resource(promise_root.get());
+    js_async_hooks_emit_after_resource(promise_root.get());
+    js_promise_resolve_with_value(js_get_promise(promise_root.get()), value_root.get());
+    return promise_root.get();
+}
+
 extern "C" Item js_promise_async_function_finish(Item promise, Item result, int64_t had_exception) {
-    RootFrame roots(7);
+    RootFrame roots(3);
     Rooted<Item> promise_root(roots, promise);
     Rooted<Item> result_root(roots, result);
-    Rooted<Item> resolve_base_root(roots, ItemNull);
-    Rooted<Item> reject_base_root(roots, ItemNull);
-    Rooted<Item> resolve_root(roots, ItemNull);
-    Rooted<Item> reject_root(roots, ItemNull);
     JsPromise* p = js_get_promise(promise_root.get());
     js_async_hooks_emit_after_resource(promise_root.get());
     if (!p) return result_root.get();
@@ -30974,19 +31098,11 @@ extern "C" Item js_promise_async_function_finish(Item promise, Item result, int6
         return promise_root.get();
     }
 
-    JsPromise* returned = js_get_promise(result_root.get());
-    if (returned && returned != p) {
-        resolve_base_root.set(js_new_native_function(js_promise_microtask_resolve));
-        reject_base_root.set(js_new_native_function(js_promise_microtask_reject));
-        Item promise_item = promise_root.get();
-        resolve_root.set(js_bind_function(resolve_base_root.get(), ItemNull, &promise_item, 1));
-        // Async return adoption constructs two callbacks before publishing either;
-        // rooting prevents the resolve callback from being recycled as reject.
-        reject_root.set(js_bind_function(reject_base_root.get(), ItemNull, &promise_item, 1));
-        js_promise_then(result_root.get(), resolve_root.get(), reject_root.get());
-    } else {
-        js_promise_resolve_with_value(p, result_root.get());
-    }
+    // ResolvePromise gives both cases their spec timing: a plain value settles
+    // now, a returned promise/thenable is adopted through
+    // PromiseResolveThenableJob. Joining with `.then` here instead cost one
+    // tick where the spec prescribes two.
+    js_promise_resolve_with_value(p, result_root.get());
     return promise_root.get();
 }
 
@@ -31055,7 +31171,7 @@ static void js_promise_schedule_unhandled_check(JsPromise* p) {
     Rooted<Item> promise_root(roots, js_promise_to_item(p));
     p = js_get_promise(promise_root.get());
     if (!p) return;
-    if (!js_root_range_ensure_registered(&js_runtime_state.promises.roots)) {
+    if (!js_root_vector_ensure_registered(&js_runtime_state.promises.roots)) {
         log_error("js-promise: unhandled queue root registration failed");
         return;
     }
@@ -31117,23 +31233,6 @@ static void js_promise_enqueue_wrapped_job(Item thunk, Item resource, Item domai
     previous_root.set(js_async_hooks_enter_resource(resource_root.get()));
     js_microtask_enqueue(thunk_root.get());
     js_async_hooks_restore_resource(previous_root.get());
-}
-
-// Enqueue a promise handler as a microtask with proper chaining.
-// Creates a bound thunk: js_promise_microtask_run(handler, result, next_promise_item)
-static void js_promise_enqueue_handler(Item handler, Item result, Item next_promise_item) {
-    JS_ROOTS(roots,
-        handler_root, handler,
-        result_root, result,
-        next_root, next_promise_item,
-        thunk_root, ItemNull,
-        runner_root, ItemNull);
-    runner_root.set(js_new_native_function(js_promise_microtask_run));
-    Item bound_args[3] = {handler_root.get(), result_root.get(), next_root.get()};
-    thunk_root.set(js_bind_function(runner_root.get(), ItemNull, bound_args, 3));
-    Item resource = get_type_id(next_root.get()) == LMD_TYPE_MAP
-        ? next_root.get() : js_async_hooks_get_current_resource();
-    js_promise_enqueue_wrapped_job(thunk_root.get(), resource, ItemNull);
 }
 
 static void js_promise_enqueue_handler_domain(Item handler, Item result, Item next_promise_item, Item domain) {
@@ -31622,12 +31721,16 @@ static void js_promise_forward_native_to_capability(Item native_promise, Item re
     js_promise_then(native_root.get(), resolve_fn_root.get(), reject_fn_root.get());
 }
 
+// PerformPromiseAll/AllSettled/Any/Race. Element handlers settle the result
+// capability directly (ES2024 27.2.4.1.2 step 4.j): the combinator owns no
+// second, internal promise. An internal result forwarded to the capability
+// through `then` was one extra microtask tick on every aggregate settle, so
+// `Promise.all([...]).then(f)` ran f a full tick behind Node's ordering.
 static Item js_promise_combinator_iterable_with_constructor(
     Item constructor, Item iterable, int kind, Item promise, Item resolve, Item reject) {
-    JS_ROOTS(roots, iterable_root, iterable, internal_result_root, ItemNull);
+    JS_ROOTS(roots, iterable_root, iterable);
     const bool custom_constructor = !js_promise_is_builtin_promise_constructor(constructor);
     const bool array_input = get_type_id(iterable_root.get()) == LMD_TYPE_ARRAY;
-    const bool use_internal_result = kind != 3 && (custom_constructor || array_input);
     Item resolve_method = js_get_key_cstr(constructor, "resolve");
     if (item_is_error(resolve_method)) {
         Item error = js_error_lane_payload(resolve_method);
@@ -31660,14 +31763,6 @@ static Item js_promise_combinator_iterable_with_constructor(
             &values_arr, &called_arr);
         js_set_key_cstr(counter, "__cap_resolve", resolve);
         js_set_key_cstr(counter, "__cap_reject", reject);
-        if (use_internal_result) {
-            // Array combinators retain the native forwarding boundary used by
-            // the legacy fast path; without it aggregate reactions run before
-            // later combinators have published their own jobs.
-            JsPromise* internal_result = js_alloc_promise();
-            if (!internal_result) return ItemError;
-            internal_result_root.set(js_promise_to_item(internal_result));
-        }
         if (custom_constructor) {
             js_set_key_default(counter,
                 js_name_item("__in_iteration", 15),
@@ -31730,7 +31825,9 @@ static Item js_promise_combinator_iterable_with_constructor(
             (kind == 1 ? js_settled_fulfill_element : js_any_fulfill_element);
         JsNativeP4 reject_handler = kind == 0 ? js_all_reject_element :
             (kind == 1 ? js_settled_reject_element : js_any_reject_element);
-        Item result_item = use_internal_result ? internal_result_root.get() : promise;
+        // A custom constructor settles through its own capability functions; a
+        // null result routes the element handler to the stored capability.
+        Item result_item = custom_constructor ? ItemNull : promise;
         Item fulfill_fn = js_promise_make_bound_element_handler(fulfill_handler,
             counter, index, result_item);
         Item reject_fn = (kind == 0 && custom_constructor) ? reject :
@@ -31783,24 +31880,11 @@ static Item js_promise_combinator_iterable_with_constructor(
                     Item error = js_error_lane_payload(cap_result);
                     js_promise_call_capability_reject(reject, error);
                 }
-            } else if (use_internal_result) {
-                (void)js_promise_settle_combinator_result(counter,
-                    internal_result_root.get(),
-                    kind == 2 ? JS_PROMISE_CAPABILITY_REJECT : JS_PROMISE_CAPABILITY_RESOLVE,
-                    final_value, false, false);
             } else {
                 (void)js_promise_settle_combinator_result(counter, promise,
                     kind == 2 ? JS_PROMISE_CAPABILITY_REJECT : JS_PROMISE_CAPABILITY_RESOLVE,
                     final_value, false, false);
             }
-        } else if (custom_constructor &&
-                   !capability_settled && !array_input) {
-            // install the forwarding reaction only after the synchronous loop
-            // has had a chance to call a custom capability directly.
-            js_promise_forward_native_to_capability(internal_result_root.get(), resolve, reject);
-        }
-        if (array_input && (!custom_constructor || !capability_settled)) {
-            js_promise_forward_native_to_capability(internal_result_root.get(), resolve, reject);
         }
     }
 
@@ -32060,13 +32144,30 @@ extern "C" void js_async_frame_map_heap_destroy(Map* map) {
 // check. Its exact owner replaces the last direct async root registration.
 static bool js_async_ensure_scratch_root() {
     return js_active_runtime_state &&
-        js_root_range_ensure_registered(&js_runtime_state.async_await.roots);
+        js_root_vector_ensure_registered(&js_runtime_state.async_await.roots);
 }
 
 // Check if an awaited value requires suspension (pending promise)
 // Returns: true = pending (must suspend), false = resolved/rejected/non-promise
 // For resolved/non-promise: caches result in js_async_resolved_value
 // For rejected: calls js_throw_value (exception mechanism handles it)
+//
+// KNOWN DIVERGENCE: answering "false" continues the async body inline, so its
+// remaining statements run ahead of microtasks queued before the await, while
+// the spec makes every await a promise reaction job. Removing this fast path
+// (always suspending on PromiseResolve of the operand) fixes the ordering and
+// was verified against Node on the microtask corpus, but it exposes a latent
+// MIR defect that corrupts an awaited value in test/js/lib_floating_ui.js.
+// See the impl note before re-attempting.
+extern "C" Item js_async_prepare_await(Item value) {
+    RootFrame roots(1);
+    Rooted<Item> value_root(roots, value);
+    Item promise = js_promise_resolve(value_root.get());
+    if (item_is_error(promise)) { js_async_resolved_value = ItemNull; return promise; }
+    js_async_resolved_value = promise;
+    return ItemNull;
+}
+
 extern "C" Item js_async_must_suspend(Item value) {
     JsPromise* p = js_get_promise(value);
     if (!p) {
@@ -32172,13 +32273,17 @@ static void js_async_drive(Item frame_item, Item input, int64_t state) {
 
         // Bind resume/reject to the frame Item itself (JSCU10): the awaited
         // promise's reaction list then retains the activation until it settles.
-        Item resume_fn = js_new_native_function(js_async_resume_handler);
-        resume_root.set(js_bind_function(resume_fn, ItemNull, &frame_item, 1));
+        // js_bind_function allocates, so the freshly made native function has
+        // to be rooted before it is passed in, not only after it is bound;
+        // otherwise the bound callback can wrap a collected target and the
+        // suspended body is never resumed (**D1.5**, **D5.3.2**).
+        resume_root.set(js_new_native_function(js_async_resume_handler));
+        resume_root.set(js_bind_function(resume_root.get(), ItemNull, &frame_item, 1));
 
-        Item reject_fn = js_new_native_function(js_async_reject_handler);
         // The first callback has no owner while the second callback allocates;
         // keep both exact-rooted until the awaited promise records them.
-        reject_root.set(js_bind_function(reject_fn, ItemNull, &frame_item, 1));
+        reject_root.set(js_new_native_function(js_async_reject_handler));
+        reject_root.set(js_bind_function(reject_root.get(), ItemNull, &frame_item, 1));
 
         // Register on the pending promise
         js_promise_then(value_root.get(), resume_root.get(), reject_root.get());
@@ -32242,8 +32347,9 @@ static Item js_async_context_create_current(void* fn_ptr, Item* env,
     ctx->ast_arguments = ast_arguments;
     ctx->ast_function_env = NULL;
     ctx->ast_body_env = NULL;
-    ctx->ast_resume_statement = NULL;
     ctx->ast_loop_continuations = NULL;
+    ctx->ast_list_continuation = NULL;
+    ctx->ast_try_continuations = NULL;
     ctx->ast_replay_values = get_type_id(ast_function) == LMD_TYPE_FUNC
         ? js_array_new(0) : ItemNull;
     if (item_is_error(ctx->ast_replay_values)) return ctx->ast_replay_values;
@@ -33864,7 +33970,8 @@ static Item js_vm_compileFunction(Item code, Item params, Item options) {
     extension_bindings.restore(global_obj);
     if (get_type_id(result) == LMD_TYPE_FUNC) {
         JsFunction* fn = (JsFunction*)result.function;
-        fn->source_text = display_source;
+        JsCallableCode* code = js_fn_code_ensure(fn);
+        if (code) code->source_text = display_source;
         js_function_set_eval_origin(fn,
             get_type_id(eval_options.filename) == LMD_TYPE_STRING
                 ? it2s(eval_options.filename) : heap_create_name("<anonymous>", 11),
@@ -34198,7 +34305,7 @@ static Item js_dc_emit_deferred_error(void) {
 }
 
 static void js_dc_defer_transform_error(Item error) {
-    js_root_range_ensure_registered(&js_dc_state.roots);
+    js_root_vector_ensure_registered(&js_dc_state.roots);
     RootFrame roots(1);
     Rooted<Item> error_root(roots, error);
     Item errors = js_dc_deferred_error_entries();
@@ -34354,7 +34461,7 @@ static Item js_dc_channel_withStoreScope(Item message) {
 
 // dc.channel(name) — create or return existing channel
 static Item js_dc_channel_factory(Item name) {
-    js_root_range_ensure_registered(&js_dc_state.roots);
+    js_root_vector_ensure_registered(&js_dc_state.roots);
     RootFrame roots(4);
     Rooted<Item> name_root(roots, name);
     if (get_type_id(name) != LMD_TYPE_STRING && !js_dc_is_symbol(name)) {
@@ -35276,7 +35383,7 @@ static Item js_cluster_setup_primary(Item options) {
     RootFrame roots(1);
     Rooted<Item> options_root(roots, options);
     if (!roots.valid() ||
-            !js_root_range_ensure_registered(&js_runtime_state.cluster.roots)) {
+            !js_root_vector_ensure_registered(&js_runtime_state.cluster.roots)) {
         return ItemError;
     }
     js_cluster_primary_options = options_root.get();
@@ -35745,23 +35852,37 @@ static Item js_internal_repl_create(Item env, Item opts, Item cb) {
     return repl;
 }
 
-#define js_als_instances (&js_runtime_state.async_local_storage->instances)
-#define js_als_instance_count root_vector_count(js_als_instances)
+static JsAsyncLocalStorageState* js_als_state_existing(void) {
+    return js_active_runtime_state ? js_runtime_state.async_local_storage : NULL;
+}
+
+static JsAsyncLocalStorageState* js_als_state_ensure(void) {
+    return js_active_runtime_state
+        ? js_async_local_storage_state_ensure(&js_runtime_state) : NULL;
+}
+
+static int64_t js_als_instance_count(void) {
+    JsAsyncLocalStorageState* state = js_als_state_existing();
+    return state ? root_vector_count(&state->instances) : 0;
+}
 
 static Item js_als_store_key(void) {
     return js_name_item("_store", 6);
 }
 
 static Item js_als_instance_at(int64_t index) {
-    Item* instance = root_vector_at(js_als_instances, index);
+    JsAsyncLocalStorageState* state = js_als_state_existing();
+    Item* instance = state ? root_vector_at(&state->instances, index) : NULL;
     return instance ? *instance : ItemNull;
 }
 
 static void js_als_register_instance(Item instance) {
-    for (int64_t i = 0; i < js_als_instance_count; i++) {
+    JsAsyncLocalStorageState* state = js_als_state_ensure();
+    if (!state) return;
+    for (int64_t i = 0; i < js_als_instance_count(); i++) {
         if (js_als_instance_at(i).item == instance.item) return;
     }
-    if (!root_vector_push(js_als_instances, instance)) {
+    if (!root_vector_push(&state->instances, instance)) {
         log_error("js-als: failed to retain AsyncLocalStorage instance");
     }
 }
@@ -35769,7 +35890,7 @@ static void js_als_register_instance(Item instance) {
 extern "C" Item js_als_capture_context(void) {
     Item context = js_array_new(0);
     Item store_key = js_als_store_key();
-    for (int64_t i = 0; i < js_als_instance_count; i++) {
+    for (int64_t i = 0; i < js_als_instance_count(); i++) {
         Item instance = js_als_instance_at(i);
         if (instance.item == 0) continue;
         Item pair = js_array_new(0);
@@ -35933,11 +36054,12 @@ static Item js_als_withScope(Item store) {
     return scope;
 }
 
-#define js_async_hooks_root_resource (js_runtime_state.async_hooks->root_resource)
-#define js_async_hooks_current_resource (js_runtime_state.async_hooks->current_resource)
-#define js_async_hooks_next_id (js_runtime_state.async_hooks->next_id)
-#define js_async_hook_values (js_runtime_state.async_hooks->hooks)
-#define js_async_pending_destroy_values (js_runtime_state.async_hooks->pending_destroy_resources)
+#define js_async_hooks_state (js_async_hooks_state_ensure(&js_runtime_state))
+#define js_async_hooks_root_resource (js_async_hooks_state->root_resource)
+#define js_async_hooks_current_resource (js_async_hooks_state->current_resource)
+#define js_async_hooks_next_id (js_async_hooks_state->next_id)
+#define js_async_hook_values (js_async_hooks_state->hooks)
+#define js_async_pending_destroy_values (js_async_hooks_state->pending_destroy_resources)
 
 static Item js_async_hooks_symbol_key(const char* name, int name_len) {
     return js_symbol_for(js_name_item(name, name_len));
@@ -35953,8 +36075,9 @@ static void js_async_hooks_stamp_id_symbols(Item resource, int64_t async_id, int
 }
 
 static Item js_async_hooks_ensure_root_resource(void) {
+    if (!js_async_hooks_state) return ItemError;
     if (js_async_hooks_root_resource.item == 0) {
-        js_root_range_ensure_registered(&js_runtime_state.async_hooks->roots);
+        js_root_vector_ensure_registered(&js_async_hooks_state->roots);
         js_async_hooks_root_resource = js_new_object();
     }
     return js_async_hooks_root_resource;
@@ -36117,6 +36240,7 @@ static bool js_async_hooks_is_gc_tracker(Item resource) {
 }
 
 extern "C" void js_async_hooks_after_gc(void) {
+    if (!js_runtime_state.async_hooks) return;
     // Capture the original queue length: a destroy callback may enqueue a new
     // resource, which belongs to the next drain just as it did in the former
     // fixed queue.
@@ -37737,7 +37861,7 @@ extern "C" Item js_get_node_module_namespace(void) {
 
 extern "C" Item js_get_domain_namespace(void) {
     if (js_domain_namespace.item == 0) {
-        if (!js_root_range_ensure_registered(&js_runtime_state.promises.roots)) {
+        if (!js_root_vector_ensure_registered(&js_runtime_state.promises.roots)) {
             return ItemError;
         }
         js_domain_namespace = js_new_object();
@@ -37805,7 +37929,7 @@ extern "C" Item js_get_diagnostics_channel_namespace(void) {
         return state->namespace_object;
     }
     state->namespace_epoch = js_heap_epoch;
-    if (!js_root_range_ensure_registered(&state->roots)) return ItemError;
+    if (!js_root_vector_ensure_registered(&state->roots)) return ItemError;
     state->namespace_object = js_new_object();
     Item diagnostics_namespace = state->namespace_object;
     js_dc_channel_proto = js_new_object();
@@ -38425,18 +38549,30 @@ void js_deep_batch_reset() {
     js_domain_current = (Item){0};
     js_domain_namespace = (Item){0};
     js_item_stack_clear(&js_domain_stack_state);
-    root_vector_clear(js_als_instances);
-    js_async_hooks_root_resource = (Item){0};
-    js_async_hooks_current_resource = (Item){0};
-    js_async_hooks_next_id = 2;
-    root_vector_clear(&js_async_hook_values);
-    root_vector_clear(&js_async_pending_destroy_values);
+    if (js_runtime_state.async_local_storage) {
+        root_vector_clear(&js_runtime_state.async_local_storage->instances);
+    }
+    if (js_runtime_state.async_hooks) {
+        js_runtime_state.async_hooks->root_resource = (Item){0};
+        js_runtime_state.async_hooks->current_resource = (Item){0};
+        js_runtime_state.async_hooks->next_id = 2;
+        root_vector_clear(&js_runtime_state.async_hooks->hooks);
+        root_vector_clear(&js_runtime_state.async_hooks->pending_destroy_resources);
+    }
     js_async_resolved_value = (Item){0};
     js_reset_transient_call_state();
-    // generator proto caches point into old heap — must reset
-    js_generator_proto_depth2_cache = (Item){0};
-    js_async_generator_proto_depth2_cache = (Item){0};
-    js_async_iterator_proto_cache = (Item){0};
+    // generator proto caches point into old heap — clear only existing realm
+    // slots; reset itself must not materialize the lazy cache entries.
+    const JsRealmSlotId iterator_slots[] = {
+        JS_REALM_SLOT_GENERATOR_PROTO_DEPTH2,
+        JS_REALM_SLOT_ASYNC_GENERATOR_PROTO_DEPTH2,
+        JS_REALM_SLOT_ASYNC_ITERATOR_PROTOTYPE,
+    };
+    for (int i = 0; i < (int)(sizeof(iterator_slots) / sizeof(iterator_slots[0])); i++) {
+        Item* cache = js_realm_slot_existing(&js_runtime_state.realm_slots,
+            iterator_slots[i]);
+        if (cache) *cache = (Item){0};
+    }
     js_generator_callee_proto = (Item){0};
     js_current_private_home_class = (Item){0};
     js_call_depth = 0;

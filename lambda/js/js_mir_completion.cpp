@@ -50,6 +50,7 @@ void jm_emit_suspend_env_save(JsMirTranspiler* mt) {
             jm_emit_store_i64(mt, entry->var.env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, entry->var.reg);
         }
     }
+    jm_emit_try_state_save(mt);
 }
 
 void jm_emit_resume_env_restore(JsMirTranspiler* mt) {
@@ -67,14 +68,47 @@ void jm_emit_resume_env_restore(JsMirTranspiler* mt) {
     }
 }
 
-void jm_emit_try_state_reset(JsMirTranspiler* mt) {
+// A suspension returns from the state machine, so the delayed-return registers
+// of every enclosing try are gone on resume. Park them in env slots first; a
+// `return` that is waiting for a `finally` which itself yields would otherwise
+// be forgotten and the generator would finish with no value.
+void jm_emit_try_state_save(JsMirTranspiler* mt) {
+    if (!mt || !mt->gen_env_reg) return;
+    for (int td = 0; td < mt->try_ctx_depth; td++) {
+        JsTryContext* context = jm_try_context_at(mt, td);
+        if (!context->has_return_reg || !context->return_val_reg) continue;
+        if (context->has_return_spill < 0 && context->return_val_spill < 0) {
+            int has_slot = jm_gen_spill_reserve(mt);
+            int val_slot = has_slot >= 0 ? jm_gen_spill_reserve(mt) : -1;
+            // Both or neither: a half-saved pair would restore a stale value
+            // against a live flag. Without slots the old reset applies.
+            if (val_slot < 0) continue;
+            context->has_return_spill = has_slot;
+            context->return_val_spill = val_slot;
+        }
+        if (context->has_return_spill < 0) continue;
+        jm_emit_store_i64(mt, context->has_return_spill * (int)sizeof(uint64_t),
+            mt->gen_env_reg, context->has_return_reg);
+        jm_emit_store_i64(mt, context->return_val_spill * (int)sizeof(uint64_t),
+            mt->gen_env_reg, context->return_val_reg);
+    }
+}
+
+void jm_emit_try_state_restore(JsMirTranspiler* mt) {
     if (!mt) return;
     for (int td = 0; td < mt->try_ctx_depth; td++) {
         JsTryContext* context = jm_try_context_at(mt, td);
-        if (context->has_return_reg) {
+        bool restored = context->has_return_spill >= 0 && mt->gen_env_reg;
+        if (restored) {
+            jm_emit_load_i64(mt, context->has_return_reg,
+                context->has_return_spill * (int)sizeof(uint64_t), mt->gen_env_reg);
+            jm_emit_load_i64(mt, context->return_val_reg,
+                context->return_val_spill * (int)sizeof(uint64_t), mt->gen_env_reg);
+        }
+        if (!restored && context->has_return_reg) {
             jm_emit_reg_op(mt, MIR_MOV, context->has_return_reg, MIR_new_int_op(mt->ctx, 0));
         }
-        if (context->return_val_reg) {
+        if (!restored && context->return_val_reg) {
             jm_emit_reg_op(mt, MIR_MOV, context->return_val_reg, MIR_new_int_op(mt->ctx, 0));
         }
         if (context->saved_error_lane_flag_reg) {
@@ -427,6 +461,16 @@ MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MirValue value) {
     return em_require_rep(&mt->func_em->em, value, VALUE_REP_F64).reg;
 }
 
+// native errors share the planned companion lane and ownership epilogue (D8.4.3v2).
+bool jm_emit_native_throw_exit(JsMirTranspiler* mt, MIR_reg_t lane) {
+    if (!mt || !mt->in_native_func || !mt->current_fc || !lane) return false;
+    MIR_op_t placeholder = mt->func_em->em.frame.return_type == MIR_T_D
+        ? MIR_new_double_op(mt->ctx, 0.0) : MIR_new_int_op(mt->ctx, 0);
+    em_stage_function_return(&mt->func_em->em, placeholder, lane);
+    jm_error_lane_set_state(mt, JS_ERROR_LANE_UNREACHABLE);
+    return true;
+}
+
 static void jm_emit_throw_completion_impl(JsMirTranspiler* mt, MIR_reg_t value,
         JsTryContext* forced_context, bool force_finally) {
     if (!mt) return;
@@ -449,6 +493,7 @@ static void jm_emit_throw_completion_impl(JsMirTranspiler* mt, MIR_reg_t value,
         jm_emit_jmp(mt, target);
         return;
     }
+    if (jm_emit_native_throw_exit(mt, thrown)) return;
     MIR_reg_t native_value = jm_native_return_reg(mt, jm_item_value(thrown));
     jm_emit_ret(mt, native_value);
 }
@@ -471,9 +516,15 @@ void jm_emit_error_lane_exit(JsMirTranspiler* mt) {
     jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_THROW);
 }
 
-void jm_emit_abrupt_jump_cleanup(JsMirTranspiler* mt) {
+// `target_loop_index` is the break-target stack entry the jump lands on, or -1
+// when none was found. Only a try entered *inside* that target is unwound: a
+// `break` out of a `switch` (or an inner loop) that sits inside a try's block
+// leaves the block still running, so its finally must not run here — and would
+// otherwise run a second time when the block completes normally.
+void jm_emit_abrupt_jump_cleanup(JsMirTranspiler* mt, int target_loop_index) {
     for (int t = mt->try_ctx_depth - 1; t >= 0; t--) {
         JsTryContext* tc = jm_try_context_at(mt, t);
+        if (tc->loop_depth_at_push <= target_loop_index) continue;
         if (tc->has_finally && tc->finally_body && !tc->inlining_finally &&
             tc->finally_body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
             tc->inlining_finally = true;
@@ -503,49 +554,51 @@ static void jm_emit_close_intervening_iterators(JsMirTranspiler* mt, int target_
     }
 }
 
-void jm_emit_break_completion(JsMirTranspiler* mt, JsBreakContinueNode* brk) {
-    jm_emit_abrupt_jump_cleanup(mt);
-    if (brk->label && brk->label_len > 0) {
+// Which break-target stack entry this jump lands on; -1 when unresolved. The
+// finally-unwinding depth is decided from it, so it has to be known first.
+static int jm_jump_target_index(JsMirTranspiler* mt, JsBreakContinueNode* jump,
+        bool is_continue) {
+    if (!mt || !jump) return -1;
+    if (jump->label && jump->label_len > 0) {
         for (int i = mt->loop_depth - 1; i >= 0; i--) {
             JsLoopLabels* loop = jm_loop_label_at(mt, i);
             if (loop && loop->label_name &&
-                loop->label_name_len == brk->label_len &&
-                memcmp(loop->label_name, brk->label, brk->label_len) == 0) {
-                jm_emit_close_intervening_iterators(mt, i);
-                jm_emit_jmp(mt, loop->break_label);
-                break;
+                loop->label_name_len == jump->label_len &&
+                memcmp(loop->label_name, jump->label, jump->label_len) == 0) {
+                return i;
             }
         }
-    } else if (mt->loop_depth > 0) {
-        JsLoopLabels* loop = jm_loop_label_at(mt, mt->loop_depth - 1);
-        if (loop) {
-            jm_emit_jmp(mt, loop->break_label);
-        }
+        return -1;
     }
+    if (!is_continue) return mt->loop_depth > 0 ? mt->loop_depth - 1 : -1;
+    // `continue` skips break-only targets such as an enclosing switch.
+    for (int i = mt->loop_depth - 1; i >= 0; i--) {
+        JsLoopLabels* loop = jm_loop_label_at(mt, i);
+        if (loop && loop->continue_label) return i;
+    }
+    return -1;
+}
+
+void jm_emit_break_completion(JsMirTranspiler* mt, JsBreakContinueNode* brk) {
+    int target = jm_jump_target_index(mt, brk, false);
+    jm_emit_abrupt_jump_cleanup(mt, target);
+    if (target < 0) return;
+    JsLoopLabels* loop = jm_loop_label_at(mt, target);
+    if (!loop) return;
+    if (brk->label && brk->label_len > 0) {
+        jm_emit_close_intervening_iterators(mt, target);
+    }
+    jm_emit_jmp(mt, loop->break_label);
 }
 
 void jm_emit_continue_completion(JsMirTranspiler* mt, JsBreakContinueNode* cont) {
-    jm_emit_abrupt_jump_cleanup(mt);
+    int target = jm_jump_target_index(mt, cont, true);
+    jm_emit_abrupt_jump_cleanup(mt, target);
+    if (target < 0) return;
+    JsLoopLabels* loop = jm_loop_label_at(mt, target);
+    if (!loop || !loop->continue_label) return;
     if (cont->label && cont->label_len > 0) {
-        for (int i = mt->loop_depth - 1; i >= 0; i--) {
-            JsLoopLabels* loop = jm_loop_label_at(mt, i);
-            if (loop && loop->label_name &&
-                loop->label_name_len == cont->label_len &&
-                memcmp(loop->label_name, cont->label, cont->label_len) == 0) {
-                if (loop->continue_label) {
-                    jm_emit_close_intervening_iterators(mt, i);
-                    jm_emit_jmp(mt, loop->continue_label);
-                }
-                break;
-            }
-        }
-    } else if (mt->loop_depth > 0) {
-        for (int i = mt->loop_depth - 1; i >= 0; i--) {
-            JsLoopLabels* loop = jm_loop_label_at(mt, i);
-            if (loop && loop->continue_label) {
-                jm_emit_jmp(mt, loop->continue_label);
-                break;
-            }
-        }
+        jm_emit_close_intervening_iterators(mt, target);
     }
+    jm_emit_jmp(mt, loop->continue_label);
 }

@@ -1,16 +1,20 @@
 {
   "schema_version": 1,
-  "description": "T22-4: only a total text split producer establishes the exact String[] success representation, so its destination boundary needs no lambda_type_check (S11.4.2, D8.4.1v2).",
+  "description": "T22-4: a total text split producer still crosses the one shared String[] admission boundary, which publishes the representation certificate before later direct reads (S11.4.1v3, D3.3.3v3).",
   "checks": [
     {
       "in_func": "_tune22_split_words_#",
-      "expect": ["call\tfn_split2_p, fn_split2"],
-      "forbid": ["call\tlambda_type_check_p, lambda_type_check"]
+      "expect": [
+        "call\tfn_split2_p, fn_split2",
+        "call\tlambda_type_check_p, lambda_type_check"
+      ]
     },
     {
       "in_func": "_main_#",
-      "expect": ["call\tfn_split2_p, fn_split2"],
-      "forbid": ["call\tlambda_type_check_p, lambda_type_check"]
+      "expect": [
+        "call\tfn_split2_p, fn_split2",
+        "call\tlambda_type_check_p, lambda_type_check"
+      ]
     }
   ]
 }

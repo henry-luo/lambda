@@ -15,6 +15,7 @@
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
+#include "../../lib/arraylist.h"
 #include "../../lib/uv_loop.h"
 #include "../../lib/windows_compat.h"
 
@@ -215,8 +216,9 @@ typedef struct JsChildProcess {
     bool   max_buffer_exceeded;
     char   max_buffer_stream[8];
 
-    // callback for exec(): (err, stdout, stderr) => ...
-    Item callback;
+    // exact roots for the one exec operation's durable JS values.
+    RuntimeValueSlots values;
+    uint32_t resource_id;
 
     // lifecycle tracking
     int    pipes_closed;      // count of closed pipes (need 2: stdout + stderr)
@@ -226,11 +228,36 @@ typedef struct JsChildProcess {
     int    handles_closed;    // count of uv_close completions (need 3: process + 2 pipes)
     bool   aborted;
     int    abort_kill_signal;
-    Item   abort_reason;
-    Item   abort_signal;
-    Item   abort_listener;
     Item*  abort_env;
 } JsChildProcess;
+
+enum JsChildProcessValueSlot {
+    JS_CHILD_VALUE_ABORT_REASON,
+    JS_CHILD_VALUE_ABORT_SIGNAL,
+    JS_CHILD_VALUE_ABORT_LISTENER,
+    JS_CHILD_VALUE_COUNT,
+};
+
+static bool child_values_init(JsChildProcess* cp) {
+    return cp && runtime_value_slots_init(&cp->values, (Context*)context,
+        "child process values", JS_CHILD_VALUE_COUNT);
+}
+
+static Item child_value(JsChildProcess* cp, JsChildProcessValueSlot slot) {
+    return cp ? runtime_value_slots_get(&cp->values, slot) : make_js_undefined();
+}
+
+static Item child_callback(JsChildProcess* cp) {
+    if (!cp || cp->resource_id == 0) return make_js_undefined();
+    const RuntimeResourceEntry* entry = runtime_resource_table_entry_owned(
+        &js_runtime_state.resources, cp, cp->resource_id);
+    return runtime_resource_table_value(&js_runtime_state.resources, entry);
+}
+
+static void child_set_value(JsChildProcess* cp, JsChildProcessValueSlot slot,
+        Item value) {
+    if (cp) runtime_value_slots_set(&cp->values, slot, value);
+}
 
 // =============================================================================
 // Allocation callback for uv_read_start
@@ -253,6 +280,13 @@ static void child_handle_close_cb(uv_handle_t* handle) {
         if (cp->abort_env) cp->abort_env[0] = (Item){.item = 0};
         if (cp->stdout_buf) mem_free(cp->stdout_buf);
         if (cp->stderr_buf) mem_free(cp->stderr_buf);
+        if (cp->resource_id != 0) {
+            uint32_t resource_id = cp->resource_id;
+            cp->resource_id = 0;
+            runtime_resource_table_remove_owned(&js_runtime_state.resources,
+                cp, resource_id);
+        }
+        runtime_value_slots_destroy(&cp->values);
         mem_free(cp);
     }
 }
@@ -338,10 +372,11 @@ static void maybe_complete(JsChildProcess* cp) {
     cp->callback_fired = true;
 
     // call callback(err, stdout, stderr)
-    if (js_is_callable(cp->callback)) {
+    Item callback = child_callback(cp);
+    if (js_is_callable(callback)) {
         Item err = ItemNull;
         if (cp->aborted) {
-            err = child_abort_error(cp->abort_reason);
+            err = child_abort_error(child_value(cp, JS_CHILD_VALUE_ABORT_REASON));
         } else if (cp->max_buffer_exceeded) {
             char emsg[128];
             snprintf(emsg, sizeof(emsg), "%s maxBuffer length exceeded",
@@ -367,7 +402,7 @@ static void maybe_complete(JsChildProcess* cp) {
             : make_string_item("");
 
         Item args[3] = {err, stdout_str, stderr_str};
-        js_call_function(cp->callback, ItemNull, args, 3);
+        js_call_function(callback, ItemNull, args, 3);
 
         // flush microtasks after callback
         js_microtask_flush();
@@ -394,9 +429,10 @@ static Item child_abort_with_env(Item env_item, Item event_item) {
         return make_js_undefined();
     }
     cp->aborted = true;
-    cp->abort_reason = is_object_item(cp->abort_signal)
-        ? js_get_key_cstr(cp->abort_signal, "reason")
-        : make_js_undefined();
+    Item abort_signal = child_value(cp, JS_CHILD_VALUE_ABORT_SIGNAL);
+    child_set_value(cp, JS_CHILD_VALUE_ABORT_REASON, is_object_item(abort_signal)
+        ? js_get_key_cstr(abort_signal, "reason")
+        : make_js_undefined());
     // AbortSignal owns cancellation for exec(); without killing the shell child,
     // long-running commands stay as refed UV_PROCESS handles until the drain watchdog.
     uv_process_kill(&cp->process, cp->abort_kill_signal ? cp->abort_kill_signal : SIGTERM);
@@ -415,13 +451,13 @@ static void child_install_abort_signal(JsChildProcess* cp, Item options) {
     if (!cp || !is_object_item(options)) return;
     Item signal = js_get_key_cstr(options, "signal");
     if (is_nullish_item(signal)) return;
-    cp->abort_signal = signal;
+    child_set_value(cp, JS_CHILD_VALUE_ABORT_SIGNAL, signal);
     cp->abort_kill_signal = SIGTERM;
     Item* abort_env = js_alloc_env(1);
     abort_env[0] = (Item){.item = (uint64_t)(uintptr_t)cp};
     cp->abort_env = abort_env;
     Item listener = js_new_native_closure(child_abort_with_env, 1, abort_env, 1);
-    cp->abort_listener = listener;
+    child_set_value(cp, JS_CHILD_VALUE_ABORT_LISTENER, listener);
     Item add_listener = js_get_key_cstr(signal, "addEventListener");
     Item args[2] = {make_string_item("abort"), listener};
     js_call_function(add_listener, signal, args, 2);
@@ -434,14 +470,16 @@ static void child_install_abort_signal(JsChildProcess* cp, Item options) {
 }
 
 static void child_remove_abort_signal(JsChildProcess* cp) {
-    if (!cp || !is_object_item(cp->abort_signal) || !is_callable(cp->abort_listener)) return;
-    Item remove_listener = js_get_key_cstr(cp->abort_signal, "removeEventListener");
+    Item signal = child_value(cp, JS_CHILD_VALUE_ABORT_SIGNAL);
+    Item listener = child_value(cp, JS_CHILD_VALUE_ABORT_LISTENER);
+    if (!cp || !is_object_item(signal) || !is_callable(listener)) return;
+    Item remove_listener = js_get_key_cstr(signal, "removeEventListener");
     if (is_callable(remove_listener)) {
-        Item args[2] = {make_string_item("abort"), cp->abort_listener};
-        js_call_function(remove_listener, cp->abort_signal, args, 2);
+        Item args[2] = {make_string_item("abort"), listener};
+        js_call_function(remove_listener, signal, args, 2);
     }
-    cp->abort_signal = make_js_undefined();
-    cp->abort_listener = make_js_undefined();
+    child_set_value(cp, JS_CHILD_VALUE_ABORT_SIGNAL, make_js_undefined());
+    child_set_value(cp, JS_CHILD_VALUE_ABORT_LISTENER, make_js_undefined());
 }
 
 // =============================================================================
@@ -464,12 +502,21 @@ static Item js_cp_exec_with_options(Item command_item, Item options_item,
 
     JsChildProcess* cp = (JsChildProcess*)mem_calloc(1, sizeof(JsChildProcess), MEM_CAT_JS_RUNTIME);
     if (!cp) return ItemNull;
+    if (!child_values_init(cp)) {
+        mem_free(cp);
+        return ItemNull;
+    }
 
-    cp->callback = callback_item;
+    const RuntimeResourceDescriptor* descriptor =
+        runtime_resource_descriptor_from_legacy_name("ChildProcess");
+    cp->resource_id = runtime_resource_table_add_owned(
+        &js_runtime_state.resources, cp, callback_item, descriptor, NULL, NULL, false);
+    if (cp->resource_id == 0) {
+        runtime_value_slots_destroy(&cp->values);
+        mem_free(cp);
+        return ItemNull;
+    }
     cp->max_buffer = max_buffer;
-    cp->abort_signal = make_js_undefined();
-    cp->abort_listener = make_js_undefined();
-    cp->abort_reason = make_js_undefined();
 
     // init pipes
     uv_pipe_init(loop, &cp->stdout_pipe, 0);
@@ -647,7 +694,9 @@ typedef struct JsSpawnProcess {
     uv_pipe_t    stdout_pipe;
     uv_pipe_t    stderr_pipe;
     uv_pipe_t    ipc_pipe;
-    Item         js_object;    // the JS object returned to user
+    // Exact roots for JS values retained by the native process lifecycle.
+    RuntimeValueSlots values;
+    uint32_t     resource_id;
     int          exit_code;
     int          exit_signal;
     bool         process_exited;
@@ -668,8 +717,6 @@ typedef struct JsSpawnProcess {
     bool         ipc_unref_requested;
     bool         abort_error_emitted;
     int          abort_kill_signal;
-    Item         abort_signal;
-    Item         abort_listener;
     Item*        stdin_env;
     Item*        stdin_destroy_env;
     Item*        stdout_env;
@@ -685,11 +732,40 @@ typedef struct JsSpawnProcess {
     char*        ipc_buf;
     size_t       ipc_len;
     size_t       ipc_cap;
-    uv_stream_t* pending_sent_streams[8];
-    int          pending_sent_stream_count;
+    ArrayList*   pending_sent_streams;
     struct SpawnTransferredConnection* transferred_connections_head;
     struct SpawnTransferredConnection* transferred_connections_tail;
 } JsSpawnProcess;
+
+enum JsSpawnProcessValueSlot {
+    // The public ChildProcess object is owned by the resource-table row;
+    // keep this sentinel for call-site readability without a duplicate root.
+    JS_SPAWN_VALUE_OBJECT = -1,
+    JS_SPAWN_VALUE_ABORT_SIGNAL = 0,
+    JS_SPAWN_VALUE_ABORT_LISTENER = 1,
+    JS_SPAWN_VALUE_COUNT = 2,
+};
+
+static bool spawn_values_init(JsSpawnProcess* sp) {
+    return sp && runtime_value_slots_init(&sp->values, (Context*)context,
+        "spawn process values", JS_SPAWN_VALUE_COUNT);
+}
+
+static Item spawn_value(JsSpawnProcess* sp, JsSpawnProcessValueSlot slot) {
+    if (!sp) return make_js_undefined();
+    if (slot == JS_SPAWN_VALUE_OBJECT) {
+        if (sp->resource_id == 0) return make_js_undefined();
+        const RuntimeResourceEntry* entry = runtime_resource_table_entry_owned(
+            &js_runtime_state.resources, sp, sp->resource_id);
+        return runtime_resource_table_value(&js_runtime_state.resources, entry);
+    }
+    return runtime_value_slots_get(&sp->values, slot);
+}
+
+static void spawn_set_value(JsSpawnProcess* sp, JsSpawnProcessValueSlot slot,
+        Item value) {
+    if (sp) runtime_value_slots_set(&sp->values, slot, value);
+}
 
 typedef struct SpawnTransferredConnection {
     void* account;
@@ -775,7 +851,7 @@ static void spawn_maybe_emit_process_close(JsSpawnProcess* sp) {
     };
     // close observers may probe pid liveness; wait for the libuv process
     // handle to close as well as stdio so exited children are fully reaped.
-    spawn_emit_event(sp->js_object, "close", args, 2);
+    spawn_emit_event(spawn_value(sp, JS_SPAWN_VALUE_OBJECT), "close", args, 2);
 }
 
 static bool spawn_has_event_listener(Item obj, const char* event) {
@@ -910,7 +986,7 @@ static void spawn_emit_abort_error_once(JsSpawnProcess* sp, Item reason) {
     if (!sp || sp->abort_error_emitted || sp->process_exited) return;
     sp->abort_error_emitted = true;
     Item err = child_abort_error(reason);
-    spawn_emit_event(sp->js_object, "error", &err, 1);
+    spawn_emit_event(spawn_value(sp, JS_SPAWN_VALUE_OBJECT), "error", &err, 1);
 }
 
 static Item spawn_send_callback_later(Item env_item) {
@@ -968,7 +1044,8 @@ static Item spawn_signal_name_item(int signal_number) {
 
 static void spawn_set_process_signal_state(JsSpawnProcess* sp, int signal_number) {
     if (!sp) return;
-    js_set_key_cstr(sp->js_object, "signalCode", signal_number == 0 ? ItemNull : spawn_signal_name_item(signal_number));
+    js_set_key_cstr(spawn_value(sp, JS_SPAWN_VALUE_OBJECT), "signalCode",
+        signal_number == 0 ? ItemNull : spawn_signal_name_item(signal_number));
 }
 
 static Item spawn_kill_with_env(Item env_item, Item signal_item) {
@@ -980,7 +1057,8 @@ static Item spawn_kill_with_env(Item env_item, Item signal_item) {
     int signal_number = spawn_signal_number(signal_item);
     int r = uv_process_kill(&sp->process, signal_number);
     if (r == 0) {
-        js_set_key_cstr(sp->js_object, "killed", (Item){.item = ITEM_TRUE});
+        js_set_key_cstr(spawn_value(sp, JS_SPAWN_VALUE_OBJECT), "killed",
+            (Item){.item = ITEM_TRUE});
     }
     return (Item){.item = b2it(r == 0)};
 }
@@ -1065,6 +1143,13 @@ static void spawn_release_process(JsSpawnProcess* sp) {
     spawn_drain_transferred_connections(sp);
     spawn_close_pending_sent_stream_wrappers(sp);
     spawn_clear_stdio_handle_properties(sp);
+    if (sp->resource_id != 0) {
+        uint32_t resource_id = sp->resource_id;
+        sp->resource_id = 0;
+        runtime_resource_table_remove_owned(&js_runtime_state.resources,
+            sp, resource_id);
+    }
+    runtime_value_slots_destroy(&sp->values);
     runtime_callback_slots_destroy(&sp->ipc_write_callbacks);
     if (sp->ipc_buf) mem_free(sp->ipc_buf);
     mem_free(sp);
@@ -1110,23 +1195,25 @@ static void spawn_close_sent_stream_wrapper(uv_stream_t* stream) {
 static void spawn_track_sent_stream_wrapper(JsSpawnProcess* sp, uv_stream_t* stream) {
     if (!sp || !stream) return;
     uv_unref((uv_handle_t*)stream);
-    if (sp->pending_sent_stream_count >= 8) {
-        spawn_close_sent_stream_wrapper(sp->pending_sent_streams[0]);
-        for (int i = 1; i < sp->pending_sent_stream_count; i++) {
-            sp->pending_sent_streams[i - 1] = sp->pending_sent_streams[i];
-        }
-        sp->pending_sent_stream_count--;
+    if (!sp->pending_sent_streams) {
+        sp->pending_sent_streams = arraylist_new(4);
     }
-    sp->pending_sent_streams[sp->pending_sent_stream_count++] = stream;
+    if (!sp->pending_sent_streams ||
+            !arraylist_append(sp->pending_sent_streams, stream)) {
+        // A duplicate wrapper has no independent semantic lifetime if its
+        // owner cannot retain it for the delayed receiver acknowledgement.
+        spawn_close_sent_stream_wrapper(stream);
+    }
 }
 
 static void spawn_close_pending_sent_stream_wrappers(JsSpawnProcess* sp) {
-    if (!sp) return;
-    for (int i = 0; i < sp->pending_sent_stream_count; i++) {
-        spawn_close_sent_stream_wrapper(sp->pending_sent_streams[i]);
-        sp->pending_sent_streams[i] = NULL;
+    if (!sp || !sp->pending_sent_streams) return;
+    for (int i = 0; i < sp->pending_sent_streams->length; i++) {
+        spawn_close_sent_stream_wrapper((uv_stream_t*)arraylist_get(
+            sp->pending_sent_streams, i));
     }
-    sp->pending_sent_stream_count = 0;
+    arraylist_free(sp->pending_sent_streams);
+    sp->pending_sent_streams = NULL;
 }
 
 static void spawn_queue_transferred_connection(JsSpawnProcess* sp, void* account,
@@ -1223,8 +1310,9 @@ static void spawn_ipc_write_cb(uv_write_t* req, int status) {
 static void spawn_emit_disconnect_once(JsSpawnProcess* sp) {
     if (!sp || sp->ipc_disconnect_emitted) return;
     sp->ipc_disconnect_emitted = true;
-    spawn_set_connected(sp->js_object, false);
-    spawn_emit_event(sp->js_object, "disconnect", NULL, 0);
+    Item object = spawn_value(sp, JS_SPAWN_VALUE_OBJECT);
+    spawn_set_connected(object, false);
+    spawn_emit_event(object, "disconnect", NULL, 0);
 }
 
 static Item spawn_abort_with_env(Item env_item, Item event_item) {
@@ -1234,8 +1322,9 @@ static Item spawn_abort_with_env(Item env_item, Item event_item) {
     if (!sp || sp->process_exited || uv_is_closing((uv_handle_t*)&sp->process)) {
         return make_js_undefined();
     }
-    Item reason = is_object_item(sp->abort_signal)
-        ? js_get_key_cstr(sp->abort_signal, "reason")
+    Item signal = spawn_value(sp, JS_SPAWN_VALUE_ABORT_SIGNAL);
+    Item reason = is_object_item(signal)
+        ? js_get_key_cstr(signal, "reason")
         : make_js_undefined();
     uv_process_kill(&sp->process, sp->abort_kill_signal ? sp->abort_kill_signal : SIGTERM);
     spawn_emit_abort_error_once(sp, reason);
@@ -1248,14 +1337,14 @@ static void spawn_install_abort_signal(Item obj, JsSpawnProcess* sp, Item option
     Item signal = js_get_key_cstr(options, "signal");
     if (!is_object_item(signal)) return;
 
-    sp->abort_signal = signal;
+    spawn_set_value(sp, JS_SPAWN_VALUE_ABORT_SIGNAL, signal);
     sp->abort_kill_signal = spawn_signal_number(js_get_key_cstr(options, "killSignal"));
 
     Item* abort_env = js_alloc_env(1);
     abort_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     sp->abort_env = abort_env;
     Item listener = js_new_native_closure(spawn_abort_with_env, 1, abort_env, 1);
-    sp->abort_listener = listener;
+    spawn_set_value(sp, JS_SPAWN_VALUE_ABORT_LISTENER, listener);
 
     Item add_listener = js_get_key_cstr(signal, "addEventListener");
     if (is_callable(add_listener)) {
@@ -1273,14 +1362,17 @@ static void spawn_install_abort_signal(Item obj, JsSpawnProcess* sp, Item option
 }
 
 static void spawn_remove_abort_signal(JsSpawnProcess* sp) {
-    if (!sp || !is_object_item(sp->abort_signal) || !is_callable(sp->abort_listener)) return;
-    Item remove_listener = js_get_key_cstr(sp->abort_signal, "removeEventListener");
+    if (!sp) return;
+    Item signal = spawn_value(sp, JS_SPAWN_VALUE_ABORT_SIGNAL);
+    Item listener = spawn_value(sp, JS_SPAWN_VALUE_ABORT_LISTENER);
+    if (!is_object_item(signal) || !is_callable(listener)) return;
+    Item remove_listener = js_get_key_cstr(signal, "removeEventListener");
     if (is_callable(remove_listener)) {
-        Item args[2] = {make_string_item("abort"), sp->abort_listener};
-        js_call_function(remove_listener, sp->abort_signal, args, 2);
+        Item args[2] = {make_string_item("abort"), listener};
+        js_call_function(remove_listener, signal, args, 2);
     }
-    sp->abort_signal = make_js_undefined();
-    sp->abort_listener = make_js_undefined();
+    spawn_set_value(sp, JS_SPAWN_VALUE_ABORT_SIGNAL, make_js_undefined());
+    spawn_set_value(sp, JS_SPAWN_VALUE_ABORT_LISTENER, make_js_undefined());
 }
 
 static bool spawn_ipc_write_json(JsSpawnProcess* sp, Item message, uv_stream_t* send_handle,
@@ -1414,7 +1506,7 @@ static void spawn_ipc_handle_line(JsSpawnProcess* sp, const char* chars, int len
     if (spawn_ipc_is_cluster_listening(message)) {
         // cluster readiness is carried over ChildProcess IPC but surfaces as a
         // worker 'listening' event, not as a user-visible message payload.
-        spawn_emit_or_queue_cluster_listening(sp->js_object);
+        spawn_emit_or_queue_cluster_listening(spawn_value(sp, JS_SPAWN_VALUE_OBJECT));
         return;
     }
     if (spawn_ipc_is_handle_accepted_control(message)) {
@@ -1430,7 +1522,7 @@ static void spawn_ipc_handle_line(JsSpawnProcess* sp, const char* chars, int len
         return;
     }
     Item handle = js_net_accept_ipc_tcp_handle(&sp->ipc_pipe);
-    spawn_emit_ipc_message_or_queue(sp->js_object, message, handle);
+    spawn_emit_ipc_message_or_queue(spawn_value(sp, JS_SPAWN_VALUE_OBJECT), message, handle);
 }
 
 static void spawn_ipc_consume_lines(JsSpawnProcess* sp) {
@@ -1573,7 +1665,7 @@ static void spawn_emit_data(Item stream_obj, const char* data, int len) {
 static void spawn_output_read_cb(uv_stream_t* stream, ssize_t nread,
                                  const uv_buf_t* buf, bool is_stderr) {
     JsSpawnProcess* sp = (JsSpawnProcess*)stream->data;
-    Item output_obj = sp ? js_get_key_default(sp->js_object,
+    Item output_obj = sp ? js_get_key_default(spawn_value(sp, JS_SPAWN_VALUE_OBJECT),
         make_string_item(is_stderr ? "stderr" : "stdout")) : ItemNull;
     if (nread > 0 && sp) {
         spawn_emit_data(output_obj, buf->base, (int)nread);
@@ -1606,14 +1698,15 @@ static void spawn_exit_cb(uv_process_t* process, int64_t exit_status, int term_s
     sp->process_exited = true;
     spawn_drain_transferred_connections(sp);
     spawn_remove_abort_signal(sp);
-    js_set_key_cstr(sp->js_object, "exitCode", term_signal == 0 ? (Item){.item = i2it(exit_status)} : ItemNull);
+    Item object = spawn_value(sp, JS_SPAWN_VALUE_OBJECT);
+    js_set_key_cstr(object, "exitCode", term_signal == 0 ? (Item){.item = i2it(exit_status)} : ItemNull);
     spawn_set_process_signal_state(sp, term_signal);
 
     Item args[2] = {
         term_signal == 0 ? (Item){.item = i2it(exit_status)} : ItemNull,
         term_signal == 0 ? ItemNull : spawn_signal_name_item(term_signal)
     };
-    spawn_emit_event(sp->js_object, "exit", args, 2);
+    spawn_emit_event(object, "exit", args, 2);
 
     if (sp->stdin_pipe_active) {
         sp->stdin_pipe_active = false;
@@ -1815,10 +1908,11 @@ static void install_spawn_stream_destroy(Item stream_obj, JsSpawnProcess* sp,
 }
 
 static void spawn_clear_stdio_handle_properties(JsSpawnProcess* sp) {
-    if (!sp || !sp->js_object.item) return;
+    Item object = spawn_value(sp, JS_SPAWN_VALUE_OBJECT);
+    if (!sp || !object.item) return;
     const char* names[3] = {"stdin", "stdout", "stderr"};
     for (int i = 0; i < 3; i++) {
-        Item stream_obj = js_get_key_default(sp->js_object, make_string_item(names[i]));
+        Item stream_obj = js_get_key_default(object, make_string_item(names[i]));
         if (!is_object_item(stream_obj)) continue;
         js_set_key_cstr(stream_obj, "__lambda_spawn_stdio_owner__", make_js_undefined());
         js_set_key_cstr(stream_obj, "__lambda_spawn_stdio_kind__", make_js_undefined());
@@ -2435,13 +2529,27 @@ extern "C" Item js_cp_spawn(Item rest_args) {
     if (!sp) return ItemNull;
     runtime_callback_slots_init(&sp->ipc_write_callbacks, (Context*)context,
         "child process IPC write callbacks");
+    if (!spawn_values_init(sp)) {
+        runtime_callback_slots_destroy(&sp->ipc_write_callbacks);
+        mem_free(sp);
+        return ItemNull;
+    }
 
     // create JS object with stdout/stderr sub-objects
     Item obj = make_child_process_object();
     js_set_key_cstr(obj, "spawnfile", make_string_item(req.shell ? argv[0] : req.file));
     js_set_key_cstr(obj, "spawnargs", spawnargs);
 
-    sp->js_object = obj;
+    const RuntimeResourceDescriptor* descriptor =
+        runtime_resource_descriptor_from_legacy_name("SpawnProcess");
+    sp->resource_id = runtime_resource_table_add_owned(
+        &js_runtime_state.resources, sp, obj, descriptor, NULL, NULL, false);
+    if (sp->resource_id == 0) {
+        runtime_value_slots_destroy(&sp->values);
+        runtime_callback_slots_destroy(&sp->ipc_write_callbacks);
+        mem_free(sp);
+        return ItemNull;
+    }
     install_spawn_lifecycle_surface(obj, sp);
     if (req.ipc) install_ipc_surface(obj, sp);
 
@@ -3524,9 +3632,6 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
 // child_process Module Namespace
 // =============================================================================
 
-#define cp_namespace (js_runtime_state.child_process.namespace_object)
-JS_FORWARD_STATIC_RETURN(bool, js_cp_register_namespace_root, (void), js_root_range_ensure_registered, (&js_runtime_state.child_process.roots))
-
 template <typename Target>
 JS_FORWARD_STATIC_VOID( js_cp_set_method, (Item ns, const char* name, Target target,         int adapter_arity), js_install_native_method, (ns, name, target, adapter_arity))
 
@@ -3538,7 +3643,10 @@ JS_FORWARD_STATIC_VOID( js_cp_set_method, (Item ns, const char* name, Target tar
 
 extern "C" Item js_get_child_process_namespace(void) {
     if (!js_active_runtime_state) return ItemError;
-    if (!js_cp_register_namespace_root()) return ItemError;
+    Item* namespace_slot = js_realm_slot(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_CHILD_PROCESS_NAMESPACE);
+    if (!namespace_slot) return ItemError;
+    Item& cp_namespace = *namespace_slot;
     if (cp_namespace.item != 0) return cp_namespace;
 
     RootFrame roots(1);
@@ -3564,6 +3672,8 @@ extern "C" Item js_get_child_process_namespace(void) {
 
 extern "C" void js_child_process_reset(void) {
     if (!js_active_runtime_state) return;
-    cp_namespace = (Item){0};
+    Item* namespace_slot = js_realm_slot(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_CHILD_PROCESS_NAMESPACE);
+    if (namespace_slot) *namespace_slot = (Item){0};
     js_host_hooks_set_cluster_online_hook(NULL);
 }

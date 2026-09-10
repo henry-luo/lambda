@@ -23,6 +23,7 @@
 #include "side_stack.h"
 #include "recovery_frame.h"
 #include "../js/js_test262_fast_paths.h"
+#include "../js/js_exec_profile.h"
 
 // External Type globals (defined in lambda-data.cpp)
 extern Type TYPE_NULL, TYPE_BOOL, TYPE_INT, TYPE_INT64, TYPE_FLOAT, TYPE_COMPLEX;
@@ -1252,6 +1253,8 @@ JitImport jit_runtime_imports[] = {
     {"bits_to_f32", FPTR(bits_to_f32)},
     // stack overflow protection
     {"lambda_stack_overflow_error", FPTR(lambda_stack_overflow_error)},
+    // LR07-7/LR08-3 root-honesty witness (emitted only under LAMBDA_ROOT_WITNESS)
+    {"lambda_jit_root_witness", FPTR(lambda_jit_root_witness)},
     {"lambda_side_stack_ensure_for", FPTR(lambda_side_stack_ensure_for)},
     {"lambda_side_stack_ensure_tls", FPTR(lambda_side_stack_ensure_tls)},
     {"lambda_recovery_frame_begin_for", FPTR(lambda_recovery_frame_begin_for)},
@@ -1925,6 +1928,12 @@ JitImport jit_runtime_imports[] = {
     {"fn_array_set", FPTR(fn_array_set)},
     {"lambda_array_set_checked_item", FPTR(lambda_array_set_checked_item)},
     {"lambda_array_set_checked_inplace_item", FPTR(lambda_array_set_checked_inplace_item)},
+    {"lambda_array_path_set_checked", FPTR(lambda_array_path_set_checked)},
+    {"lambda_array_path_set_checked_inplace", FPTR(lambda_array_path_set_checked_inplace)},
+    {"lambda_array_mask_assign_checked", FPTR(lambda_array_mask_assign_checked)},
+    {"lambda_array_mask_assign_checked_inplace", FPTR(lambda_array_mask_assign_checked_inplace)},
+    {"lambda_array_set_nd_checked", FPTR(lambda_array_set_nd_checked)},
+    {"lambda_array_set_nd_checked_inplace", FPTR(lambda_array_set_nd_checked_inplace)},
     {"fn_mutable_value", FPTR(fn_mutable_value)},
     {"fn_map_set", FPTR(fn_map_set)},
     {"cow_mark_shared", FPTR(cow_mark_shared)},
@@ -1969,6 +1978,7 @@ JitImport jit_runtime_imports[] = {
     {"lambda_map_set_checked_inplace", FPTR(lambda_map_set_checked_inplace)},
     {"lambda_map_path_set_checked", FPTR(lambda_map_path_set_checked)},
     {"lambda_map_path_set_checked_inplace", FPTR(lambda_map_path_set_checked_inplace)},
+    {"lambda_array_push_checked", FPTR(lambda_array_push_checked)},
     {"lambda_array_set_checked", FPTR(lambda_array_set_checked)},
     {"lambda_array_set_checked_inplace", FPTR(lambda_array_set_checked_inplace)},
     {"lambda_array_set_checked_lane", FPTR(lambda_array_set_checked_lane)},
@@ -2023,23 +2033,23 @@ JitImport jit_runtime_imports[] = {
     {"js_divide", FPTR(js_divide)},
     {"js_modulo", FPTR(js_modulo)},
     {"js_power", FPTR(js_power)},
-    {"js_equal", FPTR(js_equal)},
-    {"js_strict_equal", FPTR(js_strict_equal)},
+    {"js_equal", FPTR(js_equal), JIT_IMPORT_STABLE_ITEM},
+    {"js_strict_equal", FPTR(js_strict_equal), JIT_IMPORT_STABLE_ITEM},
     // Tune8 §2.1: js_less_than/_equal/js_greater_than/_equal collapsed into
     // js_compare(op, l, r). js_less_than and js_greater_than survive as
     // C-side thin wrappers for callers in js_runtime.cpp.
-    {"js_compare", FPTR(js_compare)},
+    {"js_compare", FPTR(js_compare), JIT_IMPORT_STABLE_ITEM},
     {"js_logical_and", FPTR(js_logical_and)},
     {"js_logical_or", FPTR(js_logical_or)},
-    {"js_logical_not", FPTR(js_logical_not)},
-    {"js_bitwise_and", FPTR(js_bitwise_and)},
-    {"js_bitwise_or", FPTR(js_bitwise_or)},
-    {"js_bitwise_xor", FPTR(js_bitwise_xor)},
-    {"js_bitwise_not", FPTR(js_bitwise_not)},
+    {"js_logical_not", FPTR(js_logical_not), JIT_IMPORT_STABLE_ITEM},
+    {"js_bitwise_and", FPTR(js_bitwise_and), JIT_IMPORT_STABLE_ITEM},
+    {"js_bitwise_or", FPTR(js_bitwise_or), JIT_IMPORT_STABLE_ITEM},
+    {"js_bitwise_xor", FPTR(js_bitwise_xor), JIT_IMPORT_STABLE_ITEM},
+    {"js_bitwise_not", FPTR(js_bitwise_not), JIT_IMPORT_STABLE_ITEM},
     {"js_double_to_int32", FPTR(js_double_to_int32), JIT_IMPORT_RAW_SCALAR_PRESERVES},
-    {"js_left_shift", FPTR(js_left_shift)},
-    {"js_right_shift", FPTR(js_right_shift)},
-    {"js_unsigned_right_shift", FPTR(js_unsigned_right_shift)},
+    {"js_left_shift", FPTR(js_left_shift), JIT_IMPORT_STABLE_ITEM},
+    {"js_right_shift", FPTR(js_right_shift), JIT_IMPORT_STABLE_ITEM},
+    {"js_unsigned_right_shift", FPTR(js_unsigned_right_shift), JIT_IMPORT_STABLE_ITEM},
     {"js_unary_plus", FPTR(js_unary_plus)},
     {"js_unary_minus", FPTR(js_unary_minus)},
     {"js_bigint_constructor", FPTR(js_bigint_constructor)},
@@ -2055,13 +2065,26 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES}},
-    {"js_typeof", FPTR(js_typeof)},
+    {"js_typeof", FPTR(js_typeof), JIT_IMPORT_STABLE_ITEM},
     {"js_typeof_is", FPTR(js_typeof_is), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_cmp_raw", FPTR(js_cmp_raw), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_eq_raw", FPTR(js_eq_raw), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_loose_eq_raw", FPTR(js_loose_eq_raw), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_new_object", FPTR(js_new_object)},
     {"js_new_object_shaped", FPTR(js_new_object_shaped)},
+    {"js_literal_shape", FPTR(js_literal_shape),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES, JIT_EXCEPTION_PRESERVES, 0}},
+#ifdef LAMBDA_JS_EXEC_PROFILE
+    {"js_opt_trace_record", FPTR(js_opt_trace_record),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES, JIT_EXCEPTION_PRESERVES, 0}},
+#endif
     {"js_shaped_slot_get", FPTR(js_shaped_slot_get),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM}},
     {"js_get_key_default", FPTR(js_get_key_default)},
@@ -2137,7 +2160,7 @@ JitImport jit_runtime_imports[] = {
     // when the SET lane routes a strict const-assignment exception.
     {"js_throw_const_assign", FPTR(js_throw_const_assign),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM, 0,
-      0, JIT_EXCEPTION_SETS, 0}},
+      JIT_IMPORT_RESULT_SCALAR_STABLE, JIT_EXCEPTION_SETS, 0}},
     // Test262-only helpers share one catalog with the configured build gate.
 #if JS_TEST262_FAST_PATHS
 #define JS_TEST262_REGISTRY_ENTRY(name) {#name, FPTR(name)},
@@ -2160,7 +2183,11 @@ JitImport jit_runtime_imports[] = {
     {"js_new_closure_mir", FPTR(js_new_closure_mir)},
     {"js_alloc_env", FPTR(js_alloc_env)},
     {"js_env_rehome_scalars", FPTR(js_env_rehome_scalars), JIT_IMPORT_VOID_PRESERVES},
-    {"js_throw_range_error", FPTR(js_throw_range_error)},
+    // every result is an Error carrier, including allocation failure.
+    {"js_throw_range_error", FPTR(js_throw_range_error),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER),
+      JIT_IMPORT_RESULT_SCALAR_STABLE, JIT_EXCEPTION_SETS}},
     {"js_call_function", FPTR(js_call_function),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
@@ -2312,7 +2339,7 @@ JitImport jit_runtime_imports[] = {
     // exception handling
     {"js_throw_value", FPTR(js_throw_value),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM, 0,
-      0, JIT_EXCEPTION_SETS, 0}},
+      JIT_IMPORT_RESULT_SCALAR_STABLE, JIT_EXCEPTION_SETS, 0}},
     {"js_error_lane_payload", FPTR(js_error_lane_payload),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
@@ -2326,7 +2353,7 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
       JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM),
-      0, JIT_EXCEPTION_SETS, 0}},
+      JIT_IMPORT_RESULT_SCALAR_STABLE, JIT_EXCEPTION_SETS, 0}},
     {"js_new_error_with_name", FPTR(js_new_error_with_name)},
     {"js_new_error_with_stack", FPTR(js_new_error_with_stack)},
     {"js_new_error_with_name_stack", FPTR(js_new_error_with_name_stack)},
@@ -2733,7 +2760,9 @@ JitImport jit_runtime_imports[] = {
     // Phase 3: Promise.withResolvers
     {"js_await_sync", FPTR(js_await_sync)},
     // Phase 6: Async state machine runtime
+    {"js_async_wrap_return", FPTR(js_async_wrap_return)},
     {"js_async_must_suspend", FPTR(js_async_must_suspend)},
+    {"js_async_prepare_await", FPTR(js_async_prepare_await)},
     {"js_async_get_resolved", FPTR(js_async_get_resolved)},
     {"js_async_context_create", FPTR(js_async_context_create)},
     {"js_async_context_create_mir", FPTR(js_async_context_create_mir)},
@@ -3472,6 +3501,14 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_int_lane_divmod_slow", "int2it_lane",
         "js_is_truthy", "js_is_nullish",
         "js_typed_array_matches_type", "js_number_key_to_index_fast",
+        // resolves NameIds and builds pool-owned shape metadata only; the
+        // cache uses ArrayList allocation, with no GC heap or JS re-entry.
+        "js_literal_shape",
+#ifdef LAMBDA_JS_EXEC_PROFILE
+        // updates native counters; first-use getenv/atexit cannot collect or
+        // re-enter JS. This diagnostic import is absent from release MIR.
+        "js_opt_trace_record",
+#endif
         "js_error_lane_payload",
         "js_set_this", "js_get_new_target",
         "js_set_direct_new_target", "js_set_function_source",

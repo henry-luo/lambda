@@ -322,16 +322,57 @@ static Item fs_validate_offset_length(Item offset_item, Item length_item, int by
     return js_status_ok();
 }
 
-// fs cache slots are context-owned so independent runtimes never share a
-// namespace, prototype, or user-replaceable internal binding.
-#define internal_fs_binding_namespace (js_runtime_state.fs.internal_binding_namespace)
-#define internal_fs_default_fstat (js_runtime_state.fs.internal_default_fstat)
-#define stats_proto (js_runtime_state.fs.stats_prototype)
-#define fs_namespace (js_runtime_state.fs.namespace_object)
-#define fs_filehandle_ctor (js_runtime_state.fs.filehandle_constructor)
-#define fs_filehandle_proto (js_runtime_state.fs.filehandle_prototype)
-#define fs_internal_promises_namespace (js_runtime_state.fs.internal_promises_namespace)
-JS_FORWARD_STATIC_EXPRESSION(bool, fs_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.fs.roots)))
+struct FsRealmItems {
+    Item* namespace_object = NULL;
+    Item* internal_binding_namespace = NULL;
+    Item* internal_default_fstat = NULL;
+    Item* stats_prototype = NULL;
+    Item* filehandle_constructor = NULL;
+    Item* filehandle_prototype = NULL;
+    Item* internal_promises_namespace = NULL;
+};
+
+static bool fs_realm_items(FsRealmItems* items, bool reserve) {
+    if (!items || !js_active_runtime_state) return false;
+    static const JsRealmSlotId slot_ids[] = {
+        JS_REALM_SLOT_FS_NAMESPACE,
+        JS_REALM_SLOT_FS_INTERNAL_BINDING_NAMESPACE,
+        JS_REALM_SLOT_FS_INTERNAL_DEFAULT_FSTAT,
+        JS_REALM_SLOT_FS_STATS_PROTOTYPE,
+        JS_REALM_SLOT_FS_FILEHANDLE_CONSTRUCTOR,
+        JS_REALM_SLOT_FS_FILEHANDLE_PROTOTYPE,
+        JS_REALM_SLOT_FS_INTERNAL_PROMISES_NAMESPACE,
+    };
+    Item* values[7] = {};
+    if (!js_realm_slots_lookup(&js_runtime_state.realm_slots, slot_ids, values,
+            7, reserve)) return false;
+    items->namespace_object = values[0];
+    items->internal_binding_namespace = values[1];
+    items->internal_default_fstat = values[2];
+    items->stats_prototype = values[3];
+    items->filehandle_constructor = values[4];
+    items->filehandle_prototype = values[5];
+    items->internal_promises_namespace = values[6];
+    return true;
+}
+
+static Item* fs_realm_slot_existing(JsRealmSlotId slot) {
+    return js_active_runtime_state ? js_realm_slot_existing(
+        &js_runtime_state.realm_slots, slot) : NULL;
+}
+
+#define internal_fs_binding_namespace (*fs_realm_slot_existing(JS_REALM_SLOT_FS_INTERNAL_BINDING_NAMESPACE))
+#define internal_fs_default_fstat (*fs_realm_slot_existing(JS_REALM_SLOT_FS_INTERNAL_DEFAULT_FSTAT))
+#define stats_proto (*fs_realm_slot_existing(JS_REALM_SLOT_FS_STATS_PROTOTYPE))
+#define fs_namespace (*fs_realm_slot_existing(JS_REALM_SLOT_FS_NAMESPACE))
+#define fs_filehandle_ctor (*fs_realm_slot_existing(JS_REALM_SLOT_FS_FILEHANDLE_CONSTRUCTOR))
+#define fs_filehandle_proto (*fs_realm_slot_existing(JS_REALM_SLOT_FS_FILEHANDLE_PROTOTYPE))
+#define fs_internal_promises_namespace (*fs_realm_slot_existing(JS_REALM_SLOT_FS_INTERNAL_PROMISES_NAMESPACE))
+
+static bool fs_ensure_roots(void) {
+    FsRealmItems items = {};
+    return fs_realm_items(&items, true);
+}
 
 extern "C" Item js_fs_fstatSync(Item fd_item, Item options_item);
 JS_FORWARD_STATIC_ITEM(js_internal_fs_fstat, (Item fd_item), js_fs_fstatSync, (fd_item, make_js_undefined()))
@@ -1755,8 +1796,6 @@ typedef struct JsFsReq {
     char path[1024];      // file path (for multi-step operations)
     void* jube_session;   // opaque owner for table lookup and cancellation
     uint32_t resource_id;
-    bool detached;
-    struct JsFsReq* next_pending;
 } JsFsReq;
 
 enum JsFsReqValueSlot {
@@ -1773,32 +1812,6 @@ static Item fs_req_value(JsFsReq* fsreq, JsFsReqValueSlot slot) {
         fsreq->resource_id, (int)slot);
 }
 
-// The async request list is realm-local. Jube's completion boundary re-enters
-// the owning context, so list operations remain ordinary pointer updates.
-static JsFsReq*& fs_pending_read_requests_ref() {
-    return *(JsFsReq**)&js_runtime_state.fs.pending_requests;
-}
-#define fs_pending_read_requests (fs_pending_read_requests_ref())
-
-static void fs_req_add_pending(JsFsReq* fsreq) {
-    if (!fsreq) return;
-    fsreq->next_pending = fs_pending_read_requests;
-    fs_pending_read_requests = fsreq;
-}
-
-static void fs_req_remove_pending(JsFsReq* fsreq) {
-    if (!fsreq) return;
-    JsFsReq** link = &fs_pending_read_requests;
-    while (*link) {
-        if (*link == fsreq) {
-            *link = fsreq->next_pending;
-            fsreq->next_pending = NULL;
-            return;
-        }
-        link = &(*link)->next_pending;
-    }
-}
-
 static bool fs_req_attach_session(JsFsReq* fsreq) {
     if (!fsreq) return false;
     const JubeHostAPI* host = jube_internal_host_api();
@@ -1810,14 +1823,13 @@ static bool fs_req_attach_session(JsFsReq* fsreq) {
 
 static void fs_req_free(JsFsReq* fsreq) {
     if (!fsreq) return;
-    fs_req_remove_pending(fsreq);
     fsreq->jube_session = NULL;
     mem_free(fsreq);
 }
 
 static Item fs_req_call_callback(JsFsReq* fsreq, Item* args, int arg_count) {
     Item callback = fs_req_value(fsreq, JS_FS_REQ_VALUE_CALLBACK);
-    if (!fsreq || fsreq->detached || !js_is_callable(callback)) {
+    if (!fsreq || !js_is_callable(callback)) {
         return make_js_undefined();
     }
     return js_domain_call_function(fs_req_value(fsreq, JS_FS_REQ_VALUE_DOMAIN),
@@ -1846,11 +1858,9 @@ static bool fs_req_submit_work(JsFsReq* fsreq, JubeAsyncWorkCallback work,
     Item root_values[JS_FS_REQ_VALUE_COUNT] = {
         callback_root.get(), domain_root.get(),
     };
-    fs_req_add_pending(fsreq);
     if (host->node->async_ops->work_submit_root_span(fsreq->jube_session,
             JUBE_ASYNC_RESOURCE_FILESYSTEM_REQUEST, root_values, JS_FS_REQ_VALUE_COUNT,
             work, complete, destroy, fsreq, &fsreq->resource_id) != 0) {
-        fs_req_remove_pending(fsreq);
         return false;
     }
     return true;
@@ -1940,21 +1950,9 @@ extern "C" Item js_fs_readFile(Item path_item, Item options_or_cb, Item callback
 }
 
 extern "C" void js_fs_runtime_detach(void) {
-    if (!js_active_runtime_state) return;
-    for (JsFsReq* fsreq = fs_pending_read_requests; fsreq; fsreq = fsreq->next_pending) {
-        // A libuv callback may still arrive after teardown, but it must not
-        // retain roots into a destroyed heap or invoke user JS in that runtime.
-        fsreq->detached = true;
-        void* session = fsreq->jube_session;
-        const JubeHostAPI* host = jube_internal_host_api();
-        if (fsreq->resource_id != 0 && host && host->node && host->node->async_ops &&
-                host->node->async_ops->work_cancel) {
-            (void)host->node->async_ops->work_cancel(session,
-                fsreq->resource_id);
-        } else {
-            (void)uv_cancel((uv_req_t*)&fsreq->req);
-        }
-    }
+    // Filesystem requests are owned by the Jube async resource row. Session
+    // detach marks the owner dead and clears/cancels those rows; a second
+    // linked-list owner here would race the same completion lifecycle.
 }
 
 static void fs_write_file_work(void* user) {
@@ -3462,21 +3460,13 @@ extern "C" Item js_get_internal_fs_promises_namespace(void) {
 // Reset fs namespace (for re-initialization between runs)
 extern "C" void js_fs_reset(void) {
     if (!js_active_runtime_state) return;
-    fs_namespace = (Item){0};
-    fs_internal_promises_namespace = (Item){0};
-    fs_filehandle_ctor = (Item){0};
-    fs_filehandle_proto = (Item){0};
-    stats_proto = (Item){0};
-    internal_fs_binding_namespace = (Item){0};
-    internal_fs_default_fstat = (Item){0};
-}
-
-#undef fs_pending_read_requests
-
-extern "C" void js_fs_pending_destroy_context(JsRuntimeState* runtime_state) {
-    if (!runtime_state || !runtime_state->fs.pending_requests) return;
-    // runtime_cleanup detaches/cancels every request while its owning context
-    // is current; completion destroy callbacks own the request allocation.
-    log_error("js-fs: context destroyed with pending async requests");
-    runtime_state->fs.pending_requests = NULL;
+    FsRealmItems items = {};
+    if (!fs_realm_items(&items, false)) return;
+    *items.namespace_object = (Item){0};
+    *items.internal_promises_namespace = (Item){0};
+    *items.filehandle_constructor = (Item){0};
+    *items.filehandle_prototype = (Item){0};
+    *items.stats_prototype = (Item){0};
+    *items.internal_binding_namespace = (Item){0};
+    *items.internal_default_fstat = (Item){0};
 }

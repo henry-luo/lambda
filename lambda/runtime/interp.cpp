@@ -578,35 +578,20 @@ static Item interp_coerce_declared_numeric(InterpFrame* f, Item value,
 static Item interp_coerce_declared_array(InterpFrame* f, Item value,
         Type* declared_type, const char* boundary) {
     if (!f || item_is_error(value)) return value;
-    Type* element = ast_declared_array_element(declared_type);
-    if (!element) return value;
+    LambdaArrayContractInfo info = {};
+    if (!lambda_array_contract_info(declared_type, &info)) return value;
+    if (info.array_contract && info.array_contract->type_id == LMD_TYPE_ARRAY) {
+        // TypeArray is inferred literal metadata, not an explicit boundary.
+        // It can guide local representation but must not reject the value as a
+        // user declaration would; T[] is the explicit OPERATOR_ARRAY form.
+        return value;
+    }
     Scratch source_root(f);
     source_root.set(value);
-    if (element->type_id == LMD_TYPE_ANY) {
-        // MIR widens an ArrayNum at an any[] declaration boundary; retaining
-        // its packed N-D carrier would make later scalar indexing flatten a
-        // row instead of replacing the boxed sequence element.
-        void* boxed = ensure_typed_array(source_root.get(), LMD_TYPE_ANY);
-        return boxed ? interp_ptr_item(boxed) : ItemError;
-    }
-    LaneStorageDesc lane = {};
-    if (lambda_type_lane_storage_desc(element, &lane) &&
-            (lane.nullable || lane.kind == LANE_STORAGE_POINTER)) {
-        // Optional elements are TypeUnary contracts and pointer elements have
-        // no bare TypeId carrier. Passing either to ensure_typed_array rejects
-        // a valid string[] source or loses T?'s null lane; the shared boundary
-        // detaches/rebuilds the exact native carrier before T0's first store.
-        return lambda_type_check(source_root.get(), declared_type, boundary);
-    }
-    void* typed = element->type_id == LMD_TYPE_NUM_SIZED
-        ? ensure_sized_array(source_root.get(),
-            (int64_t)num_sized_to_elem_type(type_num_sized_kind(element)))
-        : ensure_typed_array(source_root.get(), element->type_id);
-    if (!typed) return ItemError;
-    // MIR establishes T[]'s physical carrier at this declaration boundary;
-    // retaining a generic array here would let an indexed T0 store bypass the
-    // checked element contract and silently diverge after a later mutation.
-    return interp_ptr_item(typed);
+    // TypeId-only coercion lost nested rank and named map layout. The shared
+    // boundary validates/reifies every element once and installs its exact
+    // certificate for both T0 and MIR consumers (D3.1.1v2, D3.3.3).
+    return lambda_type_check(source_root.get(), declared_type, boundary);
 }
 
 static bool interp_declared_optional_array(Type* type) {
@@ -1366,7 +1351,12 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
             Item owner = interp_read_binding(f, owner_entry);
             Item replacement = ItemError;
             if (sinfo->fn == SYSPROC_PUSH) {
-                replacement = pn_push_cow(owner, (Item){.item = values[0]});
+                // Only a declared binding imposes the append contract; a
+                // representation certificate may also belong to an open alias.
+                Type* contract = owner_entry->declared_type;
+                replacement = lambda_array_contract_canonical(contract)
+                    ? lambda_array_push_checked(owner, (Item){.item = values[0]}, contract, "push")
+                    : pn_push_cow(owner, (Item){.item = values[0]});
             } else if (sinfo->fn == SYSPROC_SPLICE) {
                 replacement = pn_splice_cow(owner, (Item){.item = values[0]},
                     (Item){.item = values[1]});
@@ -4434,6 +4424,11 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             Scratch value_slot(f);
             value_slot.set(eval_expr(f, ca->value));
             if (interp_frame_pending(f)) return value_slot.get();
+            // Nested insertion captures the RHS just like the flat writer;
+            // otherwise a later source mutation changes this stored snapshot.
+            if (!ca->cow_borrow_release && ast_expr_insertion_needs_capture(ca->value)) {
+                cow_capture_value(value_slot.get());
+            }
 
             Scratch path_slot(f);
             path_slot.set(interp_ptr_item(array_plain()));
@@ -4478,14 +4473,23 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             // CW29: only `var` borrows write through; a plain param's write
             // stays local to the callee (S9.1.3).
             bool writes_through_caller = root->is_var_param;
+            LambdaArrayContractInfo array_info = {};
             Item replacement = ast_declared_type_is_map(root->declared_type)
                 ? lambda_map_path_set_checked(owner_slot.get(), path_slot.get(),
                     value_slot.get(), root->declared_type,
                     "typed nested map assignment")
-                : (writes_through_caller
-                    ? cow_path_set_inplace(owner_slot.get(), path_slot.get(),
-                        value_slot.get())
-                    : cow_path_set(owner_slot.get(), path_slot.get(), value_slot.get()));
+                : lambda_array_contract_info(root->declared_type, &array_info)
+                    ? (writes_through_caller
+                        ? lambda_array_path_set_checked_inplace(owner_slot.get(),
+                            path_slot.get(), value_slot.get(), root->declared_type,
+                            "typed nested array assignment")
+                        : lambda_array_path_set_checked(owner_slot.get(), path_slot.get(),
+                            value_slot.get(), root->declared_type,
+                            "typed nested array assignment"))
+                    : (writes_through_caller
+                        ? cow_path_set_inplace(owner_slot.get(), path_slot.get(),
+                            value_slot.get())
+                        : cow_path_set(owner_slot.get(), path_slot.get(), value_slot.get()));
             if (item_is_error(replacement)) return replacement;
             interp_write_binding(f, root, replacement);
             return ItemNull;
@@ -4517,6 +4521,17 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
                 log_error("interp: planned N-D assignment target is not an ArrayNum");
                 return ItemError;
             }
+            LambdaArrayContractInfo array_info = {};
+            if (lambda_array_contract_info(root->declared_type, &array_info)) {
+                Item replacement = root->is_var_param
+                    ? lambda_array_set_nd_checked_inplace(owner.get(), ndim, indices,
+                        value_slot.get(), root->declared_type)
+                    : lambda_array_set_nd_checked(owner.get(), ndim, indices,
+                        value_slot.get(), root->declared_type);
+                if (item_is_error(replacement)) return replacement;
+                interp_write_binding(f, root, replacement);
+                return ItemNull;
+            }
             Item write_result = array_num_set_nd(owner.get().array_num, ndim, indices,
                 value_slot.get());
             return item_is_error(write_result) ? write_result : ItemNull;
@@ -4531,6 +4546,17 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         owner.set(interp_read_binding(f, root));
 
         if (ast_is_direct_numeric_mask_assignment(node)) {
+            LambdaArrayContractInfo array_info = {};
+            if (lambda_array_contract_info(root->declared_type, &array_info)) {
+                Item replacement = root->is_var_param
+                    ? lambda_array_mask_assign_checked_inplace(owner.get(), key_slot.get(),
+                        value_slot.get(), root->declared_type)
+                    : lambda_array_mask_assign_checked(owner.get(), key_slot.get(),
+                        value_slot.get(), root->declared_type);
+                if (item_is_error(replacement)) return replacement;
+                interp_write_binding(f, root, replacement);
+                return ItemNull;
+            }
             // CW32v2: alias boundaries no longer eagerly detach ArrayNum, so
             // a mask store's owner may be shared. The _cow wrapper prepares
             // (one packed memcpy when shared) and returns the owner, which

@@ -672,6 +672,12 @@ typedef struct Type {
     uint8_t is_nominal:1;
 } Type;
 
+// Immutable proof attached to a homogeneous array carrier. It records the
+// full source-language contract independently of the binding that received the
+// value, so a native lane never has to recover a named record layout from a
+// lossy TypeId.
+typedef struct ArrayRepCert ArrayRepCert;
+
 // D2.6.6v2 / D3.4.1: gc_heap.c is C while the runtime carriers live in C++.
 // Keep its byte-level view in one canonical C ABI layout and assert the real
 // C and C++ structs against it where their full definitions are available.
@@ -1103,6 +1109,23 @@ typedef struct LaneStorageDesc {
     uint8_t reserved[3];
 } LaneStorageDesc;
 
+enum ArrayRepCertFlags {
+    ARRAY_REP_CERT_EXACT = 1u << 0,
+    ARRAY_REP_CERT_REIFIED = 1u << 1,
+    ARRAY_REP_CERT_ERROR_FREE = 1u << 2,
+};
+
+struct ArrayRepCert {
+    Type* array_contract;       // canonical T[] / T[][] contract
+    Type* immediate_element;    // T for T[]; T[] for T[][]
+    Type* leaf_element;         // scalar/map leaf after all array ranks
+    LaneStorageDesc leaf_lane;  // exact native/boxed storage decision
+    uint8_t rank;
+    uint8_t flags;
+    uint8_t array_num_elem;     // resolved ArrayNumElemType; valid iff has_array_num_lane
+    uint8_t has_array_num_lane;
+};
+
 // A field's packed slot is a nullable native lane (int?/bool?/float?/T?/...).
 static inline bool lane_desc_is_nullable_native(const LaneStorageDesc* desc) {
     return desc && desc->native && desc->nullable;
@@ -1142,6 +1165,7 @@ static inline bool lane_desc_is_nullable_native(const LaneStorageDesc* desc) {
         int64_t length;  // number of items
         int64_t extra;   // count of reserved tail items (wide scalars)
         int64_t capacity;  // allocated capacity
+        ArrayRepCert* rep_cert;  // non-GC full-contract representation proof
     };
 
     struct ArrayNum {
@@ -1167,6 +1191,7 @@ static inline bool lane_desc_is_nullable_native(const LaneStorageDesc* desc) {
         int64_t length;  // number of elements
         int64_t extra;   // for is_ndim/is_view: ArrayNumShape* in this slot; else count of extra elements
         int64_t capacity;  // allocated capacity
+        ArrayRepCert* rep_cert;  // non-GC full-contract representation proof
     };
 
     // ArrayList definition for MIR runtime (item_keys return type)
@@ -1226,6 +1251,7 @@ static inline bool lane_desc_is_nullable_native(const LaneStorageDesc* desc) {
         int64_t length;    // number of content items
         int64_t extra;     // count of extra items
         int64_t capacity;  // allocated capacity
+        ArrayRepCert* rep_cert;  // non-GC full-contract representation proof
     };
 
 // D2.6.6v2: the C mirror of the container chain (Map -> List/Array -> Element)
@@ -2379,6 +2405,12 @@ extern "C" {
 
     void array_float_set(ArrayNum *arr, int64_t index, double value);
     void array_int_set(ArrayNum *arr, int64_t index, int64_t lane);
+    // Grow an owned one-dimensional ArrayNum and return its rooted current
+    // header. Views and N-D carriers intentionally cannot grow in place.
+    ArrayNum* array_num_reserve_capacity(ArrayNum *arr, int64_t minimum_capacity);
+    // Exact-width store for a value that has already crossed the destination
+    // element contract. Unlike array_num_set_item(), this never coerces.
+    bool array_num_store_admitted(ArrayNum *arr, int64_t index, Item value);
     void array_num_set_item(ArrayNum *arr, int64_t index, Item value);
     Item array_num_read_item(ArrayNum *arr, int64_t index);
     double array_num_read_double(ArrayNum *arr, int64_t index);
@@ -2620,12 +2652,36 @@ extern "C" {
         const char* boundary);
     Item lambda_array_set_checked_inplace_item(Item owner, Item key, Item value, Type* expected,
         const char* boundary);
+    // Nested array writes validate from the declared root, then relink private
+    // children so a wrong leaf cannot weaken an enclosing T[][] contract.
+    Item lambda_array_path_set_checked(Item owner, Item path, Item value, Type* expected,
+        const char* boundary);
+    Item lambda_array_path_set_checked_inplace(Item owner, Item path, Item value,
+        Type* expected, const char* boundary);
+    // Mask writes stage every selected value before touching the ArrayNum
+    // payload, preserving the declared T[] contract transactionally.
+    Item lambda_array_mask_assign_checked(Item owner, Item mask, Item value,
+        Type* expected);
+    Item lambda_array_mask_assign_checked_inplace(Item owner, Item mask, Item value,
+        Type* expected);
+    // Coordinate writes target a physical N-D ArrayNum but retain the
+    // enclosing semantic T[] contract.
+    Item lambda_array_set_nd_checked(Item owner, int ndim, int64_t* indices, Item value,
+        Type* expected);
+    Item lambda_array_set_nd_checked_inplace(Item owner, int ndim, int64_t* indices,
+        Item value, Type* expected);
     Item lambda_array_set_checked_lane(Item owner, int64_t index, Item value, Type* expected,
         const char* boundary, uint8_t lane_kind, uint8_t lane_nullable,
         uint8_t lane_byte_size);
     Item lambda_array_set_checked_inplace_lane(Item owner, int64_t index, Item value,
         Type* expected, const char* boundary, uint8_t lane_kind, uint8_t lane_nullable,
         uint8_t lane_byte_size);
+    // Typed append admits the element before capacity growth, then preserves
+    // the array's full representation proof on the published replacement.
+    Item lambda_array_push_checked(Item owner, Item value, Type* expected,
+        const char* boundary);
+    Item lambda_array_push_checked_inplace(Item owner, Item value, Type* expected,
+        const char* boundary);
     Bool fn_is_nan(Item a);  // IEEE NaN check: expr is nan
     Bool fn_in(Item a, Item b);
     Bool fn_at(Item a, Item b);
@@ -2827,6 +2883,8 @@ extern "C" {
     ArrayNum* array_num_new_ndim(ArrayNumElemType elem_type, int64_t total, int ndim, int64_t* dims);
     Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices);   // multi-dim scalar read
     Item array_num_set_nd(ArrayNum* arr, int ndim, int64_t* indices, Item value); // multi-dim write
+    Item array_num_set_nd_admitted(ArrayNum* arr, int ndim, int64_t* indices,
+        Item value); // exact write after a typed boundary
     Item fn_zip(Item a, Item b);
     Item fn_range3(Item start, Item end, Item step);
     Item fn_math_quantile(Item a, Item p);
@@ -3011,6 +3069,16 @@ extern "C" {
     void cow_mark_shape_children(struct TypeMap* type, void* data);
     Item cow_bind_var(Item value);
     Item cow_prepare_write(Item old);
+
+    // LR07-7/LR08-3 root-honesty witness.  Emitted by MIR Direct only when
+    // LAMBDA_ROOT_WITNESS is set, at every point the transpiler DECLINES to
+    // allocate a GC root slot: it asserts the unrooted word does not reference
+    // GC-owned memory, so the collector's trust in static types is tested
+    // rather than assumed.
+    bool lambda_root_witness_enabled(void);
+    void lambda_jit_root_witness(uint64_t raw, int64_t claimed_type_id,
+        const char* site, const char* binding, const char* func);
+    void lambda_root_witness_dump(void);
     // Optional release-safe COW instrumentation.  It stays dormant unless
     // COW_EXEC_PROFILE is enabled, and raw JS/host setters never call it.
     void cow_profile_note_vmap_snapshot(void);

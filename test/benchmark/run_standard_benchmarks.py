@@ -14,6 +14,14 @@ import time
 
 
 PROJECT_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+if os.path.dirname(os.path.abspath(__file__)) not in sys.path:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# The debug-build gate lives with the timing runner so every entry point shares one
+# implementation and cannot drift. Importing it also chdirs to the project root,
+# which this workflow already assumes for its own relative paths.
+from run_benchmarks import check_release_build  # noqa: E402
+
 DEFAULT_ENGINES = "mir,lambdajs,quickjs,nodejs"
 # Strings emitted only by a LAMBDA_JS_EXEC_PROFILE build — these are opt-trace
 # event names from the #ifdef block in lambda/js/js_exec_profile.cpp.
@@ -29,8 +37,6 @@ PROFILE_MARKERS = [
     "named_fast_probe",
     "regex_permanent_cache_hit",
 ]
-# Emitted by the debug banner in lambda/main.cpp; absent from release builds.
-DEBUG_BUILD_MARKER = "Running DEBUG build"
 CACHE_DIR = os.path.join("test", "benchmark", "exe")
 TEST262_BASELINE_CMD = [
     "./test/test_js_test262_gtest.exe",
@@ -278,27 +284,6 @@ def check_ac_power(log_path=None):
     return "passed"
 
 
-def check_release_build(log_path=None):
-    """Reject a debug lambda.exe: -Og plus assertions make timings meaningless."""
-    proc = subprocess.run(["strings", "./lambda.exe"], cwd=PROJECT_ROOT,
-                          capture_output=True, text=True, check=True)
-    is_debug = DEBUG_BUILD_MARKER in proc.stdout
-    if log_path:
-        os.makedirs(os.path.dirname(log_path), exist_ok=True)
-        with open(log_path, "w") as f:
-            f.write(f"checked_at={datetime.datetime.now().isoformat(timespec='seconds')}\n")
-            f.write(f"marker={DEBUG_BUILD_MARKER}\n")
-            f.write(f"is_debug={is_debug}\n")
-    if is_debug:
-        raise SystemExit(
-            "benchmark aborted: ./lambda.exe is a DEBUG build.\n"
-            f"  found marker {DEBUG_BUILD_MARKER!r} in the binary.\n"
-            "  Run `make release` (the default workflow does this unless "
-            "--skip-build is passed)."
-        )
-    print("release build check passed: lambda.exe is not a debug build")
-
-
 def check_profile_markers(log_path=None):
     proc = subprocess.run(["strings", "./lambda.exe"], cwd=PROJECT_ROOT, capture_output=True, text=True, check=True)
     matches = [marker for marker in PROFILE_MARKERS if marker in proc.stdout]
@@ -409,7 +394,7 @@ def main():
             print(f"+ AC power check  [log: {os.path.join(log_dir, 'power_check.log')}]")
         if not args.skip_build:
             print(f"+ make release  [log: {os.path.join(log_dir, 'build_release.log')}]")
-        print(f"+ strings ./lambda.exe  [debug-build check, log: {os.path.join(log_dir, 'release_check.log')}]")
+        print(f"+ check ./lambda.exe  [debug-build check, log: {os.path.join(log_dir, 'release_check.log')}]")
         if not args.skip_profile_check:
             print(f"+ strings ./lambda.exe  [profile marker check, log: {os.path.join(log_dir, 'profile_check.log')}]")
         print(f"+ make ensure-test262-gtest  [log: {os.path.join(log_dir, 'test262_prepare.log')}]")

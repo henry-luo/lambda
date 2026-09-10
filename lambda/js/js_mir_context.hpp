@@ -108,7 +108,7 @@ static const uint64_t ITEM_FALSE_VAL = ((uint64_t)LMD_TYPE_BOOL << 56) | 0;
 static const uint64_t STR_TAG        = (uint64_t)LMD_TYPE_STRING << 56;
 
 // §9.3: one capture record replaces six parallel arrays that appeared three
-// times over — in JsMirTranspiler, in JsMirLastClosureSnapshot, and through that
+// times over — in JsMirTranspiler and through branch checkpoints —
 // snapshot in JsMirBranchState — each fixed at 512 entries, which was also a
 // hard source-language limit on captures per closure.
 struct JsClosureCapture {
@@ -120,13 +120,18 @@ struct JsClosureCapture {
     bool        is_assigned;
 };
 
-// Grow-on-demand capture list plus the env register the captures live in.
+// One grow-on-demand closure tracker owns both the active capture list and
+// checkpoint journal.  Checkpoints retain only a mark into this journal;
+// branch/loop lowering never copies a second fixed capture array.
 struct JsClosureTracker {
     JsClosureCapture* captures;
     int               count;
     int               capacity;
     MIR_reg_t         env_reg;
     bool              has_env;
+    JsClosureCapture* journal;
+    int               journal_count;
+    int               journal_capacity;
 };
 
 typedef MirImportEntry JsMirImportEntry;
@@ -392,6 +397,16 @@ struct JsTryContext {
     MIR_label_t end_label;       // end of entire try statement
     MIR_reg_t return_val_reg;    // stores delayed return value
     MIR_reg_t has_return_reg;    // flag: 1 if return encountered in try/catch
+    // A delayed return is held in plain MIR registers, which do not survive a
+    // generator/async suspension. When the finally itself suspends, these env
+    // slots carry the pending return across it. -1 until first reserved, and
+    // -1 forever if the fixed spill region is already full.
+    int has_return_spill;
+    int return_val_spill;
+    // Break-target stack depth when this try was entered. A break/continue
+    // only unwinds the finally clauses entered inside its target, so this is
+    // what separates "must run now" from "the try block continues".
+    int loop_depth_at_push;
     bool end_label_has_edge;     // compiler-only: an emitted completion targets end_label
     JsErrorLaneTrack end_label_error_lane_state; // merged proof for end_label predecessors
     bool has_catch;
@@ -419,6 +434,7 @@ struct JsMirArgStackScope {
 enum JsMirNameCacheDomain : uint8_t {
     JS_MIR_NAME_CACHE_PROPERTY_ITEM,
     JS_MIR_NAME_CACHE_MODULE_ID,
+    JS_MIR_NAME_CACHE_LITERAL_SHAPE,
 };
 
 enum { JS_MIR_NAME_CACHE_CAPACITY = 32 };
@@ -484,6 +500,8 @@ struct JsMirFunctionEmitter {
         {}, 0, NULL, JS_MIR_NAME_CACHE_PROPERTY_ITEM};
     JsMirNameCache module_name_id_cache = {
         {}, 0, NULL, JS_MIR_NAME_CACHE_MODULE_ID};
+    JsMirNameCache literal_shape_cache = {
+        {}, 0, NULL, JS_MIR_NAME_CACHE_LITERAL_SHAPE};
 };
 
 // One checkpointable lowering cursor owns the mutable function/class/scope
@@ -588,18 +606,17 @@ struct JsMirTranspiler {
     // T10-2: the module key range each object literal registered, memoized by
     // node so the declarator and the member sites can ask for a literal's shape
     // without re-registering its keys. Compile-time only.
-    ArrayList* literal_shape_ranges;
+    struct hashmap* literal_shape_ranges;
+    struct hashmap* shape_field_candidates;
+    AstNode** shape_candidates; // indexed compile-time parameter/return hints
+    uint32_t shape_candidate_count;
 
     bool in_main;                    // true when transpiling Phase 3 (js_main)
 
-    // Closure env read-back for mutable captures (forEach, reduce, etc.)
+    // Closure env read-back and checkpoints for mutable captures (forEach,
+    // reduce, etc.).  The tracker owns its journal; no sibling snapshot
+    // record may carry another capture array.
     JsClosureTracker last_closure;
-    // Scoped saves push the live captures here and restore by truncating back
-    // to a mark, so a snapshot is a mark rather than an 11,792-byte copy and
-    // owns no storage a stack-local's early return could leak.
-    JsClosureCapture* closure_journal;
-    int closure_journal_count;
-    int closure_journal_capacity;
     // Hoisted closures can be created while a later lexical binding is still
     // TDZ. Retain every such cell until that binding initializes.
     // §9.3: grown on demand. The fixed 512 entries were 16,384 B — 86 % of
@@ -685,6 +702,11 @@ struct JsMirTranspiler {
     bool in_typeof;                          // true when transpiling operand of typeof
     int with_depth;                           // nesting depth of `with` during collection or body lowering
     bool destructure_assignment_mode;         // true for assignment-pattern destructuring targets
+    // Raised while lowering the first of two alternative iterator branches for
+    // one destructuring element: both are initializing writes for the same
+    // declaration, so the first must not consume the binding's compile-time
+    // TDZ flag and leave the second emitting an assignment.
+    int destructure_preserve_tdz;
 
     // Js57 Track A: synthetic module-level scope env. Captures of top-level closures
     // (whose indexed parent FunctionId is invalid) that reference block-lets
@@ -825,9 +847,15 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
         mt->module_name_specs = NULL;
     }
     if (mt->literal_shape_ranges) {
-        arraylist_free(mt->literal_shape_ranges);
+        hashmap_free(mt->literal_shape_ranges);
         mt->literal_shape_ranges = NULL;
     }
+    if (mt->shape_field_candidates) {
+        hashmap_free(mt->shape_field_candidates);
+        mt->shape_field_candidates = NULL;
+    }
+    mem_free(mt->shape_candidates);
+    mt->shape_candidates = NULL;
     if (mt->func_entries) jm_free_scope_env_names(mt->func_entries, mt->func_count);
     mt->func_entries = NULL;
     mt->class_entries = NULL;

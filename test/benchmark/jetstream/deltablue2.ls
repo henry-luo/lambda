@@ -7,7 +7,9 @@
 // Type definitions — field order MUST match map literal order in constructors
 type Variable = {value: int, constraints: int[], det_by: int, mark: int, walk_str: int, stay: bool, name: string}
 type Constraint = {kind: int, strength: int, direction: int, v1: int, v2: int, scale: int, offset: int, satisfied: bool}
-type Planner = {current_mark: int, vars: array, constraints: array, nv: int, nc: int}
+// Projection preallocates slots with null, so these are nullable native
+// record-pointer lanes rather than open boxed arrays.
+type Planner = {current_mark: int, vars: Variable?[], constraints: Constraint?[], nv: int, nc: int}
 
 // Strength values (lower = stronger)
 let STRONGEST    = 0
@@ -64,7 +66,7 @@ pn create_constraint(kind: int, strength: int, v1: int, v2: int,
 
 // Planner globals stored in a state map
 pn create_planner() Planner {
-    var p: Planner = {current_mark: 0, vars: fill(0, null), constraints: fill(0, null),
+    var p: Planner = {current_mark: 0, vars: [], constraints: [],
             nv: 0, nc: 0}
     return p
 }

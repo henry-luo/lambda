@@ -1,3 +1,4 @@
+#include "type_contract.hpp"
 #include "../lambda-data.hpp"
 #include "lambda-number-runtime.hpp"
 #include "../core/collection_storage.h"
@@ -184,19 +185,44 @@ void array_push(Array* arr, Item item) {
 
 Item pn_push(Item arr_item, Item value) {
     TypeId tid = get_type_id(arr_item);
-    if (tid != LMD_TYPE_ARRAY) {
+    if (tid != LMD_TYPE_ARRAY && tid != LMD_TYPE_ARRAY_NUM) {
         log_error("push: expected a growable array, got %s", get_type_name(tid));
         // Invalid mutation is an error, never a successful unchanged owner
         // (S7.10.6). Keep the owner-returning success convention intact.
         return ItemError;
     }
+    ArrayRepCert* cert = arr_item.array->rep_cert;
+    if (cert && cert->array_contract) {
+        // A direct caller owns this exact container. The checked entry admits
+        // before growth and preserves the certificate on the same header.
+        return lambda_array_push_checked_inplace(arr_item, value,
+            cert->array_contract, "push");
+    }
+    if (tid != LMD_TYPE_ARRAY) {
+        log_error("push: an uncertified ArrayNum has no append contract");
+        return ItemError;
+    }
+    // Open growth is allowed to change the element set; it cannot retain a
+    // proof that was not re-established by a typed append boundary.
+    arr_item.array->rep_cert = NULL;
     array_push(arr_item.array, value);
     return arr_item;
 }
 
 Item pn_push_cow(Item owner, Item value) {
+    TypeId tid = get_type_id(owner);
+    if ((tid == LMD_TYPE_ARRAY_NUM ||
+            (tid == LMD_TYPE_ARRAY && array_has_native_lane(owner.array))) &&
+            owner.array->rep_cert && owner.array->rep_cert->array_contract) {
+        return lambda_array_push_checked(owner, value,
+            owner.array->rep_cert->array_contract, "push");
+    }
     Item replacement = cow_prepare_write(owner);
     if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
+    // A boxed certificate records a past admission, not an open binding's
+    // write contract. Detach before clearing it to preserve aliases (D3.3.3v3).
+    if (get_type_id(replacement) == LMD_TYPE_ARRAY)
+        lambda_array_clear_rep_cert(replacement);
     return pn_push(replacement, value);
 }
 

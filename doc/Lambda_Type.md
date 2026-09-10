@@ -280,46 +280,28 @@ let squares = for (i in 1 to 5) i ** 2  // [1, 4, 9, 16, 25]
 
 ### Array Types
 
-Lambda has two forms for array types:
-
-**Form 1: Bracket notation** — a type with an occurrence modifier inside `[ ]`:
-
-<!-- code-fence: lambda type -->
-| Form | Meaning |
-|------|---------|
-| `[int*]` | Array of zero or more ints |
-| `[int+]` | Array of one or more ints (non-empty) |
-| `[string*]` | Array of zero or more strings |
-| `[bool+]` | Non-empty array of booleans |
-
-> **Note:** `[int]` (without `*` or `+`) means a tuple of exactly 1 int, not an array of ints.
-
-**Form 2: Occurrence suffix** — a type followed by `[]` or `[n]`:
+`T[]` is Lambda's homogeneous array contract: every logical element must
+satisfy `T`. It composes by rank, so `T[][]` is an array of `T[]`. This is
+distinct from a structural bracket pattern such as `[int]` (exactly one
+position) and an occurrence/count pattern such as `T[n]` (**S11.1.1v2**).
 
 <!-- code-fence: lambda type -->
 | Form | Meaning |
 |------|---------|
-| `int[]` | Array of zero or more ints (same as `[int*]`) |
-| `string[]` | Array of zero or more strings |
-| `float[]` | Array of zero or more floats |
-| `int[5]` | Array of exactly 5 ints |
-| `int[3+]` | Array of 3 or more ints |
-| `int[2, 10]` | Array of 2 to 10 ints |
-
-Nested arrays:
-
-<!-- code-fence: lambda type -->
-| Form | Meaning |
-|------|---------|
-| `(int*)*` | Array of int arrays |
-| `(string*)*` | 2D array of strings |
+| `int[]` | Homogeneous array whose elements are `int` |
+| `string[]` | Homogeneous array whose elements are `string` |
+| `float[]` | Homogeneous array whose elements are `float` |
+| `int?[]` | Homogeneous array whose elements may be `int` or `null` |
+| `int[]?` | An `int[]` value or `null` |
+| `int[][]` | Homogeneous array whose elements are `int[]` |
+| `int[5]` | Occurrence/count pattern; not a synonym for `int[]` |
 
 Examples:
 
 ```lambda
 let nums: int[] = [1, 2, 3]
-let matrix: (int*)* = [[1, 2], [3, 4]]
-let names: [string+] = ["Alice", "Bob"]
+let matrix: int[][] = [[1, 2], [3, 4]]
+let names: string[] = ["Alice", "Bob"]
 ```
 
 ### Map Types
@@ -499,31 +481,32 @@ type User = {
 
 ### Type Occurrence Modifiers
 
+Occurrence modifiers express structural pattern cardinality. They are not a
+second spelling of a homogeneous `T[]` contract. Use `T[]` for declarations,
+parameters, returns, and mutations that require every element to satisfy `T`.
+
 <!-- code-fence: lambda type -->
 | Form | Meaning |
 |------|---------|
-| `int*` | Same as `int[]` — array of zero or more |
-| `string*` | Array of zero or more strings |
-| `int+` | Array of at least one int |
-| `string+` | Non-empty string array |
-| `int[]` | Array of zero or more ints (same as `int*`) |
-| `float[]` | Array of zero or more floats |
-| `int[5]` | Array of exactly 5 ints |
-| `int[3+]` | Array of 3 or more ints |
-| `int[2, 10]` | Array of 2 to 10 ints |
+| `int*` | Structural occurrence pattern of zero or more ints |
+| `string+` | Structural occurrence pattern of one or more strings |
+| `int[5]` | Structural occurrence pattern of exactly five ints |
+| `int[3+]` | Structural occurrence pattern of at least three ints |
+| `int[2, 10]` | Structural occurrence pattern bounded from two to ten ints |
+| `int[]` | Homogeneous element contract, independent of occurrence syntax |
 
 In declarations, variables, parameters and signatures:
 
 ```lambda
-type Args = string*        // Zero or more arguments
-type Names = string+       // At least one name required
+type Args = string[]       // Homogeneous string array
+type Names = string[]      // Homogeneous string array
 
 pn demo() {
     var positions: float[] = [0.0, 1.0, 2.0]
 }
 pn update(arr: int[], n: int) { arr[0] = n }
 
-fn concat(parts: string+) => ...   // Requires at least one
+fn concat(parts: string[]) => ...
 ```
 
 ### Occurrence Summary
@@ -532,12 +515,12 @@ fn concat(parts: string+) => ...   // Requires at least one
 |--------|---------|------------|
 | `T` | Exactly one | Required |
 | `T?` | Zero or one | `T \| null` |
-| `T*` | Zero or more | `T[]` |
-| `T+` | One or more | Non-empty `T[]` |
-| `T[]` | Zero or more | Same as `T*` |
-| `T[n]` | Exactly n | Fixed-size array |
-| `T[n+]` | n or more | Min-size array |
-| `T[n, m]` | n to m | Bounded-size array |
+| `T*` | Structural zero-or-more occurrence | Pattern-only cardinality |
+| `T+` | Structural one-or-more occurrence | Pattern-only cardinality |
+| `T[]` | Homogeneous array contract | Every logical element is `T` |
+| `T[n]` | Structural occurrence of exactly n | Count pattern |
+| `T[n+]` | Structural occurrence of n or more | Count pattern |
+| `T[n, m]` | Structural occurrence from n to m | Count pattern |
 
 ---
 

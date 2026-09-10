@@ -2,7 +2,10 @@
 #include "js_builtin_catalog.hpp"
 #include "js_test262_fast_paths.h"
 #include "js_exec_profile.h"
+#include "../runtime/mir_shape_candidates.hpp"
+#include "js_typed_array_carrier.hpp"
 #include "../../lib/lambda_alloca.h"
+#include "../../lib/hashmap_helpers.h"
 
 
 MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc);
@@ -21,6 +24,19 @@ static bool jm_capture_is_current_loop_lexical(JsMirTranspiler* mt,
         const char* name, JsMirVarEntry* var);
 static void jm_promote_capture_to_scope_env(JsMirTranspiler* mt,
         JsMirVarEntry* var, int slot);
+
+static MIR_reg_t jm_emit_predicted_shape_access(JsMirTranspiler* mt,
+        JsAstNode* receiver, MIR_reg_t object, String* name, MIR_reg_t name_id,
+        MIR_reg_t store_value = 0, bool strict = false);
+static void jm_access_guard(JsMirTranspiler* mt, MIR_insn_code_t code,
+        MIR_label_t miss, MIR_reg_t value, MIR_op_t expected);
+
+static int jm_preserve_before_expression(JsMirTranspiler* mt, MIR_reg_t value,
+        JsAstNode* following) {
+    // The next expression may collect or resume in a new native activation.
+    jm_create_gc_root_slot(mt, value);
+    return jm_can_suspend(mt, following) ? jm_gen_spill_save(mt, value) : -1;
+}
 
 static bool jm_shared_scope_env_captures_valid(JsMirTranspiler* mt,
         JsFuncCollected* fc, bool reject_nfe_binding) {
@@ -837,7 +853,7 @@ static void jm_emit_class_computed_field_module_key(JsMirTranspiler* mt,
         MIR_reg_t cls_obj, JsAstNode* key_expr, int module_var_index,
         bool validate_static_key) {
     int cls_key_spill = -1;
-    if (mt->in_generator && jm_has_yield(mt, key_expr)) {
+    if (jm_can_suspend(mt, key_expr)) {
         // computed keys may suspend before the following class metadata writes;
         // preserve the class object across that suspension boundary.
         cls_key_spill = jm_gen_spill_save(mt, cls_obj);
@@ -848,7 +864,7 @@ static void jm_emit_class_computed_field_module_key(JsMirTranspiler* mt,
     MIR_reg_t previous_private_home = jm_callr_1(mt, "js_private_home_class_enter", MIR_T_I64, cls_obj);
     jm_create_gc_root_slot(mt, previous_private_home);
     int previous_private_home_spill = -1;
-    if (mt->in_generator && jm_has_yield(mt, key_expr)) {
+    if (jm_can_suspend(mt, key_expr)) {
         // MIR registers do not survive a generator suspension; the private
         // home returned before a computed key yield must be restored from the
         // generator environment before leaving that temporary home.
@@ -982,6 +998,11 @@ static bool jm_super_reference_before_constructor_super_call(JsMirTranspiler* mt
     if (!JM_JS_FACT(mt->current_fc, is_constructor)) return false;
     if (!mt->current_class->node || !mt->current_class->node->superclass) return false;
     FnAnalysis* analysis = jm_function_analysis(mt->current_fc);
+    // The early throw is a source-order approximation of a purely dynamic rule.
+    // A super() inside a nested arrow binds `this` at a point no static scan can
+    // order against, so the approximation reported *every* `this` in the
+    // constructor as uninitialized. Defer to the runtime TDZ check instead.
+    if (analysis && analysis->js_has_lexical_super_call) return false;
     return !analysis || !analysis->js_has_direct_super_call ||
         super_ref_node->source_span.start_byte <
             analysis->js_first_direct_super_call_start;
@@ -1005,20 +1026,240 @@ static void jm_emit_named_evaluation_for_identifier(JsMirTranspiler* mt, JsAstNo
     }
 }
 
+// Item-array slots may own movable scalar payloads. Direct copies admit only
+// self-contained Items; the generic path rehomes every borrowed scalar.
+static void jm_guard_stable_element(JsMirTranspiler* mt, MIR_reg_t item,
+        MIR_label_t miss) {
+    MIR_reg_t bits = jm_new_reg(mt, "elem_bits", MIR_T_I64);
+    jm_emit_reg_binary_op(mt, MIR_AND, bits, item,
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK));
+    MIR_label_t stable = jm_new_label(mt);
+    jm_emit_branch(mt, MIR_BT, stable, bits);
+    MIR_reg_t tag = jm_new_reg(mt, "elem_tag", MIR_T_I64);
+    jm_emit_reg_binary_op(mt, MIR_URSH, tag, item, MIR_new_int_op(mt->ctx, 56));
+    const TypeId home_types[] = {LMD_TYPE_INT64, LMD_TYPE_UINT64};
+    for (TypeId type : home_types) {
+        jm_access_guard(mt, MIR_BEQ, miss, tag, MIR_new_int_op(mt->ctx, type));
+    }
+    jm_access_guard(mt, MIR_BNE, stable, tag, MIR_new_int_op(mt->ctx, LMD_TYPE_FLOAT));
+    jm_emit_reg_binary_op(mt, MIR_AND, bits, item, MIR_new_int_op(mt->ctx, -2));
+    jm_access_guard(mt, MIR_BNE, miss, bits, MIR_new_int_op(mt->ctx, (int64_t)ITEM_FLOAT_P0));
+    jm_emit_label(mt, stable);
+}
+
+static MIR_reg_t jm_guard_number_element(JsMirTranspiler* mt, MIR_reg_t item,
+        MIR_label_t miss) {
+    MIR_reg_t bits = jm_new_reg(mt, "elem_number", MIR_T_I64);
+    jm_emit_reg_binary_op(mt, MIR_AND, bits, item,
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK));
+    MIR_label_t numeric = jm_new_label(mt);
+    jm_emit_branch(mt, MIR_BT, numeric, bits);
+    jm_emit_reg_binary_op(mt, MIR_URSH, bits, item, MIR_new_int_op(mt->ctx, 56));
+    jm_access_guard(mt, MIR_BEQ, numeric, bits, MIR_new_int_op(mt->ctx, LMD_TYPE_INT));
+    jm_access_guard(mt, MIR_BNE, miss, bits, MIR_new_int_op(mt->ctx, LMD_TYPE_FLOAT));
+    jm_emit_label(mt, numeric);
+    return jm_emit_unbox_float(mt, item);
+}
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winvalid-offsetof"
+static MIR_reg_t jm_emit_numeric_index_access(JsMirTranspiler* mt,
+        MIR_reg_t object, MIR_reg_t number_key, MIR_reg_t integer_key,
+        MIR_reg_t store_value = 0, bool strict = false, bool native_number = false) {
+    MirEmitter* em = &mt->func_em->em;
+    MIR_label_t miss = jm_new_label(mt), done = jm_new_label(mt);
+    MIR_label_t dense = jm_new_label(mt), tagged = jm_new_label(mt);
+    MIR_label_t typed = jm_new_label(mt), floating = jm_new_label(mt);
+    MIR_label_t number_result = store_value ? NULL : jm_new_label(mt);
+    MIR_reg_t number_value = store_value ? 0 : jm_new_reg(mt, "index_value", MIR_T_D);
+    MIR_reg_t result = jm_new_reg(mt, "index_result", native_number ? MIR_T_D : MIR_T_I64);
+    auto guard = [&](MIR_insn_code_t code, MIR_reg_t value, int64_t want) {
+        jm_access_guard(mt, code, miss, value, MIR_new_int_op(mt->ctx, want));
+    };
+    MIR_reg_t index = integer_key;
+    if (!index) {
+        // Bounds precede D2I: NaN, infinities and huge doubles must not reach
+        // a machine-integer conversion. -0 is the ordinary index zero.
+        MIR_reg_t valid = jm_new_reg(mt, "index_valid", MIR_T_I64);
+        jm_emit_reg_binary_op(mt, MIR_DGE, valid, number_key, MIR_new_double_op(mt->ctx, 0));
+        jm_emit_branch(mt, MIR_BF, miss, valid);
+        jm_emit_reg_binary_op(mt, MIR_DLE, valid, number_key, MIR_new_double_op(mt->ctx, 4294967294.0));
+        jm_emit_branch(mt, MIR_BF, miss, valid);
+        index = jm_emit_double_to_int(mt, number_key);
+        MIR_reg_t roundtrip = jm_emit_int_to_double(mt, index);
+        jm_emit_reg_binary(mt, MIR_DEQ, valid, roundtrip, number_key);
+        jm_emit_branch(mt, MIR_BF, miss, valid);
+    } else {
+        guard(MIR_UBGT, index, 0xfffffffeLL);
+    }
+    MIR_reg_t array = em_guard_container(em, object, LMD_TYPE_RAW_POINTER, miss);
+    MIR_reg_t kind = em_load_at(em, array, LAMBDA_GC_OFF_CONTAINER_TYPE_ID, MIR_T_U8, "index_kind");
+    jm_access_guard(mt, MIR_BEQ, typed, kind, MIR_new_int_op(mt->ctx, LMD_TYPE_MAP));
+    jm_access_guard(mt, MIR_BEQ, dense, kind, MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_NUM));
+    guard(MIR_BNE, kind, LMD_TYPE_ARRAY);
+    jm_emit_label(mt, dense);
+    MIR_reg_t flags = em_load_at(em, array, LAMBDA_GC_OFF_CONTAINER_FLAGS, MIR_T_U8, "index_flags");
+    jm_emit_reg_binary_op(mt, MIR_AND, flags, flags, MIR_new_int_op(mt->ctx, 0x11));
+    guard(MIR_BNE, flags, 0); // arguments/content and static storage stay generic
+    MIR_reg_t state = em_load_at(em, array, LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS, MIR_T_U8, "index_state");
+    MIR_reg_t layout = jm_new_reg(mt, "index_layout", MIR_T_I64);
+    jm_emit_reg_binary_op(mt, MIR_AND, layout, state, MIR_new_int_op(mt->ctx, 0x13));
+    guard(MIR_BNE, layout, 0); // excludes views, n-d and native-lane Item arrays
+    // Attribute faces cover numeric descriptors, sparse storage and host
+    // collections. Their property policies remain in the reference kernel.
+    guard(MIR_BNE, em_load_at(em, array, LAMBDA_GC_OFF_MAP_DATA, MIR_T_I64, "index_props"), 0);
+    MIR_reg_t length = em_load_at(em, array, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "index_length");
+    jm_access_guard(mt, MIR_UBGE, miss, index, MIR_new_reg_op(mt->ctx, length));
+    MIR_reg_t capacity = em_load_at(em, array, LAMBDA_GC_OFF_LIST_CAPACITY, MIR_T_I64, "index_capacity");
+    MIR_reg_t extra = em_load_at(em, array, LAMBDA_GC_OFF_LIST_EXTRA, MIR_T_I64, "index_extra");
+    jm_emit_reg_binary(mt, MIR_SUB, capacity, capacity, extra);
+    jm_access_guard(mt, MIR_BGE, miss, index, MIR_new_reg_op(mt->ctx, capacity));
+    MIR_reg_t address = em_array_element_address(em, array, index, 8);
+    jm_access_guard(mt, MIR_BEQ, tagged, kind, MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY));
+    guard(MIR_BNE, state, JS_ELEMENTS_PACKED_NUMERIC);
+    guard(MIR_BNE, em_load_at(em, array, LAMBDA_GC_OFF_CONTAINER_MAP_KIND, MIR_T_U8, "index_elem"), ELEM_FLOAT64);
+    jm_emit_jmp(mt, floating);
+
+    jm_emit_label(mt, tagged);
+    if (store_value) {
+        // only tagged states remain valid for every admitted Item store;
+        // unmanaged or numeric states need the kernel's state transition.
+        MIR_reg_t elements = jm_new_reg(mt, "index_elements", MIR_T_I64);
+        jm_emit_reg_binary_op(mt, MIR_AND, elements, state,
+            MIR_new_int_op(mt->ctx, JS_ELEMENTS_STATE_MASK));
+        guard(MIR_BLT, elements, JS_ELEMENTS_PACKED_TAGGED);
+        guard(MIR_BGT, elements, JS_ELEMENTS_SPARSE_TAGGED);
+    }
+    MIR_reg_t word = em_load_at(em, address, 0, MIR_T_I64, "index_item");
+    guard(MIR_BEQ, word, (int64_t)JS_DELETED_SENTINEL_VAL);
+    jm_guard_stable_element(mt, store_value ? store_value : word, miss);
+    if (store_value) {
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, address, 0, 1),
+            MIR_new_reg_op(mt->ctx, store_value)));
+        jm_emit_mov(mt, result, store_value);
+    } else if (native_number) {
+        jm_emit_dmov(mt, result, jm_emit_unbox_float(mt, word));
+    } else {
+        jm_emit_mov(mt, result, word);
+    }
+    jm_emit_jmp(mt, done);
+
+    jm_emit_label(mt, typed);
+    guard(MIR_BNE, em_load_at(em, array, LAMBDA_GC_OFF_CONTAINER_MAP_KIND, MIR_T_U8, "ta_kind"), MAP_KIND_TYPED_ARRAY);
+    const size_t payload = offsetof(JsTypedArrayMapCarrier, payload);
+    MIR_reg_t element_type = em_load_at(em, array,
+        payload + offsetof(JsTypedArray, element_type), MIR_T_I32, "ta_elem");
+    MIR_label_t supported = jm_new_label(mt);
+    if (!store_value) {
+        jm_access_guard(mt, MIR_BEQ, supported, element_type,
+            MIR_new_int_op(mt->ctx, JS_TYPED_INT32));
+    }
+    guard(MIR_BNE, element_type, JS_TYPED_FLOAT64);
+    jm_emit_label(mt, supported);
+    guard(MIR_BNE, em_load_at(em, array, payload + offsetof(JsTypedArray, length_tracking), MIR_T_U8, "ta_tracking"), 0);
+    MIR_reg_t buffer = em_load_at(em, array, payload + offsetof(JsTypedArray, buffer), MIR_T_I64, "ta_buffer");
+    guard(MIR_BEQ, buffer, 0);
+    guard(MIR_BNE, em_load_at(em, buffer, offsetof(ByteBufferHandle, flags), MIR_T_U32, "ta_flags"), 0);
+    MIR_reg_t storage = em_load_at(em, buffer, offsetof(ByteBufferHandle, storage), MIR_T_I64, "ta_storage");
+    guard(MIR_BEQ, storage, 0);
+    if (store_value) {
+        guard(MIR_BNE, em_load_at(em, storage, offsetof(ByteStorage, refs), MIR_T_I32, "ta_refs"), 1);
+        guard(MIR_BNE, em_load_at(em, storage, offsetof(ByteStorage, flags), MIR_T_U32, "ta_storage_flags"), 0);
+    }
+    MIR_reg_t offset = em_load_at(em, array, payload + offsetof(JsTypedArray, byte_offset), MIR_T_I32, "ta_offset");
+    MIR_reg_t bytes = em_load_at(em, array, payload + offsetof(JsTypedArray, byte_length), MIR_T_I32, "ta_bytes");
+    MIR_reg_t available = em_load_at(em, buffer, offsetof(ByteBufferHandle, byte_length), MIR_T_I64, "ta_available");
+    jm_emit_reg_binary(mt, MIR_SUB, available, available, offset);
+    jm_access_guard(mt, MIR_BLT, miss, available, MIR_new_reg_op(mt->ctx, bytes));
+    MIR_reg_t data = em_load_at(em, storage, offsetof(ByteStorage, data), MIR_T_I64, "ta_data");
+    guard(MIR_BEQ, data, 0);
+    MIR_reg_t storage_offset = em_load_at(em, buffer, offsetof(ByteBufferHandle, storage_offset), MIR_T_I64, "ta_storage_offset");
+    jm_emit_reg_binary(mt, MIR_ADD, data, data, storage_offset);
+    jm_emit_reg_binary(mt, MIR_ADD, data, data, offset);
+    if (!store_value) {
+        MIR_label_t double_view = jm_new_label(mt);
+        jm_access_guard(mt, MIR_BNE, double_view, element_type,
+            MIR_new_int_op(mt->ctx, JS_TYPED_INT32));
+        // signed 32-bit lanes share the live view checks and JS number
+        // publication; they must not become Lambda INT-symbol Items.
+        jm_emit_reg_binary_op(mt, MIR_RSH, bytes, bytes, MIR_new_int_op(mt->ctx, 2));
+        jm_access_guard(mt, MIR_UBGE, miss, index, MIR_new_reg_op(mt->ctx, bytes));
+        MIR_reg_t lane = em_load_at(em, em_element_address(em, data, index, 4),
+            0, MIR_T_I32, "ta_int32");
+        jm_emit_dmov(mt, number_value, jm_emit_int_to_double(mt, lane));
+        jm_emit_jmp(mt, number_result);
+        jm_emit_label(mt, double_view);
+    }
+    jm_emit_reg_binary_op(mt, MIR_RSH, bytes, bytes, MIR_new_int_op(mt->ctx, 3));
+    jm_access_guard(mt, MIR_UBGE, miss, index, MIR_new_reg_op(mt->ctx, bytes));
+    jm_emit_mov(mt, address, em_element_address(em, data, index, 8));
+
+    jm_emit_label(mt, floating);
+    if (store_value) {
+        MIR_reg_t value = jm_guard_number_element(mt, store_value, miss);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_D, 0, address, 0, 1),
+            MIR_new_reg_op(mt->ctx, value)));
+        jm_emit_mov(mt, result, store_value);
+    } else {
+        jm_emit_dmov(mt, number_value, em_load_at(em, address, 0, MIR_T_D, "index_number"));
+        jm_emit_label(mt, number_result);
+        if (native_number) jm_emit_dmov(mt, result, number_value);
+        else jm_emit_mov(mt, result, jm_box_float(mt, number_value));
+    }
+    jm_emit_jmp(mt, done);
+    jm_emit_label(mt, miss);
+    // Convert an original integer only on the miss edge, where arbitrary
+    // numeric property names still require Number/ToPropertyKey semantics.
+    MIR_reg_t key = number_key ? number_key : jm_emit_int_to_double(mt, integer_key);
+    MIR_reg_t fallback = store_value ? jm_call_4(mt, "js_set_number_assignment", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, object),
+        MIR_T_D, MIR_new_reg_op(mt->ctx, key),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, store_value),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, strict ? 1 : 0))
+        : jm_call_2(mt, "js_get_number_reference", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, object),
+            MIR_T_D, MIR_new_reg_op(mt->ctx, key));
+    if (native_number) {
+        jm_emit_error_lane_propagate_check(mt);
+        jm_emit_dmov(mt, result, jm_emit_unbox_float(mt, fallback));
+    } else {
+        jm_emit_mov(mt, result, fallback);
+    }
+    // Only the joined Item dominates both fast and fallback completions.
+    // A native result has already checked the fallback before unboxing.
+    jm_emit_label_with_state(mt, done,
+        native_number ? JS_ERROR_LANE_CLEAN : JS_ERROR_LANE_UNKNOWN);
+    if (native_number) mt->func_em->last_call_result = {};
+    else jm_publish_call_result(mt, result);
+    return result;
+}
+#pragma clang diagnostic pop
+
 // T10-1/D-A: the numeric key lane is admitted by the key's physical carrier,
 // never by a static type guess. A native F64/INT register cannot hold a string,
 // so ToPropertyKey on it runs no user code and its result is the index the
 // element kernels already take. An inferred numeric type over a boxed carrier
 // is not a proof — a rebound `var` still holds anything — and stays generic.
-// Returns true and sets *out_num (MIR_T_D) on admission; otherwise sets
-// *out_item to the boxed key the generic path consumes.
+// sets out_index (I64) or out_num (F64) on admission; otherwise sets
+// out_item to the boxed key the generic path consumes.
 static bool jm_emit_computed_key_number_lane(JsMirTranspiler* mt,
-        JsAstNode* key_expr, MIR_reg_t* out_num, MIR_reg_t* out_item) {
+        JsAstNode* key_expr, MIR_reg_t* out_num, MIR_reg_t* out_item,
+        MIR_reg_t* out_index) {
     MirValue value = jm_transpile_expression_value(mt, key_expr);
     bool native_number = value.rep == VALUE_REP_F64 ||
         (value.rep == VALUE_REP_I64 && value.semantic_type == LMD_TYPE_INT);
     if (native_number) {
-        *out_num = em_require_rep(&mt->func_em->em, value, VALUE_REP_F64).reg;
+        // A reference captures the key value before its RHS can reassign
+        // the source binding. MIR may coalesce this copy when it is safe.
+        if (value.rep == VALUE_REP_I64) {
+            *out_index = jm_new_reg(mt, "index_key", MIR_T_I64);
+            jm_emit_mov(mt, *out_index, value.reg);
+        } else {
+            *out_num = jm_new_reg(mt, "number_key", MIR_T_D);
+            jm_emit_dmov(mt, *out_num, value.reg);
+        }
         return true;
     }
     *out_item = em_require_rep(&mt->func_em->em, value, VALUE_REP_ITEM).reg;
@@ -1037,6 +1278,8 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
     ref.property_key_canonicalized = false;
     ref.key_is_number = false;
     ref.key_num_reg = 0;
+    ref.key_index_reg = 0;
+    ref.member = NULL;
     ref.named_key_index = UINT32_MAX;
     ref.named_key_id = NAME_ID_NONE;
     ref.jube_slot = -1;
@@ -1069,6 +1312,7 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
         }
 
         ref.kind = JS_MIR_REF_PROPERTY;
+        ref.member = mem;
         ref.computed_key = mem->computed;
         if (!mem->computed && mem->property &&
             mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
@@ -1121,7 +1365,7 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
         // turn a valid array bucket into undefined after compaction.
         jm_create_gc_root_slot(mt, ref.base_reg);
         int obj_spill = -1;
-        if (mt->in_generator && mem->computed && jm_has_yield(mt, mem->property)) {
+        if (mem->computed && jm_can_suspend(mt, mem->property)) {
             obj_spill = jm_gen_spill_save(mt, ref.base_reg);
         }
         // T10-1/D-A: a computed key carried in a native numeric register
@@ -1132,10 +1376,11 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
         if (ref.computed_key) {
             MIR_reg_t key_num = 0, key_item = 0;
             if (jm_emit_computed_key_number_lane(mt, mem->property,
-                    &key_num, &key_item)) {
+                    &key_num, &key_item, &ref.key_index_reg)) {
                 ref.key_num_reg = key_num;
                 ref.key_is_number = true;
-                ref.key_reg = jm_box_native(mt, key_num, LMD_TYPE_FLOAT);
+                ref.key_reg = ref.key_index_reg ? jm_box_int_reg(mt, ref.key_index_reg)
+                    : jm_box_float(mt, key_num);
             } else {
                 ref.key_reg = key_item;
             }
@@ -1268,12 +1513,15 @@ MIR_reg_t jm_emit_get_value(JsMirTranspiler* mt, const JsMirReference* ref) {
         }
         if (!ref->is_private && ref->named_key_index != UINT32_MAX) {
             MIR_reg_t name_id = jm_emit_reference_name_id(mt, ref);
-            return jm_callr_2(mt, "js_get_name_id", MIR_T_I64, ref->base_reg, name_id);
+            MIR_reg_t fast = ref->member ? jm_emit_predicted_shape_access(mt,
+                ref->member->object, ref->base_reg,
+                ((JsIdentifierNode*)ref->member->property)->name, name_id) : 0;
+            return fast ? fast : jm_callr_2(mt, "js_get_name_id", MIR_T_I64,
+                ref->base_reg, name_id);
         }
         if (ref->key_is_number) {
-            return jm_call_2(mt, "js_get_number_reference", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
-                MIR_T_D, MIR_new_reg_op(mt->ctx, ref->key_num_reg));
+            return jm_emit_numeric_index_access(mt, ref->base_reg,
+                ref->key_num_reg, ref->key_index_reg);
         }
         MIR_reg_t key = jm_emit_reference_key(mt, ref);
         MIR_reg_t lane = jm_callr_1(mt, "js_property_lane_for_canonical_key", MIR_T_I64, key);
@@ -1325,7 +1573,11 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
         else {
             if (ref->named_key_index != UINT32_MAX) {
                 MIR_reg_t name_id = jm_emit_reference_name_id(mt, ref);
-                result = jm_call_4(mt, "js_set_name_id", MIR_T_I64,
+                MIR_reg_t fast = ref->member ? jm_emit_predicted_shape_access(mt,
+                    ref->member->object, ref->base_reg,
+                    ((JsIdentifierNode*)ref->member->property)->name,
+                    name_id, value, ref->strict) : 0;
+                result = fast ? fast : jm_call_4(mt, "js_set_name_id", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, name_id),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
@@ -1333,11 +1585,8 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
             } else if (ref->key_is_number) {
                 // js_set_number_assignment owns the strict-policy completion,
                 // so no separate js_assignment_set_result is needed here.
-                result = jm_call_4(mt, "js_set_number_assignment", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
-                    MIR_T_D, MIR_new_reg_op(mt->ctx, ref->key_num_reg),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, ref->strict ? 1 : 0));
+                result = jm_emit_numeric_index_access(mt, ref->base_reg,
+                    ref->key_num_reg, ref->key_index_reg, value, ref->strict);
             } else {
                 MIR_reg_t key = jm_emit_reference_key(mt, ref);
                 MIR_reg_t lane = jm_callr_1(mt, "js_property_lane_for_canonical_key", MIR_T_I64, key);
@@ -1758,8 +2007,8 @@ static MIR_reg_t jm_emit_identifier_read(JsMirTranspiler* mt,
                     jm_find_direct_function_decl_for_identifier(mt, id);
                 if (direct_func && direct_func->func_item &&
                         !JM_JS_FACT(direct_func, is_reassigned)) {
-                    JsMirLastClosureSnapshot saved_closure_tracker;
-                    jm_save_last_closure_snapshot(mt, &saved_closure_tracker);
+                    JsClosureCheckpoint saved_closure_tracker;
+                    jm_closure_checkpoint_save(mt, &saved_closure_tracker);
                     MIR_reg_t is_undef = jm_new_reg(mt, "func_decl_undef", MIR_T_I64);
                     MIR_reg_t result = jm_new_reg(mt, "func_decl_val", MIR_T_I64);
                     MIR_label_t use_existing = jm_new_label(mt);
@@ -1776,7 +2025,7 @@ static MIR_reg_t jm_emit_identifier_read(JsMirTranspiler* mt,
                     // Cached function declarations skip the fresh closure-env
                     // allocation path, so the branch-local env register must not
                     // become the later capture readback target after the merge.
-                    jm_restore_last_closure_snapshot(mt, &saved_closure_tracker);
+                    jm_closure_checkpoint_rollback(mt, &saved_closure_tracker);
                     return jm_apply_with_identifier_fallback(mt, id, result);
                 }
                 if (mc->is_nested_func_hoist && !mc->is_iife_var) {
@@ -2639,11 +2888,7 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
         left = jm_transpile_box_item(mt, bin->left);
     }
 
-    int left_spill_slot = -1;
-    if (mt->in_generator &&
-        (jm_has_yield(mt, bin->right) || (mt->in_async && jm_count_awaits(mt, bin->right) > 0))) {
-        left_spill_slot = jm_gen_spill_save(mt, left);
-    }
+    int left_spill_slot = jm_preserve_before_expression(mt, left, bin->right);
 
     // Special case: instanceof against Error-family builtins can use the
     // runtime classname helper because thrown Error objects carry class names.
@@ -3349,7 +3594,9 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, JsIdentifierNode* id,
             jm_emit_destructure_var_value(mt, var->reg, var->from_env,
                 var->env_slot, var->env_reg, var->in_scope_env,
                 var->scope_env_slot, var->scope_env_reg, val);
-            var->tdz_active = false;
+            // An element lowered on both iterator branches keeps the flag for
+            // the sibling branch; the last emission clears it.
+            if (!mt->destructure_preserve_tdz) var->tdz_active = false;
             return;
         }
         if (var->is_const) {
@@ -3481,7 +3728,7 @@ void jm_emit_destructure_target(JsMirTranspiler* mt, JsAstNode* target, MIR_reg_
         // assignment target: obj.prop or obj[expr]
         JsMemberNode* member = (JsMemberNode*)target;
         // generator spill: if computed property contains yield, spill val and obj across it
-        bool need_spill = mt->in_generator && member->computed && jm_has_yield(mt, member->property);
+        bool need_spill = member->computed && jm_can_suspend(mt, member->property);
         int val_spill = -1, obj_spill = -1;
         if (need_spill) {
             val_spill = jm_gen_spill_save(mt, val);
@@ -3574,14 +3821,15 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
     // that state across suspension before destructuring continues.
     bool has_yields = false;
     {
-        // Module destructuring has no source function; use the active scope record.
-        JsFuncCollected* fc = mt->current_fc;
-        if (fc && fc->node && fc->node->is_generator) {
-            JsAstNode* chk = pattern->elements;
-            while (chk) {
-                if (jm_count_yields(mt, chk) > 0) { has_yields = true; break; }
-                chk = chk->next;
-            }
+        // The state machine, not the source spelling, decides whether a
+        // suspension can occur here: an async function is lowered as one too,
+        // and jm_can_suspend already refuses outside it. Gating on
+        // `fc->node->is_generator` left `await` in a destructuring default with
+        // no iterator spill at all.
+        JsAstNode* chk = pattern->elements;
+        while (chk) {
+            if (jm_can_suspend(mt, chk)) { has_yields = true; break; }
+            chk = chk->next;
         }
     }
 
@@ -3617,7 +3865,7 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
                 JsMirReference rest_ref = jm_invalid_destructure_reference();
                 int rest_pre_iterator_spill = -1;
                 int rest_pre_iter_done_spill = -1;
-        bool rest_pre_has_yield = mt->in_generator && jm_has_yield(mt, sp->argument);
+        bool rest_pre_has_yield = jm_can_suspend(mt, sp->argument);
                 if (rest_pre_has_yield) {
                     rest_pre_iterator_spill = jm_gen_spill_save(mt, iterator);
                     rest_pre_iter_done_spill = jm_gen_spill_save(mt, iter_done);
@@ -3641,15 +3889,18 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
                 MIR_reg_t rest = jm_emit_iterator_collect_rest(mt, iterator);
                 jm_emit_iterator_abrupt_marks_done(mt, iter_done);
                 jm_emit_reg_op(mt, MIR_MOV, iter_done, MIR_new_int_op(mt->ctx, 1));
-        bool rest_target_has_yield = has_yields && mt->in_generator && jm_has_yield(mt, sp->argument);
+        bool rest_target_has_yield = has_yields && jm_can_suspend(mt, sp->argument);
+                // The `rest_skip` branch below binds the same target.
+                mt->destructure_preserve_tdz++;
                 jm_emit_array_destructure_target(mt, sp->argument, &rest_ref,
                     has_rest_ref, rest, iterator, iter_done, rest_target_has_yield, false);
+                mt->destructure_preserve_tdz--;
                 jm_emit_iterator_close_on_error_lane_if_open(mt, iterator, iter_done, skip_arr_destr);
                 jm_emit_jmp(mt, rest_end);
                 jm_emit_label(mt, rest_skip);
                 MIR_reg_t empty_arr = jm_call_1(mt, "js_array_new", MIR_T_I64,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
-        bool empty_target_has_yield = has_yields && mt->in_generator && jm_has_yield(mt, sp->argument);
+        bool empty_target_has_yield = has_yields && jm_can_suspend(mt, sp->argument);
                 jm_emit_array_destructure_target(mt, sp->argument, &rest_ref,
                     has_rest_ref, empty_arr, iterator, iter_done,
                     empty_target_has_yield, false);
@@ -3677,7 +3928,7 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
             JsMirReference pre_ref = jm_invalid_destructure_reference();
             int pre_iterator_spill = -1;
             int pre_iter_done_spill = -1;
-        bool pre_ref_has_yield = mt->in_generator && jm_has_yield(mt, elem);
+        bool pre_ref_has_yield = jm_can_suspend(mt, elem);
             if (pre_ref_has_yield) {
                 pre_iterator_spill = jm_gen_spill_save(mt, iterator);
                 pre_iter_done_spill = jm_gen_spill_save(mt, iter_done);
@@ -3710,9 +3961,13 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
             jm_emit_branch(mt, MIR_BT, assign_undef, is_done);
 
             // not done: bind step value to target
-        bool elem_has_yield = has_yields && mt->in_generator && jm_has_yield(mt, elem);
+        bool elem_has_yield = has_yields && jm_can_suspend(mt, elem);
+            // The `assign_undef` branch below binds the same element; both are
+            // initializing writes for one declaration.
+            mt->destructure_preserve_tdz++;
             jm_emit_array_destructure_target(mt, elem, &pre_ref,
                 has_pre_ref, step_val, iterator, iter_done, elem_has_yield, true);
+            mt->destructure_preserve_tdz--;
             jm_emit_iterator_close_on_error_lane_if_open(mt, iterator, iter_done, skip_arr_destr);
             jm_emit_jmp(mt, elem_end);
 
@@ -3724,7 +3979,7 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
             jm_emit_reg_op(mt, MIR_MOV, iter_done, MIR_new_int_op(mt->ctx, 1));
             MIR_reg_t undef_val = jm_new_reg(mt, "undef", MIR_T_I64);
             jm_emit_reg_op(mt, MIR_MOV, undef_val, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED));
-        bool undef_elem_has_yield = has_yields && mt->in_generator && jm_has_yield(mt, elem);
+        bool undef_elem_has_yield = has_yields && jm_can_suspend(mt, elem);
             jm_emit_array_destructure_target(mt, elem, &pre_ref,
                 has_pre_ref, undef_val, iterator, iter_done,
                 undef_elem_has_yield, true);
@@ -3826,7 +4081,7 @@ void jm_emit_object_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MI
             JsMirReference pre_ref = jm_invalid_destructure_reference();
             int pre_src_spill = -1;
             int pre_key_spill = -1;
-            bool pre_ref_has_yield = mt->in_generator && jm_has_yield(mt, target);
+            bool pre_ref_has_yield = jm_can_suspend(mt, target);
             if (pre_ref_has_yield) {
                 pre_src_spill = jm_gen_spill_save(mt, src);
                 pre_key_spill = jm_gen_spill_save(mt, key);
@@ -3841,7 +4096,7 @@ void jm_emit_object_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MI
             MIR_reg_t val = jm_callr_2(mt, "js_get_key_default", MIR_T_I64, src, key);
             jm_emit_error_lane_propagate_check(mt);
             int target_src_spill = -1;
-            bool target_has_yield = mt->in_generator && jm_has_yield(mt, target);
+            bool target_has_yield = jm_can_suspend(mt, target);
             if (target_has_yield) {
                 target_src_spill = jm_gen_spill_save(mt, src);
             }
@@ -3901,8 +4156,7 @@ void jm_emit_object_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MI
 }
 
 static bool jm_expression_can_suspend(JsMirTranspiler* mt, JsAstNode* expr) {
-    return mt && mt->in_generator && expr &&
-        (jm_has_yield(mt, expr) || (mt->in_async && jm_count_awaits(mt, expr) > 0));
+    return jm_can_suspend(mt, expr);
 }
 
 static void jm_spill_reference_for_suspending_rhs(JsMirTranspiler* mt,
@@ -3918,12 +4172,20 @@ static void jm_spill_reference_for_suspending_rhs(JsMirTranspiler* mt,
 }
 
 static void jm_restore_suspended_reference(JsMirTranspiler* mt,
-                                           const JsMirReference* ref,
+                                           JsMirReference* ref,
                                            int base_slot,
                                            int key_slot) {
     if (!ref) return;
     if (base_slot >= 0) jm_gen_spill_load(mt, ref->base_reg, base_slot);
-    if (key_slot >= 0) jm_gen_spill_load(mt, ref->key_reg, key_slot);
+    if (key_slot >= 0) {
+        jm_gen_spill_load(mt, ref->key_reg, key_slot);
+        if (ref->key_is_number) {
+            // Native temporaries do not survive a generator/async re-entry.
+            // Recover the already-evaluated Number; never re-evaluate its AST.
+            ref->key_num_reg = jm_emit_unbox_float(mt, ref->key_reg);
+            ref->key_index_reg = 0;
+        }
+    }
 }
 
 // Assignment expression
@@ -3932,7 +4194,7 @@ static MIR_reg_t jm_emit_destructure_assignment(JsMirTranspiler* mt,
     // evaluate RHS first so swap assignments cannot observe partially updated bindings.
     MIR_reg_t src = jm_transpile_box_item(mt, rhs);
     int src_spill = -1;
-    if (mt->in_generator && jm_has_yield(mt, pattern)) {
+    if (jm_can_suspend(mt, pattern)) {
         src_spill = jm_gen_spill_save(mt, src);
     }
     bool prev_dstr_assignment = mt->destructure_assignment_mode;
@@ -4375,7 +4637,9 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
                 old_val = jm_callr_2(mt, jm_with_binding_get_name(mt), MIR_T_I64, with_key, old_val);
                 jm_emit_error_lane_propagate_check(mt);
             }
+            int old_spill = jm_preserve_before_expression(mt, old_val, asgn->right);
             MIR_reg_t rval = jm_transpile_box_item(mt, asgn->right);
+            if (old_spill >= 0) jm_gen_spill_load(mt, old_val, old_spill);
             rhs = jm_emit_compound_assign(mt, asgn->op, old_val, rval);
         }
 
@@ -4479,7 +4743,9 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
             // Compound: get current value, apply operation, set result
             jm_emit_canonicalize_computed_key_for_get_put(mt, &ref);
             MIR_reg_t cur_val = jm_emit_get_value(mt, &ref);
+            int cur_spill = jm_preserve_before_expression(mt, cur_val, asgn->right);
             MIR_reg_t rval = jm_transpile_box_item(mt, asgn->right);
+            if (cur_spill >= 0) jm_gen_spill_load(mt, cur_val, cur_spill);
             const char* fn = jm_compound_assign_fn(asgn->op);
             new_val = jm_callr_2(mt, fn, MIR_T_I64, cur_val, rval);
         }
@@ -4860,7 +5126,7 @@ static MIR_reg_t jm_emit_optional_method_call(JsMirTranspiler* mt, MIR_reg_t rec
         jm_emit_reg_binary_op(mt, MIR_EQ, opt_cmp, fn, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED));
         jm_emit_branch(mt, MIR_BT, l_opt_skip, opt_cmp);
     }
-    jm_clear_last_closure_snapshot(mt);
+    jm_closure_tracker_clear(mt);
     // D5.4.3: optional calls use the same suspend-safe receiver/callee spill
     // path as ordinary member calls; keeping them in raw MIR registers across
     // an awaited argument loses both the target and the required this value.
@@ -5766,12 +6032,6 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
             if (fc && fc->node && fc->node->is_async) fc = NULL;
             if (fc && fc->node && fc->node->is_generator &&
                     ast_linked_node_count(fc->node->params) == 0) fc = NULL;
-            if (fc && mt->current_fc && fc == mt->current_fc &&
-                    (!mt->tco_func || !mt->in_tail_position ||
-                     !jm_is_recursive_call(call, mt->tco_func))) {
-                // non-tail self recursion must use js_call_function so the call-depth RangeError is catchable.
-                fc = NULL;
-            }
             if (fc && (jm_current_function_captures_with_scope(mt) ||
                     jm_node_has_with_ancestor(mt, (JsAstNode*)call) ||
                     jm_node_has_with_ancestor(mt, (JsAstNode*)resolved_fn))) {
@@ -5884,8 +6144,9 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
                             jm_transpile_discard_call_args(mt, arg);
 
                             bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
-                            MIR_reg_t result = jm_call_direct_native(mt, fc,
+                            MirCallResult native_call = jm_call_direct_native(mt, fc,
                                 JM_PARAM_COUNT(fc), native_args);
+                            MIR_reg_t result = jm_finish_native_call(mt, native_call);
                             jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
                             return jm_emit_call_native_value(mt, call, fc, result);
                         }
@@ -6077,12 +6338,8 @@ static MIR_reg_t jm_emit_optional_member_access(JsMirTranspiler* mt,
     return result;
 }
 
-static MIR_reg_t jm_emit_predicted_shape_get(JsMirTranspiler* mt,
-        JsAstNode* receiver, MIR_reg_t obj, String* key_name,
-        MIR_reg_t name_id);
-
 static MirValue jm_emit_member_value(JsMirTranspiler* mt,
-        JsMemberNode* mem) {
+        JsMemberNode* mem, bool native_number = false) {
 
     // super.x / super[expr] property access must bypass local receiver fast paths.
     if (mem->object && mem->object->node_type == JS_AST_NODE_IDENTIFIER) {
@@ -6138,7 +6395,7 @@ static MirValue jm_emit_member_value(JsMirTranspiler* mt,
                 if (mem_obj_spill >= 0) jm_gen_spill_load(mt, obj, mem_obj_spill);
                 MIR_reg_t name_id = jm_module_name_id(mt, key_name->chars,
                     key_name->len);
-                MIR_reg_t val = jm_emit_predicted_shape_get(mt, mem->object,
+                MIR_reg_t val = jm_emit_predicted_shape_access(mt, mem->object,
                     obj, key_name, name_id);
                 if (!val) {
                     val = jm_callr_2(mt, "js_get_name_id", MIR_T_I64, obj, name_id);
@@ -6156,16 +6413,15 @@ static MirValue jm_emit_member_value(JsMirTranspiler* mt,
     // string elements without the generic property walk.
     MIR_reg_t key = 0;
     if (mem->computed) {
-        MIR_reg_t key_num = 0;
-        if (jm_emit_computed_key_number_lane(mt, mem->property, &key_num, &key)) {
+        MIR_reg_t key_num = 0, key_index = 0;
+        if (jm_emit_computed_key_number_lane(mt, mem->property, &key_num, &key, &key_index)) {
             if (mem_obj_spill >= 0) jm_gen_spill_load(mt, obj, mem_obj_spill);
-            MIR_reg_t num_val = jm_call_2(mt, "js_get_number_reference",
-                MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
-                MIR_T_D, MIR_new_reg_op(mt->ctx, key_num));
-            jm_emit_error_lane_propagate_check(mt);
+            MIR_reg_t num_val = jm_emit_numeric_index_access(mt, obj,
+                key_num, key_index, 0, false, native_number);
+            if (!native_number) jm_emit_error_lane_propagate_check(mt);
             return jm_expression_value(mt, (JsAstNode*)mem, num_val,
-                jm_get_effective_type(mt, (JsAstNode*)mem), VALUE_REP_ITEM);
+                native_number ? LMD_TYPE_FLOAT : jm_get_effective_type(mt, (JsAstNode*)mem),
+                native_number ? VALUE_REP_F64 : VALUE_REP_ITEM);
         }
     } else {
         key = jm_transpile_member_key(mt, mem);
@@ -6179,6 +6435,11 @@ static MirValue jm_emit_member_value(JsMirTranspiler* mt,
     jm_emit_error_lane_propagate_check(mt);
     return jm_expression_value(mt, (JsAstNode*)mem, val,
         jm_get_effective_type(mt, (JsAstNode*)mem), VALUE_REP_ITEM);
+}
+
+MIR_reg_t jm_transpile_member_as_number(JsMirTranspiler* mt, JsMemberNode* member) {
+    MirValue value = jm_emit_member_value(mt, member, true);
+    return em_require_rep(&mt->func_em->em, value, VALUE_REP_F64).reg;
 }
 
 // Array expression
@@ -6211,9 +6472,9 @@ static MirValue jm_emit_array_value(JsMirTranspiler* mt,
 
         // Generator spill: if any element contains yield, save array ref to env
         int arr_spill_slot_s = -1;
-        if (mt->in_generator) {
+        {
             JsAstNode* cy = arr->elements;
-            while (cy) { if (jm_has_yield(mt, cy)) { arr_spill_slot_s = jm_gen_spill_save(mt, array); break; } cy = cy->next; }
+            while (cy) { if (jm_can_suspend(mt, cy)) { arr_spill_slot_s = jm_gen_spill_save(mt, array); break; } cy = cy->next; }
         }
 
         JsAstNode* elem = arr->elements;
@@ -6224,7 +6485,7 @@ static MirValue jm_emit_array_value(JsMirTranspiler* mt,
                 MIR_reg_t src_raw = jm_transpile_box_item(mt, spread->argument);
 
                 // Generator spill: restore array reg after evaluating spread argument that may yield
-                if (arr_spill_slot_s >= 0 && jm_has_yield(mt, spread->argument)) {
+                if (arr_spill_slot_s >= 0 && jm_can_suspend(mt, spread->argument)) {
                     jm_gen_spill_load(mt, array, arr_spill_slot_s);
                 }
                 
@@ -6265,7 +6526,7 @@ static MirValue jm_emit_array_value(JsMirTranspiler* mt,
                     val = jm_call_0(mt, "js_array_hole", MIR_T_I64);
                 } else {
                     val = jm_transpile_box_item(mt, elem);
-                    if (arr_spill_slot_s >= 0 && jm_has_yield(mt, elem)) {
+                    if (arr_spill_slot_s >= 0 && jm_can_suspend(mt, elem)) {
                         jm_gen_spill_load(mt, array, arr_spill_slot_s);
                     }
                 }
@@ -6280,10 +6541,10 @@ static MirValue jm_emit_array_value(JsMirTranspiler* mt,
 
         // Generator spill: if any element contains yield, save array ref to env
         int arr_spill_slot = -1;
-        if (mt->in_generator) {
+        {
             JsAstNode* check_yield = arr->elements;
             while (check_yield) {
-                if (jm_has_yield(mt, check_yield)) {
+                if (jm_can_suspend(mt, check_yield)) {
                     arr_spill_slot = jm_gen_spill_save(mt, array);
                     break;
                 }
@@ -6301,7 +6562,7 @@ static MirValue jm_emit_array_value(JsMirTranspiler* mt,
                 continue;
             }
             MIR_reg_t val = jm_transpile_box_item(mt, elem);
-            if (arr_spill_slot >= 0 && jm_has_yield(mt, elem)) {
+            if (arr_spill_slot >= 0 && jm_can_suspend(mt, elem)) {
                 // Restore array ref after yield
                 jm_gen_spill_load(mt, array, arr_spill_slot);
             }
@@ -6333,41 +6594,38 @@ static MirValue jm_emit_array_value(JsMirTranspiler* mt,
 static uint32_t jm_object_literal_shape_keys_uncached(JsMirTranspiler* mt,
         JsObjectNode* obj, uint32_t* out_count);
 
-// Returns the first index of the reserved module key range, or UINT32_MAX.
-//
-// Memoized by node: the declarator that records the flow fact and the member
-// sites that guard against it all ask the same question, and registering the
-// keys twice would append a second range to the module image. The table stores
-// [node, (first << 8) | count] pairs so a literal costs no allocation.
+struct JsLiteralShapeRange {
+    JsObjectNode* object;
+    uint32_t first;
+    uint32_t count;
+};
+HASHMAP_DEFINE_PTRKEY(jm_literal_shape_range, JsLiteralShapeRange, object)
+
+struct JsShapeFieldCandidate {
+    const char* name;
+    uint32_t length;
+    AstNode* literal; // null records ambiguity, not a missing table entry
+};
+HASHMAP_DEFINE_LENSTRKEY(jm_shape_field, JsShapeFieldCandidate, name, length)
+
+// Every construction/access to one literal must use the same module range.
+// Hashing the AST identity also bounds compile cost for large JS libraries.
 static uint32_t jm_object_literal_shape_keys(JsMirTranspiler* mt,
         JsObjectNode* obj, uint32_t* out_count) {
     if (out_count) *out_count = 0;
     if (!mt || !obj) return UINT32_MAX;
-    ArrayList* memo = mt->literal_shape_ranges;
-    if (memo) {
-        for (int i = 0; i + 1 < memo->length; i += 2) {
-            if (arraylist_get(memo, i) != (void*)obj) continue;
-            uintptr_t packed = (uintptr_t)arraylist_get(memo, i + 1);
-            if (packed == 0) return UINT32_MAX;
-            if (out_count) *out_count = (uint32_t)(packed & 0xffu);
-            return (uint32_t)(packed >> 8);
-        }
+    if (!mt->literal_shape_ranges) mt->literal_shape_ranges = jm_literal_shape_range_new(16);
+    if (!mt->literal_shape_ranges) return UINT32_MAX;
+    JsLiteralShapeRange key = {obj, UINT32_MAX, 0};
+    const JsLiteralShapeRange* found = (const JsLiteralShapeRange*)hashmap_get(mt->literal_shape_ranges, &key);
+    if (found) {
+        if (out_count) *out_count = found->count;
+        return found->first;
     }
-    uint32_t memo_count = 0;
-    uint32_t memo_first = jm_object_literal_shape_keys_uncached(mt, obj,
-        &memo_count);
-    if (!memo) {
-        memo = arraylist_new(8);
-        mt->literal_shape_ranges = memo;
-    }
-    if (memo) {
-        uintptr_t packed = memo_first == UINT32_MAX ? 0
-            : (((uintptr_t)memo_first << 8) | (uintptr_t)memo_count);
-        arraylist_append(memo, (void*)obj);
-        arraylist_append(memo, (void*)packed);
-    }
-    if (out_count) *out_count = memo_count;
-    return memo_first;
+    key.first = jm_object_literal_shape_keys_uncached(mt, obj, &key.count);
+    hashmap_set(mt->literal_shape_ranges, &key);
+    if (out_count) *out_count = key.count;
+    return key.first;
 }
 
 static uint32_t jm_object_literal_shape_keys_uncached(JsMirTranspiler* mt,
@@ -6431,42 +6689,275 @@ static int jm_predicted_shape_slot_for(JsMirTranspiler* mt, uint32_t first,
     return -1;
 }
 
-// T10-2 item 2: the guarded read for `recv.name`, or 0 when this site has no
-// candidate shape.
-//
-// The candidate comes from the binding's own declarator (D8.2.4: the resolved
-// binding, never a re-resolved spelling), so it needs no flow fact carried on
-// the var entry -- which also means it cannot be lost when a scope map rebuilds
-// that entry. It is a CANDIDATE only: a later rebind, an alias, or any receiver
-// that simply is not this literal's object fails the emitted guard and takes
-// the ordinary named kernel.
-static MIR_reg_t jm_emit_predicted_shape_get(JsMirTranspiler* mt,
-        JsAstNode* receiver, MIR_reg_t obj, String* key_name,
-        MIR_reg_t name_id) {
-    if (!mt || !receiver || !key_name ||
-            receiver->node_type != JS_AST_NODE_IDENTIFIER) return 0;
-    JsIdentifierNode* id = (JsIdentifierNode*)receiver;
-    if (!id->entry || !id->entry->node) return 0;
-    JsAstNode* decl = (JsAstNode*)id->entry->node;
-    if (decl->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) return 0;
-    JsAstNode* init = (JsAstNode*)((JsVariableDeclaratorNode*)decl)->init;
-    if (!init || init->node_type != JS_AST_NODE_OBJECT_EXPRESSION) return 0;
+// candidates follow resolved bindings, direct-call arguments and returns.
+// A later rebind or incompatible caller fails the emitted runtime guard.
+static void* jm_shape_direct_candidate(void* owner, AstNode* node) {
+    if (node->node_type != JS_AST_NODE_OBJECT_EXPRESSION) return NULL;
     uint32_t count = 0;
-    // Memoized by node, so this agrees with the range the literal's own
-    // lowering registers regardless of which of the two runs first.
-    uint32_t first = jm_object_literal_shape_keys(mt, (JsObjectNode*)init,
-        &count);
-    if (first == UINT32_MAX || count == 0) return 0;
-    int slot = jm_predicted_shape_slot_for(mt, first, count,
-        key_name->chars, (uint32_t)key_name->len);
-    if (slot < 0) return 0;
-    return jm_call_5(mt, "js_shaped_slot_get", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)first),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)count),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)slot),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, name_id));
+    uint32_t first = jm_object_literal_shape_keys((JsMirTranspiler*)owner,
+        (JsObjectNode*)node, &count);
+    return first != UINT32_MAX && first < JS_PREDICTED_SHAPE_LIMIT ? node : NULL;
 }
+
+static void* jm_shape_binding_candidate(void* owner, AstNode* node) {
+    JsMirTranspiler* mt = (JsMirTranspiler*)owner;
+    AstNodeId id = ast_index_find(&mt->tp->ast_index, node);
+    return mt->shape_candidates && id < mt->shape_candidate_count
+        ? mt->shape_candidates[id] : NULL;
+}
+
+static void* jm_shape_call_candidate(void* owner, AstCallNode* call) {
+    JsMirTranspiler* mt = (JsMirTranspiler*)owner;
+    AstNode* fn = (AstNode*)jm_resolve_direct_call_function(mt, call, false);
+    return fn ? jm_shape_binding_candidate(owner, fn) : NULL;
+}
+
+static AstNode* jm_shape_candidate(JsMirTranspiler* mt, AstNode* expression) {
+    MirShapeCandidateProfile profile = {mt, jm_shape_direct_candidate,
+        jm_shape_binding_candidate, jm_shape_call_candidate};
+    return (AstNode*)mir_shape_candidate(profile, expression, 8);
+}
+
+static void jm_resolve_shape_candidates(JsMirTranspiler* mt) {
+    if (mt->shape_candidates || !mt->tp) return;
+    AstIndex* index = &mt->tp->ast_index;
+    mt->shape_candidates = (AstNode**)mem_calloc(index->count, sizeof(AstNode*), MEM_CAT_JS_RUNTIME);
+    if (!mt->shape_candidates) return;
+    mt->shape_candidate_count = index->count;
+    // First usable source wins, as in Lambda: later incompatible calls miss
+    // the runtime guard. Bounded rounds stop recursive binding cycles.
+    for (int round = 0; round < 4; round++) {
+        for (uint32_t i = 0; i < index->count; i++) {
+            AstNode* node = index->nodes[i];
+            if (node->node_type == JS_AST_NODE_RETURN_STATEMENT) {
+                AstFunctionId owner = index->owner_functions[i];
+                if (owner == AST_FUNCTION_ID_INVALID) continue;
+                AstNodeId fn = ast_index_find(index, index->functions[owner].node);
+                if (fn != AST_NODE_ID_INVALID && !mt->shape_candidates[fn]) {
+                    mt->shape_candidates[fn] = jm_shape_candidate(mt,
+                        ((JsReturnNode*)node)->argument);
+                }
+            } else if (node->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+                JsCallNode* call = (JsCallNode*)node;
+                JsFunctionNode* fn = jm_resolve_direct_call_function(mt, call, false);
+                if (!fn) continue;
+                AstNode* param = (AstNode*)fn->params;
+                for (AstNode* arg = call->arguments; arg && param;
+                        arg = arg->next, param = param->next) {
+                    AstNodeId id = ast_index_find(index, param);
+                    if (id != AST_NODE_ID_INVALID && !mt->shape_candidates[id]) {
+                        mt->shape_candidates[id] = jm_shape_candidate(mt, arg);
+                    }
+                }
+            }
+        }
+        for (AstFunctionId i = 0; i < index->function_count; i++) {
+            JsFunctionNode* fn = (JsFunctionNode*)index->functions[i].node;
+            AstNodeId id = ast_index_find(index, (AstNode*)fn);
+            if (fn && fn->is_arrow && fn->body &&
+                    fn->body->node_type != JS_AST_NODE_BLOCK_STATEMENT &&
+                    id != AST_NODE_ID_INVALID && !mt->shape_candidates[id]) {
+                mt->shape_candidates[id] = jm_shape_candidate(mt, fn->body);
+            }
+        }
+    }
+}
+
+static AstNode* jm_shape_for_field(JsMirTranspiler* mt, AstNode* receiver,
+        String* name, uint32_t* first, uint32_t* count, int* slot) {
+    jm_resolve_shape_candidates(mt);
+    AstNode* candidate = jm_shape_candidate(mt, receiver);
+    auto find_slot = [&](AstNode* node) -> int {
+        *first = jm_object_literal_shape_keys(mt, (JsObjectNode*)node, count);
+        return *first == UINT32_MAX ? -1 : jm_predicted_shape_slot_for(mt,
+            *first, *count, name->chars, (uint32_t)name->len);
+    };
+    if (candidate && (*slot = find_slot(candidate)) >= 0) return candidate;
+    // Build the module's unique-field index once; scanning the whole AST at
+    // each unknown receiver makes large-library compilation quadratic.
+    if (!mt->shape_field_candidates) {
+        mt->shape_field_candidates = jm_shape_field_new(32);
+        if (!mt->shape_field_candidates) return NULL;
+        AstIndex* index = &mt->tp->ast_index;
+        for (uint32_t i = 0; i < index->count; i++) {
+            AstNode* node = index->nodes[i];
+            if (!jm_shape_direct_candidate(mt, node)) continue;
+            for (AstNode* property = ((JsObjectNode*)node)->properties;
+                    property; property = property->next) {
+                String* field = ((JsIdentifierNode*)((JsPropertyNode*)property)->key)->name;
+                JsShapeFieldCandidate key = {field->chars, (uint32_t)field->len, node};
+                const JsShapeFieldCandidate* previous = (const JsShapeFieldCandidate*)
+                    hashmap_get(mt->shape_field_candidates, &key);
+                if (previous && previous->literal != node) key.literal = NULL;
+                hashmap_set(mt->shape_field_candidates, &key);
+            }
+        }
+    }
+    JsShapeFieldCandidate key = {name->chars, (uint32_t)name->len, NULL};
+    const JsShapeFieldCandidate* found = (const JsShapeFieldCandidate*)
+        hashmap_get(mt->shape_field_candidates, &key);
+    if (!found || !found->literal) return NULL;
+    *slot = find_slot(found->literal);
+    return *slot >= 0 ? found->literal : NULL;
+}
+
+static MIR_reg_t jm_literal_shape_handle(JsMirTranspiler* mt,
+        uint32_t first, uint32_t count) {
+    JsMirNameCache* cache = &mt->func_em->literal_shape_cache;
+    jm_name_cache_begin(cache, mt->func_em->em.func_item);
+    MIR_reg_t handle = jm_name_cache_find(cache, first, (NameId)count);
+    if (!handle) {
+        handle = jm_new_reg(mt, "literal_shape", MIR_T_I64);
+        // Unlike a block name cache, this recipe handle is initialized on
+        // every entry and resolved lazily, so sibling branches can share it.
+        MIR_prepend_insn(mt->ctx, mt->func_em->em.func_item,
+            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, handle),
+                MIR_new_int_op(mt->ctx, 0)));
+        jm_name_cache_store(cache, first, (NameId)count, handle);
+    }
+    MIR_label_t ready = jm_new_label(mt);
+    jm_emit_branch(mt, MIR_BT, ready, handle);
+    MIR_reg_t resolved = jm_call_2(mt, "js_literal_shape", MIR_T_I64,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, first),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, count));
+    jm_emit_mov(mt, handle, resolved);
+    jm_emit_label(mt, ready);
+    return handle;
+}
+
+static void jm_access_guard(JsMirTranspiler* mt, MIR_insn_code_t code,
+        MIR_label_t miss, MIR_reg_t value, MIR_op_t expected) {
+    jm_emit(mt, MIR_new_insn(mt->ctx, code, MIR_new_label_op(mt->ctx, miss),
+        MIR_new_reg_op(mt->ctx, value), expected));
+}
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winvalid-offsetof"
+static MIR_reg_t jm_emit_predicted_shape_access(JsMirTranspiler* mt,
+        JsAstNode* receiver, MIR_reg_t obj, String* key_name,
+        MIR_reg_t name_id, MIR_reg_t store_value, bool strict) {
+    if (!mt || !receiver || !key_name) return 0;
+    uint32_t first = 0, count = 0;
+    int slot = -1;
+    if (!jm_shape_for_field(mt, receiver, key_name, &first, &count, &slot)) return 0;
+    // Event-handler names keep the host observer even on ordinary objects.
+    if (store_value && key_name->len >= 2 &&
+            key_name->chars[0] == 'o' && key_name->chars[1] == 'n') return 0;
+    MirEmitter* em = &mt->func_em->em;
+    MIR_reg_t expected = jm_literal_shape_handle(mt, first, count);
+    MIR_label_t miss = jm_new_label(mt), done = jm_new_label(mt);
+    MIR_label_t success = done;
+#ifdef LAMBDA_JS_EXEC_PROFILE
+    success = jm_new_label(mt);
+    auto trace = [&](JsOptEvent event, JsOptTraceOutcome outcome) {
+        jm_call_void_3(mt, "js_opt_trace_record",
+            MIR_T_I64, MIR_new_int_op(mt->ctx, event),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, JS_OPT_REASON_NONE),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, outcome));
+    };
+    // instrumentation is compile-profile selected, so toggling JS_OPT_TRACE
+    // changes counters without perturbing the MIR being compared.
+    trace(JS_OPT_NAMED_FAST_PROBE, JS_OPT_OUTCOME_TAKEN);
+#endif
+    MIR_reg_t result = jm_new_reg(mt, "slot_item", MIR_T_I64);
+    MIR_reg_t map = em_guard_container(em, obj, LMD_TYPE_MAP, miss);
+    auto guard = [&](MIR_insn_code_t code, MIR_reg_t value, int64_t want) {
+        jm_access_guard(mt, code, miss, value, MIR_new_int_op(mt->ctx, want));
+    };
+    guard(MIR_BEQ, expected, 0);
+    MIR_reg_t shape = em_load_at(em, map, LAMBDA_GC_OFF_MAP_TYPE, MIR_T_I64, "slot_shape");
+    jm_access_guard(mt, MIR_BNE, miss, shape, MIR_new_reg_op(mt->ctx, expected));
+    guard(MIR_BNE, em_load_at(em, map, offsetof(Container, map_kind), MIR_T_U8, "slot_map_kind"), MAP_KIND_PLAIN);
+    MIR_reg_t flags = em_load_at(em, map, offsetof(Container, flags), MIR_T_U8, "slot_flags");
+    jm_emit_reg_binary_op(mt, MIR_AND, flags, flags, MIR_new_int_op(mt->ctx, 0x80));
+    guard(MIR_BNE, flags, 0); // reserved constructor slots are not own properties yet
+    guard(MIR_BLT, em_load_at(em, map, LAMBDA_GC_OFF_MAP_DATA_CAP, MIR_T_I32, "slot_cap"), (slot + 1) * 8);
+    MIR_reg_t data = em_load_at(em, map, LAMBDA_GC_OFF_MAP_DATA, MIR_T_I64, "slot_data");
+    guard(MIR_BEQ, data, 0);
+    MIR_reg_t entries = em_load_at(em, shape, offsetof(TypeMap, slot_entries), MIR_T_I64, "slot_entries");
+    guard(MIR_BEQ, entries, 0);
+    guard(MIR_BLE, em_load_at(em, shape, offsetof(TypeMap, slot_count), MIR_T_I32, "slot_count"), slot);
+    MIR_reg_t entry = em_load_at(em, entries, slot * sizeof(void*), MIR_T_I64, "slot_entry");
+    guard(MIR_BEQ, entry, 0);
+    guard(MIR_BNE, em_load_at(em, entry, offsetof(ShapeEntry, flags), MIR_T_U8, "slot_attrs"), 0);
+    guard(MIR_BNE, em_load_at(em, entry, offsetof(ShapeEntry, byte_offset), MIR_T_I64, "slot_offset"), slot * 8);
+    guard(MIR_BNE, em_load_at(em, entry, offsetof(ShapeEntry, storage) + offsetof(LaneStorageDesc, nullable), MIR_T_U8, "slot_nullable"), 0);
+    MIR_reg_t domain = em_load_at(em, entry,
+        offsetof(ShapeEntry, storage) + offsetof(LaneStorageDesc, value_domain), MIR_T_U8, "slot_domain");
+    MIR_reg_t word = em_load_at(em, data, slot * 8, MIR_T_I64, "slot_word");
+    guard(MIR_BEQ, word, (int64_t)JS_DELETED_SENTINEL_VAL);
+    MIR_label_t number = jm_new_label(mt), pointer = jm_new_label(mt), null_slot = jm_new_label(mt);
+    jm_access_guard(mt, MIR_BEQ, number, domain, MIR_new_int_op(mt->ctx, LMD_TYPE_FLOAT));
+    jm_access_guard(mt, MIR_BEQ, null_slot, domain, MIR_new_int_op(mt->ctx, LMD_TYPE_NULL));
+    guard(MIR_BLT, domain, LMD_TYPE_RANGE);
+    guard(MIR_BGT, domain, LMD_TYPE_FUNC);
+    jm_emit_jmp(mt, pointer);
+    jm_emit_label(mt, number);
+    if (store_value) {
+        // Only self-tagged doubles enter this store; out-of-band numbers and
+        // all representation transitions retain the existing owned writer.
+        MIR_reg_t mask = jm_new_reg(mt, "slot_number", MIR_T_I64);
+        jm_emit_reg_binary_op(mt, MIR_AND, mask, store_value, MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK));
+        guard(MIR_BEQ, mask, 0);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * 8, data, 0, 1),
+            MIR_new_reg_op(mt->ctx, store_value)));
+        jm_emit_mov(mt, result, store_value);
+    } else {
+        MIR_reg_t value = em_load_at(em, data, slot * 8, MIR_T_D, "slot_number");
+        jm_emit_mov(mt, result, jm_box_float(mt, value));
+    }
+    jm_emit_jmp(mt, success);
+    jm_emit_label(mt, null_slot);
+    if (store_value) {
+        guard(MIR_BNE, store_value, (int64_t)ITEM_NULL);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * 8, data, 0, 1),
+            MIR_new_reg_op(mt->ctx, store_value)));
+        jm_emit_mov(mt, result, store_value);
+        jm_emit_jmp(mt, success);
+    }
+    jm_emit_label(mt, pointer);
+    if (store_value) {
+        MIR_reg_t tag = jm_new_reg(mt, "slot_value_tag", MIR_T_I64);
+        jm_emit_reg_binary_op(mt, MIR_URSH, tag, store_value, MIR_new_int_op(mt->ctx, 56));
+        guard(MIR_BNE, tag, 0);
+        guard(MIR_BEQ, store_value, 0);
+        MIR_reg_t kind = em_load_at(em, store_value, 0, MIR_T_U8, "slot_value_kind");
+        jm_access_guard(mt, MIR_BNE, miss, kind, MIR_new_reg_op(mt->ctx, domain));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * 8, data, 0, 1),
+            MIR_new_reg_op(mt->ctx, store_value)));
+        jm_emit_mov(mt, result, store_value);
+    } else {
+        jm_emit_mov(mt, result, word);
+        jm_emit_branch(mt, MIR_BT, success, result);
+        jm_emit_reg_op(mt, MIR_MOV, result, MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL));
+    }
+    jm_emit_jmp(mt, success);
+#ifdef LAMBDA_JS_EXEC_PROFILE
+    jm_emit_label(mt, success);
+    trace(JS_OPT_NAMED_FAST_HIT, JS_OPT_OUTCOME_TAKEN);
+    jm_emit_jmp(mt, done);
+#endif
+    jm_emit_label(mt, miss);
+#ifdef LAMBDA_JS_EXEC_PROFILE
+    trace(JS_OPT_NAMED_FAST_MISS, JS_OPT_OUTCOME_FALLBACK);
+#endif
+    MIR_reg_t fallback = store_value ? jm_call_4(mt, "js_set_name_id", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, name_id),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, store_value),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, strict ? 1 : 0))
+        : jm_callr_2(mt, "js_get_name_id", MIR_T_I64, obj, name_id);
+    jm_emit_mov(mt, result, fallback);
+    jm_emit_label(mt, done);
+    // D8.4.3: the fallback's call register is undefined on a guard hit.
+    jm_publish_call_result(mt, result);
+    return result;
+}
+
+#pragma clang diagnostic pop
 
 static MirValue jm_emit_object_value(JsMirTranspiler* mt,
         JsObjectNode* obj) {
@@ -6491,7 +6982,7 @@ static MirValue jm_emit_object_value(JsMirTranspiler* mt,
     if (mt->in_generator) {
         JsAstNode* cy = obj->properties;
         while (cy) {
-            if (jm_has_yield(mt, cy)) { obj_spill_slot = jm_gen_spill_save(mt, object); break; }
+            if (jm_can_suspend(mt, cy)) { obj_spill_slot = jm_gen_spill_save(mt, object); break; }
             cy = cy->next;
         }
     }
@@ -6506,7 +6997,7 @@ static MirValue jm_emit_object_value(JsMirTranspiler* mt,
             // Generator spill: if value contains yield, we need to spill key too
             // since key is evaluated before value which may yield
             int key_spill_slot = -1;
-            bool val_has_yield = obj_spill_slot >= 0 && p->value && jm_has_yield(mt, p->value);
+            bool val_has_yield = obj_spill_slot >= 0 && p->value && jm_can_suspend(mt, p->value);
             if (p->computed) {
                 key = jm_transpile_box_item(mt, p->key);
                 key = jm_callr_1(mt, "js_to_property_key", MIR_T_I64, key);
@@ -6533,7 +7024,7 @@ static MirValue jm_emit_object_value(JsMirTranspiler* mt,
             if (val_has_yield) {
                 jm_gen_spill_load(mt, object, obj_spill_slot);
                 jm_gen_spill_load(mt, key, key_spill_slot);
-            } else if (obj_spill_slot >= 0 && jm_has_yield(mt, prop)) {
+            } else if (obj_spill_slot >= 0 && jm_can_suspend(mt, prop)) {
                 // key itself contained yield (computed key case)
                 jm_gen_spill_load(mt, object, obj_spill_slot);
             }
@@ -6579,7 +7070,7 @@ static MirValue jm_emit_object_value(JsMirTranspiler* mt,
             JsSpreadElementNode* sp = (JsSpreadElementNode*)prop;
             MIR_reg_t source = jm_transpile_box_item(mt, sp->argument);
             // Generator spill: restore object ref after yield-containing spread
-            if (obj_spill_slot >= 0 && jm_has_yield(mt, prop)) {
+            if (obj_spill_slot >= 0 && jm_can_suspend(mt, prop)) {
                 jm_gen_spill_load(mt, object, obj_spill_slot);
             }
             jm_callr_2(mt, "js_object_spread_into", MIR_T_I64, object, source);
@@ -6594,7 +7085,7 @@ static MirValue jm_emit_object_value(JsMirTranspiler* mt,
 // Conditional expression (ternary)
 struct JsMirBranchState {
     JsMirCursor cursor;
-    JsMirLastClosureSnapshot last_closure;
+    JsClosureCheckpoint closure_checkpoint;
     bool scopes_saved;
     ArrayList* original_var_scopes;
     ArrayList* cloned_var_scopes;
@@ -6621,7 +7112,7 @@ static void jm_free_branch_state(JsMirBranchState* state);
 static void jm_save_branch_state(JsMirTranspiler* mt, JsMirBranchState* state) {
     memset(state, 0, sizeof(*state));
     jm_cursor_capture(mt, &state->cursor);
-    jm_save_last_closure_snapshot(mt, &state->last_closure);
+    jm_closure_checkpoint_save(mt, &state->closure_checkpoint);
     state->scopes_saved = true;
     state->original_var_scopes = mt->var_scopes;
     state->cloned_var_scopes = arraylist_new(
@@ -6675,7 +7166,7 @@ static void jm_restore_branch_state(JsMirTranspiler* mt, JsMirBranchState* state
     jm_cursor_restore(mt, &state->cursor);
     // Conditional-expression arms do not dominate one another. A closure env
     // allocated in one arm must not remain the writeback target in its sibling.
-    jm_restore_last_closure_snapshot(mt, &state->last_closure);
+    jm_closure_checkpoint_rollback(mt, &state->closure_checkpoint);
 
     if (!state->scopes_saved) return;
     mt->var_scopes = state->original_var_scopes;
@@ -6817,7 +7308,7 @@ static MirValue jm_emit_template_literal_value(JsMirTranspiler* mt,
             !((JsTemplateElementNode*)quasi)->tail) {
             // Generator spill: save StringBuf across yield in expression
             int sb_spill = -1;
-            if (mt->in_generator && jm_has_yield(mt, expr)) {
+            if (jm_can_suspend(mt, expr)) {
                 sb_spill = jm_gen_spill_save(mt, sb);
             }
             MIR_reg_t eval = jm_transpile_box_item(mt, expr);
@@ -6950,11 +7441,29 @@ static MirValue jm_emit_tagged_template_value(JsMirTranspiler* mt,
         MIR_T_I64, MIR_new_int_op(mt->ctx, total_argc));
     // store template object as first arg
     jm_emit_store_i64(mt, 0, args_ptr, tmpl_obj);
+    // A substitution can suspend, and the tag, its receiver and the argument
+    // buffer are plain registers that do not survive the state-machine return.
+    int tag_spill = -1, this_spill = -1, args_spill = -1;
+    for (JsAstNode* e = tmpl->expressions; e; e = e->next) {
+        if (jm_can_suspend(mt, e)) {
+            tag_spill = jm_gen_spill_save(mt, tag_fn);
+            this_spill = jm_gen_spill_save(mt, this_val);
+            args_spill = jm_gen_spill_save(mt, args_ptr);
+            break;
+        }
+    }
     // store expression values
     int ei = 1;
     for (JsAstNode* e = tmpl->expressions; e; e = e->next, ei++) {
         MIR_reg_t val = jm_transpile_box_item(mt, e);
+        if (args_spill >= 0 && jm_can_suspend(mt, e)) {
+            jm_gen_spill_load(mt, args_ptr, args_spill);
+        }
         jm_emit_store_i64(mt, ei * 8, args_ptr, val);
+    }
+    if (tag_spill >= 0) {
+        jm_gen_spill_load(mt, tag_fn, tag_spill);
+        jm_gen_spill_load(mt, this_val, this_spill);
     }
 
     // Preserve a scalar tag result in the caller-owned liveness slot.
@@ -7931,7 +8440,7 @@ static MirValue jm_transpile_expression_direct(JsMirTranspiler* mt,
             // has_return_reg cause spurious early returns at the try end_label
             // (returning the also-uninitialized return_val_reg, which surfaces
             // as a `null`-valued done iteration result).
-            jm_emit_try_state_reset(mt);
+            jm_emit_try_state_restore(mt);
 
             // Generator.prototype.return resumes the suspended yield with an
             // internal return signal. Route it through the same delayed-return

@@ -1,0 +1,40 @@
+3
+7 null
+true
+true
+changed 9
+undefined
+27 2
+true 11
+getter
+undefined
+8
+9
+undefined false
+refilled
+12
+true true true Infinity
+true
+-1
+0.5
+4294967295
+NaN
+Infinity
+true 20
+1.25 1.25 undefined
+true
+true
+7.5 1
+undefined
+undefined undefined
+4.5 4.5
+1
+first second 10,24,9
+2,20
+-2147483648
+-1
+0
+2147483647
+1
+-1 2147483647 undefined false
+undefined

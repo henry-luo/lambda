@@ -132,7 +132,7 @@ Recursion and width are bounded: `MAX_DEPTH = 2000` and `MAX_FIELD_COUNT = 10000
 
 ## Known Issues & Future Improvements
 
-Moved to the central ledger: **[Lambda Core Runtime — Central Issue Ledger](../../../vibe/Lambda_Issue_Ledger.md)**, entries **LR11-1 – LR11-8** (open/partial) and **LR11-R1** (resolved, Appendix A).
+Moved to the central ledger: **[Lambda Core Runtime — Central Issue Ledger](../../../vibe/Lambda_Issue_Ledger.md)**, entries **LR11-1 – LR11-8** (open/partial) and **LR11-R1**, **LR11-R6** (resolved, Appendix A). LR11-6 ("conservative safety analysis") was retired on 2026-09-10: the hard-coded gate functions it cited were dead code and are gone — see [LR12 §5](LR_12_Procedural_Runtime.md#5-the-static-safety-analyzer).
 
 The ledger carries the verification status of each entry (OPEN / PARTIAL / RESOLVED) against the current source, re-resolved `file:line` anchors, and the cross-cutting clusters that group issues shared with other `LR_*` areas.
 

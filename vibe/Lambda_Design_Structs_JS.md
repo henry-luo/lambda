@@ -1,5 +1,7 @@
 # Lambda Design: LambdaJS Struct Authority — The Four That Matter
 
+> **Follow-up proposal (2026-09-10):** [Shared optimization structures](Lambda_Design_Structs_JS2.md) proposes **JSCU36–JSCU43** and continues **JSCU33(A)**, building on the implementation recorded here. It leaves this document's unresolved work and ratification status intact.
+
 > **Status: DRAFT for user ratification — 2026-09-07.** This is the design
 > record for the highest-yield items of
 > [`Lambda_Proposal_JS_Struct_Clean_Up.md`](Lambda_Proposal_JS_Struct_Clean_Up.md)
@@ -1883,15 +1885,65 @@ carrier and compiler work is open.
   suspended activations remain separate GC-owned frame carriers. A pending
   promise is explicitly collected, resolved with an object, and resumed under
   normal and forced-GC execution, per D5.1.1v2 and D5.3.5.
-- **JSCU29(A), DNS range:** the five contiguous DNS namespace, resolver and
-  server-cache Items now use `JsRootedState` and one exact realm range instead
-  of five direct registrations plus a private epoch. The DNS namespace and
-  promise-resolver regression passes normally and with forced GC, per D5.3.5.
-- **JSCU29(A), crypto namespace:** `JsCryptoState`'s inherited exact realm
-  range is the sole root owner of the lazy `crypto` namespace; its constructor
-  no longer adds a duplicate direct registration. Requiring the namespace
-  before and after collection preserves its identity normally and with forced
-  GC, per D5.3.5 and D6.2.2v2.
+- **JSCU29(A), DNS realm slots:** DNS's ordinary and promise namespaces,
+  resolver prototypes, and default-server cache now occupy five named
+  `JsRealmSlots` entries, replacing `JsDnsState` and its exact realm range.
+  Resolver setup roots its new constructor, instance, server list, and handle
+  until their owning slots/properties are installed. Namespace, promise, and
+  prototype identity survive explicit collection normally and with forced GC,
+  per D5.3.5 and D5.4.2.
+- **JSCU29(A), TLS realm slots:** TLS's namespace and four certificate-cache
+  values now occupy five named `JsRealmSlots` entries, replacing the rooted
+  portion of `JsTlsState`. `JsTlsNativeState` remains the separate owner of
+  TLS ticket and secure-context native lists; that resource lifetime is not a
+  singleton cache. TLS namespace and certificate identity survive explicit
+  collection normally and with forced GC, per D5.3.5, D5.4.2 and D7.4.3.
+- **JSCU29(A), readline realm slots:** readline's ordinary/promise namespaces
+  and its completion handoff now use three named `JsRealmSlots` entries.
+  `JsReadlineState` retains only its dynamic input-to-interface `RootVector`
+  and row metadata, so completion, namespace, and input-map lifetimes no
+  longer share a rooted struct. Both namespace identities survive explicit
+  collection normally and with forced GC, per D5.3.5 and D6.2.2v2.
+- **JSCU29(A), HTTP realm slots:** HTTP's namespace and server, incoming-
+  message, server-response, and outgoing-message prototypes now use five
+  named `JsRealmSlots` entries, replacing `JsHttpState` and its exact range.
+  Constructor objects stay rooted while their prototypes are installed.
+  Namespace and constructor identity survive explicit collection normally and
+  with forced GC, per D5.3.5 and D5.4.2.
+- **JSCU29(A), net realm slots:** net's namespace, Socket/Server prototypes,
+  Socket connect callable, and internal stream-socket constructor now use five
+  named `JsRealmSlots` entries, replacing the fixed-item portion of
+  `JsNetState`. `JsNetNativeState` remains the lazy owner for BlockList and
+  native net-default state. Namespace and constructor identity survive
+  explicit collection normally and with forced GC, per D5.3.5, D5.4.2 and
+  D7.4.3.
+- **JSCU29(A), FS realm slots:** fs's public/internal namespaces, default
+  `fstat`, Stats prototype, and FileHandle constructor/prototype now use seven
+  named `JsRealmSlots` entries, replacing the fixed-item portion of
+  `JsFsState`. `JsFsNativeState` remains the distinct owner of pending async
+  requests. Namespace and promise-namespace identity survive explicit
+  collection normally and with forced GC, per D5.3.5, D5.4.2 and D7.4.3.
+- **JSCU29(A), crypto realm slot:** the lazy Jube-hosted `crypto` namespace
+  occupies its named `JsRealmSlots` entry. It replaces the private
+  `JsCryptoState` exact range, and reads that need no construction use the
+  existing slot without allocating. Requiring it before and after collection
+  preserves namespace identity normally and with forced GC, per D5.3.5 and
+  D6.2.2v2.
+- **JSCU29(A), realm-slot foundation:** `JsRealmSlots` is the shared
+  context-owned `RootVector` catalog for fixed realm singleton/cache values.
+  Its first migrated members, the `util`, `child_process`, `crypto`, and
+  `Buffer`, DNS, TLS, readline, HTTP, net, and FS namespaces/prototypes/caches
+  plus the `https` namespace and HTTPS Agent prototype,
+  reserve a rooted slot before namespace allocation and no longer derive
+  `JsRootedState` or appear in the `JsRootRange` catalog. The stale empty
+  `JsCryptoState` is deleted: `crypto` is a Jube-hosted namespace, whose
+  module owns its value rather than a duplicate JS cache. Heap replacement
+  clears the carrier as one unit; the next access reserves the same named slot
+  before rebuilding a namespace. Util, child-process, crypto, Buffer, DNS,
+  TLS, readline, HTTP, net, FS, and HTTPS namespace identity survive explicit
+  collection normally and with forced GC, per D5.3.5, D5.4.2 and D7.4.3.
+  Remaining root-range clients migrate into this catalog by named slot rather
+  than adding another singleton-root mechanism.
 - **JSCU30:** `RuntimeJob` and `RuntimeJobQueue` own nextTick, microtask,
   unhandled-rejection and RAF payloads. Timers carry the same job envelope,
   including an arbitrary Array argument pack, while their scheduling policy
@@ -1951,6 +2003,51 @@ carrier and compiler work is open.
   and with forced GC, per D5.1.1v2 and D5.4.2. This deliberately remains
   distinct from TLS's FIFO pre-handshake queue: completion order is part of
   the latter's semantics.
+- **JSCU31 follow-up, fixed native value slots:** `RuntimeValueSlots` is the
+  one context-owned carrier for a native operation's fixed set of durable JS
+  values. Its sole exact `RootVector` is distinct from
+  `RuntimeCallbackSlots`: it has named semantic slots rather than request
+  completion order. Every slot begins as the all-zero absent `Item`, matching
+  the presence sentinel of the native fields it replaces rather than imposing
+  a language-level null value. `JsChildProcess`, `JsSpawnProcess`, `JsTlsServer` and
+  `JsTlsSocket` now use it for their operation-lifetime values, deleting
+  their parallel raw `Item` fields while retaining each protocol's native
+  process, pipe, TLS and byte-buffer tail. A TLS server handler/close-callback
+  regression passes normally and with forced GC, per D5.1.1v2 and D5.4.2.
+- **JSCU31 follow-up, HTTP native values:** `JsHttpClientReq`,
+  `JsHttpServer` and `JsHttpConn` now use the same `RuntimeValueSlots`
+  mechanism for their fixed request, callback, async-resource, socket,
+  response, constructor, timeout and AbortSignal values. A connection keeps
+  its all-zero absent-slot contract, while variable-lifetime write callbacks
+  stay in `RuntimeCallbackSlots`. This deletes the remaining parallel raw
+  `Item` fields from the HTTP native owners without merging their distinct
+  transport and parser tails. The response and client-write regressions pass
+  normally and with forced GC, per D5.1.1v2 and D5.4.2.
+- **JSCU31 follow-up, net native values:** `JsSocket` now stores its public
+  object, timeout, AbortSignal/listener, `onread` buffer/factory/callback and
+  TLS peer through one `RuntimeValueSlots` record; `JsServer` uses the same
+  mechanism for its public object, connection handler, block list and delayed
+  listen arguments. Socket `RuntimeCallbackSlots` and its
+  `PendingSocketWrite` sequence remain separate because callback completion
+  order and pending byte order are protocol state. Closed server records are
+  now released from the realm's close-complete registry during reset/destroy,
+  instead of leaking an embedded-but-closed libuv handle. The pre-connect
+  two-write/end regression, block-list and arbitrary-argument connection
+  regressions pass normally and with forced GC, per D5.1.1v2 and D5.4.2.
+- **JSCU31 follow-up, bound-socket ownership:** `JsBoundSocket` has no
+  independent JS-value owner. Its script object's private handle property is
+  the sole native-record owner; explicit close receives that activation-local
+  object through a precise root only while clearing the property. This deletes
+  the redundant unrooted reverse `Item` edge while retaining the adopted-handle
+  record needed to report `ERR_SOCKET_HANDLE_ADOPTED`. Bound address/fd/close
+  behavior survives explicit collection normally and with forced GC, per
+  D5.1.1v2 and D5.4.2.
+- **JSCU31 follow-up, timer owner:** a `JsTimerHandle` no longer caches a
+  second public-handle `Item`; its `RuntimeResourceTable` row is the sole
+  exact owner for the public timeout/promise owner and `RuntimeJob` span.
+  Timeout destruction derives the public object from that row before it is
+  released. The 1,025-timer and timer-handle coercion regressions pass
+  normally and with forced GC, per D5.1.1v2, D5.3.5 and D5.4.2.
 - **JSCU31 follow-up, HTTP response write tail:** `HttpResponseWriteReq` now
   contains only the native completion data it actually consumes (connection,
   byte count and close policy). Its former raw response and callback Items
@@ -1959,6 +2056,41 @@ carrier and compiler work is open.
   the response and callback in one exact root frame instead. The response
   body/end-callback regression passes normally and with forced GC, per
   D5.1.1v2 and D5.4.2.
+- **JSCU31 follow-up, child IPC wrapper tail:** a spawned child's pending
+  `keepOpen` duplicate-stream wrappers are one dynamic `ArrayList`, replacing
+  the private eight-pointer array whose ninth wrapper was prematurely closed.
+  The list owns only duplicate native wrappers; descriptor-transfer accounting
+  remains the separate ordered `SpawnTransferredConnection` protocol tail.
+  Existing child IPC messaging passes normally and with forced GC; an explicit
+  nine-handle transfer regression remains part of the resource-table migration
+  gate under D5.3.5 and D7.4.1v2.
+- **JSCU31 follow-up, exec process values:** one `JsChildProcess` owns its
+  callback and AbortSignal state in `RuntimeValueSlots` rather than four raw
+  `Item` fields with a second lifetime protocol. The process,
+  pipes and output bytes remain its operation-specific native tail. The
+  asynchronous `exec` callback regression passes normally and with forced GC,
+  per D5.1.1v2 and D5.4.2.
+- **JSCU31 follow-up, spawn process values:** one `JsSpawnProcess` owns its
+  script-visible process object and optional AbortSignal/listener pair in an
+  exact `RuntimeValueSlots` record; IPC completion callbacks remain in the
+  separate shared `RuntimeCallbackSlots` carrier because they can complete
+  out of order. This deletes the three raw native `Item` fields while keeping
+  the process, pipes and byte buffers in the operation-specific native tail.
+  The abort-and-exit regression passes normally and with forced GC, per
+  D5.1.1v2 and D5.4.2.
+- **JSCU31 follow-up, hosted persistent value slots:**
+  `JubePersistentValueSlots` is the one opaque-host carrier for a Node
+  module's fixed persistent JS values. It owns the session token, root API,
+  exact `Item` span and partial-attach rollback/detach protocol, so
+  `events`, `string_decoder`, `constants`, `tty`, `os`, `punycode`, `path`,
+  `perf_hooks`, `querystring`, `url`, `worker_threads`, `v8`, `timers`,
+  `trace_events`, and the `process` capture callback no longer each declare
+  a session field, rooted flag and direct persistent-root loop. The URL
+  Blob registry remains distinct: each growable row owns both its native ID
+  and Blob root, so it is not a fixed module value slot. Cached namespace
+  identity, EventEmitter delivery, trace namespace creation, and the process
+  capture callback survive an explicit collection normally and with forced
+  GC, per D5.1.1v2, D5.4.2 and D7.4.3.
 - **Root-storage capacity follow-up:** AsyncLocalStorage and assertion
   instances use context-owned `RootVector`s; readline input/interface pairs
   are dynamic `JsReadlineInput` rows with one rooted value store. Their former
@@ -2187,11 +2319,147 @@ carrier and compiler work is open.
   preserves its enclosing-pattern semantics under normal and forced-GC
   execution, per D8.2.4 and D5.3.5.
 
-Open: JSCU29(A)'s full realm-slot catalog and deletion of the remaining
-root-range mechanism, JSCU31's remaining native-owner migration to the resource table,
-JSCU33(A)'s immutable callable-code owner, JSCU35's remaining emitted artifact
-consolidation, the lazy realm-capsule census and all final release performance
-gates.
+### 8.14 Phase 2 continuation implementation (2026-09-10)
+
+The next implementation slice keeps the proposal's one-concept/one-carrier
+rule while preserving the semantic tails that D6.2.2v2 deliberately keeps
+separate:
+
+- **JSCU29(A), fixed-span completion:** `RootVector` now owns both growable
+  blocks and legacy fixed contiguous Item spans. `JsRootRange` and its reset
+  registry are deleted; registration, heap-generation invalidation, clearing,
+  and teardown all use the same vector primitive. The realm visitor tolerates
+  absent lazy records, so it no longer requires a second root descriptor for
+  fixed state (D5.3.5 and D5.4.2).
+- **JSCU29(A), singleton-slot completion:** the `__proto__` name, generator and
+  async-function prototype singletons, iterator prototypes, generator markers,
+  and async-iterator prototypes now use `JsRealmSlots`. The former
+  `JsIteratorState` capsule and its fixed eleven-Item root span are gone; reset
+  clears only existing realm slots, while first use reserves the exact dynamic
+  slot (D5.3.5, D5.4.2 and D6.2.2v2).
+- **JSCU29(A), lazy capsule record:** `JsTest262AgentState` (including the
+  Atomics waiter carrier) is allocated only when `$262` or Atomics agent state
+  is used. Its callback/report vectors are initialized by the same owner
+  function, and reset/destroy paths accept an absent record. Ordinary realms
+  therefore avoid an otherwise unused callback/report allocation while the
+  forced-GC Test262 and Atomics regressions retain exact roots (D5.1.1v2 and
+  D5.3.5).
+- **JSCU29(A), lazy host records:** `JsReadlineState` and
+  `JsAsyncLocalStorageState` now follow the same ensure-on-first-use contract.
+  Their input/instance root vectors are absent from an ordinary realm until
+  the corresponding API is constructed, and reset paths clear only an
+  existing record (D5.1.1v2 and D5.3.5).
+- **JSCU31, TLS native owner:** `JsTlsSocket` publishes its transport through
+  a generation-checked `RuntimeResourceTable` row of kind `TLSSocketWrap`.
+  `__handle__` stores the generation-checked resource id, close is routed
+  through the typed descriptor, and the row is removed before native transport
+  teardown. TLS continuation callbacks and fixed value slots remain their
+  respective `RootVector` carriers rather than becoming duplicate resource
+  owners (D5.1.1v2, D5.4.2 and D7.4.1v2).
+- **JSCU31, native owner typing:** TLS ticket-generation and secure-context
+  owner lists now use explicit forward-declared record pointers in
+  `JsTlsNativeState`; the old `void*` fields and cast-based accessor macros are
+  gone. These lists remain native TLS policy state, while script-visible
+  transports continue to use the resource table (D5.3.5 and D7.4.1v2).
+- **JSCU33(A), callable-code owner:** immutable callable metadata formerly
+  spread across `JsFunction` (`func_ptr`, source, runtime, arity, catalog,
+  module, formal length, intrinsic/body tags) now lives in one
+  `JsCallableCode` allocation referenced by the value. Constructors,
+  finalization, invocation, construction, source formatting, typed-array
+  policy and interpreter body checks use that accessor boundary; mutable value
+  state and semantic payloads remain on `JsFunction` (D6.2.1 and D6.2.2v2).
+- **JSCU35(4d) verification:** completed MIR/source units continue to use the
+  dynamic `JsCompiledArtifact` row store as their sole deferred-artifact
+  owner. The in-flight signal-recovery capsule remains intentionally separate
+  because it owns unfinished transpilers, not emitted code (D8.2.4).
+
+All 65 `JavaScriptRegression` cases pass in the normal release/debug harness;
+socket-enabled runs were used for the network cases. The newly touched Jube
+and network smoke scripts also pass in the release binary. A broader
+`LAMBDA_GC_FORCE_EVERY=1` sweep still exposes the baseline's unrelated
+forced-GC instability in intrinsic/template/media paths, so it is not claimed
+as a gate for this slice. The release build and 544-translation-unit
+structural census complete successfully.
+
+Open after this phase: the operation-specific HTTP resource rows, removal of
+the legacy TLS-socket object slot, and the final release/performance gates.
+The realm catalog, typed-array slot carrier, lazy-record slices, AST
+definition owner, and closure checkpoint work are carried forward below.
+
+### 8.15 Phase 3 continuation implementation (2026-09-10)
+
+This slice makes the next definition/lifetime boundary explicit: one callable
+definition owns one immutable MIR-code record, while each function value keeps
+only its mutable identity and semantic payload. It also removes another fixed
+intrinsic span and makes the assertion/test-runner record genuinely lazy.
+
+- **JSCU33(C), definition-level callable-code interning:** GC-backed MIR
+  wrappers and closures now share a weak, realm-owned `JsCallableCode` table
+  keyed by MIR entry, runtime `Context`, parameter count and module-state
+  identity. The record carries the immutable executable facts and a reference
+  count; each function finalizer releases one reference, and the last release
+  removes the weak row and frees the record. Pool-backed wrappers, native
+  wrappers and AST-bodied functions retain their non-interned code records
+  because their owners and semantic tails differ. Allocation failure falls
+  back to the same fully initialized unique record, preserving D6.2.1's
+  callable representation and D5.3.5's precise ownership contract.
+- **JSCU29(H), intrinsic namespace tail:** Math, JSON, CSS, Intl, console,
+  `$262`, Reflect and Atomics namespace identities now use the existing
+  `JsRealmSlots` dynamic root carrier. `JsRealmIntrinsicSlots` retains only
+  catalog-indexed builtin/constructor and typed-array caches, so its fixed
+  root span is contiguous and no longer mixes namespace singletons with
+  indexed intrinsic tables (D5.3.5 and D6.2.2v2).
+- **JSCU29(I), lazy assertion record:** `JsAssertState` is allocated only
+  when `assert` or `node:test` is first requested. Its assertion-instance,
+  node-test and mock ledgers initialize together in one ensure function;
+  realm root visitation, reset and teardown tolerate an absent record. This
+  extends the lazy-record contract already used by Test262 agents, readline
+  and AsyncLocalStorage, without creating a second owner for any rooted value
+  (D5.1.1v2, D5.3.5 and D5.4.2).
+
+The phase-3 build and test binaries compile cleanly. The AST definition-owner
+probe passes in both normal and forced-GC AST execution. Socket-backed
+regressions require a socket-enabled test environment; sandboxed runs report
+permission failures before producing script output. The remaining work is
+limited to the HTTP resource-row tail, the TLS-socket legacy object slot, and
+the final release/performance gates.
+
+### 8.16 Phase 3 wrap-up implementation (2026-09-10)
+
+This wrap-up records the final verified slices from the current worktree. They
+apply the one-concept/one-carrier rule at the definition, resource-owner, and
+closure-checkpoint boundaries while keeping the formal lifetime rulings
+unchanged.
+
+- **JSCU33(A), AST definition owner:** `JsAstDefinition` is retained by the
+  `JsScript` and owns the immutable function facts plus one pooled
+  `JsCallableCode`. Every closure keeps only its definition pointer,
+  environment, and lexical homes; closures made from one AST definition now
+  share the same code record. Function-value identity remains distinct, and
+  the retained Script pool owns the shared code (D6.2.1, D8.1.3v10 and
+  D8.2.4).
+- **JSCUO4, closure checkpoints:** MIR lowering uses `JsClosureTracker` for
+  active captures and its checkpoint journal. Save, rollback, clear, and
+  reserve operations now name the single tracker mechanism instead of a
+  snapshot plus a parallel journal (D8.2.4 and D8.2.5).
+- **JSCU29, indexed realm catalog:** typed-array prototypes, builtin-function
+  entries, global builtin entries, and constructor entries are addressed by
+  indexed `JsRealmSlots`; `JsRealmIntrinsicSlots` contains only initialization
+  policy booleans. Indexed access uses `RootVector` addressing, including
+  non-contiguous growth, so fixed-span pointer arithmetic is not required
+  (D5.3.5, D5.4.2 and D6.2.2v2).
+- **JSCU31, native owner rows:** process IPC, child-process exec/spawn, and
+  TLS-server owners now publish their script-visible owner through typed
+  `RuntimeResourceTable` rows. Callback/value teardown removes the row before
+  releasing native state, preserving generation checks and exact roots
+  (D7.4.1v2, D7.4.2 and D5.4.2).
+
+The verified non-network regressions and AST probe pass after the changes. A
+full socket-enabled run remains the appropriate gate for network cases; this
+worktree's sandbox cannot bind those sockets. HTTP operation rows, the TLS
+socket's remaining object-slot consolidation, and release/performance gates
+are intentionally left as the next bounded slice rather than being claimed
+complete here.
 
 ---
 

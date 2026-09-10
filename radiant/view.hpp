@@ -2579,7 +2579,9 @@ static_assert(sizeof(ViewTable) == sizeof(DomElement), "ViewTable must not add f
 static_assert(sizeof(ViewTableRowGroup) == sizeof(DomElement), "ViewTableRowGroup must not add fields");
 static_assert(sizeof(ViewTableRow) == sizeof(DomElement), "ViewTableRow must not add fields");
 static_assert(sizeof(ViewTableCell) == sizeof(DomElement), "ViewTableCell must not add fields");
-static_assert(sizeof(DomElement) <= 368, "DomElement size ratchet regressed");
+// List now carries Lambda's array representation certificate after its stable
+// content offsets; DOM overlays inherit that one-word tail (D3.3.3).
+static_assert(sizeof(DomElement) <= 376, "DomElement size ratchet regressed");
 static_assert(sizeof(DomText) <= 120, "DomText size ratchet regressed");
 static_assert(sizeof(DomNode) <= 80, "DomNode size ratchet regressed");
 

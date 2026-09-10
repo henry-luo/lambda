@@ -1203,6 +1203,11 @@ TEST(JavaScriptRegression, Jscu29DynamicGlobalEnvironmentAndJobs) {
         "test/js/jscu29_dynamic_global_environment.txt");
 }
 
+TEST(JavaScriptRegression, Jscu29RealmSlotsUtil) {
+    test_js_script_against_file("test/js/jscu29_realm_slots_util.js",
+        "test/js/jscu29_realm_slots_util.txt");
+}
+
 TEST(JavaScriptRegression, Jscu31TimerResourceTable) {
     test_js_script_against_file("test/js/jscu31_timer_resource_table.js",
         "test/js/jscu31_timer_resource_table.txt");
@@ -1308,6 +1313,11 @@ TEST(JavaScriptRegression, Jscu31TlsWriteCallbackRoots) {
         "test/js/jscu31_tls_write_callback_roots.txt");
 }
 
+TEST(JavaScriptRegression, Jscu31TlsServerValueSlots) {
+    test_js_script_against_file("test/js/jscu31_tls_server_value_slots.js",
+        "test/js/jscu31_tls_server_value_slots.txt");
+}
+
 TEST(JavaScriptRegression, Jscu31ProcessIpcCallbackRoots) {
     test_js_script_against_file("test/js/jscu31_process_ipc_callback_roots.js",
         "test/js/jscu31_process_ipc_callback_roots.txt");
@@ -1331,6 +1341,26 @@ TEST(JavaScriptRegression, Jscu31HttpResponseWriteTail) {
 TEST(JavaScriptRegression, Jscu31ChildProcessIpcCallbackSlots) {
     test_js_script_against_file("test/js/jscu31_child_process_ipc_callback_slots.js",
         "test/js/jscu31_child_process_ipc_callback_slots.txt");
+}
+
+TEST(JavaScriptRegression, Jscu31ChildProcessExecValues) {
+    test_js_script_against_file("test/js/jscu31_child_process_exec_values.js",
+        "test/js/jscu31_child_process_exec_values.txt");
+}
+
+TEST(JavaScriptRegression, Jscu31ChildProcessSpawnValues) {
+    test_js_script_against_file("test/js/jscu31_child_process_spawn_values.js",
+        "test/js/jscu31_child_process_spawn_values.txt");
+}
+
+TEST(JavaScriptRegression, Jscu31JubePersistentValueSlots) {
+    test_js_script_against_file("test/js/jscu31_jube_persistent_value_slots.js",
+        "test/js/jscu31_jube_persistent_value_slots.txt");
+}
+
+TEST(JavaScriptRegression, Jscu31BoundSocketOwner) {
+    test_js_script_against_file("test/js/jscu31_bound_socket_owner.js",
+        "test/js/jscu31_bound_socket_owner.txt");
 }
 
 TEST(JavaScriptRegression, Jscu35DynamicFunctionCache) {

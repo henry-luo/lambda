@@ -2,6 +2,7 @@
  * JavaScript Typed Array, ArrayBuffer, and DataView Implementation for Lambda
  */
 #include "js_typed_array.h"
+#include "js_typed_array_carrier.hpp"
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
 #include "js_class.h"
@@ -26,11 +27,6 @@ typedef struct JsArrayBufferMapCarrier {
     Map base;
     JsArrayBuffer* payload;
 } JsArrayBufferMapCarrier;
-
-typedef struct JsTypedArrayMapCarrier {
-    Map base;
-    JsTypedArray payload;
-} JsTypedArrayMapCarrier;
 
 typedef struct JsDataViewMapCarrier {
     Map base;
@@ -900,12 +896,13 @@ typedef struct JsAtomicsRuntimeState {
 } JsAtomicsRuntimeState;
 
 static JsAtomicsRuntimeState* js_atomics_runtime_state(void) {
-    return js_active_runtime_state ?
-        (JsAtomicsRuntimeState*)js_runtime_state.test262_agent->atomics_waiter_state : NULL;
+    return js_active_runtime_state && js_runtime_state.test262_agent ?
+        js_runtime_state.test262_agent->atomics_waiter_state : NULL;
 }
 
 extern "C" bool js_atomics_runtime_state_ensure(void) {
     if (!js_active_runtime_state) return false;
+    if (!js_test262_agent_state_ensure(&js_runtime_state)) return false;
     if (!js_runtime_state.test262_agent->atomics_waiter_state) {
         // Atomics namespace creation is cold; waiter lookup and notification
         // below use direct owner-context storage without synchronization.
@@ -920,7 +917,7 @@ extern "C" bool js_atomics_runtime_state_ensure(void) {
     return true;
 }
 
-#define js_atomics_state (*(JsAtomicsRuntimeState*)js_runtime_state.test262_agent->atomics_waiter_state)
+#define js_atomics_state (*js_runtime_state.test262_agent->atomics_waiter_state)
 #define js_atomics_waiter_rows (js_atomics_state.waiters)
 #define js_atomics_waiter_values (js_atomics_state.promise_values)
 #define js_atomics_next_waiter_id (js_atomics_state.next_waiter_id)
@@ -1151,9 +1148,9 @@ extern "C" void js_atomics_reset_waiters(void) {
 }
 
 extern "C" void js_atomics_destroy_context(JsRuntimeState* runtime_state) {
-    if (!runtime_state || !runtime_state->test262_agent->atomics_waiter_state) return;
-    JsAtomicsRuntimeState* state = (JsAtomicsRuntimeState*)
-        runtime_state->test262_agent->atomics_waiter_state;
+    if (!runtime_state || !runtime_state->test262_agent ||
+            !runtime_state->test262_agent->atomics_waiter_state) return;
+    JsAtomicsRuntimeState* state = runtime_state->test262_agent->atomics_waiter_state;
     js_atomics_waiters_clear(state);
     js_atomics_agent_waiters_clear(state);
     root_vector_destroy(&state->promise_values);

@@ -17,20 +17,24 @@
 
 static const JubeHostAPI* node_events_host = NULL;
 
+enum NodeEventsCacheSlot {
+    NODE_EVENTS_CACHE_EVENTS_KEY,
+    NODE_EVENTS_CACHE_ONCE_KEY,
+    NODE_EVENTS_CACHE_MAX_LISTENERS_KEY,
+    NODE_EVENTS_CACHE_NEW_LISTENER_KEY,
+    NODE_EVENTS_CACHE_REMOVE_LISTENER_KEY,
+    NODE_EVENTS_CACHE_LISTENER_FN_KEY,
+    NODE_EVENTS_CACHE_LISTENER_CONTEXT_KEY,
+    NODE_EVENTS_CACHE_WARNED_KEY,
+    NODE_EVENTS_CACHE_NAMESPACE,
+    NODE_EVENTS_CACHE_EE_PROTOTYPE,
+    NODE_EVENTS_CACHE_COUNT,
+};
+
 struct NodeEventsSessionState {
-    void* session;
-    bool rooted;
-    Item cached_events_key;
-    Item cached_once_key;
-    Item cached_max_listeners_key;
-    Item cached_new_listener_key;
-    Item cached_remove_listener_key;
-    Item cached_listener_fn_key;
-    Item cached_listener_context_key;
-    Item cached_warned_key;
-    Item cached_events_namespace;
+    JubePersistentValueSlots cache_values;
+    Item cache_items[NODE_EVENTS_CACHE_COUNT];
     bool cached_keys_initialized;
-    Item cached_ee_prototype;
 };
 
 void node_events_runtime_attach(void* session);
@@ -63,19 +67,18 @@ static bool node_events_attached(void) {
     return node_events_host != NULL && node_events_state() != NULL;
 }
 
-#define node_events_session (node_events_state()->session)
-#define node_events_rooted (node_events_state()->rooted)
-#define events_key (node_events_state()->cached_events_key)
-#define once_key (node_events_state()->cached_once_key)
-#define max_listeners_key (node_events_state()->cached_max_listeners_key)
-#define new_listener_key (node_events_state()->cached_new_listener_key)
-#define remove_listener_key (node_events_state()->cached_remove_listener_key)
-#define listener_fn_key (node_events_state()->cached_listener_fn_key)
-#define listener_context_key (node_events_state()->cached_listener_context_key)
-#define warned_key (node_events_state()->cached_warned_key)
-#define events_namespace (node_events_state()->cached_events_namespace)
+#define node_events_session (node_events_state()->cache_values.session)
+#define events_key (node_events_state()->cache_items[NODE_EVENTS_CACHE_EVENTS_KEY])
+#define once_key (node_events_state()->cache_items[NODE_EVENTS_CACHE_ONCE_KEY])
+#define max_listeners_key (node_events_state()->cache_items[NODE_EVENTS_CACHE_MAX_LISTENERS_KEY])
+#define new_listener_key (node_events_state()->cache_items[NODE_EVENTS_CACHE_NEW_LISTENER_KEY])
+#define remove_listener_key (node_events_state()->cache_items[NODE_EVENTS_CACHE_REMOVE_LISTENER_KEY])
+#define listener_fn_key (node_events_state()->cache_items[NODE_EVENTS_CACHE_LISTENER_FN_KEY])
+#define listener_context_key (node_events_state()->cache_items[NODE_EVENTS_CACHE_LISTENER_CONTEXT_KEY])
+#define warned_key (node_events_state()->cache_items[NODE_EVENTS_CACHE_WARNED_KEY])
+#define events_namespace (node_events_state()->cache_items[NODE_EVENTS_CACHE_NAMESPACE])
 #define keys_initialized (node_events_state()->cached_keys_initialized)
-#define ee_prototype (node_events_state()->cached_ee_prototype)
+#define ee_prototype (node_events_state()->cache_items[NODE_EVENTS_CACHE_EE_PROTOTYPE])
 
 static Item node_events_string(const char* text) {
     return node_events_host && node_events_host->value &&
@@ -1183,16 +1186,7 @@ Item node_events_namespace(void) {
 static void node_events_cache_reset(void) {
     NodeEventsSessionState* state = node_events_state();
     if (!state) return;
-    state->cached_events_key = (Item){0};
-    state->cached_once_key = (Item){0};
-    state->cached_max_listeners_key = (Item){0};
-    state->cached_new_listener_key = (Item){0};
-    state->cached_remove_listener_key = (Item){0};
-    state->cached_listener_fn_key = (Item){0};
-    state->cached_listener_context_key = (Item){0};
-    state->cached_warned_key = (Item){0};
-    state->cached_events_namespace = (Item){0};
-    state->cached_ee_prototype = (Item){0};
+    jube_persistent_value_slots_reset(&state->cache_values);
     state->cached_keys_initialized = false;
 }
 
@@ -1217,7 +1211,9 @@ int node_events_init(const JubeHostAPI* host) {
             !host->node->events->als_context_call ||
             !host->node->events->domain_emit_current_error ||
             !host->node->events->process_emit_warning ||
-            !host->node->events->is_error_like) return -1;
+            !host->node->events->is_error_like ||
+            !host->node->roots->persistent_root_register ||
+            !host->node->roots->persistent_root_unregister) return -1;
     node_events_host = host;
     return 0;
 }
@@ -1225,10 +1221,7 @@ int node_events_init(const JubeHostAPI* host) {
 void node_events_shutdown(void) {
     node_events_cache_reset();
     NodeEventsSessionState* state = node_events_state();
-    if (state) {
-        state->rooted = false;
-        state->session = NULL;
-    }
+    if (state) jube_persistent_value_slots_forget(&state->cache_values);
     node_events_host = NULL;
 }
 
@@ -1240,49 +1233,19 @@ void node_events_runtime_attach(void* session) {
         jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_EVENTS,
             sizeof(NodeEventsSessionState));
     if (!state) return;
-    uint64_t* roots[] = {
-        &state->cached_events_key.item, &state->cached_once_key.item,
-        &state->cached_max_listeners_key.item, &state->cached_new_listener_key.item,
-        &state->cached_remove_listener_key.item, &state->cached_listener_fn_key.item,
-        &state->cached_listener_context_key.item, &state->cached_warned_key.item,
-        &state->cached_events_namespace.item, &state->cached_ee_prototype.item,
-    };
-    int registered = 0;
-    for (; registered < (int)(sizeof(roots) / sizeof(roots[0])); registered++) {
-        if (node_events_host->node->roots->persistent_root_register(session, roots[registered]) != 0) {
-            // The cache belongs to one attached runtime; unwind partial roots
-            // so a failed attach cannot retain values from a later session.
-            while (registered-- > 0) {
-                node_events_host->node->roots->persistent_root_unregister(session, roots[registered]);
-            }
-            return;
-        }
-    }
-    state->session = session;
-    state->rooted = true;
+    if (jube_persistent_value_slots_attach(&state->cache_values, session,
+            node_events_host->node->roots, state->cache_items,
+            NODE_EVENTS_CACHE_COUNT) != 0) return;
 }
 
 void node_events_runtime_reset(void* session) {
     NodeEventsSessionState* state = node_events_state();
-    if (state && session == state->session) node_events_cache_reset();
+    if (state && session == state->cache_values.session) node_events_cache_reset();
 }
 
 void node_events_runtime_detach(void* session) {
     NodeEventsSessionState* state = node_events_state();
-    if (!node_events_host || !state || session != state->session) return;
-    if (state->rooted) {
-        uint64_t* roots[] = {
-            &state->cached_events_key.item, &state->cached_once_key.item,
-            &state->cached_max_listeners_key.item, &state->cached_new_listener_key.item,
-            &state->cached_remove_listener_key.item, &state->cached_listener_fn_key.item,
-            &state->cached_listener_context_key.item, &state->cached_warned_key.item,
-            &state->cached_events_namespace.item, &state->cached_ee_prototype.item,
-        };
-        for (int i = 0; i < (int)(sizeof(roots) / sizeof(roots[0])); i++) {
-            node_events_host->node->roots->persistent_root_unregister(session, roots[i]);
-        }
-        state->rooted = false;
-    }
-    node_events_cache_reset();
-    state->session = NULL;
+    if (!node_events_host || !state || session != state->cache_values.session) return;
+    state->cached_keys_initialized = false;
+    jube_persistent_value_slots_detach(&state->cache_values);
 }

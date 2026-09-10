@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Tune18 string[] indexing keeps the generic array bounds contract but removes fn_index dispatch for the stable boxed element lane.",
+  "description": "Tune18 string[] indexing uses its certificate-guarded raw pointer lane and preserves item_at as the representation-safe slow path.",
   "checks": [
     {
       "in_func": "_main_#",
@@ -8,8 +8,7 @@
         "mov\ti64:("
       ],
       "forbid": [
-        "call\tfn_index_p, fn_index",
-        "call\titem_at_p, item_at"
+        "call\tfn_index_p, fn_index"
       ]
     }
   ]

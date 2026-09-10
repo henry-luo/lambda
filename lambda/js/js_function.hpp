@@ -10,6 +10,13 @@ struct JsFunction;
 struct AstFuncNode;
 struct JsScript;
 struct JsInterpEnv;
+struct JsAstDefinition;
+struct JsCallableCode;
+
+JsAstDefinition* js_script_ast_definition_ensure(JsScript* script,
+                                                 AstFuncNode* function);
+JsCallableCode* js_script_ast_definition_code_ensure(
+    JsAstDefinition* definition, int param_count, uint32_t module_state_id);
 
 enum JsFunctionBodyKind : uint8_t {
     JS_FUNCTION_BODY_CODE = 0,
@@ -93,21 +100,26 @@ struct JsNativeCode {
     uint8_t               policy;
 };
 
-// An AST-bodied closure retains source-level semantics while using the ordinary
-// JS call kernel. Only such a closure carries these facts, so a compiled-code
-// function holds one null word instead of five fields and three flags. The two
-// Items are precise GC edges reached through the owning value's tracer.
-struct JsAstBody {
+// Immutable AST definition facts are owned by JsScript and shared by every
+// closure made for the same AstFuncNode. The per-value body retains only its
+// closure environment and lexical Item homes (D6.2.1; JSCU33(A)).
+struct JsAstDefinition {
     AstFuncNode* function;
     JsScript* script;
-    JsInterpEnv* env;
-    Item lexical_this;
-    Item lexical_new_target;
-    // Derived once at closure creation; immutable because the source AST and
-    // the lexical function form are immutable too.
+    JsCallableCode* code;
     bool has_direct_eval;
     bool uses_arguments;
     bool tail_reuse_safe;
+};
+
+// An AST-bodied closure retains source-level semantic state while using the
+// ordinary JS call kernel. The definition pointer is non-owning; the Script
+// retains the definition rows until its AST function values are gone.
+struct JsAstBody {
+    JsAstDefinition* definition;
+    JsInterpEnv* env;
+    Item lexical_this;
+    Item lexical_new_target;
 };
 
 // Source origin of a dynamically compiled function.
@@ -116,6 +128,29 @@ struct JsEvalOrigin {
     String* source;
     int64_t line_offset;
     int64_t column_offset;
+};
+
+// JSCU33(A): immutable definition-site facts have one owner shared by the
+// callable value and any wrappers materialized from that definition. Mutable
+// value state (prototype, properties, bound/class payload and finalized
+// capabilities) remains on JsFunction itself.
+struct JsCallableCode {
+    void* func_ptr;
+    String* source_text;
+    Context* runtime_context;
+    int param_count;
+    int catalog_id;
+    uint32_t module_state_id;
+    int16_t formal_length;
+    uint8_t intrinsic_class;
+    uint8_t typed_array_element_type_plus_one;
+    bool eval_initializer_context;
+    uint8_t body_kind;
+    uint32_t intern_refcount;
+    bool interned;
+    // AST definition records live in their retained Script pool; their code
+    // pointer is shared by every closure made from that definition.
+    bool definition_owned;
 };
 
 // JSCUO8: one payload word on the value, not six. A value that needs none
@@ -142,7 +177,6 @@ struct JsFunction {
     uint32_t layout_magic;
 
     // 8-byte group
-    void* func_ptr;
     Item* env;
     Item prototype;
     String* name;
@@ -150,34 +184,16 @@ struct JsFunction {
     JsCallEntry invoke;
     JsConstructEntry construct;
     Item home_global;
-    // `source_text` stays on the value: its setter js_set_function_source is a
-    // NO_GC JIT import (sys_func_registry.c) and must not allocate, which a
-    // lazily minted payload would force it to do.
-    String* source_text;
-    Context* runtime_context;
-    // JSCUO8: every optional record hangs off this one word.
+    JsCallableCode* code;
+    // JSCUO8: every optional value record hangs off this one word.
     JsFunctionPayload* payload;
 
     // 4-byte group
-    int param_count;
     int env_size;
-    int catalog_id;
-    uint32_t module_state_id;
 
     // 2-byte group
     uint16_t flags;
-    int16_t formal_length;
-
-    // 1-byte group
-    uint8_t intrinsic_class;
-    // Concrete TypedArray constructors carry their element policy directly;
-    // display names and catalog IDs are never executable selectors (D6.2.2v2).
-    uint8_t typed_array_element_type_plus_one;
     uint8_t pool_pointer_roots_registered;
-    bool eval_initializer_context;
-    // `body_kind` stays inline because it is the discriminator every call site
-    // tests before it looks at the payload at all.
-    uint8_t body_kind;
 };
 
 
@@ -190,16 +206,80 @@ inline const JsClassData js_fn_class_absent{};
 inline const JsWithData js_fn_with_absent{};
 
 inline const JsEvalOrigin js_fn_eval_origin_absent{};
+inline const JsCallableCode js_fn_code_absent{
+    NULL, NULL, NULL, 0, 0, UINT32_MAX, -1, 0, 0, false,
+    JS_FUNCTION_BODY_CODE, 0, false, false};
 
 #define JS_FN_PAYLOAD_READ(fn, field) \
     ((fn) && (fn)->payload && (fn)->payload->field ? (fn)->payload->field \
                                                    : &js_fn_##field##_absent)
+
+static inline const JsCallableCode* js_fn_code(const JsFunction* fn) {
+    return fn && fn->code ? fn->code : &js_fn_code_absent;
+}
+static inline void* js_fn_func_ptr(const JsFunction* fn) {
+    return js_fn_code(fn)->func_ptr;
+}
+static inline String* js_fn_source_text(const JsFunction* fn) {
+    return js_fn_code(fn)->source_text;
+}
+static inline Context* js_fn_runtime_context(const JsFunction* fn) {
+    return js_fn_code(fn)->runtime_context;
+}
+static inline int js_fn_param_count(const JsFunction* fn) {
+    return js_fn_code(fn)->param_count;
+}
+static inline int js_fn_catalog_id(const JsFunction* fn) {
+    return js_fn_code(fn)->catalog_id;
+}
+static inline uint32_t js_fn_module_state_id(const JsFunction* fn) {
+    return js_fn_code(fn)->module_state_id;
+}
+static inline int16_t js_fn_formal_length(const JsFunction* fn) {
+    return js_fn_code(fn)->formal_length;
+}
+static inline uint8_t js_fn_intrinsic_class(const JsFunction* fn) {
+    return js_fn_code(fn)->intrinsic_class;
+}
+static inline uint8_t js_fn_typed_array_element_type_plus_one(const JsFunction* fn) {
+    return js_fn_code(fn)->typed_array_element_type_plus_one;
+}
+static inline bool js_fn_eval_initializer_context(const JsFunction* fn) {
+    return js_fn_code(fn)->eval_initializer_context;
+}
+static inline uint8_t js_fn_body_kind(const JsFunction* fn) {
+    return js_fn_code(fn)->body_kind;
+}
 
 static inline const JsNativeCode* js_fn_native(const JsFunction* fn) {
     return JS_FN_PAYLOAD_READ(fn, native);
 }
 static inline const JsAstBody* js_fn_ast(const JsFunction* fn) {
     return JS_FN_PAYLOAD_READ(fn, ast);
+}
+static inline const JsAstDefinition* js_fn_ast_definition(const JsFunction* fn) {
+    const JsAstBody* ast = js_fn_ast(fn);
+    return ast && ast->definition ? ast->definition : NULL;
+}
+static inline AstFuncNode* js_fn_ast_function(const JsFunction* fn) {
+    const JsAstDefinition* definition = js_fn_ast_definition(fn);
+    return definition ? definition->function : NULL;
+}
+static inline JsScript* js_fn_ast_script(const JsFunction* fn) {
+    const JsAstDefinition* definition = js_fn_ast_definition(fn);
+    return definition ? definition->script : NULL;
+}
+static inline bool js_fn_ast_has_direct_eval(const JsFunction* fn) {
+    const JsAstDefinition* definition = js_fn_ast_definition(fn);
+    return definition && definition->has_direct_eval;
+}
+static inline bool js_fn_ast_uses_arguments(const JsFunction* fn) {
+    const JsAstDefinition* definition = js_fn_ast_definition(fn);
+    return definition && definition->uses_arguments;
+}
+static inline bool js_fn_ast_tail_reuse_safe(const JsFunction* fn) {
+    const JsAstDefinition* definition = js_fn_ast_definition(fn);
+    return definition && definition->tail_reuse_safe;
 }
 static inline const JsBoundData* js_fn_bound(const JsFunction* fn) {
     return JS_FN_PAYLOAD_READ(fn, bound);
@@ -221,6 +301,10 @@ JsBoundData* js_fn_bound_ensure(JsFunction* fn);
 JsClassData* js_fn_class_ensure(JsFunction* fn);
 JsWithData* js_fn_with_ensure(JsFunction* fn);
 JsEvalOrigin* js_fn_eval_origin_ensure(JsFunction* fn);
+JsCallableCode* js_fn_code_ensure(JsFunction* fn);
+JsCallableCode* js_callable_code_intern_mir(JsFunction* fn, void* func_ptr,
+        Context* runtime_context, int param_count, uint32_t module_state_id);
+void js_callable_code_release(JsCallableCode* code);
 
 #define JS_FUNCTION_LAYOUT_MAGIC 0x4A53464Eu
 
@@ -253,14 +337,15 @@ static_assert(offsetof(JsFunction, type_id) == 0,
               "JsFunction type tag must sit where every Item consumer reads it");
 static_assert(offsetof(JsFunction, layout_magic) == 4,
               "JsFunction layout discriminator is read before any field access");
-static_assert(offsetof(JsFunction, type_id) < offsetof(JsFunction, func_ptr),
+static_assert(offsetof(JsFunction, type_id) < offsetof(JsFunction, code),
               "the discrimination prefix must precede every other field");
 
 static inline void js_function_init_native_module_scope(JsFunction* fn) {
     if (!fn) return;
     // Pool allocation zeroes this field, but zero is a valid module id. Native
     // wrappers have no compiled module scope and must not switch callers to it.
-    fn->module_state_id = UINT32_MAX;
+    JsCallableCode* code = js_fn_code_ensure(fn);
+    if (code) code->module_state_id = UINT32_MAX;
 }
 
 static inline void js_function_set_bound_this(JsFunction* fn, Item value) {
@@ -272,10 +357,6 @@ static inline Item js_function_get_bound_this(JsFunction* fn) {
     // only a bound function has the home; anything else has no bound receiver
     if (!fn || !fn->payload || !fn->payload->bound) return ItemNull;
     return owned_item_slot_read(fn->payload->bound->this_store, 1, 0, false);
-}
-
-static inline String* js_fn_source_text(const JsFunction* fn) {
-    return fn ? fn->source_text : NULL;
 }
 
 // JSCUO9: only a method carries a home class, and its setter

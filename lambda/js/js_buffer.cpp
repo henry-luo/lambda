@@ -1972,9 +1972,13 @@ JS_FORWARD_ITEM(js_buffer_swap64, (Item buf), js_buffer_swap_words, (buf, 8))
 
 // ─── Helpers & statics ──────────────────────────────────────────────────────
 
-#define buffer_namespace (js_runtime_state.buffer.namespace_object)
-#define buffer_prototype (js_runtime_state.buffer.prototype)
-JS_FORWARD_STATIC_EXPRESSION(bool, buffer_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.buffer.roots)))
+static bool buffer_ensure_realm_slots(void) {
+    if (!js_active_runtime_state) return false;
+    return js_realm_slot(&js_runtime_state.realm_slots,
+               JS_REALM_SLOT_BUFFER_NAMESPACE) &&
+        js_realm_slot(&js_runtime_state.realm_slots,
+            JS_REALM_SLOT_BUFFER_PROTOTYPE);
+}
 
 template <typename Target>
 JS_FORWARD_STATIC_VOID( buf_set_method, (Item ns, const char* name, Target target,         int adapter_arity), js_install_native_method, (ns, name, target, adapter_arity))
@@ -2288,7 +2292,11 @@ JS_BUF_INST_VOID0(swap64)
 // ─── Buffer Prototype ───────────────────────────────────────────────────────
 
 extern "C" Item js_get_buffer_prototype(void) {
-    if (!buffer_ensure_roots()) return ItemError;
+    if (!buffer_ensure_realm_slots()) return ItemError;
+    Item* prototype_slot = js_realm_slot(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_BUFFER_PROTOTYPE);
+    if (!prototype_slot) return ItemError;
+    Item& buffer_prototype = *prototype_slot;
     if (buffer_prototype.item != 0) return buffer_prototype;
 
     buffer_prototype = js_new_object();
@@ -2354,7 +2362,11 @@ extern "C" Item js_get_buffer_prototype(void) {
 // ─── Namespace ───────────────────────────────────────────────────────────────
 
 extern "C" Item js_get_buffer_namespace(void) {
-    if (!buffer_ensure_roots()) return ItemError;
+    if (!buffer_ensure_realm_slots()) return ItemError;
+    Item* namespace_slot = js_realm_slot(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_BUFFER_NAMESPACE);
+    if (!namespace_slot) return ItemError;
+    Item& buffer_namespace = *namespace_slot;
     if (buffer_namespace.item != 0) return buffer_namespace;
 
     // Buffer is both a callable function (deprecated Buffer(arg, enc)) and a namespace
@@ -2467,6 +2479,10 @@ extern "C" Item js_get_buffer_namespace(void) {
 
 extern "C" void js_reset_buffer_module(void) {
     if (!js_active_runtime_state) return;
-    buffer_namespace = (Item){0};
-    buffer_prototype = (Item){0};
+    Item* namespace_slot = js_realm_slot_existing(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_BUFFER_NAMESPACE);
+    Item* prototype_slot = js_realm_slot_existing(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_BUFFER_PROTOTYPE);
+    if (namespace_slot) *namespace_slot = (Item){0};
+    if (prototype_slot) *prototype_slot = (Item){0};
 }

@@ -1,11 +1,14 @@
 # Proper `T[]` Typed Arrays for Core Lambda — Implementation Plan
 
 - **Date:** 2026-09-09
-- **Status:** PROPOSED — audit complete; implementation not started.
+- **Status:** Typed-array functionality implemented on 2026-09-09;
+  proof-preserving typed-path follow-up implemented and verified on
+  2026-09-10 in `temp/typed-array-proper` (§13, including two unrelated
+  pre-existing baseline failures).
 - **Scope:** Core Lambda `T[]` contracts from parsing through AST typing,
-  admission, storage, MIR Direct, mutation, views, reflection, and system
-  functions. Existing `ArrayNum` kernels are retained and brought under the
-  contract model.
+  runtime admission, storage, MIR Direct, mutation, views, reflection, system
+  functions, typed benchmark scripts, tests, and user documentation. Existing
+  `ArrayNum` kernels are retained and brought under the contract model.
 - **Out of scope:** LambdaJS `TypedArray`, new image algorithms, manual SIMD,
   dependent-shape types, a C-text/C2MIR back end, and changes to vendored MIR.
 - **Prior records:** `../Lambda_Typed_Array.md`,
@@ -14,25 +17,12 @@
   `../Lambda_Design_Runtime_COW.md`,
   `../Lambda_Design_Compiling_Lane.md`, and
   `../Lambda_Issue_Ledger.md` (`LR12-4`, `LR12-5`).
-- **Formal authority:** **S7.7.2–S7.7.6** (checked boundaries and failure
-  routing), **S7.8.1** (container admission comes from the destination
-  contract), **S7.10.5–S7.10.6** (typed vector results and mutator errors),
-  **S9.1.1–S9.1.3**, **S9.1.5v2** (finality, COW, `var` sharing, and the
-  no-reference-cell value model), **S9.2.1–S9.2.2**
-  (value covariance, borrow invariance, and view confinement), **S11.1.1**
-  (`T[]` is the homogeneous-array spelling), **S11.3.1v2** (structural array
-  membership), **S11.4.1–S11.4.5** (annotations are enforced contracts),
-  **S12.2.1** (exact embedding and annotated reassignment), **D2.4.1–D2.4.3**
-  (semantic contract and representation are separate facts), **D2.5.1–D2.5.3**
-  (nullable lanes and `T?` reads), **D2.6.1–D2.6.5** (array representations,
-  ArrayNum/nullability, and append semantics), **D2.6.11** (the pinned
-  container header), **D2.8.1–D2.8.3** (error-free
-  lane entry), **D3.1.1v2–D3.1.3** (the full `Type*` graph is authoritative),
-  **D3.2.3–D3.2.4v2** (declared/effective separation and map reification),
-  **D3.3.3–D3.3.4** (binding-local narrowing and full-contract
-  representation), **D3.4.5–D3.4.6** (transactional writes and shared lane
-  descriptors), and **D5.3.3–D5.3.4** (precise roots across allocating
-  boundaries).
+- **Formal authority:** **S11.1.1v2** (homogeneous arrays and rank),
+  **S11.4.1v3** (checked construction and mutation), **S7.7.2** (checked
+  boundaries), **S7.10.6** (mutator errors), **S9.1.1–S9.2.2** (value/COW and
+  `var` borrowing), **D3.1.1v3** (the full `Type*` graph is authoritative),
+  **D3.2.4v3** (named-layout reification), and **D3.3.3v3** (a certificate is
+  not inferred narrowing).
 
 ---
 
@@ -113,7 +103,7 @@ Typed empty construction is representation-directed:
 
 ## 2. Audit baseline and root cause
 
-### 2.1 Current split
+### 2.1 Pre-implementation split
 
 The implementation currently has four partial notions of an array type:
 
@@ -875,8 +865,8 @@ wrong result, tier divergence, memory overwrite, or missing expected output.
 - Update `doc/Lambda_Type.md`, validator docs, and examples for array-only
   `T[]`, exact `[T]`, nested rank, nullable arrays, covariance, and invariant
   `var` parameters.
-- Mark this file `(done)` only after all correctness, baseline, sanitizer,
-  release, and mechanism gates pass.
+- This file is complete because the correctness, baseline, sanitizer, release,
+  and mechanism gates recorded in Section 12 passed.
 
 **Performance gates — release build only**
 
@@ -973,17 +963,17 @@ grow another switch independently in AST, T0, MIR, and validator code.
 
 | Phase | Status | Required evidence |
 |---|---|---|
-| 0. Pin failures | not started | permanent regressions + issue-ledger sync |
-| 1. Compact-width safety | not started | 14-kind canary + ASan |
-| 2. Canonical `T[]` | not started | one resolver; structural relation tests |
-| 3. Representation certificate | not started | ABI/GC/COW/lifetime tests |
-| 4. Unified admission | not started | exact JIT/T0 boundary matrix; O(1) repeat |
-| 5. Inference/rank/reads | not started | nested and nullable inferred-type tests |
-| 6. MIR proof | not started | MIR helper/instruction gates |
-| 7. Checked mutation/growth | not started | flat/N-D/mask/push transactional matrix |
-| 8. Views/borrows | not started | snapshot, write-through, exclusivity, GC |
-| 9. Sysfunc/reflection | not started | registry census; empty/equality invariance |
-| 10. Migration/closeout | not started | baselines, full suite, release report, docs |
+| 0. Pin failures | complete | permanent positive/negative `.ls` goldens |
+| 1. Compact-width safety | complete | exact-store canaries and ASan fixture |
+| 2. Canonical `T[]` | complete | one resolver and structural-relation coverage |
+| 3. Representation certificate | complete | ABI, COW, GC, and heap-local lifetime coverage |
+| 4. Unified admission | complete | JIT/T0 boundary matrix and repeat-admission guards |
+| 5. Inference/rank/reads | complete | nested and nullable inferred-type tests |
+| 6. MIR proof | complete | MIR mechanism suite 86/86 and ratchets 16/16 |
+| 7. Checked mutation/growth | complete | flat/N-D/mask/push transactional coverage |
+| 8. Views/borrows | complete | snapshot, confined `var`, and forced-GC coverage |
+| 9. Sysfunc/reflection | complete | typed-result, empty-result, equality, and reflection coverage |
+| 10. Migration/closeout | complete | docs, baseline, release, and ASan evidence in Section 12 |
 
 Update this table only with concrete evidence: test names, counts, benchmark
 artifact, and commit/date. “Implemented” without a gate is not progress.
@@ -1088,5 +1078,256 @@ Proper `T[]` support is complete only when all of the following are true:
     contracts and no longer encode implementation workarounds as language
     semantics.
 
-Until all fourteen conditions hold, the feature remains partial and this file
-must retain its unsuffixed, not-complete name.
+The 2026-09-09 closeout below established broad functionality, but its claim of
+complete hot-path proof preservation was premature. The DeltaBlue regression
+exposed gaps in conditions 8–9; §13 records their follow-up implementation.
+
+---
+
+## 12. Implementation record and closeout audit
+
+The implementation uses one full-contract path rather than a second
+`TypeId`-only typed-array mechanism:
+
+- `OPERATOR_ARRAY` is distinct from occurrence/count syntax, and rank,
+  immediate element, lane, and compatibility questions go through
+  `lambda_array_contract_info`.
+- `runtime_type_admit_array` is the dynamic boundary. It roots every
+  allocating intermediate, validates and reifies the complete element
+  contract transactionally, then installs an interned `ArrayRepCert`.
+- `ArrayNum` has an exact non-coercive store for every compact kind. Raw
+  writes clear a certificate; checked writes retain or renew it only after
+  carrier verification.
+- MIR Direct guards a certificate before raw numeric, string, and named-map
+  lane access; its fallback is representation-safe. The T0 interpreter calls
+  the same checked runtime helpers.
+- The typed-benchmark audit found 69 `*2.ls` scripts. Only the two DeltaBlue
+  variants were promoted: their `Variable[]` values have the concrete
+  `MapVariable*[]` carrier, while the remaining open arrays are genuinely
+  heterogeneous JSON, AST, tuple, text-pipeline, or dynamic-node values.
+
+Final validation on 2026-09-09:
+
+- `make build-test`, compact-lane tests, and the interpreter proof test passed;
+- the focused typed-array/direct-map/COW script group passed 37/37;
+- the MIR mechanism and ratchet suites passed 86/86 and 16/16;
+- `make test-lambda-baseline` passed Input 2104/2104 and Lambda 3008/3012.
+  The four residual JS/Test262-harness failures were pre-existing and were not
+  masked or changed by this work;
+- `make release` and the release fixture passed. AWFY `deltablue2` completed
+  in 33345.5 ms and JetStream `deltablue2` in 23216.7 ms; and
+- the final typed-array fixture passed under AddressSanitizer with no
+  diagnostics.
+
+## 13. Typed-path proof preservation follow-up (2026-09-10)
+
+### Root cause
+
+`World.vars: Variable[]` and `World.cons: Constraint?[]` were correctly
+annotated, but those facts were lost across field reads and COW relinks.
+Nullable record receivers stopped declared-path resolution; member-owned
+arrays were excluded from MIR's full-array proof lookup. A nested typed write
+therefore built a runtime key array and entered the whole-root admission
+helper. Nullable `Constraint?` links and array-valued leaves defeated its
+existing leaf-only shortcut. Shallow native-array clones dropped certificates,
+and raw map relinks retagged a declared array field as an open array. These
+combined to make subsequent admissions traverse and rebuild the graph.
+
+The original AWFY profile recorded 34,030,320 map admissions, 32,614,995
+relation-cache misses, and 275,820 reifications. This was not an unavoidable
+cost of Lambda's value semantics: **D3.2.4v3** and **D3.3.3v3** already provide
+the layout and certificate invariants needed to avoid it.
+
+### Implemented changes
+
+1. **Full path inference.** The shared declared-path resolver preserves array
+   fields and resolves record fields through nullable wrappers. Indexed and
+   nullable-receiver reads still contribute `null`, as required by
+   **S7.1.1v3/D3.3.4**. The shared non-null map resolver deliberately does not
+   discharge value-dependent refinements from layout alone.
+2. **Proof-preserving mutation.** A proven record path admits only its incoming
+   leaf, including array-valued leaves. Shallow COW clones retain certificates;
+   same-contract relinks preserve field descriptors and array certificates.
+   Raw representation-changing writes still invalidate proofs. Flat declared
+   field writes use the same invariant and no longer validate every sibling.
+3. **MIR direct stores.** A statically resolved path ending in a plain integer
+   field uses packed field offsets and runtime array indices. Its hot arm
+   checks nulls, array bounds/certificates, map layouts, and sharing, then
+   stores the integer lane directly without allocating a key array or calling
+   a path setter. Shared or unproven paths take the rooted checked COW arm;
+   there are no interior pointers live across its allocation safepoints
+   (**S9.1.2/S9.3.1/D5.1.1v2**).
+4. **Boundary reuse.** Same-contract typed bindings and explicitly admitted
+   function returns avoid duplicate array admission. An inferred builtin
+   result alone is not a carrier proof: `split` still crosses the String[]
+   conversion boundary before native-pointer reads (**D3.3.3v3**).
+5. **Typed RMW handles.** An invariant array annotation no longer excludes a
+   get-modify-put handle from existing borrow analysis. `push`/`splice` now
+   record place-copy mutation just like user `var` calls, so eliminating a
+   formerly copying admission cannot accidentally mutate a snapshot.
+6. **Exact nested numeric writes.** COW relinks use the existing common array
+   setter, including its logical bounds checks and exact-width admitted
+   stores, instead of the legacy coercing numeric setter. Invalid writes
+   retain the hard-error channel (**S7.1.3v2**).
+
+### Validation and scope
+
+`test/mir/lambda/typed_path_store.ls` exercises nullable entries, runtime
+indices, same-contract array replacement, shared snapshots, get-modify-put,
+rejected values, invalid indices, and single evaluation of an effectful index.
+Its golden test checks semantics; its MIR sidecar checks that the direct store
+precedes the cold descriptor allocation; the MIR corpus runs it under forced
+and randomized GC. `LambdaOptAdmission.TypedArrayPathPreservesGraphProof`
+pins one initial literal admission and no additional map reification/field
+visits across 100 typed nested updates.
+
+Final correctness gates for this follow-up:
+
+- Input baseline: **2104/2104**.
+- Lambda baseline: **3127/3129**, with **87/87** MIR emission,
+  **117/117** forced-GC, **16/16** MIR ratchet, **9/9** optimization admission,
+  and **490/490** JavaScript cases passing.
+- The two unchanged-master failures were reproduced independently:
+  `dom_derive_forms` expects 22 details-document elements but its current HTML
+  contains 23; Test262 preflight's `Promise.allSettled` fixture reports
+  `Promise is not defined`. Neither test, expectation, nor harness was changed.
+- The new typed-path golden agrees on JIT and T0, including null/OOB reads,
+  invalid writes, snapshots, and exact compact-integer storage.
+
+Release measurements, with the same unchanged benchmark sources and
+`LAMBDA_TIER=jit`, `LAMBDA_DISABLE_MIR_CACHE=1`, and logging disabled:
+
+| DeltaBlue variant | Unchanged master (one fresh run) | Optimized median (five runs after warm-up) | Speedup |
+|---|---:|---:|---:|
+| AWFY `deltablue2` | 33,603.2 ms | 73.933 ms | 454.5× |
+| JetStream `deltablue2` | 23,554.4 ms | 36.573 ms | 644.0× |
+
+Every measured run reported PASS. A separate final AWFY release profile has
+**zero map reifications, deep clones, admission field visits, and copied map
+bytes**, with only **3** relation-cache misses. Its 238,840 map admissions
+all take the exact-shape O(1) arm; they do not scan `World`. Numeric-vector
+COW remains measurable (38,880 shallow copies, 3,401,760 copied bytes), so
+this record does not claim that all allocation or boundary overhead is gone.
+
+Worktree artifacts: `temp/typed_path_bench.json`,
+`temp/typed_path_final_profile.tsv`, `temp/typed_path_final.mir`, and
+`temp/typed_path_baseline_verified.log`. The final release binary/package and
+release admission tests were rebuilt and checked after the baseline run.
+
+This follow-up is not blanket C-equivalent lowering. Bounds/null/COW guards,
+some scalar admission and boxing, and generic paths for unsupported layouts
+remain. The new inline nested writer targets plain `int` terminal fields;
+other leaf kinds retain checked leaf-only runtime writes. Whole-root admission
+remains available for genuinely unproven/dynamic paths, but is not required
+for DeltaBlue's admitted `World` mutations. No benchmark source workaround,
+identity-semantics change, or alternate compiler backend is introduced.
+
+## 14. Follow-up: certificate reuse and native vector mutation (2026-09-10)
+
+This increment addresses the remaining contract-metadata and vector-write
+costs identified after §13. It preserves full representation proofs
+(**D3.3.3v3**), named-record layout admission (**D3.2.4v3**), snapshot semantics
+(**S9.1.2/S9.3.1**), and precise ownership across safepoints (**D5.1.1v2**).
+No benchmark source, vendor source, or language semantics changed.
+
+### Implemented
+
+1. **Resolve array storage once.** `ArrayRepCert` caches its resolved numeric
+   lane in previously reserved bytes. Carrier checks still inspect the live
+   array header; certificate identity alone never licenses mismatched storage.
+   Lightweight outer-array/element queries no longer derive unused leaf lanes.
+2. **Reuse heap-local certificates.** The existing bounded interner remembers
+   each contract spelling and its canonical certificate. Warm pointer hits
+   precede semantic comparison. Full invariant equality no longer builds two
+   storage descriptions, and runtime admission tries the certificate fast
+   path before generic type dispatch. Exact trusted map identity similarly
+   bypasses relation-cache hashing.
+3. **Preserve admission on direct calls.** A stable admitted binding or an
+   explicit same-contract result supplies the full `T[]` witness to the raw
+   callee. Dynamic arguments still cross the checked admission boundary;
+   builtin element inference alone is not a native-storage proof.
+4. **Direct array-field publication.** The guarded nested writer now accepts
+   declared array-valued fields as well as plain integer fields. It admits
+   the RHS before loading the spine, checks layout/null/bounds/sharing, then
+   stores the native container pointer. The cold checked path remains intact.
+5. **Inline plain `int[]` append.** For a proven native integer operand and a
+   unique plain integer array with spare capacity, generated MIR writes the
+   lane and increments length. Shared storage, views, growth, invalid compact
+   integers, and mismatched carriers retain `pn_push_cow`. Both arms use the
+   same owner-publication code. Adjacent immutable certificate checks are
+   combined into word tests without dropping rank, lane, or nullability checks.
+
+### Correctness gaps exposed by the new tests
+
+- **Interprocedural capture:** a callee can share an array without changing
+  its caller's compile-time COW flag. Append/splice and typed array borrow
+  preparation now consult live ownership, including inside a `var` activation.
+  The interpreter's nested-path insertion now captures its RHS just like its
+  flat insertion path (**S9.3.1**).
+- **Detached typed array write-back:** direct binding arguments now transport
+  their precise root-slot homes to typed array callees. Wrappers forward via
+  their own roots, and callers reload replacements after return. Typed array
+  homes are published after argument evaluation so nested argument calls
+  cannot consume them. This is the array-binding portion of the gap tracked
+  by **DO29**, not a claim to complete arbitrary place, typed-record, or async
+  rebinding. The existing `interp_typed_var_rebind.ls` now also agrees with its
+  golden under eager JIT; satellite eligibility restrictions are unchanged.
+- **Hidden error exits:** an interior array-argument admission may fail even
+  if all explicit returns are native integers. Return-lane analysis now scans
+  the complete function body, excluding nested definitions, using the shared
+  Lambda AST traversal. Such a body keeps an Item-capable result instead of
+  misboxing the error as an integer (**S7.4**, **D3.3.1**).
+
+### Measurements and remaining work
+
+Release workload-only timing, unchanged sources, eager JIT, disabled MIR cache
+and logging: eight interleaved executions per variant, first discarded.
+
+| Workload | Previous §13 median | This increment median | Change |
+|---|---:|---:|---:|
+| AWFY `deltablue2` | 73.933 ms | 41.374 ms | 1.79× faster |
+| JetStream `deltablue2` | 36.573 ms | 32.965 ms | 1.11× faster |
+| AWFY native C2MIR port | — | 1.129883 ms | Lambda/C: 36.62× |
+
+The C number is the matching native C benchmark port run through the pinned
+MIR C frontend, not a restored Lambda C-text backend. JetStream has a different
+workload and is not compared with that C number. AWFY samples ranged from
+38.431–55.855 ms; every measured run reported PASS. The previous comparison
+run's 78.592 ms Lambda median would make this improvement 1.90×; these are
+separate measurement batches, not a paired old/new binary experiment.
+
+The execution profile still shows **zero map reifications, deep clones,
+visited fields, and copied map bytes**. All 238,840 map admissions are exact
+shape hits; relation-cache lookups are now zero. Numeric-array COW is **not**
+eliminated: the strengthened capture checks record 67,420 shallow copies and
+10,436,960 copied bytes, versus §13's 38,880/3,401,760. This increment must not
+be described as reducing all allocation or removing all ownership work.
+
+Remaining optimization candidates are more precise escape/borrow proofs to
+avoid unnecessary snapshots, guard reuse across proven mutation-free regions,
+native splice/removal and additional element lanes, scalar boundary cleanup,
+constant propagation, and small-function inlining. These are not implemented
+by this increment. Public nullable reads and rejected writes retain their
+language behavior (**D3.3.4**, **S7.1.1v3/S7.1.3v2**).
+
+New regression coverage: `typed_array_reuse.{ls,txt,mir-check}` exercises
+same-contract forwarding, dynamic rejection, interior error exits, snapshots,
+nested typed `var` write-back, and capacity growth. `typed_path_store` additionally
+checks array-valued leaf publication and capture. Two certificate unit tests
+reject stale live carriers and distinguish nullable/native pointer storage.
+Focused gates: **88/88** MIR emission, **118/118** GC stress, **131/131**
+error/contract tests, and **9/9** optimization admission tests pass.
+
+The full baseline ran **5,238** checks: **5,224** passed in the sandbox.
+Twelve failures were local TCP/TLS socket tests; rerunning JavaScript with
+socket access passed **493/493** (including the twelve failures and three
+additional cases omitted by baseline heavy-load mode). The two remaining
+failures are the already reproduced unchanged-master cases from §13:
+`dom_derive_forms`' 22-versus-23 expectation and Test262 preflight's missing
+`Promise.allSettled`/`Promise` support. No failing expectation or harness was
+changed. Input baseline remains **2,104/2,104**.
+
+Worktree artifacts: `temp/typed_followup_bench_final.jsonl` (final release),
+`temp/typed_followup_bench.json` (earlier measurement batch),
+`temp/typed_followup_profile.tsv`, `temp/typed_followup_mir_final.log`,
+`temp/typed_followup_gc.log`, and `temp/typed_followup_baseline.log`.

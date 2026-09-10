@@ -77,6 +77,71 @@ TEST(ValueRepresentationTest, CanonicalRepUsesTheFullSemanticContract) {
     pool_destroy(pool);
 }
 
+static TypeUnary array_contract_for_test(Type* element) {
+    TypeUnary type = {};
+    type.type_id = LMD_TYPE_TYPE;
+    type.kind = TYPE_KIND_UNARY;
+    type.op = OPERATOR_ARRAY;
+    type.operand = element;
+    return type;
+}
+
+TEST(ValueRepresentationTest, ArrayCertificateIdentityStillChecksTheLiveCarrier) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    Type* elements[] = {&TYPE_INT, &TYPE_BOOL, &TYPE_FLOAT};
+    ArrayNumElemType lanes[] = {ELEM_INT, ELEM_BOOL, ELEM_FLOAT64};
+    for (int i = 0; i < 3; i++) {
+        TypeUnary contract = array_contract_for_test(elements[i]);
+        TypeUnary equivalent = array_contract_for_test(elements[i]);
+        TypeUnary nested = array_contract_for_test((Type*)&contract);
+        ArrayRepCert* cert = lambda_array_rep_cert_create(pool, (Type*)&contract);
+        ASSERT_NE(cert, nullptr);
+        EXPECT_TRUE(cert->has_array_num_lane);
+        EXPECT_EQ(cert->array_num_elem, lanes[i]);
+        ArrayNum array = {};
+        array.type_id = LMD_TYPE_ARRAY_NUM;
+        array.set_elem_type(lanes[i]);
+        array.rep_cert = cert;
+        Item value = {.array_num = &array};
+        EXPECT_TRUE(lambda_array_rep_proves_cert(value, cert, true));
+        EXPECT_TRUE(lambda_array_rep_proves(value, (Type*)&equivalent, true));
+        EXPECT_FALSE(lambda_array_rep_proves(value, (Type*)&nested, true));
+        array.set_elem_type(lanes[(i + 1) % 3]);
+        EXPECT_FALSE(lambda_array_rep_proves_cert(value, cert, true));
+        EXPECT_FALSE(lambda_array_rep_proves(value, (Type*)&contract, true));
+        array.set_elem_type(lanes[i]);
+        lambda_array_clear_rep_cert(value);
+        EXPECT_FALSE(lambda_array_rep_proves_cert(value, cert, true));
+    }
+    EXPECT_FALSE(lambda_array_contract_compatible(&TYPE_INT, &TYPE_INT, true));
+    pool_destroy(pool);
+}
+
+TEST(ValueRepresentationTest, ArrayCertificateKeepsNullablePointerStorageDistinct) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    TypeUnary strings = array_contract_for_test(&TYPE_STRING);
+    Type* nullable = lambda_type_nullable_normalized(pool, &TYPE_STRING);
+    TypeUnary optionals = array_contract_for_test(nullable);
+    ArrayRepCert* cert = lambda_array_rep_cert_create(pool, (Type*)&strings);
+    ASSERT_NE(cert, nullptr);
+    EXPECT_FALSE(cert->has_array_num_lane);
+    Array array = {};
+    array.type_id = LMD_TYPE_ARRAY;
+    array.rep_cert = cert;
+    Item value = {.array = &array};
+    // A certificate on boxed slots never authorizes native String* loads.
+    EXPECT_FALSE(lambda_array_rep_proves_cert(value, cert, true));
+    array_native_lane_configure(&array, &cert->leaf_lane);
+    EXPECT_TRUE(lambda_array_rep_proves_cert(value, cert, true));
+    EXPECT_FALSE(lambda_array_rep_proves(value, (Type*)&optionals, true));
+    LaneStorageDesc optional_lane = lambda_lane_storage_desc_for(nullable);
+    array_native_lane_configure(&array, &optional_lane);
+    EXPECT_FALSE(lambda_array_rep_proves_cert(value, cert, true));
+    pool_destroy(pool);
+}
+
 TEST(ValueRepresentationTest, DirectTransitionsKeepLogicalAndPhysicalAxesSeparate) {
     EXPECT_NE(VALUE_REP_INT_LANE, VALUE_REP_I64);
     EXPECT_NE(VALUE_REP_INT_LANE, VALUE_REP_MACHINE_I64);
@@ -1268,6 +1333,12 @@ TEST_F(NegativeScriptTest, TypeEnforcementRuntimeNegativeGoldensPinDiagnostics) 
         "error[E201]: computed map key must evaluate to string or symbol");
     ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_array_write.ls",
         "error[E201]: type check at typed array element assignment failed: expected int, got string 'not an integer'");
+    ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_nested_array_write.ls",
+        "error[E201]: type check at typed nested array assignment failed: expected Variable, got map; validator at .value: Required field 'value' is missing from object");
+    ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_ndim_array_write.ls",
+        "error[E201]: type check at typed multi-dimensional array assignment failed: expected int, got string 'not an integer'");
+    ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_mask_array_write.ls",
+        "error[E201]: type check at typed array mask assignment failed: expected num_sized, got int 300");
     ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_dynamic_arity.ls",
         "error[E206]: fn_call_into: function 'add' expects 2 arguments, got 1");
     ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_dynamic_declaration.ls",

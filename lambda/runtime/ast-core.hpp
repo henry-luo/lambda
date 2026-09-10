@@ -210,6 +210,9 @@ typedef enum Operator {
     OPERATOR_ONE_MORE,
     OPERATOR_ZERO_MORE,
     OPERATOR_REPEAT,
+    // `T[]` is a value-array contract, distinct from validator occurrence
+    // counts such as `T[3]` (D3.1.1v2).
+    OPERATOR_ARRAY,
 
     OPERATOR_ASSIGN,
 
@@ -1360,6 +1363,7 @@ typedef struct FnAnalysis {
     bool js_is_class_method;
     bool js_is_class_field_initializer;
     bool js_has_direct_super_call;
+    bool js_has_lexical_super_call;
     uint32_t js_first_direct_super_call_start;
     AstClassId js_owner_class_id;
     bool js_closure_env_has_parent_link;

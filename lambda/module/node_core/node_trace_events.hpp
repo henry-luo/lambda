@@ -24,8 +24,8 @@ struct NodeTraceState {
     ArrayList* events;
     bool initialized;
     bool file_written;
-    uint64_t namespace_item;
-    bool namespace_rooted;
+    JubePersistentValueSlots namespace_values;
+    Item namespace_items[1];
 };
 
 int node_trace_events_init(const JubeHostAPI* host);

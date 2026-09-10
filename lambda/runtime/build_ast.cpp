@@ -97,9 +97,6 @@ static AstNamedNode* find_existing_named_item(AstNode* first_item, String* name)
 static bool match_arm_is_error_handler(AstMatchArm* arm);
 static bool match_has_error_handler(AstMatchNode* match);
 
-typedef bool (*LambdaAstVisitor)(AstNode* node, void* data);
-static void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
-                            bool descend_functions);
 
 static TypeMethod* direct_lookup_object_method(Transpiler* tp,
         AstNode* receiver, StrView name, bool* out_has_user_member);
@@ -588,7 +585,12 @@ static bool typed_array_element_compatible(Type* arg_elem, Type* expected_elem) 
                arg_tid == LMD_TYPE_UINT64 || arg_tid == LMD_TYPE_BOOL ||
                type_is_sized_integer(arg_elem);
     default:
-        return false;
+        // Named maps, nested arrays, and pointer-lane scalars are checked by
+        // the same structural relation as a normal declared boundary. The
+        // numeric cases above remain explicit because their admission may
+        // convert carriers rather than merely compare contracts (D3.1.1v2).
+        return lambda_type_contract_semantically_compatible(arg_elem,
+            expected_elem);
     }
 }
 
@@ -616,17 +618,11 @@ static bool ast_is_numeric_literal_syntax(AstNode* node) {
 static bool typed_array_annotation_compatible(Type* arg_type, Type* param_type) {
     arg_type = unwrap_simple_type_type(arg_type);
     param_type = unwrap_simple_type_type(param_type);
-    if (!arg_type || !param_type || param_type->kind != TYPE_KIND_UNARY) return false;
+    if (!arg_type || !param_type) return false;
 
-    TypeUnary* unary = (TypeUnary*)param_type;
-    Type* expected_elem = unwrap_simple_type_type(unary->operand);
-    if (!expected_elem) return false;
-    if (expected_elem->type_id != LMD_TYPE_INT &&
-        expected_elem->type_id != LMD_TYPE_FLOAT &&
-        expected_elem->type_id != LMD_TYPE_INT64 &&
-        expected_elem->type_id != LMD_TYPE_UINT64) {
-        return false;
-    }
+    LambdaArrayContractInfo expected_info = {};
+    if (!lambda_array_contract_info(param_type, &expected_info)) return false;
+    Type* expected_elem = expected_info.immediate_element;
 
     if (arg_type->type_id == LMD_TYPE_ARRAY_NUM) return true;
     if (arg_type->type_id != LMD_TYPE_ARRAY) return false;
@@ -637,19 +633,9 @@ static bool typed_array_annotation_compatible(Type* arg_type, Type* param_type) 
 }
 
 static Type* typed_array_expected_element(Type* param_type) {
-    param_type = unwrap_simple_type_type(param_type);
-    if (!param_type || param_type->kind != TYPE_KIND_UNARY) return NULL;
-
-    TypeUnary* unary = (TypeUnary*)param_type;
-    Type* expected_elem = unwrap_simple_type_type(unary->operand);
-    if (!expected_elem) return NULL;
-    if (expected_elem->type_id != LMD_TYPE_INT &&
-        expected_elem->type_id != LMD_TYPE_FLOAT &&
-        expected_elem->type_id != LMD_TYPE_INT64 &&
-        expected_elem->type_id != LMD_TYPE_UINT64) {
-        return NULL;
-    }
-    return expected_elem;
+    LambdaArrayContractInfo info = {};
+    return lambda_array_contract_info(param_type, &info)
+        ? info.immediate_element : NULL;
 }
 
 static bool typed_array_argument_compatible(AstNode* arg, Type* param_type) {
@@ -1741,7 +1727,7 @@ static void lambda_ast_note_view_binding(AstDeclaratorNode* named) {
 // root.  Inferred map shapes intentionally do not participate: an unannotated
 // `var` remains free to evolve its value/shape, while `var p: Person` keeps the
 // Person contract across every interior write.
-static Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
+Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
         const char** destination_label) {
     node = unwrap_primary_node(node);
     if (!node) return NULL;
@@ -1752,7 +1738,7 @@ static Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
     if (node->node_type == AST_NODE_MEMBER_EXPR) {
         AstFieldNode* member = (AstFieldNode*)node;
         Type* owner_type = declared_compound_destination_type(tp, member->object, NULL);
-        owner_type = boundary_unwrap_type(owner_type);
+        owner_type = lambda_type_nonnull_map_contract(owner_type);
         if (!owner_type || owner_type->type_id != LMD_TYPE_MAP ||
                 is_global_simple_type(owner_type) ||
                 !member->field || member->field->node_type != AST_NODE_IDENT) {
@@ -1771,7 +1757,11 @@ static Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
         if (owner_type && owner_type->type_id == LMD_TYPE_MAP &&
                 !is_global_simple_type(owner_type) && index->field && !index->field->next) {
             Item key = ItemNull;
-            if (ast_static_literal_item(tp, index->field, &key) &&
+            AstNode* key_node = unwrap_primary_node(index->field);
+            bool literal_key = tp ? ast_static_literal_item(tp, index->field, &key)
+                : static_literal_item_from_type(key_node ? key_node->type :
+                    index->field->type, &key);
+            if (literal_key &&
                     get_type_id(key) == LMD_TYPE_STRING) {
                 String* field_name = it2s(key);
                 ShapeEntry* field = find_shape_field_by_name((TypeMap*)owner_type,
@@ -1783,7 +1773,7 @@ static Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
         }
         if (boundary_type_is_extended(owner_type, TYPE_KIND_UNARY)) {
             TypeUnary* occurrence = (TypeUnary*)owner_type;
-            if (occurrence->op == OPERATOR_REPEAT) {
+            if (occurrence->op == OPERATOR_ARRAY) {
                 return boundary_unwrap_type(occurrence->operand);
             }
         }
@@ -4171,11 +4161,8 @@ static bool known_magnitude_comparable_type_set(Type* left, Type* right) {
 
 
 static Type* known_array_element_type(Type* type) {
-    if (!type) return NULL;
-    if (type->type_id == LMD_TYPE_ARRAY || type->type_id == LMD_TYPE_ARRAY_NUM) {
-        return ((TypeArray*)type)->nested;
-    }
-    return type;
+    LambdaArrayContractInfo info = {};
+    return lambda_array_contract_info(type, &info) ? info.immediate_element : type;
 }
 
 static Type* binary_array_result_element_type(AstBinaryNode* ast_node) {
@@ -6485,7 +6472,7 @@ void declare_module_import(Transpiler* tp, AstImportNode* import_node) {
 // Pattern bodies use the unified _type_expr reduction path.
 
 
-static void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
+void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
                             bool descend_functions) {
     if (!node || !visitor(node, data)) return;
 
@@ -8247,6 +8234,42 @@ static void direct_type_alias_begin(LambdaDirectAstSink* sink,
     sink->pending_type_alias = alias;
 }
 
+// Closing a recursive union changes a forward field from a map pointer to
+// an Item. Refresh its cached storage descriptor and any affected packed
+// offsets before literals or native readers can consume the contract (D3.4.1).
+static void direct_refresh_recursive_type_layout(Type* type, ArrayList* visited) {
+    type = unwrap_simple_type_type(type);
+    if (!type || is_global_simple_type(type)) return;
+    for (int i = 0; i < visited->length; i++) {
+        if (visited->data[i] == type) return;
+    }
+    arraylist_append(visited, type);
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY) {
+        TypeBinary* binary = (TypeBinary*)type;
+        direct_refresh_recursive_type_layout(binary->left, visited);
+        direct_refresh_recursive_type_layout(binary->right, visited);
+    } else if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY) {
+        direct_refresh_recursive_type_layout(((TypeUnary*)type)->operand, visited);
+    } else if (type->type_id == LMD_TYPE_MAP && type != &TYPE_MAP) {
+        TypeMap* map = (TypeMap*)type;
+        bool changed_width = false;
+        for (ShapeEntry* field = map->shape; field; field = field->next) {
+            direct_refresh_recursive_type_layout(field->type, visited);
+            int old_width = shape_entry_storage_size(field);
+            shape_entry_set_type(field, field->type);
+            changed_width |= old_width != shape_entry_storage_size(field);
+        }
+        if (changed_width) {
+            int64_t offset = 0;
+            for (ShapeEntry* field = map->shape; field; field = field->next) {
+                field->byte_offset = offset;
+                offset += shape_entry_storage_size(field);
+            }
+            map->byte_size = offset;
+        }
+    }
+}
+
 // Recursive fields were built against the pre-registered placeholder map.
 // Publish the completed shape through that same identity so function contracts
 // and self-references cannot split into placeholder and final maps.
@@ -8255,6 +8278,16 @@ static void direct_adopt_pending_alias_map(Transpiler* tp, AstDeclaratorNode* al
     TypeMap* pre_map = (TypeMap*)pre_type->type;
     Type* definition = alias->type;
     Type* actual = unwrap_simple_type_type(definition);
+    if (lambda_type_is_union(actual)) {
+        // Pattern references retain pre_type, so publish the completed union
+        // through that same wrapper rather than leaving an empty map behind.
+        pre_type->type = actual;
+        alias->type = (Type*)pre_type;
+        ArrayList* visited = arraylist_new(8);
+        direct_refresh_recursive_type_layout(actual, visited);
+        arraylist_free(visited);
+        return;
+    }
     if (!actual || actual->type_id != LMD_TYPE_MAP || actual == &TYPE_MAP ||
             actual == (Type*)pre_map || !pre_map ||
             pre_map->type_id != LMD_TYPE_MAP) return;
@@ -8880,13 +8913,16 @@ AstNode* build_field_node_from_parts(Transpiler* tp, SourceSpan span,
             node->is_proc_method_reference = method && method->is_proc;
         }
     }
-    if (node_type == AST_NODE_INDEX_EXPR) {
+    if (node_type == AST_NODE_INDEX_EXPR || node_type == AST_NODE_MEMBER_EXPR) {
         Type* declared = declared_compound_destination_type(tp,
             (AstNode*)node, NULL);
         if (declared) {
-            // Indexed reads are total. Preserve the annotated element contract
-            // as nullable so an OOB read cannot bypass its declaration check.
-            node->type = lambda_type_nullable_normalized(tp->pool, declared);
+            // Preserve the full path contract and carry only actual absence:
+            // indexing or a nullable receiver contributes null (S7.1.1v3).
+            bool nullable = node_type == AST_NODE_INDEX_EXPR ||
+                (object && object->type && lambda_type_accepts_null(object->type));
+            node->type = nullable ? lambda_type_nullable_normalized(tp->pool, declared)
+                : declared;
             return (AstNode*)node;
         }
     }
@@ -9222,6 +9258,9 @@ AstNode* build_call_node_from_parts(Transpiler* tp, SourceSpan span,
             // compound assignment; apply the same immutable-root rule before
             // lowering can select the raw in-place helper (S9.1.1, S9.1.6).
             direct_validate_mutable_compound(tp, span, call->argument);
+            // A typed-array place copy needs the same snapshot/RMW analysis
+            // as a user `var` call; admission may now be an identity.
+            direct_note_place_copy_var_borrow(span, call->argument);
         }
         call->can_raise = info->can_raise;
         call->pipe_inject = tp->pipe_inject_args > 0 && !method_call;
@@ -9979,8 +10018,15 @@ static void rmw_try_candidate(AstNode* stmt_node) {
     AstDeclaratorNode* named = (AstDeclaratorNode*)d;
     NameEntry* handle = named->entry;
     if (!handle || !handle->is_place_copy || !handle->place_copy_mutated ||
-            named->declared_type || !named->init) {
+            !named->init) {
         return;
+    }
+    if (named->declared_type) {
+        // An invariant array annotation preserves the borrowed place's lane;
+        // a converting/different contract must retain snapshot admission.
+        Type* source_contract = declared_compound_destination_type(NULL, named->init, NULL);
+        if (!source_contract || !lambda_array_contract_compatible(source_contract,
+                named->declared_type, true)) return;
     }
     AstCowPath path = {};
     if (!ast_collect_cow_path(&path, named->init) || path.count < 1 ||

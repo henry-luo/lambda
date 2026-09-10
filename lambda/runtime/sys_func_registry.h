@@ -227,6 +227,11 @@ enum {
     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_NON_GC_SCALAR, \
      0, 0, JIT_EXCEPTION_PRESERVES, 0}
 
+// scalar ownership is independent of coercion, collection and fallibility.
+#define JIT_IMPORT_STABLE_ITEM \
+    {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, \
+     0, JIT_IMPORT_RESULT_SCALAR_STABLE}
+
 static inline JitValueClass jit_import_arg_class(
         const JitImportMetadata* metadata, int index) {
     if (!metadata || index < 0 || index >= 8) return JIT_VALUE_UNKNOWN;

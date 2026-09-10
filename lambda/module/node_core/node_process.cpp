@@ -29,9 +29,8 @@
 
 static const JubeHostAPI* node_process_host = NULL;
 struct NodeProcessSessionState {
-    void* session;
-    uint64_t uncaught_callback;
-    bool uncaught_callback_rooted;
+    JubePersistentValueSlots value_slots;
+    Item value_items[1];
     int umask_value;
     double uptime_start_time;
     uint32_t mach_timebase_numer;
@@ -41,9 +40,8 @@ static NodeProcessSessionState* node_process_state(void) {
     return (NodeProcessSessionState*)jube_node_current_module_state(
         JUBE_NODE_MODULE_STATE_PROCESS);
 }
-#define node_process_session (node_process_state()->session)
-#define node_process_uncaught_callback (node_process_state()->uncaught_callback)
-#define node_process_uncaught_callback_rooted (node_process_state()->uncaught_callback_rooted)
+#define node_process_session (node_process_state()->value_slots.session)
+#define node_process_uncaught_callback (node_process_state()->value_items[0].item)
 #define node_process_umask_value (node_process_state()->umask_value)
 
 static bool node_process_root_frame(JubeRootFrame* frame, size_t count) {
@@ -377,14 +375,10 @@ static Item node_process_set_uncaught_exception_capture_callback(Item callback) 
             !node_process_host->value || !node_process_host->value->kind) return ItemNull;
     int kind = node_process_host->value->kind(callback);
     if (kind == JUBE_VALUE_FUNCTION) {
-        if (!node_process_uncaught_callback_rooted) {
-            if (!node_process_host->node->roots->persistent_root_register ||
-                    node_process_host->node->roots->persistent_root_register(node_process_session,
-                        &node_process_uncaught_callback) != 0) return ItemNull;
-            node_process_uncaught_callback_rooted = true;
+        if (!jube_persistent_value_slots_attached(&node_process_state()->value_slots)) {
+            return ItemNull;
         }
-        // The persistent slot is registered before storing callback so forced GC
-        // cannot reclaim a capture handler between installation and dispatch.
+        // The attached fixed slot is rooted before storing a capture handler.
         node_process_uncaught_callback = callback.item;
     } else if (kind == JUBE_VALUE_NULL) {
         node_process_uncaught_callback = ItemNull.item;
@@ -676,7 +670,10 @@ void node_process_runtime_attach(void* session) {
     if (state->umask_value == 0) state->umask_value = 0022;
     Item process = node_process_host->node->runtime->session_process(session);
     if (process.item == ItemNull.item) return;
-    node_process_session = session;
+    bool values_attached = jube_persistent_value_slots_attached(&state->value_slots);
+    if (jube_persistent_value_slots_attach(&state->value_slots, session,
+            node_process_host->node->roots, state->value_items, 1) != 0) return;
+    if (!values_attached) node_process_uncaught_callback = ItemNull.item;
     node_process_install_permission(process);
     node_process_install_method(process, "memoryUsage", node_process_memory_usage, 0);
     node_process_install_method(process, "cwd", node_process_cwd, 0);
@@ -715,17 +712,18 @@ void node_process_runtime_attach(void* session) {
 }
 
 void node_process_runtime_reset(void* session) {
-    if (session == node_process_session) node_process_uncaught_callback = ItemNull.item;
+    if (session == node_process_session) {
+        jube_persistent_value_slots_reset(&node_process_state()->value_slots);
+        node_process_uncaught_callback = ItemNull.item;
+    }
 }
 
 void node_process_runtime_detach(void* session) {
-    if (session != node_process_session) return;
-    if (node_process_uncaught_callback_rooted && node_process_host && node_process_host->node &&
-            node_process_host->node->roots && node_process_host->node->roots->persistent_root_unregister) {
-        node_process_host->node->roots->persistent_root_unregister(session,
-            &node_process_uncaught_callback);
+    NodeProcessSessionState* state = node_process_state();
+    if (!state || session != state->value_slots.session) return;
+    if (node_process_host) {
+        jube_persistent_value_slots_detach(&state->value_slots);
+    } else {
+        jube_persistent_value_slots_forget(&state->value_slots);
     }
-    node_process_uncaught_callback = ItemNull.item;
-    node_process_uncaught_callback_rooted = false;
-    node_process_session = NULL;
 }

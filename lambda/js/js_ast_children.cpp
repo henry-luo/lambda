@@ -249,6 +249,12 @@ static void js_ast_collect_function_facts_node(JsAstNode* node,
             JsCallNode* call = (JsCallNode*)node;
             if (js_ast_identifier_named(call->callee, "super", 5)) {
                 walk.facts->observations |= JS_AST_OBSERVES_THIS;
+                // direct_eval_active is cleared at every function boundary, so
+                // its absence here means this super() sits inside a nested
+                // arrow that still shares the constructor's `this`.
+                if (!walk.direct_eval_active) {
+                    walk.facts->has_lexical_super_call = true;
+                }
             }
         } else if (node->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
             JsMemberNode* member = (JsMemberNode*)node;

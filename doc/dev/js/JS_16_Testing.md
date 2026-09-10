@@ -1,6 +1,6 @@
 # LambdaJS — Testing & Conformance Infrastructure
 
-> **Last verified against tree:** 2026-08-18 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-09-10 (batch helper retention, realm lifecycle, and timing; older sections retain their original verification scope)
 
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers how LambdaJS conformance and unit tests run: the test262 batch runner (GTest orchestrator → `posix_spawn` worker pool → persistent hot-reload process → wire protocol), batch execution phases and slowest-first dispatch, the three-layer crash recovery, batch-state reset, baseline management, the async/`$DONE` runner, diagnose mode, the Node.js official-test harness and shims, and the GTest unit suites.
 >
@@ -14,6 +14,57 @@
 LambdaJS validates correctness against three independent corpora: the **TC39 test262** suite (tens of thousands of spec-conformance tests, the primary gate), the **official Node.js parallel tests** (`ref/node/test/parallel/`, host-API compatibility), and a set of **focused GTest suites** for individual kernels (coercion, the backtracking regex matcher, JSX round-trip, transpile timing). The throughput-critical piece is the test262 runner, which compiles a shared harness once per batch and streams test sources to a long-lived worker — the preamble/batch entry points it depends on are defined in [JS_01 — Compilation Pipeline §3 and §8](JS_01_Compilation_Pipeline.md). This document owns the test *infrastructure*: process orchestration, the wire protocol, crash recovery, batch reset, and baseline gating. Lowering and runtime semantics that the tests exercise live in their owning docs.
 
 The runner enforces a **zero-crash policy**: any crash or lost test is treated as a regression that blocks a baseline update (`test_js_test262_gtest.cpp:19`). Absolute pass counts in the baseline header are configuration-dependent (build type, opt level, interpreter vs JIT, host CPU count) and are not reproduced here.
+
+### 1.1 Current batch throughput implementation
+
+Under **D8.1.3v10**, AST batches retain immutable `JsScript` owners and execute
+them in each test's fresh realm. The worker prepares `sta.js`/`assert.js` once
+with `harness:<len>`. For eligible positive AST tests, the coordinator groups
+the ordered include set and strictness and sends a second
+`harness-includes:<len>` record. Both Scripts execute before each test; only
+their parsed source and binding facts survive recycling. The include Script
+receives the test's strict directive, while the base harness remains a
+separate non-strict Script. Negative tests retain their previous inclusion
+policy, and MIR batches retain their existing compiled preamble path.
+
+Realm globals keep real own properties from creation. Constructor graphs and
+the Math, JSON, Intl, Reflect, Atomics, console, and CSS namespaces are built
+when their values are first observed, using the existing lazy-slot mechanism.
+Reads and property descriptors resolve the slot; presence, assignment, and
+deletion use ordinary property semantics. Calls still use real callable
+objects and executable entries (**D6.2.2v2**). `runtime_reset_heap` owns the
+normal full reset; the worker no longer duplicates it. Binding removal after
+heap destruction observes the root generation without creating new roots
+(**D5.3.3**).
+
+The selective native harness remains C+. Its `assert.throws` compares the
+thrown object's constructor identity, and `verifyProperty` performs real
+enumeration, write/restore, and delete probes through the runtime kernels.
+Differential cases compare these outcomes with the checked-out canonical
+helpers, including deceptive Proxies and abrupt getters. This does not widen
+native admission to tests that include `propertyHelper.js`: those still run
+the canonical helper, now with its AST retained. Native diagnostic text is
+not a complete replacement for the canonical helper's messages.
+
+Set `LAMBDA_JS_PHASE_TIMING=1` to append these columns to
+`temp/_t262_phase_timing_o<N>.tsv`:
+
+| Column | Scope |
+|---|---|
+| `realm_us` | Initial global graph construction during this test, including harness execution. Later lazy value construction is charged where the read occurs. |
+| `harness_us` | Execution of retained AST base/include Scripts, excluding their initial global graph construction. Zero for other paths. |
+| `reset_us` | Cleanup after `BATCH_END`, including normal realm recycling and test Script release. |
+| `lifecycle_us` | Test execution through cleanup, including result/protocol overhead; excludes batch startup and initial harness preparation. |
+
+The worker emits the four values in a separate `BATCH_LIFECYCLE` record after
+cleanup. `BATCH_END` retains its result and pre-cleanup elapsed-time contract;
+timing never changes classification or timeout policy. A missing lifecycle
+record (for example, an immediate worker exit during recovery) leaves the
+four columns zero. All three parent readers share the `BATCH_END` numeric
+parser. AST `execute_us` and `phase_total_us` are now populated; initial realm
+construction is excluded from AST execution and MIR `imports_us`. The CLI's
+`JS_TRANSPILE_TIMING` line also reports `realm_ms`. Lifecycle, test, and phase
+totals overlap and must not be added together.
 
 Tune6 adds an architecture gate alongside behavior testing. The structural
 census checks immutable `TypeMap::js_meta` ownership under **D3.4.7**, the
@@ -32,9 +83,9 @@ The runner is a GTest binary that orchestrates a pool of worker processes; it ne
 
 - **Orchestrator (parent).** `test_js_test262_gtest.cpp` discovers tests by walking fixed category tables — `language_cats` (`:655`), `builtin_cats`, and AnnexB cats (`:771`) — under `TEST262_ROOT` (`ref/test262`), skipping `_FIXTURE.js` helper modules (`:599`). Phase 1 parses each test's YAML frontmatter into a `Test262Prepared` record (`:956`) and `partition_batch_indices` (`:2659`) splits work into native-harness, JS-harness, module, and slow groups; JS groups are keyed by their special-preamble needs so heavy helpers compile once only for batches that need them.
 - **Worker pool.** Each worker is `./lambda.exe js-test-batch`, launched via **`posix_spawn`** (`run_t262_sub_batch`, `:2547`) rather than `fork`+`exec`: with the parent holding ~1.3 GB of test sources, `fork` would copy page tables thousands of times (the comment at `:2515` cites ~500 s of avoided system time). Worker count is `cpu_count - 1` by default (`t262_target_worker_count`, `:1321`), overridable with `--jobs`. stdin is dup2'd from a per-worker reusable manifest file and stdout/stderr from a pipe; each worker reuses one `temp/_t262_worker_N.manifest`.
-- **Persistent hot-reload process.** With hot-reload on (the default), the worker keeps **one** `EvalContext`, GC heap, and name pool across all tests in its sub-batch (`main.cpp:3416`), so each test hits the context-reuse fast path of `transpile_js_to_mir_core_len` (JS_01 §2 step 5) instead of re-initializing the runtime.
+- **Persistent hot-reload process.** With hot-reload on (the default), the worker reuses its `EvalContext`. AST tests recycle the realm heap and release each test's Script generation while retaining the harness Scripts (§1.1); MIR tests use the existing preamble/checkpoint path.
 - **Wire protocol.** The manifest is a length-prefixed line protocol read on the worker's stdin (`main.cpp:3452`): `harness:<len>` (compile the shared harness as a preamble, once per batch), `source:<name>[:<path>]:<len>` (an ordinary test), and `module-source:<name>[:<path>]:<len>` (run through the ES-module entry). The worker emits results back on stdout framed by a **`\x01` control byte**: `BATCH_START <name>`, then captured stdout, then `BATCH_END <status> <elapsed_us> <rss…> <phase_us…>` (parsed by the parent at `:2599`); out-of-band diagnostics use `BATCH_EXIT`/`BATCH_DIAG`.
-- **Preamble pre-compilation.** `assemble_harness_source` (`:988`) concatenates `sta.js` + `assert.js` + `PREAMBLE_INCLUDE_FILES` (`:940`) (+ any batch-local special includes from `special_premble.txt`) and sends it via `harness:`. The worker compiles it through `transpile_js_to_mir_preamble_len`, snapshotting harness module-vars into a `JsPreambleState`; each subsequent test compiles via `transpile_js_to_mir_with_preamble_len`, inheriting those bindings without recompiling the harness. This preamble mechanism is described from the compiler side in [JS_01 §3](JS_01_Compilation_Pipeline.md).
+- **Preamble pre-compilation.** MIR batches concatenate the base harness and batch-local special includes, then compile through `transpile_js_to_mir_preamble_len`, retaining a `JsPreambleState`. AST batches use the two retained Scripts described in §1.1. The MIR preamble mechanism is described from the compiler side in [JS_01 §3](JS_01_Compilation_Pipeline.md).
 
 ---
 
@@ -133,9 +184,9 @@ Async-flagged tests rely on test262's `doneprintHandle.js` calling a host `$DONE
 1. **Batch-vs-single-script divergence.** Tests that pass in isolation but fail/flake in a 50-test batch are a recurring class — the entire Phase 4 retry + `t262_partial.txt` mechanism exists to detect and quarantine them. Root causes are residual cross-test state (next item) rather than the tested feature; the batch interaction is recorded, not fixed.
 2. **Residual unreset statics.** `js_batch_reset` / `js_batch_reset_to` enumerate dozens of module/global reset calls by hand (`js_runtime_state.cpp:271`/`:388`); any process-global static not on that list silently leaks across tests. The two functions are also large near-duplicates that must be kept in sync manually — a missed reset surfaces only as a batch-order-dependent flake.
 3. **MIR JIT code-page leak on crash recovery.** Each SIGSEGV/SIGBUS/timeout `longjmp` "leaks ~55MB (MIR code pages, AST, temporaries that skip cleanup)" (`main.cpp:3700`); the worker compensates by capping at 10 crashes / 4 GB RSS and exiting the batch (`:3721`), trading completeness for bounded memory. The leaked code pages are unreachable after the eventual `heap_destroy`, but accumulate within a batch.
-4. **`_FIXTURE` files require special-casing.** test262 `_FIXTURE.js` helper modules are not standalone tests and are skipped by suffix match in two places (`test_js_test262_gtest.cpp:599`, `:634`); special preamble helpers (e.g. `testTypedArray.js`) are intentionally kept per-test rather than as a shared preamble because preamble-exported lexical bindings are not visible to test modules (`special_premble.txt`).
+4. **`_FIXTURE` files require special-casing.** test262 `_FIXTURE.js` helper modules are not standalone tests and are skipped by suffix match. Module includes remain in the module source; eligible classic AST tests retain helper Scripts under §1.1.
 5. **Config-dependent pass percentages.** Pass counts depend on build type, opt level (the timing TSV is per-`o<N>`), interpreter-vs-JIT mode, async/module admission flags, and host CPU count (which sets worker count and thus batch composition). The baseline header records the exact configuration; treat any absolute number as point-in-time.
-6. **Heavyweight orchestrator.** `test_js_test262_gtest.cpp` is ~4600 lines with the full phase pipeline, two platform implementations of `run_t262_sub_batch`, and the protocol parser duplicated between the POSIX and Windows branches (`:2584` vs `:2447`) — a drift risk if the wire format changes.
+6. **Large orchestrator.** The full phase pipeline still has separate Windows, POSIX, and persistent-worker readers. Numeric result and lifecycle parsing are shared; framing and process management remain platform-specific.
 7. **Negative-test scoring is coarse.** `evaluate_batch_result` passes a negative test if the output merely contains "Error"/"error" (`:2936`) rather than matching the declared `negative_type`/`negative_phase`, so a test expecting `SyntaxError` would pass on any thrown error.
 
 ---

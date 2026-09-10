@@ -1093,8 +1093,8 @@ static void jm_emit_annexb_global_export(JsMirTranspiler* mt,
 }
 
 void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
-    JsMirLastClosureSnapshot saved_last_closure;
-    jm_save_last_closure_snapshot(mt, &saved_last_closure);
+    JsClosureCheckpoint saved_last_closure;
+    jm_closure_checkpoint_save(mt, &saved_last_closure);
 
     // Tune3 §3: constant-fold the condition and drop the dead branch entirely.
     if (jm_const_fold_enabled()) {
@@ -1108,7 +1108,7 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
                 jm_transpile_if_branch(mt, live);
                 // Constant-folded branches are still path-local for closure
                 // readback, so do not let their env register escape.
-                jm_restore_last_closure_snapshot(mt, &saved_last_closure);
+                jm_closure_checkpoint_rollback(mt, &saved_last_closure);
                 return;
             }
         }
@@ -1207,7 +1207,7 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
 
     // Branch-local closure env registers do not dominate the merge point; keep
     // later callback readback tied to the pre-if env instead of a path-local one.
-    jm_restore_last_closure_snapshot(mt, &saved_last_closure);
+    jm_closure_checkpoint_rollback(mt, &saved_last_closure);
 }
 
 // Reload all in-scope-env variables from the shared scope env into their local registers.
@@ -1410,7 +1410,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     // here prevents the assignment writeback (added by Js56 P2) from leaking
     // an iteration mutation into a closure that captured the init binding.
     // Regression test: language/statements/for/scope-body-lex-open.js.
-    jm_clear_last_closure_snapshot(mt);
+    jm_closure_tracker_clear(mt);
 
     // Eval completion: ForBodyEvaluation starts with V = undefined (spec §13.7.4.8)
     jm_eval_cptn_reset(mt);
@@ -1595,9 +1595,9 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     // Update — use native path for typed increment/assignment
     jm_emit_label(mt, l_update);
     if (for_node->update) {
-        JsMirLastClosureSnapshot saved_last_closure;
-        jm_save_last_closure_snapshot(mt, &saved_last_closure);
-        jm_clear_last_closure_snapshot(mt);
+        JsClosureCheckpoint saved_last_closure;
+        jm_closure_checkpoint_save(mt, &saved_last_closure);
+        jm_closure_tracker_clear(mt);
         TypeId upd_type = jm_get_effective_type(mt, for_node->update);
         if (jm_is_native_type(upd_type)) {
             (void)em_apply_value_demand(&mt->func_em->em,
@@ -1619,7 +1619,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
                     loop_var->reg, loop_var->type_id);
             }
         }
-        jm_restore_last_closure_snapshot(mt, &saved_last_closure);
+        jm_closure_checkpoint_rollback(mt, &saved_last_closure);
     }
 
     jm_emit_jmp(mt, l_test);
@@ -1954,6 +1954,21 @@ void jm_emit_class_setup(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* c
         setup->class_proto_obj);
 }
 
+// A computed member key can suspend, and the evaluated superclass is a raw
+// register held across method installation. The class object and its prototype
+// travel through the install policy and are restored there; the heritage value
+// has no such carrier.
+static bool jm_class_member_keys_can_suspend(JsMirTranspiler* mt, JsClassEntry* ce) {
+    if (!ce) return false;
+    for (int i = 0; i < ce->member_count; i++) {
+        JsClassMethodEntry* method = jm_class_member_method(ce, i);
+        if (method && method->key_expr && jm_can_suspend(mt, method->key_expr)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void jm_emit_class_instance_setup_tail(JsMirTranspiler* mt, MIR_reg_t cls_obj,
         JsClassEntry* ce, MIR_reg_t proto_obj, MIR_reg_t ctor_super_val, bool heritage_is_null) {
     proto_obj = jm_emit_current_class_prototype(mt, cls_obj, proto_obj);
@@ -1961,7 +1976,10 @@ void jm_emit_class_instance_setup_tail(JsMirTranspiler* mt, MIR_reg_t cls_obj,
         MIR_reg_t null_proto = jm_emit_null(mt);
         jm_callr_void_2(mt, "js_set_prototype", proto_obj, null_proto);
     }
+    int super_spill = ctor_super_val && jm_class_member_keys_can_suspend(mt, ce)
+        ? jm_gen_spill_save(mt, ctor_super_val) : -1;
     jm_emit_class_instance_methods(mt, proto_obj, cls_obj, ce);
+    if (super_spill >= 0) jm_gen_spill_load(mt, ctor_super_val, super_spill);
     jm_callr_void_2(mt, "js_set_class_instance_prototype", cls_obj, proto_obj);
     jm_callr_void_2(mt, "js_set_default_constructor_property", proto_obj, cls_obj);
     jm_callr_void_1(mt, "js_mark_all_non_enumerable", proto_obj);
@@ -1998,11 +2016,20 @@ static MIR_reg_t jm_emit_dynamic_new_expr(JsMirTranspiler* mt, JsCallNode* call,
     for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
         if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { has_spread = true; break; }
     }
+    // An argument that suspends returns from the state machine, so the callee
+    // cannot stay in a raw register across it — the ordinary call path spills
+    // it for the same reason (jm_call_yield_blocks_direct).
+    int callee_spill = -1;
+    for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
+        if (jm_can_suspend(mt, chk)) { callee_spill = jm_gen_spill_save(mt, callee); break; }
+    }
     if (has_spread) {
         MIR_reg_t args_arr = jm_build_spread_args_array(mt, call->arguments);
+        if (callee_spill >= 0) jm_gen_spill_load(mt, callee, callee_spill);
         return jm_callr_3(mt, "js_construct_array_like", MIR_T_I64, callee, args_arr, callee);
     }
     MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+    if (callee_spill >= 0) jm_gen_spill_load(mt, callee, callee_spill);
     // D6.2.2v2 makes newTarget an explicit construct operand; the generated
     // call cannot leak state into an adjacent construction on any exit.
     return jm_construct_value_into(mt, MIR_new_reg_op(mt->ctx, callee),
@@ -2023,8 +2050,8 @@ MirValue jm_emit_new_value(JsMirTranspiler* mt, JsCallNode* call) {
 }
 // switch statement
 void jm_transpile_switch(JsMirTranspiler* mt, JsSwitchNode* sw) {
-    JsMirLastClosureSnapshot saved_last_closure;
-    jm_save_last_closure_snapshot(mt, &saved_last_closure);
+    JsClosureCheckpoint saved_last_closure;
+    jm_closure_checkpoint_save(mt, &saved_last_closure);
 
     MIR_reg_t discriminant = jm_transpile_box_item(mt, sw->discriminant);
     MIR_label_t l_end = jm_new_label(mt);
@@ -2059,7 +2086,7 @@ void jm_transpile_switch(JsMirTranspiler* mt, JsSwitchNode* sw) {
         js_syntax_error(mt->tp, ((JsAstNode*)sw)->source_span,
             "Cannot allocate switch lowering rows");
         jm_emit_label(mt, l_end);
-        jm_restore_last_closure_snapshot(mt, &saved_last_closure);
+        jm_closure_checkpoint_rollback(mt, &saved_last_closure);
         if (mt->loop_depth > 0) mt->loop_depth--;
         mt->scope_env_reg = saved_scope_env_reg;
         mt->scope_env_slot_count = saved_scope_env_slot_count;
@@ -2075,7 +2102,7 @@ void jm_transpile_switch(JsMirTranspiler* mt, JsSwitchNode* sw) {
                 "Cannot retain switch lowering row");
             jm_switch_case_rows_destroy(cases);
             jm_emit_label(mt, l_end);
-            jm_restore_last_closure_snapshot(mt, &saved_last_closure);
+            jm_closure_checkpoint_rollback(mt, &saved_last_closure);
             if (mt->loop_depth > 0) mt->loop_depth--;
             mt->scope_env_reg = saved_scope_env_reg;
             mt->scope_env_slot_count = saved_scope_env_slot_count;
@@ -2128,7 +2155,7 @@ void jm_transpile_switch(JsMirTranspiler* mt, JsSwitchNode* sw) {
     jm_switch_case_rows_destroy(cases);
     // Case-local closure env registers are path-specific; after switch merge,
     // later callback readback must not use an env allocated in only one case.
-    jm_restore_last_closure_snapshot(mt, &saved_last_closure);
+    jm_closure_checkpoint_rollback(mt, &saved_last_closure);
     if (mt->loop_depth > 0) mt->loop_depth--;
     mt->scope_env_reg = saved_scope_env_reg;
     mt->scope_env_slot_count = saved_scope_env_slot_count;
@@ -2183,22 +2210,10 @@ MIR_reg_t jm_emit_await_value_reg(JsMirTranspiler* mt, MIR_reg_t promise_val,
         int next_state = jm_next_resume_state(mt, kind);
         if (next_state < 0) return promise_val;
 
-        MIR_label_t suspend_label = jm_new_label(mt);
-        MIR_label_t after_await_label = jm_new_label(mt);
-
-        MIR_reg_t must_suspend_item = jm_callr_1(mt, "js_async_must_suspend", MIR_T_I64, promise_val);
+        (void)jm_callr_1(mt, "js_async_prepare_await", MIR_T_I64, promise_val);
         jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_AWAIT_REJECTION);
-        MIR_reg_t must_suspend = jm_emit_is_truthy(mt,
-            jm_item_value(must_suspend_item));
-
-        jm_emit_branch(mt, MIR_BT, suspend_label, must_suspend);
 
         MIR_reg_t await_result = jm_new_reg(mt, "await_res", MIR_T_I64);
-        MIR_reg_t fast_val = jm_call_0(mt, "js_async_get_resolved", MIR_T_I64);
-        jm_emit_mov(mt, await_result, fast_val);
-        jm_emit_jmp(mt, after_await_label);
-
-        jm_emit_label(mt, suspend_label);
         jm_emit_suspend_env_save(mt);
         MIR_reg_t await_target = jm_call_0(mt, "js_async_get_resolved", MIR_T_I64);
         MIR_reg_t suspend_result = jm_call_2(mt, "js_gen_await_result", MIR_T_I64,
@@ -2208,7 +2223,7 @@ MIR_reg_t jm_emit_await_value_reg(JsMirTranspiler* mt, MIR_reg_t promise_val,
 
         jm_emit_label(mt, mt->gen_state_labels[next_state]);
         jm_emit_resume_env_restore(mt);
-        jm_emit_try_state_reset(mt);
+        jm_emit_try_state_restore(mt);
         jm_emit_mov(mt, await_result, mt->gen_input_reg);
         // Resume input is ordinary data for fulfillment but must re-enter the
         // merged ERROR lane for rejection; the host callback supplies the
@@ -2216,8 +2231,6 @@ MIR_reg_t jm_emit_await_value_reg(JsMirTranspiler* mt, MIR_reg_t promise_val,
         jm_publish_call_result(mt, mt->gen_input_reg);
         jm_emit_async_resume_refresh(mt);
         jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_AWAIT_REJECTION);
-
-        jm_emit_label_with_state(mt, after_await_label, JS_ERROR_LANE_CLEAN);
         return await_result;
     }
 
@@ -2250,9 +2263,9 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     // `for (let ctor of ctors) {...}` would write back to the FIRST loop's
     // last evil's env, and reads of the body's bindings would route through
     // that stale env. See §12.14.
-    JsMirLastClosureSnapshot saved_last_closure;
-    jm_save_last_closure_snapshot(mt, &saved_last_closure);
-    jm_clear_last_closure_snapshot(mt);
+    JsClosureCheckpoint saved_last_closure;
+    jm_closure_checkpoint_save(mt, &saved_last_closure);
+    jm_closure_tracker_clear(mt);
 
     jm_push_scope(mt);
     int saved_loop_scope_depth = mt->loop_scope_depth;
@@ -2308,7 +2321,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         log_error("js-mir: for-of/for-in missing loop variable");
         mt->loop_scope_depth = saved_loop_scope_depth;
         jm_pop_scope(mt);
-        jm_restore_last_closure_snapshot(mt, &saved_last_closure);
+        jm_closure_checkpoint_rollback(mt, &saved_last_closure);
         return;
     }
 
@@ -2540,10 +2553,30 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         jm_emit_for_loop_destructure(mt, destr_pattern, obj_destr_pattern,
             loop_var, left_creates_bindings, 0);
 
+        // for-in carries its key snapshot, length, cursor and source object in
+        // plain registers across the body. `for-of` parks its iterator in the
+        // activation slot; this loop has no such home, so a body that suspends
+        // resumed with a garbage cursor and stopped after the first key.
+        int keys_spill = -1, len_spill = -1, idx_spill = -1, obj_spill = -1;
+        if (jm_can_suspend(mt, fo->body)) {
+            keys_spill = jm_gen_spill_save(mt, collection);
+            len_spill = jm_gen_spill_save(mt, len);
+            obj_spill = jm_gen_spill_save(mt, iterable);
+            idx_spill = jm_gen_spill_save(mt, idx);
+        }
+
         jm_transpile_loop_body(mt, fo->body);
 
         jm_emit_label(mt, l_update);
+        // `continue` also lands here, so the reload belongs after the label.
+        if (idx_spill >= 0) {
+            jm_gen_spill_load(mt, collection, keys_spill);
+            jm_gen_spill_load(mt, len, len_spill);
+            jm_gen_spill_load(mt, iterable, obj_spill);
+            jm_gen_spill_load(mt, idx, idx_spill);
+        }
         jm_emit_reg_binary_op(mt, MIR_ADD, idx, idx, MIR_new_int_op(mt->ctx, 1));
+        if (idx_spill >= 0) jm_gen_spill_save_at(mt, idx, idx_spill);
         jm_emit_jmp(mt, l_test);
 
         jm_emit_label(mt, l_end);
@@ -2551,7 +2584,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         if (mt->loop_depth > 0) mt->loop_depth--;
         mt->loop_scope_depth = saved_loop_scope_depth;
         jm_pop_scope(mt);
-        jm_restore_last_closure_snapshot(mt, &saved_last_closure);
+        jm_closure_checkpoint_rollback(mt, &saved_last_closure);
         return;
     }
 
@@ -2776,7 +2809,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     jm_pop_scope(mt);
 
     // Js55 P19: restore last-closure tracking saved at entry.
-    jm_restore_last_closure_snapshot(mt, &saved_last_closure);
+    jm_closure_checkpoint_rollback(mt, &saved_last_closure);
 }
 
 void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
@@ -2866,9 +2899,12 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
         return;
     }
 
-    // Phase 5: In async function, wrap return value in Promise.resolve()
+    // The body owns the async function's result promise; js_async_wrap_return
+    // resolves a fresh one with the value rather than handing back
+    // Promise.resolve of it, which is what keeps `return v` settling now and
+    // `return thenable` adopting later.
     if (mt->in_async) {
-        val = jm_callr_1(mt, "js_promise_resolve", MIR_T_I64, val);
+        val = jm_callr_1(mt, "js_async_wrap_return", MIR_T_I64, val);
     }
 
     // If inside a try block, delay the return and jump to finally/end
@@ -3295,9 +3331,9 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         // Js55 P19: save and reset last-closure tracking so a prior block's
         // closure cannot capture this block's let/const initializers via
         // jm_write_last_closure_capture_if_matching. See §12.14.
-        JsMirLastClosureSnapshot blk_saved_last_closure;
-        jm_save_last_closure_snapshot(mt, &blk_saved_last_closure);
-        jm_clear_last_closure_snapshot(mt);
+        JsClosureCheckpoint blk_saved_last_closure;
+        jm_closure_checkpoint_save(mt, &blk_saved_last_closure);
+        jm_closure_tracker_clear(mt);
 
         jm_push_scope(mt);
         jm_init_block_tdz(mt, stmt);  // v20 TDZ
@@ -3306,7 +3342,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         jm_pop_scope(mt);
 
         // Js55 P19: restore prior tracking.
-        jm_restore_last_closure_snapshot(mt, &blk_saved_last_closure);
+        jm_closure_checkpoint_rollback(mt, &blk_saved_last_closure);
         break;
     }
     case JS_AST_NODE_EXPRESSION_STATEMENT: {
@@ -3595,7 +3631,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             }
             int saved_error_lane_flag_spill = -1;
             int saved_error_lane_val_spill = -1;
-            if (mt->in_generator && jm_has_yield(mt, try_node->finalizer)) {
+            if (jm_can_suspend(mt, try_node->finalizer)) {
                 saved_error_lane_flag_spill = jm_gen_spill_save(mt, saved_error_lane_flag);
                 saved_error_lane_val_spill = jm_gen_spill_save(mt, saved_error_lane_val);
             }
@@ -3642,6 +3678,10 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     // to route through; returning the rethrow carrier keeps
                     // the generator protocol from converting it into done.
                     jm_emit_ret(mt, restored_exception);
+                } else if (!outer_exception_context) {
+                    // A native frame cannot leave the rethrown lane in band for
+                    // a later check either; it exits through its own channel.
+                    (void)jm_emit_native_throw_exit(mt, restored_exception);
                 }
                 jm_emit_label(mt, skip_restore);
             }
@@ -3663,18 +3703,24 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 jm_emit_label_with_state(mt, end_label, end_label_error_lane_state);
             }
 
-            // If has_return_reg is set, issue the actual return
+            // If has_return_reg is set, issue the actual return. This try's
+            // context is already popped, so an enclosing try still owns the
+            // completion: hand the delayed value to its finally rather than
+            // returning past it (`try{try{return v}finally{a}}finally{b}`).
             MIR_label_t no_ret_label = jm_new_label(mt);
             jm_emit_branch(mt, MIR_BF, no_ret_label, has_return_reg);
-            if (mt->in_generator) {
-                MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, return_val_reg),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
-                jm_emit_ret(mt, done_result);
-            } else {
-                MIR_reg_t native_ret = jm_native_return_reg(mt,
-                    jm_item_value(return_val_reg));
-                jm_emit_ret(mt, native_ret);
+            if (!jm_emit_delayed_return_completion(mt, return_val_reg,
+                    JS_MIR_COMPLETION_RETURN)) {
+                if (mt->in_generator) {
+                    MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, return_val_reg),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
+                    jm_emit_ret(mt, done_result);
+                } else {
+                    MIR_reg_t native_ret = jm_native_return_reg(mt,
+                        jm_item_value(return_val_reg));
+                    jm_emit_ret(mt, native_ret);
+                }
             }
             jm_emit_label_with_state(mt, no_ret_label, end_label_error_lane_state);
 

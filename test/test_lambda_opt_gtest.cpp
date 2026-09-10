@@ -53,6 +53,7 @@
 
 extern "C" {
 #include "../lib/shell.h"
+#include "../lib/file.h"
 }
 
 namespace {
@@ -189,6 +190,16 @@ static FixtureRun run_fixture(const char* name, const char* tier,
     return run;
 }
 
+static FixtureRun run_source_fixture(const char* name, const char* source_path,
+        const char* tier) {
+    char* source = read_text_file(source_path);
+    EXPECT_NE(source, nullptr) << source_path;
+    if (!source) return {};
+    FixtureRun run = run_fixture(name, tier, source, true);
+    free(source);
+    return run;
+}
+
 // A self-referential record contract with a typed recursive traversal. The
 // declared boundaries here are the `let node: Node` initializer, the `head`
 // stores, and the `depth(n.next)` recursion — 20 nodes' worth per run.
@@ -318,6 +329,37 @@ TEST(LambdaOptAdmission, RecursiveShapeIdentityInterpExactHits) {
     EXPECT_EQ(run.profile.get("map_admit_reifications"), 1u);
 }
 
+// A nullable record-array path must not re-admit its owning graph after each
+// scalar store or same-contract array relink (D3.2.4v3, D3.3.3v3).
+static const char* kTypedPathSource =
+    "type Row = {value: int, values: int[]}\n"
+    "type World = {rows: Row?[]}\n"
+    "pn update(var world: World, index: int) any {\n"
+    "    world.rows[index].value = world.rows[index].value + 1\n"
+    "    var values: int[] = world.rows[index].values\n"
+    "    values[0] = values[0] + 1\n"
+    "    world.rows[index].values = values\n"
+    "}\n"
+    "pn main() {\n"
+    "    var world: World = {rows: [{value: 0, values: [0]}, null]}\n"
+    "    var i = 0\n"
+    "    while (i < 100) { update(world, 0); i = i + 1 }\n"
+    "    print([world.rows[0].value, world.rows[0].values[0]])\n"
+    "}\n";
+
+TEST(LambdaOptAdmission, TypedArrayPathPreservesGraphProof) {
+    FixtureRun run = run_fixture("typed_array_path", "jit", kTypedPathSource, true);
+    ASSERT_TRUE(run.ok);
+    EXPECT_EQ(run.std_out, "[100, 100]\n");
+    // The initial nullable array reifies its one literal Row once. None of
+    // the 100 updates may revisit fields or rebuild a graph after that.
+    EXPECT_EQ(run.profile.get("map_admit_reifications"), 1u);
+    EXPECT_EQ(run.profile.get("map_admit_deep_clone_calls"), 0u);
+    EXPECT_EQ(run.profile.get("map_admit_fields_visited"), 2u);
+    EXPECT_EQ(run.profile.get("map_admit_bytes_copied"), 48u);
+    EXPECT_EQ(run.profile.get("array_checked_store_full_clone"), 0u);
+}
+
 // The refusal control: an ANY-bearing contract must keep reifying at declared
 // crossings on BOTH tiers. A zero here without concrete storage classification
 // for the union field means the adoption gate started admitting a shape whose
@@ -416,6 +458,52 @@ TEST(LambdaOptAdmission, ProfileDisabledWritesNoTsv) {
     EXPECT_EQ(run.std_out, "20\n");
     EXPECT_NE(OPT_ACCESS(run.profile_path.c_str(), 0), 0)
         << "profile TSV was written with COW_EXEC_PROFILE=0: " << run.profile_path;
+}
+
+TEST(LambdaOptAdmission, ImmutableArrayConsumerAdmitsOnce) {
+    FixtureRun run = run_source_fixture("array_consumer",
+        "test/lambda/proc/tune23_array_consumer.ls", "jit");
+    ASSERT_TRUE(run.ok);
+    EXPECT_EQ(run.std_out, "[93, \"one\", 2, 42]\n");
+    // one conversion for the closed producer and one for the open control;
+    // increasing the traversal count must not allocate another admitted copy.
+    EXPECT_LE(run.profile.get("fn_mutable_value_calls"), 2u);
+}
+
+TEST(LambdaOptAdmission, ExpressionConstructorUsesDeclaredLayout) {
+    FixtureRun run = run_source_fixture("record_constructor",
+        "test/lambda/proc/tune23_record_constructor.ls", "jit");
+    ASSERT_TRUE(run.ok);
+    EXPECT_EQ(run.std_out, "[190, 3, 2, null]\n");
+    EXPECT_EQ(run.profile.get("map_admit_reifications"), 0u);
+}
+
+TEST(LambdaOptAdmission, BorrowedNumericArrayRetainsStoreLane) {
+    FixtureRun run = run_source_fixture("array_borrow_lane",
+        "test/lambda/proc/tune23_array_borrow_lane.ls", "jit");
+    ASSERT_TRUE(run.ok);
+    EXPECT_EQ(run.std_out, "[[1, 2, 3], [10, 12, 15], [4, 5, 6]]\n");
+    EXPECT_EQ(run.profile.get("array_checked_store_calls"), 0u);
+}
+
+TEST(LambdaOptAdmission, RecursiveUnionFieldsReuseAdmittedContract) {
+    FixtureRun run = run_source_fixture("union_field",
+        "test/lambda/proc/tune23_union_field.ls", "jit");
+    ASSERT_TRUE(run.ok);
+    EXPECT_EQ(run.std_out, "[340, true, true]\n");
+    ASSERT_TRUE(run.profile.has("union_admit_calls"));
+    // Construction and the missing-field slow path still admit. Traversing
+    // the ten-node tree twenty times must not revalidate every child.
+    EXPECT_GT(run.profile.get("union_admit_calls"), 0u);
+    EXPECT_LT(run.profile.get("union_admit_calls"), 40u);
+}
+
+TEST(LambdaOptAdmission, BoxedUnionArrayAdmissionRetainsCarrier) {
+    FixtureRun run = run_source_fixture("union_array",
+        "test/lambda/proc/tune23_union_array.ls", "jit");
+    ASSERT_TRUE(run.ok);
+    EXPECT_EQ(run.std_out, "[40, 2, 3, true, true, 2, 3]\n");
+    EXPECT_EQ(run.profile.get("fn_mutable_value_calls"), 0u);
 }
 
 }  // namespace

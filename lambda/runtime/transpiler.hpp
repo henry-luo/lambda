@@ -16,12 +16,25 @@ typedef struct LambdaRegionBlock LambdaRegionBlock;
 // Runtime map admissions repeat the same candidate/contract shape pair across
 // recursive calls. The entries are context-owned so a cache cannot leak a
 // TypeMap relation between independent EvalContexts (D3.2.2).
-#define LAMBDA_MAP_CONTRACT_CACHE_CAPACITY 16
+// Typed record arrays repeatedly cross the same nested map contracts in one
+// solver run. Keep this a power of two: runtime_map_contract_relation_cached
+// uses bounded hash probes rather than a linear full-table scan.
+#define LAMBDA_MAP_CONTRACT_CACHE_CAPACITY 256
 typedef struct LambdaMapContractCacheEntry {
     const TypeMap* candidate;
     const TypeMap* expected;
     uint8_t relation;
 } LambdaMapContractCacheEntry;
+
+// Array representation proofs are immutable and heap-local.  Keeping their
+// interning table beside the map-relation cache gives every equivalent T[]
+// boundary in one EvalContext the same proof without retaining Type objects
+// after that context's pool is released (D3.3.3).
+#define LAMBDA_ARRAY_REP_CERT_CACHE_CAPACITY 32
+typedef struct LambdaArrayRepCertCacheEntry {
+    Type* contract;
+    ArrayRepCert* cert;
+} LambdaArrayRepCertCacheEntry;
 
 typedef struct Heap {
     Pool *pool;  // runtime owner group for non-GC semantic allocations
@@ -34,6 +47,8 @@ typedef struct Heap {
     LambdaRegionBlock* region_free_blocks;
     LambdaMapContractCacheEntry map_contract_cache[LAMBDA_MAP_CONTRACT_CACHE_CAPACITY];
     uint32_t map_contract_cache_next;
+    LambdaArrayRepCertCacheEntry array_rep_cert_cache[LAMBDA_ARRAY_REP_CERT_CACHE_CAPACITY];
+    uint32_t array_rep_cert_cache_next;
     // Identity of this heap incarnation, assigned once at heap_init from a
     // process-wide counter and never reused. Root registrations die with the
     // heap; a RootVector compares this to know its blocks must re-register

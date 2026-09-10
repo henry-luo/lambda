@@ -74,8 +74,8 @@ JS_FORWARD_STATIC_VOID( js_assert_set_native, (Item object, const char* name, Ta
 #define assert_instance_count root_vector_count(assert_instances)
 
 static bool js_assert_ensure_roots(void) {
-    return js_active_runtime_state && js_runtime_state.assert &&
-        js_root_range_ensure_registered(&js_runtime_state.assert->roots);
+    JsAssertState* state = js_assert_state_ensure(js_active_runtime_state);
+    return state && js_root_vector_ensure_registered(&state->roots);
 }
 
 static void js_assert_register_instance(Item instance) {
@@ -343,8 +343,8 @@ static void js_internal_errors_set_code(Item codes, const char* name,
 }
 
 extern "C" Item js_get_internal_errors_namespace(void) {
-    if (internal_errors_namespace.item != 0) return internal_errors_namespace;
     if (!js_assert_ensure_roots()) return ItemError;
+    if (internal_errors_namespace.item != 0) return internal_errors_namespace;
 
     internal_errors_namespace = js_new_object();
     RootFrame roots(1);
@@ -444,8 +444,8 @@ extern "C" Item js_internal_assert_printMyersDiff(Item diff, Item operator_item)
 }
 
 extern "C" Item js_get_internal_assert_myers_diff_namespace(void) {
-    if (internal_assert_myers_diff_namespace.item != 0) return internal_assert_myers_diff_namespace;
     if (!js_assert_ensure_roots()) return ItemError;
+    if (internal_assert_myers_diff_namespace.item != 0) return internal_assert_myers_diff_namespace;
 
     internal_assert_myers_diff_namespace = js_new_object();
     js_set_native_key(internal_assert_myers_diff_namespace, assert_make_string("myersDiff"), js_internal_assert_myersDiff);
@@ -5100,8 +5100,8 @@ extern "C" Item js_assert_constructor(Item options) {
 }
 
 extern "C" Item js_get_assert_namespace(void) {
-    if (assert_namespace.item != 0) return assert_namespace;
     if (!js_assert_ensure_roots()) return ItemError;
+    if (assert_namespace.item != 0) return assert_namespace;
 
     // namespace doubles as the assert() function itself
     assert_namespace = js_new_native_function(js_assert_ok);
@@ -5154,6 +5154,7 @@ extern "C" Item js_get_assert_namespace(void) {
 #undef JS_ASSERT_METHODS
 
 extern "C" void js_assert_reset(void) {
+    if (!js_active_runtime_state || !js_runtime_state.assert) return;
     assert_namespace = (Item){0};
     internal_errors_namespace = (Item){0};
     internal_assert_myers_diff_namespace = (Item){0};
@@ -5175,6 +5176,7 @@ enum JsNodeTestValueSlot {
 };
 
 static bool node_test_values_ensure(void) {
+    if (!js_assert_ensure_roots()) return false;
     RootVector* values = &js_runtime_state.assert->node_test_values;
     if (root_vector_count(values) == JS_NODE_TEST_VALUE_SLOT_COUNT) return true;
     root_vector_clear(values);
@@ -5534,24 +5536,24 @@ static Item node_test_make_event_stream(Item events) {
 extern "C" void js_node_test_reset_counts(void) {
     // Node's shell runner resets counters before it creates a JS realm. There
     // is no context-owned table to clear until the first runtime activation.
-    if (!js_active_runtime_state) return;
+    if (!js_active_runtime_state || !js_runtime_state.assert) return;
     g_node_test_total_count = 0;
     g_node_test_pass_count = 0;
     g_node_test_fail_count = 0;
 }
 
 extern "C" int js_node_test_total_count(void) {
-    if (!js_active_runtime_state) return 0;
+    if (!js_active_runtime_state || !js_runtime_state.assert) return 0;
     return g_node_test_total_count;
 }
 
 extern "C" int js_node_test_pass_count(void) {
-    if (!js_active_runtime_state) return 0;
+    if (!js_active_runtime_state || !js_runtime_state.assert) return 0;
     return g_node_test_pass_count;
 }
 
 extern "C" int js_node_test_fail_count(void) {
-    if (!js_active_runtime_state) return 0;
+    if (!js_active_runtime_state || !js_runtime_state.assert) return 0;
     return g_node_test_fail_count;
 }
 
@@ -5641,6 +5643,7 @@ static void js_node_test_resolve_options(Item options_or_fn, Item fn,
 
 // test(name, fn) / test(name, options, fn) — run fn synchronously
 extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
+    if (!js_assert_ensure_roots()) return ItemError;
 
     // Check for skip/todo option in options object
     Item options;
@@ -5743,6 +5746,7 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
 
 // describe(name, fn) — grouping, just run fn with scoped hooks
 extern "C" Item js_node_test_describe(Item name, Item options_or_fn, Item fn) {
+    if (!js_assert_ensure_roots()) return ItemError;
 
     Item options;
     Item callback;
@@ -5775,12 +5779,14 @@ extern "C" Item js_node_test_describe(Item name, Item options_or_fn, Item fn) {
 
 // hook registration stubs. The lightweight runner applies each stored phase.
 extern "C" Item js_node_test_hook(Item fn, Item options) {
+    if (!js_assert_ensure_roots()) return ItemError;
     (void)fn;
     (void)options;
     return make_js_undefined();
 }
 
 extern "C" Item js_node_test_before_each(Item fn, Item options) {
+    if (!js_assert_ensure_roots()) return ItemError;
     (void)options;
     if (!node_test_store_hook(&g_node_test_hooks->before_each, fn)) {
         return js_throw_range_error("Cannot retain node:test beforeEach hook");
@@ -5789,6 +5795,7 @@ extern "C" Item js_node_test_before_each(Item fn, Item options) {
 }
 
 extern "C" Item js_node_test_after_each(Item fn, Item options) {
+    if (!js_assert_ensure_roots()) return ItemError;
     (void)options;
     if (!node_test_store_hook(&g_node_test_hooks->after_each, fn)) {
         return js_throw_range_error("Cannot retain node:test afterEach hook");
@@ -5797,6 +5804,7 @@ extern "C" Item js_node_test_after_each(Item fn, Item options) {
 }
 
 static Item js_node_test_run_files(Item options) {
+    if (!js_assert_ensure_roots()) return ItemError;
 
     RootFrame roots(2);
     Rooted<Item> previous_queue_root(roots, g_node_test_event_queue);
@@ -5838,6 +5846,7 @@ static Item js_node_test_run_files(Item options) {
 }
 
 extern "C" Item js_get_node_test_namespace(void) {
+    if (!js_assert_ensure_roots()) return ItemError;
     if (node_test_namespace.item != 0) return node_test_namespace;
 
     RootFrame roots(6);
@@ -5879,7 +5888,7 @@ extern "C" Item js_get_node_test_namespace(void) {
 extern "C" void js_node_test_reset(void) {
     // The pre-realm runner call must remain context-free; invoking the mock
     // scheduler before a realm exists would dereference a null capsule.
-    if (!js_active_runtime_state) return;
+    if (!js_active_runtime_state || !js_runtime_state.assert) return;
     extern void js_mock_scheduler_reset(void);
     js_mock_scheduler_reset();
     root_vector_clear(&js_runtime_state.assert->node_test_values);

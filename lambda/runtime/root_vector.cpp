@@ -27,6 +27,11 @@ static void root_vector_zero_range(RootVector* v, int64_t from, int64_t to) {
     }
 }
 
+static void root_vector_zero_external(RootVector* v) {
+    if (!v || !v->external_slots || v->external_count <= 0) return;
+    memset(v->external_slots, 0, (size_t)v->external_count * sizeof(Item));
+}
+
 // Registrations die with the heap. When the owner's generation moved, every
 // retained Item belonged to the dead heap. Observing that drops the Items and
 // forgets the registration; it never registers, so the non-publishing
@@ -36,6 +41,7 @@ static void root_vector_observe_heap(RootVector* v) {
     uint64_t generation = heap_generation_for(root_vector_owner(v));
     if (generation == v->heap_generation) return;
     if (v->count > 0) root_vector_zero_range(v, 0, v->count);
+    root_vector_zero_external(v);
     v->count = 0;
     v->heap_generation = 0;
 }
@@ -48,6 +54,10 @@ static bool root_vector_sync_heap(RootVector* v) {
     uint64_t generation = heap_generation_for(owner);
     if (generation == 0) return false;
     if (generation == v->heap_generation) return true;
+    if (v->external_slots && v->external_count > 0) {
+        heap_register_gc_root_range_for(root_vector_owner(v),
+            (uint64_t*)v->external_slots, (int)v->external_count);
+    }
     for (int i = 0; i < v->block_count; i++) {
         memset(v->blocks[i]->slots, 0, sizeof(v->blocks[i]->slots));
         heap_register_gc_root_range_for(owner, v->blocks[i]->slots,
@@ -83,6 +93,48 @@ extern "C" void root_vector_init(RootVector* v, Context* owner, const char* name
     memset(v, 0, sizeof(*v));
     v->owner = owner;
     v->name = name;
+}
+
+extern "C" void root_vector_bind_external(RootVector* v, Context* owner,
+                                            Item* slots, int64_t count,
+                                            const char* name) {
+    if (!v) return;
+    if (v->external_slots == slots && v->external_count == (count > 0 ? count : 0) &&
+            v->owner == owner) {
+        v->name = name;
+        return;
+    }
+    if (v->external_slots) {
+        root_vector_unbind_external(v);
+    }
+    v->owner = owner;
+    v->name = name;
+    v->external_slots = slots;
+    v->external_count = count > 0 ? count : 0;
+}
+
+extern "C" bool root_vector_ensure_external(RootVector* v) {
+    if (!v || !v->external_slots || v->external_count <= 0) return false;
+    return root_vector_sync_heap(v);
+}
+
+extern "C" void root_vector_clear_external(RootVector* v) {
+    if (!v) return;
+    root_vector_observe_heap(v);
+    root_vector_zero_external(v);
+}
+
+extern "C" void root_vector_unbind_external(RootVector* v) {
+    if (!v) return;
+    Context* owner = root_vector_owner(v);
+    bool live = heap_generation_for(owner) == v->heap_generation &&
+        v->heap_generation != 0;
+    if (live && v->external_slots && v->external_count > 0) {
+        heap_unregister_gc_root_range_for(owner, (uint64_t*)v->external_slots);
+    }
+    v->external_slots = NULL;
+    v->external_count = 0;
+    v->heap_generation = 0;
 }
 
 extern "C" bool root_vector_push(RootVector* v, Item value) {
@@ -149,6 +201,9 @@ extern "C" void root_vector_destroy(RootVector* v) {
     for (int i = 0; i < v->block_count; i++) {
         if (live) heap_unregister_gc_root_range_for(owner, v->blocks[i]->slots);
         mem_free(v->blocks[i]);
+    }
+    if (live && v->external_slots && v->external_count > 0) {
+        heap_unregister_gc_root_range_for(owner, (uint64_t*)v->external_slots);
     }
     if (v->blocks) mem_free(v->blocks);
     Context* keep_owner = v->owner;

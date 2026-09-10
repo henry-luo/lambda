@@ -1118,6 +1118,32 @@ files. The only remaining `.bak` files are inside the **vendored**
 CLAUDE.md rule 16 puts off limits for in-place edits — they are upstream
 artefacts, not Lambda drift.
 
+<a id="lr11-r6"></a>**LR11-R6 · Conservative safety analysis (adjacent) · RESOLVED 2026-09-10 (record was never live)**
+The entry claimed `function_needs_stack_check` was hard-`true` and
+`function_is_tail_recursive` hard-`false`, so TCO existed but was switched off
+at the gate. **Both functions were dead code when the claim was written.** At
+the ledger's own verification commit `c568f0f93`, `git grep function_needs_stack_check`
+matched only `doc/dev/lambda/LR_11` and `LR_12` plus the definition itself — no
+call site anywhere in the tree — while the live eligibility test `should_use_tco`
+was already wired into both lowering paths (`transpile-mir.cpp:24580`,
+`interp_plan.cpp:1676`). The doc sweep read a vestigial function and inferred a
+gate that no code consulted.
+
+Commit `8d44a6ca3` (2026-09-01) deleted the whole vestige — `SafetyAnalyzer`,
+`analyze_function_safety`, `function_needs_stack_check`,
+`function_is_tail_recursive` — leaving `safety_analyzer.cpp` as pure tail-call
+analysis. TCO is live on both tiers today: `transpile-mir.cpp:27906` wraps an
+eligible body in the TCO loop, and `interp_plan.cpp:1693` marks tail calls for
+T0. C-stack overflow is caught by the guard-page/signal handler in
+`lambda-stack.cpp`, not by a per-function emitted check, so "every user function
+pays for a stack check" was never true either.
+
+**Live residue, re-filed rather than closed:** `is_tco_function_safe` is still
+defined and declared but has **no caller** — the "all recursion is tail
+recursion, so this frame cannot grow" conclusion is computed and discarded. That
+is the surviving half, tracked as [LR07-13](Lambda_Issue_Ledger.md#lr07-13)
+alongside the `LAMBDA_TCO_MAX_ITERATIONS` ceiling it would justify removing.
+
 ### A.10 Schema validator (LR_13)
 
 <a id="lr13-r1"></a><a id="a8-schema-validator-lr_13"></a>**LR13-R1 · The dead unified-schema model · RESOLVED**
@@ -1272,6 +1298,14 @@ failure. The successful owner-returning convention remains unchanged; only
 the unresolved choice between updated-owner and unit conventions in
 `S7.10.6` remains open. Targeted invalid-mutation probes and the full baseline
 pass.
+
+<a id="lr12-r3"></a>**LR12-R3 · Safety gate hard-coded, TCO disabled despite being implemented · RESOLVED 2026-09-10 (record was never live)**
+The procedural-runtime face of the same mistaken reading recorded in
+[LR11-R6](#lr11-r6). `function_needs_stack_check` / `function_is_tail_recursive`
+were never called by any code; `should_use_tco` was and is the real gate, and it
+was already wired at the commit the ledger verified against. The vestigial
+functions were deleted in `8d44a6ca3` (2026-09-01). No behaviour changed when
+they went, which is itself the proof they gated nothing.
 
 <a id="lr12-r8"></a>**LR12-R8 · `push`/`splice` mutate a module-level `let` in place, falsifying `fn` purity · RESOLVED 2026-08-26**
 The COW selector only found local `MirVarEntry` bindings, so a module-level

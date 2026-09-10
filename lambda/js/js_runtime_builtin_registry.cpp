@@ -9,7 +9,7 @@
 
 // Intrinsic functions are realm-owned binding values. A shared target never
 // implies JavaScript identity; only an explicit binding alias can share a slot.
-#define js_builtin_cache (js_runtime_state.intrinsic_slots->builtin_function_entries)
+#define js_builtin_cache_at(index) (*js_realm_intrinsic_slot(JS_REALM_SLOT_BUILTIN_FUNCTION_BASE, (index)))
 #define js_builtin_cache_init (js_runtime_state.intrinsic_slots->builtin_function_initialized)
 
 
@@ -262,7 +262,7 @@ static Item js_create_builtin_function_from_spec(const JsBuiltinMethodSpec* spec
     }
     if (!js_builtin_cache_init) {
         for (int i = 0; i < JS_INTRINSIC_BINDING_COUNT; i++) {
-            js_builtin_cache[i] = ItemNull;
+            js_builtin_cache_at(i) = ItemNull;
         }
         js_builtin_cache_init = true;
     }
@@ -279,17 +279,19 @@ static Item js_create_builtin_function_from_spec(const JsBuiltinMethodSpec* spec
             }
         }
     }
-    if (js_builtin_cache[identity_slot].item != 0 &&
-        js_builtin_cache[identity_slot].item != ItemNull.item) {
-        return js_builtin_cache[identity_slot];
+    if (js_builtin_cache_at(identity_slot).item != 0 &&
+        js_builtin_cache_at(identity_slot).item != ItemNull.item) {
+        return js_builtin_cache_at(identity_slot);
     }
     const char* display_name = js_builtin_method_spec_display_name(spec);
     JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
     js_function_init_native_module_scope(fn);
     fn->type_id = LMD_TYPE_FUNC;
-    fn->param_count = spec->param_count;
-    fn->formal_length = -1;
-    fn->catalog_id = spec->builtin_id;
+    JsCallableCode* code = js_fn_code_ensure(fn);
+    if (!code) return ItemError;
+    code->param_count = spec->param_count;
+    code->formal_length = -1;
+    code->catalog_id = spec->builtin_id;
     if (spec->builtin_id > JS_BUILTIN_NONE) {
         const JsIntrinsicTargetSpec* target = js_intrinsic_target_find(
             spec->builtin_id);
@@ -319,7 +321,7 @@ static Item js_create_builtin_function_from_spec(const JsBuiltinMethodSpec* spec
         Item frozen_key = js_name_item("__frozen__", 10);
         js_func_init_property(result, frozen_key, (Item){.item = b2it(true)});
     }
-    js_builtin_cache[identity_slot] = result;
+    js_builtin_cache_at(identity_slot) = result;
     return result;
 }
 
@@ -429,8 +431,9 @@ void js_populate_builtin_prototype_methods(Item prototype, const char* ctor_name
 
 void js_builtin_cache_reset() {
     if (!js_active_runtime_state) return;
+    if (!js_realm_intrinsic_slots_ensure_roots()) return;
     for (int i = 0; i < JS_INTRINSIC_BINDING_COUNT; i++) {
-        js_builtin_cache[i] = ItemNull;
+        js_builtin_cache_at(i) = ItemNull;
     }
 }
 
@@ -479,9 +482,11 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
         JsFunction* tag_getter = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
         js_function_init_native_module_scope(tag_getter);
         tag_getter->type_id = LMD_TYPE_FUNC;
+        JsCallableCode* tag_code = js_fn_code_ensure(tag_getter);
+        if (!tag_code) return;
         tag_getter->name = heap_create_name("get [Symbol.toStringTag]", 24);
-        tag_getter->param_count = 0;
-        tag_getter->formal_length = -1;
+        tag_code->param_count = 0;
+        tag_code->formal_length = -1;
         // The symbol accessor's spelling is observable metadata; its stored
         // body protects callable behavior from later name mutation.
         js_fn_native_ensure(tag_getter)->call = js_intrinsic_typed_array_to_string_tag_body;

@@ -10,6 +10,7 @@
 #include "../runtime/mir_dump.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/path_str.h"
+#include "../../lib/time_util.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -287,13 +288,7 @@ bool js_capture_compiled_name_table(const JsMirTranspiler* mt,
 }
 
 static long js_mir_phase_now_us(void) {
-#ifndef _WIN32
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (long)tv.tv_sec * 1000000L + (long)tv.tv_usec;
-#else
-    return (long)GetTickCount64() * 1000L;
-#endif
+    return (long)time_now_us();
 }
 
 extern "C" void js_mir_reset_last_phase_timing(void) {
@@ -322,6 +317,7 @@ extern "C" void js_mir_accumulate_last_phase_timing(bool is_preamble) {
     g_document_js_mir_phase_timing.link_us += g_last_js_mir_phase_timing.link_us;
     g_document_js_mir_phase_timing.execute_us += g_last_js_mir_phase_timing.execute_us;
     g_document_js_mir_phase_timing.cleanup_us += g_last_js_mir_phase_timing.cleanup_us;
+    g_document_js_mir_phase_timing.realm_us += g_last_js_mir_phase_timing.realm_us;
     g_document_js_mir_phase_timing.total_us += g_last_js_mir_phase_timing.total_us;
     if (is_preamble) {
         g_document_js_mir_phase_timing.preamble_us += g_last_js_mir_phase_timing.total_us;
@@ -774,9 +770,19 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
             runtime->js_ast_backend = true;
             log_info("js-mir: document AST (%u nodes) uses AST executor", tp->ast_index.count);
         }
-        return js_mir_execute_ast_script(runtime, tp, js_ast, owned_source,
+        // nested eval compiles through the same counters; retain this source's
+        // record and separate realm construction from AST execution.
+        JsMirPhaseTiming timing = g_last_js_mir_phase_timing;
+        uint64_t realm_start = js_realm_init_time_us();
+        phase_start = js_mir_phase_now_us();
+        Item result = js_mir_execute_ast_script(runtime, tp, js_ast, owned_source,
             js_source, js_source_len, filename, result_home,
             test262_native_harness);
+        timing.realm_us = (long)(js_realm_init_time_us() - realm_start);
+        timing.execute_us = js_mir_phase_now_us() - phase_start - timing.realm_us;
+        timing.total_us = js_mir_phase_now_us() - phase_total_start;
+        g_last_js_mir_phase_timing = timing;
+        return result;
     }
 
     // Set up the canonical evaluation context early so module objects and
@@ -847,6 +853,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
 
     if (!g_jm_preamble_compile_only) {
         phase_start = js_mir_phase_now_us();
+        uint64_t realm_start = js_realm_init_time_us();
         if (!js_activate_runtime_name_pool()) {
             log_error("js-mir: failed to activate dynamic NamePool");
             return js_mir_compile_unit_fail(ctx, mt, tp, owned_source,
@@ -856,7 +863,10 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         // discovery seals the root and installs the dynamic child.
         (void)js_get_global_this();
         jm_load_imports(runtime, js_ast, filename);
-        g_last_js_mir_phase_timing.imports_us = js_mir_phase_now_us() - phase_start;
+        g_last_js_mir_phase_timing.realm_us =
+            (long)(js_realm_init_time_us() - realm_start);
+        g_last_js_mir_phase_timing.imports_us = js_mir_phase_now_us() - phase_start -
+            g_last_js_mir_phase_timing.realm_us;
         log_mem_stage("js-core: imports_loaded");
     }
 

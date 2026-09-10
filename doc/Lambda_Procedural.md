@@ -220,15 +220,18 @@ pn example() {
 
 ```lambda
 pn example() {
-    let arr = [1, 2, 3]    // typed as int array
-    arr[1] = 99            // OK: same type
-    arr[0] = 3.14          // OK: auto-converts array to generic
-    arr[last] = "hello"    // OK: tail-relative write
-    arr[-1] = "oops"       // ERROR: negative indexes are absent
+    var arr: int[] = [1, 2, 3]
+    arr[1] = 99            // OK: checked int write
+    arr[last] = 42         // OK: tail-relative checked write
+    // arr[0] = "oops"     // ERROR E201; `arr` remains unchanged
+    // arr[-1] = 1          // ERROR: negative indexes are absent
 }
 ```
 
-When a value of a different type is assigned to a typed array (e.g., float into an int array), the array is automatically converted to a generic array that can hold any type.
+An annotation is a contract: an incompatible array-element write is rejected
+before it changes the array. An unannotated array may widen as ordinary dynamic
+data, but that behavior never weakens a declared `T[]` binding
+(**S11.4.1v3**, **S7.10.6**).
 
 ### Map Field Assignment
 
@@ -260,7 +263,7 @@ Elements support both attribute mutation (via dot notation) and child mutation (
 | Target | Syntax | Behavior on Type Change |
 |--------|--------|------------------------|
 | Variable | `x = val` | Type widens (unannotated `var`) or error (annotated) |
-| Array element | `arr[i] = val` | Array auto-converts from typed to generic |
+| Array element | `arr[i] = val` | Declared `T[]` checks before commit; open arrays may widen |
 | Map field | `obj.key = val` | Shape metadata auto-rebuilt |
 | Element attr | `elem.attr = val` | Attribute updated in shape |
 | Element child | `elem[i] = val` | Child replaced at index |

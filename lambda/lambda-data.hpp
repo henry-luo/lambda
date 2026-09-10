@@ -401,9 +401,9 @@ typedef struct TypeMap : Type {
     // by multiple instances from one `new` callsite. Structural mutations and
     // incompatible established-slot retags must clone before mutating entries.
     bool is_shared_constructor_shape;
-    // P5 (JS): parent->child transition targets are also shared across
-    // instances. They are not constructor roots, but must obey the same detach
-    // rules before descriptor or incompatible type mutation.
+    // P5 (JS): immutable transition roots/targets are shared across instances.
+    // A predicted literal blueprint joins this family once it publishes null,
+    // so later initialization must detach instead of upgrading its NULL slots.
     bool is_transition_shared_shape;
     struct TypeMapTransition* transitions;
     // Tune6: immutable JS semantic metadata. Null is reserved for foreign or
@@ -939,7 +939,7 @@ typedef struct TypeUnary : Type {
     Type* operand;
     Operator op;  // operator
     int type_index;  // index of the type in the type list
-    int min_count;   // minimum occurrence count (for OPERATOR_REPEAT)
+    int min_count;   // occurrence bounds (for OPERATOR_REPEAT only)
     int max_count;   // maximum occurrence count (-1 for unbounded)
 } TypeUnary;
 

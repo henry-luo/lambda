@@ -1439,7 +1439,7 @@ static TypeId classify_storage_domain(const Type* type) {
         // pointer lane first decoded an `int[]?` field as a Type* Item.
         if (base && base->type_id == LMD_TYPE_TYPE &&
                 base->kind == TYPE_KIND_UNARY &&
-                ((const TypeUnary*)base)->op == OPERATOR_REPEAT) {
+                ((const TypeUnary*)base)->op == OPERATOR_ARRAY) {
             return LMD_TYPE_ARRAY;
         }
         // only a simple `type` contract (or a global meta-type) is the Type*
@@ -1473,7 +1473,7 @@ static TypeId classify_storage_domain(const Type* type) {
         // shape laid out on 8-byte strides, which is the malformation Tune19
         // §11.3 measured (Lambda_Design_Compiling_Lane.md §10.3).
         if (type->kind == TYPE_KIND_UNARY &&
-                ((const TypeUnary*)type)->op == OPERATOR_REPEAT) {
+                ((const TypeUnary*)type)->op == OPERATOR_ARRAY) {
             return LMD_TYPE_ARRAY;
         }
         // TB5: a constrained contract stores in its BASE type's lane. The
@@ -1502,7 +1502,7 @@ static TypeId classify_storage_domain(const Type* type) {
                     // mirroring the simple/optional cases handled above.
                     if (base->type_id == LMD_TYPE_TYPE &&
                             base->kind == TYPE_KIND_UNARY &&
-                            ((const TypeUnary*)base)->op == OPERATOR_REPEAT) {
+                            ((const TypeUnary*)base)->op == OPERATOR_ARRAY) {
                         return LMD_TYPE_ARRAY;
                     }
                     if (base == &TYPE_INTEGER || base == &TYPE_NUMBER) return LMD_TYPE_ANY;

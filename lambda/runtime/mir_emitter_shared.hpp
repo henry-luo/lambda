@@ -309,6 +309,7 @@ enum ScalarPayloadProvenance {
     SCALAR_PROVENANCE_INLINE,
     SCALAR_PROVENANCE_HEAP,
     SCALAR_PROVENANCE_ACTIVATION_HOME,
+    SCALAR_PROVENANCE_ACTIVATION_EXTENT,
     SCALAR_PROVENANCE_UNKNOWN,
 };
 struct MirValue {
@@ -363,6 +364,13 @@ struct MirCallOptions {
     // lane as `_env_ptr`.
     bool has_hidden_env;
     MIR_reg_t hidden_env;
+};
+
+// a profile supplies its context-owned counter and overflow semantics.
+struct MirInvocationDepthPlan {
+    MIR_reg_t owner;
+    MIR_disp_t depth_offset;
+    MIR_disp_t limit_offset;
 };
 struct MirCallResult {
     MirValue normal;
@@ -1200,8 +1208,106 @@ static inline void em_emit_insn(MirEmitter* em, MIR_insn_t insn) {
         mir_append_emit_insn(em->ctx, em->func_item, insn);
     }
 }
+
+// both frontends stage completion before their common ownership epilogue.
+static inline void em_stage_function_return(MirEmitter* em, MIR_op_t value,
+        MIR_reg_t error = 0) {
+    MirFrameState* frame = &em->frame;
+    MIR_insn_code_t move = frame->return_type == MIR_T_D ? MIR_DMOV : MIR_MOV;
+    em_emit_insn(em, MIR_new_insn(em->ctx, move,
+        MIR_new_reg_op(em->ctx, frame->return_reg), value));
+    if (frame->return_lane_kind == RETURN_LANE_ERROR) {
+        MIR_op_t lane = error ? MIR_new_reg_op(em->ctx, error)
+            : em_error_lane_in_register(frame->plan.companion)
+                ? MIR_new_uint_op(em->ctx, ITEM_NULL)
+                : MIR_new_int_op(em->ctx, 0);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+            MIR_new_reg_op(em->ctx, frame->error_return_reg), lane));
+    }
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
+        MIR_new_label_op(em->ctx, frame->return_label)));
+}
 static inline void em_emit_label(MirEmitter* em, MIR_label_t label) {
     mir_append_emit_label(em->ctx, em->func_item, label);
+}
+
+static inline MIR_reg_t em_load_at(MirEmitter* em, MIR_reg_t base,
+        MIR_disp_t offset, MIR_type_t type, const char* name) {
+    MIR_reg_t value = em_new_reg(em, name,
+        type == MIR_T_D ? MIR_T_D : type == MIR_T_F ? MIR_T_F : MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx,
+        type == MIR_T_D ? MIR_DMOV : type == MIR_T_F ? MIR_FMOV : MIR_MOV,
+        MIR_new_reg_op(em->ctx, value),
+        MIR_new_mem_op(em->ctx, type, offset, base, 0, 1)));
+    return value;
+}
+
+static inline void em_change_invocation_depth(MirEmitter* em,
+        const MirInvocationDepthPlan& plan, int delta, MIR_label_t overflow = 0) {
+    MIR_reg_t depth = em_load_at(em, plan.owner, plan.depth_offset, MIR_T_I32, "call_depth");
+    if (overflow) {
+        MIR_reg_t limit = em_load_at(em, plan.owner, plan.limit_offset, MIR_T_I32, "call_limit");
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BGE,
+            MIR_new_label_op(em->ctx, overflow), MIR_new_reg_op(em->ctx, depth),
+            MIR_new_reg_op(em->ctx, limit)));
+    }
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_ADD,
+        MIR_new_reg_op(em->ctx, depth), MIR_new_reg_op(em->ctx, depth),
+        MIR_new_int_op(em->ctx, delta)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_mem_op(em->ctx, MIR_T_I32, plan.depth_offset, plan.owner, 0, 1),
+        MIR_new_reg_op(em->ctx, depth)));
+}
+
+// Establish pointer/kind before dereferencing an inferred container candidate.
+// A scalar Item (including inline IEEE doubles) must never reach the header.
+static inline MIR_reg_t em_guard_container(MirEmitter* em, MIR_reg_t item,
+        TypeId kind, MIR_label_t miss, bool proven_kind = false) {
+    if (!proven_kind) {
+        MIR_reg_t tag = em_new_reg(em, "grd_tag", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_URSH,
+            MIR_new_reg_op(em->ctx, tag), MIR_new_reg_op(em->ctx, item),
+            MIR_new_int_op(em->ctx, 56)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE,
+            MIR_new_label_op(em->ctx, miss), MIR_new_reg_op(em->ctx, tag),
+            MIR_new_int_op(em->ctx, 0)));
+    }
+    MIR_reg_t pointer = em_new_reg(em, "grd_ptr", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
+        MIR_new_reg_op(em->ctx, pointer), MIR_new_reg_op(em->ctx, item),
+        MIR_new_uint_op(em->ctx, UINT64_C(0x00ffffffffffffff))));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ,
+        MIR_new_label_op(em->ctx, miss), MIR_new_reg_op(em->ctx, pointer),
+        MIR_new_int_op(em->ctx, 0)));
+    if (!proven_kind && kind != LMD_TYPE_RAW_POINTER) {
+        MIR_reg_t actual = em_load_at(em, pointer,
+            LAMBDA_GC_OFF_CONTAINER_TYPE_ID, MIR_T_U8, "grd_kind");
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE,
+            MIR_new_label_op(em->ctx, miss), MIR_new_reg_op(em->ctx, actual),
+            MIR_new_int_op(em->ctx, kind)));
+    }
+    return pointer;
+}
+
+// The one dense element address calculation for Lambda and JS. Callers own
+// representation, bounds, presence, mutability and lifetime admission.
+static inline MIR_reg_t em_element_address(MirEmitter* em, MIR_reg_t items,
+        MIR_reg_t index, int width) {
+    MIR_reg_t offset = em_new_reg(em, "boff", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, width == 8 ? MIR_LSH : MIR_MUL,
+        MIR_new_reg_op(em->ctx, offset), MIR_new_reg_op(em->ctx, index),
+        MIR_new_int_op(em->ctx, width == 8 ? 3 : width)));
+    MIR_reg_t address = em_new_reg(em, "eadr", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_ADD,
+        MIR_new_reg_op(em->ctx, address), MIR_new_reg_op(em->ctx, items),
+        MIR_new_reg_op(em->ctx, offset)));
+    return address;
+}
+
+static inline MIR_reg_t em_array_element_address(MirEmitter* em,
+        MIR_reg_t array, MIR_reg_t index, int width) {
+    return em_element_address(em, em_load_at(em, array,
+        LAMBDA_GC_OFF_LIST_ITEMS, MIR_T_I64, "itms"), index, width);
 }
 static inline MIR_reg_t em_load_frame_top(MirEmitter* em, MIR_reg_t runtime,
                                           size_t context_offset,
@@ -1556,6 +1662,8 @@ static inline MirValue em_materialize_pending_value(MirEmitter* em,
     }
     value.pending_companion = 0;
     value.maybe_pending = false;
+    // every wide lane was transported as raw bits and resolved in this frame.
+    value.scalar_provenance = SCALAR_PROVENANCE_ACTIVATION_EXTENT;
     if (em && em->after_call_result) {
         em->after_call_result(em->call_owner, value.reg, value.mir_type);
     }

@@ -98,7 +98,7 @@ SUITES = {
     "text": [
         ("fast_diff", "fast_diff: CHECKSUM:748544"),
         ("microdiff", "microdiff: CHECKSUM:3278848"),
-        ("hyphen", "hyphen: CHECKSUM:731008"),
+        ("hyphen", "hyphen: CHECKSUM:1183296"),
         ("prettier_ast", "prettier_ast: CHECKSUM:56483873"),
         ("text_search", "text_search: CHECKSUM:91395120"),
         ("three_way_merge", "three_way_merge: CHECKSUM:342313356"),

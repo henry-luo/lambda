@@ -95,11 +95,12 @@ typedef struct JsMirReference {
     bool is_private;
     bool computed_key;
     bool property_key_canonicalized;
-    // T10-1/D-A: a computed key carried in a native numeric register stays in
-    // a double lane. ToPropertyKey would format it as text, intern the text in
-    // the NamePool, and have the kernel parse it back into an index.
+    // retain the evaluated numeric carrier instead of formatting an index
+    // as a property name. Exactly one native register is set on admission.
     bool key_is_number;
-    MIR_reg_t key_num_reg;      // MIR_T_D, valid only when key_is_number
+    MIR_reg_t key_num_reg;      // F64 carrier, or zero for an integer key
+    MIR_reg_t key_index_reg;    // original I64 carrier, or zero for an F64 key
+    JsMemberNode* member;       // compile-only shape candidate provenance
     uint32_t named_key_index;
     NameId named_key_id;
     int jube_slot;
@@ -113,12 +114,12 @@ typedef struct JsMirReference {
 // A save is a mark into the transpiler-owned closure journal, not a copy of 512
 // possible captures. Restoring truncates the journal back to the mark, so no
 // stack-local snapshot owns storage an early return could leak.
-typedef struct JsMirLastClosureSnapshot {
+typedef struct JsClosureCheckpoint {
     bool has_env;
     MIR_reg_t env_reg;
     int capture_count;
     int journal_mark;
-} JsMirLastClosureSnapshot;
+} JsClosureCheckpoint;
 
 typedef struct JsMirLexicalThisRebind {
     bool saved_force_closure_env_copy;
@@ -301,7 +302,7 @@ void jm_emit_iterator_close(JsMirTranspiler* mt, MIR_reg_t iterator);
 void jm_emit_iterator_close_checked(JsMirTranspiler* mt, MIR_reg_t iterator);
 void jm_emit_iterator_close_on_error_lane_if_open(JsMirTranspiler* mt, MIR_reg_t iterator,
     MIR_reg_t iter_done, MIR_label_t target);
-void jm_emit_abrupt_jump_cleanup(JsMirTranspiler* mt);
+void jm_emit_abrupt_jump_cleanup(JsMirTranspiler* mt, int target_loop_index);
 void jm_emit_break_completion(JsMirTranspiler* mt, JsBreakContinueNode* brk);
 void jm_emit_continue_completion(JsMirTranspiler* mt, JsBreakContinueNode* cont);
 int jm_next_resume_state(JsMirTranspiler* mt, JsMirSuspendKind kind);
@@ -309,12 +310,14 @@ MIR_reg_t jm_emit_await_value_reg(JsMirTranspiler* mt, MIR_reg_t promise_val,
     JsMirSuspendKind kind);
 void jm_emit_suspend_env_save(JsMirTranspiler* mt);
 void jm_emit_resume_env_restore(JsMirTranspiler* mt);
-void jm_emit_try_state_reset(JsMirTranspiler* mt);
+void jm_emit_try_state_save(JsMirTranspiler* mt);
+void jm_emit_try_state_restore(JsMirTranspiler* mt);
 void jm_emit_async_resume_refresh(JsMirTranspiler* mt);
 JsTryContext* jm_find_completion_context(JsMirTranspiler* mt, JsMirCompletionKind kind);
 JsErrorLaneTrack jm_error_lane_state(JsMirTranspiler* mt);
 JsErrorLaneTrack jm_error_lane_merge(JsErrorLaneTrack a, JsErrorLaneTrack b);
 void jm_error_lane_set_state(JsMirTranspiler* mt, JsErrorLaneTrack state);
+bool jm_emit_native_throw_exit(JsMirTranspiler* mt, MIR_reg_t lane);
 void jm_error_lane_note_call(JsMirTranspiler* mt, JitExceptionEffect effect);
 MIR_reg_t jm_emit_error_lane_test(JsMirTranspiler* mt);
 void jm_emit_error_lane_route(JsMirTranspiler* mt, JsMirCompletionKind kind);
@@ -355,11 +358,11 @@ JsMirVarEntry* jm_install_fresh_var_entry(JsMirTranspiler* mt, int depth,
 JsMirVarEntry* jm_find_var_at(JsMirTranspiler* mt, const char* name,
     int depth);
 bool jm_closure_tracker_reserve(JsClosureTracker* tracker, int n);
-void jm_save_last_closure_snapshot(JsMirTranspiler* mt,
-    JsMirLastClosureSnapshot* snapshot);
-void jm_clear_last_closure_snapshot(JsMirTranspiler* mt);
-void jm_restore_last_closure_snapshot(JsMirTranspiler* mt,
-    const JsMirLastClosureSnapshot* snapshot);
+void jm_closure_checkpoint_save(JsMirTranspiler* mt,
+    JsClosureCheckpoint* checkpoint);
+void jm_closure_tracker_clear(JsMirTranspiler* mt);
+void jm_closure_checkpoint_rollback(JsMirTranspiler* mt,
+    const JsClosureCheckpoint* checkpoint);
 JsMirVarEntry* jm_find_var(JsMirTranspiler* mt, const char* name);
 // Source identifiers arrive with a builder-resolved NameEntry. Keep the
 // spelling map only for lowering-created locals; consumers use this identity
@@ -380,9 +383,14 @@ void jm_name_set_add(struct hashmap* set, const char* name);
 bool jm_name_set_has(struct hashmap* set, const char* name);
 bool jm_binding_set_has(struct hashmap* set, NameEntry* binding);
 int jm_count_yields(JsMirTranspiler* mt, JsAstNode* node);
+int jm_count_finally_inline_yields(JsAstNode* root);
+int jm_count_finally_inline_awaits(JsAstNode* root);
+int jm_gen_spill_reserve(JsMirTranspiler* mt);
 int jm_gen_spill_save(JsMirTranspiler* mt, MIR_reg_t reg);
+void jm_gen_spill_save_at(JsMirTranspiler* mt, MIR_reg_t reg, int slot);
 void jm_gen_spill_load(JsMirTranspiler* mt, MIR_reg_t reg, int slot);
 bool jm_has_yield(JsMirTranspiler* mt, JsAstNode* node);
+bool jm_can_suspend(JsMirTranspiler* mt, JsAstNode* node);
 bool jm_has_optional_chain(JsAstNode* node);
 int jm_count_awaits(JsMirTranspiler* mt, JsAstNode* node);
 void jm_collect_indexed_func_assignments(JsMirTranspiler* mt, JsAstNode* node,
@@ -484,7 +492,7 @@ static inline void jm_preserve_error_lane_carrier(JsMirTranspiler* mt,
         VALUE_REP_ITEM);
 }
 MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
-        int arg_count, MIR_reg_t* arg_regs, bool discard_result = false);
+        int arg_count, MIR_reg_t* arg_regs, bool discard_result = false, bool source_invocation = true);
 MIR_reg_t jm_module_name_id_at_index(JsMirTranspiler* mt, uint32_t index);
 MIR_reg_t jm_call_function_into(JsMirTranspiler* mt, MIR_op_t func,
         MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count);
@@ -496,8 +504,9 @@ MIR_reg_t jm_super_call_class_into(JsMirTranspiler* mt, MIR_op_t callee,
         MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count);
 MIR_reg_t jm_super_apply_class_into(JsMirTranspiler* mt, MIR_op_t callee,
         MIR_op_t this_value, MIR_op_t args);
-MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
-        int arg_count, MIR_reg_t* arg_regs);
+MirCallResult jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
+        int arg_count, MIR_reg_t* arg_regs, bool source_invocation = true);
+MIR_reg_t jm_finish_native_call(JsMirTranspiler* mt, MirCallResult result);
 MirValue jm_convert_rep(void* owner, MirValue value, ValueRep required);
 #define jm_call_void_0(mt, fn) \
     (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_0(&(mt)->func_em->em, fn, true))
@@ -621,6 +630,7 @@ static inline MirValue jm_item_value(MIR_reg_t reg,
     return em_value_for_rep(reg, semantic_type, VALUE_REP_ITEM);
 }
 MIR_reg_t jm_emit_is_truthy(JsMirTranspiler* mt, MirValue value);
+MIR_reg_t jm_transpile_member_as_number(JsMirTranspiler* mt, JsMemberNode* member);
 MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                                          TypeId target_type);
 MIR_reg_t jm_transpile_conditional_as_native(JsMirTranspiler* mt,

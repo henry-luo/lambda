@@ -59,12 +59,33 @@ extern __thread EvalContext* context;
 template <typename Target>
 JS_FORWARD_STATIC_VOID( js_http_set_direct_method, (Item object, const char* name, Target target), js_set_native_key, (object, make_string_item(name), target))
 
-#define http_server_prototype (js_runtime_state.http.server_prototype)
-#define http_incoming_message_prototype (js_runtime_state.http.incoming_message_prototype)
-#define http_server_response_prototype (js_runtime_state.http.server_response_prototype)
-#define http_outgoing_message_prototype (js_runtime_state.http.outgoing_message_prototype)
-#define http_namespace (js_runtime_state.http.namespace_object)
-JS_FORWARD_STATIC_EXPRESSION(bool, http_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.http.roots)))
+struct HttpRealmItems {
+    Item* namespace_object = NULL;
+    Item* server_prototype = NULL;
+    Item* incoming_message_prototype = NULL;
+    Item* server_response_prototype = NULL;
+    Item* outgoing_message_prototype = NULL;
+};
+
+static bool http_realm_items(HttpRealmItems* items, bool reserve) {
+    if (!items || !js_active_runtime_state) return false;
+    static const JsRealmSlotId slot_ids[] = {
+        JS_REALM_SLOT_HTTP_NAMESPACE,
+        JS_REALM_SLOT_HTTP_SERVER_PROTOTYPE,
+        JS_REALM_SLOT_HTTP_INCOMING_MESSAGE_PROTOTYPE,
+        JS_REALM_SLOT_HTTP_SERVER_RESPONSE_PROTOTYPE,
+        JS_REALM_SLOT_HTTP_OUTGOING_MESSAGE_PROTOTYPE,
+    };
+    Item* values[5] = {};
+    if (!js_realm_slots_lookup(&js_runtime_state.realm_slots, slot_ids, values,
+            5, reserve)) return false;
+    items->namespace_object = values[0];
+    items->server_prototype = values[1];
+    items->incoming_message_prototype = values[2];
+    items->server_response_prototype = values[3];
+    items->outgoing_message_prototype = values[4];
+    return true;
+}
 
 #define HTTP_CONN_HIGH_WATER_MARK (16 * 1024)
 
@@ -721,11 +742,8 @@ static int parse_http_request(char* data, int data_len, HttpRequestHead* req, in
 typedef struct JsHttpServer {
     uv_tcp_t  tcp;
     uv_pipe_t pipe;
-    Item      js_object;
-    Item      request_handler;     // callback(req, res)
-    Item      incoming_message_ctor;
-    Item      server_response_ctor;
-    Item      timeout_callback;
+    // Exact roots for the server's durable script values.
+    RuntimeValueSlots values;
     bool      reject_nonstandard_body_writes;
     bool      is_pipe;
     bool      handle_initialized;
@@ -737,17 +755,39 @@ typedef struct JsHttpServer {
     struct JsHttpConn* connections_head;
 } JsHttpServer;
 
+enum JsHttpServerValueSlot {
+    JS_HTTP_SERVER_VALUE_OBJECT,
+    JS_HTTP_SERVER_VALUE_REQUEST_HANDLER,
+    JS_HTTP_SERVER_VALUE_INCOMING_MESSAGE_CTOR,
+    JS_HTTP_SERVER_VALUE_SERVER_RESPONSE_CTOR,
+    JS_HTTP_SERVER_VALUE_TIMEOUT_CALLBACK,
+    JS_HTTP_SERVER_VALUE_COUNT,
+};
+
+static bool http_server_values_init(JsHttpServer* srv) {
+    return srv && runtime_value_slots_init(&srv->values, (Context*)context,
+        "HTTP server values", JS_HTTP_SERVER_VALUE_COUNT);
+}
+
+static Item http_server_value(JsHttpServer* srv, JsHttpServerValueSlot slot) {
+    return srv ? runtime_value_slots_get(&srv->values, slot) : ItemNull;
+}
+
+static void http_server_set_value(JsHttpServer* srv, JsHttpServerValueSlot slot,
+        Item value) {
+    if (srv) runtime_value_slots_set(&srv->values, slot, value);
+}
+
+#define HTTP_SERVER_VALUE(srv, name) \
+    http_server_value((srv), JS_HTTP_SERVER_VALUE_##name)
+#define HTTP_SERVER_SET_VALUE(srv, name, value) \
+    http_server_set_value((srv), JS_HTTP_SERVER_VALUE_##name, (value))
+
 typedef struct JsHttpConn {
     uv_tcp_t     tcp;
     uv_pipe_t    pipe;
     JsHttpServer* server;
-    Item         async_resource;
-    Item         socket_object;
-    Item         current_request;
-    Item         current_response;
-    Item         timeout_response;
-    Item         request_timeout_callback;
-    Item         response_timeout_callback;
+    RuntimeValueSlots values;
     char*        recv_buf;
     int          recv_len;
     int          recv_cap;
@@ -760,7 +800,6 @@ typedef struct JsHttpConn {
     int64_t      pending_write_bytes;
     JsHttpConn*  server_prev;
     JsHttpConn*  server_next;
-    Item         timeout_timer;
     bool         destroyed;
     bool         read_ended;
     bool         is_pipe;
@@ -771,6 +810,37 @@ typedef struct JsHttpConn {
     bool         read_paused_for_backpressure;
 } JsHttpConn;
 
+enum JsHttpConnValueSlot {
+    JS_HTTP_CONN_VALUE_ASYNC_RESOURCE,
+    JS_HTTP_CONN_VALUE_SOCKET_OBJECT,
+    JS_HTTP_CONN_VALUE_CURRENT_REQUEST,
+    JS_HTTP_CONN_VALUE_CURRENT_RESPONSE,
+    JS_HTTP_CONN_VALUE_TIMEOUT_RESPONSE,
+    JS_HTTP_CONN_VALUE_REQUEST_TIMEOUT_CALLBACK,
+    JS_HTTP_CONN_VALUE_RESPONSE_TIMEOUT_CALLBACK,
+    JS_HTTP_CONN_VALUE_TIMEOUT_TIMER,
+    JS_HTTP_CONN_VALUE_COUNT,
+};
+
+static bool http_conn_values_init(JsHttpConn* conn) {
+    return conn && runtime_value_slots_init(&conn->values, (Context*)context,
+        "HTTP connection values", JS_HTTP_CONN_VALUE_COUNT);
+}
+
+static Item http_conn_value(JsHttpConn* conn, JsHttpConnValueSlot slot) {
+    return conn ? runtime_value_slots_get(&conn->values, slot) : ItemNull;
+}
+
+static void http_conn_set_value(JsHttpConn* conn, JsHttpConnValueSlot slot,
+        Item value) {
+    if (conn) runtime_value_slots_set(&conn->values, slot, value);
+}
+
+#define HTTP_CONN_VALUE(conn, name) \
+    http_conn_value((conn), JS_HTTP_CONN_VALUE_##name)
+#define HTTP_CONN_SET_VALUE(conn, name, value) \
+    http_conn_set_value((conn), JS_HTTP_CONN_VALUE_##name, (value))
+
 static uv_stream_t* http_conn_stream(JsHttpConn* conn) {
     if (!conn) return NULL;
     return conn->is_pipe ? (uv_stream_t*)&conn->pipe : (uv_stream_t*)&conn->tcp;
@@ -779,6 +849,7 @@ static uv_stream_t* http_conn_stream(JsHttpConn* conn) {
 static void http_conn_free_if_done(JsHttpConn* conn) {
     if (!conn || !conn->handle_closed) return;
     if (conn->open_response_count > 0 || conn->pending_response_writes > 0) return;
+    runtime_value_slots_destroy(&conn->values);
     mem_free(conn);
 }
 
@@ -795,11 +866,11 @@ static bool http_response_flush_partial(Item self);
 static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf);
 
 static void http_conn_update_socket_counters(JsHttpConn* conn) {
-    if (!conn || conn->socket_object.item == 0) return;
+    if (!conn || HTTP_CONN_VALUE(conn, SOCKET_OBJECT).item == 0) return;
     // Node socket counters are public JS Number APIs; keep them explicit.
-    js_set_key_cstr(conn->socket_object, "bytesRead", js_make_number((double)conn->bytes_read));
-    js_set_key_cstr(conn->socket_object, "bytesWritten", js_make_number((double)conn->bytes_written));
-    js_set_key_cstr(conn->socket_object, "bufferSize", js_make_number((double)conn->pending_write_bytes));
+    js_set_key_cstr(HTTP_CONN_VALUE(conn, SOCKET_OBJECT), "bytesRead", js_make_number((double)conn->bytes_read));
+    js_set_key_cstr(HTTP_CONN_VALUE(conn, SOCKET_OBJECT), "bytesWritten", js_make_number((double)conn->bytes_written));
+    js_set_key_cstr(HTTP_CONN_VALUE(conn, SOCKET_OBJECT), "bufferSize", js_make_number((double)conn->pending_write_bytes));
 }
 
 static void http_conn_pause_read_for_backpressure(JsHttpConn* conn) {
@@ -1649,12 +1720,12 @@ static void http_response_flush(Item self) {
         // delayed pipelined res.end() timers can fire after the socket closes;
         // retain the conn until those responses settle, but never write to it.
         if (conn->open_response_count > 0) conn->open_response_count--;
-        if (conn->timeout_response.item == self.item) {
-            conn->timeout_response = make_js_undefined();
-            conn->response_timeout_callback = make_js_undefined();
+        if (HTTP_CONN_VALUE(conn, TIMEOUT_RESPONSE).item == self.item) {
+            HTTP_CONN_SET_VALUE(conn, TIMEOUT_RESPONSE, make_js_undefined());
+            HTTP_CONN_SET_VALUE(conn, RESPONSE_TIMEOUT_CALLBACK, make_js_undefined());
         }
-        if (conn->current_response.item == self.item) {
-            conn->current_response = make_js_undefined();
+        if (HTTP_CONN_VALUE(conn, CURRENT_RESPONSE).item == self.item) {
+            HTTP_CONN_SET_VALUE(conn, CURRENT_RESPONSE, make_js_undefined());
         }
     http_response_mark_sent(self, true);
         http_response_emit(self, "finish", NULL, 0, false);
@@ -1668,12 +1739,12 @@ static void http_response_flush(Item self) {
     }
     if (http_response_bool_prop(self, "__partial_sent__")) {
         if (conn->open_response_count > 0) conn->open_response_count--;
-        if (conn->timeout_response.item == self.item) {
-            conn->timeout_response = make_js_undefined();
-            conn->response_timeout_callback = make_js_undefined();
+        if (HTTP_CONN_VALUE(conn, TIMEOUT_RESPONSE).item == self.item) {
+            HTTP_CONN_SET_VALUE(conn, TIMEOUT_RESPONSE, make_js_undefined());
+            HTTP_CONN_SET_VALUE(conn, RESPONSE_TIMEOUT_CALLBACK, make_js_undefined());
         }
-        if (conn->current_response.item == self.item) {
-            conn->current_response = make_js_undefined();
+        if (HTTP_CONN_VALUE(conn, CURRENT_RESPONSE).item == self.item) {
+            HTTP_CONN_SET_VALUE(conn, CURRENT_RESPONSE, make_js_undefined());
         }
 
         int body_len = http_response_body_len(self);
@@ -1724,14 +1795,14 @@ static void http_response_flush(Item self) {
     bool has_open_responses_after_this = false;
     if (conn->open_response_count > 0) conn->open_response_count--;
     has_open_responses_after_this = conn->open_response_count > 0;
-    if (conn->timeout_response.item == self.item) {
+    if (HTTP_CONN_VALUE(conn, TIMEOUT_RESPONSE).item == self.item) {
         // response timeout ownership is valid only while that response is open;
         // completed pipelined responses must not consume later socket timeouts.
-        conn->timeout_response = make_js_undefined();
-        conn->response_timeout_callback = make_js_undefined();
+        HTTP_CONN_SET_VALUE(conn, TIMEOUT_RESPONSE, make_js_undefined());
+        HTTP_CONN_SET_VALUE(conn, RESPONSE_TIMEOUT_CALLBACK, make_js_undefined());
     }
-    if (conn->current_response.item == self.item) {
-        conn->current_response = make_js_undefined();
+    if (HTTP_CONN_VALUE(conn, CURRENT_RESPONSE).item == self.item) {
+        HTTP_CONN_SET_VALUE(conn, CURRENT_RESPONSE, make_js_undefined());
     }
 
     // get status code
@@ -2214,8 +2285,10 @@ static Item js_http_res_inst_on(Item maybe_self, Item event_item, Item callback)
 // create a ServerResponse object for a connection
 static Item make_response_object(JsHttpConn* conn) {
     Item res = js_new_object_with_class(JS_CLASS_SERVER_RESPONSE);
-    if (get_type_id(http_server_response_prototype) == LMD_TYPE_MAP) {
-        js_set_prototype(res, http_server_response_prototype);
+    HttpRealmItems items = {};
+    if (http_realm_items(&items, false) &&
+            get_type_id(*items.server_response_prototype) == LMD_TYPE_MAP) {
+        js_set_prototype(res, *items.server_response_prototype);
     }
     js_set_key_cstr(res, "__conn__", (Item){.item = i2it((int64_t)(uintptr_t)conn)});
 #define JS_HTTP_RESPONSE_FIELDS(M) \
@@ -2259,7 +2332,7 @@ static Item make_response_object(JsHttpConn* conn) {
 #undef JS_HTTP_RESPONSE_METHODS
 
     if (conn && conn->server) {
-        Item ctor = conn->server->server_response_ctor;
+        Item ctor = HTTP_SERVER_VALUE(conn->server, SERVER_RESPONSE_CTOR);
         if (get_type_id(ctor) == LMD_TYPE_FUNC || get_type_id(ctor) == LMD_TYPE_MAP) {
             Item proto = js_get_key_cstr(ctor, "prototype");
             if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(res, proto);
@@ -2318,8 +2391,10 @@ static Item js_http_server_req_setTimeout(Item maybe_self, Item msecs_item, Item
 
 static Item make_request_object(JsHttpConn* conn, HttpRequestHead* req) {
     Item msg = js_readable_new_with_class(ItemNull, JS_CLASS_INCOMING_MESSAGE);
-    if (get_type_id(http_incoming_message_prototype) == LMD_TYPE_MAP) {
-        js_set_prototype(msg, http_incoming_message_prototype);
+    HttpRealmItems items = {};
+    if (http_realm_items(&items, false) &&
+            get_type_id(*items.incoming_message_prototype) == LMD_TYPE_MAP) {
+        js_set_prototype(msg, *items.incoming_message_prototype);
     }
 
     js_set_key_cstr(msg, "method", make_string_item(req->method));
@@ -2393,7 +2468,7 @@ static Item make_request_object(JsHttpConn* conn, HttpRequestHead* req) {
     }
 
     if (conn && conn->server) {
-        Item ctor = conn->server->incoming_message_ctor;
+        Item ctor = HTTP_SERVER_VALUE(conn->server, INCOMING_MESSAGE_CTOR);
         if (get_type_id(ctor) == LMD_TYPE_FUNC || get_type_id(ctor) == LMD_TYPE_MAP) {
             Item proto = js_get_key_cstr(ctor, "prototype");
             if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(msg, proto);
@@ -2442,8 +2517,8 @@ static void http_server_unlink_conn(JsHttpConn* conn) {
 static bool http_conn_is_idle(JsHttpConn* conn) {
     if (!conn || conn->destroyed) return false;
     if (conn->open_response_count > 0 || conn->pending_response_writes > 0) return false;
-    if (conn->current_request.item != 0 &&
-        get_type_id(conn->current_request) != LMD_TYPE_UNDEFINED) return false;
+    if (HTTP_CONN_VALUE(conn, CURRENT_REQUEST).item != 0 &&
+        get_type_id(HTTP_CONN_VALUE(conn, CURRENT_REQUEST)) != LMD_TYPE_UNDEFINED) return false;
     return conn->request_body_remaining <= 0 && !conn->request_body_chunked;
 }
 
@@ -2474,8 +2549,9 @@ static void http_server_maybe_finish_close(JsHttpServer* srv) {
     // otherwise late socket close/read callbacks can touch freed server state.
     if (!srv->close_event_emitted) {
         srv->close_event_emitted = true;
-        http_emit_event(srv->js_object, "close", NULL, 0);
+        http_emit_event(HTTP_SERVER_VALUE(srv, OBJECT), "close", NULL, 0);
     }
+    runtime_value_slots_destroy(&srv->values);
     mem_free(srv);
 }
 
@@ -2531,11 +2607,15 @@ static void http_server_close_failed_listen(JsHttpServer* srv, Item self) {
         // here prevents tiny error-path tests from waiting for the drain guard.
         uv_close(handle, [](uv_handle_t* h) {
             JsHttpServer* s = (JsHttpServer*)h->data;
-            if (s) mem_free(s);
+            if (s) {
+                runtime_value_slots_destroy(&s->values);
+                mem_free(s);
+            }
         });
         return;
     }
     if (!handle) {
+        runtime_value_slots_destroy(&srv->values);
         mem_free(srv);
     }
 }
@@ -2549,7 +2629,7 @@ static void http_request_emit_close_now(Item req) {
     Item handle_item = js_get_key_cstr(req, "__server_req_conn__");
     if (get_type_id(handle_item) == LMD_TYPE_INT) {
         JsHttpConn* conn = (JsHttpConn*)(uintptr_t)it2i(handle_item);
-        if (conn) conn->request_timeout_callback = make_js_undefined();
+        if (conn) HTTP_CONN_SET_VALUE(conn, REQUEST_TIMEOUT_CALLBACK, make_js_undefined());
     }
     Item async_resource = js_get_key_cstr(req, "__async_resource__");
     // IncomingMessage async resources outlive the parser callback; destroy
@@ -2569,12 +2649,12 @@ static void http_response_close_request(Item res) {
 }
 
 static void http_conn_destroy_unfinished_request(JsHttpConn* conn) {
-    if (!conn || conn->current_request.item == 0 ||
+    if (!conn || HTTP_CONN_VALUE(conn, CURRENT_REQUEST).item == 0 ||
         (!conn->request_body_chunked && conn->request_body_remaining <= 0)) return;
-    Item req = conn->current_request;
+    Item req = HTTP_CONN_VALUE(conn, CURRENT_REQUEST);
     js_stream_destroy(req, make_js_undefined());
     http_request_emit_close_now(req);
-    conn->current_request = make_js_undefined();
+    HTTP_CONN_SET_VALUE(conn, CURRENT_REQUEST, make_js_undefined());
     conn->request_body_remaining = 0;
     conn->request_body_chunked = false;
 }
@@ -2606,8 +2686,8 @@ static void http_conn_close_now(JsHttpConn* conn) {
     http_conn_clear_timeout(conn);
     http_conn_destroy_unfinished_request(conn);
     conn->destroyed = true;
-    if (conn->socket_object.item != 0) {
-        js_set_key_cstr(conn->socket_object, "destroyed", (Item){.item = b2it(true)});
+    if (HTTP_CONN_VALUE(conn, SOCKET_OBJECT).item != 0) {
+        js_set_key_cstr(HTTP_CONN_VALUE(conn, SOCKET_OBJECT), "destroyed", (Item){.item = b2it(true)});
     }
     http_server_note_conn_closed(conn);
     uv_handle_t* handle = (uv_handle_t*)http_conn_stream(conn);
@@ -2708,17 +2788,17 @@ static Item js_http_conn_socket_destroy(Item maybe_self) {
 }
 
 static void http_conn_socket_emit(JsHttpConn* conn, const char* event) {
-    if (!conn || conn->socket_object.item == 0 || !event) return;
-    Item socket = conn->socket_object;
-    if (http_emit_event(conn->socket_object, event, &socket, 1)) {
+    if (!conn || HTTP_CONN_VALUE(conn, SOCKET_OBJECT).item == 0 || !event) return;
+    Item socket = HTTP_CONN_VALUE(conn, SOCKET_OBJECT);
+    if (http_emit_event(HTTP_CONN_VALUE(conn, SOCKET_OBJECT), event, &socket, 1)) {
         js_microtask_flush();
     }
 }
 
 static void http_conn_clear_timeout(JsHttpConn* conn) {
     if (!conn || !conn->timeout_timer_active) return;
-    js_clearTimeout(conn->timeout_timer);
-    conn->timeout_timer = make_js_undefined();
+    js_clearTimeout(HTTP_CONN_VALUE(conn, TIMEOUT_TIMER));
+    HTTP_CONN_SET_VALUE(conn, TIMEOUT_TIMER, make_js_undefined());
     conn->timeout_timer_active = false;
 }
 
@@ -2730,20 +2810,20 @@ static Item js_http_conn_socket_timeout_fire(Item env_item) {
         (JsHttpConn*)(uintptr_t)it2i(env[0]) : NULL;
     if (!conn || conn->destroyed) return make_js_undefined();
     conn->timeout_timer_active = false;
-    conn->timeout_timer = make_js_undefined();
+    HTTP_CONN_SET_VALUE(conn, TIMEOUT_TIMER, make_js_undefined());
     Item socket = http_conn_socket_object(conn);
-    if (js_is_callable(conn->request_timeout_callback)) {
-        js_call_function(conn->request_timeout_callback, socket, &socket, 1);
+    if (js_is_callable(HTTP_CONN_VALUE(conn, REQUEST_TIMEOUT_CALLBACK))) {
+        js_call_function(HTTP_CONN_VALUE(conn, REQUEST_TIMEOUT_CALLBACK), socket, &socket, 1);
         js_microtask_flush();
     }
-    Item timeout_response = conn->timeout_response;
-    Item response_timeout_callback = conn->response_timeout_callback;
+    Item timeout_response = HTTP_CONN_VALUE(conn, TIMEOUT_RESPONSE);
+    Item response_timeout_callback = HTTP_CONN_VALUE(conn, RESPONSE_TIMEOUT_CALLBACK);
     if (timeout_response.item != 0 &&
         get_type_id(timeout_response) != LMD_TYPE_UNDEFINED) {
         // A pipelined socket can parse later responses before the head response
         // times out; fire the callback for the response that armed the timer.
-        conn->timeout_response = make_js_undefined();
-        conn->response_timeout_callback = make_js_undefined();
+        HTTP_CONN_SET_VALUE(conn, TIMEOUT_RESPONSE, make_js_undefined());
+        HTTP_CONN_SET_VALUE(conn, RESPONSE_TIMEOUT_CALLBACK, make_js_undefined());
     }
     if (js_is_callable(response_timeout_callback)) {
         js_call_function(response_timeout_callback, socket, &socket, 1);
@@ -2752,7 +2832,7 @@ static Item js_http_conn_socket_timeout_fire(Item env_item) {
     Item response_event_target = timeout_response;
     if (response_event_target.item == 0 ||
         get_type_id(response_event_target) == LMD_TYPE_UNDEFINED) {
-        response_event_target = conn->current_response;
+        response_event_target = HTTP_CONN_VALUE(conn, CURRENT_RESPONSE);
     }
     if (response_event_target.item != 0 &&
         get_type_id(response_event_target) != LMD_TYPE_UNDEFINED) {
@@ -2762,11 +2842,11 @@ static Item js_http_conn_socket_timeout_fire(Item env_item) {
     }
     http_conn_socket_emit(conn, "timeout");
     if (conn->server) {
-        Item server_cb = conn->server->timeout_callback;
+        Item server_cb = HTTP_SERVER_VALUE(conn->server, TIMEOUT_CALLBACK);
         if (js_is_callable(server_cb)) {
-            js_call_function(server_cb, conn->server->js_object, &socket, 1);
+            js_call_function(server_cb, HTTP_SERVER_VALUE(conn->server, OBJECT), &socket, 1);
             js_microtask_flush();
-        } else if (http_emit_event(conn->server->js_object, "timeout", &socket, 1)) {
+        } else if (http_emit_event(HTTP_SERVER_VALUE(conn->server, OBJECT), "timeout", &socket, 1)) {
             js_microtask_flush();
         }
     }
@@ -2784,7 +2864,7 @@ static void http_conn_start_timeout(JsHttpConn* conn, int64_t delay) {
     // timers per request/response leaves closed servers alive until the drain watchdog.
     Item timer = js_setTimeout(js_new_native_closure(js_http_conn_socket_timeout_fire, 0, env, 1),
                                (Item){.item = i2it(delay)});
-    conn->timeout_timer = timer;
+    HTTP_CONN_SET_VALUE(conn, TIMEOUT_TIMER, timer);
     conn->timeout_timer_active = true;
 }
 
@@ -2823,16 +2903,16 @@ static Item js_http_set_timeout(Item maybe_self, Item msecs_item,
             js_http_conn_socket_on(self, make_string_item("timeout"), actual_callback);
         }
     } else if (lane == JS_HTTP_TIMEOUT_REQUEST) {
-        conn->request_timeout_callback =
+        HTTP_CONN_SET_VALUE(conn, REQUEST_TIMEOUT_CALLBACK,
             !http_response_bool_prop(self, "__server_req_complete__") &&
-            js_is_callable(actual_callback) ? actual_callback : make_js_undefined();
+            js_is_callable(actual_callback) ? actual_callback : make_js_undefined());
     } else {
-        if (conn->timeout_response.item != 0 &&
-            get_type_id(conn->timeout_response) != LMD_TYPE_UNDEFINED &&
-            conn->timeout_response.item != self.item) return self;
-        conn->timeout_response = self;
-        conn->response_timeout_callback = js_is_callable(actual_callback)
-            ? actual_callback : make_js_undefined();
+        if (HTTP_CONN_VALUE(conn, TIMEOUT_RESPONSE).item != 0 &&
+            get_type_id(HTTP_CONN_VALUE(conn, TIMEOUT_RESPONSE)) != LMD_TYPE_UNDEFINED &&
+            HTTP_CONN_VALUE(conn, TIMEOUT_RESPONSE).item != self.item) return self;
+        HTTP_CONN_SET_VALUE(conn, TIMEOUT_RESPONSE, self);
+        HTTP_CONN_SET_VALUE(conn, RESPONSE_TIMEOUT_CALLBACK,
+            js_is_callable(actual_callback) ? actual_callback : make_js_undefined());
     }
     int64_t delay = 0;
     http_item_to_integral_int64(actual_msecs, &delay);
@@ -2852,9 +2932,12 @@ JS_HTTP_TIMEOUT_WRAPPER(js_http_res_inst_setTimeout, JS_HTTP_TIMEOUT_RESPONSE)
 
 static Item http_conn_socket_object(JsHttpConn* conn) {
     if (!conn) return make_js_undefined();
-    if (conn->socket_object.item != 0) return conn->socket_object;
+    if (HTTP_CONN_VALUE(conn, SOCKET_OBJECT).item != 0) {
+        return HTTP_CONN_VALUE(conn, SOCKET_OBJECT);
+    }
 
     Item obj = js_new_object_with_class(JS_CLASS_SOCKET);
+    HTTP_CONN_SET_VALUE(conn, SOCKET_OBJECT, obj);
     Item net_proto = js_net_get_socket_prototype();
     if (get_type_id(net_proto) == LMD_TYPE_MAP) {
         // HTTP accepted sockets are net.Socket instances; missing the shared
@@ -2883,20 +2966,19 @@ static Item http_conn_socket_object(JsHttpConn* conn) {
     js_set_key_cstr(obj, "_writableState", writable_state);
     js_set_key_cstr(obj, "readableHighWaterMark", hwm);
     js_set_key_cstr(obj, "writableHighWaterMark", hwm);
-    conn->socket_object = obj;
     return obj;
 }
 
 static int http_server_max_requests(JsHttpServer* srv) {
     if (!srv) return 0;
-    Item value = js_get_key_cstr(srv->js_object, "maxRequestsPerSocket");
+    Item value = js_get_key_cstr(HTTP_SERVER_VALUE(srv, OBJECT), "maxRequestsPerSocket");
     if (get_type_id(value) == LMD_TYPE_INT) return (int)it2i(value);
     return 0;
 }
 
 static bool http_server_max_requests_is_null(JsHttpServer* srv) {
     if (!srv) return false;
-    Item value = js_get_key_cstr(srv->js_object, "maxRequestsPerSocket");
+    Item value = js_get_key_cstr(HTTP_SERVER_VALUE(srv, OBJECT), "maxRequestsPerSocket");
     return get_type_id(value) == LMD_TYPE_NULL;
 }
 
@@ -2908,7 +2990,7 @@ static bool http_request_has_invalid_method_start(const char* data, int len) {
 }
 
 static void http_conn_feed_request_body(JsHttpConn* conn) {
-    if (!conn || conn->current_request.item == 0) return;
+    if (!conn || HTTP_CONN_VALUE(conn, CURRENT_REQUEST).item == 0) return;
     if (conn->request_body_chunked) {
         // Expect/continue requests can stream chunked body bytes after the
         // headers have already dispatched the IncomingMessage.
@@ -2926,15 +3008,15 @@ static void http_conn_feed_request_body(JsHttpConn* conn) {
                                                        &trailer_req, &consumed, &complete, true);
         http_request_head_release(&trailer_req);
         if (decoded_len > 0) {
-            js_readable_push(conn->current_request, make_string_item(conn->recv_buf, decoded_len));
+            js_readable_push(HTTP_CONN_VALUE(conn, CURRENT_REQUEST), make_string_item(conn->recv_buf, decoded_len));
         }
-        js_readable_push(conn->current_request, ItemNull);
-        js_set_key_cstr(conn->current_request, "__server_req_complete__", (Item){.item = b2it(true)});
-        conn->request_timeout_callback = make_js_undefined();
+        js_readable_push(HTTP_CONN_VALUE(conn, CURRENT_REQUEST), ItemNull);
+        js_set_key_cstr(HTTP_CONN_VALUE(conn, CURRENT_REQUEST), "__server_req_complete__", (Item){.item = b2it(true)});
+        HTTP_CONN_SET_VALUE(conn, REQUEST_TIMEOUT_CALLBACK, make_js_undefined());
         int remaining = conn->recv_len - consumed;
         if (remaining > 0) memmove(conn->recv_buf, conn->recv_buf + consumed, (size_t)remaining);
         conn->recv_len = remaining;
-        conn->current_request = make_js_undefined();
+        HTTP_CONN_SET_VALUE(conn, CURRENT_REQUEST, make_js_undefined());
         conn->request_body_chunked = false;
         return;
     }
@@ -2943,7 +3025,7 @@ static void http_conn_feed_request_body(JsHttpConn* conn) {
         int take = conn->recv_len < conn->request_body_remaining ?
             conn->recv_len : conn->request_body_remaining;
         if (take > 0) {
-            js_readable_push(conn->current_request, make_string_item(conn->recv_buf, take));
+            js_readable_push(HTTP_CONN_VALUE(conn, CURRENT_REQUEST), make_string_item(conn->recv_buf, take));
             int remaining = conn->recv_len - take;
             if (remaining > 0) memmove(conn->recv_buf, conn->recv_buf + take, (size_t)remaining);
             conn->recv_len = remaining;
@@ -2951,10 +3033,10 @@ static void http_conn_feed_request_body(JsHttpConn* conn) {
         }
     }
     if (conn->request_body_remaining == 0) {
-        js_readable_push(conn->current_request, ItemNull);
-        js_set_key_cstr(conn->current_request, "__server_req_complete__", (Item){.item = b2it(true)});
-        conn->request_timeout_callback = make_js_undefined();
-        conn->current_request = make_js_undefined();
+        js_readable_push(HTTP_CONN_VALUE(conn, CURRENT_REQUEST), ItemNull);
+        js_set_key_cstr(HTTP_CONN_VALUE(conn, CURRENT_REQUEST), "__server_req_complete__", (Item){.item = b2it(true)});
+        HTTP_CONN_SET_VALUE(conn, REQUEST_TIMEOUT_CALLBACK, make_js_undefined());
+        HTTP_CONN_SET_VALUE(conn, CURRENT_REQUEST, make_js_undefined());
         conn->request_body_chunked = false;
     }
 }
@@ -2962,7 +3044,7 @@ static void http_conn_feed_request_body(JsHttpConn* conn) {
 static bool http_server_emit_client_error(JsHttpConn* conn, const char* code,
                                           const char* message, int bytes_parsed) {
     if (!conn || !conn->server) return false;
-    if (!http_has_listener_event(conn->server->js_object, "clientError")) return false;
+    if (!http_has_listener_event(HTTP_SERVER_VALUE(conn->server, OBJECT), "clientError")) return false;
 
     Item err = js_new_error(make_string_item(message));
     js_set_key_cstr(err, "code", make_string_item(code));
@@ -2970,7 +3052,7 @@ static bool http_server_emit_client_error(JsHttpConn* conn, const char* code,
     js_set_key_cstr(err, "rawPacket", js_buffer_from_bytes(conn->recv_buf, conn->recv_len));
     Item socket = http_conn_socket_object(conn);
     Item args[2] = { err, socket };
-    http_emit_event(conn->server->js_object, "clientError", args, 2);
+    http_emit_event(HTTP_SERVER_VALUE(conn->server, OBJECT), "clientError", args, 2);
     js_microtask_flush();
     return true;
 }
@@ -3026,7 +3108,7 @@ static Item http_response_for_request(JsHttpConn* conn, HttpRequestHead* req, bo
     Item res_obj = make_response_object(conn);
     if (conn) {
         conn->open_response_count++;
-        conn->current_response = res_obj;
+        HTTP_CONN_SET_VALUE(conn, CURRENT_RESPONSE, res_obj);
     }
     bool keep_alive = !force_close && !over_max && http_request_wants_keep_alive(req, has_buffered_request);
     int max_requests = http_server_max_requests(conn ? conn->server : NULL);
@@ -3063,8 +3145,9 @@ static void http_server_send_expectation_failed(JsHttpConn* conn, HttpRequestHea
 // run one request-lane listener inside the connection's async resource
 static void http_dispatch_one(JsHttpConn* conn, Item listener, Item* args) {
     if (!js_is_callable(listener)) return;
-    Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-    js_call_function(listener, conn->server->js_object, args, 2);
+    Item previous_resource = js_async_hooks_enter_resource(
+        HTTP_CONN_VALUE(conn, ASYNC_RESOURCE));
+    js_call_function(listener, HTTP_SERVER_VALUE(conn->server, OBJECT), args, 2);
     js_async_hooks_restore_resource(previous_resource);
     js_microtask_flush();
 }
@@ -3085,12 +3168,14 @@ static void http_server_dispatch_request(JsHttpConn* conn, HttpRequestHead* req,
         bool has_expect_handler, bool expect_continue, bool response_at_eof,
         bool has_buffered_request) {
     JsHttpServer* srv = conn->server;
-    if (conn->async_resource.item == 0) conn->async_resource = js_new_object();
+    if (HTTP_CONN_VALUE(conn, ASYNC_RESOURCE).item == 0) {
+        HTTP_CONN_SET_VALUE(conn, ASYNC_RESOURCE, js_new_object());
+    }
     Item req_obj = make_request_object(conn, req);
     Item res_obj = http_response_for_request(conn, req, response_at_eof, false, has_buffered_request);
     js_set_key_cstr(res_obj, "__request__", req_obj);
     if (!req->body_complete) {
-        conn->current_request = req_obj;
+        HTTP_CONN_SET_VALUE(conn, CURRENT_REQUEST, req_obj);
         conn->request_body_remaining = req->content_length - req->body_len;
         conn->request_body_chunked = http_request_is_chunked(req);
     }
@@ -3104,14 +3189,14 @@ static void http_server_dispatch_request(JsHttpConn* conn, HttpRequestHead* req,
         http_conn_write_bytes(conn, make_string_item("HTTP/1.1 100 Continue\r\n\r\n"), false);
     }
     if (has_handler) {
-        http_dispatch_one(conn, srv->request_handler, args);
+        http_dispatch_one(conn, HTTP_SERVER_VALUE(srv, REQUEST_HANDLER), args);
     }
     if (has_request_event) {
         // createServer()'s handler is mirrored into srv->request_handler and
         // already ran above; skip that one entry so a second 'request'
         // listener still fires exactly once.
         http_dispatch_listeners(conn, on_req,
-            has_handler ? srv->request_handler : ItemNull, args);
+            has_handler ? HTTP_SERVER_VALUE(srv, REQUEST_HANDLER) : ItemNull, args);
     }
 }
 
@@ -3128,12 +3213,12 @@ static void http_server_process_parsed_request(JsHttpConn* conn,
             return;
         }
     }
-    Item on_req = http_listener_list(srv->js_object, "request");
+    Item on_req = http_listener_list(HTTP_SERVER_VALUE(srv, OBJECT), "request");
     Item on_expect = expect_continue
-        ? http_listener_list(srv->js_object, "checkContinue")
-        : (expect_unknown ? http_listener_list(srv->js_object, "checkExpectation")
+        ? http_listener_list(HTTP_SERVER_VALUE(srv, OBJECT), "checkContinue")
+        : (expect_unknown ? http_listener_list(HTTP_SERVER_VALUE(srv, OBJECT), "checkExpectation")
                           : js_array_new(0));
-    bool has_handler = js_is_callable(srv->request_handler);
+    bool has_handler = js_is_callable(HTTP_SERVER_VALUE(srv, REQUEST_HANDLER));
     bool has_request_event = js_array_length(on_req) > 0;
     bool has_expect_handler = js_array_length(on_expect) > 0;
     if (expect_unknown && !has_expect_handler) {
@@ -3142,8 +3227,8 @@ static void http_server_process_parsed_request(JsHttpConn* conn,
         return;
     }
     if (!has_expect_handler && !has_handler && !has_request_event) return;
-    if (response_at_eof && conn->async_resource.item == 0) {
-        conn->async_resource = js_new_object();
+    if (response_at_eof && HTTP_CONN_VALUE(conn, ASYNC_RESOURCE).item == 0) {
+        HTTP_CONN_SET_VALUE(conn, ASYNC_RESOURCE, js_new_object());
     }
     http_server_dispatch_request(conn, req, on_req, on_expect,
         has_handler, has_request_event, has_expect_handler,
@@ -3185,7 +3270,7 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
         HttpRequestHead req;
         http_request_head_init(&req, conn->recv_buf);
         while (conn->recv_len > 0 && !conn->destroyed) {
-            if (conn->current_request.item != 0 &&
+            if (HTTP_CONN_VALUE(conn, CURRENT_REQUEST).item != 0 &&
                 (conn->request_body_remaining > 0 || conn->request_body_chunked)) {
                 int before_body_len = conn->recv_len;
                 http_conn_feed_request_body(conn);
@@ -3257,7 +3342,7 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
 
     if (nread < 0 && conn && !conn->destroyed) {
         conn->read_ended = true;
-        if (conn->recv_len > 0 && conn->current_request.item == 0) {
+        if (conn->recv_len > 0 && HTTP_CONN_VALUE(conn, CURRENT_REQUEST).item == 0) {
             HttpRequestHead req;
             http_request_head_init(&req, conn->recv_buf);
             int consumed = 0;
@@ -3282,8 +3367,8 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
         js_microtask_flush();
         uv_read_stop(stream);
         if (conn->request_count == 0 ||
-            (conn->recv_len == 0 && (conn->current_request.item == 0 ||
-             get_type_id(conn->current_request) == LMD_TYPE_UNDEFINED))) {
+            (conn->recv_len == 0 && (HTTP_CONN_VALUE(conn, CURRENT_REQUEST).item == 0 ||
+             get_type_id(HTTP_CONN_VALUE(conn, CURRENT_REQUEST)) == LMD_TYPE_UNDEFINED))) {
             if (conn->pending_response_writes > 0) {
                 conn->close_after_response_writes = true;
             } else {
@@ -3301,6 +3386,10 @@ static void http_server_connection_cb(uv_stream_t* server, int status) {
     uv_loop_t* loop = server->loop;
 
     JsHttpConn* conn = (JsHttpConn*)mem_calloc(1, sizeof(JsHttpConn), MEM_CAT_JS_RUNTIME);
+    if (!conn || !http_conn_values_init(conn)) {
+        if (conn) mem_free(conn);
+        return;
+    }
     conn->is_pipe = srv->is_pipe;
     if (conn->is_pipe) {
         uv_pipe_init(loop, &conn->pipe, 0);
@@ -3321,7 +3410,11 @@ static void http_server_connection_cb(uv_stream_t* server, int status) {
     } else {
         mem_free(conn->recv_buf);
         uv_close((uv_handle_t*)http_conn_stream(conn), [](uv_handle_t* h) {
-            mem_free(h->data);
+            JsHttpConn* c = (JsHttpConn*)h->data;
+            if (c) {
+                runtime_value_slots_destroy(&c->values);
+                mem_free(c);
+            }
         });
     }
 }
@@ -3604,7 +3697,9 @@ static Item js_http_server_inst_setTimeout(Item maybe_self, Item msecs_item, Ite
     if (get_type_id(actual_msecs) == LMD_TYPE_INT) delay = it2i(actual_msecs);
     if (delay < 0) delay = 0;
     srv->timeout_msecs = delay > 2147483647 ? 2147483647 : (int)delay;
-    if (js_is_callable(actual_callback)) srv->timeout_callback = actual_callback;
+    if (js_is_callable(actual_callback)) {
+        HTTP_SERVER_SET_VALUE(srv, TIMEOUT_CALLBACK, actual_callback);
+    }
     return self;
 }
 
@@ -3628,16 +3723,23 @@ extern "C" Item js_http_createServer(Item options_or_handler, Item maybe_handler
     }
 
     JsHttpServer* srv = (JsHttpServer*)mem_calloc(1, sizeof(JsHttpServer), MEM_CAT_JS_RUNTIME);
-    srv->request_handler = handler;
-    srv->incoming_message_ctor = incoming_ctor;
-    srv->server_response_ctor = response_ctor;
+    if (!srv || !http_server_values_init(srv)) {
+        if (srv) mem_free(srv);
+        return ItemNull;
+    }
+    HTTP_SERVER_SET_VALUE(srv, REQUEST_HANDLER, handler);
+    HTTP_SERVER_SET_VALUE(srv, INCOMING_MESSAGE_CTOR, incoming_ctor);
+    HTTP_SERVER_SET_VALUE(srv, SERVER_RESPONSE_CTOR, response_ctor);
     Item reject_body = js_get_key_cstr(options_or_handler, "rejectNonStandardBodyWrites");
     srv->reject_nonstandard_body_writes =
         get_type_id(reject_body) == LMD_TYPE_BOOL && it2b(reject_body);
 
     Item obj = js_new_object_with_class(JS_CLASS_SERVER);
-    if (get_type_id(http_server_prototype) == LMD_TYPE_MAP) {
-        js_set_prototype(obj, http_server_prototype);
+    HTTP_SERVER_SET_VALUE(srv, OBJECT, obj);
+    HttpRealmItems items = {};
+    if (http_realm_items(&items, false) &&
+            get_type_id(*items.server_prototype) == LMD_TYPE_MAP) {
+        js_set_prototype(obj, *items.server_prototype);
     }
     js_set_key_cstr(obj, "__server__", (Item){.item = i2it((int64_t)(uintptr_t)srv)});
 #define JS_HTTP_SERVER_METHODS(M) \
@@ -3651,7 +3753,6 @@ extern "C" Item js_http_createServer(Item options_or_handler, Item maybe_handler
 #undef JS_HTTP_SERVER_METHODS
     js_set_key_cstr(obj, "listening", (Item){.item = b2it(false)});
 
-    srv->js_object = obj;
     return obj;
 }
 
@@ -3662,13 +3763,8 @@ extern "C" Item js_http_createServer(Item options_or_handler, Item maybe_handler
 typedef struct JsHttpClientReq {
     uv_tcp_t   tcp;
     uv_pipe_t  pipe;
-    Item       js_object;        // the ClientRequest object
-    Item       callback;          // response callback
-    Item       als_context;
-    Item       async_resource;
-    Item       socket_object;
-    Item       agent;
-    Item       response;
+    // Exact roots for the request's durable script values.
+    RuntimeValueSlots values;
     RuntimeCallbackSlots write_callbacks;
     char*      send_buf;
     int        send_len;
@@ -3697,9 +3793,39 @@ typedef struct JsHttpClientReq {
     // keep-alive reuse state is part of the post-ab4 HTTP recovery path.
     bool       keep_alive_agent;
     bool       reusable_idle;
-    Item       abort_signal;
-    Item       abort_handler;
 } JsHttpClientReq;
+
+enum JsHttpClientValueSlot {
+    JS_HTTP_CLIENT_VALUE_OBJECT,
+    JS_HTTP_CLIENT_VALUE_CALLBACK,
+    JS_HTTP_CLIENT_VALUE_ALS_CONTEXT,
+    JS_HTTP_CLIENT_VALUE_ASYNC_RESOURCE,
+    JS_HTTP_CLIENT_VALUE_SOCKET_OBJECT,
+    JS_HTTP_CLIENT_VALUE_AGENT,
+    JS_HTTP_CLIENT_VALUE_RESPONSE,
+    JS_HTTP_CLIENT_VALUE_ABORT_SIGNAL,
+    JS_HTTP_CLIENT_VALUE_ABORT_HANDLER,
+    JS_HTTP_CLIENT_VALUE_COUNT,
+};
+
+static bool http_client_values_init(JsHttpClientReq* creq) {
+    return creq && runtime_value_slots_init(&creq->values, (Context*)context,
+        "HTTP client request values", JS_HTTP_CLIENT_VALUE_COUNT);
+}
+
+static Item http_client_value(JsHttpClientReq* creq, JsHttpClientValueSlot slot) {
+    return creq ? runtime_value_slots_get(&creq->values, slot) : ItemNull;
+}
+
+static void http_client_set_value(JsHttpClientReq* creq,
+        JsHttpClientValueSlot slot, Item value) {
+    if (creq) runtime_value_slots_set(&creq->values, slot, value);
+}
+
+#define HTTP_CLIENT_VALUE(creq, name) \
+    http_client_value((creq), JS_HTTP_CLIENT_VALUE_##name)
+#define HTTP_CLIENT_SET_VALUE(creq, name, value) \
+    http_client_set_value((creq), JS_HTTP_CLIENT_VALUE_##name, (value))
 
 static Item http_client_socket_object(JsHttpClientReq* creq);
 static void http_client_stamp_socket_from_resource(JsHttpClientReq* creq);
@@ -3808,24 +3934,28 @@ static void http_client_stamp_socket_async_ids(Item socket, int64_t async_id, in
 }
 
 static void http_client_stamp_socket_from_resource(JsHttpClientReq* creq) {
-    if (!creq || creq->socket_object.item == 0) return;
-    int64_t async_id = http_client_resource_int_prop(creq->async_resource, "__lambda_async_id__");
-    int64_t trigger_id = http_client_resource_int_prop(creq->async_resource, "__lambda_trigger_async_id__");
-    http_client_stamp_socket_async_ids(creq->socket_object, async_id, trigger_id);
+    Item socket = HTTP_CLIENT_VALUE(creq, SOCKET_OBJECT);
+    Item async_resource = HTTP_CLIENT_VALUE(creq, ASYNC_RESOURCE);
+    if (!creq || socket.item == 0) return;
+    int64_t async_id = http_client_resource_int_prop(async_resource, "__lambda_async_id__");
+    int64_t trigger_id = http_client_resource_int_prop(async_resource, "__lambda_trigger_async_id__");
+    http_client_stamp_socket_async_ids(socket, async_id, trigger_id);
 }
 
 static Item http_client_socket_object(JsHttpClientReq* creq) {
     if (!creq) return make_js_undefined();
-    if (creq->socket_object.item != 0) {
+    Item socket = HTTP_CLIENT_VALUE(creq, SOCKET_OBJECT);
+    if (socket.item != 0) {
         if (!creq->reusable_idle) {
             // Reused keep-alive sockets keep their JS identity but need the
             // fresh request async id after the idle marker parked them at -1.
             http_client_stamp_socket_from_resource(creq);
         }
-        return creq->socket_object;
+        return socket;
     }
 
     Item obj = js_new_object_with_class(JS_CLASS_SOCKET);
+    HTTP_CLIENT_SET_VALUE(creq, SOCKET_OBJECT, obj);
     Item net_proto = js_net_get_socket_prototype();
     if (get_type_id(net_proto) == LMD_TYPE_MAP) {
         js_set_prototype(obj, net_proto);
@@ -3844,9 +3974,9 @@ static Item http_client_socket_object(JsHttpClientReq* creq) {
     js_set_key_cstr(obj, "_writableState", writable_state);
     js_set_key_cstr(obj, "readableHighWaterMark", hwm);
     js_set_key_cstr(obj, "writableHighWaterMark", hwm);
-    creq->socket_object = obj;
     http_client_stamp_socket_from_resource(creq);
-    if (creq->js_object.item != 0) js_set_key_cstr(creq->js_object, "socket", obj);
+    Item request = HTTP_CLIENT_VALUE(creq, OBJECT);
+    if (request.item != 0) js_set_key_cstr(request, "socket", obj);
     return obj;
 }
 
@@ -3855,7 +3985,7 @@ static void http_client_mark_socket_idle(JsHttpClientReq* creq) {
     Item socket = http_client_socket_object(creq);
     // Keep-alive reuse parks the public socket between requests; Node marks
     // the old handle id dead until a fresh async resource is assigned.
-    js_async_hooks_emit_destroy_resource(creq->async_resource);
+    js_async_hooks_emit_destroy_resource(HTTP_CLIENT_VALUE(creq, ASYNC_RESOURCE));
     http_client_stamp_socket_async_ids(socket, -1, -1);
 }
 
@@ -3990,7 +4120,8 @@ static Item js_http_client_res_destroy(Item maybe_self, Item err_item) {
         JsHttpClientReq* creq = (JsHttpClientReq*)(uintptr_t)it2i(handle_item);
         if (creq && !creq->destroyed) {
             creq->destroyed = true;
-            js_set_key_cstr(creq->js_object, "destroyed", (Item){.item = b2it(true)});
+            js_set_key_cstr(HTTP_CLIENT_VALUE(creq, OBJECT), "destroyed",
+                (Item){.item = b2it(true)});
             js_http_close_client_req(creq);
         }
     }
@@ -4023,8 +4154,9 @@ static Item js_http_make_abort_error(void) {
 }
 
 static Item js_http_abort_reason(JsHttpClientReq* creq) {
-    if (creq && creq->abort_signal.item) {
-        Item reason = js_get_key_cstr(creq->abort_signal, "reason");
+    Item signal = HTTP_CLIENT_VALUE(creq, ABORT_SIGNAL);
+    if (creq && signal.item) {
+        Item reason = js_get_key_cstr(signal, "reason");
         TypeId type = get_type_id(reason);
         if (reason.item != 0 && type != LMD_TYPE_UNDEFINED && type != LMD_TYPE_NULL) return reason;
     }
@@ -4033,15 +4165,17 @@ static Item js_http_abort_reason(JsHttpClientReq* creq) {
 
 static void js_http_client_remove_abort_listener(JsHttpClientReq* creq) {
     if (!creq || !creq->abort_handler_set) return;
-    Item remove_fn = js_get_key_cstr(creq->abort_signal, "removeEventListener");
+    Item signal = HTTP_CLIENT_VALUE(creq, ABORT_SIGNAL);
+    Item handler = HTTP_CLIENT_VALUE(creq, ABORT_HANDLER);
+    Item remove_fn = js_get_key_cstr(signal, "removeEventListener");
     if (js_is_callable(remove_fn)) {
-        Item args[2] = { make_string_item("abort"), creq->abort_handler };
-        js_call_function(remove_fn, creq->abort_signal, args, 2);
+        Item args[2] = { make_string_item("abort"), handler };
+        js_call_function(remove_fn, signal, args, 2);
         js_microtask_flush();
     }
     creq->abort_handler_set = false;
-    creq->abort_signal = make_js_undefined();
-    creq->abort_handler = make_js_undefined();
+    HTTP_CLIENT_SET_VALUE(creq, ABORT_SIGNAL, make_js_undefined());
+    HTTP_CLIENT_SET_VALUE(creq, ABORT_HANDLER, make_js_undefined());
 }
 
 static Item js_http_client_abort_scheduled(Item env_item) {
@@ -4068,7 +4202,7 @@ static void js_http_client_schedule_abort(JsHttpClientReq* creq) {
     if (!creq || creq->destroyed || creq->abort_scheduled) return;
     creq->abort_scheduled = true;
     Item* env = js_alloc_env(1);
-    env[0] = creq->js_object;
+    env[0] = HTTP_CLIENT_VALUE(creq, OBJECT);
     Item fn = js_new_native_closure(js_http_client_abort_scheduled, 0, env, 1);
     js_next_tick_enqueue(fn);
 }
@@ -4086,11 +4220,11 @@ static Item js_http_client_abort_signal_event(Item env_item) {
 }
 
 static bool js_http_client_configure_abort_signal(JsHttpClientReq* creq, Item signal) {
-    if (!creq || !creq->js_object.item) return false;
+    if (!creq || !HTTP_CLIENT_VALUE(creq, OBJECT).item) return false;
     TypeId type = get_type_id(signal);
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_VMAP) return false;
 
-    creq->abort_signal = signal;
+    HTTP_CLIENT_SET_VALUE(creq, ABORT_SIGNAL, signal);
     if (js_http_signal_is_aborted(signal)) {
         js_http_client_schedule_abort(creq);
         return true;
@@ -4100,41 +4234,45 @@ static bool js_http_client_configure_abort_signal(JsHttpClientReq* creq, Item si
     if (!js_is_callable(add_fn)) return false;
 
     Item* env = js_alloc_env(1);
-    env[0] = creq->js_object;
+    env[0] = HTTP_CLIENT_VALUE(creq, OBJECT);
     Item handler = js_new_native_closure(js_http_client_abort_signal_event, 1, env, 1);
     Item args[2] = { make_string_item("abort"), handler };
     js_call_function(add_fn, signal, args, 2);
     js_microtask_flush();
-    creq->abort_handler = handler;
+    HTTP_CLIENT_SET_VALUE(creq, ABORT_HANDLER, handler);
     creq->abort_handler_set = true;
     return false;
 }
 
 static void js_http_agent_clear_idle_client(JsHttpClientReq* creq) {
-    if (!creq || creq->agent.item == 0) return;
+    Item agent = HTTP_CLIENT_VALUE(creq, AGENT);
+    if (!creq || agent.item == 0) return;
     Item key = make_string_item("__lambda_idle_client__");
-    Item idle_item = js_get_key_default(creq->agent, key);
+    Item idle_item = js_get_key_default(agent, key);
     if (get_type_id(idle_item) == LMD_TYPE_INT &&
         (JsHttpClientReq*)(uintptr_t)it2i(idle_item) == creq) {
-        js_set_key_default(creq->agent, key, ItemNull);
+        js_set_key_default(agent, key, ItemNull);
     }
 }
 
 static void js_http_agent_store_idle_client(JsHttpClientReq* creq) {
-    if (!creq || !creq->keep_alive_agent || creq->agent.item == 0 ||
+    Item agent = HTTP_CLIENT_VALUE(creq, AGENT);
+    if (!creq || !creq->keep_alive_agent || agent.item == 0 ||
         creq->destroyed || !creq->connected) return;
     // keepAlive agents own one idle native connection here; closing it at
     // response end prevents official reuse tests from ever seeing a hot socket.
     http_client_mark_socket_idle(creq);
     creq->reusable_idle = true;
-    js_set_key_cstr(creq->js_object, "__client__", ItemNull);
-    js_set_key_cstr(creq->agent, "__lambda_idle_client__", (Item){.item = i2it((int64_t)(uintptr_t)creq)});
+    js_set_key_cstr(HTTP_CLIENT_VALUE(creq, OBJECT), "__client__", ItemNull);
+    js_set_key_cstr(agent, "__lambda_idle_client__",
+        (Item){.item = i2it((int64_t)(uintptr_t)creq)});
 }
 
 static void js_http_free_client_req(JsHttpClientReq* creq) {
     if (!creq) return;
     js_http_agent_clear_idle_client(creq);
-    js_async_hooks_emit_destroy_resource(creq->async_resource);
+    js_async_hooks_emit_destroy_resource(HTTP_CLIENT_VALUE(creq, ASYNC_RESOURCE));
+    runtime_value_slots_destroy(&creq->values);
     runtime_callback_slots_destroy(&creq->write_callbacks);
     if (creq->send_buf) mem_free(creq->send_buf);
     if (creq->recv_buf) mem_free(creq->recv_buf);
@@ -4144,8 +4282,9 @@ static void js_http_free_client_req(JsHttpClientReq* creq) {
 static void js_http_close_client_req(JsHttpClientReq* creq) {
     if (!creq) return;
     js_http_client_remove_abort_listener(creq);
-    if (creq->js_object.item != 0) {
-        js_set_key_cstr(creq->js_object, "__client__", ItemNull);
+    Item request = HTTP_CLIENT_VALUE(creq, OBJECT);
+    if (request.item != 0) {
+        js_set_key_cstr(request, "__client__", ItemNull);
     }
     uv_handle_t* handle = http_client_handle(creq);
     if (handle && !uv_is_closing(handle)) {
@@ -4187,16 +4326,19 @@ extern "C" Item js_http_agent_socket_cb(Item req_obj, Item err, Item socket) {
 static void js_http_emit_client_response(JsHttpClientReq* creq, Item res) {
     if (!creq || creq->response_emitted) return;
     creq->response_emitted = true;
-    Item on_response = http_listener_list(creq->js_object, "response");
-    if (js_is_callable(creq->callback)) {
-        js_als_context_call(creq->als_context, creq->callback, creq->js_object, res, 1);
+    Item request = HTTP_CLIENT_VALUE(creq, OBJECT);
+    Item callback = HTTP_CLIENT_VALUE(creq, CALLBACK);
+    Item als_context = HTTP_CLIENT_VALUE(creq, ALS_CONTEXT);
+    Item on_response = http_listener_list(request, "response");
+    if (js_is_callable(callback)) {
+        js_als_context_call(als_context, callback, request, res, 1);
         js_microtask_flush();
     }
     int64_t count = js_array_length(on_response);
     for (int64_t i = 0; i < count; i++) {
         Item cb = js_elements_get_int(on_response, i);
         if (!js_is_callable(cb)) continue;
-        js_als_context_call(creq->als_context, cb, creq->js_object, res, 1);
+        js_als_context_call(als_context, cb, request, res, 1);
         js_microtask_flush();
     }
 }
@@ -4285,13 +4427,15 @@ static void js_http_client_finish_response_if_complete(JsHttpClientReq* creq, It
     js_readable_push(res, ItemNull);
     creq->response_ended = true;
     creq->destroyed = true;
-    js_set_key_cstr(creq->js_object, "destroyed", (Item){.item = b2it(true)});
+    js_set_key_cstr(HTTP_CLIENT_VALUE(creq, OBJECT), "destroyed",
+        (Item){.item = b2it(true)});
     js_http_close_client_req(creq);
 }
 
 static Item js_http_make_client_response(JsHttpClientReq* creq, int status_code,
         Item status_message, Item headers, Item raw_headers, bool attach_socket) {
     Item response = js_readable_new_with_class(ItemNull, JS_CLASS_INCOMING_MESSAGE);
+    HTTP_CLIENT_SET_VALUE(creq, RESPONSE, response);
     js_set_key_cstr(response, "__client__", (Item){.item = i2it((int64_t)(uintptr_t)creq)});
     js_set_key_cstr(response, "statusCode", (Item){.item = i2it(status_code)});
     js_set_key_cstr(response, "statusMessage", status_message);
@@ -4300,7 +4444,7 @@ static Item js_http_make_client_response(JsHttpClientReq* creq, int status_code,
     if (attach_socket) {
         Item socket = http_client_socket_object(creq);
         js_set_key_cstr(response, "socket", socket);
-        js_set_key_cstr(creq->js_object, "socket", socket);
+        js_set_key_cstr(HTTP_CLIENT_VALUE(creq, OBJECT), "socket", socket);
     }
 #define JS_HTTP_INSTALL_CLIENT_RESPONSE_METHOD(name, target) js_http_set_direct_method(response, name, target);
     JS_HTTP_INSTALL_CLIENT_RESPONSE_METHOD("destroy", js_http_client_res_inst_destroy)
@@ -4311,7 +4455,9 @@ static Item js_http_make_client_response(JsHttpClientReq* creq, int status_code,
 }
 
 static bool js_http_client_try_emit_response(JsHttpClientReq* creq) {
-    if (!creq || creq->response.item != 0) return creq && creq->response.item != 0;
+    if (!creq || HTTP_CLIENT_VALUE(creq, RESPONSE).item != 0) {
+        return creq && HTTP_CLIENT_VALUE(creq, RESPONSE).item != 0;
+    }
     if (creq->recv_len <= 0) return false;
 
     int status_code = 0;
@@ -4329,7 +4475,7 @@ static bool js_http_client_try_emit_response(JsHttpClientReq* creq) {
         int remaining = creq->recv_len - hdr_size;
         if (remaining > 0) memmove(creq->recv_buf, creq->recv_buf + hdr_size, (size_t)remaining);
         creq->recv_len = remaining;
-        http_client_emit(creq->js_object, "continue");
+        http_client_emit(HTTP_CLIENT_VALUE(creq, OBJECT), "continue");
         return js_http_client_try_emit_response(creq);
     }
 
@@ -4363,7 +4509,7 @@ static bool js_http_client_try_emit_response(JsHttpClientReq* creq) {
     }
     if (decoded_body) mem_free(decoded_body);
 
-    creq->response = res;
+    HTTP_CLIENT_SET_VALUE(creq, RESPONSE, res);
     creq->response_hdr_size = hdr_size;
     creq->response_delivered = creq->recv_len;
     creq->response_chunked = chunked;
@@ -4374,7 +4520,8 @@ static bool js_http_client_try_emit_response(JsHttpClientReq* creq) {
             js_readable_push(res, ItemNull);
             creq->response_ended = true;
             creq->destroyed = true;
-            js_set_key_cstr(creq->js_object, "destroyed", (Item){.item = b2it(true)});
+            js_set_key_cstr(HTTP_CLIENT_VALUE(creq, OBJECT), "destroyed",
+                (Item){.item = b2it(true)});
             js_http_close_client_req(creq);
         }
     } else {
@@ -4405,7 +4552,7 @@ static void http_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
         }
         memcpy(creq->recv_buf + creq->recv_len, buf->base, (size_t)nread);
         creq->recv_len += (int)nread;
-        if (creq->response.item != 0) {
+        if (HTTP_CLIENT_VALUE(creq, RESPONSE).item != 0) {
             int body_start = creq->response_hdr_size;
             int prev = creq->response_delivered;
             if (prev < body_start) prev = body_start;
@@ -4421,19 +4568,20 @@ static void http_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                     if (decoded_len > creq->response_decoded_delivered) {
                         // Transfer-Encoding frames are transport delimiters;
                         // response streams must expose only newly decoded data.
-                        js_readable_push(creq->response,
+                js_readable_push(HTTP_CLIENT_VALUE(creq, RESPONSE),
                                          make_string_item(decoded_body + creq->response_decoded_delivered,
                                                           decoded_len - creq->response_decoded_delivered));
                         creq->response_decoded_delivered = decoded_len;
                     }
                     if (chunked_complete && !creq->response_ended) {
-                        js_readable_push(creq->response, ItemNull);
+                        js_readable_push(HTTP_CLIENT_VALUE(creq, RESPONSE), ItemNull);
                         creq->response_ended = true;
                         if (creq->keep_alive_agent) {
                             js_http_agent_store_idle_client(creq);
                         } else {
                             creq->destroyed = true;
-                            js_set_key_cstr(creq->js_object, "destroyed", (Item){.item = b2it(true)});
+                            js_set_key_cstr(HTTP_CLIENT_VALUE(creq, OBJECT), "destroyed",
+                                (Item){.item = b2it(true)});
                             js_http_close_client_req(creq);
                         }
                     }
@@ -4441,10 +4589,12 @@ static void http_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                 }
                 creq->response_delivered = creq->recv_len;
             } else if (creq->recv_len > prev) {
-                js_readable_push(creq->response, make_string_item(creq->recv_buf + prev, creq->recv_len - prev));
+                js_readable_push(HTTP_CLIENT_VALUE(creq, RESPONSE),
+                    make_string_item(creq->recv_buf + prev, creq->recv_len - prev));
                 creq->response_delivered = creq->recv_len;
-                Item headers = js_get_key_cstr(creq->response, "headers");
-                js_http_client_finish_response_if_complete(creq, creq->response, headers,
+                Item response = HTTP_CLIENT_VALUE(creq, RESPONSE);
+                Item headers = js_get_key_cstr(response, "headers");
+                js_http_client_finish_response_if_complete(creq, response, headers,
                                                            creq->recv_len - creq->response_hdr_size);
             }
         } else {
@@ -4456,9 +4606,9 @@ static void http_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
 
     if (nread < 0) {
         // connection ended — parse response and emit
-        if (creq->response.item != 0) {
+        if (HTTP_CLIENT_VALUE(creq, RESPONSE).item != 0) {
             if (!creq->response_ended) {
-                js_readable_push(creq->response, ItemNull);
+                js_readable_push(HTTP_CLIENT_VALUE(creq, RESPONSE), ItemNull);
                 creq->response_ended = true;
             }
         } else if (creq->recv_len > 0) {
@@ -4488,14 +4638,14 @@ static void http_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                 js_readable_push(res, ItemNull);
                 creq->response_ended = true;
 
-                creq->response = res;
+                HTTP_CLIENT_SET_VALUE(creq, RESPONSE, res);
                 js_http_emit_client_response(creq, res);
             }
         } else {
             // A closed socket before response headers is a request failure,
             // not a quiet EOF; server-side req.destroy() relies on this.
             Item err = js_http_econnreset_error(make_js_undefined());
-            if (http_emit_event(creq->js_object, "error", &err, 1)) {
+            if (http_emit_event(HTTP_CLIENT_VALUE(creq, OBJECT), "error", &err, 1)) {
                 js_microtask_flush();
             }
         }
@@ -4532,7 +4682,8 @@ static void http_client_write_settled(void* ud, int status, const char* bytes,
     if (creq && creq->close_after_send && !creq->destroyed) {
         (void)status;
         creq->destroyed = true;
-        js_set_key_cstr(creq->js_object, "destroyed", (Item){.item = b2it(true)});
+        js_set_key_cstr(HTTP_CLIENT_VALUE(creq, OBJECT), "destroyed",
+            (Item){.item = b2it(true)});
         js_http_close_client_req(creq);
     }
 }
@@ -4751,9 +4902,10 @@ static void http_client_connect_cb(uv_connect_t* req, int status) {
     if (status != 0) {
         if (creq) {
             Item err = js_new_error(make_string_item(uv_strerror(status)));
-            http_emit_event(creq->js_object, "error", &err, 1);
+            http_emit_event(HTTP_CLIENT_VALUE(creq, OBJECT), "error", &err, 1);
             creq->destroyed = true;
-            js_set_key_cstr(creq->js_object, "destroyed", (Item){.item = b2it(true)});
+            js_set_key_cstr(HTTP_CLIENT_VALUE(creq, OBJECT), "destroyed",
+                (Item){.item = b2it(true)});
             js_http_close_client_req(creq);
         }
         return;
@@ -4782,9 +4934,10 @@ static void http_client_connect_cb(uv_connect_t* req, int status) {
             JsNodeUvError spec;
             spec.status = r; spec.code = "EPIPE"; spec.message = "write EPIPE";
             Item err = js_node_uv_error(spec);
-            http_emit_event(creq->js_object, "error", &err, 1);
+            http_emit_event(HTTP_CLIENT_VALUE(creq, OBJECT), "error", &err, 1);
             creq->destroyed = true;
-            js_set_key_cstr(creq->js_object, "destroyed", (Item){.item = b2it(true)});
+            js_set_key_cstr(HTTP_CLIENT_VALUE(creq, OBJECT), "destroyed",
+                (Item){.item = b2it(true)});
             js_http_close_client_req(creq);
             return;
         }
@@ -4945,8 +5098,8 @@ extern "C" Item js_http_client_destroy(Item self, Item err_item) {
     js_http_client_remove_abort_listener(creq);
     Item err = js_http_econnreset_error(err_item);
     http_emit_event(self, "error", &err, 1);
-    if (creq->response.item != 0) {
-        js_stream_destroy(creq->response, err);
+    if (HTTP_CLIENT_VALUE(creq, RESPONSE).item != 0) {
+        js_stream_destroy(HTTP_CLIENT_VALUE(creq, RESPONSE), err);
     }
     uv_handle_t* handle = http_client_handle(creq);
     if (handle && !uv_is_closing(handle)) {
@@ -4985,7 +5138,7 @@ static void http_client_insert_pending_header(JsHttpClientReq* creq, const char*
     creq->send_buf = next;
     creq->send_len = new_len;
     creq->send_head_len += line_len;
-    http_client_sync_header_property(creq, creq->js_object);
+    http_client_sync_header_property(creq, HTTP_CLIENT_VALUE(creq, OBJECT));
 }
 
 extern "C" Item js_http_client_setHeader(Item self, Item name_item, Item value_item) {
@@ -5034,6 +5187,7 @@ static Item http_client_make_request_object(JsHttpClientReq* creq,
                                             const char* method,
                                             const char* path) {
     Item obj = js_new_object_with_class(JS_CLASS_CLIENT_REQUEST);
+    HTTP_CLIENT_SET_VALUE(creq, OBJECT, obj);
     js_set_key_cstr(obj, "__client_request__", (Item){.item = b2it(true)});
     if (creq) {
         js_set_key_cstr(obj, "__client__", (Item){.item = i2it((int64_t)(uintptr_t)creq)});
@@ -5481,7 +5635,14 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
         // Reused keep-alive sockets keep the uv handle but must forget the
         // previous response parser state before the next request is written.
         creq->reusable_idle = false;
-        creq->response = (Item){0};
+        HTTP_CLIENT_SET_VALUE(creq, OBJECT, ItemNull);
+        HTTP_CLIENT_SET_VALUE(creq, CALLBACK, ItemNull);
+        HTTP_CLIENT_SET_VALUE(creq, ALS_CONTEXT, ItemNull);
+        HTTP_CLIENT_SET_VALUE(creq, ASYNC_RESOURCE, ItemNull);
+        HTTP_CLIENT_SET_VALUE(creq, AGENT, ItemNull);
+        HTTP_CLIENT_SET_VALUE(creq, RESPONSE, ItemNull);
+        HTTP_CLIENT_SET_VALUE(creq, ABORT_SIGNAL, ItemNull);
+        HTTP_CLIENT_SET_VALUE(creq, ABORT_HANDLER, ItemNull);
         creq->recv_len = 0;
         creq->response_hdr_size = 0;
         creq->response_delivered = 0;
@@ -5497,6 +5658,10 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
         creq->destroyed = false;
     } else {
         creq = (JsHttpClientReq*)mem_calloc(1, sizeof(JsHttpClientReq), MEM_CAT_JS_RUNTIME);
+        if (!creq || !http_client_values_init(creq)) {
+            if (creq) mem_free(creq);
+            return ItemNull;
+        }
         runtime_callback_slots_init(&creq->write_callbacks, (Context*)context,
             "HTTP client write callbacks");
         creq->is_pipe = use_pipe;
@@ -5510,10 +5675,11 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
         creq->recv_cap = 16384;
         creq->recv_buf = (char*)mem_alloc(creq->recv_cap, MEM_CAT_JS_RUNTIME);
     }
-    creq->callback = callback;
-    creq->als_context = js_als_capture_context();
-    creq->async_resource = js_async_hooks_create_resource("HTTPCLIENTREQUEST", 17);
-    creq->agent = request_agent;
+    HTTP_CLIENT_SET_VALUE(creq, CALLBACK, callback);
+    HTTP_CLIENT_SET_VALUE(creq, ALS_CONTEXT, js_als_capture_context());
+    HTTP_CLIENT_SET_VALUE(creq, ASYNC_RESOURCE,
+        js_async_hooks_create_resource("HTTPCLIENTREQUEST", 17));
+    HTTP_CLIENT_SET_VALUE(creq, AGENT, request_agent);
     creq->keep_alive_agent = request_keep_alive;
     if (!creq->recv_buf) {
         creq->recv_cap = 16384;
@@ -5532,7 +5698,6 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
 
     Item obj = http_client_make_request_object(creq, method_buf, path_buf);
 
-    creq->js_object = obj;
     if (reused_idle_client) http_client_socket_object(creq);
     http_client_sync_header_property(creq, obj);
     http_client_metadata_from_headers(obj, custom_headers);
@@ -5620,6 +5785,13 @@ extern "C" Item js_http_get(Item options_item, Item callback) {
     }
     return req;
 }
+
+#undef HTTP_CLIENT_SET_VALUE
+#undef HTTP_CLIENT_VALUE
+#undef HTTP_CONN_SET_VALUE
+#undef HTTP_CONN_VALUE
+#undef HTTP_SERVER_SET_VALUE
+#undef HTTP_SERVER_VALUE
 
 // =============================================================================
 // http.STATUS_CODES — map of status code → reason phrase
@@ -5926,7 +6098,13 @@ static Item http_constructor_prototype(Item ctor, JsClass cls) {
 }
 
 extern "C" Item js_get_http_namespace(void) {
-    if (!http_ensure_roots()) return ItemError;
+    HttpRealmItems items = {};
+    if (!http_realm_items(&items, true)) return ItemError;
+    Item& http_namespace = *items.namespace_object;
+    Item& http_server_prototype = *items.server_prototype;
+    Item& http_incoming_message_prototype = *items.incoming_message_prototype;
+    Item& http_server_response_prototype = *items.server_response_prototype;
+    Item& http_outgoing_message_prototype = *items.outgoing_message_prototype;
     if (http_namespace.item != 0) return http_namespace;
 
     http_namespace = js_new_object();
@@ -5936,9 +6114,11 @@ extern "C" Item js_get_http_namespace(void) {
     http_set_method(http_namespace, "get",           js_http_get, 2);
 
     // Server — alias for createServer (Node.js allows http.Server(cb))
-    Item server_fn = js_new_native_constructor(js_http_createServer);
-    js_set_key_cstr(http_namespace, "Server", server_fn);
-    http_server_prototype = http_constructor_prototype(server_fn, JS_CLASS_SERVER);
+    JS_ROOTS(server_roots, server_fn_root,
+        js_new_native_constructor(js_http_createServer));
+    js_set_key_cstr(http_namespace, "Server", server_fn_root.get());
+    http_server_prototype = http_constructor_prototype(server_fn_root.get(),
+        JS_CLASS_SERVER);
 
     // STATUS_CODES
     js_set_key_cstr(http_namespace, "STATUS_CODES", build_status_codes());
@@ -5970,18 +6150,19 @@ extern "C" Item js_get_http_namespace(void) {
     js_set_key_cstr(http_namespace, "globalAgent", agent_root.get());
 
     // Stub constructors for IncomingMessage, ServerResponse, ClientRequest, OutgoingMessage
-    Item incoming_fn = js_new_distinct_native_constructor(js_http_stub_ctor);
-    js_set_key_cstr(http_namespace, "IncomingMessage", incoming_fn);
+    JS_ROOTS(constructors_roots,
+        incoming_fn_root, js_new_distinct_native_constructor(js_http_stub_ctor),
+        outgoing_fn_root, js_new_distinct_native_constructor(js_http_stub_ctor),
+        response_fn_root, js_new_distinct_native_constructor(js_http_stub_ctor));
+    js_set_key_cstr(http_namespace, "IncomingMessage", incoming_fn_root.get());
     http_incoming_message_prototype =
-        http_constructor_prototype(incoming_fn, JS_CLASS_INCOMING_MESSAGE);
-    Item outgoing_fn = js_new_distinct_native_constructor(js_http_stub_ctor);
-    js_set_key_cstr(http_namespace, "OutgoingMessage", outgoing_fn);
+        http_constructor_prototype(incoming_fn_root.get(), JS_CLASS_INCOMING_MESSAGE);
+    js_set_key_cstr(http_namespace, "OutgoingMessage", outgoing_fn_root.get());
     http_outgoing_message_prototype =
-        http_constructor_prototype(outgoing_fn, JS_CLASS_OBJECT);
-    Item response_fn = js_new_distinct_native_constructor(js_http_stub_ctor);
-    js_set_key_cstr(http_namespace, "ServerResponse", response_fn);
+        http_constructor_prototype(outgoing_fn_root.get(), JS_CLASS_OBJECT);
+    js_set_key_cstr(http_namespace, "ServerResponse", response_fn_root.get());
     http_server_response_prototype =
-        http_constructor_prototype(response_fn, JS_CLASS_SERVER_RESPONSE);
+        http_constructor_prototype(response_fn_root.get(), JS_CLASS_SERVER_RESPONSE);
     if (get_type_id(http_outgoing_message_prototype) == LMD_TYPE_MAP) {
         js_set_prototype(http_server_response_prototype, http_outgoing_message_prototype);
     }
@@ -5996,5 +6177,11 @@ extern "C" Item js_get_http_namespace(void) {
 
 extern "C" void js_http_reset(void) {
     if (!js_active_runtime_state) return;
-    http_namespace = (Item){0};
+    HttpRealmItems items = {};
+    if (!http_realm_items(&items, false)) return;
+    *items.namespace_object = (Item){0};
+    *items.server_prototype = (Item){0};
+    *items.incoming_message_prototype = (Item){0};
+    *items.server_response_prototype = (Item){0};
+    *items.outgoing_message_prototype = (Item){0};
 }

@@ -1,6 +1,7 @@
 #include "js_mir_internal.hpp"
 
 #include "js_exec_profile.h"
+#include "js_runtime_state.hpp"
 #include "../../lib/lambda_alloca.h"
 
 MIR_reg_t jm_box_float(JsMirTranspiler* mt, MIR_reg_t d_reg);
@@ -81,8 +82,11 @@ static MIR_reg_t jm_finish_scalar_result_home(JsMirTranspiler* mt,
 }
 
 static MIR_reg_t jm_adopt_direct_scalar_result(JsMirTranspiler* mt,
-        const FnVariantAnalysis* body, MIR_reg_t result) {
+        const FnVariantAnalysis* body, MirValue value) {
+    MIR_reg_t result = value.reg;
     if (!mt || !result || !mt->func_em->em.frame.active) return result;
+    // the shared resolver already owns every transported scalar in this frame.
+    if (value.scalar_provenance == SCALAR_PROVENANCE_ACTIVATION_EXTENT) return result;
     ScalarReturnClass mode = body
         ? body->result.normal.scalar_class
         : SCALAR_RETURN_DYNAMIC;
@@ -105,8 +109,32 @@ static MIR_reg_t jm_adopt_direct_scalar_result(JsMirTranspiler* mt,
     return adopted;
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winvalid-offsetof"
+static MirInvocationDepthPlan jm_enter_source_invocation(JsMirTranspiler* mt) {
+    MirEmitter* em = &mt->func_em->em;
+    // the capsule is context-owned for this synchronous call's whole extent.
+    MIR_reg_t state = em_load_at(em, em->frame.runtime,
+        offsetof(EvalContext, capsule_directory) + offsetof(ContextCapsuleDirectory, slots) +
+        CONTEXT_CAPSULE_JS_RUNTIME * sizeof(ContextCapsuleSlot) +
+        offsetof(ContextCapsuleSlot, capsule), MIR_T_I64, "js_call_owner");
+    MirInvocationDepthPlan plan = {state,
+        offsetof(JsRuntimeState, execution) + offsetof(JsExecutionState, call_depth),
+        offsetof(JsRuntimeState, execution) + offsetof(JsExecutionState, call_stack_limit)};
+    MIR_label_t overflow = jm_new_label(mt), entered = jm_new_label(mt);
+    em_change_invocation_depth(em, plan, 1, overflow);
+    jm_emit_jmp(mt, entered);
+    jm_emit_label(mt, overflow);
+    jm_call_1(mt, "js_throw_range_error", MIR_T_I64, MIR_T_P,
+        MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)"Maximum call stack size exceeded"));
+    jm_emit_error_lane_propagate_check(mt);
+    jm_emit_label_with_state(mt, entered, JS_ERROR_LANE_CLEAN);
+    return plan;
+}
+#pragma clang diagnostic pop
+
 MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
-        int arg_count, MIR_reg_t* arg_regs, bool discard_result) {
+        int arg_count, MIR_reg_t* arg_regs, bool discard_result, bool source_invocation) {
     if (!mt || !callee || !callee->body_func_item || arg_count < 0) return 0;
     MIR_type_t* types = arg_count > 0 ? LAMBDA_ALLOCA(
         arg_count, MIR_type_t) : NULL;
@@ -125,12 +153,16 @@ MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
     MirCallOptions options = {true, false, 0};
     FnVariantAnalysis* body = fn_analysis_variant(jm_function_analysis(callee),
         FN_ENTRY_BOXED_BODY);
+    MirInvocationDepthPlan depth = source_invocation ? jm_enter_source_invocation(mt)
+        : MirInvocationDepthPlan{};
     MirCallResult direct = em_call_direct(&mt->func_em->em, callee->body_name,
         callee->body_func_item, body, arg_count, types, ops,
         &options);
+    // inline exit preserves a pending companion until the shared materializer.
+    if (source_invocation) em_change_invocation_depth(&mt->func_em->em, depth, -1);
     direct.normal = em_finish_direct_call_normal(&mt->func_em->em, direct,
         MIR_PENDING_REASON_UNKNOWN_CALL);
-    MIR_reg_t result = jm_adopt_direct_scalar_result(mt, body, direct.normal.reg);
+    MIR_reg_t result = jm_adopt_direct_scalar_result(mt, body, direct.normal);
     return jm_publish_call_result(mt, result);
 }
 
@@ -209,9 +241,9 @@ MIR_reg_t jm_super_apply_class_into(JsMirTranspiler* mt, MIR_op_t callee,
     return jm_finish_scalar_result_home(mt, home, result);
 }
 
-MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
-        int arg_count, MIR_reg_t* arg_regs) {
-    if (!mt || !callee || !callee->native_func_item || arg_count < 0) return 0;
+MirCallResult jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
+        int arg_count, MIR_reg_t* arg_regs, bool source_invocation) {
+    if (!mt || !callee || !callee->native_func_item || arg_count < 0) return {};
     MIR_type_t* types = arg_count > 0
         ? LAMBDA_ALLOCA(arg_count, MIR_type_t) : NULL;
     MIR_op_t* ops = arg_count > 0
@@ -224,14 +256,24 @@ MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
     FnVariantAnalysis* native = fn_analysis_variant(jm_function_analysis(callee),
         FN_ENTRY_NATIVE_BODY);
     MirCallOptions options = {true, false, 0};
+    MirInvocationDepthPlan depth = source_invocation ? jm_enter_source_invocation(mt)
+        : MirInvocationDepthPlan{};
     MirCallResult direct = em_call_direct(&mt->func_em->em, callee->name,
         callee->native_func_item, native, arg_count, types, ops,
         &options);
-    direct.normal = em_finish_direct_call_normal(&mt->func_em->em, direct,
-        MIR_PENDING_REASON_UNKNOWN_CALL);
-    MIR_reg_t result = direct.normal.reg;
+    if (source_invocation) em_change_invocation_depth(&mt->func_em->em, depth, -1);
     mt->func_em->last_call_result = {};
-    return result;
+    return direct;
+}
+
+MIR_reg_t jm_finish_native_call(JsMirTranspiler* mt, MirCallResult result) {
+    // consume failure before boxing or any helper can replace its carrier.
+    if (result.error.reg) {
+        mt->func_em->last_call_result = result.error;
+        jm_error_lane_set_state(mt, JS_ERROR_LANE_UNKNOWN);
+        jm_emit_error_lane_propagate_check(mt);
+    }
+    return result.normal.reg;
 }
 
 JsMirImportEntry* jm_ensure_import(JsMirTranspiler* mt, const char* name,
@@ -1336,6 +1378,13 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
         // Ternary lowering normally joins boxed Item arms; native returns need
         // each arm lowered to the target MIR mode before the branch join.
         return jm_transpile_conditional_as_native(mt, (JsConditionalNode*)expr, target_type);
+    }
+
+    if (target_type == LMD_TYPE_FLOAT && expr &&
+            expr->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+        // A pre-existing numeric demand can consume a guarded element load
+        // directly. Its miss performs the same Item conversion as below.
+        return jm_transpile_member_as_number(mt, (JsMemberNode*)expr);
     }
 
     MirValue value = jm_transpile_expression_value(mt, expr);
