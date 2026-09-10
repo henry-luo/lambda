@@ -434,7 +434,6 @@ struct JsMirArgStackScope {
 enum JsMirNameCacheDomain : uint8_t {
     JS_MIR_NAME_CACHE_PROPERTY_ITEM,
     JS_MIR_NAME_CACHE_MODULE_ID,
-    JS_MIR_NAME_CACHE_LITERAL_SHAPE,
 };
 
 enum { JS_MIR_NAME_CACHE_CAPACITY = 32 };
@@ -500,8 +499,7 @@ struct JsMirFunctionEmitter {
         {}, 0, NULL, JS_MIR_NAME_CACHE_PROPERTY_ITEM};
     JsMirNameCache module_name_id_cache = {
         {}, 0, NULL, JS_MIR_NAME_CACHE_MODULE_ID};
-    JsMirNameCache literal_shape_cache = {
-        {}, 0, NULL, JS_MIR_NAME_CACHE_LITERAL_SHAPE};
+
 };
 
 // One checkpointable lowering cursor owns the mutable function/class/scope

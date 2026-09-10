@@ -796,3 +796,5 @@ bool js_is_cjs_file(const char* path);
 char* js_wrap_cjs_source(const char* source, const char* filename);
 extern "C" Item js_require(Item specifier);
 extern "C" Item js_dynamic_import(Item specifier);
+
+void jm_emit_constructor_plan(JsMirTranspiler* mt, MIR_reg_t function, JsFunctionNode* node);

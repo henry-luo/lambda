@@ -7,6 +7,7 @@
 #include "../../lib/strbuf.h"
 #include "../../lib/mempool.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include <cstring>
 #include <cstdarg>
 #include <cstdio>
@@ -305,13 +306,12 @@ static void js_script_destroy_extension(Script* base_script) {
         script->type_registry = NULL;
     }
     if (script->ast_definitions) {
-        for (int i = 0; i < script->ast_definitions->length; i++) {
-            JsAstDefinition* definition = (JsAstDefinition*)arraylist_get(
-                script->ast_definitions, i);
-            if (definition) mem_free(definition);
-        }
-        arraylist_free(script->ast_definitions);
+        hashmap_free(script->ast_definitions);
         script->ast_definitions = NULL;
+    }
+    if (script->field_initializers) {
+        hashmap_free(script->field_initializers);
+        script->field_initializers = NULL;
     }
     // NamePool owns hash tables outside the AST pool. Release it before base
     // Script cleanup destroys the backing pool.
@@ -321,20 +321,77 @@ static void js_script_destroy_extension(Script* base_script) {
     }
 }
 
+struct JsFieldInitializerEntry {
+    AstNodeId field_id;
+    JsFunctionNode* function;
+};
+HASHMAP_DEFINE_INTKEY(js_field_initializer_table, JsFieldInitializerEntry, field_id)
+
+JsFunctionNode* js_script_field_initializer_ensure(JsScript* script,
+        JsFieldDefinitionNode* field) {
+    if (!script || !script->pool || !field || !field->value) return NULL;
+    AstNodeId field_id = ast_index_find(&script->ast_index, (AstNode*)field);
+    if (field_id == AST_NODE_ID_INVALID) return NULL;
+    if (!script->field_initializers)
+        script->field_initializers = js_field_initializer_table_new(8);
+    if (!script->field_initializers) return NULL;
+    JsFieldInitializerEntry key = {field_id, NULL};
+    const JsFieldInitializerEntry* found = (const JsFieldInitializerEntry*)hashmap_get(
+        script->field_initializers, &key);
+    if (found) return found->function;
+    JsFunctionNode* function = (JsFunctionNode*)pool_calloc(script->pool, sizeof(JsFunctionNode));
+    JsBlockNode* body = (JsBlockNode*)pool_calloc(script->pool, sizeof(JsBlockNode));
+    JsReturnNode* result = (JsReturnNode*)pool_calloc(script->pool, sizeof(JsReturnNode));
+    NameScope* scope = (NameScope*)pool_calloc(script->pool, sizeof(NameScope));
+    if (!function || !body || !result || !scope) return NULL;
+    // one indexed definition per field; each class evaluation supplies its own environment.
+    function->node_type = JS_AST_NODE_FUNCTION_EXPRESSION;
+    function->source_span = field->source_span;
+    function->body = (JsAstNode*)body;
+    function->vars = scope;
+    function->has_use_strict_directive = true;
+    scope->kind = SCOPE_KIND_FUNCTION;
+    scope->strict = true;
+    body->node_type = JS_AST_NODE_BLOCK_STATEMENT;
+    body->source_span = field->source_span;
+    body->statements = (JsAstNode*)result;
+    result->node_type = JS_AST_NODE_RETURN_STATEMENT;
+    result->source_span = field->source_span;
+    result->argument = field->value;
+    if (!ast_index_append_profile(&script->ast_index, (AstNode*)function,
+            (AstNode*)field, script->profile)) return NULL;
+    key.function = function;
+    hashmap_set(script->field_initializers, &key);
+    return hashmap_oom(script->field_initializers) ? NULL : function;
+}
+
+struct JsAstDefinitionEntry {
+    AstFunctionId function_id;
+    JsAstDefinition* definition;
+};
+HASHMAP_DEFINE_INTKEY(js_ast_definition_table, JsAstDefinitionEntry, function_id)
+
 JsAstDefinition* js_script_ast_definition_ensure(JsScript* script,
         AstFuncNode* function) {
-    if (!script || !function) return NULL;
+    if (!script || !script->pool || !function) return NULL;
     if (!script->ast_definitions) {
-        script->ast_definitions = arraylist_new(8);
+        script->ast_definitions = js_ast_definition_table_new(8);
         if (!script->ast_definitions) return NULL;
     }
-    for (int i = 0; i < script->ast_definitions->length; i++) {
-        JsAstDefinition* definition = (JsAstDefinition*)arraylist_get(
-            script->ast_definitions, i);
-        if (definition && definition->function == function) return definition;
+    AstNodeId node_id = ast_index_find(&script->ast_index, (AstNode*)function);
+    AstFunctionId function_id = node_id != AST_NODE_ID_INVALID
+        ? script->ast_index.owner_functions[node_id] : AST_FUNCTION_ID_INVALID;
+    if (function_id == AST_FUNCTION_ID_INVALID ||
+            script->ast_index.functions[function_id].node != (AstNode*)function) {
+        log_error("js-definition: function is missing its indexed identity");
+        return NULL;
     }
-    JsAstDefinition* definition = (JsAstDefinition*)mem_calloc(1,
-        sizeof(JsAstDefinition), MEM_CAT_SYSTEM);
+    JsAstDefinitionEntry key = {function_id, NULL};
+    const JsAstDefinitionEntry* found = (const JsAstDefinitionEntry*)hashmap_get(
+        script->ast_definitions, &key);
+    if (found) return found->definition;
+    JsAstDefinition* definition = (JsAstDefinition*)pool_calloc(
+        script->pool, sizeof(JsAstDefinition));
     if (!definition) return NULL;
     JsAstFunctionFacts facts = js_ast_collect_function_facts(
         (JsAstNode*)function->params, (JsAstNode*)function->body);
@@ -343,10 +400,9 @@ JsAstDefinition* js_script_ast_definition_ensure(JsScript* script,
     definition->has_direct_eval = facts.has_direct_eval;
     definition->uses_arguments = facts.observations & JS_AST_OBSERVES_ARGUMENTS;
     definition->tail_reuse_safe = facts.tail_reuse_safe;
-    if (!arraylist_append(script->ast_definitions, definition)) {
-        mem_free(definition);
-        return NULL;
-    }
+    key.definition = definition;
+    hashmap_set(script->ast_definitions, &key);
+    if (hashmap_oom(script->ast_definitions)) return NULL;
     return definition;
 }
 

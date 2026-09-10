@@ -4,6 +4,7 @@
 #include "js_runtime_internal.hpp"
 #include "js_ast.hpp"
 #include "../../lib/memtrack.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../runtime/gc/gc_heap.h"
 #include "../runtime/side_stack.h"
 
@@ -268,18 +269,10 @@ static void* js_fn_payload_calloc(const JsFunction* fn, size_t size) {
     return mem_calloc(1, size, MEM_CAT_JS_RUNTIME);
 }
 
-static void* js_fn_code_calloc(const JsFunction* fn) {
-    if (js_function_is_pool_backed(fn)) {
-        return js_input && js_input->pool
-            ? pool_calloc(js_input->pool, sizeof(JsCallableCode)) : NULL;
-    }
-    return mem_calloc(1, sizeof(JsCallableCode), MEM_CAT_JS_RUNTIME);
-}
-
 JsCallableCode* js_fn_code_ensure(JsFunction* fn) {
     if (!fn) return NULL;
     if (!fn->code) {
-        fn->code = (JsCallableCode*)js_fn_code_calloc(fn);
+        fn->code = (JsCallableCode*)js_fn_payload_calloc(fn, sizeof(JsCallableCode));
         if (!fn->code) return NULL;
         fn->code->module_state_id = UINT32_MAX;
         fn->code->formal_length = -1;
@@ -288,14 +281,18 @@ JsCallableCode* js_fn_code_ensure(JsFunction* fn) {
     return fn->code;
 }
 
-static bool js_callable_code_matches_mir(const JsCallableCode* code,
-        void* func_ptr, Context* runtime_context, int param_count,
-        uint32_t module_state_id) {
-    return code && code->interned && code->func_ptr == func_ptr &&
-        code->runtime_context == runtime_context &&
-        code->param_count == param_count &&
-        code->module_state_id == module_state_id &&
-        code->body_kind == JS_FUNCTION_BODY_CODE;
+struct JsCallableCodeEntry {
+    void* target;
+    Context* runtime;
+    uint64_t signature;
+    JsCallableCode* code;
+};
+HASHMAP_DEFINE_FIELD3_KEY(js_callable_code_table, JsCallableCodeEntry,
+    target, runtime, signature)
+
+static JsCallableCodeEntry js_callable_code_key(void* target, Context* runtime,
+        int param_count, uint32_t module_state_id) {
+    return {target, runtime, ((uint64_t)module_state_id << 32) | (uint32_t)param_count, NULL};
 }
 
 static void js_callable_code_detach(JsFunction* fn) {
@@ -342,62 +339,53 @@ JsCallableCode* js_callable_code_intern_mir(JsFunction* fn, void* func_ptr,
         return js_callable_code_prepare_unique(fn, func_ptr, runtime_context,
             param_count, module_state_id);
     }
-    if (!state->callable_code_interned) {
-        state->callable_code_interned = arraylist_new(16);
+    if (!state->callable_code_interned)
+        state->callable_code_interned = js_callable_code_table_new(16);
+    HashMap* table = state->callable_code_interned;
+    JsCallableCodeEntry key = js_callable_code_key(func_ptr, runtime_context,
+        param_count, module_state_id);
+    const JsCallableCodeEntry* found = table
+        ? (const JsCallableCodeEntry*)hashmap_get(table, &key) : NULL;
+    if (found) {
+        JsCallableCode* code = found->code;
+        if (fn->code == code) return code;
+        code->intern_refcount++;
+        js_callable_code_detach(fn);
+        fn->code = code;
+        return code;
     }
-    if (state->callable_code_interned) {
-        for (int i = 0; i < state->callable_code_interned->length; i++) {
-            JsCallableCode* code = (JsCallableCode*)arraylist_get(
-                state->callable_code_interned, i);
-            if (js_callable_code_matches_mir(code, func_ptr, runtime_context,
-                    param_count, module_state_id)) {
-                if (fn->code == code) return code;
-                code->intern_refcount++;
-                js_callable_code_detach(fn);
-                fn->code = code;
-                return code;
-            }
-        }
+    JsCallableCode* code = js_callable_code_prepare_unique(fn, func_ptr,
+        runtime_context, param_count, module_state_id);
+    if (!code || !table) return code;
+    key.code = code;
+    hashmap_set(table, &key);
+    if (!hashmap_oom(table)) {
+        code->intern_refcount = 1;
+        code->interned = true;
+        code->intern_table = table;
     }
-    JsCallableCode* code = (JsCallableCode*)mem_calloc(1,
-        sizeof(JsCallableCode), MEM_CAT_JS_RUNTIME);
-    if (!code) {
-        return js_callable_code_prepare_unique(fn, func_ptr, runtime_context,
-            param_count, module_state_id);
-    }
-    code->func_ptr = func_ptr;
-    code->runtime_context = runtime_context;
-    code->param_count = param_count;
-    code->module_state_id = module_state_id;
-    code->formal_length = -1;
-    code->body_kind = JS_FUNCTION_BODY_CODE;
-    code->intern_refcount = 1;
-    code->interned = true;
-    if (!state->callable_code_interned ||
-            !arraylist_append(state->callable_code_interned, code)) {
-        mem_free(code);
-        return js_callable_code_prepare_unique(fn, func_ptr, runtime_context,
-            param_count, module_state_id);
-    }
-    js_callable_code_detach(fn);
-    fn->code = code;
     return code;
 }
 
 void js_callable_code_release(JsCallableCode* code) {
     if (!code || !code->interned || code->intern_refcount == 0) return;
-    code->intern_refcount--;
-    if (code->intern_refcount != 0) return;
-    JsRuntimeState* state = js_active_runtime_state;
-    if (state && state->callable_code_interned) {
-        for (int i = 0; i < state->callable_code_interned->length; i++) {
-            if (arraylist_get(state->callable_code_interned, i) == code) {
-                arraylist_remove(state->callable_code_interned, i);
-                break;
-            }
-        }
+    if (--code->intern_refcount != 0) return;
+    // collection can finalize a callable while a different realm is active.
+    if (code->intern_table) {
+        JsCallableCodeEntry key = js_callable_code_key(code->func_ptr,
+            code->runtime_context, code->param_count, code->module_state_id);
+        hashmap_delete(code->intern_table, &key);
     }
     mem_free(code);
+}
+
+void js_callable_code_table_destroy(HashMap* table) {
+    if (!table) return;
+    size_t cursor = 0;
+    void* item = NULL;
+    while (hashmap_iter(table, &cursor, &item))
+        ((JsCallableCodeEntry*)item)->code->intern_table = NULL;
+    hashmap_free(table);
 }
 
 // JSCU20: an eval origin is a per-value native payload, so it is allocated
@@ -640,17 +628,11 @@ static JsFunction* js_alloc_function_storage(bool gc_backed) {
         : (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
 }
 
-static void js_function_init_common(JsFunction* fn, int param_count) {
-    js_function_init_native_module_scope(fn);
+static void js_function_init_common(JsFunction* fn) {
     fn->type_id = LMD_TYPE_FUNC;
     // D6.2.2v2: every callable wrapper uses the canonical layout marker;
     // legacy arity/target decoding otherwise silently drops compiled args.
     fn->layout_magic = JS_FUNCTION_LAYOUT_MAGIC;
-    JsCallableCode* code = js_fn_code_ensure(fn);
-    if (code) {
-        code->param_count = param_count;
-        code->formal_length = -1;
-    }
     fn->prototype = ItemNull;
 }
 
@@ -682,7 +664,7 @@ static Item js_new_function_impl(void* func_ptr, int param_count,
     JsFunction* fn = js_alloc_function_storage(has_with_env || suppress_cache);
     if (!fn) return ItemError;
     fn_root.set((Item){.function = (Function*)fn});
-    js_function_init_common(fn, param_count);
+    js_function_init_common(fn);
     JsCallableCode* code = js_callable_code_intern_mir(fn, func_ptr, runtime,
         param_count, lambda_active_module_state_id());
     if (!code) return ItemError;
@@ -707,7 +689,7 @@ extern "C" Item js_new_interpreted_function(AstFuncNode* function,
     JsFunction* fn = js_alloc_function_storage(true);
     if (!fn) return ItemError;
     function_root.set((Item){.function = (Function*)fn});
-    js_function_init_common(fn, param_count);
+    js_function_init_common(fn);
     JsAstBody* ast = js_fn_ast_ensure(fn);
     if (!ast) return ItemError;
     ast->definition = js_script_ast_definition_ensure(script, function);
@@ -715,13 +697,8 @@ extern "C" Item js_new_interpreted_function(AstFuncNode* function,
     JsCallableCode* code = js_script_ast_definition_code_ensure(ast->definition,
         param_count, lambda_active_module_state_id());
     if (!code) return ItemError;
-    // js_function_init_common installs a temporary per-value code record so
-    // generic initialization remains allocation-safe; replace it before the
-    // AST value is published, leaving the definition as the sole code owner.
-    if (fn->code != code) {
-        js_callable_code_detach(fn);
-        fn->code = code;
-    }
+    // definition metadata is installed directly, with no per-value temporary.
+    fn->code = code;
     ast->env = environment;
     fn->flags = flags;
     fn->home_global = js_get_global_this();
@@ -851,7 +828,10 @@ static Item js_new_native_function_impl(JsNativeTarget target,
     JsFunction* fn = js_alloc_function_storage(has_with_env || suppress_cache);
     if (!fn) return ItemError;
     fn_root.set((Item){.function = (Function*)fn});
-    js_function_init_common(fn, policy == JS_NATIVE_CALL_REST ? -arity : arity);
+    js_function_init_common(fn);
+    JsCallableCode* code = js_fn_code_ensure(fn);
+    if (!code) return ItemError;
+    code->param_count = policy == JS_NATIVE_CALL_REST ? -arity : arity;
     JsNativeCode* native = js_fn_native_ensure(fn);
     if (!native) return ItemError;
     native->target = target;

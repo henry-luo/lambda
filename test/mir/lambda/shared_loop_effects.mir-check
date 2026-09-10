@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "description": "D5.3/D8.4.3v2: immutable native arguments admit total scalar calls before the loop test, including a zero-trip invocation.",
+  "checks": [
+    {
+      "in_func": "_stable_abs_#",
+      "expect_seq": ["call\tfabs_p, fabs", "dlt"],
+      "count": {"call\tfabs_p, fabs": 1}
+    }
+  ]
+}

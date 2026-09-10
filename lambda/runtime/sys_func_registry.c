@@ -1253,8 +1253,21 @@ JitImport jit_runtime_imports[] = {
     {"bits_to_f32", FPTR(bits_to_f32)},
     // stack overflow protection
     {"lambda_stack_overflow_error", FPTR(lambda_stack_overflow_error)},
-    // LR07-7/LR08-3 root-honesty witness (emitted only under LAMBDA_ROOT_WITNESS)
-    {"lambda_jit_root_witness", FPTR(lambda_jit_root_witness)},
+    // LR07-7/LR08-3 root-honesty witness (emitted only under LAMBDA_ROOT_WITNESS).
+    // The metadata is load-bearing, not decoration: an unannotated row defaults
+    // to JIT_EFFECT_MAY_GC with JIT_VALUE_UNKNOWN arguments, which would make
+    // the emitter publish every probed register into a root slot at the probe's
+    // own call site -- the instrumentation would then root exactly the values it
+    // exists to catch as unrooted, and would grow the frame after finalization.
+    // The probe only reads a word and compares it against the GC zone, so it
+    // allocates nothing, re-enters nothing, and none of its arguments are roots.
+    {"lambda_jit_root_witness", FPTR(lambda_jit_root_witness),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER)}},
     {"lambda_side_stack_ensure_for", FPTR(lambda_side_stack_ensure_for)},
     {"lambda_side_stack_ensure_tls", FPTR(lambda_side_stack_ensure_tls)},
     {"lambda_recovery_frame_begin_for", FPTR(lambda_recovery_frame_begin_for)},
@@ -1779,27 +1792,28 @@ JitImport jit_runtime_imports[] = {
     // Unboxed system functions (native types, no Item boxing overhead)
     // ========================================================================
     {"fn_pow_u", FPTR(fn_pow_u)},
-    {"fn_min2_u", FPTR(fn_min2_u)},
-    {"fn_max2_u", FPTR(fn_max2_u)},
-    {"fn_abs_i", FPTR(fn_abs_i)},
-    {"fn_abs_f", FPTR(fn_abs_f)},
-    {"fn_neg_i", FPTR(fn_neg_i)},
-    {"fn_neg_f", FPTR(fn_neg_f)},
-    {"fn_not_u", FPTR(fn_not_u)},
-    {"fn_sign_i", FPTR(fn_sign_i)},
-    {"fn_sign_f", FPTR(fn_sign_f)},
-    {"js_math_round", FPTR(js_math_round), JIT_IMPORT_RAW_SCALAR_PRESERVES},
+    {"fn_min2_u", FPTR(fn_min2_u), JIT_IMPORT_PURE_SCALAR},
+    {"fn_max2_u", FPTR(fn_max2_u), JIT_IMPORT_PURE_SCALAR},
+    {"fn_abs_i", FPTR(fn_abs_i), JIT_IMPORT_PURE_SCALAR},
+    {"fn_abs_f", FPTR(fn_abs_f), JIT_IMPORT_PURE_SCALAR},
+    {"fabs", FPTR(fabs), JIT_IMPORT_PURE_SCALAR},
+    {"fn_neg_i", FPTR(fn_neg_i), JIT_IMPORT_PURE_SCALAR},
+    {"fn_neg_f", FPTR(fn_neg_f), JIT_IMPORT_PURE_SCALAR},
+    {"fn_not_u", FPTR(fn_not_u), JIT_IMPORT_PURE_SCALAR},
+    {"fn_sign_i", FPTR(fn_sign_i), JIT_IMPORT_PURE_SCALAR},
+    {"fn_sign_f", FPTR(fn_sign_f), JIT_IMPORT_PURE_SCALAR},
+    {"js_math_round", FPTR(js_math_round), JIT_IMPORT_PURE_SCALAR},
     {"js_math_trunc", FPTR(js_math_trunc)},
     {"js_math_sign", FPTR(js_math_sign)},
     {"js_math_floor", FPTR(js_math_floor)},
     {"js_math_ceil", FPTR(js_math_ceil)},
-    {"js_math_ceil_d", FPTR(js_math_ceil_d), JIT_IMPORT_RAW_SCALAR_PRESERVES},
+    {"js_math_ceil_d", FPTR(js_math_ceil_d), JIT_IMPORT_PURE_SCALAR},
     {"js_math_round_item", FPTR(js_math_round_item)},
     {"js_math_pow", FPTR(js_math_pow)},
-    {"js_math_pow_d", FPTR(js_math_pow_d), JIT_IMPORT_RAW_SCALAR_PRESERVES},
-    {"fn_floor_i", FPTR(fn_floor_i)},
-    {"fn_ceil_i", FPTR(fn_ceil_i)},
-    {"fn_round_i", FPTR(fn_round_i)},
+    {"js_math_pow_d", FPTR(js_math_pow_d), JIT_IMPORT_PURE_SCALAR},
+    {"fn_floor_i", FPTR(fn_floor_i), JIT_IMPORT_PURE_SCALAR},
+    {"fn_ceil_i", FPTR(fn_ceil_i), JIT_IMPORT_PURE_SCALAR},
+    {"fn_round_i", FPTR(fn_round_i), JIT_IMPORT_PURE_SCALAR},
     // collection length — type-specialized native variants
     {"fn_len_l", FPTR(fn_len_l)},
     {"fn_len_a", FPTR(fn_len_a)},
@@ -1810,6 +1824,7 @@ JitImport jit_runtime_imports[] = {
     // String operations (non-sys-func entries)
     // ========================================================================
     {"fn_strcat", FPTR(fn_strcat)},
+    {"fn_strcat_many", FPTR(fn_strcat_many)},
     {"fn_string_freeze", FPTR(fn_string_freeze)},
     {"fn_normalize", FPTR(fn_normalize)},
     {"fn_substring", FPTR(fn_substring)},
@@ -2024,15 +2039,14 @@ JitImport jit_runtime_imports[] = {
     {"js_increment", FPTR(js_increment)},
     {"js_decrement", FPTR(js_decrement)},
     {"js_number_function", FPTR(js_number_function)},
-    {"js_add", FPTR(js_add),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM)}},
-    {"js_subtract", FPTR(js_subtract)},
-    {"js_multiply", FPTR(js_multiply)},
-    {"js_divide", FPTR(js_divide)},
-    {"js_modulo", FPTR(js_modulo)},
-    {"js_power", FPTR(js_power)},
+    // addition retains its existing per-call reclaim; the other arithmetic
+    // helpers retain their existing caller-extent lifetime with an explicit audit.
+    {"js_add", FPTR(js_add), JIT_IMPORT_JS_NUMBER_BINARY(0)},
+    {"js_subtract", FPTR(js_subtract), JIT_IMPORT_JS_NUMBER_BINARY(JIT_IMPORT_RESULT_CALLER_OWNED)},
+    {"js_multiply", FPTR(js_multiply), JIT_IMPORT_JS_NUMBER_BINARY(JIT_IMPORT_RESULT_CALLER_OWNED)},
+    {"js_divide", FPTR(js_divide), JIT_IMPORT_JS_NUMBER_BINARY(JIT_IMPORT_RESULT_CALLER_OWNED)},
+    {"js_modulo", FPTR(js_modulo), JIT_IMPORT_JS_NUMBER_BINARY(JIT_IMPORT_RESULT_CALLER_OWNED)},
+    {"js_power", FPTR(js_power), JIT_IMPORT_JS_NUMBER_BINARY(JIT_IMPORT_RESULT_CALLER_OWNED)},
     {"js_equal", FPTR(js_equal), JIT_IMPORT_STABLE_ITEM},
     {"js_strict_equal", FPTR(js_strict_equal), JIT_IMPORT_STABLE_ITEM},
     // Tune8 §2.1: js_less_than/_equal/js_greater_than/_equal collapsed into
@@ -2046,7 +2060,7 @@ JitImport jit_runtime_imports[] = {
     {"js_bitwise_or", FPTR(js_bitwise_or), JIT_IMPORT_STABLE_ITEM},
     {"js_bitwise_xor", FPTR(js_bitwise_xor), JIT_IMPORT_STABLE_ITEM},
     {"js_bitwise_not", FPTR(js_bitwise_not), JIT_IMPORT_STABLE_ITEM},
-    {"js_double_to_int32", FPTR(js_double_to_int32), JIT_IMPORT_RAW_SCALAR_PRESERVES},
+    {"js_double_to_int32", FPTR(js_double_to_int32), JIT_IMPORT_PURE_SCALAR},
     {"js_left_shift", FPTR(js_left_shift), JIT_IMPORT_STABLE_ITEM},
     {"js_right_shift", FPTR(js_right_shift), JIT_IMPORT_STABLE_ITEM},
     {"js_unsigned_right_shift", FPTR(js_unsigned_right_shift), JIT_IMPORT_STABLE_ITEM},
@@ -2072,6 +2086,13 @@ JitImport jit_runtime_imports[] = {
     {"js_loose_eq_raw", FPTR(js_loose_eq_raw), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_new_object", FPTR(js_new_object)},
     {"js_new_object_shaped", FPTR(js_new_object_shaped)},
+    {"js_set_constructor_plan", FPTR(js_set_constructor_plan),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      JIT_EXCEPTION_PRESERVES, 0}},
     {"js_literal_shape", FPTR(js_literal_shape),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
@@ -3501,9 +3522,26 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_int_lane_divmod_slow", "int2it_lane",
         "js_is_truthy", "js_is_nullish",
         "js_typed_array_matches_type", "js_number_key_to_index_fast",
+        "fn_min2_u",
+        "fn_max2_u",
+        "fn_abs_i",
+        "fn_abs_f",
+        "fabs",
+        "fn_neg_i",
+        "fn_neg_f",
+        "fn_not_u",
+        "fn_sign_i",
+        "fn_sign_f",
+        "fn_floor_i",
+        "fn_ceil_i",
+        "fn_round_i",
+        "js_math_round",
+        "js_math_ceil_d",
+        "js_math_pow_d",
+        "js_double_to_int32",
         // resolves NameIds and builds pool-owned shape metadata only; the
         // cache uses ArrayList allocation, with no GC heap or JS re-entry.
-        "js_literal_shape",
+        "js_literal_shape", "js_set_constructor_plan",
 #ifdef LAMBDA_JS_EXEC_PROFILE
         // updates native counters; first-use getenv/atexit cannot collect or
         // re-enter JS. This diagnostic import is absent from release MIR.
@@ -3515,6 +3553,15 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_active_module_var_store",
         "lambda_active_module_var_at",
         "js_with_save_depth", "js_with_restore_depth",
+        // LR07-7 root-honesty probe. Reads one machine word, compares it
+        // against the GC zone (`gc_is_managed`, a pure range query) and may
+        // log; it allocates no GC object, never calls gc_collect, and never
+        // re-enters generated code. The NO_GC claim is load-bearing rather
+        // than cosmetic: as a MAY_GC row the emitter would publish every
+        // probed register into a root slot at the probe's own call site,
+        // rooting exactly the values the probe exists to catch as unrooted.
+        // Emitted only under LAMBDA_ROOT_WITNESS, so release MIR has none.
+        "lambda_jit_root_witness",
     };
     const int audited_count = (int)(sizeof(audited) / sizeof(audited[0]));
     int no_gc_count = 0;

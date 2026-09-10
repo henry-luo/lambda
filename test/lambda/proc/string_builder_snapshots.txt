@@ -1,0 +1,8 @@
+["", "x", "xx", "xxx"]
+xx
+xxxx
+xxxx
+xxxx!
+xxxx!xxxx!
+[4, 10, "éééé"]
+[5, 2]

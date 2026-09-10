@@ -88,7 +88,8 @@ struct JsScript : Script {
     struct hashmap* type_registry; // TS name → Type* facts for this JS/TS unit
     JsInterpImportBinding* interp_imports;
     JsInterpExportBinding* interp_exports;
-    ArrayList* ast_definitions;
+    HashMap* ast_definitions;
+    HashMap* field_initializers;
 };
 
 // JsTranspiler is an ephemeral builder extending the retained JsScript prefix.
@@ -155,6 +156,7 @@ void js_syntax_error(JsTranspiler* tp, SourceSpan span, const char* message);
 // Transpiler lifecycle functions
 JsTranspiler* js_transpiler_create(Runtime* runtime);
 void js_transpiler_destroy(JsTranspiler* tp);
+JsFunctionNode* js_script_field_initializer_ensure(JsScript* script, JsFieldDefinitionNode* field);
 int js_transpiler_parse_error_get(const JsTranspiler* tp, int64_t* out_row,
                                   int64_t* out_col, char* out_message,
                                   int64_t out_message_size);

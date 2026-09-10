@@ -43,6 +43,12 @@ static const char* kExtraJsScripts[] = {
     "test/js/function_decl_callback_hoist.js",
     "test/js/concurrency_lambda_promise.js",
     "test/js/tune4_closure_scalar_ownership.js",
+    "test/js/js_shared_scalar_analysis.js",
+    "test/js/js_shared_construction_plans.js",
+    "test/js/js_shared_native_lanes.js",
+    "test/js/js_shared_loop_effects.js",
+    "test/js/js_callable_definition_sharing.js",
+    "test/js/js_shared_search_leaf.js",
 };
 
 static const char* kExtraLambdaScripts[] = {
@@ -51,6 +57,7 @@ static const char* kExtraLambdaScripts[] = {
     // A map field carried in the packed `any` lane is the only reference to
     // its container; the shape walk must decode that lane to reach it.
     "test/lambda/gc_shape_any_lane.ls",
+    "test/lambda/proc/string_builder_snapshots.ls",
 };
 
 struct StressScript {

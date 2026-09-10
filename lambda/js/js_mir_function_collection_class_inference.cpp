@@ -326,34 +326,9 @@ static JsFuncCollected* jm_collect_class_field_initializer(JsMirTranspiler* mt,
         return NULL;
     }
 
-    JsFunctionNode* function = (JsFunctionNode*)pool_calloc(
-        mt->tp->pool, sizeof(JsFunctionNode));
-    JsBlockNode* body = (JsBlockNode*)pool_calloc(
-        mt->tp->pool, sizeof(JsBlockNode));
-    JsReturnNode* result = (JsReturnNode*)pool_calloc(
-        mt->tp->pool, sizeof(JsReturnNode));
-    if (!function || !body || !result) {
-        log_error("js-mir: failed to allocate class field initializer AST");
-        mt->collection_failed = true;
-        return NULL;
-    }
-    // D6.2.2v2 requires dynamic construction to follow stored capabilities.
-    // A synthetic ordinary function preserves the definition environment while
-    // receiving the constructed object as `this`; evaluating the expression at
-    // class definition would permanently capture the wrong receiver.
-    function->node_type = JS_AST_NODE_FUNCTION_EXPRESSION;
-    function->source_span = field->source_span;
-    function->body = (JsAstNode*)body;
-    body->node_type = JS_AST_NODE_BLOCK_STATEMENT;
-    body->source_span = field->source_span;
-    body->statements = (JsAstNode*)result;
-    result->node_type = JS_AST_NODE_RETURN_STATEMENT;
-    result->source_span = field->source_span;
-    result->argument = field->value;
-
-    if (!ast_index_append_profile(&mt->tp->ast_index, (AstNode*)function,
-            (AstNode*)field, mt->tp->profile)) {
-        log_error("js-mir: failed to index class field initializer");
+    JsFunctionNode* function = js_script_field_initializer_ensure(mt->tp, field);
+    if (!function) {
+        log_error("js-mir: failed to retain indexed class field initializer");
         mt->collection_failed = true;
         return NULL;
     }
@@ -1367,7 +1342,7 @@ ScalarReturnClass jm_infer_boxed_return_scalar_class(JsMirTranspiler* mt,
         }
     }
     if (!needs_home) return SCALAR_RETURN_NONE;
-    return em_scalar_return_class_for_type(JM_JS_FACT(fc, return_type));
+    return jit_scalar_return_class_for_type(JM_JS_FACT(fc, return_type));
 }
 
 // ============================================================================

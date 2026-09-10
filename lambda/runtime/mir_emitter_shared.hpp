@@ -86,8 +86,8 @@ struct VarEntry {
     // Checked stores must publish through that shared root, not retain a
     // transactional replacement only in the callee's local register.
     bool is_var_param;
-    // A String buffer may be appended in place only by this local binding.
-    // Any ordinary read clears this state before the value can become an alias.
+    // This binding may carry an exclusive String buffer on some control-flow path.
+    // Ordinary reads freeze its runtime flag; the may-own fact survives branches.
     bool string_buffer_owned;
     // A local initialized by an exact integer zero literal can safely serve as
     // the counted accumulator of a compiler-proven positive-step loop.
@@ -186,10 +186,7 @@ static inline void em_normalize_import_call(MirImportEntry* entry,
     // Only audited boxed-Item imports may return a transient number-home
     // pointer; UNKNOWN also covers ordinary containers, whose values must not
     // be misclassified as scalar homes at later retaining calls (D5.4.3).
-    entry->call.normal_result.scalar_class =
-        ret_class == JIT_VALUE_BOXED_ITEM &&
-        !(entry->audit.flags & JIT_IMPORT_RESULT_SCALAR_STABLE)
-        ? SCALAR_RETURN_DYNAMIC : SCALAR_RETURN_NONE;
+    entry->call.normal_result.scalar_class = jit_import_scalar_return_class(&entry->audit);
     entry->call.abi_arg_count = (uint16_t)nargs;
     entry->call.source_arg_count = (uint16_t)nargs;
     // C helpers never speak the pair protocol (RV12/SF6): they establish no
@@ -948,24 +945,6 @@ static inline int em_gc_new_home(MirEmitter* em) {
 // Boxed scalar returns need a lifetime policy that is independent of their
 // machine return type. Both Lambda and LambdaJS use this classification so
 // Item encoding changes cannot make their return epilogues drift apart.
-static inline ScalarReturnClass em_scalar_return_class_for_type(TypeId type_id) {
-    // The NONE decision lives in lambda_type_id_may_be_wide_scalar() so the
-    // C-side sys-func metadata fallback shares exactly this answer.
-    if (!lambda_type_id_may_be_wide_scalar(type_id)) {
-        return SCALAR_RETURN_NONE;
-    }
-    switch (type_id) {
-    case LMD_TYPE_FLOAT:
-        return SCALAR_RETURN_F64;
-    case LMD_TYPE_INT64:
-        return SCALAR_RETURN_I64;
-    case LMD_TYPE_UINT64:
-        return SCALAR_RETURN_U64;
-    default:
-        return SCALAR_RETURN_DYNAMIC;  // ANY
-    }
-}
-
 // RV1/RV2/RV10 — the ONLY place a return shape is computed. Every emitter,
 // wrapper and dispatch site reads the resulting descriptor instead of
 // re-deriving the answer from its own local facts; that divergence is exactly
@@ -1234,12 +1213,46 @@ static inline void em_emit_label(MirEmitter* em, MIR_label_t label) {
 static inline MIR_reg_t em_load_at(MirEmitter* em, MIR_reg_t base,
         MIR_disp_t offset, MIR_type_t type, const char* name) {
     MIR_reg_t value = em_new_reg(em, name,
-        type == MIR_T_D ? MIR_T_D : type == MIR_T_F ? MIR_T_F : MIR_T_I64);
+        type == MIR_T_D || type == MIR_T_F ? MIR_T_D : MIR_T_I64);
     em_emit_insn(em, MIR_new_insn(em->ctx,
-        type == MIR_T_D ? MIR_DMOV : type == MIR_T_F ? MIR_FMOV : MIR_MOV,
+        type == MIR_T_D ? MIR_DMOV : type == MIR_T_F ? MIR_F2D : MIR_MOV,
         MIR_new_reg_op(em->ctx, value),
         MIR_new_mem_op(em->ctx, type, offset, base, 0, 1)));
     return value;
+}
+
+// physical lane decoding is shared; profiles choose coercion and result meaning.
+static inline MIR_type_t em_numeric_storage_type(ArrayNumElemType type) {
+    switch (type) {
+    case ELEM_INT8: return MIR_T_I8;
+    case ELEM_UINT8: case ELEM_UINT8_CLAMPED: case ELEM_BOOL: return MIR_T_U8;
+    case ELEM_INT16: return MIR_T_I16;
+    case ELEM_UINT16: return MIR_T_U16;
+    case ELEM_INT32: return MIR_T_I32;
+    case ELEM_UINT32: return MIR_T_U32;
+    case ELEM_INT: case ELEM_INT64: return MIR_T_I64;
+    case ELEM_UINT64: return MIR_T_U64;
+    case ELEM_FLOAT32: return MIR_T_F;
+    case ELEM_FLOAT64: return MIR_T_D;
+    default: return MIR_T_UNDEF;
+    }
+}
+
+static inline void em_store_at(MirEmitter* em, MIR_reg_t base, MIR_disp_t offset,
+        MIR_type_t type, MIR_reg_t value) {
+    MIR_insn_code_t code = type == MIR_T_D ? MIR_DMOV : MIR_MOV;
+    if (type == MIR_T_F) {
+        // MIR registers retain an explicit f32 carrier for the rounding store.
+        MIR_reg_t narrow = mir_new_numbered_reg(em->ctx, em->func,
+            &em->reg_counter, "store_f32", MIR_T_F, false);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_D2F,
+            MIR_new_reg_op(em->ctx, narrow), MIR_new_reg_op(em->ctx, value)));
+        value = narrow;
+        code = MIR_FMOV;
+    }
+    em_emit_insn(em, MIR_new_insn(em->ctx, code,
+        MIR_new_mem_op(em->ctx, type, offset, base, 0, 1),
+        MIR_new_reg_op(em->ctx, value)));
 }
 
 static inline void em_change_invocation_depth(MirEmitter* em,
@@ -1287,6 +1300,17 @@ static inline MIR_reg_t em_guard_container(MirEmitter* em, MIR_reg_t item,
             MIR_new_int_op(em->ctx, kind)));
     }
     return pointer;
+}
+
+static inline MIR_reg_t em_guard_map_shape(MirEmitter* em, MIR_reg_t item,
+        MIR_reg_t expected, MIR_label_t miss, bool proven_map = false) {
+    MIR_reg_t map = em_guard_container(em, item, LMD_TYPE_MAP, miss, proven_map);
+    MIR_reg_t shape = em_load_at(em, map, LAMBDA_GC_OFF_MAP_TYPE,
+        MIR_T_I64, "grd_shape");
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE,
+        MIR_new_label_op(em->ctx, miss), MIR_new_reg_op(em->ctx, shape),
+        MIR_new_reg_op(em->ctx, expected)));
+    return map;
 }
 
 // The one dense element address calculation for Lambda and JS. Callers own
@@ -1432,56 +1456,55 @@ static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_URSH,
         MIR_new_reg_op(em->ctx, item_type), MIR_new_reg_op(em->ctx, item),
         MIR_new_int_op(em->ctx, 56)));
-    MIR_reg_t is_int64 = em_new_reg(em, "adopt_i64", MIR_T_I64);
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
-        MIR_new_reg_op(em->ctx, is_int64), MIR_new_reg_op(em->ctx, item_type),
-        MIR_new_int_op(em->ctx, LMD_TYPE_INT64)));
-    MIR_reg_t is_uint64 = em_new_reg(em, "adopt_u64", MIR_T_I64);
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
-        MIR_new_reg_op(em->ctx, is_uint64), MIR_new_reg_op(em->ctx, item_type),
-        MIR_new_int_op(em->ctx, LMD_TYPE_UINT64)));
-    MIR_reg_t scalar_int = em_new_reg(em, "adopt_int", MIR_T_I64);
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_OR,
-        MIR_new_reg_op(em->ctx, scalar_int), MIR_new_reg_op(em->ctx, is_int64),
-        MIR_new_reg_op(em->ctx, is_uint64)));
-
     MIR_label_t l_call = em_new_label(em);
     MIR_label_t l_passthrough = em_new_label(em);
     MIR_label_t l_done = em_new_label(em);
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
-        MIR_new_label_op(em->ctx, l_call), MIR_new_reg_op(em->ctx, scalar_int)));
+    // only test the wide lanes admitted by the shared result analysis.
+    const TypeId integer_types[] = {LMD_TYPE_INT64, LMD_TYPE_UINT64};
+    const ScalarReturnClass integer_modes[] = {SCALAR_RETURN_I64, SCALAR_RETURN_U64};
+    for (int i = 0; i < 2; i++) {
+        if (mode != SCALAR_RETURN_DYNAMIC && mode != integer_modes[i]) continue;
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ,
+            MIR_new_label_op(em->ctx, l_call), MIR_new_reg_op(em->ctx, item_type),
+            MIR_new_int_op(em->ctx, integer_types[i])));
+    }
+    if (mode == SCALAR_RETURN_F64 || mode == SCALAR_RETURN_DYNAMIC) {
+        MIR_reg_t is_float = em_new_reg(em, "adopt_float", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
+            MIR_new_reg_op(em->ctx, is_float), MIR_new_reg_op(em->ctx, item_type),
+            MIR_new_int_op(em->ctx, LMD_TYPE_FLOAT)));
+        MIR_reg_t scalar_float = is_float;
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BF,
+            MIR_new_label_op(em->ctx, l_passthrough),
+            MIR_new_reg_op(em->ctx, scalar_float)));
+        MIR_reg_t float_bits = em_new_reg(em, "adopt_float_bits", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
+            MIR_new_reg_op(em->ctx, float_bits), MIR_new_reg_op(em->ctx, item),
+            MIR_new_int_op(em->ctx, (int64_t)ITEM_DBL_MASK)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+            MIR_new_label_op(em->ctx, l_passthrough),
+            MIR_new_reg_op(em->ctx, float_bits)));
+        MIR_reg_t is_pos_zero = em_new_reg(em, "adopt_pos_zero", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
+            MIR_new_reg_op(em->ctx, is_pos_zero), MIR_new_reg_op(em->ctx, item),
+            MIR_new_int_op(em->ctx, (int64_t)ITEM_FLOAT_P0)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+            MIR_new_label_op(em->ctx, l_passthrough),
+            MIR_new_reg_op(em->ctx, is_pos_zero)));
+        MIR_reg_t is_neg_zero = em_new_reg(em, "adopt_neg_zero", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
+            MIR_new_reg_op(em->ctx, is_neg_zero), MIR_new_reg_op(em->ctx, item),
+            MIR_new_int_op(em->ctx, (int64_t)ITEM_FLOAT_N0)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+            MIR_new_label_op(em->ctx, l_passthrough),
+            MIR_new_reg_op(em->ctx, is_neg_zero)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
+            MIR_new_label_op(em->ctx, l_call)));
 
-    MIR_reg_t is_float = em_new_reg(em, "adopt_float", MIR_T_I64);
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
-        MIR_new_reg_op(em->ctx, is_float), MIR_new_reg_op(em->ctx, item_type),
-        MIR_new_int_op(em->ctx, LMD_TYPE_FLOAT)));
-    MIR_reg_t scalar_float = is_float;
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BF,
-        MIR_new_label_op(em->ctx, l_passthrough),
-        MIR_new_reg_op(em->ctx, scalar_float)));
-    MIR_reg_t float_bits = em_new_reg(em, "adopt_float_bits", MIR_T_I64);
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
-        MIR_new_reg_op(em->ctx, float_bits), MIR_new_reg_op(em->ctx, item),
-        MIR_new_int_op(em->ctx, (int64_t)ITEM_DBL_MASK)));
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
-        MIR_new_label_op(em->ctx, l_passthrough),
-        MIR_new_reg_op(em->ctx, float_bits)));
-    MIR_reg_t is_pos_zero = em_new_reg(em, "adopt_pos_zero", MIR_T_I64);
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
-        MIR_new_reg_op(em->ctx, is_pos_zero), MIR_new_reg_op(em->ctx, item),
-        MIR_new_int_op(em->ctx, (int64_t)ITEM_FLOAT_P0)));
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
-        MIR_new_label_op(em->ctx, l_passthrough),
-        MIR_new_reg_op(em->ctx, is_pos_zero)));
-    MIR_reg_t is_neg_zero = em_new_reg(em, "adopt_neg_zero", MIR_T_I64);
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
-        MIR_new_reg_op(em->ctx, is_neg_zero), MIR_new_reg_op(em->ctx, item),
-        MIR_new_int_op(em->ctx, (int64_t)ITEM_FLOAT_N0)));
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
-        MIR_new_label_op(em->ctx, l_passthrough),
-        MIR_new_reg_op(em->ctx, is_neg_zero)));
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
-        MIR_new_label_op(em->ctx, l_call)));
+    } else {
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
+            MIR_new_label_op(em->ctx, l_passthrough)));
+    }
 
     MIR_reg_t result = em_new_reg(em, "adopt_result", MIR_T_I64);
     em_emit_label(em, l_passthrough);
@@ -4107,7 +4130,10 @@ static inline MIR_reg_t em_call_with_args(MirEmitter* em,
     MIR_reg_t source_base = 0;
     MIR_reg_t scalar_home = 0;
     int scalar_home_id = 0;
-    if (!em->helper_results_skip_rehome &&
+    // audited fresh results already belong to this extent; retaining them also
+    // retains its watermark, independently of whether the helper allocates.
+    bool caller_owned_result = resolved.audit.flags & JIT_IMPORT_RESULT_CALLER_OWNED;
+    if (!em->helper_results_skip_rehome && !caller_owned_result &&
             scalar_mode != SCALAR_RETURN_NONE && !callee_preserves_watermark &&
             em->frame.active && em->frame.number_base) {
         scalar_home_id = em_scalar_home_new(em);

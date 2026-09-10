@@ -9,10 +9,19 @@
 > are recorded in [the implementation record](impl/Lambda_Impl_JS2_Performance.md).
 > Tasks 1 and 2 subsequently implement shared candidate traversal, field guards
 > and native indexing; see [guarded-access progress](impl/Lambda_Impl_JS2_Guarded_Access.md)
-> against `a436d168f`. The wider shared operation/construction interfaces,
-> effect-based hoisting and additional lane coverage remain proposals.
+> against `a436d168f`. That step left the wider operation/construction
+> interfaces, effect-based hoisting and additional lanes open; later records
+> below update the implemented scope.
 > Tasks 3 and 4 continue with [native completion, recursion and scalar ownership](impl/Lambda_Impl_JS2_Calls_Ownership.md)
 > against `fa254c56b`; that record owns their validation and measurement status.
+> Tasks 5–7 implement [shared scalar analysis, callable-definition lookup and search leaves](impl/Lambda_Impl_JS2_Analysis_Code_Leaf.md)
+> against `6460b0f51`, including common indexed class-field initializer construction.
+> That record states the measured scope and the remaining wider proposals.
+> The next follow-up implements [shared field/construction plans, additional
+> native lanes and pure scalar loop hoisting](impl/Lambda_Impl_JS2_Planning_Lanes_Effects.md)
+> against `31d19bac9`, including ordinary constructor recipes, shared allocation
+> and slot writing. That record distinguishes the implemented families from
+> the remaining class/exotic, lane and alias-sensitive optimization work.
 >
 > **Relationship to earlier work.** JSCU9–JSCU35 established or proposed shared
 > ownership for roots, capsules, activations, environments, resources and

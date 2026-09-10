@@ -202,9 +202,12 @@ bool jit_import_get_metadata(const char* name, JitImportMetadata* metadata) {
                 // `success_type` is unset.
                 Type* narrowing_type = info->success_type ? info->success_type
                     : info->return_type;
-                if (narrowing_type && !lambda_type_id_may_be_wide_scalar(
-                        narrowing_type->type_id)) {
-                    metadata->flags |= JIT_IMPORT_RESULT_SCALAR_STABLE;
+                if (narrowing_type) {
+                    ScalarReturnClass scalar_class = jit_scalar_return_class_for_type(
+                        narrowing_type->type_id);
+                    metadata->flags |= JIT_IMPORT_SCALAR_RESULT(scalar_class);
+                    if (scalar_class == SCALAR_RETURN_NONE)
+                        metadata->flags |= JIT_IMPORT_RESULT_SCALAR_STABLE;
                 }
                 break;
             case C_RET_STRING:

@@ -1717,9 +1717,9 @@ static inline bool is_numeric_type_id(TypeId type_id) {
 // Can a value of this DECLARED type ever be a wide scalar — one that needs a
 // number home (v1) or the companion lane (v3)? Everything else is inline,
 // pointer-backed or a container, and so needs no rehoming at any boundary.
-// This is the single source of the "NONE" decision: the emitter's
-// `em_scalar_return_class_for_type()` defers to it, and the C-side sys-func
-// metadata fallback in mir.c uses it directly, so the two cannot drift.
+// This is the single source of the "NONE" decision: the shared
+// `jit_scalar_return_class_for_type()` uses it for both emission and the
+// C-side sys-func metadata fallback, so the two cannot drift.
 static inline bool lambda_type_id_may_be_wide_scalar(TypeId type_id) {
     return type_id == LMD_TYPE_FLOAT ||
            type_id == LMD_TYPE_INT64 || type_id == LMD_TYPE_UINT64 ||
@@ -2426,6 +2426,10 @@ extern "C" {
 
     Map* map(int64_t type_index);
     Map* map_with_data(int64_t type_index);
+    // shared physical construction; profiles retain layout and property admission.
+    Map* map_alloc_for_type(struct TypeMap* map_type, LambdaRegion* region,
+        int64_t minimum_capacity);
+    bool map_field_store(void* field_ptr, Item value, TypeId value_type);
     Map* map_with_tl(int64_t type_index, void* type_list_ptr);
     Map* map_with_region_tl(LambdaRegion* region, int64_t type_index,
         void* type_list_ptr);
@@ -2902,6 +2906,8 @@ extern "C" {
 
     String* fn_string(Item item);
     String *fn_strcat(String *left, String *right);
+    enum { LAMBDA_STRING_CONCAT_MAX_PARTS = 64 };
+    String *fn_strcat_many(int64_t owned, int64_t count, ...);
     String *fn_string_freeze(String *str);
     Item fn_normalize(Item str, Item type);
     Item fn_normalize1(Item str);           // normalize with default NFC
@@ -3076,6 +3082,10 @@ extern "C" {
     // GC-owned memory, so the collector's trust in static types is tested
     // rather than assumed.
     bool lambda_root_witness_enabled(void);
+    // Level 2 additionally probes expression temporaries: every register live
+    // across a may-GC call that the root machinery never made a candidate.
+    int  lambda_root_witness_level(void);
+    bool lambda_root_witness_temporaries(void);
     void lambda_jit_root_witness(uint64_t raw, int64_t claimed_type_id,
         const char* site, const char* binding, const char* func);
     void lambda_root_witness_dump(void);

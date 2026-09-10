@@ -200,6 +200,29 @@ static FixtureRun run_source_fixture(const char* name, const char* source_path,
     return run;
 }
 
+TEST(LambdaOptStrings, LengthObservationRetainsGeometricGrowth) {
+    auto run = run_source_fixture("string_observer",
+        "test/mir/lambda/string_builder_observer.ls", "jit");
+    ASSERT_TRUE(run.ok);
+    EXPECT_EQ(run.std_out, "8384\n");
+    EXPECT_EQ(run.profile.get("string_append_calls"), 128u);
+    EXPECT_EQ(run.profile.get("string_freezes"), 0u);
+    EXPECT_EQ(run.profile.get("string_generic_joins"), 0u);
+    EXPECT_LE(run.profile.get("string_growth_copies"), 9u);
+    EXPECT_LT(run.profile.get("string_copied_bytes"), 512u);
+}
+
+TEST(LambdaOptStrings, TailAccumulatorCopiesLinearBytes) {
+    auto run = run_source_fixture("string_tail",
+        "test/mir/lambda/string_builder_tail.ls", "jit");
+    ASSERT_TRUE(run.ok);
+    EXPECT_NE(strstr(run.std_out.c_str(), "129\ns\n"), nullptr);
+    EXPECT_NE(strstr(run.std_out.c_str(), "xx:xxx"), nullptr);
+    EXPECT_GE(run.profile.get("string_inplace_appends"), 120u);
+    EXPECT_LT(run.profile.get("string_copied_bytes"), 1024u);
+    EXPECT_GT(run.profile.get("string_freezes"), 0u);
+}
+
 // A self-referential record contract with a typed recursive traversal. The
 // declared boundaries here are the `let node: Node` initializer, the `head`
 // stores, and the `depth(n.next)` recursion — 20 nodes' worth per run.

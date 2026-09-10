@@ -153,13 +153,6 @@ static bool js_ast_call_is_direct_eval(JsAstNode* node) {
         strncmp(id->name->chars, "eval", 4) == 0;
 }
 
-static bool js_ast_identifier_named(JsAstNode* node, const char* name,
-        size_t length) {
-    if (!node || node->node_type != JS_AST_NODE_IDENTIFIER) return false;
-    String* value = ((JsIdentifierNode*)node)->name;
-    return value && value->len == length && strncmp(value->chars, name, length) == 0;
-}
-
 struct JsAstFunctionFactWalk {
     JsAstFunctionFacts* facts;
     bool direct_eval_active;

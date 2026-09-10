@@ -1028,7 +1028,7 @@ struct JsRuntimeState {
     // Definition-level MIR code records are shared by closures and method
     // wrappers while their functions remain live. The table is weak storage;
     // each code record releases itself when its last GC function dies.
-    ArrayList* callable_code_interned = NULL;
+    HashMap* callable_code_interned = NULL;
     JsDynFuncCacheState* dynamic_function_cache_state = NULL;
     // Timeout recovery may interrupt JS compilation before the ordinary
     // teardown path runs.  Its compiler owners stay with this realm, never in

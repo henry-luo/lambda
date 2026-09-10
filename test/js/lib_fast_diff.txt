@@ -10,7 +10,7 @@ function
 [[0,"ab"],[1,"X"],[0,"c"]]
 [[-1,"hello"],[1,"goodbye"]]
 [[0,"The c"],[-1," "],[0,"at came."]]
-[[0,"A"],[-1,"😀"],[1,"\ud83d\ude03"],[0,"B"]]
+[[0,"A"],[-1,"😀"],[1,"😃"],[0,"B"]]
 [[0,"function greet(name) {\n  const message = \"H"],[-1,"ello"],[1,"i"],[0,", \" + name;\n  return message;\n}\n"]]
 [[0,"const items = [1, 2, 3];\nconst total = items.reduce(sum, 0);\n"],[1,"console.log(total);\n"]]
 [[0,"for (var i = 0; i < items.length; i++) {\n  process(items[i]);\n"],[-1,"  log(i);\n"],[0,"}\n"]]
