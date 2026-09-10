@@ -1,0 +1,1288 @@
+{
+  "release": {
+    "binary": "test/benchmark/exe/lambda-tune23-23697ee47d8e",
+    "sha256": "23697ee47d8efc45feea5f264e1e74e2e3dd6c8481b70cd41d215eb398f96672",
+    "size_bytes": 19407320,
+    "head": "e11c74392dff1441633fb1a2eaae8211b8933bcd",
+    "runtime_patch_sha256": "15ef42686244c6881a9de0d5a8f68292b06e2e99a2926274036e0da8b18c1869",
+    "build": "make release, followed by make build-release-compile for incremental changes",
+    "sources": {
+      "lambda/runtime/build_ast.cpp": "ea7f5a59b15abafc46757e026e327127b2b361b6bb0a009de9fc73a86046ad7b",
+      "lambda/runtime/lambda-eval.cpp": "0561ecb34e49fc263c964eadff0cd0a25b438842017622be8030bc571ccc1e63",
+      "lambda/runtime/transpile-mir.cpp": "abe7aab604bc02cb334bc9f9cce674356b95481ebc6ec950eb4543ac7110ea63",
+      "lambda/runtime/collection_runtime.cpp": "3d303a79fc39839c2651a9b13af68a72a0088b55764f11a245323343486a4fc0",
+      "lambda/runtime/interp.cpp": "1b191f80efda319c2c4df97fc7bd515753ecee777559a785959ee9336e3d4c83",
+      "lambda/runtime/sys_func_registry.c": "b37007c8be3b5271b9a0a2707691dbfa1e9029a7423df71fb4b632ad91acef18",
+      "lambda/js/js_mir_module_batch_lowering.cpp": "b691e16be86945561766f71ab759a42d7e57f9cf9d897ab050c419e744e76544",
+      "lambda/js/js_mir_eval_lowering.cpp": "f4a2bede1d2095fd6e880e14bf2e4da4f9639830095494dd279b88e4e71d8aec"
+    }
+  },
+  "binaries": {
+    "before": {
+      "path": "test/benchmark/exe/lambda-v41-57addc5cf4",
+      "sha256": "d2c8df4bd4fb1fe8c983ccdef752f2943c6970128e0ce1e33bf04434789c4cf8"
+    },
+    "after": {
+      "path": "test/benchmark/exe/lambda-tune23-23697ee47d8e",
+      "sha256": "23697ee47d8efc45feea5f264e1e74e2e3dd6c8481b70cd41d215eb398f96672"
+    }
+  },
+  "method": "fresh process; forced JIT; in-script timing; alternating AB/BA; no profiling",
+  "cases": [
+    {
+      "name": "merge_typed",
+      "source": "test/benchmark/text/three_way_merge2.ls",
+      "source_sha256": "bb7b68b056ed2e8d2259e7704bcacc2bb7809179a5506aa4f6461f5c9b1144b0",
+      "samples": [
+        {
+          "engine": "before",
+          "repetition": 0,
+          "ms": 31838.1,
+          "output_sha256": "1224d06a3790e8b7ae598a15b8ef5d9f82c9f75c0f0159b6da5bcbd3b157a3eb",
+          "checks": [
+            "three_way_merge: CHECKSUM:342313356"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 0,
+          "ms": 6277.48,
+          "output_sha256": "1224d06a3790e8b7ae598a15b8ef5d9f82c9f75c0f0159b6da5bcbd3b157a3eb",
+          "checks": [
+            "three_way_merge: CHECKSUM:342313356"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 1,
+          "ms": 6242.22,
+          "output_sha256": "1224d06a3790e8b7ae598a15b8ef5d9f82c9f75c0f0159b6da5bcbd3b157a3eb",
+          "checks": [
+            "three_way_merge: CHECKSUM:342313356"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 1,
+          "ms": 31850.9,
+          "output_sha256": "1224d06a3790e8b7ae598a15b8ef5d9f82c9f75c0f0159b6da5bcbd3b157a3eb",
+          "checks": [
+            "three_way_merge: CHECKSUM:342313356"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 2,
+          "ms": 32016.9,
+          "output_sha256": "1224d06a3790e8b7ae598a15b8ef5d9f82c9f75c0f0159b6da5bcbd3b157a3eb",
+          "checks": [
+            "three_way_merge: CHECKSUM:342313356"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 2,
+          "ms": 6197.89,
+          "output_sha256": "1224d06a3790e8b7ae598a15b8ef5d9f82c9f75c0f0159b6da5bcbd3b157a3eb",
+          "checks": [
+            "three_way_merge: CHECKSUM:342313356"
+          ]
+        }
+      ],
+      "correct": true,
+      "dependencies_sha256": {},
+      "before": {
+        "median_ms": 31850.9,
+        "min_ms": 31838.1,
+        "max_ms": 32016.9
+      },
+      "after": {
+        "median_ms": 6242.22,
+        "min_ms": 6197.89,
+        "max_ms": 6277.48
+      },
+      "speedup": 5.102495586506083
+    },
+    {
+      "name": "prettier_typed",
+      "source": "test/benchmark/text/prettier_ast2.ls",
+      "source_sha256": "b2af4a8705395faef9f7d019a216ca0c027ff27dac45a14681ca4bfea8f0edfc",
+      "samples": [
+        {
+          "engine": "before",
+          "repetition": 0,
+          "ms": 9688.12,
+          "output_sha256": "d069c16c1571b23ee745a32f57303ab2ae58f6cae99ba230b17cddb6178b2427",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 0,
+          "ms": 2746.09,
+          "output_sha256": "d069c16c1571b23ee745a32f57303ab2ae58f6cae99ba230b17cddb6178b2427",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 1,
+          "ms": 2677.6,
+          "output_sha256": "d069c16c1571b23ee745a32f57303ab2ae58f6cae99ba230b17cddb6178b2427",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 1,
+          "ms": 9862.57,
+          "output_sha256": "d069c16c1571b23ee745a32f57303ab2ae58f6cae99ba230b17cddb6178b2427",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 2,
+          "ms": 9523.4,
+          "output_sha256": "d069c16c1571b23ee745a32f57303ab2ae58f6cae99ba230b17cddb6178b2427",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 2,
+          "ms": 2665.01,
+          "output_sha256": "d069c16c1571b23ee745a32f57303ab2ae58f6cae99ba230b17cddb6178b2427",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        }
+      ],
+      "correct": true,
+      "dependencies_sha256": {},
+      "before": {
+        "median_ms": 9688.12,
+        "min_ms": 9523.4,
+        "max_ms": 9862.57
+      },
+      "after": {
+        "median_ms": 2677.6,
+        "min_ms": 2665.01,
+        "max_ms": 2746.09
+      },
+      "speedup": 3.6182103376157757
+    },
+    {
+      "name": "richards_typed",
+      "source": "test/benchmark/awfy/richards2.ls",
+      "source_sha256": "d1e67689ae5967f2f75a7fc783ef1aa2105c298d5c4c574492a0a5cf5a47a4cd",
+      "samples": [
+        {
+          "engine": "before",
+          "repetition": 0,
+          "ms": 2051.95,
+          "output_sha256": "814250487733a15dadbe65226bd547db0e95598cf821ac547b8d93aec044dffb",
+          "checks": [
+            "Richards: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 0,
+          "ms": 726.476,
+          "output_sha256": "814250487733a15dadbe65226bd547db0e95598cf821ac547b8d93aec044dffb",
+          "checks": [
+            "Richards: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 1,
+          "ms": 725.186,
+          "output_sha256": "814250487733a15dadbe65226bd547db0e95598cf821ac547b8d93aec044dffb",
+          "checks": [
+            "Richards: PASS"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 1,
+          "ms": 1957.02,
+          "output_sha256": "814250487733a15dadbe65226bd547db0e95598cf821ac547b8d93aec044dffb",
+          "checks": [
+            "Richards: PASS"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 2,
+          "ms": 1957.02,
+          "output_sha256": "814250487733a15dadbe65226bd547db0e95598cf821ac547b8d93aec044dffb",
+          "checks": [
+            "Richards: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 2,
+          "ms": 722.909,
+          "output_sha256": "814250487733a15dadbe65226bd547db0e95598cf821ac547b8d93aec044dffb",
+          "checks": [
+            "Richards: PASS"
+          ]
+        }
+      ],
+      "correct": true,
+      "dependencies_sha256": {
+        "lambda/benchmark/richards2_core.ls": "d284ddcdf8267c86007f73982d06b653bb1226f416903cb54a9d58b9845fe5eb"
+      },
+      "before": {
+        "median_ms": 1957.02,
+        "min_ms": 1957.02,
+        "max_ms": 2051.95
+      },
+      "after": {
+        "median_ms": 725.186,
+        "min_ms": 722.909,
+        "max_ms": 726.476
+      },
+      "speedup": 2.6986455888558245
+    },
+    {
+      "name": "deltablue_typed",
+      "source": "test/benchmark/awfy/deltablue2.ls",
+      "source_sha256": "6a6ce7c43845d4d77cb0f2688209af8cab85653c3929c636ede0972896a5e28f",
+      "samples": [
+        {
+          "engine": "before",
+          "repetition": 0,
+          "ms": 45.444,
+          "output_sha256": "73cfe24d5cfd82bbe57021933510c0d7065f06486b729a8cb5b937e45b724886",
+          "checks": [
+            "DeltaBlue: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 0,
+          "ms": 45.378,
+          "output_sha256": "73cfe24d5cfd82bbe57021933510c0d7065f06486b729a8cb5b937e45b724886",
+          "checks": [
+            "DeltaBlue: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 1,
+          "ms": 99.888,
+          "output_sha256": "73cfe24d5cfd82bbe57021933510c0d7065f06486b729a8cb5b937e45b724886",
+          "checks": [
+            "DeltaBlue: PASS"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 1,
+          "ms": 45.73,
+          "output_sha256": "73cfe24d5cfd82bbe57021933510c0d7065f06486b729a8cb5b937e45b724886",
+          "checks": [
+            "DeltaBlue: PASS"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 2,
+          "ms": 46.035,
+          "output_sha256": "73cfe24d5cfd82bbe57021933510c0d7065f06486b729a8cb5b937e45b724886",
+          "checks": [
+            "DeltaBlue: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 2,
+          "ms": 45.85,
+          "output_sha256": "73cfe24d5cfd82bbe57021933510c0d7065f06486b729a8cb5b937e45b724886",
+          "checks": [
+            "DeltaBlue: PASS"
+          ]
+        }
+      ],
+      "correct": true,
+      "dependencies_sha256": {},
+      "before": {
+        "median_ms": 45.73,
+        "min_ms": 45.444,
+        "max_ms": 46.035
+      },
+      "after": {
+        "median_ms": 45.85,
+        "min_ms": 45.378,
+        "max_ms": 99.888
+      },
+      "speedup": 0.9973827699018538
+    },
+    {
+      "name": "navier_typed",
+      "source": "test/benchmark/jetstream/navier_stokes2.ls",
+      "source_sha256": "b004863e56c35ab60068a2a1c92745bf57e53fdf15fae3b15140a40d808358fa",
+      "samples": [
+        {
+          "engine": "before",
+          "repetition": 0,
+          "ms": 1601.53,
+          "output_sha256": "e4bf887821a1df7d230da27ae9dbf1069a604003a954b828946fb38ca067fe9a",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 0,
+          "ms": 261.561,
+          "output_sha256": "e4bf887821a1df7d230da27ae9dbf1069a604003a954b828946fb38ca067fe9a",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 1,
+          "ms": 261.174,
+          "output_sha256": "e4bf887821a1df7d230da27ae9dbf1069a604003a954b828946fb38ca067fe9a",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 1,
+          "ms": 1603.94,
+          "output_sha256": "e4bf887821a1df7d230da27ae9dbf1069a604003a954b828946fb38ca067fe9a",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 2,
+          "ms": 1608.95,
+          "output_sha256": "e4bf887821a1df7d230da27ae9dbf1069a604003a954b828946fb38ca067fe9a",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 2,
+          "ms": 259.598,
+          "output_sha256": "e4bf887821a1df7d230da27ae9dbf1069a604003a954b828946fb38ca067fe9a",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        }
+      ],
+      "correct": true,
+      "dependencies_sha256": {},
+      "before": {
+        "median_ms": 1603.94,
+        "min_ms": 1601.53,
+        "max_ms": 1608.95
+      },
+      "after": {
+        "median_ms": 261.174,
+        "min_ms": 259.598,
+        "max_ms": 261.561
+      },
+      "speedup": 6.141269804804461
+    },
+    {
+      "name": "primes_typed",
+      "source": "test/benchmark/kostya/primes2.ls",
+      "source_sha256": "f91b571e3faed4f3ae75ca9db513eecf04e2cb1291e6a39cf0ce532a8600c53d",
+      "samples": [
+        {
+          "engine": "before",
+          "repetition": 0,
+          "ms": 23.453,
+          "output_sha256": "404f06095ed23da41a4573ed0fca421e49ba1b24307ec010610b45f15eb1d921",
+          "checks": [
+            "primes: PASS (78498)"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 0,
+          "ms": 23.481,
+          "output_sha256": "404f06095ed23da41a4573ed0fca421e49ba1b24307ec010610b45f15eb1d921",
+          "checks": [
+            "primes: PASS (78498)"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 1,
+          "ms": 23.411,
+          "output_sha256": "404f06095ed23da41a4573ed0fca421e49ba1b24307ec010610b45f15eb1d921",
+          "checks": [
+            "primes: PASS (78498)"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 1,
+          "ms": 24.115,
+          "output_sha256": "404f06095ed23da41a4573ed0fca421e49ba1b24307ec010610b45f15eb1d921",
+          "checks": [
+            "primes: PASS (78498)"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 2,
+          "ms": 23.548,
+          "output_sha256": "404f06095ed23da41a4573ed0fca421e49ba1b24307ec010610b45f15eb1d921",
+          "checks": [
+            "primes: PASS (78498)"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 2,
+          "ms": 23.6,
+          "output_sha256": "404f06095ed23da41a4573ed0fca421e49ba1b24307ec010610b45f15eb1d921",
+          "checks": [
+            "primes: PASS (78498)"
+          ]
+        }
+      ],
+      "correct": true,
+      "dependencies_sha256": {},
+      "before": {
+        "median_ms": 23.548,
+        "min_ms": 23.453,
+        "max_ms": 24.115
+      },
+      "after": {
+        "median_ms": 23.481,
+        "min_ms": 23.411,
+        "max_ms": 23.6
+      },
+      "speedup": 1.0028533708104423
+    },
+    {
+      "name": "cube_typed",
+      "source": "test/benchmark/jetstream/cube3d2.ls",
+      "source_sha256": "8e070abd68f312196ba6967ff2ed44ec6dbc6b007d815eb5e1dc1d5613538707",
+      "samples": [
+        {
+          "engine": "before",
+          "repetition": 0,
+          "ms": 31.228,
+          "output_sha256": "d0fa77ba780c63fcfdd3098f10a3a76aa10fb210e9b36a4c85b2560bd461d3d8",
+          "checks": [
+            "3d-cube: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 0,
+          "ms": 29.378,
+          "output_sha256": "d0fa77ba780c63fcfdd3098f10a3a76aa10fb210e9b36a4c85b2560bd461d3d8",
+          "checks": [
+            "3d-cube: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 1,
+          "ms": 29.451,
+          "output_sha256": "d0fa77ba780c63fcfdd3098f10a3a76aa10fb210e9b36a4c85b2560bd461d3d8",
+          "checks": [
+            "3d-cube: PASS"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 1,
+          "ms": 29.308,
+          "output_sha256": "d0fa77ba780c63fcfdd3098f10a3a76aa10fb210e9b36a4c85b2560bd461d3d8",
+          "checks": [
+            "3d-cube: PASS"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 2,
+          "ms": 29.595,
+          "output_sha256": "d0fa77ba780c63fcfdd3098f10a3a76aa10fb210e9b36a4c85b2560bd461d3d8",
+          "checks": [
+            "3d-cube: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 2,
+          "ms": 29.471,
+          "output_sha256": "d0fa77ba780c63fcfdd3098f10a3a76aa10fb210e9b36a4c85b2560bd461d3d8",
+          "checks": [
+            "3d-cube: PASS"
+          ]
+        }
+      ],
+      "correct": true,
+      "dependencies_sha256": {},
+      "before": {
+        "median_ms": 29.595,
+        "min_ms": 29.308,
+        "max_ms": 31.228
+      },
+      "after": {
+        "median_ms": 29.451,
+        "min_ms": 29.378,
+        "max_ms": 29.471
+      },
+      "speedup": 1.0048894774370989
+    },
+    {
+      "name": "log_typed",
+      "source": "test/benchmark/text/log_pipeline2.ls",
+      "source_sha256": "6e5a79d5bbcd3293cde4c54131905df94fce408e3a4a280589dc211bdef2d1ed",
+      "samples": [
+        {
+          "engine": "before",
+          "repetition": 0,
+          "ms": 6874.33,
+          "output_sha256": "395ff6bbd84ccecae8acca8c818c7aa468df5e9ac68502fed4f23610bc2ab387",
+          "checks": [
+            "log_pipeline: CHECKSUM:292634526"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 0,
+          "ms": 6664.78,
+          "output_sha256": "395ff6bbd84ccecae8acca8c818c7aa468df5e9ac68502fed4f23610bc2ab387",
+          "checks": [
+            "log_pipeline: CHECKSUM:292634526"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 1,
+          "ms": 6580.58,
+          "output_sha256": "395ff6bbd84ccecae8acca8c818c7aa468df5e9ac68502fed4f23610bc2ab387",
+          "checks": [
+            "log_pipeline: CHECKSUM:292634526"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 1,
+          "ms": 6824.43,
+          "output_sha256": "395ff6bbd84ccecae8acca8c818c7aa468df5e9ac68502fed4f23610bc2ab387",
+          "checks": [
+            "log_pipeline: CHECKSUM:292634526"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 2,
+          "ms": 6664.45,
+          "output_sha256": "395ff6bbd84ccecae8acca8c818c7aa468df5e9ac68502fed4f23610bc2ab387",
+          "checks": [
+            "log_pipeline: CHECKSUM:292634526"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 2,
+          "ms": 6415.81,
+          "output_sha256": "395ff6bbd84ccecae8acca8c818c7aa468df5e9ac68502fed4f23610bc2ab387",
+          "checks": [
+            "log_pipeline: CHECKSUM:292634526"
+          ]
+        }
+      ],
+      "correct": true,
+      "dependencies_sha256": {},
+      "before": {
+        "median_ms": 6824.43,
+        "min_ms": 6664.45,
+        "max_ms": 6874.33
+      },
+      "after": {
+        "median_ms": 6580.58,
+        "min_ms": 6415.81,
+        "max_ms": 6664.78
+      },
+      "speedup": 1.0370560041820023
+    },
+    {
+      "name": "merge_untyped",
+      "source": "test/benchmark/text/three_way_merge.ls",
+      "source_sha256": "9865e4b85c83aa140bc89f40f6bf7b4845b8e41bc81605d8aa2f850e51040cc9",
+      "samples": [
+        {
+          "engine": "before",
+          "repetition": 0,
+          "ms": 3923.41,
+          "output_sha256": "1224d06a3790e8b7ae598a15b8ef5d9f82c9f75c0f0159b6da5bcbd3b157a3eb",
+          "checks": [
+            "three_way_merge: CHECKSUM:342313356"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 0,
+          "ms": 3833.0,
+          "output_sha256": "1224d06a3790e8b7ae598a15b8ef5d9f82c9f75c0f0159b6da5bcbd3b157a3eb",
+          "checks": [
+            "three_way_merge: CHECKSUM:342313356"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 1,
+          "ms": 3833.36,
+          "output_sha256": "1224d06a3790e8b7ae598a15b8ef5d9f82c9f75c0f0159b6da5bcbd3b157a3eb",
+          "checks": [
+            "three_way_merge: CHECKSUM:342313356"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 1,
+          "ms": 3861.87,
+          "output_sha256": "1224d06a3790e8b7ae598a15b8ef5d9f82c9f75c0f0159b6da5bcbd3b157a3eb",
+          "checks": [
+            "three_way_merge: CHECKSUM:342313356"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 2,
+          "ms": 3858.77,
+          "output_sha256": "1224d06a3790e8b7ae598a15b8ef5d9f82c9f75c0f0159b6da5bcbd3b157a3eb",
+          "checks": [
+            "three_way_merge: CHECKSUM:342313356"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 2,
+          "ms": 3897.62,
+          "output_sha256": "1224d06a3790e8b7ae598a15b8ef5d9f82c9f75c0f0159b6da5bcbd3b157a3eb",
+          "checks": [
+            "three_way_merge: CHECKSUM:342313356"
+          ]
+        }
+      ],
+      "correct": true,
+      "dependencies_sha256": {},
+      "before": {
+        "median_ms": 3861.87,
+        "min_ms": 3858.77,
+        "max_ms": 3923.41
+      },
+      "after": {
+        "median_ms": 3833.36,
+        "min_ms": 3833.0,
+        "max_ms": 3897.62
+      },
+      "speedup": 1.0074373395663334
+    },
+    {
+      "name": "prettier_untyped",
+      "source": "test/benchmark/text/prettier_ast.ls",
+      "source_sha256": "fdc64cdea954607a9973aacf9d0d7ca322851f1a243887d5f008de9e58b58903",
+      "samples": [
+        {
+          "engine": "before",
+          "repetition": 0,
+          "ms": 1087.44,
+          "output_sha256": "d069c16c1571b23ee745a32f57303ab2ae58f6cae99ba230b17cddb6178b2427",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 0,
+          "ms": 1084.99,
+          "output_sha256": "d069c16c1571b23ee745a32f57303ab2ae58f6cae99ba230b17cddb6178b2427",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 1,
+          "ms": 1085.19,
+          "output_sha256": "d069c16c1571b23ee745a32f57303ab2ae58f6cae99ba230b17cddb6178b2427",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 1,
+          "ms": 1132.45,
+          "output_sha256": "d069c16c1571b23ee745a32f57303ab2ae58f6cae99ba230b17cddb6178b2427",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 2,
+          "ms": 1092.2,
+          "output_sha256": "d069c16c1571b23ee745a32f57303ab2ae58f6cae99ba230b17cddb6178b2427",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 2,
+          "ms": 1111.21,
+          "output_sha256": "d069c16c1571b23ee745a32f57303ab2ae58f6cae99ba230b17cddb6178b2427",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        }
+      ],
+      "correct": true,
+      "dependencies_sha256": {},
+      "before": {
+        "median_ms": 1092.2,
+        "min_ms": 1087.44,
+        "max_ms": 1132.45
+      },
+      "after": {
+        "median_ms": 1085.19,
+        "min_ms": 1084.99,
+        "max_ms": 1111.21
+      },
+      "speedup": 1.0064596983016798
+    },
+    {
+      "name": "richards_untyped",
+      "source": "test/benchmark/awfy/richards.ls",
+      "source_sha256": "e90387fc9c39023fd56239dbf6164c378824e6b3365d1ec2c7479700b6969ab1",
+      "samples": [
+        {
+          "engine": "before",
+          "repetition": 0,
+          "ms": 424.638,
+          "output_sha256": "814250487733a15dadbe65226bd547db0e95598cf821ac547b8d93aec044dffb",
+          "checks": [
+            "Richards: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 0,
+          "ms": 426.078,
+          "output_sha256": "814250487733a15dadbe65226bd547db0e95598cf821ac547b8d93aec044dffb",
+          "checks": [
+            "Richards: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 1,
+          "ms": 428.021,
+          "output_sha256": "814250487733a15dadbe65226bd547db0e95598cf821ac547b8d93aec044dffb",
+          "checks": [
+            "Richards: PASS"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 1,
+          "ms": 422.792,
+          "output_sha256": "814250487733a15dadbe65226bd547db0e95598cf821ac547b8d93aec044dffb",
+          "checks": [
+            "Richards: PASS"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 2,
+          "ms": 421.974,
+          "output_sha256": "814250487733a15dadbe65226bd547db0e95598cf821ac547b8d93aec044dffb",
+          "checks": [
+            "Richards: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 2,
+          "ms": 427.972,
+          "output_sha256": "814250487733a15dadbe65226bd547db0e95598cf821ac547b8d93aec044dffb",
+          "checks": [
+            "Richards: PASS"
+          ]
+        }
+      ],
+      "correct": true,
+      "dependencies_sha256": {},
+      "before": {
+        "median_ms": 422.792,
+        "min_ms": 421.974,
+        "max_ms": 424.638
+      },
+      "after": {
+        "median_ms": 427.972,
+        "min_ms": 426.078,
+        "max_ms": 428.021
+      },
+      "speedup": 0.9878964044376735
+    },
+    {
+      "name": "navier_untyped",
+      "source": "test/benchmark/jetstream/navier_stokes.ls",
+      "source_sha256": "c66c7b43fe4d2d7bc2c6ce34d6abdf4ddb7d434b1b1dcbb9a6e531f563b04c0c",
+      "samples": [
+        {
+          "engine": "before",
+          "repetition": 0,
+          "ms": 1555.32,
+          "output_sha256": "e4bf887821a1df7d230da27ae9dbf1069a604003a954b828946fb38ca067fe9a",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 0,
+          "ms": 261.554,
+          "output_sha256": "e4bf887821a1df7d230da27ae9dbf1069a604003a954b828946fb38ca067fe9a",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 1,
+          "ms": 261.816,
+          "output_sha256": "e4bf887821a1df7d230da27ae9dbf1069a604003a954b828946fb38ca067fe9a",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 1,
+          "ms": 1561.56,
+          "output_sha256": "e4bf887821a1df7d230da27ae9dbf1069a604003a954b828946fb38ca067fe9a",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        },
+        {
+          "engine": "before",
+          "repetition": 2,
+          "ms": 1555.74,
+          "output_sha256": "e4bf887821a1df7d230da27ae9dbf1069a604003a954b828946fb38ca067fe9a",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        },
+        {
+          "engine": "after",
+          "repetition": 2,
+          "ms": 299.647,
+          "output_sha256": "e4bf887821a1df7d230da27ae9dbf1069a604003a954b828946fb38ca067fe9a",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        }
+      ],
+      "correct": true,
+      "dependencies_sha256": {},
+      "before": {
+        "median_ms": 1555.74,
+        "min_ms": 1555.32,
+        "max_ms": 1561.56
+      },
+      "after": {
+        "median_ms": 261.816,
+        "min_ms": 261.554,
+        "max_ms": 299.647
+      },
+      "speedup": 5.942112017600147
+    }
+  ],
+  "schema_version": 1,
+  "scope": "Focused Tune23 comparison; not a full ResultN snapshot",
+  "generated_at": "2026-09-10T05:45:38.672405+00:00",
+  "host": {
+    "os": "Darwin",
+    "os_version": "26.5.2",
+    "machine": "arm64"
+  },
+  "notes": [
+    "Three fresh-process samples per binary per case; AB, BA, AB order.",
+    "Kernel __TIMING__ values exclude CLI startup and compilation.",
+    "Normalized stdout must match across all six samples; nonzero exit or FAIL aborts.",
+    "All timed runs use immutable cached release paths, not the working lambda.exe.",
+    "No builds or other tests from this task ran during the timing series; external host activity was not controlled.",
+    "The before and after source revisions differ; exact binary and edited compiler source hashes are retained."
+  ],
+  "validation": {
+    "lambda_baseline": {
+      "passed": 5259,
+      "total": 5259
+    },
+    "test262_baseline": {
+      "passed": 40261,
+      "total": 40261
+    },
+    "release_optimization_contracts": {
+      "passed": 14,
+      "total": 14
+    },
+    "release_forced_gc": [
+      {
+        "script": "test/lambda/proc/tune23_array_borrow_lane.ls",
+        "source_sha256": "223ea538ab6baa2d85df929075e6378fe0b5bbd74b31b0a52ea50744040bd1fb",
+        "tier": "jit",
+        "ok": true,
+        "exit": 0,
+        "stdout": "[[1, 2, 3], [10, 12, 15], [4, 5, 6]]\n"
+      },
+      {
+        "script": "test/lambda/proc/tune23_array_borrow_lane.ls",
+        "source_sha256": "223ea538ab6baa2d85df929075e6378fe0b5bbd74b31b0a52ea50744040bd1fb",
+        "tier": "interp",
+        "ok": true,
+        "exit": 0,
+        "stdout": "[[1, 2, 3], [10, 12, 15], [4, 5, 6]]\n"
+      },
+      {
+        "script": "test/lambda/proc/tune23_array_consumer.ls",
+        "source_sha256": "0152310058bb735314e975af617ef26fdaacd89c8fd17e76e8415ae91bacb9cb",
+        "tier": "jit",
+        "ok": true,
+        "exit": 0,
+        "stdout": "[93, \"one\", 2, 42]\n"
+      },
+      {
+        "script": "test/lambda/proc/tune23_array_consumer.ls",
+        "source_sha256": "0152310058bb735314e975af617ef26fdaacd89c8fd17e76e8415ae91bacb9cb",
+        "tier": "interp",
+        "ok": true,
+        "exit": 0,
+        "stdout": "[93, \"one\", 2, 42]\n"
+      },
+      {
+        "script": "test/lambda/proc/tune23_array_consumer_refinement.ls",
+        "source_sha256": "e6d4deb3ca03a04c11beaeb1c32258d8648f2b88be3cd8561b5bdcdfd2aa33d3",
+        "tier": "jit",
+        "ok": true,
+        "exit": 0,
+        "stdout": "evaluated\ncaught\nnullable evaluated\nunion caught\nnumeric caught\n\n"
+      },
+      {
+        "script": "test/lambda/proc/tune23_array_consumer_refinement.ls",
+        "source_sha256": "e6d4deb3ca03a04c11beaeb1c32258d8648f2b88be3cd8561b5bdcdfd2aa33d3",
+        "tier": "interp",
+        "ok": true,
+        "exit": 0,
+        "stdout": "evaluated\ncaught\nnullable evaluated\nunion caught\nnumeric caught\n\n"
+      },
+      {
+        "script": "test/lambda/proc/tune23_empty_numeric_array.ls",
+        "source_sha256": "65f9c68c2adb473ca53b446f496bf66ca141aab3900e9bbb7835654bb4b114dc",
+        "tier": "jit",
+        "ok": true,
+        "exit": 0,
+        "stdout": "[7, 2.5, true, 1, 2]\n"
+      },
+      {
+        "script": "test/lambda/proc/tune23_empty_numeric_array.ls",
+        "source_sha256": "65f9c68c2adb473ca53b446f496bf66ca141aab3900e9bbb7835654bb4b114dc",
+        "tier": "interp",
+        "ok": true,
+        "exit": 0,
+        "stdout": "[7, 2.5, true, 1, 2]\n"
+      },
+      {
+        "script": "test/lambda/proc/tune23_map_argument_order.ls",
+        "source_sha256": "e334deaa4a9eca09d1897765c55f9305492f12b99c057ad6246a995d631e0e46",
+        "tier": "jit",
+        "ok": true,
+        "exit": 0,
+        "stdout": "open label\nopen trailing\n7\ntyped label\ntyped trailing\n8\n\n"
+      },
+      {
+        "script": "test/lambda/proc/tune23_map_argument_order.ls",
+        "source_sha256": "e334deaa4a9eca09d1897765c55f9305492f12b99c057ad6246a995d631e0e46",
+        "tier": "interp",
+        "ok": true,
+        "exit": 0,
+        "stdout": "open label\nopen trailing\n7\ntyped label\ntyped trailing\n8\n\n"
+      },
+      {
+        "script": "test/lambda/proc/tune23_map_argument_reject.ls",
+        "source_sha256": "083d8f3cb62c9ba9e2b833dd8a7567cd17bb9cd5c5824e7c88782b78d3122bd7",
+        "tier": "jit",
+        "ok": true,
+        "exit": 0,
+        "stdout": "true\n"
+      },
+      {
+        "script": "test/lambda/proc/tune23_map_argument_reject.ls",
+        "source_sha256": "083d8f3cb62c9ba9e2b833dd8a7567cd17bb9cd5c5824e7c88782b78d3122bd7",
+        "tier": "interp",
+        "ok": true,
+        "exit": 0,
+        "stdout": "true\n"
+      },
+      {
+        "script": "test/lambda/proc/tune23_open_array_path.ls",
+        "source_sha256": "5d7f56617e0af3bff66b320e7444ab36b6754ee045953273555a0510da9e1c9d",
+        "tier": "jit",
+        "ok": true,
+        "exit": 0,
+        "stdout": "[0, false, 19, true, true, 7, 7]\n"
+      },
+      {
+        "script": "test/lambda/proc/tune23_open_array_path.ls",
+        "source_sha256": "5d7f56617e0af3bff66b320e7444ab36b6754ee045953273555a0510da9e1c9d",
+        "tier": "interp",
+        "ok": true,
+        "exit": 0,
+        "stdout": "[0, false, 19, true, true, 7, 7]\n"
+      },
+      {
+        "script": "test/lambda/proc/tune23_record_constructor.ls",
+        "source_sha256": "3a72afa247008f9fbb7a550f485369dd689d22dfcaeaa592ff9c2a9aff4df49a",
+        "tier": "jit",
+        "ok": true,
+        "exit": 0,
+        "stdout": "[190, 3, 2, null]\n"
+      },
+      {
+        "script": "test/lambda/proc/tune23_record_constructor.ls",
+        "source_sha256": "3a72afa247008f9fbb7a550f485369dd689d22dfcaeaa592ff9c2a9aff4df49a",
+        "tier": "interp",
+        "ok": true,
+        "exit": 0,
+        "stdout": "[190, 3, 2, null]\n"
+      },
+      {
+        "script": "test/lambda/proc/tune23_recursive_union_contract.ls",
+        "source_sha256": "cd6e408598f58d7be9bb174fee598fce6d31f7985f09ae42f98220b830dcc75b",
+        "tier": "jit",
+        "ok": true,
+        "exit": 0,
+        "stdout": "[true, false, true, false, 7, true]\n"
+      },
+      {
+        "script": "test/lambda/proc/tune23_recursive_union_contract.ls",
+        "source_sha256": "cd6e408598f58d7be9bb174fee598fce6d31f7985f09ae42f98220b830dcc75b",
+        "tier": "interp",
+        "ok": true,
+        "exit": 0,
+        "stdout": "[true, false, true, false, 7, true]\n"
+      },
+      {
+        "script": "test/lambda/proc/tune23_union_array.ls",
+        "source_sha256": "0c7d6fab3b7d80dc8b3f4b7fbddb67bc5e7f2fc1122623736897103a1a381275",
+        "tier": "jit",
+        "ok": true,
+        "exit": 0,
+        "stdout": "[40, 2, 3, true, true, 2, 3]\n"
+      },
+      {
+        "script": "test/lambda/proc/tune23_union_array.ls",
+        "source_sha256": "0c7d6fab3b7d80dc8b3f4b7fbddb67bc5e7f2fc1122623736897103a1a381275",
+        "tier": "interp",
+        "ok": true,
+        "exit": 0,
+        "stdout": "[40, 2, 3, true, true, 2, 3]\n"
+      },
+      {
+        "script": "test/lambda/proc/tune23_union_field.ls",
+        "source_sha256": "0b43fb99a33cc23306da4e083e5da8e3d53bc7225795ea4488a23ef2fe2fe322",
+        "tier": "jit",
+        "ok": true,
+        "exit": 0,
+        "stdout": "[340, true, true]\n"
+      },
+      {
+        "script": "test/lambda/proc/tune23_union_field.ls",
+        "source_sha256": "0b43fb99a33cc23306da4e083e5da8e3d53bc7225795ea4488a23ef2fe2fe322",
+        "tier": "interp",
+        "ok": true,
+        "exit": 0,
+        "stdout": "[340, true, true]\n"
+      }
+    ],
+    "gates_log": "temp/tune23/final_gates.log",
+    "gates_log_sha256": "a63e4ed145fbd3d1dec6ad009708ebee528070b474d106d4e9b692710201aaf9"
+  },
+  "optimization_counters": {
+    "array_consumer": {
+      "vmap_snapshots": 0,
+      "vmap_rejections": 0,
+      "fn_mutable_value_calls": 2,
+      "union_admit_calls": 0,
+      "map_admit_calls": 0,
+      "map_admit_relation_cache_hits": 0,
+      "map_admit_relation_cache_misses": 0,
+      "map_admit_exact_shape_hits": 0,
+      "map_admit_storage_compatible_hits": 0,
+      "map_admit_readonly_validations": 0,
+      "map_admit_reifications": 0,
+      "map_admit_deep_clone_calls": 0,
+      "map_admit_fields_visited": 0,
+      "map_admit_bytes_copied": 0,
+      "array_checked_store_calls": 0,
+      "array_checked_store_direct": 0,
+      "array_checked_store_unique_inplace": 0,
+      "array_checked_store_cow_detach": 0,
+      "array_checked_store_rebuild": 0,
+      "array_checked_store_full_clone": 0,
+      "array_checked_store_bytes_copied": 0
+    },
+    "record_constructor": {
+      "vmap_snapshots": 0,
+      "vmap_rejections": 0,
+      "fn_mutable_value_calls": 0,
+      "union_admit_calls": 0,
+      "map_admit_calls": 21,
+      "map_admit_relation_cache_hits": 0,
+      "map_admit_relation_cache_misses": 0,
+      "map_admit_exact_shape_hits": 21,
+      "map_admit_storage_compatible_hits": 0,
+      "map_admit_readonly_validations": 0,
+      "map_admit_reifications": 0,
+      "map_admit_deep_clone_calls": 0,
+      "map_admit_fields_visited": 0,
+      "map_admit_bytes_copied": 0,
+      "array_checked_store_calls": 0,
+      "array_checked_store_direct": 0,
+      "array_checked_store_unique_inplace": 0,
+      "array_checked_store_cow_detach": 0,
+      "array_checked_store_rebuild": 0,
+      "array_checked_store_full_clone": 0,
+      "array_checked_store_bytes_copied": 0
+    },
+    "array_borrow_lane": {
+      "vmap_snapshots": 0,
+      "vmap_rejections": 0,
+      "fn_mutable_value_calls": 0,
+      "union_admit_calls": 0,
+      "map_admit_calls": 0,
+      "map_admit_relation_cache_hits": 0,
+      "map_admit_relation_cache_misses": 0,
+      "map_admit_exact_shape_hits": 0,
+      "map_admit_storage_compatible_hits": 0,
+      "map_admit_readonly_validations": 0,
+      "map_admit_reifications": 0,
+      "map_admit_deep_clone_calls": 0,
+      "map_admit_fields_visited": 0,
+      "map_admit_bytes_copied": 0,
+      "array_checked_store_calls": 0,
+      "array_checked_store_direct": 0,
+      "array_checked_store_unique_inplace": 0,
+      "array_checked_store_cow_detach": 0,
+      "array_checked_store_rebuild": 0,
+      "array_checked_store_full_clone": 0,
+      "array_checked_store_bytes_copied": 0
+    },
+    "union_field": {
+      "vmap_snapshots": 0,
+      "vmap_rejections": 0,
+      "fn_mutable_value_calls": 0,
+      "union_admit_calls": 34,
+      "map_admit_calls": 2,
+      "map_admit_relation_cache_hits": 0,
+      "map_admit_relation_cache_misses": 2,
+      "map_admit_exact_shape_hits": 0,
+      "map_admit_storage_compatible_hits": 0,
+      "map_admit_readonly_validations": 0,
+      "map_admit_reifications": 2,
+      "map_admit_deep_clone_calls": 0,
+      "map_admit_fields_visited": 2,
+      "map_admit_bytes_copied": 66,
+      "array_checked_store_calls": 0,
+      "array_checked_store_direct": 0,
+      "array_checked_store_unique_inplace": 0,
+      "array_checked_store_cow_detach": 0,
+      "array_checked_store_rebuild": 0,
+      "array_checked_store_full_clone": 0,
+      "array_checked_store_bytes_copied": 0
+    },
+    "union_array": {
+      "vmap_snapshots": 0,
+      "vmap_rejections": 0,
+      "fn_mutable_value_calls": 0,
+      "union_admit_calls": 7,
+      "map_admit_calls": 4,
+      "map_admit_relation_cache_hits": 0,
+      "map_admit_relation_cache_misses": 4,
+      "map_admit_exact_shape_hits": 0,
+      "map_admit_storage_compatible_hits": 0,
+      "map_admit_readonly_validations": 0,
+      "map_admit_reifications": 4,
+      "map_admit_deep_clone_calls": 0,
+      "map_admit_fields_visited": 4,
+      "map_admit_bytes_copied": 132,
+      "array_checked_store_calls": 0,
+      "array_checked_store_direct": 0,
+      "array_checked_store_unique_inplace": 0,
+      "array_checked_store_cow_detach": 0,
+      "array_checked_store_rebuild": 0,
+      "array_checked_store_full_clone": 0,
+      "array_checked_store_bytes_copied": 0
+    }
+  },
+  "deltablue_duplicate_admission_experiment": {
+    "v41": {
+      "samples": [
+        47.1,
+        46.008,
+        46.238,
+        44.983,
+        46.06,
+        45.755,
+        76.948
+      ],
+      "median": 46.06
+    },
+    "first": {
+      "samples": [
+        47.406,
+        79.052,
+        48.899,
+        47.898,
+        47.785,
+        47.797,
+        48.88
+      ],
+      "median": 47.898
+    },
+    "adjusted": {
+      "samples": [
+        45.792,
+        45.529,
+        47.056,
+        45.743,
+        45.521,
+        45.216,
+        46.334
+      ],
+      "median": 45.743
+    }
+  }
+}

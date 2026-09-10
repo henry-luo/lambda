@@ -130,8 +130,8 @@ for (var microdiff_round = 0; microdiff_round < microdiff_rounds; microdiff_roun
   }
 }
 var microdiff_t1 = process.hrtime.bigint();
-if (microdiff_checksum === 0) {
-  throw new Error("microdiff benchmark produced an empty checksum");
+if (microdiff_checksum !== 3278848) {
+  throw new Error("microdiff benchmark checksum mismatch: " + microdiff_checksum);
 }
 console.log("CHECKSUM:" + microdiff_checksum);
 console.log(

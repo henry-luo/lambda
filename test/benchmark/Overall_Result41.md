@@ -1,4 +1,4 @@
-# Lambda Benchmark Results: Result41
+# Overall Benchmark Result 41
 
 - **Date:** 2026-09-10
 - **Platform:** Darwin arm64
@@ -13,7 +13,8 @@
 - **Range notation:** per-row timing cells are `median [minimum–maximum]`; the complete ordered sample set is retained in the result JSON's status detail.
 - **Engines in this report:** MIR (untyped), MIR (typed), C2MIR, LambdaJS, QuickJS, Node.js
 - **Results source:** `test/benchmark/benchmark_results_v41.json`
-- **Separately measured:** MIR (untyped), MIR (untyped, auto), MIR (typed), MIR (typed, auto) measured on 2026-09-10, 3 run(s) from `temp/benchmark_v41_fixed_mir.json` on Lambda commit `086c8685a6`. Result41 recovery refresh for awfy/havlak and jetstream/navier_stokes; 3 runs on cached release test/benchmark/exe/lambda-v41-086c8685a6 (SHA-256 34e2779603fc695c8439902e05753561bc97a24d892354f753ab2c55fae0bd28) after Test262 40261/40261, 0 regressions.
+- **Separately measured:** MIR (untyped), MIR (untyped, auto), MIR (typed), MIR (typed, auto) measured on 2026-09-10, 3 run(s) from `temp/benchmark_v41_release_repair.json` on Lambda commit `57addc5cf4`. Release repair for awfy/havlak, jetstream/navier_stokes, text/three_way_merge, and text/log_pipeline; three runs from verified NDEBUG cache test/benchmark/exe/lambda-v41-57addc5cf4 (SHA-256 d2c8df4bd4fb1fe8c983ccdef752f2943c6970128e0ce1e33bf04434789c4cf8). The prior debug-build refresh was removed.
+- **Separately measured:** C2MIR measured on 2026-09-10, 3 run(s) from `temp/benchmark_v41_c2mir_repair.json` on Lambda commit `57addc5cf4`. C2MIR repair for text/three_way_merge and text/log_pipeline; three runs after both ports were corrected to execute the complete Lambda workloads.
 - **MIR columns:** untyped and typed; `*` means the typed column reuses the untyped result because no typed source exists
 
 JetStream JavaScript-engine wrappers run each benchmark's own `Benchmark.runIteration()` workload — the loop count is read from the file itself (nbody/cube3d/raytrace3d 8, richards/splay 50, crypto_sha1 25, deltablue 20, navier_stokes/hashmap 1). Each Lambda `.ls` port implements exactly one `runIteration()`, so every engine times the same work. A previous revision hard-coded 8 repeats for every file, which made the JS engines run 8/50 of Lambda's work on richards and splay, and 8x too much on navier_stokes and hashmap.
@@ -31,13 +32,13 @@ Each engine's own `__TIMING__` figure: the timed workload only, with startup and
 | Suite | Total | Timed MIR (untyped) | Timed MIR (typed) | Timed C2MIR | Timed LambdaJS | Timed QuickJS | Timed Node.js | MIR (untyped)/Node geo | MIR (typed)/Node geo | C2MIR/Node geo | LambdaJS/Node geo | QuickJS/Node geo |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | R7RS | 10 | 10 | 10 | 10 | 10 | 10 | 10 | 0.45x | 0.49x | 0.19x | 11.8x | 6.71x |
-| AWFY | 14 | 14 | 14 | 14 | 14 | 14 | 14 | 2.00x | 1.60x | 0.09x | 18.2x | 5.23x |
+| AWFY | 14 | 14 | 14 | 14 | 14 | 14 | 14 | 1.54x | 1.19x | 0.09x | 18.2x | 5.23x |
 | BENG | 8 | 8 | 8 | 8 | 8 | 8 | 8 | 0.40x | 0.38x | 0.10x | 9.19x | 1.71x |
 | KOSTYA | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 2.10x | 2.25x | 0.23x | 23.4x | 11.9x |
 | LARCENY | 11 | 11 | 11 | 11 | 11 | 11 | 11 | 1.68x | 1.05x | 0.33x | 24.2x | 13.2x |
-| JetStream | 6 | 6 | 6 | 6 | 6 | 6 | 6 | 9.16x | 6.60x | 0.29x | 44.6x | 12.0x |
-| Text | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 2.28x | 3.01x | 0.14x | 48.9x | 12.1x |
-| **Overall** | 63 | 63 | 63 | 63 | 63 | 63 | 63 | 1.47x | 1.31x | 0.17x | 20.4x | 7.22x |
+| JetStream | 6 | 6 | 6 | 6 | 6 | 6 | 6 | 8.97x | 6.50x | 0.29x | 44.6x | 12.0x |
+| Text | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 2.28x | 3.01x | 0.15x | 48.9x | 12.1x |
+| **Overall** | 63 | 63 | 63 | 63 | 63 | 63 | 63 | 1.39x | 1.22x | 0.17x | 20.4x | 7.22x |
 
 ### Population Accounting
 
@@ -45,8 +46,8 @@ The first population is the only one comparable with Result38; the complete-suit
 
 | Population | Rows | MIR (typed)/Node geo | MIR (untyped)/Node geo | MIR (typed)/C2MIR geo | C2MIR matched rows |
 |---|---:|---:|---:|---:|---:|
-| v38-comparable (without the four text extensions) | 59 | 1.10x | 1.30x | 7.09x | 59 |
-| complete current suite | 63 | 1.31x | 1.47x | 7.65x | 63 |
+| v38-comparable (without the four text extensions) | 59 | 1.02x | 1.22x | 6.60x | 59 |
+| complete current suite | 63 | 1.22x | 1.39x | 7.11x | 63 |
 
 > The benchmark runner keeps one canonical row for each known duplicate workload, so no reporting deduplication is required.
 > Ratio < 1.0 means the engine is faster than Node.js on matched timed rows; ratio > 1.0 means Node.js is faster.
@@ -57,24 +58,24 @@ The first population is the only one comparable with Result38; the complete-suit
 
 How far MIR (typed) is from the same workload written in a statically typed language. These columns are a reference bound, not another Lambda execution path: they say what is still on the table, and C2MIR is the sharper of the two because it shares MIR's code generator, so a gap there is attributable to Lambda's front end rather than to the backend.
 
-- **MIR (typed) / C2MIR geomean:** 7.65x over 63 of 63 rows
+- **MIR (typed) / C2MIR geomean:** 7.11x over 63 of 63 rows
 
 **Widest gaps vs C2MIR**
 
 | Benchmark | MIR (typed) | C2MIR | MIR (typed)/C2MIR |
 |---|---:|---:|---:|
-| awfy/havlak | 3.58s | 1.83 | 1960x |
 | text/prettier_ast | 9.64s | 41.6 | 231x |
 | awfy/richards | 2.01s | 29.2 | 68.8x |
 | jetstream/cube3d | 27.7 | 0.514 | 53.9x |
 | awfy/deltablue | 47.4 | 1.16 | 41.0x |
-| jetstream/navier_stokes | 1.79s | 47.1 | 38.0x |
 | awfy/cd | 533.5 | 15.0 | 35.6x |
+| jetstream/navier_stokes | 1.63s | 47.0 | 34.6x |
+| awfy/havlak | 58.0 | 1.85 | 31.4x |
 | text/hyphen | 2.25 | 0.088 | 25.6x |
 | jetstream/hashmap | 70.4 | 2.77 | 25.4x |
 | kostya/base64 | 13.7 | 0.558 | 24.5x |
-| text/three_way_merge | 31.69s | 1.45s | 21.9x |
 | text/fast_diff | 281.0 | 13.1 | 21.5x |
+| r7rs/nqueens | 2.52 | 0.130 | 19.4x |
 
 ---
 
@@ -132,7 +133,7 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 | richards | macro | 427.4 [427.1–428.3] | 2.01s [1.98s–2.04s] | 29.2 [28.9–29.3] | 1.09s [1.09s–1.09s] | 193.3 [190.4–201.9] | 46.9 [46.9–47.1] | 9.11x | 42.9x | 0.62x | 23.2x | 4.12x |
 | json | macro | 6.13 [6.12–6.15] | 4.62 [4.62–4.66] | 0.267 [0.257–0.275] | 44.1 [44.0–44.2] | 10.7 [10.7–11.1] | 2.62 [2.59–2.64] | 2.34x | 1.77x | 0.10x | 16.9x | 4.10x |
 | deltablue | macro | 132.7 [132.4–133.3] | 47.4 [47.2–99.0] | 1.16 [1.15–1.16] | 501.2 [500.1–509.7] | 99.8 [99.5–100.5] | 11.7 [11.6–12.9] | 11.3x | 4.05x | 0.10x | 42.8x | 8.53x |
-| havlak | macro | 2.49s [2.48s–2.56s] | 3.58s [3.57s–3.60s] | 1.83 [1.79–1.88] | 18.39s [18.29s–18.41s] | 3.33s [3.29s–3.36s] | 94.8 [93.8–95.4] | 26.3x | 37.8x | 0.02x | 194x | 35.1x |
+| havlak | macro | 65.1 [64.1–65.4] | 58.0 [58.0–59.4] | 1.85 [1.82–1.88] | 18.39s [18.29s–18.41s] | 3.33s [3.29s–3.36s] | 94.8 [93.8–95.4] | 0.69x | 0.61x | 0.02x | 194x | 35.1x |
 | cd | macro | 635.8 [634.0–694.0] | 533.5 [531.5–534.6] | 15.0 [15.0–15.1] | 4.10s [4.08s–4.18s] | 963.0 [956.7–964.7] | 35.9 [35.8–36.1] | 17.7x | 14.9x | 0.42x | 114x | 26.8x |
 
 ### BENG
@@ -181,7 +182,7 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 | Benchmark | Category | MIR (untyped) (ms) | MIR (typed) (ms) | C2MIR (ms) | LambdaJS (ms) | QuickJS (ms) | Node.js (ms) | MIR (untyped)/Node | MIR (typed)/Node | C2MIR/Node | LambdaJS/Node | QuickJS/Node |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | cube3d | 3d | 25.1 [25.1–25.2] | 27.7 [27.6–28.0] | 0.514 [0.513–0.522] | 388.3 [387.8–390.8] | 217.0 [215.9–217.0] | 17.8 [17.7–17.9] | 1.41x | 1.56x | 0.03x | 21.8x | 12.2x |
-| navier_stokes | numeric | 1.76s [1.74s–1.81s] | 1.79s [1.79s–1.84s] | 47.1 [47.0–48.4] | 349.7 [347.2–352.9] | 98.7 [98.5–98.9] | 14.0 [13.9–14.1] | 126x | 128x | 3.36x | 25.0x | 7.04x |
+| navier_stokes | numeric | 1.55s [1.55s–1.57s] | 1.63s [1.61s–1.66s] | 47.0 [46.9–47.1] | 349.7 [347.2–352.9] | 98.7 [98.5–98.9] | 14.0 [13.9–14.1] | 111x | 116x | 3.36x | 25.0x | 7.04x |
 | splay | data | 317.4 [316.8–322.7] | 317.7 [316.5–317.9] | 19.2 [19.0–19.3] | 1.78s [1.76s–1.88s] | 146.9 [145.5–147.7] | 19.2 [18.5–19.4] | 16.5x | 16.5x | 1.00x | 92.7x | 7.64x |
 | hashmap | data | 121.9 [121.4–122.9] | 70.4 [70.3–73.1] | 2.77 [2.72–2.83] | 1.71s [1.71s–1.74s] | 314.9 [309.3–316.6] | 15.4 [15.0–15.5] | 7.91x | 4.57x | 0.18x | 111x | 20.4x |
 | crypto_sha1 | crypto | 53.9 [53.8–55.6] | 35.1 [34.7–35.7] | 2.65 [2.60–2.67] | 377.3 [374.8–378.8] | 218.8 [218.0–219.7] | 8.69 [8.30–8.82] | 6.20x | 4.04x | 0.31x | 43.4x | 25.2x |
@@ -196,8 +197,8 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 | hyphen | hyphenation | 3.45 [3.44–3.48] | 2.25 [2.19–3.21] | 0.088 [0.086–0.091] | 346.8 [344.5–362.9] | 51.0 [50.7–51.3] | 6.53 [6.36–7.33] | 0.53x | 0.35x | 0.01x | 53.1x | 7.81x |
 | prettier_ast | formatting | 1.10s [1.08s–1.11s] | 9.64s [9.55s–9.76s] | 41.6 [41.6–41.7] | 5.75s [5.71s–5.77s] | 1.43s [1.41s–1.44s] | 99.8 [99.4–100.0] | 11.0x | 96.6x | 0.42x | 57.6x | 14.4x |
 | text_search | search | 15.65s [15.62s–15.71s] | 2.81s [2.81s–2.82s] | 538.6 [538.5–538.6] | 114.13s [114.01s–114.59s] | 38.96s [38.88s–38.97s] | 776.7 [776.2–779.3] | 20.1x | 3.62x | 0.69x | 147x | 50.2x |
-| three_way_merge | merge | 3.80s [3.80s–3.83s] | 31.69s [31.60s–31.70s] | 1.45s [1.44s–1.49s] | 20.22s [20.19s–20.44s] | 6.13s [6.12s–6.28s] | 966.6 [966.2–966.8] | 3.93x | 32.8x | 1.50x | 20.9x | 6.34x |
-| log_pipeline | log-processing | 6.42s [6.42s–6.45s] | 6.74s [6.74s–6.87s] | 571.3 [558.0–571.6] | 19.05s [19.03s–19.17s] | 9.55s [9.48s–9.56s] | 945.2 [943.3–963.6] | 6.80x | 7.14x | 0.60x | 20.2x | 10.1x |
+| three_way_merge | merge | 3.83s [3.82s–3.86s] | 31.73s [31.71s–31.75s] | 2.09s [2.03s–2.09s] | 20.22s [20.19s–20.44s] | 6.13s [6.12s–6.28s] | 966.6 [966.2–966.8] | 3.97x | 32.8x | 2.16x | 20.9x | 6.34x |
+| log_pipeline | log-processing | 6.44s [6.42s–6.47s] | 6.73s [6.72s–6.77s] | 609.8 [606.8–612.3] | 19.05s [19.03s–19.17s] | 9.55s [9.48s–9.56s] | 945.2 [943.3–963.6] | 6.81x | 7.12x | 0.65x | 20.2x | 10.1x |
 
 ---
 
@@ -216,13 +217,13 @@ Same processes, where possible: the reference engines report their wall and `__T
 | Suite | Total | Timed MIR (untyped, auto) | Timed MIR (typed, auto) | Timed C2MIR | Timed LambdaJS | Timed QuickJS | Timed Node.js | MIR (untyped, auto)/Node geo | MIR (typed, auto)/Node geo | C2MIR/Node geo | LambdaJS/Node geo | QuickJS/Node geo |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | R7RS | 10 | 10 | 10 | 10 | 10 | 10 | 10 | 0.41x | 0.42x | 1.02x | 1.31x | 0.43x |
-| AWFY | 14 | 14 | 14 | 14 | 14 | 14 | 14 | 1.35x | 1.57x | 0.91x | 4.60x | 0.79x |
+| AWFY | 14 | 14 | 14 | 14 | 14 | 14 | 14 | 0.98x | 1.13x | 0.91x | 4.60x | 0.79x |
 | BENG | 8 | 8 | 8 | 8 | 8 | 8 | 8 | 0.48x | 0.51x | 1.00x | 2.04x | 0.32x |
 | KOSTYA | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 0.82x | 0.92x | 0.72x | 6.17x | 2.88x |
 | LARCENY | 11 | 11 | 11 | 11 | 11 | 11 | 11 | 0.89x | 0.75x | 0.99x | 4.92x | 1.89x |
-| JetStream | 6 | 6 | 6 | 6 | 6 | 6 | 6 | 4.47x | 6.52x | 0.91x | 14.8x | 3.67x |
-| Text | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 3.12x | 4.28x | 0.80x | 31.8x | 6.49x |
-| **Overall** | 63 | 63 | 63 | 63 | 63 | 63 | 63 | 1.06x | 1.17x | 0.92x | 4.92x | 1.26x |
+| JetStream | 6 | 6 | 6 | 6 | 6 | 6 | 6 | 4.21x | 6.13x | 0.91x | 14.8x | 3.67x |
+| Text | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 3.11x | 4.27x | 0.85x | 31.8x | 6.49x |
+| **Overall** | 63 | 63 | 63 | 63 | 63 | 63 | 63 | 0.98x | 1.08x | 0.92x | 4.92x | 1.26x |
 
 > Ratio < 1.0 means the engine finished the whole run faster than Node.js.
 
@@ -257,7 +258,7 @@ Same processes, where possible: the reference engines report their wall and `__T
 | richards | macro | 481.2 [479.2–482.3] | 2.05s [2.03s–2.16s] | 77.4 [76.8–77.5] | 1.19s [1.19s–1.20s] | 200.3 [197.3–209.0] | 93.4 [92.7–93.5] | 5.15x | 21.9x | 0.83x | 12.8x | 2.14x |
 | json | macro | 51.7 [51.1–51.9] | 53.0 [52.5–53.8] | 52.7 [52.2–53.0] | 239.8 [238.0–239.9] | 18.2 [17.8–19.0] | 46.9 [46.9–47.8] | 1.10x | 1.13x | 1.12x | 5.11x | 0.39x |
 | deltablue | macro | 244.7 [243.2–244.8] | 189.9 [189.4–190.3] | 53.7 [53.5–53.8] | 727.7 [726.6–740.1] | 107.5 [107.4–108.1] | 58.7 [57.1–59.4] | 4.17x | 3.23x | 0.92x | 12.4x | 1.83x |
-| havlak | macro | 13.27s [13.26s–13.40s] | 12.91s [12.89s–13.01s] | 54.0 [53.7–54.4] | 18.72s [18.61s–18.72s] | 3.34s [3.31s–3.37s] | 142.5 [141.8–142.5] | 93.1x | 90.6x | 0.38x | 131x | 23.5x |
+| havlak | macro | 154.8 [153.8–155.1] | 134.2 [133.0–134.3] | 53.4 [52.4–53.7] | 18.72s [18.61s–18.72s] | 3.34s [3.31s–3.37s] | 142.5 [141.8–142.5] | 1.09x | 0.94x | 0.37x | 131x | 23.5x |
 | cd | macro | 701.0 [700.7–701.0] | 595.1 [593.0–597.4] | 67.5 [67.4–68.2] | 4.42s [4.40s–4.50s] | 971.3 [964.8–972.7] | 80.7 [80.5–81.8] | 8.68x | 7.37x | 0.84x | 54.8x | 12.0x |
 
 ### BENG
@@ -306,7 +307,7 @@ Same processes, where possible: the reference engines report their wall and `__T
 | Benchmark | Category | MIR (untyped, auto) (ms) | MIR (typed, auto) (ms) | C2MIR (ms) | LambdaJS (ms) | QuickJS (ms) | Node.js (ms) | MIR (untyped, auto)/Node | MIR (typed, auto)/Node | C2MIR/Node | LambdaJS/Node | QuickJS/Node |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | cube3d | 3d | 171.0 [170.8–171.1] | 386.1 [384.9–386.9] | 49.4 [49.3–50.1] | 495.4 [494.3–498.1] | 223.8 [222.8–223.9] | 63.5 [62.7–64.8] | 2.69x | 6.08x | 0.78x | 7.80x | 3.52x |
-| navier_stokes | numeric | 2.38s [2.37s–2.39s] | 2.46s [2.43s–2.46s] | 95.5 [95.4–97.6] | 524.2 [521.6–529.9] | 109.8 [109.3–109.8] | 61.1 [60.3–61.2] | 38.9x | 40.2x | 1.56x | 8.58x | 1.80x |
+| navier_stokes | numeric | 1.65s [1.63s–1.65s] | 1.70s [1.70s–1.71s] | 94.9 [94.9–95.5] | 524.2 [521.6–529.9] | 109.8 [109.3–109.8] | 61.1 [60.3–61.2] | 26.9x | 27.8x | 1.55x | 8.58x | 1.80x |
 | splay | data | 382.3 [379.7–382.3] | 377.0 [376.8–378.8] | 66.8 [66.6–67.0] | 5.37s [5.37s–5.38s] | 565.1 [561.8–569.3] | 92.4 [92.4–92.5] | 4.14x | 4.08x | 0.72x | 58.2x | 6.12x |
 | hashmap | data | 153.1 [151.8–153.1] | 103.7 [103.5–105.3] | 48.6 [48.5–48.7] | 1.82s [1.82s–1.85s] | 322.3 [316.6–323.9] | 59.6 [58.9–60.1] | 2.57x | 1.74x | 0.82x | 30.6x | 5.41x |
 | crypto_sha1 | crypto | 90.6 [88.9–146.2] | 684.4 [683.1–697.2] | 48.9 [48.4–49.4] | 423.0 [421.6–424.6] | 225.5 [224.7–226.2] | 52.1 [52.1–52.5] | 1.74x | 13.1x | 0.94x | 8.12x | 4.33x |
@@ -321,6 +322,6 @@ Same processes, where possible: the reference engines report their wall and `__T
 | hyphen | hyphenation | 27.3 [27.2–27.3] | 25.0 [25.0–25.3] | 45.8 [45.7–46.0] | 1.58s [1.57s–1.58s] | 68.1 [67.6–68.1] | 53.0 [53.0–53.9] | 0.51x | 0.47x | 0.86x | 29.8x | 1.28x |
 | prettier_ast | formatting | 1.18s [1.18s–1.19s] | 10.14s [10.11s–10.14s] | 104.2 [103.8–105.2] | 5.96s [5.92s–6.01s] | 1.44s [1.42s–1.45s] | 145.8 [145.2–146.0] | 8.11x | 69.5x | 0.71x | 40.9x | 9.89x |
 | text_search | search | 15.65s [15.65s–15.73s] | 2.88s [2.85s–2.90s] | 586.0 [585.9–586.2] | 114.23s [114.11s–114.68s] | 38.97s [38.89s–38.98s] | 822.0 [821.6–824.6] | 19.0x | 3.51x | 0.71x | 139x | 47.4x |
-| three_way_merge | merge | 3.97s [3.82s–4.02s] | 31.83s [31.65s–31.89s] | 1.49s [1.49s–1.54s] | 20.26s [20.23s–20.48s] | 6.14s [6.13s–6.29s] | 1.01s [1.01s–1.01s] | 3.92x | 31.5x | 1.47x | 20.0x | 6.06x |
-| log_pipeline | log-processing | 6.51s [6.49s–6.53s] | 6.88s [6.81s–6.92s] | 619.8 [606.6–619.9] | 19.16s [19.13s–19.28s] | 9.59s [9.51s–9.59s] | 998.4 [996.8–1.02s] | 6.52x | 6.89x | 0.62x | 19.2x | 9.60x |
+| three_way_merge | merge | 3.88s [3.87s–3.96s] | 31.79s [31.75s–32.17s] | 2.13s [2.08s–2.14s] | 20.26s [20.23s–20.48s] | 6.14s [6.13s–6.29s] | 1.01s [1.01s–1.01s] | 3.83x | 31.4x | 2.11x | 20.0x | 6.06x |
+| log_pipeline | log-processing | 6.47s [6.45s–6.54s] | 6.81s [6.81s–6.88s] | 658.5 [655.4–661.0] | 19.16s [19.13s–19.28s] | 9.59s [9.51s–9.59s] | 998.4 [996.8–1.02s] | 6.48x | 6.82x | 0.66x | 19.2x | 9.60x |
 

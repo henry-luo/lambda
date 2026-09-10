@@ -63,7 +63,20 @@ DEFAULT_TIMEOUT_S = 120
 DEFAULT_SUITE_COOLDOWN_S = 10
 LAMBDA_EXE = os.environ.get("LAMBDA_EXE", "./lambda.exe")
 NODE_EXE = "node"
+# Node.js is the reference every Lambda column is quoted against, and V8 codegen
+# moves between releases, so an unpinned `node` on PATH silently makes a result
+# file incomparable with the ones before it. Pin the version the current result
+# series was measured with and refuse to run against anything else. Re-pinning is
+# a deliberate act: bump this constant (and note it in the result doc), or set
+# LAMBDA_BENCH_NODE_VERSION for a one-off run against another build.
+PINNED_NODE_VERSION = "v22.13.0"
+NODE_VERSION_ENV = "LAMBDA_BENCH_NODE_VERSION"
 PYTHON_EXE = "python3"
+# Emitted by the debug banner in lambda/main.cpp; absent from release builds. A
+# debug lambda.exe is -Og with assertions, so its timings measure nothing useful —
+# and `make test-lambda-baseline` overwrites ./lambda.exe with exactly such a build,
+# which is the usual way a debug binary ends up under the release path.
+DEBUG_BUILD_MARKER = b"Running DEBUG build"
 QJS_EXE = "qjs"
 QJS_STACK_SIZE = 4 * 1024 * 1024
 TIMING_RE = re.compile(r"__TIMING__:([\d.]+(?:e[+-]?\d+)?)")
@@ -384,6 +397,72 @@ def get_command_output(args):
     return proc.stdout.strip() or proc.stderr.strip() or None
 
 
+def check_release_build(log_path=None, exe_path=None):
+    """Abort the run unless the Lambda binary is a release build.
+
+    Scans the binary for the debug banner literal instead of shelling out to
+    `strings`, so the gate holds on hosts without binutils and cannot be skipped
+    by a missing tool. Every entry point calls this, not just the snapshot
+    workflow: a hand-run benchmark against a leftover debug binary is silent
+    otherwise, and its numbers are unusable.
+    """
+    exe = exe_path or LAMBDA_EXE
+    if not os.path.exists(exe):
+        raise SystemExit(f"benchmark aborted: {exe} is missing. Run `make release`.")
+    with open(exe, "rb") as binary:
+        is_debug = DEBUG_BUILD_MARKER in binary.read()
+    if log_path:
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "w") as f:
+            f.write(f"checked_at={datetime.datetime.now().isoformat(timespec='seconds')}\n")
+            f.write(f"exe={exe}\n")
+            f.write(f"marker={DEBUG_BUILD_MARKER.decode()}\n")
+            f.write(f"is_debug={is_debug}\n")
+    if is_debug:
+        raise SystemExit(
+            f"benchmark aborted: {exe} is a DEBUG build.\n"
+            f"  found marker {DEBUG_BUILD_MARKER.decode()!r} in the binary.\n"
+            "  Debug builds are -Og with assertions enabled; their timings are meaningless.\n"
+            "  Run `make release` (note that `make test-lambda-baseline` replaces\n"
+            "  ./lambda.exe with a debug build, so rebuild after a test pass)."
+        )
+    print(f"release build check passed: {exe} is not a debug build")
+
+
+def expected_node_version():
+    """The Node.js version this runner is pinned to, honouring a one-off override."""
+    return os.environ.get(NODE_VERSION_ENV) or PINNED_NODE_VERSION
+
+
+def require_pinned_node_version(engines, mode):
+    """Abort the run unless the Node.js on PATH matches the pinned version.
+
+    Only enforced when the nodejs engine is actually selected: a MIR-only or
+    mir-vs-c run never invokes node, so its absence must not block it.
+    """
+    if mode == "mir-vs-c" or "nodejs" not in engines:
+        return
+    expected = expected_node_version()
+    actual = get_command_output([NODE_EXE, "--version"])
+    if actual == expected:
+        return
+    found = actual if actual else f"{NODE_EXE} not found on PATH"
+    print(
+        f"error: Node.js version mismatch — this runner is pinned to {expected}.\n"
+        f"  expected: {expected}\n"
+        f"  found   : {found}\n"
+        "\n"
+        "Node timings are the baseline the Lambda columns are quoted against, so a\n"
+        "different V8 makes the run incomparable with earlier result files.\n"
+        "\n"
+        f"  install {expected} (e.g. nvm use {expected.lstrip('v')}), or\n"
+        "  drop the baseline for this run:  -e mir,c2mir,...  (omit nodejs), or\n"
+        f"  measure another build on purpose: {NODE_VERSION_ENV}=<version> ...\n"
+        f"     (then bump PINNED_NODE_VERSION once the new version is the series baseline)\n",
+        file=sys.stderr)
+    sys.exit(2)
+
+
 def build_run_metadata(mode, engines, num_runs, timeout_s, results_output, fresh, suite_filters,
                        bench_filters, suite_cooldown_s=DEFAULT_SUITE_COOLDOWN_S):
     exe_size = os.path.getsize(LAMBDA_EXE) if os.path.exists(LAMBDA_EXE) else None
@@ -432,6 +511,7 @@ def build_run_metadata(mode, engines, num_runs, timeout_s, results_output, fresh
         "test262_baseline": test262_baseline,
         "lambda_commit": get_command_output(["git", "rev-parse", "HEAD"]),
         "node_version": get_command_output([NODE_EXE, "--version"]),
+        "node_version_pinned": expected_node_version(),
         "python_version": get_command_output([PYTHON_EXE, "--version"]),
         "quickjs_version": quickjs_version,
         "profile_check": os.environ.get("LAMBDA_BENCH_PROFILE_CHECK", "not_recorded"),
@@ -1927,6 +2007,12 @@ Examples:
         print(f"\n  Total: {len(benchmarks)} benchmarks")
         return
 
+    # Enforce the build and Node baseline gates before any timing starts, so a
+    # mismatch costs nothing rather than being discovered in the result file
+    # afterwards. Both apply to every mode; --list and --dry-run returned already.
+    check_release_build()
+    require_pinned_node_version(engines, mode)
+
     # --- Print header ---
     suite_desc = f"suites={args.suite}" if args.suite else "all suites"
     bench_desc = f"benchmarks={args.bench}" if args.bench else "all benchmarks"
@@ -1950,7 +2036,7 @@ Examples:
     if mode != "mir-vs-c":
         py_ver = subprocess.run(f"{PYTHON_EXE} --version", shell=True, capture_output=True, text=True).stdout.strip()
         node_ver = subprocess.run(f"{NODE_EXE} --version", shell=True, capture_output=True, text=True).stdout.strip()
-        print(f"  Node.js   : {node_ver}")
+        print(f"  Node.js   : {node_ver} (pinned {expected_node_version()})")
         print(f"  Python    : {py_ver}")
     print()
 

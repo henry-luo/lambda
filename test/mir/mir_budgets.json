@@ -311,13 +311,13 @@
       "name": "lambda_cow_nested_store",
       "script": "test/mir/lambda/cow_nested_store.ls",
       "language": "lambda",
-      "description": "Stage-1 nested COW relinking: the reviewed register/root-slot path has no heap path-array construction. T22 adds the bounded fixed-spine direct-store guards before retaining the generic reinstall fallback (D4.4.4, D5.1.1v2).",
+      "description": "Stage-1 nested COW relinking: the reviewed register/root-slot path has no heap path-array construction. T22 adds the bounded fixed-spine direct-store guards before retaining the generic reinstall fallback (D4.4.4, D5.1.1v2). T23 adds five instructions to propagate a failed cow_prepare_write before publishing the replacement (D5.3.4).",
       "budgets": {
         "default": {
           "module_insns": 155
         },
         "darwin-debug-v3": {
-          "module_insns": 143
+          "module_insns": 148
         }
       }
     },

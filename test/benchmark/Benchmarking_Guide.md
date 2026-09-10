@@ -59,7 +59,13 @@ For the BENG suite, the convention is simpler: `binarytrees.ls` and `js/binarytr
 - **MIR Direct**: Lambda → MIR IR → native. Default compiler path, lowest startup.
 - **C2MIR**: Lambda → C source → MIR. Legacy path, sometimes better optimized.
 - **LambdaJS**: Lambda's built-in JS JIT engine. No `require()` or `fs`.
-- **Node.js**: Google V8 with optimizing JIT. Full Node.js API.
+- **Node.js**: Google V8 with optimizing JIT. Full Node.js API. **Version-pinned**: the
+  runner aborts (exit 2) unless `node --version` matches `PINNED_NODE_VERSION` in
+  `run_benchmarks.py` (currently `v22.13.0`), because V8 changes across releases make a
+  run incomparable with earlier result files. The check only fires when the `nodejs`
+  engine is selected, so `-e mir,...` runs are unaffected. To measure another build on
+  purpose, set `LAMBDA_BENCH_NODE_VERSION=<version>`; once that version is the series
+  baseline, bump `PINNED_NODE_VERSION` and note it in the result doc.
 - **QuickJS**: Lightweight interpreter. Needs a polyfill wrapper (auto-generated).
 - **Python**: CPython interpreter. AWFY benchmarks use the official AWFY Python harness.
 
@@ -227,6 +233,9 @@ Default behavior, in order:
   `Running DEBUG build` banner string that `lambda/main.cpp` compiles in only
   for debug configurations. This runs *even with* `--skip-build`, where a stale
   debug binary left over from a test cycle is exactly the likely mistake.
+  The gate itself lives in `run_benchmarks.py` (`check_release_build()`), which
+  this workflow imports, so it fires on **every** entry point — including a
+  hand-run `run_benchmarks.py` — not only on the snapshot workflow.
 - Checks `lambda.exe` with `strings` and rejects binaries containing profiling markers such as `JS_EXEC_PROFILE`.
 - Clears `JS_EXEC_PROFILE` and `JS_EXEC_PROFILE_OUT` from the benchmark environment.
 - Ensures the Test262 baseline runner exists, then runs the complete release
@@ -520,13 +529,17 @@ python3 test/benchmark/r7rs/python/fib.py
 | Dependency | Install |
 |------------|---------|
 | `./lambda.exe` | `make release` (must use release build for benchmarking) |
-| `node` | [nodejs.org](https://nodejs.org/) |
+| `node` | [nodejs.org](https://nodejs.org/) — must be the pinned `v22.13.0` (see [Engines](#engines)) |
 | `qjs` | `brew install quickjs` (macOS) |
 | `python3` | Pre-installed on macOS/Linux |
 | AWFY source | `ref/are-we-fast-yet/` (git submodule or clone) |
 | JetStream source | `ref/JetStream/` (for Node.js JetStream benchmarks) |
 
 > **IMPORTANT**: Never benchmark with a debug build. Always use `make release`.
+> Both runners enforce this: `run_benchmarks.py` aborts (before any timing) when
+> `LAMBDA_EXE` contains the `Running DEBUG build` banner. Note that
+> `make test-lambda-baseline` overwrites `./lambda.exe` with a debug build, so
+> rebuild with `make release` after a test pass.
 
 ---
 
@@ -585,7 +598,8 @@ python3 test/benchmark/gen_overall_result.py --output test/benchmark/Overall_Res
 ```
 
 Reads the selected benchmark JSON and writes a chosen `Overall_ResultN.md` with:
-- Run metadata: current date, platform, Lambda commit hash, Node.js version, and QuickJS version
+- Run metadata: current date, platform, Lambda commit hash, Node.js version (observed and
+  pinned), and QuickJS version
 - Per-suite tables for the selected engines
 - Geometric mean ratios against Node.js per suite and overall
 - A single overall metric for current runner snapshots, because known duplicate workloads are filtered before execution

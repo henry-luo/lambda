@@ -7,15 +7,21 @@ extern int printf(const char *, ...);
 #define LOG_MODULUS 1000000007
 
 typedef struct {
+    const char *timestamp;
+    int timestamp_length;
     int is_error;
     int service;
     int status;
     int latency;
+    int region;
+    int route;
     int bytes;
+    int message;
 } Record;
 
 typedef struct {
     int count;
+    int errors;
     int slow;
     int total_latency;
     int total_bytes;
@@ -140,6 +146,22 @@ static int service_id(const char *line, int start, int length) {
     return 3;
 }
 
+static int region_id(const char *line, int start, int length) {
+    if (text_equals(line, start, length, "us-east")) return 0;
+    if (text_equals(line, start, length, "eu-west")) return 1;
+    return 2;
+}
+
+static int route_id(const char *line, int start, int length) {
+    if (text_equals(line, start, length, "/v1/items")) return 0;
+    return 1;
+}
+
+static int message_id(const char *line, int start, int length) {
+    if (text_equals(line, start, length, "retry-scheduled")) return 0;
+    return 1;
+}
+
 static int next_token(const char *line, int length, int *cursor, int *start) {
     int token_length = 0;
     while (*cursor < length && line[*cursor] == ' ') *cursor = *cursor + 1;
@@ -156,13 +178,18 @@ static void parse_log_line(const char *line, int length, Record *record) {
     int start;
     int token_length;
     int equal_at;
+    record->timestamp_length = 0;
     record->is_error = 0;
     record->service = 0;
     record->status = 0;
     record->latency = 0;
+    record->region = 0;
+    record->route = 0;
     record->bytes = 0;
+    record->message = 0;
 
-    next_token(line, length, &cursor, &start); /* skip the timestamp */
+    record->timestamp_length = next_token(line, length, &cursor, &start);
+    record->timestamp = line + start;
     token_length = next_token(line, length, &cursor, &start);
     equal_at = 0;
     while (equal_at < token_length && line[start + equal_at] != '=') equal_at++;
@@ -191,9 +218,18 @@ static void parse_log_line(const char *line, int length, Record *record) {
         } else if (text_equals(line, start, equal_at, "latency")) {
             record->latency = parse_decimal(line, start + equal_at + 1,
                                             token_length - equal_at - 1);
+        } else if (text_equals(line, start, equal_at, "region")) {
+            record->region = region_id(line, start + equal_at + 1,
+                                       token_length - equal_at - 1);
+        } else if (text_equals(line, start, equal_at, "route")) {
+            record->route = route_id(line, start + equal_at + 1,
+                                     token_length - equal_at - 1);
         } else if (text_equals(line, start, equal_at, "bytes")) {
             record->bytes = parse_decimal(line, start + equal_at + 1,
-                                          token_length - equal_at - 1);
+                                           token_length - equal_at - 1);
+        } else if (text_equals(line, start, equal_at, "message")) {
+            record->message = message_id(line, start + equal_at + 1,
+                                         token_length - equal_at - 1);
         }
     }
 }
@@ -206,7 +242,10 @@ static void add_to_group(Group *group, Record *record) {
 }
 
 static int process_logs(void) {
-    Group groups[4] = {{0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}};
+    Group groups[4] = {
+        {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}
+    };
     int accepted = 0;
     int rejected = 0;
     int index;
