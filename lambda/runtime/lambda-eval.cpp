@@ -1533,21 +1533,7 @@ static Type* runtime_boundary_unwrap_type(Type* type) {
 // `expected->type_id == LMD_TYPE_MAP` test silently drops every optional record
 // contract -- which is every self-referential one.
 static Type* runtime_boundary_nonnull_map_arm(Type* expected) {
-    Type* type = runtime_boundary_unwrap_type(expected);
-    if (!type) return NULL;
-    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY &&
-            ((TypeUnary*)type)->op == OPERATOR_OPTIONAL) {
-        type = runtime_boundary_unwrap_type(((TypeUnary*)type)->operand);
-    } else if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY &&
-            ((TypeBinary*)type)->op == OPERATOR_UNION) {
-        TypeBinary* binary = (TypeBinary*)type;
-        Type* left = runtime_boundary_unwrap_type(binary->left);
-        Type* right = runtime_boundary_unwrap_type(binary->right);
-        if (left && left->type_id == LMD_TYPE_NULL) type = right;
-        else if (right && right->type_id == LMD_TYPE_NULL) type = left;
-    }
-    if (!type || type->type_id != LMD_TYPE_MAP || type == &TYPE_MAP) return NULL;
-    return type;
+    return lambda_type_nonnull_map_contract(expected);
 }
 
 static bool runtime_validate_value_against_type(Item item, Type* expected,
@@ -8452,6 +8438,8 @@ static Item cow_clone_array_one_level(Array* source) {
             cow_mark_shared(array_native_lane_read(source, index));
         }
         copy->cow_state &= ~COW_STATE_SHARED;
+        // identical lanes and children retain the full layout proof (D3.3.3v3).
+        copy->rep_cert = source->rep_cert;
         return {.array = copy};
     }
     for (int64_t index = 0; index < source->length; index++) {
@@ -8461,6 +8449,7 @@ static Item cow_clone_array_one_level(Array* source) {
         array_push(rooted_copy.get(), child);
     }
     rooted_copy.get()->cow_state &= ~COW_STATE_SHARED;
+    rooted_copy.get()->rep_cert = rooted_source.get()->rep_cert;
     return {.array = rooted_copy.get()};
 }
 
@@ -8633,8 +8622,9 @@ static Type* runtime_map_path_leaf_contract(Type* root_contract, Item path) {
         Item key = item_at(path, index);
         current = runtime_boundary_unwrap_type(current);
         if (!current) return NULL;
-        if (current->type_id == LMD_TYPE_MAP && current != &TYPE_MAP) {
-            ShapeEntry* field = runtime_named_map_field(current, key);
+        Type* map_contract = lambda_type_nonnull_map_contract(current);
+        if (map_contract) {
+            ShapeEntry* field = runtime_named_map_field(map_contract, key);
             if (!field) return NULL;
             current = field->type;
             continue;
@@ -8659,6 +8649,40 @@ static bool runtime_map_rep_proves_contract(Item value, Type* contract) {
         (TypeMap*)expected);
     return relation == MAP_CONTRACT_EXACT_TRUSTED ||
         relation == MAP_CONTRACT_STORAGE_COMPATIBLE;
+}
+
+// A raw COW relink may retain a proof only when the replacement already has
+// the same representation. This never turns an open write into a contract.
+static bool runtime_value_rep_proves_contract(Item value, Type* contract) {
+    if (!contract) return false;
+    if (get_type_id(value) == LMD_TYPE_NULL) return lambda_type_accepts_null(contract);
+    LambdaArrayContractInfo array_info = {};
+    if (lambda_array_contract_info(contract, &array_info)) {
+        return lambda_array_rep_proves(value, contract, true);
+    }
+    if (lambda_type_nonnull_map_contract(contract)) {
+        return runtime_map_rep_proves_contract(value, contract);
+    }
+    LaneStorageDesc lane = lambda_lane_storage_desc_for(contract);
+    return lane.base_contract && lane.base_contract->kind == TYPE_KIND_SIMPLE &&
+        lane.value_domain == get_type_id(value) && lambda_type_matches(value, contract);
+}
+
+static Item runtime_map_path_write_proven(Item owner, Item path, Item value,
+        Type* leaf_contract, const char* boundary, bool inplace) {
+    RootFrame roots(3);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_path(roots, path);
+    Rooted<Item> rooted_value(roots, value);
+    // Admit only the incoming leaf. All other fields retain the root's
+    // established contract; COW relinks preserve its layouts (D3.2.4v3).
+    if (!runtime_value_rep_proves_contract(rooted_value.get(), leaf_contract)) {
+        rooted_value.set(lambda_type_check(rooted_value.get(), leaf_contract, boundary));
+        if (get_type_id(rooted_value.get()) == LMD_TYPE_ERROR) return rooted_value.get();
+    }
+    return inplace
+        ? cow_path_set_inplace(rooted_owner.get(), rooted_path.get(), rooted_value.get())
+        : cow_path_set(rooted_owner.get(), rooted_path.get(), rooted_value.get());
 }
 
 static bool map_extend_open_shape(Item map_item, Item key, Item value) {
@@ -8785,6 +8809,24 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
 
 static Item lambda_map_set_checked_impl(Item owner, Item key, Item value, Type* expected,
         const char* boundary, bool publish_in_place) {
+    // A declared field write preserves every other field's established proof;
+    // admit only the replacement, including T[] fields (D3.2.4v3/D3.3.3v3).
+    Type* proven_contract = runtime_boundary_unwrap_type(expected);
+    ShapeEntry* proven_field = runtime_named_map_field(proven_contract, key);
+    if (proven_field && runtime_map_rep_proves_contract(owner, proven_contract)) {
+        RootFrame roots(3);
+        Rooted<Item> rooted_owner(roots, owner);
+        Rooted<Item> rooted_key(roots, key);
+        Rooted<Item> rooted_value(roots, value);
+        if (!runtime_value_rep_proves_contract(rooted_value.get(), proven_field->type)) {
+            rooted_value.set(lambda_type_check(rooted_value.get(), proven_field->type, boundary));
+            if (get_type_id(rooted_value.get()) == LMD_TYPE_ERROR) return rooted_value.get();
+        }
+        if (!publish_in_place) rooted_owner.set(cow_prepare_write(rooted_owner.get()));
+        if (get_type_id(rooted_owner.get()) == LMD_TYPE_ERROR) return rooted_owner.get();
+        Item status = fn_map_set(rooted_owner.get(), rooted_key.get(), rooted_value.get());
+        return get_type_id(status) == LMD_TYPE_ERROR ? status : rooted_owner.get();
+    }
     // Typed map writes are transactional at the root boundary. Clone first,
     // then validate/store on the private candidate; a failed field check or
     // post-state check therefore cannot corrupt the original map or a COW
@@ -8803,7 +8845,7 @@ static Item lambda_map_set_checked_impl(Item owner, Item key, Item value, Type* 
         return lambda_type_error(owner, contract, boundary);
     }
 
-    RootFrame roots(3);
+    RootFrame roots(4);
     Rooted<Item> rooted_owner(roots, owner);
     Rooted<Item> rooted_key(roots, key);
     Rooted<Item> rooted_value(roots, checked_value);
@@ -8867,7 +8909,12 @@ Item lambda_map_path_set_checked(Item owner, Item path, Item value, Type* expect
     if (!contract || contract->type_id != LMD_TYPE_MAP) {
         return lambda_type_error(value, expected, boundary);
     }
-    RootFrame roots(3);
+    Type* leaf_contract = runtime_map_path_leaf_contract(contract, path);
+    if (leaf_contract && runtime_map_rep_proves_contract(owner, contract)) {
+        return runtime_map_path_write_proven(owner, path, value, leaf_contract,
+            boundary, false);
+    }
+    RootFrame roots(4);
     Rooted<Item> rooted_owner(roots, owner);
     Rooted<Item> rooted_path(roots, path);
     Rooted<Item> rooted_value(roots, value);
@@ -8900,21 +8947,10 @@ Item lambda_map_path_set_checked_inplace(Item owner, Item path, Item value,
     Rooted<Item> rooted_path(roots, path);
     Rooted<Item> rooted_value(roots, value);
     Type* leaf_contract = runtime_map_path_leaf_contract(contract, rooted_path.get());
-    LambdaArrayContractInfo leaf_array_info = {};
-    if (leaf_contract && !lambda_array_contract_info(leaf_contract, &leaf_array_info) &&
+    if (leaf_contract &&
             runtime_map_rep_proves_contract(rooted_owner.get(), contract)) {
-        // A storage-compatible root already proves every map offset on this
-        // path. Checking the target leaf before the COW walk gives rejected
-        // writes the same transactional guarantee without rescanning the
-        // whole World/Variable graph for every scalar assignment. Array
-        // leaves retain their own representation certificate, so they use
-        // the regular detached admission path below (D3.3.3v3).
-        rooted_value.set(lambda_type_check(rooted_value.get(), leaf_contract, boundary));
-        if (get_type_id(rooted_value.get()) == LMD_TYPE_ERROR) return rooted_value.get();
-        Item direct = cow_path_set_inplace(rooted_owner.get(), rooted_path.get(),
-            rooted_value.get());
-        if (get_type_id(direct) == LMD_TYPE_ERROR) return direct;
-        return rooted_owner.get();
+        return runtime_map_path_write_proven(rooted_owner.get(), rooted_path.get(),
+            rooted_value.get(), leaf_contract, boundary, true);
     }
     if (!lambda_type_matches(rooted_owner.get(), contract)) {
         return lambda_type_error(rooted_owner.get(), contract, boundary);
@@ -8950,9 +8986,7 @@ Item lambda_map_path_set_checked_inplace(Item owner, Item path, Item value,
 }
 
 static Type* runtime_array_contract_element(Type* expected) {
-    LambdaArrayContractInfo info = {};
-    return lambda_array_contract_info(expected, &info)
-        ? runtime_boundary_unwrap_type(info.immediate_element) : NULL;
+    return runtime_boundary_unwrap_type(lambda_array_contract_element(expected));
 }
 
 static ArrayRepCert* runtime_array_rep_cert_intern(Type* contract) {
@@ -8961,15 +8995,23 @@ static ArrayRepCert* runtime_array_rep_cert_intern(Type* contract) {
     Heap* heap = context ? context->heap : NULL;
     if (!heap) return lambda_array_rep_cert_create(pool, contract);
 
+    // Remember each spelling as well as the canonical certificate: warm
+    // boundaries must not compare every preceding contract's type graph.
+    for (uint32_t i = 0; i < LAMBDA_ARRAY_REP_CERT_CACHE_CAPACITY; i++) {
+        LambdaArrayRepCertCacheEntry* entry = &heap->array_rep_cert_cache[i];
+        if (entry->contract == contract) return entry->cert;
+    }
+    ArrayRepCert* cert = NULL;
     for (uint32_t i = 0; i < LAMBDA_ARRAY_REP_CERT_CACHE_CAPACITY; i++) {
         LambdaArrayRepCertCacheEntry* entry = &heap->array_rep_cert_cache[i];
         if (entry->cert && entry->contract &&
                 lambda_array_contract_compatible(entry->contract, contract, true)) {
-            return entry->cert;
+            cert = entry->cert;
+            break;
         }
     }
 
-    ArrayRepCert* cert = lambda_array_rep_cert_create(pool, contract);
+    if (!cert) cert = lambda_array_rep_cert_create(pool, contract);
     if (!cert) return NULL;
     uint32_t slot = heap->array_rep_cert_cache_next++ %
         LAMBDA_ARRAY_REP_CERT_CACHE_CAPACITY;
@@ -9484,11 +9526,16 @@ Item cow_path_set_raw(Item owner, Item key, Item value) {
     if ((owner_type == LMD_TYPE_ARRAY || owner_type == LMD_TYPE_ELEMENT ||
             owner_type == LMD_TYPE_ARRAY_NUM) &&
             lambda_item_to_int64_exact(rooted_key.get(), &index)) {
-        if (owner_type == LMD_TYPE_ARRAY_NUM) {
-            array_num_set_item(rooted_owner.get().array_num, index, rooted_value.get());
-        } else if (fn_array_set(rooted_owner.get().array, index, rooted_value.get()).item == ItemError.item) {
+        ArrayRepCert* cert = rooted_owner.get().array->rep_cert;
+        bool preserve = cert && runtime_value_rep_proves_contract(
+            rooted_value.get(), cert->immediate_element);
+        // The common setter checks logical bounds and stores admitted integer
+        // lanes exactly; the legacy coercing setter loses full-width bits.
+        if (get_type_id(fn_array_set(rooted_owner.get().array, index,
+                rooted_value.get())) == LMD_TYPE_ERROR) {
             return ItemError;
         }
+        if (preserve) lambda_array_install_rep_cert(rooted_owner.get(), cert);
         return rooted_owner.get();
     }
     if (owner_type == LMD_TYPE_MAP ||
@@ -10234,6 +10281,10 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
 static MapContractRelation runtime_map_contract_relation_cached(
         const TypeMap* candidate, const TypeMap* expected) {
     if (!candidate || !expected) return MAP_CONTRACT_INCOMPATIBLE;
+    // An exact trusted shape is already the answer; hashing it only repeats
+    // the proof every time a typed node crosses a boundary (D3.2.4v3).
+    if (candidate == expected && expected->is_trusted_contract)
+        return MAP_CONTRACT_EXACT_TRUSTED;
     Heap* heap = context ? context->heap : NULL;
     if (!heap) return lambda_map_contract_relation(candidate, expected);
 
@@ -10281,6 +10332,19 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
     if (!converted) return false;
     expected = runtime_boundary_unwrap_type(expected);
     if (!expected) return false;
+
+    // Reuse the resolved, heap-local proof before decomposing a T[] contract.
+    // The carrier check remains mandatory even when certificate identity hits.
+    TypeId value_type = get_type_id(value);
+    if ((value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_ARRAY_NUM) &&
+            value.array && value.array->rep_cert &&
+            lambda_array_contract_canonical(expected)) {
+        ArrayRepCert* target = runtime_array_rep_cert_intern(expected);
+        if (lambda_array_rep_proves_cert(value, target, true)) {
+            *converted = value;
+            return true;
+        }
+    }
 
     LambdaNumericKind source_kind = lambda_numeric_kind_from_item(value);
     LambdaNumericKind target_kind = lambda_numeric_kind_from_type(expected);
@@ -10529,6 +10593,19 @@ Item fn_map_set(Item map_item, Item key, Item value) {
             name_matches = shape_field_name_equals(entry, key_cstr, key_len);
         }
         if (name_matches) {
+            // A typed field's contract is richer than the value's TypeId.
+            // Reinstalling a certified T[] must not retag it as open array.
+            if (map_type->is_trusted_contract &&
+                    runtime_value_rep_proves_contract(value, entry->type)) {
+                if (map_type_id == LMD_TYPE_MAP) {
+                    map_ctor_initialize_offset(map_item.map, entry->byte_offset);
+                }
+                void* field_ptr = (char*)*data_slot + entry->byte_offset;
+                if (!map_shape_field_store_native_lane(field_ptr, entry, value)) {
+                    map_field_store(field_ptr, value, shape_entry_storage_type_id(entry));
+                }
+                return ItemNull;
+            }
             TypeId field_type = entry->type->type_id;
             entry = map_detach_shared_ctor_shape_for_type(map_item, &map_type,
                 type_slot, key_cstr, key_len, key_ref, entry, value_type);

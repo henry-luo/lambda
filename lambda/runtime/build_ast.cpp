@@ -97,9 +97,6 @@ static AstNamedNode* find_existing_named_item(AstNode* first_item, String* name)
 static bool match_arm_is_error_handler(AstMatchArm* arm);
 static bool match_has_error_handler(AstMatchNode* match);
 
-typedef bool (*LambdaAstVisitor)(AstNode* node, void* data);
-static void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
-                            bool descend_functions);
 
 static TypeMethod* direct_lookup_object_method(Transpiler* tp,
         AstNode* receiver, StrView name, bool* out_has_user_member);
@@ -1730,7 +1727,7 @@ static void lambda_ast_note_view_binding(AstDeclaratorNode* named) {
 // root.  Inferred map shapes intentionally do not participate: an unannotated
 // `var` remains free to evolve its value/shape, while `var p: Person` keeps the
 // Person contract across every interior write.
-static Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
+Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
         const char** destination_label) {
     node = unwrap_primary_node(node);
     if (!node) return NULL;
@@ -1741,7 +1738,7 @@ static Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
     if (node->node_type == AST_NODE_MEMBER_EXPR) {
         AstFieldNode* member = (AstFieldNode*)node;
         Type* owner_type = declared_compound_destination_type(tp, member->object, NULL);
-        owner_type = boundary_unwrap_type(owner_type);
+        owner_type = lambda_type_nonnull_map_contract(owner_type);
         if (!owner_type || owner_type->type_id != LMD_TYPE_MAP ||
                 is_global_simple_type(owner_type) ||
                 !member->field || member->field->node_type != AST_NODE_IDENT) {
@@ -1760,7 +1757,11 @@ static Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
         if (owner_type && owner_type->type_id == LMD_TYPE_MAP &&
                 !is_global_simple_type(owner_type) && index->field && !index->field->next) {
             Item key = ItemNull;
-            if (ast_static_literal_item(tp, index->field, &key) &&
+            AstNode* key_node = unwrap_primary_node(index->field);
+            bool literal_key = tp ? ast_static_literal_item(tp, index->field, &key)
+                : static_literal_item_from_type(key_node ? key_node->type :
+                    index->field->type, &key);
+            if (literal_key &&
                     get_type_id(key) == LMD_TYPE_STRING) {
                 String* field_name = it2s(key);
                 ShapeEntry* field = find_shape_field_by_name((TypeMap*)owner_type,
@@ -6471,7 +6472,7 @@ void declare_module_import(Transpiler* tp, AstImportNode* import_node) {
 // Pattern bodies use the unified _type_expr reduction path.
 
 
-static void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
+void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
                             bool descend_functions) {
     if (!node || !visitor(node, data)) return;
 
@@ -8866,13 +8867,16 @@ AstNode* build_field_node_from_parts(Transpiler* tp, SourceSpan span,
             node->is_proc_method_reference = method && method->is_proc;
         }
     }
-    if (node_type == AST_NODE_INDEX_EXPR) {
+    if (node_type == AST_NODE_INDEX_EXPR || node_type == AST_NODE_MEMBER_EXPR) {
         Type* declared = declared_compound_destination_type(tp,
             (AstNode*)node, NULL);
         if (declared) {
-            // Indexed reads are total. Preserve the annotated element contract
-            // as nullable so an OOB read cannot bypass its declaration check.
-            node->type = lambda_type_nullable_normalized(tp->pool, declared);
+            // Preserve the full path contract and carry only actual absence:
+            // indexing or a nullable receiver contributes null (S7.1.1v3).
+            bool nullable = node_type == AST_NODE_INDEX_EXPR ||
+                (object && object->type && lambda_type_accepts_null(object->type));
+            node->type = nullable ? lambda_type_nullable_normalized(tp->pool, declared)
+                : declared;
             return (AstNode*)node;
         }
     }
@@ -9208,6 +9212,9 @@ AstNode* build_call_node_from_parts(Transpiler* tp, SourceSpan span,
             // compound assignment; apply the same immutable-root rule before
             // lowering can select the raw in-place helper (S9.1.1, S9.1.6).
             direct_validate_mutable_compound(tp, span, call->argument);
+            // A typed-array place copy needs the same snapshot/RMW analysis
+            // as a user `var` call; admission may now be an identity.
+            direct_note_place_copy_var_borrow(span, call->argument);
         }
         call->can_raise = info->can_raise;
         call->pipe_inject = tp->pipe_inject_args > 0 && !method_call;
@@ -9965,8 +9972,15 @@ static void rmw_try_candidate(AstNode* stmt_node) {
     AstDeclaratorNode* named = (AstDeclaratorNode*)d;
     NameEntry* handle = named->entry;
     if (!handle || !handle->is_place_copy || !handle->place_copy_mutated ||
-            named->declared_type || !named->init) {
+            !named->init) {
         return;
+    }
+    if (named->declared_type) {
+        // An invariant array annotation preserves the borrowed place's lane;
+        // a converting/different contract must retain snapshot admission.
+        Type* source_contract = declared_compound_destination_type(NULL, named->init, NULL);
+        if (!source_contract || !lambda_array_contract_compatible(source_contract,
+                named->declared_type, true)) return;
     }
     AstCowPath path = {};
     if (!ast_collect_cow_path(&path, named->init) || path.count < 1 ||

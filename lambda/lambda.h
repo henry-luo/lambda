@@ -1122,7 +1122,8 @@ struct ArrayRepCert {
     LaneStorageDesc leaf_lane;  // exact native/boxed storage decision
     uint8_t rank;
     uint8_t flags;
-    uint16_t reserved;
+    uint8_t array_num_elem;     // resolved ArrayNumElemType; valid iff has_array_num_lane
+    uint8_t has_array_num_lane;
 };
 
 // A field's packed slot is a nullable native lane (int?/bool?/float?/T?/...).

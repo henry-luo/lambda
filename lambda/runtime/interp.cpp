@@ -4419,6 +4419,11 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             Scratch value_slot(f);
             value_slot.set(eval_expr(f, ca->value));
             if (interp_frame_pending(f)) return value_slot.get();
+            // Nested insertion captures the RHS just like the flat writer;
+            // otherwise a later source mutation changes this stored snapshot.
+            if (!ca->cow_borrow_release && ast_expr_insertion_needs_capture(ca->value)) {
+                cow_capture_value(value_slot.get());
+            }
 
             Scratch path_slot(f);
             path_slot.set(interp_ptr_item(array_plain()));

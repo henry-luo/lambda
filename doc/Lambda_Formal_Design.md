@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 2.1.0 (2026-09-09)
+**Spec version:** 2.1.1 (2026-09-10)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -2079,6 +2079,12 @@ Numbered `DO#` (design-open); each links to its record.
   T0's; the auto tier matches it). Closing it is CW33's typed
   `Container**` half on the raw entry (COW doc §11.10), not a satellite
   matter.
+  **Partial implementation, 2026-09-10:** eager typed-array binding arguments
+  now transport/reload precise root-slot homes, including wrapper forwarding
+  and COW detach after nested capture; the cited rebind fixture passes eager
+  JIT too. Typed-record, arbitrary-place and async rebinding remain outside
+  this increment, and satellite eligibility restrictions are unchanged.
+  See `vibe/impl/Lambda_Impl_Typed_Array.md` §14 for scope and verification.
 - **DO30** *(closed 2026-09-07 — misattributed)* "Eager inference slower
   than boxed bodies on splay." The 256 ms auto figure that the cluster
   (446 ms, the eager tier's own time) seemed to lose came from the
