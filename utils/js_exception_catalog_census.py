@@ -71,7 +71,10 @@ def parse_registry(root: pathlib.Path):
             r'FPTR\([A-Za-z_0-9]+\)\s*,\s*\{\s*[^,]+,\s*[^,]+,\s*'
             r'(JIT_VALUE_[A-Z_]+)', body)
         ret_class = metadata.group(1) if metadata else "JIT_VALUE_UNKNOWN"
-        if "JIT_IMPORT_RAW_SCALAR_PRESERVES" in body:
+        # Both initializers explicitly declare a raw scalar and PRESERVES;
+        # the pure variant additionally rules out collection and reentry.
+        if any(macro in body for macro in (
+                "JIT_IMPORT_RAW_SCALAR_PRESERVES", "JIT_IMPORT_PURE_SCALAR")):
             ret_class = NON_GC_SCALAR
             effect = "PRESERVES"
         if "JIT_IMPORT_VOID_PRESERVES" in body:

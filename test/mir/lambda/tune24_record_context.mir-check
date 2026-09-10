@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "description": "D3.3.3v3, D5.3.4, D8.3.1: record context.",
+  "checks": [
+    {
+      "in_func": "_count_#",
+      "expect": [
+        "_record_result0"
+      ],
+      "forbid": [
+        "call\t_count_",
+        "call\tmap_fill",
+        "call\theap_calloc_class",
+        "call\tfn_member"
+      ]
+    },
+    {
+      "in_func": "_forward_#",
+      "expect": [
+        "_record_result0",
+        "call\t_count_"
+      ],
+      "forbid": [
+        "call\tfn_member"
+      ]
+    },
+    {
+      "in_func": "_swap_#",
+      "forbid": [
+        "call\t_swap_",
+        "call\tmap_fill",
+        "call\tfn_member"
+      ]
+    },
+    {
+      "in_func": "_chain_#",
+      "forbid": [
+        "call\t_chain_",
+        "call\tmap_fill",
+        "call\tfn_member"
+      ]
+    }
+  ]
+}
