@@ -51,7 +51,7 @@ The archived reports show one cliff, 2026-08-10 → 2026-08-13 (commits `e91432d
 | awfy/havlak | 54,210 | 107,290 | 82,500 |
 | awfy/richards | 1,850 | 7,670 | 1,330 |
 
-Tune9 (2026-08-14) diagnosed this correctly (§5.1–5.5) and planned P1 (indexed recovery) and P2 (named recovery). IC_Retire (2026-08-15) initially removed the per-callsite ICs **and the compiler-side indexed lanes**. T10-1 restored the semantic `js_number_key_to_index_fast`, `js_get_number_reference`, and `js_set_number_assignment` fallback seam. The old direct-store imports, `js_elements_set_existing_dense_int_fast` and the append-or-dense pair, still had no lowering or C client and were retired rather than preserved as dormant alternatives; `js_array_fast_own_dense_get/set` remain the shared runtime kernel internals. This follows **D1.3**, **D8.4.1v2**, and **D8.4.3v2**: one current lowering uses one semantic fallback, while a replaced fast-path ABI is deleted.
+Tune9 (2026-08-14) diagnosed this correctly (§5.1–5.5) and planned P1 (indexed recovery) and P2 (named recovery). IC_Retire (2026-08-15) initially removed the per-callsite ICs **and the compiler-side indexed lanes**. T10-1 restored the semantic `js_number_key_to_index_fast`, `js_get_number_reference`, and `js_set_number_assignment` fallback seam. The old direct-store imports, `js_elements_set_existing_dense_int_fast` and the append-or-dense pair, still had no lowering or C client and were retired rather than preserved as dormant alternatives; `js_array_fast_own_dense_get/set` remain the shared runtime kernel internals. The follow-up runtime consolidation (2026-09-10) retired the numeric ABI seam as well: computed members now enter the single boxed `js_get_reference` / `js_set` path. This follows **D1.3**, **D8.4.1v2**, and **D8.4.3v2**: one current lowering uses one semantic fallback, while a replaced fast-path ABI is deleted.
 
 ### 2.3 Micro-benchmarks (same machine, same day; archived release binaries)
 
@@ -128,9 +128,9 @@ Ordering is by measured payoff divided by risk. Every phase lands behind a same-
 - **`arguments` detection (D-D).** In `js_ast_children.cpp` the observation walk must not treat the property identifier of a non-computed member expression (or a property key in an object literal / class member) as a reference to `arguments`, `this`, or `new.target`. Expected: `prettier_ast` −13%, and any code that reads `node.arguments` (every AST walker, i.e. real-world JS) stops paying 51 µs per call.
 - **`ToPropertyKey` for numbers (D-A, runtime half).** `lambda_finite_double_to_shortest` must not loop `snprintf`/`sscanf`; integral doubles in index range format through an integer path, and the general case uses one shortest-round-trip conversion (the project already has `lambda-decimal`; a Ryu/Grisu-style shortest formatter is the standard answer). This helps every remaining generic keyed access and `String(n)`.
 
-### T10-1 Numeric index lane (D-A, compiler half) — the primes/quicksort/sieve/fft recovery — **LANDED 2026-09-09**
+### T10-1 Numeric index lane (D-A, compiler half) — the primes/quicksort/sieve/fft recovery — **RETIRED 2026-09-10**
 
-Emit, for a computed reference whose key is carried as INT or FLOAT (`jm_is_native_type`) or is a boxed Number:
+The original proposal emitted a native-number reference lane:
 
 ```text
 if key is exact non-negative integer < 2^32-1            (js_number_key_to_index_fast semantics, inline)
@@ -144,6 +144,8 @@ else (non-number key): today's js_to_property_key path
 ```
 
 This reuses the Lambda index lane: the same `item_at`-style entry and the same unboxed-int register the untyped tier uses, with JS-specific guards. Target: `a[i]` ≤ 15 ns (QuickJS 26 ns), primes ≤ 100 ms (v28 level), sieve/quicksort/fft/fannkuch/permute back to R28.
+
+This was retired because its compiler and runtime specialization duplicated the generic property semantics. Computed members now box their key once and call `js_get_reference` / `js_set`; array and typed-array specialization remains encapsulated inside those runtime kernels.
 
 ### T10-2 Named access: predicted shape + inline guard, kernel on miss (D-C, D-E) — **item 3 LANDED 2026-09-09; items 1-2 LANDED for object literals 2026-09-09 (constructor prefixes and the `set` half still open — §12)**
 
@@ -207,7 +209,7 @@ rebuilds. No gate was added: every effect below is 1.7×–402×, far outside th
 |---|---|---|
 | T10-0 (D-D) | The function-facts walk no longer reads a **key position** as a reference. `node.arguments`, `{arguments: v}`, `class { arguments() {} }` and `obj.eval` stopped forcing an `arguments` object (and stopped clearing `tail_reuse_safe`). A shorthand `{arguments}` key still is a reference and is not skipped. | `lambda/js/js_ast_children.cpp` |
 | T10-0 (D-A, runtime half) | `lambda_finite_double_to_shortest` takes an integer path for integral magnitudes below 2^53 instead of up to 21 `snprintf`/`sscanf` round trips. Adjacent doubles there are ≥1 apart, so the exact integer digits *are* the shortest round-tripping form, and ES `Number::toString` prints them (k ≤ e ≤ 21). | `lambda/core/lambda-decimal.cpp` |
-| T10-1 (D-A, compiler half) | Computed member get/put and the compound-update canonicalizer emit `js_get_number_reference` / `js_set_number_assignment` with the key in a **native double**, instead of `js_to_property_key` → name-pool intern → `js_get`/`js_set` re-parsing the text back into an index. The two runtime entries already existed (IC_Retire left them unemitted); nothing new was added below the semantic boundary, so D1.3 holds. `ToPropertyKey` on a Number runs no user code, so `a[i] += v` keeps the lane across both halves. | `lambda/js/js_mir_expression_lowering.cpp`, `js_mir_internal.hpp` |
+| T10-1 (D-A, compiler half) | Retired 2026-09-10. Computed members now box the key once and use the canonical `js_get_reference` / `js_set` property kernels. The numeric ABI wrappers and their import metadata were removed, while array and typed-array handling remains internal to the semantic kernels. | `lambda/js/js_mir_expression_lowering.cpp`, `js_props.cpp` |
 | T10-2 item 3 (D-C) | `js_get_name_id` / `js_set_name_id` no longer hash the 24-byte `__lambda_dataset_element` marker on every named access. The marker is installed non-enumerable, which promotes the view's map to `MAP_KIND_DESC`, so that byte rules a dataset out first. `js_dataset_owner` takes the same precondition. | `lambda/js/js_runtime.cpp` |
 | T10-3 (D-B) | `js_set_completion_with_key` decides the ordinary "create a new own data property" case from shape storage — own-entry absence, extensibility, and a prototype chain of ordinary shape-backed maps with no entry for the key — and then performs the single slot write. The descriptor-object path (`js_reflect_set_define_receiver` → `js_make_reflect_set_value_desc` → `js_reflect_define_property` → `js_descriptor_from_object`) still owns everything the kernel cannot prove cheaply. | `lambda/js/js_globals.cpp` |
 

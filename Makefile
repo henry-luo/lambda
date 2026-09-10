@@ -664,7 +664,7 @@ help:
 	@echo "  test-lambda   - Run lambda runtime tests only"
 	@echo "  test-std      - Run Lambda Standard Tests (custom test runner)"
 	@echo "  test-coverage - Run all native tests with LLVM C/C++ coverage"
-	@echo "  test-js-coverage - Run test_js_gtest and Test262 with LLVM coverage"
+	@echo "  test-js-coverage - Run JS gtest, Test262, and benchmark scripts with LLVM coverage"
 	@echo "  test-benchmark- Run performance benchmark tests"
 	@echo "  fuzz-lambda    - Run fuzzy tests (5 minutes, mutation + random generation)"
 	@echo "  fuzz-lambda-extended - Run extended fuzzy tests (1 hour)"

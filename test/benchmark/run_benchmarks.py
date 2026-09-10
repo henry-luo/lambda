@@ -1892,6 +1892,8 @@ Examples:
                         help="Output JSON path for time or memory mode")
     parser.add_argument("--fresh", action="store_true",
                         help="Start from an empty result file instead of merging with existing JSON")
+    parser.add_argument("--coverage", action="store_true",
+                        help="Run with an LLVM-instrumented build; skip the release-build timing gate")
 
     args = parser.parse_args()
 
@@ -1906,6 +1908,10 @@ Examples:
 
     mode = args.mode
     timeout_s = args.timeout
+
+    if args.coverage and mode != "time":
+        print("error: --coverage is only supported in TIME mode.", file=sys.stderr)
+        sys.exit(2)
 
     # TIME mode must state which Lambda variant it is measuring. The two modes differ
     # in what the "mir" result key MEANS — legacy stores the typed *2.ls timing under it,
@@ -1946,6 +1952,10 @@ Examples:
         num_runs = args.runs
     else:
         num_runs = 1 if mode == "memory" else 3
+    if args.coverage:
+        # coverage needs one execution per workload; repeated timing samples add cost
+        # without adding useful source coverage.
+        num_runs = 1
 
     # Engine handling
     if mode == "mir-vs-c":
@@ -1961,6 +1971,7 @@ Examples:
     metadata.update({
         "engines": engines,
         "runs": num_runs,
+        "coverage_build": args.coverage,
     })
 
     # Build benchmark list
@@ -2010,7 +2021,10 @@ Examples:
     # Enforce the build and Node baseline gates before any timing starts, so a
     # mismatch costs nothing rather than being discovered in the result file
     # afterwards. Both apply to every mode; --list and --dry-run returned already.
-    check_release_build()
+    if args.coverage:
+        print("coverage build check enabled: LLVM-instrumented build accepted")
+    else:
+        check_release_build()
     require_pinned_node_version(engines, mode)
 
     # --- Print header ---

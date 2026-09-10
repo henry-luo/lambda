@@ -782,7 +782,6 @@ void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)span_lengths),
         MIR_T_I64, MIR_new_int_op(mt->ctx, JM_JS_FACT(fc, formal_length)),
         MIR_T_I64, MIR_new_int_op(mt->ctx, flags));
-    jm_emit_constructor_plan(mt, fn_reg, fn_node);
 }
 
 // Publish a class's source in the callable carrier so Function.prototype

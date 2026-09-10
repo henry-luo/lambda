@@ -1732,12 +1732,6 @@ extern "C" bool js_is_typed_array(Item val) {
     return ptr != NULL;
 }
 
-extern "C" int64_t js_typed_array_matches_type(Item val, int64_t type_id) {
-    if (!js_is_typed_array(val)) return 0;
-    JsTypedArray* typed_array = js_get_typed_array_ptr(val.map);
-    return typed_array && (int64_t)typed_array->element_type == type_id;
-}
-
 // Get the typed trailing payload after validating the physical carrier.
 extern "C" JsTypedArray* js_get_typed_array_ptr(Map* m) {
     if (!m || m->map_kind != MAP_KIND_TYPED_ARRAY) return NULL;
