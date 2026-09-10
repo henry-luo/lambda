@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "description": "A uniquely-owned typed float array uses the proved raw store lane.",
+  "description": "S7.1.3v2: typed cold stores retain the checked error boundary. A uniquely-owned typed float array uses the proved raw store lane.",
   "checks": [
     {
       "in_func": "_tune16_proved_float_store_#",
       "expect": [
-        "call\tfn_array_set_p, fn_array_set",
+        "call\tlambda_array_set_checked",
         "lsh\t{{r}}, {{r}}, 3",
         "dmov\td:({{r}}), {{r}}"
       ]

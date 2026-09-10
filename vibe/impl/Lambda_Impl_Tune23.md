@@ -185,6 +185,11 @@ lowering. Broader scalar replacement and builder ownership outside that
 eligibility, induction-variable range proofs, and call-site specialization
 remain open (D8.3.1 permits one unboxed version per function).
 They require explicit lifetime, effect and range proofs.
+The [Tune25 implementation](Lambda_Impl_Tune25.md) extends audited scalar-call
+hoisting to initialized locals and counted/indexed loops, removes discarded
+comprehension output, and adds native stores for ten compact/wide numeric
+element kinds. Its checked fallback and precise-root requirements remain
+unchanged (D3.3.3v3, D5.3.4, D8.2.6).
 Loop-wide bounds/COW proofs and smaller precise-root frames around leaf calls
 remain useful follow-ups beyond those delivered scopes. These are
 implementation opportunities under D3.3.3v3, D5.3.4 and D8.3.1, not a request

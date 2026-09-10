@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "description": "D8.2.6, D3.3.3v3, D5.3.4, S7.1.3v2: loop demand and checked native mutation.",
+  "checks": [
+    {
+      "in_func": "_local_while_#",
+      "expect_seq": [
+        "call\tfabs_p, fabs",
+        "dlt"
+      ],
+      "count": {
+        "call\tfabs_p, fabs": 1
+      }
+    },
+    {
+      "in_func": "_counted_#",
+      "expect_seq": [
+        "call\tfabs_p, fabs",
+        "ge\t"
+      ],
+      "forbid": [
+        "array_spreadable",
+        "array_push_spread"
+      ]
+    },
+    {
+      "in_func": "_changing_#",
+      "expect_seq": [
+        "bt\t",
+        "call\tfabs_p, fabs",
+        "dadd\t"
+      ],
+      "forbid": [
+        "array_spreadable",
+        "array_push_spread"
+      ]
+    },
+    {
+      "in_func": "_retained_#",
+      "expect": [
+        "call\tarray_spreadable",
+        "call\tarray_push_spread"
+      ]
+    },
+    {
+      "in_func": "_effects_#",
+      "expect_seq": [
+        "ge\t",
+        "bt\t",
+        "call\t_touch_"
+      ],
+      "forbid": [
+        "array_spreadable",
+        "array_push_spread"
+      ]
+    }
+  ]
+}
