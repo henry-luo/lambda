@@ -1225,8 +1225,6 @@ extern Item js_set_number_assignment(Item target, double number_key, Item value,
     int64_t strict);
 extern int64_t js_number_key_to_index_fast(double number_key);
 extern int64_t js_typed_array_matches_type(Item value, int64_t type_id);
-extern int64_t js_elements_set_existing_dense_int_fast(Item array,
-    int64_t index, Item value);
 extern Item js_delete(Item target, uint64_t lane, Item observable_key);
 extern Item js_has_property(Item target, uint64_t lane, Item observable_key);
 extern Item js_install_user_accessor(Item obj, Item name, Item fn, int is_setter);
@@ -1802,14 +1800,6 @@ JitImport jit_runtime_imports[] = {
     {"fn_not_u", FPTR(fn_not_u), JIT_IMPORT_PURE_SCALAR},
     {"fn_sign_i", FPTR(fn_sign_i), JIT_IMPORT_PURE_SCALAR},
     {"fn_sign_f", FPTR(fn_sign_f), JIT_IMPORT_PURE_SCALAR},
-    {"js_math_round", FPTR(js_math_round), JIT_IMPORT_PURE_SCALAR},
-    {"js_math_trunc", FPTR(js_math_trunc)},
-    {"js_math_sign", FPTR(js_math_sign)},
-    {"js_math_floor", FPTR(js_math_floor)},
-    {"js_math_ceil", FPTR(js_math_ceil)},
-    {"js_math_ceil_d", FPTR(js_math_ceil_d), JIT_IMPORT_PURE_SCALAR},
-    {"js_math_round_item", FPTR(js_math_round_item)},
-    {"js_math_pow", FPTR(js_math_pow)},
     {"js_math_pow_d", FPTR(js_math_pow_d), JIT_IMPORT_PURE_SCALAR},
     {"fn_floor_i", FPTR(fn_floor_i), JIT_IMPORT_PURE_SCALAR},
     {"fn_ceil_i", FPTR(fn_ceil_i), JIT_IMPORT_PURE_SCALAR},
@@ -2093,11 +2083,6 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED,
       JIT_EXCEPTION_PRESERVES, 0}},
-    {"js_literal_shape", FPTR(js_literal_shape),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
-      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
-      JIT_IMPORT_NUMBER_STACK_PRESERVES, JIT_EXCEPTION_PRESERVES, 0}},
 #ifdef LAMBDA_JS_EXEC_PROFILE
     {"js_opt_trace_record", FPTR(js_opt_trace_record),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
@@ -2106,8 +2091,6 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES, JIT_EXCEPTION_PRESERVES, 0}},
 #endif
-    {"js_shaped_slot_get", FPTR(js_shaped_slot_get),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM}},
     {"js_get_key_default", FPTR(js_get_key_default)},
     // Property reads can materialize out-of-band numeric Items; the explicit
     // boxed contract lets MIR reserve a caller scalar home without treating
@@ -2193,8 +2176,6 @@ JitImport jit_runtime_imports[] = {
     {"js_private_field_init_end", FPTR(js_private_field_init_end), JIT_IMPORT_VOID_PRESERVES},
     {"js_elements_get", FPTR(js_elements_get)},
     {"js_elements_set", FPTR(js_elements_set)},
-    {"js_elements_set_append_or_dense_int_fast", FPTR(js_elements_set_append_or_dense_int_fast), JIT_IMPORT_RAW_SCALAR_PRESERVES},
-    {"js_elements_set_append_or_dense_item_fast", FPTR(js_elements_set_append_or_dense_item_fast), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_array_define_dense_element_direct", FPTR(js_array_define_dense_element_direct)},
     {"js_array_length", FPTR(js_array_length), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_array_push", FPTR(js_array_push)},
@@ -2293,12 +2274,6 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_RESULT_SCALAR_STABLE |
       JIT_IMPORT_ARGS_BORROWED_AUDITED,
       JIT_EXCEPTION_MAY_SET, 0}},
-    {"js_construct_value_defer_own_fields", FPTR(js_construct_value_defer_own_fields),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(1, JIT_VALUE_RAW_NON_GC_POINTER) |
-      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR) |
-      JIT_ARG_CLASS(3, JIT_VALUE_BOXED_ITEM)}},
     {"js_string_concat", FPTR(js_string_concat),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
@@ -2315,17 +2290,6 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"js_elements_set_int", FPTR(js_elements_set_int)},
-    {"js_elements_set_existing_dense_int_fast",
-     FPTR(js_elements_set_existing_dense_int_fast),
-     // Prototype/shape guards can lazily resolve JS state before the final
-     // no-GC dense write, so the import itself needs a caller safepoint.
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
-      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
-      JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM),
-      JIT_IMPORT_NUMBER_STACK_PRESERVES,
-      JIT_EXCEPTION_PRESERVES, 0}},
-    {"js_elements_set_number", FPTR(js_elements_set_number)},
     {"js_get_this", FPTR(js_get_this)},
     {"js_get_lexical_this_binding", FPTR(js_get_lexical_this_binding)},
     {"js_resolve_lexical_this", FPTR(js_resolve_lexical_this)},
@@ -2540,7 +2504,6 @@ JitImport jit_runtime_imports[] = {
     {"js_number_is_safe_integer", FPTR(js_number_is_safe_integer)},
     // v9: Array.from, JSON, delete
     {"js_array_from", FPTR(js_array_from)},
-    {"js_array_from_with_mapper", FPTR(js_array_from_with_mapper)},
     {"js_array_from_with_mapper_this", FPTR(js_array_from_with_mapper_this)},
     {"js_json_parse", FPTR(js_json_parse)},
     {"js_json_parse_full", FPTR(js_json_parse_full)},
@@ -2727,10 +2690,6 @@ JitImport jit_runtime_imports[] = {
     {"js_setTimeout_args", FPTR(js_setTimeout_args)},
     {"js_setInterval", FPTR(js_setInterval)},
     {"js_setInterval_args", FPTR(js_setInterval_args)},
-    {"js_pack_args_1", FPTR(js_pack_args_1)},
-    {"js_pack_args_2", FPTR(js_pack_args_2)},
-    {"js_pack_args_3", FPTR(js_pack_args_3)},
-    {"js_pack_args_4", FPTR(js_pack_args_4)},
     {"js_clearTimeout", FPTR(js_clearTimeout), JIT_IMPORT_VOID_PRESERVES},
     {"js_clearInterval", FPTR(js_clearInterval), JIT_IMPORT_VOID_PRESERVES},
     {"js_setImmediate", FPTR(js_setImmediate)},
@@ -2782,10 +2741,8 @@ JitImport jit_runtime_imports[] = {
     {"js_await_sync", FPTR(js_await_sync)},
     // Phase 6: Async state machine runtime
     {"js_async_wrap_return", FPTR(js_async_wrap_return)},
-    {"js_async_must_suspend", FPTR(js_async_must_suspend)},
     {"js_async_prepare_await", FPTR(js_async_prepare_await)},
     {"js_async_get_resolved", FPTR(js_async_get_resolved)},
-    {"js_async_context_create", FPTR(js_async_context_create)},
     {"js_async_context_create_mir", FPTR(js_async_context_create_mir)},
     {"js_async_start", FPTR(js_async_start)},
     {"js_async_get_promise", FPTR(js_async_get_promise)},
@@ -3535,13 +3492,9 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "fn_floor_i",
         "fn_ceil_i",
         "fn_round_i",
-        "js_math_round",
-        "js_math_ceil_d",
         "js_math_pow_d",
         "js_double_to_int32",
-        // resolves NameIds and builds pool-owned shape metadata only; the
-        // cache uses ArrayList allocation, with no GC heap or JS re-entry.
-        "js_literal_shape", "js_set_constructor_plan",
+        "js_set_constructor_plan",
 #ifdef LAMBDA_JS_EXEC_PROFILE
         // updates native counters; first-use getenv/atexit cannot collect or
         // re-enter JS. This diagnostic import is absent from release MIR.

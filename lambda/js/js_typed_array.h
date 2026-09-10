@@ -202,7 +202,6 @@ Item js_arraybuffer_resize(Item val, Item new_length_item);
 // copy min(srcByteLength, newLength) bytes, and detach the source.
 Item js_arraybuffer_transfer(Item val, Item new_length_item, int argc);
 Item js_arraybuffer_transfer_to_fixed_length(Item val, Item new_length_item, int argc);
-Item js_arraybuffer_slice(Item val, int begin, int end);
 Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_item, int argc);
 Item js_arraybuffer_is_view_item(Item val);
 void js_arraybuffer_detach(Item val);

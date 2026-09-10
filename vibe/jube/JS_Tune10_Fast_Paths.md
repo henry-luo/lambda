@@ -51,7 +51,7 @@ The archived reports show one cliff, 2026-08-10 → 2026-08-13 (commits `e91432d
 | awfy/havlak | 54,210 | 107,290 | 82,500 |
 | awfy/richards | 1,850 | 7,670 | 1,330 |
 
-Tune9 (2026-08-14) diagnosed this correctly (§5.1–5.5) and planned P1 (indexed recovery) and P2 (named recovery). IC_Retire (2026-08-15) then removed the per-callsite ICs **and the compiler-side indexed lanes**, leaving `js_number_key_to_index_fast`, `js_get_number_reference`, `js_set_number_assignment`, `js_elements_set_existing_dense_int_fast`, `js_array_fast_own_dense_get/set` defined in the runtime but **never emitted by the lowering** (`grep` over `js_mir_*.cpp`: 0 emit sites). The only emitted keyed path is `js_to_property_key` → `js_property_lane_for_canonical_key` → `js_get`/`js_set` (`js_mir_expression_lowering.cpp:1195–1231`, `:1287`).
+Tune9 (2026-08-14) diagnosed this correctly (§5.1–5.5) and planned P1 (indexed recovery) and P2 (named recovery). IC_Retire (2026-08-15) initially removed the per-callsite ICs **and the compiler-side indexed lanes**. T10-1 restored the semantic `js_number_key_to_index_fast`, `js_get_number_reference`, and `js_set_number_assignment` fallback seam. The old direct-store imports, `js_elements_set_existing_dense_int_fast` and the append-or-dense pair, still had no lowering or C client and were retired rather than preserved as dormant alternatives; `js_array_fast_own_dense_get/set` remain the shared runtime kernel internals. This follows **D1.3**, **D8.4.1v2**, and **D8.4.3v2**: one current lowering uses one semantic fallback, while a replaced fast-path ABI is deleted.
 
 ### 2.3 Micro-benchmarks (same machine, same day; archived release binaries)
 

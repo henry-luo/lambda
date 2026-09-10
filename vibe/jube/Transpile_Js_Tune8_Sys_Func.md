@@ -36,7 +36,7 @@ This table is the post-mortem of folds and deletions that were tried during Tune
 | **§2.4 `js_eval_private_push_frame` / `_pop_frame`** | Symmetric pair (both `void()`), but only 52 emissions each. The fold cost (extra register operand at every emit site) exceeds the −1 entry savings. |
 | **§2.4 `js_private_field_init_begin` / `_end`** | Trivial one-line runtime bodies (`g_flag = true / false`). With 10 emit sites and 30K+ emissions, adding a runtime branch and a register operand at every callsite is a net loss vs the −1 entry saved. |
 | **§2.4 `js_eval_env_*` triple** | Three different signatures: `push(void)`, `pop(void)`, `bind(Item, Item)`. Not a clean dispatcher target. |
-| **§2.6 dead type-specialized variants** | Telemetry confirmed all 8 candidates (`js_math_pow_d` 4.2K, `js_math_ceil_d` 0, `js_math_round_item` 13, `js_string_fromCharCode_int` 66, `js_string_fromCharCode_array` 2, `js_setTimeout_args` 0, `js_setInterval_args` 0) are either still emitted at runtime or quoted in MIR lowering. None deletable. The original proposal estimate of "−10 entries" turned out to be optimistic. |
+| **§2.6 dead type-specialized variants** | The initial telemetry retained the candidates because some were still quoted in lowering. A later source census found that the dedicated `js_math_round`, `js_math_trunc`, `js_math_sign`, `js_math_floor`, `js_math_ceil`, `js_math_ceil_d` and `js_math_round_item` bodies had no lowering or C caller after `js_math_intrinsic` became the live JS-semantic dispatcher. Their bodies, declarations and imports are retired. `js_math_pow_d`, the `String.fromCharCode` helpers and timer helpers remain emitted. This preserves the profile-owned JS coercion/result contract (**D1.3**, **D2.4.3**, **D8.4.3v2**). |
 | **§4 transpiler-side `#ifdef` gating** | Two-sided change: 15 transpiler emit detection blocks must also be wrapped. Mechanical but substantial. Savings only materialize in a hypothetical non-test262 production build. Currently registry-side only; the macro defaults to `1` so the default build is unchanged. |
 
 ### Reshaped (kept the change but in a different form than originally planned)
@@ -447,12 +447,12 @@ The `js_test262_*` and `js_uri_decode_equals_from_char_code` are prime suspects 
 Candidates with zero string-references in any `js_mir_*.cpp` and no obvious indirect caller:
 
 ```
-js_math_pow_d  js_math_ceil_d  js_math_round_item
+js_math_pow_d
 js_string_fromCharCode_int  js_string_fromCharCode_array  js_string_fromCharCode2
 js_setTimeout_args  js_setInterval_args
 ```
 
-**Action:** §1.3 telemetry confirms zero emissions across the full test262 + Radiant fixture set. Then delete. If telemetry shows even one emission, leave in place and investigate.
+**Action:** §1.3 telemetry confirms zero emissions across the full test262 + Radiant fixture set. Then delete. If telemetry shows even one emission, leave in place and investigate. The Math-dispatcher follow-up above completed this proof for the retired Math helpers.
 
 Estimated savings: ~10 entries.
 

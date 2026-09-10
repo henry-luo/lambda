@@ -2792,17 +2792,6 @@ extern "C" {
     int64_t fn_sign_i(int64_t x);
     int64_t fn_sign_f(double x);
 
-    // JS Math.round (rounds to +Infinity for ties)
-    double js_math_round(double x);
-
-    // JS-semantic Math functions (boxed Item → boxed Item, handle NaN/-0/Infinity)
-    Item js_math_trunc(Item x);
-    Item js_math_sign(Item x);
-    Item js_math_floor(Item x);
-    Item js_math_ceil(Item x);
-    double js_math_ceil_d(double d);
-    Item js_math_round_item(Item x);
-
     // String.raw tagged template literal
     Item js_string_raw(Item* args, int argc);
 

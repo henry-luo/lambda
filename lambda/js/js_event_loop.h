@@ -92,11 +92,6 @@ void js_event_loop_abandon_document_timers(void* dom_doc);
 void js_event_loop_abandon_all_timers(void);
 void js_event_loop_timer_state_destroy(struct JsEventLoopTimerState* state);
 
-// Helper: pack 1-4 items into a JS array (used by transpiler for timer extra args)
-Item js_pack_args_1(Item a1);
-Item js_pack_args_2(Item a1, Item a2);
-Item js_pack_args_3(Item a1, Item a2, Item a3);
-Item js_pack_args_4(Item a1, Item a2, Item a3, Item a4);
 // Dynamic native callers keep every actual in one Array argument pack.
 Item js_pack_args_span(Item* values, int count);
 

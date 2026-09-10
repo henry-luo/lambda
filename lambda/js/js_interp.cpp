@@ -1,5 +1,7 @@
 #include "js_interp.hpp"
 
+#include <limits.h>
+
 #include "js_interp_env.h"
 #include "js_runtime_state.hpp"
 #include "js_builtin_catalog.hpp"
@@ -2660,21 +2662,34 @@ struct JsInterpEvalLocalFrame {
 
 static bool js_interp_identifier_is(JsAstNode* node, const char* name);
 
+static bool js_interp_call_has_plain_arguments(JsCallNode* call, int* out_count) {
+    if (!call || !out_count) return false;
+    int count = 0;
+    for (JsAstNode* arg = (JsAstNode*)call->arguments; arg;
+            arg = (JsAstNode*)arg->next) {
+        if (arg->node_type == JS_AST_NODE_SPREAD_ELEMENT || count == INT_MAX) {
+            return false;
+        }
+        count++;
+    }
+    *out_count = count;
+    return true;
+}
+
 static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
         JsCallNode* call, bool construct) {
 #define JS_INTERP_CALL_RETURN(value) return {(value), false}
     if (!call) JS_INTERP_CALL_RETURN(js_interp_throw(ItemError));
+    int plain_arg_count = 0;
+    bool has_plain_arguments = js_interp_call_has_plain_arguments(call, &plain_arg_count);
     RootFrame roots(7);
     Rooted<Item> callee_root(roots, ItemNull);
     Rooted<Item> this_root(roots, make_js_undefined());
     Rooted<Item> key_root(roots, ItemNull);
-    Rooted<Item> arguments_root(roots, js_array_new(0));
+    Rooted<Item> arguments_root(roots, ItemNull);
     Rooted<Item> value_root(roots, ItemNull);
     Rooted<Item> spread_item_root(roots, ItemNull);
     Rooted<Item> super_base_root(roots, ItemNull);
-    if (item_is_error(arguments_root.get())) {
-        JS_INTERP_CALL_RETURN(js_interp_throw(arguments_root.get()));
-    }
     bool super_call = !construct && js_interp_identifier_is(
         (JsAstNode*)call->function, "super");
     bool intrinsic_require = !construct && call->function &&
@@ -2686,6 +2701,26 @@ static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
         call->function->node_type == AST_NODE_IDENT &&
         js_interp_identifier_is((JsAstNode*)call->function, "import") &&
         ((JsIdentifierNode*)call->function)->entry == NULL;
+    bool intrinsic_eval = !construct && call->function &&
+        call->function->node_type == AST_NODE_IDENT &&
+        js_interp_identifier_is((JsAstNode*)call->function, "eval");
+    bool direct_arguments = has_plain_arguments && !super_call &&
+        !intrinsic_require && !intrinsic_dynamic_import && !intrinsic_eval;
+    if (!direct_arguments) {
+        arguments_root.set(js_array_new(0));
+        if (item_is_error(arguments_root.get())) {
+            JS_INTERP_CALL_RETURN(js_interp_throw(arguments_root.get()));
+        }
+    }
+    // Ordinary AST calls do not need a JavaScript arguments array. Keep the
+    // evaluated values in one exact GC-root span and hand it to the call
+    // kernel, avoiding the array allocation and apply-style copy round-trip.
+    RootSpan direct_argument_roots(direct_arguments && plain_arg_count > 0
+        ? (size_t)plain_arg_count : 0);
+    Item* direct_arguments_items = direct_arguments ? direct_argument_roots.items() : NULL;
+    if (direct_arguments && plain_arg_count > 0 && !direct_arguments_items) {
+        JS_INTERP_CALL_RETURN(js_interp_throw(ItemError));
+    }
     if (super_call) {
         // The generic dispatcher installed this constructor's home class,
         // deferred derived `this` binding, and active new.target. Resolve the
@@ -2745,6 +2780,7 @@ static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
     if (item_is_error(callee_root.get())) {
         JS_INTERP_CALL_RETURN(js_interp_throw(callee_root.get()));
     }
+    int argument_index = 0;
     for (JsAstNode* arg = (JsAstNode*)call->arguments; arg; arg = (JsAstNode*)arg->next) {
         if (arg->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
             JsSpreadElementNode* spread = (JsSpreadElementNode*)arg;
@@ -2770,8 +2806,12 @@ static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
         JsInterpCompletion value = js_interp_eval(frame, arg);
         if (value.kind != JS_INTERP_NORMAL) JS_INTERP_CALL_RETURN(value);
         value_root.set(value.value);
-        Item pushed = js_array_push(arguments_root.get(), value_root.get());
-        if (item_is_error(pushed)) JS_INTERP_CALL_RETURN(js_interp_throw(pushed));
+        if (direct_arguments) {
+            direct_arguments_items[argument_index++] = value_root.get();
+        } else {
+            Item pushed = js_array_push(arguments_root.get(), value_root.get());
+            if (item_is_error(pushed)) JS_INTERP_CALL_RETURN(js_interp_throw(pushed));
+        }
     }
     if (!construct && call->function && call->function->node_type == AST_NODE_IDENT &&
             js_interp_identifier_is((JsAstNode*)call->function, "eval")) {
@@ -2854,9 +2894,18 @@ static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
         }
         JS_INTERP_CALL_RETURN(js_interp_normal(value_root.get()));
     }
-    Item result = construct
-        ? js_construct_array_like(callee_root.get(), arguments_root.get(), callee_root.get())
-        : js_apply_function(callee_root.get(), this_root.get(), arguments_root.get());
+    Item result = ItemNull;
+    if (direct_arguments) {
+        result = construct
+            ? js_construct_value(callee_root.get(), direct_arguments_items, plain_arg_count,
+                callee_root.get(), value_root.home(), true)
+            : js_call_function_prerooted_args_into(callee_root.get(), this_root.get(),
+                direct_arguments_items, plain_arg_count, value_root.home());
+    } else {
+        result = construct
+            ? js_construct_array_like(callee_root.get(), arguments_root.get(), callee_root.get())
+            : js_apply_function(callee_root.get(), this_root.get(), arguments_root.get());
+    }
     JS_INTERP_CALL_RETURN(item_is_error(result) ? js_interp_throw(result)
         : js_interp_normal(result));
 #undef JS_INTERP_CALL_RETURN

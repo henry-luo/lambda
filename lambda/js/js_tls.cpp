@@ -650,19 +650,21 @@ enum JsTlsSocketValueSlot {
     JS_TLS_SOCKET_VALUE_COUNT,
 };
 
-static bool tls_server_values_init(JsTlsServer* srv) {
-    return srv && runtime_value_slots_init(&srv->values, (Context*)context,
-        "TLS server values", JS_TLS_SERVER_VALUE_COUNT);
-}
-
-static Item tls_server_value(JsTlsServer* srv, JsTlsServerValueSlot slot) {
-    return srv ? runtime_value_slots_get(&srv->values, slot) : make_js_undefined();
-}
-
-static void tls_server_set_value(JsTlsServer* srv, JsTlsServerValueSlot slot,
-        Item value) {
-    if (srv) runtime_value_slots_set(&srv->values, slot, value);
-}
+#define TLS_VALUES_INIT(owner, label, count) \
+    ((owner) && runtime_value_slots_init(&(owner)->values, (Context*)context, \
+        (label), (count)))
+#define TLS_VALUE(owner, prefix, name) \
+    ((owner) ? runtime_value_slots_get(&(owner)->values, prefix ## name) : make_js_undefined())
+#define TLS_SET_VALUE(owner, prefix, name, value) \
+    do { if (owner) runtime_value_slots_set(&(owner)->values, prefix ## name, (value)); } while (0)
+#define TLS_SERVER_VALUE(srv, name) \
+    TLS_VALUE((srv), JS_TLS_SERVER_VALUE_, name)
+#define TLS_SERVER_SET_VALUE(srv, name, value) \
+    TLS_SET_VALUE((srv), JS_TLS_SERVER_VALUE_, name, (value))
+#define TLS_SOCKET_VALUE(sock, name) \
+    TLS_VALUE((sock), JS_TLS_SOCKET_VALUE_, name)
+#define TLS_SOCKET_SET_VALUE(sock, name, value) \
+    TLS_SET_VALUE((sock), JS_TLS_SOCKET_VALUE_, name, (value))
 
 static Item tls_server_object(JsTlsServer* srv) {
     if (!srv || srv->resource_id == 0) return make_js_undefined();
@@ -672,39 +674,25 @@ static Item tls_server_object(JsTlsServer* srv) {
 }
 
 static Item tls_server_connection_handler(JsTlsServer* srv) {
-    return tls_server_value(srv, JS_TLS_SERVER_VALUE_CONNECTION_HANDLER);
+    return TLS_SERVER_VALUE(srv, CONNECTION_HANDLER);
 }
 
 static Item tls_server_close_callback(JsTlsServer* srv) {
-    return tls_server_value(srv, JS_TLS_SERVER_VALUE_CLOSE_CALLBACK);
-}
-
-static bool tls_socket_values_init(JsTlsSocket* sock) {
-    return sock && runtime_value_slots_init(&sock->values, (Context*)context,
-        "TLS socket values", JS_TLS_SOCKET_VALUE_COUNT);
-}
-
-static Item tls_socket_value(JsTlsSocket* sock, JsTlsSocketValueSlot slot) {
-    return sock ? runtime_value_slots_get(&sock->values, slot) : make_js_undefined();
-}
-
-static void tls_socket_set_value(JsTlsSocket* sock, JsTlsSocketValueSlot slot,
-        Item value) {
-    if (sock) runtime_value_slots_set(&sock->values, slot, value);
+    return TLS_SERVER_VALUE(srv, CLOSE_CALLBACK);
 }
 
 static Item tls_socket_object(JsTlsSocket* sock) {
-    return tls_socket_value(sock, JS_TLS_SOCKET_VALUE_OBJECT);
+    return TLS_SOCKET_VALUE(sock, OBJECT);
 }
 
 static Item tls_socket_borrowed_socket(JsTlsSocket* sock) {
-    return tls_socket_value(sock, JS_TLS_SOCKET_VALUE_BORROWED_SOCKET);
+    return TLS_SOCKET_VALUE(sock, BORROWED_SOCKET);
 }
 
 static JsTlsSocket* tls_socket_alloc(void) {
     JsTlsSocket* sock = (JsTlsSocket*)mem_calloc(1, sizeof(JsTlsSocket), MEM_CAT_JS_RUNTIME);
     if (!sock) return NULL;
-    if (!tls_socket_values_init(sock)) {
+    if (!TLS_VALUES_INIT(sock, "TLS socket values", JS_TLS_SOCKET_VALUE_COUNT)) {
         mem_free(sock);
         return NULL;
     }
@@ -878,8 +866,7 @@ static void tls_socket_finalize_closed(JsTlsSocket* sock, bool had_error) {
         // native close owner once it adopts their uv_tcp_t.
         js_net_socket_tls_closed(tls_socket_borrowed_socket(sock), had_error);
         sock->has_borrowed_socket = false;
-        tls_socket_set_value(sock, JS_TLS_SOCKET_VALUE_BORROWED_SOCKET,
-            make_js_undefined());
+        TLS_SOCKET_SET_VALUE(sock, BORROWED_SOCKET, make_js_undefined());
     }
     tls_server_note_socket_closed(sock);
     tls_socket_detach_js_object(tls_socket_object(sock));
@@ -904,8 +891,7 @@ static void tls_socket_destroy_pending_borrowed_socket(JsTlsSocket* sock) {
         js_microtask_flush();
     }
     sock->has_borrowed_socket = false;
-    tls_socket_set_value(sock, JS_TLS_SOCKET_VALUE_BORROWED_SOCKET,
-        make_js_undefined());
+    TLS_SOCKET_SET_VALUE(sock, BORROWED_SOCKET, make_js_undefined());
 }
 
 // emit an event on a TLS socket or server through the shared Node emitter
@@ -1392,7 +1378,7 @@ static void tls_socket_emit_plain_data(JsTlsSocket* sock, const unsigned char* d
     // emitting here lets server secure handlers register session listeners.
     tls_socket_emit_session_now(sock);
     Item chunk = js_buffer_from_bytes((const char*)data, len);
-    tls_socket_set_value(sock, JS_TLS_SOCKET_VALUE_PENDING_READ, chunk);
+    TLS_SOCKET_SET_VALUE(sock, PENDING_READ, chunk);
     sock->has_pending_read = true;
     tls_socket_emit(tls_socket_object(sock), "data", &chunk, 1);
     tls_socket_emit(tls_socket_object(sock), "readable", NULL, 0);
@@ -1685,9 +1671,8 @@ extern "C" Item js_tls_socket_read(void) {
     JsTlsSocket* sock = tls_socket_from_object(self);
     if (!sock || !sock->has_pending_read) return ItemNull;
     sock->has_pending_read = false;
-    Item chunk = tls_socket_value(sock, JS_TLS_SOCKET_VALUE_PENDING_READ);
-    tls_socket_set_value(sock, JS_TLS_SOCKET_VALUE_PENDING_READ,
-        make_js_undefined());
+    Item chunk = TLS_SOCKET_VALUE(sock, PENDING_READ);
+    TLS_SOCKET_SET_VALUE(sock, PENDING_READ, make_js_undefined());
     return chunk;
 }
 
@@ -1953,7 +1938,7 @@ extern "C" Item js_tls_socket_isSessionReused(void) {
 static Item make_tls_socket_object(JsTlsSocket* sock) {
     if (sock->high_water_mark <= 0) sock->high_water_mark = 16 * 1024;
     Item obj = js_new_object_with_class(JS_CLASS_TLS_SOCKET);
-    tls_socket_set_value(sock, JS_TLS_SOCKET_VALUE_OBJECT, obj);
+    TLS_SOCKET_SET_VALUE(sock, OBJECT, obj);
     const RuntimeResourceDescriptor* descriptor =
         runtime_resource_descriptor_from_legacy_name("TLSSocketWrap");
     sock->resource_id = runtime_resource_table_add_owned(
@@ -2361,7 +2346,7 @@ extern "C" Item js_tls_TLSSocket(Item socket_item, Item options_item) {
     js_set_key_cstr(obj, "alpnProtocol", make_string_item("http/1.1"));
     if (get_type_id(socket_item) == LMD_TYPE_MAP ||
         get_type_id(socket_item) == LMD_TYPE_VMAP) {
-        tls_socket_set_value(sock, JS_TLS_SOCKET_VALUE_BORROWED_SOCKET, socket_item);
+        TLS_SOCKET_SET_VALUE(sock, BORROWED_SOCKET, socket_item);
         sock->has_borrowed_socket = true;
         js_set_key_cstr(obj, "__underlying_socket__", socket_item);
         schedule_tls_attach_existing_socket(obj, socket_item);
@@ -2534,8 +2519,7 @@ extern "C" Item js_tls_connect(Item options_item) {
     }
 
     if (use_existing_socket) {
-        tls_socket_set_value(sock, JS_TLS_SOCKET_VALUE_BORROWED_SOCKET,
-            existing_socket_item);
+        TLS_SOCKET_SET_VALUE(sock, BORROWED_SOCKET, existing_socket_item);
         sock->has_borrowed_socket = true;
         js_set_key_cstr(obj, "__underlying_socket__", existing_socket_item);
         schedule_tls_attach_existing_socket(obj, existing_socket_item);
@@ -2750,7 +2734,7 @@ extern "C" Item js_tls_server_close(Item callback) {
     JsTlsServer* srv = (JsTlsServer*)(uintptr_t)it2i(handle_item);
     if (!srv) return self;
     if (is_callable(callback)) {
-        tls_server_set_value(srv, JS_TLS_SERVER_VALUE_CLOSE_CALLBACK, callback);
+        TLS_SERVER_SET_VALUE(srv, CLOSE_CALLBACK, callback);
     }
     srv->closing = true;
 
@@ -2883,7 +2867,7 @@ extern "C" Item js_tls_createServer(Item options_item, Item handler) {
     }
 
     JsTlsServer* srv = (JsTlsServer*)mem_calloc(1, sizeof(JsTlsServer), MEM_CAT_JS_RUNTIME);
-    if (!srv || !tls_server_values_init(srv)) {
+    if (!TLS_VALUES_INIT(srv, "TLS server values", JS_TLS_SERVER_VALUE_COUNT)) {
         if (srv) mem_free(srv);
         tls_context_destroy(ctx);
         return js_new_error(make_string_item("Could not allocate TLS server"));
@@ -2891,7 +2875,7 @@ extern "C" Item js_tls_createServer(Item options_item, Item handler) {
     uv_tcp_init(loop, &srv->tcp);
     srv->tcp.data = srv;
     srv->tls_ctx = ctx;
-    tls_server_set_value(srv, JS_TLS_SERVER_VALUE_CONNECTION_HANDLER, handler);
+    TLS_SERVER_SET_VALUE(srv, CONNECTION_HANDLER, handler);
     if (ticket_keys_len > 0) {
         memcpy(srv->ticket_keys, ticket_keys, (size_t)ticket_keys_len);
         srv->ticket_keys_len = ticket_keys_len;
@@ -3106,3 +3090,11 @@ extern "C" void js_tls_destroy_context(JsRuntimeState* runtime_state) {
     // Context teardown is a valid lifecycle exit without a prior realm reset.
     tls_destroy_tracked_secure_contexts_for(runtime_state);
 }
+
+#undef TLS_SOCKET_SET_VALUE
+#undef TLS_SOCKET_VALUE
+#undef TLS_SERVER_SET_VALUE
+#undef TLS_SERVER_VALUE
+#undef TLS_SET_VALUE
+#undef TLS_VALUE
+#undef TLS_VALUES_INIT

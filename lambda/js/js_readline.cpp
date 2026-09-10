@@ -17,9 +17,6 @@
 #include <stdio.h>
 
 extern "C" Item js_get_current_this(void);
-extern "C" Item js_readline_completion_callback(Item err_item, Item result_item);
-extern "C" Item js_readline_completion_fulfilled(Item rl_item, Item result_item);
-extern "C" Item js_readline_completion_rejected(Item rl_item, Item err_item);
 extern "C" Item js_readline_completion_callback_bound(Item rl_item, Item tab_count_item, Item err_item, Item result_item);
 extern "C" Item js_readline_completion_fulfilled_bound(Item rl_item, Item tab_count_item, Item result_item);
 extern "C" Item js_readline_completion_rejected_bound(Item rl_item, Item tab_count_item, Item err_item);
@@ -41,7 +38,6 @@ static JsReadlineState* readline_state_require(void) {
 struct ReadlineRealmItems {
     Item* namespace_object = NULL;
     Item* promises_namespace = NULL;
-    Item* completion_interface = NULL;
 };
 
 static bool readline_realm_items(ReadlineRealmItems* items, bool reserve) {
@@ -49,14 +45,12 @@ static bool readline_realm_items(ReadlineRealmItems* items, bool reserve) {
     static const JsRealmSlotId slot_ids[] = {
         JS_REALM_SLOT_READLINE_NAMESPACE,
         JS_REALM_SLOT_READLINE_PROMISES_NAMESPACE,
-        JS_REALM_SLOT_READLINE_COMPLETION_INTERFACE,
     };
-    Item* values[3] = {};
+    Item* values[2] = {};
     if (!js_realm_slots_lookup(&js_runtime_state.realm_slots, slot_ids, values,
-            3, reserve)) return false;
+            2, reserve)) return false;
     items->namespace_object = values[0];
     items->promises_namespace = values[1];
-    items->completion_interface = values[2];
     return true;
 }
 
@@ -1095,15 +1089,6 @@ static Item readline_completion_callback_impl(Item rl, Item err_item, Item resul
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
-extern "C" Item js_readline_completion_callback(Item err_item, Item result_item) {
-    ReadlineRealmItems items = {};
-    if (!readline_realm_items(&items, false)) return ItemError;
-    Item tab_count_item = readline_get(*items.completion_interface, "__tab_count__");
-    int tab_count = get_type_id(tab_count_item) == LMD_TYPE_INT ? it2i(tab_count_item) : 0;
-    return readline_completion_callback_impl(*items.completion_interface, err_item,
-        result_item, tab_count);
-}
-
 extern "C" Item js_readline_completion_callback_bound(Item rl_item, Item tab_count_item, Item err_item, Item result_item) {
     int tab_count = get_type_id(tab_count_item) == LMD_TYPE_INT ? it2i(tab_count_item) : 0;
     return readline_completion_callback_impl(rl_item, err_item, result_item, tab_count);
@@ -1116,26 +1101,6 @@ static Item js_readline_completion_direct(Item rl_item, Item err_item,
         result_item, tab_count);
     readline_set(rl_item, "__completion_direct_output__", (Item){.item = ITEM_JS_UNDEFINED});
     return result;
-}
-
-extern "C" Item js_readline_completion_fulfilled(Item rl_item, Item result_item) {
-    ReadlineRealmItems items = {};
-    if (!readline_realm_items(&items, false)) return ItemError;
-    *items.completion_interface = rl_item;
-    Item tab_count_item = readline_get(rl_item, "__tab_count__");
-    int tab_count = get_type_id(tab_count_item) == LMD_TYPE_INT ? it2i(tab_count_item) : 0;
-    return js_readline_completion_direct(rl_item,
-        (Item){.item = ITEM_JS_UNDEFINED}, result_item, tab_count);
-}
-
-extern "C" Item js_readline_completion_rejected(Item rl_item, Item err_item) {
-    ReadlineRealmItems items = {};
-    if (!readline_realm_items(&items, false)) return ItemError;
-    *items.completion_interface = rl_item;
-    Item tab_count_item = readline_get(rl_item, "__tab_count__");
-    int tab_count = get_type_id(tab_count_item) == LMD_TYPE_INT ? it2i(tab_count_item) : 0;
-    return js_readline_completion_direct(rl_item, err_item,
-        (Item){.item = ITEM_JS_UNDEFINED}, tab_count);
 }
 
 extern "C" Item js_readline_completion_fulfilled_bound(Item rl_item, Item tab_count_item, Item result_item) {
@@ -1890,7 +1855,6 @@ extern "C" void js_readline_reset(void) {
     if (readline_realm_items(&items, false)) {
         *items.namespace_object = (Item){0};
         *items.promises_namespace = (Item){0};
-        *items.completion_interface = (Item){0};
     }
     JsReadlineState* state = js_runtime_state.readline;
     if (state) {

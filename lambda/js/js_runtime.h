@@ -242,13 +242,8 @@ Item js_new_object_shaped(int64_t first_key_index, int64_t key_count);
 // initialize an admitted default predicted slot, using shared transitions for
 // incompatible lanes. May allocate; handled distinguishes refusal from error.
 Item js_predicted_slot_initialize(Item target, NameRef key, Item value, bool* handled);
-// T10-2 item 2: guarded direct-slot read. The shape is a compile-time candidate;
-// the guard proves it at runtime and misses fall through to js_get_name_id.
 #define JS_PREDICTED_SHAPE_LIMIT 512
-void* js_literal_shape(int64_t first_key_index, int64_t key_count);
 void js_set_constructor_plan(Item function, int64_t first_key_index, int64_t key_count);
-Item js_shaped_slot_get(Item object, int64_t first_key_index, int64_t key_count,
-                        int64_t slot, int64_t name_id);
 struct TypeMap;
 // Native carriers use the same pre-publication metadata-qualified empty shape.
 struct TypeMap* js_object_type_for_class(int class_id);
@@ -267,9 +262,7 @@ Item js_get_key_cstr(Item object, const char* key);
 // Receiver-explicit property Get used by prototype, accessor, and Proxy paths.
 Item js_get_key_core(Item object, Item key, Item receiver);
 Item js_set_key_default(Item object, Item key, Item value);
-// Receiver-explicit property Set used by prototype, accessor, and Proxy paths.
-Item js_set_key_core(Item object, Item key, Item value,
-                                   Item receiver);
+// Receiver-explicit property Set belongs to the completion kernel.
 Item js_set_completion_with_key(Item target, Item key, Item value,
                                 Item receiver);
 Item js_dataset_owner(Item dataset);
@@ -314,24 +307,18 @@ Item js_elements_get(Item array, Item index);
 Item js_elements_set(Item array, Item index, Item value);
 Item js_elements_get_int(Item array, int64_t index);
 Item js_elements_set_int(Item array, int64_t index, Item value);
-int64_t js_elements_set_existing_dense_int_fast(Item array, int64_t index,
-                                                Item value);
 // Returns a boolean Set completion for the narrow ordinary-array index fast
 // path, or ItemNull when descriptor/prototype/exotic checks require fallback.
 Item js_elements_set_int_completion(Item array, int64_t index, Item value);
-Item js_elements_set_number(Item array, Item index, Item value);
 Item js_elements_set_int_direct(Item array, int64_t index, Item value);
 int64_t js_array_sparse_delete_index(Item array, int64_t index);
 int64_t js_array_sparse_has_index(Item array, int64_t index);
 Item js_array_sparse_get_index(Item array, int64_t index);
 int64_t js_array_sparse_collect_indices(Item array, int64_t start, int64_t end, int64_t* indices, int64_t cap);
-int64_t js_elements_set_append_or_dense_int_fast(Item array, int64_t index, Item value);
-int64_t js_elements_set_append_or_dense_item_fast(Item array, Item index, Item value);
 Item js_array_define_dense_element_direct(Item array, int64_t index, Item value);
 int64_t js_array_length(Item array);
 Item js_array_push(Item array, Item value);
 void js_array_push_item_direct(Array* arr, Item value);
-Item js_math_pow(Item base, Item exp);
 double js_math_pow_d(double base, double exp);
 int64_t js_get_length(Item object);
 
@@ -550,7 +537,6 @@ Item js_toFixed(Item num_item, Item digits_item);
 // v5: String Methods (charCodeAt, fromCharCode)
 // =============================================================================
 
-Item js_string_charCodeAt(Item str_item, Item index_item);
 Item js_string_fromCharCode(Item code_item);
 Item js_string_fromCharCode_array(Item arr_item);
 Item js_string_fromCodePoint(Item code_item);
@@ -685,7 +671,6 @@ Item js_number_is_safe_integer(Item value);
 // =============================================================================
 
 Item js_array_from(Item iterable);
-Item js_array_from_with_mapper(Item iterable, Item mapFn);
 Item js_array_from_with_mapper_this(Item iterable, Item mapFn, Item this_arg);
 Item js_json_parse(Item str_item);
 Item js_json_parse_full(Item str_item, Item reviver);
@@ -825,8 +810,6 @@ void js_reset_constructor_prototypes(void);
 Item js_constructor_create_object(Item callee, Item new_target);
 Item js_construct_value(Item callee, Item* args, int argc, Item new_target,
                         uint64_t* result_home, bool args_prerooted);
-Item js_construct_value_defer_own_fields(Item callee, Item* args, int argc,
-                                         Item new_target);
 
 // =============================================================================
 // v12: Language extensions
@@ -1074,12 +1057,8 @@ void js_promise_reject_existing(Item promise, Item reason);
 const char* js_promise_state_name(Item promise); // "pending", "fulfilled", "rejected", or NULL
 int js_promise_pending_count(void);
 Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected);
-Item js_promise_catch(Item promise, Item on_rejected);
 Item js_promise_finally(Item promise, Item on_finally);
 Item js_promise_all(Item iterable);              // Promise.all([...])
-Item js_promise_race(Item iterable);             // Promise.race([...])
-Item js_promise_any(Item iterable);              // Promise.any([...])
-Item js_promise_all_settled(Item iterable);      // Promise.allSettled([...])
 Item js_promise_with_resolvers(void);            // Promise.withResolvers()
 Item js_await_sync(Item value);                  // Phase 5: synchronous await unwrap
 Item js_await_sync_incremental(Item value);      // wait without draining unrelated jobs
@@ -1090,9 +1069,7 @@ Item js_promise_async_function_finish(Item promise, Item result,
 // Phase 6: Async state machine runtime
 Item js_async_prepare_await(Item value);
 Item js_async_wrap_return(Item value);           // fresh async-function result promise
-Item js_async_must_suspend(Item value);          // true if pending promise, false otherwise
-Item js_async_get_resolved(void);                // get cached resolved value
-Item js_async_context_create(void* fn_ptr, Item* env, int64_t env_size, Item this_val);
+Item js_async_get_resolved(void);                // get prepared await promise
 Item js_async_context_create_mir(void* fn_ptr, Item* env, int64_t env_size,
                                  Item this_val);
 Item js_async_context_create_ast(Item function, Item arguments, Item this_val);

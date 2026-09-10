@@ -161,23 +161,18 @@ enum JsSocketValueSlot {
     JS_SOCKET_VALUE_COUNT,
 };
 
-static bool socket_values_init(JsSocket* sock) {
-    return sock && runtime_value_slots_init(&sock->values, (Context*)context,
-        "net.Socket values", JS_SOCKET_VALUE_COUNT);
-}
-
-static Item socket_value(JsSocket* sock, JsSocketValueSlot slot) {
-    return sock ? runtime_value_slots_get(&sock->values, slot) : (Item){0};
-}
-
-static void socket_set_value(JsSocket* sock, JsSocketValueSlot slot, Item value) {
-    if (sock) runtime_value_slots_set(&sock->values, slot, value);
-}
+#define NET_VALUES_INIT(owner, label, count) \
+    ((owner) && runtime_value_slots_init(&(owner)->values, (Context*)context, \
+        (label), (count)))
+#define NET_VALUE(owner, prefix, name) \
+    ((owner) ? runtime_value_slots_get(&(owner)->values, prefix ## name) : (Item){0})
+#define NET_SET_VALUE(owner, prefix, name, value) \
+    do { if (owner) runtime_value_slots_set(&(owner)->values, prefix ## name, (value)); } while (0)
 
 #define SOCKET_VALUE(sock, name) \
-    socket_value((sock), JS_SOCKET_VALUE_##name)
+    NET_VALUE((sock), JS_SOCKET_VALUE_, name)
 #define SOCKET_SET_VALUE(sock, name, value) \
-    socket_set_value((sock), JS_SOCKET_VALUE_##name, (value))
+    NET_SET_VALUE((sock), JS_SOCKET_VALUE_, name, (value))
 
 struct SocketAutoAttemptTimerReq {
     uv_timer_t timer;
@@ -221,7 +216,7 @@ struct PendingSocketWrite {
 static JsSocket* socket_alloc(void) {
     JsSocket* sock = (JsSocket*)mem_calloc(1, sizeof(JsSocket), MEM_CAT_JS_RUNTIME);
     if (!sock) return NULL;
-    if (!socket_values_init(sock)) {
+    if (!NET_VALUES_INIT(sock, "net.Socket values", JS_SOCKET_VALUE_COUNT)) {
         mem_free(sock);
         return NULL;
     }
@@ -4023,23 +4018,10 @@ enum JsServerValueSlot {
     JS_SERVER_VALUE_COUNT,
 };
 
-static bool server_values_init(JsServer* srv) {
-    return srv && runtime_value_slots_init(&srv->values, (Context*)context,
-        "net.Server values", JS_SERVER_VALUE_COUNT);
-}
-
-static Item server_value(JsServer* srv, JsServerValueSlot slot) {
-    return srv ? runtime_value_slots_get(&srv->values, slot) : (Item){0};
-}
-
-static void server_set_value(JsServer* srv, JsServerValueSlot slot, Item value) {
-    if (srv) runtime_value_slots_set(&srv->values, slot, value);
-}
-
 #define NET_SERVER_VALUE(srv, name) \
-    server_value((srv), JS_SERVER_VALUE_##name)
+    NET_VALUE((srv), JS_SERVER_VALUE_, name)
 #define NET_SERVER_SET_VALUE(srv, name, value) \
-    server_set_value((srv), JS_SERVER_VALUE_##name, (value))
+    NET_SET_VALUE((srv), JS_SERVER_VALUE_, name, (value))
 
 static void net_server_register_closed(JsServer* srv) {
     if (!srv) return;
@@ -5027,7 +5009,7 @@ extern "C" Item js_net_createServer(Item rest_args) {
     }
 
     JsServer* srv = (JsServer*)mem_calloc(1, sizeof(JsServer), MEM_CAT_JS_RUNTIME);
-    if (!srv || !server_values_init(srv)) {
+    if (!NET_VALUES_INIT(srv, "net.Server values", JS_SERVER_VALUE_COUNT)) {
         if (srv) mem_free(srv);
         return ItemNull;
     }
@@ -5563,6 +5545,9 @@ extern "C" void js_net_reset(void) {
 #undef NET_SERVER_VALUE
 #undef SOCKET_SET_VALUE
 #undef SOCKET_VALUE
+#undef NET_SET_VALUE
+#undef NET_VALUE
+#undef NET_VALUES_INIT
 
 extern "C" void js_net_destroy_context(JsRuntimeState* runtime_state) {
     if (!runtime_state || !runtime_state->net_native.native_state) return;

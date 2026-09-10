@@ -1773,33 +1773,6 @@ JS_ARRAYBUFFER_TRANSFER_WRAPPER(js_arraybuffer_transfer, false)
 JS_ARRAYBUFFER_TRANSFER_WRAPPER(js_arraybuffer_transfer_to_fixed_length, true)
 #undef JS_ARRAYBUFFER_TRANSFER_WRAPPER
 
-extern "C" Item js_arraybuffer_slice(Item val, int begin, int end) {
-    if (!js_is_arraybuffer(val)) return (Item){.item = ITEM_NULL};
-    // ES spec: ArrayBuffer.prototype.slice must throw TypeError for SharedArrayBuffer
-    if (js_is_sharedarraybuffer(val)) {
-        return js_throw_type_error("ArrayBuffer.prototype.slice requires that |this| not be a SharedArrayBuffer");
-    }
-    JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
-    if (!ab) return (Item){.item = ITEM_NULL};
-    if (js_arraybuffer_detached(ab)) {
-        return js_throw_type_error("ArrayBuffer.prototype.slice called on detached buffer");
-    }
-
-    int source_length = js_arraybuffer_length(ab);
-    if (begin < 0) begin = source_length + begin;
-    if (end < 0) end = source_length + end;
-    if (begin < 0) begin = 0;
-    if (end > source_length) end = source_length;
-    if (begin >= end) return js_arraybuffer_new(0);
-
-    int new_len = end - begin;
-    Item result = js_arraybuffer_new(new_len);
-    JsArrayBuffer* rab = (JsArrayBuffer*)result.map->data;
-    memcpy(js_arraybuffer_prepare_write(rab), js_arraybuffer_data_const(ab) + begin,
-        (size_t)new_len);
-    return result;
-}
-
 static bool js_arraybuffer_slice_index(Item value, int len, int* out_index) {
     Item num = js_to_number(value);
     if (item_is_error(num)) return false;

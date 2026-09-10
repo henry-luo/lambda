@@ -1,5 +1,5 @@
 {
-  "name": "DOM mutation structural CSS risk uses retained full layout",
+  "name": "DOM mutation local structural CSS stays incremental",
   "html": "test/ui/dom_mutation_structural_css_risk_retained_full.html",
   "viewport": {"width": 640, "height": 340},
   "events": [
@@ -10,7 +10,8 @@
     {"type": "key_press", "key": "b"},
     {"type": "assert_count", "target": {"selector": "#inserted-risk"}, "equals": 1},
     {"type": "assert_text", "target": {"selector": "#status"}, "contains": "structural risk mutation complete"},
-    {"type": "assert_reconcile_mode", "mode": "retained_full_layout", "reason": "structural-css-risk"},
+    {"type": "assert_style", "target": {"selector": "#inserted-risk"}, "property": "color", "equals": "rgb(180, 40, 40)"},
+    {"type": "assert_reconcile_mode", "mode": "incremental", "reason": "eligible"},
     {"type": "assert_state_store_snapshot", "name": "focused-input", "target": {"selector": "#name"}},
     {"type": "assert_focus", "target": {"selector": "#name"}},
     {"type": "assert_state_store", "target": {"selector": "#name"}, "view_state": true, "kind": "form", "weak_ref": true}
