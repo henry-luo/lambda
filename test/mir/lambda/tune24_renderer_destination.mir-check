@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "description": "D3.3.3v3, D5.3.4, D8.3.1: renderer destination.",
+  "checks": [
+    {
+      "in_func": "_parts_#",
+      "expect": [
+        "_record_result0",
+        "call\t_render_"
+      ],
+      "count": {
+        "call\tfn_strcat_p, fn_strcat": 1
+      },
+      "forbid": [
+        "call\t_parts_",
+        "call\tfn_join",
+        "call\tmap_fill",
+        "call\tfn_member"
+      ]
+    },
+    {
+      "in_func": "_render_#",
+      "expect": [
+        "call\t_parts_",
+        "_record_result0"
+      ],
+      "forbid": [
+        "call\tmap_fill",
+        "call\tfn_member"
+      ]
+    },
+    {
+      "in_func": "_retained_#",
+      "expect": [
+        "call\tfn_strcat_many"
+      ]
+    }
+  ]
+}

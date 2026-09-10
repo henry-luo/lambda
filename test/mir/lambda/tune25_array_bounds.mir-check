@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "description": "D8.2.6, D3.3.3v3, D5.3.4, S7.1.3v2: loop demand and checked native mutation.",
+  "checks": [
+    {
+      "in_func": "_change_#",
+      "expect": [
+        "lt\t",
+        "ge\t",
+        "call\tlambda_array_set_checked"
+      ],
+      "forbid": [
+        "lts\t",
+        "ges\t",
+        "call\tfn_array_set"
+      ]
+    },
+    {
+      "in_func": "_read_#",
+      "expect": [
+        "lt\t",
+        "ge\t"
+      ],
+      "forbid": [
+        "lts\t",
+        "ges\t"
+      ]
+    },
+    {
+      "in_func": "_text_#",
+      "expect": [
+        "lt\t",
+        "ge\t"
+      ],
+      "forbid": [
+        "lts\t",
+        "ges\t"
+      ]
+    }
+  ]
+}

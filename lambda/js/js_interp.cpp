@@ -2690,6 +2690,9 @@ static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
     Rooted<Item> value_root(roots, ItemNull);
     Rooted<Item> spread_item_root(roots, ItemNull);
     Rooted<Item> super_base_root(roots, ItemNull);
+    // scalar result payloads must not alias an Item root: publishing the tag
+    // would overwrite the payload, and this root frame ends with the call AST.
+    LAMBDA_SCALAR_HOME(call_result_home);
     bool super_call = !construct && js_interp_identifier_is(
         (JsAstNode*)call->function, "super");
     bool intrinsic_require = !construct && call->function &&
@@ -2874,7 +2877,7 @@ static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
         // transition and rejects a duplicate `super()`.
         value_root.set(js_is_class_constructor_value(callee_root.get())
             ? js_super_apply_class_into(callee_root.get(), this_root.get(),
-                arguments_root.get(), value_root.home())
+                arguments_root.get(), &call_result_home)
             : js_super_apply_native(callee_root.get(), this_root.get(), arguments_root.get()));
         if (item_is_error(value_root.get())) {
             JS_INTERP_CALL_RETURN(js_interp_throw(value_root.get()));
@@ -2898,14 +2901,17 @@ static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
     if (direct_arguments) {
         result = construct
             ? js_construct_value(callee_root.get(), direct_arguments_items, plain_arg_count,
-                callee_root.get(), value_root.home(), true)
+                callee_root.get(), &call_result_home, true)
             : js_call_function_prerooted_args_into(callee_root.get(), this_root.get(),
-                direct_arguments_items, plain_arg_count, value_root.home());
+                direct_arguments_items, plain_arg_count, &call_result_home);
     } else {
         result = construct
             ? js_construct_array_like(callee_root.get(), arguments_root.get(), callee_root.get())
             : js_apply_function(callee_root.get(), this_root.get(), arguments_root.get());
     }
+    // a wide result outlives this C frame; use the existing transient-number
+    // ownership boundary before returning its completion (D5.3.4).
+    result = scalar_storage_read(result, false);
     JS_INTERP_CALL_RETURN(item_is_error(result) ? js_interp_throw(result)
         : js_interp_normal(result));
 #undef JS_INTERP_CALL_RETURN

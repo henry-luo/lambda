@@ -8977,7 +8977,11 @@ static Item js_array_get_index(Item array, int64_t idx, Item fallback_key,
         if (js_array_sparse_get(arr, idx, &sparse_val)) return sparse_val;
     }
     if (idx >= 0 && idx < arr->length && idx < js_array_dense_capacity(arr)) {
-        if (arr->items[idx].item != JS_DELETED_SENTINEL_VAL) return arr->items[idx];
+        if (arr->items[idx].item != JS_DELETED_SENTINEL_VAL) {
+            // a consumer can allocate after this read, moving the array's
+            // scalar tail. Its result needs a transient number home (D5.3.4).
+            return scalar_storage_read(arr->items[idx], false);
+        }
         if (!lookup_prototype) return make_js_undefined();
     }
     if (lookup_prototype) {

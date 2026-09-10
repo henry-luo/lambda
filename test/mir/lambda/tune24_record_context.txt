@@ -1,0 +1,19 @@
+[{
+    text: "x",
+    count: 5
+  }, {
+    text: "x",
+    count: 9
+  }, {
+    text: "x",
+    count: 12
+  }, {
+    text: "x",
+    count: 9
+  }, {
+    text: "s",
+    count: 72
+  }, {
+    text: "",
+    count: 6
+  }]

@@ -151,7 +151,16 @@ typedef struct MirPropertyKeyEntry {
     MIR_reg_t cached_reg;
 } MirPropertyKeyEntry;
 
+struct MirFlowScope;
+struct MirRecordValue;
+
 struct MirTranspiler {
+    MirFlowScope* flow_scope;
+    AstCallNode* record_call_target;
+    MirRecordValue* record_call_output;
+    TypeMap* record_result_shape;
+    MIR_reg_t record_result_addresses[4];
+    NameEntry* record_prefix_binding;
     // CW33 M1a: the current function's consumed `var`-param homes (from
     // Context::mir_var_homes), written back through in the shared epilogue.
     // Only untyped `var` params participate (single boxed convention); the
@@ -408,6 +417,44 @@ struct MirTranspiler {
     NamePool* name_pool;
 };
 
+enum MirFlowFactKind { MIR_FLOW_SEMANTIC, MIR_FLOW_ADMITTED, MIR_FLOW_LAYOUT };
+
+struct MirFlowFact {
+    AstNode* source;
+    Type* contract;
+    MirFlowFactKind kind;
+    int root_slot;
+    MIR_reg_t guard;
+};
+
+struct MirRecordValue {
+    TypeMap* shape;
+    NameEntry* binding;
+    int count;
+    int roots[4];
+    MIR_reg_t addresses[4];
+    bool filled;
+    MirRecordValue* next;
+    int streamed_field;
+    MIR_reg_t external_base;
+};
+
+// Facts belong to a dominating region, never to emission order across arms.
+struct MirFlowScope {
+    MirTranspiler* mt;
+    MirFlowScope* parent;
+    MIR_item_t function;
+    MirFlowFact facts[32];
+    int count;
+    MirRecordValue* records;
+    MirFlowScope(MirTranspiler* owner) : mt(owner), parent(owner->flow_scope),
+        function(owner->em.func_item), count(0), records(NULL) { owner->flow_scope = this; }
+    ~MirFlowScope() {
+        while (records) { MirRecordValue* next = records->next; mem_free(records); records = next; }
+        mt->flow_scope = parent;
+    }
+};
+
 static bool ensure_pattern_compiled(MirTranspiler* mt,
         AstPatternDefNode* pattern_def);
 
@@ -441,6 +488,9 @@ struct NativeFuncInfo {
     bool typed_array_witness_closed;
     bool needs_boxed_slow_body;
     bool needs_boxed_entry;
+    TypeMap* record_result;
+    int record_prefix_index;
+    TypeMap* record_params[10];
 };
 HASHMAP_DEFINE_STRKEY(native_func, struct NativeFuncInfo, name)
 
@@ -809,6 +859,9 @@ static MirValue mir_string_binding_value(MirTranspiler* mt, AstNode* node,
 static MirValue transpile_binary(MirTranspiler* mt, AstBinaryNode* binary);
 static MirValue transpile_unary(MirTranspiler* mt, AstUnaryNode* unary);
 static MirValue transpile_call(MirTranspiler* mt, AstCallNode* call);
+static bool mir_try_scalar_record_binding(MirTranspiler* mt, AstDeclaratorNode* declaration);
+static void mir_emit_record_body(MirTranspiler* mt, AstNode* node,
+    TypeMap* shape, const MIR_reg_t* addresses);
 static MirValue transpile_control_value(MirTranspiler* mt, AstNode* node);
 static MirValue transpile_structural_value(MirTranspiler* mt, AstNode* node);
 static MirValue mir_profile_lower_value(void* owner, AstNode* node);
@@ -1449,14 +1502,13 @@ static MIR_reg_t mir_materialize_pending_reg(MirTranspiler* mt,
 }
 
 static void transpile_discard_expr(MirTranspiler* mt, AstNode* node) {
-    MirLoweringProfile profile = {&mt->em, mt, mir_profile_lower_value, NULL};
     // Result37: `(if (c) { x } else { y }) + 1` returned null on the JIT --
     // transpile_if discarded every boxed proc-mode `if` that was not a tail
     // or an initializer, including one consumed as an operand. Only THIS
     // statement-position lowering may discard.
     AstNode* saved = mt->discarding_if_node;
     mt->discarding_if_node = ast_unwrap_primary(node);
-    (void)em_lower_profile_value(&profile, node, MIR_VALUE_DISCARD);
+    (void)transpile_expr_value(mt, node, MIR_VALUE_DISCARD);
     mt->discarding_if_node = saved;
 }
 
@@ -2934,6 +2986,231 @@ static void mir_dump_specialization_diag(AstFuncNode* fn_node,
 // Build the entry plan from source declarations plus whole-unit call evidence.
 // A closed exact inferred shape is an implementation fact, never a contract:
 // an escaped or mixed caller set keeps the boxed slow body available.
+static TypeMap* mir_scalar_record_shape(Type* contract) {
+    Type* result = mir_unwrap_decl_contract(contract);
+    if (!result || result->type_id != LMD_TYPE_MAP || result == &TYPE_MAP) return NULL;
+    TypeMap* shape = (TypeMap*)result;
+    if (!shape->is_trusted_contract || !has_fixed_shape(shape) ||
+            shape->length < 1 || shape->length > 4) return NULL;
+    for (ShapeEntry* field = shape->shape; field; field = field->next) {
+        Type* type = mir_unwrap_decl_contract(field->type);
+        if (!field->name || !type || type->kind != TYPE_KIND_SIMPLE || type->is_literal ||
+                (type->type_id != LMD_TYPE_INT &&
+                 type->type_id != LMD_TYPE_BOOL && type->type_id != LMD_TYPE_STRING)) return NULL;
+    }
+    return shape;
+}
+
+static TypeMap* mir_record_result_contract(AstFuncNode* function) {
+    if (!function || function->node_type != AST_NODE_FUNC || function->captures ||
+            !function->type || function->type->type_id != LMD_TYPE_FUNC) return NULL;
+    TypeFunc* signature = (TypeFunc*)function->type;
+    if (!signature->has_explicit_return_contract || signature->can_raise ||
+            signature->is_variadic || signature->param_count > 10) return NULL;
+    TypeMap* shape = mir_scalar_record_shape(signature->return_contract);
+    if (!shape) return NULL;
+    for (AstNamedNode* param = function->param; param; param = (AstNamedNode*)param->next) {
+        TypeParam* type = (TypeParam*)param->type;
+        if (!type || !type->full_type || type->is_var_param || type->default_value) return NULL;
+    }
+    return shape;
+}
+
+static bool mir_record_result_body(AstNode* node, TypeMap* shape,
+        AstFuncNode** visiting, int depth);
+
+static bool mir_record_result_function(AstFuncNode* function, TypeMap* shape,
+        AstFuncNode** visiting, int depth) {
+    if (mir_record_result_contract(function) != shape || depth >= 32) return false;
+    for (int i = 0; i < depth; i++) if (visiting[i] == function) return true;
+    visiting[depth++] = function;
+    return mir_record_result_body(function->body, shape, visiting, depth);
+}
+
+static bool mir_record_result_body(AstNode* node, TypeMap* shape,
+        AstFuncNode** visiting, int depth) {
+    node = ast_unwrap_primary(node);
+    if (!node) return false;
+    if (node->node_type == AST_NODE_CONTENT || node->node_type == AST_NODE_BLOCK) {
+        AstListNode* block = (AstListNode*)node;
+        if (block->declare) return false;
+        AstNode* tail = block->item;
+        while (tail && tail->next) {
+            if (tail->node_type != AST_NODE_LET_STAM) return false;
+            tail = tail->next;
+        }
+        return tail && mir_record_result_body(tail, shape, visiting, depth);
+    }
+    if (node->node_type == AST_NODE_IF_EXPR) {
+        AstIfNode* branch = (AstIfNode*)node;
+        return branch->otherwise && mir_record_result_body(branch->then, shape, visiting, depth) &&
+            mir_record_result_body(branch->otherwise, shape, visiting, depth);
+    }
+    if (node->node_type == AST_NODE_CALL_EXPR) {
+        return mir_record_result_function(ast_direct_call_function((AstCallNode*)node),
+            shape, visiting, depth);
+    }
+    if (node->node_type != AST_NODE_MAP) return false;
+    AstMapNode* map = (AstMapNode*)node;
+    if (map->has_computed_key || ast_linked_node_count(map->item) != shape->length) return false;
+    ShapeEntry* field = shape->shape;
+    // Exact fields preserve open-record extra-field behavior at materialization.
+    for (AstNode* item = map->item; item; item = item->next, field = field->next) {
+        if (item->node_type != AST_NODE_KEY_EXPR || ((AstNamedNode*)item)->is_spread) return false;
+        String* name = ((AstNamedNode*)item)->name;
+        if (!name || find_shape_field_by_name(shape, name->chars, name->len) != field) return false;
+    }
+    return true;
+}
+
+static TypeMap* mir_record_result_plan(AstFuncNode* function) {
+    TypeMap* shape = mir_record_result_contract(function);
+    AstFuncNode* visiting[32];
+    return shape && mir_record_result_function(function, shape, visiting, 0) ? shape : NULL;
+}
+
+static int mir_record_string_field(TypeMap* shape) {
+    int selected = -1, index = 0;
+    for (ShapeEntry* field = shape->shape; field; field = field->next, index++) {
+        if (mir_decl_type_id(field->type) != LMD_TYPE_STRING) continue;
+        if (selected >= 0) return -1;
+        selected = index;
+    }
+    return selected;
+}
+
+struct MirRecordPrefixVisit { AstFuncNode* function; NameEntry* binding; };
+struct MirBindingUseCount { NameEntry* binding; int count; };
+
+static bool mir_count_binding_uses(AstNode* node, void* data) {
+    MirBindingUseCount* uses = (MirBindingUseCount*)data;
+    if (node->node_type == AST_NODE_IDENT && ((AstIdentNode*)node)->entry == uses->binding)
+        uses->count++;
+    return true;
+}
+
+static AstNode* mir_string_leftmost(AstNode* node) {
+    node = ast_unwrap_primary(node);
+    while (node && node->node_type == AST_NODE_BINARY && ((AstBinaryNode*)node)->op == OPERATOR_JOIN)
+        node = ast_unwrap_primary(((AstBinaryNode*)node)->left);
+    return node;
+}
+
+static bool mir_record_prefix_function(AstFuncNode* function, TypeMap* shape,
+    NameEntry* binding, MirRecordPrefixVisit* visiting, int depth);
+
+// A drained parameter must be the output prefix on every return path. Counting
+// all uses also rejects observers, captures, duplication and dropped prefixes.
+static bool mir_record_prefix_body(AstNode* node, TypeMap* shape, NameEntry* binding,
+        MirRecordPrefixVisit* visiting, int depth, int* consumed) {
+    node = ast_unwrap_primary(node);
+    if (!node) return false;
+    if (node->node_type == AST_NODE_CONTENT || node->node_type == AST_NODE_BLOCK) {
+        AstNode* tail = ((AstListNode*)node)->item;
+        while (tail && tail->next) tail = tail->next;
+        return mir_record_prefix_body(tail, shape, binding, visiting, depth, consumed);
+    }
+    if (node->node_type == AST_NODE_IF_EXPR) {
+        AstIfNode* branch = (AstIfNode*)node;
+        return mir_record_prefix_body(branch->then, shape, binding, visiting, depth, consumed) &&
+            mir_record_prefix_body(branch->otherwise, shape, binding, visiting, depth, consumed);
+    }
+    AstNode* prefix = NULL;
+    if (node->node_type == AST_NODE_MAP) {
+        AstNode* field = ((AstMapNode*)node)->item;
+        for (int i = 0; field && i < mir_record_string_field(shape); i++) field = field->next;
+        prefix = field ? mir_string_leftmost(((AstNamedNode*)field)->as) : NULL;
+    } else if (node->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)node;
+        AstFuncNode* target = ast_direct_call_function(call);
+        if (!target || mir_record_result_contract(target) != shape) return false;
+        AstNode* arg = call->argument;
+        for (AstNamedNode* param = target->param; param && arg;
+                param = (AstNamedNode*)param->next, arg = arg->next) {
+            AstNode* left = mir_string_leftmost(arg);
+            if (left && left->node_type == AST_NODE_IDENT &&
+                    ((AstIdentNode*)left)->entry == binding &&
+                    mir_decl_type_id(((TypeParam*)param->type)->full_type) == LMD_TYPE_STRING &&
+                    mir_record_prefix_function(target, shape, param->entry, visiting, depth)) {
+                prefix = left;
+                break;
+            }
+        }
+    }
+    if (!prefix || prefix->node_type != AST_NODE_IDENT ||
+            ((AstIdentNode*)prefix)->entry != binding) return false;
+    (*consumed)++;
+    return true;
+}
+
+static bool mir_record_prefix_function(AstFuncNode* function, TypeMap* shape,
+        NameEntry* binding, MirRecordPrefixVisit* visiting, int depth) {
+    if (!binding || depth >= 32 || mir_record_string_field(shape) < 0) return false;
+    for (int i = 0; i < depth; i++)
+        if (visiting[i].function == function && visiting[i].binding == binding) return true;
+    visiting[depth++] = {function, binding};
+    int consumed = 0;
+    if (!mir_record_prefix_body(function->body, shape, binding, visiting, depth, &consumed)) return false;
+    MirBindingUseCount uses = {binding, 0};
+    walk_lambda_ast(function->body, mir_count_binding_uses, &uses, true);
+    return uses.count == consumed;
+}
+
+static int mir_record_prefix_plan(AstFuncNode* function, TypeMap* shape) {
+    MirRecordPrefixVisit visiting[32];
+    int index = 0;
+    for (AstNamedNode* param = function->param; param; param = (AstNamedNode*)param->next, index++) {
+        if (mir_decl_type_id(((TypeParam*)param->type)->full_type) == LMD_TYPE_STRING &&
+                mir_record_prefix_function(function, shape, param->entry, visiting, 0)) return index;
+    }
+    return -1;
+}
+
+static bool mir_record_parameter_uses(MirTranspiler* mt, AstFuncNode* function,
+        AstNamedNode* parameter, TypeMap* shape, NameEntry** visiting, int depth) {
+    if (!mt->ast_index || !parameter->entry || depth >= 32) return false;
+    NameEntry* binding = parameter->entry;
+    for (int i = 0; i < depth; i++) if (visiting[i] == binding) return true;
+    visiting[depth++] = binding;
+    const AstIndex* index = mt->ast_index;
+    AstNodeId parameter_id = ast_index_find(index, (AstNode*)parameter);
+    if (parameter_id == AST_NODE_ID_INVALID) return false;
+    for (uint32_t id = 0; id < index->count; id++) {
+        AstNode* node = index->nodes[id];
+        if (node->node_type != AST_NODE_IDENT || ((AstIdentNode*)node)->entry != binding) continue;
+        AstNode* parent = index->parents[id];
+        if (parent == (AstNode*)parameter) continue;
+        if (index->owner_functions[id] != index->owner_functions[parameter_id]) return false;
+        while (parent && parent->node_type == AST_NODE_PRIMARY) {
+            node = parent;
+            AstNodeId parent_id = ast_index_find(index, parent);
+            parent = parent_id == AST_NODE_ID_INVALID ? NULL : index->parents[parent_id];
+        }
+        if (parent && parent->node_type == AST_NODE_MEMBER_EXPR) {
+            AstFieldNode* member = (AstFieldNode*)parent;
+            AstNode* key = ast_unwrap_primary(member->field);
+            if (ast_unwrap_primary(member->object) != ast_unwrap_primary(node) || !key ||
+                    key->node_type != AST_NODE_IDENT) return false;
+            String* name = ((AstIdentNode*)key)->name;
+            if (!find_shape_field_by_name(shape, name->chars, name->len)) return false;
+            continue;
+        }
+        if (!parent || parent->node_type != AST_NODE_CALL_EXPR) return false;
+        AstCallNode* call = (AstCallNode*)parent;
+        AstFuncNode* callee = ast_direct_call_function(call);
+        if (!callee || !mir_record_result_plan(callee)) return false;
+        AstNamedNode* target = callee->param;
+        AstNode* argument = call->argument;
+        while (argument && target && ast_unwrap_primary(argument) != ast_unwrap_primary(node)) {
+            argument = argument->next;
+            target = (AstNamedNode*)target->next;
+        }
+        if (!argument || !target || mir_unwrap_decl_contract(((TypeParam*)target->type)->full_type) != (Type*)shape ||
+                !mir_record_parameter_uses(mt, callee, target, shape, visiting, depth)) return false;
+    }
+    return true;
+}
+
 static void plan_native_func_specialization(MirTranspiler* mt,
         AstFuncNode* fn_node, NativeFuncInfo* nfi) {
     if (!nfi || !fn_node) return;
@@ -3007,6 +3284,24 @@ static void plan_native_func_specialization(MirTranspiler* mt,
         }
     }
     nfi->typed_array_witness_closed = array_mask != 0 && array_closed;
+    if (!nfi->has_inferred_specialization) {
+        nfi->record_result = mir_record_result_plan(fn_node);
+        if (nfi->record_result) {
+            nfi->record_prefix_index = mir_record_prefix_plan(fn_node, nfi->record_result);
+            NameEntry* visiting[32];
+            for (int i = 0; i < nfi->param_count; i++) {
+                AstNamedNode* param = mir_param_at(fn_node, i);
+                TypeMap* shape = mir_scalar_record_shape(((TypeParam*)param->type)->full_type);
+                if (shape && mir_record_parameter_uses(mt, fn_node, param, shape, visiting, 0))
+                    nfi->record_params[i] = shape;
+            }
+            // One native body writes caller-owned roots; the Item adapter
+            // materializes an ordinary map only at an escaping boundary.
+            nfi->return_type = LMD_TYPE_ANY;
+            nfi->return_mir = MIR_T_I64;
+            nfi->needs_boxed_entry = true;
+        }
+    }
 }
 
 // Every Core Lambda definition publishes one boxed companion. Direct calls
@@ -4553,12 +4848,187 @@ static bool mir_type_is_reified_map(Type* type) {
     return map_type->is_trusted_contract && has_fixed_shape(map_type);
 }
 
+static bool mir_flow_same_source(AstNode* left, AstNode* right, int depth = 0) {
+    left = ast_unwrap_primary(left);
+    right = ast_unwrap_primary(right);
+    if (!left || !right || depth > 16 || left->node_type != right->node_type) return false;
+    if (left->node_type == AST_NODE_IDENT) {
+        NameEntry* binding = ((AstIdentNode*)left)->entry;
+        return binding && binding == ((AstIdentNode*)right)->entry;
+    }
+    if (left->node_type != AST_NODE_MEMBER_EXPR) return false;
+    AstFieldNode* l = (AstFieldNode*)left;
+    AstFieldNode* r = (AstFieldNode*)right;
+    AstNode* lf = ast_unwrap_primary(l->field);
+    AstNode* rf = ast_unwrap_primary(r->field);
+    return lf && rf && lf->node_type == AST_NODE_IDENT && rf->node_type == AST_NODE_IDENT &&
+        mir_region_same_field_name(((AstIdentNode*)lf)->name, ((AstIdentNode*)rf)->name) &&
+        mir_flow_same_source(l->object, r->object, depth + 1);
+}
+
+static MIR_reg_t mir_root_slot_address(MirTranspiler* mt, int slot) {
+    MIR_reg_t address = new_reg(mt, "root_home_addr", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+        MIR_new_reg_op(mt->ctx, address), MIR_new_reg_op(mt->ctx, mt->em.frame.root_base),
+        MIR_new_int_op(mt->ctx, (int64_t)slot * sizeof(uint64_t))));
+    return address;
+}
+
+static MIR_reg_t mir_empty_string_pointer(MirTranspiler* mt) {
+    String* empty = name_pool_create_len(mt->name_pool, "", 0);
+    MIR_reg_t pointer = new_reg(mt, "empty_string", MIR_T_P);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, pointer),
+        MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)empty)));
+    return pointer;
+}
+
+static void mir_record_value_init(MirTranspiler* mt, MirRecordValue* value, TypeMap* shape) {
+    *value = {};
+    value->shape = shape;
+    value->count = (int)shape->length;
+    value->streamed_field = -1;
+    ShapeEntry* field = shape->shape;
+    for (int i = 0; i < value->count; i++, field = field->next) {
+        MIR_reg_t initial = mir_decl_type_id(field->type) == LMD_TYPE_STRING
+            ? emit_box_string(mt, mir_empty_string_pointer(mt)) : emit_null_item_reg(mt);
+        value->roots[i] = create_gc_root_slot(mt, initial);
+        // an address-taken destination is memory-owned, not a register mirror.
+        // explicit stores pin its offset in the shared root publication pass.
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                (MIR_disp_t)value->roots[i] * sizeof(uint64_t), mt->em.frame.root_base, 0, 1),
+            MIR_new_reg_op(mt->ctx, initial)));
+        em_root_unbind_home(&mt->em, value->roots[i] + 1);
+        value->addresses[i] = mir_root_slot_address(mt, value->roots[i]);
+    }
+}
+
+static MirRecordValue* mir_record_binding(MirTranspiler* mt, AstNode* object) {
+    object = ast_unwrap_primary(object);
+    NameEntry* binding = object && object->node_type == AST_NODE_IDENT
+        ? ((AstIdentNode*)object)->entry : NULL;
+    if (!binding) return NULL;
+    for (MirFlowScope* scope = mt->flow_scope; scope && scope->function == mt->em.func_item;
+            scope = scope->parent) {
+        for (MirRecordValue* record = scope->records; record; record = record->next)
+            if (record->binding == binding) return record;
+    }
+    return NULL;
+}
+
+static ShapeEntry* mir_record_member_field(MirTranspiler* mt, AstNode* node,
+        MirRecordValue** owner = NULL) {
+    node = ast_unwrap_primary(node);
+    if (!node || node->node_type != AST_NODE_MEMBER_EXPR) return NULL;
+    AstFieldNode* member = (AstFieldNode*)node;
+    MirRecordValue* record = mir_record_binding(mt, member->object);
+    AstNode* key = ast_unwrap_primary(member->field);
+    if (!record || !key || key->node_type != AST_NODE_IDENT) return NULL;
+    if (owner) *owner = record;
+    String* name = ((AstIdentNode*)key)->name;
+    return find_shape_field_by_name(record->shape, name->chars, name->len);
+}
+
+static bool mir_record_drained_string(MirTranspiler* mt, AstNode* node) {
+    node = ast_unwrap_primary(node);
+    if (!node || !mt->record_result_shape) return false;
+    if (node->node_type == AST_NODE_IDENT)
+        return mt->record_prefix_binding && ((AstIdentNode*)node)->entry == mt->record_prefix_binding;
+    if (node->node_type == AST_NODE_BINARY && ((AstBinaryNode*)node)->op == OPERATOR_JOIN)
+        return mir_record_drained_string(mt, ((AstBinaryNode*)node)->left) &&
+            mir_record_drained_string(mt, ((AstBinaryNode*)node)->right);
+    MirRecordValue* record = NULL;
+    ShapeEntry* field = mir_record_member_field(mt, node, &record);
+    return field && record->streamed_field >= 0 && mir_decl_type_id(field->type) == LMD_TYPE_STRING;
+}
+
+static bool mir_flow_stable_source(MirTranspiler* mt, AstNode* source) {
+    // Pure functions cannot change an incoming value. Mutable/view places and
+    // captured/module storage need an effect proof before they can participate.
+    if (!mt->in_user_func || mt->in_proc || !mt->flow_scope) return false;
+    AstNode* root = ast_unwrap_primary(source);
+    int depth = 0;
+    while (root && root->node_type == AST_NODE_MEMBER_EXPR && depth++ < 16) {
+        AstFieldNode* member = (AstFieldNode*)root;
+        AstNode* field = ast_unwrap_primary(member->field);
+        if (!field || field->node_type != AST_NODE_IDENT) return false;
+        root = ast_unwrap_primary(member->object);
+    }
+    if (!root || root->node_type != AST_NODE_IDENT) return false;
+    AstIdentNode* ident = (AstIdentNode*)root;
+    NameEntry* binding = ident->entry;
+    MirVarEntry* var = mir_var_for_ident(mt, ident);
+    return var && binding && !binding->is_mutable && !binding->is_var_param &&
+        !binding->cow_param_mutated && !binding->type_widened && !binding->view_base &&
+        !var->from_env && !var->is_state_var && !var->is_var_param;
+}
+
+static MirFlowFact* mir_flow_find(MirTranspiler* mt, AstNode* source,
+        Type* contract, MirFlowFactKind kind) {
+    if (!mir_flow_stable_source(mt, source)) return NULL;
+    contract = mir_unwrap_decl_contract(contract);
+    for (MirFlowScope* scope = mt->flow_scope; scope && scope->function == mt->em.func_item;
+            scope = scope->parent) {
+        for (int i = scope->count - 1; i >= 0; i--) {
+            MirFlowFact* fact = &scope->facts[i];
+            if (fact->kind == kind && (!contract || fact->contract == contract) &&
+                    mir_flow_same_source(fact->source, source)) return fact;
+        }
+    }
+    return NULL;
+}
+
+static void mir_flow_note(MirTranspiler* mt, AstNode* source, Type* contract,
+        MirFlowFactKind kind, int root_slot = -1, MIR_reg_t guard = 0) {
+    if (!contract || !mir_flow_stable_source(mt, source)) return;
+    MirFlowScope* scope = mt->flow_scope;
+    if (scope->count == 32 || scope->function != mt->em.func_item) return;
+    scope->facts[scope->count++] = {source, mir_unwrap_decl_contract(contract),
+        kind, root_slot, guard};
+}
+
+static Type* mir_flow_test_contract(AstNode* pattern) {
+    pattern = ast_unwrap_primary(pattern);
+    Type* type = pattern ? pattern->type : NULL;
+    // Only a statically resolved type value, not a value's TYPE-tagged union.
+    if (!type || type->type_id != LMD_TYPE_TYPE || type_is_global_meta_type(type) ||
+            type->kind != TYPE_KIND_SIMPLE) return NULL;
+    return ((TypeType*)type)->type;
+}
+
+static void mir_flow_note_condition(MirTranspiler* mt, AstNode* node, bool truth) {
+    node = ast_unwrap_primary(node);
+    if (!node) return;
+    if (node->node_type == AST_NODE_UNARY && ((AstUnaryNode*)node)->op == OPERATOR_NOT) {
+        mir_flow_note_condition(mt, ((AstUnaryNode*)node)->operand, !truth);
+    } else if (node->node_type == AST_NODE_BINARY) {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        if (truth && binary->op == OPERATOR_IS) {
+            mir_flow_note(mt, binary->left, mir_flow_test_contract(binary->right),
+                MIR_FLOW_SEMANTIC);
+        } else if ((truth && binary->op == OPERATOR_AND) ||
+                (!truth && binary->op == OPERATOR_OR)) {
+            mir_flow_note_condition(mt, binary->left, truth);
+            mir_flow_note_condition(mt, binary->right, truth);
+        }
+    }
+}
+
 static bool mir_boundary_is_redundant(MirTranspiler* mt, AstNode* source_node, Type* target) {
     if (!source_node || !source_node->type || !target) return false;
     if (lambda_boundary_is_redundant(source_node->type, target)) return true;
+    ShapeEntry* scalar_field = mir_record_member_field(mt, source_node);
+    // Forward-call projections can keep public Any types. Their scalar cells
+    // already crossed the result boundary; retain that private field proof.
+    if (scalar_field && (mir_unwrap_decl_contract(scalar_field->type) == mir_unwrap_decl_contract(target) ||
+            lambda_boundary_is_redundant(scalar_field->type, target))) return true;
     // Builtin result types (including split's boxed strings) do not prove a
     // native T[] carrier; only admitted bindings/returns may elide reification.
     Type* expected = mir_unwrap_decl_type(target);
+    // A type predicate proves membership, not record/array reification. Union
+    // admission preserves its member carrier, so the identical union is safe.
+    if (lambda_type_is_union(expected) && !lambda_type_nonnull_map_contract(expected) &&
+            mir_flow_find(mt, source_node, expected, MIR_FLOW_SEMANTIC)) return true;
     TypeId expected_tid = expected ? expected->type_id : LMD_TYPE_ANY;
     if (expected && expected->kind == TYPE_KIND_SIMPLE &&
             (expected_tid == LMD_TYPE_INT || expected_tid == LMD_TYPE_FLOAT) &&
@@ -6590,7 +7060,12 @@ static MirValue mir_string_binding_value(MirTranspiler* mt, AstNode* node,
     return mir_value_from_var_entry(mt, node, var, stored);
 }
 
+static MIR_reg_t mir_record_materialize(MirTranspiler* mt, const MirRecordValue* record);
+
 static MirValue transpile_ident_value(MirTranspiler* mt, AstIdentNode* ident) {
+    MirRecordValue* record = mir_record_binding(mt, (AstNode*)ident);
+    if (record) return mir_value_from_reg(mt, (AstNode*)ident, mir_record_materialize(mt, record),
+        VALUE_REP_ITEM, (Type*)record->shape, LMD_TYPE_MAP);
     char name_buf[128];
     snprintf(name_buf, sizeof(name_buf), "%.*s", (int)ident->name->len, ident->name->chars);
 
@@ -8606,6 +9081,7 @@ static MIR_reg_t mir_replay_string_concat(MirTranspiler* mt, AstNode* node,
 
 static MIR_reg_t mir_emit_string_concat_tree(MirTranspiler* mt, AstNode* node,
         MirVarEntry* owner) {
+    if (mir_record_drained_string(mt, node)) return emit_box_string(mt, mir_empty_string_pointer(mt));
     AstNode* leaves[MIR_STRING_CONCAT_CHAIN_MAX_PARTS];
     int count = 0;
     if (!mir_collect_string_concat_leaves(mt, node, leaves, &count) || count < 2 ||
@@ -10837,6 +11313,7 @@ static MirValue emit_unary_value(MirTranspiler* mt, AstUnaryNode* un) {
 }
 
 static MirValue transpile_binary(MirTranspiler* mt, AstBinaryNode* binary) {
+    MirFlowScope flow(mt);
     return emit_binary_value(mt, binary, false);
 }
 
@@ -10957,6 +11434,7 @@ static bool mir_branch_ends_in_return(AstNode* branch) {
 }
 
 static MirValue transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
+    MirFlowScope flow(mt);
     // TCO: condition is NOT in tail position
     bool saved_tail = mt->in_tail_position;
     mt->in_tail_position = false;
@@ -11018,6 +11496,8 @@ static MirValue transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
 
     // Then branch
     if (if_node->then) {
+        MirFlowScope then_flow(mt);
+        mir_flow_note_condition(mt, if_node->cond, true);
         mt->in_tail_position = saved_tail;  // ensure correct before then branch
         mir_emit_if_branch(mt, if_node->then, if_tid, result_type,
             result, need_boxing, proc_discard);
@@ -11032,6 +11512,8 @@ static MirValue transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
     emit_label(mt, l_else);
     mt->in_tail_position = saved_tail;  // restore for else branch
     if (if_node->otherwise) {
+        MirFlowScope else_flow(mt);
+        mir_flow_note_condition(mt, if_node->cond, false);
         mir_emit_if_branch(mt, if_node->otherwise, if_tid,
             result_type, result, need_boxing, proc_discard);
     } else {
@@ -11146,6 +11628,7 @@ static void emit_match_pattern_test(MirTranspiler* mt, AstNode* pattern, MIR_reg
 }
 
 static MirValue transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
+    MirFlowScope flow(mt);
     // TCO: scrutinee is NOT in tail position
     bool saved_tail = mt->in_tail_position;
     mt->in_tail_position = false;
@@ -11177,10 +11660,13 @@ static MirValue transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
     while (arm) {
         AstMatchArm* match_arm = (AstMatchArm*)arm;
         if (match_arm->pattern) {
+            MirFlowScope arm_flow(mt);
             MIR_label_t l_next = new_label(mt);
 
             // Emit pattern test (handles union/or-patterns recursively)
             emit_match_pattern_test(mt, match_arm->pattern, boxed_scrut, l_next);
+            mir_flow_note(mt, match_node->scrutinee,
+                mir_flow_test_contract(match_arm->pattern), MIR_FLOW_SEMANTIC);
 
             // Body (restore tail position before each arm body)
             mt->in_tail_position = saved_tail;
@@ -11192,6 +11678,7 @@ static MirValue transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
             emit_label(mt, l_next);
         } else {
             // Default arm (restore tail position)
+            MirFlowScope arm_flow(mt);
             mt->in_tail_position = saved_tail;
             MIR_reg_t body = transpile_box_item(mt, match_arm->body);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
@@ -11890,8 +12377,31 @@ static MIR_reg_t mir_emit_range_bound(MirTranspiler* mt, AstNode* bound) {
     return emit_int_native_lane_typed(mt, value).r;
 }
 
+static ArrayList* mir_loop_entry_scalars(MirTranspiler* mt) {
+    ArrayList* initialized = arraylist_new(16);
+    if (!initialized) return NULL;
+    for (int scope = mt->scope_depth; scope >= 0; scope--) {
+        if (!mt->var_scopes[scope]) continue;
+        size_t iter = 0;
+        void* item = NULL;
+        while (hashmap_iter(mt->var_scopes[scope], &iter, &item)) {
+            MirVarEntry* var = &((VarScopeEntry*)item)->var;
+            // lexical scalar homes are initialized before loop entry. Captured
+            // or borrowed homes can change through a call and are not proofs.
+            if (!var->binding || !var->reg || var->from_env || var->in_scope_env ||
+                    var->env_offset >= 0 || var->is_var_param || var->is_state_var ||
+                    (var->type_id != LMD_TYPE_INT && var->type_id != LMD_TYPE_INT64 &&
+                     var->type_id != LMD_TYPE_UINT64 && var->type_id != LMD_TYPE_FLOAT &&
+                     var->type_id != LMD_TYPE_BOOL)) continue;
+            arraylist_append(initialized, (void*)(uintptr_t)var->reg);
+        }
+    }
+    return initialized;
+}
+
 static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
         bool result_demanded) {
+    MirFlowScope flow(mt);
     // Before push_scope: a binding this body widens is declared OUTSIDE the
     // loop, so it must be widened in the enclosing scope where its reads live.
     mir_prewiden_loop_bindings(mt, for_node->then, 0);
@@ -12225,6 +12735,7 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
     }
 
     // Index counter and break/continue labels
+    ArrayList* loop_scalars = mt->in_async_proc ? NULL : mir_loop_entry_scalars(mt);
     MirIndexedLoopFrame loop_frame = mir_begin_indexed_loop(mt, "idx");
     MIR_reg_t idx = loop_frame.index;
     MIR_label_t l_loop = loop_frame.loop;
@@ -12408,6 +12919,8 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_loop)));
 
     emit_label(mt, l_end);
+    if (!mt->in_async_proc) em_hoist_loop_scalar_calls(&mt->em, l_loop, l_end, loop_scalars);
+    arraylist_free(loop_scalars);
     if (keys_al) {
         emit_call_void_1(mt, "symbol_key_list_free",
             MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al));
@@ -13051,7 +13564,7 @@ static MIR_reg_t mir_prepare_dense_loop_guard(MirTranspiler* mt,
                 MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_CONTAINER_LENGTH_OFFSET, root->reg, 0, 1)));
         }
         MIR_reg_t enough = new_reg(mt, "dense_len_ok", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES,
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE,
             MIR_new_reg_op(mt->ctx, enough), MIR_new_reg_op(mt->ctx, length),
             MIR_new_reg_op(mt->ctx, required_extent)));
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
@@ -13068,6 +13581,7 @@ static MIR_reg_t mir_prepare_dense_loop_guard(MirTranspiler* mt,
 static MIR_reg_t transpile_while_core(MirTranspiler* mt, AstWhileNode* while_node,
         NameEntry* compact_lhs, NameEntry* compact_rhs,
         NameEntry* compact_counter) {
+    MirFlowScope flow(mt);
     NameEntry* saved_compact_lhs = mt->compact_loop_sub_lhs;
     NameEntry* saved_compact_rhs = mt->compact_loop_sub_rhs;
     NameEntry* saved_compact_counter = mt->compact_loop_add_lhs;
@@ -13124,6 +13638,7 @@ static MIR_reg_t transpile_while_core(MirTranspiler* mt, AstWhileNode* while_nod
     push_scope(mt);
 
     (void)mir_prepare_dense_loop_guard(mt, while_node, compact_counter);
+    ArrayList* loop_scalars = mt->in_async_proc ? NULL : mir_loop_entry_scalars(mt);
 
     emit_label(mt, l_loop);
 
@@ -13138,7 +13653,8 @@ static MIR_reg_t transpile_while_core(MirTranspiler* mt, AstWhileNode* while_nod
 
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_loop)));
     emit_label(mt, l_end);
-    if (!mt->in_async_proc) em_hoist_loop_scalar_calls(&mt->em, l_loop, l_end);
+    if (!mt->in_async_proc) em_hoist_loop_scalar_calls(&mt->em, l_loop, l_end, loop_scalars);
+    arraylist_free(loop_scalars);
 
     if (mt->loop_depth > 0) mt->loop_depth--;
     pop_scope(mt);
@@ -13675,6 +14191,115 @@ static Type* mir_local_array_consumer_contract(MirTranspiler* mt,
     return target;
 }
 
+static AstNode* mir_index_use_parent(const AstIndex* index, AstNode** use) {
+    AstNodeId id = ast_index_find(index, *use);
+    AstNode* parent = id == AST_NODE_ID_INVALID ? NULL : index->parents[id];
+    while (parent && parent->node_type == AST_NODE_PRIMARY) {
+        *use = parent;
+        id = ast_index_find(index, parent);
+        if (id == AST_NODE_ID_INVALID) return NULL;
+        parent = index->parents[id];
+    }
+    return parent;
+}
+
+// A read-only summary rejects the bare value at every retaining/opaque use.
+// Following known pure callees also admits small recursive scalar observers.
+static bool mir_observer_scalar_contract(Type* contract) {
+    switch (mir_decl_type_id(contract)) {
+    case LMD_TYPE_NULL: case LMD_TYPE_BOOL: case LMD_TYPE_INT: case LMD_TYPE_INT64:
+    case LMD_TYPE_UINT64: case LMD_TYPE_FLOAT: case LMD_TYPE_NUM_SIZED:
+    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_DTIME:
+    case LMD_TYPE_DECIMAL: return true;
+    default: return false;
+    }
+}
+
+static bool mir_binding_only_observed(MirTranspiler* mt, NameEntry* binding,
+        NameEntry** visiting, int depth) {
+    if (!binding || !mt->ast_index || binding->is_var_param ||
+            binding->cow_param_mutated || binding->place_copy_mutated ||
+            binding->view_base || depth >= 12) return false;
+    for (int i = 0; i < depth; i++) if (visiting[i] == binding) return true;
+    visiting[depth++] = binding;
+    const AstIndex* index = mt->ast_index;
+    AstNodeId definition = ast_index_find(index, binding->node);
+    if (definition == AST_NODE_ID_INVALID) return false;
+    for (uint32_t id = 0; id < index->count; id++) {
+        AstNode* use = index->nodes[id];
+        if (use->node_type != AST_NODE_IDENT || ((AstIdentNode*)use)->entry != binding)
+            continue;
+        AstNode* original = use;
+        AstNode* parent = mir_index_use_parent(index, &use);
+        if (parent == binding->node) continue; // declaration identifier
+        if (index->owner_functions[id] != index->owner_functions[definition]) return false;
+        if (parent && (parent->node_type == AST_NODE_MEMBER_EXPR ||
+                parent->node_type == AST_NODE_INDEX_EXPR) &&
+                ast_unwrap_primary(((AstFieldNode*)parent)->object) == original &&
+                mir_observer_scalar_contract(parent->type)) continue;
+        if (!parent || parent->node_type != AST_NODE_CALL_EXPR) return false;
+        AstCallNode* call = (AstCallNode*)parent;
+        AstNode* function = ast_unwrap_primary(call->function);
+        if (function && function->node_type == AST_NODE_SYS_FUNC) {
+            SysFuncInfo* info = ((AstSysFuncNode*)function)->fn_info;
+            if (info && info->fn == SYSFUNC_LEN && call->argument == use) continue;
+            return false;
+        }
+        AstFuncNode* callee = ast_direct_call_function(call);
+        if (!callee || callee->node_type != AST_NODE_FUNC || callee->captures) return false;
+        TypeFunc* callee_type = callee->type && callee->type->type_id == LMD_TYPE_FUNC
+            ? (TypeFunc*)callee->type : NULL;
+        // Returning a borrowed child would extend its observation past this
+        // interval; container-valued observers need a separate escape proof.
+        if (!callee_type || !mir_observer_scalar_contract(callee_type->return_contract))
+            return false;
+        AstNode* arguments[LAMBDA_MAX_FUNCTION_ARGS] = {};
+        ast_resolve_call_args(call->argument, callee, ast_linked_node_count(call->argument),
+            arguments);
+        AstNamedNode* param = callee->param;
+        int position = 0;
+        while (param && position < LAMBDA_MAX_FUNCTION_ARGS && arguments[position] != use) {
+            param = (AstNamedNode*)param->next;
+            position++;
+        }
+        if (!param || !mir_binding_only_observed(mt, param->entry, visiting, depth)) return false;
+    }
+    return true;
+}
+
+static bool mir_alias_is_readonly_borrow(MirTranspiler* mt, AstDeclaratorNode* declaration) {
+    if (!mt->ast_index || !mt->in_user_func || mt->in_async_proc || !declaration->entry ||
+            declaration->entry->is_mutable || declaration->next) return false;
+    MirVarEntry* source = mir_direct_root_binding(mt, declaration->init);
+    if (!source || !source->binding || source->from_env || source->is_state_var ||
+            source->binding->view_base || source->is_var_param) return false;
+    NameEntry* visiting[12];
+    if (!mir_binding_only_observed(mt, declaration->entry, visiting, 0)) return false;
+    const AstIndex* index = mt->ast_index;
+    AstNodeId id = ast_index_find(index, (AstNode*)declaration);
+    AstNode* statement = id == AST_NODE_ID_INVALID ? NULL : index->parents[id];
+    if (!statement || statement->node_type != AST_NODE_LET_STAM) return false;
+    id = ast_index_find(index, statement);
+    AstNode* block = id == AST_NODE_ID_INVALID ? NULL : index->parents[id];
+    if (!block || (block->node_type != AST_NODE_CONTENT && block->node_type != AST_NODE_BLOCK))
+        return false;
+    AstNode* last_use = statement;
+    // Compare siblings, not source offsets: generated AST nodes can share spans.
+    for (AstNode* item = statement->next; item; item = item->next) {
+        AstNodeId item_id = ast_index_find(index, item);
+        for (uint32_t use_id = 0; use_id < index->count; use_id++) {
+            AstNode* use = index->nodes[use_id];
+            if (use->node_type == AST_NODE_IDENT &&
+                    ((AstIdentNode*)use)->entry == declaration->entry &&
+                    ast_index_node_descends(index, use_id, item_id)) last_use = item;
+        }
+    }
+    if (last_use == statement) return true;
+    // A later source mutation is safe after the last observation. Any mutation
+    // within this interval, including a var/unknown call, keeps the snapshot.
+    return !ast_body_may_write_entry(statement->next, source->binding, true, last_use->next);
+}
+
 static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
     AstNode* declare = let_node->declare;
     // TCO: a DECLARATION's initializer is never in tail position -- the binding
@@ -13689,6 +14314,10 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
     while (declare) {
         if (declare->node_type == AST_NODE_VARIABLE_DECLARATOR) {
             AstDeclaratorNode* asn = (AstDeclaratorNode*)declare;
+            if (mir_try_scalar_record_binding(mt, asn)) {
+                declare = declare->next;
+                continue;
+            }
             if (asn->init) {
                 bool saved_preserve_proc_if_result = mt->preserve_proc_if_result;
                 if (mt->in_proc && asn->init->node_type == AST_NODE_IF_EXPR) {
@@ -14177,6 +14806,10 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     ast_expr_may_return_container(asn->init, expr_tid, var_tid);
                 bool cow_binding = ast_expr_may_return_container(asn->init, expr_tid, var_tid) &&
                     mir_expr_is_owned_binding_alias(mt, asn->init);
+                if (cow_binding && mir_alias_is_readonly_borrow(mt, asn)) {
+                    cow_binding = false;
+                    cow_owned = false;
+                }
                 // CW34 (COW §11.11): a read-modify-write handle borrows its
                 // place when the runtime spine is unshared; the helper falls
                 // back to the snapshot bind otherwise. The binding is modelled
@@ -15086,6 +15719,7 @@ static MirValue transpile_content_finish(MirTranspiler* mt, AstListNode* content
 }
 
 static MirValue transpile_content_value(MirTranspiler* mt, AstListNode* list_node) {
+    MirFlowScope flow(mt);
     // Extend block-tail lowering for the proven string accumulator. Other
     // recursive result protocols retain their existing admission/entry path.
     bool tail_position = mt->in_tail_position && mt->tco_func &&
@@ -15152,6 +15786,12 @@ static MirValue transpile_content_value(MirTranspiler* mt, AstListNode* list_nod
             }
             scan = scan->next;
         }
+        // an explicit terminal return owns the result. Earlier expressions
+        // still run, but their collection producers receive discard demand.
+        if (last_executable && last_executable->node_type == AST_NODE_RETURN_STAM) {
+            value_count = 0;
+            last_value = NULL;
+        }
     }
 
     // In proc context with multiple values, only the LAST value expression
@@ -15189,7 +15829,7 @@ static MirValue transpile_content_value(MirTranspiler* mt, AstListNode* list_nod
     // No value items: execute side-effect statements and return null
     if (value_count == 0) {
         push_scope(mt);
-        (void)transpile_content_items(mt, list_node, last_value, is_proc, false);
+        (void)transpile_content_items(mt, list_node, last_value, is_proc, is_proc);
         // In proc context, the result of a side-effect-only block is never used.
         // Skip the expensive list()/list_end() allocation and return a null Item.
         if (is_proc) {
@@ -15528,7 +16168,7 @@ static bool mir_union_map_field_matches(Type* parent, String* name,
     return true;
 }
 
-static bool mir_trusted_union_field_matches(AstNode* source, Type* expected) {
+static bool mir_trusted_union_field_matches(MirTranspiler* mt, AstNode* source, Type* expected) {
     expected = mir_unwrap_decl_contract(expected);
     // Optional named maps and typed arrays may require a physical conversion;
     // only a genuine union whose admission preserves an existing member fits.
@@ -15544,7 +16184,9 @@ static bool mir_trusted_union_field_matches(AstNode* source, Type* expected) {
     NameEntry* entry = ((AstIdentNode*)object)->entry;
     Type* parent = entry && !entry->type_widened
         ? mir_unwrap_decl_contract(entry->declared_type) : NULL;
-    if (!lambda_type_is_union(parent)) return false;
+    MirFlowFact* narrowed = mir_flow_find(mt, object, NULL, MIR_FLOW_SEMANTIC);
+    if (narrowed) parent = narrowed->contract;
+    if (!narrowed && !lambda_type_is_union(parent)) return false;
     bool found = false;
     bool matches = mir_union_map_field_matches(parent, ((AstIdentNode*)field)->name,
         expected, &found) && found;
@@ -15555,7 +16197,7 @@ static MIR_reg_t mir_emit_trusted_map_field_argument(MirTranspiler* mt,
         AstNode* source, MIR_reg_t value, Type* expected, const char* site,
         bool* handled) {
     if (handled) *handled = false;
-    bool union_field = mir_trusted_union_field_matches(source, expected);
+    bool union_field = mir_trusted_union_field_matches(mt, source, expected);
     if (!union_field && !mir_trusted_map_field_matches(source, expected)) return value;
 
     // A trusted packed parent certifies the field's non-null arm. Compare the
@@ -15595,6 +16237,25 @@ static MIR_reg_t mir_emit_trusted_map_field_argument(MirTranspiler* mt,
         MIR_new_reg_op(mt->ctx, checked)));
     emit_label(mt, done);
     if (handled) *handled = true;
+    return result;
+}
+
+static MIR_reg_t mir_flow_admit_argument(MirTranspiler* mt, AstNode* source,
+        MIR_reg_t value, Type* expected, const char* site, bool borrowed) {
+    bool reusable = !borrowed && expected &&
+        (lambda_type_is_union(expected) || mir_type_is_reified_map(expected) ||
+         lambda_array_contract_element(expected)) && mir_flow_stable_source(mt, source);
+    MirFlowFact* prior = reusable
+        ? mir_flow_find(mt, source, expected, MIR_FLOW_ADMITTED) : NULL;
+    if (prior) return load_gc_root_slot(mt, prior->root_slot, "flow_admitted");
+    bool handled = false;
+    MIR_reg_t result = mir_emit_trusted_map_field_argument(mt, source, value,
+        expected, site, &handled);
+    if (!handled) result = emit_parameter_boundary(mt, value, LMD_TYPE_ANY, expected, site);
+    if (reusable) {
+        int root = create_gc_root_slot(mt, result);
+        mir_flow_note(mt, source, expected, MIR_FLOW_ADMITTED, root);
+    }
     return result;
 }
 
@@ -16853,8 +17514,400 @@ static void emit_mir_direct_field_write(MirTranspiler* mt, AstNode* object,
     if (!skip_null_guard) emit_label(mt, l_skip_write);
 }
 
+static NativeFuncInfo* mir_record_call_info(MirTranspiler* mt, AstCallNode* call) {
+    AstFuncNode* function = ast_direct_call_function(call);
+    if (!function || !mir_satellite_defines(mt, (AstNode*)function)) return NULL;
+    StrBuf* name = strbuf_new_cap(64);
+    write_fn_name(name, function, NULL);
+    NativeFuncInfo* info = find_native_func_info(mt, name->str);
+    strbuf_free(name);
+    return info && info->record_result ? info : NULL;
+}
+
+static TypeMap* mir_record_call_shape(MirTranspiler* mt, AstCallNode* call) {
+    NativeFuncInfo* info = mir_record_call_info(mt, call);
+    return info ? info->record_result : NULL;
+}
+
+static void mir_record_store_field(MirTranspiler* mt, MIR_reg_t address,
+        MIR_reg_t item, Type* contract) {
+    if (mir_decl_type_id(contract) == LMD_TYPE_STRING) {
+        MIR_reg_t piece = emit_text_pointer_lane(mt,
+            mir_value_from_reg(mt, NULL, item, VALUE_REP_ITEM), LMD_TYPE_STRING, true);
+        MIR_reg_t length = em_load_at(&mt->em, piece, offsetof(String, len), MIR_T_U32, "piece_len");
+        MIR_label_t done = new_label(mt);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, done),
+            MIR_new_reg_op(mt->ctx, length)));
+        MIR_reg_t prefix = new_reg(mt, "destination_prefix", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, prefix),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, address, 0, 1)));
+        prefix = emit_text_pointer_lane(mt,
+            mir_value_from_reg(mt, NULL, prefix, VALUE_REP_ITEM), LMD_TYPE_STRING, true);
+        MIR_reg_t appended = emit_call_2(mt, "fn_strcat", MIR_T_P,
+            MIR_T_P, MIR_new_reg_op(mt->ctx, prefix), MIR_T_P, MIR_new_reg_op(mt->ctx, piece));
+        item = emit_box_string(mt, appended);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, address, 0, 1), MIR_new_reg_op(mt->ctx, item)));
+        emit_label(mt, done);
+    } else {
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, address, 0, 1), MIR_new_reg_op(mt->ctx, item)));
+    }
+}
+
+static MIR_reg_t mir_record_publish_field(MirTranspiler* mt, const MirRecordValue* record,
+        int index, ShapeEntry* field) {
+    MIR_reg_t item = record->external_base
+        ? em_load_at(&mt->em, record->external_base, (MIR_disp_t)index * sizeof(uint64_t),
+            MIR_T_I64, "record_param_field")
+        : load_gc_root_slot(mt, record->roots[index], "record_field");
+    if (mir_decl_type_id(field->type) != LMD_TYPE_STRING) return item;
+    MIR_reg_t pointer = emit_text_pointer_lane(mt,
+        mir_value_from_reg(mt, NULL, item, VALUE_REP_ITEM), LMD_TYPE_STRING, true);
+    return emit_box_string(mt, emit_call_1(mt, "fn_string_freeze", MIR_T_P,
+        MIR_T_P, MIR_new_reg_op(mt->ctx, pointer)));
+}
+
+static MIR_reg_t mir_record_materialize(MirTranspiler* mt, const MirRecordValue* record) {
+    MIR_reg_t map = emit_map_alloc(mt, record->shape, record->shape->type_index);
+    int map_root = create_pointer_gc_root_slot(mt, map);
+    MIR_op_t fields[4];
+    ShapeEntry* field = record->shape->shape;
+    for (int i = 0; i < record->count; i++, field = field->next) fields[i] = MIR_new_reg_op(mt->ctx,
+        mir_record_publish_field(mt, record, i, field));
+    return emit_vararg_call(mt, "map_fill", MIR_T_P, 1,
+        MIR_T_P, MIR_new_reg_op(mt->ctx, load_gc_root_slot(mt, map_root, "record_map")),
+        record->count, fields);
+}
+
+static void mir_emit_record_call(MirTranspiler* mt, AstCallNode* call, MirRecordValue* output) {
+    AstCallNode* saved_target = mt->record_call_target;
+    MirRecordValue* saved_output = mt->record_call_output;
+    bool saved_tail = mt->in_tail_position;
+    mt->record_call_target = call;
+    mt->record_call_output = output;
+    bool forwarded = mt->record_result_shape == output->shape;
+    for (int i = 0; forwarded && i < output->count; i++)
+        forwarded &= output->addresses[i] == mt->record_result_addresses[i];
+    mt->in_tail_position = saved_tail && forwarded;
+    MirValue result = transpile_call(mt, call);
+    mt->record_call_target = saved_target;
+    mt->record_call_output = saved_output;
+    mt->in_tail_position = saved_tail;
+    if (forwarded && mt->block_returned) return;
+    MIR_reg_t item = em_require_rep(&mt->em, result, VALUE_REP_ITEM).reg;
+    emit_return_if_item_error(mt, item);
+    if (output->filled) return;
+    // An unproven argument may select the ordinary boxed adapter. Its result
+    // has already crossed the same exact record boundary; extract it once.
+    int root = create_gc_root_slot(mt, item);
+    ShapeEntry* field = output->shape->shape;
+    for (int i = 0; i < output->count; i++, field = field->next) {
+        MIR_reg_t raw = emit_mir_direct_field_read(mt,
+            load_gc_root_slot(mt, root, "record_fallback"), field, true, LMD_TYPE_MAP);
+        MIR_reg_t boxed = emit_box_contract_lane(mt, raw, shape_entry_storage_type_id(field),
+            field->type);
+        mir_record_store_field(mt, output->addresses[i], boxed, field->type);
+    }
+}
+
+static bool mir_record_only_field_uses(MirTranspiler* mt, AstDeclaratorNode* declaration,
+        TypeMap* shape) {
+    if (!mt->ast_index || !declaration->entry || declaration->entry->is_mutable ||
+            declaration->entry->place_copy_mutated) return false;
+    const AstIndex* index = mt->ast_index;
+    AstNodeId definition = ast_index_find(index, (AstNode*)declaration);
+    if (definition == AST_NODE_ID_INVALID) return false;
+    for (uint32_t id = 0; id < index->count; id++) {
+        AstNode* use = index->nodes[id];
+        if (use == declaration->id || use->node_type != AST_NODE_IDENT ||
+                ((AstIdentNode*)use)->entry != declaration->entry) continue;
+        if (index->owner_functions[id] != index->owner_functions[definition]) return false;
+        AstNode* original = use;
+        AstNode* parent = mir_index_use_parent(index, &use);
+        if (!parent || parent->node_type != AST_NODE_MEMBER_EXPR) return false;
+        AstFieldNode* member = (AstFieldNode*)parent;
+        AstNode* field = ast_unwrap_primary(member->field);
+        if (ast_unwrap_primary(member->object) != original || !field ||
+                field->node_type != AST_NODE_IDENT) return false;
+        String* name = ((AstIdentNode*)field)->name;
+        if (!find_shape_field_by_name(shape, name->chars, name->len)) return false;
+    }
+    return true;
+}
+
+static bool mir_record_is_return_value(MirTranspiler* mt, AstNode* node,
+        AstNode* declaration) {
+    AstNode* enclosing = declaration;
+    while (enclosing && enclosing->node_type != AST_NODE_CONTENT &&
+            enclosing->node_type != AST_NODE_BLOCK)
+        enclosing = mir_index_use_parent(mt->ast_index, &enclosing);
+    if (!enclosing) return false;
+    bool reaches_declaration = false;
+    while (node && node != mt->func_body) {
+        AstNode* child = node;
+        AstNode* parent = mir_index_use_parent(mt->ast_index, &child);
+        if (!parent) return false;
+        if (parent == enclosing) reaches_declaration = true;
+        if (parent->node_type == AST_NODE_CONTENT || parent->node_type == AST_NODE_BLOCK) {
+            AstNode* tail = ((AstListNode*)parent)->item;
+            while (tail && tail->next) tail = tail->next;
+            if (ast_unwrap_primary(tail) != ast_unwrap_primary(child)) return false;
+        } else if (parent->node_type == AST_NODE_IF_EXPR) {
+            // A branch after construction can discard the child. Sharing its
+            // destination is safe only inside the declaration's own branch.
+            if (!reaches_declaration) return false;
+            if (ast_unwrap_primary(((AstIfNode*)parent)->cond) == ast_unwrap_primary(child)) return false;
+        } else return false;
+        node = parent;
+    }
+    return node == mt->func_body && reaches_declaration;
+}
+
+// Only a single output use may consume the shared destination. A prefix that
+// is observed, duplicated, prepended later, or conditionally dropped stays local.
+static int mir_record_streamed_field(MirTranspiler* mt, AstDeclaratorNode* declaration,
+        TypeMap* shape) {
+    if (shape != mt->record_result_shape || !mt->ast_index) return -1;
+    int selected = mir_record_string_field(shape);
+    if (selected < 0) return -1;
+    ShapeEntry* string_field = shape->shape;
+    for (int i = 0; i < selected; i++) string_field = string_field->next;
+    AstNode* use = NULL;
+    for (uint32_t id = 0; id < mt->ast_index->count; id++) {
+        AstNode* node = mt->ast_index->nodes[id];
+        if (node->node_type != AST_NODE_MEMBER_EXPR) continue;
+        AstFieldNode* member = (AstFieldNode*)node;
+        AstNode* object = ast_unwrap_primary(member->object);
+        AstNode* key = ast_unwrap_primary(member->field);
+        if (!object || object->node_type != AST_NODE_IDENT ||
+                ((AstIdentNode*)object)->entry != declaration->entry || !key ||
+                key->node_type != AST_NODE_IDENT ||
+                find_shape_field_by_name(shape, ((AstIdentNode*)key)->name->chars,
+                    ((AstIdentNode*)key)->name->len) != string_field) continue;
+        if (use) return -1;
+        use = node;
+    }
+    if (!use) return -1;
+    AstNode* parent = mir_index_use_parent(mt->ast_index, &use);
+    if (parent && parent->node_type == AST_NODE_BINARY && ((AstBinaryNode*)parent)->op == OPERATOR_JOIN) {
+        AstBinaryNode* join = (AstBinaryNode*)parent;
+        AstNode* prefix = ast_unwrap_primary(join->left);
+        if (ast_unwrap_primary(join->right) != ast_unwrap_primary(use) ||
+                !prefix || prefix->node_type != AST_NODE_IDENT ||
+                !mt->record_prefix_binding ||
+                ((AstIdentNode*)prefix)->entry != mt->record_prefix_binding) return -1;
+        use = parent;
+        parent = mir_index_use_parent(mt->ast_index, &use);
+    }
+    if (!parent || parent->node_type != AST_NODE_CALL_EXPR ||
+            !mir_record_is_return_value(mt, parent, (AstNode*)declaration)) return -1;
+    AstCallNode* call = (AstCallNode*)parent;
+    NativeFuncInfo* callee = mir_record_call_info(mt, call);
+    if (!callee || callee->record_result != shape || callee->record_prefix_index < 0) return -1;
+    AstNode* argument = call->argument;
+    for (int i = 0; argument && i < callee->record_prefix_index; i++) argument = argument->next;
+    return ast_unwrap_primary(argument) == ast_unwrap_primary(use) ? selected : -1;
+}
+
+static bool mir_try_scalar_record_binding(MirTranspiler* mt, AstDeclaratorNode* declaration) {
+    if (!mt->flow_scope || !mt->in_user_func || mt->in_async_proc ||
+            declaration->is_type_definition) return false;
+    AstNode* init = ast_unwrap_primary(declaration->init);
+    TypeMap* shape = init && init->node_type == AST_NODE_CALL_EXPR
+        ? mir_record_call_shape(mt, (AstCallNode*)init) : NULL;
+    if (!shape || (declaration->declared_type &&
+            mir_unwrap_decl_contract(declaration->declared_type) != (Type*)shape) ||
+            !mir_record_only_field_uses(mt, declaration, shape)) return false;
+    MirRecordValue* record = (MirRecordValue*)mem_calloc(1, sizeof(MirRecordValue), MEM_CAT_TEMP);
+    if (!record) return false;
+    mir_record_value_init(mt, record, shape);
+    record->streamed_field = mir_record_streamed_field(mt, declaration, shape);
+    if (record->streamed_field >= 0)
+        record->addresses[record->streamed_field] = mt->record_result_addresses[record->streamed_field];
+    mir_emit_record_call(mt, (AstCallNode*)init, record);
+    record->binding = declaration->entry;
+    record->next = mt->flow_scope->records;
+    mt->flow_scope->records = record;
+    return true;
+}
+
+static void mir_emit_record_body(MirTranspiler* mt, AstNode* node,
+        TypeMap* shape, const MIR_reg_t* addresses) {
+    node = ast_unwrap_primary(node);
+    MirFlowScope flow(mt);
+    if (node->node_type == AST_NODE_CONTENT || node->node_type == AST_NODE_BLOCK) {
+        push_scope(mt);
+        AstNode* item = ((AstListNode*)node)->item;
+        for (; item->next; item = item->next) transpile_content_decl_or_side_effect(mt, item);
+        mir_emit_record_body(mt, item, shape, addresses);
+        pop_scope(mt);
+        return;
+    }
+    if (node->node_type == AST_NODE_IF_EXPR) {
+        AstIfNode* branch = (AstIfNode*)node;
+        bool saved_tail = mt->in_tail_position;
+        mt->in_tail_position = false;
+        MirLoweringProfile profile = {&mt->em, mt, mir_profile_lower_value, mir_profile_emit_condition};
+        MIR_reg_t condition = em_lower_profile_condition(&profile, branch->cond);
+        MIR_label_t otherwise = new_label(mt);
+        MIR_label_t done = new_label(mt);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, otherwise),
+            MIR_new_reg_op(mt->ctx, condition)));
+        mt->in_tail_position = saved_tail;
+        {
+            MirFlowScope then_flow(mt);
+            mir_flow_note_condition(mt, branch->cond, true);
+            mir_emit_record_body(mt, branch->then, shape, addresses);
+        }
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done)));
+        emit_label(mt, otherwise);
+        mt->block_returned = false;
+        {
+            MirFlowScope else_flow(mt);
+            mir_flow_note_condition(mt, branch->cond, false);
+            mir_emit_record_body(mt, branch->otherwise, shape, addresses);
+        }
+        emit_label(mt, done);
+        mt->block_returned = false;
+        mt->in_tail_position = saved_tail;
+        return;
+    }
+    if (node->node_type == AST_NODE_CALL_EXPR) {
+        MirRecordValue destination = {};
+        destination.shape = shape;
+        destination.count = (int)shape->length;
+        memcpy(destination.addresses, addresses, sizeof(destination.addresses));
+        mir_emit_record_call(mt, (AstCallNode*)node, &destination);
+        return;
+    }
+    // The plan admits only exact constructor/call/branch tails. Evaluate all
+    // field producers before the return admission and publish no partial result.
+    AstMapNode* map = (AstMapNode*)node;
+    int fields[4];
+    AstNode* item = map->item;
+    for (int i = 0; item; i++, item = item->next) {
+        MIR_reg_t value = transpile_box_item(mt, ((AstNamedNode*)item)->as);
+        fields[i] = create_gc_root_slot(mt, value);
+    }
+    ShapeEntry* field = shape->shape;
+    item = map->item;
+    for (int i = 0; field; i++, field = field->next, item = item->next) {
+        MIR_reg_t value = load_gc_root_slot(mt, fields[i], "record_return_field");
+        if (!mir_boundary_is_redundant(mt, ((AstNamedNode*)item)->as, field->type)) {
+            value = emit_parameter_boundary(mt, value, LMD_TYPE_ANY, field->type, "function return");
+            store_gc_root_slot(mt, fields[i], value);
+        }
+    }
+    field = shape->shape;
+    for (int i = 0; i < shape->length; i++, field = field->next) {
+        MIR_reg_t value = load_gc_root_slot(mt, fields[i], "record_result");
+        mir_record_store_field(mt, addresses[i], value, field->type);
+    }
+}
+
+static void mir_record_copy_cells(MirTranspiler* mt, MIR_reg_t destination,
+        MIR_reg_t source, int count);
+
+static bool mir_record_argument_proven(MirTranspiler* mt, AstNode* node, TypeMap* shape) {
+    MirRecordValue* record = mir_record_binding(mt, node);
+    if (record && record->shape == shape) return true;
+    AstNode* unwrapped = ast_unwrap_primary(node);
+    AstFuncNode* visiting[32];
+    if (unwrapped && unwrapped->node_type == AST_NODE_MAP &&
+            mir_record_result_body(unwrapped, shape, visiting, 0)) {
+        ShapeEntry* field = shape->shape;
+        for (AstNode* item = ((AstMapNode*)unwrapped)->item; item; item = item->next, field = field->next)
+            if (!mir_boundary_is_redundant(mt, ((AstNamedNode*)item)->as, field->type)) return false;
+        return true;
+    }
+    return mir_boundary_is_redundant(mt, node, (Type*)shape);
+}
+
+static bool mir_record_tail_arguments_proven(MirTranspiler* mt, AstCallNode* call, const char* name) {
+    NativeFuncInfo* info = find_native_func_info(mt, name);
+    if (!info || !info->record_result) return true;
+    AstNode* argument = call->argument;
+    for (int i = 0; i < info->param_count; i++, argument = argument ? argument->next : NULL)
+        if (info->record_params[i] && !mir_record_argument_proven(mt, argument, info->record_params[i])) return false;
+    return true;
+}
+
+static MIR_reg_t mir_record_argument_pointer(MirTranspiler* mt, AstNode* node,
+        TypeMap* shape, MIR_reg_t admitted = 0, bool snapshot = false) {
+    MirRecordValue* existing = node ? mir_record_binding(mt, node) : NULL;
+    if (existing && existing->shape == shape && existing->external_base && !snapshot) return existing->external_base;
+    MirRecordValue fields;
+    mir_record_value_init(mt, &fields, shape);
+    AstNode* unwrapped = ast_unwrap_primary(node);
+    AstFuncNode* visiting[32];
+    if (existing && existing->shape == shape && existing->external_base) {
+        mir_record_copy_cells(mt, fields.addresses[0], existing->external_base, fields.count);
+    } else if (!admitted && unwrapped && unwrapped->node_type == AST_NODE_MAP &&
+            mir_record_result_body(unwrapped, shape, visiting, 0)) {
+        mir_emit_record_body(mt, unwrapped, shape, fields.addresses);
+    } else {
+        MIR_reg_t item = admitted ? admitted : transpile_box_item(mt, node);
+        // Unproven edges route through _b before selecting this transport.
+        if (!admitted && !mir_record_argument_proven(mt, node, shape)) abort();
+        emit_return_if_item_error(mt, item);
+        int root = create_gc_root_slot(mt, item);
+        ShapeEntry* field = shape->shape;
+        for (int i = 0; i < fields.count; i++, field = field->next) {
+            // Open record admission preserves extra fields. Resolve the actual
+            // layout at the boxed edge; only scalar cells cross the raw edge.
+            String* name = name_pool_create_len(mt->name_pool, field->name->str, field->name->length);
+            MIR_reg_t key = emit_module_property_key_load(mt, module_property_key_index(mt, name));
+            MIR_reg_t boxed = emit_call_2(mt, "fn_member_by_id", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, load_gc_root_slot(mt, root, "record_argument")),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, fields.addresses[i], 0, 1),
+                MIR_new_reg_op(mt->ctx, boxed)));
+        }
+    }
+    return fields.addresses[0];
+}
+
+static void mir_record_copy_cells(MirTranspiler* mt, MIR_reg_t destination,
+        MIR_reg_t source, int count) {
+    MIR_reg_t values[4];
+    for (int i = 0; i < count; i++) values[i] = em_load_at(&mt->em, source,
+        (MIR_disp_t)i * sizeof(uint64_t), MIR_T_I64, "record_copy");
+    for (int i = 0; i < count; i++) emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, (MIR_disp_t)i * sizeof(uint64_t), destination, 0, 1),
+        MIR_new_reg_op(mt->ctx, values[i])));
+}
+
 static MirValue emit_member_value(MirTranspiler* mt, AstFieldNode* field_node) {
     AstNode* node = (AstNode*)field_node;
+    MirRecordValue temporary = {};
+    MirRecordValue* scalar = mir_record_binding(mt, field_node->object);
+    AstNode* object = ast_unwrap_primary(field_node->object);
+    AstNode* member = ast_unwrap_primary(field_node->field);
+    if (!scalar && object && object->node_type == AST_NODE_CALL_EXPR && member &&
+            member->node_type == AST_NODE_IDENT) {
+        TypeMap* shape = mir_record_call_shape(mt, (AstCallNode*)object);
+        String* name = ((AstIdentNode*)member)->name;
+        if (shape && find_shape_field_by_name(shape, name->chars, name->len)) {
+            mir_record_value_init(mt, &temporary, shape);
+            mir_emit_record_call(mt, (AstCallNode*)object, &temporary);
+            scalar = &temporary;
+        }
+    }
+    if (scalar && member && member->node_type == AST_NODE_IDENT) {
+        String* name = ((AstIdentNode*)member)->name;
+        ShapeEntry* selected = find_shape_field_by_name(scalar->shape, name->chars, name->len);
+        ShapeEntry* field = scalar->shape->shape;
+        for (int i = 0; field; i++, field = field->next) {
+            if (field != selected) continue;
+            MIR_reg_t value = i == scalar->streamed_field
+                ? emit_box_string(mt, mir_empty_string_pointer(mt))
+                : mir_record_publish_field(mt, scalar, i, field);
+            return mir_value_from_reg(mt, node, value, VALUE_REP_ITEM, field->type,
+                mir_decl_type_id(field->type));
+        }
+    }
     Type* contract = mir_trusted_map_member_contract(node);
     if (node->type && lambda_type_accepts_null(node->type)) contract = node->type;
     auto publish = [mt, node, contract](MIR_reg_t reg, ValueRep rep) -> MirValue {
@@ -17006,6 +18059,13 @@ static MirValue emit_member_value(MirTranspiler* mt, AstFieldNode* field_node) {
         mir_shape_layout_is_addressable((TypeMap*)ast_obj_type);
     Type* candidate_shape = static_receiver_is_map ? ast_obj_type
         : mir_expr_candidate_shape(mt, field_node->object, 4);
+    MirFlowFact* branch_record = mir_flow_find(mt, field_node->object, NULL,
+        MIR_FLOW_SEMANTIC);
+    if (branch_record && mir_type_is_reified_map(branch_record->contract)) {
+        // `is Record` proves the fields, but does not impose Record's offsets.
+        // Select that layout as a guarded candidate, never as an admitted one.
+        candidate_shape = lambda_type_nonnull_map_contract(branch_record->contract);
+    }
     MirFieldAccessPlan access_plan = {};
     bool has_access_plan = field_node->field->node_type == AST_NODE_IDENT &&
         mir_plan_field_access(candidate_shape,
@@ -17056,8 +18116,29 @@ static MirValue emit_member_value(MirTranspiler* mt, AstFieldNode* field_node) {
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, want_type),
                 MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)shape_type)));
-            em_guard_map_shape(&mt->em, boxed_obj, want_type, l_slow,
-                static_receiver_is_map);
+            MirFlowFact* layout = mir_flow_find(mt, field_node->object,
+                (Type*)shape_type, MIR_FLOW_LAYOUT);
+            if (layout) {
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                    MIR_new_label_op(mt->ctx, l_slow), MIR_new_reg_op(mt->ctx, layout->guard)));
+            } else if (mir_flow_stable_source(mt, field_node->object)) {
+                MIR_reg_t guard = new_reg(mt, "flow_layout", MIR_T_I64);
+                MIR_label_t tested = new_label(mt);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, guard), MIR_new_int_op(mt->ctx, 0)));
+                em_guard_map_shape(&mt->em, boxed_obj, want_type, tested,
+                    static_receiver_is_map);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, guard), MIR_new_int_op(mt->ctx, 1)));
+                emit_label(mt, tested);
+                mir_flow_note(mt, field_node->object, (Type*)shape_type,
+                    MIR_FLOW_LAYOUT, -1, guard);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                    MIR_new_label_op(mt->ctx, l_slow), MIR_new_reg_op(mt->ctx, guard)));
+            } else {
+                em_guard_map_shape(&mt->em, boxed_obj, want_type, l_slow,
+                    static_receiver_is_map);
+            }
 
             // Fast arm: the receiver was built at this site, so the packed slot
             // is the one this offset was computed for. The null check above is
@@ -17614,13 +18695,13 @@ static MIR_reg_t emit_checked_index_load(MirTranspiler* mt, MIR_reg_t arr_ptr,
     }
     if (!index_nonnegative) {
         MIR_reg_t negative = new_reg(mt, "idx_negative", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, negative),
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LT, MIR_new_reg_op(mt->ctx, negative),
             MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, 0)));
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
             MIR_new_reg_op(mt->ctx, negative)));
     }
     MIR_reg_t past_end = new_reg(mt, "idx_past_end", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, past_end),
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, past_end),
         MIR_new_reg_op(mt->ctx, idx_native), MIR_new_reg_op(mt->ctx, arr_len)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
         MIR_new_reg_op(mt->ctx, past_end)));
@@ -17790,13 +18871,13 @@ static MIR_reg_t emit_generic_pointer_array_load(MirTranspiler* mt,
         MIR_new_reg_op(mt->ctx, length),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_CONTAINER_LENGTH_OFFSET, array_ptr, 0, 1)));
     MIR_reg_t is_negative = new_reg(mt, "ptr_array_neg", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS,
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LT,
         MIR_new_reg_op(mt->ctx, is_negative), MIR_new_reg_op(mt->ctx, idx_native),
         MIR_new_int_op(mt->ctx, 0)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
         MIR_new_label_op(mt->ctx, oob), MIR_new_reg_op(mt->ctx, is_negative)));
     MIR_reg_t past_end = new_reg(mt, "ptr_array_end", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES,
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE,
         MIR_new_reg_op(mt->ctx, past_end), MIR_new_reg_op(mt->ctx, idx_native),
         MIR_new_reg_op(mt->ctx, length)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
@@ -18239,16 +19320,17 @@ static void emit_array_num_elem_guard(MirTranspiler* mt, MIR_reg_t arr_ptr,
 
 static void emit_array_num_bounds_check(MirTranspiler* mt, MIR_reg_t arr_ptr,
         MIR_reg_t idx_int, MIR_label_t oob_label) {
+    // indices are 64-bit: MIR's S suffix truncates to 32 bits, admitting 2^32.
     MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_CONTAINER_LENGTH_OFFSET, arr_ptr, 0, 1)));
     MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LT, MIR_new_reg_op(mt->ctx, neg_check),
         MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, 0)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, oob_label),
         MIR_new_reg_op(mt->ctx, neg_check)));
     MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, ge_check),
         MIR_new_reg_op(mt->ctx, idx_int), MIR_new_reg_op(mt->ctx, arr_len)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, oob_label),
         MIR_new_reg_op(mt->ctx, ge_check)));
@@ -18790,12 +19872,7 @@ static bool mir_emit_var_home_transport(MirTranspiler* mt, int position,
             (MIR_disp_t)borrow_root->root_slot * (MIR_disp_t)sizeof(uint64_t),
             mt->em.frame.root_base, 0, 1),
         MIR_new_reg_op(mt->ctx, val)));
-    MIR_reg_t vh_addr = new_reg(mt, "var_home_addr", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
-        MIR_new_reg_op(mt->ctx, vh_addr),
-        MIR_new_reg_op(mt->ctx, mt->em.frame.root_base),
-        MIR_new_int_op(mt->ctx,
-            (int64_t)borrow_root->root_slot * (int64_t)sizeof(uint64_t))));
+    MIR_reg_t vh_addr = mir_root_slot_address(mt, borrow_root->root_slot);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_mem_op(mt->ctx, MIR_T_I64, vh_cell, mt->em.frame.runtime, 0, 1),
         MIR_new_reg_op(mt->ctx, vh_addr)));
@@ -20060,7 +21137,8 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             // ======== TCO interception ========
             // If this is a tail-recursive call to the current TCO function,
             // transform into: evaluate args → assign to params → goto tco_label
-            if (mt->tco_func && call_in_tail_position && is_recursive_call(call_node, mt->tco_func)) {
+            if (mt->tco_func && call_in_tail_position && is_recursive_call(call_node, mt->tco_func) &&
+                    mir_record_tail_arguments_proven(mt, call_node, fn_mangled)) {
                 log_debug("mir: TCO tail call to '%.*s' — converting to goto",
                     (int)mt->tco_func->name->len, mt->tco_func->name->chars);
 
@@ -20072,10 +21150,21 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 // This prevents aliasing when args reference parameters being overwritten (e.g., f(b, a))
                 AstNode* arg = call_node->argument;
                 AstNamedNode* param = mt->tco_func->param;
+                NativeFuncInfo* tail_info = find_native_func_info(mt, fn_mangled);
                 MIR_reg_t temps[LAMBDA_MAX_FUNCTION_ARGS];
                 int arg_idx = 0;
                 MirVarEntry* string_accumulator = mir_string_tail_accumulator(mt);
                 while (arg && param && arg_idx < LAMBDA_MAX_FUNCTION_ARGS) {
+                    if (tail_info && tail_info->record_result && tail_info->record_params[arg_idx]) {
+                        MIR_reg_t value = mir_record_argument_pointer(mt, arg, tail_info->record_params[arg_idx], 0, true);
+                        temps[arg_idx] = new_reg(mt, "record_tail_argument", MIR_T_I64);
+                        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, temps[arg_idx]), MIR_new_reg_op(mt->ctx, value)));
+                        arg_idx++;
+                        arg = arg->next;
+                        param = (AstNamedNode*)param->next;
+                        continue;
+                    }
                     TypeParam* parameter = (TypeParam*)param->type;
                     bool short_circuit_error = mir_param_short_circuits_item_error(parameter) &&
                         mir_argument_may_return_item_error(mt, arg);
@@ -20178,6 +21267,17 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 param = mt->tco_func->param;
                 for (int i = 0; i < arg_idx; i++) {
                     if (!param) break;
+                    if (tail_info && tail_info->record_result && tail_info->record_params[i]) {
+                        for (MirFlowScope* scope = mt->flow_scope; scope && scope->function == mt->em.func_item;
+                                scope = scope->parent) {
+                            for (MirRecordValue* record = scope->records; record; record = record->next) {
+                                if (record->binding != param->entry) continue;
+                                mir_record_copy_cells(mt, record->external_base, temps[i], record->count);
+                            }
+                        }
+                        param = (AstNamedNode*)param->next;
+                        continue;
+                    }
                     MirVarEntry* pvar = mir_var_for_binding(mt, param->entry);
                     if (pvar) {
                         if (pvar->mir_type == MIR_T_D) {
@@ -20295,7 +21395,9 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             // call wrapper and performs no extra borrow/COW admission, so
             // forcing the route only stripped the *sibling* scalar arguments of
             // their raw lanes (D3.3.1, D5.2).
-            if (borrowed_var_call && fn_def && !native_call) {
+            if ((borrowed_var_call && fn_def && !native_call) ||
+                    (native_call && call_nfi->record_result &&
+                     mt->record_call_target != call_node)) {
                 entry_name_buf = strbuf_new_cap(64);
                 write_fn_name_ex(entry_name_buf, fn_def,
                     ident->entry ? ident->entry->import : NULL, "_b");
@@ -20312,6 +21414,11 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             }
             if (native_call && fn_def) {
                 for (int i = 0; i < call_nfi->param_count; i++) {
+                    if (call_nfi->record_result && call_nfi->record_params[i] &&
+                            !mir_record_argument_proven(mt, resolved_args[i], call_nfi->record_params[i])) {
+                        routed_to_boxed_entry = true;
+                        break;
+                    }
                     if (!mir_param_is_declared(call_nfi->fn_node, i) &&
                             !mir_param_is_inferred_specialization(call_nfi->fn_node, i)) {
                         continue;
@@ -20470,6 +21577,13 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 Type* parameter_contract = param_iter
                     ? mir_unwrap_decl_contract(mir_named_contract(param_iter)) : NULL;
                 MirMapContractScope argument_contract(mt, resolved_args[i], parameter_contract, true);
+                if (native_call && call_nfi->record_result && call_nfi->record_params[i] && resolved_args[i]) {
+                    arg_ops[i] = MIR_new_reg_op(mt->ctx,
+                        mir_record_argument_pointer(mt, resolved_args[i], call_nfi->record_params[i]));
+                    arg_vars[i] = {MIR_T_I64, "record", 0};
+                    if (param_iter) param_iter = (AstNamedNode*)param_iter->next;
+                    continue;
+                }
                 bool short_circuit_error = resolved_args[i] &&
                     mir_param_short_circuits_item_error(type_param) &&
                     mir_argument_may_return_item_error(mt, resolved_args[i]);
@@ -20857,14 +21971,9 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                             char boundary[192];
                             snprintf(boundary, sizeof(boundary), "argument %d of %s",
                                 i + 1, fn_mangled);
-                            bool trusted_field_handled = false;
-                            val = mir_emit_trusted_map_field_argument(mt,
-                                resolved_args[i], val, parameter_contract, boundary,
-                                &trusted_field_handled);
-                            if (!trusted_field_handled) {
-                                val = emit_parameter_boundary(mt, val, LMD_TYPE_ANY,
-                                    parameter_contract, boundary);
-                            }
+                            val = mir_flow_admit_argument(mt, resolved_args[i], val,
+                                parameter_contract, boundary,
+                                type_param && type_param->is_var_param);
                         }
                         arg_root_slots[i] = create_gc_root_slot(mt, val);
                         arg_ops[i] = MIR_new_reg_op(mt->ctx, val);
@@ -20888,6 +21997,16 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 if (param_iter) param_iter = (AstNamedNode*)((AstNode*)param_iter)->next;
             }
             ai = expected_params;
+
+            if (native_call && call_nfi->record_result && mt->record_call_target == call_node) {
+                MirRecordValue* output = mt->record_call_output;
+                for (int i = 0; i < output->count; i++) {
+                    arg_ops[ai] = MIR_new_reg_op(mt->ctx, output->addresses[i]);
+                    arg_vars[ai] = {MIR_T_I64, "record_output", 0};
+                    arg_root_slots[ai++] = -1;
+                }
+                output->filled = true;
+            }
 
             uint64_t callee_array_witness_mask = native_call && call_nfi
                 ? mir_typed_array_witness_mask(call_nfi->fn_node) : 0;
@@ -22943,11 +24062,13 @@ static bool mir_emit_typed_path_store(MirTranspiler* mt, MirVarEntry* root,
 
 static void emit_array_num_store_fallback(MirTranspiler* mt,
         MIR_reg_t obj, TypeId obj_tid, MIR_reg_t arr_ptr, MIR_reg_t index,
-        MIR_reg_t boxed_value, MirVarEntry* root, bool guarded,
+        MIR_reg_t boxed_value, MirVarEntry* root,
         MIR_reg_t result_reg) {
     MIR_reg_t result;
-    if (guarded && root && root->full_type &&
+    if (root && root->full_type &&
             mir_array_occurrence_element(root->full_type)) {
+        // a native value proof removes admission on the hot path, never the
+        // declared store's error boundary on an OOB/COW fallback (S7.1.3v2).
         // T21-2d: only a DECLARED array contract owns the checked typed store.
         // An inferred witness on an untyped `var` parameter carries the
         // parameter's implicit `any \ error` as full_type; handing that to
@@ -23047,7 +24168,7 @@ static void emit_array_num_direct_store(MirTranspiler* mt,
             ? emit_box(mt, native_value, LMD_TYPE_FLOAT)
             : emit_box_bool(mt, native_value);
     emit_array_num_store_fallback(mt, object, object_type, array, index, boxed,
-        root, element_guarded, result);
+        root, result);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
         MIR_new_label_op(mt->ctx, done)));
 
@@ -23076,6 +24197,75 @@ static void emit_array_num_direct_store(MirTranspiler* mt,
         if (root) update_gc_root_slot(mt, root);
     }
     emit_label(mt, done);
+}
+
+static bool mir_emit_compact_array_store(MirTranspiler* mt, MirVarEntry* root,
+        AstCompoundAssignNode* assignment, const LambdaArrayContractInfo* contract,
+        MIR_reg_t* output) {
+    Type* element = mir_unwrap_decl_contract(contract->immediate_element);
+    ArrayNumElemType storage;
+    if (!element || contract->rank != 1 || !root->reg || root->from_env || root->is_state_var ||
+            (element->type_id != LMD_TYPE_NUM_SIZED && element->type_id != LMD_TYPE_INT64 &&
+             element->type_id != LMD_TYPE_UINT64) ||
+            (element->type_id != LMD_TYPE_NUM_SIZED && element->kind != TYPE_KIND_SIMPLE) ||
+            element->is_literal ||
+            !lambda_array_num_elem_type_for_contract(element, &storage)) return false;
+    TypeId index_type = mir_expr_carrier_type(mt, assignment->key);
+    if (!is_integer_type_id(index_type) && !mir_index_expr_is_native_int(mt, assignment->key))
+        return false;
+
+    // source order is RHS, key, then the current owner. A key call may collect
+    // or replace a borrowed root, so neither operand is an interior pointer.
+    MIR_reg_t value = transpile_box_item(mt, assignment->value);
+    int value_home = create_gc_root_slot(mt, value);
+    MirValue key = transpile_expr_value(mt, assignment->key);
+    MIR_reg_t index = index_type == LMD_TYPE_INT64 || index_type == LMD_TYPE_UINT64
+        ? em_require_rep(&mt->em, key, VALUE_REP_I64).reg
+        : emit_int_native_lane_typed(mt, key).r;
+    value = load_gc_root_slot(mt, value_home, "compact_store_value");
+    MIR_reg_t array = root->reg;
+    MIR_reg_t owner = emit_box(mt, array, root->type_id);
+    MIR_reg_t result = new_reg(mt, "compact_store_result", MIR_T_I64);
+    MIR_label_t fallback = new_label(mt);
+    MIR_label_t done = new_label(mt);
+
+    emit_array_num_elem_guard(mt, array, storage, fallback);
+    emit_array_rep_cert_guard(mt, array, root->full_type, fallback);
+    // exact encoded kind proves both membership and representation. Values
+    // requiring lossless admission retain the transactional checked setter.
+    bool compact = element->type_id == LMD_TYPE_NUM_SIZED;
+    uint64_t prefix = (uint64_t)element->type_id << 56;
+    int shift = compact ? 32 : 56;
+    if (compact) prefix |= (uint64_t)type_num_sized_kind(element) << 48;
+    MIR_reg_t actual = new_reg(mt, "compact_value_kind", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_URSH, MIR_new_reg_op(mt->ctx, actual),
+        MIR_new_reg_op(mt->ctx, value), MIR_new_int_op(mt->ctx, shift)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, fallback),
+        MIR_new_reg_op(mt->ctx, actual), MIR_new_int_op(mt->ctx, (int64_t)(prefix >> shift))));
+    emit_array_num_cow_guard(mt, array, fallback);
+    emit_array_num_bounds_check(mt, array, index, fallback);
+
+    // compact numeric Items carry the exact f16/f32 or integer storage bits;
+    // storing their low bytes avoids a lossy double conversion, including NaNs.
+    int width = ELEM_TYPE_SIZE[storage >> 4];
+    MIR_type_t memory_type = width == 1 ? MIR_T_U8 : width == 2 ? MIR_T_U16 :
+        width == 4 ? MIR_T_U32 : MIR_T_I64;
+    MIR_reg_t raw = compact ? value : emit_unbox(mt, value, element->type_id);
+    MIR_reg_t address = emit_array_num_element_address(mt, array, index, width);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_mem_op(mt->ctx, memory_type, 0, address, 0, 1), MIR_new_reg_op(mt->ctx, raw)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, owner)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done)));
+
+    emit_label(mt, fallback);
+    MIR_reg_t replacement = emit_typed_array_store_fallback(mt, owner, root->type_id,
+        index, load_gc_root_slot(mt, value_home, "compact_store_fallback"), root);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, replacement)));
+    emit_label(mt, done);
+    *output = result;
+    return true;
 }
 
 // A direct member/index chain retains occurrence lineage only until a
@@ -24023,6 +25213,9 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
                     update_gc_root_slot(mt, typed_root);
                     return replacement;
                 }
+                MIR_reg_t compact_store;
+                if (mir_emit_compact_array_store(mt, typed_root, ca, &typed_array_info,
+                        &compact_store)) return compact_store;
                 // Arithmetic subscripts can retain the TYPE wrapper in the
                 // AST even though MIR has already proven their native int lane.
                 // Use the same proof as the later inline index lowering.
@@ -24667,7 +25860,7 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
             if (assign_obj_cow_guard) {
                 // CW32v2: a marked root's boxed store also consults the bit
                 emit_array_num_store_fallback(mt, obj, obj_tid, arr_ptr, idx_int,
-                    val, assign_obj_var, assign_elem_guarded, assign_result);
+                    val, assign_obj_var, assign_result);
             } else {
                 MIR_reg_t call_result = emit_call_3(mt, "fn_array_set", MIR_T_I64,
                     MIR_T_P, MIR_new_reg_op(mt->ctx, arr_ptr),
@@ -25204,6 +26397,12 @@ static MirValue transpile_expr_value_core(MirTranspiler* mt, AstNode* node) {
 static MirValue transpile_expr_value(MirTranspiler* mt, AstNode* node,
         uint32_t demand, ValueRep required) {
     if (required != VALUE_REP_NONE) demand |= MIR_VALUE_REQUIRED_REP;
+    AstNode* unwrapped = ast_unwrap_primary(node);
+    if ((demand & MIR_VALUE_DISCARD) && unwrapped && unwrapped->node_type == AST_NODE_FOR_EXPR) {
+        // let the collection producer see discard before allocating its result.
+        return em_apply_value_demand(&mt->em,
+            transpile_for(mt, (AstForNode*)unwrapped, false), demand, required);
+    }
     MirValue value = node && node->node_type == AST_NODE_PRIMARY &&
             (demand & MIR_VALUE_REQUIRED_REP)
         ? transpile_primary_value(mt, (AstPrimaryNode*)node, required)
@@ -26809,27 +28008,34 @@ static FnVariantAnalysis* analyze_lambda_mir_variants(MirTranspiler* mt,
     body->result.companion = em_companion_transport(body->result.shape,
         /*c_reachable=*/false);
     body->param_count = param_count;
-    if (native && native_info->param_count > 0) {
+    if ((native || (native_info && native_info->record_result)) &&
+            (native_info->param_count > 0 || native_info->record_result)) {
         // Physical MIR I64 cannot distinguish boxed Items from raw I64/U64.
         // Preserve the semantic representation so direct calls never publish
         // raw scalar bits as GC roots.
+        int record_fields = native_info->record_result ? (int)native_info->record_result->length : 0;
         body->params = (FnParamAnalysis*)pool_calloc(mt->script_pool,
-            sizeof(FnParamAnalysis) * (size_t)native_info->param_count);
+            sizeof(FnParamAnalysis) * (size_t)(native_info->param_count + record_fields));
         if (!body->params) {
             log_error("mir: native parameter analysis allocation failed");
             abort();
         }
-        body->param_count = native_info->param_count;
+        body->param_count = native_info->param_count + record_fields;
         for (int i = 0; i < native_info->param_count; i++) {
             TypeId param_type = mir_native_param_type(native_info, i);
             bool typed_array_witness =
                 (mir_typed_array_witness_mask(native_info->fn_node) &
                     ((uint64_t)1 << i)) != 0;
             body->params[i] = {param_type,
-                typed_array_witness ? VALUE_REP_RAW_GC_POINTER
+                native_info->record_result && native_info->record_params[i] ? VALUE_REP_RAW_NON_GC_POINTER
+                    : typed_array_witness ? VALUE_REP_RAW_GC_POINTER
                     : mir_native_func_param_uses_lane(native_info, i)
                     ? lambda_canonical_rep_for_type_id(param_type) : VALUE_REP_ITEM,
                 0};
+        }
+        for (int i = 0; i < record_fields; i++) {
+            body->params[native_info->param_count + i] =
+                {LMD_TYPE_ANY, VALUE_REP_RAW_NON_GC_POINTER, 0};
         }
     }
 
@@ -27235,7 +28441,11 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     }
     for (int i = 0; i < user_index; i++) {
         MIR_reg_t prepared = prepared_params[i];
-        if (wrapper_array_witness_mask & ((uint64_t)1 << i)) {
+        if (nfi && nfi->record_result && nfi->record_params[i]) {
+            call_args[call_arg_count] = MIR_new_reg_op(mt->ctx,
+                mir_record_argument_pointer(mt, NULL, nfi->record_params[i], prepared));
+            call_vars[call_arg_count] = {MIR_T_I64, "record", 0};
+        } else if (wrapper_array_witness_mask & ((uint64_t)1 << i)) {
             call_args[call_arg_count] = MIR_new_reg_op(mt->ctx,
                 raw_array_params[i]);
             call_vars[call_arg_count] = {MIR_T_I64, "array", 0};
@@ -27251,6 +28461,14 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
             call_vars[call_arg_count] = {MIR_T_I64, "p", 0};
         }
         call_arg_count++;
+    }
+    MirRecordValue record_output = {};
+    if (nfi && nfi->record_result) {
+        mir_record_value_init(mt, &record_output, nfi->record_result);
+        for (int i = 0; i < record_output.count; i++) {
+            call_args[call_arg_count] = MIR_new_reg_op(mt->ctx, record_output.addresses[i]);
+            call_vars[call_arg_count++] = {MIR_T_I64, "record_output", 0};
+        }
     }
     if (wrapper_array_witness_mask && call_arg_count < WRAPPER_PARAM_CAPACITY) {
         call_args[call_arg_count] = MIR_new_int_op(mt->ctx,
@@ -27359,6 +28577,10 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     MIR_reg_t boxed_result = native_return
         ? emit_box_contract_lane(mt, result, nfi->return_type,
             fn_type ? fn_type->return_contract : NULL) : result;
+    if (nfi && nfi->record_result) {
+        emit_return_if_item_error(mt, result);
+        boxed_result = mir_record_materialize(mt, &record_output);
+    }
     if (native_return) {
         if (raw_lane_kind == RETURN_LANE_ERROR) {
             MIR_reg_t selected = new_reg(mt, "wrapper_lane", MIR_T_I64);
@@ -27534,7 +28756,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         // avoid boxing/unboxing return values at call sites.
         if (!generate_native) {
             TypeId ret_tid = infer_return_type(mt, fn_node);
-            if (ret_tid != LMD_TYPE_ANY) {
+            if (ret_tid != LMD_TYPE_ANY || mir_record_result_plan(fn_node)) {
                 generate_native = true;
             }
         }
@@ -27614,6 +28836,13 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         param = (AstNamedNode*)param->next;
     }
 
+    if (raw_nfi && raw_nfi->record_result) {
+        for (int i = 0; i < raw_nfi->record_result->length; i++) {
+            char name[32];
+            snprintf(name, sizeof(name), "_record_result%d", i);
+            params[param_count++] = {MIR_T_I64, raw_strdup(name), 0};
+        }
+    }
     if (raw_array_witness_mask && param_count < RAW_FUNCTION_PARAM_CAPACITY - 1) {
         // The witness is a trailing scalar mask so raw bodies can distinguish
         // an already-unboxed ArrayNum pointer from the boxed fallback Item.
@@ -27656,6 +28885,10 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
 
     // Save current function context
     MIR_item_t saved_func_item = mt->em.func_item;
+    TypeMap* saved_record_shape = mt->record_result_shape;
+    NameEntry* saved_record_prefix = mt->record_prefix_binding;
+    MIR_reg_t saved_record_addresses[4];
+    memcpy(saved_record_addresses, mt->record_result_addresses, sizeof(saved_record_addresses));
     MIR_func_t saved_func = mt->em.func;
     MIR_reg_t saved_consts_reg = mt->consts_reg;
     MIR_reg_t saved_gc_reg = mt->gc_reg;
@@ -27742,6 +28975,17 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     MIR_func_t func = MIR_get_item_func(mt->ctx, func_item);
     mt->em.func_item = func_item;
     mt->em.func = func;
+    mt->record_result_shape = raw_nfi ? raw_nfi->record_result : NULL;
+    mt->record_prefix_binding = mt->record_result_shape && raw_nfi->record_prefix_index >= 0
+        ? mir_param_at(fn_node, raw_nfi->record_prefix_index)->entry : NULL;
+    memset(mt->record_result_addresses, 0, sizeof(mt->record_result_addresses));
+    if (mt->record_result_shape) {
+        for (int i = 0; i < mt->record_result_shape->length; i++) {
+            char name[32];
+            snprintf(name, sizeof(name), "_record_result%d", i);
+            mt->record_result_addresses[i] = MIR_reg(mt->ctx, name, func);
+        }
+    }
     mt->region_producer_call = NULL;
     mt->region_capability_reg = region_producer
         ? MIR_reg(mt->ctx, "_region", func) : 0;
@@ -28045,6 +29289,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         name_buf->str, (void*)fn_type, generate_native);
     param = fn_node->param;
     int pi = 0;
+    MirFlowScope record_parameters(mt);
     int user_param_base = 1 + ((is_closure || (is_method && !is_closure)) ? 1 : 0);
     while (param && pi < user_param_count) {
         const char* pname = param->name->chars;
@@ -28054,6 +29299,22 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         mir_format_backend_name(prefixed, sizeof(prefixed), 'p',
             (uint64_t)(user_param_base + pi));
         MIR_reg_t preg = MIR_reg(mt->ctx, prefixed, func);
+
+        if (raw_nfi && raw_nfi->record_result && raw_nfi->record_params[pi]) {
+            MirRecordValue* record = (MirRecordValue*)mem_calloc(1, sizeof(MirRecordValue), MEM_CAT_TEMP);
+            if (!record) abort();
+            mir_record_value_init(mt, record, raw_nfi->record_params[pi]);
+            record->binding = param->entry;
+            record->external_base = record->addresses[0];
+            // Tail backedges reuse argument temporaries. Keep the current
+            // parameter in separate homes until every next argument is ready.
+            mir_record_copy_cells(mt, record->external_base, preg, record->count);
+            record->next = record_parameters.records;
+            record_parameters.records = record;
+            param = (AstNamedNode*)param->next;
+            pi++;
+            continue;
+        }
 
         TypeId tid = resolved_param_types[pi];
         bool param_has_declared_contract = param->declared_type &&
@@ -28385,10 +29646,24 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     }
 
     // Transpile body
+    if (mt->record_prefix_binding) {
+        MirVarEntry* prefix = mir_var_for_binding(mt, mt->record_prefix_binding);
+        int index = mir_record_string_field(mt->record_result_shape);
+        MIR_reg_t item = emit_box(mt, prefix->reg, prefix->type_id);
+        mir_record_store_field(mt, mt->record_result_addresses[index], item, &TYPE_STRING);
+        MIR_reg_t empty = mir_empty_string_pointer(mt);
+        if (prefix->type_id != LMD_TYPE_STRING) empty = emit_box_string(mt, empty);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, prefix->reg),
+            MIR_new_reg_op(mt->ctx, empty)));
+        update_gc_root_slot(mt, prefix);
+    }
         MIR_reg_t body_result;
         MirValue body_value = {};
     MirMapContractScope body_contract(mt, fn_node->body, mt->current_return_type, true);
-    if (native_return) {
+    if (mt->record_result_shape) {
+        mir_emit_record_body(mt, fn_node->body, mt->record_result_shape, mt->record_result_addresses);
+        body_result = emit_null_item_reg(mt);
+    } else if (native_return) {
         // P4-3.3: Native return — produce unboxed native value
         NativeFuncInfo* nfi_body = find_native_func_info(mt, name_buf->str);
         AstNode* native_body_expr = function_body_result_expr(fn_node);
@@ -28534,6 +29809,9 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     }
 
     // Restore function context
+    mt->record_result_shape = saved_record_shape;
+    mt->record_prefix_binding = saved_record_prefix;
+    memcpy(mt->record_result_addresses, saved_record_addresses, sizeof(saved_record_addresses));
     mt->em.func_item = saved_func_item;
     mt->em.func = saved_func;
     mt->module_state_reg = 0;
@@ -29572,7 +30850,7 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                         }
                     }
                     if (!borrowed_raw_abi && !has_native &&
-                            infer_return_type(mt, fn_node) != LMD_TYPE_ANY) {
+                            (infer_return_type(mt, fn_node) != LMD_TYPE_ANY || mir_record_result_plan(fn_node))) {
                         has_native = true;
                     }
                     // Prepass and final lowering now share the same resolved
