@@ -95,8 +95,33 @@ void dl_store_clip_shapes(DisplayList* dl, DlClipShapeStack* dst,
     }
 }
 
+static void dl_offset_clip_shape(ClipShape* shape, float offset_x, float offset_y) {
+    if (!shape || (offset_x == 0.0f && offset_y == 0.0f)) return;
+    switch (shape->type) {
+        case CLIP_SHAPE_CIRCLE:
+            shape->circle.cx -= offset_x;
+            shape->circle.cy -= offset_y;
+            break;
+        case CLIP_SHAPE_ELLIPSE:
+            shape->ellipse.cx -= offset_x;
+            shape->ellipse.cy -= offset_y;
+            break;
+        case CLIP_SHAPE_INSET:
+            shape->inset.x -= offset_x;
+            shape->inset.y -= offset_y;
+            break;
+        case CLIP_SHAPE_ROUNDED_RECT:
+            shape->rounded_rect.x -= offset_x;
+            shape->rounded_rect.y -= offset_y;
+            break;
+        default:
+            break;
+    }
+}
+
 int dl_restore_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes,
-                           ClipShape** shape_ptrs) {
+                           ClipShape** shape_ptrs, ScratchArena* scratch,
+                           float offset_x, float offset_y) {
     if (!src || !shapes || !shape_ptrs || src->depth <= 0) return 0;
     int depth = src->depth;
     if (depth > RDT_MAX_CLIP_SHAPES) {
@@ -108,11 +133,25 @@ int dl_restore_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes,
     for (int i = 0; i < depth; i++) {
         if (src->type[i] == CLIP_SHAPE_NONE) continue;
         if (src->type[i] == CLIP_SHAPE_POLYGON) {
-            if (src->polygon_count[i] < 3 || !src->polygon_vx[i] || !src->polygon_vy[i]) continue;
+            int count = src->polygon_count[i];
+            if (count < 3 || !src->polygon_vx[i] || !src->polygon_vy[i]) continue;
+            if ((offset_x != 0.0f || offset_y != 0.0f) && !scratch) continue;
+            float* vx = src->polygon_vx[i];
+            float* vy = src->polygon_vy[i];
+            if (scratch) {
+                vx = (float*)scratch_alloc(scratch, count * sizeof(float));
+                vy = (float*)scratch_alloc(scratch, count * sizeof(float));
+                if (!vx || !vy) continue;
+                for (int pi = 0; pi < count; pi++) {
+                    vx[pi] = src->polygon_vx[i][pi] - offset_x;
+                    vy[pi] = src->polygon_vy[i][pi] - offset_y;
+                }
+            }
             shapes[out_depth].type = CLIP_SHAPE_POLYGON;
-            shapes[out_depth].polygon = {src->polygon_vx[i], src->polygon_vy[i], src->polygon_count[i]};
+            shapes[out_depth].polygon = {vx, vy, count};
         } else {
             shapes[out_depth] = clip_shape_from_params(src->type[i], src->params[i]);
+            dl_offset_clip_shape(&shapes[out_depth], offset_x, offset_y);
         }
         shape_ptrs[out_depth] = &shapes[out_depth];
         out_depth++;

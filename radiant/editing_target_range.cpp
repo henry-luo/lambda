@@ -320,10 +320,7 @@ static uint32_t target_range_leading_space_len(const char* text,
 
 static bool target_range_node_is_inside(DomNode* node, DomElement* owner) {
     DomNode* owner_node = static_cast<DomNode*>(owner);
-    for (DomNode* cur = node; cur; cur = cur->parent) {
-        if (cur == owner_node) return true;
-    }
-    return false;
+    return view_geometry_dom_is_descendant(node, owner_node);
 }
 
 static bool target_range_can_cleanup_inline(DomElement* elem,

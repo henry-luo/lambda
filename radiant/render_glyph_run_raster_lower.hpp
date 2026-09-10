@@ -2,6 +2,7 @@
 // internal implementation header — do not include outside radiant/
 
 #include "render.hpp"
+#include "layout.hpp"
 #include "view.hpp"
 #include "../lib/str.h"
 #include <math.h>
@@ -34,13 +35,10 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
     const char* end = run->text + text_len;
     while (cursor < end) {
         uint32_t codepoint = 0;
-        int bytes = str_utf8_decode(cursor, (size_t)(end - cursor), &codepoint);
-        if (bytes <= 0) {
-            cursor++;
+        if (!layout_utf8_next_codepoint(&cursor, end, &codepoint)) {
             x += space_width;
             continue;
         }
-        cursor += bytes;
 
         if (codepoint == 0xFE0F) {
             continue;

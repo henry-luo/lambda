@@ -26575,7 +26575,7 @@ static ScalarReturnClass infer_boxed_return_mode(MirTranspiler* mt,
     // DYNAMIC — mapping it through the scalar table would yield NONE and skip
     // the adoption that keeps the payload alive past the watermark restore.
     if (return_type == LMD_TYPE_TYPE) return_type = LMD_TYPE_ANY;
-    return em_scalar_return_class_for_type(return_type);
+    return jit_scalar_return_class_for_type(return_type);
 }
 
 // SCU11: a body's return lane and boxed scalar class are derived ONCE from the
@@ -26651,7 +26651,7 @@ static FnVariantAnalysis* analyze_lambda_mir_variants(MirTranspiler* mt,
     body->effects = public_entry->effects;
     TypeId return_type = native ? native_info->return_type : LMD_TYPE_ANY;
     ValueRep return_rep = native ? lambda_canonical_rep_for_type_id(return_type) : VALUE_REP_ITEM;
-    ScalarReturnClass scalar_class = em_scalar_return_class_for_type(
+    ScalarReturnClass scalar_class = jit_scalar_return_class_for_type(
         return_type);
     if (!native) scalar_class = scalar_mode == SCALAR_RETURN_DYNAMIC
         ? SCALAR_RETURN_DYNAMIC : scalar_class;

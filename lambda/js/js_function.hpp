@@ -151,6 +151,8 @@ struct JsCallableCode {
     // AST definition records live in their retained Script pool; their code
     // pointer is shared by every closure made from that definition.
     bool definition_owned;
+    // a weak realm table is detached before its owner is destroyed.
+    HashMap* intern_table;
 };
 
 // JSCUO8: one payload word on the value, not six. A value that needs none
@@ -208,7 +210,7 @@ inline const JsWithData js_fn_with_absent{};
 inline const JsEvalOrigin js_fn_eval_origin_absent{};
 inline const JsCallableCode js_fn_code_absent{
     NULL, NULL, NULL, 0, 0, UINT32_MAX, -1, 0, 0, false,
-    JS_FUNCTION_BODY_CODE, 0, false, false};
+    JS_FUNCTION_BODY_CODE, 0, false, false, NULL};
 
 #define JS_FN_PAYLOAD_READ(fn, field) \
     ((fn) && (fn)->payload && (fn)->payload->field ? (fn)->payload->field \
@@ -305,6 +307,7 @@ JsCallableCode* js_fn_code_ensure(JsFunction* fn);
 JsCallableCode* js_callable_code_intern_mir(JsFunction* fn, void* func_ptr,
         Context* runtime_context, int param_count, uint32_t module_state_id);
 void js_callable_code_release(JsCallableCode* code);
+void js_callable_code_table_destroy(HashMap* table);
 
 #define JS_FUNCTION_LAYOUT_MAGIC 0x4A53464Eu
 

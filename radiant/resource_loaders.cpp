@@ -16,6 +16,7 @@
 #include "../lambda/input/css/css_font_face.hpp"
 #include "view.hpp"
 #include "layout.hpp"
+#include "radiant.hpp"
 #include "event.hpp"
 #include "../lib/font/font.h"
 #include <string.h>
@@ -118,7 +119,7 @@ static bool add_stylesheet_to_document(DomDocument* doc, CssStylesheet* sheet) {
 
 // CSS resource handler
 
-// Helper: resolve a relative URL in a CssValue against a base URL
+// resolve one declaration's nested URL values against its stylesheet origin
 static void resolve_css_value_urls(CssValue* value, const Url* base_url, Pool* pool) {
     if (!value || !base_url || !pool) return;
 
@@ -147,7 +148,17 @@ static void resolve_css_value_urls(CssValue* value, const Url* base_url, Pool* p
     }
 }
 
-// Helper: walk all rules and resolve url() values against stylesheet origin
+typedef struct CssUrlResolveContext {
+    const Url* base_url;
+    Pool* pool;
+} CssUrlResolveContext;
+
+static void resolve_css_declaration_urls(CssDeclaration* declaration, void* context) {
+    CssUrlResolveContext* resolve = (CssUrlResolveContext*)context;
+    if (!declaration || !resolve) return;
+    resolve_css_value_urls(declaration->value, resolve->base_url, resolve->pool);
+}
+
 static void resolve_stylesheet_urls(CssStylesheet* sheet) {
     if (!sheet || !sheet->origin_url || !sheet->pool) return;
 
@@ -157,20 +168,8 @@ static void resolve_stylesheet_urls(CssStylesheet* sheet) {
     Url* base_url = url_parse(sheet->origin_url);
     if (!base_url) return;
 
-    for (size_t i = 0; i < sheet->rule_count; i++) {
-        CssRule* rule = sheet->rules[i];
-        if (!rule) continue;
-
-        // resolve urls in style rules
-        if (rule->type == CSS_RULE_STYLE) {
-            for (size_t j = 0; j < rule->data.style_rule.declaration_count; j++) {
-                CssDeclaration* decl = rule->data.style_rule.declarations[j];
-                if (decl && decl->value) {
-                    resolve_css_value_urls(decl->value, base_url, sheet->pool);
-                }
-            }
-        }
-    }
+    CssUrlResolveContext context = {base_url, sheet->pool};
+    radiant_for_each_css_declaration(sheet, resolve_css_declaration_urls, &context);
     url_destroy(base_url);
 }
 
@@ -449,17 +448,8 @@ void process_font_resource(NetworkResource* res, const struct CssFontFaceDescrip
         return;
     }
 
-    // map CSS weight/style → FontWeight/FontSlant (same as font_face.cpp)
-    FontWeight fw = FONT_WEIGHT_NORMAL;
-    if (font_face->font_weight == CSS_VALUE_BOLD)
-        fw = FONT_WEIGHT_BOLD;
-    else if (font_face->font_weight != CSS_VALUE_NORMAL &&
-             font_face->font_weight >= 100 && font_face->font_weight <= 900)
-        fw = (FontWeight)font_face->font_weight;
-
-    FontSlant fs = FONT_SLANT_NORMAL;
-    if (font_face->font_style == CSS_VALUE_ITALIC) fs = FONT_SLANT_ITALIC;
-    else if (font_face->font_style == CSS_VALUE_OBLIQUE) fs = FONT_SLANT_OBLIQUE;
+    FontWeight fw = radiant_font_weight_from_css(font_face->font_weight);
+    FontSlant fs = radiant_font_slant_from_css(font_face->font_style);
 
     // re-register @font-face with the downloaded local cache path as source
     // font_face_register() merges sources into existing entries

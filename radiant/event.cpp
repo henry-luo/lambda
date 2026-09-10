@@ -76,8 +76,7 @@ void rebuild_lambda_doc(UiContext* uicon);
 void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results, int result_count);
 
 struct SelectorMatcher* selector_matcher_create(Pool* pool);
-static void clear_cascaded_styles_recursive(DomNode* node);
-static void mark_layout_dirty_recursive(DomNode* node);
+static bool clear_cascaded_styles_visitor(DomNode* node, void* context);
 static void pseudo_state_batch_begin(DocState* state);
 static void pseudo_state_batch_end(DomDocument* doc, DocState* state);
 static bool radiant_dispatch_simple_event(EventContext* evcon, View* target,
@@ -1300,10 +1299,8 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     // assumed to be all text) and the click snaps to the nearest text via the
     // margin-text-hit above, so the image can never be clicked/selected.
     uintptr_t self_tag = block->tag();
-    bool is_replaced_block = self_tag == MARKUP_NAME_IMG || self_tag == MARKUP_NAME_VIDEO ||
-        self_tag == MARKUP_NAME_CANVAS || self_tag == MARKUP_NAME_IFRAME ||
-        self_tag == MARKUP_NAME_EMBED || self_tag == MARKUP_NAME_OBJECT ||
-        self_tag == MARKUP_NAME_HR;
+    bool is_replaced_block = layout_tag_is_replaced_content((NameId)self_tag) ||
+        self_tag == MARKUP_NAME_HR || self_tag == MARKUP_NAME_OBJECT;
     if (!pointer_events_none && !evcon->target &&
         (is_replaced_block ||
          !(is_in_rich_editable_subtree(static_cast<View*>(block)) && !is_rich_editable_host(static_cast<View*>(block))))) { // check the block itself
@@ -1635,10 +1632,7 @@ static DomElement* rich_editable_from_target(View* target) {
 }
 
 static bool dom_node_is_descendant_of(DomNode* node, DomNode* ancestor) {
-    for (DomNode* p = node; p; p = p->parent) {
-        if (p == ancestor) return true;
-    }
-    return false;
+    return view_geometry_dom_is_descendant(node, ancestor);
 }
 
 static void collapse_active_text_control_selection_for_rich_target(DocState* state,
@@ -4065,7 +4059,7 @@ static bool form_apply_caret_operation(EventContext* evcon, DomElement* elem,
                                        const char* value, int value_len, int cur) {
     uint32_t dest = 0;
     bool multiline = elem && elem->form &&
-        elem->form->control_type == FORM_CONTROL_TEXTAREA;
+        form_control_is_textarea(elem->form);
     if (!form_caret_operation_destination(s_caret_op_name, value, value_len,
                                           cur, multiline, &dest)) {
         return false;
@@ -5290,7 +5284,7 @@ static bool dispatch_form_key_intent(EventContext* evcon, DomElement* elem,
             break;
         case INPUT_INTENT_INSERT_PARAGRAPH:
         case INPUT_INTENT_INSERT_LINE_BREAK:
-            if (elem->form->control_type == FORM_CONTROL_TEXTAREA) {
+            if (form_control_is_textarea(elem->form)) {
                 dispatch_form_text_replace(evcon, elem, state, target,
                                            (uint32_t)caret, (uint32_t)caret,
                                            "\n", 1, intent.type);
@@ -6018,24 +6012,15 @@ static void dom_js_record_reconcile(DomDocument* doc,
     event_state_log_finish_record(state->active_event_log, &w);
 }
 
-static void dom_js_clear_layout_dirty_recursive(DomNode* node) {
-    if (!node) return;
+static bool dom_js_clear_layout_dirty_visitor(DomNode* node, void*) {
     node->layout_dirty = false;
-    if (node->is_element()) {
-        DomElement* elem = lam::dom_require_element(node);
-        for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-            dom_js_clear_layout_dirty_recursive(child);
-        }
-    }
+    return true;
 }
 
 static bool dom_js_is_connected_to_document(DomDocument* doc, DomNode* node) {
     if (!doc || !node) return false;
     DomNode* root = static_cast<DomNode*>(doc->root);
-    for (DomNode* cur = node; cur; cur = cur->parent) {
-        if (cur == root) return true;
-    }
-    return false;
+    return view_geometry_dom_is_descendant(node, root);
 }
 
 static DomElement* dom_js_record_cascade_root(DomDocument* doc,
@@ -6276,7 +6261,8 @@ static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
         return;
     }
 
-    clear_cascaded_styles_recursive(static_cast<DomNode*>(root));
+    view_geometry_walk_dom_tree(static_cast<DomNode*>(root),
+                                clear_cascaded_styles_visitor, nullptr);
 
     Pool* pool = doc->document_pool;
     CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
@@ -6286,10 +6272,7 @@ static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
 }
 
 static bool dom_js_node_contains(DomNode* ancestor, DomNode* node) {
-    for (DomNode* current = node; current; current = current->parent) {
-        if (current == ancestor) return true;
-    }
-    return false;
+    return view_geometry_dom_is_descendant(node, ancestor);
 }
 
 static bool dom_js_node_has_table_fixup_context(DomNode* node) {
@@ -6605,7 +6588,8 @@ static bool post_html_handler_incremental_rebuild(
     if (evcon->ui_context) evcon->ui_context->document = saved_doc;
 
     if (doc->root) {
-        dom_js_clear_layout_dirty_recursive(static_cast<DomNode*>(doc->root));
+        view_geometry_walk_dom_tree(static_cast<DomNode*>(doc->root),
+                                    dom_js_clear_layout_dirty_visitor, nullptr);
     }
 
     auto t2 = high_resolution_clock::now();
@@ -6700,7 +6684,8 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     // Clear previously cascaded declarations so removed classes/attributes cannot
     // keep stale winning CSS declarations in specified_style.
-    clear_cascaded_styles_recursive(static_cast<DomNode*>(doc->root));
+    view_geometry_walk_dom_tree(static_cast<DomNode*>(doc->root),
+                                clear_cascaded_styles_visitor, nullptr);
     SelectorMatcher* matcher = selector_matcher_create(pool);
     if (matcher) {
         state_configure_selector_matcher((DocState*)doc->state, matcher);
@@ -8063,40 +8048,26 @@ bool radiant_editing_animation_tick(UiContext* uicon, double timestamp) {
 // ============================================================================
 
 /**
- * Recursively clear stylesheet declarations and styles_resolved on every
- * element in the subtree. Live inline declarations remain attached while
- * previously matching selector declarations (e.g. :hover) are removed.
+ * Clear stylesheet declarations and styles_resolved on every element in the
+ * subtree. Live inline declarations remain attached while previously matching
+ * selector declarations (e.g. :hover) are removed.
  */
-static void clear_cascaded_styles_recursive(DomNode* node) {
-    if (!node) return;
-    if (node->is_element()) {
-        DomElement* e = lam::dom_require_element(node);
-        if (!layout_element_is_anonymous_table_fixup(e)) {
-            dom_element_clear_cascaded_styles(e);
-            // Pseudo declarations share the base cascade epoch; otherwise a :hover
-            // recascade reads declarations that no longer match.
-            dom_element_clear_pseudo_styles(e);
-            e->set_styles_resolved(false);
-        }
-        for (DomNode* c = e->first_child; c; c = c->next_sibling) {
-            if ((uintptr_t)c < 4096) {
-                log_error("drawing recascade invalid child link: parent=%p tag=%s child=%p",
-                          (void*)e, e->tag_name ? e->tag_name : "?", (void*)c);
-                return;
-            }
-            clear_cascaded_styles_recursive(c);
-        }
+static bool clear_cascaded_styles_visitor(DomNode* node, void*) {
+    if (!node->is_element()) return true;
+    DomElement* e = lam::dom_require_element(node);
+    if (!layout_element_is_anonymous_table_fixup(e)) {
+        dom_element_clear_cascaded_styles(e);
+        // Pseudo declarations share the base cascade epoch; otherwise a :hover
+        // recascade reads declarations that no longer match.
+        dom_element_clear_pseudo_styles(e);
+        e->set_styles_resolved(false);
     }
+    return true;
 }
 
-static void mark_layout_dirty_recursive(DomNode* node) {
-    if (!node) return;
+static bool mark_layout_dirty_visitor(DomNode* node, void*) {
     node->layout_dirty = true;
-    if (!node->is_element()) return;
-    DomElement* element = lam::dom_require_element(node);
-    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        mark_layout_dirty_recursive(child);
-    }
+    return true;
 }
 
 static bool css_simple_selector_uses_hover(CssSimpleSelector* simple) {
@@ -8248,7 +8219,8 @@ static void recascade_document_for_pseudo_state(DomDocument* doc, DocState* stat
         // Pseudo-state changes can affect descendants through selectors like
         // `.parent:hover .child`, so clear and re-apply the full cascade once
         // after the StateStore pseudo bits have been updated.
-        clear_cascaded_styles_recursive(static_cast<DomNode*>(doc->root));
+        view_geometry_walk_dom_tree(static_cast<DomNode*>(doc->root),
+                                    clear_cascaded_styles_visitor, nullptr);
         SelectorMatcher* matcher = selector_matcher_create(pool);
         if (matcher) {
             state_configure_selector_matcher(state, matcher);
@@ -8270,7 +8242,8 @@ static void apply_pseudo_state_restyle(DomDocument* doc, DocState* state) {
     // The mutation reconciler may run an incremental layout before the
     // queued reflow. Marking the retained tree prevents its clean subtree
     // fast path from reusing styles resolved before this state transition.
-    mark_layout_dirty_recursive(static_cast<DomNode*>(doc->root));
+    view_geometry_walk_dom_tree(static_cast<DomNode*>(doc->root),
+                                mark_layout_dirty_visitor, nullptr);
     reflow_schedule(state, doc->root, REFLOW_SUBTREE, CHANGE_PSEUDO_STATE);
 
     // Always mark for repaint.
@@ -8452,23 +8425,22 @@ void update_active_state(EventContext* evcon, View* target, bool is_active) {
 /**
  * Check if an element is a checkbox input
  */
-static bool is_input_type(View* view, const char* expected_type) {
+static bool is_input_kind(View* view, FormInputKind expected_kind) {
     if (!view || !view->is_element()) return false;
     ViewElement* elem = lam::view_require_element(view);
     if (elem->tag() != MARKUP_NAME_INPUT) return false;
-    const char* type = elem->get_attribute("type");
-    return type && strcmp(type, expected_type) == 0;
+    return form_input_kind_is(elem->get_attribute("type"), expected_kind);
 }
 
 static bool is_checkbox(View* view) {
-    return is_input_type(view, "checkbox");
+    return is_input_kind(view, FORM_INPUT_KIND_CHECKBOX);
 }
 
 /**
  * Check if an element is a radio button input
  */
 static bool is_radio(View* view) {
-    return is_input_type(view, "radio");
+    return is_input_kind(view, FORM_INPUT_KIND_RADIO);
 }
 
 
@@ -9931,15 +9903,13 @@ static int event_text_offset_for_x(UiContext* uicon, FontBox* font,
                 bytes = 1;
                 codepoint = *current;
             }
-            FontStyleDesc style = font_style_desc_from_prop(font->style);
-            LoadedGlyph* glyph = font_load_glyph(
-                font_box_handle(font), &style, codepoint, false);
-            if (!glyph) {
+            advance = layout_measure_font_glyph_advance(
+                font_box_handle(font), font->style, codepoint, raster_scale);
+            if (advance <= 0.0f) {
                 current += bytes;
                 byte_offset += bytes;
                 continue;
             }
-            advance = glyph->advance_x / raster_scale;
         }
         unsigned char* next = current + bytes;
         if (next < run.end && *next != '\n' && *next != '\r') {
@@ -10273,6 +10243,62 @@ struct EventDocumentScope {
     }
 };
 
+void rdt_event_set_mouse_position(RdtEvent* event, EventType type,
+                                  float x, float y, double timestamp) {
+    if (!event) return;
+    memset(event, 0, sizeof(*event));
+    event->mouse_position.type = type;
+    event->mouse_position.timestamp = timestamp;
+    event->mouse_position.x = x;
+    event->mouse_position.y = y;
+}
+
+void rdt_event_set_mouse_button(RdtEvent* event, EventType type,
+                                float x, float y, int button, int clicks,
+                                int mods, double timestamp) {
+    if (!event) return;
+    memset(event, 0, sizeof(*event));
+    event->mouse_button.type = type;
+    event->mouse_button.timestamp = timestamp;
+    event->mouse_button.x = x;
+    event->mouse_button.y = y;
+    event->mouse_button.button = (uint8_t)button;
+    event->mouse_button.clicks = (uint8_t)clicks;
+    event->mouse_button.mods = mods;
+}
+
+void rdt_event_set_scroll(RdtEvent* event, float x, float y,
+                          float xoffset, float yoffset, double timestamp) {
+    if (!event) return;
+    memset(event, 0, sizeof(*event));
+    event->scroll.type = RDT_EVENT_SCROLL;
+    event->scroll.timestamp = timestamp;
+    event->scroll.x = x;
+    event->scroll.y = y;
+    event->scroll.xoffset = xoffset;
+    event->scroll.yoffset = yoffset;
+}
+
+void rdt_event_set_key(RdtEvent* event, EventType type, int key, int mods,
+                       int scancode, double timestamp) {
+    if (!event) return;
+    memset(event, 0, sizeof(*event));
+    event->key.type = type;
+    event->key.timestamp = timestamp;
+    event->key.key = key;
+    event->key.scancode = scancode;
+    event->key.mods = mods;
+}
+
+void rdt_event_set_text_input(RdtEvent* event, uint32_t codepoint,
+                              double timestamp) {
+    if (!event) return;
+    memset(event, 0, sizeof(*event));
+    event->text_input.type = RDT_EVENT_TEXT_INPUT;
+    event->text_input.timestamp = timestamp;
+    event->text_input.codepoint = codepoint;
+}
+
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     EventContext evcon;
     log_debug("HANDLE_EVENT: type=%d", event->type);
@@ -10502,7 +10528,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             if (anchor_view && anchor_view->is_element()) {
                 DomElement* anchor_elem = lam::dom_require_element(anchor_view);
                 if (anchor_elem->form_control() &&
-                    anchor_elem->form->control_type == FORM_CONTROL_TEXTAREA) {
+                    form_control_is_textarea(anchor_elem->form)) {
                     uint32_t hit_offset = 0;
                     editing_geometry_text_control_offset_for_point(evcon.ui_context,
                         anchor_elem, (float)motion->x, (float)motion->y,
@@ -11223,7 +11249,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     evcon.need_repaint = true;
 
                 } else if (!text_drag_armed && target_elem->form_control() &&
-                           target_elem->form->control_type == FORM_CONTROL_TEXTAREA &&
+                           form_control_is_textarea(target_elem->form) &&
                            !form_control_is_disabled(state, static_cast<View*>(target_elem))) {
                     // Textarea form controls: click-to-position caret
                     EditingBoundary click_boundary;
@@ -11665,25 +11691,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                 RdtVideo* video = (RdtVideo*)blk->embedp()->video;
                                 bool has_controls = blk->embedp()->has_controls;
 
-                                // compute absolute viewport position by walking parent chain
-                                float vid_x = 0, vid_y = 0;
-                                View* walk = static_cast<View*>(blk);
-                                while (walk) {
-                                    if (walk->view_type == RDT_VIEW_BLOCK) {
-                                        ViewBlock* wb = lam::view_require_block(walk);
-                                        vid_x += wb->x;
-                                        vid_y += wb->y;
-                                        if (wb->scroller && wb->scroll_mut()->pane) {
-                                            DocState* scroll_state = wb->doc ? wb->doc->state : NULL;
-                                            float scroll_x = 0.0f, scroll_y = 0.0f;
-                                            scroll_state_get_position_for_view(scroll_state, static_cast<View*>(wb),
-                                                wb->scroll()->pane, &scroll_x, &scroll_y, NULL, NULL);
-                                            vid_x -= scroll_x;
-                                            vid_y -= scroll_y;
-                                        }
-                                    }
-                                    walk = static_cast<View*>(walk->parent);
-                                }
+                                // Video hit regions use the same block-only viewport walk
+                                // as the rest of event geometry, including canonical scroll.
+                                RdtLogicalPoint video_origin =
+                                    view_geometry_block_viewport_origin(
+                                        static_cast<View*>(blk),
+                                        scroll_state_resolve_view_geometry);
+                                float vid_x = video_origin.x;
+                                float vid_y = video_origin.y;
 
                                 float vid_w = blk->width;
                                 float vid_h = blk->height;
@@ -12319,8 +12334,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         if (focused && focused->is_element()) {
             DomElement* elem = lam::dom_require_element(focused);
             if (elem->form_control() &&
-                (elem->form->control_type == FORM_CONTROL_TEXT ||
-                 elem->form->control_type == FORM_CONTROL_TEXTAREA)) {
+                form_control_is_text_editable(elem->form)) {
                 is_form_input = true;
                 bool editable = !form_control_is_user_readonly(state, static_cast<View*>(elem));
                 int caret_offset = 0;

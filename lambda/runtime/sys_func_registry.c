@@ -2025,15 +2025,14 @@ JitImport jit_runtime_imports[] = {
     {"js_increment", FPTR(js_increment)},
     {"js_decrement", FPTR(js_decrement)},
     {"js_number_function", FPTR(js_number_function)},
-    {"js_add", FPTR(js_add),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM)}},
-    {"js_subtract", FPTR(js_subtract)},
-    {"js_multiply", FPTR(js_multiply)},
-    {"js_divide", FPTR(js_divide)},
-    {"js_modulo", FPTR(js_modulo)},
-    {"js_power", FPTR(js_power)},
+    // addition retains its existing per-call reclaim; the other arithmetic
+    // helpers retain their existing caller-extent lifetime with an explicit audit.
+    {"js_add", FPTR(js_add), JIT_IMPORT_JS_NUMBER_BINARY(0)},
+    {"js_subtract", FPTR(js_subtract), JIT_IMPORT_JS_NUMBER_BINARY(JIT_IMPORT_RESULT_CALLER_OWNED)},
+    {"js_multiply", FPTR(js_multiply), JIT_IMPORT_JS_NUMBER_BINARY(JIT_IMPORT_RESULT_CALLER_OWNED)},
+    {"js_divide", FPTR(js_divide), JIT_IMPORT_JS_NUMBER_BINARY(JIT_IMPORT_RESULT_CALLER_OWNED)},
+    {"js_modulo", FPTR(js_modulo), JIT_IMPORT_JS_NUMBER_BINARY(JIT_IMPORT_RESULT_CALLER_OWNED)},
+    {"js_power", FPTR(js_power), JIT_IMPORT_JS_NUMBER_BINARY(JIT_IMPORT_RESULT_CALLER_OWNED)},
     {"js_equal", FPTR(js_equal), JIT_IMPORT_STABLE_ITEM},
     {"js_strict_equal", FPTR(js_strict_equal), JIT_IMPORT_STABLE_ITEM},
     // Tune8 §2.1: js_less_than/_equal/js_greater_than/_equal collapsed into

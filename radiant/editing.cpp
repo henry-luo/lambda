@@ -11,7 +11,7 @@ static bool element_is_password_text_control(DomElement* elem) {
         return false;
     }
     const char* type = elem->get_attribute("type");
-    return type && strcasecmp(type, "password") == 0;
+    return form_input_kind_is(type, FORM_INPUT_KIND_PASSWORD);
 }
 
 static bool element_is_textarea(DomElement* elem) {

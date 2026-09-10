@@ -48,20 +48,14 @@ static void tc_collect_text(DomNode* n, StrBuf* sb) {
 bool tc_is_text_control(DomElement* elem) {
     if (!elem || !elem->tag_name) return false;
     if (elem->form_control()) {
-        return elem->form->control_type == FORM_CONTROL_TEXT
-            || elem->form->control_type == FORM_CONTROL_TEXTAREA;
+        return form_control_is_textarea(elem->form) ||
+            form_input_has_capability(elem->form->input_type,
+                FORM_INPUT_CAP_TEXT_CONTROL);
     }
     if (strcasecmp(elem->tag_name, "textarea") == 0) return true;
     if (strcasecmp(elem->tag_name, "input") == 0) {
-        const char* t = elem->get_attribute("type");
-        if (!t || !*t) return true;
-        return strcasecmp(t, "text") == 0
-            || strcasecmp(t, "password") == 0
-            || strcasecmp(t, "email") == 0
-            || strcasecmp(t, "url") == 0
-            || strcasecmp(t, "search") == 0
-            || strcasecmp(t, "tel") == 0
-            || strcasecmp(t, "number") == 0;
+        return form_input_has_capability(elem->get_attribute("type"),
+            FORM_INPUT_CAP_TEXT_CONTROL);
     }
     return false;
 }

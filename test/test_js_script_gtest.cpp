@@ -6,6 +6,90 @@
 #include "../lambda/runtime/module_registry.h"
 #include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_interp.hpp"
+#include "../lambda/js/js_function.hpp"
+#include "../lambda/js/js_runtime_state.hpp"
+#include "../lambda/runtime/sys_func_registry.h"
+
+TEST(JsCallableDefinitions, SharesAstDefinitionWithoutSharingCaptures) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] = "function classFactory(x) { return class { value = x; }; } "
+        "var A = classFactory(3); var B = classFactory(4); "
+        "var av = new A(); var bv = new B(); "
+        "function make(x) { return function() { return x; }; } "
+        "var first = make(1); var second = make(2); first;";
+    Item first = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "definitions.js", NULL);
+    ASSERT_EQ(get_type_id(first), LMD_TYPE_FUNC);
+    const char read_second[] = "second;";
+    Item second = js_interp_execute_source(&runtime, read_second, sizeof(read_second) - 1,
+        "read-definition.js", NULL);
+    ASSERT_EQ(get_type_id(second), LMD_TYPE_FUNC);
+    JsFunction* a = (JsFunction*)first.function;
+    JsFunction* b = (JsFunction*)second.function;
+    EXPECT_NE(a, b);
+    EXPECT_EQ(a->code, b->code);
+    EXPECT_EQ(js_fn_ast_definition(a), js_fn_ast_definition(b));
+    EXPECT_NE(js_fn_ast(a)->env, js_fn_ast(b)->env);
+    EXPECT_EQ(js_call_function(first, ItemNull, NULL, 0).item, flt2it(1.0).item);
+    EXPECT_EQ(js_call_function(second, ItemNull, NULL, 0).item, flt2it(2.0).item);
+    JsScript* script = (JsScript*)runtime.scripts->data[0];
+    EXPECT_EQ(hashmap_count(script->field_initializers), 1u);
+    const char fields[] = "av.value + bv.value;";
+    EXPECT_EQ(js_interp_execute_source(&runtime, fields, sizeof(fields) - 1,
+        "read-fields.js", NULL).item, flt2it(7.0).item);
+    runtime_cleanup(&runtime);
+}
+
+static uint64_t js_test_callable_target(Context*, uint64_t value) { return value; }
+
+TEST(JsCallableDefinitions, LiveMirValuesSurviveWeakTableTeardown) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] = "0;";
+    js_interp_execute_source(&runtime, source, sizeof(source) - 1, "code-owner.js", NULL);
+    {
+        RootFrame roots(2);
+        Rooted<Item> first(roots, js_new_distinct_function_mir((void*)js_test_callable_target, 1));
+        Rooted<Item> second(roots, js_new_distinct_function_mir((void*)js_test_callable_target, 1));
+        ASSERT_EQ(get_type_id(first.get()), LMD_TYPE_FUNC);
+        ASSERT_EQ(get_type_id(second.get()), LMD_TYPE_FUNC);
+        JsFunction* a = (JsFunction*)first.get().function;
+        JsFunction* b = (JsFunction*)second.get().function;
+        EXPECT_NE(a, b);
+        ASSERT_EQ(a->code, b->code);
+        EXPECT_EQ(a->code->intern_refcount, 2u);
+        JsRuntimeState* state = js_runtime_state_for(runtime.eval_context);
+        ASSERT_NE(state, nullptr);
+        EXPECT_EQ(hashmap_count(state->callable_code_interned), 1u);
+        // surviving values retain the record after its weak owner disappears.
+        js_callable_code_table_destroy(state->callable_code_interned);
+        state->callable_code_interned = NULL;
+        EXPECT_EQ(a->code->intern_table, nullptr);
+        EXPECT_EQ(js_fn_param_count(a), 1);
+    }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsScalarAnalysis, ResultFactsDoNotWeakenCallEffects) {
+    JitImportMetadata metadata = {};
+    ASSERT_TRUE(jit_import_get_metadata("js_add", &metadata));
+    EXPECT_EQ(jit_import_scalar_return_class(&metadata), SCALAR_RETURN_F64);
+    EXPECT_EQ(metadata.gc_effect, JIT_EFFECT_MAY_GC);
+    EXPECT_EQ(metadata.reentry_effect, JIT_REENTRY_YES);
+    EXPECT_EQ(metadata.exception_effect, JIT_EXCEPTION_MAY_SET);
+    EXPECT_EQ(metadata.flags & JIT_IMPORT_NUMBER_STACK_PRESERVES, 0u);
+    ASSERT_TRUE(jit_import_get_metadata("js_subtract", &metadata));
+    EXPECT_NE(metadata.flags & JIT_IMPORT_RESULT_CALLER_OWNED, 0u);
+    EXPECT_EQ(metadata.flags & JIT_IMPORT_NUMBER_STACK_PRESERVES, 0u);
+    metadata = {};
+    metadata.ret_class = JIT_VALUE_BOXED_ITEM;
+    EXPECT_EQ(jit_import_scalar_return_class(&metadata), SCALAR_RETURN_DYNAMIC);
+    EXPECT_EQ(jit_scalar_return_class_for_type(LMD_TYPE_ANY), SCALAR_RETURN_DYNAMIC);
+    EXPECT_EQ(jit_scalar_return_class_for_type(LMD_TYPE_FLOAT), SCALAR_RETURN_F64);
+    EXPECT_EQ(jit_scalar_return_class_for_type(LMD_TYPE_INT64), SCALAR_RETURN_I64);
+    EXPECT_EQ(jit_scalar_return_class_for_type(LMD_TYPE_STRING), SCALAR_RETURN_NONE);
+}
 
 TEST(JsAstStructure, ExtensionChildCatalogIsComplete) {
     EXPECT_TRUE(js_ast_child_catalog_complete());

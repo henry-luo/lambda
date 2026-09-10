@@ -25,138 +25,10 @@ typedef struct ImageEntry {
 
 HASHMAP_DEFINE_STRKEY(image, ImageEntry, path)
 
-static size_t resource_path_length(const char* path) {
-    if (!path) return 0;
-    const char* query = strpbrk(path, "?#");
-    return query ? (size_t)(query - path) : strlen(path);
-}
-
-static char* try_join_absolute_resource(const char* root, const char* abs_path) {
-    if (!root || !abs_path || abs_path[0] != '/') return nullptr;
-    size_t root_len = strlen(root);
-    size_t path_len = resource_path_length(abs_path);
-    char* candidate = (char*)mem_alloc(root_len + path_len + 1, MEM_CAT_RENDER);
-    if (!candidate) return nullptr;
-    memcpy(candidate, root, root_len);
-    memcpy(candidate + root_len, abs_path, path_len);
-    candidate[root_len + path_len] = '\0';
-    if (file_exists(candidate)) return candidate;
-    mem_free(candidate);
-    return nullptr;
-}
-
-static char* try_join_resource_suffix(const char* root, const char* suffix) {
-    if (!root || !suffix || suffix[0] == '\0') return nullptr;
-    size_t root_len = strlen(root);
-    size_t suffix_len = resource_path_length(suffix);
-    char* candidate = (char*)mem_alloc(root_len + 1 + suffix_len + 1, MEM_CAT_RENDER);
-    if (!candidate) return nullptr;
-    memcpy(candidate, root, root_len);
-    candidate[root_len] = '/';
-    memcpy(candidate + root_len + 1, suffix, suffix_len);
-    candidate[root_len + 1 + suffix_len] = '\0';
-    if (file_exists(candidate)) return candidate;
-    mem_free(candidate);
-    return nullptr;
-}
-
-static const char* wpt_support_resource_suffix(const char* abs_path) {
-    static const char css_support_prefix[] = "/css/support/";
-    if (abs_path && strncmp(abs_path, css_support_prefix,
-                            sizeof(css_support_prefix) - 1) == 0) {
-        // Local WPT fixtures flatten /css/support beneath data/support; keeping
-        // the URL prefix here would look for support/css/support and turn a
-        // present fixture into a broken 16px image fallback during layout.
-        return abs_path + sizeof(css_support_prefix) - 1;
-    }
-    return abs_path;
-}
-
 static char* resolve_wpt_absolute_image_path(UiContext* uicon, const char* img_url) {
-    if (!uicon || !uicon->document || !uicon->document->url ||
-        !img_url || img_url[0] != '/' || img_url[1] == '/') {
-        return nullptr;
-    }
-
-    char* doc_path = url_to_local_path(uicon->document->url);
-    if (doc_path) {
-        const char* wpt_marker = strstr(doc_path, "/ref/wpt/");
-        if (wpt_marker) {
-            size_t root_len = (size_t)(wpt_marker - doc_path) + strlen("/ref/wpt");
-            char* root = (char*)mem_alloc(root_len + 1, MEM_CAT_RENDER);
-            if (root) {
-                memcpy(root, doc_path, root_len);
-                root[root_len] = '\0';
-                char* resolved = try_join_absolute_resource(root, img_url);
-                mem_free(root);
-                if (resolved) {
-                    mem_free(doc_path);
-                    return resolved;
-                }
-            }
-        }
-
-        const char* data_marker = strstr(doc_path, "/layout/data/");
-        if (data_marker) {
-            size_t root_len = (size_t)(data_marker - doc_path) + strlen("/layout/data");
-            char* root = (char*)mem_alloc(root_len + strlen("/support") + 1, MEM_CAT_RENDER);
-            if (root) {
-                memcpy(root, doc_path, root_len);
-                memcpy(root + root_len, "/support", strlen("/support") + 1);
-                char* resolved = try_join_absolute_resource(root, img_url);
-                if (!resolved) {
-                    const char* support_suffix = wpt_support_resource_suffix(img_url);
-                    if (support_suffix != img_url) {
-                        resolved = try_join_resource_suffix(root, support_suffix);
-                    }
-                }
-                mem_free(root);
-                if (resolved) {
-                    mem_free(doc_path);
-                    return resolved;
-                }
-            }
-        }
-        mem_free(doc_path);
-    }
-
-    char cwd[4096];
-    if (getcwd(cwd, sizeof(cwd))) {
-        char* wpt_root = try_join_absolute_resource(cwd, "/ref/wpt");
-        if (wpt_root) {
-            char* resolved = try_join_absolute_resource(wpt_root, img_url);
-            if (!resolved) {
-                // An existing WPT root must not mask flattened /css/support fixtures.
-                const char* support_suffix = wpt_support_resource_suffix(img_url);
-                if (support_suffix != img_url) {
-                    resolved = try_join_resource_suffix(wpt_root, support_suffix);
-                }
-            }
-            mem_free(wpt_root);
-            if (resolved) return resolved;
-        }
-
-        size_t cwd_len = strlen(cwd);
-        const char* support_root_suffix = "/test/layout/data/support";
-        size_t suffix_len = strlen(support_root_suffix);
-        char* support_root = (char*)mem_alloc(cwd_len + suffix_len + 1, MEM_CAT_RENDER);
-        if (!support_root) return nullptr;
-        memcpy(support_root, cwd, cwd_len);
-        memcpy(support_root + cwd_len, support_root_suffix, suffix_len + 1);
-        char* resolved = try_join_absolute_resource(support_root, img_url);
-        if (!resolved) {
-            // Relative CLI document URLs bypass the /layout/data/ branch; apply
-            // the same WPT support flattening or valid /css/support/ images stay broken.
-            const char* support_suffix = wpt_support_resource_suffix(img_url);
-            if (support_suffix != img_url) {
-                resolved = try_join_resource_suffix(support_root, support_suffix);
-            }
-        }
-        mem_free(support_root);
-        return resolved;
-    }
-
-    return nullptr;
+    if (!uicon || !uicon->document) return nullptr;
+    return radiant_resolve_wpt_resource_path(img_url,
+        uicon->document->url, MEM_CAT_RENDER);
 }
 
 // Detect if memory content is SVG by checking for XML/SVG signature
@@ -558,6 +430,28 @@ static void load_image_cleanup_failed(Url* abs_url, char* file_path, unsigned ch
     if (abs_url) url_destroy(abs_url);
 }
 
+static ImageSurface* image_surface_decode_memory(const unsigned char* data,
+                                                 size_t length) {
+    if (!data || length == 0) return nullptr;
+    int width = 0, height = 0, channels = 0;
+    unsigned char* pixels = image_load_from_memory(
+        data, length, &width, &height, &channels);
+    if (!pixels) return nullptr;
+    ImageSurface* surface = image_surface_create_from(width, height, pixels);
+    if (!surface) image_free(pixels);
+    return surface;
+}
+
+static ImageSurface* image_surface_decode_file(const char* path) {
+    if (!path || !*path) return nullptr;
+    int width = 0, height = 0, channels = 0;
+    unsigned char* pixels = image_load(path, &width, &height, &channels, 4);
+    if (!pixels) return nullptr;
+    ImageSurface* surface = image_surface_create_from(width, height, pixels);
+    if (!surface) image_free(pixels);
+    return surface;
+}
+
 static bool image_path_has_declared_non_svg_extension(const char* file_path) {
     if (!file_path) return false;
     const char* slash = strrchr(file_path, '/');
@@ -918,18 +812,11 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
                 log_debug("[image] Lazy load HTTP image: %dx%d (%zu bytes)", width, height, downloaded_size);
             } else {
                 // Fallback: full decode if header read fails
-                int channels;
-                unsigned char *data = image_load_from_memory(downloaded_data, downloaded_size, &width, &height, &channels);
+                surface = image_surface_decode_memory(downloaded_data, downloaded_size);
                 mem_free(downloaded_data);
                 downloaded_data = nullptr;
-                if (!data) {
-                    log_debug("failed to load image: %s", file_path);
-                    load_image_cleanup_failed(abs_url, file_path, nullptr);
-                    return NULL;
-                }
-                surface = image_surface_create_from(width, height, data);
                 if (!surface) {
-                    image_free(data);
+                    log_debug("failed to load image: %s", file_path);
                     load_image_cleanup_failed(abs_url, file_path, nullptr);
                     return NULL;
                 }
@@ -948,16 +835,9 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
                 log_debug("[image] Lazy load local image: %dx%d from %s", width, height, file_path);
             } else {
                 // Fallback: full decode if header read fails
-                int channels;
-                unsigned char *data = image_load(file_path, &width, &height, &channels, 4);
-                if (!data) {
-                    log_debug("failed to load image: %s", file_path);
-                    load_image_cleanup_failed(abs_url, file_path, nullptr);
-                    return NULL;
-                }
-                surface = image_surface_create_from(width, height, data);
+                surface = image_surface_decode_file(file_path);
                 if (!surface) {
-                    image_free(data);
+                    log_debug("failed to load image: %s", file_path);
                     load_image_cleanup_failed(abs_url, file_path, nullptr);
                     return NULL;
                 }

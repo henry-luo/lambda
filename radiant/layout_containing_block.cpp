@@ -9,6 +9,36 @@ bool layout_view_is_abs_or_fixed(ViewBlock* block) {
          block->positionp()->position == CSS_VALUE_FIXED);
 }
 
+bool layout_element_has_in_flow_content(DomElement* element,
+                                        LayoutTextContentPredicate text_predicate,
+                                        LayoutElementContentPredicate element_predicate) {
+    if (!element) return false;
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (child->is_text()) {
+            if (text_predicate && text_predicate(child)) return true;
+            continue;
+        }
+        if (!child->is_element()) continue;
+        if (element_predicate && !element_predicate(child->as_element())) continue;
+        ViewBlock* child_block = lam::view_as_block(child->as_element());
+        if (!child_block) {
+            if (!layout_display_is_none(resolve_display_value(child))) return true;
+            continue;
+        }
+        if (!layout_block_is_display_none(child_block) &&
+            !layout_view_is_abs_or_fixed(child_block)) return true;
+    }
+    return false;
+}
+
+bool layout_element_has_direct_text_content(DomElement* element) {
+    if (!element) return false;
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (layout_text_node_has_content(child)) return true;
+    }
+    return false;
+}
+
 ViewBlock* layout_nearest_block_ancestor(ViewElement* view) {
     ViewElement* current = view;
     while (current && !current->is_block()) {

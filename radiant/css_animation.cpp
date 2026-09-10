@@ -91,6 +91,20 @@ static float parse_transform_angle(const char** source) {
     return angle * (float)M_PI / 180.0f;
 }
 
+static const char* skip_css_balanced_block(const char* source) {
+    if (!source) return source;
+    while (*source && *source != '{') source++;
+    if (*source != '{') return source;
+    int depth = 1;
+    source++;
+    while (*source && depth > 0) {
+        if (*source == '{') depth++;
+        else if (*source == '}') depth--;
+        source++;
+    }
+    return source;
+}
+
 static void parse_transform_translate_component(const char** source, float* length,
                                                 float* percentage) {
     const char* value = skip_ws(*source);
@@ -166,50 +180,10 @@ static bool parse_color_value(const char* val, Color* out) {
     return false;
 }
 
-// Determine the animation value type for a property
+// Determine the animation value type from the shared CSS property metadata.
 static CssAnimValueType property_value_type(CssPropertyCode id) {
-    switch (id) {
-        case CSS_PROPERTY_OPACITY:
-            return ANIM_VAL_FLOAT;
-        case CSS_PROPERTY_TRANSFORM:
-            return ANIM_VAL_TRANSFORM;
-        case CSS_PROPERTY_BACKGROUND_COLOR:
-        case CSS_PROPERTY_COLOR:
-        case CSS_PROPERTY_BORDER_TOP_COLOR:
-        case CSS_PROPERTY_BORDER_RIGHT_COLOR:
-        case CSS_PROPERTY_BORDER_BOTTOM_COLOR:
-        case CSS_PROPERTY_BORDER_LEFT_COLOR:
-            return ANIM_VAL_COLOR;
-        case CSS_PROPERTY_WIDTH:
-        case CSS_PROPERTY_HEIGHT:
-        case CSS_PROPERTY_MIN_WIDTH:
-        case CSS_PROPERTY_MAX_WIDTH:
-        case CSS_PROPERTY_MIN_HEIGHT:
-        case CSS_PROPERTY_MAX_HEIGHT:
-        case CSS_PROPERTY_TOP:
-        case CSS_PROPERTY_RIGHT:
-        case CSS_PROPERTY_BOTTOM:
-        case CSS_PROPERTY_LEFT:
-        case CSS_PROPERTY_MARGIN_TOP:
-        case CSS_PROPERTY_MARGIN_RIGHT:
-        case CSS_PROPERTY_MARGIN_BOTTOM:
-        case CSS_PROPERTY_MARGIN_LEFT:
-        case CSS_PROPERTY_PADDING_TOP:
-        case CSS_PROPERTY_PADDING_RIGHT:
-        case CSS_PROPERTY_PADDING_BOTTOM:
-        case CSS_PROPERTY_PADDING_LEFT:
-        case CSS_PROPERTY_BORDER_TOP_WIDTH:
-        case CSS_PROPERTY_BORDER_RIGHT_WIDTH:
-        case CSS_PROPERTY_BORDER_BOTTOM_WIDTH:
-        case CSS_PROPERTY_BORDER_LEFT_WIDTH:
-            return ANIM_VAL_LENGTH;
-        case CSS_PROPERTY_ASPECT_RATIO:
-            return ANIM_VAL_ASPECT_RATIO;
-        case CSS_PROPERTY_DISPLAY:
-            return ANIM_VAL_DISPLAY;
-        default:
-            return ANIM_VAL_NONE;
-    }
+    const CssPropertyRuntimeMetadata* metadata = css_property_runtime_metadata(id);
+    return metadata ? metadata->animation_type : ANIM_VAL_NONE;
 }
 
 // Parse a single transform function from string (e.g., "translateX(20px)")
@@ -468,31 +442,13 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
             if (*p == '%') p++;
         } else {
             // skip unknown content
-            while (*p && *p != '{') p++;
-            if (*p == '{') {
-                int depth = 1;
-                p++;
-                while (*p && depth > 0) {
-                    if (*p == '{') depth++;
-                    else if (*p == '}') depth--;
-                    p++;
-                }
-            }
+            p = skip_css_balanced_block(p);
             continue;
         }
 
         if (offset < 0.0f || offset > 1.0f) {
             // invalid offset, skip this stop
-            while (*p && *p != '{') p++;
-            if (*p == '{') {
-                int depth = 1;
-                p++;
-                while (*p && depth > 0) {
-                    if (*p == '{') depth++;
-                    else if (*p == '}') depth--;
-                    p++;
-                }
-            }
+            p = skip_css_balanced_block(p);
             continue;
         }
 
@@ -1839,21 +1795,11 @@ static bool css_transition_read_used_value(DomElement* element,
     }
 }
 
-// Map a supported property id to its transitionable value type (or ANIM_VAL_NONE).
+// Map a transition property to the same value type used by keyframes.
 static CssAnimValueType css_transition_value_type_for(CssPropertyCode prop_id) {
-    switch (prop_id) {
-        case CSS_PROPERTY_WIDTH:
-        case CSS_PROPERTY_HEIGHT:
-        case CSS_PROPERTY_MIN_WIDTH:
-        case CSS_PROPERTY_MAX_WIDTH:
-        case CSS_PROPERTY_MIN_HEIGHT:
-        case CSS_PROPERTY_MAX_HEIGHT: return ANIM_VAL_LENGTH;
-        case CSS_PROPERTY_OPACITY:          return ANIM_VAL_FLOAT;
-        case CSS_PROPERTY_COLOR:            return ANIM_VAL_COLOR;
-        case CSS_PROPERTY_BACKGROUND_COLOR: return ANIM_VAL_COLOR;
-        case CSS_PROPERTY_ASPECT_RATIO:     return ANIM_VAL_ASPECT_RATIO;
-        default:                            return ANIM_VAL_NONE;
-    }
+    const CssPropertyRuntimeMetadata* metadata = css_property_runtime_metadata(prop_id);
+    return metadata && metadata->transition_supported
+        ? metadata->animation_type : ANIM_VAL_NONE;
 }
 
 static CssTransitionTrack* css_transition_track_for(CssTransitionElemState* es,
@@ -2296,17 +2242,6 @@ bool css_transition_resolve_config(StyleTree* style_tree, Pool* pool,
         tp, prop_buf, prop_cap);
 }
 
-// Supported transitionable properties for the "all" keyword.
-static const CssPropertyCode kTransitionSupported[] = {
-    CSS_PROPERTY_WIDTH, CSS_PROPERTY_HEIGHT,
-    CSS_PROPERTY_MIN_WIDTH, CSS_PROPERTY_MAX_WIDTH,
-    CSS_PROPERTY_MIN_HEIGHT, CSS_PROPERTY_MAX_HEIGHT,
-    CSS_PROPERTY_OPACITY, CSS_PROPERTY_COLOR, CSS_PROPERTY_BACKGROUND_COLOR,
-    CSS_PROPERTY_ASPECT_RATIO,
-};
-static const int kTransitionSupportedCount =
-    (int)(sizeof(kTransitionSupported) / sizeof(kTransitionSupported[0]));
-
 // Start (or restart) a transition for one property from `from` to `to`.
 static void css_transition_start(AnimationScheduler* scheduler, DomElement* element,
                                  CssTransitionTrack* track, const CssTransitionProp* tp,
@@ -2417,9 +2352,11 @@ void css_transition_resolve(DomElement* element, LayoutContext* lycon) {
     // to the snapshot; if changed and covered by a transition declaration (with
     // a positive duration), start an interpolating instance. Always update the
     // snapshot to the new used value.
-    for (int i = 0; i < kTransitionSupportedCount; i++) {
-        CssPropertyCode prop_id = kTransitionSupported[i];
-        CssAnimValueType vt = css_transition_value_type_for(prop_id);
+    for (size_t i = 0; i < css_property_runtime_metadata_count(); i++) {
+        const CssPropertyRuntimeMetadata* metadata = css_property_runtime_metadata_at(i);
+        if (!metadata || !metadata->transition_supported) continue;
+        CssPropertyCode prop_id = metadata->property;
+        CssAnimValueType vt = metadata->animation_type;
 
         CssAnimValueType read_vt; float new_f = 0.0f; float new_ratio = 0.0f;
         Color new_c; new_c.c = 0;

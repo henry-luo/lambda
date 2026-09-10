@@ -10,6 +10,93 @@
 
 static RadiantCssomUsedValueSync s_cssom_used_value_sync = nullptr;
 
+static const CssPropertyRuntimeMetadata kCssPropertyRuntimeMetadata[] = {
+    {CSS_PROPERTY_OPACITY, ANIM_VAL_FLOAT, true, false},
+    {CSS_PROPERTY_TRANSFORM, ANIM_VAL_TRANSFORM, false, false},
+    {CSS_PROPERTY_BACKGROUND_COLOR, ANIM_VAL_COLOR, true, false},
+    {CSS_PROPERTY_COLOR, ANIM_VAL_COLOR, true, false},
+    {CSS_PROPERTY_BORDER_TOP_COLOR, ANIM_VAL_COLOR, false, false},
+    {CSS_PROPERTY_BORDER_RIGHT_COLOR, ANIM_VAL_COLOR, false, false},
+    {CSS_PROPERTY_BORDER_BOTTOM_COLOR, ANIM_VAL_COLOR, false, false},
+    {CSS_PROPERTY_BORDER_LEFT_COLOR, ANIM_VAL_COLOR, false, false},
+    {CSS_PROPERTY_WIDTH, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_HEIGHT, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_MIN_WIDTH, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_MAX_WIDTH, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_MIN_HEIGHT, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_MAX_HEIGHT, ANIM_VAL_LENGTH, true, false},
+    {CSS_PROPERTY_TOP, ANIM_VAL_LENGTH, false, false},
+    {CSS_PROPERTY_RIGHT, ANIM_VAL_LENGTH, false, false},
+    {CSS_PROPERTY_BOTTOM, ANIM_VAL_LENGTH, false, false},
+    {CSS_PROPERTY_LEFT, ANIM_VAL_LENGTH, false, false},
+    {CSS_PROPERTY_MARGIN_TOP, ANIM_VAL_LENGTH, false, false},
+    {CSS_PROPERTY_MARGIN_RIGHT, ANIM_VAL_LENGTH, false, false},
+    {CSS_PROPERTY_MARGIN_BOTTOM, ANIM_VAL_LENGTH, false, false},
+    {CSS_PROPERTY_MARGIN_LEFT, ANIM_VAL_LENGTH, false, false},
+    {CSS_PROPERTY_PADDING_TOP, ANIM_VAL_LENGTH, false, false},
+    {CSS_PROPERTY_PADDING_RIGHT, ANIM_VAL_LENGTH, false, false},
+    {CSS_PROPERTY_PADDING_BOTTOM, ANIM_VAL_LENGTH, false, false},
+    {CSS_PROPERTY_PADDING_LEFT, ANIM_VAL_LENGTH, false, false},
+    {CSS_PROPERTY_BORDER_TOP_WIDTH, ANIM_VAL_LENGTH, false, false},
+    {CSS_PROPERTY_BORDER_RIGHT_WIDTH, ANIM_VAL_LENGTH, false, false},
+    {CSS_PROPERTY_BORDER_BOTTOM_WIDTH, ANIM_VAL_LENGTH, false, false},
+    {CSS_PROPERTY_BORDER_LEFT_WIDTH, ANIM_VAL_LENGTH, false, false},
+    {CSS_PROPERTY_ASPECT_RATIO, ANIM_VAL_ASPECT_RATIO, true, false},
+    {CSS_PROPERTY_DISPLAY, ANIM_VAL_DISPLAY, false, false},
+    {CSS_PROPERTY_FONT, ANIM_VAL_NONE, false, true},
+    {CSS_PROPERTY_FONT_SIZE, ANIM_VAL_NONE, false, true},
+    {CSS_PROPERTY_FONT_FAMILY, ANIM_VAL_NONE, false, true},
+    {CSS_PROPERTY_FONT_WEIGHT, ANIM_VAL_NONE, false, true},
+    {CSS_PROPERTY_FONT_STYLE, ANIM_VAL_NONE, false, true},
+    {CSS_PROPERTY_FONT_VARIANT, ANIM_VAL_NONE, false, true},
+    {CSS_PROPERTY_LINE_HEIGHT, ANIM_VAL_NONE, false, true},
+};
+
+const CssPropertyRuntimeMetadata* css_property_runtime_metadata(CssPropertyCode property) {
+    size_t count = sizeof(kCssPropertyRuntimeMetadata) /
+        sizeof(kCssPropertyRuntimeMetadata[0]);
+    for (size_t i = 0; i < count; i++) {
+        if (kCssPropertyRuntimeMetadata[i].property == property) {
+            return &kCssPropertyRuntimeMetadata[i];
+        }
+    }
+    return nullptr;
+}
+
+size_t css_property_runtime_metadata_count() {
+    return sizeof(kCssPropertyRuntimeMetadata) /
+        sizeof(kCssPropertyRuntimeMetadata[0]);
+}
+
+const CssPropertyRuntimeMetadata* css_property_runtime_metadata_at(size_t index) {
+    return index < css_property_runtime_metadata_count()
+        ? &kCssPropertyRuntimeMetadata[index] : nullptr;
+}
+
+bool css_property_runtime_inherited(CssPropertyCode property) {
+    static const CssPropertyCode resolver_inherited[] = {
+        CSS_PROPERTY_FONT_FAMILY, CSS_PROPERTY_FONT_SIZE,
+        CSS_PROPERTY_FONT_WEIGHT, CSS_PROPERTY_FONT_STYLE,
+        CSS_PROPERTY_FONT_VARIANT, CSS_PROPERTY_COLOR,
+        CSS_PROPERTY_LINE_HEIGHT, CSS_PROPERTY_TEXT_ALIGN,
+        CSS_PROPERTY_TEXT_DECORATION, CSS_PROPERTY_TEXT_EMPHASIS,
+        CSS_PROPERTY_TEXT_EMPHASIS_STYLE, CSS_PROPERTY_TEXT_EMPHASIS_POSITION,
+        CSS_PROPERTY_TEXT_TRANSFORM, CSS_PROPERTY_TEXT_INDENT,
+        CSS_PROPERTY_TEXT_SPACING_TRIM, CSS_PROPERTY_HYPHENATE_CHARACTER,
+        CSS_PROPERTY_DOMINANT_BASELINE, CSS_PROPERTY_LETTER_SPACING,
+        CSS_PROPERTY_WORD_SPACING, CSS_PROPERTY_WHITE_SPACE,
+        CSS_PROPERTY_FILL, CSS_PROPERTY_STROKE, CSS_PROPERTY_STROKE_WIDTH,
+        CSS_PROPERTY_ACCENT_COLOR, CSS_PROPERTY_VISIBILITY,
+        CSS_PROPERTY_EMPTY_CELLS, CSS_PROPERTY_DIRECTION,
+        CSS_PROPERTY_LIST_STYLE_POSITION, CSS_PROPERTY_LIST_STYLE_TYPE,
+        CSS_PROPERTY_LIST_STYLE, CSS_PROPERTY_RUBY_POSITION
+    };
+    for (size_t i = 0; i < sizeof(resolver_inherited) / sizeof(resolver_inherited[0]); i++) {
+        if (resolver_inherited[i] == property) return true;
+    }
+    return false;
+}
+
 void radiant_set_cssom_used_value_sync(RadiantCssomUsedValueSync sync) {
     s_cssom_used_value_sync = sync;
 }
@@ -64,6 +151,8 @@ static const void* prop_group_base(const DomElement* element, PropGroupKind grou
             return element->flex_item() ? element->flex_item() : &FLEX_ITEM_PROP_DEFAULT;
         case PROP_GROUP_GRID_ITEM:
             return element->grid_item() ? element->grid_item() : &GRID_ITEM_PROP_DEFAULT;
+        case PROP_GROUP_OUTLINE:
+            return element->boundary() ? element->boundary()->outline : nullptr;
         case PROP_GROUP_NONE:
         default: return nullptr;
     }
@@ -766,6 +855,28 @@ static bool serialize_z_index(const CssPropAccessor*, DomElement* element, int p
     return true;
 }
 
+static bool serialize_outline(const CssPropAccessor* accessor, DomElement* element,
+                              int pseudo_type, char* out, size_t out_size) {
+    if (!accessor || !element || pseudo_type != 0) return false;
+    OutlineProp* outline = element->boundary() ? element->boundary()->outline : nullptr;
+    if (!outline) {
+        if (accessor->id == CSS_PROPERTY_OUTLINE_STYLE) return copy_text(out, out_size, "none");
+        if (accessor->id == CSS_PROPERTY_OUTLINE_WIDTH) return copy_text(out, out_size, "0px");
+        return copy_text(out, out_size, "rgba(0, 0, 0, 0)");
+    }
+    if (accessor->id == CSS_PROPERTY_OUTLINE_STYLE) {
+        const CssEnumInfo* info = css_enum_info(outline->style);
+        return copy_text(out, out_size, info && info->name ? info->name : "none");
+    }
+    if (accessor->id == CSS_PROPERTY_OUTLINE_WIDTH) {
+        return format_number(out, out_size, outline->width, "px");
+    }
+    if (accessor->id == CSS_PROPERTY_OUTLINE_COLOR) {
+        return format_color(out, out_size, outline->color);
+    }
+    return false;
+}
+
 static bool serialize_transition(const CssPropAccessor* accessor, DomElement* element,
                                  int pseudo_type, char* out, size_t out_size) {
     if (!accessor || !element || pseudo_type != 0) return false;
@@ -863,6 +974,9 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DIRECT_ROW(CSS_PROPERTY_TEXT_WRAP_MODE, PROP_GROUP_BLOCK, BlockProp, text_wrap_mode, CSS_PROP_VALUE_ENUM, 0),
     DIRECT_ROW(CSS_PROPERTY_TEXT_INDENT, PROP_GROUP_BLOCK, BlockProp, text_indent, CSS_PROP_VALUE_PX, 0),
     DIRECT_ROW(CSS_PROPERTY_VERTICAL_ALIGN, PROP_GROUP_INLINE, InlineProp, vertical_align, CSS_PROP_VALUE_ENUM, 0),
+    DERIVED_ROW(CSS_PROPERTY_OUTLINE_STYLE, serialize_outline, 0),
+    DERIVED_ROW(CSS_PROPERTY_OUTLINE_WIDTH, serialize_outline, 0),
+    DERIVED_ROW(CSS_PROPERTY_OUTLINE_COLOR, serialize_outline, 0),
     DERIVED_ROW(CSS_PROPERTY_COLOR, serialize_color_prop, 0),
     DIRECT_ROW(CSS_PROPERTY_OPACITY, PROP_GROUP_INLINE, InlineProp, opacity, CSS_PROP_VALUE_NUMBER, 0),
     DIRECT_ROW(CSS_PROPERTY_CURSOR, PROP_GROUP_INLINE, InlineProp, cursor, CSS_PROP_VALUE_ENUM, 0),

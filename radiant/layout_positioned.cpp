@@ -645,8 +645,7 @@ static bool positioned_element_is_replaced(ViewBlock* block) {
     bool is_form_control =
         block->form_control();
     return block->display.inner == RDT_DISPLAY_REPLACED ||
-        block->tag() == MARKUP_NAME_IMG || block->tag() == MARKUP_NAME_IFRAME ||
-        block->tag() == MARKUP_NAME_VIDEO || block->tag() == MARKUP_NAME_EMBED ||
+        layout_tag_is_replaced_content(block->tag()) ||
         (block->tag() == MARKUP_NAME_OBJECT && block->get_attribute("data")) ||
         (block->tag() == MARKUP_NAME_AUDIO && block->has_attribute(MARKUP_NAME_CONTROLS)) ||
         is_form_control;
@@ -659,16 +658,15 @@ static bool positioned_element_has_replaced_sizing(ViewBlock* block) {
     // representing replaced content use stretch-fit automatic sizing. Image
     // inputs remain the direct-replacement exception among form controls.
     if (block->form_control()) {
-        const char* input_type = block->get_attribute("type");
-        return block->tag() == MARKUP_NAME_INPUT && input_type &&
-            strcmp(input_type, "image") == 0;
+        return block->tag() == MARKUP_NAME_INPUT &&
+            form_input_kind_is(block->get_attribute("type"),
+                FORM_INPUT_KIND_IMAGE);
     }
     if (block->tag() == MARKUP_NAME_METER || block->tag() == MARKUP_NAME_PROGRESS) {
         return false;
     }
     return block->display.inner == RDT_DISPLAY_REPLACED ||
-        block->tag() == MARKUP_NAME_IMG || block->tag() == MARKUP_NAME_IFRAME ||
-        block->tag() == MARKUP_NAME_VIDEO || block->tag() == MARKUP_NAME_EMBED ||
+        layout_tag_is_replaced_content(block->tag()) ||
         (block->tag() == MARKUP_NAME_OBJECT && block->get_attribute("data")) ||
         (block->tag() == MARKUP_NAME_AUDIO && block->has_attribute(MARKUP_NAME_CONTROLS));
 }
@@ -1478,14 +1476,17 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         NameId tag = block->tag();
         if (tag == MARKUP_NAME_IFRAME) {
             IntrinsicSize replaced_size = layout_measure_replaced(lycon, block, lycon->available_space);
+            float default_width = 0.0f;
+            float default_height = 0.0f;
+            layout_replaced_default_size(tag, &default_width, &default_height);
             if (lycon->block.given_width < 0) {
                 layout_store_given_axis(lycon, block,
-                    replaced_size.max_width > 0.0f ? replaced_size.max_width : 300.0f,
+                    replaced_size.max_width > 0.0f ? replaced_size.max_width : default_width,
                     true);
             }
             if (lycon->block.given_height < 0) {
                 layout_store_given_axis(lycon, block,
-                    replaced_size.max_height > 0.0f ? replaced_size.max_height : 150.0f,
+                    replaced_size.max_height > 0.0f ? replaced_size.max_height : default_height,
                     false);
             }
         }
@@ -2044,18 +2045,8 @@ static void layout_abs_block_internal(LayoutContext* lycon, DomNode *elmt,
     calculate_absolute_position(lycon, block, cb, pa_block, pa_line);
 
     NameId elmt_name = block->tag();
-    if (elmt_name == MARKUP_NAME_IMG) {
-        const char *value = block->get_attribute("src");
-        if (value) {
-            size_t value_len = strlen(value);
-            StrBuf* src = strbuf_new_cap(value_len);
-            strbuf_append_str_n(src, value, value_len);
-            if (!block->embed) {
-                block->ensure_embed(lycon);
-            }
-            block->embed->img = load_image(lycon->ui_context, src->str);
-            strbuf_free(src);
-        }
+    if (elmt_name == MARKUP_NAME_IMG && block->is_element()) {
+        layout_ensure_replaced_image_surface(lycon, block, block->as_element());
         if (block->embed && block->embedp()->img) {
             ImageSurface* img = block->embedp()->img;
             // Image intrinsic dimensions are in CSS logical pixels
@@ -2840,20 +2831,11 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     float margin_bottom = margin.bottom;
 
     float parent_content_width = parent_ctx->content_width;
-    float parent_x_in_bfc = 0;
-    float parent_y_in_bfc = 0;
-    if (parent_view) {
-        ViewElement* v = parent_view;
-        while (v && v != bfc->establishing_element) {
-            if (v->is_block()) {
-                parent_x_in_bfc += v->x;
-                parent_y_in_bfc += v->y;
-            }
-            ViewElement* pv = v->parent_view();
-            if (!pv) break;
-            v = pv;
-        }
-    }
+    RdtLogicalPoint parent_bfc_offset = view_geometry_ancestor_offset(
+        static_cast<View*>(parent_view),
+        static_cast<View*>(bfc->establishing_element), true);
+    float parent_x_in_bfc = parent_bfc_offset.x;
+    float parent_y_in_bfc = parent_bfc_offset.y;
     float float_total_width = block->width + margin_left + margin_right;
     float float_total_height = block->height + margin_top + margin_bottom;
     // CSS 2.1 §9.5.2: For floats with 'clear', the border edge is positioned at or below

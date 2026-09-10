@@ -258,13 +258,7 @@ static float compute_element_baseline(
     }
     if (last_child_baseline >= 0.0f) return last_child_baseline;
 
-    bool has_text_content = false;
-    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        if (layout_text_node_has_content(child)) {
-            has_text_content = true;
-            break;
-        }
-    }
+    bool has_text_content = layout_element_has_direct_text_content(element);
     if (has_text_content && element->font) {
         BoxMetrics box = layout_box_metrics(element);
         float fallback = element->fontp()->font_size * 0.8f;

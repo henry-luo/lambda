@@ -245,7 +245,7 @@ static void make_temp_dir(void) {
 /* Sanitize a doc_name into a filesystem-safe slug.
  * Strips directory prefix, keeps [A-Za-z0-9._-], replaces others with '_'.
  * Truncates to a reasonable length. */
-static void sanitize_doc_name(const char* in, char* out, size_t out_sz) {
+void event_state_log_sanitize_doc_name(const char* in, char* out, size_t out_sz) {
     if (out_sz == 0) return;
     out[0] = '\0';
     if (!in || !*in) { snprintf(out, out_sz, "doc"); return; }
@@ -328,7 +328,7 @@ bool EventStateLog::init(const char* doc_name, const char* doc_url) {
     cascade_seq = 0;
 
     char slug[96];
-    sanitize_doc_name(doc_name, slug, sizeof(slug));
+    event_state_log_sanitize_doc_name(doc_name, slug, sizeof(slug));
 
     snprintf(path, sizeof(path),
              "./temp/events_%d_%s.jsonl", pid, slug);

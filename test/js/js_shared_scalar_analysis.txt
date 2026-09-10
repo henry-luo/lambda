@@ -1,0 +1,9 @@
+wide-results true
+mixed-results a2 7 1180591620717411303424
+special-results true true Infinity
+borrowed-owner true
+coercion-result 7 left,right
+symbol-error true
+bigint-error true
+wide-error true
+after-error 42

@@ -1,4 +1,5 @@
 #include "escape.h"
+#include "utf.h"
 
 #include <stdio.h>
 
@@ -144,6 +145,19 @@ static void escape_append_json_common(void* out, const char* s, size_t len,
                                   ((unsigned int)(c2 & 0x3F) << 6) |
                                   (unsigned int)(c3 & 0x3F);
                 if (cp >= 0xD800 && cp <= 0xDFFF) {
+                    // a WTF-8 pair is one valid character, not two lone surrogates.
+                    if (utf_is_high_surrogate(cp) && i + 5 < len &&
+                            (unsigned char)s[i + 3] == 0xED &&
+                            ((unsigned char)s[i + 4] & 0xF0) == 0xB0 &&
+                            ((unsigned char)s[i + 5] & 0xC0) == 0x80) {
+                        uint16_t low = (uint16_t)(0xD000 |
+                            (((unsigned char)s[i + 4] & 0x3F) << 6) |
+                            ((unsigned char)s[i + 5] & 0x3F));
+                        utf8_encode_z(utf16_decode_pair((uint16_t)cp, low), tmp);
+                        append_str(out, tmp);
+                        i += 5;
+                        continue;
+                    }
                     snprintf(tmp, sizeof(tmp), "\\u%04x", cp);
                     append_str(out, tmp);
                     i += 2;

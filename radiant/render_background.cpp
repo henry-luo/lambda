@@ -550,7 +550,8 @@ static void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGr
             float position = fmodf((angle / (2.0f * (float)M_PI)) + 1.0f, 1.0f);
 
             Color color = get_gradient_color_at(gradient->stops, gradient->stop_count, position);
-            pixels[py * w + px] = color.r | (color.g << 8) | (color.b << 16) | (color.a << 24);
+            pixels[py * w + px] = render_pixel_pack_abgr(
+                color.r, color.g, color.b, color.a);
         }
     }
 
@@ -737,6 +738,31 @@ static bool clip_surface_region(ImageSurface* surface, int* rx, int* ry, int* rw
     return *rw > 0 && *rh > 0;
 }
 
+static int render_collect_box_shadows(RenderContext* rdcon, ViewBlock* view,
+                                      bool inset, BoxShadow*** out_shadows) {
+    if (out_shadows) *out_shadows = nullptr;
+    if (!rdcon || !view || !view->bound || !view->boundary()->box_shadow || !out_shadows) {
+        return 0;
+    }
+    int count = 0;
+    for (BoxShadow* shadow = view->boundary()->box_shadow; shadow; shadow = shadow->next) {
+        if (shadow->inset == inset) count++;
+    }
+    if (count == 0) return 0;
+    BoxShadow** shadows = (BoxShadow**)scratch_calloc(
+        &rdcon->scratch, (size_t)count * sizeof(BoxShadow*));
+    if (!shadows) {
+        log_error("[BOX-SHADOW] failed to allocate shadow list for %d shadow(s)", count);
+        return 0;
+    }
+    int index = 0;
+    for (BoxShadow* shadow = view->boundary()->box_shadow; shadow; shadow = shadow->next) {
+        if (shadow->inset == inset) shadows[index++] = shadow;
+    }
+    *out_shadows = shadows;
+    return count;
+}
+
 static void transform_surface_region(ImageSurface* surface, int rx, int ry, int rw, int rh,
                                      const Color* tint) {
     if (!surface || !surface->pixels || rw <= 0 || rh <= 0) return;
@@ -759,7 +785,7 @@ static void transform_surface_region(ImageSurface* surface, int rx, int ry, int 
             r = (r * a + 127u) / 255u;
             g = (g * a + 127u) / 255u;
             b = (b * a + 127u) / 255u;
-            dst[col] = (a << 24) | (b << 16) | (g << 8) | r;
+            dst[col] = render_pixel_pack_abgr(r, g, b, a);
         }
     }
 }
@@ -990,7 +1016,7 @@ static bool build_outer_shadow_image(
     uint32_t sr_b = ((uint32_t)shadow_color.r * sa_b + 127) / 255;
     uint32_t sg_b = ((uint32_t)shadow_color.g * sa_b + 127) / 255;
     uint32_t sb_b = ((uint32_t)shadow_color.b * sa_b + 127) / 255;
-    uint32_t shadow_px = (sa_b << 24) | (sb_b << 16) | (sg_b << 8) | sr_b;
+    uint32_t shadow_px = render_pixel_pack_abgr(sr_b, sg_b, sb_b, sa_b);
 
     rasterise_rounded_rect_into_buffer(shadow_buf, br_w, br_h, br_x0, br_y0,
                                         shadow_x, shadow_y, shadow_w, shadow_h,
@@ -1041,55 +1067,11 @@ void render_outer_shadow_blur_composite(
         : ClipShape{};
 
     // composite shadow_buf over surface (src-over, premultiplied src)
-    uint32_t* surf_px = (uint32_t*)surface->pixels;
-    int stride = surface->pitch / 4;
-    for (int row = 0; row < br_h; row++) {
-        int sy = br_y0 + row;
-        for (int col = 0; col < br_w; col++) {
-            uint32_t sp = shadow_buf[row * br_w + col];
-            uint32_t sap = (sp >> 24) & 0xFF;
-            if (sap == 0) continue;  // no shadow contribution
-
-            int sx = br_x0 + col;
-            float fx = (float)sx + 0.5f;
-            float fy = (float)sy + 0.5f;
-            if (has_exclude && clip_point_in_shape(&exclude_cs, fx, fy)) continue;
-            if (has_clip && !clip_point_in_shape(&clip_cs, fx, fy)) continue;
-
-            uint32_t dp = surf_px[sy * stride + sx];
-            uint32_t dr = (dp >>  0) & 0xFF;
-            uint32_t dg = (dp >>  8) & 0xFF;
-            uint32_t db = (dp >> 16) & 0xFF;
-            uint32_t da = (dp >> 24) & 0xFF;
-
-            uint32_t srp = (sp >>  0) & 0xFF;
-            uint32_t sgp = (sp >>  8) & 0xFF;
-            uint32_t sbp = (sp >> 16) & 0xFF;
-
-            uint32_t inv = 255u - sap;  // (1 - src_a) * 255
-            // src-over: result_premult = src_p + dst_premult * inv / 255
-            //           dst_premult.rgb = dst.rgb * dst.a / 255
-            //           result_a       = src_a + dst_a * inv / 255
-            uint32_t ra = sap + (da * inv + 127u) / 255u;
-            if (ra == 0) {
-                surf_px[sy * stride + sx] = 0;
-                continue;
-            }
-            uint32_t rrp = srp + (dr * da * inv + 32512u) / 65025u;
-            uint32_t rgp = sgp + (dg * da * inv + 32512u) / 65025u;
-            uint32_t rbp = sbp + (db * da * inv + 32512u) / 65025u;
-            // convert back to straight alpha
-            uint32_t rr = (rrp * 255u + ra / 2u) / ra;
-            uint32_t rg = (rgp * 255u + ra / 2u) / ra;
-            uint32_t rb = (rbp * 255u + ra / 2u) / ra;
-            if (rr > 255) rr = 255;
-            if (rg > 255) rg = 255;
-            if (rb > 255) rb = 255;
-            if (ra > 255) ra = 255;
-            surf_px[sy * stride + sx] =
-                (ra << 24) | (rb << 16) | (rg << 8) | rr;
-        }
-    }
+    render_composite_apply_region(surface, shadow_buf, br_x0, br_y0, br_w, br_h,
+                                  RENDER_COMPOSITE_REGION_PREMULTIPLIED_FULL,
+                                  CSS_VALUE_NORMAL, 255,
+                                  has_exclude ? &exclude_cs : nullptr,
+                                  has_clip ? &clip_cs : nullptr);
 }
 
 static uint32_t* render_outer_shadow_blur_image(
@@ -1155,27 +1137,9 @@ static uint32_t* render_outer_shadow_blur_image(
 void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (!view->bound || !view->boundary()->box_shadow) return;
 
-    // Count shadows and collect into array for reverse iteration
-    int shadow_count = 0;
-    BoxShadow* shadow = view->boundary()->box_shadow;
-    while (shadow) {
-        shadow_count++;
-        shadow = shadow->next;
-    }
-
+    BoxShadow** shadows = nullptr;
+    int shadow_count = render_collect_box_shadows(rdcon, view, false, &shadows);
     if (shadow_count == 0) return;
-
-    // Shadow lists come from parsed CSS, so do not let author input size a stack frame.
-    BoxShadow** shadows = (BoxShadow**)scratch_calloc(&rdcon->scratch, (size_t)shadow_count * sizeof(BoxShadow*));
-    if (!shadows) {
-        log_error("[BOX-SHADOW] failed to allocate shadow list for %d shadow(s)", shadow_count);
-        return;
-    }
-    shadow = view->boundary()->box_shadow;
-    for (int i = 0; i < shadow_count; i++) {
-        shadows[i] = shadow;
-        shadow = shadow->next;
-    }
 
     // Scale factor: rect is in physical pixels but shadow props and border radii
     // are in CSS pixels. Multiply by raster_scale at the lowering boundary.
@@ -1282,12 +1246,8 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             Rect shadow_rect = {shadow_x, shadow_y, shadow_w, shadow_h};
             RdtPath* shadow_path = nullptr;
             if (sr_tl > 0 || sr_tr > 0 || sr_br > 0 || sr_bl > 0) {
-                Corner shadow_radius = {};
-                float radii[4] = {sr_tl, sr_tr, sr_br, sr_bl};
-                for (int corner = 0; corner < 4; corner++) {
-                    shadow_radius.horizontal[corner] = radii[corner];
-                    shadow_radius.vertical[corner] = radii[corner];
-                }
+                Corner shadow_radius = render_path_uniform_corner(
+                    sr_tl, sr_tr, sr_br, sr_bl);
                 shadow_path = render_path_create_rounded_rect(shadow_rect, &shadow_radius);
             } else {
                 shadow_path = render_path_create_rounded_rect(shadow_rect, nullptr);
@@ -1327,27 +1287,9 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (!view->bound || !view->boundary()->box_shadow) return;
 
-    // Count inset shadows
-    int shadow_count = 0;
-    BoxShadow* shadow = view->boundary()->box_shadow;
-    while (shadow) {
-        if (shadow->inset) shadow_count++;
-        shadow = shadow->next;
-    }
+    BoxShadow** shadows = nullptr;
+    int shadow_count = render_collect_box_shadows(rdcon, view, true, &shadows);
     if (shadow_count == 0) return;
-
-    // Shadow lists come from parsed CSS, so do not let author input size a stack frame.
-    BoxShadow** shadows = (BoxShadow**)scratch_calloc(&rdcon->scratch, (size_t)shadow_count * sizeof(BoxShadow*));
-    if (!shadows) {
-        log_error("[BOX-SHADOW INSET] failed to allocate shadow list for %d shadow(s)", shadow_count);
-        return;
-    }
-    shadow = view->boundary()->box_shadow;
-    int idx = 0;
-    while (shadow) {
-        if (shadow->inset) shadows[idx++] = shadow;
-        shadow = shadow->next;
-    }
 
     // Scale factor: rect is in physical pixels but shadow props and border radii
     // are in CSS pixels. Multiply by raster_scale at the lowering boundary.
@@ -1412,75 +1354,13 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         // Even-odd fill: outer (CW) = element border-box, inner (CCW) = inset cutout
         RdtPath* shadow_path = rdt_path_new();
 
-        // Outer path (clockwise): element border-box
-        if (r_tl > 0 || r_tr > 0 || r_br > 0 || r_bl > 0) {
-            #define KAPPA_INSET 0.5522847498f
-            rdt_path_move_to(shadow_path, rect.x + r_tl, rect.y);
-            rdt_path_line_to(shadow_path, rect.x + rect.width - r_tr, rect.y);
-            if (r_tr > 0) rdt_path_cubic_to(shadow_path,
-                rect.x + rect.width - r_tr + r_tr * KAPPA_INSET, rect.y,
-                rect.x + rect.width, rect.y + r_tr - r_tr * KAPPA_INSET,
-                rect.x + rect.width, rect.y + r_tr);
-            rdt_path_line_to(shadow_path, rect.x + rect.width, rect.y + rect.height - r_br);
-            if (r_br > 0) rdt_path_cubic_to(shadow_path,
-                rect.x + rect.width, rect.y + rect.height - r_br + r_br * KAPPA_INSET,
-                rect.x + rect.width - r_br + r_br * KAPPA_INSET, rect.y + rect.height,
-                rect.x + rect.width - r_br, rect.y + rect.height);
-            rdt_path_line_to(shadow_path, rect.x + r_bl, rect.y + rect.height);
-            if (r_bl > 0) rdt_path_cubic_to(shadow_path,
-                rect.x + r_bl - r_bl * KAPPA_INSET, rect.y + rect.height,
-                rect.x, rect.y + rect.height - r_bl + r_bl * KAPPA_INSET,
-                rect.x, rect.y + rect.height - r_bl);
-            rdt_path_line_to(shadow_path, rect.x, rect.y + r_tl);
-            if (r_tl > 0) rdt_path_cubic_to(shadow_path,
-                rect.x, rect.y + r_tl - r_tl * KAPPA_INSET,
-                rect.x + r_tl - r_tl * KAPPA_INSET, rect.y,
-                rect.x + r_tl, rect.y);
-            rdt_path_close(shadow_path);
-            #undef KAPPA_INSET
-        } else {
-            rdt_path_move_to(shadow_path, rect.x, rect.y);
-            rdt_path_line_to(shadow_path, rect.x + rect.width, rect.y);
-            rdt_path_line_to(shadow_path, rect.x + rect.width, rect.y + rect.height);
-            rdt_path_line_to(shadow_path, rect.x, rect.y + rect.height);
-            rdt_path_close(shadow_path);
-        }
-
-        // Inner path (counter-clockwise): the cutout hole
-        {
-            float ix = inner_x, iy = inner_y, iw = inner_w, ih = inner_h;
-            if (ir_tl > 0 || ir_tr > 0 || ir_br > 0 || ir_bl > 0) {
-                #define KAPPA_INNER 0.5522847498f
-                rdt_path_move_to(shadow_path, ix + ir_tl, iy);
-                if (ir_tl > 0) rdt_path_cubic_to(shadow_path,
-                    ix + ir_tl - ir_tl * KAPPA_INNER, iy,
-                    ix, iy + ir_tl - ir_tl * KAPPA_INNER,
-                    ix, iy + ir_tl);
-                rdt_path_line_to(shadow_path, ix, iy + ih - ir_bl);
-                if (ir_bl > 0) rdt_path_cubic_to(shadow_path,
-                    ix, iy + ih - ir_bl + ir_bl * KAPPA_INNER,
-                    ix + ir_bl - ir_bl * KAPPA_INNER, iy + ih,
-                    ix + ir_bl, iy + ih);
-                rdt_path_line_to(shadow_path, ix + iw - ir_br, iy + ih);
-                if (ir_br > 0) rdt_path_cubic_to(shadow_path,
-                    ix + iw - ir_br + ir_br * KAPPA_INNER, iy + ih,
-                    ix + iw, iy + ih - ir_br + ir_br * KAPPA_INNER,
-                    ix + iw, iy + ih - ir_br);
-                rdt_path_line_to(shadow_path, ix + iw, iy + ir_tr);
-                if (ir_tr > 0) rdt_path_cubic_to(shadow_path,
-                    ix + iw, iy + ir_tr - ir_tr * KAPPA_INNER,
-                    ix + iw - ir_tr + ir_tr * KAPPA_INNER, iy,
-                    ix + iw - ir_tr, iy);
-                rdt_path_close(shadow_path);
-                #undef KAPPA_INNER
-            } else {
-                rdt_path_move_to(shadow_path, ix, iy);
-                rdt_path_line_to(shadow_path, ix, iy + ih);
-                rdt_path_line_to(shadow_path, ix + iw, iy + ih);
-                rdt_path_line_to(shadow_path, ix + iw, iy);
-                rdt_path_close(shadow_path);
-            }
-        }
+        // The shared path builder keeps outer and inner rounded geometry in
+        // one owner while retaining the winding required by even-odd fill.
+        Corner outer_radius = render_path_uniform_corner(r_tl, r_tr, r_br, r_bl);
+        Corner inner_radius = render_path_uniform_corner(ir_tl, ir_tr, ir_br, ir_bl);
+        render_path_append_rounded_rect(shadow_path, rect, &outer_radius, true);
+        render_path_append_rounded_rect(
+            shadow_path, {inner_x, inner_y, inner_w, inner_h}, &inner_radius, false);
 
         // For rounded elements, the inset blur operates on a rectangular region
         // that extends into the rounded corners. Save corner pixels before fill+blur
@@ -1528,8 +1408,8 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
                 bg = view->boundary()->background->color;
             }
             // Convert to surface pixel format (ABGR8888)
-            uint32_t bg_pixel = ((uint32_t)bg.a << 24) | ((uint32_t)bg.b << 16) |
-                                ((uint32_t)bg.g << 8) | (uint32_t)bg.r;
+            uint32_t bg_pixel = render_pixel_pack_abgr(
+                bg.r, bg.g, bg.b, bg.a);
 
             rc_box_blur_inset(rdcon, br_x, br_y, br_w, br_h, pad, blur_px, bg_pixel);
         }

@@ -148,71 +148,59 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
 
     // Helper lambda (as inline struct) for rendering one side's trapezoid with a color
     struct SideDraw {
-        static void top(RenderContext* rdcon, Rect rect, float bwt, float bwr, float bwl, Color c) {
-            if (bwt <= 0 || c.a == 0) return;
+        static void draw(RenderContext* rdcon, Rect rect, int side,
+                         float width, float before, float after, Color c) {
+            if (width <= 0 || c.a == 0) return;
             const RdtMatrix* xform = render_state_current_transform(rdcon);
             RdtPath* clip = render_path_create_clip_path(rdcon);
             rc_push_clip(rdcon, clip, NULL);
             RdtPath* p = rdt_path_new();
-            rdt_path_move_to(p, rect.x, rect.y);
-            rdt_path_line_to(p, rect.x + rect.width, rect.y);
-            rdt_path_line_to(p, rect.x + rect.width - bwr, rect.y + bwt);
-            rdt_path_line_to(p, rect.x + bwl, rect.y + bwt);
+            float right = rect.x + rect.width;
+            float bottom = rect.y + rect.height;
+            switch (side) {
+                case 0:
+                    rdt_path_move_to(p, rect.x, rect.y);
+                    rdt_path_line_to(p, right, rect.y);
+                    rdt_path_line_to(p, right - after, rect.y + width);
+                    rdt_path_line_to(p, rect.x + before, rect.y + width);
+                    break;
+                case 1:
+                    rdt_path_move_to(p, right - width, rect.y + before);
+                    rdt_path_line_to(p, right, rect.y);
+                    rdt_path_line_to(p, right, bottom);
+                    rdt_path_line_to(p, right - width, bottom - after);
+                    break;
+                case 2:
+                    rdt_path_move_to(p, rect.x + before, bottom - width);
+                    rdt_path_line_to(p, right - after, bottom - width);
+                    rdt_path_line_to(p, right, bottom);
+                    rdt_path_line_to(p, rect.x, bottom);
+                    break;
+                case 3:
+                    rdt_path_move_to(p, rect.x, rect.y);
+                    rdt_path_line_to(p, rect.x + width, rect.y + before);
+                    rdt_path_line_to(p, rect.x + width, bottom - after);
+                    rdt_path_line_to(p, rect.x, bottom);
+                    break;
+                default:
+                    rdt_path_free(p);
+                    rc_pop_clip(rdcon);
+                    rdt_path_free(clip);
+                    return;
+            }
             rdt_path_close(p);
             rc_fill_path(rdcon, p, c, RDT_FILL_WINDING, xform);
             rdt_path_free(p);
             rc_pop_clip(rdcon);
             rdt_path_free(clip);
         }
-        static void bottom(RenderContext* rdcon, Rect rect, float bwb, float bwr, float bwl, Color c) {
-            if (bwb <= 0 || c.a == 0) return;
-            const RdtMatrix* xform = render_state_current_transform(rdcon);
-            RdtPath* clip = render_path_create_clip_path(rdcon);
-            rc_push_clip(rdcon, clip, NULL);
-            RdtPath* p = rdt_path_new();
-            float bot = rect.y + rect.height;
-            rdt_path_move_to(p, rect.x + bwl, bot - bwb);
-            rdt_path_line_to(p, rect.x + rect.width - bwr, bot - bwb);
-            rdt_path_line_to(p, rect.x + rect.width, bot);
-            rdt_path_line_to(p, rect.x, bot);
-            rdt_path_close(p);
-            rc_fill_path(rdcon, p, c, RDT_FILL_WINDING, xform);
-            rdt_path_free(p);
-            rc_pop_clip(rdcon);
-            rdt_path_free(clip);
-        }
-        static void left(RenderContext* rdcon, Rect rect, float bwl, float bwt, float bwb, Color c) {
-            if (bwl <= 0 || c.a == 0) return;
-            const RdtMatrix* xform = render_state_current_transform(rdcon);
-            RdtPath* clip = render_path_create_clip_path(rdcon);
-            rc_push_clip(rdcon, clip, NULL);
-            RdtPath* p = rdt_path_new();
-            rdt_path_move_to(p, rect.x, rect.y);
-            rdt_path_line_to(p, rect.x + bwl, rect.y + bwt);
-            rdt_path_line_to(p, rect.x + bwl, rect.y + rect.height - bwb);
-            rdt_path_line_to(p, rect.x, rect.y + rect.height);
-            rdt_path_close(p);
-            rc_fill_path(rdcon, p, c, RDT_FILL_WINDING, xform);
-            rdt_path_free(p);
-            rc_pop_clip(rdcon);
-            rdt_path_free(clip);
-        }
-        static void right(RenderContext* rdcon, Rect rect, float bwr, float bwt, float bwb, Color c) {
-            if (bwr <= 0 || c.a == 0) return;
-            const RdtMatrix* xform = render_state_current_transform(rdcon);
-            RdtPath* clip = render_path_create_clip_path(rdcon);
-            rc_push_clip(rdcon, clip, NULL);
-            RdtPath* p = rdt_path_new();
-            float rg = rect.x + rect.width;
-            rdt_path_move_to(p, rg - bwr, rect.y + bwt);
-            rdt_path_line_to(p, rg, rect.y);
-            rdt_path_line_to(p, rg, rect.y + rect.height);
-            rdt_path_line_to(p, rg - bwr, rect.y + rect.height - bwb);
-            rdt_path_close(p);
-            rc_fill_path(rdcon, p, c, RDT_FILL_WINDING, xform);
-            rdt_path_free(p);
-            rc_pop_clip(rdcon);
-            rdt_path_free(clip);
+
+        static void filled(RenderContext* rdcon, Rect rect, int side,
+                           float width, float bwt, float bwr,
+                           float bwb, float bwl, Color color) {
+            float before = (side == 0 || side == 2) ? bwl : bwt;
+            float after = (side == 0 || side == 2) ? bwr : bwb;
+            draw(rdcon, rect, side, width, before, after, color);
         }
     };
 
@@ -251,14 +239,9 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
             (void)gap;
 
             // Outer thin side
-            switch (side) {
-                case 0:
-                    SideDraw::top(rdcon, rect, ow, bwr > 0 ? ow : 0, bwl > 0 ? ow : 0, c);
-                    break;
-                case 1: SideDraw::right(rdcon, rect, ow, bwt > 0 ? ow : 0, bwb > 0 ? ow : 0, c); break;
-                case 2: SideDraw::bottom(rdcon, rect, ow, bwr > 0 ? ow : 0, bwl > 0 ? ow : 0, c); break;
-                case 3: SideDraw::left(rdcon, rect, ow, bwt > 0 ? ow : 0, bwb > 0 ? ow : 0, c); break;
-            }
+            SideDraw::filled(rdcon, rect, side, ow, bwt > 0 ? ow : 0,
+                             bwr > 0 ? ow : 0, bwb > 0 ? ow : 0,
+                             bwl > 0 ? ow : 0, c);
             // Inner thin side (inset by w - iw)
             float inset = w - iw;
             Rect inner = {x + (side == 3 ? inset : 0), y + (side == 0 ? inset : 0),
@@ -267,12 +250,9 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
             if (side == 1) { inner.x = x; inner.width = W - inset; }
             if (side == 2) { inner.y = y; inner.height = H - inset; }
             if (inner.width > 0 && inner.height > 0) {
-                switch (side) {
-                    case 0: SideDraw::top(rdcon, inner, iw, bwr > 0 ? iw : 0, bwl > 0 ? iw : 0, c); break;
-                    case 1: SideDraw::right(rdcon, inner, iw, bwt > 0 ? iw : 0, bwb > 0 ? iw : 0, c); break;
-                    case 2: SideDraw::bottom(rdcon, inner, iw, bwr > 0 ? iw : 0, bwl > 0 ? iw : 0, c); break;
-                    case 3: SideDraw::left(rdcon, inner, iw, bwt > 0 ? iw : 0, bwb > 0 ? iw : 0, c); break;
-                }
+                SideDraw::filled(rdcon, inner, side, iw, bwt > 0 ? iw : 0,
+                                 bwr > 0 ? iw : 0, bwb > 0 ? iw : 0,
+                                 bwl > 0 ? iw : 0, c);
             }
 
         } else if (st == CSS_VALUE_GROOVE || st == CSS_VALUE_RIDGE) {
@@ -291,12 +271,9 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
                 inner_c = is_top_left ? dark : c;
             }
             // Outer half
-            switch (side) {
-                case 0: SideDraw::top(rdcon, rect, hw, bwr > 0 ? hw : 0, bwl > 0 ? hw : 0, outer_c); break;
-                case 1: SideDraw::right(rdcon, rect, hw, bwt > 0 ? hw : 0, bwb > 0 ? hw : 0, outer_c); break;
-                case 2: SideDraw::bottom(rdcon, rect, hw, bwr > 0 ? hw : 0, bwl > 0 ? hw : 0, outer_c); break;
-                case 3: SideDraw::left(rdcon, rect, hw, bwt > 0 ? hw : 0, bwb > 0 ? hw : 0, outer_c); break;
-            }
+            SideDraw::filled(rdcon, rect, side, hw, bwt > 0 ? hw : 0,
+                             bwr > 0 ? hw : 0, bwb > 0 ? hw : 0,
+                             bwl > 0 ? hw : 0, outer_c);
             // Inner half — inset by hw
             Rect inner = {x + (side == 3 ? hw : 0), y + (side == 0 ? hw : 0),
                           W, H};
@@ -305,12 +282,9 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
             if (side == 2) { inner.height = H - hw; }
             else if (side == 0) { inner.height = H - hw; }
             if (inner.width > 0 && inner.height > 0) {
-                switch (side) {
-                    case 0: SideDraw::top(rdcon, inner, hw, bwr > 0 ? hw : 0, bwl > 0 ? hw : 0, inner_c); break;
-                    case 1: SideDraw::right(rdcon, inner, hw, bwt > 0 ? hw : 0, bwb > 0 ? hw : 0, inner_c); break;
-                    case 2: SideDraw::bottom(rdcon, inner, hw, bwr > 0 ? hw : 0, bwl > 0 ? hw : 0, inner_c); break;
-                    case 3: SideDraw::left(rdcon, inner, hw, bwt > 0 ? hw : 0, bwb > 0 ? hw : 0, inner_c); break;
-                }
+                SideDraw::filled(rdcon, inner, side, hw, bwt > 0 ? hw : 0,
+                                 bwr > 0 ? hw : 0, bwb > 0 ? hw : 0,
+                                 bwl > 0 ? hw : 0, inner_c);
             }
 
         } else if (st == CSS_VALUE_INSET || st == CSS_VALUE_OUTSET) {
@@ -323,12 +297,7 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
                 side_c = (side == 0 || side == 3) ? dark : light;
             else
                 side_c = (side == 0 || side == 3) ? light : dark;
-            switch (side) {
-                case 0: SideDraw::top(rdcon, rect, w, bwr, bwl, side_c); break;
-                case 1: SideDraw::right(rdcon, rect, w, bwt, bwb, side_c); break;
-                case 2: SideDraw::bottom(rdcon, rect, w, bwr, bwl, side_c); break;
-                case 3: SideDraw::left(rdcon, rect, w, bwt, bwb, side_c); break;
-            }
+            SideDraw::filled(rdcon, rect, side, w, bwt, bwr, bwb, bwl, side_c);
 
         } else if (st == CSS_VALUE_DASHED || st == CSS_VALUE_DOTTED) {
             // Dashed/dotted: stroke a line along the center of each side
@@ -388,12 +357,7 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
 
         } else {
             // solid — render as filled trapezoid
-            switch (side) {
-                case 0: SideDraw::top(rdcon, rect, w, bwr, bwl, c); break;
-                case 1: SideDraw::right(rdcon, rect, w, bwt, bwb, c); break;
-                case 2: SideDraw::bottom(rdcon, rect, w, bwr, bwl, c); break;
-                case 3: SideDraw::left(rdcon, rect, w, bwt, bwb, c); break;
-            }
+            SideDraw::filled(rdcon, rect, side, w, bwt, bwr, bwb, bwl, c);
         }
     }
 
@@ -592,6 +556,31 @@ static void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect r
     }
 }
 
+static void render_rounded_border_stroke_pair(
+        RenderContext* rdcon, Rect rect, const Corner* radius,
+        float outer_inset, float outer_width, Color outer_color,
+        float inner_inset, float inner_width, Color inner_color,
+        const RdtMatrix* xform) {
+    if (!rdcon || !radius) return;
+    Rect outer_rect = {rect.x + outer_inset, rect.y + outer_inset,
+                       rect.width - outer_inset * 2,
+                       rect.height - outer_inset * 2};
+    Corner outer_radius = radiant_corner_inset(radius, outer_inset, outer_inset);
+    RdtPath* outer = render_path_create_rounded_rect(outer_rect, &outer_radius);
+    rc_stroke_path(rdcon, outer, outer_color, outer_width,
+                   RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
+    rdt_path_free(outer);
+
+    Rect inner_rect = {rect.x + inner_inset, rect.y + inner_inset,
+                       rect.width - inner_inset * 2,
+                       rect.height - inner_inset * 2};
+    Corner inner_radius = radiant_corner_inset(radius, inner_inset, inner_inset);
+    RdtPath* inner = render_path_create_rounded_rect(inner_rect, &inner_radius);
+    rc_stroke_path(rdcon, inner, inner_color, inner_width,
+                   RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
+    rdt_path_free(inner);
+}
+
 /**
  * Render border with vector rendering (supports rounded corners and styled borders)
  */
@@ -638,23 +627,10 @@ static void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect re
             if (line_w < 1) line_w = 1;
             float half_lw = line_w / 2.0f;
 
-            // Outer border: path centered at half_lw from outer edge
-            Corner orig_r = border->radius;
-            Rect outer_rect = {rect.x + half_lw, rect.y + half_lw,
-                               rect.width - line_w, rect.height - line_w};
-            Corner outer_radius = radiant_corner_inset(&orig_r, half_lw, half_lw);
-            RdtPath* outer = render_path_create_rounded_rect(outer_rect, &outer_radius);
-            rc_stroke_path(rdcon, outer, c, line_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
-            rdt_path_free(outer);
-
-            // Inner border: path centered at (w - half_lw) from outer edge
             float inner_inset = w - half_lw;
-            Rect inner_rect = {rect.x + inner_inset, rect.y + inner_inset,
-                               rect.width - inner_inset * 2, rect.height - inner_inset * 2};
-            Corner inner_radius = radiant_corner_inset(&orig_r, inner_inset, inner_inset);
-            RdtPath* inner = render_path_create_rounded_rect(inner_rect, &inner_radius);
-            rc_stroke_path(rdcon, inner, c, line_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
-            rdt_path_free(inner);
+            render_rounded_border_stroke_pair(
+                rdcon, rect, &border->radius, half_lw, line_w, c,
+                inner_inset, line_w, c, xform);
 
         } else if (style == CSS_VALUE_GROOVE || style == CSS_VALUE_RIDGE) {
             float half_w = w / 2.0f;
@@ -667,23 +643,10 @@ static void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect re
             Color outer_c = groove ? dark_c : light_c;
             Color inner_c = groove ? light_c : dark_c;
 
-            // Outer half: stroke width=half_w, path centered at quarter_w from outer edge
-            Corner orig_r = border->radius;
-            Rect outer_rect = {rect.x + quarter_w, rect.y + quarter_w,
-                               rect.width - half_w, rect.height - half_w};
-            Corner outer_radius = radiant_corner_inset(&orig_r, quarter_w, quarter_w);
-            RdtPath* outer = render_path_create_rounded_rect(outer_rect, &outer_radius);
-            rc_stroke_path(rdcon, outer, outer_c, half_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
-            rdt_path_free(outer);
-
-            // Inner half: stroke width=half_w, path centered at 3*quarter_w from outer edge
             float inner_inset = quarter_w * 3.0f;
-            Rect inner_rect = {rect.x + inner_inset, rect.y + inner_inset,
-                               rect.width - inner_inset * 2, rect.height - inner_inset * 2};
-            Corner inner_radius = radiant_corner_inset(&orig_r, inner_inset, inner_inset);
-            RdtPath* inner = render_path_create_rounded_rect(inner_rect, &inner_radius);
-            rc_stroke_path(rdcon, inner, inner_c, half_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
-            rdt_path_free(inner);
+            render_rounded_border_stroke_pair(
+                rdcon, rect, &border->radius, quarter_w, half_w, outer_c,
+                inner_inset, half_w, inner_c, xform);
 
         } else if (style == CSS_VALUE_INSET || style == CSS_VALUE_OUTSET) {
             Color tl_color, br_color;

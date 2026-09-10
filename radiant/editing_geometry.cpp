@@ -1,4 +1,5 @@
 #include "event.hpp"
+#include "layout.hpp"
 
 #include "view.hpp"
 #include "../lib/tagged.hpp"
@@ -7,16 +8,6 @@
 #include "../lib/log.h"
 #include "../lib/utf.h"
 #include <string.h>
-
-static bool editing_geometry_node_is_descendant_of(DomNode* node, DomElement* owner) {
-    if (!node || !owner) return false;
-    DomNode* cur = node;
-    while (cur) {
-        if (cur == static_cast<DomNode*>(owner)) return true;
-        cur = cur->parent;
-    }
-    return false;
-}
 
 static bool editing_geometry_node_inside_text_control(DomNode* node) {
     DomNode* cur = node;
@@ -64,23 +55,8 @@ static bool editing_geometry_text_metrics(UiContext* uicon, ViewBlock* block,
     FontHandle* font_handle = font_box_handle(&fbox);
     if (!font_handle) return false;
 
-    float raster_scale = ui_context_raster_scale(uicon);
-    const unsigned char* p = (const unsigned char*)value;
-    const unsigned char* p_end = p + limit;
-    float width = 0.0f;
-    while (p < p_end) {
-        uint32_t codepoint = 0;
-        int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-        if (bytes <= 0) {
-            p++;
-            continue;
-        }
-        p += bytes;
-        FontStyleDesc sd = font_style_desc_from_prop(block->font);
-        LoadedGlyph* glyph = font_load_glyph(font_handle, &sd, codepoint, false);
-        if (glyph) width += glyph->advance_x / raster_scale;
-    }
-    if (out_width) *out_width = width;
+    if (out_width) *out_width = layout_measure_utf8_text_width(
+        font_handle, block->font, value, limit, ui_context_raster_scale(uicon));
     return true;
 }
 
@@ -91,14 +67,9 @@ static int editing_geometry_first_strong_direction(const char* text,
     const char* end = text + len;
     while (p < end) {
         uint32_t cp = 0;
-        int bytes = str_utf8_decode(p, (size_t)(end - p), &cp);
-        if (bytes <= 0) {
-            p++;
-            continue;
-        }
+        if (!layout_utf8_next_codepoint(&p, end, &cp)) continue;
         int cls = utf_bidi_strong_class(cp);
         if (cls != 0) return cls;
-        p += bytes;
     }
     return 0;
 }
@@ -134,12 +105,12 @@ static EditingTextControlMetrics editing_geometry_text_control_metrics(
     metrics.border = (block->bound && block->boundary_mut()->border)
         ? block->boundary()->border->width.left : 1.0f;
     metrics.padding = block->bound ? block->boundary()->padding.left
-        : (elem->form->control_type == FORM_CONTROL_TEXTAREA
+        : (form_control_is_textarea(elem->form)
             ? FormDefaults::TEXTAREA_PADDING : FormDefaults::TEXT_PADDING_H);
     metrics.content_width = block->width - 2.0f * (metrics.border + metrics.padding);
     if (metrics.content_width < 0.0f) metrics.content_width = 0.0f;
     metrics.font_size = block->font ? block->fontp()->font_size
-        : (elem->form->control_type == FORM_CONTROL_TEXTAREA ? 13.333f : 16.0f);
+        : (form_control_is_textarea(elem->form) ? 13.333f : 16.0f);
     return metrics;
 }
 
@@ -163,21 +134,19 @@ static uint32_t editing_geometry_line_offset_for_x(UiContext* uicon,
     uint32_t byte_off = 0;
     while (p < p_end) {
         uint32_t codepoint = 0;
-        int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-        if (bytes <= 0) {
-            p++;
+        const unsigned char* codepoint_start = p;
+        if (!layout_utf8_next_codepoint(&p, p_end, &codepoint)) {
             byte_off++;
             continue;
         }
-        FontStyleDesc sd = font_style_desc_from_prop(block->font);
-        LoadedGlyph* glyph = font_load_glyph(font_handle, &sd, codepoint, false);
-        float gw = glyph ? glyph->advance_x / raster_scale : 0.0f;
+        uint32_t bytes = (uint32_t)(p - codepoint_start);
+        float gw = layout_measure_font_glyph_advance(
+            font_handle, block->font, codepoint, raster_scale);
         if (rel_x < accum_w + gw / 2.0f) {
             return line_start + byte_off;
         }
         accum_w += gw;
-        p += bytes;
-        byte_off += (uint32_t)bytes; // INT_CAST_OK: UTF-8 decoder reports byte count for offset math.
+        byte_off += bytes; // INT_CAST_OK: UTF-8 decoder reports byte count for offset math.
     }
     return line_start + line_len;
 }
@@ -245,7 +214,8 @@ bool editing_geometry_surface_contains_boundary(const EditingSurface* surface,
     if (editing_surface_is_rich(surface)) {
         if (boundary->kind != EDITING_BOUNDARY_DOM || !boundary->dom.node) return false;
         if (editing_geometry_node_inside_text_control(boundary->dom.node)) return false;
-        return editing_geometry_node_is_descendant_of(boundary->dom.node, surface->owner);
+        return view_geometry_dom_is_descendant(
+            boundary->dom.node, static_cast<DomNode*>(surface->owner), true);
     }
     return false;
 }
@@ -353,7 +323,7 @@ bool editing_geometry_text_control_offset_for_point(UiContext* uicon,
     float rel_x = vx - abs_x - border - padding + elem->form->scroll_x;
     if (rel_x < 0.0f) rel_x = 0.0f;
 
-    if (elem->form->control_type == FORM_CONTROL_TEXTAREA) {
+    if (form_control_is_textarea(elem->form)) {
         float font_size = block->font ? block->fontp()->font_size : 13.333f;
         float line_height = font_size * 1.4f;
         float rel_y = vy - abs_y - border - padding + elem->form->scroll_y;
@@ -578,7 +548,7 @@ bool editing_geometry_text_control_caret_rect(UiContext* uicon,
     float text_width = 0.0f;
     uint32_t line_start = 0;
     uint32_t line_len = value_len;
-    if (elem->form->control_type == FORM_CONTROL_TEXTAREA && value) {
+    if (form_control_is_textarea(elem->form) && value) {
         uint32_t scan = 0;
         while (scan < offset) {
             if (value[scan] == '\n') line_start = scan + 1;
@@ -594,10 +564,10 @@ bool editing_geometry_text_control_caret_rect(UiContext* uicon,
     }
 
     float font_size = metrics.font_size;
-    float line_height = elem->form->control_type == FORM_CONTROL_TEXTAREA
+    float line_height = form_control_is_textarea(elem->form)
         ? font_size * 1.4f : font_size;
     float line_y = 0.0f;
-    if (elem->form->control_type == FORM_CONTROL_TEXTAREA && value) {
+    if (form_control_is_textarea(elem->form) && value) {
         for (uint32_t i = 0; i < offset && i < value_len; i++) {
             if (value[i] == '\n') line_y += line_height;
         }

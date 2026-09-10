@@ -46,6 +46,16 @@ extern __thread EvalContext* context;
 extern __thread Context* input_context;
 extern UiContext ui_context;
 
+static void window_cleanup_load_failure(Pool* pool, Url* cwd, UiContext* uicon,
+                                        bool reset_virtual_clock) {
+    if (pool) pool_destroy(pool);
+    url_destroy(cwd);
+    dom_set_ui_context(nullptr);
+    dom_set_host_driven_loop(false);
+    if (reset_virtual_clock) js_event_loop_set_virtual_clock(false, 0.0);
+    ui_context_cleanup(uicon);
+}
+
 typedef enum RadiantJsLoopAction {
     RADIANT_JS_LOOP_PUMP,
     RADIANT_JS_LOOP_ADVANCE
@@ -521,15 +531,14 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 
     // Build keyboard event
     RdtEvent event;
-    event.key.type = (action == GLFW_PRESS || action == GLFW_REPEAT) ? RDT_EVENT_KEY_DOWN : RDT_EVENT_KEY_UP;
-    event.key.timestamp = glfwGetTime();
-    event.key.key = key;
-    event.key.scancode = scancode;
-    event.key.mods = 0;
-    if (mods & GLFW_MOD_SHIFT) event.key.mods |= RDT_MOD_SHIFT;
-    if (mods & GLFW_MOD_CONTROL) event.key.mods |= RDT_MOD_CTRL;
-    if (mods & GLFW_MOD_ALT) event.key.mods |= RDT_MOD_ALT;
-    if (mods & GLFW_MOD_SUPER) event.key.mods |= RDT_MOD_SUPER;
+    int rdt_mods = 0;
+    if (mods & GLFW_MOD_SHIFT) rdt_mods |= RDT_MOD_SHIFT;
+    if (mods & GLFW_MOD_CONTROL) rdt_mods |= RDT_MOD_CTRL;
+    if (mods & GLFW_MOD_ALT) rdt_mods |= RDT_MOD_ALT;
+    if (mods & GLFW_MOD_SUPER) rdt_mods |= RDT_MOD_SUPER;
+    rdt_event_set_key(&event,
+        (action == GLFW_PRESS || action == GLFW_REPEAT) ? RDT_EVENT_KEY_DOWN : RDT_EVENT_KEY_UP,
+        key, rdt_mods, scancode, glfwGetTime());
 
     // Handle key events
     handle_event(&ui_context, ui_context.document, &event);
@@ -542,9 +551,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 void character_callback(GLFWwindow* window, unsigned int codepoint) {
     // Build text input event
     RdtEvent event;
-    event.text_input.type = RDT_EVENT_TEXT_INPUT;
-    event.text_input.timestamp = glfwGetTime();
-    event.text_input.codepoint = codepoint;
+    rdt_event_set_text_input(&event, codepoint, glfwGetTime());
 
     if (codepoint > 127) {
         log_debug("Unicode character entered: U+%04X", codepoint);
@@ -561,13 +568,11 @@ void character_callback(GLFWwindow* window, unsigned int codepoint) {
 static void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
     RdtEvent event;
     log_debug("Cursor position: (%.1f, %.1f)", xpos, ypos);
-    event.mouse_position.type = RDT_EVENT_MOUSE_MOVE;
-    event.mouse_position.timestamp = glfwGetTime();
     // GLFW reports logical window coordinates, so the platform scale is 1:1.
     RdtLogicalPoint logical = rdt_platform_to_logical_point(
         (float)xpos, (float)ypos, 1.0f, 1.0f);
-    event.mouse_position.x = logical.x;
-    event.mouse_position.y = logical.y;
+    rdt_event_set_mouse_position(&event, RDT_EVENT_MOUSE_MOVE,
+                                 logical.x, logical.y, glfwGetTime());
     handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
 
     // Trigger redraw so any pending reflows/repaints from hover state
@@ -582,17 +587,21 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
 static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
     log_info("MOUSE_BUTTON_CALLBACK: button=%d action=%d mods=%d", button, action, mods);
     RdtEvent event;
-    event.mouse_button.type = action == GLFW_PRESS ? RDT_EVENT_MOUSE_DOWN : RDT_EVENT_MOUSE_UP;
-    event.mouse_button.timestamp = glfwGetTime();
-    event.mouse_button.button = button;
+    double event_timestamp = glfwGetTime();
+    int rdt_mods = 0;
+    if (mods & GLFW_MOD_SHIFT) rdt_mods |= RDT_MOD_SHIFT;
+    if (mods & GLFW_MOD_CONTROL) rdt_mods |= RDT_MOD_CTRL;
+    if (mods & GLFW_MOD_ALT) rdt_mods |= RDT_MOD_ALT;
+    if (mods & GLFW_MOD_SUPER) rdt_mods |= RDT_MOD_SUPER;
 
     // Get cursor position for all mouse button events
     double xpos, ypos;
     glfwGetCursorPos(window, &xpos, &ypos);
     RdtLogicalPoint logical = rdt_platform_to_logical_point(
         (float)xpos, (float)ypos, 1.0f, 1.0f);
-    event.mouse_button.x = logical.x;
-    event.mouse_button.y = logical.y;
+    rdt_event_set_mouse_button(&event,
+        action == GLFW_PRESS ? RDT_EVENT_MOUSE_DOWN : RDT_EVENT_MOUSE_UP,
+        logical.x, logical.y, button, 1, rdt_mods, event_timestamp);
 
     UiContext* ui = &ui_context;
     if (action == GLFW_PRESS) {
@@ -613,13 +622,6 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
         ui->click_count = ui->active_click_count;
     }
     event.mouse_button.clicks = ui->click_count;
-
-    // Map GLFW modifiers to RDT modifiers
-    event.mouse_button.mods = 0;
-    if (mods & GLFW_MOD_SHIFT) event.mouse_button.mods |= RDT_MOD_SHIFT;
-    if (mods & GLFW_MOD_CONTROL) event.mouse_button.mods |= RDT_MOD_CTRL;
-    if (mods & GLFW_MOD_ALT) event.mouse_button.mods |= RDT_MOD_ALT;
-    if (mods & GLFW_MOD_SUPER) event.mouse_button.mods |= RDT_MOD_SUPER;
 
     if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS) {
         log_debug("Right mouse button pressed");
@@ -653,11 +655,8 @@ void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
     RdtEvent event;
     log_debug("Scroll_callback");
     log_enter();
-    event.scroll.type = RDT_EVENT_SCROLL;
-    event.scroll.timestamp = glfwGetTime();
+    double event_timestamp = glfwGetTime();
     // Scroll offset can stay as-is (relative motion)
-    event.scroll.xoffset = xoffset;
-    event.scroll.yoffset = yoffset;
     log_debug("Scroll offset: (%.1f, %.1f)", xoffset, yoffset);
     assert(xoffset != 0 || yoffset != 0);
     double xpos, ypos;
@@ -665,8 +664,8 @@ void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
     log_debug("Mouse position: (%.1f, %.1f)", xpos, ypos);
     RdtLogicalPoint logical = rdt_platform_to_logical_point(
         (float)xpos, (float)ypos, 1.0f, 1.0f);
-    event.scroll.x = logical.x;
-    event.scroll.y = logical.y;
+    rdt_event_set_scroll(&event, logical.x, logical.y,
+                         xoffset, yoffset, event_timestamp);
     handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
     do_redraw = 1;
     log_leave();
@@ -1094,10 +1093,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         Pool* pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "window");
         if (!pool) {
             log_error("Failed to create memory pool for document");
-            url_destroy(cwd);
-            dom_set_ui_context(nullptr);
-            dom_set_host_driven_loop(false);
-            ui_context_cleanup(&ui_context);
+            window_cleanup_load_failure(nullptr, cwd, &ui_context, false);
             return -1;
         }
 
@@ -1137,12 +1133,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
             Url* script_url = url_parse_with_base(file_to_load, cwd);
             if (!script_url) {
                 log_error("Failed to parse in-memory script URL: %s", file_to_load);
-                pool_destroy(pool);
-                url_destroy(cwd);
-                dom_set_ui_context(nullptr);
-                dom_set_host_driven_loop(false);
-                js_event_loop_set_virtual_clock(false, 0.0);
-                ui_context_cleanup(&ui_context);
+                window_cleanup_load_failure(pool, cwd, &ui_context, true);
                 return -1;
             }
             doc = load_lambda_script_source_doc(script_url, doc_source, css_width, css_height, pool);
@@ -1156,12 +1147,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         // for a page that never needs it denies it to a Lambda-script iframe.
         if (!doc) {
             log_error("Failed to load document: %s", file_to_load);
-            pool_destroy(pool);
-            url_destroy(cwd);
-            dom_set_ui_context(nullptr);
-            dom_set_host_driven_loop(false);
-            js_event_loop_set_virtual_clock(false, 0.0);
-            ui_context_cleanup(&ui_context);
+            window_cleanup_load_failure(pool, cwd, &ui_context, true);
             return -1;
         }
         log_mem_stage("after-load");

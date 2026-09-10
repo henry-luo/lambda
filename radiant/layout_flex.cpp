@@ -567,19 +567,8 @@ bool flex_item_has_content_flex_basis(ViewElement* item) {
 
 static float flex_item_replaced_natural_aspect_ratio(ViewElement* item) {
     ViewBlock* block = lam::view_as_block(item);
-    if (block && item->tag() == MARKUP_NAME_IMG && block->embed && block->embedp()->img) {
-        ImageSurface* image = block->embedp()->img;
-        if (image->width > 0 && image->height > 0) {
-            return (float)image->width / (float)image->height;
-        }
-    }
-    float natural_width = 0.0f;
-    float natural_height = 0.0f;
-    if (layout_canvas_natural_size(block, &natural_width, &natural_height) &&
-        natural_width > 0.0f && natural_height > 0.0f) {
-        return natural_width / natural_height;
-    }
-    return 0.0f;
+    ReplacedIntrinsicFacts facts = layout_replaced_intrinsic_facts(nullptr, block);
+    return facts.has_natural_aspect_ratio ? facts.natural_aspect_ratio : 0.0f;
 }
 
 static float flex_item_auto_minimum_aspect_ratio(ViewElement* item) {
@@ -1978,8 +1967,8 @@ static void flex_ensure_explicit_image_loaded(ViewElement* item,
     const char* src = item->get_attribute(MARKUP_NAME_SRC);
     if (!src || (item->embed && item->embedp()->img)) return;
 
-    if (!item->embed) item->ensure_embed(flex_layout->lycon);
-    item->embed->img = load_image(flex_layout->lycon->ui_context, src);
+    layout_ensure_replaced_image_surface(
+        flex_layout->lycon, lam::view_as_block(item), item);
     if (item->embedp()->img && item->embedp()->img->format == IMAGE_FORMAT_SVG) {
         item->embedp()->img->max_render_width = (int)main_size; // INT_CAST_OK: image API expects int.
         if (cross_size >= 0) {
@@ -2701,11 +2690,7 @@ float apply_stretch_constraint(
 }
 
 static bool flex_item_has_direct_text_content(ViewElement* item) {
-    if (!item) return false;
-    for (DomNode* child = item->first_child; child; child = child->next_sibling) {
-        if (layout_text_node_has_content(child)) return true;
-    }
-    return false;
+    return item && layout_element_has_direct_text_content(item->as_element());
 }
 
 static float flex_item_direct_text_baseline(ViewElement* item, float fallback_ascender) {

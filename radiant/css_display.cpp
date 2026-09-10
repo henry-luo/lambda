@@ -61,14 +61,8 @@ bool css_display_element_is_replaced(DomElement* dom_elem) {
     if (!dom_elem) return false;
     // HTML §4.8.7/§4.8.9: these elements use replaced display internals when
     // their HTML conditions make them replaced.
-    static const NameId replaced_tags[] = {
-        MARKUP_NAME_IMG, MARKUP_NAME_VIDEO, MARKUP_NAME_INPUT, MARKUP_NAME_SELECT,
-        MARKUP_NAME_TEXTAREA, MARKUP_NAME_IFRAME, MARKUP_NAME_HR, MARKUP_NAME_SVG,
-        MARKUP_NAME_METER, MARKUP_NAME_PROGRESS, MARKUP_NAME_CANVAS,
-        MARKUP_NAME_WEBVIEW, MARKUP_NAME_EMBED};
     NameId tag_id = dom_elem->tag_id;
-    bool is_replaced = layout_tag_in_list(
-        tag_id, replaced_tags, sizeof(replaced_tags) / sizeof(*replaced_tags)) ||
+    bool is_replaced = layout_tag_is_css_replaced(tag_id) ||
         (tag_id == MARKUP_NAME_OBJECT && dom_elem->get_attribute(MARKUP_NAME_DATA)) ||
         (tag_id == MARKUP_NAME_AUDIO && dom_elem->has_attribute(MARKUP_NAME_CONTROLS));
     if (dom_elem->specified_style) {

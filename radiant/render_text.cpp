@@ -892,8 +892,8 @@ static int collect_skip_ink_gaps(RenderContext* rdcon, unsigned char* str,
     int gap_count = 0;
     float pad = fmaxf(2.0f, (deco_y_bot - deco_y_top));
 
-    unsigned char* p = str + text_rect->start_index;
-    unsigned char* end = p + text_rect->length;
+    const unsigned char* p = str + text_rect->start_index;
+    const unsigned char* end = p + text_rect->length;
     FontStyleDesc sd = font_style_desc_from_prop(rdcon->font.style);
 
     while (p < end && gap_count < max_gaps) {
@@ -904,12 +904,7 @@ static int collect_skip_ink_gaps(RenderContext* rdcon, unsigned char* str,
         }
 
         uint32_t codepoint;
-        int bytes = str_utf8_decode((const char*)p, (size_t)(end - p), &codepoint);
-        if (bytes <= 0) {
-            p++;
-            continue;
-        }
-        p += bytes;
+        if (!layout_utf8_next_codepoint(&p, end, &codepoint)) continue;
         if (codepoint == 0x00AD || text_codepoint_has_zero_advance(codepoint)) continue;
 
         LoadedGlyph* glyph = font_load_glyph(font_box_handle(&rdcon->font), &sd, codepoint, true);

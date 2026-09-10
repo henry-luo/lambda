@@ -1,0 +1,16 @@
+string 0 1 1 4 1 true
+string 1 1 1 4 1 true
+string 2 0 2 2 0 true
+string 3 0 3 3 0 true
+string 4 2 2 2 -1 true
+string 5 0 0 0 0 true
+bounds 0 3 0 -1
+surrogates 0 1 4 3 true true
+positions -1 0 0 true true true
+missing 0 0 true true true
+coercion 1 search,position
+buffer 0 3 3 0
+byte 1 4 4 true
+empty-needle 0 4 4
+utf16-buffer 2 6
+absent -1 -1 -1

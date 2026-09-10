@@ -17,52 +17,22 @@
  * Returns CONTENT-AREA dimensions (without border/padding).
  * The layout code adds actual CSS-resolved border/padding on top.
  */
-struct FixedInputIntrinsicSize {
-    const char* type;
-    float width;
-    float height;
-};
-
-static bool form_input_uses_editable_line_baseline(const FormControlProp* form) {
-    if (!form || !form->input_type || !*form->input_type) return true;
-    const char* type = form->input_type;
-    return strcmp(type, "text") == 0 || strcmp(type, "password") == 0 ||
-        strcmp(type, "email") == 0 || strcmp(type, "url") == 0 ||
-        strcmp(type, "search") == 0 || strcmp(type, "tel") == 0 ||
-        strcmp(type, "number") == 0;
-}
-
-static const FixedInputIntrinsicSize* fixed_input_intrinsic_size(
-    const FormControlProp* form) {
-    if (!form || !form->input_type) return nullptr;
-    static const FixedInputIntrinsicSize sizes[] = {
-        // Chromium's native date/time editors retain fractional CSS-pixel
-        // field metrics that differ from the generic text-control box.
-        {"date", 121.33f, 17.33f},
-        {"time", 100.0f, 20.0f},
-        {"month", 151.33f, 17.33f},
-        {"week", 143.33f, 17.33f},
-        {"color", 44.0f, 23.0f},
-    };
-    for (const FixedInputIntrinsicSize& size : sizes) {
-        if (strcmp(form->input_type, size.type) == 0) {
-            return &size;
-        }
-    }
-    return nullptr;
-}
-
 bool form_input_uses_fixed_intrinsic_size(const FormControlProp* form) {
-    if (!form || !form->input_type) return false;
-    return strcmp(form->input_type, "datetime-local") == 0 ||
-        fixed_input_intrinsic_size(form) != nullptr;
+    return form && (form_input_kind_is(form->input_type,
+                 FORM_INPUT_KIND_DATETIME_LOCAL) ||
+        form_input_has_capability(form->input_type,
+            FORM_INPUT_CAP_FIXED_INTRINSIC_SIZE));
 }
 
 static bool apply_fixed_input_intrinsic_size(FormControlProp* form) {
-    const FixedInputIntrinsicSize* size = fixed_input_intrinsic_size(form);
-    if (!size) return false;
-    form->intrinsic_width = size->width;
-    form->intrinsic_height = size->height;
+    if (!form) return false;
+    const FormInputDescriptor* descriptor =
+        form_input_descriptor(form->input_type);
+    if (!(descriptor->capabilities & FORM_INPUT_CAP_FIXED_INTRINSIC_SIZE)) {
+        return false;
+    }
+    form->intrinsic_width = descriptor->fixed_intrinsic_width;
+    form->intrinsic_height = descriptor->fixed_intrinsic_height;
     return true;
 }
 
@@ -315,7 +285,8 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
     // These are content-area widths (border-box minus 6px border+padding).
     // Chrome renders these at specific widths based on their picker format.
     if (form->input_type) {
-        if (strcmp(form->input_type, "datetime-local") == 0) {
+        if (form_input_kind_is(form->input_type,
+                FORM_INPUT_KIND_DATETIME_LOCAL)) {
             form->intrinsic_width = datetime_local_intrinsic_content_width(block, form);
             form->intrinsic_height = 17.0f;
             return;
@@ -450,8 +421,12 @@ const char* form_button_label_text(ViewBlock* block, FormControlProp* form) {
         text = block->get_attribute("value");
     }
     if ((!text || !*text) && form && form->input_type) {
-        if (strcmp(form->input_type, "submit") == 0) return "Submit";
-        if (strcmp(form->input_type, "reset") == 0) return "Reset";
+        if (form_input_kind_is(form->input_type, FORM_INPUT_KIND_SUBMIT)) {
+            return "Submit";
+        }
+        if (form_input_kind_is(form->input_type, FORM_INPUT_KIND_RESET)) {
+            return "Reset";
+        }
     }
     return text;
 }
@@ -605,6 +580,37 @@ float layout_select_option_text_width(LayoutContext* lycon, DomElement* select,
     return max_text_width;
 }
 
+bool layout_measure_select_intrinsic(LayoutContext* lycon, ViewBlock* block,
+                                     SelectIntrinsicMeasure* out) {
+    if (!lycon || !block || !block->is_element() || !out) return false;
+    DomElement* select = block->as_element();
+    if (select->tag() != MARKUP_NAME_SELECT) return false;
+
+    FormControlProp* form = block->form;
+    bool is_listbox = form && (form->multiple || form->select_size > 1);
+    bool appearance_none = form && form->appearance_none;
+    if (!form) {
+        CssDeclaration* appearance = dom_element_get_specified_value(
+            select, CSS_PROPERTY_APPEARANCE);
+        appearance_none = appearance && appearance->value &&
+            appearance->value->type == CSS_VALUE_TYPE_KEYWORD &&
+            appearance->value->data.keyword == CSS_VALUE_NONE;
+    }
+
+    out->min_width = layout_select_option_text_width(lycon, select, true);
+    out->max_width = layout_select_option_text_width(lycon, select, false);
+    out->min_excludes_padding = false;
+    if (is_listbox) {
+        out->width = FormDefaults::SELECT_WIDTH;
+        return true;
+    }
+
+    out->width = layout_select_combo_intrinsic_width(
+        out->max_width, !appearance_none);
+    out->min_excludes_padding = appearance_none;
+    return true;
+}
+
 static int layout_select_selected_count(DomElement* select) {
     int selected_count = 0;
     for (DomElement* option = dom_select_next_option(select, nullptr); option;
@@ -653,6 +659,18 @@ static float layout_select_listbox_row_height(bool has_visible_content) {
     return !has_visible_content
         ? FormDefaults::SELECT_EMPTY_LISTBOX_ROW_HEIGHT
         : FormDefaults::SELECT_OPTION_ROW_HEIGHT;
+}
+
+static bool layout_select_has_visible_content(DomElement* select) {
+    if (!select) return false;
+    for (DomNode* child = select->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        DomElement* element = child->as_element();
+        if ((element->tag() == MARKUP_NAME_OPTION ||
+             element->tag() == MARKUP_NAME_OPTGROUP) &&
+            !layout_select_child_is_hidden(element)) return true;
+    }
+    return false;
 }
 
 /**
@@ -705,19 +723,7 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
         }
 
         BoxMetrics box = layout_box_metrics(block);
-        bool has_visible_option = false;
-        bool has_visible_optgroup = false;
-        for (DomNode* child = block->first_child; child; child = child->next_sibling) {
-            if (!child->is_element()) continue;
-            DomElement* elem = child->as_element();
-            if (elem->tag() == MARKUP_NAME_OPTION) {
-                if (!layout_select_child_is_hidden(elem)) has_visible_option = true;
-            } else if (elem->tag() == MARKUP_NAME_OPTGROUP &&
-                       !layout_select_child_is_hidden(elem)) {
-                has_visible_optgroup = true;
-            }
-        }
-        bool has_visible_content = has_visible_option || has_visible_optgroup;
+        bool has_visible_content = layout_select_has_visible_content(block->as_element());
         float row_height = layout_select_listbox_row_height(has_visible_content);
         if (!has_visible_content) {
             // With no option content, the native listbox contributes only its
@@ -835,7 +841,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
     FormControlProp* form = block->form;
     FontProp* font = block->font ? block->font : lycon->font.style;
     bool textarea_needs_baseline_set =
-        form->control_type == FORM_CONTROL_TEXTAREA &&
+        form_control_is_textarea(form) &&
         radiant::layout_uses_explicit_baseline_source(block);
     if (textarea_needs_baseline_set) {
         // Textarea children are its default value, not ordinary layout children.
@@ -952,8 +958,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
     // listbox selects have no such single internal line and keep the replaced baseline.
     bool is_single_line_select = form->control_type == FORM_CONTROL_SELECT &&
         !form->multiple && form->select_size <= 1;
-    if (form->control_type == FORM_CONTROL_TEXT ||
-        form->control_type == FORM_CONTROL_TEXTAREA ||
+    if (form_control_is_text_editable(form) ||
         form->control_type == FORM_CONTROL_BUTTON ||
         is_single_line_select) {
         float border_top = (block->bound && block->boundary_mut()->border) ? block->boundary_mut()->border->width.top : 0;
@@ -987,7 +992,8 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                 internal_baseline = border_top + pad_top + font_ascender;
             }
             internal_baseline = min(internal_baseline, block->height);
-            if (form_input_uses_editable_line_baseline(form)) {
+            if (form_input_has_capability(form->input_type,
+                    FORM_INPUT_CAP_TEXT_CONTROL)) {
                 form->first_text_baseline = internal_baseline;
                 form->last_text_baseline = internal_baseline;
                 // CSS Inline: editable text controls export their internal line
@@ -1050,16 +1056,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
             padding.left - padding.right;
         if (option_width < 0) option_width = 0;
 
-        bool has_visible_content = false;
-        for (DomNode* child = block->first_child; child; child = child->next_sibling) {
-            if (!child->is_element()) continue;
-            DomElement* elem = child->as_element();
-            if ((elem->tag() == MARKUP_NAME_OPTION || elem->tag() == MARKUP_NAME_OPTGROUP) &&
-                !layout_select_child_is_hidden(elem)) {
-                has_visible_content = true;
-                break;
-            }
-        }
+        bool has_visible_content = layout_select_has_visible_content(block->as_element());
         float row_height = layout_select_listbox_row_height(has_visible_content);
         // hr margin-top per UA stylesheet: 0.5em (HTML spec §10 / Chrome UA)
         float fs = (font && font->font_size > 0) ? font->font_size : 13.333f;

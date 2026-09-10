@@ -13,6 +13,9 @@
 > effect-based hoisting and additional lane coverage remain proposals.
 > Tasks 3 and 4 continue with [native completion, recursion and scalar ownership](impl/Lambda_Impl_JS2_Calls_Ownership.md)
 > against `fa254c56b`; that record owns their validation and measurement status.
+> Tasks 5–7 implement [shared scalar analysis, callable-definition lookup and search leaves](impl/Lambda_Impl_JS2_Analysis_Code_Leaf.md)
+> against `6460b0f51`, including common indexed class-field initializer construction.
+> That record states the measured scope and the remaining wider proposals.
 >
 > **Relationship to earlier work.** JSCU9–JSCU35 established or proposed shared
 > ownership for roots, capsules, activations, environments, resources and

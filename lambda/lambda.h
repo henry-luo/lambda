@@ -1717,9 +1717,9 @@ static inline bool is_numeric_type_id(TypeId type_id) {
 // Can a value of this DECLARED type ever be a wide scalar — one that needs a
 // number home (v1) or the companion lane (v3)? Everything else is inline,
 // pointer-backed or a container, and so needs no rehoming at any boundary.
-// This is the single source of the "NONE" decision: the emitter's
-// `em_scalar_return_class_for_type()` defers to it, and the C-side sys-func
-// metadata fallback in mir.c uses it directly, so the two cannot drift.
+// This is the single source of the "NONE" decision: the shared
+// `jit_scalar_return_class_for_type()` uses it for both emission and the
+// C-side sys-func metadata fallback, so the two cannot drift.
 static inline bool lambda_type_id_may_be_wide_scalar(TypeId type_id) {
     return type_id == LMD_TYPE_FLOAT ||
            type_id == LMD_TYPE_INT64 || type_id == LMD_TYPE_UINT64 ||

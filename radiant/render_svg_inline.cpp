@@ -6,6 +6,7 @@
  */
 
 #include "render.hpp"
+#include "layout.hpp"
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/tagged.hpp"
@@ -3259,10 +3260,8 @@ static bool render_svg_text_with_radiant_glyphs(SvgInlineRenderContext* ctx, con
     const unsigned char* cursor = (const unsigned char*)text;
     const unsigned char* end = cursor + strlen(text);
     while (cursor < end) {
-        uint32_t codepoint;
-        int bytes = str_utf8_decode((const char*)cursor, (size_t)(end - cursor), &codepoint);
-        if (bytes <= 0) { cursor++; continue; }
-        cursor += bytes;
+        uint32_t codepoint = 0;
+        if (!layout_utf8_next_codepoint(&cursor, end, &codepoint)) continue;
         LoadedGlyph* glyph = font_load_glyph(handle, &style, codepoint, false);
         if (glyph) natural_width += glyph->advance_x;
     }
@@ -3296,10 +3295,8 @@ static bool render_svg_text_with_radiant_glyphs(SvgInlineRenderContext* ctx, con
 
     cursor = (const unsigned char*)text;
     while (cursor < end) {
-        uint32_t codepoint;
-        int bytes = str_utf8_decode((const char*)cursor, (size_t)(end - cursor), &codepoint);
-        if (bytes <= 0) { cursor++; continue; }
-        cursor += bytes;
+        uint32_t codepoint = 0;
+        if (!layout_utf8_next_codepoint(&cursor, end, &codepoint)) continue;
         LoadedGlyph* glyph = font_load_glyph(handle, &style, codepoint, false);
         if (!glyph) continue;
         float glyph_advance = glyph->advance_x;
@@ -5058,19 +5055,7 @@ static bool svg_subscene_attr_name_equals(ShapeEntry* field, const char* name) {
 }
 
 static int svg_subscene_pdf_image_id_from_href(const char* href) {
-    if (!href) return 0;
-    const char* prefix = "img:";
-    size_t prefix_len = strlen(prefix);
-    if (strncmp(href, prefix, prefix_len) != 0) return 0;
-    const char* p = href + prefix_len;
-    if (!*p) return 0;
-    int value = 0;
-    while (*p) {
-        if (*p < '0' || *p > '9') return 0;
-        value = value * 10 + (*p - '0');
-        p++;
-    }
-    return value;
+    return svg_pdf_image_id_from_href(href);
 }
 
 static const char* svg_subscene_resolve_image_href(Element* root, const char* href) {

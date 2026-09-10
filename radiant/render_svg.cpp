@@ -21,7 +21,6 @@ extern "C" {
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
-#include <png.h>
 #include <cctype>
 #include <cwctype>
 
@@ -130,62 +129,6 @@ static void svg_lower_paint_list(SvgRenderContext* ctx) {
     paint_list_clear(&ctx->paint_list);
 }
 
-static void svg_png_write_to_strbuf(png_structp png_ptr,
-                                    png_bytep data,
-                                    png_size_t length) {
-    StrBuf* out = (StrBuf*)png_get_io_ptr(png_ptr);
-    if (!out || !data || length == 0) return;
-    if (!strbuf_ensure_cap(out, out->length + length + 1)) return;
-    memcpy(out->str + out->length, data, length);
-    out->length += length;
-    out->str[out->length] = '\0';
-}
-
-static StrBuf* svg_encode_surface_png(ImageSurface* surface) {
-    if (!surface || !surface->pixels || surface->width <= 0 || surface->height <= 0) {
-        return nullptr;
-    }
-    StrBuf* png_bytes = strbuf_new_cap((size_t)surface->width * (size_t)surface->height);
-    png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-    if (!png_ptr) {
-        strbuf_free(png_bytes);
-        return nullptr;
-    }
-    png_infop info_ptr = png_create_info_struct(png_ptr);
-    if (!info_ptr) {
-        png_destroy_write_struct(&png_ptr, NULL);
-        strbuf_free(png_bytes);
-        return nullptr;
-    }
-    if (setjmp(png_jmpbuf(png_ptr))) {
-        png_destroy_write_struct(&png_ptr, &info_ptr);
-        strbuf_free(png_bytes);
-        return nullptr;
-    }
-
-    png_set_write_fn(png_ptr, png_bytes, svg_png_write_to_strbuf, NULL);
-    png_set_IHDR(png_ptr, info_ptr, surface->width, surface->height,
-                 8, PNG_COLOR_TYPE_RGBA, PNG_INTERLACE_NONE,
-                 PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
-    png_write_info(png_ptr, info_ptr);
-
-    png_bytep* rows = (png_bytep*)mem_alloc(sizeof(png_bytep) * surface->height, MEM_CAT_RENDER);
-    if (!rows) {
-        png_destroy_write_struct(&png_ptr, &info_ptr);
-        strbuf_free(png_bytes);
-        return nullptr;
-    }
-    for (int y = 0; y < surface->height; y++) {
-        rows[y] = (png_bytep)((uint8_t*)surface->pixels + y * surface->pitch);
-    }
-    png_write_image(png_ptr, rows);
-    png_write_end(png_ptr, NULL);
-
-    mem_free(rows);
-    png_destroy_write_struct(&png_ptr, &info_ptr);
-    return png_bytes;
-}
-
 static void svg_append_base64(StrBuf* out, const uint8_t* data, size_t len) {
     if (!out || !data) return;
     char* b64 = base64_encode_alloc(data, len, BASE64_STD);
@@ -200,7 +143,7 @@ static bool svg_emit_raster_fallback_image(SvgRenderContext* ctx,
                                            float y,
                                            float width,
                                            float height) {
-    StrBuf* png_bytes = svg_encode_surface_png(surface);
+    StrBuf* png_bytes = render_encode_surface_png(surface);
     if (!png_bytes) return false;
     svg_indent(ctx);
     strbuf_append_format(ctx->svg_content,
@@ -454,59 +397,6 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     if (text_rect) { goto NEXT_RECT; }
 }
 
-// ── SVG rounded-rect path helper ─────────────────────────────────────────────
-
-// Kappa constant for circular arcs using cubic Bézier curves
-#define SVG_KAPPA 0.5522847498f
-
-/**
- * Append SVG path data for a rounded rectangle with per-corner radii.
- * Uses cubic Bézier curves (C commands) matching the raster backend's
- * build_rounded_rect_path() logic.
- */
-static void svg_append_rounded_rect_path(StrBuf* buf, float x, float y, float w, float h,
-                                          float r_tl, float r_tr, float r_br, float r_bl) {
-    // start after top-left corner arc
-    strbuf_append_format(buf, "M%.2f,%.2f", x + r_tl, y);
-    // top edge
-    strbuf_append_format(buf, " L%.2f,%.2f", x + w - r_tr, y);
-    // top-right corner
-    if (r_tr > 0) {
-        strbuf_append_format(buf, " C%.2f,%.2f %.2f,%.2f %.2f,%.2f",
-            x + w - r_tr + r_tr * SVG_KAPPA, y,
-            x + w, y + r_tr - r_tr * SVG_KAPPA,
-            x + w, y + r_tr);
-    }
-    // right edge
-    strbuf_append_format(buf, " L%.2f,%.2f", x + w, y + h - r_br);
-    // bottom-right corner
-    if (r_br > 0) {
-        strbuf_append_format(buf, " C%.2f,%.2f %.2f,%.2f %.2f,%.2f",
-            x + w, y + h - r_br + r_br * SVG_KAPPA,
-            x + w - r_br + r_br * SVG_KAPPA, y + h,
-            x + w - r_br, y + h);
-    }
-    // bottom edge
-    strbuf_append_format(buf, " L%.2f,%.2f", x + r_bl, y + h);
-    // bottom-left corner
-    if (r_bl > 0) {
-        strbuf_append_format(buf, " C%.2f,%.2f %.2f,%.2f %.2f,%.2f",
-            x + r_bl - r_bl * SVG_KAPPA, y + h,
-            x, y + h - r_bl + r_bl * SVG_KAPPA,
-            x, y + h - r_bl);
-    }
-    // left edge
-    strbuf_append_format(buf, " L%.2f,%.2f", x, y + r_tl);
-    // top-left corner
-    if (r_tl > 0) {
-        strbuf_append_format(buf, " C%.2f,%.2f %.2f,%.2f %.2f,%.2f",
-            x, y + r_tl - r_tl * SVG_KAPPA,
-            x + r_tl - r_tl * SVG_KAPPA, y,
-            x + r_tl, y);
-    }
-    strbuf_append_str(buf, " Z");
-}
-
 /**
  * Convenience: test whether a border has any non-zero corner radius.
  */
@@ -694,11 +584,9 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
                 svg_lower_paint_list(ctx);
             } else {
                 Rect rect = {x, y, width, height};
-                Corner radius_shape = {};
-                for (int corner = 0; corner < 4; corner++) {
-                    radius_shape.horizontal[corner] = border->radius.horizontal[corner];
-                    radius_shape.vertical[corner] = border->radius.horizontal[corner];
-                }
+                Corner radius_shape = render_path_uniform_corner(
+                    border->radius.horizontal[0], border->radius.horizontal[1],
+                    border->radius.horizontal[2], border->radius.horizontal[3]);
                 RdtPath* path = render_path_create_rounded_rect(rect, &radius_shape);
                 paint_fill_path(svg_active_paint_list(ctx), path, view->boundary()->background->color,
                                 RDT_FILL_WINDING, nullptr);
@@ -879,9 +767,11 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
             str_fmt(clip_id, sizeof(clip_id), "border-clip-%lx", (unsigned long)(uintptr_t)view);
             svg_indent(ctx);
             strbuf_append_format(ctx->svg_content, "<defs><clipPath id=\"%s\"><path d=\"", clip_id);
-            svg_append_rounded_rect_path(ctx->svg_content, x, y, width, height,
+            Corner radius = render_path_uniform_corner(
                 border->radius.top_left, border->radius.top_right,
                 border->radius.bottom_right, border->radius.bottom_left);
+            render_path_append_svg_rounded_rect(
+                ctx->svg_content, {x, y, width, height}, &radius);
             strbuf_append_str(ctx->svg_content, "\"/></clipPath></defs>\n");
             svg_indent(ctx);
             strbuf_append_format(ctx->svg_content, "<g clip-path=\"url(#%s)\">\n", clip_id);
@@ -934,7 +824,9 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
                 float r_br = fmaxf(0, border->radius.bottom_right + expand);
                 float r_bl = fmaxf(0, border->radius.bottom_left + expand);
                 strbuf_append_format(ctx->svg_content, "<path d=\"");
-                svg_append_rounded_rect_path(ctx->svg_content, ox, oy, ow, oh, r_tl, r_tr, r_br, r_bl);
+                Corner radius = render_path_uniform_corner(r_tl, r_tr, r_br, r_bl);
+                render_path_append_svg_rounded_rect(
+                    ctx->svg_content, {ox, oy, ow, oh}, &radius);
                 strbuf_append_format(ctx->svg_content,
                     "\" fill=\"none\" stroke=\"%s\" stroke-width=\"%.1f\"%s />\n",
                     outline_color, outline->width, dash_attr);

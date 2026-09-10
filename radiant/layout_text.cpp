@@ -462,8 +462,10 @@ static int count_justify_opportunities_impl(const char* str, int len,
 
     while (str < end) {
         uint32_t cp;
-        int bytes = str_utf8_decode(str, (size_t)(end - str), &cp);
-        if (bytes <= 0) { str++; prev_was_id = false; continue; }
+        if (!layout_utf8_next_codepoint(&str, end, &cp)) {
+            prev_was_id = false;
+            continue;
+        }
 
         bool ascii_space = cp <= 0x7F && is_space((char)cp);
         if (collapse_spaces && ascii_space) {
@@ -495,8 +497,6 @@ static int count_justify_opportunities_impl(const char* str, int len,
             ends_in_collapsible_space = false;
             prev_was_id = false;
         }
-
-        str += bytes;
     }
 
     if (trim_trailing_space && ends_in_collapsible_space && count > 0) count--;
@@ -953,15 +953,13 @@ bool layout_get_grapheme_cluster_bytes(const unsigned char* cluster_start,
     bool has_extension = false;
     while (cursor < text_end) {
         uint32_t current = 0;
-        int bytes = str_utf8_decode(
-            (const char*)cursor, (size_t)(text_end - cursor), &current);
-        if (bytes <= 0 || utf8proc_grapheme_break(
+        if (!layout_utf8_next_codepoint(&cursor, text_end, &current) ||
+            utf8proc_grapheme_break(
                 (utf8proc_int32_t)previous, (utf8proc_int32_t)current)) {
             break;
         }
         has_extension = true;
         previous = current;
-        cursor += bytes;
     }
     if (!has_extension) return false;
 
@@ -992,9 +990,7 @@ bool layout_measure_grapheme_cluster_advance(
     float raster_scale = ui_context_raster_scale(lycon->ui_context);
     while (cursor < cluster_end) {
         uint32_t codepoint = 0;
-        int bytes = str_utf8_decode(
-            (const char*)cursor, (size_t)(cluster_end - cursor), &codepoint);
-        if (bytes <= 0) return false;
+        if (!layout_utf8_next_codepoint(&cursor, cluster_end, &codepoint)) return false;
         // emoji, bidi, and autospace paths keep their own script-boundary and
         // fallback state; replacing them with one generic cluster advance
         // would discard those semantic boundaries.
@@ -1015,7 +1011,6 @@ bool layout_measure_grapheme_cluster_advance(
                 if (advance > fallback_width) fallback_width = advance;
             }
         }
-        cursor += bytes;
     }
     if (fallback_width > extents.width) extents.width = fallback_width;
     if (extents.width <= 0.0f) return false;
@@ -1098,7 +1093,7 @@ static uint32_t peek_next_inline_codepoint(DomNode* node) {
  *
  * Reference: Unicode Standard, Chapter 6 "Writing Systems and Punctuation"
  */
-static inline float get_unicode_space_width_em(uint32_t codepoint) {
+float text_unicode_space_width_em(uint32_t codepoint) {
     if (text_codepoint_has_zero_advance(codepoint)) return -1.0f;
 
     switch (codepoint) {
@@ -1216,15 +1211,12 @@ uint8_t layout_text_autospace_flags(LayoutContext* lycon,
 
 bool layout_text_contains_rtl_codepoint(const char* text, size_t length) {
     if (!text || length == 0) return false;
-    for (size_t offset = 0; offset < length;) {
+    const char* cursor = text;
+    const char* end = text + length;
+    while (cursor < end) {
         uint32_t codepoint = 0;
-        int bytes = str_utf8_decode(text + offset, length - offset, &codepoint);
-        if (bytes <= 0) {
-            offset++;
-            continue;
-        }
+        if (!layout_utf8_next_codepoint(&cursor, end, &codepoint)) continue;
         if (utf_bidi_strong_class(codepoint) == 1) return true;
-        offset += (size_t)bytes;
     }
     return false;
 }
@@ -1388,9 +1380,8 @@ bool layout_measure_bidi_run(LayoutContext* lycon,
     bool has_rtl_codepoint = false;
     while (cursor < text_end) {
         uint32_t codepoint = 0;
-        int bytes = str_utf8_decode(
-            (const char*)cursor, (size_t)(text_end - cursor), &codepoint);
-        if (bytes <= 0 || is_space(codepoint) || codepoint == 0x000A ||
+        if (!layout_utf8_next_codepoint(&cursor, text_end, &codepoint) ||
+            is_space(codepoint) || codepoint == 0x000A ||
             codepoint == 0x000D) {
             break;
         }
@@ -1401,7 +1392,6 @@ bool layout_measure_bidi_run(LayoutContext* lycon,
         if (!first_codepoint) first_codepoint = codepoint;
         last_codepoint = codepoint;
         has_rtl_codepoint = has_rtl_codepoint || strong_class == 1;
-        cursor += bytes;
     }
     if (!has_rtl_codepoint || cursor == str) return false;
 
@@ -2856,7 +2846,7 @@ static float measure_first_word_width(LayoutContext* lycon, const unsigned char*
         word_start = false;
 
         float char_width;
-        float unicode_space_em = get_unicode_space_width_em(codepoint);
+        float unicode_space_em = text_unicode_space_width_em(codepoint);
         if (unicode_space_em < 0.0f) {
             str += char_bytes;
             continue;
@@ -2958,7 +2948,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
             has_break_opportunity = true;
         }
 
-        float unicode_space_em = get_unicode_space_width_em(codepoint);
+        float unicode_space_em = text_unicode_space_width_em(codepoint);
         if (unicode_space_em < 0.0f) {
             if (codepoint == 0x200B) return RDT_LINE_NOT_FILLED;
             str += char_bytes;
@@ -3814,6 +3804,19 @@ static void discard_uncommitted_text_rect(ViewText* text, TextRect* rect) {
     if (prev) prev->next = nullptr;
 }
 
+static void commit_text_overflow_break(LayoutContext* lycon, ViewText* text_view,
+                                       TextRect* rect, unsigned char* str,
+                                       unsigned char* text_start, float advance) {
+    rect->width -= advance;
+    int text_len = str - text_start - rect->start_index;
+    if (text_len > 0) {
+        output_text(lycon, text_view, rect, text_len, rect->width);
+    } else {
+        discard_uncommitted_text_rect(text_view, rect);
+    }
+    line_break(lycon);
+}
+
 static bool clear_initial_letter_continuation(LayoutContext* lycon) {
     if (!lycon || lycon->block.initial_letter_continuation_cleared) return false;
 
@@ -4322,7 +4325,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             }
             is_word_start = false;  // No longer at word start
 
-            float unicode_space_em = get_unicode_space_width_em(codepoint);
+            float unicode_space_em = text_unicode_space_width_em(codepoint);
             if (unicode_space_em < 0.0f) {
                 if (codepoint == 0x200B && wrap_lines) {
                     str = next_ch;
@@ -4677,14 +4680,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     if (break_word && !lycon->line.is_line_start) {
                         float full_line_width = lycon->line.right - lycon->line.left;
                         if (rect->width - wd > full_line_width) {
-                            rect->width -= wd;  // undo the char that overflowed
-                            int text_len = str - text_start - rect->start_index;
-                            if (text_len > 0) {
-                                output_text(lycon, text_view, rect, text_len, rect->width);
-                            } else {
-                                discard_uncommitted_text_rect(text_view, rect);
-                            }
-                            line_break(lycon);
+                            commit_text_overflow_break(
+                                lycon, text_view, rect, str, text_start, wd);
                             goto LAYOUT_TEXT;
                         }
                         str = text_start + rect->start_index;  // rewind to text start
@@ -4726,14 +4723,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 goto LAYOUT_TEXT;
             }
             else if (break_word && !lycon->line.is_line_start) {
-                rect->width -= wd;  // undo the char that overflowed
-                int text_len = str - text_start - rect->start_index;
-                if (text_len > 0) {
-                    output_text(lycon, text_view, rect, text_len, rect->width);
-                } else {
-                    discard_uncommitted_text_rect(text_view, rect);
-                }
-                line_break(lycon);
+                // undo the char that overflowed
+                commit_text_overflow_break(
+                    lycon, text_view, rect, str, text_start, wd);
                 goto LAYOUT_TEXT;
             }
             // else cannot break and no float intrusion, continue the flow in current line
