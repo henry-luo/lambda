@@ -42,6 +42,7 @@ extern "C" bool js_promise_vmap_is(Item value);
 #include "../../lib/base64.h"
 #include "../../lib/escape.h"
 #include "../../lib/log.h"
+#include "../../lib/time_util.h"
 #include "../../lib/utf.h"
 #include <assert.h>
 #include <limits.h>
@@ -62,6 +63,7 @@ extern "C" Item js_get_typed_array_base();
 extern "C" uint64_t js_get_heap_epoch(void);
 extern "C" Item js_get_process_object_value(void);
 extern "C" Item js_get_buffer_namespace(void);
+extern "C" Item js_get_intl_object_value(void);
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
 
 static bool js_string_exotic_index_in_range(Item obj, String* key);
@@ -89,7 +91,24 @@ static const JsLazyGlobalSpec js_lazy_host_globals[] = {
     {"process", 7, js_get_process_object_value},
     {"Buffer", 6, js_get_buffer_namespace},
     {"crypto", 6, js_get_jube_crypto_namespace},
+    {"Math", 4, js_get_math_object_value},
+    {"JSON", 4, js_get_json_object_value},
+    {"Intl", 4, js_get_intl_object_value},
+    {"Reflect", 7, js_get_reflect_object_value},
+    {"Atomics", 7, js_get_atomics_object_value},
+    {"console", 7, js_get_console_object_value},
+    {"CSS", 3, js_get_css_object_value},
 };
+
+static Item js_publish_lazy_global(Item object, Item key, Item value) {
+    JS_ROOTS(roots, object_root, object, key_root, key, value_root, value);
+    if (item_is_error(value_root.get())) return value_root.get();
+    // publish through storage: OrdinarySet would read the marker's descriptor
+    // and recursively resolve it before the complete object is installed.
+    JS_ASSIGN_OR_RETURN(stored, js_define_own_key_storage(object_root.get(),
+        key_root.get(), value_root.get()));
+    return value_root.get();
+}
 
 static void js_install_lazy_host_globals(Item global) {
     for (size_t i = 0;
@@ -148,10 +167,6 @@ extern "C" bool js_resolve_lazy_global(Item object, Item key, Item* out_value) {
             continue;
         }
         value_root.set(spec->build());
-        if (item_is_error(value_root.get())) {
-            if (out_value) *out_value = value_root.get();
-            return true;
-        }
         // The own slot, rather than a miss hook, owns lazy namespace identity.
         // Publish only after the whole object exists so re-entrant reads never
         // observe a partially installed process/Buffer/crypto namespace.
@@ -159,9 +174,18 @@ extern "C" bool js_resolve_lazy_global(Item object, Item key, Item* out_value) {
         // OrdinarySet would inspect its descriptor, read the marker again,
         // and recursively re-enter this resolver before the slot changes
         // (D4.6.1v2).
-        Item status = js_define_own_key_storage(object_root.get(),
-            key_root.get(), value_root.get());
-        if (item_is_error(status)) value_root.set(status);
+        value_root.set(js_publish_lazy_global(object_root.get(), key_root.get(),
+            value_root.get()));
+        if (out_value) *out_value = value_root.get();
+        return true;
+    }
+    const JsBuiltinGlobalSpec* constructor = js_builtin_global_find(
+        name->chars, (int)name->len);
+    if (constructor && constructor->kind == JS_BUILTIN_GLOBAL_CONSTRUCTOR &&
+            (constructor->flags & JS_BUILTIN_GLOBAL_INSTALL)) {
+        value_root.set(js_get_constructor(key_root.get()));
+        value_root.set(js_publish_lazy_global(object_root.get(), key_root.get(),
+            value_root.get()));
         if (out_value) *out_value = value_root.get();
         return true;
     }
@@ -8832,6 +8856,46 @@ static int js_for_in_seen_compare(const void* a, const void* b, void*) {
     return memcmp(ea->name, eb->name, (size_t)ea->len);
 }
 
+struct JsForInSeenMap {
+    HashMap* map = hashmap_new(sizeof(JsForInSeenEntry), 64, 0, 0,
+        js_for_in_seen_hash, js_for_in_seen_compare, NULL, NULL);
+    ~JsForInSeenMap() { hashmap_free(map); }
+};
+
+static Item js_for_in_reflected_keys(Item object) {
+    JS_ROOTS(roots, current_root, object, result_root, js_array_new(0),
+        keys_root, ItemNull, key_root, ItemNull, descriptor_root, ItemNull,
+        visited_root, js_array_new(0));
+    JsForInSeenMap seen;
+    if (!seen.map) return ItemError;
+    while (current_root.get().item != ITEM_NULL &&
+            get_type_id(current_root.get()) != LMD_TYPE_UNDEFINED) {
+        keys_root.set(js_reflect_own_keys(current_root.get()));
+        if (item_is_error(keys_root.get())) return keys_root.get();
+        int64_t count = js_array_length(keys_root.get());
+        for (int64_t i = 0; i < count; i++) {
+            key_root.set(js_elements_get_int(keys_root.get(), i));
+            if (get_type_id(key_root.get()) != LMD_TYPE_STRING) continue;
+            String* key = it2s(key_root.get());
+            JsForInSeenEntry entry = {key->chars, (int)key->len};
+            if (hashmap_get(seen.map, &entry)) continue;
+            descriptor_root.set(js_object_get_own_property_descriptor(
+                current_root.get(), key_root.get()));
+            if (item_is_error(descriptor_root.get())) return descriptor_root.get();
+            if (get_type_id(descriptor_root.get()) == LMD_TYPE_UNDEFINED) continue;
+            // non-enumerable keys shadow prototypes too; retain their strings
+            // because Proxy-provided key arrays can die at the next level.
+            js_array_push(visited_root.get(), key_root.get());
+            hashmap_set(seen.map, &entry);
+            JS_ASSIGN_OR_RETURN(enumerable, js_get_key_cstr(descriptor_root.get(), "enumerable"));
+            if (js_is_truthy(enumerable)) js_array_push(result_root.get(), key_root.get());
+        }
+        current_root.set(js_get_prototype_of(current_root.get()));
+        if (item_is_error(current_root.get())) return current_root.get();
+    }
+    return result_root.get();
+}
+
 // v17: for-in enumeration — walks prototype chain to collect all enumerable string keys
 extern "C" Item js_for_in_keys(Item object) {
     TypeId type = get_type_id(object);
@@ -8846,63 +8910,10 @@ extern "C" Item js_for_in_keys(Item object) {
         return js_object_keys(object);
     }
 
-    // S8.1.1/S8.1.2v2: callable and virtual object carriers enumerate their
-    // projected own keys, then the same inherited enumerable string keys.
-    if (type == LMD_TYPE_FUNC || is_virtual_container_type_id(type)) {
-        JS_ROOTS(roots,
-            object_root, object,
-            result_root, js_object_keys(object_root.get()),
-            current_root, ItemNull);
-        HashMap* seen = hashmap_new(sizeof(JsForInSeenEntry), 64, 0, 0,
-            js_for_in_seen_hash, js_for_in_seen_compare, NULL, NULL);
-        if (get_type_id(result_root.get()) == LMD_TYPE_ARRAY) {
-            for (int i = 0; i < result_root.get().array->length; i++) {
-                String* ks = it2s(result_root.get().array->items[i]);
-                if (!ks) continue;
-                JsForInSeenEntry entry;
-                js_for_in_seen_entry_set(&entry, ks->chars, (int)ks->len);
-                hashmap_set(seen, &entry);
-            }
-        }
-        current_root.set(js_get_prototype_of(object_root.get()));
-        int depth = 0;
-        while (current_root.get().item != ItemNull.item && depth < 64) {
-            TypeId current_type = get_type_id(current_root.get());
-            if (current_type != LMD_TYPE_MAP &&
-                    !js_is_js_array(current_root.get()) &&
-                    current_type != LMD_TYPE_FUNC && current_type != LMD_TYPE_ELEMENT) break;
-            Map* m = js_obj_underlying_map(current_root.get());
-            if (m && m->type) {
-                TypeMap* tm = (TypeMap*)m->type;
-                for (ShapeEntry* e = tm->shape; e; e = e->next) {
-                    const char* s = e->name->str;
-                    int len = (int)e->name->length;
-                    bool skip = js_is_engine_internal_enumeration_key(s, len);
-                    if (!skip) {
-                        JsShapeSlotStatus status = js_own_shape_slot_status(
-                            current_root.get(), s, len, NULL, NULL);
-                        if (status != JS_SHAPE_SLOT_DATA && status != JS_SHAPE_SLOT_ACCESSOR) skip = true;
-                    }
-                    if (!skip) {
-                        JsForInSeenEntry probe;
-                        js_for_in_seen_entry_set(&probe, s, len);
-                        if (!hashmap_get(seen, &probe)) {
-                            hashmap_set(seen, &probe);
-                            if (js_props_query_enumerable(m, e, s, len)) {
-                                js_array_push(result_root.get(), js_name_item(s, len));
-                            }
-                        }
-                    }
-                }
-            }
-            // Callable prototype carriers participate in the same ordinary
-            // enumeration chain; Map-only walking hid enumerable properties
-            // installed on %Function.prototype% from bound functions.
-            current_root.set(js_get_prototype_of(current_root.get()));
-            depth++;
-        }
-        hashmap_free(seen);
-        return result_root.get();
+    // reflection owns Proxy traps and projected function/host properties;
+    // unwrapping a Proxy here silently bypassed its ownKeys oracle.
+    if (type == LMD_TYPE_FUNC || is_virtual_container_type_id(type) || js_is_proxy(object)) {
+        return js_for_in_reflected_keys(object);
     }
 
     // for non-map primitives (string, number, bool): coerce
@@ -8928,11 +8939,6 @@ extern "C" Item js_for_in_keys(Item object) {
     // properties even though the backing map only stores the primitive value.
     if (js_class_id(object) == JS_CLASS_STRING) {
         return js_object_keys(object);
-    }
-
-    // Proxy: forward for-in to target (enumerate own + inherited enumerable keys)
-    if (js_is_proxy(object)) {
-        return js_for_in_keys(js_proxy_get_target(object));
     }
 
     RootFrame roots(5);
@@ -9864,18 +9870,110 @@ extern "C" Item js_assert_compare_array(Item actual, Item expected, Item message
 // =============================================================================
 // Native verifyProperty for test262 (debug builds only)
 // =============================================================================
-// Simplified native version: checks descriptor fields against
-// Object.getOwnPropertyDescriptor result. Skips destructive isWritable/
-// isConfigurable/isEnumerable checks for performance.
+// descriptor metadata alone cannot verify a Proxy's actual write/delete/ownKeys
+// behavior; run the canonical helper's observable probes through JS kernels.
+
+static Item js_test262_probe_exception(Item result) {
+    if (!item_is_error(result)) return js_status_ok();
+    JS_ROOTS(roots, error_root, js_error_lane_payload(result),
+        constructor_root, ItemNull);
+    constructor_root.set(js_get_key_cstr(js_get_global_this(), "TypeError"));
+    if (item_is_error(constructor_root.get())) return constructor_root.get();
+    JS_ASSIGN_OR_RETURN(matches, js_instanceof(error_root.get(), constructor_root.get()));
+    if (js_is_truthy(matches)) return js_status_ok();
+    return js_throw_value(js_test262_error_with_message(
+        "Expected TypeError from property probe", ItemNull));
+}
+
+static Item js_test262_property_probe(Item obj, Item name, int probe) {
+    JS_ROOTS(roots, object_root, obj, name_root, name,
+        old_root, ItemNull, value_root, ItemNull, keys_root, ItemNull);
+    if (probe == 0) { // enumeration must observe the same live for-in keys
+        bool found = get_type_id(name_root.get()) != LMD_TYPE_STRING;
+        if (!found) {
+            keys_root.set(js_for_in_keys(object_root.get()));
+            if (item_is_error(keys_root.get())) return keys_root.get();
+            for (int64_t i = 0; i < js_array_length(keys_root.get()); i++) {
+                value_root.set(js_elements_get_int(keys_root.get(), i));
+                if (js_for_in_key_is_live(object_root.get(), value_root.get()) &&
+                        it2b(js_strict_equal(value_root.get(), name_root.get()))) {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if (!found) return (Item){.item = ITEM_FALSE};
+        JS_ASSIGN_OR_RETURN(own, js_has_own_property(object_root.get(), name_root.get()));
+        if (!js_is_truthy(own)) return (Item){.item = ITEM_FALSE};
+        value_root.set(js_object_get_own_property_descriptor(object_root.get(), name_root.get()));
+        if (item_is_error(value_root.get())) return value_root.get();
+        if (get_type_id(value_root.get()) == LMD_TYPE_UNDEFINED) return (Item){.item = ITEM_FALSE};
+        return js_get_key_cstr(value_root.get(), "enumerable");
+    }
+    if (probe == 2) {
+        JS_ASSIGN_OR_RETURN(checked, js_test262_probe_exception(
+            js_delete_property(object_root.get(), name_root.get())));
+        JS_ASSIGN_OR_RETURN(own, js_has_own_property(object_root.get(), name_root.get()));
+        return (Item){.item = b2it(!js_is_truthy(own))};
+    }
+    JS_ASSIGN_OR_RETURN(is_array, js_array_is_array(object_root.get()));
+    value_root.set(js_is_truthy(is_array) && js_string_equals(name_root.get(), "length")
+        ? push_d(4294967295.0) : js_name_item("unlikelyValue"));
+    JS_ASSIGN_OR_RETURN(had_value, js_has_own_property(object_root.get(), name_root.get()));
+    bool had_own_value = js_is_truthy(had_value);
+    old_root.set(js_get_key_default(object_root.get(), name_root.get()));
+    if (item_is_error(old_root.get())) return old_root.get();
+    if (it2b(js_strict_equal(value_root.get(), old_root.get()))) {
+        value_root.set(js_add(value_root.get(), js_name_item("2")));
+        if (item_is_error(value_root.get())) return value_root.get();
+    }
+    JS_ASSIGN_OR_RETURN(checked, js_test262_probe_exception(js_set_key_policy(
+        object_root.get(), name_root.get(), value_root.get(), 0)));
+    keys_root.set(js_get_key_default(object_root.get(), name_root.get()));
+    if (item_is_error(keys_root.get())) return keys_root.get();
+    bool wrote = it2b(js_object_is(keys_root.get(), value_root.get()));
+    if (wrote) {
+        // restoration is conditional: an ignored write must not call a setter twice.
+        JS_ASSIGN_OR_RETURN(restored, had_own_value
+            ? js_set_key_policy(object_root.get(), name_root.get(), old_root.get(), 0)
+            : js_delete_property(object_root.get(), name_root.get()));
+    }
+    return (Item){.item = b2it(wrote)};
+}
+
+static Item js_test262_string(Item value) {
+    JS_ROOTS(roots, value_root, value, constructor_root, ItemNull);
+    constructor_root.set(js_get_key_cstr(js_get_global_this(), "String"));
+    if (item_is_error(constructor_root.get())) return constructor_root.get();
+    Item argument = value_root.get();
+    return js_call_function(constructor_root.get(), make_js_undefined(), &argument, 1);
+}
 
 extern "C" Item js_verify_property(Item obj, Item name, Item desc, Item options) {
+
+    JS_ROOTS(inputs, object_root, obj, name_root, name, desc_root, desc, options_root, options);
+    JS_ROOTS(roots, original_root, ItemNull, expected_root, ItemNull,
+        actual_root, ItemNull, names_root, ItemNull, key_root, ItemNull, label_root, ItemNull);
 
     Item err_name = js_name_item("Test262Error");
 
     // verifyProperty requires at least 3 arguments: obj, name, desc
     // (always true when called from transpiler)
 
-    Item originalDesc = js_object_get_own_property_descriptor(obj, name);
+    // labels and descriptor diagnostics are evaluated eagerly by the JS
+    // oracle; their getters/coercions may mutate the property under test.
+    if (js_is_truthy(options)) {
+        label_root.set(js_get_key_cstr(options, "label"));
+        if (item_is_error(label_root.get())) return label_root.get();
+    }
+    if (!js_is_truthy(label_root.get())) {
+        label_root.set(js_test262_string(name));
+        if (item_is_error(label_root.get())) return label_root.get();
+    }
+
+    original_root.set(js_object_get_own_property_descriptor(obj, name));
+    if (item_is_error(original_root.get())) return original_root.get();
+    Item originalDesc = original_root.get();
 
     // desc === undefined → verify property doesn't exist
     if (get_type_id(desc) == LMD_TYPE_UNDEFINED) {
@@ -9887,11 +9985,12 @@ extern "C" Item js_verify_property(Item obj, Item name, Item desc, Item options)
                               ns ? (int)ns->len : 0, ns ? ns->chars : "");
             return js_throw_value(js_new_error_with_name(err_name, js_name_item(buf, len)));
         }
-        return js_status_ok();
+        return (Item){.item = ITEM_TRUE};
     }
 
     // assert(hasOwnProperty(obj, name))
-    if (!it2b(js_has_own_property(obj, name))) {
+    JS_ASSIGN_OR_RETURN(has_own, js_has_own_property(obj, name));
+    if (!it2b(has_own)) {
         Item name_str = js_to_string_val(name);
         String* ns = it2s(name_str);
         char buf[256];
@@ -9900,10 +9999,29 @@ extern "C" Item js_verify_property(Item obj, Item name, Item desc, Item options)
         return js_throw_value(js_new_error_with_name(err_name, js_name_item(buf, len)));
     }
 
+    if (get_type_id(desc) != LMD_TYPE_NULL) {
+        JS_ASSIGN_OR_RETURN(desc_string, js_test262_string(desc));
+    }
+
     // desc must be an object
-    if (get_type_id(desc) != LMD_TYPE_MAP) {
+    if (!js_is_object_value(desc) || js_is_callable(desc)) {
         return js_throw_value(js_new_error_with_name(err_name,
             js_name_item("The desc argument should be an object or undefined")));
+    }
+
+    names_root.set(js_object_get_own_property_names(desc));
+    if (item_is_error(names_root.get())) return names_root.get();
+    for (int64_t i = 0; i < js_array_length(names_root.get()); i++) {
+        key_root.set(js_elements_get_int(names_root.get(), i));
+        if (!js_string_equals(key_root.get(), "value") &&
+                !js_string_equals(key_root.get(), "writable") &&
+                !js_string_equals(key_root.get(), "enumerable") &&
+                !js_string_equals(key_root.get(), "configurable") &&
+                !js_string_equals(key_root.get(), "get") &&
+                !js_string_equals(key_root.get(), "set")) {
+            return js_throw_value(js_test262_error_with_message(
+                "Invalid descriptor field: ", key_root.get()));
+        }
     }
 
     if (get_type_id(originalDesc) == LMD_TYPE_UNDEFINED) {
@@ -9914,9 +10032,6 @@ extern "C" Item js_verify_property(Item obj, Item name, Item desc, Item options)
 
     // check each descriptor field
     Item value_key = js_name_item("value", 5);
-    Item writable_key = js_name_item("writable", 8);
-    Item enumerable_key = js_name_item("enumerable", 10);
-    Item configurable_key = js_name_item("configurable", 12);
 
     // collect failure messages
     char failures[1024];
@@ -9936,61 +10051,62 @@ extern "C" Item js_verify_property(Item obj, Item name, Item desc, Item options)
         failures[fpos] = '\0';
     };
 
-    if (it2b(js_has_own_property(desc, value_key))) {
-        Item desc_value = js_get_key_default(desc, value_key);
-        Item orig_value = js_get_key_default(originalDesc, value_key);
-        if (!it2b(js_object_is(desc_value, orig_value))) {
+    JS_ASSIGN_OR_RETURN(has_value, js_has_own_property(desc, value_key));
+    if (it2b(has_value)) {
+        expected_root.set(js_get_key_default(desc, value_key));
+        if (item_is_error(expected_root.get())) return expected_root.get();
+        actual_root.set(js_get_key_default(originalDesc, value_key));
+        if (item_is_error(actual_root.get())) return actual_root.get();
+        if (!it2b(js_object_is(expected_root.get(), actual_root.get()))) {
             append_failure("descriptor value mismatch");
         }
         // also check obj[name] matches
-        Item obj_value = js_get_key_default(obj, name);
-        if (!it2b(js_object_is(desc_value, obj_value))) {
+        expected_root.set(js_get_key_default(desc, value_key));
+        if (item_is_error(expected_root.get())) return expected_root.get();
+        actual_root.set(js_get_key_default(obj, name));
+        if (item_is_error(actual_root.get())) return actual_root.get();
+        if (!it2b(js_object_is(expected_root.get(), actual_root.get()))) {
             append_failure("object value mismatch");
         }
     }
 
-    if (it2b(js_has_own_property(desc, enumerable_key))) {
-        Item desc_enum = js_get_key_default(desc, enumerable_key);
-        Item orig_enum = js_get_key_default(originalDesc, enumerable_key);
-        bool desc_e = it2b(desc_enum);
-        bool orig_e = it2b(orig_enum);
-        if (desc_e != orig_e) {
-            append_failure(desc_e ? "descriptor should be enumerable" : "descriptor should not be enumerable");
+    static const char* fields[] = {"enumerable", "writable", "configurable"};
+    for (int probe = 0; probe < 3; probe++) {
+        key_root.set(js_name_item(fields[probe]));
+        JS_ASSIGN_OR_RETURN(present, js_has_own_property(desc, key_root.get()));
+        if (!it2b(present)) continue;
+        expected_root.set(js_get_key_default(desc, key_root.get()));
+        if (item_is_error(expected_root.get())) return expected_root.get();
+        if (get_type_id(expected_root.get()) == LMD_TYPE_UNDEFINED) continue;
+        // Canonical verifyProperty uses strict equality and short-circuits the
+        // destructive probe when the reported descriptor already disagrees.
+        expected_root.set(js_get_key_default(desc, key_root.get()));
+        if (item_is_error(expected_root.get())) return expected_root.get();
+        actual_root.set(js_get_key_default(original_root.get(), key_root.get()));
+        if (item_is_error(actual_root.get())) return actual_root.get();
+        bool matches = it2b(js_strict_equal(expected_root.get(), actual_root.get()));
+        if (matches) {
+            expected_root.set(js_get_key_default(desc, key_root.get()));
+            if (item_is_error(expected_root.get())) return expected_root.get();
+            actual_root.set(js_test262_property_probe(obj, name, probe));
+            if (item_is_error(actual_root.get())) return actual_root.get();
+            matches = it2b(js_strict_equal(expected_root.get(), actual_root.get()));
         }
-    }
-
-    if (it2b(js_has_own_property(desc, writable_key))) {
-        Item desc_writ = js_get_key_default(desc, writable_key);
-        Item orig_writ = js_get_key_default(originalDesc, writable_key);
-        bool desc_w = it2b(desc_writ);
-        bool orig_w = it2b(orig_writ);
-        if (desc_w != orig_w) {
-            append_failure(desc_w ? "descriptor should be writable" : "descriptor should not be writable");
-        }
-    }
-
-    if (it2b(js_has_own_property(desc, configurable_key))) {
-        Item desc_conf = js_get_key_default(desc, configurable_key);
-        Item orig_conf = js_get_key_default(originalDesc, configurable_key);
-        bool desc_c = it2b(desc_conf);
-        bool orig_c = it2b(orig_conf);
-        if (desc_c != orig_c) {
-            append_failure(desc_c ? "descriptor should be configurable" : "descriptor should not be configurable");
-        }
+        if (!matches) append_failure(fields[probe]);
     }
 
     if (fpos > 0) {
         return js_throw_value(js_new_error_with_name(err_name, js_name_item(failures, fpos)));
     }
 
-    // options.restore: restore the original descriptor
-    if (get_type_id(options) == LMD_TYPE_MAP) {
-        Item restore_val = js_get_name_key(options, "restore", 7);
-        if (it2b(restore_val)) {
-            js_object_define_property(obj, name, originalDesc);
+    if (js_is_truthy(options)) {
+        actual_root.set(js_get_key_cstr(options, "restore"));
+        if (item_is_error(actual_root.get())) return actual_root.get();
+        if (js_is_truthy(actual_root.get())) {
+            JS_ASSIGN_OR_RETURN(restored, js_object_define_property(obj, name, original_root.get()));
         }
     }
-    return js_status_ok();
+    return (Item){.item = ITEM_TRUE};
 }
 
 // =============================================================================
@@ -10107,11 +10223,11 @@ extern "C" Item js_assert_deep_equal(Item actual, Item expected, Item message) {
 
 extern "C" Item js_assert_throws(Item expected_ctor, Item func, Item message) {
 
-    // assert.throws calls arbitrary user code, then performs instanceof and
+    // assert.throws calls arbitrary user code, then compares constructor identity and
     // property lookups while the callback, expected constructor, and thrown
     // object are still live. Precise GC cannot recover those values from the
     // native stack, so keep every cross-call Item in explicit roots.
-    RootFrame roots(5);
+    RootFrame roots(10);
     Rooted<Item> expected_root(roots, expected_ctor);
     Rooted<Item> func_root(roots, func);
     Rooted<Item> message_root(roots, message);
@@ -10140,16 +10256,8 @@ extern "C" Item js_assert_throws(Item expected_ctor, Item func, Item message) {
         Rooted<Item> thrown_root(roots, js_error_lane_payload(call_result_root.get()));
         Item thrown = thrown_root.get();
 
-        // if expected_ctor is undefined/null, accept any thrown error
-        // (e.g. Test262Error not defined — just verify something was thrown)
-        TypeId ect = get_type_id(expected_root.get());
-        if (ect == LMD_TYPE_NULL || expected_root.get().item == ITEM_JS_UNDEFINED) {
-            return js_status_ok();  // any error is acceptable
-        }
-
         // thrown must be an object
-        TypeId tid = get_type_id(thrown);
-        if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ELEMENT) {
+        if (!js_is_object_value(thrown) || js_is_callable(thrown)) {
             char buf[1200];
             int pos = 0;
             if (msg_len > 0) { memcpy(buf, msg_chars, msg_len < 1000 ? msg_len : 1000); pos = msg_len < 1000 ? msg_len : 1000; buf[pos++] = ' '; }
@@ -10162,22 +10270,24 @@ extern "C" Item js_assert_throws(Item expected_ctor, Item func, Item message) {
             return js_throw_value(js_new_error_with_name(err_name, err_msg));
         }
 
-        // check: thrown instanceof expectedErrorConstructor
-        Item instanceof_result = js_instanceof(thrown_root.get(), expected_root.get());
-        bool is_instance = (get_type_id(instanceof_result) == LMD_TYPE_BOOL && it2b(instanceof_result));
+        // instanceof accepts subclasses and forged @@hasInstance hooks. The
+        // Test262 oracle requires the thrown object's actual constructor.
+        Rooted<Item> actual_constructor(roots, js_get_key_cstr(thrown_root.get(), "constructor"));
+        if (item_is_error(actual_constructor.get())) return actual_constructor.get();
+        bool is_instance = it2b(js_strict_equal(actual_constructor.get(), expected_root.get()));
 
         if (!is_instance) {
             // type mismatch — build error message
             Item name_key = js_name_item("name");
-            Rooted<Item> exp_name_root(roots, js_get_key_default(expected_root.get(), name_key));
+            Rooted<Item> exp_name_root(roots, js_get_reference(expected_root.get(), name_key));
+            if (item_is_error(exp_name_root.get())) return exp_name_root.get();
             // get actual constructor name via prototype chain
             Item ctor_key = js_name_item("constructor");
-            Rooted<Item> thrown_ctor_root(roots, js_prototype_lookup(thrown_root.get(), ctor_key));
+            Rooted<Item> thrown_ctor_root(roots, js_get_key_default(thrown_root.get(), ctor_key));
+            if (item_is_error(thrown_ctor_root.get())) return thrown_ctor_root.get();
             Rooted<Item> act_name_root(roots,
-                (get_type_id(thrown_ctor_root.get()) != LMD_TYPE_UNDEFINED &&
-                 get_type_id(thrown_ctor_root.get()) != LMD_TYPE_NULL)
-                    ? js_get_key_default(thrown_ctor_root.get(), name_key)
-                    : make_js_undefined());
+                js_get_reference(thrown_ctor_root.get(), name_key));
+            if (item_is_error(act_name_root.get())) return act_name_root.get();
             Item exp_name = exp_name_root.get();
             Item act_name = act_name_root.get();
             String* ens = (get_type_id(exp_name) == LMD_TYPE_STRING) ? it2s(exp_name) : NULL;
@@ -10219,7 +10329,8 @@ extern "C" Item js_assert_throws(Item expected_ctor, Item func, Item message) {
 
     // no exception was thrown — that's a failure
     {
-        Rooted<Item> exp_name_root(roots, js_get_name_key(expected_root.get(), "name"));
+        Rooted<Item> exp_name_root(roots, js_get_reference(expected_root.get(), js_name_item("name")));
+        if (item_is_error(exp_name_root.get())) return exp_name_root.get();
         Item exp_name = exp_name_root.get();
         String* ens = (get_type_id(exp_name) == LMD_TYPE_STRING) ? it2s(exp_name) : NULL;
         const char* en = ens ? ens->chars : "?";
@@ -10313,11 +10424,19 @@ static Item js_test262_is_primitive(Item value) {
     return (Item){.item = b2it(primitive)};
 }
 
+static Item js_test262_verify_property_call(Item* args, int argc) {
+    if (argc < 3) return js_throw_value(js_test262_error_with_message(
+        "verifyProperty should receive at least 3 arguments: obj, name, and descriptor",
+        ItemNull));
+    return js_verify_property(args[0], args[1], args[2],
+        argc > 3 ? args[3] : make_js_undefined());
+}
+
 extern "C" Item js_test262_native_harness_install(void) {
     // Native-harness jobs run in a fresh realm. Publishing real callable
     // helpers preserves ordinary lookup, aliasing, and method dispatch while
     // avoiding a JavaScript evaluation of sta.js/assert.js for safe tests.
-    RootFrame roots(2);
+    RootFrame roots(3);
     Rooted<Item> global_root(roots, js_get_global_this());
     Rooted<Item> assert_root(roots, js_new_native_function(js_assert_base));
     if (item_is_error(global_root.get()) || item_is_error(assert_root.get())) {
@@ -10333,7 +10452,15 @@ extern "C" Item js_test262_native_harness_install(void) {
     if (item_is_error(stored)) return stored;
 
     js_set_native_method(global_root.get(), "compareArray", js_compare_array);
-    js_set_native_method(global_root.get(), "verifyProperty", js_verify_property);
+    // a span preserves the distinction between a missing descriptor argument
+    // and an explicitly supplied undefined descriptor.
+    Rooted<Item> verify_root(roots,
+        js_new_native_span_function(js_test262_verify_property_call));
+    if (item_is_error(verify_root.get())) return verify_root.get();
+    js_set_formal_length(verify_root.get(), 4);
+    js_set_function_name(verify_root.get(), js_name_item("verifyProperty"));
+    JS_ASSIGN_OR_RETURN(verify_stored,
+        js_set_key_cstr(global_root.get(), "verifyProperty", verify_root.get()));
     js_set_native_method(global_root.get(), "$DONOTEVALUATE", js_donotevaluate);
     js_set_native_method(global_root.get(), "isConstructor", js_is_constructor);
     js_set_native_method(global_root.get(), "isPrimitive", js_test262_is_primitive);
@@ -14005,8 +14132,16 @@ static Item js_node_filter_new(void) {
     return filter_root.get();
 }
 
+// cumulative thread-local timing survives nested eval resetting phase counters.
+static __thread uint64_t js_realm_init_us = 0;
+
+extern "C" uint64_t js_realm_init_time_us(void) {
+    return js_realm_init_us;
+}
+
 extern "C" Item js_get_global_this() {
     if (js_global_this_obj.item == 0) {
+        uint64_t realm_start = time_now_us();
         if (!js_global_bindings_ensure_roots()) return ItemNull;
         js_global_this_obj = js_new_object();
         // populate standard globals
@@ -14033,12 +14168,12 @@ extern "C" Item js_get_global_this() {
             if (!spec || spec->kind != JS_BUILTIN_GLOBAL_CONSTRUCTOR ||
                 !(spec->flags & JS_BUILTIN_GLOBAL_INSTALL)) continue;
             Item name_item = js_name_item(spec->name, spec->len);
-            Item ctor = js_get_constructor(name_item);
-            if (get_type_id(ctor) == LMD_TYPE_FUNC) {
-                js_set_key_default(js_global_this_obj, name_item, ctor);
-                if (spec->flags & JS_BUILTIN_GLOBAL_NON_ENUMERABLE) {
-                    js_mark_non_enumerable(js_global_this_obj, name_item);
-                }
+            // the ordinary own slot preserves reflection/deletion semantics;
+            // its constructor graph is built only when the value is observed.
+            js_set_key_default(js_global_this_obj, name_item,
+                (Item){.item = ITEM_JS_LAZY_GLOBAL_SENTINEL});
+            if (spec->flags & JS_BUILTIN_GLOBAL_NON_ENUMERABLE) {
+                js_mark_non_enumerable(js_global_this_obj, name_item);
             }
         }
         // globalThis self-reference
@@ -14047,14 +14182,6 @@ extern "C" Item js_get_global_this() {
         js_set_key_cstr(js_global_this_obj, "self", js_global_this_obj);
         js_set_key_cstr(js_global_this_obj, "window", js_global_this_obj);
 
-        // populate namespace objects on globalThis (Math, JSON, Reflect, console)
-        js_set_key_cstr(js_global_this_obj, "Math", js_get_math_object_value());
-        js_set_key_cstr(js_global_this_obj, "JSON", js_get_json_object_value());
-        extern Item js_get_intl_object_value(void);
-        js_set_key_cstr(js_global_this_obj, "Intl", js_get_intl_object_value());
-        js_set_key_cstr(js_global_this_obj, "Reflect", js_get_reflect_object_value());
-        js_set_key_cstr(js_global_this_obj, "Atomics", js_get_atomics_object_value());
-        js_set_key_cstr(js_global_this_obj, "console", js_get_console_object_value());
         // Node compatibility namespaces are ordinary own data slots, but their
         // large method graphs are built only when read. Tune4 requires this
         // whole-object transaction when eager real properties exceed the realm
@@ -14063,7 +14190,6 @@ extern "C" Item js_get_global_this() {
         // D6.2.2v2: the retired direct-global lowering used to fabricate this
         // namespace; generic global Get now requires the real realm property.
         js_set_key_cstr(js_global_this_obj, "$262", js_get_262_object_value());
-        js_set_key_cstr(js_global_this_obj, "CSS", js_get_css_object_value());
         // Install lazy slots after the eager JS globals. A Jube session is
         // created only when one of these slots or a module specifier is read.
         js_install_jube_global_namespaces(js_global_this_obj);
@@ -14293,6 +14419,7 @@ extern "C" Item js_get_global_this() {
         js_window_event_value = make_js_undefined();
         js_window_event_ensure_rooted();
         js_window_event_intercept_enabled = true;
+        js_realm_init_us += time_now_us() - realm_start;
     }
     return js_global_this_obj;
 }

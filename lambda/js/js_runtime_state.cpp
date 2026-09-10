@@ -323,8 +323,19 @@ bool js_global_environment_upsert(JsGlobalEnvironment* environment,
     return true;
 }
 
+static bool js_global_environment_prepare_removal(JsGlobalEnvironment* environment) {
+    if (!environment) return false;
+    // removal can follow heap destruction. Observe RootVector's generation
+    // without publishing new roots into a realm that no longer exists.
+    if (root_vector_count(&environment->roots) < JS_GLOBAL_ENV_SLOT_COUNT) {
+        js_global_environment_reset_metadata(environment);
+        return false;
+    }
+    return true;
+}
+
 void js_global_environment_clear_bindings(JsGlobalEnvironment* environment) {
-    if (!js_global_environment_ensure(environment)) return;
+    if (!js_global_environment_prepare_removal(environment)) return;
     root_vector_shrink(&environment->roots, JS_GLOBAL_ENV_SLOT_COUNT);
     js_global_environment_reset_metadata(environment);
 }
@@ -362,7 +373,7 @@ static bool js_global_environment_rebuild_bindings(
 
 void js_global_environment_remove_kind(JsGlobalEnvironment* environment,
         JsGlobalBindingKind kind) {
-    if (!js_global_environment_ensure(environment)) return;
+    if (!js_global_environment_prepare_removal(environment)) return;
     int retained = 0;
     for (int i = 0; i < environment->binding_count; i++) {
         if (environment->bindings[i].kind != kind) {
@@ -379,7 +390,7 @@ void js_global_environment_remove_kind(JsGlobalEnvironment* environment,
 
 void js_global_environment_release_module_bindings(
         JsGlobalEnvironment* environment, uint32_t first_module_state_id) {
-    if (!js_global_environment_ensure(environment) ||
+    if (!js_global_environment_prepare_removal(environment) ||
             first_module_state_id == UINT32_MAX) return;
     int retained = 0;
     for (int i = 0; i < environment->binding_count; i++) {

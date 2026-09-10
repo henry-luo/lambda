@@ -855,6 +855,7 @@ typedef struct JsMirPhaseTiming {
     long cleanup_us;
     long total_us;
     long preamble_us;
+    long realm_us; // global graph construction, excluded from imports/execute
 } JsMirPhaseTiming;
 
 void js_mir_reset_last_phase_timing(void);
@@ -862,6 +863,7 @@ void js_mir_get_last_phase_timing(JsMirPhaseTiming* out);
 void js_mir_begin_document_phase_timing(void);
 void js_mir_accumulate_last_phase_timing(bool is_preamble);
 void js_mir_end_document_phase_timing(JsMirPhaseTiming* out);
+uint64_t js_realm_init_time_us(void);
 
 // Shared ECMAScript IdentifierName policy backed by the generated Unicode
 // ID_Start / ID_Continue range tables used by RegExp property support.

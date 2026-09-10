@@ -243,6 +243,118 @@ TEST(JsInterpreter, RetainedHarnessRebuildsAfterRealmReplacement) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, LazyGlobalsPreserveOwnDescriptorsAndReplacements) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] =
+        "var before = 'Uint16Array' in globalThis; "
+        "var descriptor = Object.getOwnPropertyDescriptor(globalThis, 'Uint16Array'); "
+        "var identity = descriptor.value === Uint16Array && Uint16Array === globalThis.Uint16Array; "
+        "globalThis.Float64Array = 17; delete globalThis.BigUint64Array; "
+        "Object.defineProperty(globalThis, 'Int16Array', {value: 23}); "
+        "var math = Object.getOwnPropertyDescriptor(globalThis, 'Math'); "
+        "before && identity && descriptor.writable && descriptor.configurable && "
+        "!descriptor.enumerable && Float64Array === 17 && Int16Array === 23 && "
+        "!('BigUint64Array' in globalThis) && math.value === Math && "
+        "Object.getPrototypeOf(Uint16Array.prototype) === Object.getPrototypeOf(Uint8Array.prototype);";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "lazy-globals.js", NULL);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, RetainedTypedArrayAndPropertyHelpersKeepStrictnessAndIsolation) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    StrBuf* source = strbuf_new();
+    ASSERT_TRUE(js_test262_append_file(source, "ref/test262/harness/sta.js"));
+    ASSERT_TRUE(js_test262_append_file(source, "ref/test262/harness/assert.js"));
+    JsScript* base = js_interp_prepare_script(&runtime, source->str, source->length, "base.js");
+    ASSERT_NE(base, nullptr);
+    strbuf_reset(source);
+    strbuf_append_str(source, "\"use strict\";\nfunction helperStrict() { return this; }\n");
+    ASSERT_TRUE(js_test262_append_file(source, "ref/test262/harness/propertyHelper.js"));
+    ASSERT_TRUE(js_test262_append_file(source, "ref/test262/harness/testTypedArray.js"));
+    JsScript* helpers = js_interp_prepare_script(&runtime, source->str, source->length, "includes.js");
+    strbuf_free(source);
+    ASSERT_NE(helpers, nullptr);
+    const int checkpoint = runtime.scripts->length;
+    const uint32_t module_checkpoint = runtime.next_module_state_id;
+    const char test[] =
+        "assert.sameValue(helperStrict(), undefined); "
+        "testWithTypedArrayConstructors(function(C) { assert.sameValue(new C(2).length, 2); }); "
+        "verifyProperty({x: 1}, 'x', {value: 1, writable: true}); "
+        "assert.sameValue(typeof verifyProperty, 'function'); "
+        "verifyProperty = 0; typedArrayConstructors.length = 0; true;";
+    for (int i = 0; i < 2; i++) {
+        ASSERT_FALSE(item_is_error(js_interp_execute_script(&runtime, base, NULL)));
+        ASSERT_FALSE(item_is_error(js_interp_execute_script(&runtime, helpers, NULL)));
+        heap_gc_collect();
+        Item result = js_interp_execute_source(&runtime, test, sizeof(test) - 1, "test.js", NULL);
+        ASSERT_FALSE(item_is_error(result));
+        EXPECT_EQ(result.item, ITEM_TRUE);
+        runtime_reset_heap(&runtime);
+        runtime_release_script_generation(&runtime, checkpoint, module_checkpoint);
+    }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, NativeHarnessMatchesCanonicalPropertyAndThrowChecks) {
+    struct Probe { const char* source; const char* expected; };
+    const Probe probes[] = {
+        {"verifyProperty({x: 1}, 'x', {value: 1, writable: true, enumerable: true, configurable: true});", "ok"},
+        {"var o = {x: 1}; verifyProperty(o, 'x', {configurable: true}); if ('x' in o) throw new Error();", "ok"},
+        {"var o = {x: 1}; verifyProperty(o, 'x', {writable: true, configurable: true}, {restore: true}); if (o.x !== 1) throw new Error();", "ok"},
+        {"verifyProperty({}, 'x', undefined);", "ok"},
+        {"verifyProperty({}, 'x');", "Test262Error"},
+        {"verifyProperty({x: 1}, 'x', {writable: undefined});", "ok"},
+        {"verifyProperty({x: 1}, 'x', {writable: 1});", "Test262Error"},
+        {"verifyProperty({x: 1}, 'x', {invalid: true});", "Test262Error"},
+        {"var s = Symbol(); var o = {}; o[s] = 1; verifyProperty(o, s, {enumerable: true, writable: true});", "ok"},
+        {"var p = new Proxy({x: 1}, {set: function() { return true; }}); verifyProperty(p, 'x', {writable: true});", "Test262Error"},
+        {"var p = new Proxy({x: 1}, {deleteProperty: function() { return true; }}); verifyProperty(p, 'x', {configurable: true});", "Test262Error"},
+        {"var p = new Proxy({x: 1}, {ownKeys: function() { return []; }}); verifyProperty(p, 'x', {enumerable: true});", "Test262Error"},
+        {"var p = new Proxy({x: 1}, {set: function() { throw new TypeError(); }}); verifyProperty(p, 'x', {writable: true});", "Test262Error"},
+        {"var p = new Proxy({x: 1}, {set: function() { throw new RangeError(); }}); verifyProperty(p, 'x', {writable: true});", "Test262Error"},
+        {"var d = {get writable() { throw new RangeError(); }}; verifyProperty({x: 1}, 'x', d);", "RangeError"},
+        {"assert.throws(TypeError, function() { throw new TypeError(); });", "ok"},
+        {"assert.throws(Error, function() { throw new TypeError(); });", "Test262Error"},
+        {"assert.throws(TypeError, function() { throw {constructor: TypeError}; });", "ok"},
+        {"assert.throws(Array, function() { throw []; });", "ok"},
+        {"assert.throws(undefined, function() { throw new TypeError(); });", "TypeError"},
+        {"assert.throws(Function, function() { throw function() {}; });", "Test262Error"},
+        {"assert.throws(TypeError, function() { throw {get constructor() { throw new RangeError(); }}; });", "RangeError"},
+    };
+    for (const Probe& probe : probes) {
+        SCOPED_TRACE(probe.source);
+        for (int native = 0; native < 2; native++) {
+            SCOPED_TRACE(native);
+            Runtime runtime = {};
+            runtime_init(&runtime);
+            StrBuf* source = strbuf_new();
+            if (!native) {
+                ASSERT_TRUE(js_test262_append_file(source, "ref/test262/harness/sta.js"));
+                ASSERT_TRUE(js_test262_append_file(source, "ref/test262/harness/assert.js"));
+                ASSERT_TRUE(js_test262_append_file(source, "ref/test262/harness/propertyHelper.js"));
+            }
+            strbuf_append_str(source, "var outcome = 'ok'; try { ");
+            strbuf_append_str(source, probe.source);
+            strbuf_append_str(source,
+                " } catch (error) { outcome = error.name || error.constructor.name; } outcome;");
+            JsScript* script = js_interp_prepare_script(&runtime, source->str, source->length, "parity.js");
+            strbuf_free(source);
+            ASSERT_NE(script, nullptr);
+            script->test262_native_harness = native != 0;
+            Item result = js_interp_execute_script(&runtime, script, NULL);
+            ASSERT_FALSE(item_is_error(result));
+            ASSERT_EQ(get_type_id(result), LMD_TYPE_STRING);
+            EXPECT_STREQ(it2s(result)->chars, probe.expected);
+            runtime_cleanup(&runtime);
+        }
+    }
+}
+
 TEST(JsScriptOwnership, ReleasesBatchScriptGenerationAfterHeapReset) {
     Runtime runtime = {};
     runtime_init(&runtime);
