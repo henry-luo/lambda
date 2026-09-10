@@ -2902,6 +2902,8 @@ extern "C" {
 
     String* fn_string(Item item);
     String *fn_strcat(String *left, String *right);
+    enum { LAMBDA_STRING_CONCAT_MAX_PARTS = 64 };
+    String *fn_strcat_many(int64_t owned, int64_t count, ...);
     String *fn_string_freeze(String *str);
     Item fn_normalize(Item str, Item type);
     Item fn_normalize1(Item str);           // normalize with default NFC

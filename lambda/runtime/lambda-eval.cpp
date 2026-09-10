@@ -279,7 +279,7 @@ Item v2it(List* list) {
 static bool string_is_owned_buffer(String* str, gc_header_t** out_header) {
     if (out_header) *out_header = NULL;
     if (!str || !str->is_buffer) return false;
-    // is_buffer is set only by string_buffer_copy_join after the constructor
+    // is_buffer is set only by string_buffer_join after the constructor
     // audit has cleared every non-GC String's flags. Avoiding a heap-wide
     // ownership lookup keeps the append fast path proportional to the copy.
     gc_header_t* header = gc_get_header(str);
@@ -289,66 +289,103 @@ static bool string_is_owned_buffer(String* str, gc_header_t** out_header) {
     return true;
 }
 
-static String* string_buffer_copy_join(String* left, String* right, size_t capacity) {
-    if (!left || !right || capacity > UINT32_MAX ||
-            left->len > capacity || right->len > capacity - left->len) return NULL;
+enum StringBuilderCounter {
+    STRING_APPEND_CALLS, STRING_APPEND_PIECES, STRING_INPLACE_APPENDS,
+    STRING_GROWTH_COPIES, STRING_COPIED_BYTES, STRING_FREEZES,
+    STRING_GENERIC_JOINS, STRING_BUILDER_COUNTER_COUNT
+};
+static void string_profile_note(StringBuilderCounter counter, uint64_t count = 1);
+static void string_profile_append(int count, size_t copied, bool inplace);
+
+static inline size_t string_builder_copy_part(char* destination, const String* part) {
+    // The stored byte length proves this copy needs one store, including NUL;
+    // multi-byte UTF-8 fragments retain the general length-based copy.
+    size_t length = part->len;
+    if (length == 1) *destination = part->chars[0];
+    else memcpy(destination, part->chars, length);
+    return length;
+}
+
+static String* string_buffer_copy_join(String* const* parts, int count,
+        size_t capacity, size_t required, bool ascii, bool owned) {
     size_t bytes = sizeof(String) + capacity + 1;
     if (bytes > (size_t)INT_MAX) return NULL;
-
-    // Allocation may relocate both sources. Their exact roots remain valid
-    // until the new buffer has copied both halves of the concatenation.
-    RootFrame roots(2);
-    Rooted<String*> rooted_left(roots, left);
-    Rooted<String*> rooted_right(roots, right);
+    // Every source can move during allocation, including converted temporaries.
+    RootSpan roots(count);
+    uint64_t* homes = roots.words();
+    for (int i = 0; i < count; i++) {
+        if (homes) homes[i] = (uint64_t)(uintptr_t)parts[i];
+    }
     String* result = (String*)heap_alloc((int)bytes, LMD_TYPE_STRING);
     if (!result) return NULL;
-    left = rooted_left.get();
-    right = rooted_right.get();
-    size_t left_len = left->len;
-    size_t right_len = right->len;
-    result->len = (uint32_t)(left_len + right_len);
+    result->len = (uint32_t)required;
     result->flags = 0;
-    result->is_ascii = left->is_ascii && right->is_ascii;
-    result->is_buffer = 1;
-    memcpy(result->chars, left->chars, left_len);
-    memcpy(result->chars + left_len, right->chars, right_len + 1);
+    result->is_ascii = ascii;
+    result->is_buffer = owned;
+    size_t offset = 0;
+    for (int i = 0; i < count; i++) {
+        String* part = homes ? (String*)(uintptr_t)homes[i] : parts[i];
+        offset += string_builder_copy_part(result->chars + offset, part);
+    }
+    result->chars[offset] = 0;
+    string_profile_append(count, required, false);
     return result;
 }
 
-String *fn_strcat(String *left, String *right) {
-    if (!left || !right || left->len > UINT32_MAX - right->len) {
-        log_error("fn_strcat: invalid concat operands");
-        return &STR_ERROR;
+// Specialize the binary API's fixed count without duplicating reserve/copy code.
+// Otherwise the release compiler keeps a variable-count loop and stack array
+// wrapper even for every single-piece append.
+template<int fixed_count>
+static String* string_buffer_join(String* const* parts, int variable_count, bool owned) {
+    const int count = fixed_count ? fixed_count : variable_count;
+    size_t required = 0;
+    bool ascii = true;
+    bool overlaps = false;
+    for (int i = 0; i < count; i++) {
+        if (!parts[i] || parts[i]->len > UINT32_MAX - required) return &STR_ERROR;
+        required += parts[i]->len;
+        ascii = ascii && parts[i]->is_ascii;
+        if (i && parts[i] == parts[0]) overlaps = true;
     }
-    size_t required = (size_t)left->len + right->len;
-    gc_header_t* left_header = NULL;
-    if (left != right && string_is_owned_buffer(left, &left_header)) {
-        size_t capacity = (size_t)left_header->alloc_size - sizeof(String) - 1;
-        if (required <= capacity) {
-            // MIR publishes a buffer only while its binding is exclusive; a
-            // generic join freezes first, so this in-place append cannot alter
-            // an alias that observes the prior immutable value.
-            size_t old_len = left->len;
-            memcpy(left->chars + old_len, right->chars, (size_t)right->len + 1);
-            left->len = (uint32_t)required;
-            left->is_ascii = left->is_ascii && right->is_ascii;
-            return left;
-        }
-        size_t grown = capacity < 64 ? 64 : capacity;
-        while (grown < required) {
-            if (grown > UINT32_MAX / 2) {
-                grown = required;
-                break;
+    gc_header_t* header = NULL;
+    size_t capacity = required;
+    bool reuse = owned && !overlaps && string_is_owned_buffer(parts[0], &header);
+    if (reuse) {
+        capacity = (size_t)header->alloc_size - sizeof(String) - 1;
+        if (capacity < required) {
+            if (capacity < 64) capacity = 64;
+            while (capacity < required) {
+                capacity = capacity > UINT32_MAX / 2 ? required : capacity * 2;
             }
-            grown *= 2;
+        } else {
+            String* result = parts[0];
+            size_t offset = result->len;
+            for (int i = 1; i < count; i++) {
+                offset += string_builder_copy_part(result->chars + offset, parts[i]);
+            }
+            result->chars[offset] = 0;
+            string_profile_append(count, required - result->len, true);
+            result->len = (uint32_t)offset;
+            result->is_ascii = ascii;
+            return result;
         }
-        return string_buffer_copy_join(left, right, grown);
     }
+    return string_buffer_copy_join(parts, count, capacity, required, ascii, owned);
+}
 
-    // A fresh concat starts at its exact size. This keeps ordinary short-lived
-    // concatenations compact; only a proven builder pays geometric spare space
-    // when its next append actually requires growth.
-    return string_buffer_copy_join(left, right, required);
+String *fn_strcat(String *left, String *right) {
+    String* parts[] = {left, right};
+    return string_buffer_join<2>(parts, 2, true);
+}
+
+String *fn_strcat_many(int64_t owned, int64_t count, ...) {
+    if (count < 2 || count > LAMBDA_STRING_CONCAT_MAX_PARTS) return &STR_ERROR;
+    String* parts[LAMBDA_STRING_CONCAT_MAX_PARTS];
+    va_list args;
+    va_start(args, count);
+    for (int i = 0; i < count; i++) parts[i] = va_arg(args, String*);
+    va_end(args);
+    return string_buffer_join<0>(parts, (int)count, owned != 0);
 }
 
 String *fn_string_freeze(String *str) {
@@ -356,11 +393,13 @@ String *fn_string_freeze(String *str) {
         // The MIR owner is about to publish this value through an ordinary
         // read, so later concatenation must allocate rather than alter an alias.
         str->is_buffer = 0;
+        string_profile_note(STRING_FREEZES);
     }
     return str;
 }
 
 static String* fn_concat_string_items(Item left, Item right) {
+    string_profile_note(STRING_GENERIC_JOINS);
     // The second conversion can collect the first conversion result before
     // fn_strcat receives it, so conversion temporaries need native homes too.
     RootFrame roots(2);
@@ -8140,6 +8179,7 @@ typedef struct CowProfileCounters {
     uint64_t array_checked_store_rebuild;
     uint64_t array_checked_store_full_clone;
     uint64_t array_checked_store_bytes_copied;
+    uint64_t string_builder[STRING_BUILDER_COUNTER_COUNT];
 } CowProfileCounters;
 
 static CowProfileCounters g_cow_profile = {};
@@ -8162,6 +8202,19 @@ static bool cow_profile_enabled(void) {
         g_cow_profile_registered = true;
     }
     return g_cow_profile_enabled != 0;
+}
+
+static void string_profile_note(StringBuilderCounter counter, uint64_t count) {
+    if (cow_profile_enabled()) g_cow_profile.string_builder[counter] += count;
+}
+
+static void string_profile_append(int count, size_t copied, bool inplace) {
+    // One disabled-profile branch per append, including multi-piece appends.
+    if (!cow_profile_enabled()) return;
+    g_cow_profile.string_builder[STRING_APPEND_CALLS]++;
+    g_cow_profile.string_builder[STRING_APPEND_PIECES] += count - 1;
+    g_cow_profile.string_builder[inplace ? STRING_INPLACE_APPENDS : STRING_GROWTH_COPIES]++;
+    g_cow_profile.string_builder[STRING_COPIED_BYTES] += copied;
 }
 
 struct CowProfileLifetime {
@@ -8296,6 +8349,17 @@ void cow_profile_dump(void) {
     strbuf_append_uint64(output, g_cow_profile.array_checked_store_full_clone);
     strbuf_append_str(output, "\narray_checked_store_bytes_copied\t");
     strbuf_append_uint64(output, g_cow_profile.array_checked_store_bytes_copied);
+    static const char* string_counters[] = {
+        "string_append_calls", "string_append_pieces", "string_inplace_appends",
+        "string_growth_copies", "string_copied_bytes", "string_freezes",
+        "string_generic_joins"
+    };
+    for (int i = 0; i < STRING_BUILDER_COUNTER_COUNT; i++) {
+        strbuf_append_char(output, '\n');
+        strbuf_append_str(output, string_counters[i]);
+        strbuf_append_char(output, '\t');
+        strbuf_append_uint64(output, g_cow_profile.string_builder[i]);
+    }
     strbuf_append_char(output, '\n');
     if (write_text_file_atomic(output_path, output->str ? output->str : "") != 0) {
         log_error("cow profile: failed to write '%s'", output_path);

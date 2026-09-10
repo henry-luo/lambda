@@ -1810,6 +1810,7 @@ JitImport jit_runtime_imports[] = {
     // String operations (non-sys-func entries)
     // ========================================================================
     {"fn_strcat", FPTR(fn_strcat)},
+    {"fn_strcat_many", FPTR(fn_strcat_many)},
     {"fn_string_freeze", FPTR(fn_string_freeze)},
     {"fn_normalize", FPTR(fn_normalize)},
     {"fn_substring", FPTR(fn_substring)},
