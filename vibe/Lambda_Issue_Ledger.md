@@ -433,9 +433,41 @@ scalar. Violations are logged and execution continues, so one suite run collects
 every offending site; totals are reported at exit. The flag is off by default
 and then emits nothing, so ordinary and release builds are unchanged.
 
-*Coverage limit:* the probe watches named locals and rooted call results, not
-every unrooted expression temporary. A clean run therefore proves the
-**binding** half of the invariant, not the whole of it.
+*Coverage — two levels (`LAMBDA_ROOT_WITNESS`):*
+
+| level | what is probed |
+|---|---|
+| `1` | named locals and rooted call results — a handful of probes per function, so whole-corpus sweeps stay cheap |
+| `2` / `all` | adds **expression temporaries**: every register live across a may-GC call that the root machinery never made a candidate |
+
+Level 2 exists because the root machinery's own liveness pass
+(`em_finalize_semantic_root_write_back`) only ever considers **candidates** —
+registers someone explicitly noted. A register that never became one is
+invisible to it, and that is precisely where a temporary can carry a heap value
+across a safepoint with nothing publishing it. `emit_root_witness_across_calls`
+runs after root finalization, computes each register's first..last *mention*
+span, and probes every non-candidate register whose span straddles a may-GC
+call. A mention span rather than def..use: a loop-carried register is defined at
+the bottom of the body and read at the top, so in linear order its last use
+precedes its first definition and a def..use test would call it dead exactly
+where it is live across every call in the loop. The span over-approximates, which
+is the right direction for a diagnostic, and the runtime filter discards the noise.
+
+Measured cost of level 2: `graph/structurizr/source_contract.ls` emits **53,937**
+extra probes and runs 2.51 s vs 2.39 s at level 1 (~5%).
+
+*The probe's own registry metadata is load-bearing.* Its first version left the
+`lambda_jit_root_witness` row unannotated, which defaults to
+`JIT_EFFECT_MAY_GC` with `JIT_VALUE_UNKNOWN` arguments — so the emitter
+published **every probed register into a root slot at the probe's own call
+site**. The instrumentation was rooting exactly the values it existed to catch
+as unrooted, and at level 2 it was growing the frame after finalization. The row
+now declares `JIT_EFFECT_NO_GC` / `JIT_REENTRY_NO` with non-GC argument classes,
+and `lambda_jit_root_witness` is listed in
+`jit_import_validate_no_gc_allowlist()` with its justification. That allowlist is
+what caught the mistake: a NO_GC claim that is not audited aborts the build.
+Any future probe added to this tool must be audited the same way, or it will
+quietly falsify its own results.
 
 *First sweep, 2026-09-10 (all 1052 `test/lambda/**/*.ls`, `LAMBDA_TIER=jit`):*
 **4 violations in 3 scripts**, every one the same shape — `claimed_type=24`
@@ -493,12 +525,48 @@ overload cannot be forgotten at a fourth site.
 the first producer: 2 in 2 scripts). The binding half of the invariant is now
 tested clean across the corpus.
 
-*Remaining work on this entry* is the coverage limit above — unrooted
-expression temporaries are still outside the probe — and the structural point
-the episode exposed: `lambda_gc_value_class` still answers a GC-safety question
-from a bare `TypeId`. Threading the `Type*` to it (or making it fail closed on
-`LMD_TYPE_TYPE`) would make a fourth producer harmless rather than merely
-absent.
+*Classifier made fail-closed, 2026-09-10.* Fixing the producers left the
+consumer still deciding GC safety from a bare `TypeId`, so a fourth producer
+would have re-opened the hole. `lambda_gc_value_class` now takes the semantic
+`Type*` when the caller has one and treats `LMD_TYPE_TYPE` as *unresolved*
+rather than as a descriptor:
+
+- with a contract, `lambda_canonical_rep(contract)` decides — it already
+  unwraps occurrence kinds and refuses a raw carrier for a union, so it
+  separates a real descriptor from a value wearing a type term;
+- without one, the value is **rooted**. A needless root slot on a descriptor
+  costs one store and the collector skips the word (`gc_mark_item` →
+  `is_gc_object`); a missing slot on a live container is a use-after-free.
+
+The contract is consulted **only** for that arm. `type_id` at these sites is the
+reconciled carrier witness and is the more honest description of what the
+register physically holds, so it still drives every other classification —
+re-deriving the carrier from the raw AST contract would have been a regression.
+`update_gc_root_slot` passes the binding's existing `VarEntry::full_type`; sites
+without a contract simply fail closed.
+
+*Verified by reverting the producers.* With `mir_value_type_id` temporarily
+restored to the raw `->type_id` read — i.e. all three producers dishonest
+again — the witness still reports **0 violations**: the classifier alone now
+roots them. That is the defence-in-depth property the entry was missing.
+
+*Temporaries covered 2026-09-10 (level 2).* See the coverage table above.
+`make test-lambda-baseline` **5286/5286**, and a level-2 sweep over all 1054
+scripts reports **0 violations** — so both halves of the invariant, bindings and
+temporaries, now test clean across the corpus.
+
+The notable finding while building it is how little was left: instrumenting the
+candidate/non-candidate split showed that nearly every register live across a
+may-GC call is **already a root candidate** (in one measured function, 13 of
+17), so the root machinery's coverage was materially better than this entry
+implied. It was simply never *checked*. What LR07-7 should now say is not "the
+collector trusts the transpiler" but "the collector's trust is verified at
+level 2, for bindings and temporaries, over the whole test corpus."
+
+*Negative control.* Reverting both the producers and the classifier to their
+pre-fix state makes the probe report the original violation again at level 1 and
+level 2, so a clean sweep is evidence of correctness rather than of a probe that
+stopped looking.
 
 *Reproduce:*
 

@@ -1579,16 +1579,38 @@ static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_i
 static void async_store_var(MirTranspiler* mt, MirVarEntry* var);
 static void transpile_task_scope_unwind(MirTranspiler* mt, bool error_exit);
 
+// `contract` is the semantic Type* behind `type_id` when the caller has it.
+// It exists for exactly one question -- see the LMD_TYPE_TYPE arm below -- and
+// is deliberately NOT used to re-derive the carrier: `type_id` at these sites
+// is the reconciled carrier witness, which is the more honest description of
+// what the register physically holds.
 static JitValueClass lambda_gc_value_class(MIR_type_t mir_type,
-        TypeId type_id) {
-    // Type values point into the compiler/runtime descriptor pool, not the GC
-    // object zone; treating them as managed pointers needlessly publishes a
-    // descriptor word as a root (D5.3.4).
-    if (type_id == LMD_TYPE_TYPE) return JIT_VALUE_RAW_NON_GC_POINTER;
+        TypeId type_id, Type* contract = NULL) {
+    // Physical fact first: a float register cannot carry a pointer, whatever a
+    // semantic contract claims about it.
     if (mir_type == MIR_T_D || mir_type == MIR_T_F || mir_type == MIR_T_LD) {
         return JIT_VALUE_NON_GC_SCALAR;
     }
+    // `LMD_TYPE_TYPE` is the one TypeId that does not settle GC safety on its
+    // own. A type VALUE (`let t = int`) is a descriptor pointer into the
+    // compiler/runtime pool and must not be published as a root (D5.3.4); a
+    // value CONTRACT written as a type term (`Node?`, `int | null`) is an
+    // ordinary value that must be. Only the `Type*` tells them apart, and
+    // `lambda_canonical_rep` already knows how -- it unwraps occurrence kinds
+    // and refuses a raw carrier for a union.
+    //
+    // Without a contract the question is unanswerable here, so fail closed
+    // rather than guess: a needless root slot on a descriptor costs one store
+    // and the collector skips the word (`gc_mark_item` -> `is_gc_object`),
+    // whereas a missing slot on a live container is a use-after-free. Deciding
+    // this from the bare id is what hid four live containers from the
+    // collector until the LAMBDA_ROOT_WITNESS sweep found them (LR07-7).
+    if (type_id == LMD_TYPE_TYPE && contract &&
+            lambda_canonical_rep(contract) == VALUE_REP_RAW_NON_GC_POINTER) {
+        return JIT_VALUE_RAW_NON_GC_POINTER;
+    }
     if (mir_type == MIR_T_P) return JIT_VALUE_RAW_GC_POINTER;
+    if (type_id == LMD_TYPE_TYPE) return JIT_VALUE_BOXED_ITEM;
     ValueRep rep = lambda_canonical_rep_for_type_id(type_id);
     return rep == VALUE_REP_ITEM ? JIT_VALUE_BOXED_ITEM
         : rep == VALUE_REP_RAW_GC_POINTER ? JIT_VALUE_RAW_GC_POINTER
@@ -1596,9 +1618,10 @@ static JitValueClass lambda_gc_value_class(MIR_type_t mir_type,
         : JIT_VALUE_NON_GC_SCALAR;
 }
 
-static bool should_gc_root_var(MIR_type_t mir_type, TypeId type_id) {
-    return mir_gc_value_needs_root(lambda_gc_value_class(mir_type, type_id),
-        mir_type);
+static bool should_gc_root_var(MIR_type_t mir_type, TypeId type_id,
+        Type* contract = NULL) {
+    return mir_gc_value_needs_root(
+        lambda_gc_value_class(mir_type, type_id, contract), mir_type);
 }
 
 // LR07-7/LR08-3: the precise collector trusts `should_gc_root_var` -- i.e. it
@@ -1949,14 +1972,145 @@ static void finalize_side_root_frame(MirTranspiler* mt) {
     em_finalize_function_metadata(&mt->em);
 }
 
+// LR07-7, temporaries. The binding-side probe covers named locals and rooted
+// call results. A register that never became a root CANDIDATE is invisible to
+// the entire root machinery -- the liveness pass in
+// em_finalize_semantic_root_write_back only ever considers candidates -- and
+// that is exactly where an expression temporary can carry a heap value across
+// a safepoint with nothing publishing it.
+//
+// This pass runs after root finalization, only under LAMBDA_ROOT_WITNESS. For
+// every may-GC call it finds the registers live across the call -- defined
+// before it, used after it -- that are not candidates, and probes each one
+// immediately before the call.
+//
+// Liveness here is the span between a register's first and last mention, which
+// over-approximates: it can name a register that is not truly live at a given
+// call, but it cannot miss one that is -- including loop-carried registers,
+// whose last read precedes their definition in linear order. The runtime filter
+// (8-byte aligned, GC-owned, decodes as a container header) discards the
+// resulting noise, the same filter that removed 556 false positives from the
+// first binding-side sweep.
+static void emit_root_witness_across_calls(MirTranspiler* mt,
+        const char* function_name) {
+    if (!mt || !lambda_root_witness_temporaries()) return;
+    MIR_func_t func = mt->em.func;
+    if (!func || !mt->em.func_item) return;
+    MirFrameState* frame = &mt->em.frame;
+
+    // Pass 1: index the instructions and find the highest register in use.
+    int insn_count = 0;
+    MIR_reg_t max_reg = 0;
+    for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, func->insns); insn;
+            insn = DLIST_NEXT(MIR_insn_t, insn)) {
+        insn_count++;
+        for (size_t nop = 0; nop < insn->nops; nop++) {
+            MIR_op_t* op = &insn->ops[nop];
+            if (op->mode == MIR_OP_REG && op->u.reg > max_reg) {
+                max_reg = op->u.reg;
+            } else if (op->mode == MIR_OP_MEM) {
+                if (op->u.mem.base > max_reg) max_reg = op->u.mem.base;
+                if (op->u.mem.index > max_reg) max_reg = op->u.mem.index;
+            }
+        }
+    }
+    if (insn_count == 0 || max_reg == 0) return;
+
+    int reg_count = (int)max_reg + 1;
+    int* first_mention = (int*)mem_alloc((size_t)reg_count * sizeof(int), MEM_CAT_TEMP);
+    int* last_mention = (int*)mem_alloc((size_t)reg_count * sizeof(int), MEM_CAT_TEMP);
+    if (!first_mention || !last_mention) {
+        mem_free(first_mention); mem_free(last_mention);
+        log_error("root-witness: mention table allocation failed for %s",
+            function_name ? function_name : "<unnamed>");
+        return;  // diagnostic only: never fail the compile
+    }
+    for (int i = 0; i < reg_count; i++) {
+        first_mention[i] = insn_count; last_mention[i] = -1;
+    }
+
+    // Pass 2: record the span between each register's first and last mention.
+    //
+    // Deliberately a MENTION span rather than a def..use span: a loop-carried
+    // register is defined at the bottom of the body and read at the top, so in
+    // linear order its last use precedes its first definition and a def..use
+    // test would call it dead exactly where it is live across every call in
+    // the loop. The mention span has no such hole, at the cost of naming some
+    // registers that are not live at a given call -- the safe direction for a
+    // diagnostic, and the runtime filter discards the noise.
+    int index = 0;
+    for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, func->insns); insn;
+            insn = DLIST_NEXT(MIR_insn_t, insn), index++) {
+        for (size_t nop = 0; nop < insn->nops; nop++) {
+            MIR_op_t* op = &insn->ops[nop];
+            MIR_reg_t mentioned[2] = {0, 0};
+            if (op->mode == MIR_OP_REG) {
+                mentioned[0] = op->u.reg;
+            } else if (op->mode == MIR_OP_MEM) {
+                mentioned[0] = op->u.mem.base;
+                mentioned[1] = op->u.mem.index;
+            }
+            for (int m = 0; m < 2; m++) {
+                MIR_reg_t reg = mentioned[m];
+                if (!reg || reg > max_reg) continue;
+                if (index < first_mention[reg]) first_mention[reg] = index;
+                if (index > last_mention[reg]) last_mention[reg] = index;
+            }
+        }
+    }
+
+    // Pass 3: probe the live-across registers at each may-GC call.
+    MIR_insn_t saved_insert_after = mt->em.insert_after;
+    index = 0;
+    int probed = 0;
+    for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, func->insns); insn;
+            insn = DLIST_NEXT(MIR_insn_t, insn), index++) {
+        if (!MIR_call_code_p(insn->code)) continue;
+        if (!em_root_call_may_collect(insn, frame->gc_call_sites,
+                frame->gc_call_site_count)) continue;
+        MIR_insn_t previous = DLIST_PREV(MIR_insn_t, insn);
+        if (!previous) continue;  // no anchor to insert behind
+        for (MIR_reg_t reg = 1; reg <= max_reg; reg++) {
+            if (first_mention[reg] >= index || last_mention[reg] <= index) continue;
+            // A candidate is already the root machinery's business; this pass
+            // exists for the registers it never heard about.
+            if (em_root_candidate_info(frame->gc_candidates,
+                    frame->gc_candidate_count, frame->gc_candidate_by_reg,
+                    frame->gc_candidate_by_reg_capacity, reg, NULL)) continue;
+            MIR_type_t reg_type = MIR_reg_type(mt->ctx, reg, func);
+            if (reg_type != MIR_T_I64 && reg_type != MIR_T_P) continue;
+            // The frame's own bookkeeping registers hold side-stack and
+            // Context addresses, never GC objects.
+            if (reg == frame->runtime || reg == frame->root_base ||
+                    reg == frame->root_end || reg == frame->number_base) continue;
+            mt->em.insert_after = previous;
+            emit_root_honesty_witness(mt, reg, reg_type, LMD_TYPE_ANY,
+                "live-across-may-gc-call");
+            previous = mt->em.insert_after;
+            probed++;
+        }
+    }
+    mt->em.insert_after = saved_insert_after;
+    mem_free(first_mention); mem_free(last_mention);
+    if (probed > 0) {
+        log_debug("root-witness: %d live-across-call probes in %s", probed,
+            function_name ? function_name : "<unnamed>");
+    }
+}
+
 static void finalize_gc_root_publication(MirTranspiler* mt,
         const char* function_name) {
-    if (!mt || mt->em.frame.root_slot_count <= 0) return;
-    MirRootWriteBackResult result;
-    if (em_finalize_recorded_roots(&mt->em, mt->em.frame.root_base,
-            mt->em.frame.anchor, &result, function_name)) {
-        mt->em.frame.root_slot_count = result.stable_slots + result.scratch_slots;
+    if (mt && mt->em.frame.root_slot_count > 0) {
+        MirRootWriteBackResult result;
+        if (em_finalize_recorded_roots(&mt->em, mt->em.frame.root_base,
+                mt->em.frame.anchor, &result, function_name)) {
+            mt->em.frame.root_slot_count =
+                result.stable_slots + result.scratch_slots;
+        }
     }
+    // Runs even when the frame took no roots at all: a function with zero root
+    // slots is precisely where an unrooted temporary would go unnoticed.
+    emit_root_witness_across_calls(mt, function_name);
 }
 
 static void note_gc_root_candidate(MirTranspiler* mt, MIR_reg_t value,
@@ -2067,18 +2221,19 @@ static void update_gc_root_slot(MirTranspiler* mt, MirVarEntry* var) {
     // An async frame snapshots only at a real suspension edge.  Keep the
     // ordinary side root current between edges: continuously mirroring every
     // local into the frame made a synchronous tail pay async set calls.
-    if (var->root_slot < 0 && !should_gc_root_var(var->mir_type, var->type_id)) {
+    if (var->root_slot < 0 &&
+            !should_gc_root_var(var->mir_type, var->type_id, var->full_type)) {
         emit_root_honesty_witness(mt, var->reg, var->mir_type, var->type_id,
             "update_gc_root_slot");
         return;
     }
     if (var->root_slot < 0) {
         var->root_slot = create_gc_root_slot(mt, var->reg,
-            lambda_gc_value_class(var->mir_type, var->type_id));
+            lambda_gc_value_class(var->mir_type, var->type_id, var->full_type));
         return;
     }
     store_gc_root_slot(mt, var->root_slot, var->reg,
-        lambda_gc_value_class(var->mir_type, var->type_id));
+        lambda_gc_value_class(var->mir_type, var->type_id, var->full_type));
 }
 
 static void emit_return_if_item_error(MirTranspiler* mt, MIR_reg_t item_reg);

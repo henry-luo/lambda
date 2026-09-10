@@ -1251,8 +1251,21 @@ JitImport jit_runtime_imports[] = {
     {"bits_to_f32", FPTR(bits_to_f32)},
     // stack overflow protection
     {"lambda_stack_overflow_error", FPTR(lambda_stack_overflow_error)},
-    // LR07-7/LR08-3 root-honesty witness (emitted only under LAMBDA_ROOT_WITNESS)
-    {"lambda_jit_root_witness", FPTR(lambda_jit_root_witness)},
+    // LR07-7/LR08-3 root-honesty witness (emitted only under LAMBDA_ROOT_WITNESS).
+    // The metadata is load-bearing, not decoration: an unannotated row defaults
+    // to JIT_EFFECT_MAY_GC with JIT_VALUE_UNKNOWN arguments, which would make
+    // the emitter publish every probed register into a root slot at the probe's
+    // own call site -- the instrumentation would then root exactly the values it
+    // exists to catch as unrooted, and would grow the frame after finalization.
+    // The probe only reads a word and compares it against the GC zone, so it
+    // allocates nothing, re-enters nothing, and none of its arguments are roots.
+    {"lambda_jit_root_witness", FPTR(lambda_jit_root_witness),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER)}},
     {"lambda_side_stack_ensure_for", FPTR(lambda_side_stack_ensure_for)},
     {"lambda_side_stack_ensure_tls", FPTR(lambda_side_stack_ensure_tls)},
     {"lambda_recovery_frame_begin_for", FPTR(lambda_recovery_frame_begin_for)},
@@ -3493,6 +3506,15 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_active_module_var_store",
         "lambda_active_module_var_at",
         "js_with_save_depth", "js_with_restore_depth",
+        // LR07-7 root-honesty probe. Reads one machine word, compares it
+        // against the GC zone (`gc_is_managed`, a pure range query) and may
+        // log; it allocates no GC object, never calls gc_collect, and never
+        // re-enters generated code. The NO_GC claim is load-bearing rather
+        // than cosmetic: as a MAY_GC row the emitter would publish every
+        // probed register into a root slot at the probe's own call site,
+        // rooting exactly the values the probe exists to catch as unrooted.
+        // Emitted only under LAMBDA_ROOT_WITNESS, so release MIR has none.
+        "lambda_jit_root_witness",
     };
     const int audited_count = (int)(sizeof(audited) / sizeof(audited[0]));
     int no_gc_count = 0;

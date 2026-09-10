@@ -427,21 +427,44 @@ static void heap_configure_gc_poisoning(gc_heap_t* gc) {
 static size_t lambda_root_witness_violation_count = 0;
 static size_t lambda_root_witness_probe_count = 0;
 
-bool lambda_root_witness_enabled(void) {
+// LAMBDA_ROOT_WITNESS selects how much of the invariant is probed:
+//   unset / 0     off
+//   1             bindings and rooted call results (cheap: a handful of probes
+//                 per function, so whole-corpus sweeps stay practical)
+//   2 / all       adds every register live across a may-GC call that the root
+//                 machinery never made a candidate -- the expression
+//                 temporaries. Tens of thousands of probes per script, so it
+//                 is opt-in rather than the default.
+int lambda_root_witness_level(void) {
     static int cached = -1;
     if (cached < 0) {
         const char* value = getenv("LAMBDA_ROOT_WITNESS");
-        cached = (value && value[0] && strcmp(value, "0") != 0) ? 1 : 0;
-        if (cached) {
-            log_info("root-witness: enabled; unrooted JIT values are checked "
-                "against the GC zone");
+        if (!value || !value[0] || strcmp(value, "0") == 0) {
+            cached = 0;
+        } else if (strcmp(value, "2") == 0 || strcmp(value, "all") == 0) {
+            cached = 2;
+        } else {
+            cached = 1;
+        }
+        if (cached > 0) {
+            log_info("root-witness: level %d; unrooted JIT values are checked "
+                "against the GC zone%s", cached,
+                cached >= 2 ? " (including expression temporaries)" : "");
             // Same shape as the COW profile: the totals are only meaningful
             // once the whole run is over, and a verification run must report
             // them even when the script itself exits early.
             atexit(lambda_root_witness_dump);
         }
     }
-    return cached == 1;
+    return cached;
+}
+
+bool lambda_root_witness_enabled(void) {
+    return lambda_root_witness_level() > 0;
+}
+
+bool lambda_root_witness_temporaries(void) {
+    return lambda_root_witness_level() >= 2;
 }
 
 static void root_witness_report(const char* shape, uint64_t raw, void* target,

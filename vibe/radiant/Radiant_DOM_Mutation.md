@@ -5,17 +5,19 @@
 **Related:** `vibe/radiant/Radiant_Issue4.md`, `vibe/editing/Radiant_Editor_Stage4C.md`  
 **Status:** implementation in progress
 
-**Implementation update, 2026-07-03:** ordinary DOM mutation fallback now uses
+**Implementation update, 2026-09-10:** ordinary DOM mutation fallback now uses
 `DOM_RECONCILE_RETAINED_FULL_LAYOUT`: it releases layout-pool-owned props,
 keeps the `ViewTree` shell and retained DOM/view nodes, runs
 `layout_html_doc(..., true)`, and prunes/reprojects StateStore afterward.
 `view_pool_destroy` remains reserved for document/root teardown. The overflow
 fixture is now covered by `dom_mutation_overflow_retained_full`. Native
 `DragDropState` source removal is covered by
-`dom_mutation_removed_source_clears_dragdrop`. Child insert/remove now only
-keeps the `structural-css-risk` fallback when loaded selectors depend on
-sibling/child structure (`:first-child`, `:nth-*`, sibling combinators,
-`:has(...)`, etc.); simple styled structural mutations remain incremental.
+`dom_mutation_removed_source_clears_dragdrop`. Child insert/remove re-cascades
+from the parent, so sibling/child structure (`:first-child`, `:nth-*`, sibling
+combinators, etc.) remains incremental. Only `:has(...)`, whose match can
+change on an ancestor outside that subtree, keeps the
+`broad-structural-css-risk` retained-full fallback. Simple styled structural
+mutations remain incremental.
 Parent-local `innerHTML`, `innerText`, element `textContent`, and
 `textarea.defaultValue` replacements now keep their detailed child remove/insert
 records instead of forcing a broad `TREE_REPLACE` fallback.
@@ -155,12 +157,12 @@ DOM nodes that still exist.
 - `DOM_JS_MUTATION_UNKNOWN`;
 - `DOM_JS_MUTATION_TREE_REPLACE`;
 - mutations touching `<style>` or stylesheet-related `<link>`;
-- child insert/remove when `doc->stylesheet_count > 0`.
+- child insert/remove when a loaded selector has a broad `:has(...)`
+  dependency.
 
-The last case is especially broad. Most real editor documents have stylesheets,
-so a local insertion such as a drop-line indicator can still fall back even
-though the DOM mutation itself is local and the affected node identities are
-stable.
+The broad selector case is intentionally retained: a child insertion can change
+the style of an ancestor selected by `:has(...)`, outside the parent subtree
+that is normally re-cascaded.
 
 ## 4. Proposal Goals
 
@@ -178,27 +180,20 @@ stable.
 
 ### 5.1 Treat Stylesheet Presence as a Cascade Scope Problem
 
-The current `structural-css-risk` gate rejects any child insert/remove when the
-document has stylesheets. That is safe but too broad.
+The former `structural-css-risk` gate rejected a child insert/remove when the
+document had local structural selectors. That was safe but too broad.
 
 Replace it with scoped invalidation:
 
-- For child insert/remove, compute a conservative cascade root:
-  - the parent for insertion/removal;
-  - the inserted subtree for new nodes;
-  - ancestors up to the nearest style containment boundary if one exists;
-  - otherwise ancestors to root for selectors that may depend on sibling/index
-    relationships.
-- Re-cascade that scope rather than falling back solely because stylesheets
-  exist.
-- Only force fallback for stylesheet mutations themselves, unsupported selector
-  invalidation, or record overflow.
+- For child insert/remove, use the parent as the cascade root. It contains the
+  changed child list and every sibling whose local structural match can change.
+- Re-cascade that scope rather than falling back for sibling/index selectors.
+- Only force fallback for stylesheet mutations, record overflow, or a broad
+  ancestor-sensitive selector such as `:has(...)`.
 
-Selectors that require wider invalidation:
+Selectors that require broader invalidation:
 
-- sibling combinators (`+`, `~`);
-- child index selectors (`:first-child`, `:last-child`, `:nth-*`);
-- ancestor-dependent states such as `:has(...)` if/when supported.
+- ancestor-dependent states such as `:has(...)`.
 
 Until the selector invalidation analyzer is precise, it is acceptable to choose
 a broader root, including the whole document, while still retaining the view
@@ -489,10 +484,10 @@ full layout.
 
 Work:
 
-- **Partially implemented:** replace the broad `structural-css-risk` gate with
-  a conservative selector dependency scan. Child insert/remove now stays
-  incremental for simple class/id/tag/attribute/descendant/child selectors, and
-  falls back only for sibling/position-sensitive selectors.
+- **Implemented:** selector dependency classification distinguishes local
+  sibling/position-sensitive selectors from broad `:has(...)` selectors. Child
+  insert/remove re-cascades the parent for local selectors and stays
+  incremental; `:has(...)` retains the broad fallback.
 - **Implemented:** downgrade parent-local `innerHTML`, `innerText`, element
   `textContent`, and `textarea.defaultValue` replacement by preserving detailed
   child remove/insert records instead of adding a broad `TREE_REPLACE` record.
@@ -508,7 +503,7 @@ Work:
 Verification:
 
 - **Implemented:** add tests for structural insert/remove in a styled document:
-  one safe simple-stylesheet case and one `:first-child` risk case.
+  one local `:first-child` case and one broad `:has(...)` fallback case.
 - **Implemented:** add tests for `innerHTML` replacement preserving parent state
   but dropping removed child state.
 - **Implemented:** add tests for `textarea.defaultValue` replacement staying
@@ -585,7 +580,8 @@ Add fixtures under `test/ui` with matching `.html` and `.json` files:
 | Fixture | Purpose | Key assertions |
 |---------|---------|----------------|
 | `dom_mutation_structural_css_retains_state` | Styled document inserts/removes a sibling node under simple selectors. | implemented; incremental reconcile, state snapshot before/after retained |
-| `dom_mutation_structural_css_risk_retained_full` | Styled document inserts before a `:first-child` match. | implemented; retained full layout with `structural-css-risk` |
+| `dom_mutation_structural_css_risk_retained_full` | Styled document inserts before a `:first-child` match. | implemented; incremental reconcile, parent re-cascade updates the local structural match |
+| `dom_mutation_has_css_risk_retained_full` | Styled document insertion changes an ancestor `:has(...)` match. | retained full layout with `broad-structural-css-risk` |
 | `dom_mutation_stylesheet_fallback_retains_state` | Mutating a `<style>` element still needs broad recascade. | implemented; retained full layout, connected form state retained |
 | `dom_mutation_innerhtml_parent_retains_child_prunes` | `innerHTML` replaces children but parent survives. | implemented; incremental reconcile, parent state retained, removed child state pruned |
 | `dom_mutation_textcontent_incremental` | Element `textContent` replaces children while unrelated focused state survives. | implemented; incremental reconcile, focus/form state retained |
