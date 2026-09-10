@@ -4,6 +4,7 @@
 #include "js_exec_profile.h"
 #include "../runtime/mir_shape_candidates.hpp"
 #include "js_typed_array_carrier.hpp"
+#include "js_props.h"
 #include "../../lib/lambda_alloca.h"
 #include "../../lib/hashmap_helpers.h"
 
@@ -1055,8 +1056,14 @@ static MIR_reg_t jm_guard_number_element(JsMirTranspiler* mt, MIR_reg_t item,
     MIR_label_t numeric = jm_new_label(mt);
     jm_emit_branch(mt, MIR_BT, numeric, bits);
     jm_emit_reg_binary_op(mt, MIR_URSH, bits, item, MIR_new_int_op(mt->ctx, 56));
-    jm_access_guard(mt, MIR_BEQ, numeric, bits, MIR_new_int_op(mt->ctx, LMD_TYPE_INT));
+    MIR_label_t integral = jm_new_label(mt);
+    jm_access_guard(mt, MIR_BEQ, integral, bits, MIR_new_int_op(mt->ctx, LMD_TYPE_INT));
     jm_access_guard(mt, MIR_BNE, miss, bits, MIR_new_int_op(mt->ctx, LMD_TYPE_FLOAT));
+    jm_emit_jmp(mt, numeric);
+    jm_emit_label(mt, integral);
+    // JS symbols share the int tag; numeric storage must still run ToNumber's throw.
+    jm_access_guard(mt, MIR_BLE, miss, jm_emit_unbox_int(mt, item),
+        MIR_new_int_op(mt->ctx, -(int64_t)JS_SYMBOL_BASE));
     jm_emit_label(mt, numeric);
     return jm_emit_unbox_float(mt, item);
 }
@@ -1150,13 +1157,10 @@ static MIR_reg_t jm_emit_numeric_index_access(JsMirTranspiler* mt,
     const size_t payload = offsetof(JsTypedArrayMapCarrier, payload);
     MIR_reg_t element_type = em_load_at(em, array,
         payload + offsetof(JsTypedArray, element_type), MIR_T_I32, "ta_elem");
-    MIR_label_t supported = jm_new_label(mt);
-    if (!store_value) {
-        jm_access_guard(mt, MIR_BEQ, supported, element_type,
-            MIR_new_int_op(mt->ctx, JS_TYPED_INT32));
-    }
-    guard(MIR_BNE, element_type, JS_TYPED_FLOAT64);
-    jm_emit_label(mt, supported);
+    // Number lanes through Uint8ClampedArray share one live-view admission.
+    // BigInt and float16 retain their semantic conversion kernels.
+    guard(MIR_UBGT, element_type, JS_TYPED_UINT8_CLAMPED);
+    if (store_value) guard(MIR_BEQ, element_type, JS_TYPED_UINT8_CLAMPED);
     guard(MIR_BNE, em_load_at(em, array, payload + offsetof(JsTypedArray, length_tracking), MIR_T_U8, "ta_tracking"), 0);
     MIR_reg_t buffer = em_load_at(em, array, payload + offsetof(JsTypedArray, buffer), MIR_T_I64, "ta_buffer");
     guard(MIR_BEQ, buffer, 0);
@@ -1177,23 +1181,48 @@ static MIR_reg_t jm_emit_numeric_index_access(JsMirTranspiler* mt,
     MIR_reg_t storage_offset = em_load_at(em, buffer, offsetof(ByteBufferHandle, storage_offset), MIR_T_I64, "ta_storage_offset");
     jm_emit_reg_binary(mt, MIR_ADD, data, data, storage_offset);
     jm_emit_reg_binary(mt, MIR_ADD, data, data, offset);
-    if (!store_value) {
-        MIR_label_t double_view = jm_new_label(mt);
-        jm_access_guard(mt, MIR_BNE, double_view, element_type,
-            MIR_new_int_op(mt->ctx, JS_TYPED_INT32));
-        // signed 32-bit lanes share the live view checks and JS number
-        // publication; they must not become Lambda INT-symbol Items.
-        jm_emit_reg_binary_op(mt, MIR_RSH, bytes, bytes, MIR_new_int_op(mt->ctx, 2));
-        jm_access_guard(mt, MIR_UBGE, miss, index, MIR_new_reg_op(mt->ctx, bytes));
-        MIR_reg_t lane = em_load_at(em, em_element_address(em, data, index, 4),
-            0, MIR_T_I32, "ta_int32");
-        jm_emit_dmov(mt, number_value, jm_emit_int_to_double(mt, lane));
-        jm_emit_jmp(mt, number_result);
-        jm_emit_label(mt, double_view);
+    // The descriptor table is the authority for widths and sign extension;
+    // one emitted arm per physical format replaces handwritten type variants.
+    MIR_reg_t typed_number = store_value
+        ? jm_guard_number_element(mt, store_value, miss) : number_value;
+    MIR_reg_t typed_integer = 0;
+    if (store_value) {
+        MIR_label_t float_store = jm_new_label(mt);
+        jm_access_guard(mt, MIR_BGE, float_store, element_type,
+            MIR_new_int_op(mt->ctx, JS_TYPED_FLOAT32));
+        // ToInt32 is total and noncollecting; narrowing its low bits also
+        // implements the modulo conversion of the 8/16/unsigned 32-bit lanes.
+        typed_integer = jm_call_1(mt, "js_double_to_int32", MIR_T_I64,
+            MIR_T_D, MIR_new_reg_op(mt->ctx, typed_number));
+        jm_emit_label(mt, float_store);
     }
-    jm_emit_reg_binary_op(mt, MIR_RSH, bytes, bytes, MIR_new_int_op(mt->ctx, 3));
-    jm_access_guard(mt, MIR_UBGE, miss, index, MIR_new_reg_op(mt->ctx, bytes));
-    jm_emit_mov(mt, address, em_element_address(em, data, index, 8));
+    for (int type = JS_TYPED_INT8; type <= JS_TYPED_UINT8_CLAMPED; type++) {
+        if (store_value && type == JS_TYPED_UINT8_CLAMPED) continue;
+        const JsTypedArraySpec* spec = js_typed_array_spec((JsTypedArrayType)type);
+        MIR_type_t memory_type = em_numeric_storage_type(spec->elem_type);
+        MIR_label_t next = jm_new_label(mt);
+        jm_access_guard(mt, MIR_BNE, next, element_type, MIR_new_int_op(mt->ctx, type));
+        MIR_reg_t live_length = jm_new_reg(mt, "ta_length", MIR_T_I64);
+        int shift = spec->byte_size == 8 ? 3 : spec->byte_size == 4 ? 2
+            : spec->byte_size == 2 ? 1 : 0;
+        jm_emit_reg_binary_op(mt, MIR_RSH, live_length, bytes,
+            MIR_new_int_op(mt->ctx, shift));
+        jm_access_guard(mt, MIR_UBGE, miss, index, MIR_new_reg_op(mt->ctx, live_length));
+        MIR_reg_t slot = em_element_address(em, data, index, spec->byte_size);
+        if (store_value) {
+            em_store_at(em, slot, 0, memory_type,
+                spec->integer ? typed_integer : typed_number);
+            jm_emit_mov(mt, result, store_value);
+            jm_emit_jmp(mt, done);
+        } else {
+            MIR_reg_t lane = em_load_at(em, slot, 0, memory_type, "ta_value");
+            jm_emit_dmov(mt, number_value,
+                spec->integer ? jm_emit_int_to_double(mt, lane) : lane);
+            jm_emit_jmp(mt, number_result);
+        }
+        jm_emit_label(mt, next);
+    }
+    jm_emit_jmp(mt, miss);
 
     jm_emit_label(mt, floating);
     if (store_value) {
@@ -1723,10 +1752,10 @@ static MIR_reg_t jm_box_bigint_literal(JsMirTranspiler* mt, String* spelling) {
 static MirValue jm_expression_value(JsMirTranspiler* mt, JsAstNode* item,
         MIR_reg_t reg, TypeId type_id, ValueRep rep);
 
-// Literal lowering owns its boxed Item carrier; callers receive the complete
-// descriptor instead of re-deriving that fact from the literal tag.
+// Literal lowering keeps immediate Items unless a numeric consumer requests
+// the raw double; that demand avoids a boxed constant's scratch-memory decode.
 static MirValue jm_transpile_literal_value(JsMirTranspiler* mt,
-        JsLiteralNode* lit) {
+        JsLiteralNode* lit, ValueRep required = VALUE_REP_NONE) {
     MIR_reg_t result = 0;
     switch (lit->literal_type) {
     case JS_LITERAL_NUMBER: {
@@ -1738,6 +1767,12 @@ static MirValue jm_transpile_literal_value(JsMirTranspiler* mt,
             break;
         }
         double val = lit->value.number_value;
+        if (required == VALUE_REP_F64) {
+            result = jm_new_reg(mt, "literal_number", MIR_T_D);
+            jm_emit_reg_op(mt, MIR_DMOV, result, MIR_new_double_op(mt->ctx, val));
+            return jm_expression_value(mt, (JsAstNode*)lit, result,
+                LMD_TYPE_FLOAT, VALUE_REP_F64);
+        }
         result = jm_box_float_const(mt, val);
         break;
     }
@@ -6591,13 +6626,12 @@ static MirValue jm_emit_array_value(JsMirTranspiler* mt,
 // accessors and `__proto__` create no data slot, and a duplicate key would put
 // two entries in the shape where the object has one property.
 //
-static uint32_t jm_object_literal_shape_keys_uncached(JsMirTranspiler* mt,
-        JsObjectNode* obj, uint32_t* out_count);
+static uint32_t jm_construction_keys_uncached(JsMirTranspiler* mt,
+        AstNode* obj, uint32_t* out_count);
 
 struct JsLiteralShapeRange {
-    JsObjectNode* object;
-    uint32_t first;
-    uint32_t count;
+    AstNode* object;
+    MirConstructionPlan plan;
 };
 HASHMAP_DEFINE_PTRKEY(jm_literal_shape_range, JsLiteralShapeRange, object)
 
@@ -6610,65 +6644,112 @@ HASHMAP_DEFINE_LENSTRKEY(jm_shape_field, JsShapeFieldCandidate, name, length)
 
 // Every construction/access to one literal must use the same module range.
 // Hashing the AST identity also bounds compile cost for large JS libraries.
-static uint32_t jm_object_literal_shape_keys(JsMirTranspiler* mt,
-        JsObjectNode* obj, uint32_t* out_count) {
+static uint32_t jm_construction_keys(JsMirTranspiler* mt,
+        AstNode* obj, uint32_t* out_count) {
     if (out_count) *out_count = 0;
     if (!mt || !obj) return UINT32_MAX;
     if (!mt->literal_shape_ranges) mt->literal_shape_ranges = jm_literal_shape_range_new(16);
     if (!mt->literal_shape_ranges) return UINT32_MAX;
-    JsLiteralShapeRange key = {obj, UINT32_MAX, 0};
+    JsLiteralShapeRange key = {obj, {NULL, UINT32_MAX, 0}};
     const JsLiteralShapeRange* found = (const JsLiteralShapeRange*)hashmap_get(mt->literal_shape_ranges, &key);
     if (found) {
-        if (out_count) *out_count = found->count;
-        return found->first;
+        if (out_count) *out_count = found->plan.field_count;
+        return found->plan.recipe_id;
     }
-    key.first = jm_object_literal_shape_keys_uncached(mt, obj, &key.count);
+    key.plan.recipe_id = jm_construction_keys_uncached(mt, obj, &key.plan.field_count);
     hashmap_set(mt->literal_shape_ranges, &key);
-    if (out_count) *out_count = key.count;
-    return key.first;
+    if (out_count) *out_count = key.plan.field_count;
+    return key.plan.recipe_id;
 }
 
-static uint32_t jm_object_literal_shape_keys_uncached(JsMirTranspiler* mt,
-        JsObjectNode* obj, uint32_t* out_count) {
+static uint32_t jm_construction_keys_uncached(JsMirTranspiler* mt,
+        AstNode* obj, uint32_t* out_count) {
     if (out_count) *out_count = 0;
     if (!mt || !obj) return UINT32_MAX;
     JsIdentifierNode* keys[JS_PREDICTED_SHAPE_MAX_SLOTS];
     uint32_t count = 0;
-    for (JsAstNode* prop = obj->properties; prop; prop = prop->next) {
-        if (prop->node_type != JS_AST_NODE_PROPERTY) return UINT32_MAX;
-        JsPropertyNode* p = (JsPropertyNode*)prop;
-        if (!p->key || !p->value || p->computed || p->method ||
-                p->is_getter || p->is_setter) return UINT32_MAX;
-        if (p->key->node_type != JS_AST_NODE_IDENTIFIER) return UINT32_MAX;
-        JsIdentifierNode* id = (JsIdentifierNode*)p->key;
-        if (!id->name || id->name->len == 0) return UINT32_MAX;
-        if (js_ast_is_proto_literal_key(p->key)) return UINT32_MAX;
-        if (count >= JS_PREDICTED_SHAPE_MAX_SLOTS) return UINT32_MAX;
-        for (uint32_t i = 0; i < count; i++) {
-            if (keys[i]->name->len == id->name->len &&
-                    memcmp(keys[i]->name->chars, id->name->chars,
-                        id->name->len) == 0) {
-                return UINT32_MAX;
+    if (obj->node_type == JS_AST_NODE_OBJECT_EXPRESSION) {
+        for (JsAstNode* prop = ((JsObjectNode*)obj)->properties; prop; prop = prop->next) {
+            if (prop->node_type != JS_AST_NODE_PROPERTY) return UINT32_MAX;
+            JsPropertyNode* p = (JsPropertyNode*)prop;
+            if (!p->key || !p->value || p->computed || p->method ||
+                    p->is_getter || p->is_setter) return UINT32_MAX;
+            if (p->key->node_type != JS_AST_NODE_IDENTIFIER) return UINT32_MAX;
+            JsIdentifierNode* id = (JsIdentifierNode*)p->key;
+            if (!id->name || id->name->len == 0) return UINT32_MAX;
+            if (js_ast_is_proto_literal_key(p->key)) return UINT32_MAX;
+            if (count >= JS_PREDICTED_SHAPE_MAX_SLOTS) return UINT32_MAX;
+            for (uint32_t i = 0; i < count; i++) {
+                if (keys[i]->name->len == id->name->len &&
+                        memcmp(keys[i]->name->chars, id->name->chars,
+                            id->name->len) == 0) {
+                    return UINT32_MAX;
+                }
             }
+            keys[count++] = id;
         }
-        keys[count++] = id;
-    }
+    } else if (ast_index_node_is_function(obj)) {
+        JsFunctionNode* fn = (JsFunctionNode*)obj;
+        if (fn->is_arrow || fn->is_async || fn->is_generator || !fn->body ||
+                fn->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) return UINT32_MAX;
+        for (AstNode* stmt = ((JsBlockNode*)fn->body)->statements; stmt; stmt = stmt->next) {
+            if (stmt->node_type != JS_AST_NODE_EXPRESSION_STATEMENT) break;
+            AstNode* expr = ((JsExpressionStatementNode*)stmt)->expression;
+            if (!expr || expr->node_type != JS_AST_NODE_ASSIGNMENT_EXPRESSION) break;
+            JsAssignmentNode* assignment = (JsAssignmentNode*)expr;
+            if (assignment->op != JS_OP_ASSIGN || !assignment->left ||
+                    assignment->left->node_type != JS_AST_NODE_MEMBER_EXPRESSION) break;
+            JsMemberNode* member = (JsMemberNode*)assignment->left;
+            if (member->computed || !member->object ||
+                    !js_ast_identifier_named(member->object, "this", 4) ||
+                    !member->property || member->property->node_type != JS_AST_NODE_IDENTIFIER) break;
+            JsIdentifierNode* key = (JsIdentifierNode*)member->property;
+            if (!key->name || !key->name->len || js_ast_is_proto_literal_key(member->property)) break;
+            if (key->name->len == (size_t)JS_INTERNAL_PROTO_KEY_LEN &&
+                    memcmp(key->name->chars, JS_INTERNAL_PROTO_KEY, key->name->len) == 0) break;
+            if (count + 1 >= JS_PREDICTED_SHAPE_MAX_SLOTS) break;
+            bool duplicate = false;
+            for (uint32_t i = 0; i < count; i++) duplicate |=
+                keys[i]->name->len == key->name->len &&
+                memcmp(keys[i]->name->chars, key->name->chars, key->name->len) == 0;
+            if (duplicate) break;
+            keys[count++] = key;
+        }
+    } else return UINT32_MAX;
     if (count == 0) return UINT32_MAX;
     // Reserved only once every key has passed, so a refusal never leaves a
     // partial range in the module image. jm_module_name_append (not _index)
     // keeps the entries contiguous even when a spelling already appears.
     uint32_t first = UINT32_MAX;
+    uint32_t prefix = ast_index_node_is_function(obj) ? 1 : 0;
+    if (prefix) {
+        // OrdinaryCreateFromConstructor publishes this existing internal slot
+        // before the reserved source fields. It is not a public property.
+        first = jm_module_name_append(mt, JS_INTERNAL_PROTO_KEY, JS_INTERNAL_PROTO_KEY_LEN);
+        if (first == UINT32_MAX) return first;
+    }
     for (uint32_t i = 0; i < count; i++) {
         uint32_t at = jm_module_name_append(mt, keys[i]->name->chars,
             (uint32_t)keys[i]->name->len);
         if (at == UINT32_MAX) return UINT32_MAX;
-        if (i == 0) first = at;
-        else if (at != first + i) return UINT32_MAX;  // range broken; stay generic
+        if (i == 0 && !prefix) first = at;
+        else if (at != first + prefix + i) return UINT32_MAX;  // range broken; stay generic
     }
-    if (out_count) *out_count = count;
+    if (out_count) *out_count = count + prefix;
     return first;
 }
 
+
+void jm_emit_constructor_plan(JsMirTranspiler* mt, MIR_reg_t function,
+        JsFunctionNode* node) {
+    uint32_t count = 0;
+    uint32_t first = jm_construction_keys(mt, (AstNode*)node, &count);
+    if (first == UINT32_MAX || !count) return;
+    jm_call_void_3(mt, "js_set_constructor_plan",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, function),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, first),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, count));
+}
 
 // The slot a property name occupies in a registered range, or -1. The range's
 // spellings are the module name specs themselves, so this needs no second copy
@@ -6692,10 +6773,15 @@ static int jm_predicted_shape_slot_for(JsMirTranspiler* mt, uint32_t first,
 // candidates follow resolved bindings, direct-call arguments and returns.
 // A later rebind or incompatible caller fails the emitted runtime guard.
 static void* jm_shape_direct_candidate(void* owner, AstNode* node) {
-    if (node->node_type != JS_AST_NODE_OBJECT_EXPRESSION) return NULL;
+    JsMirTranspiler* mt = (JsMirTranspiler*)owner;
+    if (node->node_type == JS_AST_NODE_NEW_EXPRESSION) {
+        node = (AstNode*)jm_resolve_direct_call_function(mt, (JsCallNode*)node, false);
+    } else if (js_ast_identifier_named(node, "this", 4)) {
+        node = mt->current_fc ? (AstNode*)mt->current_fc->node : NULL;
+    } else if (node->node_type != JS_AST_NODE_OBJECT_EXPRESSION) return NULL;
+    if (!node) return NULL;
     uint32_t count = 0;
-    uint32_t first = jm_object_literal_shape_keys((JsMirTranspiler*)owner,
-        (JsObjectNode*)node, &count);
+    uint32_t first = jm_construction_keys(mt, node, &count);
     return first != UINT32_MAX && first < JS_PREDICTED_SHAPE_LIMIT ? node : NULL;
 }
 
@@ -6763,16 +6849,7 @@ static void jm_resolve_shape_candidates(JsMirTranspiler* mt) {
     }
 }
 
-static AstNode* jm_shape_for_field(JsMirTranspiler* mt, AstNode* receiver,
-        String* name, uint32_t* first, uint32_t* count, int* slot) {
-    jm_resolve_shape_candidates(mt);
-    AstNode* candidate = jm_shape_candidate(mt, receiver);
-    auto find_slot = [&](AstNode* node) -> int {
-        *first = jm_object_literal_shape_keys(mt, (JsObjectNode*)node, count);
-        return *first == UINT32_MAX ? -1 : jm_predicted_shape_slot_for(mt,
-            *first, *count, name->chars, (uint32_t)name->len);
-    };
-    if (candidate && (*slot = find_slot(candidate)) >= 0) return candidate;
+static void* jm_unique_construction_for_field(JsMirTranspiler* mt, String* name) {
     // Build the module's unique-field index once; scanning the whole AST at
     // each unknown receiver makes large-library compilation quadratic.
     if (!mt->shape_field_candidates) {
@@ -6781,10 +6858,15 @@ static AstNode* jm_shape_for_field(JsMirTranspiler* mt, AstNode* receiver,
         AstIndex* index = &mt->tp->ast_index;
         for (uint32_t i = 0; i < index->count; i++) {
             AstNode* node = index->nodes[i];
-            if (!jm_shape_direct_candidate(mt, node)) continue;
-            for (AstNode* property = ((JsObjectNode*)node)->properties;
-                    property; property = property->next) {
-                String* field = ((JsIdentifierNode*)((JsPropertyNode*)property)->key)->name;
+            if (node->node_type != JS_AST_NODE_OBJECT_EXPRESSION &&
+                    !ast_index_node_is_function(node)) continue;
+            uint32_t count = 0;
+            uint32_t first = jm_construction_keys(mt, node, &count);
+            if (first == UINT32_MAX || first >= JS_PREDICTED_SHAPE_LIMIT) continue;
+            uint32_t start = ast_index_node_is_function(node) ? 1 : 0;
+            for (uint32_t slot = start; slot < count; slot++) {
+                NameRef field = (NameRef)arraylist_get(mt->module_name_specs,
+                    (int)(first - mt->module_name_base + slot));
                 JsShapeFieldCandidate key = {field->chars, (uint32_t)field->len, node};
                 const JsShapeFieldCandidate* previous = (const JsShapeFieldCandidate*)
                     hashmap_get(mt->shape_field_candidates, &key);
@@ -6797,32 +6879,22 @@ static AstNode* jm_shape_for_field(JsMirTranspiler* mt, AstNode* receiver,
     const JsShapeFieldCandidate* found = (const JsShapeFieldCandidate*)
         hashmap_get(mt->shape_field_candidates, &key);
     if (!found || !found->literal) return NULL;
-    *slot = find_slot(found->literal);
-    return *slot >= 0 ? found->literal : NULL;
+    return found->literal;
 }
 
-static MIR_reg_t jm_literal_shape_handle(JsMirTranspiler* mt,
-        uint32_t first, uint32_t count) {
-    JsMirNameCache* cache = &mt->func_em->literal_shape_cache;
-    jm_name_cache_begin(cache, mt->func_em->em.func_item);
-    MIR_reg_t handle = jm_name_cache_find(cache, first, (NameId)count);
-    if (!handle) {
-        handle = jm_new_reg(mt, "literal_shape", MIR_T_I64);
-        // Unlike a block name cache, this recipe handle is initialized on
-        // every entry and resolved lazily, so sibling branches can share it.
-        MIR_prepend_insn(mt->ctx, mt->func_em->em.func_item,
-            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, handle),
-                MIR_new_int_op(mt->ctx, 0)));
-        jm_name_cache_store(cache, first, (NameId)count, handle);
-    }
-    MIR_label_t ready = jm_new_label(mt);
-    jm_emit_branch(mt, MIR_BT, ready, handle);
-    MIR_reg_t resolved = jm_call_2(mt, "js_literal_shape", MIR_T_I64,
-        MIR_T_I64, MIR_new_int_op(mt->ctx, first),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, count));
-    jm_emit_mov(mt, handle, resolved);
-    jm_emit_label(mt, ready);
-    return handle;
+static bool jm_shape_for_field(JsMirTranspiler* mt, AstNode* receiver,
+        String* name, MirFieldAccessPlan* plan) {
+    jm_resolve_shape_candidates(mt);
+    return mir_plan_field_access(jm_shape_candidate(mt, receiver),
+        [&](void* site, MirFieldAccessPlan* selected) {
+            uint32_t count = 0;
+            uint32_t first = jm_construction_keys(mt, (AstNode*)site, &count);
+            int slot = first == UINT32_MAX ? -1 : jm_predicted_shape_slot_for(mt,
+                first, count, name->chars, (uint32_t)name->len);
+            if (slot < 0) return false;
+            *selected = {{NULL, first, count}, NULL, slot * (int64_t)sizeof(void*), slot};
+            return true;
+        }, [&]() { return jm_unique_construction_for_field(mt, name); }, plan);
 }
 
 static void jm_access_guard(JsMirTranspiler* mt, MIR_insn_code_t code,
@@ -6837,14 +6909,14 @@ static MIR_reg_t jm_emit_predicted_shape_access(JsMirTranspiler* mt,
         JsAstNode* receiver, MIR_reg_t obj, String* key_name,
         MIR_reg_t name_id, MIR_reg_t store_value, bool strict) {
     if (!mt || !receiver || !key_name) return 0;
-    uint32_t first = 0, count = 0;
-    int slot = -1;
-    if (!jm_shape_for_field(mt, receiver, key_name, &first, &count, &slot)) return 0;
+    MirFieldAccessPlan plan = {};
+    if (!jm_shape_for_field(mt, receiver, key_name, &plan)) return 0;
+    int slot = plan.slot;
+    int64_t offset = plan.byte_offset;
     // Event-handler names keep the host observer even on ordinary objects.
     if (store_value && key_name->len >= 2 &&
             key_name->chars[0] == 'o' && key_name->chars[1] == 'n') return 0;
     MirEmitter* em = &mt->func_em->em;
-    MIR_reg_t expected = jm_literal_shape_handle(mt, first, count);
     MIR_label_t miss = jm_new_label(mt), done = jm_new_label(mt);
     MIR_label_t success = done;
 #ifdef LAMBDA_JS_EXEC_PROFILE
@@ -6864,14 +6936,22 @@ static MIR_reg_t jm_emit_predicted_shape_access(JsMirTranspiler* mt,
     auto guard = [&](MIR_insn_code_t code, MIR_reg_t value, int64_t want) {
         jm_access_guard(mt, code, miss, value, MIR_new_int_op(mt->ctx, want));
     };
-    guard(MIR_BEQ, expected, 0);
     MIR_reg_t shape = em_load_at(em, map, LAMBDA_GC_OFF_MAP_TYPE, MIR_T_I64, "slot_shape");
-    jm_access_guard(mt, MIR_BNE, miss, shape, MIR_new_reg_op(mt->ctx, expected));
+    guard(MIR_BEQ, shape, 0);
     guard(MIR_BNE, em_load_at(em, map, offsetof(Container, map_kind), MIR_T_U8, "slot_map_kind"), MAP_KIND_PLAIN);
-    MIR_reg_t flags = em_load_at(em, map, offsetof(Container, flags), MIR_T_U8, "slot_flags");
-    jm_emit_reg_binary_op(mt, MIR_AND, flags, flags, MIR_new_int_op(mt->ctx, 0x80));
-    guard(MIR_BNE, flags, 0); // reserved constructor slots are not own properties yet
-    guard(MIR_BLT, em_load_at(em, map, LAMBDA_GC_OFF_MAP_DATA_CAP, MIR_T_I32, "slot_cap"), (slot + 1) * 8);
+    if (store_value) {
+        MIR_reg_t flags = em_load_at(em, map, offsetof(Container, flags), MIR_T_U8, "slot_flags");
+        jm_emit_reg_binary_op(mt, MIR_AND, flags, flags, MIR_new_int_op(mt->ctx, 0x10));
+        guard(MIR_BNE, flags, 0);
+    }
+    // Other reserved fields do not hide this already initialized own slot.
+    MIR_reg_t reserved = em_load_at(em, map, slot < 8
+        ? offsetof(Container, ctor_reserved_mask_lo) : offsetof(Container, ctor_reserved_mask_hi),
+        MIR_T_U8, "slot_reserved");
+    jm_emit_reg_binary_op(mt, MIR_AND, reserved, reserved,
+        MIR_new_int_op(mt->ctx, 1u << (slot & 7)));
+    guard(MIR_BNE, reserved, 0);
+    guard(MIR_BLT, em_load_at(em, map, LAMBDA_GC_OFF_MAP_DATA_CAP, MIR_T_I32, "slot_cap"), offset + 8);
     MIR_reg_t data = em_load_at(em, map, LAMBDA_GC_OFF_MAP_DATA, MIR_T_I64, "slot_data");
     guard(MIR_BEQ, data, 0);
     MIR_reg_t entries = em_load_at(em, shape, offsetof(TypeMap, slot_entries), MIR_T_I64, "slot_entries");
@@ -6879,19 +6959,64 @@ static MIR_reg_t jm_emit_predicted_shape_access(JsMirTranspiler* mt,
     guard(MIR_BLE, em_load_at(em, shape, offsetof(TypeMap, slot_count), MIR_T_I32, "slot_count"), slot);
     MIR_reg_t entry = em_load_at(em, entries, slot * sizeof(void*), MIR_T_I64, "slot_entry");
     guard(MIR_BEQ, entry, 0);
+    // A transition may keep this slot while changing the shape identity. The
+    // live NameId, offset, attributes and lane are the complete access witness.
+    jm_access_guard(mt, MIR_BNE, miss,
+        em_load_at(em, entry, offsetof(ShapeEntry, name_id), MIR_T_U32, "slot_name"),
+        MIR_new_reg_op(mt->ctx, name_id));
     guard(MIR_BNE, em_load_at(em, entry, offsetof(ShapeEntry, flags), MIR_T_U8, "slot_attrs"), 0);
-    guard(MIR_BNE, em_load_at(em, entry, offsetof(ShapeEntry, byte_offset), MIR_T_I64, "slot_offset"), slot * 8);
+    guard(MIR_BNE, em_load_at(em, entry, offsetof(ShapeEntry, byte_offset), MIR_T_I64, "slot_offset"), offset);
     guard(MIR_BNE, em_load_at(em, entry, offsetof(ShapeEntry, storage) + offsetof(LaneStorageDesc, nullable), MIR_T_U8, "slot_nullable"), 0);
     MIR_reg_t domain = em_load_at(em, entry,
         offsetof(ShapeEntry, storage) + offsetof(LaneStorageDesc, value_domain), MIR_T_U8, "slot_domain");
-    MIR_reg_t word = em_load_at(em, data, slot * 8, MIR_T_I64, "slot_word");
+    MIR_reg_t word = em_load_at(em, data, offset, MIR_T_I64, "slot_word");
     guard(MIR_BEQ, word, (int64_t)JS_DELETED_SENTINEL_VAL);
     MIR_label_t number = jm_new_label(mt), pointer = jm_new_label(mt), null_slot = jm_new_label(mt);
     jm_access_guard(mt, MIR_BEQ, number, domain, MIR_new_int_op(mt->ctx, LMD_TYPE_FLOAT));
     jm_access_guard(mt, MIR_BEQ, null_slot, domain, MIR_new_int_op(mt->ctx, LMD_TYPE_NULL));
+    const TypeId scalar_types[] = {LMD_TYPE_BOOL, LMD_TYPE_INT, LMD_TYPE_STRING};
+    MIR_label_t scalar = store_value ? NULL : jm_new_label(mt);
+    for (TypeId type : scalar_types) {
+        if (!store_value) {
+            jm_access_guard(mt, MIR_BEQ, scalar, domain, MIR_new_int_op(mt->ctx, type));
+            continue;
+        }
+        MIR_label_t next = jm_new_label(mt);
+        jm_access_guard(mt, MIR_BNE, next, domain, MIR_new_int_op(mt->ctx, type));
+        MIR_type_t memory_type = type == LMD_TYPE_BOOL ? MIR_T_U8 : MIR_T_I64;
+        MIR_reg_t tag = jm_new_reg(mt, "slot_tag", MIR_T_I64);
+        jm_emit_reg_binary_op(mt, MIR_URSH, tag, store_value, MIR_new_int_op(mt->ctx, 56));
+        guard(MIR_BNE, tag, type);
+        MIR_reg_t payload = type == LMD_TYPE_INT ? jm_emit_unbox_int(mt, store_value)
+            : jm_new_reg(mt, "slot_payload", MIR_T_I64);
+        if (type != LMD_TYPE_INT) jm_emit_reg_binary_op(mt, MIR_AND,
+            payload, store_value, MIR_new_uint_op(mt->ctx, ITEM_INT_PAYLOAD_MASK));
+        em_store_at(em, data, offset, memory_type, payload);
+        jm_emit_mov(mt, result, store_value);
+        jm_emit_jmp(mt, success);
+        jm_emit_label(mt, next);
+    }
     guard(MIR_BLT, domain, LMD_TYPE_RANGE);
     guard(MIR_BGT, domain, LMD_TYPE_FUNC);
     jm_emit_jmp(mt, pointer);
+    if (!store_value) {
+        jm_emit_label(mt, scalar);
+        // All three lanes reconstruct the original tag, including Symbol's
+        // int payload. Only bool needs byte narrowing and string a null test.
+        MIR_label_t word_lane = jm_new_label(mt);
+        jm_access_guard(mt, MIR_BNE, word_lane, domain, MIR_new_int_op(mt->ctx, LMD_TYPE_BOOL));
+        jm_emit_reg_binary_op(mt, MIR_AND, word, word, MIR_new_int_op(mt->ctx, 0xff));
+        jm_emit_label(mt, word_lane);
+        jm_emit_reg_binary_op(mt, MIR_AND, word, word,
+            MIR_new_uint_op(mt->ctx, ITEM_INT_PAYLOAD_MASK));
+        MIR_reg_t tag = jm_new_reg(mt, "slot_tag", MIR_T_I64);
+        jm_emit_reg_binary_op(mt, MIR_LSH, tag, domain, MIR_new_int_op(mt->ctx, 56));
+        jm_emit_reg_binary(mt, MIR_OR, result, word, tag);
+        jm_access_guard(mt, MIR_BNE, success, domain, MIR_new_int_op(mt->ctx, LMD_TYPE_STRING));
+        jm_emit_branch(mt, MIR_BT, success, word);
+        jm_emit_reg_op(mt, MIR_MOV, result, MIR_new_uint_op(mt->ctx, ITEM_NULL));
+        jm_emit_jmp(mt, success);
+    }
     jm_emit_label(mt, number);
     if (store_value) {
         // Only self-tagged doubles enter this store; out-of-band numbers and
@@ -6900,11 +7025,11 @@ static MIR_reg_t jm_emit_predicted_shape_access(JsMirTranspiler* mt,
         jm_emit_reg_binary_op(mt, MIR_AND, mask, store_value, MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK));
         guard(MIR_BEQ, mask, 0);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * 8, data, 0, 1),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, offset, data, 0, 1),
             MIR_new_reg_op(mt->ctx, store_value)));
         jm_emit_mov(mt, result, store_value);
     } else {
-        MIR_reg_t value = em_load_at(em, data, slot * 8, MIR_T_D, "slot_number");
+        MIR_reg_t value = em_load_at(em, data, offset, MIR_T_D, "slot_number");
         jm_emit_mov(mt, result, jm_box_float(mt, value));
     }
     jm_emit_jmp(mt, success);
@@ -6912,7 +7037,7 @@ static MIR_reg_t jm_emit_predicted_shape_access(JsMirTranspiler* mt,
     if (store_value) {
         guard(MIR_BNE, store_value, (int64_t)ITEM_NULL);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * 8, data, 0, 1),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, offset, data, 0, 1),
             MIR_new_reg_op(mt->ctx, store_value)));
         jm_emit_mov(mt, result, store_value);
         jm_emit_jmp(mt, success);
@@ -6926,7 +7051,7 @@ static MIR_reg_t jm_emit_predicted_shape_access(JsMirTranspiler* mt,
         MIR_reg_t kind = em_load_at(em, store_value, 0, MIR_T_U8, "slot_value_kind");
         jm_access_guard(mt, MIR_BNE, miss, kind, MIR_new_reg_op(mt->ctx, domain));
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * 8, data, 0, 1),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, offset, data, 0, 1),
             MIR_new_reg_op(mt->ctx, store_value)));
         jm_emit_mov(mt, result, store_value);
     } else {
@@ -6965,14 +7090,14 @@ static MirValue jm_emit_object_value(JsMirTranspiler* mt,
     // allocation differs. The retired static-shape shortcut embedded
     // compiler-pool name arrays in delayed MIR -- this one bakes two module key
     // indices, so the realm is resolved through active module state (D5.4.3).
-    uint32_t shape_key_count = 0;
-    uint32_t shape_first_key = jm_object_literal_shape_keys(mt, obj,
-        &shape_key_count);
+    MirConstructionPlan construction = {NULL, UINT32_MAX, 0};
+    construction.recipe_id = jm_construction_keys(mt, (AstNode*)obj,
+        &construction.field_count);
     MIR_reg_t object;
-    if (shape_first_key != UINT32_MAX && shape_key_count > 0) {
+    if (construction.recipe_id != UINT32_MAX && construction.field_count > 0) {
         object = jm_call_2(mt, "js_new_object_shaped", MIR_T_I64,
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)shape_first_key),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)shape_key_count));
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)construction.recipe_id),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)construction.field_count));
     } else {
         object = jm_call_0(mt, "js_new_object", MIR_T_I64);
     }
@@ -8091,8 +8216,11 @@ static MirValue jm_expression_value(JsMirTranspiler* mt, JsAstNode* item,
 MirValue jm_transpile_expression_value(JsMirTranspiler* mt, JsAstNode* item,
         uint32_t demand, ValueRep required) {
     if (required != VALUE_REP_NONE) demand |= MIR_VALUE_REQUIRED_REP;
+    MirValue value = item && item->node_type == JS_AST_NODE_LITERAL
+        ? jm_transpile_literal_value(mt, (JsLiteralNode*)item, required)
+        : jm_transpile_expression_direct(mt, item);
     return em_apply_value_demand(&mt->func_em->em,
-        jm_transpile_expression_direct(mt, item), demand, required);
+        value, demand, required);
 }
 
 MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {

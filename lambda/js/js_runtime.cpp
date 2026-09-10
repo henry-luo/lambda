@@ -2078,6 +2078,7 @@ extern "C" Item js_proxy_trap_construct(Item proxy, Item* args, int arg_count, I
 }
 
 // Create a new object for a constructor call: sets __proto__ from callee.prototype
+static Item js_constructor_allocate_object(Item callee);
 extern "C" Item js_constructor_create_object(Item callee, Item new_target) {
     // Prototype lookup and builtin subclass allocation can compact the
     // unpublished instance; native argument registers are not GC roots.
@@ -2091,7 +2092,7 @@ extern "C" Item js_constructor_create_object(Item callee, Item new_target) {
     Rooted<Item> aux_one_root(roots, ItemNull);
     Rooted<Item> aux_two_root(roots, ItemNull);
     if (!roots.valid()) return ItemNull;
-    object_root.set(js_new_object());
+    object_root.set(js_constructor_allocate_object(callee_root.get()));
     TypeId callee_type = get_type_id(callee_root.get());
     if (callee_type == LMD_TYPE_FUNC || js_is_proxy(callee_root.get())) {
         // Bound construction substitutes the ultimate target only when the
@@ -3767,27 +3768,12 @@ extern "C" Item js_new_object_with_typemap(TypeMap* tm) {
         return js_new_object();
     }
 
-    Map* m = (Map*)heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, JS_MAP_SIZE_CLASS);
-    if (!m) return js_new_object();
-    m->type_id = LMD_TYPE_MAP;
-    m->type = &EmptyMap;
-    RootFrame roots(1);
-    Rooted<Map*> rooted_map(roots, m);
-    if (!roots.valid()) return js_new_object();
-
     int data_cap = js_typemap_storage_capacity(tm);
     if (data_cap < 0) return js_new_object();
-    m = rooted_map.get();
-    m->type = tm;
-    void* data = heap_data_calloc(data_cap);
-    m = rooted_map.get();
-    if (!data) {
-        m->type = &EmptyMap;
-        return (Item){.map = m};
-    }
-    m->data = data;
-    m->data_cap = data_cap;
-    return (Item){.map = m};
+    // Lambda's combined allocation publishes the shape and payload together;
+    // no unrooted instance or partially initialized header spans a safepoint.
+    Map* m = map_alloc_for_type(tm, NULL, data_cap);
+    return m ? (Item){.map = m} : js_new_object();
 }
 
 // ---------------------------------------------------------------------------
@@ -3931,6 +3917,39 @@ extern "C" void* js_literal_shape(int64_t first_key_index, int64_t key_count) {
     if (first_key_index < 0 || first_key_index >= JS_PREDICTED_SHAPE_LIMIT ||
             key_count <= 0 || key_count > JS_PREDICTED_SHAPE_MAX_SLOTS) return NULL;
     return js_predicted_shape_resolve((uint32_t)first_key_index, (uint32_t)key_count);
+}
+
+extern "C" void js_set_constructor_plan(Item function, int64_t first_key_index,
+        int64_t key_count) {
+    if (get_type_id(function) != LMD_TYPE_FUNC || !function.function ||
+            first_key_index < 0 || first_key_index >= JS_PREDICTED_SHAPE_LIMIT ||
+            key_count <= 1 || key_count > JS_PREDICTED_SHAPE_MAX_SLOTS) return;
+    JsCallableCode* code = ((JsFunction*)function.function)->code;
+    if (!code) return;
+    code->construction_first = (uint32_t)first_key_index;
+    code->construction_count = (uint32_t)key_count;
+}
+
+static Item js_constructor_allocate_object(Item callee) {
+    if (get_type_id(callee) != LMD_TYPE_FUNC || !callee.function) return js_new_object();
+    const JsCallableCode* code = js_fn_code((JsFunction*)callee.function);
+    if (!code->construction_count || code->runtime_context != (Context*)context)
+        return js_new_object();
+    TypeMap* shape = NULL;
+    {
+        // recipes belong to the callee module, including cross-module `new`.
+        RuntimeModuleStateScope module_scope(context);
+        if (module_scope.activate(code->module_state_id)) shape = js_predicted_shape_resolve(
+            code->construction_first, code->construction_count);
+    }
+    if (!shape) return js_new_object();
+    // No access may observe a reserved field before its source assignment.
+    // The prototype writer initializes slot zero through the ordinary writer.
+    uint32_t count = code->construction_count;
+    Item result = js_new_object_with_typemap(shape);
+    if (get_type_id(result) == LMD_TYPE_MAP && result.map->type == shape)
+        map_ctor_set_reserved_mask(result.map, (uint16_t)((1u << count) - 1));
+    return result;
 }
 
 // MIR entry: allocate a literal on its predicted shape before field evaluation.
@@ -6562,7 +6581,7 @@ static bool js_shape_write_same_size_slot(TypeMap* tm, ShapeEntry* entry,
         return true;
     }
 
-    if (!js_store_typed_value(field_ptr, value_type, value)) return false;
+    if (!map_field_store(field_ptr, value, value_type)) return false;
     // Retag on T->NULL too, else the stored null word is read back through the
     // stale tag as a zero-valued T (`arr.tag = 7; arr.tag = null` read `0`).
     if (shape_entry_retag_is_safe(tm, value_type)) {
@@ -7263,20 +7282,7 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
                                 "add property", str_key->chars, (int)str_key->len));
                             return value;
                         }
-                        // Unlink from current position
-                        ShapeEntry* prev = NULL;
-                        ShapeEntry* scan = map_type->shape;
-                        while (scan && scan != found_entry) { prev = scan; scan = scan->next; }
-                        if (prev) prev->next = found_entry->next;
-                        else map_type->shape = found_entry->next;
-                        if (map_type->last == found_entry) {
-                            map_type->last = prev ? prev : map_type->shape;
-                        }
-                        // Append at end
-                        found_entry->next = NULL;
-                        if (map_type->last) map_type->last->next = found_entry;
-                        else map_type->shape = found_entry;
-                        map_type->last = found_entry;
+                        typemap_move_field_to_end(map_type, found_entry);
                     }
                 }
                 if ((slot_status == JS_SHAPE_SLOT_DELETED || jspd_is_deleted(found_entry)) && !identity_key) {
@@ -8470,7 +8476,7 @@ static inline bool js_named_fast_store_same_slot(ShapeEntry* entry, void* data,
         return true;
     }
     if (field_type != value_type) return false;
-    return js_store_typed_value(field_ptr, value_type, value);
+    return map_field_store(field_ptr, value, value_type);
 }
 
 extern "C" Item js_get_name_id(Item object, NameId name_id) {

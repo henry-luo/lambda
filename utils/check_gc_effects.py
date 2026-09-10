@@ -47,6 +47,14 @@ VERIFIED_EXTERNAL_LEAVES = {
     "d2it",
     "fmod",
     "floor",
+    # Audited scalar math leaves used by the common pure-call metadata.
+    "fabs",
+    "ceil",
+    "modf",
+    "pow",
+    "isinf",
+    "signbit",
+    "trunc",
     "getenv",
     "isnan",
     "isfinite",
@@ -348,8 +356,18 @@ def normalize_recovery_checkpoint_name(names: set[str]) -> set[str]:
 
 
 def extract_no_gc_names(registry: str) -> set[str]:
+    # Expand metadata macro names from their definitions, so the transitive
+    # audit follows the same NO_GC rows as the compiled import catalog.
+    header = REGISTRY.with_suffix(".h").read_text(encoding="utf-8")
+    metadata_macros = re.findall(
+        r"#define\s+(JIT_IMPORT_\w+)\s+\{\s*JIT_EFFECT_NO_GC\b",
+        header.replace("\\\n", ""),
+    )
+    initializer = r"\{\s*JIT_EFFECT_NO_GC"
+    if metadata_macros:
+        initializer += "|" + "|".join(re.escape(name) + r"\b" for name in metadata_macros)
     pattern = re.compile(
-        r'\{"([^"]+)"\s*,\s*FPTR\([^)]*\)\s*,\s*\{\s*JIT_EFFECT_NO_GC',
+        r'\{"([^"]+)"\s*,\s*FPTR\([^)]*\)\s*,\s*(?:' + initializer + ")",
         re.MULTILINE,
     )
     return normalize_recovery_checkpoint_name(set(pattern.findall(registry)))

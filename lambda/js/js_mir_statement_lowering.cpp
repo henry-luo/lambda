@@ -1,3 +1,4 @@
+#include "../runtime/mir_loop_invariants.hpp"
 #include "js_mir_internal.hpp"
 #include "js_builtin_catalog.hpp"
 
@@ -1336,6 +1337,8 @@ void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
     // all fallible body and condition edges route before this normal exit, so
     // no following statement may inspect a body register skipped on entry.
     jm_emit_label_with_state(mt, l_end, JS_ERROR_LANE_CLEAN);
+    if (!mt->in_generator && !mt->in_async)
+        em_hoist_loop_scalar_calls(&mt->func_em->em, l_test, l_end);
 
     if (mt->iteration_depth > 0) mt->iteration_depth--;
     if (mt->loop_depth > 0) mt->loop_depth--;
@@ -1625,6 +1628,8 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     jm_emit_jmp(mt, l_test);
     // all fallible body, update, and test edges route before this normal exit.
     jm_emit_label_with_state(mt, l_end, JS_ERROR_LANE_CLEAN);
+    if (!mt->in_generator && !mt->in_async)
+        em_hoist_loop_scalar_calls(&mt->func_em->em, l_test, l_end);
 
     if (init_is_var && for_var_init_name && for_var_init_name[0]) {
         JsMirVarEntry* init_var = jm_find_var_by_binding(mt,
@@ -2200,6 +2205,8 @@ void jm_transpile_do_while(JsMirTranspiler* mt, JsDoWhileNode* dw) {
 
     // the test's abrupt path has already been routed before normal completion.
     jm_emit_label_with_state(mt, l_end, JS_ERROR_LANE_CLEAN);
+    if (!mt->in_generator && !mt->in_async)
+        em_hoist_loop_scalar_calls(&mt->func_em->em, l_body, l_end);
     if (mt->iteration_depth > 0) mt->iteration_depth--;
     if (mt->loop_depth > 0) mt->loop_depth--;
 }

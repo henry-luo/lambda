@@ -246,6 +246,7 @@ Item js_predicted_slot_initialize(Item target, NameRef key, Item value, bool* ha
 // the guard proves it at runtime and misses fall through to js_get_name_id.
 #define JS_PREDICTED_SHAPE_LIMIT 512
 void* js_literal_shape(int64_t first_key_index, int64_t key_count);
+void js_set_constructor_plan(Item function, int64_t first_key_index, int64_t key_count);
 Item js_shaped_slot_get(Item object, int64_t first_key_index, int64_t key_count,
                         int64_t slot, int64_t name_id);
 struct TypeMap;
@@ -1341,7 +1342,6 @@ Item js_get_name_key(Item object, const char* name, int len);
 Item js_get_name_key(Item object, const char* name);
 Item js_set_name_key(Item object, const char* name, int len, Item value);
 Item js_set_name_key(Item object, const char* name, Item value);
-bool js_store_typed_value(void* field_ptr, TypeId value_type, Item value);
 // Native adapters are one overload family; keep declarations in lockstep with
 // the arity-generated implementations in js_runtime_function.cpp.
 #define JS_NATIVE_FIXED_ARITIES(M) \

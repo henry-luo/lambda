@@ -2426,6 +2426,10 @@ extern "C" {
 
     Map* map(int64_t type_index);
     Map* map_with_data(int64_t type_index);
+    // shared physical construction; profiles retain layout and property admission.
+    Map* map_alloc_for_type(struct TypeMap* map_type, LambdaRegion* region,
+        int64_t minimum_capacity);
+    bool map_field_store(void* field_ptr, Item value, TypeId value_type);
     Map* map_with_tl(int64_t type_index, void* type_list_ptr);
     Map* map_with_region_tl(LambdaRegion* region, int64_t type_index,
         void* type_list_ptr);

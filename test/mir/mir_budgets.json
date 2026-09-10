@@ -168,13 +168,13 @@
       "name": "js_numeric_inference_call",
       "script": "test/mir/js/numeric_inference_call.js",
       "language": "js",
-      "description": "JS call-result binding: watches js_main's root-store traffic and merged Item error-tag branches. Tune4 re-baseline: console.log is an ordinary mutable property call through the per-callee entry instead of a name-selected MIR shortcut (D6.2.2v2). JS2 reviewed growth (D8.6.1): +66 instructions for the exact-shape/storage guards, native slot load and joined fallback; two root stores and one cold float-boxing safepoint. The profiling build adds four instructions for the existing named probe/hit/miss counters and their join; trace on/off retains identical MIR. JS2 tasks 3/4 reviewed growth (D8.6.1): +13 instructions for source-call depth accounting and its RangeError edge; one cold safepoint, no additional root stores.",
+      "description": "JS call-result binding: watches js_main's root-store traffic and merged Item error-tag branches. Tune4 re-baseline: console.log is an ordinary mutable property call through the per-callee entry instead of a name-selected MIR shortcut (D6.2.2v2). JS2 reviewed growth (D8.6.1): +66 instructions for the exact-shape/storage guards, native slot load and joined fallback; two root stores and one cold float-boxing safepoint. The profiling build adds four instructions for the existing named probe/hit/miss counters and their join; trace on/off retains identical MIR. JS2 tasks 3/4 reviewed growth (D8.6.1): +13 instructions for source-call depth accounting and its RangeError edge; one cold safepoint, no additional root stores. JS2 planning/lanes reviewed growth (D8.6.1): +7 against the recorded debug ceiling (+9 versus the current control artifact), for live NameId/reservation guards and shared bool/int/string loads; removes the activation shape-handle cache and adds no roots, root stores or safepoints. Release is four instructions smaller.",
       "budgets": {
         "default": {
-          "module_insns": 312,
+          "module_insns": 319,
           "functions": {
             "js_main": {
-              "insns": 251
+              "insns": 258
             }
           },
           "frames": [

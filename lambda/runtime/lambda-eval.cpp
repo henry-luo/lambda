@@ -7665,7 +7665,8 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
 }
 
 // helper: store a value at a field pointer, according to its storage type
-static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
+bool map_field_store(void* field_ptr, Item value, TypeId value_type) {
+    if (!field_ptr) return false;
     switch (value_type) {
     case LMD_TYPE_NULL:  *(void**)field_ptr = NULL; break;
     case LMD_TYPE_UNDEFINED:  *(bool*)field_ptr = false; break;
@@ -7770,7 +7771,7 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
     }
     case LMD_TYPE_FUNC: case LMD_TYPE_VMAP: case LMD_TYPE_VARRAY:
     case LMD_TYPE_VELMT: case LMD_TYPE_DECIMAL:
-    case LMD_TYPE_TYPE: {
+    case LMD_TYPE_TYPE: case LMD_TYPE_PATH: {
         // store as opaque pointer (low 56 bits)
         *(void**)field_ptr = (void*)(uintptr_t)(value.item & 0x00FFFFFFFFFFFFFF);
         break;
@@ -7781,8 +7782,9 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
         break;
     default:
         log_error("map_field_store: unsupported type %d", value_type);
-        break;
+        return false;
     }
+    return true;
 }
 
 struct MutableCloneEntry {
@@ -10653,6 +10655,26 @@ Item fn_map_set(Item map_item, Item key, Item value) {
             name_matches = shape_field_name_equals(entry, key_cstr, key_len);
         }
         if (name_matches) {
+            if (map_type_id == LMD_TYPE_MAP &&
+                    map_ctor_offset_is_reserved(map_item.map, entry->byte_offset)) {
+                // An RHS, parameter initializer or inherited setter can publish
+                // another key first. Reserve storage without preordering creation.
+                bool published_after = false;
+                for (ShapeEntry* next = entry->next; next; next = next->next) {
+                    if (!map_ctor_offset_is_reserved(map_item.map, next->byte_offset)) {
+                        published_after = true;
+                        break;
+                    }
+                }
+                if (published_after) {
+                    map_type = js_typemap_clone_for_mutation_pub(map_item);
+                    if (!map_type) return ItemError;
+                    *type_slot = map_type;
+                    entry = map_resolve_entry_in_shape(map_type, key_ref, key_cstr, key_len);
+                    if (!entry) return ItemError;
+                    typemap_move_field_to_end(map_type, entry);
+                }
+            }
             // A typed field's contract is richer than the value's TypeId.
             // Reinstalling a certified T[] must not retag it as open array.
             if (map_type->is_trusted_contract &&
@@ -10667,6 +10689,14 @@ Item fn_map_set(Item map_item, Item key, Item value) {
                 return ItemNull;
             }
             TypeId field_type = entry->type->type_id;
+            // Publishing a null constructor field seals the shared blueprint:
+            // a later instance must not retag that earlier null as a native lane.
+            if (value_type == LMD_TYPE_NULL && map_type->is_shared_constructor_shape &&
+                    map_type_id == LMD_TYPE_MAP &&
+                    map_ctor_offset_is_reserved(map_item.map, entry->byte_offset)) {
+                map_type->is_shared_constructor_shape = false;
+                map_type->is_transition_shared_shape = true;
+            }
             entry = map_detach_shared_ctor_shape_for_type(map_item, &map_type,
                 type_slot, key_cstr, key_len, key_ref, entry, value_type);
             if (!entry || !entry->type) return ItemError;

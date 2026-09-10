@@ -218,6 +218,8 @@ enum {
     JIT_IMPORT_SCALAR_CLASS_KNOWN = 1u << 6,
     // wide results are created in the caller's extent, never borrowed storage.
     JIT_IMPORT_RESULT_CALLER_OWNED = 1u << 7,
+    // total raw scalar function: no memory reads/writes or observable completion.
+    JIT_IMPORT_PURE_SCALAR_CALL = 1u << 8,
 };
 
 // result representation does not weaken collection, reentry or completion effects.
@@ -253,6 +255,13 @@ static inline ScalarReturnClass jit_import_scalar_return_class(const JitImportMe
 #define JIT_IMPORT_RAW_SCALAR_PRESERVES \
     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_NON_GC_SCALAR, \
      0, 0, JIT_EXCEPTION_PRESERVES, 0}
+
+// total scalar leaves cannot collect, reenter or retain a borrowed argument.
+#define JIT_IMPORT_PURE_SCALAR \
+    {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, \
+     0, JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES | \
+        JIT_IMPORT_ARGS_BORROWED_AUDITED | JIT_IMPORT_PURE_SCALAR_CALL, \
+     JIT_EXCEPTION_PRESERVES, 0}
 
 // Void imports have no merged-Item return transport and must be audited as
 // preserving the lane rather than silently relying on the emitter's fold.

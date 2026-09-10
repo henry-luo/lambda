@@ -32,6 +32,20 @@ typedef enum JsTypedArrayType {
     JS_TYPED_FLOAT16,
 } JsTypedArrayType;
 
+typedef struct JsTypedArraySpec {
+    uint8_t byte_size;
+    ArrayNumElemType elem_type;
+    const char* name;
+    bool integer;
+    bool atomic;
+    bool bigint;
+    bool signed_integer;
+    uint8_t bits;
+} JsTypedArraySpec;
+
+// compiler and runtime consume the same element descriptor.
+const JsTypedArraySpec* js_typed_array_spec(JsTypedArrayType type);
+
 int js_typed_array_element_size(JsTypedArrayType type);
 const char* js_typed_array_type_name_from_type(JsTypedArrayType type);
 bool js_typed_array_is_integer_type(JsTypedArrayType type);
