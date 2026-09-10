@@ -9,6 +9,7 @@
 #include "ast_build.hpp"
 #include "mir_emitter_shared.hpp"
 #include "mir_shape_candidates.hpp"
+#include "mir_loop_invariants.hpp"
 #include "mir_dump.h"
 #include "mir_policy.hpp"
 #include "interp.hpp"
@@ -12770,6 +12771,7 @@ static MIR_reg_t transpile_while_core(MirTranspiler* mt, AstWhileNode* while_nod
 
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_loop)));
     emit_label(mt, l_end);
+    if (!mt->in_async_proc) em_hoist_loop_scalar_calls(&mt->em, l_loop, l_end);
 
     if (mt->loop_depth > 0) mt->loop_depth--;
     pop_scope(mt);
@@ -15516,7 +15518,9 @@ static MIR_reg_t emit_map_storage(MirTranspiler* mt, AstMapNode* map_node) {
         return static_reg;
     }
 
-    TypeMap* map_type = map_contract ? map_contract : (TypeMap*)map_node->type;
+    MirConstructionPlan construction = mir_plan_static_construction(
+        map_contract ? map_contract : (TypeMap*)map_node->type);
+    TypeMap* map_type = construction.static_layout;
     int type_index = map_contract ? map_contract->type_index : map_type->type_index;
 
     // Create map with inline data: Map* m = map_with_data(type_index)
@@ -16629,22 +16633,22 @@ static MirValue emit_member_value(MirTranspiler* mt, AstFieldNode* field_node) {
         mir_shape_layout_is_addressable((TypeMap*)ast_obj_type);
     Type* candidate_shape = static_receiver_is_map ? ast_obj_type
         : mir_expr_candidate_shape(mt, field_node->object, 4);
-    if (!candidate_shape && field_node->field->node_type == AST_NODE_IDENT) {
-        // Nothing traced back to a construction site; fall back to the module's
-        // own literal shapes (T20-1b). Only a receiver that could still BE a map
-        // qualifies -- a statically scalar expression has no business here.
-        TypeId recv_tid = mir_expr_carrier_type(mt, field_node->object);
-        if (recv_tid == LMD_TYPE_ANY || recv_tid == LMD_TYPE_MAP) {
-            AstIdentNode* fname = (AstIdentNode*)field_node->field;
-            candidate_shape = mir_module_unique_shape_for_field(mt,
-                fname->name->chars, fname->name->len);
-        }
-    }
-    if (candidate_shape && field_node->field->node_type == AST_NODE_IDENT) {
-        TypeMap* shape_type = (TypeMap*)candidate_shape;
+    MirFieldAccessPlan access_plan = {};
+    bool has_access_plan = field_node->field->node_type == AST_NODE_IDENT &&
+        mir_plan_field_access(candidate_shape,
+            [&](void* shape, MirFieldAccessPlan* selected) {
+                return mir_plan_static_field((TypeMap*)shape,
+                    ((AstIdentNode*)field_node->field)->name, selected);
+            }, [&]() -> void* {
+                TypeId receiver_type = mir_expr_carrier_type(mt, field_node->object);
+                if (receiver_type != LMD_TYPE_ANY && receiver_type != LMD_TYPE_MAP) return NULL;
+                String* name = ((AstIdentNode*)field_node->field)->name;
+                return mir_module_unique_shape_for_field(mt, name->chars, name->len);
+            }, &access_plan);
+    if (has_access_plan) {
+        TypeMap* shape_type = access_plan.construction.static_layout;
         AstIdentNode* ident = (AstIdentNode*)field_node->field;
-        ShapeEntry* se = find_shape_field_by_name(shape_type,
-            ident->name->chars, ident->name->len);
+        ShapeEntry* se = access_plan.static_field;
         TypeId storage_type = se ? shape_entry_storage_type_id(se) : LMD_TYPE_NULL;
         LaneStorageDesc native_lane = {};
         bool uses_native_lane = se && shape_entry_uses_native_lane(se, &native_lane);
@@ -16675,22 +16679,12 @@ static MirValue emit_member_value(MirTranspiler* mt, AstFieldNode* field_node) {
             guarded_done = new_label(mt);
             MIR_label_t l_slow = new_label(mt);
 
-            MIR_reg_t map_ptr = em_guard_container(&mt->em, boxed_obj,
-                shape_type->type_id, l_slow, static_receiver_is_map);
-            // The shape pointer sits at a kind-dependent offset (D2.6.6): a map
-            // keeps it right after the header, an object after the list fields.
-            MIR_reg_t hdr_type = new_reg(mt, "grd_shape", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, hdr_type),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                    MIR_CONTAINER_TYPE_OFFSET, map_ptr, 0, 1)));
             MIR_reg_t want_type = new_reg(mt, "grd_want", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, want_type),
                 MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)shape_type)));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
-                MIR_new_label_op(mt->ctx, l_slow),
-                MIR_new_reg_op(mt->ctx, hdr_type), MIR_new_reg_op(mt->ctx, want_type)));
+            em_guard_map_shape(&mt->em, boxed_obj, want_type, l_slow,
+                static_receiver_is_map);
 
             // Fast arm: the receiver was built at this site, so the packed slot
             // is the one this offset was computed for. The null check above is
@@ -17133,17 +17127,7 @@ static void emit_index_result_move(MirTranspiler* mt, MIR_reg_t result,
 
 static MIR_reg_t emit_index_storage_load(MirTranspiler* mt,
         MIR_reg_t element_addr, MirIndexLoadPolicy policy, const char* reg_name) {
-    // Dense reads used to force every element through DMOV, so an integer proof
-    // still reinterpreted its i64 lane as a double. The policy is the storage
-    // proof; keep the register and memory load types derived from that proof.
-    MIR_type_t register_type = policy.element_type == MIR_T_D
-        ? MIR_T_D : MIR_T_I64;
-    MIR_reg_t loaded = new_reg(mt, reg_name, register_type);
-    MIR_insn_code_t load_code = policy.element_type == MIR_T_D ? MIR_DMOV : MIR_MOV;
-    emit_insn(mt, MIR_new_insn(mt->ctx, load_code,
-        MIR_new_reg_op(mt->ctx, loaded),
-        MIR_new_mem_op(mt->ctx, policy.element_type, 0, element_addr, 0, 1)));
-    return loaded;
+    return em_load_at(&mt->em, element_addr, 0, policy.element_type, reg_name);
 }
 
 // Typed index paths share this layout, but their guards, representations, and

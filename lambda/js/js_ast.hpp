@@ -325,3 +325,10 @@ bool js_ast_publish_extension_facts(AstNode* node, struct AstIndex* index);
 typedef AstExportDeclNode JsExportNode;
 
 typedef AstExportSpecifierNode JsExportSpecifierNode;
+
+static inline bool js_ast_identifier_named(JsAstNode* node, const char* name,
+        size_t length) {
+    if (!node || node->node_type != JS_AST_NODE_IDENTIFIER) return false;
+    String* value = ((JsIdentifierNode*)node)->name;
+    return value && value->len == length && strncmp(value->chars, name, length) == 0;
+}

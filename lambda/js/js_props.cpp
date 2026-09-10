@@ -795,7 +795,7 @@ static bool js_props_store_raw_data_slot(Item target, ShapeEntry* entry, Item va
     void* field_ptr = (char*)target.map->data + entry->byte_offset;
     if (value_type == LMD_TYPE_ERROR) {
         *(void**)field_ptr = NULL;
-    } else if (!js_store_typed_value(field_ptr, value_type, value)) {
+    } else if (!map_field_store(field_ptr, value, value_type)) {
         return false;
     }
 

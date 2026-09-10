@@ -44,6 +44,9 @@ static const char* kExtraJsScripts[] = {
     "test/js/concurrency_lambda_promise.js",
     "test/js/tune4_closure_scalar_ownership.js",
     "test/js/js_shared_scalar_analysis.js",
+    "test/js/js_shared_construction_plans.js",
+    "test/js/js_shared_native_lanes.js",
+    "test/js/js_shared_loop_effects.js",
     "test/js/js_callable_definition_sharing.js",
     "test/js/js_shared_search_leaf.js",
 };

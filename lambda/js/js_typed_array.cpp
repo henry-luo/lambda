@@ -143,17 +143,6 @@ static void js_dataview_link_prototype(Item view) {
     if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(view, proto);
 }
 
-typedef struct JsTypedArraySpec {
-    uint8_t byte_size;
-    ArrayNumElemType elem_type;
-    const char* name;
-    bool integer;
-    bool atomic;
-    bool bigint;
-    bool signed_integer;
-    uint8_t bits;
-} JsTypedArraySpec;
-
 // One immutable descriptor supplies storage, ArrayNum, atomic, and public-name
 // behavior; separate switches had drifted when Float16 and BigInt were added.
 static const JsTypedArraySpec js_typed_array_specs[] = {
@@ -174,7 +163,7 @@ static const JsTypedArraySpec js_typed_array_specs[] = {
 static const JsTypedArraySpec js_typed_array_default_spec =
     {4, ELEM_UINT8, NULL, false, false, false, false, 0};
 
-static const JsTypedArraySpec* js_typed_array_spec(JsTypedArrayType type) {
+const JsTypedArraySpec* js_typed_array_spec(JsTypedArrayType type) {
     int index = (int)type;
     if (index < 0 || index >= (int)(sizeof(js_typed_array_specs) /
                                     sizeof(js_typed_array_specs[0]))) {

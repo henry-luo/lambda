@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "description": "D5.3/D8.4.3v2: shared effect metadata moves only the invariant scalar conversion before the loop test; changing operands stay after it.",
+  "checks": [
+    {
+      "in_func": "_js_constantBits_#_body",
+      "expect_seq": ["call\tjs_double_to_int32", "dlt", "call\tjs_double_to_int32"],
+      "count": {"call\tjs_double_to_int32": 2}
+    },
+    {
+      "in_func": "_js_varyingBits_#_body",
+      "expect_seq": ["dlt", "call\tjs_double_to_int32", "call\tjs_double_to_int32"],
+      "count": {"call\tjs_double_to_int32": 2}
+    }
+  ]
+}

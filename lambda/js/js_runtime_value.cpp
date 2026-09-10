@@ -27,61 +27,6 @@ JS_FORWARD_LOCAL_RETURN(Item, make_string_item, (const char* str, int len),
 JS_FORWARD_LOCAL_RETURN(Item, make_string_item, (const char* str),
     js_make_string, (str))
 
-bool js_store_typed_value(void* field_ptr, TypeId value_type,
-        Item value) {
-    if (!field_ptr) return false;
-    // All raw shape writers must use the same representation map; otherwise a
-    // fast store can leave a slot readable only through a different type path.
-    switch (value_type) {
-    case LMD_TYPE_NULL:
-        *(void**)field_ptr = NULL;
-        break;
-    case LMD_TYPE_UNDEFINED:
-        *(bool*)field_ptr = false;
-        break;
-    case LMD_TYPE_BOOL:
-        *(bool*)field_ptr = value.bool_val;
-        break;
-    case LMD_TYPE_INT:
-        *(int64_t*)field_ptr = lambda_int_item_to_lane(value.item);
-        break;
-    case LMD_TYPE_INT64:
-        *(int64_t*)field_ptr = value.get_int64();
-        break;
-    case LMD_TYPE_UINT64:
-        *(uint64_t*)field_ptr = value.get_uint64();
-        break;
-    case LMD_TYPE_FLOAT:
-        *(double*)field_ptr = value.get_double();
-        break;
-    case LMD_TYPE_DTIME:
-        *(DateTime**)field_ptr = value.get_datetime_ptr();
-        break;
-    case LMD_TYPE_STRING:
-        *(String**)field_ptr = value.get_safe_string();
-        break;
-    case LMD_TYPE_SYMBOL:
-        *(Symbol**)field_ptr = value.get_safe_symbol();
-        break;
-    case LMD_TYPE_BINARY:
-        *(Binary**)field_ptr = value.get_safe_binary();
-        break;
-    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_RANGE:
-    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
-        *(Container**)field_ptr = value.container;
-        break;
-    case LMD_TYPE_FUNC: case LMD_TYPE_VMAP: case LMD_TYPE_VARRAY:
-    case LMD_TYPE_VELMT: case LMD_TYPE_DECIMAL:
-    case LMD_TYPE_TYPE: case LMD_TYPE_PATH:
-        *(void**)field_ptr = (void*)(uintptr_t)(value.item & 0x00FFFFFFFFFFFFFFULL);
-        break;
-    default:
-        return false;
-    }
-    return true;
-}
-
 static inline bool js_number_like_type(TypeId type) {
     return type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT ||
            type == LMD_TYPE_NUM_SIZED;

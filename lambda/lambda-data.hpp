@@ -421,6 +421,23 @@ typedef struct TypeMap : Type {
     struct TypeNominal* nominal;
 } TypeMap;
 
+// callers detach shared shapes before changing observable field order. Physical
+// offsets and slot_entries stay valid because only the enumeration chain moves.
+static inline void typemap_move_field_to_end(TypeMap* shape, ShapeEntry* field) {
+    if (!shape || !field || shape->last == field) return;
+    ShapeEntry* previous = NULL;
+    ShapeEntry* current = shape->shape;
+    while (current && current != field) { previous = current; current = current->next; }
+    if (!current) return;
+    if (previous) previous->next = field->next;
+    else shape->shape = field->next;
+    field->next = NULL;
+    if (shape->last) shape->last->next = field;
+    else shape->shape = field;
+    shape->last = field;
+}
+
+
 // The C collector walks these descriptor prefixes without including this
 // C++ header. Keep that bridge checked at the defining types.
 #pragma clang diagnostic push

@@ -782,6 +782,7 @@ void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)span_lengths),
         MIR_T_I64, MIR_new_int_op(mt->ctx, JM_JS_FACT(fc, formal_length)),
         MIR_T_I64, MIR_new_int_op(mt->ctx, flags));
+    jm_emit_constructor_plan(mt, fn_reg, fn_node);
 }
 
 // Publish a class's source in the callable carrier so Function.prototype
@@ -1378,6 +1379,12 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
         // Ternary lowering normally joins boxed Item arms; native returns need
         // each arm lowered to the target MIR mode before the branch join.
         return jm_transpile_conditional_as_native(mt, (JsConditionalNode*)expr, target_type);
+    }
+
+    if (target_type == LMD_TYPE_FLOAT && expr &&
+            expr->node_type == JS_AST_NODE_LITERAL) {
+        return jm_transpile_expression_value(mt, expr, MIR_VALUE_REQUIRED_REP,
+            VALUE_REP_F64).reg;
     }
 
     if (target_type == LMD_TYPE_FLOAT && expr &&

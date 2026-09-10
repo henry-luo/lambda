@@ -5,25 +5,25 @@
     {
       "in_func": "_js_readRecord_#_body",
       "expect_seq": [
-        "call\tjs_literal_shape",
         "bne",
         "dmov",
         "call\tjs_get_name_id"
       ],
       "forbid": [
-        "js_shaped_slot_get"
+        "js_shaped_slot_get",
+        "js_literal_shape"
       ]
     },
     {
       "in_func": "_js_writeRecord_#_body",
       "expect_seq": [
-        "call\tjs_literal_shape",
         "bne",
         "dmov",
         "call\tjs_get_name_id"
       ],
       "forbid": [
-        "js_shaped_slot_get"
+        "js_shaped_slot_get",
+        "js_literal_shape"
       ],
       "expect": [
         "call\tjs_set_name_id"
