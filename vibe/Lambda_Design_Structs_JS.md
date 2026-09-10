@@ -2379,11 +2379,49 @@ forced-GC instability in intrinsic/template/media paths, so it is not claimed
 as a gate for this slice. The release build and 544-translation-unit
 structural census complete successfully.
 
-Open: JSCU29(A)'s remaining realm-slot catalog and deletion of the remaining
-non-namespace singleton spans, JSCU31's remaining native-owner migration to
-the resource table, JSCU33(A)'s definition-level code interning and AST
-script-owner split, lazy allocation of the remaining capsule records, and all
-final release performance gates.
+Open after this phase: JSCU29(A)'s remaining realm-slot catalog and deletion
+of the remaining typed-array/intrinsic tail, JSCU31's remaining native-owner
+migration to the resource table, JSCU33(A)'s AST script-owner split, lazy
+allocation of the remaining capsule records, and all final release
+performance gates.
+
+### 8.15 Phase 3 continuation implementation (2026-09-10)
+
+This slice makes the next definition/lifetime boundary explicit: one callable
+definition owns one immutable MIR-code record, while each function value keeps
+only its mutable identity and semantic payload. It also removes another fixed
+intrinsic span and makes the assertion/test-runner record genuinely lazy.
+
+- **JSCU33(C), definition-level callable-code interning:** GC-backed MIR
+  wrappers and closures now share a weak, realm-owned `JsCallableCode` table
+  keyed by MIR entry, runtime `Context`, parameter count and module-state
+  identity. The record carries the immutable executable facts and a reference
+  count; each function finalizer releases one reference, and the last release
+  removes the weak row and frees the record. Pool-backed wrappers, native
+  wrappers and AST-bodied functions retain their non-interned code records
+  because their owners and semantic tails differ. Allocation failure falls
+  back to the same fully initialized unique record, preserving D6.2.1's
+  callable representation and D5.3.5's precise ownership contract.
+- **JSCU29(H), intrinsic namespace tail:** Math, JSON, CSS, Intl, console,
+  `$262`, Reflect and Atomics namespace identities now use the existing
+  `JsRealmSlots` dynamic root carrier. `JsRealmIntrinsicSlots` retains only
+  catalog-indexed builtin/constructor and typed-array caches, so its fixed
+  root span is contiguous and no longer mixes namespace singletons with
+  indexed intrinsic tables (D5.3.5 and D6.2.2v2).
+- **JSCU29(I), lazy assertion record:** `JsAssertState` is allocated only
+  when `assert` or `node:test` is first requested. Its assertion-instance,
+  node-test and mock ledgers initialize together in one ensure function;
+  realm root visitation, reset and teardown tolerate an absent record. This
+  extends the lazy-record contract already used by Test262 agents, readline
+  and AsyncLocalStorage, without creating a second owner for any rooted value
+  (D5.1.1v2, D5.3.5 and D5.4.2).
+
+The phase-3 build and test binaries compile cleanly. All 65
+`JavaScriptRegression` cases pass, and the node:test lazy-record probe also
+passes with `LAMBDA_GC_FORCE_EVERY=1`. The remaining work is the AST
+script-owner split, the rest of the typed-array/intrinsic tail and native
+resource-owner migrations, additional lazy records where their first-use
+boundary is observable, and final release/performance gates.
 
 ---
 

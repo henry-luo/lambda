@@ -26850,7 +26850,8 @@ static Item js_array_intrinsic_algorithm_into(Item arr,
 // =============================================================================
 
 // backing store for user-defined Math properties (e.g. Math.sumPrecise polyfill)
-#define js_math_object (js_runtime_state.intrinsic_slots->math)
+#define js_math_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_MATH_OBJECT))
 
 // Root-range cleanup clears the context-owned slots to zero. Treat that
 // representation like ItemNull so a later realm rebuilds its namespace
@@ -26911,7 +26912,8 @@ static Item js_get_math_object() {
 JS_FORWARD_ITEM(js_get_math_object_value, (void), js_get_math_object, ())
 
 // v18n: JSON and console as global objects for bare identifier resolution
-#define js_json_object (js_runtime_state.intrinsic_slots->json)
+#define js_json_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_JSON_OBJECT))
 void js_reset_json_object() { js_json_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_json_object_value() {
@@ -26930,7 +26932,8 @@ extern "C" Item js_get_json_object_value() {
 // =============================================================================
 // CSS Namespace Object (CSS.supports, CSS.escape)
 // =============================================================================
-#define js_css_namespace_object (js_runtime_state.intrinsic_slots->css)
+#define js_css_namespace_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_CSS_NAMESPACE_OBJECT))
 extern "C" void js_reset_css_namespace_object() { js_css_namespace_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_css_object_value() {
@@ -27091,7 +27094,8 @@ static Item js_intl_segmenter_construct_body(Item callee, Item* args, int argc,
         target_root.get(), JS_CLASS_OBJECT);
 }
 
-#define js_intl_object (js_runtime_state.intrinsic_slots->intl)
+#define js_intl_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_INTL_OBJECT))
 extern "C" void js_reset_intl_object() { js_intl_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_intl_object_value() {
@@ -27136,7 +27140,8 @@ extern "C" Item js_get_intl_object_value() {
     return intl_root.get();
 }
 
-#define js_console_object (js_runtime_state.intrinsic_slots->console)
+#define js_console_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_CONSOLE_OBJECT))
 void js_reset_console_object() { js_console_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_console_object_value() {
@@ -27193,7 +27198,8 @@ extern "C" Item js_get_console_object_value() {
 }
 
 // test262 host object $262 — provides detachArrayBuffer for typed array tests
-#define js_262_object (js_runtime_state.intrinsic_slots->test262)
+#define js_262_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_TEST262_OBJECT))
 #define js_262_eval_script_active (js_runtime_state.test262_agent ? \
     js_runtime_state.test262_agent->eval_script_active : 0)
 #define js_262_agent_object (js_runtime_state.test262_agent->object)
@@ -27474,7 +27480,8 @@ extern "C" Item js_get_262_object_value() {
 }
 
 // v25: Reflect global object for bare identifier resolution
-#define js_reflect_object (js_runtime_state.intrinsic_slots->reflect)
+#define js_reflect_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_REFLECT_OBJECT))
 void js_reset_reflect_object() { js_reflect_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_reflect_object_value() {
@@ -27492,7 +27499,8 @@ extern "C" Item js_get_reflect_object_value() {
 }
 
 // Atomics namespace object
-#define js_atomics_object (js_runtime_state.intrinsic_slots->atomics)
+#define js_atomics_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_ATOMICS_OBJECT))
 void js_reset_atomics_object() { js_atomics_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_atomics_object_value() {

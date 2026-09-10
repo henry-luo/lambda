@@ -16,6 +16,8 @@
 #include "../../lib/arraylist.h"
 
 struct JsFunction;
+struct JsCallableCode;
+struct JsRuntimeState;
 struct JsInterpEnv;
 struct JsInterpGeneratorLoopContinuation;
 struct JsInterpGeneratorListContinuation;
@@ -178,6 +180,14 @@ enum JsRealmSlotId {
     JS_REALM_SLOT_FS_INTERNAL_PROMISES_NAMESPACE,
     JS_REALM_SLOT_HTTPS_NAMESPACE,
     JS_REALM_SLOT_HTTPS_AGENT_PROTOTYPE,
+    JS_REALM_SLOT_MATH_OBJECT,
+    JS_REALM_SLOT_JSON_OBJECT,
+    JS_REALM_SLOT_CSS_NAMESPACE_OBJECT,
+    JS_REALM_SLOT_INTL_OBJECT,
+    JS_REALM_SLOT_CONSOLE_OBJECT,
+    JS_REALM_SLOT_TEST262_OBJECT,
+    JS_REALM_SLOT_REFLECT_OBJECT,
+    JS_REALM_SLOT_ATOMICS_OBJECT,
     JS_REALM_SLOT_COUNT,
 };
 
@@ -324,6 +334,8 @@ struct JsAssertState : JsRootedState {
     int node_test_fail_count = 0;
     int64_t node_test_next_id = 1;
 };
+
+JsAssertState* js_assert_state_ensure(JsRuntimeState* state);
 
 struct JsNetNativeState {
     // Native network defaults and BlockList objects are realm-local. The
@@ -507,14 +519,6 @@ struct JsRealmIntrinsicSlots : JsRootedState {
     Item typed_array_base = {};
     Item typed_array_base_prototype = {};
     Item typed_array_prototypes[JS_TYPED_ARRAY_CACHE_TYPE_COUNT] = {};
-    Item math = {};
-    Item json = {};
-    Item css = {};
-    Item intl = {};
-    Item console = {};
-    Item test262 = {};
-    Item reflect = {};
-    Item atomics = {};
     bool builtin_function_initialized = false;
     bool global_builtin_initialized = false;
     bool constructors_initialized = false;
@@ -522,7 +526,7 @@ struct JsRealmIntrinsicSlots : JsRootedState {
 
 enum : int {
     JS_REALM_INTRINSIC_SLOT_COUNT = JS_INTRINSIC_BINDING_COUNT +
-        JS_BUILTIN_GLOBAL_MAX + JS_CTOR_MAX + 2 + JS_TYPED_ARRAY_CACHE_TYPE_COUNT + 8,
+        JS_BUILTIN_GLOBAL_MAX + JS_CTOR_MAX + 2 + JS_TYPED_ARRAY_CACHE_TYPE_COUNT,
 };
 
 struct JsTest262AgentReport {
@@ -1010,6 +1014,10 @@ struct JsRuntimeState {
     RuntimeResourceTable resources = {};
     JsWithScopeState with_scope = {};
     JsCodeStore code_store = {};
+    // Definition-level MIR code records are shared by closures and method
+    // wrappers while their functions remain live. The table is weak storage;
+    // each code record releases itself when its last GC function dies.
+    ArrayList* callable_code_interned = NULL;
     void* dynamic_function_cache_state = NULL;
     // Timeout recovery may interrupt JS compilation before the ordinary
     // teardown path runs.  Its compiler owners stay with this realm, never in

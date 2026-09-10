@@ -134,6 +134,8 @@ struct JsCallableCode {
     uint8_t typed_array_element_type_plus_one;
     bool eval_initializer_context;
     uint8_t body_kind;
+    uint32_t intern_refcount;
+    bool interned;
 };
 
 // JSCUO8: one payload word on the value, not six. A value that needs none
@@ -190,7 +192,8 @@ inline const JsWithData js_fn_with_absent{};
 
 inline const JsEvalOrigin js_fn_eval_origin_absent{};
 inline const JsCallableCode js_fn_code_absent{
-    NULL, NULL, NULL, 0, 0, UINT32_MAX, -1, 0, 0, false, JS_FUNCTION_BODY_CODE};
+    NULL, NULL, NULL, 0, 0, UINT32_MAX, -1, 0, 0, false,
+    JS_FUNCTION_BODY_CODE, 0, false};
 
 #define JS_FN_PAYLOAD_READ(fn, field) \
     ((fn) && (fn)->payload && (fn)->payload->field ? (fn)->payload->field \
@@ -260,6 +263,9 @@ JsClassData* js_fn_class_ensure(JsFunction* fn);
 JsWithData* js_fn_with_ensure(JsFunction* fn);
 JsEvalOrigin* js_fn_eval_origin_ensure(JsFunction* fn);
 JsCallableCode* js_fn_code_ensure(JsFunction* fn);
+JsCallableCode* js_callable_code_intern_mir(JsFunction* fn, void* func_ptr,
+        Context* runtime_context, int param_count, uint32_t module_state_id);
+void js_callable_code_release(JsCallableCode* code);
 
 #define JS_FUNCTION_LAYOUT_MAGIC 0x4A53464Eu
 

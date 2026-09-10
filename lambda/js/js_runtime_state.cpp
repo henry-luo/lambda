@@ -415,6 +415,10 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
         state->function_cache_values = NULL;
         state->function_cache_capacity = 0;
         state->function_cache_count = 0;
+        if (state->callable_code_interned) {
+            arraylist_free(state->callable_code_interned);
+            state->callable_code_interned = NULL;
+        }
     }
     if (!state) return;
     if (state->global_environment) {
@@ -486,6 +490,30 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
     state->process = NULL;
 }
 
+JsAssertState* js_assert_state_ensure(JsRuntimeState* state) {
+    if (!state) return NULL;
+    if (state->assert) return state->assert;
+    JsAssertState* assert_state = (JsAssertState*)mem_calloc(1,
+        sizeof(JsAssertState), MEM_CAT_JS_RUNTIME);
+    if (!assert_state) {
+        log_error("js-runtime-state: failed to allocate lazy assert record");
+        return NULL;
+    }
+    root_vector_init(&assert_state->instances, (Context*)context,
+        "assert instances");
+    root_vector_init(&assert_state->node_test_values, (Context*)context,
+        "node:test namespace and event queue");
+    root_vector_init(&assert_state->node_test_hooks.before_each,
+        (Context*)context, "node:test beforeEach hooks");
+    root_vector_init(&assert_state->node_test_hooks.after_each,
+        (Context*)context, "node:test afterEach hooks");
+    root_vector_init(&assert_state->mocks.values, (Context*)context,
+        "node:test mock records");
+    assert_state->node_test_next_id = 1;
+    state->assert = assert_state;
+    return assert_state;
+}
+
 JsReadlineState* js_readline_state_ensure(JsRuntimeState* state) {
     if (!state) return NULL;
     if (state->readline) return state->readline;
@@ -550,7 +578,6 @@ static bool js_runtime_state_alloc_records(JsRuntimeState* state) {
         sizeof(JsAsyncHooksState), MEM_CAT_JS_RUNTIME);
     state->string_caches = (JsStringCacheState*)mem_calloc(1,
         sizeof(JsStringCacheState), MEM_CAT_JS_RUNTIME);
-    state->assert = (JsAssertState*)mem_calloc(1, sizeof(JsAssertState), MEM_CAT_JS_RUNTIME);
     state->intrinsics = (JsIntrinsicState*)mem_calloc(1, sizeof(JsIntrinsicState), MEM_CAT_JS_RUNTIME);
     state->intrinsic_slots = (JsRealmIntrinsicSlots*)mem_calloc(1,
         sizeof(JsRealmIntrinsicSlots), MEM_CAT_JS_RUNTIME);
@@ -558,7 +585,6 @@ static bool js_runtime_state_alloc_records(JsRuntimeState* state) {
     if (!state->global_environment || !state->event_loop || !state->timers ||
             !state->async_hooks ||
             !state->string_caches ||
-            !state->assert ||
             !state->intrinsics ||
             !state->intrinsic_slots ||
             !state->process) {
@@ -574,16 +600,6 @@ static bool js_runtime_state_alloc_records(JsRuntimeState* state) {
     runtime_resource_table_init(&state->resources, context,
         "JS runtime resources");
     js_realm_slots_init(&state->realm_slots, (Context*)context);
-    root_vector_init(&state->assert->instances, (Context*)context,
-        "assert instances");
-    root_vector_init(&state->assert->node_test_values, (Context*)context,
-        "node:test namespace and event queue");
-    root_vector_init(&state->assert->node_test_hooks.before_each,
-        (Context*)context, "node:test beforeEach hooks");
-    root_vector_init(&state->assert->node_test_hooks.after_each,
-        (Context*)context, "node:test afterEach hooks");
-    root_vector_init(&state->assert->mocks.values, (Context*)context,
-        "node:test mock records");
     root_vector_init(&state->async_hooks->hooks, (Context*)context,
         "async hook instances");
     root_vector_init(&state->async_hooks->pending_destroy_resources,
@@ -664,7 +680,6 @@ bool js_runtime_state_init(EvalContext* runtime_context) {
         state->promises.unhandled_strict =
             js_promise_initial_unhandled_rejections_strict();
         state->cluster.next_worker_id = 1;
-        state->assert->node_test_next_id = 1;
         state->performance.origin_epoch = UINT64_MAX;
     }
     if (js_active_runtime_state &&
@@ -860,7 +875,8 @@ static void js_runtime_state_prepare_root_vectors(JsRuntimeState* state) {
 
     if (&state->intrinsic_slots->builtin_function_entries[0] +
             (JS_REALM_INTRINSIC_SLOT_COUNT - 1) !=
-            &state->intrinsic_slots->atomics) {
+            &state->intrinsic_slots->typed_array_prototypes[
+                JS_TYPED_ARRAY_CACHE_TYPE_COUNT - 1]) {
         log_error("js-root-vector: intrinsic slot span is not contiguous");
     }
 }
