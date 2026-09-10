@@ -12,6 +12,35 @@ static inline Type* contract_unwrap_type(Type* type) {
     return type_field_unwrap_simple_decl(type);
 }
 
+Type* lambda_type_nonnull_map_contract(Type* contract) {
+    for (int depth = 0; contract && depth < 64; depth++) {
+        contract = contract_unwrap_type(contract);
+        if (!contract) return NULL;
+        if (contract->type_id == LMD_TYPE_MAP) {
+            return contract != &TYPE_MAP && contract != &TYPE_OBJECT ? contract : NULL;
+        }
+        if (contract->type_id != LMD_TYPE_TYPE) return NULL;
+        if (contract->kind == TYPE_KIND_PARAM) {
+            TypeParam* parameter = (TypeParam*)contract;
+            contract = parameter->contract_type ? parameter->contract_type : parameter->full_type;
+        } else if (contract->kind == TYPE_KIND_UNARY &&
+                ((TypeUnary*)contract)->op == OPERATOR_OPTIONAL) {
+            contract = ((TypeUnary*)contract)->operand;
+        } else if (lambda_type_is_union(contract)) {
+            TypeBinary* binary = (TypeBinary*)contract;
+            Type* left = contract_unwrap_type(binary->left);
+            Type* right = contract_unwrap_type(binary->right);
+            if (left && left->type_id == LMD_TYPE_NULL) contract = right;
+            else if (right && right->type_id == LMD_TYPE_NULL) contract = left;
+            else return NULL;
+        } else {
+            // A layout alone cannot discharge a value-dependent refinement.
+            return NULL;
+        }
+    }
+    return NULL;
+}
+
 static Type* canonical_contract_base(Type* type, int depth) {
     if (!type || depth > 64) return NULL;
     type = contract_unwrap_type(type);
@@ -370,9 +399,16 @@ bool lambda_array_contract_info(Type* contract, LambdaArrayContractInfo* out) {
     return true;
 }
 
+Type* lambda_array_contract_element(Type* contract) {
+    Type* element = NULL;
+    return array_contract_layer(array_contract_unwrap(contract, 0), &element)
+        ? array_contract_unwrap(element, 0) : NULL;
+}
+
 Type* lambda_array_contract_canonical(Type* contract) {
-    LambdaArrayContractInfo info = {};
-    return lambda_array_contract_info(contract, &info) ? info.array_contract : NULL;
+    Type* root = array_contract_unwrap(contract, 0);
+    Type* element = NULL;
+    return array_contract_layer(root, &element) ? root : NULL;
 }
 
 static bool array_contract_semantically_equal(Type* left, Type* right) {
@@ -393,18 +429,19 @@ static bool array_contract_semantically_equal(Type* left, Type* right) {
 
 bool lambda_array_contract_compatible(Type* candidate, Type* expected,
         bool invariant) {
+    if (invariant) {
+        // Equality needs rank and leaf semantics, not two freshly derived
+        // storage descriptions. Non-array identities are not array proofs.
+        if (!lambda_array_contract_canonical(candidate) ||
+                !lambda_array_contract_canonical(expected)) return false;
+        return candidate == expected || array_contract_semantically_equal(candidate, expected);
+    }
     LambdaArrayContractInfo candidate_info = {};
     LambdaArrayContractInfo expected_info = {};
     if (!lambda_array_contract_info(candidate, &candidate_info) ||
             !lambda_array_contract_info(expected, &expected_info) ||
             candidate_info.rank != expected_info.rank) {
         return false;
-    }
-    if (invariant) {
-        // Declared T[] and inferred TypeArray use different construction
-        // nodes. Equality is their rank-plus-leaf contract, not node identity.
-        return array_contract_semantically_equal(candidate_info.array_contract,
-            expected_info.array_contract);
     }
     if (expected_info.immediate_element == &TYPE_ANY) return true;
     return contract_semantics_compatible(candidate_info.immediate_element,
@@ -450,6 +487,10 @@ ArrayRepCert* lambda_array_rep_cert_create(Pool* pool, Type* contract) {
     cert->leaf_lane = info.leaf_lane;
     cert->rank = info.rank;
     cert->flags = ARRAY_REP_CERT_EXACT | ARRAY_REP_CERT_ERROR_FREE;
+    ArrayNumElemType element = ELEM_INT;
+    cert->has_array_num_lane = info.rank == 1 &&
+        lambda_array_num_elem_type_for_contract(info.leaf_element, &element);
+    cert->array_num_elem = element;
     if (info.leaf_element && (info.leaf_element->type_id == LMD_TYPE_MAP ||
             info.leaf_element->type_id == LMD_TYPE_ELEMENT)) {
         cert->flags |= ARRAY_REP_CERT_REIFIED;
@@ -480,10 +521,10 @@ static bool array_representation_matches_cert(Item value,
     if (!cert || cert->rank == 0) return false;
     TypeId value_type = get_type_id(value);
     if (value_type == LMD_TYPE_ARRAY_NUM) {
-        ArrayNumElemType elem_type = ELEM_INT;
-        return cert->rank == 1 && value.array_num &&
-            lambda_array_num_elem_type_for_contract(cert->leaf_element, &elem_type) &&
-            value.array_num->get_elem_type() == elem_type;
+        // The immutable certificate already resolved nullable/sized numeric
+        // spellings; only the live carrier can have changed (D3.3.3v3).
+        return cert->has_array_num_lane && value.array_num &&
+            value.array_num->get_elem_type() == cert->array_num_elem;
     }
     if (value_type != LMD_TYPE_ARRAY || !value.array) return false;
     if (cert->rank != 1) {
@@ -503,8 +544,16 @@ bool lambda_array_rep_proves(Item value, Type* target_contract, bool invariant) 
         return false;
     }
     return array_representation_matches_cert(value, cert) &&
-        lambda_array_contract_compatible(cert->array_contract, target_contract,
-            invariant);
+        (cert->array_contract == target_contract ||
+         lambda_array_contract_compatible(cert->array_contract, target_contract, invariant));
+}
+
+bool lambda_array_rep_proves_cert(Item value, const ArrayRepCert* target, bool invariant) {
+    ArrayRepCert* cert = array_rep_cert_for_value(value);
+    if (!cert || !target || !(cert->flags & ARRAY_REP_CERT_EXACT)) return false;
+    return array_representation_matches_cert(value, cert) &&
+        (cert == target || lambda_array_contract_compatible(cert->array_contract,
+            target->array_contract, invariant));
 }
 
 void lambda_array_install_rep_cert(Item value, ArrayRepCert* cert) {

@@ -53,6 +53,8 @@ struct LambdaArrayContractInfo {
 };
 
 bool lambda_array_contract_info(Type* contract, LambdaArrayContractInfo* out);
+// Resolve just the outer layer without deriving an unused leaf storage lane.
+Type* lambda_array_contract_element(Type* contract);
 // Return the resolver's canonical outer array node for an exact certificate
 // comparison, or NULL when the contract is not a homogeneous value array.
 Type* lambda_array_contract_canonical(Type* contract);
@@ -65,6 +67,8 @@ bool lambda_array_num_elem_type_for_contract(Type* element,
     ArrayNumElemType* out_type);
 ArrayRepCert* lambda_array_rep_cert_create(Pool* pool, Type* contract);
 bool lambda_array_rep_proves(Item value, Type* target_contract, bool invariant);
+bool lambda_array_rep_proves_cert(Item value, const ArrayRepCert* target,
+    bool invariant);
 void lambda_array_install_rep_cert(Item value, ArrayRepCert* cert);
 void lambda_array_clear_rep_cert(Item value);
 
@@ -86,6 +90,10 @@ MapContractRelation lambda_map_contract_relation(const TypeMap* candidate,
 // Compare one proven expression result with a map field contract without
 // exposing the relation's recursive implementation to the MIR transpiler.
 bool lambda_type_contract_semantically_compatible(Type* candidate, Type* expected);
+
+// Resolve a concrete record layout through aliases and nullable spellings.
+// A nullable receiver still needs its own value/null guard (D3.2.4v3).
+Type* lambda_type_nonnull_map_contract(Type* contract);
 
 // True when an annotated boundary from `source` to `target` needs no runtime
 // check at all, so the MIR transpiler can skip emitting one.

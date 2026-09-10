@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "description": "D3.3.3v3: relay keeps its public entry admission, but native calls to add/size reuse the full admitted Vec witness.",
+  "checks": [
+    {
+      "in_func": "_relay_#",
+      "count": {"call\tlambda_type_check_p, lambda_type_check": 1}
+    },
+    {
+      "in_func": "_dynamic_size_#",
+      "expect": ["call\tlambda_type_check_p, lambda_type_check"]
+    },
+    {
+      "in_func": "_add_#",
+      "expect_seq": [
+        {"pattern": "mov\t{{r}}, u8:4({{r}})"},
+        {"pattern": "mov\ti64:({{r}}), %p2"},
+        {"pattern": "call\tpn_push_cow"}
+      ]
+    }
+  ]
+}
