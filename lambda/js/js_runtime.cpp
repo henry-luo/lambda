@@ -2592,21 +2592,11 @@ static Item js_init_class_instance_fields_inner(Item callee, Item object) {
     return js_status_ok();
 }
 
-static bool js_deferred_instance_field_class_contains(Item callee) {
-    // Deferral is owned by one class capability. Treating its ancestors as
-    // deferred skipped parent fields during super(), even though only the
-    // derived class evaluates its fields at the post-super point (D6.2.2v2).
-    return js_deferred_instance_field_class.item == callee.item;
-}
-
 static Item js_init_class_instance_fields_with_private_init(Item callee,
-        Item object, bool skip_deferred_class) {
-    if (skip_deferred_class && js_deferred_instance_field_class_contains(callee)) {
-        // A compiler-known default-derived construct emits every default
-        // class's source initializers after runtime super-dispatch. Metadata
-        // cannot reproduce expression values or private-field timing.
-        return js_status_ok();
-    }
+        Item object) {
+    // Construction and the exact post-super hook both initialize one class;
+    // a derived source initializer is called only from its post-super hook.
+    // The shared private-init guard preserves that class capability boundary.
     bool saved_private_init = js_private_field_initializing;
     js_private_field_initializing = true;
     // Each [[Construct]] initializes only its own class fields; its parent
@@ -2618,14 +2608,13 @@ static Item js_init_class_instance_fields_with_private_init(Item callee,
 }
 
 JS_FORWARD_ITEM(js_init_class_instance_fields, (Item callee, Item object),
-    js_init_class_instance_fields_with_private_init, (callee, object, true))
+    js_init_class_instance_fields_with_private_init, (callee, object))
 
-// The derived constructor owns this exact post-super point. It must bypass
-// only its own deferred marker; parent construction remains responsible for
-// parent fields, preserving the D6.2.2v2 construct capability boundary.
+// The derived constructor owns this exact post-super point; the shared helper
+// initializes only the derived class and preserves D6.2.2v2 ordering.
 JS_FORWARD_ITEM(js_init_class_instance_fields_after_super,
     (Item callee, Item object), js_init_class_instance_fields_with_private_init,
-    (callee, object, false))
+    (callee, object))
 
 extern "C" Item js_private_brand_add(Item object, Item private_key, Item callee) {
     if (!js_can_host_private_slots(object)) return js_status_ok();
@@ -3544,19 +3533,6 @@ extern "C" Item js_get_class_superclass(Item class_function) {
         ? js_fn_class(fn)->superclass : ItemNull;
 }
 
-extern "C" Item js_construct_value_defer_own_fields(Item callee,
-        Item* args, int argc, Item new_target) {
-    JS_ROOTS(roots, callee_root, callee, saved_target_root, js_deferred_instance_field_class);
-    // The ordinary runtime construct path must still perform inherited
-    // [[Construct]], but a compiler-known derived class owns expression field
-    // initialization. Keep that target rooted while runtime dispatch runs.
-    js_deferred_instance_field_class = callee_root.get();
-    Item result = js_construct_value(callee_root.get(), args, argc, new_target,
-        NULL, false);
-    js_deferred_instance_field_class = saved_target_root.get();
-    return result;
-}
-
 static Item js_typed_array_species_constructor_property(Item exemplar) {
     Item ctor_key = js_name_item("constructor", 11);
     Item ord_val = ItemNull;
@@ -3911,14 +3887,6 @@ static TypeMap* js_predicted_shape_resolve(uint32_t first_key_index,
     return shape;
 }
 
-// Pool-owned metadata, independent of GC and of any observed receiver. MIR
-// resolves this compile-selected recipe per activation, never learns an IC.
-extern "C" void* js_literal_shape(int64_t first_key_index, int64_t key_count) {
-    if (first_key_index < 0 || first_key_index >= JS_PREDICTED_SHAPE_LIMIT ||
-            key_count <= 0 || key_count > JS_PREDICTED_SHAPE_MAX_SLOTS) return NULL;
-    return js_predicted_shape_resolve((uint32_t)first_key_index, (uint32_t)key_count);
-}
-
 extern "C" void js_set_constructor_plan(Item function, int64_t first_key_index,
         int64_t key_count) {
     if (get_type_id(function) != LMD_TYPE_FUNC || !function.function ||
@@ -4013,49 +3981,6 @@ extern "C" Item js_predicted_slot_initialize(Item target, NameRef key,
     // preserves siblings and caches the new shape instead of cloning a
     // throwaway descriptor and a private TypeMap on every literal evaluation.
     return fn_map_set(target, (Item){.item = s2it(key)}, value);
-}
-
-// T10-2 item 2: guarded direct-slot read.
-//
-// The site's shape is a compile-time CANDIDATE -- the receiver was initialized
-// by a literal with this shape somewhere the lowering could see it -- and
-// nothing static proves the object arriving here is that one. The guard
-// supplies the proof at runtime; any miss falls through to the ordinary named
-// kernel. The compare is against resolved constants and no code is ever
-// rewritten, so this is a guard chain, not an inline cache (D8.4.1v2, LC1v2).
-//
-// Shape identity subsumes most of what the kernel re-checks per access: every
-// descriptor, accessor, delete, freeze and extension path clones the TypeMap
-// before mutating it, so an instance that took any of them no longer carries
-// this shape and fails the compare.
-extern "C" Item js_get_name_id(Item object, NameId name_id);
-
-extern "C" Item js_shaped_slot_get(Item object, int64_t first_key_index,
-        int64_t key_count, int64_t slot, int64_t name_id) {
-    if (get_type_id(object) == LMD_TYPE_MAP && object.map) {
-        Map* m = object.map;
-        // MAP_KIND_PLAIN rules out dataset views, descriptor-promoted maps,
-        // array companion maps and every exotic receiver in one byte.
-        if (m->data && m->map_kind == MAP_KIND_PLAIN && !m->has_ctor_reserved &&
-                slot >= 0 && slot < (int64_t)key_count) {
-            TypeMap* shape = js_predicted_shape_resolve(
-                (uint32_t)first_key_index, (uint32_t)key_count);
-            if (shape && (TypeMap*)m->type == shape &&
-                    shape->slot_entries && slot < shape->slot_count) {
-                ShapeEntry* e = shape->slot_entries[slot];
-                // flags stay 0 by the clone rule above; the bounds test is kept
-                // because data_cap is per instance, not per shape.
-                if (e && e->flags == 0 &&
-                        shape_entry_storage_fits_data(e, m->data_cap)) {
-                    Item value = _map_read_field(e, m->data);
-                    // A sentinel can be written without cloning, so identity
-                    // does not subsume this one.
-                    if (!js_is_deleted_sentinel(value)) return value;
-                }
-            }
-        }
-    }
-    return js_get_name_id(object, (NameId)name_id);
 }
 
 // Forward declaration for prototype chain support
@@ -7741,22 +7666,12 @@ extern "C" Item js_set_private_proxy_property(Item proxy, Item key, Item value) 
     return item_is_error(result) ? result : (Item){.item = b2it(true)};
 }
 
-extern "C" Item js_set_key_core(Item object, Item key,
-                                                Item value, Item receiver) {
-    // The receiver-aware completion kernel owns ordinary Set semantics;
-    // this value-returning ABI is only the legacy caller adapter.
-    // MIR can pass transient String Items here; root every operand before the
-    // completion kernel crosses an allocating property boundary (D5.4.3).
-    JS_ROOTS(roots, object_root, object, key_root, key, value_root, value, receiver_root, receiver);
-    Item result = js_set_completion_with_key(object_root.get(), key_root.get(),
-        value_root.get(), receiver_root.get());
-    return item_is_error(result) ? result : value_root.get();
-}
 JS_FORWARD_ITEM(js_define_own_key_storage, (Item object, Item key, Item value), js_set_storage_mode, (object, key, value, object, true, false))
 
 extern "C" Item js_set_key_default(Item object, Item key, Item value) {
-    // The adapter is an allocating ABI boundary; retain the incoming key and
-    // value until OrdinarySet has completed (D5.4.3).
+    // The completion kernel owns ordinary Set semantics; this default adapter
+    // roots transient MIR keys and values through its allocating ABI boundary
+    // until OrdinarySet has completed (D5.4.3).
     JS_ROOTS(roots, object_root, object, key_root, key, value_root, value);
     Item result = js_set_completion_with_key(object_root.get(), key_root.get(),
         value_root.get(), object_root.get());
@@ -8881,13 +8796,6 @@ extern "C" double js_math_pow_d(double base, double exp) {
     return pow(base, exp);
 }
 
-// Boxed version: takes Items, returns Item
-extern "C" Item js_math_pow(Item base_item, Item exp_item) {
-    double base = js_get_number(js_to_number(base_item));
-    double exp = js_get_number(js_to_number(exp_item));
-    return js_make_number(js_math_pow_d(base, exp));
-}
-
 static Item js_array_new_sparse_length(int64_t length) {
     Array* arr = array();
     container_set_js_elements_kind((Container*)arr,
@@ -9464,8 +9372,6 @@ static bool js_array_set_existing_dense_no_gc(Item array, int64_t index,
         JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
     return true;
 }
-JS_FORWARD_EXPRESSION(int64_t, js_elements_set_existing_dense_int_fast, (Item array,         int64_t index, Item value), (js_array_set_existing_dense_no_gc(array, index, value) ? 1 : 0))
-
 extern "C" Item js_elements_set_int_completion(Item array, int64_t index,
                                                  Item value) {
     if (js_is_ordinary_numeric_array(array)) {
@@ -9555,53 +9461,7 @@ extern "C" Item js_elements_set_int_completion(Item array, int64_t index,
     return (Item){.item = b2it(true)};
 }
 
-extern "C" Item js_elements_set_number(Item array, Item index, Item value) {
-    int64_t native_index = -1;
-    // JavaScript numeric keys use the dense array lane only when they are
-    // canonical non-negative integer indices; NaN, fractions, and infinities
-    // remain ordinary property keys and must retain the full fallback path.
-    if (js_key_as_array_index(index, &native_index)) {
-        return js_elements_set_int(array, native_index, value);
-    }
-    return js_set_key_default(array, index, value);
-}
 JS_FORWARD_ITEM(js_elements_set_int_direct, (Item array, int64_t index, Item value), js_elements_set_int_mode, (array, index, value, true, false))
-
-extern "C" int64_t js_elements_set_append_or_dense_int_fast(Item array, int64_t index, Item value) {
-    if (js_is_ordinary_numeric_array(array)) {
-        if (index < 0 || index > array.array_num->length ||
-                !js_array_value_is_numeric(value)) return 0;
-        return js_array_numeric_store(array, index, value) ? 1 : 0;
-    }
-    if (get_type_id(array) != LMD_TYPE_ARRAY || index < 0) return 0;
-    Array* arr = array.array;
-    if (arr->is_content == 1) return 0;
-
-    if (index < arr->length && index < js_array_dense_capacity(arr) &&
-            arr->items[index].item != JS_DELETED_SENTINEL_VAL &&
-            !js_array_companion_has_numeric_slot(arr, index)) {
-        js_array_store_owned(arr, index, value);
-        return 1;
-    }
-
-    if (index != arr->length) return 0;
-    if (js_array_companion_has_numeric_slot(arr, index)) return 0;
-    if (!js_is_extensible(array)) return 0;
-    if (js_array_length_is_non_writable(array)) return 0;
-    // A length-only sparse Array can have a logical tail far beyond its dense
-    // buffer; direct append would advance length without storing that element.
-    if (js_array_should_store_sparse_for_index(arr, index)) return 0;
-    Item arr_proto = js_get_prototype_of(array);
-    if (js_is_proxy(arr_proto) || js_array_proto_index_guard_is_dirty(array)) return 0;
-    js_array_push_item_direct(arr, value);
-    return 1;
-}
-
-extern "C" int64_t js_elements_set_append_or_dense_item_fast(Item array, Item index, Item value) {
-    int64_t idx = 0;
-    if (!js_array_key_is_index(index, &idx)) return 0;
-    return js_elements_set_append_or_dense_int_fast(array, idx, value);
-}
 
 extern "C" Item js_array_define_dense_element_direct(Item array, int64_t index, Item value) {
     if (js_is_ordinary_numeric_array(array)) {
@@ -23563,7 +23423,8 @@ static Item js_string_intrinsic_algorithm(Item str,
         }
     }
     // toString
-    if (operation == JS_STRING_INTRINSIC_TO_STRING) {
+    if (operation == JS_STRING_INTRINSIC_TO_STRING ||
+        operation == JS_STRING_INTRINSIC_VALUE_OF) {
         return str;
     }
 
@@ -23715,12 +23576,6 @@ static Item js_string_intrinsic_algorithm(Item str,
         }
         // Fallback: if @@matchAll not found on rx, throw TypeError
         return js_throw_type_error("matchAll: RegExp[Symbol.matchAll] is not a function");
-    }
-    if (operation == JS_STRING_INTRINSIC_VALUE_OF) {
-        return str;
-    }
-    if (operation == JS_STRING_INTRINSIC_TO_STRING) {
-        return str;
     }
     // isWellFormed() — returns false if string contains lone surrogates
     if (operation == JS_STRING_INTRINSIC_IS_WELL_FORMED) {
@@ -28949,68 +28804,69 @@ static bool js_iterator_state_ensure_roots(void) {
     return js_active_runtime_state != NULL;
 }
 
-static Item js_get_gen_return_signal_marker() {
-    if (js_gen_return_signal_marker.item == 0) {
+enum JsGeneratorSignalKind {
+    JS_GENERATOR_SIGNAL_RETURN,
+    JS_GENERATOR_SIGNAL_THROW,
+};
+
+static Item js_get_gen_signal_marker(JsGeneratorSignalKind kind) {
+    Item* marker = kind == JS_GENERATOR_SIGNAL_RETURN
+        ? &js_gen_return_signal_marker : &js_gen_throw_signal_marker;
+    if (marker->item == 0) {
         if (!js_iterator_state_ensure_roots()) return ItemNull;
-        js_gen_return_signal_marker = js_new_object();
+        *marker = js_new_object();
     }
-    return js_gen_return_signal_marker;
+    return *marker;
+}
+
+static Item js_gen_signal(Item value, JsGeneratorSignalKind kind) {
+    RootFrame roots(3);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> signal_root(roots, js_array_new(2));
+    if (get_type_id(signal_root.get()) != LMD_TYPE_ARRAY) return ItemError;
+    js_array_store_owned(signal_root.get().array, 0, value_root.get());
+    signal_root.get().array->items[1] = js_get_gen_signal_marker(kind);
+    return signal_root.get();
+}
+
+static int64_t js_gen_is_signal(Item value, JsGeneratorSignalKind kind) {
+    if (get_type_id(value) != LMD_TYPE_ARRAY || value.array->length < 2) return 0;
+    return value.array->items[1].item == js_get_gen_signal_marker(kind).item;
+}
+
+static Item js_gen_signal_value(Item value) {
+    return get_type_id(value) == LMD_TYPE_ARRAY && value.array->length >= 1
+        ? value.array->items[0] : make_js_undefined();
 }
 
 extern "C" Item js_gen_return_signal(Item value) {
     // The marker is created lazily, so reading it can allocate and collect.
     // Both the incoming value and the fresh array must be rooted across that
     // call, exactly as js_gen_throw_signal does below.
-    RootFrame roots(3);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> signal_root(roots, js_array_new(2));
-    if (get_type_id(signal_root.get()) != LMD_TYPE_ARRAY) return ItemError;
-    js_array_store_owned(signal_root.get().array, 0, value_root.get());
-    signal_root.get().array->items[1] = js_get_gen_return_signal_marker();
-    return signal_root.get();
+    return js_gen_signal(value, JS_GENERATOR_SIGNAL_RETURN);
 }
 
 extern "C" int64_t js_gen_is_return_signal(Item value) {
-    if (get_type_id(value) != LMD_TYPE_ARRAY || value.array->length < 2) return 0;
-    Item tag = value.array->items[1];
-    return (tag.item == js_get_gen_return_signal_marker().item) ? 1 : 0;
+    return js_gen_is_signal(value, JS_GENERATOR_SIGNAL_RETURN);
 }
 
 extern "C" Item js_gen_return_signal_value(Item value) {
-    if (get_type_id(value) != LMD_TYPE_ARRAY || value.array->length < 1) return make_js_undefined();
-    return value.array->items[0];
+    return js_gen_signal_value(value);
 }
 
 // A thrown-into-generator value must cross a suspension as ordinary input;
 // publishing it directly into the ERROR lane would make the state machine
 // terminate before the suspended try/finally can run.
-static Item js_get_gen_throw_signal_marker() {
-    if (js_gen_throw_signal_marker.item == 0) {
-        if (!js_iterator_state_ensure_roots()) return ItemNull;
-        js_gen_throw_signal_marker = js_new_object();
-    }
-    return js_gen_throw_signal_marker;
-}
-
 extern "C" Item js_gen_throw_signal(Item value) {
-    RootFrame roots(3);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> signal_root(roots, js_array_new(2));
-    if (get_type_id(signal_root.get()) != LMD_TYPE_ARRAY) return ItemError;
-    js_array_store_owned(signal_root.get().array, 0, value_root.get());
-    signal_root.get().array->items[1] = js_get_gen_throw_signal_marker();
-    return signal_root.get();
+    return js_gen_signal(value, JS_GENERATOR_SIGNAL_THROW);
 }
 
 extern "C" int64_t js_gen_is_throw_signal(Item value) {
-    if (get_type_id(value) != LMD_TYPE_ARRAY || value.array->length < 2) return 0;
-    Item tag = value.array->items[1];
-    return (tag.item == js_get_gen_throw_signal_marker().item) ? 1 : 0;
+    return js_gen_is_signal(value, JS_GENERATOR_SIGNAL_THROW);
 }
 
 extern "C" Item js_gen_throw_signal_value(Item value) {
-    if (get_type_id(value) != LMD_TYPE_ARRAY || value.array->length < 1) return make_js_undefined();
-    return value.array->items[0];
+    return js_gen_signal_value(value);
 }
 
 static Item js_iter_result_is_done(Item result) {
@@ -30655,24 +30511,6 @@ extern "C" Item js_domain_get_current(void) {
     return js_domain_current;
 }
 
-extern "C" Item js_domain_set_current(Item domain) {
-    Item previous = js_domain_get_current();
-    TypeId domain_type = get_type_id(domain);
-    if (domain.item == 0 || domain_type == LMD_TYPE_UNDEFINED ||
-        domain_type == LMD_TYPE_NULL || domain.item == ItemNull.item) {
-        js_item_stack_clear(&js_domain_stack_state);
-    } else {
-        js_item_stack_clear(&js_domain_stack_state);
-        js_item_stack_push(&js_domain_stack_state, domain);
-    }
-    js_domain_sync_visible_state();
-    return previous;
-}
-
-extern "C" void js_domain_restore(Item previous) {
-    js_domain_set_current(previous);
-}
-
 extern "C" Item js_domain_call_function(Item domain, Item fn, Item this_val, Item* args, int arg_count) {
     if (arg_count < 0 || (arg_count > 0 && !args)) return ItemError;
     RootFrame roots((size_t)arg_count + 5);
@@ -32126,18 +31964,17 @@ static bool js_async_ensure_scratch_root() {
         js_root_vector_ensure_registered(&js_runtime_state.async_await.roots);
 }
 
-// Check if an awaited value requires suspension (pending promise)
-// Returns: true = pending (must suspend), false = resolved/rejected/non-promise
-// For resolved/non-promise: caches result in js_async_resolved_value
-// For rejected: calls js_throw_value (exception mechanism handles it)
+// Prepare an awaited value for the generated suspension continuation.
+// PromiseResolve produces the one promise carrier consumed after resume.
+// The exact scratch root preserves that carrier across the callback handoff.
+// Rejections remain an explicit completion from the preparation call.
 //
-// KNOWN DIVERGENCE: answering "false" continues the async body inline, so its
-// remaining statements run ahead of microtasks queued before the await, while
-// the spec makes every await a promise reaction job. Removing this fast path
-// (always suspending on PromiseResolve of the operand) fixes the ordering and
-// was verified against Node on the microtask corpus, but it exposes a latent
-// MIR defect that corrupts an awaited value in test/js/lib_floating_ui.js.
-// See the impl note before re-attempting.
+// The generated state machine does not use an inline fulfilled-value shortcut.
+// It always records the PromiseResolve result and returns a suspend signal.
+// This preserves await job ordering without a second native decision path.
+// The resume input supplies fulfillment or rejection at the shared state label.
+// The error lane routes a rejection before ordinary continuation code observes it.
+// The resulting contract follows D8.4.3v2's explicit completion ABI.
 extern "C" Item js_async_prepare_await(Item value) {
     RootFrame roots(1);
     Rooted<Item> value_root(roots, value);
@@ -32147,45 +31984,7 @@ extern "C" Item js_async_prepare_await(Item value) {
     return ItemNull;
 }
 
-extern "C" Item js_async_must_suspend(Item value) {
-    JsPromise* p = js_get_promise(value);
-    if (!p) {
-    if (js_is_object_value(value)) {
-            Item wrapped = js_promise_resolve(value);
-            if (item_is_error(wrapped)) {
-                return wrapped;
-            }
-            p = js_get_promise(wrapped);
-            if (p) {
-                if (p->state == JS_PROMISE_FULFILLED) {
-                    js_async_resolved_value = p->result;
-                    return (Item){.item = b2it(false)};
-                }
-                if (p->state == JS_PROMISE_REJECTED) {
-                    js_async_resolved_value = ItemNull;
-                    return js_throw_value(p->result);
-                }
-                js_async_resolved_value = wrapped;
-                return (Item){.item = b2it(true)};
-            }
-        }
-        js_async_resolved_value = value;
-        return (Item){.item = b2it(false)};
-    }
-    if (p->state == JS_PROMISE_FULFILLED) {
-        js_async_resolved_value = p->result;
-        return (Item){.item = b2it(false)};
-    }
-    if (p->state == JS_PROMISE_REJECTED) {
-        js_async_resolved_value = ItemNull;
-        return js_throw_value(p->result);
-    }
-    // Pending — must suspend
-    js_async_resolved_value = value;
-    return (Item){.item = b2it(true)};
-}
-
-// Get the cached resolved value after js_async_must_suspend returned 0
+// Get the promise cached by js_async_prepare_await.
 JS_FORWARD_EXPRESSION(Item, js_async_get_resolved, (void), js_async_resolved_value)
 
 // Forward declarations for async callbacks
@@ -32353,10 +32152,6 @@ extern "C" Item js_async_context_create_mir(void* fn_ptr, Item* env,
         ItemNull, ItemNull);
 }
 
-JS_FORWARD_ITEM(js_async_context_create, (void* fn_ptr, Item* env, int64_t env_size, Item this_val),
-    js_async_context_create_current, (fn_ptr, env, env_size, this_val,
-        ItemNull, ItemNull))
-
 extern "C" Item js_async_context_create_ast(Item function, Item arguments,
         Item this_val) {
     return js_async_context_create_current(NULL, NULL, 0, this_val, function,
@@ -32456,11 +32251,6 @@ extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejecte
     }
 
     return return_promise_root.get();
-}
-
-extern "C" Item js_promise_catch(Item promise, Item on_rejected) {
-    Item undef = (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-    return js_promise_then(promise, undef, on_rejected);
 }
 
 extern "C" Item js_promise_finally(Item promise, Item on_finally) {
@@ -32731,18 +32521,6 @@ static Item js_promise_make_bound_element_handler(JsNativeP4 handler, Item count
 
 extern "C" Item js_promise_all(Item iterable) {
     return js_promise_combinator_with_constructor(js_promise_default_constructor(), iterable, 0);
-}
-
-extern "C" Item js_promise_race(Item iterable) {
-    return js_promise_combinator_with_constructor(js_promise_default_constructor(), iterable, 3);
-}
-
-extern "C" Item js_promise_any(Item iterable) {
-    return js_promise_combinator_with_constructor(js_promise_default_constructor(), iterable, 2);
-}
-
-extern "C" Item js_promise_all_settled(Item iterable) {
-    return js_promise_combinator_with_constructor(js_promise_default_constructor(), iterable, 1);
 }
 
 // =============================================================================

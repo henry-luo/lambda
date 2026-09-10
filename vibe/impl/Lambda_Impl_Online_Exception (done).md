@@ -260,7 +260,7 @@ Each phase lands independently with `make test-lambda-baseline` green.
 
 ## 4. Stacked-poll unification (await / throw / super)
 
-**(a) `await f()` in a try** — today: 2 helper polls (fast path after `js_async_must_suspend`; resume path after `jm_emit_async_resume_refresh`) + 1 trailing statement poll = 3 static, 2 executed per dynamic path. The two path polls are **genuinely disjoint** (each execution runs exactly one) and guard different rejection sources — they stay. The trailing statement poll is eliminated by the E3.3 join merge. Net: 3→2 static, 2→1 executed.
+**(a) `await f()` in a try** — the retired inline-await path had 2 helper polls (after `js_async_must_suspend` and after `jm_emit_async_resume_refresh`) plus a trailing statement poll. The current unconditional `js_async_prepare_await` path routes its explicit completion before suspension, and the resume path still routes rejection after `jm_emit_async_resume_refresh`; those disjoint paths preserve **D8.4.3v2**. The trailing statement poll is eliminated by the E3.3 join merge.
 
 **(b) `throw x;`** — today, `jm_emit_throw_completion` already emits `js_throw_value` + unconditional `jmp/ret`; the enclosing try/async/class statement loop may still emit an unreachable trailing poll. After E1, centralized transfer tracking marks the path UNREACHABLE and suppresses that trailing poll. Net: existing direct throw transfer retained; unreachable poll removed. SETS adds value at other helper-followed route sites, not at the explicit throw transfer itself.
 

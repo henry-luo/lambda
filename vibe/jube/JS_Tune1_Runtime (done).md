@@ -78,8 +78,8 @@ catch lowering has captured it.
   1. the E3 sweep worklist (batched by file),
   2. the **void-fallible list** (each becomes Item-status or is proven
      infallible),
-  3. the **raw-scalar audit** (4 known raw-double helpers: `js_get_number`,
-     `js_math_ceil_d`, `js_math_pow_d`, `js_math_round` — verify infallible,
+  3. the **raw-scalar audit** (2 known raw-double helpers: `js_get_number`
+     and `js_math_pow_d` — verify infallible,
      mark `PRESERVES`; the "only infallible helpers may return raw scalars"
      rule becomes a census lint that stays forever),
   4. `PRESERVES` candidates for the catalog audit (P5): rows that provably

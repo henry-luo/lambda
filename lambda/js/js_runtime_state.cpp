@@ -2325,7 +2325,6 @@ void js_reset_heap_bound_runtime_state(bool full_reset) {
     js_cached_object_proto = NULL;
     js_resolving_object_proto = false;
     js_private_field_initializing = false;
-    js_deferred_instance_field_class = ItemNull;
     if (full_reset) js_release_input_resources();
     else js_input = NULL;
 }

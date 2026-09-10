@@ -736,9 +736,11 @@ Convert and inventory all producers:
 - DOM/host constructors represented as function values use registered
   construct entries.
 
-`js_apply_constructor`, `js_new_from_class_object`, and defer-own-fields
-variants become either thin phase-local adapters to `js_construct_value` or
-are deleted when their callers move. There is one final construct kernel.
+`js_apply_constructor` and `js_new_from_class_object` become either thin
+phase-local adapters to `js_construct_value` or are deleted when their callers
+move. The obsolete defer-own-fields variant and its realm marker were retired
+once derived field initialization moved to the explicit post-super hook. There
+is one final construct kernel, per **D6.2.2v2**.
 
 #### C5.2 Scoped active `new.target`
 

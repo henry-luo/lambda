@@ -165,7 +165,6 @@ enum JsRealmSlotId {
     JS_REALM_SLOT_TLS_CA_DEFAULT,
     JS_REALM_SLOT_READLINE_NAMESPACE,
     JS_REALM_SLOT_READLINE_PROMISES_NAMESPACE,
-    JS_REALM_SLOT_READLINE_COMPLETION_INTERFACE,
     JS_REALM_SLOT_HTTP_NAMESPACE,
     JS_REALM_SLOT_HTTP_SERVER_PROTOTYPE,
     JS_REALM_SLOT_HTTP_INCOMING_MESSAGE_PROTOTYPE,
@@ -609,7 +608,6 @@ struct JsRuntimeOperationState {
     bool reflect_define_property_mode = false;
     bool reflect_define_property_failed = false;
     bool private_define_active = false;
-    Item deferred_instance_field_class = {};
     const char* regex_property_cache_chars = NULL;
     int regex_property_cache_len = 0;
     int regex_property_cache_mode = 0;
@@ -1145,5 +1143,4 @@ extern "C" bool js_promise_initial_unhandled_rejections_strict(void);
 #define js_resolving_object_proto (js_runtime_state.resolving_object_proto)
 #define js_private_field_initializing (js_runtime_state.private_field_initializing)
 #define js_eval_initializer_context (js_runtime_state.eval_initializer_context)
-#define js_deferred_instance_field_class (js_runtime_state.operations.deferred_instance_field_class)
 #define js_pending_args_is_strict (js_call_activation_current()->args_is_strict)

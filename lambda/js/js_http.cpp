@@ -764,24 +764,18 @@ enum JsHttpServerValueSlot {
     JS_HTTP_SERVER_VALUE_COUNT,
 };
 
-static bool http_server_values_init(JsHttpServer* srv) {
-    return srv && runtime_value_slots_init(&srv->values, (Context*)context,
-        "HTTP server values", JS_HTTP_SERVER_VALUE_COUNT);
-}
-
-static Item http_server_value(JsHttpServer* srv, JsHttpServerValueSlot slot) {
-    return srv ? runtime_value_slots_get(&srv->values, slot) : ItemNull;
-}
-
-static void http_server_set_value(JsHttpServer* srv, JsHttpServerValueSlot slot,
-        Item value) {
-    if (srv) runtime_value_slots_set(&srv->values, slot, value);
-}
+#define HTTP_VALUES_INIT(owner, label, count) \
+    ((owner) && runtime_value_slots_init(&(owner)->values, (Context*)context, \
+        (label), (count)))
+#define HTTP_VALUE(owner, prefix, name) \
+    ((owner) ? runtime_value_slots_get(&(owner)->values, prefix ## name) : ItemNull)
+#define HTTP_SET_VALUE(owner, prefix, name, value) \
+    do { if (owner) runtime_value_slots_set(&(owner)->values, prefix ## name, (value)); } while (0)
 
 #define HTTP_SERVER_VALUE(srv, name) \
-    http_server_value((srv), JS_HTTP_SERVER_VALUE_##name)
+    HTTP_VALUE((srv), JS_HTTP_SERVER_VALUE_, name)
 #define HTTP_SERVER_SET_VALUE(srv, name, value) \
-    http_server_set_value((srv), JS_HTTP_SERVER_VALUE_##name, (value))
+    HTTP_SET_VALUE((srv), JS_HTTP_SERVER_VALUE_, name, (value))
 
 typedef struct JsHttpConn {
     uv_tcp_t     tcp;
@@ -822,24 +816,10 @@ enum JsHttpConnValueSlot {
     JS_HTTP_CONN_VALUE_COUNT,
 };
 
-static bool http_conn_values_init(JsHttpConn* conn) {
-    return conn && runtime_value_slots_init(&conn->values, (Context*)context,
-        "HTTP connection values", JS_HTTP_CONN_VALUE_COUNT);
-}
-
-static Item http_conn_value(JsHttpConn* conn, JsHttpConnValueSlot slot) {
-    return conn ? runtime_value_slots_get(&conn->values, slot) : ItemNull;
-}
-
-static void http_conn_set_value(JsHttpConn* conn, JsHttpConnValueSlot slot,
-        Item value) {
-    if (conn) runtime_value_slots_set(&conn->values, slot, value);
-}
-
 #define HTTP_CONN_VALUE(conn, name) \
-    http_conn_value((conn), JS_HTTP_CONN_VALUE_##name)
+    HTTP_VALUE((conn), JS_HTTP_CONN_VALUE_, name)
 #define HTTP_CONN_SET_VALUE(conn, name, value) \
-    http_conn_set_value((conn), JS_HTTP_CONN_VALUE_##name, (value))
+    HTTP_SET_VALUE((conn), JS_HTTP_CONN_VALUE_, name, (value))
 
 static uv_stream_t* http_conn_stream(JsHttpConn* conn) {
     if (!conn) return NULL;
@@ -3386,7 +3366,8 @@ static void http_server_connection_cb(uv_stream_t* server, int status) {
     uv_loop_t* loop = server->loop;
 
     JsHttpConn* conn = (JsHttpConn*)mem_calloc(1, sizeof(JsHttpConn), MEM_CAT_JS_RUNTIME);
-    if (!conn || !http_conn_values_init(conn)) {
+    if (!HTTP_VALUES_INIT(conn, "HTTP connection values",
+            JS_HTTP_CONN_VALUE_COUNT)) {
         if (conn) mem_free(conn);
         return;
     }
@@ -3723,7 +3704,8 @@ extern "C" Item js_http_createServer(Item options_or_handler, Item maybe_handler
     }
 
     JsHttpServer* srv = (JsHttpServer*)mem_calloc(1, sizeof(JsHttpServer), MEM_CAT_JS_RUNTIME);
-    if (!srv || !http_server_values_init(srv)) {
+    if (!HTTP_VALUES_INIT(srv, "HTTP server values",
+            JS_HTTP_SERVER_VALUE_COUNT)) {
         if (srv) mem_free(srv);
         return ItemNull;
     }
@@ -3808,24 +3790,10 @@ enum JsHttpClientValueSlot {
     JS_HTTP_CLIENT_VALUE_COUNT,
 };
 
-static bool http_client_values_init(JsHttpClientReq* creq) {
-    return creq && runtime_value_slots_init(&creq->values, (Context*)context,
-        "HTTP client request values", JS_HTTP_CLIENT_VALUE_COUNT);
-}
-
-static Item http_client_value(JsHttpClientReq* creq, JsHttpClientValueSlot slot) {
-    return creq ? runtime_value_slots_get(&creq->values, slot) : ItemNull;
-}
-
-static void http_client_set_value(JsHttpClientReq* creq,
-        JsHttpClientValueSlot slot, Item value) {
-    if (creq) runtime_value_slots_set(&creq->values, slot, value);
-}
-
 #define HTTP_CLIENT_VALUE(creq, name) \
-    http_client_value((creq), JS_HTTP_CLIENT_VALUE_##name)
+    HTTP_VALUE((creq), JS_HTTP_CLIENT_VALUE_, name)
 #define HTTP_CLIENT_SET_VALUE(creq, name, value) \
-    http_client_set_value((creq), JS_HTTP_CLIENT_VALUE_##name, (value))
+    HTTP_SET_VALUE((creq), JS_HTTP_CLIENT_VALUE_, name, (value))
 
 static Item http_client_socket_object(JsHttpClientReq* creq);
 static void http_client_stamp_socket_from_resource(JsHttpClientReq* creq);
@@ -5658,7 +5626,8 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
         creq->destroyed = false;
     } else {
         creq = (JsHttpClientReq*)mem_calloc(1, sizeof(JsHttpClientReq), MEM_CAT_JS_RUNTIME);
-        if (!creq || !http_client_values_init(creq)) {
+        if (!HTTP_VALUES_INIT(creq, "HTTP client request values",
+                JS_HTTP_CLIENT_VALUE_COUNT)) {
             if (creq) mem_free(creq);
             return ItemNull;
         }
@@ -5788,6 +5757,9 @@ extern "C" Item js_http_get(Item options_item, Item callback) {
 
 #undef HTTP_CLIENT_SET_VALUE
 #undef HTTP_CLIENT_VALUE
+#undef HTTP_SET_VALUE
+#undef HTTP_VALUE
+#undef HTTP_VALUES_INIT
 #undef HTTP_CONN_SET_VALUE
 #undef HTTP_CONN_VALUE
 #undef HTTP_SERVER_SET_VALUE
