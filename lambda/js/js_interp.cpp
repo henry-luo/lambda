@@ -6074,10 +6074,23 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
 JsScript* js_interp_prepare_script(Runtime* runtime, const char* source,
         size_t source_length, const char* filename, bool strict) {
     if (!runtime || !source) return NULL;
+    JsScript* cached = js_runtime_ast_cache_lookup(runtime, source, source_length,
+        filename, strict, false);
+    if (cached) {
+        // `prepare_script` promises a classic Script even when its parse facts
+        // were last used by eval/new Function in the same Runtime.
+        cached->is_module = false;
+        cached->is_es_module = false;
+        cached->is_eval_script = false;
+        cached->test262_native_harness = false;
+        cached->test262_native_build_string = false;
+        return cached;
+    }
     JsTranspiler* transpiler = js_transpiler_create(runtime);
     if (transpiler && strict) {
         transpiler->strict_mode = true;
     }
+    if (transpiler) transpiler->ast_cache_requested_strict = strict;
     if (!transpiler || !js_transpiler_parse_c(transpiler, source, source_length,
             JS_PARSE_AUTO)) {
         js_transpiler_destroy(transpiler);
@@ -6104,8 +6117,11 @@ static Item js_interp_execute_source_mode(Runtime* runtime, const char* source,
         return js_throw_syntax_error(js_make_string("invalid JavaScript source"));
     }
     script->is_module = is_module;
+    script->is_es_module = false;
     if (strict) script->strict_mode = true;
     script->is_eval_script = is_eval_script;
+    script->test262_native_harness = false;
+    script->test262_native_build_string = false;
     return js_interp_execute_script(runtime, script, result_home);
 }
 

@@ -15,6 +15,134 @@
 
 static void js_script_destroy_extension(Script* base_script);
 
+struct JsRuntimeAstCacheEntry {
+    const char* source;
+    size_t source_length;
+    const char* reference;
+    size_t reference_length;
+    bool strict;
+    bool typescript_profile;
+    JsScript* script;
+};
+
+struct JsRuntimeAstCache {
+    HashMap* entries;
+};
+
+static uint64_t js_runtime_ast_cache_mix(uint64_t hash, uint64_t value) {
+    return hash ^ (value + 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2));
+}
+
+static uint64_t js_runtime_ast_cache_entry_hash(const void* item,
+        uint64_t seed0, uint64_t seed1) {
+    const JsRuntimeAstCacheEntry* entry = (const JsRuntimeAstCacheEntry*)item;
+    uint64_t hash = hashmap_xxhash3(entry->source, entry->source_length, seed0, seed1);
+    hash = js_runtime_ast_cache_mix(hash,
+        hashmap_xxhash3(entry->reference, entry->reference_length, seed0, seed1));
+    hash = js_runtime_ast_cache_mix(hash, entry->strict ? 1 : 0);
+    return js_runtime_ast_cache_mix(hash, entry->typescript_profile ? 1 : 0);
+}
+
+static int js_runtime_ast_cache_entry_compare(const void* left, const void* right,
+        void* udata) {
+    (void)udata;
+    const JsRuntimeAstCacheEntry* a = (const JsRuntimeAstCacheEntry*)left;
+    const JsRuntimeAstCacheEntry* b = (const JsRuntimeAstCacheEntry*)right;
+    if (a->strict != b->strict) return a->strict ? -1 : 1;
+    if (a->typescript_profile != b->typescript_profile) {
+        return a->typescript_profile ? -1 : 1;
+    }
+    if (a->source_length != b->source_length) {
+        return a->source_length < b->source_length ? -1 : 1;
+    }
+    if (a->reference_length != b->reference_length) {
+        return a->reference_length < b->reference_length ? -1 : 1;
+    }
+    int reference_compare = memcmp(a->reference, b->reference, a->reference_length);
+    if (reference_compare != 0) return reference_compare;
+    if (a->source_length == 0) return 0;
+    return memcmp(a->source, b->source, a->source_length);
+}
+
+static JsRuntimeAstCache* js_runtime_ast_cache_ensure(Runtime* runtime) {
+    if (!runtime || !runtime->scripts) return NULL;
+    if (runtime->js_ast_cache) return (JsRuntimeAstCache*)runtime->js_ast_cache;
+    JsRuntimeAstCache* cache = (JsRuntimeAstCache*)mem_calloc(1,
+        sizeof(JsRuntimeAstCache), MEM_CAT_JS_RUNTIME);
+    if (!cache) return NULL;
+    cache->entries = hashmap_new(sizeof(JsRuntimeAstCacheEntry), 16, 0, 0,
+        js_runtime_ast_cache_entry_hash, js_runtime_ast_cache_entry_compare, NULL, NULL);
+    if (!cache->entries) {
+        mem_free(cache);
+        return NULL;
+    }
+    runtime->js_ast_cache = cache;
+    return cache;
+}
+
+static JsRuntimeAstCacheEntry js_runtime_ast_cache_probe(const char* source,
+        size_t source_length, const char* reference, bool strict,
+        bool typescript_profile) {
+    JsRuntimeAstCacheEntry probe = {};
+    probe.source = source ? source : "";
+    probe.source_length = source ? source_length : 0;
+    probe.reference = reference ? reference : "<inline-js>";
+    probe.reference_length = strlen(probe.reference);
+    probe.strict = strict;
+    probe.typescript_profile = typescript_profile;
+    return probe;
+}
+
+JsScript* js_runtime_ast_cache_lookup(Runtime* runtime, const char* source,
+        size_t source_length, const char* reference, bool strict,
+        bool typescript_profile) {
+    JsRuntimeAstCache* cache = runtime ? (JsRuntimeAstCache*)runtime->js_ast_cache : NULL;
+    if (!cache || !cache->entries || !source) return NULL;
+    JsRuntimeAstCacheEntry probe = js_runtime_ast_cache_probe(source, source_length,
+        reference, strict, typescript_profile);
+    const JsRuntimeAstCacheEntry* found = (const JsRuntimeAstCacheEntry*)hashmap_get(
+        cache->entries, &probe);
+    // ES modules retain evaluation/link state in their ModuleDescriptor. Keep
+    // their existing module path rather than treating them as repeatable scripts.
+    return found && found->script && !found->script->is_es_module ? found->script : NULL;
+}
+
+static void js_runtime_ast_cache_insert(Runtime* runtime, JsScript* script) {
+    if (!runtime || !script || !script->source || !script->reference) return;
+    JsRuntimeAstCache* cache = js_runtime_ast_cache_ensure(runtime);
+    if (!cache) return;
+    JsRuntimeAstCacheEntry entry = js_runtime_ast_cache_probe(script->source,
+        script->source_length, script->reference, script->ast_cache_requested_strict,
+        script->ast_cache_typescript_profile);
+    entry.script = script;
+    if (hashmap_get(cache->entries, &entry)) return;
+    hashmap_set(cache->entries, &entry);
+    if (hashmap_oom(cache->entries)) {
+        hashmap_delete(cache->entries, &entry);
+        log_error("js-ast-cache: failed to index retained script %s", script->reference);
+    }
+}
+
+void js_runtime_ast_cache_remove_script(Runtime* runtime, Script* base_script) {
+    JsRuntimeAstCache* cache = runtime ? (JsRuntimeAstCache*)runtime->js_ast_cache : NULL;
+    JsScript* script = js_script_from_script(base_script);
+    if (!cache || !cache->entries || !script || !script->source || !script->reference) return;
+    JsRuntimeAstCacheEntry probe = js_runtime_ast_cache_probe(script->source,
+        script->source_length, script->reference, script->ast_cache_requested_strict,
+        script->ast_cache_typescript_profile);
+    const JsRuntimeAstCacheEntry* found = (const JsRuntimeAstCacheEntry*)hashmap_get(
+        cache->entries, &probe);
+    if (found && found->script == script) hashmap_delete(cache->entries, &probe);
+}
+
+void js_runtime_ast_cache_destroy(Runtime* runtime) {
+    if (!runtime || !runtime->js_ast_cache) return;
+    JsRuntimeAstCache* cache = (JsRuntimeAstCache*)runtime->js_ast_cache;
+    hashmap_free(cache->entries);
+    mem_free(cache);
+    runtime->js_ast_cache = NULL;
+}
+
 int js_transpiler_parse_error_get(const JsTranspiler* tp, int64_t* out_row,
                                   int64_t* out_col, char* out_message,
                                   int64_t out_message_size) {
@@ -473,6 +601,9 @@ JsScript* js_script_adopt_transpiler(JsTranspiler* tp, Runtime* runtime,
     memset((JsScript*)tp, 0, sizeof(JsScript));
     js_transpiler_destroy(tp);
 
-    if (runtime) runtime_register_script(runtime, (Script*)script);
+    if (runtime) {
+        runtime_register_script(runtime, (Script*)script);
+        js_runtime_ast_cache_insert(runtime, script);
+    }
     return script;
 }
