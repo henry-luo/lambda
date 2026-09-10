@@ -75,7 +75,7 @@ JS_FORWARD_STATIC_VOID( js_clipboard_set_method, (Item object, const char* name,
 #define g_file_list_proto (js_runtime_state.clipboard.file_list_prototype)
 #define g_drag_data_transfer (js_runtime_state.clipboard.drag_data_transfer)
 #define g_clipboard_generation (js_runtime_state.clipboard.generation)
-JS_FORWARD_STATIC_EXPRESSION(bool, clipboard_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.clipboard.roots)))
+JS_FORWARD_STATIC_EXPRESSION(bool, clipboard_ensure_roots, (void), (js_active_runtime_state && js_root_vector_ensure_registered(&js_runtime_state.clipboard.roots)))
 
 static void attach_known_prototype(Item obj, Item proto) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return;

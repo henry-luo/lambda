@@ -215,6 +215,7 @@ static const RuntimeResourceDescriptor runtime_resource_descriptors[] = {
     {RUNTIME_RESOURCE_CRYPTO_CIPHER, RUNTIME_RESOURCE_GROUP_CRYPTO, "crypto.cipher"},
     {RUNTIME_RESOURCE_FS_REQUEST, RUNTIME_RESOURCE_GROUP_NONE, "FSReqCallback"},
     {RUNTIME_RESOURCE_DNS_REQUEST, RUNTIME_RESOURCE_GROUP_NETWORK, "DNSReqCallback"},
+    {RUNTIME_RESOURCE_TLS_SOCKET, RUNTIME_RESOURCE_GROUP_NETWORK, "TLSSocketWrap"},
 };
 
 extern "C" const RuntimeResourceDescriptor*

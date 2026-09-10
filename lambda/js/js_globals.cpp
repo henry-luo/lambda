@@ -2105,7 +2105,7 @@ JS_FORWARD_STATIC_EXPRESSION(bool*, js_process_exit_requested_slot, (void),
 #define js_process_ipc_buf (js_runtime_state.process->ipc_buffer)
 #define js_process_ipc_len (js_runtime_state.process->ipc_length)
 #define js_process_ipc_cap (js_runtime_state.process->ipc_capacity)
-JS_FORWARD_STATIC_EXPRESSION(bool, js_process_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.process->roots)))
+JS_FORWARD_STATIC_EXPRESSION(bool, js_process_ensure_roots, (void), (js_active_runtime_state && js_root_vector_ensure_registered(&js_runtime_state.process->roots)))
 
 // root-range cleanup clears expired realm cache slots to zero, while an
 // explicit realm reset uses ItemNull; neither value is a JS object.
@@ -4620,9 +4620,8 @@ extern "C" uint64_t js_get_heap_epoch();
 
 static bool js_global_string_caches_ensure_roots(void) {
     if (!js_active_runtime_state) return false;
-    JsRootRange* roots = &js_runtime_state.string_caches->roots;
-    if (roots->roots_epoch == js_get_heap_epoch()) return true;
-    return js_root_range_ensure_registered(roots);
+    RootVector* roots = &js_runtime_state.string_caches->roots;
+    return js_root_vector_ensure_registered(roots);
 }
 
 static inline Item js_uri_make_four_byte_string(char* decoded) {
@@ -5470,7 +5469,7 @@ static bool js_class_matches_instanceof_target(JsClass actual, JsClass target) {
 // cross-realm VM errors are classified by the constructor's immutable
 // intrinsic policy; observable `.name` is freely redefinable (D6.2.2v2).
 JS_FORWARD_STATIC_EXPRESSION(bool, js_instanceof_is_host_error_constructor,
-    (JsFuncName* fn), fn && js_class_is_error_like((JsClass)fn->intrinsic_class))
+    (JsFuncName* fn), fn && js_class_is_error_like((JsClass)js_fn_intrinsic_class(fn)))
 
 #define js_instanceof_is_vm_context_error js_is_vm_context_error
 JS_FORWARD_ITEM(js_instanceof, (Item left, Item right), js_instanceof_impl, (left, right, false))
@@ -5975,7 +5974,8 @@ static Item js_setup_dynamic_function_prototype(Item proto, Item ctor_fn,
     if (get_type_id(ctor_fn) == LMD_TYPE_FUNC) {
         JsFuncFlagsAccess* fn = (JsFuncFlagsAccess*)ctor_fn.function;
         js_set_function_name(ctor_fn, js_name_item(ctor_name, strlen(ctor_name)));
-        fn->intrinsic_class = JS_CLASS_FUNCTION;
+        JsCallableCode* code = js_fn_code_ensure(fn);
+        if (code) code->intrinsic_class = JS_CLASS_FUNCTION;
         function_ctor = js_get_constructor(js_name_item("Function", 8));
         if (get_type_id(function_ctor) == LMD_TYPE_FUNC) {
             js_set_prototype(ctor_fn, function_ctor);
@@ -6108,7 +6108,7 @@ extern "C" Item js_get_prototype_of(Item object) {
                 ? ItemNull : custom_proto;
         }
         JsFuncFlagsAccess* intrinsic_fn = (JsFuncFlagsAccess*)object.function;
-        JsClass intrinsic_class = (JsClass)intrinsic_fn->intrinsic_class;
+        JsClass intrinsic_class = (JsClass)js_fn_intrinsic_class(intrinsic_fn);
         bool is_native_error = intrinsic_class == JS_CLASS_TYPE_ERROR ||
             intrinsic_class == JS_CLASS_RANGE_ERROR ||
             intrinsic_class == JS_CLASS_REFERENCE_ERROR ||
@@ -7145,7 +7145,7 @@ extern "C" bool js_func_is_builtin_ctor(Item fn) {
     // Builtin constructor descriptors follow the stored construct target;
     // mutating `.name` cannot change prototype attributes (D6.2.2v2).
     return efn && (js_fn_native(efn)->construct != NULL ||
-        efn->intrinsic_class != JS_CLASS_NONE);
+        js_fn_intrinsic_class(efn) != JS_CLASS_NONE);
 }
 
 static Item js_make_data_descriptor(Item value, bool writable, bool enumerable,
@@ -15776,10 +15776,12 @@ extern "C" Item js_get_global_builtin_fn_by_id(Item global_id_item) {
     js_function_init_native_module_scope(fn);
     fn->type_id = LMD_TYPE_FUNC;
     fn->layout_magic = JS_FUNCTION_LAYOUT_MAGIC;
-    fn->func_ptr = NULL;
-    fn->param_count = spec->param_count;
-    fn->formal_length = -1; // -1 = use param_count for .length
-    fn->catalog_id = spec->target_id;
+    JsCallableCode* code = js_fn_code_ensure(fn);
+    if (!code) return ItemError;
+    code->func_ptr = NULL;
+    code->param_count = spec->param_count;
+    code->formal_length = -1; // -1 = use param_count for .length
+    code->catalog_id = spec->target_id;
     js_fn_native_ensure(fn)->call = target->call_body;
     js_fn_native_ensure(fn)->construct = target->construct_body;
     js_fn_native_ensure(fn)->policy = JS_NATIVE_CALL_BODY;
@@ -16657,10 +16659,12 @@ extern "C" Item js_get_typed_array_base() {
     JsFunctionLayout* fn = (JsFunctionLayout*)pool_calloc(js_input->pool, sizeof(JsFunctionLayout));
     fn->type_id = LMD_TYPE_FUNC;
     fn->layout_magic = JS_FUNCTION_LAYOUT_MAGIC;
-    fn->func_ptr = (void*)js_ctor_placeholder;
-    fn->param_count = 0;
-    fn->formal_length = -1;
-    fn->intrinsic_class = JS_CLASS_TYPED_ARRAY;
+    JsCallableCode* code = js_fn_code_ensure(fn);
+    if (!code) return ItemError;
+    code->func_ptr = (void*)js_ctor_placeholder;
+    code->param_count = 0;
+    code->formal_length = -1;
+    code->intrinsic_class = JS_CLASS_TYPED_ARRAY;
     fn->name = heap_create_name("TypedArray", 10);
     js_fn_native_ensure(fn)->call = js_typed_array_base_call_body;
     js_fn_native_ensure(fn)->construct = js_typed_array_base_construct_body;
@@ -16873,6 +16877,8 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
     JsCtor* fn = (JsCtor*)pool_calloc(js_input->pool, sizeof(JsCtor));
     fn->type_id = LMD_TYPE_FUNC;
     fn->layout_magic = JS_FUNCTION_LAYOUT_MAGIC;
+    JsCallableCode* code = js_fn_code_ensure(fn);
+    if (!code) return ItemError;
     const JsIntrinsicTargetSpec* target =
         js_intrinsic_target_find(spec->target_id);
     if (!target || !target->call_body) return ItemError;
@@ -16881,20 +16887,20 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
     js_fn_native_ensure(fn)->call = target->call_body;
     js_fn_native_ensure(fn)->construct = target->construct_body;
     js_fn_native_ensure(fn)->policy = JS_NATIVE_CALL_BODY;
-    fn->catalog_id = target->catalog_id;
-    fn->param_count = param_count;
+    code->catalog_id = target->catalog_id;
+    code->param_count = param_count;
     int typed_array_element_type =
         js_typed_array_element_type_for_constructor_id(ctor_id);
-    fn->intrinsic_class = (uint8_t)(typed_array_element_type >= 0
+    code->intrinsic_class = (uint8_t)(typed_array_element_type >= 0
         ? JS_CLASS_TYPED_ARRAY
         : (name ? js_class_from_name(name, (int)strlen(name)) : JS_CLASS_NONE));
     if (typed_array_element_type >= 0) {
         // The target owns its concrete element policy; changing `.name` can
         // never redirect TypedArray allocation or species behavior (D6.2.2v2).
-        fn->typed_array_element_type_plus_one =
+        code->typed_array_element_type_plus_one =
             (uint8_t)(typed_array_element_type + 1);
     }
-    fn->formal_length = -1; // -1 = use param_count for .length
+    code->formal_length = -1; // -1 = use param_count for .length
     fn->env = NULL;
     fn->env_size = 0;
     fn->prototype = ItemNull;

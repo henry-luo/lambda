@@ -590,6 +590,7 @@ typedef struct JsTlsSocket {
     TlsContext*    tls_ctx;        // shared context (owned by this if client-created)
     TlsConnection* tls_conn;       // per-connection TLS state
     RuntimeValueSlots values;
+    uint32_t        resource_id;   // owner row in the context resource table
     JsTlsServer*   owner_server;
     bool           connected;
     bool           destroyed;
@@ -711,6 +712,12 @@ static JsTlsSocket* tls_socket_alloc(void) {
 
 static void tls_socket_free(JsTlsSocket* sock) {
     if (!sock) return;
+    if (sock->resource_id != 0) {
+        uint32_t resource_id = sock->resource_id;
+        sock->resource_id = 0;
+        runtime_resource_table_forget_owned(&js_runtime_state.resources,
+            sock, resource_id);
+    }
     runtime_value_slots_destroy(&sock->values);
     root_vector_destroy(&sock->pending_write_callbacks);
     mem_free(sock);
@@ -827,10 +834,20 @@ static void tls_destroy_tracked_secure_contexts(void) {
 static JsTlsSocket* tls_socket_from_object(Item obj) {
     Item handle_item = js_get_key_cstr(obj, "__handle__");
     if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
-    return (JsTlsSocket*)(uintptr_t)it2i(handle_item);
+    uint32_t resource_id = (uint32_t)it2i(handle_item);
+    const RuntimeResourceEntry* entry = runtime_resource_table_entry(
+        &js_runtime_state.resources, resource_id);
+    if (!entry || !entry->descriptor ||
+            entry->descriptor->kind != RUNTIME_RESOURCE_TLS_SOCKET) return NULL;
+    return (JsTlsSocket*)entry->close_user;
 }
 
 static JsTlsServer* tls_server_from_object(Item self);
+static void tls_socket_close_transport(JsTlsSocket* sock, bool had_error);
+
+static void tls_socket_resource_close(void* user) {
+    tls_socket_close_transport((JsTlsSocket*)user, false);
+}
 
 static void tls_server_maybe_destroy(JsTlsServer* srv) {
     if (!srv || !srv->closing || !srv->listen_closed || srv->active_connections > 0) return;
@@ -1494,7 +1511,15 @@ static bool tls_socket_flush_pending_plaintext(JsTlsSocket* sock) {
 }
 
 static void tls_socket_close_transport(JsTlsSocket* sock, bool had_error) {
-    if (!sock || !sock->tcp_initialized || sock->destroyed) return;
+    if (!sock) return;
+    if (sock->resource_id != 0) {
+        uint32_t resource_id = sock->resource_id;
+        sock->resource_id = 0;
+        runtime_resource_table_remove_owned(&js_runtime_state.resources,
+            sock, resource_id);
+        return;
+    }
+    if (!sock->tcp_initialized || sock->destroyed) return;
     sock->destroyed = true;
     sock->close_had_error = had_error;
     if (tls_socket_has_write_callbacks(sock)) {
@@ -1938,7 +1963,16 @@ static Item make_tls_socket_object(JsTlsSocket* sock) {
     if (sock->high_water_mark <= 0) sock->high_water_mark = 16 * 1024;
     Item obj = js_new_object_with_class(JS_CLASS_TLS_SOCKET);
     tls_socket_set_value(sock, JS_TLS_SOCKET_VALUE_OBJECT, obj);
-    js_set_key_cstr(obj, "__handle__", (Item){.item = i2it((int64_t)(uintptr_t)sock)});
+    const RuntimeResourceDescriptor* descriptor =
+        runtime_resource_descriptor_from_legacy_name("TLSSocketWrap");
+    sock->resource_id = runtime_resource_table_add_owned(
+        &js_runtime_state.resources, sock, obj, descriptor,
+        tls_socket_resource_close, sock, true);
+    if (sock->resource_id == 0) {
+        log_error("tls: could not register socket resource");
+    }
+    js_set_key_cstr(obj, "__handle__", sock->resource_id != 0
+        ? (Item){.item = i2it((int64_t)sock->resource_id)} : ItemNull);
 #define JS_TLS_SOCKET_EVENT_METHODS(M) \
     M("on", js_tls_socket_on) M("once", js_tls_socket_once) \
     M("resume", js_tls_socket_resume) M("pause", js_tls_socket_pause) \

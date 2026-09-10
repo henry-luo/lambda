@@ -109,21 +109,12 @@ struct JsRegexpLastMatch {
     int match_end = 0;
 };
 
-// A fixed Item range whose address outlives every heap epoch.  Registration is
-// deliberately owned by the range so clients cannot publish a live Item before
-// the collector knows where that Item resides.
-struct JsRootRange {
-    Item* slots = NULL;
-    int slot_count = 0;
-    uint64_t roots_epoch = 0;
-    const char* name = NULL;
-};
-
 // All context-owned caches expose the same precise root owner; keeping that
 // invariant in one base state prevents realm subsystems from drifting into
-// ad-hoc GC registration fields (D5.3).
+// ad-hoc GC registration fields. RootVector also supports fixed contiguous
+// spans for legacy semantic records, so there is one root carrier (D5.3).
 struct JsRootedState {
-    JsRootRange roots = {};
+    RootVector roots = {};
 };
 
 struct JsNamespaceState : JsRootedState {
@@ -801,10 +792,12 @@ struct JsAsyncContextStateRecord : JsSuspendedActivation {
     JsInterpTryContinuation* ast_try_continuations = NULL;
 };
 
-bool js_root_range_ensure_registered(JsRootRange* range);
-void js_root_range_unregister(JsRootRange* range);
+bool js_root_vector_ensure_registered(RootVector* roots);
+void js_root_vector_unregister(RootVector* roots);
 void js_readline_state_destroy(JsReadlineState* state);
 void js_test262_agent_state_destroy(JsTest262AgentState* state);
+JsTest262AgentState* js_test262_agent_state_ensure(JsRuntimeState* state);
+JsIteratorState* js_iterator_state_ensure(JsRuntimeState* state);
 void js_item_stack_init(JsItemStack* stack, Context* owner, const char* name);
 void js_item_stack_destroy(JsItemStack* stack);
 bool js_item_stack_push(JsItemStack* stack, Item value);
@@ -1068,7 +1061,7 @@ struct JsRuntimeState {
     bool eval_initializer_context = false;
 
     // The event-loop queues share their three fixed, context-owned Item homes.
-    JsRootRange event_loop_queue_roots = {};
+    RootVector event_loop_queue_roots = {};
 };
 
 // This derived TLS cache is initialized once after the eval thread acquires

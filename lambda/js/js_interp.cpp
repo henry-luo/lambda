@@ -1554,7 +1554,9 @@ static Item js_interp_new_function(JsInterpFrame* frame,
             (js_private_field_initializing || js_eval_initializer_context)) {
         // Nested closures retain the field-initializer early-error context
         // after the initializer itself has returned.
-        ((JsFunction*)result_root.get().function)->eval_initializer_context = true;
+        JsFunction* result_function = (JsFunction*)result_root.get().function;
+        JsCallableCode* code = js_fn_code_ensure(result_function);
+        if (code) code->eval_initializer_context = true;
     }
     if (name_scope) {
         NameEntry* self = name_scope->first;
@@ -1669,7 +1671,9 @@ static Item js_interp_make_field_initializer(JsInterpFrame* frame,
     if (!item_is_error(result)) {
         // Instance fields run later, outside class evaluation, but retain the
         // same direct-eval early-error rules as a static field initializer.
-        ((JsFunction*)result.function)->eval_initializer_context = true;
+        JsFunction* result_function = (JsFunction*)result.function;
+        JsCallableCode* code = js_fn_code_ensure(result_function);
+        if (code) code->eval_initializer_context = true;
     }
     return result;
 }
@@ -5409,7 +5413,7 @@ static bool js_interp_function_tail_reuse_safe(JsFunction* function) {
 Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
         uint64_t* result_home) {
     (void)result_home;
-    if (!function || function->body_kind != JS_FUNCTION_BODY_AST ||
+    if (!function || js_fn_body_kind(function) != JS_FUNCTION_BODY_AST ||
             !js_fn_ast(function)->function || !js_fn_ast(function)->script) return ItemError;
     RootFrame roots(7);
     Rooted<Item> function_root(roots, (Item){.function = (Function*)function});
@@ -5561,7 +5565,7 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
 
 Item js_interp_start_async_function(JsFunction* function, Item* args,
         int arg_count) {
-    if (!function || function->body_kind != JS_FUNCTION_BODY_AST) return ItemError;
+    if (!function || js_fn_body_kind(function) != JS_FUNCTION_BODY_AST) return ItemError;
     RootFrame roots(5);
     Rooted<Item> function_root(roots, (Item){.function = (Function*)function});
     Rooted<Item> this_root(roots, (function->flags & JS_FUNC_FLAG_ARROW)
@@ -5591,7 +5595,7 @@ static Item js_interp_prepare_suspended_activation(JsFunction* function,
         JsInterpEnv** out_function_env, JsInterpEnv** out_body_env);
 
 Item js_interp_create_generator(JsFunction* function, Item* args, int arg_count) {
-    if (!function || function->body_kind != JS_FUNCTION_BODY_AST ||
+    if (!function || js_fn_body_kind(function) != JS_FUNCTION_BODY_AST ||
             !js_fn_ast(function)->function) {
         return js_throw_type_error("unsupported interpreted generator form");
     }

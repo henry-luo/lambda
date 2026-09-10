@@ -76,6 +76,7 @@ typedef enum RuntimeResourceKind {
     RUNTIME_RESOURCE_CRYPTO_CIPHER,
     RUNTIME_RESOURCE_FS_REQUEST,
     RUNTIME_RESOURCE_DNS_REQUEST,
+    RUNTIME_RESOURCE_TLS_SOCKET,
 } RuntimeResourceKind;
 
 typedef enum RuntimeResourceGroup {
