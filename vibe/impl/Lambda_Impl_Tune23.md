@@ -1,7 +1,7 @@
 # Tune 23: Result41 typed execution overhead
 
 - Date: 2026-09-10
-- Status: implemented and validated; focused release results recorded below.
+- Status: targeted changes implemented and validated; broader tuning remains open.
 - Input: patched `test/benchmark/Overall_Result41.md` and
   `benchmark_results_v41.json`; cached release `lambda-v41-57addc5cf4`, SHA-256
   `d2c8df4bd4fb1fe8c983ccdef752f2943c6970128e0ce1e33bf04434789c4cf8`.
@@ -184,8 +184,13 @@ ownership, broader induction-variable range proofs, and broader call-site
 specialization remain open (D8.3.1 permits one unboxed version per function).
 They require explicit lifetime, effect and range proofs.
 Next work should focus on branch-local union proofs, so a matched record arm
-can use its concrete layout throughout a traversal; unique internal string
-builders that avoid repeated immutable string copies; and loop-wide bounds/
+can use its concrete layout throughout a traversal; extending the existing
+owned string builder to proven read-only observations, expression construction,
+and recursive accumulators; and loop-wide bounds/
 COW proofs with smaller precise-root frames around leaf calls. These are
 implementation opportunities under D3.3.3v3, D5.3.4 and D8.3.1, not a request
 to weaken source contracts or add a C-text backend.
+
+The builder itself already exists from earlier tuning rounds. The live-source
+audit, release reproductions, and revised extension proposal are recorded in
+[String builder follow-up](Lambda_Impl_String_Builder_Followup.md).

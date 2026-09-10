@@ -82,11 +82,11 @@ Counts:
 | LR_08 | Memory management & GC | 9 | 0 | 0 | 9 |
 | LR_09 | Runtime builtins | 5 | 0 | 0 | 5 |
 | LR_10 | Error handling | 1 | 0 | 0 | 1 |
-| LR_11 | Mark data API | 8 | 0 | 0 | 8 |
-| LR_12 | Procedural runtime | 7 | 0 | 0 | 7 |
+| LR_11 | Mark data API | 7 | 0 | 0 | 7 |
+| LR_12 | Procedural runtime | 6 | 0 | 0 | 6 |
 | LR_13 | Schema validator | 7 | 0 | 0 | 7 |
 | TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 6 | 1 | 0 | 7 |
-| **Live total** | | **77** | **10** | **0** | **87** |
+| **Live total** | | **75** | **10** | **0** | **85** |
 
 The active ledger now contains 87 live records, with the 61 previously counted
 resolved records moved to the archive. Duplicate/split records and
@@ -414,14 +414,102 @@ hazard for non-identifier expressions
 To prevent callers re-boxing an already-boxed value and then dereferencing it as
 a pointer.
 
-<a id="lr07-7"></a>**LR07-7 · Precise-root correctness is type-driven · OPEN**
+<a id="lr07-7"></a>**LR07-7 · Precise-root correctness is type-driven · OPEN (now instrumented)**
 BUG-001's heap-frame growth hole is closed by static side-stack slots and
 publish-before-call lowering. The remaining invariant: any register carrying a
 heap-capable boxed value must retain a heap/ANY MIR type. `should_gc_root_var`
-(`transpile-mir.cpp:1370`, used `:1954`, `:2008`) roots unknown/manual capture
-entries pessimistically. Cross-link: [LR08-3](#8-memory-management--gc-lr_08),
-[LR11-6](#11-mark-data-api-lr_11), [LR12-3](#12-procedural-runtime-lr_12) — one
-honest-static-typing issue with four faces.
+(`transpile-mir.cpp:1594`) derives that from `lambda_gc_value_class`, i.e. from
+the static `TypeId` via `lambda_canonical_rep_for_type_id` (D2.4.1–D2.4.3), and
+roots unaudited imports pessimistically (`JIT_VALUE_UNKNOWN` falls back to "root
+any word-sized carrier", `mir_emitter_shared.hpp:918`).
+
+*Instrumented 2026-09-10.* The invariant is no longer only trusted. Setting
+`LAMBDA_ROOT_WITNESS=1` makes MIR Direct emit `lambda_jit_root_witness` at every
+site that acts on a **negative** `should_gc_root_var` answer —
+`mir_store_var_entry`, `update_gc_root_slot`, `root_gc_result_if_needed` — and
+the probe checks the unrooted word against the GC zone (`gc_is_managed`) in both
+carrier shapes: a bare container/descriptor pointer, and a tagged pointer-lane
+scalar. Violations are logged and execution continues, so one suite run collects
+every offending site; totals are reported at exit. The flag is off by default
+and then emits nothing, so ordinary and release builds are unchanged.
+
+*Coverage limit:* the probe watches named locals and rooted call results, not
+every unrooted expression temporary. A clean run therefore proves the
+**binding** half of the invariant, not the whole of it.
+
+*First sweep, 2026-09-10 (all 1052 `test/lambda/**/*.ls`, `LAMBDA_TIER=jit`):*
+**4 violations in 3 scripts**, every one the same shape — `claimed_type=24`
+(`LMD_TYPE_TYPE`) over a live `MAP` or `ARRAY_NUM`. Root cause: `LMD_TYPE_TYPE`
+is overloaded. A type **value** (`let t = int`) really is a descriptor pointer,
+but a value **contract** written as a type term — `Node?`, `int | null`, a
+`TypeParam` carrier — also has `type_id == LMD_TYPE_TYPE`, with an extended
+`kind`. `mir_unwrap_decl_type` only unwraps the SIMPLE kind, so
+`mir_decl_type_id` reported the meta-type for a contract describing an ordinary
+value; `lambda_gc_value_class` read that lone id, returned
+`JIT_VALUE_RAW_NON_GC_POINTER`, and `should_gc_root_var` allocated no root slot
+for a live container. This is the same overload that already cost Result37
+`triangl2` on the indexing path (the reason `mir_type_is_type_value` exists) —
+the GC classifier was simply never brought to the same discipline.
+
+**Severity: latent, not live.** The MIR dump for the repro shows the binding
+still reaching a root slot (`mov i64:72(%rf4), %rfa` before the next call): the
+MOV-propagation candidate pass rescues it through the `JIT_VALUE_UNKNOWN`
+compatibility fallback (`mir_emitter_shared.hpp:918`, "root any word-sized
+carrier"). So the classifier lie is real but currently masked — **retiring that
+fallback before fixing the classifier would convert these into live
+use-after-free.**
+
+*Fixed 2026-09-10 — all four sites.* Three producers read a contract's
+`->type_id` raw and so published the meta-type for a value:
+`mir_decl_type_id` (declaration/binding contracts), the `for`-clause element
+binding (`val_tid = loop->type->type_id`), and `mir_expr_carrier_type`'s
+fall-through (`tid = node->type->type_id`). The last already had a partial
+repair beside it — a `LaneStorageDesc` refinement whose comment reads "an
+occurrence node's compact TypeId is `type`, but its carrier is the payload
+lane" — but it only covers INT/BOOL/FLOAT64/POINTER lanes, so a **container**
+occurrence (`Node?`, `Variable?[]`) fell straight through.
+
+Rather than repeat the test, one predicate now owns the distinction and all
+three call it:
+
+```c
+// The TypeId a contract publishes for a VALUE.
+static TypeId mir_value_type_id(Type* type) {
+    if (!type) return LMD_TYPE_ANY;
+    if (type->type_id == LMD_TYPE_TYPE && !mir_type_is_type_value(type)) {
+        return LMD_TYPE_ANY;
+    }
+    return type->type_id;
+}
+```
+
+`mir_decl_type_id` is now `mir_value_type_id(mir_unwrap_decl_type(type))`. Any
+future value-side TypeId read should go through `mir_value_type_id` so the
+overload cannot be forgotten at a fourth site.
+
+*Verification:* `make test-lambda-baseline` **5259/5259**, and a full
+`LAMBDA_ROOT_WITNESS` sweep over all 1052 `test/lambda/**/*.ls` under
+`LAMBDA_TIER=jit` reports **0 violations** (pass 1: 4 in 3 scripts; pass 2 after
+the first producer: 2 in 2 scripts). The binding half of the invariant is now
+tested clean across the corpus.
+
+*Remaining work on this entry* is the coverage limit above — unrooted
+expression temporaries are still outside the probe — and the structural point
+the episode exposed: `lambda_gc_value_class` still answers a GC-safety question
+from a bare `TypeId`. Threading the `Type*` to it (or making it fail closed on
+`LMD_TYPE_TYPE`) would make a fourth producer harmless rather than merely
+absent.
+
+*Reproduce:*
+
+```bash
+LAMBDA_TIER=jit LAMBDA_ROOT_WITNESS=1 ./lambda.exe run temp/rw_repro/nullable_return_unrooted.ls
+```
+
+Cross-link: [LR08-3](#lr08-3) is the same defect seen from the collector's side.
+The former LR11-6 / LR12-3 faces are archived — see
+[LR11-R6](<Lambda_Issue_Ledger(fixed).md#lr11-r6>) — and the TCO face is now
+[LR07-13](#lr07-13).
 
 <a id="lr07-8"></a>**LR07-8 · Bitwise ops are special-cased before generic dispatch · OPEN**
 `band` / `bor` / `bxor` lower to a single MIR instruction and `shl` / `shr` are
@@ -449,10 +537,19 @@ so the type-dependent semantic split is real, just now explicit.
 `:5796`, `:6250`, `:6682`, `:15109`), and `proto_name[140]`
 (`mir_emitter_shared.hpp:1569`).
 
-<a id="lr07-13"></a>**LR07-13 · TCO iteration ceiling · OPEN**
+<a id="lr07-13"></a>**LR07-13 · TCO iteration ceiling, and the safety proof that would lift it · OPEN**
 Tail-recursive loops emit a guard raising a stack-overflow error past
-`LAMBDA_TCO_MAX_ITERATIONS` (`transpile-mir.cpp:24607`–`24611`); the interpreter
-shares the constant (`interp.hpp:59`).
+`LAMBDA_TCO_MAX_ITERATIONS` (`transpile-mir.cpp:27934`–`27941`); the interpreter
+enforces its own `LAMBDA_INTERP_TCO_MAX_ITERATIONS` (`interp.cpp:5051`). A
+correctly TCO'd loop consumes no native stack, so the ceiling is a proxy for a
+proof the transpiler declines to use.
+
+*Absorbed from [LR11-6](#lr11-6) / [LR12-3](#lr12-3) on 2026-09-10:*
+`is_tco_function_safe` (`safety_analyzer.cpp:441`) computes exactly that proof —
+"every recursive call in this function is in tail position, so after the goto
+transform the frame cannot grow" — and is **declared, defined, and never
+called**. Wiring it is what turns the iteration ceiling from a blanket cap into
+a guard only unproven functions pay for.
 
 
 <a id="lr07-14"></a>**LR07-14 · Cross-cutting gaps · OPEN (rollup)**
@@ -474,11 +571,15 @@ Root and raw-number regions have fixed virtual limits. Checked prologues fail
 deterministically instead of corrupting adjacent memory, but workloads that
 genuinely exceed those reservations cannot grow them dynamically.
 
-<a id="lr08-3"></a>**LR08-3 · JIT rooting still hinges on honest static types · OPEN**
+<a id="lr08-3"></a>**LR08-3 · JIT rooting still hinges on honest static types · OPEN (now instrumented)**
 The collector trusts the transpiler's `should_gc_root_var` classification. A
 heap Item mislabeled as a packed scalar could miss a precise slot; publishing
 all heap-capable live locals before calls narrows but does not close the hazard.
-Cross-link: [LR07-7](#lr07-7).
+This is the collector-side view of [LR07-7](#lr07-7), which now carries the
+`LAMBDA_ROOT_WITNESS` probe that tests the classification against the runtime
+bit pattern; run it together with `LAMBDA_GC_FORCE_EVERY=1` and
+`LAMBDA_GC_POISON_FREED=1` to pair "unrooted heap reference" evidence with the
+use-after-free it would cause.
 Per CLAUDE.md rule 15, the fix is precise `RootFrame`/`Rooted` ownership — never
 a return to conservative native-stack scanning.
 
@@ -742,13 +843,13 @@ Truncate vs. error vs. clamp vs. fail, for four caps in one subsystem, is itself
 the hazard.
 
 
-<a id="lr11-6"></a>**LR11-6 · Conservative safety analysis (adjacent) · OPEN**
-`function_needs_stack_check` is hard-`true` and `function_is_tail_recursive` is
-hard-`false`, so the TCO machinery exists but is not enabled. Same issue as
-[LR12-3](#lr12-3);
-tracked with the GC-root issue in
-[LR07-7](#lr07-7) and
-[LR08-3](#lr08-3).
+<a id="lr11-6"></a>**LR11-6 · Conservative safety analysis (adjacent) · RESOLVED 2026-09-10**
+Archived as [LR11-R6](<Lambda_Issue_Ledger(fixed).md#lr11-r6>). The record was
+never live: the two hard-coded functions it named had no call site anywhere in
+the tree even at the commit this ledger verified against, while the real gate
+`should_use_tco` was already wired on both tiers. Surviving residue —
+`is_tco_function_safe` is computed and discarded — moved to
+[LR07-13](#lr07-13).
 
 <a id="lr11-7"></a>**LR11-7 · `createSymbol` pooling-comment divergence · OPEN**
 The header comment still claims symbols ≤32 chars are pooled
@@ -773,16 +874,11 @@ only the response body as a String; status, headers, and metadata are dropped
 (`:510`, consumed `:663`). A proper `{status, headers, body}` map is pending
 type-system work.
 
-<a id="lr12-3"></a>**LR12-3 · Safety gate hard-coded, TCO disabled despite being implemented · OPEN**
-`function_needs_stack_check` returns a literal `true` and
-`function_is_tail_recursive` a literal `false`
-(`lambda/runtime/safety_analyzer.cpp:46`–`55`, with `// Tail recursion
-optimization not yet implemented`). Every user function pays for a stack check
-and no function gets TCO, even though `should_use_tco` / `has_tail_call` /
-`is_tco_function_safe` are fully implemented and would classify many functions
-correctly. Sound but pessimistic; the static-analysis face of
-[LR07-7](#lr07-7) /
-[LR08-3](#lr08-3).
+<a id="lr12-3"></a>**LR12-3 · Safety gate hard-coded, TCO disabled despite being implemented · RESOLVED 2026-09-10**
+Archived as [LR12-R3](<Lambda_Issue_Ledger(fixed).md#lr12-r3>). Same mistaken
+reading as [LR11-6](#lr11-6): the named functions were dead code, `should_use_tco`
+was the live gate all along, and deleting the vestige in `8d44a6ca3` changed no
+behaviour.
 
 <a id="lr12-4"></a>**LR12-4 · `push` is generic-`Array`-only · OPEN**
 `pn_push` rejects `ArrayNum` (`collection_runtime.cpp:213`), so there is no
@@ -1322,7 +1418,7 @@ together, not individually.
 
 | Cluster | Entries | Root |
 |---|---|---|
-| **Honest static types** | LR07-7, LR08-3, LR11-6, LR12-3 | The collector, the TCO gate, and the stack-check gate all trust transpiler type classification. Until that is provable, all three stay pessimistic. Fix per CLAUDE.md rule 15 with precise `RootFrame`/`Rooted` ownership. |
+| **Honest static types** | LR07-7, LR08-3, LR07-13 | The collector trusts the transpiler's type classification: `should_gc_root_var` roots a JIT local only where the static type says heap-capable, and nothing proved that matches the runtime bit pattern. Verified 2026-09-10 — the former LR11-6/LR12-3 faces were a misreading of dead code and are archived; the surviving TCO face is the unused `is_tco_function_safe` proof, now under LR07-13. A `LAMBDA_ROOT_WITNESS` probe (see LR07-7) now tests the root half at run time. Fix per CLAUDE.md rule 15 with precise `RootFrame`/`Rooted` ownership. |
 | **Representation ↔ semantics coupling** | LR03-3, LR07-1, LR07-5, LR07-14 | Expression results carry no `ValueRep`; each consumer re-derives it. See [Result32 lane-parity + Tune19], [Compiling lane design]. |
 | **`INT64_MAX` sentinel residue** | LR07-4 | [LR03-R4](Lambda_Issue_Ledger(fixed).md#lr03-r4) removed `INT64_ERROR`; index OOB still lands on the legitimate finite value `INT64_MAX` and must get an explicit failure channel. |
 | **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-6, LR08-10, LR11-4, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency (LR11-4) is the clearest statement of the pattern. |

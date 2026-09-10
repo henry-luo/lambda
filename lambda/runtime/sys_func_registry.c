@@ -1252,6 +1252,8 @@ JitImport jit_runtime_imports[] = {
     {"bits_to_f32", FPTR(bits_to_f32)},
     // stack overflow protection
     {"lambda_stack_overflow_error", FPTR(lambda_stack_overflow_error)},
+    // LR07-7/LR08-3 root-honesty witness (emitted only under LAMBDA_ROOT_WITNESS)
+    {"lambda_jit_root_witness", FPTR(lambda_jit_root_witness)},
     {"lambda_side_stack_ensure_for", FPTR(lambda_side_stack_ensure_for)},
     {"lambda_side_stack_ensure_tls", FPTR(lambda_side_stack_ensure_tls)},
     {"lambda_recovery_frame_begin_for", FPTR(lambda_recovery_frame_begin_for)},

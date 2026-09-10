@@ -1503,6 +1503,7 @@ static void emit_mir_function_abi_markers(MirTranspiler* mt, MIR_reg_t fn_obj,
 #define emit_call_void_2(mt, fn, ...) em_call_void_2(&(mt)->em, fn, __VA_ARGS__, false)
 #define emit_call_void_3(mt, fn, ...) em_call_void_3(&(mt)->em, fn, __VA_ARGS__, false)
 #define emit_call_void_4(mt, fn, ...) em_call_void_4(&(mt)->em, fn, __VA_ARGS__, false)
+#define emit_call_void_5(mt, fn, ...) em_call_void_5(&(mt)->em, fn, __VA_ARGS__, false)
 // ---------------------------------------------------------------------------
 // Register provenance types (v5)
 //
@@ -1594,6 +1595,34 @@ static JitValueClass lambda_gc_value_class(MIR_type_t mir_type,
 static bool should_gc_root_var(MIR_type_t mir_type, TypeId type_id) {
     return mir_gc_value_needs_root(lambda_gc_value_class(mir_type, type_id),
         mir_type);
+}
+
+// LR07-7/LR08-3: the precise collector trusts `should_gc_root_var` -- i.e. it
+// trusts that a value the transpiler classified as a non-GC scalar really is
+// one.  Every site that acts on a NEGATIVE answer routes through here, so the
+// invariant can be tested instead of assumed: under LAMBDA_ROOT_WITNESS the
+// value is checked at run time against the GC zone (see
+// `lambda_jit_root_witness`).  Off by default, and then emits nothing at all,
+// so ordinary and release builds are unchanged.
+static void emit_root_honesty_witness(MirTranspiler* mt, MIR_reg_t value,
+        MIR_type_t mir_type, TypeId type_id, const char* site) {
+    if (!mt || !mt->em.func_item || !value) return;
+    if (!lambda_root_witness_enabled()) return;
+    // A float register physically cannot hold a pointer, so probing one would
+    // buy nothing but a call on every store.
+    if (mir_type == MIR_T_D || mir_type == MIR_T_F || mir_type == MIR_T_LD) {
+        return;
+    }
+    // MIR already owns stable names for the register and the enclosing
+    // function, so a violation locates itself without a parallel table.
+    const char* reg_name = MIR_reg_name(mt->ctx, value, mt->em.func_item->u.func);
+    const char* func_name = MIR_item_name(mt->ctx, mt->em.func_item);
+    emit_call_void_5(mt, "lambda_jit_root_witness",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)type_id),
+        MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)site),
+        MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)reg_name),
+        MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)func_name));
 }
 
 static void emit_jit_root_frame_enter(MirTranspiler* mt) {
@@ -2067,7 +2096,11 @@ static void update_gc_root_slot(MirTranspiler* mt, MirVarEntry* var) {
     // An async frame snapshots only at a real suspension edge.  Keep the
     // ordinary side root current between edges: continuously mirroring every
     // local into the frame made a synchronous tail pay async set calls.
-    if (var->root_slot < 0 && !should_gc_root_var(var->mir_type, var->type_id)) return;
+    if (var->root_slot < 0 && !should_gc_root_var(var->mir_type, var->type_id)) {
+        emit_root_honesty_witness(mt, var->reg, var->mir_type, var->type_id,
+            "update_gc_root_slot");
+        return;
+    }
     if (var->root_slot < 0) {
         var->root_slot = create_gc_root_slot(mt, var->reg,
             lambda_gc_value_class(var->mir_type, var->type_id));
@@ -2182,7 +2215,11 @@ static MIR_reg_t root_gc_result_if_needed(MirTranspiler* mt, MIR_reg_t result,
     MIR_type_t mir_type, TypeId type_id, const char* prefix) {
     result = mir_materialize_pending_reg(mt, result,
         MIR_PENDING_REASON_ROOT_OR_SPILL);
-    if (!should_gc_root_var(mir_type, type_id)) return result;
+    if (!should_gc_root_var(mir_type, type_id)) {
+        emit_root_honesty_witness(mt, result, mir_type, type_id,
+            "root_gc_result_if_needed");
+        return result;
+    }
     int root_slot = create_gc_root_slot(mt, result,
         lambda_gc_value_class(mir_type, type_id));
     return load_gc_root_slot(mt, root_slot, prefix);
@@ -2236,6 +2273,9 @@ static void mir_store_var_entry(MirTranspiler* mt, StrView name, MIR_reg_t reg,
     if (should_gc_root_var(mir_type, type_id)) {
         entry.var.root_slot = create_gc_root_slot(mt, reg,
             lambda_gc_value_class(mir_type, type_id));
+    } else {
+        emit_root_honesty_witness(mt, reg, mir_type, type_id,
+            "mir_store_var_entry");
     }
     hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
 }
@@ -3535,9 +3575,28 @@ static Type* mir_unwrap_decl_contract(Type* type) {
     return mir_unwrap_decl_type(type);
 }
 
+// The TypeId a contract publishes for a VALUE.
+//
+// `LMD_TYPE_TYPE` is overloaded (see mir_type_is_type_value above): a type
+// VALUE (`let t = int`, kind SIMPLE) is physically a descriptor pointer, but a
+// value CONTRACT expressed as a type term (`Node?`, `int | null`, a TypeParam
+// carrier -- extended kinds) describes an ordinary value.  Reading `->type_id`
+// raw conflates the two, and handing the meta-type to `lambda_gc_value_class()`
+// claimed "descriptor, not GC memory" for a live MAP/ArrayNum, so
+// `should_gc_root_var()` allocated no root slot (LR07-7; only the conservative
+// JIT_VALUE_UNKNOWN net at finalize kept those bindings alive).  A value
+// contract we cannot narrow is `any`.  Every value-side TypeId read goes
+// through here so the distinction cannot be forgotten at a fourth site.
+static TypeId mir_value_type_id(Type* type) {
+    if (!type) return LMD_TYPE_ANY;
+    if (type->type_id == LMD_TYPE_TYPE && !mir_type_is_type_value(type)) {
+        return LMD_TYPE_ANY;
+    }
+    return type->type_id;
+}
+
 static TypeId mir_decl_type_id(Type* type) {
-    Type* unwrapped = mir_unwrap_decl_type(type);
-    return unwrapped ? unwrapped->type_id : LMD_TYPE_ANY;
+    return mir_value_type_id(mir_unwrap_decl_type(type));
 }
 
 static MIR_reg_t emit_coerce_boxed_to_declared(MirTranspiler* mt, MIR_reg_t boxed, Type* declared_type) {
@@ -7372,7 +7431,7 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
         // lane here: `case float` is a Type value, not an F64 register.
         return LMD_TYPE_TYPE;
     }
-    TypeId tid = node->type ? node->type->type_id : LMD_TYPE_ANY;
+    TypeId tid = mir_value_type_id(node->type);
     LaneStorageDesc contract_lane = {};
     if (node->type && lambda_type_lane_storage_desc(node->type, &contract_lane) &&
             contract_lane.base_contract &&
@@ -11871,8 +11930,10 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, idx),
         MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
 
-    // Determine the proper type for the loop variable from AST
-    val_tid = loop->type ? loop->type->type_id : LMD_TYPE_ANY;
+    // Determine the proper type for the loop variable from AST. A loop over a
+    // container of optionals (`Diagnostic?`) publishes an occurrence contract,
+    // whose own type_id is the meta-type -- bind the value's type, not it.
+    val_tid = mir_value_type_id(loop->type);
     val_reg = current_item;
 
     // For known element types, unbox to the proper MIR type

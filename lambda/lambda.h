@@ -3069,6 +3069,16 @@ extern "C" {
     void cow_mark_shape_children(struct TypeMap* type, void* data);
     Item cow_bind_var(Item value);
     Item cow_prepare_write(Item old);
+
+    // LR07-7/LR08-3 root-honesty witness.  Emitted by MIR Direct only when
+    // LAMBDA_ROOT_WITNESS is set, at every point the transpiler DECLINES to
+    // allocate a GC root slot: it asserts the unrooted word does not reference
+    // GC-owned memory, so the collector's trust in static types is tested
+    // rather than assumed.
+    bool lambda_root_witness_enabled(void);
+    void lambda_jit_root_witness(uint64_t raw, int64_t claimed_type_id,
+        const char* site, const char* binding, const char* func);
+    void lambda_root_witness_dump(void);
     // Optional release-safe COW instrumentation.  It stays dormant unless
     // COW_EXEC_PROFILE is enabled, and raw JS/host setters never call it.
     void cow_profile_note_vmap_snapshot(void);

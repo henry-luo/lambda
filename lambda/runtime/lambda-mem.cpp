@@ -409,6 +409,107 @@ static void heap_configure_gc_poisoning(gc_heap_t* gc) {
         GC_FREED_POISON_BYTE, (void*)gc);
 }
 
+// ============================================================================
+// Root-honesty witness (LR07-7 / LR08-3)
+// ============================================================================
+// The precise collector roots a JIT local only where `should_gc_root_var()`
+// classifies it as heap-capable, and that classification is derived from the
+// transpiler's static type.  Nothing proved the classification matched the
+// runtime bit pattern, so a heap value mislabelled as a scalar silently misses
+// its root slot and can be collected while still live -- the D4.3.4 failure
+// shape.  Under `LAMBDA_ROOT_WITNESS` the transpiler emits this probe at every
+// point where it DECLINES to root, turning the trusted invariant into a tested
+// one.  A violation is reported and execution continues, so one suite run
+// collects every offending site rather than stopping at the first.
+//
+// The probe must stay allocation-free and GC-free: it runs on the store path.
+
+static size_t lambda_root_witness_violation_count = 0;
+static size_t lambda_root_witness_probe_count = 0;
+
+bool lambda_root_witness_enabled(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        const char* value = getenv("LAMBDA_ROOT_WITNESS");
+        cached = (value && value[0] && strcmp(value, "0") != 0) ? 1 : 0;
+        if (cached) {
+            log_info("root-witness: enabled; unrooted JIT values are checked "
+                "against the GC zone");
+            // Same shape as the COW profile: the totals are only meaningful
+            // once the whole run is over, and a verification run must report
+            // them even when the script itself exits early.
+            atexit(lambda_root_witness_dump);
+        }
+    }
+    return cached == 1;
+}
+
+static void root_witness_report(const char* shape, uint64_t raw, void* target,
+        TypeId observed, int64_t claimed_type_id, const char* site,
+        const char* binding, const char* func) {
+    lambda_root_witness_violation_count++;
+    log_error("root-witness: VIOLATION %s fn=%s reg=%s site=%s claimed_type=%d "
+        "observed_type=%u word=0x%016llx gc_ptr=%p -- an unrooted value "
+        "references GC-owned memory",
+        shape, func ? func : "<unknown>", binding ? binding : "<unnamed>",
+        site ? site : "<unknown>", (int)claimed_type_id, (unsigned)observed,
+        (unsigned long long)raw, target);
+}
+
+// `raw` is the machine word the transpiler decided needs no root slot;
+// `claimed_type_id` is the static TypeId that decision was derived from.
+extern "C" void lambda_jit_root_witness(uint64_t raw, int64_t claimed_type_id,
+        const char* site, const char* binding, const char* func) {
+    lambda_root_witness_probe_count++;
+    if (!raw) return;
+    // Self-tagged inline doubles occupy the whole word and carry no pointer.
+    if (raw & ITEM_DBL_MASK) return;
+    EvalContext* ctx = context;
+    gc_heap_t* gc = ctx && ctx->heap ? ctx->heap->gc : NULL;
+    if (!gc) return;
+
+    // Shape 1 -- direct container/descriptor pointer.  A container Item is a
+    // bare pointer whose first byte is its TypeId.  Both conditions must hold
+    // before this is called a violation: the word has to be a properly aligned
+    // address the collector owns, AND the header there has to decode as a kind
+    // that actually exists as a direct-pointer Item.  Accepting any byte below
+    // LMD_TYPE_COUNT was far too weak -- a zero byte is the commonest thing in
+    // memory, and it turned every raw scalar lane that happened to alias the
+    // data zone into a false report.
+    void* direct = (void*)(uintptr_t)raw;
+    if ((raw & (sizeof(void*) - 1)) == 0 && gc_is_managed(gc, direct)) {
+        TypeId observed = *(TypeId*)direct;
+        if (is_container_type_id(observed) || observed == LMD_TYPE_FUNC) {
+            root_witness_report("direct", raw, direct, observed,
+                claimed_type_id, site, binding, func);
+            return;
+        }
+    }
+
+    // Shape 2 -- pointer-backed scalar (string, symbol, decimal, datetime,
+    // binary, complex): tag in the high byte, payload in the low 56 bits.
+    TypeId tag = (TypeId)(raw >> 56);
+    if (lambda_type_id_has_pointer_lane(tag)) {
+        void* payload = (void*)(uintptr_t)(raw & ITEM_INT_PAYLOAD_MASK);
+        if (payload && gc_is_managed(gc, payload)) {
+            root_witness_report("tagged", raw, payload, tag, claimed_type_id,
+                site, binding, func);
+        }
+    }
+}
+
+void lambda_root_witness_dump(void) {
+    if (!lambda_root_witness_enabled()) return;
+    if (lambda_root_witness_violation_count == 0) {
+        log_info("root-witness: %zu unrooted values probed, 0 violations",
+            lambda_root_witness_probe_count);
+    } else {
+        log_error("root-witness: %zu unrooted values probed, %zu VIOLATIONS",
+            lambda_root_witness_probe_count,
+            lambda_root_witness_violation_count);
+    }
+}
+
 static void init_ascii_char_table() {
     for (int i = 0; i < 128; i++) {
         String* s = (String*)(ascii_char_storage + i * ASCII_CHAR_ENTRY_SIZE);
