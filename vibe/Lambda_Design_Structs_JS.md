@@ -1,5 +1,7 @@
 # Lambda Design: LambdaJS Struct Authority — The Four That Matter
 
+> **Follow-up proposal (2026-09-10):** [Shared optimization structures](Lambda_Design_Structs_JS2.md) proposes **JSCU36–JSCU43** and continues **JSCU33(A)**, building on the implementation recorded here. It leaves this document's unresolved work and ratification status intact.
+
 > **Status: DRAFT for user ratification — 2026-09-07.** This is the design
 > record for the highest-yield items of
 > [`Lambda_Proposal_JS_Struct_Clean_Up.md`](Lambda_Proposal_JS_Struct_Clean_Up.md)

@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """Interleaved A/B runner for matched Lambda release binaries.
 
-Each pair runs the same Lambda script once with the control binary and once
+Each pair runs the same script once with the control binary and once
 with the candidate binary.  The order alternates by pair so host drift is not
 systematically assigned to one binary.  Timing samples and observable stdout
 digests are retained in a JSON artifact under ``temp/``.
 
-This runner deliberately measures only the MIR Lambda scripts.  It is the
-causal gate for Result30 follow-up work; the normal benchmark matrix remains
-the publication snapshot runner.
+Both Lambda MIR and LambdaJS use this causal gate; the normal benchmark matrix
+remains the publication snapshot runner.
 """
 
 import argparse
@@ -30,6 +29,7 @@ os.chdir(PROJECT_ROOT)
 
 from run_benchmarks import (  # noqa: E402
     build_benchmark_list,
+    make_jetstream_ljs_wrapper,
     mir_script_variants,
     parse_timing,
 )
@@ -71,9 +71,9 @@ def median(values):
     return ordered[len(ordered) // 2]
 
 
-def run_once(binary, script, timeout_s):
+def run_once(binary, script, timeout_s, language="lambda"):
     """Run one script and return a serializable timing/observable record."""
-    command = [binary, "run", script]
+    command = [binary, "js" if language == "js" else "run", script]
     started = time.perf_counter_ns()
     process = None
     try:
@@ -147,7 +147,7 @@ def summarize_side(samples):
     }
 
 
-def compare_row(control, candidate, script, pairs, timeout_s):
+def compare_row(control, candidate, script, pairs, timeout_s, language="lambda"):
     control_samples = []
     candidate_samples = []
     pair_records = []
@@ -158,8 +158,8 @@ def compare_row(control, candidate, script, pairs, timeout_s):
         second_binary = candidate if control_first else control
         first_label = "control" if control_first else "candidate"
         second_label = "candidate" if control_first else "control"
-        first = run_once(first_binary, script, timeout_s)
-        second = run_once(second_binary, script, timeout_s)
+        first = run_once(first_binary, script, timeout_s, language)
+        second = run_once(second_binary, script, timeout_s, language)
         samples = {first_label: first, second_label: second}
         control_samples.append(samples["control"])
         candidate_samples.append(samples["candidate"])
@@ -216,6 +216,8 @@ def main():
     )
     parser.add_argument("--control", required=True, help="control release binary")
     parser.add_argument("--candidate", required=True, help="candidate release binary")
+    parser.add_argument("--language", choices=["lambda", "js"], default="lambda",
+                        help="source language (default: lambda)")
     parser.add_argument("-s", "--suite", default=None, help="comma-separated suite filter")
     parser.add_argument("-b", "--bench", default=None, help="comma-separated benchmark filter")
     parser.add_argument(
@@ -248,6 +250,8 @@ def main():
     output = args.output or os.path.join("temp", f"paired_benchmarks_{timestamp}.json")
     os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
     variants = ["untyped", "typed"] if args.variants == "both" else [args.variants]
+    if args.language == "js":
+        variants = ["js"]
     metadata = {
         "schema_version": 1,
         "started_at": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -259,6 +263,7 @@ def main():
         "suite_filters": suite_filters or [],
         "bench_filters": bench_filters or [],
         "variants": variants,
+        "language": args.language,
         "pairs": args.pairs,
         "timeout_s": args.timeout,
         "command": " ".join(sys.argv),
@@ -268,6 +273,15 @@ def main():
     for benchmark in benchmarks:
         untyped, typed = mir_script_variants(benchmark)
         scripts = {"untyped": untyped, "typed": typed}
+        if args.language == "js":
+            script = benchmark["js_path"]
+            if benchmark["is_jetstream"] and benchmark["ref_js"]:
+                script = make_jetstream_ljs_wrapper(benchmark["name"], benchmark["ref_js"])
+            elif benchmark["suite"] == "awfy" and script:
+                bundle = script.replace("2.js", "2_bundle.js")
+                if os.path.exists(bundle):
+                    script = bundle
+            scripts = {"js": script}
         for variant in variants:
             script = scripts[variant]
             row = {
@@ -282,7 +296,9 @@ def main():
                 print(f"\n{benchmark['suite']}/{benchmark['name']}[{variant}] missing script")
                 continue
             print(f"\n{benchmark['suite']}/{benchmark['name']}[{variant}] ", end="", flush=True)
-            row.update(compare_row(control, candidate, script, args.pairs, args.timeout))
+            row["script_sha256"] = sha256_file(script)
+            row.update(compare_row(control, candidate, script, args.pairs, args.timeout,
+                                   args.language))
             row["status"] = "ok" if row["pairs_valid"] == args.pairs else "partial_ok"
             artifact["rows"].append(row)
             ratio = row["candidate_over_control_median_ratio"]

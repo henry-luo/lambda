@@ -95,11 +95,12 @@ typedef struct JsMirReference {
     bool is_private;
     bool computed_key;
     bool property_key_canonicalized;
-    // T10-1/D-A: a computed key carried in a native numeric register stays in
-    // a double lane. ToPropertyKey would format it as text, intern the text in
-    // the NamePool, and have the kernel parse it back into an index.
+    // retain the evaluated numeric carrier instead of formatting an index
+    // as a property name. Exactly one native register is set on admission.
     bool key_is_number;
-    MIR_reg_t key_num_reg;      // MIR_T_D, valid only when key_is_number
+    MIR_reg_t key_num_reg;      // F64 carrier, or zero for an integer key
+    MIR_reg_t key_index_reg;    // original I64 carrier, or zero for an F64 key
+    JsMemberNode* member;       // compile-only shape candidate provenance
     uint32_t named_key_index;
     NameId named_key_id;
     int jube_slot;
@@ -491,7 +492,7 @@ static inline void jm_preserve_error_lane_carrier(JsMirTranspiler* mt,
         VALUE_REP_ITEM);
 }
 MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
-        int arg_count, MIR_reg_t* arg_regs, bool discard_result = false);
+        int arg_count, MIR_reg_t* arg_regs, bool discard_result = false, bool source_invocation = true);
 MIR_reg_t jm_module_name_id_at_index(JsMirTranspiler* mt, uint32_t index);
 MIR_reg_t jm_call_function_into(JsMirTranspiler* mt, MIR_op_t func,
         MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count);
@@ -503,8 +504,9 @@ MIR_reg_t jm_super_call_class_into(JsMirTranspiler* mt, MIR_op_t callee,
         MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count);
 MIR_reg_t jm_super_apply_class_into(JsMirTranspiler* mt, MIR_op_t callee,
         MIR_op_t this_value, MIR_op_t args);
-MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
-        int arg_count, MIR_reg_t* arg_regs);
+MirCallResult jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
+        int arg_count, MIR_reg_t* arg_regs, bool source_invocation = true);
+MIR_reg_t jm_finish_native_call(JsMirTranspiler* mt, MirCallResult result);
 MirValue jm_convert_rep(void* owner, MirValue value, ValueRep required);
 #define jm_call_void_0(mt, fn) \
     (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_0(&(mt)->func_em->em, fn, true))
@@ -628,6 +630,7 @@ static inline MirValue jm_item_value(MIR_reg_t reg,
     return em_value_for_rep(reg, semantic_type, VALUE_REP_ITEM);
 }
 MIR_reg_t jm_emit_is_truthy(JsMirTranspiler* mt, MirValue value);
+MIR_reg_t jm_transpile_member_as_number(JsMirTranspiler* mt, JsMemberNode* member);
 MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                                          TypeId target_type);
 MIR_reg_t jm_transpile_conditional_as_native(JsMirTranspiler* mt,

@@ -461,23 +461,13 @@ MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MirValue value) {
     return em_require_rep(&mt->func_em->em, value, VALUE_REP_F64).reg;
 }
 
-// A native return carries an unboxed scalar, so an ERROR Item cannot travel in
-// band: reinterpreting it as the native return type is what turned an uncaught
-// throw into a NaN-valued normal return. Publish the lane for the caller — the
-// boxed entry and every direct native call site take it — and return the
-// placeholder the native ABI expects. False outside a native frame.
+// native errors share the planned companion lane and ownership epilogue (D8.4.3v2).
 bool jm_emit_native_throw_exit(JsMirTranspiler* mt, MIR_reg_t lane) {
     if (!mt || !mt->in_native_func || !mt->current_fc || !lane) return false;
-    jm_callr_void_1(mt, "js_native_throw_publish", lane);
-    bool native_float = JM_JS_FACT(mt->current_fc, return_type) == LMD_TYPE_FLOAT;
-    MIR_reg_t placeholder = jm_new_reg(mt, "throw_ph",
-        native_float ? MIR_T_D : MIR_T_I64);
-    if (native_float) {
-        jm_emit_reg_op(mt, MIR_DMOV, placeholder, MIR_new_double_op(mt->ctx, 0.0));
-    } else {
-        jm_emit_reg_op(mt, MIR_MOV, placeholder, MIR_new_int_op(mt->ctx, 0));
-    }
-    jm_emit_ret(mt, placeholder);
+    MIR_op_t placeholder = mt->func_em->em.frame.return_type == MIR_T_D
+        ? MIR_new_double_op(mt->ctx, 0.0) : MIR_new_int_op(mt->ctx, 0);
+    em_stage_function_return(&mt->func_em->em, placeholder, lane);
+    jm_error_lane_set_state(mt, JS_ERROR_LANE_UNREACHABLE);
     return true;
 }
 

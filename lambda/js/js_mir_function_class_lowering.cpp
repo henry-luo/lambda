@@ -880,7 +880,7 @@ static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
     for (int i = 0; i < call_param_count; i++) {
         args[i] = MIR_reg(mt->ctx, names[i + 1], wrapper_func);
     }
-    MIR_reg_t result = jm_call_direct_boxed(mt, fc, call_param_count, args);
+    MIR_reg_t result = jm_call_direct_boxed(mt, fc, call_param_count, args, false, false);
     MIR_reg_t persistent = jm_new_reg(mt, "public_result", MIR_T_I64);
     jm_emit_mov(mt, persistent, result);
     jm_emit_ret(mt, persistent);
@@ -1250,7 +1250,11 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
         MIR_type_t native_ret_type = JM_JS_FACT(fc, native_return_kind) == NATIVE_RETURN_FLOAT
             ? MIR_T_D : MIR_T_I64;
-        MIR_item_t native_item = MIR_new_func_arr(mt->ctx, native_name, 1, &native_ret_type,
+        FnVariantAnalysis* native_variant = fn_analysis_variant(jm_function_analysis(fc),
+            FN_ENTRY_NATIVE_BODY);
+        MIR_type_t native_results[2] = {native_ret_type, MIR_T_I64};
+        MIR_item_t native_item = MIR_new_func_arr(mt->ctx, native_name,
+            em_return_nres(native_variant->result.companion), native_results,
             param_count + 1, n_params);
         MIR_func_t native_func = MIR_get_item_func(mt->ctx, native_item);
 
@@ -1297,6 +1301,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             SCALAR_RETURN_NONE, MIR_reg(mt->ctx, "ctx", native_func), true);
         mt->func_em->em.frame.plan.entry_kind = FN_ENTRY_NATIVE_BODY;
         mt->func_em->em.frame.plan.entry_mode = MIR_ENTRY_BOUND_INTERNAL;
+        em_plan_bind_return(&mt->func_em->em.frame.plan,
+            &native_variant->result, /*c_reachable=*/false);
+        mt->func_em->em.frame.return_lane_kind = RETURN_LANE_ERROR;
+        mt->func_em->em.frame.error_return_reg = jm_new_reg(mt, "native_error", MIR_T_I64);
         jm_push_scope(mt);
 
         // Register parameters with their inferred native types
@@ -1389,19 +1397,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // Exception landing pad for native function (return 0/0.0 on exception)
         if (mt->func_error_lane_label) {
             jm_emit_label(mt, mt->func_error_lane_label);
-            // The unboxed return cannot carry the ERROR Item, so hand the lane
-            // to the caller out of band before returning the placeholder;
-            // otherwise the throw is silently lost and the placeholder becomes
-            // the call's value.
-            jm_callr_void_1(mt, "js_native_throw_publish",
-                jm_emit_error_lane_return(mt));
-            MIR_reg_t exc_ret = jm_new_reg(mt, "exc_ret", native_ret_type);
-            if (native_ret_type == MIR_T_D) {
-                jm_emit_reg_op(mt, MIR_DMOV, exc_ret, MIR_new_double_op(mt->ctx, 0.0));
-            } else {
-                jm_emit_reg_op(mt, MIR_MOV, exc_ret, MIR_new_int_op(mt->ctx, 0));
-            }
-            jm_emit_ret(mt, exc_ret);
+            jm_emit_native_throw_exit(mt, jm_emit_error_lane_return(mt));
         }
         jm_pop_scope(mt);
         jm_finish_function_frame(mt, native_name);
@@ -2071,25 +2067,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             param_node = param_node ? param_node->next : NULL;
         }
 
-        MIR_reg_t native_result = jm_call_direct_native(mt, fc,
-            param_count, native_args);
-
-        // Box the result and return
+        MirCallResult native_call = jm_call_direct_native(mt, fc,
+            param_count, native_args, false);
+        MIR_reg_t native_result = jm_finish_native_call(mt, native_call);
         MIR_reg_t boxed_result = jm_box_native(mt, native_result, JM_JS_FACT(fc, return_type));
-        // A throw inside the native body arrives out of band; an unhandled lane
-        // leaves this function exactly as a boxed body's would — as the ERROR
-        // carrier, or as a rejected promise for an async function.
-        MIR_reg_t native_lane = jm_call_0(mt, "js_native_throw_take", MIR_T_I64);
-        // The take is the only fallibility signal on this edge and the catalog
-        // cannot know that, so the lane state has to be declared unknown before
-        // the tag test or the test folds to a constant "clean".
-        jm_error_lane_set_state(mt, JS_ERROR_LANE_UNKNOWN);
-        MIR_reg_t native_threw = jm_emit_error_lane_test(mt);
-        MIR_label_t native_clean = jm_new_label(mt);
-        jm_emit_branch(mt, MIR_BF, native_clean, native_threw);
-        jm_emit_ret(mt, fn->is_async && !fn->is_generator
-            ? jm_emit_async_rejected_value(mt, native_lane) : native_lane);
-        jm_emit_label_with_state(mt, native_clean, JS_ERROR_LANE_CLEAN);
         if (fn->is_async && !fn->is_generator) {
             // The fast path returns the body's value directly, but an async
             // function still owes its caller its own result promise — the

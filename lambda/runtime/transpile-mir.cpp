@@ -8,6 +8,7 @@
 #include "type_contract.hpp"
 #include "ast_build.hpp"
 #include "mir_emitter_shared.hpp"
+#include "mir_shape_candidates.hpp"
 #include "mir_dump.h"
 #include "mir_policy.hpp"
 #include "interp.hpp"
@@ -1638,23 +1639,6 @@ static void emit_jit_root_frame_exit(MirTranspiler* mt) {
         offsetof(Context, side_root_top), mt->em.frame.root_base);
 }
 
-// The "no error" value on a shape-4 error lane.
-//
-// RV9 rules this `ItemNull` for the v3 pair: a `T^E` function returning a
-// legitimate `null` flows it on lane 1 (the value lane), so lane 2 `ItemNull`
-// can only ever mean "no error". The v1 context-lane transport predates that
-// ruling and encodes it as 0 (`ITEM_UNDEFINED`), with callers testing `BT`
-// (non-zero) rather than comparing; both are one instruction, so the two
-// encodings coexist per transport rather than being unified for its own sake.
-static inline MIR_op_t mir_error_lane_no_error_op(MirTranspiler* mt) {
-    // RV9: one definition of the no-error spelling, shared with the consumer
-    // (em_error_lane_in_register). Deriving it separately on each side is the
-    // mismatch this ruling exists to prevent.
-    return em_error_lane_in_register(mt->em.frame.plan.companion)
-        ? MIR_new_uint_op(mt->ctx, ITEM_NULL)
-        : MIR_new_int_op(mt->ctx, 0);
-}
-
 // v3 (RV1 shape 2): does this boxed body hand its wide payload back on a second
 // MIR result instead of a caller-donated home? The forward-declared contract
 // and the emitted body MUST answer identically — a contract promising the v2
@@ -1696,7 +1680,6 @@ static void begin_function_epilogue(MirTranspiler* mt, MIR_type_t return_type,
 
 static MIR_reg_t emit_box_float(MirTranspiler* mt, MIR_reg_t val_reg);
 static void emit_function_return(MirTranspiler* mt, MIR_op_t value) {
-    MIR_insn_code_t move = mt->em.frame.return_type == MIR_T_D ? MIR_DMOV : MIR_MOV;
     // physical-only: the ABI frame fixes the MIR move opcode; this does not
     // classify the Lambda value or infer its ValueRep (D2.4.1).
     // G0: a function declared `int` or `float` returns in the shared double
@@ -1718,15 +1701,7 @@ static void emit_function_return(MirTranspiler* mt, MIR_op_t value) {
             MIR_reg_type(mt->ctx, value.u.reg, mt->em.func) == MIR_T_D) {
         value = MIR_new_reg_op(mt->ctx, emit_box_float(mt, value.u.reg));
     }
-    emit_insn(mt, MIR_new_insn(mt->ctx, move,
-        MIR_new_reg_op(mt->ctx, mt->em.frame.return_reg), value));
-    if (mt->em.frame.return_lane_kind == RETURN_LANE_ERROR) {
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, mt->em.frame.error_return_reg),
-            mir_error_lane_no_error_op(mt)));
-    }
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-        MIR_new_label_op(mt->ctx, mt->em.frame.return_label)));
+    em_stage_function_return(&mt->em, value);
 }
 
 static void emit_function_error_return(MirTranspiler* mt, MIR_reg_t error_item) {
@@ -1734,16 +1709,9 @@ static void emit_function_error_return(MirTranspiler* mt, MIR_reg_t error_item) 
         emit_function_return(mt, MIR_new_reg_op(mt->ctx, error_item));
         return;
     }
-    MIR_insn_code_t move = mt->em.frame.return_type == MIR_T_D ? MIR_DMOV : MIR_MOV;
     MIR_op_t zero = mt->em.frame.return_type == MIR_T_D
         ? MIR_new_double_op(mt->ctx, 0.0) : MIR_new_int_op(mt->ctx, 0);
-    emit_insn(mt, MIR_new_insn(mt->ctx, move,
-        MIR_new_reg_op(mt->ctx, mt->em.frame.return_reg), zero));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, mt->em.frame.error_return_reg),
-        MIR_new_reg_op(mt->ctx, error_item)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-        MIR_new_label_op(mt->ctx, mt->em.frame.return_label)));
+    em_stage_function_return(&mt->em, zero, error_item);
 }
 
 static void emit_number_frame_enter(MirTranspiler* mt) {
@@ -16707,39 +16675,8 @@ static MirValue emit_member_value(MirTranspiler* mt, AstFieldNode* field_node) {
             guarded_done = new_label(mt);
             MIR_label_t l_slow = new_label(mt);
 
-            if (!static_receiver_is_map) {
-                // T20-1c. The candidate came from an inference edge, so nothing
-                // static says this Item is even a container. A scalar Item keeps
-                // its tag in the high byte while a container Item IS a raw
-                // pointer (tag 0, kind read from the struct's first byte), so
-                // unboxing a scalar here and loading its header would be a wild
-                // read. Establish "is a pointer" and "is the right container
-                // kind" BEFORE the header compare.
-                MIR_reg_t tag = new_reg(mt, "grd_tag", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_URSH,
-                    MIR_new_reg_op(mt->ctx, tag), MIR_new_reg_op(mt->ctx, boxed_obj),
-                    MIR_new_int_op(mt->ctx, 56)));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
-                    MIR_new_label_op(mt->ctx, l_slow),
-                    MIR_new_reg_op(mt->ctx, tag), MIR_new_int_op(mt->ctx, 0)));
-            }
-
-            MIR_reg_t map_ptr = emit_unbox_container(mt, boxed_obj);
-            // A null receiver has no header to test; `null.k` semantics stay
-            // with the generic accessor (S7.1).
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
-                MIR_new_label_op(mt->ctx, l_slow),
-                MIR_new_reg_op(mt->ctx, map_ptr), MIR_new_int_op(mt->ctx, 0)));
-            if (!static_receiver_is_map) {
-                MIR_reg_t kind = new_reg(mt, "grd_kind", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, kind),
-                    MIR_new_mem_op(mt->ctx, MIR_T_U8, 0, map_ptr, 0, 1)));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
-                    MIR_new_label_op(mt->ctx, l_slow),
-                    MIR_new_reg_op(mt->ctx, kind),
-                    MIR_new_int_op(mt->ctx, (int64_t)shape_type->type_id)));
-            }
+            MIR_reg_t map_ptr = em_guard_container(&mt->em, boxed_obj,
+                shape_type->type_id, l_slow, static_receiver_is_map);
             // The shape pointer sits at a kind-dependent offset (D2.6.6): a map
             // keeps it right after the header, an object after the list fields.
             MIR_reg_t hdr_type = new_reg(mt, "grd_shape", MIR_T_I64);
@@ -17989,21 +17926,7 @@ static void emit_int_lane_validity_check(MirTranspiler* mt, MIR_reg_t value,
 
 static MIR_reg_t emit_array_num_element_address(MirTranspiler* mt,
         MIR_reg_t arr_ptr, MIR_reg_t idx_int, int element_width) {
-    MIR_reg_t items_ptr = new_reg(mt, "itms", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_CONTAINER_ITEMS_OFFSET, arr_ptr, 0, 1)));
-    MIR_reg_t byte_off = new_reg(mt, "boff", MIR_T_I64);
-    if (element_width == 8) {
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
-            MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, 3)));
-    } else {
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MUL, MIR_new_reg_op(mt->ctx, byte_off),
-            MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, element_width)));
-    }
-    MIR_reg_t elem_addr = new_reg(mt, "eadr", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
-        MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
-    return elem_addr;
+    return em_array_element_address(&mt->em, arr_ptr, idx_int, element_width);
 }
 
 static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_node) {
@@ -28618,41 +28541,31 @@ static Type* mir_addressable_literal_shape(Type* type) {
 // Resolve one expression to the map shape it will produce, following the two
 // edges the fixpoint cares about: a binding to its initializer, and a call to
 // its callee's resolved return shape. `depth` bounds the binding chain.
-static Type* mir_expr_candidate_shape(MirTranspiler* mt, AstNode* expr, int depth) {
-    if (!expr || depth <= 0) return NULL;
-    AstNode* node = ast_unwrap_primary(expr);
-    if (!node) return NULL;
-    Type* direct = mir_addressable_literal_shape(node->type);
-    if (direct) return direct;
+static void* mir_shape_direct_candidate(void*, AstNode* node) {
+    return mir_addressable_literal_shape(node->type);
+}
 
-    if (node->node_type == AST_NODE_IDENT) {
-        AstIdentNode* ident = (AstIdentNode*)node;
-        NameEntry* entry = ident->entry;
-        if (!entry || !entry->node) return NULL;
-        AstNode* decl = (AstNode*)entry->node;
-        if (decl->node_type == AST_NODE_VARIABLE_DECLARATOR) {
-            AstDeclaratorNode* named = (AstDeclaratorNode*)decl;
-            // A `var` rebound elsewhere may hold another shape; that is a guard
-            // miss, not an error, so the initializer still names the candidate.
-            return mir_expr_candidate_shape(mt, named->init, depth - 1);
-        }
-        if (decl->node_type == AST_NODE_PARAM) {
-            ShapeHintEntry key;
-            memset(&key, 0, sizeof(key));
-            key.node = decl;
-            ShapeHintEntry* hint = mt->shape_hints
-                ? (ShapeHintEntry*)hashmap_get(mt->shape_hints, &key) : NULL;
-            return hint ? hint->shape : NULL;
-        }
-        return NULL;
-    }
-    if (node->node_type == AST_NODE_CALL_EXPR) {
-        AstFuncNode* callee = mir_ident_local_func(((AstCallNode*)node)->function);
-        if (!callee) return NULL;
-        CallSiteEntry* e = mir_callsite_entry(mt, callee, false);
-        return e ? e->return_shape : NULL;
-    }
-    return NULL;
+static void* mir_shape_binding_candidate(void* owner, AstNode* definition) {
+    MirTranspiler* mt = (MirTranspiler*)owner;
+    if (definition->node_type != AST_NODE_PARAM) return NULL;
+    ShapeHintEntry key = {};
+    key.node = definition;
+    ShapeHintEntry* hint = mt->shape_hints
+        ? (ShapeHintEntry*)hashmap_get(mt->shape_hints, &key) : NULL;
+    return hint ? hint->shape : NULL;
+}
+
+static void* mir_shape_call_candidate(void* owner, AstCallNode* call) {
+    AstFuncNode* callee = mir_ident_local_func(call->function);
+    if (!callee) return NULL;
+    CallSiteEntry* entry = mir_callsite_entry((MirTranspiler*)owner, callee, false);
+    return entry ? entry->return_shape : NULL;
+}
+
+static Type* mir_expr_candidate_shape(MirTranspiler* mt, AstNode* expr, int depth) {
+    MirShapeCandidateProfile profile = {mt, mir_shape_direct_candidate,
+        mir_shape_binding_candidate, mir_shape_call_candidate};
+    return (Type*)mir_shape_candidate(profile, expr, depth);
 }
 
 // T20-1b. Propagation reaches a member site only when the receiver traces back

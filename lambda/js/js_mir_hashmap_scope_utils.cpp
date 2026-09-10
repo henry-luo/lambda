@@ -659,6 +659,14 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
         em_store_frame_top(&mt->func_em->em, mt->func_em->em.frame.runtime,
             offsetof(Context, side_root_top), mt->func_em->em.frame.root_base);
     }
+    if (mt->func_em->em.frame.return_lane_kind == RETURN_LANE_ERROR) {
+        pair_item = mt->func_em->em.frame.return_reg;
+        pair_companion = mt->func_em->em.frame.error_return_reg;
+        if (em_returns_companion_slot(mt->func_em->em.frame.plan.companion)) {
+            em_store_frame_top(&mt->func_em->em, mt->func_em->em.frame.runtime,
+                offsetof(Context, mir_companion_slot), pair_companion);
+        }
+    }
     if (em_returns_result_pair(mt->func_em->em.frame.plan.companion)) {
         em_emit_insn(&mt->func_em->em, MIR_new_ret_insn(mt->ctx, 2,
             MIR_new_reg_op(mt->ctx, pair_item),
@@ -696,11 +704,7 @@ void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn) {
             em_emit_insn(&mt->func_em->em, insn);
             return;
         }
-        MIR_insn_code_t move = mt->func_em->em.frame.return_type == MIR_T_D ? MIR_DMOV : MIR_MOV;
-        em_emit_insn(&mt->func_em->em, MIR_new_insn(mt->ctx, move,
-            MIR_new_reg_op(mt->ctx, mt->func_em->em.frame.return_reg), insn->ops[0]));
-        em_emit_insn(&mt->func_em->em, MIR_new_insn(mt->ctx, MIR_JMP,
-            MIR_new_label_op(mt->ctx, mt->func_em->em.frame.return_label)));
+        em_stage_function_return(&mt->func_em->em, insn->ops[0]);
         jm_error_lane_set_state(mt, JS_ERROR_LANE_UNREACHABLE);
         _MIR_free_insn(mt->ctx, insn);
         return;

@@ -434,6 +434,7 @@ struct JsMirArgStackScope {
 enum JsMirNameCacheDomain : uint8_t {
     JS_MIR_NAME_CACHE_PROPERTY_ITEM,
     JS_MIR_NAME_CACHE_MODULE_ID,
+    JS_MIR_NAME_CACHE_LITERAL_SHAPE,
 };
 
 enum { JS_MIR_NAME_CACHE_CAPACITY = 32 };
@@ -499,6 +500,8 @@ struct JsMirFunctionEmitter {
         {}, 0, NULL, JS_MIR_NAME_CACHE_PROPERTY_ITEM};
     JsMirNameCache module_name_id_cache = {
         {}, 0, NULL, JS_MIR_NAME_CACHE_MODULE_ID};
+    JsMirNameCache literal_shape_cache = {
+        {}, 0, NULL, JS_MIR_NAME_CACHE_LITERAL_SHAPE};
 };
 
 // One checkpointable lowering cursor owns the mutable function/class/scope
@@ -603,7 +606,10 @@ struct JsMirTranspiler {
     // T10-2: the module key range each object literal registered, memoized by
     // node so the declarator and the member sites can ask for a literal's shape
     // without re-registering its keys. Compile-time only.
-    ArrayList* literal_shape_ranges;
+    struct hashmap* literal_shape_ranges;
+    struct hashmap* shape_field_candidates;
+    AstNode** shape_candidates; // indexed compile-time parameter/return hints
+    uint32_t shape_candidate_count;
 
     bool in_main;                    // true when transpiling Phase 3 (js_main)
 
@@ -841,9 +847,15 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
         mt->module_name_specs = NULL;
     }
     if (mt->literal_shape_ranges) {
-        arraylist_free(mt->literal_shape_ranges);
+        hashmap_free(mt->literal_shape_ranges);
         mt->literal_shape_ranges = NULL;
     }
+    if (mt->shape_field_candidates) {
+        hashmap_free(mt->shape_field_candidates);
+        mt->shape_field_candidates = NULL;
+    }
+    mem_free(mt->shape_candidates);
+    mt->shape_candidates = NULL;
     if (mt->func_entries) jm_free_scope_env_names(mt->func_entries, mt->func_count);
     mt->func_entries = NULL;
     mt->class_entries = NULL;

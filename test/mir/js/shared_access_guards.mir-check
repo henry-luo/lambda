@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "description": "D8.4.1v2/D8.4.3v2: candidate field guards and native element addressing retain the semantic miss kernels; successful guards join a defined completion. Runtime and GC oracles cover hit/miss behavior.",
+  "checks": [
+    {
+      "in_func": "_js_readRecord_#_body",
+      "expect_seq": [
+        "call\tjs_literal_shape",
+        "bne",
+        "dmov",
+        "call\tjs_get_name_id"
+      ],
+      "forbid": [
+        "js_shaped_slot_get"
+      ]
+    },
+    {
+      "in_func": "_js_writeRecord_#_body",
+      "expect_seq": [
+        "call\tjs_literal_shape",
+        "bne",
+        "dmov",
+        "call\tjs_get_name_id"
+      ],
+      "forbid": [
+        "js_shaped_slot_get"
+      ],
+      "expect": [
+        "call\tjs_set_name_id"
+      ]
+    },
+    {
+      "in_func": "_js_numericRegion_#_body",
+      "expect": [
+        "ubge",
+        "lsh",
+        "dmov",
+        "call\tjs_get_number_reference",
+        "call\tjs_set_number_assignment",
+        "i32:(%",
+        "i2d"
+      ]
+    }
+  ]
+}

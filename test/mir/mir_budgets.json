@@ -168,23 +168,23 @@
       "name": "js_numeric_inference_call",
       "script": "test/mir/js/numeric_inference_call.js",
       "language": "js",
-      "description": "JS call-result binding: watches js_main's root-store traffic and merged Item error-tag branches. Tune4 re-baseline: console.log is an ordinary mutable property call through the per-callee entry instead of a name-selected MIR shortcut (D6.2.2v2).",
+      "description": "JS call-result binding: watches js_main's root-store traffic and merged Item error-tag branches. Tune4 re-baseline: console.log is an ordinary mutable property call through the per-callee entry instead of a name-selected MIR shortcut (D6.2.2v2). JS2 reviewed growth (D8.6.1): +66 instructions for the exact-shape/storage guards, native slot load and joined fallback; two root stores and one cold float-boxing safepoint. The profiling build adds four instructions for the existing named probe/hit/miss counters and their join; trace on/off retains identical MIR. JS2 tasks 3/4 reviewed growth (D8.6.1): +13 instructions for source-call depth accounting and its RangeError edge; one cold safepoint, no additional root stores.",
       "budgets": {
         "default": {
-          "module_insns": 229,
+          "module_insns": 312,
           "functions": {
             "js_main": {
-              "insns": 168
+              "insns": 251
             }
           },
           "frames": [
             {
               "name": "js_main",
               "roots": 7,
-              "root_stores": 18,
+              "root_stores": 20,
               "scalar_homes": 2,
               "number_scratch": 0,
-              "safepoints": 21
+              "safepoints": 23
             }
           ]
         }
@@ -194,7 +194,7 @@
       "name": "js_hoisted_modvar_write_through",
       "script": "test/mir/js/hoisted_modvar_write_through.js",
       "language": "js",
-      "description": "Nested closures over an IIFE scope: the shape most exposed to rooting bloat, including merged Item error-tag branches. Tune4 re-baseline: dynamic closure and console calls use rooted argument spans and per-callee entries; js_main itself shrank by two instructions (D6.2.2v2, D5.4.3). Darwin debug v3 also uses the profile-enabled numeric helper imports in the ordinary debug host.",
+      "description": "Nested closures over an IIFE scope: the shape most exposed to rooting bloat, including merged Item error-tag branches. Tune4 re-baseline: dynamic closure and console calls use rooted argument spans and per-callee entries; js_main itself shrank by two instructions (D6.2.2v2, D5.4.3). Darwin debug v3 also uses the profile-enabled numeric helper imports in the ordinary debug host. JS2 tasks 3/4 reviewed Darwin growth (D8.6.1): net +13 instructions for source-call depth accounting after removal of redundant scalar adoption; one cold RangeError safepoint in _js_anon1_#, no additional root stores.",
       "budgets": {
         "default": {
           "module_insns": 507,
@@ -224,7 +224,7 @@
           ]
         },
         "darwin-debug-v3": {
-          "module_insns": 360,
+          "module_insns": 373,
           "functions": {
             "js_main": {
               "insns": 74
@@ -246,7 +246,7 @@
               "root_stores": 8,
               "scalar_homes": 1,
               "number_scratch": 0,
-              "safepoints": 12
+              "safepoints": 13
             }
           ]
         }
@@ -300,10 +300,10 @@
       "name": "js_corpus_side_stack_frame_gc",
       "script": "test/js/regression_side_stack_frame_gc.js",
       "language": "js",
-      "description": "The rooting-bloat sentinel: the GC-rooting regression script, which is the committed stand-in for the historical frameReview probe whose emission grew 58 -> 440 instructions under shadow-copy rooting. Its bound includes nested, throwing fixed argument-root extents, merged Item error-tag branches, and generator throw-resume markers. Tune4 re-baseline: 64 former name/receiver-selected calls now perform observable property Get plus per-callee dispatch with precise argument roots (D6.2.2v2, D5.4.3).",
+      "description": "The rooting-bloat sentinel: the GC-rooting regression script, which is the committed stand-in for the historical frameReview probe whose emission grew 58 -> 440 instructions under shadow-copy rooting. Its bound includes nested, throwing fixed argument-root extents, merged Item error-tag branches, and generator throw-resume markers. Tune4 re-baseline: 64 former name/receiver-selected calls now perform observable property Get plus per-callee dispatch with precise argument roots (D6.2.2v2, D5.4.3). JS2 reviewed growth (D8.6.1): +307 instructions above the recorded budget for guarded field/index access with the existing rooted fallback kernels. The profiling build adds 24 instructions for the existing named probe/hit/miss counters and their joins.",
       "budgets": {
         "default": {
-          "module_insns": 7653
+          "module_insns": 7984
         }
       }
     },
