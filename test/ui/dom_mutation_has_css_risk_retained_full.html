@@ -2,12 +2,12 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>DOM mutation local structural CSS incremental layout</title>
+<title>DOM mutation broad has CSS risk retained full layout</title>
 <style>
   body { font-family: sans-serif; margin: 24px; }
   #name { width: 220px; padding: 8px; border: 2px solid #333; }
   #items { margin-top: 16px; }
-  #items .row:first-child { color: rgb(180, 40, 40); }
+  #items:has(.inserted-risk) { border: 3px solid rgb(180, 40, 40); }
   .inserted { padding: 6px; }
 </style>
 </head>
@@ -15,7 +15,7 @@
   <label for="name">Name</label>
   <input id="name" value="ready">
   <div id="items">
-    <div id="old-first" class="row">old first</div>
+    <div class="row">original row</div>
   </div>
   <p id="status">waiting</p>
   <script>
@@ -30,9 +30,9 @@
       const row = document.createElement('div');
       row.id = 'inserted-risk';
       row.className = 'row inserted';
-      row.textContent = 'new first';
-      items.insertBefore(row, items.firstElementChild);
-      status.textContent = 'structural risk mutation complete';
+      row.textContent = 'inserted row';
+      items.appendChild(row);
+      status.textContent = 'broad structural risk mutation complete';
     });
   </script>
 </body>

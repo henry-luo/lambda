@@ -1,0 +1,16 @@
+{
+  "name": "DOM mutation broad has CSS risk uses retained full layout",
+  "html": "test/ui/dom_mutation_has_css_risk_retained_full.html",
+  "viewport": {"width": 640, "height": 340},
+  "events": [
+    {"type": "click", "target": {"selector": "#name"}},
+    {"type": "assert_focus", "target": {"selector": "#name"}},
+    {"type": "snapshot_state_store", "name": "focused-input", "target": {"selector": "#name"}},
+    {"type": "key_press", "key": "b"},
+    {"type": "assert_count", "target": {"selector": "#inserted-risk"}, "equals": 1},
+    {"type": "assert_text", "target": {"selector": "#status"}, "contains": "broad structural risk mutation complete"},
+    {"type": "assert_reconcile_mode", "mode": "retained_full_layout", "reason": "broad-structural-css-risk"},
+    {"type": "assert_state_store_snapshot", "name": "focused-input", "target": {"selector": "#name"}},
+    {"type": "assert_focus", "target": {"selector": "#name"}}
+  ]
+}
