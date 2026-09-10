@@ -7721,12 +7721,6 @@ extern "C" Item js_create_data_property(Item obj, Item name, Item value) {
             if (nm && !(nm->len >= 2 && nm->chars[0] == '_' && nm->chars[1] == '_')) {
                 bool key_exists = false;
                 js_map_shape_lookup_ext(m, nm->chars, (int)nm->len, &key_exists);
-                if (key_exists) {
-                    bool handled = false;
-                    JS_RETURN_IF_ERROR(js_predicted_slot_initialize(obj_root.get(),
-                        nm, value_root.get(), &handled));
-                    if (handled) return obj_root.get();
-                }
                 if (!key_exists && js_is_truthy(js_object_is_extensible(obj_root.get()))) {
                     // Extensibility is an allocating host query; reload the
                     // map after it because GC may relocate the receiver's

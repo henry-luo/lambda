@@ -1017,52 +1017,6 @@ static void jm_init_if_clause_function_binding(JsMirTranspiler* mt, JsAstNode* s
     jm_scope_env_mark_and_writeback_binding(mt, vname, (JsAstNode*)fn, fn_reg);
 }
 
-// transpile one if-branch body with the same scope/TDZ handling as the inline
-// consequent/alternate paths below (used by the constant-folded dead-branch path).
-static void jm_transpile_if_branch(JsMirTranspiler* mt, JsAstNode* branch) {
-    if (!branch) return;
-    if (branch->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
-        jm_push_scope(mt);
-        jm_init_block_tdz(mt, branch);
-        JsBlockNode* blk = (JsBlockNode*)branch;
-        JsAstNode* s = blk->statements;
-        while (s) { jm_transpile_statement(mt, s); s = s->next; }
-        jm_pop_scope(mt);
-    } else if (branch->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
-        jm_push_scope(mt);
-        jm_init_if_clause_function_binding(mt, branch);
-        jm_transpile_statement(mt, branch);
-        jm_pop_scope(mt);
-    } else {
-        jm_transpile_statement(mt, branch);
-    }
-}
-
-// Whether a never-taken branch can be dropped without losing a hoisting side
-// effect. var bindings are hoisted by jm_collect_body_locals regardless of
-// lowering (and their assignments are runtime-conditional anyway), so the only
-// hazard is Annex-B function-declaration hoisting. This whitelist admits only
-// statements that cannot hoist a function into the enclosing scope.
-static bool jm_branch_dead_safe(JsAstNode* n) {
-    if (!n) return true;
-    switch (n->node_type) {
-    case JS_AST_NODE_THROW_STATEMENT:
-    case JS_AST_NODE_EXPRESSION_STATEMENT:
-    case JS_AST_NODE_RETURN_STATEMENT:
-    case JS_AST_NODE_BREAK_STATEMENT:
-    case JS_AST_NODE_CONTINUE_STATEMENT:
-        return true;
-    case JS_AST_NODE_BLOCK_STATEMENT: {
-        JsBlockNode* blk = (JsBlockNode*)n;
-        for (JsAstNode* s = blk->statements; s; s = s->next)
-            if (!jm_branch_dead_safe(s)) return false;
-        return true;
-    }
-    default:
-        return false;  // conservative: anything else uses the normal lowering path
-    }
-}
-
 static void jm_emit_annexb_global_export(JsMirTranspiler* mt,
         MIR_reg_t key_reg, MIR_reg_t value_reg) {
     if (!mt || !key_reg || !value_reg) return;
@@ -1097,23 +1051,6 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
     JsClosureCheckpoint saved_last_closure;
     jm_closure_checkpoint_save(mt, &saved_last_closure);
 
-    // Tune3 §3: constant-fold the condition and drop the dead branch entirely.
-    if (jm_const_fold_enabled()) {
-        JsFoldVal fv;
-        if (jm_try_fold_const(if_node->test, &fv)) {
-            bool cond = (fv.kind == JS_FOLD_BOOL) ? fv.boolean : (fv.num != 0.0);
-            JsAstNode* live = cond ? if_node->consequent : if_node->alternate;
-            JsAstNode* dead = cond ? if_node->alternate : if_node->consequent;
-            if (jm_branch_dead_safe(dead)) {
-                jm_eval_cptn_reset(mt);
-                jm_transpile_if_branch(mt, live);
-                // Constant-folded branches are still path-local for closure
-                // readback, so do not let their env register escape.
-                jm_closure_checkpoint_rollback(mt, &saved_last_closure);
-                return;
-            }
-        }
-    }
     // Phase 3.5: detect typeof narrowing pattern before emitting the test
     TypeId typeof_narrowed_type = LMD_TYPE_ANY;
     bool typeof_negate = false;
