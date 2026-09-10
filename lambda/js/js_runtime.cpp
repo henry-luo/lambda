@@ -1549,8 +1549,6 @@ static Item js_array_generic_flat_map(Item object, Item* args, int argc);
 static Item js_array_generic_iterative_callback_with_object(Item object, Item callback_object, Item* args, int argc, int method_kind);
 static Item js_array_generic_reduce_with_object(Item object, Item callback_object, Item* args,
     int argc, bool from_right, uint64_t* result_home = NULL);
-static Item js_array_generic_reduce(Item object, Item* args, int argc, bool from_right,
-    uint64_t* result_home = NULL);
 static Item js_array_generic_find_last(Item object, Item* args, int argc, bool return_index);
 enum JsIndexedIntrinsicOp : int;
 static Item js_array_intrinsic_algorithm_impl(Item arr,
@@ -10501,30 +10499,6 @@ static const uint64_t JS_OP_FLAG_UNCONDITIONAL_LENGTH_WRITE =
     JS_OP_BIT(JS_ARRAY_INTRINSIC_SHIFT) |
     JS_OP_BIT(JS_ARRAY_INTRINSIC_UNSHIFT) |
     JS_OP_BIT(JS_ARRAY_INTRINSIC_SPLICE);
-static const uint64_t JS_OP_FLAG_ARRAYLIKE_GENERIC =
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_INDEX_OF) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_LAST_INDEX_OF) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_INCLUDES) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_MAP) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_FILTER) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_REDUCE) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_REDUCE_RIGHT) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_FOR_EACH) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_SOME) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_EVERY) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_FIND) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_FIND_INDEX) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_FIND_LAST) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_FIND_LAST_INDEX) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_JOIN) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_FLAT) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_FLAT_MAP) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_KEYS) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_VALUES) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_ENTRIES) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_AT) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_ITEM) |
-    JS_OP_BIT(JS_ARRAY_INTRINSIC_SORT);
 static const uint64_t JS_OP_FLAG_WRITEBACK =
     JS_OP_BIT(JS_ARRAY_INTRINSIC_FILL) |
     JS_OP_BIT(JS_ARRAY_INTRINSIC_COPY_WITHIN) |
@@ -10614,6 +10588,14 @@ static bool js_array_generic_dispatch(Item source, Item callback_object,
     case JS_ARRAY_INTRINSIC_SPLICE:
         if (mode != JS_ARRAY_GENERIC_MAP) return false;
         result = js_array_generic_splice(source, args, arg_count); break;
+    case JS_ARRAY_INTRINSIC_FILL:
+        result = js_array_generic_fill(source, args, arg_count); break;
+    case JS_ARRAY_INTRINSIC_COPY_WITHIN:
+        result = js_array_generic_copy_within(source, args, arg_count); break;
+    case JS_ARRAY_INTRINSIC_REVERSE:
+        result = js_array_generic_reverse(source); break;
+    case JS_ARRAY_INTRINSIC_SORT:
+        result = js_array_generic_sort(source, args, arg_count); break;
     case JS_ARRAY_INTRINSIC_FIND_LAST:
     case JS_ARRAY_INTRINSIC_FIND_LAST_INDEX:
         if (mode != JS_ARRAY_GENERIC_MAP) return false;
@@ -15019,9 +15001,8 @@ struct JsRegexNameAlias {
 };
 
 struct JsRegexData {
-    re2::RE2* re2;            // compiled regex (direct, for patterns without assertions)
-    JsRegexCompiled* wrapper; // wrapper with post-filters (for patterns with lookaheads/backrefs)
-    JsBtRegex* bt;            // spec backtracking matcher (backrefs / hard lookbehind)
+    re2::RE2* re2;            // compiled regex without assertions
+    JsBtRegex* bt;            // spec backtracking matcher for assertions and backrefs
     const char* literal_pattern; // simple literal pattern handled without RE2
     int literal_pattern_len;
     int special_property_kind; // +/-: fast Unicode property-repeat kind
@@ -15124,12 +15105,6 @@ extern "C" void js_regex_map_heap_destroy(Map* map, gc_native_seen_t* seen_nativ
     if (js_regex_cache_owns_data(rd)) return;
     if (gc_native_seen_seen_or_add(seen_native, rd)) return;
 
-    JsRegexCompiled* wrapper = rd->wrapper;
-    if (wrapper) {
-        rd->wrapper = nullptr;
-        if (rd->re2 == wrapper->re2) rd->re2 = nullptr;
-        js_regex_compiled_free(wrapper);
-    }
     if (rd->re2 && !rd->re2_permanent_owned &&
             !js_regex_permanent_cache_contains_re2(rd->re2)) {
         // Direct RE2 matchers belong to the RegExp payload unless the
@@ -15192,22 +15167,6 @@ static bool js_regex_permanent_cache_contains_re2(re2::RE2* re);
 static void js_regex_cache_entry_release_native(JsRegexCacheEntry* ce) {
     if (!ce || !ce->rd) return;
     ce->rd->cache_owned = false;
-    if (ce->rd->wrapper) {
-        JsRegexCompiled* wrapper = ce->rd->wrapper;
-        // Batch resets clear stale AST-keyed cache entries before the heap may run
-        // RegExp map finalizers; release wrapper native state here and poison the
-        // RegExp data pointer so a later finalizer cannot double-free it.
-        ce->rd->wrapper = nullptr;
-        if (js_regex_permanent_cache_contains_re2(wrapper->re2)) {
-            // A pass-through wrapper can share the permanent cache's compiled
-            // RE2. Detach its borrowed engine before releasing wrapper metadata.
-            // The permanent cache remains the sole owner through context teardown.
-            if (ce->rd->re2 == wrapper->re2) ce->rd->re2 = nullptr;
-            wrapper->re2 = nullptr;
-        }
-        if (ce->rd->re2 == wrapper->re2) ce->rd->re2 = nullptr;
-        js_regex_compiled_free(wrapper);
-    }
     if (ce->rd->re2 && !ce->rd->re2_permanent_owned &&
             !js_regex_permanent_cache_contains_re2(ce->rd->re2)) {
         // Cache entries own direct matchers too; otherwise the pool can drop
@@ -16240,7 +16199,7 @@ static bool js_regex_match_special_property(int special_kind, const char* input,
 }
 
 // Permanent RE2 compilation cache — survives pool/batch resets within a process.
-// Keyed by FNV-1a content hash of pattern+flags. Only caches simple patterns (no wrapper).
+// Keyed by FNV-1a content hash of pattern+flags. Only caches direct patterns.
 // Eliminates repeated recompilation of huge regex literals (e.g. UnicodeIDStart/Continue)
 // across test boundaries in batch mode.
 struct Re2PermanentEntry {
@@ -16309,20 +16268,16 @@ static inline uint64_t js_regex_content_hash(const char* pat, int plen, const ch
     return h;
 }
 
-// Helper: get the correct number of capturing groups for output
-// When wrapper is active, use original JS group count (not RE2's inflated count)
+// Helper: get the correct number of capturing groups for output.
 static int js_regex_num_groups(JsRegexData* rd) {
     if (rd->special_property_kind != 0) return 1;
     if (rd->simple_class_kind != JS_REGEX_SIMPLE_CLASS_NONE) return 1;
     if (rd->literal_fast) return 1;
     if (rd->bt) return js_bt_group_count(rd->bt) + 1; // +1 for full match
-    if (rd->wrapper && rd->wrapper->has_filters) {
-        return rd->wrapper->original_group_count + 1; // +1 for full match
-    }
     return rd->re2->NumberOfCapturingGroups() + 1;
 }
 
-// Helper: match using wrapper if available, otherwise direct RE2
+// Helper: match with the backtracker for assertions, otherwise direct RE2.
 // Returns true if matched. Fills `matches` array with StringPiece groups.
 static bool js_regex_match_internal(JsRegexData* rd, const char* input, int input_len,
                                      int start_pos, re2::RE2::Anchor anchor,
@@ -16374,25 +16329,7 @@ static bool js_regex_match_internal(JsRegexData* rd, const char* input, int inpu
         }
         return true;
     }
-    if (rd->wrapper && rd->wrapper->has_filters) {
-        // use wrapper with post-filter verification
-        JsRegexScratch<int> starts_buf(num_groups), ends_buf(num_groups);
-        int* starts = starts_buf.slots; int* ends = ends_buf.slots;
-        bool anchor_start = (anchor == re2::RE2::ANCHOR_START);
-        int result = js_regex_wrapper_exec(rd->wrapper, input, input_len, start_pos, anchor_start,
-                                    starts, ends, num_groups);
-        if (result <= 0) return false;
-        // convert int offsets back to StringPiece
-        for (int i = 0; i < num_groups; i++) {
-            if (starts[i] >= 0 && ends[i] >= starts[i]) {
-                matches[i] = re2::StringPiece(input + starts[i], ends[i] - starts[i]);
-            } else {
-                matches[i] = re2::StringPiece();
-            }
-        }
-        return true;
-    }
-    // direct RE2 match (no assertions to worry about)
+    // direct RE2 match (the routing scan already excluded assertions)
     return rd->re2->Match(re2::StringPiece(input, input_len), start_pos, input_len,
                            anchor, matches, num_groups);
 }
@@ -16420,7 +16357,7 @@ static bool js_regex_pattern_has_quantifier_after(const std::string& pattern, in
 
 static void js_regex_reset_stale_repeated_captures(JsRegexData* rd,
         re2::StringPiece* matches, int num_groups) {
-    if (!rd || rd->wrapper || !rd->re2 || num_groups <= 1) return;
+    if (!rd || !rd->re2 || num_groups <= 1) return;
     const std::string& pattern = rd->re2->pattern();
     if (pattern.empty()) return;
 
@@ -16688,62 +16625,14 @@ static const char* js_regex_original_group_name(JsRegexData* rd, const char* re2
     return re2_name;
 }
 
-static bool js_regex_needs_wrapper(const char* pattern, int pattern_len) {
-    bool in_class = false;
-    for (int i = 0; i < pattern_len; i++) {
-        char c = pattern[i];
-        if (c == '\\') {
-            if (i + 1 >= pattern_len) return false;
-            char next = pattern[i + 1];
-            if (!in_class && next >= '1' && next <= '9') return true;
-            i++;
-            continue;
-        }
-        if (c == '[') {
-            in_class = true;
-            continue;
-        }
-        if (c == ']' && in_class) {
-            in_class = false;
-            continue;
-        }
-        if (!in_class && c == '(' && i + 2 < pattern_len && pattern[i + 1] == '?') {
-            char kind = pattern[i + 2];
-            if (kind == '=' || kind == '!') return true;
-            // lookbehind (?<=...) / (?<!...) — handled by the wrapper post-filter
-            if (kind == '<' && i + 3 < pattern_len &&
-                (pattern[i + 3] == '=' || pattern[i + 3] == '!')) return true;
-        }
-    }
-    return false;
-}
-
-// Route a (preprocessed) pattern to the spec backtracking matcher only when it
-// uses features RE2 + post-filters cannot do correctly:
-//   - a backreference (\N or \k<name>) outside a character class;
-//   - a "hard" lookbehind (?<=…)/(?<!…) whose body contains a capture group,
-//     a backreference, a nested assertion, an alternation, or a variable-length
-//     quantifier. Pure fixed-length lookbehinds stay on the RE2/Tier-2b path.
-// Everything else stays on RE2 exactly as before.
-// Scan a lookahead body starting just after "(?=" / "(?!" for a capturing group.
-// `start` points at the first body char; returns true if a capturing "(" appears.
-static bool js_regex_lookahead_has_capture(const char* pattern, int pattern_len, int start) {
-    int depth = 1;
-    bool in_class = false;
-    for (int j = start; j < pattern_len && depth > 0; j++) {
-        char d = pattern[j];
-        if (d == '\\') { j++; continue; }
-        if (d == '[') { in_class = true; continue; }
-        if (d == ']' && in_class) { in_class = false; continue; }
-        if (in_class) continue;
-        if (d == '(') {
-            depth++;
-            if (j + 1 >= pattern_len || pattern[j + 1] != '?') return true; // capturing group
-        } else if (d == ')') depth--;
-    }
-    return false;
-}
-
+// Route patterns with JS-only matching semantics to the spec backtracker.
+// Every lookaround and backreference uses that engine so captures, retries,
+// and assertion position are evaluated by one implementation.
+// Direct RE2 retains patterns without assertions or backreferences, where its
+// capture layout is already ECMAScript-compatible after front-end normalization.
+// The scan is deliberately lexical: escaped delimiters and character classes
+// cannot make a pattern select the backtracking route accidentally.
+// This keeps routing independent of the validator and `/v` class rewriter.
 static bool js_regex_has_unescaped_anchor(const char* pattern, int pattern_len) {
     bool in_class = false;
     for (int i = 0; i < pattern_len; i++) {
@@ -16759,61 +16648,8 @@ static bool js_regex_has_unescaped_anchor(const char* pattern, int pattern_len) 
     return false;
 }
 
-static bool js_regex_has_nested_lookaround(const char* pattern, int pattern_len) {
-    if (pattern_len <= 0) return false;
-    JsRegexScratch<int> group_body_start_buf(pattern_len);
-    if (group_body_start_buf.count != pattern_len) {
-        log_error("js-regex nested-lookaround analysis: cannot retain group boundaries");
-        return true;
-    }
-    int* group_body_start = group_body_start_buf.slots;
-    bool in_class = false;
-    int group_depth = 0;
-    for (int i = 0; i < pattern_len; i++) {
-        char c = pattern[i];
-        if (c == '\\') {
-            if (i + 1 < pattern_len) i++;
-            continue;
-        }
-        if (c == '[') { in_class = true; continue; }
-        if (c == ']' && in_class) { in_class = false; continue; }
-        if (in_class) continue;
-        if (c == '(') {
-            bool is_lookaround = i + 2 < pattern_len && pattern[i + 1] == '?' &&
-                (pattern[i + 2] == '=' || pattern[i + 2] == '!' ||
-                 (pattern[i + 2] == '<' && i + 3 < pattern_len &&
-                  (pattern[i + 3] == '=' || pattern[i + 3] == '!')));
-            if (is_lookaround && group_depth > 0 &&
-                    i > group_body_start[group_depth - 1]) {
-                // RE2 post-filters only see the outer assertion; a nested
-                // lookaround after assertion content must be evaluated with
-                // its enclosing assertion so alternation stays coupled.
-                return true;
-            }
-            if (group_depth >= group_body_start_buf.count) {
-                log_error("js-regex nested-lookaround analysis: group depth exceeds capacity");
-                return true;
-            }
-            group_body_start[group_depth] = i + 1;
-            if (i + 2 < pattern_len && pattern[i + 1] == '?') {
-                if (pattern[i + 2] == '=' || pattern[i + 2] == '!') {
-                    group_body_start[group_depth] = i + 3;
-                } else if (pattern[i + 2] == '<' && i + 3 < pattern_len &&
-                           (pattern[i + 3] == '=' || pattern[i + 3] == '!')) {
-                    group_body_start[group_depth] = i + 4;
-                }
-            }
-            group_depth++;
-        } else if (c == ')' && group_depth > 0) {
-            group_depth--;
-        }
-    }
-    return false;
-}
-
 static bool js_regex_needs_backtrack(const char* pattern, int pattern_len, bool multiline) {
     if (multiline && js_regex_has_unescaped_anchor(pattern, pattern_len)) return true;
-    if (js_regex_has_nested_lookaround(pattern, pattern_len)) return true;
 
     if (pattern_len <= 0) return false;
     struct JsRegexQuantifierFacts {
@@ -16847,11 +16683,10 @@ static bool js_regex_needs_backtrack(const char* pattern, int pattern_len, bool 
         if (c == '[') { in_class = true; continue; }
         if (c == ']' && in_class) { in_class = false; continue; }
         if (in_class) continue;
-        // lookahead containing a capture group: RE2 cannot surface those captures.
         if (c == '(' && i + 2 < pattern_len && pattern[i + 1] == '?' &&
-            (pattern[i + 2] == '=' || pattern[i + 2] == '!')) {
-            if (js_regex_lookahead_has_capture(pattern, pattern_len, i + 3)) return true;
-        }
+            (pattern[i + 2] == '=' || pattern[i + 2] == '!' ||
+             (pattern[i + 2] == '<' && i + 3 < pattern_len &&
+              (pattern[i + 3] == '=' || pattern[i + 3] == '!')))) return true;
         if (c == '(') {
             if (grp_depth >= group_facts_buf.count) {
                 log_error("js-regex backtrack analysis: group depth exceeds capacity");
@@ -16875,36 +16710,6 @@ static bool js_regex_needs_backtrack(const char* pattern, int pattern_len, bool 
             // (skip the '?' of a (?: / (?= / (?<name> group marker via the guard).
             if (c == '?') group_facts[grp_depth - 1].optional = true;
             else if (c == '*' || c == '+') group_facts[grp_depth - 1].unbounded = true;
-        }
-        if (c == '(' && i + 3 < pattern_len && pattern[i + 1] == '?' &&
-            pattern[i + 2] == '<' && (pattern[i + 3] == '=' || pattern[i + 3] == '!')) {
-            // scan the lookbehind body for "hard" features
-            int depth = 1;
-            int j = i + 4;
-            bool hard = false;
-            bool body_class = false;
-            for (; j < pattern_len && depth > 0; j++) {
-                char d = pattern[j];
-                if (d == '\\') {
-                    if (j + 1 < pattern_len) {
-                        char dn = pattern[j + 1];
-                        // backref, or \b/\B word boundary (the RE2 lookbehind slice
-                        // cannot see the boundary char at the right edge).
-                        if (!body_class && ((dn >= '1' && dn <= '9') || dn == 'k' ||
-                                            dn == 'b' || dn == 'B')) hard = true;
-                    }
-                    j++;
-                    continue;
-                }
-                if (d == '[') { body_class = true; continue; }
-                if (d == ']' && body_class) { body_class = false; continue; }
-                if (body_class) continue;
-                if (d == '(') { hard = true; depth++; continue; }
-                if (d == ')') { depth--; continue; }
-                if (d == '|' || d == '*' || d == '+') hard = true;
-                else if (d == '{' || d == '?') hard = true; // variable / optional length
-            }
-            if (hard) return true;
         }
     }
     return false;
@@ -17761,7 +17566,6 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
                 JsRegexData* rd = (JsRegexData*)pool_calloc(js_input->pool, sizeof(JsRegexData));
                 rd->re2 = pe.re2;
                 rd->re2_permanent_owned = true;
-                rd->wrapper = nullptr;
                 rd->global = pe.global;
                 rd->ignore_case = pe.ignore_case;
                 rd->multiline = pe.multiline;
@@ -17866,8 +17670,14 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     // Decide routing to the spec backtracking matcher early — before the RE2
     // preprocessing drops forward backreferences and rewrites named groups — so
     // those constructs survive into the pattern the backtracker compiles.
+    // Assertions and backreferences have one semantic engine. Keeping a
+    // second route for simple forms would duplicate capture and retry
+    // behavior that the backtracker already implements.  The Unicode-sets
+    // class rewriter runs before this decision, so both paths consume its
+    // normalized character classes.
     bool route_to_bt = (special_property_kind == 0) &&
-        js_regex_needs_backtrack(effective_pattern, effective_pattern_len, compile_info.multiline);
+        js_regex_needs_backtrack(effective_pattern, effective_pattern_len,
+            compile_info.multiline);
     const char* bt_pattern = effective_pattern;
     int bt_pattern_len = effective_pattern_len;
 
@@ -17948,8 +17758,8 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
                 continue;
             }
             bool legacy_non_unicode = !compile_info.unicode && !compile_info.unicode_sets;
-            // Handle backreferences \1-\9: passed through for js_regex_wrapper to handle
-            // The wrapper converts them to capture groups with post-filter equality checks
+            // Preserve backreferences for the spec backtracker to evaluate.
+            // Direct RE2 is selected only after the routing scan rules them out.
             // Annex B: \N is an identity escape if N > total capture groups
             if (next == '0' && bracket_depth == 0 && legacy_non_unicode) {
                 i = js_regex_append_legacy_octal_escape(processed_pattern,
@@ -18326,10 +18136,10 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
                       pattern_len, pattern);
         }
     }
-    // 3b. Lookbehind (?<=...) / (?<!...) is handled by the wrapper post-filter
-    //     (js_regex_needs_wrapper returns true for lookbehind). The legacy strip
-    //     now only guards the direct-RE2 fallback below, for the rare case where
-    //     the wrapper is unavailable or fails to compile.
+    // 3b. Lookbehind and all other assertions compile through the backtracker.
+    //     The direct-RE2 conversion below runs only for patterns it does not own.
+    //     Keeping this boundary explicit prevents RE2 preprocessing from changing
+    //     a backtracking pattern's capture or assertion semantics.
     // 4. Convert JS named capture groups (?<name>...) to RE2 syntax (?P<name>...)
     //    Must NOT convert lookbehind (?<=...) or (?<!...)
     if (!bt) {
@@ -18406,68 +18216,29 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     bool literal_fast = js_regex_try_make_literal_fast(pattern, pattern_len, flags, flags_len,
                                                        &literal_buf, &literal_len);
 
-    // compile RE2 pattern (use preprocessed version)
-    // Try wrapper compilation first (handles lookaheads, backreferences with post-filters)
-    JsRegexCompiled* wrapper = nullptr;
+    // Assertions and backreferences always compile through the backtracker.
     re2::RE2* re2 = nullptr;
     if (!bt && !literal_fast && special_property_kind == 0) {
-        if (js_regex_needs_wrapper(processed_pattern.c_str(), (int)processed_pattern.size())) {
-            wrapper = js_regex_wrapper_compile(processed_pattern.c_str(),
-                                                         (int)processed_pattern.size(),
-                                                         flags, flags_len, &opts);
-            if (wrapper) {
-                re2 = wrapper->re2; // use the wrapper's compiled RE2
-            }
-        }
-        if (!re2) {
-            // Direct RE2 path for patterns without wrapper-only features. This avoids
-            // the wrapper's heavyweight scans for generated Unicode property tests.
-            // Safety net: if a lookbehind survived to here (wrapper unavailable or
-            // failed), strip it so RE2 still compiles (legacy approximate behavior)
-            // rather than throwing a SyntaxError.
-            for (const char* lb_prefix : {"(?<=", "(?<!"}) {
-                size_t lpos = 0;
-                while ((lpos = processed_pattern.find(lb_prefix, lpos)) != std::string::npos) {
-                    if (lpos > 0 && processed_pattern[lpos - 1] == '\\') { lpos++; continue; }
-                    int depth = 1;
-                    size_t end = lpos + strlen(lb_prefix);
-                    while (end < processed_pattern.size() && depth > 0) {
-                        if (processed_pattern[end] == '\\' && end + 1 < processed_pattern.size()) {
-                            end += 2; continue;
-                        }
-                        if (processed_pattern[end] == '(') depth++;
-                        else if (processed_pattern[end] == ')') depth--;
-                        end++;
-                    }
-                    log_debug("js regex: stripping lookbehind %s (direct RE2 fallback)", lb_prefix);
-                    processed_pattern.erase(lpos, end - lpos);
-                }
-            }
-            re2 = new re2::RE2(processed_pattern, opts);
+        re2 = new re2::RE2(processed_pattern, opts);
+        if (!re2->ok()) {
+            delete re2;
+            re2 = new re2::RE2(re2::StringPiece(pattern, pattern_len), opts);
             if (!re2->ok()) {
-                // fall back to original pattern if preprocessing caused errors
-                std::string err1 = re2->error();
+                std::string error = re2->error();
+                log_error("js regex compile error: /%.*s/%.*s: %s",
+                    pattern_len, pattern, flags_len, flags, error.c_str());
                 delete re2;
-                re2 = new re2::RE2(re2::StringPiece(pattern, pattern_len), opts);
-                if (!re2->ok()) {
-                    std::string err2 = re2->error();
-                    log_error("js regex compile error: /%.*s/%.*s: %s",
-                        pattern_len, pattern, flags_len, flags, err2.c_str());
-                    delete re2;
-                    // throw SyntaxError per ES spec §22.2.3.2.1
-                    char msg[512];
-                    snprintf(msg, sizeof(msg), "Invalid regular expression: /%.*s/%.*s: %s",
-                        pattern_len, pattern, flags_len, flags, err2.c_str());
-                    Item m = js_name_item(msg);
-                    return js_throw_syntax_error(m);
-                }
+                char msg[512];
+                snprintf(msg, sizeof(msg), "Invalid regular expression: /%.*s/%.*s: %s",
+                    pattern_len, pattern, flags_len, flags, error.c_str());
+                Item m = js_name_item(msg, strlen(msg));
+                return js_throw_syntax_error(m);
             }
         }
     }
     // store regex data in a pool-allocated struct
     JsRegexData* rd = (JsRegexData*)pool_calloc(js_input->pool, sizeof(JsRegexData));
     rd->re2 = re2;
-    rd->wrapper = wrapper;
     rd->bt = bt;
     rd->global = global;
     rd->ignore_case = !opts.case_sensitive();
@@ -18506,12 +18277,10 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     Rooted<Item> regex_obj_root(regex_roots,
         js_regex_build_object(rd, true, pattern, pattern_len, canonical_flags,
             flags_len, dot_all, compile_info.unicode_sets));
-    // Store in permanent RE2 cache if no complex wrapper — survives batch resets for cross-test reuse.
-    // Wrapper metadata owns its RE2 engine, so only direct RE2 compilations
-    // may enter this cache. This keeps one unambiguous native owner.
+    // Store direct RE2 matchers in the permanent cache across batch resets.
     if (permanent_cache_requested && !bt && special_property_kind == 0 && !literal_fast && named_aliases.count() == 0 &&
-        !needs_utf16_subject && !wrapper) {
-        re2::RE2* perm_re2 = re2; // re2 points to either wrapper->re2 or directly-compiled re2
+        !needs_utf16_subject) {
+        re2::RE2* perm_re2 = re2;
         char* perm_flags = new char[flags_len + 1];
         memcpy(perm_flags, canonical_flags, flags_len + 1);
         g_re2_permanent_cache[perm_key] = {perm_re2, global, !opts.case_sensitive(), multiline, sticky,
@@ -19095,15 +18864,7 @@ static void js_regex_attach_indices(Item result, JsRegexData* rd,
             for (auto& pair : named) {
                 int re2_idx = pair.second;
                 int idx = re2_idx;
-                if (rd->wrapper && rd->wrapper->group_remap) {
-                    for (int g = 0; g < rd->wrapper->group_remap_count; g++) {
-                        if (rd->wrapper->group_remap[g] == re2_idx) {
-                            idx = g;
-                            break;
-                        }
-                    }
-                }
-                val_root.set(make_js_undefined());
+                                val_root.set(make_js_undefined());
                 if (idx >= 0 && idx < num_groups) {
                     val_root.set(js_regex_make_indices_pair(input, input_len,
                         matches[idx], code_unit_indices));
@@ -19291,18 +19052,9 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
             groups_obj_root.set(js_object_create(ItemNull));
             for (auto& pair : named) {
                 int re2_idx = pair.second;
-                // when wrapper is active, matches[] uses original JS indices (already remapped)
-                // RE2's NamedCapturingGroups returns RE2-internal indices; reverse-map needed
+                // Direct RE2 reports its native capture indices on this path.
+                // Assertion patterns use the backtracker and do not enter this loop.
                 int idx = re2_idx;
-                if (rd->wrapper && rd->wrapper->group_remap) {
-                    // reverse lookup: find original JS index that maps to this RE2 index
-                    for (int g = 0; g < rd->wrapper->group_remap_count; g++) {
-                        if (rd->wrapper->group_remap[g] == re2_idx) {
-                            idx = g;
-                            break;
-                        }
-                    }
-                }
                 val_root.set(make_js_undefined());
                 if (idx < num_groups && matches[idx].data()) {
                     int mlen = (int)matches[idx].size();
@@ -20996,8 +20748,6 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                 }
                 if (from < 0) { from += len; if (from < 0) from = 0; }
                 if (from >= len) return (Item){.item = i2it(-1)};
-                int raw_index = js_typed_array_raw_index_of(obj, search_val, from, len, false, false);
-                if (raw_index >= -1) return (Item){.item = i2it(raw_index)};
                 // Js54 P4: spec §23.2.3.18 step 11.a uses HasProperty, which is
                 // false for indices >= current TypedArrayLength or when the
                 // buffer is detached/OOB. Skip those positions so e.g.
@@ -21025,8 +20775,6 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                 }
                 if (from < 0) from += len;
                 if (from < 0) return (Item){.item = i2it(-1)};
-                int raw_index = js_typed_array_raw_index_of(obj, search_val, from, len, true, false);
-                if (raw_index >= -1) return (Item){.item = i2it(raw_index)};
                 // Js54 P4: same HasProperty-skip rule as indexOf — spec §23.2.3.20
                 // step 9.a uses HasProperty so detached/OOB indices are skipped.
                 int found = js_typed_array_scan_search(obj, search_val, from, len,
@@ -21047,8 +20795,6 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                 }
                 if (from < 0) { from += len; if (from < 0) from = 0; }
                 if (from >= len) return (Item){.item = ITEM_FALSE};
-                int raw_index = js_typed_array_raw_index_of(obj, search_val, from, len, false, true);
-                if (raw_index >= -1) return (Item){.item = raw_index >= 0 ? ITEM_TRUE : ITEM_FALSE};
                 int found = js_typed_array_scan_search(obj, search_val, from, len,
                     false, true, false);
                 return (Item){.item = found >= 0 ? ITEM_TRUE : ITEM_FALSE};
@@ -21244,7 +20990,6 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                 if (target + count > len) count = len - target;
                 if (start + count > len) count = len - start;
                 if (count <= 0) return obj;
-                if (js_typed_array_raw_copy_within(obj, target, start, count)) return obj;
                 int elem_size = js_typed_array_element_size(ta->element_type);
                 void* data = js_typed_array_prepare_write_ptr(obj);
                 if (!data) {
@@ -21883,12 +21628,7 @@ static Item js_build_groups_object(JsRegexData* rd, re2::StringPiece* matches, i
     for (auto& pair : named) {
         int re2_idx = pair.second;
         int idx = re2_idx;
-        if (rd->wrapper && rd->wrapper->group_remap) {
-            for (int g = 0; g < rd->wrapper->group_remap_count; g++) {
-                if (rd->wrapper->group_remap[g] == re2_idx) { idx = g; break; }
-            }
-        }
-        Item val = make_js_undefined();
+                Item val = make_js_undefined();
         if (idx < num_groups && matches[idx].data()) {
             int mlen = (int)matches[idx].size();
             val = (Item){.item = s2it(heap_strcpy((char*)matches[idx].data(), mlen))};
@@ -25768,11 +25508,6 @@ static Item js_array_generic_reduce_with_object(Item object, Item callback_objec
     return accumulator_root.get();
 }
 
-JS_FORWARD_STATIC_ITEM(js_array_generic_reduce,
-    (Item object, Item* args, int argc, bool from_right, uint64_t* result_home),
-    js_array_generic_reduce_with_object,
-    (object, object, args, argc, from_right, result_home))
-
 static Item js_array_generic_find_last(Item object, Item* args, int argc, bool return_index) {
     int64_t len = 0;
     Item len_key;
@@ -25827,342 +25562,15 @@ static Item js_array_intrinsic_algorithm_impl(Item arr,
         Item operation_receiver,
         JsIndexedIntrinsicOp operation, Item* args, int argc,
         uint64_t* result_home) {
-    int splice_rooted_argc = operation == JS_ARRAY_INTRINSIC_SPLICE &&
-        args && argc > 0 ? argc : 0;
-    RootFrame splice_roots(operation == JS_ARRAY_INTRINSIC_SPLICE
-        ? (size_t)(4 + splice_rooted_argc) : 0);
-    Rooted<Item> splice_arr_root(splice_roots, arr);
-    Rooted<Item> splice_receiver_root(splice_roots, operation_receiver);
-    Rooted<Item> splice_deleted_root(splice_roots, ItemNull);
-    Rooted<Item> splice_source_root(splice_roots, ItemNull);
-    uint64_t** splice_arg_roots = splice_rooted_argc > 0
-        ? LAMBDA_ALLOCA(splice_rooted_argc, uint64_t*) : NULL;
-    for (int i = 0; i < splice_rooted_argc; i++) {
-        splice_arg_roots[i] = splice_roots.take_slot();
-        if (splice_arg_roots[i]) *splice_arg_roots[i] = args[i].item;
-    }
-    if (operation == JS_ARRAY_INTRINSIC_SPLICE) {
-        // Frozen/length checks can allocate before the splice branch; root the
-        // receiver before those checks or the later dense pointer may already
-        // refer to a reclaimed items buffer (D5.4.3).
-        if (!splice_roots.valid()) return ItemError;
-        arr = splice_arr_root.get();
-        operation_receiver = splice_receiver_root.get();
-    }
-    auto splice_arg = [&](int index) -> Item {
-        return (Item){.item = splice_arg_roots[index]
-            ? *splice_arg_roots[index] : args[index].item};
-    };
-    // D6.2.2v2: array semantics are selected by the immutable target policy;
-    // `.name`, source spelling, and receiver properties are not selectors.
+    // Array methods share the property-kernel implementations. The remaining
+    // cases below are the operations whose receiver or result policy is not
+    // expressible by that generic dispatcher (D8.4.1v2).
     TypeId arr_type = get_type_id(arr);
-    // D6.2.2v2: carry the original operation receiver explicitly because a
-    // mutable ambient cell let nested Array calls replace callback arg 3.
-    Item cb_this = operation_receiver;
-
-    // J39-7: mutating Array.prototype methods on a frozen real Array must throw
-    // TypeError per ES spec — Set(O, "length", ...) fails on frozen receiver.
-    // Same applies if length is explicitly non-writable.
-    // Only ops that *unconditionally* Set length: push/pop/shift/unshift/splice.
-    // sort/reverse/fill/copyWithin are no-ops on small/empty arrays so do NOT
-    // throw eagerly here (spec only fails when an actual write occurs).
-    if (arr_type == LMD_TYPE_ARRAY) {
-        bool is_mut = JS_OP_HAS(operation, JS_OP_FLAG_UNCONDITIONAL_LENGTH_WRITE);
-        if (is_mut) {
-            if (it2b(js_object_is_frozen(arr))) {
-                return js_throw_type_error("Cannot modify frozen array");
-            }
-            if (js_array_length_is_non_writable(arr)) {
-                return js_throw_type_error("Cannot assign to read only property 'length' of array");
-            }
-        }
-    }
-
-    // v37: ES spec — most Array.prototype methods are intentionally generic
-    // They work on any object with a length property (array-like objects).
-    // Convert array-like objects to temp arrays for non-mutating methods.
-    if (arr_type != LMD_TYPE_ARRAY && (arr_type == LMD_TYPE_MAP || arr_type == LMD_TYPE_ELEMENT)) {
-        if (operation == JS_ARRAY_INTRINSIC_FILL) {
-            return js_array_generic_fill(arr, args, argc);
-        }
-        if (operation == JS_ARRAY_INTRINSIC_COPY_WITHIN) {
-            return js_array_generic_copy_within(arr, args, argc);
-        }
-        if (operation == JS_ARRAY_INTRINSIC_REVERSE) {
-            return js_array_generic_reverse(arr);
-        }
-        if (operation == JS_ARRAY_INTRINSIC_SLICE) {
-            return js_array_generic_slice(arr, args, argc);
-        }
-        bool is_generic = JS_OP_HAS(operation, JS_OP_FLAG_ARRAYLIKE_GENERIC);
-        if (is_generic) {
-            // Note: slice/map/filter length validation per ArraySpeciesCreate is done
-            // up-front by the typed intrinsic body before reaching here.
-            JS_ASSIGN_OR_RETURN_INTO(arr, js_array_like_to_array(arr));
-            arr_type = get_type_id(arr);
-        }
-    }
-
-    // callback/search operations return through shared kernels here; the
-    // former per-operation bodies below were duplicate, unreachable lanes.
-    if (operation == JS_ARRAY_INTRINSIC_INDEX_OF) {
-        return js_array_generic_index_of(arr, args, argc, false);
-    }
-    if (operation == JS_ARRAY_INTRINSIC_LAST_INDEX_OF) {
-        return js_array_generic_index_of(arr, args, argc, true);
-    }
-    if (operation == JS_ARRAY_INTRINSIC_INCLUDES) {
-        return js_array_generic_includes(arr, args, argc);
-    }
-    if (operation == JS_ARRAY_INTRINSIC_FOR_EACH) {
-        return js_array_generic_iterative_callback_with_object(
-            arr, arr, args, argc, JS_ARRAY_ITER_FOR_EACH);
-    }
-    if (operation == JS_ARRAY_INTRINSIC_MAP) {
-        return js_array_generic_iterative_callback_with_object(
-            arr, arr, args, argc, JS_ARRAY_ITER_MAP);
-    }
-    if (operation == JS_ARRAY_INTRINSIC_FILTER) {
-        return js_array_generic_iterative_callback_with_object(
-            arr, arr, args, argc, JS_ARRAY_ITER_FILTER);
-    }
-    if (operation == JS_ARRAY_INTRINSIC_SOME) {
-        return js_array_generic_iterative_callback_with_object(
-            arr, arr, args, argc, JS_ARRAY_ITER_SOME);
-    }
-    if (operation == JS_ARRAY_INTRINSIC_EVERY) {
-        return js_array_generic_iterative_callback_with_object(
-            arr, arr, args, argc, JS_ARRAY_ITER_EVERY);
-    }
-    if (operation == JS_ARRAY_INTRINSIC_REDUCE) {
-        return js_array_generic_reduce(arr, args, argc, false, result_home);
-    }
-    if (operation == JS_ARRAY_INTRINSIC_REDUCE_RIGHT) {
-        return js_array_generic_reduce(arr, args, argc, true, result_home);
-    }
-
-    // push - mutating
-    if (operation == JS_ARRAY_INTRINSIC_PUSH) {
-        // Generic object push (ES spec §23.1.3.22): works on any object with length
-        TypeId cb_type = get_type_id(cb_this);
-        if (cb_type == LMD_TYPE_MAP && arr_type == LMD_TYPE_ARRAY) {
-            // Get length from the original object
-            Item len_key = js_name_item("length", 6);
-            JS_ASSIGN_OR_RETURN(len_val, js_get_key_default(cb_this, len_key));
-            JS_ASSIGN_OR_RETURN(len_num, js_to_number(len_val));
-            int64_t length = (int64_t)js_get_number(len_num);
-            if (length < 0 || get_type_id(len_val) == LMD_TYPE_UNDEFINED ||
-                get_type_id(len_val) == LMD_TYPE_NULL) length = 0;
-            for (int i = 0; i < argc; i++) {
-                Item idx_key = js_property_index_key(length + i);
-                JS_ASSIGN_OR_RETURN(set_result, js_set_key_default(cb_this, idx_key, args[i]));
-            }
-            int64_t new_len = length + argc;
-            JS_ASSIGN_OR_RETURN(set_length, js_set_key_default(cb_this, len_key, (Item){.item = i2it(new_len)}));
-            return (Item){.item = i2it(new_len)};
-        }
-        if (arr_type != LMD_TYPE_ARRAY) return (Item){.item = i2it(0)};
-        // J39-7: spec-compliant push — Set(O, ToString(len+i), v) for each
-        // item, then Set(O, "length", len+argc) with Throw=true. Walks
-        // Array.prototype chain so inherited accessors fire (ES §23.1.3.21).
-        // Final length Set throws TypeError if frozen/non-writable length even in
-        // sloppy mode (Set with Throw=true).
-        int64_t length = arr.array->length;
-        int64_t new_len = length + (int64_t)argc;
-        if (argc > 0 &&
-            (new_len > 0xFFFFFFFFLL ||
-             js_array_should_store_sparse_for_index(arr.array, length))) {
-            for (int i = 0; i < argc; i++) {
-                Item idx_key = js_array_method_property_key(length + (int64_t)i);
-                JS_ASSIGN_OR_RETURN(set_result, js_set_key_strict_policy(arr, idx_key, args[i]));
-            }
-            Item len_key = js_name_item("length", 6);
-            JS_ASSIGN_OR_RETURN(set_length, js_elements_set_length_throw_status(arr, len_key, new_len));
-            return (Item){.item = i2it(arr.array->length)};
-        }
-        Item arr_proto = ItemNull;
-        bool proto_resolved = false;
-        for (int i = 0; i < argc; i++) {
-            int blen = 0;
-            const char* buf = js_property_index_chars(length + i, &blen);
-            if (!buf) return ItemError;
-            // Walk Array.prototype chain for inherited accessor at this index.
-            // Own companion-map accessors are handled by js_elements_set's caller path.
-            JsAccessorPair* ap = NULL;
-            if (!proto_resolved) {
-                arr_proto = js_get_prototype_of(arr);
-                proto_resolved = true;
-            }
-            if (arr_proto.item != ItemNull.item && get_type_id(arr_proto) == LMD_TYPE_MAP) {
-                ap = js_find_accessor_pair_inheritable(arr_proto, buf, blen);
-            }
-            if (ap) {
-                if (ap->setter.item != ItemNull.item &&
-                    js_is_callable(ap->setter)) {
-                    Item set_args[1] = { args[i] };
-                    JS_ASSIGN_OR_RETURN(set_result, js_call_function(ap->setter, arr, set_args, 1));
-                } else {
-                    // Accessor with no setter: Set with Throw=true → TypeError.
-                    return js_throw_type_error("Cannot set property which has only a getter");
-                }
-            } else {
-                // No inherited accessor — direct slot write (avoid re-walking proto).
-                js_array_push_item_direct(arr.array, args[i]);
-            }
-        }
-        // Pre-check length writability after setter side effects (setter may
-        // have frozen the array or made length non-writable).
-        if (js_array_length_is_non_writable(arr)) {
-            return js_throw_type_error("Cannot assign to read only property 'length' of array");
-        }
-        // Length is implicitly correct after js_array_push_item_direct calls;
-        // when accessors fired, length was NOT bumped — that matches spec
-        // (inherited setter does not create own slot). Set length explicitly
-        // only if accessor branch was taken to ensure length reflects len+argc.
-        // Actually: per spec, length is unconditionally set to len+argc
-        // regardless of whether setters wrote own slots.
-        if (arr.array->length != new_len) {
-            Item len_key = js_name_item("length", 6);
-            JS_ASSIGN_OR_RETURN(set_length, js_set_key_default(arr, len_key, (Item){.item = i2it(new_len)}));
-        }
-        return (Item){.item = i2it(arr.array->length)};
-    }
-    // pop - mutating
-    if (operation == JS_ARRAY_INTRINSIC_POP) {
-        // Generic object pop (ES spec §23.1.3.21)
-        TypeId cb_type = get_type_id(cb_this);
-        if (cb_type == LMD_TYPE_MAP && arr_type == LMD_TYPE_ARRAY) {
-            Item len_key = js_name_item("length", 6);
-            JS_ASSIGN_OR_RETURN(len_val, js_get_key_default(cb_this, len_key));
-            JS_ASSIGN_OR_RETURN(len_num, js_to_number(len_val));
-            int64_t length = (int64_t)js_get_number(len_num);
-            if (length <= 0 || get_type_id(len_val) == LMD_TYPE_UNDEFINED) {
-                JS_ASSIGN_OR_RETURN(set_length, js_set_key_default(cb_this, len_key, (Item){.item = i2it(0)}));
-                return make_js_undefined();
-            }
-            char buf[32];
-            snprintf(buf, sizeof(buf), "%lld", (long long)(length - 1));
-            Item idx_key = js_name_item(buf, strlen(buf));
-            JS_ASSIGN_OR_RETURN(result, js_get_key_default(cb_this, idx_key));
-            // Delete the property and decrement length
-            JS_ASSIGN_OR_RETURN(delete_result, js_delete_property(cb_this, idx_key));
-            JS_ASSIGN_OR_RETURN(set_length, js_set_key_default(cb_this, len_key,
-                (Item){.item = i2it((int)(length - 1))}));
-            return result;
-        }
-        if (arr_type != LMD_TYPE_ARRAY) return make_js_undefined();
-        // J39-7: spec-compliant pop (ES §23.1.3.21):
-        //   if len == 0: Set(O, "length", 0, true) → throws if non-writable.
-        //   else: Get(O, ToString(len-1)) — fires inherited getter (may freeze
-        //     array). Then Set(O, "length", len-1, true) — must throw if frozen.
-        if (arr.array->length == 0) {
-            if (js_array_length_is_non_writable(arr)) {
-                return js_throw_type_error("Cannot assign to read only property 'length' of array");
-            }
-            return make_js_undefined();
-        }
-        {
-            Array* a = arr.array;
-            int64_t idx = a->length - 1;
-            Item idx_key = js_property_index_key(idx);
-            JS_ASSIGN_OR_RETURN(result, js_get_key_default(arr, idx_key));
-            // After get side effects, length may now be non-writable.
-            if (js_array_length_is_non_writable(arr)) {
-                return js_throw_type_error("Cannot assign to read only property 'length' of array");
-            }
-            // Array.prototype.pop must delete the former last own property;
-            // only decrementing the dense length leaves a sparse last element
-            // observable after pop (D6.2.2v2).
-            JS_ASSIGN_OR_RETURN(delete_result, js_delete_property_or_throw_status(
-                arr, idx_key));
-            JS_ASSIGN_OR_RETURN(set_length, js_elements_set_length_throw_status(
-                arr, js_name_item("length", 6), idx));
-            return result;
-        }
-    }
-    // item(index) - NodeList/HTMLCollection style index access
-    if (operation == JS_ARRAY_INTRINSIC_ITEM) {
-        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return ItemNull;
-        JS_ASSIGN_OR_RETURN(index_num, js_to_number(args[0]));
-        int idx = (int)js_get_number(index_num);
-        Array* a = arr.array;
-        if (idx >= 0 && idx < a->length) {
-            Item val = js_array_element(arr, idx);
-            if (get_type_id(val) == LMD_TYPE_UNDEFINED || val.item == ITEM_JS_UNDEFINED) return ItemNull;
-            return val;
-        }
-        return ItemNull;
-    }
-    // join - converts all elements to strings and joins them
-    if (operation == JS_ARRAY_INTRINSIC_JOIN) {
-        return js_array_like_join(arr, args, argc, false);
-    }
-    // reverse - in-place reversal (JS spec: mutates and returns same array)
-    if (operation == JS_ARRAY_INTRINSIC_REVERSE) {
-        if (arr_type != LMD_TYPE_ARRAY) return arr;
-        return js_array_generic_reverse(arr);
-    }
-    // slice - returns new Array with elements from start to end
-    if (operation == JS_ARRAY_INTRINSIC_SLICE) {
-        if (arr_type != LMD_TYPE_ARRAY) return arr;
-        Array* src = arr.array;
-        int64_t len = src->length;
-        int64_t start = 0;
-        if (argc > 0) {
-            JS_ASSIGN_OR_RETURN(start_status, js_array_relative_index_status(args[0], len, 0, &start));
-        }
-        int64_t end = len;
-        if (argc > 1) {
-            JS_ASSIGN_OR_RETURN(end_status, js_array_relative_index_status(args[1], len, len, &end));
-        }
-        int64_t count = end > start ? end - start : 0;
-        JS_ASSIGN_OR_RETURN(result, js_array_species_create(arr, count));
-
-        bool check_proto = js_array_proto_index_guard_is_dirty(arr);
-        int64_t dense_end = end;
-        if (dense_end > src->capacity) dense_end = src->capacity;
-        if (dense_end > src->length) dense_end = src->length;
-        for (int64_t idx = start; idx < dense_end; idx++) {
-            Item elem = ItemNull;
-            if (js_array_has_element(arr, lam::gc_borrow(src), idx, &elem, check_proto)) {
-                JS_ASSIGN_OR_RETURN(create_result, js_create_data_property_or_throw(result, idx - start, elem));
-            }
-        }
-        if (js_array_has_props(src)) {
-            Map* pm = js_array_props(src);
-            TypeMap* tm = pm && pm->type ? (TypeMap*)pm->type : NULL;
-            for (ShapeEntry* se = tm ? tm->shape : NULL; se; se = se->next) {
-                if (!se->name) continue;
-                int64_t sparse_idx = -1;
-                if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &sparse_idx)) continue;
-                if (sparse_idx < start || sparse_idx >= end || sparse_idx < dense_end) continue;
-                if (jspd_is_deleted(se)) continue;
-                Item sparse_val = _map_read_field(se, pm->data);
-                if (sparse_val.item == JS_DELETED_SENTINEL_VAL) continue;
-                if (jspd_is_accessor(se)) {
-                    Item sparse_key = js_name_item(se->name->str, (int)se->name->length);
-                    JS_ASSIGN_OR_RETURN_INTO(sparse_val, js_get_key_default(arr, sparse_key));
-                }
-                JS_ASSIGN_OR_RETURN(create_result, js_create_data_property_or_throw(result, sparse_idx - start,
-                    sparse_val));
-            }
-            SparseArrayMap* sm = js_array_sparse_from_map(pm);
-            if (sm && sm->sparse_indices) {
-                size_t iter = 0;
-                void* item = NULL;
-                while (hashmap_iter(sm->sparse_indices, &iter, &item)) {
-                    JsArraySparseHashEntry* entry = (JsArraySparseHashEntry*)item;
-                    int64_t sparse_idx = entry->index;
-                    if (sparse_idx < start || sparse_idx >= end || sparse_idx < dense_end) continue;
-                    if (entry->value.item == JS_DELETED_SENTINEL_VAL) continue;
-                    JS_ASSIGN_OR_RETURN(create_result, js_create_data_property_or_throw(result,
-                        sparse_idx - start, entry->value));
-                }
-            }
-        }
-        Item len_key = js_name_item("length", 6);
-        JS_ASSIGN_OR_RETURN(set_length, js_set_key_default(result, len_key, (Item){.item = i2it(count)}));
-        return result;
+    Item callback_receiver = operation_receiver;
+    Item generic_result = ItemNull;
+    if (js_array_generic_dispatch(arr, callback_receiver, operation, args, argc,
+            result_home, JS_ARRAY_GENERIC_MAP, &generic_result)) {
+        return generic_result;
     }
     // concat - returns new array that is the concatenation
     if (operation == JS_ARRAY_INTRINSIC_CONCAT) {
@@ -26262,299 +25670,42 @@ static Item js_array_intrinsic_algorithm_impl(Item arr,
     if (operation == JS_ARRAY_INTRINSIC_FIND) {
         if (arr_type != LMD_TYPE_ARRAY) return make_js_undefined();
         if (argc < 1 || !js_is_callable(args[0])) return js_throw_not_callable("callback");
-        return js_array_find_predicate(arr, args, argc, cb_this, false, false);
+        return js_array_find_predicate(arr, args, argc, callback_receiver, false, false);
     }
     // findIndex
     if (operation == JS_ARRAY_INTRINSIC_FIND_INDEX) {
         if (arr_type != LMD_TYPE_ARRAY) return (Item){.item = i2it(-1)};
         if (argc < 1 || !js_is_callable(args[0])) return js_throw_not_callable("callback");
-        return js_array_find_predicate(arr, args, argc, cb_this, false, true);
+        return js_array_find_predicate(arr, args, argc, callback_receiver, false, true);
     }
     // findLast
     if (operation == JS_ARRAY_INTRINSIC_FIND_LAST) {
         if (arr_type != LMD_TYPE_ARRAY) return make_js_undefined();
         if (argc < 1 || !js_is_callable(args[0])) return js_throw_not_callable("callback");
-        return js_array_find_predicate(arr, args, argc, cb_this, true, false);
+        return js_array_find_predicate(arr, args, argc, callback_receiver, true, false);
     }
     // findLastIndex
     if (operation == JS_ARRAY_INTRINSIC_FIND_LAST_INDEX) {
         if (arr_type != LMD_TYPE_ARRAY) return (Item){.item = i2it(-1)};
         if (argc < 1 || !js_is_callable(args[0])) return js_throw_not_callable("callback");
-        return js_array_find_predicate(arr, args, argc, cb_this, true, true);
+        return js_array_find_predicate(arr, args, argc, callback_receiver, true, true);
     }
-    // sort
-    if (operation == JS_ARRAY_INTRINSIC_SORT) {
-        return js_array_generic_sort(arr, args, argc);
-    }
-    // flat
-    if (operation == JS_ARRAY_INTRINSIC_FLAT) {
-        return js_array_generic_flat(arr, args, argc);
-    }
-    // fill(value, start?, end?) — fill array elements in range with value
-    if (operation == JS_ARRAY_INTRINSIC_FILL) {
-        return js_array_generic_fill(arr, args, argc);
-    }
-    // copyWithin(target, start, end?) — copy elements within the array
-    if (operation == JS_ARRAY_INTRINSIC_COPY_WITHIN) {
-        if (arr_type != LMD_TYPE_ARRAY) return arr;
-        return js_array_generic_copy_within(arr, args, argc);
-    }
-    // splice(start, deleteCount, ...items) — mutating
-    if (operation == JS_ARRAY_INTRINSIC_SPLICE) {
-        // Generic splice on non-Array: ES §23.1.3.29 — Set(O, "length", ...) throws for getter-only
-        if (get_type_id(cb_this) == LMD_TYPE_MAP && arr_type == LMD_TYPE_ARRAY) {
-            // cb_this is the original non-Array Map; arr is the array-like conversion
-            Item len_key = js_name_item("length", 6);
-            JS_ASSIGN_OR_RETURN(len_val, js_get_key_default(cb_this, len_key));
-            JS_ASSIGN_OR_RETURN(old_len_num, js_to_number(len_val));
-            double old_len = js_get_number(old_len_num);
-            if (isnan(old_len) || old_len < 0) old_len = 0;
-            double start_d = 0;
-            if (argc > 0) {
-                JS_ASSIGN_OR_RETURN(start_status, js_array_to_integer_or_infinity_status(args[0], &start_d));
-            }
-            if (start_d < 0) { start_d = old_len + start_d; if (start_d < 0) start_d = 0; }
-            if (start_d > old_len) start_d = old_len;
-            double dc_d = old_len - start_d;
-            if (argc > 1) {
-                JS_ASSIGN_OR_RETURN(delete_status, js_array_to_integer_or_infinity_status(args[1], &dc_d));
-            }
-            if (dc_d < 0) dc_d = 0;
-            if (dc_d > old_len - start_d) dc_d = old_len - start_d;
-            int insert_count = argc > 2 ? argc - 2 : 0;
-            double new_len = old_len + (double)insert_count - dc_d;
-            JS_ASSIGN_OR_RETURN(set_length, js_elements_set_length_throw_status(cb_this, len_key, (int64_t)new_len));
-            return js_array_new(0);
-        }
-        if (arr_type != LMD_TYPE_ARRAY) return js_array_new(0);
-        // The optimized kernel mutates dense storage after several allocating
-        // descriptor calls; reload this rooted receiver before every raw-array
-        // phase so compaction cannot leave `a` stale (D5.4.3).
-        arr = splice_arr_root.get();
-        cb_this = splice_receiver_root.get();
+    // item(index) - NodeList/HTMLCollection style index access
+    if (operation == JS_ARRAY_INTRINSIC_ITEM) {
+        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return ItemNull;
+        JS_ASSIGN_OR_RETURN(index_num, js_to_number(args[0]));
+        int idx = (int)js_get_number(index_num);
         Array* a = arr.array;
-        double start_d = 0;
-        if (argc > 0) {
-            JS_ASSIGN_OR_RETURN(start_status, js_array_to_integer_or_infinity_status(
-                splice_arg(0), &start_d));
+        if (idx >= 0 && idx < a->length) {
+            Item val = js_array_element(arr, idx);
+            if (get_type_id(val) == LMD_TYPE_UNDEFINED || val.item == ITEM_JS_UNDEFINED) return ItemNull;
+            return val;
         }
-        int start;
-        if (start_d < 0) {
-            start_d = (double)a->length + start_d;
-            if (start_d < 0) start_d = 0;
-        }
-        if (start_d >= a->length) start = a->length;
-        else if (start_d < 0) start = 0;
-        else start = (int)start_d;
-        double dc_d = (double)(a->length - start);
-        if (argc > 1) {
-            JS_ASSIGN_OR_RETURN(delete_status, js_array_to_integer_or_infinity_status(
-                splice_arg(1), &dc_d));
-        }
-        int delete_count;
-        if (dc_d < 0) delete_count = 0;
-        else if (dc_d > (double)(a->length - start)) delete_count = a->length - start;
-        else delete_count = (int)dc_d;
-        int insert_count = argc > 2 ? argc - 2 : 0;
-        splice_deleted_root.set(js_array_species_create(splice_arr_root.get(), delete_count));
-        if (item_is_error(splice_deleted_root.get())) return splice_deleted_root.get();
-        arr = splice_arr_root.get();
-        a = arr.array;
-        Item len_key = js_name_item("length", 6);
-        for (int i = 0; i < delete_count; i++) {
-            int64_t src_idx = (int64_t)start + i;
-            Item from_key = js_array_index_key(src_idx);
-            JS_ASSIGN_OR_RETURN(has, js_array_method_has_property_status(
-                splice_arr_root.get(), from_key));
-            if (js_is_truthy(has)) {
-                splice_source_root.set(js_get_key_default(splice_arr_root.get(), from_key));
-                if (item_is_error(splice_source_root.get())) return splice_source_root.get();
-                JS_ASSIGN_OR_RETURN(create_result, js_create_data_property_or_throw(
-                    splice_deleted_root.get(), i, splice_source_root.get()));
-            }
-        }
-        JS_ASSIGN_OR_RETURN(deleted_length, js_set_key_default(splice_deleted_root.get(),
-            len_key, (Item){.item = i2it(delete_count)}));
-
-        arr = splice_arr_root.get();
-        a = arr.array;
-        int64_t dense_capacity = js_array_dense_capacity(a);
-        int sparse_count = 0;
-        if (js_array_has_props(a)) {
-            Map* pm = js_array_props(a);
-            TypeMap* tm = pm && pm->type ? (TypeMap*)pm->type : NULL;
-            for (ShapeEntry* se = tm ? tm->shape : NULL; se; se = se->next) {
-                if (!se->name) continue;
-                int64_t idx = -1;
-                if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &idx)) continue;
-                if (idx >= a->length) continue;
-                // A companion numeric property can overlay a dense hole inside
-                // the physical buffer; it must move with the logical element,
-                // while a present dense slot already shadows that overlay.
-                if (idx < dense_capacity && js_array_dense_present(a, idx)) continue;
-                if (jspd_is_deleted(se)) continue;
-                Item val = _map_read_field(se, pm->data);
-                if (val.item != JS_DELETED_SENTINEL_VAL) sparse_count++;
-            }
-            sparse_count += (int)js_array_sparse_collect_indices(
-                splice_arr_root.get(), dense_capacity, a->length, NULL, 0);
-        }
-        int64_t* sparse_indices = sparse_count > 0 ?
-            (int64_t*)mem_alloc((size_t)sparse_count * sizeof(int64_t), MEM_CAT_JS_RUNTIME) : NULL;
-        RootSpan sparse_value_roots((size_t)(sparse_count > 0 ? sparse_count : 0));
-        bool sparse_values_owned = sparse_count > 0 && !sparse_value_roots.valid();
-        Item* sparse_values = sparse_count > 0
-            ? (sparse_value_roots.valid()
-                ? (Item*)sparse_value_roots.words()
-                : (Item*)mem_alloc((size_t)sparse_count * sizeof(Item), MEM_CAT_JS_RUNTIME))
-            : NULL;
-        int sparse_pos = 0;
-        arr = splice_arr_root.get();
-        a = arr.array;
-        if (sparse_count > 0 && js_array_has_props(a)) {
-            Map* pm = js_array_props(a);
-            TypeMap* tm = pm && pm->type ? (TypeMap*)pm->type : NULL;
-            for (ShapeEntry* se = tm ? tm->shape : NULL; se; se = se->next) {
-                if (!se->name) continue;
-                int64_t idx = -1;
-                if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &idx)) continue;
-                if (idx >= a->length) continue;
-                if (idx < dense_capacity && js_array_dense_present(a, idx)) continue;
-                if (jspd_is_deleted(se)) continue;
-                Item val = _map_read_field(se, pm->data);
-                if (val.item == JS_DELETED_SENTINEL_VAL) continue;
-                sparse_indices[sparse_pos] = idx;
-                sparse_values[sparse_pos] = val;
-                sparse_pos++;
-            }
-            int64_t hash_count = js_array_sparse_collect_indices(
-                splice_arr_root.get(), dense_capacity, a->length,
-                sparse_indices ? sparse_indices + sparse_pos : NULL,
-                sparse_count - sparse_pos);
-            for (int64_t hi = 0; hi < hash_count && sparse_pos < sparse_count; hi++) {
-                int64_t idx = sparse_indices[sparse_pos];
-                sparse_values[sparse_pos] = js_array_sparse_get_index(arr, idx);
-                sparse_pos++;
-            }
-        }
-
-        int shift = insert_count - delete_count;
-        arr = splice_arr_root.get();
-        a = arr.array;
-        int old_len = a->length;
-        int new_len = old_len + shift;
-        // Remove companion properties before dense movement: deleting them
-        // afterward can mistake a moved dense value for the old sparse slot
-        // when the two layouts overlap (D5.4.3).
-        for (int i = 0; i < sparse_pos; i++) {
-            int64_t old_idx = sparse_indices[i];
-            if ((old_idx >= start && old_idx < (int64_t)start + delete_count) ||
-                    (old_idx >= (int64_t)start + delete_count && old_idx < old_len)) {
-                Item delete_result = js_delete_property_or_throw_status(
-                    splice_arr_root.get(), js_array_index_key(old_idx));
-                if (item_is_error(delete_result)) {
-                    if (sparse_indices) mem_free(sparse_indices);
-                    if (sparse_values_owned && sparse_values) mem_free(sparse_values);
-                    return delete_result;
-                }
-            }
-        }
-        arr = splice_arr_root.get();
-        a = arr.array;
-        dense_capacity = js_array_dense_capacity(a);
-        int dense_end = (int)((int64_t)old_len < dense_capacity ? old_len : dense_capacity);
-        if (shift > 0) {
-            if (new_len + a->extra + 4 > a->capacity) {
-                int new_cap = new_len + (int)a->extra + 4;
-                Item* new_items = (Item*)mem_alloc(new_cap * sizeof(Item), MEM_CAT_JS_RUNTIME);
-                arr = splice_arr_root.get();
-                a = arr.array;
-                if (a->items && a->length > 0) {
-                    int copy_cnt = (int)((int64_t)a->length < dense_capacity ? a->length : dense_capacity);
-                    memcpy(new_items, a->items, copy_cnt * sizeof(Item));
-                }
-                js_array_install_runtime_items(a, new_items, new_cap);
-                dense_capacity = js_array_dense_capacity(a);
-                dense_end = (int)((int64_t)old_len < dense_capacity ? old_len : dense_capacity);
-            }
-            int elements_to_move = dense_end - start - delete_count;
-            if (elements_to_move > 0) {
-                memmove(&a->items[start + insert_count], &a->items[start + delete_count],
-                        elements_to_move * sizeof(Item));
-            }
-            a->length = new_len;
-        } else if (shift < 0) {
-            int elements_to_move = dense_end - start - delete_count;
-            if (elements_to_move > 0) {
-                memmove(&a->items[start + insert_count], &a->items[start + delete_count],
-                        elements_to_move * sizeof(Item));
-            }
-            a->length = new_len;
-        }
-        for (int i = 0; i < sparse_pos; i++) {
-            int64_t old_idx = sparse_indices[i];
-            if (old_idx >= (int64_t)start + delete_count && old_idx < old_len) {
-                int64_t new_idx = old_idx + shift;
-                if (new_idx >= 0 && new_idx < new_len) {
-                    Item set_result = js_elements_set(splice_arr_root.get(),
-                        (Item){.item = i2it(new_idx)}, sparse_values[i]);
-                    if (item_is_error(set_result)) {
-                        if (sparse_indices) mem_free(sparse_indices);
-                        if (sparse_values_owned && sparse_values) mem_free(sparse_values);
-                        return set_result;
-                    }
-                }
-            }
-        }
-        arr = splice_arr_root.get();
-        a = arr.array;
-        if (js_array_has_props(a)) js_array_delete_sparse_indices_from(
-            lam::gc_borrow(a), new_len);
-        if (sparse_indices) mem_free(sparse_indices);
-        if (sparse_values_owned && sparse_values) mem_free(sparse_values);
-
-        for (int i = 0; i < insert_count; i++) {
-            int64_t idx = (int64_t)start + i;
-            arr = splice_arr_root.get();
-            a = arr.array;
-            if (idx >= 0 && idx < js_array_dense_capacity(a)) {
-                js_array_store_owned(a, idx, splice_arg(2 + i));
-            } else {
-                JS_ASSIGN_OR_RETURN(set_result, js_elements_set(splice_arr_root.get(),
-                    (Item){.item = i2it(idx)}, splice_arg(2 + i)));
-            }
-        }
-        return splice_deleted_root.get();
+        return ItemNull;
     }
-    // toSorted() — ES2023: returns new sorted copy without mutating original
-    if (operation == JS_ARRAY_INTRINSIC_TO_SORTED) {
-        return js_array_generic_to_sorted(arr, args, argc);
-    }
-    // toReversed() — ES2023: returns new reversed copy without mutating original
-    if (operation == JS_ARRAY_INTRINSIC_TO_REVERSED) {
-        return js_array_generic_to_reversed(arr);
-    }
-    // toSpliced(start, deleteCount, ...items) — ES2023: returns new array with splice applied
-    if (operation == JS_ARRAY_INTRINSIC_TO_SPLICED) {
-        return js_array_generic_to_spliced(arr, args, argc);
-    }
-    // with(index, value) — ES2023: returns copy with one element replaced
-    if (operation == JS_ARRAY_INTRINSIC_WITH) {
-        return js_array_generic_with(arr, args, argc);
-    }
-    // shift() — remove and return first element
-    if (operation == JS_ARRAY_INTRINSIC_SHIFT) {
-        if (arr_type != LMD_TYPE_ARRAY) return make_js_undefined();
-        return js_array_generic_shift(arr);
-    }
-    // unshift(...items) — prepend items, return new length
-    if (operation == JS_ARRAY_INTRINSIC_UNSHIFT) {
-        if (arr_type != LMD_TYPE_ARRAY) return (Item){.item = i2it(0)};
-        return js_array_generic_unshift(arr, args, argc);
-    }
-    // flatMap
-    if (operation == JS_ARRAY_INTRINSIC_FLAT_MAP) {
-        return js_array_generic_flat_map(arr, args, argc);
+    // join - converts all elements to strings and joins them
+    if (operation == JS_ARRAY_INTRINSIC_JOIN) {
+        return js_array_like_join(arr, args, argc, false);
     }
     // at(index) — supports negative indexing
     if (operation == JS_ARRAY_INTRINSIC_AT) {
@@ -26575,28 +25726,6 @@ static Item js_array_intrinsic_algorithm_impl(Item arr,
         if (idx < 0) idx = a->length + idx;
         if (idx < 0 || idx >= a->length) return make_js_undefined();
         return js_array_element(arr, idx);
-    }
-    // item(index) — DOM NodeList/HTMLCollection compatibility. Unlike
-    // Array.prototype.at(), negative and out-of-range indices return null.
-    if (operation == JS_ARRAY_INTRINSIC_ITEM) {
-        if (arr_type != LMD_TYPE_ARRAY) return ItemNull;
-        Array* a = arr.array;
-        int64_t idx = 0;
-        if (argc >= 1) {
-            if (js_key_is_symbol(args[0]))
-                return js_throw_type_error("Cannot convert a Symbol value to a number");
-            JS_ASSIGN_OR_RETURN(index_num, js_to_number(args[0]));
-            double d = js_get_number(index_num);
-            if (d != d) d = 0.0;
-            d = d >= 0.0 ? floor(d) : ceil(d);
-            if (d < (double)INT64_MIN) d = (double)INT64_MIN;
-            if (d > (double)INT64_MAX) d = (double)INT64_MAX;
-            idx = (int64_t)d;
-        }
-        if (idx < 0 || idx >= a->length) return ItemNull;
-        Item val = js_array_element(arr, idx);
-        if (get_type_id(val) == LMD_TYPE_UNDEFINED || val.item == ITEM_JS_UNDEFINED) return ItemNull;
-        return val;
     }
     // toString — join elements with comma
     if (operation == JS_ARRAY_INTRINSIC_TO_STRING) {

@@ -46,6 +46,7 @@ class PremakeGenerator:
                 resolved_defines.append(f"{name}={value}")
         self.premake_content = []
         self.variant = variant
+        self.coverage_bin_dir = os.environ.get('LAMBDA_COVERAGE_BIN_DIR', 'test/coverage/bin')
 
         # Add platform detection for use throughout the generator
         import platform
@@ -2147,7 +2148,7 @@ class PremakeGenerator:
             f'    objdir "build/obj/%{{prj.name}}"',
             f'    targetextension ".exe"',
             '    filter "configurations:coverage"',
-            '        targetdir "test/coverage/bin"',
+            f'        targetdir "{self.coverage_bin_dir}"',
             '    filter {}',
             '',
             f'    files {{',
@@ -2406,7 +2407,7 @@ class PremakeGenerator:
             '    targetdir "test"',
             '    objdir "build/obj/%{prj.name}"',
             '    filter "configurations:coverage"',
-            '        targetdir "test/coverage/bin"',
+            f'        targetdir "{self.coverage_bin_dir}"',
             '    filter {}',
         ])
 
@@ -3375,7 +3376,7 @@ class PremakeGenerator:
             '    targetdir "."',
             '    objdir "build/obj/%{prj.name}"',
             '    filter "configurations:coverage"',
-            '        targetdir "test/coverage/bin"',
+            f'        targetdir "{self.coverage_bin_dir}"',
             '    filter {}',
             f'    targetname "{target_name}"',
             f'    targetextension "{target_extension}"',

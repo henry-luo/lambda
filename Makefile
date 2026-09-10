@@ -157,6 +157,15 @@ else
 	RANLIB := ranlib
 endif
 
+# Prefer an LLVM tool already on PATH, then use Xcode Command Line Tools on macOS.
+LLVM_COV ?= $(shell if command -v llvm-cov >/dev/null 2>&1; then command -v llvm-cov; elif command -v xcrun >/dev/null 2>&1; then xcrun --find llvm-cov 2>/dev/null; fi)
+LLVM_PROFDATA ?= $(shell if command -v llvm-profdata >/dev/null 2>&1; then command -v llvm-profdata; elif command -v xcrun >/dev/null 2>&1; then xcrun --find llvm-profdata 2>/dev/null; fi)
+COVERAGE_ROOT := test/coverage
+COVERAGE_NATIVE_DIR := $(COVERAGE_ROOT)/native
+COVERAGE_JS_DIR := $(COVERAGE_ROOT)/js
+COVERAGE_NATIVE_BIN_DIR := $(COVERAGE_NATIVE_DIR)/bin
+COVERAGE_JS_BIN_DIR := $(COVERAGE_JS_DIR)/bin
+
 # Enable ccache for faster builds if available.
 # MUST come after the CC/CXX detection block above; otherwise the platform
 # branches overwrite our `ccache <compiler>` wrap.
@@ -559,6 +568,7 @@ tree-sitter-libs: tree-sitter-jube-libs
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir c2mir-driver verify-mir-patches \
 	    ensure-test262-gtest test-js262-prelim test-js-exception-catalog test-js-callable-catalog test-js-opt test262-baseline test262-full \
+	    coverage-tools coverage-build-config coverage-build-config-native coverage-build-config-js coverage-build-all coverage-build-js test-coverage test-js-coverage \
 	test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui view-ui native-gui-ui editable-unit editable-ui editable-editor-e2e test-editable test-wpt-contenteditable test-chromium-contenteditable audit-editable-ownership editable-package-disabled test-editable-ua-focused editable-form-regressions test-editable-ua drawing-editor-e2e test-drawing check-error-recovery \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
 	    build-graph-structurizr-test test-graph-structurizr \
@@ -653,7 +663,8 @@ help:
 	@echo "  test-mir      - Run MIR JIT tests only"
 	@echo "  test-lambda   - Run lambda runtime tests only"
 	@echo "  test-std      - Run Lambda Standard Tests (custom test runner)"
-	@echo "  test-coverage - Run tests with code coverage analysis"
+	@echo "  test-coverage - Run all native tests with LLVM C/C++ coverage"
+	@echo "  test-js-coverage - Run test_js_gtest and Test262 with LLVM coverage"
 	@echo "  test-benchmark- Run performance benchmark tests"
 	@echo "  fuzz-lambda    - Run fuzzy tests (5 minutes, mutation + random generation)"
 	@echo "  fuzz-lambda-extended - Run extended fuzzy tests (1 hour)"
@@ -2814,21 +2825,43 @@ test-std: build
 		exit 1; \
 	fi
 
-test-coverage:
-	@echo "Running tests with coverage analysis..."
-	@if command -v gcov >/dev/null 2>&1 && command -v lcov >/dev/null 2>&1; then \
-		echo "Compiling with coverage flags..."; \
-		gcc --coverage -fprofile-arcs -ftest-coverage -o lambda_coverage.exe $(shell find lambda -name "*.c") -I./include -I./lambda; \
-		node test/test_run.js; \
-		gcov $(shell find lambda -name "*.c"); \
-		lcov --capture --directory . --output-file coverage.info; \
-		genhtml coverage.info --output-directory coverage-report; \
-		echo "Coverage report generated in coverage-report/"; \
-		echo "Open coverage-report/index.html to view results"; \
-	else \
-		echo "Coverage tools not found. Install with: brew install lcov"; \
+coverage-tools:
+	@if [ -z "$(LLVM_COV)" ] || [ ! -x "$(LLVM_COV)" ]; then \
+		echo "llvm-cov not found. Install LLVM or the Xcode Command Line Tools." >&2; \
 		exit 1; \
 	fi
+	@if [ -z "$(LLVM_PROFDATA)" ] || [ ! -x "$(LLVM_PROFDATA)" ]; then \
+		echo "llvm-profdata not found. Install LLVM or the Xcode Command Line Tools." >&2; \
+		exit 1; \
+	fi
+
+coverage-build-config: coverage-build-config-native
+
+coverage-build-config-native: coverage-tools
+	@mkdir -p build/premake
+	@LAMBDA_COVERAGE_BIN_DIR="$(COVERAGE_NATIVE_BIN_DIR)" $(MAKE) --no-print-directory TEST_BUILD_QUIET=1 generate-premake
+	@out=$$(cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE) 2>&1) || { printf '%s\n' "$$out"; exit 1; }
+
+coverage-build-config-js: coverage-tools
+	@mkdir -p build/premake
+	@LAMBDA_COVERAGE_BIN_DIR="$(COVERAGE_JS_BIN_DIR)" $(MAKE) --no-print-directory TEST_BUILD_QUIET=1 generate-premake
+	@out=$$(cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE) 2>&1) || { printf '%s\n' "$$out"; exit 1; }
+
+coverage-build-all: coverage-build-config-native
+	@echo "Building all C/C++ targets with LLVM source coverage..."
+	$(call run_make_with_error_summary,coverage,coverage_native,,all)
+
+coverage-build-js: coverage-build-config-js
+	@echo "Building JavaScript coverage targets with LLVM source coverage..."
+	$(call run_make_with_error_summary,coverage-js,coverage_native,,lambda-lib-cpp lambda test_js_gtest test_js_test262_gtest)
+
+test-coverage: coverage-build-all
+	@LLVM_COV="$(LLVM_COV)" LLVM_PROFDATA="$(LLVM_PROFDATA)" \
+		bash utils/run_llvm_coverage.sh native "$(COVERAGE_NATIVE_DIR)" "$(COVERAGE_NATIVE_BIN_DIR)"
+
+test-js-coverage: coverage-build-js
+	@LLVM_COV="$(LLVM_COV)" LLVM_PROFDATA="$(LLVM_PROFDATA)" \
+		bash utils/run_llvm_coverage.sh js "$(COVERAGE_JS_DIR)" "$(COVERAGE_JS_BIN_DIR)"
 
 test-benchmark:
 	@echo "Running performance benchmark tests..."

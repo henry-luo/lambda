@@ -349,26 +349,6 @@ static bool js_typed_array_try_raw_set_same_type(JsTypedArray* dst, JsTypedArray
     return false;
 }
 
-static bool js_typed_array_ranges_overlap(const char* dst_data, int dst_byte_len,
-                                          const char* src_data, int src_byte_len) {
-    if (!dst_data || !src_data || dst_byte_len <= 0 || src_byte_len <= 0) return false;
-    const char* dst_end = dst_data + dst_byte_len;
-    const char* src_end = src_data + src_byte_len;
-    return dst_data < src_end && src_data < dst_end;
-}
-
-static double js_typed_array_raw_load_number(JsTypedArray* ta, const char* data, int index) {
-    if (!ta) return 0.0;
-    if (ta->element_type == JS_TYPED_FLOAT16 && data && index >= 0) {
-        return js_float16_bits_to_float64(((uint16_t*)data)[index]);
-    }
-    if (js_typed_array_arraynum_view_matches(ta, data, index) &&
-        js_typed_array_is_number_element(ta->element_type)) {
-        return array_num_get_number_value(ta->view, index);
-    }
-    return 0.0;
-}
-
 extern "C" bool js_typed_array_is_out_of_bounds_item(Item ta_item) {
     if (!js_is_typed_array(ta_item)) return false;
     return js_typed_array_is_out_of_bounds(js_get_typed_array_ptr(ta_item.map));
@@ -397,28 +377,6 @@ static uint8_t js_typed_array_to_uint8_clamp(double value) {
     return (uint8_t)((floor_value & 1) ? floor_value + 1 : floor_value);
 }
 
-static void js_typed_array_arraynum_store_number(JsTypedArray* ta, int index, double value) {
-    if (!ta || !ta->view) return;
-    const JsTypedArraySpec* spec = js_typed_array_spec(ta->element_type);
-    if (ta->element_type == JS_TYPED_UINT8_CLAMPED) {
-        array_num_set_double_value(ta->view, index, value);
-        return;
-    }
-    if (ta->element_type == JS_TYPED_FLOAT16) {
-        // Float16Array stores IEEE-754 binary16 bits; using ArrayNum's uint16
-        // view here would expose backing bits instead of rounded JS Numbers.
-        if (ta->view->data && index >= 0 && index < ta->view->length)
-            ((uint16_t*)ta->view->data)[index] = js_float64_to_float16_bits(value);
-        return;
-    }
-    if (spec->integer) {
-        array_num_set_int64_value(ta->view, index,
-            js_typed_array_to_int_n(value, spec->bits, spec->signed_integer));
-    } else {
-        array_num_set_double_value(ta->view, index, value);
-    }
-}
-
 static void js_typed_array_store_number_direct(JsTypedArrayType type,
                                                char* data, int index, double value) {
     if (!data || index < 0) return;
@@ -440,119 +398,6 @@ static void js_typed_array_store_number_direct(JsTypedArrayType type,
             spec->bits, spec->signed_integer);
         memcpy(slot, &raw, spec->byte_size);
     }
-}
-
-static void js_typed_array_raw_store_number(JsTypedArray* ta, char* data, int index, double value) {
-    if (!ta) return;
-    if (js_typed_array_arraynum_view_matches(ta, data, index) &&
-        js_typed_array_is_number_element(ta->element_type)) {
-        js_typed_array_arraynum_store_number(ta, index, value);
-    }
-}
-
-static bool js_typed_array_try_raw_from_dense_number_array(Item result, Array* arr, int len) {
-    if (!arr || arr->is_content == 1 || js_array_has_props(arr)) return false;
-    if (len < 0 || (int64_t)len > arr->capacity) return false;
-
-    JsTypedArray* dst = js_get_typed_array_ptr(result.map);
-    if (!dst || !js_typed_array_is_number_element(dst->element_type)) return false;
-    js_typed_array_refresh_arraynum_view(dst);
-    char* data = (char*)js_typed_array_prepare_write(dst);
-    if (len > 0 && !data) return false;
-    if (!js_typed_array_arraynum_range_matches(dst, data, 0, len)) return false;
-
-    for (int i = 0; i < len; i++) {
-        Item val = arr->items[i];
-        if (val.item == JS_DELETED_SENTINEL_VAL) return false;
-        double num_val = 0.0;
-        if (val.item == ITEM_JS_UNDEFINED) {
-            num_val = NAN;
-        } else {
-            TypeId val_type = get_type_id(val);
-            if (val_type == LMD_TYPE_INT) {
-                int64_t iv = it2i(val);
-                if (iv <= -(int64_t)JS_SYMBOL_BASE) return false;
-                num_val = (double)iv;
-            } else if (val_type == LMD_TYPE_FLOAT) {
-                num_val = it2d(val);
-            } else {
-                return false;
-            }
-        }
-        js_typed_array_raw_store_number(dst, data, i, num_val);
-    }
-    return true;
-}
-
-static bool js_typed_array_try_arraynum_convert_number(JsTypedArray* dst, JsTypedArray* src,
-                                                       int offset, bool allow_overlap) {
-    if (!dst || !src) return false;
-    if (dst->is_buffer || src->is_buffer) return false;
-    if (!js_typed_array_is_number_element(dst->element_type) ||
-        !js_typed_array_is_number_element(src->element_type)) return false;
-    if (js_typed_array_is_out_of_bounds(dst) || js_typed_array_is_out_of_bounds(src)) return false;
-
-    int src_len = js_typed_array_current_length(src);
-    if (src_len <= 0) return true;
-    int dst_len = js_typed_array_current_length(dst);
-    if (offset < 0 || (int64_t)offset + (int64_t)src_len > (int64_t)dst_len) return false;
-
-    js_typed_array_refresh_arraynum_view(src);
-    js_typed_array_refresh_arraynum_view(dst);
-    char* src_data = (char*)js_typed_array_current_data(src);
-    char* dst_data = (char*)js_typed_array_prepare_write(dst);
-    if (!src_data || !dst_data) return false;
-    if (!js_typed_array_arraynum_range_matches(src, src_data, 0, src_len) ||
-        !js_typed_array_arraynum_range_matches(dst, dst_data, offset, src_len)) {
-        return false;
-    }
-
-    int src_elem_size = js_typed_array_element_size(src->element_type);
-    int dst_elem_size = js_typed_array_element_size(dst->element_type);
-    char* dst_start = dst_data + ((size_t)offset * (size_t)dst_elem_size);
-    if (!allow_overlap &&
-        js_typed_array_ranges_overlap(dst_start, src_len * dst_elem_size,
-                                      src_data, src_len * src_elem_size)) {
-        return false;
-    }
-
-    for (int i = 0; i < src_len; i++) {
-        double value = js_typed_array_raw_load_number(src, src_data, i);
-        js_typed_array_arraynum_store_number(dst, offset + i, value);
-    }
-    return true;
-}
-
-static bool js_typed_array_try_arraynum_convert_bigint(JsTypedArray* dst, JsTypedArray* src,
-                                                       int offset, bool allow_overlap) {
-    if (!dst || !src) return false;
-    if (dst->is_buffer || src->is_buffer) return false;
-    if (!js_typed_array_is_bigint_element(dst->element_type) ||
-        !js_typed_array_is_bigint_element(src->element_type)) return false;
-    if (dst->element_type == src->element_type) return false;
-    if (js_typed_array_is_out_of_bounds(dst) || js_typed_array_is_out_of_bounds(src)) return false;
-
-    int src_len = js_typed_array_current_length(src);
-    if (src_len <= 0) return true;
-    int dst_len = js_typed_array_current_length(dst);
-    if (offset < 0 || (int64_t)offset + (int64_t)src_len > (int64_t)dst_len) return false;
-
-    char* src_data = (char*)js_typed_array_current_data(src);
-    char* dst_data = (char*)js_typed_array_prepare_write(dst);
-    if (!src_data || !dst_data) return false;
-    if (!js_typed_array_arraynum_range_matches(src, src_data, 0, src_len) ||
-        !js_typed_array_arraynum_range_matches(dst, dst_data, offset, src_len)) {
-        return false;
-    }
-
-    int elem_size = js_typed_array_element_size(src->element_type);
-    char* dst_start = dst_data + ((size_t)offset * (size_t)elem_size);
-    size_t byte_count = (size_t)src_len * (size_t)elem_size;
-    if (!allow_overlap && js_typed_array_ranges_overlap(dst_start, (int)byte_count,
-                                                        src_data, (int)byte_count)) {
-        return false;
-    }
-    return array_num_copy_equal_size_bytes(dst->view, offset, src->view, 0, src_len);
 }
 
 static bool js_typed_array_raw_copy_same_type_impl(Item dst_item, Item src_item,
@@ -594,85 +439,6 @@ extern "C" bool js_typed_array_raw_reverse(Item ta_item) {
     return false;
 }
 JS_FORWARD_RETURN(bool, js_typed_array_raw_copy_reversed, (Item dst_item, Item src_item), js_typed_array_raw_copy_same_type_impl, (dst_item, src_item, true))
-
-extern "C" bool js_typed_array_raw_copy_within(Item ta_item, int target, int start, int count) {
-    if (!js_is_typed_array(ta_item)) return false;
-    JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
-    if (!ta || js_typed_array_is_out_of_bounds(ta)) return false;
-    if (count <= 0) return true;
-    js_typed_array_refresh_arraynum_view(ta);
-    char* data = (char*)js_typed_array_prepare_write(ta);
-    if (!data) return false;
-    if (js_typed_array_arraynum_range_matches(ta, data, start, count) &&
-        js_typed_array_arraynum_range_matches(ta, data, target, count)) {
-        return array_num_copy_same_type_bytes(ta->view, target, ta->view, start, count);
-    }
-    return false;
-}
-
-extern "C" int js_typed_array_raw_index_of(Item ta_item, Item search_value,
-                                           int from, int bound, bool reverse, bool same_value_zero) {
-    if (!js_is_typed_array(ta_item)) return -2;
-    JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
-    if (!ta || !js_typed_array_is_number_element(ta->element_type)) return -2;
-    if (js_typed_array_is_out_of_bounds(ta)) return -2;
-
-    TypeId search_type = get_type_id(search_value);
-    double needle = 0.0;
-    if (search_type == LMD_TYPE_INT) {
-        int64_t iv = it2i(search_value);
-        if (iv <= -(int64_t)JS_SYMBOL_BASE) return -1;
-        needle = (double)iv;
-    } else if (search_type == LMD_TYPE_FLOAT) {
-        needle = it2d(search_value);
-    } else {
-        // Js54 P4: non-numeric search (undefined, null, string, ...) — fall
-        // through to the slow path. Callers iterate with the spec-captured
-        // length, and Get() returns undefined for post-resize OOB positions,
-        // so includes(undefined, ...) can still match. Returning -1 here
-        // would falsely shortcut callers to "not found".
-        return -2;
-    }
-
-    // Js54 P4: clamp to the spec-captured bound the caller provided. Spec
-    // §23.2.3.{18,20,15} (indexOf/lastIndexOf/includes) capture len BEFORE
-    // any coercion callback; if a callback grew the buffer, our current
-    // length would be larger and the fast path could find new (zero-initialised)
-    // elements outside the spec-required range.
-    int current_len = js_typed_array_current_length(ta);
-    int len = bound < current_len ? bound : current_len;
-    if (len <= 0) return -1;
-    if (from < 0) return -1;
-    // Js55 P12: for reverse iteration (lastIndexOf), when `from` lies past the
-    // current end (the spec-cached `bound` was > current_len because a coercion
-    // callback shrank the buffer), the spec walks indices [from..0] using
-    // HasProperty — out-of-range indices are skipped, then the in-range
-    // indices [current_len-1..0] are tested. So clamp `from` to len-1 and
-    // continue, instead of bailing with -1. For forward iteration (indexOf)
-    // a `from >= len` value has no valid indices to test and we return -1.
-    if (from >= len) {
-        if (!reverse) return -1;
-        from = len - 1;
-    }
-    js_typed_array_refresh_arraynum_view(ta);
-    char* data = (char*)js_typed_array_current_data(ta);
-    if (!data) return -2;
-    if (!js_typed_array_arraynum_range_matches(ta, data, 0, current_len)) return -2;
-
-    bool needle_nan = isnan(needle);
-    if (reverse) {
-        for (int i = from; i >= 0; i--) {
-            double value = js_typed_array_raw_load_number(ta, data, i);
-            if (value == needle || (same_value_zero && needle_nan && isnan(value))) return i;
-        }
-    } else {
-        for (int i = from; i < len; i++) {
-            double value = js_typed_array_raw_load_number(ta, data, i);
-            if (value == needle || (same_value_zero && needle_nan && isnan(value))) return i;
-        }
-    }
-    return -1;
-}
 
 static Item js_to_index_i64(Item value, int64_t* out_index,
         const char* error_message) {
@@ -2225,20 +1991,15 @@ extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
         result_root.set(js_typed_array_new(type_id, src_len));
         Item result = result_root.get();
         JsTypedArray* dst = js_get_typed_array_ptr(result.map);
-        bool copied = false;
-        if (src->element_type == (JsTypedArrayType)type_id) {
-            copied = js_typed_array_try_raw_set_same_type(dst, src, 0);
-        } else if (js_typed_array_try_arraynum_convert_number(dst, src, 0, true) ||
-                   js_typed_array_try_arraynum_convert_bigint(dst, src, 0, true)) {
-            copied = true;
+        if (src->element_type == (JsTypedArrayType)type_id &&
+                js_typed_array_try_raw_set_same_type(dst, src, 0)) {
+            return result_root.get();
         }
-        if (!copied) {
-            for (int i = 0; i < src_len; i++) {
-                source = source_root.get();
-                Item idx = (Item){.item = i2it(i)};
-                Item val = js_typed_array_get(source, idx);
-                JS_ASSIGN_OR_RETURN(set_result, js_typed_array_set(result_root.get(), idx, val));
-            }
+        for (int i = 0; i < src_len; i++) {
+            source = source_root.get();
+            Item idx = (Item){.item = i2it(i)};
+            Item val = js_typed_array_get(source, idx);
+            JS_ASSIGN_OR_RETURN(set_result, js_typed_array_set(result_root.get(), idx, val));
         }
         return result_root.get();
     }
@@ -2251,8 +2012,6 @@ extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
         ArrayNum* num_arr = src_type == LMD_TYPE_ARRAY_NUM ? source.array_num : NULL;
         int len = (int)(arr ? arr->length : (num_arr ? num_arr->length : 0));
         result_root.set(js_typed_array_new(type_id, len));
-        Item result = result_root.get();
-        if (arr && js_typed_array_try_raw_from_dense_number_array(result, arr, len)) return result;
         Item* values = len > 0 ? (Item*)mem_alloc(sizeof(Item) * len, MEM_CAT_JS_RUNTIME) : NULL;
         for (int i = 0; i < len; i++) {
             values[i] = arr ? arr->items[i] : array_num_get(num_arr, i);
@@ -2748,14 +2507,6 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
             return js_throw_type_error("Cannot mix BigInt and non-BigInt typed arrays");
         }
         if (js_typed_array_try_raw_set_same_type(dst, src, offset)) {
-            return (Item){.item = ITEM_JS_UNDEFINED};
-        }
-
-        if (js_typed_array_try_arraynum_convert_number(dst, src, offset, false)) {
-            return (Item){.item = ITEM_JS_UNDEFINED};
-        }
-
-        if (js_typed_array_try_arraynum_convert_bigint(dst, src, offset, false)) {
             return (Item){.item = ITEM_JS_UNDEFINED};
         }
 

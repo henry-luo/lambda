@@ -166,7 +166,7 @@ test/fuzzy/radiant/results/timeouts/
 test/fuzzy/radiant/regression/
 test/fuzzy/js/results/crashes/
 test/fuzzy/js/results/timeouts/
-
+test/coverage
 test/event/
 test/events/
 

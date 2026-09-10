@@ -1355,10 +1355,9 @@ static void js_assert_append_structural_diff(StrBuf* sb, Item actual, Item expec
                                              int indent, bool trailing_comma,
                                              int depth_left);
 
-static void js_assert_append_array_diff_recursive(StrBuf* sb, Item actual, Item expected,
-                                                  int indent, bool trailing_comma) {
-    js_assert_append_spaces(sb, indent);
-    strbuf_append_str(sb, "[\n");
+static void js_assert_append_array_diff_full_contents(StrBuf* sb, Item actual, Item expected,
+                                                      int element_indent, int depth_left,
+                                                      bool preserve_large_context) {
     int64_t actual_len = get_type_id(actual) == LMD_TYPE_ARRAY ? js_array_length(actual) : 0;
     int64_t expected_len = get_type_id(expected) == LMD_TYPE_ARRAY ? js_array_length(expected) : 0;
     int64_t max_len = actual_len > expected_len ? actual_len : expected_len;
@@ -1372,7 +1371,7 @@ static void js_assert_append_array_diff_recursive(StrBuf* sb, Item actual, Item 
                     js_assert_deep_values_same(js_elements_get_int(actual, i), js_elements_get_int(expected, j))) {
                 bool child_comma = i < actual_len - 1 || j < expected_len - 1;
                 js_assert_append_multiline_value(sb, js_elements_get_int(actual, i),
-                    indent + 2, 0, child_comma, 16);
+                    element_indent, 0, child_comma, depth_left);
                 i++;
                 j++;
             } else if (i < actual_len && j < expected_len &&
@@ -1382,7 +1381,7 @@ static void js_assert_append_array_diff_recursive(StrBuf* sb, Item actual, Item 
                 // LCS is for inserted/removed scalar runs; object-like peers at
                 // the same slot need a nested diff or the leaf mismatch vanishes.
                 js_assert_append_structural_diff(sb, js_elements_get_int(actual, i),
-                    js_elements_get_int(expected, j), indent + 2, child_comma, 16);
+                    js_elements_get_int(expected, j), element_indent, child_comma, depth_left);
                 i++;
                 j++;
             } else if (i < actual_len && j < expected_len && actual_len == expected_len &&
@@ -1391,9 +1390,9 @@ static void js_assert_append_array_diff_recursive(StrBuf* sb, Item actual, Item 
                 // Equal-length scalar mismatches are replacements; treating
                 // them as add/remove pairs adds a comma between the +/- lines.
                 js_assert_append_multiline_value(sb, js_elements_get_int(actual, i),
-                    indent + 2, '+', child_comma, 16);
+                    element_indent, '+', child_comma, depth_left);
                 js_assert_append_multiline_value(sb, js_elements_get_int(expected, j),
-                    indent + 2, '-', child_comma, 16);
+                    element_indent, '-', child_comma, depth_left);
                 i++;
                 j++;
             } else if (i + 1 < actual_len && j + 1 < expected_len &&
@@ -1404,9 +1403,9 @@ static void js_assert_append_array_diff_recursive(StrBuf* sb, Item actual, Item 
                 // Equal-length scalar replacements should keep the actual line
                 // before the expected line when the following slot realigns.
                 js_assert_append_multiline_value(sb, js_elements_get_int(actual, i),
-                    indent + 2, '+', child_comma, 16);
+                    element_indent, '+', child_comma, depth_left);
                 js_assert_append_multiline_value(sb, js_elements_get_int(expected, j),
-                    indent + 2, '-', child_comma, 16);
+                    element_indent, '-', child_comma, depth_left);
                 i++;
                 j++;
             } else if (i < actual_len &&
@@ -1415,19 +1414,44 @@ static void js_assert_append_array_diff_recursive(StrBuf* sb, Item actual, Item 
                 bool child_comma = score[0][0] == 0 && i == actual_len - 1 &&
                     j < expected_len ? false : (i < actual_len - 1 || j < expected_len);
                 js_assert_append_multiline_value(sb, js_elements_get_int(actual, i),
-                    indent + 2, '+', child_comma, 16);
+                    element_indent, '+', child_comma, depth_left);
                 i++;
             } else if (j < expected_len) {
                 bool child_comma = i < actual_len || j < expected_len - 1;
                 js_assert_append_multiline_value(sb, js_elements_get_int(expected, j),
-                    indent + 2, '-', child_comma, 16);
+                    element_indent, '-', child_comma, depth_left);
                 j++;
             }
         }
-        js_assert_append_spaces(sb, indent);
-        strbuf_append_char(sb, ']');
-        if (trailing_comma) strbuf_append_char(sb, ',');
-        strbuf_append_char(sb, '\n');
+        return;
+    }
+    if (preserve_large_context) {
+        for (int64_t i = 0; i < max_len; i++) {
+            bool has_actual = i < actual_len;
+            bool has_expected = i < expected_len;
+            Item av = has_actual ? js_elements_get_int(actual, i) : make_js_undefined();
+            Item ev = has_expected ? js_elements_get_int(expected, i) : make_js_undefined();
+            bool same = has_actual && has_expected && js_assert_deep_values_same(av, ev);
+            bool child_comma = i < max_len - 1;
+            if (same) {
+                js_assert_append_multiline_value(sb, av, element_indent, 0, child_comma, depth_left);
+                continue;
+            }
+            if (has_actual && has_expected && js_assert_is_object_like_value(av) &&
+                    js_assert_is_object_like_value(ev)) {
+                // Nested structural mismatches must expand at the differing depth;
+                // compact inspect loses the exact leaf that changed.
+                js_assert_append_structural_diff(sb, av, ev, element_indent, child_comma, depth_left);
+                continue;
+            }
+            if (has_actual) {
+                js_assert_append_multiline_value(sb, av, element_indent, '+', child_comma, depth_left);
+            }
+            if (has_expected) {
+                js_assert_append_multiline_value(sb, ev, element_indent, '-', child_comma, depth_left);
+            }
+        }
+
         return;
     }
     for (int64_t i = 0; i < max_len; i++) {
@@ -1435,26 +1459,21 @@ static void js_assert_append_array_diff_recursive(StrBuf* sb, Item actual, Item 
         bool has_expected = i < expected_len;
         Item av = has_actual ? js_elements_get_int(actual, i) : make_js_undefined();
         Item ev = has_expected ? js_elements_get_int(expected, i) : make_js_undefined();
-        bool same = has_actual && has_expected && js_assert_deep_values_same(av, ev);
         bool child_comma = i < max_len - 1;
-        if (same) {
-            js_assert_append_multiline_value(sb, av, indent + 2, 0, child_comma, 16);
-            continue;
-        }
-        if (has_actual && has_expected && js_assert_is_object_like_value(av) &&
-                js_assert_is_object_like_value(ev)) {
-            // Nested structural mismatches must expand at the differing depth;
-            // compact inspect loses the exact leaf that changed.
-            js_assert_append_structural_diff(sb, av, ev, indent + 2, child_comma, 16);
-            continue;
-        }
         if (has_actual) {
-            js_assert_append_multiline_value(sb, av, indent + 2, '+', child_comma, 16);
+            js_assert_append_multiline_value(sb, av, element_indent, '+', child_comma, depth_left);
         }
         if (has_expected) {
-            js_assert_append_multiline_value(sb, ev, indent + 2, '-', child_comma, 16);
+            js_assert_append_multiline_value(sb, ev, element_indent, '-', child_comma, depth_left);
         }
     }
+}
+
+static void js_assert_append_array_diff_recursive(StrBuf* sb, Item actual, Item expected,
+                                                  int indent, bool trailing_comma) {
+    js_assert_append_spaces(sb, indent);
+    strbuf_append_str(sb, "[\n");
+    js_assert_append_array_diff_full_contents(sb, actual, expected, indent + 2, 16, true);
     js_assert_append_spaces(sb, indent);
     strbuf_append_char(sb, ']');
     if (trailing_comma) strbuf_append_char(sb, ',');
@@ -1590,91 +1609,8 @@ static void js_assert_append_object_diff_recursive(StrBuf* sb, Item actual, Item
                 // Object properties keep the key and opening bracket on one line
                 // in Node's nested deepStrictEqual diffs.
                 strbuf_append_str(sb, "[\n");
-                StrBuf* nested = sb;
-                (void)nested;
-                int64_t alen = js_array_length(av);
-                int64_t elen = js_array_length(ev);
-                if (alen <= 64 && elen <= 64) {
-                    int score[65][65];
-                    memset(score, 0, sizeof(score));
-                    for (int64_t ai = alen - 1; ai >= 0; ai--) {
-                        for (int64_t ej = elen - 1; ej >= 0; ej--) {
-                            if (js_assert_deep_values_same(js_elements_get_int(av, ai), js_elements_get_int(ev, ej))) {
-                                score[ai][ej] = score[ai + 1][ej + 1] + 1;
-                            } else {
-                                score[ai][ej] = score[ai + 1][ej] > score[ai][ej + 1] ?
-                                    score[ai + 1][ej] : score[ai][ej + 1];
-                            }
-                        }
-                    }
-                    int64_t ai = 0;
-                    int64_t ej = 0;
-                    while (ai < alen || ej < elen) {
-                        if (ai < alen && ej < elen &&
-                                js_assert_deep_values_same(js_elements_get_int(av, ai), js_elements_get_int(ev, ej))) {
-                            bool comma = ai < alen - 1 || ej < elen - 1;
-                            js_assert_append_multiline_value(sb, js_elements_get_int(av, ai),
-                                indent + 4, 0, comma, depth_left - 1);
-                            ai++;
-                            ej++;
-                        } else if (ai < alen && ej < elen &&
-                                js_assert_is_object_like_value(js_elements_get_int(av, ai)) &&
-                                js_assert_is_object_like_value(js_elements_get_int(ev, ej))) {
-                            bool comma = ai < alen - 1 || ej < elen - 1;
-                            // Preserve nested structural context under object
-                            // properties instead of replacing the whole child.
-                            js_assert_append_structural_diff(sb, js_elements_get_int(av, ai),
-                                js_elements_get_int(ev, ej), indent + 4, comma, depth_left - 1);
-                            ai++;
-                            ej++;
-                        } else if (ai < alen && ej < elen && alen == elen &&
-                                ai == alen - 1 && ej == elen - 1) {
-                            bool comma = ai < alen - 1;
-                            // Equal-length scalar mismatches are replacements;
-                            // do not attach an insertion comma to the + line.
-                            js_assert_append_multiline_value(sb, js_elements_get_int(av, ai),
-                                indent + 4, '+', comma, depth_left - 1);
-                            js_assert_append_multiline_value(sb, js_elements_get_int(ev, ej),
-                                indent + 4, '-', comma, depth_left - 1);
-                            ai++;
-                            ej++;
-                        } else if (ai + 1 < alen && ej + 1 < elen && alen == elen &&
-                                js_assert_deep_values_same(js_elements_get_int(av, ai + 1),
-                                                           js_elements_get_int(ev, ej + 1))) {
-                            bool comma = ai < alen - 1;
-                            // Equal-length scalar replacements should keep the
-                            // actual line before expected after realignment.
-                            js_assert_append_multiline_value(sb, js_elements_get_int(av, ai),
-                                indent + 4, '+', comma, depth_left - 1);
-                            js_assert_append_multiline_value(sb, js_elements_get_int(ev, ej),
-                                indent + 4, '-', comma, depth_left - 1);
-                            ai++;
-                            ej++;
-                        } else if (ai < alen &&
-                                js_assert_lcs_should_take_actual(av, ev, score,
-                                    ai, ej, alen, elen)) {
-                            bool comma = score[0][0] == 0 && ai == alen - 1 &&
-                                ej < elen ? false : (ai < alen - 1 || ej < elen);
-                            js_assert_append_multiline_value(sb, js_elements_get_int(av, ai),
-                                indent + 4, '+', comma, depth_left - 1);
-                            ai++;
-                        } else if (ej < elen) {
-                            bool comma = ai < alen || ej < elen - 1;
-                            js_assert_append_multiline_value(sb, js_elements_get_int(ev, ej),
-                                indent + 4, '-', comma, depth_left - 1);
-                            ej++;
-                        }
-                    }
-                } else {
-                    int64_t max_len = alen > elen ? alen : elen;
-                    for (int64_t ai = 0; ai < max_len; ai++) {
-                        bool comma = ai < max_len - 1;
-                        if (ai < alen) js_assert_append_multiline_value(sb, js_elements_get_int(av, ai),
-                            indent + 4, '+', comma, depth_left - 1);
-                        if (ai < elen) js_assert_append_multiline_value(sb, js_elements_get_int(ev, ai),
-                            indent + 4, '-', comma, depth_left - 1);
-                    }
-                }
+                js_assert_append_array_diff_full_contents(sb, av, ev,
+                    indent + 4, depth_left - 1, false);
                 js_assert_append_spaces(sb, indent + 2);
                 strbuf_append_char(sb, ']');
                 if (has_more) strbuf_append_char(sb, ',');
