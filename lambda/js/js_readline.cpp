@@ -29,9 +29,14 @@ extern "C" void js_stream_flush_data_now(Item self);
 extern "C" int64_t js_key_is_symbol_c(Item key);
 extern Item js_make_number(double d);
 
-#define readline_create_promises_mode (js_runtime_state.readline->create_promises_mode)
-#define readline_input_rows (js_runtime_state.readline->inputs)
-#define readline_input_values (js_runtime_state.readline->input_values)
+static JsReadlineState* readline_state_require(void) {
+    return js_active_runtime_state
+        ? js_readline_state_ensure(&js_runtime_state) : NULL;
+}
+
+#define readline_create_promises_mode (readline_state_require()->create_promises_mode)
+#define readline_input_rows (readline_state_require()->inputs)
+#define readline_input_values (readline_state_require()->input_values)
 
 struct ReadlineRealmItems {
     Item* namespace_object = NULL;
@@ -92,7 +97,7 @@ void js_readline_state_destroy(JsReadlineState* state) {
 }
 
 static bool readline_input_rows_ensure(void) {
-    JsReadlineState* state = js_active_runtime_state ? js_runtime_state.readline : NULL;
+    JsReadlineState* state = readline_state_require();
     if (!state) return false;
     int row_count = state->inputs ? state->inputs->length : 0;
     if (root_vector_count(&state->input_values) != row_count * 2) {
@@ -1887,6 +1892,9 @@ extern "C" void js_readline_reset(void) {
         *items.promises_namespace = (Item){0};
         *items.completion_interface = (Item){0};
     }
-    readline_input_rows_clear(js_runtime_state.readline);
-    readline_create_promises_mode = false;
+    JsReadlineState* state = js_runtime_state.readline;
+    if (state) {
+        readline_input_rows_clear(state);
+        state->create_promises_mode = false;
+    }
 }

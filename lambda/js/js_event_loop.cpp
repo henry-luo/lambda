@@ -87,7 +87,7 @@ JS_FORWARD_EXPRESSION(bool, js_event_loop_is_shutting_down, (void),
 
 static bool js_async_queue_push(RuntimeJobQueue* queue, Item cb,
                                 RuntimeJobKind kind) {
-    if (!js_root_range_ensure_registered(&js_runtime_state.event_loop_queue_roots)) {
+    if (!js_root_vector_ensure_registered(&js_runtime_state.event_loop_queue_roots)) {
         return false;
     }
     JS_ROOTS(roots,
@@ -232,7 +232,7 @@ extern "C" Item js_microtask_step(void) {
 static bool raf_push(Item cb, int64_t id) {
     RootFrame roots(1);
     Rooted<Item> callback_root(roots, cb);
-    if (!js_root_range_ensure_registered(&js_runtime_state.event_loop_queue_roots)) {
+    if (!js_root_vector_ensure_registered(&js_runtime_state.event_loop_queue_roots)) {
         return false;
     }
     RuntimeJob job = {};
@@ -1513,7 +1513,7 @@ extern "C" void js_event_loop_init(void) {
     runtime_job_queue_clear(&next_tick_queue);
     runtime_job_queue_clear(&microtask_queue);
     runtime_job_queue_clear(&animation_frame_queue);
-    (void)js_root_range_ensure_registered(&js_runtime_state.event_loop_queue_roots);
+    (void)js_root_vector_ensure_registered(&js_runtime_state.event_loop_queue_roots);
     next_raf_id = 1;
     // No timer is live here; release the retired registry allocation rather
     // than retaining a historical fixed-capacity table between documents.

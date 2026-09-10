@@ -271,7 +271,7 @@ static void jube_node_session_state_clear(NodeRuntimeSession* session) {
         session->commonjs_compile_cache = NULL;
     }
     if (session->diagnostics_channels) {
-        js_root_range_unregister(&session->diagnostics_channels->roots);
+        root_vector_unbind_external(&session->diagnostics_channels->roots);
         mem_free(session->diagnostics_channels);
         session->diagnostics_channels = NULL;
     }
@@ -6032,9 +6032,8 @@ JsDiagnosticsChannelState* jube_node_diagnostics_channel_state(void* session) {
             (JsDiagnosticsChannelState*)mem_calloc(1, sizeof(JsDiagnosticsChannelState),
                 MEM_CAT_SYSTEM);
         if (!state) return NULL;
-        state->roots.slots = &state->namespace_object;
-        state->roots.slot_count = 9;
-        state->roots.name = "diagnostics channel state";
+        root_vector_bind_external(&state->roots, (Context*)context,
+            &state->namespace_object, 9, "diagnostics channel state");
         state->namespace_epoch = UINT64_MAX;
         node_session->diagnostics_channels = state;
     }
