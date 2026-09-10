@@ -20,6 +20,7 @@
 #include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/io/mark_editor.hpp"
 #include "view.hpp"  // For MARKUP_NAME_* constants
+#include "layout.hpp"
 #include "render.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/css_style.hpp"
@@ -101,15 +102,6 @@ static uint32_t collect_ancestors(const DomNode* node, const DomNode** out, uint
         node = node->parent;
     }
     return n;
-}
-
-// True iff `ancestor` is `node` or a strict ancestor of `node`.
-static bool is_inclusive_ancestor(const DomNode* ancestor, const DomNode* node) {
-    while (node) {
-        if (node == ancestor) return true;
-        node = node->parent;
-    }
-    return false;
 }
 
 // ============================================================================
@@ -473,7 +465,7 @@ DomNode* dom_range_common_ancestor(const DomRange* r) {
     if (!r || !r->start.node || !r->end.node) return NULL;
     // Walk up from start.node until we find an inclusive ancestor of end.node.
     for (DomNode* n = r->start.node; n; n = n->parent) {
-        if (is_inclusive_ancestor(n, r->end.node)) return n;
+        if (view_geometry_dom_is_descendant(r->end.node, n, true)) return n;
     }
     return NULL;
 }
@@ -991,7 +983,7 @@ static void adjust_one_endpoint_for_remove(DomBoundary* b,
                                            const DomNode* child,
                                            uint32_t index) {
     if (!b || !b->node) return;
-    if (is_inclusive_ancestor(child, b->node)) {
+    if (view_geometry_dom_is_descendant(b->node, child, true)) {
         b->node = const_cast<DomNode*>(parent);
         b->offset = index;
         return;
@@ -1005,19 +997,7 @@ static bool removed_node_is_atomic_selection_boundary(const DomNode* child) {
     if (!child || !child->is_element()) return false;
     const DomElement* elem = child->as_element();
     if (!elem) return false;
-    NameId tag = elem->tag();
-    return tag == MARKUP_NAME_IFRAME ||
-        tag == MARKUP_NAME_IMG ||
-        tag == MARKUP_NAME_HR ||
-        tag == MARKUP_NAME_INPUT ||
-        tag == MARKUP_NAME_SELECT ||
-        tag == MARKUP_NAME_TEXTAREA ||
-        tag == MARKUP_NAME_VIDEO ||
-        tag == MARKUP_NAME_CANVAS ||
-        tag == MARKUP_NAME_EMBED ||
-        tag == MARKUP_NAME_OBJECT ||
-        tag == MARKUP_NAME_AUDIO ||
-        tag == MARKUP_NAME_BUTTON;
+    return layout_tag_is_non_caret_container(elem->tag(), true);
 }
 
 static DomText* last_text_descendant_for_selection(DomNode* node) {
@@ -1395,13 +1375,13 @@ static void compute_post_mutation_boundary(const DomRange* r,
                                            DomNode** out_node, uint32_t* out_off) {
     DomNode* sn = r->start.node;
     DomNode* en = r->end.node;
-    if (is_inclusive_ancestor(sn, en)) {
+    if (view_geometry_dom_is_descendant(en, sn, true)) {
         *out_node = sn;
         *out_off  = r->start.offset;
         return;
     }
     DomNode* ref = sn;
-    while (ref->parent && !is_inclusive_ancestor(ref->parent, en)) {
+    while (ref->parent && !view_geometry_dom_is_descendant(en, ref->parent, true)) {
         ref = ref->parent;
     }
     *out_node = ref->parent;
@@ -1532,12 +1512,12 @@ static DomElement* range_process_contents(DomRange* r, RangeOp op,
     // Determine first/last partially-contained children of `common`.
     DomNode* first_partial = nullptr;
     DomNode* last_partial  = nullptr;
-    if (!is_inclusive_ancestor(sn, en)) {
+    if (!view_geometry_dom_is_descendant(en, sn, true)) {
         DomNode* ref = sn;
         while (ref && ref->parent != common) ref = ref->parent;
         first_partial = ref;
     }
-    if (!is_inclusive_ancestor(en, sn)) {
+    if (!view_geometry_dom_is_descendant(sn, en, true)) {
         DomNode* ref = en;
         while (ref && ref->parent != common) ref = ref->parent;
         last_partial = ref;
@@ -1707,7 +1687,7 @@ bool dom_range_surround_contents(DomRange* r, DomNode* node, const char** out_ex
     DomNode* en = r->end.node;
     DomNode* common = dom_range_common_ancestor(r);
     if (common) {
-        if (!is_inclusive_ancestor(sn, en)) {
+        if (!view_geometry_dom_is_descendant(en, sn, true)) {
             DomNode* ref = sn;
             while (ref && ref->parent != common) ref = ref->parent;
             if (ref && ref->is_element()) {
@@ -1715,7 +1695,7 @@ bool dom_range_surround_contents(DomRange* r, DomNode* node, const char** out_ex
                 return false;
             }
         }
-        if (!is_inclusive_ancestor(en, sn)) {
+        if (!view_geometry_dom_is_descendant(sn, en, true)) {
             DomNode* ref = en;
             while (ref && ref->parent != common) ref = ref->parent;
             if (ref && ref->is_element()) {
@@ -2832,13 +2812,6 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
     return out;
 }
 
-// Find the document root (top-most ancestor) for `n`.
-static DomNode* root_of(DomNode* n) {
-    if (!n) return nullptr;
-    while (n->parent) n = n->parent;
-    return n;
-}
-
 // Find the first text node in the subtree (or the subtree's leftmost leaf if no text exists).
 static DomNode* first_in_subtree(DomNode* n) {
     if (!n) return nullptr;
@@ -3064,10 +3037,7 @@ static uint32_t cp_before(DomBoundary b) {
 
 static bool node_is_descendant_of(DomNode* node, DomElement* root) {
     if (!root) return true; // no confinement
-    for (DomNode* p = node; p; p = p->parent) {
-        if (p->is_element() && p->as_element() == root) return true;
-    }
-    return false;
+    return view_geometry_dom_is_descendant(node, static_cast<DomNode*>(root));
 }
 
 static bool node_is_false_island_for_host(DomNode* node, DomElement* host) {
@@ -3983,8 +3953,8 @@ static bool node_tag_is(DomNode* node, const char* tag) {
 
 static bool element_is_hidden_input(DomElement* elem) {
     if (!element_tag_is(elem, "input")) return false;
-    const char* type = elem->get_attribute("type");
-    return type && tag_ieq(type, "hidden");
+    return form_input_kind_is(elem->get_attribute("type"),
+        FORM_INPUT_KIND_HIDDEN);
 }
 
 static bool node_is_visible_line_control(DomNode* node) {
@@ -4219,7 +4189,7 @@ static bool line_stop_list_move(DomBoundary focus,
     if (!focus.node || !out) return false;
     DomElement* root = host;
     if (!root) {
-        DomNode* doc_root = root_of(focus.node);
+        DomNode* doc_root = range_root_of(focus.node);
         root = doc_root && doc_root->is_element() ? doc_root->as_element() : nullptr;
     }
     if (!root) return false;
@@ -4263,7 +4233,7 @@ DomBoundary dom_boundary_move(DomBoundary b, DomModGranularity gran, int32_t cou
     int32_t n = (count > 0) ? count : -count;
 
     if (gran == DOM_MOD_DOCUMENT) {
-        DomNode* r = root_of(b.node);
+        DomNode* r = range_root_of(b.node);
         if (dir > 0) {
             DomNode* tail = last_in_subtree(r);
             if (tail && tail->is_text()) return DomBoundary{ tail, dom_text_utf16_length(tail->as_text()) };

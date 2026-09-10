@@ -1,4 +1,5 @@
 #include "network_integration.h"
+#include "radiant.hpp"
 #include "view.hpp"
 #include "../lambda/network/network_resource_manager.h"
 #include "../lambda/network/network_thread_pool.h"
@@ -12,10 +13,6 @@
 #include "../lib/time_util.h"
 #include "../lambda/input/css/css_font_face.hpp"
 #include <time.h>
-
-static bool is_http_resource_url(const char* url) {
-    return url && (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0);
-}
 
 static void process_registered_font_resource(const CssFontFaceDescriptor* descriptor,
                                              void* user_data) {
@@ -56,41 +53,33 @@ static void attach_font_resource_callback(NetworkResource* res,
 // Returns a heap-allocated absolute URL string (caller must free with mem_free).
 // If resolution fails, returns a copy of the input.
 static char* resolve_url(const char* href, DomDocument* doc) {
-    if (!href) return nullptr;
-    if (url_is_absolute_url(href)) {
-        return mem_strdup(href, MEM_CAT_NETWORK);
-    }
-    if (!doc || !doc->url) {
-        return mem_strdup(href, MEM_CAT_NETWORK);
-    }
-    Url* resolved = url_resolve_relative(href, doc->url);
-    if (resolved && resolved->href) {
-        char* result = mem_strdup(resolved->href->chars, MEM_CAT_NETWORK);
-        url_destroy(resolved);
-        return result;
-    }
-    if (resolved) url_destroy(resolved);
-    return mem_strdup(href, MEM_CAT_NETWORK);
+    return radiant_resolve_resource_url(href, doc ? doc->url : nullptr,
+        MEM_CAT_NETWORK);
 }
 
 static char* resolve_font_resource_url(const char* href, const char* stylesheet_url,
                                        DomDocument* doc) {
-    if (!href) return nullptr;
-    if (url_is_absolute_url(href)) {
-        return mem_strdup(href, MEM_CAT_NETWORK);
-    }
     if (stylesheet_url && url_is_absolute_url(stylesheet_url)) {
         Url* base = url_parse(stylesheet_url);
-        Url* resolved = base ? url_resolve_relative(href, base) : NULL;
+        char* result = base ? radiant_resolve_resource_url(href, base,
+            MEM_CAT_NETWORK) : nullptr;
         if (base) url_destroy(base);
-        if (resolved && resolved->href) {
-            char* result = mem_strdup(resolved->href->chars, MEM_CAT_NETWORK);
-            url_destroy(resolved);
-            return result;
-        }
-        if (resolved) url_destroy(resolved);
+        if (result) return result;
     }
     return resolve_url(href, doc);
+}
+
+static bool queue_resolved_http_resource(DomDocument* doc, const char* href,
+                                         ResourceType type, ResourcePriority priority,
+                                         DomElement* owner) {
+    if (!doc || !doc->resource_manager || !href) return false;
+    char* abs_url = resolve_url(href, doc);
+    bool queued = radiant_url_is_http(abs_url);
+    if (queued) {
+        resource_manager_load(doc->resource_manager, abs_url, type, priority, owner);
+    }
+    mem_free(abs_url);
+    return queued;
 }
 
 // Initialize network support for a document
@@ -125,23 +114,27 @@ int radiant_init_network_support(DomDocument* doc,
 }
 
 // Helper to query selector all matching elements
+typedef struct NetworkSelectorWalk {
+    const char* tag_name;
+    void (*callback)(DomElement*, void*);
+    void* user_data;
+} NetworkSelectorWalk;
+
+static bool network_selector_visitor(DomNode* node, void* user_data) {
+    NetworkSelectorWalk* walk = (NetworkSelectorWalk*)user_data;
+    if (!node || !walk || !walk->callback || !node->is_element()) return true;
+    DomElement* element = node->as_element();
+    if (element->tag_name && strcmp(element->tag_name, walk->tag_name) == 0) {
+        walk->callback(element, walk->user_data);
+    }
+    return true;
+}
+
 static void find_elements_by_selector(DomElement* root, const char* tag_name,
                                       void (*callback)(DomElement*, void*), void* user_data) {
     if (!root || !callback) return;
-
-    // Check current element
-    if (root->tag_name && strcmp(root->tag_name, tag_name) == 0) {
-        callback(root, user_data);
-    }
-
-    // Recursively check children
-    DomNode* child = root->first_child;
-    while (child) {
-        if (child->is_element()) {
-            find_elements_by_selector(child->as_element(), tag_name, callback, user_data);
-        }
-        child = child->next_sibling;
-    }
+    NetworkSelectorWalk walk = {tag_name, callback, user_data};
+    view_geometry_walk_dom_tree(root, network_selector_visitor, &walk);
 }
 
 // Callback for <link rel="stylesheet"> discovery
@@ -160,24 +153,14 @@ static void discover_link_callback(DomElement* link, void* user_data) {
         log_debug("network: discovered stylesheet: %s", href);
 
         // Resolve relative URL against document base
-        char* abs_url = resolve_url(href, doc);
-
-        if (is_http_resource_url(abs_url)) {
-            // Local stylesheets are already loaded synchronously by the document parser.
-            resource_manager_load(doc->resource_manager,
-                                  abs_url,
-                                  RESOURCE_CSS,
-                                  PRIORITY_HIGH,
-                                  link);
-        }
-        mem_free(abs_url);
+        // Local stylesheets are already loaded synchronously by the document parser.
+        queue_resolved_http_resource(doc, href, RESOURCE_CSS, PRIORITY_HIGH, link);
     }
     else if (strcmp(rel, "preload") == 0) {
         // <link rel="preload" href="..." as="...">
         const char* as_type = link->get_attribute("as");
         if (!as_type) return;
 
-        char* abs_url = resolve_url(href, doc);
         ResourceType rtype = RESOURCE_IMAGE;  // default
         ResourcePriority prio = PRIORITY_NORMAL;
 
@@ -196,10 +179,7 @@ static void discover_link_callback(DomElement* link, void* user_data) {
         }
 
         log_debug("network: discovered preload: %s (as=%s)", href, as_type);
-        if (is_http_resource_url(abs_url)) {
-            resource_manager_load(doc->resource_manager, abs_url, rtype, prio, link);
-        }
-        mem_free(abs_url);
+        queue_resolved_http_resource(doc, href, rtype, prio, link);
     }
 }
 
@@ -223,16 +203,7 @@ static void discover_img_callback(DomElement* img, void* user_data) {
     log_debug("network: discovered image: %s", src);
 
     // Resolve relative URL against document base
-    char* abs_url = resolve_url(src, doc);
-
-    if (is_http_resource_url(abs_url)) {
-        resource_manager_load(doc->resource_manager,
-                              abs_url,
-                              RESOURCE_IMAGE,
-                              PRIORITY_NORMAL,
-                              img);
-    }
-    mem_free(abs_url);
+    queue_resolved_http_resource(doc, src, RESOURCE_IMAGE, PRIORITY_NORMAL, img);
 }
 
 // Callback for <svg><use> discovery
@@ -258,16 +229,7 @@ static void discover_use_callback(DomElement* use, void* user_data) {
     log_debug("network: discovered external SVG reference: %s", href);
 
     // Resolve relative URL against document base
-    char* abs_url = resolve_url(href, doc);
-
-    if (is_http_resource_url(abs_url)) {
-        resource_manager_load(doc->resource_manager,
-                              abs_url,
-                              RESOURCE_SVG,
-                              PRIORITY_NORMAL,
-                              use);
-    }
-    mem_free(abs_url);
+    queue_resolved_http_resource(doc, href, RESOURCE_SVG, PRIORITY_NORMAL, use);
 }
 
 // Callback for <script src="..."> discovery
@@ -285,7 +247,7 @@ static void discover_script_callback(DomElement* script, void* user_data) {
     char* abs_url = resolve_url(src, doc);
     log_debug("network: discovered <script src>: %s (priority=%d)", abs_url, priority);
 
-    if (is_http_resource_url(abs_url)) {
+    if (radiant_url_is_http(abs_url)) {
         resource_manager_load(doc->resource_manager, abs_url, RESOURCE_SCRIPT, priority, script);
     }
     mem_free(abs_url);
@@ -319,7 +281,7 @@ static void discover_document_font_resources(DomDocument* doc) {
                     continue;
                 }
                 char* abs_url = resolve_font_resource_url(font_url, font_base_url, doc);
-                if (abs_url && url_is_absolute_url(abs_url) && is_http_resource_url(abs_url)) {
+                if (abs_url && url_is_absolute_url(abs_url) && radiant_url_is_http(abs_url)) {
                     log_debug("network: discovered @font-face url: %s (family: %s)",
                               abs_url, faces[f]->family_name ? faces[f]->family_name : "?");
                     NetworkResource* res = resource_manager_load(
@@ -333,7 +295,7 @@ static void discover_document_font_resources(DomDocument* doc) {
             // Also try the fallback src_url field.
             if (faces[f]->src_url && faces[f]->src_count == 0) {
                 char* abs_url = resolve_font_resource_url(faces[f]->src_url, font_base_url, doc);
-                if (abs_url && url_is_absolute_url(abs_url) && is_http_resource_url(abs_url)) {
+                if (abs_url && url_is_absolute_url(abs_url) && radiant_url_is_http(abs_url)) {
                     log_debug("network: discovered @font-face src_url: %s", abs_url);
                     NetworkResource* res = resource_manager_load(
                         doc->resource_manager, abs_url, RESOURCE_FONT, PRIORITY_HIGH, NULL);

@@ -20,6 +20,24 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+// Shared resource identity/address resolution. Loaders retain ownership and
+// policy; this helper only resolves an address using the caller's category.
+char* radiant_resolve_resource_url(const char* href, Url* base_url,
+                                   MemCategory category);
+char* radiant_resolve_resource_path(const char* href, const char* base_path,
+                                    bool allow_fixture_root, MemCategory category);
+bool radiant_url_is_http(const char* url);
+bool radiant_url_is_http(const Url* url);
+char* radiant_document_resource_base(DomDocument* doc, MemCategory category);
+char* radiant_resolve_wpt_resource_path(const char* href, Url* base_url,
+                                        MemCategory category);
+
+typedef void (*RadiantCssDeclarationVisitor)(CssDeclaration* declaration,
+                                             void* context);
+void radiant_for_each_css_declaration(CssStylesheet* stylesheet,
+                                      RadiantCssDeclarationVisitor visitor,
+                                      void* context);
+
 // consolidated Radiant shell API (DD4).
 
 #ifdef __cplusplus

@@ -443,35 +443,6 @@ static void append_browser_global_sync(StrBuf* buf) {
         "}\n");
 }
 
-static char* try_join_script_resource(const char* root, const char* abs_path) {
-    if (!root || !abs_path || abs_path[0] != '/') return nullptr;
-    size_t root_len = strlen(root);
-    size_t path_len = strlen(abs_path);
-    char* candidate = (char*)mem_alloc(root_len + path_len + 1, MEM_CAT_JS_RUNTIME);
-    if (!candidate) return nullptr;
-    memcpy(candidate, root, root_len);
-    memcpy(candidate + root_len, abs_path, path_len);
-    candidate[root_len + path_len] = '\0';
-    if (file_exists(candidate)) return candidate;
-    mem_free(candidate);
-    return nullptr;
-}
-
-static char* try_layout_support_script_resource(const char* support_root, const char* src) {
-    if (!support_root || !src) return nullptr;
-
-    char* resolved = try_join_script_resource(support_root, src);
-    if (resolved) return resolved;
-
-    const char* css_support_prefix = "/css/support";
-    size_t css_support_prefix_len = strlen(css_support_prefix);
-    if (strncmp(src, css_support_prefix, css_support_prefix_len) == 0 &&
-        src[css_support_prefix_len] == '/') {
-        return try_join_script_resource(support_root, src + css_support_prefix_len);
-    }
-    return nullptr;
-}
-
 static char* resolve_wpt_absolute_script_path(const char* src, Url* base_url) {
     if (!src || src[0] != '/' || src[1] == '/') return nullptr;
 
@@ -499,37 +470,7 @@ static char* resolve_wpt_absolute_script_path(const char* src, Url* base_url) {
         return mem_strdup("builtin:wpt-testdriver-vendor.js", MEM_CAT_JS_RUNTIME);
     }
 
-    if (base_url) {
-        char* base_local = url_to_local_path(base_url);
-        if (base_local) {
-            const char* marker = strstr(base_local, "/test/layout/data/");
-            size_t marker_len = strlen("/test/layout/data");
-            if (!marker) {
-                marker = strstr(base_local, "/layout/data/");
-                marker_len = strlen("/layout/data");
-            }
-            if (marker) {
-                size_t root_len = (size_t)(marker - base_local) + marker_len;
-                char* support_root = (char*)mem_alloc(root_len + strlen("/support") + 1,
-                                                      MEM_CAT_JS_RUNTIME);
-                if (support_root) {
-                    memcpy(support_root, base_local, root_len);
-                    memcpy(support_root + root_len, "/support", strlen("/support") + 1);
-                    char* resolved = try_layout_support_script_resource(support_root, src);
-                    mem_free(support_root);
-                    if (resolved) {
-                        mem_free(base_local);
-                        return resolved;
-                    }
-                }
-            }
-            mem_free(base_local);
-        }
-    }
-
-    char* resolved = try_layout_support_script_resource("test/layout/data/support", src);
-    if (resolved) return resolved;
-    return try_join_script_resource("ref/wpt", src);
+    return radiant_resolve_wpt_resource_path(src, base_url, MEM_CAT_JS_RUNTIME);
 }
 
 /**
@@ -544,63 +485,16 @@ static char* resolve_wpt_absolute_script_path(const char* src, Url* base_url) {
 static char* resolve_script_url(const char* src, Url* base_url, bool* out_is_http) {
     if (!src) return nullptr;
     *out_is_http = false;
-
-    if (src[0] == '/' && src[1] != '/' && base_url &&
-        (base_url->scheme == URL_SCHEME_HTTP || base_url->scheme == URL_SCHEME_HTTPS)) {
-        // resolve root-relative remote paths against the document origin
-        Url* resolved_url = parse_url(base_url, src);
-        if (resolved_url && resolved_url->is_valid &&
-            (resolved_url->scheme == URL_SCHEME_HTTP || resolved_url->scheme == URL_SCHEME_HTTPS)) {
-            const char* url_str = url_get_href(resolved_url);
-            char* resolved_path = mem_strdup(url_str ? url_str : src, MEM_CAT_JS_RUNTIME);
-            *out_is_http = true;
-            url_destroy(resolved_url);
-            return resolved_path;
-        } else {
-            if (resolved_url) url_destroy(resolved_url);
-            return mem_strdup(src, MEM_CAT_JS_RUNTIME);
-        }
-    } else if (src[0] == '/' && src[1] != '/') {
+    if (src[0] == '/' && src[1] != '/') {
         char* wpt_path = resolve_wpt_absolute_script_path(src, base_url);
-        if (wpt_path) {
-            // WPT fixtures use server-root URLs while layout tests run from
-            // local files, so resolve known support scripts before falling
-            // back to the host filesystem root.
-            return wpt_path;
-        }
-        // absolute local path
-        return mem_strdup(src, MEM_CAT_JS_RUNTIME);
-    } else if (strstr(src, "://") != nullptr) {
-        // full url
-        *out_is_http = (strncmp(src, "http://", 7) == 0 || strncmp(src, "https://", 8) == 0);
-        return mem_strdup(src, MEM_CAT_JS_RUNTIME);
-    } else if (base_url) {
-        // resolve relative paths against the base url
-        Url* resolved_url = parse_url(base_url, src);
-        if (resolved_url && resolved_url->is_valid) {
-            if (resolved_url->scheme == URL_SCHEME_HTTP || resolved_url->scheme == URL_SCHEME_HTTPS) {
-                const char* url_str = url_get_href(resolved_url);
-                char* resolved_path = mem_strdup(url_str ? url_str : src, MEM_CAT_JS_RUNTIME);
-                *out_is_http = true;
-                url_destroy(resolved_url);
-                return resolved_path;
-            } else {
-                char* local_path = url_to_local_path(resolved_url);
-                if (local_path) {
-                    url_destroy(resolved_url);
-                    return local_path;
-                } else {
-                    url_destroy(resolved_url);
-                    return mem_strdup(src, MEM_CAT_JS_RUNTIME);
-                }
-            }
-        } else {
-            if (resolved_url) url_destroy(resolved_url);
-            return mem_strdup(src, MEM_CAT_JS_RUNTIME);
-        }
-    } else {
-        return mem_strdup(src, MEM_CAT_JS_RUNTIME);
+        if (wpt_path) return wpt_path;
     }
+    const char* base_href = base_url ? url_get_href(base_url) : nullptr;
+    char* resolved = radiant_resolve_resource_path(
+        src, base_href, false, MEM_CAT_JS_RUNTIME);
+    if (!resolved) return mem_strdup(src, MEM_CAT_JS_RUNTIME);
+    *out_is_http = radiant_url_is_http(resolved);
+    return resolved;
 }
 
 /**

@@ -339,15 +339,10 @@ BlockContextOffset block_context_offset_to_bfc(ViewElement* view, BlockContext* 
     if (!view || !bfc) return offset;
 
     ViewBlock* bfc_elem = bfc->establishing_element;
-    ViewElement* walker = view;
-    while (walker && walker != bfc_elem) {
-        // inline wrappers do not add a block-formatting offset to float geometry.
-        if (walker->is_block()) {
-            offset.x += walker->x;
-            offset.y += walker->y;
-        }
-        walker = walker->parent_view();
-    }
+    RdtLogicalPoint shared = view_geometry_ancestor_offset(
+        view, static_cast<View*>(bfc_elem), true);
+    offset.x = shared.x;
+    offset.y = shared.y;
     return offset;
 }
 
@@ -365,17 +360,6 @@ FloatBox* block_context_alloc_float_box(BlockContext* ctx) {
 // Float Management
 // ============================================================================
 
-static bool block_context_view_is_descendant_of(ViewElement* child,
-                                                ViewElement* ancestor) {
-    if (!child || !ancestor) return false;
-    ViewElement* walker = child->parent_view();
-    while (walker) {
-        if (walker == ancestor) return true;
-        walker = walker->parent_view();
-    }
-    return false;
-}
-
 static void block_context_update_float_geometry(BlockContext* ctx, FloatBox* box) {
     if (!ctx || !box || !box->element) return;
 
@@ -390,16 +374,11 @@ static void block_context_update_float_geometry(BlockContext* ctx, FloatBox* box
 
     // keep the generated-view coordinate conversion used at registration;
     // inline wrappers do not add a block formatting offset.
-    float bfc_x = float_elem->x;
-    float bfc_y = float_elem->y;
-    ViewElement* parent = float_elem->parent_view();
-    while (parent && parent != ctx->establishing_element) {
-        if (parent->is_block()) {
-            bfc_x += parent->x;
-            bfc_y += parent->y;
-        }
-        parent = parent->parent_view();
-    }
+    RdtLogicalPoint bfc_offset = view_geometry_ancestor_offset(
+        static_cast<View*>(float_elem),
+        static_cast<View*>(ctx->establishing_element), true);
+    float bfc_x = bfc_offset.x;
+    float bfc_y = bfc_offset.y;
 
     box->margin_box_left = bfc_x - margin.left - ctx->origin_x;
     box->margin_box_top = bfc_y - margin.top - ctx->origin_y;
@@ -464,8 +443,7 @@ void block_context_refresh_descendant_float_geometry(BlockContext* ctx,
         for (; floating; floating = floating->next) {
             if (!floating->element) continue;
             ViewElement* float_element = lam::view_require_element(floating->element);
-            if (float_element == ancestor ||
-                block_context_view_is_descendant_of(float_element, ancestor)) {
+            if (view_geometry_is_descendant(float_element, ancestor, true)) {
                 block_context_update_float_geometry(ctx, floating);
             }
         }

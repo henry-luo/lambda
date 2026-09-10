@@ -130,14 +130,11 @@ static bool bidi_is_line_text_rect(ViewText* text, TextRect* rect, int line_numb
 static bool bidi_rect_contains_segment_break(ViewText* text, TextRect* rect) {
     if (!text || !rect || !text->text_data()) return false;
     const char* cursor = (const char*)text->text_data() + rect->start_index;
-    int remaining = rect->length;
-    while (remaining > 0) {
+    const char* end = cursor + rect->length;
+    while (cursor < end) {
         uint32_t codepoint = 0;
-        int consumed = str_utf8_decode(cursor, (size_t)remaining, &codepoint);
-        if (consumed <= 0 || consumed > remaining) consumed = 1;
+        if (!layout_utf8_next_codepoint(&cursor, end, &codepoint)) continue;
         if (codepoint == 0x000A || codepoint == 0x000D) return true;
-        cursor += consumed;
-        remaining -= consumed;
     }
     return false;
 }
@@ -159,14 +156,12 @@ static int bidi_find_strong_direction(DomNode* node, bool skip_explicit_dir,
         const char* end = cursor + text->length;
         while (cursor < end) {
             uint32_t codepoint = 0;
-            int bytes = str_utf8_decode(cursor, (size_t)(end - cursor), &codepoint);
-            if (bytes <= 0) { cursor++; continue; }
+            if (!layout_utf8_next_codepoint(&cursor, end, &codepoint)) continue;
             int strong_class = utf_bidi_strong_class(codepoint);
             if (strong_class != 0) {
                 if (first) return strong_class;
                 last_strong = strong_class;
             }
-            cursor += bytes;
         }
         return last_strong;
     }
@@ -215,15 +210,12 @@ static int bidi_first_strong_in_line_view(View* view, int line_number) {
             for (TextRect* rect = text->rect; rect; rect = rect->next) {
                 if (!bidi_is_line_text_rect(text, rect, line_number)) continue;
                 const char* cursor = (const char*)text->text_data() + rect->start_index;
-                int remaining = rect->length;
-                while (remaining > 0) {
+                const char* end = cursor + rect->length;
+                while (cursor < end) {
                     uint32_t codepoint = 0;
-                    int consumed = str_utf8_decode(cursor, (size_t)remaining, &codepoint);
-                    if (consumed <= 0 || consumed > remaining) consumed = 1;
+                    if (!layout_utf8_next_codepoint(&cursor, end, &codepoint)) continue;
                     int strong_class = utf_bidi_strong_class(codepoint);
                     if (strong_class != 0) return strong_class;
-                    cursor += consumed;
-                    remaining -= consumed;
                 }
             }
         } else if (current->view_type == RDT_VIEW_INLINE) {

@@ -1584,7 +1584,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
             // File inputs: Chrome renders as 253×21 border-box with no external border/padding
             // (the internal "Choose File" button + label text are shadow DOM)
-            if (block->form->input_type && strcmp(block->form->input_type, "file") == 0) {
+            if (form_input_kind_is(block->form->input_type,
+                    FORM_INPUT_KIND_FILE)) {
                 block->form->intrinsic_width = 253.0f;
                 block->form->intrinsic_height = FormDefaults::TEXT_HEIGHT;
                 block->ensure_block(lycon);
@@ -1600,18 +1601,20 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 - 2 * (FormDefaults::TEXT_BORDER + FormDefaults::TEXT_PADDING_V);
         block->ensure_boundary(lycon);
             Color text_border_color = (Color){ .r=118, .g=118, .b=118, .a=255 };
-            const char* input_type = block->form->input_type;
-            float border_width = input_type && strcmp(input_type, "color") == 0
+            float border_width = form_input_kind_is(block->form->input_type,
+                    FORM_INPUT_KIND_COLOR)
                 ? FormDefaults::COLOR_BORDER : FormDefaults::TEXT_BORDER;
             apply_html_uniform_border(lycon, block, border_width, CSS_VALUE_SOLID,
                 &text_border_color);
             // Chrome UA: date/time inputs have padding=0; text-like inputs have padding=1
             {
-                const char* itype = block->form->input_type;
-                bool is_date_time = itype && (
-                    strcmp(itype, "date") == 0 || strcmp(itype, "time") == 0 ||
-                    strcmp(itype, "datetime-local") == 0 || strcmp(itype, "month") == 0 ||
-                    strcmp(itype, "week") == 0);
+                FormInputKind input_kind =
+                    form_input_kind(block->form->input_type);
+                bool is_date_time = input_kind == FORM_INPUT_KIND_DATE ||
+                    input_kind == FORM_INPUT_KIND_TIME ||
+                    input_kind == FORM_INPUT_KIND_DATETIME_LOCAL ||
+                    input_kind == FORM_INPUT_KIND_MONTH ||
+                    input_kind == FORM_INPUT_KIND_WEEK;
                 if (is_date_time) {
                     radiant_spacing_set_all(&block->boundary_mut()->padding, 0);
                 } else {

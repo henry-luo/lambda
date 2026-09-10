@@ -342,6 +342,13 @@ float layout_broken_image_fallback_width(LayoutContext* lycon, ViewBlock* block,
                                           const char* fallback_text);
 uint8_t layout_text_autospace_flags(LayoutContext* lycon, DomNode* text_node = nullptr);
 bool layout_text_contains_rtl_codepoint(const char* text, size_t length);
+bool layout_utf8_next_codepoint(const char** cursor, const char* end,
+                                uint32_t* codepoint);
+bool layout_utf8_next_codepoint(const unsigned char** cursor,
+                                const unsigned char* end,
+                                uint32_t* codepoint);
+void layout_resolve_inherited_text_wrap(DomNode* node, CssEnum* overflow_wrap,
+                                         CssEnum* word_break = nullptr);
 bool layout_text_autospace_pair(uint8_t flags, uint32_t previous, uint32_t current);
 float layout_text_autospace_advance(LayoutContext* lycon);
 bool layout_get_grapheme_cluster_bytes(const unsigned char* cluster_start,
@@ -442,8 +449,43 @@ typedef struct IntrinsicSize {
     float last_baseline;
 } IntrinsicSize;
 
+typedef struct ReplacedIntrinsicFacts {
+    float width;
+    float height;
+    float natural_width;
+    float natural_height;
+    float natural_aspect_ratio;
+    bool has_natural_width;
+    bool has_natural_height;
+    bool has_natural_aspect_ratio;
+    bool has_default_size;
+} ReplacedIntrinsicFacts;
+
+struct FlexContainerLayout;
+
+typedef struct ReplacedSvgIntrinsicSize {
+    float width;
+    float height;
+} ReplacedSvgIntrinsicSize;
+
+ReplacedIntrinsicFacts layout_replaced_intrinsic_facts(LayoutContext* lycon,
+                                                      ViewBlock* block);
+bool layout_replaced_intrinsic_axis_size(LayoutContext* lycon, ViewBlock* block,
+                                         DomElement* element, bool horizontal,
+                                         float opposite_size, float* out_size);
+ReplacedSvgIntrinsicSize layout_replaced_svg_intrinsic_size(DomElement* element,
+                                                            float constrained_width = -1.0f);
 IntrinsicSize layout_measure_replaced(LayoutContext* lycon, ViewBlock* block, AvailableSpace space);
 IntrinsicSize layout_measure_form_control(LayoutContext* lycon, ViewBlock* block, AvailableSpace space);
+bool layout_replaced_default_size(NameId tag, float* width, float* height);
+bool layout_measure_replaced_flex_intrinsic(LayoutContext* lycon,
+                                            ViewElement* item,
+                                            FlexContainerLayout* flex_layout,
+                                            IntrinsicSize* out);
+bool layout_replaced_flex_intrinsic_dimensions(ViewBlock* block,
+                                               FlexContainerLayout* flex_layout,
+                                               const ReplacedIntrinsicFacts* facts,
+                                               float* width, float* height);
 void layout_form_control(LayoutContext* lycon, ViewBlock* block);
 float form_control_em_size(LayoutContext* lycon, ViewBlock* block, float em);
 bool form_input_uses_fixed_intrinsic_size(const FormControlProp* form);
@@ -452,6 +494,14 @@ void layout_refresh_html_em_replaced_size(LayoutContext* lycon, DomElement* elem
 float layout_select_combo_intrinsic_width(float max_text_width, bool has_ua_arrow);
 float layout_select_option_text_width(LayoutContext* lycon, DomElement* select,
                                       bool use_min_content);
+typedef struct SelectIntrinsicMeasure {
+    float width;
+    float min_width;
+    float max_width;
+    bool min_excludes_padding;
+} SelectIntrinsicMeasure;
+bool layout_measure_select_intrinsic(LayoutContext* lycon, ViewBlock* block,
+                                     SelectIntrinsicMeasure* out);
 
 IntrinsicSizes layout_measure_intrinsic_widths(LayoutContext* lycon, DomElement* element,
     bool content_only = false);
@@ -476,6 +526,9 @@ ImageSurface* layout_ensure_replaced_image_surface(LayoutContext* lycon,
                                                    ViewBlock* block,
                                                    DomElement* element);
 bool layout_canvas_natural_size(ViewBlock* block, float* out_width, float* out_height);
+bool layout_canvas_intrinsic_size(LayoutContext* lycon, ViewBlock* block,
+                                 float* out_width, float* out_height,
+                                 bool* out_view_box_changed = nullptr);
 bool layout_apply_object_view_box_intrinsic_size(LayoutContext* lycon, DomElement* element,
                                                  float* intrinsic_width,
                                                  float* intrinsic_height);
@@ -1070,6 +1123,12 @@ typedef struct LayoutContainingBlock {
 } LayoutContainingBlock;
 
 bool layout_view_is_abs_or_fixed(ViewBlock* block);
+typedef bool (*LayoutTextContentPredicate)(DomNode* node);
+typedef bool (*LayoutElementContentPredicate)(DomElement* element);
+bool layout_element_has_in_flow_content(DomElement* element,
+                                        LayoutTextContentPredicate text_predicate,
+                                        LayoutElementContentPredicate element_predicate = nullptr);
+bool layout_element_has_direct_text_content(DomElement* element);
 ViewBlock* layout_nearest_block_ancestor(ViewElement* view);
 bool layout_is_initial_containing_block(LayoutContext* lycon, ViewBlock* block);
 
@@ -1389,6 +1448,7 @@ CssEnum layout_inherited_text_transform(DomNode* node);
 bool layout_text_combine_upright_applies(DomNode* text_node);
 float layout_inline_end_edge(ViewSpan* span);
 bool text_codepoint_has_zero_advance(uint32_t codepoint);
+float text_unicode_space_width_em(uint32_t codepoint);
 // tier-3: layout-transient, valid within pass
 struct TableMetadata {
     int column_count;
@@ -2295,6 +2355,15 @@ static inline bool layout_tag_in_list(NameId tag, const NameId* tags, size_t cou
     }
     return false;
 }
+
+// Shared HTML role sets keep replaced/atomic decisions identical across layout,
+// display resolution, and editing hit-testing.
+bool layout_tag_is_replaced_content(NameId tag);
+bool layout_tag_is_replaced_widget(NameId tag);
+bool layout_tag_is_css_replaced(NameId tag);
+bool layout_tag_is_non_caret_container(NameId tag, bool include_button = false);
+bool layout_tag_is_default_inline(NameId tag);
+bool layout_block_is_replaced_baseline(ViewBlock* block, bool include_select_listbox);
 
 inline CssBoxSide layout_axis_side(LayoutAxis axis, bool start) {
     if (axis == LAYOUT_AXIS_X) return start ? CSS_BOX_SIDE_LEFT : CSS_BOX_SIDE_RIGHT;
@@ -4318,6 +4387,8 @@ LayoutBorderSpacingValue layout_resolve_border_spacing_value(
 bool layout_inherit_table_border_spacing(LayoutContext* lycon, DomNode* element,
                                         float* spacing_h, float* spacing_v);
 bool layout_image_orientation_uses_from_image(DomElement* element);
+bool layout_image_intrinsic_size(DomElement* element, ImageSurface* image,
+                                 float* out_width, float* out_height);
 float layout_view_children_bottom(ViewBlock* block, bool block_only);
 
 inline bool layout_element_is_abs_or_fixed(DomElement* element) {
@@ -4365,6 +4436,11 @@ float layout_measure_space_advance(LayoutContext* lycon, struct FontHandle* hand
                                    FontProp* style);
 float layout_measure_glyph_advance(LayoutContext* lycon, struct FontHandle* handle,
                                    FontProp* style, uint32_t codepoint);
+float layout_measure_font_glyph_advance(struct FontHandle* handle, FontProp* style,
+                                        uint32_t codepoint, float raster_scale);
+float layout_measure_utf8_text_width(struct FontHandle* handle, FontProp* style,
+                                     const char* text, size_t byte_length,
+                                     float raster_scale);
 size_t layout_normalize_collapsible_whitespace(const char* text, size_t length,
                                                char* buffer, size_t buffer_size);
 bool layout_text_edge_has_whitespace(const char* text, bool end);

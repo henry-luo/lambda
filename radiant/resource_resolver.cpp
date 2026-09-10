@@ -2,10 +2,211 @@
 
 #include "../lib/mem.h"
 #include "../lib/url.h"
+#include "../lib/file.h"
+#include "../lambda/input/css/css_parser.hpp"
 
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
+
+static void radiant_visit_css_rule(CssRule* rule,
+                                   RadiantCssDeclarationVisitor visitor,
+                                   void* context) {
+    if (!rule || !visitor) return;
+    if (rule->type == CSS_RULE_STYLE) {
+        for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
+            visitor(rule->data.style_rule.declarations[i], context);
+        }
+        for (size_t i = 0; i < rule->data.style_rule.nested_rule_count; i++) {
+            radiant_visit_css_rule(rule->data.style_rule.nested_rules[i],
+                                   visitor, context);
+        }
+    } else if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
+               rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_SCOPE ||
+               rule->type == CSS_RULE_LAYER) {
+        for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
+            radiant_visit_css_rule(rule->data.conditional_rule.rules[i],
+                                   visitor, context);
+        }
+    }
+}
+
+void radiant_for_each_css_declaration(CssStylesheet* stylesheet,
+                                      RadiantCssDeclarationVisitor visitor,
+                                      void* context) {
+    if (!stylesheet || !visitor) return;
+    for (size_t i = 0; i < stylesheet->rule_count; i++) {
+        radiant_visit_css_rule(stylesheet->rules[i], visitor, context);
+    }
+}
+
+bool radiant_url_is_http(const char* url) {
+    return url && (strncmp(url, "http://", 7) == 0 ||
+                   strncmp(url, "https://", 8) == 0);
+}
+
+bool radiant_url_is_http(const Url* url) {
+    return url && (url->scheme == URL_SCHEME_HTTP ||
+                   url->scheme == URL_SCHEME_HTTPS);
+}
+
+char* radiant_document_resource_base(DomDocument* doc, MemCategory category) {
+    if (!doc || !doc->url) return nullptr;
+    if (radiant_url_is_http(doc->url)) {
+        const char* href = url_get_href(doc->url);
+        return href ? mem_strdup(href, category) : nullptr;
+    }
+    char* local = url_to_local_path(doc->url);
+    if (!local) return nullptr;
+    char* result = mem_strdup(local, category);
+    mem_free(local);
+    return result;
+}
+
+static char* radiant_try_wpt_root(const char* root, const char* href,
+                                  MemCategory category) {
+    if (!root || !href || href[0] != '/') return nullptr;
+    const char* candidates[2] = {href,
+        strncmp(href, "/css/support/", 13) == 0 ? href + 13 : nullptr};
+    for (int i = 0; i < 2; i++) {
+        const char* path = candidates[i];
+        if (!path || !*path) continue;
+        size_t root_len = strlen(root);
+        const char* query = strpbrk(path, "?#");
+        size_t path_len = query ? (size_t)(query - path) : strlen(path);
+        size_t separator = i == 0 ? 0 : 1;
+        char* candidate = (char*)mem_alloc(root_len + path_len + separator + 1, category);
+        if (!candidate) continue;
+        memcpy(candidate, root, root_len);
+        if (separator) candidate[root_len++] = '/';
+        memcpy(candidate + root_len, path, path_len);
+        candidate[root_len + path_len] = '\0';
+        if (file_exists(candidate)) return candidate;
+        mem_free(candidate);
+    }
+    return nullptr;
+}
+
+static char* radiant_try_wpt_prefix(const char* prefix, size_t prefix_len,
+                                    const char* suffix, const char* href,
+                                    MemCategory category) {
+    if (!prefix || prefix_len == 0) return nullptr;
+    size_t suffix_len = suffix ? strlen(suffix) : 0;
+    char* root = (char*)mem_alloc(prefix_len + suffix_len + 1, category);
+    if (!root) return nullptr;
+    memcpy(root, prefix, prefix_len);
+    if (suffix_len) memcpy(root + prefix_len, suffix, suffix_len);
+    root[prefix_len + suffix_len] = '\0';
+    char* result = radiant_try_wpt_root(root, href, category);
+    mem_free(root);
+    return result;
+}
+
+char* radiant_resolve_wpt_resource_path(const char* href, Url* base_url,
+                                        MemCategory category) {
+    if (!href || href[0] != '/' || href[1] == '/') return nullptr;
+
+    if (base_url) {
+        char* base_local = url_to_local_path(base_url);
+        if (base_local) {
+            const char* wpt_marker = strstr(base_local, "/ref/wpt/");
+            if (wpt_marker) {
+                size_t root_len = (size_t)(wpt_marker - base_local) + strlen("/ref/wpt");
+                char* resolved = radiant_try_wpt_prefix(base_local, root_len,
+                                                        nullptr, href, category);
+                if (resolved) {
+                    mem_free(base_local);
+                    return resolved;
+                }
+            }
+            char candidate[4096];
+            if (radiant_resolve_layout_support_resource_path(
+                    href, base_local, candidate, sizeof(candidate))) {
+                char* resolved = mem_strdup(candidate, category);
+                mem_free(base_local);
+                return resolved;
+            }
+            mem_free(base_local);
+        }
+    }
+
+    char cwd[4096];
+    if (getcwd(cwd, sizeof(cwd))) {
+        size_t cwd_len = strlen(cwd);
+        char* resolved = radiant_try_wpt_prefix(cwd, cwd_len, "/ref/wpt",
+                                                href, category);
+        if (resolved) return resolved;
+        resolved = radiant_try_wpt_prefix(cwd, cwd_len,
+                                           "/test/layout/data/support", href,
+                                           category);
+        if (resolved) return resolved;
+    }
+    return radiant_try_wpt_root("ref/wpt", href, category);
+}
+
+char* radiant_resolve_resource_url(const char* href, Url* base_url,
+                                   MemCategory category) {
+    if (!href) return nullptr;
+    if (url_is_absolute_url(href) || !base_url) {
+        return mem_strdup(href, category);
+    }
+    Url* resolved = url_resolve_relative(href, base_url);
+    if (resolved && resolved->href) {
+        char* result = mem_strdup(resolved->href->chars, category);
+        url_destroy(resolved);
+        return result;
+    }
+    if (resolved) url_destroy(resolved);
+    return mem_strdup(href, category);
+}
+
+char* radiant_resolve_resource_path(const char* href, const char* base_path,
+                                    bool allow_fixture_root, MemCategory category) {
+    if (!href || !*href) return nullptr;
+    Url* base_url = base_path && *base_path ? url_parse(base_path) : nullptr;
+    if (allow_fixture_root && href[0] == '/' && href[1] != '/' &&
+        (!base_url || !radiant_url_is_http(base_path))) {
+        char* fixture = radiant_resolve_wpt_resource_path(href, base_url, category);
+        if (fixture) {
+            if (base_url) url_destroy(base_url);
+            return fixture;
+        }
+    }
+
+    bool base_valid = base_url && base_url->is_valid;
+    char* resolved = radiant_resolve_resource_url(href, base_url, category);
+    if (base_url) url_destroy(base_url);
+    if (!resolved) return nullptr;
+    if (strncmp(resolved, "file:", 5) == 0) {
+        Url* file_url = url_parse(resolved);
+        char* local = file_url ? url_to_local_path(file_url) : nullptr;
+        if (file_url) url_destroy(file_url);
+        mem_free(resolved);
+        if (local) {
+            char* result = mem_strdup(local, category);
+            mem_free(local);
+            return result;
+        }
+        return nullptr;
+    }
+    if (base_path && !radiant_url_is_http(base_path) &&
+        href[0] != '/' && !url_is_absolute_url(href) &&
+        !base_valid) {
+        const char* slash = strrchr(base_path, '/');
+        if (slash) {
+            size_t dir_len = (size_t)(slash - base_path) + 1;
+            size_t href_len = strlen(href);
+            char* joined = (char*)mem_alloc(dir_len + href_len + 1, category);
+            if (joined) {
+                memcpy(joined, base_path, dir_len);
+                memcpy(joined + dir_len, href, href_len + 1);
+                mem_free(resolved);
+                return joined;
+            }
+        }
+    }
+    return resolved;
+}
 
 static bool radiant_resource_is_shared_res_href(const char* href) {
     return href && (strncmp(href, "res/", 4) == 0 ||

@@ -10,6 +10,7 @@
 #include "rdt_video.h"
 #include "event.hpp"
 #include "view.hpp"
+#include "glyph_sampling.hpp"
 #include "../lib/font/font.h"
 #include "../lib/log.h"
 #include "../lib/mem.h"
@@ -79,68 +80,37 @@ static void format_time(double seconds, char* buf, int bufsize) {
     snprintf(buf, bufsize, "%d:%02d", m, s);
 }
 
-// alpha-blend a pixel onto the surface (still needed for glyph blitting)
-static inline void blend_pixel(uint32_t* dst, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
-    if (a == 0) return;
-    if (a == 255) { *dst = (uint32_t)r | ((uint32_t)g << 8) | ((uint32_t)b << 16) | (0xFFu << 24); return; }
-    uint32_t d = *dst;
-    uint8_t dr = d & 0xFF, dg = (d >> 8) & 0xFF, db = (d >> 16) & 0xFF;
-    uint8_t inv_a = 255 - a;
-    uint8_t or_ = (uint8_t)((r * a + dr * inv_a) / 255);
-    uint8_t og  = (uint8_t)((g * a + dg * inv_a) / 255);
-    uint8_t ob  = (uint8_t)((b * a + db * inv_a) / 255);
-    *dst = (uint32_t)or_ | ((uint32_t)og << 8) | ((uint32_t)ob << 16) | (0xFFu << 24);
-}
-
 // blit a grayscale glyph bitmap onto the surface with a given color
 static void blit_glyph(ImageSurface* surface, GlyphBitmap* bitmap,
                        int x, int y, uint8_t cr, uint8_t cg, uint8_t cb, uint8_t ca) {
-    if (!bitmap || !bitmap->buffer || !surface || !surface->pixels) return;
-    int sw = surface->width, sh = surface->height;
-    int pitch = surface->pitch / 4;
-    uint32_t* pixels = (uint32_t*)surface->pixels;
-
-    for (int row = 0; row < bitmap->height; row++) {
-        int py = y + row;
-        if (py < 0 || py >= sh) continue;
-        uint32_t* dst_row = pixels + py * pitch;
-        for (int col = 0; col < bitmap->width; col++) {
-            int px = x + col;
-            if (px < 0 || px >= sw) continue;
-            uint8_t intensity = bitmap->buffer[row * bitmap->pitch + col];
-            if (intensity == 0) continue;
-            uint8_t a = (uint8_t)((ca * intensity) / 255);
-            blend_pixel(&dst_row[px], cr, cg, cb, a);
-        }
-    }
+    if (!surface || !bitmap) return;
+    Bound clip = {0, 0, (float)surface->width, (float)surface->height};
+    Color color = {0};
+    color.r = cr;
+    color.g = cg;
+    color.b = cb;
+    color.a = ca;
+    glyph_draw_coverage_bitmap(surface, bitmap, x, y, &clip, color);
 }
 
-// draw a text string using font system glyphs, returns total advance width
-static float draw_font_text(ImageSurface* surface, FontContext* font_ctx,
-                            const char* text, float x, float y_baseline,
-                            float font_size_px, uint8_t cr, uint8_t cg, uint8_t cb, uint8_t ca) {
-    if (!font_ctx || !text || !text[0]) return 0;
-
-    FontStyleDesc style = {};
-    style.family = "Helvetica,Arial,sans-serif";
-    style.size_px = font_size_px;
-    style.weight = FONT_WEIGHT_NORMAL;
-    style.slant = FONT_SLANT_NORMAL;
-
+static float video_text_advance(ImageSurface* surface, FontContext* font_ctx,
+                                const char* text, float x, float y_baseline,
+                                float font_size_px, Color color, bool draw) {
+    if (!font_ctx || !text || !text[0]) return 0.0f;
+    FontStyleDesc style = font_style_desc_system_ui(font_size_px);
     FontHandle* handle = font_resolve(font_ctx, &style);
-    if (!handle) return 0;
+    if (!handle) return 0.0f;
 
     float cx = x;
     for (int i = 0; text[i]; i++) {
         uint32_t codepoint = (uint32_t)(unsigned char)text[i];
-        LoadedGlyph* glyph = font_load_glyph(handle, &style, codepoint, true);
+        LoadedGlyph* glyph = font_load_glyph(handle, &style, codepoint, draw);
         if (!glyph) { cx += font_size_px * 0.5f; continue; }
-
-        int gx = (int)(cx + glyph->bitmap.bearing_x);
-        int gy = (int)(y_baseline - glyph->bitmap.bearing_y);
-
-        if (glyph->bitmap.pixel_mode == GLYPH_PIXEL_GRAY && glyph->bitmap.buffer) {
-            blit_glyph(surface, &glyph->bitmap, gx, gy, cr, cg, cb, ca);
+        if (draw && glyph->bitmap.pixel_mode == GLYPH_PIXEL_GRAY && glyph->bitmap.buffer) {
+            blit_glyph(surface, &glyph->bitmap,
+                       (int)(cx + glyph->bitmap.bearing_x),
+                       (int)(y_baseline - glyph->bitmap.bearing_y),
+                       color.r, color.g, color.b, color.a);
         }
         cx += glyph->advance_x;
     }
@@ -149,29 +119,23 @@ static float draw_font_text(ImageSurface* surface, FontContext* font_ctx,
     return cx - x;
 }
 
+// draw a text string using font system glyphs, returns total advance width
+static float draw_font_text(ImageSurface* surface, FontContext* font_ctx,
+                            const char* text, float x, float y_baseline,
+                            float font_size_px, uint8_t cr, uint8_t cg, uint8_t cb, uint8_t ca) {
+    Color color = {};
+    color.r = cr;
+    color.g = cg;
+    color.b = cb;
+    color.a = ca;
+    return video_text_advance(surface, font_ctx, text, x, y_baseline,
+                              font_size_px, color, true);
+}
+
 // measure text width without drawing
 static float measure_font_text(FontContext* font_ctx, const char* text, float font_size_px) {
-    if (!font_ctx || !text || !text[0]) return 0;
-
-    FontStyleDesc style = {};
-    style.family = "Helvetica,Arial,sans-serif";
-    style.size_px = font_size_px;
-    style.weight = FONT_WEIGHT_NORMAL;
-    style.slant = FONT_SLANT_NORMAL;
-
-    FontHandle* handle = font_resolve(font_ctx, &style);
-    if (!handle) return (float)strlen(text) * font_size_px * 0.6f;
-
-    float width = 0;
-    for (int i = 0; text[i]; i++) {
-        uint32_t codepoint = (uint32_t)(unsigned char)text[i];
-        LoadedGlyph* glyph = font_load_glyph(handle, &style, codepoint, false);
-        if (glyph) width += glyph->advance_x;
-        else width += font_size_px * 0.5f;
-    }
-
-    font_handle_release(handle);
-    return width;
+    return video_text_advance(nullptr, font_ctx, text, 0.0f, 0.0f,
+                              font_size_px, {}, false);
 }
 
 // ---------------------------------------------------------------------------

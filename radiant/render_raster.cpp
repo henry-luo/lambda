@@ -7,29 +7,12 @@
 static void raster_fill_row(uint8_t* pixels, int x, int wd, uint32_t color) {
     uint32_t* pixel = (uint32_t*)pixels + x;
     uint32_t* end = pixel + wd;
-
     uint8_t src_a = (color >> 24) & 0xFF;
-
-    if (src_a == 255) {
-        while (pixel < end) { *pixel++ = color; }
-    } else if (src_a > 0) {
-        uint8_t src_r = color & 0xFF;
-        uint8_t src_g = (color >> 8) & 0xFF;
-        uint8_t src_b = (color >> 16) & 0xFF;
-        uint8_t inv_a = 255 - src_a;
-
-        while (pixel < end) {
-            uint32_t dst = *pixel;
-            uint8_t dst_r = dst & 0xFF;
-            uint8_t dst_g = (dst >> 8) & 0xFF;
-            uint8_t dst_b = (dst >> 16) & 0xFF;
-
-            uint8_t out_r = (src_r * src_a + dst_r * inv_a) / 255;
-            uint8_t out_g = (src_g * src_a + dst_g * inv_a) / 255;
-            uint8_t out_b = (src_b * src_a + dst_b * inv_a) / 255;
-
-            *pixel++ = (255 << 24) | (out_b << 16) | (out_g << 8) | out_r;
-        }
+    if (src_a == 0) return;
+    while (pixel < end) {
+        *pixel = src_a == 255 ? color :
+            render_pixel_source_over_opaque(*pixel, color);
+        pixel++;
     }
 }
 
@@ -54,83 +37,23 @@ void raster_fill_rect(RasterPaintContext* ctx, Rect* rect, uint32_t color) {
     if (left >= right || top >= bottom) return;
 
     int y_off = surface->tile_offset_y;
-    if (clip_depth <= 0) {
-        for (int i = top; i < bottom; i++) {
-            uint8_t* row_pixels = (uint8_t*)surface->pixels + (i - y_off) * surface->pitch;
-            raster_fill_row(row_pixels, left, right - left, color);
-        }
-        return;
-    }
-
-    if (clip_shapes_rect_inside(clip_shapes, clip_depth,
+    bool need_shape_clip = clip_depth > 0 &&
+        !clip_shapes_rect_inside(clip_shapes, clip_depth,
             (float)left + 0.5f, (float)top + 0.5f,
-            (float)(right - left - 1), (float)(bottom - top - 1))) {
-        for (int i = top; i < bottom; i++) {
-            uint8_t* row_pixels = (uint8_t*)surface->pixels + (i - y_off) * surface->pitch;
-            raster_fill_row(row_pixels, left, right - left, color);
-        }
-        return;
-    }
+            (float)(right - left - 1), (float)(bottom - top - 1));
 
     for (int i = top; i < bottom; i++) {
-        float py = (float)i + 0.5f;
         int rl = left;
         int rr = right;
-        clip_shapes_scanline_bounds(clip_shapes, clip_depth, py, left, right, &rl, &rr);
+        if (need_shape_clip) {
+            float py = (float)i + 0.5f;
+            clip_shapes_scanline_bounds(clip_shapes, clip_depth, py,
+                                        left, right, &rl, &rr);
+        }
         if (rl >= rr) continue;
         uint8_t* row_pixels = (uint8_t*)surface->pixels + (i - y_off) * surface->pitch;
         raster_fill_row(row_pixels, rl, rr - rl, color);
     }
-}
-
-static uint32_t raster_bilinear_interpolate_impl(ImageSurface* src, float src_x,
-                                                 float src_y, bool wrap) {
-    int src_w = (src->decoded_width > 0) ? src->decoded_width : src->width;
-    int src_h = (src->decoded_height > 0) ? src->decoded_height : src->height;
-    int x1 = (int)floorf(src_x);
-    int y1 = (int)floorf(src_y);
-    int x2 = x1 + 1;
-    int y2 = y1 + 1;
-
-    if (wrap) {
-        x1 = ((x1 % src_w) + src_w) % src_w;
-        y1 = ((y1 % src_h) + src_h) % src_h;
-        x2 = ((x2 % src_w) + src_w) % src_w;
-        y2 = ((y2 % src_h) + src_h) % src_h;
-    } else {
-        x1 = std::max(0, std::min(x1, src_w - 1));
-        y1 = std::max(0, std::min(y1, src_h - 1));
-        x2 = std::max(0, std::min(x2, src_w - 1));
-        y2 = std::max(0, std::min(y2, src_h - 1));
-    }
-
-    float fx = src_x - floorf(src_x);
-    float fy = src_y - floorf(src_y);
-
-    uint32_t* p11 = (uint32_t*)((uint8_t*)src->pixels + y1 * src->pitch + x1 * 4);
-    uint32_t* p21 = (uint32_t*)((uint8_t*)src->pixels + y1 * src->pitch + x2 * 4);
-    uint32_t* p12 = (uint32_t*)((uint8_t*)src->pixels + y2 * src->pitch + x1 * 4);
-    uint32_t* p22 = (uint32_t*)((uint8_t*)src->pixels + y2 * src->pitch + x2 * 4);
-
-    uint8_t r11 = *p11 & 0xFF, g11 = (*p11 >> 8) & 0xFF, b11 = (*p11 >> 16) & 0xFF, a11 = (*p11 >> 24) & 0xFF;
-    uint8_t r21 = *p21 & 0xFF, g21 = (*p21 >> 8) & 0xFF, b21 = (*p21 >> 16) & 0xFF, a21 = (*p21 >> 24) & 0xFF;
-    uint8_t r12 = *p12 & 0xFF, g12 = (*p12 >> 8) & 0xFF, b12 = (*p12 >> 16) & 0xFF, a12 = (*p12 >> 24) & 0xFF;
-    uint8_t r22 = *p22 & 0xFF, g22 = (*p22 >> 8) & 0xFF, b22 = (*p22 >> 16) & 0xFF, a22 = (*p22 >> 24) & 0xFF;
-
-    uint8_t r = (uint8_t)(r11 * (1 - fx) * (1 - fy) + r21 * fx * (1 - fy) + r12 * (1 - fx) * fy + r22 * fx * fy);
-    uint8_t g = (uint8_t)(g11 * (1 - fx) * (1 - fy) + g21 * fx * (1 - fy) + g12 * (1 - fx) * fy + g22 * fx * fy);
-    uint8_t b = (uint8_t)(b11 * (1 - fx) * (1 - fy) + b21 * fx * (1 - fy) + b12 * (1 - fx) * fy + b22 * fx * fy);
-    uint8_t a = (uint8_t)(a11 * (1 - fx) * (1 - fy) + a21 * fx * (1 - fy) + a12 * (1 - fx) * fy + a22 * fx * fy);
-
-    return r | (g << 8) | (b << 16) | (a << 24);
-}
-
-static uint32_t raster_bilinear_interpolate_wrap(ImageSurface* src, float src_x, float src_y) {
-    return raster_bilinear_interpolate_impl(src, src_x, src_y, true);
-}
-
-static uint32_t raster_bilinear_interpolate(ImageSurface* src, float src_x, float src_y) {
-    return raster_bilinear_interpolate_impl(src, src_x, src_y, false);
 }
 
 static uint32_t raster_area_average(ImageSurface* src, float x0, float y0, float x1, float y1) {
@@ -192,6 +115,8 @@ void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect
     ClipShape** clip_shapes = ctx->clip_shapes;
     int clip_depth = ctx->clip_depth;
     if (!src || !dst || !dst_rect) return;
+    int src_w = (src->decoded_width > 0) ? src->decoded_width : src->width;
+    int src_h = (src->decoded_height > 0) ? src->decoded_height : src->height;
     Bound default_clip = {0, 0, (float)dst->width, (float)dst->height};
     if (!clip) clip = &default_clip;
     if (!src->pixels) {
@@ -252,17 +177,17 @@ void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect
             } else if (scale_mode == SCALE_MODE_LINEAR) {
                 float bx = src_rect->x + (j - dst_rect->x + 0.5f) * x_ratio - 0.5f;
                 float by = src_rect->y + (i - dst_rect->y + 0.5f) * y_ratio - 0.5f;
-                src_color = raster_bilinear_interpolate(src, bx, by);
+                src_color = render_pixel_sample_bilinear(
+                    (const uint8_t*)src->pixels, src_w, src_h, src->pitch, bx, by, false, false);
             } else if (scale_mode == SCALE_MODE_LINEAR_WRAP) {
                 float bx = src_rect->x + (j - dst_rect->x + 0.5f) * x_ratio - 0.5f;
                 float by = src_rect->y + (i - dst_rect->y + 0.5f) * y_ratio - 0.5f;
-                src_color = raster_bilinear_interpolate_wrap(src, bx, by);
+                src_color = render_pixel_sample_bilinear(
+                    (const uint8_t*)src->pixels, src_w, src_h, src->pitch, bx, by, true, false);
             } else {
                 int int_src_x = (int)(src_x + 0.5f);
                 int int_src_y = (int)(src_y + 0.5f);
 
-                int src_w = (src->decoded_width > 0) ? src->decoded_width : src->width;
-                int src_h = (src->decoded_height > 0) ? src->decoded_height : src->height;
                 if (int_src_x < 0 || int_src_x >= src_w || int_src_y < 0 || int_src_y >= src_h) {
                     continue;
                 }
@@ -271,30 +196,7 @@ void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect
                 src_color = *((uint32_t*)src_pixel);
             }
 
-            uint8_t src_r = src_color & 0xFF;
-            uint8_t src_g = (src_color >> 8) & 0xFF;
-            uint8_t src_b = (src_color >> 16) & 0xFF;
-            uint8_t src_a = (src_color >> 24) & 0xFF;
-            if (opacity < 255 && src_a > 0) {
-                src_a = (uint8_t)((src_a * opacity + 127) / 255);
-            }
-
-            if (src_a == 255) {
-                *((uint32_t*)dst_pixel) = src_color;
-            } else if (src_a > 0) {
-                uint8_t dst_r = dst_pixel[0];
-                uint8_t dst_g = dst_pixel[1];
-                uint8_t dst_b = dst_pixel[2];
-                uint8_t dst_a = dst_pixel[3];
-
-                float alpha = src_a / 255.0f;
-                float inv_alpha = 1.0f - alpha;
-
-                dst_pixel[0] = (uint8_t)(src_r * alpha + dst_r * inv_alpha);
-                dst_pixel[1] = (uint8_t)(src_g * alpha + dst_g * inv_alpha);
-                dst_pixel[2] = (uint8_t)(src_b * alpha + dst_b * inv_alpha);
-                dst_pixel[3] = (uint8_t)(src_a + dst_a * inv_alpha);
-            }
+            render_pixel_source_over_opaque_bytes(dst_pixel, src_color, opacity);
         }
     }
 }

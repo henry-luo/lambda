@@ -151,15 +151,22 @@ static void cg_release_heap_clip_stack_if_empty() {
     s_cg_clip_capacity = RDT_CG_INITIAL_CLIP_DEPTH;
 }
 
-static inline uint8_t cg_premul_channel(uint8_t channel, uint8_t alpha) {
-    return (uint8_t)(((uint32_t)channel * alpha + 127) / 255);
-}
-
-static inline uint8_t cg_unpremul_channel(uint8_t channel, uint8_t alpha) {
-    if (alpha == 0) return 0;
-    if (alpha == 255) return channel;
-    uint32_t value = ((uint32_t)channel * 255 + (alpha / 2)) / alpha;
-    return (uint8_t)(value > 255 ? 255 : value);
+static uint32_t cg_convert_pixel(uint32_t pixel, bool to_premultiplied) {
+    uint8_t a = (pixel >> 24) & 0xff;
+    uint8_t b = (pixel >> 16) & 0xff;
+    uint8_t g = (pixel >> 8) & 0xff;
+    uint8_t r = pixel & 0xff;
+    if (to_premultiplied) {
+        b = render_pixel_premultiply_channel(b, a);
+        g = render_pixel_premultiply_channel(g, a);
+        r = render_pixel_premultiply_channel(r, a);
+    } else {
+        b = render_pixel_unpremultiply_channel(b, a);
+        g = render_pixel_unpremultiply_channel(g, a);
+        r = render_pixel_unpremultiply_channel(r, a);
+    }
+    return ((uint32_t)a << 24) | ((uint32_t)b << 16) |
+           ((uint32_t)g << 8) | (uint32_t)r;
 }
 
 static void cg_sync_from_target(RdtVectorImpl* cg) {
@@ -168,15 +175,7 @@ static void cg_sync_from_target(RdtVectorImpl* cg) {
         uint32_t* dst = cg->premul_pixels + y * cg->stride;
         uint32_t* src = cg->pixels + y * cg->stride;
         for (int x = 0; x < cg->width; x++) {
-            uint32_t p = src[x];
-            uint8_t a = (p >> 24) & 0xff;
-            uint8_t b = (p >> 16) & 0xff;
-            uint8_t g = (p >> 8) & 0xff;
-            uint8_t r = p & 0xff;
-            dst[x] = ((uint32_t)a << 24) |
-                     ((uint32_t)cg_premul_channel(b, a) << 16) |
-                     ((uint32_t)cg_premul_channel(g, a) << 8) |
-                     (uint32_t)cg_premul_channel(r, a);
+            dst[x] = cg_convert_pixel(src[x], true);
         }
     }
     cg->needs_sync_from_target = false;
@@ -189,15 +188,7 @@ static void cg_flush_to_target(RdtVectorImpl* cg) {
         uint32_t* dst = cg->pixels + y * cg->stride;
         uint32_t* src = cg->premul_pixels + y * cg->stride;
         for (int x = 0; x < cg->width; x++) {
-            uint32_t p = src[x];
-            uint8_t a = (p >> 24) & 0xff;
-            uint8_t b = (p >> 16) & 0xff;
-            uint8_t g = (p >> 8) & 0xff;
-            uint8_t r = p & 0xff;
-            dst[x] = ((uint32_t)a << 24) |
-                     ((uint32_t)cg_unpremul_channel(b, a) << 16) |
-                     ((uint32_t)cg_unpremul_channel(g, a) << 8) |
-                     (uint32_t)cg_unpremul_channel(r, a);
+            dst[x] = cg_convert_pixel(src[x], false);
         }
     }
     cg->dirty = false;
@@ -281,15 +272,7 @@ static uint32_t* cg_copy_premul_image_data(const uint32_t* pixels, int src_w,
         const uint32_t* src = pixels + y * src_stride;
         uint32_t* dst = copy + y * src_w;
         for (int x = 0; x < src_w; x++) {
-            uint32_t p = src[x];
-            uint8_t a = (p >> 24) & 0xff;
-            uint8_t b = (p >> 16) & 0xff;
-            uint8_t g = (p >> 8) & 0xff;
-            uint8_t r = p & 0xff;
-            dst[x] = ((uint32_t)a << 24) |
-                     ((uint32_t)cg_premul_channel(b, a) << 16) |
-                     ((uint32_t)cg_premul_channel(g, a) << 8) |
-                     (uint32_t)cg_premul_channel(r, a);
+            dst[x] = cg_convert_pixel(src[x], true);
         }
     }
     return copy;
@@ -1035,19 +1018,6 @@ static const char* cg_picture_elem_attr(Element* element, const char* attr_name)
     return nullptr;
 }
 
-static Element* cg_picture_find_id_recursive(Element* elem, const char* id) {
-    if (!elem || !id) return nullptr;
-    const char* elem_id = cg_picture_elem_attr(elem, "id");
-    if (elem_id && strcmp(elem_id, id) == 0) return elem;
-    for (int64_t i = 0; i < elem->length; i++) {
-        Item child = elem->items[i];
-        if (get_type_id(child) != LMD_TYPE_ELEMENT) continue;
-        Element* found = cg_picture_find_id_recursive(child.element, id);
-        if (found) return found;
-    }
-    return nullptr;
-}
-
 RdtPicture* rdt_picture_load(const char* path) {
     if (!path) return nullptr;
 
@@ -1177,7 +1147,7 @@ Element* rdt_picture_get_svg_root(RdtPicture* pic) {
 
 Element* rdt_picture_find_svg_element_by_id(RdtPicture* pic, const char* id) {
     if (!pic || pic->kind != RdtPicture::KIND_SVG_DOM || !pic->svg || !id || !*id) return nullptr;
-    return cg_picture_find_id_recursive(pic->svg->svg_root, id);
+    return rdt_picture_find_element_id(pic->svg->svg_root, id, cg_picture_elem_attr);
 }
 
 Pool* rdt_picture_get_pool(RdtPicture* pic) {

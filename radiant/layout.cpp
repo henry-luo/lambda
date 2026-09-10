@@ -26,6 +26,84 @@ using namespace std::chrono;
 
 double g_style_resolve_time = 0;
 
+bool layout_tag_is_replaced_content(NameId tag) {
+    switch (tag) {
+        case MARKUP_NAME_IMG:
+        case MARKUP_NAME_VIDEO:
+        case MARKUP_NAME_IFRAME:
+        case MARKUP_NAME_CANVAS:
+        case MARKUP_NAME_SVG:
+        case MARKUP_NAME_EMBED:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool layout_tag_is_replaced_widget(NameId tag) {
+    switch (tag) {
+        case MARKUP_NAME_INPUT:
+        case MARKUP_NAME_SELECT:
+        case MARKUP_NAME_TEXTAREA:
+        case MARKUP_NAME_METER:
+        case MARKUP_NAME_PROGRESS:
+        case MARKUP_NAME_WEBVIEW:
+        case MARKUP_NAME_HR:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool layout_tag_is_css_replaced(NameId tag) {
+    return tag == MARKUP_NAME_IMG || tag == MARKUP_NAME_VIDEO ||
+        tag == MARKUP_NAME_INPUT || tag == MARKUP_NAME_SELECT ||
+        tag == MARKUP_NAME_TEXTAREA || tag == MARKUP_NAME_IFRAME ||
+        tag == MARKUP_NAME_HR || tag == MARKUP_NAME_METER ||
+        tag == MARKUP_NAME_PROGRESS || tag == MARKUP_NAME_CANVAS ||
+        tag == MARKUP_NAME_WEBVIEW || tag == MARKUP_NAME_EMBED;
+}
+
+bool layout_tag_is_non_caret_container(NameId tag, bool include_button) {
+    if (tag == MARKUP_NAME_BR || tag == MARKUP_NAME_HR ||
+        layout_tag_is_replaced_content(tag) ||
+        tag == MARKUP_NAME_INPUT || tag == MARKUP_NAME_SELECT ||
+        tag == MARKUP_NAME_TEXTAREA || tag == MARKUP_NAME_OBJECT ||
+        tag == MARKUP_NAME_AUDIO) return true;
+    return include_button && tag == MARKUP_NAME_BUTTON;
+}
+
+bool layout_tag_is_default_inline(NameId tag) {
+    static const NameId inline_tags[] = {
+        MARKUP_NAME_A, MARKUP_NAME_SPAN, MARKUP_NAME_EM, MARKUP_NAME_STRONG,
+        MARKUP_NAME_B, MARKUP_NAME_I, MARKUP_NAME_U, MARKUP_NAME_S,
+        MARKUP_NAME_SMALL, MARKUP_NAME_BIG, MARKUP_NAME_SUB, MARKUP_NAME_SUP,
+        MARKUP_NAME_ABBR, MARKUP_NAME_ACRONYM, MARKUP_NAME_CITE, MARKUP_NAME_DFN,
+        MARKUP_NAME_Q, MARKUP_NAME_VAR, MARKUP_NAME_TIME, MARKUP_NAME_MARK,
+        MARKUP_NAME_BDI, MARKUP_NAME_BDO, MARKUP_NAME_CODE, MARKUP_NAME_TT,
+        MARKUP_NAME_KBD, MARKUP_NAME_SAMP, MARKUP_NAME_BR, MARKUP_NAME_LABEL,
+        MARKUP_NAME_IMG, MARKUP_NAME_VIDEO, MARKUP_NAME_AUDIO, MARKUP_NAME_CANVAS,
+        MARKUP_NAME_IFRAME, MARKUP_NAME_EMBED, MARKUP_NAME_OBJECT, MARKUP_NAME_SVG,
+        MARKUP_NAME_METER, MARKUP_NAME_PROGRESS, MARKUP_NAME_BUTTON,
+        MARKUP_NAME_INPUT, MARKUP_NAME_SELECT, MARKUP_NAME_TEXTAREA
+    };
+    return layout_tag_in_list(tag, inline_tags,
+                              sizeof(inline_tags) / sizeof(*inline_tags));
+}
+
+bool layout_block_is_replaced_baseline(ViewBlock* block, bool include_select_listbox) {
+    if (!block) return false;
+    NameId tag = block->tag();
+    if (tag == MARKUP_NAME_IMG || tag == MARKUP_NAME_IFRAME ||
+        tag == MARKUP_NAME_VIDEO || tag == MARKUP_NAME_EMBED ||
+        tag == MARKUP_NAME_TEXTAREA ||
+        (tag == MARKUP_NAME_OBJECT && block->get_attribute(MARKUP_NAME_DATA))) {
+        return true;
+    }
+    return include_select_listbox && tag == MARKUP_NAME_SELECT &&
+        (!block->form || block->form->multiple || block->form->select_size > 1);
+}
+
 bool layout_overflow_establishes_scroll_container(CssEnum overflow) {
     // CSS Overflow: clip suppresses scrolling; hidden remains programmatically scrollable.
     return overflow == CSS_VALUE_AUTO || overflow == CSS_VALUE_SCROLL ||
@@ -1082,25 +1160,12 @@ bool layout_element_was_inline(DomElement* element, bool include_replaced) {
         element, CSS_PROPERTY_DISPLAY, CSS_VALUE__UNDEF);
     if (display != CSS_VALUE__UNDEF) return layout_display_is_inline_level(display);
 
-    static const NameId inline_tags[] = {
-        MARKUP_NAME_SPAN, MARKUP_NAME_A, MARKUP_NAME_EM, MARKUP_NAME_STRONG,
-        MARKUP_NAME_B, MARKUP_NAME_I, MARKUP_NAME_U, MARKUP_NAME_S,
-        MARKUP_NAME_SMALL, MARKUP_NAME_CODE, MARKUP_NAME_SUB, MARKUP_NAME_SUP,
-        MARKUP_NAME_ABBR, MARKUP_NAME_CITE, MARKUP_NAME_Q, MARKUP_NAME_VAR,
-        MARKUP_NAME_TIME, MARKUP_NAME_MARK, MARKUP_NAME_BDO, MARKUP_NAME_BDI,
-        MARKUP_NAME_LABEL
-    };
-    if (layout_tag_in_list(element->tag_id, inline_tags,
-                           sizeof(inline_tags) / sizeof(inline_tags[0]))) return true;
+    if (layout_tag_is_default_inline(element->tag_id)) return true;
     if (!include_replaced) return false;
-    static const NameId replaced_tags[] = {
-        MARKUP_NAME_IMG, MARKUP_NAME_INPUT, MARKUP_NAME_SELECT, MARKUP_NAME_TEXTAREA,
-        MARKUP_NAME_BUTTON, MARKUP_NAME_VIDEO, MARKUP_NAME_IFRAME, MARKUP_NAME_CANVAS,
-        MARKUP_NAME_METER, MARKUP_NAME_PROGRESS, MARKUP_NAME_EMBED, MARKUP_NAME_OBJECT,
-        MARKUP_NAME_SVG
-    };
-    return layout_tag_in_list(element->tag_id, replaced_tags,
-                              sizeof(replaced_tags) / sizeof(replaced_tags[0]));
+    NameId tag = element->tag_id;
+    return layout_tag_is_replaced_content(tag) ||
+        layout_tag_is_replaced_widget(tag) || tag == MARKUP_NAME_BUTTON ||
+        tag == MARKUP_NAME_OBJECT;
 }
 
 bool layout_object_uses_default_size(DomElement* element) {
@@ -1114,12 +1179,7 @@ bool layout_element_is_replaced(DomElement* element) {
     NameId tag = element->tag();
     // An empty object reserves the default object box while CSSOM exposes inline display.
     return (view && view->display.inner == RDT_DISPLAY_REPLACED) ||
-        tag == MARKUP_NAME_IMG || tag == MARKUP_NAME_VIDEO ||
-        tag == MARKUP_NAME_IFRAME || tag == MARKUP_NAME_HR ||
-        tag == MARKUP_NAME_SVG || tag == MARKUP_NAME_CANVAS ||
-        tag == MARKUP_NAME_EMBED || tag == MARKUP_NAME_INPUT ||
-        tag == MARKUP_NAME_SELECT || tag == MARKUP_NAME_TEXTAREA ||
-        tag == MARKUP_NAME_METER || tag == MARKUP_NAME_PROGRESS ||
+        layout_tag_is_replaced_content(tag) || layout_tag_is_replaced_widget(tag) ||
         (tag == MARKUP_NAME_OBJECT && element->get_attribute(MARKUP_NAME_DATA)) ||
         layout_object_uses_default_size(element) ||
         (tag == MARKUP_NAME_AUDIO && element->has_attribute(MARKUP_NAME_CONTROLS)) ||
@@ -1219,6 +1279,20 @@ bool layout_image_orientation_uses_from_image(DomElement* element) {
         return !(declaration->value->type == CSS_VALUE_TYPE_KEYWORD &&
                  declaration->value->data.keyword == CSS_VALUE_NONE);
     }
+    return true;
+}
+
+bool layout_image_intrinsic_size(DomElement* element, ImageSurface* image,
+                                 float* out_width, float* out_height) {
+    if (!element || !image || !out_width || !out_height) return false;
+    bool from_image = layout_image_orientation_uses_from_image(element);
+    float width = (from_image || image->encoded_width <= 0)
+        ? (float)image->width : (float)image->encoded_width;
+    float height = (from_image || image->encoded_height <= 0)
+        ? (float)image->height : (float)image->encoded_height;
+    if (width <= 0.0f || height <= 0.0f) return false;
+    *out_width = width;
+    *out_height = height;
     return true;
 }
 
@@ -1368,17 +1442,80 @@ float layout_measure_glyph_advance(LayoutContext* lycon, FontHandle* handle,
     if (!style) return 0.0f;
     if (style->font_size <= 0.0f) return 0.0f;
     if (!handle) handle = style->font_handle;
-    if (handle) {
-        FontStyleDesc desc = font_style_desc_from_prop(style);
-        LoadedGlyph* glyph = font_load_glyph(handle, &desc, codepoint, false);
-        float advance = 0.0f;
-        if (glyph && glyph->advance_x > 0.0f) {
-            float raster_scale = ui_context_raster_scale(lycon->ui_context);
-            advance = glyph->advance_x / raster_scale;
-        }
-        if (advance > 0.0f) return advance;
+    return layout_measure_font_glyph_advance(
+        handle, style, codepoint, ui_context_raster_scale(lycon->ui_context));
+}
+
+float layout_measure_font_glyph_advance(FontHandle* handle, FontProp* style,
+                                        uint32_t codepoint, float raster_scale) {
+    if (!style || style->font_size <= 0.0f || !handle) return 0.0f;
+    FontStyleDesc desc = font_style_desc_from_prop(style);
+    LoadedGlyph* glyph = font_load_glyph(handle, &desc, codepoint, false);
+    if (!glyph || glyph->advance_x <= 0.0f) return 0.0f;
+    return glyph->advance_x / (raster_scale > 0.0f ? raster_scale : 1.0f);
+}
+
+bool layout_utf8_next_codepoint(const char** cursor, const char* end,
+                                uint32_t* codepoint) {
+    if (!cursor || !*cursor || !end || *cursor >= end || !codepoint) return false;
+    int bytes = str_utf8_decode(*cursor, (size_t)(end - *cursor), codepoint);
+    if (bytes <= 0 || bytes > end - *cursor) {
+        (*cursor)++;
+        return false;
     }
-    return 0.0f;
+    *cursor += bytes;
+    return true;
+}
+
+bool layout_utf8_next_codepoint(const unsigned char** cursor,
+                                const unsigned char* end,
+                                uint32_t* codepoint) {
+    const char* text_cursor = cursor ? (const char*)*cursor : nullptr;
+    bool decoded = layout_utf8_next_codepoint(
+        &text_cursor, (const char*)end, codepoint);
+    if (cursor) *cursor = (const unsigned char*)text_cursor;
+    return decoded;
+}
+
+void layout_resolve_inherited_text_wrap(DomNode* node, CssEnum* overflow_wrap,
+                                        CssEnum* word_break) {
+    if (overflow_wrap) *overflow_wrap = CSS_VALUE_NORMAL;
+    if (word_break) *word_break = CSS_VALUE_NORMAL;
+    for (DomNode* current = node; current; current = current->parent) {
+        if (!current->is_element()) continue;
+        DomElement* element = lam::dom_require_element(current);
+        if (!element->blk) continue;
+        if (word_break && *word_break == CSS_VALUE_NORMAL &&
+            element->block()->word_break != 0) {
+            *word_break = element->block()->word_break;
+        }
+        if (overflow_wrap && element->block()->overflow_wrap != 0) {
+            *overflow_wrap = element->block()->overflow_wrap;
+            return;
+        }
+        if (overflow_wrap && element->block()->word_break == CSS_VALUE_BREAK_WORD) {
+            *overflow_wrap = CSS_VALUE_ANYWHERE;
+            return;
+        }
+    }
+}
+
+float layout_measure_utf8_text_width(FontHandle* handle, FontProp* style,
+                                     const char* text, size_t byte_length,
+                                     float raster_scale) {
+    if (!handle || !style || !text || byte_length == 0) return 0.0f;
+    FontStyleDesc desc = font_style_desc_from_prop(style);
+    const unsigned char* cursor = (const unsigned char*)text;
+    const unsigned char* end = cursor + byte_length;
+    float width = 0.0f;
+    while (cursor < end) {
+        uint32_t codepoint = 0;
+        if (!layout_utf8_next_codepoint(&cursor, end, &codepoint)) continue;
+        LoadedGlyph* glyph = font_load_glyph(handle, &desc, codepoint, false);
+        if (glyph) width += glyph->advance_x /
+            (raster_scale > 0.0f ? raster_scale : 1.0f);
+    }
+    return width;
 }
 
 float layout_measure_space_advance(LayoutContext* lycon, FontHandle* handle,
@@ -2552,10 +2689,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             }
         } else if (!is_inline_table &&
                    !layout_inline_box_is_orthogonal_to_parent(block)) {
-            bool is_replaced_elem = (block->tag() == MARKUP_NAME_IMG || block->tag() == MARKUP_NAME_IFRAME ||
-                block->tag() == MARKUP_NAME_VIDEO || block->tag() == MARKUP_NAME_EMBED ||
-                (block->tag() == MARKUP_NAME_OBJECT && block->get_attribute(MARKUP_NAME_DATA)) ||
-                block->tag() == MARKUP_NAME_TEXTAREA);
+            bool is_replaced_elem = layout_block_is_replaced_baseline(block, false);
             float content_baseline = block->blk &&
                 block->block_mut()->last_line_max_ascender > 0.0f
                 ? radiant::layout_inline_baseline_for_source(
@@ -3828,14 +3962,6 @@ static void layout_move_display_contents_pseudo_to_edge(
     parent->last_child = last;
 }
 
-static bool layout_node_is_descendant_or_self(DomNode* node,
-                                              DomNode* ancestor) {
-    for (DomNode* current = node; current; current = current->parent) {
-        if (current == ancestor) return true;
-    }
-    return false;
-}
-
 static bool layout_node_is_hidden_by_closed_details(DomNode* node) {
     if (!node) return false;
     for (DomNode* ancestor = node->parent; ancestor;
@@ -3855,7 +3981,7 @@ static bool layout_node_is_hidden_by_closed_details(DomNode* node) {
                 break;
             }
         }
-        if (!summary || !layout_node_is_descendant_or_self(node, summary)) {
+        if (!summary || !view_geometry_dom_is_descendant(node, summary, true)) {
             return true;
         }
     }
@@ -4863,26 +4989,18 @@ int detect_html_version_lambda_css(DomDocument* doc) {
     return doc->html_version;
 }
 
-static void reset_styles_resolved_recursive(DomNode* node) {
-    if (!node) return;
-
+static bool reset_styles_resolved_visitor(DomNode* node, void*) {
     if (node->is_element()) {
         DomElement* elem = node->as_element();
-        if (!layout_element_is_anonymous_table_fixup(elem)) {
-            elem->set_styles_resolved(false);
-        }
-
-        DomNode* child = elem->first_child;
-        while (child) {
-            reset_styles_resolved_recursive(child);
-            child = child->next_sibling;
-        }
+        if (!layout_element_is_anonymous_table_fixup(elem)) elem->set_styles_resolved(false);
     }
+    return true;
 }
 
 void reset_styles_resolved(DomDocument* doc) {
     if (!doc || !doc->root) return;
-    reset_styles_resolved_recursive(doc->root);
+    view_geometry_walk_dom_tree(static_cast<DomNode*>(doc->root),
+                                reset_styles_resolved_visitor, nullptr);
 }
 
 void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {

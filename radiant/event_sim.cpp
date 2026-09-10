@@ -95,10 +95,7 @@ static bool sim_target_is_rich_editing_surface(View* target) {
 static bool sim_focus_is_within_target(const DomDocument* doc, const View* target) {
     if (!doc || !doc->state || !target) return false;
     View* focused = focus_get(doc->state);
-    for (DomNode* node = static_cast<DomNode*>(focused); node; node = node->parent) {
-        if (node == static_cast<const DomNode*>(target)) return true;
-    }
-    return false;
+    return view_geometry_is_descendant(focused, const_cast<View*>(target));
 }
 
 static bool sim_event_is_assertion(SimEventType type) {
@@ -106,6 +103,249 @@ static bool sim_event_is_assertion(SimEventType type) {
     // in the common retry/schema path instead of requiring fixed waits around it.
     return type == SIM_EVENT_ASSERT_CLIPBOARD ||
            (type >= SIM_EVENT_ASSERT_CARET && type <= SIM_EVENT_ASSERT_SNAPSHOT);
+}
+
+static void sim_record_assertion(EventSimContext* ctx, bool passed) {
+    if (!ctx) return;
+    if (passed) ctx->pass_count++;
+    else ctx->fail_count++;
+}
+
+static bool sim_float_matches(const char* assertion, const char* field,
+                              float expected, float actual, float tolerance) {
+    if (fabsf(actual - expected) <= tolerance) return true;
+    log_error("event_sim: %s FAIL - %s expected %.1f, got %.1f (tol=%.1f)",
+              assertion ? assertion : "assertion", field ? field : "value",
+              expected, actual, tolerance);
+    return false;
+}
+
+static bool sim_bool_matches(const char* assertion, const char* field,
+                             bool expected, bool actual) {
+    if (actual == expected) return true;
+    log_error("event_sim: %s FAIL - %s expected %s, got %s",
+              assertion ? assertion : "assertion", field ? field : "value",
+              expected ? "true" : "false", actual ? "true" : "false");
+    return false;
+}
+
+typedef struct SimBoolExpectation {
+    const char* field;
+    bool enabled;
+    bool expected;
+    bool actual;
+} SimBoolExpectation;
+
+static bool sim_match_bool_expectations(const SimBoolExpectation* expectations,
+                                        int count) {
+    bool passed = true;
+    for (int i = 0; i < count; i++) {
+        if (!expectations[i].enabled) continue;
+        passed &= sim_bool_matches("assert_state_store", expectations[i].field,
+                                   expectations[i].expected, expectations[i].actual);
+    }
+    return passed;
+}
+
+typedef struct SimFloatExpectation {
+    const char* field;
+    bool enabled;
+    float expected;
+    float actual;
+} SimFloatExpectation;
+
+static bool sim_match_float_expectations(const SimFloatExpectation* expectations,
+                                         int count, float tolerance) {
+    bool passed = true;
+    for (int i = 0; i < count; i++) {
+        if (!expectations[i].enabled) continue;
+        passed &= sim_float_matches("assert_state_store", expectations[i].field,
+                                    expectations[i].expected, expectations[i].actual,
+                                    tolerance);
+    }
+    return passed;
+}
+
+typedef struct SimIntExpectation {
+    const char* field;
+    bool enabled;
+    int expected;
+    int actual;
+} SimIntExpectation;
+
+static bool sim_match_int_expectations(const char* assertion,
+                                       const SimIntExpectation* expectations,
+                                       int count) {
+    bool passed = true;
+    for (int i = 0; i < count; i++) {
+        if (!expectations[i].enabled) continue;
+        if (expectations[i].actual == expectations[i].expected) continue;
+        log_error("event_sim: %s FAIL - %s expected %d, got %d",
+                  assertion, expectations[i].field, expectations[i].expected,
+                  expectations[i].actual);
+        passed = false;
+    }
+    return passed;
+}
+
+typedef struct SimStringExpectation {
+    const char* field;
+    bool enabled;
+    const char* expected;
+    const char* actual;
+} SimStringExpectation;
+
+static bool sim_match_string_expectations(const char* assertion,
+                                          const SimStringExpectation* expectations,
+                                          int count) {
+    bool passed = true;
+    for (int i = 0; i < count; i++) {
+        if (!expectations[i].enabled) continue;
+        const char* expected = expectations[i].expected ? expectations[i].expected : "";
+        const char* actual = expectations[i].actual ? expectations[i].actual : "";
+        if (strcmp(actual, expected) == 0) continue;
+        log_error("event_sim: %s FAIL - %s expected %s, got %s",
+                  assertion, expectations[i].field, expected, actual);
+        passed = false;
+    }
+    return passed;
+}
+
+static bool sim_match_selection_offsets(EventSimContext* ctx,
+                                        const char* assertion,
+                                        uint32_t expected_start,
+                                        uint32_t expected_end,
+                                        uint32_t actual_start,
+                                        uint32_t actual_end) {
+    bool passed = actual_start == expected_start && actual_end == expected_end;
+    if (!passed) {
+        log_error("event_sim: %s - mismatch: expected [%u..%u], got [%u..%u]",
+                  assertion, expected_start, expected_end, actual_start, actual_end);
+    } else {
+        log_info("event_sim: %s PASS [%u..%u]", assertion, actual_start, actual_end);
+    }
+    sim_record_assertion(ctx, passed);
+    return passed;
+}
+
+static bool sim_count_matches(const char* assertion, const char* target,
+                              int actual, int expected, int minimum, int maximum) {
+    bool passed = true;
+    if (expected >= 0 && actual != expected) {
+        log_error("event_sim: %s FAIL - '%s' expected %d, got %d",
+                  assertion, target, expected, actual);
+        passed = false;
+    }
+    if (minimum >= 0 && actual < minimum) {
+        log_error("event_sim: %s FAIL - '%s' expected min %d, got %d",
+                  assertion, target, minimum, actual);
+        passed = false;
+    }
+    if (maximum >= 0 && actual > maximum) {
+        log_error("event_sim: %s FAIL - '%s' expected max %d, got %d",
+                  assertion, target, maximum, actual);
+        passed = false;
+    }
+    return passed;
+}
+
+static void sim_record_bool_assertion(EventSimContext* ctx, const char* assertion,
+                                      const char* field, bool expected, bool actual) {
+    bool passed = sim_bool_matches(assertion, field, expected, actual);
+    if (passed) log_info("event_sim: %s PASS", assertion);
+    sim_record_assertion(ctx, passed);
+}
+
+static DocState* sim_require_state(EventSimContext* ctx, UiContext* uicon,
+                                   const char* assertion, DomDocument** out_doc) {
+    DomDocument* doc = uicon ? uicon->document : nullptr;
+    if (out_doc) *out_doc = doc;
+    if (doc && doc->state) return (DocState*)doc->state;
+    log_error("event_sim: %s - no document or state",
+              assertion ? assertion : "assertion");
+    sim_record_assertion(ctx, false);
+    return nullptr;
+}
+
+static DomDocument* sim_require_document(EventSimContext* ctx, UiContext* uicon,
+                                         const char* assertion) {
+    DomDocument* doc = uicon ? uicon->document : nullptr;
+    if (doc) return doc;
+    log_error("event_sim: %s - no document", assertion ? assertion : "assertion");
+    sim_record_assertion(ctx, false);
+    return nullptr;
+}
+
+static void sim_reflow_if_pending(DomDocument* doc, DocState* state) {
+    if (!doc || !state || !state->needs_reflow) return;
+    reflow_process_pending(state);
+    if (!state->needs_reflow) return;
+    extern void reflow_html_doc(DomDocument* doc);
+    reflow_html_doc(doc);
+    doc_state_clear_reflow(state);
+}
+
+static bool sim_attribute_matches(const char* actual, SimEvent* ev) {
+    if (!ev) return false;
+    if (ev->has_expected_attribute_presence) {
+        return (actual != nullptr) == ev->expected_attribute_present;
+    }
+    if (ev->assert_equals) return actual && strcmp(actual, ev->assert_equals) == 0;
+    if (ev->assert_contains) return actual && strstr(actual, ev->assert_contains);
+    if (ev->assert_not_contains) return !actual || !strstr(actual, ev->assert_not_contains);
+    return actual != nullptr;
+}
+
+static bool sim_text_matches(const char* assertion, const char* actual,
+                             const SimEvent* ev) {
+    actual = actual ? actual : "";
+    bool passed = true;
+    if (ev && ev->assert_equals && strcmp(actual, ev->assert_equals) != 0) {
+        log_error("event_sim: %s FAIL - expected '%s', got '%s'",
+                  assertion, ev->assert_equals, actual);
+        passed = false;
+    }
+    if (ev && ev->assert_contains && !strstr(actual, ev->assert_contains)) {
+        log_error("event_sim: %s FAIL - expected to contain '%s', got '%s'",
+                  assertion, ev->assert_contains, actual);
+        passed = false;
+    }
+    return passed;
+}
+
+static View* find_element_by_selector(DomDocument* doc, const char* selector_text,
+                                      int index = 0);
+
+static bool sim_element_matches_assertions(const char* assertion, DomDocument* doc,
+                                           View* found, const SimEvent* ev,
+                                           float x, float y,
+                                           bool selector_allows_ancestor) {
+    if (!found || !ev) return false;
+    bool passed = true;
+    DomElement* found_elem = found->as_element();
+    if (ev->expected_at_tag && found_elem) {
+        const char* tag = found_elem->tag_name;
+        if (!tag || strcasecmp(tag, ev->expected_at_tag) != 0) {
+            log_error("event_sim: %s FAIL - expected tag '%s', got '%s' at (%.2f, %.2f)",
+                      assertion, ev->expected_at_tag, tag ? tag : "(null)", x, y);
+            passed = false;
+        }
+    }
+    if (ev->expected_at_selector && found_elem) {
+        View* expected = find_element_by_selector(doc, ev->expected_at_selector);
+        bool selector_matched = expected && expected == found;
+        if (selector_allows_ancestor) {
+            selector_matched = view_geometry_is_descendant(found, expected, true);
+        }
+        if (!selector_matched) {
+            const char* detail = selector_allows_ancestor
+                ? "does not match selector" : "is not selector";
+            log_error("event_sim: %s FAIL - element at (%.2f, %.2f) %s '%s'",
+                      assertion, x, y, detail, ev->expected_at_selector);
+            passed = false;
+        }
+    }
+    return passed;
 }
 
 typedef struct EventSimStateStoreSnapshot {
@@ -307,24 +547,28 @@ static bool find_text_position(DomDocument* doc, const char* target_text, float*
     return find_text_position_recursive(static_cast<View*>(doc->view_tree->root), target_text, out_x, out_y);
 }
 
+typedef struct SimTextDescendantSearch {
+    const char* target_text;
+    View* result;
+} SimTextDescendantSearch;
+
+static bool sim_find_text_descendant_visitor(View* view, bool entering, void* context) {
+    if (!entering) return true;
+    SimTextDescendantSearch* search = (SimTextDescendantSearch*)context;
+    if (view->view_type != RDT_VIEW_TEXT) return true;
+    DomText* text_view = view->as_text();
+    if (!search->target_text || (text_view && text_view->text &&
+                                 strstr(text_view->text, search->target_text))) {
+        search->result = view;
+        return false;
+    }
+    return true;
+}
+
 static View* sim_find_text_descendant(View* view, const char* target_text) {
-    if (!view) return nullptr;
-    if (view->view_type == RDT_VIEW_TEXT) {
-        DomText* text_view = view->as_text();
-        if (!target_text || (text_view && text_view->text && strstr(text_view->text, target_text))) {
-            return view;
-        }
-    }
-    DomElement* elem = view->as_element();
-    if (elem) {
-        View* child = static_cast<View*>(elem->first_child);
-        while (child) {
-            View* found = sim_find_text_descendant(child, target_text);
-            if (found) return found;
-            child = static_cast<View*>(child->next_sibling);
-        }
-    }
-    return nullptr;
+    SimTextDescendantSearch search = {target_text, nullptr};
+    view_geometry_walk_tree(view, sim_find_text_descendant_visitor, &search);
+    return search.result;
 }
 
 static View* find_text_view(DomDocument* doc, const char* target_text) {
@@ -372,31 +616,13 @@ static View* resolve_editing_range_view(DomDocument* doc, SimEvent* ev,
 // CSS Selector Element Finding
 // ============================================================================
 
-// Traverse view tree depth-first, calling visitor for each element
-typedef bool (*SimViewVisitor)(View* view, void* udata);
-
-static bool sim_traverse_views(View* view, SimViewVisitor visitor, void* udata) {
-    if (!view) return true;
-    if (view->is_element()) {
-        if (!visitor(view, udata)) return false;
-    }
-    DomElement* elem = view->as_element();
-    if (elem) {
-        View* child = static_cast<View*>(elem->first_child);
-        while (child) {
-            if (!sim_traverse_views(child, visitor, udata)) return false;
-            child = static_cast<View*>(child->next_sibling);
-        }
-    }
-    return true;
-}
-
 typedef struct {
     CssSelector* selector;
     SelectorMatcher* matcher;
     View* result;
     int target_index;   // which match to return (0-based)
     int current_match;  // counter of matches found so far
+    int count;
 } SimSelectorCtx;
 
 static bool sim_selector_visitor(View* view, void* udata) {
@@ -404,11 +630,15 @@ static bool sim_selector_visitor(View* view, void* udata) {
     if (!view->is_element()) return true;
     DomElement* dom_elem = lam::dom_require_element(view);
     if (selector_matcher_matches(ctx->matcher, ctx->selector, dom_elem, NULL)) {
-        if (ctx->current_match == ctx->target_index) {
-            ctx->result = view;
-            return false;  // stop on target match
+        if (ctx->target_index >= 0) {
+            if (ctx->current_match == ctx->target_index) {
+                ctx->result = view;
+                return false;  // stop on target match
+            }
+            ctx->current_match++;
+        } else {
+            ctx->count++;
         }
-        ctx->current_match++;
     }
     return true;
 }
@@ -431,30 +661,41 @@ static SelectorMatcher* sim_create_dom_selector_matcher(DomDocument* doc) {
     return doc ? (SelectorMatcher*)dom_create_selector_matcher_bridge(doc) : NULL;
 }
 
+static bool sim_parse_selector(DomDocument* doc, const char* selector_text,
+                               CssSelector** out_selector,
+                               SelectorMatcher** out_matcher) {
+    if (out_selector) *out_selector = nullptr;
+    if (out_matcher) *out_matcher = nullptr;
+    if (!doc || !selector_text || !out_selector || !out_matcher) return false;
+    Pool* pool = doc->document_pool;
+    if (!pool) return false;
+
+    size_t token_count = 0;
+    CssToken* tokens = css_tokenize(selector_text, strlen(selector_text),
+                                    pool, &token_count);
+    if (!tokens || token_count == 0) return false;
+    int pos = 0;
+    CssSelector* selector = css_parse_selector_with_combinators(
+        tokens, &pos, (int)token_count, pool);
+    if (!selector) return false;
+    SelectorMatcher* matcher = sim_create_dom_selector_matcher(doc);
+    if (!matcher) return false;
+    *out_selector = selector;
+    *out_matcher = matcher;
+    return true;
+}
+
 // Find nth element matching a CSS selector in the document (0-based index)
-static View* find_element_by_selector(DomDocument* doc, const char* selector_text, int index = 0) {
+static View* find_element_by_selector(DomDocument* doc, const char* selector_text, int index) {
     if (!doc || !doc->view_tree || !doc->view_tree->root || !selector_text) return NULL;
     sim_flush_pending_reflow(doc);
 
-    Pool* pool = doc->document_pool;
-    if (!pool) return NULL;
-
-    // Tokenize and parse the selector
-    size_t token_count = 0;
-    CssToken* tokens = css_tokenize(selector_text, strlen(selector_text), pool, &token_count);
-    if (!tokens || token_count == 0) {
+    CssSelector* selector = nullptr;
+    SelectorMatcher* matcher = nullptr;
+    if (!sim_parse_selector(doc, selector_text, &selector, &matcher)) {
         log_error("event_sim: failed to tokenize selector '%s'", selector_text);
         return NULL;
     }
-    int pos = 0;
-    CssSelector* selector = css_parse_selector_with_combinators(tokens, &pos, (int)token_count, pool);
-    if (!selector) {
-        log_error("event_sim: failed to parse selector '%s'", selector_text);
-        return NULL;
-    }
-
-    SelectorMatcher* matcher = sim_create_dom_selector_matcher(doc);
-    if (!matcher) return NULL;
 
     SimSelectorCtx ctx = {0};
     ctx.selector = selector;
@@ -462,26 +703,11 @@ static View* find_element_by_selector(DomDocument* doc, const char* selector_tex
     ctx.result = NULL;
     ctx.target_index = index;
     ctx.current_match = 0;
+    ctx.count = 0;
 
-    sim_traverse_views(static_cast<View*>(doc->view_tree->root), sim_selector_visitor, &ctx);
+    view_geometry_walk_elements(static_cast<View*>(doc->view_tree->root),
+                                sim_selector_visitor, &ctx);
     return ctx.result;
-}
-
-// Count visitor context for assert_count
-typedef struct {
-    CssSelector* selector;
-    SelectorMatcher* matcher;
-    int count;
-} SimCountCtx;
-
-static bool sim_count_visitor(View* view, void* udata) {
-    SimCountCtx* ctx = (SimCountCtx*)udata;
-    if (!view->is_element()) return true;
-    DomElement* dom_elem = lam::dom_require_element(view);
-    if (selector_matcher_matches(ctx->matcher, ctx->selector, dom_elem, NULL)) {
-        ctx->count++;
-    }
-    return true;  // continue traversal (count all matches)
 }
 
 // Count elements matching a CSS selector in the document
@@ -492,25 +718,17 @@ static int count_elements_by_selector(DomDocument* doc, const char* selector_tex
     // assertion has the same post-mutation visibility as selector targets.
     sim_flush_pending_reflow(doc);
 
-    Pool* pool = doc->document_pool;
-    if (!pool) return 0;
+    CssSelector* selector = nullptr;
+    SelectorMatcher* matcher = nullptr;
+    if (!sim_parse_selector(doc, selector_text, &selector, &matcher)) return 0;
 
-    size_t token_count = 0;
-    CssToken* tokens = css_tokenize(selector_text, strlen(selector_text), pool, &token_count);
-    if (!tokens || token_count == 0) return 0;
-    int pos = 0;
-    CssSelector* selector = css_parse_selector_with_combinators(tokens, &pos, (int)token_count, pool);
-    if (!selector) return 0;
-
-    SelectorMatcher* matcher = sim_create_dom_selector_matcher(doc);
-    if (!matcher) return 0;
-
-    SimCountCtx ctx = {0};
+    SimSelectorCtx ctx = {0};
     ctx.selector = selector;
     ctx.matcher = matcher;
-    ctx.count = 0;
+    ctx.target_index = -1;
 
-    sim_traverse_views(static_cast<View*>(doc->view_tree->root), sim_count_visitor, &ctx);
+    view_geometry_walk_elements(static_cast<View*>(doc->view_tree->root),
+                                sim_selector_visitor, &ctx);
     return ctx.count;
 }
 
@@ -539,302 +757,27 @@ static void get_element_rect_abs(View* view, float* out_x, float* out_y, float* 
     view_get_visual_bounds(view, out_x, out_y, out_w, out_h);
 }
 
-// Serialize a Color to "rgb(R, G, B)" or "rgba(R, G, B, A)" string
-static void serialize_color(Color c, StrBuf* buf) {
-    char tmp[64];
-    if (c.a == 255 || c.a == 0) {
-        snprintf(tmp, sizeof(tmp), "rgb(%d, %d, %d)", c.r, c.g, c.b);
-    } else {
-        float alpha = c.a / 255.0f;
-        snprintf(tmp, sizeof(tmp), "rgba(%d, %d, %d, %.2g)", c.r, c.g, c.b, alpha);
-    }
-    strbuf_append_str(buf, tmp);
-}
-
-// Serialize a CssEnum value to its CSS keyword string
-static const char* serialize_css_enum(CssEnum value) {
-    if (value == CSS_VALUE_NONE) return "none";
-    const CssEnumInfo* info = css_enum_info(value);
-    return info ? info->name : "unknown";
-}
-
-static bool serialize_spacing_side(const char* property,
-                                   const char* const names[4],
-                                   const Spacing* spacing,
-                                   StrBuf* buf) {
-    for (int side = 0; side < 4; side++) {
-        if (strcmp(property, names[side]) != 0) continue;
-        float value = 0;
-        if (spacing) {
-            const float values[] = {
-                spacing->top, spacing->right, spacing->bottom, spacing->left
-            };
-            value = values[side];
-        }
-        char tmp[64];
-        snprintf(tmp, sizeof(tmp), "%.4gpx", value);
-        strbuf_append_str(buf, tmp);
-        return true;
-    }
-    return false;
-}
-
 // Get computed style value for a CSS property on an element
 // Returns true if property was found, writes serialized value to buf
 static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
-    if (!view || !property) return false;
-    DomElement* elem = view->as_element();
-    if (!elem) return false;
+    if (!view || !property || !buf) return false;
+    DomElement* element = view->as_element();
+    if (!element) return false;
 
-    char tmp[64]; // scratch buffer for numeric formatting
-
-    // display
-    if (strcmp(property, "display") == 0) {
-        if (elem->display.outer == CSS_VALUE_NONE) {
-            strbuf_append_str(buf, "none");
-        } else {
-            strbuf_append_str(buf, serialize_css_enum(elem->display.outer));
-        }
-        return true;
+    CssPropertyCode property_id = css_property_code_from_name(property);
+    if (strcmp(property, "overflow") == 0) property_id = CSS_PROPERTY_OVERFLOW_X;
+    if (property_id <= CSS_PROPERTY_UNKNOWN || property_id >= CSS_PROPERTY_COUNT) {
+        log_error("event_sim: get_computed_style - unsupported property '%s'", property);
+        return false;
     }
-    // position
-    if (strcmp(property, "position") == 0) {
-        if (elem->position) {
-            strbuf_append_str(buf, serialize_css_enum(elem->positionp()->position));
-        } else {
-            strbuf_append_str(buf, "static");
-        }
-        return true;
+    char serialized[4096];
+    if (!css_prop_serialize_computed(element, property_id, 0,
+                                     serialized, sizeof(serialized))) {
+        log_error("event_sim: get_computed_style - unsupported property '%s'", property);
+        return false;
     }
-    // font-size
-    if (strcmp(property, "font-size") == 0) {
-        if (elem->font) {
-            snprintf(tmp, sizeof(tmp), "%.4gpx", elem->fontp()->font_size);
-            strbuf_append_str(buf, tmp);
-        } else {
-            strbuf_append_str(buf, "16px");
-        }
-        return true;
-    }
-    // font-weight
-    if (strcmp(property, "font-weight") == 0) {
-        if (elem->font) {
-            if (elem->fontp()->font_weight_numeric > 0) {
-                snprintf(tmp, sizeof(tmp), "%d", (int)elem->fontp()->font_weight_numeric);
-                strbuf_append_str(buf, tmp);
-            } else {
-                strbuf_append_str(buf, serialize_css_enum(elem->fontp()->font_weight));
-            }
-        } else {
-            strbuf_append_str(buf, "400");
-        }
-        return true;
-    }
-    // font-family
-    if (strcmp(property, "font-family") == 0) {
-        if (elem->font && elem->fontp()->family) {
-            strbuf_append_str(buf, elem->fontp()->family);
-        }
-        return true;
-    }
-    // font-style
-    if (strcmp(property, "font-style") == 0) {
-        if (elem->font) {
-            strbuf_append_str(buf, serialize_css_enum(elem->fontp()->font_style));
-        } else {
-            strbuf_append_str(buf, "normal");
-        }
-        return true;
-    }
-    // color (text color)
-    if (strcmp(property, "color") == 0) {
-        if (elem->in_line && elem->inl()->has_color) {
-            serialize_color(elem->inl()->color, buf);
-        } else {
-            strbuf_append_str(buf, "rgb(0, 0, 0)");
-        }
-        return true;
-    }
-    // background-color
-    if (strcmp(property, "background-color") == 0) {
-        if (elem->bound && elem->boundary_mut()->background) {
-            serialize_color(elem->boundary()->background->color, buf);
-        } else {
-            strbuf_append_str(buf, "rgba(0, 0, 0, 0)");
-        }
-        return true;
-    }
-    // text-align
-    if (strcmp(property, "text-align") == 0) {
-        if (elem->blk) {
-            strbuf_append_str(buf, serialize_css_enum(elem->block()->text_align));
-        } else {
-            strbuf_append_str(buf, "start");
-        }
-        return true;
-    }
-    // box-sizing
-    if (strcmp(property, "box-sizing") == 0) {
-        if (elem->blk) {
-            strbuf_append_str(buf, serialize_css_enum(elem->block()->box_sizing));
-        } else {
-            strbuf_append_str(buf, "content-box");
-        }
-        return true;
-    }
-    // opacity
-    if (strcmp(property, "opacity") == 0) {
-        if (elem->in_line) {
-            snprintf(tmp, sizeof(tmp), "%.4g", elem->inl()->opacity);
-            strbuf_append_str(buf, tmp);
-        } else {
-            strbuf_append_str(buf, "1");
-        }
-        return true;
-    }
-    // z-index
-    if (strcmp(property, "z-index") == 0) {
-        if (elem->position && elem->positionp()->position != CSS_VALUE_STATIC) {
-            snprintf(tmp, sizeof(tmp), "%d", elem->positionp()->z_index);
-            strbuf_append_str(buf, tmp);
-        } else {
-            strbuf_append_str(buf, "auto");
-        }
-        return true;
-    }
-    // overflow-x / overflow-y / overflow
-    if (strcmp(property, "overflow") == 0 || strcmp(property, "overflow-x") == 0) {
-        if (elem->scroller) {
-            strbuf_append_str(buf, serialize_css_enum(elem->scroll()->overflow_x));
-        } else {
-            strbuf_append_str(buf, "visible");
-        }
-        return true;
-    }
-    if (strcmp(property, "overflow-y") == 0) {
-        if (elem->scroller) {
-            strbuf_append_str(buf, serialize_css_enum(elem->scroll()->overflow_y));
-        } else {
-            strbuf_append_str(buf, "visible");
-        }
-        return true;
-    }
-    static const char* margin_names[] = {
-        "margin-top", "margin-right", "margin-bottom", "margin-left"
-    };
-    static const char* padding_names[] = {
-        "padding-top", "padding-right", "padding-bottom", "padding-left"
-    };
-    static const char* border_width_names[] = {
-        "border-top-width", "border-right-width",
-        "border-bottom-width", "border-left-width"
-    };
-    if (serialize_spacing_side(property, margin_names,
-                               elem->bound ? &elem->boundary_mut()->margin : nullptr, buf) ||
-        serialize_spacing_side(property, padding_names,
-                               elem->bound ? &elem->boundary_mut()->padding : nullptr, buf) ||
-        serialize_spacing_side(property, border_width_names,
-                               elem->bound && elem->boundary_mut()->border
-                                   ? &elem->boundary_mut()->border->width : nullptr,
-                               buf)) {
-        return true;
-    }
-    // border-*-color
-    if (strcmp(property, "border-top-color") == 0) {
-        if (elem->bound && elem->boundary_mut()->border) serialize_color(elem->boundary_mut()->border->top_color, buf);
-        else strbuf_append_str(buf, "rgb(0, 0, 0)");
-        return true;
-    }
-    if (strcmp(property, "border-right-color") == 0) {
-        if (elem->bound && elem->boundary_mut()->border) serialize_color(elem->boundary_mut()->border->right_color, buf);
-        else strbuf_append_str(buf, "rgb(0, 0, 0)");
-        return true;
-    }
-    if (strcmp(property, "border-bottom-color") == 0) {
-        if (elem->bound && elem->boundary_mut()->border) serialize_color(elem->boundary_mut()->border->bottom_color, buf);
-        else strbuf_append_str(buf, "rgb(0, 0, 0)");
-        return true;
-    }
-    if (strcmp(property, "border-left-color") == 0) {
-        if (elem->bound && elem->boundary_mut()->border) serialize_color(elem->boundary_mut()->border->left_color, buf);
-        else strbuf_append_str(buf, "rgb(0, 0, 0)");
-        return true;
-    }
-    // outline-* 
-    if (strcmp(property, "outline-style") == 0) {
-        if (elem->bound && elem->boundary_mut()->outline) {
-            strbuf_append_str(buf, serialize_css_enum(elem->boundary()->outline->style));
-        } else {
-            strbuf_append_str(buf, "none");
-        }
-        return true;
-    }
-    if (strcmp(property, "outline-width") == 0) {
-        if (elem->bound && elem->boundary_mut()->outline) {
-            snprintf(tmp, sizeof(tmp), "%.4gpx", elem->boundary()->outline->width);
-            strbuf_append_str(buf, tmp);
-        } else {
-            strbuf_append_str(buf, "0px");
-        }
-        return true;
-    }
-    if (strcmp(property, "outline-color") == 0) {
-        if (elem->bound && elem->boundary_mut()->outline) {
-            serialize_color(elem->boundary()->outline->color, buf);
-        } else {
-            strbuf_append_str(buf, "rgba(0, 0, 0, 0)");
-        }
-        return true;
-    }
-    // width / height (computed box size in px)
-    if (strcmp(property, "width") == 0) {
-        snprintf(tmp, sizeof(tmp), "%.4gpx", view->width);
-        strbuf_append_str(buf, tmp);
-        return true;
-    }
-    if (strcmp(property, "height") == 0) {
-        snprintf(tmp, sizeof(tmp), "%.4gpx", view->height);
-        strbuf_append_str(buf, tmp);
-        return true;
-    }
-    // white-space
-    if (strcmp(property, "white-space") == 0) {
-        if (elem->blk) strbuf_append_str(buf, serialize_css_enum(elem->block()->white_space));
-        else strbuf_append_str(buf, "normal");
-        return true;
-    }
-    // letter-spacing
-    if (strcmp(property, "letter-spacing") == 0) {
-        if (elem->font && elem->fontp()->letter_spacing != 0) {
-            snprintf(tmp, sizeof(tmp), "%.4gpx", elem->fontp()->letter_spacing);
-            strbuf_append_str(buf, tmp);
-        } else {
-            strbuf_append_str(buf, "normal");
-        }
-        return true;
-    }
-    // word-spacing
-    if (strcmp(property, "word-spacing") == 0) {
-        if (elem->font && elem->fontp()->word_spacing != 0) {
-            snprintf(tmp, sizeof(tmp), "%.4gpx", elem->fontp()->word_spacing);
-            strbuf_append_str(buf, tmp);
-        } else {
-            strbuf_append_str(buf, "normal");
-        }
-        return true;
-    }
-    // vertical-align
-    if (strcmp(property, "vertical-align") == 0) {
-        if (elem->in_line) {
-            strbuf_append_str(buf, serialize_css_enum(elem->inl()->vertical_align));
-        } else {
-            strbuf_append_str(buf, "baseline");
-        }
-        return true;
-    }
-
-    log_error("event_sim: get_computed_style - unsupported property '%s'", property);
-    return false;
+    strbuf_append_str(buf, serialized);
+    return true;
 }
 
 // Find element at absolute coordinates by hit-testing the view tree
@@ -867,8 +810,8 @@ static bool sim_is_checkbox_or_radio(View* view) {
     if (!view || !view->is_element()) return false;
     ViewElement* elem = lam::view_require_element(view);
     if (elem->tag() != MARKUP_NAME_INPUT) return false;
-    const char* type = elem->get_attribute("type");
-    return type && (strcmp(type, "checkbox") == 0 || strcmp(type, "radio") == 0);
+    FormInputKind kind = form_input_kind(elem->get_attribute("type"));
+    return kind == FORM_INPUT_KIND_CHECKBOX || kind == FORM_INPUT_KIND_RADIO;
 }
 
 // Extract visible text from a view tree recursively
@@ -893,21 +836,14 @@ static void sim_append_visible_text(StrBuf* buf, const char* text) {
     }
 }
 
-static void sim_extract_text(View* view, StrBuf* buf) {
-    if (!view) return;
+static bool sim_extract_text_visitor(View* view, bool entering, void* context) {
+    if (!entering) return true;
+    StrBuf* buf = (StrBuf*)context;
     if (view->view_type == RDT_VIEW_TEXT) {
         DomText* text = view->as_text();
         if (text && text->text) sim_append_visible_text(buf, text->text);
-        return;
     }
-    DomElement* elem = view->as_element();
-    if (elem) {
-        DomNode* child = elem->first_child;
-        while (child) {
-            sim_extract_text(static_cast<View*>(child), buf);
-            child = child->next_sibling;
-        }
-    }
+    return true;
 }
 
 // Resolve a target to (x,y) coordinates. Tries target_selector first, then target_text, then raw x/y.
@@ -1107,6 +1043,80 @@ static void parse_assert_count(MapReader& reader, SimEvent* ev) {
     if (reader.has("max")) ev->assert_count_max = reader.get("max").asInt32();
 }
 
+typedef struct SimEventBoolField {
+    const char* key;
+    bool SimEvent::*has;
+    bool SimEvent::*value;
+} SimEventBoolField;
+
+typedef struct SimEventFloatField {
+    const char* key;
+    bool SimEvent::*has;
+    float SimEvent::*value;
+} SimEventFloatField;
+
+static void sim_parse_bool_fields(MapReader& reader, SimEvent* ev,
+                                  const SimEventBoolField* fields, int count) {
+    for (int i = 0; i < count; i++) {
+        if (!reader.has(fields[i].key)) continue;
+        ev->*fields[i].has = true;
+        ev->*fields[i].value = reader.get(fields[i].key).asBool();
+    }
+}
+
+static void sim_parse_float_fields(MapReader& reader, SimEvent* ev,
+                                   const SimEventFloatField* fields, int count) {
+    for (int i = 0; i < count; i++) {
+        if (!reader.has(fields[i].key)) continue;
+        ItemReader value = reader.get(fields[i].key);
+        ev->*fields[i].has = true;
+        ev->*fields[i].value = sim_number_as_float(value);
+    }
+}
+
+static void parse_state_store_expectations(MapReader& reader, SimEvent* ev) {
+    static const SimEventBoolField bool_fields[] = {
+        {"weak_ref", &SimEvent::has_expected_weak_ref, &SimEvent::expected_weak_ref},
+        {"active_target", &SimEvent::has_expected_active_target, &SimEvent::expected_active_target},
+        {"drag_target", &SimEvent::has_expected_drag_target, &SimEvent::expected_drag_target},
+        {"drag_active", &SimEvent::has_expected_drag_active, &SimEvent::expected_drag_active},
+        {"drag_drop", &SimEvent::has_expected_drag_drop, &SimEvent::expected_drag_drop},
+        {"drag_drop_pending", &SimEvent::has_expected_drag_drop_pending, &SimEvent::expected_drag_drop_pending},
+        {"drag_drop_active", &SimEvent::has_expected_drag_drop_active, &SimEvent::expected_drag_drop_active},
+        {"drag_drop_source", &SimEvent::has_expected_drag_drop_source, &SimEvent::expected_drag_drop_source},
+        {"drag_drop_target", &SimEvent::has_expected_drag_drop_target, &SimEvent::expected_drag_drop_target},
+        {"open_dropdown", &SimEvent::has_expected_open_dropdown, &SimEvent::expected_open_dropdown},
+        {"context_menu_open", &SimEvent::has_expected_context_menu_open, &SimEvent::expected_context_menu_open},
+        {"scrollbar_h_hovered", &SimEvent::has_expected_scrollbar_h_hovered, &SimEvent::expected_scrollbar_h_hovered},
+        {"scrollbar_v_hovered", &SimEvent::has_expected_scrollbar_v_hovered, &SimEvent::expected_scrollbar_v_hovered},
+        {"scrollbar_h_dragging", &SimEvent::has_expected_scrollbar_h_dragging, &SimEvent::expected_scrollbar_h_dragging},
+        {"scrollbar_v_dragging", &SimEvent::has_expected_scrollbar_v_dragging, &SimEvent::expected_scrollbar_v_dragging},
+    };
+    static const SimEventFloatField float_fields[] = {
+        {"doc_scroll_x", &SimEvent::has_expected_doc_scroll_x, &SimEvent::expected_doc_scroll_x},
+        {"doc_scroll_y", &SimEvent::has_expected_doc_scroll_y, &SimEvent::expected_doc_scroll_y},
+        {"view_scroll_x", &SimEvent::has_expected_view_scroll_x, &SimEvent::expected_view_scroll_x},
+        {"view_scroll_y", &SimEvent::has_expected_view_scroll_y, &SimEvent::expected_view_scroll_y},
+        {"dropdown_x", &SimEvent::has_expected_dropdown_x, &SimEvent::expected_dropdown_x},
+        {"dropdown_y", &SimEvent::has_expected_dropdown_y, &SimEvent::expected_dropdown_y},
+        {"dropdown_width", &SimEvent::has_expected_dropdown_width, &SimEvent::expected_dropdown_width},
+        {"dropdown_height", &SimEvent::has_expected_dropdown_height, &SimEvent::expected_dropdown_height},
+        {"context_menu_x", &SimEvent::has_expected_context_menu_x, &SimEvent::expected_context_menu_x},
+        {"context_menu_y", &SimEvent::has_expected_context_menu_y, &SimEvent::expected_context_menu_y},
+        {"context_menu_width", &SimEvent::has_expected_context_menu_width, &SimEvent::expected_context_menu_width},
+        {"context_menu_height", &SimEvent::has_expected_context_menu_height, &SimEvent::expected_context_menu_height},
+    };
+    sim_parse_bool_fields(reader, ev, bool_fields,
+                          sizeof(bool_fields) / sizeof(*bool_fields));
+    sim_parse_float_fields(reader, ev, float_fields,
+                           sizeof(float_fields) / sizeof(*float_fields));
+    if (reader.has("context_menu_enabled")) {
+        ev->has_expected_context_menu_enabled = true;
+        ev->expected_context_menu_enabled =
+            static_cast<uint32_t>(reader.get("context_menu_enabled").asInt32());
+    }
+}
+
 static void parse_pointer_fields(MapReader& reader, SimEvent* ev) {
     ev->x = sim_number_as_float(reader.get("x"));
     ev->y = sim_number_as_float(reader.get("y"));
@@ -1148,6 +1158,17 @@ static void parse_element_at_fields(MapReader& reader, SimEvent* ev) {
     if (selector) ev->expected_at_selector = mem_strdup(selector, MEM_CAT_LAYOUT);
     const char* tag = reader.get("expected_tag").cstring();
     if (tag) ev->expected_at_tag = mem_strdup(tag, MEM_CAT_LAYOUT);
+}
+
+static void parse_position_element(MapReader& reader, const char* key,
+                                   char** out_selector, char** out_text) {
+    ItemReader item = reader.get(key);
+    if (!item.isMap()) return;
+    MapReader map = item.asMap();
+    const char* selector = map.get("selector").cstring();
+    if (selector) *out_selector = mem_strdup(selector, MEM_CAT_LAYOUT);
+    const char* text = map.get("text").cstring();
+    if (text) *out_text = mem_strdup(text, MEM_CAT_LAYOUT);
 }
 
 static void sim_event_free_owned_fields(SimEvent* ev) {
@@ -1590,26 +1611,14 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     else if (strcmp(type_str, "assert_rect") == 0) {
         ev->type = SIM_EVENT_ASSERT_RECT;
         parse_target(reader, ev);
-        if (reader.has("x")) {
-            ItemReader value = reader.get("x");
-            ev->expected_rect_x = (float)(value.isFloat() ? value.asFloat() : value.asInt());
-            ev->has_rect_x = true;
-        }
-        if (reader.has("y")) {
-            ItemReader value = reader.get("y");
-            ev->expected_rect_y = (float)(value.isFloat() ? value.asFloat() : value.asInt());
-            ev->has_rect_y = true;
-        }
-        if (reader.has("width")) {
-            ItemReader value = reader.get("width");
-            ev->expected_rect_w = (float)(value.isFloat() ? value.asFloat() : value.asInt());
-            ev->has_rect_w = true;
-        }
-        if (reader.has("height")) {
-            ItemReader value = reader.get("height");
-            ev->expected_rect_h = (float)(value.isFloat() ? value.asFloat() : value.asInt());
-            ev->has_rect_h = true;
-        }
+        static const SimEventFloatField rect_fields[] = {
+            {"x", &SimEvent::has_rect_x, &SimEvent::expected_rect_x},
+            {"y", &SimEvent::has_rect_y, &SimEvent::expected_rect_y},
+            {"width", &SimEvent::has_rect_w, &SimEvent::expected_rect_w},
+            {"height", &SimEvent::has_rect_h, &SimEvent::expected_rect_h},
+        };
+        sim_parse_float_fields(reader, ev, rect_fields,
+                               sizeof(rect_fields) / sizeof(*rect_fields));
         {
             ItemReader tol = reader.get("tolerance");
             ev->rect_tolerance = tol.isFloat() ? (float)tol.asFloat() : (float)tol.asInt();
@@ -1630,24 +1639,10 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     }
     else if (strcmp(type_str, "assert_position") == 0) {
         ev->type = SIM_EVENT_ASSERT_POSITION;
-        // Parse element_a
-        ItemReader a_item = reader.get("element_a");
-        if (a_item.isMap()) {
-            MapReader a_map = a_item.asMap();
-            const char* sel = a_map.get("selector").cstring();
-            if (sel) ev->element_a_selector = mem_strdup(sel, MEM_CAT_LAYOUT);
-            const char* txt = a_map.get("text").cstring();
-            if (txt) ev->element_a_text = mem_strdup(txt, MEM_CAT_LAYOUT);
-        }
-        // Parse element_b
-        ItemReader b_item = reader.get("element_b");
-        if (b_item.isMap()) {
-            MapReader b_map = b_item.asMap();
-            const char* sel = b_map.get("selector").cstring();
-            if (sel) ev->element_b_selector = mem_strdup(sel, MEM_CAT_LAYOUT);
-            const char* txt = b_map.get("text").cstring();
-            if (txt) ev->element_b_text = mem_strdup(txt, MEM_CAT_LAYOUT);
-        }
+        parse_position_element(reader, "element_a",
+                               &ev->element_a_selector, &ev->element_a_text);
+        parse_position_element(reader, "element_b",
+                               &ev->element_b_selector, &ev->element_b_text);
         const char* rel = reader.get("relation").cstring();
         if (rel) ev->position_relation = mem_strdup(rel, MEM_CAT_LAYOUT);
         {
@@ -1720,131 +1715,7 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
         }
         const char* kind = reader.get("kind").cstring();
         if (kind) ev->expected_view_state_kind = mem_strdup(kind, MEM_CAT_LAYOUT);
-        if (reader.has("weak_ref")) {
-            ev->has_expected_weak_ref = true;
-            ev->expected_weak_ref = reader.get("weak_ref").asBool();
-        }
-        if (reader.has("active_target")) {
-            ev->has_expected_active_target = true;
-            ev->expected_active_target = reader.get("active_target").asBool();
-        }
-        if (reader.has("drag_target")) {
-            ev->has_expected_drag_target = true;
-            ev->expected_drag_target = reader.get("drag_target").asBool();
-        }
-        if (reader.has("drag_active")) {
-            ev->has_expected_drag_active = true;
-            ev->expected_drag_active = reader.get("drag_active").asBool();
-        }
-        if (reader.has("drag_drop")) {
-            ev->has_expected_drag_drop = true;
-            ev->expected_drag_drop = reader.get("drag_drop").asBool();
-        }
-        if (reader.has("drag_drop_pending")) {
-            ev->has_expected_drag_drop_pending = true;
-            ev->expected_drag_drop_pending = reader.get("drag_drop_pending").asBool();
-        }
-        if (reader.has("drag_drop_active")) {
-            ev->has_expected_drag_drop_active = true;
-            ev->expected_drag_drop_active = reader.get("drag_drop_active").asBool();
-        }
-        if (reader.has("drag_drop_source")) {
-            ev->has_expected_drag_drop_source = true;
-            ev->expected_drag_drop_source = reader.get("drag_drop_source").asBool();
-        }
-        if (reader.has("drag_drop_target")) {
-            ev->has_expected_drag_drop_target = true;
-            ev->expected_drag_drop_target = reader.get("drag_drop_target").asBool();
-        }
-        if (reader.has("open_dropdown")) {
-            ev->has_expected_open_dropdown = true;
-            ev->expected_open_dropdown = reader.get("open_dropdown").asBool();
-        }
-        if (reader.has("context_menu_open")) {
-            ev->has_expected_context_menu_open = true;
-            ev->expected_context_menu_open = reader.get("context_menu_open").asBool();
-        }
-        if (reader.has("context_menu_enabled")) {
-            ev->has_expected_context_menu_enabled = true;
-            ev->expected_context_menu_enabled =
-                static_cast<uint32_t>(reader.get("context_menu_enabled").asInt32());
-        }
-        if (reader.has("scrollbar_h_hovered")) {
-            ev->has_expected_scrollbar_h_hovered = true;
-            ev->expected_scrollbar_h_hovered = reader.get("scrollbar_h_hovered").asBool();
-        }
-        if (reader.has("scrollbar_v_hovered")) {
-            ev->has_expected_scrollbar_v_hovered = true;
-            ev->expected_scrollbar_v_hovered = reader.get("scrollbar_v_hovered").asBool();
-        }
-        if (reader.has("scrollbar_h_dragging")) {
-            ev->has_expected_scrollbar_h_dragging = true;
-            ev->expected_scrollbar_h_dragging = reader.get("scrollbar_h_dragging").asBool();
-        }
-        if (reader.has("scrollbar_v_dragging")) {
-            ev->has_expected_scrollbar_v_dragging = true;
-            ev->expected_scrollbar_v_dragging = reader.get("scrollbar_v_dragging").asBool();
-        }
-        if (reader.has("doc_scroll_x")) {
-            ev->has_expected_doc_scroll_x = true;
-            ItemReader sx = reader.get("doc_scroll_x");
-            ev->expected_doc_scroll_x = (float)(sx.isFloat() ? sx.asFloat() : sx.asInt());
-        }
-        if (reader.has("doc_scroll_y")) {
-            ev->has_expected_doc_scroll_y = true;
-            ItemReader sy = reader.get("doc_scroll_y");
-            ev->expected_doc_scroll_y = (float)(sy.isFloat() ? sy.asFloat() : sy.asInt());
-        }
-        if (reader.has("view_scroll_x")) {
-            ev->has_expected_view_scroll_x = true;
-            ItemReader sx = reader.get("view_scroll_x");
-            ev->expected_view_scroll_x = (float)(sx.isFloat() ? sx.asFloat() : sx.asInt());
-        }
-        if (reader.has("view_scroll_y")) {
-            ev->has_expected_view_scroll_y = true;
-            ItemReader sy = reader.get("view_scroll_y");
-            ev->expected_view_scroll_y = (float)(sy.isFloat() ? sy.asFloat() : sy.asInt());
-        }
-        if (reader.has("dropdown_x")) {
-            ev->has_expected_dropdown_x = true;
-            ItemReader sx = reader.get("dropdown_x");
-            ev->expected_dropdown_x = (float)(sx.isFloat() ? sx.asFloat() : sx.asInt());
-        }
-        if (reader.has("dropdown_y")) {
-            ev->has_expected_dropdown_y = true;
-            ItemReader sy = reader.get("dropdown_y");
-            ev->expected_dropdown_y = (float)(sy.isFloat() ? sy.asFloat() : sy.asInt());
-        }
-        if (reader.has("dropdown_width")) {
-            ev->has_expected_dropdown_width = true;
-            ItemReader sw = reader.get("dropdown_width");
-            ev->expected_dropdown_width = (float)(sw.isFloat() ? sw.asFloat() : sw.asInt());
-        }
-        if (reader.has("dropdown_height")) {
-            ev->has_expected_dropdown_height = true;
-            ItemReader sh = reader.get("dropdown_height");
-            ev->expected_dropdown_height = (float)(sh.isFloat() ? sh.asFloat() : sh.asInt());
-        }
-        if (reader.has("context_menu_x")) {
-            ev->has_expected_context_menu_x = true;
-            ItemReader sx = reader.get("context_menu_x");
-            ev->expected_context_menu_x = (float)(sx.isFloat() ? sx.asFloat() : sx.asInt());
-        }
-        if (reader.has("context_menu_y")) {
-            ev->has_expected_context_menu_y = true;
-            ItemReader sy = reader.get("context_menu_y");
-            ev->expected_context_menu_y = (float)(sy.isFloat() ? sy.asFloat() : sy.asInt());
-        }
-        if (reader.has("context_menu_width")) {
-            ev->has_expected_context_menu_width = true;
-            ItemReader sw = reader.get("context_menu_width");
-            ev->expected_context_menu_width = (float)(sw.isFloat() ? sw.asFloat() : sw.asInt());
-        }
-        if (reader.has("context_menu_height")) {
-            ev->has_expected_context_menu_height = true;
-            ItemReader sh = reader.get("context_menu_height");
-            ev->expected_context_menu_height = (float)(sh.isFloat() ? sh.asFloat() : sh.asInt());
-        }
+        parse_state_store_expectations(reader, ev);
         {
             ItemReader st = reader.get("tolerance");
             ev->scroll_tolerance = (float)(st.isFloat() ? st.asFloat() : st.asInt());
@@ -2458,30 +2329,14 @@ static void assert_event_log_impl(EventSimContext* ctx, UiContext* uicon, SimEve
     int max_count = ev->assert_count_max;
     if (expected < 0 && min_count < 0 && max_count < 0) min_count = 1;
 
-    bool passed = true;
-    if (expected >= 0 && actual != expected) {
-        log_error("event_sim: assert_event_log FAIL - '%s' expected %d, got %d",
-            ev->assert_contains, expected, actual);
-        passed = false;
-    }
-    if (min_count >= 0 && actual < min_count) {
-        log_error("event_sim: assert_event_log FAIL - '%s' expected min %d, got %d",
-            ev->assert_contains, min_count, actual);
-        passed = false;
-    }
-    if (max_count >= 0 && actual > max_count) {
-        log_error("event_sim: assert_event_log FAIL - '%s' expected max %d, got %d",
-            ev->assert_contains, max_count, actual);
-        passed = false;
-    }
+    bool passed = sim_count_matches("assert_event_log", ev->assert_contains,
+                                    actual, expected, min_count, max_count);
 
     if (passed) {
         log_info("event_sim: assert_event_log PASS - '%s' count=%d",
             ev->assert_contains, actual);
-        ctx->pass_count++;
-    } else {
-        ctx->fail_count++;
     }
+    sim_record_assertion(ctx, passed);
 
     mem_free(content);
 }
@@ -2629,45 +2484,34 @@ static void event_sim_assert_state_store_snapshot(EventSimContext* ctx,
 
     EventSimStateStoreSnapshot current = {};
     bool passed = event_sim_capture_state_snapshot(ctx, uicon, ev, &current);
-    if (passed && current.dom_id != snap->dom_id) {
-        log_error("event_sim: assert_state_store_snapshot FAIL - dom_id expected %u, got %u",
-                  snap->dom_id, current.dom_id);
-        passed = false;
-    }
-    if (passed && current.view_state_exists != snap->view_state_exists) {
-        log_error("event_sim: assert_state_store_snapshot FAIL - view_state expected %s, got %s",
-                  snap->view_state_exists ? "true" : "false",
-                  current.view_state_exists ? "true" : "false");
-        passed = false;
-    }
-    if (passed && current.view_state_kind != snap->view_state_kind) {
-        log_error("event_sim: assert_state_store_snapshot FAIL - kind expected %s, got %s",
-                  event_sim_view_state_kind_name(snap->view_state_kind),
-                  event_sim_view_state_kind_name(current.view_state_kind));
-        passed = false;
-    }
-    if (passed && current.weak_ref != snap->weak_ref) {
-        log_error("event_sim: assert_state_store_snapshot FAIL - weak_ref expected %s, got %s",
-                  snap->weak_ref ? "true" : "false",
-                  current.weak_ref ? "true" : "false");
-        passed = false;
-    }
-    if (passed && current.focused != snap->focused) {
-        log_error("event_sim: assert_state_store_snapshot FAIL - focused expected %s, got %s",
-                  snap->focused ? "true" : "false",
-                  current.focused ? "true" : "false");
-        passed = false;
-    }
+    SimIntExpectation snapshot_id = {
+        "dom_id", passed, (int)snap->dom_id, (int)current.dom_id};
+    passed &= sim_match_int_expectations(
+        "assert_state_store_snapshot", &snapshot_id, 1);
+    const char* expected_view_state = snap->view_state_exists ? "true" : "false";
+    const char* actual_view_state = current.view_state_exists ? "true" : "false";
+    const char* expected_weak_ref = snap->weak_ref ? "true" : "false";
+    const char* actual_weak_ref = current.weak_ref ? "true" : "false";
+    const char* expected_focused = snap->focused ? "true" : "false";
+    const char* actual_focused = current.focused ? "true" : "false";
+    SimStringExpectation snapshot_strings[] = {
+        {"view_state", passed, expected_view_state, actual_view_state},
+        {"kind", passed, event_sim_view_state_kind_name(snap->view_state_kind),
+            event_sim_view_state_kind_name(current.view_state_kind)},
+        {"weak_ref", passed, expected_weak_ref, actual_weak_ref},
+        {"focused", passed, expected_focused, actual_focused},
+    };
+    passed &= sim_match_string_expectations(
+        "assert_state_store_snapshot", snapshot_strings,
+        sizeof(snapshot_strings) / sizeof(snapshot_strings[0]));
 
     if (passed) {
         log_info("event_sim: assert_state_store_snapshot PASS - '%s' id=%u kind=%s",
                  ev->state_snapshot_name,
                  current.dom_id,
                  event_sim_view_state_kind_name(current.view_state_kind));
-        ctx->pass_count++;
-    } else {
-        ctx->fail_count++;
     }
+    sim_record_assertion(ctx, passed);
 }
 
 static StrBuf* sim_normalize_state_dump_text(const char* text) {
@@ -2741,12 +2585,8 @@ static void sim_copy_line_at(const char* text, size_t offset, char* out, size_t 
 
 static void assert_state_dump_impl(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
     if (!ctx || !uicon || !ev) return;
-    DomDocument* doc = uicon->document;
-    if (!doc) {
-        log_error("event_sim: assert_state_dump FAIL - no document");
-        ctx->fail_count++;
-        return;
-    }
+    DomDocument* doc = sim_require_document(ctx, uicon, "assert_state_dump");
+    if (!doc) return;
 
     DocState* state = doc->state ? (DocState*)doc->state :
         radiant_document_ensure_state(doc, "event_sim:assert_state_dump");
@@ -2835,67 +2675,52 @@ static void assert_state_dump_impl(EventSimContext* ctx, UiContext* uicon, SimEv
     strbuf_free(actual_norm);
 }
 
+static void sim_dispatch_event(UiContext* uicon, RdtEvent* event,
+                               bool mark_pending = true) {
+    if (!uicon || !event) return;
+    event->timestamp = get_monotonic_time();
+    handle_event(uicon, uicon->document, event);
+    if (mark_pending) sim_input_turn_mark_pending();
+}
+
 // Simulate a mouse move event
 static void sim_mouse_move(UiContext* uicon, float x, float y) {
-    RdtEvent event;
-    event.mouse_position.type = RDT_EVENT_MOUSE_MOVE;
-    event.mouse_position.timestamp = get_monotonic_time();
-    event.mouse_position.x = x;
-    event.mouse_position.y = y;
-    handle_event(uicon, uicon->document, &event);
-    sim_input_turn_mark_pending();
+    RdtEvent event = {};
+    rdt_event_set_mouse_position(&event, RDT_EVENT_MOUSE_MOVE, x, y, 0.0);
+    sim_dispatch_event(uicon, &event);
 }
 
 // Simulate a mouse button event
 static void sim_mouse_button(UiContext* uicon, float x, float y, int button, int mods, bool is_down) {
-    // First move to the position
     sim_mouse_move(uicon, x, y);
-
-    // Then press/release
-    RdtEvent event;
-    event.mouse_button.type = is_down ? RDT_EVENT_MOUSE_DOWN : RDT_EVENT_MOUSE_UP;
-    event.mouse_button.timestamp = get_monotonic_time();
-    event.mouse_button.x = x;
-    event.mouse_button.y = y;
-    event.mouse_button.button = button;
-    event.mouse_button.clicks = 1;
-    event.mouse_button.mods = mods;
-    handle_event(uicon, uicon->document, &event);
-    sim_input_turn_mark_pending();
+    RdtEvent event = {};
+    rdt_event_set_mouse_button(&event,
+        is_down ? RDT_EVENT_MOUSE_DOWN : RDT_EVENT_MOUSE_UP,
+        x, y, button, 1, mods, 0.0);
+    sim_dispatch_event(uicon, &event);
 }
 
 // Simulate a key event
 static void sim_key(UiContext* uicon, int key, int mods, bool is_down) {
-    RdtEvent event;
-    event.key.type = is_down ? RDT_EVENT_KEY_DOWN : RDT_EVENT_KEY_UP;
-    event.key.timestamp = get_monotonic_time();
-    event.key.key = key;
-    event.key.scancode = 0;
-    event.key.mods = mods;
-    handle_event(uicon, uicon->document, &event);
-    sim_input_turn_mark_pending();
+    RdtEvent event = {};
+    rdt_event_set_key(&event,
+        is_down ? RDT_EVENT_KEY_DOWN : RDT_EVENT_KEY_UP,
+        key, mods, 0, 0.0);
+    sim_dispatch_event(uicon, &event);
 }
 
 // Simulate a scroll event
 static void sim_scroll(UiContext* uicon, float x, float y, float dx, float dy) {
-    RdtEvent event;
-    event.scroll.type = RDT_EVENT_SCROLL;
-    event.scroll.timestamp = get_monotonic_time();
-    event.scroll.x = x;
-    event.scroll.y = y;
-    event.scroll.xoffset = dx;
-    event.scroll.yoffset = dy;
-    handle_event(uicon, uicon->document, &event);
+    RdtEvent event = {};
+    rdt_event_set_scroll(&event, x, y, dx, dy, 0.0);
+    sim_dispatch_event(uicon, &event, false);
 }
 
 // Simulate a text input event (single Unicode codepoint)
 static void sim_text_input(UiContext* uicon, uint32_t codepoint) {
-    RdtEvent event;
-    event.text_input.type = RDT_EVENT_TEXT_INPUT;
-    event.text_input.timestamp = get_monotonic_time();
-    event.text_input.codepoint = codepoint;
-    handle_event(uicon, uicon->document, &event);
-    sim_input_turn_mark_pending();
+    RdtEvent event = {};
+    rdt_event_set_text_input(&event, codepoint, 0.0);
+    sim_dispatch_event(uicon, &event);
 }
 
 static void sim_replay_input(UiContext* uicon, SimEvent* ev) {
@@ -2963,15 +2788,12 @@ static void sim_replay_input(UiContext* uicon, SimEvent* ev) {
 
 // Assert helper for caret state
 static bool assert_caret(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
-    DomDocument* doc = uicon->document;
-    if (!doc || !doc->state) {
-        log_error("event_sim: assert_caret - no document or state");
-        ctx->fail_count++;
-        return false;
-    }
+    DomDocument* doc = nullptr;
+    DocState* state = sim_require_state(ctx, uicon, "assert_caret", &doc);
+    if (!state) return false;
 
     bool passed = true;
-    View* caret_view = caret_get_view(doc->state);
+    View* caret_view = caret_get_view(state);
 
     if (ev->expected_view_type >= 0) {
         if (ev->negate_view_type) {
@@ -3024,10 +2846,8 @@ static bool assert_caret(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
                      ev->target_selector);
             passed = false;
         } else {
-            bool in_target = false;
-            for (DomNode* n = static_cast<DomNode*>(caret_view); n; n = n->parent) {
-                if (n == static_cast<DomNode*>(target)) { in_target = true; break; }
-            }
+            bool in_target = view_geometry_dom_is_descendant(
+                static_cast<DomNode*>(caret_view), static_cast<DomNode*>(target));
             if (!in_target) {
                 log_error("event_sim: assert_caret - caret not inside target '%s'",
                          ev->target_selector);
@@ -3038,10 +2858,8 @@ static bool assert_caret(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
 
     if (passed) {
         log_info("event_sim: assert_caret PASS");
-        ctx->pass_count++;
-    } else {
-        ctx->fail_count++;
     }
+    sim_record_assertion(ctx, passed);
 
     return passed;
 }
@@ -3051,14 +2869,9 @@ static bool assert_caret(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
 // selection. Text controls use EditingSelection; rich/document ranges use
 // DomSelection.
 static bool assert_selection(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
-    DomDocument* doc = uicon->document;
-    if (!doc || !doc->state) {
-        log_error("event_sim: assert_selection - no document or state");
-        ctx->fail_count++;
-        return false;
-    }
-
-    DocState* state = doc->state;
+    DomDocument* doc = nullptr;
+    DocState* state = sim_require_state(ctx, uicon, "assert_selection", &doc);
+    if (!state) return false;
     bool projection_collapsed = !selection_has(state);
     bool text_control_selection = state->sel.kind == EDIT_SEL_TEXT_CONTROL;
     bool canonical_collapsed = projection_collapsed;
@@ -3099,12 +2912,9 @@ static bool assert_selection(EventSimContext* ctx, UiContext* uicon, SimEvent* e
 }
 
 static bool assert_form_selection(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
-    DomDocument* doc = uicon ? uicon->document : nullptr;
-    if (!doc || !doc->state) {
-        log_error("event_sim: assert_form_selection - no document or state");
-        ctx->fail_count++;
-        return false;
-    }
+    DomDocument* doc = nullptr;
+    DocState* state = sim_require_state(ctx, uicon, "assert_form_selection", &doc);
+    if (!state) return false;
 
     View* view = resolve_target_element(ev, doc);
     if (!view || !view->is_element()) {
@@ -3120,28 +2930,17 @@ static bool assert_form_selection(EventSimContext* ctx, UiContext* uicon, SimEve
     }
 
     uint32_t start = 0, end = 0;
-    form_control_get_selection(doc->state, view, &start, &end, NULL);
+    form_control_get_selection(state, view, &start, &end, NULL);
     uint32_t expected_start = ev->expected_char_offset < 0 ? 0 : (uint32_t)ev->expected_char_offset;
     uint32_t expected_end = ev->expected_selection_end < 0 ? 0 : (uint32_t)ev->expected_selection_end;
-    if (start != expected_start || end != expected_end) {
-        log_error("event_sim: assert_form_selection - mismatch: expected [%u..%u], got [%u..%u]",
-                  expected_start, expected_end, start, end);
-        ctx->fail_count++;
-        return false;
-    }
-
-    log_info("event_sim: assert_form_selection PASS [%u..%u]", start, end);
-    ctx->pass_count++;
-    return true;
+    return sim_match_selection_offsets(ctx, "assert_form_selection",
+                                       expected_start, expected_end, start, end);
 }
 
 static bool assert_editing_selection(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
-    DomDocument* doc = uicon ? uicon->document : nullptr;
-    if (!doc || !doc->state) {
-        log_error("event_sim: assert_editing_selection - no document or state");
-        ctx->fail_count++;
-        return false;
-    }
+    DomDocument* doc = nullptr;
+    DocState* state = sim_require_state(ctx, uicon, "assert_editing_selection", &doc);
+    if (!state) return false;
 
     EditingSurface surface;
     View* range_view = resolve_editing_range_view(doc, ev, &surface);
@@ -3161,7 +2960,7 @@ static bool assert_editing_selection(EventSimContext* ctx, UiContext* uicon, Sim
     uint32_t start = 0;
     uint32_t end = 0;
     if (editing_surface_is_text_control(&surface)) {
-        form_control_get_selection(doc->state, range_view, &start, &end, NULL);
+        form_control_get_selection(state, range_view, &start, &end, NULL);
     } else {
         int rich_start = 0;
         int rich_end = 0;
@@ -3170,28 +2969,17 @@ static bool assert_editing_selection(EventSimContext* ctx, UiContext* uicon, Sim
         end = rich_end < 0 ? 0 : (uint32_t)rich_end;
     }
 
-    if (start != expected_start || end != expected_end) {
-        log_error("event_sim: assert_editing_selection - mismatch: expected [%u..%u], got [%u..%u]",
-                  expected_start, expected_end, start, end);
-        ctx->fail_count++;
-        return false;
-    }
-
-    log_info("event_sim: assert_editing_selection PASS [%u..%u]", start, end);
-    ctx->pass_count++;
-    return true;
+    return sim_match_selection_offsets(ctx, "assert_editing_selection",
+                                       expected_start, expected_end, start, end);
 }
 
 // Assert helper for target view
 static bool assert_target(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
-    DomDocument* doc = uicon->document;
-    if (!doc || !doc->state) {
-        log_error("event_sim: assert_target - no document or state");
-        ctx->fail_count++;
-        return false;
-    }
+    DomDocument* doc = nullptr;
+    DocState* state = sim_require_state(ctx, uicon, "assert_target", &doc);
+    if (!state) return false;
 
-    View* caret_view = caret_get_view(doc->state);
+    View* caret_view = caret_get_view(state);
 
     if (!caret_view) {
         log_error("event_sim: assert_target - no caret view");
@@ -3232,14 +3020,7 @@ static void render_pending_surface(UiContext* uicon) {
         state->needs_reflow || state->dirty_tracker.full_repaint ||
         state->dirty_tracker.full_reflow || dirty_has_regions(&state->dirty_tracker);
     if (!pending) return;
-    if (state->needs_reflow) {
-        reflow_process_pending(state);
-        if (state->needs_reflow) {
-            extern void reflow_html_doc(DomDocument* doc);
-            reflow_html_doc(uicon->document);
-            doc_state_clear_reflow(state);
-        }
-    }
+    sim_reflow_if_pending(uicon->document, state);
     render_html_doc(uicon, uicon->document->view_tree, nullptr);
     doc_state_clear_render_flags(state);
 }
@@ -3445,14 +3226,8 @@ static uint32_t sim_fuzz_time_seed() {
 
 static bool event_sim_assert_schema(EventSimContext* ctx, UiContext* uicon,
                                     const char* phase) {
-    DomDocument* doc = uicon ? uicon->document : NULL;
-    DocState* state = doc ? doc->state : NULL;
-    if (!state) {
-        log_error("event_sim: schema conformance FAIL - no document state (%s)",
-                  phase ? phase : "unknown");
-        if (ctx) ctx->fail_count++;
-        return false;
-    }
+    DocState* state = sim_require_state(ctx, uicon, phase, nullptr);
+    if (!state) return false;
     StateValidationReport report;
     bool ok = radiant_state_validate_interaction(state, &report);
     if (!ok) {
@@ -3469,12 +3244,7 @@ static bool event_sim_assert_schema(EventSimContext* ctx, UiContext* uicon,
 
 static void event_sim_fuzz_schema(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
     if (!ctx || !uicon || !ev) return;
-    DomDocument* doc = uicon->document;
-    if (!doc || !doc->state) {
-        log_error("event_sim: fuzz_schema FAIL - no document state");
-        ctx->fail_count++;
-        return;
-    }
+    if (!sim_require_state(ctx, uicon, "fuzz_schema", nullptr)) return;
 
     uint32_t rng = ev->fuzz_seed ? ev->fuzz_seed : sim_fuzz_time_seed();
     int steps = ev->fuzz_steps > 0 ? ev->fuzz_steps : 32;
@@ -3775,12 +3545,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         }
 
         case SIM_EVENT_DRAG_AND_DROP: {
-            DomDocument* doc = uicon->document;
-            if (!doc) {
-                log_error("event_sim: drag_and_drop - no document");
-                ctx->fail_count++;
-                break;
-            }
+            DomDocument* doc = sim_require_document(ctx, uicon, "drag_and_drop");
+            if (!doc) break;
             // Resolve drag source element
             View* src_view = nullptr;
             if (ev->target_selector) {
@@ -3844,12 +3610,9 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         }
 
         case SIM_EVENT_EDITING_TEXT_DRAG_DROP: {
-            DomDocument* doc = uicon->document;
-            if (!doc) {
-                log_error("event_sim: editing_text_drag_drop - no document");
-                ctx->fail_count++;
-                break;
-            }
+            DomDocument* doc = sim_require_document(ctx, uicon,
+                                                    "editing_text_drag_drop");
+            if (!doc) break;
             View* src_view = nullptr;
             if (ev->target_selector) {
                 src_view = find_element_by_selector(doc, ev->target_selector,
@@ -4259,23 +4022,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ? clipboard_store_read_mime(ev->clipboard_mime)
                 : clipboard_get_text();
             if (!clip) clip = "";
-            bool passed = true;
-            if (ev->assert_equals && strcmp(clip, ev->assert_equals) != 0) {
-                log_error("event_sim: assert_clipboard equals fail: expected '%s', got '%s'",
-                          ev->assert_equals, clip);
-                passed = false;
-            }
-            if (ev->assert_contains && !strstr(clip, ev->assert_contains)) {
-                log_error("event_sim: assert_clipboard contains fail: '%s' not in '%s'",
-                          ev->assert_contains, clip);
-                passed = false;
-            }
+            bool passed = sim_text_matches("assert_clipboard", clip, ev);
             if (passed) {
                 log_info("event_sim: assert_clipboard PASS");
-                ctx->pass_count++;
-            } else {
-                ctx->fail_count++;
             }
+            sim_record_assertion(ctx, passed);
             break;
         }
 
@@ -4283,12 +4034,9 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         // editing surface. Mirrors the OS shim path without requiring
         // NSTextInputClient / IMM in the test runner.
         case SIM_EVENT_IME_COMPOSE: {
-            DomDocument* doc = uicon->document;
-            if (!doc || !doc->state) {
-                log_error("event_sim: ime_compose - no document/state");
-                ctx->fail_count++;
-                break;
-            }
+            DomDocument* doc = nullptr;
+            DocState* state = sim_require_state(ctx, uicon, "ime_compose", &doc);
+            if (!state) break;
             // Optional target focus: click to focus first.
             if (ev->target_selector || ev->target_text) {
                 float x, y;
@@ -4297,7 +4045,6 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                     sim_mouse_button(uicon, x, y, 0, 0, false);
                 }
             }
-            DocState* state = (DocState*)doc->state;
             View* focused = focus_get(state);
             View* intent_target = focused ? focused : caret_get_view(state);
             EditingSurface surface;
@@ -4351,12 +4098,10 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         }
 
         case SIM_EVENT_SET_EDITING_SELECTION: {
-            DomDocument* doc = uicon->document;
-            if (!doc || !doc->state) {
-                log_error("event_sim: set_editing_selection - no document/state");
-                ctx->fail_count++;
-                break;
-            }
+            DomDocument* doc = nullptr;
+            DocState* state = sim_require_state(
+                ctx, uicon, "set_editing_selection", &doc);
+            if (!state) break;
             EditingSurface surface;
             View* range_view = resolve_editing_range_view(doc, ev, &surface);
             if (!range_view) {
@@ -4389,29 +4134,26 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 focus_view = surface.owner ? surface.owner : range_view;
             }
             if (focus_view) {
-                focus_set((DocState*)doc->state, focus_view, true);
+                focus_set(state, focus_view, true);
             }
             if (start == end) {
-                if (selection_has_projection((DocState*)doc->state)) {
-                    state_store_selection_clear((DocState*)doc->state);
+                if (selection_has_projection(state)) {
+                    state_store_selection_clear(state);
                 }
-                state_store_caret_collapse_to_view_offset((DocState*)doc->state, range_view, (int)start); // INT_CAST_OK: StateStore caret API uses int offsets.
+                state_store_caret_collapse_to_view_offset(state, range_view, (int)start); // INT_CAST_OK: StateStore caret API uses int offsets.
             } else {
-                state_store_selection_set_view_offsets((DocState*)doc->state, range_view,
+                state_store_selection_set_view_offsets(state, range_view,
                               (int)start, (int)end); // INT_CAST_OK: StateStore selection API uses int offsets.
             }
             log_info("event_sim: set_editing_selection [%u..%u]", start, end);
-            doc_state_request_repaint((DocState*)doc->state);
+            doc_state_request_repaint(state);
             break;
         }
 
         case SIM_EVENT_SET_EDITING_VALUE: {
-            DomDocument* doc = uicon->document;
-            if (!doc || !doc->state) {
-                log_error("event_sim: set_editing_value - no document/state");
-                ctx->fail_count++;
-                break;
-            }
+            DomDocument* doc = nullptr;
+            DocState* state = sim_require_state(ctx, uicon, "set_editing_value", &doc);
+            if (!state) break;
             View* elem = resolve_target_element(ev, doc);
             if (!elem || !elem->is_element()) {
                 log_error("event_sim: set_editing_value - target element not found");
@@ -4433,7 +4175,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 : 0;
             const char* text = ev->input_text ? ev->input_text : "";
             uint32_t text_len = (uint32_t)strlen(text);
-            bool ok = te_replace_byte_range_no_events(owner, (DocState*)doc->state,
+            bool ok = te_replace_byte_range_no_events(owner, state,
                                                       surface.view, 0, old_len,
                                                       text, text_len);
             if (!ok) {
@@ -4442,9 +4184,9 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             owner->set_attribute("value", text);
-            state_store_caret_collapse_to_view_offset((DocState*)doc->state, surface.view, (int)text_len);
+            state_store_caret_collapse_to_view_offset(state, surface.view, (int)text_len);
             log_info("event_sim: set_editing_value len=%u", text_len);
-            doc_state_request_repaint((DocState*)doc->state);
+            doc_state_request_repaint(state);
             break;
         }
 
@@ -4491,23 +4233,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             const char* pre = editing_composition_preedit(
                 pre_state, static_cast<View*>(dom_elem), nullptr, nullptr);
             const char* actual = pre ? pre : "";
-            bool passed = true;
-            if (ev->assert_equals && strcmp(actual, ev->assert_equals) != 0) {
-                log_error("event_sim: assert_preedit FAIL - expected '%s', got '%s'",
-                          ev->assert_equals, actual);
-                passed = false;
-            }
-            if (ev->assert_contains && !strstr(actual, ev->assert_contains)) {
-                log_error("event_sim: assert_preedit FAIL - expected to contain '%s', got '%s'",
-                          ev->assert_contains, actual);
-                passed = false;
-            }
+            bool passed = sim_text_matches("assert_preedit", actual, ev);
             if (passed) {
                 log_info("event_sim: assert_preedit PASS (preedit='%s')", actual);
-                ctx->pass_count++;
-            } else {
-                ctx->fail_count++;
             }
+            sim_record_assertion(ctx, passed);
             break;
         }
 
@@ -4524,13 +4254,9 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             uint32_t actual_reveal_start = 0, actual_reveal_end = 0;
             bool actual_active = form_control_password_reveal_get(
                 reveal_state, elem, &actual_reveal_start, &actual_reveal_end);
-            bool passed = true;
-            if (actual_active != ev->expected_password_reveal_active) {
-                log_error("event_sim: assert_password_reveal FAIL - active expected %s, got %s",
-                          ev->expected_password_reveal_active ? "true" : "false",
-                          actual_active ? "true" : "false");
-                passed = false;
-            }
+            bool passed = sim_bool_matches("assert_password_reveal", "active",
+                                           ev->expected_password_reveal_active,
+                                           actual_active);
             if (ev->expected_char_offset >= 0 &&
                 actual_reveal_start != (uint32_t)ev->expected_char_offset) {
                 log_error("event_sim: assert_password_reveal FAIL - start expected %d, got %u",
@@ -4547,10 +4273,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             if (passed) {
                 log_info("event_sim: assert_password_reveal PASS");
-                ctx->pass_count++;
-            } else {
-                ctx->fail_count++;
             }
+            sim_record_assertion(ctx, passed);
             break;
         }
 
@@ -4560,36 +4284,15 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             break;
 
         case SIM_EVENT_ASSERT_TEXT: {
-            DomDocument* doc = uicon->document;
-            View* elem = resolve_target_element(ev, doc);
-            if (!elem) {
-                log_error("event_sim: assert_text - target element not found");
-                ctx->fail_count++;
-                break;
-            }
+            View* elem = resolve_assert_element(ctx, uicon, ev, "assert_text");
+            if (!elem) break;
             StrBuf* buf = strbuf_new_cap(256);
-            sim_extract_text(elem, buf);
-            bool passed = true;
-            if (ev->assert_contains) {
-                if (!buf->str || !strstr(buf->str, ev->assert_contains)) {
-                    log_error("event_sim: assert_text FAIL - expected to contain '%s', got '%s'",
-                             ev->assert_contains, buf->str ? buf->str : "(empty)");
-                    passed = false;
-                }
-            }
-            if (ev->assert_equals) {
-                if (!buf->str || strcmp(buf->str, ev->assert_equals) != 0) {
-                    log_error("event_sim: assert_text FAIL - expected '%s', got '%s'",
-                             ev->assert_equals, buf->str ? buf->str : "(empty)");
-                    passed = false;
-                }
-            }
+            view_geometry_walk_tree(elem, sim_extract_text_visitor, buf);
+            bool passed = sim_text_matches("assert_text", buf->str, ev);
             if (passed) {
                 log_info("event_sim: assert_text PASS");
-                ctx->pass_count++;
-            } else {
-                ctx->fail_count++;
             }
+            sim_record_assertion(ctx, passed);
             strbuf_free(buf);
             break;
         }
@@ -4599,28 +4302,14 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             if (!elem) break;
             DomElement* dom_elem = lam::dom_require_element(elem);
             bool present = dom_elem && dom_elem->has_class(ev->assert_equals);
-            if (present == ev->expected_state_value) {
-                log_info("event_sim: assert_class PASS class='%s' present=%s",
-                         ev->assert_equals, present ? "true" : "false");
-                ctx->pass_count++;
-            } else {
-                log_error("event_sim: assert_class FAIL class='%s' expected present=%s, got %s",
-                          ev->assert_equals,
-                          ev->expected_state_value ? "true" : "false",
-                          present ? "true" : "false");
-                ctx->fail_count++;
-            }
+            sim_record_bool_assertion(ctx, "assert_class", "present",
+                                      ev->expected_state_value, present);
             break;
         }
 
         case SIM_EVENT_ASSERT_VISIBLE: {
-            DomDocument* doc = uicon->document;
-            View* elem = resolve_target_element(ev, doc);
-            if (!elem) {
-                log_error("event_sim: assert_visible - target element not found");
-                ctx->fail_count++;
-                break;
-            }
+            View* elem = resolve_assert_element(ctx, uicon, ev, "assert_visible");
+            if (!elem) break;
             bool has_display_box = true;
             for (View* current = elem; current; current = current->parent) {
                 DomElement* current_elem = current->as_element();
@@ -4686,38 +4375,17 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 const char* val = dom_elem->get_attribute("value");
                 actual = val ? val : "";
             }
-            bool passed = true;
-            if (ev->assert_equals) {
-                if (strcmp(actual, ev->assert_equals) != 0) {
-                    log_error("event_sim: assert_value FAIL - expected '%s', got '%s'",
-                             ev->assert_equals, actual);
-                    passed = false;
-                }
-            }
-            if (ev->assert_contains) {
-                if (!strstr(actual, ev->assert_contains)) {
-                    log_error("event_sim: assert_value FAIL - expected to contain '%s', got '%s'",
-                             ev->assert_contains, actual);
-                    passed = false;
-                }
-            }
+            bool passed = sim_text_matches("assert_value", actual, ev);
             if (passed) {
                 log_info("event_sim: assert_value PASS (value='%s')", actual);
-                ctx->pass_count++;
-            } else {
-                ctx->fail_count++;
             }
+            sim_record_assertion(ctx, passed);
             break;
         }
 
         case SIM_EVENT_ASSERT_EDITING_VALUE: {
-            DomDocument* doc = uicon->document;
-            View* elem = resolve_target_element(ev, doc);
-            if (!elem) {
-                log_error("event_sim: assert_editing_value - target element not found");
-                ctx->fail_count++;
-                break;
-            }
+            View* elem = resolve_assert_element(ctx, uicon, ev, "assert_editing_value");
+            if (!elem) break;
             const char* actual = nullptr;
             StrBuf* rich_text = nullptr;
             EditingSurface surface;
@@ -4731,26 +4399,14 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                     : "";
             } else {
                 rich_text = strbuf_new_cap(256);
-                sim_extract_text(elem, rich_text);
+            view_geometry_walk_tree(elem, sim_extract_text_visitor, rich_text);
                 actual = rich_text && rich_text->str ? rich_text->str : "";
             }
-            bool passed = true;
-            if (ev->assert_equals && strcmp(actual, ev->assert_equals) != 0) {
-                log_error("event_sim: assert_editing_value FAIL - expected '%s', got '%s'",
-                          ev->assert_equals, actual);
-                passed = false;
-            }
-            if (ev->assert_contains && !strstr(actual, ev->assert_contains)) {
-                log_error("event_sim: assert_editing_value FAIL - expected to contain '%s', got '%s'",
-                          ev->assert_contains, actual);
-                passed = false;
-            }
+            bool passed = sim_text_matches("assert_editing_value", actual, ev);
             if (passed) {
                 log_info("event_sim: assert_editing_value PASS (value='%s')", actual);
-                ctx->pass_count++;
-            } else {
-                ctx->fail_count++;
             }
+            sim_record_assertion(ctx, passed);
             if (rich_text) strbuf_free(rich_text);
             break;
         }
@@ -4761,15 +4417,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             if (!elem) break;
             DocState* state = doc ? (DocState*)doc->state : nullptr;
             bool is_checked = form_control_get_checked(state, elem);
-            if (is_checked != ev->expected_checked) {
-                log_error("event_sim: assert_checked FAIL - expected %s, got %s",
-                         ev->expected_checked ? "checked" : "unchecked",
-                         is_checked ? "checked" : "unchecked");
-                ctx->fail_count++;
-            } else {
-                log_info("event_sim: assert_checked PASS (%s)", is_checked ? "checked" : "unchecked");
-                ctx->pass_count++;
-            }
+            sim_record_bool_assertion(ctx, "assert_checked", "checked",
+                                      ev->expected_checked, is_checked);
             break;
         }
 
@@ -4814,10 +4463,12 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         }
 
         case SIM_EVENT_ASSERT_FOCUS: {
-            DomDocument* doc = uicon->document;
+            DomDocument* doc = sim_require_document(ctx, uicon, "assert_focus");
             if (!doc || !doc->state) {
-                log_error("event_sim: assert_focus - no document or focus state");
-                ctx->fail_count++;
+                if (doc) {
+                    log_error("event_sim: assert_focus - no focus state");
+                    sim_record_assertion(ctx, false);
+                }
                 break;
             }
             View* expected = resolve_target_element(ev, doc);
@@ -4831,14 +4482,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             } else {
                 // for replaced elements (input, textarea, etc.), focus may be on
                 // an internal child view; check if actual is a descendant of expected
-                bool match = false;
-                if (actual) {
-                    View* p = actual->parent;
-                    while (p) {
-                        if (p == expected) { match = true; break; }
-                        p = p->parent;
-                    }
-                }
+                bool match = view_geometry_is_descendant(actual, expected, false);
                 if (match) {
                     log_info("event_sim: assert_focus PASS (child of expected)");
                     ctx->pass_count++;
@@ -4851,10 +4495,12 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         }
 
         case SIM_EVENT_ASSERT_SCROLL: {
-            DomDocument* doc = uicon->document;
+            DomDocument* doc = sim_require_document(ctx, uicon, "assert_scroll");
             if (!doc || !doc->view_tree || !doc->view_tree->root) {
-                log_error("event_sim: assert_scroll - no document or view tree");
-                ctx->fail_count++;
+                if (doc) {
+                    log_error("event_sim: assert_scroll - no view tree");
+                    sim_record_assertion(ctx, false);
+                }
                 break;
             }
             // Read scroll position from root block's scroller (the actual scroll source)
@@ -4887,58 +4533,33 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
 
         case SIM_EVENT_ASSERT_RECT: {
             DomDocument* doc = uicon->document;
-            View* elem = resolve_target_element(ev, doc);
-            if (!elem) {
-                log_error("event_sim: assert_rect - target element not found");
-                ctx->fail_count++;
-                break;
-            }
+            View* elem = resolve_assert_element(ctx, uicon, ev, "assert_rect");
+            if (!elem) break;
             DocState* state = doc ? (DocState*)doc->state : nullptr;
-            if (state && state->needs_reflow) {
-                reflow_process_pending(state);
-                if (state->needs_reflow) {
-                    extern void reflow_html_doc(DomDocument* doc);
-                    reflow_html_doc(doc);
-                    doc_state_clear_reflow(state);
-                }
-            }
+            sim_reflow_if_pending(doc, state);
             float ax, ay, aw, ah;
             get_element_rect_abs(elem, &ax, &ay, &aw, &ah);
             float tol = ev->rect_tolerance;
             bool passed = true;
-            if (ev->has_rect_x && (ax < ev->expected_rect_x - tol || ax > ev->expected_rect_x + tol)) {
-                log_error("event_sim: assert_rect FAIL - x: expected %.1f, got %.1f (tol=%.1f)", ev->expected_rect_x, ax, tol);
-                passed = false;
-            }
-            if (ev->has_rect_y && (ay < ev->expected_rect_y - tol || ay > ev->expected_rect_y + tol)) {
-                log_error("event_sim: assert_rect FAIL - y: expected %.1f, got %.1f (tol=%.1f)", ev->expected_rect_y, ay, tol);
-                passed = false;
-            }
-            if (ev->has_rect_w && (aw < ev->expected_rect_w - tol || aw > ev->expected_rect_w + tol)) {
-                log_error("event_sim: assert_rect FAIL - width: expected %.1f, got %.1f (tol=%.1f)", ev->expected_rect_w, aw, tol);
-                passed = false;
-            }
-            if (ev->has_rect_h && (ah < ev->expected_rect_h - tol || ah > ev->expected_rect_h + tol)) {
-                log_error("event_sim: assert_rect FAIL - height: expected %.1f, got %.1f (tol=%.1f)", ev->expected_rect_h, ah, tol);
-                passed = false;
-            }
+            if (ev->has_rect_x) passed &= sim_float_matches("assert_rect", "x",
+                ev->expected_rect_x, ax, tol);
+            if (ev->has_rect_y) passed &= sim_float_matches("assert_rect", "y",
+                ev->expected_rect_y, ay, tol);
+            if (ev->has_rect_w) passed &= sim_float_matches("assert_rect", "width",
+                ev->expected_rect_w, aw, tol);
+            if (ev->has_rect_h) passed &= sim_float_matches("assert_rect", "height",
+                ev->expected_rect_h, ah, tol);
             if (passed) {
                 log_info("event_sim: assert_rect PASS (x=%.1f, y=%.1f, w=%.1f, h=%.1f)", ax, ay, aw, ah);
-                ctx->pass_count++;
-            } else {
-                ctx->fail_count++;
             }
+            sim_record_assertion(ctx, passed);
             break;
         }
 
         case SIM_EVENT_ASSERT_STYLE: {
             DomDocument* doc = uicon->document;
-            View* elem = resolve_target_element(ev, doc);
-            if (!elem) {
-                log_error("event_sim: assert_style - target element not found");
-                ctx->fail_count++;
-                break;
-            }
+            View* elem = resolve_assert_element(ctx, uicon, ev, "assert_style");
+            if (!elem) break;
             if (!ev->style_property) {
                 log_error("event_sim: assert_style - missing 'property' field");
                 ctx->fail_count++;
@@ -4946,14 +4567,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
 
             DocState* state = doc ? (DocState*)doc->state : nullptr;
-            if (state && state->needs_reflow) {
-                reflow_process_pending(state);
-                if (state->needs_reflow) {
-                    extern void reflow_html_doc(DomDocument* doc);
-                    reflow_html_doc(doc);
-                    doc_state_clear_reflow(state);
-                }
-            }
+            sim_reflow_if_pending(doc, state);
 
             StrBuf* val_buf = strbuf_new_cap(64);
             if (!get_computed_style(elem, ev->style_property, val_buf)) {
@@ -4964,36 +4578,22 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             const char* actual = val_buf->str ? val_buf->str : "";
             bool passed = true;
-            if (ev->assert_equals) {
-                if (ev->style_animated) {
-                    // Animated tolerance comparison: parse both as float
-                    float actual_f = (float)atof(actual);
-                    float expected_f = (float)atof(ev->assert_equals);
-                    float tol = ev->style_tolerance > 0 ? ev->style_tolerance : 0.05f;
-                    if (actual_f < expected_f - tol || actual_f > expected_f + tol) {
-                        log_error("event_sim: assert_style FAIL (animated) - %s: expected ~%.4g, got %.4g (tol=%.4g)",
-                                 ev->style_property, expected_f, actual_f, tol);
-                        passed = false;
-                    }
-                } else if (strcmp(actual, ev->assert_equals) != 0) {
-                    log_error("event_sim: assert_style FAIL - %s: expected '%s', got '%s'",
-                             ev->style_property, ev->assert_equals, actual);
+            if (ev->style_animated && ev->assert_equals) {
+                float actual_f = (float)atof(actual);
+                float expected_f = (float)atof(ev->assert_equals);
+                float tol = ev->style_tolerance > 0 ? ev->style_tolerance : 0.05f;
+                if (actual_f < expected_f - tol || actual_f > expected_f + tol) {
+                    log_error("event_sim: assert_style FAIL (animated) - %s: expected ~%.4g, got %.4g (tol=%.4g)",
+                             ev->style_property, expected_f, actual_f, tol);
                     passed = false;
                 }
-            }
-            if (ev->assert_contains) {
-                if (!strstr(actual, ev->assert_contains)) {
-                    log_error("event_sim: assert_style FAIL - %s: expected to contain '%s', got '%s'",
-                             ev->style_property, ev->assert_contains, actual);
-                    passed = false;
-                }
+            } else {
+                passed &= sim_text_matches("assert_style", actual, ev);
             }
             if (passed) {
                 log_info("event_sim: assert_style PASS (%s = '%s')", ev->style_property, actual);
-                ctx->pass_count++;
-            } else {
-                ctx->fail_count++;
             }
+            sim_record_assertion(ctx, passed);
             strbuf_free(val_buf);
             break;
         }
@@ -5084,10 +4684,12 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         }
 
         case SIM_EVENT_ASSERT_ELEMENT_AT: {
-            DomDocument* doc = uicon->document;
+            DomDocument* doc = sim_require_document(ctx, uicon, "assert_element_at");
             if (!doc || !doc->view_tree || !doc->view_tree->root) {
-                log_error("event_sim: assert_element_at - no document/view tree");
-                ctx->fail_count++;
+                if (doc) {
+                    log_error("event_sim: assert_element_at - no view tree");
+                    sim_record_assertion(ctx, false);
+                }
                 break;
             }
             View* root = static_cast<View*>(doc->view_tree->root);
@@ -5098,51 +4700,18 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             bool passed = true;
-            DomElement* found_elem = found->as_element();
-            if (ev->expected_at_tag && found_elem) {
-                const char* tag = found_elem->tag_name;
-                if (!tag || strcasecmp(tag, ev->expected_at_tag) != 0) {
-                    log_error("event_sim: assert_element_at FAIL - expected tag '%s', got '%s' at (%.2f, %.2f)",
-                             ev->expected_at_tag, tag ? tag : "(null)", ev->at_x, ev->at_y);
-                    passed = false;
-                }
-            }
-            if (ev->expected_at_selector && found_elem) {
-                // Check if the found element or any of its ancestors match the selector
-                View* check = found;
-                bool selector_matched = false;
-                while (check) {
-                    if (check->is_element()) {
-                        View* candidate = find_element_by_selector(doc, ev->expected_at_selector);
-                        if (candidate == check) {
-                            selector_matched = true;
-                            break;
-                        }
-                    }
-                    check = check->parent;
-                }
-                if (!selector_matched) {
-                    log_error("event_sim: assert_element_at FAIL - element at (%.2f, %.2f) does not match selector '%s'",
-                             ev->at_x, ev->at_y, ev->expected_at_selector);
-                    passed = false;
-                }
-            }
+            passed = sim_element_matches_assertions(
+                "assert_element_at", doc, found, ev, ev->at_x, ev->at_y, true);
             if (passed) {
                 log_info("event_sim: assert_element_at PASS at (%.2f, %.2f)", ev->at_x, ev->at_y);
-                ctx->pass_count++;
-            } else {
-                ctx->fail_count++;
             }
+            sim_record_assertion(ctx, passed);
             break;
         }
 
         case SIM_EVENT_ASSERT_HIT_TEST: {
-            DomDocument* doc = uicon->document;
-            if (!doc) {
-                log_error("event_sim: assert_hit_test - no document");
-                ctx->fail_count++;
-                break;
-            }
+            DomDocument* doc = sim_require_document(ctx, uicon, "assert_hit_test");
+            if (!doc) break;
             DomElement* found = (DomElement*)dom_document_element_from_point_native(
                 doc, ev->at_x, ev->at_y);
             if (!found) {
@@ -5152,40 +4721,19 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             bool passed = true;
-            if (ev->expected_at_tag) {
-                const char* tag = found->tag_name;
-                if (!tag || strcasecmp(tag, ev->expected_at_tag) != 0) {
-                    log_error("event_sim: assert_hit_test FAIL - expected tag '%s', got '%s' at (%.2f, %.2f)",
-                        ev->expected_at_tag, tag ? tag : "(null)", ev->at_x, ev->at_y);
-                    passed = false;
-                }
-            }
-            if (ev->expected_at_selector) {
-                View* expected = find_element_by_selector(doc, ev->expected_at_selector);
-                // The public DOM method returns one exact element, unlike
-                // assert_element_at's legacy ancestor-friendly box assertion.
-                if (!expected || static_cast<DomElement*>(expected) != found) {
-                    log_error("event_sim: assert_hit_test FAIL - element at (%.2f, %.2f) is not selector '%s'",
-                        ev->at_x, ev->at_y, ev->expected_at_selector);
-                    passed = false;
-                }
-            }
+            passed = sim_element_matches_assertions(
+                "assert_hit_test", doc, static_cast<View*>(found), ev,
+                ev->at_x, ev->at_y, false);
             if (passed) {
                 log_info("event_sim: assert_hit_test PASS at (%.2f, %.2f)", ev->at_x, ev->at_y);
-                ctx->pass_count++;
-            } else {
-                ctx->fail_count++;
             }
+            sim_record_assertion(ctx, passed);
             break;
         }
 
         case SIM_EVENT_ASSERT_ATTRIBUTE: {
-            DomDocument* doc = uicon->document;
-            if (!doc) {
-                log_error("event_sim: assert_attribute - no document");
-                ctx->fail_count++;
-                break;
-            }
+            DomDocument* doc = sim_require_document(ctx, uicon, "assert_attribute");
+            if (!doc) break;
             View* elem = nullptr;
             if (ev->target_selector) {
                 // Attribute assertions share the indexed target contract used
@@ -5207,99 +4755,29 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             const char* actual = dom_elem->get_attribute(ev->attribute_name);
-            if (ev->has_expected_attribute_presence) {
-                bool present = actual != nullptr;
-                if (present == ev->expected_attribute_present) {
-                    log_info("event_sim: assert_attribute PASS '%s' present=%s on '%s'",
-                        ev->attribute_name, present ? "true" : "false", ev->target_selector);
-                    ctx->pass_count++;
-                } else {
-                    log_error("event_sim: assert_attribute FAIL '%s' expected present=%s on '%s'",
-                        ev->attribute_name, ev->expected_attribute_present ? "true" : "false",
-                        ev->target_selector);
-                    ctx->fail_count++;
-                }
-            } else if (ev->assert_equals) {
-                if (actual && strcmp(actual, ev->assert_equals) == 0) {
-                    log_info("event_sim: assert_attribute PASS '%s'='%s' on '%s'",
-                        ev->attribute_name, ev->assert_equals, ev->target_selector);
-                    ctx->pass_count++;
-                } else {
-                    log_error("event_sim: assert_attribute FAIL '%s' expected='%s', actual='%s' on '%s'",
-                        ev->attribute_name, ev->assert_equals,
-                        actual ? actual : "(null)", ev->target_selector);
-                    ctx->fail_count++;
-                }
-            } else if (ev->assert_contains) {
-                if (actual && strstr(actual, ev->assert_contains)) {
-                    log_info("event_sim: assert_attribute PASS '%s' contains '%s' on '%s'",
-                        ev->attribute_name, ev->assert_contains, ev->target_selector);
-                    ctx->pass_count++;
-                } else {
-                    log_error("event_sim: assert_attribute FAIL '%s' does not contain '%s', actual='%s' on '%s'",
-                        ev->attribute_name, ev->assert_contains,
-                        actual ? actual : "(null)", ev->target_selector);
-                    ctx->fail_count++;
-                }
-            } else if (ev->assert_not_contains) {
-                // Pass when the attribute is missing OR does not include the substring.
-                if (!actual || !strstr(actual, ev->assert_not_contains)) {
-                    log_info("event_sim: assert_attribute PASS '%s' does not contain '%s' on '%s'",
-                        ev->attribute_name, ev->assert_not_contains, ev->target_selector);
-                    ctx->pass_count++;
-                } else {
-                    log_error("event_sim: assert_attribute FAIL '%s' should not contain '%s', actual='%s' on '%s'",
-                        ev->attribute_name, ev->assert_not_contains,
-                        actual, ev->target_selector);
-                    ctx->fail_count++;
-                }
+            bool passed = sim_attribute_matches(actual, ev);
+            if (passed) {
+                log_info("event_sim: assert_attribute PASS '%s' on '%s'",
+                    ev->attribute_name, ev->target_selector);
             } else {
-                // Just check attribute exists
-                if (actual) {
-                    log_info("event_sim: assert_attribute PASS '%s' exists (='%s') on '%s'",
-                        ev->attribute_name, actual, ev->target_selector);
-                    ctx->pass_count++;
-                } else {
-                    log_error("event_sim: assert_attribute FAIL '%s' not found on '%s'",
-                        ev->attribute_name, ev->target_selector);
-                    ctx->fail_count++;
-                }
+                log_error("event_sim: assert_attribute FAIL '%s' expected condition not met; actual='%s' on '%s'",
+                    ev->attribute_name, actual ? actual : "(null)", ev->target_selector);
             }
+            sim_record_assertion(ctx, passed);
             break;
         }
 
         case SIM_EVENT_ASSERT_COUNT: {
-            DomDocument* doc = uicon->document;
-            if (!doc) {
-                log_error("event_sim: assert_count - no document");
-                ctx->fail_count++;
-                break;
-            }
+            DomDocument* doc = sim_require_document(ctx, uicon, "assert_count");
+            if (!doc) break;
             int actual = count_elements_by_selector(doc, ev->target_selector);
-            bool passed = true;
-            if (ev->assert_count_expected >= 0) {
-                if (actual != ev->assert_count_expected) {
-                    log_error("event_sim: assert_count FAIL - '%s' expected %d, got %d",
-                        ev->target_selector, ev->assert_count_expected, actual);
-                    passed = false;
-                }
-            }
-            if (ev->assert_count_min >= 0 && actual < ev->assert_count_min) {
-                log_error("event_sim: assert_count FAIL - '%s' expected min %d, got %d",
-                    ev->target_selector, ev->assert_count_min, actual);
-                passed = false;
-            }
-            if (ev->assert_count_max >= 0 && actual > ev->assert_count_max) {
-                log_error("event_sim: assert_count FAIL - '%s' expected max %d, got %d",
-                    ev->target_selector, ev->assert_count_max, actual);
-                passed = false;
-            }
+            bool passed = sim_count_matches("assert_count", ev->target_selector, actual,
+                                            ev->assert_count_expected,
+                                            ev->assert_count_min, ev->assert_count_max);
             if (passed) {
                 log_info("event_sim: assert_count PASS - '%s' count=%d", ev->target_selector, actual);
-                ctx->pass_count++;
-            } else {
-                ctx->fail_count++;
             }
+            sim_record_assertion(ctx, passed);
             break;
         }
 
@@ -5314,12 +4792,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         }
 
         case SIM_EVENT_ASSERT_STATE_STORE: {
-            DomDocument* doc = uicon->document;
-            if (!doc) {
-                log_error("event_sim: assert_state_store - no document");
-                ctx->fail_count++;
-                break;
-            }
+            DomDocument* doc = sim_require_document(ctx, uicon, "assert_state_store");
+            if (!doc) break;
 
             DocState* state = (DocState*)doc->state;
             bool passed = true;
@@ -5354,81 +4828,37 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
 
             ViewState* view_state = (state && elem) ? view_state_get(state, elem) : NULL;
-            if (elem && ev->has_expected_view_state && ((view_state != NULL) != ev->expected_view_state_exists)) {
-                log_error("event_sim: assert_state_store FAIL - expected ViewState %s, got %s",
-                    ev->expected_view_state_exists ? "present" : "absent",
-                    view_state ? "present" : "absent");
-                passed = false;
-            }
-            if (elem && ev->has_expected_weak_ref && ((elem->view_state_ref == view_state && view_state != NULL) != ev->expected_weak_ref)) {
-                log_error("event_sim: assert_state_store FAIL - weak ViewState ref expectation mismatch");
-                passed = false;
-            }
-            if (state && elem && ev->has_expected_active_target && ((state->active_target == elem) != ev->expected_active_target)) {
-                log_error("event_sim: assert_state_store FAIL - active target expectation mismatch");
-                passed = false;
-            }
-            if (state && elem && ev->has_expected_drag_target && ((state->drag_target == elem) != ev->expected_drag_target)) {
-                log_error("event_sim: assert_state_store FAIL - drag target expectation mismatch");
-                passed = false;
-            }
-            if (state && ev->has_expected_drag_active && (state->is_dragging != ev->expected_drag_active)) {
-                log_error("event_sim: assert_state_store FAIL - drag active expected %s, got %s",
-                    ev->expected_drag_active ? "true" : "false",
-                    state->is_dragging ? "true" : "false");
-                passed = false;
-            }
-            if (state && ev->has_expected_drag_drop) {
-                bool has_drag_drop = state->drag_drop && (state->drag_drop->pending || state->drag_drop->active || state->drag_drop->source_view);
-                if (has_drag_drop != ev->expected_drag_drop) {
-                    log_error("event_sim: assert_state_store FAIL - drag_drop expected %s, got %s",
-                        ev->expected_drag_drop ? "present" : "absent",
-                        has_drag_drop ? "present" : "absent");
-                    passed = false;
-                }
-            }
             DragDropState* drag_drop = state ? state->drag_drop : NULL;
-            if (ev->has_expected_drag_drop_pending) {
-                bool actual = drag_drop ? drag_drop->pending : false;
-                if (actual != ev->expected_drag_drop_pending) {
-                    log_error("event_sim: assert_state_store FAIL - drag_drop pending expected %s, got %s",
-                        ev->expected_drag_drop_pending ? "true" : "false",
-                        actual ? "true" : "false");
-                    passed = false;
-                }
-            }
-            if (ev->has_expected_drag_drop_active) {
-                bool actual = drag_drop ? drag_drop->active : false;
-                if (actual != ev->expected_drag_drop_active) {
-                    log_error("event_sim: assert_state_store FAIL - drag_drop active expected %s, got %s",
-                        ev->expected_drag_drop_active ? "true" : "false",
-                        actual ? "true" : "false");
-                    passed = false;
-                }
-            }
-            if (elem && ev->has_expected_drag_drop_source) {
-                bool actual = drag_drop && drag_drop->source_view == elem;
-                if (actual != ev->expected_drag_drop_source) {
-                    log_error("event_sim: assert_state_store FAIL - drag_drop source expectation mismatch");
-                    passed = false;
-                }
-            }
-            if (elem && ev->has_expected_drag_drop_target) {
-                bool actual = drag_drop && drag_drop->drop_target == elem;
-                if (actual != ev->expected_drag_drop_target) {
-                    log_error("event_sim: assert_state_store FAIL - drag_drop target expectation mismatch");
-                    passed = false;
-                }
-            }
-            if (state && elem && ev->has_expected_open_dropdown && ((state->open_dropdown == elem) != ev->expected_open_dropdown)) {
-                log_error("event_sim: assert_state_store FAIL - open dropdown expectation mismatch");
-                passed = false;
-            }
-            if (state && elem && ev->has_expected_context_menu_open &&
-                ((state->context_menu_target == elem) != ev->expected_context_menu_open)) {
-                log_error("event_sim: assert_state_store FAIL - context menu expectation mismatch");
-                passed = false;
-            }
+            bool has_drag_drop = drag_drop &&
+                (drag_drop->pending || drag_drop->active || drag_drop->source_view);
+            SimBoolExpectation bool_expectations[] = {
+                {"ViewState", elem && ev->has_expected_view_state,
+                    ev->expected_view_state_exists, view_state != NULL},
+                {"weak ViewState ref", elem && ev->has_expected_weak_ref,
+                    ev->expected_weak_ref, elem && elem->view_state_ref == view_state && view_state != NULL},
+                {"active target", state && elem && ev->has_expected_active_target,
+                    ev->expected_active_target, state && state->active_target == elem},
+                {"drag target", state && elem && ev->has_expected_drag_target,
+                    ev->expected_drag_target, state && state->drag_target == elem},
+                {"drag active", state && ev->has_expected_drag_active,
+                    ev->expected_drag_active, state && state->is_dragging},
+                {"drag_drop", state && ev->has_expected_drag_drop,
+                    ev->expected_drag_drop, has_drag_drop},
+                {"drag_drop pending", ev->has_expected_drag_drop_pending,
+                    ev->expected_drag_drop_pending, drag_drop && drag_drop->pending},
+                {"drag_drop active", ev->has_expected_drag_drop_active,
+                    ev->expected_drag_drop_active, drag_drop && drag_drop->active},
+                {"drag_drop source", elem && ev->has_expected_drag_drop_source,
+                    ev->expected_drag_drop_source, drag_drop && drag_drop->source_view == elem},
+                {"drag_drop target", elem && ev->has_expected_drag_drop_target,
+                    ev->expected_drag_drop_target, drag_drop && drag_drop->drop_target == elem},
+                {"open dropdown", state && elem && ev->has_expected_open_dropdown,
+                    ev->expected_open_dropdown, state && state->open_dropdown == elem},
+                {"context menu", state && elem && ev->has_expected_context_menu_open,
+                    ev->expected_context_menu_open, state && state->context_menu_target == elem},
+            };
+            passed &= sim_match_bool_expectations(bool_expectations,
+                                                  sizeof(bool_expectations) / sizeof(bool_expectations[0]));
             if (state && ev->has_expected_context_menu_enabled &&
                 state->context_menu_enabled_mask != ev->expected_context_menu_enabled) {
                 log_error("event_sim: assert_state_store FAIL - context menu enabled expected %u, got %u",
@@ -5437,60 +4867,27 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 passed = false;
             }
             float tol = ev->scroll_tolerance > 0.0f ? ev->scroll_tolerance : 1.0f;
-            if (state && (ev->has_expected_dropdown_x || ev->has_expected_dropdown_y ||
-                          ev->has_expected_dropdown_width || ev->has_expected_dropdown_height)) {
-                if (ev->has_expected_dropdown_x &&
-                    (state->dropdown_x < ev->expected_dropdown_x - tol || state->dropdown_x > ev->expected_dropdown_x + tol)) {
-                    log_error("event_sim: assert_state_store FAIL - dropdown_x expected %.1f, got %.1f",
-                        ev->expected_dropdown_x, state->dropdown_x);
-                    passed = false;
-                }
-                if (ev->has_expected_dropdown_y &&
-                    (state->dropdown_y < ev->expected_dropdown_y - tol || state->dropdown_y > ev->expected_dropdown_y + tol)) {
-                    log_error("event_sim: assert_state_store FAIL - dropdown_y expected %.1f, got %.1f",
-                        ev->expected_dropdown_y, state->dropdown_y);
-                    passed = false;
-                }
-                if (ev->has_expected_dropdown_width &&
-                    (state->dropdown_width < ev->expected_dropdown_width - tol || state->dropdown_width > ev->expected_dropdown_width + tol)) {
-                    log_error("event_sim: assert_state_store FAIL - dropdown_width expected %.1f, got %.1f",
-                        ev->expected_dropdown_width, state->dropdown_width);
-                    passed = false;
-                }
-                if (ev->has_expected_dropdown_height &&
-                    (state->dropdown_height < ev->expected_dropdown_height - tol || state->dropdown_height > ev->expected_dropdown_height + tol)) {
-                    log_error("event_sim: assert_state_store FAIL - dropdown_height expected %.1f, got %.1f",
-                        ev->expected_dropdown_height, state->dropdown_height);
-                    passed = false;
-                }
-            }
-            if (state && (ev->has_expected_context_menu_x || ev->has_expected_context_menu_y ||
-                          ev->has_expected_context_menu_width || ev->has_expected_context_menu_height)) {
-                if (ev->has_expected_context_menu_x &&
-                    fabsf(state->context_menu_x - ev->expected_context_menu_x) > tol) {
-                    log_error("event_sim: assert_state_store FAIL - context_menu_x expected %.1f, got %.1f",
-                              ev->expected_context_menu_x, state->context_menu_x);
-                    passed = false;
-                }
-                if (ev->has_expected_context_menu_y &&
-                    fabsf(state->context_menu_y - ev->expected_context_menu_y) > tol) {
-                    log_error("event_sim: assert_state_store FAIL - context_menu_y expected %.1f, got %.1f",
-                              ev->expected_context_menu_y, state->context_menu_y);
-                    passed = false;
-                }
-                if (ev->has_expected_context_menu_width &&
-                    fabsf(state->context_menu_width - ev->expected_context_menu_width) > tol) {
-                    log_error("event_sim: assert_state_store FAIL - context_menu_width expected %.1f, got %.1f",
-                              ev->expected_context_menu_width, state->context_menu_width);
-                    passed = false;
-                }
-                if (ev->has_expected_context_menu_height &&
-                    fabsf(state->context_menu_height - ev->expected_context_menu_height) > tol) {
-                    log_error("event_sim: assert_state_store FAIL - context_menu_height expected %.1f, got %.1f",
-                              ev->expected_context_menu_height, state->context_menu_height);
-                    passed = false;
-                }
-            }
+            SimFloatExpectation geometry_expectations[] = {
+                {"dropdown_x", state && ev->has_expected_dropdown_x,
+                    ev->expected_dropdown_x, state ? state->dropdown_x : 0.0f},
+                {"dropdown_y", state && ev->has_expected_dropdown_y,
+                    ev->expected_dropdown_y, state ? state->dropdown_y : 0.0f},
+                {"dropdown_width", state && ev->has_expected_dropdown_width,
+                    ev->expected_dropdown_width, state ? state->dropdown_width : 0.0f},
+                {"dropdown_height", state && ev->has_expected_dropdown_height,
+                    ev->expected_dropdown_height, state ? state->dropdown_height : 0.0f},
+                {"context_menu_x", state && ev->has_expected_context_menu_x,
+                    ev->expected_context_menu_x, state ? state->context_menu_x : 0.0f},
+                {"context_menu_y", state && ev->has_expected_context_menu_y,
+                    ev->expected_context_menu_y, state ? state->context_menu_y : 0.0f},
+                {"context_menu_width", state && ev->has_expected_context_menu_width,
+                    ev->expected_context_menu_width, state ? state->context_menu_width : 0.0f},
+                {"context_menu_height", state && ev->has_expected_context_menu_height,
+                    ev->expected_context_menu_height, state ? state->context_menu_height : 0.0f},
+            };
+            passed &= sim_match_float_expectations(geometry_expectations,
+                                                   sizeof(geometry_expectations) / sizeof(geometry_expectations[0]),
+                                                   tol);
             if (elem && ev->expected_view_state_kind) {
                 const char* actual_kind = "none";
                 if (view_state) {
@@ -5509,20 +4906,16 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 }
             }
 
-            if (state && (ev->has_expected_doc_scroll_x || ev->has_expected_doc_scroll_y)) {
-                if (ev->has_expected_doc_scroll_x &&
-                    (state->scroll_x < ev->expected_doc_scroll_x - tol || state->scroll_x > ev->expected_doc_scroll_x + tol)) {
-                    log_error("event_sim: assert_state_store FAIL - doc scroll_x expected %.1f, got %.1f",
-                        ev->expected_doc_scroll_x, state->scroll_x);
-                    passed = false;
-                }
-                if (ev->has_expected_doc_scroll_y &&
-                    (state->scroll_y < ev->expected_doc_scroll_y - tol || state->scroll_y > ev->expected_doc_scroll_y + tol)) {
-                    log_error("event_sim: assert_state_store FAIL - doc scroll_y expected %.1f, got %.1f",
-                        ev->expected_doc_scroll_y, state->scroll_y);
-                    passed = false;
-                }
-            }
+            SimFloatExpectation document_scroll_expectations[] = {
+                {"doc scroll_x", state && ev->has_expected_doc_scroll_x,
+                    ev->expected_doc_scroll_x, state ? state->scroll_x : 0.0f},
+                {"doc scroll_y", state && ev->has_expected_doc_scroll_y,
+                    ev->expected_doc_scroll_y, state ? state->scroll_y : 0.0f},
+            };
+            passed &= sim_match_float_expectations(document_scroll_expectations,
+                                                   sizeof(document_scroll_expectations) /
+                                                       sizeof(document_scroll_expectations[0]),
+                                                   tol);
 
             if (elem && (ev->has_expected_view_scroll_x || ev->has_expected_view_scroll_y)) {
                 if (!elem->is_block()) {
@@ -5533,18 +4926,16 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                     float actual_x = 0.0f, actual_y = 0.0f;
                     void* pane = block->scroller ? (void*)block->scroll()->pane : NULL;
                     scroll_state_get_position_for_view(state, elem, pane, &actual_x, &actual_y, NULL, NULL);
-                    if (ev->has_expected_view_scroll_x &&
-                        (actual_x < ev->expected_view_scroll_x - tol || actual_x > ev->expected_view_scroll_x + tol)) {
-                        log_error("event_sim: assert_state_store FAIL - view scroll_x expected %.1f, got %.1f",
-                            ev->expected_view_scroll_x, actual_x);
-                        passed = false;
-                    }
-                    if (ev->has_expected_view_scroll_y &&
-                        (actual_y < ev->expected_view_scroll_y - tol || actual_y > ev->expected_view_scroll_y + tol)) {
-                        log_error("event_sim: assert_state_store FAIL - view scroll_y expected %.1f, got %.1f",
-                            ev->expected_view_scroll_y, actual_y);
-                        passed = false;
-                    }
+                    SimFloatExpectation view_scroll_expectations[] = {
+                        {"view scroll_x", ev->has_expected_view_scroll_x,
+                            ev->expected_view_scroll_x, actual_x},
+                        {"view scroll_y", ev->has_expected_view_scroll_y,
+                            ev->expected_view_scroll_y, actual_y},
+                    };
+                    passed &= sim_match_float_expectations(view_scroll_expectations,
+                                                           sizeof(view_scroll_expectations) /
+                                                               sizeof(view_scroll_expectations[0]),
+                                                           tol);
                 }
             }
 
@@ -5552,38 +4943,25 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                          ev->has_expected_scrollbar_h_dragging || ev->has_expected_scrollbar_v_dragging)) {
                 ScrollInteractionState interaction;
                 scroll_state_get_interaction_for_view(state, elem, &interaction);
-                if (ev->has_expected_scrollbar_h_hovered && interaction.h_hovered != ev->expected_scrollbar_h_hovered) {
-                    log_error("event_sim: assert_state_store FAIL - scrollbar_h_hovered expected %s, got %s",
-                        ev->expected_scrollbar_h_hovered ? "true" : "false",
-                        interaction.h_hovered ? "true" : "false");
-                    passed = false;
-                }
-                if (ev->has_expected_scrollbar_v_hovered && interaction.v_hovered != ev->expected_scrollbar_v_hovered) {
-                    log_error("event_sim: assert_state_store FAIL - scrollbar_v_hovered expected %s, got %s",
-                        ev->expected_scrollbar_v_hovered ? "true" : "false",
-                        interaction.v_hovered ? "true" : "false");
-                    passed = false;
-                }
-                if (ev->has_expected_scrollbar_h_dragging && interaction.h_dragging != ev->expected_scrollbar_h_dragging) {
-                    log_error("event_sim: assert_state_store FAIL - scrollbar_h_dragging expected %s, got %s",
-                        ev->expected_scrollbar_h_dragging ? "true" : "false",
-                        interaction.h_dragging ? "true" : "false");
-                    passed = false;
-                }
-                if (ev->has_expected_scrollbar_v_dragging && interaction.v_dragging != ev->expected_scrollbar_v_dragging) {
-                    log_error("event_sim: assert_state_store FAIL - scrollbar_v_dragging expected %s, got %s",
-                        ev->expected_scrollbar_v_dragging ? "true" : "false",
-                        interaction.v_dragging ? "true" : "false");
-                    passed = false;
-                }
+                SimBoolExpectation scrollbar_expectations[] = {
+                    {"scrollbar_h_hovered", ev->has_expected_scrollbar_h_hovered,
+                        ev->expected_scrollbar_h_hovered, interaction.h_hovered},
+                    {"scrollbar_v_hovered", ev->has_expected_scrollbar_v_hovered,
+                        ev->expected_scrollbar_v_hovered, interaction.v_hovered},
+                    {"scrollbar_h_dragging", ev->has_expected_scrollbar_h_dragging,
+                        ev->expected_scrollbar_h_dragging, interaction.h_dragging},
+                    {"scrollbar_v_dragging", ev->has_expected_scrollbar_v_dragging,
+                        ev->expected_scrollbar_v_dragging, interaction.v_dragging},
+                };
+                passed &= sim_match_bool_expectations(scrollbar_expectations,
+                                                      sizeof(scrollbar_expectations) /
+                                                          sizeof(scrollbar_expectations[0]));
             }
 
             if (passed) {
                 log_info("event_sim: assert_state_store PASS");
-                ctx->pass_count++;
-            } else {
-                ctx->fail_count++;
             }
+            sim_record_assertion(ctx, passed);
             break;
         }
 
@@ -5593,12 +4971,9 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         }
 
         case SIM_EVENT_ASSERT_RECONCILE_MODE: {
-            DomDocument* doc = uicon ? uicon->document : NULL;
-            bool passed = true;
-            if (!doc) {
-                log_error("event_sim: assert_reconcile_mode FAIL - no document");
-                passed = false;
-            } else {
+            DomDocument* doc = sim_require_document(nullptr, uicon, "assert_reconcile_mode");
+            bool passed = doc != nullptr;
+            if (doc) {
                 const char* actual_mode = dom_reconcile_mode_name(doc->reconcile.mode);
                 const char* actual_reason = doc->reconcile.reason
                     ? doc->reconcile.reason : "none";
@@ -5613,36 +4988,24 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                               ev->expected_reconcile_reason, actual_reason);
                     passed = false;
                 }
-                if (ev->has_expected_reconcile_mutations &&
-                    doc->reconcile.mutations != ev->expected_reconcile_mutations) {
-                    log_error("event_sim: assert_reconcile_mode FAIL - mutations expected %d, got %d",
-                              ev->expected_reconcile_mutations,
-                              doc->reconcile.mutations);
-                    passed = false;
-                }
-                if (ev->has_expected_reconcile_records &&
-                    doc->reconcile.records != ev->expected_reconcile_records) {
-                    log_error("event_sim: assert_reconcile_mode FAIL - records expected %d, got %d",
-                              ev->expected_reconcile_records,
-                              doc->reconcile.records);
-                    passed = false;
-                }
-                if (ev->has_expected_reconcile_record_overflow &&
-                    doc->reconcile.record_overflow != ev->expected_reconcile_record_overflow) {
-                    log_error("event_sim: assert_reconcile_mode FAIL - record_overflow expected %d, got %d",
-                              ev->expected_reconcile_record_overflow,
-                              doc->reconcile.record_overflow);
-                    passed = false;
-                }
+                SimIntExpectation reconcile_expectations[] = {
+                    {"mutations", ev->has_expected_reconcile_mutations,
+                        ev->expected_reconcile_mutations, doc->reconcile.mutations},
+                    {"records", ev->has_expected_reconcile_records,
+                        ev->expected_reconcile_records, doc->reconcile.records},
+                    {"record_overflow", ev->has_expected_reconcile_record_overflow,
+                        ev->expected_reconcile_record_overflow, doc->reconcile.record_overflow},
+                };
+                passed &= sim_match_int_expectations(
+                    "assert_reconcile_mode", reconcile_expectations,
+                    sizeof(reconcile_expectations) / sizeof(reconcile_expectations[0]));
             }
             if (passed) {
                 log_info("event_sim: assert_reconcile_mode PASS - mode=%s reason=%s",
                          ev->expected_reconcile_mode,
                          ev->expected_reconcile_reason ? ev->expected_reconcile_reason : "(any)");
-                ctx->pass_count++;
-            } else {
-                ctx->fail_count++;
             }
+            sim_record_assertion(ctx, passed);
             break;
         }
 

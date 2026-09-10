@@ -50,8 +50,8 @@ static const char* tc_buffer(FormControlProp* f, uint32_t* out_len) {
 }
 
 static bool te_is_password_control(DomElement* elem) {
-    return elem && elem->form && elem->form->input_type &&
-        strcasecmp(elem->form->input_type, "password") == 0;
+    return elem && elem->form && form_input_kind_is(elem->form->input_type,
+        FORM_INPUT_KIND_PASSWORD);
 }
 
 
@@ -561,4 +561,3 @@ bool te_ime_commit_prepare(DomElement* elem, DocState* state,
 
 
 // ---------- F8: ARIA reflection (Radiant_Design_Form_Input.md §4) -----
-

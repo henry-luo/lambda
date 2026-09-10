@@ -59,6 +59,12 @@ static Color form_text_color(ViewBlock* block, FormControlProp* form,
     return text_color;
 }
 
+static Color form_control_text_color(ViewBlock* block, FormControlProp* form,
+                                     bool disabled, uint8_t disabled_value) {
+    return disabled ? make_color(disabled_value, disabled_value, disabled_value)
+                    : form_text_color(block, form, false);
+}
+
 static Color form_accent_color(ViewBlock* block, bool disabled) {
     if (disabled) {
         return make_color(128, 128, 128);
@@ -323,20 +329,6 @@ static bool form_glyph_run_next(FormGlyphRun* run, FormGlyphStep* step) {
     return false;
 }
 
-static float form_measure_glyph_width(FontHandle* font_handle, FontProp* font,
-                                      float raster_scale, const char* text,
-                                      size_t byte_len) {
-    if (!text || byte_len == 0 || !font_handle || !font) return 0.0f;
-    FormGlyphRun run;
-    form_glyph_run_init(&run, font_handle, font, text, byte_len, false);
-    FormGlyphStep step;
-    float text_width = 0.0f;
-    while (form_glyph_run_next(&run, &step)) {
-        if (step.glyph) text_width += step.glyph->advance_x / raster_scale;
-    }
-    return text_width;
-}
-
 void render_simple_string(RenderContext* rdcon, const char* text, float x, float y,
                           FontProp* font, Color color) {
     if (!text || !*text || !font || !rdcon->ui_context) return;
@@ -391,9 +383,9 @@ static float measure_input_text_width(RenderContext* rdcon, FontProp* font,
     FontBox fbox = {0};
     setup_font(rdcon->ui_context, &fbox, font);
     if (!font_box_handle(&fbox)) return 0.0f;
-    return form_measure_glyph_width(font_box_handle(&fbox), font,
-                                    form_render_pixel_ratio(rdcon),
-                                    text, (size_t)byte_count);
+    return layout_measure_utf8_text_width(font_box_handle(&fbox), font, text,
+                                          (size_t)byte_count,
+                                          form_render_pixel_ratio(rdcon));
 }
 
 /**
@@ -639,8 +631,8 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
     char* preedit_display = display.preedit_display;
     bool has_preedit = display.has_preedit;
     bool is_placeholder = display.is_placeholder;
-    bool is_password = !has_preedit && !is_placeholder && src_text
-        && form->input_type && strcmp(form->input_type, "password") == 0;
+    bool is_password = !has_preedit && !is_placeholder && src_text &&
+        form_input_kind_is(form->input_type, FORM_INPUT_KIND_PASSWORD);
     uint32_t password_reveal_start = 0;
     uint32_t password_reveal_end = 0;
     if (is_password && focused_here) {
@@ -963,13 +955,7 @@ static void render_button(RenderContext* rdcon, ViewBlock* block, FormControlPro
     // (child content rendering only works for <button>text</button> style elements)
     const char* label_text = form_button_label_text(block, form);
     if (!block->first_child && label_text && *label_text && block->font) {
-        Color text_color = make_color(0, 0, 0);
-        if (block->in_line && block->inl()->has_color) {
-            text_color.r = block->inl()->color.r;
-            text_color.g = block->inl()->color.g;
-            text_color.b = block->inl()->color.b;
-            text_color.a = block->inl()->color.a;
-        }
+        Color text_color = form_text_color(block, form, false);
 
         // Measure text width for horizontal centering
         float text_width = measure_input_text_width(
@@ -1160,17 +1146,7 @@ static void render_select(RenderContext* rdcon, ViewBlock* block, FormControlPro
             // Text color: prefer CSS-resolved color (from `color` property),
             // fallback to dark grey when disabled, black otherwise. Matches
             // Chrome UA default behavior.
-            Color text_color;
-            if (disabled) {
-                text_color = make_color(109, 109, 109);
-            } else if (block->in_line && block->inl()->has_color) {
-                text_color.r = block->inl()->color.r;
-                text_color.g = block->inl()->color.g;
-                text_color.b = block->inl()->color.b;
-                text_color.a = block->inl()->color.a;
-            } else {
-                text_color = make_color(0, 0, 0);
-            }
+            Color text_color = form_control_text_color(block, form, disabled, 109);
 
             // Clip text to the select's content box so it doesn't overflow into
             // the right-padding area where the author chevron / UA arrow lives.
@@ -1278,17 +1254,6 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
     // Restore original clip
     rdcon->block.clip = saved_clip;
 
-}
-
-/**
- * Measure the advance width of a UTF-8 string segment using the given font handle.
- * Returns logical width after removing the font raster scale.
- */
-static float measure_text_width(FontHandle* font_handle, FontProp* font, float raster_scale,
-                                const char* text, int byte_len) {
-    if (!text || byte_len <= 0 || !font_handle) return 0;
-    return form_measure_glyph_width(font_handle, font, raster_scale,
-                                    text, (size_t)byte_len);
 }
 
 /**
@@ -1492,12 +1457,12 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
             setup_font(rdcon->ui_context, &fbox, block->font);
             if (font_box_handle(&fbox)) {
                 float raster_scale = ui_context_raster_scale(rdcon->ui_context);
-                float ux0 = content_x + measure_text_width(font_box_handle(&fbox), block->font,
-                                                           raster_scale, preedit_display + line_start,
-                                                           start_col) * s;
-                float ux1 = content_x + measure_text_width(font_box_handle(&fbox), block->font,
-                                                           raster_scale, preedit_display + line_start,
-                                                           end_col) * s;
+                float ux0 = content_x + layout_measure_utf8_text_width(
+                    font_box_handle(&fbox), block->font, preedit_display + line_start,
+                    (size_t)start_col, raster_scale) * s;
+                float ux1 = content_x + layout_measure_utf8_text_width(
+                    font_box_handle(&fbox), block->font, preedit_display + line_start,
+                    (size_t)end_col, raster_scale) * s;
                 if (ux1 > ux0) {
                     Color underline = make_color(0x33, 0x33, 0x33, 0xCC);
                     float ux_scroll = form ? form->scroll_x * s : 0.0f;
@@ -1561,8 +1526,9 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
                 if (font_box_handle(&fbox)) {
                     float raster_scale = ui_context_raster_scale(rdcon->ui_context);
                     int line_off = textarea_line_start(value, caret_line);
-                    caret_x = content_x + measure_text_width(font_box_handle(&fbox), block->font,
-                                                              raster_scale, value + line_off, caret_col) * s
+                    caret_x = content_x + layout_measure_utf8_text_width(
+                            font_box_handle(&fbox), block->font, value + line_off,
+                            (size_t)caret_col, raster_scale) * s
                         - (form ? form->scroll_x * s : 0.0f);
                 }
                 }

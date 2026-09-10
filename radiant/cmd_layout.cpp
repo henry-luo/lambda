@@ -61,6 +61,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/network/network_downloader.h"
 #include "network_integration.h"
+#include "radiant.hpp"
 #include "../lambda/network/network_resource_manager.h"
 #include "../lambda/io/mark_builder.hpp"
 #include "../radiant/view.hpp"
@@ -105,25 +106,11 @@ static EnhancedFileCache* layout_prepare_network_resources(UiContext* ui_context
 // Current document charset for CSS fallback encoding (set before stylesheet collection)
 const char* g_css_document_charset = nullptr;
 
-static void annotate_css_rule_source_file(CssRule* rule, const char* source_file) {
-    if (!rule || !source_file) return;
-
-    if (rule->type == CSS_RULE_STYLE) {
-        for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
-            CssDeclaration* decl = rule->data.style_rule.declarations[i];
-            if (decl && !decl->source_file) {
-                decl->source_file = source_file;
-            }
-        }
-        for (size_t i = 0; i < rule->data.style_rule.nested_rule_count; i++) {
-            annotate_css_rule_source_file(rule->data.style_rule.nested_rules[i], source_file);
-        }
-    } else if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
-               rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_SCOPE ||
-               rule->type == CSS_RULE_LAYER) {
-        for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
-            annotate_css_rule_source_file(rule->data.conditional_rule.rules[i], source_file);
-        }
+static void annotate_css_declaration_source_file(CssDeclaration* declaration,
+                                                 void* context) {
+    const char* source_file = (const char*)context;
+    if (declaration && source_file && !declaration->source_file) {
+        declaration->source_file = source_file;
     }
 }
 
@@ -131,35 +118,13 @@ static void annotate_css_stylesheet_source_file(CssStylesheet* stylesheet, const
     if (!stylesheet) return;
     const char* stable_source_file = stylesheet->origin_url ? stylesheet->origin_url : source_file;
     if (!stable_source_file) return;
-    for (size_t i = 0; i < stylesheet->rule_count; i++) {
-        annotate_css_rule_source_file(stylesheet->rules[i], stable_source_file);
-    }
-}
-
-static bool css_file_url_to_local_path(const char* href, char* out_path, size_t out_size) {
-    if (!href || !out_path || out_size == 0 || strncmp(href, "file:", 5) != 0) return false;
-    const char* path = href + 5;
-    if (path[0] == '/' && path[1] == '/') path += 2;
-    if (path[0] != '/') return false;
-
-    size_t len = strlen(path);
-    if (len + 1 > out_size) return false;
-    str_copy(out_path, out_size, path, len);
-    return true;
+    radiant_for_each_css_declaration(stylesheet,
+                                     annotate_css_declaration_source_file,
+                                     (void*)stable_source_file);
 }
 
 static bool css_path_is_http(const char* path) {
-    return path && (strncmp(path, "http://", 7) == 0 ||
-                    strncmp(path, "https://", 8) == 0);
-}
-
-static void css_copy_path(char* out_path, size_t out_size, const char* path) {
-    if (!out_path || out_size == 0) return;
-    if (!path) {
-        out_path[0] = '\0';
-        return;
-    }
-    str_copy(out_path, out_size, path, strlen(path));
+    return radiant_url_is_http(path);
 }
 
 // CSS references share URL resolution, but only link elements use the layout
@@ -170,65 +135,18 @@ static bool css_resolve_reference_path(const char* href, const char* base_path,
     if (!href || !*href || !out_path || out_size == 0) return false;
     out_path[0] = '\0';
     if (out_is_http) *out_is_http = false;
-
-    bool base_is_http = css_path_is_http(base_path);
-    if (href[0] == '/' && href[1] != '/' && (!base_path || !base_is_http)) {
-        if (!allow_support_root ||
-            !radiant_resolve_layout_support_resource_path(href, base_path,
-                                                          out_path, out_size)) {
-            css_copy_path(out_path, out_size, href);
-        }
-    } else if (strstr(href, "://") != nullptr) {
-        if (strncmp(href, "file:", 5) == 0 &&
-            !css_file_url_to_local_path(href, out_path, out_size)) {
-            css_copy_path(out_path, out_size, href);
-        } else if (strncmp(href, "file:", 5) != 0) {
-            css_copy_path(out_path, out_size, href);
-        }
-    } else if (base_path) {
-        Url* base_url = url_parse(base_path);
-        Url* resolved_url = base_url && base_url->is_valid
-            ? url_parse_with_base(href, base_url) : nullptr;
-        if (resolved_url && resolved_url->is_valid) {
-            if (resolved_url->scheme == URL_SCHEME_HTTP ||
-                resolved_url->scheme == URL_SCHEME_HTTPS) {
-                css_copy_path(out_path, out_size, url_get_href(resolved_url));
-            } else if (resolved_url->scheme == URL_SCHEME_FILE) {
-                char* local_path = url_to_local_path(resolved_url);
-                if (local_path) {
-                    css_copy_path(out_path, out_size, local_path);
-                    mem_free(local_path);
-                } else {
-                    css_copy_path(out_path, out_size, href);
-                }
-            } else {
-                const char* resolved_href = url_get_href(resolved_url);
-                css_copy_path(out_path, out_size, resolved_href ? resolved_href : href);
-            }
-        } else {
-            const char* last_slash = strrchr(base_path, '/');
-            if (last_slash) {
-                size_t dir_len = (size_t)(last_slash - base_path) + 1;
-                if (dir_len + strlen(href) + 1 <= out_size) {
-                    memcpy(out_path, base_path, dir_len);
-                    str_copy(out_path + dir_len, out_size - dir_len,
-                             href, strlen(href));
-                } else {
-                    css_copy_path(out_path, out_size, href);
-                }
-            } else {
-                css_copy_path(out_path, out_size, href);
-            }
-        }
-        if (resolved_url) url_destroy(resolved_url);
-        if (base_url) url_destroy(base_url);
-    } else {
-        css_copy_path(out_path, out_size, href);
+    char* resolved = radiant_resolve_resource_path(
+        href, base_path, allow_support_root, MEM_CAT_TEMP);
+    if (!resolved) return false;
+    size_t length = strlen(resolved);
+    if (length >= out_size) {
+        mem_free(resolved);
+        return false;
     }
-
-    if (out_path[0] == '\0') css_copy_path(out_path, out_size, href);
+    memcpy(out_path, resolved, length + 1);
+    mem_free(resolved);
     if (out_is_http) *out_is_http = css_path_is_http(out_path);
-    return out_path[0] != '\0';
+    return true;
 }
 
 struct CssSourceBuffer {
@@ -1111,43 +1029,14 @@ static char* convert_css_to_utf8(const char* data, size_t len, const char* css_c
 // resolve an HTTP href against its base URL.
 static char* resolve_http_href(const char* href, const char* base_path) {
     if (!href || !*href) return nullptr;
-
-    // already absolute http(s) URL
-    if (strncmp(href, "http://", 7) == 0 || strncmp(href, "https://", 8) == 0) {
-        return mem_strdup(href, MEM_CAT_TEMP);
-    }
-    // protocol-relative //host/path
-    if (href[0] == '/' && href[1] == '/' && base_path) {
-        const char* scheme_end = strstr(base_path, "://");
-        if (scheme_end) {
-            size_t scheme_len = scheme_end - base_path;
-            size_t out_len = scheme_len + 1 /*':'*/ + strlen(href) + 1;
-            char* out = (char*)mem_alloc(out_len, MEM_CAT_TEMP);
-            snprintf(out, out_len, "%.*s:%s", (int)scheme_len, base_path, href);
-            return out;
-        }
+    Url* base_url = base_path && *base_path ? url_parse(base_path) : nullptr;
+    char* resolved = radiant_resolve_resource_url(href, base_url, MEM_CAT_TEMP);
+    if (base_url) url_destroy(base_url);
+    if (!resolved || !radiant_url_is_http(resolved)) {
+        if (resolved) mem_free(resolved);
         return nullptr;
     }
-    // relative — resolve against base_path if base is HTTP
-    if (!base_path) return nullptr;
-    if (strncmp(base_path, "http://", 7) != 0 && strncmp(base_path, "https://", 8) != 0) {
-        return nullptr;
-    }
-    Url* base_url = url_parse(base_path);
-    if (!base_url || !base_url->is_valid) {
-        if (base_url) url_destroy(base_url);
-        return nullptr;
-    }
-    Url* resolved = parse_url(base_url, href);
-    char* out = nullptr;
-    if (resolved && resolved->is_valid &&
-        (resolved->scheme == URL_SCHEME_HTTP || resolved->scheme == URL_SCHEME_HTTPS)) {
-        const char* s = url_get_href(resolved);
-        if (s) out = mem_strdup(s, MEM_CAT_TEMP);
-    }
-    if (resolved) url_destroy(resolved);
-    url_destroy(base_url);
-    return out;
+    return resolved;
 }
 
 static void append_external_resource_url(char* url, char*** out_urls,
@@ -1543,21 +1432,16 @@ CssStylesheet** extract_and_collect_css(Element* html_root, DomElement* dom_root
     return stylesheets;
 }
 
-static void clear_load_stylesheet_cascade_recursive(DomNode* node) {
-    if (!node) return;
-    if (node->is_element()) {
-        DomElement* elem = lam::dom_require_element(node);
-        if (!layout_element_is_anonymous_table_fixup(elem)) {
-            dom_element_clear_cascaded_styles(elem);
-            // Keep pseudo declarations in the same cascade epoch as element styles.
-            dom_element_clear_pseudo_styles(elem);
-            elem->set_styles_resolved(false);
-        }
-
-        for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-            clear_load_stylesheet_cascade_recursive(child);
-        }
+static bool clear_load_stylesheet_cascade_visitor(DomNode* node, void*) {
+    if (!node->is_element()) return true;
+    DomElement* elem = lam::dom_require_element(node);
+    if (!layout_element_is_anonymous_table_fixup(elem)) {
+        dom_element_clear_cascaded_styles(elem);
+        // Keep pseudo declarations in the same cascade epoch as element styles.
+        dom_element_clear_pseudo_styles(elem);
+        elem->set_styles_resolved(false);
     }
+    return true;
 }
 
 static CssStylesheet** layout_merge_css_sources(Pool* pool,
@@ -2264,7 +2148,8 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
                      dom_doc->js.mutation_count);
 
             dom_cssom_sync_mutated_inline_stylesheets(dom_doc);
-            clear_load_stylesheet_cascade_recursive(static_cast<DomNode*>(dom_root));
+            view_geometry_walk_dom_tree(static_cast<DomNode*>(dom_root),
+                                        clear_load_stylesheet_cascade_visitor, nullptr);
             apply_load_css_cascade(dom_doc, dom_root, css_engine, pool, "post-script");
             log_mem_stage("load_html: post_script_cascade_done");
         }

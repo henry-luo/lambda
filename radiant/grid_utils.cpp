@@ -11,29 +11,17 @@ extern "C" {
 #include "../lib/memtrack.h"
 }
 
-static bool grid_item_has_in_flow_content(ViewBlock* item) {
-    if (!item) return false;
-    for (DomNode* child = item->first_child; child; child = child->next_sibling) {
-        if (child->is_text()) {
-            const char* text = (const char*)child->text_data();
-            if (!text) continue;
-            for (const char* p = text; *p; p++) {
-                if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' && *p != '\f') {
-                    return true;
-                }
-            }
-            continue;
-        }
-        if (!child->is_element()) continue;
-        ViewBlock* child_block = lam::view_as_block(child->as_element());
-        if (!child_block) return true;
-        if (layout_block_is_display_none(child_block) ||
-            layout_view_is_abs_or_fixed(child_block)) {
-            continue;
-        }
-        return true;
+static bool grid_text_has_in_flow_content(DomNode* node) {
+    const char* text = node ? (const char*)node->text_data() : nullptr;
+    if (!text) return false;
+    for (const char* p = text; *p; p++) {
+        if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' && *p != '\f') return true;
     }
     return false;
+}
+
+static bool grid_item_has_in_flow_content(ViewBlock* item) {
+    return layout_element_has_in_flow_content(item, grid_text_has_in_flow_content);
 }
 
 // Create a new grid track list

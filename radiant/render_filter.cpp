@@ -444,7 +444,7 @@ void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filt
             }
 
             // Repack ABGR
-            *pixel = ((uint32_t)a << 24) | ((uint32_t)b << 16) | ((uint32_t)g << 8) | r;
+            *pixel = render_pixel_pack_abgr(r, g, b, a);
         }
     }
 
@@ -509,10 +509,8 @@ void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filt
                     uint8_t sr = (uint8_t)(((int)sc.r * sha + 127) / 255);
                     uint8_t sg = (uint8_t)(((int)sc.g * sha + 127) / 255);
                     uint8_t sb = (uint8_t)(((int)sc.b * sha + 127) / 255);
-                    shadow_px[row * ew + col] = ((uint32_t)sha  << 24)
-                                              | ((uint32_t)sb << 16)
-                                              | ((uint32_t)sg <<  8)
-                                              |  (uint32_t)sr;
+                    shadow_px[row * ew + col] = render_pixel_pack_abgr(
+                        sr, sg, sb, sha);
                 }
             }
 
@@ -542,20 +540,11 @@ void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filt
                     if (shadow_a == 0) continue;
 
                     uint32_t* dst = &pixels[sy * pitch + sx];
-                    uint32_t ep = *dst;
-                    uint8_t ea = (ep >> 24) & 0xFF;
-                    if (ea == 255) continue;  // fully opaque existing pixel hides shadow
-
-                    uint32_t inv_ea = 255 - ea;
-                    uint32_t new_a = ea + (shadow_a * inv_ea + 127) / 255;
-                    uint32_t new_r = (ep & 0xFF) + ((sp & 0xFF) * inv_ea + 127) / 255;
-                    uint32_t new_g = ((ep >> 8) & 0xFF) + (((sp >> 8) & 0xFF) * inv_ea + 127) / 255;
-                    uint32_t new_b = ((ep >> 16) & 0xFF) + (((sp >> 16) & 0xFF) * inv_ea + 127) / 255;
-
-                    *dst = (LMB_MIN(new_a, 255u) << 24) |
-                           (LMB_MIN(new_b, 255u) << 16) |
-                           (LMB_MIN(new_g, 255u) << 8) |
-                           LMB_MIN(new_r, 255u);
+                    *dst = render_pixel_destination_over_premultiplied(*dst, sp);
+                    // Keep shadow color premultiplied while preserving the destination alpha.
+                    // The shared primitive applies the same channel rounding as other filters.
+                    // No per-channel fallback is needed after the source-over conversion.
+                    // This also keeps transparent shadow fringes from storing straight color.
                 }
             }
 

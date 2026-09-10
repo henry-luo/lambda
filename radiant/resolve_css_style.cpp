@@ -1,6 +1,7 @@
 #include "layout.hpp"
 #include "view.hpp"
 #include "render.hpp"
+#include "radiant.hpp"
 #include "../lib/font/font.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -2405,42 +2406,30 @@ static bool css_value_is_background_position_candidate(const CssValue* value) {
            keyword == CSS_VALUE_BOTTOM || keyword == CSS_VALUE_CENTER;
 }
 
-static bool css_url_has_scheme(const char* url) {
-    if (!url) return false;
-    const char* p = url;
-    while (*p) {
-        if (*p == ':') return p != url;
-        if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
-              (*p >= '0' && *p <= '9') || *p == '+' || *p == '-' || *p == '.')) {
-            return false;
-        }
-        p++;
-    }
-    return false;
-}
-
 char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl, const char* url) {
     if (!lycon || !url) return nullptr;
     size_t url_len = strlen(url);
     const char* source_file = decl ? decl->source_file : nullptr;
-    bool already_resolved = url[0] == '/' || (url[0] == '/' && url[1] == '/') ||
-        strncmp(url, "data:", 5) == 0 || css_url_has_scheme(url);
     bool has_stylesheet_base = source_file && source_file[0] && strcmp(source_file, "<inline-style>") != 0;
-    if (!already_resolved && has_stylesheet_base) {
-        const char* slash = strrchr(source_file, '/');
-        if (slash) {
-            size_t dir_len = slash - source_file + 1;
-            char* resolved = (char*)alloc_prop(lycon, dir_len + url_len + 1);
-            if (!resolved) return nullptr;
-            memcpy(resolved, source_file, dir_len);
-            memcpy(resolved + dir_len, url, url_len);
-            resolved[dir_len + url_len] = '\0';
-            return resolved;
-        }
+    const char* base_path = has_stylesheet_base ? source_file : nullptr;
+    if (!base_path && (url[0] == '/' || strncmp(url, "data:", 5) == 0 ||
+                       url_is_absolute_url(url))) {
+        char* copy = (char*)alloc_prop(lycon, url_len + 1);
+        if (!copy) return nullptr;
+        str_copy(copy, url_len + 1, url, url_len);
+        return copy;
     }
-    char* copy = (char*)alloc_prop(lycon, url_len + 1);
-    if (!copy) return nullptr;
-    str_copy(copy, url_len + 1, url, url_len);
+    char* resolved = radiant_resolve_resource_path(
+        url, base_path, false, MEM_CAT_TEMP);
+    if (!resolved) return nullptr;
+    size_t resolved_len = strlen(resolved);
+    char* copy = (char*)alloc_prop(lycon, resolved_len + 1);
+    if (!copy) {
+        mem_free(resolved);
+        return nullptr;
+    }
+    str_copy(copy, resolved_len + 1, resolved, resolved_len);
+    mem_free(resolved);
     return copy;
 }
 
@@ -3254,7 +3243,7 @@ static DisplayValue resolve_display_value_raw(void* child,
         // when display:none is set by UA defaults for hidden inputs, respect it
         if (dom_elem && tag_id == MARKUP_NAME_INPUT) {
             const char* type_attr = dom_elem->get_attribute("type");
-            if (type_attr && (strcmp(type_attr, "hidden") == 0)) {
+            if (form_input_kind_is(type_attr, FORM_INPUT_KIND_HIDDEN)) {
                 DisplayValue none_display = {CSS_VALUE_NONE, CSS_VALUE_NONE};
                 return none_display;
             }
@@ -4474,18 +4463,8 @@ static bool apply_grid_shorthand(const CssValue* value, GridProp* grid) {
 
 
 static bool css_property_is_font(CssPropertyCode property) {
-    switch (property) {
-        case CSS_PROPERTY_FONT:
-        case CSS_PROPERTY_FONT_SIZE:
-        case CSS_PROPERTY_FONT_FAMILY:
-        case CSS_PROPERTY_FONT_WEIGHT:
-        case CSS_PROPERTY_FONT_STYLE:
-        case CSS_PROPERTY_FONT_VARIANT:
-        case CSS_PROPERTY_LINE_HEIGHT:
-            return true;
-        default:
-            return false;
-    }
+    const CssPropertyRuntimeMetadata* metadata = css_property_runtime_metadata(property);
+    return metadata && metadata->font_phase;
 }
 
 static bool resolve_property_callback(AvlNode* node, void* context, bool font_pass) {
@@ -4507,23 +4486,15 @@ static bool resolve_non_font_property_callback(AvlNode* node, void* context) {
     return resolve_property_callback(node, context, false);
 }
 
-static const CssPropertyCode kFontProperties[] = {
-    CSS_PROPERTY_FONT,
-    CSS_PROPERTY_FONT_SIZE,
-    CSS_PROPERTY_FONT_FAMILY,
-    CSS_PROPERTY_FONT_WEIGHT,
-    CSS_PROPERTY_FONT_STYLE,
-    CSS_PROPERTY_FONT_VARIANT,
-    CSS_PROPERTY_LINE_HEIGHT,
-};
-
 static bool css_style_tree_has_font_property(StyleTree* style_tree,
                                              bool include_line_height) {
     if (!style_tree || !style_tree->tree) return false;
-    size_t count = sizeof(kFontProperties) / sizeof(kFontProperties[0]);
-    for (size_t i = 0; i < count; i++) {
-        if (!include_line_height && kFontProperties[i] == CSS_PROPERTY_LINE_HEIGHT) continue;
-        if (avl_tree_search(style_tree->tree, kFontProperties[i])) return true;
+    for (size_t i = 0; i < css_property_runtime_metadata_count(); i++) {
+        const CssPropertyRuntimeMetadata* metadata =
+            css_property_runtime_metadata_at(i);
+        if (!metadata || !metadata->font_phase) continue;
+        if (!include_line_height && metadata->property == CSS_PROPERTY_LINE_HEIGHT) continue;
+        if (avl_tree_search(style_tree->tree, metadata->property)) return true;
     }
     return false;
 }
@@ -4980,42 +4951,6 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         }
     }
     avl_tree_foreach_inorder(style_tree->tree, resolve_non_font_property_callback, lycon);
-    // Handle CSS inheritance for inheritable properties not explicitly set
-    // Important inherited properties: font-family, font-size, font-weight, color, etc.
-    static const CssPropertyCode inheritable_props[] = {
-        CSS_PROPERTY_FONT_FAMILY,
-        CSS_PROPERTY_FONT_SIZE,
-        CSS_PROPERTY_FONT_WEIGHT,
-        CSS_PROPERTY_FONT_STYLE,
-        CSS_PROPERTY_FONT_VARIANT,
-        CSS_PROPERTY_COLOR,
-        CSS_PROPERTY_LINE_HEIGHT,
-        CSS_PROPERTY_TEXT_ALIGN,
-        CSS_PROPERTY_TEXT_DECORATION,
-        CSS_PROPERTY_TEXT_EMPHASIS,
-        CSS_PROPERTY_TEXT_EMPHASIS_STYLE,
-        CSS_PROPERTY_TEXT_EMPHASIS_POSITION,
-        CSS_PROPERTY_TEXT_TRANSFORM,
-        CSS_PROPERTY_TEXT_INDENT,
-        CSS_PROPERTY_TEXT_SPACING_TRIM,
-        CSS_PROPERTY_HYPHENATE_CHARACTER,
-        CSS_PROPERTY_DOMINANT_BASELINE,
-        CSS_PROPERTY_LETTER_SPACING,
-        CSS_PROPERTY_WORD_SPACING,
-        CSS_PROPERTY_WHITE_SPACE,
-        CSS_PROPERTY_FILL,
-        CSS_PROPERTY_STROKE,
-        CSS_PROPERTY_STROKE_WIDTH,
-        CSS_PROPERTY_ACCENT_COLOR,
-        CSS_PROPERTY_VISIBILITY,
-        CSS_PROPERTY_EMPTY_CELLS,
-        CSS_PROPERTY_DIRECTION,
-        CSS_PROPERTY_LIST_STYLE_POSITION,
-        CSS_PROPERTY_LIST_STYLE_TYPE,
-        CSS_PROPERTY_LIST_STYLE,
-        CSS_PROPERTY_RUBY_POSITION,
-    };
-    static const size_t num_inheritable = sizeof(inheritable_props) / sizeof(inheritable_props[0]);
     DomElement* parent = dom_parent_element(dom_elem);
     StyleTree* parent_tree = (parent && parent->specified_style)
                              ? parent->specified_style : NULL;
@@ -5023,8 +4958,12 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     // This handles anonymous table elements that have font but no specified_style
     if (parent_tree || (parent && parent->font)) {
         ViewSpan* inheritance_span = lam::view_require_element(lycon->view);
-        for (size_t i = 0; i < num_inheritable; i++) {
-            CssPropertyCode prop_id = inheritable_props[i];
+        // The CSS property database is the sole source of default inheritance
+        // metadata; resolver-specific exceptions below retain their policy.
+        for (int property_code = CSS_PROPERTY_DISPLAY;
+             property_code < CSS_PROPERTY_COUNT; property_code++) {
+            CssPropertyCode prop_id = (CssPropertyCode)property_code;
+            if (!css_property_runtime_inherited(prop_id)) continue;
             CssDeclaration* existing = style_tree_get_declaration(style_tree, prop_id);
             if (existing) {
                 continue;

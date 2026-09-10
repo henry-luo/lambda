@@ -56,41 +56,12 @@ IntrinsicSize layout_measure_replaced(LayoutContext* lycon, ViewBlock* block, Av
         return result;
     }
 
-    float width = block->width > 0.0f ? block->width : 0.0f;
-    float height = block->height > 0.0f ? block->height : 0.0f;
-    if (block->embed && block->embedp()->img) {
-        if (block->embedp()->img->width > 0) width = (float)block->embedp()->img->width;
-        if (block->embedp()->img->height > 0) height = (float)block->embedp()->img->height;
-    }
+    ReplacedIntrinsicFacts facts = layout_replaced_intrinsic_facts(lycon, block);
+    float width = facts.width;
+    float height = facts.height;
     NameId tag = block->tag();
-    if (tag == MARKUP_NAME_CANVAS && (width <= 0.0f || height <= 0.0f)) {
-        float natural_width = 0.0f;
-        float natural_height = 0.0f;
-        // Canvas bitmap attributes supply its natural object size before the
-        // generic replaced-element fallback is considered.
-        if (layout_canvas_natural_size(block, &natural_width, &natural_height) &&
-            natural_width > 0.0f && natural_height > 0.0f) {
-            layout_apply_object_view_box_intrinsic_size(
-                lycon, block->as_element(), &natural_width, &natural_height);
-            if (width <= 0.0f) {
-                width = height > 0.0f ? height * natural_width / natural_height
-                                      : natural_width;
-            }
-            if (height <= 0.0f) {
-                height = width > 0.0f ? width * natural_height / natural_width
-                                      : natural_height;
-            }
-        }
-    }
     if (width <= 0.0f || height <= 0.0f) {
-        if (tag == MARKUP_NAME_IFRAME || tag == MARKUP_NAME_VIDEO || tag == MARKUP_NAME_CANVAS ||
-            tag == MARKUP_NAME_OBJECT || tag == MARKUP_NAME_EMBED || tag == MARKUP_NAME_SVG) {
-            if (width <= 0.0f) width = 300.0f;
-            if (height <= 0.0f) height = 150.0f;
-        } else if (tag == MARKUP_NAME_AUDIO) {
-            if (width <= 0.0f) width = 300.0f;
-            if (height <= 0.0f) height = 54.0f;
-        } else if (tag == MARKUP_NAME_METER) {
+        if (tag == MARKUP_NAME_METER) {
             if (width <= 0.0f) width = form_control_em_size(
                 lycon, block, FormDefaults::METER_INLINE_SIZE_EM);
             if (height <= 0.0f) height = form_control_em_size(
