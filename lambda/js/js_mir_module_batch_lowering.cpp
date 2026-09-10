@@ -312,15 +312,14 @@ void* jm_build_js_debug_info(JsMirTranspiler* mt, const char* filename) {
 JsMirCompileRecoveryState* jm_compile_recovery_state_ensure(void) {
     if (!js_active_runtime_state) return NULL;
     if (!js_runtime_state.mir_compile_recovery_state) {
-        js_runtime_state.mir_compile_recovery_state = mem_calloc(1,
+        js_runtime_state.mir_compile_recovery_state = (JsMirCompileRecoveryState*)mem_calloc(1,
             sizeof(JsMirCompileRecoveryState), MEM_CAT_JS_RUNTIME);
     }
-    return (JsMirCompileRecoveryState*)js_runtime_state.mir_compile_recovery_state;
+    return js_runtime_state.mir_compile_recovery_state;
 }
 
 JsMirCompileRecoveryState* jm_compile_recovery_state_current(void) {
-    return js_active_runtime_state ?
-        (JsMirCompileRecoveryState*)js_runtime_state.mir_compile_recovery_state : NULL;
+    return js_active_runtime_state ? js_runtime_state.mir_compile_recovery_state : NULL;
 }
 
 static JsMirCompileRecoveryState* jm_compile_recovery_state_required(void) {
@@ -838,8 +837,7 @@ void jm_abandon_active_mir_after_signal(void) {
 
 void jm_compile_recovery_state_destroy_context(JsRuntimeState* runtime_state) {
     if (!runtime_state || !runtime_state->mir_compile_recovery_state) return;
-    JsMirCompileRecoveryState* state =
-        (JsMirCompileRecoveryState*)runtime_state->mir_compile_recovery_state;
+    JsMirCompileRecoveryState* state = runtime_state->mir_compile_recovery_state;
     // Context teardown is a cold ownership boundary. Finish any interrupted
     // compilation before dropping the capsule so no MIR owner crosses realms.
     jm_cleanup_active_mir_state(state, false);

@@ -576,6 +576,7 @@ typedef struct JsTlsServer {
     uv_tcp_t     tcp;
     TlsContext*  tls_ctx;
     RuntimeValueSlots values;
+    uint32_t     resource_id;
     char         ticket_keys[48];
     int          ticket_keys_len;
     int          active_connections;
@@ -637,7 +638,6 @@ typedef struct JsTlsSocket {
 } JsTlsSocket;
 
 enum JsTlsServerValueSlot {
-    JS_TLS_SERVER_VALUE_OBJECT,
     JS_TLS_SERVER_VALUE_CONNECTION_HANDLER,
     JS_TLS_SERVER_VALUE_CLOSE_CALLBACK,
     JS_TLS_SERVER_VALUE_COUNT,
@@ -665,7 +665,10 @@ static void tls_server_set_value(JsTlsServer* srv, JsTlsServerValueSlot slot,
 }
 
 static Item tls_server_object(JsTlsServer* srv) {
-    return tls_server_value(srv, JS_TLS_SERVER_VALUE_OBJECT);
+    if (!srv || srv->resource_id == 0) return make_js_undefined();
+    const RuntimeResourceEntry* entry = runtime_resource_table_entry_owned(
+        &js_runtime_state.resources, srv, srv->resource_id);
+    return runtime_resource_table_value(&js_runtime_state.resources, entry);
 }
 
 static Item tls_server_connection_handler(JsTlsServer* srv) {
@@ -836,6 +839,12 @@ static void tls_server_maybe_destroy(JsTlsServer* srv) {
     if (srv->tls_ctx) {
         tls_context_destroy(srv->tls_ctx);
         srv->tls_ctx = NULL;
+    }
+    if (srv->resource_id != 0) {
+        uint32_t resource_id = srv->resource_id;
+        srv->resource_id = 0;
+        runtime_resource_table_remove_owned(&js_runtime_state.resources,
+            srv, resource_id);
     }
     runtime_value_slots_destroy(&srv->values);
     mem_free(srv);
@@ -2889,7 +2898,16 @@ extern "C" Item js_tls_createServer(Item options_item, Item handler) {
     }
 
     Item obj = js_new_object_with_class(JS_CLASS_TLS_SERVER);
-    tls_server_set_value(srv, JS_TLS_SERVER_VALUE_OBJECT, obj);
+    const RuntimeResourceDescriptor* descriptor =
+        runtime_resource_descriptor_from_legacy_name("TLSServerWrap");
+    srv->resource_id = runtime_resource_table_add_owned(
+        &js_runtime_state.resources, srv, obj, descriptor, NULL, NULL, true);
+    if (srv->resource_id == 0) {
+        runtime_value_slots_destroy(&srv->values);
+        mem_free(srv);
+        tls_context_destroy(ctx);
+        return js_new_error(make_string_item("Could not register TLS server"));
+    }
     js_set_key_cstr(obj, "__server__", (Item){.item = i2it((int64_t)(uintptr_t)srv)});
 #define JS_TLS_SERVER_METHODS(M) \
     M("listen", js_tls_server_listen) M("close", js_tls_server_close) \

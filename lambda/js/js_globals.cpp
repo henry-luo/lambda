@@ -2106,30 +2106,33 @@ static int js_process_bootstrap_argc_raw = 0;
 static int js_process_bootstrap_exec_argc_raw = 0;
 
 JS_FORWARD_STATIC_EXPRESSION(bool*, js_process_exit_requested_slot, (void),
-    js_active_runtime_state ? &js_runtime_state.process->exit_requested : NULL)
-#define js_process_argv_items (js_runtime_state.process->argv)
-#define js_process_exec_argv_items (js_runtime_state.process->exec_argv)
+    js_active_runtime_state && js_process_state_ensure(&js_runtime_state)
+        ? &js_runtime_state.process->exit_requested : NULL)
+#define js_process_state (js_process_state_ensure(&js_runtime_state))
+#define js_process_argv_items (js_process_state->argv)
+#define js_process_exec_argv_items (js_process_state->exec_argv)
 #define js_process_argv_raw js_process_bootstrap_argv_raw
 #define js_process_exec_argv_raw js_process_bootstrap_exec_argv_raw
 #define js_process_argc_raw js_process_bootstrap_argc_raw
 #define js_process_exec_argc_raw js_process_bootstrap_exec_argc_raw
-#define js_process_object (js_runtime_state.process->object)
-#define js_process_exit_code_value (js_runtime_state.process->exit_code)
-#define js_process_exit_requested_value (js_runtime_state.process->exit_requested)
-#define js_process_exiting (js_runtime_state.process->exiting)
-#define process_listener_map (js_runtime_state.process->listener_map)
-#define process_total_listener_count (js_runtime_state.process->total_listener_count)
-#define process_ipc_liveness_listener_count (js_runtime_state.process->ipc_liveness_listener_count)
-#define js_process_ipc_active (js_runtime_state.process->ipc_active)
-#define js_process_ipc_closing (js_runtime_state.process->ipc_closing)
-#define js_process_ipc_disconnect_emitted (js_runtime_state.process->ipc_disconnect_emitted)
-#define js_process_ipc_force_ref (js_runtime_state.process->ipc_force_ref)
-#define js_process_ipc_pending_messages (js_runtime_state.process->ipc_pending_messages)
-#define js_process_ipc_write_callbacks (js_runtime_state.process->ipc_write_callbacks)
-#define js_process_ipc_buf (js_runtime_state.process->ipc_buffer)
-#define js_process_ipc_len (js_runtime_state.process->ipc_length)
-#define js_process_ipc_cap (js_runtime_state.process->ipc_capacity)
-JS_FORWARD_STATIC_EXPRESSION(bool, js_process_ensure_roots, (void), (js_active_runtime_state && js_root_vector_ensure_registered(&js_runtime_state.process->roots)))
+#define js_process_object (js_process_state->object)
+#define js_process_exit_code_value (js_process_state->exit_code)
+#define js_process_exit_requested_value (js_process_state->exit_requested)
+#define js_process_exiting (js_process_state->exiting)
+#define process_listener_map (js_process_state->listener_map)
+#define process_total_listener_count (js_process_state->total_listener_count)
+#define process_ipc_liveness_listener_count (js_process_state->ipc_liveness_listener_count)
+#define js_process_ipc_active (js_process_state->ipc_active)
+#define js_process_ipc_closing (js_process_state->ipc_closing)
+#define js_process_ipc_disconnect_emitted (js_process_state->ipc_disconnect_emitted)
+#define js_process_ipc_force_ref (js_process_state->ipc_force_ref)
+#define js_process_ipc_pending_messages (js_process_state->ipc_pending_messages)
+#define js_process_ipc_write_callbacks (js_process_state->ipc_write_callbacks)
+#define js_process_ipc_buf (js_process_state->ipc_buffer)
+#define js_process_ipc_len (js_process_state->ipc_length)
+#define js_process_ipc_cap (js_process_state->ipc_capacity)
+JS_FORWARD_STATIC_EXPRESSION(bool, js_process_ensure_roots, (void),
+    (js_process_state && js_root_vector_ensure_registered(&js_process_state->roots)))
 
 // root-range cleanup clears expired realm cache slots to zero, while an
 // explicit realm reset uses ItemNull; neither value is a JS object.
@@ -3006,6 +3009,7 @@ extern "C" Item js_process_emit_before_exit(int code) {
 }
 
 extern "C" void js_process_reset_listeners(void) {
+    if (!js_active_runtime_state || !js_runtime_state.process) return;
     js_process_exiting = false;
     js_process_exit_requested_value = false;
     process_total_listener_count = 0;
@@ -3152,8 +3156,12 @@ typedef struct JsProcessIpcWriteReq {
     int64_t callback_slot;
 } JsProcessIpcWriteReq;
 
+static void js_process_ipc_resource_close(void* user);
+
 JS_FORWARD_STATIC_EXPRESSION(uv_pipe_t*, js_process_ipc_pipe_ptr, (void),
-    (uv_pipe_t*)js_runtime_state.process->ipc_pipe)
+    (js_process_state && js_process_state->ipc_resource_id != 0)
+        ? (uv_pipe_t*)runtime_resource_table_user_data(&js_runtime_state.resources,
+            js_process_state->ipc_resource_id) : NULL)
 #define js_process_ipc_pipe (*js_process_ipc_pipe_ptr())
 
 typedef struct JsProcessIpcScope {
@@ -3230,9 +3238,22 @@ static void js_process_ipc_close_cb(uv_handle_t* handle) {
     }
     js_process_ipc_len = 0;
     js_process_ipc_cap = 0;
-    js_runtime_state.process->ipc_pipe = NULL;
+    if (js_process_state && js_process_state->ipc_resource_id != 0) {
+        uint32_t resource_id = js_process_state->ipc_resource_id;
+        js_process_state->ipc_resource_id = 0;
+        runtime_resource_table_forget_owned(&js_runtime_state.resources,
+            js_process_state, resource_id);
+    }
     js_process_ipc_exit(&scope);
     mem_free(handle);
+}
+
+static void js_process_ipc_resource_close(void* user) {
+    uv_pipe_t* pipe = (uv_pipe_t*)user;
+    if (!pipe) return;
+    if (!uv_is_closing((uv_handle_t*)pipe)) {
+        uv_close((uv_handle_t*)pipe, js_process_ipc_close_cb);
+    }
 }
 
 static void js_process_ipc_write_cb(uv_write_t* req, int status) {
@@ -3458,18 +3479,31 @@ static void js_process_ipc_init_from_env(void) {
         log_error("process_ipc: event loop not initialized");
         return;
     }
-    if (!js_runtime_state.process->ipc_pipe) {
-        js_runtime_state.process->ipc_pipe = mem_calloc(1, sizeof(uv_pipe_t), MEM_CAT_JS_RUNTIME);
-        if (!js_runtime_state.process->ipc_pipe) {
-            log_error("process_ipc: failed to allocate context-owned pipe");
-            return;
-        }
+    uv_pipe_t* pipe = (uv_pipe_t*)mem_calloc(1, sizeof(uv_pipe_t), MEM_CAT_JS_RUNTIME);
+    if (!pipe) {
+        log_error("process_ipc: failed to allocate context-owned pipe");
+        return;
+    }
+    const RuntimeResourceDescriptor* descriptor =
+        runtime_resource_descriptor_from_legacy_name("ProcessIpc");
+    js_process_state->ipc_resource_id = runtime_resource_table_add_owned(
+        &js_runtime_state.resources, js_process_state, js_process_object,
+        descriptor, js_process_ipc_resource_close, pipe, true);
+    if (js_process_state->ipc_resource_id == 0) {
+        mem_free(pipe);
+        log_error("process_ipc: failed to register context-owned pipe");
+        return;
     }
     // child IPC pipes must opt into descriptor passing for ChildProcess.send(handle).
     uv_pipe_init(loop, &js_process_ipc_pipe, 1);
     int r = uv_pipe_open(&js_process_ipc_pipe, fd);
     if (r != 0) {
         log_error("process_ipc: failed to open fd %d: %s", fd, uv_strerror(r));
+        uint32_t resource_id = js_process_state->ipc_resource_id;
+        js_process_state->ipc_resource_id = 0;
+        runtime_resource_table_forget_owned(&js_runtime_state.resources,
+            js_process_state, resource_id);
+        mem_free(pipe);
         return;
     }
     js_process_ipc_pipe.data = context;
@@ -6034,37 +6068,41 @@ static Item js_get_generator_function_prototype(bool is_async) {
     if (cache->item != 0) return *cache;
 
     // Create a MAP to serve as GeneratorFunction.prototype (or AsyncGeneratorFunction.prototype)
-    Item proto = js_object_create(ItemNull);
-    if (get_type_id(proto) != LMD_TYPE_MAP) return ItemNull;
+    RootFrame roots(3);
+    Rooted<Item> proto_root(roots, js_object_create(ItemNull));
+    if (get_type_id(proto_root.get()) != LMD_TYPE_MAP) return ItemNull;
 
     const char* ctor_name = is_async ? "AsyncGeneratorFunction" : "GeneratorFunction";
-    Item ctor_fn = is_async
+    Rooted<Item> ctor_root(roots, is_async
         ? js_new_native_body_constructor(
             js_dynamic_async_generator_function_call_body,
             js_dynamic_async_generator_function_construct_body, 1)
         : js_new_native_body_constructor(js_dynamic_generator_function_call_body,
-            js_dynamic_generator_function_construct_body, 1);
-    proto = js_setup_dynamic_function_prototype(proto, ctor_fn, ctor_name);
+            js_dynamic_generator_function_construct_body, 1));
+    if (item_is_error(ctor_root.get())) return ctor_root.get();
+    proto_root.set(js_setup_dynamic_function_prototype(proto_root.get(),
+        ctor_root.get(), ctor_name));
+    if (item_is_error(proto_root.get())) return proto_root.get();
 
     // Per ES spec §27.6.3.1 / §27.3.3.1:
     // GeneratorFunction.prototype.prototype === %AsyncGeneratorPrototype% / %GeneratorPrototype%
     // This means: Object.getPrototypeOf(genFunc).prototype === depth-2
     {
-        Item depth2 = js_get_generator_shared_proto(is_async);
+        Rooted<Item> depth2_root(roots, js_get_generator_shared_proto(is_async));
         Item proto_key = js_name_item("prototype", 9);
-        js_set_key_default(proto, proto_key, depth2);
-        js_mark_non_writable(proto, proto_key);
-        js_mark_non_enumerable(proto, proto_key);
-        if (get_type_id(depth2) == LMD_TYPE_MAP) {
+        js_set_key_default(proto_root.get(), proto_key, depth2_root.get());
+        js_mark_non_writable(proto_root.get(), proto_key);
+        js_mark_non_enumerable(proto_root.get(), proto_key);
+        if (get_type_id(depth2_root.get()) == LMD_TYPE_MAP) {
             Item ctor_key = js_name_item("constructor", 11);
-            js_set_key_default(depth2, ctor_key, proto);
-            js_mark_non_writable(depth2, ctor_key);
-            js_mark_non_enumerable(depth2, ctor_key);
+            js_set_key_default(depth2_root.get(), ctor_key, proto_root.get());
+            js_mark_non_writable(depth2_root.get(), ctor_key);
+            js_mark_non_enumerable(depth2_root.get(), ctor_key);
         }
     }
 
-    *cache = proto;
-    return proto;
+    *cache = proto_root.get();
+    return proto_root.get();
 }
 
 // AsyncFunction.prototype singleton — analog of generator-function prototype but for
@@ -6073,14 +6111,18 @@ static Item js_get_async_function_prototype() {
     Item* cache = js_async_function_proto_cache_slot();
     if (!cache) return ItemNull;
     if (cache->item != 0) return *cache;
-    Item proto = js_object_create(ItemNull);
-    if (get_type_id(proto) != LMD_TYPE_MAP) return ItemNull;
-    Item ctor_fn = js_new_native_body_constructor(
+    RootFrame roots(2);
+    Rooted<Item> proto_root(roots, js_object_create(ItemNull));
+    if (get_type_id(proto_root.get()) != LMD_TYPE_MAP) return ItemNull;
+    Rooted<Item> ctor_root(roots, js_new_native_body_constructor(
         js_dynamic_async_function_call_body,
-        js_dynamic_async_function_construct_body, 1);
-    proto = js_setup_dynamic_function_prototype(proto, ctor_fn, "AsyncFunction");
-    *cache = proto;
-    return proto;
+        js_dynamic_async_function_construct_body, 1));
+    if (item_is_error(ctor_root.get())) return ctor_root.get();
+    proto_root.set(js_setup_dynamic_function_prototype(proto_root.get(),
+        ctor_root.get(), "AsyncFunction"));
+    if (item_is_error(proto_root.get())) return proto_root.get();
+    *cache = proto_root.get();
+    return proto_root.get();
 }
 
 extern "C" Item js_get_prototype_of(Item object) {
@@ -15875,7 +15917,7 @@ extern "C" Item js_resolve_unresolved_binding(Item value, NameId name_id, int64_
 
 // Global builtin function values retain the catalog ID that selected them.
 // The registry is the sole owner of names, arities, and cache identity.
-#define global_builtin_fn_cache (js_runtime_state.intrinsic_slots->global_builtin_functions)
+#define global_builtin_fn_cache_at(index) (*js_realm_intrinsic_slot(JS_REALM_SLOT_GLOBAL_BUILTIN_BASE, (index)))
 #define global_builtin_fn_cache_init (js_runtime_state.intrinsic_slots->global_builtin_initialized)
 
 // The preamble snapshot owns the realm's catalog-backed global functions too;
@@ -15895,8 +15937,9 @@ void js_global_builtin_fn_cache_reset() {
 }
 
 extern "C" Item js_get_global_builtin_fn_by_id(Item global_id_item) {
+    if (!js_realm_intrinsic_slots_ensure_roots()) return ItemError;
     if (!global_builtin_fn_cache_init) {
-        for (int i = 0; i < JS_BUILTIN_GLOBAL_MAX; i++) global_builtin_fn_cache[i] = ItemNull;
+        for (int i = 0; i < JS_BUILTIN_GLOBAL_MAX; i++) global_builtin_fn_cache_at(i) = ItemNull;
         global_builtin_fn_cache_init = true;
     }
     int global_id = (int)it2i(global_id_item);
@@ -15907,8 +15950,8 @@ extern "C" Item js_get_global_builtin_fn_by_id(Item global_id_item) {
     if (!spec || spec->id != global_id || spec->kind != JS_BUILTIN_GLOBAL_FUNCTION) {
         return ItemNull;
     }
-    if (!js_intrinsic_cache_slot_empty(global_builtin_fn_cache[spec->id])) {
-        return global_builtin_fn_cache[spec->id];
+    if (!js_intrinsic_cache_slot_empty(global_builtin_fn_cache_at(spec->id))) {
+        return global_builtin_fn_cache_at(spec->id);
     }
 
     const JsIntrinsicTargetSpec* target = js_intrinsic_target_find(spec->target_id);
@@ -15934,7 +15977,7 @@ extern "C" Item js_get_global_builtin_fn_by_id(Item global_id_item) {
     js_function_finalize_capabilities(fn);
     // prototype and properties_map left as zero (pool_calloc)
     Item result = {.function = (Function*)fn};
-    global_builtin_fn_cache[spec->id] = result;
+    global_builtin_fn_cache_at(spec->id) = result;
     return result;
 }
 
@@ -15944,7 +15987,7 @@ extern "C" Item js_get_global_builtin_fn_by_id(Item global_id_item) {
 // `Array.prototype.push` work correctly.
 // =============================================================================
 
-#define js_constructor_cache (js_runtime_state.intrinsic_slots->constructors)
+#define js_constructor_cache_at(index) (*js_realm_intrinsic_slot(JS_REALM_SLOT_CONSTRUCTOR_BASE, (index)))
 #define js_ctor_cache_init (js_runtime_state.intrinsic_slots->constructors_initialized)
 static void js_typed_array_base_reset();
 
@@ -15992,7 +16035,7 @@ static void js_intrinsic_state_ensure_epoch() {
 extern "C" int js_intrinsic_initialization_begin_for_constructor(Item constructor) {
     js_intrinsic_state_ensure_epoch();
     for (int ctor_id = 0; ctor_id < JS_CTOR_MAX; ctor_id++) {
-        if (js_constructor_cache[ctor_id].item == constructor.item) {
+        if (js_constructor_cache_at(ctor_id).item == constructor.item) {
             js_intrinsic_state.initialization_depth++;
             return 1;
         }
@@ -16030,7 +16073,8 @@ void js_ctor_cache_reset() {
     // re-creation of NEW JsCtor objects on next access, breaking identity with
     // the harness-cached references. Skip the reset; snapshot/restore handles state.
     if (js_proto_snapshot_is_valid()) return;
-    memset(js_constructor_cache, 0, sizeof(js_constructor_cache));
+    if (!js_realm_intrinsic_slots_ensure_roots()) return;
+    for (int i = 0; i < JS_CTOR_MAX; i++) js_constructor_cache_at(i) = (Item){0};
     js_intrinsic_proto_cache_reset();
     js_ctor_cache_init = false;
     js_typed_array_base_reset();
@@ -16153,12 +16197,15 @@ static void js_typed_array_base_reset(); // forward declaration
 
 // %TypedArray% intrinsic: shared base constructor for all TypedArray types.
 // (Forward declarations moved up so the snapshot code below can reference them.)
-#define js_typed_array_base (js_runtime_state.intrinsic_slots->typed_array_base)
-#define js_typed_array_base_proto (js_runtime_state.intrinsic_slots->typed_array_base_prototype)
+#define js_typed_array_base (*js_realm_slot(&js_runtime_state.realm_slots, JS_REALM_SLOT_TYPED_ARRAY_BASE))
+#define js_typed_array_base_proto (*js_realm_slot(&js_runtime_state.realm_slots, JS_REALM_SLOT_TYPED_ARRAY_BASE_PROTOTYPE))
 // float16array is still part of the typed-array surface; the prototype snapshot
 // table must cover every JsTypedArrayType enum slot.
 #define JS_TYPED_ARRAY_TYPE_COUNT JS_TYPED_ARRAY_CACHE_TYPE_COUNT
-#define js_typed_array_per_type_proto (js_runtime_state.intrinsic_slots->typed_array_prototypes)
+static inline Item& js_typed_array_per_type_proto_at(int element_type) {
+    return *js_realm_slot(&js_runtime_state.realm_slots,
+        (JsRealmSlotId)(JS_REALM_SLOT_TYPED_ARRAY_PROTO_INT8 + element_type));
+}
 
 // Map snapshot: the pristine shadow is a rooted GC Map, rather than untraced raw
 // bytes, so accessors and other pointer fields remain alive across collections.
@@ -16214,8 +16261,7 @@ struct JsPrototypeSnapshotState {
 
 static JsPrototypeSnapshotState* js_proto_snapshot_state() {
     if (!js_active_runtime_state) return NULL;
-    JsPrototypeSnapshotState* state =
-        (JsPrototypeSnapshotState*)js_runtime_state.prototype_snapshot_state;
+    JsPrototypeSnapshotState* state = js_runtime_state.prototype_snapshot_state;
     if (!state) {
         state = (JsPrototypeSnapshotState*)mem_calloc(1,
             sizeof(JsPrototypeSnapshotState), MEM_CAT_JS_RUNTIME);
@@ -16292,8 +16338,7 @@ static void js_proto_snapshot_ensure_roots() {
 
 extern "C" void js_runtime_prototype_snapshot_destroy_context(JsRuntimeState* runtime_state) {
     if (!runtime_state || !runtime_state->prototype_snapshot_state) return;
-    JsPrototypeSnapshotState* state =
-        (JsPrototypeSnapshotState*)runtime_state->prototype_snapshot_state;
+    JsPrototypeSnapshotState* state = runtime_state->prototype_snapshot_state;
     if (state->roots_epoch != 0 && context && context->heap &&
             context->heap->gc && state->roots_epoch == js_get_heap_epoch()) {
         js_proto_snapshot_visit_root_slots(state, heap_unregister_gc_root);
@@ -16636,7 +16681,7 @@ static void js_proto_snapshot_take_locked() {
         s->valid = false;
         js_proto_snapshot_clear_map(&s->proto_map);
         js_proto_snapshot_clear_map(&s->props_map);
-        Item ci = js_constructor_cache[i];
+        Item ci = js_constructor_cache_at(i);
         if (ci.item == 0 || ci.item == ItemNull.item) continue;
         JsCtor* ctor = (JsCtor*)ci.function;
         if (!ctor) continue;
@@ -16668,7 +16713,7 @@ static void js_proto_snapshot_take_locked() {
         GlobalBuiltinFunctionSnapshot* s = &js_global_builtin_fn_snapshots[i];
         s->valid = false;
         js_proto_snapshot_clear_map(&s->props_map);
-        Item function_item = global_builtin_fn_cache[i];
+        Item function_item = global_builtin_fn_cache_at(i);
         if (get_type_id(function_item) != LMD_TYPE_FUNC) continue;
         JsFunction* function = (JsFunction*)function_item.function;
         if (!function) continue;
@@ -16687,7 +16732,7 @@ static void js_proto_snapshot_take_locked() {
         js_proto_snapshot_map(&js_typed_array_base_proto_snap, js_typed_array_base_proto.map);
     }
     for (int i = 0; i < JS_TYPED_ARRAY_TYPE_COUNT; i++) {
-        Item p = js_typed_array_per_type_proto[i];
+        Item p = js_typed_array_per_type_proto_at(i);
         js_typed_array_per_type_proto_snap[i] = p;
         js_proto_snapshot_clear_map(
             &js_typed_array_per_type_proto_map_snap[i]);
@@ -16730,7 +16775,7 @@ static void js_proto_snapshot_restore_locked() {
     js_typed_array_base_proto = js_typed_array_base_proto_item_snap;
     if (js_typed_array_base_proto_snap.m) js_proto_restore_map(&js_typed_array_base_proto_snap);
     for (int i = 0; i < JS_TYPED_ARRAY_TYPE_COUNT; i++) {
-        js_typed_array_per_type_proto[i] = js_typed_array_per_type_proto_snap[i];
+        js_typed_array_per_type_proto_at(i) = js_typed_array_per_type_proto_snap[i];
         if (js_typed_array_per_type_proto_map_snap[i].m)
             js_proto_restore_map(&js_typed_array_per_type_proto_map_snap[i]);
     }
@@ -16852,7 +16897,7 @@ static void js_typed_array_base_reset() {
     js_typed_array_base = (Item){0};
     js_typed_array_base_proto = (Item){0};
     for (int i = 0; i < JS_TYPED_ARRAY_TYPE_COUNT; i++)
-        js_typed_array_per_type_proto[i] = (Item){0};
+        js_typed_array_per_type_proto_at(i) = (Item){0};
 }
 
 // Get/create per-type prototype for a typed array element type.
@@ -16860,7 +16905,9 @@ static void js_typed_array_base_reset() {
 extern "C" Item js_get_typed_array_per_type_proto(int element_type) {
     if (element_type < 0 || element_type >= JS_TYPED_ARRAY_TYPE_COUNT) return js_get_typed_array_base_proto();
     if (!js_realm_intrinsic_slots_ensure_roots()) return ItemError;
-    if (js_typed_array_per_type_proto[element_type].item != 0) return js_typed_array_per_type_proto[element_type];
+    if (js_typed_array_per_type_proto_at(element_type).item != 0) {
+        return js_typed_array_per_type_proto_at(element_type);
+    }
 
     // Determine constructor name and BYTES_PER_ELEMENT
     const char* ctor_name = NULL;
@@ -16885,7 +16932,7 @@ extern "C" Item js_get_typed_array_per_type_proto(int element_type) {
     Item base_proto = js_get_typed_array_base_proto();
     if (item_is_error(base_proto)) return base_proto;
     Item per_type = js_new_object();
-    js_typed_array_per_type_proto[element_type] = per_type;
+    js_typed_array_per_type_proto_at(element_type) = per_type;
 
     // Set __proto__ to %TypedArray%.prototype
     js_set_name_key(per_type, "__proto__", 9, base_proto);
@@ -16999,19 +17046,20 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
     // handler, getBoundingClientRect, a keyed result object -- used to fault on
     // js_input->pool a few lines below (ESO81).
     if (!js_input || !js_input->pool) return ItemNull;
+    if (!js_realm_intrinsic_slots_ensure_roots()) return ItemError;
     int ctor_id = spec->runtime_id;
     const char* name = spec->name;
     int param_count = spec->param_count;
     if (!js_ctor_cache_init) {
-        for (int i = 0; i < JS_CTOR_MAX; i++) js_constructor_cache[i] = ItemNull;
+        for (int i = 0; i < JS_CTOR_MAX; i++) js_constructor_cache_at(i) = ItemNull;
         js_ctor_cache_init = true;
     }
     // A cleared root-range slot is zero, not ItemNull, so an emptiness test that
     // only knows ItemNull reads a wiped slot as a cached null and hands it out
     // forever. Zero means empty here, as it does for the generator caches in
     // the same record.
-    if (!js_intrinsic_cache_slot_empty(js_constructor_cache[ctor_id])) {
-        return js_constructor_cache[ctor_id];
+    if (!js_intrinsic_cache_slot_empty(js_constructor_cache_at(ctor_id))) {
+        return js_constructor_cache_at(ctor_id);
     }
     js_intrinsic_state_ensure_epoch();
     js_intrinsic_state.initialization_depth++;
@@ -17054,7 +17102,7 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
     // capabilities become immutable executable metadata under D6.2.2v2.
     js_function_finalize_capabilities(fn);
     Item fn_item = (Item){.function = (Function*)fn};
-    js_constructor_cache[ctor_id] = fn_item;
+    js_constructor_cache_at(ctor_id) = fn_item;
     // Populate constructor-specific own properties
     if (ctor_id == JS_CTOR_NUMBER) js_populate_number_ctor(fn_item);
     if (ctor_id == JS_CTOR_SYMBOL) js_populate_symbol_ctor(fn_item);
@@ -17257,8 +17305,8 @@ extern "C" void js_intrinsic_note_property_mutation(Item object, Item key) {
 
     if (!js_intrinsic_key_equals(key, "prototype", 9)) return;
     for (int ctor_id = 0; ctor_id < JS_CTOR_MAX; ctor_id++) {
-        if (js_constructor_cache[ctor_id].item == 0 ||
-            js_constructor_cache[ctor_id].item != object.item) {
+        if (js_constructor_cache_at(ctor_id).item == 0 ||
+            js_constructor_cache_at(ctor_id).item != object.item) {
             continue;
         }
         // Replacing a constructor prototype invalidates cached identity for all

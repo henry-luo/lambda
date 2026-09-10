@@ -2839,7 +2839,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     }
 
 finish_boxed:
-    jm_clear_last_closure_snapshot(mt);
+    jm_closure_tracker_clear(mt);
     jm_pop_scope(mt);
     jm_finish_function_frame(mt, fc->name);
     MIR_finish_func(mt->ctx);

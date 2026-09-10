@@ -2379,11 +2379,10 @@ forced-GC instability in intrinsic/template/media paths, so it is not claimed
 as a gate for this slice. The release build and 544-translation-unit
 structural census complete successfully.
 
-Open after this phase: JSCU29(A)'s remaining realm-slot catalog and deletion
-of the remaining typed-array/intrinsic tail, JSCU31's remaining native-owner
-migration to the resource table, JSCU33(A)'s AST script-owner split, lazy
-allocation of the remaining capsule records, and all final release
-performance gates.
+Open after this phase: the operation-specific HTTP resource rows, removal of
+the legacy TLS-socket object slot, and the final release/performance gates.
+The realm catalog, typed-array slot carrier, lazy-record slices, AST
+definition owner, and closure checkpoint work are carried forward below.
 
 ### 8.15 Phase 3 continuation implementation (2026-09-10)
 
@@ -2416,12 +2415,49 @@ intrinsic span and makes the assertion/test-runner record genuinely lazy.
   and AsyncLocalStorage, without creating a second owner for any rooted value
   (D5.1.1v2, D5.3.5 and D5.4.2).
 
-The phase-3 build and test binaries compile cleanly. All 65
-`JavaScriptRegression` cases pass, and the node:test lazy-record probe also
-passes with `LAMBDA_GC_FORCE_EVERY=1`. The remaining work is the AST
-script-owner split, the rest of the typed-array/intrinsic tail and native
-resource-owner migrations, additional lazy records where their first-use
-boundary is observable, and final release/performance gates.
+The phase-3 build and test binaries compile cleanly. The AST definition-owner
+probe passes in both normal and forced-GC AST execution. Socket-backed
+regressions require a socket-enabled test environment; sandboxed runs report
+permission failures before producing script output. The remaining work is
+limited to the HTTP resource-row tail, the TLS-socket legacy object slot, and
+the final release/performance gates.
+
+### 8.16 Phase 3 wrap-up implementation (2026-09-10)
+
+This wrap-up records the final verified slices from the current worktree. They
+apply the one-concept/one-carrier rule at the definition, resource-owner, and
+closure-checkpoint boundaries while keeping the formal lifetime rulings
+unchanged.
+
+- **JSCU33(A), AST definition owner:** `JsAstDefinition` is retained by the
+  `JsScript` and owns the immutable function facts plus one pooled
+  `JsCallableCode`. Every closure keeps only its definition pointer,
+  environment, and lexical homes; closures made from one AST definition now
+  share the same code record. Function-value identity remains distinct, and
+  the retained Script pool owns the shared code (D6.2.1, D8.1.3v10 and
+  D8.2.4).
+- **JSCUO4, closure checkpoints:** MIR lowering uses `JsClosureTracker` for
+  active captures and its checkpoint journal. Save, rollback, clear, and
+  reserve operations now name the single tracker mechanism instead of a
+  snapshot plus a parallel journal (D8.2.4 and D8.2.5).
+- **JSCU29, indexed realm catalog:** typed-array prototypes, builtin-function
+  entries, global builtin entries, and constructor entries are addressed by
+  indexed `JsRealmSlots`; `JsRealmIntrinsicSlots` contains only initialization
+  policy booleans. Indexed access uses `RootVector` addressing, including
+  non-contiguous growth, so fixed-span pointer arithmetic is not required
+  (D5.3.5, D5.4.2 and D6.2.2v2).
+- **JSCU31, native owner rows:** process IPC, child-process exec/spawn, and
+  TLS-server owners now publish their script-visible owner through typed
+  `RuntimeResourceTable` rows. Callback/value teardown removes the row before
+  releasing native state, preserving generation checks and exact roots
+  (D7.4.1v2, D7.4.2 and D5.4.2).
+
+The verified non-network regressions and AST probe pass after the changes. A
+full socket-enabled run remains the appropriate gate for network cases; this
+worktree's sandbox cannot bind those sockets. HTTP operation rows, the TLS
+socket's remaining object-slot consolidation, and release/performance gates
+are intentionally left as the next bounded slice rather than being claimed
+complete here.
 
 ---
 

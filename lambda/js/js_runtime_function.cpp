@@ -304,7 +304,7 @@ static void js_callable_code_detach(JsFunction* fn) {
     fn->code = NULL;
     if (code->interned) {
         js_callable_code_release(code);
-    } else if (!js_function_is_pool_backed(fn)) {
+    } else if (!js_function_is_pool_backed(fn) && !code->definition_owned) {
         mem_free(code);
     }
 }
@@ -326,6 +326,7 @@ static JsCallableCode* js_callable_code_prepare_unique(JsFunction* fn,
     code->body_kind = JS_FUNCTION_BODY_CODE;
     code->intern_refcount = 0;
     code->interned = false;
+    code->definition_owned = false;
     return code;
 }
 
@@ -486,7 +487,7 @@ extern "C" void js_function_gc_destroy(void* data) {
     }
     if (fn->code) {
         if (fn->code->interned) js_callable_code_release(fn->code);
-        else mem_free(fn->code);
+        else if (!fn->code->definition_owned) mem_free(fn->code);
         fn->code = NULL;
     }
 }
@@ -707,16 +708,22 @@ extern "C" Item js_new_interpreted_function(AstFuncNode* function,
     if (!fn) return ItemError;
     function_root.set((Item){.function = (Function*)fn});
     js_function_init_common(fn, param_count);
-    JsCallableCode* code = js_fn_code_ensure(fn);
-    if (!code) return ItemError;
     JsAstBody* ast = js_fn_ast_ensure(fn);
     if (!ast) return ItemError;
-    ast->function = function;
-    ast->script = script;
+    ast->definition = js_script_ast_definition_ensure(script, function);
+    if (!ast->definition) return ItemError;
+    JsCallableCode* code = js_script_ast_definition_code_ensure(ast->definition,
+        param_count, lambda_active_module_state_id());
+    if (!code) return ItemError;
+    // js_function_init_common installs a temporary per-value code record so
+    // generic initialization remains allocation-safe; replace it before the
+    // AST value is published, leaving the definition as the sole code owner.
+    if (fn->code != code) {
+        js_callable_code_detach(fn);
+        fn->code = code;
+    }
     ast->env = environment;
-    code->body_kind = JS_FUNCTION_BODY_AST;
     fn->flags = flags;
-    code->module_state_id = lambda_active_module_state_id();
     fn->home_global = js_get_global_this();
     ast->lexical_this = (flags & JS_FUNC_FLAG_ARROW) ? js_get_this() : ItemNull;
     ast->lexical_new_target = (flags & JS_FUNC_FLAG_ARROW)

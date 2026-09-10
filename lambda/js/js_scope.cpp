@@ -1,4 +1,5 @@
 #include "js_transpiler.hpp"
+#include "js_function.hpp"
 #include "js_runtime.h"
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
@@ -303,12 +304,70 @@ static void js_script_destroy_extension(Script* base_script) {
         hashmap_free(script->type_registry);
         script->type_registry = NULL;
     }
+    if (script->ast_definitions) {
+        for (int i = 0; i < script->ast_definitions->length; i++) {
+            JsAstDefinition* definition = (JsAstDefinition*)arraylist_get(
+                script->ast_definitions, i);
+            if (definition) mem_free(definition);
+        }
+        arraylist_free(script->ast_definitions);
+        script->ast_definitions = NULL;
+    }
     // NamePool owns hash tables outside the AST pool. Release it before base
     // Script cleanup destroys the backing pool.
     if (script->name_pool) {
         name_pool_release(script->name_pool);
         script->name_pool = NULL;
     }
+}
+
+JsAstDefinition* js_script_ast_definition_ensure(JsScript* script,
+        AstFuncNode* function) {
+    if (!script || !function) return NULL;
+    if (!script->ast_definitions) {
+        script->ast_definitions = arraylist_new(8);
+        if (!script->ast_definitions) return NULL;
+    }
+    for (int i = 0; i < script->ast_definitions->length; i++) {
+        JsAstDefinition* definition = (JsAstDefinition*)arraylist_get(
+            script->ast_definitions, i);
+        if (definition && definition->function == function) return definition;
+    }
+    JsAstDefinition* definition = (JsAstDefinition*)mem_calloc(1,
+        sizeof(JsAstDefinition), MEM_CAT_SYSTEM);
+    if (!definition) return NULL;
+    JsAstFunctionFacts facts = js_ast_collect_function_facts(
+        (JsAstNode*)function->params, (JsAstNode*)function->body);
+    definition->function = function;
+    definition->script = script;
+    definition->has_direct_eval = facts.has_direct_eval;
+    definition->uses_arguments = facts.observations & JS_AST_OBSERVES_ARGUMENTS;
+    definition->tail_reuse_safe = facts.tail_reuse_safe;
+    if (!arraylist_append(script->ast_definitions, definition)) {
+        mem_free(definition);
+        return NULL;
+    }
+    return definition;
+}
+
+// AST code is owned by the retained Script pool, not by any one closure. The
+// definition row is the identity boundary; every AST function value points at
+// the same immutable code record while the Script remains live (D8.1.3v10,
+// D6.2.1; JSCU33(A)).
+JsCallableCode* js_script_ast_definition_code_ensure(
+        JsAstDefinition* definition, int param_count, uint32_t module_state_id) {
+    if (!definition || !definition->script || !definition->script->pool) return NULL;
+    if (definition->code) return definition->code;
+    JsCallableCode* code = (JsCallableCode*)pool_calloc(
+        definition->script->pool, sizeof(JsCallableCode));
+    if (!code) return NULL;
+    code->param_count = param_count;
+    code->formal_length = (int16_t)param_count;
+    code->module_state_id = module_state_id;
+    code->body_kind = JS_FUNCTION_BODY_AST;
+    code->definition_owned = true;
+    definition->code = code;
+    return code;
 }
 
 void js_transpiler_destroy(JsTranspiler* tp) {

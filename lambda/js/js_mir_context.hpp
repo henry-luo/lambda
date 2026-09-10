@@ -108,7 +108,7 @@ static const uint64_t ITEM_FALSE_VAL = ((uint64_t)LMD_TYPE_BOOL << 56) | 0;
 static const uint64_t STR_TAG        = (uint64_t)LMD_TYPE_STRING << 56;
 
 // §9.3: one capture record replaces six parallel arrays that appeared three
-// times over — in JsMirTranspiler, in JsMirLastClosureSnapshot, and through that
+// times over — in JsMirTranspiler and through branch checkpoints —
 // snapshot in JsMirBranchState — each fixed at 512 entries, which was also a
 // hard source-language limit on captures per closure.
 struct JsClosureCapture {
@@ -120,13 +120,18 @@ struct JsClosureCapture {
     bool        is_assigned;
 };
 
-// Grow-on-demand capture list plus the env register the captures live in.
+// One grow-on-demand closure tracker owns both the active capture list and
+// checkpoint journal.  Checkpoints retain only a mark into this journal;
+// branch/loop lowering never copies a second fixed capture array.
 struct JsClosureTracker {
     JsClosureCapture* captures;
     int               count;
     int               capacity;
     MIR_reg_t         env_reg;
     bool              has_env;
+    JsClosureCapture* journal;
+    int               journal_count;
+    int               journal_capacity;
 };
 
 typedef MirImportEntry JsMirImportEntry;
@@ -602,14 +607,10 @@ struct JsMirTranspiler {
 
     bool in_main;                    // true when transpiling Phase 3 (js_main)
 
-    // Closure env read-back for mutable captures (forEach, reduce, etc.)
+    // Closure env read-back and checkpoints for mutable captures (forEach,
+    // reduce, etc.).  The tracker owns its journal; no sibling snapshot
+    // record may carry another capture array.
     JsClosureTracker last_closure;
-    // Scoped saves push the live captures here and restore by truncating back
-    // to a mark, so a snapshot is a mark rather than an 11,792-byte copy and
-    // owns no storage a stack-local's early return could leak.
-    JsClosureCapture* closure_journal;
-    int closure_journal_count;
-    int closure_journal_capacity;
     // Hoisted closures can be created while a later lexical binding is still
     // TDZ. Retain every such cell until that binding initializes.
     // §9.3: grown on demand. The fixed 512 entries were 16,384 B — 86 % of
