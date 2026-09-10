@@ -1553,6 +1553,7 @@ static bool runtime_validate_value_against_type(Item item, Type* expected,
 
 static bool runtime_type_admit_value(Item value, Type* expected, Item* converted);
 static bool runtime_type_admit_array(Item value, Type* expected, Item* converted);
+static bool runtime_value_rep_proves_contract(Item value, Type* contract);
 
 static bool literal_type_matches_item(Type* expected, Item item) {
     if (!expected || !expected->is_literal ||
@@ -7508,8 +7509,13 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
         return ItemError;
     }
 
-    // Raw mutation has no destination contract. Invalidate the value-level
-    // proof before it can make an unchecked write look layout-safe (D3.3.3).
+    // A raw mutation may retain an exact proof only when its replacement
+    // already proves the certified element contract. Recheck the carrier
+    // after the store: open writes may still widen its physical layout
+    // (D3.3.3v3).
+    ArrayRepCert* prior_cert = arr->rep_cert;
+    bool preserve_cert = prior_cert && prior_cert->immediate_element &&
+        runtime_value_rep_proves_contract(value, prior_cert->immediate_element);
     lambda_array_clear_rep_cert({.array = arr});
 
     switch (arr_type) {
@@ -7630,6 +7636,12 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
     default:
         log_error("fn_array_set: unsupported array type %d", arr_type);
         return ItemError;
+    }
+    if (preserve_cert) {
+        lambda_array_install_rep_cert({.array = arr}, prior_cert);
+        if (!lambda_array_rep_proves_cert({.array = arr}, prior_cert, true)) {
+            lambda_array_clear_rep_cert({.array = arr});
+        }
     }
     return ItemNull;
 }
@@ -9252,13 +9264,8 @@ static Item lambda_array_path_set_checked_impl(Item owner, Item path, Item value
         Item private_child = cow_prepare_write(admitted_child);
         if (item_is_error(private_child)) return private_child;
         if (private_child.item != child.item) {
-            ArrayRepCert* parent_cert = rooted_current.get().array
-                ? rooted_current.get().array->rep_cert : NULL;
             Item link_result = fn_array_set(rooted_current.get().array, index, private_child);
             if (item_is_error(link_result)) return link_result;
-            // The child was admitted to the immediate contract before linking;
-            // raw relinking changes no parent element semantics.
-            lambda_array_install_rep_cert(rooted_current.get(), parent_cert);
         }
         rooted_current.set(private_child);
         current_contract = info.immediate_element;
@@ -9526,16 +9533,12 @@ Item cow_path_set_raw(Item owner, Item key, Item value) {
     if ((owner_type == LMD_TYPE_ARRAY || owner_type == LMD_TYPE_ELEMENT ||
             owner_type == LMD_TYPE_ARRAY_NUM) &&
             lambda_item_to_int64_exact(rooted_key.get(), &index)) {
-        ArrayRepCert* cert = rooted_owner.get().array->rep_cert;
-        bool preserve = cert && runtime_value_rep_proves_contract(
-            rooted_value.get(), cert->immediate_element);
         // The common setter checks logical bounds and stores admitted integer
         // lanes exactly; the legacy coercing setter loses full-width bits.
         if (get_type_id(fn_array_set(rooted_owner.get().array, index,
                 rooted_value.get())) == LMD_TYPE_ERROR) {
             return ItemError;
         }
-        if (preserve) lambda_array_install_rep_cert(rooted_owner.get(), cert);
         return rooted_owner.get();
     }
     if (owner_type == LMD_TYPE_MAP ||

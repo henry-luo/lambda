@@ -558,6 +558,21 @@ static Type* mir_named_contract(AstNamedNode* named) {
     return parameter ? parameter->full_type : named->type;
 }
 
+// An explicit `var array` is a boxed COW carrier even through a native call.
+// A T[] parameter uses that home only through its boxed ABI; raw direct calls
+// retain their ArrayNum pointer descriptor (D3.3.3v3).
+static bool mir_var_param_uses_generic_array_home(TypeParam* parameter,
+        Type* contract) {
+    return parameter && parameter->is_var_param && parameter->full_type &&
+        contract == &TYPE_ARRAY;
+}
+
+static bool mir_var_param_uses_typed_array_home(TypeParam* parameter,
+        Type* contract) {
+    return parameter && parameter->is_var_param && parameter->full_type &&
+        lambda_array_contract_element(contract);
+}
+
 static Type* mir_binding_contract(AstNode* binding) {
     return binding && binding->node_type == AST_NODE_VARIABLE_DECLARATOR
         ? ((AstDeclaratorNode*)binding)->declared_type
@@ -13425,6 +13440,12 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 bool declaration_boundary_redundant = declaration_boundary_applies &&
                     (map_contract_constructed ||
                      mir_boundary_is_redundant(mt, asn->init, declared_value_type));
+                if (declared_array_contract) {
+                    // Declaration admission creates the value-level T[]
+                    // certificate; a static relation only proves element
+                    // compatibility, not the live ArrayNum representation.
+                    declaration_boundary_redundant = false;
+                }
                 bool native_scalar_declaration = declaration_boundary_applies &&
                     !declaration_boundary_redundant && declared_value_type &&
                     declared_value_type->kind == TYPE_KIND_SIMPLE &&
@@ -18189,20 +18210,22 @@ static MirValue mir_call_value_from_result(MirTranspiler* mt,
         mir_expr_semantic_type(node));
 }
 
-// Transport a var binding's boxed Item through its precise root (D5.1.1v2).
+// Transport a boxed var binding through its precise root (D5.1.1v2).
 // When the argument is a rooted binding, sync its register to
 // its root slot and publish the slot's ADDRESS in Context::mir_var_homes[i];
-// otherwise publish 0 (place borrows) so the callee's
+// otherwise publish 0 (place borrows, raw ArrayNum roots) so the callee's
 // write-back degrades to a no-op instead of reading a stale cell. Returns
 // whether the caller must reload the binding after the call. Shared by the
 // direct native call and (T21-3b) the dynamic call a satellite makes to a
 // function it cannot link to directly.
 static bool mir_emit_var_home_transport(MirTranspiler* mt, int position,
-        MirVarEntry* borrow_root, MIR_reg_t val) {
+        MirVarEntry* borrow_root, MIR_reg_t val, bool allow_array_num) {
     MIR_disp_t vh_cell = (MIR_disp_t)offsetof(Context, mir_var_homes)
         + (MIR_disp_t)position * (MIR_disp_t)sizeof(uint64_t*);
-    // Container Items are untagged pointers, including native ArrayNum roots.
-    bool vh_homed = borrow_root && borrow_root->root_slot >= 0;
+    // Direct native typed-array calls keep their raw pointer descriptor and
+    // write in place. Only a boxed ABI edge transports ArrayNum roots.
+    bool vh_homed = borrow_root && borrow_root->root_slot >= 0 &&
+        (allow_array_num || borrow_root->type_id != LMD_TYPE_ARRAY_NUM);
     if (!vh_homed) {
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_mem_op(mt->ctx, MIR_T_I64, vh_cell, mt->em.frame.runtime, 0, 1),
@@ -19902,10 +19925,6 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                         array_item = admitted_array;
                     }
                     arg_root_slots[i] = create_gc_root_slot(mt, array_item);
-                    if (witness_param) {
-                        array_home_args[i] = true;
-                        array_home_roots[i] = witness_root;
-                    }
                     arg_ops[i] = MIR_new_reg_op(mt->ctx, array_item);
                     arg_vars[i] = {MIR_T_I64, "array", 0};
                     typed_array_witness_args[i] = true;
@@ -20175,16 +20194,19 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                                 mir_root_may_need_cow(borrow_root)) {
                             val = mir_prepare_cow_root(mt, borrow_root);
                         }
+                        bool generic_array_var = mir_var_param_uses_generic_array_home(
+                            type_param, parameter_contract);
                         if (type_param && type_param->is_var_param &&
-                                (!type_param->full_type ||
+                                (!type_param->full_type || generic_array_var ||
                                  lambda_array_contract_element(parameter_contract)) &&
                                 i < LAMBDA_MAX_FUNCTION_ARGS) {
-                            // Typed arrays also need write-back when a capture
-                            // inside the borrowed body forces a later detach.
-                            if (type_param->full_type) {
+                            if (type_param->full_type &&
+                                    lambda_array_contract_element(parameter_contract)) {
                                 array_home_args[i] = true;
                                 array_home_roots[i] = borrow_root;
-                            } else if (mir_emit_var_home_transport(mt, i, borrow_root, val)) {
+                            } else if (mir_emit_var_home_transport(mt, i, borrow_root, val,
+                                    false)) {
+                                var_home_typed[var_home_count] = generic_array_var;
                                 var_home_roots[var_home_count++] = borrow_root;
                             }
                         }
@@ -20311,13 +20333,12 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             const FnVariantAnalysis* call_variant = local_func
                 ? local_func_variant_for_call(local_entry, direct_call_name)
                 : NULL;
-            // A typed array can detach after a nested callee captures it.
             // Publish homes after argument evaluation, immediately before the
             // consuming call; later argument calls must not steal the cells.
             for (int i = 0; i < expected_params && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
                 if (!array_home_args[i]) continue;
                 MIR_reg_t value = load_gc_root_slot(mt, arg_root_slots[i], "array_home");
-                if (mir_emit_var_home_transport(mt, i, array_home_roots[i], value)) {
+                if (mir_emit_var_home_transport(mt, i, array_home_roots[i], value, true)) {
                     var_home_typed[var_home_count] = true;
                     var_home_roots[var_home_count++] = array_home_roots[i];
                 }
@@ -20672,7 +20693,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             TypeParam* var_param = mir_dynamic_call_var_param(dyn_var_signature, i);
             if (!var_param) continue;
             MirVarEntry* borrow_root = mir_direct_root_binding(mt, position_arg);
-            if (mir_emit_var_home_transport(mt, i, borrow_root, boxed_args[i])) {
+            if (mir_emit_var_home_transport(mt, i, borrow_root, boxed_args[i], true)) {
                 dyn_home_typed[dyn_home_count] = var_param->full_type != NULL;
                 dyn_home_roots[dyn_home_count++] = borrow_root;
             }
@@ -26628,10 +26649,14 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     int wrapper_array_home_count = 0;
     for (int i = 0; i < user_index; i++) {
         AstNamedNode* vp = mir_param_at(fn_node, i);
+        TypeParam* vp_type = vp ? (TypeParam*)vp->type : NULL;
+        Type* vp_contract = mir_named_contract(vp);
+        bool generic_array_var = mir_var_param_uses_generic_array_home(vp_type,
+            vp_contract);
         if (!typed_var_homes[i] ||
-                !lambda_array_contract_element(mir_named_contract(vp))) continue;
+                (!generic_array_var && !lambda_array_contract_element(vp_contract))) continue;
         MirVarEntry* binding = mir_var_for_binding(mt, vp->entry);
-        if (mir_emit_var_home_transport(mt, i, binding, prepared_params[i])) {
+        if (mir_emit_var_home_transport(mt, i, binding, prepared_params[i], true)) {
             wrapper_array_homes[wrapper_array_home_count++] = binding;
         }
     }
@@ -27079,16 +27104,19 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     MIR_reg_t runtime_fn = MIR_reg(mt->ctx, "runtime", func);
     // CW33 M1a: consume the caller's `var`-home transport cells FIRST, before
     // anything else can call out -- the cells are dead outside this window.
-    // Untyped and typed-array params use the same Item* convention; async
-    // procs retain their separate suspension/write-back protocol.
+    // Untyped and array params use an Item* home. An array can detach under
+    // COW; typed arrays retain their raw descriptor across that write-back.
     if (fn_as_node && fn_as_node->node_type == AST_NODE_PROC && !is_async_proc) {
         int vh_index = 0;
         for (AstNamedNode* vp = fn_node->param; vp && vh_index < LAMBDA_MAX_FUNCTION_ARGS;
                 vp = (AstNamedNode*)((AstNode*)vp)->next, vh_index++) {
             TypeParam* vp_type = (TypeParam*)((AstNode*)vp)->type;
+            bool generic_array_var = mir_var_param_uses_generic_array_home(vp_type,
+                mir_named_contract(vp));
+            bool typed_array_var = mir_var_param_uses_typed_array_home(vp_type,
+                mir_named_contract(vp));
             if (!vp_type || !vp_type->is_var_param ||
-                    (vp_type->full_type &&
-                     !lambda_array_contract_element(mir_named_contract(vp)))) continue;
+                    (vp_type->full_type && !generic_array_var && !typed_array_var)) continue;
             char vh_name[24];
             snprintf(vh_name, sizeof(vh_name), "var_home_%d", vh_index);
             MIR_reg_t home = new_reg(mt, vh_name, MIR_T_I64);
