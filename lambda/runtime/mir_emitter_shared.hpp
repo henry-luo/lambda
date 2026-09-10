@@ -86,8 +86,8 @@ struct VarEntry {
     // Checked stores must publish through that shared root, not retain a
     // transactional replacement only in the callee's local register.
     bool is_var_param;
-    // A String buffer may be appended in place only by this local binding.
-    // Any ordinary read clears this state before the value can become an alias.
+    // This binding may carry an exclusive String buffer on some control-flow path.
+    // Ordinary reads freeze its runtime flag; the may-own fact survives branches.
     bool string_buffer_owned;
     // A local initialized by an exact integer zero literal can safely serve as
     // the counted accumulator of a compiler-proven positive-step loop.

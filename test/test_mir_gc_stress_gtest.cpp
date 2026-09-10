@@ -57,6 +57,7 @@ static const char* kExtraLambdaScripts[] = {
     // A map field carried in the packed `any` lane is the only reference to
     // its container; the shape walk must decode that lane to reach it.
     "test/lambda/gc_shape_any_lane.ls",
+    "test/lambda/proc/string_builder_snapshots.ls",
 };
 
 struct StressScript {

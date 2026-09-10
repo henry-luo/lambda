@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "description": "Fresh string expressions use one destination; nullable indexed strings retain generic join fallback.",
+  "checks": [
+    {"in_func": "_expression_builder_#", "expect": ["fn_strcat_many"], "forbid": ["call\tfn_join_p, fn_join", "call\tfn_string_p, fn_string"]},
+    {"in_func": "_indexed_builder_#", "expect": ["fn_strcat_many", "call\tfn_join_p, fn_join"]}
+  ]
+}
