@@ -5948,13 +5948,20 @@ extern "C" Item js_object_create(Item proto) {
 // Forward declarations for %TypedArray% intrinsic (defined later in file)
 JS_FORWARD_RETURN(bool, js_is_typed_array_ctor_name, (const char* name, int len), js_builtin_global_has_flag, (name, len, JS_BUILTIN_GLOBAL_TYPED_ARRAY))
 
-// v90: GeneratorFunction.prototype singleton — returned by Object.getPrototypeOf for generator functions.
-// Its .constructor creates generator-flagged functions (non-constructable via 'new').
-// Function-prototype identity is observable and therefore belongs to each JS
-// realm. These direct fields stay lock-free on prototype lookup paths.
-#define js_generator_function_proto_cache (js_runtime_state.intrinsic_slots->generator_function)
-#define js_async_generator_function_proto_cache (js_runtime_state.intrinsic_slots->async_generator_function)
-#define js_async_function_proto_cache (js_runtime_state.intrinsic_slots->async_function)
+// v90: GeneratorFunction.prototype singletons are realm slots, alongside the
+// module namespace cache. They are observable identities, not intrinsic
+// catalog entries, so keeping them in the dynamic realm store avoids another
+// fixed singleton span (D5.3.5; JSCU29).
+static Item* js_generator_function_proto_cache_slot(bool is_async) {
+    return js_realm_slot(&js_runtime_state.realm_slots, is_async
+        ? JS_REALM_SLOT_ASYNC_GENERATOR_FUNCTION_PROTOTYPE
+        : JS_REALM_SLOT_GENERATOR_FUNCTION_PROTOTYPE);
+}
+
+static Item* js_async_function_proto_cache_slot(void) {
+    return js_realm_slot(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_ASYNC_FUNCTION_PROTOTYPE);
+}
 
 
 using JsFuncFlagsAccess = JsFunction;
@@ -5998,7 +6005,8 @@ static Item js_setup_dynamic_function_prototype(Item proto, Item ctor_fn,
 }
 
 static Item js_get_generator_function_prototype(bool is_async) {
-    Item* cache = is_async ? &js_async_generator_function_proto_cache : &js_generator_function_proto_cache;
+    Item* cache = js_generator_function_proto_cache_slot(is_async);
+    if (!cache) return ItemNull;
     if (cache->item != 0) return *cache;
 
     // Create a MAP to serve as GeneratorFunction.prototype (or AsyncGeneratorFunction.prototype)
@@ -6038,14 +6046,16 @@ static Item js_get_generator_function_prototype(bool is_async) {
 // AsyncFunction.prototype singleton — analog of generator-function prototype but for
 // non-generator async functions. Object.getPrototypeOf(asyncFn) === this.
 static Item js_get_async_function_prototype() {
-    if (js_async_function_proto_cache.item != 0) return js_async_function_proto_cache;
+    Item* cache = js_async_function_proto_cache_slot();
+    if (!cache) return ItemNull;
+    if (cache->item != 0) return *cache;
     Item proto = js_object_create(ItemNull);
     if (get_type_id(proto) != LMD_TYPE_MAP) return ItemNull;
     Item ctor_fn = js_new_native_body_constructor(
         js_dynamic_async_function_call_body,
         js_dynamic_async_function_construct_body, 1);
     proto = js_setup_dynamic_function_prototype(proto, ctor_fn, "AsyncFunction");
-    js_async_function_proto_cache = proto;
+    *cache = proto;
     return proto;
 }
 
@@ -13126,9 +13136,15 @@ extern "C" void js_globals_batch_reset() {
     extern void js_with_batch_reset(void);
     js_with_batch_reset();
     // reset GeneratorFunction.prototype caches — objects live in old heap after reset
-    js_generator_function_proto_cache = (Item){0};
-    js_async_generator_function_proto_cache = (Item){0};
-    js_async_function_proto_cache = (Item){0};
+    Item* generator_proto = js_realm_slot_existing(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_GENERATOR_FUNCTION_PROTOTYPE);
+    Item* async_generator_proto = js_realm_slot_existing(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_ASYNC_GENERATOR_FUNCTION_PROTOTYPE);
+    Item* async_proto = js_realm_slot_existing(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_ASYNC_FUNCTION_PROTOTYPE);
+    if (generator_proto) *generator_proto = (Item){0};
+    if (async_generator_proto) *async_generator_proto = (Item){0};
+    if (async_proto) *async_proto = (Item){0};
 }
 
 // =============================================================================

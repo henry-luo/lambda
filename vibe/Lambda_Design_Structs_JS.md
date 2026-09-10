@@ -2329,6 +2329,12 @@ separate:
   and teardown all use the same vector primitive. The realm visitor tolerates
   absent lazy records, so it no longer requires a second root descriptor for
   fixed state (D5.3.5 and D5.4.2).
+- **JSCU29(A), singleton-slot completion:** the `__proto__` name, generator and
+  async-function prototype singletons, iterator prototypes, generator markers,
+  and async-iterator prototypes now use `JsRealmSlots`. The former
+  `JsIteratorState` capsule and its fixed eleven-Item root span are gone; reset
+  clears only existing realm slots, while first use reserves the exact dynamic
+  slot (D5.3.5, D5.4.2 and D6.2.2v2).
 - **JSCU29(A), lazy capsule record:** `JsTest262AgentState` (including the
   Atomics waiter carrier) is allocated only when `$262` or Atomics agent state
   is used. Its callback/report vectors are initialized by the same owner
@@ -2336,6 +2342,11 @@ separate:
   therefore avoid an otherwise unused callback/report allocation while the
   forced-GC Test262 and Atomics regressions retain exact roots (D5.1.1v2 and
   D5.3.5).
+- **JSCU29(A), lazy host records:** `JsReadlineState` and
+  `JsAsyncLocalStorageState` now follow the same ensure-on-first-use contract.
+  Their input/instance root vectors are absent from an ordinary realm until
+  the corresponding API is constructed, and reset paths clear only an
+  existing record (D5.1.1v2 and D5.3.5).
 - **JSCU31, TLS native owner:** `JsTlsSocket` publishes its transport through
   a generation-checked `RuntimeResourceTable` row of kind `TLSSocketWrap`.
   `__handle__` stores the generation-checked resource id, close is routed
@@ -2363,7 +2374,7 @@ forced-GC instability in intrinsic/template/media paths, so it is not claimed
 as a gate for this slice. The release build and 544-translation-unit
 structural census complete successfully.
 
-Open: JSCU29(A)'s full realm-slot catalog and deletion of the remaining
+Open: JSCU29(A)'s remaining realm-slot catalog and deletion of the remaining
 non-namespace singleton spans, JSCU31's remaining native-owner migration to
 the resource table, JSCU33(A)'s definition-level code interning and AST
 script-owner split, lazy allocation of the remaining capsule records, and all

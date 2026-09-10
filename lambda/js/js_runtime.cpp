@@ -4120,14 +4120,24 @@ Item js_map_shape_lookup_ext(Map* m, const char* key_str, int key_len, bool* out
 }
 
 // P10d: Interned __proto__ key — avoid heap_create_name on every prototype lookup.
-// Initialized lazily on first use.
-#define js_proto_key_item (js_runtime_state.intrinsic_slots->proto_key)
-void js_reset_proto_key() { js_proto_key_item = (Item){0}; }
+// Initialized lazily on first use and owned by the dynamic realm slot store.
+static Item* js_proto_key_slot(void) {
+    return js_realm_slot(&js_runtime_state.realm_slots, JS_REALM_SLOT_PROTO_KEY);
+}
+
+void js_reset_proto_key() {
+    Item* slot = js_realm_slot_existing(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_PROTO_KEY);
+    if (slot) *slot = (Item){0};
+}
+
 static Item js_get_proto_key() {
-    if (js_proto_key_item.item == 0) {
-        js_proto_key_item.item = s2it(heap_create_name("__proto__", 9));
+    Item* slot = js_proto_key_slot();
+    if (!slot) return ItemNull;
+    if (slot->item == 0) {
+        slot->item = s2it(heap_create_name("__proto__", 9));
     }
-    return js_proto_key_item;
+    return *slot;
 }
 
 // Forward declaration for builtin method lookup (extern — used by js_globals.cpp too)
@@ -28696,22 +28706,34 @@ enum JsIteratorCacheSlot {
 };
 
 static Item* js_iterator_cache_item(JsIteratorCacheSlot slot) {
-    if (!js_iterator_state_ensure_roots()) return NULL;
-    JsIteratorState* state = js_runtime_state.iterators;
+    if (!js_active_runtime_state) return NULL;
+    JsRealmSlotId realm_slot = JS_REALM_SLOT_COUNT;
     switch (slot) {
-    case JS_ITERATOR_CACHE_GENERATOR_DEPTH2: return &state->generator_proto_depth2;
-    case JS_ITERATOR_CACHE_ASYNC_GENERATOR_DEPTH2: return &state->async_generator_proto_depth2;
-    case JS_ITERATOR_CACHE_ASYNC_ITERATOR: return &state->async_iterator_prototype;
-    case JS_ITERATOR_CACHE_GENERATOR_RETURN: return &state->generator_return_marker;
-    case JS_ITERATOR_CACHE_GENERATOR_THROW: return &state->generator_throw_marker;
-    case JS_ITERATOR_CACHE_ITERATOR: return &state->iterator_prototype;
-    case JS_ITERATOR_CACHE_ARRAY_ITERATOR: return &state->array_iterator_prototype;
-    case JS_ITERATOR_CACHE_STRING_ITERATOR: return &state->string_iterator_prototype;
-    case JS_ITERATOR_CACHE_MAP_ITERATOR: return &state->map_iterator_prototype;
-    case JS_ITERATOR_CACHE_SET_ITERATOR: return &state->set_iterator_prototype;
-    case JS_ITERATOR_CACHE_REGEXP_ITERATOR: return &state->regexp_string_iterator_prototype;
+    case JS_ITERATOR_CACHE_GENERATOR_DEPTH2:
+        realm_slot = JS_REALM_SLOT_GENERATOR_PROTO_DEPTH2; break;
+    case JS_ITERATOR_CACHE_ASYNC_GENERATOR_DEPTH2:
+        realm_slot = JS_REALM_SLOT_ASYNC_GENERATOR_PROTO_DEPTH2; break;
+    case JS_ITERATOR_CACHE_ASYNC_ITERATOR:
+        realm_slot = JS_REALM_SLOT_ASYNC_ITERATOR_PROTOTYPE; break;
+    case JS_ITERATOR_CACHE_GENERATOR_RETURN:
+        realm_slot = JS_REALM_SLOT_GENERATOR_RETURN_MARKER; break;
+    case JS_ITERATOR_CACHE_GENERATOR_THROW:
+        realm_slot = JS_REALM_SLOT_GENERATOR_THROW_MARKER; break;
+    case JS_ITERATOR_CACHE_ITERATOR:
+        realm_slot = JS_REALM_SLOT_ITERATOR_PROTOTYPE; break;
+    case JS_ITERATOR_CACHE_ARRAY_ITERATOR:
+        realm_slot = JS_REALM_SLOT_ARRAY_ITERATOR_PROTOTYPE; break;
+    case JS_ITERATOR_CACHE_STRING_ITERATOR:
+        realm_slot = JS_REALM_SLOT_STRING_ITERATOR_PROTOTYPE; break;
+    case JS_ITERATOR_CACHE_MAP_ITERATOR:
+        realm_slot = JS_REALM_SLOT_MAP_ITERATOR_PROTOTYPE; break;
+    case JS_ITERATOR_CACHE_SET_ITERATOR:
+        realm_slot = JS_REALM_SLOT_SET_ITERATOR_PROTOTYPE; break;
+    case JS_ITERATOR_CACHE_REGEXP_ITERATOR:
+        realm_slot = JS_REALM_SLOT_REGEXP_ITERATOR_PROTOTYPE; break;
     }
-    return NULL;
+    return realm_slot == JS_REALM_SLOT_COUNT ? NULL :
+        js_realm_slot(&js_runtime_state.realm_slots, realm_slot);
 }
 
 #define js_generator_proto_depth2_cache (*js_iterator_cache_item(JS_ITERATOR_CACHE_GENERATOR_DEPTH2))
@@ -28936,9 +28958,10 @@ extern "C" JsGeneratorStateRecord* js_generator_get_ast_state(Item generator) {
 #define js_gen_throw_signal_marker (*js_iterator_cache_item(JS_ITERATOR_CACHE_GENERATOR_THROW))
 
 static bool js_iterator_state_ensure_roots(void) {
-    JsIteratorState* state = js_active_runtime_state
-        ? js_iterator_state_ensure(&js_runtime_state) : NULL;
-    return state && js_root_vector_ensure_registered(&state->roots);
+    // Iterator prototypes and generator markers are realm singletons. Their
+    // exact roots are now owned by JsRealmSlots, so no secondary lazy record
+    // or fixed root span is needed (D5.3.5; JSCU29).
+    return js_active_runtime_state != NULL;
 }
 
 static Item js_get_gen_return_signal_marker() {
@@ -29543,13 +29566,18 @@ extern "C" bool js_is_async_generator(Item obj) {
 #define js_regexp_string_iterator_proto_cache (*js_iterator_cache_item(JS_ITERATOR_CACHE_REGEXP_ITERATOR))
 
 extern "C" void js_iterator_proto_cache_reset(void) {
-    if (!js_runtime_state.iterators) return;
-    js_iterator_proto_cache = (Item){0};
-    js_array_iterator_proto_cache = (Item){0};
-    js_string_iterator_proto_cache = (Item){0};
-    js_map_iterator_proto_cache = (Item){0};
-    js_set_iterator_proto_cache = (Item){0};
-    js_regexp_string_iterator_proto_cache = (Item){0};
+    const JsRealmSlotId slots[] = {
+        JS_REALM_SLOT_ITERATOR_PROTOTYPE,
+        JS_REALM_SLOT_ARRAY_ITERATOR_PROTOTYPE,
+        JS_REALM_SLOT_STRING_ITERATOR_PROTOTYPE,
+        JS_REALM_SLOT_MAP_ITERATOR_PROTOTYPE,
+        JS_REALM_SLOT_SET_ITERATOR_PROTOTYPE,
+        JS_REALM_SLOT_REGEXP_ITERATOR_PROTOTYPE,
+    };
+    for (int i = 0; i < (int)(sizeof(slots) / sizeof(slots[0])); i++) {
+        Item* cache = js_realm_slot_existing(&js_runtime_state.realm_slots, slots[i]);
+        if (cache) *cache = (Item){0};
+    }
 }
 
 static Item js_make_iterator_proto(Item* cache, JsBuiltinOwner next_owner,
@@ -35835,23 +35863,37 @@ static Item js_internal_repl_create(Item env, Item opts, Item cb) {
     return repl;
 }
 
-#define js_als_instances (&js_runtime_state.async_local_storage->instances)
-#define js_als_instance_count root_vector_count(js_als_instances)
+static JsAsyncLocalStorageState* js_als_state_existing(void) {
+    return js_active_runtime_state ? js_runtime_state.async_local_storage : NULL;
+}
+
+static JsAsyncLocalStorageState* js_als_state_ensure(void) {
+    return js_active_runtime_state
+        ? js_async_local_storage_state_ensure(&js_runtime_state) : NULL;
+}
+
+static int64_t js_als_instance_count(void) {
+    JsAsyncLocalStorageState* state = js_als_state_existing();
+    return state ? root_vector_count(&state->instances) : 0;
+}
 
 static Item js_als_store_key(void) {
     return js_name_item("_store", 6);
 }
 
 static Item js_als_instance_at(int64_t index) {
-    Item* instance = root_vector_at(js_als_instances, index);
+    JsAsyncLocalStorageState* state = js_als_state_existing();
+    Item* instance = state ? root_vector_at(&state->instances, index) : NULL;
     return instance ? *instance : ItemNull;
 }
 
 static void js_als_register_instance(Item instance) {
-    for (int64_t i = 0; i < js_als_instance_count; i++) {
+    JsAsyncLocalStorageState* state = js_als_state_ensure();
+    if (!state) return;
+    for (int64_t i = 0; i < js_als_instance_count(); i++) {
         if (js_als_instance_at(i).item == instance.item) return;
     }
-    if (!root_vector_push(js_als_instances, instance)) {
+    if (!root_vector_push(&state->instances, instance)) {
         log_error("js-als: failed to retain AsyncLocalStorage instance");
     }
 }
@@ -35859,7 +35901,7 @@ static void js_als_register_instance(Item instance) {
 extern "C" Item js_als_capture_context(void) {
     Item context = js_array_new(0);
     Item store_key = js_als_store_key();
-    for (int64_t i = 0; i < js_als_instance_count; i++) {
+    for (int64_t i = 0; i < js_als_instance_count(); i++) {
         Item instance = js_als_instance_at(i);
         if (instance.item == 0) continue;
         Item pair = js_array_new(0);
@@ -38515,7 +38557,9 @@ void js_deep_batch_reset() {
     js_domain_current = (Item){0};
     js_domain_namespace = (Item){0};
     js_item_stack_clear(&js_domain_stack_state);
-    root_vector_clear(js_als_instances);
+    if (js_runtime_state.async_local_storage) {
+        root_vector_clear(&js_runtime_state.async_local_storage->instances);
+    }
     js_async_hooks_root_resource = (Item){0};
     js_async_hooks_current_resource = (Item){0};
     js_async_hooks_next_id = 2;
@@ -38523,12 +38567,17 @@ void js_deep_batch_reset() {
     root_vector_clear(&js_async_pending_destroy_values);
     js_async_resolved_value = (Item){0};
     js_reset_transient_call_state();
-    // generator proto caches point into old heap — reset only if the lazy
-    // iterator record was materialized; reset itself must not create it.
-    if (js_runtime_state.iterators) {
-        js_generator_proto_depth2_cache = (Item){0};
-        js_async_generator_proto_depth2_cache = (Item){0};
-        js_async_iterator_proto_cache = (Item){0};
+    // generator proto caches point into old heap — clear only existing realm
+    // slots; reset itself must not materialize the lazy cache entries.
+    const JsRealmSlotId iterator_slots[] = {
+        JS_REALM_SLOT_GENERATOR_PROTO_DEPTH2,
+        JS_REALM_SLOT_ASYNC_GENERATOR_PROTO_DEPTH2,
+        JS_REALM_SLOT_ASYNC_ITERATOR_PROTOTYPE,
+    };
+    for (int i = 0; i < (int)(sizeof(iterator_slots) / sizeof(iterator_slots[0])); i++) {
+        Item* cache = js_realm_slot_existing(&js_runtime_state.realm_slots,
+            iterator_slots[i]);
+        if (cache) *cache = (Item){0};
     }
     js_generator_callee_proto = (Item){0};
     js_current_private_home_class = (Item){0};

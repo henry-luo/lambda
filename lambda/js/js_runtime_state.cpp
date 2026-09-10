@@ -465,7 +465,6 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
         runtime_callback_slots_destroy(&state->process->ipc_write_callbacks);
         mem_free(state->process);
     }
-    if (state->iterators) mem_free(state->iterators);
     state->readline = NULL;
     state->string_caches = NULL;
     state->assert = NULL;
@@ -474,7 +473,36 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
     state->intrinsic_slots = NULL;
     state->test262_agent = NULL;
     state->process = NULL;
-    state->iterators = NULL;
+}
+
+JsReadlineState* js_readline_state_ensure(JsRuntimeState* state) {
+    if (!state) return NULL;
+    if (state->readline) return state->readline;
+    JsReadlineState* readline = (JsReadlineState*)mem_calloc(1,
+        sizeof(JsReadlineState), MEM_CAT_JS_RUNTIME);
+    if (!readline) {
+        log_error("js-runtime-state: failed to allocate lazy readline record");
+        return NULL;
+    }
+    root_vector_init(&readline->input_values, (Context*)context,
+        "readline input map");
+    state->readline = readline;
+    return readline;
+}
+
+JsAsyncLocalStorageState* js_async_local_storage_state_ensure(JsRuntimeState* state) {
+    if (!state) return NULL;
+    if (state->async_local_storage) return state->async_local_storage;
+    JsAsyncLocalStorageState* storage = (JsAsyncLocalStorageState*)mem_calloc(1,
+        sizeof(JsAsyncLocalStorageState), MEM_CAT_JS_RUNTIME);
+    if (!storage) {
+        log_error("js-runtime-state: failed to allocate lazy async-local-storage record");
+        return NULL;
+    }
+    root_vector_init(&storage->instances, (Context*)context,
+        "AsyncLocalStorage instances");
+    state->async_local_storage = storage;
+    return storage;
 }
 
 JsTest262AgentState* js_test262_agent_state_ensure(JsRuntimeState* state) {
@@ -495,21 +523,6 @@ JsTest262AgentState* js_test262_agent_state_ensure(JsRuntimeState* state) {
     return agent;
 }
 
-JsIteratorState* js_iterator_state_ensure(JsRuntimeState* state) {
-    if (!state) return NULL;
-    if (state->iterators) return state->iterators;
-    JsIteratorState* iterators = (JsIteratorState*)mem_calloc(1,
-        sizeof(JsIteratorState), MEM_CAT_JS_RUNTIME);
-    if (!iterators) {
-        log_error("js-runtime-state: failed to allocate lazy iterator record");
-        return NULL;
-    }
-    root_vector_init(&iterators->roots, (Context*)context,
-        "generator and iterator prototype caches");
-    state->iterators = iterators;
-    return iterators;
-}
-
 // JSCU16: the realm's large records are allocated beside JsRuntimeState
 // instead of embedded in it, so the capsule itself stays small. They are
 // created with the realm because every realm uses them immediately; their
@@ -524,22 +537,18 @@ static bool js_runtime_state_alloc_records(JsRuntimeState* state) {
         sizeof(JsEventLoopTimerState), MEM_CAT_JS_RUNTIME);
     state->async_hooks = (JsAsyncHooksState*)mem_calloc(1,
         sizeof(JsAsyncHooksState), MEM_CAT_JS_RUNTIME);
-    state->readline = (JsReadlineState*)mem_calloc(1, sizeof(JsReadlineState), MEM_CAT_JS_RUNTIME);
     state->string_caches = (JsStringCacheState*)mem_calloc(1,
         sizeof(JsStringCacheState), MEM_CAT_JS_RUNTIME);
     state->assert = (JsAssertState*)mem_calloc(1, sizeof(JsAssertState), MEM_CAT_JS_RUNTIME);
     state->intrinsics = (JsIntrinsicState*)mem_calloc(1, sizeof(JsIntrinsicState), MEM_CAT_JS_RUNTIME);
-    state->async_local_storage = (JsAsyncLocalStorageState*)mem_calloc(1, sizeof(JsAsyncLocalStorageState), MEM_CAT_JS_RUNTIME);
     state->intrinsic_slots = (JsRealmIntrinsicSlots*)mem_calloc(1,
         sizeof(JsRealmIntrinsicSlots), MEM_CAT_JS_RUNTIME);
     state->process = (JsProcessState*)mem_calloc(1, sizeof(JsProcessState), MEM_CAT_JS_RUNTIME);
     if (!state->global_environment || !state->event_loop || !state->timers ||
             !state->async_hooks ||
-            !state->readline ||
             !state->string_caches ||
             !state->assert ||
             !state->intrinsics ||
-            !state->async_local_storage ||
             !state->intrinsic_slots ||
             !state->process) {
         log_error("js-runtime-state: failed to allocate realm records");
@@ -554,8 +563,6 @@ static bool js_runtime_state_alloc_records(JsRuntimeState* state) {
     runtime_resource_table_init(&state->resources, context,
         "JS runtime resources");
     js_realm_slots_init(&state->realm_slots, (Context*)context);
-    root_vector_init(&state->async_local_storage->instances, (Context*)context,
-        "AsyncLocalStorage instances");
     root_vector_init(&state->assert->instances, (Context*)context,
         "assert instances");
     root_vector_init(&state->assert->node_test_values, (Context*)context,
@@ -566,8 +573,6 @@ static bool js_runtime_state_alloc_records(JsRuntimeState* state) {
         (Context*)context, "node:test afterEach hooks");
     root_vector_init(&state->assert->mocks.values, (Context*)context,
         "node:test mock records");
-    root_vector_init(&state->readline->input_values, (Context*)context,
-        "readline input map");
     root_vector_init(&state->async_hooks->hooks, (Context*)context,
         "async hook instances");
     root_vector_init(&state->async_hooks->pending_destroy_resources,
@@ -786,7 +791,8 @@ static void js_runtime_state_visit_root_vectors(JsRuntimeState* state,
         visit(&state->assert->roots, &state->assert->namespace_object, 5,
             "assert namespaces and cached keys", data);
     }
-    visit(&state->intrinsic_slots->roots, &state->intrinsic_slots->proto_key,
+    visit(&state->intrinsic_slots->roots,
+        state->intrinsic_slots->builtin_function_entries,
         JS_REALM_INTRINSIC_SLOT_COUNT, "realm intrinsic slots", data);
     if (state->test262_agent) {
         visit(&state->test262_agent->roots, &state->test262_agent->object, 1,
@@ -795,11 +801,6 @@ static void js_runtime_state_visit_root_vectors(JsRuntimeState* state,
     if (state->process) {
         visit(&state->process->roots, &state->process->argv, 5,
             "process realm state", data);
-    }
-    if (state->iterators) {
-        visit(&state->iterators->roots,
-            &state->iterators->generator_return_marker, 11,
-            "generator and iterator prototype caches", data);
     }
     visit(&state->promises.roots, &state->promises.unhandled_storage, 3,
         "Promise unhandled queue and domain state", data);
@@ -846,7 +847,7 @@ static void js_runtime_state_prepare_root_vectors(JsRuntimeState* state) {
     JS_CHECK_NAMESPACE_ROOT_RANGE(stream, internal_add_abort_signal_namespace, 45)
 #undef JS_CHECK_NAMESPACE_ROOT_RANGE
 
-    if (&state->intrinsic_slots->proto_key +
+    if (&state->intrinsic_slots->builtin_function_entries[0] +
             (JS_REALM_INTRINSIC_SLOT_COUNT - 1) !=
             &state->intrinsic_slots->atomics) {
         log_error("js-root-vector: intrinsic slot span is not contiguous");
