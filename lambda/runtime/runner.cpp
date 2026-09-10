@@ -22,6 +22,7 @@
 #include "../jube/jube_registry.h"
 #include "../js/js_runtime.h"
 #include "../js/js_runtime_state.hpp"
+#include "../js/js_transpiler.hpp"
 #include "../js/js_event_loop.h"
 #include "../js/js_exec_profile.h"
 #include "../input/css/css_style.hpp"
@@ -1711,6 +1712,7 @@ void runtime_free_all_scripts(Runtime* runtime) {
         hashmap_free(runtime->script_index);
         runtime->script_index = NULL;
     }
+    js_runtime_ast_cache_destroy(runtime);
 }
 
 void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
@@ -1718,6 +1720,7 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     if (remove_index && script->reference) {
         runtime_script_index_delete_script(runtime, script);
     }
+    js_runtime_ast_cache_remove_script(runtime, script);
     // Hosted owners release their language-specific facts before the shared
     // AST/Input storage disappears. The hook never owns common Script fields.
     if (script->destroy_extension) {

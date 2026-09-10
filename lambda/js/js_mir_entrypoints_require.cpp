@@ -127,25 +127,25 @@ static void js_mir_finish_script_turn(Runtime* runtime, Item result) {
     js_process_current_exit_code();
 }
 
-static Item js_mir_execute_ast_script(Runtime* runtime, JsTranspiler* tp,
-        JsAstNode* js_ast, char* owned_source, const char* js_source,
-        size_t js_source_len, const char* filename, uint64_t* result_home,
-        bool test262_native_harness) {
-    // The AST tier owns the retained JsScript, but uses the same source parse,
-    // early-error pass, Runtime catalog, and EvalContext setup as MIR lowering.
-    jm_clear_active_js_transpile(tp, NULL, NULL);
-    JsScript* script = js_script_adopt_transpiler(tp, runtime, filename);
+static Item js_mir_execute_retained_ast_script(Runtime* runtime, JsScript* script,
+        char* owned_source, const char* js_source, size_t js_source_len,
+        const char* filename, uint64_t* result_home, bool test262_native_harness) {
     if (!script) {
         jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
         return ItemError;
     }
+    // A cache hit keeps parse facts only; each ordinary source execution gets
+    // fresh script-mode flags and rebuilds values in the active document realm.
+    script->is_module = false;
+    script->is_es_module = false;
+    script->is_eval_script = false;
     script->test262_native_harness = test262_native_harness;
     script->test262_native_build_string =
         js_test262_source_has_build_string_helper(js_source, js_source_len, filename);
     jm_clear_active_js_transpile(NULL, NULL, owned_source);
     mem_free(owned_source);
-    Item result = js_ast_is_es_module(js_ast)
+    Item result = js_ast_is_es_module((JsAstNode*)script->ast_root)
         ? js_interp_execute_es_module_script(runtime, script, result_home)
         : js_interp_execute_script(runtime, script, result_home);
     js_mir_finish_script_turn(runtime, result);
@@ -153,6 +153,17 @@ static Item js_mir_execute_ast_script(Runtime* runtime, JsTranspiler* tp,
     // Drain the script turn before matching the JIT fresh-turn cleanup.
     if (!js_batch_execution_mode) jm_cleanup_deferred_mir();
     return result;
+}
+
+static Item js_mir_execute_ast_script(Runtime* runtime, JsTranspiler* tp,
+        char* owned_source, const char* js_source, size_t js_source_len,
+        const char* filename, uint64_t* result_home, bool test262_native_harness) {
+    // The AST tier owns the retained JsScript, but uses the same source parse,
+    // early-error pass, Runtime catalog, and EvalContext setup as MIR lowering.
+    jm_clear_active_js_transpile(tp, NULL, NULL);
+    JsScript* script = js_script_adopt_transpiler(tp, runtime, filename);
+    return js_mir_execute_retained_ast_script(runtime, script, owned_source,
+        js_source, js_source_len, filename, result_home, test262_native_harness);
 }
 
 bool js_activate_runtime_name_pool(void) {
@@ -715,6 +726,23 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         interp_checked = true;
     }
 
+    if (js_ast_interpreter_requested()) {
+        JsScript* cached = js_runtime_ast_cache_lookup(runtime, js_source, js_source_len,
+            filename, typescript_profile, typescript_profile);
+        if (cached) {
+            uint64_t realm_start = js_realm_init_time_us();
+            long execute_start = js_mir_phase_now_us();
+            Item result = js_mir_execute_retained_ast_script(runtime, cached, owned_source,
+                js_source, js_source_len, filename, result_home, test262_native_harness);
+            g_last_js_mir_phase_timing.realm_us =
+                (long)(js_realm_init_time_us() - realm_start);
+            g_last_js_mir_phase_timing.execute_us = js_mir_phase_now_us() - execute_start -
+                g_last_js_mir_phase_timing.realm_us;
+            g_last_js_mir_phase_timing.total_us = js_mir_phase_now_us() - phase_total_start;
+            return result;
+        }
+    }
+
     // Create JS transpiler (for parsing and AST building)
     JsTranspiler* tp = js_transpiler_create(runtime);
     if (!tp) {
@@ -730,6 +758,8 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         tp->strict_js = false;
         tp->strict_mode = true;
     }
+    tp->ast_cache_requested_strict = typescript_profile;
+    tp->ast_cache_typescript_profile = typescript_profile;
     jm_track_active_js_transpile(tp, NULL, NULL);
 
     // Parse JavaScript source
@@ -775,7 +805,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         JsMirPhaseTiming timing = g_last_js_mir_phase_timing;
         uint64_t realm_start = js_realm_init_time_us();
         phase_start = js_mir_phase_now_us();
-        Item result = js_mir_execute_ast_script(runtime, tp, js_ast, owned_source,
+        Item result = js_mir_execute_ast_script(runtime, tp, owned_source,
             js_source, js_source_len, filename, result_home,
             test262_native_harness);
         timing.realm_us = (long)(js_realm_init_time_us() - realm_start);

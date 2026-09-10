@@ -63,6 +63,22 @@ elif [ "$mode" = js ]; then
     if [ "$js_test262_status" -ne 0 ] && [ "$test_status" -eq 0 ]; then
         test_status=$js_test262_status
     fi
+
+    js_benchmark_status=0
+    set +e
+    LAMBDA_EXE="$binary_dir/lambda.exe" \
+    LLVM_PROFILE_FILE="$profile_pattern" \
+    PYTHONUNBUFFERED=1 \
+    python3 test/benchmark/run_benchmarks.py \
+        -e lambdajs --legacy --runs 1 --timeout 30 --cooldown 0 \
+        --fresh --coverage \
+        --results-output "$coverage_dir/test_benchmark_results.json" \
+        2>&1 | tee "$coverage_dir/test_benchmark.log"
+    js_benchmark_status=${PIPESTATUS[0]}
+    set -e
+    if [ "$js_benchmark_status" -ne 0 ] && [ "$test_status" -eq 0 ]; then
+        test_status=$js_benchmark_status
+    fi
 else
     echo "unknown coverage mode: $mode" >&2
     exit 2

@@ -601,13 +601,6 @@ struct JsMirTranspiler {
     // sealed, so generated MIR never embeds a compiler-owned String*.
     ArrayList* module_name_specs;
     uint32_t module_name_base;
-    // T10-2: the module key range each object literal registered, memoized by
-    // node so the declarator and the member sites can ask for a literal's shape
-    // without re-registering its keys. Compile-time only.
-    struct hashmap* literal_shape_ranges;
-    struct hashmap* shape_field_candidates;
-    AstNode** shape_candidates; // indexed compile-time parameter/return hints
-    uint32_t shape_candidate_count;
 
     bool in_main;                    // true when transpiling Phase 3 (js_main)
 
@@ -844,16 +837,6 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
         arraylist_free(mt->module_name_specs);
         mt->module_name_specs = NULL;
     }
-    if (mt->literal_shape_ranges) {
-        hashmap_free(mt->literal_shape_ranges);
-        mt->literal_shape_ranges = NULL;
-    }
-    if (mt->shape_field_candidates) {
-        hashmap_free(mt->shape_field_candidates);
-        mt->shape_field_candidates = NULL;
-    }
-    mem_free(mt->shape_candidates);
-    mt->shape_candidates = NULL;
     if (mt->func_entries) jm_free_scope_env_names(mt->func_entries, mt->func_count);
     mt->func_entries = NULL;
     mt->class_entries = NULL;

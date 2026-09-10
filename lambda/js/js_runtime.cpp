@@ -2076,7 +2076,6 @@ extern "C" Item js_proxy_trap_construct(Item proxy, Item* args, int arg_count, I
 }
 
 // Create a new object for a constructor call: sets __proto__ from callee.prototype
-static Item js_constructor_allocate_object(Item callee);
 extern "C" Item js_constructor_create_object(Item callee, Item new_target) {
     // Prototype lookup and builtin subclass allocation can compact the
     // unpublished instance; native argument registers are not GC roots.
@@ -2090,7 +2089,7 @@ extern "C" Item js_constructor_create_object(Item callee, Item new_target) {
     Rooted<Item> aux_one_root(roots, ItemNull);
     Rooted<Item> aux_two_root(roots, ItemNull);
     if (!roots.valid()) return ItemNull;
-    object_root.set(js_constructor_allocate_object(callee_root.get()));
+    object_root.set(js_new_object());
     TypeId callee_type = get_type_id(callee_root.get());
     if (callee_type == LMD_TYPE_FUNC || js_is_proxy(callee_root.get())) {
         // Bound construction substitutes the ultimate target only when the
@@ -3748,237 +3747,6 @@ extern "C" Item js_new_object_with_typemap(TypeMap* tm) {
     // no unrooted instance or partially initialized header spans a safepoint.
     Map* m = map_alloc_for_type(tm, NULL, data_cap);
     return m ? (Item){.map = m} : js_new_object();
-}
-
-// ---------------------------------------------------------------------------
-// T10-2 item 1, compiler half: compile-predicted literal shapes.
-//
-// A site's shape is named by a contiguous range of the ACTIVE MODULE's
-// property-key table, so the constant baked into MIR is a pair of indices and
-// never a realm pointer (D5.4.3, D5.4.4) -- the same indirection
-// lambda_active_module_name_id already uses for a single name.
-//
-// Every slot is NULL-typed at pointer width. That is what makes the shape
-// knowable at compile time without knowing value types: the first write to a
-// slot retags it in place through fn_map_set's same-width path (NULL -> INT,
-// FLOAT, STRING, MAP, FUNC ...) and the layout never repacks. Per-instance
-// ctor_reserved_mask keeps a slot absent, not `null`, until it is written.
-//
-// These shapes are deliberately NOT interned in the shape transition graph:
-// retagging mutates the entry type, which would break the graph's invariant
-// that a target's entry type matches the edge's value_type and hand a later
-// add(x, NULL) lookup a shape whose x is already INT.
-// ---------------------------------------------------------------------------
-
-typedef struct JsPredictedShape {
-    uint64_t descriptor;   // [module_id:16][first_key_index:32][key_count:16]
-    TypeMap* shape;
-} JsPredictedShape;
-
-// One realm's literal sites are few; a bounded linear scan beats a hash table
-// and the caller memoizes the resolved TypeMap in a register per function.
-
-static uint64_t js_predicted_shape_descriptor(uint32_t module_id,
-        uint32_t first_key_index, uint32_t key_count) {
-    return ((uint64_t)(module_id & 0xffffu) << 48) |
-        ((uint64_t)first_key_index << 16) | (uint64_t)(key_count & 0xffffu);
-}
-
-static TypeMap* js_predicted_shape_build(uint32_t first_key_index,
-        uint32_t key_count) {
-    if (!js_input || !js_input->pool || !js_input->type_list) return NULL;
-    TypeMap* tm = (TypeMap*)alloc_type(js_input->pool, LMD_TYPE_MAP,
-        sizeof(TypeMap));
-    if (!tm) return NULL;
-    ShapeEntry* first = NULL;
-    ShapeEntry* prev = NULL;
-    for (uint32_t i = 0; i < key_count; i++) {
-        NameId name_id = (NameId)lambda_active_module_name_id(first_key_index + i);
-        if (name_id == NAME_ID_NONE) return NULL;
-        NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL,
-            name_id);
-        if (!key) return NULL;
-        ShapeEntry* se = (ShapeEntry*)pool_calloc(js_input->pool,
-            sizeof(ShapeEntry) + sizeof(StrView));
-        if (!se) return NULL;
-        StrView* nv = (StrView*)((char*)se + sizeof(ShapeEntry));
-        nv->str = key->chars;
-        nv->length = key->len;
-        se->name = nv;
-        se->name_hash = property_key_hash(key);
-        se->name_id = name_id;
-        se->key_kind = property_key_kind(key);
-        // SCU9/D3.4.6: the storage descriptor is derived by the one resolver at
-        // assignment; a raw `se->type =` would leave `storage` zeroed and every
-        // read of the slot would resolve an invalid lane.
-        shape_entry_set_type(se, type_info[LMD_TYPE_NULL].type);
-        se->byte_offset = (int64_t)i * (int64_t)sizeof(void*);
-        se->next = NULL;
-        if (prev) prev->next = se; else first = se;
-        prev = se;
-    }
-    if (!first) return NULL;
-    tm->shape = first;
-    tm->last = prev;
-    tm->length = (int)key_count;
-    tm->byte_size = (int64_t)key_count * (int64_t)sizeof(void*);
-    tm->js_meta = js_class_meta_for_id((JsClass)JS_CLASS_OBJECT);
-    // the initial blueprint may learn non-null lanes. Publishing null seals
-    // it as an immutable transition root before any sibling can reinterpret it.
-    tm->is_shared_constructor_shape = true;
-    tm->is_private_clone = false;
-    tm->is_transition_shared_shape = false;
-    // slot_entries is what makes typemap_fixed_slot_prefix_count admit this
-    // layout; the offsets above already satisfy its i * sizeof(void*) rule.
-    ShapeEntry** slots = (ShapeEntry**)pool_calloc(js_input->pool,
-        (size_t)key_count * sizeof(ShapeEntry*));
-    if (!slots) return NULL;
-    ShapeEntry* walk = first;
-    for (uint32_t i = 0; i < key_count && walk; i++, walk = walk->next) {
-        slots[i] = walk;
-    }
-    tm->slot_entries = slots;
-    tm->slot_count = (int)key_count;
-    typemap_hash_build(tm, js_input->pool);
-    arraylist_append(js_input->type_list, tm);
-    tm->type_index = js_input->type_list->length - 1;
-    return tm;
-}
-
-// Resolve a site's predicted shape, interning it per realm. NULL means the
-// caller must fall back to the ordinary unshaped object path.
-//
-// Indexed by the range's own first key index rather than scanned: this runs on
-// every evaluation of the literal, so it has to cost what
-// lambda_active_module_name_id costs -- one bounds check and one array read.
-// The stored descriptor is re-compared because a module id can be reused within
-// a realm, and a stale row would otherwise hand this site another module's keys.
-static TypeMap* js_predicted_shape_resolve(uint32_t first_key_index,
-        uint32_t key_count) {
-    if (!js_input || !js_input->pool || key_count == 0 ||
-            key_count > JS_PREDICTED_SHAPE_MAX_SLOTS ||
-            first_key_index >= JS_PREDICTED_SHAPE_LIMIT) return NULL;
-    uint64_t descriptor = js_predicted_shape_descriptor(
-        lambda_active_module_state_id(), first_key_index, key_count);
-    ArrayList* cache = js_input->predicted_shapes;
-    if (cache && (int)first_key_index < cache->length) {
-        JsPredictedShape* row = (JsPredictedShape*)arraylist_get(cache,
-            (int)first_key_index);
-        if (row && row->descriptor == descriptor) return row->shape;
-    }
-    if (!cache) {
-        cache = arraylist_new(32);
-        if (!cache) return NULL;
-        js_input->predicted_shapes = cache;
-    }
-    while (cache->length <= (int)first_key_index) {
-        if (!arraylist_append(cache, NULL)) return NULL;
-    }
-    TypeMap* shape = js_predicted_shape_build(first_key_index, key_count);
-    JsPredictedShape* row = (JsPredictedShape*)pool_calloc(js_input->pool,
-        sizeof(JsPredictedShape));
-    if (!row) return shape;
-    row->descriptor = descriptor;
-    // A refused shape is cached as NULL so the refusal is decided once.
-    row->shape = shape;
-    arraylist_set(cache, (int)first_key_index, row);
-    return shape;
-}
-
-extern "C" void js_set_constructor_plan(Item function, int64_t first_key_index,
-        int64_t key_count) {
-    if (get_type_id(function) != LMD_TYPE_FUNC || !function.function ||
-            first_key_index < 0 || first_key_index >= JS_PREDICTED_SHAPE_LIMIT ||
-            key_count <= 1 || key_count > JS_PREDICTED_SHAPE_MAX_SLOTS) return;
-    JsCallableCode* code = ((JsFunction*)function.function)->code;
-    if (!code) return;
-    code->construction_first = (uint32_t)first_key_index;
-    code->construction_count = (uint32_t)key_count;
-}
-
-static Item js_constructor_allocate_object(Item callee) {
-    if (get_type_id(callee) != LMD_TYPE_FUNC || !callee.function) return js_new_object();
-    const JsCallableCode* code = js_fn_code((JsFunction*)callee.function);
-    if (!code->construction_count || code->runtime_context != (Context*)context)
-        return js_new_object();
-    TypeMap* shape = NULL;
-    {
-        // recipes belong to the callee module, including cross-module `new`.
-        RuntimeModuleStateScope module_scope(context);
-        if (module_scope.activate(code->module_state_id)) shape = js_predicted_shape_resolve(
-            code->construction_first, code->construction_count);
-    }
-    if (!shape) return js_new_object();
-    // No access may observe a reserved field before its source assignment.
-    // The prototype writer initializes slot zero through the ordinary writer.
-    uint32_t count = code->construction_count;
-    Item result = js_new_object_with_typemap(shape);
-    if (get_type_id(result) == LMD_TYPE_MAP && result.map->type == shape)
-        map_ctor_set_reserved_mask(result.map, (uint16_t)((1u << count) - 1));
-    return result;
-}
-
-// MIR entry: allocate a literal on its predicted shape before field evaluation.
-extern "C" Item js_new_object_shaped(int64_t first_key_index,
-        int64_t key_count) {
-    if (first_key_index < 0 || key_count <= 0) return js_new_object();
-    TypeMap* shape = js_predicted_shape_resolve((uint32_t)first_key_index,
-        (uint32_t)key_count);
-    if (!shape) return js_new_object();
-    // No ctor_reserved_mask here on purpose. A literal writes every one of its
-    // slots before the object is reachable, so there is no window in which an
-    // unwritten slot is observable -- and reserving them would make the literal's
-    // own stores miss the named fast path, which is the cost this shape exists to
-    // remove. A constructor prefix, where the window is real, will need the mask.
-    return js_new_object_with_typemap(shape);
-}
-
-static bool js_shape_write_same_size_slot(TypeMap* tm, ShapeEntry* entry,
-        void* data, Item value);
-static inline bool js_named_fast_store_can_write_same_slot(ShapeEntry* entry,
-        Item value);
-static inline bool js_named_fast_store_same_slot(ShapeEntry* entry, void* data,
-        Item value);
-
-// initialize a default data slot without allocating a property descriptor.
-// Once a literal stores an observable null, its blueprint must join the
-// immutable transition graph: a later NULL -> T retag would reinterpret that
-// earlier instance's null bytes as T (D3.4.5-D3.4.6).
-extern "C" Item js_predicted_slot_initialize(Item target, NameRef key,
-        Item value, bool* handled) {
-    *handled = false;
-    if (get_type_id(target) != LMD_TYPE_MAP || !target.map) return ItemNull;
-    Map* m = target.map;
-    if (m->map_kind != MAP_KIND_PLAIN || m->is_static || !m->data) return ItemNull;
-    TypeMap* tm = (TypeMap*)m->type;
-    if (!typemap_is_shared_shape(tm) ||
-            typemap_fixed_slot_prefix_count(tm) <= 0) return ItemNull;
-    if (!key || property_key_kind(key) != NAME_KEY_STRING) return ItemNull;
-    NameId name_id = property_key_id(key);
-    if (name_id == NAME_ID_NONE) return ItemNull;
-    ShapeEntry* e = typemap_hash_lookup_by_name_id(tm, name_id,
-        property_key_hash(key));
-    if (!e || e->flags != 0 || !e->type ||
-            !typemap_entry_uses_fixed_slot(tm, e) ||
-            !shape_entry_storage_fits_data(e, m->data_cap) ||
-            map_ctor_offset_is_reserved(m, e->byte_offset)) return ItemNull;
-
-    *handled = true;
-    if (get_type_id(value) == LMD_TYPE_NULL && tm->is_shared_constructor_shape) {
-        tm->is_shared_constructor_shape = false;
-        tm->is_transition_shared_shape = true;
-    }
-    if (js_named_fast_store_can_write_same_slot(e, value) &&
-            js_named_fast_store_same_slot(e, m->data, value)) return ItemNull;
-
-    // only the unpublished, null-free blueprint may still learn a field type.
-    if (tm->is_shared_constructor_shape && e->type->type_id == LMD_TYPE_NULL &&
-            js_shape_write_same_size_slot(tm, e, m->data, value)) return ItemNull;
-
-    // reuse Lambda's storage/transition writer for incompatible lanes. It
-    // preserves siblings and caches the new shape instead of cloning a
-    // throwaway descriptor and a private TypeMap on every literal evaluation.
-    return fn_map_set(target, (Item){.item = s2it(key)}, value);
 }
 
 // Forward declaration for prototype chain support
@@ -8846,26 +8614,6 @@ extern "C" Item js_array_new_with_class(int length, int class_id) {
     return result;
 }
 
-extern "C" Item js_array_new_numeric(int length) {
-    if (length < 0) return js_throw_range_error("Invalid array length");
-    // The final raw lane is the reserved companion slot; dense capacity is
-    // therefore one below the allocation capacity even before named props exist.
-    ArrayNum* numeric = array_num_new_with_extra(ELEM_FLOAT64,
-        (int64_t)length, 1);
-    if (!numeric || !numeric->data) return ItemError;
-    container_set_js_elements_kind((Container*)numeric,
-                                   JS_ELEMENTS_PACKED_NUMERIC);
-    return (Item){.array_num = numeric};
-}
-
-extern "C" Item js_elements_set_numeric_direct(Item array, int64_t index,
-                                             Item value) {
-    if (!js_is_ordinary_numeric_array(array) || index < 0 ||
-            index >= array.array_num->length) return value;
-    js_array_numeric_store(array, index, value);
-    return value;
-}
-
 // Return a hole sentinel value for array elisions
 JS_FORWARD_ITEM(js_array_hole, (), lam::hole_sentinel_item, ())
 
@@ -9474,7 +9222,7 @@ JS_FORWARD_ITEM(js_elements_set_int_direct, (Item array, int64_t index, Item val
 
 extern "C" Item js_array_define_dense_element_direct(Item array, int64_t index, Item value) {
     if (js_is_ordinary_numeric_array(array)) {
-        js_elements_set_numeric_direct(array, index, value);
+        js_array_numeric_store(array, index, value);
         return value;
     }
     if (get_type_id(array) != LMD_TYPE_ARRAY || index < 0) return value;

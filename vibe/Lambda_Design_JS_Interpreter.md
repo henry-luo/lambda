@@ -1123,6 +1123,20 @@ The JavaScript entry driver is split into frontend, planning, and backend execut
 15. retain JsScript generations in the runtime catalog until runtime teardown removes all possible heap referrers
 ```
 
+For ordinary AST scripts, `Runtime::js_ast_cache` indexes the retained
+`JsScript` by the complete source bytes, reference name, requested strictness,
+and JS-versus-TS parse profile. A hit bypasses parse/bind/early-error work but
+never reuses heap values, DOM wrappers, environments, module slabs, or callback
+objects: the executor resets ordinary script mode and re-instantiates those in
+the active realm. The cache owns no source or AST memory; its entry merely
+points at the `Runtime` catalog's `JsScript`, and `runtime_free_script()` removes
+that entry before the Script's pool is released. It therefore survives a
+`runtime_reset_heap()` but not `runtime_cleanup()`. ES modules are intentionally
+excluded from reuse because their one-time link/evaluation state belongs to the
+canonical module registry. This is a local derived cache under **D1.7**, with
+the single shared `Runtime`/`EvalContext` ownership required by
+**D8.1.3v10** and **D5.4.1**.
+
 `jit_init()` moves wholly inside the T1 branch. This is the point of the feature: a successful T0 run creates no MIR context and performs no MIR lowering/link. Runtime/context/heap initialization is not T1 work and is shared with Lambda.
 
 ### 11.3 One page event turn

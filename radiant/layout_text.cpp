@@ -932,10 +932,14 @@ bool layout_get_grapheme_cluster_bytes(const unsigned char* cluster_start,
     const unsigned char* cursor = cluster_start + first_bytes;
     bool has_extension = false;
     while (cursor < text_end) {
+        const unsigned char* current_start = cursor;
         uint32_t current = 0;
         if (!layout_utf8_next_codepoint(&cursor, text_end, &current) ||
-            utf8proc_grapheme_break(
+            is_line_break_ba(previous) || utf8proc_grapheme_break(
                 (utf8proc_int32_t)previous, (utf8proc_int32_t)current)) {
+            // The next layout unit begins here. Keeping it in this cluster
+            // hides a prior UAX #14 break opportunity from the line breaker.
+            cursor = current_start;
             break;
         }
         has_extension = true;
@@ -978,7 +982,9 @@ bool layout_measure_grapheme_cluster_advance(
             utf_bidi_strong_class(codepoint) == 1 ||
             utf_is_emoji_for_zwj(codepoint) ||
             (codepoint >= 0xE0020 && codepoint <= 0xE007F) ||
-            codepoint == 0x200D ||
+            // Join controls must not acquire a font-dependent advance when a
+            // neighboring grapheme cluster is measured as one CoreText run.
+            codepoint == 0x200C || codepoint == 0x200D ||
             (codepoint >= 0xFE00 && codepoint <= 0xFE0F) ||
             (codepoint >= 0xE0100 && codepoint <= 0xE01EF)) {
             return false;
@@ -1341,10 +1347,14 @@ bool layout_measure_bidi_run(LayoutContext* lycon,
     uint32_t last_codepoint = 0;
     bool has_rtl_codepoint = false;
     while (cursor < text_end) {
+        const unsigned char* codepoint_start = cursor;
         uint32_t codepoint = 0;
         if (!layout_utf8_next_codepoint(&cursor, text_end, &codepoint) ||
             is_space(codepoint) || codepoint == 0x000A ||
             codepoint == 0x000D) {
+            // The separator starts the next layout unit; do not include it in
+            // this shaped run or segment-break transformation cannot observe it.
+            cursor = codepoint_start;
             break;
         }
         int strong_class = utf_bidi_strong_class(codepoint);
@@ -1508,11 +1518,24 @@ static void position_terminal_soft_hyphen_fragment(DomNode* text_node,
 }
 
 /**
- * CSS Text 3 §4.1.2: Check if a codepoint has East Asian Width Fullwidth (F) or Wide (W).
- * Used for segment break transformation rules: segment breaks between two
- * East Asian F/W characters (neither Hangul) are removed instead of becoming spaces.
- * utf8proc_charwidth returns 2 for F and W characters, 1 for all others.
+ * CSS Text 3 §4.1.2: Check the East Asian Width F/W repertoire used by
+ * segment-break transformation. Terminal character width is not equivalent:
+ * Arabic can occupy two terminal cells but must retain a transformed space.
  */
+static inline bool is_east_asian_fullwidth_or_wide(uint32_t cp) {
+    return (cp >= 0x1100 && cp <= 0x115F) ||
+           cp == 0x2329 || cp == 0x232A ||
+           (cp >= 0x2E80 && cp <= 0xA4CF) ||
+           (cp >= 0xAC00 && cp <= 0xD7A3) ||
+           (cp >= 0xF900 && cp <= 0xFAFF) ||
+           (cp >= 0xFE10 && cp <= 0xFE19) ||
+           (cp >= 0xFE30 && cp <= 0xFE6B) ||
+           (cp >= 0xFF01 && cp <= 0xFF60) ||
+           (cp >= 0xFFE0 && cp <= 0xFFE6) ||
+           (cp >= 0x1B000 && cp <= 0x1B001) ||
+           (cp >= 0x1F200 && cp <= 0x1F251) ||
+           (cp >= 0x20000 && cp <= 0x3FFFD);
+}
 /**
  * CSS Text 3 §4.1.2: Check if a codepoint is Hangul.
  * Segment break removal between East Asian Wide characters does not apply
@@ -4503,6 +4526,19 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 lycon, (uint8_t*)str - 1, rect->width, BRK_HYPHEN);
         }
         rect->width += wd;
+        if (measured_grapheme_cluster) {
+            const unsigned char* cluster_cursor = str;
+            uint32_t cluster_last_codepoint = 0;
+            while (cluster_cursor < next_ch &&
+                   layout_utf8_next_codepoint(&cluster_cursor, next_ch,
+                                               &cluster_last_codepoint)) {
+            }
+            // A grapheme can include a UAX #14 BA separator such as Tibetan
+            // tsheg. Expose that separator before the overflow decision.
+            if (is_line_break_ba(cluster_last_codepoint)) {
+                codepoint = cluster_last_codepoint;
+            }
+        }
         if (auto_hyphenation && auto_hyphen_word_start &&
             next_auto_hyphen_offset != SIZE_MAX && next_ch >= auto_hyphen_word_start &&
             (size_t)(next_ch - auto_hyphen_word_start) == next_auto_hyphen_offset) {
@@ -4710,7 +4746,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         if (is_space(*str)) {
             if (collapse_spaces) {
                 // CSS Text 3 §4.1.2: Track whether whitespace contains a segment break (newline)
-                bool has_segment_break = (codepoint == '\n' || codepoint == '\r');
+                // A shaped bidi run may end immediately before this separator,
+                // leaving `codepoint` at the run's final glyph rather than the
+                // current raw whitespace byte.
+                bool has_segment_break = (*str == '\n' || *str == '\r');
                 do {
                     str++;
                     if ((*str == '\n' || *str == '\r') && collapse_newlines) has_segment_break = true;
@@ -4729,9 +4768,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     }
                     // CSS Text 3 §4.1.2: segment breaks between two East Asian F/W
                     if (!remove_break && last_processed_cp && next_cp
-                        && utf8proc_charwidth(last_processed_cp) == 2 &&
+                        && is_east_asian_fullwidth_or_wide(last_processed_cp) &&
                            !utf_is_hangul(last_processed_cp)
-                        && utf8proc_charwidth(next_cp) == 2 && !utf_is_hangul(next_cp)) {
+                        && is_east_asian_fullwidth_or_wide(next_cp) &&
+                           !utf_is_hangul(next_cp)) {
                         remove_break = true;
                     }
                     if (remove_break) {

@@ -3830,6 +3830,23 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             replaced_width = form_control_em_size(
                 lycon, view_block_replaced, FormDefaults::PROGRESS_INLINE_SIZE_EM);
         }
+        else if (replaced_tag == MARKUP_NAME_SVG &&
+                 replaced_facts.has_natural_width && replaced_facts.has_natural_height) {
+            float svg_width = replaced_facts.natural_width;
+            CssDeclaration* svg_width_declaration =
+                layout_specified_physical_size_declaration(element, true);
+            bool svg_width_is_percentage = svg_width_declaration &&
+                svg_width_declaration->value &&
+                layout_css_value_has_percentage(svg_width_declaration->value);
+            if (svg_width_is_percentage) {
+                // A cyclic percentage width is auto for intrinsic sizing, but
+                // max-height still transfers through the SVG's natural ratio.
+                svg_width = intrinsic_replaced_width_with_max_height(
+                    lycon, element, view_block_replaced, svg_width,
+                    replaced_facts.natural_width, replaced_facts.natural_height);
+            }
+            replaced_width = svg_width;
+        }
         else if (replaced_facts.has_natural_width) {
             replaced_width = replaced_facts.natural_width;
         }
@@ -5777,12 +5794,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         sizes.max_content = max(sizes.max_content, aspect_border_width);
     }
 
-    if (aspect_ratio_max_width > 0.0f && aspect_ratio_width_is_intrinsic_keyword) {
+    if (aspect_ratio_max_width > 0.0f &&
+        (aspect_ratio_width_is_intrinsic_keyword || is_replaced_element)) {
         float aspect_border_width = aspect_ratio_max_width_uses_border_box
             ? aspect_ratio_max_width
             : aspect_ratio_max_width + horiz_padding + horiz_border;
-        // A transferred maximum constrains intrinsic preferred contributions;
-        // the later min-width floor still wins when the two conflict.
+        // A definite max-height transfers through a replaced object's natural
+        // ratio before table column measurement; the min-width floor still wins.
         sizes.min_content = min(sizes.min_content, aspect_border_width);
         sizes.max_content = min(sizes.max_content, aspect_border_width);
     }

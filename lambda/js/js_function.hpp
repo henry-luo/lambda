@@ -153,9 +153,6 @@ struct JsCallableCode {
     bool definition_owned;
     // a weak realm table is detached before its owner is destroyed.
     HashMap* intern_table;
-    // module-scoped source recipe, shared by values from this definition.
-    uint32_t construction_first;
-    uint32_t construction_count;
 };
 
 // JSCUO8: one payload word on the value, not six. A value that needs none
@@ -213,7 +210,7 @@ inline const JsWithData js_fn_with_absent{};
 inline const JsEvalOrigin js_fn_eval_origin_absent{};
 inline const JsCallableCode js_fn_code_absent{
     NULL, NULL, NULL, 0, 0, UINT32_MAX, -1, 0, 0, false,
-    JS_FUNCTION_BODY_CODE, 0, false, false, NULL, 0, 0};
+    JS_FUNCTION_BODY_CODE, 0, false, false, NULL};
 
 #define JS_FN_PAYLOAD_READ(fn, field) \
     ((fn) && (fn)->payload && (fn)->payload->field ? (fn)->payload->field \

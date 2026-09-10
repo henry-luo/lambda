@@ -95,12 +95,6 @@ typedef struct JsMirReference {
     bool is_private;
     bool computed_key;
     bool property_key_canonicalized;
-    // retain the evaluated numeric carrier instead of formatting an index
-    // as a property name. Exactly one native register is set on admission.
-    bool key_is_number;
-    MIR_reg_t key_num_reg;      // F64 carrier, or zero for an integer key
-    MIR_reg_t key_index_reg;    // original I64 carrier, or zero for an F64 key
-    JsMemberNode* member;       // compile-only shape candidate provenance
     uint32_t named_key_index;
     NameId named_key_id;
     int jube_slot;
@@ -609,15 +603,6 @@ Type* jm_get_full_type(JsMirTranspiler* mt, JsAstNode* node);
 // (e.g. `-1 << 16`, `(a) !== b` with literal a/b). Results are bit-identical to
 // the runtime arithmetic; folding bails (returns false) on any case that could
 // diverge (non-finite results, bigint, int overflow past 2^53, unsupported ops).
-enum JsFoldKind { JS_FOLD_NUM, JS_FOLD_BOOL };
-struct JsFoldVal {
-    JsFoldKind kind;
-    double num;     // valid when kind == JS_FOLD_NUM
-    bool boolean;   // valid when kind == JS_FOLD_BOOL
-    bool is_float;  // when kind == JS_FOLD_NUM: emit as float (vs int) — matches runtime type
-};
-bool jm_const_fold_enabled();
-bool jm_try_fold_const(JsAstNode* node, JsFoldVal* out);
 bool jm_is_native_type(TypeId tid);
 void jm_scope_env_mark_and_writeback_generated(JsMirTranspiler* mt, const char* name,
     MIR_reg_t val_reg, TypeId type_id = LMD_TYPE_ANY);
@@ -796,5 +781,3 @@ bool js_is_cjs_file(const char* path);
 char* js_wrap_cjs_source(const char* source, const char* filename);
 extern "C" Item js_require(Item specifier);
 extern "C" Item js_dynamic_import(Item specifier);
-
-void jm_emit_constructor_plan(JsMirTranspiler* mt, MIR_reg_t function, JsFunctionNode* node);

@@ -88,14 +88,16 @@ ReplacedIntrinsicFacts layout_replaced_intrinsic_facts(LayoutContext* lycon,
     }
     if (block->embed && block->embedp()->img) {
         ImageSurface* image = block->embedp()->img;
-        if (image->width > 0) {
-            replaced_facts_set_axis(&facts, true, (float)image->width, true);
+        if (image->has_intrinsic_size && image->width > 0 && image->height > 0) {
+            replaced_facts_set_pair(&facts, (float)image->width,
+                                    (float)image->height, true);
+        } else if (image->has_intrinsic_aspect_ratio &&
+                   image->width > 0 && image->height > 0) {
+            // SVG's 300x150 fallback supplies usable axes, but only a viewBox
+            // contributes a natural ratio to `aspect-ratio: auto <ratio>`.
+            facts.natural_aspect_ratio = (float)image->width / (float)image->height;
+            facts.has_natural_aspect_ratio = true;
         }
-        if (image->height > 0) {
-            replaced_facts_set_axis(&facts, false, (float)image->height, true);
-        }
-        replaced_facts_set_pair(&facts, facts.natural_width,
-                                facts.natural_height, false);
     }
 
     if (block->tag() == MARKUP_NAME_VIDEO && block->embed && block->embedp()->video) {
@@ -109,9 +111,15 @@ ReplacedIntrinsicFacts layout_replaced_intrinsic_facts(LayoutContext* lycon,
     if (block->tag() == MARKUP_NAME_SVG && block->is_element()) {
         Element* svg = dom_element_backing(lam::dom_require_element(block));
         SvgIntrinsicSize intrinsic = calculate_svg_intrinsic_size(svg);
-        if (intrinsic.has_intrinsic_width || intrinsic.has_intrinsic_height) {
+        if (intrinsic.has_intrinsic_width) {
             replaced_facts_set_axis(&facts, true, intrinsic.width, true);
+        }
+        if (intrinsic.has_intrinsic_height) {
             replaced_facts_set_axis(&facts, false, intrinsic.height, true);
+        }
+        // A viewBox supplies a natural ratio even when neither viewport axis is
+        // intrinsic; flex and `aspect-ratio:auto` need that distinction.
+        if (intrinsic.has_intrinsic_aspect_ratio) {
             facts.natural_aspect_ratio = intrinsic.aspect_ratio;
             facts.has_natural_aspect_ratio = intrinsic.has_intrinsic_aspect_ratio;
         }
@@ -265,12 +273,18 @@ ReplacedSvgIntrinsicSize layout_replaced_svg_intrinsic_size(DomElement* element,
     if (!element) return result;
     Element* svg = dom_element_backing(lam::dom_require_element(element));
     SvgIntrinsicSize intrinsic = calculate_svg_intrinsic_size(svg);
-    result.width = intrinsic.width;
-    result.height = intrinsic.height;
-    if (constrained_width > 0.0f && constrained_width < result.width &&
-        intrinsic.has_intrinsic_aspect_ratio && result.width > 0.0f) {
-        result.height = constrained_width * result.height / result.width;
-        result.width = constrained_width;
+    if (intrinsic.has_intrinsic_width) result.width = intrinsic.width;
+    if (intrinsic.has_intrinsic_height) result.height = intrinsic.height;
+    if (intrinsic.has_intrinsic_aspect_ratio) {
+        if (intrinsic.has_intrinsic_width && !intrinsic.has_intrinsic_height) {
+            result.height = result.width / intrinsic.aspect_ratio;
+        } else if (!intrinsic.has_intrinsic_width && intrinsic.has_intrinsic_height) {
+            result.width = result.height * intrinsic.aspect_ratio;
+        } else if (!intrinsic.has_intrinsic_width && !intrinsic.has_intrinsic_height &&
+                   constrained_width > 0.0f) {
+            result.width = constrained_width;
+            result.height = constrained_width / intrinsic.aspect_ratio;
+        }
     }
     return result;
 }
@@ -301,8 +315,6 @@ bool layout_measure_replaced_flex_intrinsic(LayoutContext* lycon,
             item->block()->given_width >= 0.0f && isnan(item->block()->given_width_percent);
         width = has_html_width
             ? min(item->block()->given_width, MAX_LAYOUT_DIMENSION) : 0.0f;
-    } else if (!facts.has_natural_aspect_ratio) {
-        return false;
     } else if (!layout_replaced_flex_intrinsic_dimensions(
                    block, flex_layout, &facts, &width, &height)) {
         return false;

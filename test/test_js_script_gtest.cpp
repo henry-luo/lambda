@@ -240,6 +240,25 @@ TEST(JsInterpreter, ExplicitAstSelectorUsesTheSharedScriptPath) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, ReusesRuntimeAstCacheThroughSharedScriptPath) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+
+    const char source[] = "21 * 2;";
+    Item first = transpile_js_to_mir(&runtime, source, "<runtime-ast-cache>", NULL);
+    ASSERT_FALSE(item_is_error(first));
+    ASSERT_EQ(runtime.scripts->length, 1);
+
+    Item second = transpile_js_to_mir(&runtime, source, "<runtime-ast-cache>", NULL);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_FALSE(item_is_error(second));
+    EXPECT_EQ(second.item, flt2it(42.0).item);
+    EXPECT_EQ(runtime.scripts->length, 1);
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsMir, CapturesTopLevelForOfBindingsAfterSiblingFunctionDeclaration) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -323,6 +342,28 @@ TEST(JsInterpreter, RetainedHarnessRebuildsAfterRealmReplacement) {
     const char second_test[] = "assertHarness(true);";
     ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, second_test,
         sizeof(second_test) - 1, "second.js", NULL)));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ReusesRuntimeAstCacheAcrossHeapReplacement) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "function cachedHarness(value) { if (!value) throw new Error('failed'); }";
+    JsScript* first = js_interp_prepare_script(&runtime, source, sizeof(source) - 1,
+        "cached-harness.js");
+    ASSERT_NE(first, nullptr);
+    ASSERT_EQ(runtime.scripts->length, 1);
+    ASSERT_FALSE(item_is_error(js_interp_execute_script(&runtime, first, NULL)));
+
+    runtime_reset_heap(&runtime);
+    JsScript* second = js_interp_prepare_script(&runtime, source, sizeof(source) - 1,
+        "cached-harness.js");
+    EXPECT_EQ(second, first);
+    EXPECT_EQ(runtime.scripts->length, 1);
+    ASSERT_FALSE(item_is_error(js_interp_execute_script(&runtime, second, NULL)));
 
     runtime_cleanup(&runtime);
 }

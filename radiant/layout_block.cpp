@@ -4992,18 +4992,21 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
     } else {
         doc = block->embedp()->doc;
     }
-    if (doc && doc->view_tree && doc->view_tree->root) {
-        ViewBlock* root = lam::view_require_block(doc->view_tree->root);
-        float iframe_width = root->content_width > 0 ? root->content_width : root->width;
-        float iframe_height = root->content_height > 0 ? root->content_height : root->height;
-        lycon->block.max_width = iframe_width;
-        lycon->block.advance_y = iframe_height;
-        if (root->scroller) {
-            if (root->content_height > root->height) {
-                root->height = root->content_height;  // restore full content height
-            }
-            root->scroller = NULL;
+    if (!doc || !doc->view_tree || !doc->view_tree->root) {
+        // A non-navigated iframe has no inner flow; finalizing an empty flow
+        // would overwrite the replaced box dimensions selected by outer sizing.
+        return;
+    }
+    ViewBlock* root = lam::view_require_block(doc->view_tree->root);
+    float iframe_width = root->content_width > 0 ? root->content_width : root->width;
+    float iframe_height = root->content_height > 0 ? root->content_height : root->height;
+    lycon->block.max_width = iframe_width;
+    lycon->block.advance_y = iframe_height;
+    if (root->scroller) {
+        if (root->content_height > root->height) {
+            root->height = root->content_height;  // restore full content height
         }
+        root->scroller = NULL;
     }
     block->ensure_scroll(lycon);
     block->scroller->overflow_y = CSS_VALUE_AUTO;
@@ -7514,7 +7517,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     float default_width = 300.0f;
     float default_height = 150.0f;
     layout_replaced_default_size(elmt_name, &default_width, &default_height);
-    if (elmt_name == MARKUP_NAME_IFRAME || is_open_popover_object ||
+    if (elmt_name == MARKUP_NAME_IFRAME || elmt_name == MARKUP_NAME_VIDEO ||
+        is_open_popover_object ||
         object_uses_default_size) {
         // Table-internal display resolution can skip BlockProp creation, but an
         // element's intrinsic fallback must persist on the box's used-size slots.
@@ -7551,20 +7555,6 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             }
         }
         layout_apply_preferred_ratio_to_replaced_auto_axes(lycon, block);
-    } else if (elmt_name == MARKUP_NAME_VIDEO) {
-        layout_apply_preferred_ratio_to_replaced_auto_axes(lycon, block);
-        if (!contain_intrinsic_used_axes.height &&
-            layout_used_preferred_aspect_ratio(block) <= 0.0f &&
-            layout_block_has_automatic_size(block, false)) {
-            // A ratio-less video still has the replaced-element 150px intrinsic
-            // block size; treating its empty DOM contents as the auto height
-            // collapses the remembered content-visibility size to its borders.
-            IntrinsicSize intrinsic = layout_measure_replaced(
-                lycon, block, AvailableSpace::make_max_content());
-            layout_store_given_axis(
-                lycon, block, intrinsic.max_height, false, false);
-            layout_clear_auto_axis_type(block, false);
-        }
     } else if (elmt_name == MARKUP_NAME_EMBED ||
                (elmt_name == MARKUP_NAME_OBJECT && block->get_attribute(MARKUP_NAME_DATA))) {
         if (block->is_element() && layout_aspect_ratio_uses_content_box(block)) {
@@ -7820,7 +7810,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             // css 2.1 §10.3.2/§10.6.2: a percentage against a definite zero
             // containing block is zero; intrinsic image dimensions must not replace it.
             if (lycon->block.given_width < 0 || lycon->block.given_height < 0) {
-                float intrinsic_aspect_ratio = h > 0.0f ? w / h : 0.0f;
+                // The 300x150 SVG fallback is a pair of fallback axes, not a
+                // natural ratio; `aspect-ratio: auto <ratio>` must use its ratio.
+                float intrinsic_aspect_ratio = image_has_intrinsic_ratio && h > 0.0f
+                    ? w / h : 0.0f;
                 float css_aspect_ratio = layout_preferred_aspect_ratio(block);
                 bool css_ratio_uses_content_box = layout_aspect_ratio_uses_content_box(block);
                 bool css_ratio_overrides_intrinsic = css_aspect_ratio > 0.0f &&
@@ -8270,16 +8263,18 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // A definite descendant width must not inherit that measurement mode: the
     bool descendant_width_is_definite = lycon->block.given_width >= 0.0f;
     bool width_is_inline_axis = !layout_block_inline_axis_is_vertical(block);
-    bool is_max_content_width = (width_is_inline_axis && block->blk &&
-                                 block->block_mut()->given_width_type == CSS_VALUE_MAX_CONTENT) ||
-                                (width_is_inline_axis && parent_is_intrinsic_sizing &&
-                                 !descendant_width_is_definite &&
-                                 lycon->available_space.is_width_max_content());
-    bool is_min_content_width = (width_is_inline_axis && block->blk &&
-                                 block->block_mut()->given_width_type == CSS_VALUE_MIN_CONTENT) ||
-                                (width_is_inline_axis && parent_is_intrinsic_sizing &&
-                                 !descendant_width_is_definite &&
-                                 lycon->available_space.is_width_min_content());
+    bool replaced_width_is_used = block->display.inner == RDT_DISPLAY_REPLACED &&
+        lycon->block.given_width >= 0.0f;
+    bool is_max_content_width = !replaced_width_is_used && (
+        (width_is_inline_axis && block->blk &&
+         block->block_mut()->given_width_type == CSS_VALUE_MAX_CONTENT) ||
+        (width_is_inline_axis && parent_is_intrinsic_sizing &&
+         !descendant_width_is_definite && lycon->available_space.is_width_max_content()));
+    bool is_min_content_width = !replaced_width_is_used && (
+        (width_is_inline_axis && block->blk &&
+         block->block_mut()->given_width_type == CSS_VALUE_MIN_CONTENT) ||
+        (width_is_inline_axis && parent_is_intrinsic_sizing &&
+         !descendant_width_is_definite && lycon->available_space.is_width_min_content()));
     bool is_fit_content_width = block->blk &&
         block->block_mut()->given_width_type == CSS_VALUE_FIT_CONTENT &&
         width_is_inline_axis &&

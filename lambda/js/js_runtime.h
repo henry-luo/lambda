@@ -233,17 +233,6 @@ Item js_new_object(void);
 // Allocate a JS object with its immutable semantic metadata selected before
 // the object is returned to any caller. The class ID is a stable JsClass value.
 Item js_new_object_with_class(int class_id);
-// predicted shapes share the fixed-slot cap with constructor prefixes.
-#define JS_PREDICTED_SHAPE_MAX_SLOTS 16
-// T10-2: allocate an object literal on its compile-predicted shape. The site is
-// named by a range of the active module's property-key table, never a realm
-// pointer (D5.4.3). Falls back to js_new_object() when the shape is refused.
-Item js_new_object_shaped(int64_t first_key_index, int64_t key_count);
-// initialize an admitted default predicted slot, using shared transitions for
-// incompatible lanes. May allocate; handled distinguishes refusal from error.
-Item js_predicted_slot_initialize(Item target, NameRef key, Item value, bool* handled);
-#define JS_PREDICTED_SHAPE_LIMIT 512
-void js_set_constructor_plan(Item function, int64_t first_key_index, int64_t key_count);
 struct TypeMap;
 // Native carriers use the same pre-publication metadata-qualified empty shape.
 struct TypeMap* js_object_type_for_class(int class_id);
@@ -298,8 +287,6 @@ Item js_array_hole(void);
 // Allocate an array with an explicit immutable JS class carrier for branded
 // array-backed host objects such as FileList.
 Item js_array_new_with_class(int length, int class_id);
-Item js_array_new_numeric(int length);
-Item js_elements_set_numeric_direct(Item array, int64_t index, Item value);
 bool js_is_ordinary_numeric_array(Item value);
 bool js_array_promote_numeric(Item array);
 Item js_array_new_from_item(Item arg);
