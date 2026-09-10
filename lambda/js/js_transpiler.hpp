@@ -68,6 +68,9 @@ struct JsScript : Script {
     size_t source_length;           // source byte count; adopted Script owns source bytes
     JsScope* global_scope;          // JS global/module lexical scope root
     bool strict_mode;               // JS script/function strictness default
+    // Cache identity records parse policy, not mutable execution mode.
+    bool ast_cache_requested_strict;
+    bool ast_cache_typescript_profile;
     // Eval code uses configurable global var bindings and inherits any
     // pre-existing global property during declaration instantiation.
     bool is_eval_script;
@@ -162,6 +165,13 @@ int js_transpiler_parse_error_get(const JsTranspiler* tp, int64_t* out_row,
                                   int64_t out_message_size);
 JsScript* js_script_adopt_transpiler(JsTranspiler* tp, Runtime* runtime,
                                      const char* reference);
+// Runtime-owned source cache for immutable AST/binding facts. Execution state
+// stays on the document realm and is rebuilt for each execution.
+JsScript* js_runtime_ast_cache_lookup(Runtime* runtime, const char* source,
+                                      size_t source_length, const char* reference,
+                                      bool strict, bool typescript_profile);
+void js_runtime_ast_cache_remove_script(Runtime* runtime, Script* script);
+void js_runtime_ast_cache_destroy(Runtime* runtime);
 static inline JsScript* js_script_from_script(Script* script) {
     return script && script->profile == &js_profile ? (JsScript*)script : NULL;
 }
