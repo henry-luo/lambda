@@ -46,6 +46,7 @@ class PremakeGenerator:
                 resolved_defines.append(f"{name}={value}")
         self.premake_content = []
         self.variant = variant
+        self.coverage_bin_dir = os.environ.get('LAMBDA_COVERAGE_BIN_DIR', 'test/coverage/bin')
 
         # Add platform detection for use throughout the generator
         import platform
@@ -666,7 +667,7 @@ class PremakeGenerator:
 
         self.premake_content.extend([
             f'workspace "{workspace_name}"',
-            '    configurations { "debug", "debug_asan", "release", "release_profile" }',
+            '    configurations { "debug", "debug_asan", "release", "release_profile", "coverage" }',
             f'    platforms {{ {platform_str} }}',
             f'    location "{location}"',
             f'    startproject "{startup_project}"',
@@ -682,7 +683,7 @@ class PremakeGenerator:
         debug_platform = self.config.get('platforms', {}).get('debug', {})
         debug_defines = ['DEBUG', *debug_platform.get('defines', [])]
         debug_defines_lua = ', '.join(f'"{define}"' for define in debug_defines)
-        debug_configurations_filter = 'configurations:debug or debug_asan'
+        debug_configurations_filter = 'configurations:debug or debug_asan or coverage'
         self.premake_content.extend([
             '    filter "configurations:debug"',
             f'        defines {{ {debug_defines_lua} }}',
@@ -694,6 +695,12 @@ class PremakeGenerator:
             '        symbols "On"',
             '        -- -Og keeps sanitizer debugging practical while avoiding the O0 runtime penalty.',
             '        buildoptions { "-Og", "-fno-omit-frame-pointer" }',
+            '    filter "configurations:coverage"',
+            '        defines { "DEBUG" }',
+            '        symbols "On"',
+            '        optimize "Off"',
+            '        buildoptions { "-fprofile-instr-generate", "-fcoverage-mapping", "-fno-omit-frame-pointer" }',
+            '        linkoptions { "-fprofile-instr-generate" }',
         ])
 
         # apply the configured Windows stack reserve to the default debug binary;
@@ -2140,6 +2147,9 @@ class PremakeGenerator:
             f'    targetdir "{self.config.get("target_dir", "test")}"',
             f'    objdir "build/obj/%{{prj.name}}"',
             f'    targetextension ".exe"',
+            '    filter "configurations:coverage"',
+            f'        targetdir "{self.coverage_bin_dir}"',
+            '    filter {}',
             '',
             f'    files {{',
         ])
@@ -2396,6 +2406,9 @@ class PremakeGenerator:
             f'    language "{language}"',
             '    targetdir "test"',
             '    objdir "build/obj/%{prj.name}"',
+            '    filter "configurations:coverage"',
+            f'        targetdir "{self.coverage_bin_dir}"',
+            '    filter {}',
         ])
 
         # Use custom target name if provided, otherwise use the project name
@@ -3362,6 +3375,9 @@ class PremakeGenerator:
             '    language "C++"',  # Use C++ as primary language since we have mixed sources
             '    targetdir "."',
             '    objdir "build/obj/%{prj.name}"',
+            '    filter "configurations:coverage"',
+            f'        targetdir "{self.coverage_bin_dir}"',
+            '    filter {}',
             f'    targetname "{target_name}"',
             f'    targetextension "{target_extension}"',
             '    filter "configurations:release_profile"',

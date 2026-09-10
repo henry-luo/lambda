@@ -35,7 +35,8 @@ accessors, deleted fields and other receivers retain `js_get_name_id` or
 counter calls; release builds omit them, and toggling `JS_OPT_TRACE` within a
 profiling build leaves its MIR unchanged. Stores recheck after the RHS and
 preserve the event-handler observer for `on...` names. The generated hot hit no longer calls
-`js_shaped_slot_get`; that runtime helper remains available.
+`js_shaped_slot_get`; once the emitted guard superseded every client, that
+runtime helper and its unused import were retired.
 
 Both frontends now call `em_guard_container` for the common pointer/kind guard.
 The JS-specific shape/storage admission remains local. This is an extraction

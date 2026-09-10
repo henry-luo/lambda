@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "description": "D8.2.6, D3.3.3v3, D5.3.4, S7.1.3v2: loop demand and checked native mutation.",
+  "checks": [
+    {
+      "in_func": "_bytes_#",
+      "expect": [
+        "mov\tu8:",
+        "call\tlambda_array_set_checked_inplace"
+      ]
+    },
+    {
+      "in_func": "_widths_#",
+      "expect": [
+        "mov\tu8:",
+        "mov\tu16:",
+        "mov\tu32:",
+        "call\tlambda_array_set_checked"
+      ]
+    }
+  ]
+}

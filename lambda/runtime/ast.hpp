@@ -362,8 +362,9 @@ typedef struct AstForNode : AstNode {
 // write -- the loop must keep the entry-time value -- while the CW29 sweep
 // excludes it (a rebind is local to the callee under BOTH param semantics).
 static inline bool ast_body_may_write_entry(AstNode* node, NameEntry* root,
-        bool include_rebind) {
-    for (; node; node = node->next) {
+        bool include_rebind, AstNode* stop_before = NULL) {
+    // Borrow intervals stop at the last observer; later writes are irrelevant.
+    for (; node && node != stop_before; node = node->next) {
         AstNode* stmt = ast_unwrap_primary(node);
         if (!stmt) continue;
         switch (stmt->node_type) {

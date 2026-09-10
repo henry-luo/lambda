@@ -1,0 +1,22 @@
+[{
+    text: "[λ🙂λ🙂λ🙂",
+    count: 3
+  }, 2000, 4001, {
+    text: "abc",
+    count: 3
+  }, {
+    text: "abab",
+    count: 2
+  }, {
+    text: "z",
+    count: 1
+  }, "λ🙂:λ🙂", {
+    text: "λ🙂",
+    count: 1
+  }, {
+    text: "λ🙂",
+    count: 1
+  }, {
+    text: "z",
+    count: 2
+  }]

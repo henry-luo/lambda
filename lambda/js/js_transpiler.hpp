@@ -339,8 +339,6 @@ Item js_call_constructor_body_prerooted_args_into(Item func, Item this_binding,
                                                   uint64_t* result_home);
 Item js_construct_value(Item callee, Item* args, int arg_count, Item new_target,
                         uint64_t* result_home, bool args_prerooted);
-Item js_construct_value_defer_own_fields(Item callee, Item* args, int arg_count,
-                                         Item new_target);
 Item js_init_class_instance_fields_after_super(Item callee, Item object);
 
 // Array functions

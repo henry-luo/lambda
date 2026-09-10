@@ -41,8 +41,6 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" void js_promise_flush_unhandled_checks(void);
 extern "C" bool js_process_exit_requested(void);
 extern "C" Item js_domain_get_current(void);
-extern "C" Item js_domain_set_current(Item domain);
-extern "C" void js_domain_restore(Item previous);
 extern "C" Item js_domain_capture_stack(void);
 extern "C" Item js_domain_capture_async_stack(void);
 extern "C" Item js_domain_set_stack(Item stack);
@@ -1063,31 +1061,6 @@ extern "C" Item js_pack_args_span(Item* values, int count) {
     }
     return (Item){.array = arr};
 }
-#define JS_PACK_ARGS_1(name, a1) \
-extern "C" Item name(Item a1) { \
-    Item values[1] = {a1}; return js_pack_args_span(values, 1); \
-}
-#define JS_PACK_ARGS_2(name, a1, a2) \
-extern "C" Item name(Item a1, Item a2) { \
-    Item values[2] = {a1, a2}; return js_pack_args_span(values, 2); \
-}
-#define JS_PACK_ARGS_3(name, a1, a2, a3) \
-extern "C" Item name(Item a1, Item a2, Item a3) { \
-    Item values[3] = {a1, a2, a3}; return js_pack_args_span(values, 3); \
-}
-#define JS_PACK_ARGS_4(name, a1, a2, a3, a4) \
-extern "C" Item name(Item a1, Item a2, Item a3, Item a4) { \
-    Item values[4] = {a1, a2, a3, a4}; return js_pack_args_span(values, 4); \
-}
-JS_PACK_ARGS_1(js_pack_args_1, a1)
-JS_PACK_ARGS_2(js_pack_args_2, a1, a2)
-JS_PACK_ARGS_3(js_pack_args_3, a1, a2, a3)
-JS_PACK_ARGS_4(js_pack_args_4, a1, a2, a3, a4)
-#undef JS_PACK_ARGS_4
-#undef JS_PACK_ARGS_3
-#undef JS_PACK_ARGS_2
-#undef JS_PACK_ARGS_1
-
 JS_TIMER_FORWARD(js_setInterval, ItemNull, false, true)
 JS_TIMER_FORWARD_ARGS(js_setInterval_args, true)
 #undef JS_TIMER_FORWARD_ARGS

@@ -1,0 +1,1437 @@
+{
+  "started_utc": "2026-09-10T11:50:11.121028+00:00",
+  "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+  "before": {
+    "binary": "test/benchmark/exe/lambda-tune25-before-a36b8bdd345e",
+    "sha256": "a36b8bdd345efec2230f3d67394ee6946617ba000b4b8e0ae2606c844a5bbdda",
+    "head": "ae8a46bcb16ab2568223ed053bf996f9e5056a60",
+    "build": "make release",
+    "sources": {
+      "lambda/runtime/transpile-mir.cpp": "d9c2ca75438fcd9a08a24c9991f3d77a580d6194cff39ff18fa9e5356c7b2da7",
+      "lambda/runtime/mir_loop_invariants.hpp": "ce84738e58933d45443e409d4061aff5103cc67160b24e5bf6b160dd0dc60f81",
+      "lambda/js/js_interp.cpp": "98cc03b26b311a4a1e30c3e738987de64b036e99bf3b3c7c1063d27a44706cc3",
+      "lambda/js/js_runtime.cpp": "384b05e9d9515e0d4f4d9c118cbb6d04d2624a21ad736a4b992182b37894621b",
+      "build_lambda_config.json": "c294b3ad6fa49d83d1d289ca03dc25bb66b503dcf930a66cca01ca6078375ca5"
+    }
+  },
+  "after": {
+    "binary": "test/benchmark/exe/lambda-tune25-1f70eb3aac9d",
+    "sha256": "1f70eb3aac9d11cf334ac7b89734135b0d9e07c6c3cb33c55d98c6c41a350c12",
+    "size_bytes": 19498280,
+    "head": "ae8a46bcb16ab2568223ed053bf996f9e5056a60",
+    "build": "make release",
+    "runtime_patch_sha256": "c00764627a6db044bff7bd3c35176efaf77c5ef4620c0697d42cce0ea8781a6c",
+    "sources": {
+      "lambda/runtime/transpile-mir.cpp": "ee327facb44d3c6efadbceb0b6a81ae628fa5d50e2ae6be15d6f3df017660ec4",
+      "lambda/runtime/mir_loop_invariants.hpp": "92bbbef4dca83d4bd7c2e12b2e5fbb2fcd0faf85bdcf1a268f4db12e42bbe88d",
+      "lambda/js/js_interp.cpp": "ae0e2cad8a957c107a8c166e387abc20d1c8b571e72be71a87fc8291d42f30e9",
+      "lambda/js/js_runtime.cpp": "c9a122eef943043fa876e1ae4fb7817e8b1966921513ed4965a2dad062b464ca",
+      "build_lambda_config.json": "c294b3ad6fa49d83d1d289ca03dc25bb66b503dcf930a66cca01ca6078375ca5"
+    }
+  },
+  "method": "fresh process; forced JIT; in-script execution timing; 5 alternating AB/BA pairs; no logging or profiling; identical source for both binaries",
+  "cases": [
+    {
+      "name": "loop_calls",
+      "source": "test/benchmark/ls_micro/loop_calls2.ls",
+      "source_sha256": "01c93ce4a1860e4a946f4e11ae9a3b5b0bbc11ff8f0dd3250ed9f18b2349fbe3",
+      "samples": [
+        {
+          "engine": "before",
+          "pair": 0,
+          "ms": 26.275,
+          "wall_ms": 39.4225420022849,
+          "output_sha256": "e5850a527e30089740f19dfd94ecdd28a9756e2f7a4325ba697030be5da933b4",
+          "checks": [
+            "CHECKSUM: 1e+07"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 0,
+          "ms": 1.509,
+          "wall_ms": 419.16595899965614,
+          "output_sha256": "e5850a527e30089740f19dfd94ecdd28a9756e2f7a4325ba697030be5da933b4",
+          "checks": [
+            "CHECKSUM: 1e+07"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 1,
+          "ms": 1.475,
+          "wall_ms": 13.562416992499493,
+          "output_sha256": "e5850a527e30089740f19dfd94ecdd28a9756e2f7a4325ba697030be5da933b4",
+          "checks": [
+            "CHECKSUM: 1e+07"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 1,
+          "ms": 26.23,
+          "wall_ms": 39.086041986593045,
+          "output_sha256": "e5850a527e30089740f19dfd94ecdd28a9756e2f7a4325ba697030be5da933b4",
+          "checks": [
+            "CHECKSUM: 1e+07"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 2,
+          "ms": 26.311,
+          "wall_ms": 38.863417008542456,
+          "output_sha256": "e5850a527e30089740f19dfd94ecdd28a9756e2f7a4325ba697030be5da933b4",
+          "checks": [
+            "CHECKSUM: 1e+07"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 2,
+          "ms": 1.441,
+          "wall_ms": 13.353540998650715,
+          "output_sha256": "e5850a527e30089740f19dfd94ecdd28a9756e2f7a4325ba697030be5da933b4",
+          "checks": [
+            "CHECKSUM: 1e+07"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 3,
+          "ms": 1.438,
+          "wall_ms": 12.892915998236276,
+          "output_sha256": "e5850a527e30089740f19dfd94ecdd28a9756e2f7a4325ba697030be5da933b4",
+          "checks": [
+            "CHECKSUM: 1e+07"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 3,
+          "ms": 26.246,
+          "wall_ms": 38.35054200317245,
+          "output_sha256": "e5850a527e30089740f19dfd94ecdd28a9756e2f7a4325ba697030be5da933b4",
+          "checks": [
+            "CHECKSUM: 1e+07"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 4,
+          "ms": 26.176,
+          "wall_ms": 38.737832990591414,
+          "output_sha256": "e5850a527e30089740f19dfd94ecdd28a9756e2f7a4325ba697030be5da933b4",
+          "checks": [
+            "CHECKSUM: 1e+07"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 4,
+          "ms": 1.421,
+          "wall_ms": 13.487415999406949,
+          "output_sha256": "e5850a527e30089740f19dfd94ecdd28a9756e2f7a4325ba697030be5da933b4",
+          "checks": [
+            "CHECKSUM: 1e+07"
+          ]
+        }
+      ],
+      "before_median_ms": 26.246,
+      "before_range_ms": [
+        26.176,
+        26.311
+      ],
+      "after_median_ms": 1.441,
+      "after_range_ms": [
+        1.421,
+        1.509
+      ],
+      "after_over_before": 0.054903604358759434,
+      "status": "ok",
+      "expected_output_sha256": "27fdf3bdb49d353aa5299444f7026253c330da045ac7b6497c1af69c7f0e070f",
+      "output_consistent": true
+    },
+    {
+      "name": "typed_numeric_stores",
+      "source": "test/benchmark/ls_micro/typed_numeric_store2.ls",
+      "source_sha256": "b77921bd26fbf933f4ee2e6dc8c32f3f9a84b25332a05c1e280d74ef14fbbe84",
+      "samples": [
+        {
+          "engine": "before",
+          "pair": 0,
+          "ms": 73.485,
+          "wall_ms": 86.961541994242,
+          "output_sha256": "cd6e8335e75100fed90f118d0f9627a1433c688daa6f53798f3cbc27eda09c26",
+          "checks": [
+            "CHECKSUM: [7, 0.5, 18446744073709551615]"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 0,
+          "ms": 10.386,
+          "wall_ms": 25.026625007740222,
+          "output_sha256": "cd6e8335e75100fed90f118d0f9627a1433c688daa6f53798f3cbc27eda09c26",
+          "checks": [
+            "CHECKSUM: [7, 0.5, 18446744073709551615]"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 1,
+          "ms": 10.855,
+          "wall_ms": 25.320958011434413,
+          "output_sha256": "cd6e8335e75100fed90f118d0f9627a1433c688daa6f53798f3cbc27eda09c26",
+          "checks": [
+            "CHECKSUM: [7, 0.5, 18446744073709551615]"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 1,
+          "ms": 74.76,
+          "wall_ms": 88.82945799268782,
+          "output_sha256": "cd6e8335e75100fed90f118d0f9627a1433c688daa6f53798f3cbc27eda09c26",
+          "checks": [
+            "CHECKSUM: [7, 0.5, 18446744073709551615]"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 2,
+          "ms": 72.616,
+          "wall_ms": 85.94187500420958,
+          "output_sha256": "cd6e8335e75100fed90f118d0f9627a1433c688daa6f53798f3cbc27eda09c26",
+          "checks": [
+            "CHECKSUM: [7, 0.5, 18446744073709551615]"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 2,
+          "ms": 9.81,
+          "wall_ms": 23.344832996372133,
+          "output_sha256": "cd6e8335e75100fed90f118d0f9627a1433c688daa6f53798f3cbc27eda09c26",
+          "checks": [
+            "CHECKSUM: [7, 0.5, 18446744073709551615]"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 3,
+          "ms": 10.205,
+          "wall_ms": 23.760999989463016,
+          "output_sha256": "cd6e8335e75100fed90f118d0f9627a1433c688daa6f53798f3cbc27eda09c26",
+          "checks": [
+            "CHECKSUM: [7, 0.5, 18446744073709551615]"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 3,
+          "ms": 71.747,
+          "wall_ms": 84.78187500440981,
+          "output_sha256": "cd6e8335e75100fed90f118d0f9627a1433c688daa6f53798f3cbc27eda09c26",
+          "checks": [
+            "CHECKSUM: [7, 0.5, 18446744073709551615]"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 4,
+          "ms": 70.629,
+          "wall_ms": 83.48600000317674,
+          "output_sha256": "cd6e8335e75100fed90f118d0f9627a1433c688daa6f53798f3cbc27eda09c26",
+          "checks": [
+            "CHECKSUM: [7, 0.5, 18446744073709551615]"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 4,
+          "ms": 10.149,
+          "wall_ms": 24.034000001847744,
+          "output_sha256": "cd6e8335e75100fed90f118d0f9627a1433c688daa6f53798f3cbc27eda09c26",
+          "checks": [
+            "CHECKSUM: [7, 0.5, 18446744073709551615]"
+          ]
+        }
+      ],
+      "before_median_ms": 72.616,
+      "before_range_ms": [
+        70.629,
+        74.76
+      ],
+      "after_median_ms": 10.205,
+      "after_range_ms": [
+        9.81,
+        10.855
+      ],
+      "after_over_before": 0.14053376666299439,
+      "status": "ok",
+      "expected_output_sha256": "3302bd169f67229059ac831d24d049ef6c3a91d96be4ecb2030eafb8327be5b8",
+      "output_consistent": true
+    },
+    {
+      "name": "matmul_typed",
+      "source": "test/benchmark/kostya/matmul2.ls",
+      "source_sha256": "b3d1721441e078472c62fdde706567c9c968312de9da8a8db1c76087d1fd5a39",
+      "samples": [
+        {
+          "engine": "before",
+          "pair": 0,
+          "ms": 44.27,
+          "wall_ms": 61.247958001331426,
+          "output_sha256": "9e169ac9eba3abed87aa02fff6e2167310ca2c5c2015e9198846224676e88b10",
+          "checks": [
+            "matmul: sum=-29562",
+            "matmul: DONE"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 0,
+          "ms": 43.41,
+          "wall_ms": 60.59612501121592,
+          "output_sha256": "9e169ac9eba3abed87aa02fff6e2167310ca2c5c2015e9198846224676e88b10",
+          "checks": [
+            "matmul: sum=-29562",
+            "matmul: DONE"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 1,
+          "ms": 43.162,
+          "wall_ms": 60.16325000382494,
+          "output_sha256": "9e169ac9eba3abed87aa02fff6e2167310ca2c5c2015e9198846224676e88b10",
+          "checks": [
+            "matmul: sum=-29562",
+            "matmul: DONE"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 1,
+          "ms": 44.372,
+          "wall_ms": 62.034000002313405,
+          "output_sha256": "9e169ac9eba3abed87aa02fff6e2167310ca2c5c2015e9198846224676e88b10",
+          "checks": [
+            "matmul: sum=-29562",
+            "matmul: DONE"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 2,
+          "ms": 44.479,
+          "wall_ms": 61.48995799594559,
+          "output_sha256": "9e169ac9eba3abed87aa02fff6e2167310ca2c5c2015e9198846224676e88b10",
+          "checks": [
+            "matmul: sum=-29562",
+            "matmul: DONE"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 2,
+          "ms": 43.435,
+          "wall_ms": 61.02716700115707,
+          "output_sha256": "9e169ac9eba3abed87aa02fff6e2167310ca2c5c2015e9198846224676e88b10",
+          "checks": [
+            "matmul: sum=-29562",
+            "matmul: DONE"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 3,
+          "ms": 44.383,
+          "wall_ms": 61.61404200247489,
+          "output_sha256": "9e169ac9eba3abed87aa02fff6e2167310ca2c5c2015e9198846224676e88b10",
+          "checks": [
+            "matmul: sum=-29562",
+            "matmul: DONE"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 3,
+          "ms": 43.488,
+          "wall_ms": 60.5205829924671,
+          "output_sha256": "9e169ac9eba3abed87aa02fff6e2167310ca2c5c2015e9198846224676e88b10",
+          "checks": [
+            "matmul: sum=-29562",
+            "matmul: DONE"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 4,
+          "ms": 44.296,
+          "wall_ms": 61.10137500218116,
+          "output_sha256": "9e169ac9eba3abed87aa02fff6e2167310ca2c5c2015e9198846224676e88b10",
+          "checks": [
+            "matmul: sum=-29562",
+            "matmul: DONE"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 4,
+          "ms": 43.862,
+          "wall_ms": 60.926833000849,
+          "output_sha256": "9e169ac9eba3abed87aa02fff6e2167310ca2c5c2015e9198846224676e88b10",
+          "checks": [
+            "matmul: sum=-29562",
+            "matmul: DONE"
+          ]
+        }
+      ],
+      "before_median_ms": 44.296,
+      "before_range_ms": [
+        43.488,
+        44.479
+      ],
+      "after_median_ms": 43.435,
+      "after_range_ms": [
+        43.162,
+        44.383
+      ],
+      "after_over_before": 0.9805625790139065,
+      "status": "ok",
+      "expected_output_sha256": "a3526171d8d09199ca158cc3da3719274210baaaf7db6b88244c7f7902fd5fae",
+      "output_consistent": true
+    },
+    {
+      "name": "fft_typed",
+      "source": "test/benchmark/r7rs/fft2.ls",
+      "source_sha256": "0ceda879d6521ad61633794024618a51c786c0b70c8757719519931e3661caec",
+      "samples": [
+        {
+          "engine": "before",
+          "pair": 0,
+          "ms": 0.344,
+          "wall_ms": 24.12775000266265,
+          "output_sha256": "9356bd93485f797c3c31f44b7df4983c7856eb60b1013c5940fdbf3379acc049",
+          "checks": [
+            "fft: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 0,
+          "ms": 0.35,
+          "wall_ms": 25.141958001768216,
+          "output_sha256": "9356bd93485f797c3c31f44b7df4983c7856eb60b1013c5940fdbf3379acc049",
+          "checks": [
+            "fft: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 1,
+          "ms": 0.353,
+          "wall_ms": 24.148666998371482,
+          "output_sha256": "9356bd93485f797c3c31f44b7df4983c7856eb60b1013c5940fdbf3379acc049",
+          "checks": [
+            "fft: PASS"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 1,
+          "ms": 0.343,
+          "wall_ms": 24.417916996753775,
+          "output_sha256": "9356bd93485f797c3c31f44b7df4983c7856eb60b1013c5940fdbf3379acc049",
+          "checks": [
+            "fft: PASS"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 2,
+          "ms": 0.344,
+          "wall_ms": 24.304916005348787,
+          "output_sha256": "9356bd93485f797c3c31f44b7df4983c7856eb60b1013c5940fdbf3379acc049",
+          "checks": [
+            "fft: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 2,
+          "ms": 0.344,
+          "wall_ms": 24.39291699556634,
+          "output_sha256": "9356bd93485f797c3c31f44b7df4983c7856eb60b1013c5940fdbf3379acc049",
+          "checks": [
+            "fft: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 3,
+          "ms": 0.344,
+          "wall_ms": 24.400834008702077,
+          "output_sha256": "9356bd93485f797c3c31f44b7df4983c7856eb60b1013c5940fdbf3379acc049",
+          "checks": [
+            "fft: PASS"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 3,
+          "ms": 0.343,
+          "wall_ms": 24.35262499784585,
+          "output_sha256": "9356bd93485f797c3c31f44b7df4983c7856eb60b1013c5940fdbf3379acc049",
+          "checks": [
+            "fft: PASS"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 4,
+          "ms": 0.344,
+          "wall_ms": 24.98337499855552,
+          "output_sha256": "9356bd93485f797c3c31f44b7df4983c7856eb60b1013c5940fdbf3379acc049",
+          "checks": [
+            "fft: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 4,
+          "ms": 0.343,
+          "wall_ms": 24.696332999155857,
+          "output_sha256": "9356bd93485f797c3c31f44b7df4983c7856eb60b1013c5940fdbf3379acc049",
+          "checks": [
+            "fft: PASS"
+          ]
+        }
+      ],
+      "before_median_ms": 0.344,
+      "before_range_ms": [
+        0.343,
+        0.344
+      ],
+      "after_median_ms": 0.344,
+      "after_range_ms": [
+        0.343,
+        0.353
+      ],
+      "after_over_before": 1.0,
+      "status": "ok",
+      "expected_output_sha256": "dba080a64544022934ff5eb962ac5bbc221952f3af079d80ee36402b771b70f2",
+      "output_consistent": true
+    },
+    {
+      "name": "nbody_typed",
+      "source": "test/benchmark/beng/nbody2.ls",
+      "source_sha256": "c16a531b52cae3eaae99f04f2d09955788f2664ce25d7366fd0f9f24dcde5d98",
+      "samples": [
+        {
+          "engine": "before",
+          "pair": 0,
+          "ms": 26.117,
+          "wall_ms": 91.13337501185015,
+          "output_sha256": "668c980a68b8f2314ddde44003cb850e92e3fdf094998fa6fa313ab65e3d4069",
+          "checks": []
+        },
+        {
+          "engine": "after",
+          "pair": 0,
+          "ms": 26.609,
+          "wall_ms": 92.71666599670425,
+          "output_sha256": "668c980a68b8f2314ddde44003cb850e92e3fdf094998fa6fa313ab65e3d4069",
+          "checks": []
+        },
+        {
+          "engine": "after",
+          "pair": 1,
+          "ms": 26.584,
+          "wall_ms": 93.49545899021905,
+          "output_sha256": "668c980a68b8f2314ddde44003cb850e92e3fdf094998fa6fa313ab65e3d4069",
+          "checks": []
+        },
+        {
+          "engine": "before",
+          "pair": 1,
+          "ms": 26.159,
+          "wall_ms": 92.60295800049789,
+          "output_sha256": "668c980a68b8f2314ddde44003cb850e92e3fdf094998fa6fa313ab65e3d4069",
+          "checks": []
+        },
+        {
+          "engine": "before",
+          "pair": 2,
+          "ms": 26.251,
+          "wall_ms": 92.35579200321808,
+          "output_sha256": "668c980a68b8f2314ddde44003cb850e92e3fdf094998fa6fa313ab65e3d4069",
+          "checks": []
+        },
+        {
+          "engine": "after",
+          "pair": 2,
+          "ms": 26.306,
+          "wall_ms": 92.11666700139176,
+          "output_sha256": "668c980a68b8f2314ddde44003cb850e92e3fdf094998fa6fa313ab65e3d4069",
+          "checks": []
+        },
+        {
+          "engine": "after",
+          "pair": 3,
+          "ms": 26.337,
+          "wall_ms": 93.27666700119153,
+          "output_sha256": "668c980a68b8f2314ddde44003cb850e92e3fdf094998fa6fa313ab65e3d4069",
+          "checks": []
+        },
+        {
+          "engine": "before",
+          "pair": 3,
+          "ms": 26.335,
+          "wall_ms": 92.13608299614862,
+          "output_sha256": "668c980a68b8f2314ddde44003cb850e92e3fdf094998fa6fa313ab65e3d4069",
+          "checks": []
+        },
+        {
+          "engine": "before",
+          "pair": 4,
+          "ms": 26.259,
+          "wall_ms": 92.2610830020858,
+          "output_sha256": "668c980a68b8f2314ddde44003cb850e92e3fdf094998fa6fa313ab65e3d4069",
+          "checks": []
+        },
+        {
+          "engine": "after",
+          "pair": 4,
+          "ms": 26.285,
+          "wall_ms": 92.73866699368227,
+          "output_sha256": "668c980a68b8f2314ddde44003cb850e92e3fdf094998fa6fa313ab65e3d4069",
+          "checks": []
+        }
+      ],
+      "before_median_ms": 26.251,
+      "before_range_ms": [
+        26.117,
+        26.335
+      ],
+      "after_median_ms": 26.337,
+      "after_range_ms": [
+        26.285,
+        26.609
+      ],
+      "after_over_before": 1.0032760656736885,
+      "status": "ok",
+      "expected_output_sha256": "668c980a68b8f2314ddde44003cb850e92e3fdf094998fa6fa313ab65e3d4069",
+      "output_consistent": true
+    },
+    {
+      "name": "navier_stokes_typed",
+      "source": "test/benchmark/jetstream/navier_stokes2.ls",
+      "source_sha256": "b004863e56c35ab60068a2a1c92745bf57e53fdf15fae3b15140a40d808358fa",
+      "samples": [
+        {
+          "engine": "before",
+          "pair": 0,
+          "ms": 257.13,
+          "wall_ms": 341.1217919929186,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 0,
+          "ms": 262.496,
+          "wall_ms": 346.36020800098777,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 1,
+          "ms": 264.697,
+          "wall_ms": 348.5563329886645,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 1,
+          "ms": 257.794,
+          "wall_ms": 342.62283401039895,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 2,
+          "ms": 259.458,
+          "wall_ms": 342.8697499912232,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 2,
+          "ms": 264.801,
+          "wall_ms": 348.28858300170396,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 3,
+          "ms": 262.521,
+          "wall_ms": 346.2727919977624,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 3,
+          "ms": 257.422,
+          "wall_ms": 341.0876249981811,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 4,
+          "ms": 257.248,
+          "wall_ms": 340.466584006208,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 4,
+          "ms": 261.981,
+          "wall_ms": 345.82270799728576,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81",
+          "checks": [
+            "navier-stokes: PASS (checksum=77)"
+          ]
+        }
+      ],
+      "before_median_ms": 257.422,
+      "before_range_ms": [
+        257.13,
+        259.458
+      ],
+      "after_median_ms": 262.521,
+      "after_range_ms": [
+        261.981,
+        264.801
+      ],
+      "after_over_before": 1.0198079418231543,
+      "status": "ok",
+      "output_consistent": true
+    },
+    {
+      "name": "primes_typed",
+      "source": "test/benchmark/kostya/primes2.ls",
+      "source_sha256": "f91b571e3faed4f3ae75ca9db513eecf04e2cb1291e6a39cf0ce532a8600c53d",
+      "samples": [
+        {
+          "engine": "before",
+          "pair": 0,
+          "ms": 24.051,
+          "wall_ms": 37.761375002446584,
+          "output_sha256": "c7cd79a4b9c1f39c8699cca79eff1ab5be7e473c08f252cb0acaba6b0c7b7f40",
+          "checks": [
+            "primes: PASS (78498)"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 0,
+          "ms": 23.887,
+          "wall_ms": 36.89324999868404,
+          "output_sha256": "c7cd79a4b9c1f39c8699cca79eff1ab5be7e473c08f252cb0acaba6b0c7b7f40",
+          "checks": [
+            "primes: PASS (78498)"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 1,
+          "ms": 23.52,
+          "wall_ms": 36.87233400705736,
+          "output_sha256": "c7cd79a4b9c1f39c8699cca79eff1ab5be7e473c08f252cb0acaba6b0c7b7f40",
+          "checks": [
+            "primes: PASS (78498)"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 1,
+          "ms": 24.358,
+          "wall_ms": 37.63283400621731,
+          "output_sha256": "c7cd79a4b9c1f39c8699cca79eff1ab5be7e473c08f252cb0acaba6b0c7b7f40",
+          "checks": [
+            "primes: PASS (78498)"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 2,
+          "ms": 24.06,
+          "wall_ms": 37.424875001306646,
+          "output_sha256": "c7cd79a4b9c1f39c8699cca79eff1ab5be7e473c08f252cb0acaba6b0c7b7f40",
+          "checks": [
+            "primes: PASS (78498)"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 2,
+          "ms": 23.509,
+          "wall_ms": 37.11595899949316,
+          "output_sha256": "c7cd79a4b9c1f39c8699cca79eff1ab5be7e473c08f252cb0acaba6b0c7b7f40",
+          "checks": [
+            "primes: PASS (78498)"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 3,
+          "ms": 24.267,
+          "wall_ms": 37.6912500069011,
+          "output_sha256": "c7cd79a4b9c1f39c8699cca79eff1ab5be7e473c08f252cb0acaba6b0c7b7f40",
+          "checks": [
+            "primes: PASS (78498)"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 3,
+          "ms": 24.057,
+          "wall_ms": 37.37733300658874,
+          "output_sha256": "c7cd79a4b9c1f39c8699cca79eff1ab5be7e473c08f252cb0acaba6b0c7b7f40",
+          "checks": [
+            "primes: PASS (78498)"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 4,
+          "ms": 24.873,
+          "wall_ms": 38.10266699292697,
+          "output_sha256": "c7cd79a4b9c1f39c8699cca79eff1ab5be7e473c08f252cb0acaba6b0c7b7f40",
+          "checks": [
+            "primes: PASS (78498)"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 4,
+          "ms": 23.869,
+          "wall_ms": 37.64695901190862,
+          "output_sha256": "c7cd79a4b9c1f39c8699cca79eff1ab5be7e473c08f252cb0acaba6b0c7b7f40",
+          "checks": [
+            "primes: PASS (78498)"
+          ]
+        }
+      ],
+      "before_median_ms": 24.06,
+      "before_range_ms": [
+        24.051,
+        24.873
+      ],
+      "after_median_ms": 23.869,
+      "after_range_ms": [
+        23.509,
+        24.267
+      ],
+      "after_over_before": 0.9920615128844555,
+      "status": "ok",
+      "expected_output_sha256": "ad41b14f4746602e708f5a733bec68feb6cb8b3e4312203e95e0f14457a2df4e",
+      "output_consistent": true
+    },
+    {
+      "name": "richards_typed",
+      "source": "test/benchmark/awfy/richards2.ls",
+      "source_sha256": "d1e67689ae5967f2f75a7fc783ef1aa2105c298d5c4c574492a0a5cf5a47a4cd",
+      "samples": [
+        {
+          "engine": "before",
+          "pair": 0,
+          "ms": 723.891,
+          "wall_ms": 774.2310830071801,
+          "output_sha256": "161fcf6a787f312bf285f323f1fdc8164907c983acdd2c44ee98a1bfe934c01a",
+          "checks": [
+            "Richards: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 0,
+          "ms": 726.455,
+          "wall_ms": 777.5344999972731,
+          "output_sha256": "161fcf6a787f312bf285f323f1fdc8164907c983acdd2c44ee98a1bfe934c01a",
+          "checks": [
+            "Richards: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 1,
+          "ms": 715.702,
+          "wall_ms": 767.4233750003623,
+          "output_sha256": "161fcf6a787f312bf285f323f1fdc8164907c983acdd2c44ee98a1bfe934c01a",
+          "checks": [
+            "Richards: PASS"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 1,
+          "ms": 706.304,
+          "wall_ms": 757.5415830069687,
+          "output_sha256": "161fcf6a787f312bf285f323f1fdc8164907c983acdd2c44ee98a1bfe934c01a",
+          "checks": [
+            "Richards: PASS"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 2,
+          "ms": 710.029,
+          "wall_ms": 760.7486670021899,
+          "output_sha256": "161fcf6a787f312bf285f323f1fdc8164907c983acdd2c44ee98a1bfe934c01a",
+          "checks": [
+            "Richards: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 2,
+          "ms": 715.917,
+          "wall_ms": 767.1287080011098,
+          "output_sha256": "161fcf6a787f312bf285f323f1fdc8164907c983acdd2c44ee98a1bfe934c01a",
+          "checks": [
+            "Richards: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 3,
+          "ms": 726.714,
+          "wall_ms": 778.0191250058124,
+          "output_sha256": "161fcf6a787f312bf285f323f1fdc8164907c983acdd2c44ee98a1bfe934c01a",
+          "checks": [
+            "Richards: PASS"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 3,
+          "ms": 705.8,
+          "wall_ms": 757.1096250030678,
+          "output_sha256": "161fcf6a787f312bf285f323f1fdc8164907c983acdd2c44ee98a1bfe934c01a",
+          "checks": [
+            "Richards: PASS"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 4,
+          "ms": 717.048,
+          "wall_ms": 768.4443339967402,
+          "output_sha256": "161fcf6a787f312bf285f323f1fdc8164907c983acdd2c44ee98a1bfe934c01a",
+          "checks": [
+            "Richards: PASS"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 4,
+          "ms": 713.007,
+          "wall_ms": 764.3411669996567,
+          "output_sha256": "161fcf6a787f312bf285f323f1fdc8164907c983acdd2c44ee98a1bfe934c01a",
+          "checks": [
+            "Richards: PASS"
+          ]
+        }
+      ],
+      "before_median_ms": 710.029,
+      "before_range_ms": [
+        705.8,
+        723.891
+      ],
+      "after_median_ms": 715.917,
+      "after_range_ms": [
+        713.007,
+        726.714
+      ],
+      "after_over_before": 1.0082926190338706,
+      "status": "ok",
+      "expected_output_sha256": "7b93d54ddcdfa3a77015c3cf58eba2b9ad91dbd652b80a851c794346300dfb88",
+      "output_consistent": true
+    },
+    {
+      "name": "prettier_typed",
+      "source": "test/benchmark/text/prettier_ast2.ls",
+      "source_sha256": "b2af4a8705395faef9f7d019a216ca0c027ff27dac45a14681ca4bfea8f0edfc",
+      "samples": [
+        {
+          "engine": "before",
+          "pair": 0,
+          "ms": 2419.56,
+          "wall_ms": 2754.91287499608,
+          "output_sha256": "0dc8ccbda6e9c972f2afbfe1cba7e5d969d7e1ad42740c087986a20a05df59a5",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 0,
+          "ms": 2405.9,
+          "wall_ms": 2737.1857079997426,
+          "output_sha256": "0dc8ccbda6e9c972f2afbfe1cba7e5d969d7e1ad42740c087986a20a05df59a5",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 1,
+          "ms": 2445.72,
+          "wall_ms": 2776.1322079895763,
+          "output_sha256": "0dc8ccbda6e9c972f2afbfe1cba7e5d969d7e1ad42740c087986a20a05df59a5",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 1,
+          "ms": 2457.73,
+          "wall_ms": 2805.9456659975694,
+          "output_sha256": "0dc8ccbda6e9c972f2afbfe1cba7e5d969d7e1ad42740c087986a20a05df59a5",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 2,
+          "ms": 2404.06,
+          "wall_ms": 2743.0710830085445,
+          "output_sha256": "0dc8ccbda6e9c972f2afbfe1cba7e5d969d7e1ad42740c087986a20a05df59a5",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 2,
+          "ms": 2412.56,
+          "wall_ms": 2752.9627079929924,
+          "output_sha256": "0dc8ccbda6e9c972f2afbfe1cba7e5d969d7e1ad42740c087986a20a05df59a5",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 3,
+          "ms": 2417.26,
+          "wall_ms": 2762.8112500096904,
+          "output_sha256": "0dc8ccbda6e9c972f2afbfe1cba7e5d969d7e1ad42740c087986a20a05df59a5",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 3,
+          "ms": 2408.56,
+          "wall_ms": 2748.4815000061644,
+          "output_sha256": "0dc8ccbda6e9c972f2afbfe1cba7e5d969d7e1ad42740c087986a20a05df59a5",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        },
+        {
+          "engine": "before",
+          "pair": 4,
+          "ms": 2441.14,
+          "wall_ms": 2798.5721250006463,
+          "output_sha256": "0dc8ccbda6e9c972f2afbfe1cba7e5d969d7e1ad42740c087986a20a05df59a5",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        },
+        {
+          "engine": "after",
+          "pair": 4,
+          "ms": 2447.1,
+          "wall_ms": 2795.8531670010416,
+          "output_sha256": "0dc8ccbda6e9c972f2afbfe1cba7e5d969d7e1ad42740c087986a20a05df59a5",
+          "checks": [
+            "prettier_ast: CHECKSUM:56483873"
+          ]
+        }
+      ],
+      "before_median_ms": 2419.56,
+      "before_range_ms": [
+        2404.06,
+        2457.73
+      ],
+      "after_median_ms": 2417.26,
+      "after_range_ms": [
+        2405.9,
+        2447.1
+      ],
+      "after_over_before": 0.999049413943031,
+      "status": "ok",
+      "expected_output_sha256": "db25c1b8396a082699f0724b4a2b6763cfff4540cdb609c3447f5fba2a47dc97",
+      "output_consistent": true
+    }
+  ],
+  "validation": {
+    "lambda_baseline": {
+      "command": "make test-lambda-baseline",
+      "passed": 5318,
+      "failed": 0,
+      "input_cases": 2104,
+      "runtime_cases": 3214,
+      "log": "temp/tune25/lambda_baseline_verified.log"
+    },
+    "test262_baseline": {
+      "command": "make test262-baseline",
+      "passed": 40261,
+      "failed": 0,
+      "log": "temp/tune25/test262_baseline_final.log"
+    },
+    "focused_lambda_modes": [
+      {
+        "source": "test/mir/lambda/tune25_array_bounds.ls",
+        "mode": "t0",
+        "exit": 0,
+        "matches_expected": true
+      },
+      {
+        "source": "test/mir/lambda/tune25_array_bounds.ls",
+        "mode": "jit",
+        "exit": 0,
+        "matches_expected": true
+      },
+      {
+        "source": "test/mir/lambda/tune25_array_bounds.ls",
+        "mode": "jit_gc",
+        "exit": 0,
+        "matches_expected": true
+      },
+      {
+        "source": "test/mir/lambda/tune25_array_bounds.ls",
+        "mode": "mir_interp_gc",
+        "exit": 0,
+        "matches_expected": true
+      },
+      {
+        "source": "test/mir/lambda/tune25_compact_stores.ls",
+        "mode": "t0",
+        "exit": 0,
+        "matches_expected": true
+      },
+      {
+        "source": "test/mir/lambda/tune25_compact_stores.ls",
+        "mode": "jit",
+        "exit": 0,
+        "matches_expected": true
+      },
+      {
+        "source": "test/mir/lambda/tune25_compact_stores.ls",
+        "mode": "jit_gc",
+        "exit": 0,
+        "matches_expected": true
+      },
+      {
+        "source": "test/mir/lambda/tune25_compact_stores.ls",
+        "mode": "mir_interp_gc",
+        "exit": 0,
+        "matches_expected": true
+      },
+      {
+        "source": "test/mir/lambda/tune25_loop_calls.ls",
+        "mode": "t0",
+        "exit": 0,
+        "matches_expected": true
+      },
+      {
+        "source": "test/mir/lambda/tune25_loop_calls.ls",
+        "mode": "jit",
+        "exit": 0,
+        "matches_expected": true
+      },
+      {
+        "source": "test/mir/lambda/tune25_loop_calls.ls",
+        "mode": "jit_gc",
+        "exit": 0,
+        "matches_expected": true
+      },
+      {
+        "source": "test/mir/lambda/tune25_loop_calls.ls",
+        "mode": "mir_interp_gc",
+        "exit": 0,
+        "matches_expected": true
+      },
+      {
+        "source": "test/mir/lambda/tune25_store_guards.ls",
+        "mode": "t0",
+        "exit": 0,
+        "matches_expected": true
+      },
+      {
+        "source": "test/mir/lambda/tune25_store_guards.ls",
+        "mode": "jit",
+        "exit": 0,
+        "matches_expected": true
+      },
+      {
+        "source": "test/mir/lambda/tune25_store_guards.ls",
+        "mode": "jit_gc",
+        "exit": 0,
+        "matches_expected": true
+      },
+      {
+        "source": "test/mir/lambda/tune25_store_guards.ls",
+        "mode": "mir_interp_gc",
+        "exit": 0,
+        "matches_expected": true
+      }
+    ],
+    "js_scalar_home_regression": {
+      "backends": [
+        "ast",
+        "mir"
+      ],
+      "modes": [
+        "normal",
+        "forced GC with freed-memory poisoning"
+      ],
+      "passed": 4,
+      "failed": 0
+    },
+    "baseline_repairs": {
+      "preexisting_js_ast_scalar_home": true,
+      "preexisting_js_array_scalar_read": true,
+      "node_net_module_rebuilt": true
+    },
+    "release_mir_emission": {
+      "passed": 102,
+      "failed": 0
+    },
+    "release_mir_gc_stress": {
+      "passed": 142,
+      "failed": 0
+    }
+  },
+  "expected_output_mode": "terminal expected output, with full normalized output hashes compared between engines",
+  "finished_utc": "2026-09-10T11:52:25.979210+00:00",
+  "profiles": {
+    "before": {
+      "source": "test/benchmark/ls_micro/typed_numeric_store2.ls",
+      "counters": {
+        "vmap_snapshots": 0,
+        "vmap_rejections": 0,
+        "fn_mutable_value_calls": 2,
+        "union_admit_calls": 0,
+        "map_admit_calls": 0,
+        "map_admit_relation_cache_hits": 0,
+        "map_admit_relation_cache_misses": 0,
+        "map_admit_exact_shape_hits": 0,
+        "map_admit_storage_compatible_hits": 0,
+        "map_admit_readonly_validations": 0,
+        "map_admit_reifications": 0,
+        "map_admit_deep_clone_calls": 0,
+        "map_admit_fields_visited": 0,
+        "map_admit_bytes_copied": 0,
+        "array_checked_store_calls": 0,
+        "array_checked_store_direct": 0,
+        "array_checked_store_unique_inplace": 0,
+        "array_checked_store_cow_detach": 0,
+        "array_checked_store_rebuild": 0,
+        "array_checked_store_full_clone": 0,
+        "array_checked_store_bytes_copied": 0,
+        "string_append_calls": 3,
+        "string_append_pieces": 4,
+        "string_inplace_appends": 0,
+        "string_growth_copies": 3,
+        "string_copied_bytes": 76,
+        "string_freezes": 0,
+        "string_generic_joins": 2
+      },
+      "output_sha256": "cd6e8335e75100fed90f118d0f9627a1433c688daa6f53798f3cbc27eda09c26"
+    },
+    "after": {
+      "source": "test/benchmark/ls_micro/typed_numeric_store2.ls",
+      "counters": {
+        "vmap_snapshots": 0,
+        "vmap_rejections": 0,
+        "fn_mutable_value_calls": 2,
+        "union_admit_calls": 0,
+        "map_admit_calls": 0,
+        "map_admit_relation_cache_hits": 0,
+        "map_admit_relation_cache_misses": 0,
+        "map_admit_exact_shape_hits": 0,
+        "map_admit_storage_compatible_hits": 0,
+        "map_admit_readonly_validations": 0,
+        "map_admit_reifications": 0,
+        "map_admit_deep_clone_calls": 0,
+        "map_admit_fields_visited": 0,
+        "map_admit_bytes_copied": 0,
+        "array_checked_store_calls": 0,
+        "array_checked_store_direct": 0,
+        "array_checked_store_unique_inplace": 0,
+        "array_checked_store_cow_detach": 0,
+        "array_checked_store_rebuild": 0,
+        "array_checked_store_full_clone": 0,
+        "array_checked_store_bytes_copied": 0,
+        "string_append_calls": 3,
+        "string_append_pieces": 4,
+        "string_inplace_appends": 0,
+        "string_growth_copies": 3,
+        "string_copied_bytes": 74,
+        "string_freezes": 0,
+        "string_generic_joins": 2
+      },
+      "output_sha256": "cd6e8335e75100fed90f118d0f9627a1433c688daa6f53798f3cbc27eda09c26"
+    }
+  },
+  "followups": {
+    "navier_stokes_typed": {
+      "source": "test/benchmark/jetstream/navier_stokes2.ls",
+      "reason": "repeat the separated Navier-Stokes slowdown without other benchmark workloads",
+      "samples": [
+        {
+          "engine": "after",
+          "pair": 0,
+          "ms": 261.952,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81"
+        },
+        {
+          "engine": "before",
+          "pair": 0,
+          "ms": 256.634,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81"
+        },
+        {
+          "engine": "before",
+          "pair": 1,
+          "ms": 258.209,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81"
+        },
+        {
+          "engine": "after",
+          "pair": 1,
+          "ms": 262.361,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81"
+        },
+        {
+          "engine": "after",
+          "pair": 2,
+          "ms": 261.907,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81"
+        },
+        {
+          "engine": "before",
+          "pair": 2,
+          "ms": 257.67,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81"
+        },
+        {
+          "engine": "before",
+          "pair": 3,
+          "ms": 257.033,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81"
+        },
+        {
+          "engine": "after",
+          "pair": 3,
+          "ms": 262.452,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81"
+        },
+        {
+          "engine": "after",
+          "pair": 4,
+          "ms": 262.035,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81"
+        },
+        {
+          "engine": "before",
+          "pair": 4,
+          "ms": 256.252,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81"
+        },
+        {
+          "engine": "before",
+          "pair": 5,
+          "ms": 256.714,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81"
+        },
+        {
+          "engine": "after",
+          "pair": 5,
+          "ms": 263.329,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81"
+        },
+        {
+          "engine": "after",
+          "pair": 6,
+          "ms": 264.06,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81"
+        },
+        {
+          "engine": "before",
+          "pair": 6,
+          "ms": 256.688,
+          "output_sha256": "d4587712455ba4fdee7b5f8d921e15e98189ada4661d566798eceb3822ef3f81"
+        }
+      ],
+      "before_median_ms": 256.714,
+      "before_range_ms": [
+        256.252,
+        258.209
+      ],
+      "after_median_ms": 262.361,
+      "after_range_ms": [
+        261.907,
+        264.06
+      ],
+      "after_over_before": 1.0219972420670473
+    }
+  },
+  "status": "complete_with_navier_stokes_performance_regression",
+  "known_regressions": [
+    {
+      "name": "navier_stokes_typed",
+      "original_change_percent": 1.9807941823154263,
+      "isolated_change_percent": 2.199724206704734,
+      "cause": "not isolated; helper-call counts unchanged",
+      "status": "open"
+    }
+  ]
+}

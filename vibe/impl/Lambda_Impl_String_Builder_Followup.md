@@ -1,8 +1,9 @@
 # String builder: audit, implementation and measurements
 
 - Date: 2026-09-10
-- Status: stages 1–3 and the self-tail-accumulator portion of stage 4 implemented;
-  whole-renderer destination passing remains a separate follow-up. Baselines and
+- Status: stages 1–3 and the self-tail-accumulator portion of stage 4 implemented.
+  The subsequent [Tune24 implementation](Lambda_Impl_Tune24.md) adds eligible
+  whole-renderer destinations and scalar records. Baselines and
   the focused release comparison are complete; small residual slowdowns are recorded below.
 - Authority: S1.4/S1.6 (observable mutation and representation), S9.1.1–S9.1.2
   (finality and snapshots), D2.4.2–D2.4.3 (value descriptors and representation
@@ -249,18 +250,19 @@ These changes stay within MIR Direct and the existing entry plan
 
 ### Remaining scope and C2MIR comparison
 
-The closed-renderer investigation confirms that `prettier_ast2.ls::render_doc`
-still returns materialized child strings inside `RenderResult` maps. Its C
+At this round's measurement boundary, `prettier_ast2.ls::render_doc`
+still returned materialized child strings inside `RenderResult` maps. Its C
 benchmark reference instead carries a `RenderState*` through the entire walk
 and writes directly into one destination. This change optimizes the sibling
 accumulator; it does not remove child results, transient records, or the five
 `replace` passes in Lambda's JSON quoting.
 
-Whole-renderer destination passing therefore needs escape/effect analysis and
+Whole-renderer destination passing required escape/effect analysis and
 an internal result protocol preserving errors, snapshots and column updates.
-Record scalar replacement is a separate step. These are not implemented here,
-nor are additional observer summaries, SIMD append specialization,
-or cached Unicode character counts. Repeated `len` on a growing non-ASCII string
+Record scalar replacement was a separate step. [Tune24](Lambda_Impl_Tune24.md)
+now implements both for eligible typed graphs and adds scalar-observer borrow
+summaries under D5.3.4 and D8.3.1–D8.3.3. SIMD append specialization and cached
+Unicode character counts remain open. Repeated `len` on a growing non-ASCII string
 can still rescan its contents even though builder copying itself is linear.
 The existing public typed entry remains unchanged (D8.3.1); this does not
 establish that C-equivalent allocation behavior requires a language change.

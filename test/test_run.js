@@ -58,6 +58,7 @@ for (let i = 0; i < args.length; i++) {
   --help               Show this help message
 
 Environment variables:
+  LAMBDA_TEST_BIN_DIR       Override the directory containing test executables
   LAMBDA_TEST_IDLE_TIMEOUT   Override idle timeout in seconds (default: auto-scaled by CPU count/load)
   LAMBDA_TEST_HEAVY_LOAD     Set to 1 to bias idle timeout upward for full-suite parallel runs
   LAMBDA_TEST_MAX_CONCURRENT Cap nested GTest fan-out (default: CPU-scaled, heavy-load caps at 4)
@@ -75,6 +76,9 @@ Environment variables:
 const ROOT_DIR   = path.resolve(__dirname, '..');
 const CONFIG_FILE = path.join(ROOT_DIR, 'build_lambda_config.json');
 const TEST_OUTPUT_DIR = path.join(ROOT_DIR, 'test_output');
+const TEST_BINARY_DIR = process.env.LAMBDA_TEST_BIN_DIR
+    ? path.resolve(ROOT_DIR, process.env.LAMBDA_TEST_BIN_DIR)
+    : path.join(ROOT_DIR, 'test');
 const IS_WINDOWS = process.platform === 'win32';
 
 const SCRIPT_TESTS = [
@@ -293,7 +297,7 @@ function discoverTests(config) {
                 'test_input_roundtrip',
             ];
             if (preferGtest.includes(baseName)) {
-                const gtestExe = path.join(ROOT_DIR, 'test', `${baseName}_gtest.exe`);
+                const gtestExe = path.join(TEST_BINARY_DIR, `${baseName}_gtest.exe`);
                 if (fs.existsSync(gtestExe)) {
                     baseName = baseName + '_gtest';
                 }
@@ -306,7 +310,7 @@ function discoverTests(config) {
             if (IS_WINDOWS && !baseName.includes('gtest')) continue;
 
             const executable = t.binary || `${baseName}.exe`;
-            const exePath = path.join(ROOT_DIR, 'test', executable);
+            const exePath = path.join(TEST_BINARY_DIR, executable);
             const srcPath = path.join(ROOT_DIR, src.startsWith('test/') ? src : `test/${src}`);
 
             if (fs.existsSync(exePath) || fs.existsSync(srcPath)) {

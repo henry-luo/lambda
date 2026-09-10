@@ -4635,26 +4635,6 @@ Item js_numeric_prototype_algorithm(Item num,
 // String Methods (v5 additions)
 // =============================================================================
 
-extern "C" Item js_string_charCodeAt(Item str_item, Item index_item) {
-    String* s = it2s(str_item);
-    if (!s) return (Item){.item = i2it(0)};
-
-    int idx = 0;
-    TypeId itype = get_type_id(index_item);
-    if (itype == LMD_TYPE_INT) {
-        idx = (int)it2i(index_item);
-    } else if (itype == LMD_TYPE_FLOAT) {
-        idx = (int)it2d(index_item);
-    }
-
-    if (idx < 0 || idx >= (int)s->len) {
-        return push_d(NAN);
-    }
-
-    // Return the UTF-16 code unit (for ASCII, same as byte value)
-    return (Item){.item = i2it((int64_t)(unsigned char)s->chars[idx])};
-}
-
 static int encode_charcode_utf8(char* buf, int code);
 static int encode_codepoint_utf8(char* buf, int code);
 static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out);
@@ -11544,8 +11524,6 @@ static Item js_array_from_check_mapper(Item iterable, Item mapFn, Item this_arg)
     if (!js_is_callable(mapFn)) return js_array_from(iterable);
     return js_array_from_with_mapper_impl(iterable, mapFn, this_arg);
 }
-JS_FORWARD_ITEM(js_array_from_with_mapper, (Item iterable, Item mapFn), js_array_from_check_mapper, (iterable, mapFn, make_js_undefined()))
-
 // Array.from(iterable, mapFn, thisArg) — with mapper and explicit this value
 JS_FORWARD_ITEM(js_array_from_with_mapper_this, (Item iterable, Item mapFn, Item this_arg), js_array_from_check_mapper, (iterable, mapFn, this_arg))
 

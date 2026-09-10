@@ -181,8 +181,6 @@ Item js_typed_array_set_from(Item ta, Item source, int offset);
 bool js_typed_array_raw_reverse(Item ta);
 bool js_typed_array_raw_copy_reversed(Item dst, Item src);
 bool js_typed_array_raw_copy_same_type(Item dst, Item src);
-bool js_typed_array_raw_copy_within(Item ta, int target, int start, int count);
-int js_typed_array_raw_index_of(Item ta, Item search_value, int from, int bound, bool reverse, bool same_value_zero);
 
 // ArrayBuffer operations
 Item js_arraybuffer_new(int byte_length);
@@ -202,7 +200,6 @@ Item js_arraybuffer_resize(Item val, Item new_length_item);
 // copy min(srcByteLength, newLength) bytes, and detach the source.
 Item js_arraybuffer_transfer(Item val, Item new_length_item, int argc);
 Item js_arraybuffer_transfer_to_fixed_length(Item val, Item new_length_item, int argc);
-Item js_arraybuffer_slice(Item val, int begin, int end);
 Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_item, int argc);
 Item js_arraybuffer_is_view_item(Item val);
 void js_arraybuffer_detach(Item val);

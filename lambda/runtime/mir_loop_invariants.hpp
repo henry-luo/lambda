@@ -45,7 +45,7 @@ static inline bool em_loop_scalar_instruction(MIR_insn_t insn) {
 // Move only the scalar dependency slice of audited pure calls. GC and alias
 // writes elsewhere cannot invalidate these values; memory witnesses stay local.
 static inline int em_hoist_loop_scalar_calls(MirEmitter* em,
-        MIR_label_t first, MIR_label_t end) {
+        MIR_label_t first, MIR_label_t end, const ArrayList* initialized = NULL) {
     if (!em || !first || !end) return 0;
     MIR_reg_t max_reg = 0;
     bool has_pure_call = false;
@@ -77,6 +77,13 @@ static inline int em_hoist_loop_scalar_calls(MirEmitter* em,
     // outside definitions may be conditional, so they are not guessed stable.
     for (MIR_reg_t reg = 1; reg <= max_reg; reg++) {
         if (facts[reg].writes == 0 && em_root_is_function_argument_reg(em, reg))
+            facts[reg].invariant = true;
+    }
+    // the semantic emitter may certify initialized lexical scalars at entry;
+    // a body write still disqualifies them, including writes on cold paths.
+    for (int i = 0; initialized && i < initialized->length; i++) {
+        MIR_reg_t reg = (MIR_reg_t)(uintptr_t)initialized->data[i];
+        if (reg && reg <= max_reg && facts[reg].writes == 0)
             facts[reg].invariant = true;
     }
     bool changed;

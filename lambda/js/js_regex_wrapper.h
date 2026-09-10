@@ -1,15 +1,6 @@
-/**
- * JS Regex Wrapper for RE2
- *
- * Transpiles JavaScript regex features (lookaheads, backreferences) that RE2
- * cannot handle natively. Uses a "match wider + post-filter" strategy:
- * 1. Parse JS regex to identify assertions and backreferences
- * 2. Rewrite to RE2-compatible pattern (absorbing or removing assertions)
- * 3. Attach runtime post-filters to verify/trim matches
- */
+// Shared RegExp support: match scratch, Unicode validation, and /v class rewrite.
 #pragma once
 
-#include <re2/re2.h>
 #include <stdbool.h>
 #include "../../lib/mem.h"
 #include "../../lib/log.h"
@@ -54,55 +45,6 @@ struct JsRegexScratch {
 extern "C" {
 #endif
 
-// Post-filter types for runtime match verification
-enum JsRegexFilterType {
-    JS_PF_TRIM_GROUP,        // trim captured group from match end (trailing lookahead absorbed)
-    JS_PF_REJECT_MATCH,      // reject match if rejection pattern matches at the boundary
-    JS_PF_GROUP_EQUALITY,    // require capture group[a] == capture group[b] (backreference)
-    JS_PF_ASSERT_MATCH,      // require absorbed positive lookahead to equal its anchored match
-    JS_PF_ASSERT_AT_MARKER,  // require positive lookahead subpattern at zero-width marker
-    JS_PF_LOOKBEHIND,        // require/forbid lookbehind subpattern matching ending at marker pos
-};
-
-struct JsRegexCompiled;
-
-struct JsRegexFilter {
-    JsRegexFilterType type;
-    int trim_group_idx;            // for JS_PF_TRIM_GROUP: which group to trim from match end
-    re2::RE2* reject_pattern;      // for JS_PF_REJECT_MATCH / JS_PF_LOOKBEHIND: assertion pattern
-    JsRegexCompiled* reject_wrapper; // wrapper-backed reject pattern when assertion needs JS features
-    int reject_at_start;           // for JS_PF_REJECT_MATCH / JS_PF_LOOKBEHIND: marker group's RE2 index
-    int eq_group_a;                // for JS_PF_GROUP_EQUALITY: first group index
-    int eq_group_b;                // for JS_PF_GROUP_EQUALITY: second group index
-    bool lb_negative;              // for JS_PF_LOOKBEHIND: true = (?<!...), false = (?<=...)
-};
-
-// The compiled wrapper owns one growable sequence of post-filter facts. Its
-// rows may own nested regex objects, so teardown follows this one carrier.
-struct JsRegexFilterList {
-    JsRegexFilter* rows;
-    int count;
-    int capacity;
-};
-
-struct JsRegexCompiled {
-    re2::RE2* re2;                 // compiled RE2 pattern
-    JsRegexFilterList filters;     // active post-filters
-    bool has_filters;              // fast path: skip post-processing if false
-    int original_group_count;      // capture groups in the original JS pattern
-    int* group_remap;              // original group index -> rewritten group index (NULL if no remap)
-    int group_remap_count;
-};
-
-/**
- * Compile a JS regex pattern+flags into a JsRegexCompiled structure.
- * The caller must use js_regex_compiled_free() to release.
- * Returns NULL on compile failure.
- */
-JsRegexCompiled* js_regex_wrapper_compile(const char* pattern, int pattern_len,
-                                   const char* flags, int flags_len,
-                                   re2::RE2::Options* opts);
-
 /**
  * Validate pattern under Annex B strict mode (used when `u`/`v` flag set).
  * Returns true if valid, false if Annex B legacy syntax is present.
@@ -132,32 +74,6 @@ bool js_regex_wrapper_rewrite_v_flag_classes_c(const char* in_buf, int in_len,
  */
 extern "C" int js_regex_wrapper_lookup_property_ranges(const char* name, int name_len,
                                                        int* out_pairs, int max_pairs);
-
-/**
- * Execute a compiled regex against input text.
- * Returns number of matches found (0 = no match).
- * match_starts[i] and match_ends[i] are filled with byte offsets for each group.
- * Group 0 is the full match. Groups 1..N are capture groups.
- * All offsets are -1 if the group didn't participate.
- */
-int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int input_len,
-                  int start_pos, bool anchor_start,
-                  int* match_starts, int* match_ends, int max_groups);
-
-/**
- * Capture-group slots a wrapper can fill, including group 0. Callers size their
- * match scratch from this rather than from a fixed ceiling (LR09-30).
- */
-int js_regex_wrapper_group_count(JsRegexCompiled* compiled);
-
-/**
- * Test if a compiled regex matches anywhere in the input.
- */
-
-/**
- * Free a compiled regex and all its resources.
- */
-void js_regex_compiled_free(JsRegexCompiled* compiled);
 
 #ifdef __cplusplus
 }

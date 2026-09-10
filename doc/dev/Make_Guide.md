@@ -155,7 +155,8 @@ When `grammar.js` is modified, the Lambda CST parser artifacts are regenerated b
 
 | Target             | Description                                                       |
 | ------------------ | ----------------------------------------------------------------- |
-| `test-coverage`    | Run tests with code coverage analysis (requires `gcov` + `lcov`). |
+| `test-coverage`    | Build and run native C/C++ tests with LLVM source coverage; writes HTML and metadata under `test/coverage/native/`. |
+| `test-js-coverage` | Build and run `test_js_gtest` plus Test262 with LLVM source coverage; writes HTML and metadata under `test/coverage/js/`. |
 | `test-benchmark`   | Run performance benchmark tests.                                  |
 | `test-integration` | Run end-to-end integration tests.                                 |
 
