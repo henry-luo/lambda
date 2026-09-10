@@ -19,6 +19,12 @@ AstNode* alloc_ast_node_from_span(Transpiler* tp, AstNodeType node_type,
 // be rebased before the fragment is attached to the session AST.
 void lambda_ast_shift_source_spans(AstNode* root, uint32_t byte_offset);
 
+// Shared Lambda traversal, including procedural statements missing from the
+// language-neutral core visitor. False prunes the current subtree.
+typedef bool (*LambdaAstVisitor)(AstNode* node, void* data);
+void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
+        bool descend_functions);
+
 // Lexer-neutral literal categories. The C lexer maps directly to these
 // categories.
 typedef enum LambdaAstLiteralKind {
@@ -113,6 +119,8 @@ AstNode* build_binary_node_from_parts(Transpiler* tp, SourceSpan span,
         StrView op_spelling, AstNode* left, AstNode* right);
 AstNode* build_field_node_from_parts(Transpiler* tp, SourceSpan span,
         AstNodeType node_type, AstNode* object, AstNode* field);
+Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
+    const char** destination_label);
 AstNode* build_navigation_node_from_parts(Transpiler* tp, SourceSpan span,
         AstNode* object, bool root);
 AstNode* build_query_node_from_parts(Transpiler* tp, SourceSpan span,

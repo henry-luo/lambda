@@ -318,6 +318,37 @@ TEST(LambdaOptAdmission, RecursiveShapeIdentityInterpExactHits) {
     EXPECT_EQ(run.profile.get("map_admit_reifications"), 1u);
 }
 
+// A nullable record-array path must not re-admit its owning graph after each
+// scalar store or same-contract array relink (D3.2.4v3, D3.3.3v3).
+static const char* kTypedPathSource =
+    "type Row = {value: int, values: int[]}\n"
+    "type World = {rows: Row?[]}\n"
+    "pn update(var world: World, index: int) any {\n"
+    "    world.rows[index].value = world.rows[index].value + 1\n"
+    "    var values: int[] = world.rows[index].values\n"
+    "    values[0] = values[0] + 1\n"
+    "    world.rows[index].values = values\n"
+    "}\n"
+    "pn main() {\n"
+    "    var world: World = {rows: [{value: 0, values: [0]}, null]}\n"
+    "    var i = 0\n"
+    "    while (i < 100) { update(world, 0); i = i + 1 }\n"
+    "    print([world.rows[0].value, world.rows[0].values[0]])\n"
+    "}\n";
+
+TEST(LambdaOptAdmission, TypedArrayPathPreservesGraphProof) {
+    FixtureRun run = run_fixture("typed_array_path", "jit", kTypedPathSource, true);
+    ASSERT_TRUE(run.ok);
+    EXPECT_EQ(run.std_out, "[100, 100]\n");
+    // The initial nullable array reifies its one literal Row once. None of
+    // the 100 updates may revisit fields or rebuild a graph after that.
+    EXPECT_EQ(run.profile.get("map_admit_reifications"), 1u);
+    EXPECT_EQ(run.profile.get("map_admit_deep_clone_calls"), 0u);
+    EXPECT_EQ(run.profile.get("map_admit_fields_visited"), 2u);
+    EXPECT_EQ(run.profile.get("map_admit_bytes_copied"), 48u);
+    EXPECT_EQ(run.profile.get("array_checked_store_full_clone"), 0u);
+}
+
 // The refusal control: an ANY-bearing contract must keep reifying at declared
 // crossings on BOTH tiers. A zero here without concrete storage classification
 // for the union field means the adoption gate started admitting a shape whose

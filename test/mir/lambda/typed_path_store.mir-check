@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "description": "Typed runtime-index stores use guarded packed loads and direct integer/array-pointer stores before cold COW descriptor allocation.",
+  "checks": [
+    {
+      "in_func": "_bump_#",
+      "expect_seq": [
+        { "pattern": "mov\t{{r}}, u8:4({{r}})" },
+        { "pattern": "mov\t{{r}}, i64:8({{r}})" },
+        { "pattern": "mov\t{{r}}, i64:16({{r}})" },
+        { "pattern": "mov\ti64:({{r}}), {{r}}" },
+        { "pattern": "call\tarray_plain" },
+        { "pattern": "call\tlambda_map_path_set_checked_inplace" }
+      ]
+    },
+    {
+      "in_func": "_append_#",
+      "expect_seq": [
+        { "pattern": "call\tpn_push" },
+        { "pattern": "mov\t{{r}}, u8:4({{r}})" },
+        { "pattern": "mov\ti64:8({{r}}), {{r}}" },
+        { "pattern": "call\tarray_plain" },
+        { "pattern": "call\tlambda_map_path_set_checked_inplace" }
+      ]
+    }
+  ]
+}
