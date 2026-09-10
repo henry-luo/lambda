@@ -901,7 +901,7 @@ typedef struct JsAtomicsRuntimeState {
 
 static JsAtomicsRuntimeState* js_atomics_runtime_state(void) {
     return js_active_runtime_state && js_runtime_state.test262_agent ?
-        (JsAtomicsRuntimeState*)js_runtime_state.test262_agent->atomics_waiter_state : NULL;
+        js_runtime_state.test262_agent->atomics_waiter_state : NULL;
 }
 
 extern "C" bool js_atomics_runtime_state_ensure(void) {
@@ -921,7 +921,7 @@ extern "C" bool js_atomics_runtime_state_ensure(void) {
     return true;
 }
 
-#define js_atomics_state (*(JsAtomicsRuntimeState*)js_runtime_state.test262_agent->atomics_waiter_state)
+#define js_atomics_state (*js_runtime_state.test262_agent->atomics_waiter_state)
 #define js_atomics_waiter_rows (js_atomics_state.waiters)
 #define js_atomics_waiter_values (js_atomics_state.promise_values)
 #define js_atomics_next_waiter_id (js_atomics_state.next_waiter_id)
@@ -1154,8 +1154,7 @@ extern "C" void js_atomics_reset_waiters(void) {
 extern "C" void js_atomics_destroy_context(JsRuntimeState* runtime_state) {
     if (!runtime_state || !runtime_state->test262_agent ||
             !runtime_state->test262_agent->atomics_waiter_state) return;
-    JsAtomicsRuntimeState* state = (JsAtomicsRuntimeState*)
-        runtime_state->test262_agent->atomics_waiter_state;
+    JsAtomicsRuntimeState* state = runtime_state->test262_agent->atomics_waiter_state;
     js_atomics_waiters_clear(state);
     js_atomics_agent_waiters_clear(state);
     root_vector_destroy(&state->promise_values);

@@ -218,6 +218,7 @@ typedef struct JsChildProcess {
 
     // exact roots for the one exec operation's durable JS values.
     RuntimeValueSlots values;
+    uint32_t resource_id;
 
     // lifecycle tracking
     int    pipes_closed;      // count of closed pipes (need 2: stdout + stderr)
@@ -231,7 +232,6 @@ typedef struct JsChildProcess {
 } JsChildProcess;
 
 enum JsChildProcessValueSlot {
-    JS_CHILD_VALUE_CALLBACK,
     JS_CHILD_VALUE_ABORT_REASON,
     JS_CHILD_VALUE_ABORT_SIGNAL,
     JS_CHILD_VALUE_ABORT_LISTENER,
@@ -245,6 +245,13 @@ static bool child_values_init(JsChildProcess* cp) {
 
 static Item child_value(JsChildProcess* cp, JsChildProcessValueSlot slot) {
     return cp ? runtime_value_slots_get(&cp->values, slot) : make_js_undefined();
+}
+
+static Item child_callback(JsChildProcess* cp) {
+    if (!cp || cp->resource_id == 0) return make_js_undefined();
+    const RuntimeResourceEntry* entry = runtime_resource_table_entry_owned(
+        &js_runtime_state.resources, cp, cp->resource_id);
+    return runtime_resource_table_value(&js_runtime_state.resources, entry);
 }
 
 static void child_set_value(JsChildProcess* cp, JsChildProcessValueSlot slot,
@@ -273,6 +280,12 @@ static void child_handle_close_cb(uv_handle_t* handle) {
         if (cp->abort_env) cp->abort_env[0] = (Item){.item = 0};
         if (cp->stdout_buf) mem_free(cp->stdout_buf);
         if (cp->stderr_buf) mem_free(cp->stderr_buf);
+        if (cp->resource_id != 0) {
+            uint32_t resource_id = cp->resource_id;
+            cp->resource_id = 0;
+            runtime_resource_table_remove_owned(&js_runtime_state.resources,
+                cp, resource_id);
+        }
         runtime_value_slots_destroy(&cp->values);
         mem_free(cp);
     }
@@ -359,7 +372,7 @@ static void maybe_complete(JsChildProcess* cp) {
     cp->callback_fired = true;
 
     // call callback(err, stdout, stderr)
-    Item callback = child_value(cp, JS_CHILD_VALUE_CALLBACK);
+    Item callback = child_callback(cp);
     if (js_is_callable(callback)) {
         Item err = ItemNull;
         if (cp->aborted) {
@@ -494,7 +507,15 @@ static Item js_cp_exec_with_options(Item command_item, Item options_item,
         return ItemNull;
     }
 
-    child_set_value(cp, JS_CHILD_VALUE_CALLBACK, callback_item);
+    const RuntimeResourceDescriptor* descriptor =
+        runtime_resource_descriptor_from_legacy_name("ChildProcess");
+    cp->resource_id = runtime_resource_table_add_owned(
+        &js_runtime_state.resources, cp, callback_item, descriptor, NULL, NULL, false);
+    if (cp->resource_id == 0) {
+        runtime_value_slots_destroy(&cp->values);
+        mem_free(cp);
+        return ItemNull;
+    }
     cp->max_buffer = max_buffer;
 
     // init pipes
@@ -675,6 +696,7 @@ typedef struct JsSpawnProcess {
     uv_pipe_t    ipc_pipe;
     // Exact roots for JS values retained by the native process lifecycle.
     RuntimeValueSlots values;
+    uint32_t     resource_id;
     int          exit_code;
     int          exit_signal;
     bool         process_exited;
@@ -716,10 +738,12 @@ typedef struct JsSpawnProcess {
 } JsSpawnProcess;
 
 enum JsSpawnProcessValueSlot {
-    JS_SPAWN_VALUE_OBJECT,
-    JS_SPAWN_VALUE_ABORT_SIGNAL,
-    JS_SPAWN_VALUE_ABORT_LISTENER,
-    JS_SPAWN_VALUE_COUNT,
+    // The public ChildProcess object is owned by the resource-table row;
+    // keep this sentinel for call-site readability without a duplicate root.
+    JS_SPAWN_VALUE_OBJECT = -1,
+    JS_SPAWN_VALUE_ABORT_SIGNAL = 0,
+    JS_SPAWN_VALUE_ABORT_LISTENER = 1,
+    JS_SPAWN_VALUE_COUNT = 2,
 };
 
 static bool spawn_values_init(JsSpawnProcess* sp) {
@@ -728,7 +752,14 @@ static bool spawn_values_init(JsSpawnProcess* sp) {
 }
 
 static Item spawn_value(JsSpawnProcess* sp, JsSpawnProcessValueSlot slot) {
-    return sp ? runtime_value_slots_get(&sp->values, slot) : make_js_undefined();
+    if (!sp) return make_js_undefined();
+    if (slot == JS_SPAWN_VALUE_OBJECT) {
+        if (sp->resource_id == 0) return make_js_undefined();
+        const RuntimeResourceEntry* entry = runtime_resource_table_entry_owned(
+            &js_runtime_state.resources, sp, sp->resource_id);
+        return runtime_resource_table_value(&js_runtime_state.resources, entry);
+    }
+    return runtime_value_slots_get(&sp->values, slot);
 }
 
 static void spawn_set_value(JsSpawnProcess* sp, JsSpawnProcessValueSlot slot,
@@ -1112,6 +1143,12 @@ static void spawn_release_process(JsSpawnProcess* sp) {
     spawn_drain_transferred_connections(sp);
     spawn_close_pending_sent_stream_wrappers(sp);
     spawn_clear_stdio_handle_properties(sp);
+    if (sp->resource_id != 0) {
+        uint32_t resource_id = sp->resource_id;
+        sp->resource_id = 0;
+        runtime_resource_table_remove_owned(&js_runtime_state.resources,
+            sp, resource_id);
+    }
     runtime_value_slots_destroy(&sp->values);
     runtime_callback_slots_destroy(&sp->ipc_write_callbacks);
     if (sp->ipc_buf) mem_free(sp->ipc_buf);
@@ -2503,7 +2540,16 @@ extern "C" Item js_cp_spawn(Item rest_args) {
     js_set_key_cstr(obj, "spawnfile", make_string_item(req.shell ? argv[0] : req.file));
     js_set_key_cstr(obj, "spawnargs", spawnargs);
 
-    spawn_set_value(sp, JS_SPAWN_VALUE_OBJECT, obj);
+    const RuntimeResourceDescriptor* descriptor =
+        runtime_resource_descriptor_from_legacy_name("SpawnProcess");
+    sp->resource_id = runtime_resource_table_add_owned(
+        &js_runtime_state.resources, sp, obj, descriptor, NULL, NULL, false);
+    if (sp->resource_id == 0) {
+        runtime_value_slots_destroy(&sp->values);
+        runtime_callback_slots_destroy(&sp->ipc_write_callbacks);
+        mem_free(sp);
+        return ItemNull;
+    }
     install_spawn_lifecycle_surface(obj, sp);
     if (req.ipc) install_ipc_surface(obj, sp);
 

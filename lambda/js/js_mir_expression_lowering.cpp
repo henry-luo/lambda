@@ -1763,8 +1763,8 @@ static MIR_reg_t jm_emit_identifier_read(JsMirTranspiler* mt,
                     jm_find_direct_function_decl_for_identifier(mt, id);
                 if (direct_func && direct_func->func_item &&
                         !JM_JS_FACT(direct_func, is_reassigned)) {
-                    JsMirLastClosureSnapshot saved_closure_tracker;
-                    jm_save_last_closure_snapshot(mt, &saved_closure_tracker);
+                    JsClosureCheckpoint saved_closure_tracker;
+                    jm_closure_checkpoint_save(mt, &saved_closure_tracker);
                     MIR_reg_t is_undef = jm_new_reg(mt, "func_decl_undef", MIR_T_I64);
                     MIR_reg_t result = jm_new_reg(mt, "func_decl_val", MIR_T_I64);
                     MIR_label_t use_existing = jm_new_label(mt);
@@ -1781,7 +1781,7 @@ static MIR_reg_t jm_emit_identifier_read(JsMirTranspiler* mt,
                     // Cached function declarations skip the fresh closure-env
                     // allocation path, so the branch-local env register must not
                     // become the later capture readback target after the merge.
-                    jm_restore_last_closure_snapshot(mt, &saved_closure_tracker);
+                    jm_closure_checkpoint_rollback(mt, &saved_closure_tracker);
                     return jm_apply_with_identifier_fallback(mt, id, result);
                 }
                 if (mc->is_nested_func_hoist && !mc->is_iife_var) {
@@ -4873,7 +4873,7 @@ static MIR_reg_t jm_emit_optional_method_call(JsMirTranspiler* mt, MIR_reg_t rec
         jm_emit_reg_binary_op(mt, MIR_EQ, opt_cmp, fn, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED));
         jm_emit_branch(mt, MIR_BT, l_opt_skip, opt_cmp);
     }
-    jm_clear_last_closure_snapshot(mt);
+    jm_closure_tracker_clear(mt);
     // D5.4.3: optional calls use the same suspend-safe receiver/callee spill
     // path as ordinary member calls; keeping them in raw MIR registers across
     // an awaited argument loses both the target and the required this value.
@@ -6612,7 +6612,7 @@ static MirValue jm_emit_object_value(JsMirTranspiler* mt,
 // Conditional expression (ternary)
 struct JsMirBranchState {
     JsMirCursor cursor;
-    JsMirLastClosureSnapshot last_closure;
+    JsClosureCheckpoint closure_checkpoint;
     bool scopes_saved;
     ArrayList* original_var_scopes;
     ArrayList* cloned_var_scopes;
@@ -6639,7 +6639,7 @@ static void jm_free_branch_state(JsMirBranchState* state);
 static void jm_save_branch_state(JsMirTranspiler* mt, JsMirBranchState* state) {
     memset(state, 0, sizeof(*state));
     jm_cursor_capture(mt, &state->cursor);
-    jm_save_last_closure_snapshot(mt, &state->last_closure);
+    jm_closure_checkpoint_save(mt, &state->closure_checkpoint);
     state->scopes_saved = true;
     state->original_var_scopes = mt->var_scopes;
     state->cloned_var_scopes = arraylist_new(
@@ -6693,7 +6693,7 @@ static void jm_restore_branch_state(JsMirTranspiler* mt, JsMirBranchState* state
     jm_cursor_restore(mt, &state->cursor);
     // Conditional-expression arms do not dominate one another. A closure env
     // allocated in one arm must not remain the writeback target in its sibling.
-    jm_restore_last_closure_snapshot(mt, &state->last_closure);
+    jm_closure_checkpoint_rollback(mt, &state->closure_checkpoint);
 
     if (!state->scopes_saved) return;
     mt->var_scopes = state->original_var_scopes;

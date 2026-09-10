@@ -1093,8 +1093,8 @@ static void jm_emit_annexb_global_export(JsMirTranspiler* mt,
 }
 
 void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
-    JsMirLastClosureSnapshot saved_last_closure;
-    jm_save_last_closure_snapshot(mt, &saved_last_closure);
+    JsClosureCheckpoint saved_last_closure;
+    jm_closure_checkpoint_save(mt, &saved_last_closure);
 
     // Tune3 §3: constant-fold the condition and drop the dead branch entirely.
     if (jm_const_fold_enabled()) {
@@ -1108,7 +1108,7 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
                 jm_transpile_if_branch(mt, live);
                 // Constant-folded branches are still path-local for closure
                 // readback, so do not let their env register escape.
-                jm_restore_last_closure_snapshot(mt, &saved_last_closure);
+                jm_closure_checkpoint_rollback(mt, &saved_last_closure);
                 return;
             }
         }
@@ -1207,7 +1207,7 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
 
     // Branch-local closure env registers do not dominate the merge point; keep
     // later callback readback tied to the pre-if env instead of a path-local one.
-    jm_restore_last_closure_snapshot(mt, &saved_last_closure);
+    jm_closure_checkpoint_rollback(mt, &saved_last_closure);
 }
 
 // Reload all in-scope-env variables from the shared scope env into their local registers.
@@ -1410,7 +1410,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     // here prevents the assignment writeback (added by Js56 P2) from leaking
     // an iteration mutation into a closure that captured the init binding.
     // Regression test: language/statements/for/scope-body-lex-open.js.
-    jm_clear_last_closure_snapshot(mt);
+    jm_closure_tracker_clear(mt);
 
     // Eval completion: ForBodyEvaluation starts with V = undefined (spec §13.7.4.8)
     jm_eval_cptn_reset(mt);
@@ -1595,9 +1595,9 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     // Update — use native path for typed increment/assignment
     jm_emit_label(mt, l_update);
     if (for_node->update) {
-        JsMirLastClosureSnapshot saved_last_closure;
-        jm_save_last_closure_snapshot(mt, &saved_last_closure);
-        jm_clear_last_closure_snapshot(mt);
+        JsClosureCheckpoint saved_last_closure;
+        jm_closure_checkpoint_save(mt, &saved_last_closure);
+        jm_closure_tracker_clear(mt);
         TypeId upd_type = jm_get_effective_type(mt, for_node->update);
         if (jm_is_native_type(upd_type)) {
             (void)em_apply_value_demand(&mt->func_em->em,
@@ -1619,7 +1619,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
                     loop_var->reg, loop_var->type_id);
             }
         }
-        jm_restore_last_closure_snapshot(mt, &saved_last_closure);
+        jm_closure_checkpoint_rollback(mt, &saved_last_closure);
     }
 
     jm_emit_jmp(mt, l_test);
@@ -2050,8 +2050,8 @@ MirValue jm_emit_new_value(JsMirTranspiler* mt, JsCallNode* call) {
 }
 // switch statement
 void jm_transpile_switch(JsMirTranspiler* mt, JsSwitchNode* sw) {
-    JsMirLastClosureSnapshot saved_last_closure;
-    jm_save_last_closure_snapshot(mt, &saved_last_closure);
+    JsClosureCheckpoint saved_last_closure;
+    jm_closure_checkpoint_save(mt, &saved_last_closure);
 
     MIR_reg_t discriminant = jm_transpile_box_item(mt, sw->discriminant);
     MIR_label_t l_end = jm_new_label(mt);
@@ -2086,7 +2086,7 @@ void jm_transpile_switch(JsMirTranspiler* mt, JsSwitchNode* sw) {
         js_syntax_error(mt->tp, ((JsAstNode*)sw)->source_span,
             "Cannot allocate switch lowering rows");
         jm_emit_label(mt, l_end);
-        jm_restore_last_closure_snapshot(mt, &saved_last_closure);
+        jm_closure_checkpoint_rollback(mt, &saved_last_closure);
         if (mt->loop_depth > 0) mt->loop_depth--;
         mt->scope_env_reg = saved_scope_env_reg;
         mt->scope_env_slot_count = saved_scope_env_slot_count;
@@ -2102,7 +2102,7 @@ void jm_transpile_switch(JsMirTranspiler* mt, JsSwitchNode* sw) {
                 "Cannot retain switch lowering row");
             jm_switch_case_rows_destroy(cases);
             jm_emit_label(mt, l_end);
-            jm_restore_last_closure_snapshot(mt, &saved_last_closure);
+            jm_closure_checkpoint_rollback(mt, &saved_last_closure);
             if (mt->loop_depth > 0) mt->loop_depth--;
             mt->scope_env_reg = saved_scope_env_reg;
             mt->scope_env_slot_count = saved_scope_env_slot_count;
@@ -2155,7 +2155,7 @@ void jm_transpile_switch(JsMirTranspiler* mt, JsSwitchNode* sw) {
     jm_switch_case_rows_destroy(cases);
     // Case-local closure env registers are path-specific; after switch merge,
     // later callback readback must not use an env allocated in only one case.
-    jm_restore_last_closure_snapshot(mt, &saved_last_closure);
+    jm_closure_checkpoint_rollback(mt, &saved_last_closure);
     if (mt->loop_depth > 0) mt->loop_depth--;
     mt->scope_env_reg = saved_scope_env_reg;
     mt->scope_env_slot_count = saved_scope_env_slot_count;
@@ -2263,9 +2263,9 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     // `for (let ctor of ctors) {...}` would write back to the FIRST loop's
     // last evil's env, and reads of the body's bindings would route through
     // that stale env. See §12.14.
-    JsMirLastClosureSnapshot saved_last_closure;
-    jm_save_last_closure_snapshot(mt, &saved_last_closure);
-    jm_clear_last_closure_snapshot(mt);
+    JsClosureCheckpoint saved_last_closure;
+    jm_closure_checkpoint_save(mt, &saved_last_closure);
+    jm_closure_tracker_clear(mt);
 
     jm_push_scope(mt);
     int saved_loop_scope_depth = mt->loop_scope_depth;
@@ -2321,7 +2321,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         log_error("js-mir: for-of/for-in missing loop variable");
         mt->loop_scope_depth = saved_loop_scope_depth;
         jm_pop_scope(mt);
-        jm_restore_last_closure_snapshot(mt, &saved_last_closure);
+        jm_closure_checkpoint_rollback(mt, &saved_last_closure);
         return;
     }
 
@@ -2584,7 +2584,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         if (mt->loop_depth > 0) mt->loop_depth--;
         mt->loop_scope_depth = saved_loop_scope_depth;
         jm_pop_scope(mt);
-        jm_restore_last_closure_snapshot(mt, &saved_last_closure);
+        jm_closure_checkpoint_rollback(mt, &saved_last_closure);
         return;
     }
 
@@ -2809,7 +2809,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     jm_pop_scope(mt);
 
     // Js55 P19: restore last-closure tracking saved at entry.
-    jm_restore_last_closure_snapshot(mt, &saved_last_closure);
+    jm_closure_checkpoint_rollback(mt, &saved_last_closure);
 }
 
 void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
@@ -3331,9 +3331,9 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         // Js55 P19: save and reset last-closure tracking so a prior block's
         // closure cannot capture this block's let/const initializers via
         // jm_write_last_closure_capture_if_matching. See §12.14.
-        JsMirLastClosureSnapshot blk_saved_last_closure;
-        jm_save_last_closure_snapshot(mt, &blk_saved_last_closure);
-        jm_clear_last_closure_snapshot(mt);
+        JsClosureCheckpoint blk_saved_last_closure;
+        jm_closure_checkpoint_save(mt, &blk_saved_last_closure);
+        jm_closure_tracker_clear(mt);
 
         jm_push_scope(mt);
         jm_init_block_tdz(mt, stmt);  // v20 TDZ
@@ -3342,7 +3342,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         jm_pop_scope(mt);
 
         // Js55 P19: restore prior tracking.
-        jm_restore_last_closure_snapshot(mt, &blk_saved_last_closure);
+        jm_closure_checkpoint_rollback(mt, &blk_saved_last_closure);
         break;
     }
     case JS_AST_NODE_EXPRESSION_STATEMENT: {

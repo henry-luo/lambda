@@ -113,12 +113,12 @@ typedef struct JsMirReference {
 // A save is a mark into the transpiler-owned closure journal, not a copy of 512
 // possible captures. Restoring truncates the journal back to the mark, so no
 // stack-local snapshot owns storage an early return could leak.
-typedef struct JsMirLastClosureSnapshot {
+typedef struct JsClosureCheckpoint {
     bool has_env;
     MIR_reg_t env_reg;
     int capture_count;
     int journal_mark;
-} JsMirLastClosureSnapshot;
+} JsClosureCheckpoint;
 
 typedef struct JsMirLexicalThisRebind {
     bool saved_force_closure_env_copy;
@@ -357,11 +357,11 @@ JsMirVarEntry* jm_install_fresh_var_entry(JsMirTranspiler* mt, int depth,
 JsMirVarEntry* jm_find_var_at(JsMirTranspiler* mt, const char* name,
     int depth);
 bool jm_closure_tracker_reserve(JsClosureTracker* tracker, int n);
-void jm_save_last_closure_snapshot(JsMirTranspiler* mt,
-    JsMirLastClosureSnapshot* snapshot);
-void jm_clear_last_closure_snapshot(JsMirTranspiler* mt);
-void jm_restore_last_closure_snapshot(JsMirTranspiler* mt,
-    const JsMirLastClosureSnapshot* snapshot);
+void jm_closure_checkpoint_save(JsMirTranspiler* mt,
+    JsClosureCheckpoint* checkpoint);
+void jm_closure_tracker_clear(JsMirTranspiler* mt);
+void jm_closure_checkpoint_rollback(JsMirTranspiler* mt,
+    const JsClosureCheckpoint* checkpoint);
 JsMirVarEntry* jm_find_var(JsMirTranspiler* mt, const char* name);
 // Source identifiers arrive with a builder-resolved NameEntry. Keep the
 // spelling map only for lowering-created locals; consumers use this identity

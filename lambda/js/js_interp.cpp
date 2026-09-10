@@ -2587,7 +2587,7 @@ static Item js_interp_capture_eval_bindings(JsInterpFrame* frame) {
 static bool js_interp_eval_redeclares_parameter(JsInterpFrame* frame, Item code) {
     if (!frame || !frame->in_parameter_initializer ||
             get_type_id(code) != LMD_TYPE_STRING || !frame->active_function ||
-            !js_fn_ast(frame->active_function)->function) {
+            !js_fn_ast_function(frame->active_function)) {
         return false;
     }
     String* source = it2s(code);
@@ -2603,8 +2603,8 @@ static bool js_interp_eval_redeclares_parameter(JsInterpFrame* frame, Item code)
         for (NameEntry* declared = transpiler->global_scope->first; declared &&
                 !redeclares_parameter; declared = declared->next) {
             if (declared->is_lexical || !declared->name) continue;
-            for (NameEntry* parameter = js_fn_ast(frame->active_function)->function->vars
-                    ? js_fn_ast(frame->active_function)->function->vars->first : NULL;
+            for (NameEntry* parameter = js_fn_ast_function(frame->active_function)->vars
+                    ? js_fn_ast_function(frame->active_function)->vars->first : NULL;
                     parameter; parameter = parameter->next) {
                 if (!parameter->is_parameter || !parameter->name ||
                         parameter->name->len != declared->name->len) {
@@ -4074,7 +4074,7 @@ static JsInterpCompletion js_interp_initialize_function_declarations(
 
 static JsInterpCompletion js_interp_bind_named_function_expression_self(
         JsInterpFrame* frame, JsFunction* function, Item callable) {
-    JsFunctionNode* ast = function ? js_fn_ast(function)->function : NULL;
+    JsFunctionNode* ast = function ? js_fn_ast_function(function) : NULL;
     if (!frame || !ast || ast->node_type != AST_NODE_FUNC_EXPR || !ast->name ||
             !ast->vars) {
         return js_interp_normal(make_js_undefined());
@@ -5397,24 +5397,20 @@ bool js_interp_script_is_supported(JsScript* script) {
 static Item js_interp_configure_function_metadata(Item function_item) {
     if (get_type_id(function_item) != LMD_TYPE_FUNC) return function_item;
     JsFunction* function = (JsFunction*)function_item.function;
-    if (!function || !js_fn_ast(function)->function) return ItemError;
-    JsAstFunctionFacts facts = js_ast_collect_function_facts(
-        js_fn_ast(function)->function->params, js_fn_ast(function)->function->body);
-    js_fn_ast_ensure(function)->has_direct_eval = facts.has_direct_eval;
-    js_fn_ast_ensure(function)->uses_arguments = facts.observations & JS_AST_OBSERVES_ARGUMENTS;
-    js_fn_ast_ensure(function)->tail_reuse_safe = facts.tail_reuse_safe;
-    return function_item;
+    // Definition facts are computed once when the Script retains the AST
+    // definition row; closures only retain their shared owner pointer.
+    return function && js_fn_ast_definition(function) ? function_item : ItemError;
 }
 
 static bool js_interp_function_tail_reuse_safe(JsFunction* function) {
-    return function && js_fn_ast(function)->tail_reuse_safe;
+    return function && js_fn_ast_tail_reuse_safe(function);
 }
 
 Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
         uint64_t* result_home) {
     (void)result_home;
     if (!function || js_fn_body_kind(function) != JS_FUNCTION_BODY_AST ||
-            !js_fn_ast(function)->function || !js_fn_ast(function)->script) return ItemError;
+            !js_fn_ast_function(function) || !js_fn_ast_script(function)) return ItemError;
     RootFrame roots(7);
     Rooted<Item> function_root(roots, (Item){.function = (Function*)function});
     uint64_t* lexical_this_home = (function->flags & JS_FUNC_FLAG_ARROW)
@@ -5427,9 +5423,9 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
     Rooted<Item> arguments_root(roots, ItemNull);
     Rooted<Item> tail_arguments_root(roots, ItemNull);
     Rooted<Item> tail_scratch_root(roots, ItemNull);
-    JsBlockNode* body_block = js_fn_ast(function)->function->body &&
-            js_fn_ast(function)->function->body->node_type == AST_NODE_BLOCK
-        ? (JsBlockNode*)js_fn_ast(function)->function->body : NULL;
+    JsBlockNode* body_block = js_fn_ast_function(function)->body &&
+            js_fn_ast_function(function)->body->node_type == AST_NODE_BLOCK
+        ? (JsBlockNode*)js_fn_ast_function(function)->body : NULL;
     // A block record exists only when its predeclared lexical graph has
     // bindings. Empty function-body records otherwise add one GC allocation
     // to every call without changing identifier resolution.
@@ -5451,7 +5447,7 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
     JsInterpEnvRoot retained_body_env_root;
     for (;;) {
         JsInterpEnv* env = reusing_tail_activation ? retained_env_root.env
-            : js_interp_env_create(js_fn_ast(function)->function->vars, js_fn_ast(function)->env);
+            : js_interp_env_create(js_fn_ast_function(function)->vars, js_fn_ast(function)->env);
         JsInterpEnvRoot env_root(reusing_tail_activation ? NULL : env);
         if (!env || (!reusing_tail_activation && !env_root.registered)) return ItemError;
         if (!(function->flags & JS_FUNC_FLAG_ARROW)) {
@@ -5464,11 +5460,11 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
         JsInterpEnvRoot body_env_root(reusing_tail_activation ? NULL : body_env);
         if (body_needs_environment && (!body_env ||
                 (!reusing_tail_activation && !body_env_root.registered))) return ItemError;
-        if (!(function->flags & JS_FUNC_FLAG_ARROW) && js_fn_ast(function)->uses_arguments &&
+        if (!(function->flags & JS_FUNC_FLAG_ARROW) && js_fn_ast_uses_arguments(function) &&
                 !reusing_tail_activation) {
             bool strict = (function->flags & JS_FUNC_FLAG_STRICT) != 0;
             bool mapped = !strict && js_interp_function_has_simple_params(
-                js_fn_ast(function)->function);
+                js_fn_ast_function(function));
             // Materialize before parameter defaults and keep it in the traced
             // activation record. Later nested calls therefore cannot replace an
             // AST function's lexical arguments binding through ambient state.
@@ -5477,7 +5473,7 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
                 (Item){.function = (Function*)function}));
             if (item_is_error(arguments_root.get())) return arguments_root.get();
             env->arguments_object = arguments_root.get().item;
-            env->function_node = (AstNode*)js_fn_ast(function)->function;
+            env->function_node = (AstNode*)js_fn_ast_function(function);
             env->arguments_are_mapped = mapped ? 1 : 0;
         }
         // Direct eval's function-scoped `var` declarations live in the shared
@@ -5486,24 +5482,24 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
         // A non-strict function body has its own lexical record. Direct eval
         // must see it when rejecting conflicting var declarations.
         JsInterpEvalLocalFrame eval_local(body_env ? body_env : env,
-            js_fn_ast(function)->has_direct_eval);
+            js_fn_ast_has_direct_eval(function));
         uint64_t* frame_this_home = lexical_this_home ? lexical_this_home
             : ((function->flags & JS_FUNC_FLAG_ARROW) ? this_root.home()
                 : &env->lexical_this);
-        JsInterpFrame frame = {js_fn_ast(function)->script, env, frame_this_home,
+        JsInterpFrame frame = {js_fn_ast_script(function), env, frame_this_home,
             new_target_root.home(), home_class_root.home(),
             (function->flags & JS_FUNC_FLAG_STRICT) != 0, NULL, 0, function,
             false, &tail_scratch};
         if (body_env) frame.env = body_env;
         JsInterpCompletion initialized = js_interp_initialize_scope(&frame,
-            js_fn_ast(function)->function->vars, false);
+            js_fn_ast_function(function)->vars, false);
         if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
         initialized = js_interp_bind_named_function_expression_self(&frame,
             function, function_root.get());
         if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
-        js_interp_prepare_parameter_tdz(&frame, js_fn_ast(function)->function);
+        js_interp_prepare_parameter_tdz(&frame, js_fn_ast_function(function));
         int index = 0;
-        for (JsAstNode* param = (JsAstNode*)js_fn_ast(function)->function->params; param;
+        for (JsAstNode* param = (JsAstNode*)js_fn_ast_function(function)->params; param;
                 param = (JsAstNode*)param->next) {
             RootFrame param_roots(1);
             Rooted<Item> value_root(param_roots, make_js_undefined());
@@ -5527,7 +5523,7 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
             if (bound.kind != JS_INTERP_NORMAL) return bound.value;
         }
         initialized = js_interp_initialize_function_declarations(&frame,
-            js_fn_ast(function)->function->vars);
+            js_fn_ast_function(function)->vars);
         if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
         if (body_block) {
             initialized = js_interp_initialize_scope(&frame, body_block->vars);
@@ -5535,7 +5531,7 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
         }
         JsInterpCompletion result = body_block
             ? js_interp_exec_list(&frame, (JsAstNode*)body_block->statements)
-            : js_interp_eval(&frame, (JsAstNode*)js_fn_ast(function)->function->body);
+            : js_interp_eval(&frame, (JsAstNode*)js_fn_ast_function(function)->body);
         if (result.kind == JS_INTERP_TAIL_CALL) {
             tail_arguments_root.set(result.tail_arguments);
             if (get_type_id(tail_arguments_root.get()) != LMD_TYPE_ARRAY) return ItemError;
@@ -5554,8 +5550,8 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
         // return. Preserve expression-bodied arrows and field-initializer thunks,
         // whose normal completion is their callable result.
         if (result.kind == JS_INTERP_NORMAL) {
-            return js_fn_ast(function)->function->body &&
-                    js_fn_ast(function)->function->body->node_type == AST_NODE_BLOCK
+            return js_fn_ast_function(function)->body &&
+                    js_fn_ast_function(function)->body->node_type == AST_NODE_BLOCK
                 ? make_js_undefined() : result.value;
         }
         if (result.kind == JS_INTERP_THROW) return result.value;
@@ -5596,7 +5592,7 @@ static Item js_interp_prepare_suspended_activation(JsFunction* function,
 
 Item js_interp_create_generator(JsFunction* function, Item* args, int arg_count) {
     if (!function || js_fn_body_kind(function) != JS_FUNCTION_BODY_AST ||
-            !js_fn_ast(function)->function) {
+            !js_fn_ast_function(function)) {
         return js_throw_type_error("unsupported interpreted generator form");
     }
     RootFrame roots(4);
@@ -5640,17 +5636,17 @@ Item js_interp_create_generator(JsFunction* function, Item* args, int arg_count)
 static Item js_interp_prepare_suspended_activation(JsFunction* function,
         Item function_item, Item arguments, Item this_value,
         JsInterpEnv** out_function_env, JsInterpEnv** out_body_env) {
-    if (!function || !js_fn_ast(function)->function || !out_function_env || !out_body_env ||
+    if (!function || !js_fn_ast_function(function) || !out_function_env || !out_body_env ||
             get_type_id(arguments) != LMD_TYPE_ARRAY) return ItemError;
-    JsBlockNode* body = js_fn_ast(function)->function->body &&
-            js_fn_ast(function)->function->body->node_type == AST_NODE_BLOCK
-        ? (JsBlockNode*)js_fn_ast(function)->function->body : NULL;
+    JsBlockNode* body = js_fn_ast_function(function)->body &&
+            js_fn_ast_function(function)->body->node_type == AST_NODE_BLOCK
+        ? (JsBlockNode*)js_fn_ast_function(function)->body : NULL;
     RootFrame roots(4);
     Rooted<Item> function_root(roots, function_item);
     Rooted<Item> arguments_root(roots, arguments);
     Rooted<Item> this_root(roots, this_value);
     Rooted<Item> arguments_object_root(roots, ItemNull);
-    JsInterpEnv* function_env = js_interp_env_create(js_fn_ast(function)->function->vars,
+    JsInterpEnv* function_env = js_interp_env_create(js_fn_ast_function(function)->vars,
         js_fn_ast(function)->env);
     JsInterpEnvRoot function_env_root(function_env);
     if (!function_env || !function_env_root.registered) return ItemError;
@@ -5659,18 +5655,18 @@ static Item js_interp_prepare_suspended_activation(JsFunction* function,
     JsInterpEnvRoot body_env_root(body ? body_env : NULL);
     if (!body_env || (body && !body_env_root.registered)) return ItemError;
     bool strict = (function->flags & JS_FUNC_FLAG_STRICT) != 0;
-    bool mapped = !strict && js_interp_function_has_simple_params(js_fn_ast(function)->function);
+    bool mapped = !strict && js_interp_function_has_simple_params(js_fn_ast_function(function));
     int arg_count = (int)js_array_length(arguments_root.get());
     Item* args = arg_count > 0 ? arguments_root.get().array->items : NULL;
     arguments_object_root.set(js_build_arguments_object_for_call(args, arg_count,
         mapped ? 0 : 1, function_root.get()));
     if (item_is_error(arguments_object_root.get())) return arguments_object_root.get();
     function_env->arguments_object = arguments_object_root.get().item;
-    function_env->function_node = (AstNode*)js_fn_ast(function)->function;
+    function_env->function_node = (AstNode*)js_fn_ast_function(function);
     function_env->arguments_are_mapped = mapped ? 1 : 0;
     Item home_class = js_fn_home_class(function);
     JsInterpFrame init_frame = {};
-    init_frame.script = js_fn_ast(function)->script;
+    init_frame.script = js_fn_ast_script(function);
     init_frame.env = function_env;
     init_frame.this_home = this_root.home();
     init_frame.home_class_home = &home_class.item;
@@ -5679,16 +5675,16 @@ static Item js_interp_prepare_suspended_activation(JsFunction* function,
     // Generator parameters execute during activation setup, before the first
     // resume, but direct eval still needs the activation's shared var journal.
     JsInterpEvalLocalFrame eval_local(body_env ? body_env : function_env,
-        js_fn_ast(function)->has_direct_eval);
+        js_fn_ast_has_direct_eval(function));
     JsInterpCompletion initialized = js_interp_initialize_scope(&init_frame,
-        js_fn_ast(function)->function->vars, false);
+        js_fn_ast_function(function)->vars, false);
     if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
     initialized = js_interp_bind_named_function_expression_self(&init_frame,
         function, function_root.get());
     if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
-    js_interp_prepare_parameter_tdz(&init_frame, js_fn_ast(function)->function);
+    js_interp_prepare_parameter_tdz(&init_frame, js_fn_ast_function(function));
     int index = 0;
-    for (JsAstNode* parameter = (JsAstNode*)js_fn_ast(function)->function->params;
+    for (JsAstNode* parameter = (JsAstNode*)js_fn_ast_function(function)->params;
             parameter; parameter = (JsAstNode*)parameter->next) {
         RootFrame parameter_roots(1);
         Rooted<Item> value_root(parameter_roots, make_js_undefined());
@@ -5710,7 +5706,7 @@ static Item js_interp_prepare_suspended_activation(JsFunction* function,
         if (bound.kind != JS_INTERP_NORMAL) return bound.value;
     }
     initialized = js_interp_initialize_function_declarations(&init_frame,
-        js_fn_ast(function)->function->vars);
+        js_fn_ast_function(function)->vars);
     if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
     if (body) {
         JsInterpFrame body_init_frame = init_frame;
@@ -5737,12 +5733,12 @@ extern "C" Item js_interp_resume_generator(Item generator,
     Rooted<Item> yield_values_root(roots, state->ast_replay_values);
     if (get_type_id(function_root.get()) != LMD_TYPE_FUNC) return ItemError;
     JsFunction* function = (JsFunction*)function_root.get().function;
-    if (!function || !js_fn_ast(function)->function ||
+    if (!function || !js_fn_ast_function(function) ||
             get_type_id(arguments_root.get()) != LMD_TYPE_ARRAY) return ItemError;
     home_class_root.set(js_fn_home_class(function));
-    JsBlockNode* body = js_fn_ast(function)->function->body &&
-            js_fn_ast(function)->function->body->node_type == AST_NODE_BLOCK
-        ? (JsBlockNode*)js_fn_ast(function)->function->body : NULL;
+    JsBlockNode* body = js_fn_ast_function(function)->body &&
+            js_fn_ast_function(function)->body->node_type == AST_NODE_BLOCK
+        ? (JsBlockNode*)js_fn_ast_function(function)->body : NULL;
     if (!body) return js_throw_type_error("interpreted generator requires a block body");
 
     if (state->ast_replay_skip > 0) {
@@ -5819,7 +5815,7 @@ extern "C" Item js_interp_resume_generator(Item generator,
 
     int64_t yielded = resumed_yield_count;
     JsInterpFrame frame = {};
-    frame.script = js_fn_ast(function)->script;
+    frame.script = js_fn_ast_script(function);
     frame.env = state->ast_body_env;
     frame.this_home = this_root.home();
     frame.home_class_home = home_class_root.home();
@@ -5837,7 +5833,7 @@ extern "C" Item js_interp_resume_generator(Item generator,
     frame.generator_state = state;
     JsInterpEvalLocalFrame eval_local(state->ast_body_env ? state->ast_body_env
         : state->ast_function_env,
-        js_fn_ast(function)->has_direct_eval);
+        js_fn_ast_has_direct_eval(function));
     JsInterpCompletion result = js_interp_exec_list(&frame,
         (JsAstNode*)body->statements);
     if (result.kind == JS_INTERP_YIELD) {
@@ -5889,11 +5885,11 @@ extern "C" Item js_interp_resume_async(JsAsyncContextStateRecord* state,
         js_fn_home_class((JsFunction*)function_root.get().function));
     Rooted<Item> await_values_root(roots, state->ast_replay_values);
     JsFunction* function = (JsFunction*)function_root.get().function;
-    if (!function || !js_fn_ast(function)->function ||
+    if (!function || !js_fn_ast_function(function) ||
             get_type_id(arguments_root.get()) != LMD_TYPE_ARRAY) return ItemError;
-    JsBlockNode* body = js_fn_ast(function)->function->body &&
-            js_fn_ast(function)->function->body->node_type == AST_NODE_BLOCK
-        ? (JsBlockNode*)js_fn_ast(function)->function->body : NULL;
+    JsBlockNode* body = js_fn_ast_function(function)->body &&
+            js_fn_ast_function(function)->body->node_type == AST_NODE_BLOCK
+        ? (JsBlockNode*)js_fn_ast_function(function)->body : NULL;
     if (state->ast_replay_skip > 0) {
         if (get_type_id(await_values_root.get()) != LMD_TYPE_ARRAY) {
             await_values_root.set(js_array_new(0));
@@ -5922,7 +5918,7 @@ extern "C" Item js_interp_resume_async(JsAsyncContextStateRecord* state,
     }
     int64_t awaited = 0;
     JsInterpFrame frame = {};
-    frame.script = js_fn_ast(function)->script;
+    frame.script = js_fn_ast_script(function);
     frame.env = state->ast_body_env;
     frame.this_home = this_root.home();
     frame.home_class_home = home_class_root.home();
@@ -5937,10 +5933,10 @@ extern "C" Item js_interp_resume_async(JsAsyncContextStateRecord* state,
     frame.async_try_continuations = &state->ast_try_continuations;
     JsInterpEvalLocalFrame eval_local(state->ast_body_env ? state->ast_body_env
         : state->ast_function_env,
-        js_fn_ast(function)->has_direct_eval);
+        js_fn_ast_has_direct_eval(function));
     JsInterpCompletion result = body
         ? js_interp_exec_list(&frame, (JsAstNode*)body->statements)
-        : js_interp_eval(&frame, (JsAstNode*)js_fn_ast(function)->function->body);
+        : js_interp_eval(&frame, (JsAstNode*)js_fn_ast_function(function)->body);
     if (result.kind == JS_INTERP_AWAIT) {
         state->ast_replay_skip++;
         return js_interp_async_state_result(result.value, state->ast_replay_skip);

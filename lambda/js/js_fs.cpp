@@ -1796,8 +1796,6 @@ typedef struct JsFsReq {
     char path[1024];      // file path (for multi-step operations)
     void* jube_session;   // opaque owner for table lookup and cancellation
     uint32_t resource_id;
-    bool detached;
-    struct JsFsReq* next_pending;
 } JsFsReq;
 
 enum JsFsReqValueSlot {
@@ -1814,32 +1812,6 @@ static Item fs_req_value(JsFsReq* fsreq, JsFsReqValueSlot slot) {
         fsreq->resource_id, (int)slot);
 }
 
-// The async request list is realm-local. Jube's completion boundary re-enters
-// the owning context, so list operations remain ordinary pointer updates.
-static JsFsReq*& fs_pending_read_requests_ref() {
-    return *(JsFsReq**)&js_runtime_state.fs_native.pending_requests;
-}
-#define fs_pending_read_requests (fs_pending_read_requests_ref())
-
-static void fs_req_add_pending(JsFsReq* fsreq) {
-    if (!fsreq) return;
-    fsreq->next_pending = fs_pending_read_requests;
-    fs_pending_read_requests = fsreq;
-}
-
-static void fs_req_remove_pending(JsFsReq* fsreq) {
-    if (!fsreq) return;
-    JsFsReq** link = &fs_pending_read_requests;
-    while (*link) {
-        if (*link == fsreq) {
-            *link = fsreq->next_pending;
-            fsreq->next_pending = NULL;
-            return;
-        }
-        link = &(*link)->next_pending;
-    }
-}
-
 static bool fs_req_attach_session(JsFsReq* fsreq) {
     if (!fsreq) return false;
     const JubeHostAPI* host = jube_internal_host_api();
@@ -1851,14 +1823,13 @@ static bool fs_req_attach_session(JsFsReq* fsreq) {
 
 static void fs_req_free(JsFsReq* fsreq) {
     if (!fsreq) return;
-    fs_req_remove_pending(fsreq);
     fsreq->jube_session = NULL;
     mem_free(fsreq);
 }
 
 static Item fs_req_call_callback(JsFsReq* fsreq, Item* args, int arg_count) {
     Item callback = fs_req_value(fsreq, JS_FS_REQ_VALUE_CALLBACK);
-    if (!fsreq || fsreq->detached || !js_is_callable(callback)) {
+    if (!fsreq || !js_is_callable(callback)) {
         return make_js_undefined();
     }
     return js_domain_call_function(fs_req_value(fsreq, JS_FS_REQ_VALUE_DOMAIN),
@@ -1887,11 +1858,9 @@ static bool fs_req_submit_work(JsFsReq* fsreq, JubeAsyncWorkCallback work,
     Item root_values[JS_FS_REQ_VALUE_COUNT] = {
         callback_root.get(), domain_root.get(),
     };
-    fs_req_add_pending(fsreq);
     if (host->node->async_ops->work_submit_root_span(fsreq->jube_session,
             JUBE_ASYNC_RESOURCE_FILESYSTEM_REQUEST, root_values, JS_FS_REQ_VALUE_COUNT,
             work, complete, destroy, fsreq, &fsreq->resource_id) != 0) {
-        fs_req_remove_pending(fsreq);
         return false;
     }
     return true;
@@ -1981,21 +1950,9 @@ extern "C" Item js_fs_readFile(Item path_item, Item options_or_cb, Item callback
 }
 
 extern "C" void js_fs_runtime_detach(void) {
-    if (!js_active_runtime_state) return;
-    for (JsFsReq* fsreq = fs_pending_read_requests; fsreq; fsreq = fsreq->next_pending) {
-        // A libuv callback may still arrive after teardown, but it must not
-        // retain roots into a destroyed heap or invoke user JS in that runtime.
-        fsreq->detached = true;
-        void* session = fsreq->jube_session;
-        const JubeHostAPI* host = jube_internal_host_api();
-        if (fsreq->resource_id != 0 && host && host->node && host->node->async_ops &&
-                host->node->async_ops->work_cancel) {
-            (void)host->node->async_ops->work_cancel(session,
-                fsreq->resource_id);
-        } else {
-            (void)uv_cancel((uv_req_t*)&fsreq->req);
-        }
-    }
+    // Filesystem requests are owned by the Jube async resource row. Session
+    // detach marks the owner dead and clears/cancels those rows; a second
+    // linked-list owner here would race the same completion lifecycle.
 }
 
 static void fs_write_file_work(void* user) {
@@ -3512,14 +3469,4 @@ extern "C" void js_fs_reset(void) {
     *items.stats_prototype = (Item){0};
     *items.internal_binding_namespace = (Item){0};
     *items.internal_default_fstat = (Item){0};
-}
-
-#undef fs_pending_read_requests
-
-extern "C" void js_fs_pending_destroy_context(JsRuntimeState* runtime_state) {
-    if (!runtime_state || !runtime_state->fs_native.pending_requests) return;
-    // runtime_cleanup detaches/cancels every request while its owning context
-    // is current; completion destroy callbacks own the request allocation.
-    log_error("js-fs: context destroyed with pending async requests");
-    runtime_state->fs_native.pending_requests = NULL;
 }

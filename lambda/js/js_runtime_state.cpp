@@ -16,6 +16,7 @@ extern __thread EvalContext* context;
 extern "C" int js_initial_call_stack_limit(void);
 extern "C" void js_runtime_owned_cache_destroy_context(JsRuntimeState* state);
 extern "C" void js_runtime_prototype_snapshot_destroy_context(JsRuntimeState* state);
+extern "C" bool js_proto_snapshot_is_valid(void);
 extern "C" void js_runtime_regex_cache_destroy_context(JsRuntimeState* state);
 extern "C" void js_iterator_proto_cache_reset(void);
 extern "C" void js_history_reset(void);
@@ -72,7 +73,6 @@ static void js_reset_core_module_caches(void) {
 }
 extern "C" void dom_window_dialog_reset(void);
 extern "C" void js_fetch_apply_bootstrap_base_path(void);
-extern "C" void js_fs_pending_destroy_context(JsRuntimeState* state);
 extern "C" void js_tls_destroy_context(JsRuntimeState* state);
 extern "C" void js_net_destroy_context(JsRuntimeState* state);
 extern "C" void js_atomics_destroy_context(JsRuntimeState* state);
@@ -415,6 +415,10 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
         state->function_cache_values = NULL;
         state->function_cache_capacity = 0;
         state->function_cache_count = 0;
+        if (state->callable_code_interned) {
+            arraylist_free(state->callable_code_interned);
+            state->callable_code_interned = NULL;
+        }
     }
     if (!state) return;
     if (state->global_environment) {
@@ -486,6 +490,30 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
     state->process = NULL;
 }
 
+JsAssertState* js_assert_state_ensure(JsRuntimeState* state) {
+    if (!state) return NULL;
+    if (state->assert) return state->assert;
+    JsAssertState* assert_state = (JsAssertState*)mem_calloc(1,
+        sizeof(JsAssertState), MEM_CAT_JS_RUNTIME);
+    if (!assert_state) {
+        log_error("js-runtime-state: failed to allocate lazy assert record");
+        return NULL;
+    }
+    root_vector_init(&assert_state->instances, (Context*)context,
+        "assert instances");
+    root_vector_init(&assert_state->node_test_values, (Context*)context,
+        "node:test namespace and event queue");
+    root_vector_init(&assert_state->node_test_hooks.before_each,
+        (Context*)context, "node:test beforeEach hooks");
+    root_vector_init(&assert_state->node_test_hooks.after_each,
+        (Context*)context, "node:test afterEach hooks");
+    root_vector_init(&assert_state->mocks.values, (Context*)context,
+        "node:test mock records");
+    assert_state->node_test_next_id = 1;
+    state->assert = assert_state;
+    return assert_state;
+}
+
 JsReadlineState* js_readline_state_ensure(JsRuntimeState* state) {
     if (!state) return NULL;
     if (state->readline) return state->readline;
@@ -534,6 +562,38 @@ JsTest262AgentState* js_test262_agent_state_ensure(JsRuntimeState* state) {
     return agent;
 }
 
+JsAsyncHooksState* js_async_hooks_state_ensure(JsRuntimeState* state) {
+    if (!state) return NULL;
+    if (state->async_hooks) return state->async_hooks;
+    JsAsyncHooksState* hooks = (JsAsyncHooksState*)mem_calloc(1,
+        sizeof(JsAsyncHooksState), MEM_CAT_JS_RUNTIME);
+    if (!hooks) {
+        log_error("js-runtime-state: failed to allocate lazy async-hooks record");
+        return NULL;
+    }
+    root_vector_init(&hooks->hooks, (Context*)context, "async hook instances");
+    root_vector_init(&hooks->pending_destroy_resources, (Context*)context,
+        "async hook destroy queue");
+    hooks->next_id = 2;
+    state->async_hooks = hooks;
+    return hooks;
+}
+
+JsProcessState* js_process_state_ensure(JsRuntimeState* state) {
+    if (!state) return NULL;
+    if (state->process) return state->process;
+    JsProcessState* process = (JsProcessState*)mem_calloc(1,
+        sizeof(JsProcessState), MEM_CAT_JS_RUNTIME);
+    if (!process) {
+        log_error("js-runtime-state: failed to allocate lazy process record");
+        return NULL;
+    }
+    runtime_callback_slots_init(&process->ipc_write_callbacks,
+        (Context*)context, "process IPC write callbacks");
+    state->process = process;
+    return process;
+}
+
 // JSCU16: the realm's large records are allocated beside JsRuntimeState
 // instead of embedded in it, so the capsule itself stays small. They are
 // created with the realm because every realm uses them immediately; their
@@ -546,22 +606,15 @@ static bool js_runtime_state_alloc_records(JsRuntimeState* state) {
         sizeof(JsEventLoopQueueState), MEM_CAT_JS_RUNTIME);
     state->timers = (JsEventLoopTimerState*)mem_calloc(1,
         sizeof(JsEventLoopTimerState), MEM_CAT_JS_RUNTIME);
-    state->async_hooks = (JsAsyncHooksState*)mem_calloc(1,
-        sizeof(JsAsyncHooksState), MEM_CAT_JS_RUNTIME);
     state->string_caches = (JsStringCacheState*)mem_calloc(1,
         sizeof(JsStringCacheState), MEM_CAT_JS_RUNTIME);
-    state->assert = (JsAssertState*)mem_calloc(1, sizeof(JsAssertState), MEM_CAT_JS_RUNTIME);
     state->intrinsics = (JsIntrinsicState*)mem_calloc(1, sizeof(JsIntrinsicState), MEM_CAT_JS_RUNTIME);
     state->intrinsic_slots = (JsRealmIntrinsicSlots*)mem_calloc(1,
         sizeof(JsRealmIntrinsicSlots), MEM_CAT_JS_RUNTIME);
-    state->process = (JsProcessState*)mem_calloc(1, sizeof(JsProcessState), MEM_CAT_JS_RUNTIME);
     if (!state->global_environment || !state->event_loop || !state->timers ||
-            !state->async_hooks ||
             !state->string_caches ||
-            !state->assert ||
             !state->intrinsics ||
-            !state->intrinsic_slots ||
-            !state->process) {
+            !state->intrinsic_slots) {
         log_error("js-runtime-state: failed to allocate realm records");
         js_runtime_state_free_records(state);
         return false;
@@ -574,22 +627,6 @@ static bool js_runtime_state_alloc_records(JsRuntimeState* state) {
     runtime_resource_table_init(&state->resources, context,
         "JS runtime resources");
     js_realm_slots_init(&state->realm_slots, (Context*)context);
-    root_vector_init(&state->assert->instances, (Context*)context,
-        "assert instances");
-    root_vector_init(&state->assert->node_test_values, (Context*)context,
-        "node:test namespace and event queue");
-    root_vector_init(&state->assert->node_test_hooks.before_each,
-        (Context*)context, "node:test beforeEach hooks");
-    root_vector_init(&state->assert->node_test_hooks.after_each,
-        (Context*)context, "node:test afterEach hooks");
-    root_vector_init(&state->assert->mocks.values, (Context*)context,
-        "node:test mock records");
-    root_vector_init(&state->async_hooks->hooks, (Context*)context,
-        "async hook instances");
-    root_vector_init(&state->async_hooks->pending_destroy_resources,
-        (Context*)context, "async hook destroy queue");
-    runtime_callback_slots_init(&state->process->ipc_write_callbacks, (Context*)context,
-        "process IPC write callbacks");
     root_vector_init(&state->regexp_last_match.values, (Context*)context,
         "JS RegExp last match");
     root_vector_init(&state->template_registry.values, (Context*)context,
@@ -660,11 +697,9 @@ bool js_runtime_state_init(EvalContext* runtime_context) {
         state->stream.default_object_hwm = 16;
         state->clipboard.generation = 1;
         state->intrinsics->mutation_serial = 1;
-        state->async_hooks->next_id = 2;
         state->promises.unhandled_strict =
             js_promise_initial_unhandled_rejections_strict();
         state->cluster.next_worker_id = 1;
-        state->assert->node_test_next_id = 1;
         state->performance.origin_epoch = UINT64_MAX;
     }
     if (js_active_runtime_state &&
@@ -745,7 +780,6 @@ void js_runtime_state_destroy_context(void) {
     // JSCU18: the DOM/web capsules leave through the directory's own walk
     // instead of eight hand-maintained calls.
     context_capsule_destroy_all(runtime_context);
-    js_fs_pending_destroy_context(state);
     js_tls_destroy_context(state);
     js_net_destroy_context(state);
     js_atomics_destroy_context(state);
@@ -802,9 +836,6 @@ static void js_runtime_state_visit_root_vectors(JsRuntimeState* state,
         visit(&state->assert->roots, &state->assert->namespace_object, 5,
             "assert namespaces and cached keys", data);
     }
-    visit(&state->intrinsic_slots->roots,
-        state->intrinsic_slots->builtin_function_entries,
-        JS_REALM_INTRINSIC_SLOT_COUNT, "realm intrinsic slots", data);
     if (state->test262_agent) {
         visit(&state->test262_agent->roots, &state->test262_agent->object, 1,
             "Test262 agent object", data);
@@ -858,11 +889,6 @@ static void js_runtime_state_prepare_root_vectors(JsRuntimeState* state) {
     JS_CHECK_NAMESPACE_ROOT_RANGE(stream, internal_add_abort_signal_namespace, 45)
 #undef JS_CHECK_NAMESPACE_ROOT_RANGE
 
-    if (&state->intrinsic_slots->builtin_function_entries[0] +
-            (JS_REALM_INTRINSIC_SLOT_COUNT - 1) !=
-            &state->intrinsic_slots->atomics) {
-        log_error("js-root-vector: intrinsic slot span is not contiguous");
-    }
 }
 
 bool js_root_vector_ensure_registered(RootVector* roots) {
@@ -871,9 +897,20 @@ bool js_root_vector_ensure_registered(RootVector* roots) {
 }
 
 bool js_realm_intrinsic_slots_ensure_roots(void) {
-    return js_active_runtime_state && js_runtime_state.intrinsic_slots &&
-        js_root_vector_ensure_registered(
-            &js_runtime_state.intrinsic_slots->roots);
+    if (!js_active_runtime_state || !js_runtime_state.intrinsic_slots) return false;
+    // Fixed semantic spans must be bound before this lazy catalog reservation;
+    // registration can otherwise let a bootstrap collection observe an
+    // unconfigured owner range while the realm store grows (D5.3.5).
+    js_runtime_state_prepare_root_vectors(js_active_runtime_state);
+    // Typed-array and catalog identity all belong to the dynamic realm-slot
+    // carrier. Reserve the complete suffix once intrinsic construction first
+    // asks for any indexed entry.
+    for (int slot = JS_REALM_SLOT_TYPED_ARRAY_BASE;
+            slot < JS_REALM_SLOT_COUNT; slot++) {
+        if (!js_realm_slot(&js_runtime_state.realm_slots,
+                (JsRealmSlotId)slot)) return false;
+    }
+    return true;
 }
 
 void js_root_vector_unregister(RootVector* roots) {
@@ -892,6 +929,20 @@ void js_realm_slots_clear(JsRealmSlots* slots) {
     if (slots) root_vector_clear(&slots->values);
 }
 
+void js_realm_slots_clear_transient(JsRealmSlots* slots) {
+    if (!slots) return;
+    // Partial batch resets retain catalog-backed callable identity when the
+    // preamble snapshot is live; namespace/prototype slots are reset by their
+    // owning subsystem and are the only prefix that needs clearing here.
+    int count = JS_REALM_SLOT_BUILTIN_FUNCTION_BASE;
+    int64_t available = root_vector_count(&slots->values);
+    if (count > available) count = (int)available;
+    for (int i = 0; i < count; i++) {
+        Item* slot = root_vector_at(&slots->values, i);
+        if (slot) *slot = (Item){0};
+    }
+}
+
 Item* js_realm_slot(JsRealmSlots* slots, JsRealmSlotId slot) {
     if (!slots || slot < 0 || slot >= JS_REALM_SLOT_COUNT) return NULL;
     while (root_vector_count(&slots->values) <= slot) {
@@ -904,6 +955,13 @@ Item* js_realm_slot_existing(JsRealmSlots* slots, JsRealmSlotId slot) {
     if (!slots || slot < 0 || slot >= JS_REALM_SLOT_COUNT ||
             root_vector_count(&slots->values) <= slot) return NULL;
     return root_vector_at(&slots->values, slot);
+}
+
+Item* js_realm_intrinsic_slot(JsRealmSlotId base, int index) {
+    if (!js_active_runtime_state || base < 0 || index < 0 ||
+            base + index >= JS_REALM_SLOT_COUNT) return NULL;
+    return js_realm_slot(&js_runtime_state.realm_slots,
+        (JsRealmSlotId)(base + index));
 }
 
 bool js_realm_slots_lookup(JsRealmSlots* slots, const JsRealmSlotId* slot_ids,
@@ -919,7 +977,6 @@ bool js_realm_slots_lookup(JsRealmSlots* slots, const JsRealmSlotId* slot_ids,
 }
 
 struct JsRuntimeRootResetOptions {
-    bool retain_intrinsic_slots;
     bool retain_cluster_primary_options;
 };
 
@@ -927,19 +984,6 @@ static void js_runtime_state_clear_root_vector(RootVector* roots, Item*,
         int, const char*, void* options_data) {
     JsRuntimeRootResetOptions* options =
         (JsRuntimeRootResetOptions*)options_data;
-    // Every group in the intrinsic-slots range has an owner reset that already
-    // ran in js_reset_cached_realm_objects/js_globals_batch_reset, and the two
-    // snapshot-aware owners (js_ctor_cache_reset, js_global_builtin_fn_cache_reset)
-    // deliberately retain their Items so preamble-cached references keep their
-    // identity (D6.2.2v2). Clearing the range behind them wiped exactly what
-    // they kept while leaving their `*_initialized` flags set, so every
-    // constructor read back as a cached null and globalThis lost Object,
-    // Symbol, Error and friends for the rest of the batch.
-    if (options && options->retain_intrinsic_slots &&
-            js_runtime_state.intrinsic_slots &&
-            roots == &js_runtime_state.intrinsic_slots->roots) {
-        return;
-    }
     if (options && options->retain_cluster_primary_options &&
             roots == &js_runtime_state.cluster.roots) {
         return;
@@ -960,7 +1004,7 @@ static void js_runtime_state_unbind_root_vectors(JsRuntimeState* state) {
 }
 
 static void js_root_vector_reset_all(bool full_reset) {
-    JsRuntimeRootResetOptions options = {!full_reset, !full_reset};
+    JsRuntimeRootResetOptions options = {!full_reset};
     js_runtime_state_prepare_root_vectors(js_active_runtime_state);
     js_runtime_state_visit_root_vectors(js_active_runtime_state,
         js_runtime_state_clear_root_vector, &options);
@@ -1657,9 +1701,14 @@ static void js_batch_reset_runtime_caches(const char* reason, bool full_reset) {
     if (full_reset) js_eval_preamble_cache_reset();
     js_dynfunc_cache_reset();
     if (full_reset) js_array_runtime_items_cleanup_all();
-    // Preamble reuse retains intrinsic callable identity and cluster setup;
-    // a full realm reset clears every fixed range (D6.2.2v2).
-    js_realm_slots_clear(&js_runtime_state.realm_slots);
+    // Preamble reuse retains catalog callable/constructor identity and cluster
+    // setup; a full reset, or a partial reset without a valid snapshot, drops
+    // the complete realm-slot store (D6.2.2v2).
+    if (full_reset || !js_proto_snapshot_is_valid()) {
+        js_realm_slots_clear(&js_runtime_state.realm_slots);
+    } else {
+        js_realm_slots_clear_transient(&js_runtime_state.realm_slots);
+    }
     js_root_vector_reset_all(full_reset);
     // Stacks outside the fixed realm catalog keep the same named reset on both
     // the full and the checkpoint path (super-this and with are cleared by

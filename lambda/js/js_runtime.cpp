@@ -26850,7 +26850,8 @@ static Item js_array_intrinsic_algorithm_into(Item arr,
 // =============================================================================
 
 // backing store for user-defined Math properties (e.g. Math.sumPrecise polyfill)
-#define js_math_object (js_runtime_state.intrinsic_slots->math)
+#define js_math_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_MATH_OBJECT))
 
 // Root-range cleanup clears the context-owned slots to zero. Treat that
 // representation like ItemNull so a later realm rebuilds its namespace
@@ -26911,7 +26912,8 @@ static Item js_get_math_object() {
 JS_FORWARD_ITEM(js_get_math_object_value, (void), js_get_math_object, ())
 
 // v18n: JSON and console as global objects for bare identifier resolution
-#define js_json_object (js_runtime_state.intrinsic_slots->json)
+#define js_json_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_JSON_OBJECT))
 void js_reset_json_object() { js_json_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_json_object_value() {
@@ -26930,7 +26932,8 @@ extern "C" Item js_get_json_object_value() {
 // =============================================================================
 // CSS Namespace Object (CSS.supports, CSS.escape)
 // =============================================================================
-#define js_css_namespace_object (js_runtime_state.intrinsic_slots->css)
+#define js_css_namespace_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_CSS_NAMESPACE_OBJECT))
 extern "C" void js_reset_css_namespace_object() { js_css_namespace_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_css_object_value() {
@@ -27091,7 +27094,8 @@ static Item js_intl_segmenter_construct_body(Item callee, Item* args, int argc,
         target_root.get(), JS_CLASS_OBJECT);
 }
 
-#define js_intl_object (js_runtime_state.intrinsic_slots->intl)
+#define js_intl_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_INTL_OBJECT))
 extern "C" void js_reset_intl_object() { js_intl_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_intl_object_value() {
@@ -27136,7 +27140,8 @@ extern "C" Item js_get_intl_object_value() {
     return intl_root.get();
 }
 
-#define js_console_object (js_runtime_state.intrinsic_slots->console)
+#define js_console_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_CONSOLE_OBJECT))
 void js_reset_console_object() { js_console_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_console_object_value() {
@@ -27193,7 +27198,8 @@ extern "C" Item js_get_console_object_value() {
 }
 
 // test262 host object $262 — provides detachArrayBuffer for typed array tests
-#define js_262_object (js_runtime_state.intrinsic_slots->test262)
+#define js_262_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_TEST262_OBJECT))
 #define js_262_eval_script_active (js_runtime_state.test262_agent ? \
     js_runtime_state.test262_agent->eval_script_active : 0)
 #define js_262_agent_object (js_runtime_state.test262_agent->object)
@@ -27474,7 +27480,8 @@ extern "C" Item js_get_262_object_value() {
 }
 
 // v25: Reflect global object for bare identifier resolution
-#define js_reflect_object (js_runtime_state.intrinsic_slots->reflect)
+#define js_reflect_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_REFLECT_OBJECT))
 void js_reset_reflect_object() { js_reflect_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_reflect_object_value() {
@@ -27492,7 +27499,8 @@ extern "C" Item js_get_reflect_object_value() {
 }
 
 // Atomics namespace object
-#define js_atomics_object (js_runtime_state.intrinsic_slots->atomics)
+#define js_atomics_object (*js_realm_slot(&js_runtime_state.realm_slots, \
+    JS_REALM_SLOT_ATOMICS_OBJECT))
 void js_reset_atomics_object() { js_atomics_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_atomics_object_value() {
@@ -36065,11 +36073,12 @@ static Item js_als_withScope(Item store) {
     return scope;
 }
 
-#define js_async_hooks_root_resource (js_runtime_state.async_hooks->root_resource)
-#define js_async_hooks_current_resource (js_runtime_state.async_hooks->current_resource)
-#define js_async_hooks_next_id (js_runtime_state.async_hooks->next_id)
-#define js_async_hook_values (js_runtime_state.async_hooks->hooks)
-#define js_async_pending_destroy_values (js_runtime_state.async_hooks->pending_destroy_resources)
+#define js_async_hooks_state (js_async_hooks_state_ensure(&js_runtime_state))
+#define js_async_hooks_root_resource (js_async_hooks_state->root_resource)
+#define js_async_hooks_current_resource (js_async_hooks_state->current_resource)
+#define js_async_hooks_next_id (js_async_hooks_state->next_id)
+#define js_async_hook_values (js_async_hooks_state->hooks)
+#define js_async_pending_destroy_values (js_async_hooks_state->pending_destroy_resources)
 
 static Item js_async_hooks_symbol_key(const char* name, int name_len) {
     return js_symbol_for(js_name_item(name, name_len));
@@ -36085,8 +36094,9 @@ static void js_async_hooks_stamp_id_symbols(Item resource, int64_t async_id, int
 }
 
 static Item js_async_hooks_ensure_root_resource(void) {
+    if (!js_async_hooks_state) return ItemError;
     if (js_async_hooks_root_resource.item == 0) {
-        js_root_vector_ensure_registered(&js_runtime_state.async_hooks->roots);
+        js_root_vector_ensure_registered(&js_async_hooks_state->roots);
         js_async_hooks_root_resource = js_new_object();
     }
     return js_async_hooks_root_resource;
@@ -36249,6 +36259,7 @@ static bool js_async_hooks_is_gc_tracker(Item resource) {
 }
 
 extern "C" void js_async_hooks_after_gc(void) {
+    if (!js_runtime_state.async_hooks) return;
     // Capture the original queue length: a destroy callback may enqueue a new
     // resource, which belongs to the next drain just as it did in the former
     // fixed queue.
@@ -38560,11 +38571,13 @@ void js_deep_batch_reset() {
     if (js_runtime_state.async_local_storage) {
         root_vector_clear(&js_runtime_state.async_local_storage->instances);
     }
-    js_async_hooks_root_resource = (Item){0};
-    js_async_hooks_current_resource = (Item){0};
-    js_async_hooks_next_id = 2;
-    root_vector_clear(&js_async_hook_values);
-    root_vector_clear(&js_async_pending_destroy_values);
+    if (js_runtime_state.async_hooks) {
+        js_runtime_state.async_hooks->root_resource = (Item){0};
+        js_runtime_state.async_hooks->current_resource = (Item){0};
+        js_runtime_state.async_hooks->next_id = 2;
+        root_vector_clear(&js_runtime_state.async_hooks->hooks);
+        root_vector_clear(&js_runtime_state.async_hooks->pending_destroy_resources);
+    }
     js_async_resolved_value = (Item){0};
     js_reset_transient_call_state();
     // generator proto caches point into old heap — clear only existing realm

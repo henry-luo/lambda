@@ -43,6 +43,8 @@ typedef struct JsInterpExportBinding {
     struct JsInterpExportBinding* next;
 } JsInterpExportBinding;
 
+struct JsAstDefinition;
+
 // JavaScript variable declaration types
 typedef enum JsVarKind {
     JS_VAR_VAR,     // var - function scoped
@@ -86,6 +88,7 @@ struct JsScript : Script {
     struct hashmap* type_registry; // TS name → Type* facts for this JS/TS unit
     JsInterpImportBinding* interp_imports;
     JsInterpExportBinding* interp_exports;
+    ArrayList* ast_definitions;
 };
 
 // JsTranspiler is an ephemeral builder extending the retained JsScript prefix.

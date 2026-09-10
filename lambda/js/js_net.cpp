@@ -1970,7 +1970,7 @@ static bool net_ensure_roots(void) {
     if (!js_runtime_state.net_native.native_state) {
         // These defaults used to be process globals. Allocate them once when
         // the cold net namespace is first entered, never on socket hot paths.
-        js_runtime_state.net_native.native_state = mem_calloc(1, sizeof(JsNetRuntimeState),
+        js_runtime_state.net_native.native_state = (JsNetRuntimeState*)mem_calloc(1, sizeof(JsNetRuntimeState),
             MEM_CAT_JS_RUNTIME);
         if (!js_runtime_state.net_native.native_state) return false;
         ((JsNetRuntimeState*)js_runtime_state.net_native.native_state)->auto_select_family_timeout = 500;
