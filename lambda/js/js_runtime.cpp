@@ -6351,7 +6351,9 @@ static Item js_array_numeric_key_to_property_key(Item key) {
     return js_to_property_key(key);
 }
 
-static void js_array_delete_sparse_indices_from(lam::GcPtr<Array> arr, int64_t new_len) {
+static void js_array_delete_sparse_indices_range(lam::GcPtr<Array> arr,
+                                                 int64_t first_index,
+                                                 int64_t end_index) {
     if (!js_array_has_props(arr.get())) return;
     Map* pm = js_array_props(arr.get());
     SparseArrayMap* sm = js_array_sparse_from_map(pm);
@@ -6360,7 +6362,7 @@ static void js_array_delete_sparse_indices_from(lam::GcPtr<Array> arr, int64_t n
         void* item = NULL;
         while (hashmap_iter(sm->sparse_indices, &iter, &item)) {
             JsArraySparseHashEntry* entry = (JsArraySparseHashEntry*)item;
-            if (entry->index >= new_len) {
+            if (entry->index >= first_index && entry->index < end_index) {
                 JsArraySparseHashEntry probe;
                 probe.index = entry->index;
                 probe.value = ItemNull;
@@ -6379,11 +6381,16 @@ static void js_array_delete_sparse_indices_from(lam::GcPtr<Array> arr, int64_t n
         const char* name = entry->name->str;
         int64_t index = -1;
         if (!js_array_parse_index_name(name, name_len, &index)) continue;
-        if (index < new_len) continue;
+        if (index < first_index || index >= end_index) continue;
         ShapeEntry* se = js_find_shape_entry(map_item, name, name_len);
         if (!js_props_query_configurable(pm, se, name, name_len)) continue;
         js_ordinary_delete(map_item, name, name_len);
     }
+}
+
+static void js_array_delete_sparse_indices_from(lam::GcPtr<Array> arr,
+                                                int64_t new_len) {
+    js_array_delete_sparse_indices_range(arr, new_len, INT64_MAX);
 }
 
 static bool js_proto_chain_has_nonwritable_data_impl(Item object, NameRef identity_key,
@@ -24403,6 +24410,34 @@ static bool js_array_concat_try_append_typed_array(Item result, int64_t* n, Item
 
 static Item js_array_generic_push(Item object, Item* args, int argc) {
     const int64_t max_safe_len = 9007199254740991LL;
+    // A clean ordinary Array has no observable index Set path. Preserve the
+    // dense representation for append-heavy code, while descriptor, prototype,
+    // and non-extensible receivers continue through the generic ES path
+    // (D8.4.3v2).
+    if (get_type_id(object) == LMD_TYPE_ARRAY && object.array &&
+            !object.array->is_content) {
+        RootFrame roots(1);
+        Rooted<Item> object_root(roots, object);
+        if (!roots.valid()) return ItemError;
+        Array* arr = object_root.get().array;
+        int64_t len = arr->length;
+        int64_t new_len = len + (int64_t)argc;
+        if (new_len <= INT_MAX &&
+                !js_array_has_props(arr) &&
+                !js_array_should_store_sparse_for_index(arr, len) &&
+                !js_array_proto_index_guard_is_dirty(object_root.get()) &&
+                !js_array_length_is_non_writable(object_root.get()) &&
+                js_is_extensible(object_root.get())) {
+            RootSpan arg_roots(argc > 0 ? (size_t)argc : 0);
+            Item* rooted_args = argc > 0 ? arg_roots.items() : NULL;
+            if (argc > 0 && (!rooted_args || !arg_roots.valid())) return ItemError;
+            for (int i = 0; i < argc; i++) rooted_args[i] = args[i];
+            for (int i = 0; i < argc; i++) {
+                js_array_push_item_direct(object_root.get().array, rooted_args[i]);
+            }
+            return (Item){.item = i2it(new_len)};
+        }
+    }
     int64_t len = 0;
     Item len_key;
     JS_ASSIGN_OR_RETURN(len_status, js_array_get_length_status(object, &len_key, &len));
@@ -24539,9 +24574,17 @@ static Item js_array_generic_flat_map(Item object, Item* args, int argc) {
 }
 
 static Item js_array_generic_slice(Item object, Item* args, int argc) {
+    // Slice allocates its species result before reading source entries. Keep the
+    // receiver, result, and current entry in exact homes across those safepoints
+    // so JIT-only callers cannot lose them to GC (D5.4.3).
+    RootFrame roots(3);
+    Rooted<Item> object_root(roots, object);
+    Rooted<Item> result_root(roots, ItemNull);
+    Rooted<Item> from_value_root(roots, ItemNull);
     int64_t len = 0;
     Item len_key;
-    JS_ASSIGN_OR_RETURN(len_status, js_array_get_length_status(object, &len_key, &len));
+    JS_ASSIGN_OR_RETURN(len_status, js_array_get_length_status(
+        object_root.get(), &len_key, &len));
 
     int64_t start = 0;
     if (argc > 0) {
@@ -24553,20 +24596,25 @@ static Item js_array_generic_slice(Item object, Item* args, int argc) {
     }
     int64_t count = end > start ? end - start : 0;
 
-    JS_ASSIGN_OR_RETURN(result, js_array_species_create(object, count));
+    result_root.set(js_array_species_create(object_root.get(), count));
+    if (item_is_error(result_root.get())) return result_root.get();
 
     int64_t n = 0;
     for (int64_t k = start; k < end; k++) {
         Item from_key = js_array_method_property_key(k);
-        JS_ASSIGN_OR_RETURN(has, js_array_method_has_property_status(object, from_key));
+        JS_ASSIGN_OR_RETURN(has, js_array_method_has_property_status(
+            object_root.get(), from_key));
         if (js_is_truthy(has)) {
-            JS_ASSIGN_OR_RETURN(from_val, js_get_key_default(object, from_key));
-            JS_ASSIGN_OR_RETURN(create_result, js_create_data_property_or_throw(result, n, from_val));
+            from_value_root.set(js_get_key_default(object_root.get(), from_key));
+            if (item_is_error(from_value_root.get())) return from_value_root.get();
+            JS_ASSIGN_OR_RETURN(create_result, js_create_data_property_or_throw(
+                result_root.get(), n, from_value_root.get()));
         }
         n++;
     }
-    JS_ASSIGN_OR_RETURN(set_result, js_set_key_default(result, len_key, (Item){.item = i2it(count)}));
-    return result;
+    JS_ASSIGN_OR_RETURN(set_result, js_set_key_default(
+        result_root.get(), len_key, (Item){.item = i2it(count)}));
+    return result_root.get();
 }
 
 static Item js_delete_property_or_throw_status(Item object, Item key) {
@@ -24954,7 +25002,9 @@ static Item js_array_generic_sort(Item object, Item* args, int argc) {
             a->items[j] = hole;
         }
         if (js_array_has_props(a)) {
-            js_array_delete_sparse_indices_from(lam::gc_borrow(a), item_count);
+            // Sort snapshots len; writes caused by getters/setters beyond that
+            // snapshot are observable and must survive cleanup (S1.6).
+            js_array_delete_sparse_indices_range(lam::gc_borrow(a), item_count, len);
         }
     } else {
         for (int64_t j = item_count; j < len; j++) {
@@ -25570,6 +25620,18 @@ static Item js_array_intrinsic_algorithm_impl(Item arr,
     // cases below are the operations whose receiver or result policy is not
     // expressible by that generic dispatcher (D8.4.1v2).
     TypeId arr_type = get_type_id(arr);
+    // ES Array methods that unconditionally Set length must reject a frozen
+    // or length-locked receiver even when their element loop is empty. Keep
+    // this invariant at the array boundary before generic dispatch (D8.4.3v2).
+    if (arr_type == LMD_TYPE_ARRAY &&
+            JS_OP_HAS(operation, JS_OP_FLAG_UNCONDITIONAL_LENGTH_WRITE)) {
+        if (it2b(js_object_is_frozen(arr))) {
+            return js_throw_type_error("Cannot modify frozen array");
+        }
+        if (js_array_length_is_non_writable(arr)) {
+            return js_throw_type_error("Cannot assign to read only property 'length' of array");
+        }
+    }
     Item callback_receiver = operation_receiver;
     Item generic_result = ItemNull;
     if (js_array_generic_dispatch(arr, callback_receiver, operation, args, argc,

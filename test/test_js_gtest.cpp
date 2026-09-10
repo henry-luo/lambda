@@ -1518,6 +1518,16 @@ TEST(JavaScriptRegression, Js54P6ArrayProtoFillSetSlice) {
     ASSERT_EQ(status, 0) << output;
 }
 
+// Js55 P0: generic slice crosses allocation/GC safepoints while reading the
+// source, and clean ordinary arrays need the guarded dense append path.
+TEST(JavaScriptRegression, Js55P0ArraySliceGcRootsAndDenseAppend) {
+    char output[2048];
+    int status = execute_js_script_status(
+        "test/js/regression_js55_p0_array_slice_gc_roots.js",
+        output, sizeof(output));
+    ASSERT_EQ(status, 0) << output;
+}
+
 static void parse_js_gtest_options(int* argc, char** argv) {
     if (!argc || !argv) return;
     const char* mode = getenv("JS_GTEST_MODE");
