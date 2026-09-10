@@ -588,26 +588,29 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
     }
 
     // array of numbers
-    if (tid == LMD_TYPE_ARRAY && js_array_length(data) >= 0) {
-        int64_t arr_len = js_array_length(data);
+    if (js_is_js_array(data)) {
+        // ordinary arrays can use tagged or numeric storage; admission is shared.
+        RootFrame roots(2);
+        Rooted<Item> source(roots, data);
+        Rooted<Item> result(roots, ItemNull);
+        int64_t arr_len = js_array_length(source.get());
         if (arr_len > 2147483647) {
             return js_throw_range_error_code("ERR_OUT_OF_RANGE",
                 "The value of \"length\" is out of range.");
         }
-        Item buf = create_buffer((int)arr_len);
-        int buf_byte_len = 0;
-        uint8_t* bdata = buffer_data_write(buf, &buf_byte_len);
-        if (bdata) {
-            for (int64_t i = 0; i < arr_len; i++) {
-                Item elem = js_elements_get_int(data, i);
-                int64_t v = 0;
-                TypeId et = get_type_id(elem);
-                if (et == LMD_TYPE_INT) v = it2i(elem);
-                else if (et == LMD_TYPE_FLOAT) v = (int64_t)it2d(elem);
-                bdata[i] = (uint8_t)(v & 0xFF);
-            }
+        result.set(create_buffer((int)arr_len));
+        for (int64_t i = 0; i < arr_len; i++) {
+            JS_ASSIGN_OR_RETURN(elem, js_elements_get_int(source.get(), i));
+            int64_t value = 0;
+            TypeId type = get_type_id(elem);
+            if (type == LMD_TYPE_INT) value = it2i(elem);
+            else if (type == LMD_TYPE_FLOAT) value = (int64_t)it2d(elem);
+            // element access may collect; reacquire the destination payload.
+            int byte_len = 0;
+            uint8_t* bytes = buffer_data_write(result.get(), &byte_len);
+            if (bytes) bytes[i] = (uint8_t)(value & 0xFF);
         }
-        return buf;
+        return result.get();
     }
 
     // typed array / buffer → copy
@@ -1553,20 +1556,6 @@ static Item buffer_prepare_search_needle(Item value, Item enc_item, char* enc,
     return js_status_ok();
 }
 
-static int buffer_find_byte(const uint8_t* data, int first, int last,
-                            int step, uint8_t needle) {
-    if (step > 0) {
-        for (int i = first; i <= last; i += step) {
-            if (data[i] == needle) return i;
-        }
-    } else {
-        for (int i = first; i >= last; i += step) {
-            if (data[i] == needle) return i;
-        }
-    }
-    return -1;
-}
-
 static int buffer_find_needle(const uint8_t* data, int blen,
         const uint8_t* needle, int needle_len, int offset, bool reverse,
         bool ucs2) {
@@ -1590,18 +1579,17 @@ static int buffer_find_needle(const uint8_t* data, int blen,
         return -1;
     }
     if (needle_len == 0) return reverse ? (offset < blen ? offset : blen) : offset;
+    // UCS-2 keeps its aligned search above; byte searches share the core leaf.
+    if (needle_len > blen) return -1;
     if (!reverse) {
-        for (int i = offset; i <= blen - needle_len; i++) {
-            if (memcmp(data + i, needle, needle_len) == 0) return i;
-        }
-    } else {
-        int limit = offset;
-        if (limit > blen - needle_len) limit = blen - needle_len;
-        for (int i = limit; i >= 0; i--) {
-            if (memcmp(data + i, needle, needle_len) == 0) return i;
-        }
+        size_t found = str_find((const char*)data + offset, (size_t)(blen - offset),
+            (const char*)needle, (size_t)needle_len);
+        return found == STR_NPOS ? -1 : offset + (int)found;
     }
-    return -1;
+    int limit = offset < blen - needle_len ? offset : blen - needle_len;
+    size_t found = str_rfind((const char*)data, (size_t)(limit + needle_len),
+        (const char*)needle, (size_t)needle_len);
+    return found == STR_NPOS ? -1 : (int)found;
 }
 
 static Item js_buffer_search(Item buf, Item value, Item offset_item, Item enc_item,
@@ -1630,14 +1618,13 @@ static Item js_buffer_search(Item buf, Item value, Item offset_item, Item enc_it
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
     }
 
-    if (vtid == LMD_TYPE_INT || (!reverse && vtid == LMD_TYPE_FLOAT)) {
+    if (vtid == LMD_TYPE_INT || vtid == LMD_TYPE_FLOAT) {
         if (offset >= blen) return (Item){.item = i2it(-1)};
         int byte_val;
         if (vtid == LMD_TYPE_INT) byte_val = (int)(it2i(value) & 0xFF);
-        else byte_val = (int)((int64_t)it2d(value) & 0xFF);
-        int found = reverse
-            ? buffer_find_byte(data, offset, 0, -1, (uint8_t)byte_val)
-            : buffer_find_byte(data, offset, blen - 1, 1, (uint8_t)byte_val);
+        else byte_val = (int)(js_double_to_int32(it2d(value)) & 0xFF);
+        uint8_t needle_byte = (uint8_t)byte_val;
+        int found = buffer_find_needle(data, blen, &needle_byte, 1, offset, reverse, false);
         return (Item){.item = i2it(found)};
     }
 

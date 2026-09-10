@@ -22923,10 +22923,20 @@ static Item js_string_coerce_receiver(Item* value) {
     return ItemNull;
 }
 
-static int64_t js_string_find_position(Item str, Item search, int64_t position, bool reverse) {
-    String* source = it2s(str);
-    String* needle = it2s(search);
-    if (!source || !needle) return -1;
+static int64_t js_string_find_position(Item str, Item search, int64_t position,
+        bool reverse, bool anchored) {
+    RootFrame roots(2);
+    Rooted<Item> source_root(roots, str);
+    Rooted<Item> needle_root(roots, search);
+    String* source = it2s(source_root.get());
+    if (!source || !it2s(needle_root.get())) return -1;
+    // searching expanded WTF-8 gives one encoded character per JS code unit.
+    if (!source->is_ascii) {
+        source_root.set((Item){.item = s2it(js_string_expand_utf16_subject(source))});
+        needle_root.set((Item){.item = s2it(js_string_expand_utf16_subject(it2s(needle_root.get())))});
+    }
+    source = it2s(source_root.get());
+    String* needle = it2s(needle_root.get());
     int64_t char_len = source->is_ascii ? (int64_t)source->len :
         str_utf8_count(source->chars, source->len);
     if (needle->len == 0) {
@@ -22939,25 +22949,70 @@ static int64_t js_string_find_position(Item str, Item search, int64_t position, 
         size_t byte_start = source->is_ascii ? (size_t)position :
             str_utf8_char_to_byte(source->chars, source->len, (size_t)position);
         if (byte_start >= source->len || source->len - byte_start < needle->len) return -1;
-        for (size_t i = byte_start; i <= source->len - needle->len; i++) {
-            if (memcmp(source->chars + i, needle->chars, needle->len) == 0) {
-                return source->is_ascii ? (int64_t)i : (int64_t)str_utf8_count(source->chars, i);
-            }
-        }
-        return -1;
+        // prefix/suffix predicates inspect only their candidate span.
+        size_t span = anchored ? needle->len : source->len - byte_start;
+        size_t found = str_find(source->chars + byte_start, span,
+            needle->chars, needle->len);
+        if (found == STR_NPOS) return -1;
+        size_t offset = byte_start + found;
+        return source->is_ascii ? (int64_t)offset : (int64_t)str_utf8_count(source->chars, offset);
     }
     if (position < 0) return -1;
     int64_t end_char = position < char_len ? position : char_len;
     size_t byte_end = source->is_ascii ? (size_t)end_char :
         str_utf8_char_to_byte(source->chars, source->len, (size_t)end_char);
     size_t max_start = byte_end + needle->len <= source->len ? byte_end : source->len - needle->len;
-    for (size_t i = max_start + 1; i > 0; i--) {
-        size_t start = i - 1;
-        if (memcmp(source->chars + start, needle->chars, needle->len) == 0) {
-            return source->is_ascii ? (int64_t)start : (int64_t)str_utf8_count(source->chars, start);
+    // the JS adapter owns index conversion; the leaf only sees byte spans.
+    size_t found = str_rfind(source->chars, max_start + needle->len,
+        needle->chars, needle->len);
+    if (found == STR_NPOS) return -1;
+    return source->is_ascii ? (int64_t)found : (int64_t)str_utf8_count(source->chars, found);
+}
+
+static Item js_string_search_intrinsic(Item str, JsStringIntrinsicOp operation,
+        Item* args, int argc) {
+    RootFrame roots(2);
+    Rooted<Item> source(roots, str);
+    Rooted<Item> needle(roots, argc > 0 ? args[0] : make_js_undefined());
+    bool index_result = operation == JS_STRING_INTRINSIC_INDEX_OF ||
+        operation == JS_STRING_INTRINSIC_LAST_INDEX_OF;
+    if (!index_result) {
+        bool is_regexp = false;
+        JS_ASSIGN_OR_RETURN(status, js_string_is_regexp(needle.get(), &is_regexp));
+        if (is_regexp) {
+            const char* method = operation == JS_STRING_INTRINSIC_INCLUDES ? "includes"
+                : operation == JS_STRING_INTRINSIC_STARTS_WITH ? "startsWith" : "endsWith";
+            return js_throw_type_errorf("First argument to String.prototype.%s must not be a regular expression", method);
         }
     }
-    return -1;
+    JS_ASSIGN_OR_RETURN(search_value, js_to_string(needle.get()));
+    needle.set(search_value);
+    bool reverse = operation == JS_STRING_INTRINSIC_LAST_INDEX_OF;
+    bool suffix = operation == JS_STRING_INTRINSIC_ENDS_WITH;
+    double position = reverse || suffix ? INFINITY : 0.0;
+    if (argc > 1) {
+        if (reverse) {
+            JS_ASSIGN_OR_RETURN(number, js_to_number(args[1]));
+            position = js_get_number(number);
+            if (isnan(position)) position = INFINITY;
+        } else {
+            JS_ASSIGN_OR_RETURN(status, js_string_to_integer_or_infinity(
+                args[1], position, &position));
+        }
+    }
+    String* text = it2s(source.get());
+    int64_t length = js_utf16_len(text->chars, (int)text->len, text->is_ascii);
+    int64_t start = js_string_clamp_integer(position, length);
+    if (suffix) {
+        String* search = it2s(needle.get());
+        start -= js_utf16_len(search->chars, (int)search->len, search->is_ascii);
+        if (start < 0) return (Item){.item = b2it(false)};
+    }
+    bool anchored = !index_result && operation != JS_STRING_INTRINSIC_INCLUDES;
+    int64_t found = js_string_find_position(source.get(), needle.get(), start, reverse, anchored);
+    if (index_result) return (Item){.item = i2it(found)};
+    return (Item){.item = b2it(operation == JS_STRING_INTRINSIC_INCLUDES
+        ? found >= 0 : found == start)};
 }
 
 static Item js_string_intrinsic_algorithm(Item str,
@@ -23004,94 +23059,12 @@ static Item js_string_intrinsic_algorithm(Item str,
         }
     }
 
-    if (operation == JS_STRING_INTRINSIC_INDEX_OF) {
-        JS_ASSIGN_OR_RETURN(search_val, js_to_string((argc >= 1) ? args[0] : make_js_undefined()));
-        if (argc < 2) return (Item){.item = i2it(fn_index_of_raw(str, search_val))};
-        double dpos = 0.0;
-        JS_ASSIGN_OR_RETURN(position_status, js_string_to_integer_or_infinity(args[1], 0.0, &dpos));
-        String* s = it2s(str);
-        int64_t str_char_len = s ? (s->is_ascii ? (int64_t)s->len : str_utf8_count(s->chars, s->len)) : 0;
-        int64_t start_pos = js_string_clamp_integer(dpos, str_char_len);
-        return (Item){.item = i2it(js_string_find_position(str, search_val, start_pos, false))};
-    }
-    if (operation == JS_STRING_INTRINSIC_LAST_INDEX_OF) {
-        JS_ASSIGN_OR_RETURN(search_val, js_to_string((argc >= 1) ? args[0] : make_js_undefined()));
-        if (argc < 2) return (Item){.item = i2it(fn_last_index_of_raw(str, search_val))};
-        JS_ASSIGN_OR_RETURN(pos_num, js_to_number(args[1]));
-        double dpos = js_get_number(pos_num);
-        int end_pos = isnan(dpos) ? INT32_MAX : (int)dpos;
-        return (Item){.item = i2it(js_string_find_position(str, search_val, end_pos, true))};
-    }
-    if (operation == JS_STRING_INTRINSIC_INCLUDES) {
-        bool is_regexp = false;
-        JS_ASSIGN_OR_RETURN(regexp_status, js_string_is_regexp(args[0], &is_regexp));
-        if (is_regexp)
-            return js_throw_type_error("First argument to String.prototype.includes must not be a regular expression");
-        if (argc < 1) return (Item){.item = b2it(false)};
-        String* s = it2s(str);
-        JS_ASSIGN_OR_RETURN(search_item, js_to_string(args[0]));
-        String* search_str = it2s(search_item);
-        if (!s || !search_str) return (Item){.item = b2it(false)};
-        int64_t str_char_len = s->is_ascii ? (int64_t)s->len : str_utf8_count(s->chars, s->len);
-        int64_t pos = 0;
-        if (argc >= 2) {
-            double dpos = 0.0;
-            JS_ASSIGN_OR_RETURN(position_status, js_string_to_integer_or_infinity(args[1], 0.0, &dpos));
-            pos = js_string_clamp_integer(dpos, str_char_len);
-        }
-        return (Item){.item = b2it(js_string_find_position(str, search_item, pos, false) >= 0)};
-    }
-    if (operation == JS_STRING_INTRINSIC_STARTS_WITH) {
-        bool is_regexp = false;
-        JS_ASSIGN_OR_RETURN(regexp_status, js_string_is_regexp(args[0], &is_regexp));
-        if (is_regexp)
-            return js_throw_type_error("First argument to String.prototype.startsWith must not be a regular expression");
-        if (argc < 1) return (Item){.item = b2it(false)};
-        String* s = it2s(str);
-        JS_ASSIGN_OR_RETURN(search_item, js_to_string(args[0]));
-        String* search_str = it2s(search_item);
-        if (!s || !search_str) return (Item){.item = b2it(false)};
-        int64_t str_char_len = s->is_ascii ? (int64_t)s->len : str_utf8_count(s->chars, s->len);
-        int64_t pos = 0;
-        if (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
-            double dpos = 0.0;
-            JS_ASSIGN_OR_RETURN(position_status, js_string_to_integer_or_infinity(args[1], 0.0, &dpos));
-            pos = js_string_clamp_integer(dpos, str_char_len);
-        }
-        return (Item){.item = b2it(js_string_find_position(str, search_item, pos, false) == pos)};
-    }
-    if (operation == JS_STRING_INTRINSIC_ENDS_WITH) {
-        bool is_regexp = false;
-        JS_ASSIGN_OR_RETURN(regexp_status, js_string_is_regexp(args[0], &is_regexp));
-        if (is_regexp)
-            return js_throw_type_error("First argument to String.prototype.endsWith must not be a regular expression");
-        if (argc < 1) return (Item){.item = b2it(false)};
-        String* s = it2s(str);
-        JS_ASSIGN_OR_RETURN(search_item, js_to_string(args[0]));
-        String* search_str = it2s(search_item);
-        if (!s || !search_str) return (Item){.item = b2it(false)};
-        size_t str_char_len = s->is_ascii ? s->len : str_utf8_count(s->chars, s->len);
-        size_t end_pos = str_char_len;
-        if (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
-            double dpos = 0.0;
-            JS_ASSIGN_OR_RETURN(position_status, js_string_to_integer_or_infinity(args[1], (double)str_char_len, &dpos));
-            end_pos = (size_t)js_string_clamp_integer(dpos, (int64_t)str_char_len);
-        }
-        if (search_str->len == 0) return (Item){.item = b2it(true)};
-        size_t search_char_len = search_str->is_ascii ? search_str->len : str_utf8_count(search_str->chars, search_str->len);
-        if (search_char_len > end_pos) return (Item){.item = b2it(false)};
-        size_t start_char = end_pos - search_char_len;
-        size_t byte_start, byte_end;
-        if (s->is_ascii) {
-            byte_start = start_char;
-            byte_end = end_pos;
-        } else {
-            byte_start = str_utf8_char_to_byte(s->chars, s->len, start_char);
-            byte_end = str_utf8_char_to_byte(s->chars, s->len, end_pos);
-        }
-        size_t byte_len = byte_end - byte_start;
-        if (byte_len != search_str->len) return (Item){.item = b2it(false)};
-        return (Item){.item = b2it(memcmp(s->chars + byte_start, search_str->chars, search_str->len) == 0)};
+    if (operation == JS_STRING_INTRINSIC_INDEX_OF ||
+            operation == JS_STRING_INTRINSIC_LAST_INDEX_OF ||
+            operation == JS_STRING_INTRINSIC_INCLUDES ||
+            operation == JS_STRING_INTRINSIC_STARTS_WITH ||
+            operation == JS_STRING_INTRINSIC_ENDS_WITH) {
+        return js_string_search_intrinsic(str, operation, args, argc);
     }
     if (operation == JS_STRING_INTRINSIC_TRIM) {
         String* s = it2s(str);

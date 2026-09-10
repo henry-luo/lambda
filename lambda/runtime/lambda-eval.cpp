@@ -5525,22 +5525,9 @@ Bool fn_contains(Item str_item, Item substr_item) {
         return BOOL_FALSE;
     }
 
-    if (substr->len == 0) {
-        return BOOL_TRUE; // empty string is contained in any string
-    }
-
-    if (str->len == 0 || substr->len > str->len) {
-        return BOOL_FALSE;
-    }
-
-    // simple byte-based search for now - could be optimized with KMP or Boyer-Moore
-    for (uint32_t i = 0; i <= str->len - substr->len; i++) {
-        if (memcmp(str->chars + i, substr->chars, substr->len) == 0) {
-            return BOOL_TRUE;
-        }
-    }
-
-    return BOOL_FALSE;
+    // shared bounded byte search preserves embedded NUL and UTF-8 substrings.
+    return str_find(str->chars, str->len, substr->chars, substr->len) != STR_NPOS
+        ? BOOL_TRUE : BOOL_FALSE;
 }
 
 // starts_with native: String* in, Bool out (no Item boxing)
@@ -5668,19 +5655,11 @@ static int64_t fn_index_of_raw_impl(Item str_item, Item sub_item, bool reverse) 
     }
     if (str_len < sub_len) return -1;
 
-    if (!reverse) {
-        for (size_t i = 0; i <= str_len - sub_len; i++) {
-            if (memcmp(str_chars + i, sub_chars, sub_len) == 0)
-                return is_ascii ? (int64_t)i : (int64_t)str_utf8_count(str_chars, i);
-        }
-    } else {
-        for (size_t i = str_len - sub_len + 1; i > 0; i--) {
-            size_t pos = i - 1;
-            if (memcmp(str_chars + pos, sub_chars, sub_len) == 0)
-                return is_ascii ? (int64_t)pos : (int64_t)str_utf8_count(str_chars, pos);
-        }
-    }
-    return -1;
+    // byte matching is shared; Lambda's result remains a code-point index.
+    size_t found = reverse ? str_rfind(str_chars, str_len, sub_chars, sub_len)
+        : str_find(str_chars, str_len, sub_chars, sub_len);
+    return found == STR_NPOS ? -1 : is_ascii ? (int64_t)found
+        : (int64_t)str_utf8_count(str_chars, found);
 }
 
 int64_t fn_index_of_raw(Item str_item, Item sub_item) {

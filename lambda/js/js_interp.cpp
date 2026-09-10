@@ -1652,20 +1652,8 @@ static Item js_interp_make_field_initializer(JsInterpFrame* frame,
     if (!frame || !frame->script || !frame->script->pool || !field || !field->value) {
         return ItemError;
     }
-    JsFunctionNode* initializer = (JsFunctionNode*)pool_calloc(frame->script->pool,
-        sizeof(JsFunctionNode));
-    NameScope* scope = (NameScope*)pool_calloc(frame->script->pool, sizeof(NameScope));
-    if (!initializer || !scope) return ItemError;
-    // Keep an empty function environment between the initializer's `this`
-    // and its captured defining environment. Evaluating the expression at
-    // class definition would bind `this` to the wrong receiver.
-    scope->kind = SCOPE_KIND_FUNCTION;
-    scope->strict = true;
-    initializer->node_type = JS_AST_NODE_FUNCTION_EXPRESSION;
-    initializer->source_span = field->source_span;
-    initializer->body = field->value;
-    initializer->vars = scope;
-    initializer->has_use_strict_directive = true;
+    JsFunctionNode* initializer = js_script_field_initializer_ensure(frame->script, field);
+    if (!initializer) return ItemError;
     Item result = js_interp_new_function(frame, initializer,
         JS_FUNC_FLAG_METHOD | JS_FUNC_FLAG_STRICT);
     if (!item_is_error(result)) {

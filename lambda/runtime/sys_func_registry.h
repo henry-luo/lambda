@@ -213,7 +213,40 @@ enum {
     JIT_IMPORT_RESULT_SCALAR_STABLE = 1u << 0,
     JIT_IMPORT_NUMBER_STACK_PRESERVES = 1u << 1,
     JIT_IMPORT_ARGS_BORROWED_AUDITED = 1u << 2,
+    JIT_IMPORT_SCALAR_CLASS_SHIFT = 3,
+    JIT_IMPORT_SCALAR_CLASS_MASK = 7u << JIT_IMPORT_SCALAR_CLASS_SHIFT,
+    JIT_IMPORT_SCALAR_CLASS_KNOWN = 1u << 6,
+    // wide results are created in the caller's extent, never borrowed storage.
+    JIT_IMPORT_RESULT_CALLER_OWNED = 1u << 7,
 };
+
+// result representation does not weaken collection, reentry or completion effects.
+#define JIT_IMPORT_SCALAR_RESULT(kind) \
+    (JIT_IMPORT_SCALAR_CLASS_KNOWN | ((uint32_t)(kind) << JIT_IMPORT_SCALAR_CLASS_SHIFT))
+
+static inline ScalarReturnClass jit_scalar_return_class_for_type(TypeId type_id) {
+    if (!lambda_type_id_may_be_wide_scalar(type_id)) return SCALAR_RETURN_NONE;
+    switch (type_id) {
+    case LMD_TYPE_FLOAT: return SCALAR_RETURN_F64;
+    case LMD_TYPE_INT64: return SCALAR_RETURN_I64;
+    case LMD_TYPE_UINT64: return SCALAR_RETURN_U64;
+    default: return SCALAR_RETURN_DYNAMIC;
+    }
+}
+
+static inline ScalarReturnClass jit_import_scalar_return_class(const JitImportMetadata* metadata) {
+    if (metadata->ret_class != JIT_VALUE_BOXED_ITEM ||
+            (metadata->flags & JIT_IMPORT_RESULT_SCALAR_STABLE)) return SCALAR_RETURN_NONE;
+    return metadata->flags & JIT_IMPORT_SCALAR_CLASS_KNOWN
+        ? (ScalarReturnClass)((metadata->flags & JIT_IMPORT_SCALAR_CLASS_MASK) >>
+            JIT_IMPORT_SCALAR_CLASS_SHIFT) : SCALAR_RETURN_DYNAMIC;
+}
+
+// Number arithmetic may coerce/reenter; its only number-home result is a double.
+#define JIT_IMPORT_JS_NUMBER_BINARY(ownership) \
+    {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM, \
+     JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) | JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM), \
+     JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_F64) | (ownership)}
 
 // A raw scalar has no ERROR-tag transport.  Keep its catalog contract in one
 // named initializer so every audited JS fast-path row states PRESERVES.

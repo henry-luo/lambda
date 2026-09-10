@@ -416,7 +416,7 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
         state->function_cache_capacity = 0;
         state->function_cache_count = 0;
         if (state->callable_code_interned) {
-            arraylist_free(state->callable_code_interned);
+            js_callable_code_table_destroy(state->callable_code_interned);
             state->callable_code_interned = NULL;
         }
     }

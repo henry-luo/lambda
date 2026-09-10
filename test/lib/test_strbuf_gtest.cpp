@@ -700,6 +700,10 @@ TEST_F(StrBufTest, EscapeAppendJsonStringQuotesAndSurrogates) {
     strbuf_reset(sb);
     escape_append_json_string(sb, surrogate, 3, true, true);
     EXPECT_STREQ(sb->str, "\"\\ud800\"");
+    strbuf_reset(sb);
+    const char pair[] = "\xed\xa0\xbd\xed\xb8\x80";
+    escape_append_json_string(sb, pair, sizeof(pair) - 1, true, true);
+    EXPECT_STREQ(sb->str, "\"😀\"");
     strbuf_free(sb);
 }
 
