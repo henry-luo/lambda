@@ -3078,6 +3078,10 @@ extern "C" {
     // GC-owned memory, so the collector's trust in static types is tested
     // rather than assumed.
     bool lambda_root_witness_enabled(void);
+    // Level 2 additionally probes expression temporaries: every register live
+    // across a may-GC call that the root machinery never made a candidate.
+    int  lambda_root_witness_level(void);
+    bool lambda_root_witness_temporaries(void);
     void lambda_jit_root_witness(uint64_t raw, int64_t claimed_type_id,
         const char* site, const char* binding, const char* func);
     void lambda_root_witness_dump(void);
