@@ -2354,6 +2354,11 @@ separate:
   teardown. TLS continuation callbacks and fixed value slots remain their
   respective `RootVector` carriers rather than becoming duplicate resource
   owners (D5.1.1v2, D5.4.2 and D7.4.1v2).
+- **JSCU31, native owner typing:** TLS ticket-generation and secure-context
+  owner lists now use explicit forward-declared record pointers in
+  `JsTlsNativeState`; the old `void*` fields and cast-based accessor macros are
+  gone. These lists remain native TLS policy state, while script-visible
+  transports continue to use the resource table (D5.3.5 and D7.4.1v2).
 - **JSCU33(A), callable-code owner:** immutable callable metadata formerly
   spread across `JsFunction` (`func_ptr`, source, runtime, arity, catalog,
   module, formal length, intrinsic/body tags) now lives in one

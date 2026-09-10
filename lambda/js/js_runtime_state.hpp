@@ -25,6 +25,8 @@ struct AstNode;
 struct DomDocument;
 struct DomElement;
 struct UiContext;
+struct TlsClientTicketState;
+struct JsTlsSecureContextOwner;
 
 // Namespace selection is the JS profile's counterpart to the shared module
 // slab scope.  Keep restoration identical for AST and MIR module entries.
@@ -251,8 +253,8 @@ struct JsReadlineState {
 };
 
 struct JsTlsNativeState {
-    void* client_ticket_states = NULL;
-    void* secure_context_owners = NULL;
+    TlsClientTicketState* client_ticket_states = NULL;
+    JsTlsSecureContextOwner* secure_context_owners = NULL;
 };
 
 struct JsStreamState : JsNamespaceState {
