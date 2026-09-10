@@ -492,7 +492,7 @@ static inline void jm_preserve_error_lane_carrier(JsMirTranspiler* mt,
         VALUE_REP_ITEM);
 }
 MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
-        int arg_count, MIR_reg_t* arg_regs, bool discard_result = false);
+        int arg_count, MIR_reg_t* arg_regs, bool discard_result = false, bool source_invocation = true);
 MIR_reg_t jm_module_name_id_at_index(JsMirTranspiler* mt, uint32_t index);
 MIR_reg_t jm_call_function_into(JsMirTranspiler* mt, MIR_op_t func,
         MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count);
@@ -504,8 +504,9 @@ MIR_reg_t jm_super_call_class_into(JsMirTranspiler* mt, MIR_op_t callee,
         MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count);
 MIR_reg_t jm_super_apply_class_into(JsMirTranspiler* mt, MIR_op_t callee,
         MIR_op_t this_value, MIR_op_t args);
-MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
-        int arg_count, MIR_reg_t* arg_regs);
+MirCallResult jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
+        int arg_count, MIR_reg_t* arg_regs, bool source_invocation = true);
+MIR_reg_t jm_finish_native_call(JsMirTranspiler* mt, MirCallResult result);
 MirValue jm_convert_rep(void* owner, MirValue value, ValueRep required);
 #define jm_call_void_0(mt, fn) \
     (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_0(&(mt)->func_em->em, fn, true))

@@ -2894,6 +2894,11 @@ static int js_mir_analyze_and_plan(void* opaque) {
                 JM_JS_FACT(fc, native_return_kind) == NATIVE_RETURN_FLOAT
                     ? VALUE_REP_F64 : VALUE_REP_I64,
                 SCALAR_RETURN_NONE};
+            // native normal and error lanes use Lambda's published return ABI.
+            native->result.shape = em_return_shape(true, true, SCALAR_RETURN_NONE);
+            native->result.companion = em_companion_transport(
+                native->result.shape, /*c_reachable=*/false);
+            native->result.error = {LMD_TYPE_ERROR, VALUE_REP_ITEM, SCALAR_RETURN_NONE};
             native->param_count = JM_PARAM_COUNT(fc);
             if (JM_PARAM_COUNT(fc) > 0) {
                 native->params = (FnParamAnalysis*)pool_calloc(

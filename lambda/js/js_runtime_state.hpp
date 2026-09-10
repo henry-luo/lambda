@@ -975,10 +975,6 @@ struct JsExecutionState {
 // native suspend check; activations themselves are GC-owned frame carriers.
 struct JsAsyncAwaitState : JsRootedState {
     Item resolved_value = {};
-    // The native calling convention returns an unboxed scalar and has no
-    // in-band ERROR carrier, so a throw inside a natively-typed body parks its
-    // lane here for the boxed entry (or a direct caller) to take on return.
-    Item native_throw_lane = {};
 };
 
 struct JsRuntimeState {
@@ -1061,8 +1057,7 @@ struct JsRuntimeState {
     // frame has returned.  The fixed tables are context-owned so resumes never
     // consult process-global state or contend with another isolate.
     // JSCU10: async activations are GC-owned frames, not a fixed table. The
-    // await handoff is its own precise owner, shared with the native throw lane
-    // so both scratch Items live under one root range.
+    // await handoff is its own precise owner.
     JsAsyncAwaitState async_await = {};
     int dynamic_func_counter = 0;
 

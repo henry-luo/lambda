@@ -1088,8 +1088,6 @@ Item js_promise_async_function_finish(Item promise, Item result,
 
 // Phase 6: Async state machine runtime
 Item js_async_prepare_await(Item value);
-void js_native_throw_publish(Item lane);         // native body -> boxed entry throw channel
-Item js_native_throw_take(void);                 // take and clear that channel
 Item js_async_wrap_return(Item value);           // fresh async-function result promise
 Item js_async_must_suspend(Item value);          // true if pending promise, false otherwise
 Item js_async_get_resolved(void);                // get cached resolved value

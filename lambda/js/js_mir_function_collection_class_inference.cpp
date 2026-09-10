@@ -96,12 +96,6 @@ bool jm_is_recursive_call(JsCallNode* call, JsFuncCollected* fc) {
 
 bool jm_call_result_uses_native_register(JsMirTranspiler* mt, JsCallNode* call, JsFuncCollected* fc) {
     if (!mt || !call || !fc) return false;
-    // non-tail self recursion is deliberately routed through js_call_function, so
-    // the MIR result is a boxed Item even when the function has a native body.
-    if (mt->current_fc && fc == mt->current_fc &&
-        (!mt->tco_func || !mt->in_tail_position || !jm_is_recursive_call(call, mt->tco_func))) {
-        return false;
-    }
     // A known native body is not enough: an unmatched direct call is lowered
     // through the boxed entry, whose slow lane can return any JavaScript value.
     // Reporting the inferred raw return here would make its caller unbox an

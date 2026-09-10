@@ -32141,27 +32141,10 @@ extern "C" void js_async_frame_map_heap_destroy(Map* map) {
 }
 
 // One scratch Item (await's resolved-value handoff) survives across the suspend
-// check. Its exact owner replaces the last direct async root registration, and
-// covers the native throw lane in the same range.
+// check. Its exact owner replaces the last direct async root registration.
 static bool js_async_ensure_scratch_root() {
     return js_active_runtime_state &&
         js_root_vector_ensure_registered(&js_runtime_state.async_await.roots);
-}
-
-// A native body reports a throw through these instead of its return value: the
-// native ABI returns an unboxed scalar, so there is no in-band ERROR carrier
-// for the caller to test. Publish happens on the native landing pad, take at
-// every site that calls a native entry directly; taking clears the slot so a
-// stale lane cannot be attributed to a later call.
-extern "C" void js_native_throw_publish(Item lane) {
-    js_async_ensure_scratch_root();
-    js_runtime_state.async_await.native_throw_lane = lane;
-}
-
-extern "C" Item js_native_throw_take(void) {
-    Item lane = js_runtime_state.async_await.native_throw_lane;
-    js_runtime_state.async_await.native_throw_lane = ItemNull;
-    return lane;
 }
 
 // Check if an awaited value requires suspension (pending promise)

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "description": "D8.4.3v2/D5.2.1v3: native calls carry an explicit error result, direct recursion retains the depth guard, and shared pending resolution removes the second scalar adoption.",
+  "checks": [
+    {
+      "in_func": "_js_nativeLeaf_#_n",
+      "expect": ["call\tjs_throw_value", "ret\t{{r}}, {{r}}"],
+      "forbid": ["js_native_throw", "lambda_item_adopt_scalar_home"]
+    },
+    {
+      "in_func": "_js_nativeRec_#_n",
+      "expect": ["call\t_js_nativeRec_", "call\tjs_throw_range_error", "i32:", "ret\t{{r}}, {{r}}"],
+      "forbid": ["js_native_throw", "js_call_function"]
+    },
+    {
+      "in_func": "_js_boxedCaller_#_body",
+      "expect": ["call\t_js_boxedStep_", "call\tlambda_item_resolve_pending"],
+      "forbid": ["lambda_item_adopt_scalar_home"]
+    }
+  ]
+}

@@ -1610,23 +1610,6 @@ static void emit_jit_root_frame_exit(MirTranspiler* mt) {
         offsetof(Context, side_root_top), mt->em.frame.root_base);
 }
 
-// The "no error" value on a shape-4 error lane.
-//
-// RV9 rules this `ItemNull` for the v3 pair: a `T^E` function returning a
-// legitimate `null` flows it on lane 1 (the value lane), so lane 2 `ItemNull`
-// can only ever mean "no error". The v1 context-lane transport predates that
-// ruling and encodes it as 0 (`ITEM_UNDEFINED`), with callers testing `BT`
-// (non-zero) rather than comparing; both are one instruction, so the two
-// encodings coexist per transport rather than being unified for its own sake.
-static inline MIR_op_t mir_error_lane_no_error_op(MirTranspiler* mt) {
-    // RV9: one definition of the no-error spelling, shared with the consumer
-    // (em_error_lane_in_register). Deriving it separately on each side is the
-    // mismatch this ruling exists to prevent.
-    return em_error_lane_in_register(mt->em.frame.plan.companion)
-        ? MIR_new_uint_op(mt->ctx, ITEM_NULL)
-        : MIR_new_int_op(mt->ctx, 0);
-}
-
 // v3 (RV1 shape 2): does this boxed body hand its wide payload back on a second
 // MIR result instead of a caller-donated home? The forward-declared contract
 // and the emitted body MUST answer identically — a contract promising the v2
@@ -1668,7 +1651,6 @@ static void begin_function_epilogue(MirTranspiler* mt, MIR_type_t return_type,
 
 static MIR_reg_t emit_box_float(MirTranspiler* mt, MIR_reg_t val_reg);
 static void emit_function_return(MirTranspiler* mt, MIR_op_t value) {
-    MIR_insn_code_t move = mt->em.frame.return_type == MIR_T_D ? MIR_DMOV : MIR_MOV;
     // physical-only: the ABI frame fixes the MIR move opcode; this does not
     // classify the Lambda value or infer its ValueRep (D2.4.1).
     // G0: a function declared `int` or `float` returns in the shared double
@@ -1690,15 +1672,7 @@ static void emit_function_return(MirTranspiler* mt, MIR_op_t value) {
             MIR_reg_type(mt->ctx, value.u.reg, mt->em.func) == MIR_T_D) {
         value = MIR_new_reg_op(mt->ctx, emit_box_float(mt, value.u.reg));
     }
-    emit_insn(mt, MIR_new_insn(mt->ctx, move,
-        MIR_new_reg_op(mt->ctx, mt->em.frame.return_reg), value));
-    if (mt->em.frame.return_lane_kind == RETURN_LANE_ERROR) {
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, mt->em.frame.error_return_reg),
-            mir_error_lane_no_error_op(mt)));
-    }
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-        MIR_new_label_op(mt->ctx, mt->em.frame.return_label)));
+    em_stage_function_return(&mt->em, value);
 }
 
 static void emit_function_error_return(MirTranspiler* mt, MIR_reg_t error_item) {
@@ -1706,16 +1680,9 @@ static void emit_function_error_return(MirTranspiler* mt, MIR_reg_t error_item) 
         emit_function_return(mt, MIR_new_reg_op(mt->ctx, error_item));
         return;
     }
-    MIR_insn_code_t move = mt->em.frame.return_type == MIR_T_D ? MIR_DMOV : MIR_MOV;
     MIR_op_t zero = mt->em.frame.return_type == MIR_T_D
         ? MIR_new_double_op(mt->ctx, 0.0) : MIR_new_int_op(mt->ctx, 0);
-    emit_insn(mt, MIR_new_insn(mt->ctx, move,
-        MIR_new_reg_op(mt->ctx, mt->em.frame.return_reg), zero));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, mt->em.frame.error_return_reg),
-        MIR_new_reg_op(mt->ctx, error_item)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-        MIR_new_label_op(mt->ctx, mt->em.frame.return_label)));
+    em_stage_function_return(&mt->em, zero, error_item);
 }
 
 static void emit_number_frame_enter(MirTranspiler* mt) {

@@ -848,8 +848,9 @@ static void js_runtime_state_visit_root_vectors(JsRuntimeState* state,
         "Promise unhandled queue and domain state", data);
     visit(&state->cluster.roots, &state->cluster.primary_options, 1,
         "cluster primary options", data);
-    visit(&state->async_await.roots, &state->async_await.resolved_value, 2,
-        "async await result handoff and native throw lane", data);
+    // the retired throw slot must not leave the following runtime IDs in the root span.
+    visit(&state->async_await.roots, &state->async_await.resolved_value, 1,
+        "async await result handoff", data);
     if (state->async_hooks) {
         visit(&state->async_hooks->roots, &state->async_hooks->root_resource, 2,
             "async hooks current resources", data);

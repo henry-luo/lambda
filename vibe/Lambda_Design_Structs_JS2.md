@@ -11,6 +11,8 @@
 > and native indexing; see [guarded-access progress](impl/Lambda_Impl_JS2_Guarded_Access.md)
 > against `a436d168f`. The wider shared operation/construction interfaces,
 > effect-based hoisting and additional lane coverage remain proposals.
+> Tasks 3 and 4 continue with [native completion, recursion and scalar ownership](impl/Lambda_Impl_JS2_Calls_Ownership.md)
+> against `fa254c56b`; that record owns their validation and measurement status.
 >
 > **Relationship to earlier work.** JSCU9–JSCU35 established or proposed shared
 > ownership for roots, capsules, activations, environments, resources and

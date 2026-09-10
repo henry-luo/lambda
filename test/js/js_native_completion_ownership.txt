@@ -1,0 +1,27 @@
+native-recursive 8.5
+native-depth true
+native-depth-restored 2.5 2500.5
+wide-throw true
+recursive 144
+native-leaf 6
+native-leaf-error native-leaf
+native-leaf-clean 8
+native-finally-error native-leaf
+native-finally-clean 8
+normal 5.5 4.5
+direct-error true
+boxed-error true
+after-error 3.5 5
+finally-override 17.5
+direct-depth true
+depth-restored 11 2501
+mixed-depth true
+mixed-restored 11 2501
+module-owner true true
+owned-results true
+special-numbers true true Infinity
+suspended-owner true
+helper-results true 3 -4 object false
+helper-order left,right,left,right,right
+bigint-results 1180591620717411303427 -2 4
+helper-error true

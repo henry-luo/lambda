@@ -6032,12 +6032,6 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
             if (fc && fc->node && fc->node->is_async) fc = NULL;
             if (fc && fc->node && fc->node->is_generator &&
                     ast_linked_node_count(fc->node->params) == 0) fc = NULL;
-            if (fc && mt->current_fc && fc == mt->current_fc &&
-                    (!mt->tco_func || !mt->in_tail_position ||
-                     !jm_is_recursive_call(call, mt->tco_func))) {
-                // non-tail self recursion must use js_call_function so the call-depth RangeError is catchable.
-                fc = NULL;
-            }
             if (fc && (jm_current_function_captures_with_scope(mt) ||
                     jm_node_has_with_ancestor(mt, (JsAstNode*)call) ||
                     jm_node_has_with_ancestor(mt, (JsAstNode*)resolved_fn))) {
@@ -6150,14 +6144,10 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
                             jm_transpile_discard_call_args(mt, arg);
 
                             bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
-                            MIR_reg_t result = jm_call_direct_native(mt, fc,
+                            MirCallResult native_call = jm_call_direct_native(mt, fc,
                                 JM_PARAM_COUNT(fc), native_args);
+                            MIR_reg_t result = jm_finish_native_call(mt, native_call);
                             jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
-                            // The native ABI has no in-band ERROR carrier, so a
-                            // callee throw arrives through the out-of-band lane.
-                            (void)jm_call_0(mt, "js_native_throw_take", MIR_T_I64);
-                            jm_error_lane_set_state(mt, JS_ERROR_LANE_UNKNOWN);
-                            jm_emit_error_lane_propagate_check(mt);
                             return jm_emit_call_native_value(mt, call, fc, result);
                         }
                 }
