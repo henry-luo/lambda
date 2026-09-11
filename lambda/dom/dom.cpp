@@ -8833,10 +8833,6 @@ static Item dom_template_content(DomElement* template_elem) {
     return fragment_item;
 }
 
-static Item dom_collect_child_nodes(DomElement* elem, bool elements_only) {
-    return elem ? dom_live_child_collection_bridge(elem, elements_only) : ItemNull;
-}
-
 // form[name] named getter: collect every listed control whose name or id
 // matches.
 typedef struct FormNamedGetterCtx {
@@ -8884,7 +8880,7 @@ static bool dom_get_textlike_property(DomNode* node, Item elem_item,
         return true;
     }
     if (strcmp(prop, "parentElement") == 0) {
-        *result = dom_parent_element_or_null(node);
+        *result = dom_fp_parent_element(elem_item);
         return true;
     }
     if (strcmp(prop, "isConnected") == 0) {
@@ -8902,19 +8898,11 @@ static bool dom_get_textlike_property(DomNode* node, Item elem_item,
     // by the ES43 traversal oracle, which walks the real sibling chain and so
     // disagreed with the property on all 15 text nodes of a small document.
     if (strcmp(prop, "nextElementSibling") == 0) {
-        DomNode* sibling = dom_next_script_visible_sibling(node);
-        while (sibling && !sibling->is_element()) {
-            sibling = dom_next_script_visible_sibling(sibling);
-        }
-        *result = sibling ? dom_wrap_element(sibling->as_element()) : ItemNull;
+        *result = dom_fp_next_element_sibling(elem_item);
         return true;
     }
     if (strcmp(prop, "previousElementSibling") == 0) {
-        DomNode* sibling = dom_prev_script_visible_sibling(node);
-        while (sibling && !sibling->is_element()) {
-            sibling = dom_prev_script_visible_sibling(sibling);
-        }
-        *result = sibling ? dom_wrap_element(sibling->as_element()) : ItemNull;
+        *result = dom_fp_previous_element_sibling(elem_item);
         return true;
     }
     if (strcmp(prop, "previousSibling") == 0) {
@@ -8922,7 +8910,7 @@ static bool dom_get_textlike_property(DomNode* node, Item elem_item,
         return true;
     }
     if (strcmp(prop, "childNodes") == 0) {
-        *result = dom_live_child_collection_bridge((void*)node, false);
+        *result = dom_fp_child_nodes(elem_item);
         return true;
     }
     if (strcmp(prop, "firstChild") == 0) {
@@ -9053,6 +9041,116 @@ extern "C" Item dom_core_next_sibling(Item n) {
 extern "C" Item dom_core_previous_sibling(Item n) {
     DomNode* node = (DomNode*)dom_unwrap_element(n);
     return node ? dom_node_link_item(dom_prev_script_visible_sibling(node)) : ItemNull;
+}
+
+// ---------------------------------------------------------------------------
+// The element-traversal rows (DERIVED, DOM_F_FASTPATH).
+//
+// Same story as the eight above: each body was `dom_prop_get(n, "camelCase")`,
+// which made the declared *fast path* slower than the derivation it exists to
+// accelerate. They walk the links directly now, so the flag states a fact.
+// ---------------------------------------------------------------------------
+
+// ParentNode and NonDocumentTypeChildNode share one element-skipping walk;
+// only the starting link and the direction differ.
+static Item dom_first_element_from(DomNode* start, bool forward) {
+    for (DomNode* node = start; node;
+         node = forward ? dom_next_script_visible_sibling(node)
+                        : dom_prev_script_visible_sibling(node)) {
+        if (node->is_element()) return dom_wrap_element(node->as_element());
+    }
+    return ItemNull;
+}
+
+extern "C" Item dom_fp_parent_element(Item n) {
+    DomNode* node = (DomNode*)dom_unwrap_element(n);
+    return node ? dom_parent_element_or_null(node) : ItemNull;
+}
+
+extern "C" Item dom_fp_first_element_child(Item n) {
+    DomNode* node = (DomNode*)dom_unwrap_element(n);
+    // ParentNode is Element-only, so CharacterData answers null rather than
+    // walking a child list it does not have.
+    if (!node || !node->is_element()) return ItemNull;
+    return dom_first_element_from(dom_first_script_visible_child(node->as_element()), true);
+}
+
+extern "C" Item dom_fp_last_element_child(Item n) {
+    DomNode* node = (DomNode*)dom_unwrap_element(n);
+    if (!node || !node->is_element()) return ItemNull;
+    return dom_first_element_from(dom_last_script_visible_child(node->as_element()), false);
+}
+
+extern "C" Item dom_fp_next_element_sibling(Item n) {
+    DomNode* node = (DomNode*)dom_unwrap_element(n);
+    // CharacterData implements NonDocumentTypeChildNode too (DOM 4.2.8), so
+    // these two accept text and comment receivers.
+    return node ? dom_first_element_from(dom_next_script_visible_sibling(node), true) : ItemNull;
+}
+
+extern "C" Item dom_fp_previous_element_sibling(Item n) {
+    DomNode* node = (DomNode*)dom_unwrap_element(n);
+    return node ? dom_first_element_from(dom_prev_script_visible_sibling(node), false) : ItemNull;
+}
+
+extern "C" Item dom_fp_children(Item n) {
+    DomNode* node = (DomNode*)dom_unwrap_element(n);
+    if (!node || !node->is_element()) return ItemNull;
+    return dom_live_child_collection_bridge(node->as_element(), true);
+}
+
+extern "C" Item dom_fp_child_nodes(Item n) {
+    DomNode* node = (DomNode*)dom_unwrap_element(n);
+    // CharacterData has an (empty) childNodes list, so text and comment nodes
+    // get the same live VArray rather than null.
+    return node ? dom_live_child_collection_bridge((void*)node, false) : ItemNull;
+}
+
+// The serialization rows. Same inversion again: each was a `dom_prop_get`
+// re-entry, so `dom.text_content(n)` walked the property chain to reach a
+// recursive walk that lives three lines away.
+static Item dom_serialized_item(StrBuf* sb) {
+    String* result = heap_create_name(sb->str ? sb->str : "");
+    strbuf_free(sb);
+    return (Item){.item = s2it(result)};
+}
+
+extern "C" Item dom_fp_text_content(Item n) {
+    DomNode* node = (DomNode*)dom_unwrap_element(n);
+    if (!node) return ItemNull;
+    // CharacterData.textContent is its own data verbatim -- including for a
+    // generated pseudo node, which the descendant walk below skips.
+    if (node->is_text()) {
+        const char* text = node->as_text()->text;
+        return js_name_item(text ? text : "");
+    }
+    if (node->is_comment()) {
+        const char* content = node->as_comment()->content;
+        return js_name_item(content ? content : "");
+    }
+    StrBuf* sb = strbuf_new_cap(128);
+    collect_text_content(node, sb);
+    return dom_serialized_item(sb);
+}
+
+extern "C" Item dom_fp_inner_html(Item n) {
+    DomNode* node = (DomNode*)dom_unwrap_element(n);
+    // Serialization is an Element operation; CharacterData has no markup face.
+    if (!node || !node->is_element()) return ItemNull;
+    StrBuf* sb = strbuf_new_cap(256);
+    for (DomNode* child = dom_first_script_visible_child(node->as_element()); child;
+         child = dom_next_script_visible_sibling(child)) {
+        collect_inner_html(child, sb);
+    }
+    return dom_serialized_item(sb);
+}
+
+extern "C" Item dom_fp_outer_html(Item n) {
+    DomNode* node = (DomNode*)dom_unwrap_element(n);
+    if (!node || !node->is_element()) return ItemNull;
+    StrBuf* sb = strbuf_new_cap(256);
+    collect_inner_html(node, sb);
+    return dom_serialized_item(sb);
 }
 
 extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
@@ -9259,34 +9357,12 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // textContent / innerText (recursive text extraction)
     if (prop_id == JS_DOM_PROP_TEXT_CONTENT || prop_id == JS_DOM_PROP_INNER_TEXT) {
-        StrBuf* sb = strbuf_new_cap(128);
-        collect_text_content((DomNode*)elem, sb);
-        String* result = heap_create_name(sb->str ? sb->str : "");
-        strbuf_free(sb);
-        return (Item){.item = s2it(result)};
+        return dom_fp_text_content(elem_item);
     }
 
-    // innerHTML (recursive HTML serialization of children)
-    if (prop_id == JS_DOM_PROP_INNER_HTML) {
-        StrBuf* sb = strbuf_new_cap(256);
-        DomNode* child = dom_first_script_visible_child(elem);
-        while (child) {
-            collect_inner_html(child, sb);
-            child = dom_next_script_visible_sibling(child);
-        }
-        String* result = heap_create_name(sb->str ? sb->str : "");
-        strbuf_free(sb);
-        return (Item){.item = s2it(result)};
-    }
-
-    // v12: outerHTML (element itself + children)
-    if (prop_id == JS_DOM_PROP_OUTER_HTML) {
-        StrBuf* sb = strbuf_new_cap(256);
-        collect_inner_html((DomNode*)elem, sb);
-        String* result = heap_create_name(sb->str ? sb->str : "");
-        strbuf_free(sb);
-        return (Item){.item = s2it(result)};
-    }
+    // innerHTML / outerHTML (recursive HTML serialization)
+    if (prop_id == JS_DOM_PROP_INNER_HTML) return dom_fp_inner_html(elem_item);
+    if (prop_id == JS_DOM_PROP_OUTER_HTML) return dom_fp_outer_html(elem_item);
 
     // nodeType
     if (prop_id == JS_DOM_PROP_NODE_TYPE) return dom_core_node_type(elem_item);
@@ -9302,15 +9378,11 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = i2it((int64_t)count)};
     }
 
-    // children (array of child DOM elements only)
-    if (prop_id == JS_DOM_PROP_CHILDREN) {
-        return dom_collect_child_nodes(elem, true);
-    }
+    // children (live element-only VArray)
+    if (prop_id == JS_DOM_PROP_CHILDREN) return dom_fp_children(elem_item);
 
     // parentElement
-    if (prop_id == JS_DOM_PROP_PARENT_ELEMENT) {
-        return dom_parent_element_or_null((DomNode*)elem);
-    }
+    if (prop_id == JS_DOM_PROP_PARENT_ELEMENT) return dom_fp_parent_element(elem_item);
 
     // parentNode (includes text nodes — returns any parent)
     if (prop_id == JS_DOM_PROP_PARENT_NODE) return dom_core_parent_node(elem_item);
@@ -9348,55 +9420,14 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     if (prop_id == JS_DOM_PROP_NEXT_SIBLING) return dom_core_next_sibling(elem_item);
     if (prop_id == JS_DOM_PROP_PREVIOUS_SIBLING) return dom_core_previous_sibling(elem_item);
 
-    // firstElementChild
-    if (prop_id == JS_DOM_PROP_FIRST_ELEMENT_CHILD) {
-        DomNode* child = dom_first_script_visible_child(elem);
-        while (child) {
-            if (child->is_element()) return dom_wrap_element(child->as_element());
-            child = dom_next_script_visible_sibling(child);
-        }
-        return ItemNull;
-    }
-
-    // lastElementChild
-    if (prop_id == JS_DOM_PROP_LAST_ELEMENT_CHILD) {
-        DomNode* child = dom_last_script_visible_child(elem);
-        while (child) {
-            if (child->is_element()) return dom_wrap_element(child->as_element());
-            child = dom_prev_script_visible_sibling(child);
-        }
-        return ItemNull;
-    }
-
-    // nextElementSibling
-    if (prop_id == JS_DOM_PROP_NEXT_ELEMENT_SIBLING) {
-        DomNode* sib = dom_next_script_visible_sibling((DomNode*)elem);
-        while (sib) {
-            if (sib->is_element()) return dom_wrap_element(sib->as_element());
-            sib = dom_next_script_visible_sibling(sib);
-        }
-        return ItemNull;
-    }
-
-    // previousElementSibling
-    if (prop_id == JS_DOM_PROP_PREVIOUS_ELEMENT_SIBLING) {
-        DomNode* sib = dom_prev_script_visible_sibling((DomNode*)elem);
-        while (sib) {
-            if (sib->is_element()) return dom_wrap_element(sib->as_element());
-            sib = dom_prev_script_visible_sibling(sib);
-        }
-        return ItemNull;
-    }
+    // element traversal — the rows own the element-skipping walk
+    if (prop_id == JS_DOM_PROP_FIRST_ELEMENT_CHILD) return dom_fp_first_element_child(elem_item);
+    if (prop_id == JS_DOM_PROP_LAST_ELEMENT_CHILD) return dom_fp_last_element_child(elem_item);
+    if (prop_id == JS_DOM_PROP_NEXT_ELEMENT_SIBLING) return dom_fp_next_element_sibling(elem_item);
+    if (prop_id == JS_DOM_PROP_PREVIOUS_ELEMENT_SIBLING) return dom_fp_previous_element_sibling(elem_item);
 
     // childNodes (all children including text nodes)
-    if (prop_id == JS_DOM_PROP_CHILD_NODES) {
-        return dom_collect_child_nodes(elem, false);
-    }
-
-    // children (live element-only VArray)
-    if (prop_id == JS_DOM_PROP_CHILDREN) {
-        return dom_live_child_collection_bridge(elem, true);
-    }
+    if (prop_id == JS_DOM_PROP_CHILD_NODES) return dom_fp_child_nodes(elem_item);
 
     if (_is_tag(elem, "img") &&
         (prop_id == JS_DOM_PROP_NATURAL_WIDTH || prop_id == JS_DOM_PROP_NATURAL_HEIGHT)) {
