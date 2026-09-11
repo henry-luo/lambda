@@ -17,11 +17,12 @@ These rules MUST be followed. Violations are considered errors.
 11. **In `radiant/` layout code, NEVER use `int` for position/dimension variables**. All layout dimensions are `float`. If an `(int)` cast is truly needed (e.g., string length, repeat count), mark it with `// INT_CAST_OK: <reason>`. Run `make lint ARGS='--rule ^no-int-cast-radiant$'` to verify (or `make lint` for the full sweep).
 12. Concisely comment any non-trivial code change. Do not add generic narration.
 13. **NEVER duplicate code.** Grep for an existing helper before writing one. At the 3rd near-identical variant (type/kind/case), extract the shared shape first. To reuse another file's `static`, promote it to the module header — never copy it.
-14. **The legacy C2MIR path is REMOVED.** `transpile.cpp`/`transpile-call.cpp` and the CLI flag that selected them are gone; MIR Direct (`transpile-mir.cpp`) is the only back end. Do not reintroduce a C-text back end or add C2MIR support to new runtime/ABI/design work.
+14. **The legacy C2MIR path is REMOVED.** MIR Direct (`transpile-mir.cpp`) is the only back end. 
 15. **NEVER restore or rely on conservative native-stack GC scanning.** It is retired. Fix GC lifetime bugs with precise `RootFrame` / `Rooted` ownership only.
-16. **NEVER patch third-party vendor code.** MIR (`lambda/mir/`), the Tree-sitter runtime (`lambda/tree-sitter/`) and its vendored language grammars (`lambda/tree-sitter-{bash,javascript,latex,latex-math,python,ruby,typescript}/`), ThorVG, re2, curl and every other vendored dependency are off limits — do not edit them in place. Fix the defect on the Lambda side instead. If the fix genuinely belongs upstream, STOP and ask for approval first, explaining the root cause. Once approved, record the change as a patch under `patches/` so the delta versus upstream stays auditable — see `lambda/mir/VENDOR.md` for the pattern. **`lambda/tree-sitter-lambda/` is NOT vendored** — it is Lambda's own grammar. Edit `grammar.js` and `src/scanner.c` there directly, then regenerate per rule 5; never hand-edit its generated `src/parser.c`.
+16. **NEVER patch third-party vendor code.** MIR (`lambda/mir/`), the Tree-sitter runtime (`lambda/tree-sitter/`) and its vendored language grammars (`lambda/tree-sitter-{bash,javascript,latex,latex-math,python,ruby,typescript}/`), ThorVG, re2, curl and every other vendored dependency are off limits — do not edit them in place. Fix the defect on the Lambda side instead. If the fix genuinely belongs upstream, STOP and ask for approval first, explaining the root cause. Once approved, record the change as a patch under `patches/` so the delta versus upstream stays auditable — see `lambda/mir/VENDOR.md` for the pattern. **`lambda/tree-sitter-lambda/` is NOT vendored** — it is Lambda's own grammar.
 17. **Cite rulings by formal-spec ID.** `doc/Lambda_Formal_Semantics.md` (`S#`) and `doc/Lambda_Formal_Design.md` (`D#`) are the single sources of truth. In chat/discussion and in every new or updated design/impl doc, quote the `S#`/`D#` point when one covers the topic; only when none exists, quote the vibe design-doc ledger ID (e.g. TE-16, K13, CW9). When a semantics or design ruling changes, update BOTH the `./doc` formal spec (revise the ruling in place: `v2` suffix + doc semver bump) and the relevant `./vibe` working design doc. Documentation tiers, authority order, and style conventions: `doc/Doc_Convention.md`.
-18. **When js262/Test262 tests fail, crash, or time out, NEVER modify `test_js_test262_gtest` to mask the issue. Investigate and fix the root cause or instability in the JS runtime.**
+18. **When js262/Test262 tests fail, crash, or time out, NEVER modify `test_js_test262_gtest` to mask the issue. ** Investigate and fix the root cause or instability in the JS runtime.
+19. When asked to reduce LOC, **NEVER ever remove blank/comment lines, or reformat the code to reduce LOC**. Simplify the code itself.
 
 | DON'T | DO |
 |-------|-----|
@@ -45,9 +46,9 @@ Lambda Script is a **general-purpose, cross-platform, pure functional scripting 
 
 ### Key Characteristics
 - **Language Type**: Pure functional scripting language with modern syntax
-- **Implementation**: Custom C/C++ runtime with Tree-sitter based parsing
+- **Implementation**: Custom C/C++ runtime 
 - **Compilation**: JIT compilation via MIR for near-native performance
-- **Memory Management**: Garbage collection with three-tier string allocation (namepool, arena, GC heap)
+- **Memory Management**: Garbage collection with three-tier string allocation (name pool, arena, GC heap)
 - **Target Use Cases**: Data processing, document transformation, mathematical computation, CSS layout and rendering
 - **Input Formats**: JSON, XML, HTML, CSS, Markdown, PDF, YAML, LaTeX, CSV, TOML, etc.
 - **Output Formats**: JSON, HTML, Markdown, YAML, PDF, SVG, PNG, etc.
@@ -83,7 +84,7 @@ Access type with `get_type_id(Item)` - handles all variants uniformly.
 - **Validation**: `lambda/validator/` - schema-based type validation
 - **CSS Engine**: `lambda/input/css/` - CSS parser and cascade resolver
 
-### Radiant Layout Engine (`radiant/`)
+### Radiant GUI Engine (`radiant/`)
 CSS layout and rendering engine for HTML/CSS document presentation.
 - **DOM/View Tree**: `DomNode` → `DomText`/`DomElement` (both DOM and layout views)
 - **Layout**: `layout_block.cpp`, `layout_inline.cpp`, `layout_flex.cpp`, `layout_grid.cpp`, `layout_table.cpp`
@@ -141,7 +142,6 @@ Lambda adopts a **C+** coding convention - a subset of C++ that is C compatible.
 - **Logging**: Use `log_debug()`/`log_info()`/`log_error()` from `lib/log.h` → outputs to `./log.txt`
 - **Naming**: `snake_case` for C/C++ functions, `PascalCase` for classes
 - **Comments**: Start inline comments in lowercase: `// process the next token`. For bug fixes, add a short comment at the fix point explaining why the code is necessary, especially for lifecycle, ownership, memory, async, batching, parser, or platform edge cases. Prefer root-cause comments over restating what the code does.
-- **Error handling**: Return `ItemNull` or `ItemError`, log errors with `log_error()`
 
 ## Key Entry Points
 
