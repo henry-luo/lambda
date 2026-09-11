@@ -25396,10 +25396,9 @@ static bool mir_emit_const_folded_item(MirTranspiler* mt, AstNode* node,
     Item value = {.item = facts->folded_item};
     TypeId type_id = get_type_id(value);
     if (type_id != evaluated->type->type_id) return false;
-    if (type_id != LMD_TYPE_INT && type_id != LMD_TYPE_BOOL &&
-            type_id != LMD_TYPE_NULL) {
-        return false;
-    }
+    // the producer already admitted only self-contained words; re-check here
+    // because a baked operand must never be a pointer (DI14, RC4).
+    if (!lambda_item_is_self_contained(value.item)) return false;
     MIR_reg_t result = new_reg(mt, "const_fold", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, result),

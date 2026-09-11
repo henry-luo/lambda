@@ -5277,18 +5277,14 @@ static bool interp_const_node_supported(AstNode* node) {
     }
 }
 
-// fold facts deliberately carry only tagged immediate values. Float and all
-// pointer-backed results may be valid during the attempt but must not survive
-// its side-stack lifetime or enter cacheable MIR as a stale address (DI14).
+// A fold fact must outlive the throwaway frame that produced it and may be
+// baked into cacheable MIR, so it may carry only a self-contained Item -- never
+// a pointer into frame, pool, or heap storage (DI14). This asks the
+// representation, not the TypeId: a self-tagged double is as safe to keep as an
+// int, while the residue that failed to pack is a pointer and is not.
+// [RC4, vibe/Lambda_Design_Runtime_Const.md]
 static bool interp_const_result_is_immediate(Item result) {
-    switch (get_type_id(result)) {
-    case LMD_TYPE_NULL:
-    case LMD_TYPE_BOOL:
-    case LMD_TYPE_INT:
-        return true;
-    default:
-        return false;
-    }
+    return lambda_item_is_self_contained(result.item);
 }
 
 bool interp_const_fold_script(Transpiler* tp) {

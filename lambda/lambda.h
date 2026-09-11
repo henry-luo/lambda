@@ -2012,6 +2012,30 @@ static inline bool lambda_item_is_merged_poison(uint64_t bits) {
     return (bits & ITEM_DBL_MASK) && LAMBDA_ITEM_IS_IEEE_SPECIAL(bits);
 }
 
+// Does this Item word carry its whole value, with no pointer into heap, pool,
+// or frame storage? Such a word stays valid for the life of the process, so it
+// may outlive the frame that produced it and may be baked into cacheable MIR
+// (DI14). This is a question about representation, not about TypeId: most
+// doubles are self-tagged (the Item *is* the IEEE bit pattern) while the
+// residue `lambda_float_ptr_to_item` cannot pack is a pointer to a boxed
+// double. [RC4, vibe/Lambda_Design_Runtime_Const.md]
+static inline bool lambda_item_is_self_contained(uint64_t bits) {
+    // the double test comes first: an inline double can carry any high byte.
+    if (bits & ITEM_DBL_MASK) return true;
+    switch ((uint8_t)(bits >> 56)) {
+    case LMD_TYPE_NULL:
+    case LMD_TYPE_BOOL:
+    case LMD_TYPE_INT:
+        return true;
+    case LMD_TYPE_FLOAT:
+        // ±0 are packed outside the double space; every other float word here
+        // failed to pack and holds a pointer.
+        return bits == ITEM_FLOAT_P0 || bits == ITEM_FLOAT_N0;
+    default:
+        return false;
+    }
+}
+
 // Is this Item word a packed (finite) int? The tag byte alone decides -- but
 // the double test must come first, because an inline double can carry any high
 // byte. Callers inside type_id() have already excluded doubles.
