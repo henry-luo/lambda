@@ -1,0 +1,22 @@
+id: no-dom-row-name-dispatch
+language: cpp
+severity: warning
+message: >-
+  A DOM catalog body reaches its own mechanism by property NAME. `dom_prop_get`
+  re-enters the string-keyed property protocol (fn_to_cstr + a bsearch over the
+  152-name JS_DOM_PROPS table + a linear if-chain), so a row implemented this
+  way costs two extra dispatch hops and, for a DOM_F_FASTPATH row, is slower
+  than the derivation it exists to accelerate. Put the body beside the helpers
+  it needs (dom.cpp) and let the property arm delegate to the row, not the
+  reverse — that is the direction D7.4.4 and ES38 require, and it keeps one
+  implementation per operation across both doors. See
+  vibe/impl/Lambda_Impl_DOM_Simplify.md DS8/DS14. Rows still blocked on a
+  recorded design issue mark the line "// DOM_NAME_DISPATCH_OK: <DSO id>".
+metadata:
+  suppress: DOM_NAME_DISPATCH_OK
+rule:
+  any:
+    - pattern: dom_prop_get($NODE, $NAME)
+    - pattern: dom_prop_set($NODE, $NAME, $$$V)
+files:
+  - "lambda/dom/dom_core.cpp"

@@ -691,7 +691,13 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc);
 MIR_reg_t jm_emit_module_const_value(JsMirTranspiler* mt,
     const JsModuleConstEntry* mc);
 bool jm_capture_uses_live_module_var(JsMirTranspiler* mt, FnCapture* capture);
+// Compiler-synthesized pseudo-bindings (`_js_this`, `_js_new.target`,
+// `_js_arguments`) are not user source names; sites recognize them through
+// these two predicates rather than open-coding a spelling (D8.2.4).
 bool jm_capture_is_lexical_meta_binding(const char* name);
+// `this`/`new.target` ride the receiver, so a receiver rebind excludes exactly
+// those two while `arguments` stays an ordinary env slot.
+bool jm_is_receiver_meta_binding(const char* name);
 int jm_capture_env_slot(FnCapture* capture, int dense_slot);
 void jm_emit_class_static_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
     MIR_reg_t key, MIR_reg_t value, bool private_brand);
@@ -699,6 +705,9 @@ void jm_emit_class_static_named_field(JsMirTranspiler* mt, MIR_reg_t cls_obj,
     JsStaticFieldEntry* sf, MIR_reg_t value);
 MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item);
 MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr);
+// JS side of the shared structural lowering hooks installed on MirEmitter.
+MirValue jm_profile_lower_value(void* owner, AstNode* node);
+MIR_reg_t jm_profile_emit_condition(void* owner, MirValue value);
 MirValue jm_transpile_expression_value(JsMirTranspiler* mt, JsAstNode* item,
     uint32_t demand = MIR_VALUE_ANY, ValueRep required = VALUE_REP_NONE);
 MIR_reg_t jm_load_module_var(JsMirTranspiler* mt, uint32_t slot);

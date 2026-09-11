@@ -262,6 +262,13 @@ rules:
     enforces: claude-md/rule-4
     tags: [logging]
 
+  no-dom-row-name-dispatch:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-dom-row-name-dispatch.yml
+    category: api-hygiene
+    enforces: claude-md/rule-13
+    tags: [dom, dispatch]
+
   no-std-containers:
     backend: ast-grep
     file: utils/lint/rules/c-cpp/no-std-containers.yml

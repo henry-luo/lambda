@@ -261,7 +261,12 @@ extern "C" Item dom_engine_load_document(Item path) {
 // the node-kind rules they need, and the property arms there delegate to them.
 // They were `dom_prop_get(n, "camelCaseName")` here, which made the mechanism
 // the whole DOM composes over re-enter the property protocol by name.
-extern "C" Item dom_core_owner_document(Item n)   { return dom_prop_get(n, "ownerDocument"); }
+// DOM_NAME_DISPATCH_OK: DSO9 -- ownerDocument's element and CharacterData
+// paths genuinely differ today (only the element arm has the realm-free
+// dom_get_or_create_doc_node fallback), so hoisting a single body would change
+// behaviour for text nodes. It is realm-dependent besides, so it belongs with
+// the document rows in DS15 rather than here.
+extern "C" Item dom_core_owner_document(Item n)   { return dom_prop_get(n, "ownerDocument"); }  // DOM_NAME_DISPATCH_OK: DSO9
 // identity: `==` cannot express it (S5.1.4 + zero-entry wrappers), so the DOM
 // supplies it as an operation, exactly as Node.isSameNode() does.
 extern "C" Item dom_core_same_node(Item a, Item b)  { return dom_op1(a, JUBE_DOM_IS_SAME_NODE, b); }
@@ -548,7 +553,7 @@ extern "C" Item dom_core_matches(Item n, Item selector) {
 }
 extern "C" Item dom_core_serialize(Item n, Item outer) {
     bool is_outer = get_type_id(outer) == LMD_TYPE_BOOL && it2b(outer);
-    return dom_prop_get(n, is_outer ? "outerHTML" : "innerHTML");
+    return is_outer ? dom_fp_outer_html(n) : dom_fp_inner_html(n);
 }
 
 // --- geometry
@@ -582,7 +587,11 @@ static Item dom_result_map(DomDocument* doc, const char* const* keys, const Item
 extern "C" Item dom_core_scroll_state(Item n) {
     DomDocument* doc = (DomDocument*)dom_document_from_item(n);
     static const char* const keys[] = { "x", "y" };
-    Item vals[] = { dom_prop_get(n, "scrollLeft"), dom_prop_get(n, "scrollTop") };
+    // DOM_NAME_DISPATCH_OK: DSO8 -- the geometry commit these two need lives
+    // only in radiant_dom_get_property, which this door does not cross. Giving
+    // the row its own committing read here would make a third place that knows
+    // which properties need layout; DS16 moves the commit onto the row instead.
+    Item vals[] = { dom_prop_get(n, "scrollLeft"), dom_prop_get(n, "scrollTop") };  // DOM_NAME_DISPATCH_OK: DSO8
     return dom_result_map(doc, keys, vals, 2);
 }
 extern "C" Item dom_core_set_scroll_state(Item n, Item x, Item y) {
@@ -652,19 +661,19 @@ extern "C" Item dom_core_css_color_valid(Item value) {
 // DERIVED fast paths — each equals its derivation in dom_api.def
 // ===========================================================================
 
-extern "C" Item dom_fp_first_element_child(Item n)     { return dom_prop_get(n, "firstElementChild"); }
-extern "C" Item dom_fp_last_element_child(Item n)      { return dom_prop_get(n, "lastElementChild"); }
-extern "C" Item dom_fp_next_element_sibling(Item n)    { return dom_prop_get(n, "nextElementSibling"); }
-extern "C" Item dom_fp_previous_element_sibling(Item n){ return dom_prop_get(n, "previousElementSibling"); }
-extern "C" Item dom_fp_parent_element(Item n)          { return dom_prop_get(n, "parentElement"); }
+// The five element-traversal rows live in dom.cpp with the eight node links,
+// beside the script-visible walkers they share.
 // root_node IS its derivation: JUBE_DOM_GET_ROOT_NODE is answered on the
 // module side (radiant_dom_bridge.cpp), never by the core executor, so the
 // ordinal is null from a Lambda caller. Walking parent_node is the mechanism.
 // Without a document wrapper (ESO93) the walk ends at the document element.
 extern "C" Item dom_fp_root_node(Item n) {
     Item cur = n;
-    for (Item p = dom_prop_get(cur, "parentNode"); get_type_id(p) != LMD_TYPE_NULL;
-         p = dom_prop_get(cur, "parentNode")) {
+    // One link read per ancestor; this used to be a property-protocol lookup
+    // per ancestor, so a deep tree paid the 152-name bsearch and the linear
+    // chain on every step of the walk.
+    for (Item p = dom_core_parent_node(cur); get_type_id(p) != LMD_TYPE_NULL;
+         p = dom_core_parent_node(cur)) {
         cur = p;
     }
     return cur;
@@ -683,8 +692,8 @@ extern "C" Item dom_fp_equal_node(Item a, Item b)      { return dom_op1(a, JUBE_
 
 // D7.4.5v2: Lambda and JS share the owner-backed VArray; Lambda's DOM remains
 // fixed for the run, so no second membership snapshot is needed.
-extern "C" Item dom_fp_children(Item n)    { return dom_prop_get(n, "children"); }
-extern "C" Item dom_fp_child_nodes(Item n) { return dom_prop_get(n, "childNodes"); }
+// children / child_nodes also live in dom.cpp: both answer the live VArray
+// backend directly rather than asking the property protocol for it.
 
 extern "C" Item dom_fp_append_child(Item parent, Item child) {
     return dom_op1(parent, JUBE_DOM_APPEND_CHILD, child);
@@ -706,9 +715,8 @@ extern "C" Item dom_fp_create_text_node(Item doc, Item data) {
 extern "C" Item dom_fp_clone_node(Item n, Item deep) {
     return dom_op1(n, JUBE_DOM_CLONE_NODE, deep);
 }
-extern "C" Item dom_fp_text_content(Item n) {
-    return dom_prop_get(n, "textContent");
-}
+// text_content / inner_html / outer_html live in dom.cpp with the recursive
+// walks they drive.
 extern "C" Item dom_fp_query_selector(Item root, Item selector) {
     return dom_op1(root, JUBE_DOM_QUERY_SELECTOR, selector);
 }
@@ -727,5 +735,4 @@ extern "C" Item dom_fp_has_attribute(Item n, Item name) {
     Item value = dom_core_get_attribute(n, name);
     return (Item){.item = b2it(get_type_id(value) != LMD_TYPE_NULL)};
 }
-extern "C" Item dom_fp_inner_html(Item n) { return dom_prop_get(n, "innerHTML"); }
-extern "C" Item dom_fp_outer_html(Item n) { return dom_prop_get(n, "outerHTML"); }
+

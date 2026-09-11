@@ -521,7 +521,7 @@ No silent `if (count >= 256) return` remains. Allocation failure becomes an expl
 
 ### 9.1 Binding identity plus fact tables
 
-D8.2.4 requires dense stable binding IDs; D8.2.5 requires optimization facts in ID-keyed side tables. Replace `NameEntry`/`VarEntry` fact accumulation with:
+D8.2.4 requires dense stable binding IDs. **D8.2.5v2** (revised 2026-09-11) no longer places per-node optimization facts in ID-keyed side tables: inferred type and const results are essential runtime facts that stay on the AST, and only erasable *type-scoped* facts move to a lazy record behind a `Type` pointer. Binding-scoped facts below remain ID-keyed. Replace `NameEntry`/`VarEntry` fact accumulation with:
 
 ```text
 BindingId -> BindingDecl
@@ -724,7 +724,7 @@ Performance-sensitive shape/container/context changes are measured only with `ma
 - **R6 — JS mutable state leaks back into shared shapes.** Mitigation: immutable `JsClassMeta` only on shared type/family descriptors (D3.4.7); context-owned caches keyed by stable shape identity.
 - **R7 — Context ownership migration creates transient double-free or dangling TLS state.** Mitigation: move one resource at a time, assert sole ownership and destroy through `EvalContext` only before deleting the mirror.
 - **R8 — Function metadata sharing breaks closure identity or GC tracing.** Mitigation: immutable `FunctionCode`; captures remain per `FunctionValue`; retain explicit `closure_field_count` until tracing metadata is proven equivalent.
-- **R9 — Fact tables become unsynchronized.** Mitigation: D8.2.5 pass manager declares producers/consumers; facts are immutable after their producing pass and indexed by stable IDs.
+- **R9 — Fact tables become unsynchronized.** Mitigation: the **D8.2.5v2** pass manager declares producers/consumers; binding-scoped facts are immutable after their producing pass and indexed by stable IDs. Per-node type facts are not tabled at all — they live on `AstNode.type` — so they cannot desynchronize.
 - **R10 — Clean-up turns into semantic flattening.** Mitigation: the non-consolidation table is a mandatory review gate; cite the applicable S#/D# ruling in every implementation PR.
 
 ## 15. Completion criteria

@@ -1,8 +1,9 @@
 # DOM Simplify: collapsing the script-runtime ↔ Radiant DOM interface
 
 - **Date:** 2026-09-11.
-- **Status:** PROPOSED. No implementation has started; every number below is a
-  measurement of HEAD, not of a candidate.
+- **Status:** IN PROGRESS. Sections 1–5 and 7–10 are the proposal; §6.0 below
+  records what has landed. Every measurement in §2–§4 is of HEAD at the audit
+  commit, not of a candidate.
 - **Source audit:** HEAD `fa77dbdcc`, working tree as of 2026-09-11.
 - **Scope:** the interface *between* the script runtimes (LambdaJS, Lambda
   script) and the Radiant engine — `lambda/dom/`, `lambda/module/radiant/`,
@@ -636,6 +637,162 @@ reach two and one only because a vtable *is* the dispatch.
 
 Each phase is independently landable and independently gated.
 
+### 6.0 Landed so far (2026-09-11)
+
+**DS14 — the eight node-link `CORE` rows** (`node_type`, `node_name`,
+`node_value`, `parent_node`, `first_child`, `last_child`, `next_sibling`,
+`previous_sibling`). Bodies moved from `dom_core.cpp`, where each was
+`dom_prop_get(n, "camelCaseName")`, into `dom.cpp` beside the script-visible
+traversal helpers and the node-kind rules they need. The property-chain arms
+now delegate *to* the rows instead of the rows re-entering the chain, so the
+two doors keep one implementation (ES38, D7.4.4).
+
+**DS14 extended — the seven element-traversal rows** (`parent_element`,
+`first_element_child`, `last_element_child`, `next_element_sibling`,
+`previous_element_sibling`, `children`, `child_nodes`). Same inversion. These
+carry `DOM_F_FASTPATH`, so until now the declared *fast path* was slower than
+the derivation it exists to accelerate; the flag states a fact for the first
+time. The element-skipping walk was written out four times in the chain and
+twice more in the textlike handler; it is one `dom_first_element_from(start,
+forward)` helper now.
+
+Incidental, found by the change rather than looked for:
+
+- A **dead duplicate** `JS_DOM_PROP_CHILDREN` arm — two arms for one property,
+  the second unreachable. Removed, with its now-unused `dom_collect_child_nodes`
+  wrapper (the compiler's `-Werror=unused-function` found that one).
+- **A live two-door divergence, recorded not fixed (see DSO8).**
+
+**DS14 completed — the serialization rows** (`text_content`, `inner_html`,
+`outer_html`) and two more re-entries the lint rule found that a grep for
+string literals could not: `dom_core_serialize`, which chose the property name
+*dynamically* (`is_outer ? "outerHTML" : "innerHTML"`), and `dom_fp_root_node`,
+which called `dom_prop_get(cur, "parentNode")` **once per ancestor** — so a
+deep tree paid the 152-name bsearch and the linear chain on every step of the
+walk.
+
+**DS11 (first rule) — `no-dom-row-name-dispatch`**, at
+`utils/lint/rules/c-cpp/no-dom-row-name-dispatch.yml` and registered in the
+lint manifest. It makes the invariant checkable: *no catalog body reaches its
+own mechanism by property name*. It found the two cases above on its first run,
+which is the argument for writing the rule rather than trusting the sweep.
+
+| Measure | Before | After |
+|---|---:|---:|
+| `dom_prop_get` string re-entries in `dom_core.cpp` | 21 | **3**, each suppressed with a recorded DSO id |
+| Rows whose body re-enters the property protocol | 18 | **0** unblocked |
+| Net code lines | — | **≈ −4** |
+
+The three that remain are blocked on recorded design issues, not on effort:
+`owner_document` (DSO9), and the two scroll reads inside `scroll_state`
+(DSO8). Both carry `// DOM_NAME_DISPATCH_OK: <id>` so the rule passes clean
+while the debt stays visible.
+
+**Net lines are ~zero, and that is the expected shape**: DS14 buys *hops*, not
+lines (classes B and G, 5 → 3). The line gate is carried by P1–P3. The earlier
+claim that DS14 contributed to P4's ≈190-line budget was wrong — that budget is
+the snapshot→`VArray` work, which is untouched.
+
+**DS4 (partial) — one reflection table for the module.**
+`lambda/dom/dom_reflect.def` now declares 16 reflected attributes once, as
+`(name, attr, [fallback,] tags)`. `radiant_dom_bridge.cpp` generates the
+accessor pair from it and `radiant_dom_iface.cpp` generates the matching
+`extern` declarations, so a binding row cannot name an accessor the table does
+not define. Per attribute this replaced a `RADIANT_REFLECT_*` invocation, a
+`RADIANT_GUARDED_GET`/`_SET` pair and two `extern`s; the element set an
+attribute exists on is now stated beside the attribute instead of in a
+separately-named guard function. **Nine tag-set guards became dead and were
+removed** — they are `RADIANT_C_API`, so the compiler could not flag them.
+
+All 16 tag sets were verified byte-identical against the guards they replaced,
+mechanically rather than by eye.
+
+Two rows were deliberately kept out of the table, because they are not
+reflections:
+
+- **`href`** resolves against the document base URL on `<a>`/`<area>`, so it is
+  a computation. Putting it in the table would have silently broken anchor
+  URL resolution.
+- **`disabled`, `src`, `checked`, `selected`, `multiple`** run an invariant hook
+  on set: their setter is a reflection *plus* a state transition.
+
+**Correction to the P2 estimate (≈300 lines).** The real yield is **−47**. The
+estimate double-counted: the per-attribute *accessor* collapse had already been
+done by an earlier round (`RADIANT_REFLECT_BOOL/INT/STRING` were already one
+line each), so what remained to remove was only the guard/wrapper/extern layer.
+The ceiling for this technique was ~−100, not −300, and the `.def` itself costs
+40 lines back.
+
+**`reflect_attr` is still unused, and that is now a considered decision.**
+Wiring it as the ABI describes would put the kind-aware logic (presence for
+boolean, parse-with-default for long, verbatim for DOMString) inside
+`jube_interface.cpp`, which must not know DOM semantics — or else add a hop to
+reach a module hook. It becomes the right mechanism only alongside **DS13**:
+with the record able to call a module-supplied reflect hook directly,
+`reflect_attr` supplies the attribute name and the per-attribute thunk
+disappears, taking class C to three hops. Until then the generated thunk is
+what keeps the kind logic on the DOM side.
+
+**P1 slice 1 — the ordinal table.** `lambda/dom/dom_element_ops.def` declares
+the 83 element operations once, as `(NAME, thunk)`. The ordinal enum in
+`jube.h`, the module's 84 binding thunks and their 84 `extern` declarations are
+now expansions of it: **253 hand-written lines became 18.** Row order is stated
+in the file to be the ABI, since the ordinal is the value that crosses the host
+API.
+
+Verified mechanically, not by eye: the ordinal sequence is **identical** to the
+previous enum position-for-position, and the set of generated thunk symbols is
+identical to the set that existed before.
+
+Two entries resisted derivation and are recorded rather than smoothed over:
+`remove2` (HTMLSelectElement.remove(index) and ChildNode.remove() are one
+ordinal under two member names, so the second binding is an alias, not a row),
+and the three `__lambda_` automation entries, whose script-facing spelling is
+deliberately reserved rather than derived — the table carries their thunk
+suffix explicitly.
+
+**A negative result worth recording: the `BIND_CALL` rows are not worth
+generating.** DS1 assumed they were. Measured: 86 rows across 5 binding tables,
+83 name-derivable. But the preprocessor can only filter rows per table by
+pasting the interface into a macro name, which costs 6 filter definitions plus
+6 `#undef`s per table — ~65 lines to save ~83, and the rows carry information
+the table would then have to carry instead (which table, which JS spelling).
+**So DS1's line value is in the thunks, the externs and the enum — already
+taken here — not in the bind rows.** The bind rows remain worth unifying for
+*correctness* (one declaration that cannot disagree), which is DS13's argument,
+not a line-count one.
+
+**P1 slice 2 — duplicate member accessors.** The module kept its own
+implementation of members the catalog already has. Removed:
+
+- **9 accessors that were defined and never bound** (`first_child`, `last_child`,
+  `next_sibling`, `previous_sibling`, `node_type`, `child_nodes`,
+  `owner_document`, `parent_node`, `is_connected`) — the `_any` variants,
+  already routed through the catalog, are what the binding tables use. They were
+  `RADIANT_C_API`, so `-Werror=unused-function` could not see them.
+- **4 element-traversal accessors** now route through the catalog
+  (`first_element_child`, `last_element_child`, `next_element_sibling`,
+  `previous_element_sibling`), which made the module's four duplicate
+  element-skipping walkers dead. The compiler caught those, as intended.
+
+**`children` was reverted: converting it regresses page load.** Routing
+`radiant_dom_member_children` through the catalog row made
+`bootstrap-5-kitchen-sink` exit -1 with peak RSS 283 MB against a 160 MB limit.
+Isolated properly rather than guessed: with the change stashed the suite is
+105/105, with it 104/1; a bisect then showed the four traversal conversions are
+green and `children` alone is the cause. The page loads fine under `lambda.exe
+view` standalone, so it needs the full-suite harness to show. **Root cause not
+found**, so the conversion stays reverted (rule 1: no workaround) and this is
+recorded as DSO11 rather than patched around.
+
+Gates: build clean; **all five ES43 derivation oracles pass**
+(`dom_derive_{traversal,chardata,query,forms,urlencode}` — `traversal` walks
+every link on every node comparing native body against derivation);
+**`make test-radiant-baseline` 3622 passed, 0 failed** (re-run after each
+increment, including DS4's, which exercises form-control reflection through the
+DOM UI integration and form layout suites).
+
+
 ### Phase P1 — DS1 + DS2 + DS13: one catalog, no ordinals, no adapter thunks
 
 1. Add `iface` and `js_name` columns to every existing `dom_api.def` row
@@ -814,6 +971,49 @@ code lines. Gate: **≤ 32 168** after P6; expected **≈ 31 448**. P1–P3 alon
 - **DSO6** — DS10 changes `.ls` source under our control. Does the package
   migrate in one commit (gated by the `.ls` goldens) or per file? Per file is
   safer; one commit keeps the two doors from coexisting.
+- **DSO8 — a live two-door divergence on scroll geometry, found while landing
+  DS14.** `dom_core_scroll_state` is a `CORE | DOM_F_NEUTRAL` row — the
+  published `dom.scroll_state(n)` — and its body reads `scrollLeft`/`scrollTop`
+  through the property protocol, which only *checks*
+  `dom_has_committed_geometry_snapshot` and never commits. The commit exists
+  only in `radiant_dom_get_property`, gated on
+  `strncmp(prop, "scroll", 6)`, and only the JS door crosses it. So with layout
+  pending, `dom.scroll_state(n)` and `el.scrollTop` can answer differently.
+  This is DS16's case in the concrete: the geometry commit is a property-*name*
+  test inside one door's wrapper rather than a property of the row. Fixing it
+  is DS16 (`DOM_F_GEOMETRY`) and needs the DS1 columns, so it is recorded here
+  rather than patched locally — patching it in `dom_core_scroll_state` would
+  add a third place that knows which properties need layout.
+- **DSO9 — `owner_document`'s two node-kind paths already disagree.** The
+  element arm falls back to `dom_get_or_create_doc_node` when no realm is
+  active; `dom_owner_document_from_node`, which serves text and comment nodes,
+  does not — it answers `js_get_document_object_value()` regardless. So
+  hoisting one body would change behaviour for CharacterData rather than
+  preserve it. Which of the two is correct is a question for DS15 (the document
+  rows), where the realm-free document object is already the subject.
+- **DSO10 — the core and module reflection tables overlap but disagree, so
+  they cannot simply be merged.** Measured: 11 rows exist only in the module
+  (`accept`, `autocomplete`, `max`, `min`, `name`, `pattern`, `placeholder`,
+  `size`(select), `step`, `target`, `wrap`), 12 only in the core
+  (`contentEditable`, `defaultChecked`, `defaultSelected`, `disabled`,
+  `enterKeyHint`, `formAction`, `formEncoding`, `formEnctype`, `formMethod`,
+  `href`, `inputMode`, `tabIndex`), and **three shared names disagree on kind**
+  — `acceptCharset`, `formTarget` and `htmlFor` are `MAP` (name-mapped) to the
+  core and `STR` to the module. That is a behavioural question (which door is
+  right?), not a refactor, so DS4 stopped at the module's own table and this is
+  recorded rather than resolved. Whoever answers it should check what the core's
+  `MAP` getter actually returns for those three, since the module's returns the
+  attribute verbatim.
+- **DSO11 — `children` cannot yet be routed through its catalog row.** The two
+  implementations look equivalent by inspection — both end at
+  `dom_live_child_collection_bridge(elem, true)` — but substituting one for the
+  other crashes `bootstrap-5-kitchen-sink` under the page-load suite with a
+  ~120 MB RSS excursion. Something differs about wrapper or collection lifetime
+  between the module's direct call and the same call reached through the
+  catalog slot, and it is not visible in the source. Worth finding before DS1
+  routes more members through the catalog, because every such conversion has
+  this shape. The four traversal members converted cleanly, so it is specific to
+  the live collection, not to the catalog route itself.
 - **DSO7 — PROMOTED to DS13.** It was listed here as optional on the grounds
   that the adapter thunk is generated and therefore free to maintain. That is
   true of maintenance and irrelevant to the budget: it is a real call on every
@@ -827,23 +1027,23 @@ code lines. Gate: **≤ 32 168** after P6; expected **≈ 31 448**. P1–P3 alon
 | ID | Ruling | Status |
 |---|---|---|
 | DS1 | One `dom_api.def` row per operation, carrying `iface` and `js_name`; every surface is an expansion | PROPOSED |
-| DS2 | `JubeDomElementOperation` and `dom_element_operation_impl` are deleted | PROPOSED |
+| DS2 | `JubeDomElementOperation` and `dom_element_operation_impl` are deleted | **PARTIAL** — the enum is now generated from `dom_element_ops.def`; deleting it needs DS13 |
 | DS3 | The property protocol keeps only genuinely name-driven access | PROPOSED |
-| DS4 | One reflection table (`dom_reflect.def`) generating core and module | PROPOSED |
+| DS4 | One reflection table (`dom_reflect.def`) generating core and module | **PARTIAL** — module side landed; core merge blocked on DSO10 |
 | DS5 | A native body must earn its row; compositions are `DERIVED` | PROPOSED |
 | DS6 | Duplicate rows merge; a lint rule keeps them merged | PROPOSED |
 | DS7 | Radiant DOM state reaches Lambda as `velmt`/`varray`/`vmap`, never a snapshot | PROPOSED |
 | DS8 | `dom_core.cpp` never re-enters the property dispatcher by name | PROPOSED |
 | DS9 | The structural `radiant.velmt_*` aliases retire into the element face | PROPOSED |
 | DS10 | The `.ls` package migrates off the name-keyed doors | PROPOSED |
-| DS11 | Two lint rules gate the collapse | PROPOSED |
+| DS11 | Two lint rules gate the collapse | **`no-dom-row-name-dispatch` LANDED**; `no-hand-written-dom-bind` proposed |
 | DS12 | `dom.cpp` splits, credited zero lines | PROPOSED |
 | DS13 | The record's slot is the row body; the member ABI carries the arity | PROPOSED |
-| DS14 | A `CORE` row never reaches its own mechanism by name | PROPOSED |
+| DS14 | A `CORE` row never reaches its own mechanism by name | **LANDED** (3 rows suppressed on DSO8/DSO9) |
 | DS15 | Document members are `iface: document` rows, not string re-lookups | PROPOSED |
 | DS16 | One residual resolver; the geometry commit is a row flag | PROPOSED |
 | DS17 | **Three hops, every path**: one dispatch, one body, one engine access | PROPOSED |
-| DSO1–DSO6 | Open, §9 | OPEN |
+| DSO1–DSO6, DSO8–DSO11 | Open, §9 | OPEN |
 | DSO7 | Promoted to DS13 | CLOSED |
 
 ### Hop counts, before and after

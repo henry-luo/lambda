@@ -1432,37 +1432,18 @@ typedef struct ClauseNodeBase : AstNode {
     AstNode* body;
 } ClauseNodeBase;
 
+// The compilation unit's language (D8.2.1). Semantic dispatch during lowering
+// rides MirEmitter::lower_value/emit_condition, which are per-function; this
+// profile carries only the unit-wide extension-node contract.
 typedef struct LangProfile {
     const char* name;
-    void (*validate)(void* ctx, AstNode* root);
-    void (*analyze)(void* ctx, AstNode* root);
-    void (*lower)(void* ctx, AstNode* root);
     bool (*publish_ext_facts)(AstNode* node, struct AstIndex* index);
     void (*visit_ext_children)(AstNode* node, AstChildVisitor visitor, void* ctx);
 } LangProfile;
 
-static inline void lang_profile_noop_hook(void* ctx, AstNode* root) {
-    (void)ctx;
-    (void)root;
-}
+inline LangProfile lambda_profile = { "lambda", NULL, NULL };
 
-inline LangProfile lambda_profile = {
-    "lambda",
-    lang_profile_noop_hook,
-    lang_profile_noop_hook,
-    lang_profile_noop_hook,
-    NULL,
-    NULL,
-};
-
-inline LangProfile js_profile = {
-    "js",
-    lang_profile_noop_hook,
-    lang_profile_noop_hook,
-    lang_profile_noop_hook,
-    NULL,
-    NULL,
-};
+inline LangProfile js_profile = { "js", NULL, NULL };
 
 static inline LangProfile* lang_profile_for_name(const char* name) {
     if (!name) return &lambda_profile;

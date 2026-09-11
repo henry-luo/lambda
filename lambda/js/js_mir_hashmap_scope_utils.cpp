@@ -282,10 +282,16 @@ bool jm_capture_uses_live_module_var(JsMirTranspiler* mt, FnCapture* capture) {
             entry->is_iife_func_decl);
 }
 
+// every pseudo-binding shares the generated "_js_" prefix, so one prefix test
+// rejects an ordinary source name before any full comparison.
+bool jm_is_receiver_meta_binding(const char* name) {
+    if (!name || strncmp(name, "_js_", 4) != 0) return false;
+    return strcmp(name + 4, "this") == 0 || strcmp(name + 4, "new.target") == 0;
+}
+
 bool jm_capture_is_lexical_meta_binding(const char* name) {
-    return name && (strcmp(name, "_js_this") == 0 ||
-        strcmp(name, "_js_new.target") == 0 ||
-        strcmp(name, "_js_arguments") == 0);
+    return jm_is_receiver_meta_binding(name) ||
+        (name && strcmp(name, "_js_arguments") == 0);
 }
 
 int jm_capture_env_slot(FnCapture* capture, int dense_slot) {
@@ -343,6 +349,8 @@ JsMirTranspiler* jm_create_mir_transpiler(
     mt->func_em->em.root_call_value = js_call_root_value;
     mt->func_em->em.note_call_exception = jm_note_call_error_lane;
     mt->func_em->em.convert_rep = jm_convert_rep;
+    mt->func_em->em.lower_value = jm_profile_lower_value;
+    mt->func_em->em.emit_condition = jm_profile_emit_condition;
     mt->func_em->em.lookup_import_metadata = jit_import_get_metadata;
     mt->is_module = is_module;
     mt->filename = filename;

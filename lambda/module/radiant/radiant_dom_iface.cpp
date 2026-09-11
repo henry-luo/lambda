@@ -929,46 +929,21 @@ extern "C" int radiant_dom_member_next_element_sibling(Item receiver, Item* out)
 extern "C" int radiant_dom_member_previous_element_sibling(Item receiver, Item* out);
 extern "C" int radiant_dom_member_child_nodes_any(Item receiver, Item* out);
 extern "C" int radiant_dom_guard_dis(Item receiver);
-extern "C" int radiant_dom_guard_ist(Item receiver);
-extern "C" int radiant_dom_guard_it(Item receiver);
-extern "C" int radiant_dom_guard_ib(Item receiver);
-extern "C" int radiant_dom_guard_fist(Item receiver);
-extern "C" int radiant_dom_guard_form(Item receiver);
-extern "C" int radiant_dom_guard_details(Item receiver);
-extern "C" int radiant_dom_guard_img(Item receiver);
 extern "C" int radiant_dom_guard_srct(Item receiver);
 extern "C" int radiant_dom_guard_hreft(Item receiver);
 extern "C" int radiant_dom_guard_anchor(Item receiver);
-extern "C" int radiant_dom_guard_namet(Item receiver);
-extern "C" int radiant_dom_guard_lblout(Item receiver);
 extern "C" int radiant_dom_m4b_disabled_get(Item r, Item* out);
 extern "C" int radiant_dom_m4b_disabled_set(Item r, Item v, Item* out);
-extern "C" int radiant_dom_m4b_required_get(Item r, Item* out);
-extern "C" int radiant_dom_m4b_required_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4b_multiple_get(Item r, Item* out);
 extern "C" int radiant_dom_m4b_multiple_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4b_multiple2_get(Item r, Item* out);
 extern "C" int radiant_dom_m4b_multiple2_set(Item r, Item v, Item* out);
-extern "C" int radiant_dom_m4b_read_only_get(Item r, Item* out);
-extern "C" int radiant_dom_m4b_read_only_set(Item r, Item v, Item* out);
-extern "C" int radiant_dom_m4b_readonly_get(Item r, Item* out);
-extern "C" int radiant_dom_m4b_readonly_set(Item r, Item v, Item* out);
-extern "C" int radiant_dom_m4b_no_validate_get(Item r, Item* out);
-extern "C" int radiant_dom_m4b_no_validate_set(Item r, Item v, Item* out);
-extern "C" int radiant_dom_m4b_form_no_validate_get(Item r, Item* out);
-extern "C" int radiant_dom_m4b_form_no_validate_set(Item r, Item v, Item* out);
-extern "C" int radiant_dom_m4b_open_get(Item r, Item* out);
-extern "C" int radiant_dom_m4b_open_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4b_default_checked_get(Item r, Item* out);
 extern "C" int radiant_dom_m4b_default_checked_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4b_default_selected_get(Item r, Item* out);
 extern "C" int radiant_dom_m4b_default_selected_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4b_autofocus_get(Item r, Item* out);
 extern "C" int radiant_dom_m4b_autofocus_set(Item r, Item v, Item* out);
-extern "C" int radiant_dom_m4b_max_length_get(Item r, Item* out);
-extern "C" int radiant_dom_m4b_max_length_set(Item r, Item v, Item* out);
-extern "C" int radiant_dom_m4b_min_length_get(Item r, Item* out);
-extern "C" int radiant_dom_m4b_min_length_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4b_size_get(Item r, Item* out);
 extern "C" int radiant_dom_m4b_size_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4b_size2_get(Item r, Item* out);
@@ -992,14 +967,6 @@ extern "C" int radiant_dom_anchor_pathname_get(Item r, Item* out);
 extern "C" int radiant_dom_anchor_search_get(Item r, Item* out);
 extern "C" int radiant_dom_anchor_hash_get(Item r, Item* out);
 extern "C" int radiant_dom_anchor_origin_get(Item r, Item* out);
-extern "C" int radiant_dom_m4b_alt_get(Item r, Item* out);
-extern "C" int radiant_dom_m4b_alt_set(Item r, Item v, Item* out);
-extern "C" int radiant_dom_m4b_name_get(Item r, Item* out);
-extern "C" int radiant_dom_m4b_name_set(Item r, Item v, Item* out);
-extern "C" int radiant_dom_m4b_placeholder_get(Item r, Item* out);
-extern "C" int radiant_dom_m4b_placeholder_set(Item r, Item v, Item* out);
-extern "C" int radiant_dom_m4b_autocomplete_get(Item r, Item* out);
-extern "C" int radiant_dom_m4b_autocomplete_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4b_pattern_get(Item r, Item* out);
 extern "C" int radiant_dom_m4b_pattern_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4b_min_get(Item r, Item* out);
@@ -1010,14 +977,6 @@ extern "C" int radiant_dom_m4b_step_get(Item r, Item* out);
 extern "C" int radiant_dom_m4b_step_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4b_accept_get(Item r, Item* out);
 extern "C" int radiant_dom_m4b_accept_set(Item r, Item v, Item* out);
-extern "C" int radiant_dom_m4b_html_for_get(Item r, Item* out);
-extern "C" int radiant_dom_m4b_html_for_set(Item r, Item v, Item* out);
-extern "C" int radiant_dom_m4b_target_get(Item r, Item* out);
-extern "C" int radiant_dom_m4b_target_set(Item r, Item v, Item* out);
-extern "C" int radiant_dom_m4b_accept_charset_get(Item r, Item* out);
-extern "C" int radiant_dom_m4b_accept_charset_set(Item r, Item v, Item* out);
-extern "C" int radiant_dom_m4b_form_target_get(Item r, Item* out);
-extern "C" int radiant_dom_m4b_form_target_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4b_wrap_get(Item r, Item* out);
 extern "C" int radiant_dom_m4b_wrap_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4b_input_mode_get(Item r, Item* out);
@@ -1029,90 +988,12 @@ extern "C" int radiant_dom_m4b_content_editable_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4b_is_content_editable_get(Item r, Item* out);
 extern "C" int radiant_dom_guard_tc(Item receiver);
 extern "C" int radiant_dom_guard_input_typed_value(Item receiver);
-extern "C" int radiant_dom_m4d_named_item(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_add(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_remove(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_contains(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_compare_document_position(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_get_root_node(Item r, Item* args, int argc, Item* out);
+// Declared from the same table the bridge defines them from, so a binding
+// row cannot name an operation thunk the ordinal table does not define.
+#define DOM_ELEMENT_OP(NAME, thunk) \
+    extern "C" int radiant_dom_m4d_##thunk(Item r, Item* args, int argc, Item* out);
+#include "../../dom/dom_element_ops.def"
 extern "C" int radiant_dom_m4d_remove2(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_replace_with(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_after(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_before(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_has_child_nodes(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_clone_node(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_replace_data(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_insert_data(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_append_data(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_delete_data(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_substring_data(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_split_text(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_get_attribute(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_set_attribute(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_remove_attribute(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_toggle_attribute(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_has_attribute(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_get_attribute_names(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_matches(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_query_selector(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_query_selector_all(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_closest(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_get_elements_by_tag_name(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_get_elements_by_class_name(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_get_element_by_id(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_add_event_listener(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_remove_event_listener(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_dispatch_event(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_append_child(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_remove_child(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_insert_before(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_replace_child(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_normalize(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_append(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_prepend(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_insert_adjacent_element(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_insert_adjacent_html(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_get_bounding_client_rect(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_get_client_rects(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_scroll_into_view(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_scroll(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_scroll_to(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_scroll_by(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_focus(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_blur(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_click(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_show_popover(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_hide_popover(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_show_modal(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_reset(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_submit(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_request_submit(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_check_validity(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_report_validity(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_set_custom_validity(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_set_selection_range(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_set_range_text(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_select(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_item(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_toggle(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_replace(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_attach_shadow(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_to_string(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d___lambda_boundary_from_point(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d___lambda_text_control_boundary_from_point(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d___lambda_text_control_caret_bounds(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_get_attribute_ns(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_set_attribute_ns(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_remove_attribute_ns(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_is_equal_node(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_is_same_node(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_create_svg_point(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_create_svg_matrix(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_create_svg_transform(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_create_svg_transform_from_matrix(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_get_bbox(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_get_ctm(Item r, Item* args, int argc, Item* out);
-extern "C" int radiant_dom_m4d_get_screen_ctm(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4c_get_checked(Item r, Item* out);
 extern "C" int radiant_dom_m4c_checked_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4c_get_value(Item r, Item* out);
@@ -1168,6 +1049,23 @@ extern "C" int radiant_dom_m4c_get_form(Item r, Item* out);
 #define BIND_CALL_JS(n, js, fn) \
     {n, js, NULL, NULL, fn, NULL, 0}
 
+// The reflected-attribute accessors are generated in radiant_dom_bridge.cpp
+// from lambda/dom/dom_reflect.def; declare them from the same table so the
+// binding rows below cannot name one the table does not define.
+#define DOM_REFLECT_BOOL(name, attr, tags) \
+    extern "C" int radiant_html_##name##_get(Item r, Item* out); \
+    extern "C" int radiant_html_##name##_set(Item r, Item v, Item* out);
+#define DOM_REFLECT_INT(name, attr, fallback, tags) \
+    extern "C" int radiant_html_##name##_get(Item r, Item* out); \
+    extern "C" int radiant_html_##name##_set(Item r, Item v, Item* out);
+#define DOM_REFLECT_STR(name, attr, fallback, tags) \
+    extern "C" int radiant_html_##name##_get(Item r, Item* out); \
+    extern "C" int radiant_html_##name##_set(Item r, Item v, Item* out);
+#include "../../dom/dom_reflect.def"
+#undef DOM_REFLECT_BOOL
+#undef DOM_REFLECT_INT
+#undef DOM_REFLECT_STR
+
 #define RADIANT_GUARDED_GET(name, guard, getter) \
     static int name(Item receiver, Item* out) { \
         return guard(receiver) ? getter(receiver, out) : 0; \
@@ -1181,38 +1079,6 @@ RADIANT_GUARDED_GET(radiant_html_disabled_get, radiant_dom_guard_dis,
                    radiant_dom_m4b_disabled_get)
 RADIANT_GUARDED_SET(radiant_html_disabled_set, radiant_dom_guard_dis,
                    radiant_dom_m4b_disabled_set)
-RADIANT_GUARDED_GET(radiant_html_required_get, radiant_dom_guard_ist,
-                   radiant_dom_m4b_required_get)
-RADIANT_GUARDED_SET(radiant_html_required_set, radiant_dom_guard_ist,
-                   radiant_dom_m4b_required_set)
-RADIANT_GUARDED_GET(radiant_html_read_only_get, radiant_dom_guard_it,
-                   radiant_dom_m4b_read_only_get)
-RADIANT_GUARDED_SET(radiant_html_read_only_set, radiant_dom_guard_it,
-                   radiant_dom_m4b_read_only_set)
-RADIANT_GUARDED_GET(radiant_html_readonly_get, radiant_dom_guard_it,
-                   radiant_dom_m4b_readonly_get)
-RADIANT_GUARDED_SET(radiant_html_readonly_set, radiant_dom_guard_it,
-                   radiant_dom_m4b_readonly_set)
-RADIANT_GUARDED_GET(radiant_html_no_validate_get, radiant_dom_guard_form,
-                   radiant_dom_m4b_no_validate_get)
-RADIANT_GUARDED_SET(radiant_html_no_validate_set, radiant_dom_guard_form,
-                   radiant_dom_m4b_no_validate_set)
-RADIANT_GUARDED_GET(radiant_html_form_no_validate_get, radiant_dom_guard_ib,
-                   radiant_dom_m4b_form_no_validate_get)
-RADIANT_GUARDED_SET(radiant_html_form_no_validate_set, radiant_dom_guard_ib,
-                   radiant_dom_m4b_form_no_validate_set)
-RADIANT_GUARDED_GET(radiant_html_open_get, radiant_dom_guard_details,
-                   radiant_dom_m4b_open_get)
-RADIANT_GUARDED_SET(radiant_html_open_set, radiant_dom_guard_details,
-                   radiant_dom_m4b_open_set)
-RADIANT_GUARDED_GET(radiant_html_max_length_get, radiant_dom_guard_it,
-                   radiant_dom_m4b_max_length_get)
-RADIANT_GUARDED_SET(radiant_html_max_length_set, radiant_dom_guard_it,
-                   radiant_dom_m4b_max_length_set)
-RADIANT_GUARDED_GET(radiant_html_min_length_get, radiant_dom_guard_it,
-                   radiant_dom_m4b_min_length_get)
-RADIANT_GUARDED_SET(radiant_html_min_length_set, radiant_dom_guard_it,
-                   radiant_dom_m4b_min_length_set)
 RADIANT_GUARDED_GET(radiant_html_src_get, radiant_dom_guard_srct,
                    radiant_dom_m4b_src_get)
 RADIANT_GUARDED_SET(radiant_html_src_set, radiant_dom_guard_srct,
@@ -1235,38 +1101,6 @@ RADIANT_GUARDED_GET(radiant_html_hash_get, radiant_dom_guard_anchor,
                    radiant_dom_anchor_hash_get)
 RADIANT_GUARDED_GET(radiant_html_origin_get, radiant_dom_guard_anchor,
                    radiant_dom_anchor_origin_get)
-RADIANT_GUARDED_GET(radiant_html_alt_get, radiant_dom_guard_img,
-                   radiant_dom_m4b_alt_get)
-RADIANT_GUARDED_SET(radiant_html_alt_set, radiant_dom_guard_img,
-                   radiant_dom_m4b_alt_set)
-RADIANT_GUARDED_GET(radiant_html_name_get, radiant_dom_guard_namet,
-                   radiant_dom_m4b_name_get)
-RADIANT_GUARDED_SET(radiant_html_name_set, radiant_dom_guard_namet,
-                   radiant_dom_m4b_name_set)
-RADIANT_GUARDED_GET(radiant_html_placeholder_get, radiant_dom_guard_it,
-                   radiant_dom_m4b_placeholder_get)
-RADIANT_GUARDED_SET(radiant_html_placeholder_set, radiant_dom_guard_it,
-                   radiant_dom_m4b_placeholder_set)
-RADIANT_GUARDED_GET(radiant_html_autocomplete_get, radiant_dom_guard_fist,
-                   radiant_dom_m4b_autocomplete_get)
-RADIANT_GUARDED_SET(radiant_html_autocomplete_set, radiant_dom_guard_fist,
-                   radiant_dom_m4b_autocomplete_set)
-RADIANT_GUARDED_GET(radiant_html_html_for_get, radiant_dom_guard_lblout,
-                   radiant_dom_m4b_html_for_get)
-RADIANT_GUARDED_SET(radiant_html_html_for_set, radiant_dom_guard_lblout,
-                   radiant_dom_m4b_html_for_set)
-RADIANT_GUARDED_GET(radiant_html_target_get, radiant_dom_guard_form,
-                   radiant_dom_m4b_target_get)
-RADIANT_GUARDED_SET(radiant_html_target_set, radiant_dom_guard_form,
-                   radiant_dom_m4b_target_set)
-RADIANT_GUARDED_GET(radiant_html_accept_charset_get, radiant_dom_guard_form,
-                   radiant_dom_m4b_accept_charset_get)
-RADIANT_GUARDED_SET(radiant_html_accept_charset_set, radiant_dom_guard_form,
-                   radiant_dom_m4b_accept_charset_set)
-RADIANT_GUARDED_GET(radiant_html_form_target_get, radiant_dom_guard_ib,
-                   radiant_dom_m4b_form_target_get)
-RADIANT_GUARDED_SET(radiant_html_form_target_set, radiant_dom_guard_ib,
-                   radiant_dom_m4b_form_target_set)
 
 static int radiant_input_value_get(Item receiver, Item* out) {
     if (radiant_dom_guard_input_typed_value(receiver)) {

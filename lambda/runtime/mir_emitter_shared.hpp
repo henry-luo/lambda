@@ -530,6 +530,13 @@ struct MirEmitter {
     void (*after_call_result)(void* owner, MIR_reg_t reg, MIR_type_t type);
     void (*note_call_exception)(void* owner, JitExceptionEffect effect);
     MirValue (*convert_rep)(void* owner, MirValue value, ValueRep required);
+    // Shared structural lowering recurses into the owning language through
+    // these two hooks (D8.2.1: operator semantics dispatch through the
+    // profile; D8.2.6: the common layer owns demand). Both receive
+    // `call_owner`, so a structural helper never needs a caller-built record
+    // to re-enter language lowering.
+    MirValue (*lower_value)(void* owner, AstNode* node);
+    MIR_reg_t (*emit_condition)(void* owner, MirValue value);
     // Hosted compilers provide their build-coupled catalog lookup. Core
     // transpilers leave this NULL and retain the existing registry path.
     bool (*lookup_import_metadata)(const char* name, JitImportMetadata* metadata);
@@ -552,14 +559,6 @@ struct MirEmitter {
     // stale register can never leak into a different function's body.
     MIR_item_t bitcast_slot_func;
     MIR_reg_t bitcast_slot_addr;
-};
-
-// Shared structural lowering owns demand; profiles retain language semantics (D8.1.3v10).
-struct MirLoweringProfile {
-    MirEmitter* emitter;
-    void* owner;
-    MirValue (*lower_value)(void* owner, AstNode* node);
-    MIR_reg_t (*emit_condition)(void* owner, MirValue value);
 };
 
 // Profiles locate Item-only module slots; the common layer owns conversion.
@@ -1732,14 +1731,13 @@ static inline MirValue em_apply_value_demand(MirEmitter* em, MirValue value,
     return value;
 }
 
-static inline MirValue em_lower_profile_value(const MirLoweringProfile* profile,
-        AstNode* node, uint32_t demand) {
-    if (!profile || !profile->emitter || !profile->lower_value) {
-        log_error("mir-lowering: missing value profile");
+static inline MirValue em_lower_value(MirEmitter* em, AstNode* node,
+        uint32_t demand) {
+    if (!em || !em->lower_value) {
+        log_error("mir-lowering: missing value hook");
         abort();
     }
-    return em_apply_value_demand(profile->emitter,
-        profile->lower_value(profile->owner, node), demand);
+    return em_apply_value_demand(em, em->lower_value(em->call_owner, node), demand);
 }
 
 static inline MirValue em_load_module_slot(const MirModuleSlotProfile* profile,
@@ -1766,16 +1764,19 @@ static inline void em_store_module_slot(const MirModuleSlotProfile* profile,
     profile->store_item(profile->owner, slot, value);
 }
 
-static inline MIR_reg_t em_lower_profile_condition(
-        const MirLoweringProfile* profile, AstNode* node) {
-    if (!profile || !profile->emitter || !profile->emit_condition) {
-        log_error("mir-lowering: missing condition profile");
+// `variant` lets a construct with its own lane policy (Lambda's loop test
+// selects a native comparison lane) override the profile's default truthiness
+// emitter without reintroducing a per-site profile record.
+static inline MIR_reg_t em_lower_condition(MirEmitter* em, AstNode* node,
+        MIR_reg_t (*variant)(void* owner, MirValue value) = NULL) {
+    MIR_reg_t (*emit)(void*, MirValue) = variant ? variant : (em ? em->emit_condition : NULL);
+    if (!em || !emit) {
+        log_error("mir-lowering: missing condition hook");
         abort();
     }
-    MirValue value = em_lower_profile_value(profile, node, MIR_VALUE_BRANCH);
-    value = em_materialize_pending_value(profile->emitter, value,
-        MIR_PENDING_REASON_BRANCH);
-    return profile->emit_condition(profile->owner, value);
+    MirValue value = em_lower_value(em, node, MIR_VALUE_BRANCH);
+    value = em_materialize_pending_value(em, value, MIR_PENDING_REASON_BRANCH);
+    return emit(em->call_owner, value);
 }
 
 // A join or completion consumes its pending result before writing its destination.
