@@ -248,27 +248,30 @@ bool js_realm_items_fill(void* items, const JsRealmSlotId* slot_ids, int count,
 
 void js_realm_slots_clear_transient(JsRealmSlots* slots);
 
-// Use this only for actual single-Item LIFO storage.  Clients with replacement,
-// replay, or multi-field records retain those semantic operations themselves.
-// JSCU14(b): backed by the one runtime RootVector — no fixed slot array, no
-// per-stack epoch, no reset-registry callback.
-struct JsItemStack {
-    RootVector vec = {};
+// JSCU44: the `with` chain is owned by the activation that pushed it, not by
+// the runtime. One frame is either a single scope introduction (`base` is one
+// slot of `slots`, released on pop) or a whole inherited chain (`base` is the
+// callee closure's captured env, which its JsFunction already roots, so the
+// frame borrows it). POD frames never live in scanned slot storage (JSCU13).
+struct JsWithFrame {
+    Item* base = NULL;            // address-stable; count entries, innermost last
+    int count = 0;
+    int base_depth = 0;           // absolute depth of base[0]
+    int owned_slot = -1;          // slots index to release on pop; -1 = borrowed
+    JsWithFrame* parent = NULL;
 };
 
-static inline int js_item_stack_depth(JsItemStack* stack) {
-    return stack ? (int)root_vector_count(&stack->vec) : 0;
-}
-
-// index must be below the current depth; an out-of-range index faults loudly
-static inline Item& js_item_stack_at(JsItemStack* stack, int index) {
-    return *root_vector_at(&stack->vec, index);
-}
-
 struct JsWithScopeState {
-    JsItemStack stack = {};
+    JsWithFrame* head = NULL;     // innermost frame; NULL = no with-scope in scope
+    // Scope slots are released out of order (a suspended generator holds its
+    // frame while other activations push and pop), so the vector never shrinks
+    // and released indices are recycled through a POD free list.
+    RootVector slots = {};
+    int* free_slots = NULL;
+    int free_count = 0;
+    int free_capacity = 0;
     // The memo is two semantic values, but its root ownership is the same
-    // growable exact-root mechanism as the with-scope stack.
+    // growable exact-root mechanism as the scope slots.
     RootVector last_binding_values = {};
     bool last_binding_valid = false;
 };
@@ -709,7 +712,7 @@ struct JsPromiseRuntimeState : JsRootedState {
     int peak_live_count = 0;
     int64_t unhandled_epoch = 0;
     bool unhandled_strict = false;
-    JsItemStack domain_stack = {};
+    RootVector domain_stack = {};
 };
 
 enum JsModuleRuntimeSlot : int {
@@ -784,6 +787,11 @@ struct JsSuspendedActivation {
     int64_t ast_replay_skip = 0;
     JsInterpGeneratorLoopContinuation* ast_loop_continuations = NULL;
     bool ast_initialized = false;
+    // JSCU44: `with` scopes open at the suspension point. They outlive the
+    // native activation, so they spill here as a captured env and are entered
+    // again on resume instead of being re-pushed by replayed statements.
+    Item* with_env = NULL;
+    int with_depth = 0;
 };
 
 struct JsGeneratorStateRecord : JsSuspendedActivation {
@@ -824,18 +832,18 @@ struct JsAsyncContextStateRecord : JsSuspendedActivation {
     JsInterpTryContinuation* ast_try_continuations = NULL;
 };
 
+// JSCU44: the `with` activation boundary. `storage` is caller-owned POD (a
+// native frame local); enter returns the head to hand back to leave.
+extern "C" Item* js_with_capture_stack(int* out_depth);
+extern "C" JsWithFrame* js_with_activation_enter(Item* captured, int depth, JsWithFrame* storage);
+extern "C" void js_with_activation_leave(JsWithFrame* saved_head);
+
 bool js_root_vector_ensure_registered(RootVector* roots);
 void js_readline_state_destroy(JsReadlineState* state);
 JsReadlineState* js_readline_state_ensure(JsRuntimeState* state);
 JsAsyncLocalStorageState* js_async_local_storage_state_ensure(JsRuntimeState* state);
 void js_test262_agent_state_destroy(JsTest262AgentState* state);
 JsTest262AgentState* js_test262_agent_state_ensure(JsRuntimeState* state);
-void js_item_stack_init(JsItemStack* stack, Context* owner, const char* name);
-void js_item_stack_destroy(JsItemStack* stack);
-bool js_item_stack_push(JsItemStack* stack, Item value);
-void js_item_stack_pop(JsItemStack* stack);
-void js_item_stack_clear(JsItemStack* stack);
-void js_item_stack_shrink(JsItemStack* stack, int depth);
 
 // Source records span a runtime eval or a VM-originated function call. One
 // row owns the complete source-context fact; its Item fields live in the

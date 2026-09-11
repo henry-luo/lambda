@@ -658,11 +658,11 @@ bool js_runtime_state_init(EvalContext* runtime_context) {
             return false;
         }
         state->heap_epoch = 1;
-        js_item_stack_init(&state->with_scope.stack,
-            (Context*)runtime_context, "with-scope stack");
+        root_vector_init(&state->with_scope.slots,
+            (Context*)runtime_context, "with-scope slots");
         root_vector_init(&state->with_scope.last_binding_values,
             (Context*)runtime_context, "with-scope binding memo");
-        js_item_stack_init(&state->promises.domain_stack,
+        root_vector_init(&state->promises.domain_stack,
             (Context*)runtime_context, "domain stack");
         js_eval_state_vectors_init(&state->eval,
             (Context*)runtime_context);
@@ -801,9 +801,11 @@ void js_runtime_state_destroy_context(void) {
     root_vector_destroy(&state->execution.base_activation_items);
     js_realm_slots_destroy(&state->realm_slots);
     root_vector_destroy(&state->regexp_last_match.values);
-    js_item_stack_destroy(&state->with_scope.stack);
+    root_vector_destroy(&state->with_scope.slots);
+    mem_free(state->with_scope.free_slots);
+    state->with_scope.free_slots = NULL;
     root_vector_destroy(&state->with_scope.last_binding_values);
-    js_item_stack_destroy(&state->promises.domain_stack);
+    root_vector_destroy(&state->promises.domain_stack);
     js_eval_state_vectors_destroy(&state->eval);
     js_code_store_destroy(&state->code_store);
     js_runtime_state_free_records(state);
@@ -1013,33 +1015,6 @@ static void js_root_vector_reset_all(bool full_reset) {
     js_runtime_state_visit_root_vectors(js_active_runtime_state,
         js_runtime_state_clear_root_vector, &options);
 }
-// JSCU14(b): the item stacks are RootVectors. Registration, vacated-slot
-// clearing and heap-replacement handling live in the primitive; the stacks
-// own only their LIFO discipline and their named reset in the lifecycle.
-void js_item_stack_init(JsItemStack* stack, Context* owner, const char* name) {
-    if (stack) root_vector_init(&stack->vec, owner, name);
-}
-
-void js_item_stack_destroy(JsItemStack* stack) {
-    if (stack) root_vector_destroy(&stack->vec);
-}
-
-bool js_item_stack_push(JsItemStack* stack, Item value) {
-    return stack && root_vector_push(&stack->vec, value);
-}
-
-void js_item_stack_pop(JsItemStack* stack) {
-    if (stack) root_vector_pop(&stack->vec);
-}
-
-void js_item_stack_clear(JsItemStack* stack) {
-    if (stack) root_vector_clear(&stack->vec);
-}
-
-void js_item_stack_shrink(JsItemStack* stack, int depth) {
-    if (stack) root_vector_shrink(&stack->vec, depth);
-}
-
 #define js_eval_source_values (js_runtime_state.eval.source.values)
 #define js_eval_source_records (js_runtime_state.eval.source.records)
 
@@ -1717,7 +1692,7 @@ static void js_batch_reset_runtime_caches(const char* reason, bool full_reset) {
     // Stacks outside the fixed realm catalog keep the same named reset on both
     // the full and the checkpoint path (super-this and with are cleared by
     // the transient-call and globals resets above).
-    js_item_stack_clear(&js_runtime_state.promises.domain_stack);
+    root_vector_clear(&js_runtime_state.promises.domain_stack);
     js_cjs_metadata_reset();
     js_assert_batch_runtime_state_clear(reason, true);
 }

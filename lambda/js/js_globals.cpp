@@ -14430,14 +14430,65 @@ JS_FORWARD_ITEM(js_get_global_object, (), js_get_global_this, ())
 // ============================================================================
 // With-scope stack for 'with' statement support
 // ============================================================================
-#define js_with_stack_at(i) js_item_stack_at(&js_with_stack_state, (i))
-#define js_with_stack_depth js_item_stack_depth(&js_with_stack_state)
+#define js_with_head (js_runtime_state.with_scope.head)
+#define js_with_stack_depth (js_with_head ? js_with_head->base_depth + js_with_head->count : 0)
+#define js_with_stack_at(i) js_with_scope_at((int)(i))
 #define js_last_with_binding_scope (*root_vector_at(&js_runtime_state.with_scope.last_binding_values, 0))
 #define js_last_with_binding_key (*root_vector_at(&js_runtime_state.with_scope.last_binding_values, 1))
 #define js_last_with_binding_valid (js_runtime_state.with_scope.last_binding_valid)
 
-// The scope stack and its two-value binding memo can each be the sole owner of
-// a scope object. RootVector owns both; recreate the fixed memo slots after a
+// Absolute index into the chain, innermost first. One frame per open `with`
+// plus at most one borrowed frame for the inherited chain, so this walk is
+// shorter than the property probe every caller performs on the result.
+static Item js_with_scope_at(int index) {
+    for (JsWithFrame* frame = js_with_head; frame; frame = frame->parent) {
+        if (index >= frame->base_depth) {
+            int offset = index - frame->base_depth;
+            return offset < frame->count ? frame->base[offset] : ItemNull;
+        }
+    }
+    return ItemNull;
+}
+
+// Slots are released out of order, so the vector never shrinks and freed
+// indices are recycled. A failed free-list growth keeps the slot allocated:
+// losing reuse is harmless, losing the null-out would retain a dead scope.
+static int js_with_slot_alloc(Item obj) {
+    JsWithScopeState* with = &js_runtime_state.with_scope;
+    if (with->free_count > 0) {
+        int index = with->free_slots[--with->free_count];
+        Item* slot = root_vector_at(&with->slots, index);
+        if (!slot) return -1;
+        *slot = obj;
+        return index;
+    }
+    if (!root_vector_push(&with->slots, obj)) return -1;
+    return (int)root_vector_count(&with->slots) - 1;
+}
+
+static void js_with_slot_release(int index) {
+    JsWithScopeState* with = &js_runtime_state.with_scope;
+    Item* slot = root_vector_at(&with->slots, index);
+    if (slot) *slot = ItemNull;
+    if (with->free_count == with->free_capacity) {
+        int capacity = with->free_capacity ? with->free_capacity * 2 : 8;
+        int* grown = (int*)mem_realloc(with->free_slots,
+            (size_t)capacity * sizeof(int), MEM_CAT_JS_RUNTIME);
+        if (!grown) return;
+        with->free_slots = grown;
+        with->free_capacity = capacity;
+    }
+    with->free_slots[with->free_count++] = index;
+}
+
+static void js_with_frame_drop(JsWithFrame* frame) {
+    if (!frame || frame->owned_slot < 0) return;
+    js_with_slot_release(frame->owned_slot);
+    mem_free(frame);
+}
+
+// The memo is two semantic values whose root ownership is the same growable
+// exact-root mechanism as the scope slots; recreate its fixed slots after a
 // heap replacement before exposing either reference.
 static bool js_with_ensure_roots(void) {
     RootVector* memo = &js_runtime_state.with_scope.last_binding_values;
@@ -14471,9 +14522,16 @@ static bool js_with_scope_is_object(Item value) {
 }
 
 extern "C" void js_with_batch_reset(void) {
-    js_item_stack_clear(&js_with_stack_state);
+    JsWithScopeState* with = &js_runtime_state.with_scope;
+    while (with->head) {
+        JsWithFrame* frame = with->head;
+        with->head = frame->parent;
+        js_with_frame_drop(frame);
+    }
     js_last_with_binding_valid = false;
-    root_vector_clear(&js_runtime_state.with_scope.last_binding_values);
+    root_vector_clear(&with->last_binding_values);
+    root_vector_clear(&with->slots);
+    with->free_count = 0;
 }
 
 extern "C" Item js_with_push(Item obj) {
@@ -14485,66 +14543,95 @@ extern "C" Item js_with_push(Item obj) {
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC) {
         JS_ASSIGN_OR_RETURN_INTO(obj, js_to_object(obj));
     }
-    if (!js_item_stack_push(&js_with_stack_state, obj)) {
+    int slot = js_with_slot_alloc(obj);
+    JsWithFrame* frame = slot >= 0
+        ? (JsWithFrame*)mem_calloc(1, sizeof(JsWithFrame), MEM_CAT_JS_RUNTIME) : NULL;
+    if (!frame) {
+        if (slot >= 0) js_with_slot_release(slot);
         return js_throw_range_error("Could not grow with scope stack");
     }
+    frame->base = root_vector_at(&js_runtime_state.with_scope.slots, slot);
+    frame->count = 1;
+    frame->base_depth = js_with_stack_depth;
+    frame->owned_slot = slot;
+    frame->parent = js_with_head;
+    js_with_head = frame;
     js_last_with_binding_valid = false;
     return js_status_ok();
 }
 
+// A borrowed frame is the activation's base, installed by its caller; only the
+// installer may unlink it.
 extern "C" void js_with_pop() {
-    if (js_with_stack_depth > 0) {
-        js_last_with_binding_valid = false;
-        js_item_stack_pop(&js_with_stack_state);
-    }
+    JsWithFrame* frame = js_with_head;
+    if (!frame || frame->owned_slot < 0) return;
+    js_with_head = frame->parent;
+    js_with_frame_drop(frame);
+    js_last_with_binding_valid = false;
 }
 
 JS_FORWARD_EXPRESSION(int, js_with_save_depth, (void), js_with_stack_depth)
 
 extern "C" void js_with_restore_depth(int depth) {
     if (depth < 0) depth = 0;
-    js_item_stack_shrink(&js_with_stack_state, depth);
-    js_last_with_binding_valid = false;
-}
-
-extern "C" int js_with_save_stack(Item* out_stack, int max_depth) {
-    int depth = js_with_stack_depth;
-    if (out_stack && max_depth > 0) {
-        int copy_depth = depth < max_depth ? depth : max_depth;
-        for (int i = 0; i < copy_depth; i++) {
-            out_stack[i] = js_with_stack_at(i);
-        }
-    }
-    return depth;
-}
-
-extern "C" void js_with_set_stack(Item* stack, int depth) {
-    if (!js_with_ensure_roots()) return;
-    if (depth < 0) depth = 0;
-    js_item_stack_clear(&js_with_stack_state);
-    for (int i = 0; i < depth; i++) {
-        if (!js_item_stack_push(&js_with_stack_state, stack ? stack[i] : ItemNull)) {
-            log_error("js-with: could not restore scope stack");
-            break;
-        }
+    while (js_with_stack_depth > depth) {
+        JsWithFrame* frame = js_with_head;
+        if (!frame || frame->owned_slot < 0) break;
+        js_with_head = frame->parent;
+        js_with_frame_drop(frame);
     }
     js_last_with_binding_valid = false;
 }
 
+// Closures and suspensions both snapshot the object list: the chain structure
+// is immutable once created, and the scope objects are shared by reference.
 extern "C" Item* js_with_capture_stack(int* out_depth) {
-    if (out_depth) *out_depth = js_with_stack_depth;
-    if (js_with_stack_depth <= 0) return NULL;
-    Item* captured = js_alloc_env(js_with_stack_depth);
+    int depth = js_with_stack_depth;
+    if (out_depth) *out_depth = depth;
+    if (depth <= 0) return NULL;
+    Item* captured = js_alloc_env(depth);
     // async cleanup can create handlers after the input pool stops accepting
     // allocations; a missing capture is safer than dereferencing null storage.
     if (!captured) {
         if (out_depth) *out_depth = 0;
         return NULL;
     }
-    for (int i = 0; i < js_with_stack_depth; i++) {
-        captured[i] = js_with_stack_at(i);
-    }
+    for (int i = 0; i < depth; i++) captured[i] = js_with_scope_at(i);
     return captured;
+}
+
+// JSCU44: an activation resolves names against exactly its own captured chain.
+// The caller's frames stay linked below the saved head and are unreachable
+// while the callee runs, so no copy is needed in either direction.
+extern "C" JsWithFrame* js_with_activation_enter(Item* captured, int depth,
+        JsWithFrame* storage) {
+    JsWithScopeState* with = &js_runtime_state.with_scope;
+    JsWithFrame* previous = with->head;
+    if (captured && depth > 0 && storage) {
+        storage->base = captured;
+        storage->count = depth;
+        storage->base_depth = 0;
+        storage->owned_slot = -1;
+        storage->parent = NULL;
+        with->head = storage;
+    } else {
+        with->head = NULL;
+    }
+    js_last_with_binding_valid = false;
+    return previous;
+}
+
+// An early return out of a compiled `with` body bypasses its generated pop, so
+// the callee's own frames are released here rather than trusted to unwind.
+extern "C" void js_with_activation_leave(JsWithFrame* saved_head) {
+    JsWithScopeState* with = &js_runtime_state.with_scope;
+    while (with->head && with->head != saved_head && with->head->owned_slot >= 0) {
+        JsWithFrame* frame = with->head;
+        with->head = frame->parent;
+        js_with_frame_drop(frame);
+    }
+    with->head = saved_head;
+    js_last_with_binding_valid = false;
 }
 
 JS_FORWARD_EXPRESSION(int64_t, js_with_depth_active, (void), js_with_stack_depth > 0 ? 1 : 0)

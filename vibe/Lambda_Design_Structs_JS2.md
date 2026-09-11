@@ -618,7 +618,93 @@ Diagnostic counters may measure guard hits, helper calls, descriptors, boxes,
 roots and adoption, but never feed semantic dispatch (**D5.4.4**). Account for
 instrumentation overhead and collect final timings without those counters.
 
-## 13. Boundaries preserved by the proposal
+## 13. JSCU44 — Per-activation `with` scope chain
+
+**Status: IMPLEMENTED 2026-09-11.** Fixes
+[`JS_Issue_Ledger.md` JS05-L1](JS_Issue_Ledger.md). Supersedes the
+`js_with_stack` row of
+[`Lambda_Design_Stack_API.md`](Lambda_Design_Stack_API.md) Appendix A.2.
+
+**Problem.** The `with` scope chain is one process-wide stack
+(`JsRuntimeState.with_scope.stack`). Because it is not owned by the activation
+that pushed it, three defects follow from the same cause:
+
+1. A generator suspended inside `with` leaves its scope object on the shared
+   stack, where unrelated code resolves names against it (JS05-L1).
+2. The call kernel must *copy* the caller's chain out and the callee's captured
+   chain in (`js_with_set_stack`, `JsSavedWithScope`) so a `with` cannot leak
+   into a callee — the copy was itself a use-after-free until 2026-07-24.
+3. The fast call lane skips that copy entirely, so a `common_lane` callee
+   observes the caller's chain.
+
+**Proposal.** Replace the shared stack with a chain of frames, one per scope
+introduction, rooted at a head the activation owns.
+
+```c
+struct JsWithFrame {
+    Item*        base;    // address-stable Item storage, count entries
+    int          count;   // scopes in this frame, innermost last
+    JsWithFrame* parent;  // next frame outward; NULL ends the chain
+};
+```
+
+`base` is address-stable and always GC-traced, but its owner differs by frame
+kind, and that is the whole point of carrying a pointer rather than an index:
+
+| frame kind | `base` points at | traced by | created at |
+|---|---|---|---|
+| locally pushed scope | one slot of the with-scope `RootVector` | the vector's registered root range | `js_with_push` |
+| inherited captured chain | the closure's existing `js_alloc_env` array (`js_fn_with(fn)->env`) | the owning `JsFunction` | the call kernel, **no copy** |
+
+The inherited case is why the call-boundary copy disappears: the callee's chain
+is already a GC-rooted array owned by its function object, so the kernel links
+one frame to it and restores the previous head on return.
+
+**Head ownership.** `JsRuntimeState.with_scope.head` holds the innermost frame.
+Entering a call saves the head, sets it from the callee's captured chain, and
+restores it on return — one pointer, on every lane including `common_lane`.
+`head == NULL` replaces `js_with_stack_depth <= 0` as the resolution fast-out at
+identical cost.
+
+**Resolution is unchanged.** `js_with_scope_lookup` consumes only "the next
+scope outward, one at a time", never random access, so it becomes: walk
+`base[count-1 … 0]`, then follow `parent`. `js_in` / `@@unscopables` / re-check
+/ `js_get_key_default` per scope object (ES2023 9.1.1.2.1) are untouched, and
+they dominate the cost — this is a correctness and ownership change, not a
+`with` speedup. The generated code path is likewise unchanged: identifier reads
+still emit the ordinary load and hand it to
+`js_get_with_binding_or_fallback(key, fallback)` as an override.
+
+**Slot allocation is not LIFO.** A suspended generator holds its frame while
+other activations push and pop, so with-scope slots are allocated from a free
+list over a `RootVector` that never shrinks; a released slot is nulled and its
+index returned to the list. This is why the storage is not the Lambda root
+stack: the side root stack is strictly watermark-LIFO
+(`lambda_side_root_alloc_n` / `_pop_n`) and cannot express that interleaving
+without a spill on every suspension. Per-frame side-root slots remain available
+as a later optimization for functions proven not to suspend; `with` is
+sloppy-mode-only and cold, so that optimization is not scheduled.
+
+**POD stays out of scanned storage.** `JsWithFrame` is POD and never lives in
+the `RootVector` blocks — JSCU13.
+
+**Retired by this ruling.** `js_with_set_stack`, `js_with_save_stack`,
+`js_with_capture_stack`'s stack walk, `JsSavedWithScope` and its root-range
+register/unregister, both "Could not save with scope stack" `RangeError` paths,
+and the `mt->with_depth` loop in `js_mir_completion.cpp` that emits one
+`js_with_pop` per open scope — a single head restore replaces it.
+
+**Unified clients.** The MIR lane, the AST interpreter
+(`js_interp.cpp` `JS_AST_NODE_WITH_STATEMENT`) and the `vm` module all push
+through the same entry and all observe the same chain; none of them retains a
+private copy of the stack.
+
+**Gates.** `make test262-baseline` at zero regressions;
+`test/js/regression_with_stack_gc.js` on all three collector lanes plus
+`make test-gc-rooting-core`; a new regression for JS05-L1; and a net LOC
+reduction in `lambda/js`.
+
+## 14. Boundaries preserved by the proposal
 
 | Distinction | Formal authority | Consequence |
 |---|---|---|
