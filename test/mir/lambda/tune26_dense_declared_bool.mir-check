@@ -1,11 +1,13 @@
 {
   "schema_version": 1,
-  "description": "Tune26 T26-2: a counted declared bool[] loop retains its checked fallback while the guarded hot arm reads the packed byte directly. A finite induction sibling may add a second cold item_at path.",
+  "description": "Tune26 T26-2: a counted local bool[] consumes its dominating declaration proof, so both finite and generic loop arms read the packed byte with dynamic bounds behavior but without rebuilding the carrier certificate.",
   "checks": [
     {
       "in_func": "_tune26_dense_declared_bool_#",
       "expect": [
-        "mov\t{{r}}, u8:({{r}})",
+        "mov\t{{r}}, u8:({{r}})"
+      ],
+      "forbid": [
         "call\titem_at_p, item_at"
       ]
     }

@@ -8868,6 +8868,9 @@ static bool dom_get_textlike_property(DomNode* node, Item elem_item,
         *result = (Item){.item = i2it(length)};
         return true;
     }
+    // The node-kind rules for these three live in the core rows; node_type and
+    // node_name stay parameters because the split_text path builds a textlike
+    // view before the node is linked.
     if (strcmp(prop, "nodeType") == 0) {
         *result = (Item){.item = i2it(node_type)};
         return true;
@@ -8877,7 +8880,7 @@ static bool dom_get_textlike_property(DomNode* node, Item elem_item,
         return true;
     }
     if (strcmp(prop, "parentNode") == 0) {
-        *result = dom_parent_node_or_null(node);
+        *result = dom_core_parent_node(elem_item);
         return true;
     }
     if (strcmp(prop, "parentElement") == 0) {
@@ -8889,8 +8892,7 @@ static bool dom_get_textlike_property(DomNode* node, Item elem_item,
         return true;
     }
     if (strcmp(prop, "nextSibling") == 0) {
-        DomNode* sibling = dom_next_script_visible_sibling(node);
-        *result = sibling ? dom_wrap_element((void*)sibling) : ItemNull;
+        *result = dom_core_next_sibling(elem_item);
         return true;
     }
     // NonDocumentTypeChildNode is implemented by CharacterData as well as by
@@ -8916,16 +8918,19 @@ static bool dom_get_textlike_property(DomNode* node, Item elem_item,
         return true;
     }
     if (strcmp(prop, "previousSibling") == 0) {
-        DomNode* sibling = dom_prev_script_visible_sibling(node);
-        *result = sibling ? dom_wrap_element((void*)sibling) : ItemNull;
+        *result = dom_core_previous_sibling(elem_item);
         return true;
     }
     if (strcmp(prop, "childNodes") == 0) {
         *result = dom_live_child_collection_bridge((void*)node, false);
         return true;
     }
-    if (strcmp(prop, "firstChild") == 0 || strcmp(prop, "lastChild") == 0) {
-        *result = ItemNull;
+    if (strcmp(prop, "firstChild") == 0) {
+        *result = dom_core_first_child(elem_item);
+        return true;
+    }
+    if (strcmp(prop, "lastChild") == 0) {
+        *result = dom_core_last_child(elem_item);
         return true;
     }
     if (strcmp(prop, "ownerDocument") == 0) {
@@ -8957,6 +8962,97 @@ static bool dom_get_textlike_property(DomNode* node, Item elem_item,
         }
     }
     return expando_get_property(node, prop_name, result);
+}
+
+// ---------------------------------------------------------------------------
+// The node-link core rows.
+//
+// These eight are the mechanism every other DOM operation composes over, and
+// each of their bodies used to be `dom_prop_get(n, "camelCaseName")` in
+// dom_core.cpp -- a re-entry into the property protocol below, paying
+// fn_to_cstr plus a bsearch over 152 property names plus the linear chain, per
+// link followed. They read the engine link directly instead. The property arms
+// further down delegate here rather than the reverse, so both doors keep one
+// implementation (ES38) and the node-kind rules live in one place.
+// ---------------------------------------------------------------------------
+
+// Every node kind shares the wrapper, so one helper covers element, text and
+// comment links; a missing link is null, never undefined (DOM 4.4).
+static Item dom_node_link_item(DomNode* node) {
+    return node ? dom_wrap_element((void*)node) : ItemNull;
+}
+
+extern "C" Item dom_core_node_type(Item n) {
+    DomNode* node = (DomNode*)dom_unwrap_element(n);
+    if (!node) return ItemNull;
+    if (node->is_element()) {
+        DomElement* elem = node->as_element();
+        // "#document" and "#document-fragment" reuse DomElement storage, so
+        // without these a walk that reached one would report node type 1 where
+        // the spec says 9 and 11 (ESO93).
+        if (_is_tag(elem, "#document-fragment")) return (Item){.item = i2it(11)};
+        if (_is_tag(elem, "#document")) return (Item){.item = i2it(9)};
+    }
+    // DomNodeType carries the spec's own numbering, including DOCTYPE as 10.
+    return (Item){.item = i2it((int64_t)node->node_type)};
+}
+
+extern "C" Item dom_core_node_name(Item n) {
+    DomNode* node = (DomNode*)dom_unwrap_element(n);
+    if (!node) return ItemNull;
+    if (node->is_text()) return js_name_item("#text");
+    if (!node->is_element()) return js_name_item("#comment");
+    DomElement* elem = node->as_element();
+    // "#document", "#document-fragment" and friends are spec-fixed names, not
+    // tag names: uppercasing them yields "#DOCUMENT", which no DOM exposes
+    // (ESO93).
+    if (elem->tag_name && elem->tag_name[0] == '#') return js_name_item(elem->tag_name);
+    return (Item){.item = s2it(uppercase_tag_name(elem->tag_name))};
+}
+
+extern "C" Item dom_core_node_value(Item n) {
+    DomNode* node = (DomNode*)dom_unwrap_element(n);
+    if (!node) return ItemNull;
+    if (node->is_text()) {
+        const char* text = node->as_text()->text;
+        return js_name_item(text ? text : "");
+    }
+    if (node->is_comment()) {
+        const char* content = node->as_comment()->content;
+        return js_name_item(content ? content : "");
+    }
+    return ItemNull;  // Element.nodeValue is null, not the element's text
+}
+
+extern "C" Item dom_core_parent_node(Item n) {
+    DomNode* node = (DomNode*)dom_unwrap_element(n);
+    // The document-element case (its parent is the Document, which owns no
+    // DomNode link) lives in the shared helper; do not re-derive it here.
+    return node ? dom_parent_node_or_null(node) : ItemNull;
+}
+
+extern "C" Item dom_core_first_child(Item n) {
+    DomNode* node = (DomNode*)dom_unwrap_element(n);
+    // CharacterData has no children, so text and comment nodes answer null
+    // without consulting the traversal rule.
+    if (!node || !node->is_element()) return ItemNull;
+    return dom_node_link_item(dom_first_script_visible_child(node->as_element()));
+}
+
+extern "C" Item dom_core_last_child(Item n) {
+    DomNode* node = (DomNode*)dom_unwrap_element(n);
+    if (!node || !node->is_element()) return ItemNull;
+    return dom_node_link_item(dom_last_script_visible_child(node->as_element()));
+}
+
+extern "C" Item dom_core_next_sibling(Item n) {
+    DomNode* node = (DomNode*)dom_unwrap_element(n);
+    return node ? dom_node_link_item(dom_next_script_visible_sibling(node)) : ItemNull;
+}
+
+extern "C" Item dom_core_previous_sibling(Item n) {
+    DomNode* node = (DomNode*)dom_unwrap_element(n);
+    return node ? dom_node_link_item(dom_prev_script_visible_sibling(node)) : ItemNull;
 }
 
 extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
@@ -9193,17 +9289,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // nodeType
-    if (prop_id == JS_DOM_PROP_NODE_TYPE) {
-        if (_is_tag(elem, "#document-fragment"))
-            return (Item){.item = i2it(11)};
-        // The document node is carried as a DomElement tagged "#document"
-        // (dom_get_or_create_doc_node), so it must not report itself as an
-        // element -- a walk that reaches it would otherwise see node type 1
-        // where the spec says 9 (ESO93).
-        if (_is_tag(elem, "#document"))
-            return (Item){.item = i2it(9)};
-        return (Item){.item = i2it((int64_t)elem->node_type)};
-    }
+    if (prop_id == JS_DOM_PROP_NODE_TYPE) return dom_core_node_type(elem_item);
 
     // childElementCount
     if (prop_id == JS_DOM_PROP_CHILD_ELEMENT_COUNT) {
@@ -9227,9 +9313,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // parentNode (includes text nodes — returns any parent)
-    if (prop_id == JS_DOM_PROP_PARENT_NODE) {
-        return dom_parent_node_or_null((DomNode*)elem);
-    }
+    if (prop_id == JS_DOM_PROP_PARENT_NODE) return dom_core_parent_node(elem_item);
 
     // isConnected — true iff the shadow-inclusive root is the Document.
     if (prop_id == JS_DOM_PROP_IS_CONNECTED) {
@@ -9258,38 +9342,11 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         return doc_node ? dom_wrap_element(doc_node) : ItemNull;
     }
 
-    // firstChild (any node type, not just elements)
-    if (prop_id == JS_DOM_PROP_FIRST_CHILD) {
-        DomNode* child = dom_first_script_visible_child(elem);
-        if (!child) return ItemNull;
-        if (child->is_element()) return dom_wrap_element(child->as_element());
-        // wrap text node
-        return dom_wrap_element((DomElement*)(void*)child);
-    }
-
-    // lastChild (any node type)
-    if (prop_id == JS_DOM_PROP_LAST_CHILD) {
-        DomNode* child = dom_last_script_visible_child(elem);
-        if (!child) return ItemNull;
-        if (child->is_element()) return dom_wrap_element(child->as_element());
-        return dom_wrap_element((DomElement*)(void*)child);
-    }
-
-    // nextSibling (any node type)
-    if (prop_id == JS_DOM_PROP_NEXT_SIBLING) {
-        DomNode* sib = dom_next_script_visible_sibling((DomNode*)elem);
-        if (!sib) return ItemNull;
-        if (sib->is_element()) return dom_wrap_element(sib->as_element());
-        return dom_wrap_element((DomElement*)(void*)sib);
-    }
-
-    // previousSibling (any node type)
-    if (prop_id == JS_DOM_PROP_PREVIOUS_SIBLING) {
-        DomNode* sib = dom_prev_script_visible_sibling((DomNode*)elem);
-        if (!sib) return ItemNull;
-        if (sib->is_element()) return dom_wrap_element(sib->as_element());
-        return dom_wrap_element((DomElement*)(void*)sib);
-    }
+    // firstChild / lastChild / nextSibling / previousSibling (any node type)
+    if (prop_id == JS_DOM_PROP_FIRST_CHILD) return dom_core_first_child(elem_item);
+    if (prop_id == JS_DOM_PROP_LAST_CHILD) return dom_core_last_child(elem_item);
+    if (prop_id == JS_DOM_PROP_NEXT_SIBLING) return dom_core_next_sibling(elem_item);
+    if (prop_id == JS_DOM_PROP_PREVIOUS_SIBLING) return dom_core_previous_sibling(elem_item);
 
     // firstElementChild
     if (prop_id == JS_DOM_PROP_FIRST_ELEMENT_CHILD) {
@@ -9469,19 +9526,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // nodeName — tag name for elements, "#text" for text nodes
-    if (prop_id == JS_DOM_PROP_NODE_NAME) {
-        DomNode* node = (DomNode*)elem;
-        if (node->is_text()) {
-            return js_name_item("#text");
-        }
-        // "#document", "#document-fragment" and friends are spec-fixed names,
-        // not tag names: uppercasing them yields "#DOCUMENT", which no DOM
-        // exposes (ESO93).
-        if (elem->tag_name && elem->tag_name[0] == '#') {
-            return js_name_item(elem->tag_name);
-        }
-        return (Item){.item = s2it(uppercase_tag_name(elem->tag_name))};
-    }
+    if (prop_id == JS_DOM_PROP_NODE_NAME) return dom_core_node_name(elem_item);
 
     // LinkStyle.sheet — associated CSSStyleSheet for <style> and stylesheet <link>.
     if (prop_id == JS_DOM_PROP_SHEET &&

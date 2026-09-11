@@ -256,15 +256,11 @@ extern "C" Item dom_engine_load_document(Item path) {
 // CORE
 // ===========================================================================
 
-// --- node reads: the property protocol is the one reader of node links
-extern "C" Item dom_core_node_type(Item n)        { return dom_prop_get(n, "nodeType"); }
-extern "C" Item dom_core_node_name(Item n)        { return dom_prop_get(n, "nodeName"); }
-extern "C" Item dom_core_node_value(Item n)       { return dom_prop_get(n, "nodeValue"); }
-extern "C" Item dom_core_parent_node(Item n)      { return dom_prop_get(n, "parentNode"); }
-extern "C" Item dom_core_first_child(Item n)      { return dom_prop_get(n, "firstChild"); }
-extern "C" Item dom_core_last_child(Item n)       { return dom_prop_get(n, "lastChild"); }
-extern "C" Item dom_core_next_sibling(Item n)     { return dom_prop_get(n, "nextSibling"); }
-extern "C" Item dom_core_previous_sibling(Item n) { return dom_prop_get(n, "previousSibling"); }
+// --- node reads
+// The eight node-link rows live in dom.cpp, beside the traversal helpers and
+// the node-kind rules they need, and the property arms there delegate to them.
+// They were `dom_prop_get(n, "camelCaseName")` here, which made the mechanism
+// the whole DOM composes over re-enter the property protocol by name.
 extern "C" Item dom_core_owner_document(Item n)   { return dom_prop_get(n, "ownerDocument"); }
 // identity: `==` cannot express it (S5.1.4 + zero-entry wrappers), so the DOM
 // supplies it as an operation, exactly as Node.isSameNode() does.

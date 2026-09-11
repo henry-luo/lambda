@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "description": "Tune26 T26-2: a var float[] destination keeps its checked COW store, while a distinct readonly float[] peer receives the loop's dense extent proof and raw float load.",
+  "checks": [
+    {
+      "in_func": "_tune26_var_readonly_peer_#",
+      "expect_seq": [
+        "ge\t{{r}}, %p3, -2147483648",
+        "le\t{{r}}, %p3, 2147483647",
+        "ge\t{{r}}, {{r}}, {{r}}",
+        "bt\tL",
+        "mul\t{{r}}, {{r}}, 8",
+        "dmov\t{{r}}, d:({{r}})"
+      ],
+      "expect": [
+        "call\tlambda_array_set_checked_inplace_lane"
+      ]
+    }
+  ]
+}

@@ -5,13 +5,9 @@ pn tune26_same_owner_store(n: int) int {
     var flags: bool[] = fill(n + 1, true)
     flags[0] = false
     var i: int = 2
+    var count: int = 0
     while (i <= n) {
         flags[i] = false
-        i = i + 1
-    }
-    var count: int = 0
-    i = 2
-    while (i <= n) {
         if (not flags[i]) { count = count + 1 }
         i = i + 1
     }

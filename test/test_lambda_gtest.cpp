@@ -292,6 +292,21 @@ TEST(LambdaTypedPathTests, ReusesFiniteProofAcrossPositiveSubtractionLoop) {
         "test/mir/lambda/tune26_finite_sub_loop.txt", true);
 }
 
+TEST(LambdaTypedPathTests, ReusesFiniteProofAcrossDescendingSumLoop) {
+    test_lambda_script_against_file("test/mir/lambda/tune26_descending_sum.ls",
+        "test/mir/lambda/tune26_descending_sum.txt", true);
+}
+
+TEST(LambdaTypedPathTests, PreservesIntegerParityAcrossFiniteAndSentinelLanes) {
+    test_lambda_script_against_file("test/mir/lambda/tune26_parity_compare.ls",
+        "test/mir/lambda/tune26_parity_compare.txt", true);
+}
+
+TEST(LambdaTypedPathTests, ReusesReadonlyArrayProofBesideVarDestination) {
+    test_lambda_script_against_file("test/mir/lambda/tune26_var_readonly_peer.ls",
+        "test/mir/lambda/tune26_var_readonly_peer.txt", true);
+}
+
 TEST(LambdaTypedPathTests, ReusesFiniteProofAcrossBoundedInduction) {
     test_lambda_script_against_file("test/mir/lambda/tune26_bounded_induction.ls",
         "test/mir/lambda/tune26_bounded_induction.txt", true);

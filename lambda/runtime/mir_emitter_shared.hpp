@@ -102,6 +102,10 @@ struct VarEntry {
     MIR_reg_t typed_array_cache_items;
     MIR_reg_t typed_array_cache_len;
     bool typed_array_cache_valid;
+    // The local declaration boundary established this exact T[] proof. It is
+    // cleared on whole-binding replacement; the layout cache alone is only a
+    // physical carrier witness and cannot stand in for this contract.
+    Type* typed_array_contract_proven;
     bool is_live_default_binding;
     const char* live_binding_specifier;
 };

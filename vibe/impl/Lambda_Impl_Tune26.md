@@ -1,15 +1,18 @@
 # Tune26: recover Result37 performance and make typed arrays pay
 
 - **Date:** 2026-09-11.
-- **Status:** PROPOSED. All T26 tracks below are planned; this document reports
-  no new implementation or benchmark pass.
+- **Status:** IMPLEMENTED WITH OPEN PERFORMANCE GATES. T26-0 through T26-4
+  have working-tree implementation slices and focused evidence; T26-5 and all
+  proposal completion gates remain open. Section 9 records both the measured
+  improvement and the failures that prevent closure.
 - **User requirement:** typed arrays should speed up code. Adding correct
   homogeneous-array annotations to an equivalent workload must preserve the
   inferred implementation's speed and enable faster native access where the
   inferred path remains boxed. An already optimal inferred lane may tie.
 - **Primary reference:** [Result42 versus Result37 analysis](Lambda_Benchmark_Result42_Analysis.md).
-- **Source audit:** HEAD `fa77dbdcc`; the relevant admission, array-access and
-  integer-comparison mechanisms remain present.
+- **Source audit:** working tree based on `e86d7ff8b602`. The relevant
+  admission, array-access and integer-comparison mechanisms have been
+  extended; this is an uncommitted implementation, not a release artifact.
 - **Predecessors:** [Tune22](Lambda_Impl_Tune22.md),
   [typed-array implementation, §§13–14](Lambda_Impl_Typed_Array.md),
   [Tune24](Lambda_Impl_Tune24.md), [Tune25](Lambda_Impl_Tune25.md).
@@ -411,12 +414,12 @@ Archive identities from the benchmark JSON:
 
 | Track | Main existing source owners | Status | Required closeout evidence |
 |---|---|---|---|
-| T26-0 | `test/benchmark/run_paired_benchmarks.py`, `run_benchmarks.py`, report generator | Planned | Fixed manifests, archive/dependency provenance, reproduced controls |
-| T26-1 | `lambda/runtime/type_contract.{hpp,cpp}`, `lambda-eval.cpp`, `lambda-vector.cpp`, `collection_runtime.cpp` | Planned | No eligible admission scan, size sweep, cold/warm parity |
-| T26-2 | `lambda/runtime/transpile-mir.cpp`, scoped facts and `mir_emitter_shared.hpp` | Planned | Native hot access, bool coverage, checked misses, unchanged-source gains |
-| T26-3 | Compact-loop analysis, `mir_int_lane_interval`, comparison lowering | Planned | Finite-loop MIR, sentinel correctness, diviter/sum recovery |
-| T26-4 | Existing checked/native stores, scoped ownership, caller-home publication | Planned | Correct capture/detachment/growth and no redundant unique-loop work |
-| T26-5 | Residual source owners established by profiling; benchmark/report tools | Planned | All performance gates plus complete Lambda/Test262 baselines |
+| T26-0 | `test/benchmark/run_paired_benchmarks.py`, `run_benchmarks.py`, report generator | Partially implemented | The frozen 43-row manifest and paired source/binary provenance exist; a durable generated Tune26 comparison report is still absent |
+| T26-1 | `lambda/runtime/type_contract.{hpp,cpp}`, `lambda-eval.cpp`, `lambda-vector.cpp`, `collection_runtime.cpp` | Partially implemented | Exact declared-local contract proof and typed-array-only native formal selection landed; no size/counter evidence closes admission cost |
+| T26-2 | `lambda/runtime/transpile-mir.cpp`, scoped facts and `mir_emitter_shared.hpp` | Partially implemented | Dense typed reads, BOOL coverage, and an independently proved readonly peer beside a `var` destination; full loop family and measured recovery remain open |
+| T26-3 | Compact-loop analysis, `mir_int_lane_interval`, comparison lowering | Partially implemented | Narrow descending-sum induction and finite parity lowering, with sentinel fallback; diviter and broad range reuse remain open |
+| T26-4 | Existing checked/native stores, scoped ownership, caller-home publication | Partially implemented | Same-contract `var` call proof and checked COW write-back remain correct; dynamic in-body snapshot capture still requires the checked store |
+| T26-5 | Residual source owners established by profiling; benchmark/report tools | Open | All performance gates, residual attribution, generated report, and complete Lambda/Test262 baselines |
 
 Use existing `lib` containers and shared helpers. No benchmark-name dispatch,
 hardcoded workload constants, public type weakening, source workaround,
@@ -429,3 +432,93 @@ Update this ledger with measured evidence as work lands. Tune26 is complete
 only when typed arrays deliver the required gains, Result37 recovery and
 current-suite preservation gates pass, and no correctness obligation remains
 unreported.
+
+## 9. Implementation evidence and remaining closeout
+
+### Implemented slices
+
+The current working tree makes the following scoped changes without changing a
+language ruling.
+
+- T26-0 freezes the Result37 43-row source population in
+  `test/benchmark/tune26_manifest.json`, and the paired runner records source
+  and binary provenance for exact manifest selections and source-pair runs.
+- T26-1 records a full canonical `T[]` declaration proof in `MirVarEntry`,
+  separate from its physical layout cache.  A matching declared local can
+  reuse that proof after successful boundary admission.  An all-value function
+  with typed-array formals now selects the existing raw-array witness body even
+  when it has no scalar lanes or scalar return.  `var` formals deliberately
+  retain the adapter because they may publish a replacement owner through the
+  caller home (D3.3.3, D8.3.2–D8.3.3).
+- T26-2 extends dense-loop analysis to BOOL, same-owner writes whose separate
+  write proof is valid, and independently proved roots.  In particular, a
+  `var` destination stays on the checked COW path while a distinct readonly
+  source can use dense raw loads.  One uncertain root therefore no longer
+  discards an unrelated read proof.
+- T26-3 adds a deliberately narrow finite descending-sum induction and turns
+  finite `n % 2 == 0` or `!= 0` predicates into a native low-bit test.  The
+  sentinel/out-of-band arm retains existing remainder and numeric-comparison
+  lowering, as required by D2.2.2 and S4.1.2.
+- T26-4 carries the same declared contract through direct one-hop `var T[]`
+  calls, reloads a possibly replaced owner, and retains checked COW stores.
+  New fixture families cover typed-array-only formals, descending sum, parity
+  including an out-of-band integer, `var` call boundaries, `var` bool-array
+  stores, and the readonly-peer/destination combination.
+
+Focused evidence at the last fresh correctness build was:
+
+| Check | Result | Scope |
+|---|---:|---|
+| `test_mir_emission_gtest --gtest_filter='*tune26*:*typed_array_reuse*'` | 12/12 passed | MIR shape and ratchet fixtures |
+| `test_lambda_gtest --gtest_filter='LambdaTypedPathTests.*'` | 10/10 passed | expected-output typed-path fixtures |
+| `git diff --check` | passed | current working-tree patch |
+
+A later experimental relaxation of `var ArrayNum` COW was rejected and fully
+reverted.  In the reproducer `let snapshot = values; values[0] = 2.0`, a raw
+store caused the snapshot to observe `2.0` rather than its old value.  The
+expected result was `12 2`; the trial produced `22 2`.  This establishes that
+call-boundary preparation alone does not prove exclusive ownership after an
+in-body snapshot capture.  The current implementation keeps the dynamic COW
+guard at that store, preserving S9.2.2 and D3.3.3.  The binary produced during
+that rejected trial is stale, so the focused checks must be rebuilt and rerun
+before any final correctness claim.
+
+### Measured performance evidence
+
+All timings below are release, same-host alternating paired measurements with
+equal normalized output.  They are implementation evidence, not a completed
+gate report; their raw JSON is presently under `temp/` and must be promoted
+into a versioned report for closure.
+
+| Candidate archive | Measurement | Result | Gate consequence |
+|---|---|---:|---|
+| `lambda-tune26-e86d7ff8b-t15` SHA-256 `9e5920187bc13584056a1b64434e42796d99c2aa5e083969c11fe1ef26ab4edc` | 43 frozen Result37 rows, 31 pairs | 0.998773x geomean | G1 passes for this earlier candidate only |
+| same t15 archive | 43-row tail | 17 rows still exceed 1.10x | G2 fails |
+| `lambda-tune26-e86d7ff8b-t16` SHA-256 `74adba47a17ab5af11bbceb024f935f3871d6f31042204b1964a0fdf0c8a4487` | Result37 Navier-Stokes, 31 pairs | 1.4119x, 0/31 wins | Better than t15's 1.4442x, but still fails G2 |
+
+The t15 tail failures were `navier_stokes`, `fft`, `nqueens`, `paraffins`,
+`divrec`, `permute`, `cpstak`, `tak`, `levenshtein`, `fib`, `storage`,
+`nbody`, `crypto_sha1`, `brainfuck`, `fannkuch`, `cube3d`, and `mandelbrot`.
+Their t15 ratios range from 1.1002x to 1.4442x.  The detailed samples are
+`temp/tune26_r37_t15_full.json`; this temporary path is not durable gate
+evidence.  The t16 readonly-peer change has only the Navier-Stokes probe
+(`temp/tune26_r37_t16_navier_probe.json`), so it cannot inherit t15's full G1
+result despite restoring the source state after the rejected COW experiment.
+
+### Work still outstanding
+
+1. Rebuild the reverted current source and rerun all focused tests, then run
+   the required Lambda, Test262, MIR GC-stress, T0/JIT, and sanitizer checks.
+2. Archive a new release binary and repeat the complete 43-row interleaved
+   Result37 comparison.  G1 must be established on that exact binary, while
+   every listed G2 tail row needs emitted-code/profile attribution and a
+   root-cause fix.
+3. Complete annotation-pair measurements and uncertainty reporting for G3;
+   add the cold admission and sustained bool/int/float diagnostics with the
+   required counters and size sweeps for G4 and G7.
+4. Compare typed and untyped current 63-row execution plus auto wall time to
+   the frozen pre-Tune26 control for G5 and G6.  Generate and check in
+   `benchmark_tune26.json` and its Markdown report from those data.
+5. Keep `var` writes COW-safe while expanding ownership proof only where a
+   capture/alias analysis proves it.  The rejected snapshot result rules out
+   treating a `var` parameter as permanently exclusive.

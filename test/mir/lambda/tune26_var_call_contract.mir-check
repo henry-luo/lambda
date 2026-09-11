@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "Tune26 T26-4: an exact one-hop var float[] call reloads its possible COW replacement and preserves the caller's full array proof; the caller reads packed lanes without a repeated representation fallback.",
+  "checks": [
+    {
+      "in_func": "_tune26_var_call_contract_#",
+      "expect": [
+        "call\t_tune26_var_call_boundary_"
+      ],
+      "forbid": [
+        "call\titem_at_p, item_at"
+      ]
+    }
+  ]
+}

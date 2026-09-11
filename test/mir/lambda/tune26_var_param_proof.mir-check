@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "description": "Tune26 T26-4: a native var bool[] parameter consumes the entry witness once, keeps COW and dynamic bounds checks on each store, and reuses its admitted layout for the paired read.",
+  "checks": [
+    {
+      "in_func": "_tune26_var_param_proof_#",
+      "expect_seq": [
+        "mov\t{{r}}, u8:4({{r}})",
+        "and\t{{r}}, {{r}}, 1",
+        "bt\tL",
+        "mov\t{{r}}, i64:40({{r}})",
+        "lt\t{{r}}, {{r}}, 0",
+        "ge\t{{r}}, {{r}}, {{r}}",
+        "mov\tu8:({{r}}), {{r}}",
+        "mov\t{{r}}, u8:({{r}})"
+      ],
+      "expect": [
+        "call\tlambda_array_set_checked_inplace_lane_p, lambda_array_set_checked_inplace_lane"
+      ],
+      "forbid": [
+        "call\titem_at_p, item_at"
+      ],
+      "count": {
+        "call\tlambda_type_check_p, lambda_type_check": 1
+      }
+    }
+  ]
+}

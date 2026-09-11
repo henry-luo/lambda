@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "description": "Tune26 T26-3: a finite nonnegative countdown is checked once, then its zero-origin sum uses raw comparison, addition, and subtraction; the generic sibling remains in the function.",
+  "checks": [
+    {
+      "in_func": "_tune26_descending_sum_#",
+      "expect_seq": [
+        "ge\t{{r}}, %p1, 0",
+        "le\t{{r}}, %p1, 100000000",
+        "ge\t{{r}}, %p1, {{r}}",
+        "add\t{{r}}, {{r}}, %p1",
+        "sub\t{{r}}, %p1, {{r}}"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "description": "Tune26 T26-1: a typed-array-only signature selects the raw witness ABI even with an array return, so the callee reads its packed float lanes without item_at.",
+  "checks": [
+    {
+      "in_func": "_tune26_array_only_params_#",
+      "expect": [
+        "and\t{{r}}, _array_witness, 1",
+        "and\t{{r}}, _array_witness, 2"
+      ],
+      "forbid": [
+        "call\titem_at_p, item_at"
+      ]
+    },
+    {
+      "in_func": "_main_#",
+      "expect": [
+        "call\t_tune26_array_only_params_"
+      ],
+      "forbid": [
+        "call\t_tune26_array_only_params_#_b"
+      ]
+    }
+  ]
+}

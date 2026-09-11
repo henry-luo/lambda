@@ -25,7 +25,7 @@
   code does not yet satisfy (D7.4.4 "no fallback tier", D7.4.5v2 "materializing
   array-shaped host state into real arrays … is an anti-pattern this ruling
   retires").
-- **New ledger IDs:** `DS1`–`DS12` (rulings proposed here), `DSO1`–`DSO6`
+- **New ledger IDs:** `DS1`–`DS17` (rulings proposed here), `DSO1`–`DSO6`
   (open questions). Continues the host-API ledger at **ES48** and **ESO115**
   where a point needs to be recorded there instead.
 
@@ -34,11 +34,11 @@
 ## 1. Objective and completion contract
 
 One DOM operation should be **declared once, implemented once, and reached in
-one hop** from either script runtime. Today it is declared in as many as six
-places and reached in five or six hops, and the "core" tier that secondary
-operations are supposed to compose over is 83% of the catalog.
+at most three calls** from either script runtime. Today it is declared in as
+many as six places and reached in five or six, and the "core" tier that
+secondary operations are supposed to compose over is 83% of the catalog.
 
-Three obligations, matching the three requirements:
+Four obligations — the three requirements, plus the hop budget:
 
 1. **Fewer layers.** Delete the intermediate dispatch tiers — the ordinal
    enum, the per-ordinal thunks, the name-keyed property chains — so a member
@@ -51,6 +51,8 @@ Three obligations, matching the three requirements:
    `varray` / `vmap` over the live engine structures (D7.4.5v2), not as
    snapshot arrays built by a collect loop and not as a re-entry into a
    string-keyed property dispatcher.
+4. **Three hops, every path.** One dispatch, one body, one engine access —
+   DS17, with the counting rule and the per-class analysis in §4.5.
 
 **Exit gate:** ≥ **1000 code lines** removed from the C++ DOM handling surface,
 counted with blank lines and comment-only lines excluded and with no
@@ -90,7 +92,7 @@ collapse adds rows to the first and deletes the enum from the second.
 | Property ids | `dom.cpp:6154` `JS_DOM_PROPS(X)` | **152** |
 | Reflected attributes | `dom.cpp:8609` `JS_DOM_REFLECTED_ATTRS(X)` | **32** |
 | Declared interface members | `radiant_dom_iface.cpp` `radiant_dom_interface_decl[]` | 29 types, **300** member lines |
-| Member bind rows | `radiant_dom_iface.cpp`, 23 `JubeMemberBind` tables | **272** rows, 232 distinct names, **315** distinct handler functions |
+| Member bind rows | `radiant_dom_iface.cpp`, 23 `JubeMemberBind` tables | **387** rows (11 macro spellings), 302 distinct names, **315** distinct handler functions |
 
 Only the first is compile-checked against anything (`dom_api_check.cpp`
 expands it four ways). The other five are hand-maintained and must agree by
@@ -251,6 +253,41 @@ of boundary points.
 **F-7 — snapshot-by-default for Lambda**, contradicting D7.4.5v2 and duplicating
 live `VArray` backends that already exist.
 
+**F-8 — the eight most primitive operations in the DOM are string re-entries.**
+`node_type`, `node_name`, `node_value`, `parent_node`, `first_child`,
+`last_child`, `next_sibling`, `previous_sibling` are all `CORE` rows, and every
+one of their bodies is literally `dom_prop_get(n, "camelCaseName")`
+(`dom_core.cpp:260–267`). The node link walk — the mechanism the whole DOM is
+defined over — re-enters the JS property dispatcher by a string literal, paying
+`fn_to_cstr` + a `bsearch` over 152 names + a linear chain, per link. F-5
+under-stated this: these eight are worse than the 21 `DOM_F_FASTPATH` bodies,
+because they are the rows every derivation composes over.
+
+**F-9 — the document re-materializes the name the record just resolved.** All
+**76** document members are `RADIANT_DOC_GET_FN` / `_SET_FN` / `_CALL_FN`
+two-liners that take the resolved member and look it back up by *string*:
+
+```c
+#define RADIANT_DOC_GET_FN(fn, js) \
+    static int fn(Item receiver, Item* out) { \
+        return radiant_dom_document_host_get_property(receiver, radiant_dom_doc_key(js), out); \
+    }
+```
+
+and `radiant_dom_document_host_get_property` then swaps the process-wide active
+document (`dom_swap_active_document` / `dom_restore_active_document`) around
+each read, because `dom_document_proxy_get_property(key)` takes only a key and
+reads an ambient global. D7.4.4's corollary rules the opposite in as many
+words: property keys "are resolved internally via one borrowed byte view, and
+are never re-materialized for a fallback consumer."
+
+**F-10 — the open-name fallback is four aliases of one function.**
+`radiant_dom_node_named_get` → `radiant_dom_host_get_property` →
+`radiant_dom_get_property` → `dom_get_property_impl`. Only the third does work,
+and that work is two special cases: a `labels` tag test, and a geometry commit
+gated on `strcmp(prop,"offsetWidth")… || strncmp(prop,"client",6) || strncmp(prop,"scroll",6)`
+— nine property names, tested on **every** property read of every node.
+
 ---
 
 ## 4. Proposed rulings
@@ -285,11 +322,25 @@ ABI selector. Every ordinal becomes a `DOM_OP` row with a body of its own; the
 80 arms of `dom_element_operation_impl` become 80 `extern "C" Item dom_core_<name>(…)`
 functions with the same bodies. `invoke_raw` is retired along with the chain.
 
-Call path after DS2, for the §2.4 trace:
+Call path after DS2, for the §2.4 trace — counting a hop the same way §2.4
+does, one per call, the final engine call included:
 
 ```
-JS site → jube_member_call_by_ordinal → dom_catalog-><row>   (2 hops)
+JS property/call site
+ └─ jube_member_call_by_ordinal            (1) compiled record, ordinal
+     └─ <generated row thunk>              (2) arity adapter only
+         └─ dom_catalog->get_attribute     (3) == dom_core_get_attribute, the body
+             └─ elem->get_attribute        (4) radiant DomElement
 ```
+
+**Six hops become four**, and the 80-test linear scan is gone entirely.
+`radiant_dom_element_operation` and `invoke_raw` disappear; the host-API seam is
+no longer a hop of its own, because the slot it dereferences now *is* the body
+rather than a dispatcher that will go looking for one.
+
+Hop 2 survives only because `JubeMemberBind.call` is
+`int (Item, Item*, int, Item*)` while a row body is `Item (Item, …)` at the
+row's own arity. **DS13** removes it, taking this path to three.
 
 Receiver-kind guards that the chain performs up front (text vs comment vs
 element vs `#document`) move into a generated per-row prologue keyed by the
@@ -320,13 +371,41 @@ is the only implementation; a second one that must agree is the defect.
 
 ### DS4 — one reflection table, in the core, generating both sides
 
+`JubeMemberBind` **already carries the slot for this**:
+
+```c
+const char* reflect_attr; // attribute-reflected member: generic reflect routine
+                          //   handles get/set; no handler functions needed
+```
+
+It is declared, and `jube_interface.cpp` reads it in exactly two places — to
+decide `record->readonly` and to pass the "a field needs a getter" validation.
+**No binding table anywhere sets it, and no dispatch path reads it**: the
+generic reflect routine its comment promises does not exist. So the 26
+duplicated attributes are not working around a missing mechanism; they are
+hand-written beside an unwired one. DS4 wires it rather than inventing it.
+
 `JS_DOM_REFLECTED_ATTRS` moves to `lambda/dom/dom_reflect.def` with columns
 `(idl, attr, kind, default, tags, js_name, after_hook)`. `after_hook` names the
 invariant call a few attributes need (`dom_after_disabled_attribute_set`,
 `dom_after_select_multiple_removed`, `dom_after_default_checked_set`,
 `dom_after_default_selected_set`) and is empty for the rest. The module's tag
-guards, `m4b` accessors, `RADIANT_GUARDED_*` wrappers, externs and `BIND_FIELD_SET`
-rows are all expansions of this file.
+guards, `m4b` accessors, `RADIANT_GUARDED_*` wrappers, externs and
+`BIND_FIELD_SET` rows are all expansions of this file, emitted as
+`reflect_attr` rows with no handler functions at all.
+
+Hop count for a reflected read (`el.disabled`), counted as in §2.4:
+
+| | Today | After DS4 |
+|---|---|---|
+| 1 | `jube_member_call_by_ordinal` | `jube_member_call_by_ordinal` |
+| 2 | `radiant_html_disabled_get` (guard wrapper) | generic reflect routine |
+| 3 | `radiant_dom_m4b_disabled_get` | `elem->has_attribute` |
+| 4 | `radiant_dom_reflected_bool_get` | — |
+| 5 | `elem->has_attribute` | — |
+
+**Five hops become three**, and the parallel `prop_id == JS_DOM_PROP_DISABLED`
+arm in `dom_set_property_impl` that has to agree with them goes with DS3.
 
 ### DS5 — a native body must earn its row
 
@@ -370,7 +449,32 @@ Three concrete changes:
 
 The 21 `dom_prop_get(n, "camelCaseName")` bodies call their operation's row (or
 the `velmt` vtable) directly. After DS2 most of them have a row of their own and
-the wrapper disappears entirely.
+the wrapper disappears entirely. The `dom_op0..3` helpers go with the ordinal.
+
+The Lambda door shortens by the same two hops as the JS one:
+
+```
+dom.get_attribute(n, "x")            TODAY (5)          AFTER (3)
+  1  dom_pub_get_attribute            ✓                  ✓
+  2  dom_core_get_attribute           ✓                  ✓  (now the body)
+  3  dom_op1                          ✓                  —
+  4  dom_element_operation_impl       ✓ 80-test scan     —
+  5  elem->get_attribute              ✓                  ✓
+```
+
+```
+dom.children(n)                       TODAY (5)          AFTER (3)
+  1  dom_pub_children                 ✓                  ✓
+  2  dom_fp_children                  ✓                  ✓  (now the body)
+  3  dom_prop_get(n, "children")      ✓ by STRING        —
+  4  dom_get_property_impl            ✓ bsearch + scan   —
+  5  dom_live_child_collection_bridge ✓                  ✓
+```
+
+And under DS7/DS10 a structural read — `n[i]`, `len(n)`, `n.attrname` — takes
+**one** hop: the `velmt` vtable entry, with no `dom.*` call in the path at all.
+The `.ls` package currently spends 30 `dom.get_attribute` sites at five hops
+each on exactly that.
 
 ### DS9 — the `radiant.*` `velmt_*` family is folded into the element face
 
@@ -411,6 +515,109 @@ cannot be mistaken for progress. See the stale-artifact hazard in §9.
 
 ---
 
+### DS13 — the record's slot is the row body; the member ABI carries the arity
+
+`JubeMemberRecord` **already carries `int arity`** ("methods: declared parameter
+count"), parsed from the interface declaration. The only reason a member call
+cannot land on a catalog slot today is that `JubeMemberBind.call` is
+`int (Item, Item*, int, Item*)` while a row body is `Item (Item, …)` at the
+row's own arity.
+
+So the bind gains one field — the row body plus the fact that it *is* a row —
+and `jube_member_call_by_ordinal` / `jube_dispatch_get_record` switch on
+`rec->arity` and call the slot directly. Argument padding and truncation (JS may
+call with any count) happen **once**, in that switch, instead of in 84 generated
+thunks and 80 `argc < n` tests inside the arms.
+
+This is DSO7 promoted to a ruling, because the three-hop budget cannot be met
+without it. It costs a `JUBE_ABI_VERSION` bump — the same kind D7.4.4 and
+D7.4.5v2 each took. It removes one hop from **every** JS member access.
+
+### DS14 — a `CORE` row never reaches its own mechanism by name
+
+No catalog body may call `dom_prop_get`, `dom_get_property_impl` or
+`dom_element_operation_impl`. The eight node-link rows (F-8) read the engine
+link directly — `node->parent`, `node->first_child`, `node->node_name()` — or,
+where the script-visible traversal rule applies, the one shared
+`radiant_dom_*_script_visible_*` walker the `velmt` vtable already uses.
+
+This is DS8 stated as a prohibition rather than a cleanup, so it is checkable:
+the DS11 lint rule `no-dom-name-dispatch` enforces it.
+
+### DS15 — document members are `iface: document` rows, not string re-lookups
+
+The 76 `RADIANT_DOC_*_FN` two-liners are deleted. Each document member becomes
+a catalog row whose body takes the document **explicitly**
+(`dom_document_get_property_for` already proves this is possible — ESO101 built
+it), so the active-document swap/restore disappears from the read path along
+with the string round-trip. The ambient-global `dom_document_proxy_get_property(key)`
+door survives only for the genuinely open-name cases (named access on the
+document, expandos).
+
+### DS16 — one residual resolver, and the geometry commit is a row flag
+
+`radiant_dom_node_named_get`, `radiant_dom_host_get_property` and
+`radiant_dom_get_property` collapse into a single `named_get` hook that *is*
+the residual resolver. Its two pieces of real work move out:
+
+- `labels` becomes a catalog row (it is a DOM operation, not a fallback case);
+- the geometry commit becomes a per-row flag, **`DOM_F_GEOMETRY`**, emitted as a
+  one-line prologue in the generated thunk for the nine rows that need it,
+  instead of nine string comparisons on every property read of every node.
+
+---
+
+## 4.5 The three-hop budget
+
+**DS17 — every published DOM operation reaches Radiant state in at most three
+calls: one dispatch, one body, one engine access.**
+
+*Definition, so the number is checkable rather than rhetorical.* A **hop** is a
+call on the **dispatch path**: from the script site to the first function that
+reads or writes Radiant state. Calls a body makes **after** it has begun doing
+its own work — walking siblings, building a `VArray`, parsing a selector — are
+the operation, not dispatch, and are not hops. A hop is a dispatch hop if
+removing it would still leave the same state access reachable.
+
+Per access class, today → after:
+
+| # | Class | Today | After | Requires |
+|---|---|---:|---:|---|
+| A | JS method on a node — `el.getAttribute("x")` | 6 | **3** | DS1, DS2, **DS13** |
+| B | JS field on a node — `el.nodeName`, `el.firstChild` | 5 | **3** | DS13, **DS14** |
+| C | JS reflected attribute — `el.disabled` | 5 | **3** | **DS4** |
+| D | JS document member — `document.body` | 5 (+2 global swaps) | **3** | DS13, **DS15** |
+| E | JS open name / expando — `el.foo` | 6 | **3** | DS3, **DS16** |
+| F | JS collection index — `el.children[0]` | 3 | **3** | already met (`indexed_get` → VArray vtable) |
+| G | Lambda `dom.*` — `dom.get_attribute(n,"x")` | 5 | **3** | DS2, DS8 |
+| H | Lambda structural — `n[i]`, `len(n)`, `n.attr` | 5 (via `dom.*`) | **1** | DS7, DS10 |
+| I | Lambda `radiant.*` engine call | 2–3 | **2–3** | unchanged (out of scope) |
+
+The three-hop shape, once, for all of A–E and G:
+
+```
+script site
+ └─ record dispatch          (1)  jube_member_* / dom_pub_*  — resolves the member
+     └─ the row body         (2)  dom_core_<name>            — the operation
+         └─ engine access    (3)  DomElement::… / DomNode::… — Radiant state
+```
+
+**Where the budget is tight.** Class G spends hop 1 on the `dom_pub_*` absence
+trampoline (ESO107). It fits in three, but only because DS8 removes `dom_op1`.
+If a later row needs a fourth, the trampoline is the one to elide: flag the rows
+whose bodies can answer `undefined` (`DOM_F_ABSENT`) and generate the
+trampoline only for those, taking the rest to **two**. Recorded as an option,
+not a requirement — the budget is met without it.
+
+**Where three is the floor.** Hops 2 and 3 cannot merge. Hop 2 does the work
+that makes the operation an operation — unwrapping `Item` → `DomNode*`,
+filtering `__lambda_*` internal attributes, mapping a missing attribute to null
+versus an empty string. Hop 3 is Radiant's own method. Collapsing them would put
+DOM semantics inside the engine, which ES47 separates on purpose. Class F and H
+reach two and one only because a vtable *is* the dispatch.
+
+---
+
 ## 5. What this does *not* change
 
 - **No new fast path, no new cache.** LC1v2 rules out inline caches in both
@@ -429,7 +636,7 @@ cannot be mistaken for progress. See the stale-artifact hazard in §9.
 
 Each phase is independently landable and independently gated.
 
-### Phase P1 — DS1 + DS2: one catalog, no ordinals
+### Phase P1 — DS1 + DS2 + DS13: one catalog, no ordinals, no adapter thunks
 
 1. Add `iface` and `js_name` columns to every existing `dom_api.def` row
    (mechanical; `iface = ""` preserves today's behaviour).
@@ -440,36 +647,50 @@ Each phase is independently landable and independently gated.
    ones onto their existing rows (the ordinal's spelling survives as `js_name`
    where JS needs it), one cluster at a time, each arm of
    `dom_element_operation_impl` becoming that row's body verbatim.
-4. Delete the enum, `invoke_raw`, the 84 thunks, the 84 externs and the chain.
+4. Add the arity field to `JubeMemberBind`, switch on `rec->arity` in
+   `jube_member_call_by_ordinal` and `jube_dispatch_get_record`, bump
+   `JUBE_ABI_VERSION` (DS13). Argument padding moves into that switch.
+5. Delete the enum, `invoke_raw`, the 84 thunks, the 84 externs and the chain.
+   With DS13 the thunks are not regenerated — they go entirely for any member
+   with a catalog row.
 
-**Budget: ≈ 380 code lines.** (89 enum + 168 thunk/extern + ≈ 120 chain
-scaffolding + ≈ 40 `dom_op0..3` delegation helpers in `dom_core.cpp`, less the
-generation macros added.)
+**Budget: ≈ 400 code lines.** (89 enum + 168 thunk/extern + ≈ 120 chain
+scaffolding + ≈ 40 `dom_op0..3` helpers + ≈ 80 `argc < n` prologue tests now
+done once, less ≈ 100 for the arity switch and the remaining generation macros.)
+**This is the phase that carries the ABI bump**, so it lands first and alone.
 
-### Phase P2 — DS4: one reflection table
+### Phase P2 — DS4: one reflection table, and `reflect_attr` finally wired
 
-Extract `dom_reflect.def`; generate the module side. Delete the 13
+Write the generic reflect routine `jube_interface.cpp` promises but does not
+have (≈ 30 lines). Extract `dom_reflect.def`; emit the module side as
+`reflect_attr` rows with no handler functions. Delete the 13
 `RADIANT_DOM_TAG_SET_GUARD`s, the 8 `RADIANT_REFLECT_BOOL`s, the ≈ 30
 `RADIANT_GUARDED_GET`/`_SET` pairs, their ≈ 60 externs, and the 26 duplicate
 bind rows.
 
-**Budget: ≈ 330 code lines.**
+**Budget: ≈ 300 code lines** (330 removed, 30 added).
 
-### Phase P3 — DS3: the property chains shrink to what is name-driven
+### Phase P3 — DS3 + DS16: the chains shrink, the fallback stack collapses
 
 Delete every arm whose name has a bind row, in this order: `node` cluster →
 `html_element` → `input`/`select`/`textarea`/`option` → `document`. After each
 group, run the WPT DOM suites and diff.
 
-**Budget: ≈ 550 code lines** (of 1607).
+Then collapse `radiant_dom_node_named_get` / `radiant_dom_host_get_property` /
+`radiant_dom_get_property` into one residual resolver, promote `labels` to a
+row, and move the geometry commit onto `DOM_F_GEOMETRY`.
 
-### Phase P4 — DS7 + DS8: carriers instead of snapshots
+**Budget: ≈ 560 code lines** (of 1607 in the chains, plus ≈ 30 in the alias
+stack).
+
+### Phase P4 — DS7 + DS8 + DS14: carriers instead of snapshots, links direct
 
 `attribute_names` → `velmt` attribute face; `form_controls`/`radio_group`/
 `details_group` → live `VArray`; the 21 `dom_prop_get` re-entries → direct row
-calls.
+calls, **the eight node-link `CORE` rows first** (DS14) since every derivation
+composes over them.
 
-**Budget: ≈ 180 code lines.**
+**Budget: ≈ 190 code lines.**
 
 ### Phase P5 — DS5 + DS6 + DS9: minimize the core
 
@@ -480,25 +701,39 @@ row's native body is deleted only once its derivation passes the ES43 oracle
 
 **Budget: ≈ 150 code lines**, plus 28 fewer native bodies to maintain.
 
-### Phase P6 — DS10 + DS11 + DS12
+### Phase P6 — DS15: the document stops looking itself up by name
 
-Package migration, lint rules, file split. **Budget: 0 credited lines.**
+Delete the 77 `RADIANT_DOC_*_FN` invocations and their three macros; each
+document member becomes an `iface: document` row taking the document
+explicitly. `dom_swap_active_document` / `dom_restore_active_document` leave the
+property read path. The ambient-global door survives only for genuinely
+open-name document access.
+
+**Budget: ≈ 120 code lines.**
+
+### Phase P7 — DS10 + DS11 + DS12 + DS17 verification
+
+Package migration, lint rules, file split, and the hop-count audit that closes
+DS17. **Budget: 0 credited lines.**
 
 ### Budget summary
 
-| Phase | Code lines removed |
-|---|---:|
-| P1 — one catalog, no ordinals | 380 |
-| P2 — one reflection table | 330 |
-| P3 — property chains | 550 |
-| P4 — carriers, not snapshots | 180 |
-| P5 — minimal core | 150 |
-| **Total** | **1590** |
-| **Exit gate** | **1000** |
+| Phase | Net code lines removed | Classes it fixes |
+|---|---:|---|
+| P1 — one catalog, no ordinals, no thunks | 400 | A (→3), enables B, D |
+| P2 — one reflection table | 300 | C (→3) |
+| P3 — property chains + fallback stack | 560 | E (→3) |
+| P4 — carriers, links direct | 190 | B (→3), G (→3), H (→1) |
+| P5 — minimal core | 150 | — |
+| P6 — document rows | 120 | D (→3) |
+| **Total** | **1720** | all of A–H at ≤3 |
+| **Exit gate** | **1000** | |
 
-The 590-line margin is deliberate: P3's estimate is the least certain, because
+The 720-line margin is deliberate: P3's estimate is the least certain, because
 some chain arms carry behaviour (geometry commits, mutation notification
-ordering) that has to move rather than go.
+ordering) that has to move rather than go. P1 alone clears 40% of the gate, and
+P1–P3 clear it outright — the hop budget and the line gate are met by the same
+work, in the same order.
 
 ---
 
@@ -510,8 +745,10 @@ ordering) that has to move rather than go.
 | Precedence change: a record now wins where the chain used to | P3 | Delete an arm only after confirming the bind row exists for that receiver type *and* that its handler reaches the same body. |
 | A demoted row is measurably slower | P5 | Demote behind the ES43 oracle plus a release-build timing on the WPT/`.ls` corpus; keep `DOM_F_FASTPATH` for any row that fails the budget, with the budget recorded in the row's comment. |
 | Live carrier where a snapshot was semantically required | P4 | Only the four rows the spec calls live are converted. `query_selector_all` stays a snapshot — it is static by specification. |
-| Stale `.o` after the P6 split | P6 | Renamed/moved files leave objects in `build/` **and inside the `.a`**; purge both or the gates test stale code. |
+| **`JUBE_ABI_VERSION` bump breaks prebuilt modules** | P1 (DS13) | Adding a field to `JubeMemberBind` changes `sizeof`, so any pre-built module carrying its own bind tables mis-strides them — and `modules/lang-python/lang-python.dylib` is checked in as a binary. `make build` does not rebuild it. P1 must bump `JUBE_ABI_VERSION` 6 → 7, rebuild every module in `modules/`, and verify the version guard rejects a stale one loudly rather than reading garbage. This is the same class of break that produced ABI 6 (D7.4.4 and D7.4.5v2 each took one), so the mechanism exists; the hazard is forgetting the rebuild. |
+| Stale `.o` after the P7 split | P7 | Renamed/moved files leave objects in `build/` **and inside the `.a`**; purge both or the gates test stale code. |
 | `JsRuntimeState` layout drift breaking `modules/node-*.dylib` | P1–P3 | `make build` does not rebuild them; rebuild both sides of any A/B. |
+| DS15 changes *when* the active document is swapped | P6 | The swap/restore currently wraps every document property read. Removing it is correct only if every migrated row takes the document explicitly. Migrate a row and its swap in the same commit; the foreign-document WPT cases are the ones that will catch a miss. |
 
 ---
 
@@ -529,7 +766,13 @@ ordering) that has to move rather than go.
 - `test/lambda/dom_derive_*.ls` — the ES43 oracle, mandatory for P5.
 - `make test` before declaring a phase done.
 
-**Structural (P6 and the exit gate):**
+**The hop budget (DS17), audited at P7.** A script, run under the existing
+`LAMBDA_*` tracing, walks one representative of each access class A–H and
+asserts the call depth from the script site to the first Radiant state access is
+≤ 3. It is committed with P1 so each phase can be measured against it, and it
+is the artefact that closes DS17 — the number is checked, not asserted.
+
+**Structural (P7 and the exit gate):**
 
 - `make lint` including the two new rules.
 - `dom_api_check.cpp` static assertions extended to the new columns: every
@@ -545,7 +788,8 @@ per-file baseline are committed with P1 so the number is reproducible rather
 than asserted.
 
 Baseline at HEAD `fa77dbdcc` for that set: 31 441 + 376 + 1 351 = **33 168**
-code lines. Target after P5: **≤ 32 168**; expected **≈ 31 578**.
+code lines. Gate: **≤ 32 168** after P6; expected **≈ 31 448**. P1–P3 alone
+(1 260) clear the gate.
 
 ---
 
@@ -570,6 +814,11 @@ code lines. Target after P5: **≤ 32 168**; expected **≈ 31 578**.
 - **DSO6** — DS10 changes `.ls` source under our control. Does the package
   migrate in one commit (gated by the `.ls` goldens) or per file? Per file is
   safer; one commit keeps the two doors from coexisting.
+- **DSO7 — PROMOTED to DS13.** It was listed here as optional on the grounds
+  that the adapter thunk is generated and therefore free to maintain. That is
+  true of maintenance and irrelevant to the budget: it is a real call on every
+  JS member access, and without removing it class A stops at four. The ABI bump
+  is the cost of the three-hop rule, not an optional extra.
 
 ---
 
@@ -589,4 +838,29 @@ code lines. Target after P5: **≤ 32 168**; expected **≈ 31 578**.
 | DS10 | The `.ls` package migrates off the name-keyed doors | PROPOSED |
 | DS11 | Two lint rules gate the collapse | PROPOSED |
 | DS12 | `dom.cpp` splits, credited zero lines | PROPOSED |
+| DS13 | The record's slot is the row body; the member ABI carries the arity | PROPOSED |
+| DS14 | A `CORE` row never reaches its own mechanism by name | PROPOSED |
+| DS15 | Document members are `iface: document` rows, not string re-lookups | PROPOSED |
+| DS16 | One residual resolver; the geometry commit is a row flag | PROPOSED |
+| DS17 | **Three hops, every path**: one dispatch, one body, one engine access | PROPOSED |
 | DSO1–DSO6 | Open, §9 | OPEN |
+| DSO7 | Promoted to DS13 | CLOSED |
+
+### Hop counts, before and after
+
+| Path | Today | After | What goes |
+|---|---:|---:|---|
+| JS `el.getAttribute("x")` | 6 | **3** | `radiant_dom_element_operation`, `invoke_raw`, the 80-test scan, the adapter thunk |
+| JS `el.nodeName` / `el.firstChild` | 5 | **3** | the catalog wrapper, the string re-entry, the bsearch + chain |
+| JS `el.disabled` (reflected) | 5 | **3** | the guard wrapper, the `m4b` accessor, the shared reflect helper |
+| JS `document.body` | 5 (+2 global swaps) | **3** | the `DOC_GET_FN` re-lookup, the swap/restore, the document chain |
+| JS `el.foo` (open name) | 6 | **3** | three of the four fallback aliases |
+| JS `el.children[0]` | 3 | **3** | — already met |
+| Lambda `dom.get_attribute(n,"x")` | 5 | **3** | `dom_op1`, the 80-test scan |
+| Lambda `dom.children(n)` | 5 | **3** | the string re-entry, the bsearch + property chain |
+| Lambda structural `n[i]` / `n.attr` / `len(n)` | 5 (via `dom.*`) | **1** | the whole `dom.*` door — the `velmt` vtable answers |
+
+Counting rule in §4.5. Two is reachable for the Lambda `dom.*` rows that cannot
+answer `undefined`, by eliding the absence trampoline; three is the floor for
+everything else, because hop 2 (DOM semantics) and hop 3 (engine state) must
+not merge — ES47 separates them on purpose.

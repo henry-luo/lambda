@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "Tune26 T26-4: finite int x % 2 == 0 uses a single low-bit test, while the emitted generic remainder arm preserves sentinel semantics.",
+  "checks": [
+    {
+      "in_func": "_tune26_is_even_#",
+      "expect_seq": [
+        "ge\t{{r}}, %p1, -9007199254740991",
+        "le\t{{r}}, %p1, 9007199254740991",
+        "and\t{{r}}, %p1, 1",
+        "eq\t{{r}}, {{r}}, {{r}}"
+      ]
+    }
+  ]
+}
