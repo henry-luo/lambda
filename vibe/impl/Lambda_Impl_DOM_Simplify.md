@@ -1,8 +1,9 @@
 # DOM Simplify: collapsing the script-runtime ↔ Radiant DOM interface
 
 - **Date:** 2026-09-11.
-- **Status:** PROPOSED. No implementation has started; every number below is a
-  measurement of HEAD, not of a candidate.
+- **Status:** IN PROGRESS. Sections 1–5 and 7–10 are the proposal; §6.0 below
+  records what has landed. Every measurement in §2–§4 is of HEAD at the audit
+  commit, not of a candidate.
 - **Source audit:** HEAD `fa77dbdcc`, working tree as of 2026-09-11.
 - **Scope:** the interface *between* the script runtimes (LambdaJS, Lambda
   script) and the Radiant engine — `lambda/dom/`, `lambda/module/radiant/`,
@@ -636,6 +637,68 @@ reach two and one only because a vtable *is* the dispatch.
 
 Each phase is independently landable and independently gated.
 
+### 6.0 Landed so far (2026-09-11)
+
+**DS14 — the eight node-link `CORE` rows** (`node_type`, `node_name`,
+`node_value`, `parent_node`, `first_child`, `last_child`, `next_sibling`,
+`previous_sibling`). Bodies moved from `dom_core.cpp`, where each was
+`dom_prop_get(n, "camelCaseName")`, into `dom.cpp` beside the script-visible
+traversal helpers and the node-kind rules they need. The property-chain arms
+now delegate *to* the rows instead of the rows re-entering the chain, so the
+two doors keep one implementation (ES38, D7.4.4).
+
+**DS14 extended — the seven element-traversal rows** (`parent_element`,
+`first_element_child`, `last_element_child`, `next_element_sibling`,
+`previous_element_sibling`, `children`, `child_nodes`). Same inversion. These
+carry `DOM_F_FASTPATH`, so until now the declared *fast path* was slower than
+the derivation it exists to accelerate; the flag states a fact for the first
+time. The element-skipping walk was written out four times in the chain and
+twice more in the textlike handler; it is one `dom_first_element_from(start,
+forward)` helper now.
+
+Incidental, found by the change rather than looked for:
+
+- A **dead duplicate** `JS_DOM_PROP_CHILDREN` arm — two arms for one property,
+  the second unreachable. Removed, with its now-unused `dom_collect_child_nodes`
+  wrapper (the compiler's `-Werror=unused-function` found that one).
+- **A live two-door divergence, recorded not fixed (see DSO8).**
+
+**DS14 completed — the serialization rows** (`text_content`, `inner_html`,
+`outer_html`) and two more re-entries the lint rule found that a grep for
+string literals could not: `dom_core_serialize`, which chose the property name
+*dynamically* (`is_outer ? "outerHTML" : "innerHTML"`), and `dom_fp_root_node`,
+which called `dom_prop_get(cur, "parentNode")` **once per ancestor** — so a
+deep tree paid the 152-name bsearch and the linear chain on every step of the
+walk.
+
+**DS11 (first rule) — `no-dom-row-name-dispatch`**, at
+`utils/lint/rules/c-cpp/no-dom-row-name-dispatch.yml` and registered in the
+lint manifest. It makes the invariant checkable: *no catalog body reaches its
+own mechanism by property name*. It found the two cases above on its first run,
+which is the argument for writing the rule rather than trusting the sweep.
+
+| Measure | Before | After |
+|---|---:|---:|
+| `dom_prop_get` string re-entries in `dom_core.cpp` | 21 | **3**, each suppressed with a recorded DSO id |
+| Rows whose body re-enters the property protocol | 18 | **0** unblocked |
+| Net code lines | — | **≈ −4** |
+
+The three that remain are blocked on recorded design issues, not on effort:
+`owner_document` (DSO9), and the two scroll reads inside `scroll_state`
+(DSO8). Both carry `// DOM_NAME_DISPATCH_OK: <id>` so the rule passes clean
+while the debt stays visible.
+
+**Net lines are ~zero, and that is the expected shape**: DS14 buys *hops*, not
+lines (classes B and G, 5 → 3). The line gate is carried by P1–P3. The earlier
+claim that DS14 contributed to P4's ≈190-line budget was wrong — that budget is
+the snapshot→`VArray` work, which is untouched.
+
+Gates: build clean; **all five ES43 derivation oracles pass**
+(`dom_derive_{traversal,chardata,query,forms,urlencode}` — `traversal` walks
+every link on every node comparing native body against derivation);
+**`make test-radiant-baseline` 3622 passed, 0 failed.**
+
+
 ### Phase P1 — DS1 + DS2 + DS13: one catalog, no ordinals, no adapter thunks
 
 1. Add `iface` and `js_name` columns to every existing `dom_api.def` row
@@ -814,6 +877,26 @@ code lines. Gate: **≤ 32 168** after P6; expected **≈ 31 448**. P1–P3 alon
 - **DSO6** — DS10 changes `.ls` source under our control. Does the package
   migrate in one commit (gated by the `.ls` goldens) or per file? Per file is
   safer; one commit keeps the two doors from coexisting.
+- **DSO8 — a live two-door divergence on scroll geometry, found while landing
+  DS14.** `dom_core_scroll_state` is a `CORE | DOM_F_NEUTRAL` row — the
+  published `dom.scroll_state(n)` — and its body reads `scrollLeft`/`scrollTop`
+  through the property protocol, which only *checks*
+  `dom_has_committed_geometry_snapshot` and never commits. The commit exists
+  only in `radiant_dom_get_property`, gated on
+  `strncmp(prop, "scroll", 6)`, and only the JS door crosses it. So with layout
+  pending, `dom.scroll_state(n)` and `el.scrollTop` can answer differently.
+  This is DS16's case in the concrete: the geometry commit is a property-*name*
+  test inside one door's wrapper rather than a property of the row. Fixing it
+  is DS16 (`DOM_F_GEOMETRY`) and needs the DS1 columns, so it is recorded here
+  rather than patched locally — patching it in `dom_core_scroll_state` would
+  add a third place that knows which properties need layout.
+- **DSO9 — `owner_document`'s two node-kind paths already disagree.** The
+  element arm falls back to `dom_get_or_create_doc_node` when no realm is
+  active; `dom_owner_document_from_node`, which serves text and comment nodes,
+  does not — it answers `js_get_document_object_value()` regardless. So
+  hoisting one body would change behaviour for CharacterData rather than
+  preserve it. Which of the two is correct is a question for DS15 (the document
+  rows), where the realm-free document object is already the subject.
 - **DSO7 — PROMOTED to DS13.** It was listed here as optional on the grounds
   that the adapter thunk is generated and therefore free to maintain. That is
   true of maintenance and irrelevant to the budget: it is a real call on every
@@ -836,14 +919,14 @@ code lines. Gate: **≤ 32 168** after P6; expected **≈ 31 448**. P1–P3 alon
 | DS8 | `dom_core.cpp` never re-enters the property dispatcher by name | PROPOSED |
 | DS9 | The structural `radiant.velmt_*` aliases retire into the element face | PROPOSED |
 | DS10 | The `.ls` package migrates off the name-keyed doors | PROPOSED |
-| DS11 | Two lint rules gate the collapse | PROPOSED |
+| DS11 | Two lint rules gate the collapse | **`no-dom-row-name-dispatch` LANDED**; `no-hand-written-dom-bind` proposed |
 | DS12 | `dom.cpp` splits, credited zero lines | PROPOSED |
 | DS13 | The record's slot is the row body; the member ABI carries the arity | PROPOSED |
-| DS14 | A `CORE` row never reaches its own mechanism by name | PROPOSED |
+| DS14 | A `CORE` row never reaches its own mechanism by name | **LANDED** (3 rows suppressed on DSO8/DSO9) |
 | DS15 | Document members are `iface: document` rows, not string re-lookups | PROPOSED |
 | DS16 | One residual resolver; the geometry commit is a row flag | PROPOSED |
 | DS17 | **Three hops, every path**: one dispatch, one body, one engine access | PROPOSED |
-| DSO1–DSO6 | Open, §9 | OPEN |
+| DSO1–DSO6, DSO8, DSO9 | Open, §9 | OPEN |
 | DSO7 | Promoted to DS13 | CLOSED |
 
 ### Hop counts, before and after
