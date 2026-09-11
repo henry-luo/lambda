@@ -1046,12 +1046,7 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
                 Item target;
                 if (js_props_is_array(object)) {
                     Array* arr = object.array;
-                    if (!js_array_has_props(arr)) {
-                        Item nm = js_new_object();
-                        nm.map->map_kind = MAP_KIND_ARRAY_PROPS;
-                        js_elements_set_props(arr, nm.map);
-                    }
-                    target = (Item){.map = js_array_props(arr)};
+                    target = (Item){.map = js_array_props_ensure(arr)};
                 } else {
                     // object IS the companion map (MAP_KIND_ARRAY_PROPS); use it.
                     target = object;

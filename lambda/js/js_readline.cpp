@@ -565,11 +565,18 @@ static int readline_is_word_char(char c) {
     return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
 }
 
-static void readline_move_word_forward(Item rl) {
+// Line editing always needs the buffer and the caret together. A missing or
+// non-string line means there is nothing to edit, which the caller checks.
+static String* readline_line_and_cursor(Item rl, int* out_cursor) {
     Item line_item = readline_get(rl, "line");
-    if (get_type_id(line_item) != LMD_TYPE_STRING) return;
-    String* s = it2s(line_item);
-    int cursor = it2i(readline_get(rl, "cursor"));
+    *out_cursor = it2i(readline_get(rl, "cursor"));
+    return get_type_id(line_item) == LMD_TYPE_STRING ? it2s(line_item) : NULL;
+}
+
+static void readline_move_word_forward(Item rl) {
+    int cursor = 0;
+    String* s = readline_line_and_cursor(rl, &cursor);
+    if (!s) return;
     if (cursor < (int)s->len && readline_is_word_char(s->chars[cursor])) {
         while (cursor < (int)s->len && readline_is_word_char(s->chars[cursor])) cursor++;
         while (cursor < (int)s->len && s->chars[cursor] == ' ') cursor++;
@@ -580,10 +587,9 @@ static void readline_move_word_forward(Item rl) {
 }
 
 static void readline_move_word_backward(Item rl) {
-    Item line_item = readline_get(rl, "line");
-    if (get_type_id(line_item) != LMD_TYPE_STRING) return;
-    String* s = it2s(line_item);
-    int cursor = it2i(readline_get(rl, "cursor"));
+    int cursor = 0;
+    String* s = readline_line_and_cursor(rl, &cursor);
+    if (!s) return;
     if (cursor > 0 && readline_is_word_char(s->chars[cursor - 1])) {
         while (cursor > 0 && readline_is_word_char(s->chars[cursor - 1])) cursor--;
     } else if (cursor > 0 && s->chars[cursor - 1] == ' ') {
@@ -596,10 +602,9 @@ static void readline_move_word_backward(Item rl) {
 }
 
 static void readline_delete_word_forward(Item rl) {
-    Item line_item = readline_get(rl, "line");
-    if (get_type_id(line_item) != LMD_TYPE_STRING) return;
-    String* s = it2s(line_item);
-    int cursor = it2i(readline_get(rl, "cursor"));
+    int cursor = 0;
+    String* s = readline_line_and_cursor(rl, &cursor);
+    if (!s) return;
     int end = cursor;
     if (end < (int)s->len && readline_is_word_char(s->chars[end])) {
         while (end < (int)s->len && readline_is_word_char(s->chars[end])) end++;
@@ -625,10 +630,9 @@ static void readline_delete_word_forward(Item rl) {
 }
 
 static void readline_delete_word_backward(Item rl) {
-    Item line_item = readline_get(rl, "line");
-    if (get_type_id(line_item) != LMD_TYPE_STRING) return;
-    String* s = it2s(line_item);
-    int cursor = it2i(readline_get(rl, "cursor"));
+    int cursor = 0;
+    String* s = readline_line_and_cursor(rl, &cursor);
+    if (!s) return;
     int start = cursor;
     while (start > 0 && s->chars[start - 1] == ' ') start--;
     while (start > 0 && readline_is_word_char(s->chars[start - 1])) start--;
@@ -744,10 +748,9 @@ static void readline_redo(Item rl) {
 }
 
 static void readline_backspace(Item rl) {
-    Item line_item = readline_get(rl, "line");
-    if (get_type_id(line_item) != LMD_TYPE_STRING) return;
-    String* s = it2s(line_item);
-    int cursor = it2i(readline_get(rl, "cursor"));
+    int cursor = 0;
+    String* s = readline_line_and_cursor(rl, &cursor);
+    if (!s) return;
     if (cursor <= 0) return;
     int start = readline_prev_char_index(s, cursor);
     readline_delete_range(rl, start, cursor);
@@ -757,10 +760,9 @@ static void readline_backspace(Item rl) {
 }
 
 static void readline_delete_right(Item rl) {
-    Item line_item = readline_get(rl, "line");
-    if (get_type_id(line_item) != LMD_TYPE_STRING) return;
-    String* s = it2s(line_item);
-    int cursor = it2i(readline_get(rl, "cursor"));
+    int cursor = 0;
+    String* s = readline_line_and_cursor(rl, &cursor);
+    if (!s) return;
     int end = readline_next_char_index(s, cursor);
     readline_delete_range(rl, cursor, end);
 }
@@ -1205,9 +1207,8 @@ extern "C" Item js_readline_close(void) {
 extern "C" Item js_readline_getCursorPos(void) {
     Item self = js_get_current_this();
     Item result = js_new_object();
-    Item line_item = readline_get(self, "line");
-    String* line = get_type_id(line_item) == LMD_TYPE_STRING ? it2s(line_item) : NULL;
-    int cursor = it2i(readline_get(self, "cursor"));
+    int cursor = 0;
+    String* line = readline_line_and_cursor(self, &cursor);
     Item columns_item = readline_get(readline_get(self, "output"), "columns");
     int columns = get_type_id(columns_item) == LMD_TYPE_INT ? it2i(columns_item) : 0;
     int rows = 0;
@@ -1316,23 +1317,20 @@ static Item js_readline_write_impl(Item self, Item data_item, Item key_item) {
             } else if (c == 'w' && ctrl_item.item == ITEM_TRUE) {
                 readline_delete_word_backward(self);
             } else if (c == 'b' && ctrl_item.item == ITEM_TRUE) {
-                Item line_item = readline_get(self, "line");
-                String* line = get_type_id(line_item) == LMD_TYPE_STRING ? it2s(line_item) : NULL;
-                int cursor = it2i(readline_get(self, "cursor"));
+                int cursor = 0;
+                String* line = readline_line_and_cursor(self, &cursor);
                 readline_set(self, "cursor", (Item){.item = i2it(readline_prev_char_index(line, cursor))});
             } else if (c == 'f' && ctrl_item.item == ITEM_TRUE) {
-                Item line_item = readline_get(self, "line");
-                String* line = get_type_id(line_item) == LMD_TYPE_STRING ? it2s(line_item) : NULL;
-                int cursor = it2i(readline_get(self, "cursor"));
+                int cursor = 0;
+                String* line = readline_line_and_cursor(self, &cursor);
                 readline_set(self, "cursor", (Item){.item = i2it(readline_next_char_index(line, cursor))});
             } else if (c == 'c' && ctrl_item.item == ITEM_TRUE) {
                 if (!readline_abort_pending_question(self, true)) {
                     readline_set(self, "closed", (Item){.item = ITEM_TRUE});
                 }
             } else if (c == 'k' && ctrl_item.item == ITEM_TRUE) {
-                Item line_item = readline_get(self, "line");
-                String* line = get_type_id(line_item) == LMD_TYPE_STRING ? it2s(line_item) : NULL;
-                int cursor = it2i(readline_get(self, "cursor"));
+                int cursor = 0;
+                String* line = readline_line_and_cursor(self, &cursor);
                 int end = line ? (int)line->len : cursor;
                 if (cursor < end) {
                     readline_remember_undo(self);
@@ -1375,24 +1373,21 @@ static Item js_readline_write_impl(Item self, Item data_item, Item key_item) {
             else readline_backspace(self);
         } else if (name && name->len == 6 && memcmp(name->chars, "delete", 6) == 0) {
             if (ctrl_item.item == ITEM_TRUE && shift_item.item == ITEM_TRUE) {
-                Item line_item = readline_get(self, "line");
-                String* line = get_type_id(line_item) == LMD_TYPE_STRING ? it2s(line_item) : NULL;
-                int cursor = it2i(readline_get(self, "cursor"));
+                int cursor = 0;
+                String* line = readline_line_and_cursor(self, &cursor);
                 int end = line ? (int)line->len : cursor;
                 readline_store_kill(self, readline_slice_line(self, cursor, end));
                 readline_delete_range(self, cursor, end);
             } else if (ctrl_item.item == ITEM_TRUE || meta_item.item == ITEM_TRUE) readline_delete_word_forward(self);
             else readline_delete_right(self);
         } else if (name && name->len == 4 && memcmp(name->chars, "left", 4) == 0) {
-            Item line_item = readline_get(self, "line");
-            String* line = get_type_id(line_item) == LMD_TYPE_STRING ? it2s(line_item) : NULL;
-            int cursor = it2i(readline_get(self, "cursor"));
+            int cursor = 0;
+            String* line = readline_line_and_cursor(self, &cursor);
             if (ctrl_item.item == ITEM_TRUE || meta_item.item == ITEM_TRUE) readline_move_word_backward(self);
             else if (cursor > 0) readline_set(self, "cursor", (Item){.item = i2it(readline_prev_char_index(line, cursor))});
         } else if (name && name->len == 5 && memcmp(name->chars, "right", 5) == 0) {
-            Item line_item = readline_get(self, "line");
-            String* line = get_type_id(line_item) == LMD_TYPE_STRING ? it2s(line_item) : NULL;
-            int cursor = it2i(readline_get(self, "cursor"));
+            int cursor = 0;
+            String* line = readline_line_and_cursor(self, &cursor);
             if (ctrl_item.item == ITEM_TRUE || meta_item.item == ITEM_TRUE) readline_move_word_forward(self);
             else if (line && cursor < (int)line->len) readline_set(self, "cursor", (Item){.item = i2it(readline_next_char_index(line, cursor))});
             readline_set(self, "__history_index__", (Item){.item = i2it(-1)});

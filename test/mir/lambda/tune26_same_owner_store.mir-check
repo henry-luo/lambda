@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "description": "Tune26 T26-4: a local certified bool[] proves its plain unshared carrier once before a same-lane write loop. Each guarded store keeps its dynamic bounds checks and the checked setter as the cold miss path; an alias remains observable as a COW snapshot.",
+  "checks": [
+    {
+      "in_func": "_tune26_same_owner_store_#",
+      "expect_seq": [
+        "mov\t{{r}}, u8:8({{r}})",
+        "mov\t{{r}}, u8:4({{r}})",
+        "bt\tL",
+        "mov\t{{r}}, i64:40({{r}})",
+        "lt\t{{r}}, {{r}}, 0",
+        "ge\t{{r}}, {{r}}, {{r}}",
+        "mov\t{{r}}, i64:32({{r}})",
+        "mul\t{{r}}, {{r}}, 1",
+        "mov\tu8:({{r}}), {{r}}"
+      ],
+      "expect": [
+        "call\tlambda_array_set_checked"
+      ]
+    }
+  ]
+}

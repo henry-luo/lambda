@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "description": "Tune26 T26-3: the finite positive-subtraction branch proves both parameter lanes once before it emits raw integer comparison and subtraction; the generic sibling remains available for sentinel lanes.",
+  "checks": [
+    {
+      "in_func": "_tune26_divide_#",
+      "expect": [
+        "gts\t{{r}}, %p2, 0",
+        "ge\t{{r}}, %p1, -9007199254740991",
+        "le\t{{r}}, %p2, 9007199254740991",
+        "ge\t{{r}}, %p1, %p2",
+        "sub\t{{r}}, %p1, %p2",
+        "add\t{{r}},"
+      ]
+    }
+  ]
+}

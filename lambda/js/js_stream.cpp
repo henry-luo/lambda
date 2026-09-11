@@ -7423,9 +7423,7 @@ static Item js_stream_pipeline_rest(Item rest_args) {
     }
 
     Item callback = js_elements_get_int(rest_args, argc - 1);
-    if (!js_is_callable(callback)) {
-        return js_throw_invalid_arg_type("callback", "function", callback);
-    }
+    JS_REQUIRE_CALLBACK(callback);
     if (argc < 3) {
         if (argc == 2) {
             Item first_arg = js_elements_get_int(rest_args, 0);
@@ -7913,9 +7911,7 @@ static Item js_stream_finished_options_cleanup(Item options, bool* cleanup) {
 
 static Item js_stream_finished_impl(Item stream, Item options, Item callback) {
     ensure_keys();
-    if (!js_is_callable(callback)) {
-        return js_throw_invalid_arg_type("callback", "function", callback);
-    }
+    JS_REQUIRE_CALLBACK(callback);
     if (!js_stream_is_stream_like(stream)) {
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
             "ERR_INVALID_ARG_TYPE: The \"stream\" argument must be an instance of stream.Stream.");

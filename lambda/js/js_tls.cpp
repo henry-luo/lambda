@@ -1125,19 +1125,9 @@ static Item make_tls_record_error(bool from_server_socket) {
 // on/once(event, callback) — TLSSocket listeners live in the shared Node
 // emitter, so once() is its real one-shot registration rather than a
 // self-removing shim (C0.1) over per-module storage.
-extern "C" Item js_tls_socket_on(Item event_item, Item callback) {
-    Item self = js_get_this();
-    if (get_type_id(event_item) != LMD_TYPE_STRING) return self;
-    js_ee_on(self, event_item, callback);
-    return self;
-}
+JS_DEFINE_EMITTER_FACADE(js_tls_socket_on, js_ee_on)
 
-extern "C" Item js_tls_socket_once(Item event_item, Item callback) {
-    Item self = js_get_this();
-    if (get_type_id(event_item) != LMD_TYPE_STRING) return self;
-    js_ee_once(self, event_item, callback);
-    return self;
-}
+JS_DEFINE_EMITTER_FACADE(js_tls_socket_once, js_ee_once)
 
 extern "C" Item js_tls_socket_resume(void) {
     Item self = js_get_this();
@@ -2661,13 +2651,8 @@ static Item js_tls_server_address(void) {
     return js_node_tcp_server_address(&srv->tcp);
 }
 
-static JsTlsServer* tls_server_from_object(Item self) {
-    TypeId type = get_type_id(self);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_VMAP) return NULL;
-    Item handle_item = js_get_key_cstr(self, "__server__");
-    if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
-    return (JsTlsServer*)(uintptr_t)it2i(handle_item);
-}
+JS_FORWARD_STATIC_EXPRESSION(JsTlsServer*, tls_server_from_object, (Item self),
+    (JsTlsServer*)js_node_handle_from_object(self, "__server__"))
 
 static Item js_tls_server_ref_or_unref(bool do_ref) {
     Item self = js_get_this();
@@ -2744,12 +2729,7 @@ extern "C" Item js_tls_server_on(Item event_item, Item callback) {
     return self;
 }
 
-extern "C" Item js_tls_server_once(Item event_item, Item callback) {
-    Item self = js_get_this();
-    if (get_type_id(event_item) != LMD_TYPE_STRING) return self;
-    js_ee_once(self, event_item, callback);
-    return self;
-}
+JS_DEFINE_EMITTER_FACADE(js_tls_server_once, js_ee_once)
 
 extern "C" Item js_tls_server_getTicketKeys(void) {
     Item self = js_get_this();

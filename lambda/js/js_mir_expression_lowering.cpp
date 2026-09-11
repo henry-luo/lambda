@@ -1661,9 +1661,16 @@ static MIR_reg_t jm_emit_identifier_read(JsMirTranspiler* mt,
             ? jm_find_module_const_by_binding(mt, id->entry)
             : jm_find_preamble_module_const(mt, vname);
         if (!mc && !id->entry) {
-            // Compiler-created identifiers have no source binding, but still
-            // name an entry in this compilation unit's module slot table.
-            mc = jm_find_module_const_in(mt->module_consts, vname);
+            // An IIFE's hoisted function declaration is promoted out of its
+            // wrapper frame, so a compiler-created reference to it carries no
+            // source binding yet still names this unit's slot. Only that shape
+            // may resolve by name: a genuine free reference — an eval'd read of
+            // an outer binding — also has no entry, but the matching assignment
+            // path resolves it dynamically, so binding the read to a unit-local
+            // slot here would read a slot nothing ever writes.
+            JsModuleConstEntry* iife_decl = jm_find_module_const_in(
+                mt->module_consts, vname);
+            if (iife_decl && iife_decl->is_iife_func_decl) mc = iife_decl;
         }
         if (!mc && !id->entry) {
             mc = jm_find_unresolved_annex_b_module_const(mt, vname);

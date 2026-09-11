@@ -277,6 +277,31 @@ TEST(LambdaTypedPathTests, ReusesFullArrayContractsAcrossCalls) {
         "test/mir/lambda/typed_array_reuse.txt", true);
 }
 
+TEST(LambdaTypedPathTests, CertifiesMatchingPrimitiveArrayNumCarriers) {
+    test_lambda_script_against_file("test/mir/lambda/tune26_primitive_admission.ls",
+        "test/mir/lambda/tune26_primitive_admission.txt", true);
+}
+
+TEST(LambdaTypedPathTests, ReusesDeclaredBoolArrayProofAcrossDenseLoop) {
+    test_lambda_script_against_file("test/mir/lambda/tune26_dense_declared_bool.ls",
+        "test/mir/lambda/tune26_dense_declared_bool.txt", true);
+}
+
+TEST(LambdaTypedPathTests, ReusesFiniteProofAcrossPositiveSubtractionLoop) {
+    test_lambda_script_against_file("test/mir/lambda/tune26_finite_sub_loop.ls",
+        "test/mir/lambda/tune26_finite_sub_loop.txt", true);
+}
+
+TEST(LambdaTypedPathTests, ReusesFiniteProofAcrossBoundedInduction) {
+    test_lambda_script_against_file("test/mir/lambda/tune26_bounded_induction.ls",
+        "test/mir/lambda/tune26_bounded_induction.txt", true);
+}
+
+TEST(LambdaTypedPathTests, PreservesSnapshotsAcrossSameOwnerStoreLoop) {
+    test_lambda_script_against_file("test/mir/lambda/tune26_same_owner_store.ls",
+        "test/mir/lambda/tune26_same_owner_store.txt", true);
+}
+
 // Helper to test that a script reports type errors but doesn't crash
 // Note: Lambda currently exits with code 0 even on type errors (errors are reported to stderr)
 void test_lambda_script_expects_error(const char* script_path) {

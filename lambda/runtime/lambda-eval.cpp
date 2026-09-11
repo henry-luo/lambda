@@ -10203,6 +10203,19 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
         return true;
     }
 
+    // ArrayNum's lane is an exact scalar decoder, not a hint. Once the owned
+    // rank-one carrier matches the full primitive T[] contract, walking every
+    // element only reconstructs the proof that the carrier already provides.
+    // Keep views, shaped arrays, nullable/refined contracts, and all lane
+    // conversions on the checked path in the helper.
+    if (lambda_array_num_representation_proves_primitive_contract(value, expected)) {
+        ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
+        if (!cert) return false;
+        lambda_array_install_rep_cert(value, cert);
+        *converted = value;
+        return true;
+    }
+
     LambdaArrayContractInfo contract_info = {};
     ArrayNumElemType compact_type = ELEM_INT;
     bool target_has_numeric_lane = lambda_array_num_elem_type_for_contract(

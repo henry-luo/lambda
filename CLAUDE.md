@@ -21,7 +21,7 @@ These rules MUST be followed. Violations are considered errors.
 15. **NEVER restore or rely on conservative native-stack GC scanning.** It is retired. Fix GC lifetime bugs with precise `RootFrame` / `Rooted` ownership only.
 16. **NEVER patch third-party vendor code.** MIR (`lambda/mir/`), the Tree-sitter runtime (`lambda/tree-sitter/`) and its vendored language grammars (`lambda/tree-sitter-{bash,javascript,latex,latex-math,python,ruby,typescript}/`), ThorVG, re2, curl and every other vendored dependency are off limits — do not edit them in place. Fix the defect on the Lambda side instead. If the fix genuinely belongs upstream, STOP and ask for approval first, explaining the root cause. Once approved, record the change as a patch under `patches/` so the delta versus upstream stays auditable — see `lambda/mir/VENDOR.md` for the pattern. **`lambda/tree-sitter-lambda/` is NOT vendored** — it is Lambda's own grammar.
 17. **Cite rulings by formal-spec ID.** `doc/Lambda_Formal_Semantics.md` (`S#`) and `doc/Lambda_Formal_Design.md` (`D#`) are the single sources of truth. In chat/discussion and in every new or updated design/impl doc, quote the `S#`/`D#` point when one covers the topic; only when none exists, quote the vibe design-doc ledger ID (e.g. TE-16, K13, CW9). When a semantics or design ruling changes, update BOTH the `./doc` formal spec (revise the ruling in place: `v2` suffix + doc semver bump) and the relevant `./vibe` working design doc. Documentation tiers, authority order, and style conventions: `doc/Doc_Convention.md`.
-18. **When js262/Test262 tests fail, crash, or time out, NEVER modify `test_js_test262_gtest` to mask the issue. ** Investigate and fix the root cause or instability in the JS runtime.
+18. **When js262/Test262 tests fail, crash, or time out, NEVER modify `test_js_test262_gtest` to mask the issue.** Investigate and fix the root cause or instability in the JS runtime.
 19. When asked to reduce LOC, **NEVER ever remove blank/comment lines, or reformat the code to reduce LOC**. Simplify the code itself.
 
 | DON'T | DO |
@@ -74,12 +74,12 @@ Access type with `get_type_id(Item)` - handles all variants uniformly.
 ### Core System Architecture
 - **Parser**: Direct C lexer/parser (`lambda/runtime/parser/` and `lambda/runtime/parse.c`); Tree-sitter grammar is retained only for the isolated `lambda-cst` verifier
 - **AST Builder**: `lambda/runtime/build_ast.cpp` - constructs typed AST from parser reductions
-- **Transpiler**: `lambda/transpile.cpp` (C code) + `lambda/transpile-mir.cpp` (MIR JIT)
-- **Runtime**: `lambda/lambda-eval.cpp` - interpreter execution + `lambda/mir.c` - JIT compilation
+- **Transpiler**: `lambda/runtime/transpile-mir.cpp` - MIR Direct JIT, the only back end (the C-text transpiler is removed, see rule 14)
+- **Runtime**: `lambda/runtime/lambda-eval.cpp` - interpreter execution + `lambda/runtime/mir.c` - JIT compilation
 - **Type System**: `lambda/lambda-data.hpp` - 20+ built-in types with inference
 
 ### Document Processing Pipeline
-- **Input**: `lambda/input/` - parsers for JSON, XML, HTML, CSS, Markdown, PDF, YAML, LaTeX, etc. Each uses `MarkBuilder` (`lambda/mark_builder.hpp`) to construct Lambda data structures.
+- **Input**: `lambda/input/` - parsers for JSON, XML, HTML, CSS, Markdown, PDF, YAML, LaTeX, etc. Each uses `MarkBuilder` (`lambda/io/mark_builder.hpp`) to construct Lambda data structures.
 - **Output**: `lambda/format/` - formatters (JSON, Markdown, HTML, YAML, etc.)
 - **Validation**: `lambda/validator/` - schema-based type validation
 - **CSS Engine**: `lambda/input/css/` - CSS parser and cascade resolver
@@ -148,11 +148,11 @@ Lambda adopts a **C+** coding convention - a subset of C++ that is C compatible.
 | Area | Start here |
 |------|-----------|
 | Core data types | `lambda/lambda-data.hpp`, `lambda/lambda.h` (C API for MIR) |
-| Runtime evaluation | `lambda/lambda-eval.cpp` |
-| Memory management | `lambda/lambda-mem.cpp` |
-| AST & parsing | `lambda/build_ast.cpp`, `lambda/parse.c` |
-| JIT compilation | `lambda/transpile-mir.cpp`, `lambda/mir.c` |
-| Data construction | `lambda/mark_builder.hpp`, `lambda/mark_reader.hpp`, `lambda/mark_editor.hpp` |
+| Runtime evaluation | `lambda/runtime/lambda-eval.cpp` |
+| Memory management | `lambda/runtime/lambda-mem.cpp` |
+| AST & parsing | `lambda/runtime/build_ast.cpp`, `lambda/runtime/parse.c`, `lambda/runtime/parser/` |
+| JIT compilation | `lambda/runtime/transpile-mir.cpp`, `lambda/runtime/mir.c` |
+| Data construction | `lambda/io/mark_builder.hpp`, `lambda/core/mark_reader.hpp`, `lambda/io/mark_editor.hpp` |
 | Input parsers | `lambda/input/input.cpp` (dispatcher), `lambda/input/input-*.cpp` |
 | Output formatters | `lambda/format/` |
 | CSS, layout, rendering & interaction | `radiant/` — start with `radiant/view.hpp`, `radiant/layout.hpp`, `radiant/render.hpp`, `radiant/event.hpp`, `radiant/radiant.hpp`; detailed design in `doc/dev/radiant/RAD_00_Overview.md` (view/DOM model, CSS resolution, layout, rendering, SVG, events, editing, state, shell, JS scripting, media/webview) |

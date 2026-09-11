@@ -405,12 +405,7 @@ static int64_t js_attrs_parse_index_name(const char* name, int name_len) {
 
 static Map* js_attr_ensure_array_props_map(Array* arr) {
     if (!arr) return nullptr;
-    if (!js_array_has_props(arr)) {
-        Item obj = js_new_object();
-        obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
-        js_elements_set_props(arr, obj.map);
-    }
-    return js_array_props(arr);
+    return js_array_props_ensure(arr);
 }
 
 static void js_attr_mark_array_index_shape(Item target, const char* name, int name_len) {

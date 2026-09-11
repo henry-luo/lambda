@@ -1625,13 +1625,8 @@ JS_FORWARD_STATIC_ITEM(js_socket_unref, (void), js_socket_ref_or_unref, (false))
 JS_FORWARD_STATIC_ITEM(js_socket_cork, (void), js_get_this, ())
 JS_FORWARD_STATIC_ITEM(js_socket_uncork, (void), js_get_this, ())
 
-static JsSocket* socket_from_handle_object(Item self) {
-    TypeId type = get_type_id(self);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_VMAP) return NULL;
-    Item handle_item = js_get_key_cstr(self, "__socket_handle__");
-    if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
-    return (JsSocket*)(uintptr_t)it2i(handle_item);
-}
+JS_FORWARD_STATIC_EXPRESSION(JsSocket*, socket_from_handle_object, (Item self),
+    (JsSocket*)js_node_handle_from_object(self, "__socket_handle__"))
 
 static Item js_socket_handle_setKeepAlive(Item enable_item, Item delay_item) {
     Item self = js_get_this();
@@ -2626,13 +2621,8 @@ static bool net_string_equals_ascii_ci(const char* a, const char* b) {
     return *a == '\0' && *b == '\0';
 }
 
-static NetBlockList* net_block_list_from_item(Item self) {
-    TypeId type = get_type_id(self);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_VMAP) return NULL;
-    Item handle_item = js_get_key_cstr(self, "__net_block_list__");
-    if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
-    return (NetBlockList*)(uintptr_t)it2i(handle_item);
-}
+JS_FORWARD_STATIC_EXPRESSION(NetBlockList*, net_block_list_from_item, (Item self),
+    (NetBlockList*)js_node_handle_from_object(self, "__net_block_list__"))
 
 static bool net_block_list_type_family(Item type_item, int* family) {
     if (!family) return false;
@@ -4850,13 +4840,8 @@ static Item js_server_address(void) {
     return js_node_tcp_server_address(&srv->tcp);
 }
 
-static JsServer* server_from_object(Item self) {
-    TypeId type = get_type_id(self);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_VMAP) return NULL;
-    Item handle_item = js_get_key_cstr(self, "__server__");
-    if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
-    return (JsServer*)(uintptr_t)it2i(handle_item);
-}
+JS_FORWARD_STATIC_EXPRESSION(JsServer*, server_from_object, (Item self),
+    (JsServer*)js_node_handle_from_object(self, "__server__"))
 
 // server.ref() / server.unref()
 static Item js_server_ref_or_unref(bool do_ref) {
@@ -4931,12 +4916,7 @@ extern "C" Item js_server_listeners(Item event_item) {
     return js_ee_listeners(self, event_item);
 }
 
-extern "C" Item js_server_removeListener(Item event_item, Item callback) {
-    Item self = js_get_this();
-    if (get_type_id(event_item) != LMD_TYPE_STRING) return self;
-    js_ee_off(self, event_item, callback);
-    return self;
-}
+JS_DEFINE_EMITTER_FACADE(js_server_removeListener, js_ee_off)
 
 extern "C" Item js_net_createServer(Item rest_args) {
     uv_loop_t* loop = lambda_uv_loop();

@@ -476,6 +476,26 @@ bool lambda_array_num_elem_type_for_contract(Type* element,
     }
 }
 
+bool lambda_array_num_representation_proves_primitive_contract(Item value,
+        Type* contract) {
+    if (get_type_id(value) != LMD_TYPE_ARRAY_NUM || !value.array_num) return false;
+
+    LambdaArrayContractInfo info = {};
+    ArrayNumElemType expected_elem = ELEM_INT;
+    if (!lambda_array_contract_info(contract, &info) || info.rank != 1 ||
+            !lambda_array_num_elem_type_for_contract(info.immediate_element,
+                &expected_elem)) {
+        return false;
+    }
+
+    ArrayNum* array = value.array_num;
+    // A shaped carrier's leading axis is observable as a row, and a view may
+    // alias storage whose owner has a different contract. Neither is a T[]
+    // proof even when its leaf bytes use the same lane.
+    if (array->is_ndim || array->is_view) return false;
+    return array->get_elem_type() == expected_elem;
+}
+
 ArrayRepCert* lambda_array_rep_cert_create(Pool* pool, Type* contract) {
     LambdaArrayContractInfo info = {};
     if (!pool || !lambda_array_contract_info(contract, &info)) return NULL;

@@ -1,0 +1,368 @@
+{
+  "schema_version": 1,
+  "metadata": {
+    "purpose": "Tune26 G1 frozen Result37 recovery population; each entry is byte-identical at Result37, original Result42, and the live checkout when this manifest was generated.",
+    "source_reference": {
+      "result37_commit": "4758dc716580375581d605af4d56b67aaea8b0be",
+      "result42_commit": "584748bc54e209e220ca4a73cd1f29fcaf67523f"
+    },
+    "controls": {
+      "result37": {
+        "binary": "test/benchmark/exe/lambda-v37-4758dc7165",
+        "sha256": "07fc09a4d4cd6c832dcc24e7916a8aa0b7f663b23be94666e20ec3187a20eb4e"
+      },
+      "result42_original": {
+        "binary": "test/benchmark/exe/lambda-v42-584748bc54",
+        "sha256": "6d34ff2ccd008e0d4b70692101e5799ae1848cfcaead2066a7ca606c9373eef5"
+      }
+    },
+    "entry_source_count": 43,
+    "dependency_provenance": "The paired runner records a SHA-256 of each row source_root tree at execution time; this covers sibling imports and fixtures in addition to the entry script hash."
+  },
+  "rows": [
+    {
+      "suite": "r7rs",
+      "name": "fib",
+      "variant": "typed",
+      "script": "test/benchmark/r7rs/fib2.ls",
+      "source_root": "test/benchmark/r7rs",
+      "script_sha256": "ad9074603819010cc1f476b7af588722f4f19b2370254353ed35d0c9cc062fb1"
+    },
+    {
+      "suite": "r7rs",
+      "name": "fibfp",
+      "variant": "typed",
+      "script": "test/benchmark/r7rs/fibfp2.ls",
+      "source_root": "test/benchmark/r7rs",
+      "script_sha256": "8d1cb538740747b7d138ce943841881a84b19182a34648ba97f1db080cae9359"
+    },
+    {
+      "suite": "r7rs",
+      "name": "tak",
+      "variant": "typed",
+      "script": "test/benchmark/r7rs/tak2.ls",
+      "source_root": "test/benchmark/r7rs",
+      "script_sha256": "f91983ab41fd3bac9432602f4d6d2dd57b937e04c2f5c1d9f9033e9f3810c930"
+    },
+    {
+      "suite": "r7rs",
+      "name": "cpstak",
+      "variant": "typed",
+      "script": "test/benchmark/r7rs/cpstak2.ls",
+      "source_root": "test/benchmark/r7rs",
+      "script_sha256": "1d718ac23afbfe0ce95c108a8169ae1656aa401823df35cc8827a8f0f6129961"
+    },
+    {
+      "suite": "r7rs",
+      "name": "sum",
+      "variant": "typed",
+      "script": "test/benchmark/r7rs/sum2.ls",
+      "source_root": "test/benchmark/r7rs",
+      "script_sha256": "eaacce819f1c90251412546b58fee14b2205ee81705a22b90e8ab8255137072c"
+    },
+    {
+      "suite": "r7rs",
+      "name": "sumfp",
+      "variant": "typed",
+      "script": "test/benchmark/r7rs/sumfp2.ls",
+      "source_root": "test/benchmark/r7rs",
+      "script_sha256": "5579b9a75f242ecb308bc6dbaabd4b41290a780c30fcc8dc803d5872a4c2a4d3"
+    },
+    {
+      "suite": "r7rs",
+      "name": "nqueens",
+      "variant": "typed",
+      "script": "test/benchmark/r7rs/nqueens2.ls",
+      "source_root": "test/benchmark/r7rs",
+      "script_sha256": "98ddf12c2937fd31aebadffea4bc51b5b38c594b1487915f420276e7b84dc07b"
+    },
+    {
+      "suite": "r7rs",
+      "name": "fft",
+      "variant": "typed",
+      "script": "test/benchmark/r7rs/fft2.ls",
+      "source_root": "test/benchmark/r7rs",
+      "script_sha256": "0ceda879d6521ad61633794024618a51c786c0b70c8757719519931e3661caec"
+    },
+    {
+      "suite": "r7rs",
+      "name": "ack",
+      "variant": "typed",
+      "script": "test/benchmark/r7rs/ack2.ls",
+      "source_root": "test/benchmark/r7rs",
+      "script_sha256": "2d9fe67177f838159bb07ae485f743a68ac7765e8c39345baf4ddff6113c6f5a"
+    },
+    {
+      "suite": "awfy",
+      "name": "sieve",
+      "variant": "typed",
+      "script": "test/benchmark/awfy/sieve2.ls",
+      "source_root": "test/benchmark/awfy",
+      "script_sha256": "73983caca211c8de45423a720fc816ca1cff1902740d17fe73d6c769cbd6ac48"
+    },
+    {
+      "suite": "awfy",
+      "name": "permute",
+      "variant": "typed",
+      "script": "test/benchmark/awfy/permute2.ls",
+      "source_root": "test/benchmark/awfy",
+      "script_sha256": "2ef438bdac3533361173554f033f382406290a49ba20873280a670d49ef855b3"
+    },
+    {
+      "suite": "awfy",
+      "name": "towers",
+      "variant": "typed",
+      "script": "test/benchmark/awfy/towers2.ls",
+      "source_root": "test/benchmark/awfy",
+      "script_sha256": "6912fae18ffda7d447238139ac90311527720c151ed35021ac6b0f6f6a78289a"
+    },
+    {
+      "suite": "awfy",
+      "name": "bounce",
+      "variant": "typed",
+      "script": "test/benchmark/awfy/bounce2.ls",
+      "source_root": "test/benchmark/awfy",
+      "script_sha256": "f0fdec5fa1ede9bc4034f196c2c15235f6945c548d4e711a0af74d4deb7141ba"
+    },
+    {
+      "suite": "awfy",
+      "name": "list",
+      "variant": "typed",
+      "script": "test/benchmark/awfy/list2.ls",
+      "source_root": "test/benchmark/awfy",
+      "script_sha256": "3c4ba81d1f031fc153638b09f855bdbc84dfe467b3e98fe5488466d149f3c481"
+    },
+    {
+      "suite": "awfy",
+      "name": "storage",
+      "variant": "typed",
+      "script": "test/benchmark/awfy/storage2.ls",
+      "source_root": "test/benchmark/awfy",
+      "script_sha256": "e15fccc5b9726fd1c19222ef9e659c644755a9ee273127667f26a2b3bb5b1ac2"
+    },
+    {
+      "suite": "awfy",
+      "name": "mandelbrot",
+      "variant": "typed",
+      "script": "test/benchmark/awfy/mandelbrot2.ls",
+      "source_root": "test/benchmark/awfy",
+      "script_sha256": "388d8d7690aaf84aca8afb6f339721b73a9efe16f2fd5d78afdb550032d3236a"
+    },
+    {
+      "suite": "awfy",
+      "name": "nbody",
+      "variant": "typed",
+      "script": "test/benchmark/awfy/nbody2.ls",
+      "source_root": "test/benchmark/awfy",
+      "script_sha256": "bcbfe4bb60e90bc05d63819525813122549ef1bbb421e3400973f688ac928df8"
+    },
+    {
+      "suite": "beng",
+      "name": "binarytrees",
+      "variant": "typed",
+      "script": "test/benchmark/beng/binarytrees2.ls",
+      "source_root": "test/benchmark/beng",
+      "script_sha256": "6aaf529355b5cdf3e27b54f45c4464727764049a402e3fab658222b625baddcd"
+    },
+    {
+      "suite": "beng",
+      "name": "fannkuch",
+      "variant": "typed",
+      "script": "test/benchmark/beng/fannkuch2.ls",
+      "source_root": "test/benchmark/beng",
+      "script_sha256": "5af5b151d2670483b8c93a0fc06d83218ecb5f7de99d3ae326943db34dc68f81"
+    },
+    {
+      "suite": "beng",
+      "name": "pidigits",
+      "variant": "typed",
+      "script": "test/benchmark/beng/pidigits2.ls",
+      "source_root": "test/benchmark/beng",
+      "script_sha256": "1026e79152d9fdcc8d65afdce81ef716316498fa956bf9b7b2b9f58a200d5a63"
+    },
+    {
+      "suite": "beng",
+      "name": "regexredux",
+      "variant": "typed",
+      "script": "test/benchmark/beng/regexredux2.ls",
+      "source_root": "test/benchmark/beng",
+      "script_sha256": "a7d3bb6556208a35e48b56db55b7935448b42598aded81ac1409cc77a710cc90"
+    },
+    {
+      "suite": "beng",
+      "name": "revcomp",
+      "variant": "typed",
+      "script": "test/benchmark/beng/revcomp2.ls",
+      "source_root": "test/benchmark/beng",
+      "script_sha256": "0f5d6b04024430975d884cf84c3e233a5be68289e820227729defa3849f2dc0e"
+    },
+    {
+      "suite": "beng",
+      "name": "spectralnorm",
+      "variant": "typed",
+      "script": "test/benchmark/beng/spectralnorm2.ls",
+      "source_root": "test/benchmark/beng",
+      "script_sha256": "cf4a531900f8abb91892490ae17c682bddc7fb46d55008fa823e1dd6655e82c5"
+    },
+    {
+      "suite": "kostya",
+      "name": "brainfuck",
+      "variant": "typed",
+      "script": "test/benchmark/kostya/brainfuck2.ls",
+      "source_root": "test/benchmark/kostya",
+      "script_sha256": "b41dee97d594bbab58df6c2df6ec90ebc8cde580751a548378947d8a8347a06b"
+    },
+    {
+      "suite": "kostya",
+      "name": "matmul",
+      "variant": "typed",
+      "script": "test/benchmark/kostya/matmul2.ls",
+      "source_root": "test/benchmark/kostya",
+      "script_sha256": "b3d1721441e078472c62fdde706567c9c968312de9da8a8db1c76087d1fd5a39"
+    },
+    {
+      "suite": "kostya",
+      "name": "primes",
+      "variant": "typed",
+      "script": "test/benchmark/kostya/primes2.ls",
+      "source_root": "test/benchmark/kostya",
+      "script_sha256": "f91b571e3faed4f3ae75ca9db513eecf04e2cb1291e6a39cf0ce532a8600c53d"
+    },
+    {
+      "suite": "kostya",
+      "name": "base64",
+      "variant": "typed",
+      "script": "test/benchmark/kostya/base642.ls",
+      "source_root": "test/benchmark/kostya",
+      "script_sha256": "222b45ba9cc785b9bf1f4d0c65d731937b16e6cbe795e4ad12d114178a7d09ef"
+    },
+    {
+      "suite": "kostya",
+      "name": "levenshtein",
+      "variant": "typed",
+      "script": "test/benchmark/kostya/levenshtein2.ls",
+      "source_root": "test/benchmark/kostya",
+      "script_sha256": "f5b1e1d3ea74f54beccad8e2be30267213fc1e8680a6b0f997b639cb2f442f60"
+    },
+    {
+      "suite": "kostya",
+      "name": "json_gen",
+      "variant": "typed",
+      "script": "test/benchmark/kostya/json_gen2.ls",
+      "source_root": "test/benchmark/kostya",
+      "script_sha256": "7ec5c3a30c394e4abe47a9ff777348a403ffa1f91931c9f62d5f2b16eb447ead"
+    },
+    {
+      "suite": "kostya",
+      "name": "collatz",
+      "variant": "typed",
+      "script": "test/benchmark/kostya/collatz2.ls",
+      "source_root": "test/benchmark/kostya",
+      "script_sha256": "b77deb7028d1d132fd033069379e8867f54e75b4f413350661fc8e818d1a368b"
+    },
+    {
+      "suite": "larceny",
+      "name": "triangl",
+      "variant": "typed",
+      "script": "test/benchmark/larceny/triangl2.ls",
+      "source_root": "test/benchmark/larceny",
+      "script_sha256": "b611c39a857319b4286a09c0db321c2cf47616f7d1ef6901e163ed14e9aec612"
+    },
+    {
+      "suite": "larceny",
+      "name": "array1",
+      "variant": "typed",
+      "script": "test/benchmark/larceny/array12.ls",
+      "source_root": "test/benchmark/larceny",
+      "script_sha256": "fbd8095df7847310837c57c61ac717cc9748d6eeb39163c36e30581fe234232d"
+    },
+    {
+      "suite": "larceny",
+      "name": "diviter",
+      "variant": "typed",
+      "script": "test/benchmark/larceny/diviter2.ls",
+      "source_root": "test/benchmark/larceny",
+      "script_sha256": "8d7918f68cf3d9ad3928110a07d471412eec154f2a71a288993e390b8208329a"
+    },
+    {
+      "suite": "larceny",
+      "name": "divrec",
+      "variant": "typed",
+      "script": "test/benchmark/larceny/divrec2.ls",
+      "source_root": "test/benchmark/larceny",
+      "script_sha256": "9238894862791fe30abde507e1999d620f019d55bcae89c279e4d204ea30b8f6"
+    },
+    {
+      "suite": "larceny",
+      "name": "paraffins",
+      "variant": "typed",
+      "script": "test/benchmark/larceny/paraffins2.ls",
+      "source_root": "test/benchmark/larceny",
+      "script_sha256": "975aa78cee202f377482b276d6cdfd0b169c4b37af206248a07e98f0f5f19182"
+    },
+    {
+      "suite": "larceny",
+      "name": "pnpoly",
+      "variant": "typed",
+      "script": "test/benchmark/larceny/pnpoly2.ls",
+      "source_root": "test/benchmark/larceny",
+      "script_sha256": "03479648c679800689caca5d7722730f68f525f9eba59f389a0ae509e4330862"
+    },
+    {
+      "suite": "larceny",
+      "name": "puzzle",
+      "variant": "typed",
+      "script": "test/benchmark/larceny/puzzle2.ls",
+      "source_root": "test/benchmark/larceny",
+      "script_sha256": "9ef3adcb30fbfe38108dd1c4ff87a7f02620dceb198a554a4dc082997d8535e7"
+    },
+    {
+      "suite": "larceny",
+      "name": "quicksort",
+      "variant": "typed",
+      "script": "test/benchmark/larceny/quicksort2.ls",
+      "source_root": "test/benchmark/larceny",
+      "script_sha256": "8b50d3735a0fc324b119dd543f7ce5af20f9985808515db41c0a5e25e9800f8a"
+    },
+    {
+      "suite": "larceny",
+      "name": "ray",
+      "variant": "typed",
+      "script": "test/benchmark/larceny/ray2.ls",
+      "source_root": "test/benchmark/larceny",
+      "script_sha256": "bf76f39ce4054675e0fa5e6aac97f53d4d015e5cc6455252ad6f98dc155252f8"
+    },
+    {
+      "suite": "jetstream",
+      "name": "cube3d",
+      "variant": "typed",
+      "script": "test/benchmark/jetstream/cube3d2.ls",
+      "source_root": "test/benchmark/jetstream",
+      "script_sha256": "8e070abd68f312196ba6967ff2ed44ec6dbc6b007d815eb5e1dc1d5613538707"
+    },
+    {
+      "suite": "jetstream",
+      "name": "navier_stokes",
+      "variant": "typed",
+      "script": "test/benchmark/jetstream/navier_stokes2.ls",
+      "source_root": "test/benchmark/jetstream",
+      "script_sha256": "b004863e56c35ab60068a2a1c92745bf57e53fdf15fae3b15140a40d808358fa"
+    },
+    {
+      "suite": "jetstream",
+      "name": "crypto_sha1",
+      "variant": "typed",
+      "script": "test/benchmark/jetstream/crypto_sha12.ls",
+      "source_root": "test/benchmark/jetstream",
+      "script_sha256": "5347b8da647463646f31685210e674b6759865876fde7ecbaab15baa596ce929"
+    },
+    {
+      "suite": "text",
+      "name": "fast_diff",
+      "variant": "typed",
+      "script": "test/benchmark/text/fast_diff2.ls",
+      "source_root": "test/benchmark/text",
+      "script_sha256": "dd5691dce71f39323338585ce624fa93773b90676cbd74bf9d3ef884bf5db234"
+    }
+  ]
+}

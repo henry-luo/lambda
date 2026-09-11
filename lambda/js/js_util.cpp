@@ -5,6 +5,7 @@
  * Registered as built-in module 'util' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_node_common.hpp"
 #include "js_runtime_state.hpp"
 #include "js_host_hooks.h"
 #include "js_typed_array.h"
@@ -1280,9 +1281,7 @@ static Item js_util_callbackified_function(Item env_item, Item rest_args) {
     }
 
     Item callback = js_elements_get_int(rest_args, argc64 - 1);
-    if (!js_is_callable(callback)) {
-        return js_throw_invalid_arg_type("callback", "function", callback);
-    }
+    JS_REQUIRE_CALLBACK(callback);
 
     int argc = (int)argc64 - 1;
     Item* call_args = argc > 0 ? (Item*)alloca((size_t)argc * sizeof(Item)) : NULL;

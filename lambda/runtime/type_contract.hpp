@@ -65,6 +65,12 @@ bool lambda_array_contract_compatible(Type* candidate, Type* expected,
 // carrier, so they deliberately return false.
 bool lambda_array_num_elem_type_for_contract(Type* element,
     ArrayNumElemType* out_type);
+// An owned rank-one ArrayNum with this exact lane already decodes every
+// element as the complete non-nullable primitive contract. Views, shaped
+// carriers, nullable/refined contracts, and representation changes remain
+// deferred to boundary admission.
+bool lambda_array_num_representation_proves_primitive_contract(Item value,
+    Type* contract);
 ArrayRepCert* lambda_array_rep_cert_create(Pool* pool, Type* contract);
 bool lambda_array_rep_proves(Item value, Type* target_contract, bool invariant);
 bool lambda_array_rep_proves_cert(Item value, const ArrayRepCert* target,

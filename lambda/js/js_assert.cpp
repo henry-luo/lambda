@@ -64,6 +64,15 @@ static Item assert_make_string_n(const char* str, size_t len) {
 
 // Assertion diagnostics are all rendered into a StrBuf and then handed on as an
 // Item; taking the string and releasing the buffer is one step, never two.
+// Every strict-deep-equal diff opens with the same two header lines; what
+// follows the "+ actual - expected" legend is what varies between diffs.
+static StrBuf* assert_deep_equal_diff(void) {
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
+    strbuf_append_str(sb, "+ actual - expected\n");
+    return sb;
+}
+
 static Item assert_take_string(StrBuf* sb) {
     Item result = assert_make_string_n(sb->str, sb->length);
     strbuf_free(sb);
@@ -157,9 +166,7 @@ static Item js_assert_date_checktag_message(Item actual, Item expected) {
         return ItemNull;
     }
 
-    StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
-    strbuf_append_str(sb, "+ actual - expected\n");
+    StrBuf* sb = assert_deep_equal_diff();
     strbuf_append_str(sb, "\n");
     strbuf_append_str(sb, "+ ");
     if (!js_assert_append_date_checktag_value(sb, actual)) return ItemNull;
@@ -628,12 +635,19 @@ static Item js_assert_resolve_user_message(Item message, Item actual, Item expec
     return message;
 }
 
-static Item js_assert_throw_invalid_fn_arg(Item actual) {
+// Node's ERR_INVALID_ARG_TYPE diagnostics differ only in the argument name
+// and the expected-type phrase; the received-value rendering is identical.
+static Item js_assert_throw_invalid_arg(const char* arg_name,
+        const char* expected, Item actual) {
     char received[160];
     js_assert_append_value_type(received, sizeof(received), actual);
-    return js_throw_type_error_codef(JS_ERR_INVALID_ARG_TYPE, 
-        "The \"fn\" argument must be of type function. Received %s", received);
+    return js_throw_type_error_codef(JS_ERR_INVALID_ARG_TYPE,
+        "The \"%s\" argument must be of type %s. Received %s",
+        arg_name, expected, received);
 }
+
+JS_FORWARD_STATIC_ITEM(js_assert_throw_invalid_fn_arg, (Item actual),
+    js_assert_throw_invalid_arg, ("fn", "function", actual))
 
 typedef enum {
     ASSERT_MESSAGE_AUTO = 0,
@@ -1744,9 +1758,7 @@ static Item js_assert_deep_strict_array_message(Item actual, Item expected) {
             Item expected_value = js_get_key_default(expected_child, child_key);
             if (get_type_id(actual_value) == LMD_TYPE_ARRAY &&
                     get_type_id(expected_value) == LMD_TYPE_ARRAY) {
-                StrBuf* sb = strbuf_new();
-                strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
-                strbuf_append_str(sb, "+ actual - expected\n");
+                StrBuf* sb = assert_deep_equal_diff();
                 strbuf_append_str(sb, "... Skipped lines\n\n");
                 strbuf_append_str(sb, "  [\n");
                 int64_t head_count = diff_index < 2 ? diff_index : 2;
@@ -1772,9 +1784,7 @@ static Item js_assert_deep_strict_array_message(Item actual, Item expected) {
             diff_index >= 6) {
         // Long array diffs preserve context near the changed tail; dumping all
         // shared elements makes the public assert message too noisy.
-        StrBuf* sb = strbuf_new();
-        strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
-        strbuf_append_str(sb, "+ actual - expected\n");
+        StrBuf* sb = assert_deep_equal_diff();
         strbuf_append_str(sb, "... Skipped lines\n\n");
         strbuf_append_str(sb, "  [\n");
         for (int64_t i = 0; i < 4 && i < actual_len; i++) {
@@ -1810,9 +1820,8 @@ static Item js_assert_deep_strict_array_message(Item actual, Item expected) {
         strbuf_append_str(sb, "  ]\n");
         return assert_take_string(sb);
     }
-    StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
-    strbuf_append_str(sb, "+ actual - expected\n\n");
+    StrBuf* sb = assert_deep_equal_diff();
+    strbuf_append_str(sb, "\n");
     (void)diff_index;
     int root_indent = (js_is_proxy(actual) && get_type_id(expected) == LMD_TYPE_ARRAY) ||
                       (get_type_id(actual) == LMD_TYPE_ARRAY &&
@@ -1860,9 +1869,8 @@ static Item js_assert_deep_strict_typed_array_message(Item actual, Item expected
     int64_t actual_key_len = js_array_length(actual_keys);
     int64_t expected_key_len = js_array_length(expected_keys);
     if (actual_key_len != expected_key_len) {
-        StrBuf* prop = strbuf_new();
-        strbuf_append_str(prop, "Expected values to be strictly deep-equal:\n");
-        strbuf_append_str(prop, "+ actual - expected\n\n");
+        StrBuf* prop = assert_deep_equal_diff();
+        strbuf_append_str(prop, "\n");
         strbuf_append_str(prop, "  ");
         js_assert_append_typed_array_header(prop, actual, "");
         for (int i = 0; i < len; i++) {
@@ -1895,9 +1903,8 @@ static Item js_assert_deep_strict_typed_array_message(Item actual, Item expected
         return assert_take_string(prop);
     }
 
-    StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
-    strbuf_append_str(sb, "+ actual - expected\n\n");
+    StrBuf* sb = assert_deep_equal_diff();
+    strbuf_append_str(sb, "\n");
     js_assert_append_typed_array_header(sb, actual, "+ ");
     js_assert_append_typed_array_header(sb, expected, "- ");
     for (int i = 0; i < len; i++) {
@@ -2017,9 +2024,8 @@ static Item js_assert_deep_strict_class_message(Item actual, Item expected, bool
     bool actual_match = regexp ? js_assert_is_real_regexp(actual) : js_assert_is_date_value(actual);
     bool expected_match = regexp ? js_assert_is_real_regexp(expected) : js_assert_is_date_value(expected);
     if (!actual_match || !expected_match) return ItemNull;
-    StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
-    strbuf_append_str(sb, "+ actual - expected\n\n");
+    StrBuf* sb = assert_deep_equal_diff();
+    strbuf_append_str(sb, "\n");
     js_assert_append_class_value_with_props(sb, actual, "+ ", regexp);
     js_assert_append_class_value_with_props(sb, expected, "- ", regexp);
     return assert_take_string(sb);
@@ -2051,9 +2057,8 @@ static Item js_assert_deep_strict_map_message(Item actual, Item expected) {
                     (get_type_id(value_equal) == LMD_TYPE_INT && it2i(value_equal) == 1)) {
                 break;
             }
-            StrBuf* sb = strbuf_new();
-            strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
-            strbuf_append_str(sb, "+ actual - expected\n\n  Map(");
+            StrBuf* sb = assert_deep_equal_diff();
+            strbuf_append_str(sb, "\n  Map(");
             strbuf_append_int64(sb, actual_len);
             strbuf_append_str(sb, ") {\n+   ");
             js_assert_append_inspected_value(sb, actual_key);
@@ -2083,9 +2088,8 @@ static Item js_assert_deep_strict_object_message(Item actual, Item expected) {
     if (actual_len == expected_len) return ItemNull;
 
     if (actual_len == 0 || expected_len == 0) {
-        StrBuf* sb = strbuf_new();
-        strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
-        strbuf_append_str(sb, "+ actual - expected\n\n");
+        StrBuf* sb = assert_deep_equal_diff();
+        strbuf_append_str(sb, "\n");
         if (actual_len == 0) strbuf_append_str(sb, "+ {}\n");
         else js_assert_append_multiline_value(sb, actual, 0, '+', false, 16);
         if (expected_len == 0) strbuf_append_str(sb, "- {}\n");
@@ -2101,9 +2105,8 @@ static Item js_assert_deep_strict_object_message(Item actual, Item expected) {
     Item diff_owner = actual_len > expected_len ? actual : expected;
     const char* diff_sign = actual_len > expected_len ? "+   " : "-   ";
 
-    StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
-    strbuf_append_str(sb, "+ actual - expected\n\n");
+    StrBuf* sb = assert_deep_equal_diff();
+    strbuf_append_str(sb, "\n");
     strbuf_append_str(sb, "  {\n");
     for (int64_t i = 0; i < js_array_length(base_keys); i++) {
         Item key = js_elements_get_int(base_keys, i);
@@ -2135,9 +2138,8 @@ static Item js_assert_deep_strict_url_message(Item actual, Item expected) {
             js_class_id(actual) != JS_CLASS_URL || js_class_id(expected) != JS_CLASS_URL) {
         return ItemNull;
     }
-    StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
-    strbuf_append_str(sb, "+ actual - expected\n\n");
+    StrBuf* sb = assert_deep_equal_diff();
+    strbuf_append_str(sb, "\n");
     strbuf_append_str(sb, "+ ");
     js_assert_append_inspected_value(sb, js_get_key_cstr(actual, "href"));
     strbuf_append_str(sb, "\n- ");
@@ -2154,9 +2156,8 @@ static Item js_assert_deep_strict_structural_message(Item actual, Item expected)
           get_type_id(expected) == LMD_TYPE_ARRAY || js_assert_is_plain_diff_object(expected))) {
         return ItemNull;
     }
-    StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
-    strbuf_append_str(sb, "+ actual - expected\n\n");
+    StrBuf* sb = assert_deep_equal_diff();
+    strbuf_append_str(sb, "\n");
     if (js_assert_is_plain_diff_object(actual) && js_assert_is_plain_diff_object(expected)) {
         Item keys = js_object_keys(actual);
         if (js_array_length(keys) > 50) {
@@ -2248,9 +2249,8 @@ static Item js_assert_deep_strict_error_message(Item actual, Item expected) {
         bool same = get_type_id(equal) == LMD_TYPE_BOOL && it2b(equal);
         if (same && actual_has == expected_has) continue;
 
-        StrBuf* sb = strbuf_new();
-        strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
-        strbuf_append_str(sb, "+ actual - expected\n\n");
+        StrBuf* sb = assert_deep_equal_diff();
+        strbuf_append_str(sb, "\n");
         if (actual_has && expected_has) {
             strbuf_append_str(sb, "  ");
             js_assert_append_error_label(sb, actual);
@@ -2304,9 +2304,8 @@ static Item js_assert_deep_strict_error_message(Item actual, Item expected) {
         String* ks = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
         if (!ks) continue;
 
-        StrBuf* sb = strbuf_new();
-        strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
-        strbuf_append_str(sb, "+ actual - expected\n\n");
+        StrBuf* sb = assert_deep_equal_diff();
+        strbuf_append_str(sb, "\n");
         strbuf_append_str(sb, "  ");
         js_assert_append_error_label(sb, actual);
         strbuf_append_str(sb, " {\n");
@@ -2798,12 +2797,8 @@ static Item js_assert_throws_missing_error(Item error_expected, Item message) {
     return result;
 }
 
-static Item js_assert_throw_invalid_throws_expected(Item error_expected) {
-    char received[160];
-    js_assert_append_value_type(received, sizeof(received), error_expected);
-    return js_throw_type_error_codef(JS_ERR_INVALID_ARG_TYPE, 
-        "The \"error\" argument must be of type function or an instance of Error, RegExp, or Object. Received %s", received);
-}
+JS_FORWARD_STATIC_ITEM(js_assert_throw_invalid_throws_expected, (Item error_expected),
+    js_assert_throw_invalid_arg, ("error", "function or an instance of Error, RegExp, or Object", error_expected))
 
 #define js_assert_is_vm_context_error js_is_vm_context_error
 
@@ -3087,9 +3082,8 @@ static void js_assert_append_signed_comparison_value(StrBuf* sb, Item value,
 
 static Item js_assert_throw_object_pattern_mismatch(Item thrown, Item expected) {
     if (!js_assert_is_object_like_value(thrown)) {
-        StrBuf* plain = strbuf_new();
-        strbuf_append_str(plain, "Expected values to be strictly deep-equal:\n");
-        strbuf_append_str(plain, "+ actual - expected\n\n");
+        StrBuf* plain = assert_deep_equal_diff();
+        strbuf_append_str(plain, "\n");
         js_assert_append_multiline_value(plain, thrown, 0, '+', false, 16);
         js_assert_append_multiline_value(plain, expected, 0, '-', false, 16);
         Item plain_msg = assert_take_string(plain);
@@ -3106,9 +3100,8 @@ static Item js_assert_throw_object_pattern_mismatch(Item thrown, Item expected) 
     if (count > 0 && !flags.valid()) {
         return js_throw_range_error("Cannot retain assert.throws comparison state");
     }
-    StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
-    strbuf_append_str(sb, "+ actual - expected\n\n");
+    StrBuf* sb = assert_deep_equal_diff();
+    strbuf_append_str(sb, "\n");
     strbuf_append_str(sb, "  Comparison {\n");
     for (int i = 0; i < count; i++) {
         Item key = keys.at(i);
@@ -3396,12 +3389,8 @@ static bool js_assert_expected_error_matches(Item thrown, Item error_expected) {
     return false;
 }
 
-static Item js_assert_throw_invalid_does_not_throw_expected(Item expected) {
-    char received[160];
-    js_assert_append_value_type(received, sizeof(received), expected);
-    return js_throw_type_error_codef(JS_ERR_INVALID_ARG_TYPE, 
-        "The \"expected\" argument must be of type function or an instance of RegExp. Received %s", received);
-}
+JS_FORWARD_STATIC_ITEM(js_assert_throw_invalid_does_not_throw_expected, (Item expected),
+    js_assert_throw_invalid_arg, ("expected", "function or an instance of RegExp", expected))
 
 static void js_assert_append_does_not_throw_user_message(StrBuf* sb, Item message) {
     if (get_type_id(message) == LMD_TYPE_UNDEFINED || message.item == ITEM_JS_UNDEFINED ||

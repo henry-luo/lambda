@@ -1053,6 +1053,15 @@ static TypeMap* js_object_type_for_class_impl(int class_id) {
 JS_FORWARD_RETURN(TypeMap*, js_object_type_for_class, (int class_id),
     js_object_type_for_class_impl, (class_id))
 
+Map* js_array_props_ensure(Array* arr) {
+    if (!js_array_has_props(arr)) {
+        Item obj = js_new_object();
+        obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
+        js_elements_set_props(arr, obj.map);
+    }
+    return js_array_props(arr);
+}
+
 extern "C" Item js_new_object_with_class(int class_id) {
     TypeMap* tm = js_object_type_for_class_impl(class_id);
     if (!tm) return js_new_object();
@@ -6493,12 +6502,7 @@ static Item js_set_array_core(Item object, Item key, Item value,
                         "add property", sk->chars, (int)sk->len));
                     return value;
                 }
-                if (!js_array_has_props(arr)) {
-                    Item obj = js_new_object();
-                    obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
-                    js_elements_set_props(arr, obj.map);
-                }
-                pm = js_array_props(arr);
+                pm = js_array_props_ensure(arr);
                 Item map_item = (Item){.map = pm};
                 js_set_storage_mode(
                     map_item, key, value, receiver, bypass_accessor_dispatch, strict);
@@ -6579,12 +6583,7 @@ static Item js_set_array_core(Item object, Item key, Item value,
         if (idx_d == idx_d && idx >= 0 && idx >= object.array->length) {
             Array* arr = object.array;
             Map* pm;
-            if (!js_array_has_props(arr)) {
-                Item obj = js_new_object();
-                obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
-                js_elements_set_props(arr, obj.map);
-            }
-            pm = js_array_props(arr);
+            pm = js_array_props_ensure(arr);
             Item map_item = (Item){.map = pm};
             int idx_len = 0;
             const char* idx_buf = js_property_index_chars(idx, &idx_len);
@@ -8851,12 +8850,7 @@ static bool js_array_set_index_preflight(Item array, int64_t index, Item key,
 
 static Item js_array_set_companion_key(Item array, Item key, Item value) {
     Array* arr = array.array;
-    if (!js_array_has_props(arr)) {
-        Item obj = js_new_object();
-        obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
-        js_elements_set_props(arr, obj.map);
-    }
-    js_set_key_default((Item){.map = js_array_props(arr)}, key, value);
+    js_set_key_default((Item){.map = js_array_props_ensure(arr)}, key, value);
     return value;
 }
 
@@ -8866,12 +8860,7 @@ static Item js_array_set_arguments_index(Item array, int64_t index, Item value,
     int idx_len = 0;
     const char* idx_buf = js_property_index_chars(index, &idx_len);
     Item key = js_name_item(idx_buf, idx_len);
-    if (!js_array_has_props(arr)) {
-        Item obj = js_new_object();
-        obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
-        js_elements_set_props(arr, obj.map);
-    }
-    Item map_item = (Item){.map = js_array_props(arr)};
+    Item map_item = (Item){.map = js_array_props_ensure(arr)};
     if (bypass_accessor_dispatch) {
         js_define_own_key_storage(map_item, key, value);
     } else {

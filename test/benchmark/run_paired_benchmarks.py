@@ -71,9 +71,13 @@ def median(values):
     return ordered[len(ordered) // 2]
 
 
-def run_once(binary, script, timeout_s, language="lambda"):
+def run_once(binary, script, timeout_s, language="lambda", tier="jit",
+             expected_stdout_text=None):
     """Run one script and return a serializable timing/observable record."""
     command = [binary, "js" if language == "js" else "run", script]
+    environment = os.environ.copy()
+    if language == "lambda":
+        environment["LAMBDA_TIER"] = tier
     started = time.perf_counter_ns()
     process = None
     try:
@@ -83,6 +87,7 @@ def run_once(binary, script, timeout_s, language="lambda"):
             stderr=subprocess.PIPE,
             text=True,
             start_new_session=(os.name != "nt"),
+            env=environment,
         )
         try:
             stdout, stderr = process.communicate(timeout=timeout_s)
@@ -99,6 +104,7 @@ def run_once(binary, script, timeout_s, language="lambda"):
                 "returncode": process.returncode,
                 "stdout_sha256": None,
                 "stderr_sha256": None,
+                "stdout_contains_expected": None,
             }
     except OSError as error:
         return {
@@ -109,6 +115,7 @@ def run_once(binary, script, timeout_s, language="lambda"):
             "error": str(error),
             "stdout_sha256": None,
             "stderr_sha256": None,
+            "stdout_contains_expected": None,
         }
 
     wall_ms = (time.perf_counter_ns() - started) / 1_000_000.0
@@ -127,6 +134,10 @@ def run_once(binary, script, timeout_s, language="lambda"):
         "returncode": process.returncode,
         "stdout_sha256": stdout_hash,
         "stderr_sha256": stderr_hash,
+        "stdout_contains_expected": (
+            expected_stdout_text in stable_stdout
+            if expected_stdout_text is not None else None
+        ),
     }
 
 
@@ -147,7 +158,8 @@ def summarize_side(samples):
     }
 
 
-def compare_row(control, candidate, script, pairs, timeout_s, language="lambda"):
+def compare_row(control, candidate, control_script, candidate_script, pairs, timeout_s,
+                language="lambda", tier="jit", expected_stdout_text=None):
     control_samples = []
     candidate_samples = []
     pair_records = []
@@ -158,8 +170,12 @@ def compare_row(control, candidate, script, pairs, timeout_s, language="lambda")
         second_binary = candidate if control_first else control
         first_label = "control" if control_first else "candidate"
         second_label = "candidate" if control_first else "control"
-        first = run_once(first_binary, script, timeout_s, language)
-        second = run_once(second_binary, script, timeout_s, language)
+        first_script = control_script if first_label == "control" else candidate_script
+        second_script = candidate_script if second_label == "candidate" else control_script
+        first = run_once(first_binary, first_script, timeout_s, language, tier,
+                         expected_stdout_text)
+        second = run_once(second_binary, second_script, timeout_s, language, tier,
+                          expected_stdout_text)
         samples = {first_label: first, second_label: second}
         control_samples.append(samples["control"])
         candidate_samples.append(samples["candidate"])
@@ -171,6 +187,10 @@ def compare_row(control, candidate, script, pairs, timeout_s, language="lambda")
             "stdout_equal": (
                 samples["control"]["stdout_sha256"] is not None
                 and samples["control"]["stdout_sha256"] == samples["candidate"]["stdout_sha256"]
+            ),
+            "expected_stdout_matches": (
+                samples["control"].get("stdout_contains_expected") is not False
+                and samples["candidate"].get("stdout_contains_expected") is not False
             ),
         })
         print(".", end="", flush=True)
@@ -191,7 +211,8 @@ def compare_row(control, candidate, script, pairs, timeout_s, language="lambda")
         for pair in valid_pairs
     )
     return {
-        "script": script,
+        "control_script": control_script,
+        "candidate_script": candidate_script,
         "pairs_requested": pairs,
         "pairs_valid": len(valid_pairs),
         "timeout_s": timeout_s,
@@ -200,8 +221,76 @@ def compare_row(control, candidate, script, pairs, timeout_s, language="lambda")
         "candidate_over_control_median_ratio": ratio,
         "candidate_wins": candidate_wins,
         "stdout_equal_all": bool(pair_records) and all(pair["stdout_equal"] for pair in pair_records),
+        "expected_stdout_matches_all": (
+            bool(pair_records) and all(pair["expected_stdout_matches"] for pair in pair_records)
+            if expected_stdout_text is not None else None
+        ),
         "pairs": pair_records,
     }
+
+
+def tree_sha256(root):
+    """Hash every regular file below root, including its relative path."""
+    digest = hashlib.sha256()
+    root = os.path.abspath(root)
+    for directory, subdirs, filenames in os.walk(root):
+        subdirs.sort()
+        for filename in sorted(filenames):
+            path = os.path.join(directory, filename)
+            if not os.path.isfile(path):
+                continue
+            relative = os.path.relpath(path, root).replace(os.sep, "/")
+            digest.update(relative.encode("utf-8"))
+            digest.update(b"\0")
+            with open(path, "rb") as stream:
+                for block in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(block)
+    return digest.hexdigest()
+
+
+def source_provenance(script, source_root=None):
+    """Record entry and transitive-source-tree identities for a timed script."""
+    script = os.path.abspath(script)
+    source_root = os.path.abspath(source_root or os.path.dirname(script))
+    if not os.path.isfile(script):
+        raise ValueError(f"source script does not exist: {script}")
+    if not os.path.isdir(source_root):
+        raise ValueError(f"source root does not exist: {source_root}")
+    return {
+        "path": script,
+        "sha256": sha256_file(script),
+        "source_root": source_root,
+        "source_tree_sha256": tree_sha256(source_root),
+    }
+
+
+def load_manifest_rows(path):
+    """Load explicit source pairs without silently falling back to benchmark discovery."""
+    with open(path) as stream:
+        manifest = json.load(stream)
+    rows = manifest.get("rows")
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("manifest must contain a non-empty rows array")
+    loaded = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise ValueError(f"manifest row {index + 1} is not an object")
+        control_script = row.get("control_script", row.get("script"))
+        candidate_script = row.get("candidate_script", row.get("script"))
+        if not isinstance(control_script, str) or not isinstance(candidate_script, str):
+            raise ValueError(f"manifest row {index + 1} needs script or both source-pair paths")
+        loaded.append({
+            "suite": row.get("suite", "manifest"),
+            "name": row.get("name", f"row_{index + 1}"),
+            "variant": row.get("variant", "typed"),
+            "control_script": control_script,
+            "candidate_script": candidate_script,
+            "control_source_root": row.get("control_source_root", row.get("source_root")),
+            "candidate_source_root": row.get("candidate_source_root", row.get("source_root")),
+            "expected_stdout_text": row.get("expected_stdout_text"),
+            "manifest_entry_sha256": row.get("script_sha256"),
+        })
+    return manifest, loaded
 
 
 def parse_filters(value):
@@ -224,6 +313,13 @@ def main():
         "--variants", choices=["untyped", "typed", "both"], default="both",
         help="Lambda script variants to compare (default: both)",
     )
+    parser.add_argument("--tier", choices=["jit", "auto"], default="jit",
+                        help="Lambda execution tier for Lambda sources (default: jit)")
+    parser.add_argument("--manifest", default=None,
+                        help="JSON file containing explicit same-source or source-pair rows")
+    parser.add_argument("--source-pair", nargs=2, action="append",
+                        metavar=("CONTROL_SCRIPT", "CANDIDATE_SCRIPT"),
+                        help="compare two explicit source files; may be given more than once")
     parser.add_argument("-p", "--pairs", type=int, default=41, help="alternating pairs per row")
     parser.add_argument("-t", "--timeout", type=int, default=120, help="timeout per process")
     parser.add_argument(
@@ -239,12 +335,45 @@ def main():
     for label, path in (("control", control), ("candidate", candidate)):
         if not os.path.isfile(path) or not os.access(path, os.X_OK):
             parser.error(f"{label} binary is not executable: {path}")
+    if args.manifest and args.source_pair:
+        parser.error("--manifest and --source-pair cannot be combined")
 
     suite_filters = parse_filters(args.suite)
     bench_filters = parse_filters(args.bench)
-    benchmarks = build_benchmark_list(suite_filters, bench_filters)
-    if not benchmarks:
-        parser.error("no benchmarks matched the supplied filters")
+    manifest = None
+    explicit_rows = []
+    if args.manifest:
+        manifest_path = os.path.abspath(args.manifest)
+        try:
+            manifest, explicit_rows = load_manifest_rows(manifest_path)
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            parser.error(f"invalid manifest: {error}")
+    elif args.source_pair:
+        for index, pair in enumerate(args.source_pair):
+            explicit_rows.append({
+                "suite": "source_pair",
+                "name": f"pair_{index + 1}",
+                "variant": "source_pair",
+                "control_script": pair[0],
+                "candidate_script": pair[1],
+                "control_source_root": None,
+                "candidate_source_root": None,
+                "expected_stdout_text": None,
+                "manifest_entry_sha256": None,
+            })
+    if explicit_rows and (suite_filters or bench_filters):
+        explicit_rows = [
+            row for row in explicit_rows
+            if (not suite_filters or row["suite"] in suite_filters) and
+            (not bench_filters or row["name"] in bench_filters)
+        ]
+        if not explicit_rows:
+            parser.error("no explicit rows matched the supplied filters")
+    benchmarks = []
+    if not explicit_rows:
+        benchmarks = build_benchmark_list(suite_filters, bench_filters)
+        if not benchmarks:
+            parser.error("no benchmarks matched the supplied filters")
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     output = args.output or os.path.join("temp", f"paired_benchmarks_{timestamp}.json")
@@ -252,8 +381,10 @@ def main():
     variants = ["untyped", "typed"] if args.variants == "both" else [args.variants]
     if args.language == "js":
         variants = ["js"]
+    if explicit_rows:
+        variants = sorted({row["variant"] for row in explicit_rows})
     metadata = {
-        "schema_version": 1,
+        "schema_version": 2,
         "started_at": datetime.datetime.now().isoformat(timespec="seconds"),
         "platform": f"{platform.system()} {platform.machine()}",
         "control": {"path": control, "sha256": sha256_file(control)},
@@ -264,11 +395,75 @@ def main():
         "bench_filters": bench_filters or [],
         "variants": variants,
         "language": args.language,
+        "tier": args.tier,
         "pairs": args.pairs,
         "timeout_s": args.timeout,
         "command": " ".join(sys.argv),
     }
+    if args.manifest:
+        metadata["manifest"] = {
+            "path": manifest_path,
+            "sha256": sha256_file(manifest_path),
+            "schema_version": manifest.get("schema_version"),
+            "metadata": manifest.get("metadata"),
+        }
     artifact = {"_metadata": metadata, "rows": []}
+    if explicit_rows:
+        print(f"Paired A/B: {len(explicit_rows)} explicit row(s), {args.pairs} pair(s)")
+        for spec in explicit_rows:
+            control_script = os.path.abspath(spec["control_script"])
+            candidate_script = os.path.abspath(spec["candidate_script"])
+            row = {
+                "suite": spec["suite"],
+                "name": spec["name"],
+                "variant": spec["variant"],
+                "control_script": control_script,
+                "candidate_script": candidate_script,
+                "expected_stdout_text": spec["expected_stdout_text"],
+            }
+            try:
+                row["control_source"] = source_provenance(
+                    control_script, spec["control_source_root"])
+                row["candidate_source"] = source_provenance(
+                    candidate_script, spec["candidate_source_root"])
+            except ValueError as error:
+                row["status"] = "missing_script"
+                row["status_detail"] = str(error)
+                artifact["rows"].append(row)
+                print(f"\n{spec['suite']}/{spec['name']} missing script")
+                continue
+            expected_sha256 = spec["manifest_entry_sha256"]
+            if expected_sha256 is not None:
+                row["manifest_entry_sha256"] = expected_sha256
+                row["manifest_entry_hash_matches"] = (
+                    row["control_source"]["sha256"] == expected_sha256 and
+                    row["candidate_source"]["sha256"] == expected_sha256
+                )
+                if not row["manifest_entry_hash_matches"]:
+                    row["status"] = "source_hash_mismatch"
+                    artifact["rows"].append(row)
+                    print(f"\n{spec['suite']}/{spec['name']} source hash mismatch")
+                    continue
+            print(f"\n{spec['suite']}/{spec['name']}[{spec['variant']}] ",
+                  end="", flush=True)
+            row.update(compare_row(control, candidate, control_script, candidate_script,
+                                   args.pairs, args.timeout, args.language, args.tier,
+                                   spec["expected_stdout_text"]))
+            row["status"] = "ok" if row["pairs_valid"] == args.pairs else "partial_ok"
+            if row["expected_stdout_matches_all"] is False:
+                row["status"] = "wrong_output"
+            artifact["rows"].append(row)
+            ratio = row["candidate_over_control_median_ratio"]
+            ratio_text = "n/a" if ratio is None else f"{ratio:.4f}"
+            print(f" ratio={ratio_text} wins={row['candidate_wins']}/{row['pairs_valid']}"
+                  f" stdout_equal={row['stdout_equal_all']}")
+        artifact["_metadata"]["finished_at"] = datetime.datetime.now().isoformat(
+            timespec="seconds")
+        with open(output, "w") as stream:
+            json.dump(artifact, stream, indent=2)
+        print(f"Saved paired artifact to {output}")
+        return
+
     print(f"Paired A/B: {len(benchmarks)} row(s), {args.pairs} pair(s), variants={','.join(variants)}")
     for benchmark in benchmarks:
         untyped, typed = mir_script_variants(benchmark)
@@ -296,9 +491,10 @@ def main():
                 print(f"\n{benchmark['suite']}/{benchmark['name']}[{variant}] missing script")
                 continue
             print(f"\n{benchmark['suite']}/{benchmark['name']}[{variant}] ", end="", flush=True)
-            row["script_sha256"] = sha256_file(script)
-            row.update(compare_row(control, candidate, script, args.pairs, args.timeout,
-                                   args.language))
+            row["control_source"] = source_provenance(script)
+            row["candidate_source"] = source_provenance(script)
+            row.update(compare_row(control, candidate, script, script, args.pairs,
+                                   args.timeout, args.language, args.tier))
             row["status"] = "ok" if row["pairs_valid"] == args.pairs else "partial_ok"
             artifact["rows"].append(row)
             ratio = row["candidate_over_control_median_ratio"]
