@@ -1,0 +1,111 @@
+// dom_element_ops.def — the DOM element-operation ordinals, declared once.
+//
+// One row per operation. The ordinal enum (jube.h), the radiant module's
+// binding thunks and their `extern` declarations are all expansions of this
+// file; before it, each operation was written out three times and the three
+// had to agree by inspection.
+//
+//   DOM_ELEMENT_OP(NAME, thunk)
+//
+//   NAME   enum suffix; the ordinal is JUBE_DOM_<NAME>
+//   thunk  symbol suffix; the module binding is radiant_dom_m4d_<thunk>.
+//          Equal to lowercase(NAME) for all but the three `__lambda_`
+//          automation entries, whose script-facing spelling is deliberately
+//          reserved rather than derived.
+//
+// ROW ORDER IS THE ABI: the ordinal is the value passed across the host API,
+// so rows are appended, never reordered or removed in place.
+//
+// This is a staging table. Once dom_api.def rows carry their receiver
+// interface and JS spelling (DS1), these rows merge into it and the enum stops
+// existing (DS2) -- see vibe/impl/Lambda_Impl_DOM_Simplify.md.
+
+#ifndef DOM_ELEMENT_OP
+#error "define DOM_ELEMENT_OP(NAME, thunk) before including dom_element_ops.def"
+#endif
+
+DOM_ELEMENT_OP(NAMED_ITEM, named_item)
+DOM_ELEMENT_OP(ADD, add)
+DOM_ELEMENT_OP(REMOVE, remove)
+DOM_ELEMENT_OP(CONTAINS, contains)
+DOM_ELEMENT_OP(COMPARE_DOCUMENT_POSITION, compare_document_position)
+DOM_ELEMENT_OP(GET_ROOT_NODE, get_root_node)
+DOM_ELEMENT_OP(REPLACE_WITH, replace_with)
+DOM_ELEMENT_OP(HAS_CHILD_NODES, has_child_nodes)
+DOM_ELEMENT_OP(CLONE_NODE, clone_node)
+DOM_ELEMENT_OP(REPLACE_DATA, replace_data)
+DOM_ELEMENT_OP(INSERT_DATA, insert_data)
+DOM_ELEMENT_OP(APPEND_DATA, append_data)
+DOM_ELEMENT_OP(DELETE_DATA, delete_data)
+DOM_ELEMENT_OP(SUBSTRING_DATA, substring_data)
+DOM_ELEMENT_OP(GET_ATTRIBUTE, get_attribute)
+DOM_ELEMENT_OP(SET_ATTRIBUTE, set_attribute)
+DOM_ELEMENT_OP(REMOVE_ATTRIBUTE, remove_attribute)
+DOM_ELEMENT_OP(TOGGLE_ATTRIBUTE, toggle_attribute)
+DOM_ELEMENT_OP(HAS_ATTRIBUTE, has_attribute)
+DOM_ELEMENT_OP(GET_ATTRIBUTE_NAMES, get_attribute_names)
+DOM_ELEMENT_OP(MATCHES, matches)
+DOM_ELEMENT_OP(QUERY_SELECTOR, query_selector)
+DOM_ELEMENT_OP(QUERY_SELECTOR_ALL, query_selector_all)
+DOM_ELEMENT_OP(CLOSEST, closest)
+DOM_ELEMENT_OP(GET_ELEMENTS_BY_TAG_NAME, get_elements_by_tag_name)
+DOM_ELEMENT_OP(GET_ELEMENTS_BY_CLASS_NAME, get_elements_by_class_name)
+DOM_ELEMENT_OP(GET_ELEMENT_BY_ID, get_element_by_id)
+DOM_ELEMENT_OP(ADD_EVENT_LISTENER, add_event_listener)
+DOM_ELEMENT_OP(REMOVE_EVENT_LISTENER, remove_event_listener)
+DOM_ELEMENT_OP(DISPATCH_EVENT, dispatch_event)
+DOM_ELEMENT_OP(APPEND_CHILD, append_child)
+DOM_ELEMENT_OP(REMOVE_CHILD, remove_child)
+DOM_ELEMENT_OP(INSERT_BEFORE, insert_before)
+DOM_ELEMENT_OP(REPLACE_CHILD, replace_child)
+DOM_ELEMENT_OP(NORMALIZE, normalize)
+DOM_ELEMENT_OP(APPEND, append)
+DOM_ELEMENT_OP(PREPEND, prepend)
+DOM_ELEMENT_OP(INSERT_ADJACENT_ELEMENT, insert_adjacent_element)
+DOM_ELEMENT_OP(INSERT_ADJACENT_HTML, insert_adjacent_html)
+DOM_ELEMENT_OP(GET_BOUNDING_CLIENT_RECT, get_bounding_client_rect)
+DOM_ELEMENT_OP(GET_CLIENT_RECTS, get_client_rects)
+DOM_ELEMENT_OP(SCROLL_INTO_VIEW, scroll_into_view)
+DOM_ELEMENT_OP(SCROLL, scroll)
+DOM_ELEMENT_OP(SCROLL_TO, scroll_to)
+DOM_ELEMENT_OP(SCROLL_BY, scroll_by)
+DOM_ELEMENT_OP(FOCUS, focus)
+DOM_ELEMENT_OP(BLUR, blur)
+DOM_ELEMENT_OP(CLICK, click)
+DOM_ELEMENT_OP(SHOW_POPOVER, show_popover)
+DOM_ELEMENT_OP(HIDE_POPOVER, hide_popover)
+DOM_ELEMENT_OP(SHOW_MODAL, show_modal)
+DOM_ELEMENT_OP(RESET, reset)
+DOM_ELEMENT_OP(SUBMIT, submit)
+DOM_ELEMENT_OP(REQUEST_SUBMIT, request_submit)
+DOM_ELEMENT_OP(CHECK_VALIDITY, check_validity)
+DOM_ELEMENT_OP(REPORT_VALIDITY, report_validity)
+DOM_ELEMENT_OP(SET_CUSTOM_VALIDITY, set_custom_validity)
+DOM_ELEMENT_OP(SET_SELECTION_RANGE, set_selection_range)
+DOM_ELEMENT_OP(SET_RANGE_TEXT, set_range_text)
+DOM_ELEMENT_OP(SELECT, select)
+DOM_ELEMENT_OP(ITEM, item)
+DOM_ELEMENT_OP(TOGGLE, toggle)
+DOM_ELEMENT_OP(REPLACE, replace)
+DOM_ELEMENT_OP(ATTACH_SHADOW, attach_shadow)
+DOM_ELEMENT_OP(TO_STRING, to_string)
+DOM_ELEMENT_OP(BOUNDARY_FROM_POINT, __lambda_boundary_from_point)
+DOM_ELEMENT_OP(TEXT_CONTROL_BOUNDARY_FROM_POINT, __lambda_text_control_boundary_from_point)
+DOM_ELEMENT_OP(TEXT_CONTROL_CARET_BOUNDS, __lambda_text_control_caret_bounds)
+DOM_ELEMENT_OP(GET_ATTRIBUTE_NS, get_attribute_ns)
+DOM_ELEMENT_OP(SET_ATTRIBUTE_NS, set_attribute_ns)
+DOM_ELEMENT_OP(REMOVE_ATTRIBUTE_NS, remove_attribute_ns)
+DOM_ELEMENT_OP(IS_EQUAL_NODE, is_equal_node)
+DOM_ELEMENT_OP(IS_SAME_NODE, is_same_node)
+DOM_ELEMENT_OP(CREATE_SVG_POINT, create_svg_point)
+DOM_ELEMENT_OP(CREATE_SVG_MATRIX, create_svg_matrix)
+DOM_ELEMENT_OP(CREATE_SVG_TRANSFORM, create_svg_transform)
+DOM_ELEMENT_OP(CREATE_SVG_TRANSFORM_FROM_MATRIX, create_svg_transform_from_matrix)
+DOM_ELEMENT_OP(GET_BBOX, get_bbox)
+DOM_ELEMENT_OP(GET_CTM, get_ctm)
+DOM_ELEMENT_OP(GET_SCREEN_CTM, get_screen_ctm)
+DOM_ELEMENT_OP(AFTER, after)
+DOM_ELEMENT_OP(BEFORE, before)
+DOM_ELEMENT_OP(SPLIT_TEXT, split_text)
+
+#undef DOM_ELEMENT_OP

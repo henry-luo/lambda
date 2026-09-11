@@ -257,13 +257,13 @@ static void jube_node_session_state_init(NodeRuntimeSession* session) {
     if (!session) return;
     // owner NULL: the session is used only on its attaching thread, so the
     // vector resolves the current context at each use (JSCU14).
-    js_item_stack_init(&session->cjs.module_stack, NULL, "CommonJS module stack");
+    root_vector_init(&session->cjs.module_stack, NULL, "CommonJS module stack");
 }
 
 static void jube_node_session_state_clear(NodeRuntimeSession* session) {
     if (!session) return;
     // release the rooted blocks before the record is zeroed
-    js_item_stack_destroy(&session->cjs.module_stack);
+    root_vector_destroy(&session->cjs.module_stack);
     memset(&session->cjs, 0, sizeof(session->cjs));
     if (session->commonjs_compile_cache) {
         mem_free(session->commonjs_compile_cache->directory);

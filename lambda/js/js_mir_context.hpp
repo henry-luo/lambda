@@ -168,6 +168,10 @@ struct JsLoopLabels {
     MIR_reg_t iterator_to_close;   // nonzero for for-of entries that need IteratorClose on outer abrupt jumps
     const char* label_name;       // v11: named label (NULL if anonymous)
     int label_name_len;           // v11: length of label name
+    // `with` nesting when this target was pushed. An abrupt jump unwinds only
+    // the scopes opened between the jump and its target: a `break` out of a
+    // loop that sits *inside* a `with` body stays in that scope.
+    int with_depth_at_push;
 };
 
 // A dynamically sized iterator-cleanup entry. Iterator registers are MIR

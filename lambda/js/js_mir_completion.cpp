@@ -538,7 +538,14 @@ void jm_emit_abrupt_jump_cleanup(JsMirTranspiler* mt, int target_loop_index) {
         }
     }
 
-    for (int w = 0; w < mt->with_depth; w++) {
+    // Unwind only the `with` scopes this jump actually leaves. An unresolved
+    // target (-1) exits the function, so every open scope goes.
+    int with_floor = 0;
+    if (target_loop_index >= 0) {
+        JsLoopLabels* target = jm_loop_label_at(mt, target_loop_index);
+        if (target) with_floor = target->with_depth_at_push;
+    }
+    for (int w = mt->with_depth; w > with_floor; w--) {
         jm_call_void_0(mt, "js_with_pop");
     }
 }

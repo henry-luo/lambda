@@ -231,9 +231,6 @@ static inline Context* js_fn_runtime_context(const JsFunction* fn) {
 static inline int js_fn_param_count(const JsFunction* fn) {
     return js_fn_code(fn)->param_count;
 }
-static inline int js_fn_catalog_id(const JsFunction* fn) {
-    return js_fn_code(fn)->catalog_id;
-}
 static inline uint32_t js_fn_module_state_id(const JsFunction* fn) {
     return js_fn_code(fn)->module_state_id;
 }

@@ -10,7 +10,7 @@
 // CommonJS metadata is semantic Node module state. A nested require observes
 // its own parent stack, but unrelated JS realms must never share the stack.
 struct JsCjsState {
-    JsItemStack module_stack = {};
+    RootVector module_stack = {};
 };
 
 struct JsDiagnosticsChannelState : JsRootedState {

@@ -9484,8 +9484,6 @@ static Item js_get_regexp_string_iterator_proto();
 extern "C" bool js_is_generator(Item obj);
 extern "C" bool js_is_async_generator(Item obj);
 extern "C" Item js_ordinary_has_instance(Item, Item);
-extern "C" int js_with_save_stack(Item* out_stack, int max_depth);
-extern "C" void js_with_set_stack(Item* stack, int depth);
 
 // Forward declarations for promise runtime
 struct JsPromise;
@@ -13421,43 +13419,24 @@ static inline Item js_call_value(Item func_item, Item this_val, Item* args,
         int arg_count, uint64_t* result_home, bool args_prerooted);
 
 
-// A `with` scope must not leak into a called function. Its saved copy is a
-// dynamic exact root range because a lexical with-chain has no language cap.
-// The range remains live while the callee replaces the runtime stack.
-struct JsSavedWithScope {
-    Item* stack = NULL;
-    int depth = 0;
-    bool ready = true;
-    uint64_t* root_base = NULL;
+// JSCU44: a `with` scope must not leak into a called function. The callee's
+// chain is its own captured env, so entering a call relinks one borrowed frame
+// and leaving restores the caller's head -- no copy, no dynamic root range.
+struct JsWithActivation {
+    JsWithActivation() = default;
+    JsWithFrame frame = {};
+    JsWithFrame* saved_head = NULL;
+    bool entered = false;
 
-    explicit JsSavedWithScope(bool capture) {
-        if (!capture) return;
-        depth = js_with_save_stack(NULL, 0);
-        if (depth <= 0) return;
-        stack = (Item*)mem_alloc((size_t)depth * sizeof(Item), MEM_CAT_JS_RUNTIME);
-        if (!stack) {
-            depth = 0;
-            ready = false;
-            return;
-        }
-        if (js_with_save_stack(stack, depth) != depth) {
-            mem_free(stack);
-            stack = NULL;
-            depth = 0;
-            ready = false;
-            return;
-        }
-        root_base = (uint64_t*)stack;
-        heap_register_gc_root_range(root_base, depth);
+    void enter(Item* captured, int depth) {
+        saved_head = js_with_activation_enter(captured, depth, &frame);
+        entered = true;
     }
 
-    ~JsSavedWithScope() {
-        if (root_base) heap_unregister_gc_root_range(root_base);
-        mem_free(stack);
-    }
+    ~JsWithActivation() { if (entered) js_with_activation_leave(saved_head); }
 
-    JsSavedWithScope(const JsSavedWithScope&) = delete;
-    JsSavedWithScope& operator=(const JsSavedWithScope&) = delete;
+    JsWithActivation(const JsWithActivation&) = delete;
+    JsWithActivation& operator=(const JsWithActivation&) = delete;
 };
 
 // super() for class-expression superclasses: the class carrier is a function.
@@ -14028,21 +14007,15 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         get_type_id(fn->home_global) == LMD_TYPE_MAP &&
         fn->home_global.item != caller_global.item;
     if (switched_global) prev_global = js_vm_swap_global_this(fn->home_global);
-    // Enter the callee's lexical with-environment, then restore caller state.
-    JsSavedWithScope saved_with_scope(!common_lane);
-    if (!saved_with_scope.ready) {
-        if (switched_global) js_vm_swap_global_this(prev_global);
-        js_eval_initializer_context = prev_eval_initializer_context;
-        return js_throw_range_error("Could not save with scope stack");
-    }
-    int saved_with_depth = saved_with_scope.depth;
-    // Ordinary calls usually have no caller or callee with-scope. A compiled
-    // with body is the exception: an early return bypasses its generated pop,
-    // so its empty entry stack still needs restoration after the call.
-    bool switched_with_stack = !common_lane && (saved_with_depth > 0 || js_fn_with(fn)->depth > 0 ||
-        (fn->flags & JS_FUNC_FLAG_USES_WITH) != 0);
-    if (switched_with_stack) {
-        js_with_set_stack(js_fn_with(fn)->env, js_fn_with(fn)->depth);
+    // JSCU44: the callee resolves names against its own captured chain, on every
+    // lane -- the fast lane skipping this is what let a caller's `with` leak
+    // into a callee. Entering relinks one borrowed frame; the guard skips the
+    // relink only when neither side has a with-scope at all.
+    JsWithActivation with_activation;
+    const JsWithData* callee_with = js_fn_with(fn);
+    if (js_runtime_state.with_scope.head || callee_with->depth > 0 ||
+            (fn->flags & JS_FUNC_FLAG_USES_WITH) != 0) {
+        with_activation.enter((Item*)callee_with->env, callee_with->depth);
     }
     // For generator functions: set up callee proto so js_generator_create uses fn.prototype
     // If fn.prototype is not an object, js_generator_create falls back to depth-2.
@@ -14065,9 +14038,6 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     if (pushed_vm_stack_source) js_eval_source_pop();
     if (derived_ctor_call) {
         result = js_super_this_binding_finish(result);
-    }
-    if (switched_with_stack) {
-        js_with_set_stack(saved_with_scope.stack, saved_with_depth);
     }
     if (switched_global) js_vm_swap_global_this(prev_global);
     js_eval_initializer_context = prev_eval_initializer_context;
@@ -27137,6 +27107,7 @@ static void js_suspended_activation_gc_trace(
         const JsSuspendedActivation* activation, gc_heap_t* gc) {
     if (!activation || !gc) return;
     if (activation->env) gc_mark_object_ptr(gc, activation->env);
+    if (activation->with_env) gc_mark_object_ptr(gc, activation->with_env);
     gc_mark_item(gc, activation->ast_function.item);
     gc_mark_item(gc, activation->ast_arguments.item);
     gc_mark_item(gc, activation->ast_replay_values.item);
@@ -27380,6 +27351,9 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
     js_env_rehome_scalars(env);
     gen->env = env;
     gen->env_size = env_size;
+    // JSCU44: a generator's lexical `with` chain is the one open where it was
+    // created, not the one open at whatever activation resumes it.
+    gen->with_env = js_with_capture_stack(&gen->with_depth);
     gen->state = 0;
     gen->done = false;
     gen->started = false;
@@ -27766,8 +27740,15 @@ extern "C" Item js_generator_next(Item generator, Item input) {
         get_type_id(generator_private_home) != LMD_TYPE_UNDEFINED) {
         js_current_private_home_class = generator_private_home;
     }
-    result_root.set(js_invoke_mir_state(gen->state_fn,
-        gen->env, input_root.get(), gen->state));
+    {
+        // JSCU44: resume inside the generator's own chain, then spill whatever
+        // scopes are still open at the yield -- they outlive this activation.
+        JsWithActivation gen_with;
+        gen_with.enter(gen->with_env, gen->with_depth);
+        result_root.set(js_invoke_mir_state(gen->state_fn,
+            gen->env, input_root.get(), gen->state));
+        gen->with_env = js_with_capture_stack(&gen->with_depth);
+    }
     js_current_private_home_class = saved_private_home_root.get();
     Item result = result_root.get();
     if (item_is_error(result)) {
@@ -28863,8 +28844,8 @@ extern "C" Item js_iterable_to_array(Item iterable) {
 #define js_domain_current (js_runtime_state.promises.domain_current)
 #define js_domain_namespace (js_runtime_state.promises.domain_namespace)
 #define js_domain_stack_state (js_runtime_state.promises.domain_stack)
-#define js_domain_stack_at(i) js_item_stack_at(&js_domain_stack_state, (i))
-#define js_domain_stack_count js_item_stack_depth(&js_domain_stack_state)
+#define js_domain_stack_at(i) (*root_vector_at(&js_domain_stack_state, (i)))
+#define js_domain_stack_count ((int)root_vector_count(&js_domain_stack_state))
 
 JS_FORWARD_STATIC_EXPRESSION(JsPromise*, js_promise_from_vmap_data,
     (void* data), (JsPromise*)data)
@@ -29148,18 +29129,18 @@ extern "C" Item js_domain_capture_async_stack(void) {
 static void js_domain_apply_stack(Item stack) {
     RootFrame roots(1);
     Rooted<Item> stack_root(roots, stack);
-    js_item_stack_clear(&js_domain_stack_state);
+    root_vector_clear(&js_domain_stack_state);
     if (get_type_id(stack_root.get()) == LMD_TYPE_ARRAY) {
         int64_t len = js_array_length(stack_root.get());
         if (len > 64) len = 64;
         for (int64_t i = 0; i < len; i++) {
             Item domain = js_elements_get_int(stack_root.get(), i);
             if (js_domain_is_domain_item(domain)) {
-                if (!js_item_stack_push(&js_domain_stack_state, domain)) break;
+                if (!root_vector_push(&js_domain_stack_state, domain)) break;
             }
         }
     } else if (js_domain_is_domain_item(stack_root.get())) {
-        js_item_stack_push(&js_domain_stack_state, stack_root.get());
+        root_vector_push(&js_domain_stack_state, stack_root.get());
     }
     js_domain_sync_visible_state();
 }
@@ -29178,7 +29159,7 @@ extern "C" void js_domain_restore_stack(Item previous) {
 
 static void js_domain_push(Item domain) {
     if (!js_domain_is_domain_item(domain)) return;
-    if (js_domain_stack_count < 64) js_item_stack_push(&js_domain_stack_state, domain);
+    if (js_domain_stack_count < 64) root_vector_push(&js_domain_stack_state, domain);
     js_domain_sync_visible_state();
 }
 
@@ -29220,7 +29201,7 @@ static Item js_domain_emit_error_at(Item domain, Item error, int parent_count, b
 
     if (parent_count < 0) parent_count = 0;
     if (parent_count > js_domain_stack_count) parent_count = js_domain_stack_count;
-    js_item_stack_shrink(&js_domain_stack_state, parent_count);
+    root_vector_shrink(&js_domain_stack_state, parent_count);
     // An empty domain stack exposes process.domain as undefined; overriding it
     // with null here broke root error handlers and their inherited async context.
     js_domain_sync_visible_state();
@@ -31756,8 +31737,6 @@ extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
                                              int64_t line_offset,
                                              int64_t column_offset);
 extern "C" Item js_vm_swap_global_this(Item next_global);
-extern "C" void js_with_set_stack(Item* stack, int depth);
-extern "C" int js_with_save_stack(Item* out_stack, int max_depth);
 
 struct JsVmEvalOptions {
     Item filename;
@@ -32234,20 +32213,16 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox, Item options) {
     }
     Item prev_this = js_get_current_this();
     Item prev_global = js_vm_swap_global_this(sandbox);
-    JsSavedWithScope saved_with_scope(true);
-    if (!saved_with_scope.ready) {
-        js_vm_swap_global_this(prev_global);
-        vm_bindings.restore(sandbox);
-        js_set_prototype(sandbox, previous_proto);
-        return js_throw_range_error("Could not save with scope stack");
-    }
+    // The sandbox is this activation's only scope; the eval'd code's own frames
+    // are released with it, including any a compiled `with` body left open.
+    JsWithActivation with_activation;
+    with_activation.enter(NULL, 0);
     js_with_push(sandbox);
     js_set_this(sandbox);
     Item result = js_builtin_eval_with_options(code, 1 | 8, eval_options.filename,
                                                eval_options.line_offset,
                                                eval_options.column_offset);
     js_set_this(prev_this);
-    js_with_set_stack(saved_with_scope.stack, saved_with_scope.depth);
     js_vm_swap_global_this(prev_global);
     vm_bindings.restore(sandbox);
     js_set_prototype(sandbox, previous_proto);
@@ -32370,13 +32345,11 @@ static Item js_vm_compileFunction(Item code, Item params, Item options) {
     Item previous_proto = ItemNull;
     Item prev_global = ItemNull;
     Item prev_this = ItemNull;
-    JsSavedWithScope saved_with_scope(use_parsing_context);
-    if (!saved_with_scope.ready) {
-        extension_bindings.restore(global_obj);
-        return js_throw_range_error("Could not save with scope stack");
-    }
+    JsWithActivation with_activation;
     JsVmTemporaryBindingJournal vm_bindings;
     if (use_parsing_context) {
+        // The parsing context is this activation's only scope (see above).
+        with_activation.enter(NULL, 0);
         previous_proto = js_get_prototype_of(parsing_context);
         js_set_prototype(parsing_context, js_get_global_this());
         if (!js_vm_apply_context_bindings(parsing_context, &vm_bindings)) {
@@ -32393,7 +32366,6 @@ static Item js_vm_compileFunction(Item code, Item params, Item options) {
     Item result = js_builtin_eval(eval_code, 1);
     if (use_parsing_context) {
         js_set_this(prev_this);
-        js_with_set_stack(saved_with_scope.stack, saved_with_scope.depth);
         js_vm_swap_global_this(prev_global);
         vm_bindings.restore(parsing_context);
         js_set_prototype(parsing_context, previous_proto);
@@ -33487,7 +33459,7 @@ static Item js_domain_run(Item fn) {
             Item error = js_error_lane_payload(result);
             int restore_depth = parent_count + 1;
             if (restore_depth > 64) restore_depth = 64;
-            js_item_stack_shrink(&js_domain_stack_state, restore_depth);
+            root_vector_shrink(&js_domain_stack_state, restore_depth);
             js_domain_sync_visible_state();
             bool handled = false;
             JS_ASSIGN_OR_RETURN(emit_status, js_domain_emit_error_at(self, error, parent_count, &handled));
@@ -33514,7 +33486,7 @@ static Item js_domain_enter(void) {
 }
 
 static Item js_domain_exit(void) {
-    if (js_domain_stack_count > 0) js_item_stack_pop(&js_domain_stack_state);
+    if (js_domain_stack_count > 0) root_vector_pop(&js_domain_stack_state);
     js_domain_sync_visible_state();
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
@@ -36951,7 +36923,7 @@ void js_deep_batch_reset() {
     js_runtime_state.promises.peak_live_count = 0;
     js_domain_current = (Item){0};
     js_domain_namespace = (Item){0};
-    js_item_stack_clear(&js_domain_stack_state);
+    root_vector_clear(&js_domain_stack_state);
     if (js_runtime_state.async_local_storage) {
         root_vector_clear(&js_runtime_state.async_local_storage->instances);
     }
