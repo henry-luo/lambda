@@ -10421,9 +10421,13 @@ static AstNode* build_module_import_from_parts(Transpiler* tp,
     bool relative = module.str[0] == '.';
     if (relative) {
         const char* base = tp->directory ? tp->directory : "./";
+        size_t base_len = strlen(base);
         strbuf_append_format(path, "%s%.*s", base,
             (int)module.length - 1, module.str + 1);
-        for (char* ch = path->str; *ch; ch++) if (*ch == '.') *ch = '/';
+        // only the module spec's dots are package separators. The base
+        // directory may legitimately contain a dot component (a checkout under
+        // `.claude/`, `~/.local/...`), and rewriting those produced `//claude`.
+        for (char* ch = path->str + base_len; *ch; ch++) if (*ch == '.') *ch = '/';
     } else {
         strbuf_append_format(path, "./%.*s", (int)module.length, module.str);
         for (char* ch = path->str + 2; *ch; ch++) if (*ch == '.') *ch = '/';
