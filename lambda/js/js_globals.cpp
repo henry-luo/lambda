@@ -14728,22 +14728,28 @@ static Item js_with_binding_is_visible(Item key, Item scope_obj) {
     return (Item){.item = b2it(true)};
 }
 
+// Innermost scope whose binding for `key` is visible, or ItemNull when the
+// chain has none. `minimum_depth` skips the closure-captured prefix when a
+// lexical binding shadows it. A throwing @@unscopables getter or Proxy trap
+// propagates as an error Item, which is neither a scope nor "not found".
+static Item js_with_resolve_scope(Item key, int64_t minimum_depth) {
+    int start = minimum_depth < 0 ? 0 : (int)minimum_depth;
+    for (int i = js_with_stack_depth - 1; i >= start; i--) {
+        Item scope_obj = js_with_stack_at(i);
+        if (!js_with_scope_is_object(scope_obj)) continue;
+        JS_ASSIGN_OR_RETURN(visible, js_with_binding_is_visible(key, scope_obj));
+        if (it2b(visible)) return scope_obj;
+    }
+    return ItemNull;
+}
+
 extern "C" Item js_probe_with_binding(Item key) {
     return js_probe_with_binding_from(key, 0);
 }
 
 extern "C" Item js_probe_with_binding_from(Item key, int64_t minimum_depth) {
-    int start = minimum_depth < 0 ? 0 : (int)minimum_depth;
-    if (start >= js_with_stack_depth) return (Item){.item = b2it(false)};
-    for (int i = js_with_stack_depth - 1; i >= start; i--) {
-        Item scope_obj = js_with_stack_at(i);
-        if (!js_with_scope_is_object(scope_obj)) continue;
-        JS_ASSIGN_OR_RETURN(visible, js_with_binding_is_visible(key, scope_obj));
-        if (it2b(visible)) {
-            return (Item){.item = b2it(true)};
-        }
-    }
-    return (Item){.item = b2it(false)};
+    JS_ASSIGN_OR_RETURN(scope_obj, js_with_resolve_scope(key, minimum_depth));
+    return (Item){.item = b2it(scope_obj.item != ItemNull.item)};
 }
 
 extern "C" Item js_capture_with_binding(Item key) {
@@ -14752,24 +14758,16 @@ extern "C" Item js_capture_with_binding(Item key) {
 
 extern "C" Item js_capture_with_binding_from(Item key, int64_t minimum_depth) {
     js_last_with_binding_valid = false;
-    int start = minimum_depth < 0 ? 0 : (int)minimum_depth;
-    if (start >= js_with_stack_depth) return (Item){.item = b2it(false)};
-    for (int i = js_with_stack_depth - 1; i >= start; i--) {
-        Item scope_obj = js_with_stack_at(i);
-        if (!js_with_scope_is_object(scope_obj)) continue;
-        JS_ASSIGN_OR_RETURN(visible, js_with_binding_is_visible(key, scope_obj));
-        if (it2b(visible)) {
-            if (!js_with_ensure_roots()) {
-                return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
-                                                "with binding root allocation failed");
-            }
-            js_last_with_binding_scope = scope_obj;
-            js_last_with_binding_key = key;
-            js_last_with_binding_valid = true;
-            return (Item){.item = b2it(true)};
-        }
+    JS_ASSIGN_OR_RETURN(scope_obj, js_with_resolve_scope(key, minimum_depth));
+    if (scope_obj.item == ItemNull.item) return (Item){.item = b2it(false)};
+    if (!js_with_ensure_roots()) {
+        return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
+                                        "with binding root allocation failed");
     }
-    return (Item){.item = b2it(false)};
+    js_last_with_binding_scope = scope_obj;
+    js_last_with_binding_key = key;
+    js_last_with_binding_valid = true;
+    return (Item){.item = b2it(true)};
 }
 
 static Item js_set_with_binding_resolved(Item scope_obj, Item key, Item value,
@@ -14807,16 +14805,8 @@ extern "C" Item js_set_with_binding_base(Item scope_obj, Item key, Item value, i
 
 
 extern "C" Item js_delete_identifier_with_binding(Item key, int64_t declared_binding) {
-    if (js_with_stack_depth > 0) {
-        for (int i = js_with_stack_depth - 1; i >= 0; i--) {
-            Item scope_obj = js_with_stack_at(i);
-            if (!js_with_scope_is_object(scope_obj)) continue;
-            JS_ASSIGN_OR_RETURN(visible, js_with_binding_is_visible(key, scope_obj));
-            if (it2b(visible)) {
-                return js_delete_property(scope_obj, key);
-            }
-        }
-    }
+    JS_ASSIGN_OR_RETURN(with_scope, js_with_resolve_scope(key, 0));
+    if (with_scope.item != ItemNull.item) return js_delete_property(with_scope, key);
     if (declared_binding) return (Item){.item = b2it(false)};
     if (js_global_lexical_binding_exists(key)) return (Item){.item = b2it(false)};
     Item global = js_get_global_this();

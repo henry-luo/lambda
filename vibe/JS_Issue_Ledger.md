@@ -108,3 +108,42 @@ regressions.
 "16-slot array" and lists the `super_this_*` stacks as `JsItemStack`. Both are
 stale: JSCU14(b) made the with-scope stack a growable `RootVector`, and
 super-this moved to `js_call_activation_item(JS_CALL_ACTIVATION_SUPER_THIS)`.
+
+### JS05-L2 — an abrupt jump closes every open `with`, not the ones it leaves — **RESOLVED**
+
+**Found:** 2026-09-11 while auditing JSCU44 for further retirement.
+**Reproduced against:** `master` lowering, untouched by JSCU44
+(`js_mir_completion.cpp` last changed by `2fbc777ac`). **Fixed:** 2026-09-11.
+Regression: `test/js/regression_with_abrupt_jump.js`.
+
+`jm_emit_abrupt_jump_cleanup` emitted one `js_with_pop` per scope open anywhere
+in the function, so a `break` that does **not** leave the `with` still closed
+it and the rest of the body lost its bindings.
+
+```js
+const o = { a: 1 };
+with (o) {
+  for (let i = 0; i < 2; i++) { if (i) break; }
+  console.log(typeof a);   // spec: "number"
+}
+```
+
+| engine | output |
+|---|---|
+| `./lambda.exe js` (before) | `undefined` |
+| `node` | `number` |
+
+**Root cause.** The emitter knew how many scopes were open (`mt->with_depth`)
+but not how many the jump crossed. Its sibling loop over try contexts already
+gets this right by comparing `tc->loop_depth_at_push` against the jump target;
+the `with` loop had no equivalent.
+
+**Fix.** `JsLoopLabels` records `with_depth_at_push`, set by
+`jm_push_loop_labels`, and the cleanup pops down to the target's floor. An
+unresolved target (`-1`) still exits the function, so every open scope goes.
+Labelled `with` works because the label entry is pushed before the body raises
+`mt->with_depth`.
+
+**Independent of JSCU44,** but easier to reason about after it: an over-pop used
+to corrupt a process-wide stack shared by every activation, and now cannot
+escape the activation that made the jump.

@@ -831,6 +831,7 @@ void jm_push_loop_labels(JsMirTranspiler* mt, MIR_label_t continue_label, MIR_la
         labels->iterator_to_close = 0;
         labels->label_name = mt->pending_label_name;
         labels->label_name_len = mt->pending_label_len;
+        labels->with_depth_at_push = mt->with_depth;
         mt->loop_depth++;
     }
     mt->pending_label_name = NULL;
