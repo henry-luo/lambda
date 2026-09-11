@@ -825,7 +825,6 @@ struct JsAsyncContextStateRecord : JsSuspendedActivation {
 };
 
 bool js_root_vector_ensure_registered(RootVector* roots);
-void js_root_vector_unregister(RootVector* roots);
 void js_readline_state_destroy(JsReadlineState* state);
 JsReadlineState* js_readline_state_ensure(JsRuntimeState* state);
 JsAsyncLocalStorageState* js_async_local_storage_state_ensure(JsRuntimeState* state);

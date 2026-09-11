@@ -407,9 +407,6 @@ bool jm_ast_node_has_with_ancestor(JsMirTranspiler* mt, JsAstNode* root,
     JsAstNode* target);
 JsMirImportEntry* jm_ensure_import(JsMirTranspiler* mt, const char* name,
     MIR_type_t ret_type, int nargs, MIR_var_t* args, int nres);
-JsMirImportEntry* jm_ensure_import_ii_i(JsMirTranspiler* mt, const char* name);
-JsMirImportEntry* jm_ensure_import_i_i(JsMirTranspiler* mt, const char* name);
-JsMirImportEntry* jm_ensure_import_v_i(JsMirTranspiler* mt, const char* name);
 MIR_reg_t jm_call_1_or_inline(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1);
 void jm_call_void_2_or_inline(JsMirTranspiler* mt, const char* fn_name,
@@ -591,7 +588,6 @@ void jm_emit_end_lexical_this_rebind(JsMirTranspiler* mt,
     const JsMirLexicalThisRebind* state);
 MIR_reg_t jm_emit_unbox_int(JsMirTranspiler* mt, MIR_reg_t item);
 MIR_reg_t jm_emit_unbox_float(JsMirTranspiler* mt, MIR_reg_t item);
-MIR_reg_t jm_emit_int_to_double(JsMirTranspiler* mt, MIR_reg_t int_reg);
 MIR_reg_t jm_emit_double_to_int(JsMirTranspiler* mt, MIR_reg_t d_reg);
 MIR_reg_t jm_box_native(JsMirTranspiler* mt, MIR_reg_t reg, TypeId type_id);
 TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node);
@@ -744,7 +740,6 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret);
 void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt);
 void jm_transpile_statement_list_with_using(JsMirTranspiler* mt, JsAstNode* first);
 void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc);
-bool jm_try_eval_const_expr(JsMirTranspiler* mt, JsAstNode* node, double* result);
 void jm_track_active_js_transpile(JsTranspiler* tp, JsMirTranspiler* mt, char* owned_source);
 void jm_clear_active_js_transpile(JsTranspiler* tp, JsMirTranspiler* mt, char* owned_source);
 void jm_cleanup_active_mir(void);
@@ -771,7 +766,6 @@ bool js_activate_runtime_name_pool(void);
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename);
 void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename);
 extern "C" Item js_new_function_from_string(Item* args, int argc);
-char* eval_try_insert_return(const char* code, size_t len);
 extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope);
 void js_normalize_path_separators(char* path);
 Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_t js_source_len,

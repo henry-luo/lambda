@@ -914,10 +914,6 @@ bool js_realm_intrinsic_slots_ensure_roots(void) {
     return true;
 }
 
-void js_root_vector_unregister(RootVector* roots) {
-    root_vector_unbind_external(roots);
-}
-
 void js_realm_slots_init(JsRealmSlots* slots, Context* owner) {
     if (slots) root_vector_init(&slots->values, owner, "JS realm slots");
 }

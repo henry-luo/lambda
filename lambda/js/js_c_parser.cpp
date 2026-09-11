@@ -864,7 +864,6 @@ static const char* js_c_leaf_node_type(JsTokenKind kind) {
     case JS_TOK_SATISFIES: case JS_TOK_STATIC: case JS_TOK_STRING_TYPE:
     case JS_TOK_SYMBOL: case JS_TOK_TYPE: case JS_TOK_UNKNOWN:
     case JS_TOK_GET: case JS_TOK_SET: return "identifier";
-        return "identifier";
     case JS_TOK_NUMBER: case JS_TOK_BIGINT: return "number";
     case JS_TOK_STRING: return "string";
     case JS_TOK_TRUE: return "true";

@@ -282,23 +282,6 @@ JsMirImportEntry* jm_ensure_import(JsMirTranspiler* mt, const char* name,
     return entry;
 }
 
-// Item(Item, Item)
-JsMirImportEntry* jm_ensure_import_ii_i(JsMirTranspiler* mt, const char* name) {
-    MIR_var_t args[2] = {{MIR_T_I64, "a", 0}, {MIR_T_I64, "b", 0}};
-    return jm_ensure_import(mt, name, MIR_T_I64, 2, args, 1);
-}
-
-// Item(Item)
-JsMirImportEntry* jm_ensure_import_i_i(JsMirTranspiler* mt, const char* name) {
-    MIR_var_t args[1] = {{MIR_T_I64, "a", 0}};
-    return jm_ensure_import(mt, name, MIR_T_I64, 1, args, 1);
-}
-
-// Item(void)
-JsMirImportEntry* jm_ensure_import_v_i(JsMirTranspiler* mt, const char* name) {
-    return jm_ensure_import(mt, name, MIR_T_I64, 0, NULL, 1);
-}
-
 // Immediate Item constants are non-GC values, but each use gets its own MIR
 // register because a value defined in a sibling control-flow block does not
 // dominate the current use.
@@ -842,14 +825,6 @@ MIR_reg_t jm_emit_unbox_float(JsMirTranspiler* mt, MIR_reg_t item) {
     return result;
 }
 
-// Convert native int64_t → native double
-MIR_reg_t jm_emit_int_to_double(JsMirTranspiler* mt, MIR_reg_t int_reg) {
-    MIR_reg_t result = jm_new_reg(mt, "i2d", MIR_T_D);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, result),
-        MIR_new_reg_op(mt->ctx, int_reg)));
-    return result;
-}
-
 // Convert native double → native int64_t (truncate)
 MIR_reg_t jm_emit_double_to_int(JsMirTranspiler* mt, MIR_reg_t d_reg) {
     MIR_reg_t result = jm_new_reg(mt, "d2i", MIR_T_I64);
@@ -949,7 +924,6 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
             // shared AST tags include frontend-specific Python literals; JS treats unknown tags as dynamic.
             return LMD_TYPE_ANY;
         }
-        return LMD_TYPE_ANY;
     }
 
     case AST_NODE_IDENT: {
