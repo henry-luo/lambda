@@ -306,6 +306,15 @@ struct NameEntry {
     // share-mark in the callee prologue; the first write detaches a private
     // copy. Computed once at FUNCTION_END from the shared body walk.
     bool cow_param_mutated;
+    // A plain `pn` parameter can retain its input past a call boundary by
+    // placing it in another owner, returning it, capturing it, or forwarding
+    // it. Callers retain the COW check on later `var` re-borrows only for this
+    // effect or cow_param_mutated (S9.1.2, S9.1.3).
+    bool cow_param_retained;
+    // A `var` parameter needs caller-home transport only when its body can
+    // replace or retain the borrowed binding. Pure in-place writes keep the
+    // caller's descriptor valid (S9.2.1, D3.3.3v3).
+    bool cow_var_param_may_publish;
     // CW31/S9.2.4 face 4: when this binding holds a mutable VIEW, the ultimate
     // base binding it aliases (chased through view-of-view). The call-site
     // exclusivity check conflicts two `var` args sharing an effective root, so

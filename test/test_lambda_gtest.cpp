@@ -302,6 +302,21 @@ TEST(LambdaTypedPathTests, PreservesIntegerParityAcrossFiniteAndSentinelLanes) {
         "test/mir/lambda/tune26_parity_compare.txt", true);
 }
 
+TEST(LambdaTypedPathTests, PreservesLiteralOrderedComparisonSentinelSemantics) {
+    test_lambda_script_against_file("test/mir/lambda/tune26_literal_ordered_compare.ls",
+        "test/mir/lambda/tune26_literal_ordered_compare.txt", true);
+}
+
+TEST(LambdaTypedPathTests, PreservesDynamicOrderedComparisonSentinelSemantics) {
+    test_lambda_script_against_file("test/mir/lambda/tune26_dynamic_ordered_compare.ls",
+        "test/mir/lambda/tune26_dynamic_ordered_compare.txt", true);
+}
+
+TEST(LambdaTypedPathTests, PreservesDynamicEqualityComparisonSentinelSemantics) {
+    test_lambda_script_against_file("test/mir/lambda/tune26_dynamic_equality_compare.ls",
+        "test/mir/lambda/tune26_dynamic_equality_compare.txt", true);
+}
+
 TEST(LambdaTypedPathTests, ReusesReadonlyArrayProofBesideVarDestination) {
     test_lambda_script_against_file("test/mir/lambda/tune26_var_readonly_peer.ls",
         "test/mir/lambda/tune26_var_readonly_peer.txt", true);
@@ -320,6 +335,21 @@ TEST(LambdaTypedPathTests, PreservesSnapshotsAcrossSameOwnerStoreLoop) {
 TEST(LambdaTypedPathTests, ReusesUniqueVarParameterProofAcrossStoreLoop) {
     test_lambda_script_against_file("test/mir/lambda/tune26_var_param_unique.ls",
         "test/mir/lambda/tune26_var_param_unique.txt", true);
+}
+
+TEST(LambdaTypedPathTests, ReusesVarFloatProofAcrossComputedStoreLoop) {
+    test_lambda_script_against_file("test/mir/lambda/tune26_var_float_store.ls",
+        "test/mir/lambda/tune26_var_float_store.txt", true);
+}
+
+TEST(LambdaTypedPathTests, PreservesPlainParameterSnapshotsAcrossComputedStoreLoop) {
+    test_lambda_script_against_file("test/mir/lambda/tune26_plain_param_snapshot_loop.ls",
+        "test/mir/lambda/tune26_plain_param_snapshot_loop.txt", true);
+}
+
+TEST(LambdaTypedPathTests, ReusesExclusiveTypedVarReborrow) {
+    test_lambda_script_against_file("test/mir/lambda/tune26_typed_reborrow.ls",
+        "test/mir/lambda/tune26_typed_reborrow.txt", true);
 }
 
 TEST(LambdaTypedPathTests, StoresNullableFloatLaneThroughColdTypedFallback) {

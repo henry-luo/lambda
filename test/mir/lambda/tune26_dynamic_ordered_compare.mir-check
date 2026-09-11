@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "description": "Tune26 T26-5: non-null dynamic ordered IntLane pairs exclude the one nan sentinel that can spuriously satisfy a raw predicate.",
+  "checks": [
+    {
+      "in_func": "_tune26_lt_pair_#",
+      "expect_seq": [
+        "ne\t{{r}}, %p1, -9223372036854775808",
+        "lt\t{{r}}, %p1, %p2",
+        "and\t{{r}}, {{r}}, {{r}}"
+      ]
+    },
+    {
+      "in_func": "_tune26_le_pair_#",
+      "expect_seq": [
+        "ne\t{{r}}, %p1, -9223372036854775808",
+        "le\t{{r}}, %p1, %p2",
+        "and\t{{r}}, {{r}}, {{r}}"
+      ]
+    },
+    {
+      "in_func": "_tune26_gt_pair_#",
+      "expect_seq": [
+        "ne\t{{r}}, %p2, -9223372036854775808",
+        "gt\t{{r}}, %p1, %p2",
+        "and\t{{r}}, {{r}}, {{r}}"
+      ]
+    },
+    {
+      "in_func": "_tune26_ge_pair_#",
+      "expect_seq": [
+        "ne\t{{r}}, %p2, -9223372036854775808",
+        "ge\t{{r}}, %p1, %p2",
+        "and\t{{r}}, {{r}}, {{r}}"
+      ]
+    }
+  ]
+}
