@@ -317,6 +317,21 @@ TEST(LambdaTypedPathTests, PreservesSnapshotsAcrossSameOwnerStoreLoop) {
         "test/mir/lambda/tune26_same_owner_store.txt", true);
 }
 
+TEST(LambdaTypedPathTests, ReusesUniqueVarParameterProofAcrossStoreLoop) {
+    test_lambda_script_against_file("test/mir/lambda/tune26_var_param_unique.ls",
+        "test/mir/lambda/tune26_var_param_unique.txt", true);
+}
+
+TEST(LambdaTypedPathTests, StoresNullableFloatLaneThroughColdTypedFallback) {
+    test_lambda_script_against_file("test/mir/lambda/tune26_nullable_float_store.ls",
+        "test/mir/lambda/tune26_nullable_float_store.txt", true);
+}
+
+TEST(LambdaTypedPathTests, ReifiesFreshNumericFillAtTypedDeclaration) {
+    test_lambda_script_against_file("test/mir/lambda/tune26_fill_contract_reify.ls",
+        "test/mir/lambda/tune26_fill_contract_reify.txt", true);
+}
+
 // Helper to test that a script reports type errors but doesn't crash
 // Note: Lambda currently exits with code 0 even on type errors (errors are reported to stderr)
 void test_lambda_script_expects_error(const char* script_path) {

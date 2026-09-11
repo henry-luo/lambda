@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "description": "Tune26 T26-4: a native var bool[] loop may use the raw same-lane store only after its entry guard admits the exact carrier and proves the live COW owner unshared. The checked setter remains the cold arm, preserving S9.2.2 snapshot isolation.",
+  "checks": [
+    {
+      "in_func": "_tune26_var_param_unique_#",
+      "expect_seq": [
+        "mov\t{{r}}, u8:4({{r}})",
+        "and\t{{r}}, {{r}}, 1",
+        "eq\t{{r}}, {{r}}, 0",
+        "and\t{{r}}, {{r}}, {{r}}",
+        "bt\tL",
+        "mov\t{{r}}, i64:40({{r}})",
+        "lt\t{{r}}, {{r}}, 0",
+        "ge\t{{r}}, {{r}}, {{r}}",
+        "mov\tu8:({{r}}), {{r}}"
+      ],
+      "expect": [
+        "call\tlambda_array_set_checked_inplace_lane_p, lambda_array_set_checked_inplace_lane"
+      ],
+      "count": {
+        "call\tlambda_type_check_p, lambda_type_check": 1
+      }
+    }
+  ]
+}
