@@ -562,42 +562,6 @@ static DomNode* radiant_dom_last_script_visible_child(DomElement* elem) {
     return nullptr;
 }
 
-static DomNode* radiant_dom_first_script_visible_element_child(DomElement* elem) {
-    DomNode* child = radiant_dom_first_script_visible_child(elem);
-    while (child) {
-        if (child->is_element()) return child;
-        child = radiant_dom_next_script_visible_sibling(child);
-    }
-    return nullptr;
-}
-
-static DomNode* radiant_dom_last_script_visible_element_child(DomElement* elem) {
-    DomNode* child = radiant_dom_last_script_visible_child(elem);
-    while (child) {
-        if (child->is_element()) return child;
-        child = radiant_dom_prev_script_visible_sibling(child);
-    }
-    return nullptr;
-}
-
-static DomNode* radiant_dom_next_script_visible_element_sibling(DomNode* node) {
-    DomNode* sibling = radiant_dom_next_script_visible_sibling(node);
-    while (sibling) {
-        if (sibling->is_element()) return sibling;
-        sibling = radiant_dom_next_script_visible_sibling(sibling);
-    }
-    return nullptr;
-}
-
-static DomNode* radiant_dom_prev_script_visible_element_sibling(DomNode* node) {
-    DomNode* sibling = radiant_dom_prev_script_visible_sibling(node);
-    while (sibling) {
-        if (sibling->is_element()) return sibling;
-        sibling = radiant_dom_prev_script_visible_sibling(sibling);
-    }
-    return nullptr;
-}
-
 static int64_t radiant_dom_script_visible_element_child_count(DomElement* elem) {
     int64_t count = 0;
     DomNode* child = radiant_dom_first_script_visible_child(elem);
@@ -1785,35 +1749,11 @@ RADIANT_C_API int radiant_dom_member_class_name(Item receiver, Item* out) {
         (Item){.item = s2it(heap_create_name("className"))});
     return 1;
 }
-RADIANT_MEMBER_GET(radiant_dom_member_node_type,
-    radiant_dom_int_item((int64_t)elem->node_type))
-RADIANT_MEMBER_GET(radiant_dom_member_is_connected,
-    (Item){.item = b2it(radiant_dom_node_is_connected((DomNode*)elem) ? 1 : 0)})
 RADIANT_MEMBER_GET(radiant_dom_member_child_element_count,
     radiant_dom_int_item(radiant_dom_script_visible_element_child_count(elem)))
 RADIANT_MEMBER_GET(radiant_dom_member_children,
     dom_live_child_collection_bridge((void*)elem, true))
 RADIANT_MEMBER_GET(radiant_dom_member_attributes, radiant_dom_attributes_item(elem))
-RADIANT_MEMBER_GET(radiant_dom_member_owner_document,
-    radiant_dom_document_item(elem->doc))
-RADIANT_MEMBER_GET(radiant_dom_member_first_child,
-    radiant_dom_node_item(radiant_dom_first_script_visible_child(elem)))
-RADIANT_MEMBER_GET(radiant_dom_member_last_child,
-    radiant_dom_node_item(radiant_dom_last_script_visible_child(elem)))
-RADIANT_MEMBER_GET(radiant_dom_member_next_sibling,
-    radiant_dom_node_item(radiant_dom_next_script_visible_sibling((DomNode*)elem)))
-RADIANT_MEMBER_GET(radiant_dom_member_previous_sibling,
-    radiant_dom_node_item(radiant_dom_prev_script_visible_sibling((DomNode*)elem)))
-RADIANT_MEMBER_GET(radiant_dom_member_first_element_child,
-    radiant_dom_node_item(radiant_dom_first_script_visible_element_child(elem)))
-RADIANT_MEMBER_GET(radiant_dom_member_last_element_child,
-    radiant_dom_node_item(radiant_dom_last_script_visible_element_child(elem)))
-RADIANT_MEMBER_GET(radiant_dom_member_next_element_sibling,
-    radiant_dom_node_item(radiant_dom_next_script_visible_element_sibling((DomNode*)elem)))
-RADIANT_MEMBER_GET(radiant_dom_member_previous_element_sibling,
-    radiant_dom_node_item(radiant_dom_prev_script_visible_element_sibling((DomNode*)elem)))
-RADIANT_MEMBER_GET(radiant_dom_member_child_nodes,
-    dom_live_child_collection_bridge((void*)elem, false))
 
 
 // ---- DOM3 Phase 4b: reflected-attribute members ----
@@ -1840,20 +1780,10 @@ static bool radiant_dom_member_tag_set(Item receiver, const char* tags) {
 
 RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_dis,
     "input button select textarea fieldset option optgroup")
-RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_ist, "input select textarea")
-RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_it, "input textarea")
-RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_ib, "input button")
-RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_fist, "form input select textarea")
-RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_form, "form")
-RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_details, "details")
-RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_img, "img")
 RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_srct,
     "img script iframe embed source track audio video input")
 RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_hreft, "a area link base")
 RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_anchor, "a area")
-RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_namet,
-    "input button select textarea form fieldset output object")
-RADIANT_DOM_TAG_SET_GUARD(radiant_dom_guard_lblout, "label output")
 
 #undef RADIANT_DOM_TAG_SET_GUARD
 static int radiant_dom_reflected_bool_get(Item receiver, Item* out,
@@ -1885,13 +1815,7 @@ static int radiant_dom_reflected_bool_set(Item receiver, Item value, Item* out,
         return radiant_dom_reflected_bool_set(receiver, value, out, attribute, true); \
     }
 
-RADIANT_REFLECT_BOOL(radiant_dom_m4b_required, "required")
 RADIANT_REFLECT_BOOL(radiant_dom_m4b_multiple, "multiple")
-RADIANT_REFLECT_BOOL(radiant_dom_m4b_read_only, "readonly")
-RADIANT_REFLECT_BOOL(radiant_dom_m4b_readonly, "readonly")
-RADIANT_REFLECT_BOOL(radiant_dom_m4b_no_validate, "novalidate")
-RADIANT_REFLECT_BOOL(radiant_dom_m4b_form_no_validate, "formnovalidate")
-RADIANT_REFLECT_BOOL(radiant_dom_m4b_open, "open")
 RADIANT_REFLECT_BOOL(radiant_dom_m4b_autofocus, "autofocus")
 
 #undef RADIANT_REFLECT_BOOL
@@ -1989,8 +1913,6 @@ static int radiant_dom_reflected_int_set(Item receiver, Item value, Item* out,
         return radiant_dom_reflected_int_set(receiver, value, out, attribute, fallback); \
     }
 
-RADIANT_REFLECT_INT(radiant_dom_m4b_max_length, "maxlength", -1)
-RADIANT_REFLECT_INT(radiant_dom_m4b_min_length, "minlength", 0)
 RADIANT_REFLECT_INT(radiant_dom_m4b_size, "size", 20)
 RADIANT_REFLECT_INT(radiant_dom_m4b_size2, "size", 0)
 RADIANT_REFLECT_INT(radiant_dom_m4b_width, "width", 0)
@@ -2032,22 +1954,51 @@ static int radiant_dom_reflected_string_set(Item receiver, Item value, Item* out
     }
 
 RADIANT_REFLECT_STRING(radiant_dom_m4b_src, "src", "")
-RADIANT_REFLECT_STRING(radiant_dom_m4b_alt, "alt", "")
-RADIANT_REFLECT_STRING(radiant_dom_m4b_name, "name", "")
-RADIANT_REFLECT_STRING(radiant_dom_m4b_placeholder, "placeholder", "")
-RADIANT_REFLECT_STRING(radiant_dom_m4b_autocomplete, "autocomplete", "")
 RADIANT_REFLECT_STRING(radiant_dom_m4b_pattern, "pattern", "")
 RADIANT_REFLECT_STRING(radiant_dom_m4b_min, "min", "")
 RADIANT_REFLECT_STRING(radiant_dom_m4b_max, "max", "")
 RADIANT_REFLECT_STRING(radiant_dom_m4b_step, "step", "")
 RADIANT_REFLECT_STRING(radiant_dom_m4b_accept, "accept", "")
-RADIANT_REFLECT_STRING(radiant_dom_m4b_html_for, "for", "")
-RADIANT_REFLECT_STRING(radiant_dom_m4b_target, "target", "")
-RADIANT_REFLECT_STRING(radiant_dom_m4b_accept_charset, "accept-charset", "")
-RADIANT_REFLECT_STRING(radiant_dom_m4b_form_target, "formtarget", "")
 RADIANT_REFLECT_STRING(radiant_dom_m4b_wrap, "wrap", "soft")
 
 #undef RADIANT_REFLECT_STRING
+
+// ---- reflected attributes, generated from lambda/dom/dom_reflect.def ----
+// One row per attribute replaces a tag-set guard, an accessor pair, a guarded
+// wrapper and two extern declarations. The tag set is checked here rather than
+// by a separately-named guard function, so the element set an attribute exists
+// on is stated once, beside the attribute.
+#define DOM_REFLECT_BOOL(name, attr, tags) \
+    RADIANT_C_API int radiant_html_##name##_get(Item r, Item* out) { \
+        return radiant_dom_member_tag_set(r, tags) \
+            ? radiant_dom_reflected_bool_get(r, out, attr) : 0; \
+    } \
+    RADIANT_C_API int radiant_html_##name##_set(Item r, Item v, Item* out) { \
+        return radiant_dom_member_tag_set(r, tags) \
+            ? radiant_dom_reflected_bool_set(r, v, out, attr, true) : 0; \
+    }
+#define DOM_REFLECT_INT(name, attr, fallback, tags) \
+    RADIANT_C_API int radiant_html_##name##_get(Item r, Item* out) { \
+        return radiant_dom_member_tag_set(r, tags) \
+            ? radiant_dom_reflected_int_get(r, out, attr, fallback) : 0; \
+    } \
+    RADIANT_C_API int radiant_html_##name##_set(Item r, Item v, Item* out) { \
+        return radiant_dom_member_tag_set(r, tags) \
+            ? radiant_dom_reflected_int_set(r, v, out, attr, fallback) : 0; \
+    }
+#define DOM_REFLECT_STR(name, attr, fallback, tags) \
+    RADIANT_C_API int radiant_html_##name##_get(Item r, Item* out) { \
+        return radiant_dom_member_tag_set(r, tags) \
+            ? radiant_dom_reflected_string_get(r, out, attr, fallback) : 0; \
+    } \
+    RADIANT_C_API int radiant_html_##name##_set(Item r, Item v, Item* out) { \
+        return radiant_dom_member_tag_set(r, tags) \
+            ? radiant_dom_reflected_string_set(r, v, out, attr) : 0; \
+    }
+#include "../../dom/dom_reflect.def"
+#undef DOM_REFLECT_BOOL
+#undef DOM_REFLECT_INT
+#undef DOM_REFLECT_STR
 
 extern "C" bool dom_engine_set_image_source(DomElement* element,
                                                 const char* source) {
@@ -2686,7 +2637,6 @@ RADIANT_C_API int radiant_dom_member_text_content(Item receiver, Item* out) {
         return 1;                                                             \
     }
 
-RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_parent_node, parent_node)
 RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_parent_node_any, parent_node)
 RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_parent_element_any, parent_element)
 RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_node_name, node_name)
@@ -2703,6 +2653,10 @@ RADIANT_C_API int radiant_dom_member_owner_document_any(Item receiver, Item* out
     return 1;
 }
 RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_first_child_any, first_child)
+RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_first_element_child, first_element_child)
+RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_last_element_child, last_element_child)
+RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_next_element_sibling, next_element_sibling)
+RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_previous_element_sibling, previous_element_sibling)
 RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_last_child_any, last_child)
 
 RADIANT_C_API int radiant_dom_member_is_connected_any(Item receiver, Item* out) {
@@ -2741,90 +2695,14 @@ RADIANT_C_API int radiant_dom_member_child_nodes_any(Item receiver, Item* out) {
         *out = radiant_dom_element_operation(receiver, operation, args, argc); \
         return 1; \
     }
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_named_item, JUBE_DOM_NAMED_ITEM)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_add, JUBE_DOM_ADD)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_remove, JUBE_DOM_REMOVE)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_contains, JUBE_DOM_CONTAINS)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_compare_document_position, JUBE_DOM_COMPARE_DOCUMENT_POSITION)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_root_node, JUBE_DOM_GET_ROOT_NODE)
+// One binding per ordinal, expanded from lambda/dom/dom_element_ops.def.
+#define DOM_ELEMENT_OP(NAME, thunk) \
+    RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_##thunk, JUBE_DOM_##NAME)
+#include "../../dom/dom_element_ops.def"
+
+// HTMLSelectElement.remove(index) and ChildNode.remove() are one ordinal
+// under two member names, so the second binding is an alias, not a row.
 RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_remove2, JUBE_DOM_REMOVE)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_replace_with, JUBE_DOM_REPLACE_WITH)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_after, JUBE_DOM_AFTER)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_before, JUBE_DOM_BEFORE)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_has_child_nodes, JUBE_DOM_HAS_CHILD_NODES)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_clone_node, JUBE_DOM_CLONE_NODE)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_replace_data, JUBE_DOM_REPLACE_DATA)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_insert_data, JUBE_DOM_INSERT_DATA)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_append_data, JUBE_DOM_APPEND_DATA)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_delete_data, JUBE_DOM_DELETE_DATA)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_substring_data, JUBE_DOM_SUBSTRING_DATA)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_split_text, JUBE_DOM_SPLIT_TEXT)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_attribute, JUBE_DOM_GET_ATTRIBUTE)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_set_attribute, JUBE_DOM_SET_ATTRIBUTE)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_remove_attribute, JUBE_DOM_REMOVE_ATTRIBUTE)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_toggle_attribute, JUBE_DOM_TOGGLE_ATTRIBUTE)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_has_attribute, JUBE_DOM_HAS_ATTRIBUTE)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_attribute_names, JUBE_DOM_GET_ATTRIBUTE_NAMES)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_matches, JUBE_DOM_MATCHES)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_query_selector, JUBE_DOM_QUERY_SELECTOR)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_query_selector_all, JUBE_DOM_QUERY_SELECTOR_ALL)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_closest, JUBE_DOM_CLOSEST)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_elements_by_tag_name, JUBE_DOM_GET_ELEMENTS_BY_TAG_NAME)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_elements_by_class_name, JUBE_DOM_GET_ELEMENTS_BY_CLASS_NAME)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_element_by_id, JUBE_DOM_GET_ELEMENT_BY_ID)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_add_event_listener, JUBE_DOM_ADD_EVENT_LISTENER)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_remove_event_listener, JUBE_DOM_REMOVE_EVENT_LISTENER)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_dispatch_event, JUBE_DOM_DISPATCH_EVENT)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_append_child, JUBE_DOM_APPEND_CHILD)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_remove_child, JUBE_DOM_REMOVE_CHILD)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_insert_before, JUBE_DOM_INSERT_BEFORE)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_replace_child, JUBE_DOM_REPLACE_CHILD)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_normalize, JUBE_DOM_NORMALIZE)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_append, JUBE_DOM_APPEND)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_prepend, JUBE_DOM_PREPEND)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_insert_adjacent_element, JUBE_DOM_INSERT_ADJACENT_ELEMENT)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_insert_adjacent_html, JUBE_DOM_INSERT_ADJACENT_HTML)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_bounding_client_rect, JUBE_DOM_GET_BOUNDING_CLIENT_RECT)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_client_rects, JUBE_DOM_GET_CLIENT_RECTS)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_scroll_into_view, JUBE_DOM_SCROLL_INTO_VIEW)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_scroll, JUBE_DOM_SCROLL)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_scroll_to, JUBE_DOM_SCROLL_TO)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_scroll_by, JUBE_DOM_SCROLL_BY)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_focus, JUBE_DOM_FOCUS)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_blur, JUBE_DOM_BLUR)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_click, JUBE_DOM_CLICK)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_show_popover, JUBE_DOM_SHOW_POPOVER)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_hide_popover, JUBE_DOM_HIDE_POPOVER)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_show_modal, JUBE_DOM_SHOW_MODAL)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_reset, JUBE_DOM_RESET)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_submit, JUBE_DOM_SUBMIT)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_request_submit, JUBE_DOM_REQUEST_SUBMIT)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_check_validity, JUBE_DOM_CHECK_VALIDITY)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_report_validity, JUBE_DOM_REPORT_VALIDITY)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_set_custom_validity, JUBE_DOM_SET_CUSTOM_VALIDITY)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_set_selection_range, JUBE_DOM_SET_SELECTION_RANGE)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_set_range_text, JUBE_DOM_SET_RANGE_TEXT)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_select, JUBE_DOM_SELECT)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_item, JUBE_DOM_ITEM)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_toggle, JUBE_DOM_TOGGLE)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_replace, JUBE_DOM_REPLACE)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_attach_shadow, JUBE_DOM_ATTACH_SHADOW)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_to_string, JUBE_DOM_TO_STRING)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d___lambda_boundary_from_point, JUBE_DOM_BOUNDARY_FROM_POINT)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d___lambda_text_control_boundary_from_point, JUBE_DOM_TEXT_CONTROL_BOUNDARY_FROM_POINT)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d___lambda_text_control_caret_bounds, JUBE_DOM_TEXT_CONTROL_CARET_BOUNDS)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_attribute_ns, JUBE_DOM_GET_ATTRIBUTE_NS)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_set_attribute_ns, JUBE_DOM_SET_ATTRIBUTE_NS)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_remove_attribute_ns, JUBE_DOM_REMOVE_ATTRIBUTE_NS)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_is_equal_node, JUBE_DOM_IS_EQUAL_NODE)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_is_same_node, JUBE_DOM_IS_SAME_NODE)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_create_svg_point, JUBE_DOM_CREATE_SVG_POINT)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_create_svg_matrix, JUBE_DOM_CREATE_SVG_MATRIX)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_create_svg_transform, JUBE_DOM_CREATE_SVG_TRANSFORM)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_create_svg_transform_from_matrix, JUBE_DOM_CREATE_SVG_TRANSFORM_FROM_MATRIX)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_bbox, JUBE_DOM_GET_BBOX)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_ctm, JUBE_DOM_GET_CTM)
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_screen_ctm, JUBE_DOM_GET_SCREEN_CTM)
 
 #undef RADIANT_DOM_OPERATION_BINDING
 

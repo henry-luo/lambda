@@ -4159,7 +4159,7 @@ static bool jm_eval_env_is_exposable_binding(const char* name,
         const JsMirVarEntry* var, bool for_writeback) {
     if (!name || !var) return false;
     if (strncmp(name, "_js_", 4) != 0) return false;
-    if (strcmp(name, "_js_this") == 0 || strcmp(name, "_js_new.target") == 0) return false;
+    if (jm_is_receiver_meta_binding(name)) return false;
     if (strstr(name, "__dup") != NULL) return false;
     if (var->tdz_active) return false;
     if (for_writeback) {
@@ -4297,7 +4297,7 @@ static void jm_eval_local_note_bindings(JsMirTranspiler* mt, bool immutable) {
             if (immutable ? !entry->var.is_nfe_binding :
                     (!entry->var.is_let_const && !entry->var.is_const)) continue;
             if (strncmp(entry->name, "_js_", 4) != 0) continue;
-            if (strcmp(entry->name, "_js_this") == 0 || strcmp(entry->name, "_js_new.target") == 0) continue;
+            if (jm_is_receiver_meta_binding(entry->name)) continue;
             const char* js_name = entry->name + 4;
             MIR_reg_t key_reg = jm_box_property_name_literal(mt, js_name, strlen(js_name));
             jm_callr_void_1(mt, immutable ? "js_eval_local_note_immutable_binding" :
@@ -6953,11 +6953,11 @@ MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
         VALUE_REP_ITEM).reg;
 }
 
-static MirValue jm_profile_lower_value(void* owner, AstNode* node) {
+MirValue jm_profile_lower_value(void* owner, AstNode* node) {
     return jm_transpile_expression_value((JsMirTranspiler*)owner, (JsAstNode*)node);
 }
 
-static MIR_reg_t jm_profile_emit_condition(void* owner, MirValue value) {
+MIR_reg_t jm_profile_emit_condition(void* owner, MirValue value) {
     JsMirTranspiler* mt = (JsMirTranspiler*)owner;
     value = em_apply_value_demand(&mt->func_em->em, value,
         MIR_VALUE_REQUIRED_REP, VALUE_REP_ITEM);
@@ -6965,13 +6965,13 @@ static MIR_reg_t jm_profile_emit_condition(void* owner, MirValue value) {
 }
 
 typedef struct JsSequenceLowering {
-    MirLoweringProfile profile;
+    MirEmitter* em;
     MirValue result;
 } JsSequenceLowering;
 
 static void jm_lower_sequence_item(void* owner, AstNode* node, bool is_last) {
     JsSequenceLowering* sequence = (JsSequenceLowering*)owner;
-    MirValue value = em_lower_profile_value(&sequence->profile, node,
+    MirValue value = em_lower_value(sequence->em, node,
         is_last ? MIR_VALUE_ANY : MIR_VALUE_DISCARD);
     if (is_last) sequence->result = value;
 }
@@ -7079,9 +7079,7 @@ MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr) {
     }
 
     // Case 3: generic boxed fallback through the shared branch-demand owner.
-    MirLoweringProfile profile = {&mt->func_em->em, mt, jm_profile_lower_value,
-        jm_profile_emit_condition};
-    return em_lower_profile_condition(&profile, (AstNode*)expr);
+    return em_lower_condition(&mt->func_em->em, (AstNode*)expr);
 }
 
 // ============================================================================
@@ -7212,7 +7210,7 @@ static MirValue jm_transpile_expression_direct(JsMirTranspiler* mt,
         // v11: comma operator — evaluate all expressions, return last
         JsSequenceNode* seq = (JsSequenceNode*)expr;
         JsSequenceLowering sequence = {
-            {&mt->func_em->em, mt, jm_profile_lower_value, jm_profile_emit_condition},
+            &mt->func_em->em,
             jm_expression_value(mt, expr, jm_emit_null(mt), LMD_TYPE_NULL,
                 VALUE_REP_ITEM)};
         em_visit_linked_nodes(seq->expressions, &sequence,

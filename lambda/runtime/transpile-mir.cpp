@@ -11633,9 +11633,7 @@ static MirValue transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
 
     // Restore tail position for branches
     mt->in_tail_position = saved_tail;
-    MirLoweringProfile profile = {&mt->em, mt, mir_profile_lower_value,
-        mir_profile_emit_condition};
-    MIR_reg_t cond_val = em_lower_profile_condition(&profile, if_node->cond);
+    MIR_reg_t cond_val = em_lower_condition(&mt->em, if_node->cond);
 
     // Determine result type - check if branches could produce different MIR types
     // Use effective types to account for optional params and mixed runtime paths
@@ -14243,9 +14241,8 @@ static MIR_reg_t transpile_while_core(MirTranspiler* mt, AstWhileNode* while_nod
 
     emit_label(mt, l_loop);
 
-    MirLoweringProfile profile = {&mt->em, mt, mir_profile_lower_value,
-        mir_profile_emit_loop_condition};
-    MIR_reg_t cond_val = em_lower_profile_condition(&profile, while_node->cond);
+    MIR_reg_t cond_val = em_lower_condition(&mt->em, while_node->cond,
+        mir_profile_emit_loop_condition);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
         MIR_new_reg_op(mt->ctx, cond_val)));
 
@@ -16321,8 +16318,7 @@ static MirValue transpile_content_tail_value(MirTranspiler* mt, AstNode* node) {
 }
 
 static void transpile_proc_side_effect(MirTranspiler* mt, AstNode* item) {
-    MirLoweringProfile profile = {&mt->em, mt, mir_profile_lower_value, NULL};
-    MirValue statement = em_lower_profile_value(&profile, item, MIR_VALUE_ANY);
+    MirValue statement = em_lower_value(&mt->em, item, MIR_VALUE_ANY);
     MIR_reg_t stmt_result = statement.reg;
     if (mt->current_func_can_raise && side_effect_result_can_error(item->node_type)) {
         // can-raise procs must not discard failed mutation/helper statements as side effects.
@@ -18454,8 +18450,7 @@ static void mir_emit_record_body(MirTranspiler* mt, AstNode* node,
         AstIfNode* branch = (AstIfNode*)node;
         bool saved_tail = mt->in_tail_position;
         mt->in_tail_position = false;
-        MirLoweringProfile profile = {&mt->em, mt, mir_profile_lower_value, mir_profile_emit_condition};
-        MIR_reg_t condition = em_lower_profile_condition(&profile, branch->cond);
+        MIR_reg_t condition = em_lower_condition(&mt->em, branch->cond);
         MIR_label_t otherwise = new_label(mt);
         MIR_label_t done = new_label(mt);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, otherwise),
@@ -32781,6 +32776,8 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
     mt.em.root_call_value = lambda_call_root_value;
     mt.em.after_call_result = lambda_after_call_result;
     mt.em.convert_rep = lambda_convert_rep;
+    mt.em.lower_value = mir_profile_lower_value;
+    mt.em.emit_condition = mir_profile_emit_condition;
     mt.em.lookup_import_metadata = lambda_lookup_import_metadata;
     mt.script = script;
     mt.ast_index = ast_index;

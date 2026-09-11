@@ -391,16 +391,18 @@ References are resolved once during binding/indexing. Lowering consumes `Binding
 
 ### 3.6 Explicit facts and a typed pass manager
 
-**D8.2.5** defines the typed pass/fact process; **D2.4.1** assigns each compiler fact one authority; **D3.2.3** separates declared and inferred types; **D3.3.1** requires inference to be unobservable. The AST therefore retains syntax and semantic contracts, while optimization results live in `CompilationFacts` side tables keyed by stable IDs:
+**D8.2.5v2** defines the typed pass/fact process; **D2.4.1** assigns each compiler fact one authority; **D3.2.3** separates declared and inferred types; **D3.3.1** requires inference to be unobservable. Source contracts *and core runtime facts* stay on the AST; only genuinely erasable, type-scoped optimization facts move off it, into a lazily allocated record behind a pointer in `Type` (§13):
 
 | Fact | Authority / lifetime |
 |---|---|
-| source-declared `Type*`, declaration kind, syntax form | AST; immutable after build/bind |
+| source-declared `Type*` | the declaring node — `NameEntry`/param/declarator; immutable after build/bind |
+| declaration kind, syntax form | AST; immutable after build/bind |
 | resolved binding and owning scope/function | `AstIndex`; immutable after indexing |
-| inferred/effective type | `NodeFacts`/`BindingFacts`; erasable optimization fact |
+| inferred/effective type | `AstNode.type`; **essential runtime fact, not erasable** |
+| constant result | the node's own literal `TypeConst`; **essential** — the folded value *is* the value |
 | representation plan and conversion provenance | lowering facts; never reconstructed from MIR register type |
 | capture/effect/call-graph facts | indexed function facts; worklist-produced |
-| constant result | const-analysis fact; valid only under the profile's pure-fold policy |
+| erasable, type-scoped optimization facts | lazy side record behind a `Type` pointer; never per-node (shared singletons) |
 | requested value demand | lowering input, not stored as semantic truth |
 
 Pass order and dependencies are explicit:
@@ -725,7 +727,7 @@ Risk register:
 | **U27** | **D8.2.4 compilation-unit ownership becomes concrete**: one `CompilationUnit` owns profile, AST root, stable IDs, index, facts, diagnostics, timing, and emitter state; cross-pass references use dense `NodeId`/`ScopeId`/`BindingId`/`FunctionId`/`ClassId` rather than rediscovery                                                                                                                                        | **confirmed** |
 | **U28** | **D8.2.4 one authoritative core-child traversal**: shared passes use `visit_core_children()`; profiles expose only extension children. A catalog-completeness test covers every core form. Private semantic-pass switches over core ownership are deleted as clients migrate                                                                                                                                            | **confirmed** |
 | **U29** | **D8.2.5 one typed pass manager** runs build → bind → validate → index/call graph → captures/effects → type/representation inference → function planning → lowering → emitter/module finalization → link. Every pass declares required/produced facts and records its own timing; profiles answer typed semantic questions rather than owning alternate schedules                                                                 | **confirmed** |
-| **U30** | **D8.2.5, D2.4.1, D3.2.3, and D3.3.1 fact separation is mandatory**: AST stores source contracts; `AstIndex` stores resolved identity; side tables store erasable inference, effect, const, and representation facts. `AstNode.type` must not be mutated into an inferred source contract                                                                                                                               | **confirmed** |
+| **U30v2** | **D8.2.5v2 fact placement (revised 2026-09-11, supersedes U30)**: source contracts and **core runtime info — including the inferred/effective type — stay on the AST**. `AstNode.type` **is** the effective compiler type; that is its design, since most expression nodes carry no source annotation. Declared annotations live on the declaring node — `NameEntry::declared_type`, `AstNamedNode::declared_type` (params), `AstDeclaratorNode::declared_type`. Genuinely erasable optimization facts hang off a **lazily allocated side record reached by a pointer in `Type`**, not an ID-keyed side table. `AstIndex::facts` is retired. | **confirmed** |
 | **U31** | **D8.2.6 and D2.4.2–D2.4.3 complete at every expression boundary**: lowering returns `MirValue` with full `Type*`, representation, MIR type, and provenance. Explicit demand (`DISCARD`, `ANY`, `REQUIRED_REP`, `DEST_REG`, `BRANCH`) enables destination passing and avoids unnecessary materialization; semantic coercion remains profile-owned                                                                      | **confirmed** |
 | **U32** | **D5.3.4 emitter exclusivity is a hard invariant**: all root policy/final stores and common scalar/module finalization live in `MirEmitter`; language lowering cannot reconstruct representation from MIR register classes. D8.6.1 zero-slack MIR budgets and D8.6.3 forced-GC oracles gate every migration slice                                                                                                 | **confirmed** |
 | **U33** | **D8.6.4v2 compiler efficiency is measured internally, per test/module**: common machine-readable phase timing, identical sample manifests, release builds, one warm-up plus five measured runs, median aggregate comparison. Final hard gates are ≥10% lower `test_lambda_gtest` build/transpile time and ≥20% lower `test_js_gtest`; execution/process/scheduler time cannot satisfy them                                                         | **confirmed** |
@@ -827,3 +829,95 @@ Point-by-point:
 - **Execution: keep the current MIR interpreter.** `g_mir_interp_mode` remains the sole non-JIT execution path; one lowering, one semantics.
 - **Add a const-folder during transpiling.** A bounded constant evaluator over the *pure L1 core subset* (literals, unary/binary, if-expr, whitelisted pure builtins), added to the shared analysis passes (§3.1) after Phase 2's L1 unification. Two design facts make it cheap and sound: the fn/pn effect flag (U14, core per §L4) is a sound "safe to evaluate at compile time" gate, and operator semantics dispatch through the profile — a `fold_binary`/`fold_unary` hook family beside `lower_binary`, so JS `+` string-concat folds correctly and Lambda decimal arithmetic folds per its number model (N1–N9). This captures ~95% of argument 4 at ~5% of an interpreter's cost.
 - **KIV: a unified interpreter, but never for execution.** The one future artifact worth revisiting is a deliberately slow, obviously-correct **reference interpreter as an executable spec** — a differential-testing oracle for the JIT over the `test/lambda` goldens, serving semantic-analysis and specification goals that MIR cannot (connecting to the Semantics-DSL effort, `vibe/Lambda_Semantics_DSL_Proposal.md`). Its requirements are the opposite of an engine's (clarity over speed, Lambda-first, no perf machinery). Per the K17 doctrine, build it only after Phase 4, when the core catalog is stable and it joins as a well-behaved additional client — and never wire it into `eval` or the REPL.
+
+---
+
+## 13. Reversed — Side Tables for Inferred Facts (U30 → U30v2)
+
+**Date:** 2026-09-11. Supersedes U30; drives **D8.2.5v2**.
+
+U30 required that "side tables store erasable inference, effect, const, and
+representation facts" and that "`AstNode.type` must not be mutated into an
+inferred source contract". `AstIndex::facts` (`AstNodeFacts`) was built to be
+that table. The rule was wrong in two ways, and the implementation had already
+voted against it.
+
+### 13.1 `AstNode.type` is the effective type by design, not by drift
+
+U30 read `node->type` as a source-contract slot that inference was corrupting.
+It is the opposite: most expression nodes have no source annotation at all, so
+an inferred/effective type is the only thing a general node's type field can
+hold. The code says so at `NameEntry::declared_type`:
+
+> The explicit source annotation, when present. `node->type` is the **effective
+> compiler type** and historically lost this distinction during declaration
+> construction, which let later boundaries guess from TypeId.
+
+The real defect U30 was reaching for is narrower and already fixed: a
+*declaration* must not overwrite its annotation with an inference. That is
+solved by giving declaring nodes their own slot, which they now have in three
+places — `NameEntry::declared_type`, `AstNamedNode::declared_type` (params),
+`AstDeclaratorNode::declared_type` (let/var) — with ~164 live read sites.
+Nothing about that fix requires a per-node parallel table.
+
+### 13.2 Inferred type and const facts are essential, not erasable
+
+U30's premise was that these facts are optimization extras that may be dropped
+and recomputed. They are not: the runtime operates on them. An effective type
+selects the carrier a value is materialized in; a const-folded value is the
+value. Classifying them as erasable is what justified exiling them to a side
+table, and that classification does not survive contact with how MIR lowering
+and the interpreter actually consume them.
+
+### 13.3 The table was never populated
+
+`AstNodeFacts` has five fields. After `ast_index_publish_node()` initializes
+them, exactly two sites touch the table for the rest of a compilation — the
+const-fold pass in `interp.cpp` writing `flags`/`folded_item`, and
+`transpile-mir.cpp` reading them back. `inferred_type` and `representation` are
+written once to `NULL`/`VALUE_REP_NONE` and never read or written again.
+`declared_contract` is written once and never read; every consumer reads
+`node->type` instead — including the MIR const-fold reader, which holds a
+facts pointer and still reaches past it to `node->type` for its type guard.
+
+Two years of consumers declining to use a mechanism is evidence about the
+mechanism.
+
+### 13.4 `Type` is not uniformly per-node — the constraint on the replacement
+
+The replacement hangs erasable facts off a lazily allocated record reached by a
+pointer in `Type`. One hazard governs its design: `Type*` is **not** always a
+per-node allocation. `set_type_any()` returns `&TYPE_ANY`, a process-global
+singleton, as do `TYPE_ANY_NO_ERROR`, `LIT_TYPE_ANY` and the other bare
+singletons. A per-node fact attached to a shared singleton would be read by
+every unrelated node sharing it.
+
+So the side record may hold only facts that are true of *the type*, never of
+*the node that happens to have it*. Anything genuinely per-node either belongs
+on the node, or forces the node onto its own `Type` allocation first. The
+const-fold payload satisfies this naturally, because folding replaces the
+node's type with a freshly allocated literal `TypeConst` anyway — which is
+already exactly what the builder does for source literals.
+
+### 13.5 What replaces the table
+
+- `node->type` — the effective/inferred type. Retained, unchanged, authoritative.
+- Declared annotations — on the declaring node/binding, where they already are.
+- Const-fold results — the node's type becomes a literal `TypeConst` subclass
+  (`TypeFloat`, `TypeInt64`, `TypeNumSized`, …) carrying the value and
+  `const_index`, with the existing `is_const`/`is_literal` bits. This is the
+  builder's established representation for source literals; folding simply
+  produces one later.
+- Genuinely erasable, type-scoped optimization facts — lazily allocated record
+  behind a pointer in `Type`.
+- `AstIndex::facts` and `AstNodeFacts` — retired.
+
+### 13.6 Why this was not caught earlier
+
+The P7 analysis that surfaced it first proposed the opposite (move *more*
+inference off `node->type` into `AstNodeFacts`), reasoning from reference
+counts — 349 `node->type` reads against a nearly unused facts table — without
+asking which direction the design intended. A count of reads cannot tell you
+which slot is the authority. The same error produced the withdrawn U-A in
+`Lambda_Proposal_JS_Unify_P7.md` §2.1a: a metric was read as duplication
+evidence without checking what it measured.

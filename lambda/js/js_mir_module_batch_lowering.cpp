@@ -2215,9 +2215,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
                     cap->entry);
                 if (mc && jm_capture_uses_live_module_var(mt, cap)) return false;
             }
-            if (strcmp(name, "_js_this") == 0 ||
-                strcmp(name, "_js_new.target") == 0 ||
-                strcmp(name, "_js_arguments") == 0) return false;
+            if (jm_capture_is_lexical_meta_binding(name)) return false;
             return true;
         };
 

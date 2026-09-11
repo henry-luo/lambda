@@ -1,0 +1,86 @@
+// dom_reflect.def — reflected content attributes, declared once.
+//
+// A reflected attribute is an IDL member that *is* a content attribute: the
+// getter reads it, the setter writes it, and the only per-attribute facts are
+// its HTML name, its reflection kind, its missing-value default, and the set
+// of elements it exists on. Those four facts were spelled out three times per
+// attribute in the radiant module -- a tag-set guard, an accessor pair, and a
+// guarded wrapper, plus two `extern` declarations -- and once more, in a
+// different shape, in the core's JS_DOM_REFLECTED_ATTRS table. This file is the
+// module's single declaration of them.
+//
+//   DOM_REFLECT_BOOL(name, attr, tags)
+//   DOM_REFLECT_INT (name, attr, fallback, tags)
+//   DOM_REFLECT_STR (name, attr, fallback, tags)
+//
+//   name      symbol seed; generates radiant_html_<name>_get/_set
+//   attr      the HTML content attribute
+//   fallback  the IDL missing-value default
+//   tags      space-separated element names the member exists on; on any other
+//             element the accessor declines and the member is absent
+//
+// Rows whose setter must also run an invariant hook (disabled, src, checked,
+// selected, multiple) are NOT here: their setter is not a reflection, it is a
+// reflection plus a state transition. They stay hand-written in
+// radiant_dom_bridge.cpp, next to the hooks they call.
+//
+// Not yet merged with the core's JS_DOM_REFLECTED_ATTRS: the two sets overlap
+// but are not the same, and three shared names disagree on kind. See DSO10 in
+// vibe/impl/Lambda_Impl_DOM_Simplify.md -- that merge needs a ruling on which
+// door is right, not a refactor.
+
+#ifndef DOM_REFLECT_BOOL
+#define DOM_REFLECT_BOOL(name, attr, tags)
+#define DOM_REFLECT_DEF_CLEAR_BOOL
+#endif
+#ifndef DOM_REFLECT_INT
+#define DOM_REFLECT_INT(name, attr, fallback, tags)
+#define DOM_REFLECT_DEF_CLEAR_INT
+#endif
+#ifndef DOM_REFLECT_STR
+#define DOM_REFLECT_STR(name, attr, fallback, tags)
+#define DOM_REFLECT_DEF_CLEAR_STR
+#endif
+
+// ---------------------------------------------------------------------------
+// boolean: present means true; the setter adds or removes the attribute
+// ---------------------------------------------------------------------------
+DOM_REFLECT_BOOL(required,          "required",       "input select textarea")
+DOM_REFLECT_BOOL(read_only,         "readonly",       "input textarea")
+DOM_REFLECT_BOOL(readonly,          "readonly",       "input textarea")
+DOM_REFLECT_BOOL(no_validate,       "novalidate",     "form")
+DOM_REFLECT_BOOL(form_no_validate,  "formnovalidate", "input button")
+DOM_REFLECT_BOOL(open,              "open",           "details")
+
+// ---------------------------------------------------------------------------
+// long: parsed, with the IDL default when the attribute is absent or invalid
+// ---------------------------------------------------------------------------
+DOM_REFLECT_INT(max_length, "maxlength", -1, "input textarea")
+DOM_REFLECT_INT(min_length, "minlength",  0, "input textarea")
+
+// ---------------------------------------------------------------------------
+// DOMString: the attribute verbatim, or the fallback when absent.
+// `href` is deliberately absent: on <a> and <area> it resolves against the
+// document base URL, so it is a computation, not a reflection.
+// ---------------------------------------------------------------------------
+DOM_REFLECT_STR(alt,            "alt",            "", "img")
+DOM_REFLECT_STR(name,           "name",           "", "input button select textarea form fieldset output object")
+DOM_REFLECT_STR(placeholder,    "placeholder",    "", "input textarea")
+DOM_REFLECT_STR(autocomplete,   "autocomplete",   "", "form input select textarea")
+DOM_REFLECT_STR(html_for,       "for",            "", "label output")
+DOM_REFLECT_STR(target,         "target",         "", "form")
+DOM_REFLECT_STR(accept_charset, "accept-charset", "", "form")
+DOM_REFLECT_STR(form_target,    "formtarget",     "", "input button")
+
+#ifdef DOM_REFLECT_DEF_CLEAR_BOOL
+#undef DOM_REFLECT_BOOL
+#undef DOM_REFLECT_DEF_CLEAR_BOOL
+#endif
+#ifdef DOM_REFLECT_DEF_CLEAR_INT
+#undef DOM_REFLECT_INT
+#undef DOM_REFLECT_DEF_CLEAR_INT
+#endif
+#ifdef DOM_REFLECT_DEF_CLEAR_STR
+#undef DOM_REFLECT_STR
+#undef DOM_REFLECT_DEF_CLEAR_STR
+#endif
