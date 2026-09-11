@@ -497,8 +497,9 @@ abstraction (`mark(context, Item)`) owned by the VMap runtime bridge.
 
 ### 5.3 Core-owned runtime async deque
 
-The repository has fixed rooted `JsItemStack` and a pointer `ArrayList`, but no
-growable FIFO whose Item storage remains visible to GC after relocation. Add
+The repository has `RootVector` (address-stable, precisely scanned, LIFO
+push/pop) and a pointer `ArrayList`, but no growable FIFO whose Item storage
+remains visible to GC after relocation. Add
 one small shared internal mechanism under `lambda/runtime/` only after T0
 confirms that census:
 

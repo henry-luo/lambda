@@ -2019,7 +2019,9 @@ Three merges are decided, one per kind of duplication:
   batch clearing. True single-Item stacks may layer `JsItemStack` depth /
   push / pop / shrink operations over it; caches, whole-stack replay, middle
   removal, POD companions, and multi-field journals retain their client-owned
-  semantics. Motivated directly by the Appendix A audit: the confirmed
+  semantics. **Superseded 2026-09-11:** the `JsItemStack` layer was retired —
+  `RootVector` absorbed its whole surface under JSCU14(b), so the remaining
+  clients call the primitive directly. Motivated directly by the Appendix A audit: the confirmed
   `js_with_stack` use-after-free existed because every range hand-rolled its
   own rooting and one forgot.
 - **Merge C (state ownership + lifetime-preserving data):** one
@@ -2129,23 +2131,30 @@ nesting with generated frames, or `Item`-only payload.
 The two regions are duals across the scan boundary and must never be merged
 with each other or absorb structures from the wrong side.
 
-### A.2 Semantic context stacks (fixed-size globals, read by content)
+### A.2 Semantic context stacks (context-owned, read by content)
 
 | Stack | Location | Depth | Purpose | GC rooting |
 |---|---|---|---|---|
 | `js_args_stack` | removed | — | Transient call/new argument frames | Replaced by exact live slots in the active `Context` side-root region; no private capacity or lifecycle remains |
-| `js_with_stack` | `js_globals.cpp` | 16 | `with`-statement scope chain: top-down name-resolution walk + last-binding cache | **FIXED 2026-07-24**: was unregistered — confirmed use-after-free (`with ({…}) { … }` under `LAMBDA_GC_FORCE_EVERY=1` collected the scope object mid-body). Now epoch-guarded lazy root-range registration (`js_with_register_roots`, same pattern as `js_eval_source_register_roots`) covering the 16-slot array plus the two last-binding cache slots; pop/restore-depth/set-stack null unwound slots; batch reset clears the cache Items. Regression gate: `test/js/regression_with_stack_gc.js` in `test-gc-rooting-core` + baseline. **Two further use-after-frees in the same machinery were found and fixed 2026-07-24 while extending the test:** (a) the primitive-wrapper builders `js_new_string/number/boolean_wrapper` and the Symbol/BigInt cases of `js_to_object` (`js_runtime.cpp`) built the wrapper across many allocating calls (class stamp clones the typemap, `heap_create_name`, `js_to_string`, `js_property_set`) while `obj` sat in an unrooted local → a mid-construction GC freed the half-built map (this was the reported "String-wrapper" bug, ex task_ce716fbc); now `RootFrame`/`Rooted` around every builder. (b) the **call-boundary saved with-scope** (`js_call_function_impl` ×2 + the `vm` eval path, `js_runtime.cpp`): a `with` scope must not leak into a callee, so the caller's active scope is copied into a native-stack `Item saved_with_stack[16]` and the callee's own with-env installed; that native copy was the only live reference while the callee ran, so a GC inside the callee freed the caller's still-live scope object and the restore wrote a dangling pointer back. Fixed with a `JsSavedWithScopeRoots` RAII guard that registers the saved array as a GC root range for the callee span (only when depth>0) and unregisters before the native frame returns. This one hit plain call-result operands too (`with (mk()) { churn(); … }`), not just wrappers. |
+| `js_with_stack` — **retired 2026-09-11** | `js_globals.cpp` | was 16, then unbounded | `with`-statement scope chain: top-down name-resolution walk + last-binding cache | **Replaced by JSCU44's per-activation chain** (`Lambda_Design_Structs_JS2.md` §13): a `JsWithFrame` list whose head the activation owns, over free-listed `RootVector` slots. That closed two spec defects this shared stack caused — a suspended generator's scope stayed visible to unrelated code (JS05-L1) and the fast call lane never hid a caller's scope from its callee — and retired the call-boundary copy (`js_with_set_stack`, `js_with_save_stack`, `JsSavedWithScope`) whose rooting is the subject of the history below. *History:* **FIXED 2026-07-24**: was unregistered — confirmed use-after-free (`with ({…}) { … }` under `LAMBDA_GC_FORCE_EVERY=1` collected the scope object mid-body). Now epoch-guarded lazy root-range registration (`js_with_register_roots`, same pattern as `js_eval_source_register_roots`) covering the 16-slot array plus the two last-binding cache slots; pop/restore-depth/set-stack null unwound slots; batch reset clears the cache Items. Regression gate: `test/js/regression_with_stack_gc.js` in `test-gc-rooting-core` + baseline. **Two further use-after-frees in the same machinery were found and fixed 2026-07-24 while extending the test:** (a) the primitive-wrapper builders `js_new_string/number/boolean_wrapper` and the Symbol/BigInt cases of `js_to_object` (`js_runtime.cpp`) built the wrapper across many allocating calls (class stamp clones the typemap, `heap_create_name`, `js_to_string`, `js_property_set`) while `obj` sat in an unrooted local → a mid-construction GC freed the half-built map (this was the reported "String-wrapper" bug, ex task_ce716fbc); now `RootFrame`/`Rooted` around every builder. (b) the **call-boundary saved with-scope** (`js_call_function_impl` ×2 + the `vm` eval path, `js_runtime.cpp`): a `with` scope must not leak into a callee, so the caller's active scope is copied into a native-stack `Item saved_with_stack[16]` and the callee's own with-env installed; that native copy was the only live reference while the callee ran, so a GC inside the callee freed the caller's still-live scope object and the restore wrote a dangling pointer back. Fixed with a `JsSavedWithScopeRoots` RAII guard that registers the saved array as a GC root range for the callee span (only when depth>0) and unregisters before the native frame returns. This one hit plain call-result operands too (`with (mk()) { churn(); … }`), not just wrappers. |
 | `js_eval_source_*` | `JsRuntimeState.eval.source` in `js_runtime_state.cpp` | 16 | Source context (filename, source, line/col offsets, compact flag) for `Error.stack` synthesis in nested eval and VM-provided compact function sources | Two exact `JsRootRange`s; source depth remains independent of bridge/local state |
 | eval binding journals | `JsRuntimeState.eval.bridge/local` with operations in `js_globals.cpp` | 6 paired journals, 32–512 entries | Bindings introduced by direct eval into enclosing scopes: env/global/private bridges are per call, while local/lexical/immutable state persists until the generated caller exits | Each `Item` column has a precise `JsRootRange`; bridge and local marks remain distinct lifetime APIs |
-| `js_domain_stack` | `js_runtime.cpp` | 64 | Node `domain` module: active domain chain, mirrored to `process.domain`, capture/replay for async continuations | `JsItemStack`; replay/filtering remains client-owned |
-| `js_cjs_module_stack` | `js_mir_entrypoints_require.cpp` | `JS_CJS_STACK_MAX` | Current `module` object chain for nested CommonJS `require()` | `JsItemStack`; separate module-name/object table roots remain client-owned |
-| `super_this_*` stacks | `js_runtime_state.hpp` (128-pair `bool`/`Item`) | 128 | Derived-constructor `this` binding across `super()` (TDZ tracking) | `JsItemStack` for exact Item roots; parallel bound-state booleans remain client-owned |
+| `js_domain_stack` | `js_runtime.cpp` | unbounded; a `< 64` client guard survives in `js_domain_push` and `js_domain_apply_stack` | Node `domain` module: active domain chain, mirrored to `process.domain`, capture/replay for async continuations | `RootVector` directly; replay/filtering remains client-owned. The 64 guard is pre-JSCU14(b) residue over a growable vector — it silently drops a push rather than erroring |
+| `js_cjs_module_stack` | `js_mir_entrypoints_require.cpp` (Jube session) | unbounded | Current `module` object chain for nested CommonJS `require()` | `RootVector` directly; separate module-name/object table roots remain client-owned. `js_cjs_leave` removes out of order, so this is a stack only by convention |
+| `super_this_*` stacks | moved out of Appendix A | — | Derived-constructor `this` binding across `super()` (TDZ tracking) | Now `js_call_activation_item(JS_CALL_ACTIVATION_SUPER_THIS)`, not a stack of its own |
 
 None of these merge into side_root: they are read by content (scope walks,
 capture/replay, old-value restore), several have non-`Item` companion data
 (offsets, flags, keys), and `domain.enter()`/captured-stack replay is
-legitimately non-LIFO with respect to generated frames. They are tiny and
-bounded; their scan cost is negligible.
+legitimately non-LIFO with respect to generated frames. Their scan cost is
+negligible.
+
+JSCU44 re-tested that ruling for the `with` chain and confirmed it for a
+sharper reason than "read by content": the side root stack is watermark-LIFO,
+and a suspended generator holds its scope while other activations push and pop,
+so side-root storage would need a spill on every suspension. What the `with`
+chain actually needed was a per-activation **head**, which it now has while its
+slots stay in a `RootVector`.
 
 ### A.3 Diagnostics stacks (non-`Item`; no GC interaction)
 

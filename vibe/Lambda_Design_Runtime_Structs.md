@@ -793,7 +793,7 @@ holds `state`, `result`, `result_scalar` (the companion scalar), `reactions`,
 rejection bookkeeping (`rejection_handled`, `unhandled_check_scheduled`,
 `unhandled_reported`, `unhandled_epoch`). Its context-level companion is
 `JsPromiseRuntimeState`, which owns the unhandled-rejection job queue and its
-storage Item, the domain Items and `JsItemStack` domain stack, and the promise
+storage Item, the domain Items and their `RootVector` domain stack, and the promise
 counters. The definitions are in
 [`js_runtime_state.hpp`](../lambda/js/js_runtime_state.hpp#L684).
 
@@ -868,7 +868,7 @@ The JS-specific state records directly relevant to MIR/helper boundaries are:
 
 `JsRootedState` (the one `RootVector` root-owner base every capsule state
 derives from), `JsNamespaceState`, `JsRealmSlots`, `JsGlobalEnvironment`,
-`JsRealmIntrinsicSlots`, `JsIntrinsicState`, `JsItemStack`, `JsWithScopeState`,
+`JsRealmIntrinsicSlots`, `JsIntrinsicState`, `JsWithScopeState`,
 `JsEventLoopQueueState`, `JsEventLoopTimerState`, `JsPromiseRuntimeState`,
 `JsModuleRuntimeState`, `JsAsyncHooksState`, `JsAsyncLocalStorageState`,
 `JsAsyncAwaitState`, `JsEvalState` (`JsEvalSourceState`, `JsEvalBridgeState`,
@@ -1036,8 +1036,8 @@ layout-specific access.
 | `JsGlobalEnvironment` | JavaScript | The one dynamic realm binding table | helper |
 | `JsRealmIntrinsicSlots` | JavaScript | Realm intrinsic constructor/prototype slots | helper |
 | `JsIntrinsicState` | JavaScript | Intrinsic prototype roots, names, and mutation versions | helper |
-| `JsItemStack` | JavaScript | RootVector-backed Item LIFO stack | helper |
-| `JsWithScopeState` | JavaScript | Dynamic-`with` stack and last-binding roots | helper |
+| `JsWithFrame` | JavaScript | One `with` scope introduction, or a borrowed captured chain (JSCU44) | helper |
+| `JsWithScopeState` | JavaScript | Dynamic-`with` chain head, scope slots and last-binding roots | helper |
 | `JsEventLoopQueueState` | JavaScript | Next-tick, microtask, and RAF queue state | helper |
 | `JsEventLoopTimerState` | JavaScript | Timer handles and mock-scheduler state | helper |
 | `JsModuleRuntimeState` | JavaScript | Module/VM namespace slots and evaluation depth | helper |

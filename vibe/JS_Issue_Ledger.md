@@ -104,10 +104,11 @@ copied into a process-wide stack. `js_with_set_stack`, `js_with_save_stack` and
 wired into `make test-gc-rooting-core`), plus `make test262-baseline` at zero
 regressions.
 
-**Note on Appendix A.2.** That table still describes `js_with_stack` as a
-"16-slot array" and lists the `super_this_*` stacks as `JsItemStack`. Both are
-stale: JSCU14(b) made the with-scope stack a growable `RootVector`, and
-super-this moved to `js_call_activation_item(JS_CALL_ACTIVATION_SUPER_THIS)`.
+**Note on Appendix A.2.** Updated 2026-09-11: that table described
+`js_with_stack` as a "16-slot array" and listed the `super_this_*` stacks as
+`JsItemStack`, both long stale. Its rows now record the JSCU44 chain, the
+`RootVector` clients, and super-this's move to
+`js_call_activation_item(JS_CALL_ACTIVATION_SUPER_THIS)`.
 
 ### JS05-L2 — an abrupt jump closes every open `with`, not the ones it leaves — **RESOLVED**
 

@@ -427,6 +427,13 @@ LambdaJS instead has:
 > dead-heap Items, forgets the registration, allocation-free), and only
 > `push` re-registers the retained blocks. Unit test:
 > `GCHeapTest.RootVectorGrowsAddressStableAndFollowsHeapReplacement`.
+> **Retired 2026-09-11 (JSCU44).** `JsItemStack` had become a two-line wrapper
+> holding one `RootVector` plus six one-line forwarders, and with-scope — its
+> last non-trivial client — moved to a per-activation chain
+> ([`Lambda_Design_Structs_JS2.md`](Lambda_Design_Structs_JS2.md) §13). The
+> remaining clients hold a `RootVector` directly, as the other 37 runtime-state
+> vectors already did. The ruling below stands; only the facade is gone.
+>
 > Migrated (b): the four `JsItemStack`s — with-scope, super-this, domain and
 > the Node session's CommonJS module stack — are `RootVector`s; their fixed
 > slot arrays, three catalog entries and reset-registry callbacks are gone,
@@ -2108,11 +2115,12 @@ carrier and compiler work is open.
   regression crosses every former agent/report/waiter bound under regular and
   forced-GC execution. This applies D5.1.1v2 and D5.3.5 to each one
   outliving-instance collection, without claiming the broader JSCU29(A)
-  realm-slot migration is complete. The `with` scope chain now uses its
-  existing dynamic `JsItemStack` without a 16-depth guard, and the call
-  boundary snapshots an arbitrary-depth chain in one temporary exact root
-  range rather than a fixed native array; a 17-deep closure call survives
-  forced GC. Eval source context likewise uses dynamic `JsEvalSourceRecord`
+  realm-slot migration is complete. The `with` scope chain then used its
+  dynamic `JsItemStack` without a 16-depth guard, and the call boundary
+  snapshotted an arbitrary-depth chain in one temporary exact root range
+  rather than a fixed native array; a 17-deep closure call survives forced GC.
+  *(Superseded 2026-09-11 by JSCU44: the chain is per-activation and the call
+  boundary borrows the callee's captured env instead of snapshotting it.)* Eval source context likewise uses dynamic `JsEvalSourceRecord`
   rows with paired RootVector slots for filename/source instead of separate
   16-entry Item and metadata arrays; a 17-deep nested eval passes under
   forced GC. Each eval bridge now uses one dynamic `JsEvalBindingJournal` for
@@ -2130,7 +2138,7 @@ carrier and compiler work is open.
   regression creates 65 queries. The headless dialog FIFO uses dynamic
   `DomPromptResponse` rows, keeping ordered text and Cancel records together
   without a 32-slot ring. The Node CommonJS module chain now also
-  uses its existing dynamic `JsItemStack` without a second 128-depth policy
+  uses its dynamic `RootVector` without a second 128-depth policy
   guard; allocation failure is reported rather than silently changing the
   parent chain. A focused 161-module temporary fixture verifies every
   `module.parent` link and deletes its files after the run. Node `net.BlockList`
