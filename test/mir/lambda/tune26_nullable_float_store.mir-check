@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "description": "Tune26: a nullable native float read from a dynamic integral subscript is checked for FLOAT_LANE_NULL before the raw destination store; the cold in-place setter retains typed-assignment rejection and S9.2.2 snapshot isolation.",
+  "checks": [
+    {
+      "in_func": "_tune26_nullable_float_store_#",
+      "expect": [
+        "eq\t{{r}}, {{r}}, 9221120237041090561",
+        "dmov\td:({{r}}), {{r}}",
+        "call\tlambda_array_set_checked_inplace_lane_p, lambda_array_set_checked_inplace_lane"
+      ]
+    },
+    {
+      "in_func": "_tune26_nullable_float_oob_#",
+      "expect": [
+        "eq\t{{r}}, {{r}}, 9221120237041090561",
+        "dmov\td:({{r}}), {{r}}",
+        "call\tlambda_array_set_checked_inplace_lane_p, lambda_array_set_checked_inplace_lane"
+      ]
+    }
+  ]
+}

@@ -9087,6 +9087,48 @@ static ArrayRepCert* runtime_array_rep_cert_intern(Type* contract) {
     return cert;
 }
 
+// A packed rank-one primitive lane is an exact decoder for its matching T[].
+// Keep certificate installation in this shared runtime helper so compiler
+// fast paths cannot publish a raw ArrayNum to later borrowed-write boundaries
+// (D3.3.3v3, S9.2.2).
+static bool runtime_array_admit_primitive_contract(Item value, Type* expected,
+        Item* converted) {
+    if (!lambda_array_num_representation_proves_primitive_contract(value, expected)) {
+        return false;
+    }
+    ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
+    if (!cert) return false;
+    lambda_array_install_rep_cert(value, cert);
+    *converted = value;
+    return true;
+}
+
+Item lambda_array_admit_numeric_contract(Item value, Type* expected,
+        const char* boundary) {
+    if (get_type_id(value) == LMD_TYPE_ERROR) return value;
+
+    Item admitted = ItemNull;
+    if (runtime_array_admit_primitive_contract(value, expected, &admitted)) {
+        return admitted;
+    }
+
+    Type* element_type = runtime_array_contract_element(expected);
+    ArrayNumElemType element = ELEM_INT;
+    if (get_type_id(value) == LMD_TYPE_ARRAY && value.array &&
+            value.array->length == 0 && !value.array->is_view && element_type &&
+            lambda_array_num_elem_type_for_contract(element_type, &element)) {
+        ArrayNum* reified = array_num_new(element, 0);
+        if (!reified) return lambda_type_error(value, expected, boundary);
+        Item reified_value = {.array_num = reified};
+        if (runtime_array_admit_primitive_contract(reified_value, expected, &admitted)) {
+            return admitted;
+        }
+        return lambda_type_error(value, expected, boundary);
+    }
+
+    return lambda_type_check(value, expected, boundary);
+}
+
 static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value, Type* expected,
         const char* boundary, bool publish_in_place, const LaneStorageDesc* lane_hint) {
     if (cow_profile_enabled()) {
@@ -10208,13 +10250,7 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
     // element only reconstructs the proof that the carrier already provides.
     // Keep views, shaped arrays, nullable/refined contracts, and all lane
     // conversions on the checked path in the helper.
-    if (lambda_array_num_representation_proves_primitive_contract(value, expected)) {
-        ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
-        if (!cert) return false;
-        lambda_array_install_rep_cert(value, cert);
-        *converted = value;
-        return true;
-    }
+    if (runtime_array_admit_primitive_contract(value, expected, converted)) return true;
 
     LambdaArrayContractInfo contract_info = {};
     ArrayNumElemType compact_type = ELEM_INT;

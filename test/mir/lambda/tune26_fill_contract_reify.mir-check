@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "description": "Tune26: a matched primitive fill reaches the shared numeric array admission, which reifies its empty arm and installs the declaration certificate before a float[] borrowed write (S4.1, D3.3.3v3, S9.2.2).",
+  "checks": [
+    {
+      "in_func": "_tune26_fill_contract_reify_#",
+      "expect": [
+        "call\tfn_fill_p, fn_fill",
+        "call\tlambda_array_admit_numeric_contract_p, lambda_array_admit_numeric_contract"
+      ]
+    }
+  ]
+}

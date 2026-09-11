@@ -1972,6 +1972,7 @@ JitImport jit_runtime_imports[] = {
     {"err2it", FPTR(err2it)},
     {"it2err", FPTR(it2err)},
     {"lambda_type_check", FPTR(lambda_type_check)},
+    {"lambda_array_admit_numeric_contract", FPTR(lambda_array_admit_numeric_contract)},
     {"lambda_map_set_checked", FPTR(lambda_map_set_checked)},
     {"lambda_map_set_checked_inplace", FPTR(lambda_map_set_checked_inplace)},
     {"lambda_map_path_set_checked", FPTR(lambda_map_path_set_checked)},

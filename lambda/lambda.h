@@ -2639,6 +2639,11 @@ extern "C" {
     bool lambda_type_matches(Item value, Type* expected);
     Item lambda_type_error(Item actual, Type* expected, const char* boundary);
     Item lambda_type_check(Item value, Type* expected, const char* boundary);
+    // Admit an exact primitive ArrayNum, or reify an empty ordinary Array,
+    // under a rank-one primitive T[] contract and install its certificate.
+    // Other carriers retain the complete checked-boundary path.
+    Item lambda_array_admit_numeric_contract(Item value, Type* expected,
+        const char* boundary);
     Item lambda_map_set_checked(Item owner, Item key, Item value, Type* expected,
         const char* boundary);
     Item lambda_map_set_checked_inplace(Item owner, Item key, Item value, Type* expected,
