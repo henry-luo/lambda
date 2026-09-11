@@ -1167,7 +1167,7 @@ bool str_is_alnum(char c) { return str_is_alpha(c) || str_is_digit(c); }
 bool str_is_upper(char c) { return c >= 'A' && c <= 'Z'; }
 bool str_is_lower(char c) { return c >= 'a' && c <= 'z'; }
 bool str_is_hex(char c) {
-    return str_is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+    return str_hex_val(c) >= 0;
 }
 
 size_t str_span_whitespace(const char* s, size_t len) {
@@ -1230,19 +1230,12 @@ char* str_hex_encode(char* dst, const char* s, size_t len) {
     return dst;
 }
 
-static inline int _hex_val(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
-}
-
 size_t str_hex_decode(char* dst, const char* hex, size_t hex_len) {
     if (!dst || !hex) return 0;
     size_t out = 0;
     for (size_t i = 0; i + 1 < hex_len; i += 2) {
-        int hi = _hex_val(hex[i]);
-        int lo = _hex_val(hex[i + 1]);
+        int hi = str_hex_val(hex[i]);
+        int lo = str_hex_val(hex[i + 1]);
         if (hi < 0 || lo < 0) break;
         dst[out++] = (char)((hi << 4) | lo);
     }

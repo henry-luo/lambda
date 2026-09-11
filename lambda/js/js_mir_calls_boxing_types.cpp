@@ -704,9 +704,9 @@ void jm_emit_set_function_name(JsMirTranspiler* mt, MIR_reg_t fn_reg, const char
 
 void jm_emit_set_class_assignment_name(JsMirTranspiler* mt, JsAssignmentNode* asgn, MIR_reg_t rhs, String* name) {
     if (!asgn || asgn->lhs_is_parenthesized || !asgn->right || !name) return;
-    if (asgn->op != JS_OP_ASSIGN) return;
-    if (asgn->right->node_type != JS_AST_NODE_CLASS_EXPRESSION &&
-        asgn->right->node_type != JS_AST_NODE_CLASS_DECLARATION) return;
+    if (asgn->op != OPERATOR_ASSIGN) return;
+    if (asgn->right->node_type != AST_NODE_CLASS_EXPR &&
+        asgn->right->node_type != AST_NODE_CLASS) return;
     JsClassNode* cls = (JsClassNode*)asgn->right;
     if (cls->name) return;
     MIR_reg_t name_reg = jm_box_string_literal(mt, name->chars, (int)name->len);
@@ -934,17 +934,17 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
     if (!node) return LMD_TYPE_ANY;
 
     switch (node->node_type) {
-    case JS_AST_NODE_LITERAL: {
+    case AST_NODE_LITERAL: {
         JsLiteralNode* lit = (JsLiteralNode*)node;
         switch (lit->literal_type) {
-        case JS_LITERAL_NUMBER: {
+        case AST_LITERAL_NUMBER: {
             if (lit->is_bigint) return LMD_TYPE_DECIMAL;
             return LMD_TYPE_FLOAT;
         }
-        case JS_LITERAL_BOOLEAN:  return LMD_TYPE_BOOL;
-        case JS_LITERAL_STRING:   return LMD_TYPE_STRING;
-        case JS_LITERAL_NULL:     return LMD_TYPE_NULL;
-        case JS_LITERAL_UNDEFINED: return LMD_TYPE_UNDEFINED;
+        case AST_LITERAL_BOOLEAN:  return LMD_TYPE_BOOL;
+        case AST_LITERAL_STRING:   return LMD_TYPE_STRING;
+        case AST_LITERAL_NULL:     return LMD_TYPE_NULL;
+        case AST_LITERAL_UNDEFINED: return LMD_TYPE_UNDEFINED;
         default:
             // shared AST tags include frontend-specific Python literals; JS treats unknown tags as dynamic.
             return LMD_TYPE_ANY;
@@ -952,7 +952,7 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         return LMD_TYPE_ANY;
     }
 
-    case JS_AST_NODE_IDENTIFIER: {
+    case AST_NODE_IDENT: {
         JsIdentifierNode* id = (JsIdentifierNode*)node;
         JsMirVarEntry* var = jm_find_var_by_binding(mt, id->entry);
         if (var) return var->type_id;
@@ -969,13 +969,13 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         return LMD_TYPE_ANY;
     }
 
-    case JS_AST_NODE_BINARY_EXPRESSION: {
+    case AST_NODE_BINARY: {
         JsBinaryNode* bin = (JsBinaryNode*)node;
         // comparison operators always return bool
         switch (bin->op) {
-        case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
-        case JS_OP_EQ: case JS_OP_NE: case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
-        case JS_OP_INSTANCEOF: case JS_OP_IN:
+        case OPERATOR_LT: case OPERATOR_LE: case OPERATOR_GT: case OPERATOR_GE:
+        case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_JS_STRICT_EQ: case OPERATOR_JS_STRICT_NE:
+        case OPERATOR_JS_INSTANCEOF: case OPERATOR_IN:
             return LMD_TYPE_BOOL;
         default: break;
         }
@@ -983,7 +983,7 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         TypeId left_t  = jm_get_effective_type(mt, bin->left);
         TypeId right_t = jm_get_effective_type(mt, bin->right);
         switch (bin->op) {
-        case JS_OP_ADD:
+        case OPERATOR_ADD:
             // if either is string, result is string (JS concatenation)
             if (left_t == LMD_TYPE_STRING || right_t == LMD_TYPE_STRING)
                 return LMD_TYPE_STRING;
@@ -993,63 +993,63 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
                 (right_t == LMD_TYPE_INT || right_t == LMD_TYPE_FLOAT))
                 return LMD_TYPE_FLOAT;
             return LMD_TYPE_ANY;
-        case JS_OP_SUB: case JS_OP_MUL:
+        case OPERATOR_SUB: case OPERATOR_MUL:
             if (left_t == LMD_TYPE_FLOAT || right_t == LMD_TYPE_FLOAT)
                 return LMD_TYPE_FLOAT;
             if (left_t == LMD_TYPE_INT && right_t == LMD_TYPE_INT)
                 return LMD_TYPE_FLOAT;
             return LMD_TYPE_ANY;
-        case JS_OP_EXP:
+        case OPERATOR_JS_EXP:
             // pow() always returns double
             if ((left_t == LMD_TYPE_INT || left_t == LMD_TYPE_FLOAT) &&
                 (right_t == LMD_TYPE_INT || right_t == LMD_TYPE_FLOAT))
                 return LMD_TYPE_FLOAT;
             return LMD_TYPE_ANY;
-        case JS_OP_DIV:
+        case OPERATOR_DIV:
             // JS division always produces float (7/2 == 3.5)
             if (left_t == LMD_TYPE_INT && right_t == LMD_TYPE_INT)
                 return LMD_TYPE_FLOAT;
             if (left_t == LMD_TYPE_FLOAT || right_t == LMD_TYPE_FLOAT)
                 return LMD_TYPE_FLOAT;
             return LMD_TYPE_ANY;
-        case JS_OP_MOD:
+        case OPERATOR_MOD:
             // modulo uses fmod() → always returns float (handles x%0 → NaN)
             if ((left_t == LMD_TYPE_INT || left_t == LMD_TYPE_FLOAT) &&
                 (right_t == LMD_TYPE_INT || right_t == LMD_TYPE_FLOAT))
                 return LMD_TYPE_FLOAT;
             return LMD_TYPE_ANY;
-        case JS_OP_BIT_AND: case JS_OP_BIT_OR: case JS_OP_BIT_XOR:
-        case JS_OP_BIT_LSHIFT: case JS_OP_BIT_RSHIFT: case JS_OP_BIT_URSHIFT:
+        case OPERATOR_JS_BIT_AND: case OPERATOR_JS_BIT_OR: case OPERATOR_JS_BIT_XOR:
+        case OPERATOR_JS_LSHIFT: case OPERATOR_JS_RSHIFT: case OPERATOR_JS_URSHIFT:
             // bigint bitwise/shift operators return BigInt, so only Number-proven operands may use the Number result type.
             if ((left_t == LMD_TYPE_INT || left_t == LMD_TYPE_FLOAT) &&
                 (right_t == LMD_TYPE_INT || right_t == LMD_TYPE_FLOAT))
                 return LMD_TYPE_FLOAT;
             return LMD_TYPE_ANY;
-        case JS_OP_AND: case JS_OP_OR:
+        case OPERATOR_AND: case OPERATOR_OR:
             return LMD_TYPE_ANY;  // logical AND/OR return one of the operands
         default:
             return LMD_TYPE_ANY;
         }
     }
 
-    case JS_AST_NODE_UNARY_EXPRESSION: {
+    case AST_NODE_UNARY: {
         JsUnaryNode* un = (JsUnaryNode*)node;
         switch (un->op) {
-        case JS_OP_NOT:    return LMD_TYPE_BOOL;
-        case JS_OP_TYPEOF: return LMD_TYPE_STRING;
-        case JS_OP_BIT_NOT: return LMD_TYPE_FLOAT;
-        case JS_OP_PLUS: case JS_OP_ADD: {
+        case OPERATOR_NOT:    return LMD_TYPE_BOOL;
+        case OPERATOR_JS_TYPEOF: return LMD_TYPE_STRING;
+        case OPERATOR_JS_BIT_NOT: return LMD_TYPE_FLOAT;
+        case OPERATOR_POS: case OPERATOR_ADD: {
             TypeId t = jm_get_effective_type(mt, un->operand);
             if (t == LMD_TYPE_FLOAT || t == LMD_TYPE_INT) return t;
             return LMD_TYPE_ANY;
         }
-        case JS_OP_MINUS: case JS_OP_SUB: {
+        case OPERATOR_NEG: case OPERATOR_SUB: {
             TypeId t = jm_get_effective_type(mt, un->operand);
             if (t == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
             if (t == LMD_TYPE_INT) {
-                if (un->operand && un->operand->node_type == JS_AST_NODE_LITERAL) {
+                if (un->operand && un->operand->node_type == AST_NODE_LITERAL) {
                     JsLiteralNode* lit = (JsLiteralNode*)un->operand;
-                    if (lit->literal_type == JS_LITERAL_NUMBER && lit->value.number_value == 0.0)
+                    if (lit->literal_type == AST_LITERAL_NUMBER && lit->value.number_value == 0.0)
                         return LMD_TYPE_FLOAT;
                     return LMD_TYPE_INT;
                 }
@@ -1057,7 +1057,7 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
             }
             return LMD_TYPE_ANY;
         }
-        case JS_OP_INCREMENT: case JS_OP_DECREMENT: {
+        case OPERATOR_JS_INCREMENT: case OPERATOR_JS_DECREMENT: {
             if (!un->operand) return LMD_TYPE_ANY;
             TypeId t = jm_get_effective_type(mt, un->operand);
             if (t == LMD_TYPE_INT || t == LMD_TYPE_FLOAT) return t;
@@ -1067,15 +1067,15 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         }
     }
 
-    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+    case AST_NODE_ASSIGN: {
         JsAssignmentNode* asgn = (JsAssignmentNode*)node;
-        if (asgn->op == JS_OP_ASSIGN)
+        if (asgn->op == OPERATOR_ASSIGN)
             return jm_get_effective_type(mt, asgn->right);
         // compound assignment: depends on operator and operand types
         return LMD_TYPE_ANY;
     }
 
-    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+    case AST_NODE_CONDITIONAL_EXPR: {
         JsConditionalNode* cond = (JsConditionalNode*)node;
         TypeId t1 = jm_get_effective_type(mt, cond->consequent);
         TypeId t2 = jm_get_effective_type(mt, cond->alternate);
@@ -1083,7 +1083,7 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         return LMD_TYPE_ANY;
     }
 
-    case JS_AST_NODE_SEQUENCE_EXPRESSION: {
+    case AST_NODE_SEQ: {
         // v11: comma operator returns type of last expression
         JsSequenceNode* seq = (JsSequenceNode*)node;
         JsAstNode* child = seq->expressions;
@@ -1092,9 +1092,9 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         return last ? jm_get_effective_type(mt, last) : LMD_TYPE_ANY;
     }
 
-    case JS_AST_NODE_CALL_EXPRESSION: {
+    case AST_NODE_CALL_EXPR: {
         JsCallNode* call = (JsCallNode*)node;
-        if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+        if (call->callee && call->callee->node_type == AST_NODE_IDENT) {
             JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
             if (id->name && id->name->len == 6 && strncmp(id->name->chars, "String", 6) == 0)
                 return LMD_TYPE_STRING;
@@ -1115,11 +1115,11 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         return LMD_TYPE_ANY;
     }
 
-    case JS_AST_NODE_MEMBER_EXPRESSION: {
+    case AST_NODE_MEMBER_EXPR: {
         JsMemberNode* mem = (JsMemberNode*)node;
         // .length returns INT only for known arrays, strings, and functions
         if (!mem->computed && mem->property &&
-            mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            mem->property->node_type == AST_NODE_IDENT) {
             JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
             if (prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "length", 6) == 0) {
                 // Only infer INT for known types where .length is guaranteed numeric
@@ -1160,7 +1160,7 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
 // Returns NULL for unknown or non-compound types.
 Type* jm_get_full_type(JsMirTranspiler* mt, JsAstNode* node) {
     if (!node) return NULL;
-    if (node->node_type == JS_AST_NODE_IDENTIFIER) {
+    if (node->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* id = (JsIdentifierNode*)node;
         JsMirVarEntry* var = jm_find_var_by_binding(mt, id->entry);
         if (var) return var->full_type;
@@ -1267,19 +1267,19 @@ void jm_scope_env_mark_and_writeback_generated(JsMirTranspiler* mt,
 static NameEntry* jm_scope_env_binding_for_node(JsAstNode* node) {
     if (!node) return NULL;
     switch (node->node_type) {
-    case JS_AST_NODE_IDENTIFIER:
+    case AST_NODE_IDENT:
         return ((JsIdentifierNode*)node)->entry;
-    case JS_AST_NODE_VARIABLE_DECLARATOR: {
+    case AST_NODE_VARIABLE_DECLARATOR: {
         JsAstNode* id = ((JsVariableDeclaratorNode*)node)->id;
-        return id && id->node_type == JS_AST_NODE_IDENTIFIER
+        return id && id->node_type == AST_NODE_IDENT
             ? ((JsIdentifierNode*)id)->entry : NULL;
     }
-    case JS_AST_NODE_FUNCTION_DECLARATION:
-    case JS_AST_NODE_FUNCTION_EXPRESSION:
-    case JS_AST_NODE_ARROW_FUNCTION:
+    case AST_NODE_FUNC:
+    case AST_NODE_FUNC_EXPR:
+    case AST_NODE_ARROW_FUNC:
         return ((JsFunctionNode*)node)->entry;
-    case JS_AST_NODE_CLASS_DECLARATION:
-    case JS_AST_NODE_CLASS_EXPRESSION: {
+    case AST_NODE_CLASS:
+    case AST_NODE_CLASS_EXPR: {
         JsClassNode* class_node = (JsClassNode*)node;
         return class_node->outer_entry ? class_node->outer_entry : class_node->entry;
     }
@@ -1374,20 +1374,20 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
         return jm_transpile_box_item(mt, expr);
     }
 
-    if (expr && expr->node_type == JS_AST_NODE_CONDITIONAL_EXPRESSION) {
+    if (expr && expr->node_type == AST_NODE_CONDITIONAL_EXPR) {
         // Ternary lowering normally joins boxed Item arms; native returns need
         // each arm lowered to the target MIR mode before the branch join.
         return jm_transpile_conditional_as_native(mt, (JsConditionalNode*)expr, target_type);
     }
 
     if (target_type == LMD_TYPE_FLOAT && expr &&
-            expr->node_type == JS_AST_NODE_LITERAL) {
+            expr->node_type == AST_NODE_LITERAL) {
         return jm_transpile_expression_value(mt, expr, MIR_VALUE_REQUIRED_REP,
             VALUE_REP_F64).reg;
     }
 
     if (target_type == LMD_TYPE_FLOAT && expr &&
-            expr->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+            expr->node_type == AST_NODE_MEMBER_EXPR) {
         // A pre-existing numeric demand can consume a guarded element load
         // directly. Its miss performs the same Item conversion as below.
         return jm_transpile_member_as_number(mt, (JsMemberNode*)expr);

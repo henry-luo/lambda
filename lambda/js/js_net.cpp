@@ -772,8 +772,7 @@ static void socket_report_write_error(JsSocket* sock, Item callback, Item err) {
 }
 
 static Item socket_emit_error_scheduled(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_undefined_item();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item self = env[0];
     Item err = env[1];
     socket_emit(self, "error", &err, 1);
@@ -781,8 +780,7 @@ static Item socket_emit_error_scheduled(Item env_item) {
 }
 
 static Item socket_emit_error_close_scheduled(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_undefined_item();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item self = env[0];
     Item err = env[1];
     socket_emit(self, "error", &err, 1);
@@ -793,18 +791,14 @@ static Item socket_emit_error_close_scheduled(Item env_item) {
 
 static void socket_schedule_error_event(JsSocket* sock, Item err) {
     if (!sock || !SOCKET_VALUE(sock, OBJECT).item) return;
-    Item* env = js_alloc_env(2);
-    env[0] = SOCKET_VALUE(sock, OBJECT);
-    env[1] = err;
+    Item* env = js_alloc_env2(SOCKET_VALUE(sock, OBJECT), err);
     Item fn = js_new_native_closure(socket_emit_error_scheduled, 0, env, 2);
     js_next_tick_enqueue(fn);
 }
 
 static void socket_schedule_error_close_event(JsSocket* sock, Item err) {
     if (!sock || !SOCKET_VALUE(sock, OBJECT).item) return;
-    Item* env = js_alloc_env(2);
-    env[0] = SOCKET_VALUE(sock, OBJECT);
-    env[1] = err;
+    Item* env = js_alloc_env2(SOCKET_VALUE(sock, OBJECT), err);
     Item fn = js_new_native_closure(socket_emit_error_close_scheduled, 0, env, 2);
     js_next_tick_enqueue(fn);
 }
@@ -898,7 +892,6 @@ static void socket_handle_remote_eof(JsSocket* sock) {
 // One completion for a socket write, whether libuv accepted the submission or
 // rejected it: a rejected write also un-counts the bytes it never sent.
 static void socket_write_settled(void* ud, int status, const char* data, size_t len) {
-    (void)data; (void)len;
     SocketWriteReq* wreq = (SocketWriteReq*)ud;
     if (!wreq) return;
     JsSocket* sock = wreq->sock;
@@ -1049,8 +1042,7 @@ static Item socket_abort_reason(JsSocket* sock) {
 }
 
 static Item js_socket_abort_scheduled(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_undefined_item();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item self = env[0];
     JsSocket* sock = socket_from_object(self);
     if (!sock || sock->destroyed) return make_undefined_item();
@@ -1067,15 +1059,13 @@ static Item js_socket_abort_scheduled(Item env_item) {
 static void socket_schedule_abort(JsSocket* sock) {
     if (!sock || sock->destroyed || sock->abort_scheduled) return;
     sock->abort_scheduled = true;
-    Item* env = js_alloc_env(1);
-    env[0] = SOCKET_VALUE(sock, OBJECT);
+    Item* env = js_alloc_env1(SOCKET_VALUE(sock, OBJECT));
     Item fn = js_new_native_closure(js_socket_abort_scheduled, 0, env, 1);
     js_next_tick_enqueue(fn);
 }
 
 static Item js_socket_abort_signal_event(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_undefined_item();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item self = env[0];
     JsSocket* sock = socket_from_object(self);
     if (sock) socket_schedule_abort(sock);
@@ -1114,8 +1104,7 @@ static bool socket_configure_abort_signal(JsSocket* sock, Item signal) {
     Item add_fn = js_get_key_cstr(signal, "addEventListener");
     if (!is_callable(add_fn)) return false;
 
-    Item* env = js_alloc_env(1);
-    env[0] = SOCKET_VALUE(sock, OBJECT);
+    Item* env = js_alloc_env1(SOCKET_VALUE(sock, OBJECT));
     Item handler = js_new_native_closure(js_socket_abort_signal_event, 1, env, 1);
     Item args[2] = { make_string_item("abort"), handler };
     js_call_function(add_fn, signal, args, 2);
@@ -1468,8 +1457,7 @@ extern "C" void js_net_socket_tls_closed(Item socket_obj, bool had_error) {
 }
 
 static Item js_socket_timeout_fire(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_undefined_item();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item self = env[0];
     JsSocket* sock = socket_from_object(self);
     if (!sock || sock->destroyed) return make_undefined_item();
@@ -1504,8 +1492,7 @@ static Item js_socket_setTimeout(Item msecs, Item callback) {
     JsSocket* sock = socket_from_object(self);
     socket_clear_timeout(sock);
     if (delay > 0) {
-        Item* env = js_alloc_env(1);
-        env[0] = self;
+        Item* env = js_alloc_env1(self);
         Item fn = js_new_native_closure(js_socket_timeout_fire, 0, env, 1);
         Item timer = js_setTimeout(fn, (Item){.item = i2it((int64_t)delay)});
         if (sock) {
@@ -1771,8 +1758,7 @@ static bool socket_has_js_read_handle(JsSocket* sock, Item* out_handle) {
 }
 
 static Item js_socket_js_handle_close_done(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_undefined_item();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item self = env[0];
     JsSocket* sock = socket_from_object(self);
     if (sock && !sock->destroyed) {
@@ -1796,8 +1782,7 @@ static Item js_socket_js_handle_onread(void) {
     socket_update_readable(sock, false);
     socket_emit(self, "end", NULL, 0);
 
-    Item* env = js_alloc_env(1);
-    env[0] = self;
+    Item* env = js_alloc_env1(self);
     Item close_done = js_new_native_closure(js_socket_js_handle_close_done, 0, env, 1);
     Item close_fn = js_get_key_cstr(handle, "close");
     if (is_callable(close_fn)) {
@@ -1930,23 +1915,12 @@ struct NetRealmItems {
 };
 
 static bool net_realm_items(NetRealmItems* items, bool reserve) {
-    if (!items || !js_active_runtime_state) return false;
-    static const JsRealmSlotId slot_ids[] = {
+    JS_REALM_ITEMS_FILL(NetRealmItems, items, reserve,
         JS_REALM_SLOT_NET_NAMESPACE,
         JS_REALM_SLOT_NET_SOCKET_PROTOTYPE,
         JS_REALM_SLOT_NET_SERVER_PROTOTYPE,
         JS_REALM_SLOT_NET_SOCKET_CONNECT_FUNCTION,
-        JS_REALM_SLOT_NET_STREAM_SOCKET_CONSTRUCTOR,
-    };
-    Item* values[5] = {};
-    if (!js_realm_slots_lookup(&js_runtime_state.realm_slots, slot_ids, values,
-            5, reserve)) return false;
-    items->namespace_object = values[0];
-    items->socket_prototype = values[1];
-    items->server_prototype = values[2];
-    items->socket_connect_function = values[3];
-    items->stream_socket_constructor = values[4];
-    return true;
+        JS_REALM_SLOT_NET_STREAM_SOCKET_CONSTRUCTOR);
 }
 
 static Item* net_realm_slot_existing(JsRealmSlotId slot) {
@@ -3345,8 +3319,7 @@ static bool net_copy_lookup_address(Item value, char* out, int out_size, int* ou
 }
 
 static Item net_connect_lookup_fail_scheduled(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_undefined_item();
+    JS_ENV_OR_UNDEFINED(env, env_item);
 
     Item self = env[0];
     Item err = env[1];
@@ -3367,6 +3340,9 @@ static Item net_connect_lookup_fail_scheduled(Item env_item) {
 static void net_connect_lookup_fail(NetResolveReq* nr, Item err) {
     if (!nr || !nr->sock) return;
     JsSocket* sock = nr->sock;
+    // Kept explicit: the host string must be stored into the traced env slot
+    // before anything else can allocate, so it is never a bare temporary
+    // across the env allocation.
     Item* env = js_alloc_env(3);
     env[0] = SOCKET_VALUE(sock, OBJECT);
     env[1] = err;
@@ -3376,8 +3352,7 @@ static void net_connect_lookup_fail(NetResolveReq* nr, Item err) {
 }
 
 static Item net_lookup_complete(Item env_item, Item rest_args) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_undefined_item();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     NetResolveReq* nr = (NetResolveReq*)(uintptr_t)it2i(env[0]);
     if (!nr) return make_undefined_item();
 
@@ -3674,8 +3649,7 @@ static int socket_start_connect(JsSocket* sock, const NetConnectOptions* options
         if (auto_select_family) {
             js_set_key_cstr(lookup_options, "all", (Item){.item = ITEM_TRUE});
         }
-        Item* env = js_alloc_env(1);
-        env[0] = (Item){.item = i2it((int64_t)(uintptr_t)nr)};
+        Item* env = js_alloc_env1((Item){.item = i2it((int64_t)(uintptr_t)nr)});
         Item callback = js_new_native_closure(net_lookup_complete, -1, env, 1);
         Item args[3] = { make_string_item(options->host), lookup_options, callback };
         Item lookup_result = js_call_function(options->lookup, make_undefined_item(), args, 3);
@@ -4209,8 +4183,7 @@ static bool net_capture_rejections_enabled(void) {
 }
 
 static Item server_connection_rejection(Item env_item, Item reason) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_undefined_item();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item client_obj = env[0];
     JsSocket* sock = socket_from_object(client_obj);
     if (!sock || sock->destroyed) return make_undefined_item();
@@ -4222,8 +4195,7 @@ static Item server_connection_rejection(Item env_item, Item reason) {
 static void server_capture_connection_rejection(Item result, Item client_obj) {
     if (!net_capture_rejections_enabled()) return;
     if (get_type_id(result) != LMD_TYPE_MAP || js_class_id(result) != JS_CLASS_PROMISE) return;
-    Item* env = js_alloc_env(1);
-    env[0] = client_obj;
+    Item* env = js_alloc_env1(client_obj);
     Item reject = js_new_native_closure(server_connection_rejection, 1, env, 1);
     js_promise_then(result, make_undefined_item(), reject);
 }
@@ -4304,7 +4276,6 @@ static Item server_accept_client(JsServer* srv, JsSocket* client, Item client_ha
 }
 
 static Item js_server_handle_onconnection(Item err_item, Item client_handle) {
-    (void)err_item;
     Item self = js_get_this();
     JsServer* srv = server_from_handle_object(self);
     JsSocket* client = socket_from_handle_object(client_handle);
@@ -4506,8 +4477,7 @@ static void server_connection_cb(uv_stream_t* server, int status) {
 }
 
 static Item js_server_emit_listening_scheduled(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_undefined_item();
+    JS_ENV_OR_UNDEFINED(env, env_item);
 
     Item self = env[0];
     Item callback = env[1];
@@ -4533,9 +4503,7 @@ static void server_schedule_listening(Item self, JsServer* srv, Item callback) {
     if (!srv || srv->closed) return;
     srv->listen_pending = true;
 
-    Item* env = js_alloc_env(2);
-    env[0] = self;
-    env[1] = callback;
+    Item* env = js_alloc_env2(self, callback);
     Item fn = js_new_native_closure(js_server_emit_listening_scheduled, 0, env, 2);
     // listen callbacks must run after the current JS stack, not inside the
     // listen() native call; cluster setup assigns workers immediately after it.
@@ -4543,8 +4511,7 @@ static void server_schedule_listening(Item self, JsServer* srv, Item callback) {
 }
 
 static Item js_server_emit_error_scheduled(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_undefined_item();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item self = env[0];
     Item err = env[1];
     server_emit(self, "error", &err, 1);
@@ -4552,9 +4519,7 @@ static Item js_server_emit_error_scheduled(Item env_item) {
 }
 
 static void server_schedule_error(Item self, Item err) {
-    Item* env = js_alloc_env(2);
-    env[0] = self;
-    env[1] = err;
+    Item* env = js_alloc_env2(self, err);
     Item fn = js_new_native_closure(js_server_emit_error_scheduled, 0, env, 2);
     js_next_tick_enqueue(fn);
 }
@@ -4592,8 +4557,7 @@ static bool server_signal_is_aborted(Item signal) {
 }
 
 static Item js_server_abort_signal_event(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_undefined_item();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item self = env[0];
     Item close_fn = js_get_key_cstr(self, "close");
     if (is_callable(close_fn)) {
@@ -4612,8 +4576,7 @@ static Item server_configure_listen_signal(Item self, Item signal, bool* out_abo
     if (out_aborted) *out_aborted = server_signal_is_aborted(signal);
     Item add_fn = js_get_key_cstr(signal, "addEventListener");
     if (is_callable(add_fn)) {
-        Item* env = js_alloc_env(1);
-        env[0] = self;
+        Item* env = js_alloc_env1(self);
         Item handler = js_new_native_closure(js_server_abort_signal_event, 0, env, 1);
         Item args[2] = { make_string_item("abort"), handler };
         js_call_function(add_fn, signal, args, 2);
@@ -4909,8 +4872,7 @@ JS_FORWARD_STATIC_ITEM(js_server_ref, (void), js_server_ref_or_unref, (true))
 JS_FORWARD_STATIC_ITEM(js_server_unref, (void), js_server_ref_or_unref, (false))
 
 static Item js_server_getConnections_later(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_undefined_item();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item self = env[0];
     Item callback = env[1];
     Item count = env[2];
@@ -4928,10 +4890,7 @@ static Item js_server_getConnections(Item callback) {
     JsServer* srv = server_from_object(self);
     int connections = srv ? srv->connection_count : 0;
     if (is_callable(callback)) {
-        Item* env = js_alloc_env(3);
-        env[0] = self;
-        env[1] = callback;
-        env[2] = (Item){.item = i2it(connections)};
+        Item* env = js_alloc_env3(self, callback, (Item){.item = i2it(connections)});
         // getConnections is asynchronous in Node; calling the callback inside
         // an IPC message listener reenters teardown before transfer accounting settles.
         js_next_tick_enqueue(js_new_native_closure(js_server_getConnections_later, 0, env, 3));
@@ -5075,7 +5034,6 @@ extern "C" Item js_net_createServer(Item rest_args) {
 }
 
 static Item make_server_object_from_fd(uv_loop_t* loop, int fd) {
-    (void)loop;
     Item args = js_array_new(0);
     Item obj = js_net_createServer(args);
     JsServer* srv = server_from_object(obj);
@@ -5244,7 +5202,6 @@ static Item js_block_list_check(Item address, Item type) {
 JS_FORWARD_STATIC_EXPRESSION(Item, js_block_list_isBlockList, (Item value), ((Item){.item = b2it(net_block_list_from_item(value) != NULL)}))
 
 extern "C" Item js_net_BlockList(Item options) {
-    (void)options;
     NetBlockList* list = net_block_list_alloc();
     Item obj = js_new_object();
     if (list) {
@@ -5259,15 +5216,13 @@ extern "C" Item js_net_BlockList(Item options) {
 }
 
 static Item js_stream_wrap_emit_error(Item env_item, Item err) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_undefined_item();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     socket_emit(env[0], "error", &err, 1);
     return make_undefined_item();
 }
 
 static Item js_stream_wrap_emit_terminal(Item env_item, bool close_event) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_undefined_item();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item wrap = env[0];
     const char* state_key = close_event
         ? "__stream_wrap_closed__" : "__stream_wrap_ended__";
@@ -5301,8 +5256,7 @@ static bool js_stream_wrap_terminal_event_observed(Item self, Item event_item) {
 }
 
 static Item js_stream_wrap_replay_terminal_listener(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_undefined_item();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item self = env[0];
     Item event_item = env[1];
     Item callback = env[2];
@@ -5347,8 +5301,7 @@ static Item js_stream_wrap_destroy(void) {
     if (is_callable(destroy)) {
         js_call_function(destroy, stream, NULL, 0);
     } else {
-        Item* env = js_alloc_env(1);
-        env[0] = self;
+        Item* env = js_alloc_env1(self);
         js_stream_wrap_emit_close((Item){.item = i2it((int64_t)(uintptr_t)env)});
     }
     return self;
@@ -5370,8 +5323,7 @@ extern "C" Item js_internal_js_stream_socket_constructor(Item stream) {
 
     Item on = js_get_key_cstr(stream, "on");
     if (is_callable(on)) {
-        Item* env = js_alloc_env(1);
-        env[0] = wrap;
+        Item* env = js_alloc_env1(wrap);
         // JSStreamSocket is a view over a real stream; missing these mirrors
         // leaves destroy EOF/close tests waiting on unobservable terminal events.
         Item args[2] = { make_string_item("error"),

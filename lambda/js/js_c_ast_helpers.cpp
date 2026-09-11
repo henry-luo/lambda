@@ -38,69 +38,69 @@ void js_report_any_census(JsTranspiler* tp) {
 JsOperator js_operator_from_string(const char* op_str, size_t len) {
     if (len == 1) {
         switch (op_str[0]) {
-        case '+': return JS_OP_ADD;
-        case '-': return JS_OP_SUB;
-        case '*': return JS_OP_MUL;
-        case '/': return JS_OP_DIV;
-        case '%': return JS_OP_MOD;
-        case '<': return JS_OP_LT;
-        case '>': return JS_OP_GT;
-        case '!': return JS_OP_NOT;
-        case '~': return JS_OP_BIT_NOT;
-        case '&': return JS_OP_BIT_AND;
-        case '|': return JS_OP_BIT_OR;
-        case '^': return JS_OP_BIT_XOR;
-        case '=': return JS_OP_ASSIGN;
+        case '+': return OPERATOR_ADD;
+        case '-': return OPERATOR_SUB;
+        case '*': return OPERATOR_MUL;
+        case '/': return OPERATOR_DIV;
+        case '%': return OPERATOR_MOD;
+        case '<': return OPERATOR_LT;
+        case '>': return OPERATOR_GT;
+        case '!': return OPERATOR_NOT;
+        case '~': return OPERATOR_JS_BIT_NOT;
+        case '&': return OPERATOR_JS_BIT_AND;
+        case '|': return OPERATOR_JS_BIT_OR;
+        case '^': return OPERATOR_JS_BIT_XOR;
+        case '=': return OPERATOR_ASSIGN;
         }
     } else if (len == 2) {
-        if (strncmp(op_str, "==", 2) == 0) return JS_OP_EQ;
-        if (strncmp(op_str, "!=", 2) == 0) return JS_OP_NE;
-        if (strncmp(op_str, "<=", 2) == 0) return JS_OP_LE;
-        if (strncmp(op_str, ">=", 2) == 0) return JS_OP_GE;
-        if (strncmp(op_str, "&&", 2) == 0) return JS_OP_AND;
-        if (strncmp(op_str, "||", 2) == 0) return JS_OP_OR;
-        if (strncmp(op_str, "<<", 2) == 0) return JS_OP_BIT_LSHIFT;
-        if (strncmp(op_str, ">>", 2) == 0) return JS_OP_BIT_RSHIFT;
-        if (strncmp(op_str, "**", 2) == 0) return JS_OP_EXP;
-        if (strncmp(op_str, "++", 2) == 0) return JS_OP_INCREMENT;
-        if (strncmp(op_str, "--", 2) == 0) return JS_OP_DECREMENT;
-        if (strncmp(op_str, "+=", 2) == 0) return JS_OP_ADD_ASSIGN;
-        if (strncmp(op_str, "-=", 2) == 0) return JS_OP_SUB_ASSIGN;
-        if (strncmp(op_str, "*=", 2) == 0) return JS_OP_MUL_ASSIGN;
-        if (strncmp(op_str, "/=", 2) == 0) return JS_OP_DIV_ASSIGN;
-        if (strncmp(op_str, "%=", 2) == 0) return JS_OP_MOD_ASSIGN;
-        if (strncmp(op_str, "&=", 2) == 0) return JS_OP_BIT_AND_ASSIGN;
-        if (strncmp(op_str, "|=", 2) == 0) return JS_OP_BIT_OR_ASSIGN;
-        if (strncmp(op_str, "^=", 2) == 0) return JS_OP_BIT_XOR_ASSIGN;
-        if (strncmp(op_str, "??", 2) == 0) return JS_OP_NULLISH_COALESCE;
-        if (strncmp(op_str, "in", 2) == 0) return JS_OP_IN;
+        if (strncmp(op_str, "==", 2) == 0) return OPERATOR_EQ;
+        if (strncmp(op_str, "!=", 2) == 0) return OPERATOR_NE;
+        if (strncmp(op_str, "<=", 2) == 0) return OPERATOR_LE;
+        if (strncmp(op_str, ">=", 2) == 0) return OPERATOR_GE;
+        if (strncmp(op_str, "&&", 2) == 0) return OPERATOR_AND;
+        if (strncmp(op_str, "||", 2) == 0) return OPERATOR_OR;
+        if (strncmp(op_str, "<<", 2) == 0) return OPERATOR_JS_LSHIFT;
+        if (strncmp(op_str, ">>", 2) == 0) return OPERATOR_JS_RSHIFT;
+        if (strncmp(op_str, "**", 2) == 0) return OPERATOR_JS_EXP;
+        if (strncmp(op_str, "++", 2) == 0) return OPERATOR_JS_INCREMENT;
+        if (strncmp(op_str, "--", 2) == 0) return OPERATOR_JS_DECREMENT;
+        if (strncmp(op_str, "+=", 2) == 0) return OPERATOR_JS_ADD_ASSIGN;
+        if (strncmp(op_str, "-=", 2) == 0) return OPERATOR_JS_SUB_ASSIGN;
+        if (strncmp(op_str, "*=", 2) == 0) return OPERATOR_JS_MUL_ASSIGN;
+        if (strncmp(op_str, "/=", 2) == 0) return OPERATOR_JS_DIV_ASSIGN;
+        if (strncmp(op_str, "%=", 2) == 0) return OPERATOR_JS_MOD_ASSIGN;
+        if (strncmp(op_str, "&=", 2) == 0) return OPERATOR_JS_BIT_AND_ASSIGN;
+        if (strncmp(op_str, "|=", 2) == 0) return OPERATOR_JS_BIT_OR_ASSIGN;
+        if (strncmp(op_str, "^=", 2) == 0) return OPERATOR_JS_BIT_XOR_ASSIGN;
+        if (strncmp(op_str, "??", 2) == 0) return OPERATOR_JS_NULLISH_COALESCE;
+        if (strncmp(op_str, "in", 2) == 0) return OPERATOR_IN;
     } else if (len == 3) {
-        if (strncmp(op_str, "===", 3) == 0) return JS_OP_STRICT_EQ;
-        if (strncmp(op_str, "!==", 3) == 0) return JS_OP_STRICT_NE;
-        if (strncmp(op_str, ">>>", 3) == 0) return JS_OP_BIT_URSHIFT;
-        if (strncmp(op_str, "**=", 3) == 0) return JS_OP_EXP_ASSIGN;
-        if (strncmp(op_str, "<<=", 3) == 0) return JS_OP_LSHIFT_ASSIGN;
-        if (strncmp(op_str, ">>=", 3) == 0) return JS_OP_RSHIFT_ASSIGN;
-        if (strncmp(op_str, "?\?=", 3) == 0) return JS_OP_NULLISH_ASSIGN;
-        if (strncmp(op_str, "&&=", 3) == 0) return JS_OP_AND_ASSIGN;
-        if (strncmp(op_str, "||=", 3) == 0) return JS_OP_OR_ASSIGN;
+        if (strncmp(op_str, "===", 3) == 0) return OPERATOR_JS_STRICT_EQ;
+        if (strncmp(op_str, "!==", 3) == 0) return OPERATOR_JS_STRICT_NE;
+        if (strncmp(op_str, ">>>", 3) == 0) return OPERATOR_JS_URSHIFT;
+        if (strncmp(op_str, "**=", 3) == 0) return OPERATOR_JS_EXP_ASSIGN;
+        if (strncmp(op_str, "<<=", 3) == 0) return OPERATOR_JS_LSHIFT_ASSIGN;
+        if (strncmp(op_str, ">>=", 3) == 0) return OPERATOR_JS_RSHIFT_ASSIGN;
+        if (strncmp(op_str, "?\?=", 3) == 0) return OPERATOR_JS_NULLISH_ASSIGN;
+        if (strncmp(op_str, "&&=", 3) == 0) return OPERATOR_JS_AND_ASSIGN;
+        if (strncmp(op_str, "||=", 3) == 0) return OPERATOR_JS_OR_ASSIGN;
     } else if (len == 4) {
-        if (strncmp(op_str, "void", 4) == 0) return JS_OP_VOID;
-        if (strncmp(op_str, ">>>=", 4) == 0) return JS_OP_URSHIFT_ASSIGN;
+        if (strncmp(op_str, "void", 4) == 0) return OPERATOR_JS_VOID;
+        if (strncmp(op_str, ">>>=", 4) == 0) return OPERATOR_JS_URSHIFT_ASSIGN;
     } else if (len == 6) {
-        if (strncmp(op_str, "typeof", 6) == 0) return JS_OP_TYPEOF;
-        if (strncmp(op_str, "delete", 6) == 0) return JS_OP_DELETE;
+        if (strncmp(op_str, "typeof", 6) == 0) return OPERATOR_JS_TYPEOF;
+        if (strncmp(op_str, "delete", 6) == 0) return OPERATOR_JS_DELETE;
     } else if (len == 10) {
-        if (strncmp(op_str, "instanceof", 10) == 0) return JS_OP_INSTANCEOF;
+        if (strncmp(op_str, "instanceof", 10) == 0) return OPERATOR_JS_INSTANCEOF;
     }
 
     log_error("Unknown JavaScript operator: %.*s", (int)len, op_str);
-    return JS_OP_ADD;
+    return OPERATOR_ADD;
 }
 
 JsOperator js_unary_operator_from_string(const char* op_str, size_t len) {
-    if (len == 1 && op_str[0] == '+') return JS_OP_PLUS;
-    if (len == 1 && op_str[0] == '-') return JS_OP_MINUS;
+    if (len == 1 && op_str[0] == '+') return OPERATOR_POS;
+    if (len == 1 && op_str[0] == '-') return OPERATOR_NEG;
     return js_operator_from_string(op_str, len);
 }
 
@@ -120,15 +120,8 @@ static char js_c_decode_escape_char(char c) {
     }
 }
 
-static int js_c_hex_value(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
-}
-
 static bool js_c_hex_char(char c) {
-    return js_c_hex_value(c) >= 0;
+    return str_hex_val(c) >= 0;
 }
 
 static size_t js_c_wtf8_encode(uint32_t cp, char* out) {
@@ -175,7 +168,7 @@ static bool js_c_template_invalid_escape_at(const char* source, size_t length,
             if (cursor >= length || !js_c_hex_char(source[cursor])) return true;
             while (cursor < length && js_c_hex_char(source[cursor])) {
                 codepoint = (codepoint << 4) |
-                    (uint32_t)js_c_hex_value(source[cursor++]);
+                    (uint32_t)str_hex_val(source[cursor++]);
                 if (codepoint > 0x10FFFF) return true;
             }
             return cursor >= length || source[cursor] != '}';
@@ -204,7 +197,7 @@ static size_t js_c_decode_unicode_escape(const char* source, size_t length,
         if (digit_pos >= length || !js_c_hex_char(source[digit_pos])) return 0;
         while (digit_pos < length && js_c_hex_char(source[digit_pos])) {
             codepoint = (codepoint << 4) |
-                (uint32_t)js_c_hex_value(source[digit_pos++]);
+                (uint32_t)str_hex_val(source[digit_pos++]);
             if (codepoint > 0x10FFFF) return 0;
         }
         if (digit_pos >= length || source[digit_pos] != '}') return 0;
@@ -214,7 +207,7 @@ static size_t js_c_decode_unicode_escape(const char* source, size_t length,
     if (pos + 4 >= length) return 0;
     uint32_t codepoint = 0;
     for (size_t i = 1; i <= 4; i++) {
-        int digit = js_c_hex_value(source[pos + i]);
+        int digit = str_hex_val(source[pos + i]);
         if (digit < 0) return 0;
         codepoint = (codepoint << 4) | (uint32_t)digit;
     }
@@ -229,7 +222,7 @@ static size_t js_c_decode_unicode_escape(const char* source, size_t length,
         uint32_t low = 0;
         bool valid_low = true;
         for (size_t i = 0; i < 4; i++) {
-            int digit = js_c_hex_value(source[trail + i]);
+            int digit = str_hex_val(source[trail + i]);
             if (digit < 0) {
                 valid_low = false;
                 break;
@@ -323,10 +316,10 @@ JsAstNode* alloc_js_ast_node_span(JsTranspiler* tp, JsAstNodeType node_type,
 JsAstNode* build_js_literal_from_source(JsTranspiler* tp, const char* node_type,
         StrView source, SourceSpan span) {
     JsLiteralNode* literal = (JsLiteralNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_LITERAL, span, sizeof(JsLiteralNode));
+        AST_NODE_LITERAL, span, sizeof(JsLiteralNode));
 
     if (strcmp(node_type, "number") == 0) {
-        literal->literal_type = JS_LITERAL_NUMBER;
+        literal->literal_type = AST_LITERAL_NUMBER;
         // Check if source text ends with 'n' (BigInt literal)
         literal->is_bigint = (source.length > 0 && source.str[source.length - 1] == 'n');
         // Check if source text contains '.' or 'e'/'E' (fractional/scientific hint)
@@ -387,7 +380,7 @@ JsAstNode* build_js_literal_from_source(JsTranspiler* tp, const char* node_type,
         // number inference reinterpret its preserved integer spelling.
         literal->type = literal->is_bigint ? &TYPE_DECIMAL : &TYPE_FLOAT;
     } else if (strcmp(node_type, "string") == 0) {
-        literal->literal_type = JS_LITERAL_STRING;
+        literal->literal_type = AST_LITERAL_STRING;
         // Remove quotes and handle escape sequences
         if (source.length >= 2) {
             size_t content_len = source.length - 2;
@@ -484,15 +477,15 @@ JsAstNode* build_js_literal_from_source(JsTranspiler* tp, const char* node_type,
         }
         literal->type = &TYPE_STRING;
     } else if (strcmp(node_type, "true") == 0) {
-        literal->literal_type = JS_LITERAL_BOOLEAN;
+        literal->literal_type = AST_LITERAL_BOOLEAN;
         literal->value.boolean_value = true;
         literal->type = &TYPE_BOOL;
     } else if (strcmp(node_type, "false") == 0) {
-        literal->literal_type = JS_LITERAL_BOOLEAN;
+        literal->literal_type = AST_LITERAL_BOOLEAN;
         literal->value.boolean_value = false;
         literal->type = &TYPE_BOOL;
     } else if (strcmp(node_type, "null") == 0) {
-        literal->literal_type = JS_LITERAL_NULL;
+        literal->literal_type = AST_LITERAL_NULL;
         literal->type = &TYPE_NULL;
     }
 
@@ -503,7 +496,7 @@ JsAstNode* build_js_literal_from_source(JsTranspiler* tp, const char* node_type,
 JsAstNode* build_js_identifier_from_source(JsTranspiler* tp, StrView source,
         SourceSpan span) {
     JsIdentifierNode* identifier = (JsIdentifierNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_IDENTIFIER, span, sizeof(JsIdentifierNode));
+        AST_NODE_IDENT, span, sizeof(JsIdentifierNode));
     if (source.length == 0) {
         log_error("Empty identifier source");
         return NULL;
@@ -524,7 +517,7 @@ JsAstNode* build_js_identifier_from_source(JsTranspiler* tp, StrView source,
 
 JsAstNode* build_js_new_target_from_span(JsTranspiler* tp, SourceSpan span) {
     JsIdentifierNode* identifier = (JsIdentifierNode*)alloc_js_ast_node_span(
-        tp, JS_AST_NODE_IDENTIFIER, span, sizeof(JsIdentifierNode));
+        tp, AST_NODE_IDENT, span, sizeof(JsIdentifierNode));
     identifier->name = name_pool_create_len(tp->name_pool, "new.target", 10);
     identifier->entry = NULL;
     identifier->type = js_set_type_any(tp, ANY_STATEMENT);
@@ -546,14 +539,14 @@ void refresh_js_binary_type(JsTranspiler* tp, JsBinaryNode* binary) {
     // their operands, so those need their operands' types rather than a
     // fixed answer.
     switch (binary->op) {
-    case JS_OP_EQ: case JS_OP_NE:
-    case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
-    case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
-    case JS_OP_INSTANCEOF: case JS_OP_IN:
+    case OPERATOR_EQ: case OPERATOR_NE:
+    case OPERATOR_JS_STRICT_EQ: case OPERATOR_JS_STRICT_NE:
+    case OPERATOR_LT: case OPERATOR_LE: case OPERATOR_GT: case OPERATOR_GE:
+    case OPERATOR_JS_INSTANCEOF: case OPERATOR_IN:
         // Relational, equality and membership tests are total predicates.
         binary->type = &TYPE_BOOL;
         break;
-    case JS_OP_ADD: {
+    case OPERATOR_ADD: {
         // `+` is string concatenation when either side is a string, numeric
         // addition otherwise. Only a proven pair answers; anything open stays
         // open rather than guessing one of the two behaviors.
@@ -570,7 +563,7 @@ void refresh_js_binary_type(JsTranspiler* tp, JsBinaryNode* binary) {
         }
         break;
     }
-    case JS_OP_AND: case JS_OP_OR: case JS_OP_NULLISH_COALESCE:
+    case OPERATOR_AND: case OPERATOR_OR: case OPERATOR_JS_NULLISH_COALESCE:
         // These yield one OPERAND, never a coerced number. Both constituents
         // reach the result, so the answer is their union when both are known.
         if (binary->left && binary->right && binary->left->type &&
@@ -611,7 +604,7 @@ void refresh_js_conditional_type(JsTranspiler* tp,
 JsAstNode* build_js_binary_from_children(JsTranspiler* tp, SourceSpan span,
         JsOperator op, JsAstNode* left, JsAstNode* right) {
     JsBinaryNode* binary = (JsBinaryNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_BINARY_EXPRESSION, span, sizeof(JsBinaryNode));
+        AST_NODE_BINARY, span, sizeof(JsBinaryNode));
     binary->left = left;
     binary->right = right;
     binary->op = op;
@@ -624,34 +617,34 @@ JsAstNode* build_js_binary_from_children(JsTranspiler* tp, SourceSpan span,
 JsAstNode* build_js_unary_from_child(JsTranspiler* tp, SourceSpan span,
         JsOperator op, JsAstNode* operand, bool prefix) {
     JsUnaryNode* unary = (JsUnaryNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_UNARY_EXPRESSION, span, sizeof(JsUnaryNode));
+        AST_NODE_UNARY, span, sizeof(JsUnaryNode));
     unary->operand = operand;
     unary->op = op;
     unary->prefix = prefix;
 
     // Infer result type
     switch (unary->op) {
-        case JS_OP_NOT:
+        case OPERATOR_NOT:
             unary->type = &TYPE_BOOL;
             break;
-        case JS_OP_TYPEOF:
+        case OPERATOR_JS_TYPEOF:
             unary->type = &TYPE_STRING;
             break;
-        case JS_OP_PLUS:
-        case JS_OP_MINUS:
-        case JS_OP_BIT_NOT:
+        case OPERATOR_POS:
+        case OPERATOR_NEG:
+        case OPERATOR_JS_BIT_NOT:
             unary->type = &TYPE_FLOAT;
             break;
-        case JS_OP_INCREMENT:
-        case JS_OP_DECREMENT:
+        case OPERATOR_JS_INCREMENT:
+        case OPERATOR_JS_DECREMENT:
             // update expressions produce a JavaScript Number even when the
             // referenced property has an open static type.
             unary->type = &TYPE_FLOAT;
             break;
-        case JS_OP_DELETE:
+        case OPERATOR_JS_DELETE:
             unary->type = &TYPE_BOOL;
             break;
-        case JS_OP_VOID:
+        case OPERATOR_JS_VOID:
             unary->type = &TYPE_NULL; // void always returns undefined
             break;
         default:
@@ -669,7 +662,7 @@ JsAstNode* build_js_call_from_children(JsTranspiler* tp, SourceSpan span,
         return NULL;
     }
     JsCallNode* call = (JsCallNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_CALL_EXPRESSION, span, sizeof(JsCallNode));
+        AST_NODE_CALL_EXPR, span, sizeof(JsCallNode));
     call->callee = callee;
     call->arguments = arguments;
     call->optional = optional;
@@ -685,7 +678,7 @@ JsAstNode* build_js_new_from_children(JsTranspiler* tp, SourceSpan span,
         return NULL;
     }
     JsCallNode* call = (JsCallNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_NEW_EXPRESSION, span, sizeof(JsCallNode));
+        AST_NODE_NEW_EXPR, span, sizeof(JsCallNode));
     call->callee = callee;
     call->arguments = arguments;
     call->type = js_set_type_any(tp, ANY_JS_CALL);
@@ -717,13 +710,6 @@ JsAstNode* build_js_regex_from_source(JsTranspiler* tp, StrView source,
     regex->flags_len = flags ? (int)flags->len : 0;
     regex->type = js_set_type_any(tp, ANY_OPEN_PARAM);
     return (JsAstNode*)regex;
-}
-
-static int js_template_hex_value(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
 }
 
 static String* js_template_cooked_string(JsTranspiler* tp,
@@ -760,8 +746,8 @@ static String* js_template_cooked_string(JsTranspiler* tp,
         if (escaped == 'x' && i + 3 < length &&
                 js_template_hex_char(source[i + 2]) &&
                 js_template_hex_char(source[i + 3])) {
-            int value = (js_template_hex_value(source[i + 2]) << 4) |
-                js_template_hex_value(source[i + 3]);
+            int value = (str_hex_val(source[i + 2]) << 4) |
+                str_hex_val(source[i + 3]);
             out += utf8_encode((uint32_t)value, cooked + out);
             i += 4;
             continue;
@@ -771,7 +757,7 @@ static String* js_template_cooked_string(JsTranspiler* tp,
             uint32_t value = 0;
             while (end < length && source[end] != '}') {
                 value = (value << 4) |
-                    (uint32_t)js_template_hex_value(source[end]);
+                    (uint32_t)str_hex_val(source[end]);
                 end++;
             }
             out += wtf8_encode(value, cooked + out);
@@ -783,10 +769,10 @@ static String* js_template_cooked_string(JsTranspiler* tp,
                 js_template_hex_char(source[i + 3]) &&
                 js_template_hex_char(source[i + 4]) &&
                 js_template_hex_char(source[i + 5])) {
-            uint32_t value = (uint32_t)js_template_hex_value(source[i + 2]);
-            value = (value << 4) | (uint32_t)js_template_hex_value(source[i + 3]);
-            value = (value << 4) | (uint32_t)js_template_hex_value(source[i + 4]);
-            value = (value << 4) | (uint32_t)js_template_hex_value(source[i + 5]);
+            uint32_t value = (uint32_t)str_hex_val(source[i + 2]);
+            value = (value << 4) | (uint32_t)str_hex_val(source[i + 3]);
+            value = (value << 4) | (uint32_t)str_hex_val(source[i + 4]);
+            value = (value << 4) | (uint32_t)str_hex_val(source[i + 5]);
             out += wtf8_encode(value, cooked + out);
             i += 6;
             continue;
@@ -901,7 +887,7 @@ JsAstNode* build_js_template_from_source(JsTranspiler* tp, StrView source,
 JsAstNode* build_js_await_from_child(JsTranspiler* tp, SourceSpan span,
         JsAstNode* argument) {
     JsAwaitNode* await_node = (JsAwaitNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_AWAIT_EXPRESSION, span, sizeof(JsAwaitNode));
+        AST_NODE_AWAIT, span, sizeof(JsAwaitNode));
     await_node->argument = argument;
     await_node->type = js_set_type_any(tp, ANY_STATEMENT);
     return (JsAstNode*)await_node;
@@ -910,7 +896,7 @@ JsAstNode* build_js_await_from_child(JsTranspiler* tp, SourceSpan span,
 JsAstNode* build_js_yield_from_child(JsTranspiler* tp, SourceSpan span,
         JsAstNode* argument, bool delegate) {
     JsYieldNode* yield_node = (JsYieldNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_YIELD_EXPRESSION, span, sizeof(JsYieldNode));
+        AST_NODE_YIELD, span, sizeof(JsYieldNode));
     yield_node->argument = argument;
     yield_node->delegate = delegate;
     yield_node->type = js_set_type_any(tp, ANY_STATEMENT);
@@ -920,7 +906,7 @@ JsAstNode* build_js_yield_from_child(JsTranspiler* tp, SourceSpan span,
 static Type* resolve_js_member_type(JsMemberNode* member) {
     if (!member || member->computed || !member->object ||
             !member->object->type || !member->property ||
-            member->property->node_type != JS_AST_NODE_IDENTIFIER) {
+            member->property->node_type != AST_NODE_IDENT) {
         return NULL;
     }
     Type* recv = member->object->type;
@@ -954,7 +940,7 @@ JsAstNode* build_js_member_from_children(JsTranspiler* tp, SourceSpan span,
         return NULL;
     }
     JsMemberNode* member = (JsMemberNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_MEMBER_EXPRESSION, span, sizeof(JsMemberNode));
+        AST_NODE_MEMBER_EXPR, span, sizeof(JsMemberNode));
     member->object = object;
     member->property = property;
     member->computed = computed;
@@ -978,14 +964,14 @@ static JsAstNode* build_js_array_like_from_list(JsTranspiler* tp,
 // build an array from parser-owned element children linked in source order
 JsAstNode* build_js_array_from_list(JsTranspiler* tp, SourceSpan span,
         JsAstNode* elements, uint32_t length) {
-    return build_js_array_like_from_list(tp, JS_AST_NODE_ARRAY_EXPRESSION,
+    return build_js_array_like_from_list(tp, AST_NODE_ARRAY,
         span, elements, length, &TYPE_ARRAY);
 }
 
 // build a comma sequence from parser-owned expression children
 JsAstNode* build_js_sequence_from_list(JsTranspiler* tp, SourceSpan span,
         JsAstNode* expressions, uint32_t length) {
-    return build_js_array_like_from_list(tp, JS_AST_NODE_SEQUENCE_EXPRESSION,
+    return build_js_array_like_from_list(tp, AST_NODE_SEQ,
         span, expressions, length, js_set_type_any(tp, ANY_JS_BINARY));
 }
 
@@ -997,11 +983,11 @@ JsAstNode* build_js_assignment_from_children(JsTranspiler* tp, SourceSpan span,
         return NULL;
     }
     JsAssignmentNode* assignment = (JsAssignmentNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_ASSIGNMENT_EXPRESSION, span, sizeof(JsAssignmentNode));
+        AST_NODE_ASSIGN, span, sizeof(JsAssignmentNode));
     assignment->op = op;
     assignment->left = left;
     assignment->right = right;
-    if (left->node_type == JS_AST_NODE_IDENTIFIER && tp && tp->source &&
+    if (left->node_type == AST_NODE_IDENT && tp && tp->source &&
             span.start_byte < left->source_span.start_byte &&
             left->source_span.start_byte <= tp->source_length) {
         // Parentheses are omitted from the direct AST expression node, but
@@ -1027,7 +1013,7 @@ JsAstNode* build_js_conditional_from_children(JsTranspiler* tp,
         return NULL;
     }
     JsConditionalNode* conditional = (JsConditionalNode*)alloc_js_ast_node_span(
-        tp, JS_AST_NODE_CONDITIONAL_EXPRESSION, span,
+        tp, AST_NODE_CONDITIONAL_EXPR, span,
         sizeof(JsConditionalNode));
     conditional->test = test;
     conditional->consequent = consequent;
@@ -1044,7 +1030,7 @@ JsAstNode* build_js_property_from_children(JsTranspiler* tp, SourceSpan span,
         return NULL;
     }
     JsPropertyNode* property = (JsPropertyNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_PROPERTY, span, sizeof(JsPropertyNode));
+        AST_NODE_PROPERTY, span, sizeof(JsPropertyNode));
     property->key = key;
     property->value = value ? value : key;
     property->computed = computed;
@@ -1061,20 +1047,20 @@ JsAstNode* build_js_spread_from_child(JsTranspiler* tp, SourceSpan span,
         return NULL;
     }
     JsSpreadElementNode* spread = (JsSpreadElementNode*)alloc_js_ast_node_span(
-        tp, JS_AST_NODE_SPREAD_ELEMENT, span, sizeof(JsSpreadElementNode));
+        tp, AST_NODE_SPREAD, span, sizeof(JsSpreadElementNode));
     spread->argument = argument;
     spread->type = &TYPE_ARRAY;
     return (JsAstNode*)spread;
 }
 
 void mark_js_object_spread(JsTranspiler* tp, JsAstNode* spread) {
-    if (!spread || spread->node_type != JS_AST_NODE_SPREAD_ELEMENT) return;
+    if (!spread || spread->node_type != AST_NODE_SPREAD) return;
     spread->type = js_set_type_any(tp, ANY_STATEMENT);
 }
 
 // build an explicit array elision so its slot survives AST lowering
 JsAstNode* build_js_array_hole(JsTranspiler* tp, SourceSpan span) {
-    JsAstNode* hole = alloc_js_ast_node_span(tp, JS_AST_NODE_NULL, span,
+    JsAstNode* hole = alloc_js_ast_node_span(tp, AST_NODE_NULL, span,
         sizeof(JsAstNode));
     if (hole) hole->type = js_set_type_any(tp, ANY_STATEMENT);
     return hole;
@@ -1082,15 +1068,14 @@ JsAstNode* build_js_array_hole(JsTranspiler* tp, SourceSpan span) {
 
 JsAstNode* build_js_pattern_array_from_list(JsTranspiler* tp, SourceSpan span,
         JsAstNode* elements, uint32_t length) {
-    return build_js_array_like_from_list(tp, JS_AST_NODE_ARRAY_PATTERN,
+    return build_js_array_like_from_list(tp, AST_NODE_ARRAY_PATTERN,
         span, elements, length, &TYPE_ARRAY);
 }
 
 JsAstNode* build_js_pattern_object_from_list(JsTranspiler* tp, SourceSpan span,
         JsAstNode* properties, uint32_t length) {
-    (void)length;
     JsObjectPatternNode* object = (JsObjectPatternNode*)alloc_js_ast_node_span(
-        tp, JS_AST_NODE_OBJECT_PATTERN, span, sizeof(JsObjectPatternNode));
+        tp, AST_NODE_MAP_PATTERN, span, sizeof(JsObjectPatternNode));
     object->properties = properties;
     object->type = js_set_type_any(tp, ANY_DECOMPOSE);
     return (JsAstNode*)object;
@@ -1104,7 +1089,7 @@ JsAstNode* build_js_assignment_pattern_from_children(JsTranspiler* tp,
     }
     JsAssignmentPatternNode* assignment =
         (JsAssignmentPatternNode*)alloc_js_ast_node_span(tp,
-            JS_AST_NODE_ASSIGNMENT_PATTERN, span,
+            AST_NODE_ASSIGN_PATTERN, span,
             sizeof(JsAssignmentPatternNode));
     assignment->left = left;
     assignment->right = right;
@@ -1120,7 +1105,7 @@ JsAstNode* build_js_rest_pattern_from_child(JsTranspiler* tp, SourceSpan span,
         return NULL;
     }
     JsSpreadElementNode* rest = (JsSpreadElementNode*)alloc_js_ast_node_span(
-                tp, property ? JS_AST_NODE_REST_PROPERTY : JS_AST_NODE_REST_ELEMENT,
+                tp, property ? AST_NODE_REST_PROPERTY : AST_NODE_REST_ELEMENT,
         span, sizeof(JsSpreadElementNode));
     rest->argument = argument;
     rest->type = property ? js_set_type_any(tp, ANY_DECOMPOSE) : &TYPE_ARRAY;
@@ -1135,7 +1120,7 @@ JsAstNode* build_js_pattern_property_from_children(JsTranspiler* tp,
         return NULL;
     }
     JsPropertyNode* property = (JsPropertyNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_PROPERTY, span, sizeof(JsPropertyNode));
+        AST_NODE_PROPERTY, span, sizeof(JsPropertyNode));
     property->key = key;
     property->value = value;
     property->computed = computed;
@@ -1149,7 +1134,7 @@ JsAstNode* build_js_pattern_property_from_children(JsTranspiler* tp,
 }
 
 JsAstNode* build_js_pattern_hole(JsTranspiler* tp, SourceSpan span) {
-    JsAstNode* hole = alloc_js_ast_node_span(tp, JS_AST_NODE_NULL, span,
+    JsAstNode* hole = alloc_js_ast_node_span(tp, AST_NODE_NULL, span,
         sizeof(JsAstNode));
     if (hole) hole->type = js_set_type_any(tp, ANY_DECOMPOSE);
     return hole;
@@ -1158,9 +1143,8 @@ JsAstNode* build_js_pattern_hole(JsTranspiler* tp, SourceSpan span) {
 // build an object from parser-owned property children linked in source order
 JsAstNode* build_js_object_from_list(JsTranspiler* tp, SourceSpan span,
         JsAstNode* properties, uint32_t length) {
-    (void)length;
     JsObjectNode* object = (JsObjectNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_OBJECT_EXPRESSION, span, sizeof(JsObjectNode));
+        AST_NODE_MAP, span, sizeof(JsObjectNode));
     object->properties = properties;
     object->type = &TYPE_MAP;
     return (JsAstNode*)object;
@@ -1175,7 +1159,7 @@ JsAstNode* build_js_declarator_from_children(JsTranspiler* tp, SourceSpan span,
     }
     JsVariableDeclaratorNode* declarator =
         (JsVariableDeclaratorNode*)alloc_js_ast_node_span(tp,
-            JS_AST_NODE_VARIABLE_DECLARATOR, span,
+            AST_NODE_VARIABLE_DECLARATOR, span,
             sizeof(JsVariableDeclaratorNode));
     declarator->id = id;
     declarator->init = init;
@@ -1201,10 +1185,9 @@ JsAstNode* build_js_declarator_with_type_from_children(JsTranspiler* tp,
 // build a variable declaration from parser-owned declarators
 JsAstNode* build_js_variable_declaration_from_list(JsTranspiler* tp,
         SourceSpan span, JsAstNode* declarations, uint32_t length, int kind) {
-    (void)length;
     JsVariableDeclarationNode* declaration =
         (JsVariableDeclarationNode*)alloc_js_ast_node_span(tp,
-            JS_AST_NODE_VARIABLE_DECLARATION, span,
+            AST_NODE_VAR_STAM, span,
             sizeof(JsVariableDeclarationNode));
     declaration->declarations = declarations;
     declaration->kind = kind;
@@ -1215,9 +1198,8 @@ JsAstNode* build_js_variable_declaration_from_list(JsTranspiler* tp,
 // build a block from parser-owned statement children
 JsAstNode* build_js_block_from_list(JsTranspiler* tp, SourceSpan span,
         JsAstNode* statements, uint32_t length) {
-    (void)length;
     JsBlockNode* block = (JsBlockNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_BLOCK_STATEMENT, span, sizeof(JsBlockNode));
+        AST_NODE_BLOCK, span, sizeof(JsBlockNode));
     block->statements = statements;
     block->type = &TYPE_NULL;
     return (JsAstNode*)block;
@@ -1228,7 +1210,7 @@ JsAstNode* build_js_block_from_list(JsTranspiler* tp, SourceSpan span,
 // expression statements; richer object syntax remains an object expression.
 JsAstNode* build_js_statement_block_from_object(JsTranspiler* tp,
         SourceSpan span, JsAstNode* object) {
-    if (!tp || !object || object->node_type != JS_AST_NODE_OBJECT_EXPRESSION) {
+    if (!tp || !object || object->node_type != AST_NODE_MAP) {
         return NULL;
     }
     JsObjectNode* object_node = (JsObjectNode*)object;
@@ -1236,9 +1218,9 @@ JsAstNode* build_js_statement_block_from_object(JsTranspiler* tp,
     JsAstNode* previous = NULL;
     for (JsAstNode* item = object_node->properties; item;
             item = (JsAstNode*)item->next) {
-        if (item->node_type != JS_AST_NODE_PROPERTY) return NULL;
+        if (item->node_type != AST_NODE_PROPERTY) return NULL;
         JsPropertyNode* property = (JsPropertyNode*)item;
-        if (!property->key || property->key->node_type != JS_AST_NODE_IDENTIFIER ||
+        if (!property->key || property->key->node_type != AST_NODE_IDENT ||
                 !property->value) return NULL;
         JsIdentifierNode* key = (JsIdentifierNode*)property->key;
         if (!key->name) return NULL;
@@ -1263,7 +1245,7 @@ JsAstNode* build_js_if_from_children(JsTranspiler* tp, SourceSpan span,
         return NULL;
     }
     JsIfNode* conditional = (JsIfNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_IF_STATEMENT, span, sizeof(JsIfNode));
+        AST_NODE_IF_EXPR, span, sizeof(JsIfNode));
     conditional->test = test;
     conditional->consequent = consequent;
     conditional->alternate = alternate;
@@ -1279,7 +1261,7 @@ JsAstNode* build_js_while_from_children(JsTranspiler* tp, SourceSpan span,
         return NULL;
     }
     JsWhileNode* loop = (JsWhileNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_WHILE_STATEMENT, span, sizeof(JsWhileNode));
+        AST_NODE_LOOP, span, sizeof(JsWhileNode));
     loop->form = LOOP_FORM_WHILE;
     loop->test = test;
     loop->body = body;
@@ -1298,7 +1280,7 @@ JsAstNode* build_js_do_while_from_children(JsTranspiler* tp, SourceSpan span,
         return NULL;
     }
     JsDoWhileNode* loop = (JsDoWhileNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_DO_WHILE_STATEMENT, span, sizeof(JsDoWhileNode));
+        AST_NODE_LOOP, span, sizeof(JsDoWhileNode));
     loop->form = LOOP_FORM_DO_WHILE;
     loop->test = test;
     loop->body = body;
@@ -1311,7 +1293,7 @@ JsAstNode* build_js_do_while_from_children(JsTranspiler* tp, SourceSpan span,
 JsAstNode* build_js_return_from_child(JsTranspiler* tp, SourceSpan span,
         JsAstNode* argument) {
     JsReturnNode* result = (JsReturnNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_RETURN_STATEMENT, span, sizeof(JsReturnNode));
+        AST_NODE_RETURN_STAM, span, sizeof(JsReturnNode));
     result->argument = argument;
     result->type = argument ? argument->type : &TYPE_NULL;
     return (JsAstNode*)result;
@@ -1324,7 +1306,7 @@ JsAstNode* build_js_throw_from_child(JsTranspiler* tp, SourceSpan span,
         return NULL;
     }
     JsThrowNode* result = (JsThrowNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_THROW_STATEMENT, span, sizeof(JsThrowNode));
+        AST_NODE_RAISE_STAM, span, sizeof(JsThrowNode));
     result->argument = argument;
     result->type = &TYPE_NULL;
     return (JsAstNode*)result;
@@ -1333,8 +1315,8 @@ JsAstNode* build_js_throw_from_child(JsTranspiler* tp, SourceSpan span,
 JsAstNode* build_js_break_continue(JsTranspiler* tp, SourceSpan span,
         bool is_continue, StrView label) {
     JsBreakContinueNode* result = (JsBreakContinueNode*)alloc_js_ast_node_span(
-        tp, is_continue ? JS_AST_NODE_CONTINUE_STATEMENT :
-            JS_AST_NODE_BREAK_STATEMENT, span, sizeof(JsBreakContinueNode));
+        tp, is_continue ? AST_NODE_CONTINUE_STAM :
+            AST_NODE_BREAK_STAM, span, sizeof(JsBreakContinueNode));
     String* name = label.length ? name_pool_create_len(tp->name_pool,
         label.str, (int)label.length) : NULL;
     result->label = name ? name->chars : NULL;
@@ -1388,7 +1370,7 @@ JsAstNode* build_js_expression_statement_from_child(JsTranspiler* tp,
     }
     JsExpressionStatementNode* statement =
         (JsExpressionStatementNode*)alloc_js_ast_node_span(tp,
-            JS_AST_NODE_EXPRESSION_STATEMENT, span,
+            AST_NODE_EXPR_STMT, span,
             sizeof(JsExpressionStatementNode));
     statement->expression = expression;
     statement->type = expression->type ? expression->type : &TYPE_NULL;
@@ -1406,14 +1388,14 @@ JsAstNode* build_js_parameter_from_children(JsTranspiler* tp, SourceSpan span,
     JsAstNode* parameter = pattern;
     if (rest) {
         JsSpreadElementNode* rest_node = (JsSpreadElementNode*)
-            alloc_js_ast_node_span(tp, JS_AST_NODE_REST_ELEMENT, span,
+            alloc_js_ast_node_span(tp, AST_NODE_REST_ELEMENT, span,
                 sizeof(JsSpreadElementNode));
         rest_node->argument = pattern;
         rest_node->type = &TYPE_ARRAY;
         parameter = (JsAstNode*)rest_node;
     } else if (default_value) {
         JsAssignmentPatternNode* assignment = (JsAssignmentPatternNode*)
-            alloc_js_ast_node_span(tp, JS_AST_NODE_ASSIGNMENT_PATTERN, span,
+            alloc_js_ast_node_span(tp, AST_NODE_ASSIGN_PATTERN, span,
                 sizeof(JsAssignmentPatternNode));
         assignment->left = pattern;
         assignment->right = default_value;
@@ -1421,7 +1403,7 @@ JsAstNode* build_js_parameter_from_children(JsTranspiler* tp, SourceSpan span,
         assignment->type = js_set_type_any(tp, ANY_DECOMPOSE);
         parameter = (JsAstNode*)assignment;
     }
-    if (optional && parameter->node_type == JS_AST_NODE_IDENTIFIER) {
+    if (optional && parameter->node_type == AST_NODE_IDENT) {
         // JS has no optional parameter marker; TS annotations are handled by
         // the TypeScript reduction lane before this constructor is called.
         parameter->type = js_set_type_any(tp, ANY_OPEN_PARAM);
@@ -1441,7 +1423,7 @@ JsAstNode* build_js_parameter_with_type_from_children(JsTranspiler* tp,
     JsAstNode* parameter_pattern = pattern;
     if (rest) {
         JsSpreadElementNode* rest_node = (JsSpreadElementNode*)
-            alloc_js_ast_node_span(tp, JS_AST_NODE_REST_ELEMENT, span,
+            alloc_js_ast_node_span(tp, AST_NODE_REST_ELEMENT, span,
                 sizeof(JsSpreadElementNode));
         rest_node->argument = pattern;
         rest_node->type = &TYPE_ARRAY;
@@ -1487,9 +1469,9 @@ JsAstNode* build_js_non_null_from_child(JsTranspiler* tp, SourceSpan span,
 }
 
 static bool js_ast_string_is_use_strict(JsAstNode* node) {
-    if (!node || node->node_type != JS_AST_NODE_LITERAL) return false;
+    if (!node || node->node_type != AST_NODE_LITERAL) return false;
     JsLiteralNode* literal = (JsLiteralNode*)node;
-    String* value = literal->literal_type == JS_LITERAL_STRING
+    String* value = literal->literal_type == AST_LITERAL_STRING
         ? literal->value.string_value : NULL;
     return value && value->len == 10 &&
         memcmp(value->chars, "use strict", 10) == 0;
@@ -1498,13 +1480,13 @@ static bool js_ast_string_is_use_strict(JsAstNode* node) {
 bool js_ast_statement_list_has_use_strict_directive(JsAstNode* statements) {
     for (JsAstNode* statement = statements; statement;
             statement = statement->next) {
-        if (statement->node_type != JS_AST_NODE_EXPRESSION_STATEMENT) return false;
+        if (statement->node_type != AST_NODE_EXPR_STMT) return false;
         JsExpressionStatementNode* expression_statement =
             (JsExpressionStatementNode*)statement;
         if (js_ast_string_is_use_strict(expression_statement->expression)) return true;
         JsAstNode* expression = expression_statement->expression;
-        if (!expression || expression->node_type != JS_AST_NODE_LITERAL ||
-                ((JsLiteralNode*)expression)->literal_type != JS_LITERAL_STRING) {
+        if (!expression || expression->node_type != AST_NODE_LITERAL ||
+                ((JsLiteralNode*)expression)->literal_type != AST_LITERAL_STRING) {
             return false;
         }
     }
@@ -1512,7 +1494,7 @@ bool js_ast_statement_list_has_use_strict_directive(JsAstNode* statements) {
 }
 
 bool js_ast_body_has_use_strict_directive(JsAstNode* body) {
-    if (!body || body->node_type != JS_AST_NODE_BLOCK_STATEMENT) return false;
+    if (!body || body->node_type != AST_NODE_BLOCK) return false;
     return js_ast_statement_list_has_use_strict_directive(
         ((JsBlockNode*)body)->statements);
 }
@@ -1554,12 +1536,12 @@ bool js_ast_body_has_use_strict_directive_source(JsTranspiler* tp,
     // Strict Directive spelling required by the directive-prologue grammar.
     JsAstNode* statement = first;
     while (statement) {
-        if (statement->node_type != JS_AST_NODE_EXPRESSION_STATEMENT) return false;
+        if (statement->node_type != AST_NODE_EXPR_STMT) return false;
         JsExpressionStatementNode* expression_statement =
             (JsExpressionStatementNode*)statement;
         JsAstNode* expression = expression_statement->expression;
-        if (!expression || expression->node_type != JS_AST_NODE_LITERAL ||
-                ((JsLiteralNode*)expression)->literal_type != JS_LITERAL_STRING) {
+        if (!expression || expression->node_type != AST_NODE_LITERAL ||
+                ((JsLiteralNode*)expression)->literal_type != AST_LITERAL_STRING) {
             return false;
         }
         SourceSpan expression_span = expression->source_span;
@@ -1584,13 +1566,13 @@ static JsAstNode* build_js_function_from_children_common(
         JsTranspiler* tp, SourceSpan span, JsAstNode* name, JsAstNode* params,
         JsAstNode* body, Type* return_type, bool async, bool generator,
         bool declaration, bool arrow) {
-    if (!tp || !body || (name && name->node_type != JS_AST_NODE_IDENTIFIER)) {
+    if (!tp || !body || (name && name->node_type != AST_NODE_IDENT)) {
         log_error("JavaScript function has invalid children");
         return NULL;
     }
-    JsAstNodeType node_type = arrow ? JS_AST_NODE_ARROW_FUNCTION :
-        (declaration ? JS_AST_NODE_FUNCTION_DECLARATION :
-            JS_AST_NODE_FUNCTION_EXPRESSION);
+    JsAstNodeType node_type = arrow ? AST_NODE_ARROW_FUNC :
+        (declaration ? AST_NODE_FUNC :
+            AST_NODE_FUNC_EXPR);
     JsFunctionNode* function = (JsFunctionNode*)alloc_js_ast_node_span(tp,
         node_type, span, sizeof(JsFunctionNode));
     function->type = &TYPE_FUNC;
@@ -1625,9 +1607,9 @@ JsAstNode* build_js_function_with_return_type_from_children(
 // transfer the parsed function payload into its owning method node.
 static void js_method_adopt_function_payload(JsMethodDefinitionNode* method, JsAstNode* value) {
     if (!method) return;
-    if (!value || (value->node_type != JS_AST_NODE_FUNCTION_EXPRESSION &&
-                   value->node_type != JS_AST_NODE_FUNCTION_DECLARATION &&
-                   value->node_type != JS_AST_NODE_ARROW_FUNCTION)) {
+    if (!value || (value->node_type != AST_NODE_FUNC_EXPR &&
+                   value->node_type != AST_NODE_FUNC &&
+                   value->node_type != AST_NODE_ARROW_FUNC)) {
         return;
     }
     JsFunctionNode* fn = (JsFunctionNode*)value;
@@ -1647,9 +1629,8 @@ static void js_method_adopt_function_payload(JsMethodDefinitionNode* method, JsA
 // build a class body from parser-owned member nodes
 JsAstNode* build_js_class_body_from_list(JsTranspiler* tp, SourceSpan span,
         JsAstNode* members, uint32_t length) {
-    (void)length;
     JsBlockNode* body = (JsBlockNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_BLOCK_STATEMENT, span, sizeof(JsBlockNode));
+        AST_NODE_BLOCK, span, sizeof(JsBlockNode));
     body->statements = members;
     body->type = &TYPE_NULL;
     return (JsAstNode*)body;
@@ -1673,7 +1654,7 @@ static String* js_computed_method_name_from_source(JsTranspiler* tp,
 
 JsAstNode* build_js_method_from_children(JsTranspiler* tp, SourceSpan span,
         JsAstNode* key, JsAstNode* params, JsAstNode* body, uint32_t flags) {
-    if (!tp || !key || !body || body->node_type != JS_AST_NODE_BLOCK_STATEMENT) {
+    if (!tp || !key || !body || body->node_type != AST_NODE_BLOCK) {
         log_error("JavaScript class method has invalid children");
         return NULL;
     }
@@ -1682,7 +1663,7 @@ JsAstNode* build_js_method_from_children(JsTranspiler* tp, SourceSpan span,
         (flags & JS_REDUCTION_FLAG_GENERATOR) != 0, false, false);
     if (!function) return NULL;
     // preserve the method name on the retained function payload for class constructors.
-    if (key->node_type == JS_AST_NODE_IDENTIFIER) {
+    if (key->node_type == AST_NODE_IDENT) {
         ((JsFunctionNode*)function)->name = ((JsIdentifierNode*)key)->name;
     } else if (flags & JS_REDUCTION_FLAG_COMPUTED) {
         ((JsFunctionNode*)function)->name =
@@ -1690,7 +1671,7 @@ JsAstNode* build_js_method_from_children(JsTranspiler* tp, SourceSpan span,
     }
 
     JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)alloc_js_ast_node_span(
-        tp, JS_AST_NODE_METHOD_DEFINITION, span, sizeof(JsMethodDefinitionNode));
+        tp, AST_NODE_METHOD, span, sizeof(JsMethodDefinitionNode));
     method->key = key;
     method->computed = (flags & JS_REDUCTION_FLAG_COMPUTED) != 0;
     method->static_method = (flags & JS_REDUCTION_FLAG_STATIC) != 0;
@@ -1701,14 +1682,14 @@ JsAstNode* build_js_method_from_children(JsTranspiler* tp, SourceSpan span,
             : JsMethodDefinitionNode::JS_METHOD_METHOD);
     js_method_adopt_function_payload(method, function);
     if (!method->static_method && method->kind == JsMethodDefinitionNode::JS_METHOD_METHOD &&
-            key->node_type == JS_AST_NODE_IDENTIFIER) {
+            key->node_type == AST_NODE_IDENT) {
         String* name = ((JsIdentifierNode*)key)->name;
         if (name && name->len == 11 && memcmp(name->chars, "constructor", 11) == 0) {
             method->kind = JsMethodDefinitionNode::JS_METHOD_CONSTRUCTOR;
         }
     }
     if (method->kind == JsMethodDefinitionNode::JS_METHOD_CONSTRUCTOR &&
-            body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+            body->node_type == AST_NODE_BLOCK) {
         JsAstNode* assignments = NULL;
         JsAstNode* assignment_tail = NULL;
         for (JsAstNode* parameter = params; parameter;
@@ -1718,7 +1699,7 @@ JsAstNode* build_js_method_from_children(JsTranspiler* tp, SourceSpan span,
                     ? (TsParameterNode*)parameter : NULL;
             JsAstNode* pattern = ts_parameter ? ts_parameter->pattern : NULL;
             if (!ts_parameter || !ts_parameter->accessibility || !pattern ||
-                    pattern->node_type != JS_AST_NODE_IDENTIFIER) continue;
+                    pattern->node_type != AST_NODE_IDENT) continue;
             String* name = ((JsIdentifierNode*)pattern)->name;
             JsAstNode* assignment = build_js_this_assignment_from_name(tp,
                 pattern->source_span, name);
@@ -1745,11 +1726,11 @@ JsAstNode* build_js_field_from_children(JsTranspiler* tp, SourceSpan span,
         return NULL;
     }
     JsFieldDefinitionNode* field = (JsFieldDefinitionNode*)alloc_js_ast_node_span(
-        tp, JS_AST_NODE_FIELD_DEFINITION, span, sizeof(JsFieldDefinitionNode));
+        tp, AST_NODE_FIELD, span, sizeof(JsFieldDefinitionNode));
     field->key = key;
     field->value = value;
     field->is_static = (flags & JS_REDUCTION_FLAG_STATIC) != 0;
-    field->is_private = key->node_type == JS_AST_NODE_IDENTIFIER &&
+    field->is_private = key->node_type == AST_NODE_IDENT &&
         ((JsIdentifierNode*)key)->name &&
         ((JsIdentifierNode*)key)->name->len > 0 &&
         ((JsIdentifierNode*)key)->name->chars[0] == '#';
@@ -1761,7 +1742,7 @@ JsAstNode* build_js_field_from_children(JsTranspiler* tp, SourceSpan span,
 // build a static initialization block from its block reduction
 JsAstNode* build_js_static_block_from_child(JsTranspiler* tp, SourceSpan span,
         JsAstNode* body) {
-    if (!tp || !body || body->node_type != JS_AST_NODE_BLOCK_STATEMENT) {
+    if (!tp || !body || body->node_type != AST_NODE_BLOCK) {
         log_error("JavaScript static block has invalid body");
         return NULL;
     }
@@ -1777,13 +1758,13 @@ JsAstNode* build_js_static_block_from_child(JsTranspiler* tp, SourceSpan span,
 // build a class after its heritage and body have reduced
 JsAstNode* build_js_class_from_children(JsTranspiler* tp, SourceSpan span,
         JsAstNode* name, JsAstNode* superclass, JsAstNode* body, bool declaration) {
-    if (!tp || !body || body->node_type != JS_AST_NODE_BLOCK_STATEMENT ||
-            (name && name->node_type != JS_AST_NODE_IDENTIFIER)) {
+    if (!tp || !body || body->node_type != AST_NODE_BLOCK ||
+            (name && name->node_type != AST_NODE_IDENT)) {
         log_error("JavaScript class has invalid children");
         return NULL;
     }
-    JsAstNodeType node_type = declaration ? JS_AST_NODE_CLASS_DECLARATION :
-        JS_AST_NODE_CLASS_EXPRESSION;
+    JsAstNodeType node_type = declaration ? AST_NODE_CLASS :
+        AST_NODE_CLASS_EXPR;
     JsClassNode* class_node = (JsClassNode*)alloc_js_ast_node_span(tp,
         node_type, span, sizeof(JsClassNode));
     class_node->name = name ? ((JsIdentifierNode*)name)->name : NULL;
@@ -1802,7 +1783,7 @@ JsAstNode* build_js_for_from_children(JsTranspiler* tp, SourceSpan span,
         return NULL;
     }
     JsForNode* loop = (JsForNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_FOR_STATEMENT, span, sizeof(JsForNode));
+        AST_NODE_LOOP, span, sizeof(JsForNode));
     loop->init = init;
     loop->test = test;
     loop->update = update;
@@ -1817,55 +1798,55 @@ JsAstNode* build_js_for_from_children(JsTranspiler* tp, SourceSpan span,
 // expressions because they are evaluated before the destructuring write.
 static void normalize_js_for_head_target(JsTranspiler* tp, JsAstNode* node) {
     if (!node) return;
-    if (node->node_type == JS_AST_NODE_ARRAY_EXPRESSION) {
+    if (node->node_type == AST_NODE_ARRAY) {
         JsArrayNode* array = (JsArrayNode*)node;
-        node->node_type = JS_AST_NODE_ARRAY_PATTERN;
+        node->node_type = AST_NODE_ARRAY_PATTERN;
         node->type = &TYPE_ARRAY;
         for (JsAstNode* child = array->elements; child; child = child->next)
             normalize_js_for_head_target(tp, child);
         return;
     }
-    if (node->node_type == JS_AST_NODE_OBJECT_EXPRESSION) {
+    if (node->node_type == AST_NODE_MAP) {
         JsObjectNode* object = (JsObjectNode*)node;
-        node->node_type = JS_AST_NODE_OBJECT_PATTERN;
+        node->node_type = AST_NODE_MAP_PATTERN;
         node->type = js_set_type_any(tp, ANY_DECOMPOSE);
         for (JsAstNode* child = object->properties; child; child = child->next) {
-            if (child->node_type == JS_AST_NODE_PROPERTY) {
+            if (child->node_type == AST_NODE_PROPERTY) {
                 JsPropertyNode* property = (JsPropertyNode*)child;
                 property->shorthand = false;
                 normalize_js_for_head_target(tp, property->value);
-            } else if (child->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+            } else if (child->node_type == AST_NODE_SPREAD) {
                 JsSpreadElementNode* spread = (JsSpreadElementNode*)child;
-                child->node_type = JS_AST_NODE_REST_PROPERTY;
+                child->node_type = AST_NODE_REST_PROPERTY;
                 child->type = js_set_type_any(tp, ANY_DECOMPOSE);
                 normalize_js_for_head_target(tp, spread->argument);
             }
         }
         return;
     }
-    if (node->node_type == JS_AST_NODE_ASSIGNMENT_EXPRESSION) {
+    if (node->node_type == AST_NODE_ASSIGN) {
         JsAssignmentNode* assignment = (JsAssignmentNode*)node;
-        if (assignment->op == JS_OP_ASSIGN) {
-            node->node_type = JS_AST_NODE_ASSIGNMENT_PATTERN;
+        if (assignment->op == OPERATOR_ASSIGN) {
+            node->node_type = AST_NODE_ASSIGN_PATTERN;
             assignment->op = (JsOperator)0;
             node->type = js_set_type_any(tp, ANY_DECOMPOSE);
             normalize_js_for_head_target(tp, assignment->left);
         }
         return;
     }
-    if (node->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+    if (node->node_type == AST_NODE_SPREAD) {
         JsSpreadElementNode* spread = (JsSpreadElementNode*)node;
-        node->node_type = JS_AST_NODE_REST_ELEMENT;
+        node->node_type = AST_NODE_REST_ELEMENT;
         node->type = &TYPE_ARRAY;
         normalize_js_for_head_target(tp, spread->argument);
     }
 }
 
 static void normalize_js_for_head_pattern(JsTranspiler* tp, JsAstNode* left) {
-    if (!tp || !left || (left->node_type != JS_AST_NODE_ARRAY_EXPRESSION &&
-            left->node_type != JS_AST_NODE_OBJECT_EXPRESSION)) return;
+    if (!tp || !left || (left->node_type != AST_NODE_ARRAY &&
+            left->node_type != AST_NODE_MAP)) return;
     normalize_js_for_head_target(tp, left);
-    if (left->node_type == JS_AST_NODE_OBJECT_PATTERN)
+    if (left->node_type == AST_NODE_MAP_PATTERN)
         left->type = js_set_type_any(tp, ANY_DECOMPOSE);
 }
 
@@ -1878,32 +1859,32 @@ JsAstNode* build_js_for_of_from_children(JsTranspiler* tp, SourceSpan span,
         return NULL;
     }
     JsAstNode* initializer = NULL;
-    if (left->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+    if (left->node_type == AST_NODE_VAR_STAM) {
         JsVariableDeclarationNode* declaration =
             (JsVariableDeclarationNode*)left;
         JsAstNode* item = declaration->declarations;
-        if (item && item->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+        if (item && item->node_type == AST_NODE_VARIABLE_DECLARATOR) {
             initializer = ((JsVariableDeclaratorNode*)item)->init;
         }
     }
     if (!declares_binding) normalize_js_for_head_pattern(tp, left);
     // declaration heads retain the binding pattern, not the transient
     // variable-declaration wrapper used by the parser reduction.
-    if (left->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+    if (left->node_type == AST_NODE_VAR_STAM) {
         JsVariableDeclarationNode* declaration =
             (JsVariableDeclarationNode*)left;
         JsAstNode* item = declaration->declarations;
-        if (!item || item->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) {
+        if (!item || item->node_type != AST_NODE_VARIABLE_DECLARATOR) {
             log_error("JavaScript iteration declaration has no declarator");
             return NULL;
         }
         left = ((JsVariableDeclaratorNode*)item)->id;
-        if (left && left->node_type == JS_AST_NODE_IDENTIFIER) {
+        if (left && left->node_type == AST_NODE_IDENT) {
             left->type = &TYPE_ANY;
         }
     }
     JsForOfNode* loop = (JsForOfNode*)alloc_js_ast_node_span(tp,
-        is_for_in ? JS_AST_NODE_FOR_IN_STATEMENT : JS_AST_NODE_FOR_OF_STATEMENT,
+        is_for_in ? AST_NODE_FOR_IN_STAM : AST_NODE_FOR_OF_STAM,
         span, sizeof(JsForOfNode));
     loop->left = left;
     loop->init = initializer;
@@ -1924,7 +1905,7 @@ JsAstNode* build_js_switch_from_children(JsTranspiler* tp, SourceSpan span,
         return NULL;
     }
     JsSwitchNode* switched = (JsSwitchNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_SWITCH_STATEMENT, span, sizeof(JsSwitchNode));
+        AST_NODE_MATCH_EXPR, span, sizeof(JsSwitchNode));
     switched->discriminant = discriminant;
     switched->cases = cases;
     (void)length;
@@ -1937,7 +1918,7 @@ JsAstNode* build_js_switch_case_from_children(JsTranspiler* tp, SourceSpan span,
         JsAstNode* test, JsAstNode* consequent, bool is_default) {
     if (!tp) return NULL;
     JsSwitchCaseNode* case_node = (JsSwitchCaseNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_SWITCH_CASE, span, sizeof(JsSwitchCaseNode));
+        AST_NODE_MATCH_ARM, span, sizeof(JsSwitchCaseNode));
     case_node->test = is_default ? NULL : test;
     case_node->consequent = consequent;
     case_node->body_braced = false;
@@ -1953,7 +1934,7 @@ JsAstNode* build_js_try_from_children(JsTranspiler* tp, SourceSpan span,
         return NULL;
     }
     JsTryNode* tried = (JsTryNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_TRY_STATEMENT, span, sizeof(JsTryNode));
+        AST_NODE_TRY_STAM, span, sizeof(JsTryNode));
     tried->block = block;
     tried->handler = handler;
     tried->finalizer = finalizer;
@@ -1969,7 +1950,7 @@ JsAstNode* build_js_catch_from_children(JsTranspiler* tp, SourceSpan span,
         return NULL;
     }
     JsCatchNode* handler = (JsCatchNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_CATCH_CLAUSE, span, sizeof(JsCatchNode));
+        AST_NODE_CATCH_CLAUSE, span, sizeof(JsCatchNode));
     handler->param = parameter;
     handler->body = body;
     handler->type = &TYPE_NULL;
@@ -1977,14 +1958,14 @@ JsAstNode* build_js_catch_from_children(JsTranspiler* tp, SourceSpan span,
 }
 
 static String* js_name_from_binding_node(JsAstNode* node) {
-    if (!node || node->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
+    if (!node || node->node_type != AST_NODE_IDENT) return NULL;
     return ((JsIdentifierNode*)node)->name;
 }
 
 static String* js_module_source_from_literal(JsAstNode* node) {
-    if (!node || node->node_type != JS_AST_NODE_LITERAL) return NULL;
+    if (!node || node->node_type != AST_NODE_LITERAL) return NULL;
     JsLiteralNode* literal = (JsLiteralNode*)node;
-    return literal->literal_type == JS_LITERAL_STRING
+    return literal->literal_type == AST_LITERAL_STRING
         ? literal->value.string_value : NULL;
 }
 
@@ -1999,10 +1980,10 @@ JsAstNode* build_js_import_specifier_from_children(JsTranspiler* tp,
     }
     if (!local_name) local_name = remote_name;
     JsImportSpecifierNode* specifier = (JsImportSpecifierNode*)alloc_js_ast_node_span(
-        tp, JS_AST_NODE_IMPORT_SPECIFIER, span, sizeof(JsImportSpecifierNode));
+        tp, AST_NODE_IMPORT_SPECIFIER, span, sizeof(JsImportSpecifierNode));
     specifier->remote_name = remote_name;
     specifier->local_name = local_name;
-    specifier->local_entry = local && local->node_type == JS_AST_NODE_IDENTIFIER
+    specifier->local_entry = local && local->node_type == AST_NODE_IDENT
         ? ((JsIdentifierNode*)local)->entry : NULL;
     specifier->type = NULL;
     return (JsAstNode*)specifier;
@@ -2014,15 +1995,15 @@ JsAstNode* build_js_import_from_children(JsTranspiler* tp, SourceSpan span,
         JsAstNode* specifiers) {
     if (!tp) return NULL;
     JsImportNode* node = (JsImportNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_IMPORT_DECLARATION, span, sizeof(JsImportNode));
+        AST_NODE_IMPORT, span, sizeof(JsImportNode));
     node->source = js_module_source_from_literal(source);
     node->default_name = js_name_from_binding_node(default_name);
     node->namespace_name = js_name_from_binding_node(namespace_name);
     node->default_entry = default_name &&
-            default_name->node_type == JS_AST_NODE_IDENTIFIER
+            default_name->node_type == AST_NODE_IDENT
         ? ((JsIdentifierNode*)default_name)->entry : NULL;
     node->namespace_entry = namespace_name &&
-            namespace_name->node_type == JS_AST_NODE_IDENTIFIER
+            namespace_name->node_type == AST_NODE_IDENT
         ? ((JsIdentifierNode*)namespace_name)->entry : NULL;
     node->specifiers = specifiers;
     js_record_interp_import(tp, node->default_name, node->source,
@@ -2048,7 +2029,7 @@ JsAstNode* build_js_export_specifier_from_children(JsTranspiler* tp,
     }
     if (!exported_name) exported_name = local_name;
     JsExportSpecifierNode* specifier = (JsExportSpecifierNode*)alloc_js_ast_node_span(
-        tp, JS_AST_NODE_EXPORT_SPECIFIER, span, sizeof(JsExportSpecifierNode));
+        tp, AST_NODE_EXPORT_SPECIFIER, span, sizeof(JsExportSpecifierNode));
     specifier->local_name = local_name;
     specifier->export_name = exported_name;
     specifier->type = NULL;
@@ -2061,7 +2042,7 @@ JsAstNode* build_js_export_from_children(JsTranspiler* tp, SourceSpan span,
         uint32_t flags) {
     if (!tp) return NULL;
     JsExportNode* node = (JsExportNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_EXPORT_DECLARATION, span, sizeof(JsExportNode));
+        AST_NODE_EXPORT, span, sizeof(JsExportNode));
     node->declaration = declaration;
     node->specifiers = specifiers;
     node->source = js_module_source_from_literal(source);
@@ -2072,8 +2053,8 @@ JsAstNode* build_js_export_from_children(JsTranspiler* tp, SourceSpan span,
     node->is_star = (flags & JS_REDUCTION_FLAG_EXPORT_STAR) != 0 &&
         !node->is_namespace;
     if (node->is_default && declaration &&
-            (declaration->node_type == JS_AST_NODE_CLASS_DECLARATION ||
-             declaration->node_type == JS_AST_NODE_CLASS_EXPRESSION)) {
+            (declaration->node_type == AST_NODE_CLASS ||
+             declaration->node_type == AST_NODE_CLASS_EXPR)) {
         JsClassNode* class_node = (JsClassNode*)declaration;
         if (!class_node->name) {
             class_node->name = name_pool_create_len(tp->name_pool, "default", 7);
@@ -2086,14 +2067,14 @@ JsAstNode* build_js_export_from_children(JsTranspiler* tp, SourceSpan span,
     }
     if (declaration && !node->is_default) {
         String* name = NULL;
-        if (declaration->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+        if (declaration->node_type == AST_NODE_FUNC) {
             name = ((JsFunctionNode*)declaration)->name;
-        } else if (declaration->node_type == JS_AST_NODE_CLASS_DECLARATION ||
-                declaration->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
+        } else if (declaration->node_type == AST_NODE_CLASS ||
+                declaration->node_type == AST_NODE_CLASS_EXPR) {
             name = ((JsClassNode*)declaration)->name;
         }
         if (name) js_record_interp_export(tp, name, name, NULL, false, false);
-        else if (declaration->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+        else if (declaration->node_type == AST_NODE_VAR_STAM) {
             JsVariableDeclarationNode* variables =
                 (JsVariableDeclarationNode*)declaration;
             for (JsAstNode* item = variables->declarations; item;
@@ -2114,7 +2095,7 @@ JsAstNode* build_js_export_from_children(JsTranspiler* tp, SourceSpan span,
 JsAstNode* build_js_object_method_from_children(JsTranspiler* tp,
         SourceSpan span, JsAstNode* key, JsAstNode* params, JsAstNode* body,
         uint32_t flags) {
-    if (!tp || !key || !body || body->node_type != JS_AST_NODE_BLOCK_STATEMENT) {
+    if (!tp || !key || !body || body->node_type != AST_NODE_BLOCK) {
         log_error("JavaScript object method has invalid children");
         return NULL;
     }
@@ -2125,14 +2106,14 @@ JsAstNode* build_js_object_method_from_children(JsTranspiler* tp,
     JsFunctionNode* fn = (JsFunctionNode*)function;
     fn->name = NULL;
     JsPropertyNode* property = (JsPropertyNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_PROPERTY, span, sizeof(JsPropertyNode));
+        AST_NODE_PROPERTY, span, sizeof(JsPropertyNode));
     bool computed = (flags & JS_REDUCTION_FLAG_COMPUTED) != 0;
     bool getter = (flags & JS_REDUCTION_FLAG_GETTER) != 0;
     bool setter = (flags & JS_REDUCTION_FLAG_SETTER) != 0;
     // Method names are property labels, not identifier reads. The reference
     // adapter retains the label node but leaves it unresolved.
     property->key = key;
-    if (!computed && key && key->node_type == JS_AST_NODE_IDENTIFIER) {
+    if (!computed && key && key->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* key_identifier = (JsIdentifierNode*)key;
         key_identifier->entry = NULL;
         key_identifier->type = NULL;
@@ -2145,7 +2126,7 @@ JsAstNode* build_js_object_method_from_children(JsTranspiler* tp,
     property->shorthand = false;
     property->type = js_set_type_any(tp, ANY_OPEN_MAP);
     if ((flags & (JS_REDUCTION_FLAG_GETTER | JS_REDUCTION_FLAG_SETTER)) &&
-            key->node_type == JS_AST_NODE_IDENTIFIER) {
+            key->node_type == AST_NODE_IDENT) {
         key->type = NULL;
     }
     return (JsAstNode*)property;
@@ -2154,7 +2135,7 @@ JsAstNode* build_js_object_method_from_children(JsTranspiler* tp,
 static JsAstNode* make_named_identifier_from_span(JsTranspiler* tp,
         SourceSpan span, String* name) {
     JsIdentifierNode* id = (JsIdentifierNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_IDENTIFIER, span, sizeof(JsIdentifierNode));
+        AST_NODE_IDENT, span, sizeof(JsIdentifierNode));
     id->name = name;
     id->type = js_set_type_any(tp, ANY_OPEN_PARAM);
     return (JsAstNode*)id;
@@ -2165,7 +2146,7 @@ JsAstNode* build_js_this_assignment_from_name(JsTranspiler* tp,
     if (!tp || !name) return NULL;
     String* this_name = name_pool_create_len(tp->name_pool, "this", 4);
     JsMemberNode* member = (JsMemberNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_MEMBER_EXPRESSION, span, sizeof(JsMemberNode));
+        AST_NODE_MEMBER_EXPR, span, sizeof(JsMemberNode));
     member->object = make_named_identifier_from_span(tp, span, this_name);
     member->property = make_named_identifier_from_span(tp, span, name);
     member->computed = false;
@@ -2173,15 +2154,15 @@ JsAstNode* build_js_this_assignment_from_name(JsTranspiler* tp,
     member->type = js_set_type_any(tp, ANY_JS_MEMBER);
 
     JsAssignmentNode* assign = (JsAssignmentNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_ASSIGNMENT_EXPRESSION, span, sizeof(JsAssignmentNode));
-    assign->op = JS_OP_ASSIGN;
+        AST_NODE_ASSIGN, span, sizeof(JsAssignmentNode));
+    assign->op = OPERATOR_ASSIGN;
     assign->left = (JsAstNode*)member;
     assign->right = make_named_identifier_from_span(tp, span, name);
     assign->type = js_set_type_any(tp, ANY_STATEMENT);
 
     JsExpressionStatementNode* expr_stmt =
         (JsExpressionStatementNode*)alloc_js_ast_node_span(tp,
-            JS_AST_NODE_EXPRESSION_STATEMENT, span,
+            AST_NODE_EXPR_STMT, span,
             sizeof(JsExpressionStatementNode));
     expr_stmt->expression = (JsAstNode*)assign;
     expr_stmt->type = &TYPE_NULL;

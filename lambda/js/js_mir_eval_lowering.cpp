@@ -360,7 +360,6 @@ static bool js_dynfunc_extract_return_identifier(String* body,
 
 static Item js_dynfunc_return_identifier_call(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)this_value;
     (void)args;
     (void)argc;
     (void)result_home;
@@ -1297,21 +1296,21 @@ static Item js_eval_var_conflicts_lexical_name(String* name) {
 static Item js_eval_var_conflicts_lexical_pattern(JsAstNode* node) {
     if (!node) return js_status_ok();
     switch (node->node_type) {
-        case JS_AST_NODE_IDENTIFIER:
+        case AST_NODE_IDENT:
             return js_eval_var_conflicts_lexical_name(((JsIdentifierNode*)node)->name);
-        case JS_AST_NODE_ASSIGNMENT_PATTERN:
+        case AST_NODE_ASSIGN_PATTERN:
             return js_eval_var_conflicts_lexical_pattern(((JsAssignmentPatternNode*)node)->left);
-        case JS_AST_NODE_REST_ELEMENT:
-        case JS_AST_NODE_REST_PROPERTY:
+        case AST_NODE_REST_ELEMENT:
+        case AST_NODE_REST_PROPERTY:
             return js_eval_var_conflicts_lexical_pattern(((JsSpreadElementNode*)node)->argument);
-        case JS_AST_NODE_ARRAY_PATTERN:
+        case AST_NODE_ARRAY_PATTERN:
             for (JsAstNode* e = ((JsArrayPatternNode*)node)->elements; e; e = e->next) {
                 JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_pattern(e));
             }
             break;
-        case JS_AST_NODE_OBJECT_PATTERN:
+        case AST_NODE_MAP_PATTERN:
             for (JsAstNode* p = ((JsObjectPatternNode*)node)->properties; p; p = p->next) {
-                if (p->node_type == JS_AST_NODE_PROPERTY) {
+                if (p->node_type == AST_NODE_PROPERTY) {
                     JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_pattern(((JsPropertyNode*)p)->value));
                 } else {
                     JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_pattern(p));
@@ -1336,20 +1335,20 @@ static Item js_eval_var_conflicts_lexical_statements(JsAstNode* stmt) {
 static Item js_eval_var_conflicts_lexical_statement(JsAstNode* node) {
     if (!node) return js_status_ok();
     switch (node->node_type) {
-        case JS_AST_NODE_VARIABLE_DECLARATION: {
+        case AST_NODE_VAR_STAM: {
             JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
             if (vd->kind != JS_VAR_VAR) return js_status_ok();
             for (JsAstNode* d = vd->declarations; d; d = d->next) {
-                if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+                if (d->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
                 JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_pattern(((JsVariableDeclaratorNode*)d)->id));
             }
             break;
         }
-        case JS_AST_NODE_FUNCTION_DECLARATION:
+        case AST_NODE_FUNC:
             return js_eval_var_conflicts_lexical_name(((JsFunctionNode*)node)->name);
-        case JS_AST_NODE_BLOCK_STATEMENT:
+        case AST_NODE_BLOCK:
             return js_eval_var_conflicts_lexical_statements(((JsBlockNode*)node)->statements);
-        case JS_AST_NODE_IF_STATEMENT: {
+        case AST_NODE_IF_EXPR: {
             JsIfNode* in = (JsIfNode*)node;
             JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_statement(in->consequent));
             return js_eval_var_conflicts_lexical_statement(in->alternate);
@@ -1361,27 +1360,27 @@ static Item js_eval_var_conflicts_lexical_statement(JsAstNode* node) {
             }
             return js_eval_var_conflicts_lexical_statement(loop->body);
         }
-        case JS_AST_NODE_FOR_IN_STATEMENT:
-        case JS_AST_NODE_FOR_OF_STATEMENT: {
+        case AST_NODE_FOR_IN_STAM:
+        case AST_NODE_FOR_OF_STAM: {
             JsForOfNode* fo = (JsForOfNode*)node;
             JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_statement(fo->left));
             return js_eval_var_conflicts_lexical_statement(fo->body);
         }
-        case JS_AST_NODE_SWITCH_STATEMENT: {
+        case AST_NODE_MATCH_EXPR: {
             JsSwitchNode* sw = (JsSwitchNode*)node;
             for (JsAstNode* c = sw->cases; c; c = c->next) {
-                if (c->node_type != JS_AST_NODE_SWITCH_CASE) continue;
+                if (c->node_type != AST_NODE_MATCH_ARM) continue;
                 JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_statements(((JsSwitchCaseNode*)c)->consequent));
             }
             break;
         }
-        case JS_AST_NODE_TRY_STATEMENT: {
+        case AST_NODE_TRY_STAM: {
             JsTryNode* tn = (JsTryNode*)node;
             JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_statement(tn->block));
             JS_ASSIGN_OR_RETURN_INTO(status, js_eval_var_conflicts_lexical_statement(tn->handler));
             return js_eval_var_conflicts_lexical_statement(tn->finalizer);
         }
-        case JS_AST_NODE_CATCH_CLAUSE:
+        case AST_NODE_CATCH_CLAUSE:
             return js_eval_var_conflicts_lexical_statement(((JsCatchNode*)node)->body);
         case JS_AST_NODE_LABELED_STATEMENT:
             return js_eval_var_conflicts_lexical_statement(((JsLabeledStatementNode*)node)->body);
@@ -1392,7 +1391,7 @@ static Item js_eval_var_conflicts_lexical_statement(JsAstNode* node) {
 }
 
 static Item js_eval_var_conflicts_lexical_program(JsAstNode* ast) {
-    if (!ast || ast->node_type != JS_AST_NODE_PROGRAM) return js_status_ok();
+    if (!ast || ast->node_type != AST_SCRIPT) return js_status_ok();
     return js_eval_var_conflicts_lexical_statements(((JsProgramNode*)ast)->body);
 }
 

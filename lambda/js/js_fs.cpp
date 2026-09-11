@@ -42,6 +42,7 @@ extern "C" Item js_util_promisify_custom_symbol(void);
 extern "C" Item js_domain_get_current(void);
 extern "C" Item js_domain_call_function(Item domain, Item fn, Item this_val, Item* args, int arg_count);
 extern "C" Item bigint_from_int64(int64_t val);
+extern "C" Item bigint_from_uint64(uint64_t val);
 extern "C" Item bigint_from_string(const char* str, int len);
 extern Item js_make_number(double d);
 extern __thread EvalContext* context;
@@ -113,6 +114,15 @@ static FsPathResult fs_path_to_cstr(Item value, const char* name, char* buf, int
     FsPathResult fs_path_result_##var = fs_path_to_cstr(value, name, buf, size); \
     if (item_is_error(fs_path_result_##var.status)) return fs_path_result_##var.status; \
     const char* var = fs_path_result_##var.path
+
+// Every path-taking fs entry point opens the same way: decode the path into a
+// caller-owned buffer, bail on a decode error or a null path, then clear the
+// read or write permission for that path.
+#define FS_PATH_GUARD_OR_RETURN(var, value, name, mode) \
+    char var##_path_buf[1024]; \
+    FS_PATH_OR_RETURN(var, value, name, var##_path_buf, sizeof(var##_path_buf)); \
+    if (!var) return ItemNull; \
+    if (!js_permission_has_fs_##mode(var)) return js_permission_check_fs_##mode(var)
 
 static bool fs_string_equals(String* s, const char* lit) {
     if (!s || !lit) return false;
@@ -333,27 +343,14 @@ struct FsRealmItems {
 };
 
 static bool fs_realm_items(FsRealmItems* items, bool reserve) {
-    if (!items || !js_active_runtime_state) return false;
-    static const JsRealmSlotId slot_ids[] = {
+    JS_REALM_ITEMS_FILL(FsRealmItems, items, reserve,
         JS_REALM_SLOT_FS_NAMESPACE,
         JS_REALM_SLOT_FS_INTERNAL_BINDING_NAMESPACE,
         JS_REALM_SLOT_FS_INTERNAL_DEFAULT_FSTAT,
         JS_REALM_SLOT_FS_STATS_PROTOTYPE,
         JS_REALM_SLOT_FS_FILEHANDLE_CONSTRUCTOR,
         JS_REALM_SLOT_FS_FILEHANDLE_PROTOTYPE,
-        JS_REALM_SLOT_FS_INTERNAL_PROMISES_NAMESPACE,
-    };
-    Item* values[7] = {};
-    if (!js_realm_slots_lookup(&js_runtime_state.realm_slots, slot_ids, values,
-            7, reserve)) return false;
-    items->namespace_object = values[0];
-    items->internal_binding_namespace = values[1];
-    items->internal_default_fstat = values[2];
-    items->stats_prototype = values[3];
-    items->filehandle_constructor = values[4];
-    items->filehandle_prototype = values[5];
-    items->internal_promises_namespace = values[6];
-    return true;
+        JS_REALM_SLOT_FS_INTERNAL_PROMISES_NAMESPACE);
 }
 
 static Item* fs_realm_slot_existing(JsRealmSlotId slot) {
@@ -581,15 +578,8 @@ static Item get_stats_proto() {
     return stats_proto;
 }
 
-static Item fs_bigint_from_uint64(uint64_t value) {
-    if (value <= (uint64_t)INT64_MAX) return bigint_from_int64((int64_t)value);
-    char buf[32];
-    int len = snprintf(buf, sizeof(buf), "%llu", (unsigned long long)value);
-    return bigint_from_string(buf, len);
-}
-
 static Item fs_stats_uint64_value(uint64_t value, bool bigint) {
-    if (bigint) return fs_bigint_from_uint64(value);
+    if (bigint) return bigint_from_uint64(value);
     return js_make_number((double)value);
 }
 
@@ -727,10 +717,7 @@ static char* fs_read_file_bytes(const char* path, size_t* out_len,
 // Returns file contents as a string (assumes UTF-8)
 extern "C" Item js_fs_readFileSync(Item path_item, Item encoding_item) {
     JS_ASSIGN_OR_RETURN(validation, fs_validate_encoding_options(encoding_item));
-    char path_buf[1024];
-    FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
-    if (!js_permission_has_fs_read(path)) return js_permission_check_fs_read(path);
+    FS_PATH_GUARD_OR_RETURN(path, path_item, "path", read);
     if (fs_read_file_should_return_buffer(encoding_item)) {
         return js_fs_read_file_buffer(path);
     }
@@ -987,12 +974,10 @@ static Item js_fs_writestream_write_after_end_error(void) {
 }
 
 static Item js_fs_writestream_close_noop(Item err_item) {
-    (void)err_item;
     return make_js_undefined();
 }
 
 static Item js_fs_writestream_open_hook_cb(Item err_item, Item fd_item) {
-    (void)err_item;
     if (get_type_id(fd_item) == LMD_TYPE_INT) {
         js_fs_closeSync(fd_item);
     }
@@ -1000,7 +985,6 @@ static Item js_fs_writestream_open_hook_cb(Item err_item, Item fd_item) {
 }
 
 static Item js_fs_writestream_io_hook_cb(Item err_item, Item value_item, Item data_item) {
-    (void)err_item;
     (void)value_item;
     (void)data_item;
     return make_js_undefined();
@@ -1203,10 +1187,7 @@ extern "C" Item js_fs_createWriteStream(Item path_item, Item options_item) {
 static Item fs_write_file_sync(Item path_item, Item data_item, Item options_item,
         bool append, bool check_write_error, const char* operation_name) {
     JS_ASSIGN_OR_RETURN(validation, fs_validate_encoding_options(options_item));
-    char path_buf[1024];
-    FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
-    if (!js_permission_has_fs_write(path)) return js_permission_check_fs_write(path);
+    FS_PATH_GUARD_OR_RETURN(path, path_item, "path", write);
 
     // convert data to string
     Item str_item = js_to_string(data_item);
@@ -1265,10 +1246,7 @@ typedef int (*FsPathOperation)(uv_loop_t*, uv_fs_t*, const char*, uv_fs_cb);
 
 static Item js_fs_remove_sync(Item path_item, FsPathOperation operation,
         const char* operation_name) {
-    char path_buf[1024];
-    FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
-    if (!js_permission_has_fs_write(path)) return js_permission_check_fs_write(path);
+    FS_PATH_GUARD_OR_RETURN(path, path_item, "path", write);
 
     uv_fs_t req;
     int r = operation(NULL, &req, path, NULL);
@@ -1325,10 +1303,7 @@ static int fs_mkdir_do(const char* path, int mode, bool recursive) {
 }
 
 extern "C" Item js_fs_mkdirSync(Item path_item, Item options) {
-    char path_buf[1024];
-    FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
-    if (!js_permission_has_fs_write(path)) return js_permission_check_fs_write(path);
+    FS_PATH_GUARD_OR_RETURN(path, path_item, "path", write);
 
     int mode = 0777;
     bool recursive = false;
@@ -1390,10 +1365,7 @@ extern "C" Item js_fs_mkdir_async(Item path_item, Item options_or_cb, Item callb
 
 static Item js_fs_stat_sync(Item path_item, Item options_item,
         FsPathOperation operation, const char* operation_name) {
-    char path_buf[1024];
-    FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
-    if (!js_permission_has_fs_read(path)) return js_permission_check_fs_read(path);
+    FS_PATH_GUARD_OR_RETURN(path, path_item, "path", read);
 
     uv_fs_t req;
     int r = operation(NULL, &req, path, NULL);
@@ -1424,10 +1396,7 @@ JS_FORWARD_ITEM(js_fs_renameSync, (Item old_path_item, Item new_path_item), fs_p
 // fs.readdirSync(path) → Array<string>
 extern "C" Item js_fs_readdirSync(Item path_item, Item options_item) {
     JS_ASSIGN_OR_RETURN(validation, fs_validate_encoding_options(options_item));
-    char path_buf[1024];
-    FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
-    if (!js_permission_has_fs_read(path)) return js_permission_check_fs_read(path);
+    FS_PATH_GUARD_OR_RETURN(path, path_item, "path", read);
 
     uv_fs_t req;
     int n = uv_fs_scandir(NULL, &req, path, 0, NULL);
@@ -1457,7 +1426,7 @@ static bool fs_options_bigint(Item options_item) {
 }
 
 static Item fs_statfs_number(uint64_t value, bool bigint) {
-    if (bigint) return fs_bigint_from_uint64(value);
+    if (bigint) return bigint_from_uint64(value);
     return js_make_number((double)value);
 }
 
@@ -1481,10 +1450,7 @@ static Item make_statfs_object(uint64_t type, uint64_t bsize, uint64_t frsize,
 
 // fs.statfsSync(path[, options])
 extern "C" Item js_fs_statfsSync(Item path_item, Item options_item) {
-    char path_buf[1024];
-    FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
-    if (!js_permission_has_fs_read(path)) return js_permission_check_fs_read(path);
+    FS_PATH_GUARD_OR_RETURN(path, path_item, "path", read);
 
     bool bigint = fs_options_bigint(options_item);
 #ifdef _WIN32
@@ -1549,10 +1515,7 @@ enum FsPathStringOperation {
 static Item fs_read_path_string_sync(Item path_item, Item options_item,
         FsPathStringOperation operation) {
     JS_ASSIGN_OR_RETURN(validation, fs_validate_encoding_options(options_item));
-    char path_buf[1024];
-    FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
-    if (!js_permission_has_fs_read(path)) return js_permission_check_fs_read(path);
+    FS_PATH_GUARD_OR_RETURN(path, path_item, "path", read);
 
     uv_fs_t req;
     int r = operation == FS_PATH_REALPATH
@@ -1596,10 +1559,7 @@ extern "C" Item js_fs_accessSync(Item path_item, Item mode_item) {
 
 // fs.rmSync(path[, options]) — remove file or directory (optionally recursive)
 extern "C" Item js_fs_rmSync(Item path_item, Item options_item) {
-    char path_buf[1024];
-    FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
-    if (!js_permission_has_fs_write(path)) return js_permission_check_fs_write(path);
+    FS_PATH_GUARD_OR_RETURN(path, path_item, "path", write);
 
     bool recursive = false;
     if (get_type_id(options_item) == LMD_TYPE_MAP) {
@@ -1656,10 +1616,7 @@ extern "C" Item js_fs_mkdtempSync(Item prefix_item, Item options_item) {
 
 // fs.chmodSync(path, mode)
 extern "C" Item js_fs_chmodSync(Item path_item, Item mode_item) {
-    char path_buf[1024];
-    FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
-    if (!js_permission_has_fs_write(path)) return js_permission_check_fs_write(path);
+    FS_PATH_GUARD_OR_RETURN(path, path_item, "path", write);
 
     uint32_t mode = 0;
     JS_RETURN_IF_ERROR(fs_validate_mode(mode_item, &mode));
@@ -1686,10 +1643,7 @@ extern "C" Item js_fs_fchmodSync(Item fd_item, Item mode_item) {
 }
 
 extern "C" Item js_fs_lchmodSync(Item path_item, Item mode_item) {
-    char path_buf[1024];
-    FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
-    if (!js_permission_has_fs_write(path)) return js_permission_check_fs_write(path);
+    FS_PATH_GUARD_OR_RETURN(path, path_item, "path", write);
     uint32_t mode = 0;
     JS_RETURN_IF_ERROR(fs_validate_mode(mode_item, &mode));
 #ifdef __APPLE__
@@ -1707,10 +1661,7 @@ extern "C" Item js_fs_lchmodSync(Item path_item, Item mode_item) {
 
 static Item fs_chown_path_sync(Item path_item, Item uid_item, Item gid_item,
         bool no_follow) {
-    char path_buf[1024];
-    FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
-    if (!js_permission_has_fs_write(path)) return js_permission_check_fs_write(path);
+    FS_PATH_GUARD_OR_RETURN(path, path_item, "path", write);
     int uid = 0, gid = 0;
     JS_RETURN_IF_ERROR(fs_validate_uid_gid(uid_item, "uid", &uid));
     JS_RETURN_IF_ERROR(fs_validate_uid_gid(gid_item, "gid", &gid));
@@ -3177,14 +3128,10 @@ static Item js_fs_make_watcher(void) {
 }
 
 static Item js_fs_watch(Item path_item, Item options_or_listener, Item listener_item) {
-    (void)listener_item;
     if (!js_is_callable(options_or_listener)) {
         JS_ASSIGN_OR_RETURN(validation, fs_validate_watch_options(options_or_listener));
     }
-    char path_buf[1024];
-    FS_PATH_OR_RETURN(path, path_item, "filename", path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
-    if (!js_permission_has_fs_read(path)) return js_permission_check_fs_read(path);
+    FS_PATH_GUARD_OR_RETURN(path, path_item, "filename", read);
     return js_fs_make_watcher();
 }
 
@@ -3194,15 +3141,11 @@ static Item js_fs_watchFile(Item path_item, Item options_or_listener, Item liste
     if (!js_is_callable(listener)) {
         return js_throw_invalid_arg_type("listener", "function", listener);
     }
-    char path_buf[1024];
-    FS_PATH_OR_RETURN(path, path_item, "filename", path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
-    if (!js_permission_has_fs_read(path)) return js_permission_check_fs_read(path);
+    FS_PATH_GUARD_OR_RETURN(path, path_item, "filename", read);
     return js_fs_make_watcher();
 }
 
 static Item js_fs_unwatchFile(Item path_item, Item listener_item) {
-    (void)listener_item;
     char path_buf[1024];
     FS_PATH_OR_RETURN(path, path_item, "filename", path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
@@ -3210,7 +3153,6 @@ static Item js_fs_unwatchFile(Item path_item, Item listener_item) {
 }
 
 static Item js_fs_utimesSync(Item path_item, Item atime_item, Item mtime_item) {
-    (void)atime_item;
     (void)mtime_item;
     char path_buf[1024];
     FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));

@@ -775,7 +775,7 @@ bool js_function_source_span(const char* source, size_t source_length,
         js_function_source_skip_trivia(&text, &length);
     }
     if (length > 0 && function->body &&
-            function->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+            function->body->node_type == AST_NODE_BLOCK) {
         while (length > 1 && text[length - 1] != '}') length--;
     }
     *text_out = text;
@@ -1052,7 +1052,6 @@ JS_NATIVE_REST_ARITIES(JS_DEFINE_NATIVE_REST)
 
 static Item js_native_call_span(Item fn_item, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    (void)this_value; (void)result_home;
     JsFunction* fn = (JsFunction*)fn_item.function;
     return fn && js_fn_native(fn)->target.span
         ? js_fn_native(fn)->target.span(args, argc) : ItemError;
@@ -1060,7 +1059,6 @@ static Item js_native_call_span(Item fn_item, Item this_value, Item* args,
 
 static Item js_native_call_this_span(Item fn_item, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    (void)result_home;
     JsFunction* fn = (JsFunction*)fn_item.function;
     return fn && js_fn_native(fn)->target.this_span
         ? js_fn_native(fn)->target.this_span(this_value, args, argc) : ItemError;
@@ -1324,6 +1322,24 @@ extern "C" void js_set_formal_length(Item fn_item, int length) {
 // allocation live; the GC header supplies the exact slot count to the tracer.
 JS_FORWARD_EXPRESSION(Item*, js_alloc_env, (int count),
     count > 0 ? (Item*)heap_calloc_closure_env((size_t)count * sizeof(Item)) : NULL)
+
+Item* js_alloc_env1(Item a) {
+    Item* env = js_alloc_env(1);
+    if (env) env[0] = a;
+    return env;
+}
+
+Item* js_alloc_env2(Item a, Item b) {
+    Item* env = js_alloc_env(2);
+    if (env) { env[0] = a; env[1] = b; }
+    return env;
+}
+
+Item* js_alloc_env3(Item a, Item b, Item c) {
+    Item* env = js_alloc_env(3);
+    if (env) { env[0] = a; env[1] = b; env[2] = c; }
+    return env;
+}
 
 static bool js_env_slot_is_side_number(Item item) {
     if (!context || !context->side_number_base || !context->side_number_top) return false;

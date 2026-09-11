@@ -130,9 +130,7 @@ static bool tls_validate_material_item(Item value, bool allow_pem_object,
     if (allow_zero && type == LMD_TYPE_FLOAT && it2d(value) == 0.0) return true;
     if (tls_is_buffer_source(value)) return true;
     if (type == LMD_TYPE_ARRAY) {
-        int64_t len = js_array_length(value);
-        for (int64_t i = 0; i < len; i++) {
-            Item child = js_elements_get_int(value, i);
+        JS_ARRAY_FOREACH(child, value) {
             if (!tls_validate_material_item(child, allow_pem_object, allow_zero, bad_value)) {
                 return false;
             }
@@ -367,23 +365,12 @@ struct TlsRealmItems {
 };
 
 static bool tls_realm_items(TlsRealmItems* items, bool reserve) {
-    if (!items || !js_active_runtime_state) return false;
-    static const JsRealmSlotId slot_ids[] = {
+    JS_REALM_ITEMS_FILL(TlsRealmItems, items, reserve,
         JS_REALM_SLOT_TLS_NAMESPACE,
         JS_REALM_SLOT_TLS_CA_BUNDLED,
         JS_REALM_SLOT_TLS_CA_EXTRA,
         JS_REALM_SLOT_TLS_CA_SYSTEM,
-        JS_REALM_SLOT_TLS_CA_DEFAULT,
-    };
-    Item* values[5] = {};
-    if (!js_realm_slots_lookup(&js_runtime_state.realm_slots, slot_ids, values,
-            5, reserve)) return false;
-    items->namespace_object = values[0];
-    items->ca_bundled = values[1];
-    items->ca_extra = values[2];
-    items->ca_system = values[3];
-    items->ca_default = values[4];
-    return true;
+        JS_REALM_SLOT_TLS_CA_DEFAULT);
 }
 
 static Item tls_clone_unique_string_array(Item source, bool freeze_result) {
@@ -519,9 +506,7 @@ static Item tls_get_default_certificates(void) {
     if (tls_ca_default_cache.item != 0) return tls_ca_default_cache;
     tls_ca_default_cache = tls_clone_unique_string_array(tls_get_bundled_certificates(), false);
     Item extra = tls_get_extra_certificates();
-    int64_t len = js_array_length(extra);
-    for (int64_t i = 0; i < len; i++) {
-        Item cert = js_elements_get_int(extra, i);
+    JS_ARRAY_FOREACH(cert, extra) {
         if (get_type_id(cert) == LMD_TYPE_STRING && !tls_array_includes_string(tls_ca_default_cache, cert)) {
             js_array_push(tls_ca_default_cache, cert);
         }
@@ -1024,8 +1009,7 @@ static void tls_server_emit_new_session(JsTlsServer* srv) {
         if (srv) srv->session_cache_ready = true;
         return;
     }
-    Item* env = js_alloc_env(1);
-    env[0] = (Item){.item = i2it((int64_t)(uintptr_t)srv)};
+    Item* env = js_alloc_env1((Item){.item = i2it((int64_t)(uintptr_t)srv)});
     Item callback = js_new_native_closure(tls_server_new_session_done, 0, env, 1);
     Item args[3] = {
         tls_server_session_id_item(),
@@ -1036,7 +1020,6 @@ static void tls_server_emit_new_session(JsTlsServer* srv) {
 }
 
 static Item tls_server_resume_session_done(Item env_item, Item err, Item data) {
-    (void)err;
     Item* env = (Item*)(uintptr_t)env_item.item;
     JsTlsServer* srv = env ? (JsTlsServer*)(uintptr_t)it2i(env[0]) : NULL;
     if (!srv) return make_js_undefined();
@@ -1067,8 +1050,7 @@ static void tls_server_emit_session_events(JsTlsSocket* sock) {
         return;
     }
 
-    Item* env = js_alloc_env(1);
-    env[0] = (Item){.item = i2it((int64_t)(uintptr_t)srv)};
+    Item* env = js_alloc_env1((Item){.item = i2it((int64_t)(uintptr_t)srv)});
     Item callback = js_new_native_closure(tls_server_resume_session_done, 2, env, 1);
     Item args[2] = { tls_server_session_id_item(), callback };
     tls_socket_emit(tls_server_object(srv), "resumeSession", args, 2);
@@ -1540,8 +1522,7 @@ static Item tls_socket_close_when_flushed_later(Item env_item);
 
 static Item tls_socket_finish_when_flushed(Item env_item, bool close_mode,
         JsNativeP1 retry_target) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     JsTlsSocket* sock = tls_socket_from_object(env[0]);
     if (!sock || sock->destroyed) return make_js_undefined();
     if (close_mode) sock->close_check_scheduled = false;
@@ -1549,8 +1530,7 @@ static Item tls_socket_finish_when_flushed(Item env_item, bool close_mode,
     uv_stream_t* stream = tls_socket_stream(sock);
     size_t queued = stream ? uv_stream_get_write_queue_size(stream) : 0;
     if (queued > 0 || (close_mode && sock->pending_write_data && sock->pending_write_len > 0)) {
-        Item* next_env = js_alloc_env(1);
-        next_env[0] = env[0];
+        Item* next_env = js_alloc_env1(env[0]);
         Item tick = js_new_native_closure(retry_target, 0, next_env, 1);
         if (close_mode) sock->close_check_scheduled = true;
         else sock->shutdown_check_scheduled = true;
@@ -1566,8 +1546,7 @@ JS_FORWARD_STATIC_ITEM(tls_socket_shutdown_when_flushed_later, (Item env_item), 
 static void tls_socket_schedule_shutdown_when_flushed(Item obj) {
     JsTlsSocket* sock = tls_socket_from_object(obj);
     if (!sock || sock->shutdown_check_scheduled) return;
-    Item* env = js_alloc_env(1);
-    env[0] = obj;
+    Item* env = js_alloc_env1(obj);
     Item tick = js_new_native_closure(tls_socket_shutdown_when_flushed_later, 0, env, 1);
     sock->shutdown_check_scheduled = true;
     js_setTimeout(tick, (Item){.item = i2it(1)});
@@ -1586,8 +1565,7 @@ static void tls_socket_schedule_close_when_flushed(Item obj, bool had_error) {
     JsTlsSocket* sock = tls_socket_from_object(obj);
     if (!sock || sock->close_check_scheduled || sock->destroyed) return;
     sock->close_had_error = had_error;
-    Item* env = js_alloc_env(1);
-    env[0] = obj;
+    Item* env = js_alloc_env1(obj);
     Item tick = js_new_native_closure(tls_socket_close_when_flushed_later, 0, env, 1);
     sock->close_check_scheduled = true;
     js_setTimeout(tick, (Item){.item = i2it(1)});
@@ -1610,8 +1588,7 @@ static void tls_socket_flush_deferred_io(JsTlsSocket* sock) {
 }
 
 static Item tls_socket_flush_deferred_io_later(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     JsTlsSocket* sock = tls_socket_from_object(env[0]);
     if (sock) {
         sock->plaintext_flush_scheduled = false;
@@ -1623,16 +1600,14 @@ static Item tls_socket_flush_deferred_io_later(Item env_item) {
 static void tls_socket_schedule_deferred_io(Item obj) {
     JsTlsSocket* sock = tls_socket_from_object(obj);
     if (!sock || sock->plaintext_flush_scheduled) return;
-    Item* env = js_alloc_env(1);
-    env[0] = obj;
+    Item* env = js_alloc_env1(obj);
     Item tick = js_new_native_closure(tls_socket_flush_deferred_io_later, 0, env, 1);
     sock->plaintext_flush_scheduled = true;
     js_setTimeout(tick, (Item){.item = i2it(1)});
 }
 
 static Item tls_socket_drain_check_later(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     JsTlsSocket* sock = tls_socket_from_object(env[0]);
     if (!sock || sock->destroyed) return make_js_undefined();
     sock->drain_check_scheduled = false;
@@ -1641,8 +1616,7 @@ static Item tls_socket_drain_check_later(Item env_item) {
     uv_stream_t* stream = tls_socket_stream(sock);
     size_t write_queue_size = stream ? uv_stream_get_write_queue_size(stream) : 0;
     if ((int64_t)write_queue_size > sock->high_water_mark) {
-        Item* next_env = js_alloc_env(1);
-        next_env[0] = env[0];
+        Item* next_env = js_alloc_env1(env[0]);
         Item next_tick = js_new_native_closure(tls_socket_drain_check_later, 0, next_env, 1);
         sock->drain_check_scheduled = true;
         js_setTimeout(next_tick, (Item){.item = i2it(0)});
@@ -1659,8 +1633,7 @@ static Item tls_socket_drain_check_later(Item env_item) {
 static void tls_socket_schedule_drain_check(Item obj) {
     JsTlsSocket* sock = tls_socket_from_object(obj);
     if (!sock || sock->drain_check_scheduled) return;
-    Item* env = js_alloc_env(1);
-    env[0] = obj;
+    Item* env = js_alloc_env1(obj);
     Item tick = js_new_native_closure(tls_socket_drain_check_later, 0, env, 1);
     sock->drain_check_scheduled = true;
     js_setTimeout(tick, (Item){.item = i2it(0)});
@@ -2215,16 +2188,13 @@ static Item tls_emit_error_close_later(Item env_item) {
 }
 
 static void schedule_tls_secure_event(Item obj) {
-    Item* env = js_alloc_env(1);
-    env[0] = obj;
+    Item* env = js_alloc_env1(obj);
     Item callback = js_new_native_closure(tls_emit_secure_later, 0, env, 1);
     js_next_tick_enqueue(callback);
 }
 
 static void schedule_tls_error_close(Item obj, Item err) {
-    Item* env = js_alloc_env(2);
-    env[0] = obj;
-    env[1] = err;
+    Item* env = js_alloc_env2(obj, err);
     Item callback = js_new_native_closure(tls_emit_error_close_later, 0, env, 2);
     js_setTimeout(callback, (Item){.item = i2it(0)});
 }
@@ -2232,8 +2202,7 @@ static void schedule_tls_error_close(Item obj, Item err) {
 static void tls_server_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf);
 
 static Item tls_attach_existing_socket_now(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item tls_obj = env[0];
     Item socket_obj = env[1];
     JsTlsSocket* sock = tls_socket_from_object(tls_obj);
@@ -2274,9 +2243,7 @@ static Item tls_attach_existing_socket_now(Item env_item) {
 }
 
 static void schedule_tls_attach_existing_socket(Item tls_obj, Item socket_obj) {
-    Item* env = js_alloc_env(2);
-    env[0] = tls_obj;
-    env[1] = socket_obj;
+    Item* env = js_alloc_env2(tls_obj, socket_obj);
     Item attach = js_new_native_closure(tls_attach_existing_socket_now, 0, env, 2);
 
     Item on_fn = js_get_key_cstr(socket_obj, "on");
@@ -2634,8 +2601,7 @@ static void tls_server_connection_cb(uv_stream_t* server, int status) {
 }
 
 static Item js_tls_server_listening_tick(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item self = env[0];
     Item callback = env[1];
     js_ee_emit(self, make_string_item("listening"), js_array_new(0));
@@ -2678,9 +2644,7 @@ extern "C" Item js_tls_server_listen(Item port_item, Item host_item, Item callba
     js_set_key_cstr(self, "__listening__", (Item){.item = b2it(true)});
     // Node emits listening after listen() returns; synchronous TLS callbacks
     // keep `const server = createServer().listen(...)` in its TDZ.
-    Item* env = js_alloc_env(2);
-    env[0] = self;
-    env[1] = callback;
+    Item* env = js_alloc_env2(self, callback);
     Item tick = js_new_native_closure(js_tls_server_listening_tick, 0, env, 2);
     js_next_tick_enqueue(tick);
     return self;

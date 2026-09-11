@@ -1,5 +1,6 @@
 // root_vector.cpp - growable, address-stable, precisely rooted Item vector.
 // See root_vector.h for the contract (D5.1.1v2, D5.4.2; JSCU12).
+#include "../../lib/arraylist.h"
 #include "../lambda-data.hpp"   // full Item definition; lambda.h only forward-declares it in C++
 #include "root_vector.h"
 #include "heap_api.h"
@@ -215,4 +216,15 @@ extern "C" void root_vector_destroy(RootVector* v) {
 
 extern "C" int64_t root_vector_high_water(const RootVector* v) {
     return v ? v->high_water : 0;
+}
+
+void root_vector_clear_owned_rows(ArrayList** rows, RootVector* values) {
+    if (rows && *rows) {
+        for (int i = (*rows)->length - 1; i >= 0; i--) {
+            mem_free((*rows)->data[i]);
+        }
+        arraylist_free(*rows);
+        *rows = NULL;
+    }
+    if (values) root_vector_clear(values);
 }

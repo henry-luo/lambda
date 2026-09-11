@@ -36,6 +36,8 @@ void js_map_promote_descriptor_kind(Map* m);
 Item js_undefined(void);
 Item make_js_undefined(void);
 Item js_make_string_len(const char* str, int len);
+// Take a StrBuf's contents as a GC string Item and free the buffer.
+Item js_strbuf_take_item(StrBuf* sb);
 Item js_make_string(const char* str);
 Item js_domexception_new(Item message, Item name_arg);
 bool js_string_equals(Item value, const char* expected);
@@ -304,6 +306,16 @@ Item js_array_sparse_get_index(Item array, int64_t index);
 int64_t js_array_sparse_collect_indices(Item array, int64_t start, int64_t end, int64_t* indices, int64_t cap);
 Item js_array_define_dense_element_direct(Item array, int64_t index, Item value);
 int64_t js_array_length(Item array);
+
+// Walk a JS array's elements in index order, binding `name` to each element.
+// The index and the length are loop internals — a body that needs either one
+// writes the loop out explicitly instead. `array` is evaluated once per step,
+// so pass a plain variable, not an expression with side effects.
+#define JS_ARRAY_FOREACH(name, array) \
+    for (int64_t name##__index = 0, name##__count = js_array_length(array); \
+         name##__index < name##__count; name##__index++) \
+        if (Item name = js_elements_get_int(array, name##__index); true)
+
 Item js_array_push(Item array, Item value);
 void js_array_push_item_direct(Array* arr, Item value);
 double js_math_pow_d(double base, double exp);
@@ -333,6 +345,20 @@ void js_set_formal_length(Item fn_item, int length);
 void js_func_cache_suppress_push(void);
 void js_func_cache_suppress_pop(void);
 Item* js_alloc_env(int count);
+// Allocate a closure environment and populate it in one step. A native
+// continuation's env is fixed at capture time, so the slot count and the slot
+// values are one decision; splitting them leaves a half-built env visible to
+// anything that walks the closure while the remaining stores are pending.
+Item* js_alloc_env1(Item a);
+Item* js_alloc_env2(Item a, Item b);
+Item* js_alloc_env3(Item a, Item b, Item c);
+
+// Unpack a native continuation's closure environment. A continuation that
+// outlives its environment has nothing left to do, which is not an error.
+#define JS_ENV_OR_UNDEFINED(name, env_item) \
+    Item* name = (Item*)(uintptr_t)(env_item).item; \
+    if (!name) return make_js_undefined()
+
 void js_env_rehome_scalars(Item* env);
 void js_set_function_name(Item fn_item, Item name_item);
 void js_set_function_source(Item fn_item, Item source_item);

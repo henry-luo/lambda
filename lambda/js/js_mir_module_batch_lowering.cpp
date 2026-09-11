@@ -222,7 +222,6 @@ static bool jm_emit_undefined_module_var_batch(JsMirTranspiler* mt,
 // ============================================================================
 
 static int js_debug_func_name_cmp(const void *a, const void *b, void *udata) {
-    (void)udata;
     return strcmp(*(const char**)a, *(const char**)b);
 }
 
@@ -282,7 +281,6 @@ static void js_debug_map_set(struct hashmap* map, const char* mir_name, const ch
 }
 
 void* jm_build_js_debug_info(JsMirTranspiler* mt, const char* filename) {
-    (void)filename;
     if (!mt || !mt->ctx) return NULL;
     struct hashmap* name_map = hashmap_new(sizeof(char*[2]), 64, 0, 0,
         js_debug_func_name_hash, js_debug_func_name_cmp, js_debug_func_name_entry_free, NULL);
@@ -476,8 +474,8 @@ static JsAstNode* jm_loop_binding_body(JsAstNode* node) {
         AstLoopControlNode* loop = (AstLoopControlNode*)node;
         return loop->form == LOOP_FORM_FOR_C ? loop->body : NULL;
     }
-    if (node->node_type == JS_AST_NODE_FOR_IN_STATEMENT ||
-            node->node_type == JS_AST_NODE_FOR_OF_STATEMENT) {
+    if (node->node_type == AST_NODE_FOR_IN_STAM ||
+            node->node_type == AST_NODE_FOR_OF_STAM) {
         return ((JsForOfNode*)node)->body;
     }
     return NULL;
@@ -502,12 +500,12 @@ static bool jm_ast_loop_owns_binding(JsAstNode* root, JsAstNode* closure_node,
             binding_start < body_start;
         if (closure_in_body && (binding_in_body || binding_in_header)) return true;
     }
-    if (root != closure_node && (root->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
-            root->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-            root->node_type == JS_AST_NODE_ARROW_FUNCTION ||
-            root->node_type == JS_AST_NODE_METHOD_DEFINITION ||
-            root->node_type == JS_AST_NODE_CLASS_DECLARATION ||
-            root->node_type == JS_AST_NODE_CLASS_EXPRESSION)) return false;
+    if (root != closure_node && (root->node_type == AST_NODE_FUNC ||
+            root->node_type == AST_NODE_FUNC_EXPR ||
+            root->node_type == AST_NODE_ARROW_FUNC ||
+            root->node_type == AST_NODE_METHOD ||
+            root->node_type == AST_NODE_CLASS ||
+            root->node_type == AST_NODE_CLASS_EXPR)) return false;
     LoopBindingProbe probe = {closure_node, binding_start};
     return js_ast_any_child(root, jm_ast_loop_owns_binding_child, &probe);
 }
@@ -560,7 +558,7 @@ static void jm_mark_mixed_loop_parent_link(JsFuncCollected* child, JsFuncCollect
 
 static bool jm_entry_requires_distinct_lexical_slot(NameEntry* entry) {
     return entry && (entry->is_lexical || entry->is_parameter ||
-        (entry->node && entry->node->node_type == JS_AST_NODE_FUNCTION_DECLARATION));
+        (entry->node && entry->node->node_type == AST_NODE_FUNC));
 }
 
 static bool jm_parent_owns_capture(JsMirTranspiler* mt,
@@ -703,20 +701,20 @@ static const char* jm_capture_enclosing_lexical_scope_key(JsAstNode* root,
             !cap->entry->is_lexical || !cap->entry->node) return NULL;
     JsScope* scope = NULL;
     switch (target->node_type) {
-    case JS_AST_NODE_FUNCTION_DECLARATION:
-    case JS_AST_NODE_FUNCTION_EXPRESSION:
-    case JS_AST_NODE_ARROW_FUNCTION:
-    case JS_AST_NODE_METHOD_DEFINITION:
+    case AST_NODE_FUNC:
+    case AST_NODE_FUNC_EXPR:
+    case AST_NODE_ARROW_FUNC:
+    case AST_NODE_METHOD:
         scope = ((JsFunctionNode*)target)->vars;
         break;
-    case JS_AST_NODE_CLASS_EXPRESSION:
+    case AST_NODE_CLASS_EXPR:
         scope = ((JsClassNode*)target)->expression_scope;
         break;
     default:
         return NULL;
     }
     JsScope* boundary = NULL;
-    if (root && root->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+    if (root && root->node_type == AST_NODE_BLOCK) {
         JsScope* body_scope = ((JsBlockNode*)root)->vars;
         boundary = body_scope ? body_scope->parent : NULL;
     }
@@ -774,7 +772,7 @@ static bool jm_is_direct_program_class_decl(JsProgramNode* program, JsClassNode*
     if (!program || !class_node) return false;
     for (JsAstNode* stmt = program->body; stmt; stmt = stmt->next) {
         JsAstNode* actual = stmt;
-        if (stmt->node_type == JS_AST_NODE_EXPORT_DECLARATION) {
+        if (stmt->node_type == AST_NODE_EXPORT) {
             JsExportNode* exp = (JsExportNode*)stmt;
             if (exp->declaration) actual = exp->declaration;
         }
@@ -785,11 +783,11 @@ static bool jm_is_direct_program_class_decl(JsProgramNode* program, JsClassNode*
 
 static JsFunctionNode* jm_find_iife_function_expr(JsAstNode* expr) {
     if (!expr) return NULL;
-    if (expr->node_type != JS_AST_NODE_CALL_EXPRESSION) return NULL;
+    if (expr->node_type != AST_NODE_CALL_EXPR) return NULL;
     JsCallNode* call = (JsCallNode*)expr;
     if (call->callee &&
-        (call->callee->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-         call->callee->node_type == JS_AST_NODE_ARROW_FUNCTION)) {
+        (call->callee->node_type == AST_NODE_FUNC_EXPR ||
+         call->callee->node_type == AST_NODE_ARROW_FUNC)) {
         return (JsFunctionNode*)call->callee;
     }
     return jm_find_iife_function_expr(call->callee);
@@ -977,7 +975,7 @@ void jm_emit_module_export(JsMirTranspiler* mt, const char* name, int name_len,
     // Resolve the value through box_item (handles native-typed variables)
     JsIdentifierNode temp_id;
     memset(&temp_id, 0, sizeof(temp_id));
-    temp_id.node_type = JS_AST_NODE_IDENTIFIER;
+    temp_id.node_type = AST_NODE_IDENT;
     temp_id.name = name_pool_create_len(mt->tp->name_pool, name, name_len);
     temp_id.entry = binding;
 
@@ -996,7 +994,7 @@ void jm_emit_module_export_aliased(JsMirTranspiler* mt,
                                           const char* export_name, int export_len) {
     JsIdentifierNode temp_id;
     memset(&temp_id, 0, sizeof(temp_id));
-    temp_id.node_type = JS_AST_NODE_IDENTIFIER;
+    temp_id.node_type = AST_NODE_IDENT;
     temp_id.name = name_pool_create_len(mt->tp->name_pool, local_name, local_len);
     temp_id.entry = local_binding;
 
@@ -1014,18 +1012,17 @@ void jm_emit_module_export_aliased(JsMirTranspiler* mt,
 // ============================================================================
 
 void jm_callsite_propagate(JsMirTranspiler* mt, JsAstNode* program_body) {
-    (void)program_body;
     if (!mt || !mt->tp) return;
     // The indexed node table already contains every call exactly once. It
     // replaces the former per-function and top-level recursive scans.
     AstIndex* index = &mt->tp->ast_index;
     for (uint32_t i = 0; i < index->count; i++) {
         AstNode* node = index->nodes[i];
-        if (!node || node->node_type != JS_AST_NODE_CALL_EXPRESSION) continue;
+        if (!node || node->node_type != AST_NODE_CALL_EXPR) continue;
         JsCallNode* call = (JsCallNode*)node;
         for (JsAstNode* arg = call->arguments; arg; arg = arg->next) {
-            if (arg->node_type != JS_AST_NODE_FUNCTION_EXPRESSION &&
-                    arg->node_type != JS_AST_NODE_ARROW_FUNCTION) continue;
+            if (arg->node_type != AST_NODE_FUNC_EXPR &&
+                    arg->node_type != AST_NODE_ARROW_FUNC) continue;
             JsFuncCollected* callback = jm_find_collected_func(mt,
                 (JsFunctionNode*)arg);
             if (callback && JM_JS_FACT(callback, native_return_kind) != NATIVE_RETURN_NONE) {
@@ -1062,22 +1059,22 @@ static void jm_emit_evalscript_global_lex_decl_check_name(JsMirTranspiler* mt, S
 
 static void jm_emit_evalscript_global_lex_decl_precheck(JsMirTranspiler* mt, JsAstNode* node) {
     if (!node) return;
-    if (node->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+    if (node->node_type == AST_NODE_CLASS) {
         JsClassNode* cls = (JsClassNode*)node;
         jm_emit_evalscript_global_lex_decl_check_name(mt, cls->name);
         return;
     }
-    if (node->node_type != JS_AST_NODE_VARIABLE_DECLARATION) return;
+    if (node->node_type != AST_NODE_VAR_STAM) return;
     JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
     if (vd->kind != JS_VAR_LET && vd->kind != JS_VAR_CONST) return;
     for (JsAstNode* d = vd->declarations; d; d = d->next) {
-        if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+        if (d->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
         JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
         if (!decl->id) continue;
-        if (decl->id->node_type == JS_AST_NODE_IDENTIFIER) {
+        if (decl->id->node_type == AST_NODE_IDENT) {
             jm_emit_evalscript_global_lex_decl_check_name(mt, ((JsIdentifierNode*)decl->id)->name);
-        } else if (decl->id->node_type == JS_AST_NODE_OBJECT_PATTERN ||
-                   decl->id->node_type == JS_AST_NODE_ARRAY_PATTERN) {
+        } else if (decl->id->node_type == AST_NODE_MAP_PATTERN ||
+                   decl->id->node_type == AST_NODE_ARRAY_PATTERN) {
             struct hashmap* names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
                 jm_name_hash, jm_name_cmp, NULL, NULL);
             jm_collect_pattern_names(decl->id, names);
@@ -1098,17 +1095,17 @@ static void jm_emit_evalscript_global_lex_decl_precheck(JsMirTranspiler* mt, JsA
 static void jm_emit_evalscript_global_decl_prechecks(JsMirTranspiler* mt, JsAstNode* node) {
     if (!node) return;
     switch (node->node_type) {
-    case JS_AST_NODE_VARIABLE_DECLARATION: {
+    case AST_NODE_VAR_STAM: {
         JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
         if (vd->kind != JS_VAR_VAR) return;
         for (JsAstNode* d = vd->declarations; d; d = d->next) {
-            if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+            if (d->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
             JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
             if (!decl->id) continue;
-            if (decl->id->node_type == JS_AST_NODE_IDENTIFIER) {
+            if (decl->id->node_type == AST_NODE_IDENT) {
                 jm_emit_evalscript_global_decl_check_name(mt, ((JsIdentifierNode*)decl->id)->name, false);
-            } else if (decl->id->node_type == JS_AST_NODE_OBJECT_PATTERN ||
-                       decl->id->node_type == JS_AST_NODE_ARRAY_PATTERN) {
+            } else if (decl->id->node_type == AST_NODE_MAP_PATTERN ||
+                       decl->id->node_type == AST_NODE_ARRAY_PATTERN) {
                 struct hashmap* names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
                     jm_name_hash, jm_name_cmp, NULL, NULL);
                 jm_collect_pattern_names(decl->id, names);
@@ -1122,35 +1119,35 @@ static void jm_emit_evalscript_global_decl_prechecks(JsMirTranspiler* mt, JsAstN
         }
         break;
     }
-    case JS_AST_NODE_FUNCTION_DECLARATION: {
+    case AST_NODE_FUNC: {
         JsFunctionNode* fn = (JsFunctionNode*)node;
         jm_emit_evalscript_global_decl_check_name(mt, fn->name, true);
         break;
     }
-    case JS_AST_NODE_EXPORT_DECLARATION: {
+    case AST_NODE_EXPORT: {
         JsExportNode* exp = (JsExportNode*)node;
         jm_emit_evalscript_global_decl_prechecks(mt, exp->declaration);
         break;
     }
-    case JS_AST_NODE_BLOCK_STATEMENT: {
+    case AST_NODE_BLOCK: {
         JsBlockNode* block = (JsBlockNode*)node;
         for (JsAstNode* s = block->statements; s; s = s->next)
             jm_emit_evalscript_global_decl_prechecks(mt, s);
         break;
     }
-    case JS_AST_NODE_IF_STATEMENT: {
+    case AST_NODE_IF_EXPR: {
         JsIfNode* ifn = (JsIfNode*)node;
         jm_emit_evalscript_global_decl_prechecks(mt, ifn->consequent);
         jm_emit_evalscript_global_decl_prechecks(mt, ifn->alternate);
         break;
     }
-    case JS_AST_NODE_SWITCH_STATEMENT: {
+    case AST_NODE_MATCH_EXPR: {
         JsSwitchNode* sw = (JsSwitchNode*)node;
         for (JsAstNode* c = sw->cases; c; c = c->next)
             jm_emit_evalscript_global_decl_prechecks(mt, c);
         break;
     }
-    case JS_AST_NODE_SWITCH_CASE: {
+    case AST_NODE_MATCH_ARM: {
         JsSwitchCaseNode* sc = (JsSwitchCaseNode*)node;
         for (JsAstNode* s = sc->consequent; s; s = s->next)
             jm_emit_evalscript_global_decl_prechecks(mt, s);
@@ -1162,21 +1159,21 @@ static void jm_emit_evalscript_global_decl_prechecks(JsMirTranspiler* mt, JsAstN
         jm_emit_evalscript_global_decl_prechecks(mt, loop->body);
         break;
     }
-    case JS_AST_NODE_FOR_IN_STATEMENT:
-    case JS_AST_NODE_FOR_OF_STATEMENT: {
+    case AST_NODE_FOR_IN_STAM:
+    case AST_NODE_FOR_OF_STAM: {
         JsForInNode* for_node = (JsForInNode*)node;
         jm_emit_evalscript_global_decl_prechecks(mt, for_node->left);
         jm_emit_evalscript_global_decl_prechecks(mt, for_node->body);
         break;
     }
-    case JS_AST_NODE_TRY_STATEMENT: {
+    case AST_NODE_TRY_STAM: {
         JsTryNode* try_node = (JsTryNode*)node;
         jm_emit_evalscript_global_decl_prechecks(mt, try_node->block);
         jm_emit_evalscript_global_decl_prechecks(mt, try_node->handler);
         jm_emit_evalscript_global_decl_prechecks(mt, try_node->finalizer);
         break;
     }
-    case JS_AST_NODE_CATCH_CLAUSE: {
+    case AST_NODE_CATCH_CLAUSE: {
         JsCatchNode* catch_node = (JsCatchNode*)node;
         jm_emit_evalscript_global_decl_prechecks(mt, catch_node->body);
         break;
@@ -1193,13 +1190,13 @@ static void jm_emit_evalscript_global_decl_prechecks(JsMirTranspiler* mt, JsAstN
 
 static bool jm_is_plain_script_module_var_decl_without_init(JsMirTranspiler* mt, JsAstNode* node) {
     if (!mt || !node || mt->is_module || mt->is_eval_direct || !mt->module_consts) return false;
-    if (node->node_type != JS_AST_NODE_VARIABLE_DECLARATION) return false;
+    if (node->node_type != AST_NODE_VAR_STAM) return false;
     JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
     if (vd->kind != JS_VAR_VAR || !vd->declarations) return false;
     for (JsAstNode* d = vd->declarations; d; d = d->next) {
-        if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) return false;
+        if (d->node_type != AST_NODE_VARIABLE_DECLARATOR) return false;
         JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
-        if (decl->init || !decl->id || decl->id->node_type != JS_AST_NODE_IDENTIFIER) return false;
+        if (decl->init || !decl->id || decl->id->node_type != AST_NODE_IDENT) return false;
         JsIdentifierNode* id = (JsIdentifierNode*)decl->id;
         JsModuleConstEntry* mc = jm_find_module_const_by_binding(mt, id->entry);
         if (!mc || mc->const_type != MCONST_MODVAR || mc->var_kind != JS_VAR_VAR ||
@@ -1213,7 +1210,7 @@ static bool jm_is_plain_script_module_var_decl_without_init(JsMirTranspiler* mt,
 static int js_mir_analyze_and_plan(void* opaque) {
     JsMirTranspiler* mt = (JsMirTranspiler*)opaque;
     JsAstNode* root = mt && mt->tp ? (JsAstNode*)mt->tp->ast_root : NULL;
-    if (!root || root->node_type != JS_AST_NODE_PROGRAM) {
+    if (!root || root->node_type != AST_SCRIPT) {
         log_error("js-mir: expected program node");
         return 0;
     }
@@ -1292,31 +1289,31 @@ static int js_mir_analyze_and_plan(void* opaque) {
         while (s) {
             // Unwrap export declarations to reach inner variable declarations
             JsAstNode* actual = s;
-            if (s->node_type == JS_AST_NODE_EXPORT_DECLARATION) {
+            if (s->node_type == AST_NODE_EXPORT) {
                 JsExportNode* exp = (JsExportNode*)s;
                 if (exp->declaration) actual = exp->declaration;
             }
-            if (actual->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+            if (actual->node_type == AST_NODE_VAR_STAM) {
                 JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)actual;
                 JsAstNode* d = v->declarations;
                 while (d) {
-                    if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+                    if (d->node_type == AST_NODE_VARIABLE_DECLARATOR) {
                         JsVariableDeclaratorNode* vd = (JsVariableDeclaratorNode*)d;
-                        if (vd->id && vd->id->node_type == JS_AST_NODE_IDENTIFIER) {
+                        if (vd->id && vd->id->node_type == AST_NODE_IDENT) {
                             JsIdentifierNode* vid = (JsIdentifierNode*)vd->id;
                             const char* vname = jm_var_name(vid->name);
                             TypeId modvar_type = (TypeId)0;
-                            if (vd->init && vd->init->node_type == JS_AST_NODE_LITERAL) {
+                            if (vd->init && vd->init->node_type == AST_NODE_LITERAL) {
                                 JsLiteralNode* mlit = (JsLiteralNode*)vd->init;
-                                if (mlit->literal_type == JS_LITERAL_NUMBER) {
+                                if (mlit->literal_type == AST_LITERAL_NUMBER) {
                                     modvar_type = mlit->is_bigint
                                         ? LMD_TYPE_DECIMAL : LMD_TYPE_FLOAT;
                                 }
                             }
                             jm_register_module_var(mt, vname, (int)v->kind,
                                 modvar_type, false, "module var", vid->entry);
-                        } else if (vd->id && (vd->id->node_type == JS_AST_NODE_OBJECT_PATTERN ||
-                                               vd->id->node_type == JS_AST_NODE_ARRAY_PATTERN)) {
+                        } else if (vd->id && (vd->id->node_type == AST_NODE_MAP_PATTERN ||
+                                               vd->id->node_type == AST_NODE_ARRAY_PATTERN)) {
                             // destructured binding: collect all names from the pattern
                             struct hashmap* pat_names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
                                 jm_name_hash, jm_name_cmp, NULL, NULL);
@@ -1345,15 +1342,15 @@ static int js_mir_analyze_and_plan(void* opaque) {
         JsAstNode* s = program->body;
         while (s) {
             JsAstNode* actual = s;
-            if (s->node_type == JS_AST_NODE_EXPORT_DECLARATION) {
+            if (s->node_type == AST_NODE_EXPORT) {
                 JsExportNode* exp = (JsExportNode*)s;
                 if (exp->declaration) actual = exp->declaration;
             }
             // Skip top-level variable declarations (already handled above)
             // Also skip function/class declarations (handled below as module bindings).
-            if (actual->node_type != JS_AST_NODE_VARIABLE_DECLARATION &&
-                actual->node_type != JS_AST_NODE_FUNCTION_DECLARATION &&
-                actual->node_type != JS_AST_NODE_CLASS_DECLARATION) {
+            if (actual->node_type != AST_NODE_VAR_STAM &&
+                actual->node_type != AST_NODE_FUNC &&
+                actual->node_type != AST_NODE_CLASS) {
                 jm_collect_indexed_body_locals(mt, actual, hoisted_vars, true);  // var_only: only hoist var
             }
             s = s->next;
@@ -1382,7 +1379,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
     {
         JsAstNode* s = program->body;
         while (s) {
-            if (s->node_type == JS_AST_NODE_IMPORT_DECLARATION) {
+            if (s->node_type == AST_NODE_IMPORT) {
                 JsImportNode* imp = (JsImportNode*)s;
 
                 // Default import: import X from 'module'
@@ -1427,7 +1424,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
                 // Named imports: import { a, b as c } from 'module'
                 JsAstNode* spec = imp->specifiers;
                 while (spec) {
-                    if (spec->node_type == JS_AST_NODE_IMPORT_SPECIFIER) {
+                    if (spec->node_type == AST_NODE_IMPORT_SPECIFIER) {
                         JsImportSpecifierNode* isp = (JsImportSpecifierNode*)spec;
                         const char* vname = jm_var_name(isp->local_name);
                         JsModuleConstEntry* mce = jm_register_module_var(mt,
@@ -1466,7 +1463,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
     {
         JsAstNode* s = program->body;
         while (s) {
-            if (s->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+            if (s->node_type == AST_NODE_FUNC) {
                 JsFunctionNode* fn = (JsFunctionNode*)s;
                 if (fn->name) {
                     JsFuncCollected* fc = jm_find_collected_func(mt, fn);
@@ -1505,12 +1502,12 @@ static int js_mir_analyze_and_plan(void* opaque) {
         auto find_promotable_iife = [&](JsAstNode* stmt) -> JsFunctionNode* {
             if (!stmt) return NULL;
             JsAstNode* expr = NULL;
-            if (stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
+            if (stmt->node_type == AST_NODE_EXPR_STMT) {
                 expr = ((JsExpressionStatementNode*)stmt)->expression;
-            } else if (stmt->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+            } else if (stmt->node_type == AST_NODE_VAR_STAM) {
                 JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)stmt;
                 for (JsAstNode* d = vd->declarations; d; d = d->next) {
-                    if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+                    if (d->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
                     JsFunctionNode* iife = jm_find_iife_function_expr(
                         ((JsVariableDeclaratorNode*)d)->init);
                     if (iife) {
@@ -1519,7 +1516,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
                     }
                 }
             }
-            if (!expr || expr->node_type != JS_AST_NODE_CALL_EXPRESSION) return NULL;
+            if (!expr || expr->node_type != AST_NODE_CALL_EXPR) return NULL;
             JsFunctionNode* iife_fn = jm_find_iife_function_expr(expr);
             if (!iife_fn || !iife_fn->body || iife_fn->is_async || iife_fn->is_generator) return NULL;
             if (!iife_fn->name) return iife_fn;
@@ -1558,23 +1555,23 @@ static int js_mir_analyze_and_plan(void* opaque) {
         };
         for (JsAstNode* count_stmt = program->body; count_stmt; count_stmt = count_stmt->next) {
             JsFunctionNode* iife_fn = find_promotable_iife(count_stmt);
-            if (!iife_fn || iife_fn->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) continue;
+            if (!iife_fn || iife_fn->body->node_type != AST_NODE_BLOCK) continue;
             struct hashmap* wrapper_bindings = hashmap_new(sizeof(JsNameSetEntry), 32, 0, 0,
                 jm_name_hash, jm_name_cmp, NULL, NULL);
             JsBlockNode* block = (JsBlockNode*)iife_fn->body;
             for (JsAstNode* s = block->statements; s; s = s->next) {
-                if (s->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+                if (s->node_type == AST_NODE_FUNC) {
                     JsFunctionNode* fn = (JsFunctionNode*)s;
                     if (fn->name) {
                         const char* name = jm_var_name(fn->name);
                         jm_name_set_add(wrapper_bindings, name);
                     }
-                } else if (s->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+                } else if (s->node_type == AST_NODE_VAR_STAM) {
                     JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)s;
                     for (JsAstNode* d = vd->declarations; d; d = d->next) {
-                        if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+                        if (d->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
                         JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
-                        if (!decl->id || decl->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
+                        if (!decl->id || decl->id->node_type != AST_NODE_IDENT) continue;
                         JsIdentifierNode* id = (JsIdentifierNode*)decl->id;
                         const char* name = jm_var_name(id->name);
                         jm_name_set_add(wrapper_bindings, name);
@@ -1604,23 +1601,23 @@ static int js_mir_analyze_and_plan(void* opaque) {
             JsAstNode* top = program->body;
             while (top) {
                 if (top == ignored_stmt) { top = top->next; continue; }
-                if (top->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+                if (top->node_type == AST_NODE_VAR_STAM) {
                     JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)top;
                     for (JsAstNode* d = vd->declarations; d; d = d->next) {
-                        if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+                        if (d->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
                         JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
-                        if (!decl->id || decl->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
+                        if (!decl->id || decl->id->node_type != AST_NODE_IDENT) continue;
                         JsIdentifierNode* id = (JsIdentifierNode*)decl->id;
                         const char* top_name = jm_var_name(id->name);
                         if (strcmp(top_name, candidate) == 0) return true;
                     }
-                } else if (top->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+                } else if (top->node_type == AST_NODE_FUNC) {
                     JsFunctionNode* fn = (JsFunctionNode*)top;
                     if (fn->name) {
                         const char* top_name = jm_var_name(fn->name);
                         if (strcmp(top_name, candidate) == 0) return true;
                     }
-                } else if (top->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+                } else if (top->node_type == AST_NODE_CLASS) {
                     JsClassNode* cls = (JsClassNode*)top;
                     if (cls->name) {
                         const char* top_name = jm_var_name(cls->name);
@@ -1667,20 +1664,20 @@ static int js_mir_analyze_and_plan(void* opaque) {
             if (iife_fc) JM_JS_FACT(iife_fc, is_iife_body) = true;
 
             // Scan IIFE body for function declarations and var declarations
-            if (iife_fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+            if (iife_fn->body->node_type == AST_NODE_BLOCK) {
                 JsBlockNode* blk = (JsBlockNode*)iife_fn->body;
                 JsAstNode* s = blk->statements;
                 while (s) {
-                    if (s->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+                    if (s->node_type == AST_NODE_FUNC) {
                         register_fn_as_module_const((JsFunctionNode*)s);
-                    } else if (s->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+                    } else if (s->node_type == AST_NODE_VAR_STAM) {
                         // var/let/const inside IIFE — register non-literal vars as module vars
                         JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)s;
                         JsAstNode* d = vd->declarations;
                         while (d) {
-                            if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+                            if (d->node_type == AST_NODE_VARIABLE_DECLARATOR) {
                                 JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
-                                if (decl->id && decl->id->node_type == JS_AST_NODE_IDENTIFIER) {
+                                if (decl->id && decl->id->node_type == AST_NODE_IDENT) {
                                     JsIdentifierNode* vid = (JsIdentifierNode*)decl->id;
                                     const char* vname = jm_var_name(vid->name);
                                     if (top_level_declares_name(vname, stmt)) {
@@ -1774,7 +1771,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
         JsClassEntry* ce = &mt->class_entries[i];
         ce->superclass = NULL;
         if (ce->node && ce->node->superclass &&
-            ce->node->superclass->node_type == JS_AST_NODE_IDENTIFIER) {
+            ce->node->superclass->node_type == AST_NODE_IDENT) {
             JsIdentifierNode* super_id = (JsIdentifierNode*)ce->node->superclass;
             if (super_id->name) {
                 if (ce->node->entry && ce->node->entry == super_id->entry) {
@@ -1967,7 +1964,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
                         }
 
                         bool cap_is_parent_nfe = false;
-                        if (parent->node && parent->node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION &&
+                        if (parent->node && parent->node->node_type == AST_NODE_FUNC_EXPR &&
                             parent->node->name) {
                             const char* parent_self_name = jm_var_name(parent->node->name);
                             cap_is_parent_nfe = (strcmp(cap_name, parent_self_name) == 0);
@@ -2043,7 +2040,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
                 const char* child_self_name = child->node && child->node->name
                     ? jm_var_name(child->node->name) : NULL;
 
-                bool is_child_nfe = (child->node && child->node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION);
+                bool is_child_nfe = (child->node && child->node->node_type == AST_NODE_FUNC_EXPR);
                 bool has_nfe_self_capture = false;
                 for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
                     const char* cname = JM_CAPTURE_ARRAY(child)[k].name;
@@ -2082,7 +2079,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
                         const char* child_self_name2 = child->node && child->node->name
                             ? jm_var_name(child->node->name) : NULL;
 
-                        bool is_child_nfe2 = (child->node && child->node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION);
+                        bool is_child_nfe2 = (child->node && child->node->node_type == AST_NODE_FUNC_EXPR);
                         for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
                             const char* cname = JM_CAPTURE_ARRAY(child)[k].name;
                             const char* slot_key = jm_capture_scope_env_slot_key(mt, parent_fc, child, &JM_CAPTURE_ARRAY(child)[k]);
@@ -2113,7 +2110,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
                     if (!child->node || !child->node->name) continue;
                     const char* csn = jm_var_name(child->node->name);
                     // Only true NFEs (not function declarations) get extra slots
-                    if (child->node->node_type != JS_AST_NODE_FUNCTION_EXPRESSION) continue;
+                    if (child->node->node_type != AST_NODE_FUNC_EXPR) continue;
                     bool assigned_nfe_slot = false;
                     for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
                         if (strcmp(JM_CAPTURE_ARRAY(child)[k].name, csn) == 0 &&
@@ -2149,7 +2146,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
                         const char* child_self_remap = child->node && child->node->name
                             ? jm_var_name(child->node->name) : NULL;
 
-                        bool is_child_nfe_remap = (child->node && child->node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION);
+                        bool is_child_nfe_remap = (child->node && child->node->node_type == AST_NODE_FUNC_EXPR);
                         for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
                             // Skip true NFE self-captures — already assigned dedicated slots
                             if (child_self_remap && child_self_remap[0] &&
@@ -2765,7 +2762,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
                          !JM_JS_FACT(fc, uses_arguments) &&
                          !JM_JS_FACT(fc, has_duplicate_param_names) &&
                          !(fc->node->is_arrow && fc->node->body &&
-                           fc->node->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) &&
+                           fc->node->body->node_type == AST_NODE_BLOCK) &&
                          !JM_JS_FACT(fc, has_non_simple_params) &&
                          (JM_JS_FACT(fc, return_type) == LMD_TYPE_INT || JM_JS_FACT(fc, return_type) == LMD_TYPE_FLOAT));
         bool has_native_param = false;
@@ -2951,7 +2948,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
 static int js_mir_lower(void* opaque) {
     JsMirTranspiler* mt = (JsMirTranspiler*)opaque;
     JsAstNode* root = mt && mt->tp ? (JsAstNode*)mt->tp->ast_root : NULL;
-    if (!root || root->node_type != JS_AST_NODE_PROGRAM) return 0;
+    if (!root || root->node_type != AST_SCRIPT) return 0;
     JsProgramNode* program = (JsProgramNode*)root;
 
     // Phase 2: Define all collected functions (innermost first)
@@ -3219,11 +3216,11 @@ static int js_mir_lower(void* opaque) {
     while (stmt) {
         // Unwrap export declarations to hoist exported function declarations
         JsAstNode* actual_stmt = stmt;
-        if (stmt->node_type == JS_AST_NODE_EXPORT_DECLARATION) {
+        if (stmt->node_type == AST_NODE_EXPORT) {
             JsExportNode* exp = (JsExportNode*)stmt;
             if (exp->declaration) actual_stmt = exp->declaration;
         }
-        if (actual_stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+        if (actual_stmt->node_type == AST_NODE_FUNC) {
             JsFunctionNode* fn = (JsFunctionNode*)actual_stmt;
             if (fn->name) {
                 JsFuncCollected* fc = jm_find_collected_func(mt, fn);
@@ -3305,7 +3302,7 @@ static int js_mir_lower(void* opaque) {
         // Unwrap export declarations to reach the inner declaration
         JsAstNode* actual_stmt = stmt;
         JsExportNode* current_export = NULL;
-        if (stmt->node_type == JS_AST_NODE_EXPORT_DECLARATION) {
+        if (stmt->node_type == AST_NODE_EXPORT) {
             current_export = (JsExportNode*)stmt;
             if (current_export->declaration) {
                 actual_stmt = current_export->declaration;
@@ -3315,7 +3312,7 @@ static int js_mir_lower(void* opaque) {
                 // Value is resolved by local_name; published under export_name.
                 JsAstNode* spec = current_export->specifiers;
                 while (spec) {
-                    if (spec->node_type == JS_AST_NODE_EXPORT_SPECIFIER) {
+                    if (spec->node_type == AST_NODE_EXPORT_SPECIFIER) {
                         JsExportSpecifierNode* es = (JsExportSpecifierNode*)spec;
                         jm_emit_module_export_aliased(mt,
                             es->local_name->chars,  (int)es->local_name->len,
@@ -3332,7 +3329,7 @@ static int js_mir_lower(void* opaque) {
             }
         }
 
-        if (actual_stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+        if (actual_stmt->node_type == AST_NODE_FUNC) {
             JsFunctionNode* fn = (JsFunctionNode*)actual_stmt;
             if (fn->name) {
                 JsFuncCollected* fc = jm_find_collected_func(mt, fn);
@@ -3417,7 +3414,7 @@ static int js_mir_lower(void* opaque) {
             continue;
         }
 
-        if (actual_stmt->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+        if (actual_stmt->node_type == AST_NODE_CLASS) {
             // Create the class object and store it in the module var so it can be
             // accessed by closures/methods (e.g., __publicField(ClassName, ...))
             JsClassNode* cls_node = (JsClassNode*)actual_stmt;
@@ -3485,7 +3482,7 @@ static int js_mir_lower(void* opaque) {
             continue;
         }
 
-        if (actual_stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
+        if (actual_stmt->node_type == AST_NODE_EXPR_STMT) {
             JsExpressionStatementNode* es = (JsExpressionStatementNode*)actual_stmt;
             // Js57 P7d-C: split at first top-level ExpressionStatement(Await).
             // We evaluate the await argument (so side effects + P5 publish run),
@@ -3493,7 +3490,7 @@ static int js_mir_lower(void* opaque) {
             // namespace early. The label below catches the re-entry from the
             // depth-0 AEO drain so post-await statements run.
             bool p7d_split_now = (p7d_has_tla && p7d_post_await_label && es->expression &&
-                                  es->expression->node_type == JS_AST_NODE_AWAIT_EXPRESSION);
+                                  es->expression->node_type == AST_NODE_AWAIT);
             if (p7d_split_now) {
                 JsAwaitNode* aw = (JsAwaitNode*)es->expression;
                 MIR_reg_t arg_val = jm_new_reg(mt, "p7d_aw_arg", MIR_T_I64);
@@ -3545,19 +3542,19 @@ static int js_mir_lower(void* opaque) {
             // Module mode: after transpiling exported variable declarations,
             // emit exports for each declared name
             if (current_export && mt->is_module &&
-                actual_stmt->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+                actual_stmt->node_type == AST_NODE_VAR_STAM) {
                 JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)actual_stmt;
                 JsAstNode* d = v->declarations;
                 while (d) {
-                    if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+                    if (d->node_type == AST_NODE_VARIABLE_DECLARATOR) {
                         JsVariableDeclaratorNode* vd = (JsVariableDeclaratorNode*)d;
-                        if (vd->id && vd->id->node_type == JS_AST_NODE_IDENTIFIER) {
+                        if (vd->id && vd->id->node_type == AST_NODE_IDENT) {
                             JsIdentifierNode* vid = (JsIdentifierNode*)vd->id;
                             jm_emit_module_export(mt, vid->name->chars, (int)vid->name->len,
                                 vid->entry,
                                 current_export->is_default);
-                        } else if (vd->id && (vd->id->node_type == JS_AST_NODE_OBJECT_PATTERN ||
-                                              vd->id->node_type == JS_AST_NODE_ARRAY_PATTERN)) {
+                        } else if (vd->id && (vd->id->node_type == AST_NODE_MAP_PATTERN ||
+                                              vd->id->node_type == AST_NODE_ARRAY_PATTERN)) {
                             // Js56 H2: `export const { resolve, reject } = expr;` /
                             // `export let [a, b] = expr;` — walk the pattern and
                             // export each bound name so cross-module imports
@@ -3808,7 +3805,7 @@ bool jm_validate_mir_labels(MIR_context_t ctx) {
 // ============================================================================
 
 static bool jm_module_has_top_level_await(JsMirTranspiler* mt, JsAstNode* ast) {
-    if (!ast || ast->node_type != JS_AST_NODE_PROGRAM) return false;
+    if (!ast || ast->node_type != AST_SCRIPT) return false;
     JsProgramNode* program = (JsProgramNode*)ast;
     for (JsAstNode* statement = program->body; statement; statement = statement->next) {
         if (jm_count_awaits(mt, statement) > 0) return true;
@@ -4109,12 +4106,12 @@ static void jm_propagate_import_evaluation_error(Item parent_specifier,
 }
 
 void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename) {
-    if (!ast || ast->node_type != JS_AST_NODE_PROGRAM) return;
+    if (!ast || ast->node_type != AST_SCRIPT) return;
     JsProgramNode* program = (JsProgramNode*)ast;
 
     JsAstNode* s = program->body;
     while (s) {
-        if (s->node_type == JS_AST_NODE_IMPORT_DECLARATION) {
+        if (s->node_type == AST_NODE_IMPORT) {
             JsImportNode* imp = (JsImportNode*)s;
             if (imp->source) {
                 // Resolve module path relative to current file

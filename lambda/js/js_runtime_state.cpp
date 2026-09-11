@@ -977,6 +977,13 @@ bool js_realm_slots_lookup(JsRealmSlots* slots, const JsRealmSlotId* slot_ids,
     return true;
 }
 
+bool js_realm_items_fill(void* items, const JsRealmSlotId* slot_ids, int count,
+        bool reserve) {
+    if (!items || !js_active_runtime_state) return false;
+    return js_realm_slots_lookup(&js_runtime_state.realm_slots, slot_ids,
+        (Item**)items, count, reserve);
+}
+
 struct JsRuntimeRootResetOptions {
     bool retain_cluster_primary_options;
 };

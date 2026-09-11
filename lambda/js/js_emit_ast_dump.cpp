@@ -7,98 +7,65 @@
 #include <stdio.h>
 #include <string.h>
 
-static inline const char* dump_node_src(const char* source, SourceSpan span, int* out_len) {
-    *out_len = (int)lambda_source_span_length(span);
-    return source + span.start_byte;
-}
-
-static void dump_escaped_string(const char* str, int len) {
-    putchar('"');
-    for (int i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)str[i];
-        switch (c) {
-            case '"':  printf("\\\""); break;
-            case '\\': printf("\\\\"); break;
-            case '\n': printf("\\n"); break;
-            case '\r': printf("\\r"); break;
-            case '\t': printf("\\t"); break;
-            case '\0': printf("\\0"); break;
-            default:
-                if (c < 0x20) {
-                    printf("\\x%02x", c);
-                } else {
-                    putchar(c);
-                }
-        }
-    }
-    putchar('"');
-}
-
-static void dump_indent(int indent) {
-    for (int i = 0; i < indent; i++) {
-        printf("  ");
-    }
-}
-
 static const char* js_dump_kind_name(int type) {
     switch (type) {
-        case JS_AST_NODE_NULL: return "JS_AST_NODE_NULL";
-        case JS_AST_NODE_PROGRAM: return "JS_AST_NODE_PROGRAM";
-        case JS_AST_NODE_FUNCTION_DECLARATION: return "JS_AST_NODE_FUNCTION_DECLARATION";
-        case JS_AST_NODE_VARIABLE_DECLARATION: return "JS_AST_NODE_VARIABLE_DECLARATION";
-        case JS_AST_NODE_EXPRESSION_STATEMENT: return "JS_AST_NODE_EXPRESSION_STATEMENT";
-        case JS_AST_NODE_BLOCK_STATEMENT: return "JS_AST_NODE_BLOCK_STATEMENT";
-        case JS_AST_NODE_IF_STATEMENT: return "JS_AST_NODE_IF_STATEMENT";
+        case AST_NODE_NULL: return "AST_NODE_NULL";
+        case AST_SCRIPT: return "AST_SCRIPT";
+        case AST_NODE_FUNC: return "AST_NODE_FUNC";
+        case AST_NODE_VAR_STAM: return "AST_NODE_VAR_STAM";
+        case AST_NODE_EXPR_STMT: return "AST_NODE_EXPR_STMT";
+        case AST_NODE_BLOCK: return "AST_NODE_BLOCK";
+        case AST_NODE_IF_EXPR: return "AST_NODE_IF_EXPR";
         case AST_NODE_LOOP: return "JS_AST_NODE_LOOP";
-        case JS_AST_NODE_RETURN_STATEMENT: return "JS_AST_NODE_RETURN_STATEMENT";
-        case JS_AST_NODE_BREAK_STATEMENT: return "JS_AST_NODE_BREAK_STATEMENT";
-        case JS_AST_NODE_CONTINUE_STATEMENT: return "JS_AST_NODE_CONTINUE_STATEMENT";
-        case JS_AST_NODE_IDENTIFIER: return "JS_AST_NODE_IDENTIFIER";
-        case JS_AST_NODE_LITERAL: return "JS_AST_NODE_LITERAL";
-        case JS_AST_NODE_BINARY_EXPRESSION: return "JS_AST_NODE_BINARY_EXPRESSION";
-        case JS_AST_NODE_UNARY_EXPRESSION: return "JS_AST_NODE_UNARY_EXPRESSION";
-        case JS_AST_NODE_ASSIGNMENT_EXPRESSION: return "JS_AST_NODE_ASSIGNMENT_EXPRESSION";
-        case JS_AST_NODE_CALL_EXPRESSION: return "JS_AST_NODE_CALL_EXPRESSION";
-        case JS_AST_NODE_MEMBER_EXPRESSION: return "JS_AST_NODE_MEMBER_EXPRESSION";
-        case JS_AST_NODE_ARRAY_EXPRESSION: return "JS_AST_NODE_ARRAY_EXPRESSION";
-        case JS_AST_NODE_OBJECT_EXPRESSION: return "JS_AST_NODE_OBJECT_EXPRESSION";
-        case JS_AST_NODE_FUNCTION_EXPRESSION: return "JS_AST_NODE_FUNCTION_EXPRESSION";
-        case JS_AST_NODE_SPREAD_ELEMENT: return "JS_AST_NODE_SPREAD_ELEMENT";
-        case JS_AST_NODE_CLASS_DECLARATION: return "JS_AST_NODE_CLASS_DECLARATION";
-        case JS_AST_NODE_FIELD_DEFINITION: return "JS_AST_NODE_FIELD_DEFINITION";
-        case JS_AST_NODE_THROW_STATEMENT: return "JS_AST_NODE_THROW_STATEMENT";
-        case JS_AST_NODE_PARAMETER: return "JS_AST_NODE_PARAMETER";
-        case JS_AST_NODE_NEW_EXPRESSION: return "JS_AST_NODE_NEW_EXPRESSION";
-        case JS_AST_NODE_SEQUENCE_EXPRESSION: return "JS_AST_NODE_SEQUENCE_EXPRESSION";
-        case JS_AST_NODE_YIELD_EXPRESSION: return "JS_AST_NODE_YIELD_EXPRESSION";
-        case JS_AST_NODE_AWAIT_EXPRESSION: return "JS_AST_NODE_AWAIT_EXPRESSION";
-        case JS_AST_NODE_IMPORT_DECLARATION: return "JS_AST_NODE_IMPORT_DECLARATION";
-        case JS_AST_NODE_EXPORT_DECLARATION: return "JS_AST_NODE_EXPORT_DECLARATION";
-        case JS_AST_NODE_ARROW_FUNCTION: return "JS_AST_NODE_ARROW_FUNCTION";
-        case JS_AST_NODE_CONDITIONAL_EXPRESSION: return "JS_AST_NODE_CONDITIONAL_EXPRESSION";
+        case AST_NODE_RETURN_STAM: return "AST_NODE_RETURN_STAM";
+        case AST_NODE_BREAK_STAM: return "AST_NODE_BREAK_STAM";
+        case AST_NODE_CONTINUE_STAM: return "AST_NODE_CONTINUE_STAM";
+        case AST_NODE_IDENT: return "AST_NODE_IDENT";
+        case AST_NODE_LITERAL: return "AST_NODE_LITERAL";
+        case AST_NODE_BINARY: return "AST_NODE_BINARY";
+        case AST_NODE_UNARY: return "AST_NODE_UNARY";
+        case AST_NODE_ASSIGN: return "AST_NODE_ASSIGN";
+        case AST_NODE_CALL_EXPR: return "AST_NODE_CALL_EXPR";
+        case AST_NODE_MEMBER_EXPR: return "AST_NODE_MEMBER_EXPR";
+        case AST_NODE_ARRAY: return "AST_NODE_ARRAY";
+        case AST_NODE_MAP: return "AST_NODE_MAP";
+        case AST_NODE_FUNC_EXPR: return "AST_NODE_FUNC_EXPR";
+        case AST_NODE_SPREAD: return "AST_NODE_SPREAD";
+        case AST_NODE_CLASS: return "AST_NODE_CLASS";
+        case AST_NODE_FIELD: return "AST_NODE_FIELD";
+        case AST_NODE_RAISE_STAM: return "AST_NODE_RAISE_STAM";
+        case AST_NODE_PARAM: return "AST_NODE_PARAM";
+        case AST_NODE_NEW_EXPR: return "AST_NODE_NEW_EXPR";
+        case AST_NODE_SEQ: return "AST_NODE_SEQ";
+        case AST_NODE_YIELD: return "AST_NODE_YIELD";
+        case AST_NODE_AWAIT: return "AST_NODE_AWAIT";
+        case AST_NODE_IMPORT: return "AST_NODE_IMPORT";
+        case AST_NODE_EXPORT: return "AST_NODE_EXPORT";
+        case AST_NODE_ARROW_FUNC: return "AST_NODE_ARROW_FUNC";
+        case AST_NODE_CONDITIONAL_EXPR: return "AST_NODE_CONDITIONAL_EXPR";
         case JS_AST_NODE_TEMPLATE_LITERAL: return "JS_AST_NODE_TEMPLATE_LITERAL";
         case JS_AST_NODE_TEMPLATE_ELEMENT: return "JS_AST_NODE_TEMPLATE_ELEMENT";
-        case JS_AST_NODE_CLASS_EXPRESSION: return "JS_AST_NODE_CLASS_EXPRESSION";
-        case JS_AST_NODE_METHOD_DEFINITION: return "JS_AST_NODE_METHOD_DEFINITION";
+        case AST_NODE_CLASS_EXPR: return "AST_NODE_CLASS_EXPR";
+        case AST_NODE_METHOD: return "AST_NODE_METHOD";
         case JS_AST_NODE_STATIC_BLOCK: return "JS_AST_NODE_STATIC_BLOCK";
-        case JS_AST_NODE_TRY_STATEMENT: return "JS_AST_NODE_TRY_STATEMENT";
-        case JS_AST_NODE_CATCH_CLAUSE: return "JS_AST_NODE_CATCH_CLAUSE";
+        case AST_NODE_TRY_STAM: return "AST_NODE_TRY_STAM";
+        case AST_NODE_CATCH_CLAUSE: return "AST_NODE_CATCH_CLAUSE";
         case JS_AST_NODE_FINALLY_CLAUSE: return "JS_AST_NODE_FINALLY_CLAUSE";
-        case JS_AST_NODE_ASSIGNMENT_PATTERN: return "JS_AST_NODE_ASSIGNMENT_PATTERN";
-        case JS_AST_NODE_ARRAY_PATTERN: return "JS_AST_NODE_ARRAY_PATTERN";
-        case JS_AST_NODE_OBJECT_PATTERN: return "JS_AST_NODE_OBJECT_PATTERN";
-        case JS_AST_NODE_VARIABLE_DECLARATOR: return "JS_AST_NODE_VARIABLE_DECLARATOR";
-        case JS_AST_NODE_PROPERTY: return "JS_AST_NODE_PROPERTY";
-        case JS_AST_NODE_REST_ELEMENT: return "JS_AST_NODE_REST_ELEMENT";
-        case JS_AST_NODE_REST_PROPERTY: return "JS_AST_NODE_REST_PROPERTY";
-        case JS_AST_NODE_SWITCH_STATEMENT: return "JS_AST_NODE_SWITCH_STATEMENT";
-        case JS_AST_NODE_SWITCH_CASE: return "JS_AST_NODE_SWITCH_CASE";
-        case JS_AST_NODE_FOR_OF_STATEMENT: return "JS_AST_NODE_FOR_OF_STATEMENT";
-        case JS_AST_NODE_FOR_IN_STATEMENT: return "JS_AST_NODE_FOR_IN_STATEMENT";
+        case AST_NODE_ASSIGN_PATTERN: return "AST_NODE_ASSIGN_PATTERN";
+        case AST_NODE_ARRAY_PATTERN: return "AST_NODE_ARRAY_PATTERN";
+        case AST_NODE_MAP_PATTERN: return "AST_NODE_MAP_PATTERN";
+        case AST_NODE_VARIABLE_DECLARATOR: return "AST_NODE_VARIABLE_DECLARATOR";
+        case AST_NODE_PROPERTY: return "AST_NODE_PROPERTY";
+        case AST_NODE_REST_ELEMENT: return "AST_NODE_REST_ELEMENT";
+        case AST_NODE_REST_PROPERTY: return "AST_NODE_REST_PROPERTY";
+        case AST_NODE_MATCH_EXPR: return "AST_NODE_MATCH_EXPR";
+        case AST_NODE_MATCH_ARM: return "AST_NODE_MATCH_ARM";
+        case AST_NODE_FOR_OF_STAM: return "AST_NODE_FOR_OF_STAM";
+        case AST_NODE_FOR_IN_STAM: return "AST_NODE_FOR_IN_STAM";
         case JS_AST_NODE_LABELED_STATEMENT: return "JS_AST_NODE_LABELED_STATEMENT";
         case JS_AST_NODE_REGEX: return "JS_AST_NODE_REGEX";
-        case JS_AST_NODE_IMPORT_SPECIFIER: return "JS_AST_NODE_IMPORT_SPECIFIER";
-        case JS_AST_NODE_EXPORT_SPECIFIER: return "JS_AST_NODE_EXPORT_SPECIFIER";
+        case AST_NODE_IMPORT_SPECIFIER: return "AST_NODE_IMPORT_SPECIFIER";
+        case AST_NODE_EXPORT_SPECIFIER: return "AST_NODE_EXPORT_SPECIFIER";
         case JS_AST_NODE_WITH_STATEMENT: return "JS_AST_NODE_WITH_STATEMENT";
         case JS_AST_NODE_TAGGED_TEMPLATE: return "JS_AST_NODE_TAGGED_TEMPLATE";
         case TS_AST_NODE_PARAMETER: return "TS_AST_NODE_PARAMETER";
@@ -108,75 +75,59 @@ static const char* js_dump_kind_name(int type) {
 
 static const char* js_dump_operator_name(JsOperator op) {
     switch (op) {
-        case JS_OP_ADD: return "add";
-        case JS_OP_SUB: return "sub";
-        case JS_OP_MUL: return "mul";
-        case JS_OP_DIV: return "div";
-        case JS_OP_MOD: return "mod";
-        case JS_OP_EXP: return "exp";
-        case JS_OP_EQ: return "eq";
-        case JS_OP_NE: return "ne";
-        case JS_OP_STRICT_EQ: return "strict_eq";
-        case JS_OP_STRICT_NE: return "strict_ne";
-        case JS_OP_LT: return "lt";
-        case JS_OP_LE: return "le";
-        case JS_OP_GT: return "gt";
-        case JS_OP_GE: return "ge";
-        case JS_OP_AND: return "and";
-        case JS_OP_OR: return "or";
-        case JS_OP_BIT_AND: return "bit_and";
-        case JS_OP_BIT_OR: return "bit_or";
-        case JS_OP_BIT_XOR: return "bit_xor";
-        case JS_OP_BIT_LSHIFT: return "bit_lshift";
-        case JS_OP_BIT_RSHIFT: return "bit_rshift";
-        case JS_OP_BIT_URSHIFT: return "bit_urshift";
-        case JS_OP_NOT: return "not";
-        case JS_OP_BIT_NOT: return "bit_not";
-        case JS_OP_TYPEOF: return "typeof";
-        case JS_OP_VOID: return "void";
-        case JS_OP_DELETE: return "delete";
-        case JS_OP_PLUS: return "plus";
-        case JS_OP_MINUS: return "minus";
-        case JS_OP_INCREMENT: return "increment";
-        case JS_OP_DECREMENT: return "decrement";
-        case JS_OP_ASSIGN: return "assign";
-        case JS_OP_ADD_ASSIGN: return "add_assign";
-        case JS_OP_SUB_ASSIGN: return "sub_assign";
-        case JS_OP_MUL_ASSIGN: return "mul_assign";
-        case JS_OP_DIV_ASSIGN: return "div_assign";
-        case JS_OP_MOD_ASSIGN: return "mod_assign";
-        case JS_OP_EXP_ASSIGN: return "exp_assign";
-        case JS_OP_INSTANCEOF: return "instanceof";
-        case JS_OP_IN: return "in";
-        case JS_OP_NULLISH_COALESCE: return "nullish_coalesce";
-        case JS_OP_NULLISH_ASSIGN: return "nullish_assign";
-        case JS_OP_AND_ASSIGN: return "and_assign";
-        case JS_OP_OR_ASSIGN: return "or_assign";
+        case OPERATOR_ADD: return "add";
+        case OPERATOR_SUB: return "sub";
+        case OPERATOR_MUL: return "mul";
+        case OPERATOR_DIV: return "div";
+        case OPERATOR_MOD: return "mod";
+        case OPERATOR_JS_EXP: return "exp";
+        case OPERATOR_EQ: return "eq";
+        case OPERATOR_NE: return "ne";
+        case OPERATOR_JS_STRICT_EQ: return "strict_eq";
+        case OPERATOR_JS_STRICT_NE: return "strict_ne";
+        case OPERATOR_LT: return "lt";
+        case OPERATOR_LE: return "le";
+        case OPERATOR_GT: return "gt";
+        case OPERATOR_GE: return "ge";
+        case OPERATOR_AND: return "and";
+        case OPERATOR_OR: return "or";
+        case OPERATOR_JS_BIT_AND: return "bit_and";
+        case OPERATOR_JS_BIT_OR: return "bit_or";
+        case OPERATOR_JS_BIT_XOR: return "bit_xor";
+        case OPERATOR_JS_LSHIFT: return "bit_lshift";
+        case OPERATOR_JS_RSHIFT: return "bit_rshift";
+        case OPERATOR_JS_URSHIFT: return "bit_urshift";
+        case OPERATOR_NOT: return "not";
+        case OPERATOR_JS_BIT_NOT: return "bit_not";
+        case OPERATOR_JS_TYPEOF: return "typeof";
+        case OPERATOR_JS_VOID: return "void";
+        case OPERATOR_JS_DELETE: return "delete";
+        case OPERATOR_POS: return "plus";
+        case OPERATOR_NEG: return "minus";
+        case OPERATOR_JS_INCREMENT: return "increment";
+        case OPERATOR_JS_DECREMENT: return "decrement";
+        case OPERATOR_ASSIGN: return "assign";
+        case OPERATOR_JS_ADD_ASSIGN: return "add_assign";
+        case OPERATOR_JS_SUB_ASSIGN: return "sub_assign";
+        case OPERATOR_JS_MUL_ASSIGN: return "mul_assign";
+        case OPERATOR_JS_DIV_ASSIGN: return "div_assign";
+        case OPERATOR_JS_MOD_ASSIGN: return "mod_assign";
+        case OPERATOR_JS_EXP_ASSIGN: return "exp_assign";
+        case OPERATOR_JS_INSTANCEOF: return "instanceof";
+        case OPERATOR_IN: return "in";
+        case OPERATOR_JS_NULLISH_COALESCE: return "nullish_coalesce";
+        case OPERATOR_JS_NULLISH_ASSIGN: return "nullish_assign";
+        case OPERATOR_JS_AND_ASSIGN: return "and_assign";
+        case OPERATOR_JS_OR_ASSIGN: return "or_assign";
         default: return "unknown";
     }
-}
-
-static void dump_string_field(const char* label, String* str) {
-    if (!str) return;
-    printf(" (%s ", label);
-    dump_escaped_string(str->chars, (int)str->len);
-    printf(")");
-}
-
-static void dump_source_field(const char* source, SourceSpan span) {
-    int len = 0;
-    const char* src = dump_node_src(source, span, &len);
-    if (len <= 0) return;
-    printf(" (source ");
-    dump_escaped_string(src, len);
-    printf(")");
 }
 
 static void emit_js_dump_node(const char* source, JsAstNode* node, int indent);
 
 static void emit_js_dump_list(const char* source, const char* label, JsAstNode* node, int indent) {
     printf("\n");
-    dump_indent(indent);
+    emit_dump_indent(indent);
     printf("(%s", label);
     while (node) {
         printf("\n");
@@ -198,14 +149,14 @@ static void js_dump_value_type(JsAstNode* node) {
 static void emit_js_dump_field(const char* source, const char* label, JsAstNode* node, int indent) {
     if (!node) return;
     printf("\n");
-    dump_indent(indent);
+    emit_dump_indent(indent);
     printf("(%s\n", label);
     emit_js_dump_node(source, node, indent + 1);
     printf(")");
 }
 
 static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
-    dump_indent(indent);
+    emit_dump_indent(indent);
     if (!node) {
         printf("(null)");
         return;
@@ -213,43 +164,43 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
     printf("(%s", js_dump_kind_name(node->node_type));
 
     switch (node->node_type) {
-        case JS_AST_NODE_PROGRAM:
+        case AST_SCRIPT:
             emit_js_dump_list(source, "body", ((JsProgramNode*)node)->body, indent + 1);
             break;
-        case JS_AST_NODE_VARIABLE_DECLARATION: {
+        case AST_NODE_VAR_STAM: {
             JsVariableDeclarationNode* var_decl = (JsVariableDeclarationNode*)node;
             printf(" (kind %s)", var_decl->kind == JS_VAR_VAR ? "var" : var_decl->kind == JS_VAR_LET ? "let" : "const");
             emit_js_dump_list(source, "declarations", var_decl->declarations, indent + 1);
             break;
         }
-        case JS_AST_NODE_VARIABLE_DECLARATOR: {
+        case AST_NODE_VARIABLE_DECLARATOR: {
             JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)node;
             emit_js_dump_field(source, "id", decl->id, indent + 1);
             emit_js_dump_field(source, "init", decl->init, indent + 1);
             break;
         }
-        case JS_AST_NODE_IDENTIFIER:
-            dump_string_field("name", ((JsIdentifierNode*)node)->name);
+        case AST_NODE_IDENT:
+            emit_dump_string_field("name", ((JsIdentifierNode*)node)->name);
             break;
-        case JS_AST_NODE_LITERAL: {
+        case AST_NODE_LITERAL: {
             JsLiteralNode* lit = (JsLiteralNode*)node;
-            if (lit->literal_type == JS_LITERAL_STRING) {
+            if (lit->literal_type == AST_LITERAL_STRING) {
                 printf(" (literal string)");
-                dump_string_field("value", lit->value.string_value);
-            } else if (lit->literal_type == JS_LITERAL_BOOLEAN) {
+                emit_dump_string_field("value", lit->value.string_value);
+            } else if (lit->literal_type == AST_LITERAL_BOOLEAN) {
                 printf(" (literal %s)", lit->value.boolean_value ? "true" : "false");
-            } else if (lit->literal_type == JS_LITERAL_NULL) {
+            } else if (lit->literal_type == AST_LITERAL_NULL) {
                 printf(" (literal null)");
-            } else if (lit->literal_type == JS_LITERAL_UNDEFINED) {
+            } else if (lit->literal_type == AST_LITERAL_UNDEFINED) {
                 printf(" (literal undefined)");
             } else {
                 printf(" (literal number)");
-                dump_source_field(source, node->source_span);
+                emit_dump_source_field(source, node->source_span);
             }
-            if (lit->is_bigint) dump_string_field("bigint", lit->bigint_str);
+            if (lit->is_bigint) emit_dump_string_field("bigint", lit->bigint_str);
             break;
         }
-        case JS_AST_NODE_BINARY_EXPRESSION: {
+        case AST_NODE_BINARY: {
             JsBinaryNode* bin = (JsBinaryNode*)node;
             printf(" (op %s)", js_dump_operator_name(bin->op));
             js_dump_value_type(node);
@@ -257,65 +208,65 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
             emit_js_dump_field(source, "right", bin->right, indent + 1);
             break;
         }
-        case JS_AST_NODE_UNARY_EXPRESSION: {
+        case AST_NODE_UNARY: {
             JsUnaryNode* un = (JsUnaryNode*)node;
             printf(" (op %s)", js_dump_operator_name(un->op));
             js_dump_value_type(node);
             emit_js_dump_field(source, "operand", un->operand, indent + 1);
             break;
         }
-        case JS_AST_NODE_ASSIGNMENT_EXPRESSION:
-        case JS_AST_NODE_ASSIGNMENT_PATTERN: {
+        case AST_NODE_ASSIGN:
+        case AST_NODE_ASSIGN_PATTERN: {
             JsAssignmentNode* assign = (JsAssignmentNode*)node;
             printf(" (op %s)", js_dump_operator_name(assign->op));
             emit_js_dump_field(source, "left", assign->left, indent + 1);
             emit_js_dump_field(source, "right", assign->right, indent + 1);
             break;
         }
-        case JS_AST_NODE_FUNCTION_DECLARATION:
-        case JS_AST_NODE_FUNCTION_EXPRESSION:
-        case JS_AST_NODE_ARROW_FUNCTION: {
+        case AST_NODE_FUNC:
+        case AST_NODE_FUNC_EXPR:
+        case AST_NODE_ARROW_FUNC: {
             JsFunctionNode* fn = (JsFunctionNode*)node;
-            dump_string_field("name", fn->name);
+            emit_dump_string_field("name", fn->name);
             emit_js_dump_list(source, "params", fn->params, indent + 1);
             emit_js_dump_field(source, "body", fn->body, indent + 1);
             break;
         }
-        case JS_AST_NODE_CALL_EXPRESSION:
-        case JS_AST_NODE_NEW_EXPRESSION: {
+        case AST_NODE_CALL_EXPR:
+        case AST_NODE_NEW_EXPR: {
             JsCallNode* call = (JsCallNode*)node;
             emit_js_dump_field(source, "callee", call->callee, indent + 1);
             emit_js_dump_list(source, "arguments", call->arguments, indent + 1);
             break;
         }
-        case JS_AST_NODE_MEMBER_EXPRESSION: {
+        case AST_NODE_MEMBER_EXPR: {
             JsMemberNode* mem = (JsMemberNode*)node;
             emit_js_dump_field(source, "object", mem->object, indent + 1);
             emit_js_dump_field(source, "property", mem->property, indent + 1);
             break;
         }
-        case JS_AST_NODE_ARRAY_EXPRESSION:
-        case JS_AST_NODE_ARRAY_PATTERN:
+        case AST_NODE_ARRAY:
+        case AST_NODE_ARRAY_PATTERN:
             emit_js_dump_list(source, "elements", ((JsArrayNode*)node)->elements, indent + 1);
             break;
-        case JS_AST_NODE_OBJECT_EXPRESSION:
-        case JS_AST_NODE_OBJECT_PATTERN:
+        case AST_NODE_MAP:
+        case AST_NODE_MAP_PATTERN:
             emit_js_dump_list(source, "properties", ((JsObjectNode*)node)->properties, indent + 1);
             break;
-        case JS_AST_NODE_PROPERTY: {
+        case AST_NODE_PROPERTY: {
             JsPropertyNode* prop = (JsPropertyNode*)node;
             emit_js_dump_field(source, "key", prop->key, indent + 1);
             emit_js_dump_field(source, "value", prop->value, indent + 1);
             break;
         }
-        case JS_AST_NODE_EXPRESSION_STATEMENT:
+        case AST_NODE_EXPR_STMT:
             emit_js_dump_field(source, "expression", ((JsExpressionStatementNode*)node)->expression, indent + 1);
             break;
-        case JS_AST_NODE_BLOCK_STATEMENT:
+        case AST_NODE_BLOCK:
             emit_js_dump_list(source, "statements", ((JsBlockNode*)node)->statements, indent + 1);
             break;
-        case JS_AST_NODE_FOR_OF_STATEMENT:
-        case JS_AST_NODE_FOR_IN_STATEMENT: {
+        case AST_NODE_FOR_OF_STAM:
+        case AST_NODE_FOR_IN_STAM: {
             JsForOfNode* iteration = (JsForOfNode*)node;
             emit_js_dump_field(source, "left", iteration->left, indent + 1);
             emit_js_dump_field(source, "init", iteration->init, indent + 1);
@@ -323,7 +274,7 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
             emit_js_dump_field(source, "body", iteration->body, indent + 1);
             break;
         }
-        case JS_AST_NODE_IF_STATEMENT: {
+        case AST_NODE_IF_EXPR: {
             JsIfNode* if_node = (JsIfNode*)node;
             emit_js_dump_field(source, "test", if_node->test, indent + 1);
             emit_js_dump_field(source, "consequent", if_node->consequent, indent + 1);
@@ -338,38 +289,38 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
             emit_js_dump_field(source, "body", loop->body, indent + 1);
             break;
         }
-        case JS_AST_NODE_RETURN_STATEMENT:
+        case AST_NODE_RETURN_STAM:
             emit_js_dump_field(source, "argument", ((JsReturnNode*)node)->argument, indent + 1);
             break;
-        case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+        case AST_NODE_CONDITIONAL_EXPR: {
             JsConditionalNode* cond = (JsConditionalNode*)node;
             emit_js_dump_field(source, "test", cond->test, indent + 1);
             emit_js_dump_field(source, "consequent", cond->consequent, indent + 1);
             emit_js_dump_field(source, "alternate", cond->alternate, indent + 1);
             break;
         }
-        case JS_AST_NODE_SPREAD_ELEMENT:
-        case JS_AST_NODE_REST_ELEMENT:
-        case JS_AST_NODE_REST_PROPERTY:
+        case AST_NODE_SPREAD:
+        case AST_NODE_REST_ELEMENT:
+        case AST_NODE_REST_PROPERTY:
             emit_js_dump_field(source, "argument", ((JsSpreadElementNode*)node)->argument, indent + 1);
             break;
-        case JS_AST_NODE_CLASS_DECLARATION:
-        case JS_AST_NODE_CLASS_EXPRESSION: {
+        case AST_NODE_CLASS:
+        case AST_NODE_CLASS_EXPR: {
             JsClassNode* cls = (JsClassNode*)node;
-            dump_string_field("name", cls->name);
+            emit_dump_string_field("name", cls->name);
             emit_js_dump_field(source, "superclass", cls->superclass, indent + 1);
             emit_js_dump_field(source, "body", cls->body, indent + 1);
             break;
         }
-        case JS_AST_NODE_METHOD_DEFINITION: {
+        case AST_NODE_METHOD: {
             JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)node;
-            dump_string_field("name", method->name);
+            emit_dump_string_field("name", method->name);
             emit_js_dump_field(source, "key", method->key, indent + 1);
             emit_js_dump_list(source, "params", method->params, indent + 1);
             emit_js_dump_field(source, "body", method->body, indent + 1);
             break;
         }
-        case JS_AST_NODE_FIELD_DEFINITION: {
+        case AST_NODE_FIELD: {
             JsFieldDefinitionNode* field = (JsFieldDefinitionNode*)node;
             emit_js_dump_field(source, "key", field->key, indent + 1);
             emit_js_dump_field(source, "value", field->value, indent + 1);
@@ -378,60 +329,60 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
         case JS_AST_NODE_STATIC_BLOCK:
             emit_js_dump_field(source, "body", ((JsStaticBlockNode*)node)->body, indent + 1);
             break;
-        case JS_AST_NODE_TRY_STATEMENT: {
+        case AST_NODE_TRY_STAM: {
             JsTryNode* tr = (JsTryNode*)node;
             emit_js_dump_field(source, "block", tr->block, indent + 1);
             emit_js_dump_field(source, "handler", tr->handler, indent + 1);
             emit_js_dump_field(source, "finalizer", tr->finalizer, indent + 1);
             break;
         }
-        case JS_AST_NODE_CATCH_CLAUSE: {
+        case AST_NODE_CATCH_CLAUSE: {
             JsCatchNode* catch_node = (JsCatchNode*)node;
             emit_js_dump_field(source, "param", catch_node->param, indent + 1);
             emit_js_dump_field(source, "body", catch_node->body, indent + 1);
             break;
         }
-        case JS_AST_NODE_THROW_STATEMENT:
+        case AST_NODE_RAISE_STAM:
             emit_js_dump_field(source, "argument", ((JsThrowNode*)node)->argument, indent + 1);
             break;
-        case JS_AST_NODE_SEQUENCE_EXPRESSION:
+        case AST_NODE_SEQ:
             emit_js_dump_list(source, "expressions", ((JsSequenceNode*)node)->expressions, indent + 1);
             break;
-        case JS_AST_NODE_YIELD_EXPRESSION:
+        case AST_NODE_YIELD:
             emit_js_dump_field(source, "argument", ((JsYieldNode*)node)->argument, indent + 1);
             break;
-        case JS_AST_NODE_AWAIT_EXPRESSION:
+        case AST_NODE_AWAIT:
             emit_js_dump_field(source, "argument", ((JsAwaitNode*)node)->argument, indent + 1);
             break;
-        case JS_AST_NODE_IMPORT_DECLARATION: {
+        case AST_NODE_IMPORT: {
             JsImportNode* imp = (JsImportNode*)node;
-            dump_string_field("source", imp->source);
-            dump_string_field("default", imp->default_name);
-            dump_string_field("namespace", imp->namespace_name);
+            emit_dump_string_field("source", imp->source);
+            emit_dump_string_field("default", imp->default_name);
+            emit_dump_string_field("namespace", imp->namespace_name);
             emit_js_dump_list(source, "specifiers", imp->specifiers, indent + 1);
             break;
         }
-        case JS_AST_NODE_IMPORT_SPECIFIER: {
+        case AST_NODE_IMPORT_SPECIFIER: {
             JsImportSpecifierNode* spec = (JsImportSpecifierNode*)node;
-            dump_string_field("local", spec->local_name);
-            dump_string_field("remote", spec->remote_name);
+            emit_dump_string_field("local", spec->local_name);
+            emit_dump_string_field("remote", spec->remote_name);
             break;
         }
-        case JS_AST_NODE_EXPORT_DECLARATION: {
+        case AST_NODE_EXPORT: {
             JsExportNode* exp = (JsExportNode*)node;
-            dump_string_field("source", exp->source);
+            emit_dump_string_field("source", exp->source);
             emit_js_dump_field(source, "declaration", exp->declaration, indent + 1);
             emit_js_dump_list(source, "specifiers", exp->specifiers, indent + 1);
             break;
         }
-        case JS_AST_NODE_EXPORT_SPECIFIER: {
+        case AST_NODE_EXPORT_SPECIFIER: {
             JsExportSpecifierNode* spec = (JsExportSpecifierNode*)node;
-            dump_string_field("local", spec->local_name);
-            dump_string_field("export", spec->export_name);
+            emit_dump_string_field("local", spec->local_name);
+            emit_dump_string_field("export", spec->export_name);
             break;
         }
         default:
-            dump_source_field(source, node->source_span);
+            emit_dump_source_field(source, node->source_span);
             break;
     }
 

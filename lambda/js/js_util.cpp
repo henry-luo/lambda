@@ -933,9 +933,7 @@ static Item js_util_inspect_array(Item obj_item, JsInspectContext* ctx, int dept
     }
     if (ctx && ctx->show_hidden) {
         Item keys = js_object_get_own_property_names(obj_item);
-        int64_t klen = js_array_length(keys);
-        for (int64_t i = 0; i < klen; i++) {
-            Item key = js_elements_get_int(keys, i);
+        JS_ARRAY_FOREACH(key, keys) {
             if (get_type_id(key) != LMD_TYPE_STRING) continue;
             String* ks = it2s(key);
             if (ks && ks->len == 6 && memcmp(ks->chars, "length", 6) == 0) {
@@ -1063,8 +1061,7 @@ static bool js_util_is_promise_like(Item value);
 static void js_util_emit_promisify_promise_warning(void);
 
 static Item js_util_promisify_callback(Item env_item, Item rest_args) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
 
     JS_ROOTS(roots,
         resolve_root, env[0],
@@ -1090,8 +1087,7 @@ static Item js_util_promisify_callback(Item env_item, Item rest_args) {
 }
 
 static Item js_util_promisify_executor(Item env_item, Item resolve, Item reject) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
 
     RootFrame roots(10);
     Rooted<Item> original_root(roots, env[0]);
@@ -1106,10 +1102,7 @@ static Item js_util_promisify_executor(Item env_item, Item resolve, Item reject)
     int64_t argc64 = js_array_length(call_args_root.get());
     if (argc64 < 0) argc64 = 0;
 
-    Item* cb_env = js_alloc_env(3);
-    cb_env[0] = resolve_root.get();
-    cb_env[1] = reject_root.get();
-    cb_env[2] = custom_args_root.get();
+    Item* cb_env = js_alloc_env3(resolve_root.get(), reject_root.get(), custom_args_root.get());
     callback_root.set(js_new_native_closure(js_util_promisify_callback, -1, cb_env, 3));
 
     int argc = (int)argc64 + 1;
@@ -1259,8 +1252,7 @@ static Item js_util_callbackify_make_falsy_error(Item reason) {
 }
 
 static Item js_util_callbackify_on_fulfilled(Item env_item, Item value) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
 
     Item callback = env[0];
     Item callback_args[2] = {ItemNull, value};
@@ -1269,8 +1261,7 @@ static Item js_util_callbackify_on_fulfilled(Item env_item, Item value) {
 }
 
 static Item js_util_callbackify_on_rejected(Item env_item, Item reason) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
 
     Item callback = env[0];
     Item error = js_is_truthy(reason) ? reason : js_util_callbackify_make_falsy_error(reason);
@@ -1280,8 +1271,7 @@ static Item js_util_callbackify_on_rejected(Item env_item, Item reason) {
 }
 
 static Item js_util_callbackified_function(Item env_item, Item rest_args) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
 
     Item original = env[0];
     int64_t argc64 = js_array_length(rest_args);
@@ -1309,8 +1299,7 @@ static Item js_util_callbackified_function(Item env_item, Item rest_args) {
         if (item_is_error(promise)) promise = js_promise_reject(js_error_lane_payload(promise));
     }
 
-    Item* cb_env = js_alloc_env(1);
-    cb_env[0] = callback;
+    Item* cb_env = js_alloc_env1(callback);
     Item on_fulfilled = js_new_native_closure(js_util_callbackify_on_fulfilled, 1, cb_env, 1);
     Item on_rejected = js_new_native_closure(js_util_callbackify_on_rejected, 1, cb_env, 1);
     js_promise_then(promise, on_fulfilled, on_rejected);
@@ -1322,8 +1311,7 @@ extern "C" Item js_util_callbackify(Item fn) {
         return js_throw_invalid_arg_type("original", "function", fn);
     }
 
-    Item* env = js_alloc_env(1);
-    env[0] = fn;
+    Item* env = js_alloc_env1(fn);
     Item wrapper = js_new_native_closure(js_util_callbackified_function, -1, env, 1);
     js_set_function_name(wrapper, make_string_item("callbackified"));
     return wrapper;
@@ -1351,9 +1339,7 @@ static Item js_util_invalid_arg_rejection(const char* name, const char* expected
 }
 
 static Item js_util_aborted_on_abort(Item env_item, Item event_item) {
-    (void)event_item;
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
 
     Item signal = env[0];
     Item resolve = env[1];
@@ -1373,9 +1359,7 @@ static Item js_util_aborted_on_abort(Item env_item, Item event_item) {
 }
 
 static Item js_util_aborted_executor(Item env_item, Item resolve, Item reject) {
-    (void)reject;
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
 
     Item signal = env[0];
     Item aborted = js_get_key_cstr(signal, "aborted");
@@ -1385,10 +1369,7 @@ static Item js_util_aborted_executor(Item env_item, Item resolve, Item reject) {
         return make_js_undefined();
     }
 
-    Item* handler_env = js_alloc_env(3);
-    handler_env[0] = signal;
-    handler_env[1] = resolve;
-    handler_env[2] = make_js_undefined();
+    Item* handler_env = js_alloc_env3(signal, resolve, make_js_undefined());
     Item handler = js_new_native_closure(js_util_aborted_on_abort, 1, handler_env, 3);
     handler_env[2] = handler;
 
@@ -1408,8 +1389,7 @@ extern "C" Item js_util_aborted(Item signal, Item resource) {
         return js_util_invalid_arg_rejection("resource", "object");
     }
 
-    Item* env = js_alloc_env(1);
-    env[0] = signal;
+    Item* env = js_alloc_env1(signal);
     Item executor = js_new_native_closure(js_util_aborted_executor, 2, env, 1);
     return js_promise_create(executor);
 }
@@ -1419,7 +1399,6 @@ extern "C" Item js_util_aborted(Item signal, Item resource) {
 // =============================================================================
 
 extern "C" Item js_util_deprecate(Item fn_item, Item msg_item) {
-    (void)msg_item;
     // return the function as-is (no runtime warning implemented)
     return fn_item;
 }
@@ -1662,9 +1641,7 @@ static Item js_util_enumerable_own_keys(Item object, bool include_symbols) {
 
     Item symbols = js_object_get_own_property_symbols(object);
     if (get_type_id(symbols) != LMD_TYPE_ARRAY) return result;
-    int64_t symbol_count = js_array_length(symbols);
-    for (int64_t i = 0; i < symbol_count; i++) {
-        Item key = js_elements_get_int(symbols, i);
+    JS_ARRAY_FOREACH(key, symbols) {
         Item desc = js_object_get_own_property_descriptor(object, key);
         if (js_descriptor_is_enumerable(desc)) js_array_push(result, key);
     }
@@ -1678,9 +1655,7 @@ static bool js_util_same_property_key(Item a, Item b) {
 }
 
 static Item js_util_find_matching_key(Item keys, Item key) {
-    int64_t len = js_array_length(keys);
-    for (int64_t i = 0; i < len; i++) {
-        Item candidate = js_elements_get_int(keys, i);
+    JS_ARRAY_FOREACH(candidate, keys) {
         if (js_util_same_property_key(candidate, key)) return candidate;
     }
     return ItemNull;
@@ -2466,7 +2441,6 @@ extern "C" Item js_util_getSystemErrorName(Item err_item) {
 // If NODE_DEBUG contains the section name (case-insensitive), the returned
 // function logs to stderr. Otherwise it's a no-op.
 static Item js_debuglog_noop(Item args_rest) {
-    (void)args_rest;
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
 }
 
@@ -2602,9 +2576,7 @@ static Item js_util_stripVTControlCharacters(Item str) {
 static Item js_util_extend(Item target, Item source) {
     if (get_type_id(source) == LMD_TYPE_MAP) {
         Item keys = js_object_keys(source);
-        int64_t len = js_array_length(keys);
-        for (int64_t i = 0; i < len; i++) {
-            Item key = js_elements_get_int(keys, i);
+        JS_ARRAY_FOREACH(key, keys) {
             js_set_key_default(target, key, js_get_key_default(source, key));
         }
     }

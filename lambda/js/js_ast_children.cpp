@@ -135,18 +135,18 @@ static bool visit_child(JsAstNode* child, void* opaque) {
 }  // namespace
 
 static bool js_ast_function_boundary(JsAstNode* node, JsAstNode* root) {
-    return node != root && (node->node_type == JS_AST_NODE_FUNCTION_DECLARATION || node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION || node->node_type == JS_AST_NODE_ARROW_FUNCTION || node->node_type == JS_AST_NODE_METHOD_DEFINITION || node->node_type == JS_AST_NODE_CLASS_DECLARATION || node->node_type == JS_AST_NODE_CLASS_EXPRESSION);
+    return node != root && (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR || node->node_type == AST_NODE_ARROW_FUNC || node->node_type == AST_NODE_METHOD || node->node_type == AST_NODE_CLASS || node->node_type == AST_NODE_CLASS_EXPR);
 }
 
 static bool js_ast_lexical_function_boundary(JsAstNode* node, JsAstNode* root) {
-    return node != root && (node->node_type == JS_AST_NODE_FUNCTION_DECLARATION || node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION || node->node_type == JS_AST_NODE_METHOD_DEFINITION || node->node_type == JS_AST_NODE_CLASS_DECLARATION || node->node_type == JS_AST_NODE_CLASS_EXPRESSION);
+    return node != root && (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR || node->node_type == AST_NODE_METHOD || node->node_type == AST_NODE_CLASS || node->node_type == AST_NODE_CLASS_EXPR);
 }
 
 static bool js_ast_call_is_direct_eval(JsAstNode* node) {
-    if (!node || node->node_type != JS_AST_NODE_CALL_EXPRESSION) return false;
+    if (!node || node->node_type != AST_NODE_CALL_EXPR) return false;
     JsCallNode* call = (JsCallNode*)node;
     if (call->optional || !call->callee ||
-            call->callee->node_type != JS_AST_NODE_IDENTIFIER) return false;
+            call->callee->node_type != AST_NODE_IDENT) return false;
     JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
     // `eval?.()` is always indirect eval; only the bare call is direct.
     return id->name && id->name->len == 4 &&
@@ -171,21 +171,21 @@ struct JsAstFunctionFactWalk {
 static bool js_ast_fact_walk_skips_child(JsAstNode* parent, JsAstNode* child) {
     if (!parent || !child) return false;
     switch (parent->node_type) {
-    case JS_AST_NODE_MEMBER_EXPRESSION: {
+    case AST_NODE_MEMBER_EXPR: {
         JsMemberNode* member = (JsMemberNode*)parent;
         return !member->computed && (JsAstNode*)member->property == child;
     }
-    case JS_AST_NODE_PROPERTY: {
+    case AST_NODE_PROPERTY: {
         JsPropertyNode* prop = (JsPropertyNode*)parent;
         // A shorthand `{arguments}` key doubles as the value reference.
         return !prop->computed && !prop->shorthand &&
             (JsAstNode*)prop->key == child;
     }
-    case JS_AST_NODE_METHOD_DEFINITION: {
+    case AST_NODE_METHOD: {
         JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)parent;
         return !method->computed && (JsAstNode*)method->key == child;
     }
-    case JS_AST_NODE_FIELD_DEFINITION: {
+    case AST_NODE_FIELD: {
         JsFieldDefinitionNode* field = (JsFieldDefinitionNode*)parent;
         return !field->computed && (JsAstNode*)field->key == child;
     }
@@ -220,7 +220,7 @@ static void js_ast_collect_function_facts_node(JsAstNode* node,
         walk.facts->has_direct_eval = true;
     }
     if (walk.direct_body_active && walk.direct_eval_active &&
-            node->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+            node->node_type == AST_NODE_CALL_EXPR) {
         JsCallNode* call = (JsCallNode*)node;
         if (js_ast_identifier_named(call->callee, "super", 5) &&
                 (!walk.facts->has_direct_super_call ||
@@ -237,8 +237,8 @@ static void js_ast_collect_function_facts_node(JsAstNode* node,
         } else if (js_ast_identifier_named(node, "new.target", 10)) {
             walk.facts->observations |= JS_AST_OBSERVES_NEW_TARGET;
         }
-        if (node->node_type == JS_AST_NODE_CALL_EXPRESSION ||
-                node->node_type == JS_AST_NODE_NEW_EXPRESSION) {
+        if (node->node_type == AST_NODE_CALL_EXPR ||
+                node->node_type == AST_NODE_NEW_EXPR) {
             JsCallNode* call = (JsCallNode*)node;
             if (js_ast_identifier_named(call->callee, "super", 5)) {
                 walk.facts->observations |= JS_AST_OBSERVES_THIS;
@@ -249,7 +249,7 @@ static void js_ast_collect_function_facts_node(JsAstNode* node,
                     walk.facts->has_lexical_super_call = true;
                 }
             }
-        } else if (node->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+        } else if (node->node_type == AST_NODE_MEMBER_EXPR) {
             JsMemberNode* member = (JsMemberNode*)node;
             if (js_ast_identifier_named(member->object, "super", 5)) {
                 walk.facts->observations |= JS_AST_OBSERVES_THIS;
@@ -286,15 +286,15 @@ JsAstFunctionFacts js_ast_collect_function_facts(JsAstNode* params,
 bool js_ast_publish_extension_facts(AstNode* node, struct AstIndex* index) {
     if (!node || !index) return true;
     switch (node->node_type) {
-    case JS_AST_NODE_IF_STATEMENT: {
+    case AST_NODE_IF_EXPR: {
         JsIfNode* n = (JsIfNode*)node;
         return ast_index_publish_scope(index, n->consequent_vars) &&
             ast_index_publish_scope(index, n->alternate_vars);
     }
-    case JS_AST_NODE_CLASS_EXPRESSION: return ast_index_publish_scope(index, ((JsClassNode*)node)->expression_scope);
-    case JS_AST_NODE_CATCH_CLAUSE: return ast_index_publish_scope(index, ((JsCatchNode*)node)->vars);
-    case JS_AST_NODE_SWITCH_STATEMENT: return ast_index_publish_scope(index, ((JsSwitchNode*)node)->vars);
-    case JS_AST_NODE_FOR_OF_STATEMENT: case JS_AST_NODE_FOR_IN_STATEMENT:
+    case AST_NODE_CLASS_EXPR: return ast_index_publish_scope(index, ((JsClassNode*)node)->expression_scope);
+    case AST_NODE_CATCH_CLAUSE: return ast_index_publish_scope(index, ((JsCatchNode*)node)->vars);
+    case AST_NODE_MATCH_EXPR: return ast_index_publish_scope(index, ((JsSwitchNode*)node)->vars);
+    case AST_NODE_FOR_OF_STAM: case AST_NODE_FOR_IN_STAM:
         return ast_index_publish_scope(index, ((JsForOfNode*)node)->vars);
     default:
         return true;
@@ -344,19 +344,19 @@ bool js_ast_any_binding_pattern_child(JsAstNode* node,
 
 JsIdentifierNode* js_ast_parameter_binding_identifier(JsAstNode* parameter) {
     if (!parameter) return NULL;
-    if (parameter->node_type == JS_AST_NODE_IDENTIFIER) {
+    if (parameter->node_type == AST_NODE_IDENT) {
         return (JsIdentifierNode*)parameter;
     }
     if (parameter->node_type == (int)TS_AST_NODE_PARAMETER) {
         return js_ast_parameter_binding_identifier(
             ((TsParameterNode*)parameter)->pattern);
     }
-    if (parameter->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+    if (parameter->node_type == AST_NODE_ASSIGN_PATTERN) {
         return js_ast_parameter_binding_identifier(
             ((JsAssignmentPatternNode*)parameter)->left);
     }
-    if (parameter->node_type == JS_AST_NODE_REST_ELEMENT ||
-            parameter->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+    if (parameter->node_type == AST_NODE_REST_ELEMENT ||
+            parameter->node_type == AST_NODE_SPREAD) {
         return js_ast_parameter_binding_identifier(
             ((JsSpreadElementNode*)parameter)->argument);
     }
@@ -371,7 +371,7 @@ static bool js_ast_parameter_default_child(JsAstNode* child, void*) {
 
 static bool js_ast_parameter_has_default_value(JsAstNode* parameter) {
     return parameter &&
-        (parameter->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN ||
+        (parameter->node_type == AST_NODE_ASSIGN_PATTERN ||
          js_ast_any_binding_pattern_child(parameter,
              js_ast_parameter_default_child, NULL));
 }
@@ -394,9 +394,9 @@ JsAstParameterFacts js_ast_collect_parameter_facts(JsAstNode* parameters) {
             parameter = parameter->next) {
         if (!formal_ended) {
             bool ends_formal_length =
-                parameter->node_type == JS_AST_NODE_REST_ELEMENT ||
-                parameter->node_type == JS_AST_NODE_SPREAD_ELEMENT ||
-                parameter->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN;
+                parameter->node_type == AST_NODE_REST_ELEMENT ||
+                parameter->node_type == AST_NODE_SPREAD ||
+                parameter->node_type == AST_NODE_ASSIGN_PATTERN;
             if (parameter->node_type == (int)TS_AST_NODE_PARAMETER) {
                 ends_formal_length = ends_formal_length ||
                     ((TsParameterNode*)parameter)->default_value;
@@ -410,12 +410,12 @@ JsAstParameterFacts js_ast_collect_parameter_facts(JsAstNode* parameters) {
         }
         facts.has_default_params = facts.has_default_params ||
             js_ast_parameter_has_default_value(parameter);
-        if (parameter->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN ||
-            parameter->node_type == JS_AST_NODE_ARRAY_PATTERN ||
-            parameter->node_type == JS_AST_NODE_OBJECT_PATTERN ||
-            parameter->node_type == JS_AST_NODE_REST_ELEMENT ||
-            parameter->node_type == JS_AST_NODE_SPREAD_ELEMENT ||
-            (parameter->node_type != JS_AST_NODE_IDENTIFIER &&
+        if (parameter->node_type == AST_NODE_ASSIGN_PATTERN ||
+            parameter->node_type == AST_NODE_ARRAY_PATTERN ||
+            parameter->node_type == AST_NODE_MAP_PATTERN ||
+            parameter->node_type == AST_NODE_REST_ELEMENT ||
+            parameter->node_type == AST_NODE_SPREAD ||
+            (parameter->node_type != AST_NODE_IDENT &&
              parameter->node_type != (int)TS_AST_NODE_PARAMETER)) {
             facts.has_non_simple_params = true;
         }
@@ -431,8 +431,8 @@ JsAstParameterFacts js_ast_collect_parameter_facts(JsAstNode* parameters) {
         last_parameter = parameter;
     }
     if (last_parameter &&
-            (last_parameter->node_type == JS_AST_NODE_REST_ELEMENT ||
-             last_parameter->node_type == JS_AST_NODE_SPREAD_ELEMENT)) {
+            (last_parameter->node_type == AST_NODE_REST_ELEMENT ||
+             last_parameter->node_type == AST_NODE_SPREAD)) {
         facts.has_rest_param = true;
         facts.has_non_simple_params = true;
     }
@@ -457,13 +457,13 @@ void js_ast_visit_extension_children(AstNode* node, AstChildVisitor visitor,
                                      void* ctx) {
     if (!node || !visitor) return;
 
-    if (node->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+    if (node->node_type == AST_NODE_VARIABLE_DECLARATOR) {
         return;
     }
-    if (node->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
-            node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-            node->node_type == JS_AST_NODE_ARROW_FUNCTION ||
-            node->node_type == JS_AST_NODE_METHOD_DEFINITION) {
+    if (node->node_type == AST_NODE_FUNC ||
+            node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_ARROW_FUNC ||
+            node->node_type == AST_NODE_METHOD) {
         return;
     }
 

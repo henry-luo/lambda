@@ -605,12 +605,12 @@ static size_t js_commonjs_injection_offset(const char* source, size_t source_len
 }
 
 static bool js_ast_is_es_module(JsAstNode* ast) {
-    JsProgramNode* program = ast && ast->node_type == JS_AST_NODE_PROGRAM
+    JsProgramNode* program = ast && ast->node_type == AST_SCRIPT
         ? (JsProgramNode*)ast : NULL;
     for (JsAstNode* statement = program ? (JsAstNode*)program->body : NULL;
             statement; statement = (JsAstNode*)statement->next) {
-        if (statement->node_type == JS_AST_NODE_IMPORT_DECLARATION ||
-                statement->node_type == JS_AST_NODE_EXPORT_DECLARATION) return true;
+        if (statement->node_type == AST_NODE_IMPORT ||
+                statement->node_type == AST_NODE_EXPORT) return true;
     }
     return false;
 }
@@ -1964,9 +1964,7 @@ static void js_cjs_note_child(Item child_filename, Item child_exports) {
     }
     if (get_type_id(child) != LMD_TYPE_MAP) return;
     Item children = js_cjs_children(parent);
-    int64_t len = js_array_length(children);
-    for (int64_t i = 0; i < len; i++) {
-        Item existing = js_elements_get_int(children, i);
+    JS_ARRAY_FOREACH(existing, children) {
         if (existing.item == child.item) return;
     }
     js_array_push(children, child);

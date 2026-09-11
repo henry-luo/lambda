@@ -526,7 +526,7 @@ void jm_emit_abrupt_jump_cleanup(JsMirTranspiler* mt, int target_loop_index) {
         JsTryContext* tc = jm_try_context_at(mt, t);
         if (tc->loop_depth_at_push <= target_loop_index) continue;
         if (tc->has_finally && tc->finally_body && !tc->inlining_finally &&
-            tc->finally_body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+            tc->finally_body->node_type == AST_NODE_BLOCK) {
             tc->inlining_finally = true;
             JsBlockNode* fin = (JsBlockNode*)tc->finally_body;
             JsAstNode* fs = fin->statements;

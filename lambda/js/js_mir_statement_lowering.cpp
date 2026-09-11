@@ -36,7 +36,7 @@ static void jm_using_resource_rows_destroy(ArrayList* rows) {
 
 static void jm_transpile_loop_body(JsMirTranspiler* mt, JsAstNode* body) {
     if (!body) return;
-    if (body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+    if (body->node_type == AST_NODE_BLOCK) {
         jm_push_scope(mt);
         jm_init_block_tdz(mt, body);
         JsBlockNode* block = (JsBlockNode*)body;
@@ -77,16 +77,16 @@ static void jm_bind_module_import_value(JsMirTranspiler* mt, const char* vname,
 }
 
 static bool jm_discardable_literal_statement(JsAstNode* expression) {
-    if (!expression || expression->node_type != JS_AST_NODE_LITERAL) return false;
+    if (!expression || expression->node_type != AST_NODE_LITERAL) return false;
     JsLiteralNode* literal = (JsLiteralNode*)expression;
     // Primitive literal expression statements have no evaluation effects once
     // completion values are not requested; emitting a boxed temporary here was
     // pure MIR churn, especially for library directive prologues.
-    return literal->literal_type == JS_LITERAL_NUMBER ||
-        literal->literal_type == JS_LITERAL_STRING ||
-        literal->literal_type == JS_LITERAL_BOOLEAN ||
-        literal->literal_type == JS_LITERAL_NULL ||
-        literal->literal_type == JS_LITERAL_UNDEFINED;
+    return literal->literal_type == AST_LITERAL_NUMBER ||
+        literal->literal_type == AST_LITERAL_STRING ||
+        literal->literal_type == AST_LITERAL_BOOLEAN ||
+        literal->literal_type == AST_LITERAL_NULL ||
+        literal->literal_type == AST_LITERAL_UNDEFINED;
 }
 
 static void jm_bind_catch_destructure(JsMirTranspiler* mt,
@@ -241,7 +241,7 @@ static bool jm_assignment_target_child(JsAstNode* child, void* opaque) {
 
 static bool jm_assignment_targets_binding(JsAstNode* left, NameEntry* binding) {
     if (!left || !binding) return false;
-    if (left->node_type == JS_AST_NODE_IDENTIFIER) {
+    if (left->node_type == AST_NODE_IDENT) {
         return ((JsIdentifierNode*)left)->entry == binding;
     }
     JmAssignmentTargetFind find = {binding};
@@ -257,7 +257,7 @@ static void jm_scope_env_mark_pattern_binding_child(JsAstNode* child,
 void jm_writeback_scope_env_pattern_bindings(JsMirTranspiler* mt, JsAstNode* pat) {
     if (!mt || !pat) return;
     switch (pat->node_type) {
-    case JS_AST_NODE_IDENTIFIER: {
+    case AST_NODE_IDENT: {
         JsIdentifierNode* id = (JsIdentifierNode*)pat;
         if (!id->name) return;
         const char* vname = jm_var_name(id->name);
@@ -289,11 +289,11 @@ static bool jm_native_mutation_is_relevant(const AstIndex* index,
             current = ast_index_parent_id(index, current)) {
         if (current == AST_NODE_ID_INVALID) return false;
         JsAstNode* ancestor = (JsAstNode*)index->nodes[current];
-        if (!ancestor || ancestor->node_type == JS_AST_NODE_CLASS_DECLARATION ||
-                ancestor->node_type == JS_AST_NODE_CLASS_EXPRESSION) return false;
-        if (ancestor->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+        if (!ancestor || ancestor->node_type == AST_NODE_CLASS ||
+                ancestor->node_type == AST_NODE_CLASS_EXPR) return false;
+        if (ancestor->node_type == AST_NODE_VARIABLE_DECLARATOR) {
             JsAstNode* id = ((JsVariableDeclaratorNode*)ancestor)->id;
-            if (id && id->node_type == JS_AST_NODE_IDENTIFIER &&
+            if (id && id->node_type == AST_NODE_IDENT &&
                     ((JsIdentifierNode*)id)->entry == scan->binding) return false;
         }
     }
@@ -306,11 +306,11 @@ static bool jm_scan_native_mutation(const AstIndex* index, AstNodeId node_id,
     if (scan->needs_boxing || index->owner_functions[node_id] != scan->owner ||
             !jm_native_mutation_is_relevant(index, node_id, scan)) return true;
     JsAstNode* node = (JsAstNode*)index->nodes[node_id];
-    if (!node || node->node_type != JS_AST_NODE_ASSIGNMENT_EXPRESSION) return true;
+    if (!node || node->node_type != AST_NODE_ASSIGN) return true;
     JsAssignmentNode* assignment = (JsAssignmentNode*)node;
     if (!jm_assignment_targets_binding(assignment->left, scan->binding)) return true;
     TypeId rhs_type = jm_get_effective_type(scan->mt, assignment->right);
-    scan->needs_boxing = assignment->op == JS_OP_ASSIGN
+    scan->needs_boxing = assignment->op == OPERATOR_ASSIGN
         ? rhs_type != scan->native_type
         : rhs_type != scan->native_type && rhs_type != LMD_TYPE_ANY;
     return !scan->needs_boxing;
@@ -421,9 +421,9 @@ static bool jm_can_skip_plain_top_level_var_decl_without_init(
     JsAstNode* decl = var->declarations;
     if (!decl) return false;
     while (decl) {
-        if (decl->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) return false;
+        if (decl->node_type != AST_NODE_VARIABLE_DECLARATOR) return false;
         JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)decl;
-        if (d->init || !d->id || d->id->node_type != JS_AST_NODE_IDENTIFIER) return false;
+        if (d->init || !d->id || d->id->node_type != AST_NODE_IDENT) return false;
         JsIdentifierNode* id = (JsIdentifierNode*)d->id;
         JsModuleConstEntry* mc = jm_find_module_const_by_binding(mt, id->entry);
         if (!mc || mc->const_type != MCONST_MODVAR || (int)mc->int_val < 0) return false;
@@ -479,9 +479,9 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
     }
     JsAstNode* decl = var->declarations;
     while (decl) {
-        if (decl->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+        if (decl->node_type == AST_NODE_VARIABLE_DECLARATOR) {
             JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)decl;
-            if (d->id && d->id->node_type == JS_AST_NODE_IDENTIFIER) {
+            if (d->id && d->id->node_type == AST_NODE_IDENT) {
                 JsIdentifierNode* id = (JsIdentifierNode*)d->id;
                 const char* vname = jm_var_name(id->name);
 
@@ -609,8 +609,8 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             jm_define_global_var_property_for_main_var(mt, var, id, boxed_val);
                         }
                     }
-                    if (d->init->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-                        d->init->node_type == JS_AST_NODE_ARROW_FUNCTION) {
+                    if (d->init->node_type == AST_NODE_FUNC_EXPR ||
+                        d->init->node_type == AST_NODE_ARROW_FUNC) {
                         JsFunctionNode* fn_node = (JsFunctionNode*)d->init;
                         if (!fn_node->name && id->name) {
                             jm_emit_set_function_name(mt, boxed_val, id->name->chars);
@@ -664,8 +664,8 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             jm_emit_label(mt, skip_global_lex);
                         }
                         // v18: function name inference for module-level vars
-                        if (d->init->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-                            d->init->node_type == JS_AST_NODE_ARROW_FUNCTION) {
+                        if (d->init->node_type == AST_NODE_FUNC_EXPR ||
+                            d->init->node_type == AST_NODE_ARROW_FUNC) {
                             JsFunctionNode* fn_node = (JsFunctionNode*)d->init;
                             if (!fn_node->name && id->name) {
                                 jm_emit_set_function_name(mt, boxed_val, id->name->chars);
@@ -725,8 +725,8 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                                 existing_var->reg);
                             jm_define_global_var_property_for_main_var(mt, var, id, val);
                             // v18: function name inference for anonymous function expressions
-                            if (d->init->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-                                d->init->node_type == JS_AST_NODE_ARROW_FUNCTION) {
+                            if (d->init->node_type == AST_NODE_FUNC_EXPR ||
+                                d->init->node_type == AST_NODE_ARROW_FUNC) {
                                 JsFunctionNode* fn_node = (JsFunctionNode*)d->init;
                                 if (!fn_node->name && id->name) {
                                     jm_emit_set_function_name(mt, val, id->name->chars);
@@ -795,7 +795,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                     // call-initialized binding boxed unless its callee identity is proven.
                     // Property spelling (including Math.*) is mutable and cannot prove
                     // a numeric result under D6.2.2v2.
-                    if (d->init && d->init->node_type == JS_AST_NODE_CALL_EXPRESSION &&
+                    if (d->init && d->init->node_type == AST_NODE_CALL_EXPR &&
                         (init_type == LMD_TYPE_INT || init_type == LMD_TYPE_FLOAT)) {
                         log_debug("Stage 4C: boxing var '%s' — call result numeric type is speculative, not guaranteed", vname);
                         init_type = LMD_TYPE_ANY;
@@ -831,8 +831,8 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         jm_define_global_var_property_for_main_var(mt, var, id, val);
 
                         // v18: function name inference for anonymous function expressions
-                        if (d->init && (d->init->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-                                        d->init->node_type == JS_AST_NODE_ARROW_FUNCTION)) {
+                        if (d->init && (d->init->node_type == AST_NODE_FUNC_EXPR ||
+                                        d->init->node_type == AST_NODE_ARROW_FUNC)) {
                             JsFunctionNode* fn_node = (JsFunctionNode*)d->init;
                             if (!fn_node->name && id->name) {
                                 jm_emit_set_function_name(mt, val, id->name->chars);
@@ -909,12 +909,12 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         }
                     }
                 }
-            } else if (d->id && d->id->node_type == JS_AST_NODE_ARRAY_PATTERN) {
+            } else if (d->id && d->id->node_type == AST_NODE_ARRAY_PATTERN) {
                 // v20: array destructuring via recursive helper
                 MIR_reg_t src = d->init ? jm_transpile_box_item(mt, d->init) : jm_emit_null(mt);
                 jm_emit_array_destructure(mt, d->id, src);
                 jm_writeback_pattern_bindings(mt, var, d->id);
-            } else if (d->id && d->id->node_type == JS_AST_NODE_OBJECT_PATTERN) {
+            } else if (d->id && d->id->node_type == AST_NODE_MAP_PATTERN) {
                 // v20: object destructuring via recursive helper
                 MIR_reg_t src = d->init ? jm_transpile_box_item(mt, d->init) : jm_emit_null(mt);
                 jm_emit_object_destructure(mt, d->id, src);
@@ -932,10 +932,10 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
 // Sets *negate to true if the comparison is !== (narrowing applies to the else branch)
 JsIdentifierNode* jm_detect_typeof_pattern(JsAstNode* test,
                                                     TypeId* narrowed_type, bool* negate) {
-    if (!test || test->node_type != JS_AST_NODE_BINARY_EXPRESSION) return NULL;
+    if (!test || test->node_type != AST_NODE_BINARY) return NULL;
     JsBinaryNode* bin = (JsBinaryNode*)test;
-    bool is_eq  = (bin->op == JS_OP_STRICT_EQ || bin->op == JS_OP_EQ);
-    bool is_neq = (bin->op == JS_OP_STRICT_NE || bin->op == JS_OP_NE);
+    bool is_eq  = (bin->op == OPERATOR_JS_STRICT_EQ || bin->op == OPERATOR_EQ);
+    bool is_neq = (bin->op == OPERATOR_JS_STRICT_NE || bin->op == OPERATOR_NE);
     if (!is_eq && !is_neq) return NULL;
     *negate = is_neq;
 
@@ -943,16 +943,16 @@ JsIdentifierNode* jm_detect_typeof_pattern(JsAstNode* test,
     JsAstNode* typeof_side = NULL;
     JsAstNode* literal_side = NULL;
     auto is_typeof_unary = [](JsAstNode* n) -> bool {
-        if (!n || n->node_type != JS_AST_NODE_UNARY_EXPRESSION) return false;
-        return ((JsUnaryNode*)n)->op == JS_OP_TYPEOF;
+        if (!n || n->node_type != AST_NODE_UNARY) return false;
+        return ((JsUnaryNode*)n)->op == OPERATOR_JS_TYPEOF;
     };
     if (is_typeof_unary(bin->left))  { typeof_side = bin->left;  literal_side = bin->right; }
     else if (is_typeof_unary(bin->right)) { typeof_side = bin->right; literal_side = bin->left; }
     if (!typeof_side || !literal_side) return NULL;
 
-    if (literal_side->node_type != JS_AST_NODE_LITERAL) return NULL;
+    if (literal_side->node_type != AST_NODE_LITERAL) return NULL;
     JsLiteralNode* lit = (JsLiteralNode*)literal_side;
-    if (lit->literal_type != JS_LITERAL_STRING || !lit->value.string_value) return NULL;
+    if (lit->literal_type != AST_LITERAL_STRING || !lit->value.string_value) return NULL;
 
     const char* s = lit->value.string_value->chars;
     size_t slen   = lit->value.string_value->len;
@@ -962,7 +962,7 @@ JsIdentifierNode* jm_detect_typeof_pattern(JsAstNode* test,
     else return NULL;
 
     JsUnaryNode* un = (JsUnaryNode*)typeof_side;
-    if (!un->operand || un->operand->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
+    if (!un->operand || un->operand->node_type != AST_NODE_IDENT) return NULL;
     return (JsIdentifierNode*)un->operand;
 }
 
@@ -1004,7 +1004,7 @@ static bool jm_branch_assigns_identifier(JsMirTranspiler* mt, JsAstNode* branch,
 }
 
 static void jm_init_if_clause_function_binding(JsMirTranspiler* mt, JsAstNode* stmt) {
-    if (!stmt || stmt->node_type != JS_AST_NODE_FUNCTION_DECLARATION) return;
+    if (!stmt || stmt->node_type != AST_NODE_FUNC) return;
     JsFunctionNode* fn = (JsFunctionNode*)stmt;
     if (!fn->name) return;
     JsFuncCollected* fc = jm_find_collected_func(mt, fn);
@@ -1080,14 +1080,14 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
             !jm_branch_assigns_identifier(mt, if_node->consequent, typeof_id))
             consequent_narrowed = jm_push_typeof_narrow(mt, typeof_id, typeof_narrowed_type);
 
-        if (if_node->consequent->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+        if (if_node->consequent->node_type == AST_NODE_BLOCK) {
             jm_push_scope(mt);
             jm_init_block_tdz(mt, if_node->consequent);  // v20 TDZ
             JsBlockNode* blk = (JsBlockNode*)if_node->consequent;
             JsAstNode* s = blk->statements;
             while (s) { jm_transpile_statement(mt, s); s = s->next; }
             jm_pop_scope(mt);
-        } else if (if_node->consequent->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+        } else if (if_node->consequent->node_type == AST_NODE_FUNC) {
             jm_push_scope(mt);
             jm_init_if_clause_function_binding(mt, if_node->consequent);
             jm_transpile_statement(mt, if_node->consequent);
@@ -1118,14 +1118,14 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
             !jm_branch_assigns_identifier(mt, if_node->alternate, typeof_id))
             alternate_narrowed = jm_push_typeof_narrow(mt, typeof_id, typeof_narrowed_type);
 
-        if (if_node->alternate->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+        if (if_node->alternate->node_type == AST_NODE_BLOCK) {
             jm_push_scope(mt);
             jm_init_block_tdz(mt, if_node->alternate);  // v20 TDZ
             JsBlockNode* blk = (JsBlockNode*)if_node->alternate;
             JsAstNode* s = blk->statements;
             while (s) { jm_transpile_statement(mt, s); s = s->next; }
             jm_pop_scope(mt);
-        } else if (if_node->alternate->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+        } else if (if_node->alternate->node_type == AST_NODE_FUNC) {
             jm_push_scope(mt);
             jm_init_if_clause_function_binding(mt, if_node->alternate);
             jm_transpile_statement(mt, if_node->alternate);
@@ -1259,7 +1259,7 @@ void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
 
     // Body
     if (wh->body) {
-        if (wh->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+        if (wh->body->node_type == AST_NODE_BLOCK) {
             jm_push_scope(mt);
             jm_init_block_tdz(mt, wh->body);  // v20 TDZ
             JsBlockNode* blk = (JsBlockNode*)wh->body;
@@ -1290,13 +1290,13 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     const char* for_lexical_init_name = NULL;
     NameEntry* for_var_init_binding = NULL;
     NameEntry* for_lexical_init_binding = NULL;
-    if (for_node->init && for_node->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+    if (for_node->init && for_node->init->node_type == AST_NODE_VAR_STAM) {
         JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)for_node->init;
         if (vd->kind == JS_VAR_VAR) {
             init_is_var = true;
-            if (vd->declarations && vd->declarations->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+            if (vd->declarations && vd->declarations->node_type == AST_NODE_VARIABLE_DECLARATOR) {
                 JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)vd->declarations;
-                if (d->id && d->id->node_type == JS_AST_NODE_IDENTIFIER) {
+                if (d->id && d->id->node_type == AST_NODE_IDENT) {
                     JsIdentifierNode* id = (JsIdentifierNode*)d->id;
                     for_var_init_name = jm_var_name(id->name);
                     for_var_init_binding = id->entry;
@@ -1305,9 +1305,9 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         }
         else {
             init_is_lexical_decl = true;
-            if (vd->declarations && vd->declarations->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+            if (vd->declarations && vd->declarations->node_type == AST_NODE_VARIABLE_DECLARATOR) {
                 JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)vd->declarations;
-                if (d->id && d->id->node_type == JS_AST_NODE_IDENTIFIER) {
+                if (d->id && d->id->node_type == AST_NODE_IDENT) {
                     JsIdentifierNode* id = (JsIdentifierNode*)d->id;
                     for_lexical_init_name = jm_var_name(id->name);
                     for_lexical_init_binding = id->entry;
@@ -1320,7 +1320,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     // expression initializers such as `i = 0` evaluate in the surrounding
     // environment; only let/const for-inits need the synthetic loop scope.
     if (for_node->init && !init_is_lexical_decl) {
-        if (for_node->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+        if (for_node->init->node_type == AST_NODE_VAR_STAM) {
             jm_transpile_statement(mt, for_node->init);
         } else {
             // A classic for initializer is an expression, not a statement node.
@@ -1368,7 +1368,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     JsAstNode* cached_counter_node = NULL;
     TypeId cached_cmp_target = LMD_TYPE_INT;
 
-    if (for_node->test && for_node->test->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
+    if (for_node->test && for_node->test->node_type == AST_NODE_BINARY) {
         JsBinaryNode* test_bin = (JsBinaryNode*)for_node->test;
         TypeId lt = jm_get_effective_type(mt, test_bin->left);
         TypeId rt = jm_get_effective_type(mt, test_bin->right);
@@ -1380,8 +1380,8 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         if (!full_native && (left_num || right_num)) {
             bool is_cmp = false;
             switch (test_bin->op) {
-            case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
-            case JS_OP_EQ: case JS_OP_NE: case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
+            case OPERATOR_LT: case OPERATOR_LE: case OPERATOR_GT: case OPERATOR_GE:
+            case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_JS_STRICT_EQ: case OPERATOR_JS_STRICT_NE:
                 is_cmp = true; break;
             default: break;
             }
@@ -1392,20 +1392,20 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
                 // initialized in for(init; test; update).
                 const char* init_var_name = NULL;
                 int init_var_len = 0;
-                if (for_node->init && for_node->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+                if (for_node->init && for_node->init->node_type == AST_NODE_VAR_STAM) {
                     JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)for_node->init;
-                    if (vd->declarations && vd->declarations->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+                    if (vd->declarations && vd->declarations->node_type == AST_NODE_VARIABLE_DECLARATOR) {
                         JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)vd->declarations;
-                        if (d->id && d->id->node_type == JS_AST_NODE_IDENTIFIER) {
+                        if (d->id && d->id->node_type == AST_NODE_IDENT) {
                             JsIdentifierNode* vid = (JsIdentifierNode*)d->id;
                             init_var_name = vid->name->chars;
                             init_var_len = (int)vid->name->len;
                         }
                     }
-                } else if (for_node->init && for_node->init->node_type == JS_AST_NODE_ASSIGNMENT_EXPRESSION) {
+                } else if (for_node->init && for_node->init->node_type == AST_NODE_ASSIGN) {
                     JsAssignmentNode* asgn = (JsAssignmentNode*)for_node->init;
-                    if (asgn->op == JS_OP_ASSIGN &&
-                        asgn->left && asgn->left->node_type == JS_AST_NODE_IDENTIFIER) {
+                    if (asgn->op == OPERATOR_ASSIGN &&
+                        asgn->left && asgn->left->node_type == AST_NODE_IDENT) {
                         JsIdentifierNode* vid = (JsIdentifierNode*)asgn->left;
                         init_var_name = vid->name->chars;
                         init_var_len = (int)vid->name->len;
@@ -1416,13 +1416,13 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
                 bool left_is_counter = false;
                 bool right_is_counter = false;
                 if (init_var_name) {
-                    if (test_bin->left->node_type == JS_AST_NODE_IDENTIFIER) {
+                    if (test_bin->left->node_type == AST_NODE_IDENT) {
                         JsIdentifierNode* lid = (JsIdentifierNode*)test_bin->left;
                         if (lid->name->len == (size_t)init_var_len &&
                             strncmp(lid->name->chars, init_var_name, init_var_len) == 0)
                             left_is_counter = true;
                     }
-                    if (test_bin->right->node_type == JS_AST_NODE_IDENTIFIER) {
+                    if (test_bin->right->node_type == AST_NODE_IDENT) {
                         JsIdentifierNode* rid = (JsIdentifierNode*)test_bin->right;
                         if (rid->name->len == (size_t)init_var_len &&
                             strncmp(rid->name->chars, init_var_name, init_var_len) == 0)
@@ -1457,14 +1457,14 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
                     semi_native_bound_node = bound_expr;
 
                     switch (test_bin->op) {
-                    case JS_OP_LT:        cached_cmp_insn = use_float ? MIR_DLT : MIR_LTS; break;
-                    case JS_OP_LE:        cached_cmp_insn = use_float ? MIR_DLE : MIR_LES; break;
-                    case JS_OP_GT:        cached_cmp_insn = use_float ? MIR_DGT : MIR_GTS; break;
-                    case JS_OP_GE:        cached_cmp_insn = use_float ? MIR_DGE : MIR_GES; break;
-                    case JS_OP_EQ:
-                    case JS_OP_STRICT_EQ: cached_cmp_insn = use_float ? MIR_DEQ : MIR_EQ;  break;
-                    case JS_OP_NE:
-                    case JS_OP_STRICT_NE: cached_cmp_insn = use_float ? MIR_DNE : MIR_NE;  break;
+                    case OPERATOR_LT:        cached_cmp_insn = use_float ? MIR_DLT : MIR_LTS; break;
+                    case OPERATOR_LE:        cached_cmp_insn = use_float ? MIR_DLE : MIR_LES; break;
+                    case OPERATOR_GT:        cached_cmp_insn = use_float ? MIR_DGT : MIR_GTS; break;
+                    case OPERATOR_GE:        cached_cmp_insn = use_float ? MIR_DGE : MIR_GES; break;
+                    case OPERATOR_EQ:
+                    case OPERATOR_JS_STRICT_EQ: cached_cmp_insn = use_float ? MIR_DEQ : MIR_EQ;  break;
+                    case OPERATOR_NE:
+                    case OPERATOR_JS_STRICT_NE: cached_cmp_insn = use_float ? MIR_DNE : MIR_NE;  break;
                     default: break;
                     }
 
@@ -1521,7 +1521,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
 
     // Body
     if (for_node->body) {
-        if (for_node->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+        if (for_node->body->node_type == AST_NODE_BLOCK) {
             jm_push_scope(mt);
             jm_init_block_tdz(mt, for_node->body);  // v20 TDZ
             JsBlockNode* blk = (JsBlockNode*)for_node->body;
@@ -1587,7 +1587,6 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
 
 // Build a closure for a class method that has captures
 MIR_reg_t jm_build_closure_for_method(JsMirTranspiler* mt, JsFuncCollected* fc, int param_count) {
-    (void)param_count;
     MIR_reg_t closure_reg = jm_create_func_or_closure(mt, fc);
     if (JM_JS_FACT(fc, is_derived_constructor)) {
         jm_callr_void_1(mt, "js_mark_derived_constructor_func", closure_reg);
@@ -1674,7 +1673,7 @@ void jm_emit_class_static_block(JsMirTranspiler* mt, MIR_reg_t cls_obj,
         }
         hashmap_free(static_vars);
     }
-    if (block->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+    if (block->node_type == AST_NODE_BLOCK) {
         JsBlockNode* blk = (JsBlockNode*)block;
         for (JsAstNode* s = blk->statements; s; s = s->next) {
             jm_transpile_statement(mt, s);
@@ -1769,7 +1768,7 @@ MIR_reg_t jm_emit_class_prototype_chain(JsMirTranspiler* mt, JsClassEntry* ce,
         ctor_super_val = jm_link_static_super_prototype(mt, cls_obj, proto_obj, static_superclass);
     }
     if (!static_superclass && ce && ce->node && ce->node->superclass &&
-        ce->node->superclass->node_type == JS_AST_NODE_IDENTIFIER) {
+        ce->node->superclass->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* super_id = (JsIdentifierNode*)ce->node->superclass;
         if (super_id->name) {
             const char* sname = super_id->name->chars;
@@ -1778,7 +1777,7 @@ MIR_reg_t jm_emit_class_prototype_chain(JsMirTranspiler* mt, JsClassEntry* ce,
                 // NativeError prototypes are shared singletons, so link the actual constructor prototype.
                 JsIdentifierNode tmp_sid;
                 memset(&tmp_sid, 0, sizeof(tmp_sid));
-                tmp_sid.node_type = JS_AST_NODE_IDENTIFIER;
+                tmp_sid.node_type = AST_NODE_IDENT;
                 tmp_sid.name = super_id->name;
                 MIR_reg_t super_ctor = jm_transpile_box_item(mt, (JsAstNode*)&tmp_sid);
                 jm_link_class_super_prototype(mt, cls_obj, proto_obj, super_ctor);
@@ -1791,10 +1790,10 @@ MIR_reg_t jm_emit_class_prototype_chain(JsMirTranspiler* mt, JsClassEntry* ce,
         }
     }
     if (!static_superclass && ce && ce->node && ce->node->superclass &&
-        ce->node->superclass->node_type != JS_AST_NODE_IDENTIFIER &&
-        ce->node->superclass->node_type != JS_AST_NODE_NULL &&
-        !(ce->node->superclass->node_type == JS_AST_NODE_LITERAL &&
-          ((JsLiteralNode*)ce->node->superclass)->literal_type == JS_LITERAL_NULL)) {
+        ce->node->superclass->node_type != AST_NODE_IDENT &&
+        ce->node->superclass->node_type != AST_NODE_NULL &&
+        !(ce->node->superclass->node_type == AST_NODE_LITERAL &&
+          ((JsLiteralNode*)ce->node->superclass)->literal_type == AST_LITERAL_NULL)) {
         MIR_reg_t super_val = checked_heritage_val ? checked_heritage_val :
             jm_transpile_box_item(mt, ce->node->superclass);
         if (!checked_heritage_val) {
@@ -1804,10 +1803,10 @@ MIR_reg_t jm_emit_class_prototype_chain(JsMirTranspiler* mt, JsClassEntry* ce,
         jm_link_class_super_prototype(mt, cls_obj, proto_obj, super_val);
         ctor_super_val = super_val;
     }
-    bool heritage_is_null = heritage && (heritage->node_type == JS_AST_NODE_NULL ||
-        (heritage->node_type == JS_AST_NODE_LITERAL &&
-         ((JsLiteralNode*)heritage)->literal_type == JS_LITERAL_NULL));
-    if (!heritage_is_null && heritage && heritage->node_type == JS_AST_NODE_IDENTIFIER) {
+    bool heritage_is_null = heritage && (heritage->node_type == AST_NODE_NULL ||
+        (heritage->node_type == AST_NODE_LITERAL &&
+         ((JsLiteralNode*)heritage)->literal_type == AST_LITERAL_NULL));
+    if (!heritage_is_null && heritage && heritage->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* heritage_id = (JsIdentifierNode*)heritage;
         heritage_is_null = heritage_id->name && heritage_id->name->len == 4 &&
             strncmp(heritage_id->name->chars, "null", 4) == 0;
@@ -1956,7 +1955,7 @@ static MIR_reg_t jm_emit_dynamic_new_expr(JsMirTranspiler* mt, JsCallNode* call,
     jm_emit_mov(mt, callee, callee_value);
     bool has_spread = false;
     for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
-        if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { has_spread = true; break; }
+        if (chk->node_type == AST_NODE_SPREAD) { has_spread = true; break; }
     }
     // An argument that suspends returns from the state machine, so the callee
     // cannot stay in a raw register across it — the ordinary call path spills
@@ -2119,7 +2118,7 @@ void jm_transpile_do_while(JsMirTranspiler* mt, JsDoWhileNode* dw) {
     // Body first
     jm_emit_label(mt, l_body);
     if (dw->body) {
-        if (dw->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+        if (dw->body->node_type == AST_NODE_BLOCK) {
             jm_push_scope(mt);
             jm_init_block_tdz(mt, dw->body);  // v20 TDZ
             JsBlockNode* blk = (JsBlockNode*)dw->body;
@@ -2227,37 +2226,37 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     const char* var_name = NULL;
     int var_len = 0;
 
-    bool left_is_decl = fo->left && fo->left->node_type == JS_AST_NODE_VARIABLE_DECLARATION;
+    bool left_is_decl = fo->left && fo->left->node_type == AST_NODE_VAR_STAM;
     if (left_is_decl) {
         JsVariableDeclarationNode* decl = (JsVariableDeclarationNode*)fo->left;
-        if (decl->declarations && decl->declarations->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+        if (decl->declarations && decl->declarations->node_type == AST_NODE_VARIABLE_DECLARATOR) {
             JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)decl->declarations;
-            if (d->id && d->id->node_type == JS_AST_NODE_IDENTIFIER) {
+            if (d->id && d->id->node_type == AST_NODE_IDENT) {
                 JsIdentifierNode* id = (JsIdentifierNode*)d->id;
                 var_name = id->name->chars;
                 var_len = (int)id->name->len;
                 loop_identifier = id;
-            } else if (d->id && d->id->node_type == JS_AST_NODE_ARRAY_PATTERN) {
+            } else if (d->id && d->id->node_type == AST_NODE_ARRAY_PATTERN) {
                 destr_pattern = (JsArrayPatternNode*)d->id;
-            } else if (d->id && d->id->node_type == JS_AST_NODE_OBJECT_PATTERN) {
+            } else if (d->id && d->id->node_type == AST_NODE_MAP_PATTERN) {
                 obj_destr_pattern = (JsObjectPatternNode*)d->id;
             }
         }
-    } else if (fo->left && fo->left->node_type == JS_AST_NODE_IDENTIFIER) {
+    } else if (fo->left && fo->left->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* id = (JsIdentifierNode*)fo->left;
         var_name = id->name->chars;
         var_len = (int)id->name->len;
         loop_identifier = id;
-    } else if (fo->left && (fo->left->node_type == JS_AST_NODE_ARRAY_PATTERN ||
-                            fo->left->node_type == JS_AST_NODE_ARRAY_EXPRESSION)) {
+    } else if (fo->left && (fo->left->node_type == AST_NODE_ARRAY_PATTERN ||
+                            fo->left->node_type == AST_NODE_ARRAY)) {
         // for (const [a, b] of arr) — left is array_pattern directly
         destr_pattern = (JsArrayPatternNode*)fo->left;
-    } else if (fo->left && (fo->left->node_type == JS_AST_NODE_OBJECT_PATTERN ||
-                            fo->left->node_type == JS_AST_NODE_OBJECT_EXPRESSION)) {
+    } else if (fo->left && (fo->left->node_type == AST_NODE_MAP_PATTERN ||
+                            fo->left->node_type == AST_NODE_MAP)) {
         obj_destr_pattern = (JsObjectPatternNode*)fo->left;
-    } else if (fo->left && fo->left->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+    } else if (fo->left && fo->left->node_type == AST_NODE_MEMBER_EXPR) {
         lhs_ref_node = fo->left;
-    } else if (fo->left && fo->left->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+    } else if (fo->left && fo->left->node_type == AST_NODE_CALL_EXPR) {
         lhs_call_target = true;
     }
 
@@ -2271,7 +2270,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
 
     // Create loop variable (for simple case) or temp var (for destructuring)
     MIR_reg_t loop_var;
-    bool is_for_in = (fo->node_type == JS_AST_NODE_FOR_IN_STATEMENT);
+    bool is_for_in = (fo->node_type == AST_NODE_FOR_IN_STAM);
     bool is_for_await = !is_for_in && fo->is_await;
     bool is_let_const_loop = false;
     bool is_const_loop = false;
@@ -2338,7 +2337,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
             JsVariableDeclarationNode* decl = (JsVariableDeclarationNode*)fo->left;
             if (decl->kind == JS_VAR_VAR &&
                 decl->declarations &&
-                decl->declarations->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+                decl->declarations->node_type == AST_NODE_VARIABLE_DECLARATOR) {
                 JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)decl->declarations;
                 init_expr = d->init;
             }
@@ -2359,47 +2358,47 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     if (destr_pattern && left_creates_bindings) {
         JsAstNode* pe = destr_pattern->elements;
         while (pe) {
-            if (pe->node_type == JS_AST_NODE_NULL) {
+            if (pe->node_type == AST_NODE_NULL) {
                 // elision: no variable to pre-create
-            } else if (pe->node_type == JS_AST_NODE_IDENTIFIER) {
+            } else if (pe->node_type == AST_NODE_IDENT) {
                 JsIdentifierNode* pid = (JsIdentifierNode*)pe;
                 const char* pvname = jm_var_name(pid->name);
                 jm_precreate_loop_binding(mt, pvname, pid->entry,
                     is_let_const_loop, true);
-            } else if (pe->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+            } else if (pe->node_type == AST_NODE_ASSIGN_PATTERN) {
                 // default value: [x = defaultVal, ...]
                 JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)pe;
-                if (ap->left && ap->left->node_type == JS_AST_NODE_IDENTIFIER) {
+                if (ap->left && ap->left->node_type == AST_NODE_IDENT) {
                     JsIdentifierNode* pid = (JsIdentifierNode*)ap->left;
                     const char* pvname = jm_var_name(pid->name);
                     jm_precreate_loop_binding(mt, pvname, pid->entry,
                         is_let_const_loop, true);
                 }
-            } else if (pe->node_type == JS_AST_NODE_OBJECT_PATTERN) {
+            } else if (pe->node_type == AST_NODE_MAP_PATTERN) {
                 // nested object destructure: pre-create each property variable
                 JsObjectPatternNode* op = (JsObjectPatternNode*)pe;
                 JsAstNode* pprop = op->properties;
                 while (pprop) {
-                    if (pprop->node_type == JS_AST_NODE_PROPERTY) {
+                    if (pprop->node_type == AST_NODE_PROPERTY) {
                         JsPropertyNode* pp = (JsPropertyNode*)pprop;
                         String* plocal = NULL;
-                        if (pp->value && pp->value->node_type == JS_AST_NODE_IDENTIFIER)
+                        if (pp->value && pp->value->node_type == AST_NODE_IDENT)
                             plocal = ((JsIdentifierNode*)pp->value)->name;
-                        else if (pp->key && pp->key->node_type == JS_AST_NODE_IDENTIFIER)
+                        else if (pp->key && pp->key->node_type == AST_NODE_IDENT)
                             plocal = ((JsIdentifierNode*)pp->key)->name;
                         if (plocal) {
                             const char* pvname = jm_var_name(plocal);
                             jm_precreate_loop_binding(mt, pvname,
-                                pp->value && pp->value->node_type == JS_AST_NODE_IDENTIFIER
+                                pp->value && pp->value->node_type == AST_NODE_IDENT
                                     ? ((JsIdentifierNode*)pp->value)->entry : NULL,
                                 is_let_const_loop, true);
                         }
                     }
                     pprop = pprop->next;
                 }
-            } else if (pe->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+            } else if (pe->node_type == AST_NODE_SPREAD) {
                 JsSpreadElementNode* sp = (JsSpreadElementNode*)pe;
-                if (sp->argument && sp->argument->node_type == JS_AST_NODE_IDENTIFIER) {
+                if (sp->argument && sp->argument->node_type == AST_NODE_IDENT) {
                     JsIdentifierNode* pid = (JsIdentifierNode*)sp->argument;
                     const char* pvname = jm_var_name(pid->name);
                     jm_precreate_loop_binding(mt, pvname, pid->entry,
@@ -2414,23 +2413,23 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     if (obj_destr_pattern && left_creates_bindings) {
         JsAstNode* prop = obj_destr_pattern->properties;
         while (prop) {
-            if (prop->node_type == JS_AST_NODE_PROPERTY) {
+            if (prop->node_type == AST_NODE_PROPERTY) {
                 JsPropertyNode* p = (JsPropertyNode*)prop;
                 String* local_name = NULL;
-                if (p->value && p->value->node_type == JS_AST_NODE_IDENTIFIER) {
+                if (p->value && p->value->node_type == AST_NODE_IDENT) {
                     local_name = ((JsIdentifierNode*)p->value)->name;
-                } else if (p->value && p->value->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+                } else if (p->value && p->value->node_type == AST_NODE_ASSIGN_PATTERN) {
                     JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)p->value;
-                    if (ap->left && ap->left->node_type == JS_AST_NODE_IDENTIFIER) {
+                    if (ap->left && ap->left->node_type == AST_NODE_IDENT) {
                         local_name = ((JsIdentifierNode*)ap->left)->name;
                     }
-                } else if (p->key && p->key->node_type == JS_AST_NODE_IDENTIFIER) {
+                } else if (p->key && p->key->node_type == AST_NODE_IDENT) {
                     local_name = ((JsIdentifierNode*)p->key)->name;
                 }
                 if (local_name) {
                     const char* pvname = jm_var_name(local_name);
                     jm_precreate_loop_binding(mt, pvname,
-                        p->value && p->value->node_type == JS_AST_NODE_IDENTIFIER
+                        p->value && p->value->node_type == AST_NODE_IDENT
                             ? ((JsIdentifierNode*)p->value)->entry : NULL,
                         is_let_const_loop, true);
                 }
@@ -2859,7 +2858,7 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
 }
 
 static bool jm_statement_is_using_decl(JsAstNode* stmt) {
-    if (!stmt || stmt->node_type != JS_AST_NODE_VARIABLE_DECLARATION) return false;
+    if (!stmt || stmt->node_type != AST_NODE_VAR_STAM) return false;
     JsVariableDeclarationNode* decl = (JsVariableDeclarationNode*)stmt;
     return decl->is_using;
 }
@@ -2873,9 +2872,9 @@ static void jm_emit_using_dispose_decl(JsMirTranspiler* mt, JsVariableDeclaratio
         return;
     }
     for (JsAstNode* n = decl ? decl->declarations : NULL; n; n = n->next) {
-        if (n->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+        if (n->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
         JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)n;
-        if (!d->id || d->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
+        if (!d->id || d->id->node_type != AST_NODE_IDENT) continue;
         JsIdentifierNode* id = (JsIdentifierNode*)d->id;
         JsMirVarEntry* var = jm_find_var_by_binding(mt, id->entry);
         if (!var || !var->reg) continue;
@@ -2981,13 +2980,13 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
     if (!stmt) return;
 
     switch (stmt->node_type) {
-    case JS_AST_NODE_NULL:
+    case AST_NODE_NULL:
         // Direct-parser type declarations erase to a canonical no-op node.
         break;
-    case JS_AST_NODE_VARIABLE_DECLARATION:
+    case AST_NODE_VAR_STAM:
         jm_transpile_var_decl(mt, (JsVariableDeclarationNode*)stmt);
         break;
-    case JS_AST_NODE_FUNCTION_DECLARATION: {
+    case AST_NODE_FUNC: {
         // Annex B §B.3.3.1: In sloppy mode, function declarations inside blocks/if/switch
         // are var-hoisted with undefined (Phase 2), and when evaluated, the function
         // value is written back to the var-scoped binding.
@@ -3135,7 +3134,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         }
         break;
     }
-    case JS_AST_NODE_CLASS_DECLARATION:
+    case AST_NODE_CLASS:
         // For top-level script: already handled in Phase 3 pre-pass; skip.
         // For function bodies (IIFE or regular): initialize the class object here
         // since Phase 3 only processes program->body, not function bodies.
@@ -3211,7 +3210,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             }
         }
         break;
-    case JS_AST_NODE_IF_STATEMENT:
+    case AST_NODE_IF_EXPR:
         jm_transpile_if(mt, (JsIfNode*)stmt);
         break;
     case AST_NODE_LOOP:
@@ -3223,22 +3222,22 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             jm_transpile_while(mt, (JsWhileNode*)stmt);
         }
         break;
-    case JS_AST_NODE_SWITCH_STATEMENT:
+    case AST_NODE_MATCH_EXPR:
         jm_transpile_switch(mt, (JsSwitchNode*)stmt);
         break;
-    case JS_AST_NODE_FOR_OF_STATEMENT:
-    case JS_AST_NODE_FOR_IN_STATEMENT:
+    case AST_NODE_FOR_OF_STAM:
+    case AST_NODE_FOR_IN_STAM:
         jm_transpile_for_of(mt, (JsForOfNode*)stmt);
         break;
-    case JS_AST_NODE_RETURN_STATEMENT:
+    case AST_NODE_RETURN_STAM:
         jm_transpile_return(mt, (JsReturnNode*)stmt);
         break;
-    case JS_AST_NODE_BREAK_STATEMENT: {
+    case AST_NODE_BREAK_STAM: {
         JsBreakContinueNode* brk = (JsBreakContinueNode*)stmt;
         jm_emit_break_completion(mt, brk);
         break;
     }
-    case JS_AST_NODE_CONTINUE_STATEMENT: {
+    case AST_NODE_CONTINUE_STAM: {
         JsBreakContinueNode* cont = (JsBreakContinueNode*)stmt;
         jm_emit_continue_completion(mt, cont);
         break;
@@ -3250,9 +3249,9 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             // and we just need to annotate the label on that entry
             JsAstNodeType body_type = labeled->body->node_type;
             bool is_loop_or_switch = (body_type == AST_NODE_LOOP ||
-                                      body_type == JS_AST_NODE_FOR_OF_STATEMENT ||
-                                      body_type == JS_AST_NODE_FOR_IN_STATEMENT ||
-                                      body_type == JS_AST_NODE_SWITCH_STATEMENT);
+                                      body_type == AST_NODE_FOR_OF_STAM ||
+                                      body_type == AST_NODE_FOR_IN_STAM ||
+                                      body_type == AST_NODE_MATCH_EXPR);
             if (is_loop_or_switch) {
                 // set pending label so the loop's jm_push_loop_labels picks it up
                 mt->pending_label_name = labeled->label;
@@ -3271,7 +3270,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         }
         break;
     }
-    case JS_AST_NODE_BLOCK_STATEMENT: {
+    case AST_NODE_BLOCK: {
         // Js55 P19: save and reset last-closure tracking so a prior block's
         // closure cannot capture this block's let/const initializers via
         // jm_write_last_closure_capture_if_matching. See §12.14.
@@ -3289,7 +3288,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         jm_closure_checkpoint_rollback(mt, &blk_saved_last_closure);
         break;
     }
-    case JS_AST_NODE_EXPRESSION_STATEMENT: {
+    case AST_NODE_EXPR_STMT: {
         JsExpressionStatementNode* es = (JsExpressionStatementNode*)stmt;
         if (es->expression) {
             if (!mt->eval_completion_reg &&
@@ -3313,7 +3312,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         }
         break;
     }
-    case JS_AST_NODE_TRY_STATEMENT: {
+    case AST_NODE_TRY_STAM: {
         JsTryNode* try_node = (JsTryNode*)stmt;
         bool has_catch = (try_node->handler != NULL);
         bool has_finally = (try_node->finalizer != NULL);
@@ -3367,7 +3366,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         }
 
         // === Try body ===
-        if (try_node->block && try_node->block->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+        if (try_node->block && try_node->block->node_type == AST_NODE_BLOCK) {
             jm_push_scope(mt);
             jm_init_block_tdz(mt, try_node->block);  // v20 TDZ
             JsBlockNode* blk = (JsBlockNode*)try_node->block;
@@ -3464,7 +3463,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             // nested one for the body. Keeping them separate lets destructuring
             // defaults capture the parameter without seeing body let/const TDZ.
             jm_push_scope(mt);
-            if (catch_node->param && catch_node->param->node_type == JS_AST_NODE_IDENTIFIER) {
+            if (catch_node->param && catch_node->param->node_type == AST_NODE_IDENT) {
                 JsIdentifierNode* param_id = (JsIdentifierNode*)catch_node->param;
                 const char* vname = jm_var_name(param_id->name);
                 jm_set_var(mt, vname, thrown_val, MIR_T_I64, LMD_TYPE_ANY,
@@ -3475,14 +3474,14 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 jm_scope_env_mark_and_writeback_binding(mt, vname,
                     (JsAstNode*)param_id, thrown_val);
             } else if (catch_node->param &&
-                       (catch_node->param->node_type == JS_AST_NODE_OBJECT_PATTERN ||
-                        catch_node->param->node_type == JS_AST_NODE_ARRAY_PATTERN)) {
+                       (catch_node->param->node_type == AST_NODE_MAP_PATTERN ||
+                        catch_node->param->node_type == AST_NODE_ARRAY_PATTERN)) {
                 jm_bind_catch_destructure(mt, catch_node->param, thrown_val,
-                    catch_node->param->node_type == JS_AST_NODE_ARRAY_PATTERN);
+                    catch_node->param->node_type == AST_NODE_ARRAY_PATTERN);
             }
 
             // Transpile catch body
-            if (catch_node->body && catch_node->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+            if (catch_node->body && catch_node->body->node_type == AST_NODE_BLOCK) {
                 jm_push_scope(mt);
                 jm_init_block_tdz(mt, catch_node->body);  // v20 TDZ
                 JsBlockNode* blk = (JsBlockNode*)catch_node->body;
@@ -3586,7 +3585,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 tc->incoming_error_lane_val_reg = incoming_error_lane_val_reg;
             }
 
-            if (try_node->finalizer->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+            if (try_node->finalizer->node_type == AST_NODE_BLOCK) {
                 jm_push_scope(mt);
                 jm_init_block_tdz(mt, try_node->finalizer);  // v20 TDZ
                 JsBlockNode* fin = (JsBlockNode*)try_node->finalizer;
@@ -3676,7 +3675,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         }
         break;
     }
-    case JS_AST_NODE_THROW_STATEMENT: {
+    case AST_NODE_RAISE_STAM: {
         JsThrowNode* throw_node = (JsThrowNode*)stmt;
         MIR_reg_t thrown_val = jm_emit_null(mt);
         if (throw_node->argument) {
@@ -3707,7 +3706,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
     default:
         log_error("js-mir: unsupported statement type %d", stmt->node_type);
         break;
-    case JS_AST_NODE_IMPORT_DECLARATION: {
+    case AST_NODE_IMPORT: {
         // ES module import: resolve module and bind imported names
         JsImportNode* imp = (JsImportNode*)stmt;
         if (!imp->source) break;
@@ -3765,7 +3764,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         {
             JsAstNode* spec = imp->specifiers;
             while (spec) {
-                if (spec->node_type == JS_AST_NODE_IMPORT_SPECIFIER) {
+                if (spec->node_type == AST_NODE_IMPORT_SPECIFIER) {
                     JsImportSpecifierNode* isp = (JsImportSpecifierNode*)spec;
                     // Get exported value: val = js_get_key_default(ns, remote_name)
                     MIR_reg_t key = jm_box_property_name_literal(mt,
@@ -3781,7 +3780,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         }
         break;
     }
-    case JS_AST_NODE_EXPORT_DECLARATION: {
+    case AST_NODE_EXPORT: {
         // v14: export statement — transpile the declaration normally
         JsExportNode* exp = (JsExportNode*)stmt;
         if (exp->declaration) {

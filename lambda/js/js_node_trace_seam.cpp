@@ -28,7 +28,6 @@ __attribute__((weak)) Item node_trace_events_internal_binding(void) {
 
 __attribute__((weak)) void node_trace_events_emit_async_hooks_init(
         const char* type_chars, int type_len, int64_t async_id, int64_t trigger_id) {
-    (void)type_chars; (void)type_len; (void)async_id; (void)trigger_id;
 }
 
 __attribute__((weak)) Item node_trace_events_namespace(void) {
@@ -36,18 +35,15 @@ __attribute__((weak)) Item node_trace_events_namespace(void) {
 }
 
 __attribute__((weak)) int node_trace_events_init(const JubeHostAPI* host) {
-    (void)host;
     return 0;   // no provider linked: initialising "no tracing" succeeds
 }
 
 __attribute__((weak)) void node_trace_events_shutdown(void) {}
 
 __attribute__((weak)) void node_trace_events_runtime_reset(void* session) {
-    (void)session;
 }
 
 __attribute__((weak)) void node_trace_events_runtime_detach(void* session) {
-    (void)session;
 }
 
 __attribute__((weak)) void node_trace_events_flush(void) {}

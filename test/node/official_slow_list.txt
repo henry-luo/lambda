@@ -366,6 +366,7 @@ test-tls-destroy-stream-12.js                    # [timeout] harness popen run w
 test-tls-destroy-stream.js                       # [slow] observed 10.2s (>10s)
 test-tls-disable-renegotiation.js                # [slow] observed 10.2s (>10s)
 test-tls-ecdh-auto.js                            # [slow] observed 10.2s (>10s)
+test-tls-ecdh-multiple.js                        # [slow] observed 10.3s (>10s)
 test-tls-exportkeyingmaterial.js                 # [slow] observed 10.2s (>10s)
 test-tls-finished.js                             # [slow] observed 10.2s (>10s)
 test-tls-friendly-error-message.js               # [slow] observed 10.2s (>10s)

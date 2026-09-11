@@ -45,7 +45,6 @@ static uint64_t js_runtime_ast_cache_entry_hash(const void* item,
 
 static int js_runtime_ast_cache_entry_compare(const void* left, const void* right,
         void* udata) {
-    (void)udata;
     const JsRuntimeAstCacheEntry* a = (const JsRuntimeAstCacheEntry*)left;
     const JsRuntimeAstCacheEntry* b = (const JsRuntimeAstCacheEntry*)right;
     if (a->strict != b->strict) return a->strict ? -1 : 1;
@@ -260,8 +259,8 @@ NameEntry* js_scope_define_in_scope(JsTranspiler* tp, JsScope* target_scope,
                 target_scope->kind == SCOPE_KIND_BLOCK &&
                 !target_scope->is_function_body && kind == JS_VAR_LET &&
                 existing->is_lexical &&
-                existing->node->node_type == JS_AST_NODE_FUNCTION_DECLARATION &&
-                node->node_type == JS_AST_NODE_FUNCTION_DECLARATION;
+                existing->node->node_type == AST_NODE_FUNC &&
+                node->node_type == AST_NODE_FUNC;
             if (annex_b_duplicate_block_function) {
                 // Annex B.3.3.4 permits sloppy block-only function duplicates.
                 existing->node = (AstNode*)node;
@@ -473,17 +472,17 @@ JsFunctionNode* js_script_field_initializer_ensure(JsScript* script,
     NameScope* scope = (NameScope*)pool_calloc(script->pool, sizeof(NameScope));
     if (!function || !body || !result || !scope) return NULL;
     // one indexed definition per field; each class evaluation supplies its own environment.
-    function->node_type = JS_AST_NODE_FUNCTION_EXPRESSION;
+    function->node_type = AST_NODE_FUNC_EXPR;
     function->source_span = field->source_span;
     function->body = (JsAstNode*)body;
     function->vars = scope;
     function->has_use_strict_directive = true;
     scope->kind = SCOPE_KIND_FUNCTION;
     scope->strict = true;
-    body->node_type = JS_AST_NODE_BLOCK_STATEMENT;
+    body->node_type = AST_NODE_BLOCK;
     body->source_span = field->source_span;
     body->statements = (JsAstNode*)result;
-    result->node_type = JS_AST_NODE_RETURN_STATEMENT;
+    result->node_type = AST_NODE_RETURN_STAM;
     result->source_span = field->source_span;
     result->argument = field->value;
     if (!ast_index_append_profile(&script->ast_index, (AstNode*)function,
@@ -588,7 +587,7 @@ JsScript* js_script_adopt_transpiler(JsTranspiler* tp, Runtime* runtime,
     script->source = source_copy;
     script->reference = reference_copy;
     script->destroy_extension = js_script_destroy_extension;
-    if (script->ast_root && script->ast_root->node_type == JS_AST_NODE_PROGRAM &&
+    if (script->ast_root && script->ast_root->node_type == AST_SCRIPT &&
             ((JsProgramNode*)script->ast_root)->has_use_strict_directive) {
         // The AST tier reads strictness from its retained Script rather than
         // the ephemeral transpiler; retain a program directive across adoption.

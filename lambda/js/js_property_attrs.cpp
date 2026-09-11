@@ -491,26 +491,18 @@ static bool js_attr_ensure_array_shape_entry(Item obj, const char* name, int nam
     return true;
 }
 
-extern "C" bool js_props_query_enumerable(Map* m, ShapeEntry* se,
-                                          const char* name, int name_len) {
-    (void)m; (void)name; (void)name_len;
-    if (se && !jspd_is_enumerable(se)) return false;
-    return true;
-}
+// The three attribute queries differ only in which descriptor bit they read.
+// A missing ShapeEntry means the slot carries default attributes, which are
+// enumerable, writable and configurable alike.
+#define JS_DEFINE_PROPS_QUERY(fn_name, predicate) \
+    extern "C" bool fn_name(Map* m, ShapeEntry* se, const char* name, int name_len) { \
+        (void)m; (void)name; (void)name_len; \
+        return !se || predicate(se); \
+    }
 
-extern "C" bool js_props_query_writable(Map* m, ShapeEntry* se,
-                                        const char* name, int name_len) {
-    (void)m; (void)name; (void)name_len;
-    if (se && !jspd_is_writable(se)) return false;
-    return true;
-}
-
-extern "C" bool js_props_query_configurable(Map* m, ShapeEntry* se,
-                                            const char* name, int name_len) {
-    (void)m; (void)name; (void)name_len;
-    if (se && !jspd_is_configurable(se)) return false;
-    return true;
-}
+JS_DEFINE_PROPS_QUERY(js_props_query_enumerable, jspd_is_enumerable)
+JS_DEFINE_PROPS_QUERY(js_props_query_writable, jspd_is_writable)
+JS_DEFINE_PROPS_QUERY(js_props_query_configurable, jspd_is_configurable)
 
 // Resolve the underlying Map* for an object: MAP → obj.map; FUNC →
 // fn->properties_map.map (when initialized); ARRAY → companion map (in
@@ -831,8 +823,6 @@ extern "C" Item js_install_user_accessor(Item obj, Item name, Item fn,
         obj_root.get(), name_root.get(), fn_root.get(), is_setter, 0));
     return obj_root.get();
 }
-
-
 
 extern "C" JsAccessorPair* js_find_accessor_pair_inheritable_name_id(Item obj,
         NameId name_id) {

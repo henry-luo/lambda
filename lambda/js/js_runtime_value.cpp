@@ -8,6 +8,14 @@ extern "C" void* jube_host_identity(Item item);
 JS_FORWARD_EXPRESSION(Item, js_undefined, (void), ((Item){.item = ITEM_JS_UNDEFINED}))
 JS_FORWARD_ITEM(make_js_undefined, (void), js_undefined, ())
 
+// Strings assembled in a StrBuf are always taken the same way: copy the bytes
+// into a GC string, then release the buffer. Callers must not keep the StrBuf.
+extern "C" Item js_strbuf_take_item(StrBuf* sb) {
+    String* result = heap_strcpy(sb->str, sb->length);
+    strbuf_free(sb);
+    return (Item){.item = s2it(result)};
+}
+
 extern "C" Item js_make_string_len(const char* str, int len) {
     if (!str) return ItemNull;
     if (len < 0) len = 0;
@@ -592,9 +600,7 @@ extern "C" Item js_to_string(Item value) {
                 }
             }
         }
-        String* result = heap_strcpy(sb->str, sb->length);
-        strbuf_free(sb);
-        return (Item){.item = s2it(result)};
+        return js_strbuf_take_item(sb);
     }
 
     case LMD_TYPE_MAP: {
@@ -660,9 +666,7 @@ extern "C" Item js_to_string(Item value) {
                 if (src_s && src_s->len > 0) strbuf_append_str_n(sb, src_s->chars, (int)src_s->len);
                 strbuf_append_str_n(sb, "/", 1);
                 if (flags_s && flags_s->len > 0) strbuf_append_str_n(sb, flags_s->chars, (int)flags_s->len);
-                String* result = heap_strcpy(sb->str, sb->length);
-                strbuf_free(sb);
-                return (Item){.item = s2it(result)};
+                return js_strbuf_take_item(sb);
             }
         }
         // ES spec ToPrimitive with hint "string": try toString first, then valueOf
@@ -726,9 +730,7 @@ extern "C" Item js_to_string(Item value) {
                 strbuf_append_str_n(sb, name_s->chars, (int)name_s->len);
                 strbuf_append_str_n(sb, ": ", 2);
                 strbuf_append_str_n(sb, msg_s->chars, (int)msg_s->len);
-                String* result = heap_strcpy(sb->str, sb->length);
-                strbuf_free(sb);
-                return (Item){.item = s2it(result)};
+                return js_strbuf_take_item(sb);
             }
             return name_val;
         }
@@ -1192,13 +1194,6 @@ static inline Item js_op_to_primitive(Item value, int hint) {
     return js_to_primitive(value, h);
 }
 
-static inline int js_upper_hex_digit_value(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    return -1;
-}
-
 extern "C" uint64_t js_get_heap_epoch();
 
 // These are context-local TLS-backed fields so a tight concatenation loop
@@ -1220,14 +1215,14 @@ static bool js_percent_escape_four_byte_cp(String* s, uint32_t* cp_out) {
         s->chars[6] != '%' || s->chars[9] != '%') {
         return false;
     }
-    int b0_high = js_upper_hex_digit_value(s->chars[1]);
-    int b0_low = js_upper_hex_digit_value(s->chars[2]);
-    int b1_high = js_upper_hex_digit_value(s->chars[4]);
-    int b1_low = js_upper_hex_digit_value(s->chars[5]);
-    int b2_high = js_upper_hex_digit_value(s->chars[7]);
-    int b2_low = js_upper_hex_digit_value(s->chars[8]);
-    int b3_high = js_upper_hex_digit_value(s->chars[10]);
-    int b3_low = js_upper_hex_digit_value(s->chars[11]);
+    int b0_high = str_hex_val(s->chars[1]);
+    int b0_low = str_hex_val(s->chars[2]);
+    int b1_high = str_hex_val(s->chars[4]);
+    int b1_low = str_hex_val(s->chars[5]);
+    int b2_high = str_hex_val(s->chars[7]);
+    int b2_low = str_hex_val(s->chars[8]);
+    int b3_high = str_hex_val(s->chars[10]);
+    int b3_low = str_hex_val(s->chars[11]);
     if ((b0_high | b0_low | b1_high | b1_low | b2_high | b2_low | b3_high | b3_low) < 0) return false;
     unsigned int byte0 = (unsigned int)((b0_high << 4) | b0_low);
     unsigned int byte1 = (unsigned int)((b1_high << 4) | b1_low);
@@ -1263,7 +1258,7 @@ static inline Item js_try_concat_percent_hex(String* left, String* right) {
     bool cache_rooted = js_string_concat_caches_ensure_roots();
     if (!left->is_ascii || !right->is_ascii || right->len != 1) return ItemNull;
     char right_ch = right->chars[0];
-    int right_value = js_upper_hex_digit_value(right_ch);
+    int right_value = str_hex_val(right_ch);
     if (right_value < 0) return ItemNull;
     if (left->len == 1 && left->chars[0] == '%') {
         if (cache_rooted && js_percent_prefix_cache[right_value].item) {
@@ -1276,7 +1271,7 @@ static inline Item js_try_concat_percent_hex(String* left, String* right) {
         if (cache_rooted) js_percent_prefix_cache[right_value] = result;
         return result;
     }
-    int left_value = left->len == 2 && left->chars[0] == '%' ? js_upper_hex_digit_value(left->chars[1]) : -1;
+    int left_value = left->len == 2 && left->chars[0] == '%' ? str_hex_val(left->chars[1]) : -1;
     if (left_value >= 0) {
         int byte_value = (left_value << 4) | right_value;
         if (cache_rooted && js_percent_byte_cache[byte_value].item) {
@@ -1413,7 +1408,6 @@ static Item js_equal_bigint_bool(Item bigint, Item boolean) {
 }
 
 static bool js_equal_can_coerce_object(Item value, TypeId other_type) {
-    (void)other_type;
     return get_type_id(value) == LMD_TYPE_MAP || js_is_js_array(value);
 }
 

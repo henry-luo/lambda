@@ -384,6 +384,14 @@ bool str_is_alnum(char c);
 bool str_is_upper(char c);
 bool str_is_lower(char c);
 bool str_is_hex(char c);
+/** hex digit value of c (0-15), or -1 when c is not a hex digit. */
+static inline int str_hex_val(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
 
 /* ──────────────────────────────────────────────────────────────────────
  *  16. Formatting helpers

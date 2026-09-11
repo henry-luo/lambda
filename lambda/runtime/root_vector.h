@@ -17,6 +17,7 @@
 // Never interleave POD metadata in a block (JSCU13): keep it in a parallel
 // ordinary array.
 
+#include "../../lib/arraylist.h"
 #include "../lambda.h"
 
 #ifdef __cplusplus
@@ -58,6 +59,12 @@ void root_vector_clear(RootVector* v);                   // drops Items, keeps b
 void root_vector_shrink(RootVector* v, int64_t count);   // drops Items above count
 void root_vector_destroy(RootVector* v);                 // unregisters and frees blocks
 int64_t root_vector_high_water(const RootVector* v);
+
+// Drain a table whose rows are individually mem_alloc'd alongside the
+// RootVector that holds their Items. The two halves are one logical table:
+// freeing the rows without clearing the roots leaves the GC tracing freed
+// payloads, so they are always released together.
+void root_vector_clear_owned_rows(ArrayList** rows, RootVector* values);
 
 #ifdef __cplusplus
 }

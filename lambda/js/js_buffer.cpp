@@ -24,6 +24,7 @@
 #include <cstdlib>
 
 extern "C" Item bigint_from_int64(int64_t val);
+extern "C" Item bigint_from_uint64(uint64_t val);
 extern "C" Item bigint_from_string(const char* str, int len);
 extern Item js_make_number(double d);
 
@@ -118,13 +119,6 @@ static Item buffer_to_bigint_value(Item value, Item* out_bigint) {
     } else {
         return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
     }
-}
-
-static Item buffer_biguint64_item(uint64_t value) {
-    if (value <= (uint64_t)INT64_MAX) return bigint_from_int64((int64_t)value);
-    char buf[32];
-    int len = snprintf(buf, sizeof(buf), "%llu", (unsigned long long)value);
-    return bigint_from_string(buf, len);
 }
 
 static uint64_t buffer_bigint_to_uint64_bits(Item value) {
@@ -2127,7 +2121,7 @@ static Item js_buffer_read_bigint64(Item buf, Item offset_item, bool little_endi
         for (int i = 0; i < 8; i++) raw = (raw << 8) | data[offset + i];
     }
     // bigint64 Buffer APIs must expose JS BigInt; returning packed int made typeof value "number".
-    return unsigned_value ? buffer_biguint64_item(raw) : bigint_from_int64((int64_t)raw);
+    return unsigned_value ? bigint_from_uint64(raw) : bigint_from_int64((int64_t)raw);
 }
 
 #define JS_BUFFER_READ_BIGINT(name, little, unsigned_value) \

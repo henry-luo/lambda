@@ -645,10 +645,10 @@ static inline bool jm_js_name_equal(const String* left, const String* right) {
 static inline JsFunctionNode* jm_direct_body_function_binding(
         JsFunctionNode* fn, const char* vname) {
     if (!fn || !vname || !fn->body ||
-            fn->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) return NULL;
+            fn->body->node_type != AST_NODE_BLOCK) return NULL;
     for (JsAstNode* statement = ((JsBlockNode*)fn->body)->statements;
             statement; statement = statement->next) {
-        if (statement->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+        if (statement->node_type != AST_NODE_FUNC) continue;
         JsFunctionNode* declaration = (JsFunctionNode*)statement;
         if (declaration->name &&
                 strcmp(jm_var_name(declaration->name), vname) == 0) {

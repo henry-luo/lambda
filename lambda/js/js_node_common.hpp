@@ -15,7 +15,6 @@
 // allocated buffer that its read callback frees, so they all want this.
 static inline void js_node_alloc_cb(uv_handle_t* handle, size_t suggested_size,
         uv_buf_t* buf) {
-    (void)handle;
     buf->base = (char*)mem_alloc(suggested_size, MEM_CAT_JS_RUNTIME);
     buf->len = buf->base ? suggested_size : 0;
 }

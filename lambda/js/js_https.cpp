@@ -250,9 +250,7 @@ static Item https_clone_options_object(Item source) {
     Item keys = js_object_keys(source);
     if (get_type_id(keys) != LMD_TYPE_ARRAY) return result;
 
-    int64_t len = js_array_length(keys);
-    for (int64_t i = 0; i < len; i++) {
-        Item key = js_elements_get_int(keys, i);
+    JS_ARRAY_FOREACH(key, keys) {
         js_set_key_default(result, key, js_get_key_default(source, key));
     }
     return result;
@@ -285,9 +283,7 @@ static void https_call_event_listeners(Item self, const char* key_name, Item* ar
         js_call_function(listeners, self, args, argc);
         js_microtask_flush();
     } else if (get_type_id(listeners) == LMD_TYPE_ARRAY) {
-        int64_t count = js_array_length(listeners);
-        for (int64_t i = 0; i < count; i++) {
-            Item listener = js_elements_get_int(listeners, i);
+        JS_ARRAY_FOREACH(listener, listeners) {
             if (is_callable(listener)) {
                 js_call_function(listener, self, args, argc);
             }
@@ -356,8 +352,7 @@ extern "C" Item js_https_agent_createConnection(Item rest_args) {
     Item socket = js_tls_connect(tls_args);
 
     if (js_node_is_plain_object(socket)) {
-        Item* env = js_alloc_env(1);
-        env[0] = callback;
+        Item* env = js_alloc_env1(callback);
         Item bridge = js_new_native_closure(https_agent_secure_connect_bridge, 0, env, 1);
         Item on_fn = js_get_key_cstr(socket, "on");
         if (is_callable(on_fn)) {

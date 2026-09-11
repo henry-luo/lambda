@@ -62,6 +62,14 @@ static Item assert_make_string_n(const char* str, size_t len) {
     return (Item){.item = s2it(s)};
 }
 
+// Assertion diagnostics are all rendered into a StrBuf and then handed on as an
+// Item; taking the string and releasing the buffer is one step, never two.
+static Item assert_take_string(StrBuf* sb) {
+    Item result = assert_make_string_n(sb->str, sb->length);
+    strbuf_free(sb);
+    return result;
+}
+
 template <typename Target>
 JS_FORWARD_STATIC_VOID( js_assert_set_native, (Item object, const char* name, Target target), js_set_native_key, (object, assert_make_string(name), target))
 
@@ -321,8 +329,7 @@ extern "C" Item js_internal_errors_ERR_OUT_OF_RANGE_ctor(Item name, Item range, 
     js_internal_errors_append_item(sb, range);
     strbuf_append_str(sb, ". Received ");
     js_internal_errors_append_item(sb, actual);
-    Item message = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
+    Item message = assert_take_string(sb);
     return js_internal_errors_make_range_error(message);
 }
 JS_FORWARD_EXPRESSION(Item, js_internal_errors_identity, (Item value), (value))
@@ -369,7 +376,6 @@ static Item js_assert_myers_make_operation(int op, Item value) {
 }
 
 extern "C" Item js_internal_assert_myersDiff(Item actual, Item expected, Item check_comma_disparity) {
-    (void)check_comma_disparity;
     int64_t actual_len = js_get_length(actual);
     int64_t expected_len = js_get_length(expected);
     if (actual_len < 0) actual_len = 0;
@@ -416,13 +422,10 @@ extern "C" Item js_internal_assert_printSimpleMyersDiff(Item diff) {
         Item pair = js_elements_get_int(diff, i);
         js_assert_myers_append_string_value(sb, js_elements_get_int(pair, 1));
     }
-    Item result = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return assert_take_string(sb);
 }
 
 extern "C" Item js_internal_assert_printMyersDiff(Item diff, Item operator_item) {
-    (void)operator_item;
     StrBuf* sb = strbuf_new();
     strbuf_append_char(sb, '\n');
     int64_t len = js_array_length(diff);
@@ -466,8 +469,7 @@ static Item make_assertion_error_full_item(Item msg_item, Item actual, Item expe
         strbuf_append_str(init_stack, ": ");
         strbuf_append_str_n(init_stack, init_msg->chars, init_msg->len);
     }
-    Item init_stack_item = assert_make_string_n(init_stack->str, init_stack->length);
-    strbuf_free(init_stack);
+    Item init_stack_item = assert_take_string(init_stack);
     Item error = js_new_error_with_name_stack(type_name, msg_item, init_stack_item);
     // Node.js AssertionError properties
     js_set_key_cstr(error, "code", assert_make_string("ERR_ASSERTION"));
@@ -600,9 +602,7 @@ static Item js_assert_format_user_message(Item message) {
         }
         strbuf_append_char(sb, ms->chars[i]);
     }
-    Item result = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return assert_take_string(sb);
 }
 
 static Item js_assert_resolve_user_message(Item message, Item actual, Item expected, bool* resolved) {
@@ -718,8 +718,7 @@ static Item throw_assert_deep_msg_or_auto_item(Item message, Item default_msg,
         // replacing it hides the structural mismatch Node exposes to callers.
         strbuf_append_str_n(sb, ds->chars + header_len, ds->len - header_len);
     }
-    Item custom = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
+    Item custom = assert_take_string(sb);
     return throw_assertion_error_full_item(custom, actual, expected, op_str, false);
 }
 
@@ -857,9 +856,7 @@ static Item js_assert_strict_equal_message(Item actual, Item expected) {
             strbuf_append_str(sb, "Values have same structure but are not reference-equal:\n\n");
             js_assert_append_inspected_value(sb, actual);
             strbuf_append_str(sb, "\n");
-            Item result = assert_make_string_n(sb->str, sb->length);
-            strbuf_free(sb);
-            return result;
+            return assert_take_string(sb);
         }
     }
     bool actual_object_like = js_assert_is_object_like_value(actual);
@@ -898,8 +895,7 @@ static Item js_assert_strict_equal_message(Item actual, Item expected) {
                     strbuf_append_str(sb, "\n");
                     js_assert_append_spaces(sb, (int)diff + 3);
                     strbuf_append_str(sb, "^\n");
-                    Item result = assert_make_string_n(sb->str, sb->length);
-                    strbuf_free(sb);
+                    Item result = assert_take_string(sb);
                     // Same-length string diffs keep the first differing column
                     // visible; the compact !== form loses that invariant.
                     return result;
@@ -918,9 +914,7 @@ static Item js_assert_strict_equal_message(Item actual, Item expected) {
             strbuf_append_str(sb, " !== ");
             strbuf_append_str_n(sb, es->chars, es->len);
             strbuf_append_str(sb, "\n");
-            Item result = assert_make_string_n(sb->str, sb->length);
-            strbuf_free(sb);
-            return result;
+            return assert_take_string(sb);
         }
     }
     StrBuf* sb = strbuf_new();
@@ -952,9 +946,7 @@ static Item js_assert_strict_equal_message(Item actual, Item expected) {
         // Arguments is backed by array storage internally; only the branded
         // opening line differs from an equivalent object in Node's ref diff.
         strbuf_append_str(sb, "  }\n");
-        Item result = assert_make_string_n(sb->str, sb->length);
-        strbuf_free(sb);
-        return result;
+        return assert_take_string(sb);
     }
     if (!js_assert_append_expanded_string_literal(sb, actual, "+ ", "+   ")) {
         if (get_type_id(actual) == LMD_TYPE_ARRAY || js_assert_is_arguments_value(actual) ||
@@ -992,9 +984,7 @@ static Item js_assert_strict_equal_message(Item actual, Item expected) {
     } else {
         strbuf_append_str(sb, "\n");
     }
-    Item result = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return assert_take_string(sb);
 }
 
 static Item js_assert_not_strict_equal_message(Item actual) {
@@ -1018,8 +1008,7 @@ static Item js_assert_not_strict_equal_message(Item actual) {
                 strbuf_append_str(sb, "\n");
             }
         }
-        Item result = assert_make_string_n(sb->str, sb->length);
-        strbuf_free(sb);
+        Item result = assert_take_string(sb);
         // notStrictEqual on the same object is an identity failure, not a
         // primitive inequality failure; Node exposes that distinction.
         return result;
@@ -1033,9 +1022,7 @@ static Item js_assert_not_strict_equal_message(Item actual) {
             StrBuf* one_line = strbuf_new();
             strbuf_append_str(one_line, "Expected \"actual\" to be strictly unequal to: ");
             strbuf_append_str_n(one_line, s->chars, s->len);
-            Item result = assert_make_string_n(one_line->str, one_line->length);
-            strbuf_free(one_line);
-            return result;
+            return assert_take_string(one_line);
         }
     }
     StrBuf* sb = strbuf_new();
@@ -1046,9 +1033,7 @@ static Item js_assert_not_strict_equal_message(Item actual) {
     } else {
         js_assert_append_string_literal(sb, actual);
     }
-    Item result = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return assert_take_string(sb);
 }
 
 static void js_assert_append_not_deep_value(StrBuf* sb, Item value, int depth_left) {
@@ -1082,9 +1067,7 @@ static Item js_assert_not_deep_equal_message(Item actual, Item expected, bool st
         js_assert_append_not_deep_value(sb, actual, 64);
         strbuf_append_str(sb, "\n\nshould not loosely deep-equal\n\n");
         js_assert_append_not_deep_value(sb, expected, 64);
-        Item result = assert_make_string_n(sb->str, sb->length);
-        strbuf_free(sb);
-        return result;
+        return assert_take_string(sb);
     }
     strbuf_append_str(sb, "Expected \"actual\" not to be ");
     strbuf_append_str(sb, strict ? "strictly deep-equal" : "loosely deep-equal");
@@ -1092,9 +1075,7 @@ static Item js_assert_not_deep_equal_message(Item actual, Item expected, bool st
     // notDeep* diagnostics need expanded arrays, while util.inspect's compact
     // default is one-line and fails Node's public AssertionError message shape.
     js_assert_append_not_deep_value(sb, actual, 64);
-    Item result = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return assert_take_string(sb);
 }
 
 static Item js_assert_legacy_equal_message(Item actual, Item expected, const char* op) {
@@ -1104,9 +1085,7 @@ static Item js_assert_legacy_equal_message(Item actual, Item expected, const cha
     strbuf_append_str(sb, op);
     strbuf_append_char(sb, ' ');
     js_assert_append_inspected_value(sb, expected);
-    Item result = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return assert_take_string(sb);
 }
 
 static Item js_assert_deep_equal_message(Item actual, Item expected) {
@@ -1115,9 +1094,7 @@ static Item js_assert_deep_equal_message(Item actual, Item expected) {
     js_assert_append_deep_equal_value(sb, actual);
     strbuf_append_str(sb, "\n\nshould loosely deep-equal\n\n");
     js_assert_append_deep_equal_value(sb, expected);
-    Item result = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return assert_take_string(sb);
 }
 
 static bool js_assert_deep_values_same(Item actual, Item expected) {
@@ -1191,9 +1168,7 @@ static void js_assert_append_property_value(StrBuf* sb, Item owner, Item key, It
 static bool js_assert_is_self_cycle_object(Item value) {
     if (!js_assert_is_plain_diff_object(value)) return false;
     Item keys = js_object_keys(value);
-    int64_t len = js_array_length(keys);
-    for (int64_t i = 0; i < len; i++) {
-        Item key = js_elements_get_int(keys, i);
+    JS_ARRAY_FOREACH(key, keys) {
         if (js_get_key_default(value, key).item == value.item) return true;
     }
     return false;
@@ -1763,9 +1738,7 @@ static Item js_assert_deep_strict_array_message(Item actual, Item expected) {
         Item actual_child = js_elements_get_int(actual, actual_len - 1);
         Item expected_child = js_elements_get_int(expected, expected_len - 1);
         Item child_keys = js_object_keys(actual_child);
-        int64_t child_key_len = js_array_length(child_keys);
-        for (int64_t key_index = 0; key_index < child_key_len; key_index++) {
-            Item child_key = js_elements_get_int(child_keys, key_index);
+        JS_ARRAY_FOREACH(child_key, child_keys) {
             if (!js_assert_has_own_property_key(expected_child, child_key)) continue;
             Item actual_value = js_get_key_default(actual_child, child_key);
             Item expected_value = js_get_key_default(expected_child, child_key);
@@ -1791,9 +1764,7 @@ static Item js_assert_deep_strict_array_message(Item actual, Item expected) {
                 strbuf_append_str(sb, "      ]\n");
                 strbuf_append_str(sb, "    }\n");
                 strbuf_append_str(sb, "  ]\n");
-                Item result = assert_make_string_n(sb->str, sb->length);
-                strbuf_free(sb);
-                return result;
+                return assert_take_string(sb);
             }
         }
     }
@@ -1837,9 +1808,7 @@ static Item js_assert_deep_strict_array_message(Item actual, Item expected) {
             strbuf_append_char(sb, '\n');
         }
         strbuf_append_str(sb, "  ]\n");
-        Item result = assert_make_string_n(sb->str, sb->length);
-        strbuf_free(sb);
-        return result;
+        return assert_take_string(sb);
     }
     StrBuf* sb = strbuf_new();
     strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
@@ -1851,9 +1820,7 @@ static Item js_assert_deep_strict_array_message(Item actual, Item expected) {
                       (js_assert_is_plain_diff_object(actual) &&
                        get_type_id(expected) == LMD_TYPE_ARRAY) ? 0 : 2;
     js_assert_append_structural_diff(sb, actual, expected, root_indent, false, 16);
-    Item result = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return assert_take_string(sb);
 }
 
 static bool js_assert_is_buffer_value(Item value) {
@@ -1925,9 +1892,7 @@ static Item js_assert_deep_strict_typed_array_message(Item actual, Item expected
             strbuf_append_char(prop, '\n');
         }
         strbuf_append_str(prop, "  ]\n");
-        Item result = assert_make_string_n(prop->str, prop->length);
-        strbuf_free(prop);
-        return result;
+        return assert_take_string(prop);
     }
 
     StrBuf* sb = strbuf_new();
@@ -1942,9 +1907,7 @@ static Item js_assert_deep_strict_typed_array_message(Item actual, Item expected
         strbuf_append_char(sb, '\n');
     }
     strbuf_append_str(sb, "  ]\n");
-    Item result = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return assert_take_string(sb);
 }
 
 static bool js_assert_is_date_value(Item value) {
@@ -2059,9 +2022,7 @@ static Item js_assert_deep_strict_class_message(Item actual, Item expected, bool
     strbuf_append_str(sb, "+ actual - expected\n\n");
     js_assert_append_class_value_with_props(sb, actual, "+ ", regexp);
     js_assert_append_class_value_with_props(sb, expected, "- ", regexp);
-    Item result = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return assert_take_string(sb);
 }
 
 static Item js_assert_deep_strict_map_message(Item actual, Item expected) {
@@ -2103,8 +2064,7 @@ static Item js_assert_deep_strict_map_message(Item actual, Item expected) {
             strbuf_append_str(sb, " => ");
             js_assert_append_inspected_value(sb, expected_value);
             strbuf_append_str(sb, "\n  }\n");
-            Item result = assert_make_string_n(sb->str, sb->length);
-            strbuf_free(sb);
+            Item result = assert_take_string(sb);
             // Map entries are internal slots; plain object diffing renders them
             // as {}, hiding key/value mismatches.
             return result;
@@ -2130,8 +2090,7 @@ static Item js_assert_deep_strict_object_message(Item actual, Item expected) {
         else js_assert_append_multiline_value(sb, actual, 0, '+', false, 16);
         if (expected_len == 0) strbuf_append_str(sb, "- {}\n");
         else js_assert_append_multiline_value(sb, expected, 0, '-', false, 16);
-        Item result = assert_make_string_n(sb->str, sb->length);
-        strbuf_free(sb);
+        Item result = assert_take_string(sb);
         // Empty-vs-populated object diffs must show the empty side as a value;
         // otherwise enumerable symbol keys on the populated side disappear.
         return result;
@@ -2168,9 +2127,7 @@ static Item js_assert_deep_strict_object_message(Item actual, Item expected) {
         strbuf_append_char(sb, '\n');
     }
     strbuf_append_str(sb, "  }\n");
-    Item result = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return assert_take_string(sb);
 }
 
 static Item js_assert_deep_strict_url_message(Item actual, Item expected) {
@@ -2188,9 +2145,7 @@ static Item js_assert_deep_strict_url_message(Item actual, Item expected) {
     strbuf_append_char(sb, '\n');
     // URL wrappers compare by canonical href; the fallback text hid the
     // differing URL and broke object-pattern message checks.
-    Item result = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return assert_take_string(sb);
 }
 
 static Item js_assert_deep_strict_structural_message(Item actual, Item expected) {
@@ -2208,9 +2163,7 @@ static Item js_assert_deep_strict_structural_message(Item actual, Item expected)
             // Very large object diffs are intentionally abbreviated; otherwise
             // symbol-heavy mismatches drown the useful assertion context.
             strbuf_append_str(sb, "  {\n    ...\n  }\n");
-            Item result = assert_make_string_n(sb->str, sb->length);
-            strbuf_free(sb);
-            return result;
+            return assert_take_string(sb);
         }
     }
     // Generic structural mismatches need a real diff instead of the fallback
@@ -2223,9 +2176,7 @@ static Item js_assert_deep_strict_structural_message(Item actual, Item expected)
                       (!js_assert_is_object_like_value(actual) ||
                        !js_assert_is_object_like_value(expected)) ? 0 : 2;
     js_assert_append_structural_diff(sb, actual, expected, root_indent, false, 16);
-    Item result = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return assert_take_string(sb);
 }
 
 static bool js_assert_has_own_key_early(Item object, const char* key) {
@@ -2333,16 +2284,12 @@ static Item js_assert_deep_strict_error_message(Item actual, Item expected) {
             js_assert_append_error_cause_value(sb, expected_value, "-   ");
             strbuf_append_str(sb, "\n- }\n");
         }
-        Item result = assert_make_string_n(sb->str, sb->length);
-        strbuf_free(sb);
-        return result;
+        return assert_take_string(sb);
     }
 
     Item actual_keys = js_object_keys(actual);
     Item expected_keys = js_object_keys(expected);
-    int64_t expected_len = js_array_length(expected_keys);
-    for (int64_t i = 0; i < expected_len; i++) {
-        Item key = js_elements_get_int(expected_keys, i);
+    JS_ARRAY_FOREACH(key, expected_keys) {
         if (js_assert_string_equals(key, "message") ||
                 js_assert_string_equals(key, "name") ||
                 js_assert_string_equals(key, "stack")) {
@@ -2375,9 +2322,7 @@ static Item js_assert_deep_strict_error_message(Item actual, Item expected) {
         strbuf_append_str(sb, ": ");
         js_assert_append_inspected_value(sb, expected_value);
         strbuf_append_str(sb, "\n  }\n");
-        Item result = assert_make_string_n(sb->str, sb->length);
-        strbuf_free(sb);
-        return result;
+        return assert_take_string(sb);
     }
     (void)actual_keys;
     return ItemNull;
@@ -2472,9 +2417,7 @@ static Item js_assert_ok_source_message(void) {
         }
     }
     strbuf_append_str(sb, "\n");
-    Item result = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return assert_take_string(sb);
 }
 
 // assert(value[, message]) / assert.ok(value[, message])
@@ -2550,8 +2493,7 @@ extern "C" Item js_assert_strictEqual(Item actual, Item expected, Item message) 
                 // can still inspect the failing values.
                 strbuf_append_str_n(sb, gs->chars + header_len, gs->len - header_len);
             }
-            Item custom = assert_make_string_n(sb->str, sb->length);
-            strbuf_free(sb);
+            Item custom = assert_take_string(sb);
             return throw_assertion_error_full_item(custom, actual, expected, "strictEqual", false);
         }
         return throw_assert_msg_or_auto_item(message,
@@ -2608,8 +2550,7 @@ extern "C" Item js_assert_deepStrictEqual(Item actual, Item expected, Item messa
                     // the primitive comparison suffix for strict-style asserts.
                     strbuf_append_str_n(sb, gs->chars + header_len, gs->len - header_len);
                 }
-                Item custom = assert_make_string_n(sb->str, sb->length);
-                strbuf_free(sb);
+                Item custom = assert_take_string(sb);
                 return throw_assertion_error_full_item(custom, actual, expected, "deepStrictEqual", false);
             }
         }
@@ -2651,8 +2592,7 @@ extern "C" Item js_assert_deepStrictEqual(Item actual, Item expected, Item messa
             } else if (sm) {
                 strbuf_append_str_n(rewritten, sm->chars, sm->len);
             }
-            Item deep_msg = assert_make_string_n(rewritten->str, rewritten->length);
-            strbuf_free(rewritten);
+            Item deep_msg = assert_take_string(rewritten);
             return throw_assert_deep_msg_or_auto_item(message,
                 deep_msg, actual, expected, "deepStrictEqual");
         }
@@ -2928,8 +2868,7 @@ static Item js_assert_throw_constructor_mismatch(Item thrown, Item expected_ctor
             strbuf_append_str_n(sb, ms->chars, ms->len);
         }
     }
-    Item msg = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
+    Item msg = assert_take_string(sb);
     return js_assert_throw_throws_assertion(msg, thrown, expected_ctor, true);
 }
 
@@ -2940,8 +2879,7 @@ static Item js_assert_throw_regex_mismatch(Item thrown, Item expected_regex) {
     strbuf_append_str(sb, ". Input:\n\n'");
     js_assert_append_item_text(sb, thrown);
     strbuf_append_str(sb, "'\n");
-    Item msg = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
+    Item msg = assert_take_string(sb);
     return js_assert_throw_throws_assertion(msg, thrown, expected_regex, true);
 }
 
@@ -3154,8 +3092,7 @@ static Item js_assert_throw_object_pattern_mismatch(Item thrown, Item expected) 
         strbuf_append_str(plain, "+ actual - expected\n\n");
         js_assert_append_multiline_value(plain, thrown, 0, '+', false, 16);
         js_assert_append_multiline_value(plain, expected, 0, '-', false, 16);
-        Item plain_msg = assert_make_string_n(plain->str, plain->length);
-        strbuf_free(plain);
+        Item plain_msg = assert_take_string(plain);
         // Primitive thrown values cannot be compared as property bags; Node
         // renders them against the expected pattern object directly.
         return js_assert_throw_throws_assertion(plain_msg, thrown, expected, true);
@@ -3262,8 +3199,7 @@ static Item js_assert_throw_object_pattern_mismatch(Item thrown, Item expected) 
         sb->length--;
     }
     strbuf_append_str(sb, "  }\n");
-    Item msg = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
+    Item msg = assert_take_string(sb);
     // Object-pattern mismatches synthesize assert.throws() diagnostics; without
     // a user message they remain generated AssertionErrors in Node.
     return js_assert_throw_throws_assertion(msg, thrown, expected, true);
@@ -3343,8 +3279,7 @@ extern "C" Item js_assert_module_throws(Item fn, Item error_expected, Item messa
         Item thrown_text = js_to_string_val(thrown);
         String* ts = get_type_id(thrown_text) == LMD_TYPE_STRING ? it2s(thrown_text) : NULL;
         if (ts) strbuf_append_str_n(sb, ts->chars, ts->len);
-        Item msg = assert_make_string_n(sb->str, sb->length);
-        strbuf_free(sb);
+        Item msg = assert_take_string(sb);
         // Validator callbacks only pass on literal true; truthy objects must
         // surface as assert.throws() failures instead of accepting bad validators.
         return js_assert_throw_throws_assertion(msg, thrown, error_expected, true);
@@ -3375,8 +3310,7 @@ extern "C" Item js_assert_module_throws(Item fn, Item error_expected, Item messa
                 strbuf_append_str(primitive_msg, "\n+ actual - expected\n\n");
                 js_assert_append_multiline_value(primitive_msg, thrown, 0, '+', false, 16);
                 js_assert_append_multiline_value(primitive_msg, error_expected, 0, '-', false, 16);
-                Item msg = assert_make_string_n(primitive_msg->str, primitive_msg->length);
-                strbuf_free(primitive_msg);
+                Item msg = assert_take_string(primitive_msg);
                 // Primitive throws have no property surface; user messages
                 // prefix the generated value-vs-pattern diff instead.
                 return js_assert_throw_throws_assertion(msg, thrown, error_expected, false);
@@ -3571,9 +3505,7 @@ static Item js_assert_ifError_message(Item value) {
     StrBuf* sb = strbuf_new();
     strbuf_append_str(sb, "ifError got unwanted exception: ");
     if (ds) strbuf_append_str_n(sb, ds->chars, ds->len);
-    Item message = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
-    return message;
+    return assert_take_string(sb);
 }
 
 extern "C" Item js_assert_ifError(Item value) {
@@ -3642,9 +3574,7 @@ static Item js_assert_match_default_message(Item string_val, Item regexp, const 
     // own line; the compact operator form loses Node's message contract.
     js_assert_append_inspected_value(sb, string_val);
     strbuf_append_char(sb, '\n');
-    Item result = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return assert_take_string(sb);
 }
 
 static Item js_assert_match_compact_default_message(Item string_val, Item regexp, const char* op) {
@@ -3654,9 +3584,7 @@ static Item js_assert_match_compact_default_message(Item string_val, Item regexp
     strbuf_append_str(sb, op);
     strbuf_append_char(sb, ' ');
     js_assert_append_item_text(sb, regexp);
-    Item result = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return assert_take_string(sb);
 }
 
 static Item js_assert_match_message_or_default(Item message, Item string_val, Item regexp, const char* op) {
@@ -3706,8 +3634,7 @@ static Item js_assert_match_invalid_string(Item string_val, Item regexp, const c
         js_assert_append_value_type(received, sizeof(received), string_val);
         strbuf_append_str(sb, received);
     }
-    Item msg = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
+    Item msg = assert_take_string(sb);
     return throw_assertion_error_full_item(msg, string_val, regexp, op, true);
 }
 
@@ -3806,9 +3733,7 @@ static Item js_assert_enumerable_own_keys(Item object) {
 
     Item symbols = js_object_get_own_property_symbols(object);
     if (get_type_id(symbols) == LMD_TYPE_ARRAY) {
-        int64_t sym_count = js_array_length(symbols);
-        for (int64_t i = 0; i < sym_count; i++) {
-            Item key = js_elements_get_int(symbols, i);
+        JS_ARRAY_FOREACH(key, symbols) {
             Item desc = js_object_get_own_property_descriptor(object, key);
             if (js_descriptor_is_enumerable(desc)) {
                 js_array_push(result, key);
@@ -3834,9 +3759,7 @@ static Item js_assert_enumerable_own_keys(Item object) {
 
 static Item js_assert_filter_keys(Item keys, bool want_index_keys) {
     Item result = js_array_new(0);
-    int64_t key_count = js_array_length(keys);
-    for (int64_t i = 0; i < key_count; i++) {
-        Item key = js_elements_get_int(keys, i);
+    JS_ARRAY_FOREACH(key, keys) {
         if (js_assert_key_is_array_index(key) == want_index_keys) {
             js_array_push(result, key);
         }
@@ -4086,7 +4009,6 @@ static bool js_assert_partial_key_subset_match(Item actual, Item expected,
         Item actual_keys, Item expected_keys,
         int64_t actual_index, int64_t expected_index, int depth_left,
         JsObjectPairTraversal* ctx, bool exact_only) {
-    (void)exact_only;
     Item expected_key = js_elements_get_int(expected_keys, expected_index);
     Item actual_key = js_elements_get_int(actual_keys, actual_index);
     return js_assert_partial_deep_match_impl(
@@ -4098,7 +4020,6 @@ static bool js_assert_partial_named_key_subset_match(Item actual, Item expected,
         Item actual_keys, Item expected_keys, int64_t actual_index,
         int64_t expected_index, int depth_left, JsObjectPairTraversal* ctx,
         bool exact_only) {
-    (void)exact_only;
     Item actual_key = js_elements_get_int(actual_keys, actual_index);
     Item expected_key = js_elements_get_int(expected_keys, expected_index);
     if (!js_assert_same_property_key(actual_key, expected_key)) return false;
@@ -4162,7 +4083,6 @@ static bool js_assert_partial_set_subset_match(Item actual, Item expected,
         Item actual_values, Item expected_values, int64_t actual_index,
         int64_t expected_index, int depth_left, JsObjectPairTraversal* ctx,
         bool exact_only) {
-    (void)actual;
     (void)expected;
     Item actual_value = js_elements_get_int(actual_values, actual_index);
     Item expected_value = js_elements_get_int(expected_values, expected_index);
@@ -4175,7 +4095,6 @@ static bool js_assert_partial_map_subset_match(Item actual, Item expected,
         Item actual_entries, Item expected_entries, int64_t actual_index,
         int64_t expected_index, int depth_left, JsObjectPairTraversal* ctx,
         bool exact_only) {
-    (void)actual;
     (void)expected;
     (void)exact_only;
     Item actual_pair = js_elements_get_int(actual_entries, actual_index);
@@ -4403,9 +4322,7 @@ static bool js_assert_append_first_partial_object_diff(StrBuf* sb, Item actual, 
         return false;
     }
     Item keys = js_object_keys(expected);
-    int64_t key_len = js_array_length(keys);
-    for (int64_t i = 0; i < key_len; i++) {
-        Item key = js_elements_get_int(keys, i);
+    JS_ARRAY_FOREACH(key, keys) {
         Item actual_value = js_get_key_default(actual, key);
         Item expected_value = js_get_key_default(expected, key);
         if (js_assert_partial_deep_match(actual_value, expected_value, 16)) continue;
@@ -4464,9 +4381,7 @@ static Item js_assert_partial_diff_message(Item message, Item actual, Item expec
         strbuf_append_str(sb, "Expected values to be partially deep-strict-equal");
     }
     if (!append_structured_diff) {
-        Item result = assert_make_string_n(sb->str, sb->length);
-        strbuf_free(sb);
-        return result;
+        return assert_take_string(sb);
     }
     strbuf_append_str(sb, "\n+ actual - expected\n\n");
     if (!js_assert_append_first_partial_object_diff(sb, actual, expected)) {
@@ -4476,9 +4391,7 @@ static Item js_assert_partial_diff_message(Item message, Item actual, Item expec
         js_assert_append_inspected_value(sb, expected);
         strbuf_append_str(sb, "\n");
     }
-    Item result = assert_make_string_n(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return assert_take_string(sb);
 }
 
 // assert.partialDeepStrictEqual(actual, expected[, message])
@@ -4744,7 +4657,6 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
 }
 
 static Item js_assert_rejects_on_fulfilled_with_env(Item env_item, Item value) {
-    (void)value;
     Item* env = (Item*)(uintptr_t)env_item.item;
     Item error_expected = env ? env[0] : make_js_undefined();
     return js_throw_value(js_assert_missing_rejection_error(error_expected));
@@ -4806,9 +4718,7 @@ extern "C" Item js_assert_rejects(Item asyncFnOrPromise, Item error_expected, It
         return js_assert_reject_with_error(js_assert_make_invalid_arg_type_error(asyncFnOrPromise));
     }
 
-    Item* reject_env = js_alloc_env(2);
-    reject_env[0] = error_expected;
-    reject_env[1] = message;
+    Item* reject_env = js_alloc_env2(error_expected, message);
     Item on_fulfilled = js_new_native_closure(js_assert_rejects_on_fulfilled_with_env, 1, reject_env, 2);
     Item on_rejected = js_new_native_closure(js_assert_rejects_on_rejected, 1, reject_env, 2);
     return js_promise_then(promise, on_fulfilled, on_rejected);
@@ -4843,9 +4753,7 @@ extern "C" Item js_assert_doesNotReject(Item asyncFnOrPromise, Item error_expect
         return js_assert_reject_with_error(js_assert_make_invalid_arg_type_error(asyncFnOrPromise));
     }
 
-    Item* reject_env = js_alloc_env(2);
-    reject_env[0] = error_expected;
-    reject_env[1] = message;
+    Item* reject_env = js_alloc_env2(error_expected, message);
     Item on_fulfilled = js_new_native_function(js_assert_noop);
     Item on_rejected = js_new_native_closure(js_assert_doesNotReject_on_rejected, 1, reject_env, 2);
     return js_promise_then(promise, on_fulfilled, on_rejected);
@@ -5235,7 +5143,6 @@ void js_assert_mock_registry_destroy(JsAssertMockRegistry* registry) {
 
 static Item js_mock_wrapper_body(Item wrapper, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    (void)this_value;
     (void)result_home;
     JsAssertMockSlot* slot = mock_slot_from_wrapper(wrapper);
     Item* calls = mock_slot_value(slot, 0);
@@ -5326,7 +5233,6 @@ extern "C" void js_mock_scheduler_reset(void);
 extern "C" void js_mock_scheduler_tick(Item delay);
 
 static Item js_mock_timers_enable_impl(Item options) {
-    (void)options;
     // The current node:test mock timer surface only virtualizes scheduler.wait;
     // leaving it as a stub makes official tests wait for real 9999ms timers.
     js_mock_scheduler_enable();
@@ -5754,9 +5660,7 @@ static Item js_node_test_run_files(Item options) {
     if (get_type_id(options) == LMD_TYPE_MAP) {
         Item files = js_get_key_cstr(options, "files");
         if (get_type_id(files) == LMD_TYPE_ARRAY) {
-            int64_t len = js_array_length(files);
-            for (int64_t i = 0; i < len; i++) {
-                Item file = js_elements_get_int(files, i);
+            JS_ARRAY_FOREACH(file, files) {
                 if (get_type_id(file) != LMD_TYPE_STRING) continue;
                 Item require_result = js_require(file);
                 js_microtask_flush();

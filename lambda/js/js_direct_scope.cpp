@@ -11,14 +11,14 @@ namespace {
 
 static bool direct_is_function(const JsAstNode* node) {
     if (!node) return false;
-    return node->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
-        node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-        node->node_type == JS_AST_NODE_ARROW_FUNCTION;
+    return node->node_type == AST_NODE_FUNC ||
+        node->node_type == AST_NODE_FUNC_EXPR ||
+        node->node_type == AST_NODE_ARROW_FUNC;
 }
 
 static bool direct_is_class(const JsAstNode* node) {
-    return node && (node->node_type == JS_AST_NODE_CLASS_DECLARATION ||
-        node->node_type == JS_AST_NODE_CLASS_EXPRESSION);
+    return node && (node->node_type == AST_NODE_CLASS ||
+        node->node_type == AST_NODE_CLASS_EXPR);
 }
 
 static void direct_walk_node(JsTranspiler* tp, JsAstNode* node);
@@ -56,7 +56,7 @@ static void direct_define_import_bindings(JsTranspiler* tp,
             import_node->namespace_name, import_node->namespace_entry);
     }
     for (JsAstNode* spec = import_node->specifiers; spec; spec = spec->next) {
-        if (spec->node_type != JS_AST_NODE_IMPORT_SPECIFIER) continue;
+        if (spec->node_type != AST_NODE_IMPORT_SPECIFIER) continue;
         JsImportSpecifierNode* import_spec = (JsImportSpecifierNode*)spec;
         if (import_spec->local_name) {
             import_spec->local_entry = js_scope_define(tp,
@@ -115,7 +115,7 @@ static void direct_walk_pattern(DirectPatternWalk walk, JsAstNode* pattern) {
         return;
     }
     switch (pattern->node_type) {
-    case JS_AST_NODE_IDENTIFIER: {
+    case AST_NODE_IDENT: {
         JsIdentifierNode* id = (JsIdentifierNode*)pattern;
         if (walk.mode == DIRECT_PATTERN_BIND) {
             NameEntry* entry = js_scope_lookup_current(walk.tp, id->name);
@@ -139,7 +139,7 @@ static void direct_walk_pattern(DirectPatternWalk walk, JsAstNode* pattern) {
                 JsIdentifierNode* placeholder = (JsIdentifierNode*)pool_alloc(
                     walk.tp->pool, sizeof(JsIdentifierNode));
                 memset(placeholder, 0, sizeof(JsIdentifierNode));
-                placeholder->node_type = JS_AST_NODE_IDENTIFIER;
+                placeholder->node_type = AST_NODE_IDENT;
                 placeholder->source_span = walk.declarator_owner->source_span;
                 placeholder->name = id->name;
                 placeholder->type = &TYPE_ANY;
@@ -154,7 +154,7 @@ static void direct_walk_pattern(DirectPatternWalk walk, JsAstNode* pattern) {
         }
         break;
     }
-    case JS_AST_NODE_ASSIGNMENT_PATTERN: {
+    case AST_NODE_ASSIGN_PATTERN: {
         DirectPatternWalk child = walk;
         child.owner = NULL;
         direct_walk_pattern(child, ((JsAssignmentPatternNode*)pattern)->left);
@@ -164,22 +164,22 @@ static void direct_walk_pattern(DirectPatternWalk walk, JsAstNode* pattern) {
         }
         break;
     }
-    case JS_AST_NODE_REST_ELEMENT:
-    case JS_AST_NODE_REST_PROPERTY:
-    case JS_AST_NODE_SPREAD_ELEMENT: {
+    case AST_NODE_REST_ELEMENT:
+    case AST_NODE_REST_PROPERTY:
+    case AST_NODE_SPREAD: {
         if (walk.mode == DIRECT_PATTERN_BIND &&
-                pattern->node_type == JS_AST_NODE_SPREAD_ELEMENT) break;
+                pattern->node_type == AST_NODE_SPREAD) break;
         DirectPatternWalk child = walk;
         child.owner = NULL;
         if (walk.mode == DIRECT_PATTERN_DEFINE &&
-                (pattern->node_type == JS_AST_NODE_REST_PROPERTY ||
-                 pattern->node_type == JS_AST_NODE_SPREAD_ELEMENT)) {
+                (pattern->node_type == AST_NODE_REST_PROPERTY ||
+                 pattern->node_type == AST_NODE_SPREAD)) {
             child.rest_binding = true;
         }
         direct_walk_pattern(child, ((JsSpreadElementNode*)pattern)->argument);
         break;
     }
-    case JS_AST_NODE_ARRAY_PATTERN: {
+    case AST_NODE_ARRAY_PATTERN: {
         for (JsAstNode* item = ((JsArrayPatternNode*)pattern)->elements;
                 item; item = item->next) {
             DirectPatternWalk child = walk;
@@ -189,19 +189,19 @@ static void direct_walk_pattern(DirectPatternWalk walk, JsAstNode* pattern) {
         }
         break;
     }
-    case JS_AST_NODE_OBJECT_PATTERN: {
+    case AST_NODE_MAP_PATTERN: {
         for (JsAstNode* item = ((JsObjectPatternNode*)pattern)->properties;
                 item; item = item->next) {
             DirectPatternWalk child = walk;
             child.owner = NULL;
             if (walk.mode == DIRECT_PATTERN_DEFINE) child.rest_binding = false;
-            if (item->node_type == JS_AST_NODE_PROPERTY) {
+            if (item->node_type == AST_NODE_PROPERTY) {
                 JsPropertyNode* property = (JsPropertyNode*)item;
                 if (walk.mode == DIRECT_PATTERN_BIND ||
                         walk.mode == DIRECT_PATTERN_ASSIGNMENT) {
                     if (property->computed) direct_walk_node(walk.tp, property->key);
                     else if (property->key && property->key->node_type ==
-                            JS_AST_NODE_IDENTIFIER) {
+                            AST_NODE_IDENT) {
                         JsIdentifierNode* key = (JsIdentifierNode*)property->key;
                         key->entry = NULL;
                         key->type = &TYPE_ANY;
@@ -253,7 +253,7 @@ static void direct_define_variable(JsTranspiler* tp,
     JsVarKind kind = (JsVarKind)declaration->kind;
     for (JsAstNode* item = declaration->declarations; item;
             item = item->next) {
-        if (item->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+        if (item->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
         JsVariableDeclaratorNode* declarator =
             (JsVariableDeclaratorNode*)item;
         direct_define_pattern(tp, declarator->id, kind, item, item, false);
@@ -328,7 +328,7 @@ static void direct_define_function(JsTranspiler* tp, JsFunctionNode* function,
         tp->pool, sizeof(JsIdentifierNode));
     if (!placeholder) return;
     memset(placeholder, 0, sizeof(JsIdentifierNode));
-    placeholder->node_type = JS_AST_NODE_IDENTIFIER;
+    placeholder->node_type = AST_NODE_IDENT;
     placeholder->source_span = function->source_span;
     placeholder->name = function->name;
     placeholder->type = &TYPE_FUNC;
@@ -341,28 +341,28 @@ static void direct_define_function(JsTranspiler* tp, JsFunctionNode* function,
 
 static void direct_predeclare_one(JsTranspiler* tp, JsAstNode* node) {
     if (!tp || !node) return;
-    if (node->node_type == JS_AST_NODE_EXPORT_DECLARATION) {
+    if (node->node_type == AST_NODE_EXPORT) {
         direct_predeclare_one(tp, ((JsExportNode*)node)->declaration);
         return;
     }
-    if (node->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+    if (node->node_type == AST_NODE_VAR_STAM) {
         JsVariableDeclarationNode* declaration =
             (JsVariableDeclarationNode*)node;
         if (declaration->kind != JS_VAR_VAR) direct_define_variable(tp,
             declaration);
         return;
     }
-    if (node->node_type == JS_AST_NODE_IMPORT_DECLARATION) {
+    if (node->node_type == AST_NODE_IMPORT) {
         direct_define_import_bindings(tp, (JsImportNode*)node);
         return;
     }
-    if (node->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+    if (node->node_type == AST_NODE_FUNC) {
         direct_define_function(tp, (JsFunctionNode*)node,
             tp->current_scope && tp->current_scope->kind == SCOPE_KIND_BLOCK
                 ? JS_SCOPE_BLOCK : JS_SCOPE_FUNCTION);
         return;
     }
-    if (node->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+    if (node->node_type == AST_NODE_CLASS) {
         JsClassNode* class_node = (JsClassNode*)node;
         if (class_node->name) {
             class_node->outer_entry = js_scope_define(tp, class_node->name,
@@ -377,21 +377,21 @@ static void direct_predeclare_scope(JsTranspiler* tp, JsAstNode* node) {
     // including while earlier sibling initializers are being constructed.
     for (JsAstNode* item = node; item; item = item->next) {
         JsAstNode* declaration = item;
-        if (item->node_type == JS_AST_NODE_EXPORT_DECLARATION) {
+        if (item->node_type == AST_NODE_EXPORT) {
             declaration = ((JsExportNode*)item)->declaration;
         }
         if (declaration && declaration->node_type ==
-                JS_AST_NODE_FUNCTION_DECLARATION) {
+                AST_NODE_FUNC) {
             direct_predeclare_one(tp, item);
         }
     }
     for (JsAstNode* item = node; item; item = item->next) {
         JsAstNode* declaration = item;
-        if (item->node_type == JS_AST_NODE_EXPORT_DECLARATION) {
+        if (item->node_type == AST_NODE_EXPORT) {
             declaration = ((JsExportNode*)item)->declaration;
         }
         if (declaration && declaration->node_type ==
-                JS_AST_NODE_FUNCTION_DECLARATION) continue;
+                AST_NODE_FUNC) continue;
         direct_predeclare_one(tp, item);
     }
 }
@@ -408,9 +408,9 @@ static void direct_predeclare_var_node(JsTranspiler* tp, JsAstNode* node) {
     if (!tp || !node) return;
     // Nested callable/class bodies have their own var scope.
     if (direct_is_function(node) ||
-            node->node_type == JS_AST_NODE_METHOD_DEFINITION ||
+            node->node_type == AST_NODE_METHOD ||
             direct_is_class(node)) return;
-    if (node->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+    if (node->node_type == AST_NODE_VAR_STAM) {
         JsVariableDeclarationNode* declaration =
             (JsVariableDeclarationNode*)node;
         if (declaration->kind == JS_VAR_VAR) {
@@ -433,7 +433,7 @@ static void direct_walk_function(JsTranspiler* tp, JsFunctionNode* function,
     if (!tp || !function) return;
     JsScope* parent = tp->current_scope;
     JsScope* name_scope = NULL;
-    if (!method && function->node_type == JS_AST_NODE_FUNCTION_EXPRESSION &&
+    if (!method && function->node_type == AST_NODE_FUNC_EXPR &&
             function->name) {
         // A named function expression resolves its name through an immutable
         // environment outside the ordinary function environment.
@@ -476,7 +476,7 @@ static void direct_walk_function(JsTranspiler* tp, JsFunctionNode* function,
         direct_walk_pattern_defaults(tp, parameter);
     }
     direct_predeclare_vars(tp, function->body);
-    if (function->body && function->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+    if (function->body && function->body->node_type == AST_NODE_BLOCK) {
         direct_walk_block(tp, (JsBlockNode*)function->body, JS_SCOPE_BLOCK, true);
     } else {
         direct_walk_node(tp, (JsAstNode*)function->body);
@@ -503,11 +503,11 @@ static void direct_walk_variable(JsTranspiler* tp,
     if (!declaration) return;
     for (JsAstNode* item = declaration->declarations; item;
             item = item->next) {
-        if (item->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+        if (item->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
         JsVariableDeclaratorNode* declarator =
             (JsVariableDeclaratorNode*)item;
         JsAstNode* owner = declarator->id &&
-            declarator->id->node_type == JS_AST_NODE_IDENTIFIER ? item : NULL;
+            declarator->id->node_type == AST_NODE_IDENT ? item : NULL;
         direct_bind_pattern(tp, declarator->id,
             (JsVarKind)declaration->kind, owner, false, false);
         direct_walk_node(tp, declarator->init);
@@ -554,11 +554,11 @@ static void direct_walk_for_of(JsTranspiler* tp, JsForOfNode* loop) {
     if (!scope) return;
     loop->vars = scope;
     js_scope_push(tp, scope);
-    if (loop->left && loop->left->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+    if (loop->left && loop->left->node_type == AST_NODE_VAR_STAM) {
         direct_walk_node(tp, loop->left);
     } else if (loop->declares_binding) {
         direct_bind_pattern(tp, loop->left, (JsVarKind)loop->kind, NULL,
-            false, loop->node_type == JS_AST_NODE_FOR_IN_STATEMENT);
+            false, loop->node_type == AST_NODE_FOR_IN_STAM);
         direct_walk_pattern_defaults(tp, loop->left);
     } else {
         direct_walk_node(tp, loop->left);
@@ -574,7 +574,7 @@ static void direct_walk_catch(JsTranspiler* tp, JsCatchNode* handler) {
     // Annex B.3.5 allows the handler's simple BindingIdentifier to share its
     // var region; destructured catch parameters must reject that redeclaration.
     scope->allows_legacy_var_redeclaration = handler->param &&
-        handler->param->node_type == JS_AST_NODE_IDENTIFIER;
+        handler->param->node_type == AST_NODE_IDENT;
     handler->vars = scope;
     js_scope_push(tp, scope);
     direct_bind_pattern(tp, handler->param, JS_VAR_LET, NULL, false, false);
@@ -593,12 +593,12 @@ static void direct_walk_switch(JsTranspiler* tp, JsSwitchNode* switched) {
     switched->vars = scope;
     js_scope_push(tp, scope);
     for (JsAstNode* item = switched->cases; item; item = item->next) {
-        if (item->node_type != JS_AST_NODE_SWITCH_CASE) continue;
+        if (item->node_type != AST_NODE_MATCH_ARM) continue;
         JsSwitchCaseNode* case_node = (JsSwitchCaseNode*)item;
         direct_predeclare_scope(tp, case_node->consequent);
     }
     for (JsAstNode* item = switched->cases; item; item = item->next) {
-        if (item->node_type != JS_AST_NODE_SWITCH_CASE) continue;
+        if (item->node_type != AST_NODE_MATCH_ARM) continue;
         JsSwitchCaseNode* case_node = (JsSwitchCaseNode*)item;
         direct_walk_node(tp, case_node->test);
         direct_walk_list(tp, case_node->consequent);
@@ -609,7 +609,7 @@ static void direct_walk_switch(JsTranspiler* tp, JsSwitchNode* switched) {
 static void direct_walk_class(JsTranspiler* tp, JsClassNode* class_node) {
     JsScope* saved = tp->current_scope;
     Type* saved_class_type = class_node->type;
-    bool class_expression = class_node->node_type == JS_AST_NODE_CLASS_EXPRESSION;
+    bool class_expression = class_node->node_type == AST_NODE_CLASS_EXPR;
     if (class_node->name) {
         JsScope* scope = js_scope_create(tp, JS_SCOPE_BLOCK, saved);
         if (!scope) return;
@@ -628,7 +628,7 @@ static void direct_walk_class(JsTranspiler* tp, JsClassNode* class_node) {
     }
     direct_walk_node(tp, class_node->superclass);
     if (class_node->body &&
-            class_node->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+            class_node->body->node_type == AST_NODE_BLOCK) {
         // class bodies do not contribute an executable lexical block; method
         // scopes are children of the class-expression scope when one exists.
         direct_walk_list(tp, ((JsBlockNode*)class_node->body)->statements);
@@ -641,7 +641,7 @@ static void direct_walk_property(JsTranspiler* tp, JsPropertyNode* property) {
     if (!property) return;
     if (property->computed) direct_walk_node(tp, property->key);
     else if (property->key &&
-            property->key->node_type == JS_AST_NODE_IDENTIFIER) {
+            property->key->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* key = (JsIdentifierNode*)property->key;
         if (property->shorthand) {
             direct_walk_node(tp, property->value);
@@ -662,24 +662,24 @@ static void direct_walk_property(JsTranspiler* tp, JsPropertyNode* property) {
 static void direct_walk_node(JsTranspiler* tp, JsAstNode* node) {
     if (!tp || !node) return;
     switch ((int)node->node_type) {
-    case JS_AST_NODE_PROGRAM: {
+    case AST_SCRIPT: {
         JsProgramNode* program = (JsProgramNode*)node;
         direct_predeclare_vars(tp, program->body);
         direct_predeclare_scope(tp, program->body);
         direct_walk_list(tp, program->body);
         break;
     }
-    case JS_AST_NODE_BLOCK_STATEMENT:
+    case AST_NODE_BLOCK:
         direct_walk_block(tp, (JsBlockNode*)node, JS_SCOPE_BLOCK, false);
         break;
-    case JS_AST_NODE_IDENTIFIER:
+    case AST_NODE_IDENT:
         direct_set_identifier(tp, (JsIdentifierNode*)node,
             js_scope_lookup(tp, ((JsIdentifierNode*)node)->name));
         break;
-    case JS_AST_NODE_VARIABLE_DECLARATION:
+    case AST_NODE_VAR_STAM:
         direct_walk_variable(tp, (JsVariableDeclarationNode*)node);
         break;
-    case JS_AST_NODE_VARIABLE_DECLARATOR: {
+    case AST_NODE_VARIABLE_DECLARATOR: {
         JsVariableDeclaratorNode* declarator =
             (JsVariableDeclaratorNode*)node;
         direct_walk_node(tp, declarator->init);
@@ -687,14 +687,14 @@ static void direct_walk_node(JsTranspiler* tp, JsAstNode* node) {
             : &TYPE_NULL;
         break;
     }
-    case JS_AST_NODE_BINARY_EXPRESSION: {
+    case AST_NODE_BINARY: {
         JsBinaryNode* binary = (JsBinaryNode*)node;
         direct_walk_node(tp, binary->left);
         direct_walk_node(tp, binary->right);
         refresh_js_binary_type(tp, (JsBinaryNode*)node);
         break;
     }
-    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+    case AST_NODE_CONDITIONAL_EXPR: {
         JsConditionalNode* conditional = (JsConditionalNode*)node;
         direct_walk_node(tp, conditional->test);
         direct_walk_node(tp, conditional->consequent);
@@ -702,14 +702,14 @@ static void direct_walk_node(JsTranspiler* tp, JsAstNode* node) {
         refresh_js_conditional_type(tp, conditional);
         break;
     }
-    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+    case AST_NODE_ASSIGN: {
         JsAssignmentNode* assignment = (JsAssignmentNode*)node;
         direct_walk_node(tp, assignment->left);
         direct_walk_node(tp, assignment->right);
         refresh_js_assignment_type(assignment);
         break;
     }
-    case JS_AST_NODE_EXPRESSION_STATEMENT: {
+    case AST_NODE_EXPR_STMT: {
         JsExpressionStatementNode* statement =
             (JsExpressionStatementNode*)node;
         direct_walk_node(tp, statement->expression);
@@ -720,21 +720,21 @@ static void direct_walk_node(JsTranspiler* tp, JsAstNode* node) {
         }
         break;
     }
-    case JS_AST_NODE_RETURN_STATEMENT: {
+    case AST_NODE_RETURN_STAM: {
         JsReturnNode* result = (JsReturnNode*)node;
         direct_walk_node(tp, result->argument);
         result->type = result->argument ? result->argument->type : &TYPE_NULL;
         break;
     }
-    case JS_AST_NODE_FUNCTION_DECLARATION:
-    case JS_AST_NODE_FUNCTION_EXPRESSION:
-    case JS_AST_NODE_ARROW_FUNCTION:
+    case AST_NODE_FUNC:
+    case AST_NODE_FUNC_EXPR:
+    case AST_NODE_ARROW_FUNC:
         direct_walk_function(tp, (JsFunctionNode*)node, false);
         break;
-    case JS_AST_NODE_METHOD_DEFINITION: {
+    case AST_NODE_METHOD: {
         JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)node;
         if (method->computed) direct_walk_node(tp, method->key);
-        else if (method->key && method->key->node_type == JS_AST_NODE_IDENTIFIER) {
+        else if (method->key && method->key->node_type == AST_NODE_IDENT) {
             JsIdentifierNode* key = (JsIdentifierNode*)method->key;
             key->entry = NULL;
             key->type = NULL;
@@ -745,7 +745,7 @@ static void direct_walk_node(JsTranspiler* tp, JsAstNode* node) {
     case JS_AST_NODE_STATIC_BLOCK: {
         JsStaticBlockNode* static_block = (JsStaticBlockNode*)node;
         if (static_block->body && static_block->body->node_type ==
-                JS_AST_NODE_BLOCK_STATEMENT) {
+                AST_NODE_BLOCK) {
             // A static block has a fresh function-like var environment; its
             // var declarations must not escape to the class or script scope.
             direct_walk_block(tp, (JsBlockNode*)static_block->body,
@@ -755,35 +755,35 @@ static void direct_walk_node(JsTranspiler* tp, JsAstNode* node) {
         }
         break;
     }
-    case JS_AST_NODE_CLASS_DECLARATION:
-    case JS_AST_NODE_CLASS_EXPRESSION:
+    case AST_NODE_CLASS:
+    case AST_NODE_CLASS_EXPR:
         direct_walk_class(tp, (JsClassNode*)node);
         break;
-    case JS_AST_NODE_PROPERTY:
+    case AST_NODE_PROPERTY:
         direct_walk_property(tp, (JsPropertyNode*)node);
         break;
-    case JS_AST_NODE_MEMBER_EXPRESSION: {
+    case AST_NODE_MEMBER_EXPR: {
         JsMemberNode* member = (JsMemberNode*)node;
         direct_walk_node(tp, member->object);
         if (member->computed) direct_walk_node(tp, member->property);
         else if (member->property &&
-                member->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                member->property->node_type == AST_NODE_IDENT) {
             JsIdentifierNode* property = (JsIdentifierNode*)member->property;
             property->entry = NULL;
             property->type = &TYPE_ANY;
         }
         break;
     }
-    case JS_AST_NODE_ASSIGNMENT_PATTERN:
-    case JS_AST_NODE_ARRAY_PATTERN:
-    case JS_AST_NODE_OBJECT_PATTERN:
+    case AST_NODE_ASSIGN_PATTERN:
+    case AST_NODE_ARRAY_PATTERN:
+    case AST_NODE_MAP_PATTERN:
         direct_walk_assignment_pattern(tp, node);
         break;
-    case JS_AST_NODE_PARAMETER:
+    case AST_NODE_PARAM:
         direct_bind_pattern(tp, node, JS_VAR_VAR, NULL, true, false);
         direct_walk_pattern_defaults(tp, node);
         break;
-    case JS_AST_NODE_IF_STATEMENT: {
+    case AST_NODE_IF_EXPR: {
         JsIfNode* conditional = (JsIfNode*)node;
         direct_walk_node(tp, conditional->test);
         conditional->consequent_vars = NULL;
@@ -794,41 +794,41 @@ static void direct_walk_node(JsTranspiler* tp, JsAstNode* node) {
             &conditional->alternate_vars);
         break;
     }
-    case JS_AST_NODE_FOR_STATEMENT:
+    case AST_NODE_LOOP:
         direct_walk_for(tp, (JsForNode*)node);
         break;
-    case JS_AST_NODE_FOR_IN_STATEMENT:
-    case JS_AST_NODE_FOR_OF_STATEMENT:
+    case AST_NODE_FOR_IN_STAM:
+    case AST_NODE_FOR_OF_STAM:
         direct_walk_for_of(tp, (JsForOfNode*)node);
         break;
-    case JS_AST_NODE_CATCH_CLAUSE:
+    case AST_NODE_CATCH_CLAUSE:
         direct_walk_catch(tp, (JsCatchNode*)node);
         break;
-    case JS_AST_NODE_SWITCH_STATEMENT:
+    case AST_NODE_MATCH_EXPR:
         direct_walk_switch(tp, (JsSwitchNode*)node);
         break;
-    case JS_AST_NODE_TRY_STATEMENT: {
+    case AST_NODE_TRY_STAM: {
         JsTryNode* tried = (JsTryNode*)node;
         direct_walk_node(tp, tried->block);
         direct_walk_node(tp, tried->handler);
         direct_walk_node(tp, tried->finalizer);
         break;
     }
-    case JS_AST_NODE_IMPORT_DECLARATION: {
+    case AST_NODE_IMPORT: {
         direct_define_import_bindings(tp, (JsImportNode*)node);
         break;
     }
-    case JS_AST_NODE_EXPORT_SPECIFIER:
-    case JS_AST_NODE_IMPORT_SPECIFIER:
+    case AST_NODE_EXPORT_SPECIFIER:
+    case AST_NODE_IMPORT_SPECIFIER:
         break;
-    case JS_AST_NODE_EXPORT_DECLARATION: {
+    case AST_NODE_EXPORT: {
         JsExportNode* export_node = (JsExportNode*)node;
         direct_walk_node(tp, export_node->declaration);
         // Export specifiers retain the resolved declaration edge because MIR
         // publication must not reconstruct a local binding from its spelling.
         for (JsAstNode* spec = export_node->specifiers; spec;
                 spec = spec->next) {
-            if (spec->node_type == JS_AST_NODE_EXPORT_SPECIFIER) {
+            if (spec->node_type == AST_NODE_EXPORT_SPECIFIER) {
                 JsExportSpecifierNode* export_spec =
                     (JsExportSpecifierNode*)spec;
                 export_spec->local_entry = js_scope_lookup(tp,
@@ -859,7 +859,7 @@ static void direct_walk_list(JsTranspiler* tp, JsAstNode* node) {
 }  // namespace
 
 bool js_rebuild_direct_scope_graph(JsTranspiler* tp, JsAstNode* ast) {
-    if (!tp || !ast || ast->node_type != JS_AST_NODE_PROGRAM) return false;
+    if (!tp || !ast || ast->node_type != AST_SCRIPT) return false;
     JsScope* global = js_scope_create(tp,
         tp->is_module ? JS_SCOPE_MODULE : JS_SCOPE_GLOBAL, NULL);
     if (!global) return false;

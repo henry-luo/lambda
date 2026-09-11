@@ -231,6 +231,21 @@ Item* js_realm_slot_existing(JsRealmSlots* slots, JsRealmSlotId slot);
 bool js_realm_slots_lookup(JsRealmSlots* slots, const JsRealmSlotId* slot_ids,
     Item** values, int count, bool reserve);
 Item* js_realm_intrinsic_slot(JsRealmSlotId base, int index);
+bool js_realm_items_fill(void* items, const JsRealmSlotId* slot_ids, int count,
+    bool reserve);
+
+// A module's realm-items record is exactly one Item* per realm slot, in slot
+// order, so the record itself is the lookup's output array. The static_assert
+// pins that correspondence at every use site instead of a per-module copy loop.
+#define JS_REALM_ITEMS_FILL(Type, items, reserve, ...) \
+    static const JsRealmSlotId js_realm_item_slots[] = { __VA_ARGS__ }; \
+    static_assert(sizeof(Type) == \
+        sizeof(js_realm_item_slots) / sizeof(js_realm_item_slots[0]) * sizeof(Item*), \
+        #Type " must hold exactly one Item* per realm slot, in slot order"); \
+    return js_realm_items_fill((items), js_realm_item_slots, \
+        (int)(sizeof(js_realm_item_slots) / sizeof(js_realm_item_slots[0])), (reserve))
+
+
 void js_realm_slots_clear_transient(JsRealmSlots* slots);
 
 // Use this only for actual single-Item LIFO storage.  Clients with replacement,

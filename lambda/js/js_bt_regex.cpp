@@ -10,6 +10,7 @@
 #include "js_bt_regex.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/str.h"
 #include "../../lib/utf.h"
 #include "js_regex_generated_properties.h"
 #include "js_regex_wrapper.h"   // JsRegexScratch (LR09-30)
@@ -281,13 +282,6 @@ static uint32_t parse_hex_escape(Parser* ps, bool* ok) {
     *ok = true; return v;
 }
 
-static int bt_hex_digit(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
-}
-
 // \uHHHH and \u{H+}. The backtracker previously had no 'u' case at all, so a
 // routed pattern such as /^\u0041$/m matched a literal 'u' — see the escape
 // normalization note in parse_atom. The brace form shares parse_hex_escape's
@@ -299,7 +293,7 @@ static uint32_t parse_unicode_escape(Parser* ps, bool* ok) {
     uint32_t v = 0;
     for (int i = 0; i < 4; i++) {
         if (ps->pos >= ps->len) return 0;
-        int d = bt_hex_digit(ps->p[ps->pos]);
+        int d = str_hex_val(ps->p[ps->pos]);
         if (d < 0) return 0;
         v = v * 16 + (uint32_t)d; ps->pos++;
     }
@@ -313,7 +307,7 @@ static uint32_t parse_unicode_escape(Parser* ps, bool* ok) {
         uint32_t lo = 0; bool lo_ok = true;
         for (int i = 0; i < 4; i++) {
             if (ps->pos >= ps->len) { lo_ok = false; break; }
-            int d = bt_hex_digit(ps->p[ps->pos]);
+            int d = str_hex_val(ps->p[ps->pos]);
             if (d < 0) { lo_ok = false; break; }
             lo = lo * 16 + (uint32_t)d; ps->pos++;
         }

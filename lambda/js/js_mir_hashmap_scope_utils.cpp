@@ -153,7 +153,6 @@ bool jm_var_scope_set(JsMirTranspiler* mt, int depth, struct hashmap* scope) {
 }
 
 static int jm_resumable_local_cmp(const void* a, const void* b, void* udata) {
-    (void)udata;
     const JsMirResumableLocal* left = (const JsMirResumableLocal*)a;
     const JsMirResumableLocal* right = (const JsMirResumableLocal*)b;
     return left->binding == right->binding ? 0 : 1;
@@ -259,7 +258,6 @@ void jm_try_context_setup(JsTryContext* context, MIR_label_t catch_label,
 }
 
 int js_local_func_cmp(const void *a, const void *b, void *udata) {
-    (void)udata;
     return strcmp(((JsLocalFuncEntry*)a)->name, ((JsLocalFuncEntry*)b)->name);
 }
 uint64_t js_local_func_hash(const void *item, uint64_t seed0, uint64_t seed1) {
@@ -268,7 +266,6 @@ uint64_t js_local_func_hash(const void *item, uint64_t seed0, uint64_t seed1) {
 }
 
 int js_module_const_cmp(const void *a, const void *b, void *udata) {
-    (void)udata;
     return strcmp(((JsModuleConstEntry*)a)->name, ((JsModuleConstEntry*)b)->name);
 }
 uint64_t js_module_const_hash(const void *item, uint64_t seed0, uint64_t seed1) {

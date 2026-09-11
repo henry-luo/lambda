@@ -17,7 +17,6 @@ int jm_binding_cmp(const void* a, const void* b, void* udata) {
 }
 
 bool jm_function_decl_is_direct_binding(JsFunctionNode* fn, bool arrow_body_is_direct) {
-    (void)arrow_body_is_direct;
     if (!fn || !fn->vars || !fn->vars->parent) return false;
     NameScope* declaration_scope = fn->vars->parent;
     if (declaration_scope->kind == SCOPE_KIND_GLOBAL ||
@@ -227,9 +226,9 @@ static int jm_count_indexed_suspensions(JsMirTranspiler* mt, JsAstNode* root,
         if (!owned_here && !jm_suspension_is_lowered_here(index, i, root_id)) continue;
         bool is_suspension =
             (kind == JS_SUSPENSION_YIELD &&
-             node->node_type == JS_AST_NODE_YIELD_EXPRESSION) ||
+             node->node_type == AST_NODE_YIELD) ||
             (kind == JS_SUSPENSION_AWAIT &&
-             node->node_type == JS_AST_NODE_AWAIT_EXPRESSION);
+             node->node_type == AST_NODE_AWAIT);
         if (is_suspension) {
             count++;
             // A suspension in an array-pattern element resumes through both
@@ -241,11 +240,11 @@ static int jm_count_indexed_suspensions(JsMirTranspiler* mt, JsAstNode* root,
             while (parent_id != root_id && parent_id != AST_NODE_ID_INVALID) {
                 parent_id = ast_index_parent_id(index, parent_id);
                 AstNode* parent = parent_id < index->count ? index->nodes[parent_id] : NULL;
-                if (parent && parent->node_type == JS_AST_NODE_ARRAY_PATTERN) count++;
+                if (parent && parent->node_type == AST_NODE_ARRAY_PATTERN) count++;
             }
         }
         if (kind == JS_SUSPENSION_AWAIT &&
-                node->node_type == JS_AST_NODE_FOR_OF_STATEMENT &&
+                node->node_type == AST_NODE_FOR_OF_STAM &&
                 ((JsForOfNode*)node)->is_await) {
             count += 2;
         }
@@ -281,12 +280,12 @@ static void jm_scan_finally_inline_child(JsAstNode* child, void* opaque) {
 static void jm_scan_finally_inlines(JmFinallyInlineScan* scan, JsAstNode* node) {
     if (!node) return;
     switch (node->node_type) {
-    case JS_AST_NODE_FUNCTION_DECLARATION:
-    case JS_AST_NODE_FUNCTION_EXPRESSION:
-    case JS_AST_NODE_ARROW_FUNCTION:
+    case AST_NODE_FUNC:
+    case AST_NODE_FUNC_EXPR:
+    case AST_NODE_ARROW_FUNC:
         // A nested function owns its own state machine and its own budget.
         return;
-    case JS_AST_NODE_TRY_STATEMENT: {
+    case AST_NODE_TRY_STAM: {
         JsTryNode* tried = (JsTryNode*)node;
         bool pushed = tried->finalizer && scan->depth < JM_FINALLY_INLINE_DEPTH;
         if (pushed) {
@@ -302,8 +301,8 @@ static void jm_scan_finally_inlines(JmFinallyInlineScan* scan, JsAstNode* node) 
         jm_scan_finally_inlines(scan, (JsAstNode*)tried->finalizer);
         return;
     }
-    case JS_AST_NODE_BREAK_STATEMENT:
-    case JS_AST_NODE_CONTINUE_STATEMENT:
+    case AST_NODE_BREAK_STAM:
+    case AST_NODE_CONTINUE_STAM:
         for (int d = scan->depth - 1; d >= 0; d--) {
             if (scan->inlining[d]) continue;
             scan->inlining[d] = true;
@@ -313,10 +312,10 @@ static void jm_scan_finally_inlines(JmFinallyInlineScan* scan, JsAstNode* node) 
             scan->inlining[d] = false;
         }
         return;
-    case JS_AST_NODE_YIELD_EXPRESSION:
+    case AST_NODE_YIELD:
         if (scan->expanding > 0 && scan->kind == JS_SUSPENSION_YIELD) scan->extra++;
         break;
-    case JS_AST_NODE_AWAIT_EXPRESSION:
+    case AST_NODE_AWAIT:
         if (scan->expanding > 0 && scan->kind == JS_SUSPENSION_AWAIT) scan->extra++;
         break;
     default:
@@ -394,12 +393,12 @@ bool jm_can_suspend(JsMirTranspiler* mt, JsAstNode* node) {
 // meaning the result may be undefined due to short-circuiting.
 bool jm_has_optional_chain(JsAstNode* node) {
     if (!node) return false;
-    if (node->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+    if (node->node_type == AST_NODE_MEMBER_EXPR) {
         JsMemberNode* m = (JsMemberNode*)node;
         if (m->optional) return true;
         return jm_has_optional_chain(m->object);
     }
-    if (node->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+    if (node->node_type == AST_NODE_CALL_EXPR) {
         JsCallNode* c = (JsCallNode*)node;
         if (c->optional) return true;
         return jm_has_optional_chain(c->callee);
@@ -441,15 +440,15 @@ void jm_collect_indexed_func_assignments(JsMirTranspiler* mt, JsAstNode* root,
         }
         if (in_with) continue;
         JsIdentifierNode* id = NULL;
-        if (node->node_type == JS_AST_NODE_ASSIGNMENT_EXPRESSION) {
+        if (node->node_type == AST_NODE_ASSIGN) {
             JsAssignmentNode* assignment = (JsAssignmentNode*)node;
-            if (assignment->left && assignment->left->node_type == JS_AST_NODE_IDENTIFIER) {
+            if (assignment->left && assignment->left->node_type == AST_NODE_IDENT) {
                 id = (JsIdentifierNode*)assignment->left;
             }
-        } else if (node->node_type == JS_AST_NODE_UNARY_EXPRESSION) {
+        } else if (node->node_type == AST_NODE_UNARY) {
             JsUnaryNode* unary = (JsUnaryNode*)node;
-            if ((unary->op == JS_OP_INCREMENT || unary->op == JS_OP_DECREMENT) &&
-                    unary->operand && unary->operand->node_type == JS_AST_NODE_IDENTIFIER) {
+            if ((unary->op == OPERATOR_JS_INCREMENT || unary->op == OPERATOR_JS_DECREMENT) &&
+                    unary->operand && unary->operand->node_type == AST_NODE_IDENT) {
                 id = (JsIdentifierNode*)unary->operand;
             }
         }
@@ -478,18 +477,18 @@ static bool jm_collect_indexed_body_local(const AstIndex* index, AstNodeId node_
     AstNodeId parent_id = ast_index_parent_id(index, node_id);
     bool enclosing_owner = parent_id != AST_NODE_ID_INVALID &&
         index->owner_functions[parent_id] == context->owner;
-    if (!same_owner && !(current->node_type == JS_AST_NODE_FUNCTION_DECLARATION &&
+    if (!same_owner && !(current->node_type == AST_NODE_FUNC &&
             enclosing_owner)) return true;
-    if (current->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+    if (current->node_type == AST_NODE_VAR_STAM) {
         JsVariableDeclarationNode* declaration = (JsVariableDeclarationNode*)current;
         if (context->var_only && declaration->kind != JS_VAR_VAR) return true;
         for (JsAstNode* d = declaration->declarations; d; d = d->next) {
-            if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+            if (d->node_type == AST_NODE_VARIABLE_DECLARATOR) {
                 JsVariableDeclaratorNode* declarator = (JsVariableDeclaratorNode*)d;
                 if (declarator->id) jm_collect_pattern_names(declarator->id, context->locals);
             }
         }
-    } else if (current->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+    } else if (current->node_type == AST_NODE_FUNC) {
         JsFunctionNode* fn = (JsFunctionNode*)current;
         if (context->var_only && (fn->is_generator || fn->is_async)) return true;
         if (fn->name) {
@@ -506,17 +505,17 @@ static bool jm_collect_indexed_body_local(const AstIndex* index, AstNodeId node_
             if (!existing) hashmap_set(context->locals, &entry);
             else if (!existing->entry && binding) existing->entry = binding;
         }
-    } else if (!context->var_only && current->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+    } else if (!context->var_only && current->node_type == AST_NODE_CLASS) {
         JsClassNode* cls = (JsClassNode*)current;
         if (cls->name) {
             jm_name_set_add_binding(context->locals, jm_var_name(cls->name),
                 (JsAstNode*)cls, JS_VAR_LET, cls->outer_entry);
         }
-    } else if (current->node_type == JS_AST_NODE_FOR_OF_STATEMENT ||
-            current->node_type == JS_AST_NODE_FOR_IN_STATEMENT) {
+    } else if (current->node_type == AST_NODE_FOR_OF_STAM ||
+            current->node_type == AST_NODE_FOR_IN_STAM) {
         JsForOfNode* loop = (JsForOfNode*)current;
         if (!loop->left) return true;
-        if (loop->left->node_type == JS_AST_NODE_IDENTIFIER) {
+        if (loop->left->node_type == AST_NODE_IDENT) {
             if (!context->var_only || loop->kind == JS_VAR_VAR) {
                 if (loop->kind == JS_VAR_LET || loop->kind == JS_VAR_CONST) {
                     JsIdentifierNode* id = (JsIdentifierNode*)loop->left;
@@ -526,7 +525,7 @@ static bool jm_collect_indexed_body_local(const AstIndex* index, AstNodeId node_
                     jm_collect_pattern_names(loop->left, context->locals);
                 }
             }
-        } else if (loop->left->node_type != JS_AST_NODE_VARIABLE_DECLARATION &&
+        } else if (loop->left->node_type != AST_NODE_VAR_STAM &&
                 loop->declares_binding && (!context->var_only || loop->kind == JS_VAR_VAR)) {
             jm_collect_pattern_names(loop->left, context->locals);
         }
@@ -560,18 +559,18 @@ static void jm_collect_scope_lexical_names(JsScope* scope,
         entry.entry = binding;
         entry.binding_node = (JsAstNode*)binding->node;
         entry.from_func_decl = binding->node &&
-            binding->node->node_type == JS_AST_NODE_FUNCTION_DECLARATION;
+            binding->node->node_type == AST_NODE_FUNC;
         hashmap_set(names, &entry);
     }
 }
 
 void jm_collect_let_const_names(JsAstNode* block, struct hashmap* names) {
-    if (!block || block->node_type != JS_AST_NODE_BLOCK_STATEMENT) return;
+    if (!block || block->node_type != AST_NODE_BLOCK) return;
     jm_collect_scope_lexical_names(((JsBlockNode*)block)->vars, names);
 }
 
 void jm_collect_switch_lexical_names(JsAstNode* switch_node, struct hashmap* names) {
-    if (!switch_node || switch_node->node_type != JS_AST_NODE_SWITCH_STATEMENT) return;
+    if (!switch_node || switch_node->node_type != AST_NODE_MATCH_EXPR) return;
     jm_collect_scope_lexical_names(((JsSwitchNode*)switch_node)->vars, names);
 }
 
@@ -622,7 +621,7 @@ static void jm_init_block_function_binding(JsMirTranspiler* mt,
 }
 
 void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
-    if (!block || block->node_type != JS_AST_NODE_BLOCK_STATEMENT) return;
+    if (!block || block->node_type != AST_NODE_BLOCK) return;
     struct hashmap* let_consts = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
         jm_name_hash, jm_name_cmp, NULL, NULL);
     jm_collect_let_const_names(block, let_consts);
@@ -656,7 +655,7 @@ void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
     JsBlockNode* blk = (JsBlockNode*)block;
     JsAstNode* stmt = blk->statements;
     while (stmt) {
-        if (stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+        if (stmt->node_type == AST_NODE_FUNC) {
             jm_init_block_function_binding(mt, (JsFunctionNode*)stmt);
         }
         stmt = stmt->next;
@@ -664,7 +663,7 @@ void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
 }
 
 void jm_init_switch_tdz(JsMirTranspiler* mt, JsAstNode* switch_node) {
-    if (!switch_node || switch_node->node_type != JS_AST_NODE_SWITCH_STATEMENT) return;
+    if (!switch_node || switch_node->node_type != AST_NODE_MATCH_EXPR) return;
     struct hashmap* let_consts = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
         jm_name_hash, jm_name_cmp, NULL, NULL);
     jm_collect_switch_lexical_names(switch_node, let_consts);
@@ -693,10 +692,10 @@ void jm_init_switch_tdz(JsMirTranspiler* mt, JsAstNode* switch_node) {
 
     JsSwitchNode* sw = (JsSwitchNode*)switch_node;
     for (JsAstNode* c = sw->cases; c; c = c->next) {
-        if (c->node_type != JS_AST_NODE_SWITCH_CASE) continue;
+        if (c->node_type != AST_NODE_MATCH_ARM) continue;
         JsSwitchCaseNode* sc = (JsSwitchCaseNode*)c;
         for (JsAstNode* stmt = sc->consequent; stmt; stmt = stmt->next) {
-            if (stmt->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+            if (stmt->node_type != AST_NODE_FUNC) continue;
             jm_init_block_function_binding(mt, (JsFunctionNode*)stmt);
         }
     }
@@ -712,24 +711,24 @@ static void jm_collect_pattern_name_child(JsAstNode* child, void* opaque) {
 void jm_collect_pattern_names(JsAstNode* pat, struct hashmap* names) {
     if (!pat) return;
     switch (pat->node_type) {
-    case JS_AST_NODE_IDENTIFIER: {
+    case AST_NODE_IDENT: {
         JsIdentifierNode* id = (JsIdentifierNode*)pat;
         const char* name = jm_var_name(id->name);
         jm_name_set_add_binding(names, name, (JsAstNode*)id, 0, id->entry);
         break;
     }
-    case JS_AST_NODE_PROPERTY:
+    case AST_NODE_PROPERTY:
         if (!((JsPropertyNode*)pat)->value) {
             jm_collect_pattern_names(((JsPropertyNode*)pat)->key, names);
             break;
         }
         [[fallthrough]];
-    case JS_AST_NODE_ASSIGNMENT_PATTERN:
-    case JS_AST_NODE_OBJECT_PATTERN:
-    case JS_AST_NODE_ARRAY_PATTERN:
-    case JS_AST_NODE_SPREAD_ELEMENT:
-    case JS_AST_NODE_REST_ELEMENT:
-    case JS_AST_NODE_REST_PROPERTY:
+    case AST_NODE_ASSIGN_PATTERN:
+    case AST_NODE_MAP_PATTERN:
+    case AST_NODE_ARRAY_PATTERN:
+    case AST_NODE_SPREAD:
+    case AST_NODE_REST_ELEMENT:
+    case AST_NODE_REST_PROPERTY:
         js_ast_visit_binding_pattern_children(pat,
             jm_collect_pattern_name_child, names);
         break;
@@ -747,7 +746,7 @@ static bool jm_index_identifier_is_binding(AstIndex* index, uint32_t node_id,
     if (definition == (AstNode*)id) return true;
     // Variable entries point at the whole declarator, whose initializer also
     // lies inside its span; only the pattern span is a binding position.
-    if (definition->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+    if (definition->node_type == AST_NODE_VARIABLE_DECLARATOR) {
         JsVariableDeclaratorNode* declarator =
             (JsVariableDeclaratorNode*)definition;
         JsAstNode* pattern = declarator->id;
@@ -756,10 +755,10 @@ static bool jm_index_identifier_is_binding(AstIndex* index, uint32_t node_id,
     }
     // Function/class entries cover their complete body; their declared name is
     // the sole binding identifier owned by that entry.
-    if (definition->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
-            definition->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-            definition->node_type == JS_AST_NODE_ARROW_FUNCTION ||
-            definition->node_type == JS_AST_NODE_METHOD_DEFINITION) {
+    if (definition->node_type == AST_NODE_FUNC ||
+            definition->node_type == AST_NODE_FUNC_EXPR ||
+            definition->node_type == AST_NODE_ARROW_FUNC ||
+            definition->node_type == AST_NODE_METHOD) {
         JsFunctionNode* function = (JsFunctionNode*)definition;
         // Function names are stored as interned strings rather than AST name
         // nodes; the declared name is the only entry use before the body.
@@ -767,8 +766,8 @@ static bool jm_index_identifier_is_binding(AstIndex* index, uint32_t node_id,
             id->source_span.start_byte && id->source_span.end_byte <=
             function->body->source_span.start_byte;
     }
-    if (definition->node_type == JS_AST_NODE_CLASS_DECLARATION ||
-            definition->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
+    if (definition->node_type == AST_NODE_CLASS ||
+            definition->node_type == AST_NODE_CLASS_EXPR) {
         JsClassNode* class_node = (JsClassNode*)definition;
         return class_node->body && definition->source_span.start_byte <=
             id->source_span.start_byte && id->source_span.end_byte <=
@@ -783,15 +782,15 @@ static bool jm_index_identifier_is_binding(AstIndex* index, uint32_t node_id,
 
 static bool jm_index_identifier_is_property_key(AstNode* parent, AstNode* node) {
     if (!parent || !node) return false;
-    if (parent->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+    if (parent->node_type == AST_NODE_MEMBER_EXPR) {
         JsMemberNode* member = (JsMemberNode*)parent;
         return !member->computed && member->property == node;
     }
-    if (parent->node_type == JS_AST_NODE_PROPERTY) {
+    if (parent->node_type == AST_NODE_PROPERTY) {
         JsPropertyNode* property = (JsPropertyNode*)parent;
         return !property->computed && property->key == node;
     }
-    if (parent->node_type == JS_AST_NODE_METHOD_DEFINITION) {
+    if (parent->node_type == AST_NODE_METHOD) {
         return ((JsMethodDefinitionNode*)parent)->key == node;
     }
     return false;
@@ -810,7 +809,7 @@ void jm_collect_indexed_body_refs(JsMirTranspiler* mt, JsFunctionNode* fn,
     for (uint32_t i = 0; i < index->count; i++) {
         AstNode* node = index->nodes[i];
         if (!node || index->owner_functions[i] != owner ||
-                node->node_type != JS_AST_NODE_IDENTIFIER) continue;
+                node->node_type != AST_NODE_IDENT) continue;
         if (fn->source_span.end_byte > fn->source_span.start_byte &&
                 (node->source_span.start_byte < fn->source_span.start_byte ||
                  node->source_span.end_byte > fn->source_span.end_byte)) {
@@ -824,11 +823,11 @@ void jm_collect_indexed_body_refs(JsMirTranspiler* mt, JsFunctionNode* fn,
         AstNode* parent = parent_id < index->count ? index->nodes[parent_id] : NULL;
         bool is_property_key = jm_index_identifier_is_property_key(parent, node);
         if (!id->name || is_binding || is_property_key) continue;
-        if (parent && parent->node_type == JS_AST_NODE_MEMBER_EXPRESSION &&
+        if (parent && parent->node_type == AST_NODE_MEMBER_EXPR &&
                 ((JsMemberNode*)parent)->object == node && id->name->len == 5 &&
                 memcmp(id->name->chars, "super", 5) == 0) continue;
-        if (parent && (parent->node_type == JS_AST_NODE_CALL_EXPRESSION ||
-                parent->node_type == JS_AST_NODE_NEW_EXPRESSION) &&
+        if (parent && (parent->node_type == AST_NODE_CALL_EXPR ||
+                parent->node_type == AST_NODE_NEW_EXPR) &&
                 ((JsCallNode*)parent)->callee == node && id->name->len == 5 &&
                 memcmp(id->name->chars, "super", 5) == 0) continue;
         jm_name_set_add_ref(refs, jm_var_name(id->name), id, body_start, body_end);
@@ -836,7 +835,7 @@ void jm_collect_indexed_body_refs(JsMirTranspiler* mt, JsFunctionNode* fn,
 }
 
 static bool jm_analysis_function_is_method_syntax(JsFunctionNode* fn) {
-    return fn && fn->node_type == JS_AST_NODE_METHOD_DEFINITION;
+    return fn && fn->node_type == AST_NODE_METHOD;
 }
 
 static void jm_add_capture(JsFuncCollected* fc, const char* name, NameEntry* entry,
@@ -865,7 +864,7 @@ static bool jm_capture_binding_is_lexical_ancestor(JsMirTranspiler* mt,
     AstNodeId binding_id = ast_index_find(index, (AstNode*)entry->node);
     if (binding_id == AST_NODE_ID_INVALID || binding_id >= index->count) return true;
     AstFunctionId binding_owner = index->owner_functions[binding_id];
-    if (((JsAstNode*)entry->node)->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+    if (((JsAstNode*)entry->node)->node_type == AST_NODE_FUNC) {
         // A declaration node starts a new indexed function owner, but its name
         // binds in the enclosing lexical function.
         AstNodeId parent_id = ast_index_parent_id(index, binding_id);
@@ -917,7 +916,7 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
     bool has_self_ref = false;
     const char* self_name = fn->name ? jm_var_name(fn->name) : NULL;
     bool is_method_syntax = jm_analysis_function_is_method_syntax(fn);
-    bool is_func_expr = fn->node_type == JS_AST_NODE_FUNCTION_EXPRESSION;
+    bool is_func_expr = fn->node_type == AST_NODE_FUNC_EXPR;
 
     size_t iter = 0;
     void* item;
@@ -1021,7 +1020,7 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
     // Keeping top-level functions capture-free preserves tail-call optimization.
     // Exception: function EXPRESSIONS always need self-capture for NFE name binding,
     // since their name is not in the module var table even when top-level.
-    bool is_block_func_decl = fn->node_type == JS_AST_NODE_FUNCTION_DECLARATION &&
+    bool is_block_func_decl = fn->node_type == AST_NODE_FUNC &&
         !jm_function_decl_is_direct_binding(fn, false);
     if (has_self_ref && self_name && self_name[0] &&
             (jm_parent_function_id(mt, fc) != AST_FUNCTION_ID_INVALID || is_func_expr ||

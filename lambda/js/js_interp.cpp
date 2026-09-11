@@ -971,7 +971,7 @@ static bool js_interp_function_node(JsAstNode* node) {
     return node && (node->node_type == AST_NODE_FUNC ||
         node->node_type == AST_NODE_FUNC_EXPR ||
         node->node_type == AST_NODE_ARROW_FUNC ||
-        node->node_type == JS_AST_NODE_METHOD_DEFINITION);
+        node->node_type == AST_NODE_METHOD);
 }
 
 struct JsInterpLoopCaptureProbe {
@@ -1014,8 +1014,8 @@ static void js_interp_probe_loop_capture(JsAstNode* node,
         probe->function_depth--;
         return;
     }
-    if (node->node_type == JS_AST_NODE_CLASS_DECLARATION ||
-            node->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
+    if (node->node_type == AST_NODE_CLASS ||
+            node->node_type == AST_NODE_CLASS_EXPR) {
         // Class members and instance-field initializer thunks can retain the
         // loop lexical environment after the iteration completes.
         probe->captures_loop_lexical = true;
@@ -1845,14 +1845,14 @@ static JsInterpCompletion js_interp_eval_class(JsInterpFrame* frame,
     int deferred_static_count = 0;
     for (JsAstNode* member = cls->body ? (JsAstNode*)((JsBlockNode*)cls->body)->statements
             : NULL; member; member = (JsAstNode*)member->next) {
-        if (member->node_type == JS_AST_NODE_FIELD_DEFINITION &&
+        if (member->node_type == AST_NODE_FIELD &&
                 !((JsFieldDefinitionNode*)member)->is_static) {
             instance_field_count++;
-        } else if ((member->node_type == JS_AST_NODE_FIELD_DEFINITION &&
+        } else if ((member->node_type == AST_NODE_FIELD &&
                 ((JsFieldDefinitionNode*)member)->is_static) ||
                 member->node_type == JS_AST_NODE_STATIC_BLOCK) {
             deferred_static_count++;
-        } else if (member->node_type == JS_AST_NODE_METHOD_DEFINITION) {
+        } else if (member->node_type == AST_NODE_METHOD) {
             JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)member;
             Item source_key = method->key && method->key->node_type == AST_NODE_IDENT
                 ? js_interp_name_key(((JsIdentifierNode*)method->key)->name) : ItemNull;
@@ -1882,7 +1882,7 @@ static JsInterpCompletion js_interp_eval_class(JsInterpFrame* frame,
     static_frame.home_class_home = class_root.home();
     for (JsAstNode* member = cls->body ? (JsAstNode*)((JsBlockNode*)cls->body)->statements
             : NULL; member; member = (JsAstNode*)member->next) {
-        if (member->node_type == JS_AST_NODE_METHOD_DEFINITION) {
+        if (member->node_type == AST_NODE_METHOD) {
             JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)member;
             JsInterpCompletion key = js_interp_class_key(&static_frame,
                 (JsAstNode*)method->key, method->computed, class_root.get());
@@ -1935,7 +1935,7 @@ static JsInterpCompletion js_interp_eval_class(JsInterpFrame* frame,
             }
             continue;
         }
-        if (member->node_type == JS_AST_NODE_FIELD_DEFINITION) {
+        if (member->node_type == AST_NODE_FIELD) {
             JsFieldDefinitionNode* field = (JsFieldDefinitionNode*)member;
             JsInterpCompletion key = js_interp_class_key(&static_frame,
                 (JsAstNode*)field->key, field->computed, class_root.get());
@@ -1970,7 +1970,7 @@ static JsInterpCompletion js_interp_eval_class(JsInterpFrame* frame,
     }
     for (int index = 0; index < deferred_static_index; index++) {
         JsAstNode* member = deferred_static_members[index];
-        if (member->node_type == JS_AST_NODE_FIELD_DEFINITION) {
+        if (member->node_type == AST_NODE_FIELD) {
             JsFieldDefinitionNode* field = (JsFieldDefinitionNode*)member;
             key_root.set(deferred_static_keys[index]);
             if (field->value) {
@@ -2008,7 +2008,7 @@ static JsInterpCompletion js_interp_eval_class(JsInterpFrame* frame,
 static JsInterpCompletion js_interp_eval_initializer_with_binding_name(
         JsInterpFrame* frame, JsAstNode* initializer, String* binding_name) {
     if (binding_name && initializer &&
-            initializer->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
+            initializer->node_type == AST_NODE_CLASS_EXPR) {
         JsClassNode* cls = (JsClassNode*)initializer;
         if (!cls->name) return js_interp_eval_class(frame, cls, false, binding_name);
     }
@@ -2667,7 +2667,7 @@ static bool js_interp_call_has_plain_arguments(JsCallNode* call, int* out_count)
     int count = 0;
     for (JsAstNode* arg = (JsAstNode*)call->arguments; arg;
             arg = (JsAstNode*)arg->next) {
-        if (arg->node_type == JS_AST_NODE_SPREAD_ELEMENT || count == INT_MAX) {
+        if (arg->node_type == AST_NODE_SPREAD || count == INT_MAX) {
             return false;
         }
         count++;
@@ -2785,7 +2785,7 @@ static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
     }
     int argument_index = 0;
     for (JsAstNode* arg = (JsAstNode*)call->arguments; arg; arg = (JsAstNode*)arg->next) {
-        if (arg->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+        if (arg->node_type == AST_NODE_SPREAD) {
             JsSpreadElementNode* spread = (JsSpreadElementNode*)arg;
             JsInterpCompletion source = js_interp_eval(frame,
                 (JsAstNode*)spread->argument);
@@ -3113,7 +3113,7 @@ static JsInterpCompletion js_interp_finish_array_binding(Item iterator,
 static bool js_interp_is_anonymous_function_definition(JsAstNode* initializer) {
     return initializer && (initializer->node_type == AST_NODE_FUNC_EXPR ||
         initializer->node_type == AST_NODE_ARROW_FUNC ||
-        initializer->node_type == JS_AST_NODE_CLASS_EXPRESSION);
+        initializer->node_type == AST_NODE_CLASS_EXPR);
 }
 
 static void js_interp_infer_binding_name(JsAstNode* target,
@@ -3142,7 +3142,7 @@ static JsInterpCompletion js_interp_write_pattern_assignment_target(
 }
 
 static JsAstNode* js_interp_pattern_assignment_reference_target(JsAstNode* pattern) {
-    if (pattern && pattern->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+    if (pattern && pattern->node_type == AST_NODE_ASSIGN_PATTERN) {
         pattern = (JsAstNode*)((JsAssignmentPatternNode*)pattern)->left;
     }
     return pattern && (pattern->node_type == AST_NODE_IDENT ||
@@ -3197,7 +3197,7 @@ static JsInterpCompletion js_interp_bind_pattern(JsInterpFrame* frame,
             identifier->name, input, initialize);
         return item_is_error(stored) ? js_interp_throw(stored) : js_interp_normal(stored);
     }
-    case JS_AST_NODE_ASSIGNMENT_PATTERN: {
+    case AST_NODE_ASSIGN_PATTERN: {
         JsAssignmentPatternNode* assignment = (JsAssignmentPatternNode*)pattern;
         RootFrame roots(1);
         Rooted<Item> value_root(roots, input);
@@ -3212,15 +3212,15 @@ static JsInterpCompletion js_interp_bind_pattern(JsInterpFrame* frame,
         return js_interp_bind_pattern(frame, (JsAstNode*)assignment->left,
             value_root.get(), initialize, pre_reference);
     }
-    case JS_AST_NODE_REST_ELEMENT:
-    case JS_AST_NODE_REST_PROPERTY: {
+    case AST_NODE_REST_ELEMENT:
+    case AST_NODE_REST_PROPERTY: {
         // A direct rest parameter receives its already-materialized array;
         // array/object patterns consume their rest member in their own case.
         JsSpreadElementNode* rest = (JsSpreadElementNode*)pattern;
         return js_interp_bind_pattern(frame, (JsAstNode*)rest->argument,
             input, initialize);
     }
-    case JS_AST_NODE_ARRAY_PATTERN: {
+    case AST_NODE_ARRAY_PATTERN: {
         JsArrayPatternNode* array = (JsArrayPatternNode*)pattern;
         RootFrame roots(5);
         Rooted<Item> source_root(roots, input);
@@ -3255,8 +3255,8 @@ static JsInterpCompletion js_interp_bind_pattern(JsInterpFrame* frame,
                 iterator_done = value_root.get().item == JS_ITER_DONE_SENTINEL;
                 continue;
             }
-            if (element->node_type == JS_AST_NODE_REST_ELEMENT ||
-                    element->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+            if (element->node_type == AST_NODE_REST_ELEMENT ||
+                    element->node_type == AST_NODE_SPREAD) {
                 JsSpreadElementNode* rest = (JsSpreadElementNode*)element;
                 JsInterpReference reference = {};
                 bool has_reference = false;
@@ -3357,13 +3357,13 @@ static JsInterpCompletion js_interp_bind_pattern(JsInterpFrame* frame,
         return js_interp_finish_array_binding(iterator_root.get(), iterator_done,
             js_interp_normal(make_js_undefined()));
     }
-    case JS_AST_NODE_OBJECT_PATTERN: {
+    case AST_NODE_MAP_PATTERN: {
         JsObjectPatternNode* object = (JsObjectPatternNode*)pattern;
         int property_count = 0;
         JsSpreadElementNode* rest = NULL;
         for (JsAstNode* property = (JsAstNode*)object->properties; property;
                 property = (JsAstNode*)property->next) {
-            if (property->node_type == JS_AST_NODE_REST_PROPERTY) {
+            if (property->node_type == AST_NODE_REST_PROPERTY) {
                 rest = (JsSpreadElementNode*)property;
             } else if (property->node_type == AST_NODE_PROPERTY) {
                 property_count++;
@@ -3386,7 +3386,7 @@ static JsInterpCompletion js_interp_bind_pattern(JsInterpFrame* frame,
         int excluded_count = 0;
         for (JsAstNode* property = (JsAstNode*)object->properties; property;
                 property = (JsAstNode*)property->next) {
-            if (property->node_type == JS_AST_NODE_REST_PROPERTY) continue;
+            if (property->node_type == AST_NODE_REST_PROPERTY) continue;
             JsPropertyNode* pair = (JsPropertyNode*)property;
             if (!pair->computed && pair->key && pair->key->node_type == AST_NODE_IDENT) {
                 key_root.set(js_interp_name_key(((JsIdentifierNode*)pair->key)->name));
@@ -3498,17 +3498,17 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
     case AST_NODE_LITERAL: {
         JsLiteralNode* literal = (JsLiteralNode*)node;
         switch (literal->literal_type) {
-        case JS_LITERAL_NUMBER:
+        case AST_LITERAL_NUMBER:
             return js_interp_normal(literal->is_bigint
                 ? bigint_from_string(literal->bigint_str->chars, literal->bigint_str->len)
                 : js_make_number(literal->value.number_value));
-        case JS_LITERAL_STRING:
+        case AST_LITERAL_STRING:
             return js_interp_normal(js_make_string_len(literal->value.string_value->chars,
                 literal->value.string_value->len));
-        case JS_LITERAL_BOOLEAN:
+        case AST_LITERAL_BOOLEAN:
             return js_interp_normal((Item){.item = b2it(literal->value.boolean_value)});
-        case JS_LITERAL_NULL: return js_interp_normal(ItemNull);
-        case JS_LITERAL_UNDEFINED: return js_interp_normal(make_js_undefined());
+        case AST_LITERAL_NULL: return js_interp_normal(ItemNull);
+        case AST_LITERAL_UNDEFINED: return js_interp_normal(make_js_undefined());
         default: return js_interp_throw(ItemError);
         }
     }
@@ -3522,7 +3522,7 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
         // keeps them as holes, while expression-list consumers observe their
         // specified undefined value.
         return js_interp_normal(make_js_undefined());
-    case JS_AST_NODE_CLASS_EXPRESSION:
+    case AST_NODE_CLASS_EXPR:
         return js_interp_eval_class(frame, (JsClassNode*)node, false);
     case AST_NODE_EXPR_STMT:
         // Loop headers can retain an expression-statement wrapper from the
@@ -3679,9 +3679,9 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
     }
     case AST_NODE_ASSIGN: {
         JsAssignmentNode* assignment = (JsAssignmentNode*)node;
-        if (assignment->left && (assignment->left->node_type == JS_AST_NODE_ARRAY_PATTERN ||
-                assignment->left->node_type == JS_AST_NODE_OBJECT_PATTERN ||
-                assignment->left->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)) {
+        if (assignment->left && (assignment->left->node_type == AST_NODE_ARRAY_PATTERN ||
+                assignment->left->node_type == AST_NODE_MAP_PATTERN ||
+                assignment->left->node_type == AST_NODE_ASSIGN_PATTERN)) {
             RootFrame roots(1);
             Rooted<Item> value_root(roots, ItemNull);
             JsInterpCompletion right = js_interp_eval(frame,
@@ -3756,7 +3756,7 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
         Item result = js_create_regex_literal_items(pattern_root.get(), flags_root.get());
         return item_is_error(result) ? js_interp_throw(result) : js_interp_normal(result);
     }
-    case JS_AST_NODE_AWAIT_EXPRESSION: {
+    case AST_NODE_AWAIT: {
         JsAwaitNode* awaited = (JsAwaitNode*)node;
         if (frame && frame->async_await_seen) {
             if (*frame->async_await_seen < frame->async_await_skip) {
@@ -3801,7 +3801,7 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
         Item result = js_await_sync_incremental(target_root.get());
         return item_is_error(result) ? js_interp_throw(result) : js_interp_normal(result);
     }
-    case JS_AST_NODE_YIELD_EXPRESSION: {
+    case AST_NODE_YIELD: {
         JsYieldNode* yielded = (JsYieldNode*)node;
         if (!frame || !frame->generator_yield_seen) {
             return js_interp_throw(js_throw_syntax_error(
@@ -3891,13 +3891,13 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
         if (item_is_error(result_root.get())) return js_interp_throw(result_root.get());
         for (JsAstNode* element = (JsAstNode*)array->elements; element;
                 element = (JsAstNode*)element->next) {
-            if (element->node_type == JS_AST_NODE_NULL) {
+            if (element->node_type == AST_NODE_NULL) {
                 // An elision is an absent property, not an own undefined value.
                 Item pushed = js_array_push(result_root.get(), js_array_hole());
                 if (item_is_error(pushed)) return js_interp_throw(pushed);
                 continue;
             }
-            if (element->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+            if (element->node_type == AST_NODE_SPREAD) {
                 JsSpreadElementNode* spread = (JsSpreadElementNode*)element;
                 JsInterpCompletion source = js_interp_eval(frame,
                     (JsAstNode*)spread->argument);
@@ -3934,7 +3934,7 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
         if (item_is_error(result_root.get())) return js_interp_throw(result_root.get());
         for (JsAstNode* property = (JsAstNode*)object->properties; property;
                 property = (JsAstNode*)property->next) {
-            if (property->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+            if (property->node_type == AST_NODE_SPREAD) {
                 JsInterpCompletion source = js_interp_eval(frame,
                     (JsAstNode*)((JsSpreadElementNode*)property)->argument);
                 if (source.kind != JS_INTERP_NORMAL) return source;
@@ -4134,10 +4134,10 @@ static JsInterpCompletion js_interp_bind_named_function_expression_self(
 
 static bool js_interp_yield_argument_can_suspend(JsAstNode* node) {
     if (!node) return false;
-    if (node->node_type == JS_AST_NODE_YIELD_EXPRESSION) return true;
-    if (node->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
-            node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-            node->node_type == JS_AST_NODE_ARROW_FUNCTION) {
+    if (node->node_type == AST_NODE_YIELD) return true;
+    if (node->node_type == AST_NODE_FUNC ||
+            node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_ARROW_FUNC) {
         // Creating a nested function does not execute its body.
         return false;
     }
@@ -4154,7 +4154,7 @@ static bool js_interp_yield_argument_can_suspend(JsAstNode* node) {
 
 static bool js_interp_terminal_yield_expr(JsAstNode* node) {
     if (!node) return false;
-    if (node->node_type == JS_AST_NODE_YIELD_EXPRESSION) {
+    if (node->node_type == AST_NODE_YIELD) {
         JsYieldNode* yielded = (JsYieldNode*)node;
         // A fresh `yield*` leaves the ledger untouched; the shared generator
         // runtime credits its slot only once the delegate is exhausted
@@ -4168,8 +4168,8 @@ static bool js_interp_terminal_yield_expr(JsAstNode* node) {
     }
     if (node->node_type != AST_NODE_BINARY) return false;
     JsBinaryNode* binary = (JsBinaryNode*)node;
-    return (binary->op == JS_OP_AND || binary->op == JS_OP_OR ||
-            binary->op == JS_OP_NULLISH_COALESCE) &&
+    return (binary->op == OPERATOR_AND || binary->op == OPERATOR_OR ||
+            binary->op == OPERATOR_JS_NULLISH_COALESCE) &&
         js_interp_terminal_yield_expr((JsAstNode*)binary->right);
 }
 
@@ -4364,9 +4364,9 @@ static JsInterpCompletion js_interp_assign_iteration_head(JsInterpFrame* frame,
         return js_interp_bind_pattern(frame, (JsAstNode*)declarator->id,
             value, initialize);
     }
-    if (left->node_type == JS_AST_NODE_ARRAY_PATTERN ||
-            left->node_type == JS_AST_NODE_OBJECT_PATTERN ||
-            left->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+    if (left->node_type == AST_NODE_ARRAY_PATTERN ||
+            left->node_type == AST_NODE_MAP_PATTERN ||
+            left->node_type == AST_NODE_ASSIGN_PATTERN) {
         return js_interp_bind_pattern(frame, left, value, initialize);
     }
     RootFrame roots(2);
@@ -4601,11 +4601,11 @@ static JsInterpCompletion js_interp_exec_export(JsInterpFrame* frame,
         completion = js_interp_exec(frame, exported->declaration);
         if (completion.kind != JS_INTERP_NORMAL) return completion;
         if (!exported->is_default &&
-                (exported->declaration->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
-                 exported->declaration->node_type == JS_AST_NODE_CLASS_DECLARATION ||
-                 exported->declaration->node_type == JS_AST_NODE_CLASS_EXPRESSION)) {
+                (exported->declaration->node_type == AST_NODE_FUNC ||
+                 exported->declaration->node_type == AST_NODE_CLASS ||
+                 exported->declaration->node_type == AST_NODE_CLASS_EXPR)) {
             String* name = exported->declaration->node_type ==
-                    JS_AST_NODE_FUNCTION_DECLARATION
+                    AST_NODE_FUNC
                 ? ((JsFunctionNode*)exported->declaration)->name
                 : ((JsClassNode*)exported->declaration)->name;
             NameEntry* entry = js_interp_find_binding(frame, name);
@@ -4615,7 +4615,7 @@ static JsInterpCompletion js_interp_exec_export(JsInterpFrame* frame,
                 value_root.get());
             if (item_is_error(stored)) return js_interp_throw(stored);
         } else if (!exported->is_default &&
-                exported->declaration->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+                exported->declaration->node_type == AST_NODE_VAR_STAM) {
             JsVariableDeclarationNode* declaration =
                 (JsVariableDeclarationNode*)exported->declaration;
             for (JsAstNode* declarator = (JsAstNode*)declaration->declarations;
@@ -4675,11 +4675,11 @@ static JsInterpCompletion js_interp_exec_export(JsInterpFrame* frame,
     }
     if (!exported->is_default) return completion;
     if (exported->declaration &&
-            (exported->declaration->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
-             exported->declaration->node_type == JS_AST_NODE_CLASS_DECLARATION ||
-             exported->declaration->node_type == JS_AST_NODE_CLASS_EXPRESSION)) {
+            (exported->declaration->node_type == AST_NODE_FUNC ||
+             exported->declaration->node_type == AST_NODE_CLASS ||
+             exported->declaration->node_type == AST_NODE_CLASS_EXPR)) {
         String* name = exported->declaration->node_type ==
-                JS_AST_NODE_FUNCTION_DECLARATION
+                AST_NODE_FUNC
             ? ((JsFunctionNode*)exported->declaration)->name
             : ((JsClassNode*)exported->declaration)->name;
         if (name) {
@@ -4782,7 +4782,7 @@ static bool js_interp_prepare_self_tail_call(JsInterpFrame* frame,
     }
     for (JsAstNode* arg = (JsAstNode*)call->arguments; arg;
             arg = (JsAstNode*)arg->next) {
-        if (arg->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+        if (arg->node_type == AST_NODE_SPREAD) {
             JsInterpCompletion source = js_interp_eval(frame,
                 (JsAstNode*)((JsSpreadElementNode*)arg)->argument);
             if (source.kind != JS_INTERP_NORMAL) {
@@ -4843,13 +4843,13 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
         // Declaration instantiation created the function before any statement
         // executed. Re-creating it here would change its observable identity.
         return js_interp_normal(make_js_undefined());
-    case JS_AST_NODE_IMPORT_DECLARATION:
+    case AST_NODE_IMPORT:
         // Module linking eagerly loads dependencies before body execution.
         // Reads stay live through the retained namespace binding plan.
         return js_interp_normal(make_js_undefined());
-    case JS_AST_NODE_EXPORT_DECLARATION:
+    case AST_NODE_EXPORT:
         return js_interp_exec_export(frame, (JsExportNode*)node);
-    case JS_AST_NODE_CLASS_DECLARATION:
+    case AST_NODE_CLASS:
         return js_interp_eval_class(frame, (JsClassNode*)node, true);
     case JS_AST_NODE_WITH_STATEMENT: {
         JsWithStatementNode* with = (JsWithStatementNode*)node;
@@ -4872,8 +4872,8 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
         labeled_frame.active_label_len = labeled->label_len;
         bool directly_labels_iteration = labeled->body &&
             (labeled->body->node_type == AST_NODE_LOOP ||
-             labeled->body->node_type == JS_AST_NODE_FOR_OF_STATEMENT ||
-             labeled->body->node_type == JS_AST_NODE_FOR_IN_STATEMENT);
+             labeled->body->node_type == AST_NODE_FOR_OF_STAM ||
+             labeled->body->node_type == AST_NODE_FOR_IN_STAM);
         JsInterpFrame body_frame = labeled_frame;
         if (!directly_labels_iteration) {
             // A label on a block must receive its break completion itself;
@@ -5116,11 +5116,11 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
         }
         }
     }
-    case JS_AST_NODE_SWITCH_STATEMENT:
+    case AST_NODE_MATCH_EXPR:
         return js_interp_exec_switch(frame, (JsSwitchNode*)node);
-    case JS_AST_NODE_FOR_OF_STATEMENT:
+    case AST_NODE_FOR_OF_STAM:
         return js_interp_exec_for_of(frame, (JsForOfNode*)node, false);
-    case JS_AST_NODE_FOR_IN_STATEMENT:
+    case AST_NODE_FOR_IN_STAM:
         return js_interp_exec_for_of(frame, (JsForOfNode*)node, true);
     case AST_NODE_TRY_STAM: {
         JsTryNode* tried = (JsTryNode*)node;
@@ -5283,18 +5283,18 @@ static bool js_interp_pattern_supported(JsAstNode* pattern) {
     case AST_NODE_MEMBER_EXPR:
     case AST_NODE_INDEX_EXPR:
         return true;
-    case JS_AST_NODE_ASSIGNMENT_PATTERN:
-    case JS_AST_NODE_REST_ELEMENT:
-    case JS_AST_NODE_REST_PROPERTY:
-    case JS_AST_NODE_SPREAD_ELEMENT:
-    case JS_AST_NODE_PROPERTY: {
+    case AST_NODE_ASSIGN_PATTERN:
+    case AST_NODE_REST_ELEMENT:
+    case AST_NODE_REST_PROPERTY:
+    case AST_NODE_SPREAD:
+    case AST_NODE_PROPERTY: {
         JsInterpPatternSupportState state = {true, false};
         js_ast_visit_binding_pattern_children(pattern,
             js_interp_pattern_supported_child, &state);
         return state.supported && state.has_child;
     }
-    case JS_AST_NODE_ARRAY_PATTERN:
-    case JS_AST_NODE_OBJECT_PATTERN: {
+    case AST_NODE_ARRAY_PATTERN:
+    case AST_NODE_MAP_PATTERN: {
         JsInterpPatternSupportState state = {true, false};
         js_ast_visit_binding_pattern_children(pattern,
             js_interp_pattern_supported_child, &state);
@@ -5340,28 +5340,28 @@ static void js_interp_check_node(JsAstNode* node, JsInterpSupportState* state) {
     case AST_NODE_IF_EXPR: case AST_NODE_LOOP:
     case AST_NODE_RETURN_STAM: case AST_NODE_RAISE_STAM:
     case AST_NODE_BREAK_STAM: case AST_NODE_CONTINUE_STAM: case AST_NODE_TRY_STAM:
-    case JS_AST_NODE_IMPORT_DECLARATION: case JS_AST_NODE_EXPORT_DECLARATION:
-    case JS_AST_NODE_IMPORT_SPECIFIER: case JS_AST_NODE_EXPORT_SPECIFIER:
-    case JS_AST_NODE_SWITCH_STATEMENT: case JS_AST_NODE_SWITCH_CASE:
+    case AST_NODE_IMPORT: case AST_NODE_EXPORT:
+    case AST_NODE_IMPORT_SPECIFIER: case AST_NODE_EXPORT_SPECIFIER:
+    case AST_NODE_MATCH_EXPR: case AST_NODE_MATCH_ARM:
     case JS_AST_NODE_TEMPLATE_LITERAL: case JS_AST_NODE_TEMPLATE_ELEMENT:
-    case JS_AST_NODE_SPREAD_ELEMENT:
+    case AST_NODE_SPREAD:
     case JS_AST_NODE_REGEX:
-    case JS_AST_NODE_ARRAY_PATTERN: case JS_AST_NODE_OBJECT_PATTERN:
-    case JS_AST_NODE_ASSIGNMENT_PATTERN: case JS_AST_NODE_REST_ELEMENT:
-    case JS_AST_NODE_REST_PROPERTY:
-    case JS_AST_NODE_AWAIT_EXPRESSION:
-    case JS_AST_NODE_YIELD_EXPRESSION:
+    case AST_NODE_ARRAY_PATTERN: case AST_NODE_MAP_PATTERN:
+    case AST_NODE_ASSIGN_PATTERN: case AST_NODE_REST_ELEMENT:
+    case AST_NODE_REST_PROPERTY:
+    case AST_NODE_AWAIT:
+    case AST_NODE_YIELD:
         break;
-    case JS_AST_NODE_CLASS_DECLARATION:
-    case JS_AST_NODE_CLASS_EXPRESSION:
+    case AST_NODE_CLASS:
+    case AST_NODE_CLASS_EXPR:
         break;
-    case JS_AST_NODE_METHOD_DEFINITION: {
+    case AST_NODE_METHOD: {
         JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)node;
         if ((method->kind == JsMethodDefinitionNode::JS_METHOD_CONSTRUCTOR &&
                  method->static_method)) state->supported = false;
         break;
     }
-    case JS_AST_NODE_FIELD_DEFINITION: {
+    case AST_NODE_FIELD: {
         break;
     }
     case JS_AST_NODE_STATIC_BLOCK:
@@ -5369,8 +5369,8 @@ static void js_interp_check_node(JsAstNode* node, JsInterpSupportState* state) {
     case JS_AST_NODE_WITH_STATEMENT:
     case JS_AST_NODE_TAGGED_TEMPLATE:
         break;
-    case JS_AST_NODE_FOR_OF_STATEMENT:
-    case JS_AST_NODE_FOR_IN_STATEMENT: {
+    case AST_NODE_FOR_OF_STAM:
+    case AST_NODE_FOR_IN_STAM: {
         JsForOfNode* loop = (JsForOfNode*)node;
         // This preflight runs while creating nested functions.  `for await`
         // may be syntactically valid in an uninvoked async body even though
@@ -5451,7 +5451,6 @@ static bool js_interp_function_tail_reuse_safe(JsFunction* function) {
 
 Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
         uint64_t* result_home) {
-    (void)result_home;
     if (!function || js_fn_body_kind(function) != JS_FUNCTION_BODY_AST ||
             !js_fn_ast_function(function) || !js_fn_ast_script(function)) return ItemError;
     RootFrame roots(7);
@@ -5546,7 +5545,7 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
                 param = (JsAstNode*)param->next) {
             RootFrame param_roots(1);
             Rooted<Item> value_root(param_roots, make_js_undefined());
-            if (param->node_type == JS_AST_NODE_REST_ELEMENT) {
+            if (param->node_type == AST_NODE_REST_ELEMENT) {
                 value_root.set(js_array_new(0));
                 if (item_is_error(value_root.get())) return value_root.get();
                 for (; index < call_arg_count; index++) {
@@ -5731,7 +5730,7 @@ static Item js_interp_prepare_suspended_activation(JsFunction* function,
             parameter; parameter = (JsAstNode*)parameter->next) {
         RootFrame parameter_roots(1);
         Rooted<Item> value_root(parameter_roots, make_js_undefined());
-        if (parameter->node_type == JS_AST_NODE_REST_ELEMENT) {
+        if (parameter->node_type == AST_NODE_REST_ELEMENT) {
             value_root.set(js_array_new(0));
             if (item_is_error(value_root.get())) return value_root.get();
             for (; index < arg_count; index++) {
@@ -6000,7 +5999,6 @@ extern "C" Item js_interp_resume_async(JsAsyncContextStateRecord* state,
 
 Item js_interp_execute_script(Runtime* runtime, JsScript* script,
         uint64_t* result_home) {
-    (void)result_home;
     if (!runtime || !script || !script->ast_root) return ItemError;
     EvalContext* eval = NULL;
     bool reusing_context = false;
@@ -6189,9 +6187,9 @@ static Item js_interp_load_static_imports(Runtime* runtime, JsScript* script) {
     for (JsAstNode* statement = program ? (JsAstNode*)program->body : NULL;
             statement; statement = (JsAstNode*)statement->next) {
         String* source = NULL;
-        if (statement->node_type == JS_AST_NODE_IMPORT_DECLARATION) {
+        if (statement->node_type == AST_NODE_IMPORT) {
             source = ((JsImportNode*)statement)->source;
-        } else if (statement->node_type == JS_AST_NODE_EXPORT_DECLARATION) {
+        } else if (statement->node_type == AST_NODE_EXPORT) {
             source = ((JsExportNode*)statement)->source;
         }
         if (!source) continue;
@@ -6223,7 +6221,7 @@ static Item js_interp_validate_star_exports(Runtime* runtime, JsScript* script) 
     Rooted<Item> key_root(roots, ItemNull);
     for (JsAstNode* statement = program ? (JsAstNode*)program->body : NULL;
             statement; statement = (JsAstNode*)statement->next) {
-        if (statement->node_type != JS_AST_NODE_EXPORT_DECLARATION) continue;
+        if (statement->node_type != AST_NODE_EXPORT) continue;
         JsExportNode* exported = (JsExportNode*)statement;
         if (!exported->is_star || exported->is_namespace || !exported->source) continue;
         char resolved[512];
@@ -6302,7 +6300,6 @@ static Item js_interp_instantiate_es_module(Runtime* runtime, JsScript* script) 
 
 Item js_interp_execute_es_module_script(Runtime* runtime, JsScript* script,
         uint64_t* result_home) {
-    (void)result_home;
     if (!runtime || !script) return ItemError;
     script->is_module = true;
     script->is_es_module = true;

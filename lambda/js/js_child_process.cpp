@@ -422,7 +422,6 @@ static Item child_abort_error(Item reason) {
 }
 
 static Item child_abort_with_env(Item env_item, Item event_item) {
-    (void)event_item;
     Item* env = (Item*)(uintptr_t)env_item.item;
     JsChildProcess* cp = env ? (JsChildProcess*)(uintptr_t)env[0].item : NULL;
     if (!cp || cp->process_exited || uv_is_closing((uv_handle_t*)&cp->process)) {
@@ -453,8 +452,7 @@ static void child_install_abort_signal(JsChildProcess* cp, Item options) {
     if (is_nullish_item(signal)) return;
     child_set_value(cp, JS_CHILD_VALUE_ABORT_SIGNAL, signal);
     cp->abort_kill_signal = SIGTERM;
-    Item* abort_env = js_alloc_env(1);
-    abort_env[0] = (Item){.item = (uint64_t)(uintptr_t)cp};
+    Item* abort_env = js_alloc_env1((Item){.item = (uint64_t)(uintptr_t)cp});
     cp->abort_env = abort_env;
     Item listener = js_new_native_closure(child_abort_with_env, 1, abort_env, 1);
     child_set_value(cp, JS_CHILD_VALUE_ABORT_LISTENER, listener);
@@ -899,9 +897,7 @@ static void spawn_flush_queued_ipc_messages(Item obj) {
     Item pending = js_get_key_default(obj, key);
     if (get_type_id(pending) != LMD_TYPE_ARRAY) return;
     js_set_key_default(obj, key, js_array_new(0));
-    int64_t len = js_array_length(pending);
-    for (int64_t i = 0; i < len; i++) {
-        Item entry = js_elements_get_int(pending, i);
+    JS_ARRAY_FOREACH(entry, pending) {
         Item message = js_get_key_cstr(entry, "message");
         Item handle = js_get_key_cstr(entry, "handle");
         spawn_emit_ipc_message_or_queue(obj, message, handle);
@@ -1101,8 +1097,7 @@ static Item spawn_unref_with_env(Item env_item) {
         sp->ipc_unref_requested = true;
         // fork() owns an IPC pipe; unref it after one tick so stdout writes made
         // just before ChildProcess.unref() can flush to the fork parent.
-        Item* tick_env = js_alloc_env(1);
-        tick_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+        Item* tick_env = js_alloc_env1((Item){.item = (uint64_t)(uintptr_t)sp});
         js_next_tick_enqueue(js_new_native_closure(spawn_unref_ipc_later, 0, tick_env, 1));
     }
     return js_get_this();
@@ -1110,9 +1105,7 @@ static Item spawn_unref_with_env(Item env_item) {
 
 static void schedule_spawn_send_callback(Item callback, Item err) {
     if (!is_callable(callback)) return;
-    Item* env = js_alloc_env(2);
-    env[0] = callback;
-    env[1] = err;
+    Item* env = js_alloc_env2(callback, err);
     Item tick = js_new_native_closure(spawn_send_callback_later, 0, env, 2);
     js_next_tick_enqueue(tick);
 }
@@ -1316,7 +1309,6 @@ static void spawn_emit_disconnect_once(JsSpawnProcess* sp) {
 }
 
 static Item spawn_abort_with_env(Item env_item, Item event_item) {
-    (void)event_item;
     Item* env = (Item*)(uintptr_t)env_item.item;
     JsSpawnProcess* sp = env ? (JsSpawnProcess*)(uintptr_t)env[0].item : NULL;
     if (!sp || sp->process_exited || uv_is_closing((uv_handle_t*)&sp->process)) {
@@ -1340,8 +1332,7 @@ static void spawn_install_abort_signal(Item obj, JsSpawnProcess* sp, Item option
     spawn_set_value(sp, JS_SPAWN_VALUE_ABORT_SIGNAL, signal);
     sp->abort_kill_signal = spawn_signal_number(js_get_key_cstr(options, "killSignal"));
 
-    Item* abort_env = js_alloc_env(1);
-    abort_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+    Item* abort_env = js_alloc_env1((Item){.item = (uint64_t)(uintptr_t)sp});
     sp->abort_env = abort_env;
     Item listener = js_new_native_closure(spawn_abort_with_env, 1, abort_env, 1);
     spawn_set_value(sp, JS_SPAWN_VALUE_ABORT_LISTENER, listener);
@@ -1728,7 +1719,6 @@ static Item spawn_add_listener(Item self, Item event_item, Item callback, bool o
 static void spawn_resume_stdio_stream(Item stream_obj);
 
 static Item js_spawn_stream_set_encoding(Item encoding) {
-    (void)encoding;
     return js_get_this();
 }
 
@@ -1765,8 +1755,7 @@ static Item spawn_stream_pipe_on_end(Item env_item) {
 
 static Item js_spawn_stream_pipe(Item dest, Item options) {
     Item source = js_get_this();
-    Item* data_env = js_alloc_env(1);
-    data_env[0] = dest;
+    Item* data_env = js_alloc_env1(dest);
     spawn_add_listener(source, make_string_item("data"),
                        js_new_native_closure(spawn_stream_pipe_on_data, 1, data_env, 1), false);
 
@@ -1775,9 +1764,7 @@ static Item js_spawn_stream_pipe(Item dest, Item options) {
         Item end_opt = js_get_key_cstr(options, "end");
         if (end_opt.item == ITEM_FALSE) should_end = (Item){.item = ITEM_FALSE};
     }
-    Item* end_env = js_alloc_env(2);
-    end_env[0] = dest;
-    end_env[1] = should_end;
+    Item* end_env = js_alloc_env2(dest, should_end);
     // child stdio streams are lightweight readables; missing pipe() aborts
     // silent fork setup and leaves the IPC child alive until the drain watchdog.
     spawn_add_listener(source, make_string_item("end"),
@@ -1885,7 +1872,6 @@ static void spawn_destroy_stdio_pipe(JsSpawnProcess* sp, int kind, Item stream_o
 }
 
 static Item js_spawn_stream_destroy(Item env_item, Item error_item) {
-    (void)error_item;
     Item* env = (Item*)(uintptr_t)env_item.item;
     JsSpawnProcess* sp = env ? (JsSpawnProcess*)(uintptr_t)env[0].item : NULL;
     int kind = 0;
@@ -1896,9 +1882,7 @@ static Item js_spawn_stream_destroy(Item env_item, Item error_item) {
 
 static void install_spawn_stream_destroy(Item stream_obj, JsSpawnProcess* sp,
                                          int kind, Item** out_env) {
-    Item* env = js_alloc_env(2);
-    env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
-    env[1] = (Item){.item = i2it(kind)};
+    Item* env = js_alloc_env2((Item){.item = (uint64_t)(uintptr_t)sp}, (Item){.item = i2it(kind)});
     if (out_env) *out_env = env;
     js_set_key_cstr(stream_obj, "destroy", js_new_native_closure(js_spawn_stream_destroy, 1, env, 2));
     js_set_key_cstr(stream_obj, "destroyed", (Item){.item = ITEM_FALSE});
@@ -2056,7 +2040,6 @@ static Item js_spawn_send_with_env(Item env_item, Item message, Item send_handle
 }
 
 extern "C" Item js_spawn_send(Item message, Item send_handle, Item options, Item callback) {
-    (void)message;
     Item self = js_get_this();
     Item cb = make_js_undefined();
     if (is_callable(callback)) cb = callback;
@@ -2124,23 +2107,19 @@ static Item make_child_process_object(void) {
 
 static void install_ipc_surface(Item obj, JsSpawnProcess* sp) {
     spawn_set_connected(obj, true);
-    Item* send_env = js_alloc_env(1);
-    send_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+    Item* send_env = js_alloc_env1((Item){.item = (uint64_t)(uintptr_t)sp});
     sp->send_env = send_env;
     js_set_key_cstr(obj, "send", js_new_native_closure(js_spawn_send_with_env, 4, send_env, 1));
-    Item* disconnect_env = js_alloc_env(1);
-    disconnect_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+    Item* disconnect_env = js_alloc_env1((Item){.item = (uint64_t)(uintptr_t)sp});
     sp->disconnect_env = disconnect_env;
     js_set_key_cstr(obj, "disconnect", js_new_native_closure(js_spawn_disconnect_with_env, 0, disconnect_env, 1));
 }
 
 static void install_spawn_lifecycle_surface(Item obj, JsSpawnProcess* sp) {
-    Item* kill_env = js_alloc_env(1);
-    kill_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+    Item* kill_env = js_alloc_env1((Item){.item = (uint64_t)(uintptr_t)sp});
     sp->kill_env = kill_env;
     js_set_key_cstr(obj, "kill", js_new_native_closure(spawn_kill_with_env, 1, kill_env, 1));
-    Item* dispose_env = js_alloc_env(1);
-    dispose_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+    Item* dispose_env = js_alloc_env1((Item){.item = (uint64_t)(uintptr_t)sp});
     sp->dispose_env = dispose_env;
     Item dispose_key = js_symbol_well_known(make_string_item("dispose"));
     // Symbol.dispose must drive the native kill path; treating it as a missing
@@ -2148,13 +2127,11 @@ static void install_spawn_lifecycle_surface(Item obj, JsSpawnProcess* sp) {
     js_set_key_default(obj, dispose_key,
                     js_new_native_closure(spawn_dispose_with_env, 0, dispose_env, 1));
 
-    Item* ref_env = js_alloc_env(1);
-    ref_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+    Item* ref_env = js_alloc_env1((Item){.item = (uint64_t)(uintptr_t)sp});
     sp->ref_env = ref_env;
     js_set_key_cstr(obj, "ref", js_new_native_closure(spawn_ref_with_env, 0, ref_env, 1));
 
-    Item* unref_env = js_alloc_env(1);
-    unref_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+    Item* unref_env = js_alloc_env1((Item){.item = (uint64_t)(uintptr_t)sp});
     sp->unref_env = unref_env;
     js_set_key_cstr(obj, "unref", js_new_native_closure(spawn_unref_with_env, 0, unref_env, 1));
 }
@@ -2562,8 +2539,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         sp->stdin_pipe.data = sp;
         sp->handles_expected++;
         Item stdin_obj = js_get_key_cstr(obj, "stdin");
-        Item* stdin_env = js_alloc_env(1);
-        stdin_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
+        Item* stdin_env = js_alloc_env1((Item){.item = (uint64_t)(uintptr_t)sp});
         sp->stdin_env = stdin_env;
         js_set_key_cstr(stdin_obj, "write", js_new_native_closure(js_spawn_stdin_write, 1, stdin_env, 1));
         js_set_key_cstr(stdin_obj, "end", js_new_native_closure(js_spawn_stdin_end, 1, stdin_env, 1));
@@ -2996,9 +2972,7 @@ extern "C" Item js_cp_fork(Item rest_args) {
             } else if (get_type_id(opt_stdio) == LMD_TYPE_STRING) {
                 return throw_invalid_stdio_value();
             } else if (get_type_id(opt_stdio) == LMD_TYPE_ARRAY) {
-                int64_t opt_len = js_array_length(opt_stdio);
-                for (int64_t i = 0; i < opt_len; i++) {
-                    Item entry = js_elements_get_int(opt_stdio, i);
+                JS_ARRAY_FOREACH(entry, opt_stdio) {
                     if (item_string_equals(entry, "ipc")) stdio_has_ipc = true;
                     js_array_push(stdio, entry);
                 }
@@ -3478,7 +3452,6 @@ static int cp_spawnSync_run_shell_command(const char* full_cmd, int64_t timeout_
 #else
 static int cp_spawnSync_run_shell_command(const char* full_cmd, int64_t timeout_ms,
                                           int kill_signal, bool* timed_out) {
-    (void)timeout_ms;
     (void)kill_signal;
     if (timed_out) *timed_out = false;
     return system(full_cmd);

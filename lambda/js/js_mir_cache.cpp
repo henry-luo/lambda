@@ -74,7 +74,6 @@ static uint64_t js_mir_cache_entry_hash(const void* item, uint64_t seed0, uint64
 }
 
 static int js_mir_cache_entry_compare(const void* left, const void* right, void* udata) {
-    (void)udata;
     const JsMirCacheEntry* a = (const JsMirCacheEntry*)left;
     const JsMirCacheEntry* b = (const JsMirCacheEntry*)right;
     if (a->preamble_mode != b->preamble_mode) return a->preamble_mode ? -1 : 1;

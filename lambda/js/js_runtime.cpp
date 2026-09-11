@@ -357,7 +357,6 @@ static uint64_t js_array_runtime_items_hash(const void* item, uint64_t seed0, ui
 }
 
 static int js_array_runtime_items_compare(const void* left, const void* right, void* udata) {
-    (void)udata;
     const JsArrayRuntimeItemsEntry* a = (const JsArrayRuntimeItemsEntry*)left;
     const JsArrayRuntimeItemsEntry* b = (const JsArrayRuntimeItemsEntry*)right;
     uintptr_t a_key = (uintptr_t)a->items;
@@ -1210,7 +1209,6 @@ extern "C" Item js_proxy_new(Item target, Item handler) {
 
 static Item js_proxy_revoke_call_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)this_value; (void)args; (void)argc; (void)result_home;
     JsFunction* fn = get_type_id(callee) == LMD_TYPE_FUNC
         ? (JsFunction*)callee.function : NULL;
     if (fn && fn->env && fn->env_size >= 1) {
@@ -1325,7 +1323,6 @@ extern "C" Item js_reflect_get_with_receiver(Item target, Item key, Item receive
 }
 
 static Item js_proxy_trap_set_failure(Item key) {
-    (void)key;
     // Proxy [[Set]] is a boolean completion. Assignment strictness belongs
     // to js_assignment_set_result, after the trap result returns here.
     return (Item){.item = b2it(false)};
@@ -3065,13 +3062,11 @@ static Item js_intrinsic_construct_with_policy(
 
 Item js_intrinsic_ctor_requires_new_call_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)args; (void)argc; (void)result_home;
     return js_throw_type_error("Constructor requires 'new'");
 }
 
 Item js_intrinsic_ctor_forbidden_construct_body(Item callee, Item* args,
         int argc, Item new_target, uint64_t* result_home) {
-    (void)callee; (void)args; (void)argc; (void)new_target; (void)result_home;
     // Symbol/BigInt remain construct-capable for IsConstructor and `extends`,
     // but their [[Construct]] invariant rejects before argument conversion.
     return js_throw_type_error("Constructor does not support 'new'");
@@ -3079,19 +3074,16 @@ Item js_intrinsic_ctor_forbidden_construct_body(Item callee, Item* args,
 
 Item js_typed_array_base_call_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)args; (void)argc; (void)result_home;
     return js_throw_type_error("Abstract class TypedArray not directly constructable");
 }
 
 Item js_typed_array_base_construct_body(Item callee, Item* args, int argc,
         Item new_target, uint64_t* result_home) {
-    (void)callee; (void)args; (void)argc; (void)new_target; (void)result_home;
     return js_throw_type_error("Abstract class TypedArray not directly constructable");
 }
 
 Item js_intrinsic_ctor_object_call_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
     Item value = argc > 0 && args ? args[0] : make_js_undefined();
     TypeId type = get_type_id(value);
     return type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED
@@ -3100,14 +3092,12 @@ Item js_intrinsic_ctor_object_call_body(Item callee, Item this_value,
 
 Item js_intrinsic_ctor_array_call_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)this_value; (void)result_home;
     return js_intrinsic_construct_allocate(JS_INTRINSIC_CONSTRUCT_ARRAY,
         callee, args, argc);
 }
 
 Item js_intrinsic_ctor_function_call_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
     return js_new_function_from_string(args, argc);
 }
 
@@ -3170,7 +3160,6 @@ JS_DYNAMIC_FUNCTION_TARGETS(JS_DEFINE_DYNAMIC_FUNCTION_TARGET)
 
 Item js_intrinsic_ctor_string_call_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
     if (argc == 0 || !args) return js_name_item("", 0);
     Item value = args[0];
     if (get_type_id(value) == LMD_TYPE_INT &&
@@ -3179,6 +3168,39 @@ Item js_intrinsic_ctor_string_call_body(Item callee, Item this_value,
     }
     return js_to_string(value);
 }
+
+// A missing actual is JavaScript undefined; ItemNull is an internal sentinel
+// and would change ToString/ToNumber (D6.2.2v2).
+JS_FORWARD_STATIC_EXPRESSION(Item, js_intrinsic_arg, (Item* args, int argc, int index), (args && index >= 0 && index < argc ? args[index] : make_js_undefined()))
+
+// Every intrinsic body has the same five-parameter native shape. These three
+// generics differ only in how much of the argument list they pre-bind. The
+// specialized macros below name a dispatcher; none of them respells the
+// signature, so the calling convention has exactly one definition.
+#define JS_INTRINSIC_BODY(body_name, expression) \
+    Item body_name(Item callee, Item this_value, Item* args, int argc, \
+            uint64_t* result_home) { \
+        (void)callee; (void)this_value; (void)args; (void)argc; \
+        (void)result_home; \
+        return (expression); \
+    }
+
+#define JS_INTRINSIC_ARG1_BODY(body_name, expression) \
+    Item body_name(Item callee, Item this_value, Item* args, int argc, \
+            uint64_t* result_home) { \
+        (void)callee; (void)this_value; (void)result_home; \
+        Item arg0 = js_intrinsic_arg(args, argc, 0); \
+        return (expression); \
+    }
+
+#define JS_INTRINSIC_ARG2_BODY(body_name, expression) \
+    Item body_name(Item callee, Item this_value, Item* args, int argc, \
+            uint64_t* result_home) { \
+        (void)callee; (void)this_value; (void)result_home; \
+        Item arg0 = js_intrinsic_arg(args, argc, 0); \
+        Item arg1 = js_intrinsic_arg(args, argc, 1); \
+        return (expression); \
+    }
 
 #define JS_CONSTRUCTOR_UNARY_BODY(body_name, expression) \
     Item body_name(Item callee, Item this_value, Item* args, int argc, \
@@ -3205,7 +3227,6 @@ JS_CONSTRUCTOR_UNARY_BODY(js_intrinsic_ctor_bigint_call_body,
 
 Item js_intrinsic_ctor_regexp_call_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)this_value; (void)result_home;
     Item pattern = argc > 0 && args ? args[0] : make_js_undefined();
     Item flags = argc > 1 && args ? args[1] : make_js_undefined();
     if (get_type_id(pattern) == LMD_TYPE_MAP &&
@@ -3225,22 +3246,13 @@ Item js_intrinsic_ctor_regexp_call_body(Item callee, Item this_value,
     return js_regexp_construct(pattern, flags);
 }
 
-#define JS_CONSTRUCTOR_NOARG_BODY(body_name, expression) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)this_value; (void)args; (void)argc; \
-        (void)result_home; \
-        return (expression); \
-    }
+#define JS_CONSTRUCTOR_NOARG_BODY JS_INTRINSIC_BODY
 JS_CONSTRUCTOR_NOARG_BODY(js_intrinsic_ctor_date_call_body, js_date_now_string())
 #undef JS_CONSTRUCTOR_NOARG_BODY
 
 #define JS_DEFINE_ERROR_CTOR_CALL_BODY(token, policy) \
-    Item js_intrinsic_ctor_##token##_call_body(Item callee, Item this_value, \
-            Item* args, int argc, uint64_t* result_home) { \
-        (void)callee; (void)this_value; (void)result_home; \
-        return js_intrinsic_error_allocate(policy, args, argc); \
-    }
+    JS_INTRINSIC_BODY(js_intrinsic_ctor_##token##_call_body, \
+        js_intrinsic_error_allocate(policy, args, argc))
 
 #define JS_ERROR_CTOR_CALL_BODIES(M) \
     M(error, JS_INTRINSIC_CONSTRUCT_ERROR) \
@@ -4105,7 +4117,6 @@ JS_HOST_META_KEY_OP(js_host_meta_get,
 
 static JsPropertyOpResult js_host_meta_set(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
-    (void)lane; (void)receiver; (void)descriptor;
     Item completion = ItemNull;
     return js_property_op_result(js_host_object_set_property(target, key,
         value, &completion), completion);
@@ -4127,7 +4138,6 @@ JS_HOST_META_OBJECT_OP(js_host_meta_get_prototype,
 
 static JsPropertyOpResult js_meta_property_get(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
-    (void)lane; (void)value; (void)descriptor;
     Item completion = ItemNull;
     return js_property_op_result(js_property_ops_property_get(
         target, key, receiver, &completion), completion);
@@ -4135,7 +4145,6 @@ static JsPropertyOpResult js_meta_property_get(Item target, uint64_t lane,
 
 static JsPropertyOpResult js_meta_property_set(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
-    (void)lane; (void)descriptor;
     Item mutable_value = value;
     Item completion = ItemNull;
     return js_property_op_result(js_property_ops_property_set(target, key,
@@ -4144,7 +4153,6 @@ static JsPropertyOpResult js_meta_property_set(Item target, uint64_t lane,
 
 static JsPropertyOpResult js_meta_property_define(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
-    (void)lane; (void)value; (void)receiver;
     // DefineOwn receives its descriptor in the table's final argument; using
     // the Set value slot here passed ItemNull into Proxy define traps.
     if (js_is_proxy(target)) {
@@ -4165,7 +4173,6 @@ static JsPropertyOpResult js_meta_property_define(Item target, uint64_t lane,
 
 static JsPropertyOpResult js_meta_property_delete(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
-    (void)lane; (void)value; (void)receiver; (void)descriptor;
     Item completion = ItemNull;
     return js_property_op_result(js_property_ops_delete_property(
         target, key, &completion), completion);
@@ -4173,7 +4180,6 @@ static JsPropertyOpResult js_meta_property_delete(Item target, uint64_t lane,
 
 static JsPropertyOpResult js_meta_property_has(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
-    (void)lane; (void)value; (void)receiver; (void)descriptor;
     Item completion = ItemNull;
     return js_property_op_result(js_property_ops_has_property(target, key,
         get_type_id(target), &completion), completion);
@@ -4181,7 +4187,6 @@ static JsPropertyOpResult js_meta_property_has(Item target, uint64_t lane,
 
 static JsPropertyOpResult js_meta_property_descriptor(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
-    (void)lane; (void)value; (void)receiver; (void)descriptor;
     String* name = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
     Item completion = ItemNull;
     return js_property_op_result(js_property_ops_own_property_descriptor(
@@ -4190,7 +4195,6 @@ static JsPropertyOpResult js_meta_property_descriptor(Item target, uint64_t lane
 
 static JsPropertyOpResult js_meta_property_own_keys(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
-    (void)lane; (void)key; (void)value; (void)receiver; (void)descriptor;
     if (js_is_proxy(target)) {
         // Proxy [[OwnKeys]] returns the full string-or-Symbol list. The
         // ordinary name collector is string-only, so using it here silently
@@ -5785,7 +5789,6 @@ static uint64_t js_array_sparse_hash(const void* item, uint64_t seed0, uint64_t 
 }
 
 static int js_array_sparse_compare(const void* left, const void* right, void* udata) {
-    (void)udata;
     const JsArraySparseHashEntry* a = (const JsArraySparseHashEntry*)left;
     const JsArraySparseHashEntry* b = (const JsArraySparseHashEntry*)right;
     return (a->index > b->index) - (a->index < b->index);
@@ -9620,24 +9623,9 @@ static int js_invoke_formal_count(const JsFunction* fn) {
 }
 JS_FORWARD_STATIC_EXPRESSION(bool, js_invoke_needs_adapter, (const JsFunction* fn, int arg_count), (js_fn_param_count(fn) < 0 || arg_count < js_invoke_formal_count(fn)))
 
-#define JS_GLOBAL_UNARY_BODY(body_name, expression) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)this_value; (void)result_home; \
-        /* Missing actuals are JavaScript undefined. ItemNull is an internal */ \
-        /* sentinel and changes ToString/ToNumber (D6.2.2v2). */ \
-        Item arg0 = argc > 0 ? args[0] : make_js_undefined(); \
-        return expression; \
-    }
+#define JS_GLOBAL_UNARY_BODY JS_INTRINSIC_ARG1_BODY
 
-#define JS_GLOBAL_BINARY_BODY(body_name, expression) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)this_value; (void)result_home; \
-        Item arg0 = argc > 0 ? args[0] : make_js_undefined(); \
-        Item arg1 = argc > 1 ? args[1] : make_js_undefined(); \
-        return expression; \
-    }
+#define JS_GLOBAL_BINARY_BODY JS_INTRINSIC_ARG2_BODY
 
 JS_GLOBAL_BINARY_BODY(js_intrinsic_global_parse_int_body,
     js_parseInt(arg0, arg1))
@@ -9656,7 +9644,6 @@ JS_GLOBAL_UNARY_BODY(js_intrinsic_global_unescape_body, js_unescape(arg0))
 JS_GLOBAL_UNARY_BODY(js_intrinsic_global_eval_body, js_builtin_eval(arg0, 1))
 static Item js_intrinsic_global_timer_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home, bool is_interval) {
-    (void)callee; (void)this_value; (void)result_home;
     RootSpan actual_roots((size_t)(argc > 0 ? argc : 1));
     if (!actual_roots.valid()) return ItemError;
     for (int i = 0; i < argc; i++) actual_roots.words()[i] = args[i].item;
@@ -9687,7 +9674,6 @@ Item js_intrinsic_global_set_interval_body(Item callee, Item this_value,
 
 Item js_intrinsic_global_set_immediate_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
     RootSpan actual_roots((size_t)(argc > 0 ? argc : 1));
     if (!actual_roots.valid()) return ItemError;
     for (int i = 0; i < argc; i++) actual_roots.words()[i] = args[i].item;
@@ -9733,7 +9719,6 @@ JS_GLOBAL_VOID_BODY(js_intrinsic_global_queue_microtask_body,
 
 Item js_intrinsic_global_print_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
     js_console_log(argc > 0 ? args[0] : ItemNull);
     return make_js_undefined();
 }
@@ -10546,13 +10531,8 @@ static Item js_intrinsic_array_prototype(JsIndexedIntrinsicOp op,
 }
 
 #define JS_ARRAY_INTRINSIC_BODY(body_name, op, method_name) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; \
-        return js_intrinsic_array_prototype(op, method_name, \
-            (int)(sizeof(method_name) - 1), this_value, args, argc, \
-            result_home); \
-    }
+    JS_INTRINSIC_BODY(body_name, \
+        js_intrinsic_array_prototype(op, method_name, (int)(sizeof(method_name) - 1), this_value, args, argc, result_home))
 #define JS_ARRAY_INTRINSIC_BODIES(M) \
     M(js_intrinsic_array_push_body, JS_ARRAY_INTRINSIC_PUSH, "push") M(js_intrinsic_array_pop_body, JS_ARRAY_INTRINSIC_POP, "pop") M(js_intrinsic_array_shift_body, JS_ARRAY_INTRINSIC_SHIFT, "shift") M(js_intrinsic_array_unshift_body, JS_ARRAY_INTRINSIC_UNSHIFT, "unshift") \
     M(js_intrinsic_array_join_body, JS_ARRAY_INTRINSIC_JOIN, "join") M(js_intrinsic_array_slice_body, JS_ARRAY_INTRINSIC_SLICE, "slice") M(js_intrinsic_array_splice_body, JS_ARRAY_INTRINSIC_SPLICE, "splice") M(js_intrinsic_array_index_of_body, JS_ARRAY_INTRINSIC_INDEX_OF, "indexOf") \
@@ -10582,13 +10562,8 @@ static Item js_intrinsic_typed_array_prototype(JsIndexedIntrinsicOp operation,
 }
 
 #define JS_TYPED_ARRAY_INTRINSIC_BODY(body_name, operation) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; \
-        return js_intrinsic_typed_array_prototype(operation, \
-            this_value, args, argc, \
-            result_home); \
-    }
+    JS_INTRINSIC_BODY(body_name, \
+        js_intrinsic_typed_array_prototype(operation, this_value, args, argc, result_home))
 #define JS_TYPED_ARRAY_INTRINSIC_BODIES(M) \
     M(js_intrinsic_typed_array_at_body, JS_ARRAY_INTRINSIC_AT) M(js_intrinsic_typed_array_copy_within_body, JS_ARRAY_INTRINSIC_COPY_WITHIN) M(js_intrinsic_typed_array_entries_body, JS_ARRAY_INTRINSIC_ENTRIES) M(js_intrinsic_typed_array_every_body, JS_ARRAY_INTRINSIC_EVERY) \
     M(js_intrinsic_typed_array_fill_body, JS_ARRAY_INTRINSIC_FILL) M(js_intrinsic_typed_array_filter_body, JS_ARRAY_INTRINSIC_FILTER) M(js_intrinsic_typed_array_find_body, JS_ARRAY_INTRINSIC_FIND) M(js_intrinsic_typed_array_find_index_body, JS_ARRAY_INTRINSIC_FIND_INDEX) \
@@ -10632,11 +10607,7 @@ static Item js_intrinsic_typed_array_accessor(JsTypedArrayAccessorOp op,
 }
 
 #define JS_TYPED_ARRAY_ACCESSOR_BODY(body_name, op) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)args; (void)argc; (void)result_home; \
-        return js_intrinsic_typed_array_accessor(op, this_value); \
-    }
+    JS_INTRINSIC_BODY(body_name, js_intrinsic_typed_array_accessor(op, this_value))
 JS_TYPED_ARRAY_ACCESSOR_BODY(js_intrinsic_typed_array_get_buffer_body,
     JS_TYPED_ARRAY_ACCESSOR_BUFFER)
 JS_TYPED_ARRAY_ACCESSOR_BODY(js_intrinsic_typed_array_get_byte_length_body,
@@ -10649,7 +10620,6 @@ JS_TYPED_ARRAY_ACCESSOR_BODY(js_intrinsic_typed_array_get_length_body,
 
 Item js_intrinsic_typed_array_to_string_tag_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)args; (void)argc; (void)result_home;
     const char* name = js_typed_array_type_name(this_value);
     return name ? js_name_item(name, strlen(name))
         : make_js_undefined();
@@ -10664,11 +10634,8 @@ static Item js_intrinsic_dataview_method(JsDataViewOperation operation,
 }
 
 #define JS_DATAVIEW_METHOD_BODY(body_name, operation) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)result_home; \
-        return js_intrinsic_dataview_method(operation, this_value, args, argc); \
-    }
+    JS_INTRINSIC_BODY(body_name, \
+        js_intrinsic_dataview_method(operation, this_value, args, argc))
 #define JS_DATAVIEW_METHOD_BODIES(M) \
     M(js_intrinsic_dataview_get_int8_body, JS_DATAVIEW_GET_INT8) M(js_intrinsic_dataview_get_uint8_body, JS_DATAVIEW_GET_UINT8) M(js_intrinsic_dataview_get_int16_body, JS_DATAVIEW_GET_INT16) M(js_intrinsic_dataview_get_uint16_body, JS_DATAVIEW_GET_UINT16) \
     M(js_intrinsic_dataview_get_int32_body, JS_DATAVIEW_GET_INT32) M(js_intrinsic_dataview_get_uint32_body, JS_DATAVIEW_GET_UINT32) M(js_intrinsic_dataview_get_float32_body, JS_DATAVIEW_GET_FLOAT32) M(js_intrinsic_dataview_get_float64_body, JS_DATAVIEW_GET_FLOAT64) \
@@ -10715,11 +10682,7 @@ static Item js_intrinsic_dataview_accessor(JsDataViewAccessorOp op,
 }
 
 #define JS_DATAVIEW_ACCESSOR_BODY(body_name, op) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)args; (void)argc; (void)result_home; \
-        return js_intrinsic_dataview_accessor(op, this_value); \
-    }
+    JS_INTRINSIC_BODY(body_name, js_intrinsic_dataview_accessor(op, this_value))
 JS_DATAVIEW_ACCESSOR_BODY(js_intrinsic_dataview_get_buffer_body,
     JS_DATAVIEW_ACCESSOR_BUFFER)
 JS_DATAVIEW_ACCESSOR_BODY(js_intrinsic_dataview_get_byte_length_body,
@@ -10748,12 +10711,8 @@ static Item js_intrinsic_string_method(Item this_value, JsStringIntrinsicOp op,
 // The published call target fixes the operation; display metadata is not an
 // executable selector under D6.2.2v2.
 #define JS_STRING_INTRINSIC_BODY(body_name, operation, strict_receiver) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)result_home; \
-        return js_intrinsic_string_method(this_value, operation, \
-            strict_receiver, args, argc); \
-    }
+    JS_INTRINSIC_BODY(body_name, \
+        js_intrinsic_string_method(this_value, operation, strict_receiver, args, argc))
 #define JS_STRING_INTRINSIC_BODIES(M) \
     M(js_intrinsic_string_char_at_body, JS_STRING_INTRINSIC_CHAR_AT, false) M(js_intrinsic_string_char_code_at_body, JS_STRING_INTRINSIC_CHAR_CODE_AT, false) M(js_intrinsic_string_index_of_body, JS_STRING_INTRINSIC_INDEX_OF, false) M(js_intrinsic_string_includes_body, JS_STRING_INTRINSIC_INCLUDES, false) \
     M(js_intrinsic_string_slice_body, JS_STRING_INTRINSIC_SLICE, false) M(js_intrinsic_string_substring_body, JS_STRING_INTRINSIC_SUBSTRING, false) M(js_intrinsic_string_to_lower_case_body, JS_STRING_INTRINSIC_TO_LOWER_CASE, false) M(js_intrinsic_string_to_upper_case_body, JS_STRING_INTRINSIC_TO_UPPER_CASE, false) \
@@ -10794,11 +10753,7 @@ static Item js_intrinsic_number_prototype(JsNumericPrototypeOp op,
 }
 
 #define JS_NUMBER_PROTOTYPE_BODY(body_name, op) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)result_home; \
-        return js_intrinsic_number_prototype(op, this_value, args, argc); \
-    }
+    JS_INTRINSIC_BODY(body_name, js_intrinsic_number_prototype(op, this_value, args, argc))
 JS_NUMBER_PROTOTYPE_BODY(js_intrinsic_number_to_string_body,
     JS_NUMERIC_TO_STRING)
 JS_NUMBER_PROTOTYPE_BODY(js_intrinsic_number_value_of_body,
@@ -10811,14 +10766,7 @@ JS_NUMBER_PROTOTYPE_BODY(js_intrinsic_number_to_exponential_body,
     JS_NUMERIC_TO_EXPONENTIAL)
 #undef JS_NUMBER_PROTOTYPE_BODY
 
-#define JS_NUMBER_STATIC_BODY(body_name, expression) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)this_value; (void)result_home; \
-        Item arg0 = argc > 0 ? args[0] : make_js_undefined(); \
-        Item arg1 = argc > 1 ? args[1] : make_js_undefined(); \
-        return (expression); \
-    }
+#define JS_NUMBER_STATIC_BODY JS_INTRINSIC_ARG2_BODY
 JS_NUMBER_STATIC_BODY(js_intrinsic_number_is_integer_body,
     js_number_is_integer(arg0))
 JS_NUMBER_STATIC_BODY(js_intrinsic_number_is_finite_body,
@@ -10858,11 +10806,7 @@ static Item js_intrinsic_bigint_prototype(JsNumericPrototypeOp op,
 }
 
 #define JS_BIGINT_PROTOTYPE_BODY(body_name, op) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)result_home; \
-        return js_intrinsic_bigint_prototype(op, this_value, args, argc); \
-    }
+    JS_INTRINSIC_BODY(body_name, js_intrinsic_bigint_prototype(op, this_value, args, argc))
 JS_BIGINT_PROTOTYPE_BODY(js_intrinsic_bigint_to_string_body,
     JS_NUMERIC_TO_STRING)
 JS_BIGINT_PROTOTYPE_BODY(js_intrinsic_bigint_value_of_body,
@@ -10913,12 +10857,7 @@ static Item js_intrinsic_symbol_description(Item this_value) {
     return js_symbol_get_description(symbol);
 }
 
-#define JS_SYMBOL_VALUE_BODY(body_name, expression) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)args; (void)argc; (void)result_home; \
-        return (expression); \
-    }
+#define JS_SYMBOL_VALUE_BODY JS_INTRINSIC_BODY
 JS_SYMBOL_VALUE_BODY(js_intrinsic_symbol_to_string_body,
     js_intrinsic_symbol_to_string(this_value))
 JS_SYMBOL_VALUE_BODY(js_intrinsic_symbol_value_of_body,
@@ -10931,13 +10870,7 @@ JS_SYMBOL_VALUE_BODY(js_intrinsic_symbol_description_body,
     js_intrinsic_symbol_description(this_value))
 #undef JS_SYMBOL_VALUE_BODY
 
-#define JS_UNARY_INTRINSIC_BODY(body_name, expression) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)this_value; (void)result_home; \
-        Item arg0 = argc > 0 ? args[0] : make_js_undefined(); \
-        return (expression); \
-    }
+#define JS_UNARY_INTRINSIC_BODY JS_INTRINSIC_ARG1_BODY
 JS_UNARY_INTRINSIC_BODY(js_intrinsic_symbol_for_body, js_symbol_for(arg0))
 JS_UNARY_INTRINSIC_BODY(js_intrinsic_symbol_key_for_body,
     js_symbol_key_for(arg0))
@@ -10945,7 +10878,6 @@ JS_UNARY_INTRINSIC_BODY(js_intrinsic_symbol_key_for_body,
 
 Item js_intrinsic_string_raw_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
     return js_string_raw(args, argc);
 }
 
@@ -10962,21 +10894,18 @@ static Item js_intrinsic_string_from_code(Item* args, int argc,
 
 Item js_intrinsic_string_from_code_point_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
     return js_intrinsic_string_from_code(args, argc, js_string_fromCodePoint,
         js_string_fromCodePoint_array, false);
 }
 
 Item js_intrinsic_string_from_char_code_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
     return js_intrinsic_string_from_code(args, argc, js_string_fromCharCode,
         js_string_fromCharCode_array, true);
 }
 
 Item js_intrinsic_string_iterator_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)args; (void)argc; (void)result_home;
     TypeId this_type = get_type_id(this_value);
     if (this_type == LMD_TYPE_NULL || this_type == LMD_TYPE_UNDEFINED ||
         this_value.item == 0) {
@@ -10993,7 +10922,6 @@ Item js_intrinsic_string_iterator_body(Item callee, Item this_value,
 
 Item js_intrinsic_string_iterator_next_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)args; (void)argc; (void)result_home;
     if (get_type_id(this_value) != LMD_TYPE_MAP) {
         return js_throw_type_error(
             "String Iterator.prototype.next called on incompatible receiver");
@@ -11055,12 +10983,8 @@ static Item js_intrinsic_collection_method(int collection_type, bool is_weak,
 }
 
 #define JS_COLLECTION_METHOD_BODY(body_name, collection_type, is_weak, op, error) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)result_home; \
-        return js_intrinsic_collection_method(collection_type, is_weak, op, \
-            error, this_value, args, argc); \
-    }
+    JS_INTRINSIC_BODY(body_name, \
+        js_intrinsic_collection_method(collection_type, is_weak, op, error, this_value, args, argc))
 JS_COLLECTION_METHOD_BODY(js_intrinsic_map_set_body, JS_COLLECTION_MAP,
     false, 0, "Method Map.prototype.* called on incompatible receiver")
 JS_COLLECTION_METHOD_BODY(js_intrinsic_map_get_body, JS_COLLECTION_MAP,
@@ -11101,7 +11025,6 @@ JS_COLLECTION_METHOD_BODY(js_intrinsic_weakset_delete_body, JS_COLLECTION_SET,
 
 Item js_intrinsic_function_to_string_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee;
     (void)args;
     (void)argc;
     (void)result_home;
@@ -11137,61 +11060,24 @@ Item js_intrinsic_function_to_string_body(Item callee, Item this_value,
     return js_native_function_source_item();
 }
 
-JS_FORWARD_STATIC_EXPRESSION(Item, js_intrinsic_arg, (Item* args, int argc, int index), (args && index >= 0 && index < argc ? args[index] : make_js_undefined()))
 
-#define JS_RUNTIME_NOARG_BODY(body_name, expression) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)this_value; (void)args; (void)argc; \
-        (void)result_home; \
-        return (expression); \
-    }
+#define JS_RUNTIME_NOARG_BODY JS_INTRINSIC_BODY
 
-#define JS_RUNTIME_THIS_BODY(body_name, expression) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)args; (void)argc; (void)result_home; \
-        return (expression); \
-    }
+#define JS_RUNTIME_THIS_BODY JS_INTRINSIC_BODY
 
-#define JS_RUNTIME_UNARY_BODY(body_name, expression) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)this_value; (void)result_home; \
-        Item arg0 = js_intrinsic_arg(args, argc, 0); \
-        return (expression); \
-    }
+#define JS_RUNTIME_UNARY_BODY JS_INTRINSIC_ARG1_BODY
 
-#define JS_RUNTIME_THIS_UNARY_BODY(body_name, expression) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)result_home; \
-        Item arg0 = js_intrinsic_arg(args, argc, 0); \
-        return (expression); \
-    }
+#define JS_RUNTIME_THIS_UNARY_BODY JS_INTRINSIC_ARG1_BODY
 
-#define JS_RUNTIME_BINARY_BODY(body_name, expression) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)this_value; (void)result_home; \
-        Item arg0 = js_intrinsic_arg(args, argc, 0); \
-        Item arg1 = js_intrinsic_arg(args, argc, 1); \
-        return (expression); \
-    }
+#define JS_RUNTIME_BINARY_BODY JS_INTRINSIC_ARG2_BODY
 
-#define JS_RUNTIME_ARGS_BODY(body_name, expression) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)this_value; (void)result_home; \
-        return (expression); \
-    }
+#define JS_RUNTIME_ARGS_BODY JS_INTRINSIC_BODY
 
 JS_RUNTIME_THIS_UNARY_BODY(js_intrinsic_object_has_own_body,
     js_object_prototype_has_own_property(this_value, arg0))
 
 Item js_intrinsic_object_property_enumerable_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee;
     (void)result_home;
     if (js_is_nullish(this_value)) {
         return js_throw_type_error("Cannot convert undefined or null to object");
@@ -11234,7 +11120,6 @@ JS_RUNTIME_THIS_BODY(js_intrinsic_object_value_of_body,
 
 Item js_intrinsic_object_is_prototype_of_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee;
     (void)result_home;
     if (argc < 1) return (Item){.item = ITEM_FALSE};
     Item target = args[0];
@@ -11254,7 +11139,6 @@ Item js_intrinsic_object_is_prototype_of_body(Item callee, Item this_value,
 
 Item js_intrinsic_object_to_locale_string_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee;
     (void)args;
     (void)argc;
     if (js_is_nullish(this_value)) {
@@ -11297,11 +11181,8 @@ static Item js_intrinsic_object_define_accessor(Item this_value, Item* args,
 }
 
 #define JS_OBJECT_ACCESSOR_BODY(body_name, getter) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)result_home; \
-        return js_intrinsic_object_define_accessor(this_value, args, argc, getter); \
-    }
+    JS_INTRINSIC_BODY(body_name, \
+        js_intrinsic_object_define_accessor(this_value, args, argc, getter))
 JS_OBJECT_ACCESSOR_BODY(js_intrinsic_object_define_getter_body, true)
 JS_OBJECT_ACCESSOR_BODY(js_intrinsic_object_define_setter_body, false)
 #undef JS_OBJECT_ACCESSOR_BODY
@@ -11335,11 +11216,8 @@ static Item js_intrinsic_object_lookup_accessor(Item this_value, Item* args,
 }
 
 #define JS_OBJECT_LOOKUP_ACCESSOR_BODY(body_name, getter) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)result_home; \
-        return js_intrinsic_object_lookup_accessor(this_value, args, argc, getter); \
-    }
+    JS_INTRINSIC_BODY(body_name, \
+        js_intrinsic_object_lookup_accessor(this_value, args, argc, getter))
 JS_OBJECT_LOOKUP_ACCESSOR_BODY(js_intrinsic_object_lookup_getter_body, true)
 JS_OBJECT_LOOKUP_ACCESSOR_BODY(js_intrinsic_object_lookup_setter_body, false)
 #undef JS_OBJECT_LOOKUP_ACCESSOR_BODY
@@ -11349,7 +11227,6 @@ JS_RUNTIME_THIS_BODY(js_intrinsic_object_proto_getter_body,
 
 Item js_intrinsic_object_proto_setter_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee;
     (void)result_home;
     if (js_is_nullish(this_value)) {
         return js_throw_type_error("Cannot convert undefined or null to object");
@@ -11380,7 +11257,6 @@ static Item js_intrinsic_boolean_value(Item this_value, const char* error) {
 
 Item js_intrinsic_boolean_to_string_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)args; (void)argc; (void)result_home;
     JS_ASSIGN_OR_RETURN(primitive, js_intrinsic_boolean_value(this_value,
         "Boolean.prototype.toString requires that 'this' be a Boolean"));
     // ToString on the wrapper would call this method recursively; the Boolean
@@ -11392,7 +11268,6 @@ Item js_intrinsic_boolean_to_string_body(Item callee, Item this_value,
 
 Item js_intrinsic_boolean_value_of_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)args; (void)argc; (void)result_home;
     return js_intrinsic_boolean_value(this_value,
         "Boolean.prototype.valueOf requires that 'this' be a Boolean");
 }
@@ -11603,11 +11478,7 @@ static Item js_intrinsic_object_static(JsObjectStaticOp op, Item* args,
 }
 
 #define JS_OBJECT_STATIC_BODY(name, op) \
-    Item name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)this_value; (void)result_home; \
-        return js_intrinsic_object_static(op, args, argc); \
-    }
+    JS_INTRINSIC_BODY(name, js_intrinsic_object_static(op, args, argc))
 JS_OBJECT_STATIC_BODY(js_intrinsic_object_define_property_body,
     JS_OBJECT_STATIC_DEFINE_PROPERTY)
 JS_OBJECT_STATIC_BODY(js_intrinsic_object_define_properties_body,
@@ -11639,14 +11510,7 @@ JS_OBJECT_STATIC_BODY(js_intrinsic_object_set_prototype_of_body,
     JS_OBJECT_STATIC_SET_PROTOTYPE_OF)
 #undef JS_OBJECT_STATIC_BODY
 
-#define JS_SIMPLE_INTRINSIC_BODY(name, expression) \
-    Item name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)this_value; (void)result_home; \
-        Item arg0 = js_intrinsic_arg(args, argc, 0); \
-        Item arg1 = js_intrinsic_arg(args, argc, 1); \
-        return (expression); \
-    }
+#define JS_SIMPLE_INTRINSIC_BODY JS_INTRINSIC_ARG2_BODY
 JS_SIMPLE_INTRINSIC_BODY(js_intrinsic_object_from_entries_body,
     js_object_from_entries(arg0))
 JS_SIMPLE_INTRINSIC_BODY(js_intrinsic_object_is_body, js_object_is(arg0, arg1))
@@ -11658,7 +11522,6 @@ JS_SIMPLE_INTRINSIC_BODY(js_intrinsic_object_group_by_body,
 
 Item js_intrinsic_object_create_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    (void)callee;
     (void)this_value;
     (void)result_home;
     Item object = js_object_create(js_intrinsic_arg(args, argc, 0));
@@ -11672,7 +11535,6 @@ Item js_intrinsic_object_create_body(Item callee, Item this_value, Item* args,
 
 Item js_intrinsic_object_assign_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    (void)callee;
     (void)this_value;
     (void)result_home;
     Item target = js_intrinsic_arg(args, argc, 0);
@@ -11682,7 +11544,6 @@ Item js_intrinsic_object_assign_body(Item callee, Item this_value, Item* args,
 
 Item js_intrinsic_object_to_string_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    (void)callee;
     (void)args;
     (void)argc;
     (void)result_home;
@@ -11891,14 +11752,12 @@ Item js_intrinsic_object_to_string_body(Item callee, Item this_value, Item* args
 
 Item js_intrinsic_array_is_array_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
     Item value = argc > 0 ? args[0] : make_js_undefined();
     return js_array_is_array(value);
 }
 
 Item js_intrinsic_array_from_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    (void)callee; (void)result_home;
     Item source = argc > 0 ? args[0] : make_js_undefined();
     Item mapper = argc > 1 ? args[1] : make_js_undefined();
     Item mapper_this = argc > 2 ? args[2] : make_js_undefined();
@@ -11921,7 +11780,6 @@ Item js_intrinsic_array_from_body(Item callee, Item this_value, Item* args,
 
 Item js_intrinsic_array_of_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    (void)callee; (void)result_home;
     Item result = ItemNull;
     if (js_is_constructor_internal(this_value)) {
         Item length = (Item){.item = i2it(argc)};
@@ -11945,7 +11803,6 @@ Item js_intrinsic_array_of_body(Item callee, Item this_value, Item* args,
 
 Item js_intrinsic_array_iterator_next_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)args; (void)argc; (void)result_home;
     Item this_val = this_value;
         // Array iterator .next() — this_val is the iterator object with __array__, __index__, __kind__
         if (get_type_id(this_val) != LMD_TYPE_MAP) {
@@ -12045,7 +11902,6 @@ static Item js_typed_array_from_store_mapped(Item result, Item mapfn, Item map_t
 
 Item js_intrinsic_typed_array_from_body(Item callee, Item this_value, Item* args, int argc,
         uint64_t* result_home) {
-    (void)callee; (void)result_home;
     Item arg0 = js_intrinsic_arg(args, argc, 0);
         // %TypedArray%.from(source [, mapfn [, thisArg]])
         // this_val is the constructor (e.g. Uint8Array)
@@ -12121,7 +11977,6 @@ Item js_intrinsic_typed_array_from_body(Item callee, Item this_value, Item* args
 
 Item js_intrinsic_typed_array_of_body(Item callee, Item this_value, Item* args, int argc,
         uint64_t* result_home) {
-    (void)callee; (void)result_home;
         JS_ASSIGN_OR_RETURN(result, js_typed_array_create_with_constructor(this_value, argc));
         for (int i = 0; i < argc; i++) {
             JS_ASSIGN_OR_RETURN(set_result, js_typed_array_set(result, (Item){.item = i2it(i)}, args[i]));
@@ -12131,11 +11986,8 @@ Item js_intrinsic_typed_array_of_body(Item callee, Item this_value, Item* args, 
 }
 
 #define JS_ARRAYBUFFER_BODY(body_name, operation) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)result_home; \
-        return js_intrinsic_arraybuffer_operation(operation, this_value, args, argc); \
-    }
+    JS_INTRINSIC_BODY(body_name, \
+        js_intrinsic_arraybuffer_operation(operation, this_value, args, argc))
 
 enum JsArrayBufferIntrinsicOp {
     JS_ARRAYBUFFER_IS_VIEW,
@@ -12279,7 +12131,6 @@ JS_ATOMICS_OPERATION_BODY(js_intrinsic_atomics_xor_body, JS_ATOMICS_OP_XOR,
 
 Item js_intrinsic_atomics_pause_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
     if (argc > 0 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED) {
         TypeId type = get_type_id(args[0]);
         if (type == LMD_TYPE_INT &&
@@ -12341,12 +12192,8 @@ static Item js_intrinsic_collection_iterator_create(int collection_type,
 }
 
 #define JS_COLLECTION_ITERATOR_BODY(body_name, collection_type, mode) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)args; (void)argc; (void)result_home; \
-        return js_intrinsic_collection_iterator_create(collection_type, mode, \
-            this_value); \
-    }
+    JS_INTRINSIC_BODY(body_name, \
+        js_intrinsic_collection_iterator_create(collection_type, mode, this_value))
 JS_COLLECTION_ITERATOR_BODY(js_intrinsic_set_values_body,
     JS_COLLECTION_SET, 0)
 JS_COLLECTION_ITERATOR_BODY(js_intrinsic_set_keys_body,
@@ -12374,12 +12221,7 @@ static Item js_intrinsic_set_operation(JsIndexedIntrinsicOp operation,
 }
 
 #define JS_SET_OPERATION_BODY(body_name, operation) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)result_home; \
-        return js_intrinsic_set_operation(operation, \
-            this_value, args, argc); \
-    }
+    JS_INTRINSIC_BODY(body_name, js_intrinsic_set_operation(operation, this_value, args, argc))
 JS_SET_OPERATION_BODY(js_intrinsic_set_intersection_body, JS_SET_INTRINSIC_INTERSECTION)
 JS_SET_OPERATION_BODY(js_intrinsic_set_union_body, JS_SET_INTRINSIC_UNION)
 JS_SET_OPERATION_BODY(js_intrinsic_set_difference_body, JS_SET_INTRINSIC_DIFFERENCE)
@@ -12397,7 +12239,6 @@ JS_RUNTIME_THIS_BODY(js_intrinsic_weakref_deref_body,
 
 Item js_intrinsic_finalization_register_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)result_home;
     Item target = argc > 0 ? args[0] : make_js_undefined();
     Item holdings = argc > 1 ? args[1] : make_js_undefined();
     Item token = argc > 2 ? args[2] : make_js_undefined();
@@ -12433,11 +12274,7 @@ static Item js_intrinsic_collection_size(JsCollectionSizeKind kind,
 }
 
 #define JS_COLLECTION_SIZE_BODY(body_name, kind) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)args; (void)argc; (void)result_home; \
-        return js_intrinsic_collection_size(kind, this_value); \
-    }
+    JS_INTRINSIC_BODY(body_name, js_intrinsic_collection_size(kind, this_value))
 JS_COLLECTION_SIZE_BODY(js_intrinsic_collection_size_body,
     JS_COLLECTION_SIZE_ANY)
 JS_COLLECTION_SIZE_BODY(js_intrinsic_map_size_body, JS_COLLECTION_SIZE_MAP)
@@ -12446,7 +12283,6 @@ JS_COLLECTION_SIZE_BODY(js_intrinsic_set_size_body, JS_COLLECTION_SIZE_SET)
 
 Item js_intrinsic_collection_iterator_next_body(Item callee,
         Item this_value, Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)args; (void)argc; (void)result_home;
     Item this_val = this_value;
         // Collection iterator .next()
         if (get_type_id(this_val) != LMD_TYPE_MAP) {
@@ -12518,7 +12354,6 @@ Item js_intrinsic_collection_iterator_next_body(Item callee,
 
 Item js_intrinsic_error_to_string_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)args; (void)argc; (void)result_home;
     if (!js_is_object_value(this_value)) {
         return js_throw_type_error("Error.prototype.toString called on incompatible receiver");
     }
@@ -12566,14 +12401,12 @@ Item js_intrinsic_error_to_string_body(Item callee, Item this_value,
 
 Item js_intrinsic_json_parse_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
     Item text = argc > 0 ? args[0] : make_js_undefined();
     return argc > 1 ? js_json_parse_full(text, args[1]) : js_json_parse(text);
 }
 
 Item js_intrinsic_json_stringify_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
     Item value = argc > 0 ? args[0] : make_js_undefined();
     if (argc <= 1) return js_json_stringify(value);
     Item space = argc > 2 ? args[2] : ItemNull;
@@ -12587,19 +12420,11 @@ JS_RUNTIME_UNARY_BODY(js_intrinsic_json_is_raw_json_body,
 // D6.2.2v2: each Date property stores a distinct direct target; the selected
 // operation is immutable target policy and never comes from function metadata.
 #define JS_DATE_METHOD_BODY(body_name, operation) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)args; (void)argc; (void)result_home; \
-        return js_date_method(this_value, operation); \
-    }
+    JS_INTRINSIC_BODY(body_name, js_date_method(this_value, operation))
 
 #define JS_DATE_ZERO_SETTER_BODY(body_name, operation, missing) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)args; (void)argc; (void)result_home; \
-        return js_date_setter(this_value, operation, missing, missing, \
-            missing, missing); \
-    }
+    JS_INTRINSIC_BODY(body_name, \
+        js_date_setter(this_value, operation, missing, missing, missing, missing))
 
 static Item js_intrinsic_date_setter_args(int operation, Item this_value,
         Item* args, int argc, Item missing_tail) {
@@ -12612,12 +12437,8 @@ static Item js_intrinsic_date_setter_args(int operation, Item this_value,
 }
 
 #define JS_DATE_SETTER_BODY(body_name, operation, missing_tail) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)result_home; \
-        return js_intrinsic_date_setter_args(operation, this_value, args, \
-            argc, missing_tail); \
-    }
+    JS_INTRINSIC_BODY(body_name, \
+        js_intrinsic_date_setter_args(operation, this_value, args, argc, missing_tail))
 
 #define JS_DATE_METHOD_BODIES(M) \
     M(js_intrinsic_date_get_time_body, 0) M(js_intrinsic_date_get_full_year_body, 1) M(js_intrinsic_date_get_month_body, 2) M(js_intrinsic_date_get_date_body, 3) M(js_intrinsic_date_get_hours_body, 4) \
@@ -12645,7 +12466,6 @@ JS_DATE_SETTER_BODIES(JS_DATE_SETTER_BODY)
 
 Item js_intrinsic_date_to_primitive_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)result_home;
     if (get_type_id(this_value) != LMD_TYPE_MAP &&
         get_type_id(this_value) != LMD_TYPE_ELEMENT) {
         return js_throw_type_error(
@@ -12703,7 +12523,6 @@ JS_RUNTIME_UNARY_BODY(js_intrinsic_date_parse_body, js_date_parse(arg0))
 
 Item js_intrinsic_date_utc_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
     Item packed = js_array_new(0);
     for (int i = 0; i < argc; i++) js_array_push(packed, args[i]);
     return js_date_utc(packed);
@@ -12773,11 +12592,8 @@ static Item js_intrinsic_promise_operation(JsPromiseIntrinsicOp operation,
 }
 
 #define JS_PROMISE_INTRINSIC_BODY(body_name, operation) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)result_home; \
-        return js_intrinsic_promise_operation(operation, this_value, args, argc); \
-    }
+    JS_INTRINSIC_BODY(body_name, \
+        js_intrinsic_promise_operation(operation, this_value, args, argc))
 JS_PROMISE_INTRINSIC_BODY(js_intrinsic_promise_resolve_body,
     JS_PROMISE_INTRINSIC_RESOLVE)
 JS_PROMISE_INTRINSIC_BODY(js_intrinsic_promise_reject_body,
@@ -12857,11 +12673,7 @@ static Item js_intrinsic_reflect_operation(JsReflectIntrinsicOp operation,
 }
 
 #define JS_REFLECT_INTRINSIC_BODY(body_name, operation) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)this_value; (void)result_home; \
-        return js_intrinsic_reflect_operation(operation, args, argc); \
-    }
+    JS_INTRINSIC_BODY(body_name, js_intrinsic_reflect_operation(operation, args, argc))
 JS_REFLECT_INTRINSIC_BODY(js_intrinsic_reflect_apply_body,
     JS_REFLECT_INTRINSIC_APPLY)
 JS_REFLECT_INTRINSIC_BODY(js_intrinsic_reflect_construct_body,
@@ -12924,12 +12736,8 @@ static Item js_intrinsic_generator_operation(JsGeneratorIntrinsicOp operation,
 }
 
 #define JS_GENERATOR_INTRINSIC_BODY(body_name, operation, async_policy) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)result_home; \
-        return js_intrinsic_generator_operation( \
-            operation, async_policy, this_value, args, argc); \
-    }
+    JS_INTRINSIC_BODY(body_name, \
+        js_intrinsic_generator_operation( operation, async_policy, this_value, args, argc))
 JS_GENERATOR_INTRINSIC_BODY(js_intrinsic_generator_next_body,
     JS_GENERATOR_INTRINSIC_NEXT, false)
 JS_GENERATOR_INTRINSIC_BODY(js_intrinsic_generator_return_body,
@@ -13339,11 +13147,8 @@ static Item js_intrinsic_regexp_operation(JsRegExpIntrinsicOp operation,
 }
 
 #define JS_REGEXP_INTRINSIC_BODY(body_name, operation) \
-    Item body_name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)result_home; \
-        return js_intrinsic_regexp_operation(operation, this_value, args, argc); \
-    }
+    JS_INTRINSIC_BODY(body_name, \
+        js_intrinsic_regexp_operation(operation, this_value, args, argc))
 JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_exec_body,
     JS_REGEXP_INTRINSIC_EXEC)
 JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_test_body,
@@ -13388,14 +13193,12 @@ JS_REGEXP_INTRINSIC_BODY(js_intrinsic_regexp_get_hasindices_body,
 
 Item js_intrinsic_262_detach_arraybuffer_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)result_home;
     js_arraybuffer_detach(argc > 0 ? args[0] : make_js_undefined());
     return ItemNull;
 }
 
 Item js_intrinsic_262_create_realm_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)args; (void)argc; (void)result_home;
     Item realm = js_new_object();
     Item global = js_new_object();
     for (int i = 0; i < js_builtin_global_count(); i++) {
@@ -13431,7 +13234,6 @@ Item js_intrinsic_262_create_realm_body(Item callee, Item this_value,
 
 Item js_intrinsic_262_realm_regexp_get_hasindices_body(Item callee,
         Item this_value, Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)args; (void)argc; (void)result_home;
     return js_throw_type_error(
         "RegExp.prototype getter called on incompatible receiver");
 }
@@ -13942,7 +13744,6 @@ Item js_native_construct_via_call_body(Item callee, Item* args, int argc,
 
 Item js_construct_entry_bound(Item func_item, Item* args, int arg_count,
         Item new_target, uint64_t* result_home, bool args_prerooted) {
-    (void)args_prerooted;
     JsFunction* fn = get_type_id(func_item) == LMD_TYPE_FUNC
         ? (JsFunction*)func_item.function : NULL;
     if (!fn) return js_throw_type_error("is not a constructor");
@@ -14495,7 +14296,6 @@ extern "C" Item js_apply_function_into(Item func_item, Item this_val, Item args_
 
 Item js_intrinsic_function_call_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    (void)callee;
     Item call_this = argc > 0 && args ? args[0] : make_js_undefined();
     Item* call_args = argc > 1 && args ? args + 1 : NULL;
     int call_argc = argc > 1 ? argc - 1 : 0;
@@ -14505,7 +14305,6 @@ Item js_intrinsic_function_call_body(Item callee, Item this_value, Item* args,
 
 Item js_intrinsic_function_apply_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    (void)callee;
     Item call_this = argc > 0 && args ? args[0] : make_js_undefined();
     Item arg_array = argc > 1 && args ? args[1] : make_js_undefined();
     return js_apply_function_impl(this_value, call_this, arg_array, result_home);
@@ -14513,7 +14312,6 @@ Item js_intrinsic_function_apply_body(Item callee, Item this_value, Item* args,
 
 Item js_intrinsic_function_bind_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    (void)callee;
     (void)result_home;
     Item bound_this = argc > 0 && args ? args[0] : make_js_undefined();
     return js_func_bind(this_value, bound_this,
@@ -14522,7 +14320,6 @@ Item js_intrinsic_function_bind_body(Item callee, Item this_value, Item* args,
 
 Item js_intrinsic_function_has_instance_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee;
     (void)result_home;
     if (!js_has_call_capability(this_value)) {
         return (Item){.item = ITEM_FALSE};
@@ -14533,7 +14330,6 @@ Item js_intrinsic_function_has_instance_body(Item callee, Item this_value,
 
 Item js_intrinsic_throw_type_error_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee;
     (void)this_value;
     (void)args;
     (void)argc;
@@ -19302,9 +19098,7 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
             strbuf_append_str_n(buf, S->chars + next_source_pos, lengthS - next_source_pos);
         }
     }
-    String* result_str = heap_strcpy(buf->str, buf->length);
-    strbuf_free(buf);
-    return (Item){.item = s2it(result_str)};
+    return js_strbuf_take_item(buf);
 }
 
 // RegExp.prototype[@@search](string)
@@ -21486,9 +21280,7 @@ static Item js_replace_nonws_runs(Item str, String* s, String* repl) {
         return str;
     }
     if (last < (int)s->len) strbuf_append_str_n(buf, s->chars + last, (int)s->len - last);
-    String* result = heap_strcpy(buf->str, buf->length);
-    strbuf_free(buf);
-    return (Item){.item = s2it(result)};
+    return js_strbuf_take_item(buf);
 }
 
 static Item js_try_fast_replace_non_whitespace(Item regex, Item str, Item replacement,
@@ -21616,9 +21408,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
             // append remaining text
             if (pos < (int)s->len)
                 strbuf_append_str_n(buf, s->chars + pos, (int)s->len - pos);
-            String* result = heap_strcpy(buf->str, buf->length);
-            strbuf_free(buf);
-            return (Item){.item = s2it(result)};
+            return js_strbuf_take_item(buf);
         }
         strbuf_free(buf);
         return str;
@@ -21649,9 +21439,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
             StrBuf* buf = strbuf_new();
             js_apply_replacement(buf, repl->chars, (int)repl->len,
                 "", 0, 0, 0, NULL, 0, ItemNull);
-            String* result_str = heap_strcpy(buf->str, buf->length);
-            strbuf_free(buf);
-            return (Item){.item = s2it(result_str)};
+            return js_strbuf_take_item(buf);
         }
         // "".replaceAll("x", repl) where x is non-empty → no match, return ""
         return str;
@@ -21685,9 +21473,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
                 }
                 if (pos < slen) strbuf_append_char(buf, s->chars[pos]);
             }
-            String* result_str = heap_strcpy(buf->str, buf->length);
-            strbuf_free(buf);
-            return (Item){.item = s2it(result_str)};
+            return js_strbuf_take_item(buf);
         }
         // .replace("", repl) — single replacement at position 0
         if (replacement_is_func) {
@@ -21701,9 +21487,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
             StrBuf* buf = strbuf_new();
             if (rs) strbuf_append_str_n(buf, rs->chars, rs->len);
             strbuf_append_str_n(buf, s->chars, s->len);
-            String* result_str = heap_strcpy(buf->str, buf->length);
-            strbuf_free(buf);
-            return (Item){.item = s2it(result_str)};
+            return js_strbuf_take_item(buf);
         }
         String* repl = it2s(replacement_arg);
         if (!repl || repl->len == 0) return str;
@@ -21711,9 +21495,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
         js_apply_replacement(buf, repl->chars, (int)repl->len,
             s->chars, (int)s->len, 0, 0, NULL, 0, ItemNull);
         strbuf_append_str_n(buf, s->chars, s->len);
-        String* result_str = heap_strcpy(buf->str, buf->length);
-        strbuf_free(buf);
-        return (Item){.item = s2it(result_str)};
+        return js_strbuf_take_item(buf);
     }
     if (!replacement_is_func) {
         if (is_replace_all) {
@@ -21737,9 +21519,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
             if (found_any) {
                 if (pos < (int)s->len)
                     strbuf_append_str_n(buf, s->chars + pos, (int)s->len - pos);
-                String* result_str = heap_strcpy(buf->str, buf->length);
-                strbuf_free(buf);
-                return (Item){.item = s2it(result_str)};
+                return js_strbuf_take_item(buf);
             }
             strbuf_free(buf);
             return str;
@@ -21760,9 +21540,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
             }
             int after = match_start + match_len;
             if (after < (int)s->len) strbuf_append_str_n(buf2, s->chars + after, (int)s->len - after);
-            String* result_str = heap_strcpy(buf2->str, buf2->length);
-            strbuf_free(buf2);
-            return (Item){.item = s2it(result_str)};
+            return js_strbuf_take_item(buf2);
         }
     }
     // string search with function callback
@@ -21793,9 +21571,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
     if (found_any) {
         if (pos < (int)s->len)
             strbuf_append_str_n(buf, s->chars + pos, (int)s->len - pos);
-        String* result = heap_strcpy(buf->str, buf->length);
-        strbuf_free(buf);
-        return (Item){.item = s2it(result)};
+        return js_strbuf_take_item(buf);
     }
     strbuf_free(buf);
     return str;
@@ -22266,9 +22042,7 @@ static Item js_string_pad(Item str, Item* args, int argc, bool pad_end) {
         strbuf_append_str_n(buf, s->chars, s->len);
         if (filler_s && filler_s->len > 0) strbuf_append_str_n(buf, filler_s->chars, filler_s->len);
     }
-    String* result = heap_strcpy(buf->str, buf->length);
-    strbuf_free(buf);
-    return (Item){.item = s2it(result)};
+    return js_strbuf_take_item(buf);
 }
 
 static Item js_string_coerce_receiver(Item* value) {
@@ -22790,9 +22564,7 @@ static Item js_string_intrinsic_algorithm(Item str,
         for (int i = 0; i < count; i++) {
             strbuf_append_str_n(buf, s->chars, s->len);
         }
-        String* result = heap_strcpy(buf->str, buf->length);
-        strbuf_free(buf);
-        return (Item){.item = s2it(result)};
+        return js_strbuf_take_item(buf);
     }
     // replaceAll — redirect to unified replace handler
     if (operation == JS_STRING_INTRINSIC_REPLACE_ALL) {
@@ -25567,9 +25339,7 @@ static Item js_array_intrinsic_algorithm_impl(Item arr,
             String* s = it2s(elem_str);
             if (s && s->len > 0) strbuf_append_str_n(buf, s->chars, s->len);
         }
-        String* result = heap_strcpy(buf->str, buf->length);
-        strbuf_free(buf);
-        return (Item){.item = s2it(result)};
+        return js_strbuf_take_item(buf);
     }
 
     // keys() — returns array iterator (kind=0: keys)
@@ -25860,7 +25630,6 @@ extern "C" Item js_intl_segmenter_new(Item /*locale*/, Item /*opts*/) {
 
 static Item js_intl_segmenter_construct_body(Item callee, Item* args, int argc,
         Item new_target, uint64_t* result_home) {
-    (void)callee;
     (void)result_home;
     Item locale = argc > 0 && args ? args[0] : make_js_undefined();
     Item options = argc > 1 && args ? args[1] : make_js_undefined();
@@ -25985,14 +25754,7 @@ extern "C" Item js_get_console_object_value() {
 
 static void js_262_agent_report_rows_clear(JsTest262AgentState* state) {
     if (!state) return;
-    if (state->reports) {
-        for (int i = state->reports->length - 1; i >= 0; i--) {
-            mem_free(state->reports->data[i]);
-        }
-        arraylist_free(state->reports);
-        state->reports = NULL;
-    }
-    root_vector_clear(&state->report_values);
+    root_vector_clear_owned_rows(&state->reports, &state->report_values);
 }
 
 void js_test262_agent_state_destroy(JsTest262AgentState* state) {
@@ -26549,11 +26311,7 @@ static Item js_math_intrinsic(JsMathIntrinsicOp op, Item* args, int argc) {
 }
 
 #define JS_MATH_INTRINSIC_BODY(name, op) \
-    Item name(Item callee, Item this_value, Item* args, int argc, \
-            uint64_t* result_home) { \
-        (void)callee; (void)this_value; (void)result_home; \
-        return js_math_intrinsic(op, args, argc); \
-    }
+    JS_INTRINSIC_BODY(name, js_math_intrinsic(op, args, argc))
 #define JS_MATH_INTRINSIC_BODIES(M) \
     M(js_intrinsic_math_abs_body, JS_MATH_INTRINSIC_ABS) M(js_intrinsic_math_floor_body, JS_MATH_INTRINSIC_FLOOR) M(js_intrinsic_math_ceil_body, JS_MATH_INTRINSIC_CEIL) M(js_intrinsic_math_round_body, JS_MATH_INTRINSIC_ROUND) M(js_intrinsic_math_sqrt_body, JS_MATH_INTRINSIC_SQRT) \
     M(js_intrinsic_math_pow_body, JS_MATH_INTRINSIC_POW) M(js_intrinsic_math_min_body, JS_MATH_INTRINSIC_MIN) M(js_intrinsic_math_max_body, JS_MATH_INTRINSIC_MAX) M(js_intrinsic_math_log_body, JS_MATH_INTRINSIC_LOG) M(js_intrinsic_math_log10_body, JS_MATH_INTRINSIC_LOG10) \
@@ -28414,12 +28172,19 @@ static Item js_get_iterator_proto() {
     return proto_root.get();
 }
 
-static Item js_get_array_iterator_proto() {
-    Item proto = js_make_iterator_proto(&js_array_iterator_proto_cache,
-        JS_BUILTIN_OWNER_ARRAY_ITERATOR_INTERNAL, "Array Iterator", 14);
-    js_set_prototype(proto, js_get_iterator_proto());
-    return proto;
-}
+// Every %XIteratorPrototype% is one cached object whose [[Prototype]] is
+// %IteratorPrototype%; only the cache slot, the builtin owner and the
+// @@toStringTag spelling differ between them.
+#define JS_DEFINE_ITERATOR_PROTO(fn_name, cache, owner, tag) \
+    static Item fn_name() { \
+        Item proto = js_make_iterator_proto(&cache, owner, tag, \
+            (int)sizeof(tag) - 1); \
+        js_set_prototype(proto, js_get_iterator_proto()); \
+        return proto; \
+    }
+
+JS_DEFINE_ITERATOR_PROTO(js_get_array_iterator_proto, js_array_iterator_proto_cache,
+    JS_BUILTIN_OWNER_ARRAY_ITERATOR_INTERNAL, "Array Iterator")
 
 static bool js_array_iterator_next_is_default() {
     Item proto = js_get_array_iterator_proto();
@@ -28444,12 +28209,8 @@ static Item js_array_iterator_source_length(Item source) {
     return (Item){.item = i2it(js_array_to_length(length))};
 }
 
-static Item js_get_string_iterator_proto() {
-    Item proto = js_make_iterator_proto(&js_string_iterator_proto_cache,
-        JS_BUILTIN_OWNER_STRING_ITERATOR_INTERNAL, "String Iterator", 15);
-    js_set_prototype(proto, js_get_iterator_proto());
-    return proto;
-}
+JS_DEFINE_ITERATOR_PROTO(js_get_string_iterator_proto, js_string_iterator_proto_cache,
+    JS_BUILTIN_OWNER_STRING_ITERATOR_INTERNAL, "String Iterator")
 
 Item js_iterator_prototype_for_object(Item object) {
     if (!js_is_fixed_layout_iterator(object)) return ItemNull;
@@ -28462,26 +28223,14 @@ Item js_iterator_prototype_for_object(Item object) {
     return ItemNull;
 }
 
-static Item js_get_map_iterator_proto() {
-    Item proto = js_make_iterator_proto(&js_map_iterator_proto_cache,
-        JS_BUILTIN_OWNER_COLLECTION_ITERATOR_INTERNAL, "Map Iterator", 12);
-    js_set_prototype(proto, js_get_iterator_proto());
-    return proto;
-}
+JS_DEFINE_ITERATOR_PROTO(js_get_map_iterator_proto, js_map_iterator_proto_cache,
+    JS_BUILTIN_OWNER_COLLECTION_ITERATOR_INTERNAL, "Map Iterator")
 
-static Item js_get_set_iterator_proto() {
-    Item proto = js_make_iterator_proto(&js_set_iterator_proto_cache,
-        JS_BUILTIN_OWNER_COLLECTION_ITERATOR_INTERNAL, "Set Iterator", 12);
-    js_set_prototype(proto, js_get_iterator_proto());
-    return proto;
-}
+JS_DEFINE_ITERATOR_PROTO(js_get_set_iterator_proto, js_set_iterator_proto_cache,
+    JS_BUILTIN_OWNER_COLLECTION_ITERATOR_INTERNAL, "Set Iterator")
 
-static Item js_get_regexp_string_iterator_proto() {
-    Item proto = js_make_iterator_proto(&js_regexp_string_iterator_proto_cache,
-        JS_BUILTIN_OWNER_REGEXP_ITERATOR_INTERNAL, "RegExp String Iterator", 22);
-    js_set_prototype(proto, js_get_iterator_proto());
-    return proto;
-}
+JS_DEFINE_ITERATOR_PROTO(js_get_regexp_string_iterator_proto, js_regexp_string_iterator_proto_cache,
+    JS_BUILTIN_OWNER_REGEXP_ITERATOR_INTERNAL, "RegExp String Iterator")
 
 // v28: Fixed-layout iterator data (16 bytes, 2 slots)
 // Slot 0 (offset 0): source Item (array, string, or typed array)
@@ -29164,22 +28913,18 @@ static int64_t js_promise_vmap_count(void* data) {
 }
 
 static SymbolKeyList* js_promise_vmap_keys(void* data) {
-    (void)data;
     return symbol_key_list_new(4);
 }
 
 static Item js_promise_vmap_key_at(void* data, int64_t index) {
-    (void)data; (void)index;
     return ItemNull;
 }
 
 static Item js_promise_vmap_value_at(void* data, int64_t index) {
-    (void)data; (void)index;
     return ItemNull;
 }
 
 static void js_promise_vmap_destroy(void* data) {
-    (void)data;
 }
 
 static void js_promise_vmap_trace(void* data, gc_heap_t* gc) {
@@ -29215,7 +28960,6 @@ static bool js_promise_property_prepare(Item target, Item key, Item receiver,
 
 static JsPropertyOpResult js_promise_property_get(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
-    (void)lane; (void)value; (void)descriptor;
     JsPromisePropertyContext ctx;
     if (!js_promise_property_prepare(target, key, receiver, false, &ctx)) {
         return {JS_PROPERTY_OP_COMPLETE, make_js_undefined()};
@@ -29236,7 +28980,6 @@ static JsPropertyOpResult js_promise_property_get(Item target, uint64_t lane,
 
 static JsPropertyOpResult js_promise_property_set(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
-    (void)lane; (void)descriptor;
     JsPromisePropertyContext ctx;
     if (!js_promise_property_prepare(target, key, receiver, true, &ctx)) {
         return {JS_PROPERTY_OP_COMPLETE, value};
@@ -29252,7 +28995,6 @@ static JsPropertyOpResult js_promise_property_set(Item target, uint64_t lane,
 
 static JsPropertyOpResult js_promise_property_define(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
-    (void)lane; (void)value; (void)receiver;
     JsPromisePropertyContext ctx;
     if (!js_promise_property_prepare(target, key, receiver, true, &ctx)) {
         return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_FALSE}};
@@ -29268,7 +29010,6 @@ static JsPropertyOpResult js_promise_property_define(Item target, uint64_t lane,
 
 static JsPropertyOpResult js_promise_property_delete(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
-    (void)lane; (void)value; (void)receiver; (void)descriptor;
     JsPromisePropertyContext ctx;
     if (!js_promise_property_prepare(target, key, receiver, false, &ctx)) {
         return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_TRUE}};
@@ -29281,7 +29022,6 @@ static JsPropertyOpResult js_promise_property_delete(Item target, uint64_t lane,
 
 static JsPropertyOpResult js_promise_property_has(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
-    (void)lane; (void)value; (void)receiver; (void)descriptor;
     JsPromisePropertyContext ctx;
     if (!js_promise_property_prepare(target, key, receiver, false, &ctx)) {
         return {JS_PROPERTY_OP_COMPLETE, (Item){.item = ITEM_FALSE}};
@@ -29304,7 +29044,6 @@ static JsPropertyOpResult js_promise_property_has(Item target, uint64_t lane,
 
 static JsPropertyOpResult js_promise_property_descriptor(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
-    (void)lane; (void)value; (void)receiver; (void)descriptor;
     JsPromisePropertyContext ctx;
     if (!js_promise_property_prepare(target, key, receiver, false, &ctx)) {
         return {JS_PROPERTY_OP_COMPLETE, make_js_undefined()};
@@ -29318,7 +29057,6 @@ static JsPropertyOpResult js_promise_property_descriptor(Item target, uint64_t l
 
 static JsPropertyOpResult js_promise_property_own_keys(Item target, uint64_t lane,
         Item key, Item value, Item receiver, Item descriptor) {
-    (void)lane; (void)value; (void)descriptor;
     JsPromisePropertyContext ctx;
     if (!js_promise_property_prepare(target, key, receiver, false, &ctx)) {
         return {JS_PROPERTY_OP_COMPLETE, js_array_new(0)};
@@ -30279,12 +30017,10 @@ static Item js_promise_invoke_then(Item promise, Item on_fulfilled, Item on_reje
 }
 
 static Item js_promise_finally_value_thunk(Item value, Item ignored) {
-    (void)ignored;
     return value;
 }
 
 static Item js_promise_finally_throw_thunk(Item reason, Item ignored) {
-    (void)ignored;
     return js_throw_value(reason);
 }
 
@@ -32890,9 +32626,7 @@ static bool js_dc_channel_remove_subscriber(Item channel, Item handler) {
     if (get_type_id(subs) != LMD_TYPE_ARRAY) return false;
     Item next = js_array_new(0);
     bool removed = false;
-    int64_t len = js_array_length(subs);
-    for (int64_t i = 0; i < len; i++) {
-        Item el = js_elements_get_int(subs, i);
+    JS_ARRAY_FOREACH(el, subs) {
         if (!removed && el.item == handler.item) {
             removed = true;
             continue;
@@ -32938,9 +32672,7 @@ static Item js_dc_channel_publish(Item message) {
     JS_ASSIGN_OR_RETURN(subs, js_get_key_default(self, js_dc_key("_subscribers")));
     JS_ASSIGN_OR_RETURN(name, js_get_key_default(self, js_dc_key("name")));
     if (get_type_id(subs) == LMD_TYPE_ARRAY) {
-        int64_t len = js_array_length(subs);
-        for (int64_t i = 0; i < len; i++) {
-            Item el = js_elements_get_int(subs, i);
+        JS_ARRAY_FOREACH(el, subs) {
             if (js_is_callable(el)) {
                 js_dc_call_subscriber(el, message, name);
             }
@@ -33036,9 +32768,7 @@ static Item js_dc_channel_unbindStore(Item store) {
     if (get_type_id(stores) != LMD_TYPE_ARRAY) return (Item){.item = ITEM_FALSE};
     Item next = js_array_new(0);
     bool removed = false;
-    int64_t len = js_array_length(stores);
-    for (int64_t i = 0; i < len; i++) {
-        Item entry = js_elements_get_int(stores, i);
+    JS_ARRAY_FOREACH(entry, stores) {
         if (get_type_id(entry) == LMD_TYPE_ARRAY && js_array_length(entry) >= 1) {
             Item bound_store = js_elements_get_int(entry, 0);
             if (!removed && bound_store.item == store.item) {
@@ -33058,9 +32788,7 @@ static Item js_dc_build_store_context(Item channel, Item message) {
     Item stores = js_get_key_default(channel, js_dc_stores_key());
     if (get_type_id(stores) != LMD_TYPE_ARRAY) return context;
 
-    int64_t len = js_array_length(stores);
-    for (int64_t i = 0; i < len; i++) {
-        Item entry = js_elements_get_int(stores, i);
+    JS_ARRAY_FOREACH(entry, stores) {
         if (get_type_id(entry) != LMD_TYPE_ARRAY || js_array_length(entry) < 1) continue;
         Item store = js_elements_get_int(entry, 0);
         Item transform = js_array_length(entry) >= 2 ? js_elements_get_int(entry, 1) :
@@ -33286,9 +33014,7 @@ static Item js_dc_channel_publish_on(Item channel, Item message) {
     JS_ASSIGN_OR_RETURN(subs, js_get_key_default(channel, js_dc_key("_subscribers")));
     JS_ASSIGN_OR_RETURN(name, js_get_key_default(channel, js_dc_key("name")));
     if (get_type_id(subs) == LMD_TYPE_ARRAY) {
-        int64_t len = js_array_length(subs);
-        for (int64_t i = 0; i < len; i++) {
-            Item el = js_elements_get_int(subs, i);
+        JS_ARRAY_FOREACH(el, subs) {
             if (js_is_callable(el)) {
                 js_dc_call_subscriber(el, message, name);
             }
@@ -33930,9 +33656,7 @@ static void js_cluster_copy_env(Item target, Item source) {
     if (!js_cluster_is_object_item(target) || !js_cluster_is_object_item(source)) return;
     Item keys = js_object_keys(source);
     if (get_type_id(keys) != LMD_TYPE_ARRAY) return;
-    int64_t len = js_array_length(keys);
-    for (int64_t i = 0; i < len; i++) {
-        Item key = js_elements_get_int(keys, i);
+    JS_ARRAY_FOREACH(key, keys) {
         if (get_type_id(key) != LMD_TYPE_STRING) continue;
         js_set_key_default(target, key, js_get_key_default(source, key));
     }
@@ -33952,7 +33676,6 @@ static Item js_cluster_make_worker_env(Item fork_env, int64_t worker_id) {
 }
 
 static Item js_cluster_primary_exit_kill_worker(Item env_item, Item code) {
-    (void)code;
     Item* env = (Item*)(uintptr_t)env_item.item;
     Item child = env ? env[0] : make_js_undefined();
     Item kill = js_get_key_default(child, js_cluster_key("kill"));
@@ -33968,8 +33691,7 @@ static void js_cluster_register_worker_exit_kill(Item child) {
     Item process_obj = js_get_process_object_value();
     Item on = js_get_key_default(process_obj, js_cluster_key("on"));
     if (!js_is_callable(on)) return;
-    Item* env = js_alloc_env(1);
-    env[0] = child;
+    Item* env = js_alloc_env1(child);
     Item listener = js_new_native_closure(js_cluster_primary_exit_kill_worker, 1, env, 1);
     Item args[2] = { js_cluster_key("exit"), listener };
     js_call_function(on, process_obj, args, 2);
@@ -34450,9 +34172,7 @@ static Item js_repl_create_context(Item opts, bool old_signature) {
     Item repl_context = js_new_object();
     Item names = js_object_get_own_property_names(global);
     if (get_type_id(names) == LMD_TYPE_ARRAY) {
-        int64_t len = js_array_length(names);
-        for (int64_t i = 0; i < len; i++) {
-            Item key = js_elements_get_int(names, i);
+        JS_ARRAY_FOREACH(key, names) {
             if (js_repl_key_equals(key, "globalThis", 10) ||
                 js_repl_key_equals(key, "global", 6) ||
                 js_repl_key_equals(key, "self", 4) ||
@@ -34543,7 +34263,6 @@ static Item js_repl_start(Item opts, Item old_stream, Item old_eval) {
 }
 
 static Item js_internal_repl_create(Item env, Item opts, Item cb) {
-    (void)env;
     Item repl = js_repl_start(opts, (Item){.item = ITEM_JS_UNDEFINED}, (Item){.item = ITEM_JS_UNDEFINED});
     if (js_is_callable(cb)) {
         Item args[2] = { (Item){.item = ITEM_NULL}, repl };
@@ -34606,9 +34325,7 @@ static Item js_als_apply_context(Item context) {
     if (get_type_id(context) != LMD_TYPE_ARRAY) return previous;
 
     Item store_key = js_als_store_key();
-    int64_t len = js_array_length(context);
-    for (int64_t i = 0; i < len; i++) {
-        Item pair = js_elements_get_int(context, i);
+    JS_ARRAY_FOREACH(pair, context) {
         if (get_type_id(pair) != LMD_TYPE_ARRAY || js_array_length(pair) < 2) continue;
         Item instance = js_elements_get_int(pair, 0);
         Item store = js_elements_get_int(pair, 1);
@@ -34741,9 +34458,7 @@ static Item js_als_withScope(Item store) {
     Item previous = js_get_key_default(self, js_als_store_key());
     js_set_key_default(self, js_als_store_key(), store);
     Item scope = js_new_object();
-    Item* env = js_alloc_env(2);
-    env[0] = self;
-    env[1] = previous;
+    Item* env = js_alloc_env2(self, previous);
     Item dispose = js_new_native_closure(js_als_scope_dispose, 0, env, 2);
     // Node's RunScope supports both `using` disposal and explicit .dispose().
     Item dispose_key = js_symbol_well_known(js_name_item("dispose", 7));
@@ -35107,10 +34822,7 @@ static Item js_ar_make_bound(Item resource, Item fn, Item this_arg) {
     if (!js_is_callable(fn)) {
         return js_throw_invalid_arg_type("fn", "function", fn);
     }
-    Item* env = js_alloc_env(3);
-    env[0] = resource;
-    env[1] = fn;
-    env[2] = this_arg;
+    Item* env = js_alloc_env3(resource, fn, this_arg);
     // AsyncResource.bind wraps the callback; returning the original callback
     // skipped Node's type validation and async-scope restoration.
     Item bound = js_new_native_closure(js_ar_bound_call, -1, env, 3);
@@ -36054,7 +35766,6 @@ extern "C" Item js_get_vm_namespace(void) {
 }
 
 static Item js_cares_getaddrinfo_default(Item hostname, Item family, Item hints, Item all) {
-    (void)hostname;
     (void)family;
     (void)hints;
     (void)all;
@@ -36789,7 +36500,6 @@ extern "C" Item js_text_encoder_new(void) {
 }
 
 extern "C" Item js_text_encoder_encode(Item encoder, Item str) {
-    (void)encoder;
     if (get_type_id(str) != LMD_TYPE_STRING) return js_typed_array_new(JS_TYPED_UINT8, 0);
     String* s = it2s(str);
     if (!s || s->len == 0) return js_typed_array_new(JS_TYPED_UINT8, 0);
@@ -37156,9 +36866,7 @@ extern "C" Item js_finalization_registry_unregister(Item this_val, Item unregist
         return js_throw_type_error("FinalizationRegistry unregister token must be an object or unregistered symbol");
     }
     bool removed = false;
-    int64_t len = js_array_length(cells);
-    for (int64_t i = 0; i < len; i++) {
-        Item cell = js_elements_get_int(cells, i);
+    JS_ARRAY_FOREACH(cell, cells) {
         if (get_type_id(cell) != LMD_TYPE_MAP) continue;
         bool active_found = false;
         Item active = js_map_shape_lookup(cell.map, "__active__", 10, &active_found);

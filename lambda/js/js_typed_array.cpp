@@ -78,13 +78,6 @@ static Item js_dataview_to_bigint_value(Item value, Item* out_bigint) {
     return js_status_ok();
 }
 
-static Item js_dataview_biguint64_item(uint64_t value) {
-    if (value <= (uint64_t)INT64_MAX) return bigint_from_int64((int64_t)value);
-    char buf[32];
-    int len = snprintf(buf, sizeof(buf), "%llu", (unsigned long long)value);
-    return bigint_from_string(buf, len);
-}
-
 static uint64_t js_dataview_bigint_to_uint64(Item value) {
     char* value_str = bigint_to_cstring_radix(value, 10);
     if (!value_str) return 0;
@@ -594,7 +587,7 @@ static Item js_atomics_item_from_bits(JsTypedArrayType type, uint64_t bits) {
     const JsTypedArraySpec* spec = js_typed_array_spec(type);
     if (spec->bigint) {
         return spec->signed_integer ? bigint_from_int64((int64_t)bits) :
-            js_dataview_biguint64_item(bits);
+            bigint_from_uint64(bits);
     }
     if (!spec->atomic) return (Item){.item = ITEM_JS_UNDEFINED};
     // Atomic results are already width-limited C values; widening a signed
@@ -713,14 +706,7 @@ static JsAtomicsAgentWaiterState* js_atomics_agent_waiter_for(
 
 static void js_atomics_waiters_clear(JsAtomicsRuntimeState* state) {
     if (!state) return;
-    if (state->waiters) {
-        for (int i = state->waiters->length - 1; i >= 0; i--) {
-            mem_free(state->waiters->data[i]);
-        }
-        arraylist_free(state->waiters);
-        state->waiters = NULL;
-    }
-    root_vector_clear(&state->promise_values);
+    root_vector_clear_owned_rows(&state->waiters, &state->promise_values);
 }
 
 static bool js_atomics_waiters_ensure(void) {
@@ -2918,7 +2904,7 @@ static Item js_dataview_read_value(JsDataView* dv, JsDataViewOperation operation
         return js_make_number(value);
     }
     case JS_DATAVIEW_GET_BIGINT64: return bigint_from_int64((int64_t)raw);
-    case JS_DATAVIEW_GET_BIGUINT64: return js_dataview_biguint64_item(raw);
+    case JS_DATAVIEW_GET_BIGUINT64: return bigint_from_uint64(raw);
     default: return (Item){.item = ITEM_NULL};
     }
 }

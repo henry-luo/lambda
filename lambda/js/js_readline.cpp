@@ -41,17 +41,9 @@ struct ReadlineRealmItems {
 };
 
 static bool readline_realm_items(ReadlineRealmItems* items, bool reserve) {
-    if (!items || !js_active_runtime_state) return false;
-    static const JsRealmSlotId slot_ids[] = {
+    JS_REALM_ITEMS_FILL(ReadlineRealmItems, items, reserve,
         JS_REALM_SLOT_READLINE_NAMESPACE,
-        JS_REALM_SLOT_READLINE_PROMISES_NAMESPACE,
-    };
-    Item* values[2] = {};
-    if (!js_realm_slots_lookup(&js_runtime_state.realm_slots, slot_ids, values,
-            2, reserve)) return false;
-    items->namespace_object = values[0];
-    items->promises_namespace = values[1];
-    return true;
+        JS_REALM_SLOT_READLINE_PROMISES_NAMESPACE);
 }
 
 JS_FORWARD_STATIC_ITEM(readline_get, (Item obj, const char* name), js_get_key_default, (obj, make_string_item(name)))
@@ -74,14 +66,7 @@ static bool readline_is_stream_like(Item input) {
 
 static void readline_input_rows_clear(JsReadlineState* state) {
     if (!state) return;
-    if (state->inputs) {
-        for (int i = state->inputs->length - 1; i >= 0; i--) {
-            mem_free(state->inputs->data[i]);
-        }
-        arraylist_free(state->inputs);
-        state->inputs = NULL;
-    }
-    root_vector_clear(&state->input_values);
+    root_vector_clear_owned_rows(&state->inputs, &state->input_values);
 }
 
 void js_readline_state_destroy(JsReadlineState* state) {

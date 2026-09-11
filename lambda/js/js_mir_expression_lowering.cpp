@@ -147,13 +147,13 @@ static MIR_reg_t jm_emit_logical_assignment(JsMirTranspiler* mt,
     MIR_label_t l_assign = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
     MIR_reg_t cond;
-    if (asgn->op == JS_OP_NULLISH_ASSIGN) {
+    if (asgn->op == OPERATOR_JS_NULLISH_ASSIGN) {
         cond = jm_callr_1(mt, "js_is_nullish", MIR_T_I64, old_val);
         jm_emit_branch(mt, MIR_BT, l_assign, cond);
     } else {
         cond = jm_emit_is_truthy(mt, jm_item_value(old_val));
         jm_emit(mt, MIR_new_insn(mt->ctx,
-            asgn->op == JS_OP_AND_ASSIGN ? MIR_BT : MIR_BF,
+            asgn->op == OPERATOR_JS_AND_ASSIGN ? MIR_BT : MIR_BF,
             MIR_new_label_op(mt->ctx, l_assign),
             MIR_new_reg_op(mt->ctx, cond)));
     }
@@ -266,7 +266,6 @@ static const JsTest262Intercept* jm_test262_lookup(const JsTest262Intercept* tab
 // the harness fast path. Dynamic Function parameters can be MIR locals with no
 // useful scope node, so the MIR var table is checked too.
 static bool jm_test262_assert_is_local(JsMirTranspiler* mt, JsIdentifierNode* id) {
-    (void)mt;
     return id && id->entry && id->entry->node;
 }
 
@@ -313,16 +312,16 @@ static void jm_emit_clear_pending_call_source(JsMirTranspiler* mt) {
 }
 
 static bool jm_js_ident_name_eq(JsAstNode* node, const char* name, uint32_t len) {
-    if (!node || node->node_type != JS_AST_NODE_IDENTIFIER) return false;
+    if (!node || node->node_type != AST_NODE_IDENT) return false;
     JsIdentifierNode* id = (JsIdentifierNode*)node;
     return id->name && id->name->len == len &&
         strncmp(id->name->chars, name, len) == 0;
 }
 
 static bool jm_js_string_literal_eq(JsAstNode* node, const char* name, uint32_t len) {
-    if (!node || node->node_type != JS_AST_NODE_LITERAL) return false;
+    if (!node || node->node_type != AST_NODE_LITERAL) return false;
     JsLiteralNode* lit = (JsLiteralNode*)node;
-    String* value = lit->literal_type == JS_LITERAL_STRING ?
+    String* value = lit->literal_type == AST_LITERAL_STRING ?
         lit->value.string_value : NULL;
     return value && value->len == len && memcmp(value->chars, name, len) == 0;
 }
@@ -337,14 +336,14 @@ static bool jm_is_assert_object_expr(JsAstNode* node) {
         jm_js_ident_name_eq(node, "strict", 6)) {
         return true;
     }
-    if (!node || node->node_type != JS_AST_NODE_MEMBER_EXPRESSION) return false;
+    if (!node || node->node_type != AST_NODE_MEMBER_EXPR) return false;
     JsMemberNode* m = (JsMemberNode*)node;
     return !m->computed && jm_is_assert_object_expr(m->object) &&
         jm_js_property_name_eq(m->property, "strict", 6);
 }
 
 static bool jm_is_assert_ok_member_expr(JsAstNode* node) {
-    if (!node || node->node_type != JS_AST_NODE_MEMBER_EXPRESSION) return false;
+    if (!node || node->node_type != AST_NODE_MEMBER_EXPR) return false;
     JsMemberNode* m = (JsMemberNode*)node;
     return jm_js_property_name_eq(m->property, "ok", 2) &&
         jm_is_assert_object_expr(m->object);
@@ -366,7 +365,7 @@ static bool jm_call_needs_pending_call_source(JsMirTranspiler* mt, JsCallNode* c
         // source capture there makes thousands of hot passing assertions slow.
         return !jm_is_test262_global_assert_identifier(mt, call->callee);
     }
-    if (call->callee->node_type != JS_AST_NODE_MEMBER_EXPRESSION) return false;
+    if (call->callee->node_type != AST_NODE_MEMBER_EXPR) return false;
     JsMemberNode* m = (JsMemberNode*)call->callee;
     if (jm_is_assert_ok_member_expr(call->callee)) return true;
     return jm_js_property_name_eq(m->property, "call", 4) ||
@@ -388,14 +387,14 @@ static void jm_emit_clear_assert_pending_call_source(JsMirTranspiler* mt, bool e
 
 bool js_ast_is_proto_literal_key(JsAstNode* key) {
     if (!key) return false;
-    if (key->node_type == JS_AST_NODE_IDENTIFIER) {
+    if (key->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* id = (JsIdentifierNode*)key;
         return id->name && id->name->len == 9 &&
             memcmp(id->name->chars, "__proto__", 9) == 0;
     }
-    if (key->node_type == JS_AST_NODE_LITERAL) {
+    if (key->node_type == AST_NODE_LITERAL) {
         JsLiteralNode* literal = (JsLiteralNode*)key;
-        String* value = literal->literal_type == JS_LITERAL_STRING ?
+        String* value = literal->literal_type == AST_LITERAL_STRING ?
             literal->value.string_value : NULL;
         return value && value->len == 9 &&
             memcmp(value->chars, "__proto__", 9) == 0;
@@ -408,7 +407,7 @@ static JsFuncCollected* jm_find_direct_function_decl_for_identifier(
     AstIndex* index = mt && mt->tp ? &mt->tp->ast_index : NULL;
     AstNode* definition = ast_index_binding_definition(index,
         ast_index_binding_id(index, (AstNode*)id));
-    if (!definition || definition->node_type != JS_AST_NODE_FUNCTION_DECLARATION ||
+    if (!definition || definition->node_type != AST_NODE_FUNC ||
             !jm_function_decl_is_direct_binding((JsFunctionNode*)definition, false)) return NULL;
     return jm_find_collected_func(mt, (JsFunctionNode*)definition);
 }
@@ -423,7 +422,7 @@ static bool jm_binding_statement_precedes_reference(JsMirTranspiler* mt,
     JsBlockNode* block = NULL;
     if (mt->current_fc && mt->current_fc->node &&
             mt->current_fc->node->body &&
-            mt->current_fc->node->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+            mt->current_fc->node->body->node_type == AST_NODE_BLOCK) {
         block = (JsBlockNode*)mt->current_fc->node->body;
     }
     if (!block) return false;
@@ -665,7 +664,7 @@ static MIR_reg_t jm_emit_member_key(JsMirTranspiler* mt, JsMemberNode* mem) {
     if (mem->computed) {
         return jm_transpile_box_item(mt, mem->property);
     }
-    if (mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+    if (mem->property && mem->property->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
         String* key_name = jm_resolve_private_name(mt, (JsAstNode*)mem->property, prop->name);
         if (jm_is_private_name(key_name)) {
@@ -778,7 +777,7 @@ void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_ob
         }
         jm_append_class_metadata_name(mt, cls_obj, &name_run,
             metadata_index, source_index, false);
-        if (inf->initializer && inf->initializer->node_type == JS_AST_NODE_LITERAL) {
+        if (inf->initializer && inf->initializer->node_type == AST_NODE_LITERAL) {
             MIR_reg_t field_val = jm_transpile_box_item(mt, inf->initializer);
             jm_call_void_3(mt, "js_set_class_instance_field_metadata_value",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
@@ -1002,14 +1001,14 @@ static bool jm_super_reference_before_constructor_super_call(JsMirTranspiler* mt
 
 static void jm_emit_named_evaluation_for_identifier(JsMirTranspiler* mt, JsAstNode* rhs_node, MIR_reg_t rhs, String* name) {
     if (!rhs_node || !name || name->len <= 0) return;
-    if (rhs_node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-        rhs_node->node_type == JS_AST_NODE_ARROW_FUNCTION) {
+    if (rhs_node->node_type == AST_NODE_FUNC_EXPR ||
+        rhs_node->node_type == AST_NODE_ARROW_FUNC) {
         JsFunctionNode* fn_node = (JsFunctionNode*)rhs_node;
         if (!fn_node->name) {
             jm_emit_set_function_name(mt, rhs, name->chars);
         }
-    } else if (rhs_node->node_type == JS_AST_NODE_CLASS_EXPRESSION ||
-               rhs_node->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+    } else if (rhs_node->node_type == AST_NODE_CLASS_EXPR ||
+               rhs_node->node_type == AST_NODE_CLASS) {
         JsClassNode* cls = (JsClassNode*)rhs_node;
         if (!cls->name) {
             MIR_reg_t name_reg = jm_box_string_literal(mt, name->chars, (int)name->len);
@@ -1037,10 +1036,10 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
 
     if (!node) return ref;
 
-    if (node->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+    if (node->node_type == AST_NODE_MEMBER_EXPR) {
         JsMemberNode* mem = (JsMemberNode*)node;
         bool is_super = false;
-        if (mem->object && mem->object->node_type == JS_AST_NODE_IDENTIFIER) {
+        if (mem->object && mem->object->node_type == AST_NODE_IDENT) {
             JsIdentifierNode* obj_id = (JsIdentifierNode*)mem->object;
             is_super = obj_id->name && obj_id->name->len == 5 &&
                 strncmp(obj_id->name->chars, "super", 5) == 0;
@@ -1062,7 +1061,7 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
         ref.kind = JS_MIR_REF_PROPERTY;
         ref.computed_key = mem->computed;
         if (!mem->computed && mem->property &&
-            mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            mem->property->node_type == AST_NODE_IDENT) {
             JsIdentifierNode* prop_id = (JsIdentifierNode*)mem->property;
             String* key_name = jm_resolve_private_name(mt, (JsAstNode*)mem->property, prop_id->name);
             ref.is_private = jm_is_private_name(key_name);
@@ -1075,7 +1074,7 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
                     key_name->chars, key_name->len);
             }
         }
-        if (mem->object && mem->object->node_type == JS_AST_NODE_IDENTIFIER) {
+        if (mem->object && mem->object->node_type == AST_NODE_IDENT) {
             JsIdentifierNode* obj_id = (JsIdentifierNode*)mem->object;
             if (obj_id->name && obj_id->name->len == 4 &&
                 strncmp(obj_id->name->chars, "this", 4) == 0 &&
@@ -1089,7 +1088,7 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
             }
         }
         if (!ref.computed_key && !ref.is_private && mem->property &&
-                mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                mem->property->node_type == AST_NODE_IDENT) {
             JsIdentifierNode* property = (JsIdentifierNode*)mem->property;
             const JubeTypeDef* receiver_type = jm_infer_jube_type(mt, mem->object);
             if (receiver_type && property->name) {
@@ -1168,17 +1167,17 @@ const JubeTypeDef* jm_infer_jube_type(JsMirTranspiler* mt, JsAstNode* node) {
                                 JM_JS_FACT(mt->current_fc, uses_with)))) {
         return NULL;
     }
-    if (node->node_type == JS_AST_NODE_IDENTIFIER) {
+    if (node->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* id = (JsIdentifierNode*)node;
         JsMirVarEntry* var = id->entry
             ? jm_find_var_by_binding(mt, id->entry) : NULL;
         if (var && var->jube_type) return var->jube_type;
         return jm_jube_seed_type(mt, id);
     }
-    if (node->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+    if (node->node_type == AST_NODE_MEMBER_EXPR) {
         JsMemberNode* member = (JsMemberNode*)node;
         if (member->computed || !member->property ||
-                member->property->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
+                member->property->node_type != AST_NODE_IDENT) return NULL;
         JsIdentifierNode* property = (JsIdentifierNode*)member->property;
         const JubeTypeDef* base = jm_infer_jube_type(mt, member->object);
         if (!base || !property->name) return NULL;
@@ -1186,14 +1185,14 @@ const JubeTypeDef* jm_infer_jube_type(JsMirTranspiler* mt, JsAstNode* node) {
                                           (uint32_t)property->name->len);
         return ordinal >= 0 ? jube_member_result_type_at(base, ordinal) : NULL;
     }
-    if (node->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+    if (node->node_type == AST_NODE_CALL_EXPR) {
         JsCallNode* call = (JsCallNode*)node;
-        if (!call->callee || call->callee->node_type != JS_AST_NODE_MEMBER_EXPRESSION) {
+        if (!call->callee || call->callee->node_type != AST_NODE_MEMBER_EXPR) {
             return NULL;
         }
         JsMemberNode* member = (JsMemberNode*)call->callee;
         if (member->computed || !member->property ||
-                member->property->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
+                member->property->node_type != AST_NODE_IDENT) return NULL;
         JsIdentifierNode* property = (JsIdentifierNode*)member->property;
         const JubeTypeDef* base = jm_infer_jube_type(mt, member->object);
         if (!base || !property->name) return NULL;
@@ -1379,18 +1378,18 @@ static void jm_emit_invalid_assignment_target_reference_error(JsMirTranspiler* m
 
 static const char* jm_compound_assign_fn(JsOperator op) {
     switch (op) {
-    case JS_OP_ADD_ASSIGN: return "js_add";
-    case JS_OP_SUB_ASSIGN: return "js_subtract";
-    case JS_OP_MUL_ASSIGN: return "js_multiply";
-    case JS_OP_DIV_ASSIGN: return "js_divide";
-    case JS_OP_MOD_ASSIGN: return "js_modulo";
-    case JS_OP_EXP_ASSIGN: return "js_power";
-    case JS_OP_BIT_AND_ASSIGN: return "js_bitwise_and";
-    case JS_OP_BIT_OR_ASSIGN: return "js_bitwise_or";
-    case JS_OP_BIT_XOR_ASSIGN: return "js_bitwise_xor";
-    case JS_OP_LSHIFT_ASSIGN: return "js_left_shift";
-    case JS_OP_RSHIFT_ASSIGN: return "js_right_shift";
-    case JS_OP_URSHIFT_ASSIGN: return "js_unsigned_right_shift";
+    case OPERATOR_JS_ADD_ASSIGN: return "js_add";
+    case OPERATOR_JS_SUB_ASSIGN: return "js_subtract";
+    case OPERATOR_JS_MUL_ASSIGN: return "js_multiply";
+    case OPERATOR_JS_DIV_ASSIGN: return "js_divide";
+    case OPERATOR_JS_MOD_ASSIGN: return "js_modulo";
+    case OPERATOR_JS_EXP_ASSIGN: return "js_power";
+    case OPERATOR_JS_BIT_AND_ASSIGN: return "js_bitwise_and";
+    case OPERATOR_JS_BIT_OR_ASSIGN: return "js_bitwise_or";
+    case OPERATOR_JS_BIT_XOR_ASSIGN: return "js_bitwise_xor";
+    case OPERATOR_JS_LSHIFT_ASSIGN: return "js_left_shift";
+    case OPERATOR_JS_RSHIFT_ASSIGN: return "js_right_shift";
+    case OPERATOR_JS_URSHIFT_ASSIGN: return "js_unsigned_right_shift";
     default: return "js_add";
     }
 }
@@ -1417,7 +1416,7 @@ static MirValue jm_transpile_literal_value(JsMirTranspiler* mt,
         JsLiteralNode* lit, ValueRep required = VALUE_REP_NONE) {
     MIR_reg_t result = 0;
     switch (lit->literal_type) {
-    case JS_LITERAL_NUMBER: {
+    case AST_LITERAL_NUMBER: {
         // bigint literal: store the dedicated digit spelling and parse it at runtime.
         if (lit->is_bigint) {
             // bigint AST literals keep their digits in bigint_str; value.string_value is unset,
@@ -1435,20 +1434,20 @@ static MirValue jm_transpile_literal_value(JsMirTranspiler* mt,
         result = jm_box_float_const(mt, val);
         break;
     }
-    case JS_LITERAL_STRING: {
+    case AST_LITERAL_STRING: {
         String* sv = lit->value.string_value;
         result = jm_box_string_literal(mt, sv->chars, sv->len);
         break;
     }
-    case JS_LITERAL_BOOLEAN: {
+    case AST_LITERAL_BOOLEAN: {
         uint64_t bval = lit->value.boolean_value ? ITEM_TRUE_VAL : ITEM_FALSE_VAL;
         result = jm_boxed_immediate_const(mt, bval, "bool");
         break;
     }
-    case JS_LITERAL_NULL:
+    case AST_LITERAL_NULL:
         result = jm_emit_null(mt);
         break;
-    case JS_LITERAL_UNDEFINED:
+    case AST_LITERAL_UNDEFINED:
         result = jm_emit_undefined(mt);
         break;
     default:
@@ -1481,7 +1480,7 @@ static MIR_reg_t jm_emit_plain_call_this_arg(JsMirTranspiler* mt, JsCallNode* ca
     MIR_reg_t this_arg = jm_emit_undefined(mt);
     if (!mt || (!mt->with_depth && !jm_current_function_captures_with_scope(mt)) ||
             !call || !call->callee ||
-            call->callee->node_type != JS_AST_NODE_IDENTIFIER) {
+            call->callee->node_type != AST_NODE_IDENT) {
         return this_arg;
     }
     JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
@@ -1950,11 +1949,10 @@ static bool jm_identifier_matches(String* name, const char* expected, int expect
 // path is ~100× slower per loop iteration). Restored for that reason.
 static bool jm_match_uri_decode_call(JsMirTranspiler* mt, JsAstNode* node,
                                      JsAstNode** uri_arg, int64_t* component) {
-    (void)mt;
-    if (!node || node->node_type != JS_AST_NODE_CALL_EXPRESSION) return false;
+    if (!node || node->node_type != AST_NODE_CALL_EXPR) return false;
     JsCallNode* call = (JsCallNode*)node;
     if (ast_linked_node_count(call->arguments) != 1 || !call->callee ||
-        call->callee->node_type != JS_AST_NODE_IDENTIFIER) {
+        call->callee->node_type != AST_NODE_IDENT) {
         return false;
     }
     JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
@@ -1973,17 +1971,16 @@ static bool jm_match_uri_decode_call(JsMirTranspiler* mt, JsAstNode* node,
 
 static bool jm_match_string_from_char_code2(JsMirTranspiler* mt, JsAstNode* node,
                                             JsAstNode** first_arg, JsAstNode** second_arg) {
-    (void)mt;
-    if (!node || node->node_type != JS_AST_NODE_CALL_EXPRESSION) return false;
+    if (!node || node->node_type != AST_NODE_CALL_EXPR) return false;
     JsCallNode* call = (JsCallNode*)node;
     if (ast_linked_node_count(call->arguments) != 2 || !call->callee ||
-        call->callee->node_type != JS_AST_NODE_MEMBER_EXPRESSION) {
+        call->callee->node_type != AST_NODE_MEMBER_EXPR) {
         return false;
     }
     JsMemberNode* member = (JsMemberNode*)call->callee;
     if (member->computed || !member->object || !member->property ||
-        member->object->node_type != JS_AST_NODE_IDENTIFIER ||
-        member->property->node_type != JS_AST_NODE_IDENTIFIER) {
+        member->object->node_type != AST_NODE_IDENT ||
+        member->property->node_type != AST_NODE_IDENT) {
         return false;
     }
     JsIdentifierNode* object = (JsIdentifierNode*)member->object;
@@ -1999,8 +1996,8 @@ static bool jm_match_string_from_char_code2(JsMirTranspiler* mt, JsAstNode* node
 
 static bool jm_uri_compare_arg_is_simple(JsAstNode* node) {
     if (!node) return false;
-    return node->node_type == JS_AST_NODE_IDENTIFIER ||
-           node->node_type == JS_AST_NODE_LITERAL;
+    return node->node_type == AST_NODE_IDENT ||
+           node->node_type == AST_NODE_LITERAL;
 }
 
 static bool jm_try_emit_uri_compare_fast_path(JsMirTranspiler* mt,
@@ -2030,10 +2027,10 @@ static bool jm_try_emit_uri_compare_fast_path(JsMirTranspiler* mt,
 
 #if JS_TEST262_FAST_PATHS
 static bool jm_match_decimal_to_percent_hex_call(JsAstNode* node, JsAstNode** n_arg) {
-    if (!node || node->node_type != JS_AST_NODE_CALL_EXPRESSION) return false;
+    if (!node || node->node_type != AST_NODE_CALL_EXPR) return false;
     JsCallNode* call = (JsCallNode*)node;
     if (ast_linked_node_count(call->arguments) != 1 || !call->callee ||
-        call->callee->node_type != JS_AST_NODE_IDENTIFIER) {
+        call->callee->node_type != AST_NODE_IDENT) {
         return false;
     }
     JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
@@ -2049,7 +2046,7 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
     auto publish = [mt, bin, result_type](MIR_reg_t reg, ValueRep rep) {
         return jm_expression_value(mt, (JsAstNode*)bin, reg, result_type, rep);
     };
-    if (bin->op == JS_OP_ADD) {
+    if (bin->op == OPERATOR_ADD) {
 #if JS_TEST262_FAST_PATHS
         JsAstNode* n_arg = NULL;
         if (jm_test262_fast_paths_enabled(mt) &&
@@ -2064,10 +2061,10 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
 
     // Tune8 §2.5: retiring this caused timeouts on decodeURI/decodeURIComponent
     // stress tests (generic path ~100× slower per loop iteration). Keep.
-    if (bin->op == JS_OP_STRICT_EQ || bin->op == JS_OP_STRICT_NE) {
+    if (bin->op == OPERATOR_JS_STRICT_EQ || bin->op == OPERATOR_JS_STRICT_NE) {
         MIR_reg_t result;
         if (jm_try_emit_uri_compare_fast_path(mt, bin->left, bin->right, &result)) {
-            if (bin->op == JS_OP_STRICT_NE) {
+            if (bin->op == OPERATOR_JS_STRICT_NE) {
                 return publish(jm_callr_1(mt, "js_logical_not", MIR_T_I64, result),
                     VALUE_REP_ITEM);
             }
@@ -2078,7 +2075,7 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
     TypeId left_type  = jm_get_effective_type(mt, bin->left);
     TypeId right_type = jm_get_effective_type(mt, bin->right);
 
-    if (bin->op == JS_OP_ADD && left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_STRING) {
+    if (bin->op == OPERATOR_ADD && left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_STRING) {
         MIR_reg_t left_reg = jm_transpile_box_item(mt, bin->left);
         MIR_reg_t right_reg = jm_transpile_box_item(mt, bin->right);
         return publish(jm_callr_2(mt, "js_string_concat", MIR_T_I64,
@@ -2088,7 +2085,7 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
     // --- Short-circuit evaluation for logical operators ---
     // || and && must NOT evaluate both sides eagerly (side effects, caching patterns)
     // ?? (nullish coalesce) similarly short-circuits on non-null/undefined left
-    if (bin->op == JS_OP_OR || bin->op == JS_OP_AND || bin->op == JS_OP_NULLISH_COALESCE) {
+    if (bin->op == OPERATOR_OR || bin->op == OPERATOR_AND || bin->op == OPERATOR_JS_NULLISH_COALESCE) {
         MIR_reg_t result = jm_new_reg(mt, "sc_result", MIR_T_I64);
         MIR_label_t l_right = jm_new_label(mt);
         MIR_label_t l_end = jm_new_label(mt);
@@ -2097,7 +2094,7 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
         MIR_reg_t left_val = jm_transpile_box_item(mt, bin->left);
 
         MIR_reg_t cond;
-        if (bin->op == JS_OP_NULLISH_COALESCE) {
+        if (bin->op == OPERATOR_JS_NULLISH_COALESCE) {
             // ?? : left is null or undefined → evaluate right
             cond = jm_callr_1(mt, "js_is_nullish", MIR_T_I64, left_val);
         } else {
@@ -2107,11 +2104,11 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
         }
 
         JsErrorLaneTrack branch_exc = jm_error_lane_state(mt);
-        if (bin->op == JS_OP_OR) {
+        if (bin->op == OPERATOR_OR) {
             // ||: if left is truthy, return left; else evaluate right
             // BF l_right: if truthy is FALSE (not truthy), jump to right
             jm_emit_branch(mt, MIR_BF, l_right, cond);
-        } else if (bin->op == JS_OP_NULLISH_COALESCE) {
+        } else if (bin->op == OPERATOR_JS_NULLISH_COALESCE) {
             // ??: if left is nullish (null/undefined), evaluate right; else return left
             // BT l_right: if nullish is TRUE (is null/undefined), jump to evaluate right
             jm_emit_branch(mt, MIR_BT, l_right, cond);
@@ -2145,28 +2142,28 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
     // v23: typeof pattern optimization: typeof x === "literal" → js_typeof_is(x, "literal")
     // Reduces 3 operations (typeof + box_string + strict_equal) to 1 call returning int.
     {
-        bool is_typeof_eq = (bin->op == JS_OP_STRICT_EQ || bin->op == JS_OP_EQ);
-        bool is_typeof_ne = (bin->op == JS_OP_STRICT_NE || bin->op == JS_OP_NE);
+        bool is_typeof_eq = (bin->op == OPERATOR_JS_STRICT_EQ || bin->op == OPERATOR_EQ);
+        bool is_typeof_ne = (bin->op == OPERATOR_JS_STRICT_NE || bin->op == OPERATOR_NE);
         if (is_typeof_eq || is_typeof_ne) {
             JsAstNode* typeof_side = NULL;
             JsAstNode* literal_side = NULL;
-            if (bin->left && bin->left->node_type == JS_AST_NODE_UNARY_EXPRESSION &&
-                ((JsUnaryNode*)bin->left)->op == JS_OP_TYPEOF) {
+            if (bin->left && bin->left->node_type == AST_NODE_UNARY &&
+                ((JsUnaryNode*)bin->left)->op == OPERATOR_JS_TYPEOF) {
                 typeof_side = bin->left; literal_side = bin->right;
-            } else if (bin->right && bin->right->node_type == JS_AST_NODE_UNARY_EXPRESSION &&
-                       ((JsUnaryNode*)bin->right)->op == JS_OP_TYPEOF) {
+            } else if (bin->right && bin->right->node_type == AST_NODE_UNARY &&
+                       ((JsUnaryNode*)bin->right)->op == OPERATOR_JS_TYPEOF) {
                 typeof_side = bin->right; literal_side = bin->left;
             }
             if (typeof_side && literal_side &&
-                literal_side->node_type == JS_AST_NODE_LITERAL) {
+                literal_side->node_type == AST_NODE_LITERAL) {
                 JsLiteralNode* lit = (JsLiteralNode*)literal_side;
-                if (lit->literal_type == JS_LITERAL_STRING && lit->value.string_value) {
+                if (lit->literal_type == AST_LITERAL_STRING && lit->value.string_value) {
                     JsUnaryNode* type_un = (JsUnaryNode*)typeof_side;
                     JsAstNode* operand = type_un->operand;
                     // Only optimize when operand is in scope (avoids issues with
                     // builtins like parseInt/Math and undeclared variables)
                     bool can_optimize = true;
-                    if (operand && operand->node_type == JS_AST_NODE_IDENTIFIER) {
+                    if (operand && operand->node_type == AST_NODE_IDENT) {
                         JsIdentifierNode* id = (JsIdentifierNode*)operand;
                         if (!id->entry ||
                                 (!jm_find_var_by_binding(mt, id->entry) &&
@@ -2208,33 +2205,33 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
     bool invert_box = false;
     int compare_op = -1;   // 0=LT, 1=GT, 2=LE, 3=GE; -1 = not a compare
     switch (bin->op) {
-    case JS_OP_ADD:        fn_name = "js_add"; break;
-    case JS_OP_SUB:        fn_name = "js_subtract"; break;
-    case JS_OP_MUL:        fn_name = "js_multiply"; break;
-    case JS_OP_DIV:        fn_name = "js_divide"; break;
-    case JS_OP_MOD:        fn_name = "js_modulo"; break;
-    case JS_OP_EXP:        fn_name = "js_power"; break;
-    case JS_OP_EQ:         fn_name = "js_equal"; break;
-    case JS_OP_NE:         fn_name = "js_equal"; invert_box = true; break;
-    case JS_OP_STRICT_EQ:  fn_name = "js_strict_equal"; break;
-    case JS_OP_STRICT_NE:  fn_name = "js_strict_equal"; invert_box = true; break;
+    case OPERATOR_ADD:        fn_name = "js_add"; break;
+    case OPERATOR_SUB:        fn_name = "js_subtract"; break;
+    case OPERATOR_MUL:        fn_name = "js_multiply"; break;
+    case OPERATOR_DIV:        fn_name = "js_divide"; break;
+    case OPERATOR_MOD:        fn_name = "js_modulo"; break;
+    case OPERATOR_JS_EXP:        fn_name = "js_power"; break;
+    case OPERATOR_EQ:         fn_name = "js_equal"; break;
+    case OPERATOR_NE:         fn_name = "js_equal"; invert_box = true; break;
+    case OPERATOR_JS_STRICT_EQ:  fn_name = "js_strict_equal"; break;
+    case OPERATOR_JS_STRICT_NE:  fn_name = "js_strict_equal"; invert_box = true; break;
     // Tune8 §2.1: js_less_than / _equal / js_greater_than / _equal folded into
     // js_compare(op, l, r) with op as compile-time constant operand.
-    case JS_OP_LT:         fn_name = "js_compare"; compare_op = 0; break;
-    case JS_OP_LE:         fn_name = "js_compare"; compare_op = 2; break;
-    case JS_OP_GT:         fn_name = "js_compare"; compare_op = 1; break;
-    case JS_OP_GE:         fn_name = "js_compare"; compare_op = 3; break;
-    case JS_OP_AND:        fn_name = "js_logical_and"; break;
-    case JS_OP_OR:         fn_name = "js_logical_or"; break;
-    case JS_OP_BIT_AND:    fn_name = "js_bitwise_and"; break;
-    case JS_OP_BIT_OR:     fn_name = "js_bitwise_or"; break;
-    case JS_OP_BIT_XOR:    fn_name = "js_bitwise_xor"; break;
-    case JS_OP_BIT_LSHIFT: fn_name = "js_left_shift"; break;
-    case JS_OP_BIT_RSHIFT: fn_name = "js_right_shift"; break;
-    case JS_OP_BIT_URSHIFT: fn_name = "js_unsigned_right_shift"; break;
-    case JS_OP_INSTANCEOF: fn_name = "js_instanceof"; break;
-    case JS_OP_IN:         fn_name = "js_in"; break;
-    case JS_OP_NULLISH_COALESCE: fn_name = "js_nullish_coalesce"; break;
+    case OPERATOR_LT:         fn_name = "js_compare"; compare_op = 0; break;
+    case OPERATOR_LE:         fn_name = "js_compare"; compare_op = 2; break;
+    case OPERATOR_GT:         fn_name = "js_compare"; compare_op = 1; break;
+    case OPERATOR_GE:         fn_name = "js_compare"; compare_op = 3; break;
+    case OPERATOR_AND:        fn_name = "js_logical_and"; break;
+    case OPERATOR_OR:         fn_name = "js_logical_or"; break;
+    case OPERATOR_JS_BIT_AND:    fn_name = "js_bitwise_and"; break;
+    case OPERATOR_JS_BIT_OR:     fn_name = "js_bitwise_or"; break;
+    case OPERATOR_JS_BIT_XOR:    fn_name = "js_bitwise_xor"; break;
+    case OPERATOR_JS_LSHIFT: fn_name = "js_left_shift"; break;
+    case OPERATOR_JS_RSHIFT: fn_name = "js_right_shift"; break;
+    case OPERATOR_JS_URSHIFT: fn_name = "js_unsigned_right_shift"; break;
+    case OPERATOR_JS_INSTANCEOF: fn_name = "js_instanceof"; break;
+    case OPERATOR_IN:         fn_name = "js_in"; break;
+    case OPERATOR_JS_NULLISH_COALESCE: fn_name = "js_nullish_coalesce"; break;
     default:
         log_error("js-mir: unknown binary op %d", bin->op);
         return publish(jm_emit_null(mt), VALUE_REP_ITEM);
@@ -2242,8 +2239,8 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
 
     // `#field in obj` resolves the current class's lexical private binding.
     MIR_reg_t left;
-    if (bin->op == JS_OP_IN && bin->left &&
-        bin->left->node_type == JS_AST_NODE_IDENTIFIER) {
+    if (bin->op == OPERATOR_IN && bin->left &&
+        bin->left->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* lid = (JsIdentifierNode*)bin->left;
         if (jm_is_private_name(lid->name)) {
             String* private_name = jm_resolve_private_name(mt, bin->left, lid->name);
@@ -2261,8 +2258,8 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
     // runtime classname helper because thrown Error objects carry class names.
     // Other identifiers must go through normal GetValue so unresolved bindings
     // throw ReferenceError and aliases/global assignments observe runtime values.
-    if (bin->op == JS_OP_INSTANCEOF && bin->right &&
-        bin->right->node_type == JS_AST_NODE_IDENTIFIER) {
+    if (bin->op == OPERATOR_JS_INSTANCEOF && bin->right &&
+        bin->right->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* rid = (JsIdentifierNode*)bin->right;
         if (rid->name) {
             const char* rname = rid->name->chars;
@@ -2302,7 +2299,7 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
         result = inv;
     }
     // instanceof and in can throw TypeError — propagate exception to enclosing try/catch
-    if (bin->op == JS_OP_INSTANCEOF || bin->op == JS_OP_IN) {
+    if (bin->op == OPERATOR_JS_INSTANCEOF || bin->op == OPERATOR_IN) {
         jm_emit_error_lane_propagate_check(mt);
     }
     return publish(result, VALUE_REP_ITEM);
@@ -2315,7 +2312,7 @@ static MIR_reg_t jm_transpile_unary_numeric_operand(JsMirTranspiler* mt,
                                                      JsAstNode* operand,
                                                      MIR_reg_t* with_key) {
     *with_key = 0;
-    if (operand && operand->node_type == JS_AST_NODE_IDENTIFIER && mt->with_depth > 0) {
+    if (operand && operand->node_type == AST_NODE_IDENT && mt->with_depth > 0) {
         JsIdentifierNode* id = (JsIdentifierNode*)operand;
         JsMirVarEntry* var = jm_find_var_by_binding(mt, id->entry);
         if (var) {
@@ -2434,14 +2431,14 @@ static MirValue jm_transpile_update_unary(JsMirTranspiler* mt, JsUnaryNode* un,
         return jm_expression_value(mt, (JsAstNode*)un, reg, result_type, rep);
     };
 
-    if (un->operand && un->operand->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+    if (un->operand && un->operand->node_type == AST_NODE_CALL_EXPR) {
         jm_transpile_box_item(mt, un->operand);
         jm_emit_error_lane_propagate_check(mt);
         jm_emit_invalid_assignment_target_reference_error(mt);
         jm_emit_error_lane_propagate_check(mt);
         return publish(jm_emit_undefined(mt), VALUE_REP_ITEM);
     }
-    if (un->operand && un->operand->node_type == JS_AST_NODE_IDENTIFIER) {
+    if (un->operand && un->operand->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* id = (JsIdentifierNode*)un->operand;
         JsMirVarEntry* var = jm_find_var_by_binding(mt, id->entry);
         if (var && var->is_const) {
@@ -2450,7 +2447,7 @@ static MirValue jm_transpile_update_unary(JsMirTranspiler* mt, JsUnaryNode* un,
         }
     }
 
-    if (un->operand && un->operand->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+    if (un->operand && un->operand->node_type == AST_NODE_MEMBER_EXPR) {
         JsMirReference ref = jm_emit_reference(mt, un->operand);
         jm_emit_canonicalize_computed_key_for_get_put(mt, &ref);
         MIR_reg_t operand = jm_emit_get_value(mt, &ref);
@@ -2474,7 +2471,7 @@ static MirValue jm_transpile_update_unary(JsMirTranspiler* mt, JsUnaryNode* un,
         num_operand = saved;
     }
     MIR_reg_t result = jm_callr_1(mt, update_function, MIR_T_I64, num_operand);
-    if (un->operand && un->operand->node_type == JS_AST_NODE_IDENTIFIER) {
+    if (un->operand && un->operand->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* id = (JsIdentifierNode*)un->operand;
         MIR_label_t with_done_label = 0;
         if (jm_emit_unary_identifier_writeback(mt, id, result, &with_key, &with_done_label)) {
@@ -2491,46 +2488,46 @@ static MirValue jm_emit_unary_expression(JsMirTranspiler* mt,
         return jm_expression_value(mt, (JsAstNode*)un, reg, result_type, rep);
     };
     switch (un->op) {
-    case JS_OP_NOT:
+    case OPERATOR_NOT:
         return publish(jm_callr_1(mt, "js_logical_not", MIR_T_I64,
             jm_transpile_box_item(mt, un->operand)), VALUE_REP_ITEM);
-    case JS_OP_BIT_NOT:
+    case OPERATOR_JS_BIT_NOT:
         return publish(jm_callr_1(mt, "js_bitwise_not", MIR_T_I64,
             jm_transpile_box_item(mt, un->operand)), VALUE_REP_ITEM);
-    case JS_OP_TYPEOF: {
+    case OPERATOR_JS_TYPEOF: {
         // Only direct identifiers get typeof's unresolvable-reference escape;
         // member/call operands still perform normal GetValue on their bases.
-        bool direct_identifier = un->operand && un->operand->node_type == JS_AST_NODE_IDENTIFIER;
+        bool direct_identifier = un->operand && un->operand->node_type == AST_NODE_IDENT;
         mt->in_typeof = direct_identifier;
         MIR_reg_t operand_val = jm_transpile_box_item(mt, un->operand);
         mt->in_typeof = false;
         return publish(jm_callr_1(mt, "js_typeof", MIR_T_I64, operand_val),
             VALUE_REP_ITEM);
     }
-    case JS_OP_PLUS:
-    case JS_OP_ADD:
+    case OPERATOR_POS:
+    case OPERATOR_ADD:
         return publish(jm_callr_1(mt, "js_unary_plus", MIR_T_I64,
             jm_transpile_box_item(mt, un->operand)), VALUE_REP_ITEM);
-    case JS_OP_MINUS:
-    case JS_OP_SUB:
+    case OPERATOR_NEG:
+    case OPERATOR_SUB:
         return publish(jm_callr_1(mt, "js_unary_minus", MIR_T_I64,
             jm_transpile_box_item(mt, un->operand)), VALUE_REP_ITEM);
-    case JS_OP_INCREMENT:
+    case OPERATOR_JS_INCREMENT:
         return jm_transpile_update_unary(mt, un, false);
-    case JS_OP_DECREMENT:
+    case OPERATOR_JS_DECREMENT:
         return jm_transpile_update_unary(mt, un, true);
-    case JS_OP_VOID: {
+    case OPERATOR_JS_VOID: {
         // Evaluate for side effects, return undefined (not null)
         jm_transpile_box_item(mt, un->operand);
         MIR_reg_t undef_reg = jm_new_reg(mt, "void_undef", MIR_T_I64);
         jm_emit_reg_op(mt, MIR_MOV, undef_reg, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED));
         return publish(undef_reg, VALUE_REP_ITEM);
     }
-    case JS_OP_DELETE: {
+    case OPERATOR_JS_DELETE: {
         // delete obj.prop or delete obj[expr] → js_delete_property(obj, key)
-        if (un->operand && un->operand->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+        if (un->operand && un->operand->node_type == AST_NODE_MEMBER_EXPR) {
             JsMemberNode* m = (JsMemberNode*)un->operand;
-            if (m->object && m->object->node_type == JS_AST_NODE_IDENTIFIER) {
+            if (m->object && m->object->node_type == AST_NODE_IDENT) {
                 JsIdentifierNode* obj_id = (JsIdentifierNode*)m->object;
                 if (obj_id->name && obj_id->name->len == 5 &&
                     strncmp(obj_id->name->chars, "super", 5) == 0) {
@@ -2547,7 +2544,7 @@ static MirValue jm_emit_unary_expression(JsMirTranspiler* mt,
             JsMirReference ref = jm_emit_reference(mt, un->operand);
             return publish(jm_emit_delete_reference(mt, &ref), VALUE_REP_ITEM);
         }
-        if (un->operand && un->operand->node_type == JS_AST_NODE_IDENTIFIER) {
+        if (un->operand && un->operand->node_type == AST_NODE_IDENT) {
             JsIdentifierNode* del_id = (JsIdentifierNode*)un->operand;
             const char* del_name = del_id->name ? del_id->name->chars : NULL;
             if (del_name) {
@@ -2660,13 +2657,13 @@ static void jm_emit_destructure_put_reference(JsMirTranspiler* mt, const JsMirRe
 
 static bool jm_emit_destructure_pre_reference(JsMirTranspiler* mt, JsAstNode* target, JsMirReference* ref) {
     if (!target || !ref) return false;
-    if (target->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+    if (target->node_type == AST_NODE_MEMBER_EXPR) {
         *ref = jm_emit_reference(mt, target);
         return ref->kind != JS_MIR_REF_INVALID;
     }
-    if (target->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+    if (target->node_type == AST_NODE_ASSIGN_PATTERN) {
         JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)target;
-        if (ap->left && ap->left->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+        if (ap->left && ap->left->node_type == AST_NODE_MEMBER_EXPR) {
             *ref = jm_emit_reference(mt, ap->left);
             return ref->kind != JS_MIR_REF_INVALID;
         }
@@ -2679,7 +2676,7 @@ static void jm_emit_destructure_bind_pre_reference(JsMirTranspiler* mt, JsAstNod
 {
     if (!target || !ref) return;
     MIR_reg_t put_val = val;
-    if (target->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+    if (target->node_type == AST_NODE_ASSIGN_PATTERN) {
         JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)target;
         put_val = jm_emit_destructure_default(mt, val, ap->right);
     }
@@ -2718,11 +2715,11 @@ static void jm_emit_array_destructure_target(JsMirTranspiler* mt,
 
 static JsIdentifierNode* jm_destructure_binding_identifier_target(JsAstNode* target) {
     if (!target) return NULL;
-    if (target->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+    if (target->node_type == AST_NODE_ASSIGN_PATTERN) {
         JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)target;
         target = ap->left;
     }
-    if (!target || target->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
+    if (!target || target->node_type != AST_NODE_IDENT) return NULL;
     return (JsIdentifierNode*)target;
 }
 
@@ -2960,30 +2957,30 @@ MIR_reg_t jm_emit_destructure_default(JsMirTranspiler* mt, MIR_reg_t val, JsAstN
 // Dispatch destructuring target: bind val to the target pattern node
 void jm_emit_destructure_target(JsMirTranspiler* mt, JsAstNode* target, MIR_reg_t val) {
     if (!target) return;
-    if (target->node_type == JS_AST_NODE_IDENTIFIER) {
+    if (target->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* id = (JsIdentifierNode*)target;
         jm_bind_destructure_var(mt, id, val);
-    } else if (target->node_type == JS_AST_NODE_ARRAY_PATTERN ||
-               target->node_type == JS_AST_NODE_ARRAY_EXPRESSION) {
+    } else if (target->node_type == AST_NODE_ARRAY_PATTERN ||
+               target->node_type == AST_NODE_ARRAY) {
         jm_emit_array_destructure(mt, target, val);
-    } else if (target->node_type == JS_AST_NODE_OBJECT_PATTERN ||
-               target->node_type == JS_AST_NODE_OBJECT_EXPRESSION) {
+    } else if (target->node_type == AST_NODE_MAP_PATTERN ||
+               target->node_type == AST_NODE_MAP) {
         jm_emit_object_destructure(mt, target, val);
-    } else if (target->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+    } else if (target->node_type == AST_NODE_ASSIGN_PATTERN) {
         JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)target;
         MIR_reg_t resolved = jm_emit_destructure_default(mt, val, ap->right);
         // function name inference for destructuring defaults
-        if (ap->left && ap->left->node_type == JS_AST_NODE_IDENTIFIER && ap->right) {
+        if (ap->left && ap->left->node_type == AST_NODE_IDENT && ap->right) {
             JsIdentifierNode* id = (JsIdentifierNode*)ap->left;
             bool is_anon_func = false;
             bool is_anon_class = false;
-            if (ap->right->node_type == JS_AST_NODE_ARROW_FUNCTION) {
+            if (ap->right->node_type == AST_NODE_ARROW_FUNC) {
                 is_anon_func = true;
-            } else if (ap->right->node_type == JS_AST_NODE_FUNCTION_EXPRESSION) {
+            } else if (ap->right->node_type == AST_NODE_FUNC_EXPR) {
                 JsFunctionNode* fn = (JsFunctionNode*)ap->right;
                 is_anon_func = (fn->name == NULL);
-            } else if (ap->right->node_type == JS_AST_NODE_CLASS_EXPRESSION ||
-                       ap->right->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+            } else if (ap->right->node_type == AST_NODE_CLASS_EXPR ||
+                       ap->right->node_type == AST_NODE_CLASS) {
                 JsClassNode* cls = (JsClassNode*)ap->right;
                 is_anon_class = (cls->name == NULL);
             }
@@ -2995,7 +2992,7 @@ void jm_emit_destructure_target(JsMirTranspiler* mt, JsAstNode* target, MIR_reg_
             }
         }
         jm_emit_destructure_target(mt, ap->left, resolved);
-    } else if (target->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+    } else if (target->node_type == AST_NODE_MEMBER_EXPR) {
         // assignment target: obj.prop or obj[expr]
         JsMemberNode* member = (JsMemberNode*)target;
         // generator spill: if computed property contains yield, spill val and obj across it
@@ -3018,7 +3015,7 @@ void jm_emit_destructure_target(JsMirTranspiler* mt, JsAstNode* target, MIR_reg_
                 val = jm_new_reg(mt, "_dstr_val_r", MIR_T_I64);
                 jm_gen_spill_load(mt, val, val_spill);
             }
-        } else if (member->property && member->property->node_type == JS_AST_NODE_IDENTIFIER) {
+        } else if (member->property && member->property->node_type == AST_NODE_IDENT) {
             JsIdentifierNode* prop = (JsIdentifierNode*)member->property;
             String* key_name = jm_resolve_private_name(mt, (JsAstNode*)member->property, prop->name);
             // Destructuring writes bypass ordinary Reference lowering, so a
@@ -3063,10 +3060,10 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
     {
         JsAstNode* chk = pattern->elements;
         while (chk) {
-            if (chk->node_type == JS_AST_NODE_REST_ELEMENT ||
-                chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+            if (chk->node_type == AST_NODE_REST_ELEMENT ||
+                chk->node_type == AST_NODE_SPREAD) {
                 JsSpreadElementNode* sp = (JsSpreadElementNode*)chk;
-                if (sp->argument && sp->argument->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+                if (sp->argument && sp->argument->node_type == AST_NODE_ASSIGN_PATTERN) {
                     MIR_reg_t msg = jm_box_string_literal(mt, "Rest element must not have a default initializer", 48);
                     jm_call_2(mt, "js_throw_named_error", MIR_T_I64,
             MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
@@ -3126,8 +3123,8 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
 
     JsAstNode* elem = pattern->elements;
     while (elem) {
-        if (elem->node_type == JS_AST_NODE_SPREAD_ELEMENT ||
-            elem->node_type == JS_AST_NODE_REST_ELEMENT) {
+        if (elem->node_type == AST_NODE_SPREAD ||
+            elem->node_type == AST_NODE_REST_ELEMENT) {
             // rest element: collect remaining iterator values into array
             JsSpreadElementNode* sp = (JsSpreadElementNode*)elem;
             if (sp->argument) {
@@ -3177,7 +3174,7 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
                     empty_target_has_yield, false);
                 jm_emit_label(mt, rest_end);
             }
-        } else if (elem->node_type == JS_AST_NODE_NULL) {
+        } else if (elem->node_type == AST_NODE_NULL) {
             // elision: advance iterator but discard value
             MIR_label_t elision_end = jm_new_label(mt);
             // skip if already done
@@ -3304,21 +3301,21 @@ void jm_emit_object_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MI
         JsAstNode* p = pattern->properties;
         while (p) {
             JsAstNode* target = NULL;
-            if (p->node_type == JS_AST_NODE_PROPERTY) {
+            if (p->node_type == AST_NODE_PROPERTY) {
                 JsPropertyNode* pp = (JsPropertyNode*)p;
                 target = pp->value ? pp->value : pp->key;
-            } else if (p->node_type == JS_AST_NODE_REST_ELEMENT ||
-                       p->node_type == JS_AST_NODE_REST_PROPERTY ||
-                       p->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+            } else if (p->node_type == AST_NODE_REST_ELEMENT ||
+                       p->node_type == AST_NODE_REST_PROPERTY ||
+                       p->node_type == AST_NODE_SPREAD) {
                 JsSpreadElementNode* sp = (JsSpreadElementNode*)p;
                 target = sp->argument;
             }
             // Unwrap assignment pattern: const { x = default } = obj
-            if (target && target->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+            if (target && target->node_type == AST_NODE_ASSIGN_PATTERN) {
                 JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)target;
                 target = ap->left;
             }
-            if (target && target->node_type == JS_AST_NODE_IDENTIFIER) {
+            if (target && target->node_type == AST_NODE_IDENT) {
                 JsIdentifierNode* id = (JsIdentifierNode*)target;
                 jm_bind_destructure_var(mt, id, pre_undef);
             }
@@ -3333,14 +3330,14 @@ void jm_emit_object_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MI
 
     JsAstNode* prop = pattern->properties;
     while (prop) {
-        if (prop->node_type == JS_AST_NODE_PROPERTY) {
+        if (prop->node_type == AST_NODE_PROPERTY) {
             JsPropertyNode* p = (JsPropertyNode*)prop;
             MIR_reg_t key;
             if (p->computed) {
                 key = jm_transpile_box_item(mt, p->key);
                 key = jm_callr_1(mt, "js_to_property_key", MIR_T_I64, key);
                 jm_emit_error_lane_propagate_check(mt);
-            } else if (p->key && p->key->node_type == JS_AST_NODE_IDENTIFIER) {
+            } else if (p->key && p->key->node_type == AST_NODE_IDENT) {
                 String* kn = ((JsIdentifierNode*)p->key)->name;
                 key = jm_box_property_name_literal(mt, kn->chars, kn->len);
             } else {
@@ -3376,16 +3373,16 @@ void jm_emit_object_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MI
             if (target_has_yield) {
                 jm_gen_spill_load(mt, src, target_src_spill);
             }
-        } else if (prop->node_type == JS_AST_NODE_REST_ELEMENT ||
-                   prop->node_type == JS_AST_NODE_REST_PROPERTY ||
-                   prop->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+        } else if (prop->node_type == AST_NODE_REST_ELEMENT ||
+                   prop->node_type == AST_NODE_REST_PROPERTY ||
+                   prop->node_type == AST_NODE_SPREAD) {
             // object rest: {...rest} — collect remaining keys
             JsSpreadElementNode* sp = (JsSpreadElementNode*)prop;
             if (sp->argument) {
                 int exclude_count = 0;
                 JsAstNode* pp = pattern->properties;
                 while (pp && pp != prop) {
-                    if (pp->node_type == JS_AST_NODE_PROPERTY) exclude_count++;
+                    if (pp->node_type == AST_NODE_PROPERTY) exclude_count++;
                     pp = pp->next;
                 }
                 // Use js_alloc_env instead of MIR_ALLOCA to avoid MIR inlining ALLOCA bug on ARM64.
@@ -3394,10 +3391,10 @@ void jm_emit_object_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MI
                 int ki = 0;
                 pp = pattern->properties;
                 while (pp && pp != prop) {
-                    if (pp->node_type == JS_AST_NODE_PROPERTY) {
+                    if (pp->node_type == AST_NODE_PROPERTY) {
                         JsPropertyNode* ep = (JsPropertyNode*)pp;
                         MIR_reg_t ki_item = 0;
-                        if (!ep->computed && ep->key && ep->key->node_type == JS_AST_NODE_IDENTIFIER) {
+                        if (!ep->computed && ep->key && ep->key->node_type == AST_NODE_IDENT) {
                             String* ek = ((JsIdentifierNode*)ep->key)->name;
                             ki_item = jm_box_property_name_literal(mt, ek->chars, ek->len);
                         } else if (ep->key) {
@@ -3486,7 +3483,7 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
     };
     if (!asgn->left || !asgn->right) return publish_item(jm_emit_null(mt));
 
-    if (asgn->left->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+    if (asgn->left->node_type == AST_NODE_CALL_EXPR) {
         jm_transpile_box_item(mt, asgn->left);
         jm_emit_error_lane_propagate_check(mt);
         jm_emit_invalid_assignment_target_reference_error(mt);
@@ -3495,7 +3492,7 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
     }
 
     // Simple variable assignment: x = expr
-    if (asgn->left->node_type == JS_AST_NODE_IDENTIFIER) {
+    if (asgn->left->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* id = (JsIdentifierNode*)asgn->left;
         const char* vname = jm_var_name(id->name);
         JsMirVarEntry* var = jm_find_var_by_binding(mt, id->entry);
@@ -3533,19 +3530,19 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
                     // P5: For typed INT module variables, use inline native arithmetic
                     // for compound assignments instead of calling js_add/js_subtract/etc.
                     // This eliminates one function call per iteration in tight loops.
-                    if (mt->with_depth <= 0 && mc->modvar_type == LMD_TYPE_INT && asgn->op != JS_OP_ASSIGN) {
+                    if (mt->with_depth <= 0 && mc->modvar_type == LMD_TYPE_INT && asgn->op != OPERATOR_ASSIGN) {
                         MIR_insn_code_t p5_mir_op = MIR_ADD;
                         bool p5_handled = true;
                         switch (asgn->op) {
-                        case JS_OP_ADD_ASSIGN:    p5_mir_op = MIR_ADD;  break;
-                        case JS_OP_SUB_ASSIGN:    p5_mir_op = MIR_SUB;  break;
-                        case JS_OP_MUL_ASSIGN:    p5_mir_op = MIR_MUL;  break;
-                        case JS_OP_BIT_AND_ASSIGN: p5_mir_op = MIR_AND; break;
-                        case JS_OP_BIT_OR_ASSIGN:  p5_mir_op = MIR_OR;  break;
-                        case JS_OP_BIT_XOR_ASSIGN: p5_mir_op = MIR_XOR; break;
-                        case JS_OP_LSHIFT_ASSIGN:  p5_mir_op = MIR_LSH; break;
-                        case JS_OP_RSHIFT_ASSIGN:  p5_mir_op = MIR_RSH; break;
-                        case JS_OP_URSHIFT_ASSIGN: p5_mir_op = MIR_URSH; break;
+                        case OPERATOR_JS_ADD_ASSIGN:    p5_mir_op = MIR_ADD;  break;
+                        case OPERATOR_JS_SUB_ASSIGN:    p5_mir_op = MIR_SUB;  break;
+                        case OPERATOR_JS_MUL_ASSIGN:    p5_mir_op = MIR_MUL;  break;
+                        case OPERATOR_JS_BIT_AND_ASSIGN: p5_mir_op = MIR_AND; break;
+                        case OPERATOR_JS_BIT_OR_ASSIGN:  p5_mir_op = MIR_OR;  break;
+                        case OPERATOR_JS_BIT_XOR_ASSIGN: p5_mir_op = MIR_XOR; break;
+                        case OPERATOR_JS_LSHIFT_ASSIGN:  p5_mir_op = MIR_LSH; break;
+                        case OPERATOR_JS_RSHIFT_ASSIGN:  p5_mir_op = MIR_RSH; break;
+                        case OPERATOR_JS_URSHIFT_ASSIGN: p5_mir_op = MIR_URSH; break;
                         default: p5_handled = false; break;
                         }
                         if (p5_handled) {
@@ -3570,15 +3567,15 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
                             return publish_item(boxed_new);
                         }
                     }
-                    if (asgn->op == JS_OP_AND_ASSIGN || asgn->op == JS_OP_OR_ASSIGN ||
-                        asgn->op == JS_OP_NULLISH_ASSIGN) {
+                    if (asgn->op == OPERATOR_JS_AND_ASSIGN || asgn->op == OPERATOR_JS_OR_ASSIGN ||
+                        asgn->op == OPERATOR_JS_NULLISH_ASSIGN) {
                         // Logical assignment with short-circuit for module vars
                         MIR_reg_t old_val = jm_load_module_var(mt, (uint32_t)mc->int_val);
                         return publish_item(jm_emit_logical_assignment(mt, asgn, id,
                             old_val, true, mc, vname, false, 0));
                     }
                     MIR_reg_t rhs;
-                    if (asgn->op != JS_OP_ASSIGN) {
+                    if (asgn->op != OPERATOR_ASSIGN) {
                         // Compound assignment: read current value, apply op, store result
                         MIR_reg_t old_val = jm_load_module_var(mt, (uint32_t)mc->int_val);
                         MIR_reg_t with_key = 0;
@@ -3609,8 +3606,8 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
                         // cover = function(){} → cover.name === "cover"
                         // Suppressed when LHS is parenthesized (IsIdentifierRef is false per spec)
                         if (!asgn->lhs_is_parenthesized && asgn->right &&
-                            (asgn->right->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-                             asgn->right->node_type == JS_AST_NODE_ARROW_FUNCTION)) {
+                            (asgn->right->node_type == AST_NODE_FUNC_EXPR ||
+                             asgn->right->node_type == AST_NODE_ARROW_FUNC)) {
                             JsFunctionNode* fn_node = (JsFunctionNode*)asgn->right;
                             if (!fn_node->name && id->name) {
                                 jm_emit_set_function_name(mt, rhs, id->name->chars);
@@ -3669,8 +3666,8 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
                 const int set_global_strict_flag = strict_put ? 1 : 0;
                 MIR_reg_t strict_lhs_key = 0;
                 MIR_reg_t strict_lhs_exists = 0;
-                if (asgn->op == JS_OP_AND_ASSIGN || asgn->op == JS_OP_OR_ASSIGN ||
-                    asgn->op == JS_OP_NULLISH_ASSIGN) {
+                if (asgn->op == OPERATOR_JS_AND_ASSIGN || asgn->op == OPERATOR_JS_OR_ASSIGN ||
+                    asgn->op == OPERATOR_JS_NULLISH_ASSIGN) {
                     // Logical assignment with short-circuit for global vars
                     MIR_reg_t name_reg = jm_box_property_name_literal(mt,
                         id->name->chars, id->name->len);
@@ -3680,13 +3677,13 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
                         old_val, false, NULL, NULL, strict_put, set_global_strict_flag));
                 }
                 MIR_reg_t simple_with_key = 0;
-                if (mt->with_depth > 0 && asgn->op == JS_OP_ASSIGN) {
+                if (mt->with_depth > 0 && asgn->op == OPERATOR_ASSIGN) {
                 simple_with_key = jm_box_property_name_literal(mt,
                     id->name->chars, id->name->len);
                     jm_callr_1(mt, "js_capture_with_binding", MIR_T_I64, simple_with_key);
                     jm_emit_error_lane_propagate_check(mt);
                 }
-                if (strict_put && asgn->op == JS_OP_ASSIGN) {
+                if (strict_put && asgn->op == OPERATOR_ASSIGN) {
                     strict_lhs_key = simple_with_key ? simple_with_key :
                         jm_box_property_name_literal(mt, id->name->chars, id->name->len);
                     strict_lhs_exists = jm_callr_1(mt, "js_global_binding_exists", MIR_T_I64, strict_lhs_key);
@@ -3694,7 +3691,7 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
                 }
                 MIR_reg_t rhs = jm_transpile_box_item(mt, asgn->right);
                 jm_emit_set_class_assignment_name(mt, asgn, rhs, id->name);
-                if (asgn->op != JS_OP_ASSIGN) {
+                if (asgn->op != OPERATOR_ASSIGN) {
                     // Compound assignment: read current value from global, apply op, store
                     MIR_reg_t name_reg = jm_box_property_name_literal(mt,
                         id->name->chars, id->name->len);
@@ -3718,7 +3715,7 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
             }
         }
 
-        if (var->is_nfe_binding && asgn->op == JS_OP_ASSIGN) {
+        if (var->is_nfe_binding && asgn->op == OPERATOR_ASSIGN) {
             MIR_reg_t rhs = jm_transpile_box_item(mt, asgn->right);
             jm_emit_set_class_assignment_name(mt, asgn, rhs, id->name);
             bool strict_assign = jm_strict_put(mt);
@@ -3760,7 +3757,7 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
         if (mt->with_depth <= 0 && var->type_id == LMD_TYPE_INT && !var->from_env) {
             TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
             if (rhs_type != LMD_TYPE_INT) {
-                if (asgn->op != JS_OP_ASSIGN) {
+                if (asgn->op != OPERATOR_ASSIGN) {
                     MIR_reg_t boxed_current = jm_box_native(mt, var->reg,
                         LMD_TYPE_INT);
                     jm_emit_mov(mt, var->reg, boxed_current);
@@ -3770,22 +3767,22 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
             } else {
                 MIR_reg_t rhs = jm_transpile_as_native(mt, asgn->right,
                     LMD_TYPE_INT);
-                if (asgn->op == JS_OP_ASSIGN) {
+                if (asgn->op == OPERATOR_ASSIGN) {
                     jm_emit_mov(mt, var->reg, rhs);
                 } else {
                     MIR_insn_code_t op = MIR_ADD;
                     switch (asgn->op) {
-                    case JS_OP_ADD_ASSIGN: op = MIR_ADD; break;
-                    case JS_OP_SUB_ASSIGN: op = MIR_SUB; break;
-                    case JS_OP_MUL_ASSIGN: op = MIR_MUL; break;
-                    case JS_OP_DIV_ASSIGN: op = MIR_DIV; break;
-                    case JS_OP_MOD_ASSIGN: op = MIR_MOD; break;
-                    case JS_OP_BIT_AND_ASSIGN: op = MIR_AND; break;
-                    case JS_OP_BIT_OR_ASSIGN: op = MIR_OR; break;
-                    case JS_OP_BIT_XOR_ASSIGN: op = MIR_XOR; break;
-                    case JS_OP_LSHIFT_ASSIGN: op = MIR_LSH; break;
-                    case JS_OP_RSHIFT_ASSIGN: op = MIR_RSH; break;
-                    case JS_OP_URSHIFT_ASSIGN: op = MIR_URSH; break;
+                    case OPERATOR_JS_ADD_ASSIGN: op = MIR_ADD; break;
+                    case OPERATOR_JS_SUB_ASSIGN: op = MIR_SUB; break;
+                    case OPERATOR_JS_MUL_ASSIGN: op = MIR_MUL; break;
+                    case OPERATOR_JS_DIV_ASSIGN: op = MIR_DIV; break;
+                    case OPERATOR_JS_MOD_ASSIGN: op = MIR_MOD; break;
+                    case OPERATOR_JS_BIT_AND_ASSIGN: op = MIR_AND; break;
+                    case OPERATOR_JS_BIT_OR_ASSIGN: op = MIR_OR; break;
+                    case OPERATOR_JS_BIT_XOR_ASSIGN: op = MIR_XOR; break;
+                    case OPERATOR_JS_LSHIFT_ASSIGN: op = MIR_LSH; break;
+                    case OPERATOR_JS_RSHIFT_ASSIGN: op = MIR_RSH; break;
+                    case OPERATOR_JS_URSHIFT_ASSIGN: op = MIR_URSH; break;
                     default: break;
                     }
                     jm_emit(mt, MIR_new_insn(mt->ctx, op,
@@ -3800,7 +3797,7 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
         }
 
         if (mt->with_depth <= 0 && var->type_id == LMD_TYPE_FLOAT && !var->from_env) {
-            if (asgn->op == JS_OP_ASSIGN) {
+            if (asgn->op == OPERATOR_ASSIGN) {
                 MIR_reg_t rhs = jm_transpile_as_native(mt, asgn->right,
                     LMD_TYPE_FLOAT);
                 jm_emit_dmov(mt, var->reg, rhs);
@@ -3820,7 +3817,7 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
 
         // --- Boxed variable path (original) ---
         MIR_reg_t rhs;
-        if (asgn->op == JS_OP_ASSIGN) {
+        if (asgn->op == OPERATOR_ASSIGN) {
             // Set assignment target hint for closure self-capture detection
             mt->assign_target_binding = id->entry;
             MIR_reg_t simple_with_key = 0;
@@ -3834,8 +3831,8 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
             rhs = jm_transpile_box_item(mt, asgn->right);
             mt->assign_target_binding = NULL;
             // v18: function name inference for simple assignment
-            if (asgn->right && (asgn->right->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-                                asgn->right->node_type == JS_AST_NODE_ARROW_FUNCTION)) {
+            if (asgn->right && (asgn->right->node_type == AST_NODE_FUNC_EXPR ||
+                                asgn->right->node_type == AST_NODE_ARROW_FUNC)) {
                 JsFunctionNode* fn_node = (JsFunctionNode*)asgn->right;
                 if (!fn_node->name && id->name) {
                     jm_emit_set_function_name(mt, rhs, id->name->chars);
@@ -3847,8 +3844,8 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
                 return publish_item(jm_emit_with_writeback(mt, simple_with_key,
                     rhs, "lsa_res", strict_put, var, NULL, NULL, vname));
             }
-        } else if (asgn->op == JS_OP_AND_ASSIGN || asgn->op == JS_OP_OR_ASSIGN ||
-                   asgn->op == JS_OP_NULLISH_ASSIGN) {
+        } else if (asgn->op == OPERATOR_JS_AND_ASSIGN || asgn->op == OPERATOR_JS_OR_ASSIGN ||
+                   asgn->op == OPERATOR_JS_NULLISH_ASSIGN) {
             // Logical assignment with short-circuit: do NOT evaluate RHS if condition met
             // &&= : if current is falsy, return current (don't eval RHS, don't assign)
             // ||= : if current is truthy, return current (don't eval RHS, don't assign)
@@ -3857,13 +3854,13 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
             MIR_label_t l_end = jm_new_label(mt);
 
             MIR_reg_t cond;
-            if (asgn->op == JS_OP_NULLISH_ASSIGN) {
+            if (asgn->op == OPERATOR_JS_NULLISH_ASSIGN) {
                 cond = jm_callr_1(mt, "js_is_nullish", MIR_T_I64, var->reg);
                 // if nullish → evaluate RHS and assign
                 jm_emit_branch(mt, MIR_BT, l_assign, cond);
             } else {
                 cond = jm_emit_is_truthy(mt, jm_item_value(var->reg));
-                if (asgn->op == JS_OP_AND_ASSIGN) {
+                if (asgn->op == OPERATOR_JS_AND_ASSIGN) {
                     // &&= : if truthy → evaluate RHS and assign; if falsy → short-circuit
                     jm_emit_branch(mt, MIR_BT, l_assign, cond);
                 } else {
@@ -3909,8 +3906,8 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
             rhs = jm_emit_compound_assign(mt, asgn->op, old_val, rval);
         }
 
-        if (mt->with_depth > 0 && asgn->op != JS_OP_ASSIGN && asgn->op != JS_OP_AND_ASSIGN &&
-            asgn->op != JS_OP_OR_ASSIGN && asgn->op != JS_OP_NULLISH_ASSIGN) {
+        if (mt->with_depth > 0 && asgn->op != OPERATOR_ASSIGN && asgn->op != OPERATOR_JS_AND_ASSIGN &&
+            asgn->op != OPERATOR_JS_OR_ASSIGN && asgn->op != OPERATOR_JS_NULLISH_ASSIGN) {
             MIR_reg_t with_key = jm_box_property_name_literal(mt,
                 id->name->chars, id->name->len);
             bool strict_put = jm_strict_put(mt);
@@ -3919,7 +3916,7 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
         }
 
         jm_emit_mov(mt, var->reg, rhs);
-        var->jube_type = asgn->op == JS_OP_ASSIGN
+        var->jube_type = asgn->op == OPERATOR_ASSIGN
             ? jm_infer_jube_type(mt, asgn->right) : NULL;
 
         // Write-back to env if this is a captured variable
@@ -3929,13 +3926,13 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
     }
 
     // Member assignment: obj.prop = expr, obj[key] = expr
-    if (asgn->left->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+    if (asgn->left->node_type == AST_NODE_MEMBER_EXPR) {
         JsMemberNode* member = (JsMemberNode*)asgn->left;
         bool member_is_super = jm_js_ident_name_eq(member->object, "super", 5);
 
         // super.x = val — use shared Reference Record handling for correct
         // receiver binding and derived-constructor this/key evaluation order.
-        if (asgn->op == JS_OP_ASSIGN && member_is_super) {
+        if (asgn->op == OPERATOR_ASSIGN && member_is_super) {
                 JsMirReference ref = jm_emit_reference(mt, asgn->left);
                 jm_emit_error_lane_propagate_check(mt);
                 if (ref.uninitialized_this) {
@@ -3965,11 +3962,11 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
         jm_spill_reference_for_suspending_rhs(mt, &ref, asgn->right,
                                                &base_spill, &key_spill);
         MIR_reg_t new_val;
-        if (asgn->op == JS_OP_ASSIGN) {
+        if (asgn->op == OPERATOR_ASSIGN) {
             new_val = jm_transpile_box_item(mt, asgn->right);
             jm_emit_error_lane_propagate_check(mt);
-        } else if (asgn->op == JS_OP_AND_ASSIGN || asgn->op == JS_OP_OR_ASSIGN ||
-                   asgn->op == JS_OP_NULLISH_ASSIGN) {
+        } else if (asgn->op == OPERATOR_JS_AND_ASSIGN || asgn->op == OPERATOR_JS_OR_ASSIGN ||
+                   asgn->op == OPERATOR_JS_NULLISH_ASSIGN) {
             // Logical assignment with short-circuit for member expressions
             // obj[key] &&= expr: if obj[key] is falsy, skip RHS eval and assignment
             // obj[key] ||= expr: if obj[key] is truthy, skip RHS eval and assignment
@@ -3980,12 +3977,12 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
             MIR_label_t l_assign = jm_new_label(mt);
             MIR_label_t l_end = jm_new_label(mt);
             MIR_reg_t cond;
-            if (asgn->op == JS_OP_NULLISH_ASSIGN) {
+            if (asgn->op == OPERATOR_JS_NULLISH_ASSIGN) {
                 cond = jm_callr_1(mt, "js_is_nullish", MIR_T_I64, cur_val);
                 jm_emit_branch(mt, MIR_BT, l_assign, cond);
             } else {
                 cond = jm_emit_is_truthy(mt, jm_item_value(cur_val));
-                if (asgn->op == JS_OP_AND_ASSIGN) {
+                if (asgn->op == OPERATOR_JS_AND_ASSIGN) {
                     jm_emit_branch(mt, MIR_BT, l_assign, cond);
                 } else {
                     jm_emit_branch(mt, MIR_BF, l_assign, cond);
@@ -4029,13 +4026,13 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
         return publish_item(result);
     }
 
-    if (asgn->op == JS_OP_ASSIGN &&
-        (asgn->left->node_type == JS_AST_NODE_ARRAY_PATTERN ||
-         asgn->left->node_type == JS_AST_NODE_ARRAY_EXPRESSION ||
-         asgn->left->node_type == JS_AST_NODE_OBJECT_PATTERN ||
-         asgn->left->node_type == JS_AST_NODE_OBJECT_EXPRESSION)) {
-        bool is_array = asgn->left->node_type == JS_AST_NODE_ARRAY_PATTERN ||
-            asgn->left->node_type == JS_AST_NODE_ARRAY_EXPRESSION;
+    if (asgn->op == OPERATOR_ASSIGN &&
+        (asgn->left->node_type == AST_NODE_ARRAY_PATTERN ||
+         asgn->left->node_type == AST_NODE_ARRAY ||
+         asgn->left->node_type == AST_NODE_MAP_PATTERN ||
+         asgn->left->node_type == AST_NODE_MAP)) {
+        bool is_array = asgn->left->node_type == AST_NODE_ARRAY_PATTERN ||
+            asgn->left->node_type == AST_NODE_ARRAY;
         return publish_item(jm_emit_destructure_assignment(mt, asgn->left,
             asgn->right, is_array));
     }
@@ -4345,7 +4342,7 @@ static bool jm_call_yield_blocks_direct(JsMirTranspiler* mt, JsAstNode* first_ar
 
 static bool jm_arguments_have_spread(JsAstNode* arguments) {
     for (; arguments; arguments = arguments->next) {
-        if (arguments->node_type == JS_AST_NODE_SPREAD_ELEMENT) return true;
+        if (arguments->node_type == AST_NODE_SPREAD) return true;
     }
     return false;
 }
@@ -4468,7 +4465,7 @@ static void jm_call_arg_flags(JsMirTranspiler* mt, JsAstNode* arguments,
         }
     }
     for (JsAstNode* arg = arguments; arg; arg = arg->next) {
-        if (arg->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+        if (arg->node_type == AST_NODE_SPREAD) {
             *args_have_spread = true;
             break;
         }
@@ -4630,7 +4627,7 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
     // global. Keep it in the TS compilation profile so D6.2.2v2 never needs
     // name-selected runtime semantics or property-miss synthesis to find it.
     if (mt->tp && !mt->tp->strict_js && call->callee &&
-            call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+            call->callee->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* type_id = (JsIdentifierNode*)call->callee;
         if (type_id->name && type_id->name->len == 4 &&
                 memcmp(type_id->name->chars, "type", 4) == 0) {
@@ -4648,7 +4645,7 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
     // require(specifier) — CJS module loading
     // Only intercept if 'require' is NOT a local variable/parameter (e.g. webpack factories
     // pass their own require function as a parameter named 'require')
-    if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+    if (call->callee && call->callee->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* callee_id = (JsIdentifierNode*)call->callee;
         if (callee_id->name && callee_id->name->len == 7 &&
             memcmp(callee_id->name->chars, "require", 7) == 0 && arg_count == 1) {
@@ -4656,9 +4653,9 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
             bool require_is_local = callee_id->entry != NULL;
             if (!require_is_local) {
                 JsAstNode* arg = call->arguments;
-                if (arg && arg->node_type == JS_AST_NODE_LITERAL) {
+                if (arg && arg->node_type == AST_NODE_LITERAL) {
                     JsLiteralNode* lit = (JsLiteralNode*)arg;
-                    if (lit->literal_type == JS_LITERAL_STRING && lit->value.string_value) {
+                    if (lit->literal_type == AST_LITERAL_STRING && lit->value.string_value) {
                         // resolve the module path at transpile time
                         char resolved[512];
                         jm_resolve_module_path(mt->filename ? mt->filename : ".",
@@ -4678,7 +4675,7 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
     }
 
     // import(specifier) — dynamic import, returns a Promise
-    if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+    if (call->callee && call->callee->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* callee_id = (JsIdentifierNode*)call->callee;
         if (callee_id->name && callee_id->name->len == 6 &&
             memcmp(callee_id->name->chars, "import", 6) == 0 && arg_count >= 1) {
@@ -4686,9 +4683,9 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
             bool import_is_local = callee_id->entry != NULL;
             if (!import_is_local) {
                 JsAstNode* arg = call->arguments;
-                if (arg && arg->node_type == JS_AST_NODE_LITERAL) {
+                if (arg && arg->node_type == AST_NODE_LITERAL) {
                     JsLiteralNode* lit = (JsLiteralNode*)arg;
-                    if (lit->literal_type == JS_LITERAL_STRING && lit->value.string_value) {
+                    if (lit->literal_type == AST_LITERAL_STRING && lit->value.string_value) {
                         // static string — resolve module path at transpile time
                         char resolved[512];
                         jm_resolve_module_path(mt->filename ? mt->filename : ".",
@@ -4708,16 +4705,16 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
     }
 
     // super(args) — call parent constructor with current 'this'
-    if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+    if (call->callee && call->callee->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
         if (id->name && id->name->len == 5 && strncmp(id->name->chars, "super", 5) == 0) {
             if (!mt->current_class) {
                 mt->current_class = jm_find_innermost_class_for_node(mt, (JsAstNode*)call);
             }
             if (mt->current_class && mt->current_class->node && mt->current_class->node->superclass &&
-                (mt->current_class->node->superclass->node_type == JS_AST_NODE_NULL ||
-                 (mt->current_class->node->superclass->node_type == JS_AST_NODE_LITERAL &&
-                  ((JsLiteralNode*)mt->current_class->node->superclass)->literal_type == JS_LITERAL_NULL))) {
+                (mt->current_class->node->superclass->node_type == AST_NODE_NULL ||
+                 (mt->current_class->node->superclass->node_type == AST_NODE_LITERAL &&
+                  ((JsLiteralNode*)mt->current_class->node->superclass)->literal_type == AST_LITERAL_NULL))) {
                 // `super()` in `class C extends null` is specified to evaluate
                 // arguments, then fail IsConstructor on Function.prototype.
                 // Route it through the runtime super-call helper with a null
@@ -4775,7 +4772,7 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
                 // When super(msg) is called in a class extending Error, set this.message and this.name
                 if (mt->current_class && mt->current_class->node &&
                     mt->current_class->node->superclass &&
-                    mt->current_class->node->superclass->node_type == JS_AST_NODE_IDENTIFIER) {
+                    mt->current_class->node->superclass->node_type == AST_NODE_IDENT) {
                     JsIdentifierNode* super_id = (JsIdentifierNode*)mt->current_class->node->superclass;
                     if (super_id->name) {
                         const char* sname = super_id->name->chars;
@@ -4848,7 +4845,7 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
                 // e.g. class Foo extends obj.Bar { constructor() { super(); } }
                 if (mt->current_class && mt->current_class->node &&
                     mt->current_class->node->superclass &&
-                    mt->current_class->node->superclass->node_type != JS_AST_NODE_IDENTIFIER) {
+                    mt->current_class->node->superclass->node_type != AST_NODE_IDENT) {
                     MIR_reg_t parent_fn = 0;
                     if (mt->current_class->name) {
                         MIR_reg_t class_obj = jm_emit_class_object_for_entry(mt, mt->current_class);
@@ -4877,10 +4874,10 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
     }
 
     // super.method(args) — call parent method with current 'this'
-    if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+    if (call->callee && call->callee->node_type == AST_NODE_MEMBER_EXPR) {
         JsMemberNode* m = (JsMemberNode*)call->callee;
-        if (!m->computed && m->object && m->object->node_type == JS_AST_NODE_IDENTIFIER &&
-            m->property && m->property->node_type == JS_AST_NODE_IDENTIFIER) {
+        if (!m->computed && m->object && m->object->node_type == AST_NODE_IDENT &&
+            m->property && m->property->node_type == AST_NODE_IDENT) {
             JsIdentifierNode* obj = (JsIdentifierNode*)m->object;
             if (obj->name && obj->name->len == 5 && strncmp(obj->name->chars, "super", 5) == 0) {
                 JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
@@ -4935,9 +4932,9 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
     // super[computedKey](args) — call parent computed-key method with current 'this'
     // Handles e.g. super[$sym]() where $sym is an identifier naming a Symbol variable.
     // Match computed method in parent class chain by comparing key_expr identifier names.
-    if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+    if (call->callee && call->callee->node_type == AST_NODE_MEMBER_EXPR) {
         JsMemberNode* m = (JsMemberNode*)call->callee;
-        if (m->computed && m->object && m->object->node_type == JS_AST_NODE_IDENTIFIER) {
+        if (m->computed && m->object && m->object->node_type == AST_NODE_IDENT) {
             JsIdentifierNode* obj_id = (JsIdentifierNode*)m->object;
             if (obj_id->name && obj_id->name->len == 5 && strncmp(obj_id->name->chars, "super", 5) == 0) {
                 // The key expression — we match by identifier name in the parent class methods
@@ -4947,12 +4944,12 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
                     JsClassMethodEntry* found_method = NULL;
                     // Get the identifier name of the key expression (e.g. "$finalize")
                     String* key_id_name = NULL;
-                    if (m->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                    if (m->property->node_type == AST_NODE_IDENT) {
                         key_id_name = ((JsIdentifierNode*)m->property)->name;
-                    } else if (m->property->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+                    } else if (m->property->node_type == AST_NODE_MEMBER_EXPR) {
                         // e.g. Symbol.iterator — use the property name
                         JsMemberNode* kmem = (JsMemberNode*)m->property;
-                        if (kmem->property && kmem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                        if (kmem->property && kmem->property->node_type == AST_NODE_IDENT) {
                             key_id_name = ((JsIdentifierNode*)kmem->property)->name;
                         }
                     }
@@ -4967,11 +4964,11 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
                                 if (!me->key_expr) continue;
                                 // Match by identifier name
                                 String* me_key_name = NULL;
-                                if (me->key_expr->node_type == JS_AST_NODE_IDENTIFIER) {
+                                if (me->key_expr->node_type == AST_NODE_IDENT) {
                                     me_key_name = ((JsIdentifierNode*)me->key_expr)->name;
-                                } else if (me->key_expr->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+                                } else if (me->key_expr->node_type == AST_NODE_MEMBER_EXPR) {
                                     JsMemberNode* kmem = (JsMemberNode*)me->key_expr;
-                                    if (kmem->property && kmem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                                    if (kmem->property && kmem->property->node_type == AST_NODE_IDENT) {
                                         me_key_name = ((JsIdentifierNode*)kmem->property)->name;
                                     }
                                 }
@@ -5036,10 +5033,10 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
     if (jm_test262_fast_paths_enabled(mt)) {
         const JsTest262Intercept* spec = NULL;
         bool needs_assert_guard = false;
-        if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+        if (call->callee && call->callee->node_type == AST_NODE_MEMBER_EXPR) {
             JsMemberNode* m = (JsMemberNode*)call->callee;
-            if (!m->computed && m->object && m->object->node_type == JS_AST_NODE_IDENTIFIER &&
-                m->property && m->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            if (!m->computed && m->object && m->object->node_type == AST_NODE_IDENT &&
+                m->property && m->property->node_type == AST_NODE_IDENT) {
                 JsIdentifierNode* obj = (JsIdentifierNode*)m->object;
                 JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
                 if (jm_name_is(obj->name, "assert", 6)) {
@@ -5051,7 +5048,7 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
                         spec = NULL;
                 }
             }
-        } else if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+        } else if (call->callee && call->callee->node_type == AST_NODE_IDENT) {
             JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
             spec = jm_test262_lookup(js_test262_globals, id->name, arg_count);
             if (spec && (spec->flags & JM_T262_LOCAL_GUARD) &&
@@ -5064,11 +5061,11 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
 #endif
 
     // Computed member call: obj[expr](args) -> get property, then call
-    if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+    if (call->callee && call->callee->node_type == AST_NODE_MEMBER_EXPR) {
         JsMemberNode* m = (JsMemberNode*)call->callee;
         if (m->computed) {
             bool is_super_computed_call = false;
-            if (m->object && m->object->node_type == JS_AST_NODE_IDENTIFIER) {
+            if (m->object && m->object->node_type == AST_NODE_IDENT) {
                 JsIdentifierNode* obj_id = (JsIdentifierNode*)m->object;
                 is_super_computed_call = obj_id->name && obj_id->name->len == 5 &&
                     strncmp(obj_id->name->chars, "super", 5) == 0;
@@ -5174,9 +5171,9 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
     // D6.2.2v2: named method calls use the same observable property Get and
     // ordinary call kernel as computed calls. Receiver TypeId/name shortcuts
     // bypassed monkey patches, accessors, Proxy traps, and collection methods.
-    if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+    if (call->callee && call->callee->node_type == AST_NODE_MEMBER_EXPR) {
         JsMemberNode* m = (JsMemberNode*)call->callee;
-        if (m->property && m->property->node_type == JS_AST_NODE_IDENTIFIER) {
+        if (m->property && m->property->node_type == AST_NODE_IDENT) {
             JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
             bool args_have_yield = false;
             bool args_have_spread = false;
@@ -5262,7 +5259,7 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
     }
 
     // Direct function call: identifier(args)
-    if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+    if (call->callee && call->callee->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
 
         // Direct eval needs lexical-environment bridging, but only when the
@@ -5561,7 +5558,7 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
 // Member expression
 static MIR_reg_t jm_transpile_member_key(JsMirTranspiler* mt, JsMemberNode* mem) {
     if (mem->computed) return jm_transpile_box_item(mt, mem->property);
-    if (mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+    if (mem->property && mem->property->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
         String* key_name = jm_resolve_private_name(mt,
             (JsAstNode*)mem->property, prop->name);
@@ -5608,7 +5605,7 @@ static MirValue jm_emit_member_value(JsMirTranspiler* mt,
         JsMemberNode* mem) {
 
     // super.x / super[expr] property access must bypass local receiver fast paths.
-    if (mem->object && mem->object->node_type == JS_AST_NODE_IDENTIFIER) {
+    if (mem->object && mem->object->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* obj_id = (JsIdentifierNode*)mem->object;
         if (obj_id->name && obj_id->name->len == 5 && strncmp(obj_id->name->chars, "super", 5) == 0) {
             JsMirReference ref = jm_emit_reference(mt, (JsAstNode*)mem);
@@ -5650,7 +5647,7 @@ static MirValue jm_emit_member_value(JsMirTranspiler* mt,
     }
 
     if (!mem->computed && mem->property &&
-            mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            mem->property->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
         String* key_name = jm_resolve_private_name(mt,
             (JsAstNode*)mem->property, prop->name);
@@ -5696,7 +5693,7 @@ static MirValue jm_emit_array_value(JsMirTranspiler* mt,
     bool has_spread = false;
     JsAstNode* check = arr->elements;
     while (check) {
-        if (check->node_type == JS_AST_NODE_SPREAD_ELEMENT) { has_spread = true; break; }
+        if (check->node_type == AST_NODE_SPREAD) { has_spread = true; break; }
         check = check->next;
     }
     MIR_reg_t array;
@@ -5714,7 +5711,7 @@ static MirValue jm_emit_array_value(JsMirTranspiler* mt,
 
         JsAstNode* elem = arr->elements;
         while (elem) {
-            if (elem->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+            if (elem->node_type == AST_NODE_SPREAD) {
                 // Spread element: convert to array (handles Map, Set, generators, strings) then iterate
                 JsSpreadElementNode* spread = (JsSpreadElementNode*)elem;
                 MIR_reg_t src_raw = jm_transpile_box_item(mt, spread->argument);
@@ -5756,7 +5753,7 @@ static MirValue jm_emit_array_value(JsMirTranspiler* mt,
                 jm_emit_label(mt, l_spread_end);
             } else {
                 MIR_reg_t val;
-                if (elem->node_type == JS_AST_NODE_NULL) {
+                if (elem->node_type == AST_NODE_NULL) {
                     // elision hole — push sentinel value
                     val = jm_call_0(mt, "js_array_hole", MIR_T_I64);
                 } else {
@@ -5790,7 +5787,7 @@ static MirValue jm_emit_array_value(JsMirTranspiler* mt,
         JsAstNode* elem = arr->elements;
         int index = 0;
         while (elem) {
-            if (elem->node_type == JS_AST_NODE_NULL) {
+            if (elem->node_type == AST_NODE_NULL) {
                 // elision hole — skip, array was pre-allocated with hole sentinels
                 elem = elem->next;
                 index++;
@@ -5830,7 +5827,7 @@ static MirValue jm_emit_object_value(JsMirTranspiler* mt,
 
     JsAstNode* prop = obj->properties;
     while (prop) {
-        if (prop->node_type == JS_AST_NODE_PROPERTY) {
+        if (prop->node_type == AST_NODE_PROPERTY) {
             JsPropertyNode* p = (JsPropertyNode*)prop;
             // Skip getter/setter properties with null key (get key() { ... })
             if (!p->key) { prop = prop->next; continue; }
@@ -5849,7 +5846,7 @@ static MirValue jm_emit_object_value(JsMirTranspiler* mt,
                 // Phase-5C: accessor properties no longer wrap the key with
                 // __get_/__set_ prefix; we'll dispatch via
                 // js_install_user_accessor below using the bare key.
-            } else if (p->key->node_type == JS_AST_NODE_IDENTIFIER) {
+            } else if (p->key->node_type == AST_NODE_IDENT) {
                 JsIdentifierNode* id = (JsIdentifierNode*)p->key;
                 const char* kchars = id->name->chars;
                 int klen = (int)id->name->len;
@@ -5877,11 +5874,11 @@ static MirValue jm_emit_object_value(JsMirTranspiler* mt,
             }
             // function name inference from object property key
             if (!is_proto_literal && p->value &&
-                (p->value->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-                 p->value->node_type == JS_AST_NODE_ARROW_FUNCTION ||
-                 p->value->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
-                 p->value->node_type == JS_AST_NODE_CLASS_DECLARATION ||
-                 p->value->node_type == JS_AST_NODE_CLASS_EXPRESSION)) {
+                (p->value->node_type == AST_NODE_FUNC_EXPR ||
+                 p->value->node_type == AST_NODE_ARROW_FUNC ||
+                 p->value->node_type == AST_NODE_FUNC ||
+                 p->value->node_type == AST_NODE_CLASS ||
+                 p->value->node_type == AST_NODE_CLASS_EXPR)) {
                 int64_t prefix_kind = p->is_getter ? 1 : (p->is_setter ? 2 : 0);
                 jm_call_void_3(mt, "js_set_function_name_from_property_key_if_anonymous",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
@@ -5906,7 +5903,7 @@ static MirValue jm_emit_object_value(JsMirTranspiler* mt,
                     jm_emit_error_lane_propagate_check(mt);
                 }
             }
-        } else if (prop->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+        } else if (prop->node_type == AST_NODE_SPREAD) {
             // Object spread: { ...source } — copy all own properties from source into target
             JsSpreadElementNode* sp = (JsSpreadElementNode*)prop;
             MIR_reg_t source = jm_transpile_box_item(mt, sp->argument);
@@ -6198,13 +6195,13 @@ static MirValue jm_emit_tagged_template_value(JsMirTranspiler* mt,
         JsTaggedTemplateNode* tt) {
     MIR_reg_t tag_fn;
     MIR_reg_t this_val = 0;
-    if (tt->tag && tt->tag->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+    if (tt->tag && tt->tag->node_type == AST_NODE_MEMBER_EXPR) {
         JsMemberNode* mem = (JsMemberNode*)tt->tag;
         this_val = jm_transpile_box_item(mt, mem->object);
         MIR_reg_t key;
         if (mem->computed) {
             key = jm_transpile_box_item(mt, mem->property);
-        } else if (mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+        } else if (mem->property && mem->property->node_type == AST_NODE_IDENT) {
             JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
             key = jm_box_property_name_literal(mt, prop->name->chars, prop->name->len);
         } else {
@@ -6581,8 +6578,8 @@ static void jm_capture_arrow_lexical_home_class(JsMirTranspiler* mt,
 static void jm_sync_arguments_param_after_write(JsMirTranspiler* mt,
                                                  JsMemberNode* member) {
     if (!mt || !member || mt->arguments_reg == 0 ||
-        !member->object || member->object->node_type != JS_AST_NODE_IDENTIFIER ||
-        !member->property || member->property->node_type != JS_AST_NODE_LITERAL) {
+        !member->object || member->object->node_type != AST_NODE_IDENT ||
+        !member->property || member->property->node_type != AST_NODE_LITERAL) {
         return;
     }
     JsIdentifierNode* obj_id = (JsIdentifierNode*)member->object;
@@ -6591,7 +6588,7 @@ static void jm_sync_arguments_param_after_write(JsMirTranspiler* mt,
         return;
     }
     JsLiteralNode* idx_lit = (JsLiteralNode*)member->property;
-    if (idx_lit->literal_type != JS_LITERAL_NUMBER || idx_lit->has_decimal) return;
+    if (idx_lit->literal_type != AST_LITERAL_NUMBER || idx_lit->has_decimal) return;
     int idx = (int)idx_lit->value.number_value;
     if (idx < 0) return;
     JsMirVarEntry* pvar = jm_arguments_param_var(mt, idx);
@@ -6925,14 +6922,13 @@ static MirValue jm_transpile_expression_direct(JsMirTranspiler* mt,
 
 static MirValue jm_expression_value(JsMirTranspiler* mt, JsAstNode* item,
         MIR_reg_t reg, TypeId type_id, ValueRep rep) {
-    (void)mt;
     return em_value_for_rep(reg, type_id, rep, item ? item->type : NULL, item);
 }
 
 MirValue jm_transpile_expression_value(JsMirTranspiler* mt, JsAstNode* item,
         uint32_t demand, ValueRep required) {
     if (required != VALUE_REP_NONE) demand |= MIR_VALUE_REQUIRED_REP;
-    MirValue value = item && item->node_type == JS_AST_NODE_LITERAL
+    MirValue value = item && item->node_type == AST_NODE_LITERAL
         ? jm_transpile_literal_value(mt, (JsLiteralNode*)item, required)
         : jm_transpile_expression_direct(mt, item);
     return em_apply_value_demand(&mt->func_em->em,
@@ -6981,12 +6977,12 @@ MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr) {
 
     // Case 1: numeric comparison shares the boxed semantic kernel and then
     // extracts the raw branch bit at the condition boundary.
-    if (expr->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
+    if (expr->node_type == AST_NODE_BINARY) {
         JsBinaryNode* bin = (JsBinaryNode*)expr;
         bool is_comparison = false;
         switch (bin->op) {
-        case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
-        case JS_OP_EQ: case JS_OP_NE: case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
+        case OPERATOR_LT: case OPERATOR_LE: case OPERATOR_GT: case OPERATOR_GE:
+        case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_JS_STRICT_EQ: case OPERATOR_JS_STRICT_NE:
             is_comparison = true; break;
         default: break;
         }
@@ -7002,12 +6998,12 @@ MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr) {
             }
 
             // Tune8 §2.5: kept — see comment above the box-binary-op path.
-            if (bin->op == JS_OP_STRICT_EQ || bin->op == JS_OP_STRICT_NE) {
+            if (bin->op == OPERATOR_JS_STRICT_EQ || bin->op == OPERATOR_JS_STRICT_NE) {
                 MIR_reg_t boxed;
                 if (jm_try_emit_uri_compare_fast_path(mt, bin->left, bin->right, &boxed)) {
                     MIR_reg_t raw = jm_emit_is_truthy(mt,
                         jm_item_value(boxed, LMD_TYPE_BOOL));
-                    if (bin->op == JS_OP_STRICT_NE) {
+                    if (bin->op == OPERATOR_JS_STRICT_NE) {
                         MIR_reg_t inv = jm_new_reg(mt, "uri_ne", MIR_T_I64);
                         jm_emit_reg_binary_op(mt, MIR_XOR, inv, raw, MIR_new_int_op(mt->ctx, 1));
                         raw = inv;
@@ -7026,14 +7022,14 @@ MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr) {
             bool invert = false;
             int cmp_op = -1;   // 0=LT, 1=GT, 2=LE, 3=GE; -1 = use eq path
             switch (bin->op) {
-            case JS_OP_LT:        raw_fn = "js_cmp_raw"; cmp_op = 0; break;
-            case JS_OP_GT:        raw_fn = "js_cmp_raw"; cmp_op = 1; break;
-            case JS_OP_LE:        raw_fn = "js_cmp_raw"; cmp_op = 2; break;
-            case JS_OP_GE:        raw_fn = "js_cmp_raw"; cmp_op = 3; break;
-            case JS_OP_STRICT_EQ: raw_fn = "js_eq_raw"; break;
-            case JS_OP_STRICT_NE: raw_fn = "js_eq_raw"; invert = true; break;
-            case JS_OP_EQ:        raw_fn = "js_loose_eq_raw"; break;
-            case JS_OP_NE:        raw_fn = "js_loose_eq_raw"; invert = true; break;
+            case OPERATOR_LT:        raw_fn = "js_cmp_raw"; cmp_op = 0; break;
+            case OPERATOR_GT:        raw_fn = "js_cmp_raw"; cmp_op = 1; break;
+            case OPERATOR_LE:        raw_fn = "js_cmp_raw"; cmp_op = 2; break;
+            case OPERATOR_GE:        raw_fn = "js_cmp_raw"; cmp_op = 3; break;
+            case OPERATOR_JS_STRICT_EQ: raw_fn = "js_eq_raw"; break;
+            case OPERATOR_JS_STRICT_NE: raw_fn = "js_eq_raw"; invert = true; break;
+            case OPERATOR_EQ:        raw_fn = "js_loose_eq_raw"; break;
+            case OPERATOR_NE:        raw_fn = "js_loose_eq_raw"; invert = true; break;
             default: break;
             }
             if (raw_fn) {
@@ -7059,9 +7055,9 @@ MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr) {
     }
 
     // Case 2: logical NOT → invert the inner condition
-    if (expr->node_type == JS_AST_NODE_UNARY_EXPRESSION) {
+    if (expr->node_type == AST_NODE_UNARY) {
         JsUnaryNode* un = (JsUnaryNode*)expr;
-        if (un->op == JS_OP_NOT && un->operand) {
+        if (un->op == OPERATOR_NOT && un->operand) {
             MIR_reg_t inner = jm_transpile_condition(mt, un->operand);
             MIR_reg_t result = jm_new_reg(mt, "notc", MIR_T_I64);
             jm_emit_reg_binary_op(mt, MIR_XOR, result, inner, MIR_new_int_op(mt->ctx, 1));
@@ -7158,29 +7154,29 @@ static MirValue jm_transpile_expression_direct(JsMirTranspiler* mt,
     }
 
     switch (expr->node_type) {
-    case JS_AST_NODE_IDENTIFIER: {
+    case AST_NODE_IDENT: {
         JsIdentifierNode* id = (JsIdentifierNode*)expr;
         return jm_transpile_identifier_value(mt, id);
     }
-    case JS_AST_NODE_LITERAL:
+    case AST_NODE_LITERAL:
         return jm_transpile_literal_value(mt, (JsLiteralNode*)expr);
-    case JS_AST_NODE_BINARY_EXPRESSION:
+    case AST_NODE_BINARY:
         return jm_emit_binary_expression(mt, (JsBinaryNode*)expr);
-    case JS_AST_NODE_UNARY_EXPRESSION:
+    case AST_NODE_UNARY:
         return jm_emit_unary_expression(mt, (JsUnaryNode*)expr);
-    case JS_AST_NODE_CALL_EXPRESSION:
+    case AST_NODE_CALL_EXPR:
         return jm_transpile_call_value(mt, (JsCallNode*)expr, false);
-    case JS_AST_NODE_MEMBER_EXPRESSION:
+    case AST_NODE_MEMBER_EXPR:
         return jm_emit_member_value(mt, (JsMemberNode*)expr);
-    case JS_AST_NODE_ARRAY_EXPRESSION:
+    case AST_NODE_ARRAY:
         return jm_emit_array_value(mt, (JsArrayNode*)expr);
-    case JS_AST_NODE_OBJECT_EXPRESSION:
+    case AST_NODE_MAP:
         return jm_emit_object_value(mt, (JsObjectNode*)expr);
-    case JS_AST_NODE_FUNCTION_EXPRESSION:
-    case JS_AST_NODE_ARROW_FUNCTION:
-    case JS_AST_NODE_FUNCTION_DECLARATION: // class method functions built as FUNCTION_DECLARATION
+    case AST_NODE_FUNC_EXPR:
+    case AST_NODE_ARROW_FUNC:
+    case AST_NODE_FUNC: // class method functions built as FUNCTION_DECLARATION
         return jm_emit_function_value(mt, (JsFunctionNode*)expr);
-    case JS_AST_NODE_SPREAD_ELEMENT: {
+    case AST_NODE_SPREAD: {
         // When spread is passed as standalone expression (e.g., inside object spread),
         // evaluate and return the argument value — the caller handles spreading.
         JsSpreadElementNode* sp = (JsSpreadElementNode*)expr;
@@ -7189,17 +7185,17 @@ static MirValue jm_transpile_expression_direct(JsMirTranspiler* mt,
         return jm_expression_value(mt, expr, value,
             jm_get_effective_type(mt, expr), VALUE_REP_ITEM);
     }
-    case JS_AST_NODE_CONDITIONAL_EXPRESSION:
+    case AST_NODE_CONDITIONAL_EXPR:
         return jm_emit_conditional_value(mt, (JsConditionalNode*)expr);
     case JS_AST_NODE_TEMPLATE_LITERAL:
         return jm_emit_template_literal_value(mt, (JsTemplateLiteralNode*)expr);
     case JS_AST_NODE_TAGGED_TEMPLATE:
         return jm_emit_tagged_template_value(mt, (JsTaggedTemplateNode*)expr);
-    case JS_AST_NODE_ASSIGNMENT_EXPRESSION:
+    case AST_NODE_ASSIGN:
         return jm_emit_assignment_value(mt, (JsAssignmentNode*)expr);
-    case JS_AST_NODE_NEW_EXPRESSION:
+    case AST_NODE_NEW_EXPR:
         return jm_transpile_call_value(mt, (JsCallNode*)expr, true);
-    case JS_AST_NODE_SEQUENCE_EXPRESSION: {
+    case AST_NODE_SEQ: {
         // v11: comma operator — evaluate all expressions, return last
         JsSequenceNode* seq = (JsSequenceNode*)expr;
         JsSequenceLowering sequence = {
@@ -7227,12 +7223,12 @@ static MirValue jm_transpile_expression_direct(JsMirTranspiler* mt,
             jm_callr_2(mt, "js_create_regex_literal_items", MIR_T_I64, pattern, flags),
             LMD_TYPE_ANY, VALUE_REP_ITEM);
     }
-    case JS_AST_NODE_YIELD_EXPRESSION: {
+    case AST_NODE_YIELD: {
         JsYieldNode* yield_node = (JsYieldNode*)expr;
         if (!mt->in_generator && !yield_node->argument && !yield_node->delegate) {
             JsIdentifierNode yield_id;
             memset(&yield_id, 0, sizeof(yield_id));
-            yield_id.node_type = JS_AST_NODE_IDENTIFIER;
+            yield_id.node_type = AST_NODE_IDENT;
             yield_id.name = name_pool_create_len(mt->tp->name_pool, "yield", 5);
             MirValue value = jm_transpile_identifier_value(mt, &yield_id);
             value.semantic_contract = expr->type;
@@ -7340,7 +7336,7 @@ static MirValue jm_transpile_expression_direct(JsMirTranspiler* mt,
         return jm_expression_value(mt, expr, val, LMD_TYPE_ANY,
             VALUE_REP_ITEM);
     }
-    case JS_AST_NODE_AWAIT_EXPRESSION: {
+    case AST_NODE_AWAIT: {
         JsAwaitNode* await_node = (JsAwaitNode*)expr;
         MIR_reg_t promise_val = jm_transpile_box_item(mt, await_node->argument);
 
@@ -7381,8 +7377,8 @@ static MirValue jm_transpile_expression_direct(JsMirTranspiler* mt,
         return jm_expression_value(mt, expr, result, LMD_TYPE_ANY,
             VALUE_REP_ITEM);
     }
-    case JS_AST_NODE_CLASS_DECLARATION:
-    case JS_AST_NODE_CLASS_EXPRESSION: {
+    case AST_NODE_CLASS:
+    case AST_NODE_CLASS_EXPR: {
         // Class expression: var X = class Y {} or var X = class {}
         JsClassNode* cls_expr = (JsClassNode*)expr;
         MIR_reg_t cls_obj = jm_call_0(mt, "js_new_class_function", MIR_T_I64);
@@ -7403,10 +7399,10 @@ static MirValue jm_transpile_expression_direct(JsMirTranspiler* mt,
         jm_emit_class_self_extends_check(mt, ce, effective_name);
         MIR_reg_t checked_heritage_val = 0;
         if (cls_expr->superclass &&
-            cls_expr->superclass->node_type != JS_AST_NODE_IDENTIFIER &&
-            cls_expr->superclass->node_type != JS_AST_NODE_NULL &&
-            !(cls_expr->superclass->node_type == JS_AST_NODE_LITERAL &&
-              ((JsLiteralNode*)cls_expr->superclass)->literal_type == JS_LITERAL_NULL)) {
+            cls_expr->superclass->node_type != AST_NODE_IDENT &&
+            cls_expr->superclass->node_type != AST_NODE_NULL &&
+            !(cls_expr->superclass->node_type == AST_NODE_LITERAL &&
+              ((JsLiteralNode*)cls_expr->superclass)->literal_type == AST_LITERAL_NULL)) {
             checked_heritage_val = jm_transpile_box_item(mt, cls_expr->superclass);
             jm_callr_1(mt, "js_check_class_heritage_constructor", MIR_T_I64, checked_heritage_val);
             jm_emit_error_lane_propagate_check(mt);

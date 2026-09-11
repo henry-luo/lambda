@@ -310,9 +310,7 @@ static bool js_stream_await_drain_remove(Item source, Item dest) {
     }
     Item next = js_array_new(0);
     bool removed = false;
-    int64_t len = js_array_length(writers);
-    for (int64_t i = 0; i < len; i++) {
-        Item writer = js_elements_get_int(writers, i);
+    JS_ARRAY_FOREACH(writer, writers) {
         if (writer.item == dest.item) {
             removed = true;
             js_set_key_cstr(writer, "size", make_js_undefined());
@@ -370,8 +368,7 @@ static bool js_readable_has_pipe(Item self, Item dest) {
 }
 
 static Item js_legacy_stream_pipe_on_data(Item env_item, Item chunk) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item dest = env[0];
     Item write_fn = js_get_key_default(dest, key_write);
     if (!js_is_callable(write_fn)) return make_js_undefined();
@@ -379,8 +376,7 @@ static Item js_legacy_stream_pipe_on_data(Item env_item, Item chunk) {
 }
 
 static Item js_legacy_stream_pipe_on_end(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item dest = env[0];
     Item end_fn = js_get_key_default(dest, key_end);
     if (!js_is_callable(end_fn)) return make_js_undefined();
@@ -398,8 +394,7 @@ static void js_legacy_stream_pipe_add_listener(Item source, const char* event_na
 }
 
 static Item js_legacy_stream_pipe(Item source, Item dest) {
-    Item* env = js_alloc_env(1);
-    env[0] = dest;
+    Item* env = js_alloc_env1(dest);
     Item on_data = js_new_native_closure(js_legacy_stream_pipe_on_data, 1, env, 1);
     Item on_end = js_new_native_closure(js_legacy_stream_pipe_on_end, 0, env, 1);
     js_legacy_stream_pipe_add_listener(source, "data", on_data);
@@ -464,9 +459,7 @@ static bool js_readable_remove_pipe(Item self, Item dest, bool emit_unpipe) {
     Item removed_items = js_array_new(0);
     bool removed = false;
     bool remove_all = dest.item == 0 || get_type_id(dest) == LMD_TYPE_UNDEFINED;
-    int64_t len = js_array_length(pipes);
-    for (int64_t i = 0; i < len; i++) {
-        Item current = js_elements_get_int(pipes, i);
+    JS_ARRAY_FOREACH(current, pipes) {
         bool matches = false;
         if (remove_all) {
             matches = true;
@@ -510,8 +503,7 @@ JS_FORWARD_STATIC_RETURN(bool, js_item_is_true, (Item item), get_type_id, (item)
 JS_FORWARD_STATIC_RETURN(bool, js_stream_item_to_int64, (Item value, int64_t* out), js_item_to_integral_int64, (value, out, false))
 
 static Item js_readable_pipe_on_drain(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item source = env[0];
     Item dest = env[1];
     if (js_item_is_true(js_get_key_default(source, key_destroyed)) ||
@@ -571,7 +563,6 @@ static Item js_stream_make_listener_record(Item listener) {
 }
 
 static Item js_stream_pipe_data_noop(Item chunk) {
-    (void)chunk;
     return make_js_undefined();
 }
 
@@ -955,8 +946,7 @@ static void js_stream_maybe_end_writable_after_readable_end(Item self) {
         js_item_is_true(js_get_key_default(self, key_finish_emitted))) {
         return;
     }
-    Item* env = js_alloc_env(1);
-    env[0] = self;
+    Item* env = js_alloc_env1(self);
     Item tick = js_new_native_closure(js_stream_end_writable_side_tick_closure, 0, env, 1);
     js_next_tick_enqueue(tick);
 }
@@ -991,8 +981,7 @@ static void js_stream_auto_destroy_after_terminal(Item self);
 static void js_stream_auto_destroy_after_error_emit(Item self, Item err);
 
 static Item js_stream_construct_callback_once(Item env_item, Item err) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item self = env[0];
     if (js_item_is_true(env[1])) {
         Item multi = js_stream_make_error_with_code("ERR_MULTIPLE_CALLBACK",
@@ -1019,9 +1008,7 @@ static void js_stream_call_construct(Item obj) {
 
     js_set_key_cstr(obj, "__constructing__", js_bool_item(true));
     js_set_key_cstr(obj, "__constructed__", js_bool_item(false));
-    Item* env = js_alloc_env(2);
-    env[0] = obj;
-    env[1] = js_bool_item(false);
+    Item* env = js_alloc_env2(obj, js_bool_item(false));
     Item callback = js_new_native_closure(js_stream_construct_callback_once, 1, env, 2);
     Item construct_result = js_call_function(construct_fn, obj, &callback, 1);
     if (item_is_error(construct_result)) {
@@ -1122,8 +1109,7 @@ JS_STREAM_ENV_UNARY_CLOSURE(js_stream_emit_drain_tick_closure, js_stream_emit_dr
 JS_FORWARD_STATIC_ITEM(js_stream_transform_deferred_drain_key, (void), make_string_item, ("__transform_deferred_drain__"))
 
 static Item js_stream_transform_deferred_drain_tick(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item self = env[0];
     Item pending_key = js_stream_transform_deferred_drain_key();
     if (!js_item_is_true(js_get_key_default(self, pending_key))) {
@@ -1141,8 +1127,7 @@ static void js_stream_defer_transform_drain(Item self) {
     Item pending_key = js_stream_transform_deferred_drain_key();
     if (js_item_is_true(js_get_key_default(self, pending_key))) return;
     js_set_key_default(self, pending_key, js_bool_item(true));
-    Item* env = js_alloc_env(1);
-    env[0] = self;
+    Item* env = js_alloc_env1(self);
     Item tick = js_new_native_closure(js_stream_transform_deferred_drain_tick, 0, env, 1);
     js_next_tick_enqueue(tick);
 }
@@ -1161,8 +1146,7 @@ extern "C" void js_stream_transform_flush_drained(Item self) {
         js_set_key_default(self, js_stream_drain_on_listener_key(), js_bool_item(true));
         return;
     }
-    Item* env = js_alloc_env(1);
-    env[0] = self;
+    Item* env = js_alloc_env1(self);
     Item tick = js_new_native_closure(js_stream_emit_drain_tick_closure, 0, env, 1);
     js_next_tick_enqueue(tick);
 }
@@ -1182,8 +1166,7 @@ static void js_stream_schedule_pending_drain_after_readable(Item self) {
     Item key = make_string_item("__pending_drain_after_readable__");
     if (!js_item_is_true(js_get_key_default(self, key))) return;
     js_set_key_default(self, key, js_bool_item(false));
-    Item* env = js_alloc_env(1);
-    env[0] = self;
+    Item* env = js_alloc_env1(self);
     Item tick = js_new_native_closure(js_stream_emit_drain_tick_closure, 0, env, 1);
     js_setImmediate(tick);
 }
@@ -1227,8 +1210,7 @@ static void js_stream_emit_readable(Item self) {
     if (js_item_is_true(js_get_key_cstr(self, "__defer_readable_emit__")) ||
         js_item_is_true(js_get_key_default(self, key_reading_sync))) {
         // sync _read() may push before read() unwinds; defer readable to avoid recursive user callbacks.
-        Item* env = js_alloc_env(1);
-        env[0] = self;
+        Item* env = js_alloc_env1(self);
         Item tick = js_new_native_closure(js_stream_emit_readable_tick_closure, 0, env, 1);
         js_next_tick_enqueue(tick);
         return;
@@ -1382,10 +1364,7 @@ static bool js_stream_claim_once_callback(Item* env) {
 }
 
 static Item* js_stream_alloc_once_callback_env(Item self, Item payload) {
-    Item* env = js_alloc_env(3);
-    env[0] = self;
-    env[1] = payload;
-    env[2] = js_bool_item(false);
+    Item* env = js_alloc_env3(self, payload, js_bool_item(false));
     return env;
 }
 
@@ -1435,9 +1414,7 @@ static Item js_stream_after_writev(Item self, Item pending, Item err) {
         &need_drain, &has_error);
 
     if (get_type_id(pending) == LMD_TYPE_ARRAY) {
-        int64_t plen = js_array_length(pending);
-        for (int64_t i = 0; i < plen; i++) {
-            Item request = js_elements_get_int(pending, i);
+        JS_ARRAY_FOREACH(request, pending) {
             Item callback = js_get_key_cstr(request, "callback");
             if (js_is_callable(callback)) {
                 if (has_error) {
@@ -1557,8 +1534,7 @@ JS_STREAM_ENV_UNARY_CLOSURE(js_stream_emit_end_tick_closure, js_stream_emit_end_
 JS_STREAM_ENV_UNARY_CLOSURE(js_stream_emit_close_tick_closure, js_stream_emit_close_tick)
 
 static void js_stream_schedule_unary(Item self, JsNativeP1 target) {
-    Item* env = js_alloc_env(1);
-    env[0] = self;
+    Item* env = js_alloc_env1(self);
     Item tick = js_new_native_closure(target, 0, env, 1);
     js_next_tick_enqueue(tick);
 }
@@ -1582,9 +1558,7 @@ static void js_stream_schedule_error(Item self, Item err) {
     js_stream_set_error_state(self, err);
     js_set_key_cstr(self, "__error__", err);
     js_stream_async_iterators_drain(self, err);
-    Item* env = js_alloc_env(2);
-    env[0] = self;
-    env[1] = err;
+    Item* env = js_alloc_env2(self, err);
     Item tick = js_new_native_closure(js_stream_emit_error_tick_closure, 0, env, 2);
     js_next_tick_enqueue(tick);
 }
@@ -1955,8 +1929,7 @@ static void js_stream_schedule_data_flush(Item self) {
         tick_root, ItemNull);
     if (js_state_get_bool(state_root.get(), "resumeScheduled")) return;
     js_state_set_bool(state_root.get(), "resumeScheduled", true);
-    Item* env = js_alloc_env(1);
-    env[0] = self_root.get();
+    Item* env = js_alloc_env1(self_root.get());
     // Enqueue may allocate and collect before it retains the task; keep the
     // closure and its captured stream alive until queue ownership is installed.
     tick_root.set(js_new_native_closure(js_stream_flush_data_tick_closure, 0, env, 1));
@@ -1981,8 +1954,7 @@ static void js_stream_schedule_resume(Item self) {
     Item state = js_get_key_default(self, key_readable_state);
     if (js_state_get_bool(state, "resumeScheduled")) return;
     js_state_set_bool(state, "resumeScheduled", true);
-    Item* env = js_alloc_env(1);
-    env[0] = self;
+    Item* env = js_alloc_env1(self);
     Item tick = js_new_native_closure(js_stream_resume_tick_closure, 0, env, 1);
     js_next_tick_enqueue(tick);
 }
@@ -2091,9 +2063,7 @@ extern "C" Item js_stream_off(Item self, Item event_item, Item listener) {
     if (get_type_id(arr) != LMD_TYPE_ARRAY) return self;
 
     Item next = js_array_new(0);
-    int64_t len = js_array_length(arr);
-    for (int64_t i = 0; i < len; i++) {
-        Item current = js_elements_get_int(arr, i);
+    JS_ARRAY_FOREACH(current, arr) {
         if (!js_stream_listener_matches(current, listener)) js_array_push(next, current);
     }
     if (js_array_length(next) == 0) {
@@ -2127,8 +2097,7 @@ extern "C" Item js_stream_removeAllListeners(Item self, Item event_item) {
 }
 
 static Item js_stream_once_wrapper(Item env_item, Item arg1) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item self = env[0];
     Item event_item = env[1];
     Item listener = env[2];
@@ -2249,9 +2218,7 @@ static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
         js_state_set_bool(state, "ended", true);
         Item pipes = js_readable_pipes(self);
         if (get_type_id(pipes) == LMD_TYPE_ARRAY) {
-            int64_t plen = js_array_length(pipes);
-            for (int64_t i = 0; i < plen; i++) {
-                Item pipe_dest = js_elements_get_int(pipes, i);
+            JS_ARRAY_FOREACH(pipe_dest, pipes) {
                 if (js_item_is_true(js_get_key_default(pipe_dest, key_destroyed))) {
                     continue;
                 }
@@ -2340,9 +2307,7 @@ static Item js_readable_push_encoded(Item self, Item chunk, Item encoding) {
         bool removed_destroyed_pipe = false;
         bool wrote_to_pipe = false;
         bool backpressured = false;
-        int64_t plen = js_array_length(pipes);
-        for (int64_t i = 0; i < plen; i++) {
-            Item pipe_dest = js_elements_get_int(pipes, i);
+        JS_ARRAY_FOREACH(pipe_dest, pipes) {
             if (js_item_is_true(js_get_key_default(pipe_dest, key_destroyed))) {
                 js_readable_remove_pipe(self, pipe_dest, true);
                 removed_destroyed_pipe = true;
@@ -2911,9 +2876,7 @@ static void js_stream_async_iterator_detach(Item iterator) {
     if (get_type_id(iterators) != LMD_TYPE_ARRAY) return;
 
     Item next_iterators = js_array_new(0);
-    int64_t len = js_array_length(iterators);
-    for (int64_t i = 0; i < len; i++) {
-        Item current = js_elements_get_int(iterators, i);
+    JS_ARRAY_FOREACH(current, iterators) {
         if (current.item != iterator.item) {
             js_array_push(next_iterators, current);
         }
@@ -3039,8 +3002,7 @@ static void js_stream_async_iterator_drain_legacy(Item iterator) {
 }
 
 static Item js_stream_async_iterator_legacy_data(Item env_item, Item chunk) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item iterator = env[0];
     Item buffer_key = make_string_item("__event_buffer__");
     Item buffer = js_get_key_default(iterator, buffer_key);
@@ -3053,8 +3015,7 @@ static Item js_stream_async_iterator_legacy_data(Item env_item, Item chunk) {
 }
 
 static Item js_stream_async_iterator_legacy_end(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item iterator = env[0];
     js_set_key_cstr(iterator, "__event_done__", js_bool_item(true));
     js_stream_async_iterator_drain_legacy(iterator);
@@ -3062,8 +3023,7 @@ static Item js_stream_async_iterator_legacy_end(Item env_item) {
 }
 
 static Item js_stream_async_iterator_legacy_error(Item env_item, Item err) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item iterator = env[0];
     js_set_key_cstr(iterator, "__event_error__", err);
     js_stream_async_iterator_drain_legacy(iterator);
@@ -3075,8 +3035,7 @@ static void js_stream_async_iterator_setup_legacy(Item iterator, Item stream) {
     Item on = js_get_key_default(stream, key_on);
     if (!js_is_callable(on)) return;
 
-    Item* env = js_alloc_env(1);
-    env[0] = iterator;
+    Item* env = js_alloc_env1(iterator);
     Item data = js_new_native_closure(js_stream_async_iterator_legacy_data, 1, env, 1);
     Item end = js_new_native_closure(js_stream_async_iterator_legacy_end, 0, env, 1);
     Item error = js_new_native_closure(js_stream_async_iterator_legacy_error, 1, env, 1);
@@ -3123,9 +3082,7 @@ static void js_stream_async_iterators_drain(Item stream, Item err) {
     bool has_error = err.item != 0 &&
                      get_type_id(err) != LMD_TYPE_UNDEFINED &&
                      get_type_id(err) != LMD_TYPE_NULL;
-    int64_t len = js_array_length(iterators);
-    for (int64_t i = 0; i < len; i++) {
-        Item iterator = js_elements_get_int(iterators, i);
+    JS_ARRAY_FOREACH(iterator, iterators) {
         if (js_stream_async_iterator_pending_count(iterator) <= 0) {
             continue;
         }
@@ -3386,15 +3343,13 @@ static Item js_stream_make_callback_options(Item signal) {
 static Item js_stream_collect_next(Item env_item);
 
 static Item js_stream_collect_reject(Item env_item, Item err) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     env[5] = js_bool_item(true);
     return js_stream_reject_with_error(env[2], err);
 }
 
 static Item js_stream_collect_step(Item env_item, Item result) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     if (js_item_is_true(env[5])) return make_js_undefined();
     Item done = js_iterator_result_done(result);
     if (item_is_error(done)) return js_stream_reject_with_error(env[2], done);
@@ -3413,8 +3368,7 @@ static Item js_stream_collect_step(Item env_item, Item result) {
 }
 
 static Item js_stream_collect_next(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     if (js_item_is_true(env[5])) return make_js_undefined();
     Item step = js_stream_async_iterator_next(env[0]);
     if (item_is_error(step)) return js_stream_reject_with_error(env[2], step);
@@ -3497,15 +3451,13 @@ static Item js_readable_toArray(Item readable, Item options) {
 static Item js_readable_transform_pump(Item env_item);
 
 static Item js_readable_transform_fail(Item env_item, Item err) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     js_stream_destroy(env[1], err);
     return make_js_undefined();
 }
 
 static Item js_readable_transform_value(Item env_item, Item mapped) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item out = env[1];
     if (js_item_is_true(js_get_key_default(out, key_destroyed))) return make_js_undefined();
 
@@ -3518,8 +3470,7 @@ static Item js_readable_transform_value(Item env_item, Item mapped) {
 }
 
 static Item js_readable_transform_step(Item env_item, Item result) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item out = env[1];
     if (js_item_is_true(js_get_key_default(out, key_destroyed))) return make_js_undefined();
     Item done = js_iterator_result_done(result);
@@ -3553,8 +3504,7 @@ static Item js_readable_transform_step(Item env_item, Item result) {
 }
 
 static Item js_readable_transform_pump(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item out = env[1];
     if (js_item_is_true(js_get_key_default(out, key_destroyed))) return make_js_undefined();
     Item step = js_stream_async_iterator_next(env[0]);
@@ -3644,8 +3594,7 @@ JS_READABLE_TRANSFORM_HELPER(js_readable_filter, 1)
 static Item js_readable_forEach_next(Item env_item);
 
 static Item js_readable_async_helper_fail(Item env_item, Item err) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item reject = env[2];
     if (js_is_callable(reject)) {
         Item args[1] = { err };
@@ -3673,13 +3622,11 @@ static Item js_readable_validate_helper(Item fn, Item options,
 }
 
 static Item js_readable_forEach_continue(Item env_item, Item ignored) {
-    (void)ignored;
     return js_readable_forEach_next(env_item);
 }
 
 static Item js_readable_forEach_step(Item env_item, Item result) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item done = js_iterator_result_done(result);
     if (item_is_error(done)) return js_stream_reject_with_error(env[2], done);
     if (js_is_truthy(done)) {
@@ -3701,8 +3648,7 @@ static Item js_readable_forEach_step(Item env_item, Item result) {
 }
 
 static Item js_readable_forEach_next(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item step = js_stream_async_iterator_next(env[0]);
     if (item_is_error(step)) return js_stream_reject_with_error(env[2], step);
     Item on_step = js_new_native_closure(js_readable_forEach_step, 1, env, 5);
@@ -3729,16 +3675,14 @@ static Item js_readable_forEach(Item readable, Item fn, Item options) {
 static Item js_readable_reduce_next(Item env_item);
 
 static Item js_readable_reduce_continue(Item env_item, Item value) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     env[4] = value;
     env[5] = js_bool_item(true);
     return js_readable_reduce_next(env_item);
 }
 
 static Item js_readable_reduce_step(Item env_item, Item result) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item done = js_iterator_result_done(result);
     if (item_is_error(done)) return js_stream_reject_with_error(env[2], done);
     if (js_is_truthy(done)) {
@@ -3770,8 +3714,7 @@ static Item js_readable_reduce_step(Item env_item, Item result) {
 }
 
 static Item js_readable_reduce_next(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item step = js_stream_async_iterator_next(env[0]);
     if (item_is_error(step)) return js_stream_reject_with_error(env[2], step);
     Item on_step = js_new_native_closure(js_readable_reduce_step, 1, env, 7);
@@ -3814,29 +3757,25 @@ static bool js_readable_compose_is_duplex_like(Item stream) {
 static void js_readable_compose_bridge_start(Item* env);
 
 static Item js_readable_compose_pipe_tick(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     js_readable_pipe(env[0], env[1]);
     return make_js_undefined();
 }
 
 static Item js_readable_compose_forward_error(Item env_item, Item err) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     js_stream_destroy(env[0], err);
     return make_js_undefined();
 }
 
 static void js_readable_compose_attach_error_forward(Item source, Item out) {
-    Item* env = js_alloc_env(1);
-    env[0] = out;
+    Item* env = js_alloc_env1(out);
     Item listener = js_new_native_closure(js_readable_compose_forward_error, 1, env, 1);
     js_stream_on(source, make_string_item("error"), listener);
 }
 
 static Item js_readable_compose_bridge_write(Item env_item, Item chunk, Item encoding, Item callback) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item source = env[0];
     Item input = env[2];
     Item write_fn = js_get_key_default(source, key_write);
@@ -3858,8 +3797,7 @@ static Item js_readable_compose_bridge_write(Item env_item, Item chunk, Item enc
 }
 
 static Item js_readable_compose_bridge_end(Item env_item, Item chunk, Item callback) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item source = env[0];
     Item input = env[2];
     Item end_fn = js_get_key_default(source, key_end);
@@ -3880,8 +3818,7 @@ static Item js_readable_compose_bridge_end(Item env_item, Item chunk, Item callb
 }
 
 static Item js_readable_compose_bridge_flush(Item env_item, const char* method) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item source = env[0];
     Item callback = js_get_key_default(source, make_string_item(method));
     if (js_is_callable(callback)) js_call_function(callback, source, NULL, 0);
@@ -3891,8 +3828,7 @@ JS_FORWARD_STATIC_ITEM(js_readable_compose_bridge_cork, (Item env_item), js_read
 JS_FORWARD_STATIC_ITEM(js_readable_compose_bridge_uncork, (Item env_item), js_readable_compose_bridge_flush, (env_item, "uncork"))
 
 static Item js_readable_compose_bridge_destroy(Item env_item, Item err) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item source = env[0];
     Item destroy_fn = js_get_key_default(source, key_destroy);
     if (js_is_callable(destroy_fn)) {
@@ -3926,9 +3862,7 @@ static void js_readable_compose_bridge_start(Item* env) {
         return;
     }
 
-    Item* pump_env = js_alloc_env(2);
-    pump_env[0] = out;
-    pump_env[1] = iterator;
+    Item* pump_env = js_alloc_env2(out, iterator);
     js_readable_from_pump((Item){.item = (uint64_t)(uintptr_t)pump_env});
 }
 
@@ -3966,8 +3900,7 @@ static bool js_readable_compose_result_source_failed(Item* env) {
 static Item js_readable_compose_result_pump(Item env_item);
 
 static Item js_readable_compose_result_on_step(Item env_item, Item result) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item readable = env[0];
     if (js_item_is_true(js_get_key_default(readable, key_destroyed))) return make_js_undefined();
     if (js_readable_compose_result_source_failed(env)) return make_js_undefined();
@@ -4006,8 +3939,7 @@ static Item js_readable_compose_result_on_step(Item env_item, Item result) {
 }
 
 static Item js_readable_compose_result_pump(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item readable = env[0];
     if (js_item_is_true(js_get_key_default(readable, key_destroyed))) return make_js_undefined();
     if (js_readable_compose_result_source_failed(env)) return make_js_undefined();
@@ -4039,9 +3971,7 @@ static Item js_readable_compose_from_result(Item source, Item composed, Item opt
 
     TypeId composed_type = get_type_id(composed);
     if (composed_type == LMD_TYPE_ARRAY) {
-        int64_t len = js_array_length(composed);
-        for (int64_t i = 0; i < len; i++) {
-            Item value = js_elements_get_int(composed, i);
+        JS_ARRAY_FOREACH(value, composed) {
             if (get_type_id(value) == LMD_TYPE_NULL) {
                 Item err = js_stream_make_type_error_with_code("ERR_STREAM_NULL_VALUES",
                     "May not write null values to stream");
@@ -4067,10 +3997,7 @@ static Item js_readable_compose_from_result(Item source, Item composed, Item opt
             js_stream_destroy(out, err);
             return out;
         }
-        Item* env = js_alloc_env(3);
-        env[0] = out;
-        env[1] = iterator;
-        env[2] = source;
+        Item* env = js_alloc_env3(out, iterator, source);
         js_readable_compose_result_pump((Item){.item = (uint64_t)(uintptr_t)env});
     }
 
@@ -4114,9 +4041,7 @@ static Item js_readable_compose(Item self, Item stream, Item options) {
         if (!js_readable_compose_is_duplex_like(self)) {
             js_set_key_default(stream, key_writable, js_bool_item(false));
         }
-        Item* env = js_alloc_env(2);
-        env[0] = self;
-        env[1] = stream;
+        Item* env = js_alloc_env2(self, stream);
         js_next_tick_enqueue(js_new_native_closure(js_readable_compose_pipe_tick, 0, env, 2));
         return stream;
     }
@@ -4203,8 +4128,7 @@ static Item js_stream_consumer_blob_finish(Item chunks) {
 }
 
 static Item js_stream_consumer_finish_value(Item env_item, Item chunks) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     int64_t mode = get_type_id(env[0]) == LMD_TYPE_INT ? it2i(env[0]) : 0;
     switch (mode) {
         case 1: return js_stream_consumer_arrayBuffer_finish(chunks);
@@ -4225,8 +4149,7 @@ static Item js_stream_consumer(Item readable, int64_t mode) {
         js_set_key_cstr(readable, "__web_disturbed__", js_bool_item(true));
     }
     Item promise = js_readable_toArray(readable, make_js_undefined());
-    Item* env = js_alloc_env(1);
-    env[0] = (Item){.item = i2it(mode)};
+    Item* env = js_alloc_env1((Item){.item = i2it(mode)});
     Item finish = js_new_native_closure(js_stream_consumer_finish_value, 1, env, 1);
     return js_promise_then(promise, finish, make_js_undefined());
 }
@@ -4489,8 +4412,7 @@ JS_STREAM_ITER_SYNC_CONSUMER(js_stream_iter_arraySync, nullptr, false)
 #undef JS_STREAM_ITER_SYNC_CONSUMER
 
 static Item js_stream_iter_consumer_done(Item env_item, Item chunks) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     int64_t mode = get_type_id(env[0]) == LMD_TYPE_INT ? it2i(env[0]) : 0;
     Item options = env[1];
     if (mode != 3) chunks = js_stream_iter_flatten_for_bytes(chunks);
@@ -4519,9 +4441,7 @@ static Item js_stream_iter_consumer_async(Item source, Item options, int64_t mod
     }
     Item readable = js_stream_iter_to_readable(source);
     Item promise = js_readable_toArray(readable, options);
-    Item* env = js_alloc_env(2);
-    env[0] = (Item){.item = i2it(mode)};
-    env[1] = options;
+    Item* env = js_alloc_env2((Item){.item = i2it(mode)}, options);
     Item finish = js_new_native_closure(js_stream_iter_consumer_done, 1, env, 2);
     return js_promise_then(promise, finish, make_js_undefined());
 }
@@ -4560,8 +4480,7 @@ static Item js_stream_iter_tap_async_callback(Item env_item, Item chunks) {
 static Item js_stream_iter_tap_make(Item callback, JsNativeP2 target) {
     if (!js_is_callable(callback))
         return js_throw_invalid_arg_type("fn", "function", callback);
-    Item* env = js_alloc_env(1);
-    env[0] = callback;
+    Item* env = js_alloc_env1(callback);
     return js_new_native_closure(target, 1, env, 1);
 }
 JS_FORWARD_STATIC_ITEM(js_stream_iter_tapSync, (Item callback), js_stream_iter_tap_make, (callback, js_stream_iter_tap_callback))
@@ -4660,8 +4579,7 @@ static Item js_stream_iter_pull_transform_done(Item env_item, Item chunks) {
 static Item js_stream_iter_pull(Item source, Item transform) {
     Item readable = js_stream_iter_to_readable(source);
     Item promise = js_readable_toArray(readable, make_js_undefined());
-    Item* env = js_alloc_env(1);
-    env[0] = transform;
+    Item* env = js_alloc_env1(transform);
     Item done = js_new_native_closure(js_stream_iter_pull_transform_done, 1, env, 1);
     return js_promise_then(promise, done, make_js_undefined());
 }
@@ -4745,9 +4663,7 @@ JS_FORWARD_STATIC_VOID( js_stream_iter_reject_end, (Item writer, Item err), js_s
 static void js_stream_iter_reject_pending_writes(Item writer, Item err) {
     Item pending = js_get_key_cstr(writer, "__pending_writes__");
     if (get_type_id(pending) != LMD_TYPE_ARRAY) return;
-    int64_t len = js_array_length(pending);
-    for (int64_t i = 0; i < len; i++) {
-        Item capability = js_elements_get_int(pending, i);
+    JS_ARRAY_FOREACH(capability, pending) {
         Item reject = js_get_key_cstr(capability, "reject");
         if (js_is_callable(reject)) {
             Item args[1] = { err };
@@ -4840,7 +4756,6 @@ JS_FORWARD_STATIC_ITEM(js_stream_iter_pipe_reject, (Item env_item, Item err), js
 JS_FORWARD_STATIC_ITEM(js_stream_iter_pipe_resolve, (Item env_item, Item value), js_stream_iter_pipe_settle, (env_item, value, false))
 
 static Item js_stream_iter_pipe_after_write(Item env_item, Item ignored) {
-    (void)ignored;
     return js_stream_iter_pipe_next(env_item);
 }
 JS_FORWARD_STATIC_ITEM(js_stream_iter_pipe_finish, (Item env_item, Item result), js_stream_iter_pipe_resolve, (env_item, result))
@@ -5009,8 +4924,7 @@ static Item js_stream_iter_pipeTo(Item source, Item transform_or_writer, Item wr
 }
 
 static Item js_stream_iter_pending_write_abort(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item signal = env[0];
     Item capability = env[1];
     Item reason = js_get_key_cstr(signal, "reason");
@@ -5029,9 +4943,7 @@ static void js_stream_iter_attach_pending_abort(Item options, Item capability) {
     if (get_type_id(signal) != LMD_TYPE_MAP && get_type_id(signal) != LMD_TYPE_ELEMENT) return;
     Item add_event = js_get_key_cstr(signal, "addEventListener");
     if (!js_is_callable(add_event)) return;
-    Item* env = js_alloc_env(2);
-    env[0] = signal;
-    env[1] = capability;
+    Item* env = js_alloc_env2(signal, capability);
     Item listener = js_new_native_closure(js_stream_iter_pending_write_abort, 0, env, 2);
     Item args[2] = { make_string_item("abort"), listener };
     js_call_function(add_event, signal, args, 2);
@@ -5198,8 +5110,7 @@ extern "C" Item js_transform_stream_new(Item transformer) {
     js_set_native_key(writer, make_string_item("abort"), js_stream_iter_writer_fail);
 
     Item writable = js_writable_stream_new(make_js_undefined());
-    Item* env = js_alloc_env(1);
-    env[0] = writer;
+    Item* env = js_alloc_env1(writer);
     js_set_key_cstr(writable, "__writer__", writer);
     js_set_key_cstr(writable, "getWriter", js_new_native_closure(js_web_writable_get_writer, 0, env, 1));
 
@@ -5210,8 +5121,7 @@ extern "C" Item js_transform_stream_new(Item transformer) {
 }
 
 static Item js_stream_iter_abort(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item signal = env[0];
     Item readable = env[1];
     Item reason = js_get_key_cstr(signal, "reason");
@@ -5238,9 +5148,7 @@ static void js_stream_iter_attach_abort(Item options, Item readable) {
     }
     Item add_event = js_get_key_cstr(signal, "addEventListener");
     if (!js_is_callable(add_event)) return;
-    Item* env = js_alloc_env(2);
-    env[0] = signal;
-    env[1] = readable;
+    Item* env = js_alloc_env2(signal, readable);
     Item listener = js_new_native_closure(js_stream_iter_abort, 0, env, 2);
     Item args[2] = { make_string_item("abort"), listener };
     js_call_function(add_event, signal, args, 2);
@@ -5255,8 +5163,7 @@ static Item js_stream_abort_signal_reason(Item signal) {
 }
 
 static Item js_stream_abort_signal_destroy_stream(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item signal = env[0];
     Item stream = env[1];
     js_stream_destroy(stream, js_stream_abort_signal_reason(signal));
@@ -5272,9 +5179,7 @@ static Item js_stream_attach_abort_signal(Item signal, Item stream) {
 
     Item add_event = js_get_key_cstr(signal, "addEventListener");
     if (!js_is_callable(add_event)) return stream;
-    Item* env = js_alloc_env(2);
-    env[0] = signal;
-    env[1] = stream;
+    Item* env = js_alloc_env2(signal, stream);
     Item listener = js_new_native_closure(js_stream_abort_signal_destroy_stream, 0, env, 2);
     Item args[2] = { make_string_item("abort"), listener };
     js_call_function(add_event, signal, args, 2);
@@ -5374,9 +5279,7 @@ extern "C" Item js_readable_pipe(Item self, Item dest) {
         }
     }
     js_readable_add_pipe_data_event(self);
-    Item* drain_env = js_alloc_env(2);
-    drain_env[0] = self;
-    drain_env[1] = dest;
+    Item* drain_env = js_alloc_env2(self, dest);
     Item drain_listener = js_new_native_closure(js_readable_pipe_on_drain, 0, drain_env, 2);
     Item drain_args[2] = {make_string_item("drain"), drain_listener};
     Item on_fn = js_get_key_default(dest, key_on);
@@ -6280,9 +6183,7 @@ JS_STREAM_ENV_BINARY_CLOSURE(js_stream_call_callback_error_tick_closure,
 
 static void js_stream_schedule_callback_error(Item callback, Item err) {
     if (!js_is_callable(callback)) return;
-    Item* env = js_alloc_env(2);
-    env[0] = callback;
-    env[1] = err;
+    Item* env = js_alloc_env2(callback, err);
     Item tick = js_new_native_closure(js_stream_call_callback_error_tick_closure, 0, env, 2);
     js_next_tick_enqueue(tick);
 }
@@ -6303,9 +6204,7 @@ static void js_stream_call_writable_end_callbacks(Item self, Item err) {
     js_set_key_cstr(self, "__writable_end_callbacks__", js_array_new(0));
     bool has_error = js_stream_error_value_present(err);
     Item null_arg = ItemNull;
-    int64_t len = js_array_length(callbacks);
-    for (int64_t i = 0; i < len; i++) {
-        Item callback = js_elements_get_int(callbacks, i);
+    JS_ARRAY_FOREACH(callback, callbacks) {
         if (!js_is_callable(callback)) continue;
         if (has_error) {
             js_call_function(callback, self, &err, 1);
@@ -6635,8 +6534,7 @@ extern "C" Item js_duplex_new(Item opts) {
 }
 
 static Item js_stream_duplex_pair_write(Item env_item, Item chunk, Item encoding, Item callback) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item peer = env[0];
     JS_ASSIGN_OR_RETURN(push_result, js_readable_push_encoded(peer, chunk, encoding));
     if (js_is_callable(callback)) {
@@ -6646,8 +6544,7 @@ static Item js_stream_duplex_pair_write(Item env_item, Item chunk, Item encoding
 }
 
 static Item js_stream_duplex_pair_final(Item env_item, Item callback) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item peer = env[0];
     JS_ASSIGN_OR_RETURN(push_result, js_readable_push(peer, ItemNull));
     if (js_is_callable(callback)) {
@@ -6658,8 +6555,7 @@ static Item js_stream_duplex_pair_final(Item env_item, Item callback) {
 JS_FORWARD_STATIC_ITEM(js_stream_duplex_pair_read, (void), make_js_undefined, ())
 
 static void js_stream_duplex_pair_attach(Item endpoint, Item peer) {
-    Item* env = js_alloc_env(1);
-    env[0] = peer;
+    Item* env = js_alloc_env1(peer);
     js_set_key_cstr(endpoint, "_write", js_new_native_closure(js_stream_duplex_pair_write, 3, env, 1));
     js_set_key_cstr(endpoint, "_final", js_new_native_closure(js_stream_duplex_pair_final, 1, env, 1));
     js_set_native_key(endpoint, make_string_item("_read"), js_stream_duplex_pair_read);
@@ -6681,22 +6577,19 @@ static Item js_stream_duplex_pair(void) {
 }
 
 static Item js_duplex_from_readable_data(Item env_item, Item chunk) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     js_readable_push(env[0], chunk);
     return make_js_undefined();
 }
 
 static Item js_duplex_from_readable_end(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     js_readable_push(env[0], ItemNull);
     return make_js_undefined();
 }
 
 static Item js_duplex_from_forward_error(Item env_item, Item err) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     if (js_stream_has_stored_error(env[0])) return make_js_undefined();
     if (js_stream_is_stream_like(env[1]) && env[1].item != env[0].item) {
         js_stream_destroy(env[1], err);
@@ -6722,16 +6615,12 @@ static Item js_duplex_from_forward_callback_once(Item env_item, Item err) {
 
 static Item js_duplex_from_make_forward_callback(Item callback) {
     if (!js_is_callable(callback)) return callback;
-    Item* env = js_alloc_env(2);
-    env[0] = callback;
-    env[1] = js_bool_item(false);
+    Item* env = js_alloc_env2(callback, js_bool_item(false));
     return js_new_native_closure(js_duplex_from_forward_callback_once, 1, env, 2);
 }
 
 static void js_duplex_from_attach_readable(Item duplex, Item readable, Item writable) {
-    Item* env = js_alloc_env(2);
-    env[0] = duplex;
-    env[1] = writable;
+    Item* env = js_alloc_env2(duplex, writable);
     js_stream_on(readable, make_string_item("data"),
                  js_new_native_closure(js_duplex_from_readable_data, 1, env, 2));
     js_stream_on(readable, make_string_item("end"),
@@ -6741,8 +6630,7 @@ static void js_duplex_from_attach_readable(Item duplex, Item readable, Item writ
 }
 
 static Item js_duplex_from_writable_write(Item env_item, Item chunk, Item encoding, Item callback) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item write_fn = js_get_key_default(env[0], key_write);
     if (!js_is_callable(write_fn)) {
         if (js_is_callable(callback))
@@ -6755,8 +6643,7 @@ static Item js_duplex_from_writable_write(Item env_item, Item chunk, Item encodi
 }
 
 static Item js_duplex_from_writable_final(Item env_item, Item callback) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item end_fn = js_get_key_default(env[0], key_end);
     if (js_is_callable(end_fn)) {
         Item args[1] = { js_duplex_from_make_forward_callback(callback) };
@@ -6768,21 +6655,17 @@ static Item js_duplex_from_writable_final(Item env_item, Item callback) {
 }
 
 static void js_duplex_from_attach_writable(Item duplex, Item writable) {
-    Item* env = js_alloc_env(1);
-    env[0] = writable;
+    Item* env = js_alloc_env1(writable);
     js_set_key_cstr(duplex, "_write", js_new_native_closure(js_duplex_from_writable_write, 3, env, 1));
     js_set_key_cstr(duplex, "_final", js_new_native_closure(js_duplex_from_writable_final, 1, env, 1));
 
-    Item* err_env = js_alloc_env(2);
-    err_env[0] = duplex;
-    err_env[1] = ItemNull;
+    Item* err_env = js_alloc_env2(duplex, ItemNull);
     js_stream_on(writable, make_string_item("error"),
                  js_new_native_closure(js_duplex_from_forward_error, 1, err_env, 2));
 }
 
 static Item js_duplex_from_destroy(Item env_item, Item err, Item callback) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item readable = env[0];
     Item writable = env[1];
     Item duplex = env[2];
@@ -6810,8 +6693,7 @@ static Item js_duplex_from_destroy(Item env_item, Item err, Item callback) {
 }
 
 static Item js_duplex_from_promise_fulfilled(Item env_item, Item value) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     if (get_type_id(value) != LMD_TYPE_UNDEFINED && get_type_id(value) != LMD_TYPE_NULL) {
         js_readable_push(env[0], value);
     }
@@ -6820,8 +6702,7 @@ static Item js_duplex_from_promise_fulfilled(Item env_item, Item value) {
 }
 
 static Item js_duplex_from_promise_rejected(Item env_item, Item err) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     js_stream_destroy(env[0], err);
     return make_js_undefined();
 }
@@ -6833,8 +6714,7 @@ static Item js_duplex_from_promise(Item promise) {
     JS_ASSIGN_OR_RETURN(duplex, js_duplex_new(opts));
     js_set_native_key(duplex, make_string_item("_read"), js_stream_duplex_pair_read);
 
-    Item* env = js_alloc_env(1);
-    env[0] = duplex;
+    Item* env = js_alloc_env1(duplex);
     Item on_fulfilled = js_new_native_closure(js_duplex_from_promise_fulfilled, 1, env, 1);
     Item on_rejected = js_new_native_closure(js_duplex_from_promise_rejected, 1, env, 1);
     js_promise_then(promise, on_fulfilled, on_rejected);
@@ -6892,9 +6772,7 @@ static Item js_duplex_from_web_readable(Item readable_stream) {
 }
 
 static Item js_duplex_from_web_writable_write(Item env_item, Item chunk, Item encoding, Item callback) {
-    (void)encoding;
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item sink = js_get_key_cstr(env[0], "__sink__");
     if (get_type_id(sink) != LMD_TYPE_MAP && get_type_id(sink) != LMD_TYPE_ELEMENT) {
         sink = js_get_key_cstr(env[0], "__writer__");
@@ -6913,8 +6791,7 @@ static Item js_duplex_from_web_writable_write(Item env_item, Item chunk, Item en
 }
 
 static Item js_duplex_from_web_writable_final(Item env_item, Item callback) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item sink = js_get_key_cstr(env[0], "__sink__");
     if (get_type_id(sink) != LMD_TYPE_MAP && get_type_id(sink) != LMD_TYPE_ELEMENT) {
         sink = js_get_key_cstr(env[0], "__writer__");
@@ -6937,8 +6814,7 @@ static Item js_duplex_from_web_writable(Item writable_stream) {
     js_set_key_cstr(opts, "readable", js_bool_item(false));
     js_set_key_cstr(opts, "writable", js_bool_item(true));
     JS_ASSIGN_OR_RETURN(duplex, js_duplex_new(opts));
-    Item* env = js_alloc_env(1);
-    env[0] = writable_stream;
+    Item* env = js_alloc_env1(writable_stream);
     js_set_key_cstr(duplex, "_write", js_new_native_closure(js_duplex_from_web_writable_write, 3, env, 1));
     js_set_key_cstr(duplex, "_final", js_new_native_closure(js_duplex_from_web_writable_final, 1, env, 1));
     return duplex;
@@ -7038,10 +6914,7 @@ static Item js_duplex_from(Item source) {
 
     if (has_readable) js_duplex_from_attach_readable(duplex, readable, has_writable ? writable : ItemNull);
     if (has_writable) js_duplex_from_attach_writable(duplex, writable);
-    Item* destroy_env = js_alloc_env(3);
-    destroy_env[0] = readable;
-    destroy_env[1] = writable;
-    destroy_env[2] = duplex;
+    Item* destroy_env = js_alloc_env3(readable, writable, duplex);
     js_set_key_cstr(duplex, "_destroy", js_new_native_closure(js_duplex_from_destroy, 2, destroy_env, 3));
     return duplex;
 }
@@ -7240,7 +7113,6 @@ extern "C" Item js_get_stream_transform_prototype(void) {
 
 // PassThrough default _transform: just push data through
 extern "C" Item js_passthrough_transform(Item chunk, Item encoding, Item callback) {
-    (void)encoding;
     Item self = js_get_this();
     js_readable_push(self, chunk);
     if (js_is_callable(callback)) {
@@ -7323,9 +7195,7 @@ static bool js_stream_pipeline_destroy_erred_legacy_stream(Item stream) {
 
 static void js_stream_pipeline_destroy_stream_array(Item streams, Item err) {
     if (!js_stream_error_value_present(err) || get_type_id(streams) != LMD_TYPE_ARRAY) return;
-    int64_t len = js_array_length(streams);
-    for (int64_t i = 0; i < len; i++) {
-        Item stream = js_elements_get_int(streams, i);
+    JS_ARRAY_FOREACH(stream, streams) {
         if (js_stream_has_stored_error(stream)) {
             js_stream_pipeline_destroy_erred_legacy_stream(stream);
             continue;
@@ -7350,9 +7220,7 @@ static void js_stream_pipeline_cleanup(Item* env, bool terminal_error) {
     Item error_listener = env[5];
     Item error_event = make_string_item("error");
     if (get_type_id(streams) == LMD_TYPE_ARRAY) {
-        int64_t len = js_array_length(streams);
-        for (int64_t i = 0; i < len; i++) {
-            Item stream = js_elements_get_int(streams, i);
+        JS_ARRAY_FOREACH(stream, streams) {
             js_stream_off(stream, error_event, error_listener);
         }
     } else {
@@ -7375,8 +7243,7 @@ static void js_stream_pipeline_destroy_streams(Item* env, Item err) {
 }
 
 static Item js_stream_pipeline_invoke_callback(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item callback = env[2];
     if (!js_is_callable(callback)) return make_js_undefined();
     Item err = env[8];
@@ -7405,8 +7272,7 @@ static Item js_stream_pipeline_call_once(Item* env, Item err) {
 }
 
 static Item js_stream_pipeline_on_close(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item source = env[0];
     if (js_stream_pipeline_source_ended(source)) {
         return make_js_undefined();
@@ -7420,15 +7286,13 @@ static Item js_stream_pipeline_on_close(Item env_item) {
 }
 
 static Item js_stream_pipeline_on_error(Item env_item, Item err) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     js_stream_pipeline_destroy_streams(env, err);
     return js_stream_pipeline_call_once(env, err);
 }
 
 static Item js_stream_pipeline_on_finish(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     return js_stream_pipeline_call_once(env, make_js_undefined());
 }
 
@@ -7628,8 +7492,7 @@ static Item js_stream_pipeline_rest(Item rest_args) {
 static Item js_readable_from_pump(Item env_item);
 
 static Item js_readable_from_on_step(Item env_item, Item result) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item readable = env[0];
     if (js_item_is_true(js_get_key_default(readable, key_destroyed))) {
         return make_js_undefined();
@@ -7658,15 +7521,13 @@ static Item js_readable_from_on_step(Item env_item, Item result) {
 }
 
 static Item js_readable_from_on_error(Item env_item, Item err) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     js_stream_destroy(env[0], err);
     return make_js_undefined();
 }
 
 static Item js_readable_from_pump(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item readable = env[0];
     if (js_item_is_true(js_get_key_default(readable, key_destroyed))) {
         return make_js_undefined();
@@ -7706,9 +7567,7 @@ extern "C" Item js_readable_from(Item iterable) {
     js_stream_set_readable_object_mode(readable, true);
 
     if (get_type_id(iterable) == LMD_TYPE_ARRAY) {
-        int64_t len = js_array_length(iterable);
-        for (int64_t i = 0; i < len; i++) {
-            Item value = js_elements_get_int(iterable, i);
+        JS_ARRAY_FOREACH(value, iterable) {
             if (get_type_id(value) == LMD_TYPE_NULL) {
                 Item err = js_stream_make_type_error_with_code("ERR_STREAM_NULL_VALUES",
                     "May not write null values to stream");
@@ -7728,9 +7587,7 @@ extern "C" Item js_readable_from(Item iterable) {
             js_stream_destroy(readable, err);
             return readable;
         }
-        Item* env = js_alloc_env(2);
-        env[0] = readable;
-        env[1] = iterator;
+        Item* env = js_alloc_env2(readable, iterator);
         js_readable_from_pump((Item){.item = (uint64_t)(uintptr_t)env});
     }
 
@@ -7743,8 +7600,7 @@ extern "C" Item js_readable_from(Item iterable) {
 JS_FORWARD_STATIC_ITEM(js_stream_finished_wrapper_key, (void), make_string_item, ("__lambda_stream_finished_context_callback__"))
 
 static Item js_stream_finished_context_callback(Item env_item, Item err) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item callback = env[0];
     Item context = env[1];
     Item resource = env[2];
@@ -7764,10 +7620,7 @@ static Item js_stream_finished_context_callback(Item env_item, Item err) {
 static Item js_stream_finished_context_wrapper(Item callback) {
     Item context = js_als_capture_context();
     Item resource = js_async_hooks_create_resource("STREAM_END_OF_STREAM", 20);
-    Item* env = js_alloc_env(3);
-    env[0] = callback;
-    env[1] = context;
-    env[2] = resource;
+    Item* env = js_alloc_env3(callback, context, resource);
     Item wrapper = js_new_native_closure(js_stream_finished_context_callback, 1, env, 3);
     js_set_key_default(callback, js_stream_finished_wrapper_key(), wrapper);
     return wrapper;
@@ -7873,9 +7726,7 @@ static Item js_stream_finished_options_sync_callback(Item options, bool* out_syn
     JS_ASSIGN_OR_RETURN(symbols, js_object_get_own_property_symbols(options));
     if (get_type_id(symbols) != LMD_TYPE_ARRAY) return js_status_ok();
 
-    int64_t len = js_array_length(symbols);
-    for (int64_t i = 0; i < len; i++) {
-        Item symbol = js_elements_get_int(symbols, i);
+    JS_ARRAY_FOREACH(symbol, symbols) {
         JS_ASSIGN_OR_RETURN(description, js_symbol_get_description(symbol));
         if (js_stream_string_equals(description, "kEosNodeSynchronousCallback")) {
             JS_ASSIGN_OR_RETURN(value, js_get_key_default(options, symbol));
@@ -7978,14 +7829,12 @@ static Item js_stream_finished_emit_callback(Item* env, Item err) {
 }
 
 static Item js_stream_finished_emit_callback_tick(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     return js_stream_finished_emit_callback(env, env[9]);
 }
 
 static Item js_stream_finished_on_end(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     if (!js_stream_finished_side_done(env[0], js_item_is_true(env[11]),
                                       js_item_is_true(env[12]))) {
         return make_js_undefined();
@@ -7999,8 +7848,7 @@ static Item js_stream_finished_on_end(Item env_item) {
 JS_FORWARD_STATIC_ITEM(js_stream_finished_on_finish, (Item env_item), js_stream_finished_on_end, (env_item))
 
 static Item js_stream_finished_on_error(Item env_item, Item err) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     env[9] = err;
     if (js_stream_finished_expects_close_for_checks(env[0], js_item_is_true(env[11]),
                                                     js_item_is_true(env[12]))) {
@@ -8010,8 +7858,7 @@ static Item js_stream_finished_on_error(Item env_item, Item err) {
 }
 
 static Item js_stream_finished_on_close(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     bool check_readable = js_item_is_true(env[11]);
     bool check_writable = js_item_is_true(env[12]);
     Item err = js_stream_get_stored_error(env[0]);
@@ -8029,8 +7876,7 @@ static Item js_stream_finished_on_close(Item env_item) {
 }
 
 static Item js_stream_finished_on_abort(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item err = js_stream_finished_abort_error(env[7]);
     return js_stream_finished_emit_callback(env, err);
 }
@@ -8294,8 +8140,7 @@ static Item js_stream_compose_sink_rejected(Item env_item, Item err) {
 
 static Item js_stream_compose_write(Item env_item, Item chunk, Item encoding,
         Item callback, bool forward_callback) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item write_fn = js_get_key_default(env[1], key_write);
     if (!js_is_callable(write_fn)) {
         if (js_is_callable(callback))
@@ -8312,8 +8157,7 @@ JS_FORWARD_STATIC_ITEM(js_stream_compose_tail_write, (Item env_item, Item chunk,
 
 static Item js_stream_compose_final_common(Item env_item, Item callback,
         bool emit_finish) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     env[2] = callback;
     env[4] = js_bool_item(true);
     Item writable = env[1];
@@ -8328,8 +8172,7 @@ JS_FORWARD_STATIC_ITEM(js_stream_compose_sink_final, (Item env_item, Item callba
 JS_FORWARD_STATIC_ITEM(js_stream_compose_tail_final, (Item env_item, Item callback), js_stream_compose_final_common, (env_item, callback, false))
 
 static Item js_stream_compose_sink_destroy(Item env_item, Item err) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item writable = env[1];
     Item destroy_fn = js_get_key_default(writable, key_destroy);
     if (js_is_callable(destroy_fn)) {
@@ -8386,15 +8229,13 @@ static Item js_stream_compose_async_sink(Item first, Item source, Item sink) {
 }
 
 static Item js_stream_compose_tail_on_finish(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     env[3] = js_bool_item(true);
     return js_stream_compose_maybe_complete(env, false);
 }
 
 static Item js_stream_compose_tail_on_error(Item env_item, Item err) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     env[3] = js_bool_item(true);
     env[6] = err;
     return js_stream_compose_maybe_complete(env, false);
@@ -9091,7 +8932,6 @@ static Item js_readable_to_web_reader_read(Item view) {
 }
 
 static Item js_readable_to_web_reader_cancel(Item reason) {
-    (void)reason;
     Item reader = js_get_this();
     Item readable = js_get_key_cstr(reader, "__node_readable__");
     if (get_type_id(readable) == LMD_TYPE_MAP || get_type_id(readable) == LMD_TYPE_ELEMENT) {

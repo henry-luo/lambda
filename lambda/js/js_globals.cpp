@@ -306,7 +306,6 @@ static time_t timegm(struct tm* tm) { return _mkgmtime(tm); }
 #define isatty _isatty
 #define realpath(p, r) (_fullpath((r), (p), _MAX_PATH))
 static inline long get_tm_gmtoff(const struct tm* t) {
-    (void)t;
     long bias = 0;
     _get_timezone(&bias);  // seconds west of UTC
     return -bias;          // tm_gmtoff is seconds east of UTC
@@ -1247,7 +1246,6 @@ extern "C" Item js_process_stdin_read(void) {
 JS_FORWARD_ITEM(js_process_stdin_destroy, (void), make_js_undefined, ())
 
 extern "C" Item js_process_stdin_setRawMode(Item mode_item) {
-    (void)mode_item;
     return make_js_undefined();
 }
 
@@ -1266,9 +1264,7 @@ static void js_process_stdin_add_listener(Item self, const char* event_name,
 
 static Item js_process_stdin_emit_list(Item listeners, Item arg, bool has_arg) {
     if (get_type_id(listeners) != LMD_TYPE_ARRAY) return ItemNull;
-    int64_t count = js_array_length(listeners);
-    for (int64_t i = 0; i < count; i++) {
-        Item cb = js_elements_get_int(listeners, i);
+    JS_ARRAY_FOREACH(cb, listeners) {
         if (!js_is_callable(cb)) continue;
         // callback exceptions are returned by the call ABI; callers own the
         // returned lane and must stop dispatch before invoking later listeners.
@@ -1417,12 +1413,10 @@ extern "C" double js_performance_time_origin_ms(void) {
 JS_FORWARD_ITEM(js_performance_now, (void), push_d, (js_performance_now_ms()))
 
 static Item js_performance_noop_1(Item unused) {
-    (void)unused;
     return ItemNull;
 }
 
 static Item js_performance_noop_3(Item name, Item start_or_options, Item end_mark) {
-    (void)name;
     (void)start_or_options;
     (void)end_mark;
     return ItemNull;
@@ -1430,7 +1424,6 @@ static Item js_performance_noop_3(Item name, Item start_or_options, Item end_mar
 JS_FORWARD_STATIC_ITEM(js_performance_empty_entries, (void), js_array_new, (0))
 
 static Item js_performance_empty_entries_2(Item name, Item type) {
-    (void)name;
     (void)type;
     return js_array_new(0);
 }
@@ -2756,7 +2749,6 @@ JS_FORWARD_ITEM(js_process_dlopen, (Item module, Item filename), js_throw_type_e
 
 // Set.has() stub — always returns false (for allowedNodeEnvironmentFlags)
 extern "C" Item js_set_has_stub(Item self, Item key) {
-    (void)self;
     (void)key;
     return (Item){.item = ITEM_FALSE};
 }
@@ -2991,9 +2983,7 @@ extern "C" void js_process_emit_exit(int code) {
     Item map = get_process_listener_map();
     Item listeners = js_get_key_default(map, js_name_item("exit", 4));
     if (get_type_id(listeners) != LMD_TYPE_ARRAY) return;
-    int64_t listener_count = js_array_length(listeners);
-    for (int64_t i = 0; i < listener_count; i++) {
-        Item listener = js_elements_get_int(listeners, i);
+    JS_ARRAY_FOREACH(listener, listeners) {
         if (js_is_callable(listener)) {
             // Exit delivery has historically ignored listener failures while
             // continuing the remaining callbacks.
@@ -3021,8 +3011,7 @@ extern "C" void js_process_reset_listeners(void) {
 extern "C" Item js_process_removeListener(Item event_name, Item listener);
 
 static Item js_process_once_wrapper(Item env_item, Item arg1, Item arg2) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item event_name = env[0];
     Item listener = env[1];
     Item wrapper = env[2];
@@ -3282,7 +3271,6 @@ static void js_process_ipc_write_cb(uv_write_t* req, int status) {
 }
 
 static void js_process_ipc_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
-    (void)handle;
     buf->base = (char*)mem_alloc(suggested_size, MEM_CAT_JS_RUNTIME);
     buf->len = buf->base ? suggested_size : 0;
 }
@@ -3347,9 +3335,7 @@ static void js_process_ipc_flush_pending(void) {
     }
     Item pending = js_process_ipc_pending_messages;
     js_process_ipc_pending_messages = js_array_new(0);
-    int64_t len = js_array_length(pending);
-    for (int64_t i = 0; i < len; i++) {
-        Item entry = js_elements_get_int(pending, i);
+    JS_ARRAY_FOREACH(entry, pending) {
         Item message = js_get_key_cstr(entry, "message");
         Item handle = js_get_key_cstr(entry, "handle");
         Item emit_result = js_process_ipc_emit_message(message, handle);
@@ -3866,9 +3852,7 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
     if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT) {
         Item result = js_new_object();
         Item keys = js_object_keys(value);
-        int64_t len = js_array_length(keys);
-        for (int64_t i = 0; i < len; i++) {
-            Item key = js_elements_get_int(keys, i);
+        JS_ARRAY_FOREACH(key, keys) {
             Item val = js_get_key_default(value, key);
             js_set_key_default(result, key, structured_clone_transfer_impl(val, transfer_list, depth + 1));
         }
@@ -5110,9 +5094,7 @@ extern "C" Item js_string_raw(Item* args, int argc) {
             if (sub_s && sub_s->len > 0) strbuf_append_str_n(buf, sub_s->chars, sub_s->len);
         }
     }
-    String* result = heap_strcpy(buf->str, buf->length);
-    strbuf_free(buf);
-    return (Item){.item = s2it(result)};
+    return js_strbuf_take_item(buf);
 }
 
 // =============================================================================
@@ -5173,9 +5155,7 @@ static Item js_console_arg_to_string(Item value) {
             strbuf_append_str_n(rendered, message_string->chars,
                                 message_string->len);
         }
-        String* result = heap_strcpy(rendered->str, rendered->length);
-        strbuf_free(rendered);
-        return (Item){.item = s2it(result)};
+        return js_strbuf_take_item(rendered);
     }
     return js_to_string(value);
 }
@@ -12996,13 +12976,6 @@ JS_FORWARD_ITEM(js_decodeURI, (Item str_item), js_decode_uri_common, (str_item, 
 // unescape(string) — legacy percent-decoding (%XX and %uXXXX)
 // =============================================================================
 
-static int hex_digit_value(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
-}
-
 extern "C" Item js_unescape(Item str_item) {
     Item str_val = js_to_string(str_item);
     // ToString is observable and may throw from user coercion; do not turn its
@@ -13025,10 +12998,10 @@ extern "C" Item js_unescape(Item str_item) {
         if (src[i] == '%' && i + 2 < src_len) {
             if (src[i + 1] == 'u' && i + 5 < src_len) {
                 // %uXXXX
-                int d0 = hex_digit_value(src[i + 2]);
-                int d1 = hex_digit_value(src[i + 3]);
-                int d2 = hex_digit_value(src[i + 4]);
-                int d3 = hex_digit_value(src[i + 5]);
+                int d0 = str_hex_val(src[i + 2]);
+                int d1 = str_hex_val(src[i + 3]);
+                int d2 = str_hex_val(src[i + 4]);
+                int d3 = str_hex_val(src[i + 5]);
                 if (d0 >= 0 && d1 >= 0 && d2 >= 0 && d3 >= 0) {
                     int cp = (d0 << 12) | (d1 << 8) | (d2 << 4) | d3;
                     if (cp <= 0x7F) {
@@ -13046,8 +13019,8 @@ extern "C" Item js_unescape(Item str_item) {
                 }
             }
             // %XX
-            int d0 = hex_digit_value(src[i + 1]);
-            int d1 = hex_digit_value(src[i + 2]);
+            int d0 = str_hex_val(src[i + 1]);
+            int d1 = str_hex_val(src[i + 2]);
             if (d0 >= 0 && d1 >= 0) {
                 int cp = (d0 << 4) | d1;
                 if (cp <= 0x7F) {
@@ -13754,9 +13727,7 @@ static bool js_message_port_is_filehandle(Item value) {
 
 static bool js_message_port_transfer_list_has(Item transfer_list, Item value) {
     if (get_type_id(transfer_list) != LMD_TYPE_ARRAY) return false;
-    int64_t len = js_array_length(transfer_list);
-    for (int64_t i = 0; i < len; i++) {
-        Item entry = js_elements_get_int(transfer_list, i);
+    JS_ARRAY_FOREACH(entry, transfer_list) {
         if (entry.item == value.item) return true;
     }
     return false;
@@ -13812,9 +13783,7 @@ static Item js_message_port_validate_transfer_list(Item transfer_list) {
 
 static void js_message_port_detach_arraybuffers_in_transfer_list(Item transfer_list) {
     if (get_type_id(transfer_list) != LMD_TYPE_ARRAY) return;
-    int64_t len = js_array_length(transfer_list);
-    for (int64_t i = 0; i < len; i++) {
-        Item entry = js_elements_get_int(transfer_list, i);
+    JS_ARRAY_FOREACH(entry, transfer_list) {
         if (js_is_arraybuffer(entry) && !js_is_sharedarraybuffer(entry)) {
             js_arraybuffer_detach(entry);
         }
@@ -13837,9 +13806,7 @@ static Item js_message_port_clone_for_transfer(Item port) {
 
 static bool js_message_port_transfer_list_has_marked(Item transfer_list) {
     if (get_type_id(transfer_list) != LMD_TYPE_ARRAY) return false;
-    int64_t len = js_array_length(transfer_list);
-    for (int64_t i = 0; i < len; i++) {
-        Item entry = js_elements_get_int(transfer_list, i);
+    JS_ARRAY_FOREACH(entry, transfer_list) {
         Item marked = js_worker_is_marked_as_untransferable(entry);
         if (marked.item == ITEM_TRUE) return true;
     }
@@ -13869,8 +13836,7 @@ static Item js_message_port_context_unavailable_error(void) {
 }
 
 static Item js_message_port_emit_message_error_tick(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item target = env[0];
     Item data = env[1];
     if (!js_message_port_is_port(target)) return make_js_undefined();
@@ -13885,9 +13851,7 @@ static Item js_message_port_emit_message_error_tick(Item env_item) {
 }
 
 static void js_message_port_schedule_message_error(Item target, Item data) {
-    Item* env = js_alloc_env(2);
-    env[0] = target;
-    env[1] = data;
+    Item* env = js_alloc_env2(target, data);
     Item callback = js_new_native_closure(js_message_port_emit_message_error_tick, 0, env, 2);
     js_setTimeout(callback, (Item){.item = i2it(0)});
 }
@@ -13910,8 +13874,7 @@ JS_FORWARD_STATIC_ITEM(js_message_port_add_listener, (Item event, Item handler),
 JS_FORWARD_STATIC_ITEM(js_message_port_add_event_listener, (Item event, Item handler), js_message_port_add_listener_for_event, (event, handler, true))
 
 static Item js_message_port_once_wrapper(Item env_item, Item arg1) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item self = js_get_this();
     const char* key = js_message_port_listener_key(env[0]);
     js_message_port_remove_listener_from_key(self, key, env[2]);
@@ -14018,8 +13981,7 @@ static Item js_message_port_postMessage(Item msg, Item transfer_list) {
     // and payload until the queue has installed its new message.
     js_array_push(queue_root.get(), clone_root.get());
 
-    Item* env = js_alloc_env(1);
-    env[0] = peer_root.get();
+    Item* env = js_alloc_env1(peer_root.get());
     deliver_root.set(js_new_native_closure(js_message_port_deliver, 0, env, 1));
     // Timer scheduling may allocate after closure creation; preserve the
     // callback until the event loop has taken ownership of it.
@@ -14044,7 +14006,6 @@ static Item js_message_port_close(Item callback) {
 }
 
 extern "C" Item js_message_port_move_to_context(Item port, Item context) {
-    (void)context;
     if (js_message_port_is_port(port)) {
         Item closed = js_get_key_cstr(port, "__closed__");
         if (closed.item == ITEM_TRUE) {
@@ -14124,7 +14085,6 @@ static Item js_global_gc(void) {
 
 Item js_intrinsic_global_gc_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)args; (void)argc; (void)result_home;
     return js_global_gc();
 }
 
@@ -16142,7 +16102,6 @@ JS_DEFINE_HOST_CTOR_BODY_2(animation_event, js_ctor_animation_event_fn)
 
 Item js_intrinsic_ctor_placeholder_call_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    (void)callee; (void)this_value; (void)args; (void)argc; (void)result_home;
     return ItemNull;
 }
 
@@ -17324,7 +17283,6 @@ struct JsSymbolDesc {
 #define js_symbol_desc_registry (js_runtime_state.operations.symbol_description_registry)
 
 static int js_symbol_desc_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
     return ((const JsSymbolDesc*)a)->symbol_id != ((const JsSymbolDesc*)b)->symbol_id;
 }
 
@@ -17358,7 +17316,6 @@ static void js_symbol_desc_init() {
 #define JS_SYMBOL_ID_DISPOSE       15
 
 static int js_symbol_entry_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
     return strcmp(((const JsSymbolEntry*)a)->key, ((const JsSymbolEntry*)b)->key);
 }
 
@@ -17891,8 +17848,7 @@ static Item js_web_stream_key(const char* name) {
 }
 
 static Item js_readable_stream_controller_enqueue(Item env_item, Item chunk) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     Item chunks = js_get_key_cstr(env[0], "__chunks__");
     if (get_type_id(chunks) != LMD_TYPE_ARRAY) {
         chunks = js_array_new(0);
@@ -17903,8 +17859,7 @@ static Item js_readable_stream_controller_enqueue(Item env_item, Item chunk) {
 }
 
 static Item js_readable_stream_controller_close(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    JS_ENV_OR_UNDEFINED(env, env_item);
     js_set_key_cstr(env[0], "__closed__", (Item){.item = b2it(true)});
     return make_js_undefined();
 }
@@ -17964,9 +17919,7 @@ static Item js_readable_stream_byob_respond_with_new_view(Item env_item, Item vi
 }
 
 static Item js_readable_stream_make_byob_request(Item stream, Item view) {
-    Item* env = js_alloc_env(2);
-    env[0] = stream;
-    env[1] = view;
+    Item* env = js_alloc_env2(stream, view);
     Item request = js_new_object();
     js_set_key_cstr(request, "respondWithNewView", js_new_native_closure(js_readable_stream_byob_respond_with_new_view,
                                    1, env, 2));
@@ -17999,9 +17952,7 @@ static Item js_readable_stream_reader_read(Item env_item, Item view) {
         Item pull_fn = js_get_key_cstr(stream, "__pull__");
         if (js_is_callable(pull_fn) &&
             !js_web_stream_item_is_true(js_get_key_cstr(stream, "__closed__"))) {
-            Item* controller_env = js_alloc_env(2);
-            controller_env[0] = stream;
-            controller_env[1] = view;
+            Item* controller_env = js_alloc_env2(stream, view);
             Item controller = js_new_object();
             js_set_key_cstr(controller, "enqueue", js_new_native_closure(js_readable_stream_controller_enqueue, 1,
                                            controller_env, 2));
@@ -18039,9 +17990,7 @@ static Item js_readable_stream_get_reader_stub(Item options) {
             byob = s && s->len == 4 && memcmp(s->chars, "byob", 4) == 0;
         }
     }
-    Item* env = js_alloc_env(2);
-    env[0] = stream;
-    env[1] = (Item){.item = b2it(byob)};
+    Item* env = js_alloc_env2(stream, (Item){.item = b2it(byob)});
     Item reader = js_new_object();
     js_set_key_cstr(reader, "read", js_new_native_closure(js_readable_stream_reader_read, 1, env, 2));
     return reader;
@@ -18060,8 +18009,7 @@ extern "C" Item js_readable_stream_new(Item underlying_source) {
 
     Item start_fn = js_get_key_cstr(underlying_source, "start");
     if (js_is_callable(start_fn)) {
-        Item* env = js_alloc_env(1);
-        env[0] = obj;
+        Item* env = js_alloc_env1(obj);
         Item controller = js_new_object();
         js_set_key_cstr(controller, "enqueue", js_new_native_closure(js_readable_stream_controller_enqueue, 1, env, 1));
         js_set_key_cstr(controller, "close", js_new_native_closure(js_readable_stream_controller_close, 0, env, 1));
@@ -18095,8 +18043,7 @@ static Item js_writable_stream_writer_close(Item env_item) {
 
 static Item js_writable_stream_get_writer_stub(void) {
     Item stream = js_get_this();
-    Item* env = js_alloc_env(1);
-    env[0] = stream;
+    Item* env = js_alloc_env1(stream);
     Item writer = js_new_object();
     js_set_key_cstr(writer, "write", js_new_native_closure(js_writable_stream_writer_write, 1, env, 1));
     js_set_key_cstr(writer, "close", js_new_native_closure(js_writable_stream_writer_close, 0, env, 1));

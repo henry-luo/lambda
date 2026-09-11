@@ -91,12 +91,12 @@ static bool emit_build_direct_ast(Transpiler* tp, const char* source) {
 }
 
 // get source text from the parser-neutral span retained on every AST node.
-static inline const char* node_src(const char* source, SourceSpan span, int* out_len) {
+const char* emit_dump_node_src(const char* source, SourceSpan span, int* out_len) {
     *out_len = (int)lambda_source_span_length(span);
     return source + span.start_byte;
 }
 
-static void emit_dump_escaped_string(const char* str, int len) {
+void emit_dump_escaped_string(const char* str, int len) {
     putchar('"');
     for (int i = 0; i < len; i++) {
         unsigned char c = (unsigned char)str[i];
@@ -118,7 +118,7 @@ static void emit_dump_escaped_string(const char* str, int len) {
     putchar('"');
 }
 
-static void emit_dump_indent(int indent) {
+void emit_dump_indent(int indent) {
     for (int i = 0; i < indent; i++) printf("  ");
 }
 
@@ -220,7 +220,7 @@ static const char* ast_dump_kind_name(AstNodeType type) {
     }
 }
 
-static void emit_dump_string_field(const char* label, String* str) {
+void emit_dump_string_field(const char* label, String* str) {
     if (!str) return;
     printf(" (%s ", label);
     emit_dump_escaped_string(str->chars, (int)str->len);
@@ -254,9 +254,9 @@ static void emit_dump_contract_field(const char* label, const Type* type,
     if (type) printf(" (%s_explicit %s)", label, is_explicit ? "true" : "false");
 }
 
-static void emit_dump_source_field(const char* source, SourceSpan span) {
+void emit_dump_source_field(const char* source, SourceSpan span) {
     int len = 0;
-    const char* src = node_src(source, span, &len);
+    const char* src = emit_dump_node_src(source, span, &len);
     if (len <= 0) return;
     printf(" (source ");
     emit_dump_escaped_string(src, len);
