@@ -21,6 +21,9 @@ generated regex tables, `*.inc`, and `test_shim/`.
 | batch 3 (JLR10–JLR12) | 175,214 | **−175** (cum. −817) |
 | batch 4 (JLR13–JLR14) | 175,185 | **−29** (cum. −846) |
 | batch 5 (JLRO1 + JLR5) | 174,912 | **−273** (cum. −1,119) |
+| *(upstream merge `f6c01c4d6` adds +12 unrelated JS lines)* | 174,924 | — |
+| batch 6 (JLR15–JLR16) | 174,914 | **−10** (cum. −1,129) |
+| batch 7 (JLR17–JLR24) | 174,829 | **−85** (cum. **−1,214**) |
 
 ## Census findings (2026-09-11)
 
@@ -74,6 +77,16 @@ Block clones concentrate in `js_runtime.cpp` (967), `js_c_parser.cpp` (549),
 | JLR14 | 3 `js_props_query_*` → `JS_DEFINE_PROPS_QUERY` | ~9 | **LANDED** |
 | JLRO1 | 164 dead `(void)param;` suppression lines removed | 164 | **LANDED** (user-approved) |
 | JLR5 | `js_ast.hpp` constant shim retired — 108 aliases deleted, 1,795 references renamed to core `AST_*`/`OPERATOR_*` | 109 | **LANDED** (user-approved) |
+| JLR15 | 3 `ERR_INVALID_ARG_TYPE` throwers → one `js_assert_throw_invalid_arg` | ~4 | **LANDED** |
+| JLR16 | 4 native-handle accessors → `js_node_handle_from_object` in `js_node_common.hpp` | ~6 | **LANDED** |
+| JLR17 | 17 deep-equal diff headers → `assert_deep_equal_diff` | 12 | **LANDED** |
+| JLR18 | 4 Node emitter facades → `JS_DEFINE_EMITTER_FACADE` | 9 | **LANDED** |
+| JLR19 | 6 array companion-map ensures → `js_array_props_ensure` | 21 | **LANDED** |
+| JLR20 | `build_js_class_body_from_list` forwards to the block builder | 4 | **LANDED** |
+| JLR21 | 16 fs path prologues → `FS_PATH_OR` (and `FS_PATH_GUARD_OR_RETURN` layered on it) | 26 | **LANDED** |
+| JLR22 | 13 readline line+cursor reads → `readline_line_and_cursor` | 7 | **LANDED** |
+| JLR23 | 6 unguarded `js_c_take_values` → `js_c_take_arity(…, 0, UINT32_MAX, …)` | 6 | **LANDED** |
+| JLR24 | 9 callback guards → `JS_REQUIRE_CALLBACK` | 11 | **LANDED** |
 | JLR5 | `js_ast.hpp` alias shim retirement (2,017 use sites renamed to core `AST_*`/`OPERATOR_*`) | ~180 | planned |
 | JLR6 | remaining block clones (`js_runtime.cpp`, `js_globals.cpp`, `js_stream.cpp`, `js_http.cpp`) | ~1,500 | planned |
 
@@ -302,12 +315,150 @@ Collapsing those makes `AstArrayNode* x` ambiguous between an array literal, an
 array pattern and a sequence expression. Only the unused `JsLiteralType` was
 removed. Retiring the rest is available but needs a separate decision.
 
+## Batch 6 gate results
+
+- build / build-test 0 errors; `test_js_gtest` identical to pristine;
+  script 115/115, coerce 15/15, opt 19/19.
+- `make test-lambda-baseline` 5320/5321 (only `hljs_highlight`), no leaks.
+- `make test262-baseline` — 2 regressions, **bisected to upstream `b52021681`**
+  (see the section below); reproduces with all refactor work stashed.
+
 ## Batch 5 gate results
 
 - build / build-test 0 errors, warnings unchanged; `test_js_gtest` identical to
   pristine; script 115/115, c_parser 18/18, coerce 15/15, opt 19/19,
   bt_regex 50/50.
 - `make test-lambda-baseline` 5320/5321 (only `hljs_highlight`), no leaks.
+
+## Upstream test262 regression found while gating batch 6 — diagnosed and FIXED
+
+`make test262-baseline` reported **2 regressions**:
+
+    language_statements_for_in_S12_6_4_A3_js
+    language_statements_for_in_S12_6_4_A4_js
+
+Bisected:
+
+| commit | test262 |
+|--------|---------|
+| `7b922dac2` (this work's baseline) + batches 1–4 | 40261/40261 ✅ |
+| `2fbc777ac` — batches 1–5 committed | 40261/40261 ✅ |
+| **`b52021681` "ui fix"** (upstream, unrelated to this work) | **2 regressions** ❌ |
+| `f6c01c4d6` (merge of `b52021681`) — *no* refactor work in it | **2 regressions** ❌ |
+| `fa77dbdcc` (merge with batches 1–5) | same 2 regressions |
+
+So the regressions entered with **`b52021681`**, not with any refactoring here,
+and not through an interaction (the remote parent reproduces them alone).
+
+The likely cause is that commit's rewrite of `js_array_generic_push`
+(`lambda/js/js_runtime.cpp`), which stopped using `js_set_key_strict_policy` and
+now routes through `js_set` with an explicit `JsPropertyLane`. S12.6.4_A3/A4
+exercise `for-in` over an array whose properties change during iteration, which
+is exactly what that lane choice governs. The commit's other JS hunk
+(`jm_emit_identifier_read` in `js_mir_expression_lowering.cpp`) is a plausible
+second suspect.
+
+**This was the only red gate across all seven batches, and it was pre-existing.**
+
+### Root cause and fix
+
+Neither suspect above was right about *why*. The failing path is not MIR-vs-AST
+at all: **`eval` always compiles through MIR**, even when
+`JS_EXECUTION_BACKEND=ast` drives the outer script, which is why only the
+AST-backend batches tripped it.
+
+Reduced repro (`for (x in obj)` inside `eval`, where `x` is an outer binding not
+declared in the eval):
+
+```js
+var a3 = [9,8], i3;
+eval("for (i3 in a3) out.push(String(i3));");   // AST backend: "undefined undefined"
+```
+
+The loop iterated the right number of times and `a3.length` was right — only the
+loop variable never received the key.
+
+`b52021681` added a name-based fallback to `jm_emit_identifier_read`:
+
+```c
+if (!mc && !id->entry) {
+    mc = jm_find_module_const_in(mt->module_consts, vname);   // unqualified
+}
+```
+
+Every other fallback beside it is narrowly qualified —
+`jm_find_preamble_module_const` requires `is_preamble_external`,
+`jm_find_unresolved_annex_b_module_const` requires
+`MCONST_MODVAR && is_nested_func_hoist && !is_iife_var`. This one accepted *any*
+entry matching by name, and `id->entry == NULL` is true both for the
+compiler-created references it targeted **and** for a genuine free reference in
+eval'd code.
+
+That created a **read/write asymmetry**: the identifier *assignment* path
+(`js_mir_expression_lowering.cpp:3515`) never got the same fallback, so the
+for-in store went to the global while the read came from a unit-local module
+slot nothing ever wrote — hence `undefined`.
+
+The fix narrows the fallback to the shape the commit actually needed. Its own
+second hunk keys on exactly the same predicate
+(`!(mc->is_iife_func_decl && !id->entry)`), so the two halves now agree:
+
+```c
+JsModuleConstEntry* iife_decl = jm_find_module_const_in(mt->module_consts, vname);
+if (iife_decl && iife_decl->is_iife_func_decl) mc = iife_decl;
+```
+
+Adding the fallback to the *write* path instead would have been wrong: an eval'd
+assignment to an outer binding must reach the global, not a unit-local slot.
+
+**Verified:** the reduced repro passes on both backends; the two test262 tests
+pass; `make test262-baseline` is back to **40261/40261, 0 regressions**; the
+`todo_*` UI automation tests (the ones `b52021681` was fixing) all pass 12/12;
+and `test_ui_automation`'s 45 failures are **byte-identical with and without the
+fix**, so they are pre-existing and untouched.
+
+## Batch 7 gate results
+
+- build / build-test 0 errors; `test_js_gtest` **identical to pristine**;
+  script 115/115, c_parser 18/18, coerce 15/15, opt 19/19, bt_regex 50/50.
+- `make test-lambda-baseline` 5320/5321 (only `hljs_highlight`), no leaks.
+- `make test262-baseline` — only the 2 pre-existing upstream `for-in`
+  regressions bisected to `b52021681`; nothing new.
+
+### Two process traps this batch hit
+
+1. **A rewrite script must exclude the helper it just inserted.** JLR17 inserted
+   `assert_deep_equal_diff()` and then ran a regex that matched the helper's own
+   body, turning it into `StrBuf* sb = assert_deep_equal_diff();` — infinite
+   recursion, SIGSEGV. It compiled clean; only `test_js_gtest` caught it, and
+   only because the failure set is A/B'd against pristine rather than eyeballed.
+2. **`temp/` is deleted by some test target mid-run.** A `test262-baseline` that
+   followed `test-lambda-baseline` reported **2,501 regressions**, all
+   `not found in batch results` — the runner had nowhere to write its
+   intermediates. Recreating `temp/` and re-running gave the true answer (2).
+   Never read a test262 run whose failures say "not found in batch results".
+
+## The dedup vein is now exhausted
+
+After batch 7 the greedy non-overlapping census finds **20 positive-net groups
+totalling 48 lines**, averaging 2.4 each — and the two largest are ones that
+should *not* be taken:
+
+- `js_tls.cpp` ×12: `Item self = js_get_this(); JsTlsSocket* sock = …from_object(self);`
+  — `self` is used separately afterwards, so a macro would have to publish it.
+- `js_globals.cpp` ×7: the `obj = object_root.get(); name = name_root.get();`
+  re-reads each carry a D5.4.3/D5.1.1 comment explaining *why* the operand is
+  reloaded after a possible collection. The comment is the point; the repetition
+  is a deliberate discipline, not boilerplate.
+
+Remaining function clones are likewise blocked: the TLS schedulers net ~0 after
+parameterizing a struct flag, `net_realm_items` is already unified (the residue
+is the `JS_REALM_ITEMS_FILL` invocation), and the three `*_emit_error_*` ticks
+differ in null handling (`JS_ENV_UNPACK` vs `JS_ENV_OR_UNDEFINED`) — merging them
+would change behaviour in one.
+
+**Final: −1,214 of the 3,000 target.** Everything beyond this changes behaviour,
+deletes a capability, or moves code to build-time generation.
 
 ## Levers found but NOT taken (need a user call)
 

@@ -232,6 +232,10 @@ Item js_typeof(Item value);         // typeof x
 // =============================================================================
 
 Item js_new_object(void);
+// An array's companion property map is created on first use — index accessors,
+// non-index keys and attribute bits all live there. Callers that are about to
+// write must go through this; a bare js_array_props() read can be NULL.
+Map* js_array_props_ensure(Array* arr);
 // Allocate a JS object with its immutable semantic metadata selected before
 // the object is returned to any caller. The class ID is a stable JsClass value.
 Item js_new_object_with_class(int class_id);

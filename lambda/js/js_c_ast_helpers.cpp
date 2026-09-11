@@ -1627,13 +1627,10 @@ static void js_method_adopt_function_payload(JsMethodDefinitionNode* method, JsA
 }
 
 // build a class body from parser-owned member nodes
+// A class body is a block of member definitions and carries the same node.
 JsAstNode* build_js_class_body_from_list(JsTranspiler* tp, SourceSpan span,
         JsAstNode* members, uint32_t length) {
-    JsBlockNode* body = (JsBlockNode*)alloc_js_ast_node_span(tp,
-        AST_NODE_BLOCK, span, sizeof(JsBlockNode));
-    body->statements = members;
-    body->type = &TYPE_NULL;
-    return (JsAstNode*)body;
+    return build_js_block_from_list(tp, span, members, length);
 }
 
 // build a class method from its key, parameter, and body reductions

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "description": "Tune26 T26-1: declared bool, int, and float fills retain their primitive lanes through native use after constant-time boundary admission.",
+  "checks": [
+    {
+      "in_func": "_tune26_bool_flags_#",
+      "expect": [
+        "and\t{{r}}, {{r}}, 1"
+      ],
+      "forbid": [
+        "call\tis_truthy_p, is_truthy"
+      ]
+    },
+    {
+      "in_func": "_tune26_numeric_fill_#",
+      "expect": [
+        "dadd\t{{r}}, {{r}}, {{r}}"
+      ]
+    }
+  ]
+}

@@ -1013,8 +1013,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
     if (reduction->kind == JS_REDUCE_DECLARATION &&
             reduction->form == JS_REDUCTION_TYPE) {
         JsAstNode** nodes = NULL;
-        if (!js_c_take_values(sink, reduction->child_count, reduction->span,
-                &nodes)) return false;
+        if (!js_c_take_arity(sink, reduction, 0, UINT32_MAX, &nodes)) return false;
         JsAstNode* declaration = js_c_build_ts_declaration(sink, reduction,
             nodes);
         return js_c_push_result(sink, declaration, reduction->span);
@@ -1159,8 +1158,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         int kind = js_c_variable_kind(reduction->introducer.kind);
         if (kind < 0) return js_c_unsupported(sink);
         JsAstNode** nodes = NULL;
-        if (!js_c_take_values(sink, reduction->child_count, reduction->span,
-                &nodes)) return false;
+        if (!js_c_take_arity(sink, reduction, 0, UINT32_MAX, &nodes)) return false;
         JsAstNode* declarations = js_c_link_children(nodes, 0,
             reduction->child_count);
         JsAstNode* declaration = build_js_variable_declaration_from_list(
@@ -1249,8 +1247,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
     if (reduction->kind == JS_REDUCE_CLASS_MEMBER &&
             reduction->form == JS_REDUCTION_CLASS_BODY) {
         JsAstNode** nodes = NULL;
-        if (!js_c_take_values(sink, reduction->child_count, reduction->span,
-                &nodes)) return false;
+        if (!js_c_take_arity(sink, reduction, 0, UINT32_MAX, &nodes)) return false;
         JsAstNode* members = js_c_link_children(nodes, 0,
             reduction->child_count);
         JsAstNode* body = build_js_class_body_from_list(sink->transpiler,
@@ -1529,8 +1526,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
     if (reduction->kind == JS_REDUCE_BLOCK &&
             reduction->form == JS_REDUCTION_NONE) {
         JsAstNode** nodes = NULL;
-        if (!js_c_take_values(sink, reduction->child_count, reduction->span,
-                &nodes)) return false;
+        if (!js_c_take_arity(sink, reduction, 0, UINT32_MAX, &nodes)) return false;
         JsAstNode* statements = js_c_link_children(nodes, 0,
             reduction->child_count);
         JsAstNode* block = build_js_block_from_list(sink->transpiler,
@@ -1729,8 +1725,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
     if (reduction->kind == JS_REDUCE_EXPRESSION &&
             reduction->form == JS_REDUCTION_OBJECT) {
         JsAstNode** nodes = NULL;
-        if (!js_c_take_values(sink, reduction->child_count, reduction->span,
-                &nodes)) return false;
+        if (!js_c_take_arity(sink, reduction, 0, UINT32_MAX, &nodes)) return false;
         for (uint32_t i = 0; i < reduction->child_count; i++) {
             if (nodes[i] && nodes[i]->node_type == AST_NODE_SPREAD) {
                 mark_js_object_spread(sink->transpiler, nodes[i]);
@@ -1759,8 +1754,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
     if (reduction->kind == JS_REDUCE_EXPRESSION &&
             reduction->form == JS_REDUCTION_ARRAY) {
         JsAstNode** nodes = NULL;
-        if (!js_c_take_values(sink, reduction->child_count, reduction->span,
-                &nodes)) return false;
+        if (!js_c_take_arity(sink, reduction, 0, UINT32_MAX, &nodes)) return false;
         JsAstNode* elements = js_c_link_children(nodes, 0,
             reduction->child_count);
         JsAstNode* array = build_js_array_from_list(sink->transpiler,
