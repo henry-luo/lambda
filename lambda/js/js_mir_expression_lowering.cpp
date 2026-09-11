@@ -1661,9 +1661,15 @@ static MIR_reg_t jm_emit_identifier_read(JsMirTranspiler* mt,
             ? jm_find_module_const_by_binding(mt, id->entry)
             : jm_find_preamble_module_const(mt, vname);
         if (!mc && !id->entry) {
+            // Compiler-created identifiers have no source binding, but still
+            // name an entry in this compilation unit's module slot table.
+            mc = jm_find_module_const_in(mt->module_consts, vname);
+        }
+        if (!mc && !id->entry) {
             mc = jm_find_unresolved_annex_b_module_const(mt, vname);
         }
-        if (mc && mc->is_iife_var && !jm_current_scope_can_see_iife_modvar(mt)) {
+        if (mc && mc->is_iife_var && !jm_current_scope_can_see_iife_modvar(mt) &&
+                !(mc->is_iife_func_decl && !id->entry)) {
             mc = NULL;
         }
         if (mc) {

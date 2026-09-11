@@ -3845,11 +3845,15 @@ static bool apply_initial_autofocus(DomDocument* doc, DocState* state) {
 
 struct LambdaFocusRestore {
     bool valid;
+    bool has_text_selection;
     RenderMapLookup lookup;
     int path[64];
     int path_len;
     const char* fallback_tag;
     const char* fallback_class;
+    uint32_t selection_start;
+    uint32_t selection_end;
+    uint8_t selection_direction;
 };
 
 static bool find_child_element_index(DomElement* parent, DomElement* child,
@@ -3916,6 +3920,10 @@ static bool capture_lambda_focus_restore(DocState* state,
     if (focused_elem->class_count > 0 && focused_elem->class_names) {
         out->fallback_class = focused_elem->class_names[0];
     }
+    form_control_get_selection(state, static_cast<View*>(focused_elem),
+                               &out->selection_start, &out->selection_end,
+                               &out->selection_direction);
+    out->has_text_selection = true;
 
     DomNode* node = static_cast<DomNode*>(focused);
     while (node) {
@@ -4013,6 +4021,14 @@ static View* restore_lambda_focus(DomDocument* doc, DocState* state, bool had_fo
     }
     if (focused) {
         focus_set(state, focused, false);
+        if (restore->has_text_selection) {
+            // The fresh template value is authoritative, but its form prop
+            // starts with a default caret. Keep the live selection state and
+            // clamp it to that newly rendered value.
+            form_control_set_selection(state, focused, restore->selection_start,
+                                       restore->selection_end,
+                                       restore->selection_direction);
+        }
     } else if (focus_has_current(state)) {
         focus_clear(state);
     }

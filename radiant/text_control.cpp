@@ -47,14 +47,13 @@ static void tc_collect_text(DomNode* n, StrBuf* sb) {
 
 bool tc_is_text_control(DomElement* elem) {
     if (!elem || !elem->tag_name) return false;
-    if (elem->form_control()) {
-        return form_control_is_textarea(elem->form) ||
-            form_input_has_capability(elem->form->input_type,
-                FORM_INPUT_CAP_TEXT_CONTROL);
-    }
     if (strcasecmp(elem->tag_name, "textarea") == 0) return true;
     if (strcasecmp(elem->tag_name, "input") == 0) {
-        return form_input_has_capability(elem->get_attribute("type"),
+        // Button/select form props can temporarily lack input_type; HTML's
+        // missing-value default is text only for input elements.
+        const char* input_type = elem->form_control() ? elem->form->input_type
+                                                       : elem->get_attribute("type");
+        return form_input_has_capability(input_type,
             FORM_INPUT_CAP_TEXT_CONTROL);
     }
     return false;
