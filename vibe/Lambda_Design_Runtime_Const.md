@@ -17,6 +17,24 @@ address may enter cacheable MIR), **D5.3.3** (fold frames own their rooting),
 
 **Ledger prefix:** `RC`.
 
+**Status (2026-09-12):** RC-P0 … RC-P8 landed. Two deliberate residues, each
+with a recorded reason:
+
+| Residue | Why it is open |
+|---|---|
+| User-defined `fn` calls (RC3.4) | Deliberately out of scope — §13. A sys-func call is a closed evaluation; a user call makes the folder execute user code at compile time. |
+| RC-P6b payload deletion (RC17v2) | Blocked — §12. Needs proof that a `build_lit_*` result never reaches type position; failure there is silent. |
+
+Superseded rulings, kept with their replacements so the reversal is auditable:
+**RC5v2** (one storage home, not two), **RC12v2** (result in the pool, not on
+the type), **RC17v2** (a `Type` carries a value only when the value is part of
+the type's meaning), **RC-P2b** (withdrawn), **RC11** (restated per node, not
+per unit).
+
+**Owed:** the **D8.6.4v2** compiler-time and MIR-volume ratchets are unmeasured
+across all phases. RC-P3 should have moved MIR volume down and nothing has
+confirmed it.
+
 ---
 
 ## 1. Present state
@@ -161,14 +179,14 @@ answers.
 | **RC2** | **Eligibility is bounded by the AST interpreter's evaluation capability, gated by purity.** Any *expression* the T0 interpreter can evaluate is a fold candidate; **D6.1.2**'s purity bit decides whether it *may* be folded. Not a hand-maintained node-shape whitelist. Const values (RC15) are outside this entirely — they are materialized, not evaluated. |
 | **RC3** | **Constness is compositional over the pure fragment** (§3): a literal is const; a pure operator over const operands is const; an immutable binding whose initializer is const is const; a `fn` call with const arguments is const; anything reaching a `pn`, a mutable binding, or an effectful surface is not. |
 | **RC4** | **Folded results are values, not type IDs.** The admission test is a *representation* question — "is this Item self-contained, or does it need pool residency?" — never a type-id whitelist. |
-| **RC5** | **Two storage cases, by representation** (§5). Self-contained immediates (NULL, BOOL, INT, and inline-representable FLOAT) live inline in the node's literal `Type`. Everything else is rehomed into the const pool and reached by `TypeConst::const_index`. |
+| **RC5v2** | **One storage case: the const pool** (§5; revised from RC5's two-case split once RC-P8 landed). Every const value — folded immediate, folded non-immediate, or materialized container — is a `const_list` entry. The node holds only a handle. The representation split survives at **emission**, not in storage: MIR reads the slot at compile time and bakes a self-contained word, or emits `emit_load_const` otherwise. |
 | **RC6** | **The const pool is content-hashed and shared.** Equal constant values occupy one pool slot, whatever their origin — source literal or folded result. Identity of a pooled entry is its content hash, not its construction site. |
 | **RC7** | **A pooled fold result is rehomed before its frame closes** (§4). The fold's throwaway frame owns nothing that outlives it; a value destined for the pool is copied into script-pool storage during the attempt, or the fold is abandoned. |
 | **RC8** | **MIR lowering handles both cases and must consult the fact on every path** (§6.2), not only at boxing boundaries. An immediate is baked; a pooled value loads through `const_index`. |
 | **RC9** | **The interpreter consumes the fact directly** (§6.1). A folded node evaluates to its stored value without re-entering evaluation. |
-| **RC10** | **Folded type and inferred type must agree; disagreement is a defect and is reported** (§7). The producer asserts it once. The consumer does not re-derive it. |
+| **RC10** | **Folded type and inferred type must agree; disagreement is a defect and is reported** (§7). The producer checks it once, under a greppable `const-fold: RC10` prefix; the consumer does not re-derive it. It **reports and declines, never aborts**: RC14 requires a fold attempt to be semantically inert, and `abort()` alters program completion maximally. Measured 0 firings over the full `test/lambda` corpus before the consumer's duplicate check was removed. |
 | **RC11** | **Each node folds exactly once.** The index carries a watermark; the pass resumes there and needs no wholesale reset. Stated per *node*, not per *unit*, because a unit can grow: the REPL appends to a retained index, so a unit-level skip would strand the appended nodes unfolded. |
-| **RC12** | **No per-node fact side table.** The fold's result lives on the node's type under **D8.2.5v2**; `AstIndex::facts` and `AstNodeFacts` are retired. |
+| **RC12v2** | **No per-node fact side table** (revised: RC12 said the result lives *on the node's type*; as built it lives in the **pool**, named by a handle on the node). `AstNode` carries `AstConstKind const_kind` + `uint32_t const_index` in its existing padding — `sizeof(AstNode)` stays 32. `AstNodeFacts` and `AstIndex::facts` are deleted, along with `inferred_type` (duplicated `node->type`), `declared_contract` (the declaring nodes already carry `declared_type`) and `representation` (never read). |
 | **RC13** | **Nothing pointer-backed enters cacheable MIR as a raw address** (**DI14**). Pooled values are reached through the module-state const indirection, never by a baked pointer. This is what makes RC5's second case safe. |
 | **RC14** | **Fold attempts remain semantically inert.** Fuel exhaustion, a native fault, an error result, or a rejected attempt leaves the node unfolded and changes nothing observable. A compiler optimization may never alter program completion (retained from today's design). |
 | **RC15** | **Const values are pooled when they are built and never enter the folder.** A *const value* is any value the source already determines: a scalar literal, and equally a **static/const container** — an array, map or element literal whose parts are all const. Its value needs no evaluation, so it is materialized directly into the const pool (RC6-hashed) at build time. **The folder's input is expressions only.** No const value is interpreted, and none has its value recovered by re-reading a source span — which retires the text-recovery path in `ast_static_literal_item()` for the valueless `&LIT_INT`/`LIT_BOOL` singletons. |
@@ -254,70 +272,66 @@ anything whose identity is observable is not.
 
 ---
 
-## 5. Storage (RC5)
+## 5. Storage (RC5v2) — as built
 
-Two origins reach this storage, and only one of them passes through the folder
-(RC15/RC16): a **literal**, pooled when it is built, and a **folded expression
-result**, pooled after evaluation and rehoming. Both end in the same place, so
-a consumer never asks which produced a value.
+**One home: the const pool.** Every const value is a `const_list` entry, and the
+node holds a handle into it:
 
-Today an in-band int literal is typed `&LIT_INT` — a process-global singleton
-with no payload ([`lambda-data.hpp:1141`]) — and its value is recovered by
-**re-reading the source span** ([`build_ast.cpp:1003`]). RC15 retires that: a
-literal carries a value-bearing type from the moment it is built. The span
-re-read cannot work for a fold in any case — `1 + 2` has no span that reads
-as `3`.
+```c
+struct AstNode {
+    AstNodeType  node_type;
+    AstConstKind const_kind;   // NONE | FOLDED | POOLED
+    uint32_t     const_index;
+    Type        *type;         // the inferred/effective type (D8.2.5v2)
+    ...
+};                             // still 32 bytes
+```
 
-So a folded node always receives a **per-node pooled literal `Type`**, never a
-shared singleton. This is also what **D8.2.5v2** requires: a fact attached to
-a shared `TYPE_ANY`-family singleton would be read by every unrelated node
-that shares it.
+Both fields occupy the six bytes of padding that already sat between the 16-bit
+tag and the first pointer, so `sizeof(AstNode)` is unchanged, subclass layouts
+are unchanged, and the tree has no `offsetof(AstNode, …)` pins to break.
+Zero-initialized allocation makes `AST_CONST_NONE` the default with no init pass.
 
-**RC-O1 is resolved by RC17/RC18: storage is uniform.** Every constant value —
-literal or folded, immediate or not — lives in one place, the const pool. The
-representation split survives only at *emission* (§6.2), not in storage.
+### 5.1 Two kinds, differing only in indirection
 
-| Concern | Home | Cardinality |
+| Kind | Slot holds | Produced by |
 |---|---|---|
-| which kind of value | `Type` — valueless shared singleton (`LIT_INT`, `LIT_FLOAT`, …) | one per type |
-| which value | const handle on the `AstNode` | one per node |
-| the value itself | const-pool entry, content-hashed | one per distinct value |
+| `AST_CONST_FOLDED` | a pointer to a pool-allocated `Item` | the fold pass, for a computed expression |
+| `AST_CONST_POOLED` | **the container pointer itself** | the materialization pass, for a const ARRAY/MAP |
 
-The question that made RC-O1 look hard — "there is no `TypeInt`, `TypeBool` or
-`TypeNull`, so what carries a folded immediate?" — dissolves. Nothing carries
-it in the type, because no type carries a value. The three valueless singletons
-that already exist are the *model*, not the exception.
+`POOLED` keeps the bare-pointer convention `emit_load_const(…, MIR_T_P)` already
+expected, so the existing static-collection path needed no change. `const_kind`
+is what lets one handle serve both without a kind array on the pool.
 
-`TypeConst` disappears entirely: with no payload and no `const_index`, nothing
-distinguishes it from `Type`. A folded node keeps the type it already had.
+### 5.2 What did *not* happen
 
-**The handle is free.** `AstNode` is `{AstNodeType node_type; Type* type;
-AstNode* next; SourceSpan source_span;}` — a `uint16_t` followed by six bytes
-of padding before the first pointer, for 32 bytes total. A `uint32_t` const
-handle occupies that padding: `sizeof(AstNode)` is unchanged, every subclass
-layout is unchanged, and there are no `offsetof(AstNode, …)` pins in the tree
-to break. A reserved sentinel (index 0, or `UINT32_MAX`) means "no constant".
+RC17's "a folded node receives a per-node pooled literal `Type`, and `TypeConst`
+disappears" is **withdrawn** — see §12. Under **RC17v2** a literal in type
+position keeps its payload, because there the value is the type's identity.
+`TypeConst` and the literal `Type` subclasses remain.
 
-**This also retires the singleton-aliasing hazard** that **D8.2.5v2** warns
-about. That hazard exists only if a per-node fact is attached to a possibly
-shared `Type`. With the handle on the node, the situation cannot arise, and
-sharing types becomes safe rather than dangerous — no literal allocates a
-`Type` at all, where today every float, string, datetime and decimal literal
-allocates its own.
+The `&LIT_INT`/`LIT_BOOL` source-span re-read in `ast_static_literal_item()`
+therefore also remains: retiring it needs expression-position literals to carry
+handles instead of payloads, which is RC-P6b's blocked half.
 
-`TypeNumSized::num_type` is the one payload that is partly *type* information
-rather than value. It collapses cleanly: `type_num_sized_kind()` already falls
-back to `Type::kind` for non-literals, so `kind` becomes the sole authority.
-
----
+What *did* land for literals is value **sharing** (§7): equal string/symbol
+literals now intern to one `String` and one pool slot, without touching the
+type's payload.
 
 ## 6. Consumers
 
 ### 6.1 Interpreter (RC9)
 
-Evaluation of a node carrying a fold fact returns the stored value directly:
-inline payload for an immediate, `pool[const_index]` for a pooled value. No
-re-entry into evaluation, no recomputation per execution.
+Evaluation of a node carrying a const handle returns the stored value directly —
+always through `const_list[const_index]`, dereferenced for `FOLDED` and taken as
+the pointer for `POOLED`. No re-entry into evaluation, no recomputation per run.
+
+Gated twice, both cheaply: on node kind (only UNARY/BINARY/IF/IDENT/CALL/ARRAY/MAP
+can carry a handle, so every other evaluation leaves the path on a switch), and
+originally on `EvalMode::RUNTIME`. **That mode gate was later relaxed** — RC3.3
+folding of `a + 1` recurses into the identifier, whose value is a published fact
+rather than a slab slot, so CONST mode must read facts too. Safe because a fact
+is published only after passing its RC10 agreement check.
 
 This is the largest behavioural change in this design. It converts const
 folding from a MIR-only optimization into a property of the compilation unit
@@ -327,8 +341,12 @@ that both tiers observe — **RC1**.
 
 Two cases, per the user-specified split:
 
-- **Immediate** — bake the tagged word as a literal operand, exactly as today
-  (`MIR_new_uint_op`). One instruction, self-contained, cache-safe.
+- **Immediate** — read the pool slot **at compile time** and bake the word as a
+  literal operand (`MIR_new_uint_op`). One instruction, self-contained,
+  cache-safe; the pool *address* is never emitted. As built, the producer goes
+  further and decodes the Item at compile time to emit the consumer's native
+  lane: a folded int as a raw `mov` on the int lane, a float as `dmov`, a bool
+  as 0/1 — not a tagged word the consumer must unbox again.
 - **Pooled** — `emit_load_const(const_index)`: load module state, load the
   `consts` pointer from it, load the value. Three loads, and its comment
   explains why the pointer is never baked — "the module's const image may
@@ -338,6 +356,14 @@ Two cases, per the user-specified split:
 The fact must be consulted wherever a node is lowered, not only at the two
 boxing boundaries. `let a = 1 + 2` folding to an immediate in the native int
 lane is the acceptance case for RC8.
+
+**As built, two consultation points.** `transpile_expr_value` is the D8.2.6 core
+boundary and covers generic paths. `emit_binary_value`, `emit_unary_value` and
+`transpile_if` are reached *directly* by specialized callers that bypass that
+boundary — the native-int declaration path in `transpile_let_stam` among them —
+so the check sits at those producers. That covers every route into them without
+chasing call sites, and it is sufficient because UNARY/BINARY/IF are exactly the
+foldable node kinds (the pass skips PRIMARY outright).
 
 ---
 
@@ -378,18 +404,18 @@ Each phase is independently landable, green on `make test-lambda-baseline` and
 
 | Phase | Content | Gate |
 |---|---|---|
-| **RC-P0** | Fix the §1.3 contradiction: reject float in eligibility *or* accept inline floats in the result test. Whichever, stop evaluating what is always discarded. | no MIR-volume growth; baseline green |
-| **RC-P1** | RC10 — assert agreement, delete the duplicated silent skip. Any assertion that fires is a real defect to fix before proceeding. | baseline green with assertions armed |
-| **RC-P2** | RC11 — resume the fold at a per-index watermark; delete the wholesale reset. **Not** by preseeding `ANALYZED`: the REPL *appends* to a retained index, so skipping the pass would leave every newly typed expression unfolded. A watermark gives RC11's actual guarantee — each node folds exactly once — while staying correct under growth. | REPL and retained-AST paths green |
+| **RC-P0** LANDED | Fix the §1.3 contradiction: reject float in eligibility *or* accept inline floats in the result test. Whichever, stop evaluating what is always discarded. | no MIR-volume growth; baseline green |
+| **RC-P1** LANDED | RC10 — assert agreement, delete the duplicated silent skip. Any assertion that fires is a real defect to fix before proceeding. | baseline green with assertions armed |
+| **RC-P2** LANDED | RC11 — resume the fold at a per-index watermark; delete the wholesale reset. **Not** by preseeding `ANALYZED`: the REPL *appends* to a retained index, so skipping the pass would leave every newly typed expression unfolded. A watermark gives RC11's actual guarantee — each node folds exactly once — while staying correct under growth. | REPL and retained-AST paths green |
 | ~~**RC-P2b**~~ | **WITHDRAWN 2026-09-12 — folded into RC-P6b.** Its first half (remove literals from the folder) was already true, per the §1.8 correction. Its second half (retire the `&LIT_INT` span re-read) is real but is a *build-time* change to literal typing, and doing it now with per-literal value-bearing `Type`s would build exactly what RC17/RC18 then delete. The span re-read retires when literal values reach the pool — in RC-P6b. |
-| **RC-P3** | RC8 — consult the fact on all lowering paths, not just boxing. `let a = 1 + 2` folds. | MIR volume drops; emission goldens re-based with attribution |
-| **RC-P4** | RC9 — interpreter consumes fold facts. | T0 no longer re-evaluates constants |
-| **RC-P5a** | RC15 — **const containers are materialized, not folded.** A literal ARRAY/MAP whose parts are all const becomes one pooled static container recorded as a const fact, built directly from the AST with no evaluation. `emit_static_collection_const()` already does this construction inside the MIR back end (§9.1); it becomes a consumer of the shared fact instead of a private builder, so T0 stops rebuilding the same array on every execution. | both tiers read one container; no aggregate reaches `interp_const_fold_script` |
+| **RC-P3** LANDED | RC8 — consult the fact on all lowering paths, not just boxing. `let a = 1 + 2` folds. | MIR volume drops; emission goldens re-based with attribution |
+| **RC-P4** LANDED | RC9 — interpreter consumes fold facts. | T0 no longer re-evaluates constants |
+| **RC-P5a** LANDED | RC15 — **const containers are materialized, not folded.** A literal ARRAY/MAP whose parts are all const becomes one pooled static container recorded as a const fact, built directly from the AST with no evaluation. `emit_static_collection_const()` already does this construction inside the MIR back end (§9.1); it becomes a consumer of the shared fact instead of a private builder, so T0 stops rebuilding the same array on every execution. | both tiers read one container; no aggregate reaches `interp_const_fold_script` |
 | **RC-P5** | RC5/RC7/RC13 — pooled results with rehoming. **Blocked on RC-P6 as written (2026-09-12): there is nothing to rehome.** Eligibility admits only NULL/BOOL/INT/FLOAT literal operands, and no operator over those yields a pointer-backed value — `2 ** 100` and `9007199254740991 + 1` give floats (`1.27e30`, `inf`), `"ab" + "c"` is an error since `+` does not concatenate, and string comparison gives a bool. Every producible result is self-contained. The one reachable exception is a subnormal float, which is boxed. Rehoming needs eligibility widened first — to expressions that *compute* a pointer-backed value. Aggregate literals are **not** that case: under RC15 they are const values, materialized into the pool at build time without ever entering the folder (RC-P5a). Rehoming therefore waits on RC-P6's expression widening. | forced-GC oracle (`LAMBDA_GC_FORCE_EVERY=1`, `POISON_FREED=1`) green |
 | **RC-P6** | RC2/RC3 — eligibility by interpreter capability under the purity gate. **COMPLETE as scoped (2026-09-12).** Reads of immutable const bindings fold transitively; calls reuse `interp_eval_mode_allows_sys_func`, which already encodes D6.1.2 (rejects `is_proc`/`is_async`) plus the restricted-mode set. User-defined `fn` calls are deliberately **out of scope** (§13). | baseline green; fold-rate census |
 | **RC-P6b** | RC17/RC18. **Handle half landed via RC-P8** (`AstNode::const_kind`/`const_index`, `sizeof` unchanged). **Payload-deletion half is BLOCKED: RC17 is wrong as a blanket rule (2026-09-12, §12).** A literal `Type`'s payload is often *type semantics*, not a misfiled node fact — it defines which values inhabit the type. Deleting it would break literal unions, type patterns, and `type T = 3.14`. Needs RC17 restated before any of it is implementable. | — |
-| **RC-P7** | RC6 — content-hashed pool with dedup. **Blocked on RC-P6b (2026-09-12).** `const_list` is an untyped `void*` list: its entries are `String*`, `Binary*`, `Decimal*`, `Array*`/`Map*`, and interior pointers into `Type` payloads (`&ft->double_val`, `&dt_type->datetime`), with **no kind tag anywhere**. Content-hashing needs to know what a pointer points at, so it needs either a parallel kind array or per-kind dedup tables at each of the ~10 append sites — and RC17/RC18 restructure exactly that storage, so building either first is throwaway work. Dedup belongs after the pool becomes the single typed home for const values. | const-pool size census |
-| **RC-P8** | RC12 — retire `AstIndex::facts` / `AstNodeFacts`. **Premise needs review (2026-09-12).** RC12 assumed a per-node fact table is inherently a scaffold because reaching it costs a pointer-hash probe. `AstNode::index_id` removed that cost: `facts[node->index_id]` is a direct array index, and one generic id serves *every* per-node fact rather than each fact kind claiming its own field in the node. Retiring the table may now be the wrong goal — the question is whether a compact, id-indexed facts row is the right home for erasable per-node state, which is close to what D8.2.5v2 rejected in ID-keyed *side tables*. Needs a ruling before implementation. | LOC strongly negative |
+| **RC-P7** LANDED | RC6 — content-hashed pool sharing, in two parts. Folded values intern by their raw 8-byte word (a slot is fully described by its bytes; each consumer reads it through its own node's type, and const values are immutable, so equal words are interchangeable). String/symbol literals intern by content. Both maps live on `Transpiler`, not `Script`: `const_list` is Script-owned and the REPL rolls a failed statement back by truncating it, so a Script-scoped map would hold reclaimed indices. The earlier "blocked, const_list has no kind tags" note is superseded — RC-P8 put the kind on the *node*, which is where it was needed. | measured: 12 intern calls to 2 entries; 3 "hello" literals to 1 String |
+| **RC-P8** LANDED | RC12v2 — retire `AstNodeFacts` / `AstIndex::facts`, ruled by the user: merge into `AstNode`, drop `inferred_type` (already `node->type`) and `declared_contract` (declaring nodes carry their own), no `index_id`, only `const_index`. `folded_item` would not fit the padding, so folded values moved to the pool as well — which is what unblocked RC-P7. | `sizeof(AstNode)` 32; forced-GC oracle clean; baseline 18 |
 
 RC-P0 through RC-P2 are corrections to existing defects and carry no design
 risk; all three have landed. The folder's input is already exactly the set that
@@ -431,11 +457,12 @@ GC's static/immortal contract.
 - **RC-O3** — which floats are inline-representable, exactly? The boxed
   residue must be pooled rather than baked, so the test is a representation
   predicate that does not exist yet in this form.
-- **RC-O7** — RC18 places the const handle on `AstNode`. The implementation put
-  `index_id` in that padding instead, which subsumes it (`facts[index_id]` is
-  O(1) and serves every per-node fact, not just consts) but leaves 2 of the 6
-  bytes free rather than 4. Should RC18 be restated as "the node carries its
-  index identity; per-node facts are reached through it"?
+- **RC-O7** — ~~RC18 places the const handle on `AstNode`; `index_id` took that
+  padding instead~~ **CLOSED 2026-09-12.** The user ruled "no `index_id` in
+  `AstNode`, only `const_index`". `index_id` was removed in RC-P8: with the
+  handle on the node there is no facts lookup left to accelerate, so the cache
+  had no remaining purpose. `ast_index_find` returns to its pointer hash for the
+  callers that still need an id.
 - **RC-O4** — should folding a const binding *read* also let the binding be
   eliminated when nothing else observes it, or is that a separate DCE concern?
 - **RC-O5** — does RC6's content hashing extend to the MarkPack const pool of
@@ -469,6 +496,16 @@ GC's static/immortal contract.
   caller skips `PRIMARY` nodes outright. Third instance in this family, after
   `Lambda_Design_Unified_AST.md` §13.6 and the P7 U-A withdrawal — a predicate
   read in isolation says nothing about whether it is reached.
+- **Interning a symbol literal through the `String` layout.** Shipped, then
+  caught by the suite: 101 baseline tests failed (18 to 119). A symbol is a
+  `Symbol*` carried in a `String*` slot and the layouts differ — `Symbol` has
+  `ns` where `String` has its flags, so `chars` sits at a different offset. The
+  interner hashed whatever followed `ns` and handed back the wrong shared
+  symbol. The surrounding source carries the comment "different layout from
+  String"; it was read and the implication still missed. Loud only because 101
+  tests cover symbols — the same error inside a *type-position* literal would
+  have been silent, which is the concrete reason RC-P6b's payload deletion stays
+  blocked (§12).
 - **Resolving a const initializer through `ast_static_literal_item` first.**
   Built and reverted during RC-P6. That function reports what a node's *type*
   carries, not what the node evaluates to, and inference hands a computed node a
