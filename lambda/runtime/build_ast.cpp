@@ -9674,7 +9674,115 @@ static bool cow_param_note_enabled(void) {
     return enabled;
 }
 
-static void lambda_ast_note_plain_param_writes(Transpiler* tp, AstFuncNode* fn) {
+typedef struct CowParamEffectScan {
+    NameEntry* entry;
+    bool retained;
+    bool var_may_publish;
+} CowParamEffectScan;
+
+static void cow_param_note_alias(CowParamEffectScan* scan) {
+    scan->retained = true;
+    // An alias can make a subsequent interior write detach the parameter,
+    // which must then be published through its `var` caller home.
+    scan->var_may_publish = true;
+}
+
+static bool cow_param_expr_uses_entry(AstNode* expr, NameEntry* entry) {
+    AstIdentNode* ident = ast_compound_root_ident(expr);
+    return ident && ident->entry == entry;
+}
+
+static bool cow_param_nested_function_uses_entry(AstNode* node, void* data) {
+    CowParamEffectScan* scan = (CowParamEffectScan*)data;
+    if (!scan || node->node_type != AST_NODE_IDENT) return scan != NULL;
+    if (((AstIdentNode*)node)->entry == scan->entry) cow_param_note_alias(scan);
+    return true;
+}
+
+static bool cow_param_retention_scan_node(AstNode* node, void* data) {
+    CowParamEffectScan* scan = (CowParamEffectScan*)data;
+    if (!scan || !node) return false;
+    switch (node->node_type) {
+    case AST_NODE_VARIABLE_DECLARATOR:
+        if (cow_param_expr_uses_entry(((AstDeclaratorNode*)node)->init, scan->entry)) {
+            cow_param_note_alias(scan);
+        }
+        break;
+    case AST_NODE_ASSIGN_STAM: {
+        AstAssignStamNode* assign = (AstAssignStamNode*)node;
+        if (assign->target_entry == scan->entry) {
+            scan->var_may_publish = true;
+        } else if (cow_param_expr_uses_entry(assign->value, scan->entry)) {
+            cow_param_note_alias(scan);
+        }
+        break;
+    }
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_MEMBER_ASSIGN_STAM: {
+        AstCompoundAssignNode* assign = (AstCompoundAssignNode*)node;
+        AstIdentNode* owner = ast_compound_root_ident(assign->object);
+        if (owner && owner->entry != scan->entry &&
+                cow_param_expr_uses_entry(assign->value, scan->entry)) {
+            cow_param_note_alias(scan);
+        }
+        break;
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        for (AstNode* arg = call->argument; arg; arg = arg->next) {
+            if (cow_param_expr_uses_entry(arg, scan->entry)) {
+                // The callee's effect can be unknown at this function's
+                // completion (including forward and dynamic targets).
+                cow_param_note_alias(scan);
+                break;
+            }
+        }
+        break;
+    }
+    case AST_NODE_ARRAY:
+    case AST_NODE_LIST:
+    case AST_NODE_MAP:
+    case AST_NODE_ELEMENT:
+    case AST_NODE_CONTENT: {
+        AstArrayNode* values = (AstArrayNode*)node;
+        for (AstNode* item = values->item; item; item = item->next) {
+            if (cow_param_expr_uses_entry(item, scan->entry)) {
+                cow_param_note_alias(scan);
+                break;
+            }
+        }
+        break;
+    }
+    case AST_NODE_KEY_EXPR:
+        if (cow_param_expr_uses_entry(((AstNamedNode*)node)->as, scan->entry)) {
+            cow_param_note_alias(scan);
+        }
+        break;
+    case AST_NODE_RETURN_STAM:
+        scan->retained = scan->retained || cow_param_expr_uses_entry(
+            ((AstReturnNode*)node)->value, scan->entry);
+        break;
+    case AST_NODE_FUNC:
+    case AST_NODE_FUNC_EXPR:
+    case AST_NODE_PROC: {
+        AstFuncNode* nested = (AstFuncNode*)node;
+        walk_lambda_ast(nested->body, cow_param_nested_function_uses_entry,
+            scan, true);
+        break;
+    }
+    default:
+        break;
+    }
+    return true;
+}
+
+static CowParamEffectScan ast_body_cow_param_effects(AstNode* body, NameEntry* entry) {
+    CowParamEffectScan scan = {entry, false, false};
+    walk_lambda_ast(body, cow_param_retention_scan_node, &scan, false);
+    return scan;
+}
+
+static void lambda_ast_note_param_cow_effects(Transpiler* tp, AstFuncNode* fn) {
     bool note = cow_param_note_enabled();
     // the walk feeds the shipped CW29 semantics: entry->cow_param_mutated
     // tells both tiers which plain params to snapshot at activation entry
@@ -9682,10 +9790,17 @@ static void lambda_ast_note_plain_param_writes(Transpiler* tp, AstFuncNode* fn) 
     for (AstNamedNode* param = fn->param; param;
             param = (AstNamedNode*)((AstNode*)param)->next) {
         TypeParam* pt = (TypeParam*)((AstNode*)param)->type;
-        if (!pt || pt->is_var_param || !param->entry) continue;
-        if (!ast_body_may_write_entry(fn->body, param->entry, false)) continue;
-        param->entry->cow_param_mutated = true;
-        if (!note) continue;
+        if (!pt || !param->entry) continue;
+        CowParamEffectScan effects = ast_body_cow_param_effects(fn->body,
+            param->entry);
+        if (pt->is_var_param) {
+            param->entry->cow_var_param_may_publish = effects.var_may_publish;
+            continue;
+        }
+        param->entry->cow_param_retained = effects.retained;
+        param->entry->cow_param_mutated = ast_body_may_write_entry(fn->body,
+            param->entry, false);
+        if (!param->entry->cow_param_mutated || !note) continue;
         String* fname = fn->name;
         log_warn("cow-param-note: %s:%.*s: write through plain parameter `%.*s` "
             "is local to the procedure under S9.1.3; add `var` to publish it",
@@ -11065,7 +11180,7 @@ static LambdaParseValue direct_ast_reduce(void* context,
             // CW24: the body is complete, so every write-back that could
             // excuse a place-copy mutation has now been seen.
             lambda_ast_flush_place_copy_diagnostics(tp);
-            if (fn) lambda_ast_note_plain_param_writes(tp, fn);  // CW29 sweep
+            if (fn) lambda_ast_note_param_cow_effects(tp, fn);  // CW29 sweep
             if (fn) lambda_ast_lower_rmw_borrows(fn);  // CW34
             return 0;
         }
