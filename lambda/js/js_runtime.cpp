@@ -22368,6 +22368,15 @@ static Item js_string_intrinsic_algorithm(Item str,
         // Clear is_content flag to prevent array flattening in JS context
         if (get_type_id(result) == LMD_TYPE_ARRAY && result.array) {
             result.array->is_content = 0;
+            // fn_split returns a content list on an inferred pointer lane, whose
+            // `items[]` words are raw `String*` rather than tagged Items. Every
+            // JS array read goes straight to `items[]`, so an un-widened lane
+            // reaches get_type_id() as a raw pointer -- which then reads the
+            // String's `len` as a TypeId (len 9 == LMD_TYPE_DECIMAL, and the
+            // decimal path dereferences the chars as an mpd_t). Widening at the
+            // boundary keeps the lane a Lambda-side representation choice
+            // (D3.3.1v2, D3.3.3v3).
+            array_widen_inferred_pointer_lane(result.array);
             // apply limit (compare as unsigned to avoid (int)0xFFFFFFFF = -1 bug)
             if (lim < 0xFFFFFFFF && result.array->length > (int)lim)
                 result.array->length = (int)lim;

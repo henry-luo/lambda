@@ -1379,6 +1379,11 @@ void array_drop_inplace(Array* arr, int64_t n);  // drop first n items in-place
 void array_limit_inplace(Array* arr, int64_t n);  // limit to first n items in-place
 void array_limit_last_inplace(Array* arr, int64_t n);  // limit to last n items in-place
 Array* array_spreadable();  // constructs a spreadable empty array
+// Box an inferred pointer lane's words in place and drop the lane. An inferred
+// lane is a representation choice, not a source contract (D3.3.1v2, D3.3.3v3),
+// so any consumer that reads `items[]` directly must widen first. Returns false
+// when the array has no inferred pointer lane to widen.
+bool array_widen_inferred_pointer_lane(Array* array);
 void array_push(Array* arr, Item item);  // push item to array
 void array_push_argument(Array* arr, Item item);  // verbatim positional append (dynamic-call args)
 // S9.3.1 capturing append for Lambda literals/comprehensions; array_push is raw.
