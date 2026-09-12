@@ -31,7 +31,7 @@ numbering spaces cannot collide when the doc sections are folded in later.
 
 **Found:** 2026-09-11. **Reproduced against:** a build of unmodified `master`
 at `ef03733de`. **Fixed:** 2026-09-11 by JSCU44
-([`Lambda_Design_Structs_JS2.md`](Lambda_Design_Structs_JS2.md) §13), the
+([`Lambda_Design_Structs_JS.md`](Lambda_Design_Structs_JS.md) §18), the
 structural option below. Regression:
 `test/js/regression_with_generator_scope.js`.
 
@@ -85,14 +85,12 @@ had a suspended generator in scope — but JSCU44 closes it regardless: the
 activation boundary now runs on every lane, guarded only by "neither side has a
 with-scope". Case 3 of the regression test covers it.
 
-**Fix taken.** JSCU44's per-activation chain, not either option as first
-sketched. Locally pushed scopes live in a free-listed `RootVector` rather than
-in the activation's side-root frame: the side root stack is watermark-LIFO, and
-a suspended generator holds its scope while other activations push and pop, so
-LIFO storage would have required a spill on every suspension regardless. The
-chain head *is* per-activation, which is what the fix needed. A generator's
-chain is captured at creation and re-entered on every resume
-(`JsSuspendedActivation::with_env`), so the contained option is subsumed.
+**Fix taken.** JSCU44's per-activation chain. A scope open across a suspension
+parks in a generator env slot and closes before the state machine returns, so
+scopes are activation-bounded and live in root-stack slots reserved with the
+pushing frame. The chain head is per-activation, which is what the fix needed.
+A generator or async frame captures its lexical chain at creation, so a resume
+never inherits the resuming turn's chain.
 
 The call-boundary copy is gone with it: the callee's inherited chain is its
 closure's existing `js_alloc_env` capture, borrowed by one frame rather than
@@ -104,10 +102,11 @@ copied into a process-wide stack. `js_with_set_stack`, `js_with_save_stack` and
 wired into `make test-gc-rooting-core`), plus `make test262-baseline` at zero
 regressions.
 
-**Note on Appendix A.2.** That table still describes `js_with_stack` as a
-"16-slot array" and lists the `super_this_*` stacks as `JsItemStack`. Both are
-stale: JSCU14(b) made the with-scope stack a growable `RootVector`, and
-super-this moved to `js_call_activation_item(JS_CALL_ACTIVATION_SUPER_THIS)`.
+**Note on Appendix A.2.** Updated 2026-09-11: that table described
+`js_with_stack` as a "16-slot array" and listed the `super_this_*` stacks as
+`JsItemStack`, both long stale. Its rows now record the JSCU44 chain, the
+`RootVector` clients, and super-this's move to
+`js_call_activation_item(JS_CALL_ACTIVATION_SUPER_THIS)`.
 
 ### JS05-L2 — an abrupt jump closes every open `with`, not the ones it leaves — **RESOLVED**
 
@@ -147,3 +146,72 @@ Labelled `with` works because the label entry is pushed before the body raises
 **Independent of JSCU44,** but easier to reason about after it: an over-pop used
 to corrupt a process-wide stack shared by every activation, and now cannot
 escape the activation that made the jump.
+
+### JS05-L4 — `return`/`throw` did not close the `with` scopes they left — **RESOLVED**
+
+**Found:** 2026-09-12 while auditing what still compensated for JSCU44.
+**Fixed:** 2026-09-12 (`return` first, then `throw`). Regressions:
+`test/js/regression_with_return_unwind.js`,
+`test/js/regression_with_throw_unwind.js`.
+
+The lowering unwound `with` only on the paths that stayed inside the function —
+falling off the body, `break`/`continue` (JS05-L2). A `return` or `throw` that
+left the function emitted no pop at all, so a callee handed its scopes to
+whoever ran next. Two compensations hid it: the direct-call lane bracketed every
+call to a `uses_with` callee with `js_with_save_depth`/`js_with_restore_depth`,
+and `js_with_activation_leave` walked the chain freeing whatever the callee had
+left. Neither is where the knowledge lives — only the callee's own lowering
+knows which scopes a completion crosses — and neither covers a callee reached on
+a lane that brackets nothing.
+
+**Fix.** One emitter, `jm_emit_with_unwind_to(mt, floor)`, called at each
+completion site with the floor that completion actually leaves; see
+[`Lambda_Design_Structs_JS.md` §18](Lambda_Design_Structs_JS.md) for the table.
+Both compensations are then retired: `js_with_activation_leave` becomes a head
+restore, and the direct-call lane emits nothing. `js_with_save_depth` /
+`js_with_restore_depth` survive as the try/`using` brackets, which is the one
+place a depth rather than a count is the right handle — a throw's landing point
+is a label, not an emission site.
+
+### JS05-L3 — a generator closure created inside `with` fails only under the batched suite — **OPEN**
+
+**Found:** 2026-09-12 while extending the JSCU44 regressions. **Not caused by
+JSCU44:** the same repro fails identically on `1146fec84`, the commit before
+stage 1, built and run the same way.
+
+Nine lines, correct standalone, wrong under `test_js_gtest`:
+
+```js
+function probeMakeGen() {
+  const o = { g: 3 };
+  with (o) {
+    return function* () { yield typeof g; yield g; };
+  }
+}
+const probeGen = probeMakeGen()();
+console.log(probeGen.next().value === "number");   // both print true...
+console.log(probeGen.next().value === 3);
+```
+
+| how it is run | result |
+|---|---|
+| `./lambda.exe js <file> --no-log` | exit 0, `true` / `true` |
+| `./lambda.exe js-test-batch` with only this file | `BATCH_END 0`, `true` / `true` |
+| `js-test-batch` with the 50-script chunk that contains it | `BATCH_END 0`, all 50 fine |
+| full `test_js_gtest` run | **fails** — no `BATCH_START`/`BATCH_END` record for the script, and the standalone retry returns NULL |
+
+So it is neither the script nor batch execution as such. The harness runs
+sub-batches of 50 **in parallel** (`JS_BATCH_CHUNK_SIZE`,
+`test/test_js_gtest.cpp:492`), and the failure only appears under that load.
+
+**Not root-caused.** What is established is the boundary: `with` + *generator*
+closure. The async-closure equivalent
+(`with (o) { return async function () { … } }`) passes in the same full-suite
+run, and is covered by case 5 of `regression_with_async_scope.js`. Whether this
+is the parallel-load flakiness already recorded for heavy tests, or something
+specific to a generator capturing a with-chain, is open.
+
+**Why it is not in the suite.** Adding the repro as a test file makes
+`test_js_gtest` fail, so it lives in the ledger rather than as a known-failing
+test. The generator half of the JSCU44 async regression was trimmed for the
+same reason; the case is recorded here instead.

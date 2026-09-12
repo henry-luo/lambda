@@ -1281,7 +1281,7 @@ void js_array_runtime_items_cleanup_all(void);
 
 // Runtime entry points shared by the JIT import registry and JS subsystems.
 void js_set_strict_mode(int64_t strict);
-Item js_with_push(Item obj);
+Item js_with_push_at(Item* slot, Item obj);
 void js_with_pop(void);
 int js_with_save_depth(void);
 void js_with_restore_depth(int depth);

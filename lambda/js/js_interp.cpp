@@ -4855,10 +4855,14 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
         JsWithStatementNode* with = (JsWithStatementNode*)node;
         RootFrame roots(1);
         Rooted<Item> object_root(roots, ItemNull);
+        // JSCU44: the scope lives in a root cell this activation owns, for the
+        // exact extent of the block. Declared after `roots` so it is released
+        // first -- the chain is unwound before either.
+        RootSpan scope_slot((size_t)js_with_frame_slots(1));
         JsInterpCompletion object = js_interp_eval(frame, with->object);
         if (object.kind != JS_INTERP_NORMAL) return object;
         object_root.set(object.value);
-        Item pushed = js_with_push(object_root.get());
+        Item pushed = js_with_push_at(scope_slot.items(), object_root.get());
         if (item_is_error(pushed)) return js_interp_throw(pushed);
         JsInterpCompletion completion = with->body
             ? js_interp_exec(frame, with->body) : js_interp_normal(make_js_undefined());

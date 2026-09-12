@@ -287,6 +287,10 @@ String* jm_class_private_name(JsMirTranspiler* mt, JsClassEntry* ce, String* nam
 bool jm_class_or_ancestor_has_private_members(JsClassEntry* ce);
 void jm_eval_cptn_reset(JsMirTranspiler* mt);
 void jm_push_loop_labels(JsMirTranspiler* mt, MIR_label_t continue_label, MIR_label_t break_label);
+JsWithLowering* jm_with_scope_at(JsMirTranspiler* mt, int index);
+void jm_emit_with_unwind_to(JsMirTranspiler* mt, int floor);
+void jm_emit_with_scope_save(JsMirTranspiler* mt);
+void jm_emit_with_scope_restore(JsMirTranspiler* mt);
 MIR_reg_t jm_emit_get_iterator(JsMirTranspiler* mt, MIR_reg_t iterable);
 MIR_reg_t jm_emit_get_iterator_lazy(JsMirTranspiler* mt, MIR_reg_t iterable);
 MIR_reg_t jm_emit_iterator_step(JsMirTranspiler* mt, MIR_reg_t iterator);
@@ -317,6 +321,8 @@ MIR_reg_t jm_emit_error_lane_test(JsMirTranspiler* mt);
 void jm_emit_error_lane_route(JsMirTranspiler* mt, JsMirCompletionKind kind);
 void jm_emit_error_lane_guard(JsMirTranspiler* mt, MIR_label_t target);
 MIR_reg_t jm_arg_frame_base(JsMirTranspiler* mt);
+MIR_reg_t jm_with_frame_base(JsMirTranspiler* mt);
+MIR_reg_t jm_emit_with_slot_addr(JsMirTranspiler* mt, int index);
 void jm_emit_arg_frame_clear(JsMirTranspiler* mt, JsMirArgStackScope* scope);
 bool jm_emit_delayed_return_completion(JsMirTranspiler* mt, MIR_reg_t value,
     JsMirCompletionKind kind);

@@ -174,6 +174,17 @@ struct JsLoopLabels {
     int with_depth_at_push;
 };
 
+// JSCU44: one open `with` during body lowering. A scope is state of the
+// suspending activation, exactly like a try's delayed return, so it parks its
+// coerced object in a generator env slot and the chain is rebuilt from those
+// slots on resume rather than being expected to survive the state machine's
+// return.
+struct JsWithLowering {
+    MIR_reg_t object_reg;   // holds the coerced scope object
+    int spill_slot;         // env slot, reserved lazily at the first suspension
+    int frame_slot;         // index into this function's `with` root suffix
+};
+
 // A dynamically sized iterator-cleanup entry. Iterator registers are MIR
 // values rather than pointers, so they are stored in a stack-owned record when
 // held by the Lambda ArrayList.
@@ -411,6 +422,10 @@ struct JsTryContext {
     // only unwinds the finally clauses entered inside its target, so this is
     // what separates "must run now" from "the try block continues".
     int loop_depth_at_push;
+    // `with` nesting when this try was entered. A return delayed into this
+    // try's finally has already left every scope opened inside the try, but not
+    // the ones enclosing it -- the finally body still resolves through those.
+    int with_depth_at_push;
     bool end_label_has_edge;     // compiler-only: an emitted completion targets end_label
     JsErrorLaneTrack end_label_error_lane_state; // merged proof for end_label predecessors
     bool has_catch;
@@ -543,6 +558,7 @@ struct JsMirTranspiler {
 
     // Loop label stack. Entries are JsLoopLabels* owned by the ArrayList.
     ArrayList* loop_stack;
+    ArrayList* with_stack;                    // JSCU44: one JsWithLowering per open `with`
     int loop_depth;
     int iteration_depth;
     int loop_scope_depth;
@@ -676,6 +692,14 @@ struct JsMirTranspiler {
     MIR_insn_t arg_frame_base_add;
     int arg_frame_depth;
     int arg_frame_slot_count;
+    // JSCU44: `with` scopes are a second fixed root suffix. They cannot be
+    // watermark allocations: a helper that bumps side_root_top mid-body is
+    // clobbered by the frame's own publication store, and the matching pop then
+    // rewinds below the frame. Reserving them with the frame removes all
+    // watermark traffic, and the prologue zeroes the suffix before publication.
+    int with_frame_slot_count;
+    MIR_reg_t with_frame_base;
+    MIR_insn_t with_frame_base_add;
 
     // v20: arguments aliasing state
     MIR_reg_t arguments_reg;         // register holding 'arguments' object (0 if not active)
@@ -818,6 +842,15 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
         }
         arraylist_free(mt->loop_stack);
         mt->loop_stack = NULL;
+    }
+    if (mt->with_stack) {
+        for (int i = 0; i < mt->with_stack->length; i++) {
+            JsWithLowering* scope =
+                (JsWithLowering*)arraylist_get(mt->with_stack, i);
+            if (scope) mem_free(scope);
+        }
+        arraylist_free(mt->with_stack);
+        mt->with_stack = NULL;
     }
     if (mt->for_of_iterators) {
         for (int i = 0; i < mt->for_of_iterators->length; i++) {

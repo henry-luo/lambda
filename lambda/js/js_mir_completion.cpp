@@ -51,10 +51,48 @@ void jm_emit_suspend_env_save(JsMirTranspiler* mt) {
         }
     }
     jm_emit_try_state_save(mt);
+    jm_emit_with_scope_save(mt);
+}
+
+// JSCU44: the `with` chain does not survive the state machine's return, so each
+// open scope parks its coerced object and closes before the suspension. The
+// resume rebuilds the chain from those slots -- the same treatment a
+// generator's locals and a try's delayed return already get. Hooked into the
+// shared suspend/resume pair so no suspension site can forget it.
+void jm_emit_with_scope_save(JsMirTranspiler* mt) {
+    if (!mt || !mt->gen_env_reg) return;
+    for (int w = mt->with_depth - 1; w >= 0; w--) {
+        JsWithLowering* scope = jm_with_scope_at(mt, w);
+        if (scope && scope->object_reg) {
+            if (scope->spill_slot < 0) scope->spill_slot = jm_gen_spill_reserve(mt);
+            if (scope->spill_slot >= 0) {
+                jm_emit_store_i64(mt, scope->spill_slot * (int)sizeof(uint64_t),
+                    mt->gen_env_reg, scope->object_reg);
+            }
+        }
+        jm_call_void_0(mt, "js_with_pop");
+    }
+}
+
+void jm_emit_with_scope_restore(JsMirTranspiler* mt) {
+    if (!mt || !mt->gen_env_reg) return;
+    // Outermost first: the chain is rebuilt in the order it was entered.
+    for (int w = 0; w < mt->with_depth; w++) {
+        JsWithLowering* scope = jm_with_scope_at(mt, w);
+        if (!scope || scope->spill_slot < 0 || !scope->object_reg) continue;
+        jm_emit_load_i64(mt, scope->object_reg,
+            scope->spill_slot * (int)sizeof(uint64_t), mt->gen_env_reg);
+        // The resuming activation has a fresh frame, so the scope goes back into
+        // this level's slot of the new `with` suffix. The parked value is
+        // already an object: this push cannot coerce or throw.
+        MIR_reg_t slot_reg = jm_emit_with_slot_addr(mt, scope->frame_slot);
+        jm_callr_2(mt, "js_with_push_at", MIR_T_I64, slot_reg, scope->object_reg);
+    }
 }
 
 void jm_emit_resume_env_restore(JsMirTranspiler* mt) {
     if (!mt || !mt->gen_env_reg) return;
+    jm_emit_with_scope_restore(mt);
     for (int sd = 1; sd <= mt->scope_depth; sd++) {
         struct hashmap* scope = jm_var_scope_at(mt, sd);
         if (!scope) continue;
@@ -285,6 +323,33 @@ MIR_reg_t jm_emit_error_lane_return(JsMirTranspiler* mt) {
         MIR_T_I64, MIR_new_reg_op(mt->ctx, null_value), true);
 }
 
+// Address of one slot in this function's `with` root suffix.
+MIR_reg_t jm_emit_with_slot_addr(JsMirTranspiler* mt, int index) {
+    MIR_reg_t addr = jm_new_reg(mt, "with_slot", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, addr),
+        MIR_new_reg_op(mt->ctx, jm_with_frame_base(mt)),
+        MIR_new_int_op(mt->ctx, (int64_t)index * (int64_t)sizeof(uint64_t))));
+    return addr;
+}
+
+MIR_reg_t jm_with_frame_base(JsMirTranspiler* mt) {
+    if (!mt || !mt->func_em->em.frame.active || !mt->func_em->em.frame.root_base) {
+        log_error("js-mir with-frame invariant: base without active root frame");
+        abort();
+    }
+    if (mt->with_frame_base) return mt->with_frame_base;
+    mt->with_frame_base = jm_new_reg(mt, "js_with_frame", MIR_T_I64);
+    mt->with_frame_base_add = MIR_new_insn(mt->ctx, MIR_ADD,
+        MIR_new_reg_op(mt->ctx, mt->with_frame_base),
+        MIR_new_reg_op(mt->ctx, mt->func_em->em.frame.root_base),
+        MIR_new_int_op(mt->ctx, 0));
+    // Like the argument suffix, the displacement is known only once semantic
+    // roots are colored; patch it when the complete frame is fixed.
+    MIR_insert_insn_after(mt->ctx, mt->func_em->em.func_item,
+        mt->func_em->em.frame.anchor, mt->with_frame_base_add);
+    return mt->with_frame_base;
+}
+
 MIR_reg_t jm_arg_frame_base(JsMirTranspiler* mt) {
     if (!mt || !mt->func_em->em.frame.active || !mt->func_em->em.frame.root_base) {
         log_error("js-mir arg-frame invariant: base without active root frame");
@@ -368,6 +433,10 @@ void jm_emit_error_lane_route(JsMirTranspiler* mt, JsMirCompletionKind kind) {
     case JS_ERROR_LANE_SET: {
         jm_capture_routed_error_lane(mt, route_context);
         jm_clear_active_arg_frames(mt);
+        // With no enclosing try the target is the function-level error exit, so
+        // this edge leaves the function and must close its own `with` scopes;
+        // a try target restores the depth at its handler label instead.
+        if (!route_context) jm_emit_with_unwind_to(mt, 0);
         jm_emit_jmp(mt, target);
         // An unconditional ERROR-lane jump leaves no fallthrough path. Keep
         // later lowering unreachable until the handler label supplies its
@@ -381,27 +450,19 @@ void jm_emit_error_lane_route(JsMirTranspiler* mt, JsMirCompletionKind kind) {
         break;
     }
     MIR_reg_t exception = jm_emit_error_lane_test(mt);
-    if (jm_has_active_arg_frame(mt)) {
-        MIR_label_t clean_path = jm_new_label(mt);
-        jm_emit_branch(mt, MIR_BF, clean_path, exception);
-        // Capture only on the exceptional edge. Emitting the carrier creation
-        // before this branch would allocate a synthetic null exception on
-        // every normal call and contaminate the merged lane.
-        jm_capture_routed_error_lane(mt, route_context);
-        // Fixed argument slots stay inside the function frame, but their
-        // call-expression lifetime still ends on a caught exceptional edge.
-        jm_clear_active_arg_frames(mt);
-        jm_emit_jmp(mt, target);
-        jm_emit_label_with_state(mt, clean_path, JS_ERROR_LANE_CLEAN);
-    } else {
-        MIR_label_t clean_path = jm_new_label(mt);
-        jm_emit_branch(mt, MIR_BF, clean_path, exception);
-        // Capture only after the tag test proves this edge exceptional; the
-        // normal path must not manufacture a discarded ERROR carrier.
-        jm_capture_routed_error_lane(mt, route_context);
-        jm_emit_jmp(mt, target);
-        jm_emit_label_with_state(mt, clean_path, JS_ERROR_LANE_CLEAN);
-    }
+    MIR_label_t clean_path = jm_new_label(mt);
+    jm_emit_branch(mt, MIR_BF, clean_path, exception);
+    // Capture only after the tag test proves this edge exceptional. Emitting
+    // the carrier creation before the branch would allocate a synthetic null
+    // exception on every normal call and contaminate the merged lane.
+    jm_capture_routed_error_lane(mt, route_context);
+    // Fixed argument slots stay inside the function frame, but their
+    // call-expression lifetime still ends on a caught exceptional edge.
+    if (jm_has_active_arg_frame(mt)) jm_clear_active_arg_frames(mt);
+    // See the SET case: only a function-level exit closes its `with` scopes.
+    if (!route_context) jm_emit_with_unwind_to(mt, 0);
+    jm_emit_jmp(mt, target);
+    jm_emit_label_with_state(mt, clean_path, JS_ERROR_LANE_CLEAN);
 }
 
 void jm_emit_error_lane_guard(JsMirTranspiler* mt, MIR_label_t target) {
@@ -449,6 +510,9 @@ bool jm_emit_delayed_return_completion(JsMirTranspiler* mt, MIR_reg_t value,
     }
     jm_emit_mov(mt, context->return_val_reg, value);
     jm_emit_reg_op(mt, MIR_MOV, context->has_return_reg, MIR_new_int_op(mt->ctx, 1));
+    // The value is already in its register, so the scopes it resolved through
+    // can close; the finally still runs inside whatever encloses the try.
+    jm_emit_with_unwind_to(mt, context->with_depth_at_push);
     jm_emit_jmp(mt, target);
     return true;
 }
@@ -490,9 +554,14 @@ static void jm_emit_throw_completion_impl(JsMirTranspiler* mt, MIR_reg_t value,
     }
     if (target) {
         jm_capture_routed_error_lane(mt, context);
+        // A throw caught in this function does not unwind `with` here: the
+        // catch/finally label restores the depth its try was entered at.
         jm_emit_jmp(mt, target);
         return;
     }
+    // No handler in this function, so the throw leaves it -- and a completion
+    // that leaves closes every `with` it opened, exactly as `return` does.
+    jm_emit_with_unwind_to(mt, 0);
     if (jm_emit_native_throw_exit(mt, thrown)) return;
     MIR_reg_t native_value = jm_native_return_reg(mt, jm_item_value(thrown));
     jm_emit_ret(mt, native_value);
@@ -514,6 +583,16 @@ void jm_emit_generator_throw_completion(JsMirTranspiler* mt, MIR_reg_t value) {
 void jm_emit_error_lane_exit(JsMirTranspiler* mt) {
     if (!mt) return;
     jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_THROW);
+}
+
+// Leave every `with` scope opened above `floor`. Nothing is emitted when the
+// completion is not inside a `with`, which is the overwhelming majority of
+// returns, so this costs no instructions on the ordinary path.
+void jm_emit_with_unwind_to(JsMirTranspiler* mt, int floor) {
+    if (!mt || floor < 0) return;
+    for (int w = mt->with_depth; w > floor; w--) {
+        jm_call_void_0(mt, "js_with_pop");
+    }
 }
 
 // `target_loop_index` is the break-target stack entry the jump lands on, or -1

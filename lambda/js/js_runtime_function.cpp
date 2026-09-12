@@ -32,7 +32,7 @@ extern "C" JsFunction* js_alloc_gc_function_object(void) {
         sizeof(JsFunction), LMD_TYPE_FUNC, JS_FUNCTION_SIZE_CLASS);
     if (!fn) return NULL;
     fn->type_id = LMD_TYPE_FUNC;
-    fn->layout_magic = JS_FUNCTION_LAYOUT_MAGIC;
+    fn->entry_abi = FN_ENTRY_ABI_JS_FUNCTION;
     return fn;
 }
 
@@ -202,7 +202,7 @@ extern "C" void js_set_function_home_class(Item fn_item, Item home_class) {
 extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
     JsFunction* fn = (JsFunction*)data;
     if (!fn) return 0;
-    if (fn->layout_magic != JS_FUNCTION_LAYOUT_MAGIC) return 0;
+    if (!js_fn_is_js_layout(fn)) return 0;
 
     // A GC-owned function is the reachability owner for its closure env and
     // bound argument vectors; tracing those edges replaces permanent root ranges.
@@ -459,7 +459,7 @@ extern "C" void js_function_set_eval_origin(JsFunction* fn, String* filename,
 // Called by the collector for every dying function value.
 extern "C" void js_function_gc_destroy(void* data) {
     JsFunction* fn = (JsFunction*)data;
-    if (!fn || fn->layout_magic != JS_FUNCTION_LAYOUT_MAGIC) return;
+    if (!js_fn_is_js_layout(fn)) return;
     // only a GC-backed value reaches this hook, and those own malloc'd
     // payloads; a pool-backed value's payload dies with its pool instead
     JsFunctionPayload* p = fn->payload;
@@ -483,7 +483,7 @@ extern "C" void js_function_gc_destroy(void* data) {
 extern "C" int js_function_gc_compact(void* data, gc_heap_t* gc) {
     JsFunction* fn = (JsFunction*)data;
     if (!fn) return 0;
-    if (fn->layout_magic != JS_FUNCTION_LAYOUT_MAGIC) return 0;
+    if (!js_fn_is_js_layout(fn)) return 0;
     if (!fn->env || fn->env_size <= 0 ||
         !gc_data_zone_owns(gc->data_zone, fn->env)) return 1;
     // JsFunction is not the legacy Function layout. Its environment includes
@@ -587,7 +587,15 @@ static void js_function_capture_with_env(JsFunction* fn) {
     if (stack && depth > 0) {
         js_env_rehome_scalars(stack);
         JsWithData* with = js_fn_with_ensure(fn);
-        if (with) { with->env = stack; with->depth = depth; }
+        if (with) {
+            with->env = stack;
+            with->depth = depth;
+            // A value born inside `with` needs the chain installed even when
+            // its body names no with binding -- a closure it creates captures
+            // whatever chain is current. Recording that here lets every caller
+            // decide from `flags` instead of reading the payload on every call.
+            fn->flags |= JS_FUNC_FLAG_USES_WITH;
+        }
     }
 }
 
@@ -596,7 +604,7 @@ extern "C" void* js_function_get_ptr(Item fn_item) {
     // Typed native functions deliberately have no MIR pointer; the layout
     // marker prevents them from being reinterpreted as the legacy prefix.
     JsFunction* jsfn = (JsFunction*)fn_item.function;
-    if (jsfn->layout_magic == JS_FUNCTION_LAYOUT_MAGIC) return js_fn_func_ptr(jsfn);
+    if (js_fn_is_js_layout(jsfn)) return js_fn_func_ptr(jsfn);
     // Fall back to Function layout (ptr at offset 16)
     Function* fn = fn_item.function;
     return (void*)fn->ptr;
@@ -609,7 +617,7 @@ extern "C" int js_function_get_arity(Item fn_item) {
     // The layout marker, not a target field, distinguishes JsFunction from the
     // compact legacy Function prefix; typed native targets intentionally leave
     // the MIR-only func_ptr null.
-    if (jsfn->layout_magic == JS_FUNCTION_LAYOUT_MAGIC) return js_fn_param_count(jsfn);
+    if (js_fn_is_js_layout(jsfn)) return js_fn_param_count(jsfn);
     // Otherwise it's Function layout — arity at offset 1
     Function* fn = fn_item.function;
     return fn->arity;
@@ -632,7 +640,7 @@ static void js_function_init_common(JsFunction* fn) {
     fn->type_id = LMD_TYPE_FUNC;
     // D6.2.2v2: every callable wrapper uses the canonical layout marker;
     // legacy arity/target decoding otherwise silently drops compiled args.
-    fn->layout_magic = JS_FUNCTION_LAYOUT_MAGIC;
+    fn->entry_abi = FN_ENTRY_ABI_JS_FUNCTION;
     fn->prototype = ItemNull;
 }
 
@@ -1464,7 +1472,7 @@ extern "C" void js_set_function_name(Item fn_item, Item name_item) {
         js_set_class_name(fn_item, name_item);
         return;
     }
-    if (fn->layout_magic == JS_FUNCTION_LAYOUT_MAGIC) {
+    if (js_fn_is_js_layout(fn)) {
         fn->name = it2s(name_item);
         js_function_refresh_name_property(fn);
     }
@@ -1483,7 +1491,7 @@ extern "C" void js_set_function_name_if_anonymous(Item fn_item, Item name_item) 
         js_set_class_name(fn_item, name_item);
         return;
     }
-    if (fn->layout_magic == JS_FUNCTION_LAYOUT_MAGIC &&
+    if (js_fn_is_js_layout(fn) &&
             (!fn->name || fn->name->len == 0)) {
         fn->name = it2s(name_item);
         js_function_refresh_name_property(fn);
@@ -1637,7 +1645,7 @@ extern "C" void js_set_function_source(Item fn_item, Item source_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     if (get_type_id(source_item) != LMD_TYPE_STRING) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
-    if (fn->layout_magic == JS_FUNCTION_LAYOUT_MAGIC) {
+    if (js_fn_is_js_layout(fn)) {
         JsCallableCode* code = js_fn_code_ensure(fn);
         if (code) {
             code->source_text = it2s(source_item);

@@ -191,6 +191,21 @@ void jm_clear_resumable_locals(JsMirTranspiler* mt) {
     mt->resumable_locals = NULL;
 }
 
+JsWithLowering* jm_with_scope_at(JsMirTranspiler* mt, int index) {
+    if (!mt || !mt->with_stack || index < 0 ||
+            !jm_stack_ensure_slot(mt->with_stack, index)) {
+        return NULL;
+    }
+    JsWithLowering* scope = (JsWithLowering*)arraylist_get(mt->with_stack, index);
+    if (!scope) {
+        scope = (JsWithLowering*)mem_calloc(1, sizeof(JsWithLowering), MEM_CAT_JS_RUNTIME);
+        if (!scope) return NULL;
+        scope->spill_slot = -1;
+        arraylist_set(mt->with_stack, index, scope);
+    }
+    return scope;
+}
+
 JsLoopLabels* jm_loop_label_at(JsMirTranspiler* mt, int index) {
     if (!mt || !mt->loop_stack || index < 0 || !jm_stack_ensure_slot(mt->loop_stack, index)) {
         return NULL;
@@ -236,6 +251,7 @@ JsTryContext* jm_try_context_push(JsMirTranspiler* mt) {
     context->has_return_spill = -1;
     context->return_val_spill = -1;
     context->loop_depth_at_push = mt->loop_depth;
+    context->with_depth_at_push = mt->with_depth;
     mt->try_ctx_depth++;
     return context;
 }
@@ -359,6 +375,7 @@ JsMirTranspiler* jm_create_mir_transpiler(
         js_local_func_hash, js_local_func_cmp, NULL, NULL);
     mt->var_scopes = arraylist_new(8);
     mt->loop_stack = arraylist_new(8);
+    mt->with_stack = arraylist_new(4);
     mt->for_of_iterators = arraylist_new(8);
     mt->try_ctx_stack = arraylist_new(8);
     if (!mt->var_scopes || !mt->loop_stack || !mt->for_of_iterators ||
@@ -552,6 +569,9 @@ void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
     mt->arg_frame_base_add = NULL;
     mt->arg_frame_depth = 0;
     mt->arg_frame_slot_count = 0;
+    mt->with_frame_slot_count = 0;
+    mt->with_frame_base = 0;
+    mt->with_frame_base_add = NULL;
     em_frame_dispose(&mt->func_em->em);
     mt->func_em->em.frame.return_type = return_type;
     mt->func_em->em.frame.item_return = item_return;
@@ -611,7 +631,8 @@ static void jm_finalize_write_back_roots(JsMirTranspiler* mt) {
     // Prerooted argument spans are a fixed suffix after semantic root coloring;
     // include that physical suffix in the shared watermark publication while
     // keeping it out of the semantic candidate graph (D5.3.1).
-    mt->func_em->em.frame.fixed_root_slots = mt->arg_frame_slot_count;
+    mt->func_em->em.frame.fixed_root_slots =
+        mt->arg_frame_slot_count + mt->with_frame_slot_count;
     MirRootWriteBackResult result = {};
     em_finalize_semantic_root_write_back(&mt->func_em->em,
         mt->func_em->em.frame.root_base, mt->func_em->em.frame.anchor, false, 0,
@@ -695,6 +716,20 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
             (int64_t)mt->func_em->em.frame.root_slot_count *
             (int64_t)sizeof(uint64_t);
         mt->func_em->em.frame.root_slot_count += mt->arg_frame_slot_count;
+    }
+    if (mt->with_frame_slot_count > 0) {
+        if (!mt->with_frame_base_add ||
+                mt->with_frame_base_add->nops < 3 ||
+                mt->with_frame_base_add->ops[2].mode != MIR_OP_INT) {
+            log_error("js-mir with-frame invariant: missing base fixup");
+            abort();
+        }
+        // The `with` suffix follows the argument suffix, so both are inside the
+        // fixed range the prologue zeroes before the frame is published.
+        mt->with_frame_base_add->ops[2].u.i =
+            (int64_t)mt->func_em->em.frame.root_slot_count *
+            (int64_t)sizeof(uint64_t);
+        mt->func_em->em.frame.root_slot_count += mt->with_frame_slot_count;
     }
     mt->func_em->em.frame.active = false;
     jm_finalize_side_root_prologue(mt);

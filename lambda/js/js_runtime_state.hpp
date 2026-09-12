@@ -257,24 +257,17 @@ struct JsWithFrame {
     Item* base = NULL;            // address-stable; count entries, innermost last
     int count = 0;
     int base_depth = 0;           // absolute depth of base[0]
-    int owned_slot = -1;          // slots index to release on pop; -1 = borrowed
+    bool owns_record = false;     // the POD record is ours to free; storage never is
     JsWithFrame* parent = NULL;
 };
 
-struct JsWithScopeState {
-    JsWithFrame* head = NULL;     // innermost frame; NULL = no with-scope in scope
-    // Scope slots are released out of order (a suspended generator holds its
-    // frame while other activations push and pop), so the vector never shrinks
-    // and released indices are recycled through a POD free list.
-    RootVector slots = {};
-    int* free_slots = NULL;
-    int free_count = 0;
-    int free_capacity = 0;
-    // The memo is two semantic values, but its root ownership is the same
-    // growable exact-root mechanism as the scope slots.
-    RootVector last_binding_values = {};
-    bool last_binding_valid = false;
-};
+// JSCU44: a frame's storage is its scopes followed by the two binding-memo
+// cells, so one definition fixes the slot count for every pusher -- the
+// generated `with` suffix, a native RootSpan, and a captured chain's env.
+enum { JS_WITH_MEMO_SLOTS = 2 };
+static inline int js_with_frame_slots(int scope_count) {
+    return scope_count + JS_WITH_MEMO_SLOTS;
+}
 
 // Generated closures retain only their MIR context and source buffer. Names
 // and observable strings are materialized through the owning module NameId
@@ -834,6 +827,8 @@ struct JsAsyncContextStateRecord : JsSuspendedActivation {
 // JSCU44: the `with` activation boundary. `storage` is caller-owned POD (a
 // native frame local); enter returns the head to hand back to leave.
 extern "C" Item* js_with_capture_stack(int* out_depth);
+extern "C" Item js_with_push_at(Item* slot, Item obj);
+extern "C" void js_with_chain_reset(void);
 extern "C" JsWithFrame* js_with_activation_enter(Item* captured, int depth, JsWithFrame* storage);
 extern "C" void js_with_activation_leave(JsWithFrame* saved_head);
 
@@ -1042,7 +1037,12 @@ struct JsRuntimeState {
     // The sole generation-checked native-resource registry for this context.
     // Timer and Node/Jube records use distinct lifecycle-owner keys within it.
     RuntimeResourceTable resources = {};
-    JsWithScopeState with_scope = {};
+    // JSCU44: the `with` chain is two facts, not a subsystem. The head is the
+    // innermost frame (NULL = no with-scope in scope); the flag says whether the
+    // head frame's trailing memo cells hold a live binding. Scope objects live
+    // in root slots their pushers own.
+    JsWithFrame* with_head = NULL;
+    bool with_memo_valid = false;
     JsCodeStore code_store = {};
     // Definition-level MIR code records are shared by closures and method
     // wrappers while their functions remain live. The table is weak storage;
@@ -1138,11 +1138,6 @@ void js_runtime_state_destroy_context(void);
 extern "C" bool js_promise_initial_unhandled_rejections_strict(void);
 
 #define js_runtime_state (*js_active_runtime_state)
-
-// The caller's `with`-scope depth is a per-call dispatch input. The state is
-// owner-local, so dispatch keeps the old direct-load cost without a call,
-// lock, atomic, or shared-cache probe.
-#define js_with_stack_state (js_runtime_state.with_scope.stack)
 
 #define js_input (js_runtime_state.input)
 #define js_strict_mode (js_runtime_state.strict_mode)

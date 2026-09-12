@@ -2,7 +2,7 @@
 
 > **Status: IMPLEMENTED; EXISTING BASELINE FAILURES REMAIN — 2026-09-10.**
 > Implements the first performance step
-> in [JSCU37](../Lambda_Design_Structs_JS2.md#5-jscu37--one-construction-and-slot-initialization-mechanism)
+> in [JSCU37](../Lambda_Design_Structs_JS.md#10-jscu37--one-construction-and-slot-initialization-mechanism)
 > following the user's implementation request. Authority: **D3.4.5–D3.4.6**
 > (shape/storage consistency), **D3.4.4v2** (name identity), **D4.6.1v2**
 > and **D5.1–D5.4** (precise ownership and reusable-code boundaries).

@@ -658,10 +658,6 @@ bool js_runtime_state_init(EvalContext* runtime_context) {
             return false;
         }
         state->heap_epoch = 1;
-        root_vector_init(&state->with_scope.slots,
-            (Context*)runtime_context, "with-scope slots");
-        root_vector_init(&state->with_scope.last_binding_values,
-            (Context*)runtime_context, "with-scope binding memo");
         root_vector_init(&state->promises.domain_stack,
             (Context*)runtime_context, "domain stack");
         js_eval_state_vectors_init(&state->eval,
@@ -801,10 +797,6 @@ void js_runtime_state_destroy_context(void) {
     root_vector_destroy(&state->execution.base_activation_items);
     js_realm_slots_destroy(&state->realm_slots);
     root_vector_destroy(&state->regexp_last_match.values);
-    root_vector_destroy(&state->with_scope.slots);
-    mem_free(state->with_scope.free_slots);
-    state->with_scope.free_slots = NULL;
-    root_vector_destroy(&state->with_scope.last_binding_values);
     root_vector_destroy(&state->promises.domain_stack);
     js_eval_state_vectors_destroy(&state->eval);
     js_code_store_destroy(&state->code_store);

@@ -2544,7 +2544,7 @@ JitImport jit_runtime_imports[] = {
     {"js_get_global_property_strict", FPTR(js_get_global_property_strict)},
     {"js_get_global_property_reference", FPTR(js_get_global_property_reference)},
     {"js_get_global_builtin_fn_by_id", FPTR(js_get_global_builtin_fn_by_id)},
-    {"js_with_push", FPTR(js_with_push)},
+    {"js_with_push_at", FPTR(js_with_push_at)},
     {"js_with_pop", FPTR(js_with_pop), JIT_IMPORT_VOID_PRESERVES},
     {"js_with_save_depth", FPTR(js_with_save_depth),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0,

@@ -2803,6 +2803,7 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
         }
 
         jm_emit_eval_local_pop_if_needed(mt);
+        jm_emit_with_unwind_to(mt, 0);
         jm_emit_ret(mt, val);
         return;
     }
@@ -2838,6 +2839,7 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
         jm_emit_eval_local_pop_if_needed(mt);
+        jm_emit_with_unwind_to(mt, 0);
         jm_emit_ret(mt, done_result);
         return;
     }
@@ -2854,6 +2856,7 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
     if (jm_emit_delayed_return_completion(mt, val, JS_MIR_COMPLETION_RETURN)) return;
 
     jm_emit_eval_local_pop_if_needed(mt);
+    jm_emit_with_unwind_to(mt, 0);
     jm_emit_ret(mt, val);
 }
 
@@ -2943,6 +2946,7 @@ static void jm_transpile_using_tail(JsMirTranspiler* mt, JsAstNode* tail,
     jm_emit_label(mt, end_label);
     MIR_label_t no_ret_label = jm_new_label(mt);
     jm_emit_branch(mt, MIR_BF, no_ret_label, has_return_reg);
+    jm_emit_with_unwind_to(mt, 0);
     MIR_reg_t native_ret = jm_native_return_reg(mt,
         jm_item_value(return_val_reg));
     jm_emit_ret(mt, native_ret);
@@ -3654,6 +3658,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             jm_emit_branch(mt, MIR_BF, no_ret_label, has_return_reg);
             if (!jm_emit_delayed_return_completion(mt, return_val_reg,
                     JS_MIR_COMPLETION_RETURN)) {
+                jm_emit_with_unwind_to(mt, 0);
                 if (mt->in_generator) {
                     MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, return_val_reg),
@@ -3690,9 +3695,30 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         if (with_node->object) {
             // push with-scope object
             MIR_reg_t obj_reg = jm_transpile_box_item(mt, with_node->object);
-            jm_callr_1(mt, "js_with_push", MIR_T_I64, obj_reg);
+            // JSCU44: this level's scope lives in the function's `with` root
+            // suffix, reserved with the frame. A runtime helper cannot bump the
+            // watermark mid-body: the frame's own publication store would
+            // clobber the slot and the matching pop would rewind below it.
+            // Each level owns js_with_frame_slots(1) cells: the scope plus the
+            // two binding-memo cells the head frame writes.
+            int with_level_slots = js_with_frame_slots(1);
+            int with_base_slot = mt->with_depth * with_level_slots;
+            if (with_base_slot + with_level_slots > mt->with_frame_slot_count) {
+                mt->with_frame_slot_count = with_base_slot + with_level_slots;
+            }
+            MIR_reg_t slot_reg = jm_emit_with_slot_addr(mt, with_base_slot);
+            MIR_reg_t scope_reg = jm_callr_2(mt, "js_with_push_at", MIR_T_I64,
+                slot_reg, obj_reg);
             jm_emit_error_lane_propagate_check(mt);
             jm_eval_cptn_reset(mt);
+            // Retain the coerced scope so a suspension inside the body can park
+            // it and rebuild the chain on resume.
+            JsWithLowering* with_scope = jm_with_scope_at(mt, mt->with_depth);
+            if (with_scope) {
+                with_scope->object_reg = scope_reg;
+                with_scope->spill_slot = -1;
+                with_scope->frame_slot = with_base_slot;
+            }
             mt->with_depth++;
             // transpile body
             if (with_node->body)

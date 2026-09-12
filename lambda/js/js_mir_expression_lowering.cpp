@@ -5478,17 +5478,12 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
                 }
                 if (JM_JS_FACT(fc, observes_new_target)) jm_callr_void_1(mt, "js_set_direct_new_target", undef_this);
 
-                // save with-scope depth before direct call (function may return from inside 'with')
-                MIR_reg_t saved_wd = JM_JS_FACT(fc, uses_with)
-                    ? jm_call_0(mt, "js_with_save_depth", MIR_T_I64) : 0;
-
                 bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
                 MIR_reg_t result = jm_call_direct_boxed(mt, fc,
                     param_count, direct_args,
                     mt->discarded_expression == (JsAstNode*)call);
                 jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
 
-                if (saved_wd) jm_callr_void_1(mt, "js_with_restore_depth", saved_wd);
                 if (prev_this) jm_callr_void_1(mt, "js_set_this", prev_this);
                 if (prev_nt_dc) jm_callr_void_1(mt, "js_set_direct_new_target", prev_nt_dc);
 

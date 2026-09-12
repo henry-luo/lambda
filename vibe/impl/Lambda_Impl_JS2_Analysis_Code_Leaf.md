@@ -1,7 +1,7 @@
 # LambdaJS: shared analysis, callable definitions and search leaves
 
 > **Implemented — 2026-09-10.** Tasks 5, 6 and 7 of the JS
-> tuning follow-up to [the JS2 proposal](../Lambda_Design_Structs_JS2.md).
+> tuning follow-up to [the struct-authority record](../Lambda_Design_Structs_JS.md).
 > Source base: `6460b0f51`, which commits tasks 3 and 4.
 > Authority: **D1.3**, **D2.4.3**, **D5.2.3**, **D5.3.1–D5.3.4**,
 > **D5.4.2–D5.4.3**, **D6.2.1–D6.2.3v2**, **D8.2.4**, **D8.4.3v2**,

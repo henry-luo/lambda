@@ -258,14 +258,29 @@ static bool js_mir_owner_is_current(Context* runtime, const char* boundary) {
     return true;
 }
 
-static Item js_invoke_mir_state(void* func_ptr, Item* env, Item input,
-        int64_t state) {
+// JSCU44: a state machine resolves names against the chain captured where its
+// generator or async frame was created, not the caller's. Installing it is all
+// this does -- scopes the body opens are parked in env slots and closed by the
+// lowering before the machine returns, so nothing is left here to spill.
+static Item js_invoke_mir_state(void* func_ptr, JsSuspendedActivation* activation,
+        Item* env, Item input, int64_t state) {
     if (!context || !js_runtime_state_thread_matches(context) || !func_ptr) {
         log_error("js-mir-state: owner thread is not initialized");
         return ItemError;
     }
     typedef Item (*MirStateFn)(Context*, Item*, Item, int64_t);
-    return ((MirStateFn)func_ptr)((Context*)context, env, input, state);
+    if (!activation) {
+        return ((MirStateFn)func_ptr)((Context*)context, env, input, state);
+    }
+    // The bracket is unconditional even with no inherited chain: a resumed body
+    // resolves names against its own captured chain, and leaving reinstates
+    // whatever the resumer had open.
+    JsWithFrame inherited = {};
+    JsWithFrame* saved_head = js_with_activation_enter(activation->with_env,
+        activation->with_depth, &inherited);
+    Item result = ((MirStateFn)func_ptr)((Context*)context, env, input, state);
+    js_with_activation_leave(saved_head);
+    return result;
 }
 // Tune8 §2.2: js_private_property_set now takes a strict flag (0 = sloppy,
 // 1 = strict with proxy-throw); js_private_property_set_strict removed.
@@ -13421,6 +13436,7 @@ static inline Item js_call_value(Item func_item, Item this_val, Item* args,
 // JSCU44: a `with` scope must not leak into a called function. The callee's
 // chain is its own captured env, so entering a call relinks one borrowed frame
 // and leaving restores the caller's head -- no copy, no dynamic root range.
+// The callee releases its own frames at every completion, so leaving frees none.
 struct JsWithActivation {
     JsWithActivation() = default;
     JsWithFrame frame = {};
@@ -13572,7 +13588,7 @@ static bool js_call_use_common_lane(JsFunction* fn) {
         !(fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) || js_fn_native(fn)->call ||
         (fn->flags & (JS_FUNC_FLAG_HAS_BOUND_THIS | JS_FUNC_FLAG_GENERATOR |
             JS_FUNC_FLAG_ASYNC_GEN | JS_FUNC_FLAG_DERIVED_CTOR |
-            JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) || js_fn_with(fn)->depth > 0 ||
+            JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) ||
         (fn->flags & JS_FUNC_FLAG_USES_WITH) || js_fn_eval_initializer_context(fn) ||
         js_fn_eval_origin(fn)->source) {
         // The former call-lane classifier also disabled this shortcut for
@@ -13584,7 +13600,7 @@ static bool js_call_use_common_lane(JsFunction* fn) {
     // cheaper than this shortcut; only the home-class install still wins.
     // Recheck caller-dynamic facts at the edge: classifier metadata never
     // authorizes skipping caller with-scope isolation.
-    return js_with_depth_active() == 0 && js_fn_with(fn)->depth == 0 &&
+    return js_with_depth_active() == 0 &&
         !(fn->flags & JS_FUNC_FLAG_USES_WITH) && !js_fn_eval_initializer_context(fn) &&
         !js_function_has_vm_stack_source(fn);
 }
@@ -14011,9 +14027,8 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     // into a callee. Entering relinks one borrowed frame; the guard skips the
     // relink only when neither side has a with-scope at all.
     JsWithActivation with_activation;
-    const JsWithData* callee_with = js_fn_with(fn);
-    if (js_runtime_state.with_scope.head || callee_with->depth > 0 ||
-            (fn->flags & JS_FUNC_FLAG_USES_WITH) != 0) {
+    if (js_runtime_state.with_head || (fn->flags & JS_FUNC_FLAG_USES_WITH) != 0) {
+        const JsWithData* callee_with = js_fn_with(fn);
         with_activation.enter((Item*)callee_with->env, callee_with->depth);
     }
     // For generator functions: set up callee proto so js_generator_create uses fn.prototype
@@ -14089,7 +14104,7 @@ static inline Item js_call_value(Item func_item, Item this_val, Item* args,
             return fn->invoke(func_item, this_val, args, arg_count, result_home,
                 args_prerooted);
         }
-        if (fn && fn->layout_magic == JS_FUNCTION_LAYOUT_MAGIC) {
+        if (js_fn_is_js_layout(fn)) {
             log_error("js-call-value: published JavaScript function has no call entry");
             return ItemError;
         }
@@ -27419,7 +27434,7 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
     // here ensures destructuring errors throw synchronously at call time, not on .next().
     {
         gen->executing = true;
-        result_root.set(js_invoke_mir_state(func_ptr, env,
+        result_root.set(js_invoke_mir_state(func_ptr, gen, env,
             make_js_undefined(), 0));
         gen->executing = false;
 
@@ -27748,15 +27763,8 @@ extern "C" Item js_generator_next(Item generator, Item input) {
         get_type_id(generator_private_home) != LMD_TYPE_UNDEFINED) {
         js_current_private_home_class = generator_private_home;
     }
-    {
-        // JSCU44: resume inside the generator's own chain, then spill whatever
-        // scopes are still open at the yield -- they outlive this activation.
-        JsWithActivation gen_with;
-        gen_with.enter(gen->with_env, gen->with_depth);
-        result_root.set(js_invoke_mir_state(gen->state_fn,
-            gen->env, input_root.get(), gen->state));
-        gen->with_env = js_with_capture_stack(&gen->with_depth);
-    }
+    result_root.set(js_invoke_mir_state(gen->state_fn, gen,
+        gen->env, input_root.get(), gen->state));
     js_current_private_home_class = saved_private_home_root.get();
     Item result = result_root.get();
     if (item_is_error(result)) {
@@ -27852,7 +27860,7 @@ static Item js_generator_resume_return_signal(JsGenerator* gen, bool is_async,
     }
     gen->executing = true;
     Item signal = js_gen_return_signal(value);
-    Item result = js_invoke_mir_state(gen->state_fn, gen->env, signal, gen->state);
+    Item result = js_invoke_mir_state(gen->state_fn, gen, gen->env, signal, gen->state);
     gen->executing = false;
     if (item_is_error(result)) {
         gen->done = true;
@@ -30681,7 +30689,7 @@ static void js_async_drive(Item frame_item, Item input, int64_t state) {
         result_root.set(js_interp_resume_async(ctx, input_root.get()));
     } else {
         result_root.set(js_invoke_mir_state(
-            ctx->state_fn, ctx->env, input_root.get(), state));
+            ctx->state_fn, ctx, ctx->env, input_root.get(), state));
     }
     js_current_this = prev_this;
     // Parse result: [value, next_state]
@@ -30780,6 +30788,10 @@ static Item js_async_context_create_current(void* fn_ptr, Item* env,
     js_env_rehome_scalars(env);
     ctx->env = env;
     ctx->env_size = (int)env_size;
+    // JSCU44: an async function's lexical `with` chain is the one open where it
+    // was created, not the one open at whatever turn resumes it -- the same
+    // rule js_generator_create follows.
+    ctx->with_env = js_with_capture_stack(&ctx->with_depth);
     ctx->module_state_id = lambda_active_module_state_id();
     ctx->state = 0;
     ctx->this_val = this_val;
