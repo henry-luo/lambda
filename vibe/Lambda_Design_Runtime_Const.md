@@ -387,7 +387,7 @@ Each phase is independently landable, green on `make test-lambda-baseline` and
 | **RC-P5a** | RC15 — **const containers are materialized, not folded.** A literal ARRAY/MAP whose parts are all const becomes one pooled static container recorded as a const fact, built directly from the AST with no evaluation. `emit_static_collection_const()` already does this construction inside the MIR back end (§9.1); it becomes a consumer of the shared fact instead of a private builder, so T0 stops rebuilding the same array on every execution. | both tiers read one container; no aggregate reaches `interp_const_fold_script` |
 | **RC-P5** | RC5/RC7/RC13 — pooled results with rehoming. **Blocked on RC-P6 as written (2026-09-12): there is nothing to rehome.** Eligibility admits only NULL/BOOL/INT/FLOAT literal operands, and no operator over those yields a pointer-backed value — `2 ** 100` and `9007199254740991 + 1` give floats (`1.27e30`, `inf`), `"ab" + "c"` is an error since `+` does not concatenate, and string comparison gives a bool. Every producible result is self-contained. The one reachable exception is a subnormal float, which is boxed. Rehoming needs eligibility widened first — to expressions that *compute* a pointer-backed value. Aggregate literals are **not** that case: under RC15 they are const values, materialized into the pool at build time without ever entering the folder (RC-P5a). Rehoming therefore waits on RC-P6's expression widening. | forced-GC oracle (`LAMBDA_GC_FORCE_EVERY=1`, `POISON_FREED=1`) green |
 | **RC-P6** | RC2/RC3 — eligibility by interpreter capability under the purity gate. **Landed for identifiers and pure sys-func calls (2026-09-12).** Reads of immutable const bindings fold transitively; calls reuse `interp_eval_mode_allows_sys_func`, which already encodes D6.1.2 (rejects `is_proc`/`is_async`) plus the restricted-mode set. **Open:** user-defined pure `fn` calls — that gate rejects every non-sys-func callee, so admitting them needs callee frame setup at fold time. | baseline green; fold-rate census |
-| **RC-P6b** | RC17/RC18 — delete the inline `Type` payloads and `TypeConst::const_index`; move the handle to `AstNode`'s padding; share literal types as singletons. 58 cast sites. | `sizeof(AstNode)` unchanged; no per-literal `Type` allocation; baseline green |
+| **RC-P6b** | RC17/RC18. **Handle half landed via RC-P8** (`AstNode::const_kind`/`const_index`, `sizeof` unchanged). **Payload-deletion half is BLOCKED: RC17 is wrong as a blanket rule (2026-09-12, §12).** A literal `Type`'s payload is often *type semantics*, not a misfiled node fact — it defines which values inhabit the type. Deleting it would break literal unions, type patterns, and `type T = 3.14`. Needs RC17 restated before any of it is implementable. | — |
 | **RC-P7** | RC6 — content-hashed pool with dedup. **Blocked on RC-P6b (2026-09-12).** `const_list` is an untyped `void*` list: its entries are `String*`, `Binary*`, `Decimal*`, `Array*`/`Map*`, and interior pointers into `Type` payloads (`&ft->double_val`, `&dt_type->datetime`), with **no kind tag anywhere**. Content-hashing needs to know what a pointer points at, so it needs either a parallel kind array or per-kind dedup tables at each of the ~10 append sites — and RC17/RC18 restructure exactly that storage, so building either first is throwaway work. Dedup belongs after the pool becomes the single typed home for const values. | const-pool size census |
 | **RC-P8** | RC12 — retire `AstIndex::facts` / `AstNodeFacts`. **Premise needs review (2026-09-12).** RC12 assumed a per-node fact table is inherently a scaffold because reaching it costs a pointer-hash probe. `AstNode::index_id` removed that cost: `facts[node->index_id]` is a direct array index, and one generic id serves *every* per-node fact rather than each fact kind claiming its own field in the node. Retiring the table may now be the wrong goal — the question is whether a compact, id-indexed facts row is the right home for erasable per-node state, which is close to what D8.2.5v2 rejected in ID-keyed *side tables*. Needs a ruling before implementation. | LOC strongly negative |
 
@@ -490,3 +490,69 @@ GC's static/immortal contract.
   it was a reasonable conservative reading, but it declined the values instead
   of using the mechanism that already handles them for source literals, and
   the restriction then propagated backwards into eligibility (§1.3).
+
+
+---
+
+## 12. RC17 Is Wrong as a Blanket Rule
+
+**Date:** 2026-09-12. Found while scoping RC-P6b; blocks its payload-deletion half.
+
+RC17 says "`Type` is valueless — every constant value lives in the const pool."
+That holds for a literal *expression*, whose value is a property of the node.
+It does not hold for a literal **type**, where the value is the type's identity.
+
+### 12.1 The evidence
+
+`validate.cpp:152` matches a value against a literal type by reading the
+payload off the type:
+
+```c
+if (type->is_literal && (type->type_id == LMD_TYPE_STRING || ...)) {
+    TypeString* literal_type = (TypeString*)type;
+    ... s2it(literal_type->string) ...
+    // Literal-union members are value singletons; a primitive TypeId check
+    // alone would admit every string/symbol into the union.
+}
+```
+
+There is no AST node anywhere in that call: the validator walks a `Type*`
+against a runtime `Item`. A per-node `const_index` cannot serve it.
+
+`parse_type_pattern.cpp:238` builds a value-bearing `TypeFloat` inside the
+*type* grammar, and its neighbouring comment records that a shared valueless
+singleton was already rejected for exactly this reason — "NOT `&LIT_INT`: that
+shared type makes the emitter re-parse the value".
+
+So `"a" | "b"` is literal `TypeString`s carrying their strings, and a pattern
+`[3.14]` is a literal `TypeFloat` carrying 3.14. Delete the payloads and literal
+unions, type patterns and `type T = 3.14` all lose their meaning.
+
+### 12.2 The distinction RC17 missed
+
+The same struct serves two roles:
+
+| Role | Who needs the value | Correct home |
+|---|---|---|
+| literal in **expression** position (`let x = 3.14`) | the node | const pool, via `AstNode::const_index` |
+| literal in **type** position (union member, pattern, annotation) | the type | on the `Type` — it *is* the type |
+
+RC17 saw only the first and generalized. A defensible restatement:
+
+> **RC17v2** — a `Type` carries a value only when that value is part of the
+> type's meaning: literal types used for matching (union members, patterns,
+> annotations). A literal in expression position carries no value on its type;
+> its value is a pool entry named by the node's handle, and its type may be a
+> shared singleton.
+
+That keeps RC18's payoff where it applies — no per-literal `Type` allocation for
+expression literals — without breaking the type system. It needs a ruling before
+implementation.
+
+### 12.3 Measurement note
+
+The initial scope of "58 cast sites" and "23 `double_val` readers" was inflated:
+`TypedItem` also has `double_val`, `real`, `imag`, so `lambda-data.cpp` and
+`print.cpp` matches were counted as `TypeFloat` readers when they are unrelated.
+The third such miscount in this ledger (§1.8, F3, and here), each from matching a
+name without checking the struct it belongs to.
