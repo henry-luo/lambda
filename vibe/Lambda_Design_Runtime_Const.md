@@ -308,9 +308,34 @@ So JS-P1 needs a const image JS does not have. Two shapes, unresolved:
   clear win over the status quo — the call returns an existing pointer instead
   of allocating a GC String — but a call per const load rather than a load.
 
-The second is the smaller first step and preserves the option of the first.
-Either way this is **new infrastructure inside JS's module system**, not a port
-of Lambda's; the storage *design* transfers, the storage *mechanism* does not.
+Neither is the real cost. **MIR is cached**, so a const *pointer* cannot travel
+with a compiled unit — only bytes can, and the pointers must be rebuilt when the
+unit is linked into a realm. Lambda solves this with a per-module BSS populated
+at load; JS has no equivalent.
+
+JS does, however, already solve the identical problem for property keys:
+
+- `jm_build_property_key_image()` serializes the keys into the compiled artifact;
+- `JsPreambleState` carries them as `module_property_specs` / `_count` /
+  `_bytes_size`, surviving realm cloning and the MIR cache;
+- `lambda_module_state_link_property_keys()` materializes them into module state
+  at execution, before any generated code runs.
+
+**JS-P1 is that pattern, for values.** A const image with the same three phases —
+build, carry, link — feeding `lambda_module_state_bind_static`, whose runtime
+accessor (`lambda_module_const_at_state`) already exists. The emission change is
+then one function: `jm_box_string_literal` interns by content and emits a load
+instead of a `js_make_string_len` call, and all 44 call sites follow.
+
+So the work is: (1) a value image mirroring the key image, (2) carriage through
+`JsPreambleState`, (3) a link step beside the property-key link, (4) the
+emission switch. Steps 1–3 are the subsystem; step 4 is a day's work once they
+exist.
+
+This is **new infrastructure inside JS's module system**, not a port. The storage
+*design* transfers; the storage *mechanism* does not. It also sits in the
+preamble/realm-cloning path, where a mistake is silent and cross-realm — so it
+wants its own session with the key-image code as the worked example.
 
 ### 9.4 Ledger
 
