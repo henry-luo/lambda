@@ -287,21 +287,46 @@ spends script-pool storage that dies with the unit, and leaves the identity
 space untouched. §9.2 is the constraint to respect, not an argument against
 pooling.
 
-### 9.3 Ledger
+### 9.3 JS has no const image — this is new plumbing, not a port
+
+Lambda reaches a pool entry through `em_load_const`: a per-module **BSS** slot
+holds `const_list->data`, and the load is `bss -> consts -> consts[index*8]`.
+
+JS has **no BSS at all** (`grep MIR_new_bss lambda/js/` is empty) and never
+touches `const_list`. Its only module-level indirection is a *runtime call* —
+`lambda_active_module_var_at(slot)` — built for mutable module variables and
+tied to the preamble/instantiation machinery (`JsPreambleState`,
+`module_var_count`, property-key prelink).
+
+So JS-P1 needs a const image JS does not have. Two shapes, unresolved:
+
+- **Give JS a consts BSS**, mirroring Lambda. Cheapest load (three memory ops,
+  no call), but touches JS module creation and the preamble state that carries
+  a compiled unit between realms.
+- **Reach consts through the existing module-state call**, e.g.
+  `lambda_active_module_const_at(index)`. No new module plumbing, and still a
+  clear win over the status quo — the call returns an existing pointer instead
+  of allocating a GC String — but a call per const load rather than a load.
+
+The second is the smaller first step and preserves the option of the first.
+Either way this is **new infrastructure inside JS's module system**, not a port
+of Lambda's; the storage *design* transfers, the storage *mechanism* does not.
+
+### 9.4 Ledger
 
 | ID | Ruling |
 |---|---|
 | **RC-J1** | **The storage design is shared; the folder is not.** `AstNode`'s handle, the const pool, the two `AstConstKind` cases and the emission split (RC5v2, RC12v2, RC13, RC18) carry over unchanged. Evaluation does not: **S3.1–S3.3** truthiness is Lambda's, and JS coercion can run user code through `valueOf`/`toString`. One storage design, two folders — the same shape **D8.1.3v10** settled on for the two interpreters. |
-| **RC-J2** | **Literal values move into the const pool, and the per-evaluation allocation is retired** (§9.4). No literal value spends a `NameId`; property *keys* keep using the NameId path untouched. |
+| **RC-J2** | **Pointer-backed literal values move into the const pool; their per-evaluation construction is retired** (§9.5). Immediates are **not** pooled — `jm_box_float_const` already bakes a self-contained double and `jm_boxed_immediate_const` a bool/null, which is the correct emission and a pool load would be strictly worse. This is the same immediate/pooled split RC5v2 draws for Lambda. No literal value spends a `NameId`; property *keys* keep the NameId path untouched. |
 | **RC-J3** | **Purity gating is JS-specific and must be built before any call folds.** JS has no `is_proc`. Property access can invoke a getter, most builtins can throw, and coercion can re-enter user code — so a JS purity judgement is an analysis, not a bit lookup. Until it exists, **D6.1.1**'s "guests mark all-effectful" governs and nothing calls. |
 | **RC-J4** | **RC14 inertness needs a JS restricted-eval mode first.** Lambda's guarantee rests on `EvalMode::CONST`, per-node fuel, `mode_rejected` and a throwaway rooted frame. JS has none of these. A fold that can throw, suspend, or allocate unboundedly during compilation is not admissible. |
 | **RC-J5** | **User-defined function calls are deferred**, for the same reasons as Lambda (Appendix C.5) and more: a JS callee can throw, await, or capture a realm. |
 
-### 9.4 Phases
+### 9.5 Phases
 
 | Phase | Content | Retires |
 |---|---|---|
-| **JS-P1** | **Const values and const containers into the pool.** Scalar literals gain a pool entry and a node handle; array/object literals whose parts are all const are materialized once, as RC15 does for Lambda. No evaluation, no folder — this is materialization only, so RC-J3 and RC-J4 are not yet prerequisites. | `jm_box_string_literal` (44 sites), `jm_string_literal_chars` (4), `jm_box_float_const` (3), `jm_boxed_immediate_const` (5), `jm_box_bigint_literal` (2) — each becomes a pool handle plus the shared emission split. |
+| **JS-P1** | **Pointer-backed const values and const containers into the pool.** A literal whose value needs run-time construction gains a pool entry and a node handle; array/object literals whose parts are all const are materialized once, as RC15 does for Lambda. Materialization only — no evaluation, no folder — so RC-J3 and RC-J4 are not prerequisites. | `jm_box_string_literal` (44 sites, calls `js_make_string_len` per evaluation), `jm_string_literal_chars` (4), `jm_box_bigint_literal` (2, re-parses digits per evaluation), and per-evaluation array/object construction. |
 | **JS-P2** | **Expressions and pure sys-func calls.** Requires RC-J4's restricted-eval mode and RC-J3's purity analysis first. | the runtime arithmetic behind constant JS expressions |
 | — | **User function calls: deferred** (RC-J5). | — |
 
