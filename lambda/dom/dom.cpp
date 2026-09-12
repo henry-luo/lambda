@@ -8596,11 +8596,42 @@ static uint32_t dom_tag_bit(const DomElement* elem) {
     return 0;
 }
 
+// The IDL name and the content attribute name are the same by default. These
+// are the names where HTML could not keep them equal: case folding, a hyphen
+// that is illegal in an IDL identifier (`accept-charset`), a JS reserved word
+// (`for`), and one legacy alias (`formEncoding` and `formEnctype` are two IDL
+// names for one attribute). Every renamed name is listed here once whatever
+// its value kind -- renaming is orthogonal to kind, and five BOOL rows and two
+// INT rows are renamed too.
+#define JS_DOM_IDL_ATTR_ALIASES(X) \
+    X("readOnly",        "readonly") \
+    X("noValidate",      "novalidate") \
+    X("formNoValidate",  "formnovalidate") \
+    X("defaultChecked",  "checked") \
+    X("defaultSelected", "selected") \
+    X("maxLength",       "maxlength") \
+    X("minLength",       "minlength") \
+    X("tabIndex",        "tabindex") \
+    X("inputMode",       "inputmode") \
+    X("enterKeyHint",    "enterkeyhint") \
+    X("contentEditable", "contenteditable") \
+    X("acceptCharset",   "accept-charset") \
+    X("htmlFor",         "for") \
+    X("formAction",      "formaction") \
+    X("formMethod",      "formmethod") \
+    X("formEnctype",     "formenctype") \
+    X("formEncoding",    "formenctype") \
+    X("formTarget",      "formtarget")
+
+// What the value is, never what the name is. WRITE is a reflected attribute
+// whose setter is the generic one but whose getter computes (a canonicalised
+// keyword, a document-URL fallback, a normalised method) and so is written by
+// hand below; the row still supplies the element gate the setter needs.
 typedef enum JsDomReflectKind {
     JS_DOM_REFLECT_BOOL = 0,
     JS_DOM_REFLECT_INT,
     JS_DOM_REFLECT_STR,
-    JS_DOM_REFLECT_MAP,
+    JS_DOM_REFLECT_WRITE,
 } JsDomReflectKind;
 
 // Rows are scanned in order, so a property reflected differently on two
@@ -8633,17 +8664,15 @@ typedef enum JsDomReflectKind {
     X("alt", "alt", STR, 0, DOM_TAG_IMG) \
     X("width", "width", STR, 0, DOM_TAG_IFRAME) \
     X("height", "height", STR, 0, DOM_TAG_IFRAME) \
-    X("tabIndex", "tabindex", MAP, 0, DOM_TAG_ANY) \
-    X("inputMode", "inputmode", MAP, 0, DOM_TAG_ANY) \
-    X("enterKeyHint", "enterkeyhint", MAP, 0, DOM_TAG_ANY) \
-    X("contentEditable", "contenteditable", MAP, 0, DOM_TAG_ANY) \
-    X("acceptCharset", "accept-charset", MAP, 0, DOM_TAG_FORM) \
-    X("htmlFor", "for", MAP, 0, DOM_TAG_LABEL | DOM_TAG_OUTPUT) \
-    X("formAction", "formaction", MAP, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON) \
-    X("formMethod", "formmethod", MAP, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON) \
-    X("formEnctype", "formenctype", MAP, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON) \
-    X("formEncoding", "formenctype", MAP, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON) \
-    X("formTarget", "formtarget", MAP, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON)
+    X("acceptCharset", "accept-charset", STR, 0, DOM_TAG_FORM) \
+    X("htmlFor", "for", STR, 0, DOM_TAG_LABEL | DOM_TAG_OUTPUT) \
+    X("formTarget", "formtarget", STR, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON) \
+    X("inputMode", "inputmode", WRITE, 0, DOM_TAG_ANY) \
+    X("enterKeyHint", "enterkeyhint", WRITE, 0, DOM_TAG_ANY) \
+    X("formAction", "formaction", WRITE, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON) \
+    X("formMethod", "formmethod", WRITE, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON) \
+    X("formEnctype", "formenctype", WRITE, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON) \
+    X("formEncoding", "formenctype", WRITE, 0, DOM_TAG_INPUT | DOM_TAG_BUTTON)
 
 typedef struct JsDomReflectSpec {
     const char* idl;
@@ -8675,15 +8704,14 @@ static const JsDomReflectSpec* dom_reflect_spec(const DomElement* elem,
     return NULL;
 }
 
-// IDL-name → HTML-attribute-name mapping, independent of element type.
-// Returns nullptr when the names are the same (caller uses prop verbatim).
+// IDL-name → HTML-attribute-name mapping, independent of element type and of
+// value kind. Returns nullptr when the names are the same, which is the normal
+// case -- the caller then uses `prop` verbatim.
 static const char* _idl_to_attr_name(const char* prop) {
     if (!prop) return nullptr;
-    for (size_t i = 0; i < sizeof(k_dom_reflected_attrs) / sizeof(k_dom_reflected_attrs[0]); i++) {
-        const JsDomReflectSpec* spec = &k_dom_reflected_attrs[i];
-        if (strcmp(spec->idl, prop) != 0) continue;
-        return strcmp(spec->idl, spec->attr) == 0 ? nullptr : spec->attr;
-    }
+#define JS_DOM_IDL_ALIAS_MATCH(idl, attr) if (strcmp(prop, idl) == 0) return attr;
+    JS_DOM_IDL_ATTR_ALIASES(JS_DOM_IDL_ALIAS_MATCH)
+#undef JS_DOM_IDL_ALIAS_MATCH
     return nullptr;
 }
 
@@ -8727,9 +8755,13 @@ static bool _is_string_reflected(DomElement* elem, const char* prop,
 // which gates every one of these pairs by tag — then refused to read back, and
 // `div.readOnly = true` wrote `readonly=""` instead of storing an expando.
 // The table gates the write on the same element/property pairs the getter
-// accepts.
-static bool _is_mapped_attr_reflected(DomElement* elem, const char* prop) {
-    return dom_reflect_spec(elem, prop, JS_DOM_REFLECT_MAP) != NULL;
+// accepts. WRITE rows take the generic string setter and a hand-written getter.
+static bool _is_write_reflected(DomElement* elem, const char* prop,
+                                const char** attr_name) {
+    const JsDomReflectSpec* spec = dom_reflect_spec(elem, prop, JS_DOM_REFLECT_WRITE);
+    if (!spec || !attr_name) return false;
+    *attr_name = spec->attr;
+    return true;
 }
 
 // Returns the lowercased input `formmethod` value or "get" default.
@@ -9861,10 +9893,6 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
             const char* v = elem->get_attribute("enctype");
             return js_name_item(_normalise_enctype(v));
         }
-        if (prop_id == JS_DOM_PROP_ACCEPT_CHARSET) {
-            const char* v = elem->get_attribute("accept-charset");
-            return js_name_item(v ? v : "");
-        }
     }
     // HTMLTextAreaElement: wrap (default "soft"), rows (default 2), cols (default 20)
     if (_is_tag(elem, "textarea")) {
@@ -9926,12 +9954,6 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // HTMLOptionElement.defaultSelected — reflects `selected` content attribute
     if (prop_id == JS_DOM_PROP_DEFAULT_SELECTED && _is_tag(elem, "option")) {
         return (Item){.item = b2it(elem->has_attribute("selected"))};
-    }
-    // HTMLLabelElement.htmlFor / HTMLOutputElement.htmlFor — reflects `for`
-    if (prop_id == JS_DOM_PROP_HTML_FOR &&
-        (_is_tag(elem, "label") || _is_tag(elem, "output"))) {
-        const char* v = elem->get_attribute("for");
-        return js_name_item(v ? v : "");
     }
     // HTMLOutputElement.defaultValue tracks text in default mode and the saved
     // reset value after a value setter switches the control to value mode.
@@ -10069,10 +10091,6 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         if (prop_id == JS_DOM_PROP_FORM_ENCTYPE) {
             const char* v = elem->get_attribute("formenctype");
             return js_name_item(_normalise_enctype(v));
-        }
-        if (prop_id == JS_DOM_PROP_FORM_TARGET) {
-            const char* v = elem->get_attribute("formtarget");
-            return js_name_item(v ? v : "");
         }
         if (prop_id == JS_DOM_PROP_FORM_NO_VALIDATE) {
             return (Item){.item = b2it(elem->has_attribute("formnovalidate"))};
@@ -10282,12 +10300,12 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
     }
 
     if (prop_id == JS_DOM_PROP_STYLE) {
-        const char* style_text = fn_to_cstr(value);
-        elem->set_attribute("style", style_text ? style_text : "");
+        const char* style_text = dom_to_attr_cstr(value);
+        elem->set_attribute("style", style_text);
         elem->set_styles_resolved(false);
         dom_mutation_notify(DOM_JS_MUTATION_STYLE, (DomNode*)elem, elem->parent);
         log_debug("dom_set_property: set style='%.50s' on <%s>",
-                  style_text ? style_text : "", elem->tag_name ? elem->tag_name : "?");
+                  style_text, elem->tag_name ? elem->tag_name : "?");
         return value;
     }
 
@@ -10302,8 +10320,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         if (value_type == LMD_TYPE_FLOAT) return (float)it2d(scroll_value);
         if (value_type == LMD_TYPE_BOOL) return it2b(scroll_value) ? 1.0f : 0.0f;
         if (value_type == LMD_TYPE_STRING) {
-            const char* text = fn_to_cstr(scroll_value);
-            if (text) {
+            const char* text = dom_to_attr_cstr(scroll_value);
+            {
                 char* end = nullptr;
                 double parsed = strtod(text, &end);
                 if (end != text) return (float)parsed;
@@ -10395,8 +10413,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
     }
 
     if (prop_id == JS_DOM_PROP_SRCDOC && _is_tag(elem, "iframe")) {
-        const char* srcdoc = fn_to_cstr(value);
-        elem->set_attribute("srcdoc", srcdoc ? srcdoc : "");
+        elem->set_attribute("srcdoc", dom_to_attr_cstr(value));
         // srcdoc can be assigned after the browsing context was lazily cached;
         // rehydrate that existing blank document before dispatching its load.
         dom_after_srcdoc_set((void*)elem);
@@ -10406,8 +10423,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
 
     // className
     if (prop_id == JS_DOM_PROP_CLASS_NAME) {
-        const char* class_str = fn_to_cstr(value);
-        if (class_str) {
+        const char* class_str = dom_to_attr_cstr(value);
+        {
             // set_attribute owns the pooled class cache; writing class_names
             // directly bypasses its persistent-field lifetime bookkeeping.
             elem->set_attribute("class", class_str);
@@ -10428,9 +10445,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         if (get_type_id(value) == LMD_TYPE_BOOL) {
             s = it2b(value) ? "true" : "false";
         } else {
-            s = fn_to_cstr(value);
+            s = dom_to_attr_cstr(value);
         }
-        if (!s) s = "";
         if (*s == '\0') {
             elem->remove_attribute("contenteditable");
             dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
@@ -10468,8 +10484,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         const char* s = js_is_truthy(value) ? "true" : "false";
         TypeId vt = get_type_id(value);
         if (vt == LMD_TYPE_STRING || vt == LMD_TYPE_SYMBOL) {
-            const char* raw = fn_to_cstr(value);
-            s = raw ? raw : "";
+            s = dom_to_attr_cstr(value);
         }
         elem->set_attribute("spellcheck", s);
         dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
@@ -10489,8 +10504,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
 
     // id
     if (prop_id == JS_DOM_PROP_ID) {
-        const char* id_str = fn_to_cstr(value);
-        if (id_str && elem->doc && elem->doc->document_pool) {
+        const char* id_str = dom_to_attr_cstr(value);
+        if (elem->doc && elem->doc->document_pool) {
             size_t len = strlen(id_str);
             char* id_copy = (char*)pool_alloc(elem->doc->document_pool, len + 1);
             memcpy(id_copy, id_str, len);
@@ -10642,9 +10657,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
     // ------------------------------------------------------------------
     if (_is_tag(elem, "select")) {
         if (prop_id == JS_DOM_PROP_VALUE) {
-            const char* sv = fn_to_cstr(value);
-            if (!sv) sv = "";
-            dom_select_apply_value(elem, sv, false);
+            dom_select_apply_value(elem, dom_to_attr_cstr(value), false);
             dom_expando_flag_set(elem, "__selDirty", (Item){.item = b2it(true)});
             return value;
         }
@@ -10679,13 +10692,11 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             return value;
         }
         if (prop_id == JS_DOM_PROP_VALUE) {
-            const char* sv = fn_to_cstr(value);
-            elem->set_attribute("value", sv ? sv : "");
+            elem->set_attribute("value", dom_to_attr_cstr(value));
             return value;
         }
         if (prop_id == JS_DOM_PROP_TEXT) {
-            const char* sv = fn_to_cstr(value);
-            dom_set_option_text_bridge((void*)elem, sv ? sv : "");
+            dom_set_option_text_bridge((void*)elem, dom_to_attr_cstr(value));
             return value;
         }
         if (prop_id == JS_DOM_PROP_DEFAULT_SELECTED) {
@@ -10695,8 +10706,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         }
     }
     if (prop_id == JS_DOM_PROP_VALUE && _is_tag(elem, "input") && !tc_is_text_control_elem(elem)) {
-        const char* s = fn_to_cstr(value);
-        if (!s) s = "";
+        const char* s = dom_to_attr_cstr(value);
         elem->set_attribute("value", s);
         if (elem->form) {
             elem->form->value = elem->get_attribute("value");
@@ -10743,9 +10753,9 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             } else if (value_type == LMD_TYPE_FLOAT) {
                 tab_index = (long)it2d(value);
             } else {
-                const char* text = fn_to_cstr(value);
+                const char* text = dom_to_attr_cstr(value);
                 char* end = nullptr;
-                if (text && *text) {
+                if (*text) {
                     long parsed = strtol(text, &end, 10);
                     if (end != text) tab_index = parsed;
                 }
@@ -10797,8 +10807,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
                 double d = it2d(value);
                 n = (long)d;
             } else {
-                const char* s = fn_to_cstr(value);
-                if (s && *s) {
+                const char* s = dom_to_attr_cstr(value);
+                if (*s) {
                     char* end = nullptr;
                     long parsed = strtol(s, &end, 10);
                     n = (end != s) ? parsed : 0;  // non-numeric → 0
@@ -10814,32 +10824,22 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             return value;
         }
 
-        // String reflection with IDL→HTML name mapping (readOnly → readonly,
-        // formAction → formaction, htmlFor → for, etc.).
-        const char* mapped_attr = _idl_to_attr_name(prop);
-        if (mapped_attr && _is_mapped_attr_reflected(elem, prop)) {
-            const char* s = fn_to_cstr(value);
-            if (s) {
-                elem->set_attribute(mapped_attr, s);
-            } else {
-                elem->remove_attribute(mapped_attr);
-            }
-            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
-            return value;
-        }
-
+        // One generic string write for both kinds: STR and WRITE differ only in
+        // who reads the attribute back, never in how the value is stored. The
+        // row already carries the mapped attribute name, so the write needs no
+        // second name lookup.
         const char* string_attr = nullptr;
-        if (_is_string_reflected(elem, prop, &string_attr)) {
-            const char* s = dom_to_attr_cstr(value);
-            elem->set_attribute(string_attr, s);
+        if (_is_string_reflected(elem, prop, &string_attr) ||
+            _is_write_reflected(elem, prop, &string_attr)) {
+            elem->set_attribute(string_attr, dom_to_attr_cstr(value));
             dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
 
         // <input>.type setter — lowercase, fall back to "text" for unknown.
         if (prop_id == JS_DOM_PROP_TYPE && _is_tag(elem, "input")) {
-            const char* s = fn_to_cstr(value);
-            if (s && *s) {
+            const char* s = dom_to_attr_cstr(value);
+            if (*s) {
                 char buf[32];
                 size_t i = 0;
                 for (; s[i] && i < sizeof(buf) - 1; i++)
