@@ -419,14 +419,26 @@ struct NameScope {
     bool is_switch_scope;
 };
 
+// What const value, if any, a node carries. The payload always lives in the
+// unit's const_list; this says how to read the slot `const_index` names.
+typedef enum AstConstKind : uint16_t {
+    AST_CONST_NONE = 0,
+    // A folded expression. The slot holds a pointer to a pool-allocated Item.
+    AST_CONST_FOLDED,
+    // A materialized const container. The slot *is* the container pointer,
+    // matching what `emit_load_const(..., MIR_T_P)` already loads.
+    AST_CONST_POOLED,
+} AstConstKind;
+
 struct AstNode {
     AstNodeType node_type;
-    // Cached AstIndex id, living in the padding after the 16-bit tag, so this
-    // costs no bytes (AstNode stays 32). It is a hint, not an authority: a node
-    // may be queried against an index that never published it, so every read
-    // validates `index->nodes[id] == node` and falls back to the pointer hash.
-    // That also makes a zeroed or stale value self-correcting.
-    uint32_t index_id;
+    // Const-value handle, in the padding after the 16-bit tag -- AstNode stays
+    // 32 bytes. `node->type` already carries the inferred type, and the few
+    // declaring nodes carry their own `declared_type`, so this is the only
+    // per-node compiler fact that needed a home. Zero-initialized allocation
+    // makes AST_CONST_NONE the default with no init pass (RC12, D8.2.5v2).
+    AstConstKind const_kind;
+    uint32_t const_index;
     Type *type;
     AstNode* next;
     SourceSpan source_span;
@@ -465,7 +477,6 @@ typedef struct AstIndex {
     // Dense function roots make FunctionId the shared authority for Lambda
     // and JS lowering instead of requiring each frontend to rescan nodes.
     AstFunctionIndexEntry* functions;
-    struct AstNodeFacts* facts;
     uint32_t count;
     uint32_t capacity;
     uint32_t function_count;
@@ -488,29 +499,6 @@ typedef bool (*AstIndexSubtreeVisitor)(const AstIndex* index,
 typedef struct AstIndexPassContext { AstIndex* index; AstNode* root;
     const LangProfile* profile; } AstIndexPassContext;
 
-typedef struct AstNodeFacts {
-    Type* declared_contract;
-    Type* inferred_type;
-    ValueRep representation;
-    uint32_t flags;
-    // const pass results are immediate Items only. Pointer-backed values stay
-    // out of this table so an AST fact cannot become a MIR-cache relocation
-    // dependency (D8.1.1v2 / DI14).
-    uint64_t folded_item;
-    // RC15/RC13: index of a materialized const container in the unit's
-    // const_list, or -1. A container is pool-owned, so its address must never
-    // be baked into cacheable MIR (DI14) -- both tiers resolve it through this
-    // index instead, and `folded_item` stays empty for such a fact.
-    int32_t const_index;
-} AstNodeFacts;
-
-enum AstNodeFactFlags : uint32_t {
-    AST_NODE_FACT_NONE = 0,
-    AST_NODE_FACT_CONST_FOLDED = 1u << 0,
-    // A const value materialized into the pool rather than evaluated (RC15).
-    // Its payload is `const_index`, never `folded_item`.
-    AST_NODE_FACT_CONST_POOLED = 1u << 1,
-};
 
 #ifdef __cplusplus
 extern "C" {

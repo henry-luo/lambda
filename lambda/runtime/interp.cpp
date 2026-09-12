@@ -4014,6 +4014,34 @@ static bool interp_fast_int_while(InterpFrame* frame, AstWhileNode* loop,
     return true;
 }
 
+// Both const kinds resolve through the unit's const_list: a pool-owned address
+// must never be baked anywhere it could outlive its unit (DI14). A folded slot
+// holds a pointer to a pool-allocated Item; a pooled slot *is* the container
+// pointer (RC13).
+// Publishing a folded value means pooling it: the node carries only a handle,
+// and a shared pool entry is what later lets equal constants be deduplicated
+// (RC6). Returns false without marking the node if the slot cannot be created.
+static bool interp_publish_folded_item(Transpiler* tp, AstNode* node, Item value) {
+    if (!tp || !tp->const_list || !node) return false;
+    uint64_t* slot = (uint64_t*)alloc_const(tp, sizeof(uint64_t));
+    if (!slot) return false;
+    *slot = value.item;
+    if (!arraylist_append(tp->const_list, slot)) return false;
+    node->const_index = (uint32_t)(tp->const_list->length - 1);
+    node->const_kind = AST_CONST_FOLDED;
+    return true;
+}
+
+static bool interp_const_slot_value(Script* owner, const AstNode* node, Item* out) {
+    if (!owner || !owner->const_list || node->const_kind == AST_CONST_NONE) return false;
+    if (node->const_index >= (uint32_t)owner->const_list->length) return false;
+    void* slot = arraylist_get(owner->const_list, (int)node->const_index);
+    if (!slot) return false;
+    out->item = node->const_kind == AST_CONST_FOLDED
+        ? *(uint64_t*)slot : (uint64_t)(uintptr_t)slot;
+    return true;
+}
+
 // RC9: the interpreter produced the CONST facts; it should read them too.
 // Only UNARY/BINARY/IF_EXPR are ever folded (the pass skips PRIMARY outright),
 // so the node-kind test keeps every other evaluation off this path entirely.
@@ -4029,25 +4057,9 @@ static bool interp_const_folded_value(InterpFrame* f, AstNode* node, Item* out) 
     case AST_NODE_ARRAY: case AST_NODE_MAP: break;
     default: return false;
     }
+    if (node->const_kind == AST_CONST_NONE) return false;
     Script* owner = f ? f->module : NULL;
-    if (!owner || !owner->ast_index.facts) return false;
-    AstNodeId id = ast_index_find(&owner->ast_index, node);
-    if (id == AST_NODE_ID_INVALID || id >= owner->ast_index.count) return false;
-    const AstNodeFacts* facts = &owner->ast_index.facts[id];
-    if (facts->flags & AST_NODE_FACT_CONST_FOLDED) {
-        out->item = facts->folded_item;
-        return true;
-    }
-    // A pooled container is reached through the unit's const_list: its address
-    // is pool-owned, so the fact stores the index, not the pointer (DI14).
-    if ((facts->flags & AST_NODE_FACT_CONST_POOLED) && facts->const_index >= 0 &&
-            owner->const_list && facts->const_index < owner->const_list->length) {
-        void* container = arraylist_get(owner->const_list, facts->const_index);
-        if (!container) return false;
-        out->item = (uint64_t)(uintptr_t)container;
-        return true;
-    }
-    return false;
+    return interp_const_slot_value(owner, node, out);
 }
 
 static Item eval_expr(InterpFrame* f, AstNode* node) {
@@ -5301,13 +5313,9 @@ static bool interp_const_init_value(Transpiler* tp, AstNode* init, Item* out) {
     AstNode* value = ast_unwrap_primary(init);
     // A published fold fact is this node's *computed* value, so it answers
     // first and unconditionally.
-    AstNodeId id = ast_index_find(&tp->ast_index, value);
-    if (id != AST_NODE_ID_INVALID && id < tp->ast_index.count) {
-        const AstNodeFacts* facts = &tp->ast_index.facts[id];
-        if (facts->flags & AST_NODE_FACT_CONST_FOLDED) {
-            out->item = facts->folded_item;
-            return true;
-        }
+    if (value && value->const_kind != AST_CONST_NONE &&
+            interp_const_slot_value((Script*)tp, value, out)) {
+        return true;
     }
     // Only a bare literal may answer from its type. `ast_static_literal_item`
     // reports what a node's *type* carries, and inference can hand a computed
@@ -5430,7 +5438,7 @@ static bool interp_const_result_is_immediate(Item result) {
 }
 
 bool interp_const_fold_script(Transpiler* tp) {
-    if (!tp || !tp->ast_index.nodes || !tp->ast_index.facts ||
+    if (!tp || !tp->ast_index.nodes || !tp->const_list ||
             !context || !interp_const_fold_enabled()) {
         return true;
     }
@@ -5462,7 +5470,6 @@ bool interp_const_fold_script(Transpiler* tp) {
     for (uint32_t id = tp->ast_index.const_folded_count;
             id < tp->ast_index.count; id++) {
         AstNode* node = tp->ast_index.nodes[id];
-        AstNodeFacts* facts = &tp->ast_index.facts[id];
         if (!node || node->node_type == AST_NODE_PRIMARY ||
                 !interp_const_node_supported(node)) continue;
 
@@ -5481,8 +5488,7 @@ bool interp_const_fold_script(Transpiler* tp) {
                     get_type_id(bound) != node->type->type_id) {
                 continue;
             }
-            facts->folded_item = bound.item;
-            facts->flags |= AST_NODE_FACT_CONST_FOLDED;
+            interp_publish_folded_item(tp, node, bound);
             continue;
         }
 
@@ -5510,8 +5516,7 @@ bool interp_const_fold_script(Transpiler* tp) {
                     (int)get_type_id(result), (int)node->type->type_id);
                 continue;
             }
-            facts->folded_item = result.item;
-            facts->flags |= AST_NODE_FACT_CONST_FOLDED;
+            interp_publish_folded_item(tp, node, result);
         }
     }
     tp->ast_index.const_folded_count = tp->ast_index.count;

@@ -3538,8 +3538,6 @@ static MIR_reg_t emit_vararg_call_2(MirTranspiler* mt, const char* fn_name,
 }
 
 static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node);
-static bool mir_emit_const_folded_item(MirTranspiler* mt, AstNode* node,
-        MIR_reg_t* out);
 
 static MIR_reg_t emit_variadic_args(MirTranspiler* mt, AstNode** resolved_args,
         int expected_params, int arg_count) {
@@ -6326,8 +6324,7 @@ static bool static_const_item_from_node(const ConstMaterializeCtx* cx, AstNode* 
 // own pass, before const-fold, so the folder's input stays expressions only and
 // both tiers see one container instead of each building its own.
 bool lambda_const_materialize_script(Transpiler* tp) {
-    if (!tp || !tp->ast_index.nodes || !tp->ast_index.facts || !tp->pool ||
-            !tp->const_list) {
+    if (!tp || !tp->ast_index.nodes || !tp->pool || !tp->const_list) {
         return true;
     }
     ConstMaterializeCtx cx = {tp->pool, tp->source};
@@ -6337,15 +6334,14 @@ bool lambda_const_materialize_script(Transpiler* tp) {
         if (node->node_type != AST_NODE_ARRAY && node->node_type != AST_NODE_MAP) {
             continue;
         }
-        AstNodeFacts* facts = &tp->ast_index.facts[id];
-        if (facts->flags & AST_NODE_FACT_CONST_POOLED) continue;
+        if (node->const_kind != AST_CONST_NONE) continue;
         Item value = ItemNull;
         if (!static_const_item_from_node(&cx, node, &value)) continue;
         TypeId tid = get_type_id(value);
         if (tid != LMD_TYPE_ARRAY && tid != LMD_TYPE_MAP) continue;
         if (!arraylist_append(tp->const_list, value.container)) continue;
-        facts->const_index = (int32_t)(tp->const_list->length - 1);
-        facts->flags |= AST_NODE_FACT_CONST_POOLED;
+        node->const_index = (uint32_t)(tp->const_list->length - 1);
+        node->const_kind = AST_CONST_POOLED;
     }
     return true;
 }
@@ -6356,16 +6352,9 @@ static bool emit_static_collection_const(MirTranspiler* mt, AstNode* node, MIR_r
     if (node->node_type != AST_NODE_ARRAY && node->node_type != AST_NODE_MAP) return false;
     // RC15: the materialization pass already built and pooled this container.
     // Consume that fact rather than constructing a second copy here.
-    if (mt->ast_index) {
-        AstNodeId id = ast_index_find(mt->ast_index, node);
-        if (id != AST_NODE_ID_INVALID && id < mt->ast_index->count) {
-            const AstNodeFacts* facts = &mt->ast_index->facts[id];
-            if ((facts->flags & AST_NODE_FACT_CONST_POOLED) &&
-                    facts->const_index >= 0) {
-                *out_reg = emit_load_const(mt, facts->const_index, MIR_T_P);
-                return true;
-            }
-        }
+    if (node->const_kind == AST_CONST_POOLED) {
+        *out_reg = emit_load_const(mt, (int)node->const_index, MIR_T_P);
+        return true;
     }
     // Fallback for a unit lowered without the pass (satellite roots build a
     // synthetic AST that was never indexed).
@@ -16219,8 +16208,11 @@ static MIR_reg_t emit_array_storage(MirTranspiler* mt, AstArrayNode* arr_node) {
         // before emitting a native-lane expression so its tagged carrier
         // cannot cross this boundary as an unboxed arithmetic result.
         MIR_reg_t boxed = 0;
-        bool const_folded = mir_emit_const_folded_item(mt, item, &boxed);
-        if (!const_folded) boxed = transpile_box_item(mt, item);
+        MirValue folded_item_value;
+        bool const_folded = mir_emit_const_folded_value(mt, item, VALUE_REP_ITEM,
+            &folded_item_value);
+        if (const_folded) boxed = folded_item_value.reg;
+        else boxed = transpile_box_item(mt, item);
 
         // let bindings are transparent - evaluate for side effect but don't push to array
         if (item->node_type == AST_NODE_VARIABLE_DECLARATOR) {
@@ -24852,8 +24844,10 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
         return null_r;
     }
 
-    MIR_reg_t folded = 0;
-    if (mir_emit_const_folded_item(mt, node, &folded)) return folded;
+    MirValue folded_value;
+    if (mir_emit_const_folded_value(mt, node, VALUE_REP_ITEM, &folded_value)) {
+        return folded_value.reg;
+    }
 
     if (node->node_type == AST_NODE_ASSIGN_STAM) {
         // Assignment statements return their post-store binding value even
@@ -25476,14 +25470,17 @@ static AstNode* mir_navigation_direct_parent(AstNode* node) {
 // [vibe/Lambda_Design_Runtime_Const.md RC8]
 static bool mir_emit_const_folded_value(MirTranspiler* mt, AstNode* node,
         ValueRep required, MirValue* out) {
-    if (!mt || !mt->ast_index || !node || !node->type || !out) return false;
+    if (!mt || !node || !node->type || !out || !mt->const_list) return false;
     AstNode* evaluated = ast_unwrap_primary(node);
     if (!evaluated || !evaluated->type) return false;
-    AstNodeId id = ast_index_find(mt->ast_index, evaluated);
-    if (id == AST_NODE_ID_INVALID || id >= mt->ast_index->count) return false;
-    const AstNodeFacts* facts = &mt->ast_index->facts[id];
-    if ((facts->flags & AST_NODE_FACT_CONST_FOLDED) == 0) return false;
-    Item value = {.item = facts->folded_item};
+    if (evaluated->const_kind != AST_CONST_FOLDED) return false;
+    if (evaluated->const_index >= (uint32_t)mt->const_list->length) return false;
+    // The pool slot is read *here*, at compile time, so a self-contained value
+    // can be baked as an immediate. Its address is never emitted (DI14).
+    const uint64_t* slot = (const uint64_t*)arraylist_get(mt->const_list,
+        (int)evaluated->const_index);
+    if (!slot) return false;
+    Item value = {.item = *slot};
     // the producer already admitted only self-contained words; re-check here
     // because a baked operand must never be a pointer (DI14, RC4).
     if (!lambda_item_is_self_contained(value.item)) return false;
@@ -25527,33 +25524,6 @@ static bool mir_emit_const_folded_value(MirTranspiler* mt, AstNode* node,
     default:
         return false;
     }
-}
-
-// a CONST fact is an immediate Item, so materializing it at the generic value
-// boundary preserves the tagged representation expected by callers.
-static bool mir_emit_const_folded_item(MirTranspiler* mt, AstNode* node,
-        MIR_reg_t* out) {
-    if (!mt || !mt->ast_index || !node || !node->type || !out) return false;
-    AstNode* evaluated = ast_unwrap_primary(node);
-    if (!evaluated || !evaluated->type) return false;
-    AstNodeId id = ast_index_find(mt->ast_index, evaluated);
-    if (id == AST_NODE_ID_INVALID || id >= mt->ast_index->count) return false;
-    const AstNodeFacts* facts = &mt->ast_index->facts[id];
-    if ((facts->flags & AST_NODE_FACT_CONST_FOLDED) == 0) return false;
-
-    // RC10: the producer proved folded type == inferred type before publishing
-    // the fact, and measurement over the corpus showed no fact outliving a type
-    // change. This boundary consumes that guarantee instead of re-deriving it.
-    Item value = {.item = facts->folded_item};
-    // the producer already admitted only self-contained words; re-check here
-    // because a baked operand must never be a pointer (DI14, RC4).
-    if (!lambda_item_is_self_contained(value.item)) return false;
-    MIR_reg_t result = new_reg(mt, "const_fold", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, result),
-        MIR_new_uint_op(mt->ctx, value.item)));
-    *out = result;
-    return true;
 }
 
 // Structural producers delegate local MIR emission, then publish their exact
