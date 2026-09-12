@@ -608,11 +608,47 @@ MIR_reg_t jm_string_literal_chars(JsMirTranspiler* mt, const char* str, int len)
     return chars;
 }
 
+// RC-J2/RC6: intern a literal's bytes into the unit's shared const pool, the
+// same `Script::const_list` Lambda uses, and return its index. The String is
+// built once in the unit's pool; equal literals share one entry. This spends no
+// NameId -- the pool is not the identity space, so the reason literals were kept
+// out of NameIds does not apply here.
+static int jm_intern_string_const(JsMirTranspiler* mt, const char* str, int len) {
+    if (!mt || !mt->tp || !mt->tp->const_list || !str || len < 0) return -1;
+    ArrayList* pool = mt->tp->const_list;
+    for (int i = 0; i < pool->length; i++) {
+        String* existing = (String*)arraylist_get(pool, i);
+        if (existing && (int)existing->len == len &&
+                memcmp(existing->chars, str, (size_t)len) == 0) {
+            return i;
+        }
+    }
+    // RC-J7: mem-owned, not pool_calloc'd. The transpiler pool is destroyed at
+    // js_transpiler_destroy while preamble harnesses and deferred hot-reload
+    // contexts can still run this code; the module state adopts these bodies
+    // at link time and releases them with itself.
+    String* owned = (String*)mem_calloc(1, sizeof(String) + len + 1,
+        MEM_CAT_JS_RUNTIME);
+    if (!owned) return -1;
+    owned->len = (uint32_t)len;
+    owned->flags = 0;
+    owned->is_ascii = str_is_ascii(str, len) ? 1 : 0;
+    memcpy(owned->chars, str, (size_t)len);
+    owned->chars[len] = '\0';
+    if (!arraylist_append(pool, owned)) return -1;
+    return pool->length - 1;
+}
+
 MIR_reg_t jm_box_string_literal(JsMirTranspiler* mt, const char* str, int len) {
     if (!mt || !str || len < 0) return jm_emit_null(mt);
-    // String values are not property identities. Keep their bytes in the MIR
-    // artifact and allocate an ordinary GC String at evaluation time so source
-    // text, diagnostics, and literals never consume permanent NameIds.
+    // The literal lives in the unit's const pool, so each evaluation loads the
+    // existing String instead of rebuilding one from MIR-embedded bytes.
+    int index = jm_intern_string_const(mt, str, len);
+    if (index >= 0) {
+        return jm_call_1(mt, "lambda_active_module_const_at", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, index));
+    }
+    // Fallback: a unit without a pool keeps the original per-evaluation build.
     MIR_reg_t chars = jm_string_literal_chars(mt, str, len);
     return jm_call_2(mt, "js_make_string_len", MIR_T_I64,
         MIR_T_P, MIR_new_reg_op(mt->ctx, chars),
