@@ -6558,7 +6558,10 @@ Item fn_join2(Item list_item, Item sep_item) {
     int64_t count = source->length;
     bool is_ascii = sep_type == LMD_TYPE_NULL || text_item_is_ascii(sep_item);
     for (int64_t i = 0; i < count; i++) {
-        Item item = source->items[i];
+        // A native-lane source stores raw payloads in `items[]`, so read it
+        // through the lane accessor -- `split()` produces such a list (D2.6.5).
+        Item item = array_has_native_lane((Array*)source)
+            ? array_native_lane_read((Array*)source, i) : source->items[i];
         TypeId item_type = get_type_id(item);
         if (is_text_type_id(item_type)) {
             total_len += item.get_len();
@@ -6590,7 +6593,10 @@ Item fn_join2(Item list_item, Item sep_item) {
             memcpy(p, sep_chars, sep_len);
             p += sep_len;
         }
-        Item item = source->items[i];
+        // A native-lane source stores raw payloads in `items[]`, so read it
+        // through the lane accessor -- `split()` produces such a list (D2.6.5).
+        Item item = array_has_native_lane((Array*)source)
+            ? array_native_lane_read((Array*)source, i) : source->items[i];
         TypeId item_type = get_type_id(item);
         if (is_text_type_id(item_type)) {
             const char* item_chars = item.get_chars();

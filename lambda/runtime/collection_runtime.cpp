@@ -181,7 +181,12 @@ void array_push(Array* arr, Item item) {
             for (int64_t i = 0; i < nested->length; i++) {
                 arr = rooted_array.get();
                 nested = rooted_source.get().array;
-                array_push(arr, nested->items[i]);
+                // A source may carry a native lane, where `items[]` holds raw
+                // payloads rather than tagged Items -- `split()` returns such a
+                // content list. Reading the slot directly reinterprets a
+                // `String*` as an Item and yields null (D2.6.5).
+                array_push(arr, array_has_native_lane((Array*)nested)
+                    ? array_native_lane_read((Array*)nested, i) : nested->items[i]);
             }
             return;
         }
@@ -340,7 +345,9 @@ void list_push(List* list, Item item) {
             for (int64_t i = 0; i < nested->length; i++) {
                 list = rooted_list.get();
                 nested = rooted_source.get().array;
-                list_push(list, nested->items[i]);
+                // same native-lane source rule as array_push's content spread
+                list_push(list, array_has_native_lane((Array*)nested)
+                    ? array_native_lane_read((Array*)nested, i) : nested->items[i]);
             }
             list = rooted_list.get();
             int64_t child_count = list->length - first_child_index;
@@ -439,8 +446,10 @@ void list_push_spread(List* list, Item item) {
                 list = rooted_list.get();
                 arr = rooted_source.get().array;
                 // S9.3.1: each spread element is captured into the destination.
-                cow_capture_value(arr->items[i]);
-                list_push(list, arr->items[i]);
+                Item element = array_has_native_lane(arr)
+                    ? array_native_lane_read(arr, i) : arr->items[i];
+                cow_capture_value(element);
+                list_push(list, element);
             }
             return;
         }
