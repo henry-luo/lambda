@@ -1,5 +1,4 @@
 var fs = require('node:fs').promises;
-var vm = require('node:vm');
 var workerThreads = require('node:worker_threads');
 var MessageChannel = workerThreads.MessageChannel;
 var moveMessagePortToContext = workerThreads.moveMessagePortToContext;
@@ -7,7 +6,7 @@ var moveMessagePortToContext = workerThreads.moveMessagePortToContext;
 (async function() {
   var fh = await fs.open(__filename);
   var channel = new MessageChannel();
-  var moved = moveMessagePortToContext(channel.port2, vm.createContext({}));
+  var moved = moveMessagePortToContext(channel.port2, {});
 
   moved.onmessageerror = function(event) {
     console.log('messageerror code:', event && event.data && event.data.code);

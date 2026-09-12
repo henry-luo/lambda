@@ -761,7 +761,6 @@ extern "C" Item js_get_internal_util_inspect_namespace(void);
 extern "C" Item js_get_internal_repl_namespace(void);
 extern "C" Item js_get_internal_test_binding_namespace(void);
 extern "C" Item js_get_node_module_namespace(void);
-extern "C" Item js_get_vm_namespace(void);
 extern "C" Item js_get_async_hooks_namespace(void);
 extern "C" Item js_get_domain_namespace(void);
 extern "C" Item js_get_cluster_namespace(void);
@@ -3778,7 +3777,6 @@ static int jube_host_node_resolve_host_namespace(void* session, const char* spec
         {"repl", js_get_repl_namespace},
         {"diagnostics_channel", js_get_diagnostics_channel_namespace},
         {"module", js_get_node_module_namespace},
-        {"vm", js_get_vm_namespace},
         {"async_hooks", js_get_async_hooks_namespace},
         {"trace_events", node_trace_events_namespace},
         {"domain", js_get_domain_namespace},

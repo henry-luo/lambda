@@ -1,12 +1,11 @@
 // Octane benchmark runner for Node.js
-// Runs individual Octane benchmarks using vm module to simulate V8 shell's load()
+// Runs individual Octane benchmarks via indirect eval to simulate V8 shell's load()
 // Usage: node run_octane.js <benchmark_name>
 // Example: node run_octane.js box2d
 //          node run_octane.js all
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const vm = require('vm');
 const dir = __dirname;
 
 const BENCHMARKS = {
@@ -18,26 +17,30 @@ const BENCHMARKS = {
     'typescript':  ['typescript-input.js', 'typescript-compiler.js', 'typescript.js'],
 };
 
+// Indirect eval runs at global scope, so each loaded file defines its globals
+// on the shared realm exactly as V8's shell `load()` does. Unlike the former vm
+// contexts this gives no per-benchmark isolation: run `all` only for a smoke
+// pass and take real numbers one benchmark per process.
+const load = (0, eval);
+
 function runBenchmark(name, files) {
-    // Only inject non-built-in globals. Let the sandbox use its own built-in
-    // constructors (Array, Object, etc.) to avoid cross-realm instanceof failures.
-    const ctx = {
-        performance: { now: () => Date.now() },
-        print: console.log,
-        console,
-    };
-    vm.createContext(ctx);
+    // Only inject non-built-in globals. The benchmarks use the realm's own
+    // built-in constructors (Array, Object, etc.), so instanceof stays valid.
+    if (typeof globalThis.performance === 'undefined') {
+        globalThis.performance = { now: () => Date.now() };
+    }
+    globalThis.print = console.log;
 
     // Load harness
-    vm.runInContext(fs.readFileSync(path.join(dir, 'base.js'), 'utf8'), ctx, { filename: 'base.js' });
+    load(fs.readFileSync(path.join(dir, 'base.js'), 'utf8'));
 
     // Load benchmark files
     for (const f of files) {
-        vm.runInContext(fs.readFileSync(path.join(dir, f), 'utf8'), ctx, { filename: f });
+        load(fs.readFileSync(path.join(dir, f), 'utf8'));
     }
 
     // Run
-    vm.runInContext(`
+    load(`
         var success = true;
         function PrintResult(name, result) { print(name + ': ' + result); }
         function PrintError(name, error) { PrintResult(name, error); success = false; }
@@ -47,7 +50,7 @@ function runBenchmark(name, files) {
         BenchmarkSuite.config.doWarmup = undefined;
         BenchmarkSuite.config.doDeterministic = undefined;
         BenchmarkSuite.RunSuites({ NotifyResult: PrintResult, NotifyError: PrintError, NotifyScore: PrintScore });
-    `, ctx);
+    `);
 }
 
 const arg = process.argv[2] || 'all';

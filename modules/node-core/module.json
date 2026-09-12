@@ -25,7 +25,6 @@
     "worker_threads",
     "tty",
     "module",
-    "vm",
     "async_hooks",
     "trace_events",
     "domain",

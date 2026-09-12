@@ -2,7 +2,6 @@
 // Extract the checked-in hyphen.js en-US tables into portable benchmark data.
 const fs = require("fs");
 const path = require("path");
-const vm = require("vm");
 
 const textDir = __dirname;
 const sourcePath = path.join(textDir, "hyphen.js");
@@ -12,10 +11,11 @@ const source = fs.readFileSync(sourcePath, "utf8");
 const fixtureStart = source.indexOf("var hyphen_texts = [");
 if (fixtureStart < 0) throw new Error("missing hyphen benchmark fixture marker");
 
-const context = {};
-vm.createContext(context);
-new vm.Script(source.slice(0, fixtureStart), {filename: sourcePath}).runInContext(context);
-const patterns = context.hyphenation_patterns;
+// Indirect eval runs the pattern prologue at global scope, so its `var`
+// declarations land on globalThis -- the fixture body after the marker is
+// never evaluated, which is the only isolation this generator needs.
+(0, eval)(source.slice(0, fixtureStart));
+const patterns = globalThis.hyphenation_patterns;
 if (!Array.isArray(patterns) || !Array.isArray(patterns[0]) || !patterns[1]) {
   throw new Error("could not extract hyphenationPatternsEnUs data");
 }
