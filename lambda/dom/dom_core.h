@@ -35,6 +35,30 @@ enum DomOpFlags {
 #define DOM_NO_BODY nullptr
 
 // --- core: node reads
+// Node and tree operation rows (bodies in dom.cpp, beside the bridges they
+// call; the ordinal executor's arms delegate to these).
+Item dom_core_append_child(Item parent, Item child);
+Item dom_core_remove_child_op(Item parent, Item child);
+Item dom_core_insert_before_op(Item parent, Item node, Item ref);
+Item dom_core_replace_child(Item parent, Item new_node, Item old_node);
+Item dom_core_clone_node(Item n, Item deep);
+Item dom_core_normalize(Item n);
+Item dom_core_has_child_nodes(Item n);
+Item dom_core_scroll_into_view_op(Item n);
+Item dom_core_contains_op(Item a, Item b);
+Item dom_core_equal_node(Item a, Item b);
+Item dom_core_same_node_op(Item a, Item b);
+Item dom_core_dispatch(Item n, Item event);
+Item dom_core_dispatch_op(Item n, Item event);
+
+// CharacterData rows (bodies in dom.cpp, beside the dom_text_*_method calls).
+Item dom_core_replace_data(Item n, Item offset, Item count, Item data);
+Item dom_core_insert_data(Item n, Item offset, Item data);
+Item dom_core_append_data(Item n, Item data);
+Item dom_core_delete_data(Item n, Item offset, Item count);
+Item dom_core_substring_data(Item n, Item offset, Item count);
+Item dom_core_split_text(Item n, Item offset);
+
 Item dom_core_node_type(Item n);
 Item dom_core_node_name(Item n);
 Item dom_core_node_value(Item n);
@@ -44,7 +68,6 @@ Item dom_core_last_child(Item n);
 Item dom_core_next_sibling(Item n);
 Item dom_core_previous_sibling(Item n);
 Item dom_core_owner_document(Item n);
-Item dom_core_same_node(Item a, Item b);
 // --- core: attributes
 Item dom_core_get_attribute(Item n, Item name);
 Item dom_core_set_attribute(Item n, Item name, Item value);
@@ -52,8 +75,6 @@ Item dom_core_remove_attribute(Item n, Item name);
 Item dom_core_attribute_names(Item n);
 // --- core: tree mutation
 Item dom_core_create_node(Item doc, Item type, Item name, Item data);
-Item dom_core_insert_before(Item parent, Item node, Item ref);
-Item dom_core_remove_child(Item parent, Item node);
 Item dom_core_set_node_value(Item n, Item data);
 Item dom_core_tc_set_selection(Item n, Item start, Item end, Item dir);
 Item dom_core_tc_replace_range(Item n, Item start, Item end, Item text);
@@ -69,7 +90,6 @@ Item dom_core_client_rects(Item n);
 Item dom_core_scroll_state(Item n);
 Item dom_core_set_scroll_state(Item n, Item x, Item y);
 Item dom_core_element_from_point(Item doc, Item x, Item y);
-Item dom_core_scroll_into_view(Item n);
 // --- core: range / selection composite reads
 Item dom_core_range_boundaries(Item r);
 Item dom_core_selection_boundaries(Item s);
@@ -85,21 +105,16 @@ Item dom_fp_previous_element_sibling(Item n);
 Item dom_fp_parent_element(Item n);
 Item dom_fp_children(Item n);
 Item dom_fp_child_nodes(Item n);
-Item dom_fp_contains(Item a, Item b);
 Item dom_fp_root_node(Item n);
 Item dom_fp_document_element(Item n);
-Item dom_fp_equal_node(Item a, Item b);
-Item dom_fp_append_child(Item parent, Item child);
 Item dom_fp_remove(Item n);
-Item dom_fp_replace_child(Item parent, Item new_node, Item old_node);
 Item dom_fp_create_element(Item doc, Item tag);
 Item dom_fp_create_text_node(Item doc, Item data);
-Item dom_fp_clone_node(Item n, Item deep);
 Item dom_fp_text_content(Item n);
-Item dom_fp_query_selector(Item root, Item selector);
-Item dom_fp_query_selector_all(Item root, Item selector);
-Item dom_fp_closest(Item n, Item selector);
-Item dom_fp_get_element_by_id(Item root, Item id);
+Item dom_core_query_selector(Item n, Item selector);
+Item dom_core_query_selector_all(Item n, Item selector);
+Item dom_core_closest(Item n, Item selector);
+Item dom_core_get_element_by_id(Item n, Item id_item);
 Item dom_fp_has_attribute(Item n, Item name);
 Item dom_fp_inner_html(Item n);
 Item dom_fp_outer_html(Item n);
@@ -214,7 +229,6 @@ Item dom_engine_set_hover_index(Item a, Item b);
 Item dom_engine_set_selected_index(Item a, Item b);
 Item dom_engine_submit_event(Item a, Item b);
 Item dom_engine_value_at_focus(Item a);
-Item dom_core_dispatch(Item n, Item event);
 Item dom_core_get_property(Item n, Item name);
 Item dom_core_set_property(Item n, Item name, Item value);
 Item dom_core_invoke(Item n, Item op, Item args);
