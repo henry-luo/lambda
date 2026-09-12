@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "description": "Tune26 / S4.1 / D5.2 / D5.3: each float[] read retains a cold lambda_type_check for its semantic OOB rejection, but that known-failing edge returns directly and does not tag-test the guaranteed error or rebuild typed-array caches.",
+  "checks": [
+    {
+      "in_func": "_read_sum_#",
+      "expect": [
+        "call\tlambda_type_check_p, lambda_type_check"
+      ],
+      "expect_seq": [
+        ", 72057594037927936",
+        "call\tlambda_type_check_p, lambda_type_check",
+        { "pattern": "call\tit2d_p, it2d", "next_line": true }
+      ],
+      "count": {
+        "call\tlambda_type_check_p, lambda_type_check": 4
+      }
+    }
+  ]
+}

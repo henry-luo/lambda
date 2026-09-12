@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "description": "Tune26 / S4.1 / D2.4.1 / D3.3.3v3: ord(any) returns a checked int|null Item which enters IntLane once. A plain int declaration branches on the lane null sentinel before its sole, cold lambda_type_check; the non-null path must not box and dynamically traverse the already closed result.",
+  "checks": [
+    {
+      "in_func": "_decode_#",
+      "expect_seq": [
+        { "pattern": "call\tfn_ord_p, fn_ord" },
+        { "pattern": ", 72057594037927936" },
+        { "pattern": "\tbf\t", "next_line": true },
+        { "pattern": "call\tlambda_type_check_p, lambda_type_check" }
+      ],
+      "count": {
+        "call\tfn_ord_p, fn_ord": 1,
+        "call\tlambda_type_check_p, lambda_type_check": 1
+      }
+    }
+  ]
+}

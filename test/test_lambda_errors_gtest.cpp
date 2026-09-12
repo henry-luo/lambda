@@ -118,6 +118,51 @@ TEST(ValueRepresentationTest, ArrayCertificateIdentityStillChecksTheLiveCarrier)
     pool_destroy(pool);
 }
 
+TEST(ValueRepresentationTest, OwnedNumericTensorProvesNestedPrimitiveContract) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    TypeUnary row = array_contract_for_test(&TYPE_INT);
+    TypeUnary matrix = array_contract_for_test((Type*)&row);
+    ArrayRepCert* cert = lambda_array_rep_cert_create(pool, (Type*)&matrix);
+    ASSERT_NE(cert, nullptr);
+    EXPECT_EQ(cert->rank, 2);
+    EXPECT_TRUE(cert->has_array_num_lane);
+    EXPECT_EQ(cert->array_num_elem, ELEM_INT);
+
+    alignas(ArrayNumShape) uint8_t shape_storage[
+        sizeof(ArrayNumShape) + 4 * sizeof(int64_t)] = {};
+    ArrayNumShape* shape = (ArrayNumShape*)shape_storage;
+    shape->ndim = 2;
+    shape->backing_kind = ARRAY_NUM_BACKING_GC_OWNED;
+
+    ArrayNum array = {};
+    array.type_id = LMD_TYPE_ARRAY_NUM;
+    array.set_elem_type(ELEM_INT);
+    array.is_ndim = 1;
+    array.extra = (int64_t)(uintptr_t)shape;
+    array.rep_cert = cert;
+    Item value = {.array_num = &array};
+    EXPECT_TRUE(lambda_array_num_representation_proves_primitive_contract(
+        value, (Type*)&matrix));
+    EXPECT_TRUE(lambda_array_rep_proves_cert(value, cert, true));
+
+    shape->ndim = 3;
+    EXPECT_FALSE(lambda_array_num_representation_proves_primitive_contract(
+        value, (Type*)&matrix));
+    EXPECT_FALSE(lambda_array_rep_proves_cert(value, cert, true));
+    shape->ndim = 2;
+    array.is_view = 1;
+    EXPECT_FALSE(lambda_array_num_representation_proves_primitive_contract(
+        value, (Type*)&matrix));
+    EXPECT_FALSE(lambda_array_rep_proves_cert(value, cert, true));
+    array.is_view = 0;
+    array.set_elem_type(ELEM_FLOAT64);
+    EXPECT_FALSE(lambda_array_num_representation_proves_primitive_contract(
+        value, (Type*)&matrix));
+    EXPECT_FALSE(lambda_array_rep_proves_cert(value, cert, true));
+    pool_destroy(pool);
+}
+
 TEST(ValueRepresentationTest, ArrayCertificateKeepsNullablePointerStorageDistinct) {
     Pool* pool = pool_create();
     ASSERT_NE(pool, nullptr);

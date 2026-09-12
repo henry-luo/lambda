@@ -347,9 +347,24 @@ TEST(LambdaTypedPathTests, PreservesPlainParameterSnapshotsAcrossComputedStoreLo
         "test/mir/lambda/tune26_plain_param_snapshot_loop.txt", true);
 }
 
+TEST(LambdaTypedPathTests, LazilySnapshotsPlainBoolArrayParameter) {
+    test_lambda_script_against_file("test/mir/lambda/tune26_plain_bool_param_lazy_snapshot.ls",
+        "test/mir/lambda/tune26_plain_bool_param_lazy_snapshot.txt", true);
+}
+
 TEST(LambdaTypedPathTests, ReusesExclusiveTypedVarReborrow) {
     test_lambda_script_against_file("test/mir/lambda/tune26_typed_reborrow.ls",
         "test/mir/lambda/tune26_typed_reborrow.txt", true);
+}
+
+TEST(LambdaTypedPathTests, PublishesNestedTypedVarArrayDetach) {
+    test_lambda_script_against_file("test/mir/lambda/tune26_typed_var_home_chain.ls",
+        "test/mir/lambda/tune26_typed_var_home_chain.txt", true);
+}
+
+TEST(LambdaTypedPathTests, PreservesCowStateAcrossLoopBackedge) {
+    test_lambda_script_against_file("test/mir/lambda/tune26_loop_cow_backedge.ls",
+        "test/mir/lambda/tune26_loop_cow_backedge.txt", true);
 }
 
 TEST(LambdaTypedPathTests, StoresNullableFloatLaneThroughColdTypedFallback) {

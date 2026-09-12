@@ -753,14 +753,9 @@ static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
     // Search and ordinal operations have one optional scalar result: a valid
     // non-negative integer or no value. Their former -1 sentinel made the
     // public type look total and prevented Lambda's `value or default` idiom.
-    switch (info->fn) {
-    case SYSFUNC_INDEX_OF:
-    case SYSFUNC_LAST_INDEX_OF:
-    case SYSFUNC_ORD:
+    if (sysfunc_returns_optional_int(info)) {
         return lambda_type_nullable_normalized(tp->pool,
             success ? success : (Type*)&TYPE_INT);
-    default:
-        break;
     }
 
     if (!first_arg || !first_arg->type) return success ? success : &TYPE_ANY;
@@ -8252,6 +8247,11 @@ static void direct_refresh_recursive_type_layout(Type* type, ArrayList* visited)
         direct_refresh_recursive_type_layout(((TypeUnary*)type)->operand, visited);
     } else if (type->type_id == LMD_TYPE_MAP && type != &TYPE_MAP) {
         TypeMap* map = (TypeMap*)type;
+        // Every record arm reached from a named union alias is a declared
+        // contract, just like a directly named record. Marking only the outer
+        // union left compiler-constructed member carriers unable to certify
+        // recursive admission (D3.2.4v3, D8.3.2-D8.3.3).
+        map->is_trusted_contract = true;
         bool changed_width = false;
         for (ShapeEntry* field = map->shape; field; field = field->next) {
             direct_refresh_recursive_type_layout(field->type, visited);
