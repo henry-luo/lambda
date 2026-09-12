@@ -1,7 +1,8 @@
 # Runtime Constant Handling — Folding, the Const Pool, and Shared Values
 
 **Date:** 2026-09-11 (design), 2026-09-12 (implemented)
-**Status:** IMPLEMENTED. RC-P0 … RC-P8 landed; two deliberate residues (§9).
+**Status:** IMPLEMENTED for Lambda — RC-P0 … RC-P8 landed, two deliberate
+residues (§10). **Designed, not built, for JavaScript** (§9).
 
 **Formal authority:** **D6.1.1–D6.1.2** (the purity bit; it *is* the
 const-folder's soundness gate), **D8.2.2** (purity is a core flag),
@@ -29,6 +30,11 @@ Two kinds of value reach the const pool, by two different routes:
 
 Both end as pool entries, so no consumer asks which produced a value. The
 folder's input is expressions only.
+
+§2–§8 describe this as built for **Lambda**. §9 carries the same storage design
+to **JavaScript** with a deliberately narrower scope: JS shares the pool, the
+node handle and the emission split, but not the folder — its semantics, purity
+model and inertness guarantee are its own.
 
 ---
 
@@ -77,7 +83,7 @@ A node is **const** when:
 3. it is an identifier bound by an **immutable** binding whose initializer is
    const; or
 4. it is a call to a **pure sys-func** with all-const arguments. A user-defined
-   `fn` call is semantically const under D6.1.2 but is **out of scope** (§9,
+   `fn` call is semantically const under D6.1.2 but is **out of scope** (§10,
    Appendix C.5); or
 5. it is a control form (`if`, `match`) whose scrutinee and taken arms are const.
 
@@ -203,7 +209,7 @@ carries identity and must never be content-shared; a container **constructed** b
 the program has none. A folded aggregate is constructed by definition, so it is
 always on the poolable side.
 
-*Implementation status:* rehoming has no reachable case yet — see §9.
+*Implementation status:* rehoming has no reachable case yet — see §10.
 
 ---
 
@@ -241,7 +247,72 @@ must surface as one, never as a quietly missed optimization.
 
 ---
 
-## 9. Not done
+## 9. JavaScript
+
+**Status:** designed, not built. Scope is deliberately narrower than Lambda's.
+
+### 9.1 What JS has today
+
+| | |
+|---|---|
+| Const-fold pass | **None.** No `const_fold` anywhere under `lambda/js/`. `1 + 2` emits a runtime add. |
+| Const pool | **Unused.** `grep const_list lambda/js/` is empty, though `JsScript : Script` inherits the field. |
+| Restricted eval mode | **None.** No `EvalMode`, `mode_fuel` or `mode_rejected` in `js_interp.cpp`. |
+| Purity bit | **None.** No `is_proc` equivalent for JS callables. |
+| Literal emission | **Present and reasonable.** `jm_transpile_literal_value` bakes immediates and already honours a representation demand (`VALUE_REP_F64` vs boxed). |
+| Node handle | **Already there.** `typedef AstNode JsAstNode`, so every JS node carries `const_kind`/`const_index` — currently always `AST_CONST_NONE`. |
+
+Array and object literals are built at run time, every evaluation. There is no
+JS equivalent of RC15 materialization.
+
+### 9.2 The NameId constraint
+
+`jm_box_string_literal` embeds the bytes in the MIR artifact and calls
+`js_make_string_len` **at evaluation time**, with a stated reason:
+
+> String values are not property identities. Keep their bytes in the MIR
+> artifact and allocate an ordinary GC String at evaluation time so source
+> text, diagnostics, and literals never consume permanent NameIds.
+
+That reason is sound and must survive. A `NameId` is a 16-bit **append-only**
+ordinal per segment — bounded at 65,535, never reclaimed — and exists to make
+property identity a 32-bit compare (`js_get_name_id`). A string *value* never
+participates in property lookup, so an id spent on it buys nothing and is never
+returned. JS is uniquely exposed: it is string-heavy, and `eval`/`new Function`
+mean the literal set is not bounded by source on disk.
+
+**The const pool is a third option, not a violation of that.** A `const_list`
+entry is neither a NameId nor a per-evaluation allocation. Pooling a JS literal
+spends script-pool storage that dies with the unit, and leaves the identity
+space untouched. §9.2 is the constraint to respect, not an argument against
+pooling.
+
+### 9.3 Ledger
+
+| ID | Ruling |
+|---|---|
+| **RC-J1** | **The storage design is shared; the folder is not.** `AstNode`'s handle, the const pool, the two `AstConstKind` cases and the emission split (RC5v2, RC12v2, RC13, RC18) carry over unchanged. Evaluation does not: **S3.1–S3.3** truthiness is Lambda's, and JS coercion can run user code through `valueOf`/`toString`. One storage design, two folders — the same shape **D8.1.3v10** settled on for the two interpreters. |
+| **RC-J2** | **Literal values move into the const pool, and the per-evaluation allocation is retired** (§9.4). No literal value spends a `NameId`; property *keys* keep using the NameId path untouched. |
+| **RC-J3** | **Purity gating is JS-specific and must be built before any call folds.** JS has no `is_proc`. Property access can invoke a getter, most builtins can throw, and coercion can re-enter user code — so a JS purity judgement is an analysis, not a bit lookup. Until it exists, **D6.1.1**'s "guests mark all-effectful" governs and nothing calls. |
+| **RC-J4** | **RC14 inertness needs a JS restricted-eval mode first.** Lambda's guarantee rests on `EvalMode::CONST`, per-node fuel, `mode_rejected` and a throwaway rooted frame. JS has none of these. A fold that can throw, suspend, or allocate unboundedly during compilation is not admissible. |
+| **RC-J5** | **User-defined function calls are deferred**, for the same reasons as Lambda (Appendix C.5) and more: a JS callee can throw, await, or capture a realm. |
+
+### 9.4 Phases
+
+| Phase | Content | Retires |
+|---|---|---|
+| **JS-P1** | **Const values and const containers into the pool.** Scalar literals gain a pool entry and a node handle; array/object literals whose parts are all const are materialized once, as RC15 does for Lambda. No evaluation, no folder — this is materialization only, so RC-J3 and RC-J4 are not yet prerequisites. | `jm_box_string_literal` (44 sites), `jm_string_literal_chars` (4), `jm_box_float_const` (3), `jm_boxed_immediate_const` (5), `jm_box_bigint_literal` (2) — each becomes a pool handle plus the shared emission split. |
+| **JS-P2** | **Expressions and pure sys-func calls.** Requires RC-J4's restricted-eval mode and RC-J3's purity analysis first. | the runtime arithmetic behind constant JS expressions |
+| — | **User function calls: deferred** (RC-J5). | — |
+
+JS-P1 is the whole of the value: it removes a GC allocation per literal
+evaluation and one runtime call per string literal, and it needs neither a
+folder nor a purity analysis. JS-P2 should not start until JS-P1 has shipped and
+RC-J3/RC-J4 exist.
+
+---
+
+## 10. Not done
 
 | Residue | Status |
 |---|---|
@@ -285,7 +356,7 @@ right. Everything around it was too narrow, and the narrowness compounded.
 - **A.8 Literal values were recovered by re-reading source text.** `&LIT_INT` and
   `LIT_BOOL` are valueless singletons, so `ast_static_literal_item()` re-parsed
   the span. This also couples AST validity to source retention — the REPL must
-  keep its source buffer alive because spans point into it. *Still true;* see §9.
+  keep its source buffer alive because spans point into it. *Still true;* see §10.
 - **A.9 The pass re-ran.** A retained AST begins a fresh unit with `ANALYZED`
   unseeded, so the fold repeated over settled facts.
 
@@ -300,7 +371,7 @@ right. Everything around it was too narrow, and the narrowness compounded.
 | **RC-P3** | Consult the handle on all lowering paths; emit in the consumer's lane. | Landed, binary then unary/if. |
 | **RC-P4** | Interpreter consumes its own facts. | Landed. |
 | **RC-P5a** | Const containers materialized, not folded; shared by both tiers. | Landed. |
-| **RC-P5** | Rehoming. | **No reachable case** — §9. |
+| **RC-P5** | Rehoming. | **No reachable case** — §10. |
 | **RC-P6** | Eligibility widening under the purity gate. | Landed for identifiers and pure sys-func calls; user `fn` calls out of scope (C.5). |
 | **RC-P6b** | RC17/RC18. | Handle half landed via RC-P8; payload deletion blocked (C.4). |
 | **RC-P7** | Pool sharing. | Landed. Measured: 12 intern calls → 2 entries; 3 `"hello"` literals → 1 `String`. |
@@ -361,7 +432,7 @@ that a shared valueless singleton was already rejected there.
 
 Deleting the payloads would break literal unions (`"a" | "b"`), type patterns
 (`[3.14]`) and `type T = 3.14`. RC17v2 splits the two roles. The consequence for
-§9: expression-position payload deletion needs proof that a `build_lit_*` result
+§10: expression-position payload deletion needs proof that a `build_lit_*` result
 never reaches type position, and failure there is *silent* — a literal union
 would quietly admit every string rather than erroring.
 
