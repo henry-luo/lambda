@@ -1,7 +1,7 @@
 # LambdaJS: shared plans, native lanes and scalar loop effects
 
 > **Implementation record — 2026-09-10.** Continues the three follow-up tasks
-> in [the JS2 proposal](../Lambda_Design_Structs_JS2.md), from source base
+> in [the struct-authority record](../Lambda_Design_Structs_JS.md), from source base
 > `31d19bac9`. Authority: **D1.3**, **D2.4.1–D2.4.3**, **D3.4.5–D3.4.6**,
 > **D5.2.3**, **D5.3.1–D5.3.4**, **D5.4.3**, **D6.2.2v2**,
 > **D8.4.1v2–D8.4.3v2**, **D8.6.1–D8.6.3**. No ruling or value ABI changes.

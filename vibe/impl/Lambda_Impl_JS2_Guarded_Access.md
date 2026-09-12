@@ -2,7 +2,7 @@
 
 > **Implemented — 2026-09-10; validation results below.** Tasks 1 and 2 from
 > the JS tuning follow-up, implementing the bounded field/indexing steps of
-> [JSCU38–JSCU39](../Lambda_Design_Structs_JS2.md#6-jscu38--shared-guarded-field-reads-and-writes).
+> [JSCU38–JSCU39](../Lambda_Design_Structs_JS.md#11-jscu38--shared-guarded-field-reads-and-writes).
 > Authority: **D3.4.5–D3.4.6**, **D5.1–D5.4**, **D8.4.1v2**, **D8.4.3v2**
 > and **D8.6.1–D8.6.3**. No language ruling changes.
 > Source base: `a436d168f`, including the separate callable/realm consolidation

@@ -31,7 +31,7 @@ numbering spaces cannot collide when the doc sections are folded in later.
 
 **Found:** 2026-09-11. **Reproduced against:** a build of unmodified `master`
 at `ef03733de`. **Fixed:** 2026-09-11 by JSCU44
-([`Lambda_Design_Structs_JS2.md`](Lambda_Design_Structs_JS2.md) §13), the
+([`Lambda_Design_Structs_JS.md`](Lambda_Design_Structs_JS.md) §18), the
 structural option below. Regression:
 `test/js/regression_with_generator_scope.js`.
 
@@ -85,14 +85,12 @@ had a suspended generator in scope — but JSCU44 closes it regardless: the
 activation boundary now runs on every lane, guarded only by "neither side has a
 with-scope". Case 3 of the regression test covers it.
 
-**Fix taken.** JSCU44's per-activation chain, not either option as first
-sketched. Locally pushed scopes live in a free-listed `RootVector` rather than
-in the activation's side-root frame: the side root stack is watermark-LIFO, and
-a suspended generator holds its scope while other activations push and pop, so
-LIFO storage would have required a spill on every suspension regardless. The
-chain head *is* per-activation, which is what the fix needed. A generator's
-chain is captured at creation and re-entered on every resume
-(`JsSuspendedActivation::with_env`), so the contained option is subsumed.
+**Fix taken.** JSCU44's per-activation chain. A scope open across a suspension
+parks in a generator env slot and closes before the state machine returns, so
+scopes are activation-bounded and live in root-stack slots reserved with the
+pushing frame. The chain head is per-activation, which is what the fix needed.
+A generator or async frame captures its lexical chain at creation, so a resume
+never inherits the resuming turn's chain.
 
 The call-boundary copy is gone with it: the callee's inherited chain is its
 closure's existing `js_alloc_env` capture, borrowed by one frame rather than

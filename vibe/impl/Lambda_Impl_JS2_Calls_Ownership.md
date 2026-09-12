@@ -1,7 +1,7 @@
 # LambdaJS: shared native completion and scalar ownership
 
 > **Implemented — 2026-09-10.** Tasks 3 and 4 of the JS tuning
-> follow-up, continuing [JSCU40–JSCU41](../Lambda_Design_Structs_JS2.md#8-jscu40--one-function-plan-return-contract-and-entry-obligation).
+> follow-up, continuing [JSCU40–JSCU41](../Lambda_Design_Structs_JS.md#13-jscu40--one-function-plan-return-contract-and-entry-obligation).
 > Authority: **D1.4v3**, **D5.2.1v3–D5.2.3**, **D5.3.1–D5.3.4**,
 > **D5.4.2**, **D6.2.2v2**, **D8.3.1–D8.3.4**, **D8.4.3v2**, **D8.6.1–D8.6.3**.
 > Source base: `fa254c56b`, including the earlier tasks 1 and 2 committed in
