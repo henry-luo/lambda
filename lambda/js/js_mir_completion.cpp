@@ -433,6 +433,10 @@ void jm_emit_error_lane_route(JsMirTranspiler* mt, JsMirCompletionKind kind) {
     case JS_ERROR_LANE_SET: {
         jm_capture_routed_error_lane(mt, route_context);
         jm_clear_active_arg_frames(mt);
+        // With no enclosing try the target is the function-level error exit, so
+        // this edge leaves the function and must close its own `with` scopes;
+        // a try target restores the depth at its handler label instead.
+        if (!route_context) jm_emit_with_unwind_to(mt, 0);
         jm_emit_jmp(mt, target);
         // An unconditional ERROR-lane jump leaves no fallthrough path. Keep
         // later lowering unreachable until the handler label supplies its
@@ -446,27 +450,19 @@ void jm_emit_error_lane_route(JsMirTranspiler* mt, JsMirCompletionKind kind) {
         break;
     }
     MIR_reg_t exception = jm_emit_error_lane_test(mt);
-    if (jm_has_active_arg_frame(mt)) {
-        MIR_label_t clean_path = jm_new_label(mt);
-        jm_emit_branch(mt, MIR_BF, clean_path, exception);
-        // Capture only on the exceptional edge. Emitting the carrier creation
-        // before this branch would allocate a synthetic null exception on
-        // every normal call and contaminate the merged lane.
-        jm_capture_routed_error_lane(mt, route_context);
-        // Fixed argument slots stay inside the function frame, but their
-        // call-expression lifetime still ends on a caught exceptional edge.
-        jm_clear_active_arg_frames(mt);
-        jm_emit_jmp(mt, target);
-        jm_emit_label_with_state(mt, clean_path, JS_ERROR_LANE_CLEAN);
-    } else {
-        MIR_label_t clean_path = jm_new_label(mt);
-        jm_emit_branch(mt, MIR_BF, clean_path, exception);
-        // Capture only after the tag test proves this edge exceptional; the
-        // normal path must not manufacture a discarded ERROR carrier.
-        jm_capture_routed_error_lane(mt, route_context);
-        jm_emit_jmp(mt, target);
-        jm_emit_label_with_state(mt, clean_path, JS_ERROR_LANE_CLEAN);
-    }
+    MIR_label_t clean_path = jm_new_label(mt);
+    jm_emit_branch(mt, MIR_BF, clean_path, exception);
+    // Capture only after the tag test proves this edge exceptional. Emitting
+    // the carrier creation before the branch would allocate a synthetic null
+    // exception on every normal call and contaminate the merged lane.
+    jm_capture_routed_error_lane(mt, route_context);
+    // Fixed argument slots stay inside the function frame, but their
+    // call-expression lifetime still ends on a caught exceptional edge.
+    if (jm_has_active_arg_frame(mt)) jm_clear_active_arg_frames(mt);
+    // See the SET case: only a function-level exit closes its `with` scopes.
+    if (!route_context) jm_emit_with_unwind_to(mt, 0);
+    jm_emit_jmp(mt, target);
+    jm_emit_label_with_state(mt, clean_path, JS_ERROR_LANE_CLEAN);
 }
 
 void jm_emit_error_lane_guard(JsMirTranspiler* mt, MIR_label_t target) {
@@ -558,9 +554,14 @@ static void jm_emit_throw_completion_impl(JsMirTranspiler* mt, MIR_reg_t value,
     }
     if (target) {
         jm_capture_routed_error_lane(mt, context);
+        // A throw caught in this function does not unwind `with` here: the
+        // catch/finally label restores the depth its try was entered at.
         jm_emit_jmp(mt, target);
         return;
     }
+    // No handler in this function, so the throw leaves it -- and a completion
+    // that leaves closes every `with` it opened, exactly as `return` does.
+    jm_emit_with_unwind_to(mt, 0);
     if (jm_emit_native_throw_exit(mt, thrown)) return;
     MIR_reg_t native_value = jm_native_return_reg(mt, jm_item_value(thrown));
     jm_emit_ret(mt, native_value);

@@ -273,9 +273,9 @@ static Item js_invoke_mir_state(void* func_ptr, JsSuspendedActivation* activatio
     if (!activation) {
         return ((MirStateFn)func_ptr)((Context*)context, env, input, state);
     }
-    // The bracket is unconditional even with no inherited chain: a `return` out
-    // of a `with` body bypasses the generated pop, and leaving is what releases
-    // the frames the body left open.
+    // The bracket is unconditional even with no inherited chain: a resumed body
+    // resolves names against its own captured chain, and leaving reinstates
+    // whatever the resumer had open.
     JsWithFrame inherited = {};
     JsWithFrame* saved_head = js_with_activation_enter(activation->with_env,
         activation->with_depth, &inherited);
@@ -13437,6 +13437,7 @@ static inline Item js_call_value(Item func_item, Item this_val, Item* args,
 // JSCU44: a `with` scope must not leak into a called function. The callee's
 // chain is its own captured env, so entering a call relinks one borrowed frame
 // and leaving restores the caller's head -- no copy, no dynamic root range.
+// The callee releases its own frames at every completion, so leaving frees none.
 struct JsWithActivation {
     JsWithActivation() = default;
     JsWithFrame frame = {};
