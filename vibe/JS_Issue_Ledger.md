@@ -147,6 +147,32 @@ Labelled `with` works because the label entry is pushed before the body raises
 to corrupt a process-wide stack shared by every activation, and now cannot
 escape the activation that made the jump.
 
+### JS05-L4 — `return`/`throw` did not close the `with` scopes they left — **RESOLVED**
+
+**Found:** 2026-09-12 while auditing what still compensated for JSCU44.
+**Fixed:** 2026-09-12 (`return` first, then `throw`). Regressions:
+`test/js/regression_with_return_unwind.js`,
+`test/js/regression_with_throw_unwind.js`.
+
+The lowering unwound `with` only on the paths that stayed inside the function —
+falling off the body, `break`/`continue` (JS05-L2). A `return` or `throw` that
+left the function emitted no pop at all, so a callee handed its scopes to
+whoever ran next. Two compensations hid it: the direct-call lane bracketed every
+call to a `uses_with` callee with `js_with_save_depth`/`js_with_restore_depth`,
+and `js_with_activation_leave` walked the chain freeing whatever the callee had
+left. Neither is where the knowledge lives — only the callee's own lowering
+knows which scopes a completion crosses — and neither covers a callee reached on
+a lane that brackets nothing.
+
+**Fix.** One emitter, `jm_emit_with_unwind_to(mt, floor)`, called at each
+completion site with the floor that completion actually leaves; see
+[`Lambda_Design_Structs_JS.md` §18](Lambda_Design_Structs_JS.md) for the table.
+Both compensations are then retired: `js_with_activation_leave` becomes a head
+restore, and the direct-call lane emits nothing. `js_with_save_depth` /
+`js_with_restore_depth` survive as the try/`using` brackets, which is the one
+place a depth rather than a count is the right handle — a throw's landing point
+is a label, not an emission site.
+
 ### JS05-L3 — a generator closure created inside `with` fails only under the batched suite — **OPEN**
 
 **Found:** 2026-09-12 while extending the JSCU44 regressions. **Not caused by

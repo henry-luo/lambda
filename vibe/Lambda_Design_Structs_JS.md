@@ -2013,6 +2013,26 @@ bracket their push in one native scope, so they pass a `RootSpan` cell.
 root slot — JSCU13. A frame's record is heap-allocated by the pusher, or is the
 caller's native local for the borrowed activation frame.
 
+**Every completion closes the scopes it opened.** A `with` body is left by
+falling off its end, by `break`/`continue`, by `return`, or by `throw`, and each
+is unwound at its own emission site, where the transpiler's lexical
+`mt->with_depth` is the ground truth — never repaired afterwards by the caller
+or by the activation boundary.
+
+| completion | emitter | floor |
+|---|---|---|
+| normal exit, `break`/`continue` | `with` and loop lowering | the statement's own depth |
+| `return` (real `ret`) | statement lowering | 0 — the function is left |
+| `return` delayed into a `finally` | `jm_emit_delayed_return_completion` | the try's `with_depth_at_push`: the finally still resolves through what encloses the try |
+| `throw` caught in this function | none | the catch/finally label restores the depth its try was entered at |
+| `throw` leaving the function, in-band error with no enclosing try | `jm_emit_throw_completion_impl`, `jm_emit_error_lane_route` | 0 |
+
+`jm_emit_with_unwind_to(mt, floor)` is the single emitter; at depth 0 it emits
+nothing, so completions outside a `with` cost no instructions. Because the
+callee is now complete on its own, the call boundary carries no compensation:
+`js_with_activation_leave` is a head restore, and the direct-call lane emits no
+`js_with_save_depth`/`js_with_restore_depth` pair.
+
 **Retired by this ruling.** `js_with_set_stack`, `js_with_save_stack`,
 `JsSavedWithScope` and its root-range register/unregister, both "Could not save
 with scope stack" `RangeError` paths, and `JsWithScopeState`'s scope storage —
