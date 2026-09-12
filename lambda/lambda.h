@@ -1379,6 +1379,11 @@ void array_drop_inplace(Array* arr, int64_t n);  // drop first n items in-place
 void array_limit_inplace(Array* arr, int64_t n);  // limit to first n items in-place
 void array_limit_last_inplace(Array* arr, int64_t n);  // limit to last n items in-place
 Array* array_spreadable();  // constructs a spreadable empty array
+// Box an inferred pointer lane's words in place and drop the lane. An inferred
+// lane is a representation choice, not a source contract (D3.3.1v2, D3.3.3v3),
+// so any consumer that reads `items[]` directly must widen first. Returns false
+// when the array has no inferred pointer lane to widen.
+bool array_widen_inferred_pointer_lane(Array* array);
 void array_push(Array* arr, Item item);  // push item to array
 void array_push_argument(Array* arr, Item item);  // verbatim positional append (dynamic-call args)
 // S9.3.1 capturing append for Lambda literals/comprehensions; array_push is raw.
@@ -2016,6 +2021,30 @@ static inline double lambda_float_lane_to_double(uint64_t bits) {
 // such sites, e.g. js_is_symbol()'s `it2i(v) <= -JS_SYMBOL_BASE`).
 static inline bool lambda_item_is_merged_poison(uint64_t bits) {
     return (bits & ITEM_DBL_MASK) && LAMBDA_ITEM_IS_IEEE_SPECIAL(bits);
+}
+
+// Does this Item word carry its whole value, with no pointer into heap, pool,
+// or frame storage? Such a word stays valid for the life of the process, so it
+// may outlive the frame that produced it and may be baked into cacheable MIR
+// (DI14). This is a question about representation, not about TypeId: most
+// doubles are self-tagged (the Item *is* the IEEE bit pattern) while the
+// residue `lambda_float_ptr_to_item` cannot pack is a pointer to a boxed
+// double. [RC4, vibe/Lambda_Design_Runtime_Const.md]
+static inline bool lambda_item_is_self_contained(uint64_t bits) {
+    // the double test comes first: an inline double can carry any high byte.
+    if (bits & ITEM_DBL_MASK) return true;
+    switch ((uint8_t)(bits >> 56)) {
+    case LMD_TYPE_NULL:
+    case LMD_TYPE_BOOL:
+    case LMD_TYPE_INT:
+        return true;
+    case LMD_TYPE_FLOAT:
+        // ±0 are packed outside the double space; every other float word here
+        // failed to pack and holds a pointer.
+        return bits == ITEM_FLOAT_P0 || bits == ITEM_FLOAT_N0;
+    default:
+        return false;
+    }
 }
 
 // Is this Item word a packed (finite) int? The tag byte alone decides -- but

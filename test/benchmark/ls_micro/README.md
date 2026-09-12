@@ -20,6 +20,7 @@ the auto tier measures a different thing.
 | `split_call.ls` | `split(line, " ")` cost per call, `let`-bound vs used directly (T22-1b allocation; the declaration boundary is *not* the cost) |
 | `literal_compare.ls` | an 8-arm `key == "literal"` chain, untyped vs `string` parameter (T22-1c inline literal compare) |
 | `text_search_typed_params.ls` | `text/text_search.ls` with `int[]` on the four search-function parameters and nothing else changed (T22-2: what annotation alone buys, and what the typed lane still leaves behind) |
+| `tune26_sieve_sustained{,2}.ls` | the annotation-only AWFY Sieve pair repeated 1,000 times so G3 is decided above the timer's useful resolution; the original corpus row remains the primary result |
 
 ## Baselines (2026-09-09, `exe/lambda-v38-b23793e832`, quiet machine)
 

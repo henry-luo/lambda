@@ -49,10 +49,10 @@ static unsigned long ast_ptr_hash(const AstNode* node) {
 static void ast_index_free_buffers(AstNode** nodes, AstNode** parents,
         AstFunctionId* owners, AstBindingId* node_bindings, AstNodeId* first_children,
         AstNodeId* next_siblings, NameScope** scopes, NameEntry** bindings,
-        AstNode** classes, AstNodeFacts* facts) {
+        AstNode** classes) {
     free(nodes); free(parents); free(owners); free(node_bindings); free(first_children);
     free(next_siblings); free(scopes);
-    free(bindings); free(classes); free(facts);
+    free(bindings); free(classes);
 }
 
 static bool ast_index_reserve(AstIndex* index, uint32_t needed) {
@@ -71,12 +71,11 @@ static bool ast_index_reserve(AstIndex* index, uint32_t needed) {
     NameScope** scopes = (NameScope**)malloc(sizeof(NameScope*) * capacity);
     NameEntry** bindings = (NameEntry**)malloc(sizeof(NameEntry*) * capacity);
     AstNode** classes = (AstNode**)malloc(sizeof(AstNode*) * capacity);
-    AstNodeFacts* facts = (AstNodeFacts*)malloc(sizeof(AstNodeFacts) * capacity);
     if (!nodes || !parents || !owners || !node_bindings || !first_children ||
             !next_siblings || !scopes ||
-            !bindings || !classes || !facts) {
+            !bindings || !classes) {
         ast_index_free_buffers(nodes, parents, owners, node_bindings, first_children,
-            next_siblings, scopes, bindings, classes, facts);
+            next_siblings, scopes, bindings, classes);
         return false;
     }
     if (index->count) {
@@ -92,11 +91,10 @@ static bool ast_index_reserve(AstIndex* index, uint32_t needed) {
         memcpy(scopes, index->scopes, sizeof(NameScope*) * index->scope_count);
         memcpy(bindings, index->bindings, sizeof(NameEntry*) * index->binding_count);
         memcpy(classes, index->classes, sizeof(AstNode*) * index->class_count);
-        memcpy(facts, index->facts, sizeof(AstNodeFacts) * index->count);
     }
     ast_index_free_buffers(index->nodes, index->parents, index->owner_functions,
         index->node_bindings, index->first_children, index->next_siblings,
-        index->scopes, index->bindings, index->classes, index->facts);
+        index->scopes, index->bindings, index->classes);
     index->nodes = nodes;
     index->parents = parents;
     index->owner_functions = owners;
@@ -106,7 +104,6 @@ static bool ast_index_reserve(AstIndex* index, uint32_t needed) {
     index->scopes = scopes;
     index->bindings = bindings;
     index->classes = classes;
-    index->facts = facts;
     index->capacity = capacity;
     return true;
 }
@@ -243,11 +240,6 @@ static AstNodeId ast_index_add(AstIndex* index, AstNode* node, AstNode* parent,
         index->next_siblings[id] = index->first_children[parent_id];
         index->first_children[parent_id] = id;
     }
-    index->facts[id].declared_contract = node->type;
-    index->facts[id].inferred_type = NULL;
-    index->facts[id].representation = VALUE_REP_NONE;
-    index->facts[id].flags = 0;
-    index->facts[id].folded_item = ITEM_NULL;
     if (!ast_index_publish_node(index, node, id)) return AST_NODE_ID_INVALID;
     index->slots[slot] = node;
     index->slot_ids[slot] = id;
@@ -623,7 +615,7 @@ void ast_index_destroy(AstIndex* index) {
     if (!index) return;
     ast_index_free_buffers(index->nodes, index->parents, index->owner_functions,
         index->node_bindings, index->first_children, index->next_siblings,
-        index->scopes, index->bindings, index->classes, index->facts);
+        index->scopes, index->bindings, index->classes);
     free(index->functions);
     free(index->slots); free(index->slot_ids);
     memset(index, 0, sizeof(*index));

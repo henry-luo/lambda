@@ -60,3 +60,19 @@ show('div@maxlength', div.getAttribute('maxlength'));
 div.alt = 'nope';
 show('div.alt', div.alt);
 show('div@alt', div.getAttribute('alt'));
+
+// IDL DOMString setters stringify (WebIDL DOMString conversion), so a non-string
+// value is converted rather than dropped. `alt` is the control: it always took
+// the stringifying path, while the renamed names (htmlFor, formTarget) took a
+// separate raw-cstr path that wrote "" for anything that was not already text.
+lbl.htmlFor = 5;
+show('lbl.htmlFor(num)', lbl.htmlFor);
+show('lbl@for(num)', lbl.getAttribute('for'));
+
+inp.formTarget = 7;
+show('inp.formTarget(num)', inp.formTarget);
+show('inp@formtarget(num)', inp.getAttribute('formtarget'));
+
+img.alt = 42;
+show('img.alt(num)', img.alt);
+show('img@alt(num)', img.getAttribute('alt'));

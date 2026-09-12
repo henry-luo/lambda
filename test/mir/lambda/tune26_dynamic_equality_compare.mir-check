@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "description": "Tune26 T26-5: dynamic non-null IntLane equality excludes nan from raw equality and includes it in inequality.",
+  "checks": [
+    {
+      "in_func": "_tune26_eq_pair_#",
+      "expect_seq": [
+        "eq\t{{r}}, %p1, %p2",
+        "ne\t{{r}}, %p1, -9223372036854775808",
+        "and\t{{r}}, {{r}}, {{r}}",
+        "ne\t{{r}}, %p2, -9223372036854775808",
+        "and\t{{r}}, {{r}}, {{r}}"
+      ]
+    },
+    {
+      "in_func": "_tune26_ne_pair_#",
+      "expect_seq": [
+        "ne\t{{r}}, %p1, %p2",
+        "eq\t{{r}}, %p1, -9223372036854775808",
+        "or\t{{r}}, {{r}}, {{r}}",
+        "eq\t{{r}}, %p2, -9223372036854775808",
+        "or\t{{r}}, {{r}}, {{r}}"
+      ]
+    }
+  ]
+}

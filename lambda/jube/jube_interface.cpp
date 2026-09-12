@@ -253,6 +253,39 @@ static bool jube_expando_value_present(Item value) {
 // every arity, and the process-stable record pointer is not an Item/GC edge.
 // ============================================================================
 
+// DS13: a catalog row is `Item body(Item receiver, ...)` at its own arity, while
+// a JS call arrives with any argument count. Reconciling the two is one switch
+// here rather than an adapter per member: a missing argument is `undefined`
+// (WebIDL's absent-argument value) and extras are dropped.
+#define JUBE_ROW_MAX_ARGC 8
+extern "C" void* jube_host_dom_row_slot(unsigned index);
+
+static Item jube_invoke_row(const JubeMemberBind* bind, Item receiver,
+        Item* args, int argc) {
+    Item a[JUBE_ROW_MAX_ARGC];
+    int want = (int)bind->row_argc - 1;          // row_argc counts the receiver
+    if (want < 0) want = 0;
+    if (want > JUBE_ROW_MAX_ARGC) want = JUBE_ROW_MAX_ARGC;
+    for (int i = 0; i < want; i++) {
+        a[i] = (args && i < argc) ? args[i] : jube_undefined_item();
+    }
+    void* b = jube_host_dom_row_slot(bind->row_index);
+    if (!b) return jube_undefined_item();
+    switch (bind->row_argc) {
+    case 1: return ((Item (*)(Item))b)(receiver);
+    case 2: return ((Item (*)(Item, Item))b)(receiver, a[0]);
+    case 3: return ((Item (*)(Item, Item, Item))b)(receiver, a[0], a[1]);
+    case 4: return ((Item (*)(Item, Item, Item, Item))b)(receiver, a[0], a[1], a[2]);
+    case 5: return ((Item (*)(Item, Item, Item, Item, Item))b)(
+        receiver, a[0], a[1], a[2], a[3]);
+    case 6: return ((Item (*)(Item, Item, Item, Item, Item, Item))b)(
+        receiver, a[0], a[1], a[2], a[3], a[4]);
+    default:
+        log_error("JUBE_ROW: unsupported row arity %u", (unsigned)bind->row_argc);
+        return jube_undefined_item();
+    }
+}
+
 static Item jube_tramp_invoke(Item fn_item, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
     (void)result_home;
@@ -261,8 +294,12 @@ static Item jube_tramp_invoke(Item fn_item, Item this_value, Item* args,
     JubeMemberRecord* rec = fn
         ? (JubeMemberRecord*)(uintptr_t)js_fn_native(fn)->target.bits : NULL;
     Item out = jube_undefined_item();
-    if (rec && rec->bind && rec->bind->call) {
-        rec->bind->call(this_value, args, argc, &out);
+    if (rec && rec->bind) {
+        if (rec->bind->row_index) {
+            out = jube_invoke_row(rec->bind, this_value, args, argc);
+        } else if (rec->bind->call) {
+            rec->bind->call(this_value, args, argc, &out);
+        }
     }
     return out;
 }
@@ -287,8 +324,14 @@ static Item jube_lambda_method_invoke(Item env_item, Item* args, int argc) {
     Item out = jube_undefined_item();
     JubeMemberRecord* rec = env
         ? (JubeMemberRecord*)(uintptr_t)env[1].item : NULL;
-    if (rec && rec->bind && rec->bind->call) {
-        rec->bind->call(env[0], args, argc, &out);
+    if (rec && rec->bind) {
+        // both doors resolve a row the same way, or the Lambda face would keep
+        // the adapter the JS face just lost (D6.2.2v2)
+        if (rec->bind->row_index) {
+            out = jube_invoke_row(rec->bind, env[0], args, argc);
+        } else if (rec->bind->call) {
+            rec->bind->call(env[0], args, argc, &out);
+        }
     }
     return out;
 }
@@ -649,8 +692,12 @@ extern "C" int jube_member_call_by_ordinal(Item receiver, int slot,
     JubeTypeRecord* trec = NULL;
     JubeMemberRecord* rec = jube_record_at_guarded(receiver, slot, ordinal, &trec);
     if (!trec || !rec || !out || rec->kind != JUBE_MEMBER_METHOD ||
-            !rec->bind || !rec->bind->call) return 0;
+            !rec->bind || (!rec->bind->call && !rec->bind->row_index)) return 0;
     if (!jube_native_alive(receiver)) return 0;
+    if (rec->bind->row_index) {
+        *out = jube_invoke_row(rec->bind, receiver, args, argc);
+        return 1;
+    }
     return rec->bind->call(receiver, args, argc, out) ? 1 : 0;
 }
 
@@ -1251,7 +1298,9 @@ static int jube_compile_type(const JubeModuleDef* module,
         for (int32_t j = 0; j < binding->member_count; j++) {
             const JubeMemberBind* bind = &binding->members[j];
             if (!bind->name || strcmp(bind->name, parsed[i].name) != 0) continue;
-            if (parsed[i].is_method && !bind->call) {
+            // DS13: a method is implemented either by a call handler or by a
+            // catalog row slot; requiring `call` would reject every BIND_ROW.
+            if (parsed[i].is_method && !bind->call && !bind->row_index) {
                 log_error("JUBE_IFACE: type '%s' method '%s' binding lacks a call handler",
                           type_name, parsed[i].name);
                 jube_free_parsed_members(parsed, parsed_count);

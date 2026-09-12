@@ -476,24 +476,33 @@ bool lambda_array_num_elem_type_for_contract(Type* element,
     }
 }
 
+static bool array_num_layout_proves_contract_rank(const ArrayNum* array,
+        uint8_t rank) {
+    if (!array || rank == 0 || array->is_view) return false;
+    if (rank == 1) return !array->is_ndim;
+    if (!array->is_ndim || !array->extra) return false;
+    const ArrayNumShape* shape = (const ArrayNumShape*)(uintptr_t)array->extra;
+    // Only an owned shape makes the flattened leaf buffer a durable proof of
+    // every nested axis; aliased storage stays at the dynamic boundary (D3.3.3v3).
+    return shape->ndim == rank &&
+        shape->backing_kind == ARRAY_NUM_BACKING_GC_OWNED && !shape->base;
+}
+
 bool lambda_array_num_representation_proves_primitive_contract(Item value,
         Type* contract) {
     if (get_type_id(value) != LMD_TYPE_ARRAY_NUM || !value.array_num) return false;
 
     LambdaArrayContractInfo info = {};
     ArrayNumElemType expected_elem = ELEM_INT;
-    if (!lambda_array_contract_info(contract, &info) || info.rank != 1 ||
-            !lambda_array_num_elem_type_for_contract(info.immediate_element,
+    if (!lambda_array_contract_info(contract, &info) ||
+            !lambda_array_num_elem_type_for_contract(info.leaf_element,
                 &expected_elem)) {
         return false;
     }
 
     ArrayNum* array = value.array_num;
-    // A shaped carrier's leading axis is observable as a row, and a view may
-    // alias storage whose owner has a different contract. Neither is a T[]
-    // proof even when its leaf bytes use the same lane.
-    if (array->is_ndim || array->is_view) return false;
-    return array->get_elem_type() == expected_elem;
+    return array->get_elem_type() == expected_elem &&
+        array_num_layout_proves_contract_rank(array, info.rank);
 }
 
 ArrayRepCert* lambda_array_rep_cert_create(Pool* pool, Type* contract) {
@@ -508,7 +517,7 @@ ArrayRepCert* lambda_array_rep_cert_create(Pool* pool, Type* contract) {
     cert->rank = info.rank;
     cert->flags = ARRAY_REP_CERT_EXACT | ARRAY_REP_CERT_ERROR_FREE;
     ArrayNumElemType element = ELEM_INT;
-    cert->has_array_num_lane = info.rank == 1 &&
+    cert->has_array_num_lane =
         lambda_array_num_elem_type_for_contract(info.leaf_element, &element);
     cert->array_num_elem = element;
     if (info.leaf_element && (info.leaf_element->type_id == LMD_TYPE_MAP ||
@@ -544,7 +553,8 @@ static bool array_representation_matches_cert(Item value,
         // The immutable certificate already resolved nullable/sized numeric
         // spellings; only the live carrier can have changed (D3.3.3v3).
         return cert->has_array_num_lane && value.array_num &&
-            value.array_num->get_elem_type() == cert->array_num_elem;
+            value.array_num->get_elem_type() == cert->array_num_elem &&
+            array_num_layout_proves_contract_rank(value.array_num, cert->rank);
     }
     if (value_type != LMD_TYPE_ARRAY || !value.array) return false;
     if (cert->rank != 1) {

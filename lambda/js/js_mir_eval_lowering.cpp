@@ -11,8 +11,6 @@ Item js_native_construct_via_call_body(Item callee, Item* args, int argc,
 JsModuleConstEntry* g_eval_preamble_entries = NULL;
 int g_eval_preamble_entry_count = 0;
 int g_eval_preamble_var_count = 0;
-static const int64_t JS_EVAL_FLAG_VM_GLOBAL_CONTEXT = 16;
-
 static char* js_preamble_name_copy(const char* name) {
     if (!name) return NULL;
     size_t length = strlen(name);
@@ -100,9 +98,6 @@ void js_eval_preamble_entries_free(void) {
     g_eval_preamble_entry_count = 0;
     g_eval_preamble_var_count = 0;
 }
-
-// Per-unit module-var management (defined in js_runtime_state.cpp). Used by the
-// vm.runInContext path to give each unit its own module-var slot namespace.
 
 extern "C" void js_eval_preamble_cache_reset(void) {
     js_eval_preamble_entries_free();
@@ -1450,7 +1445,6 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
     if (!code_str || code_str->len == 0) return (Item){.item = ITEM_JS_UNDEFINED};
     bool is_direct_eval = (eval_flags & 2) != 0;
     bool is_global_scope = (eval_flags & 1) != 0;
-    bool is_vm_global_context = (eval_flags & JS_EVAL_FLAG_VM_GLOBAL_CONTEXT) != 0;
     bool inherited_strict = (eval_flags & 4) != 0;
     // Direct-eval callers own the environment bridge and must write back
     // mutations made before a throw, so keep that bridge live for all eval
@@ -1652,11 +1646,6 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         }
         // v37: Also skip expression form if code contains semicolons (multi-statement)
         // or declarations that need to be compiled as a program for correct scoping.
-        if (is_vm_global_context) {
-            // node:vm global scripts must not inherit the caller's CJS lexical
-            // preamble; otherwise a later local const is observed as TDZ here.
-            skip_expr_form = true;
-        }
         if (!skip_expr_form) {
             for (size_t j = i; j < slen; j++) {
                 char c = s[j];
@@ -1754,7 +1743,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             }
         }
 
-        bool js_eval_fresh_module_scope = (eval_flags & 8) != 0 || !is_direct_eval;
+        bool js_eval_fresh_module_scope = !is_direct_eval;
         char module_name[48];
         snprintf(module_name, sizeof(module_name), "js_eval_%d", js_dynamic_func_counter++);
         MIR_context_t eval_ctx = NULL;
@@ -1776,8 +1765,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         // process-global site sequence.
         mt->template_site_salt = ++js_runtime_state.dynamic_func_counter;
 
-        if (!is_vm_global_context && g_eval_preamble_entries &&
-                g_eval_preamble_entry_count > 0) {
+        if (g_eval_preamble_entries && g_eval_preamble_entry_count > 0) {
             if (is_direct_eval) {
                 // Direct eval uses its caller's full lexical environment.
                 mt->preamble_entries = g_eval_preamble_entries;
@@ -1791,7 +1779,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
                 js_install_realm_global_preamble(mt, tp);
             }
         }
-        if (is_direct_eval && !is_vm_global_context) {
+        if (is_direct_eval) {
             uint32_t active_var_count = context && context->active_module_state
                 ? context->active_module_state->var_count : 0;
             if (active_var_count > (uint32_t)mt->preamble_var_count) {
@@ -1833,17 +1821,13 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         Item prev_nt = js_get_new_target();
         js_set_direct_new_target((Item){.item = ITEM_JS_UNDEFINED});
 
-        // vm.runInContext (eval_flags bit 8): give this unit its own module-var
-        // slot namespace. Units sharing a context each assign slot indices from 0,
-        // so without isolation a later unit's top-level globals clobber an earlier
-        // unit's slots in the shared js_module_vars array — breaking cross-unit
-        // references (e.g. a constructor defined in base.js, invoked from box2d.js,
-        // read the wrong slot for its own name). Functions capture a module-state
-        // id at creation and js_call_function activates it per call, so cross-unit
-        // invocation still resolves against the defining unit's slab.
-        // VM scripts and indirect eval each compile a separate global script.
-        // Their own slots begin after the retained harness prefix, preventing
-        // either unit from aliasing caller module bindings.
+        // Indirect eval compiles a separate global script and gets its own
+        // module-var slot namespace: units each assign slot indices from 0, so
+        // without isolation a later unit's top-level globals clobber an earlier
+        // unit's slots in the shared js_module_vars array. Functions capture a
+        // module-state id at creation and js_call_function activates it per
+        // call, so cross-unit invocation still resolves against the defining
+        // unit's slab.
         RuntimeModuleStateScope eval_module_state(context);
         uint32_t js_eval_prev_module_state_id = UINT32_MAX;
         if (js_eval_fresh_module_scope) {

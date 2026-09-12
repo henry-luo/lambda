@@ -191,12 +191,6 @@ NODE_CORE_HOST_NAMESPACE(node_core_internal_test_binding_namespace, "internal/te
 
 #undef NODE_CORE_HOST_NAMESPACE
 
-static Item node_core_vm_namespace(void) {
-    // vm creates execution contexts directly, so its engine implementation
-    // remains behind the explicit host-namespace service boundary.
-    return node_core_host_namespace("vm");
-}
-
 static Item node_core_async_hooks_namespace(void) {
     // Async-resource bookkeeping is shared with the event loop and remains a
     // runtime service until its owning state can move as one unit.
@@ -307,17 +301,9 @@ static Item node_core_buffer_global(void* session) {
     return result;
 }
 
-static Item node_core_vm_global(void* session) {
-    (void)session;
-    // vm is a compatibility global only in an active Node profile; the host
-    // implementation remains reachable through the named resolver service.
-    return node_core_vm_namespace();
-}
-
 static const JubeGlobalDef node_core_globals[] = {
     {"os", 0, node_core_os_global},
     {"Buffer", 0, node_core_buffer_global},
-    {"vm", 0, node_core_vm_global},
 };
 
 static const char* const node_core_path_specifiers[] = {
@@ -377,7 +363,6 @@ static const char* const node_core_perf_hooks_specifiers[] = { "perf_hooks" };
 static const char* const node_core_workers_specifiers[] = { "worker_threads" };
 static const char* const node_core_tty_specifiers[] = { "tty" };
 static const char* const node_core_module_specifiers[] = { "module" };
-static const char* const node_core_vm_specifiers[] = { "vm" };
 static const char* const node_core_async_hooks_specifiers[] = { "async_hooks" };
 static const char* const node_core_trace_events_specifiers[] = { "trace_events" };
 static const char* const node_core_domain_specifiers[] = { "domain" };
@@ -446,7 +431,6 @@ static const JubeNamespaceDef node_core_namespaces[] = {
     {node_core_workers_specifiers, 1, node_core_workers_namespace, NULL, 0},
     {node_core_tty_specifiers, 1, node_core_tty_namespace, NULL, 0},
     {node_core_module_specifiers, 1, node_core_module_namespace, NULL, 0},
-    {node_core_vm_specifiers, 1, node_core_vm_namespace, NULL, 0},
     {node_core_async_hooks_specifiers, 1, node_core_async_hooks_namespace, NULL, 0},
     {node_core_trace_events_specifiers, 1, node_core_trace_events_namespace, NULL, 0},
     {node_core_domain_specifiers, 1, node_core_domain_namespace, NULL, 0},
@@ -701,7 +685,9 @@ static const JubeModuleDef node_core_module = {
     NULL,
     0,
     node_core_namespaces,
-    58,
+    // derive both counts from the tables: a hand-kept literal drifted to 58
+    // against 57 rows and made the loader read one entry past the array.
+    sizeof(node_core_namespaces) / sizeof(node_core_namespaces[0]),
     node_core_init,
     node_core_shutdown,
     NULL,
@@ -712,7 +698,7 @@ static const JubeModuleDef node_core_module = {
     NULL,
     &node_core_requirements,
     node_core_globals,
-    3,
+    sizeof(node_core_globals) / sizeof(node_core_globals[0]),
     node_core_runtime_attach,
     node_core_runtime_reset,
     node_core_runtime_detach,

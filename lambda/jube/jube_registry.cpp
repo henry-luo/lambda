@@ -761,7 +761,6 @@ extern "C" Item js_get_internal_util_inspect_namespace(void);
 extern "C" Item js_get_internal_repl_namespace(void);
 extern "C" Item js_get_internal_test_binding_namespace(void);
 extern "C" Item js_get_node_module_namespace(void);
-extern "C" Item js_get_vm_namespace(void);
 extern "C" Item js_get_async_hooks_namespace(void);
 extern "C" Item js_get_domain_namespace(void);
 extern "C" Item js_get_cluster_namespace(void);
@@ -1531,7 +1530,7 @@ extern "C" bool dom_activate_popover(void* popover, int action);
 // the row's own arity, so a body whose C signature disagrees with its row is a
 // compile error here as well as in dom_api_check.cpp.
 static const JubeHostDomCatalogAPI jube_host_dom_catalog = {
-#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) \
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv, iface, member, js_name) \
     (JubeDomFn##argc)(body),
 #define DOM_RAW(name, cluster, ret, params, body, flags) \
     body,
@@ -1539,6 +1538,28 @@ static const JubeHostDomCatalogAPI jube_host_dom_catalog = {
 #undef DOM_OP
 #undef DOM_RAW
 };
+
+// DS13: the same rows as a flat array, indexed by JubeDomRowIndex, so a member
+// bind can name its row with a number a static initializer can hold. Index 0 is
+// reserved for "not a row", so the table is offset by one -- built from the same
+// .def in the same order, which is what keeps the two in step.
+static void* const jube_host_dom_row_slots[] = {
+    NULL,
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv, iface, member, js_name) (void*)(body),
+#define DOM_RAW(name, cluster, ret, params, body, flags)
+#include "../dom/dom_api.def"
+#undef DOM_OP
+#undef DOM_RAW
+};
+LAMBDA_STATIC_ASSERT(
+    sizeof(jube_host_dom_row_slots) / sizeof(jube_host_dom_row_slots[0])
+        == (size_t)JUBE_DOM_ROW_COUNT,
+    "row slot array must match the JubeDomRowIndex space");
+
+extern "C" void* jube_host_dom_row_slot(unsigned index) {
+    if (index == 0 || index >= (unsigned)JUBE_DOM_ROW_COUNT) return NULL;
+    return jube_host_dom_row_slots[index];
+}
 
 
 
@@ -3756,7 +3777,6 @@ static int jube_host_node_resolve_host_namespace(void* session, const char* spec
         {"repl", js_get_repl_namespace},
         {"diagnostics_channel", js_get_diagnostics_channel_namespace},
         {"module", js_get_node_module_namespace},
-        {"vm", js_get_vm_namespace},
         {"async_hooks", js_get_async_hooks_namespace},
         {"trace_events", node_trace_events_namespace},
         {"domain", js_get_domain_namespace},

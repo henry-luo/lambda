@@ -2,17 +2,21 @@
 
 - **Date:** 2026-09-11.
 - **Status:** IMPLEMENTED WITH OPEN PERFORMANCE GATES. T26-0 through T26-4
-  have working-tree implementation slices and focused evidence; T26-5 and all
-  proposal completion gates remain open. Section 9 records both the measured
-  improvement and the failures that prevent closure.
+  have working-tree implementation slices and focused evidence. T26-5 now
+  includes the r47 scalar-boundary repair that returns current Navier-Stokes
+  annotation parity to the G3 threshold, but the Splay, microdiff and
+  sustained-Sieve residuals, historical recovery, preservation and validation
+  gates remain open. Section 9 records both the measured improvement and the
+  failures that prevent closure.
 - **User requirement:** typed arrays should speed up code. Adding correct
   homogeneous-array annotations to an equivalent workload must preserve the
   inferred implementation's speed and enable faster native access where the
   inferred path remains boxed. An already optimal inferred lane may tie.
 - **Primary reference:** [Result42 versus Result37 analysis](Lambda_Benchmark_Result42_Analysis.md).
-- **Source audit:** working tree based on `e86d7ff8b602`. The relevant
-  admission, array-access and integer-comparison mechanisms have been
-  extended; this is an uncommitted implementation, not a release artifact.
+- **Source audit:** working tree at `2f1e36e70286` plus the uncommitted Tune26
+  slices. The r47 release artifact is
+  `temp/lambda-tune26-current-2f1e36e-r47-scalar-boundary-cold.exe`
+  (SHA-256 recorded in §9); it is a measured candidate, not a ResultN release.
 - **Predecessors:** [Tune22](Lambda_Impl_Tune22.md),
   [typed-array implementation, §§13–14](Lambda_Impl_Typed_Array.md),
   [Tune24](Lambda_Impl_Tune24.md), [Tune25](Lambda_Impl_Tune25.md).
@@ -419,7 +423,7 @@ Archive identities from the benchmark JSON:
 | T26-2 | `lambda/runtime/transpile-mir.cpp`, scoped facts and `mir_emitter_shared.hpp` | Partially implemented | Dense typed reads, BOOL coverage, and an independently proved readonly peer beside a `var` destination; full loop family and measured recovery remain open |
 | T26-3 | Compact-loop analysis, `mir_int_lane_interval`, comparison lowering | Partially implemented | Narrow descending-sum induction and finite parity lowering, with sentinel fallback; diviter and broad range reuse remain open |
 | T26-4 | Existing checked/native stores, scoped ownership, caller-home publication | Partially implemented | Same-contract `var` call proof and checked COW write-back remain correct; dynamic in-body snapshot capture still requires the checked store |
-| T26-5 | Residual source owners established by profiling; benchmark/report tools | Open | All performance gates, residual attribution, generated report, and complete Lambda/Test262 baselines |
+| T26-5 | Residual source owners established by profiling; benchmark/report tools | Partially implemented | r47 resolves the Navier scalar-boundary residual; all performance gates, Splay/microdiff/Sieve attribution, generated report, and complete Lambda/Test262 baselines remain open |
 
 Use existing `lib` containers and shared helpers. No benchmark-name dispatch,
 hardcoded workload constants, public type weakening, source workaround,
@@ -464,37 +468,76 @@ language ruling.
   New fixture families cover typed-array-only formals, descending sum, parity
   including an out-of-band integer, `var` call boundaries, `var` bool-array
   stores, and the readonly-peer/destination combination.
+- Later T26-4 ownership slices distinguish a pure in-place var T[] callee
+  from one that retains, forwards, captures, or rebinds its parameter.  The
+  AST records those effects so direct native calls retain caller-home
+  publication only where a callee can replace the caller-visible owner
+  (S9.2.1, S9.2.2, D3.3.3v3).  A same-index non-null float[] store can use
+  the compact COW/OOB helper after its entry contract proof; nullable
+  cross-array reads still branch to lambda_array_set_checked_inplace_lane
+  before their lane sentinel can reach storage (S4.1, S7.1.3v2, D3.3.3v3).
+- A T26-5 Navier-Stokes bisection isolated the remaining typed penalty to
+  non-null `float` declaration/assignment boundaries in `lin_solve`: their
+  almost-never-taken `lambda_type_check` calls split the hot loop and extended
+  numeric-register liveness across a may-GC edge.  Synchronous known-null
+  failures now branch to deferred terminal blocks while retaining the exact
+  E201 diagnostic and the shared function epilogue (S4.1, D2.4.1,
+  D5.2-D5.3).  The focused MIR fixtures pin both indexed and arithmetic
+  boundary shapes.
 
-Focused evidence at the last fresh correctness build was:
+Focused evidence for the r20 release candidate was:
 
 | Check | Result | Scope |
 |---|---:|---|
-| `test_mir_emission_gtest --gtest_filter='*tune26*:*typed_array_reuse*'` | 12/12 passed | MIR shape and ratchet fixtures |
-| `test_lambda_gtest --gtest_filter='LambdaTypedPathTests.*'` | 10/10 passed | expected-output typed-path fixtures |
+| `make build-test` | passed | fresh Lambda and test executable build |
+| focused `test_lambda_gtest` ownership/typed-path filter | 22/22 passed | snapshots, retained aliases, `var` reborrows, and nullable float rejection |
+| focused `test_mir_emission_gtest` Tune26 filter | 8/8 passed | direct-store, ownership, nullable-lane, comparison, and ratchet shapes |
 | `git diff --check` | passed | current working-tree patch |
 
-A later experimental relaxation of `var ArrayNum` COW was rejected and fully
-reverted.  In the reproducer `let snapshot = values; values[0] = 2.0`, a raw
-store caused the snapshot to observe `2.0` rather than its old value.  The
-expected result was `12 2`; the trial produced `22 2`.  This establishes that
-call-boundary preparation alone does not prove exclusive ownership after an
-in-body snapshot capture.  The current implementation keeps the dynamic COW
-guard at that store, preserving S9.2.2 and D3.3.3.  The binary produced during
-that rejected trial is stale, so the focused checks must be rebuilt and rerun
-before any final correctness claim.
+An earlier experimental relaxation of `var ArrayNum` COW was rejected.  In the
+reproducer `let snapshot = values; values[0] = 2.0`, a raw store caused the
+snapshot to observe `2.0` rather than its old value.  The expected result was
+`12 2`; the trial produced `22 2`.  This establishes that call-boundary
+preparation alone does not prove exclusive ownership after an in-body snapshot
+capture.  The retained-effect analysis keeps that dynamic COW case guarded,
+preserving S9.2.2 and D3.3.3v3.
 
 ### Measured performance evidence
 
-All timings below are release, same-host alternating paired measurements with
-equal normalized output.  They are implementation evidence, not a completed
-gate report; their raw JSON is presently under `temp/` and must be promoted
-into a versioned report for closure.
+All timings below are release, same-host alternating paired measurements.
+Rows used for a gate have equal normalized output; the contextual r47 matrix
+also preserves three unequal-output pairs as invalid evidence.  These are
+implementation results, not a completed gate report; their raw JSON is
+presently under `temp/` and must be promoted into a versioned report for
+closure.
 
 | Candidate archive | Measurement | Result | Gate consequence |
 |---|---|---:|---|
 | `lambda-tune26-e86d7ff8b-t15` SHA-256 `9e5920187bc13584056a1b64434e42796d99c2aa5e083969c11fe1ef26ab4edc` | 43 frozen Result37 rows, 31 pairs | 0.998773x geomean | G1 passes for this earlier candidate only |
 | same t15 archive | 43-row tail | 17 rows still exceed 1.10x | G2 fails |
 | `lambda-tune26-e86d7ff8b-t16` SHA-256 `74adba47a17ab5af11bbceb024f935f3871d6f31042204b1964a0fdf0c8a4487` | Result37 Navier-Stokes, 31 pairs | 1.4119x, 0/31 wins | Better than t15's 1.4442x, but still fails G2 |
+| `lambda-tune26-current-4dc76a81-r19-var-publish-effect` SHA-256 `b470405caa146c536a93fc872489d1a31f1ecf513e415ced95ebd128e9d00a9e` | Result37 Nbody, 100 pairs | 1.1317x, 2/100 wins, equal output | G2 Nbody remains a major regression |
+| `lambda-tune26-current-4dc76a81-r20-compact-fallback` SHA-256 `db109a1f5330430574305048c564ccb7da78db5820668c6b399327a722161ab2` | Result37 Nbody, 100 pairs | 1.1346x, 36/100 wins, equal output | smaller cold frame did not recover G2 Nbody |
+| `lambda-tune26-current-2f1e36e-r47-scalar-boundary-cold.exe` SHA-256 `8354dd4f88e2582d57eb66550a0d70f67921352557a15ee7ae5ab15f119c7e21` | current Navier-Stokes untyped/typed, 31 pairs | 1.0035x median, 1.0444x one-sided 95% upper bound, equal checksum 77 | focused G3 row passes |
+| same r47 archive | current 63 source pairs, 15 pairs each | 0.6458x contextual geomean; 8 raw rows above 1.05x; 3 rows have unequal output | not a G3 closure artifact: the raw population mixes annotation pairs, source rewrites, sub-clock rows and invalid output pairs |
+
+The r47 checkpoint also passed `make build-test`, the focused scalar-boundary
+and terminal-OOB MIR checks (2/2), forced-JIT Navier-Stokes checksum 77 for
+both sources, the exact E201 nullable-index rejection, JSON parsing, and
+`git diff --check`.  The later test build replaced the workspace
+`lambda.exe` with a debug executable; the hashed r47 release remains isolated
+under `temp/`.  Full Lambda, Test262, GC-stress and sanitizer gates were not
+run at this wrap-up checkpoint.
+
+The 63-row source-pair result is an audit input, not a substitute for the G3
+eligible-pair manifest.  Its residual classification is explicit:
+
+| Class | r47 rows | Required disposition |
+|---|---|---|
+| Resolved focused parity | `jetstream/navier_stokes` 1.0035x, upper 1.0444x | Retain the cold-boundary fixtures and remeasure only if the lowering changes |
+| Eligible or near-equivalent typed residual | `text/microdiff` 1.0546x; `jetstream/splay` 1.2407x | Profile and root-cause before claiming G3; Splay's typed port also needs strict source-eligibility audit because it introduced contract-supporting temporaries |
+| Below useful timer resolution | `awfy/sieve` 0.040/0.043 ms | Use the registered 1,000-iteration sustained pair; retain the original corpus row as contextual evidence |
+| Changed source or invalid output | changed: `r7rs/mbrot`, `awfy/richards`, `beng/knucleotide`; unequal output: `beng/fasta`, `beng/spectralnorm`, `kostya/matmul` | Preserve and report the rows, but do not count them toward annotation parity or attribute their ratios to the runtime |
 
 The t15 tail failures were `navier_stokes`, `fft`, `nqueens`, `paraffins`,
 `divrec`, `permute`, `cpstak`, `tak`, `levenshtein`, `fib`, `storage`,
@@ -504,17 +547,27 @@ Their t15 ratios range from 1.1002x to 1.4442x.  The detailed samples are
 evidence.  The t16 readonly-peer change has only the Navier-Stokes probe
 (`temp/tune26_r37_t16_navier_probe.json`), so it cannot inherit t15's full G1
 result despite restoring the source state after the rejected COW experiment.
+The r20 artifact is
+temp/tune26_r37_r20_compact_fallback_nbody2_100.json: identical Nbody
+source hashes, JIT tier, 30-second timeout, and 100 valid alternating pairs.
+Its Result37/candidate medians were 57.462/65.194 ms.  The compact fallback
+reduced advance's MIR side-stack frame from 456 to 384 bytes, but that code
+size reduction did not establish a causal speedup; the G2 residual remains.
 
 ### Work still outstanding
 
-1. Rebuild the reverted current source and rerun all focused tests, then run
-   the required Lambda, Test262, MIR GC-stress, T0/JIT, and sanitizer checks.
-2. Archive a new release binary and repeat the complete 43-row interleaved
+1. Run the required full Lambda, Test262, MIR GC-stress, T0/JIT, and sanitizer
+   checks on a stable candidate.
+2. Repeat the complete 43-row interleaved
    Result37 comparison.  G1 must be established on that exact binary, while
    every listed G2 tail row needs emitted-code/profile attribution and a
    root-cause fix.
-3. Complete annotation-pair measurements and uncertainty reporting for G3;
-   add the cold admission and sustained bool/int/float diagnostics with the
+3. Complete annotation-pair eligibility and uncertainty reporting for G3.
+   The r47 raw matrix leaves `microdiff` at 1.0546x and the near-equivalent
+   typed Splay port at 1.2407x; the 0.040/0.043 ms Sieve row requires its
+   registered 1,000-iteration sustained diagnostic.  Source-rewritten or
+   output-unequal pairs cannot be relabeled as annotation regressions.  Add
+   the cold admission and sustained bool/int/float diagnostics with the
    required counters and size sweeps for G4 and G7.
 4. Compare typed and untyped current 63-row execution plus auto wall time to
    the frozen pre-Tune26 control for G5 and G6.  Generate and check in

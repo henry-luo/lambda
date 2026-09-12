@@ -105,7 +105,6 @@ test-tls-on-empty-socket.js                 # [unimplemented] needs existing-soc
 # different TLS backend/build with legacy protocol support, skip the CLI wrapper
 # instead of adding fake negotiation shims.
 test-tls-cli-max-version-1.3.js             # [unimplemented] requires TLSv1.0/TLSv1.1 min/max matrix behavior unavailable in current mbedTLS build
-test-vm-dynamic-import-callback-missing-flag.js # [unimplemented] requires VM dynamic import callback flag semantics
 
 # --- Known crashers from full official-test sweeps ---
 test-async-local-storage-deep-stack.js      # [crash] aborts in async local storage deep stack fixture
@@ -165,8 +164,6 @@ test-timers-non-integer-delay.js            # [crash] segfaults in timer coercio
 test-timers-promises-scheduler.js           # [crash] segfaults in timer promises scheduler
 test-timers-timeout-with-non-integer.js     # [crash] segfaults in timer coercion path
 test-timers.js                              # [crash] segfaults in timer fixture
-test-vm-low-stack-space.js                  # [crash] aborts in VM low stack space fixture
-test-vm-syntax-error-stderr.js              # [crash] aborts in vm syntax-error stderr fixture
 
 # --- Known timeout/signal-sensitive tests from full official-test sweeps ---
 test-cluster-fork-windowsHide.js            # [timeout] leaves orphan child cluster workers under LambdaJS
@@ -174,6 +171,6 @@ test-process-kill-pid.js                    # [timeout] sends process signals an
 test-process-remove-all-signal-listeners.js # [timeout] leaves orphan signal-listener child processes under LambdaJS
 test-signal-handler.js                      # [timeout] signal-handler fixture times out under LambdaJS
 test-stream-pipeline.js                     # [timeout] stream pipeline fixture hits the official runner timeout
-test-vm-sigint-existing-handler.js          # [timeout] leaves orphan SIGINT child processes under LambdaJS
-test-vm-sigint.js                           # [timeout] leaves orphan SIGINT child processes under LambdaJS
-test-vm-timeout.js                          # [timeout] vm timeout fixture hits the official runner timeout
+test-async-hooks-vm-gc.js                    # [unimplemented] requires the removed node:vm module
+test-domain-vm-promise-isolation.js          # [unimplemented] requires the removed node:vm module
+test-worker-vm-context-terminate.js          # [unimplemented] requires the removed node:vm module

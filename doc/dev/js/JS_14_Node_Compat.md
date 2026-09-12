@@ -31,7 +31,7 @@ This document deliberately bases each module's "status" on what the code actuall
 
 Native namespaces are built once per runtime context and rooted in that context's `JsRuntimeState`; each sets a `default` property pointing at itself for CommonJS interop. Reset clears those roots and the next access rebuilds against the fresh heap. This ownership is required by **D5.4.1–D5.4.4**: namespace objects and their callable properties may not be shared across simultaneous EvalContexts merely because two heaps use the same epoch number. A few small compatibility namespaces still use file-static item-plus-epoch scaffolding and are tracked as migration debt; new namespace/callable state must use the context-owned slots.
 
-Per **D6.2.2v2**, Node class-like exports such as `http.Server`, `net.Socket`, `tls.TLSSocket`, `vm.Script`, stream classes, and `AssertionError` are published with explicit construct capabilities. Their module property name or mutable `.name` is not consulted by `new`; ordinary functions such as `http.createServer` remain call-only unless the API deliberately exposes both capabilities.
+Per **D6.2.2v2**, Node class-like exports such as `http.Server`, `net.Socket`, `tls.TLSSocket`, stream classes, and `AssertionError` are published with explicit construct capabilities. Their module property name or mutable `.name` is not consulted by `new`; ordinary functions such as `http.createServer` remain call-only unless the API deliberately exposes both capabilities.
 
 ### 2.2 The user-module cache — `JsModule`
 
@@ -122,7 +122,7 @@ The table records each module's **actual** backing and the notable gaps verified
 | `string_decoder` | `js_string_decoder.cpp` / `js_get_string_decoder_namespace` | native | `StringDecoder` with `write`/`end`; buffers incomplete multi-byte sequences in `__pending__` (`:56`). utf8 primary. |
 | `assert` | `js_assert.cpp` / `js_get_assert_namespace` | native | `ok`/`equal`/`strictEqual`/`deepStrictEqual`/`throws`/`rejects`/`match`/`ifError` and friends; throws `AssertionError` with Node-shaped properties (`:36`). `assert/strict` aliases the same namespace (always strict). |
 
-**Stub-only modules** (built inline in `js_module_get`, providing just enough surface to import without crashing): `timers`/`timers/promises`, `module` (`builtinModules`, `isBuiltin`, `createRequire`), `worker_threads` (`isMainThread: true`), `cluster`, `vm`, `perf_hooks`, `tty`, `v8`, `async_hooks`, `diagnostics_channel`, `domain`, `punycode`, `repl`, `console` (alias to the global), `node:test`, and `internal/test/binding` (which exposes `internalBinding('uv')` UV error codes and `internalBinding('config')`, `js_runtime.cpp:31491`).
+**Stub-only modules** (built inline in `js_module_get`, providing just enough surface to import without crashing): `timers`/`timers/promises`, `module` (`builtinModules`, `isBuiltin`, `createRequire`), `worker_threads` (`isMainThread: true`), `cluster`, `perf_hooks`, `tty`, `v8`, `async_hooks`, `diagnostics_channel`, `domain`, `punycode`, `repl`, `console` (alias to the global), `node:test`, and `internal/test/binding` (which exposes `internalBinding('uv')` UV error codes and `internalBinding('config')`, `js_runtime.cpp:31491`).
 
 ### 6.1 Test-harness shims
 
@@ -164,7 +164,7 @@ Top-level `let`/`var`/`const`, function declarations, and class declarations in 
 3. **Crypto coverage is hash/cipher only.** No asymmetric primitives (`createSign`/`createVerify`/`generateKeyPair`/Diffie-Hellman/ECDH); unsupported algorithms generally `log_error` and return `ItemNull` rather than throwing a proper Node `Error`, so callers see `null` instead of a thrown exception. WebCrypto `subtle` is partial (digest/encrypt/decrypt only).
 4. **No `fs.watch`/`watchFile`.** The watch APIs are absent from `js_fs.cpp`; code that calls them gets `undefined` and will fail when it tries to use the (nonexistent) watcher.
 5. **`ERR_*` error codes are incomplete.** A curated set is centralized in `js_error_codes.h` (e.g. `ERR_INVALID_ARG_TYPE`, `ERR_OUT_OF_RANGE`, `ERR_STREAM_DESTROYED`), but many Node code paths either omit the `code` property or surface a plain string/`log_error` instead of a coded `Error`, so `err.code` checks are unreliable.
-6. **`vm` shares the global scope.** The `vm` namespace (`js_runtime.cpp:31456`) wires `createContext`/`runInContext`/`runInNewContext`/`Script`, but contexts are not isolated — code executes against the same global/lexical bindings as the host (no separate realm), so `vm`'s sandboxing guarantee does not hold.
+6. **No `vm` module.** `vm` is not provided: `require('vm')` and `require('node:vm')` raise `MODULE_NOT_FOUND`. It was retired because its contexts were never isolated — code ran against the host's own global and lexical bindings, so the sandboxing guarantee callers rely on did not hold. Code needing dynamic evaluation must use `eval` / indirect `eval`, which are explicit about sharing the caller's realm.
 7. **`child_process.fork()` is unimplemented.** Only `exec`/`execSync`/`spawn`/`spawnSync` exist (`js_child_process.cpp`); there is no IPC-channel child-process spawn.
 8. **Hand-written `memcmp` dispatch chain.** `js_module_get` is a long linear `if`/`memcmp` ladder (`js_runtime.cpp:31550`+) with three spelling variants per module — adding a module means editing both this chain and `jm_resolve_module_path`'s `builtin_names[]` table, and the two lists can drift out of sync.
 9. **External package support.** Installed external packages and `node_modules`
@@ -177,7 +177,7 @@ Top-level `let`/`var`/`const`, function declarations, and class declarations in 
 
 | File | Responsibility (this doc) |
 |---|---|
-| `lambda/js/js_runtime.cpp` | `js_module_get` dispatch chain, inline stub modules, `JsModule` cache + `js_module_register`, `js_get_vm_namespace`, `js_internal_binding`. |
+| `lambda/js/js_runtime.cpp` | `js_module_get` dispatch chain, inline stub modules, `JsModule` cache + `js_module_register`, `js_internal_binding`. |
 | `lambda/js/js_mir_entrypoints_require.cpp` | `js_require`, `js_dynamic_import`, `js_is_cjs_file`, `js_wrap_cjs_source`. |
 | `lambda/js/js_mir_module_batch_lowering.cpp` | `jm_resolve_module_path`, built-in priority list, condition order, `js_module_register` call sites. |
 | `lambda/module/npm/npm_resolve_module.cpp` | Historical Node resolution algorithm; not linked into `lambda.exe`. |

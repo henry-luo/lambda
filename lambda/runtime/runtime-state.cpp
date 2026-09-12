@@ -452,6 +452,19 @@ extern "C" void lambda_module_state_snapshot_dispose(
     memset(snapshot, 0, sizeof(*snapshot));
 }
 
+static void lambda_module_state_free_consts(LambdaModuleState* state) {
+    if (!state || !state->consts_owned) return;
+    // Only the state-owned copy frees its entries; a Script-bound pool is
+    // released with its Script.
+    for (uint32_t i = 0; i < state->const_count; i++) {
+        mem_free(((void**)state->consts)[i]);
+    }
+    mem_free(state->consts);
+    state->consts = NULL;
+    state->const_count = 0;
+    state->consts_owned = false;
+}
+
 static void lambda_module_state_release_at(EvalContext* owner, uint32_t module_id) {
     LambdaModuleState* state = lambda_module_state_at(owner, module_id);
     if (!state) return;
@@ -466,6 +479,7 @@ static void lambda_module_state_release_at(EvalContext* owner, uint32_t module_i
     mem_free(state->vars);
     mem_free(state->var_payloads);
     mem_free(state->property_keys);
+    lambda_module_state_free_consts(state);
     mem_free(state);
     owner->module_states[module_id] = NULL;
 }
@@ -605,6 +619,27 @@ extern "C" bool lambda_module_state_bind_static(uint32_t module_id,
     return true;
 }
 
+extern "C" bool lambda_module_state_adopt_consts(uint32_t module_id,
+        void* const* consts, uint32_t count) {
+    // RC-J7: a JS unit's const pool is built in the transpiler pool, which dies
+    // at js_transpiler_destroy while its compiled code can still run (preamble
+    // harnesses and deferred hot-reload contexts). Copy the index array here so
+    // the state outlives the builder; the String bodies are mem-owned too and
+    // are released alongside it in lambda_module_state_release_at.
+    EvalContext* owner = context;
+    LambdaModuleState* state = lambda_module_state_at(owner, module_id);
+    if (!state) return false;
+    lambda_module_state_free_consts(state);
+    if (!consts || !count) return true;
+    void** owned = (void**)mem_calloc(count, sizeof(void*), MEM_CAT_EVAL);
+    if (!owned) return false;
+    memcpy(owned, consts, (size_t)count * sizeof(void*));
+    state->consts = owned;
+    state->const_count = count;
+    state->consts_owned = true;
+    return true;
+}
+
 extern "C" uint32_t lambda_module_state_property_key_count(uint32_t module_id) {
     EvalContext* owner = context;
     LambdaModuleState* state = lambda_module_state_at(owner, module_id);
@@ -697,6 +732,15 @@ extern "C" void lambda_module_var_store(void* module_state, uint32_t slot,
 
 extern "C" Item lambda_active_module_var_at(uint32_t slot) {
     return lambda_module_var_at(context ? context->active_module_state : NULL, slot);
+}
+
+extern "C" Item lambda_active_module_const_at(uint32_t index) {
+    // RC-J2: the JavaScript literal load. It mirrors lambda_active_module_var_at
+    // rather than Lambda's BSS path because JS emits no module BSS; the pool and
+    // the checked accessor below it are the same ones Lambda uses.
+    void* ptr = lambda_module_const_at_state(
+        context ? context->active_module_state : NULL, index);
+    return ptr ? (Item){.item = s2it((String*)ptr)} : ItemNull;
 }
 
 extern "C" void lambda_active_module_var_store(uint32_t slot, Item item) {

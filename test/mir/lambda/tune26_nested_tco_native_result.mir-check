@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "description": "D2.4.1-D2.4.3: a non-error native recursive result remains in its IntLane when it becomes the argument of the outer tail-call backedge.",
+  "checks": [
+    {
+      "in_func": "_nested_count_#",
+      "expect": [
+        "call\t_nested_count_",
+        "add\t{{r}}, {{r}}, 1",
+        "ble\t"
+      ],
+      "forbid": [
+        "call\tint2it_lane_p, int2it_lane",
+        "call\tlambda_item_to_int_lane_c_p, lambda_item_to_int_lane_c",
+        "call\tlambda_side_stack_ensure_for_p, lambda_side_stack_ensure_for"
+      ]
+    }
+  ]
+}

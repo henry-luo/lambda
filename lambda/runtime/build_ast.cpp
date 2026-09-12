@@ -753,14 +753,9 @@ static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
     // Search and ordinal operations have one optional scalar result: a valid
     // non-negative integer or no value. Their former -1 sentinel made the
     // public type look total and prevented Lambda's `value or default` idiom.
-    switch (info->fn) {
-    case SYSFUNC_INDEX_OF:
-    case SYSFUNC_LAST_INDEX_OF:
-    case SYSFUNC_ORD:
+    if (sysfunc_returns_optional_int(info)) {
         return lambda_type_nullable_normalized(tp->pool,
             success ? success : (Type*)&TYPE_INT);
-    default:
-        break;
     }
 
     if (!first_arg || !first_arg->type) return success ? success : &TYPE_ANY;
@@ -3134,6 +3129,63 @@ AstNode* build_identifier_from_span(Transpiler* tp, SourceSpan span) {
 
 
 
+// RC6/RC17v2: an expression-position string literal's value is a const-pool
+// entry, so equal literals should share one `String` and one slot rather than
+// allocating per occurrence. The Type keeps its payload — under RC17v2 that is
+// the type's identity when the literal appears in type position — but two equal
+// literals may point at the same immutable String.
+typedef struct StringDedupEntry {
+    const char* chars;
+    uint32_t len;
+    uint8_t is_symbol;
+    String* str;
+    uint32_t index;
+} StringDedupEntry;
+
+static int string_dedup_cmp(const void* a, const void* b, void* udata) {
+    const StringDedupEntry* x = (const StringDedupEntry*)a;
+    const StringDedupEntry* y = (const StringDedupEntry*)b;
+    if (x->len != y->len || x->is_symbol != y->is_symbol) return 1;
+    return memcmp(x->chars, y->chars, x->len) == 0 ? 0 : 1;
+}
+
+static uint64_t string_dedup_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const StringDedupEntry* entry = (const StringDedupEntry*)item;
+    uint64_t h = hashmap_sip(entry->chars, entry->len, seed0, seed1);
+    return entry->is_symbol ? h ^ UINT64_C(0x9E3779B97F4A7C15) : h;
+}
+
+static bool lambda_const_pool_intern_string(Transpiler* tp, String* str,
+        bool is_symbol, String** out_str, uint32_t* out_index) {
+    if (!tp || !tp->const_list || !str) return false;
+    if (!tp->string_dedup) {
+        tp->string_dedup = hashmap_new(sizeof(StringDedupEntry), 32, 0, 0,
+            string_dedup_hash, string_dedup_cmp, NULL, NULL);
+    }
+    // A symbol is a `Symbol*` carried in a `String*` slot, and the two layouts
+    // differ -- `Symbol` has `ns` where `String` has its flags, so `chars` sits
+    // at a different offset. Reading a symbol through the String layout hashes
+    // whatever follows `ns`, which silently mismatched and handed back the
+    // wrong shared symbol.
+    const char* chars = is_symbol ? ((Symbol*)str)->chars : str->chars;
+    uint32_t len = is_symbol ? ((Symbol*)str)->len : (uint32_t)str->len;
+    StringDedupEntry probe = {chars, len, (uint8_t)(is_symbol ? 1 : 0), NULL, 0};
+    if (tp->string_dedup) {
+        const StringDedupEntry* found =
+            (const StringDedupEntry*)hashmap_get(tp->string_dedup, &probe);
+        if (found) { *out_str = found->str; *out_index = found->index; return true; }
+    }
+    if (!arraylist_append(tp->const_list, str)) return false;
+    *out_str = str;
+    *out_index = (uint32_t)(tp->const_list->length - 1);
+    if (tp->string_dedup) {
+        probe.str = str;
+        probe.index = *out_index;
+        hashmap_set(tp->string_dedup, &probe);
+    }
+    return true;
+}
+
 static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
         LambdaAstLiteralKind kind) {
     // Phase 3: empty strings are values; empty symbol/binary values remain absent.
@@ -3438,9 +3490,15 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
         }
         str_type->string = str;
     }
-    // add to const list
-    arraylist_append(tp->const_list, str);
-    str_type->const_index = tp->const_list->length - 1;
+    // share the String and its pool slot with an equal earlier literal (RC6)
+    String* pooled = str;
+    uint32_t pooled_index = 0;
+    if (!lambda_const_pool_intern_string(tp, str, is_symbol, &pooled,
+            &pooled_index)) {
+        return &LIT_NULL;
+    }
+    str_type->string = pooled;
+    str_type->const_index = (int)pooled_index;
     return (Type*)str_type;
 }
 
@@ -8252,6 +8310,11 @@ static void direct_refresh_recursive_type_layout(Type* type, ArrayList* visited)
         direct_refresh_recursive_type_layout(((TypeUnary*)type)->operand, visited);
     } else if (type->type_id == LMD_TYPE_MAP && type != &TYPE_MAP) {
         TypeMap* map = (TypeMap*)type;
+        // Every record arm reached from a named union alias is a declared
+        // contract, just like a directly named record. Marking only the outer
+        // union left compiler-constructed member carriers unable to certify
+        // recursive admission (D3.2.4v3, D8.3.2-D8.3.3).
+        map->is_trusted_contract = true;
         bool changed_width = false;
         for (ShapeEntry* field = map->shape; field; field = field->next) {
             direct_refresh_recursive_type_layout(field->type, visited);
@@ -9674,7 +9737,115 @@ static bool cow_param_note_enabled(void) {
     return enabled;
 }
 
-static void lambda_ast_note_plain_param_writes(Transpiler* tp, AstFuncNode* fn) {
+typedef struct CowParamEffectScan {
+    NameEntry* entry;
+    bool retained;
+    bool var_may_publish;
+} CowParamEffectScan;
+
+static void cow_param_note_alias(CowParamEffectScan* scan) {
+    scan->retained = true;
+    // An alias can make a subsequent interior write detach the parameter,
+    // which must then be published through its `var` caller home.
+    scan->var_may_publish = true;
+}
+
+static bool cow_param_expr_uses_entry(AstNode* expr, NameEntry* entry) {
+    AstIdentNode* ident = ast_compound_root_ident(expr);
+    return ident && ident->entry == entry;
+}
+
+static bool cow_param_nested_function_uses_entry(AstNode* node, void* data) {
+    CowParamEffectScan* scan = (CowParamEffectScan*)data;
+    if (!scan || node->node_type != AST_NODE_IDENT) return scan != NULL;
+    if (((AstIdentNode*)node)->entry == scan->entry) cow_param_note_alias(scan);
+    return true;
+}
+
+static bool cow_param_retention_scan_node(AstNode* node, void* data) {
+    CowParamEffectScan* scan = (CowParamEffectScan*)data;
+    if (!scan || !node) return false;
+    switch (node->node_type) {
+    case AST_NODE_VARIABLE_DECLARATOR:
+        if (cow_param_expr_uses_entry(((AstDeclaratorNode*)node)->init, scan->entry)) {
+            cow_param_note_alias(scan);
+        }
+        break;
+    case AST_NODE_ASSIGN_STAM: {
+        AstAssignStamNode* assign = (AstAssignStamNode*)node;
+        if (assign->target_entry == scan->entry) {
+            scan->var_may_publish = true;
+        } else if (cow_param_expr_uses_entry(assign->value, scan->entry)) {
+            cow_param_note_alias(scan);
+        }
+        break;
+    }
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_MEMBER_ASSIGN_STAM: {
+        AstCompoundAssignNode* assign = (AstCompoundAssignNode*)node;
+        AstIdentNode* owner = ast_compound_root_ident(assign->object);
+        if (owner && owner->entry != scan->entry &&
+                cow_param_expr_uses_entry(assign->value, scan->entry)) {
+            cow_param_note_alias(scan);
+        }
+        break;
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        for (AstNode* arg = call->argument; arg; arg = arg->next) {
+            if (cow_param_expr_uses_entry(arg, scan->entry)) {
+                // The callee's effect can be unknown at this function's
+                // completion (including forward and dynamic targets).
+                cow_param_note_alias(scan);
+                break;
+            }
+        }
+        break;
+    }
+    case AST_NODE_ARRAY:
+    case AST_NODE_LIST:
+    case AST_NODE_MAP:
+    case AST_NODE_ELEMENT:
+    case AST_NODE_CONTENT: {
+        AstArrayNode* values = (AstArrayNode*)node;
+        for (AstNode* item = values->item; item; item = item->next) {
+            if (cow_param_expr_uses_entry(item, scan->entry)) {
+                cow_param_note_alias(scan);
+                break;
+            }
+        }
+        break;
+    }
+    case AST_NODE_KEY_EXPR:
+        if (cow_param_expr_uses_entry(((AstNamedNode*)node)->as, scan->entry)) {
+            cow_param_note_alias(scan);
+        }
+        break;
+    case AST_NODE_RETURN_STAM:
+        scan->retained = scan->retained || cow_param_expr_uses_entry(
+            ((AstReturnNode*)node)->value, scan->entry);
+        break;
+    case AST_NODE_FUNC:
+    case AST_NODE_FUNC_EXPR:
+    case AST_NODE_PROC: {
+        AstFuncNode* nested = (AstFuncNode*)node;
+        walk_lambda_ast(nested->body, cow_param_nested_function_uses_entry,
+            scan, true);
+        break;
+    }
+    default:
+        break;
+    }
+    return true;
+}
+
+static CowParamEffectScan ast_body_cow_param_effects(AstNode* body, NameEntry* entry) {
+    CowParamEffectScan scan = {entry, false, false};
+    walk_lambda_ast(body, cow_param_retention_scan_node, &scan, false);
+    return scan;
+}
+
+static void lambda_ast_note_param_cow_effects(Transpiler* tp, AstFuncNode* fn) {
     bool note = cow_param_note_enabled();
     // the walk feeds the shipped CW29 semantics: entry->cow_param_mutated
     // tells both tiers which plain params to snapshot at activation entry
@@ -9682,10 +9853,17 @@ static void lambda_ast_note_plain_param_writes(Transpiler* tp, AstFuncNode* fn) 
     for (AstNamedNode* param = fn->param; param;
             param = (AstNamedNode*)((AstNode*)param)->next) {
         TypeParam* pt = (TypeParam*)((AstNode*)param)->type;
-        if (!pt || pt->is_var_param || !param->entry) continue;
-        if (!ast_body_may_write_entry(fn->body, param->entry, false)) continue;
-        param->entry->cow_param_mutated = true;
-        if (!note) continue;
+        if (!pt || !param->entry) continue;
+        CowParamEffectScan effects = ast_body_cow_param_effects(fn->body,
+            param->entry);
+        if (pt->is_var_param) {
+            param->entry->cow_var_param_may_publish = effects.var_may_publish;
+            continue;
+        }
+        param->entry->cow_param_retained = effects.retained;
+        param->entry->cow_param_mutated = ast_body_may_write_entry(fn->body,
+            param->entry, false);
+        if (!param->entry->cow_param_mutated || !note) continue;
         String* fname = fn->name;
         log_warn("cow-param-note: %s:%.*s: write through plain parameter `%.*s` "
             "is local to the procedure under S9.1.3; add `var` to publish it",
@@ -10421,9 +10599,13 @@ static AstNode* build_module_import_from_parts(Transpiler* tp,
     bool relative = module.str[0] == '.';
     if (relative) {
         const char* base = tp->directory ? tp->directory : "./";
+        size_t base_len = strlen(base);
         strbuf_append_format(path, "%s%.*s", base,
             (int)module.length - 1, module.str + 1);
-        for (char* ch = path->str; *ch; ch++) if (*ch == '.') *ch = '/';
+        // only the module spec's dots are package separators. The base
+        // directory may legitimately contain a dot component (a checkout under
+        // `.claude/`, `~/.local/...`), and rewriting those produced `//claude`.
+        for (char* ch = path->str + base_len; *ch; ch++) if (*ch == '.') *ch = '/';
     } else {
         strbuf_append_format(path, "./%.*s", (int)module.length, module.str);
         for (char* ch = path->str + 2; *ch; ch++) if (*ch == '.') *ch = '/';
@@ -11065,7 +11247,7 @@ static LambdaParseValue direct_ast_reduce(void* context,
             // CW24: the body is complete, so every write-back that could
             // excuse a place-copy mutation has now been seen.
             lambda_ast_flush_place_copy_diagnostics(tp);
-            if (fn) lambda_ast_note_plain_param_writes(tp, fn);  // CW29 sweep
+            if (fn) lambda_ast_note_param_cow_effects(tp, fn);  // CW29 sweep
             if (fn) lambda_ast_lower_rmw_borrows(fn);  // CW34
             return 0;
         }

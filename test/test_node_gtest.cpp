@@ -207,7 +207,6 @@ static std::vector<FeatureModule> g_feature_modules = {
     {"readline",       "readline",        true,  nullptr},
     {"timers",         "timers",          true,  nullptr},
     {"tls",            "tls",             true,  nullptr},
-    {"vm",             "vm",              true,  nullptr},
 
     // --- Additional test prefixes (non-module tests) ---
     {"misc",           "next",            true,  nullptr},  // test-next-tick-*

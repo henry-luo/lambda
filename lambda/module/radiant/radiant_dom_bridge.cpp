@@ -117,7 +117,6 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 // name -- the same shape as click and check_validity.
 #define dom_dispatch_event_bridge radiant_host_api->dom_catalog->dispatch_event_bridge
 #define dom_append_child_bridge radiant_host_api->dom_catalog->append_child_bridge
-#define dom_remove_bridge radiant_host_api->dom_catalog->remove_bridge
 #define dom_adopt_node_bridge radiant_host_api->dom_catalog->adopt_node
 #define dom_location_navigate_bridge radiant_host_api->dom_catalog->location_navigate_bridge
 #define dom_document_open_bridge radiant_host_api->dom_catalog->document_open_bridge
@@ -131,7 +130,6 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_live_document_get_elements_by_tag_name_bridge radiant_host_api->realm->live_document_get_elements_by_tag_name_bridge
 #define dom_live_document_get_elements_by_class_name_bridge radiant_host_api->realm->live_document_get_elements_by_class_name_bridge
 #define dom_live_document_get_elements_by_name_bridge radiant_host_api->realm->live_document_get_elements_by_name_bridge
-#define dom_replace_with_bridge radiant_host_api->dom_catalog->replace_with_bridge
 #define dom_notify_mutation radiant_host_api->dom_catalog->notify_mutation
 #define dom_get_ui_context radiant_host_api->dom_catalog->get_ui_context
 #define dom_has_committed_geometry_snapshot radiant_host_api->dom_catalog->has_committed_geometry_snapshot
@@ -825,38 +823,6 @@ static bool radiant_dom_node_contains(DomNode* root, DomNode* other) {
         if (current == root) return true;
     }
     return false;
-}
-
-static int64_t radiant_dom_compare_document_position(DomNode* node, DomNode* other) {
-    if (!other) return 1;
-    if (node == other) return 0;
-    for (DomNode* p = other->parent; p; p = p->parent) {
-        if (p == node) return 16 + 4;
-    }
-    for (DomNode* p = node->parent; p; p = p->parent) {
-        if (p == other) return 8 + 2;
-    }
-    DomNode* a_path[256];
-    int a_depth = 0;
-    for (DomNode* p = node; p && a_depth < 256; p = p->parent) a_path[a_depth++] = p;
-    DomNode* b_path[256];
-    int b_depth = 0;
-    for (DomNode* p = other; p && b_depth < 256; p = p->parent) b_path[b_depth++] = p;
-    if (a_depth == 0 || b_depth == 0 || a_path[a_depth - 1] != b_path[b_depth - 1]) {
-        return 1;
-    }
-    int ai = a_depth - 1;
-    int bi = b_depth - 1;
-    while (ai > 0 && bi > 0 && a_path[ai - 1] == b_path[bi - 1]) {
-        ai--;
-        bi--;
-    }
-    DomNode* a_child = (ai > 0) ? a_path[ai - 1] : node;
-    DomNode* b_child = (bi > 0) ? b_path[bi - 1] : other;
-    for (DomNode* s = a_child->next_sibling; s; s = s->next_sibling) {
-        if (s == b_child) return 4;
-    }
-    return 2;
 }
 
 static DomElement* radiant_dom_find_by_id(DomElement* root, const char* id) {
@@ -2781,28 +2747,9 @@ RADIANT_C_API Item radiant_dom_element_operation(Item elem_item,
         DomNode* other = (argc >= 1) ? (DomNode*)radiant_dom_unwrap_node(args[0]) : nullptr;
         return (Item){.item = b2it(radiant_dom_node_contains(node, other) ? 1 : 0)};
     }
-    if (operation == JUBE_DOM_COMPARE_DOCUMENT_POSITION) {
-        DomNode* other = (argc >= 1) ? (DomNode*)radiant_dom_unwrap_node(args[0]) : nullptr;
-        return radiant_dom_int_item(radiant_dom_compare_document_position(node, other));
-    }
     if (operation == JUBE_DOM_GET_ROOT_NODE) {
         // Shadow DOM is deferred, so composed and non-composed roots coincide.
         return radiant_dom_node_root_item(node);
-    }
-    if (node->is_element() && radiant_dom_is_tag(node->as_element(), "select") &&
-        (operation == JUBE_DOM_NAMED_ITEM || operation == JUBE_DOM_ADD ||
-         operation == JUBE_DOM_REMOVE)) {
-        // HTMLSelectElement overrides ChildNode.remove(); preserve the option
-        // list overload before the generic node-removal bridge.
-        return dom_element_operation_impl(elem_item, operation, args, argc);
-    }
-    if (operation == JUBE_DOM_REMOVE) {
-        // Node.remove() must use the backed-tree path so renderer and DOM
-        // sibling state are retired together and observers receive a detail.
-        return dom_remove_bridge((void*)node);
-    }
-    if (operation == JUBE_DOM_REPLACE_WITH) {
-        return dom_replace_with_bridge((void*)node, args, argc);
     }
     return dom_element_operation_impl(elem_item, operation, args, argc);
 }

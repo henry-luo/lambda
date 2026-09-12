@@ -358,6 +358,21 @@ static inline bool sysfunc_params_reject_error(const SysFuncInfo* info) {
     }
 }
 
+// Search and ordinal rows return either a finite integer or semantic null.
+// Keep this shared category in the registry layer so inference and MIR
+// lowering cannot grow separate per-function lists for the same result shape.
+static inline bool sysfunc_returns_optional_int(const SysFuncInfo* info) {
+    if (!info) return false;
+    switch (info->fn) {
+    case SYSFUNC_INDEX_OF:
+    case SYSFUNC_LAST_INDEX_OF:
+    case SYSFUNC_ORD:
+        return true;
+    default:
+        return false;
+    }
+}
+
 // Math entries whose result is float regardless of argument type. The rest of
 // the native-math family (floor/ceil/round/trunc/abs …) preserve their
 // argument's type instead, so their result lane depends on type inference —

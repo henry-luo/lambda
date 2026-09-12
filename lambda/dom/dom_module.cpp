@@ -76,13 +76,13 @@ struct DomCatalogRow {
         Item (*f)(Item, Item, Item, Item, Item) = \
             (Item (*)(Item, Item, Item, Item, Item))(fn_ptr)(body); \
         return f ? dom_absent_to_null(f(a, b, c, d, e)) : ItemNull; }
-#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) \
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv, iface, member, js_name) \
     DOM_PUB_##argc(name, body)
 #include "dom_api.def"
 #undef DOM_OP
 
 static const DomCatalogRow dom_catalog[] = {
-#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) \
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv, iface, member, js_name) \
     { #name, sig, (fn_ptr)(body), (fn_ptr)dom_pub_##name, (unsigned)(flags) },
 #include "dom_api.def"
 #undef DOM_OP

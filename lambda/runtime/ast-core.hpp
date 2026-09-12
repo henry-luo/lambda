@@ -306,6 +306,15 @@ struct NameEntry {
     // share-mark in the callee prologue; the first write detaches a private
     // copy. Computed once at FUNCTION_END from the shared body walk.
     bool cow_param_mutated;
+    // A plain `pn` parameter can retain its input past a call boundary by
+    // placing it in another owner, returning it, capturing it, or forwarding
+    // it. Callers retain the COW check on later `var` re-borrows only for this
+    // effect or cow_param_mutated (S9.1.2, S9.1.3).
+    bool cow_param_retained;
+    // A `var` parameter needs caller-home transport only when its body can
+    // replace or retain the borrowed binding. Pure in-place writes keep the
+    // caller's descriptor valid (S9.2.1, D3.3.3v3).
+    bool cow_var_param_may_publish;
     // CW31/S9.2.4 face 4: when this binding holds a mutable VIEW, the ultimate
     // base binding it aliases (chased through view-of-view). The call-site
     // exclusivity check conflicts two `var` args sharing an effective root, so
@@ -419,8 +428,26 @@ struct NameScope {
     bool is_switch_scope;
 };
 
+// What const value, if any, a node carries. The payload always lives in the
+// unit's const_list; this says how to read the slot `const_index` names.
+typedef enum AstConstKind : uint16_t {
+    AST_CONST_NONE = 0,
+    // A folded expression. The slot holds a pointer to a pool-allocated Item.
+    AST_CONST_FOLDED,
+    // A materialized const container. The slot *is* the container pointer,
+    // matching what `emit_load_const(..., MIR_T_P)` already loads.
+    AST_CONST_POOLED,
+} AstConstKind;
+
 struct AstNode {
     AstNodeType node_type;
+    // Const-value handle, in the padding after the 16-bit tag -- AstNode stays
+    // 32 bytes. `node->type` already carries the inferred type, and the few
+    // declaring nodes carry their own `declared_type`, so this is the only
+    // per-node compiler fact that needed a home. Zero-initialized allocation
+    // makes AST_CONST_NONE the default with no init pass (RC12, D8.2.5v2).
+    AstConstKind const_kind;
+    uint32_t const_index;
     Type *type;
     AstNode* next;
     SourceSpan source_span;
@@ -459,7 +486,6 @@ typedef struct AstIndex {
     // Dense function roots make FunctionId the shared authority for Lambda
     // and JS lowering instead of requiring each frontend to rescan nodes.
     AstFunctionIndexEntry* functions;
-    struct AstNodeFacts* facts;
     uint32_t count;
     uint32_t capacity;
     uint32_t function_count;
@@ -470,6 +496,10 @@ typedef struct AstIndex {
     AstNode** slots;
     AstNodeId* slot_ids;
     uint32_t slot_capacity;
+    // Nodes below this id have already been const-folded. A retained unit is
+    // recompiled through a fresh pass manager and the REPL appends to it, so
+    // the fold resumes here instead of redoing settled nodes (RC11).
+    uint32_t const_folded_count;
 } AstIndex;
 
 typedef bool (*AstIndexSubtreeVisitor)(const AstIndex* index,
@@ -478,21 +508,6 @@ typedef bool (*AstIndexSubtreeVisitor)(const AstIndex* index,
 typedef struct AstIndexPassContext { AstIndex* index; AstNode* root;
     const LangProfile* profile; } AstIndexPassContext;
 
-typedef struct AstNodeFacts {
-    Type* declared_contract;
-    Type* inferred_type;
-    ValueRep representation;
-    uint32_t flags;
-    // const pass results are immediate Items only. Pointer-backed values stay
-    // out of this table so an AST fact cannot become a MIR-cache relocation
-    // dependency (D8.1.1v2 / DI14).
-    uint64_t folded_item;
-} AstNodeFacts;
-
-enum AstNodeFactFlags : uint32_t {
-    AST_NODE_FACT_NONE = 0,
-    AST_NODE_FACT_CONST_FOLDED = 1u << 0,
-};
 
 #ifdef __cplusplus
 extern "C" {

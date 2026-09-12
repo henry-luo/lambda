@@ -159,6 +159,11 @@ struct InterpState {
     // at a live frame slot and is restored when that subscript completes.
     uint64_t*    last_index_item;
     EvalMode     mode;
+    // The unit being folded, set only by the const-fold pass. CONST-mode
+    // evaluation needs it to resolve a const binding from its declarator: the
+    // module slab is empty at compile time, so an identifier has no slot to
+    // read (RC3.3). NULL in every other mode.
+    struct Transpiler* const_owner;
     uint32_t     depth;          // remaining recursion budget
     uint32_t     depth_limit;
     uint64_t     node_count;     // evaluated nodes, for the measurement report

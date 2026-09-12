@@ -93,8 +93,13 @@ typedef struct LambdaModuleState {
     uint32_t var_count;      // live module slots visible to generated code
     uint32_t var_capacity;   // root-range/storage capacity; may exceed var_count in REPL
     uint32_t property_key_count;
+    uint32_t const_count;
     uint32_t module_id;
     bool vars_registered;
+    // JS units compile from an ephemeral transpiler, so their const pool is
+    // copied into state-owned storage and released with the state (RC-J7).
+    // Lambda keeps its Script-owned pool and leaves this false.
+    bool consts_owned;
 } LambdaModuleState;
 
 // Runtime-facing scalar materializers are needed by native input adapters as

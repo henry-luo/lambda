@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "Tune26 T26-4: a typed var parameter re-borrows its already-exclusive root into a direct callee without a repeated COW preparation, while the caller snapshot remains isolated.",
+  "checks": [
+    {
+      "in_func": "_tune26_typed_reborrow_loop_#",
+      "expect": [
+        "call\t_tune26_typed_reborrow_step_"
+      ],
+      "forbid": [
+        "call\tcow_prepare_write_p, cow_prepare_write"
+      ]
+    }
+  ]
+}

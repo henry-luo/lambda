@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define JUBE_ABI_VERSION 6
+#define JUBE_ABI_VERSION 7
 #define JUBE_ABI_VERSION_LEGACY 1
 #define JUBE_HOST_API_VERSION 4
 #define JUBE_HOST_LANG_API_VERSION 1
@@ -397,6 +397,13 @@ typedef struct JubeMemberBind {
     const char* reflect_attr; // attribute-reflected member: generic reflect routine
                               //   handles get/set; no handler functions needed
     uint32_t flags;           // JubeMemberFlags
+    // DS13: the catalog row itself, so a member call lands on the operation
+    // with no adapter in between. When `row_index` is set it supersedes `call`:
+    // the dispatcher pads or truncates the argument list once and invokes the
+    // row at `row_argc`. `row_argc` counts the receiver, matching the catalog's
+    // own arity (a 0-argument method is row_argc 1).
+    uint16_t row_index;       // JubeDomRowIndex; 0 = not a row
+    uint8_t row_argc;
 } JubeMemberBind;
 
 typedef struct JubeTypeBinding {
@@ -726,8 +733,23 @@ typedef enum JubeDomTokenListOperation {
     JUBE_DOM_TOKEN_LIST_ITERATOR,
 } JubeDomTokenListOperation;
 
+// DS13: the catalog rows again, this time as a flat index space, so a module's
+// *static* member table can name a row without linking the host symbol. The
+// order is dom_api.def's order -- the same order as the struct below and as the
+// slot array the registry builds from it.
+typedef enum JubeDomRowIndex {
+    JUBE_DOM_ROW_NONE = 0,
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv, iface, member, js_name) \
+    JUBE_DOM_ROW_##name,
+#define DOM_RAW(name, cluster, ret, params, body, flags)
+#include "../dom/dom_api.def"
+#undef DOM_OP
+#undef DOM_RAW
+    JUBE_DOM_ROW_COUNT
+} JubeDomRowIndex;
+
 struct JubeHostDomCatalogAPI {
-#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) \
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv, iface, member, js_name) \
     JubeDomFn##argc name;
 #define DOM_RAW(name, cluster, ret, params, body, flags) \
     ret (*name)params;

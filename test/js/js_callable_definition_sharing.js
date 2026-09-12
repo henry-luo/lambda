@@ -30,9 +30,4 @@ console.log('dynamic-definitions', distinct[0](2), distinct[31](2), distinct[0] 
 function* resumable(value) { var next = factory(value); yield next(); return next(2); }
 var generator = resumable(10);
 console.log('suspension', generator.next().value, generator.next().value);
-var vm = require('vm');
-var one = vm.createContext({ base: 20 }), two = vm.createContext({ base: 40 });
-var f = vm.runInContext('(function(x) { return base + x; })', one);
-var g = vm.runInContext('(function(x) { return base + x; })', two);
-console.log('realms', f(1), g(2), f !== g);
 console.log('retained', closures[0](2), closures[1](2));

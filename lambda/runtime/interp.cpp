@@ -13,6 +13,7 @@
 #include "re2_wrapper.hpp"
 #include "heap_api.h"
 #include "type_contract.hpp"
+#include "type_build.hpp"   // ast_static_literal_item: const-value resolution (RC15)
 #include "lambda-number-types.hpp"
 #include "lambda-number-runtime.hpp"
 #include "../js/js_runtime.h"
@@ -287,6 +288,9 @@ public:
 // ---------------------------------------------------------------------------
 
 static Item eval_expr(InterpFrame* f, AstNode* node);
+// const-value resolution used by CONST-mode evaluation (RC3.3, RC15)
+static AstDeclaratorNode* interp_const_binding_decl(AstNode* node);
+static bool interp_const_init_value(Transpiler* tp, AstNode* init, Item* out);
 static Item interp_item_at(Item source, int64_t index);
 static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_functions);
 static Item eval_list(InterpFrame* f, AstListNode* list_node);
@@ -4010,6 +4014,96 @@ static bool interp_fast_int_while(InterpFrame* frame, AstWhileNode* loop,
     return true;
 }
 
+// Both const kinds resolve through the unit's const_list: a pool-owned address
+// must never be baked anywhere it could outlive its unit (DI14). A folded slot
+// holds a pointer to a pool-allocated Item; a pooled slot *is* the container
+// pointer (RC13).
+// Publishing a folded value means pooling it: the node carries only a handle,
+// and a shared pool entry is what later lets equal constants be deduplicated
+// (RC6). Returns false without marking the node if the slot cannot be created.
+typedef struct ConstDedupEntry {
+    uint64_t word;
+    uint32_t index;
+} ConstDedupEntry;
+
+static int const_dedup_cmp(const void* a, const void* b, void* udata) {
+    return ((const ConstDedupEntry*)a)->word == ((const ConstDedupEntry*)b)->word
+        ? 0 : 1;
+}
+
+static uint64_t const_dedup_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const ConstDedupEntry* entry = (const ConstDedupEntry*)item;
+    return hashmap_sip(&entry->word, sizeof(entry->word), seed0, seed1);
+}
+
+// RC6: an 8-byte const slot is fully described by its bytes, so two entries
+// with the same word are interchangeable -- each consumer reads the slot
+// through its own node's type, and immutability makes sharing unobservable.
+// Returns the pool index to use, reusing an existing slot when one matches.
+static bool lambda_const_pool_intern_word(Transpiler* tp, uint64_t word,
+        uint32_t* out_index) {
+    if (!tp || !tp->const_list || !out_index) return false;
+    if (!tp->const_dedup) {
+        tp->const_dedup = hashmap_new(sizeof(ConstDedupEntry), 32, 0, 0,
+            const_dedup_hash, const_dedup_cmp, NULL, NULL);
+    }
+    if (tp->const_dedup) {
+        ConstDedupEntry probe = {word, 0};
+        const ConstDedupEntry* found =
+            (const ConstDedupEntry*)hashmap_get(tp->const_dedup, &probe);
+        if (found) { *out_index = found->index; return true; }
+    }
+    uint64_t* slot = (uint64_t*)alloc_const(tp, sizeof(uint64_t));
+    if (!slot) return false;
+    *slot = word;
+    if (!arraylist_append(tp->const_list, slot)) return false;
+    *out_index = (uint32_t)(tp->const_list->length - 1);
+    if (tp->const_dedup) {
+        ConstDedupEntry entry = {word, *out_index};
+        hashmap_set(tp->const_dedup, &entry);
+    }
+    return true;
+}
+
+static bool interp_publish_folded_item(Transpiler* tp, AstNode* node, Item value) {
+    if (!tp || !node) return false;
+    uint32_t index = 0;
+    if (!lambda_const_pool_intern_word(tp, value.item, &index)) return false;
+    node->const_index = index;
+    node->const_kind = AST_CONST_FOLDED;
+    return true;
+}
+
+static bool interp_const_slot_value(Script* owner, const AstNode* node, Item* out) {
+    if (!owner || !owner->const_list || node->const_kind == AST_CONST_NONE) return false;
+    if (node->const_index >= (uint32_t)owner->const_list->length) return false;
+    void* slot = arraylist_get(owner->const_list, (int)node->const_index);
+    if (!slot) return false;
+    out->item = node->const_kind == AST_CONST_FOLDED
+        ? *(uint64_t*)slot : (uint64_t)(uintptr_t)slot;
+    return true;
+}
+
+// RC9: the interpreter produced the CONST facts; it should read them too.
+// Only UNARY/BINARY/IF_EXPR are ever folded (the pass skips PRIMARY outright),
+// so the node-kind test keeps every other evaluation off this path entirely.
+static bool interp_const_folded_value(InterpFrame* f, AstNode* node, Item* out) {
+    switch (node->node_type) {
+    // folded expressions
+    case AST_NODE_UNARY: case AST_NODE_BINARY: case AST_NODE_IF_EXPR:
+    // reads of const bindings, resolved to their binding's value (RC3.3)
+    case AST_NODE_IDENT:
+    // folded calls to pure sys-funcs (RC3.4)
+    case AST_NODE_CALL_EXPR:
+    // materialized const containers (RC15)
+    case AST_NODE_ARRAY: case AST_NODE_MAP: break;
+    default: return false;
+    }
+    if (node->const_kind == AST_CONST_NONE) return false;
+    Script* owner = f ? f->module : NULL;
+    return interp_const_slot_value(owner, node, out);
+}
+
 static Item eval_expr(InterpFrame* f, AstNode* node) {
     if (!node) return ItemNull;
     f->cur = node;
@@ -4020,6 +4114,16 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             return ItemError;
         }
         f->st->mode_fuel--;
+    }
+    // Execution reads the settled value instead of re-evaluating the same
+    // constant subtree on every run. CONST mode reads it too: folding `a + 1`
+    // recurses into the identifier, whose value is a published fact rather than
+    // a runtime slot -- the slab is empty at compile time. A fact is only
+    // published after passing its own agreement check, so consuming one mid-pass
+    // cannot observe a half-formed value (RC9, RC3.3).
+    {
+        Item folded;
+        if (interp_const_folded_value(f, node, &folded)) return folded;
     }
 
     switch (node->node_type) {
@@ -4076,6 +4180,19 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             return interp_ptr_item(pattern && pattern->pattern_index >= 0
                 ? const_pattern_with_tl(pattern->pattern_index, f->module->type_list)
                 : NULL);
+        }
+        // RC3.3: at fold time there is no slab to read. A const binding's value
+        // comes from its declarator -- which may sit at a *higher* node id than
+        // the expression using it, so this cannot wait for a published fact.
+        if (f->st->mode == EvalMode::CONST && f->st->const_owner) {
+            AstDeclaratorNode* declarator = interp_const_binding_decl(node);
+            Item bound = ItemNull;
+            if (declarator && declarator->init &&
+                    interp_const_init_value(f->st->const_owner, declarator->init,
+                        &bound)) {
+                return bound;
+            }
+            return ItemError;
         }
         return interp_read_binding(f, entry);
     }
@@ -5229,12 +5346,68 @@ public:
 // const accepts only literal scalar syntax. The same eval_expr walker still
 // performs the operation, but this narrow admission guarantees a fold cannot
 // read a binding, call user code, allocate a container, or publish an effect.
+// RC15/RC3.3: what value does a const initializer denote? Either the source
+// determines it (a literal, materialized without evaluation) or an earlier fold
+// already settled it. Both answers come from published state, never from a
+// runtime slot -- the module slab is empty while this pass runs.
+static bool interp_const_init_value(Transpiler* tp, AstNode* init, Item* out) {
+    if (!tp || !init || !out) return false;
+    AstNode* value = ast_unwrap_primary(init);
+    // A published fold fact is this node's *computed* value, so it answers
+    // first and unconditionally.
+    if (value && value->const_kind != AST_CONST_NONE &&
+            interp_const_slot_value((Script*)tp, value, out)) {
+        return true;
+    }
+    // Only a bare literal may answer from its type. `ast_static_literal_item`
+    // reports what a node's *type* carries, and inference can hand a computed
+    // node a literal-valued type: `floor(2.7)` inherits its argument's literal
+    // float type, whose payload is 2.7 -- the argument, not the result. Asking
+    // it about a non-literal node therefore returns a confidently wrong value.
+    if (!value || value->node_type != AST_NODE_PRIMARY ||
+            ((AstPrimaryNode*)value)->expr) {
+        return false;
+    }
+    return ast_static_literal_item(tp, init, out);
+}
+
+// RC3: the declarator a name is bound by, when that binding is immutable and
+// so cannot change between the fold and the read. A `var`, a parameter, or a
+// type definition is not a const binding.
+static AstDeclaratorNode* interp_const_binding_decl(AstNode* node) {
+    if (!node || node->node_type != AST_NODE_IDENT) return NULL;
+    NameEntry* entry = ((AstIdentNode*)node)->entry;
+    if (!entry || entry->is_mutable || entry->is_parameter) return NULL;
+    AstNode* decl = entry->node;
+    if (!decl || decl->node_type != AST_NODE_VARIABLE_DECLARATOR) return NULL;
+    AstDeclaratorNode* declarator = (AstDeclaratorNode*)decl;
+    return declarator->is_type_definition ? NULL : declarator;
+}
+
+static bool interp_const_node_supported_depth(AstNode* node, int depth);
+
 static bool interp_const_node_supported(AstNode* node) {
-    if (!node) return false;
+    return interp_const_node_supported_depth(node, 0);
+}
+
+// `depth` bounds the walk through binding initializers. A self- or
+// mutually-referential declaration (`let a = a`) would otherwise recur forever;
+// the cap makes a pathological chain decline to fold rather than hang.
+#define INTERP_CONST_BINDING_DEPTH_MAX 16
+
+static bool interp_const_node_supported_depth(AstNode* node, int depth) {
+    if (!node || depth > INTERP_CONST_BINDING_DEPTH_MAX) return false;
     switch (node->node_type) {
+    case AST_NODE_IDENT: {
+        // RC3.3: reading an immutable binding whose initializer is itself const
+        // is const. The read is a copy of a settled value, not an evaluation.
+        AstDeclaratorNode* declarator = interp_const_binding_decl(node);
+        return declarator && declarator->init &&
+            interp_const_node_supported_depth(declarator->init, depth + 1);
+    }
     case AST_NODE_PRIMARY: {
         AstNode* expr = ((AstPrimaryNode*)node)->expr;
-        if (expr) return interp_const_node_supported(expr);
+        if (expr) return interp_const_node_supported_depth(expr, depth);
         if (!node->type || !node->type->is_literal) return false;
         switch (node->type->type_id) {
         case LMD_TYPE_NULL:
@@ -5249,7 +5422,7 @@ static bool interp_const_node_supported(AstNode* node) {
     case AST_NODE_UNARY: {
         Operator op = ((AstUnaryNode*)node)->op;
         return (op == OPERATOR_NOT || op == OPERATOR_NEG || op == OPERATOR_POS) &&
-            interp_const_node_supported(((AstUnaryNode*)node)->operand);
+            interp_const_node_supported_depth(((AstUnaryNode*)node)->operand, depth);
     }
     case AST_NODE_BINARY: {
         AstBinaryNode* binary = (AstBinaryNode*)node;
@@ -5259,40 +5432,55 @@ static bool interp_const_node_supported(AstNode* node) {
         case OPERATOR_AND: case OPERATOR_OR:
         case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_LT: case OPERATOR_LE:
         case OPERATOR_GT: case OPERATOR_GE:
-            return interp_const_node_supported(binary->left) &&
-                interp_const_node_supported(binary->right);
+            return interp_const_node_supported_depth(binary->left, depth) &&
+                interp_const_node_supported_depth(binary->right, depth);
         default:
             return false;
         }
     }
+    case AST_NODE_CALL_EXPR: {
+        // RC3.4 / D6.1.2: purity is the soundness gate, and
+        // `interp_eval_mode_allows_sys_func` already encodes it -- it rejects
+        // `is_proc` and `is_async` callees and names the restricted-mode
+        // allowlist. Reuse that judgement rather than keeping a second list
+        // that could drift from it.
+        AstCallNode* call = (AstCallNode*)node;
+        AstNode* callee = ast_unwrap_primary(call->function);
+        if (!callee || callee->node_type != AST_NODE_SYS_FUNC) return false;
+        if (ast_call_has_named_args(call)) return false;
+        if (!interp_eval_mode_allows_sys_func(EvalMode::CONST,
+                ((AstSysFuncNode*)callee)->fn_info)) {
+            return false;
+        }
+        for (AstNode* arg = call->argument; arg; arg = arg->next) {
+            if (!interp_const_node_supported_depth(arg, depth)) return false;
+        }
+        return true;
+    }
     case AST_NODE_IF_EXPR: {
         AstIfNode* branch = (AstIfNode*)node;
         return branch->cond && branch->then &&
-            interp_const_node_supported(branch->cond) &&
-            interp_const_node_supported(branch->then) &&
-            (!branch->otherwise || interp_const_node_supported(branch->otherwise));
+            interp_const_node_supported_depth(branch->cond, depth) &&
+            interp_const_node_supported_depth(branch->then, depth) &&
+            (!branch->otherwise || interp_const_node_supported_depth(branch->otherwise, depth));
     }
     default:
         return false;
     }
 }
 
-// fold facts deliberately carry only tagged immediate values. Float and all
-// pointer-backed results may be valid during the attempt but must not survive
-// its side-stack lifetime or enter cacheable MIR as a stale address (DI14).
+// A fold fact must outlive the throwaway frame that produced it and may be
+// baked into cacheable MIR, so it may carry only a self-contained Item -- never
+// a pointer into frame, pool, or heap storage (DI14). This asks the
+// representation, not the TypeId: a self-tagged double is as safe to keep as an
+// int, while the residue that failed to pack is a pointer and is not.
+// [RC4, vibe/Lambda_Design_Runtime_Const.md]
 static bool interp_const_result_is_immediate(Item result) {
-    switch (get_type_id(result)) {
-    case LMD_TYPE_NULL:
-    case LMD_TYPE_BOOL:
-    case LMD_TYPE_INT:
-        return true;
-    default:
-        return false;
-    }
+    return lambda_item_is_self_contained(result.item);
 }
 
 bool interp_const_fold_script(Transpiler* tp) {
-    if (!tp || !tp->ast_index.nodes || !tp->ast_index.facts ||
+    if (!tp || !tp->ast_index.nodes || !tp->const_list ||
             !context || !interp_const_fold_enabled()) {
         return true;
     }
@@ -5309,18 +5497,42 @@ bool interp_const_fold_script(Transpiler* tp) {
     st.ctx = context;
     st.runtime = tp->runtime;
     st.mode = EvalMode::CONST;
+    st.const_owner = tp;
     st.depth_limit = 1;
     st.depth = 1;
     InterpState* saved_state = g_interp_state;
     g_interp_state = &st;
 
-    for (uint32_t id = 0; id < tp->ast_index.count; id++) {
+    // RC11: fold each node once. A retained unit re-enters this pass through a
+    // fresh manager, and the REPL appends to the same index, so resume at the
+    // watermark rather than re-folding settled nodes. Folding is a pure
+    // function of the subtree, so a redo could only reproduce its own answer.
+    // Appended nodes arrive with zeroed facts from ast_index_publish_node,
+    // which is why no wholesale reset is needed here.
+    for (uint32_t id = tp->ast_index.const_folded_count;
+            id < tp->ast_index.count; id++) {
         AstNode* node = tp->ast_index.nodes[id];
-        AstNodeFacts* facts = &tp->ast_index.facts[id];
-        facts->flags &= ~AST_NODE_FACT_CONST_FOLDED;
-        facts->folded_item = ITEM_NULL;
         if (!node || node->node_type == AST_NODE_PRIMARY ||
                 !interp_const_node_supported(node)) continue;
+
+        // RC3.3: a const binding's read is settled by copying its initializer's
+        // value, not by evaluating anything. The initializer's own value is
+        // either a materialized literal or a fact published earlier in this
+        // walk -- declarations precede their uses in index order.
+        if (node->node_type == AST_NODE_IDENT) {
+            AstDeclaratorNode* declarator = interp_const_binding_decl(node);
+            Item bound = ItemNull;
+            if (!declarator || !declarator->init ||
+                    !interp_const_init_value(tp, declarator->init, &bound)) {
+                continue;
+            }
+            if (!lambda_item_is_self_contained(bound.item) || !node->type ||
+                    get_type_id(bound) != node->type->type_id) {
+                continue;
+            }
+            interp_publish_folded_item(tp, node, bound);
+            continue;
+        }
 
         st.mode_fuel = interp_const_fuel_budget();
         st.mode_exhausted = false;
@@ -5334,14 +5546,22 @@ bool interp_const_fold_script(Transpiler* tp) {
             Item result = interp_eval_local_fault_operand(guard.frame(), node);
             if (interp_frame_pending(guard.frame()) || item_is_error(result) ||
                     st.mode_exhausted || st.mode_rejected ||
-                    !interp_const_result_is_immediate(result) || !node->type ||
-                    get_type_id(result) != node->type->type_id) {
+                    !interp_const_result_is_immediate(result) || !node->type) {
                 continue;
             }
-            facts->folded_item = result.item;
-            facts->flags |= AST_NODE_FACT_CONST_FOLDED;
+            // RC10: the folded value's type must equal the node's inferred
+            // type. A disagreement is a defect in this folder or in inference;
+            // report it instead of quietly declining the fold.
+            if (get_type_id(result) != node->type->type_id) {
+                log_error("const-fold: RC10 type disagreement node_kind=%d "
+                    "folded=%d inferred=%d", (int)node->node_type,
+                    (int)get_type_id(result), (int)node->type->type_id);
+                continue;
+            }
+            interp_publish_folded_item(tp, node, result);
         }
     }
+    tp->ast_index.const_folded_count = tp->ast_index.count;
     g_interp_state = saved_state;
     return true;
 }

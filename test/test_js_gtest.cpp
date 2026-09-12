@@ -1398,11 +1398,6 @@ TEST(JavaScriptRegression, Jscu35SwitchCaseRows) {
         "test/js/jscu35_switch_case_rows.txt");
 }
 
-TEST(JavaScriptRegression, Jscu35VmTemporaryBindings) {
-    test_js_script_against_file("test/js/jscu35_vm_temporary_bindings.js",
-        "test/js/jscu35_vm_temporary_bindings.txt");
-}
-
 TEST(JavaScriptRegression, Jscu35DiagnosticsChannelArguments) {
     test_js_script_against_file("test/js/jscu35_diagnostics_channel_arguments.js",
         "test/js/jscu35_diagnostics_channel_arguments.txt");
@@ -1411,11 +1406,6 @@ TEST(JavaScriptRegression, Jscu35DiagnosticsChannelArguments) {
 TEST(JavaScriptRegression, Jscu35DecoratorSequence) {
     test_js_script_against_file("test/js/jscu35_decorator_sequence.js",
         "test/js/jscu35_decorator_sequence.txt");
-}
-
-TEST(JavaScriptRegression, Jscu35VmSourceTextModuleBindings) {
-    test_js_script_against_file("test/js/jscu35_vm_source_text_module_bindings.js",
-        "test/js/jscu35_vm_source_text_module_bindings.txt");
 }
 
 TEST(JavaScriptRegression, Jscu31NetCreateConnectionArguments) {
