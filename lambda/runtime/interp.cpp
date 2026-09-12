@@ -5330,8 +5330,16 @@ bool interp_const_fold_script(Transpiler* tp) {
             Item result = interp_eval_local_fault_operand(guard.frame(), node);
             if (interp_frame_pending(guard.frame()) || item_is_error(result) ||
                     st.mode_exhausted || st.mode_rejected ||
-                    !interp_const_result_is_immediate(result) || !node->type ||
-                    get_type_id(result) != node->type->type_id) {
+                    !interp_const_result_is_immediate(result) || !node->type) {
+                continue;
+            }
+            // RC10: the folded value's type must equal the node's inferred
+            // type. A disagreement is a defect in this folder or in inference;
+            // report it instead of quietly declining the fold.
+            if (get_type_id(result) != node->type->type_id) {
+                log_error("const-fold: RC10 type disagreement node_kind=%d "
+                    "folded=%d inferred=%d", (int)node->node_type,
+                    (int)get_type_id(result), (int)node->type->type_id);
                 continue;
             }
             facts->folded_item = result.item;

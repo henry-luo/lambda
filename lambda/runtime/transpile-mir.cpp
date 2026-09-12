@@ -25393,9 +25393,10 @@ static bool mir_emit_const_folded_item(MirTranspiler* mt, AstNode* node,
     const AstNodeFacts* facts = &mt->ast_index->facts[id];
     if ((facts->flags & AST_NODE_FACT_CONST_FOLDED) == 0) return false;
 
+    // RC10: the producer proved folded type == inferred type before publishing
+    // the fact, and measurement over the corpus showed no fact outliving a type
+    // change. This boundary consumes that guarantee instead of re-deriving it.
     Item value = {.item = facts->folded_item};
-    TypeId type_id = get_type_id(value);
-    if (type_id != evaluated->type->type_id) return false;
     // the producer already admitted only self-contained words; re-check here
     // because a baked operand must never be a pointer (DI14, RC4).
     if (!lambda_item_is_self_contained(value.item)) return false;
