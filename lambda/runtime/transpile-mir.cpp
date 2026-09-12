@@ -893,6 +893,8 @@ static MirValue transpile_expr_value(MirTranspiler* mt, AstNode* node,
         uint32_t demand = MIR_VALUE_ANY,
         ValueRep required = VALUE_REP_NONE);
 static MirValue transpile_expr_value_core(MirTranspiler* mt, AstNode* node);
+static bool mir_emit_const_folded_value(MirTranspiler* mt, AstNode* node,
+        ValueRep required, MirValue* out);
 static MirValue transpile_ident_value(MirTranspiler* mt, AstIdentNode* ident);
 static MirValue mir_string_binding_value(MirTranspiler* mt, AstNode* node,
     MirVarEntry* var, bool publish);
@@ -10567,6 +10569,18 @@ static MIR_reg_t emit_dense_guarded_float_arith(MirTranspiler* mt, Operator op,
 // consumers request the compact lane explicitly through native_int_out.
 static MirValue emit_binary_value(MirTranspiler* mt, AstBinaryNode* bi,
         bool native_int_out) {
+    // RC8: specialized callers reach this producer directly, bypassing the
+    // core value boundary -- a native-int declaration (`let a = 1 + 2`) is the
+    // common one. Consult the CONST fact here so the fold covers those paths
+    // too; there is no arithmetic left to emit for a value already computed.
+    {
+        MirValue folded;
+        if (mir_emit_const_folded_value(mt, (AstNode*)bi,
+                native_int_out ? VALUE_REP_INT_LANE : VALUE_REP_NONE, &folded)) {
+            mt->in_tail_position = false;
+            return folded;
+        }
+    }
     // TCO: binary expression operands are NEVER in tail position.
     // e.g., `1 + f(n-1)` — the call is NOT tail because addition follows.
     mt->in_tail_position = false;
@@ -25381,6 +25395,66 @@ static AstNode* mir_navigation_direct_parent(AstNode* node) {
         ? field->object : NULL;
 }
 
+// RC8: a CONST fact is a compile-time value, so publish it in the lane the
+// consumer actually wants rather than only at boxing boundaries. The Item is
+// decoded here, at compile time, so a folded int reaches the native lane as an
+// immediate instead of a tagged word that must be unboxed again.
+// [vibe/Lambda_Design_Runtime_Const.md RC8]
+static bool mir_emit_const_folded_value(MirTranspiler* mt, AstNode* node,
+        ValueRep required, MirValue* out) {
+    if (!mt || !mt->ast_index || !node || !node->type || !out) return false;
+    AstNode* evaluated = ast_unwrap_primary(node);
+    if (!evaluated || !evaluated->type) return false;
+    AstNodeId id = ast_index_find(mt->ast_index, evaluated);
+    if (id == AST_NODE_ID_INVALID || id >= mt->ast_index->count) return false;
+    const AstNodeFacts* facts = &mt->ast_index->facts[id];
+    if ((facts->flags & AST_NODE_FACT_CONST_FOLDED) == 0) return false;
+    Item value = {.item = facts->folded_item};
+    // the producer already admitted only self-contained words; re-check here
+    // because a baked operand must never be a pointer (DI14, RC4).
+    if (!lambda_item_is_self_contained(value.item)) return false;
+
+    TypeId tid = get_type_id(value);
+    // an Item demand takes the tagged word unchanged -- it already is the value.
+    if (required == VALUE_REP_ITEM || tid == LMD_TYPE_NULL) {
+        MIR_reg_t r = new_reg(mt, "const_fold", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+            MIR_new_uint_op(mt->ctx, value.item)));
+        *out = mir_value_from_reg(mt, evaluated, r, VALUE_REP_ITEM,
+            evaluated->type);
+        return true;
+    }
+    switch (tid) {
+    case LMD_TYPE_INT: {
+        MIR_reg_t r = new_reg(mt, "cfint", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+            MIR_new_int_op(mt->ctx, lambda_int_item_to_i64(value))));
+        *out = mir_value_from_reg(mt, evaluated, r, VALUE_REP_INT_LANE,
+            evaluated->type);
+        return true;
+    }
+    case LMD_TYPE_BOOL: {
+        // ITEM_TRUE is the bool tag with payload 1, so the low bit is the value.
+        MIR_reg_t r = new_reg(mt, "cfbool", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+            MIR_new_int_op(mt->ctx, (int64_t)(value.item & 1))));
+        *out = mir_value_from_reg(mt, evaluated, r, VALUE_REP_I64,
+            evaluated->type);
+        return true;
+    }
+    case LMD_TYPE_FLOAT: {
+        MIR_reg_t r = new_reg(mt, "cfflt", MIR_T_D);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, r),
+            MIR_new_double_op(mt->ctx, value.get_double())));
+        *out = mir_value_from_reg(mt, evaluated, r, VALUE_REP_F64,
+            evaluated->type);
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
 // a CONST fact is an immediate Item, so materializing it at the generic value
 // boundary preserves the tagged representation expected by callers.
 static bool mir_emit_const_folded_item(MirTranspiler* mt, AstNode* node,
@@ -27513,6 +27587,15 @@ static MirValue transpile_expr_value(MirTranspiler* mt, AstNode* node,
         // let the collection producer see discard before allocating its result.
         return em_apply_value_demand(&mt->em,
             transpile_for(mt, (AstForNode*)unwrapped, false), demand, required);
+    }
+    // RC8: a folded node has its value already; consume it here, at the one
+    // core boundary every consumer passes through, rather than at the two
+    // boxing sites alone. Discard demand still skips it -- there is nothing to
+    // materialize for a value nobody reads.
+    MirValue folded;
+    if (!(demand & MIR_VALUE_DISCARD) &&
+            mir_emit_const_folded_value(mt, node, required, &folded)) {
+        return em_apply_value_demand(&mt->em, folded, demand, required);
     }
     MirValue value = node && node->node_type == AST_NODE_PRIMARY &&
             (demand & MIR_VALUE_REQUIRED_REP)
