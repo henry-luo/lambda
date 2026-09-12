@@ -1531,7 +1531,7 @@ extern "C" bool dom_activate_popover(void* popover, int action);
 // the row's own arity, so a body whose C signature disagrees with its row is a
 // compile error here as well as in dom_api_check.cpp.
 static const JubeHostDomCatalogAPI jube_host_dom_catalog = {
-#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) \
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv, iface, member, js_name) \
     (JubeDomFn##argc)(body),
 #define DOM_RAW(name, cluster, ret, params, body, flags) \
     body,
@@ -1546,7 +1546,7 @@ static const JubeHostDomCatalogAPI jube_host_dom_catalog = {
 // .def in the same order, which is what keeps the two in step.
 static void* const jube_host_dom_row_slots[] = {
     NULL,
-#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) (void*)(body),
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv, iface, member, js_name) (void*)(body),
 #define DOM_RAW(name, cluster, ret, params, body, flags)
 #include "../dom/dom_api.def"
 #undef DOM_OP

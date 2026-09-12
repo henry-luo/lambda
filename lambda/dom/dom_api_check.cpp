@@ -30,14 +30,14 @@ template <class F> constexpr bool dom_arity_ok(int argc) {
 
 // 1. uniqueness: one enumerator per canonical name
 enum DomOpId {
-#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) DOM_OP_ID_##name,
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv, iface, member, js_name) DOM_OP_ID_##name,
 #include "dom_api.def"
 #undef DOM_OP
     DOM_OP_ID_COUNT
 };
 
 // 2. arity: a body with a C signature must take exactly `argc` Items
-#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) \
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv, iface, member, js_name) \
     static_assert(dom_arity_ok<decltype(body)>(argc), \
                   "dom_api.def: body arity != argc for " #name);
 #include "dom_api.def"
@@ -46,7 +46,7 @@ enum DomOpId {
 // 3. a DERIVED row carries a derivation; a CORE row carries none
 #define DOM_OP_TIER_CORE 0
 #define DOM_OP_TIER_DERIVED 1
-#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) \
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv, iface, member, js_name) \
     static_assert((DOM_OP_TIER_##tier == DOM_OP_TIER_DERIVED) == (sizeof(deriv) > 1), \
                   "dom_api.def: derivation presence must match tier for " #name);
 #include "dom_api.def"
@@ -56,7 +56,7 @@ enum DomOpId {
 // order. Slot count is checked here; each slot's arity is checked by the cast
 // in jube_registry.cpp, which will not compile if a body disagrees with its row.
 static constexpr int dom_catalog_row_count =
-#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) 1 +
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv, iface, member, js_name) 1 +
 #define DOM_RAW(name, cluster, ret, params, body, flags) 1 +
 #include "dom_api.def"
 #undef DOM_OP
@@ -67,7 +67,7 @@ static_assert(sizeof(JubeHostDomCatalogAPI) / sizeof(void*) == dom_catalog_row_c
 // Only DOM_OP rows carry an operation id: a DOM_RAW row has no Lambda face and
 // no uniform arity, so there is nothing for an id to name.
 static constexpr int dom_catalog_op_row_count =
-#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) 1 +
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv, iface, member, js_name) 1 +
 #include "dom_api.def"
 #undef DOM_OP
     0;

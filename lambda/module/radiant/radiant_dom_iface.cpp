@@ -1046,6 +1046,24 @@ extern "C" int radiant_dom_m4c_get_form(Item r, Item* out);
     {n, js, get, set, NULL, NULL, JUBE_MEMBER_NON_ENUMERABLE}
 #define BIND_CALL(n, fn) \
     {n, NULL, NULL, NULL, fn, NULL, 0}
+// ---------------------------------------------------------------------------
+// DS1: member binds are generated from dom_api.def, not written here. A row
+// whose `iface` names this table expands to a BIND_ROW; every other row expands
+// to nothing. The per-interface empty macros are what make that selection work
+// in the preprocessor -- `iface` is a bare token so it can be pasted.
+//
+// DOM_ROW_MEMBER picks the member spelling: the row name unless the row states
+// a different one, and the JS name unless the row states one.
+// ---------------------------------------------------------------------------
+#define DOM_ROW_JS_NAME_(js)  ((js)[0] ? (js) : NULL)
+#define DOM_ROW_SNAKE_(name, member) ((member)[0] ? (member) : #name)
+#define DOM_ROW_MEMBER(name, argc, member, js) \
+    {DOM_ROW_SNAKE_(name, member), DOM_ROW_JS_NAME_(js), NULL, NULL, NULL, NULL, 0, \
+     JUBE_DOM_ROW_##name, (argc)},
+
+// one empty expansion per interface that is not the table being built
+#define DOM_ROW_NONE_(name, argc, member, js)
+
 // DS13: the member's slot is the catalog row itself, named by its index so a
 // static table can hold it without linking a host symbol. `argc` counts the
 // receiver, matching the catalog's arity. The generated `radiant_dom_m4d_*`
@@ -1128,6 +1146,17 @@ static int radiant_input_value_set(Item receiver, Item value, Item* out) {
 }
 
 static const JubeMemberBind radiant_dom_node_members[] = {
+    // DS1: rows whose iface is `dom_node` land here, generated.
+#define DOM_ROW_BIND_dom_node(name, argc, member, js) DOM_ROW_MEMBER(name, argc, member, js)
+#define DOM_ROW_BIND_none(name, argc, member, js)
+#define DOM_ROW_BIND_html_element(name, argc, member, js)
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv, iface, member, js_name) \
+    DOM_ROW_BIND_##iface(name, argc, member, js_name)
+#include "../../dom/dom_api.def"
+#undef DOM_OP
+#undef DOM_ROW_BIND_dom_node
+#undef DOM_ROW_BIND_none
+#undef DOM_ROW_BIND_html_element
     BIND_FIELD_JS("node_name", "nodeName", radiant_dom_member_node_name),
     BIND_FIELD_JS("node_type", "nodeType", radiant_dom_member_node_type_any),
     BIND_FIELD_JS("parent_node", "parentNode", radiant_dom_member_parent_node_any),
@@ -1139,9 +1168,6 @@ static const JubeMemberBind radiant_dom_node_members[] = {
     BIND_FIELD_JS("next_sibling", "nextSibling", radiant_dom_member_next_sibling_any),
     BIND_FIELD_JS("previous_sibling", "previousSibling", radiant_dom_member_previous_sibling_any),
     BIND_FIELD_JS("child_nodes", "childNodes", radiant_dom_member_child_nodes_any),
-    BIND_ROW("contains", NULL, contains, 2),
-    BIND_ROW("is_equal_node", "isEqualNode", equal_node, 2),
-    BIND_ROW("is_same_node", "isSameNode", same_node, 2),
     BIND_CALL_JS("compare_document_position", "compareDocumentPosition", radiant_dom_m4d_compare_document_position),
     BIND_CALL_JS("get_root_node", "getRootNode", radiant_dom_m4d_get_root_node),
     BIND_CALL("remove", radiant_dom_m4d_remove2),
@@ -1160,6 +1186,17 @@ static const JubeMemberBind radiant_dom_node_members[] = {
 };
 
 static const JubeMemberBind radiant_dom_html_element_members[] = {
+    // DS1: rows whose iface is `html_element` land here, generated.
+#define DOM_ROW_BIND_html_element(name, argc, member, js) DOM_ROW_MEMBER(name, argc, member, js)
+#define DOM_ROW_BIND_none(name, argc, member, js)
+#define DOM_ROW_BIND_dom_node(name, argc, member, js)
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv, iface, member, js_name) \
+    DOM_ROW_BIND_##iface(name, argc, member, js_name)
+#include "../../dom/dom_api.def"
+#undef DOM_OP
+#undef DOM_ROW_BIND_html_element
+#undef DOM_ROW_BIND_none
+#undef DOM_ROW_BIND_dom_node
     BIND_FIELD("tag_name", radiant_dom_member_tag_name),
     BIND_FIELD("local_name", radiant_dom_member_local_name),
     BIND_FIELD_JS("namespace_uri", "namespaceURI", radiant_dom_member_namespace_uri),
@@ -1204,28 +1241,15 @@ static const JubeMemberBind radiant_dom_html_element_members[] = {
     BIND_FIELD_SET_JS("enter_key_hint", "enterKeyHint", radiant_dom_m4b_enter_key_hint_get, radiant_dom_m4b_enter_key_hint_set),
     BIND_FIELD_SET_JS("content_editable", "contentEditable", radiant_dom_m4b_content_editable_get, radiant_dom_m4b_content_editable_set),
     BIND_FIELD_JS("is_content_editable", "isContentEditable", radiant_dom_m4b_is_content_editable_get),
-    BIND_ROW("get_attribute", "getAttribute", get_attribute, 2),
-    BIND_ROW("set_attribute", "setAttribute", set_attribute, 3),
     BIND_CALL_JS("set_attribute_ns", "setAttributeNS", radiant_dom_m4d_set_attribute_ns),
     BIND_CALL_JS("get_attribute_ns", "getAttributeNS", radiant_dom_m4d_get_attribute_ns),
     BIND_CALL_JS("remove_attribute_ns", "removeAttributeNS", radiant_dom_m4d_remove_attribute_ns),
-    BIND_ROW("remove_attribute", "removeAttribute", remove_attribute, 2),
     BIND_CALL_JS("toggle_attribute", "toggleAttribute", radiant_dom_m4d_toggle_attribute),
     BIND_CALL_JS("has_attribute", "hasAttribute", radiant_dom_m4d_has_attribute),
-    BIND_ROW("get_attribute_names", "getAttributeNames", attribute_names, 1),
-    BIND_ROW("matches", NULL, matches, 2),
     BIND_CALL_JS("webkit_matches_selector", "webkitMatchesSelector", radiant_dom_m4d_matches),
     BIND_CALL_JS("ms_matches_selector", "msMatchesSelector", radiant_dom_m4d_matches),
-    BIND_ROW("query_selector", "querySelector", query_selector, 2),
-    BIND_ROW("query_selector_all", "querySelectorAll", query_selector_all, 2),
-    BIND_ROW("closest", NULL, closest, 2),
     BIND_CALL_JS("get_elements_by_tag_name", "getElementsByTagName", radiant_dom_m4d_get_elements_by_tag_name),
     BIND_CALL_JS("get_elements_by_class_name", "getElementsByClassName", radiant_dom_m4d_get_elements_by_class_name),
-    BIND_ROW("get_element_by_id", "getElementById", get_element_by_id, 2),
-    BIND_ROW("append_child", "appendChild", append_child, 2),
-    BIND_ROW("remove_child", "removeChild", remove_child, 2),
-    BIND_ROW("insert_before", "insertBefore", insert_before, 3),
-    BIND_ROW("replace_child", "replaceChild", replace_child, 3),
     BIND_CALL("normalize", radiant_dom_m4d_normalize),
     BIND_CALL("append", radiant_dom_m4d_append),
     BIND_CALL("prepend", radiant_dom_m4d_prepend),
@@ -1233,7 +1257,6 @@ static const JubeMemberBind radiant_dom_html_element_members[] = {
     BIND_CALL_JS("insert_adjacent_html", "insertAdjacentHTML", radiant_dom_m4d_insert_adjacent_html),
     BIND_CALL_JS("get_bounding_client_rect", "getBoundingClientRect", radiant_dom_m4d_get_bounding_client_rect),
     BIND_CALL_JS("get_client_rects", "getClientRects", radiant_dom_m4d_get_client_rects),
-    BIND_ROW("scroll_into_view", "scrollIntoView", scroll_into_view, 1),
     BIND_CALL("scroll", radiant_dom_m4d_scroll),
     BIND_CALL_JS("scroll_to", "scrollTo", radiant_dom_m4d_scroll_to),
     BIND_CALL_JS("scroll_by", "scrollBy", radiant_dom_m4d_scroll_by),
@@ -1247,7 +1270,6 @@ static const JubeMemberBind radiant_dom_html_element_members[] = {
     BIND_CALL("submit", radiant_dom_m4d_submit),
     BIND_CALL_JS("request_submit", "requestSubmit", radiant_dom_m4d_request_submit),
     BIND_CALL_JS("check_validity", "checkValidity", radiant_dom_m4d_check_validity),
-    BIND_ROW("report_validity", "reportValidity", report_validity, 1),
     BIND_CALL_JS("set_custom_validity", "setCustomValidity", radiant_dom_m4d_set_custom_validity),
     BIND_CALL_JS("set_selection_range", "setSelectionRange", radiant_dom_m4d_set_selection_range),
     BIND_CALL_JS("set_range_text", "setRangeText", radiant_dom_m4d_set_range_text),

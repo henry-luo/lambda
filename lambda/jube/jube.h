@@ -739,7 +739,7 @@ typedef enum JubeDomTokenListOperation {
 // slot array the registry builds from it.
 typedef enum JubeDomRowIndex {
     JUBE_DOM_ROW_NONE = 0,
-#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) \
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv, iface, member, js_name) \
     JUBE_DOM_ROW_##name,
 #define DOM_RAW(name, cluster, ret, params, body, flags)
 #include "../dom/dom_api.def"
@@ -749,7 +749,7 @@ typedef enum JubeDomRowIndex {
 } JubeDomRowIndex;
 
 struct JubeHostDomCatalogAPI {
-#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) \
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv, iface, member, js_name) \
     JubeDomFn##argc name;
 #define DOM_RAW(name, cluster, ret, params, body, flags) \
     ret (*name)params;

@@ -1215,7 +1215,7 @@ code lines. Gate: **≤ 32 168** after P6; expected **≈ 31 448**. P1–P3 alon
 
 | ID | Ruling | Status |
 |---|---|---|
-| DS1 | One `dom_api.def` row per operation, carrying `iface` and `js_name`; every surface is an expansion | PROPOSED |
+| DS1 | One `dom_api.def` row per operation, carrying `iface`/`member`/`js_name`; every surface is an expansion | **PARTIAL** — three metadata columns on all 269 rows, 13 expansion sites widened; the node and html_element **member binds are generated** from the rows (18 hand-written entries deleted). Thunk and interface-line generation not started |
 | DS2 | `JubeDomElementOperation` and `dom_element_operation_impl` are deleted | **PARTIAL** — enum generated; 18 round-trips → 0; **no arm holds an implementation (76 → 0)**; executor 837 → **412** lines; module dispatcher 6 → 3 branches. Deleting the executor outright still needs DS13 |
 | DS3 | The property protocol keeps only genuinely name-driven access | PROPOSED |
 | DS4 | One reflection table (`dom_reflect.def`) generating core and module | **PARTIAL** — module side landed; **DSO10 resolved, so the core merge is unblocked**; naming split out of `kind` (18-entry alias table), `MAP` retired. The two tables are not yet one |
@@ -1236,6 +1236,51 @@ code lines. Gate: **≤ 32 168** after P6; expected **≈ 31 448**. P1–P3 alon
 | DSO10 | Resolved — `MAP` was a setter-gate membership list, not a value kind; naming is now its own table | CLOSED |
 | DSO11 | Retracted — attribution error, not a defect | CLOSED |
 | DSO7 | Promoted to DS13 | CLOSED |
+
+### 10.0a DS1 — the row carries the member, and the bind is generated
+
+**Three columns, not two.** §4's sketch says `iface` + `js_name`. That is one
+short: the row name and the member name genuinely differ where the row dropped
+an `is_` prefix because the *operation* is the identity (ESO96) — row
+`same_node` publishes member `is_same_node`, row `attribute_names` publishes
+`getAttributeNames`. camelCase(row) cannot recover those, and the preprocessor
+cannot compute them, so the member spelling is its own column:
+
+```
+DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv,
+       iface,     // bare token: dom_node | html_element | ... | none
+       member,    // snake spelling when it differs from the row name
+       js_name)   // JS spelling when it differs from camelCase(member)
+```
+
+All 269 rows carry them; 251 are `none, "", ""` and behave exactly as before.
+13 expansion sites across 5 files were widened in the same pass.
+
+**`iface` is a token, not a string, and that is what makes generation work.**
+The preprocessor cannot compare strings, so selection is by token paste: each
+member table defines `DOM_ROW_BIND_<its own iface>` to emit a bind and every
+other iface to expand to nothing, then includes `dom_api.def`. The node and
+html_element tables are now generated this way, and the 18 hand-written
+`BIND_ROW` entries are deleted. Adding a member is a row edit.
+
+**Measured:** `el.getAttribute("x")` still 3 hops, with the ordinal dispatcher
+and the executor never entered (breakpoint evidence). The generated binds are
+byte-equivalent in effect to the hand-written ones they replace.
+
+**Not done:** thunk generation and interface-declaration-line generation — the
+other two surfaces DS1 lists. The 84 module thunks and the interface strings are
+still hand-written, and rows for the remaining ordinals are still unwritten,
+which is what caps DS13's reach at 18 members.
+
+**A baseline that moved under the work.** Two failures appeared in this window —
+`js_event_handler_dynamic_phase4` (UI Automation) and
+`RadiantViewTest.JsMirCacheKeepsFreshDocumentRealms`. Both reproduce **identically
+with this work stashed out**, and both arrived with upstream
+`ac0ba59f4 js-const: JS string literals load from the shared const pool`. The
+first looked like a DS1 regression for a while because an earlier baseline in
+this same session showed 114/0 — the tree had been fast-forwarded in between.
+When the baseline itself is moving, "it passed an hour ago" is not a control;
+only stashing and re-running at the *current* HEAD is.
 
 ### 10.0 DS13 — landed slice, and a correction to §10.1's first draft
 
