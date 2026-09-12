@@ -384,7 +384,7 @@ Each phase is independently landable, green on `make test-lambda-baseline` and
 | ~~**RC-P2b**~~ | **WITHDRAWN 2026-09-12 — folded into RC-P6b.** Its first half (remove literals from the folder) was already true, per the §1.8 correction. Its second half (retire the `&LIT_INT` span re-read) is real but is a *build-time* change to literal typing, and doing it now with per-literal value-bearing `Type`s would build exactly what RC17/RC18 then delete. The span re-read retires when literal values reach the pool — in RC-P6b. |
 | **RC-P3** | RC8 — consult the fact on all lowering paths, not just boxing. `let a = 1 + 2` folds. | MIR volume drops; emission goldens re-based with attribution |
 | **RC-P4** | RC9 — interpreter consumes fold facts. | T0 no longer re-evaluates constants |
-| **RC-P5** | RC5/RC7/RC13 — pooled results with rehoming; widen the result set past the three immediates. | forced-GC oracle (`LAMBDA_GC_FORCE_EVERY=1`, `POISON_FREED=1`) green |
+| **RC-P5** | RC5/RC7/RC13 — pooled results with rehoming. **Blocked on RC-P6 as written (2026-09-12): there is nothing to rehome.** Eligibility admits only NULL/BOOL/INT/FLOAT literal operands, and no operator over those yields a pointer-backed value — `2 ** 100` and `9007199254740991 + 1` give floats (`1.27e30`, `inf`), `"ab" + "c"` is an error since `+` does not concatenate, and string comparison gives a bool. Every producible result is self-contained. The one reachable exception is a subnormal float, which is boxed. Rehoming needs eligibility widened first — to **aggregate literals** (ARRAY/MAP), which RC-O2 now admits, or to further operand types. | forced-GC oracle (`LAMBDA_GC_FORCE_EVERY=1`, `POISON_FREED=1`) green |
 | **RC-P6** | RC2/RC3 — eligibility by interpreter capability under the purity gate. | baseline green; fold-rate census |
 | **RC-P6b** | RC17/RC18 — delete the inline `Type` payloads and `TypeConst::const_index`; move the handle to `AstNode`'s padding; share literal types as singletons. 58 cast sites. | `sizeof(AstNode)` unchanged; no per-literal `Type` allocation; baseline green |
 | **RC-P7** | RC6 — content-hashed pool with dedup. | const-pool size census |
@@ -398,15 +398,35 @@ lifetime bugs live.
 
 ---
 
+### 9.1 Aggregates already have a partial mechanism
+
+`emit_static_collection_const()` ([`transpile-mir.cpp:6314`]) already builds a
+pooled constant array/map for a literal ARRAY/MAP node: it constructs the
+container from the AST into `script_pool`, marks it `is_static`/`is_immortal`,
+appends it to `const_list`, and emits `emit_load_const(..., MIR_T_P)`.
+
+So the aggregate half of RC-P5 is not greenfield. What it lacks is exactly what
+RC1 asks for: it is built from the AST inside the MIR back end, is keyed to no
+fold fact, and the interpreter cannot use it — T0 rebuilds the same array on
+every execution. Routing it through the fold instead of duplicating it is the
+cheaper path to RC5/RC7, and it reuses machinery already proven against the
+GC's static/immortal contract.
+
 ## 10. Open questions
 
 - **RC-O1** — ~~carrier for folded NULL/BOOL/INT~~ **RESOLVED 2026-09-11 by
   RC17/RC18**: no type carries a value, so there is no carrier to choose. The
   value is a pool entry; the node holds the handle; the type is a shared
   valueless singleton.
-- **RC-O2** — how far does RC7c reach? Are immutable aggregates (a const array
-  or map literal) foldable and poolable, or do identity semantics
-  (**S5.4.2**, **S5.5.1**) exclude them?
+- **RC-O2** — ~~how far does RC7c reach for immutable aggregates?~~
+  **RESOLVED 2026-09-12: immutable aggregates are foldable and poolable.** The
+  identity line is *provenance*, not shape: a container **loaded from input**
+  carries identity and must never be content-shared; a container **constructed**
+  by the program (temporal) has none, so equal values may share one pool entry.
+  A folded aggregate is constructed by definition — the folder evaluates a
+  literal subtree — so it is always on the poolable side. RC7c therefore
+  excludes input-loaded containers and identity-bearing values (functions,
+  anything whose address is observable), not aggregates as a class.
 - **RC-O3** — which floats are inline-representable, exactly? The boxed
   residue must be pooled rather than baked, so the test is a representation
   predicate that does not exist yet in this form.
