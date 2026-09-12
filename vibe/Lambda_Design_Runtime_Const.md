@@ -117,22 +117,27 @@ either the folder or inference is defective. Declining to fold hides that
 defect and reports it as nothing at all. This is a workaround standing where a
 root-cause fix belongs (CLAUDE.md rule 1).
 
-### 1.8 Literals are pushed through the interpreter
+### 1.8 Literal values are recovered by re-reading source text
 
-`interp_const_node_supported()`'s `PRIMARY` arm accepts a bare literal — `expr
-== NULL`, `is_literal` set, type ID in NULL/BOOL/INT/FLOAT
-([`interp.cpp:5235`]). So a source literal is "folded": it gets a frame, an
-interpreter evaluation, and a fuel charge, to recover a value that was already
-known when the node was built. For a float the result is then discarded (§1.3).
+**Corrected 2026-09-12.** This section first claimed literals were pushed
+through the folder. They are not: the fold loop short-circuits on
+`node->node_type == AST_NODE_PRIMARY` *before* consulting eligibility, so no
+literal is ever evaluated. `interp_const_node_supported()`'s `PRIMARY` arm is
+reached only by recursion from a parent, where it validates that an operand is
+a foldable leaf — necessary work, not overhead. The claim was read off the
+eligibility function without checking the caller that gates it.
 
-A literal has no expression to evaluate. Running one through the folder is pure
-overhead, and it is the reason the three-immediate whitelist appeared to be
-load-bearing for literals as well as for computed results.
+What is real is narrower and sits elsewhere. An in-band int literal is typed
+`&LIT_INT`, a valueless singleton ([`build_ast.cpp:3896`]), and bool literals
+share `LIT_BOOL`. Neither carries its value, so `ast_static_literal_item()`
+recovers it by **re-reading the source span** ([`build_ast.cpp:996`–`1003`])
+after its value-bearing fast path misses. Seven build-time callers depend on
+this — type patterns, ranges, map keys.
 
-It also keeps an avoidable indirection alive. An in-band int literal is typed
-`&LIT_INT` — a valueless singleton — and its value is recovered by re-reading
-the source span ([`build_ast.cpp:1003`]). Had the value been pooled when the
-literal was built, neither the span re-read nor the fold would exist.
+Float, string, datetime, decimal and binary literals already carry values, so
+only int, bool and null take the text-recovery path. Beyond the redundant
+parse, it couples AST validity to source retention: the REPL must keep its
+append-only source buffer alive precisely because spans point into it.
 
 ### 1.9 The pass re-runs
 
@@ -166,7 +171,7 @@ answers.
 | **RC12** | **No per-node fact side table.** The fold's result lives on the node's type under **D8.2.5v2**; `AstIndex::facts` and `AstNodeFacts` are retired. |
 | **RC13** | **Nothing pointer-backed enters cacheable MIR as a raw address** (**DI14**). Pooled values are reached through the module-state const indirection, never by a baked pointer. This is what makes RC5's second case safe. |
 | **RC14** | **Fold attempts remain semantically inert.** Fuel exhaustion, a native fault, an error result, or a rejected attempt leaves the node unfolded and changes nothing observable. A compiler optimization may never alter program completion (retained from today's design). |
-| **RC15** | **Literals are pooled when they are built and never enter the folder.** A source literal's value is known at build time; it goes directly into the const pool (RC6-hashed) with its node typed by a value-bearing literal `Type`. The folder sees only expressions. No literal is evaluated, no literal value is recovered by re-reading a source span. |
+| **RC15** | **Literals are pooled when they are built and never enter the folder.** A source literal's value is known at build time; it goes directly into the const pool (RC6-hashed). The folder sees only expressions — already true today (§1.8), so this half is an invariant to preserve, not a change. What remains is the value's home: no literal value may be recovered by re-reading a source span, which retires the valueless `&LIT_INT`/`LIT_BOOL` singletons' text-recovery path in `ast_static_literal_item()`. |
 | **RC16** | **Rehoming applies only to computed const-expression results** (§4). A literal is born in pool-owned storage and needs none; an expression result is born in frame/GC storage during the fold and must be moved before its frame closes. The two paths meet at the pool, never before it. |
 | **RC17** | **`Type` is valueless.** A type describes a *set* of values; it never carries one. The inline payloads of `TypeFloat`, `TypeComplex`, `TypeInt64`, `TypeUint64`, `TypeNumSized`, `TypeDateTime`, `TypeDecimal`, `TypeString`/`TypeSymbol` and `TypeBinaryConst` are deleted, and `TypeConst::const_index` with them. Every constant value lives in the const pool. |
 | **RC18** | **Three-way separation of a constant.** *Which kind* is the `Type` — now a shared valueless singleton (`LIT_INT`, `LIT_FLOAT`, `LIT_STRING`, …), one per type, never per literal. *Which value* is a per-node const handle on the `AstNode`. *The value itself* is one hashed, shared const-pool entry (RC6). No literal allocates a `Type`. The handle is on the node, not on a const-specific type, because **a folded expression is an arbitrary node kind** — a `BINARY`, a `CALL`, an `IF_EXPR` — whose type stays its own inferred type. Having a constant value is a per-node fact; it is not a type. |
@@ -376,7 +381,7 @@ Each phase is independently landable, green on `make test-lambda-baseline` and
 | **RC-P0** | Fix the §1.3 contradiction: reject float in eligibility *or* accept inline floats in the result test. Whichever, stop evaluating what is always discarded. | no MIR-volume growth; baseline green |
 | **RC-P1** | RC10 — assert agreement, delete the duplicated silent skip. Any assertion that fires is a real defect to fix before proceeding. | baseline green with assertions armed |
 | **RC-P2** | RC11 — resume the fold at a per-index watermark; delete the wholesale reset. **Not** by preseeding `ANALYZED`: the REPL *appends* to a retained index, so skipping the pass would leave every newly typed expression unfolded. A watermark gives RC11's actual guarantee — each node folds exactly once — while staying correct under growth. | REPL and retained-AST paths green |
-| **RC-P2b** | RC15 — literals are pooled at build time with value-bearing types and removed from the folder's eligibility; retire the `&LIT_INT` span re-read. | no literal reaches `interp_const_fold_script`; baseline green |
+| ~~**RC-P2b**~~ | **WITHDRAWN 2026-09-12 — folded into RC-P6b.** Its first half (remove literals from the folder) was already true, per the §1.8 correction. Its second half (retire the `&LIT_INT` span re-read) is real but is a *build-time* change to literal typing, and doing it now with per-literal value-bearing `Type`s would build exactly what RC17/RC18 then delete. The span re-read retires when literal values reach the pool — in RC-P6b. |
 | **RC-P3** | RC8 — consult the fact on all lowering paths, not just boxing. `let a = 1 + 2` folds. | MIR volume drops; emission goldens re-based with attribution |
 | **RC-P4** | RC9 — interpreter consumes fold facts. | T0 no longer re-evaluates constants |
 | **RC-P5** | RC5/RC7/RC13 — pooled results with rehoming; widen the result set past the three immediates. | forced-GC oracle (`LAMBDA_GC_FORCE_EVERY=1`, `POISON_FREED=1`) green |
@@ -385,11 +390,11 @@ Each phase is independently landable, green on `make test-lambda-baseline` and
 | **RC-P7** | RC6 — content-hashed pool with dedup. | const-pool size census |
 | **RC-P8** | RC12 — retire `AstIndex::facts` / `AstNodeFacts`. | LOC strongly negative |
 
-RC-P0 through RC-P2b are corrections to existing defects and carry no design
-risk. RC-P2b is also a prerequisite for RC-P5: once literals are pooled at
-build time, the folder's remaining input is exactly the set that needs
-rehoming, so the rehoming path can be written without a literal special case.
-RC-P5 is where the lifetime bugs live.
+RC-P0 through RC-P2 are corrections to existing defects and carry no design
+risk; all three have landed. The folder's input is already exactly the set that
+needs rehoming — literals never enter it — so RC-P5 needs no literal special
+case and no longer depends on a preceding literal phase. RC-P5 is where the
+lifetime bugs live.
 
 ---
 
@@ -431,10 +436,13 @@ RC-P5 is where the lifetime bugs live.
   because the analysis mistook a near-dead mechanism for a working one whose
   storage was merely misplaced. The prior analytical error in the same family
   is `Lambda_Design_Unified_AST.md` §13.6.
-- **Folding literals.** Rejected by RC15. A literal's value is known when the
-  node is built; routing it through an interpreter evaluation to recover the
-  same value is overhead that also made the result whitelist look like it was
-  protecting literals, when literals were never at risk.
+- **Folding literals.** Rejected by RC15 — and the folder never did it, so the
+  ruling documents an invariant rather than changing behaviour (§1.8). Recorded
+  because the analysis asserted the opposite: the eligibility function's
+  `PRIMARY` arm was read as a fold entry point without checking that its only
+  caller skips `PRIMARY` nodes outright. Third instance in this family, after
+  `Lambda_Design_Unified_AST.md` §13.6 and the P7 U-A withdrawal — a predicate
+  read in isolation says nothing about whether it is reached.
 - **Keeping `const_index` on a `TypeConst`, carried only by const AST nodes.**
   Considered and rejected while resolving RC-O1. It reads tidily for a literal,
   where the node *is* a constant, but it does not survive folding: a folded
