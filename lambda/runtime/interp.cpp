@@ -4015,7 +4015,10 @@ static bool interp_fast_int_while(InterpFrame* frame, AstWhileNode* loop,
 // so the node-kind test keeps every other evaluation off this path entirely.
 static bool interp_const_folded_value(InterpFrame* f, AstNode* node, Item* out) {
     switch (node->node_type) {
-    case AST_NODE_UNARY: case AST_NODE_BINARY: case AST_NODE_IF_EXPR: break;
+    // folded expressions
+    case AST_NODE_UNARY: case AST_NODE_BINARY: case AST_NODE_IF_EXPR:
+    // materialized const containers (RC15)
+    case AST_NODE_ARRAY: case AST_NODE_MAP: break;
     default: return false;
     }
     Script* owner = f ? f->module : NULL;
@@ -4023,9 +4026,20 @@ static bool interp_const_folded_value(InterpFrame* f, AstNode* node, Item* out) 
     AstNodeId id = ast_index_find(&owner->ast_index, node);
     if (id == AST_NODE_ID_INVALID || id >= owner->ast_index.count) return false;
     const AstNodeFacts* facts = &owner->ast_index.facts[id];
-    if ((facts->flags & AST_NODE_FACT_CONST_FOLDED) == 0) return false;
-    out->item = facts->folded_item;
-    return true;
+    if (facts->flags & AST_NODE_FACT_CONST_FOLDED) {
+        out->item = facts->folded_item;
+        return true;
+    }
+    // A pooled container is reached through the unit's const_list: its address
+    // is pool-owned, so the fact stores the index, not the pointer (DI14).
+    if ((facts->flags & AST_NODE_FACT_CONST_POOLED) && facts->const_index >= 0 &&
+            owner->const_list && facts->const_index < owner->const_list->length) {
+        void* container = arraylist_get(owner->const_list, facts->const_index);
+        if (!container) return false;
+        out->item = (uint64_t)(uintptr_t)container;
+        return true;
+    }
+    return false;
 }
 
 static Item eval_expr(InterpFrame* f, AstNode* node) {

@@ -248,6 +248,7 @@ static AstNodeId ast_index_add(AstIndex* index, AstNode* node, AstNode* parent,
     index->facts[id].representation = VALUE_REP_NONE;
     index->facts[id].flags = 0;
     index->facts[id].folded_item = ITEM_NULL;
+    index->facts[id].const_index = -1;
     node->index_id = id;
     if (!ast_index_publish_node(index, node, id)) return AST_NODE_ID_INVALID;
     index->slots[slot] = node;

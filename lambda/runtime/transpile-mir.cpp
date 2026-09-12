@@ -6107,7 +6107,17 @@ static MIR_reg_t emit_runtime_pool(MirTranspiler* mt) {
     return pool;
 }
 
-static bool static_const_item_from_node(MirTranspiler* mt, AstNode* node, Item* out);
+// RC15: materializing a const value needs only a pool to build into and the
+// source text for literals that still recover their value from a span. Keeping
+// that explicit lets both the compiler pass and MIR lowering share one builder
+// instead of the back end owning a private copy.
+typedef struct ConstMaterializeCtx {
+    Pool* pool;
+    const char* source;
+} ConstMaterializeCtx;
+
+static bool static_const_item_from_node(const ConstMaterializeCtx* cx,
+        AstNode* node, Item* out);
 
 static int append_static_container_const(MirTranspiler* mt, void* ptr) {
     mt->em.const_list = mt->const_list;
@@ -6217,8 +6227,8 @@ static bool static_store_field_value(void* field_ptr, TypeId field_type, Item va
     }
 }
 
-static bool static_const_array_from_node(MirTranspiler* mt, AstArrayNode* arr_node, Item* out) {
-    if (!mt || !arr_node || !out || !mt->script_pool) return false;
+static bool static_const_array_from_node(const ConstMaterializeCtx* cx, AstArrayNode* arr_node, Item* out) {
+    if (!cx || !arr_node || !out || !cx->pool) return false;
     TypeArray* arr_type = (TypeArray*)arr_node->type;
     if (arr_type && arr_type->nested && arr_type->nested->type_id == LMD_TYPE_BOOL) return false;
     int64_t count = 0;
@@ -6233,7 +6243,7 @@ static bool static_const_array_from_node(MirTranspiler* mt, AstArrayNode* arr_no
         if (value->node_type == AST_NODE_ARRAY) return false;
         count++;
     }
-    Array* arr = (Array*)pool_calloc(mt->script_pool, sizeof(Array));
+    Array* arr = (Array*)pool_calloc(cx->pool, sizeof(Array));
     if (!arr) return false;
     arr->type_id = LMD_TYPE_ARRAY;
     arr->is_static = 1;
@@ -6241,24 +6251,24 @@ static bool static_const_array_from_node(MirTranspiler* mt, AstArrayNode* arr_no
     arr->length = count;
     arr->capacity = count;
     if (count > 0) {
-        arr->items = (Item*)pool_calloc(mt->script_pool, sizeof(Item) * count);
+        arr->items = (Item*)pool_calloc(cx->pool, sizeof(Item) * count);
         if (!arr->items) return false;
     }
     int64_t index = 0;
     for (AstNode* item = arr_node->item; item; item = item->next) {
         Item value = ItemNull;
-        if (!static_const_item_from_node(mt, item, &value)) return false;
+        if (!static_const_item_from_node(cx, item, &value)) return false;
         arr->items[index++] = value;
     }
     out->item = (uint64_t)(uintptr_t)arr;
     return true;
 }
 
-static bool static_const_map_from_node(MirTranspiler* mt, AstMapNode* map_node, Item* out) {
-    if (!mt || !map_node || map_node->has_computed_key || !map_node->type || !out ||
-            !mt->script_pool) return false;
+static bool static_const_map_from_node(const ConstMaterializeCtx* cx, AstMapNode* map_node, Item* out) {
+    if (!cx || !map_node || map_node->has_computed_key || !map_node->type || !out ||
+            !cx->pool) return false;
     TypeMap* map_type = (TypeMap*)map_node->type;
-    Map* map = (Map*)pool_calloc(mt->script_pool, sizeof(Map));
+    Map* map = (Map*)pool_calloc(cx->pool, sizeof(Map));
     if (!map) return false;
     map->type_id = LMD_TYPE_MAP;
     map->is_static = 1;
@@ -6267,7 +6277,7 @@ static bool static_const_map_from_node(MirTranspiler* mt, AstMapNode* map_node, 
     map->type = map_type;
     map->data_cap = (int)map_type->byte_size;
     if (map_type->byte_size > 0) {
-        map->data = pool_calloc(mt->script_pool, (size_t)map_type->byte_size);
+        map->data = pool_calloc(cx->pool, (size_t)map_type->byte_size);
         if (!map->data) return false;
     }
     AstNode* item = map_node->item;
@@ -6276,7 +6286,7 @@ static bool static_const_map_from_node(MirTranspiler* mt, AstMapNode* map_node, 
         if (item->node_type != AST_NODE_KEY_EXPR || !field->name) return false;
         AstNamedNode* key_expr = (AstNamedNode*)item;
         Item value = ItemNull;
-        if (key_expr->as && !static_const_item_from_node(mt, key_expr->as, &value)) return false;
+        if (key_expr->as && !static_const_item_from_node(cx, key_expr->as, &value)) return false;
         if (!static_store_field_value((char*)map->data + field->byte_offset,
                 field->type->type_id, value)) return false;
         item = item->next;
@@ -6287,17 +6297,17 @@ static bool static_const_map_from_node(MirTranspiler* mt, AstMapNode* map_node, 
     return true;
 }
 
-static bool static_const_item_from_node(MirTranspiler* mt, AstNode* node, Item* out) {
-    if (!mt || !node || !out) return false;
+static bool static_const_item_from_node(const ConstMaterializeCtx* cx, AstNode* node, Item* out) {
+    if (!cx || !node || !out) return false;
     if (node->node_type == AST_NODE_PRIMARY) {
         AstPrimaryNode* pri = (AstPrimaryNode*)node;
-        if (pri->expr) return static_const_item_from_node(mt, pri->expr, out);
+        if (pri->expr) return static_const_item_from_node(cx, pri->expr, out);
         if (!node->type || !node->type->is_literal) return false;
         if (static_literal_item_from_type(node->type, out)) return true;
         switch (node->type->type_id) {
-        case LMD_TYPE_BOOL: out->item = b2it(parse_bool_literal_span(mt->source,
+        case LMD_TYPE_BOOL: out->item = b2it(parse_bool_literal_span(cx->source,
             node->source_span)); return true;
-        case LMD_TYPE_INT: out->item = i2it(parse_int_literal_span(mt->source,
+        case LMD_TYPE_INT: out->item = i2it(parse_int_literal_span(cx->source,
             node->source_span)); return true;
         case LMD_TYPE_DTIME: return false;
         // A complex literal must be heap-allocated and therefore cannot be embedded
@@ -6306,17 +6316,62 @@ static bool static_const_item_from_node(MirTranspiler* mt, AstNode* node, Item* 
         default: return false;
         }
     }
-    if (node->node_type == AST_NODE_ARRAY) return static_const_array_from_node(mt, (AstArrayNode*)node, out);
-    if (node->node_type == AST_NODE_MAP) return static_const_map_from_node(mt, (AstMapNode*)node, out);
+    if (node->node_type == AST_NODE_ARRAY) return static_const_array_from_node(cx, (AstArrayNode*)node, out);
+    if (node->node_type == AST_NODE_MAP) return static_const_map_from_node(cx, (AstMapNode*)node, out);
     return false;
+}
+
+// RC15/RC-P5a: a const container is a value the source already determines, so
+// it is *materialized* into the unit's pool -- never evaluated. This runs as its
+// own pass, before const-fold, so the folder's input stays expressions only and
+// both tiers see one container instead of each building its own.
+bool lambda_const_materialize_script(Transpiler* tp) {
+    if (!tp || !tp->ast_index.nodes || !tp->ast_index.facts || !tp->pool ||
+            !tp->const_list) {
+        return true;
+    }
+    ConstMaterializeCtx cx = {tp->pool, tp->source};
+    for (uint32_t id = 0; id < tp->ast_index.count; id++) {
+        AstNode* node = tp->ast_index.nodes[id];
+        if (!node) continue;
+        if (node->node_type != AST_NODE_ARRAY && node->node_type != AST_NODE_MAP) {
+            continue;
+        }
+        AstNodeFacts* facts = &tp->ast_index.facts[id];
+        if (facts->flags & AST_NODE_FACT_CONST_POOLED) continue;
+        Item value = ItemNull;
+        if (!static_const_item_from_node(&cx, node, &value)) continue;
+        TypeId tid = get_type_id(value);
+        if (tid != LMD_TYPE_ARRAY && tid != LMD_TYPE_MAP) continue;
+        if (!arraylist_append(tp->const_list, value.container)) continue;
+        facts->const_index = (int32_t)(tp->const_list->length - 1);
+        facts->flags |= AST_NODE_FACT_CONST_POOLED;
+    }
+    return true;
 }
 
 static bool emit_static_collection_const(MirTranspiler* mt, AstNode* node, MIR_reg_t* out_reg) {
     if (!mt || !node || !out_reg) return false;
     if (mt->in_proc) return false;
     if (node->node_type != AST_NODE_ARRAY && node->node_type != AST_NODE_MAP) return false;
+    // RC15: the materialization pass already built and pooled this container.
+    // Consume that fact rather than constructing a second copy here.
+    if (mt->ast_index) {
+        AstNodeId id = ast_index_find(mt->ast_index, node);
+        if (id != AST_NODE_ID_INVALID && id < mt->ast_index->count) {
+            const AstNodeFacts* facts = &mt->ast_index->facts[id];
+            if ((facts->flags & AST_NODE_FACT_CONST_POOLED) &&
+                    facts->const_index >= 0) {
+                *out_reg = emit_load_const(mt, facts->const_index, MIR_T_P);
+                return true;
+            }
+        }
+    }
+    // Fallback for a unit lowered without the pass (satellite roots build a
+    // synthetic AST that was never indexed).
     Item value = ItemNull;
-    if (!static_const_item_from_node(mt, node, &value)) return false;
+    ConstMaterializeCtx cx = {mt->script_pool, mt->source};
+    if (!static_const_item_from_node(&cx, node, &value)) return false;
     TypeId tid = get_type_id(value);
     if (tid != LMD_TYPE_ARRAY && tid != LMD_TYPE_MAP) return false;
     int const_index = append_static_container_const(mt, value.container);
@@ -33341,7 +33396,11 @@ static void transpile_mir_ast_finalize(MirModuleBuild* build,
 }
 
 static int lambda_const_fold_compiler_pass(void* opaque) {
-    return interp_const_fold_script((Transpiler*)opaque) ? 1 : 0;
+    Transpiler* tp = (Transpiler*)opaque;
+    // const values are materialized before the folder runs, so the folder only
+    // ever sees expressions (RC15).
+    if (!lambda_const_materialize_script(tp)) return 0;
+    return interp_const_fold_script(tp) ? 1 : 0;
 }
 
 typedef struct LambdaMirPipelinePassContext {

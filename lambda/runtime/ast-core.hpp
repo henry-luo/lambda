@@ -497,11 +497,19 @@ typedef struct AstNodeFacts {
     // out of this table so an AST fact cannot become a MIR-cache relocation
     // dependency (D8.1.1v2 / DI14).
     uint64_t folded_item;
+    // RC15/RC13: index of a materialized const container in the unit's
+    // const_list, or -1. A container is pool-owned, so its address must never
+    // be baked into cacheable MIR (DI14) -- both tiers resolve it through this
+    // index instead, and `folded_item` stays empty for such a fact.
+    int32_t const_index;
 } AstNodeFacts;
 
 enum AstNodeFactFlags : uint32_t {
     AST_NODE_FACT_NONE = 0,
     AST_NODE_FACT_CONST_FOLDED = 1u << 0,
+    // A const value materialized into the pool rather than evaluated (RC15).
+    // Its payload is `const_index`, never `folded_item`.
+    AST_NODE_FACT_CONST_POOLED = 1u << 1,
 };
 
 #ifdef __cplusplus
