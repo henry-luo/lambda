@@ -3690,9 +3690,16 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         if (with_node->object) {
             // push with-scope object
             MIR_reg_t obj_reg = jm_transpile_box_item(mt, with_node->object);
-            jm_callr_1(mt, "js_with_push", MIR_T_I64, obj_reg);
+            MIR_reg_t scope_reg = jm_callr_1(mt, "js_with_push", MIR_T_I64, obj_reg);
             jm_emit_error_lane_propagate_check(mt);
             jm_eval_cptn_reset(mt);
+            // JSCU44: retain the coerced scope for this level so a suspension
+            // inside the body can park it and rebuild the chain on resume.
+            JsWithLowering* with_scope = jm_with_scope_at(mt, mt->with_depth);
+            if (with_scope) {
+                with_scope->object_reg = scope_reg;
+                with_scope->spill_slot = -1;
+            }
             mt->with_depth++;
             // transpile body
             if (with_node->body)

@@ -14557,7 +14557,9 @@ extern "C" Item js_with_push(Item obj) {
     frame->parent = js_with_head;
     js_with_head = frame;
     js_last_with_binding_valid = false;
-    return js_status_ok();
+    // The coerced scope, not the operand: `with (5)` wraps once, and a re-push
+    // on resume (JSCU44) must restore that same wrapper, not make another.
+    return obj;
 }
 
 // A borrowed frame is the activation's base, installed by its caller; only the

@@ -51,10 +51,46 @@ void jm_emit_suspend_env_save(JsMirTranspiler* mt) {
         }
     }
     jm_emit_try_state_save(mt);
+    jm_emit_with_scope_save(mt);
+}
+
+// JSCU44: the `with` chain does not survive the state machine's return, so each
+// open scope parks its coerced object and closes before the suspension. The
+// resume rebuilds the chain from those slots -- the same treatment a
+// generator's locals and a try's delayed return already get. Hooked into the
+// shared suspend/resume pair so no suspension site can forget it.
+void jm_emit_with_scope_save(JsMirTranspiler* mt) {
+    if (!mt || !mt->gen_env_reg) return;
+    for (int w = mt->with_depth - 1; w >= 0; w--) {
+        JsWithLowering* scope = jm_with_scope_at(mt, w);
+        if (scope && scope->object_reg) {
+            if (scope->spill_slot < 0) scope->spill_slot = jm_gen_spill_reserve(mt);
+            if (scope->spill_slot >= 0) {
+                jm_emit_store_i64(mt, scope->spill_slot * (int)sizeof(uint64_t),
+                    mt->gen_env_reg, scope->object_reg);
+            }
+        }
+        jm_call_void_0(mt, "js_with_pop");
+    }
+}
+
+void jm_emit_with_scope_restore(JsMirTranspiler* mt) {
+    if (!mt || !mt->gen_env_reg) return;
+    // Outermost first: the chain is rebuilt in the order it was entered.
+    for (int w = 0; w < mt->with_depth; w++) {
+        JsWithLowering* scope = jm_with_scope_at(mt, w);
+        if (!scope || scope->spill_slot < 0 || !scope->object_reg) continue;
+        jm_emit_load_i64(mt, scope->object_reg,
+            scope->spill_slot * (int)sizeof(uint64_t), mt->gen_env_reg);
+        // The parked value is already an object, so this push cannot coerce or
+        // throw; the error lane stays untouched.
+        jm_callr_1(mt, "js_with_push", MIR_T_I64, scope->object_reg);
+    }
 }
 
 void jm_emit_resume_env_restore(JsMirTranspiler* mt) {
     if (!mt || !mt->gen_env_reg) return;
+    jm_emit_with_scope_restore(mt);
     for (int sd = 1; sd <= mt->scope_depth; sd++) {
         struct hashmap* scope = jm_var_scope_at(mt, sd);
         if (!scope) continue;

@@ -191,6 +191,21 @@ void jm_clear_resumable_locals(JsMirTranspiler* mt) {
     mt->resumable_locals = NULL;
 }
 
+JsWithLowering* jm_with_scope_at(JsMirTranspiler* mt, int index) {
+    if (!mt || !mt->with_stack || index < 0 ||
+            !jm_stack_ensure_slot(mt->with_stack, index)) {
+        return NULL;
+    }
+    JsWithLowering* scope = (JsWithLowering*)arraylist_get(mt->with_stack, index);
+    if (!scope) {
+        scope = (JsWithLowering*)mem_calloc(1, sizeof(JsWithLowering), MEM_CAT_JS_RUNTIME);
+        if (!scope) return NULL;
+        scope->spill_slot = -1;
+        arraylist_set(mt->with_stack, index, scope);
+    }
+    return scope;
+}
+
 JsLoopLabels* jm_loop_label_at(JsMirTranspiler* mt, int index) {
     if (!mt || !mt->loop_stack || index < 0 || !jm_stack_ensure_slot(mt->loop_stack, index)) {
         return NULL;
@@ -359,6 +374,7 @@ JsMirTranspiler* jm_create_mir_transpiler(
         js_local_func_hash, js_local_func_cmp, NULL, NULL);
     mt->var_scopes = arraylist_new(8);
     mt->loop_stack = arraylist_new(8);
+    mt->with_stack = arraylist_new(4);
     mt->for_of_iterators = arraylist_new(8);
     mt->try_ctx_stack = arraylist_new(8);
     if (!mt->var_scopes || !mt->loop_stack || !mt->for_of_iterators ||

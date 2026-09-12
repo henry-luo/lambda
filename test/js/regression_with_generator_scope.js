@@ -54,3 +54,38 @@ const outer = outerGen();
 outer.next();                                // suspended inside with (outerScope)
 console.log(innerGen().next().value === "undefined");
 outer.next();
+
+// 6. Nested `with` across a suspension: the chain is rebuilt in entry order and
+//    each level resolves through its own frame after resuming. JSCU44 parks the
+//    scopes in generator env slots, the same treatment locals already get.
+function* nestedAcrossYield() {
+  const outer = { a: 1, shared: "outer" };
+  const inner = { b: 2, shared: "inner" };
+  with (outer) {
+    with (inner) {
+      yield shared;          // "inner" -- innermost wins
+      a = 10;                // resolves through the outer frame after resume
+      b = 20;                // resolves through the inner frame after resume
+      yield shared;
+    }
+    yield shared;            // "outer" -- inner frame closed
+  }
+  return outer.a + ":" + inner.b;
+}
+const nest = nestedAcrossYield();
+console.log(nest.next().value === "inner");
+console.log(nest.next().value === "inner");
+console.log(nest.next().value === "outer");
+console.log(nest.next().value === "10:20");
+
+// 7. A `with` and a try/finally both spilling across the same yield.
+function* withTryAcrossYield() {
+  const o = { t: 1 };
+  with (o) {
+    try { yield t; } finally { o.done = true; }
+  }
+  return o.done === true;
+}
+const wt = withTryAcrossYield();
+console.log(wt.next().value === 1);
+console.log(wt.next().value === true);

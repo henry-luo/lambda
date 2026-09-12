@@ -174,6 +174,16 @@ struct JsLoopLabels {
     int with_depth_at_push;
 };
 
+// JSCU44: one open `with` during body lowering. A scope is state of the
+// suspending activation, exactly like a try's delayed return, so it parks its
+// coerced object in a generator env slot and the chain is rebuilt from those
+// slots on resume rather than being expected to survive the state machine's
+// return.
+struct JsWithLowering {
+    MIR_reg_t object_reg;   // holds the coerced scope object
+    int spill_slot;         // env slot, reserved lazily at the first suspension
+};
+
 // A dynamically sized iterator-cleanup entry. Iterator registers are MIR
 // values rather than pointers, so they are stored in a stack-owned record when
 // held by the Lambda ArrayList.
@@ -543,6 +553,7 @@ struct JsMirTranspiler {
 
     // Loop label stack. Entries are JsLoopLabels* owned by the ArrayList.
     ArrayList* loop_stack;
+    ArrayList* with_stack;                    // JSCU44: one JsWithLowering per open `with`
     int loop_depth;
     int iteration_depth;
     int loop_scope_depth;
@@ -818,6 +829,15 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
         }
         arraylist_free(mt->loop_stack);
         mt->loop_stack = NULL;
+    }
+    if (mt->with_stack) {
+        for (int i = 0; i < mt->with_stack->length; i++) {
+            JsWithLowering* scope =
+                (JsWithLowering*)arraylist_get(mt->with_stack, i);
+            if (scope) mem_free(scope);
+        }
+        arraylist_free(mt->with_stack);
+        mt->with_stack = NULL;
     }
     if (mt->for_of_iterators) {
         for (int i = 0; i < mt->for_of_iterators->length; i++) {
