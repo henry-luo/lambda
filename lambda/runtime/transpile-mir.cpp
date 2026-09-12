@@ -11455,6 +11455,15 @@ static MirValue mir_unary_value(MirTranspiler* mt, AstUnaryNode* unary,
 }
 
 static MirValue emit_unary_value(MirTranspiler* mt, AstUnaryNode* un) {
+    // RC8: same reason as emit_binary_value -- specialized callers reach this
+    // producer without passing the core value boundary.
+    {
+        MirValue folded;
+        if (mir_emit_const_folded_value(mt, (AstNode*)un, VALUE_REP_NONE,
+                &folded)) {
+            return folded;
+        }
+    }
     TypeId operand_tid = mir_expr_carrier_type(mt, un->operand);
 
     switch (un->op) {
@@ -11685,6 +11694,16 @@ static bool mir_branch_ends_in_return(AstNode* branch) {
 }
 
 static MirValue transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
+    // RC8: a folded `if` has a settled value, so neither arm is emitted and no
+    // branch is needed. Checked before the flow scope opens, since there is no
+    // control flow left to scope.
+    {
+        MirValue folded;
+        if (mir_emit_const_folded_value(mt, (AstNode*)if_node, VALUE_REP_NONE,
+                &folded)) {
+            return folded;
+        }
+    }
     MirFlowScope flow(mt);
     // TCO: condition is NOT in tail position
     bool saved_tail = mt->in_tail_position;
