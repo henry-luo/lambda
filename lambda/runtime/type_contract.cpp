@@ -268,6 +268,13 @@ static bool contract_storage_desc_equal(const ShapeEntry* left,
     return !lane_desc_is_nullable_native(l) || l->base_contract == r->base_contract;
 }
 
+// A literal contract names one value; its TypeId is the carrier it shares with
+// every other value of that carrier. No layout, storage or certificate proof
+// stands in for admitting the value itself (D3.3.3v3).
+static inline bool contract_is_value_singleton(const Type* type) {
+    return type && (type->is_literal || type->is_const);
+}
+
 static bool contract_semantics_equal(const Type* left, const Type* right) {
     left = contract_unwrap_type((Type*)left);
     right = contract_unwrap_type((Type*)right);
@@ -296,6 +303,10 @@ static bool contract_semantics_compatible(const Type* candidate,
         const Type* expected) {
     candidate = contract_unwrap_type((Type*)candidate);
     expected = contract_unwrap_type((Type*)expected);
+    // Only the identical contract discharges a literal destination. A literal
+    // CANDIDATE is the opposite case -- a statically known value of its own
+    // carrier -- and stays compatible with the wider contract below.
+    if (contract_is_value_singleton(expected) && candidate != expected) return false;
     if (contract_semantics_equal(candidate, expected)) return true;
     if (!candidate || !expected) return false;
 
@@ -420,7 +431,15 @@ static bool array_contract_semantically_equal(Type* left, Type* right) {
         bool left_is_array = array_contract_layer(left, &left_element);
         bool right_is_array = array_contract_layer(right, &right_element);
         if (left_is_array != right_is_array) return false;
-        if (!left_is_array) return contract_semantics_equal(left, right);
+        if (!left_is_array) {
+            // An invariant certificate is reused for writes as well as reads,
+            // so a refinement on either side has to be the same refinement.
+            if (left != right && (contract_is_value_singleton(left) ||
+                    contract_is_value_singleton(right))) {
+                return false;
+            }
+            return contract_semantics_equal(left, right);
+        }
         left = array_contract_unwrap(left_element, 0);
         right = array_contract_unwrap(right_element, 0);
         if (!left || !right) return false;
@@ -762,6 +781,26 @@ bool lambda_type_lane_storage_desc(Type* type, LaneStorageDesc* out) {
     if (!desc.native) return false;
     *out = desc;
     return true;
+}
+
+bool lambda_type_layout_proves_contract(Type* type) {
+    for (int depth = 0; type && depth < 64; depth++) {
+        type = contract_unwrap_type(type);
+        if (!type) return false;
+        // A literal is a singleton value. Its carrier is shared with every
+        // other string/int, so no lane or element tag can stand in for the
+        // per-element admission that selects it (D3.3.3v3).
+        if (contract_is_value_singleton(type)) return false;
+        if (type->type_id != LMD_TYPE_TYPE) return true;
+        // Follow exactly the layers the lane resolver walks (optional, null
+        // union, param, constraint base). A pattern, a range or a
+        // heterogeneous union has no single carrier and stops the walk.
+        bool nullable = false;
+        Type* base = lambda_type_nullable_lane_base(type, &nullable);
+        if (!base || base == type) return false;
+        type = base;
+    }
+    return false;
 }
 
 Type* lambda_type_nullable_normalized(Pool* pool, Type* type) {

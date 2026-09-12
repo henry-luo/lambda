@@ -128,6 +128,10 @@ bool lambda_type_has_proven_error(Type* type);
 // Native-lane projection of lambda_lane_storage_desc_for: false for contracts
 // that must remain boxed (abstract, heterogeneous, non-nullable wide ints).
 bool lambda_type_lane_storage_desc(Type* type, LaneStorageDesc* out);
+// SCU8 companion (D3.3.3v3): true when a layout proof -- a native lane or an
+// ArrayNum element tag -- discharges the whole contract. A literal singleton
+// is a value, not a carrier, so its elements still need individual admission.
+bool lambda_type_layout_proves_contract(Type* type);
 // Canonicalize a semantic `T | null` result as `T?` when it has one concrete
 // payload type. Abstract/error-bearing cases deliberately remain boxed.
 Type* lambda_type_nullable_normalized(Pool* pool, Type* type);

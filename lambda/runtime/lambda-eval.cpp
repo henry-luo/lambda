@@ -10327,7 +10327,11 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
     bool target_has_numeric_lane = lambda_array_num_elem_type_for_contract(
         element_type, &compact_type);
     LaneStorageDesc target_lane = {};
-    bool target_has_native_lane = lambda_type_lane_storage_desc(element_type, &target_lane) &&
+    // A lane is a carrier proof. A literal element contract selects one value
+    // out of that carrier, so it keeps the per-element admission below rather
+    // than certifying the source in place (D3.3.3v3, D8.3.2).
+    bool target_has_native_lane = lambda_type_layout_proves_contract(element_type) &&
+        lambda_type_lane_storage_desc(element_type, &target_lane) &&
         array_native_lane_supported(&target_lane);
     if (source_type == LMD_TYPE_ARRAY && value.array &&
             !value.array->is_ndim && !value.array->is_view &&

@@ -233,8 +233,12 @@ Item pn_push(Item arr_item, Item value) {
 
 Item pn_push_cow(Item owner, Item value) {
     TypeId tid = get_type_id(owner);
-    if ((tid == LMD_TYPE_ARRAY_NUM ||
-            (tid == LMD_TYPE_ARRAY && array_has_native_lane(owner.array))) &&
+    // This entry is reached only from a binding with no declared array
+    // contract, so an Array's certificate here is a past read admission
+    // through some alias -- including one stamped on a producer-inferred
+    // pointer lane, which an open append is free to widen. ArrayNum keeps the
+    // checked entry: its packed lane carries no boxed slot to widen into.
+    if (tid == LMD_TYPE_ARRAY_NUM &&
             owner.array->rep_cert && owner.array->rep_cert->array_contract) {
         return lambda_array_push_checked(owner, value,
             owner.array->rep_cert->array_contract, "push");
