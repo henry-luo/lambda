@@ -587,7 +587,15 @@ static void js_function_capture_with_env(JsFunction* fn) {
     if (stack && depth > 0) {
         js_env_rehome_scalars(stack);
         JsWithData* with = js_fn_with_ensure(fn);
-        if (with) { with->env = stack; with->depth = depth; }
+        if (with) {
+            with->env = stack;
+            with->depth = depth;
+            // A value born inside `with` needs the chain installed even when
+            // its body names no with binding -- a closure it creates captures
+            // whatever chain is current. Recording that here lets every caller
+            // decide from `flags` instead of reading the payload on every call.
+            fn->flags |= JS_FUNC_FLAG_USES_WITH;
+        }
     }
 }
 

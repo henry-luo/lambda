@@ -13588,7 +13588,7 @@ static bool js_call_use_common_lane(JsFunction* fn) {
         !(fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) || js_fn_native(fn)->call ||
         (fn->flags & (JS_FUNC_FLAG_HAS_BOUND_THIS | JS_FUNC_FLAG_GENERATOR |
             JS_FUNC_FLAG_ASYNC_GEN | JS_FUNC_FLAG_DERIVED_CTOR |
-            JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) || js_fn_with(fn)->depth > 0 ||
+            JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) ||
         (fn->flags & JS_FUNC_FLAG_USES_WITH) || js_fn_eval_initializer_context(fn) ||
         js_fn_eval_origin(fn)->source) {
         // The former call-lane classifier also disabled this shortcut for
@@ -13600,7 +13600,7 @@ static bool js_call_use_common_lane(JsFunction* fn) {
     // cheaper than this shortcut; only the home-class install still wins.
     // Recheck caller-dynamic facts at the edge: classifier metadata never
     // authorizes skipping caller with-scope isolation.
-    return js_with_depth_active() == 0 && js_fn_with(fn)->depth == 0 &&
+    return js_with_depth_active() == 0 &&
         !(fn->flags & JS_FUNC_FLAG_USES_WITH) && !js_fn_eval_initializer_context(fn) &&
         !js_function_has_vm_stack_source(fn);
 }
@@ -14027,9 +14027,8 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     // into a callee. Entering relinks one borrowed frame; the guard skips the
     // relink only when neither side has a with-scope at all.
     JsWithActivation with_activation;
-    const JsWithData* callee_with = js_fn_with(fn);
-    if (js_runtime_state.with_head || callee_with->depth > 0 ||
-            (fn->flags & JS_FUNC_FLAG_USES_WITH) != 0) {
+    if (js_runtime_state.with_head || (fn->flags & JS_FUNC_FLAG_USES_WITH) != 0) {
+        const JsWithData* callee_with = js_fn_with(fn);
         with_activation.enter((Item*)callee_with->env, callee_with->depth);
     }
     // For generator functions: set up callee proto so js_generator_create uses fn.prototype
