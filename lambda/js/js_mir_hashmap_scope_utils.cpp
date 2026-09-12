@@ -251,6 +251,7 @@ JsTryContext* jm_try_context_push(JsMirTranspiler* mt) {
     context->has_return_spill = -1;
     context->return_val_spill = -1;
     context->loop_depth_at_push = mt->loop_depth;
+    context->with_depth_at_push = mt->with_depth;
     mt->try_ctx_depth++;
     return context;
 }

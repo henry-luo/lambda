@@ -422,6 +422,10 @@ struct JsTryContext {
     // only unwinds the finally clauses entered inside its target, so this is
     // what separates "must run now" from "the try block continues".
     int loop_depth_at_push;
+    // `with` nesting when this try was entered. A return delayed into this
+    // try's finally has already left every scope opened inside the try, but not
+    // the ones enclosing it -- the finally body still resolves through those.
+    int with_depth_at_push;
     bool end_label_has_edge;     // compiler-only: an emitted completion targets end_label
     JsErrorLaneTrack end_label_error_lane_state; // merged proof for end_label predecessors
     bool has_catch;

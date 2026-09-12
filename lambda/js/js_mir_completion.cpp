@@ -514,6 +514,9 @@ bool jm_emit_delayed_return_completion(JsMirTranspiler* mt, MIR_reg_t value,
     }
     jm_emit_mov(mt, context->return_val_reg, value);
     jm_emit_reg_op(mt, MIR_MOV, context->has_return_reg, MIR_new_int_op(mt->ctx, 1));
+    // The value is already in its register, so the scopes it resolved through
+    // can close; the finally still runs inside whatever encloses the try.
+    jm_emit_with_unwind_to(mt, context->with_depth_at_push);
     jm_emit_jmp(mt, target);
     return true;
 }
@@ -579,6 +582,16 @@ void jm_emit_generator_throw_completion(JsMirTranspiler* mt, MIR_reg_t value) {
 void jm_emit_error_lane_exit(JsMirTranspiler* mt) {
     if (!mt) return;
     jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_THROW);
+}
+
+// Leave every `with` scope opened above `floor`. Nothing is emitted when the
+// completion is not inside a `with`, which is the overwhelming majority of
+// returns, so this costs no instructions on the ordinary path.
+void jm_emit_with_unwind_to(JsMirTranspiler* mt, int floor) {
+    if (!mt || floor < 0) return;
+    for (int w = mt->with_depth; w > floor; w--) {
+        jm_call_void_0(mt, "js_with_pop");
+    }
 }
 
 // `target_loop_index` is the break-target stack entry the jump lands on, or -1
