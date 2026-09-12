@@ -138,7 +138,7 @@ void js_elements_set_props(Array* arr, Map* props) {
     *(Item*)arr->data = {.map = rooted_props.get()};
 }
 
-static bool array_widen_inferred_pointer_lane(Array* array) {
+bool array_widen_inferred_pointer_lane(Array* array) {
     if (!array || !array_has_native_lane(array) || array->rep_cert ||
             array_native_lane_kind(array) != LANE_STORAGE_POINTER) {
         return false;
