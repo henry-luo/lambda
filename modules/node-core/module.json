@@ -1,7 +1,7 @@
 {
   "name": "node-core",
   "version": "0.1.0",
-  "base_abi_version": 6,
+  "base_abi_version": 7,
   "hosted_api_version": 1,
   "kind": "runtime-library",
   "engine": "js",

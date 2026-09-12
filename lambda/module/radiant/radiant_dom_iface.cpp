@@ -1046,6 +1046,12 @@ extern "C" int radiant_dom_m4c_get_form(Item r, Item* out);
     {n, js, get, set, NULL, NULL, JUBE_MEMBER_NON_ENUMERABLE}
 #define BIND_CALL(n, fn) \
     {n, NULL, NULL, NULL, fn, NULL, 0}
+// DS13: the member's slot is the catalog row itself, named by its index so a
+// static table can hold it without linking a host symbol. `argc` counts the
+// receiver, matching the catalog's arity. The generated `radiant_dom_m4d_*`
+// adapter, the module ordinal dispatcher and the executor arm are all skipped.
+#define BIND_ROW(n, js, row, argc) \
+    {n, js, NULL, NULL, NULL, NULL, 0, JUBE_DOM_ROW_##row, (argc)}
 #define BIND_CALL_JS(n, js, fn) \
     {n, js, NULL, NULL, fn, NULL, 0}
 
@@ -1133,9 +1139,9 @@ static const JubeMemberBind radiant_dom_node_members[] = {
     BIND_FIELD_JS("next_sibling", "nextSibling", radiant_dom_member_next_sibling_any),
     BIND_FIELD_JS("previous_sibling", "previousSibling", radiant_dom_member_previous_sibling_any),
     BIND_FIELD_JS("child_nodes", "childNodes", radiant_dom_member_child_nodes_any),
-    BIND_CALL("contains", radiant_dom_m4d_contains),
-    BIND_CALL_JS("is_equal_node", "isEqualNode", radiant_dom_m4d_is_equal_node),
-    BIND_CALL_JS("is_same_node", "isSameNode", radiant_dom_m4d_is_same_node),
+    BIND_ROW("contains", NULL, contains, 2),
+    BIND_ROW("is_equal_node", "isEqualNode", equal_node, 2),
+    BIND_ROW("is_same_node", "isSameNode", same_node, 2),
     BIND_CALL_JS("compare_document_position", "compareDocumentPosition", radiant_dom_m4d_compare_document_position),
     BIND_CALL_JS("get_root_node", "getRootNode", radiant_dom_m4d_get_root_node),
     BIND_CALL("remove", radiant_dom_m4d_remove2),
@@ -1143,6 +1149,10 @@ static const JubeMemberBind radiant_dom_node_members[] = {
     BIND_CALL("after", radiant_dom_m4d_after),
     BIND_CALL("before", radiant_dom_m4d_before),
     BIND_CALL_JS("has_child_nodes", "hasChildNodes", radiant_dom_m4d_has_child_nodes),
+    // NOT a BIND_ROW: cloneNode is a Node operation, and this door's dispatcher
+    // carries the text/comment branch (the element-only clone bridge returns
+    // null for them). Routing it to the row would skip that branch -- the row
+    // has to grow a non-element path before the member can hold it.
     BIND_CALL_JS("clone_node", "cloneNode", radiant_dom_m4d_clone_node),
     BIND_CALL_JS("add_event_listener", "addEventListener", radiant_dom_m4d_add_event_listener),
     BIND_CALL_JS("remove_event_listener", "removeEventListener", radiant_dom_m4d_remove_event_listener),
@@ -1194,28 +1204,28 @@ static const JubeMemberBind radiant_dom_html_element_members[] = {
     BIND_FIELD_SET_JS("enter_key_hint", "enterKeyHint", radiant_dom_m4b_enter_key_hint_get, radiant_dom_m4b_enter_key_hint_set),
     BIND_FIELD_SET_JS("content_editable", "contentEditable", radiant_dom_m4b_content_editable_get, radiant_dom_m4b_content_editable_set),
     BIND_FIELD_JS("is_content_editable", "isContentEditable", radiant_dom_m4b_is_content_editable_get),
-    BIND_CALL_JS("get_attribute", "getAttribute", radiant_dom_m4d_get_attribute),
-    BIND_CALL_JS("set_attribute", "setAttribute", radiant_dom_m4d_set_attribute),
+    BIND_ROW("get_attribute", "getAttribute", get_attribute, 2),
+    BIND_ROW("set_attribute", "setAttribute", set_attribute, 3),
     BIND_CALL_JS("set_attribute_ns", "setAttributeNS", radiant_dom_m4d_set_attribute_ns),
     BIND_CALL_JS("get_attribute_ns", "getAttributeNS", radiant_dom_m4d_get_attribute_ns),
     BIND_CALL_JS("remove_attribute_ns", "removeAttributeNS", radiant_dom_m4d_remove_attribute_ns),
-    BIND_CALL_JS("remove_attribute", "removeAttribute", radiant_dom_m4d_remove_attribute),
+    BIND_ROW("remove_attribute", "removeAttribute", remove_attribute, 2),
     BIND_CALL_JS("toggle_attribute", "toggleAttribute", radiant_dom_m4d_toggle_attribute),
     BIND_CALL_JS("has_attribute", "hasAttribute", radiant_dom_m4d_has_attribute),
-    BIND_CALL_JS("get_attribute_names", "getAttributeNames", radiant_dom_m4d_get_attribute_names),
-    BIND_CALL("matches", radiant_dom_m4d_matches),
+    BIND_ROW("get_attribute_names", "getAttributeNames", attribute_names, 1),
+    BIND_ROW("matches", NULL, matches, 2),
     BIND_CALL_JS("webkit_matches_selector", "webkitMatchesSelector", radiant_dom_m4d_matches),
     BIND_CALL_JS("ms_matches_selector", "msMatchesSelector", radiant_dom_m4d_matches),
-    BIND_CALL_JS("query_selector", "querySelector", radiant_dom_m4d_query_selector),
-    BIND_CALL_JS("query_selector_all", "querySelectorAll", radiant_dom_m4d_query_selector_all),
-    BIND_CALL("closest", radiant_dom_m4d_closest),
+    BIND_ROW("query_selector", "querySelector", query_selector, 2),
+    BIND_ROW("query_selector_all", "querySelectorAll", query_selector_all, 2),
+    BIND_ROW("closest", NULL, closest, 2),
     BIND_CALL_JS("get_elements_by_tag_name", "getElementsByTagName", radiant_dom_m4d_get_elements_by_tag_name),
     BIND_CALL_JS("get_elements_by_class_name", "getElementsByClassName", radiant_dom_m4d_get_elements_by_class_name),
-    BIND_CALL_JS("get_element_by_id", "getElementById", radiant_dom_m4d_get_element_by_id),
-    BIND_CALL_JS("append_child", "appendChild", radiant_dom_m4d_append_child),
-    BIND_CALL_JS("remove_child", "removeChild", radiant_dom_m4d_remove_child),
-    BIND_CALL_JS("insert_before", "insertBefore", radiant_dom_m4d_insert_before),
-    BIND_CALL_JS("replace_child", "replaceChild", radiant_dom_m4d_replace_child),
+    BIND_ROW("get_element_by_id", "getElementById", get_element_by_id, 2),
+    BIND_ROW("append_child", "appendChild", append_child, 2),
+    BIND_ROW("remove_child", "removeChild", remove_child, 2),
+    BIND_ROW("insert_before", "insertBefore", insert_before, 3),
+    BIND_ROW("replace_child", "replaceChild", replace_child, 3),
     BIND_CALL("normalize", radiant_dom_m4d_normalize),
     BIND_CALL("append", radiant_dom_m4d_append),
     BIND_CALL("prepend", radiant_dom_m4d_prepend),
@@ -1223,7 +1233,7 @@ static const JubeMemberBind radiant_dom_html_element_members[] = {
     BIND_CALL_JS("insert_adjacent_html", "insertAdjacentHTML", radiant_dom_m4d_insert_adjacent_html),
     BIND_CALL_JS("get_bounding_client_rect", "getBoundingClientRect", radiant_dom_m4d_get_bounding_client_rect),
     BIND_CALL_JS("get_client_rects", "getClientRects", radiant_dom_m4d_get_client_rects),
-    BIND_CALL_JS("scroll_into_view", "scrollIntoView", radiant_dom_m4d_scroll_into_view),
+    BIND_ROW("scroll_into_view", "scrollIntoView", scroll_into_view, 1),
     BIND_CALL("scroll", radiant_dom_m4d_scroll),
     BIND_CALL_JS("scroll_to", "scrollTo", radiant_dom_m4d_scroll_to),
     BIND_CALL_JS("scroll_by", "scrollBy", radiant_dom_m4d_scroll_by),
@@ -1237,7 +1247,7 @@ static const JubeMemberBind radiant_dom_html_element_members[] = {
     BIND_CALL("submit", radiant_dom_m4d_submit),
     BIND_CALL_JS("request_submit", "requestSubmit", radiant_dom_m4d_request_submit),
     BIND_CALL_JS("check_validity", "checkValidity", radiant_dom_m4d_check_validity),
-    BIND_CALL_JS("report_validity", "reportValidity", radiant_dom_m4d_report_validity),
+    BIND_ROW("report_validity", "reportValidity", report_validity, 1),
     BIND_CALL_JS("set_custom_validity", "setCustomValidity", radiant_dom_m4d_set_custom_validity),
     BIND_CALL_JS("set_selection_range", "setSelectionRange", radiant_dom_m4d_set_selection_range),
     BIND_CALL_JS("set_range_text", "setRangeText", radiant_dom_m4d_set_range_text),

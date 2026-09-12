@@ -1540,6 +1540,28 @@ static const JubeHostDomCatalogAPI jube_host_dom_catalog = {
 #undef DOM_RAW
 };
 
+// DS13: the same rows as a flat array, indexed by JubeDomRowIndex, so a member
+// bind can name its row with a number a static initializer can hold. Index 0 is
+// reserved for "not a row", so the table is offset by one -- built from the same
+// .def in the same order, which is what keeps the two in step.
+static void* const jube_host_dom_row_slots[] = {
+    NULL,
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) (void*)(body),
+#define DOM_RAW(name, cluster, ret, params, body, flags)
+#include "../dom/dom_api.def"
+#undef DOM_OP
+#undef DOM_RAW
+};
+LAMBDA_STATIC_ASSERT(
+    sizeof(jube_host_dom_row_slots) / sizeof(jube_host_dom_row_slots[0])
+        == (size_t)JUBE_DOM_ROW_COUNT,
+    "row slot array must match the JubeDomRowIndex space");
+
+extern "C" void* jube_host_dom_row_slot(unsigned index) {
+    if (index == 0 || index >= (unsigned)JUBE_DOM_ROW_COUNT) return NULL;
+    return jube_host_dom_row_slots[index];
+}
+
 
 
 static const JubeHostRealmAPI jube_host_realm_api = {

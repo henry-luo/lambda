@@ -1216,9 +1216,9 @@ code lines. Gate: **≤ 32 168** after P6; expected **≈ 31 448**. P1–P3 alon
 | ID | Ruling | Status |
 |---|---|---|
 | DS1 | One `dom_api.def` row per operation, carrying `iface` and `js_name`; every surface is an expansion | PROPOSED |
-| DS2 | `JubeDomElementOperation` and `dom_element_operation_impl` are deleted | **PARTIAL** — enum generated; 0 rows re-enter the executor (18 round-trips → 0); executor 837 → 701 lines; deleting it outright still needs DS13 |
+| DS2 | `JubeDomElementOperation` and `dom_element_operation_impl` are deleted | **PARTIAL** — enum generated; 18 round-trips → 0; **no arm holds an implementation (76 → 0)**; executor 837 → **412** lines; module dispatcher 6 → 3 branches. Deleting the executor outright still needs DS13 |
 | DS3 | The property protocol keeps only genuinely name-driven access | PROPOSED |
-| DS4 | One reflection table (`dom_reflect.def`) generating core and module | **PARTIAL** — module side landed; core merge blocked on DSO10 |
+| DS4 | One reflection table (`dom_reflect.def`) generating core and module | **PARTIAL** — module side landed; **DSO10 resolved, so the core merge is unblocked**; naming split out of `kind` (18-entry alias table), `MAP` retired. The two tables are not yet one |
 | DS5 | A native body must earn its row; compositions are `DERIVED` | PROPOSED |
 | DS6 | Duplicate rows merge; a lint rule keeps them merged | PROPOSED |
 | DS7 | Radiant DOM state reaches Lambda as `velmt`/`varray`/`vmap`, never a snapshot | PROPOSED |
@@ -1227,16 +1227,97 @@ code lines. Gate: **≤ 32 168** after P6; expected **≈ 31 448**. P1–P3 alon
 | DS10 | The `.ls` package migrates off the name-keyed doors | PROPOSED |
 | DS11 | Two lint rules gate the collapse | **`no-dom-row-name-dispatch` LANDED**; `no-hand-written-dom-bind` proposed |
 | DS12 | `dom.cpp` splits, credited zero lines | PROPOSED |
-| DS13 | The record's slot is the row body; the member ABI carries the arity | PROPOSED |
+| DS13 | The record's slot is the row body; the member ABI carries the arity | **PARTIAL** — mechanism landed (`BIND_ROW`, `jube_invoke_row`, ABI 6→7); **18 members** dispatch straight to their row, measured at **3 hops**. Reach is gated by DS1: only 19 of 87 ordinals have a `DOM_OP` row with matching arity |
 | DS14 | A `CORE` row never reaches its own mechanism by name | **LANDED** (3 rows suppressed on DSO8/DSO9) |
 | DS15 | Document members are `iface: document` rows, not string re-lookups | PROPOSED |
 | DS16 | One residual resolver; the geometry commit is a row flag | PROPOSED |
-| DS17 | **Three hops, every path**: one dispatch, one body, one engine access | PROPOSED |
-| DSO1–DSO6, DSO8–DSO10 | Open, §9 | OPEN |
+| DS17 | **Three hops, every path**: one dispatch, one body, one engine access | **PARTIAL** — measured, see §10.1. Lambda `dom.*` is at 3; JS method and JS field are at 4 (one adapter-thunk hop, which is DS13); document and open-name paths unchanged |
+| DSO1–DSO6, DSO8, DSO9 | Open, §9 | OPEN |
+| DSO10 | Resolved — `MAP` was a setter-gate membership list, not a value kind; naming is now its own table | CLOSED |
 | DSO11 | Retracted — attribution error, not a defect | CLOSED |
 | DSO7 | Promoted to DS13 | CLOSED |
 
-### Hop counts, before and after
+### 10.0 DS13 — landed slice, and a correction to §10.1's first draft
+
+**A correction first.** §10.1 originally reported class A at 4 hops. That was
+wrong, and the method was the reason: the count came from an lldb backtrace, and
+**tail-call optimisation had collapsed two real frames**
+(`radiant_dom_element_operation` and `dom_element_operation_impl`, both reached
+by `return f(...)`). A tail-jumped dispatcher still runs its guard chain — it is
+a hop whether or not it owns a stack frame. Re-measured with a *breakpoint* on
+each layer rather than by reading frames, class A was **6**, unchanged from the
+baseline: DS2 shrank the executor without shortening the chain.
+
+Hop counts from an optimized build are only trustworthy when taken by
+breakpoint. Absent frames prove nothing.
+
+**What landed.** `JubeMemberBind` gains `row_index` + `row_argc`;
+`jube_invoke_row` pads or truncates the argument list once (a missing argument
+is `undefined`, per WebIDL) and calls the row at its own arity. All three call
+paths — `jube_tramp_invoke` (JS), `jube_lambda_method_invoke` (Lambda) and
+`jube_member_call_by_ordinal` — resolve a row the same way, so the two doors
+cannot drift.
+
+A module's member table is *static* data and cannot name a host symbol, so the
+bind carries a **row index**, not a pointer: `dom_api.def` now also generates a
+`JubeDomRowIndex` enum and a parallel slot array, both in row order, with a
+static assert tying their lengths together.
+
+**Measured after:** `el.getAttribute("x")` is **3 hops** — dispatch, row body,
+engine — with breakpoints on `radiant_dom_element_operation` and
+`dom_element_operation_impl` never hit. Budget met for every converted member.
+
+**Reach, and what gates it.** 18 members converted. The limit is not the
+mechanism but **DS1**: of 87 ordinals only 19 have a `DOM_OP` row whose arity
+matches the arm, because most operation bodies were never given a catalog row.
+Every further member is one `dom_api.def` row away.
+
+`clone_node` was converted and then reverted: it is a Node operation, and this
+door's dispatcher carries the text/comment branch the element-only clone bridge
+cannot serve. Two UI fixtures caught it (`cloneNode` on a text node returned
+null). The row must grow a non-element path before the member can hold it — the
+same shape as the `check_validity` / `reset_form` pair DS2 left alone.
+
+**ABI 6 → 7.** The doc recorded "no load-time version check was found"; there
+is one, at `jube_register_module_descriptor`, and it **rejects** a mismatch with
+an error rather than misreading — so the bump fails loudly. Radiant is linked
+statically and needs nothing. The six dylibs were rebuilt, and their
+`module.json` manifests pin `base_abi_version` separately from the binary: that
+pin must be bumped and the integrity digest refreshed, or the module loads as
+"malformed or incompatible". That manifest pin is the trap in this bump, not
+the dylibs.
+
+### 10.1 Hop counts — measured, 2026-09-12
+
+Counted from real backtraces (lldb breakpoint on the row body, `bt`), not from
+the design. The counting rule is §4.5: JS's own call/property machinery
+(`js_call_function_impl_mode`, `js_host_meta_get`) is not a DOM dispatch hop,
+and `jube_member_get` + `jube_dispatch_get_record` are one record dispatch.
+
+| Class | Path | Before | **Now** | Target | Remaining hop |
+|---|---|---:|---:|---:|---|
+| A | JS method — `el.getAttribute("x")` | 6 | **4** | 3 | the generated thunk `radiant_dom_m4d_*` — DS13 |
+| B | JS field — `el.nodeName` | 5 | **4** | 3 | the generated accessor `radiant_dom_member_*` — DS13 |
+| D | JS document member — `document.body` | 5 | **5** | 3 | still a name-keyed chain (`dom_document_get_property`) — DS15 |
+| G | Lambda `dom.*` — `dom.get_attribute(n,"x")` | 5 | **3** ✅ | 3 | none — budget met |
+
+Class A, measured: `jube_tramp_invoke` → `radiant_dom_m4d_get_attribute` →
+`dom_core_get_attribute` → `elem->get_attribute()`. Neither
+`radiant_dom_element_operation` nor `dom_element_operation_impl` appears — the
+generated thunk reaches the row body directly, which is what took 6 to 4.
+
+Class B, measured: `jube_member_get` → `jube_dispatch_get_record` →
+`radiant_dom_member_node_name` → `dom_core_node_name` → engine.
+
+**A and B are one hop over budget, and it is the same hop in both**: the
+generated adapter between the member record and the row body. DS13 — "the
+record's slot *is* the row body" — deletes exactly that, taking both to 3. No
+other ruling is needed for A and B.
+
+Classes C, E, F, H are not re-measured here; C needs DS4's core merge, E needs
+DS3+DS16, H needs DS7+DS10, and F was already at 3.
+
+### Hop counts, before and after (design projection)
 
 | Path | Today | After | What goes |
 |---|---:|---:|---|
