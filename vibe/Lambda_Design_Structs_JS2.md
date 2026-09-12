@@ -653,12 +653,14 @@ kind, and that is the whole point of carrying a pointer rather than an index:
 
 | frame kind | `base` points at | traced by | created at |
 |---|---|---|---|
-| locally pushed scope | one slot of the with-scope `RootVector` | the vector's registered root range | `js_with_push` |
+| pushed by generated code | this function's `with` root suffix | the frame's published root range | `js_with_push_at` |
+| pushed by native code | a `RootSpan` the pusher owns | that span's frame | `js_with_push_at` |
 | inherited captured chain | the closure's existing `js_alloc_env` array (`js_fn_with(fn)->env`) | the owning `JsFunction` | the call kernel, **no copy** |
 
-The inherited case is why the call-boundary copy disappears: the callee's chain
-is already a GC-rooted array owned by its function object, so the kernel links
-one frame to it and restores the previous head on return.
+The pusher always owns the storage; a frame owns only its POD record. The
+inherited case is why the call-boundary copy disappears: the callee's chain is
+already a GC-rooted array owned by its function object, so the kernel links one
+frame to it and restores the previous head on return.
 
 **Head ownership.** `JsRuntimeState.with_scope.head` holds the innermost frame.
 Entering a call saves the head, sets it from the callee's captured chain, and
@@ -675,24 +677,37 @@ they dominate the cost — this is a correctness and ownership change, not a
 still emit the ordinary load and hand it to
 `js_get_with_binding_or_fallback(key, fallback)` as an override.
 
-**Slot allocation is not LIFO.** A suspended generator holds its frame while
-other activations push and pop, so with-scope slots are allocated from a free
-list over a `RootVector` that never shrinks; a released slot is nulled and its
-index returned to the list. This is why the storage is not the Lambda root
-stack: the side root stack is strictly watermark-LIFO
-(`lambda_side_root_alloc_n` / `_pop_n`) and cannot express that interleaving
-without a spill on every suspension. Per-frame side-root slots remain available
-as a later optimization for functions proven not to suspend; `with` is
-sloppy-mode-only and cold, so that optimization is not scheduled.
+**Scopes are activation-bounded, and that is what makes root-stack storage
+possible.** A `with` open across a `yield`/`await` parks its coerced object in a
+generator env slot and closes *before* the state machine returns;
+`jm_emit_with_scope_save`/`_restore` hang off the shared
+`jm_emit_suspend_env_save` / `jm_emit_resume_env_restore` pair, so every
+suspension site is covered and the resuming activation rebuilds the chain into
+its own fresh slots. This is the treatment a generator's locals and a try's
+delayed return already receive.
 
-**POD stays out of scanned storage.** `JsWithFrame` is POD and never lives in
-the `RootVector` blocks — JSCU13.
+**Reservation is with the frame, never a watermark bump.** The `with` slots are
+a second fixed root suffix, sized from the maximum of `mt->with_depth` and
+addressed through a patched `jm_with_frame_base`, exactly as the prerooted
+argument suffix is. A runtime helper must **not** call
+`lambda_side_root_alloc_n` mid-body: the frame's own publication store
+(`em_insert_root_publication_store`) resets `side_root_top` to `root_end` and
+silently discards such a slot, after which the matching pop rewinds *below* the
+frame and `js_prepare_owned_argument_span` reports the function's own argument
+span as outside the live range. Reserving with the frame also means the prologue
+zeroes the suffix before publication, so no slot is ever scanned uninitialized.
+
+The interpreter and the `vm` module have no generated frame; both already
+bracket their push in one native scope, so they pass a `RootSpan` cell.
+
+**POD stays out of scanned storage.** `JsWithFrame` is POD and never lives in a
+root slot — JSCU13. A frame's record is heap-allocated by the pusher, or is the
+caller's native local for the borrowed activation frame.
 
 **Retired by this ruling.** `js_with_set_stack`, `js_with_save_stack`,
-`js_with_capture_stack`'s stack walk, `JsSavedWithScope` and its root-range
-register/unregister, both "Could not save with scope stack" `RangeError` paths,
-and the `mt->with_depth` loop in `js_mir_completion.cpp` that emits one
-`js_with_pop` per open scope — a single head restore replaces it.
+`JsSavedWithScope` and its root-range register/unregister, both "Could not save
+with scope stack" `RangeError` paths, and `JsWithScopeState`'s scope storage —
+the state keeps only the chain head and the binding memo.
 
 **Unified clients.** The MIR lane, the AST interpreter
 (`js_interp.cpp` `JS_AST_NODE_WITH_STATEMENT`) and the `vm` module all push

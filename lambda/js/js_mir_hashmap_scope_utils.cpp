@@ -568,6 +568,9 @@ void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
     mt->arg_frame_base_add = NULL;
     mt->arg_frame_depth = 0;
     mt->arg_frame_slot_count = 0;
+    mt->with_frame_slot_count = 0;
+    mt->with_frame_base = 0;
+    mt->with_frame_base_add = NULL;
     em_frame_dispose(&mt->func_em->em);
     mt->func_em->em.frame.return_type = return_type;
     mt->func_em->em.frame.item_return = item_return;
@@ -627,7 +630,8 @@ static void jm_finalize_write_back_roots(JsMirTranspiler* mt) {
     // Prerooted argument spans are a fixed suffix after semantic root coloring;
     // include that physical suffix in the shared watermark publication while
     // keeping it out of the semantic candidate graph (D5.3.1).
-    mt->func_em->em.frame.fixed_root_slots = mt->arg_frame_slot_count;
+    mt->func_em->em.frame.fixed_root_slots =
+        mt->arg_frame_slot_count + mt->with_frame_slot_count;
     MirRootWriteBackResult result = {};
     em_finalize_semantic_root_write_back(&mt->func_em->em,
         mt->func_em->em.frame.root_base, mt->func_em->em.frame.anchor, false, 0,
@@ -711,6 +715,20 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
             (int64_t)mt->func_em->em.frame.root_slot_count *
             (int64_t)sizeof(uint64_t);
         mt->func_em->em.frame.root_slot_count += mt->arg_frame_slot_count;
+    }
+    if (mt->with_frame_slot_count > 0) {
+        if (!mt->with_frame_base_add ||
+                mt->with_frame_base_add->nops < 3 ||
+                mt->with_frame_base_add->ops[2].mode != MIR_OP_INT) {
+            log_error("js-mir with-frame invariant: missing base fixup");
+            abort();
+        }
+        // The `with` suffix follows the argument suffix, so both are inside the
+        // fixed range the prologue zeroes before the frame is published.
+        mt->with_frame_base_add->ops[2].u.i =
+            (int64_t)mt->func_em->em.frame.root_slot_count *
+            (int64_t)sizeof(uint64_t);
+        mt->func_em->em.frame.root_slot_count += mt->with_frame_slot_count;
     }
     mt->func_em->em.frame.active = false;
     jm_finalize_side_root_prologue(mt);

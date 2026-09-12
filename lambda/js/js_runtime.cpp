@@ -32231,9 +32231,11 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox, Item options) {
     Item prev_global = js_vm_swap_global_this(sandbox);
     // The sandbox is this activation's only scope; the eval'd code's own frames
     // are released with it, including any a compiled `with` body left open.
+    // JSCU44: the slot is declared first so it outlives the activation guard.
+    RootSpan sandbox_slot(1);
     JsWithActivation with_activation;
     with_activation.enter(NULL, 0);
-    js_with_push(sandbox);
+    js_with_push_at(sandbox_slot.items(), sandbox);
     js_set_this(sandbox);
     Item result = js_builtin_eval_with_options(code, 1 | 8, eval_options.filename,
                                                eval_options.line_offset,
@@ -32361,6 +32363,7 @@ static Item js_vm_compileFunction(Item code, Item params, Item options) {
     Item previous_proto = ItemNull;
     Item prev_global = ItemNull;
     Item prev_this = ItemNull;
+    RootSpan parsing_slot(1);
     JsWithActivation with_activation;
     JsVmTemporaryBindingJournal vm_bindings;
     if (use_parsing_context) {
@@ -32376,7 +32379,7 @@ static Item js_vm_compileFunction(Item code, Item params, Item options) {
         }
         prev_this = js_get_current_this();
         prev_global = js_vm_swap_global_this(parsing_context);
-        js_with_push(parsing_context);
+        js_with_push_at(parsing_slot.items(), parsing_context);
         js_set_this(parsing_context);
     }
     Item result = js_builtin_eval(eval_code, 1);

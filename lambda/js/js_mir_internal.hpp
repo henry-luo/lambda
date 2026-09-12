@@ -320,6 +320,8 @@ MIR_reg_t jm_emit_error_lane_test(JsMirTranspiler* mt);
 void jm_emit_error_lane_route(JsMirTranspiler* mt, JsMirCompletionKind kind);
 void jm_emit_error_lane_guard(JsMirTranspiler* mt, MIR_label_t target);
 MIR_reg_t jm_arg_frame_base(JsMirTranspiler* mt);
+MIR_reg_t jm_with_frame_base(JsMirTranspiler* mt);
+MIR_reg_t jm_emit_with_slot_addr(JsMirTranspiler* mt, int index);
 void jm_emit_arg_frame_clear(JsMirTranspiler* mt, JsMirArgStackScope* scope);
 bool jm_emit_delayed_return_completion(JsMirTranspiler* mt, MIR_reg_t value,
     JsMirCompletionKind kind);

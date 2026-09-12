@@ -3690,15 +3690,25 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         if (with_node->object) {
             // push with-scope object
             MIR_reg_t obj_reg = jm_transpile_box_item(mt, with_node->object);
-            MIR_reg_t scope_reg = jm_callr_1(mt, "js_with_push", MIR_T_I64, obj_reg);
+            // JSCU44: this level's scope lives in the function's `with` root
+            // suffix, reserved with the frame. A runtime helper cannot bump the
+            // watermark mid-body: the frame's own publication store would
+            // clobber the slot and the matching pop would rewind below it.
+            if (mt->with_depth + 1 > mt->with_frame_slot_count) {
+                mt->with_frame_slot_count = mt->with_depth + 1;
+            }
+            MIR_reg_t slot_reg = jm_emit_with_slot_addr(mt, mt->with_depth);
+            MIR_reg_t scope_reg = jm_callr_2(mt, "js_with_push_at", MIR_T_I64,
+                slot_reg, obj_reg);
             jm_emit_error_lane_propagate_check(mt);
             jm_eval_cptn_reset(mt);
-            // JSCU44: retain the coerced scope for this level so a suspension
-            // inside the body can park it and rebuild the chain on resume.
+            // Retain the coerced scope so a suspension inside the body can park
+            // it and rebuild the chain on resume.
             JsWithLowering* with_scope = jm_with_scope_at(mt, mt->with_depth);
             if (with_scope) {
                 with_scope->object_reg = scope_reg;
                 with_scope->spill_slot = -1;
+                with_scope->frame_slot = mt->with_depth;
             }
             mt->with_depth++;
             // transpile body

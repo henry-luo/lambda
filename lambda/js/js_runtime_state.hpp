@@ -257,21 +257,15 @@ struct JsWithFrame {
     Item* base = NULL;            // address-stable; count entries, innermost last
     int count = 0;
     int base_depth = 0;           // absolute depth of base[0]
-    int owned_slot = -1;          // slots index to release on pop; -1 = borrowed
+    bool owns_record = false;     // the POD record is ours to free; storage never is
     JsWithFrame* parent = NULL;
 };
 
 struct JsWithScopeState {
     JsWithFrame* head = NULL;     // innermost frame; NULL = no with-scope in scope
-    // Scope slots are released out of order (a suspended generator holds its
-    // frame while other activations push and pop), so the vector never shrinks
-    // and released indices are recycled through a POD free list.
-    RootVector slots = {};
-    int* free_slots = NULL;
-    int free_count = 0;
-    int free_capacity = 0;
-    // The memo is two semantic values, but its root ownership is the same
-    // growable exact-root mechanism as the scope slots.
+    // The memo is two semantic values whose root ownership is a growable
+    // exact-root vector; a scope object itself lives in a root slot its pusher
+    // owns -- a generated function's `with` frame suffix, or a native RootSpan.
     RootVector last_binding_values = {};
     bool last_binding_valid = false;
 };
@@ -835,6 +829,8 @@ struct JsAsyncContextStateRecord : JsSuspendedActivation {
 // JSCU44: the `with` activation boundary. `storage` is caller-owned POD (a
 // native frame local); enter returns the head to hand back to leave.
 extern "C" Item* js_with_capture_stack(int* out_depth);
+extern "C" Item js_with_push_at(Item* slot, Item obj);
+extern "C" void js_with_chain_reset(void);
 extern "C" JsWithFrame* js_with_activation_enter(Item* captured, int depth, JsWithFrame* storage);
 extern "C" void js_with_activation_leave(JsWithFrame* saved_head);
 

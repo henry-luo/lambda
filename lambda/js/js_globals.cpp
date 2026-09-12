@@ -14450,40 +14450,13 @@ static Item js_with_scope_at(int index) {
     return ItemNull;
 }
 
-// Slots are released out of order, so the vector never shrinks and freed
-// indices are recycled. A failed free-list growth keeps the slot allocated:
-// losing reuse is harmless, losing the null-out would retain a dead scope.
-static int js_with_slot_alloc(Item obj) {
-    JsWithScopeState* with = &js_runtime_state.with_scope;
-    if (with->free_count > 0) {
-        int index = with->free_slots[--with->free_count];
-        Item* slot = root_vector_at(&with->slots, index);
-        if (!slot) return -1;
-        *slot = obj;
-        return index;
-    }
-    if (!root_vector_push(&with->slots, obj)) return -1;
-    return (int)root_vector_count(&with->slots) - 1;
-}
-
-static void js_with_slot_release(int index) {
-    JsWithScopeState* with = &js_runtime_state.with_scope;
-    Item* slot = root_vector_at(&with->slots, index);
-    if (slot) *slot = ItemNull;
-    if (with->free_count == with->free_capacity) {
-        int capacity = with->free_capacity ? with->free_capacity * 2 : 8;
-        int* grown = (int*)mem_realloc(with->free_slots,
-            (size_t)capacity * sizeof(int), MEM_CAT_JS_RUNTIME);
-        if (!grown) return;
-        with->free_slots = grown;
-        with->free_capacity = capacity;
-    }
-    with->free_slots[with->free_count++] = index;
-}
-
+// JSCU44: the pusher owns the storage -- a generated function's `with` frame
+// suffix, or a native RootSpan -- so a frame only ever releases its own POD
+// record. The slot is nulled first: it stays inside the pusher's published root
+// range after the scope closes, and must not retain a dead scope object.
 static void js_with_frame_drop(JsWithFrame* frame) {
-    if (!frame || frame->owned_slot < 0) return;
-    js_with_slot_release(frame->owned_slot);
+    if (!frame || !frame->owns_record) return;
+    if (frame->base) frame->base[0] = ItemNull;
     mem_free(frame);
 }
 
@@ -14521,21 +14494,29 @@ static bool js_with_scope_is_object(Item value) {
            is_virtual_container_type_id(type);
 }
 
-extern "C" void js_with_batch_reset(void) {
+// Unlink without touching the pushers' storage. This runs at a script boundary
+// where the chain should already be empty, and at a fault landing where the
+// recovery checkpoint has rewound past those frames entirely.
+extern "C" void js_with_chain_reset(void) {
     JsWithScopeState* with = &js_runtime_state.with_scope;
     while (with->head) {
         JsWithFrame* frame = with->head;
         with->head = frame->parent;
-        js_with_frame_drop(frame);
+        if (frame->owns_record) mem_free(frame);
     }
     js_last_with_binding_valid = false;
-    root_vector_clear(&with->last_binding_values);
-    root_vector_clear(&with->slots);
-    with->free_count = 0;
 }
 
-extern "C" Item js_with_push(Item obj) {
-    if (!js_with_ensure_roots()) return js_status_ok();
+extern "C" void js_with_batch_reset(void) {
+    js_with_chain_reset();
+    root_vector_clear(&js_runtime_state.with_scope.last_binding_values);
+}
+
+// `slot` is a root cell owned by the caller and live for the scope's whole
+// extent. Returns the *coerced* scope, not the operand: `with (5)` wraps once,
+// and a re-push on resume must restore that wrapper rather than make another.
+extern "C" Item js_with_push_at(Item* slot, Item obj) {
+    if (!slot || !js_with_ensure_roots()) return js_status_ok();
     TypeId type = get_type_id(obj);
     if (type == LMD_TYPE_NULL || obj.item == ITEM_JS_UNDEFINED) {
         return js_throw_type_error("Cannot convert undefined or null to object");
@@ -14543,22 +14524,17 @@ extern "C" Item js_with_push(Item obj) {
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC) {
         JS_ASSIGN_OR_RETURN_INTO(obj, js_to_object(obj));
     }
-    int slot = js_with_slot_alloc(obj);
-    JsWithFrame* frame = slot >= 0
-        ? (JsWithFrame*)mem_calloc(1, sizeof(JsWithFrame), MEM_CAT_JS_RUNTIME) : NULL;
-    if (!frame) {
-        if (slot >= 0) js_with_slot_release(slot);
-        return js_throw_range_error("Could not grow with scope stack");
-    }
-    frame->base = root_vector_at(&js_runtime_state.with_scope.slots, slot);
+    JsWithFrame* frame = (JsWithFrame*)mem_calloc(1, sizeof(JsWithFrame),
+        MEM_CAT_JS_RUNTIME);
+    if (!frame) return js_throw_range_error("Could not grow with scope stack");
+    *slot = obj;
+    frame->base = slot;
     frame->count = 1;
     frame->base_depth = js_with_stack_depth;
-    frame->owned_slot = slot;
+    frame->owns_record = true;
     frame->parent = js_with_head;
     js_with_head = frame;
     js_last_with_binding_valid = false;
-    // The coerced scope, not the operand: `with (5)` wraps once, and a re-push
-    // on resume (JSCU44) must restore that same wrapper, not make another.
     return obj;
 }
 
@@ -14566,7 +14542,7 @@ extern "C" Item js_with_push(Item obj) {
 // installer may unlink it.
 extern "C" void js_with_pop() {
     JsWithFrame* frame = js_with_head;
-    if (!frame || frame->owned_slot < 0) return;
+    if (!frame || !frame->owns_record) return;
     js_with_head = frame->parent;
     js_with_frame_drop(frame);
     js_last_with_binding_valid = false;
@@ -14578,7 +14554,7 @@ extern "C" void js_with_restore_depth(int depth) {
     if (depth < 0) depth = 0;
     while (js_with_stack_depth > depth) {
         JsWithFrame* frame = js_with_head;
-        if (!frame || frame->owned_slot < 0) break;
+        if (!frame || !frame->owns_record) break;
         js_with_head = frame->parent;
         js_with_frame_drop(frame);
     }
@@ -14613,7 +14589,7 @@ extern "C" JsWithFrame* js_with_activation_enter(Item* captured, int depth,
         storage->base = captured;
         storage->count = depth;
         storage->base_depth = 0;
-        storage->owned_slot = -1;
+        storage->owns_record = false;
         storage->parent = NULL;
         with->head = storage;
     } else {
@@ -14627,7 +14603,7 @@ extern "C" JsWithFrame* js_with_activation_enter(Item* captured, int depth,
 // the callee's own frames are released here rather than trusted to unwind.
 extern "C" void js_with_activation_leave(JsWithFrame* saved_head) {
     JsWithScopeState* with = &js_runtime_state.with_scope;
-    while (with->head && with->head != saved_head && with->head->owned_slot >= 0) {
+    while (with->head && with->head != saved_head && with->head->owns_record) {
         JsWithFrame* frame = with->head;
         with->head = frame->parent;
         js_with_frame_drop(frame);

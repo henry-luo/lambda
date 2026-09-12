@@ -80,6 +80,9 @@ Item js_mir_execute_compiled_entry(void* entry_func) {
             recovered = lambda_recovery_frame_fault_item((Context*)context,
                 recovery_frame);
         }
+        // JSCU44: the checkpoint restore rewound past every open `with`
+        // slot, so the chain is dropped rather than unwound.
+        js_with_chain_reset();
         _lambda_stack_overflow_flag = false;
         lambda_recovery_frame_end(recovery_frame);
         return runtime_publish_result(context, recovered);

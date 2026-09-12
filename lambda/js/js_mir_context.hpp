@@ -182,6 +182,7 @@ struct JsLoopLabels {
 struct JsWithLowering {
     MIR_reg_t object_reg;   // holds the coerced scope object
     int spill_slot;         // env slot, reserved lazily at the first suspension
+    int frame_slot;         // index into this function's `with` root suffix
 };
 
 // A dynamically sized iterator-cleanup entry. Iterator registers are MIR
@@ -687,6 +688,14 @@ struct JsMirTranspiler {
     MIR_insn_t arg_frame_base_add;
     int arg_frame_depth;
     int arg_frame_slot_count;
+    // JSCU44: `with` scopes are a second fixed root suffix. They cannot be
+    // watermark allocations: a helper that bumps side_root_top mid-body is
+    // clobbered by the frame's own publication store, and the matching pop then
+    // rewinds below the frame. Reserving them with the frame removes all
+    // watermark traffic, and the prologue zeroes the suffix before publication.
+    int with_frame_slot_count;
+    MIR_reg_t with_frame_base;
+    MIR_insn_t with_frame_base_add;
 
     // v20: arguments aliasing state
     MIR_reg_t arguments_reg;         // register holding 'arguments' object (0 if not active)

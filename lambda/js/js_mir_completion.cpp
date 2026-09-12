@@ -82,9 +82,11 @@ void jm_emit_with_scope_restore(JsMirTranspiler* mt) {
         if (!scope || scope->spill_slot < 0 || !scope->object_reg) continue;
         jm_emit_load_i64(mt, scope->object_reg,
             scope->spill_slot * (int)sizeof(uint64_t), mt->gen_env_reg);
-        // The parked value is already an object, so this push cannot coerce or
-        // throw; the error lane stays untouched.
-        jm_callr_1(mt, "js_with_push", MIR_T_I64, scope->object_reg);
+        // The resuming activation has a fresh frame, so the scope goes back into
+        // this level's slot of the new `with` suffix. The parked value is
+        // already an object: this push cannot coerce or throw.
+        MIR_reg_t slot_reg = jm_emit_with_slot_addr(mt, scope->frame_slot);
+        jm_callr_2(mt, "js_with_push_at", MIR_T_I64, slot_reg, scope->object_reg);
     }
 }
 
@@ -319,6 +321,33 @@ MIR_reg_t jm_emit_error_lane_return(JsMirTranspiler* mt) {
     // valid LambdaError lane instead of manufacturing a null-plus-flag state.
     return em_call_1(&mt->func_em->em, "js_throw_value", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, null_value), true);
+}
+
+// Address of one slot in this function's `with` root suffix.
+MIR_reg_t jm_emit_with_slot_addr(JsMirTranspiler* mt, int index) {
+    MIR_reg_t addr = jm_new_reg(mt, "with_slot", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, addr),
+        MIR_new_reg_op(mt->ctx, jm_with_frame_base(mt)),
+        MIR_new_int_op(mt->ctx, (int64_t)index * (int64_t)sizeof(uint64_t))));
+    return addr;
+}
+
+MIR_reg_t jm_with_frame_base(JsMirTranspiler* mt) {
+    if (!mt || !mt->func_em->em.frame.active || !mt->func_em->em.frame.root_base) {
+        log_error("js-mir with-frame invariant: base without active root frame");
+        abort();
+    }
+    if (mt->with_frame_base) return mt->with_frame_base;
+    mt->with_frame_base = jm_new_reg(mt, "js_with_frame", MIR_T_I64);
+    mt->with_frame_base_add = MIR_new_insn(mt->ctx, MIR_ADD,
+        MIR_new_reg_op(mt->ctx, mt->with_frame_base),
+        MIR_new_reg_op(mt->ctx, mt->func_em->em.frame.root_base),
+        MIR_new_int_op(mt->ctx, 0));
+    // Like the argument suffix, the displacement is known only once semantic
+    // roots are colored; patch it when the complete frame is fixed.
+    MIR_insert_insn_after(mt->ctx, mt->func_em->em.func_item,
+        mt->func_em->em.frame.anchor, mt->with_frame_base_add);
+    return mt->with_frame_base;
 }
 
 MIR_reg_t jm_arg_frame_base(JsMirTranspiler* mt) {
