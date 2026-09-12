@@ -421,6 +421,12 @@ struct NameScope {
 
 struct AstNode {
     AstNodeType node_type;
+    // Cached AstIndex id, living in the padding after the 16-bit tag, so this
+    // costs no bytes (AstNode stays 32). It is a hint, not an authority: a node
+    // may be queried against an index that never published it, so every read
+    // validates `index->nodes[id] == node` and falls back to the pointer hash.
+    // That also makes a zeroed or stale value self-correcting.
+    uint32_t index_id;
     Type *type;
     AstNode* next;
     SourceSpan source_span;

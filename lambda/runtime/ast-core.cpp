@@ -248,6 +248,7 @@ static AstNodeId ast_index_add(AstIndex* index, AstNode* node, AstNode* parent,
     index->facts[id].representation = VALUE_REP_NONE;
     index->facts[id].flags = 0;
     index->facts[id].folded_item = ITEM_NULL;
+    node->index_id = id;
     if (!ast_index_publish_node(index, node, id)) return AST_NODE_ID_INVALID;
     index->slots[slot] = node;
     index->slot_ids[slot] = id;
@@ -631,6 +632,10 @@ void ast_index_destroy(AstIndex* index) {
 
 AstNodeId ast_index_find(const AstIndex* index, const AstNode* node) {
     if (!index || !node || !index->slot_capacity) return AST_NODE_ID_INVALID;
+    // the cached id answers without probing when it belongs to this index; the
+    // identity check rejects a stale, zeroed, or foreign-index value.
+    uint32_t cached = node->index_id;
+    if (cached < index->count && index->nodes[cached] == node) return cached;
     uint32_t slot = (uint32_t)(ast_ptr_hash(node) & (index->slot_capacity - 1));
     while (index->slots[slot]) {
         if (index->slots[slot] == node) {
