@@ -4021,13 +4021,55 @@ static bool interp_fast_int_while(InterpFrame* frame, AstWhileNode* loop,
 // Publishing a folded value means pooling it: the node carries only a handle,
 // and a shared pool entry is what later lets equal constants be deduplicated
 // (RC6). Returns false without marking the node if the slot cannot be created.
-static bool interp_publish_folded_item(Transpiler* tp, AstNode* node, Item value) {
-    if (!tp || !tp->const_list || !node) return false;
+typedef struct ConstDedupEntry {
+    uint64_t word;
+    uint32_t index;
+} ConstDedupEntry;
+
+static int const_dedup_cmp(const void* a, const void* b, void* udata) {
+    return ((const ConstDedupEntry*)a)->word == ((const ConstDedupEntry*)b)->word
+        ? 0 : 1;
+}
+
+static uint64_t const_dedup_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const ConstDedupEntry* entry = (const ConstDedupEntry*)item;
+    return hashmap_sip(&entry->word, sizeof(entry->word), seed0, seed1);
+}
+
+// RC6: an 8-byte const slot is fully described by its bytes, so two entries
+// with the same word are interchangeable -- each consumer reads the slot
+// through its own node's type, and immutability makes sharing unobservable.
+// Returns the pool index to use, reusing an existing slot when one matches.
+static bool lambda_const_pool_intern_word(Transpiler* tp, uint64_t word,
+        uint32_t* out_index) {
+    if (!tp || !tp->const_list || !out_index) return false;
+    if (!tp->const_dedup) {
+        tp->const_dedup = hashmap_new(sizeof(ConstDedupEntry), 32, 0, 0,
+            const_dedup_hash, const_dedup_cmp, NULL, NULL);
+    }
+    if (tp->const_dedup) {
+        ConstDedupEntry probe = {word, 0};
+        const ConstDedupEntry* found =
+            (const ConstDedupEntry*)hashmap_get(tp->const_dedup, &probe);
+        if (found) { *out_index = found->index; return true; }
+    }
     uint64_t* slot = (uint64_t*)alloc_const(tp, sizeof(uint64_t));
     if (!slot) return false;
-    *slot = value.item;
+    *slot = word;
     if (!arraylist_append(tp->const_list, slot)) return false;
-    node->const_index = (uint32_t)(tp->const_list->length - 1);
+    *out_index = (uint32_t)(tp->const_list->length - 1);
+    if (tp->const_dedup) {
+        ConstDedupEntry entry = {word, *out_index};
+        hashmap_set(tp->const_dedup, &entry);
+    }
+    return true;
+}
+
+static bool interp_publish_folded_item(Transpiler* tp, AstNode* node, Item value) {
+    if (!tp || !node) return false;
+    uint32_t index = 0;
+    if (!lambda_const_pool_intern_word(tp, value.item, &index)) return false;
+    node->const_index = index;
     node->const_kind = AST_CONST_FOLDED;
     return true;
 }

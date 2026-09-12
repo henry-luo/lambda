@@ -866,6 +866,12 @@ typedef struct Transpiler : Script {
     // Compiler unit resumes indexing into MIR; retained ASTs restart it.
     CompilerPassManager pass_manager;
 
+    // RC6: word -> const_list index, so equal constants share one pool slot.
+    // Scoped to the compilation unit, not the Script: the REPL rolls a failed
+    // statement back by truncating `const_list`, which would leave a
+    // Script-scoped map pointing at reclaimed indices.
+    struct hashmap* const_dedup;
+
     // Error tracking for accumulated type errors
     int error_count;           // accumulated error count
     int max_errors;            // threshold (default: 10)
