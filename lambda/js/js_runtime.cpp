@@ -259,14 +259,37 @@ static bool js_mir_owner_is_current(Context* runtime, const char* boundary) {
     return true;
 }
 
-static Item js_invoke_mir_state(void* func_ptr, Item* env, Item input,
-        int64_t state) {
+// JSCU44: a state machine resumes inside its own `with` chain and can return
+// with scopes still open at the suspension point. Those outlive this native
+// activation, so they spill into the suspension record here -- the one place
+// every MIR resume passes through -- rather than at each caller, where a missed
+// site would silently resolve names against the resumer's chain.
+static Item js_invoke_mir_state(void* func_ptr, JsSuspendedActivation* activation,
+        Item* env, Item input, int64_t state) {
     if (!context || !js_runtime_state_thread_matches(context) || !func_ptr) {
         log_error("js-mir-state: owner thread is not initialized");
         return ItemError;
     }
     typedef Item (*MirStateFn)(Context*, Item*, Item, int64_t);
-    return ((MirStateFn)func_ptr)((Context*)context, env, input, state);
+    if (!activation) {
+        return ((MirStateFn)func_ptr)((Context*)context, env, input, state);
+    }
+    JsWithFrame inherited = {};
+    JsWithFrame* saved_head = js_with_activation_enter(activation->with_env,
+        activation->with_depth, &inherited);
+    Item result = ((MirStateFn)func_ptr)((Context*)context, env, input, state);
+    if (js_runtime_state.with_scope.head) {
+        // the capture allocates, so the machine's result is rooted across it
+        RootFrame roots(1);
+        Rooted<Item> result_root(roots, result);
+        activation->with_env = js_with_capture_stack(&activation->with_depth);
+        result = result_root.get();
+    } else {
+        activation->with_env = NULL;
+        activation->with_depth = 0;
+    }
+    js_with_activation_leave(saved_head);
+    return result;
 }
 // Tune8 §2.2: js_private_property_set now takes a strict flag (0 = sloppy,
 // 1 = strict with proxy-throw); js_private_property_set_strict removed.
@@ -27411,7 +27434,7 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
     // here ensures destructuring errors throw synchronously at call time, not on .next().
     {
         gen->executing = true;
-        result_root.set(js_invoke_mir_state(func_ptr, env,
+        result_root.set(js_invoke_mir_state(func_ptr, gen, env,
             make_js_undefined(), 0));
         gen->executing = false;
 
@@ -27740,15 +27763,8 @@ extern "C" Item js_generator_next(Item generator, Item input) {
         get_type_id(generator_private_home) != LMD_TYPE_UNDEFINED) {
         js_current_private_home_class = generator_private_home;
     }
-    {
-        // JSCU44: resume inside the generator's own chain, then spill whatever
-        // scopes are still open at the yield -- they outlive this activation.
-        JsWithActivation gen_with;
-        gen_with.enter(gen->with_env, gen->with_depth);
-        result_root.set(js_invoke_mir_state(gen->state_fn,
-            gen->env, input_root.get(), gen->state));
-        gen->with_env = js_with_capture_stack(&gen->with_depth);
-    }
+    result_root.set(js_invoke_mir_state(gen->state_fn, gen,
+        gen->env, input_root.get(), gen->state));
     js_current_private_home_class = saved_private_home_root.get();
     Item result = result_root.get();
     if (item_is_error(result)) {
@@ -27844,7 +27860,7 @@ static Item js_generator_resume_return_signal(JsGenerator* gen, bool is_async,
     }
     gen->executing = true;
     Item signal = js_gen_return_signal(value);
-    Item result = js_invoke_mir_state(gen->state_fn, gen->env, signal, gen->state);
+    Item result = js_invoke_mir_state(gen->state_fn, gen, gen->env, signal, gen->state);
     gen->executing = false;
     if (item_is_error(result)) {
         gen->done = true;
@@ -30673,7 +30689,7 @@ static void js_async_drive(Item frame_item, Item input, int64_t state) {
         result_root.set(js_interp_resume_async(ctx, input_root.get()));
     } else {
         result_root.set(js_invoke_mir_state(
-            ctx->state_fn, ctx->env, input_root.get(), state));
+            ctx->state_fn, ctx, ctx->env, input_root.get(), state));
     }
     js_current_this = prev_this;
     // Parse result: [value, next_state]
