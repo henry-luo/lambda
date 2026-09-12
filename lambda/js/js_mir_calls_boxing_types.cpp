@@ -652,15 +652,18 @@ static int jm_intern_string_const(JsMirTranspiler* mt, const char* str, int len)
 
 MIR_reg_t jm_box_string_literal(JsMirTranspiler* mt, const char* str, int len) {
     if (!mt || !str || len < 0) return jm_emit_null(mt);
-    // The literal lives in the unit's const pool, so each evaluation loads the
-    // existing String instead of rebuilding one from MIR-embedded bytes.
-    int index = jm_intern_string_const(mt, str, len);
-    if (index >= 0) {
-        return jm_call_2(mt, "lambda_unit_const_at", MIR_T_I64,
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mt->tp->const_unit_id),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, index));
+    // Cache entries outlive their compile context, so their MIR cannot retain
+    // a context-local const-pool unit id. Build literals from immutable MIR
+    // bytes for compile-only units; regular units keep the shared pool.
+    if (!g_jm_preamble_compile_only) {
+        int index = jm_intern_string_const(mt, str, len);
+        if (index >= 0) {
+            return jm_call_2(mt, "lambda_unit_const_at", MIR_T_I64,
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mt->tp->const_unit_id),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, index));
+        }
     }
-    // Fallback: a unit without a pool keeps the original per-evaluation build.
+    // Units without a usable pool keep the original per-evaluation build.
     MIR_reg_t chars = jm_string_literal_chars(mt, str, len);
     return jm_call_2(mt, "js_make_string_len", MIR_T_I64,
         MIR_T_P, MIR_new_reg_op(mt->ctx, chars),
