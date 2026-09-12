@@ -229,6 +229,36 @@ TEST(InterpWalker, SystemFunctionsAndMethods) {
         "let nums = [3, 1, 2]\nsum(nums)\nmin(nums)\nmax(nums)\nnums.len()\n");
 }
 
+TEST(InterpWalker, OrderedComparisonAbsorbsNull) {
+    // S6.1.2: `null < x` -> null by absorption, the same rule as `null + 1`.
+    // The JIT's lane lowerings answered in signed (or IEEE) order and folded the
+    // null sentinel into `false` -- the falsy answer, but a bool where the
+    // interpreter produced null. Observable as `type(...)`, and sharper at a
+    // declared boundary, where `let r: bool = xs[10] > 0` raised E201 under the
+    // interpreter and quietly bound `false` under the JIT. Equality is NOT
+    // absorbing and must stay bool.
+    expect_tiers_agree("ordered_null_absorption",
+        "let xs: int[] = fill(3, 7)\nlet fs: float[] = fill(3, 1.5)\n"
+        "type(xs[9] > 0)\ntype(xs[9] < 0)\ntype(xs[9] >= 0)\ntype(xs[9] <= 0)\n"
+        "type(0 > xs[9])\ntype(0 < xs[9])\n"
+        "type(fs[9] > 0.5)\ntype(fs[9] <= 0.5)\ntype(xs[9] > 0.5)\n"
+        "type(xs[9] == 0)\ntype(xs[9] != 0)\n"
+        "xs[0] > 0\nxs[0] < 0\nfs[0] >= 1.5\n"
+        "if (xs[9] > 0) \"taken\" else \"not-taken\"\n");
+}
+
+TEST(InterpWalker, AllocatingConstFoldSurvivesTheEagerPipeline) {
+    // `type(x)` returns a Type*, so folding it allocates. The eager pipeline
+    // compiles before runner_setup_context()/heap_init(), so the fold pass ran
+    // with `context->heap` NULL and faulted in heap_calloc -- the whole process
+    // died on `type(42)` under LAMBDA_TIER=jit while the interpreter printed
+    // `int`. RC14 makes inertness the contract for every fold failure, so this
+    // asserts what inertness means here: both tiers print, and both exit 0.
+    expect_tiers_agree("const_fold_allocating",
+        "type(42)\ntype(true)\ntype(1 > 0)\ntype(1.5 * 2.0)\ntype(\"ab\")\n"
+        "type(1 + 2)\n");
+}
+
 TEST(InterpWalker, NamedPureSystemArgsKeepTheirPositionalAbi) {
     // The system registry has no formal-name table: MIR evaluates the named
     // value in source order, including when the pipe supplies argument zero.

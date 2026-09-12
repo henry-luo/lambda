@@ -5480,8 +5480,18 @@ static bool interp_const_result_is_immediate(Item result) {
 }
 
 bool interp_const_fold_script(Transpiler* tp) {
+    // A fold attempt evaluates real code on a throwaway frame, and RC7 expects
+    // that evaluation to allocate -- a folded String, Decimal or container is
+    // born on the GC heap and dies with the frame unless it is rehomed. So the
+    // pass needs a context that can allocate, not merely a context: the eager
+    // pipeline (LAMBDA_TIER=jit) compiles the whole module before the runner
+    // reaches runner_setup_context()/heap_init(), leaving `context->heap` NULL
+    // while `context` itself is live. Folding `type(42)` there reached
+    // heap_calloc and faulted on `context->heap->gc`. Declining the pass keeps
+    // the attempt inert, which is what RC14 requires of every fold failure.
     if (!tp || !tp->ast_index.nodes || !tp->const_list ||
-            !context || !interp_const_fold_enabled()) {
+            !context || !context->heap || !context->heap->gc ||
+            !interp_const_fold_enabled()) {
         return true;
     }
 

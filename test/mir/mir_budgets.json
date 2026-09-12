@@ -267,10 +267,10 @@
       "name": "lambda_corpus_array_float",
       "script": "test/lambda/array_float.ls",
       "language": "lambda",
-      "description": "Picked corpus script (array-heavy), whole-module total only. v5 re-baseline: int array elements use the i64 lane and box only at an Item boundary; two uext8 instructions normalize C bool results used by is-null checks.",
+      "description": "Picked corpus script (array-heavy), whole-module total only. v5 re-baseline: int array elements use the i64 lane and box only at an Item boundary; two uext8 instructions normalize C bool results used by is-null checks. Growth 2026-09-13 (+3): the const-fold pass now declines when `context->heap` is absent. The eager pipeline compiles before runner_setup_context()/heap_init(), so folding there evaluated with no GC heap and faulted in heap_calloc on an allocating fold (`type(42)`); RC14 requires a fold attempt to be inert, so the pass stands down and these three folded constants are emitted as ordinary computations. Restoring them means giving the compile pipeline an allocation-capable context, not re-enabling the unguarded pass.",
       "budgets": {
         "default": {
-          "module_insns": 1399
+          "module_insns": 1402
         }
       }
     },

@@ -10406,6 +10406,50 @@ static MIR_reg_t mir_emit_int_lane_pair_in_band(MirTranspiler* mt,
     return both;
 }
 
+// S6.1.2 absorption for ordered relations. `null < x` is `null`, the same rule
+// as `null + 1 -> null`, so absence has to be detected before any arm answers
+// the magnitude question. Returns 0 when neither operand can be null, which
+// leaves the proven lowerings emitting exactly what they emitted before.
+static MIR_reg_t emit_int_lane_pair_null_test(MirTranspiler* mt,
+        AstBinaryNode* comparison, LaneReg left_lane, LaneReg right_lane) {
+    if (!mt || !comparison) return 0;
+    AstNode* nodes[2] = {comparison->left, comparison->right};
+    LaneReg lanes[2] = {left_lane, right_lane};
+    MIR_reg_t has_null = 0;
+    for (int i = 0; i < 2; i++) {
+        if (!mir_expr_may_be_null(mt, nodes[i])) continue;
+        MIR_reg_t is_null = new_reg(mt, "icmp_null", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+            MIR_new_reg_op(mt->ctx, is_null), MIR_new_reg_op(mt->ctx, lanes[i].r),
+            MIR_new_int_op(mt->ctx, INT_LANE_NULL)));
+        if (!has_null) { has_null = is_null; continue; }
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR,
+            MIR_new_reg_op(mt->ctx, has_null), MIR_new_reg_op(mt->ctx, has_null),
+            MIR_new_reg_op(mt->ctx, is_null)));
+    }
+    return has_null;
+}
+
+// The lane arms answer in signed order and fold the null sentinel into `false`
+// -- the falsy ANSWER, but the wrong VALUE. Absence overrides whichever arm ran
+// and publishes ITEM_NULL, which is what the interpreter has always returned.
+static MIR_reg_t emit_ordered_null_absorption(MirTranspiler* mt,
+        MIR_reg_t bool_result, MIR_reg_t has_null) {
+    MIR_reg_t item = new_reg(mt, "icmp_absorb", MIR_T_I64);
+    MIR_label_t l_null = new_label(mt);
+    MIR_label_t l_done = new_label(mt);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+        MIR_new_label_op(mt->ctx, l_null), MIR_new_reg_op(mt->ctx, has_null)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, item),
+        MIR_new_reg_op(mt->ctx, emit_box_bool(mt, bool_result))));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
+    emit_label(mt, l_null);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, item),
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL)));
+    emit_label(mt, l_done);
+    return item;
+}
+
 // A relation against a finite literal needs a full numeric fallback only for
 // the one sentinel whose signed order disagrees with its numeric result. The
 // four IntLane sentinels have fixed signed positions: nan is below every
@@ -11304,13 +11348,27 @@ static MirValue emit_binary_value(MirTranspiler* mt, AstBinaryNode* bi,
         default:          int_op = MIR_GE; float_op = MIR_DGE; cmp_name = "ige"; break;
         }
         MIR_reg_t result = new_reg(mt, cmp_name, MIR_T_I64);
+        // S6.1.2: an ordered relation with a null operand is `null`, not a
+        // bool. Test absence once, here, before any arm branches on a lane;
+        // every arm below then publishes through `publish_cmp`, which overrides
+        // its bool answer with ITEM_NULL when the sentinel was present. A pair
+        // that cannot be null yields has_null == 0 and emits as before.
+        bool ordered_relation = bi->op == OPERATOR_LT || bi->op == OPERATOR_LE ||
+            bi->op == OPERATOR_GT || bi->op == OPERATOR_GE;
+        MIR_reg_t cmp_has_null = ordered_relation
+            ? emit_int_lane_pair_null_test(mt, bi, left_lane, right_lane) : 0;
+        auto publish_cmp = [&](MIR_reg_t bool_reg) -> MirValue {
+            if (!cmp_has_null) return publish(bool_reg, VALUE_REP_I64);
+            return publish(emit_ordered_null_absorption(mt, bool_reg, cmp_has_null),
+                VALUE_REP_ITEM);
+        };
         if (mir_emit_int_nonnull_equality_compare(mt, bi, left_lane, right_lane,
                 int_op, result)) {
-            return publish(result, VALUE_REP_I64);
+            return publish_cmp(result);
         }
         if (mir_emit_int_ordered_compare(mt, bi, left_lane, right_lane,
                 int_op, result)) {
-            return publish(result, VALUE_REP_I64);
+            return publish_cmp(result);
         }
         MIR_reg_t band_ok = mir_emit_int_lane_pair_in_band(mt, bi->left,
             left_lane, bi->right, right_lane);
@@ -11321,7 +11379,7 @@ static MirValue emit_binary_value(MirTranspiler* mt, AstBinaryNode* bi,
                 MIR_new_reg_op(mt->ctx, result),
                 MIR_new_reg_op(mt->ctx, left_lane.r),
                 MIR_new_reg_op(mt->ctx, right_lane.r)));
-            return publish(result, VALUE_REP_I64);
+            return publish_cmp(result);
         }
         MIR_label_t l_poison = new_label(mt);
         MIR_label_t l_done = new_label(mt);
@@ -11340,7 +11398,7 @@ static MirValue emit_binary_value(MirTranspiler* mt, AstBinaryNode* bi,
             MIR_new_reg_op(mt->ctx, result),
             MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
         emit_label(mt, l_done);
-        return publish(result, VALUE_REP_I64);
+        return publish_cmp(result);
     }
 
     // Arithmetic ops with native types.
@@ -11414,6 +11472,50 @@ static MirValue emit_binary_value(MirTranspiler* mt, AstBinaryNode* bi,
         MIR_reg_t fr = emit_int_or_float_to_double(mt, right_value, right_tid);
         MIR_type_t rtype = MIR_T_D;
 
+        // S6.1.2 again, on the float lane: the ordered arms below answer with
+        // IEEE ordering, where the reserved null payload compares false. Absence
+        // has to override that answer with ITEM_NULL. Arithmetic already
+        // absorbs (emit_nullable_float_arith); only the relations did not.
+        bool float_ordered_relation = bi->op == OPERATOR_LT || bi->op == OPERATOR_LE ||
+            bi->op == OPERATOR_GT || bi->op == OPERATOR_GE;
+        // An int lane's null sentinel does NOT widen to the float lane's
+        // reserved payload, so a mixed `int? > float` pair has to be asked on
+        // the side it actually lives on: the int lane before widening, the
+        // double bits after. Both values are already in registers here, so
+        // deriving the lane re-runs no operand.
+        MIR_reg_t fcmp_has_null = 0;
+        if (float_ordered_relation && (left_nullable || right_nullable)) {
+            MirValue sides[2] = {left_value, right_value};
+            TypeId tids[2] = {left_tid, right_tid};
+            bool nullable[2] = {left_nullable, right_nullable};
+            MIR_reg_t widened[2] = {fl, fr};
+            for (int i = 0; i < 2; i++) {
+                if (!nullable[i]) continue;
+                MIR_reg_t is_null = new_reg(mt, "fcmp_null", MIR_T_I64);
+                if (tids[i] == LMD_TYPE_INT) {
+                    LaneReg lane = emit_int_native_lane_typed(mt, sides[i]);
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+                        MIR_new_reg_op(mt->ctx, is_null), MIR_new_reg_op(mt->ctx, lane.r),
+                        MIR_new_int_op(mt->ctx, INT_LANE_NULL)));
+                } else {
+                    MIR_reg_t bits = emit_double_bits(mt, widened[i]);
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+                        MIR_new_reg_op(mt->ctx, is_null), MIR_new_reg_op(mt->ctx, bits),
+                        MIR_new_int_op(mt->ctx, (int64_t)FLOAT_LANE_NULL_BITS)));
+                }
+                if (!fcmp_has_null) { fcmp_has_null = is_null; continue; }
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR,
+                    MIR_new_reg_op(mt->ctx, fcmp_has_null),
+                    MIR_new_reg_op(mt->ctx, fcmp_has_null),
+                    MIR_new_reg_op(mt->ctx, is_null)));
+            }
+        }
+        auto publish_fcmp = [&](MIR_reg_t bool_reg) -> MirValue {
+            if (!fcmp_has_null) return publish(bool_reg, VALUE_REP_I64);
+            return publish(emit_ordered_null_absorption(mt, bool_reg, fcmp_has_null),
+                VALUE_REP_ITEM);
+        };
+
         switch (bi->op) {
         case OPERATOR_ADD: {
             MIR_reg_t r = new_reg(mt, "add", rtype);
@@ -11463,25 +11565,25 @@ static MirValue emit_binary_value(MirTranspiler* mt, AstBinaryNode* bi,
             MIR_reg_t r = new_reg(mt, "lt", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DLT : MIR_LT,
                 MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-            return publish(r, VALUE_REP_I64);
+            return publish_fcmp(r);
         }
         case OPERATOR_LE: {
             MIR_reg_t r = new_reg(mt, "le", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DLE : MIR_LE,
                 MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-            return publish(r, VALUE_REP_I64);
+            return publish_fcmp(r);
         }
         case OPERATOR_GT: {
             MIR_reg_t r = new_reg(mt, "gt", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DGT : MIR_GT,
                 MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-            return publish(r, VALUE_REP_I64);
+            return publish_fcmp(r);
         }
         case OPERATOR_GE: {
             MIR_reg_t r = new_reg(mt, "ge", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DGE : MIR_GE,
                 MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-            return publish(r, VALUE_REP_I64);
+            return publish_fcmp(r);
         }
         default:
             break;  // fall through to boxed path
