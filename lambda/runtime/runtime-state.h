@@ -78,6 +78,8 @@ private:
 extern "C" {
 #endif
 
+typedef struct LambdaConstPool LambdaConstPool;
+
 extern bool g_dry_run;
 
 // Context-module state is established before a sealed MIR module is entered.
@@ -129,11 +131,6 @@ bool lambda_module_state_reserve(uint32_t var_count, uint32_t* out_module_id);
 bool lambda_active_module_state_ensure_vars(uint32_t required_var_count);
 bool lambda_module_state_bind_static(uint32_t module_id, void* consts,
                                      void* type_list);
-// RC-J7: copies a const index array into state-owned storage for units whose
-// builder pool dies before their compiled code does (JS). Frees the previous
-// owned copy and its entries; Lambda keeps bind_static's borrowed pool.
-bool lambda_module_state_adopt_consts(uint32_t module_id, void* const* consts,
-                                      uint32_t count);
 uint32_t lambda_module_state_property_key_count(uint32_t module_id);
 Item lambda_name_id_to_item(NameId name_id);
 uint64_t lambda_module_name_id_at(void* module_state, uint32_t index);
@@ -149,9 +146,15 @@ void* lambda_module_const_at_state(void* module_state, uint32_t index);
 Item lambda_module_var_at(void* module_state, uint32_t slot);
 void lambda_module_var_store(void* module_state, uint32_t slot, Item item);
 Item lambda_active_module_var_at(uint32_t slot);
-// Literal load for JavaScript: resolves an index in the active unit's shared
-// const pool to a tagged Item (RC-J2).
-Item lambda_active_module_const_at(uint32_t index);
+// RC-J7v2: per-compilation-unit literal pools. A unit acquires one pool at
+// lowering, appends each interned body to it, and its generated code resolves
+// a literal with `lambda_unit_const_at(unit_id, index)`. The unit id keeps the
+// emission relocatable (DI14); the pools are released with the context, since
+// a retired module slab can leave live code behind.
+#define LAMBDA_CONST_UNIT_NONE ((uint32_t)0xFFFFFFFFu)
+LambdaConstPool* lambda_const_pool_acquire(uint32_t* out_unit_id);
+int32_t lambda_const_pool_append(LambdaConstPool* pool, void* body);
+Item lambda_unit_const_at(uint32_t unit_id, uint32_t index);
 void lambda_active_module_var_store(uint32_t slot, Item item);
 void lambda_module_state_reset(void);
 void lambda_module_state_destroy(void);

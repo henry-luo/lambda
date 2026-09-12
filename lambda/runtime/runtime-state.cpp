@@ -452,19 +452,6 @@ extern "C" void lambda_module_state_snapshot_dispose(
     memset(snapshot, 0, sizeof(*snapshot));
 }
 
-static void lambda_module_state_free_consts(LambdaModuleState* state) {
-    if (!state || !state->consts_owned) return;
-    // Only the state-owned copy frees its entries; a Script-bound pool is
-    // released with its Script.
-    for (uint32_t i = 0; i < state->const_count; i++) {
-        mem_free(((void**)state->consts)[i]);
-    }
-    mem_free(state->consts);
-    state->consts = NULL;
-    state->const_count = 0;
-    state->consts_owned = false;
-}
-
 static void lambda_module_state_release_at(EvalContext* owner, uint32_t module_id) {
     LambdaModuleState* state = lambda_module_state_at(owner, module_id);
     if (!state) return;
@@ -479,7 +466,6 @@ static void lambda_module_state_release_at(EvalContext* owner, uint32_t module_i
     mem_free(state->vars);
     mem_free(state->var_payloads);
     mem_free(state->property_keys);
-    lambda_module_state_free_consts(state);
     mem_free(state);
     owner->module_states[module_id] = NULL;
 }
@@ -619,27 +605,6 @@ extern "C" bool lambda_module_state_bind_static(uint32_t module_id,
     return true;
 }
 
-extern "C" bool lambda_module_state_adopt_consts(uint32_t module_id,
-        void* const* consts, uint32_t count) {
-    // RC-J7: a JS unit's const pool is built in the transpiler pool, which dies
-    // at js_transpiler_destroy while its compiled code can still run (preamble
-    // harnesses and deferred hot-reload contexts). Copy the index array here so
-    // the state outlives the builder; the String bodies are mem-owned too and
-    // are released alongside it in lambda_module_state_release_at.
-    EvalContext* owner = context;
-    LambdaModuleState* state = lambda_module_state_at(owner, module_id);
-    if (!state) return false;
-    lambda_module_state_free_consts(state);
-    if (!consts || !count) return true;
-    void** owned = (void**)mem_calloc(count, sizeof(void*), MEM_CAT_EVAL);
-    if (!owned) return false;
-    memcpy(owned, consts, (size_t)count * sizeof(void*));
-    state->consts = owned;
-    state->const_count = count;
-    state->consts_owned = true;
-    return true;
-}
-
 extern "C" uint32_t lambda_module_state_property_key_count(uint32_t module_id) {
     EvalContext* owner = context;
     LambdaModuleState* state = lambda_module_state_at(owner, module_id);
@@ -734,17 +699,92 @@ extern "C" Item lambda_active_module_var_at(uint32_t slot) {
     return lambda_module_var_at(context ? context->active_module_state : NULL, slot);
 }
 
-extern "C" Item lambda_active_module_const_at(uint32_t index) {
-    // RC-J2: the JavaScript literal load. It mirrors lambda_active_module_var_at
-    // rather than Lambda's BSS path because JS emits no module BSS; the pool and
-    // the checked accessor below it are the same ones Lambda uses.
-    void* ptr = lambda_module_const_at_state(
-        context ? context->active_module_state : NULL, index);
-    return ptr ? (Item){.item = s2it((String*)ptr)} : ItemNull;
-}
-
 extern "C" void lambda_active_module_var_store(uint32_t slot, Item item) {
     lambda_module_var_store(context ? context->active_module_state : NULL, slot, item);
+}
+
+// ---------------------------------------------------------------------------
+// RC-J7v2: unit-keyed const pools.
+//
+// A literal index is assigned per compilation unit, starting at zero, so the
+// pool it indexes must be selected by the unit that emitted the load. Keying it
+// on the active module slab (RC-J7) aliased: a direct `eval` compiles its own
+// unit into its caller's slab, so whichever unit linked last owned every index.
+// The unit id is an ordinary integer, so generated code stays relocatable and
+// is never patched (DI14).
+// ---------------------------------------------------------------------------
+
+static LambdaConstPool* lambda_const_pool_at(EvalContext* owner, uint32_t unit_id) {
+    return owner && owner->const_pools && unit_id < owner->const_pool_count
+        ? owner->const_pools[unit_id] : NULL;
+}
+
+extern "C" LambdaConstPool* lambda_const_pool_acquire(uint32_t* out_unit_id) {
+    EvalContext* owner = context;
+    if (!owner || !out_unit_id) return NULL;
+    if (owner->const_pool_count == owner->const_pool_capacity) {
+        uint32_t capacity = owner->const_pool_capacity ? owner->const_pool_capacity * 2 : 8;
+        LambdaConstPool** grown = (LambdaConstPool**)mem_calloc(
+            capacity, sizeof(LambdaConstPool*), MEM_CAT_EVAL);
+        if (!grown) return NULL;
+        if (owner->const_pools) {
+            memcpy(grown, owner->const_pools,
+                (size_t)owner->const_pool_count * sizeof(LambdaConstPool*));
+            mem_free(owner->const_pools);
+        }
+        owner->const_pools = grown;
+        owner->const_pool_capacity = capacity;
+    }
+    LambdaConstPool* pool = (LambdaConstPool*)mem_calloc(1, sizeof(LambdaConstPool),
+        MEM_CAT_EVAL);
+    if (!pool) return NULL;
+    *out_unit_id = owner->const_pool_count;
+    owner->const_pools[owner->const_pool_count++] = pool;
+    return pool;
+}
+
+extern "C" int32_t lambda_const_pool_append(LambdaConstPool* pool, void* body) {
+    if (!pool || !body) return -1;
+    if (pool->count == pool->capacity) {
+        uint32_t capacity = pool->capacity ? pool->capacity * 2 : 16;
+        void** grown = (void**)mem_calloc(capacity, sizeof(void*), MEM_CAT_EVAL);
+        if (!grown) return -1;
+        if (pool->entries) {
+            memcpy(grown, pool->entries, (size_t)pool->count * sizeof(void*));
+            mem_free(pool->entries);
+        }
+        pool->entries = grown;
+        pool->capacity = capacity;
+    }
+    pool->entries[pool->count] = body;
+    return (int32_t)pool->count++;
+}
+
+extern "C" Item lambda_unit_const_at(uint32_t unit_id, uint32_t index) {
+    // The literal load emitted by both guest lowerings. Bounds-checked: a unit
+    // whose pool failed to register must fault visibly rather than cast an
+    // adjacent word to String*.
+    LambdaConstPool* pool = lambda_const_pool_at(context, unit_id);
+    if (!pool || index >= pool->count) {
+        log_error("const-pool: literal %u out of range for unit %u", index, unit_id);
+        return ItemNull;
+    }
+    return (Item){.item = s2it((String*)pool->entries[index])};
+}
+
+static void lambda_const_pool_registry_destroy(EvalContext* owner) {
+    if (!owner || !owner->const_pools) return;
+    for (uint32_t i = 0; i < owner->const_pool_count; i++) {
+        LambdaConstPool* pool = owner->const_pools[i];
+        if (!pool) continue;
+        for (uint32_t j = 0; j < pool->count; j++) mem_free(pool->entries[j]);
+        mem_free(pool->entries);
+        mem_free(pool);
+    }
+    mem_free(owner->const_pools);
+    owner->const_pools = NULL;
+    owner->const_pool_capacity = 0;
+    owner->const_pool_count = 0;
 }
 
 extern "C" void lambda_module_state_reset(void) {
@@ -766,6 +806,10 @@ extern "C" void lambda_module_state_reset(void) {
 
 extern "C" void lambda_module_state_destroy(void) {
     EvalContext* owner = context;
+    // Pools outlive every module slab in this context -- generated code from a
+    // retired slab can still be reachable -- so they are released here, with
+    // the context's compiled code, not at slab release.
+    lambda_const_pool_registry_destroy(owner);
     if (!owner || !owner->module_states) return;
     lambda_module_state_release_from(0);
     mem_free(owner->module_states);

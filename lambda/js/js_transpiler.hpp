@@ -117,6 +117,12 @@ struct JsTranspiler : JsScript {
     
     // Runtime integration
     Runtime* runtime;               // builder's borrowed runtime
+
+    // RC-J7v2: this unit's literal pool, acquired lazily at the first interned
+    // literal. The pool is context-owned, not transpiler-owned: a unit's code
+    // outlives its builder in preamble and hot-reload batch mode.
+    uint32_t const_unit_id;
+    LambdaConstPool* const_pool;
 };
 
 // JavaScript type mapping functions

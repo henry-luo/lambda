@@ -194,23 +194,6 @@ static bool js_compiled_name_table_inherits_preamble(
 int js_mir_runtime_link_pass(void* opaque) {
     const JsMirTranspiler* mt = (const JsMirTranspiler*)opaque;
     if (!context || !context->active_module_state) return false;
-    // RC-J2: publish this unit's shared const pool into the active module state
-    // so `lambda_active_module_const_at` can resolve a literal index. Bound here
-    // because lowering has finished, so the pool can no longer grow and its
-    // backing array cannot move under a previously published pointer.
-    if (mt->tp && mt->tp->const_list &&
-            !lambda_module_state_adopt_consts(
-                context->active_module_state->module_id,
-                mt->tp->const_list->data,
-                (uint32_t)mt->tp->const_list->length)) {
-        log_error("js-mir: failed to bind the unit const pool");
-        return false;
-    }
-    if (mt->tp && mt->tp->const_list) {
-        // Ownership moved to the module state; empty the builder list so the
-        // transpiler's teardown cannot free entries the state now holds.
-        mt->tp->const_list->length = 0;
-    }
     bool inherits_preamble = js_compiled_name_table_inherits_preamble(mt);
     const PropertyKeySpec* inherited_specs = inherits_preamble
         ? g_jm_preamble_in->module_property_specs : NULL;

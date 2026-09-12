@@ -93,14 +93,18 @@ typedef struct LambdaModuleState {
     uint32_t var_count;      // live module slots visible to generated code
     uint32_t var_capacity;   // root-range/storage capacity; may exceed var_count in REPL
     uint32_t property_key_count;
-    uint32_t const_count;
     uint32_t module_id;
     bool vars_registered;
-    // JS units compile from an ephemeral transpiler, so their const pool is
-    // copied into state-owned storage and released with the state (RC-J7).
-    // Lambda keeps its Script-owned pool and leaves this false.
-    bool consts_owned;
 } LambdaModuleState;
+
+// RC-J7v2: a compilation unit's shared literal pool. Keyed by unit id rather
+// than by the active module state because an `eval`'d unit compiles separately
+// while sharing its caller's environment: one state, two index namespaces.
+typedef struct LambdaConstPool {
+    void** entries;          // mem-owned String* bodies
+    uint32_t count;
+    uint32_t capacity;
+} LambdaConstPool;
 
 // Runtime-facing scalar materializers are needed by native input adapters as
 // well as generated code. Keep DateTime construction here because static input
@@ -147,6 +151,13 @@ typedef struct EvalContext : Context {
     // JSCU27: one directory for context-owned subsystem state. Reading a
     // capsule is an indexed load; the lifecycle contract travels with it.
     ContextCapsuleDirectory capsule_directory;
+    // RC-J7v2: literal pools indexed by compilation-unit id. Held here rather
+    // than on the module slab because units outnumber slabs -- direct `eval`
+    // compiles a fresh unit into its caller's slab -- and because every unit's
+    // generated code dies with this context, which is when the pools are freed.
+    LambdaConstPool** const_pools;
+    uint32_t const_pool_capacity;
+    uint32_t const_pool_count;
 } EvalContext;
 
 // Unicode-enhanced comparison functions are declared in utf_string.h

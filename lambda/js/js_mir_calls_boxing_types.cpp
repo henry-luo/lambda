@@ -608,25 +608,32 @@ MIR_reg_t jm_string_literal_chars(JsMirTranspiler* mt, const char* str, int len)
     return chars;
 }
 
-// RC-J2/RC6: intern a literal's bytes into the unit's shared const pool, the
-// same `Script::const_list` Lambda uses, and return its index. The String is
-// built once in the unit's pool; equal literals share one entry. This spends no
-// NameId -- the pool is not the identity space, so the reason literals were kept
-// out of NameIds does not apply here.
+// RC-J2/RC6: intern a literal's bytes into this compilation unit's const pool
+// and return its index. The String is built once per unit; equal literals share
+// one entry. This spends no NameId -- the pool is not the identity space, so the
+// reason literals were kept out of NameIds does not apply here.
 static int jm_intern_string_const(JsMirTranspiler* mt, const char* str, int len) {
-    if (!mt || !mt->tp || !mt->tp->const_list || !str || len < 0) return -1;
-    ArrayList* pool = mt->tp->const_list;
-    for (int i = 0; i < pool->length; i++) {
-        String* existing = (String*)arraylist_get(pool, i);
+    if (!mt || !mt->tp || !str || len < 0) return -1;
+    JsTranspiler* tp = mt->tp;
+    if (!tp->const_pool) {
+        // RC-J7v2: one pool per compilation unit, keyed by unit id rather than
+        // by the active module slab -- a direct `eval` compiles its own unit
+        // into its caller's slab, so a slab-keyed pool serves two index spaces.
+        tp->const_pool = lambda_const_pool_acquire(&tp->const_unit_id);
+        if (!tp->const_pool) return -1;
+    }
+    LambdaConstPool* pool = tp->const_pool;
+    for (uint32_t i = 0; i < pool->count; i++) {
+        String* existing = (String*)pool->entries[i];
         if (existing && (int)existing->len == len &&
                 memcmp(existing->chars, str, (size_t)len) == 0) {
-            return i;
+            return (int)i;
         }
     }
-    // RC-J7: mem-owned, not pool_calloc'd. The transpiler pool is destroyed at
+    // Mem-owned, not pool_calloc'd: the transpiler pool is destroyed at
     // js_transpiler_destroy while preamble harnesses and deferred hot-reload
-    // contexts can still run this code; the module state adopts these bodies
-    // at link time and releases them with itself.
+    // contexts can still run this code. The context frees these bodies with
+    // the pool registry, after every unit's code is gone.
     String* owned = (String*)mem_calloc(1, sizeof(String) + len + 1,
         MEM_CAT_JS_RUNTIME);
     if (!owned) return -1;
@@ -635,8 +642,12 @@ static int jm_intern_string_const(JsMirTranspiler* mt, const char* str, int len)
     owned->is_ascii = str_is_ascii(str, len) ? 1 : 0;
     memcpy(owned->chars, str, (size_t)len);
     owned->chars[len] = '\0';
-    if (!arraylist_append(pool, owned)) return -1;
-    return pool->length - 1;
+    int32_t index = lambda_const_pool_append(pool, owned);
+    if (index < 0) {
+        mem_free(owned);
+        return -1;
+    }
+    return (int)index;
 }
 
 MIR_reg_t jm_box_string_literal(JsMirTranspiler* mt, const char* str, int len) {
@@ -645,7 +656,8 @@ MIR_reg_t jm_box_string_literal(JsMirTranspiler* mt, const char* str, int len) {
     // existing String instead of rebuilding one from MIR-embedded bytes.
     int index = jm_intern_string_const(mt, str, len);
     if (index >= 0) {
-        return jm_call_1(mt, "lambda_active_module_const_at", MIR_T_I64,
+        return jm_call_2(mt, "lambda_unit_const_at", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mt->tp->const_unit_id),
             MIR_T_I64, MIR_new_int_op(mt->ctx, index));
     }
     // Fallback: a unit without a pool keeps the original per-evaluation build.

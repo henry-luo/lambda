@@ -25,7 +25,7 @@ css
 true
 json
 true
-auto-error
-auto-error
+true
+true
 true
 HLJS_TESTS_DONE

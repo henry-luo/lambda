@@ -2518,12 +2518,13 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES,
       JIT_EXCEPTION_PRESERVES,
       JIT_ARG_EFFECT(0, JIT_ARG_BORROWED)}},
-    {"lambda_active_module_const_at", FPTR(lambda_active_module_const_at),
+    {"lambda_unit_const_at", FPTR(lambda_unit_const_at),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES,
       JIT_EXCEPTION_PRESERVES,
-      JIT_ARG_EFFECT(0, JIT_ARG_BORROWED)}},
+      JIT_ARG_EFFECT(0, JIT_ARG_BORROWED) | JIT_ARG_EFFECT(1, JIT_ARG_BORROWED)}},
     {"js_register_global_var_module_binding", FPTR(js_register_global_var_module_binding), JIT_IMPORT_VOID_PRESERVES},
     {"js_init_module_vars_undefined_bulk", FPTR(js_init_module_vars_undefined_bulk), JIT_IMPORT_VOID_PRESERVES},
     // v12: Language features
@@ -3465,7 +3466,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "js_set_direct_new_target", "js_set_function_source",
         "lambda_active_module_var_store",
         "lambda_active_module_var_at",
-        "lambda_active_module_const_at",
+        "lambda_unit_const_at",
         "js_with_save_depth", "js_with_restore_depth",
         // LR07-7 root-honesty probe. Reads one machine word, compares it
         // against the GC zone (`gc_is_managed`, a pure range query) and may
