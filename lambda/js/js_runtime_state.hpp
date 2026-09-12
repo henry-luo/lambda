@@ -1140,11 +1140,6 @@ extern "C" bool js_promise_initial_unhandled_rejections_strict(void);
 
 #define js_runtime_state (*js_active_runtime_state)
 
-// The caller's `with`-scope depth is a per-call dispatch input. The state is
-// owner-local, so dispatch keeps the old direct-load cost without a call,
-// lock, atomic, or shared-cache probe.
-#define js_with_stack_state (js_runtime_state.with_scope.stack)
-
 #define js_input (js_runtime_state.input)
 #define js_strict_mode (js_runtime_state.strict_mode)
 #define js_intrinsic_state (*js_runtime_state.intrinsics)
