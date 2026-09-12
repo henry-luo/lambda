@@ -261,14 +261,13 @@ struct JsWithFrame {
     JsWithFrame* parent = NULL;
 };
 
-struct JsWithScopeState {
-    JsWithFrame* head = NULL;     // innermost frame; NULL = no with-scope in scope
-    // The memo is two semantic values whose root ownership is a growable
-    // exact-root vector; a scope object itself lives in a root slot its pusher
-    // owns -- a generated function's `with` frame suffix, or a native RootSpan.
-    RootVector last_binding_values = {};
-    bool last_binding_valid = false;
-};
+// JSCU44: a frame's storage is its scopes followed by the two binding-memo
+// cells, so one definition fixes the slot count for every pusher -- the
+// generated `with` suffix, a native RootSpan, and a captured chain's env.
+enum { JS_WITH_MEMO_SLOTS = 2 };
+static inline int js_with_frame_slots(int scope_count) {
+    return scope_count + JS_WITH_MEMO_SLOTS;
+}
 
 // Generated closures retain only their MIR context and source buffer. Names
 // and observable strings are materialized through the owning module NameId
@@ -1039,7 +1038,12 @@ struct JsRuntimeState {
     // The sole generation-checked native-resource registry for this context.
     // Timer and Node/Jube records use distinct lifecycle-owner keys within it.
     RuntimeResourceTable resources = {};
-    JsWithScopeState with_scope = {};
+    // JSCU44: the `with` chain is two facts, not a subsystem. The head is the
+    // innermost frame (NULL = no with-scope in scope); the flag says whether the
+    // head frame's trailing memo cells hold a live binding. Scope objects live
+    // in root slots their pushers own.
+    JsWithFrame* with_head = NULL;
+    bool with_memo_valid = false;
     JsCodeStore code_store = {};
     // Definition-level MIR code records are shared by closures and method
     // wrappers while their functions remain live. The table is weak storage;

@@ -14430,12 +14430,12 @@ JS_FORWARD_ITEM(js_get_global_object, (), js_get_global_this, ())
 // ============================================================================
 // With-scope stack for 'with' statement support
 // ============================================================================
-#define js_with_head (js_runtime_state.with_scope.head)
+#define js_with_head (js_runtime_state.with_head)
 #define js_with_stack_depth (js_with_head ? js_with_head->base_depth + js_with_head->count : 0)
 #define js_with_stack_at(i) js_with_scope_at((int)(i))
-#define js_last_with_binding_scope (*root_vector_at(&js_runtime_state.with_scope.last_binding_values, 0))
-#define js_last_with_binding_key (*root_vector_at(&js_runtime_state.with_scope.last_binding_values, 1))
-#define js_last_with_binding_valid (js_runtime_state.with_scope.last_binding_valid)
+#define js_last_with_binding_scope (js_with_head->base[js_with_head->count])
+#define js_last_with_binding_key (js_with_head->base[js_with_head->count + 1])
+#define js_last_with_binding_valid (js_runtime_state.with_memo_valid)
 
 // Absolute index into the chain, innermost first. One frame per open `with`
 // plus at most one borrowed frame for the inherited chain, so this walk is
@@ -14456,24 +14456,16 @@ static Item js_with_scope_at(int index) {
 // range after the scope closes, and must not retain a dead scope object.
 static void js_with_frame_drop(JsWithFrame* frame) {
     if (!frame || !frame->owns_record) return;
-    if (frame->base) frame->base[0] = ItemNull;
+    if (frame->base) {
+        int slots = js_with_frame_slots(frame->count);
+        for (int i = 0; i < slots; i++) frame->base[i] = ItemNull;
+    }
     mem_free(frame);
 }
 
-// The memo is two semantic values whose root ownership is the same growable
-// exact-root mechanism as the scope slots; recreate its fixed slots after a
-// heap replacement before exposing either reference.
-static bool js_with_ensure_roots(void) {
-    RootVector* memo = &js_runtime_state.with_scope.last_binding_values;
-    if (root_vector_count(memo) == 2) return true;
-    root_vector_clear(memo);
-    js_last_with_binding_valid = false;
-    if (!root_vector_push(memo, ItemNull) || !root_vector_push(memo, ItemNull)) {
-        root_vector_clear(memo);
-        log_error("js-with: could not grow binding memo");
-        return false;
-    }
-    return true;
+// The memo lives in the head frame, so it is available exactly when a chain is.
+static inline bool js_with_memo_ready(void) {
+    return js_with_head != NULL;
 }
 
 static Item js_throw_binding_reference_error(Item key);
@@ -14498,10 +14490,9 @@ static bool js_with_scope_is_object(Item value) {
 // where the chain should already be empty, and at a fault landing where the
 // recovery checkpoint has rewound past those frames entirely.
 extern "C" void js_with_chain_reset(void) {
-    JsWithScopeState* with = &js_runtime_state.with_scope;
-    while (with->head) {
-        JsWithFrame* frame = with->head;
-        with->head = frame->parent;
+    while (js_with_head) {
+        JsWithFrame* frame = js_with_head;
+        js_with_head = frame->parent;
         if (frame->owns_record) mem_free(frame);
     }
     js_last_with_binding_valid = false;
@@ -14509,14 +14500,13 @@ extern "C" void js_with_chain_reset(void) {
 
 extern "C" void js_with_batch_reset(void) {
     js_with_chain_reset();
-    root_vector_clear(&js_runtime_state.with_scope.last_binding_values);
 }
 
 // `slot` is a root cell owned by the caller and live for the scope's whole
 // extent. Returns the *coerced* scope, not the operand: `with (5)` wraps once,
 // and a re-push on resume must restore that wrapper rather than make another.
 extern "C" Item js_with_push_at(Item* slot, Item obj) {
-    if (!slot || !js_with_ensure_roots()) return js_status_ok();
+    if (!slot) return js_status_ok();
     TypeId type = get_type_id(obj);
     if (type == LMD_TYPE_NULL || obj.item == ITEM_JS_UNDEFINED) {
         return js_throw_type_error("Cannot convert undefined or null to object");
@@ -14567,7 +14557,7 @@ extern "C" Item* js_with_capture_stack(int* out_depth) {
     int depth = js_with_stack_depth;
     if (out_depth) *out_depth = depth;
     if (depth <= 0) return NULL;
-    Item* captured = js_alloc_env(depth);
+    Item* captured = js_alloc_env(js_with_frame_slots(depth));
     // async cleanup can create handlers after the input pool stops accepting
     // allocations; a missing capture is safer than dereferencing null storage.
     if (!captured) {
@@ -14583,17 +14573,16 @@ extern "C" Item* js_with_capture_stack(int* out_depth) {
 // while the callee runs, so no copy is needed in either direction.
 extern "C" JsWithFrame* js_with_activation_enter(Item* captured, int depth,
         JsWithFrame* storage) {
-    JsWithScopeState* with = &js_runtime_state.with_scope;
-    JsWithFrame* previous = with->head;
+    JsWithFrame* previous = js_with_head;
     if (captured && depth > 0 && storage) {
         storage->base = captured;
         storage->count = depth;
         storage->base_depth = 0;
         storage->owns_record = false;
         storage->parent = NULL;
-        with->head = storage;
+        js_with_head = storage;
     } else {
-        with->head = NULL;
+        js_with_head = NULL;
     }
     js_last_with_binding_valid = false;
     return previous;
@@ -14602,13 +14591,12 @@ extern "C" JsWithFrame* js_with_activation_enter(Item* captured, int depth,
 // An early return out of a compiled `with` body bypasses its generated pop, so
 // the callee's own frames are released here rather than trusted to unwind.
 extern "C" void js_with_activation_leave(JsWithFrame* saved_head) {
-    JsWithScopeState* with = &js_runtime_state.with_scope;
-    while (with->head && with->head != saved_head && with->head->owns_record) {
-        JsWithFrame* frame = with->head;
-        with->head = frame->parent;
+    while (js_with_head && js_with_head != saved_head && js_with_head->owns_record) {
+        JsWithFrame* frame = js_with_head;
+        js_with_head = frame->parent;
         js_with_frame_drop(frame);
     }
-    with->head = saved_head;
+    js_with_head = saved_head;
     js_last_with_binding_valid = false;
 }
 
@@ -14617,9 +14605,6 @@ JS_FORWARD_EXPRESSION(int64_t, js_with_depth_active, (void), js_with_stack_depth
 // Check with-scope stack for a property (most recent scope first)
 static Item js_with_scope_lookup(Item key, bool* found, bool strict_get) {
     *found = false;
-    if (!js_with_ensure_roots()) {
-        return js_throw_range_error("Could not grow with binding memo");
-    }
     for (int i = js_with_stack_depth - 1; i >= 0; i--) {
         Item scope_obj = js_with_stack_at(i);
         if (js_with_scope_is_object(scope_obj)) {
@@ -14658,7 +14643,7 @@ static Item js_with_scope_lookup(Item key, bool* found, bool strict_get) {
                         : make_js_undefined();
                 }
                 JS_ASSIGN_OR_RETURN(value, js_get_key_default(scope_obj, key));
-                if (js_with_ensure_roots()) {
+                if (js_with_memo_ready()) {
                     js_last_with_binding_scope = scope_obj;
                     js_last_with_binding_key = key;
                     js_last_with_binding_valid = true;
@@ -14685,7 +14670,7 @@ extern "C" Item js_get_last_with_binding_base_or_undefined(Item key) {
     // plain identifier calls inside `with` keep the Object Environment Record as
     // the call reference base; reuse the exact binding found while reading the
     // callee so argument side effects cannot change the chosen `this`.
-    if (!js_with_ensure_roots() || !js_last_with_binding_valid ||
+    if (!js_with_memo_ready() || !js_last_with_binding_valid ||
             !js_with_binding_key_same(js_last_with_binding_key, key)) {
         return make_js_undefined();
     }
@@ -14738,10 +14723,6 @@ extern "C" Item js_capture_with_binding_from(Item key, int64_t minimum_depth) {
     js_last_with_binding_valid = false;
     JS_ASSIGN_OR_RETURN(scope_obj, js_with_resolve_scope(key, minimum_depth));
     if (scope_obj.item == ItemNull.item) return (Item){.item = b2it(false)};
-    if (!js_with_ensure_roots()) {
-        return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
-                                        "with binding root allocation failed");
-    }
     js_last_with_binding_scope = scope_obj;
     js_last_with_binding_key = key;
     js_last_with_binding_valid = true;
@@ -14761,7 +14742,7 @@ static Item js_set_with_binding_resolved(Item scope_obj, Item key, Item value,
 }
 
 extern "C" Item js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict) {
-    if (!js_with_ensure_roots() || !js_last_with_binding_valid ||
+    if (!js_with_memo_ready() || !js_last_with_binding_valid ||
             !js_with_binding_key_same(js_last_with_binding_key, key)) {
         return (Item){.item = b2it(false)};
     }
@@ -14999,9 +14980,6 @@ static Item js_set_global_property_after_with_lookup_impl(Item key, Item value,
 static Item js_set_global_property_impl(Item key, Item value, bool strict) {
     // Check with-scope stack first — assignments inside 'with' resolve to scope object
     if (js_with_stack_depth > 0) {
-        if (!js_with_ensure_roots()) {
-            return js_throw_range_error("Could not grow with binding memo");
-        }
         for (int i = js_with_stack_depth - 1; i >= 0; i--) {
             Item scope_obj = js_with_stack_at(i);
             if (js_with_scope_is_object(scope_obj)) {

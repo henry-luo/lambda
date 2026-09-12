@@ -3694,10 +3694,14 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             // suffix, reserved with the frame. A runtime helper cannot bump the
             // watermark mid-body: the frame's own publication store would
             // clobber the slot and the matching pop would rewind below it.
-            if (mt->with_depth + 1 > mt->with_frame_slot_count) {
-                mt->with_frame_slot_count = mt->with_depth + 1;
+            // Each level owns js_with_frame_slots(1) cells: the scope plus the
+            // two binding-memo cells the head frame writes.
+            int with_level_slots = js_with_frame_slots(1);
+            int with_base_slot = mt->with_depth * with_level_slots;
+            if (with_base_slot + with_level_slots > mt->with_frame_slot_count) {
+                mt->with_frame_slot_count = with_base_slot + with_level_slots;
             }
-            MIR_reg_t slot_reg = jm_emit_with_slot_addr(mt, mt->with_depth);
+            MIR_reg_t slot_reg = jm_emit_with_slot_addr(mt, with_base_slot);
             MIR_reg_t scope_reg = jm_callr_2(mt, "js_with_push_at", MIR_T_I64,
                 slot_reg, obj_reg);
             jm_emit_error_lane_propagate_check(mt);
@@ -3708,7 +3712,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             if (with_scope) {
                 with_scope->object_reg = scope_reg;
                 with_scope->spill_slot = -1;
-                with_scope->frame_slot = mt->with_depth;
+                with_scope->frame_slot = with_base_slot;
             }
             mt->with_depth++;
             // transpile body

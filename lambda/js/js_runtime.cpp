@@ -278,7 +278,7 @@ static Item js_invoke_mir_state(void* func_ptr, JsSuspendedActivation* activatio
     JsWithFrame* saved_head = js_with_activation_enter(activation->with_env,
         activation->with_depth, &inherited);
     Item result = ((MirStateFn)func_ptr)((Context*)context, env, input, state);
-    if (js_runtime_state.with_scope.head) {
+    if (js_runtime_state.with_head) {
         // the capture allocates, so the machine's result is rooted across it
         RootFrame roots(1);
         Rooted<Item> result_root(roots, result);
@@ -14036,7 +14036,7 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     // relink only when neither side has a with-scope at all.
     JsWithActivation with_activation;
     const JsWithData* callee_with = js_fn_with(fn);
-    if (js_runtime_state.with_scope.head || callee_with->depth > 0 ||
+    if (js_runtime_state.with_head || callee_with->depth > 0 ||
             (fn->flags & JS_FUNC_FLAG_USES_WITH) != 0) {
         with_activation.enter((Item*)callee_with->env, callee_with->depth);
     }
@@ -32232,7 +32232,7 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox, Item options) {
     // The sandbox is this activation's only scope; the eval'd code's own frames
     // are released with it, including any a compiled `with` body left open.
     // JSCU44: the slot is declared first so it outlives the activation guard.
-    RootSpan sandbox_slot(1);
+    RootSpan sandbox_slot((size_t)js_with_frame_slots(1));
     JsWithActivation with_activation;
     with_activation.enter(NULL, 0);
     js_with_push_at(sandbox_slot.items(), sandbox);
@@ -32363,7 +32363,7 @@ static Item js_vm_compileFunction(Item code, Item params, Item options) {
     Item previous_proto = ItemNull;
     Item prev_global = ItemNull;
     Item prev_this = ItemNull;
-    RootSpan parsing_slot(1);
+    RootSpan parsing_slot((size_t)js_with_frame_slots(1));
     JsWithActivation with_activation;
     JsVmTemporaryBindingJournal vm_bindings;
     if (use_parsing_context) {

@@ -4858,7 +4858,7 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
         // JSCU44: the scope lives in a root cell this activation owns, for the
         // exact extent of the block. Declared after `roots` so it is released
         // first -- the chain is unwound before either.
-        RootSpan scope_slot(1);
+        RootSpan scope_slot((size_t)js_with_frame_slots(1));
         JsInterpCompletion object = js_interp_eval(frame, with->object);
         if (object.kind != JS_INTERP_NORMAL) return object;
         object_root.set(object.value);
