@@ -14,8 +14,10 @@ import argparse
 import datetime
 import hashlib
 import json
+import math
 import os
 import platform
+import random
 import signal
 import subprocess
 import sys
@@ -36,6 +38,8 @@ from run_benchmarks import (  # noqa: E402
 
 
 TIMING_LINE = "__TIMING__:"
+DEFAULT_BOOTSTRAP_RESAMPLES = 10000
+DEFAULT_BOOTSTRAP_SEED = 260026
 
 
 def sha256_file(path):
@@ -158,8 +162,42 @@ def summarize_side(samples):
     }
 
 
+def paired_ratio_bootstrap(valid_pairs, resamples, seed):
+    """One-sided 95% paired-bootstrap bound for the ratio of medians."""
+    observations = [
+        (pair["control"]["exec_ms"], pair["candidate"]["exec_ms"])
+        for pair in valid_pairs
+    ]
+    if not observations:
+        return None
+    rng = random.Random(seed)
+    ratios = []
+    count = len(observations)
+    for _ in range(resamples):
+        sampled = [observations[rng.randrange(count)] for _ in range(count)]
+        control_median = median([pair[0] for pair in sampled])
+        candidate_median = median([pair[1] for pair in sampled])
+        if control_median and candidate_median is not None:
+            ratios.append(candidate_median / control_median)
+    if not ratios:
+        return None
+    ratios.sort()
+    upper_index = max(0, math.ceil(0.95 * len(ratios)) - 1)
+    return {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": seed,
+        "resamples_requested": resamples,
+        "resamples_valid": len(ratios),
+        "upper_bound": ratios[upper_index],
+    }
+
+
 def compare_row(control, candidate, control_script, candidate_script, pairs, timeout_s,
-                language="lambda", tier="jit", expected_stdout_text=None):
+                language="lambda", tier="jit", expected_stdout_text=None,
+                bootstrap_resamples=DEFAULT_BOOTSTRAP_RESAMPLES,
+                bootstrap_seed=DEFAULT_BOOTSTRAP_SEED):
     control_samples = []
     candidate_samples = []
     pair_records = []
@@ -210,6 +248,8 @@ def compare_row(control, candidate, control_script, candidate_script, pairs, tim
         pair["candidate"]["exec_ms"] < pair["control"]["exec_ms"]
         for pair in valid_pairs
     )
+    uncertainty = paired_ratio_bootstrap(valid_pairs, bootstrap_resamples,
+                                         bootstrap_seed)
     return {
         "control_script": control_script,
         "candidate_script": candidate_script,
@@ -219,6 +259,7 @@ def compare_row(control, candidate, control_script, candidate_script, pairs, tim
         "control": control_summary,
         "candidate": candidate_summary,
         "candidate_over_control_median_ratio": ratio,
+        "candidate_over_control_paired_uncertainty": uncertainty,
         "candidate_wins": candidate_wins,
         "stdout_equal_all": bool(pair_records) and all(pair["stdout_equal"] for pair in pair_records),
         "expected_stdout_matches_all": (
@@ -321,6 +362,11 @@ def main():
                         metavar=("CONTROL_SCRIPT", "CANDIDATE_SCRIPT"),
                         help="compare two explicit source files; may be given more than once")
     parser.add_argument("-p", "--pairs", type=int, default=41, help="alternating pairs per row")
+    parser.add_argument("--bootstrap-resamples", type=int,
+                        default=DEFAULT_BOOTSTRAP_RESAMPLES,
+                        help="paired bootstrap resamples per row (default: 10000)")
+    parser.add_argument("--bootstrap-seed", type=int, default=DEFAULT_BOOTSTRAP_SEED,
+                        help="fixed paired bootstrap seed (default: 260026)")
     parser.add_argument("-t", "--timeout", type=int, default=120, help="timeout per process")
     parser.add_argument(
         "-o", "--output", default=None,
@@ -329,6 +375,8 @@ def main():
     args = parser.parse_args()
     if args.pairs < 1:
         parser.error("--pairs must be positive")
+    if args.bootstrap_resamples < 1:
+        parser.error("--bootstrap-resamples must be positive")
 
     control = os.path.abspath(args.control)
     candidate = os.path.abspath(args.candidate)
@@ -384,7 +432,7 @@ def main():
     if explicit_rows:
         variants = sorted({row["variant"] for row in explicit_rows})
     metadata = {
-        "schema_version": 2,
+        "schema_version": 3,
         "started_at": datetime.datetime.now().isoformat(timespec="seconds"),
         "platform": f"{platform.system()} {platform.machine()}",
         "control": {"path": control, "sha256": sha256_file(control)},
@@ -397,6 +445,13 @@ def main():
         "language": args.language,
         "tier": args.tier,
         "pairs": args.pairs,
+        "paired_uncertainty": {
+            "method": "paired_bootstrap_ratio_of_medians",
+            "confidence": 0.95,
+            "tail": "one_sided_upper",
+            "resamples": args.bootstrap_resamples,
+            "seed": args.bootstrap_seed,
+        },
         "timeout_s": args.timeout,
         "command": " ".join(sys.argv),
     }
@@ -448,7 +503,8 @@ def main():
                   end="", flush=True)
             row.update(compare_row(control, candidate, control_script, candidate_script,
                                    args.pairs, args.timeout, args.language, args.tier,
-                                   spec["expected_stdout_text"]))
+                                   spec["expected_stdout_text"],
+                                   args.bootstrap_resamples, args.bootstrap_seed))
             row["status"] = "ok" if row["pairs_valid"] == args.pairs else "partial_ok"
             if row["expected_stdout_matches_all"] is False:
                 row["status"] = "wrong_output"
@@ -494,7 +550,8 @@ def main():
             row["control_source"] = source_provenance(script)
             row["candidate_source"] = source_provenance(script)
             row.update(compare_row(control, candidate, script, script, args.pairs,
-                                   args.timeout, args.language, args.tier))
+                                   args.timeout, args.language, args.tier, None,
+                                   args.bootstrap_resamples, args.bootstrap_seed))
             row["status"] = "ok" if row["pairs_valid"] == args.pairs else "partial_ok"
             artifact["rows"].append(row)
             ratio = row["candidate_over_control_median_ratio"]

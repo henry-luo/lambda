@@ -775,15 +775,132 @@ implementation of members the catalog already has. Removed:
   `previous_element_sibling`), which made the module's four duplicate
   element-skipping walkers dead. The compiler caught those, as intended.
 
-**`children` was reverted: converting it regresses page load.** Routing
-`radiant_dom_member_children` through the catalog row made
-`bootstrap-5-kitchen-sink` exit -1 with peak RSS 283 MB against a 160 MB limit.
-Isolated properly rather than guessed: with the change stashed the suite is
-105/105, with it 104/1; a bisect then showed the four traversal conversions are
-green and `children` alone is the cause. The page loads fine under `lambda.exe
-view` standalone, so it needs the full-suite harness to show. **Root cause not
-found**, so the conversion stays reverted (rule 1: no workaround) and this is
-recorded as DSO11 rather than patched around.
+**`children` is converted too — an earlier entry here claimed it regressed page
+load, and that claim was wrong.** The record is corrected rather than quietly
+dropped, because the mistake is instructive.
+
+What happened: routing `radiant_dom_member_children` through its catalog row was
+followed by `test_page_load_gtest` reporting `bootstrap-5-kitchen-sink` at
+104/105. Stashing the change gave 105/105; restoring it gave 104/105. That was
+treated as decisive and written up as a lifetime defect — **on one run of each
+configuration, of a suite that is known to flake under parallel load.** A
+"bisect" then appeared to pin it on `children`; that run simply happened to
+pass.
+
+What is actually true, measured afterwards:
+
+- the harness's exit code `-1` is `timed_out`, not a crash
+  (`result.exit_code = result.timed_out ? -1 : shell_result.exit_code`), against
+  a **15 s** budget;
+- the page takes **1.46 s** unconverted and **2.02 s** converted standalone, with
+  peak RSS differing by **0.15%** — nowhere near either limit;
+- the full page-load suite passes **105/105 three consecutive times** with the
+  conversion applied, and the full `make test-radiant-baseline` passes
+  **3622/0** with it applied.
+
+So the single failure was the suite timing out under whole-baseline load, which
+is exactly the documented flake mode for it. **One run per configuration is not
+evidence about a flaky test**, and a mechanism-sounding narrative ("something
+differs about wrapper or collection lifetime") should not have been written
+around an unreproduced result.
+
+All five member accessors are therefore routed through the catalog, and the
+module's four duplicate element-skipping walkers stay deleted.
+
+**DS2 slice — twelve tree/node operations became real rows.** Their catalog
+rows previously went *back through the ordinal executor*
+(`dom_fp_append_child` was literally `dom_op1(parent, APPEND_CHILD, child)`),
+so a Lambda caller paid a dispatch scan to reach a one-call bridge. Each now has
+a body in `dom.cpp` beside the bridge it calls, the executor's arm delegates to
+it, and the ten dead `dom_opN` round-trip bodies are deleted. The **Lambda door
+for these ops drops 5 hops → 3**.
+
+Two things this slice got wrong and had to fix, both worth recording:
+
+- **`dispatch` was nearly broken.** Its row body is *not* the executor's arm:
+  the arm is `dom_dispatch_event_bridge`, but the row also accepts a
+  **descriptor** — a bare string or `{type, bubbles, cancelable}` — and builds a
+  real event first (ESO109). Repointing the row at the bridge would have made
+  `dom.dispatch(n, "click")` stop working. The compiler surfaced it only
+  indirectly, as an unused-function warning on the helper the real body used.
+  **A row and its arm are not interchangeable by default** — the row can carry
+  contract the arm never had. Reverted; `dispatch` keeps its own body.
+- **`clone_node` drifted.** The extracted body derived the bridge's
+  "was `deep` supplied" flag from undefined-ness, where the ordinal path passed
+  `argc > 0` — always true for the row. Corrected to `true`, so
+  `dom.clone(n, null)` and `cloneNode()` cannot disagree about shallowness.
+
+**The JS door temporarily pays one extra hop** for these ops: the arm now calls
+the row, which unwraps the receiver a second time. That is the cost of making
+the row the implementation *before* the thunks are repointed at it; repointing
+them is the DS13 step, and it returns the hop with interest.
+
+**DS2 continued — no catalog row re-enters the executor any more.** The
+attribute cluster (`get_attribute`, `set_attribute`, `remove_attribute`,
+`attribute_names`), the selector cluster (`query_selector`,
+`query_selector_all`, `matches`, `closest`, `get_element_by_id`) and the
+character-data/geometry/scroll rows all own their bodies now, extracted
+**verbatim** from their arms rather than retyped. **`dom_opN` round-trips:
+18 → 0**, and all four `dom_op0..3` helpers are deleted. Executor:
+**837 → 701 lines**.
+
+**A live two-door defect fixed on the way: `remove`.** `dom_remove_bridge` is
+the dual-tree removal — it retires the renderer entry alongside the DOM node —
+and the module's dispatcher sent JS `el.remove()` straight to it. The executor's
+generic arm, which is where the *Lambda* row landed, unlinked the node by hand
+instead: `dom_pre_remove` then `parent->remove_child`, with no dual-tree
+retirement. So `dom.remove(n)` left behind renderer state that `el.remove()`
+cleaned up — the same class as DSO8 and DSO9, found because the round-trip
+removal forced both paths into view. Both doors now call `dom_remove_bridge`.
+
+This is the third time the exercise has surfaced a behavioural split rather than
+just a layering wart, which is the argument for finishing DS2 even where the
+line count does not move: **a row that reaches its operation through a
+dispatcher is a row whose contract nobody has checked against the other
+door's.**
+
+**DS2 continued — CharacterData and namespaced attributes.** Eleven more
+operations own their bodies: the six `dom_text_*` rows (`replace_data`,
+`insert_data`, `append_data`, `delete_data`, `substring_data`, `split_text`,
+which also gained catalog rows — they had none) and the five attribute rows
+(`get/set/remove_attribute_ns`, `has_attribute`, `toggle_attribute`).
+Executor **701 → 619 lines**; arms still holding an implementation **76 → 44**.
+
+The CharacterData rows are deliberately **not** `DOM_F_NEUTRAL`: no Lambda-only
+document has exercised them, and the catalog's own rule is that neutrality is a
+fact recorded per row, not a guess. They exist so the operation has one name and
+one body reachable without the executor; the `dom.*` face can follow once
+something proves them realm-free.
+
+**`toggle_attribute` needed care that a batch extraction would have destroyed.**
+The arm distinguishes *force absent* (`argc < 2` → toggle) from *force supplied
+and falsy* (→ remove). A fixed-arity row collapses those unless absence arrives
+as `undefined` and is tested for explicitly, which is what the row now does —
+the same padding convention the CharacterData rows use.
+
+**DS2 continued — SVG, text-control, popover and collection rows.** Eighteen
+more arms delegate to named bodies (`svg_create_{matrix,point,transform}`,
+`svg_{bbox,ctm,screen_ctm}`, `text_control_{select,caret_bounds,boundary_from_point}`,
+`boundary_from_point`, `{show,hide}_popover`, `elements_by_{tag,class}_name`,
+`insert_adjacent_{element,html}`). Where the arm's guard *is* part of the
+operation — SVG-ness, text-control-ness — the guard moved into the row behind
+`dom_op_svg_element` / `dom_op_text_control`.
+
+**Arms still holding an implementation: 76 → 17 (686 → 253 lines).**
+
+Two rows were deliberately left alone: `check_validity` and `reset_form` name
+the same idea as their arms, but the rows carry radiant's **form-only** engine
+bodies while the arms' bridges accept any control. They are two operations
+sharing a name, and merging them would silently widen or narrow one door.
+
+**A measurement error worth recording.** A `ui_automation` run reported 91
+failures and looked like a serious regression. It was a **scope mistake**:
+`test_ui_automation_gtest.exe` run bare executes all 499 UI tests across six
+manifest suites, while `test-radiant-baseline` runs only the 114-test
+`baseline` suite. The 91 belong to the `editor` suite, which other make targets
+gate. Verified pre-existing: `editable_drawing_raphael` scores **2/15 both with
+the changes and with them stashed**. Reading a bare test binary's totals as if
+they were the gate's is its own way of inventing a regression.
 
 Gates: build clean; **all five ES43 derivation oracles pass**
 (`dom_derive_{traversal,chardata,query,forms,urlencode}` — `traversal` walks
@@ -792,6 +909,81 @@ every link on every node comparing native body against derivation);
 increment, including DS4's, which exercises form-control reflection through the
 DOM UI integration and form layout suites).
 
+
+**DS2 complete — the executor holds no implementation.** The last seventeen
+arms became rows: `attach_shadow`, `compare_document_position`, `show_modal`,
+`focus`/`blur`, `set_selection_range`, `set_range_text`, `set_custom_validity`,
+`clone_node`, and the three `<select>` option-list overloads
+(`select_named_item`, `select_add`, `remove_node`).
+
+**Arms holding an implementation: 17 → 0. Executor 837 → 412 code lines (−51%).**
+
+Three findings, each bigger than the extraction that exposed it.
+
+*1. `compareDocumentPosition` was implemented twice.* The executor's 35-line
+tree comparison and the radiant module's private `radiant_dom_compare_document_position`
+were line-for-line the same walker (CLAUDE.md rule 13). One row now, and the
+module's branch is gone.
+
+*2. The module's `<select>` guard was pure ordering.* It tested three ordinals
+against a `<select>` receiver and then called the same default target the
+function ends with — it existed only to be evaluated *before* that door's own
+generic `REMOVE` branch. Moving the overload choice into `remove_node` deleted
+the guard, the generic branch, and the `REPLACE_WITH` branch with it. The
+module dispatcher is **6 branches → 3**, and two now-dead catalog `#define`s
+went with them. The ruling behind it: **when one name means two operations, the
+row decides which — never the door.** A guard that only fixes evaluation order
+in one door is a guard the other door does not have.
+
+*3. `replaceWith`/`after`/`before` sat below the executor's element guard.*
+They act on `node`, not `elem`, and DOM §4.2.7 puts ChildNode on text and
+comment nodes too — the module carried its own `REPLACE_WITH` branch precisely
+to reach them. Lifting the three arms above the guard makes them Node
+operations in both doors and removes the reason for the module's copy.
+
+**The variadic ruling (DS2's open question).** `append`, `prepend`,
+`replace_with`, `after`, `before` and the `scroll` family keep their
+`(Item* args, int argc)` shape and stay ordinal-only. `DOM_RAW` exists for
+targets a *second door* calls; no second door calls these, so rows for them
+would add catalog lines and buy no reachability. The invariant DS2 actually
+wanted holds either way: no arm carries a body.
+
+**A regression I introduced, found by the Lambda gate, and its root cause.**
+`test-lambda-baseline` failed `dom_api_core`: `dom.remove(comment)` left the
+comment in the tree. Bisected by stashing to HEAD — it passed there, so the
+fault was mine, from the earlier tick that routed `remove` through
+`dom_remove_bridge` to fix the two-door retirement gap.
+
+The root cause was **not** the routing. `dom_remove_backed_child` degrades
+gracefully for two of the three node kinds: an unbacked *text* child falls back
+to a plain DOM unlink, and an element with no Mark index does the same. The
+*comment* branch called `dom_comment_remove` unconditionally, and that function
+refuses when the comment has no Mark entry — so the removal returned false and
+the node stayed linked. A comment appended while its parent is still unbacked
+(exactly what `dom_api_core` does) has no Mark entry to retire.
+
+Fixed where the defect is: the comment branch now takes the same
+"not backed → finish the DOM unlink" path its two neighbours already had. While
+there, the third copy of the scan-parent's-Mark-children loop was folded into
+`dom_backed_index_of_element`, and `dom_text_is_backed_child` — a fourth copy —
+was deleted in favour of `dom_backed_node_index`. The old Lambda door never
+reached this function, so the defect was latent; routing both doors through one
+removal is what surfaced it. **The two-door collapse is worth doing partly
+because it exposes exactly this.**
+
+Gates: build clean, 0 warnings; **`make test-radiant-baseline` 3622 passed,
+0 failed**; **`make test-lambda-baseline` 5355/5362**, the 7 failures verified
+pre-existing at HEAD (4 `test_mir_emission`, 1 `test_mir_ratchet`,
+`proc_interp_var_writeback`, and the known-pristine `hljs_highlight`); all five
+ES43 oracles pass; `make lint` reports **zero findings in either touched file**.
+
+*Two flaky-run notes, since this doc already carries two lessons about them.*
+One baseline run showed 6 `DOM UI Integration` failures, all exit **137**
+(SIGKILL under the suite's parallel worker budget); the dom suite scores
+**118/118 standalone, twice**, and a re-run of the full baseline was clean.
+A later run showed 5 `test_page_load_gtest` failures; standalone **105/105**,
+re-run clean. Neither was investigated as a regression *before* being
+reproduced — which is the whole lesson from DSO11.
 
 ### Phase P1 — DS1 + DS2 + DS13: one catalog, no ordinals, no adapter thunks
 
@@ -1004,16 +1196,13 @@ code lines. Gate: **≤ 32 168** after P6; expected **≈ 31 448**. P1–P3 alon
   recorded rather than resolved. Whoever answers it should check what the core's
   `MAP` getter actually returns for those three, since the module's returns the
   attribute verbatim.
-- **DSO11 — `children` cannot yet be routed through its catalog row.** The two
-  implementations look equivalent by inspection — both end at
-  `dom_live_child_collection_bridge(elem, true)` — but substituting one for the
-  other crashes `bootstrap-5-kitchen-sink` under the page-load suite with a
-  ~120 MB RSS excursion. Something differs about wrapper or collection lifetime
-  between the module's direct call and the same call reached through the
-  catalog slot, and it is not visible in the source. Worth finding before DS1
-  routes more members through the catalog, because every such conversion has
-  this shape. The four traversal members converted cleanly, so it is specific to
-  the live collection, not to the catalog route itself.
+- **DSO11 — RETRACTED (was never a defect).** Recorded as a lifetime bug in
+  `children` on the strength of one run per configuration of a suite that flakes
+  under parallel load. Re-measured: 105/105 three times over and a full
+  3622/0 baseline with the conversion in place. The lesson worth keeping is the
+  method, not the symptom — a flaky gate needs repeated runs before attribution,
+  and the harness's `-1` means *timeout*, so a slow page under load looks
+  identical to a crash.
 - **DSO7 — PROMOTED to DS13.** It was listed here as optional on the grounds
   that the adapter thunk is generated and therefore free to maintain. That is
   true of maintenance and irrelevant to the budget: it is a real call on every
@@ -1027,13 +1216,13 @@ code lines. Gate: **≤ 32 168** after P6; expected **≈ 31 448**. P1–P3 alon
 | ID | Ruling | Status |
 |---|---|---|
 | DS1 | One `dom_api.def` row per operation, carrying `iface` and `js_name`; every surface is an expansion | PROPOSED |
-| DS2 | `JubeDomElementOperation` and `dom_element_operation_impl` are deleted | **PARTIAL** — the enum is now generated from `dom_element_ops.def`; deleting it needs DS13 |
+| DS2 | `JubeDomElementOperation` and `dom_element_operation_impl` are deleted | **PARTIAL** — enum generated; 0 rows re-enter the executor (18 round-trips → 0); executor 837 → 701 lines; deleting it outright still needs DS13 |
 | DS3 | The property protocol keeps only genuinely name-driven access | PROPOSED |
 | DS4 | One reflection table (`dom_reflect.def`) generating core and module | **PARTIAL** — module side landed; core merge blocked on DSO10 |
 | DS5 | A native body must earn its row; compositions are `DERIVED` | PROPOSED |
 | DS6 | Duplicate rows merge; a lint rule keeps them merged | PROPOSED |
 | DS7 | Radiant DOM state reaches Lambda as `velmt`/`varray`/`vmap`, never a snapshot | PROPOSED |
-| DS8 | `dom_core.cpp` never re-enters the property dispatcher by name | PROPOSED |
+| DS8 | `dom_core.cpp` never re-enters the property dispatcher by name | **LANDED** — 21 re-entries → 3, each suppressed on DSO8/DSO9 |
 | DS9 | The structural `radiant.velmt_*` aliases retire into the element face | PROPOSED |
 | DS10 | The `.ls` package migrates off the name-keyed doors | PROPOSED |
 | DS11 | Two lint rules gate the collapse | **`no-dom-row-name-dispatch` LANDED**; `no-hand-written-dom-bind` proposed |
@@ -1043,7 +1232,8 @@ code lines. Gate: **≤ 32 168** after P6; expected **≈ 31 448**. P1–P3 alon
 | DS15 | Document members are `iface: document` rows, not string re-lookups | PROPOSED |
 | DS16 | One residual resolver; the geometry commit is a row flag | PROPOSED |
 | DS17 | **Three hops, every path**: one dispatch, one body, one engine access | PROPOSED |
-| DSO1–DSO6, DSO8–DSO11 | Open, §9 | OPEN |
+| DSO1–DSO6, DSO8–DSO10 | Open, §9 | OPEN |
+| DSO11 | Retracted — attribution error, not a defect | CLOSED |
 | DSO7 | Promoted to DS13 | CLOSED |
 
 ### Hop counts, before and after

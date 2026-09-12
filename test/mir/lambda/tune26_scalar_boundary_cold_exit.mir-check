@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "description": "Tune26 / S4.1 / D2.4.1 / D5.2-D5.3: nullable declaration and assignment failures branch to terminal diagnostic blocks after the native arithmetic path instead of embedding may-GC calls inside it.",
+  "checks": [
+    {
+      "in_func": "_add_at_#",
+      "expect_seq": [
+        "call\tlambda_type_check_p, lambda_type_check",
+        "dadd",
+        "call\tlambda_type_check_p, lambda_type_check",
+        "call\tlambda_type_check_p, lambda_type_check"
+      ],
+      "count": {
+        "call\tlambda_type_check_p, lambda_type_check": 3
+      }
+    }
+  ]
+}

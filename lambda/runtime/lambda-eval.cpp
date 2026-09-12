@@ -6134,6 +6134,34 @@ static bool literal_type_pattern_item(Item type_item, Item* literal_item);
 static TypePattern* runtime_pattern_from_type(Type* type);
 
 // split(str, sep) - split string by separator, returns list of strings
+static List* split_string_list(void) {
+    List* result = list();
+    if (!result) return NULL;
+    result->is_content = 1;
+    LaneStorageDesc lane = {};
+    if (lambda_type_lane_storage_desc(&TYPE_STRING, &lane)) {
+        // Text split has a full inferred string[] result. Construct that
+        // pointer carrier directly; an open incompatible mutation widens it,
+        // while an explicit boundary may certify it (D3.3.3v3, D3.3.4).
+        array_native_lane_configure((Array*)result, &lane);
+    }
+    return result;
+}
+
+static void split_adopt_string_lane(List* result) {
+    if (!result || array_has_native_lane((Array*)result)) return;
+    for (int64_t index = 0; index < result->length; index++) {
+        if (get_type_id(result->items[index]) != LMD_TYPE_STRING) return;
+    }
+    LaneStorageDesc lane = {};
+    if (!lambda_type_lane_storage_desc(&TYPE_STRING, &lane)) return;
+    array_native_lane_configure((Array*)result, &lane);
+    for (int64_t index = 0; index < result->length; index++) {
+        Item value = result->items[index];
+        if (!array_native_lane_store((Array*)result, index, value)) return;
+    }
+}
+
 Item fn_split(Item str_item, Item sep_item) {
     // every split operand participates in dispatch, so no error may fall through to null or whitespace handling
     GUARD_ERROR2(str_item, sep_item);
@@ -6157,7 +6185,7 @@ Item fn_split(Item str_item, Item sep_item) {
     }
 
     // null string splits to empty list
-    if (str_type == LMD_TYPE_NULL) { List* e = list(); e->is_content = 1; return {.array = e}; }
+    if (str_type == LMD_TYPE_NULL) return {.array = split_string_list()};
 
     // null separator means split on whitespace (Python convention)
     bool null_sep = (sep_type == LMD_TYPE_NULL);
@@ -6176,7 +6204,10 @@ Item fn_split(Item str_item, Item sep_item) {
                 return ItemError;
             }
             List* ps = pattern_split(pattern, str_item, false);
-            if (ps) ps->is_content = 1;
+            if (ps) {
+                ps->is_content = 1;
+                split_adopt_string_lane(ps);
+            }
             return {.array = ps};
         }
     }
@@ -6198,9 +6229,8 @@ Item fn_split(Item str_item, Item sep_item) {
     // Segments are separate elements, so every append below uses array_push,
     // which stores the item verbatim (D2.6.5). list_push would concatenate each
     // string onto the previous one under S16.7's content rules.
-    List* result = list();
+    List* result = split_string_list();
     rooted_result.set(result);
-    result->is_content = 1;
     bool source_is_ascii = text_item_is_ascii(rooted_str.get());
 
     if (!rooted_str.get().get_chars() || str_len == 0) {
@@ -6324,7 +6354,7 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     bool keep_delim = (keep_type == LMD_TYPE_BOOL && it2b(keep_item));
 
     // null string splits to empty list
-    if (str_type == LMD_TYPE_NULL) { List* e = list(); e->is_content = 1; return {.array = e}; }
+    if (str_type == LMD_TYPE_NULL) return {.array = split_string_list()};
 
     // pattern-based split with keep_delim
     if (sep_type == LMD_TYPE_TYPE) {
@@ -6340,7 +6370,10 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
                 return ItemError;
             }
             List* ps = pattern_split(pattern, str_item, keep_delim);
-            if (ps) ps->is_content = 1;
+            if (ps) {
+                ps->is_content = 1;
+                split_adopt_string_lane(ps);
+            }
             return {.array = ps};
         }
     }
@@ -6367,9 +6400,8 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     Rooted<List*> rooted_result(roots, (List*)NULL);
 
 
-    List* result = list();
+    List* result = split_string_list();
     rooted_result.set(result);
-    result->is_content = 1;
     if (!rooted_str.get().get_chars() || str_len == 0 || !rooted_sep.get().get_chars() || sep_len == 0) {
         return {.array = rooted_result.get()};
     }
@@ -8144,6 +8176,8 @@ typedef struct CowProfileCounters {
     uint64_t mutable_value_calls;
     uint64_t map_admit_calls;
     uint64_t union_admit_calls;
+    uint64_t union_map_rep_cache_hits;
+    uint64_t union_map_rep_cache_misses;
     uint64_t map_admit_relation_cache_hits;
     uint64_t map_admit_relation_cache_misses;
     uint64_t map_admit_exact_shape_hits;
@@ -8296,6 +8330,10 @@ void cow_profile_dump(void) {
     strbuf_append_uint64(output, g_cow_profile.mutable_value_calls);
     strbuf_append_str(output, "\nunion_admit_calls\t");
     strbuf_append_uint64(output, g_cow_profile.union_admit_calls);
+    strbuf_append_str(output, "\nunion_map_rep_cache_hits\t");
+    strbuf_append_uint64(output, g_cow_profile.union_map_rep_cache_hits);
+    strbuf_append_str(output, "\nunion_map_rep_cache_misses\t");
+    strbuf_append_uint64(output, g_cow_profile.union_map_rep_cache_misses);
     strbuf_append_str(output, "\nmap_admit_calls\t");
     strbuf_append_uint64(output, g_cow_profile.map_admit_calls);
     strbuf_append_str(output, "\nmap_admit_relation_cache_hits\t");
@@ -9087,10 +9125,10 @@ static ArrayRepCert* runtime_array_rep_cert_intern(Type* contract) {
     return cert;
 }
 
-// A packed rank-one primitive lane is an exact decoder for its matching T[].
-// Keep certificate installation in this shared runtime helper so compiler
-// fast paths cannot publish a raw ArrayNum to later borrowed-write boundaries
-// (D3.3.3v3, S9.2.2).
+// A packed primitive lane plus an owned exact-rank shape is an exact decoder
+// for its matching nested array contract. Keep certificate installation in
+// this shared runtime helper so compiler fast paths cannot publish a raw
+// ArrayNum to later borrowed-write boundaries (D3.3.3v3, S9.2.2).
 static bool runtime_array_admit_primitive_contract(Item value, Type* expected,
         Item* converted) {
     if (!lambda_array_num_representation_proves_primitive_contract(value, expected)) {
@@ -9276,6 +9314,9 @@ Item lambda_array_set_checked_inplace_item(Item owner, Item key, Item value, Typ
     return lambda_array_set_checked_inplace(owner, index, value, expected, boundary);
 }
 
+static Item lambda_array_set_nd_checked_impl(Item owner, int ndim, int64_t* indices,
+        Item value, Type* expected, const char* boundary, bool publish_in_place);
+
 // A nested write must be checked against the declared root contract.  The
 // generic COW path only knows Item tags, so `rows[0][1] = value` previously
 // let an invalid leaf widen the inner carrier and silently falsify `T[][]`.
@@ -9286,6 +9327,31 @@ static Item lambda_array_path_set_checked_impl(Item owner, Item path, Item value
         set_runtime_error(ERR_TYPE_MISMATCH,
             "typed nested array assignment requires a non-empty index path");
         return ItemError;
+    }
+
+    int64_t path_length = path.array->length;
+    LambdaArrayContractInfo root_info = {};
+    ArrayNum* root_array = get_type_id(owner) == LMD_TYPE_ARRAY_NUM
+        ? owner.array_num : NULL;
+    ArrayNumShape* root_shape = root_array && root_array->is_ndim
+        ? (ArrayNumShape*)(uintptr_t)root_array->extra : NULL;
+    if (root_shape && path_length <= LAMBDA_ARRAY_NUM_MAX_NDIM &&
+            root_shape->ndim == path_length &&
+            lambda_array_contract_info(expected, &root_info) &&
+            root_info.rank == path_length) {
+        int64_t indices[LAMBDA_ARRAY_NUM_MAX_NDIM];
+        for (int64_t depth = 0; depth < path_length; depth++) {
+            if (!lambda_item_to_int64_exact(item_at(path, depth), &indices[depth]) ||
+                    indices[depth] < 0) {
+                return lambda_type_error(owner, expected, boundary);
+            }
+        }
+        // An owned N-D ArrayNum stores nested primitive arrays as one flat
+        // leaf lane. Walking through item_at() would allocate row views and
+        // then try to relink one into that scalar buffer; write the admitted
+        // leaf at its full coordinate instead (D3.3.3v3, S7.1.3v2, S9.2.2).
+        return lambda_array_set_nd_checked_impl(owner, (int)path_length, indices,
+            value, expected, boundary, publish_in_place);
     }
 
     RootFrame roots(6);
@@ -9309,7 +9375,6 @@ static Item lambda_array_path_set_checked_impl(Item owner, Item path, Item value
     // relinking a child. This keeps a rejected nested write transactional.
     Item probe = rooted_admitted_root.get();
     Type* probe_contract = expected;
-    int64_t path_length = rooted_path.get().array->length;
     for (int64_t depth = 0; depth < path_length; depth++) {
         LambdaArrayContractInfo info = {};
         int64_t index = 0;
@@ -9383,32 +9448,30 @@ Item lambda_array_path_set_checked_inplace(Item owner, Item path, Item value,
 }
 
 static Item lambda_array_set_nd_checked_impl(Item owner, int ndim, int64_t* indices,
-        Item value, Type* expected, bool publish_in_place) {
-    Type* element_type = runtime_array_contract_element(expected);
+        Item value, Type* expected, const char* boundary, bool publish_in_place) {
+    LambdaArrayContractInfo contract_info = {};
+    Type* element_type = lambda_array_contract_info(expected, &contract_info)
+        ? runtime_boundary_unwrap_type(contract_info.leaf_element) : NULL;
     if (!element_type || !indices || ndim < 1) {
-        return lambda_type_error(value, expected, "typed multi-dimensional array assignment");
+        return lambda_type_error(value, expected, boundary);
     }
     RootFrame roots(4);
     Rooted<Item> rooted_owner(roots, owner);
     Rooted<Item> rooted_value(roots, value);
     Rooted<Item> rooted_admitted(roots, ItemNull);
     Rooted<Item> rooted_candidate(roots, ItemNull);
-    rooted_value.set(lambda_type_check(rooted_value.get(), element_type,
-        "typed multi-dimensional array assignment"));
+    rooted_value.set(lambda_type_check(rooted_value.get(), element_type, boundary));
     if (item_is_error(rooted_value.get())) return rooted_value.get();
-    rooted_admitted.set(lambda_type_check(rooted_owner.get(), expected,
-        "typed multi-dimensional array assignment"));
+    rooted_admitted.set(lambda_type_check(rooted_owner.get(), expected, boundary));
     if (item_is_error(rooted_admitted.get())) return rooted_admitted.get();
     if (publish_in_place && rooted_admitted.get().item != rooted_owner.get().item) {
-        return lambda_type_error(rooted_owner.get(), expected,
-            "typed multi-dimensional array assignment");
+        return lambda_type_error(rooted_owner.get(), expected, boundary);
     }
     rooted_candidate.set(publish_in_place ? rooted_admitted.get() :
         cow_prepare_write(rooted_admitted.get()));
     if (item_is_error(rooted_candidate.get()) ||
             get_type_id(rooted_candidate.get()) != LMD_TYPE_ARRAY_NUM) {
-        return lambda_type_error(rooted_candidate.get(), expected,
-            "typed multi-dimensional array assignment");
+        return lambda_type_error(rooted_candidate.get(), expected, boundary);
     }
     ArrayRepCert* prior_cert = rooted_candidate.get().array_num->rep_cert;
     Item result = array_num_set_nd_admitted(rooted_candidate.get().array_num,
@@ -9418,8 +9481,7 @@ static Item lambda_array_set_nd_checked_impl(Item owner, int ndim, int64_t* indi
         lambda_array_install_rep_cert(rooted_candidate.get(), prior_cert);
     } else {
         ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
-        if (!cert) return lambda_type_error(rooted_candidate.get(), expected,
-            "typed multi-dimensional array assignment");
+        if (!cert) return lambda_type_error(rooted_candidate.get(), expected, boundary);
         lambda_array_install_rep_cert(rooted_candidate.get(), cert);
     }
     return rooted_candidate.get();
@@ -9427,12 +9489,14 @@ static Item lambda_array_set_nd_checked_impl(Item owner, int ndim, int64_t* indi
 
 Item lambda_array_set_nd_checked(Item owner, int ndim, int64_t* indices, Item value,
         Type* expected) {
-    return lambda_array_set_nd_checked_impl(owner, ndim, indices, value, expected, false);
+    return lambda_array_set_nd_checked_impl(owner, ndim, indices, value, expected,
+        "typed multi-dimensional array assignment", false);
 }
 
 Item lambda_array_set_nd_checked_inplace(Item owner, int ndim, int64_t* indices,
         Item value, Type* expected) {
-    return lambda_array_set_nd_checked_impl(owner, ndim, indices, value, expected, true);
+    return lambda_array_set_nd_checked_impl(owner, ndim, indices, value, expected,
+        "typed multi-dimensional array assignment", true);
 }
 
 static LaneStorageDesc lambda_array_lane_hint(Type* expected, uint8_t lane_kind,
@@ -10259,6 +10323,22 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
     LaneStorageDesc target_lane = {};
     bool target_has_native_lane = lambda_type_lane_storage_desc(element_type, &target_lane) &&
         array_native_lane_supported(&target_lane);
+    if (source_type == LMD_TYPE_ARRAY && value.array &&
+            !value.array->is_ndim && !value.array->is_view &&
+            target_has_native_lane &&
+            array_native_lane_matches_desc(value.array, &target_lane) &&
+            lambda_array_contract_info(expected, &contract_info) &&
+            contract_info.rank == 1) {
+        // A matching producer-maintained lane is the same physical proof as
+        // an ArrayNum element tag. The explicit crossing installs the full
+        // contract certificate without cloning and rescanning every element
+        // (D3.3.3v3, D3.3.4).
+        ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
+        if (!cert) return false;
+        lambda_array_install_rep_cert(value, cert);
+        *converted = value;
+        return true;
+    }
     if (source_type == LMD_TYPE_ARRAY && value.array && !array_has_native_lane(value.array) &&
             !target_has_native_lane && !target_has_numeric_lane) {
         // A boxed target (including a union element) needs no replacement when
@@ -10387,6 +10467,17 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
     return true;
 }
 
+static uint32_t runtime_map_contract_cache_base(const TypeMap* candidate,
+        const Type* expected) {
+    uintptr_t candidate_bits = (uintptr_t)candidate >> 4;
+    uintptr_t expected_bits = (uintptr_t)expected >> 4;
+    uint64_t hash = (uint64_t)candidate_bits ^ ((uint64_t)expected_bits << 1);
+    hash ^= hash >> 33;
+    hash *= UINT64_C(0xff51afd7ed558ccd);
+    hash ^= hash >> 33;
+    return (uint32_t)hash & (LAMBDA_MAP_CONTRACT_CACHE_CAPACITY - 1);
+}
+
 static MapContractRelation runtime_map_contract_relation_cached(
         const TypeMap* candidate, const TypeMap* expected) {
     if (!candidate || !expected) return MAP_CONTRACT_INCOMPATIBLE;
@@ -10401,13 +10492,7 @@ static MapContractRelation runtime_map_contract_relation_cached(
     // larger cache slower than a miss: a compact bounded probe keeps repeated
     // typed record paths O(1) while a round-robin fallback preserves progress
     // under adversarial shape churn (D3.2.4v3).
-    uintptr_t candidate_bits = (uintptr_t)candidate >> 4;
-    uintptr_t expected_bits = (uintptr_t)expected >> 4;
-    uint64_t hash = (uint64_t)candidate_bits ^ ((uint64_t)expected_bits << 1);
-    hash ^= hash >> 33;
-    hash *= UINT64_C(0xff51afd7ed558ccd);
-    hash ^= hash >> 33;
-    uint32_t base = (uint32_t)hash & (LAMBDA_MAP_CONTRACT_CACHE_CAPACITY - 1);
+    uint32_t base = runtime_map_contract_cache_base(candidate, expected);
     for (uint32_t probe = 0; probe < 8; probe++) {
         LambdaMapContractCacheEntry* entry = &heap->map_contract_cache[
             (base + probe) & (LAMBDA_MAP_CONTRACT_CACHE_CAPACITY - 1)];
@@ -10437,6 +10522,81 @@ static MapContractRelation runtime_map_contract_relation_cached(
     return relation;
 }
 
+// A union has no shared packed layout, so it preserves the carrier of the
+// selected member.  When a map already has the exact or storage-compatible
+// layout of one trusted arm, that shape is the admission proof; recursively
+// walking its fields would only re-establish an invariant maintained by every
+// map write.  Arms that need reification or contain an incompatible field stay
+// on the full validator path (D3.2.4v3, D8.3.2-D8.3.3).
+static bool runtime_union_map_has_exact_rep(TypeMap* candidate, Type* expected,
+        int depth = 0) {
+    expected = runtime_boundary_unwrap_type(expected);
+    if (!candidate || !expected || depth > 64) return false;
+    if (lambda_type_is_union(expected)) {
+        TypeBinary* binary = (TypeBinary*)expected;
+        return runtime_union_map_has_exact_rep(candidate, binary->left, depth + 1) ||
+            runtime_union_map_has_exact_rep(candidate, binary->right, depth + 1);
+    }
+    return expected->type_id == LMD_TYPE_MAP && expected != &TYPE_MAP &&
+        candidate == (TypeMap*)expected && ((TypeMap*)expected)->is_trusted_contract;
+}
+
+static bool runtime_union_map_rep_proves(TypeMap* candidate, Type* expected,
+        int depth = 0) {
+    expected = runtime_boundary_unwrap_type(expected);
+    if (!candidate || !expected || depth > 64) return false;
+    if (lambda_type_is_union(expected)) {
+        TypeBinary* binary = (TypeBinary*)expected;
+        return runtime_union_map_rep_proves(candidate, binary->left, depth + 1) ||
+            runtime_union_map_rep_proves(candidate, binary->right, depth + 1);
+    }
+    if (expected->type_id != LMD_TYPE_MAP || expected == &TYPE_MAP ||
+            !((TypeMap*)expected)->is_trusted_contract) {
+        return false;
+    }
+    MapContractRelation relation = runtime_map_contract_relation_cached(candidate,
+        (TypeMap*)expected);
+    return relation == MAP_CONTRACT_EXACT_TRUSTED ||
+        relation == MAP_CONTRACT_STORAGE_COMPATIBLE;
+}
+
+static bool runtime_union_map_rep_proves_cached(TypeMap* candidate,
+        Type* expected) {
+    Heap* heap = context ? context->heap : NULL;
+    if (!heap) {
+        return runtime_union_map_has_exact_rep(candidate, expected) ||
+            runtime_union_map_rep_proves(candidate, expected);
+    }
+    uint32_t base = runtime_map_contract_cache_base(candidate, expected);
+    LambdaMapContractCacheEntry* available = NULL;
+    for (uint32_t probe = 0; probe < 8; probe++) {
+        LambdaMapContractCacheEntry* entry = &heap->map_contract_cache[
+            (base + probe) & (LAMBDA_MAP_CONTRACT_CACHE_CAPACITY - 1)];
+        if (entry->candidate == candidate && entry->expected == expected) {
+            if (cow_profile_enabled()) g_cow_profile.union_map_rep_cache_hits++;
+            return entry->relation == MAP_CONTRACT_UNION_MEMBER_PROVEN;
+        }
+        if (!entry->candidate) {
+            available = entry;
+            break;
+        }
+    }
+
+    if (cow_profile_enabled()) g_cow_profile.union_map_rep_cache_misses++;
+    bool proven = runtime_union_map_has_exact_rep(candidate, expected) ||
+        runtime_union_map_rep_proves(candidate, expected);
+    if (!proven) return false;
+    if (!available) {
+        uint32_t slot = heap->map_contract_cache_next++ %
+            LAMBDA_MAP_CONTRACT_CACHE_CAPACITY;
+        available = &heap->map_contract_cache[slot];
+    }
+    available->candidate = candidate;
+    available->expected = expected;
+    available->relation = MAP_CONTRACT_UNION_MEMBER_PROVEN;
+    return true;
+}
+
 static bool runtime_type_admit_value(Item value, Type* expected, Item* converted) {
     if (!converted) return false;
     expected = runtime_boundary_unwrap_type(expected);
@@ -10447,6 +10607,15 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
     // Reuse the resolved, heap-local proof before decomposing a T[] contract.
     // The carrier check remains mandatory even when certificate identity hits.
     TypeId value_type = get_type_id(value);
+    if (value_type == LMD_TYPE_MAP && value.map &&
+            lambda_type_is_union(expected)) {
+        TypeMap* candidate = (TypeMap*)value.map->type;
+        if (candidate && typemap_ptr_is_plausible(candidate) &&
+                runtime_union_map_rep_proves_cached(candidate, expected)) {
+            *converted = value;
+            return true;
+        }
+    }
     if ((value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_ARRAY_NUM) &&
             value.array && value.array->rep_cert &&
             lambda_array_contract_canonical(expected)) {

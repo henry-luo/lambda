@@ -1350,6 +1350,9 @@ static inline MIR_reg_t em_load_frame_top(MirEmitter* em, MIR_reg_t runtime,
 static inline MIR_reg_t em_call_with_args(MirEmitter* em,
     const char* fn_name, MIR_type_t ret_type, int nargs,
     MIR_type_t* arg_types, MIR_op_t* arg_ops, bool include_signature);
+static inline MIR_reg_t em_call_terminal_with_args(MirEmitter* em,
+    const char* fn_name, MIR_type_t ret_type, int nargs,
+    MIR_type_t* arg_types, MIR_op_t* arg_ops, bool include_signature);
 
 static inline void em_store_frame_top(MirEmitter* em, MIR_reg_t runtime,
                                       size_t context_offset, MIR_reg_t value) {
@@ -4076,13 +4079,14 @@ static inline void em_emit_destination_owned_call(MirEmitter* em,
     em_emit_unclassified_call(em, call_name, insn, true);
 }
 
-static inline MIR_reg_t em_call_with_args(MirEmitter* em,
-                                          const char* fn_name,
-                                          MIR_type_t ret_type,
-                                          int nargs,
-                                          MIR_type_t* arg_types,
-                                          MIR_op_t* arg_ops,
-                                          bool include_signature) {
+static inline MIR_reg_t em_call_with_args_policy(MirEmitter* em,
+                                                  const char* fn_name,
+                                                  MIR_type_t ret_type,
+                                                  int nargs,
+                                                  MIR_type_t* arg_types,
+                                                  MIR_op_t* arg_ops,
+                                                  bool include_signature,
+                                                  bool refresh_after_gc) {
     if (nargs < 0 || nargs > LAMBDA_MAX_FUNCTION_ARGS) return 0;
     MIR_var_t args[LAMBDA_MAX_FUNCTION_ARGS];
     if (nargs > 0) mir_prepare_call_args(args, arg_types, nargs);
@@ -4160,7 +4164,7 @@ static inline MIR_reg_t em_call_with_args(MirEmitter* em,
         mir_append_emit_insn(em->ctx, em->func_item, call);
     }
     em_after_resolved_call(em, fn_name, &resolved.call, call, res, ret_type);
-    if (em->after_may_gc_call &&
+    if (refresh_after_gc && em->after_may_gc_call &&
             resolved.call.effects.gc != JIT_EFFECT_NO_GC) {
         em->after_may_gc_call(em->call_owner);
     }
@@ -4171,6 +4175,30 @@ static inline MIR_reg_t em_call_with_args(MirEmitter* em,
         em_scalar_home_bind(em, scalar_home_id, res);
     }
     return res;
+}
+
+static inline MIR_reg_t em_call_with_args(MirEmitter* em,
+                                          const char* fn_name,
+                                          MIR_type_t ret_type,
+                                          int nargs,
+                                          MIR_type_t* arg_types,
+                                          MIR_op_t* arg_ops,
+                                          bool include_signature) {
+    return em_call_with_args_policy(em, fn_name, ret_type, nargs, arg_types,
+        arg_ops, include_signature, true);
+}
+
+static inline MIR_reg_t em_call_terminal_with_args(MirEmitter* em,
+                                                   const char* fn_name,
+                                                   MIR_type_t ret_type,
+                                                   int nargs,
+                                                   MIR_type_t* arg_types,
+                                                   MIR_op_t* arg_ops,
+                                                   bool include_signature) {
+    // A terminal edge still publishes pre-call roots and records the safepoint,
+    // but no successor can observe a compacted cached pointer (D5.2, D5.3).
+    return em_call_with_args_policy(em, fn_name, ret_type, nargs, arg_types,
+        arg_ops, include_signature, false);
 }
 
 static inline void em_call_void_with_args(MirEmitter* em,

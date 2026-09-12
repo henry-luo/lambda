@@ -15,10 +15,11 @@
         "mov\t{{r}}, u8:({{r}})"
       ],
       "expect": [
-        "call\tlambda_array_set_checked_inplace_lane_p, lambda_array_set_checked_inplace_lane"
+        "call\tarray_num_set_cow_idx_p, array_num_set_cow_idx"
       ],
       "forbid": [
-        "call\titem_at_p, item_at"
+        "call\titem_at_p, item_at",
+        "call\tcow_mark_shared_p, cow_mark_shared"
       ],
       "count": {
         "call\tlambda_type_check_p, lambda_type_check": 1

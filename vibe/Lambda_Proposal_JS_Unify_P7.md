@@ -266,7 +266,19 @@ This closes **D8.2.4** for the JS lane and removes per-name hashing and internin
 
 **Exit:** zero `strcmp`/spelling-keyed compiler state in `lambda/js/js_mir_*`; `node_bindings` is the only binding authority consulted by lowering.
 
-### U-D — Retire `AstIndex::facts` *(reversed 2026-09-11)*
+### U-D — Retire `AstIndex::facts` *(SUPERSEDED 2026-09-11)*
+
+**Superseded by [`Lambda_Design_Runtime_Const.md`](Lambda_Design_Runtime_Const.md).**
+U-D kept the existing const-fold and only relocated its result. The fold itself
+is the defect: eligibility admits four node shapes and no calls or identifier
+reads (so **D6.1.2**'s purity gate never engages); results are restricted by a
+type-ID whitelist that groups self-tagged floats with pointer-backed values;
+floats are evaluated and then discarded; the fact is read at two boxing sites
+only, so `let a = 1 + 2` computes at runtime; and the interpreter that produces
+the fact never reads it. Retiring `AstIndex::facts` survives there as **RC12**,
+reached as a consequence rather than as the goal.
+
+The original text follows.
 
 Supersedes the original U-D, which proposed the opposite and is recorded as
 withdrawn in `Lambda_Design_Unified_AST.md` §13.6. Governed by **D8.2.5v2** and

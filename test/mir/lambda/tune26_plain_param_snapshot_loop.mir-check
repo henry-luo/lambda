@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "description": "Tune26 T26-4: a plain float[] parameter marks its activation snapshot at entry and lazily detaches through the first reached store, so write-free recursive activations do not clone.",
+  "checks": [
+    {
+      "in_func": "_tune26_plain_param_snapshot_loop_#",
+      "expect": [
+        "call\tcow_mark_shared_p, cow_mark_shared",
+        "call\tarray_num_set_cow_idx_p, array_num_set_cow_idx"
+      ],
+      "count": {
+        "call\tcow_mark_shared_p, cow_mark_shared": 1,
+        "call\tcow_prepare_write_p, cow_prepare_write": 0
+      }
+    }
+  ]
+}

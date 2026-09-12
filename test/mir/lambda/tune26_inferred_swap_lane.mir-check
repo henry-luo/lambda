@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "description": "Tune26 / D2.2.2 / D3.2.2: an indexed read from an inferred integer fill and a scalar initialized from a declared int[] read both preserve the destination lane. Raw stores retain checked cold fallbacks without repeating the array representation certificate on their successful paths.",
+  "checks": [
+    {
+      "in_func": "_tune26_inferred_swap_lane_#",
+      "expect": [
+        "call\tlambda_array_admit_numeric_contract_p, lambda_array_admit_numeric_contract",
+        "mov\ti64:({{r}}), {{r}}",
+        "call\tlambda_array_set_checked_lane_p, lambda_array_set_checked_lane"
+      ],
+      "forbid": [
+        "mov\t{{r}}, u16:48({{r}})",
+        "mov\t{{r}}, u8:4({{r}})"
+      ]
+    }
+  ]
+}

@@ -138,6 +138,23 @@ void js_elements_set_props(Array* arr, Map* props) {
     *(Item*)arr->data = {.map = rooted_props.get()};
 }
 
+static bool array_widen_inferred_pointer_lane(Array* array) {
+    if (!array || !array_has_native_lane(array) || array->rep_cert ||
+            array_native_lane_kind(array) != LANE_STORAGE_POINTER) {
+        return false;
+    }
+    // An inferred pointer lane is a representation choice, not a source
+    // contract. Box its words in place before an open incompatible append so
+    // erasing inference cannot change the result (D3.3.1v2, D3.3.3v3).
+    for (int64_t index = 0; index < array->length; index++) {
+        array->items[index] = array_native_lane_read(array, index);
+    }
+    array->is_native_lane_array = 0;
+    array->map_kind = 0;
+    array->reserved_state = 0;
+    return true;
+}
+
 void array_push(Array* arr, Item item) {
     if (array_has_native_lane(arr)) {
         if (arr->length >= arr->capacity) {
@@ -145,14 +162,14 @@ void array_push(Array* arr, Item item) {
             expand_list((List*)arr, nullptr);
             if (arr->capacity <= old_capacity) return;
         }
-        // Untyped mutators do not have a semantic contract to widen. Preserve
-        // the lane invariant instead of appending an unrepresentable raw Item.
-        if (!array_native_lane_store(arr, arr->length, item)) {
+        if (array_native_lane_store(arr, arr->length, item)) {
+            arr->length++;
+            return;
+        }
+        if (!array_widen_inferred_pointer_lane(arr)) {
             log_error("array_push: native lane rejected incompatible Item store");
             return;
         }
-        arr->length++;
-        return;
     }
     TypeId type_id = get_type_id(item);
     if (type_id == LMD_TYPE_ARRAY) {

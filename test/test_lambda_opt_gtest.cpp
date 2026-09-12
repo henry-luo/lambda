@@ -521,6 +521,32 @@ TEST(LambdaOptAdmission, RecursiveUnionFieldsReuseAdmittedContract) {
     EXPECT_LT(run.profile.get("union_admit_calls"), 40u);
 }
 
+TEST(LambdaOptAdmission, OpenUnionMemberShapeCachesAdmissionProof) {
+    FixtureRun run = run_source_fixture("open_union_shape",
+        "test/lambda/proc/tune26_open_union_shape.ls", "jit");
+    ASSERT_TRUE(run.ok);
+    EXPECT_EQ(run.std_out, "[220, true]\n");
+    // The open first arm cannot statically certify `child`, so the recursive
+    // boundary remains. A compiler-built member carrier proves it once per
+    // shape and the context cache reuses that proof (D3.2.4v3, D8.3.2-D8.3.3).
+    EXPECT_GT(run.profile.get("union_map_rep_cache_hits"), 200u);
+    EXPECT_LE(run.profile.get("union_map_rep_cache_misses"), 4u);
+    EXPECT_EQ(run.profile.get("map_admit_relation_cache_hits"), 0u);
+    // The malformed child must still reach the checked slow path.
+    EXPECT_NE(run.std_err.find("got int 42"), std::string::npos);
+}
+
+TEST(LambdaOptAdmission, SplitBuildsInferredStringLane) {
+    FixtureRun run = run_source_fixture("split_string_lane",
+        "test/lambda/proc/tune26_split_string_lane.ls", "jit");
+    ASSERT_TRUE(run.ok);
+    EXPECT_EQ(run.std_out, "[\"alpha\", \"beta\", 7, \"gamma\"]\n");
+    // The open first result must widen for the int append. The second result
+    // already owns the string pointer lane, so its explicit string[] crossing
+    // certifies in place instead of cloning (D3.3.1v2, D3.3.3v3, D3.3.4).
+    EXPECT_EQ(run.profile.get("fn_mutable_value_calls"), 0u);
+}
+
 TEST(LambdaOptAdmission, BoxedUnionArrayAdmissionRetainsCarrier) {
     FixtureRun run = run_source_fixture("union_array",
         "test/lambda/proc/tune23_union_array.ls", "jit");

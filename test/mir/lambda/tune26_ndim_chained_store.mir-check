@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "description": "D3.3.3v3/S7.1.3v2/S9.2.2: an exact int[][] write computes both shaped ArrayNum strides and stores the native lane before its allocation-bearing checked fallback.",
+  "checks": [
+    {
+      "in_func": "_store_#",
+      "expect_seq": [
+        { "pattern": "\tand\t{{r}}, {{r}}, 3" },
+        { "pattern": "\tmul\t{{r}}, {{r}}, {{r}}" },
+        { "pattern": "\tmov\ti64:({{r}}), {{r}}" },
+        { "pattern": "call\tarray_plain_p, array_plain" },
+        { "pattern": "call\tlambda_array_path_set_checked_inplace_p, lambda_array_path_set_checked_inplace" }
+      ],
+      "count": {
+        "\tmul\t{{r}}, {{r}}, {{r}}": 2,
+        "call\tarray_plain_p, array_plain": 1,
+        "call\tlambda_array_path_set_checked_inplace_p, lambda_array_path_set_checked_inplace": 1
+      }
+    }
+  ]
+}

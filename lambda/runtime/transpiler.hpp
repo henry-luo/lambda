@@ -14,15 +14,16 @@ typedef struct LambdaRegion LambdaRegion;
 typedef struct LambdaRegionBlock LambdaRegionBlock;
 
 // Runtime map admissions repeat the same candidate/contract shape pair across
-// recursive calls. The entries are context-owned so a cache cannot leak a
-// TypeMap relation between independent EvalContexts (D3.2.2).
+// recursive calls. The expected key may also be a union whose member carrier
+// was proven once. The entries are context-owned so a cache cannot leak a
+// relation between independent EvalContexts (D3.2.2).
 // Typed record arrays repeatedly cross the same nested map contracts in one
 // solver run. Keep this a power of two: runtime_map_contract_relation_cached
 // uses bounded hash probes rather than a linear full-table scan.
 #define LAMBDA_MAP_CONTRACT_CACHE_CAPACITY 256
 typedef struct LambdaMapContractCacheEntry {
     const TypeMap* candidate;
-    const TypeMap* expected;
+    const Type* expected;
     uint8_t relation;
 } LambdaMapContractCacheEntry;
 

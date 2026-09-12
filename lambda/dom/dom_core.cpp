@@ -54,25 +54,6 @@ extern "C" Item dom_absent_to_null(Item v) {
     return get_type_id(v) == LMD_TYPE_UNDEFINED ? ItemNull : v;
 }
 
-static Item dom_op0(Item node, JubeDomElementOperation op) {
-    return dom_absent_to_null(dom_element_operation_impl(node, op, nullptr, 0));
-}
-
-static Item dom_op1(Item node, JubeDomElementOperation op, Item a) {
-    Item args[1] = { a };
-    return dom_absent_to_null(dom_element_operation_impl(node, op, args, 1));
-}
-
-static Item dom_op2(Item node, JubeDomElementOperation op, Item a, Item b) {
-    Item args[2] = { a, b };
-    return dom_absent_to_null(dom_element_operation_impl(node, op, args, 2));
-}
-
-static Item dom_op3(Item node, JubeDomElementOperation op, Item a, Item b, Item c) {
-    Item args[3] = { a, b, c };
-    return dom_absent_to_null(dom_element_operation_impl(node, op, args, 3));
-}
-
 /**
  * Read a DOM IDL property by its spec (camelCase) name.
  *
@@ -269,21 +250,8 @@ extern "C" Item dom_engine_load_document(Item path) {
 extern "C" Item dom_core_owner_document(Item n)   { return dom_prop_get(n, "ownerDocument"); }  // DOM_NAME_DISPATCH_OK: DSO9
 // identity: `==` cannot express it (S5.1.4 + zero-entry wrappers), so the DOM
 // supplies it as an operation, exactly as Node.isSameNode() does.
-extern "C" Item dom_core_same_node(Item a, Item b)  { return dom_op1(a, JUBE_DOM_IS_SAME_NODE, b); }
 
 // --- attributes
-extern "C" Item dom_core_get_attribute(Item n, Item name) {
-    return dom_op1(n, JUBE_DOM_GET_ATTRIBUTE, name);
-}
-extern "C" Item dom_core_set_attribute(Item n, Item name, Item value) {
-    return dom_op2(n, JUBE_DOM_SET_ATTRIBUTE, name, value);
-}
-extern "C" Item dom_core_remove_attribute(Item n, Item name) {
-    return dom_op1(n, JUBE_DOM_REMOVE_ATTRIBUTE, name);
-}
-extern "C" Item dom_core_attribute_names(Item n) {
-    return dom_op0(n, JUBE_DOM_GET_ATTRIBUTE_NAMES);
-}
 
 // --- tree mutation
 // create_node is the one creator: element (1), text (3), comment (8) and
@@ -340,19 +308,8 @@ extern "C" Item dom_core_set_inner_html(Item n, Item html) {
     return dom_set_property_impl(n, js_name_item("innerHTML"), html);
 }
 
-extern "C" Item dom_core_insert_before(Item parent, Item node, Item ref) {
-    return dom_op2(parent, JUBE_DOM_INSERT_BEFORE, node, ref);
-}
-extern "C" Item dom_core_remove_child(Item parent, Item node) {
-    return dom_op1(parent, JUBE_DOM_REMOVE_CHILD, node);
-}
 // replaceData(0, +inf, data): the spec clamps count to the data length, so one
 // call rewrites the whole node value with a single mutation record.
-extern "C" Item dom_core_set_node_value(Item n, Item data) {
-    Item zero = { .item = i2it(0) };
-    Item all = { .item = i2it(INT_MAX) };
-    return dom_op3(n, JUBE_DOM_REPLACE_DATA, zero, all, data);
-}
 
 // --- the generic entries (ES45)
 //
@@ -520,6 +477,7 @@ extern "C" Item dom_core_dispatch(Item n, Item event) {
     return dom_absent_to_null(dom_dispatch_event_bridge(n, built));
 }
 
+
 // --- text controls
 // These two bodies already existed in the core; only the catalog's uniform
 // shape was missing, so each is a two-line adapter rather than an engine seam.
@@ -548,21 +506,12 @@ extern "C" Item dom_core_tc_replace_range(Item n, Item start, Item end, Item tex
 }
 
 // --- match / serialize (parse_fragment: dom.cpp)
-extern "C" Item dom_core_matches(Item n, Item selector) {
-    return dom_op1(n, JUBE_DOM_MATCHES, selector);
-}
 extern "C" Item dom_core_serialize(Item n, Item outer) {
     bool is_outer = get_type_id(outer) == LMD_TYPE_BOOL && it2b(outer);
     return is_outer ? dom_fp_outer_html(n) : dom_fp_inner_html(n);
 }
 
 // --- geometry
-extern "C" Item dom_core_bounding_box(Item n) {
-    return dom_op0(n, JUBE_DOM_GET_BOUNDING_CLIENT_RECT);
-}
-extern "C" Item dom_core_client_rects(Item n) {
-    return dom_op0(n, JUBE_DOM_GET_CLIENT_RECTS);
-}
 
 // A row that answers a *result map* -- geometry, boundaries -- must not build it
 // through the JS object model when there is no realm: OrdinarySet probes the
@@ -594,18 +543,12 @@ extern "C" Item dom_core_scroll_state(Item n) {
     Item vals[] = { dom_prop_get(n, "scrollLeft"), dom_prop_get(n, "scrollTop") };  // DOM_NAME_DISPATCH_OK: DSO8
     return dom_result_map(doc, keys, vals, 2);
 }
-extern "C" Item dom_core_set_scroll_state(Item n, Item x, Item y) {
-    return dom_op2(n, JUBE_DOM_SCROLL_TO, x, y);
-}
 extern "C" Item dom_core_element_from_point(Item doc, Item x, Item y) {
     DomDocument* document = dom_document_of(doc);
     if (!document) return ItemNull;
     float fx = (float)dom_number_of(x), fy = (float)dom_number_of(y);
     void* hit = dom_document_element_from_point_native(document, fx, fy);
     return hit ? dom_wrap_element(hit) : ItemNull;
-}
-extern "C" Item dom_core_scroll_into_view(Item n) {
-    return dom_op0(n, JUBE_DOM_SCROLL_INTO_VIEW);
 }
 
 // --- range / selection composite reads
@@ -687,23 +630,12 @@ extern "C" Item dom_fp_document_element(Item n) {
     DomDocument* doc = (DomDocument*)dom_document_from_item(n);
     return (doc && doc->root) ? dom_wrap_element(doc->root) : ItemNull;
 }
-extern "C" Item dom_fp_contains(Item a, Item b)        { return dom_op1(a, JUBE_DOM_CONTAINS, b); }
-extern "C" Item dom_fp_equal_node(Item a, Item b)      { return dom_op1(a, JUBE_DOM_IS_EQUAL_NODE, b); }
 
 // D7.4.5v2: Lambda and JS share the owner-backed VArray; Lambda's DOM remains
 // fixed for the run, so no second membership snapshot is needed.
 // children / child_nodes also live in dom.cpp: both answer the live VArray
 // backend directly rather than asking the property protocol for it.
 
-extern "C" Item dom_fp_append_child(Item parent, Item child) {
-    return dom_op1(parent, JUBE_DOM_APPEND_CHILD, child);
-}
-extern "C" Item dom_fp_remove(Item n) {
-    return dom_op0(n, JUBE_DOM_REMOVE);
-}
-extern "C" Item dom_fp_replace_child(Item parent, Item new_node, Item old_node) {
-    return dom_op2(parent, JUBE_DOM_REPLACE_CHILD, new_node, old_node);
-}
 extern "C" Item dom_fp_create_element(Item doc, Item tag) {
     Item kind = { .item = i2it(DOM_NODE_ELEMENT) };
     return dom_core_create_node(doc, kind, tag, ItemNull);
@@ -712,23 +644,8 @@ extern "C" Item dom_fp_create_text_node(Item doc, Item data) {
     Item kind = { .item = i2it(DOM_NODE_TEXT) };
     return dom_core_create_node(doc, kind, ItemNull, data);
 }
-extern "C" Item dom_fp_clone_node(Item n, Item deep) {
-    return dom_op1(n, JUBE_DOM_CLONE_NODE, deep);
-}
 // text_content / inner_html / outer_html live in dom.cpp with the recursive
 // walks they drive.
-extern "C" Item dom_fp_query_selector(Item root, Item selector) {
-    return dom_op1(root, JUBE_DOM_QUERY_SELECTOR, selector);
-}
-extern "C" Item dom_fp_query_selector_all(Item root, Item selector) {
-    return dom_op1(root, JUBE_DOM_QUERY_SELECTOR_ALL, selector);
-}
-extern "C" Item dom_fp_closest(Item n, Item selector) {
-    return dom_op1(n, JUBE_DOM_CLOSEST, selector);
-}
-extern "C" Item dom_fp_get_element_by_id(Item root, Item id) {
-    return dom_op1(root, JUBE_DOM_GET_ELEMENT_BY_ID, id);
-}
 extern "C" Item dom_fp_has_attribute(Item n, Item name) {
     // Its own derivation: the ordinal answers absence rather than `false` for a
     // node kind that has no attributes, and the row's contract is bool.

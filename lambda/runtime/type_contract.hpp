@@ -38,6 +38,7 @@ enum MapContractRelation {
     MAP_CONTRACT_EXACT_TRUSTED,
     MAP_CONTRACT_STORAGE_COMPATIBLE,
     MAP_CONTRACT_NEEDS_REIFICATION,
+    MAP_CONTRACT_UNION_MEMBER_PROVEN,
 };
 
 // One resolver for declared homogeneous arrays, inferred homogeneous arrays,
@@ -65,10 +66,10 @@ bool lambda_array_contract_compatible(Type* candidate, Type* expected,
 // carrier, so they deliberately return false.
 bool lambda_array_num_elem_type_for_contract(Type* element,
     ArrayNumElemType* out_type);
-// An owned rank-one ArrayNum with this exact lane already decodes every
-// element as the complete non-nullable primitive contract. Views, shaped
-// carriers, nullable/refined contracts, and representation changes remain
-// deferred to boundary admission.
+// An owned ArrayNum with the exact scalar lane and shape rank already decodes
+// every leaf as the complete non-nullable primitive contract. Views,
+// nullable/refined contracts, and representation changes remain deferred to
+// boundary admission.
 bool lambda_array_num_representation_proves_primitive_contract(Item value,
     Type* contract);
 ArrayRepCert* lambda_array_rep_cert_create(Pool* pool, Type* contract);

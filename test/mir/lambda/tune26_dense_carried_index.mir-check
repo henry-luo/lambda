@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "description": "Tune26 / D2.4.1-D2.4.3 / D3.3.3v3: an extent-minus-one index updated from the counter immediately before its unit increment is in-bounds on the dense arm. One guard versions the complete float expression tree; its miss retains checked nullable loads.",
+  "checks": [
+    {
+      "in_func": "_tune26_dense_carried_index_#",
+      "expect_seq": [
+        { "pattern": "\tbf\tL" },
+        { "pattern": "mul\t{{r}}, {{r}}, 8" },
+        { "pattern": "dmov\t{{r}}, d:({{r}})" },
+        { "pattern": "dmul\t{{r}}" },
+        { "pattern": "dadd\t{{r}}" },
+        { "pattern": "call\tlambda_float_null_lane_c_p, lambda_float_null_lane_c" }
+      ],
+      "expect": [
+        "call\tlambda_type_check_p, lambda_type_check"
+      ]
+    }
+  ]
+}

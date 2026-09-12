@@ -1,16 +1,20 @@
 {
   "schema_version": 1,
-  "description": "Procedural tail recursion becomes a counter-guarded loop, exactly as the functional form does: no self-call remains in the procedure body. Internal register spelling is deliberately opaque.",
+  "description": "Procedural tail recursion becomes a counter-guarded loop, exactly as the functional form does: no self-call remains in the procedure body. D2.4.1: the native int arguments n - 1 and acc * n remain IntLane values across the backedge instead of being boxed and immediately unboxed.",
   "checks": [
     {
       "in_func": "_countdown_#",
       "forbid": [
-        "call\t_countdown_"
+        "call\t_countdown_",
+        "call\tlambda_item_to_int_lane_c_p, lambda_item_to_int_lane_c"
       ],
       "expect": [
         "add\t{{r}}, {{r}}, 1",
         "ble\t"
-      ]
+      ],
+      "count": {
+        "call\tint2it_lane_p, int2it_lane": 1
+      }
     }
   ]
 }
