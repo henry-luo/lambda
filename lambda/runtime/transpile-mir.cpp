@@ -246,6 +246,10 @@ struct MirTranspiler {
     // the loop branch that established their entry checks.
     MirFiniteIntFact finite_int_facts[16];
     int finite_int_fact_count;
+    // Depth of generic loop siblings currently being emitted. A loop nested in
+    // a cold arm lowers once instead of splitting again, so body copies grow
+    // with nesting depth instead of 2^depth (D2.2.2, D8.3.1).
+    int loop_generic_arm_depth;
     // A dense typed-array loop may prove its full index extent once at entry;
     // the guard is consulted only by the nullable-float arithmetic fast arm.
     MIR_reg_t typed_array_inbounds_guard;
@@ -14947,7 +14951,24 @@ static MIR_reg_t transpile_while_core(MirTranspiler* mt, AstWhileNode* while_nod
     return r;
 }
 
+// The generic sibling is the arm an entry guard could not prove. Re-splitting
+// the loops nested inside it would specialize a path that is already the
+// fallback, at one body copy per arm combination; emitting them unsplit keeps
+// every proven hot path intact and makes the cost linear in nesting depth.
+static MIR_reg_t transpile_while_generic_arm(MirTranspiler* mt,
+        AstWhileNode* while_node) {
+    mt->loop_generic_arm_depth++;
+    MIR_reg_t result = transpile_while_core(mt, while_node, NULL, NULL, NULL);
+    mt->loop_generic_arm_depth--;
+    return result;
+}
+
 static MirValue transpile_while(MirTranspiler* mt, AstWhileNode* while_node) {
+    if (mt->loop_generic_arm_depth > 0) {
+        MIR_reg_t result = transpile_while_core(mt, while_node, NULL, NULL, NULL);
+        return mir_value_from_reg(mt, (AstNode*)while_node, result,
+            VALUE_REP_ITEM, &TYPE_NULL, LMD_TYPE_NULL);
+    }
     NameEntry* lhs_binding = NULL;
     NameEntry* rhs_binding = NULL;
     NameEntry* counter_binding = NULL;
@@ -14980,7 +15001,7 @@ static MirValue transpile_while(MirTranspiler* mt, AstWhileNode* while_node) {
             MIR_new_label_op(mt->ctx, l_end)));
 
         emit_label(mt, l_generic);
-        transpile_while_core(mt, while_node, NULL, NULL, NULL);
+        transpile_while_generic_arm(mt, while_node);
         emit_label(mt, l_end);
 
         MIR_reg_t r = new_reg(mt, "while_null", MIR_T_I64);
@@ -15015,7 +15036,7 @@ static MirValue transpile_while(MirTranspiler* mt, AstWhileNode* while_node) {
             MIR_new_label_op(mt->ctx, l_end)));
 
         emit_label(mt, l_generic);
-        transpile_while_core(mt, while_node, NULL, NULL, NULL);
+        transpile_while_generic_arm(mt, while_node);
         emit_label(mt, l_end);
 
         MIR_reg_t r = new_reg(mt, "while_null", MIR_T_I64);
@@ -15085,7 +15106,7 @@ static MirValue transpile_while(MirTranspiler* mt, AstWhileNode* while_node) {
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
     emit_label(mt, l_generic);
-    transpile_while_core(mt, while_node, NULL, NULL, NULL);
+    transpile_while_generic_arm(mt, while_node);
     emit_label(mt, l_end);
 
     MIR_reg_t r = new_reg(mt, "while_null", MIR_T_I64);
@@ -31208,6 +31229,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         sizeof(saved_typed_array_write_roots));
     int saved_typed_array_write_root_count = mt->typed_array_write_root_count;
     int saved_finite_int_fact_count = mt->finite_int_fact_count;
+    int saved_loop_generic_arm_depth = mt->loop_generic_arm_depth;
     bool saved_in_async_proc = mt->in_async_proc;
     bool saved_emitting_async_call = mt->emitting_async_call;
     int saved_async_call_state = mt->async_call_state;
@@ -31243,6 +31265,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         sizeof(mt->typed_array_write_roots));
     mt->typed_array_write_root_count = 0;
     mt->finite_int_fact_count = 0;
+    mt->loop_generic_arm_depth = 0;
     memset(mt->var_param_home_regs, 0, sizeof(mt->var_param_home_regs));
     memset(mt->var_param_bindings, 0, sizeof(mt->var_param_bindings));
     mt->in_async_proc = is_async_proc;
@@ -32177,6 +32200,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         sizeof(mt->typed_array_write_roots));
     mt->typed_array_write_root_count = saved_typed_array_write_root_count;
     mt->finite_int_fact_count = saved_finite_int_fact_count;
+    mt->loop_generic_arm_depth = saved_loop_generic_arm_depth;
     mem_free(mt->async_state_labels);
     mem_free(mt->async_state_label_emitted);
     mem_free(mt->async_state_calls);
