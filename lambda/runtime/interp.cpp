@@ -4023,6 +4023,8 @@ static bool interp_const_folded_value(InterpFrame* f, AstNode* node, Item* out) 
     case AST_NODE_UNARY: case AST_NODE_BINARY: case AST_NODE_IF_EXPR:
     // reads of const bindings, resolved to their binding's value (RC3.3)
     case AST_NODE_IDENT:
+    // folded calls to pure sys-funcs (RC3.4)
+    case AST_NODE_CALL_EXPR:
     // materialized const containers (RC15)
     case AST_NODE_ARRAY: case AST_NODE_MAP: break;
     default: return false;
@@ -5296,13 +5298,27 @@ public:
 // runtime slot -- the module slab is empty while this pass runs.
 static bool interp_const_init_value(Transpiler* tp, AstNode* init, Item* out) {
     if (!tp || !init || !out) return false;
-    if (ast_static_literal_item(tp, init, out)) return true;
-    AstNodeId id = ast_index_find(&tp->ast_index, ast_unwrap_primary(init));
-    if (id == AST_NODE_ID_INVALID || id >= tp->ast_index.count) return false;
-    const AstNodeFacts* facts = &tp->ast_index.facts[id];
-    if ((facts->flags & AST_NODE_FACT_CONST_FOLDED) == 0) return false;
-    out->item = facts->folded_item;
-    return true;
+    AstNode* value = ast_unwrap_primary(init);
+    // A published fold fact is this node's *computed* value, so it answers
+    // first and unconditionally.
+    AstNodeId id = ast_index_find(&tp->ast_index, value);
+    if (id != AST_NODE_ID_INVALID && id < tp->ast_index.count) {
+        const AstNodeFacts* facts = &tp->ast_index.facts[id];
+        if (facts->flags & AST_NODE_FACT_CONST_FOLDED) {
+            out->item = facts->folded_item;
+            return true;
+        }
+    }
+    // Only a bare literal may answer from its type. `ast_static_literal_item`
+    // reports what a node's *type* carries, and inference can hand a computed
+    // node a literal-valued type: `floor(2.7)` inherits its argument's literal
+    // float type, whose payload is 2.7 -- the argument, not the result. Asking
+    // it about a non-literal node therefore returns a confidently wrong value.
+    if (!value || value->node_type != AST_NODE_PRIMARY ||
+            ((AstPrimaryNode*)value)->expr) {
+        return false;
+    }
+    return ast_static_literal_item(tp, init, out);
 }
 
 // RC3: the declarator a name is bound by, when that binding is immutable and
@@ -5371,6 +5387,25 @@ static bool interp_const_node_supported_depth(AstNode* node, int depth) {
         default:
             return false;
         }
+    }
+    case AST_NODE_CALL_EXPR: {
+        // RC3.4 / D6.1.2: purity is the soundness gate, and
+        // `interp_eval_mode_allows_sys_func` already encodes it -- it rejects
+        // `is_proc` and `is_async` callees and names the restricted-mode
+        // allowlist. Reuse that judgement rather than keeping a second list
+        // that could drift from it.
+        AstCallNode* call = (AstCallNode*)node;
+        AstNode* callee = ast_unwrap_primary(call->function);
+        if (!callee || callee->node_type != AST_NODE_SYS_FUNC) return false;
+        if (ast_call_has_named_args(call)) return false;
+        if (!interp_eval_mode_allows_sys_func(EvalMode::CONST,
+                ((AstSysFuncNode*)callee)->fn_info)) {
+            return false;
+        }
+        for (AstNode* arg = call->argument; arg; arg = arg->next) {
+            if (!interp_const_node_supported_depth(arg, depth)) return false;
+        }
+        return true;
     }
     case AST_NODE_IF_EXPR: {
         AstIfNode* branch = (AstIfNode*)node;
