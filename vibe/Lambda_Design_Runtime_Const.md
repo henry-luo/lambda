@@ -388,8 +388,8 @@ Each phase is independently landable, green on `make test-lambda-baseline` and
 | **RC-P5** | RC5/RC7/RC13 — pooled results with rehoming. **Blocked on RC-P6 as written (2026-09-12): there is nothing to rehome.** Eligibility admits only NULL/BOOL/INT/FLOAT literal operands, and no operator over those yields a pointer-backed value — `2 ** 100` and `9007199254740991 + 1` give floats (`1.27e30`, `inf`), `"ab" + "c"` is an error since `+` does not concatenate, and string comparison gives a bool. Every producible result is self-contained. The one reachable exception is a subnormal float, which is boxed. Rehoming needs eligibility widened first — to expressions that *compute* a pointer-backed value. Aggregate literals are **not** that case: under RC15 they are const values, materialized into the pool at build time without ever entering the folder (RC-P5a). Rehoming therefore waits on RC-P6's expression widening. | forced-GC oracle (`LAMBDA_GC_FORCE_EVERY=1`, `POISON_FREED=1`) green |
 | **RC-P6** | RC2/RC3 — eligibility by interpreter capability under the purity gate. **Landed for identifiers and pure sys-func calls (2026-09-12).** Reads of immutable const bindings fold transitively; calls reuse `interp_eval_mode_allows_sys_func`, which already encodes D6.1.2 (rejects `is_proc`/`is_async`) plus the restricted-mode set. **Open:** user-defined pure `fn` calls — that gate rejects every non-sys-func callee, so admitting them needs callee frame setup at fold time. | baseline green; fold-rate census |
 | **RC-P6b** | RC17/RC18 — delete the inline `Type` payloads and `TypeConst::const_index`; move the handle to `AstNode`'s padding; share literal types as singletons. 58 cast sites. | `sizeof(AstNode)` unchanged; no per-literal `Type` allocation; baseline green |
-| **RC-P7** | RC6 — content-hashed pool with dedup. | const-pool size census |
-| **RC-P8** | RC12 — retire `AstIndex::facts` / `AstNodeFacts`. | LOC strongly negative |
+| **RC-P7** | RC6 — content-hashed pool with dedup. **Blocked on RC-P6b (2026-09-12).** `const_list` is an untyped `void*` list: its entries are `String*`, `Binary*`, `Decimal*`, `Array*`/`Map*`, and interior pointers into `Type` payloads (`&ft->double_val`, `&dt_type->datetime`), with **no kind tag anywhere**. Content-hashing needs to know what a pointer points at, so it needs either a parallel kind array or per-kind dedup tables at each of the ~10 append sites — and RC17/RC18 restructure exactly that storage, so building either first is throwaway work. Dedup belongs after the pool becomes the single typed home for const values. | const-pool size census |
+| **RC-P8** | RC12 — retire `AstIndex::facts` / `AstNodeFacts`. **Premise needs review (2026-09-12).** RC12 assumed a per-node fact table is inherently a scaffold because reaching it costs a pointer-hash probe. `AstNode::index_id` removed that cost: `facts[node->index_id]` is a direct array index, and one generic id serves *every* per-node fact rather than each fact kind claiming its own field in the node. Retiring the table may now be the wrong goal — the question is whether a compact, id-indexed facts row is the right home for erasable per-node state, which is close to what D8.2.5v2 rejected in ID-keyed *side tables*. Needs a ruling before implementation. | LOC strongly negative |
 
 RC-P0 through RC-P2 are corrections to existing defects and carry no design
 risk; all three have landed. The folder's input is already exactly the set that
@@ -431,6 +431,11 @@ GC's static/immortal contract.
 - **RC-O3** — which floats are inline-representable, exactly? The boxed
   residue must be pooled rather than baked, so the test is a representation
   predicate that does not exist yet in this form.
+- **RC-O7** — RC18 places the const handle on `AstNode`. The implementation put
+  `index_id` in that padding instead, which subsumes it (`facts[index_id]` is
+  O(1) and serves every per-node fact, not just consts) but leaves 2 of the 6
+  bytes free rather than 4. Should RC18 be restated as "the node carries its
+  index identity; per-node facts are reached through it"?
 - **RC-O4** — should folding a const binding *read* also let the binding be
   eliminated when nothing else observes it, or is that a separate DCE concern?
 - **RC-O5** — does RC6's content hashing extend to the MarkPack const pool of
