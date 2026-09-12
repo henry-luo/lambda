@@ -1,16 +1,26 @@
 {
   "schema_version": 1,
-  "description": "D8.2.6, D3.3.3v3, D5.3.4, S7.1.3v2: loop demand and checked native mutation.",
+  "description": "D8.2.6, D3.3.3v3, D5.3.4, S7.1.3v2: loop demand and checked native mutation. 2026-09-13: a guarded `while` emits a proven fast arm plus a canonical generic sibling (D2.2.2, D8.3.1), so the hoisted call is emitted once per ARM. The count tracks that; the property itself -- the call is admitted before the loop test and never from inside the body -- is pinned by the expect_seq and by the second group, which forbids the call inside the proven arm's body (loop test .. back edge). The loop test the hoisted call must precede is now the native int-lane compare (T19-C); it no longer widens to the double lane, so the ordering pin follows `lt`.",
   "checks": [
     {
       "in_func": "_local_while_#",
       "expect_seq": [
         "call\tfabs_p, fabs",
-        "dlt"
+        "lt\t{{r}}, {{r}}, %p1"
       ],
       "count": {
-        "call\tfabs_p, fabs": 1
+        "call\tfabs_p, fabs": 2
       }
+    },
+    {
+      "in_func": "_local_while_#",
+      "in_range": {
+        "from": "lt\t{{r}}, {{r}}, %p1",
+        "to": "jmp\tL"
+      },
+      "forbid": [
+        "call\tfabs_p, fabs"
+      ]
     },
     {
       "in_func": "_counted_#",

@@ -1,18 +1,32 @@
 {
   "schema_version": 1,
-  "description": "D3.3.3v3/S7.1.3v2/S9.2.2: an exact int[][] write computes both shaped ArrayNum strides and stores the native lane before its allocation-bearing checked fallback.",
+  "description": "D3.3.3v3/S7.1.3v2/S9.2.2: an exact int[][] write computes both shaped ArrayNum strides and stores the native lane before its allocation-bearing checked fallback. Re-pinned 2026-09-13: both strides are still computed, but each now multiplies its index parameter in place (%p2 row, %p3 column) instead of a copied local, so the patterns name the parameter registers -- `{{r}}` matches only %r<hex> by design. The native lane store likewise writes the value parameter (%p4) straight into the computed slot.",
   "checks": [
     {
       "in_func": "_store_#",
       "expect_seq": [
-        { "pattern": "\tand\t{{r}}, {{r}}, 3" },
-        { "pattern": "\tmul\t{{r}}, {{r}}, {{r}}" },
-        { "pattern": "\tmov\ti64:({{r}}), {{r}}" },
-        { "pattern": "call\tarray_plain_p, array_plain" },
-        { "pattern": "call\tlambda_array_path_set_checked_inplace_p, lambda_array_path_set_checked_inplace" }
+        {
+          "pattern": "\tand\t{{r}}, {{r}}, 3"
+        },
+        {
+          "pattern": "\tmul\t{{r}}, %p2, {{r}}"
+        },
+        {
+          "pattern": "\tmul\t{{r}}, %p3, {{r}}"
+        },
+        {
+          "pattern": "\tmov\ti64:({{r}}), %p4"
+        },
+        {
+          "pattern": "call\tarray_plain_p, array_plain"
+        },
+        {
+          "pattern": "call\tlambda_array_path_set_checked_inplace_p, lambda_array_path_set_checked_inplace"
+        }
       ],
       "count": {
-        "\tmul\t{{r}}, {{r}}, {{r}}": 2,
+        "\tmul\t{{r}}, %p2, {{r}}": 1,
+        "\tmul\t{{r}}, %p3, {{r}}": 1,
         "call\tarray_plain_p, array_plain": 1,
         "call\tlambda_array_path_set_checked_inplace_p, lambda_array_path_set_checked_inplace": 1
       }

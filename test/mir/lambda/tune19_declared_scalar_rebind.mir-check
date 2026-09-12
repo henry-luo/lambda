@@ -1,18 +1,27 @@
 {
   "schema_version": 1,
-  "description": "T19-A: rebinding a declared int from a lane-native int[] read tests INT_LANE_NULL inline and branches, instead of boxing the lane for lambda_type_check on the straight-line path. Anchored on the indexed load (the one `mul` in the body): the read's null arm materialises INT_LANE_NULL, the boundary compares against it, and a branch follows immediately. The boxed lowering has no such adjacency -- it tags the lane and calls out first. checked_rebind is the unproven twin and still crosses the boxed boundary.",
+  "description": "T19-A: rebinding a declared int from a lane-native int[] read stays on the raw lane -- the loop body computes the element address and loads it, and never boxes the lane to call lambda_type_check. Re-pinned 2026-09-13: the rebind boundary is now proven outright, so the old INT_LANE_NULL-compare-then-branch adjacency is gone (the read's bounds check subsumes it and the null arm is its own block) and no type check survives on the straight-line path at all. The group is scoped to the loop body, which is where a per-iteration boxed boundary would reappear. checked_rebind is the unproven twin and still crosses the boxed boundary.",
   "checks": [
     {
       "in_func": "_last_element_#",
       "expect_seq": [
-        { "pattern": "\tmul\t" },
-        { "pattern": ", 72057594037927936" },
-        { "pattern": ", 72057594037927936" },
-        { "pattern": "\tbf\t", "next_line": true }
+        {
+          "pattern": "\tmul\t"
+        },
+        {
+          "pattern": "\tadd\t"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:({{r}})"
+        }
       ],
-      "count": {
-        "lambda_type_check,": 2
-      }
+      "in_range": {
+        "from": "lt\t{{r}}, {{r}}, {{r}}",
+        "to": "jmp\tL"
+      },
+      "forbid": [
+        "lambda_type_check,"
+      ]
     },
     {
       "in_func": "_checked_rebind_#",

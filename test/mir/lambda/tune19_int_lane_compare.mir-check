@@ -1,13 +1,17 @@
 {
   "schema_version": 1,
-  "description": "T19-C: a nullable int-lane ordered comparison keeps a native integer compare on the certified in-band arm and widens to the double lane only on the sentinel arm. The certificate-miss slow path uses item_at safely.",
+  "description": "T19-C: a nullable int-lane ordered comparison lowers to ONE native integer compare paired with a null-lane sentinel test, instead of widening both operands to the double lane (a band test, an i2d and a cold call per operand). The forbid keeps the widening from coming back. CAVEAT 2026-09-13: this pins the lowering's SHAPE, not its conformance. S6.1.2 says `null < x` -> null by absorption, and the interpreter returns null; this lowering folds the sentinel into a bool, so `type(absent > 0)` is `bool` under the JIT and `null` under the interpreter -- a live tier divergence against SI3v2. An earlier revision of this file cited S7.10.3 for \"null comparisons are false\"; that ruling is about sys-func return contracts, and its parenthetical means the null RESULT is falsy, not that the result is a bool. Re-pin this group when the lane lowering is made to yield null.",
   "checks": [
     {
       "in_func": "_count_positive_#",
       "count": {
         "\tgt\t": 1,
-        "\tdgt\t": 1
-      }
+        "\tne\t{{r}}, {{r}}, 72057594037927936": 1
+      },
+      "forbid": [
+        "\tdgt\t",
+        "\ti2d\t"
+      ]
     }
   ]
 }

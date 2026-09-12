@@ -386,6 +386,15 @@ struct CheckGroup {
     bool whole_module = false;     // in_func == "*"
     bool has_occurrence = false;
     long long occurrence = 0;
+    // Narrows the scope to one region WITHIN the selected function: from the
+    // first line matching `range_from` up to (excluding) the next line matching
+    // `range_to`, or the end of the function when `range_to` is empty. A guarded
+    // loop emits a proven fast arm and a canonical generic sibling in the same
+    // function, so a whole-function `forbid` can no longer say "the optimized
+    // arm avoids this lowering" -- the generic arm is supposed to keep it.
+    bool has_range = false;
+    std::string range_from;
+    std::string range_to;
     // Return-value convention this group asserts (0 = every convention).
     // A fixture that pins emission shapes belonging to one convention carries
     // one group per convention rather than being skipped wholesale, so both
@@ -487,7 +496,7 @@ inline bool load_sidecar(const std::string& path, Sidecar* out, std::string* err
     }
 
     static const char* kCheckKeys[] = {
-        "in_module", "in_func", "occurrence", "expect", "expect_any", "forbid", "forbid_if", "expect_seq", "count",
+        "in_module", "in_func", "occurrence", "in_range", "expect", "expect_any", "forbid", "forbid_if", "expect_seq", "count",
         "return_convention",
     };
     static const char* kSeqKeys[] = { "pattern", "next_line" };
@@ -524,6 +533,31 @@ inline bool load_sidecar(const std::string& path, Sidecar* out, std::string* err
             group.has_occurrence = true;
             group.occurrence = occurrence->int_value;
         }
+        const JsonValue* in_range = group_json.find("in_range");
+        if (in_range) {
+            if (in_range->kind != JsonValue::KObj) { *error = "'in_range' must be an object"; return false; }
+            static const char* kRangeKeys[] = { "from", "to" };
+            for (size_t i = 0; i < in_range->fields.size(); i++) {
+                if (!known_key(kRangeKeys, sizeof(kRangeKeys) / sizeof(kRangeKeys[0]),
+                        in_range->fields[i].first)) {
+                    *error = "unknown field '" + in_range->fields[i].first + "' in 'in_range'";
+                    return false;
+                }
+            }
+            const JsonValue* from = in_range->find("from");
+            if (!from || from->kind != JsonValue::KStr || from->str_value.empty()) {
+                *error = "'in_range' needs a non-empty string 'from'";
+                return false;
+            }
+            group.has_range = true;
+            group.range_from = from->str_value;
+            const JsonValue* to = in_range->find("to");
+            if (to) {
+                if (to->kind != JsonValue::KStr) { *error = "'in_range.to' must be a string"; return false; }
+                group.range_to = to->str_value;
+            }
+        }
+
         const JsonValue* convention = group_json.find("return_convention");
         if (convention) {
             if (convention->kind != JsonValue::KInt || convention->int_value != 3) {
@@ -1164,6 +1198,32 @@ inline void run_fixture(const std::string& script_path, const std::string& sidec
         ASSERT_TRUE(select_scope(compiled.dump, group, &lines, &label, &scope_error))
             << "sidecar " << sidecar_path << " check #" << c << ": " << scope_error
             << "\nartifact: " << compiled.dump_path;
+
+        // Narrow to the requested region before any assertion runs, so a check
+        // that pins one loop arm is not answered by its sibling's lowering.
+        if (group.has_range) {
+            size_t begin = lines.size();
+            for (size_t i = 0; i < lines.size(); i++) {
+                if (line_contains(lines[i].text, group.range_from)) { begin = i; break; }
+            }
+            ASSERT_LT(begin, lines.size())
+                << "sidecar " << sidecar_path << " check #" << c
+                << ": in_range.from never matched: \"" << group.range_from << "\"\nscope:   "
+                << label << "\nartifact: " << compiled.dump_path;
+            size_t end = lines.size();
+            if (!group.range_to.empty()) {
+                for (size_t i = begin + 1; i < lines.size(); i++) {
+                    if (line_contains(lines[i].text, group.range_to)) { end = i; break; }
+                }
+                ASSERT_LT(end, lines.size())
+                    << "sidecar " << sidecar_path << " check #" << c
+                    << ": in_range.to never matched after from: \"" << group.range_to
+                    << "\"\nscope:   " << label << "\nartifact: " << compiled.dump_path;
+            }
+            lines.assign(lines.begin() + begin, lines.begin() + end);
+            label += " [in_range \"" + group.range_from + "\" .. \"" +
+                     (group.range_to.empty() ? std::string("end") : group.range_to) + "\"]";
+        }
 
         const std::string context =
             "\nfixture: " + script_path +

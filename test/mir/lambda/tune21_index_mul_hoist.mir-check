@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "T21-1b: a counted-loop index product (`i * n + k`) whose operands the enclosing loops prove nonnegative is lowered as a plain i64 `mul` guarded by one unsigned compare per operand against 2^26 (exact: the product is then below 2^52), and the invalid case folds into the sign bit the bounds check already rejects (`or` with valid-1). No flag-carrying `mulo`/`bo` pair or xor poison select may appear in the kernel. T22's S5.1.2-correct loop-condition slow edge may convert an unproven parameter lane to double elsewhere in the function; it is not part of this index product.",
+  "description": "T21-1b: a counted-loop index product (`i * n + k`) whose operands the enclosing loops prove nonnegative is lowered as a plain i64 `mul` guarded by one unsigned compare per operand against 2^26 (exact: the product is then below 2^52), and the invalid case folds into the sign bit the bounds check already rejects (`or` with valid-1). No flag-carrying `mulo`/`bo` pair or xor poison select may appear in the kernel. T22's S5.1.2-correct loop-condition slow edge may convert an unproven parameter lane to double elsewhere in the function; it is not part of this index product. Scoped to the proven arm 2026-09-13: the guarded `while` now emits a generic sibling whose canonical sentinel-aware lowering legitimately keeps the poison select (D2.2.2, D8.3.1); the forbid pins the proven arm, which is the kernel this fixture is about.",
   "checks": [
     {
       "in_func": "_dot_rows_#",
@@ -10,10 +10,20 @@
         "xor\t{{r}}, {{r}}, 9223372036854775807"
       ],
       "expect_seq": [
-        { "pattern": "mul\t{{r}}, {{r}}, %p3" },
-        { "pattern": "ult\t{{r}}, {{r}}, 67108864" },
-        { "pattern": "ult\t{{r}}, %p3, 67108864" }
-      ]
+        {
+          "pattern": "mul\t{{r}}, {{r}}, %p3"
+        },
+        {
+          "pattern": "ult\t{{r}}, {{r}}, 67108864"
+        },
+        {
+          "pattern": "ult\t{{r}}, %p3, 67108864"
+        }
+      ],
+      "in_range": {
+        "from": "mul\t{{r}}, {{r}}, %p3",
+        "to": "ne\t{{r}}, {{r}}, -9223372036854775808"
+      }
     }
   ]
 }

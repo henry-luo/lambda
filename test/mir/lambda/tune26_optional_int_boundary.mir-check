@@ -1,14 +1,23 @@
 {
   "schema_version": 1,
-  "description": "Tune26 / S4.1 / D2.4.1 / D3.3.3v3: ord(any) returns a checked int|null Item which enters IntLane once. A plain int declaration branches on the lane null sentinel before its sole, cold lambda_type_check; the non-null path must not box and dynamically traverse the already closed result.",
+  "description": "Tune26 / S4.1 / D2.4.1 / D3.3.3v3: ord(any) returns a checked int|null Item which enters IntLane once. A plain int declaration branches on the lane null sentinel before its sole, cold lambda_type_check; the non-null path must not box and dynamically traverse the already closed result. Re-pinned 2026-09-13: the sentinel branch is now taken TOWARD the cold check (`bt`) rather than past it (`bf`); the adjacency this fixture pins -- the null-lane test immediately followed by its branch, with one cold lambda_type_check -- is unchanged.",
   "checks": [
     {
       "in_func": "_decode_#",
       "expect_seq": [
-        { "pattern": "call\tfn_ord_p, fn_ord" },
-        { "pattern": ", 72057594037927936" },
-        { "pattern": "\tbf\t", "next_line": true },
-        { "pattern": "call\tlambda_type_check_p, lambda_type_check" }
+        {
+          "pattern": "call\tfn_ord_p, fn_ord"
+        },
+        {
+          "pattern": ", 72057594037927936"
+        },
+        {
+          "pattern": "\tbt\t",
+          "next_line": true
+        },
+        {
+          "pattern": "call\tlambda_type_check_p, lambda_type_check"
+        }
       ],
       "count": {
         "call\tfn_ord_p, fn_ord": 1,

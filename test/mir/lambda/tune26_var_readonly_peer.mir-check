@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Tune26 T26-2: a var float[] destination keeps its checked COW store, while a distinct readonly float[] peer receives the loop's dense extent proof and raw float load.",
+  "description": "Tune26 T26-2: a var float[] destination keeps its checked COW store, while a distinct readonly float[] peer receives the loop's dense extent proof and raw float load. 2026-09-13: the var destination's checked COW store is now array_num_set_cow_idx (CW32v2); it COW-prepares at operation entry and still returns ItemError, so the checked path this fixture pins is the same boundary under its current name.",
   "checks": [
     {
       "in_func": "_tune26_var_readonly_peer_#",
@@ -13,7 +13,7 @@
         "dmov\t{{r}}, d:({{r}})"
       ],
       "expect": [
-        "call\tlambda_array_set_checked_inplace_lane"
+        "call\tarray_num_set_cow_idx"
       ]
     }
   ]
