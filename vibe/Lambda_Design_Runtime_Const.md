@@ -386,7 +386,7 @@ Each phase is independently landable, green on `make test-lambda-baseline` and
 | **RC-P4** | RC9 — interpreter consumes fold facts. | T0 no longer re-evaluates constants |
 | **RC-P5a** | RC15 — **const containers are materialized, not folded.** A literal ARRAY/MAP whose parts are all const becomes one pooled static container recorded as a const fact, built directly from the AST with no evaluation. `emit_static_collection_const()` already does this construction inside the MIR back end (§9.1); it becomes a consumer of the shared fact instead of a private builder, so T0 stops rebuilding the same array on every execution. | both tiers read one container; no aggregate reaches `interp_const_fold_script` |
 | **RC-P5** | RC5/RC7/RC13 — pooled results with rehoming. **Blocked on RC-P6 as written (2026-09-12): there is nothing to rehome.** Eligibility admits only NULL/BOOL/INT/FLOAT literal operands, and no operator over those yields a pointer-backed value — `2 ** 100` and `9007199254740991 + 1` give floats (`1.27e30`, `inf`), `"ab" + "c"` is an error since `+` does not concatenate, and string comparison gives a bool. Every producible result is self-contained. The one reachable exception is a subnormal float, which is boxed. Rehoming needs eligibility widened first — to expressions that *compute* a pointer-backed value. Aggregate literals are **not** that case: under RC15 they are const values, materialized into the pool at build time without ever entering the folder (RC-P5a). Rehoming therefore waits on RC-P6's expression widening. | forced-GC oracle (`LAMBDA_GC_FORCE_EVERY=1`, `POISON_FREED=1`) green |
-| **RC-P6** | RC2/RC3 — eligibility by interpreter capability under the purity gate. | baseline green; fold-rate census |
+| **RC-P6** | RC2/RC3 — eligibility by interpreter capability under the purity gate. **Landed for identifiers and pure sys-func calls (2026-09-12).** Reads of immutable const bindings fold transitively; calls reuse `interp_eval_mode_allows_sys_func`, which already encodes D6.1.2 (rejects `is_proc`/`is_async`) plus the restricted-mode set. **Open:** user-defined pure `fn` calls — that gate rejects every non-sys-func callee, so admitting them needs callee frame setup at fold time. | baseline green; fold-rate census |
 | **RC-P6b** | RC17/RC18 — delete the inline `Type` payloads and `TypeConst::const_index`; move the handle to `AstNode`'s padding; share literal types as singletons. 58 cast sites. | `sizeof(AstNode)` unchanged; no per-literal `Type` allocation; baseline green |
 | **RC-P7** | RC6 — content-hashed pool with dedup. | const-pool size census |
 | **RC-P8** | RC12 — retire `AstIndex::facts` / `AstNodeFacts`. | LOC strongly negative |
@@ -464,6 +464,16 @@ GC's static/immortal contract.
   caller skips `PRIMARY` nodes outright. Third instance in this family, after
   `Lambda_Design_Unified_AST.md` §13.6 and the P7 U-A withdrawal — a predicate
   read in isolation says nothing about whether it is reached.
+- **Resolving a const initializer through `ast_static_literal_item` first.**
+  Built and reverted during RC-P6. That function reports what a node's *type*
+  carries, not what the node evaluates to, and inference hands a computed node a
+  literal-valued type: `floor(2.7)` inherits its argument's literal float type,
+  payload 2.7. Reading `let b = floor(2.7)` therefore resolved to the argument —
+  T0 gave 2, MIR gave 2.7. A published fold fact must answer first and
+  unconditionally; only a bare literal node may answer from its type. The
+  divergence was found by running T0, MIR and a `LAMBDA_CONST_FOLD=0` control
+  together: the control agreeing with T0 placed the defect in the fold rather
+  than the runtime, and that triangle is the standing check for later phases.
 - **Keeping `const_index` on a `TypeConst`, carried only by const AST nodes.**
   Considered and rejected while resolving RC-O1. It reads tidily for a literal,
   where the node *is* a constant, but it does not survive folding: a folded
