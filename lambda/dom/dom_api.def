@@ -63,7 +63,7 @@ DOM_OP(CORE, last_child,       node, 1, "fn(n: any) -> any",        dom_core_las
 DOM_OP(CORE, next_sibling,     node, 1, "fn(n: any) -> any",        dom_core_next_sibling,     DOM_F_NEUTRAL, "")
 DOM_OP(CORE, previous_sibling, node, 1, "fn(n: any) -> any",        dom_core_previous_sibling, DOM_F_NEUTRAL, "")
 DOM_OP(CORE, owner_document,   node, 1, "fn(n: any) -> any",        dom_core_owner_document,   DOM_F_NEUTRAL, "")
-DOM_OP(CORE, same_node,       node, 2, "fn(a: any, b: any) -> bool", dom_core_same_node,      DOM_F_NEUTRAL, "")
+DOM_OP(CORE, same_node,       node, 2, "fn(a: any, b: any) -> bool", dom_core_same_node_op,      DOM_F_NEUTRAL, "")
 // S5.1.4: Lambda has no identity operator and never will, and a node wrapper
 // materialises no entries, so `a == b` compares two empty maps and answers
 // true for ANY two nodes. Node identity is therefore a DOM operation, and
@@ -81,9 +81,22 @@ DOM_OP(CORE, attribute_names,  attr, 1, "fn(n: any) -> array",                  
 // CORE — tree mutation
 // ---------------------------------------------------------------------------
 DOM_OP(CORE, create_node,      tree, 4, "fn(doc: any, type: int, name: string|null, data: string|null) -> any", dom_core_create_node, DOM_F_NEUTRAL | DOM_F_MUTATES, "")
-DOM_OP(CORE, insert_before,    tree, 3, "fn(parent: any, node: any, ref: any) -> any",      dom_core_insert_before,    DOM_F_NEUTRAL | DOM_F_MUTATES, "")
-DOM_OP(CORE, remove_child,     tree, 2, "fn(parent: any, node: any) -> any",                dom_core_remove_child,     DOM_F_NEUTRAL | DOM_F_MUTATES, "")
+DOM_OP(CORE, insert_before,    tree, 3, "fn(parent: any, node: any, ref: any) -> any",      dom_core_insert_before_op,    DOM_F_NEUTRAL | DOM_F_MUTATES, "")
+DOM_OP(CORE, remove_child,     tree, 2, "fn(parent: any, node: any) -> any",                dom_core_remove_child_op,     DOM_F_NEUTRAL | DOM_F_MUTATES, "")
 DOM_OP(CORE, set_node_value,   tree, 2, "fn(n: any, data: string) -> null",                 dom_core_set_node_value,   DOM_F_NEUTRAL | DOM_F_MUTATES, "")
+
+// ---------------------------------------------------------------------------
+// CORE — CharacterData. Neutrality is a fact recorded per row, not a guess, and
+// no Lambda-only document has exercised these yet, so they stay out of the
+// `dom.*` face until one does. The row exists so the operation has one name and
+// one body reachable without the ordinal executor.
+// ---------------------------------------------------------------------------
+DOM_OP(CORE, replace_data,   chardata, 4, "fn(n: any, offset: int, count: int, data: string) -> null", dom_core_replace_data,   DOM_F_MUTATES, "")
+DOM_OP(CORE, insert_data,    chardata, 3, "fn(n: any, offset: int, data: string) -> null",             dom_core_insert_data,    DOM_F_MUTATES, "")
+DOM_OP(CORE, append_data,    chardata, 2, "fn(n: any, data: string) -> null",                          dom_core_append_data,    DOM_F_MUTATES, "")
+DOM_OP(CORE, delete_data,    chardata, 3, "fn(n: any, offset: int, count: int) -> null",               dom_core_delete_data,    DOM_F_MUTATES, "")
+DOM_OP(CORE, substring_data, chardata, 3, "fn(n: any, offset: int, count: int) -> string",             dom_core_substring_data, 0, "")
+DOM_OP(CORE, split_text,     chardata, 2, "fn(n: any, offset: int) -> any",                            dom_core_split_text,     DOM_F_MUTATES, "")
 
 // ---------------------------------------------------------------------------
 // CORE — matching, parsing, serializing
@@ -128,7 +141,7 @@ DOM_OP(CORE, client_rects,     geometry, 1, "fn(n: any) -> array",              
 DOM_OP(CORE, scroll_state,     geometry, 1, "fn(n: any) -> map",                            dom_core_scroll_state,     DOM_F_NEUTRAL, "")
 DOM_OP(CORE, set_scroll_state, geometry, 3, "fn(n: any, x: float, y: float) -> null",       dom_core_set_scroll_state, DOM_F_NEUTRAL | DOM_F_MUTATES, "")
 DOM_OP(CORE, element_from_point, geometry, 3, "fn(doc: any, x: float, y: float) -> any",    dom_core_element_from_point, DOM_F_NEUTRAL, "")
-DOM_OP(CORE, scroll_into_view, geometry, 1, "fn(n: any) -> bool",                           dom_core_scroll_into_view, DOM_F_NEUTRAL, "")
+DOM_OP(CORE, scroll_into_view, geometry, 1, "fn(n: any) -> bool",                           dom_core_scroll_into_view_op, DOM_F_NEUTRAL, "")
 
 // ---------------------------------------------------------------------------
 // CORE — focus, navigation, actions — engine-provided
@@ -329,9 +342,9 @@ DOM_OP(DERIVED, children,        node, 1, "fn(n: any) -> array", dom_fp_children
        "n.children")
 DOM_OP(DERIVED, child_nodes,     node, 1, "fn(n: any) -> array", dom_fp_child_nodes, DOM_F_NEUTRAL | DOM_F_FASTPATH,
        "n.child_nodes")
-DOM_OP(DERIVED, contains,        node, 2, "fn(a: any, b: any) -> bool", dom_fp_contains, DOM_F_NEUTRAL | DOM_F_FASTPATH,
+DOM_OP(DERIVED, contains,        node, 2, "fn(a: any, b: any) -> bool", dom_core_contains_op, DOM_F_NEUTRAL | DOM_F_FASTPATH,
        "same_node(b, a) or (parent_node(b) != null and contains(a, parent_node(b)))")
-DOM_OP(DERIVED, equal_node,      node, 2, "fn(a: any, b: any) -> bool", dom_fp_equal_node, DOM_F_NEUTRAL | DOM_F_FASTPATH,
+DOM_OP(DERIVED, equal_node,      node, 2, "fn(a: any, b: any) -> bool", dom_core_equal_node, DOM_F_NEUTRAL | DOM_F_FASTPATH,
        "node_type(a) == node_type(b) and node_name(a) == node_name(b) and node_value(a) == node_value(b) and attribute_names(a) == attribute_names(b) and all([for (k in attribute_names(a)) get_attribute(a, k) == get_attribute(b, k)]) and len(child_nodes(a)) == len(child_nodes(b)) and all([for (p in zip(child_nodes(a), child_nodes(b))) equal_node(p[0], p[1])])")
 // The document ELEMENT -- <html> -- as distinct from the document itself.
 // `radiant.document_root` means this one, and mapping it to root_node during
@@ -343,17 +356,17 @@ DOM_OP(DERIVED, root_node,       node, 1, "fn(n: any) -> any", dom_fp_root_node,
        "if (parent_node(n) == null) n else root_node(parent_node(n))")
 
 // --- 5.2 structural sugar
-DOM_OP(DERIVED, append_child,    tree, 2, "fn(parent: any, child: any) -> any", dom_fp_append_child, DOM_F_NEUTRAL | DOM_F_MUTATES | DOM_F_FASTPATH,
+DOM_OP(DERIVED, append_child,    tree, 2, "fn(parent: any, child: any) -> any", dom_core_append_child, DOM_F_NEUTRAL | DOM_F_MUTATES | DOM_F_FASTPATH,
        "insert_before(parent, child, null)")
 DOM_OP(DERIVED, remove,          tree, 1, "fn(n: any) -> any", dom_fp_remove, DOM_F_NEUTRAL | DOM_F_MUTATES | DOM_F_FASTPATH,
        "remove_child(parent_node(n), n)")
-DOM_OP(DERIVED, replace_child,   tree, 3, "fn(parent: any, new: any, old: any) -> any", dom_fp_replace_child, DOM_F_NEUTRAL | DOM_F_MUTATES | DOM_F_FASTPATH,
+DOM_OP(DERIVED, replace_child,   tree, 3, "fn(parent: any, new: any, old: any) -> any", dom_core_replace_child, DOM_F_NEUTRAL | DOM_F_MUTATES | DOM_F_FASTPATH,
        "insert_before(parent, new, old); remove_child(parent, old); old")
 DOM_OP(DERIVED, create_element,  tree, 2, "fn(doc: any, tag: string) -> any", dom_fp_create_element, DOM_F_NEUTRAL | DOM_F_MUTATES | DOM_F_FASTPATH,
        "create_node(doc, 1, tag, null)")
 DOM_OP(DERIVED, create_text_node, tree, 2, "fn(doc: any, data: string) -> any", dom_fp_create_text_node, DOM_F_NEUTRAL | DOM_F_MUTATES | DOM_F_FASTPATH,
        "create_node(doc, 3, null, data)")
-DOM_OP(DERIVED, clone_node,      tree, 2, "fn(n: any, deep: bool) -> any", dom_fp_clone_node, DOM_F_NEUTRAL | DOM_F_MUTATES | DOM_F_FASTPATH,
+DOM_OP(DERIVED, clone_node,      tree, 2, "fn(n: any, deep: bool) -> any", dom_core_clone_node, DOM_F_NEUTRAL | DOM_F_MUTATES | DOM_F_FASTPATH,
        "let c = create_node(owner_document(n), node_type(n), node_name(n), node_value(n)); for (name in attribute_names(n)) set_attribute(c, name, get_attribute(n, name)); if (deep) for (k in child_nodes(n)) append_child(c, clone_node(k, true)); c")
 
 // --- 5.3 character data
@@ -363,13 +376,13 @@ DOM_OP(DERIVED, set_text_content, text, 2, "fn(n: any, s: string) -> null", dom_
        "for (k in child_nodes(n)) remove_child(n, k); if (s != \"\") append_child(n, create_text_node(owner_document(n), s))")
 
 // --- 5.4 queries over matches + traversal
-DOM_OP(DERIVED, query_selector,  query, 2, "fn(root: any, selector: string) -> any", dom_fp_query_selector, DOM_F_NEUTRAL | DOM_F_FASTPATH,
+DOM_OP(DERIVED, query_selector,  query, 2, "fn(root: any, selector: string) -> any", dom_core_query_selector, DOM_F_NEUTRAL | DOM_F_FASTPATH,
        "first([for (d in descendants(root) where matches(d, selector)) d])")
-DOM_OP(DERIVED, query_selector_all, query, 2, "fn(root: any, selector: string) -> array", dom_fp_query_selector_all, DOM_F_NEUTRAL | DOM_F_SNAPSHOT | DOM_F_FASTPATH,
+DOM_OP(DERIVED, query_selector_all, query, 2, "fn(root: any, selector: string) -> array", dom_core_query_selector_all, DOM_F_NEUTRAL | DOM_F_SNAPSHOT | DOM_F_FASTPATH,
        "[for (d in descendants(root) where matches(d, selector)) d]")
-DOM_OP(DERIVED, closest,         query, 2, "fn(n: any, selector: string) -> any", dom_fp_closest, DOM_F_NEUTRAL | DOM_F_FASTPATH,
+DOM_OP(DERIVED, closest,         query, 2, "fn(n: any, selector: string) -> any", dom_core_closest, DOM_F_NEUTRAL | DOM_F_FASTPATH,
        "if (node_type(n) != 1) null else if (matches(n, selector)) n else if (parent_element(n) != null) closest(parent_element(n), selector) else null")
-DOM_OP(DERIVED, get_element_by_id, query, 2, "fn(root: any, id: string) -> any", dom_fp_get_element_by_id, DOM_F_NEUTRAL | DOM_F_FASTPATH,
+DOM_OP(DERIVED, get_element_by_id, query, 2, "fn(root: any, id: string) -> any", dom_core_get_element_by_id, DOM_F_NEUTRAL | DOM_F_FASTPATH,
        "first of [for (d in descendants(root) where node_type(d) == 1 and get_attribute(d, \"id\") == id) d]")
 DOM_OP(DERIVED, has_attribute,   attr, 2, "fn(n: any, name: string) -> bool", dom_fp_has_attribute, DOM_F_NEUTRAL | DOM_F_FASTPATH,
        "get_attribute(n, name) != null")
