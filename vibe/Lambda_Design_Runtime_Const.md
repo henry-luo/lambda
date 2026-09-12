@@ -308,9 +308,34 @@ So JS-P1 needs a const image JS does not have. Two shapes, unresolved:
   clear win over the status quo — the call returns an existing pointer instead
   of allocating a GC String — but a call per const load rather than a load.
 
-The second is the smaller first step and preserves the option of the first.
-Either way this is **new infrastructure inside JS's module system**, not a port
-of Lambda's; the storage *design* transfers, the storage *mechanism* does not.
+Neither is the real cost. **MIR is cached**, so a const *pointer* cannot travel
+with a compiled unit — only bytes can, and the pointers must be rebuilt when the
+unit is linked into a realm. Lambda solves this with a per-module BSS populated
+at load; JS has no equivalent.
+
+JS does, however, already solve the identical problem for property keys:
+
+- `jm_build_property_key_image()` serializes the keys into the compiled artifact;
+- `JsPreambleState` carries them as `module_property_specs` / `_count` /
+  `_bytes_size`, surviving realm cloning and the MIR cache;
+- `lambda_module_state_link_property_keys()` materializes them into module state
+  at execution, before any generated code runs.
+
+**JS-P1 is that pattern, for values.** A const image with the same three phases —
+build, carry, link — feeding `lambda_module_state_bind_static`, whose runtime
+accessor (`lambda_module_const_at_state`) already exists. The emission change is
+then one function: `jm_box_string_literal` interns by content and emits a load
+instead of a `js_make_string_len` call, and all 44 call sites follow.
+
+So the work is: (1) a value image mirroring the key image, (2) carriage through
+`JsPreambleState`, (3) a link step beside the property-key link, (4) the
+emission switch. Steps 1–3 are the subsystem; step 4 is a day's work once they
+exist.
+
+This is **new infrastructure inside JS's module system**, not a port. The storage
+*design* transfers; the storage *mechanism* does not. It also sits in the
+preamble/realm-cloning path, where a mistake is silent and cross-realm — so it
+wants its own session with the key-image code as the worked example.
 
 ### 9.4 Ledger
 
@@ -321,12 +346,14 @@ of Lambda's; the storage *design* transfers, the storage *mechanism* does not.
 | **RC-J3** | **Purity gating is JS-specific and must be built before any call folds.** JS has no `is_proc`. Property access can invoke a getter, most builtins can throw, and coercion can re-enter user code — so a JS purity judgement is an analysis, not a bit lookup. Until it exists, **D6.1.1**'s "guests mark all-effectful" governs and nothing calls. |
 | **RC-J4** | **RC14 inertness needs a JS restricted-eval mode first.** Lambda's guarantee rests on `EvalMode::CONST`, per-node fuel, `mode_rejected` and a throwaway rooted frame. JS has none of these. A fold that can throw, suspend, or allocate unboundedly during compilation is not admissible. |
 | **RC-J5** | **User-defined function calls are deferred**, for the same reasons as Lambda (Appendix C.5) and more: a JS callee can throw, await, or capture a realm. |
+| **RC-J6** | **JS container literals are NOT poolable** (measured 2026-09-12). RC-O2's identity rule decides it: a Lambda constructed container has no observable identity, but a JS array/object does — `mk() === mk()` is `false` and mutating one result does not affect another. Every evaluation of `[1,2,3]` or `{a:1}` must yield a fresh object. Sharing one materialized container would break `===` and mutation isolation. **RC15 materialization therefore does not transfer to JS at all**; only *primitives* are poolable there — strings and bigints, both immutable and compared by value (`123n === 123n` is `true`). |
+| **RC-J7** | **The module state owns a JS unit's const pool, not the transpiler.** Lambda's pool is safe because `Script` is registered with the `Runtime` and outlives every tier; a JS unit's `JsTranspiler` is ephemeral — `js_mir_compile_unit` destroys it (and, through `runtime_free_script`, `pool_destroy(tp->pool)` and `arraylist_free(tp->const_list)`) while its compiled code stays live in **preamble mode** (harness function objects hold code pages) and in **hot-reload batch mode** (`jm_defer_mir_cleanup`). Binding `tp->const_list->data` into `LambdaModuleState::consts` therefore publishes a pointer that is freed before its last read. So JS const bodies are `mem_calloc`'d rather than pool-allocated, and `js_mir_runtime_link_pass` calls `lambda_module_state_adopt_consts` — which copies the index array into state-owned storage and takes the entries — instead of `lambda_module_state_bind_static`. `LambdaModuleState` gains `const_count` + `consts_owned`; release frees the entries beside `property_keys`, which is the same state-owned pattern (**D5.2**). Lambda is unchanged: `bind_static` still borrows its Script-owned pool. **Constraint**: the state holds one const array, so a unit's pool is only valid while its own module state is active. The preamble harness and the tests run in *separate* states (`js_batch_reset_to`), but consecutive tests in a batch reuse `batch_test_module_state_id`, so a test's array replaces its predecessor's — the same generation-reuse the module *var* slab already has. **KNOWN DEFECT (open, merged 2026-09-12 by decision):** the constraint is violated *within a single script* by `eval`. An `eval`'d unit compiles separately but shares the caller's variable environment, so its link pass replaces the outer script's array and the outer script's later literal loads resolve against the wrong one; `lambda_module_const_at_state` has no bounds check, so a stale index reads adjacent memory and casts it to `String*`. Measured on `test/js/eval_basic.js`: `t2:hello` returns the script's filename. **Fix direction**: key the load on the compilation *unit*, not the active module state — the AST tier already does this by reaching literals through node identity (`literal->value.string_value`), which cannot alias. An integer `unit_id` assigned at transpiler creation and registered at link time (`lambda_unit_const_at(unit_id, index)`) is the relocatable stand-in for that pointer (**DI14**), plus the missing bounds check. |
 
 ### 9.5 Phases
 
 | Phase | Content | Retires |
 |---|---|---|
-| **JS-P1** | **Pointer-backed const values and const containers into the pool.** A literal whose value needs run-time construction gains a pool entry and a node handle; array/object literals whose parts are all const are materialized once, as RC15 does for Lambda. Materialization only — no evaluation, no folder — so RC-J3 and RC-J4 are not prerequisites. | `jm_box_string_literal` (44 sites, calls `js_make_string_len` per evaluation), `jm_string_literal_chars` (4), `jm_box_bigint_literal` (2, re-parses digits per evaluation), and per-evaluation array/object construction. |
+| **JS-P1** | **Pointer-backed const *primitives* into the pool.** (Containers were in scope until RC-J6 measured them unpoolable.) A literal whose value needs run-time construction gains a pool entry and a node handle; Materialization only — no evaluation, no folder — so RC-J3 and RC-J4 are not prerequisites. Containers are excluded by RC-J6. | `jm_box_string_literal` (44 sites, calls `js_make_string_len` per evaluation), `jm_string_literal_chars` (4), `jm_box_bigint_literal` (2, re-parses digits per evaluation). Per-evaluation array/object construction **stays** — RC-J6. |
 | **JS-P2** | **Expressions and pure sys-func calls.** Requires RC-J4's restricted-eval mode and RC-J3's purity analysis first. | the runtime arithmetic behind constant JS expressions |
 | — | **User function calls: deferred** (RC-J5). | — |
 

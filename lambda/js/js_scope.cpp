@@ -403,6 +403,10 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
     // Initialize memory pools
     tp->pool = mem_pool_create(NULL, MEM_ROLE_AST, "js.ast"); // Memory pool
     tp->name_pool = name_pool_create(tp->pool, NULL);
+    // RC-J2: JavaScript uses the same `Script::const_list` pool as Lambda, so a
+    // literal value is materialized once per unit instead of being rebuilt from
+    // MIR-embedded bytes on every evaluation. One pool, both languages.
+    tp->const_list = arraylist_new(16);
     tp->error_buf = NULL;
 
     tp->strict_mode = false;
@@ -563,6 +567,14 @@ void js_transpiler_destroy(JsTranspiler* tp) {
     tp->source = NULL;
     tp->reference = NULL;
     tp->directory = NULL;
+    if (tp->const_list) {
+        // RC-J7: const bodies are mem-owned. A linked unit hands them to its
+        // module state and leaves the list empty; only a unit that never
+        // reached the link pass still owns them here.
+        for (int i = 0; i < tp->const_list->length; i++) {
+            mem_free(arraylist_get(tp->const_list, i));
+        }
+    }
     runtime_free_script(NULL, (Script*)tp, false);
 }
 
