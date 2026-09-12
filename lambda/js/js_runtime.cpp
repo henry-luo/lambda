@@ -14105,7 +14105,7 @@ static inline Item js_call_value(Item func_item, Item this_val, Item* args,
             return fn->invoke(func_item, this_val, args, arg_count, result_home,
                 args_prerooted);
         }
-        if (fn && fn->layout_magic == JS_FUNCTION_LAYOUT_MAGIC) {
+        if (js_fn_is_js_layout(fn)) {
             log_error("js-call-value: published JavaScript function has no call entry");
             return ItemError;
         }

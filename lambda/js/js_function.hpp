@@ -174,9 +174,20 @@ struct JsFunction {
     // JSCUO9: fields are grouped by alignment. The previous source order left
     // 30 B of interior padding — six 4- and 1-byte fields each sitting in an
     // 8-byte hole — which is what kept the record in the 256 B GC size class.
-    // Only the discrimination prefix below is contractual (see JSCUO6).
-    TypeId type_id;
-    uint32_t layout_magic;
+    //
+    // The first eight bytes are laid out to match Lambda's `Function` prefix
+    // field for field, so the two records that share LMD_TYPE_FUNC can
+    // eventually share one header (§4). Two of those bytes are reserved rather
+    // than used: JS keeps its arity in the shared `JsCallableCode` definition,
+    // not on the value, and a JS closure environment can exceed 255 slots
+    // (a resumable layout reserves 161 before the first capture), so its size
+    // stays the `env_size` int below. Only `type_id` and `entry_abi` are
+    // contractual (see JSCUO6).
+    TypeId  type_id;
+    uint8_t arity;                 // reserved: JS arity lives in JsCallableCode
+    uint8_t closure_field_count;   // reserved: JS uses env_size, which is wider
+    uint8_t entry_abi;             // FunctionEntryAbi — the layout discriminator
+    uint32_t flags;
 
     // 8-byte group
     Item* env;
@@ -193,8 +204,8 @@ struct JsFunction {
     // 4-byte group
     int env_size;
 
-    // 2-byte group
-    uint16_t flags;
+    // 1-byte group. The latch is not folded into `flags`: two construction
+    // paths assign that word wholesale, which would clear it.
     uint8_t pool_pointer_roots_registered;
 };
 
@@ -306,7 +317,13 @@ JsCallableCode* js_callable_code_intern_mir(JsFunction* fn, void* func_ptr,
 void js_callable_code_release(JsCallableCode* code);
 void js_callable_code_table_destroy(HashMap* table);
 
-#define JS_FUNCTION_LAYOUT_MAGIC 0x4A53464Eu
+// A callable Item holds this record when its entry ABI names a hosted
+// language. Reading it is safe on either layout: `entry_abi` sits at offset 3
+// in both, and a Lambda `Function` never carries a hosted value.
+static inline bool js_fn_is_js_layout(const void* callable) {
+    return callable &&
+        ((const JsFunction*)callable)->entry_abi == FN_ENTRY_ABI_JS_FUNCTION;
+}
 
 // JSCUO6 -- inventory of what actually depends on this layout, so a field can
 // be moved with the readers known rather than guessed at.
@@ -315,7 +332,7 @@ void js_callable_code_table_destroy(HashMap* table);
 //     `Function` and this `JsFunction` share the LMD_TYPE_FUNC tag. Accessor
 //     cells use GC_TYPE_JS_ACCESSOR and never enter this discriminator path.
 //     Consumers that receive a callable Item read `type_id` at 0 and then
-//     `layout_magic` at 4 to decide which callable record it holds.
+//     `entry_abi` at 3 to decide which callable record it holds.
 // (2) No generated code reads a JsFunction field. JS MIR lowers every call to
 //     a named C helper (js_call_function_into and friends) and dispatches
 //     through `fn->invoke` in C, so unlike Lambda's `Function` -- whose
@@ -335,8 +352,12 @@ void js_callable_code_table_destroy(HashMap* table);
 // offsets below are contractual.
 static_assert(offsetof(JsFunction, type_id) == 0,
               "JsFunction type tag must sit where every Item consumer reads it");
-static_assert(offsetof(JsFunction, layout_magic) == 4,
+static_assert(offsetof(JsFunction, entry_abi) == 3,
               "JsFunction layout discriminator is read before any field access");
+static_assert(offsetof(JsFunction, entry_abi) == offsetof(Function, entry_abi),
+              "the discriminator must sit at one offset in both callable layouts");
+static_assert(offsetof(JsFunction, flags) == offsetof(Function, flags),
+              "the shared callable prefix must agree field for field");
 static_assert(offsetof(JsFunction, type_id) < offsetof(JsFunction, code),
               "the discrimination prefix must precede every other field");
 

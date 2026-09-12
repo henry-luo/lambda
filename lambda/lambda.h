@@ -1426,6 +1426,12 @@ enum {
     // T0 (AI7): a cold Lambda function with no native entry. `ptr` is NULL and
     // `def` carries the AST definition site that `interp_call` evaluates.
     FN_ENTRY_ABI_LAMBDA_INTERPRETED,
+    // Hosted-language callables share this record's 8-byte prefix and are
+    // discriminated here rather than by a per-language magic word: every value
+    // at or above FN_ENTRY_ABI_HOSTED_FIRST uses that language's layout, not
+    // `Function`'s. Consumers read `type_id` at 0 and `entry_abi` at 3.
+    FN_ENTRY_ABI_HOSTED_FIRST,
+    FN_ENTRY_ABI_JS_FUNCTION = FN_ENTRY_ABI_HOSTED_FIRST,
 };
 
 // RVO13: public boxed entries publish their post-call companion contract so

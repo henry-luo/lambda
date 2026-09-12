@@ -15926,7 +15926,7 @@ extern "C" Item js_get_global_builtin_fn_by_id(Item global_id_item) {
     JsFunctionLayout* fn = (JsFunctionLayout*)pool_calloc(js_input->pool, sizeof(JsFunctionLayout));
     js_function_init_native_module_scope(fn);
     fn->type_id = LMD_TYPE_FUNC;
-    fn->layout_magic = JS_FUNCTION_LAYOUT_MAGIC;
+    fn->entry_abi = FN_ENTRY_ABI_JS_FUNCTION;
     JsCallableCode* code = js_fn_code_ensure(fn);
     if (!code) return ItemError;
     code->func_ptr = NULL;
@@ -16810,7 +16810,7 @@ extern "C" Item js_get_typed_array_base() {
     // Create the %TypedArray% intrinsic function object
     JsFunctionLayout* fn = (JsFunctionLayout*)pool_calloc(js_input->pool, sizeof(JsFunctionLayout));
     fn->type_id = LMD_TYPE_FUNC;
-    fn->layout_magic = JS_FUNCTION_LAYOUT_MAGIC;
+    fn->entry_abi = FN_ENTRY_ABI_JS_FUNCTION;
     JsCallableCode* code = js_fn_code_ensure(fn);
     if (!code) return ItemError;
     code->func_ptr = (void*)js_ctor_placeholder;
@@ -17031,7 +17031,7 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
     // the shared placeholder body is not a valid cache identity.
     JsCtor* fn = (JsCtor*)pool_calloc(js_input->pool, sizeof(JsCtor));
     fn->type_id = LMD_TYPE_FUNC;
-    fn->layout_magic = JS_FUNCTION_LAYOUT_MAGIC;
+    fn->entry_abi = FN_ENTRY_ABI_JS_FUNCTION;
     JsCallableCode* code = js_fn_code_ensure(fn);
     if (!code) return ItemError;
     const JsIntrinsicTargetSpec* target =
