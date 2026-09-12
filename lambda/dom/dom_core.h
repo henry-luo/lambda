@@ -119,6 +119,33 @@ Item dom_fp_has_attribute(Item n, Item name);
 Item dom_fp_inner_html(Item n);
 Item dom_fp_outer_html(Item n);
 
+// DS1: bodies for the element-operation rows added to dom_api.def. Declared
+// here because the catalog expansion is what needs to see them.
+Item dom_core_toggle_attribute(Item n, Item name, Item force);
+Item dom_core_set_attribute_ns(Item n, Item ns, Item qname, Item value);
+Item dom_core_get_attribute_ns(Item n, Item ns, Item local);
+Item dom_core_remove_attribute_ns(Item n, Item ns, Item local);
+Item dom_core_elements_by_tag_name(Item n, Item name);
+Item dom_core_elements_by_class_name(Item n, Item name);
+Item dom_core_has_child_nodes(Item n);
+Item dom_core_normalize(Item n);
+Item dom_core_insert_adjacent_element(Item n, Item where, Item node);
+Item dom_core_insert_adjacent_html(Item n, Item where, Item html);
+Item dom_core_remove_node(Item n, Item index);
+Item dom_core_attach_shadow(Item n, Item init);
+Item dom_core_compare_document_position(Item a, Item b);
+Item dom_core_boundary_from_point(Item n, Item x, Item y, Item behavior);
+Item dom_core_focus(Item n, Item options);
+Item dom_core_blur(Item n);
+Item dom_core_show_popover(Item n);
+Item dom_core_hide_popover(Item n);
+Item dom_core_show_modal(Item n);
+Item dom_core_set_custom_validity(Item n, Item message);
+Item dom_core_set_selection_range(Item n, Item start, Item end, Item dir);
+Item dom_core_set_range_text(Item n, Item replacement, Item start, Item end, Item mode);
+Item dom_core_select_named_item(Item n, Item name);
+Item dom_core_select_add(Item n, Item item, Item before);
+
 // --- bodies the catalog references that are defined elsewhere in the core
 // (range/selection bindings over radiant/dom_range, CSSOM, DOMParser). They
 // are declared here, once, so every expansion of dom_api.def sees them.

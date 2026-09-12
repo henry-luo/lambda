@@ -398,7 +398,7 @@ DOM_OP(DERIVED, closest,         query, 2, "fn(n: any, selector: string) -> any"
 DOM_OP(DERIVED, get_element_by_id, query, 2, "fn(root: any, id: string) -> any", dom_core_get_element_by_id, DOM_F_NEUTRAL | DOM_F_FASTPATH,
        "first of [for (d in descendants(root) where node_type(d) == 1 and get_attribute(d, \"id\") == id) d]", html_element, "", "getElementById")
 DOM_OP(DERIVED, has_attribute,   attr, 2, "fn(n: any, name: string) -> bool", dom_fp_has_attribute, DOM_F_NEUTRAL | DOM_F_FASTPATH,
-       "get_attribute(n, name) != null", none, "", "")
+       "get_attribute(n, name) != null", html_element, "", "hasAttribute")
 
 // --- 5.5 serialization
 DOM_OP(DERIVED, inner_html,      parse, 1, "fn(n: any) -> string", dom_fp_inner_html, DOM_F_NEUTRAL | DOM_F_FASTPATH,
@@ -476,6 +476,57 @@ DOM_OP(CORE, report_validity, forms, 1, "fn(n: any) -> any", dom_report_validity
 DOM_OP(CORE, submit_form, forms, 1, "fn(f: any) -> any", dom_form_submit_bridge, DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, request_submit, forms, 2, "fn(f: any, submitter: any) -> any", dom_form_request_submit_bridge, DOM_F_MUTATES, "", none, "", "")
 
+
+// ---------------------------------------------------------------------------
+// DS1/DS13 — element operations that had a `dom_core_*` body but no row, so no
+// member could bind to them and every call still went ordinal → module
+// dispatcher → executor. Each row here is one member at three hops.
+//
+// None carries DOM_F_NEUTRAL: the header's rule is that neutrality is a fact
+// recorded per row, and no Lambda-only document has exercised these yet. They
+// are catalog rows and member slots; the `dom.*` face is a later, earned step.
+// ---------------------------------------------------------------------------
+DOM_OP(CORE, toggle_attribute,   attr, 3, "fn(n: any, name: string, force: bool) -> bool", dom_core_toggle_attribute, DOM_F_MUTATES, "", html_element, "", "toggleAttribute")
+DOM_OP(CORE, set_attribute_ns,   attr, 4, "fn(n: any, ns: string, qname: string, value: string) -> null", dom_core_set_attribute_ns, DOM_F_MUTATES, "", html_element, "", "setAttributeNS")
+DOM_OP(CORE, get_attribute_ns,   attr, 3, "fn(n: any, ns: string, local: string) -> string|null", dom_core_get_attribute_ns, 0, "", html_element, "", "getAttributeNS")
+DOM_OP(CORE, remove_attribute_ns, attr, 3, "fn(n: any, ns: string, local: string) -> null", dom_core_remove_attribute_ns, DOM_F_MUTATES, "", html_element, "", "removeAttributeNS")
+
+DOM_OP(CORE, elements_by_tag_name,   query, 2, "fn(n: any, name: string) -> any", dom_core_elements_by_tag_name, 0, "", html_element, "get_elements_by_tag_name", "getElementsByTagName")
+DOM_OP(CORE, elements_by_class_name, query, 2, "fn(n: any, name: string) -> any", dom_core_elements_by_class_name, 0, "", html_element, "get_elements_by_class_name", "getElementsByClassName")
+
+DOM_OP(DERIVED, has_child_nodes,  tree, 1, "fn(n: any) -> bool", dom_core_has_child_nodes, 0,
+       "first_child(n) != null", dom_node, "", "hasChildNodes")
+DOM_OP(CORE, normalize,           tree, 1, "fn(n: any) -> null", dom_core_normalize, DOM_F_MUTATES, "", html_element, "", "")
+DOM_OP(CORE, insert_adjacent_element, tree, 3, "fn(n: any, where: string, node: any) -> any", dom_core_insert_adjacent_element, DOM_F_MUTATES, "", html_element, "", "insertAdjacentElement")
+DOM_OP(CORE, insert_adjacent_html,    tree, 3, "fn(n: any, where: string, html: string) -> null", dom_core_insert_adjacent_html, DOM_F_MUTATES, "", html_element, "", "insertAdjacentHTML")
+// remove() is two operations behind one name; the row decides which, so both
+// doors apply the same receiver test (see the DS2 note in the impl doc).
+DOM_OP(CORE, remove_node,         tree, 2, "fn(n: any, index: int) -> null", dom_core_remove_node, DOM_F_MUTATES, "", dom_node, "remove", "")
+DOM_OP(CORE, attach_shadow,       tree, 2, "fn(n: any, init: any) -> any", dom_core_attach_shadow, DOM_F_MUTATES, "", html_element, "", "attachShadow")
+
+DOM_OP(CORE, compare_document_position, node, 2, "fn(a: any, b: any) -> int", dom_core_compare_document_position, 0, "", dom_node, "", "compareDocumentPosition")
+
+// no member: the engine boundary hit-test has no JS spelling on an element
+DOM_OP(CORE, boundary_from_point, geometry, 4, "fn(n: any, x: int, y: int, behavior: any) -> any", dom_core_boundary_from_point, 0, "", none, "", "")
+
+DOM_OP(CORE, focus,  focus, 2, "fn(n: any, options: any) -> null", dom_core_focus, DOM_F_MUTATES, "", html_element, "", "")
+DOM_OP(CORE, blur,   focus, 1, "fn(n: any) -> null", dom_core_blur, DOM_F_MUTATES, "", html_element, "", "")
+
+// `click` is deliberately absent: it already has a DERIVED row whose body is the
+// derivation `dispatch(n, {type: "click", ...})`. The member needs the native
+// bridge instead, which is *not* equal to that derivation -- per HTML §6.4.4 it
+// no-ops on a disabled control. Binding the member would either bind a null slot
+// or make the row's derivation claim false. One name, two operations (DS6).
+DOM_OP(CORE, show_popover, forms, 1, "fn(n: any) -> null", dom_core_show_popover, DOM_F_MUTATES, "", html_element, "", "showPopover")
+DOM_OP(CORE, hide_popover, forms, 1, "fn(n: any) -> null", dom_core_hide_popover, DOM_F_MUTATES, "", html_element, "", "hidePopover")
+DOM_OP(CORE, show_modal,   forms, 1, "fn(n: any) -> null", dom_core_show_modal, DOM_F_MUTATES, "", html_element, "", "showModal")
+DOM_OP(CORE, set_custom_validity, forms, 2, "fn(n: any, message: string) -> null", dom_core_set_custom_validity, DOM_F_MUTATES, "", html_element, "", "setCustomValidity")
+
+DOM_OP(CORE, set_selection_range, textctl, 4, "fn(n: any, start: int, end: int, dir: string) -> null", dom_core_set_selection_range, DOM_F_MUTATES, "", html_element, "", "setSelectionRange")
+DOM_OP(CORE, set_range_text,      textctl, 5, "fn(n: any, replacement: string, start: int, end: int, mode: string) -> null", dom_core_set_range_text, DOM_F_MUTATES, "", html_element, "", "setRangeText")
+
+DOM_OP(CORE, select_named_item, select, 2, "fn(n: any, name: string) -> any", dom_core_select_named_item, 0, "", select_element, "named_item", "namedItem")
+DOM_OP(CORE, select_add,        select, 3, "fn(n: any, item: any, before: any) -> null", dom_core_select_add, DOM_F_MUTATES, "", select_element, "add", "")
 
 // ---------------------------------------------------------------------------
 // NATIVE — the retired `->dom` section (ES40)
