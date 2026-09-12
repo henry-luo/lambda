@@ -13,6 +13,7 @@
 #include "re2_wrapper.hpp"
 #include "heap_api.h"
 #include "type_contract.hpp"
+#include "type_build.hpp"   // ast_static_literal_item: const-value resolution (RC15)
 #include "lambda-number-types.hpp"
 #include "lambda-number-runtime.hpp"
 #include "../js/js_runtime.h"
@@ -287,6 +288,9 @@ public:
 // ---------------------------------------------------------------------------
 
 static Item eval_expr(InterpFrame* f, AstNode* node);
+// const-value resolution used by CONST-mode evaluation (RC3.3, RC15)
+static AstDeclaratorNode* interp_const_binding_decl(AstNode* node);
+static bool interp_const_init_value(Transpiler* tp, AstNode* init, Item* out);
 static Item interp_item_at(Item source, int64_t index);
 static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_functions);
 static Item eval_list(InterpFrame* f, AstListNode* list_node);
@@ -4017,6 +4021,8 @@ static bool interp_const_folded_value(InterpFrame* f, AstNode* node, Item* out) 
     switch (node->node_type) {
     // folded expressions
     case AST_NODE_UNARY: case AST_NODE_BINARY: case AST_NODE_IF_EXPR:
+    // reads of const bindings, resolved to their binding's value (RC3.3)
+    case AST_NODE_IDENT:
     // materialized const containers (RC15)
     case AST_NODE_ARRAY: case AST_NODE_MAP: break;
     default: return false;
@@ -4052,10 +4058,14 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             return ItemError;
         }
         f->st->mode_fuel--;
-    } else {
-        // Execution reads the settled value instead of re-evaluating the same
-        // constant subtree on every run. Restricted to RUNTIME so the fold pass
-        // never consumes its own partial output while producing it.
+    }
+    // Execution reads the settled value instead of re-evaluating the same
+    // constant subtree on every run. CONST mode reads it too: folding `a + 1`
+    // recurses into the identifier, whose value is a published fact rather than
+    // a runtime slot -- the slab is empty at compile time. A fact is only
+    // published after passing its own agreement check, so consuming one mid-pass
+    // cannot observe a half-formed value (RC9, RC3.3).
+    {
         Item folded;
         if (interp_const_folded_value(f, node, &folded)) return folded;
     }
@@ -4114,6 +4124,19 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             return interp_ptr_item(pattern && pattern->pattern_index >= 0
                 ? const_pattern_with_tl(pattern->pattern_index, f->module->type_list)
                 : NULL);
+        }
+        // RC3.3: at fold time there is no slab to read. A const binding's value
+        // comes from its declarator -- which may sit at a *higher* node id than
+        // the expression using it, so this cannot wait for a published fact.
+        if (f->st->mode == EvalMode::CONST && f->st->const_owner) {
+            AstDeclaratorNode* declarator = interp_const_binding_decl(node);
+            Item bound = ItemNull;
+            if (declarator && declarator->init &&
+                    interp_const_init_value(f->st->const_owner, declarator->init,
+                        &bound)) {
+                return bound;
+            }
+            return ItemError;
         }
         return interp_read_binding(f, entry);
     }
@@ -5267,12 +5290,58 @@ public:
 // const accepts only literal scalar syntax. The same eval_expr walker still
 // performs the operation, but this narrow admission guarantees a fold cannot
 // read a binding, call user code, allocate a container, or publish an effect.
+// RC15/RC3.3: what value does a const initializer denote? Either the source
+// determines it (a literal, materialized without evaluation) or an earlier fold
+// already settled it. Both answers come from published state, never from a
+// runtime slot -- the module slab is empty while this pass runs.
+static bool interp_const_init_value(Transpiler* tp, AstNode* init, Item* out) {
+    if (!tp || !init || !out) return false;
+    if (ast_static_literal_item(tp, init, out)) return true;
+    AstNodeId id = ast_index_find(&tp->ast_index, ast_unwrap_primary(init));
+    if (id == AST_NODE_ID_INVALID || id >= tp->ast_index.count) return false;
+    const AstNodeFacts* facts = &tp->ast_index.facts[id];
+    if ((facts->flags & AST_NODE_FACT_CONST_FOLDED) == 0) return false;
+    out->item = facts->folded_item;
+    return true;
+}
+
+// RC3: the declarator a name is bound by, when that binding is immutable and
+// so cannot change between the fold and the read. A `var`, a parameter, or a
+// type definition is not a const binding.
+static AstDeclaratorNode* interp_const_binding_decl(AstNode* node) {
+    if (!node || node->node_type != AST_NODE_IDENT) return NULL;
+    NameEntry* entry = ((AstIdentNode*)node)->entry;
+    if (!entry || entry->is_mutable || entry->is_parameter) return NULL;
+    AstNode* decl = entry->node;
+    if (!decl || decl->node_type != AST_NODE_VARIABLE_DECLARATOR) return NULL;
+    AstDeclaratorNode* declarator = (AstDeclaratorNode*)decl;
+    return declarator->is_type_definition ? NULL : declarator;
+}
+
+static bool interp_const_node_supported_depth(AstNode* node, int depth);
+
 static bool interp_const_node_supported(AstNode* node) {
-    if (!node) return false;
+    return interp_const_node_supported_depth(node, 0);
+}
+
+// `depth` bounds the walk through binding initializers. A self- or
+// mutually-referential declaration (`let a = a`) would otherwise recur forever;
+// the cap makes a pathological chain decline to fold rather than hang.
+#define INTERP_CONST_BINDING_DEPTH_MAX 16
+
+static bool interp_const_node_supported_depth(AstNode* node, int depth) {
+    if (!node || depth > INTERP_CONST_BINDING_DEPTH_MAX) return false;
     switch (node->node_type) {
+    case AST_NODE_IDENT: {
+        // RC3.3: reading an immutable binding whose initializer is itself const
+        // is const. The read is a copy of a settled value, not an evaluation.
+        AstDeclaratorNode* declarator = interp_const_binding_decl(node);
+        return declarator && declarator->init &&
+            interp_const_node_supported_depth(declarator->init, depth + 1);
+    }
     case AST_NODE_PRIMARY: {
         AstNode* expr = ((AstPrimaryNode*)node)->expr;
-        if (expr) return interp_const_node_supported(expr);
+        if (expr) return interp_const_node_supported_depth(expr, depth);
         if (!node->type || !node->type->is_literal) return false;
         switch (node->type->type_id) {
         case LMD_TYPE_NULL:
@@ -5287,7 +5356,7 @@ static bool interp_const_node_supported(AstNode* node) {
     case AST_NODE_UNARY: {
         Operator op = ((AstUnaryNode*)node)->op;
         return (op == OPERATOR_NOT || op == OPERATOR_NEG || op == OPERATOR_POS) &&
-            interp_const_node_supported(((AstUnaryNode*)node)->operand);
+            interp_const_node_supported_depth(((AstUnaryNode*)node)->operand, depth);
     }
     case AST_NODE_BINARY: {
         AstBinaryNode* binary = (AstBinaryNode*)node;
@@ -5297,8 +5366,8 @@ static bool interp_const_node_supported(AstNode* node) {
         case OPERATOR_AND: case OPERATOR_OR:
         case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_LT: case OPERATOR_LE:
         case OPERATOR_GT: case OPERATOR_GE:
-            return interp_const_node_supported(binary->left) &&
-                interp_const_node_supported(binary->right);
+            return interp_const_node_supported_depth(binary->left, depth) &&
+                interp_const_node_supported_depth(binary->right, depth);
         default:
             return false;
         }
@@ -5306,9 +5375,9 @@ static bool interp_const_node_supported(AstNode* node) {
     case AST_NODE_IF_EXPR: {
         AstIfNode* branch = (AstIfNode*)node;
         return branch->cond && branch->then &&
-            interp_const_node_supported(branch->cond) &&
-            interp_const_node_supported(branch->then) &&
-            (!branch->otherwise || interp_const_node_supported(branch->otherwise));
+            interp_const_node_supported_depth(branch->cond, depth) &&
+            interp_const_node_supported_depth(branch->then, depth) &&
+            (!branch->otherwise || interp_const_node_supported_depth(branch->otherwise, depth));
     }
     default:
         return false;
@@ -5343,6 +5412,7 @@ bool interp_const_fold_script(Transpiler* tp) {
     st.ctx = context;
     st.runtime = tp->runtime;
     st.mode = EvalMode::CONST;
+    st.const_owner = tp;
     st.depth_limit = 1;
     st.depth = 1;
     InterpState* saved_state = g_interp_state;
@@ -5360,6 +5430,26 @@ bool interp_const_fold_script(Transpiler* tp) {
         AstNodeFacts* facts = &tp->ast_index.facts[id];
         if (!node || node->node_type == AST_NODE_PRIMARY ||
                 !interp_const_node_supported(node)) continue;
+
+        // RC3.3: a const binding's read is settled by copying its initializer's
+        // value, not by evaluating anything. The initializer's own value is
+        // either a materialized literal or a fact published earlier in this
+        // walk -- declarations precede their uses in index order.
+        if (node->node_type == AST_NODE_IDENT) {
+            AstDeclaratorNode* declarator = interp_const_binding_decl(node);
+            Item bound = ItemNull;
+            if (!declarator || !declarator->init ||
+                    !interp_const_init_value(tp, declarator->init, &bound)) {
+                continue;
+            }
+            if (!lambda_item_is_self_contained(bound.item) || !node->type ||
+                    get_type_id(bound) != node->type->type_id) {
+                continue;
+            }
+            facts->folded_item = bound.item;
+            facts->flags |= AST_NODE_FACT_CONST_FOLDED;
+            continue;
+        }
 
         st.mode_fuel = interp_const_fuel_budget();
         st.mode_exhausted = false;
