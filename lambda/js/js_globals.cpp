@@ -14588,14 +14588,9 @@ extern "C" JsWithFrame* js_with_activation_enter(Item* captured, int depth,
     return previous;
 }
 
-// An early return out of a compiled `with` body bypasses its generated pop, so
-// the callee's own frames are released here rather than trusted to unwind.
+// The callee unwinds its own `with` scopes at every completion, so the boundary
+// only has to reinstate the caller's chain -- it never releases frames.
 extern "C" void js_with_activation_leave(JsWithFrame* saved_head) {
-    while (js_with_head && js_with_head != saved_head && js_with_head->owns_record) {
-        JsWithFrame* frame = js_with_head;
-        js_with_head = frame->parent;
-        js_with_frame_drop(frame);
-    }
     js_with_head = saved_head;
     js_last_with_binding_valid = false;
 }
