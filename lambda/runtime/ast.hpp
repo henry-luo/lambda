@@ -871,6 +871,10 @@ typedef struct Transpiler : Script {
     // statement back by truncating `const_list`, which would leave a
     // Script-scoped map pointing at reclaimed indices.
     struct hashmap* const_dedup;
+    // RC6/RC17v2: literal text -> the shared String and its const_list slot, so
+    // repeated string/symbol literals allocate once. Same compilation-unit
+    // scope as `const_dedup`, for the same rollback reason.
+    struct hashmap* string_dedup;
 
     // Error tracking for accumulated type errors
     int error_count;           // accumulated error count

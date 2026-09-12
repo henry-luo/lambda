@@ -173,8 +173,8 @@ answers.
 | **RC14** | **Fold attempts remain semantically inert.** Fuel exhaustion, a native fault, an error result, or a rejected attempt leaves the node unfolded and changes nothing observable. A compiler optimization may never alter program completion (retained from today's design). |
 | **RC15** | **Const values are pooled when they are built and never enter the folder.** A *const value* is any value the source already determines: a scalar literal, and equally a **static/const container** — an array, map or element literal whose parts are all const. Its value needs no evaluation, so it is materialized directly into the const pool (RC6-hashed) at build time. **The folder's input is expressions only.** No const value is interpreted, and none has its value recovered by re-reading a source span — which retires the text-recovery path in `ast_static_literal_item()` for the valueless `&LIT_INT`/`LIT_BOOL` singletons. |
 | **RC16** | **Rehoming applies only to computed const-expression results** (§4). A const value — scalar or container — is born in pool-owned storage and needs none; only a *computed* result is born in frame/GC storage during the fold and must be moved before its frame closes. The two paths meet at the pool, never before it. This is why a folded aggregate needs no rehoming: an aggregate literal is a const value under RC15, so it never reaches the folder at all. |
-| **RC17** | **`Type` is valueless.** A type describes a *set* of values; it never carries one. The inline payloads of `TypeFloat`, `TypeComplex`, `TypeInt64`, `TypeUint64`, `TypeNumSized`, `TypeDateTime`, `TypeDecimal`, `TypeString`/`TypeSymbol` and `TypeBinaryConst` are deleted, and `TypeConst::const_index` with them. Every constant value lives in the const pool. |
-| **RC18** | **Three-way separation of a constant.** *Which kind* is the `Type` — now a shared valueless singleton (`LIT_INT`, `LIT_FLOAT`, `LIT_STRING`, …), one per type, never per literal. *Which value* is a per-node const handle on the `AstNode`. *The value itself* is one hashed, shared const-pool entry (RC6). No literal allocates a `Type`. The handle is on the node, not on a const-specific type, because **a folded expression is an arbitrary node kind** — a `BINARY`, a `CALL`, an `IF_EXPR` — whose type stays its own inferred type. Having a constant value is a per-node fact; it is not a type. |
+| **RC17v2** | **A `Type` carries a value only when that value is part of the type's meaning** (ratified 2026-09-12, supersedes RC17; rationale §12). Literal types used for *matching* — union members, type patterns, annotations — keep their payload: the value is the type's identity, and the validator reads it with no AST node in reach. A literal in **expression** position carries no value on its type: its value is a const-pool entry named by the node's handle, and its type may be a shared singleton. RC17's blanket "Type is valueless" generalized from the second case to the first and would have broken literal unions, type patterns and `type T = 3.14`. |
+| **RC18** | **Three-way separation of a constant** (applies to expression-position constants; RC17v2 exempts type-position literals). *Which kind* is the `Type` — now a shared valueless singleton (`LIT_INT`, `LIT_FLOAT`, `LIT_STRING`, …), one per type, never per literal. *Which value* is a per-node const handle on the `AstNode`. *The value itself* is one hashed, shared const-pool entry (RC6). No literal allocates a `Type`. The handle is on the node, not on a const-specific type, because **a folded expression is an arbitrary node kind** — a `BINARY`, a `CALL`, an `IF_EXPR` — whose type stays its own inferred type. Having a constant value is a per-node fact; it is not a type. |
 
 ### 2.2 What is deliberately retained
 
@@ -199,9 +199,9 @@ A node is **const** when:
 2. it is a pure operator applied to const operands; or
 3. it is an identifier bound by an **immutable** binding whose initializer is
    const; or
-4. it is a call to a pure `fn` (D6.1.1: every callable surface carries the
-   bit — sys-func registry rows, Jube module signatures, the runtime-function
-   catalog) whose arguments are all const; or
+4. it is a call to a **pure sys-func** whose arguments are all const. A call to
+   a user-defined `fn` is *semantically* const under D6.1.2 but is **out of
+   scope, deferred** (ruled 2026-09-12, §13); or
 5. it is a control form (`if`, `match`) whose scrutinee and taken arms are
    const.
 
@@ -386,7 +386,7 @@ Each phase is independently landable, green on `make test-lambda-baseline` and
 | **RC-P4** | RC9 — interpreter consumes fold facts. | T0 no longer re-evaluates constants |
 | **RC-P5a** | RC15 — **const containers are materialized, not folded.** A literal ARRAY/MAP whose parts are all const becomes one pooled static container recorded as a const fact, built directly from the AST with no evaluation. `emit_static_collection_const()` already does this construction inside the MIR back end (§9.1); it becomes a consumer of the shared fact instead of a private builder, so T0 stops rebuilding the same array on every execution. | both tiers read one container; no aggregate reaches `interp_const_fold_script` |
 | **RC-P5** | RC5/RC7/RC13 — pooled results with rehoming. **Blocked on RC-P6 as written (2026-09-12): there is nothing to rehome.** Eligibility admits only NULL/BOOL/INT/FLOAT literal operands, and no operator over those yields a pointer-backed value — `2 ** 100` and `9007199254740991 + 1` give floats (`1.27e30`, `inf`), `"ab" + "c"` is an error since `+` does not concatenate, and string comparison gives a bool. Every producible result is self-contained. The one reachable exception is a subnormal float, which is boxed. Rehoming needs eligibility widened first — to expressions that *compute* a pointer-backed value. Aggregate literals are **not** that case: under RC15 they are const values, materialized into the pool at build time without ever entering the folder (RC-P5a). Rehoming therefore waits on RC-P6's expression widening. | forced-GC oracle (`LAMBDA_GC_FORCE_EVERY=1`, `POISON_FREED=1`) green |
-| **RC-P6** | RC2/RC3 — eligibility by interpreter capability under the purity gate. **Landed for identifiers and pure sys-func calls (2026-09-12).** Reads of immutable const bindings fold transitively; calls reuse `interp_eval_mode_allows_sys_func`, which already encodes D6.1.2 (rejects `is_proc`/`is_async`) plus the restricted-mode set. **Open:** user-defined pure `fn` calls — that gate rejects every non-sys-func callee, so admitting them needs callee frame setup at fold time. | baseline green; fold-rate census |
+| **RC-P6** | RC2/RC3 — eligibility by interpreter capability under the purity gate. **COMPLETE as scoped (2026-09-12).** Reads of immutable const bindings fold transitively; calls reuse `interp_eval_mode_allows_sys_func`, which already encodes D6.1.2 (rejects `is_proc`/`is_async`) plus the restricted-mode set. User-defined `fn` calls are deliberately **out of scope** (§13). | baseline green; fold-rate census |
 | **RC-P6b** | RC17/RC18. **Handle half landed via RC-P8** (`AstNode::const_kind`/`const_index`, `sizeof` unchanged). **Payload-deletion half is BLOCKED: RC17 is wrong as a blanket rule (2026-09-12, §12).** A literal `Type`'s payload is often *type semantics*, not a misfiled node fact — it defines which values inhabit the type. Deleting it would break literal unions, type patterns, and `type T = 3.14`. Needs RC17 restated before any of it is implementable. | — |
 | **RC-P7** | RC6 — content-hashed pool with dedup. **Blocked on RC-P6b (2026-09-12).** `const_list` is an untyped `void*` list: its entries are `String*`, `Binary*`, `Decimal*`, `Array*`/`Map*`, and interior pointers into `Type` payloads (`&ft->double_val`, `&dt_type->datetime`), with **no kind tag anywhere**. Content-hashing needs to know what a pointer points at, so it needs either a parallel kind array or per-kind dedup tables at each of the ~10 append sites — and RC17/RC18 restructure exactly that storage, so building either first is throwaway work. Dedup belongs after the pool becomes the single typed home for const values. | const-pool size census |
 | **RC-P8** | RC12 — retire `AstIndex::facts` / `AstNodeFacts`. **Premise needs review (2026-09-12).** RC12 assumed a per-node fact table is inherently a scaffold because reaching it costs a pointer-hash probe. `AstNode::index_id` removed that cost: `facts[node->index_id]` is a direct array index, and one generic id serves *every* per-node fact rather than each fact kind claiming its own field in the node. Retiring the table may now be the wrong goal — the question is whether a compact, id-indexed facts row is the right home for erasable per-node state, which is close to what D8.2.5v2 rejected in ID-keyed *side tables*. Needs a ruling before implementation. | LOC strongly negative |
@@ -546,8 +546,8 @@ RC17 saw only the first and generalized. A defensible restatement:
 > shared singleton.
 
 That keeps RC18's payoff where it applies — no per-literal `Type` allocation for
-expression literals — without breaking the type system. It needs a ruling before
-implementation.
+expression literals — without breaking the type system. **Ratified 2026-09-12**
+as RC17v2.
 
 ### 12.3 Measurement note
 
@@ -556,3 +556,37 @@ The initial scope of "58 cast sites" and "23 `double_val` readers" was inflated:
 `print.cpp` matches were counted as `TypeFloat` readers when they are unrelated.
 The third such miscount in this ledger (§1.8, F3, and here), each from matching a
 name without checking the struct it belongs to.
+
+
+---
+
+## 13. User-Defined Function Calls Are Out of Scope
+
+**Date:** 2026-09-12, ruled by the user. Closes RC-P6.
+
+RC3.4 licenses folding any call to a pure callable with const arguments.
+Implementation stops at **pure sys-funcs**; a call to a user-defined `fn` is
+semantically const under **D6.1.2** and is deliberately left unfolded.
+
+The two are not the same size of problem. A sys-func call is a *closed*
+evaluation: the callee is a native function, its purity is a declared fact on
+`SysFuncInfo`, and `interp_eval_mode_allows_sys_func` already gates it. Nothing
+about the compilation unit's state participates.
+
+Folding a user call makes the const-folder **execute user code during
+compilation**, which is a different activity:
+
+- The fold pass runs at `depth_limit = 1` — no nested activation records at
+  all. A user call needs a callee frame: bind parameters, evaluate the body,
+  return.
+- Recursion is then reachable. Per-node fuel bounds the work, but
+  `depth_exhausted` publishes a stack-overflow diagnostic as a *runtime
+  completion* — which **RC14** forbids a fold attempt from doing.
+- The callee body may read module bindings, and the module slab is empty at
+  compile time. That is the same problem RC3.3 solved for identifiers, but now
+  inside a callee frame, and extending to closures and captures.
+
+The value is real — user functions over constants are common, and D6.1.2 exists
+for exactly this. But it is the first step that lets the folder run arbitrary
+user code, so it belongs in its own phase with RC14's inertness guarantee as the
+explicit design constraint, not as a tail of this one.

@@ -3134,6 +3134,63 @@ AstNode* build_identifier_from_span(Transpiler* tp, SourceSpan span) {
 
 
 
+// RC6/RC17v2: an expression-position string literal's value is a const-pool
+// entry, so equal literals should share one `String` and one slot rather than
+// allocating per occurrence. The Type keeps its payload — under RC17v2 that is
+// the type's identity when the literal appears in type position — but two equal
+// literals may point at the same immutable String.
+typedef struct StringDedupEntry {
+    const char* chars;
+    uint32_t len;
+    uint8_t is_symbol;
+    String* str;
+    uint32_t index;
+} StringDedupEntry;
+
+static int string_dedup_cmp(const void* a, const void* b, void* udata) {
+    const StringDedupEntry* x = (const StringDedupEntry*)a;
+    const StringDedupEntry* y = (const StringDedupEntry*)b;
+    if (x->len != y->len || x->is_symbol != y->is_symbol) return 1;
+    return memcmp(x->chars, y->chars, x->len) == 0 ? 0 : 1;
+}
+
+static uint64_t string_dedup_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const StringDedupEntry* entry = (const StringDedupEntry*)item;
+    uint64_t h = hashmap_sip(entry->chars, entry->len, seed0, seed1);
+    return entry->is_symbol ? h ^ UINT64_C(0x9E3779B97F4A7C15) : h;
+}
+
+static bool lambda_const_pool_intern_string(Transpiler* tp, String* str,
+        bool is_symbol, String** out_str, uint32_t* out_index) {
+    if (!tp || !tp->const_list || !str) return false;
+    if (!tp->string_dedup) {
+        tp->string_dedup = hashmap_new(sizeof(StringDedupEntry), 32, 0, 0,
+            string_dedup_hash, string_dedup_cmp, NULL, NULL);
+    }
+    // A symbol is a `Symbol*` carried in a `String*` slot, and the two layouts
+    // differ -- `Symbol` has `ns` where `String` has its flags, so `chars` sits
+    // at a different offset. Reading a symbol through the String layout hashes
+    // whatever follows `ns`, which silently mismatched and handed back the
+    // wrong shared symbol.
+    const char* chars = is_symbol ? ((Symbol*)str)->chars : str->chars;
+    uint32_t len = is_symbol ? ((Symbol*)str)->len : (uint32_t)str->len;
+    StringDedupEntry probe = {chars, len, (uint8_t)(is_symbol ? 1 : 0), NULL, 0};
+    if (tp->string_dedup) {
+        const StringDedupEntry* found =
+            (const StringDedupEntry*)hashmap_get(tp->string_dedup, &probe);
+        if (found) { *out_str = found->str; *out_index = found->index; return true; }
+    }
+    if (!arraylist_append(tp->const_list, str)) return false;
+    *out_str = str;
+    *out_index = (uint32_t)(tp->const_list->length - 1);
+    if (tp->string_dedup) {
+        probe.str = str;
+        probe.index = *out_index;
+        hashmap_set(tp->string_dedup, &probe);
+    }
+    return true;
+}
+
 static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
         LambdaAstLiteralKind kind) {
     // Phase 3: empty strings are values; empty symbol/binary values remain absent.
@@ -3438,9 +3495,15 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
         }
         str_type->string = str;
     }
-    // add to const list
-    arraylist_append(tp->const_list, str);
-    str_type->const_index = tp->const_list->length - 1;
+    // share the String and its pool slot with an equal earlier literal (RC6)
+    String* pooled = str;
+    uint32_t pooled_index = 0;
+    if (!lambda_const_pool_intern_string(tp, str, is_symbol, &pooled,
+            &pooled_index)) {
+        return &LIT_NULL;
+    }
+    str_type->string = pooled;
+    str_type->const_index = (int)pooled_index;
     return (Type*)str_type;
 }
 
