@@ -1173,6 +1173,24 @@ the fixed-length array check is commented out; warning merging exists
 `item.type_id() == type->type_id` (`:431`–`436`); `format_type_name` returns the
 literal `"unknown"` (`error_reporting.cpp:341`–`344`).
 
+<a id="lr13-8"></a>**LR13-8 · The validator runs on the typed boundary's *success* path · OPEN (measured 2026-09-12)**
+`lambda_type_matches` (`lambda/runtime/lambda-eval.cpp:1611`) routes union
+contracts (`TYPE_KIND_BINARY`/`UNARY`) and shaped map/element contracts into
+`runtime_validate_value_against_type`, and it is called from the **accepting**
+path of `runtime_type_admit_value` (`:10606`). `SchemaValidator::validate_type`
+therefore runs per admitted value, not only to build a rejection diagnostic —
+contrary to D3.2.2's "deep, on first crossing". Confirmed by `sample` stack
+(`lambda_type_check` → `SchemaValidator::validate_type` →
+`validate_against_type` → `validate_binary_type` → `validate_against_union_type`);
+self time 18.7% prettier_ast, 19.7% splay, 13.3% three_way_merge, 11.2%
+richards, 8.8% log_pipeline. `prettier_ast` reports 6,615,043
+`union_admit_calls` per run. The existing memo
+`runtime_union_map_rep_proves_cached` (`:10573`) is entered only for
+`LMD_TYPE_MAP` values and never records a **disproof**, so an unprovable
+candidate re-runs the relation and the validator on every crossing.
+S11.4.1v3 grants the proof-reuse licence; D3.2.4v3 supplies the elision test.
+Fix tracked in [Tune27 M1/T27-1](impl/Lambda_Impl_Tune27.md).
+
 <a id="lr13-7"></a>**LR13-7 · `printf`/emoji output in production paths · OPEN**
 Contrary to CLAUDE.md rule 4, `ast_validate.cpp` has 59 direct `printf` calls
 and `error_reporting.cpp` 6, writing to stdout with emoji rather than through
