@@ -15,10 +15,10 @@ async function survivesAwait() {
 }
 
 // 2. An unrelated async function running while (1) is suspended must not see it.
-let observed = "not-run";
+let withAsyncObserved = "not-run";
 async function observer() {
   await null;
-  observed = typeof ww;
+  withAsyncObserved = typeof ww;
 }
 
 // 3. Two activations suspended inside `with` at once, finishing in the order
@@ -40,21 +40,25 @@ async function longLived() {
   }
 }
 
-// 4. An async function suspended inside `with` that never resumes must not
-//    strand its frame or its scope slot.
-async function abandoned() {
-  const o = { never: 1 };
+const withAsyncA = survivesAwait(), withAsyncB = observer();
+const withAsyncC = shortLived(), withAsyncD = longLived();
+console.log(typeof ww === "undefined");        // sync observer sees nothing
+withAsyncA.then(v => console.log(v === "number:42"));
+withAsyncB.then(() => console.log(withAsyncObserved === "undefined"));
+withAsyncC.then(v => console.log(v === "number"));
+withAsyncD.then(v => console.log(v === "number,undefined"));
+
+// 5. An async closure created inside `with` keeps that chain across its own
+//    suspension. This is what the frame's chain, captured at creation, carries:
+//    an async frame captures it the way js_generator_create does, so a resume
+//    never inherits whatever chain the resuming turn happens to have.
+function withAsyncMakeAsync() {
+  const o = { captured: 7 };
   with (o) {
-    await new Promise(() => {});
-    return typeof never;
+    return async function () {
+      await null;
+      return typeof captured + ":" + captured;
+    };
   }
 }
-
-const a = survivesAwait(), b = observer();
-const c = shortLived(), d = longLived();
-abandoned();
-console.log(typeof ww === "undefined");        // sync observer sees nothing
-a.then(v => console.log(v === "number:42"));
-b.then(() => console.log(observed === "undefined"));
-c.then(v => console.log(v === "number"));
-d.then(v => console.log(v === "number,undefined"));
+withAsyncMakeAsync()().then(v => console.log(v === "number:7"));

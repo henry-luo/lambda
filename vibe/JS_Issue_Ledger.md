@@ -148,3 +148,46 @@ Labelled `with` works because the label entry is pushed before the body raises
 **Independent of JSCU44,** but easier to reason about after it: an over-pop used
 to corrupt a process-wide stack shared by every activation, and now cannot
 escape the activation that made the jump.
+
+### JS05-L3 — a generator closure created inside `with` fails only under the batched suite — **OPEN**
+
+**Found:** 2026-09-12 while extending the JSCU44 regressions. **Not caused by
+JSCU44:** the same repro fails identically on `1146fec84`, the commit before
+stage 1, built and run the same way.
+
+Nine lines, correct standalone, wrong under `test_js_gtest`:
+
+```js
+function probeMakeGen() {
+  const o = { g: 3 };
+  with (o) {
+    return function* () { yield typeof g; yield g; };
+  }
+}
+const probeGen = probeMakeGen()();
+console.log(probeGen.next().value === "number");   // both print true...
+console.log(probeGen.next().value === 3);
+```
+
+| how it is run | result |
+|---|---|
+| `./lambda.exe js <file> --no-log` | exit 0, `true` / `true` |
+| `./lambda.exe js-test-batch` with only this file | `BATCH_END 0`, `true` / `true` |
+| `js-test-batch` with the 50-script chunk that contains it | `BATCH_END 0`, all 50 fine |
+| full `test_js_gtest` run | **fails** — no `BATCH_START`/`BATCH_END` record for the script, and the standalone retry returns NULL |
+
+So it is neither the script nor batch execution as such. The harness runs
+sub-batches of 50 **in parallel** (`JS_BATCH_CHUNK_SIZE`,
+`test/test_js_gtest.cpp:492`), and the failure only appears under that load.
+
+**Not root-caused.** What is established is the boundary: `with` + *generator*
+closure. The async-closure equivalent
+(`with (o) { return async function () { … } }`) passes in the same full-suite
+run, and is covered by case 5 of `regression_with_async_scope.js`. Whether this
+is the parallel-load flakiness already recorded for heavy tests, or something
+specific to a generator capturing a with-chain, is open.
+
+**Why it is not in the suite.** Adding the repro as a test file makes
+`test_js_gtest` fail, so it lives in the ledger rather than as a known-failing
+test. The generator half of the JSCU44 async regression was trimmed for the
+same reason; the case is recorded here instead.

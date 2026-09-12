@@ -259,11 +259,10 @@ static bool js_mir_owner_is_current(Context* runtime, const char* boundary) {
     return true;
 }
 
-// JSCU44: a state machine resumes inside its own `with` chain and can return
-// with scopes still open at the suspension point. Those outlive this native
-// activation, so they spill into the suspension record here -- the one place
-// every MIR resume passes through -- rather than at each caller, where a missed
-// site would silently resolve names against the resumer's chain.
+// JSCU44: a state machine resolves names against the chain captured where its
+// generator or async frame was created, not the caller's. Installing it is all
+// this does -- scopes the body opens are parked in env slots and closed by the
+// lowering before the machine returns, so nothing is left here to spill.
 static Item js_invoke_mir_state(void* func_ptr, JsSuspendedActivation* activation,
         Item* env, Item input, int64_t state) {
     if (!context || !js_runtime_state_thread_matches(context) || !func_ptr) {
@@ -274,20 +273,13 @@ static Item js_invoke_mir_state(void* func_ptr, JsSuspendedActivation* activatio
     if (!activation) {
         return ((MirStateFn)func_ptr)((Context*)context, env, input, state);
     }
+    // The bracket is unconditional even with no inherited chain: a `return` out
+    // of a `with` body bypasses the generated pop, and leaving is what releases
+    // the frames the body left open.
     JsWithFrame inherited = {};
     JsWithFrame* saved_head = js_with_activation_enter(activation->with_env,
         activation->with_depth, &inherited);
     Item result = ((MirStateFn)func_ptr)((Context*)context, env, input, state);
-    if (js_runtime_state.with_head) {
-        // the capture allocates, so the machine's result is rooted across it
-        RootFrame roots(1);
-        Rooted<Item> result_root(roots, result);
-        activation->with_env = js_with_capture_stack(&activation->with_depth);
-        result = result_root.get();
-    } else {
-        activation->with_env = NULL;
-        activation->with_depth = 0;
-    }
     js_with_activation_leave(saved_head);
     return result;
 }
@@ -30788,6 +30780,10 @@ static Item js_async_context_create_current(void* fn_ptr, Item* env,
     js_env_rehome_scalars(env);
     ctx->env = env;
     ctx->env_size = (int)env_size;
+    // JSCU44: an async function's lexical `with` chain is the one open where it
+    // was created, not the one open at whatever turn resumes it -- the same
+    // rule js_generator_create follows.
+    ctx->with_env = js_with_capture_stack(&ctx->with_depth);
     ctx->module_state_id = lambda_active_module_state_id();
     ctx->state = 0;
     ctx->this_val = this_val;
