@@ -4010,6 +4010,24 @@ static bool interp_fast_int_while(InterpFrame* frame, AstWhileNode* loop,
     return true;
 }
 
+// RC9: the interpreter produced the CONST facts; it should read them too.
+// Only UNARY/BINARY/IF_EXPR are ever folded (the pass skips PRIMARY outright),
+// so the node-kind test keeps every other evaluation off this path entirely.
+static bool interp_const_folded_value(InterpFrame* f, AstNode* node, Item* out) {
+    switch (node->node_type) {
+    case AST_NODE_UNARY: case AST_NODE_BINARY: case AST_NODE_IF_EXPR: break;
+    default: return false;
+    }
+    Script* owner = f ? f->module : NULL;
+    if (!owner || !owner->ast_index.facts) return false;
+    AstNodeId id = ast_index_find(&owner->ast_index, node);
+    if (id == AST_NODE_ID_INVALID || id >= owner->ast_index.count) return false;
+    const AstNodeFacts* facts = &owner->ast_index.facts[id];
+    if ((facts->flags & AST_NODE_FACT_CONST_FOLDED) == 0) return false;
+    out->item = facts->folded_item;
+    return true;
+}
+
 static Item eval_expr(InterpFrame* f, AstNode* node) {
     if (!node) return ItemNull;
     f->cur = node;
@@ -4020,6 +4038,12 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             return ItemError;
         }
         f->st->mode_fuel--;
+    } else {
+        // Execution reads the settled value instead of re-evaluating the same
+        // constant subtree on every run. Restricted to RUNTIME so the fold pass
+        // never consumes its own partial output while producing it.
+        Item folded;
+        if (interp_const_folded_value(f, node, &folded)) return folded;
     }
 
     switch (node->node_type) {
