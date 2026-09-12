@@ -162,7 +162,7 @@ answers.
 | **RC8** | **MIR lowering handles both cases and must consult the fact on every path** (§6.2), not only at boxing boundaries. An immediate is baked; a pooled value loads through `const_index`. |
 | **RC9** | **The interpreter consumes the fact directly** (§6.1). A folded node evaluates to its stored value without re-entering evaluation. |
 | **RC10** | **Folded type and inferred type must agree; disagreement is a defect and is reported** (§7). The producer asserts it once. The consumer does not re-derive it. |
-| **RC11** | **The fold runs once per compilation unit.** A unit whose index already carries fold facts preseeds `ANALYZED`; the pass does not re-run and needs no wholesale reset. |
+| **RC11** | **Each node folds exactly once.** The index carries a watermark; the pass resumes there and needs no wholesale reset. Stated per *node*, not per *unit*, because a unit can grow: the REPL appends to a retained index, so a unit-level skip would strand the appended nodes unfolded. |
 | **RC12** | **No per-node fact side table.** The fold's result lives on the node's type under **D8.2.5v2**; `AstIndex::facts` and `AstNodeFacts` are retired. |
 | **RC13** | **Nothing pointer-backed enters cacheable MIR as a raw address** (**DI14**). Pooled values are reached through the module-state const indirection, never by a baked pointer. This is what makes RC5's second case safe. |
 | **RC14** | **Fold attempts remain semantically inert.** Fuel exhaustion, a native fault, an error result, or a rejected attempt leaves the node unfolded and changes nothing observable. A compiler optimization may never alter program completion (retained from today's design). |
@@ -375,7 +375,7 @@ Each phase is independently landable, green on `make test-lambda-baseline` and
 |---|---|---|
 | **RC-P0** | Fix the §1.3 contradiction: reject float in eligibility *or* accept inline floats in the result test. Whichever, stop evaluating what is always discarded. | no MIR-volume growth; baseline green |
 | **RC-P1** | RC10 — assert agreement, delete the duplicated silent skip. Any assertion that fires is a real defect to fix before proceeding. | baseline green with assertions armed |
-| **RC-P2** | RC11 — preseed `ANALYZED` on a retained unit; delete the wholesale reset. | REPL and retained-AST paths green |
+| **RC-P2** | RC11 — resume the fold at a per-index watermark; delete the wholesale reset. **Not** by preseeding `ANALYZED`: the REPL *appends* to a retained index, so skipping the pass would leave every newly typed expression unfolded. A watermark gives RC11's actual guarantee — each node folds exactly once — while staying correct under growth. | REPL and retained-AST paths green |
 | **RC-P2b** | RC15 — literals are pooled at build time with value-bearing types and removed from the folder's eligibility; retire the `&LIT_INT` span re-read. | no literal reaches `interp_const_fold_script`; baseline green |
 | **RC-P3** | RC8 — consult the fact on all lowering paths, not just boxing. `let a = 1 + 2` folds. | MIR volume drops; emission goldens re-based with attribution |
 | **RC-P4** | RC9 — interpreter consumes fold facts. | T0 no longer re-evaluates constants |

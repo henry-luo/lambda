@@ -470,6 +470,10 @@ typedef struct AstIndex {
     AstNode** slots;
     AstNodeId* slot_ids;
     uint32_t slot_capacity;
+    // Nodes below this id have already been const-folded. A retained unit is
+    // recompiled through a fresh pass manager and the REPL appends to it, so
+    // the fold resumes here instead of redoing settled nodes (RC11).
+    uint32_t const_folded_count;
 } AstIndex;
 
 typedef bool (*AstIndexSubtreeVisitor)(const AstIndex* index,

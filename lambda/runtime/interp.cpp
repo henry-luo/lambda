@@ -5310,11 +5310,16 @@ bool interp_const_fold_script(Transpiler* tp) {
     InterpState* saved_state = g_interp_state;
     g_interp_state = &st;
 
-    for (uint32_t id = 0; id < tp->ast_index.count; id++) {
+    // RC11: fold each node once. A retained unit re-enters this pass through a
+    // fresh manager, and the REPL appends to the same index, so resume at the
+    // watermark rather than re-folding settled nodes. Folding is a pure
+    // function of the subtree, so a redo could only reproduce its own answer.
+    // Appended nodes arrive with zeroed facts from ast_index_publish_node,
+    // which is why no wholesale reset is needed here.
+    for (uint32_t id = tp->ast_index.const_folded_count;
+            id < tp->ast_index.count; id++) {
         AstNode* node = tp->ast_index.nodes[id];
         AstNodeFacts* facts = &tp->ast_index.facts[id];
-        facts->flags &= ~AST_NODE_FACT_CONST_FOLDED;
-        facts->folded_item = ITEM_NULL;
         if (!node || node->node_type == AST_NODE_PRIMARY ||
                 !interp_const_node_supported(node)) continue;
 
@@ -5346,6 +5351,7 @@ bool interp_const_fold_script(Transpiler* tp) {
             facts->flags |= AST_NODE_FACT_CONST_FOLDED;
         }
     }
+    tp->ast_index.const_folded_count = tp->ast_index.count;
     g_interp_state = saved_state;
     return true;
 }
