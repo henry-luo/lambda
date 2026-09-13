@@ -15,7 +15,7 @@
 
 ## Archive index
 
-This archive contains **86 historical records**: 85 RESOLVED entries and one
+This archive contains **87 historical records**: 86 RESOLVED entries and one
 CLOSED design decision. Duplicate and split records remain separate so their
 provenance is not lost. The first sections contain records formerly
 interleaved with live entries; §15 preserves the 44 records from the former
@@ -1462,6 +1462,18 @@ LaTeX may hold consecutive strings, while the markup family (markdown, asciidoc,
 textile, wiki) calls `list_push` and merges them. `input-ics.cpp` and
 `input-mark.cpp` use both and so mix the two policies — worth reconciling, along
 with retiring the dead flag.
+
+<a id="lr09-r4-index"></a>**LR09-R4-index · `fn_index` invalid reads return `null` · RESOLVED 2026-09-13 (not a defect — ruled by S7.1.1v3 and S8.2.1v4)**
+The former LR09-4 entry misclassified the implementation as swallowing errors.
+The formal semantics explicitly require every invalid member/index **read** to
+yield `null`, including fractional or negative sequence positions, out-of-range
+positions, and keys outside a container's domain. Invalid **writes** remain hard
+errors under S7.1.3v2, which is what `proc_invalid_member_access.ls` verifies.
+`oob_read_null.ls` covers out-of-range, negative, and chained reads. The
+type-dependent JIT float-OOB residue is not closed here; it remains in
+[LR07-10](../Lambda_Issue_Ledger.md#lr07-10). The `-index` archive suffix
+disambiguates this original LR09-4 record from an unrelated legacy LR09-R4
+anchor already present in this archive.
 
 <a id="lr09-r4"></a><a id="lr10-3"></a>**LR09-R4 · `set_runtime_error` message buffer cap · RESOLVED 2026-08-28**
 `err_createf` and `set_runtime_error` now share the exact-size variadic

@@ -77,6 +77,34 @@ TEST(ValueRepresentationTest, CanonicalRepUsesTheFullSemanticContract) {
     pool_destroy(pool);
 }
 
+TEST(ValueRepresentationTest, NullableWideArraysUseDestinationOwnedTypedItems) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+
+    Type* contracts[] = {
+        lambda_type_nullable_normalized(pool, &TYPE_INT64),
+        lambda_type_nullable_normalized(pool, &TYPE_UINT64),
+    };
+    for (Type* contract : contracts) {
+        LaneStorageDesc scalar = lambda_lane_storage_desc_for(contract);
+        EXPECT_EQ((int)scalar.kind, (int)LANE_STORAGE_ITEM);
+
+        LaneStorageDesc array = {};
+        ASSERT_TRUE(lambda_type_array_lane_storage_desc(contract, &array));
+        EXPECT_EQ((int)array.kind, (int)LANE_STORAGE_TYPED_ITEM);
+        EXPECT_EQ((int)array.byte_size, (int)sizeof(TypedItem));
+        EXPECT_EQ((int)array.nullable, 1);
+        EXPECT_EQ((int)array.native, 1);
+
+        Array storage = {};
+        storage.type_id = LMD_TYPE_ARRAY;
+        array_native_lane_configure(&storage, &array);
+        EXPECT_TRUE(array_native_lane_matches_desc(&storage, &array));
+    }
+
+    pool_destroy(pool);
+}
+
 static TypeUnary array_contract_for_test(Type* element) {
     TypeUnary type = {};
     type.type_id = LMD_TYPE_TYPE;

@@ -16048,7 +16048,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     ? mir_array_occurrence_element(declared_value_type) : NULL;
                 LaneStorageDesc element_lane = {};
                 bool declared_nullable_native_array = declared_array_element &&
-                    lambda_type_lane_storage_desc(declared_array_element, &element_lane) &&
+                    lambda_type_array_lane_storage_desc(declared_array_element, &element_lane) &&
                     (element_lane.kind == LANE_STORAGE_POINTER || element_lane.nullable);
                 bool declared_array_contract = declared_array_element != NULL;
                 bool declaration_boundary_applies = has_type_annotation &&
@@ -25918,7 +25918,7 @@ static MIR_reg_t emit_typed_array_store_fallback(MirTranspiler* mt,
     Type* element_contract = mir_array_occurrence_element(root->full_type);
     LaneStorageDesc lane_desc = {};
     bool has_lane_contract = element_contract &&
-        lambda_type_lane_storage_desc(element_contract, &lane_desc);
+        lambda_type_array_lane_storage_desc(element_contract, &lane_desc);
     MIR_reg_t replacement = emit_checked_array_store(mt, checked_set, owner, index, value,
         root->full_type, "typed array representation fallback",
         has_lane_contract ? &lane_desc : NULL);
@@ -27588,12 +27588,14 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
                     mir_index_expr_is_native_int(mt, ca->key);
                 LaneStorageDesc lane_desc = {};
                 bool has_lane_contract = element_contract &&
-                    lambda_type_lane_storage_desc(element_contract, &lane_desc);
+                    lambda_type_array_lane_storage_desc(element_contract, &lane_desc);
                 bool nullable_native_lane = has_lane_contract &&
                     (lane_desc.kind == LANE_STORAGE_POINTER || (lane_desc.nullable &&
                     (lane_desc.kind == LANE_STORAGE_INT || lane_desc.kind == LANE_STORAGE_BOOL ||
                      lane_desc.kind == LANE_STORAGE_FLOAT64 || lane_desc.kind == LANE_STORAGE_ITEM ||
-                     lane_desc.kind == LANE_STORAGE_SIZED_I64 || lane_desc.kind == LANE_STORAGE_POINTER)));
+                     lane_desc.kind == LANE_STORAGE_SIZED_I64 ||
+                     lane_desc.kind == LANE_STORAGE_TYPED_ITEM ||
+                     lane_desc.kind == LANE_STORAGE_POINTER)));
                 bool writes_through_caller = typed_root->is_var_param;
                 // A local exact ArrayNum is already a writable witness. Requiring
                 // caller write-back here sent every `var a: float[]` store through

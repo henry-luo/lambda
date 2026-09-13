@@ -26,6 +26,7 @@
 #include "../js/js_interp.hpp"
 #include "dom_platform.h"
 #include "dom_observers.h"
+#include "dom_canvas.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../jube/jube_registry.h"
@@ -34,6 +35,7 @@
 #include "../io/mark_editor.hpp"
 #include "../core/mark_reader.hpp"
 #include "../module/radiant/radiant_input_value.hpp"
+#include "../module/radiant/radiant_dom_bridge.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/mem_factory.h"
@@ -7683,6 +7685,15 @@ extern "C" void dom_after_set_attribute(void* elem_ptr,
         if (sel && !sel->has_attribute("multiple")) _select_ask_for_reset(sel);
     }
     _after_image_src_set(elem, attr_name, attr_value);
+    if (elem->tag() == MARKUP_NAME_CANVAS &&
+        (strcasecmp(attr_name, "width") == 0 || strcasecmp(attr_name, "height") == 0)) {
+        // Content-attribute mutations reset exactly like the reflected IDL
+        // setters; both replace the authoritative bitmap and context state.
+        if (!radiant_canvas_reset_from_attributes(elem)) {
+            log_error("canvas: could not reset backing surface from %s attribute", attr_name);
+        }
+        dom_canvas_reset_context(dom_wrap_element(elem));
+    }
 }
 
 extern "C" void dom_after_remove_attribute(void* elem_ptr,
@@ -7691,6 +7702,13 @@ extern "C" void dom_after_remove_attribute(void* elem_ptr,
     if (!elem || !attr_name) return;
     dom_clear_event_attr_expando(elem, attr_name);
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
+    if (elem->tag() == MARKUP_NAME_CANVAS &&
+        (strcasecmp(attr_name, "width") == 0 || strcasecmp(attr_name, "height") == 0)) {
+        if (!radiant_canvas_reset_from_attributes(elem)) {
+            log_error("canvas: could not reset backing surface after removing %s", attr_name);
+        }
+        dom_canvas_reset_context(dom_wrap_element(elem));
+    }
     if (_is_tag(elem, "select") && strcasecmp(attr_name, "multiple") == 0) {
         _select_ask_for_reset(elem);
     }
@@ -8653,8 +8671,10 @@ typedef enum JsDomReflectKind {
     X("maxLength", "maxlength", INT, -1, DOM_TAG_INPUT | DOM_TAG_TEXTAREA) \
     X("minLength", "minlength", INT, 0, DOM_TAG_INPUT | DOM_TAG_TEXTAREA) \
     X("size", "size", INT, 20, DOM_TAG_INPUT) \
-    X("width", "width", INT, 0, DOM_TAG_INPUT | DOM_TAG_CANVAS) \
-    X("height", "height", INT, 0, DOM_TAG_INPUT | DOM_TAG_CANVAS) \
+    X("width", "width", INT, 0, DOM_TAG_INPUT) \
+    X("height", "height", INT, 0, DOM_TAG_INPUT) \
+    X("width", "width", INT, 300, DOM_TAG_CANVAS) \
+    X("height", "height", INT, 150, DOM_TAG_CANVAS) \
     X("size", "size", INT, 0, DOM_TAG_SELECT) \
     X("rows", "rows", INT, 2, DOM_TAG_TEXTAREA) \
     X("cols", "cols", INT, 20, DOM_TAG_TEXTAREA) \
@@ -9937,6 +9957,14 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
             return (Item){.item = i2it(_reflect_int_attr("size", 20))};
         }
     }
+    if (_is_tag(elem, "canvas")) {
+        if (prop_id == JS_DOM_PROP_WIDTH) {
+            return (Item){.item = i2it(_reflect_int_attr("width", 300))};
+        }
+        if (prop_id == JS_DOM_PROP_HEIGHT) {
+            return (Item){.item = i2it(_reflect_int_attr("height", 150))};
+        }
+    }
     // HTMLSelectElement: size (default 0 unless multiple, but 0 is spec default)
     if (_is_tag(elem, "select") && prop_id == JS_DOM_PROP_SIZE) {
         return (Item){.item = i2it(_reflect_int_attr("size", 0))};
@@ -10817,9 +10845,19 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
                 }
             }
             if (n < 0) n = int_default;  // negative → reset to default
+            bool canvas_dimension = elem->tag() == MARKUP_NAME_CANVAS &&
+                (strcmp(int_attr, "width") == 0 || strcmp(int_attr, "height") == 0);
+            if (canvas_dimension) {
+                if ((unsigned long)n > UINT32_MAX ||
+                    !radiant_canvas_set_dimension(elem, strcmp(int_attr, "width") == 0,
+                                                  (uint32_t)n)) {
+                    return js_throw_range_error("Canvas dimensions exceed Radiant limits");
+                }
+            }
             char buf[32];
             snprintf(buf, sizeof(buf), "%ld", n);
             elem->set_attribute(int_attr, buf);
+            if (canvas_dimension) dom_canvas_reset_context(elem_item);
             dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }

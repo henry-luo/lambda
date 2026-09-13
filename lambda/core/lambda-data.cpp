@@ -741,6 +741,74 @@ ConstItem List::get(int index) const {
 // One shaped-field store. Shared by the varargs filler and the array filler so
 // a map literal lands identically whether the values arrive from generated
 // code's varargs call or from the T0 walker's rooted Item span.
+bool typeditem_store_item(TypedItem* titem, Item item) {
+    if (!titem) return false;
+    TypeId type_id = get_type_id(item);
+    TypedItem stored = {.type_id = type_id, .item = item.item};
+    switch (type_id) {
+    case LMD_TYPE_NULL:
+        break;
+    case LMD_TYPE_BOOL:
+        stored.bool_val = item.bool_val;
+        break;
+    case LMD_TYPE_INT:
+        // C16: carry the numeric value; an int Item payload is not its value.
+        stored.double_val = lambda_int_item_value(item);
+        break;
+    case LMD_TYPE_INT64:
+        stored.long_val = item.get_int64();
+        break;
+    case LMD_TYPE_UINT64:
+        stored.uint64_val = item.get_uint64();
+        break;
+    case LMD_TYPE_FLOAT:
+        stored.double_val = item.get_double();
+        break;
+    case LMD_TYPE_DECIMAL:
+        stored.decimal = item.get_decimal();
+        break;
+    case LMD_TYPE_DTIME:
+        stored.datetime_ptr = item.get_datetime_ptr();
+        break;
+    case LMD_TYPE_STRING:
+        stored.string = item.get_safe_string();
+        break;
+    case LMD_TYPE_BINARY:
+        stored.binary = item.get_safe_binary();
+        break;
+    case LMD_TYPE_COMPLEX:
+        stored.pointer = item.get_complex();
+        break;
+    case LMD_TYPE_SYMBOL:
+        stored.symbol = item.get_safe_symbol();
+        break;
+    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
+    case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
+    case LMD_TYPE_VARRAY: case LMD_TYPE_VELMT:
+    case LMD_TYPE_ELEMENT:
+        stored.container = item.container;
+        break;
+    case LMD_TYPE_TYPE:
+        stored.type = item.type;
+        break;
+    case LMD_TYPE_FUNC:
+        stored.function = item.function;
+        break;
+    case LMD_TYPE_PATH:
+        stored.path = item.path;
+        break;
+    case LMD_TYPE_ERROR:
+    case LMD_TYPE_UNDEFINED:
+        // The type tag alone round-trips these sentinels.
+        break;
+    default:
+        log_error("typeditem store: unknown type %s", get_type_name(type_id));
+        return false;
+    }
+    *titem = stored;
+    return true;
+}
+
 void set_field_value(ShapeEntry* field, void* field_ptr, Item item) {
     if (!field->name) { // nested map
         TypeId type_id = get_type_id(item);
@@ -891,70 +959,9 @@ void set_field_value(ShapeEntry* field, void* field_ptr, Item item) {
             break;
         }
         case LMD_TYPE_ANY: { // a special case
-            TypeId type_id = get_type_id(item);
-            TypedItem titem = {.type_id = type_id, .item = item.item};
-            switch (type_id) {
-            case LMD_TYPE_NULL: ;
-                break; // no extra work needed
-            case LMD_TYPE_BOOL:
-                titem.bool_val = item.bool_val;  break;
-            case LMD_TYPE_INT:
-                // C16: carry the numeric value; an int Item payload is not its value.
-                titem.double_val = lambda_int_item_value(item);  break;
-            case LMD_TYPE_INT64:
-                titem.long_val = item.get_int64();  break;
-            case LMD_TYPE_UINT64:
-                titem.uint64_val = item.get_uint64();  break;
-            case LMD_TYPE_FLOAT:
-                titem.double_val = item.get_double();  break;
-            case LMD_TYPE_DECIMAL:
-                // Preserve both decimal and integer-domain payloads in `any` fields.
-                titem.decimal = item.get_decimal();  break;
-            case LMD_TYPE_DTIME:
-                titem.datetime_ptr = item.get_datetime_ptr();  break;
-            case LMD_TYPE_STRING:
-                titem.string = item.get_safe_string();
-                break;
-            case LMD_TYPE_BINARY:
-                titem.binary = item.get_safe_binary();
-                break;
-            case LMD_TYPE_COMPLEX:
-                titem.pointer = item.get_complex();
-                break;
-            case LMD_TYPE_SYMBOL:
-                titem.symbol = item.get_safe_symbol();
-                break;
-            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
-            case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
-            case LMD_TYPE_VARRAY: case LMD_TYPE_VELMT:
-            case LMD_TYPE_ELEMENT:   {
-                Container *container = item.container;
-                titem.container = container;
-                break;
+            if (!typeditem_store_item((TypedItem*)field_ptr, item)) {
+                *(TypedItem*)field_ptr = {.type_id = LMD_TYPE_ERROR};
             }
-            case LMD_TYPE_TYPE:
-                titem.type = item.type;
-                break;
-            case LMD_TYPE_FUNC: {
-                Function* fn = item.function;
-                titem.function = fn;
-                break;
-            }
-            case LMD_TYPE_PATH:
-                titem.path = item.path;
-                break;
-            case LMD_TYPE_ERROR:
-            case LMD_TYPE_UNDEFINED:
-                // store sentinel — the type_id alone is enough to round-trip
-                // through typeditem_to_item. No payload to copy.
-                break;
-            default:
-                log_error("unknown type %s in set_fields", get_type_name(type_id));
-                // set as ERROR
-                titem = {.type_id = LMD_TYPE_ERROR};
-            }
-            // set in map
-            *(TypedItem*)field_ptr = titem;
             break;
         }
         default:

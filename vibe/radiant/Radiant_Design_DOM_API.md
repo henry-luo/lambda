@@ -86,7 +86,7 @@ native contract, its implementation status, and the current scope boundary.
 | Fetch and XMLHttpRequest | **Partial** | `js_fetch.cpp`, `js_xhr.cpp`, `input_http.cpp` | Native fetch exists. XHR supports synchronous requests and event-loop-queued `open(..., true)` completion; streaming, CORS, and full response-type parity remain out of scope. |
 | Classic page scripts | **Partial** | `radiant/script_runner.cpp`, LambdaJS MIR | Inline/external classic scripts, scheduling/lifecycle, and inline event handlers run in the retained document realm. Byte budgets and unsupported browser APIs still limit arbitrary pages. |
 | `<script type="module">` | **Partial** | `script_runner.cpp`, LambdaJS MIR | Inline and relative external module graphs run through the bounded document loader. Import maps, bare package specifiers, and browser-complete module fetching are deferred. |
-| Canvas | **KIV / Deferred** | limited compatibility code in `js_canvas.cpp` | Existing `OffscreenCanvas.measureText()` may remain for library compatibility, but general Canvas 2D, bitmap, and WebGL support are not scheduled; see §3.7. |
+| Canvas | **Partial** | `lambda/dom/dom_canvas.cpp`, `radiant/canvas_2d.cpp` | HTML Canvas 2D has retained bitmap ownership plus bounded paths, clips, stroke style, and `fillText` rasterization. Offscreen drawing, gradients, image/pixel APIs, SVG/PDF output, WebGL, and WebGPU remain deferred; see §3.7. |
 
 ### 3.2 Tree, document, and element APIs
 
@@ -193,12 +193,16 @@ worker, or general browser networking features part of the Radiant DOM scope.
 KIV items are not implementation commitments. Existing narrow compatibility
 behavior may remain, but it must not be described as complete support.
 
-- **Canvas:** keep the existing `OffscreenCanvas.measureText()` path needed by
-  text/layout libraries. Defer `HTMLCanvasElement`, `CanvasRenderingContext2D`,
-  pixel buffers, paths, compositing, image export, WebGL, and WebGPU until a
-  concrete Radiant application requires them. If Canvas is resumed, first
-  decide whether it is backed by ThorVG, the current raster surface, or a
-  dedicated API layer; do not grow unrelated drawing state inside `js_dom.cpp`.
+- **Canvas:** a bounded HTML Canvas 2D slice is supported through a
+  document-owned `ImageSurface`: context identity, width/height reset,
+  transforms, solid fills/strokes, geometry paths, nonzero clipping,
+  cap/join styles, `clearRect`, `fillText()`, and font-aware `measureText()`.
+  Its authoritative state lives in Radiant, with a plain-value projection that
+  keeps JS-visible properties correct after `restore()`; it crosses the DOM
+  boundary only through the explicit bridge required by **D7.5.3**. Offscreen
+  drawing, `strokeText`, even-odd clipping, gradients, images,
+  pixels/readback/export, WebGL, and WebGPU remain deferred; see
+  `Radiant_Design_Canvas.md`.
 - **Fancy form controls:** keep truthful type/value reflection already used by
   libraries. Defer native popup/picker UI and complete browser behavior for
   date, time, datetime-local, month, week, color, and file controls. Scripted
@@ -460,7 +464,7 @@ There are no unresolved placement decisions in this document:
 | Basic `contenteditable` | **Support, partial** | Native editing/selection/input infrastructure already owns this path. |
 | Atomic and `contenteditable=false` caret boundaries | **Support** | Safe caret/selection boundaries are a native prerequisite for model-owned editors. |
 | Other richer browser-owned `contenteditable` behavior | **No support** | Structural rich editing, rich paste, UA undo, nested-host/complex-IME parity, and spellcheck belong outside the Radiant DOM contract. |
-| Canvas | **KIV / Deferred** | Limited text measurement exists, but a full drawing API has no current target. |
+| Canvas | **Support, partial** | HTML Canvas has a retained raster C0/C1 geometry/text slice. Advanced Canvas 2D, Offscreen drawing, and GPU APIs remain deferred. |
 | Fancy form controls | **KIV / Deferred** | Value semantics can remain while native picker chrome waits for a concrete product need. |
 | `execCommand` rich editing | **No support** | Legacy command semantics conflict with the model-owned editor architecture. |
 | WebSocket / Worker | **No support** | They introduce separate networking/concurrency/realm products, not DOM completion work. |

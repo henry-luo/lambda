@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 3.0.0 (2026-09-11)
+**Spec version:** 4.0.1 (2026-09-13)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -114,7 +114,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   [D2.6.2]
 - **DI9 — Container-owned scalars.** A container's wide-scalar Items point
   only into its own buffer; headers are never reallocated out from under
-  an identity. [D2.6.4]
+  an identity. [D2.6.4v2]
 - **DI10 — The safepoint contract.** GC begins only inside a `MAY_GC`
   call; `MAY_GC` is the default and `NO_GC` a mechanically verified claim;
   all `MAY_GC` cleanup runs before watermark restoration. [D5.3.2, D5.1.4]
@@ -264,23 +264,23 @@ language-visible counterparts are the semantics spec's SI ledger.
   sentinel; representation follows the **full type contract**, never
   TypeId alone; **GC sees only pointers** — numeric sentinels are never
   roots. [Nullable §1–2]
-- **D2.5.2** Sentinels: `INT_LANE_NULL` (numerically the `ItemNull` word —
-  what makes box/unbox exact) joins the three poison sentinels; `bool?` is
+- **D2.5.2v2** Sentinels: `INT_LANE_NULL` (numerically the `ItemNull` word
+  — what makes box/unbox exact) joins the three poison sentinels; `bool?` is
   one byte 0/1/2 with C-truthiness banned; sized `i8?`…`u32?` widen to the
-  i64 lane; `i64?`/`u64?` are the deliberate exception (every bit pattern
-  valid → ordinary Item lane); `float?` reserves a distinct NaN payload
-  (`ItemNull`'s bits are a valid finite double) — the null test is a bit
-  compare, never IEEE `==`, and other NaNs canonicalize on store.
-  **Consequence, accepted:** `i64?`/`u64?` therefore forgo the native lane
-  outright — a wide optional stays a boxed Item paying a scalar home per
-  value (D2.2.3), and never enters the unboxed wide `+ - *` path, which
-  admits only non-optional operands. Closed, not deferred: recovering a null
-  code costs either a reserved value (deleting a legal member from a
-  full-domain type) or a tagged pair (a second word on every wide optional),
-  and the case is judged rare — wide integers carry exact ids, counters,
-  hashes, and bit patterns, the uses that least often admit absence. Revisit
-  only on evidence that `i64?`/`u64?` are hot in real code. *Not every type
-  earns a lane.* [Nullable §3–4]
+  i64 lane; `float?` reserves a distinct NaN payload (`ItemNull`'s bits are
+  a valid finite double) — the null test is a bit compare, never IEEE `==`,
+  and other NaNs canonicalize on store. `i64?`/`u64?` have no spare raw
+  one-word null code, so their expression and dynamic-boundary carrier is an
+  ordinary Item. Their persistent native Array storage is nevertheless a
+  destination-owned `TypedItem` slot per element: a null tag, or an inline
+  `int64_t`/`uint64_t` payload with its exact tag. The store validates then
+  copies that payload into the Array; the read reconstructs the consumer
+  carrier. A raw wide-scalar Item pointing into a number frame must never be
+  retained in an Array. Thus wide nullable Arrays preserve their native typed
+  representation without borrowing a scalar home; the extra tag is confined
+  to persistent array storage, not the register ABI. Wide optionals remain
+  outside the unboxed wide `+ - *` path, which admits only non-optional
+  operands. [Nullable §3–4; D5.2.2v3–D5.2.3]
 - **D2.5.3** `a[i]` with an unproven index infers `T?` — not `T`, not
   `any`; flow-sensitive proofs may use the payload directly but never
   change the public inferred type. `any`, `number`, `integer`, and
@@ -288,12 +288,14 @@ language-visible counterparts are the semantics spec's SI ledger.
 
 ### D2.6 Containers and array storage
 
-- **D2.6.1** Three physical array forms: boxed Array (Items), native Array
-  (uniform 64-bit lane word per element), ArrayNum (specialized numeric
-  layout). Map/shape packing uses minimum field width; array packing the
-  uniform word — a deliberate granularity difference. Shapes carry an
-  immutable `LaneStorageDesc` from **one shared descriptor resolver** for
-  MIR, map layout, arrays, and guests. [Nullable §6]
+- **D2.6.1v2** Three physical array forms: boxed Array (Items), native Array
+  (uniform descriptor-selected native slot per element), ArrayNum
+  (specialized numeric layout). Native slots are normally one 64-bit lane
+  word; `i64?[]`/`u64?[]` use a destination-owned `TypedItem` slot. Map/shape
+  packing uses minimum field width; the native Array's uniform descriptor
+  slot is a deliberate granularity difference. Shapes carry an immutable
+  `LaneStorageDesc` from **one shared descriptor resolver** for MIR, map
+  layout, arrays, and guests. [Nullable §6]
 - **D2.6.2** **ArrayNum is strictly non-null**: an admitted null store
   performs a one-way, atomic demotion to native `Array<T?>`; `int[]`
   rejects the store outright. Covariant `int[] → int?[]` assignment may
@@ -304,9 +306,11 @@ language-visible counterparts are the semantics spec's SI ledger.
 - **D2.6.3** `ELEM_INT` element storage is the i64 lane (finite values or
   poison sentinels), mapped to IEEE at print/box boundaries; both int
   element kinds share the i64 kernel path.* [Int_Type §5.8]
-- **D2.6.4** Wide-scalar Items inside a container point **only into that
-  container's own buffer** (tail regions, `extra` = uniform tail count);
-  headers are never reallocated out from under an identity. [SF15]
+- **D2.6.4v2** A container that retains a raw wide-scalar Item points **only
+  into that container's own buffer** (tail regions, `extra` = uniform tail
+  count); headers are never reallocated out from under an identity.
+  `i64?[]`/`u64?[]` instead retain no raw scalar Item: each is an inline,
+  destination-owned `TypedItem` slot under D2.5.2v2. [SF15]
 - **D2.6.5** **The append API selects content normalization.** Two runtime
   appends exist and they are not interchangeable. `list_push()` is the
   **content** constructor: it applies S16.7's normalization — a `null` is
@@ -350,7 +354,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   pointer. Instance layout follows the declared structure, so an
   attribute-only nominal type is a 32-byte map, not a 64-byte element.
   JavaScript arrays hold their properties in their own attribute face, and
-  the reserved JS-properties slot in `extra` (D2.6.4) retires. *Accepted
+  the reserved JS-properties slot in `extra` (D2.6.4v2) retires. *Accepted
   cost:* every array header grows by the map face; array-heavy benchmarks
   gate the change. *Sequencing:* the layout change lands first as its own
   verified change, then the nominal-descriptor change and the TypeId
@@ -438,7 +442,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   are error-free **by representation** — there is no Item word to put an
   error in, and no lane encoding is ever spent on one: the int lane's
   out-of-band encodings denote `int.nan`/`int.inf` values (D2.2.2), the
-  null sentinels denote null (D2.5.2), and dense sized lanes have no spare
+  null sentinels denote null (D2.5.2v2), and dense sized lanes have no spare
   pattern at all. Both escape hatches are rejected rulings, not unbuilt
   options: an **in-band error sentinel** records only *that* a failure
   happened (contradicting rich error payloads) and re-creates the
@@ -624,7 +628,7 @@ that carries them.
   `var`/procedural code can, and an annotated root must keep conforming.
   [TE §6 B7b, Transpiler DD3]
 - **D3.4.6** Shapes carry the immutable `LaneStorageDesc` derived from the
-  full `Type*` via the one shared descriptor resolver (D2.6.1); changing
+  full `Type*` via the one shared descriptor resolver (D2.6.1v2); changing
   a field's *contract* re-derives layout, writing a null into a `T?`
   field does not. [Nullable §6]
 - **D3.4.7** A runtime JavaScript `TypeMap` may carry one immutable

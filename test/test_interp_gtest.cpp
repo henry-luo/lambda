@@ -416,6 +416,7 @@ TEST(InterpWalker, NullableNativeTypedArraysKeepTheirDestinationLane) {
         "test/lambda/proc/proc_nullable_native_array.ls",
         "test/lambda/proc/proc_nullable_native_float_array.ls",
         "test/lambda/proc/proc_nullable_native_int64_array.ls",
+        "test/lambda/proc/proc_nullable_native_wide_array_storage.ls",
         "test/lambda/proc/proc_nullable_native_sized_array.ls",
         "test/lambda/proc/proc_nullable_native_pointer.ls",
         "test/lambda/proc/proc_nullable_native_extended_pointer.ls",

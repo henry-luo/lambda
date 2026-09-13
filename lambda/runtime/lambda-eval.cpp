@@ -7390,7 +7390,7 @@ static bool array_native_lane_supported(const LaneStorageDesc* desc) {
     return desc && (desc->kind == LANE_STORAGE_POINTER || (desc->nullable &&
         (desc->kind == LANE_STORAGE_INT || desc->kind == LANE_STORAGE_BOOL ||
          desc->kind == LANE_STORAGE_FLOAT64 || desc->kind == LANE_STORAGE_ITEM ||
-         desc->kind == LANE_STORAGE_SIZED_I64)));
+         desc->kind == LANE_STORAGE_SIZED_I64 || desc->kind == LANE_STORAGE_TYPED_ITEM)));
 }
 
 static bool runtime_array_representation_matches_contract(Item value,
@@ -7455,7 +7455,10 @@ static bool array_rebuild_native_lane(Item source, const LaneStorageDesc* desc,
     result->capacity = length;
     if (length > 0) {
         size_t bytes = 0;
-        if (!lam::checked_mul((size_t)length, sizeof(Item), &bytes)) return false;
+        if (!lam::checked_mul((size_t)length,
+                array_native_lane_slot_size((LaneStorageKind)desc->kind), &bytes)) {
+            return false;
+        }
         result->items = (Item*)heap_data_calloc(bytes);
         result = rooted_result.get();
         if (!result->items) return false;
@@ -7982,7 +7985,9 @@ static Item clone_mutable_array(Array* src, MutableCloneContext* clone_ctx) {
         dst->capacity = src->capacity;
         if (src->capacity > 0) {
             size_t bytes = 0;
-            if (!lam::checked_mul((size_t)src->capacity, sizeof(Item), &bytes)) return ItemNull;
+            if (!lam::checked_mul((size_t)src->capacity, array_native_lane_slot_size(src), &bytes)) {
+                return ItemNull;
+            }
             dst->items = (Item*)heap_data_alloc(bytes);
             dst = rooted_dst.get();
             src = rooted_src.get();
@@ -8257,7 +8262,8 @@ static CowProfileTypeCounters* cow_profile_for(Item value) {
 static uint64_t cow_one_level_copy_bytes(Item value) {
     switch (get_type_id(value)) {
     case LMD_TYPE_ARRAY:
-        return sizeof(Array) + (uint64_t)value.array->length * sizeof(Item);
+        return sizeof(Array) + (uint64_t)value.array->length *
+            array_native_lane_slot_size(value.array);
     case LMD_TYPE_MAP:
         return sizeof(Map) + (uint64_t)value.map->data_cap;
     case LMD_TYPE_ARRAY_NUM: {
@@ -8531,7 +8537,8 @@ static Item cow_clone_array_one_level(Array* source) {
         copy->capacity = source->capacity;
         if (source->capacity > 0) {
             size_t bytes = 0;
-            if (!lam::checked_mul((size_t)source->capacity, sizeof(Item), &bytes)) {
+            if (!lam::checked_mul((size_t)source->capacity,
+                    array_native_lane_slot_size(source), &bytes)) {
                 return ItemError;
             }
             copy->items = (Item*)heap_data_alloc(bytes);
@@ -9205,7 +9212,7 @@ static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value,
         lane_desc = *lane_hint;
         has_lane_contract = true;
     } else {
-        has_lane_contract = lambda_type_lane_storage_desc(element_type, &lane_desc);
+        has_lane_contract = lambda_type_array_lane_storage_desc(element_type, &lane_desc);
     }
     bool owner_representation_proven = has_lane_contract &&
         runtime_array_representation_matches_contract(owner, &lane_desc);
@@ -9509,11 +9516,11 @@ static LaneStorageDesc lambda_array_lane_hint(Type* expected, uint8_t lane_kind,
         uint8_t lane_nullable, uint8_t lane_byte_size) {
     LaneStorageDesc hint = {};
     Type* element_type = runtime_array_contract_element(expected);
-    hint.semantic_contract = element_type;
-    hint.base_contract = element_type;
-    hint.kind = lane_kind;
-    hint.nullable = lane_nullable;
-    hint.byte_size = lane_byte_size;
+    if (!lambda_type_array_lane_storage_desc(element_type, &hint) ||
+            hint.kind != lane_kind || hint.nullable != lane_nullable ||
+            hint.byte_size != lane_byte_size) {
+        return {};
+    }
     return hint;
 }
 
@@ -10331,7 +10338,7 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
     // out of that carrier, so it keeps the per-element admission below rather
     // than certifying the source in place (D3.3.3v3, D8.3.2).
     bool target_has_native_lane = lambda_type_layout_proves_contract(element_type) &&
-        lambda_type_lane_storage_desc(element_type, &target_lane) &&
+        lambda_type_array_lane_storage_desc(element_type, &target_lane) &&
         array_native_lane_supported(&target_lane);
     if (source_type == LMD_TYPE_ARRAY && value.array &&
             !value.array->is_ndim && !value.array->is_view &&
@@ -10460,7 +10467,7 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
     }
 
     LaneStorageDesc lane_desc = {};
-    if (lambda_type_lane_storage_desc(element_type, &lane_desc) &&
+    if (lambda_type_array_lane_storage_desc(element_type, &lane_desc) &&
             array_native_lane_supported(&lane_desc) &&
             !array_native_lane_matches_desc(rooted_candidate.get().array, &lane_desc)) {
         Item rebuilt = ItemNull;

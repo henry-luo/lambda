@@ -241,6 +241,13 @@ typedef struct Item {
 
 static_assert(sizeof(Item) == sizeof(uint64_t), "C++ Item must remain one word");
 
+typedef struct TypedItem TypedItem;
+
+// TypedItem storage owns its scalar payload inline. Defined in lambda-data.cpp
+// so maps and native Arrays encode the same persistent value representation.
+Item typeditem_to_item(TypedItem* titem);
+bool typeditem_store_item(TypedItem* titem, Item item);
+
 // const read-only item
 // ConstItem, instead of const Item, to hide fields from Item
 struct ConstItem {
@@ -499,6 +506,27 @@ static inline TypeId array_native_lane_pointer_type(const Array* array) {
     return array ? (TypeId)array->reserved_state : LMD_TYPE_NULL;
 }
 
+static inline TypeId array_native_lane_typed_item_type(const Array* array) {
+    return array ? (TypeId)array->reserved_state : LMD_TYPE_NULL;
+}
+
+static inline size_t array_native_lane_slot_size(LaneStorageKind kind) {
+    return kind == LANE_STORAGE_TYPED_ITEM
+        ? LAMBDA_GC_OFF_TYPED_ITEM_VALUE + sizeof(uint64_t) : sizeof(Item);
+}
+
+static inline size_t array_native_lane_slot_size(const Array* array) {
+    return array_native_lane_slot_size(array_native_lane_kind(array));
+}
+
+static inline void* array_native_lane_slot(Array* array, int64_t index) {
+    return (uint8_t*)array->items + (size_t)index * array_native_lane_slot_size(array);
+}
+
+static inline const void* array_native_lane_slot(const Array* array, int64_t index) {
+    return (const uint8_t*)array->items + (size_t)index * array_native_lane_slot_size(array);
+}
+
 static inline void array_native_lane_configure(Array* array, const LaneStorageDesc* desc) {
     if (!array || !desc) return;
     // Generic Arrays otherwise do not consume map_kind. Keep the compact lane
@@ -508,7 +536,8 @@ static inline void array_native_lane_configure(Array* array, const LaneStorageDe
         (desc->nullable ? ARRAY_NATIVE_LANE_NULLABLE : 0);
     if (desc->kind == LANE_STORAGE_SIZED_I64 && desc->base_contract) {
         array->reserved_state = desc->base_contract->kind;
-    } else if (desc->kind == LANE_STORAGE_POINTER && desc->base_contract) {
+    } else if ((desc->kind == LANE_STORAGE_POINTER ||
+            desc->kind == LANE_STORAGE_TYPED_ITEM) && desc->base_contract) {
         array->reserved_state = desc->base_contract->type_id;
     } else {
         array->reserved_state = 0;
@@ -535,13 +564,25 @@ static inline bool array_native_lane_matches_desc(const Array* array,
         return desc->base_contract && array_native_lane_pointer_type(array) ==
             desc->base_contract->type_id;
     }
+    if (desc->kind == LANE_STORAGE_TYPED_ITEM) {
+        return desc->base_contract && array_native_lane_typed_item_type(array) ==
+            desc->base_contract->type_id && desc->byte_size == array_native_lane_slot_size(array);
+    }
     return true;
 }
 
 static inline Item array_native_lane_read(const Array* array, int64_t index) {
     if (!array_has_native_lane(array) || index < 0 || index >= array->length) return ItemNull;
+    LaneStorageKind kind = array_native_lane_kind(array);
+    if (kind == LANE_STORAGE_TYPED_ITEM) {
+        Item item = typeditem_to_item((TypedItem*)array_native_lane_slot(array, index));
+        TypeId expected = array_native_lane_typed_item_type(array);
+        TypeId actual = get_type_id(item);
+        if (actual == LMD_TYPE_NULL || actual == expected) return item;
+        return ItemError;
+    }
     uint64_t word = array->items[index].item;
-    switch (array_native_lane_kind(array)) {
+    switch (kind) {
     case LANE_STORAGE_INT:
         return {.item = lambda_int_box_lane((int64_t)word)};
     case LANE_STORAGE_BOOL:
@@ -574,7 +615,18 @@ static inline Item array_native_lane_read(const Array* array, int64_t index) {
 static inline bool array_native_lane_store(Array* array, int64_t index, Item value) {
     if (!array_has_native_lane(array) || index < 0 || index >= array->capacity) return false;
     TypeId value_type = get_type_id(value);
-    switch (array_native_lane_kind(array)) {
+    LaneStorageKind kind = array_native_lane_kind(array);
+    if (kind == LANE_STORAGE_TYPED_ITEM) {
+        TypeId expected = array_native_lane_typed_item_type(array);
+        if ((value_type == LMD_TYPE_NULL && !array_native_lane_nullable(array)) ||
+                (value_type != LMD_TYPE_NULL && value_type != expected)) {
+            return false;
+        }
+        // The TypedItem slot is owned by the Array, so no number-frame pointer
+        // can survive this store (D2.5.2v2, D5.2.2v3).
+        return typeditem_store_item((TypedItem*)array_native_lane_slot(array, index), value);
+    }
+    switch (kind) {
     case LANE_STORAGE_INT:
         if (value.item == ITEM_NULL) {
             if (!array_native_lane_nullable(array)) return false;

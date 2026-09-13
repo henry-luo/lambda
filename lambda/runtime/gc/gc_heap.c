@@ -2047,9 +2047,13 @@ static int gc_compact_content_items(gc_heap_t* gc, uint8_t* p) {
     int64_t extra = *(int64_t*)(p + LAMBDA_GC_OFF_LIST_EXTRA);
     int64_t capacity = *(int64_t*)(p + LAMBDA_GC_OFF_LIST_CAPACITY);
     if (!*items_slot || !gc_data_zone_owns(gc->data_zone, *items_slot)) return 0;
+    uint8_t lane_kind = p[LAMBDA_GC_OFF_CONTAINER_MAP_KIND] & 0x07;
+    bool native_lane = (p[LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS] & 0x10) != 0;
+    size_t slot_size = native_lane && lane_kind == LANE_STORAGE_TYPED_ITEM
+        ? LAMBDA_GC_OFF_TYPED_ITEM_VALUE + sizeof(uint64_t) : sizeof(uint64_t);
     uint64_t* old_items = (uint64_t*)*items_slot;
     void* new_items = gc_data_zone_copy(gc->tenured_data, *items_slot,
-        (size_t)capacity * sizeof(uint64_t));
+        (size_t)capacity * slot_size);
     if (!new_items) return 0;
     *items_slot = new_items;
     // Fix embedded float/int64/datetime pointers into the old buffer's tail.
@@ -2169,7 +2173,11 @@ static void gc_compact_data(gc_heap_t* gc) {
             int64_t capacity = *(int64_t*)(p + LAMBDA_GC_OFF_LIST_CAPACITY);
             if (*items_slot && gc_data_zone_owns(gc->data_zone, *items_slot)) {
                 uint64_t* old_items = (uint64_t*)*items_slot;
-                size_t size = capacity * sizeof(uint64_t); // sizeof(Item)
+                uint8_t lane_kind = p[LAMBDA_GC_OFF_CONTAINER_MAP_KIND] & 0x07;
+                bool native_lane = (p[LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS] & 0x10) != 0;
+                size_t slot_size = native_lane && lane_kind == LANE_STORAGE_TYPED_ITEM
+                    ? LAMBDA_GC_OFF_TYPED_ITEM_VALUE + sizeof(uint64_t) : sizeof(uint64_t);
+                size_t size = capacity * slot_size;
                 void* new_items = gc_data_zone_copy(gc->tenured_data, *items_slot, size);
                 if (new_items) {
                     *items_slot = new_items;

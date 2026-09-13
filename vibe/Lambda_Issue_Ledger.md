@@ -83,6 +83,11 @@ The same pass also moved the stale RESOLVED records LR09-30, LR08-12, and
 LR08-11. The duplicate active notices for LR11-6 and LR12-3 were removed; both
 were already archived as LR11-R6 and LR12-R3.
 
+LR09-4 was also reclassified on 2026-09-13. **S7.1.1v3** and **S8.2.1v4**
+define invalid member/index reads as `null`, while invalid writes take the hard
+error channel. The remaining JIT float-OOB lane mismatch is a separate residue
+already tracked by LR07-10.
+
 Counts:
 
 | Source doc | Area | Open | Partial | Resolved | Total |
@@ -95,15 +100,15 @@ Counts:
 | LR_06 | C transpiler (legacy C2MIR) | 0 | 0 | 0 | 0 |
 | LR_07 | MIR Direct transpiler & JIT | 11 | 1 | 0 | 12 |
 | LR_08 | Memory management & GC | 6 | 0 | 0 | 6 |
-| LR_09 | Runtime builtins | 5 | 0 | 0 | 5 |
+| LR_09 | Runtime builtins | 4 | 0 | 0 | 4 |
 | LR_10 | Error handling | 1 | 0 | 0 | 1 |
 | LR_11 | Mark data API | 6 | 0 | 0 | 6 |
 | LR_12 | Procedural runtime | 5 | 0 | 0 | 5 |
 | LR_13 | Schema validator | 7 | 0 | 0 | 7 |
 | TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 6 | 1 | 0 | 7 |
-| **Live total** | | **68** | **10** | **0** | **78** |
+| **Live total** | | **67** | **10** | **0** | **77** |
 
-The active ledger now contains 78 live records, with the 61 previously counted
+The active ledger now contains 77 live records, with the 62 previously counted
 resolved records moved to the archive. Duplicate/split records and
 verification-only findings remain represented there for provenance.
 Two original entries each split into a resolved half and a surviving residue —
@@ -544,14 +549,6 @@ while cross-family `==` is `false`, the Python-style split. The former
 strict-equality and VMap key-domain residue is resolved in
 [OI-1-R1](<Lambda_Issue_Ledger(fixed).md#oi1-r1>); the conversion-failure case
 is retained as [LR04-4](<Lambda_Issue_Ledger(fixed).md#lr04-4>).
-
-<a id="lr09-4"></a>**LR09-4 · `fn_index` swallows invalid indices · OPEN**
-A non-integral `FLOAT` index, an out-of-range index, or an unrecognized index
-type returns `ItemNull` with only a `log_debug`; the intended fix is still
-marked `// todo: push error` at three sites
-(`lambda-eval.cpp:4037`, `:4053`, `:4060`). OOB semantics also differ between
-integer and float index fast paths at the JIT layer
-([LR07-10](#lr07-10)).
 
 <a id="lr09-5"></a>**LR09-5 · `NULL`-pointer and unimplemented registry rows · OPEN**
 `number` is still marked `// unimplemented`

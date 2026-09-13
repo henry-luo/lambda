@@ -405,8 +405,8 @@ bool lambda_array_contract_info(Type* contract, LambdaArrayContractInfo* out) {
     if (out->rank == 0) return false;
 
     out->array_contract = root;
-    out->leaf_lane = lambda_lane_storage_desc_for(out->leaf_element);
-    out->has_leaf_lane = out->leaf_lane.kind != LANE_STORAGE_INVALID;
+    out->has_leaf_lane = lambda_type_array_lane_storage_desc(out->leaf_element,
+        &out->leaf_lane);
     return true;
 }
 
@@ -780,6 +780,18 @@ bool lambda_type_lane_storage_desc(Type* type, LaneStorageDesc* out) {
     LaneStorageDesc desc = lambda_lane_storage_desc_for(type);
     if (!desc.native) return false;
     *out = desc;
+    return true;
+}
+
+bool lambda_type_array_lane_storage_desc(Type* type, LaneStorageDesc* out) {
+    if (!out || !lambda_type_lane_storage_desc(type, out) || !out->base_contract) return false;
+    if (out->nullable && (out->base_contract->type_id == LMD_TYPE_INT64 ||
+            out->base_contract->type_id == LMD_TYPE_UINT64)) {
+        // Array slots outlive number frames, so wide optionals use the shared
+        // inline TypedItem representation instead of a borrowed Item pointer.
+        out->kind = LANE_STORAGE_TYPED_ITEM;
+        out->byte_size = (uint8_t)sizeof(TypedItem);
+    }
     return true;
 }
 
