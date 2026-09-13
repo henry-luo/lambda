@@ -3098,8 +3098,8 @@ extern "C" {
     Item index_assign_cow(Item owner, Item key, Item value);
     Item cow_capture_value(Item value);
     Item cow_bind_rmw_handle(Item root, Item value, int64_t count, Item key1, Item key2);  // CW34
-    // Whether S9.3.1 insertion capture is active (LAMBDA_COW_CAPTURE). The
-    // transpiler reads it too, so flag-off emits the pre-capture code exactly.
+    // S9.3.1 insertion capture is unconditional; the helper remains the
+    // shared runtime entry point for marking captured values.
     // Capture every field of a freshly built shaped literal (S9.3.1).
     void cow_mark_shape_children(struct TypeMap* type, void* data);
     Item cow_bind_var(Item value);

@@ -301,7 +301,7 @@ struct NameEntry {
     bool is_mutable;
     bool is_var_param;
     bool is_parameter;
-    // CW29/S9.1.3 (gated on LAMBDA_COW_CAPTURE): this plain `pn` parameter's
+    // CW29/S9.1.3: this plain `pn` parameter's
     // body writes through it, so both tiers snapshot it at entry -- one
     // share-mark in the callee prologue; the first write detaches a private
     // copy. Computed once at FUNCTION_END from the shared body walk.

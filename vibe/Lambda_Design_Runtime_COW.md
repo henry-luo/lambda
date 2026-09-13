@@ -189,7 +189,7 @@ legal; under-approximation is a bug.
    why that suffices.
 2. Storing a container into a container (§9.3 construction capture) when the
    copy is deferred: literal build, field/index write, `push`/`splice`
-   argument (`cow_capture_value`, gated per S9.3.1).
+   argument (`cow_capture_value`, per S9.3.1).
 3. Returning/capturing a Lambda value or otherwise installing a second
    Lambda-visible owner.
 4. *(CW29, designed)* the callee prologue of a `pn` that mutates a plain
@@ -1225,7 +1225,7 @@ bounds-check elimination as a new item not yet in any ledger.
 | View-state `var` passed as `var` arg (the non-local overlap) | §11.4 | Module-level half **CLOSED** — vacuous by design (S9.1.7/E224). View-state half: forbid with a teaching error (S9.2.4v2) |
 | View-borrow **confinement** (mutable views become non-escaping, `var`-position-only) | CW16.3; §11.7 | Stage 2; until then mutable views retain current behavior |
 | Snapshot iteration over a mutated `var` container (S9.2.3) | §11.6 (CW30) | Ruled but **violated both tiers**; compile-gated design recorded 2026-08-29; record as C4.2d when implemented |
-| **Plain-param snapshots (S9.1.3)** — callee-prologue share-mark on mutated plain container params; retire `is_proc_param` | §11.9 (CW29) | Designed 2026-08-29; flips together with S9.3.1 under `LAMBDA_COW_CAPTURE`; diagnostic corpus sweep first. Dissolves NM-O8; supplies NM-O2's idiom |
+| **Plain-param snapshots (S9.1.3)** — callee-prologue share-mark on mutated plain container params; retire `is_proc_param` | §11.9 (CW29) | **UNCONDITIONAL since 2026-08-29**; flipped together with S9.3.1 and the escape hatch was retired. Dissolves NM-O8; supplies NM-O2's idiom |
 | Exclusivity granularity endpoint (splitters vs static ranges vs dynamic checks) | §11.3 ladder; §12.2 | decide on real image-toolkit code during Stage 2 |
 
 ### B.2 Needs its own design first (no owner document yet)
@@ -1236,9 +1236,10 @@ bounds-check elimination as a new item not yet in any ledger.
 | **Element/document node representation for huge fan-out** — chunked children so a one-level copy of a 10⁵-child node isn't O(width) | §9.5.1 residue; §12.2 | gate on the editor/document benchmark; only if it fails on real documents (NM-O1) |
 | **Non-escaping nested-`pn` relaxation** (direct up-level `var` access for call-position-only nested `pn`s — the closure-style parser case) | C4.2a spec sketch | backward-compatible addition; interim idiom (object with `pn` methods) is unblocked by Tune-COW Phase B |
 
-**Nested mutation gates the S9.3.1 flip (2026-08-28).** Insertion capture is
+**Historical gate analysis (2026-08-28).** Insertion capture was then
 implemented on both tiers behind `LAMBDA_COW_CAPTURE` (default off;
-[LR12-9](Lambda_Issue_Ledger.md#lr12-9)). It cannot become the default while
+[LR12-R9](<Lambda_Issue_Ledger(fixed).md#lr12-r9>)). The flip has since landed
+unconditionally; the following text records the pre-flip migration analysis:
 element/field reads still borrow: as soon as a slot holds a captured value,
 the get-modify idiom `c = owner[i]` … `c[j] = v` writes a detached copy and
 loses the update. Closing insertion without closing reads breaks the one

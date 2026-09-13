@@ -38,12 +38,12 @@
 
 ---
 
-## 1. Why this is now blocking
+## 1. Why this was blocking
 
-S9.3.1 (insertion captures by value) is implemented on both tiers behind
-`LAMBDA_COW_CAPTURE`, default off — see
-[LR12-9](Lambda_Issue_Ledger.md#lr12-9). It cannot become the default, and the
-reason is not performance and not missing syntax. It is this:
+S9.3.1 (insertion captures by value) is unconditional on both tiers since
+2026-08-29; the `LAMBDA_COW_CAPTURE` escape hatch was retired — see
+[LR12-R9](<Lambda_Issue_Ledger(fixed).md#lr12-r9>). The original blocker was not
+performance or missing syntax. It was this:
 
 > **Insertion capture and borrowing reads are individually sound and jointly
 > lossy.** Once insertion captures, a slot holds a value with a second
@@ -397,9 +397,9 @@ value they handed out, detaching the callers' borrows (cd2_orig).
 The design splits into three independently shippable pieces, in this order:
 
 1. **CW24, the diagnostic.** Small, self-contained, no new syntax, no runtime
-   change. **Ships with — and gates — the `LAMBDA_COW_CAPTURE` default flip.**
-   The four blocked scripts become compile errors, each with a mechanical fix
-   (Appendix B). This is the whole of the flip's safety story.
+   change. It shipped with — and gated — the unconditional 2026-08-29
+   `S9.3.1` flip. The four blocked scripts became compile errors, each with a
+   mechanical fix (Appendix B). This was the whole of the flip's safety story.
 2. **CW25, path borrows.** Conformance work against the already-ratified
    S9.2.2 ("un-shares first"), plus the `E207`/TIG1 type-propagation fix that
    currently rejects every annotated path borrow. Removes the "extract a
@@ -695,7 +695,7 @@ write. Reproduced on pristine master with a migrated script, so it predates
 this work.
 
 `awfy/richards3.ls` is the already-landed proof that the target idiom works: it
-passes with `LAMBDA_COW_CAPTURE=1` today.
+passes with the unconditional capture semantics.
 
 ---
 
@@ -704,7 +704,7 @@ passes with `LAMBDA_COW_CAPTURE=1` today.
 §11.2/§11.3 exclusivity, Appendix B.2); semantics record
 [`Lambda_Semantics_Formal.md`](Lambda_Semantics_Formal.md) (C4.1 bug catalog,
 C4.2e handle store, C4.4 #6); status and evidence
-[LR12-9](Lambda_Issue_Ledger.md#lr12-9); spec
+[LR12-R9](<Lambda_Issue_Ledger(fixed).md#lr12-r9>); spec
 [`doc/Lambda_Formal_Semantics.md`](../doc/Lambda_Formal_Semantics.md)
 (S9.1.2, S9.1.3, S9.2.2, S9.2.3, S9.3.1, S10.4.3, SO14).
 
@@ -748,4 +748,3 @@ copy mutated and never observed — which is CW24v2's surviving form. The
 Hylo-style explicit `copy()` remains available as future sugar if steady-state
 experience shows the intent marker earns its keep; nothing in the ruling
 forecloses it.
-
