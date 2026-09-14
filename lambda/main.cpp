@@ -5113,6 +5113,11 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
         for (int i = 2; i < argc; i++) {
             if (apply_common_mir_option(argv[i], &runtime)) {
+            } else if (strcmp(argv[i], "--dry-run") == 0) {
+                // Keep `run` hermetic like ordinary script execution; fuzz
+                // scenarios must execute main() without performing real I/O.
+                runtime.dry_run = true;
+                g_dry_run = true;
             } else if (strcmp(argv[i], "--no-log") == 0) {
                 // already handled early in main()
             } else if (argv[i][0] != '-') {
