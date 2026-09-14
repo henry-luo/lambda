@@ -1162,14 +1162,17 @@ loosely across the corpus — context disambiguates, and we live with it.
   typesetting package moves (`lambda.package.math` → `lambda.doc.math`),
   keeping `lambda.math` for the built-in math module. A package path names
   exactly one thing: no path may be both a built-in module and a shipped
-  package. [S17.2.1, S17.2.2, S16.10.1v2]
+  package. Namespace resolution maps shipped paths to the source tree under
+  `<lambda-home>/package/`: `lambda.<package>.*` maps beneath its matching
+  package directory, while `lambda.doc.math.*` maps to `package/math/`.
+  [S17.2.1, S17.2.2, S16.10.1v2]
 - **D7.2.5*** **Full user-agent editing policy belongs to the shipped Lambda
   DOM behavior package, never to Radiant's native implementation.** Radiant
   owns the platform-input gate and standard DOM mechanisms—editing-host
   recognition,
   events, Selection/Range, clipboard/composition transport, observation,
   geometry, and checked generic DOM mutation primitives. The behavior package
-  (currently sourced under `lambda/dom`) owns uncanceled
+  (currently sourced under `lambda/package/dom`) owns uncanceled
   `contenteditable` default actions, structural normalization, editing
   history, `designMode`, and the complete
   `execCommand`/`queryCommand*` compatibility surface. User input and legacy
@@ -1891,8 +1894,8 @@ slice; no formal semantic ruling or document semver changes.
 | D6.3.1 | JS async activations as `LambdaTask`s (JSCU25, ratified 2026-09-07) are not implemented: readiness stays with the microtask queue (the reaction job resumes the task; the FIFO run queue never resumes a JS frame), the Promise is the handle, the mailbox is lazy, and the scheduler holds JS activation tasks weakly so an unreachable pending activation is collected. `lambda_task_create` today allocates a mailbox and registers four roots per task (`concurrency.cpp:737–774`). |
 | D6.3.2 | Worker tier pending entirely: process isolation first, thread isolation gated on the isolate-state audit and DO20. |
 | D7.1.3 | Static modules implemented (rev 29, P0–P6) except Class F: the rt→radiant boundary is a ratcheted 165-import baseline; P1c constructor consolidation deferred. |
-| D7.2.4 | **Implemented 2026-09-08.** The direct AST resolver exposes `lambda.sys.*` through the existing sys-function registry, aliases `lambda.math`/`lambda.io` to the built-in module rows, reserves the `lambda` root, and maps the shipped package tree to `lambda/{chart,dom,editor,graph,latex,openapi,pdf}` with typesetting under `lambda/doc/math`. Live imports, bridges, tests, and release preparation use the canonical paths; regressions are `test/lambda/lambda_namespace.ls` and the reserved-root negative fixture. |
-| D7.2.5 | Implemented 2026-09-07. The shipped `lambda/dom` behavior package owns the shared descriptor/context/plan/result pipeline, text and structural editing, formatting, objects, clipboard, history, `designMode`, `execCommand`, and all five `queryCommand*` surfaces. Native Radiant retains only platform transport and generic, checked DOM/Selection/Range/clipboard transaction mechanisms. Applicable WPT and pinned Chromium contenteditable manifests, package-disabled behavior, editor integration, form regressions, Lambda/Radiant baselines, and lint pass; the release/lifecycle record is `vibe/radiant/Radiant_Editable_UA6_Report.md`. The separate `Radiant_Design_Edit_History.md` expansion (including form-history migration and its different retention contract) remains a proposal and does not alter this ruling. |
+| D7.2.4 | **Implemented 2026-09-08.** The direct AST resolver exposes `lambda.sys.*` through the existing sys-function registry, aliases `lambda.math`/`lambda.io` to the built-in module rows, reserves the `lambda` root, and resolves shipped source from `<lambda-home>/package/` while exposing `lambda/{chart,dom,editor,graph,latex,openapi,pdf}` and typesetting under `lambda/doc/math`. Live imports, bridges, tests, and release preparation use the canonical paths; regressions are `test/lambda/lambda_namespace.ls` and the reserved-root negative fixture. |
+| D7.2.5 | Implemented 2026-09-07. The shipped `lambda/package/dom` behavior package owns the shared descriptor/context/plan/result pipeline, text and structural editing, formatting, objects, clipboard, history, `designMode`, `execCommand`, and all five `queryCommand*` surfaces. Native Radiant retains only platform transport and generic, checked DOM/Selection/Range/clipboard transaction mechanisms. Applicable WPT and pinned Chromium contenteditable manifests, package-disabled behavior, editor integration, form regressions, Lambda/Radiant baselines, and lint pass; the release/lifecycle record is `vibe/radiant/Radiant_Editable_UA6_Report.md`. The separate `Radiant_Design_Edit_History.md` expansion (including form-history migration and its different retention contract) remains a proposal and does not alter this ruling. |
 | D7.4.1v2 | Native-module POC 1 remains unstarted; the engine-owned Promise VMap is designed by JR7/Tune7 but not yet implemented. |
 | D7.4.3 | Hosted-language layering: `lang-python` is the landed DSO reference chain, but Python is currently statically linked and its ten follow-up ADRs (Lang_Hosting §17) are unwritten. |
 | D7.4.4 | Implemented in DOM4 (2026-08-14): `host_ops`, `legacy_ops`, `JubeHostObjectOps`, and the vmap `string_key_item` re-materialization shim were removed; record-owned hooks are the only host-object protocol. The protocol remains unchanged; the D7.4.5v2 TypeId-order revision advances the current Jube ABI to version 6. |
