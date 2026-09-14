@@ -29,8 +29,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../lib/hashmap.h"
-#include "../lib/hashmap_helpers.h"
+#include "../lib/hashmap_typed.hpp"
 #include "../lib/memtrack.h"
 #include "../lib/tagged.hpp"
 #include "../lambda/core/mark_reader.hpp"
@@ -132,6 +131,8 @@ void source_pos_free(SourcePosC* p) {
     p->kind = SOURCE_POS_TEXT;
 }
 
+} // extern "C"
+
 // ---------------------------------------------------------------------------
 // Path side-table: keyed on (source_item.item, template_ref) → SourcePathC.
 // Heap-owned indices; freed when the entry is overwritten or the table is
@@ -144,24 +145,25 @@ typedef struct PathTableEntry {
     SourcePathC path;            // owned
 } PathTableEntry;
 
+// The C hashmap only requires zero/nonzero equality; never order unrelated
+// template pointers while probing this identity key.
+static void path_entry_free(PathTableEntry* entry) {
+    if (entry) source_path_free(&entry->path);
+}
+
+typedef TypedHashMap<PathTableEntry,
+    HashMapIdentity2MemberKeyOps<PathTableEntry, &PathTableEntry::source_item_bits,
+        &PathTableEntry::template_ref>, path_entry_free> PathTable;
+
 typedef struct SourcePathBridgeState {
-    HashMap* path_table;
+    PathTable path_table;
 } SourcePathBridgeState;
 
 static void source_path_bridge_state_destroy(void* opaque) {
     SourcePathBridgeState* state = (SourcePathBridgeState*)opaque;
     if (!state) return;
-    if (state->path_table) hashmap_free(state->path_table);
+    state->path_table.destroy();
     mem_free(state);
-}
-
-HASHMAP_DEFINE_FIELD2_KEY(path, PathTableEntry, source_item_bits, template_ref)
-
-// Called by hashmap when an entry is replaced or removed: free the owned
-// indices buffer so we don't leak.
-static void path_entry_free(void* item) {
-    PathTableEntry* e = (PathTableEntry*)item;
-    if (e) source_path_free(&e->path);
 }
 
 static SourcePathBridgeState* source_path_bridge_state(bool create) {
@@ -178,29 +180,24 @@ static SourcePathBridgeState* source_path_bridge_state(bool create) {
     return state;
 }
 
-static HashMap* ensure_path_table(void) {
+static PathTable* ensure_path_table(void) {
     SourcePathBridgeState* state = source_path_bridge_state(true);
     if (!state) return NULL;
-    if (!state->path_table) {
-        state->path_table = hashmap_new(
-            sizeof(PathTableEntry), 64,
-            0xBEEF1234u, 0x5678CAFEu,
-            path_hash, path_cmp,
-            path_entry_free, NULL);
-    }
-    return state->path_table;
+    if (!state->path_table.initialized() &&
+            !state->path_table.init(64, 0xBEEF1234u, 0x5678CAFEu)) return NULL;
+    return &state->path_table;
 }
 
-void source_pos_bridge_reset(void) {
+extern "C" void source_pos_bridge_reset(void) {
     SourcePathBridgeState* state = source_path_bridge_state(false);
     if (!state) return;
     render_map_set_path_recorder_state(NULL);
     source_path_bridge_state_destroy(state);
 }
 
-void render_map_record_path(Item source_item, const char* template_ref,
-                            const int* path_indices, int depth) {
-    HashMap* m = ensure_path_table();
+extern "C" void render_map_record_path(Item source_item, const char* template_ref,
+                                         const int* path_indices, int depth) {
+    PathTable* m = ensure_path_table();
     if (!m) return;
     PathTableEntry e;
     memset(&e, 0, sizeof(e));
@@ -215,7 +212,7 @@ void render_map_record_path(Item source_item, const char* template_ref,
     }
     // hashmap_set returns the replaced entry from map->spare; it does not run
     // the element-free callback on replacement.
-    const PathTableEntry* old_entry = (const PathTableEntry*)hashmap_set(m, &e);
+    const PathTableEntry* old_entry = m->set(e);
     if (old_entry) {
         SourcePathC old_path = old_entry->path;
         source_path_free(&old_path);
@@ -227,14 +224,16 @@ void render_map_record_path(Item source_item, const char* template_ref,
 static const SourcePathC* path_table_get(Item source_item,
                                          const char* template_ref) {
     SourcePathBridgeState* state = source_path_bridge_state(false);
-    if (!state || !state->path_table) return NULL;
+    if (!state || !state->path_table.initialized()) return NULL;
     PathTableEntry q;
     memset(&q, 0, sizeof(q));
     q.source_item_bits = source_item.item;
     q.template_ref = template_ref;
-    const PathTableEntry* hit = (const PathTableEntry*)hashmap_get(state->path_table, &q);
+    const PathTableEntry* hit = state->path_table.get(q);
     return hit ? &hit->path : NULL;
 }
+
+extern "C" {
 
 static bool is_generated_marker_node(DomNode* node) {
     return node && node->node_type == DOM_NODE_ELEMENT && node->view_type == RDT_VIEW_MARKER;

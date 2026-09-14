@@ -4,7 +4,7 @@
 #include "js_runtime_internal.hpp"
 #include "js_ast.hpp"
 #include "../../lib/memtrack.h"
-#include "../../lib/hashmap_helpers.h"
+#include "../../lib/hashmap_typed.hpp"
 #include "../runtime/gc/gc_heap.h"
 #include "../runtime/side_stack.h"
 
@@ -287,8 +287,9 @@ struct JsCallableCodeEntry {
     uint64_t signature;
     JsCallableCode* code;
 };
-HASHMAP_DEFINE_FIELD3_KEY(js_callable_code_table, JsCallableCodeEntry,
-    target, runtime, signature)
+typedef TypedHashMap<JsCallableCodeEntry,
+    HashMapIdentity3MemberKeyOps<JsCallableCodeEntry, &JsCallableCodeEntry::target,
+        &JsCallableCodeEntry::runtime, &JsCallableCodeEntry::signature>> JsCallableCodeTable;
 
 static JsCallableCodeEntry js_callable_code_key(void* target, Context* runtime,
         int param_count, uint32_t module_state_id) {
@@ -340,12 +341,11 @@ JsCallableCode* js_callable_code_intern_mir(JsFunction* fn, void* func_ptr,
             param_count, module_state_id);
     }
     if (!state->callable_code_interned)
-        state->callable_code_interned = js_callable_code_table_new(16);
+        state->callable_code_interned = JsCallableCodeTable::create(16);
     HashMap* table = state->callable_code_interned;
     JsCallableCodeEntry key = js_callable_code_key(func_ptr, runtime_context,
         param_count, module_state_id);
-    const JsCallableCodeEntry* found = table
-        ? (const JsCallableCodeEntry*)hashmap_get(table, &key) : NULL;
+    const JsCallableCodeEntry* found = JsCallableCodeTable::get(table, key);
     if (found) {
         JsCallableCode* code = found->code;
         if (fn->code == code) return code;
@@ -358,7 +358,7 @@ JsCallableCode* js_callable_code_intern_mir(JsFunction* fn, void* func_ptr,
         runtime_context, param_count, module_state_id);
     if (!code || !table) return code;
     key.code = code;
-    hashmap_set(table, &key);
+    JsCallableCodeTable::set(table, key);
     if (!hashmap_oom(table)) {
         code->intern_refcount = 1;
         code->interned = true;
@@ -374,7 +374,7 @@ void js_callable_code_release(JsCallableCode* code) {
     if (code->intern_table) {
         JsCallableCodeEntry key = js_callable_code_key(code->func_ptr,
             code->runtime_context, code->param_count, code->module_state_id);
-        hashmap_delete(code->intern_table, &key);
+        JsCallableCodeTable::erase(code->intern_table, key);
     }
     mem_free(code);
 }
