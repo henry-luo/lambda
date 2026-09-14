@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <mpdecimal.h>
 #include <cstring>
+#include <cstdio>
 
 #ifndef _WIN32
 #include <pthread.h>
@@ -14,6 +15,7 @@
 #include "../lambda/runtime/lambda-stack.h"
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/interp.hpp"
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_runtime_state.hpp"
@@ -27,6 +29,7 @@
 #include "../lambda/validator/validator.hpp"
 #include "../lib/mem_factory.h"
 #include "../lib/mempool.h"
+#include "../lib/file.h"
 #include "../lib/uv_loop.h"
 #include "../lib/url.h"
 
@@ -327,6 +330,401 @@ TEST(JsCallableRealmIdentity, IntrinsicsAreStableWithinAndDistinctAcrossContexts
 
     runtime_cleanup(&second);
     runtime_cleanup(&first);
+}
+
+TEST(LambdaScriptCache, ReusesMirImageAcrossFreshRuntimes) {
+    const char* source = "1 + 2";
+    const char* identity = "<lambda-cache-fresh-runtime>";
+    InputScriptCache* cache = input_manager_global_script_cache();
+    ASSERT_NE(cache, nullptr);
+    InputScriptCacheStats before = {};
+    input_script_cache_get_stats(cache, &before);
+
+    LambdaTier saved_tier = lambda_tier_selected();
+    lambda_tier_set(LAMBDA_TIER_JIT);
+    Runtime first = {};
+    runtime_init(&first);
+    Input* first_output = run_script_mir(&first, source, (char*)identity, true);
+    ASSERT_NE(first_output, nullptr);
+    EXPECT_EQ(get_type_id(first_output->root), LMD_TYPE_INT);
+    EXPECT_EQ(it2i(first_output->root), 3);
+    runtime_cleanup(&first);
+
+    Runtime second = {};
+    runtime_init(&second);
+    Input* second_output = run_script_mir(&second, source, (char*)identity, true);
+    ASSERT_NE(second_output, nullptr);
+    EXPECT_EQ(get_type_id(second_output->root), LMD_TYPE_INT);
+    EXPECT_EQ(it2i(second_output->root), 3);
+    runtime_cleanup(&second);
+    lambda_tier_set(saved_tier);
+
+    InputScriptCacheStats after = {};
+    input_script_cache_get_stats(cache, &after);
+    EXPECT_GE(after.mir_builds, before.mir_builds + 1);
+    EXPECT_GE(after.mir_hits, before.mir_hits + 1);
+    EXPECT_GE(after.module_hits, before.module_hits + 1);
+}
+
+TEST(LambdaScriptCache, MapsLogicalUnitsToDenseModuleSlabs) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    Script* local_script = (Script*)mem_calloc(1, sizeof(Script), MEM_CAT_SYSTEM);
+    Script* colliding_local = (Script*)mem_calloc(1, sizeof(Script), MEM_CAT_SYSTEM);
+    Script* cached_script = (Script*)mem_calloc(1, sizeof(Script), MEM_CAT_SYSTEM);
+    ASSERT_NE(local_script, nullptr);
+    ASSERT_NE(colliding_local, nullptr);
+    ASSERT_NE(cached_script, nullptr);
+    // A cache-wide logical unit must not become a sparse EvalContext slab ID.
+    cached_script->cache_compilation_unit_id = 1;
+    runtime_register_script(&runtime, local_script);
+    runtime_register_script(&runtime, colliding_local);
+    runtime_register_script(&runtime, cached_script);
+
+    uint32_t dense_module_id = UINT32_MAX;
+    ASSERT_TRUE(runtime_module_state_id_for_unit(&runtime,
+        cached_script->cache_compilation_unit_id, &dense_module_id));
+    EXPECT_EQ(local_script->module_state_id, 0u);
+    EXPECT_EQ(colliding_local->module_state_id, 1u);
+    EXPECT_EQ(cached_script->module_state_id, 2u);
+    EXPECT_EQ(dense_module_id, cached_script->module_state_id);
+    EXPECT_EQ(script_module_layout_id(colliding_local),
+        colliding_local->module_state_id);
+    EXPECT_EQ(script_module_layout_id(cached_script),
+        cached_script->cache_compilation_unit_id |
+        LAMBDA_MODULE_ID_LOGICAL_UNIT_FLAG);
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(LambdaScriptCache, ReusesInterpreterAstTemplateAcrossFreshRuntimes) {
+    const char* source = "40 + 2";
+    const char* identity = "<lambda-cache-interpreter-ast>";
+    InputScriptCache* cache = input_manager_global_script_cache();
+    ASSERT_NE(cache, nullptr);
+    InputScriptCacheStats before = {};
+    input_script_cache_get_stats(cache, &before);
+
+    LambdaTier saved_tier = lambda_tier_selected();
+    lambda_tier_set(LAMBDA_TIER_INTERP);
+    Runtime first = {};
+    runtime_init(&first);
+    Input* first_output = run_script_mir(&first, source, (char*)identity, true);
+    ASSERT_NE(first_output, nullptr);
+    ASSERT_EQ(it2i(first_output->root), 42);
+    ASSERT_NE(first.scripts, nullptr);
+    Script* first_template = (Script*)first.scripts->data[0];
+    ASSERT_TRUE(first_template->cache_owned_template);
+    runtime_cleanup(&first);
+
+    Runtime second = {};
+    runtime_init(&second);
+    Input* second_output = run_script_mir(&second, source, (char*)identity, true);
+    ASSERT_NE(second_output, nullptr);
+    EXPECT_EQ(it2i(second_output->root), 42);
+    ASSERT_NE(second.scripts, nullptr);
+    Script* second_instance = (Script*)second.scripts->data[0];
+    EXPECT_EQ(second_instance->cache_template, first_template);
+    uint32_t dense_module_id = UINT32_MAX;
+    EXPECT_TRUE(runtime_module_state_id_for_unit(&second,
+        second_instance->cache_compilation_unit_id, &dense_module_id));
+    EXPECT_EQ(dense_module_id, second_instance->module_state_id);
+    runtime_cleanup(&second);
+    lambda_tier_set(saved_tier);
+
+    InputScriptCacheStats after = {};
+    input_script_cache_get_stats(cache, &after);
+    EXPECT_GE(after.ast_builds, before.ast_builds + 1);
+    EXPECT_GE(after.ast_hits, before.ast_hits + 1);
+    EXPECT_GE(after.module_hits, before.module_hits + 1);
+}
+
+TEST(LambdaScriptCache, ReusesInterpreterAstImportConeAcrossFreshRuntimes) {
+    const char* path = "test/lambda/import_vars.ls";
+    InputScriptCache* cache = input_manager_global_script_cache();
+    ASSERT_NE(cache, nullptr);
+    InputScriptCacheStats before = {};
+    input_script_cache_get_stats(cache, &before);
+
+    LambdaTier saved_tier = lambda_tier_selected();
+    lambda_tier_set(LAMBDA_TIER_INTERP);
+    Runtime first = {};
+    runtime_init(&first);
+    Input* first_output = run_script_mir(&first, NULL, (char*)path, true);
+    ASSERT_NE(first_output, nullptr);
+    ASSERT_NE(get_type_id(first_output->root), LMD_TYPE_ERROR);
+    ASSERT_NE(first.scripts, nullptr);
+    Script* first_root = (Script*)first.scripts->data[0];
+    ASSERT_TRUE(first_root->cache_owned_template);
+    ASSERT_NE(first_root->direct_imports, nullptr);
+    ASSERT_EQ(first_root->direct_imports->length, 1);
+    Script* first_dependency = (Script*)first_root->direct_imports->data[0];
+    ASSERT_TRUE(first_dependency->cache_owned_template);
+    runtime_cleanup(&first);
+
+    Runtime second = {};
+    runtime_init(&second);
+    Input* second_output = run_script_mir(&second, NULL, (char*)path, true);
+    ASSERT_NE(second_output, nullptr);
+    ASSERT_NE(get_type_id(second_output->root), LMD_TYPE_ERROR);
+    ASSERT_NE(second.scripts, nullptr);
+    Script* second_root = (Script*)second.scripts->data[0];
+    ASSERT_EQ(second_root->cache_template, first_root);
+    ASSERT_NE(second_root->direct_imports, nullptr);
+    ASSERT_EQ(second_root->direct_imports->length, 1);
+    Script* second_dependency = (Script*)second_root->direct_imports->data[0];
+    EXPECT_NE(second_dependency, first_dependency);
+    EXPECT_EQ(second_dependency->cache_template, first_dependency);
+    uint32_t dependency_slab = UINT32_MAX;
+    EXPECT_TRUE(runtime_module_state_id_for_unit(&second,
+        second_dependency->cache_compilation_unit_id, &dependency_slab));
+    EXPECT_EQ(dependency_slab, second_dependency->module_state_id);
+    runtime_cleanup(&second);
+    lambda_tier_set(saved_tier);
+
+    InputScriptCacheStats after = {};
+    input_script_cache_get_stats(cache, &after);
+    EXPECT_GE(after.ast_builds, before.ast_builds + 2);
+    EXPECT_GE(after.ast_hits, before.ast_hits + 1);
+    EXPECT_GE(after.module_hits, before.module_hits + 1);
+}
+
+TEST(LambdaScriptCache, ReusesInterpreterAstViewTemplateAcrossFreshRuntimes) {
+    const char* path = "test/lambda/script_cache_view_overlay.ls";
+    InputScriptCache* cache = input_manager_global_script_cache();
+    ASSERT_NE(cache, nullptr);
+    InputScriptCacheStats before = {};
+    input_script_cache_get_stats(cache, &before);
+
+    LambdaTier saved_tier = lambda_tier_selected();
+    lambda_tier_set(LAMBDA_TIER_INTERP);
+    Runtime first = {};
+    runtime_init(&first);
+    Input* first_output = run_script_mir(&first, NULL, (char*)path, true);
+    ASSERT_NE(first_output, nullptr);
+    ASSERT_EQ(it2i(first_output->root), 42);
+    ASSERT_NE(first.scripts, nullptr);
+    Script* first_template = (Script*)first.scripts->data[0];
+    ASSERT_TRUE(first_template->cache_owned_template);
+    ASSERT_NE(first_template->ast_overlay_strings, nullptr);
+    ASSERT_EQ(first_template->ast_overlay_strings->length, 1);
+    const char* first_ref = (const char*)first_template->ast_overlay_strings->data[0];
+    runtime_cleanup(&first);
+
+    Runtime second = {};
+    runtime_init(&second);
+    Input* second_output = run_script_mir(&second, NULL, (char*)path, true);
+    ASSERT_NE(second_output, nullptr);
+    EXPECT_EQ(it2i(second_output->root), 42);
+    ASSERT_NE(second.scripts, nullptr);
+    Script* second_instance = (Script*)second.scripts->data[0];
+    EXPECT_EQ(second_instance->cache_template, first_template);
+    ASSERT_NE(second_instance->ast_overlay_strings, nullptr);
+    ASSERT_EQ(second_instance->ast_overlay_strings->length, 1);
+    EXPECT_NE(second_instance->ast_overlay_strings->data[0], first_ref);
+    runtime_cleanup(&second);
+    lambda_tier_set(saved_tier);
+
+    InputScriptCacheStats after = {};
+    input_script_cache_get_stats(cache, &after);
+    EXPECT_GE(after.ast_builds, before.ast_builds + 1);
+    EXPECT_GE(after.ast_hits, before.ast_hits + 1);
+    EXPECT_GE(after.module_hits, before.module_hits + 1);
+}
+
+TEST(LambdaScriptCache, ReusesImportedMirConeAcrossFreshRuntimes) {
+    const char* path = "test/lambda/import_vars.ls";
+    InputScriptCache* cache = input_manager_global_script_cache();
+    ASSERT_NE(cache, nullptr);
+    InputScriptCacheStats before = {};
+    input_script_cache_get_stats(cache, &before);
+
+    LambdaTier saved_tier = lambda_tier_selected();
+    lambda_tier_set(LAMBDA_TIER_JIT);
+    Runtime first = {};
+    runtime_init(&first);
+    Input* first_output = run_script_mir(&first, NULL, (char*)path, true);
+    ASSERT_NE(first_output, nullptr);
+    EXPECT_NE(get_type_id(first_output->root), LMD_TYPE_ERROR);
+    ASSERT_NE(first.scripts, nullptr);
+    Script* first_root = (Script*)first.scripts->data[0];
+    ASSERT_TRUE(first_root->cache_owned_template);
+    ASSERT_NE(first_root->direct_imports, nullptr);
+    ASSERT_EQ(first_root->direct_imports->length, 1);
+    Script* first_dependency = (Script*)first_root->direct_imports->data[0];
+    ASSERT_TRUE(first_dependency->cache_owned_template);
+    runtime_cleanup(&first);
+
+    Runtime second = {};
+    runtime_init(&second);
+    Input* second_output = run_script_mir(&second, NULL, (char*)path, true);
+    ASSERT_NE(second_output, nullptr);
+    EXPECT_NE(get_type_id(second_output->root), LMD_TYPE_ERROR);
+    ASSERT_NE(second.scripts, nullptr);
+    Script* second_root = (Script*)second.scripts->data[0];
+    EXPECT_EQ(second_root->cache_template, first_root);
+    ASSERT_NE(second_root->direct_imports, nullptr);
+    ASSERT_EQ(second_root->direct_imports->length, 1);
+    Script* second_dependency = (Script*)second_root->direct_imports->data[0];
+    EXPECT_NE(second_dependency, first_dependency);
+    EXPECT_EQ(second_dependency->cache_template, first_dependency);
+    uint32_t dependency_slab = UINT32_MAX;
+    EXPECT_TRUE(runtime_module_state_id_for_unit(&second,
+        second_dependency->cache_compilation_unit_id, &dependency_slab));
+    EXPECT_EQ(dependency_slab, second_dependency->module_state_id);
+    runtime_cleanup(&second);
+    lambda_tier_set(saved_tier);
+
+    InputScriptCacheStats after = {};
+    input_script_cache_get_stats(cache, &after);
+    EXPECT_GE(after.mir_builds, before.mir_builds + 2);
+    EXPECT_GE(after.mir_hits, before.mir_hits + 1);
+    EXPECT_GE(after.module_hits, before.module_hits + 1);
+}
+
+TEST(LambdaScriptCache, RetiresCachedImportConeWhenDependencyFileChanges) {
+    const char* root_path = "temp/script_cache_dependency_root.ls";
+    const char* dependency_path = "temp/script_cache_dependency_child.ls";
+    const char* root_source = "import .script_cache_dependency_child\ncache_dependency_value";
+    const char* first_dependency_source = "pub let cache_dependency_value = 1";
+    const char* second_dependency_source = "pub let cache_dependency_value = 22";
+    ASSERT_EQ(write_binary_file(root_path, root_source, strlen(root_source)), 0);
+    ASSERT_EQ(write_binary_file(dependency_path, first_dependency_source,
+        strlen(first_dependency_source)), 0);
+
+    InputScriptCache* cache = input_manager_global_script_cache();
+    ASSERT_NE(cache, nullptr);
+    InputScriptCacheStats before = {};
+    input_script_cache_get_stats(cache, &before);
+
+    LambdaTier saved_tier = lambda_tier_selected();
+    lambda_tier_set(LAMBDA_TIER_JIT);
+    Runtime first = {};
+    runtime_init(&first);
+    Input* first_output = run_script_mir(&first, NULL, (char*)root_path, true);
+    ASSERT_NE(first_output, nullptr);
+    ASSERT_EQ(it2i(first_output->root), 1);
+    ASSERT_NE(first.scripts, nullptr);
+    Script* first_root = (Script*)first.scripts->data[0];
+    ASSERT_TRUE(first_root->cache_owned_template);
+    ASSERT_NE(first_root->direct_imports, nullptr);
+    ASSERT_EQ(first_root->direct_imports->length, 1);
+    Script* first_dependency =
+        (Script*)first_root->direct_imports->data[0];
+    ASSERT_TRUE(first_dependency->cache_owned_template);
+    runtime_cleanup(&first);
+
+    // Keep the replacement a different size so the file-generation detector
+    // forces the common cache to verify exact source bytes before a cache hit.
+    ASSERT_EQ(write_binary_file(dependency_path, second_dependency_source,
+        strlen(second_dependency_source)), 0);
+    Runtime second = {};
+    runtime_init(&second);
+    Input* second_output = run_script_mir(&second, NULL, (char*)root_path, true);
+    ASSERT_NE(second_output, nullptr);
+    EXPECT_EQ(it2i(second_output->root), 22);
+    ASSERT_NE(second.scripts, nullptr);
+    Script* second_root = (Script*)second.scripts->data[0];
+    EXPECT_NE(second_root->cache_template, first_root);
+    runtime_cleanup(&second);
+    lambda_tier_set(saved_tier);
+
+    InputScriptCacheStats after = {};
+    input_script_cache_get_stats(cache, &after);
+    EXPECT_GE(after.invalidations, before.invalidations + 2);
+    EXPECT_GE(after.dependency_invalidations,
+        before.dependency_invalidations + 1);
+}
+
+typedef struct LambdaCacheBuildThread {
+    const char* source;
+    const char* identity;
+    pthread_mutex_t* mutex;
+    pthread_cond_t* start_cond;
+    int* waiting;
+    int worker_count;
+    bool passed;
+} LambdaCacheBuildThread;
+
+static void* lambda_cache_build_thread_run(void* value) {
+    LambdaCacheBuildThread* worker = (LambdaCacheBuildThread*)value;
+    pthread_mutex_lock(worker->mutex);
+    (*worker->waiting)++;
+    if (*worker->waiting == worker->worker_count) {
+        pthread_cond_broadcast(worker->start_cond);
+    }
+    else {
+        while (*worker->waiting < worker->worker_count) {
+            pthread_cond_wait(worker->start_cond, worker->mutex);
+        }
+    }
+    pthread_mutex_unlock(worker->mutex);
+
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    Script* script = load_script_mir_direct(&runtime, worker->identity,
+        worker->source, false);
+    worker->passed = script && script->main_func;
+    runtime_cleanup(&runtime);
+    return NULL;
+}
+
+TEST(LambdaScriptCache, SingleFlightsSameSourceMirBuildAcrossFreshRuntimes) {
+    const int term_count = 64;
+    const size_t source_length = (size_t)(term_count - 1) * 4 + 1;
+    char* source = (char*)mem_alloc(source_length + 1, MEM_CAT_SYSTEM);
+    ASSERT_NE(source, nullptr);
+    char* cursor = source;
+    for (int i = 1; i < term_count; i++) {
+        memcpy(cursor, "1 + ", 4);
+        cursor += 4;
+    }
+    *cursor++ = '1';
+    *cursor = '\0';
+
+    static int cache_single_flight_generation = 0;
+    char identity[64];
+    snprintf(identity, sizeof(identity), "<lambda-cache-single-flight-%d>",
+        ++cache_single_flight_generation);
+
+    InputScriptCache* cache = input_manager_global_script_cache();
+    ASSERT_NE(cache, nullptr);
+    InputScriptCacheStats before = {};
+    input_script_cache_get_stats(cache, &before);
+    LambdaTier saved_tier = lambda_tier_selected();
+    lambda_tier_set(LAMBDA_TIER_JIT);
+
+    const int worker_count = 6;
+    pthread_mutex_t start_mutex = PTHREAD_MUTEX_INITIALIZER;
+    pthread_cond_t start_cond = PTHREAD_COND_INITIALIZER;
+    int waiting = 0;
+    LambdaCacheBuildThread workers[worker_count] = {};
+    pthread_t threads[worker_count];
+    for (int i = 0; i < worker_count; i++) {
+        workers[i].source = source;
+        workers[i].identity = identity;
+        workers[i].mutex = &start_mutex;
+        workers[i].start_cond = &start_cond;
+        workers[i].waiting = &waiting;
+        workers[i].worker_count = worker_count;
+        ASSERT_EQ(pthread_create(&threads[i], NULL, lambda_cache_build_thread_run,
+            &workers[i]), 0);
+    }
+    for (int i = 0; i < worker_count; i++) {
+        ASSERT_EQ(pthread_join(threads[i], NULL), 0);
+        EXPECT_TRUE(workers[i].passed);
+    }
+    pthread_cond_destroy(&start_cond);
+    pthread_mutex_destroy(&start_mutex);
+    lambda_tier_set(saved_tier);
+    mem_free(source);
+
+    InputScriptCacheStats after = {};
+    input_script_cache_get_stats(cache, &after);
+    EXPECT_EQ(after.mir_builds, before.mir_builds + 1);
+    EXPECT_GE(after.mir_hits, before.mir_hits + worker_count - 1);
+    EXPECT_GE(after.single_flight_waits, before.single_flight_waits + 1);
 }
 
 static gc_heap_t* concurrency_test_gc;

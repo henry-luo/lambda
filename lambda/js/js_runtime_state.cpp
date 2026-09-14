@@ -13,6 +13,7 @@
 
 __thread JsRuntimeState* js_active_runtime_state = NULL;
 extern __thread EvalContext* context;
+
 extern "C" int js_initial_call_stack_limit(void);
 extern "C" void js_runtime_owned_cache_destroy_context(JsRuntimeState* state);
 extern "C" void js_runtime_prototype_snapshot_destroy_context(JsRuntimeState* state);

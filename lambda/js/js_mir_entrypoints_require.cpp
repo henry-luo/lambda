@@ -5,9 +5,11 @@
 #include "../module/node_core/node_runtime_state.hpp"
 #include "../module/node_core/node_trace_events.hpp"
 #undef js_input
+#include "../input/input-script-cache.h"
 #include "../runtime/lambda-error.h"
 #include "../runtime/recovery_frame.h"
 #include "../runtime/mir_dump.h"
+#include "../../lib/file.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/path_str.h"
 #include "../../lib/time_util.h"
@@ -160,11 +162,19 @@ static Item js_mir_execute_retained_ast_script(Runtime* runtime, JsScript* scrip
 
 static Item js_mir_execute_ast_script(Runtime* runtime, JsTranspiler* tp,
         char* owned_source, const char* js_source, size_t js_source_len,
-        const char* filename, uint64_t* result_home, bool test262_native_harness) {
+        const char* filename, uint64_t* result_home, bool test262_native_harness,
+        JsCommonAstBuild* cache_build) {
     // The AST tier owns the retained JsScript, but uses the same source parse,
     // early-error pass, Runtime catalog, and EvalContext setup as MIR lowering.
     jm_clear_active_js_transpile(tp, NULL, NULL);
+    bool strict = tp && tp->ast_cache_requested_strict;
+    bool typescript_profile = tp && tp->ast_cache_typescript_profile;
     JsScript* script = js_script_adopt_transpiler(tp, runtime, filename);
+    bool published = script && (!cache_build ||
+        cache_build->state != INPUT_SCRIPT_BUILD_POISONED) &&
+        js_common_ast_cache_admit(runtime, script, js_source, js_source_len,
+            filename, strict, typescript_profile);
+    js_common_ast_cache_complete_build(cache_build, published, false);
     return js_mir_execute_retained_ast_script(runtime, script, owned_source,
         js_source, js_source_len, filename, result_home, test262_native_harness);
 }
@@ -729,8 +739,9 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         interp_checked = true;
     }
 
+    JsCommonAstBuild ast_cache_build = {};
     if (js_ast_interpreter_requested()) {
-        JsScript* cached = js_runtime_ast_cache_lookup(runtime, js_source, js_source_len,
+        JsScript* cached = js_common_ast_cache_lookup(runtime, js_source, js_source_len,
             filename, typescript_profile, typescript_profile);
         if (cached) {
             uint64_t realm_start = js_realm_init_time_us();
@@ -744,12 +755,34 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
             g_last_js_mir_phase_timing.total_us = js_mir_phase_now_us() - phase_total_start;
             return result;
         }
+        InputScriptBuildClaim claim = js_common_ast_cache_begin_build(
+            &ast_cache_build, js_source, js_source_len, filename,
+            typescript_profile, typescript_profile);
+        if (claim == INPUT_SCRIPT_BUILD_READY) {
+            cached = js_common_ast_cache_lookup(runtime, js_source, js_source_len,
+                filename, typescript_profile, typescript_profile);
+            if (cached) {
+                uint64_t realm_start = js_realm_init_time_us();
+                long execute_start = js_mir_phase_now_us();
+                Item result = js_mir_execute_retained_ast_script(runtime, cached,
+                    owned_source, js_source, js_source_len, filename, result_home,
+                    test262_native_harness);
+                g_last_js_mir_phase_timing.realm_us =
+                    (long)(js_realm_init_time_us() - realm_start);
+                g_last_js_mir_phase_timing.execute_us = js_mir_phase_now_us() -
+                    execute_start - g_last_js_mir_phase_timing.realm_us;
+                g_last_js_mir_phase_timing.total_us = js_mir_phase_now_us() -
+                    phase_total_start;
+                return result;
+            }
+        }
     }
 
     // Create JS transpiler (for parsing and AST building)
     JsTranspiler* tp = js_transpiler_create(runtime);
     if (!tp) {
         log_error("js-mir: failed to create transpiler");
+        js_common_ast_cache_complete_build(&ast_cache_build, false, false);
         jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
         return (Item){.item = ITEM_ERROR};
@@ -769,6 +802,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     long phase_start = js_mir_phase_now_us();
     if (!js_transpiler_parse_c(tp, js_source, js_source_len, JS_PARSE_AUTO)) {
         log_error("js-mir: parse failed");
+        js_common_ast_cache_complete_build(&ast_cache_build, false, false);
         return js_mir_compile_unit_fail(NULL, NULL, tp, owned_source,
             runtime, NULL, true);
     }
@@ -780,6 +814,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     JsAstNode* js_ast = (JsAstNode*)tp->ast_root;
     if (!js_ast) {
         log_error("js-mir: AST build failed");
+        js_common_ast_cache_complete_build(&ast_cache_build, false, false);
         return js_mir_compile_unit_fail(NULL, NULL, tp, owned_source,
             runtime, NULL, true);
     }
@@ -788,6 +823,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
 
     if (tp->has_errors) {
         log_error("js-mir: early error(s) detected");
+        js_common_ast_cache_complete_build(&ast_cache_build, false, false);
         return js_mir_compile_unit_fail(NULL, NULL, tp, owned_source,
             runtime, NULL, true);
     }
@@ -810,7 +846,8 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         phase_start = js_mir_phase_now_us();
         Item result = js_mir_execute_ast_script(runtime, tp, owned_source,
             js_source, js_source_len, filename, result_home,
-            test262_native_harness);
+            test262_native_harness,
+            js_ast_interpreter_requested() ? &ast_cache_build : NULL);
         timing.realm_us = (long)(js_realm_init_time_us() - realm_start);
         timing.execute_us = js_mir_phase_now_us() - phase_start - timing.realm_us;
         timing.total_us = js_mir_phase_now_us() - phase_total_start;
@@ -895,7 +932,8 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         // Realm construction is runtime work: it must occur only after static
         // discovery seals the root and installs the dynamic child.
         (void)js_get_global_this();
-        jm_load_imports(runtime, js_ast, filename);
+        (void)jm_load_imports(runtime, js_ast, filename, js_source,
+            js_source_len, false);
         g_last_js_mir_phase_timing.realm_us =
             (long)(js_realm_init_time_us() - realm_start);
         g_last_js_mir_phase_timing.imports_us = js_mir_phase_now_us() - phase_start -
@@ -1478,7 +1516,6 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
         return ItemError;
     }
     out_state->module_state_id = lambda_active_module_state_id();
-
     // js262 restores a value checkpoint because its harness heap survives.
     // This heap is new: clear all process caches before js_main initializes
     // fresh values in the pre-reserved module slab.
@@ -1572,6 +1609,41 @@ void preamble_state_destroy(JsPreambleState* state) {
     state->owns_compiled_state = false;
 }
 
+char* js_load_script_source_from_cache(const char* path,
+        const char* profile, const char* execution_mode, bool module_mode,
+        size_t* out_length) {
+    if (out_length) *out_length = 0;
+    if (!path || !path[0]) return NULL;
+
+    char* canonical = file_realpath(path);
+    const char* identity = canonical ? canonical : path;
+    InputScriptRequest request = {};
+    request.identity = identity;
+    request.source_kind = INPUT_SCRIPT_SOURCE_FILE;
+    request.language = "javascript";
+    request.profile = profile ? profile : "js-module";
+    request.parser_abi = "js-direct-parser-v1";
+    request.parse_flags = module_mode ? "module" : "classic";
+    request.resolution_base = identity;
+    request.backend = "mir-direct";
+    request.execution_mode = execution_mode
+        ? execution_mode : (module_mode ? "module" : "classic");
+    request.ast_abi = 1;
+    request.compiler_abi = 1;
+    request.interface_abi = jube_interface_registry_digest();
+    request.dependency_digest = jube_interface_registry_digest();
+    request.optimize_level = g_js_mir_optimize_level;
+    request.module_mode = module_mode;
+
+    char* source = input_script_cache_copy_file_source(
+        input_manager_global_script_cache(), &request, path, out_length);
+    if (canonical) mem_free(canonical);
+    if (!source) {
+        log_error("js-script-cache: failed to acquire file %s", path);
+    }
+    return source;
+}
+
 // ============================================================================
 // Public API: load a JS file as a module for cross-language import
 // ============================================================================
@@ -1579,7 +1651,8 @@ void preamble_state_destroy(JsPreambleState* state) {
 Item load_js_module(Runtime* runtime, const char* js_path) {
     log_info("js-mir: loading JS module '%s' for cross-language import", js_path);
     if (runtime) runtime->js_runtime_used = true;
-    char* source = read_text_file(js_path);
+    char* source = js_load_script_source_from_cache(
+        js_path, "js-cross-language-module", "module", true, NULL);
     if (!source) {
         log_error("js-mir: cannot read JS file '%s'", js_path);
         return ItemNull;
@@ -1652,6 +1725,13 @@ static bool js_require_path_has_known_extension(const char* path) {
 static bool js_require_path_is_json(const char* path) {
     int len = path ? (int)strlen(path) : 0;
     return len >= 5 && strcmp(path + len - 5, ".json") == 0;
+}
+
+static char* js_require_read_source(const char* path) {
+    if (js_require_path_is_json(path)) return read_text_file(path);
+    bool module_mode = !js_is_cjs_file(path);
+    return js_load_script_source_from_cache(path, "js-require",
+        module_mode ? "module" : "cjs", module_mode, NULL);
 }
 
 static char* js_require_read_resolved_path_internal(char* path_buf, int path_buf_size,
@@ -1732,7 +1812,7 @@ static char* js_require_read_resolved_path_internal(char* path_buf, int path_buf
     char original[512];
     snprintf(original, sizeof(original), "%s", path_buf);
 
-    char* source = read_text_file(path_buf);
+    char* source = js_require_read_source(path_buf);
     if (source) {
         js_require_canonicalize_existing_path(path_buf, path_buf_size);
         return source;
@@ -1743,7 +1823,7 @@ static char* js_require_read_resolved_path_internal(char* path_buf, int path_buf
     if (!has_node_prefix && !js_require_path_has_known_extension(original) &&
             len + 3 < path_buf_size) {
         snprintf(path_buf, path_buf_size, "%s.js", original);
-        source = read_text_file(path_buf);
+        source = js_require_read_source(path_buf);
         if (source) {
             js_require_canonicalize_existing_path(path_buf, path_buf_size);
             return source;
@@ -1762,7 +1842,7 @@ static char* js_require_read_resolved_path_internal(char* path_buf, int path_buf
     }
     if (plen + strlen("/index.js") < (size_t)path_buf_size) {
         strncat(path_buf, "/index.js", path_buf_size - strlen(path_buf) - 1);
-        source = read_text_file(path_buf);
+        source = js_require_read_source(path_buf);
         if (source) {
             js_require_canonicalize_existing_path(path_buf, path_buf_size);
             return source;
@@ -2188,7 +2268,8 @@ extern "C" Item js_dynamic_import(Item specifier) {
     } else {
         char path_buf[2048];
         snprintf(path_buf, sizeof(path_buf), "%s", resolved_path);
-        char* source = read_text_file(path_buf);
+        char* source = js_load_script_source_from_cache(
+            path_buf, "js-dynamic-import", "module", true, NULL);
         if (!source) {
             js_dynamic_import_suppress_module_drain--;
             char msg[256];

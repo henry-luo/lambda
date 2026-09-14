@@ -1,7 +1,14 @@
 # Lambda Script Cache Proposal
 
-**Status:** Proposal — unratified  
-**Date:** 2026-09-13  
+**Status:** Implementation in progress — common source admission, Lambda AST
+import/view overlays, Lambda fresh-runtime MIR dependency cones with
+logical-to-dense module-slab mapping, source-change retirement, and
+single-flight artifact builds, broad JS AST templates with execution
+overlays, synchronous static-JS-import module MIR artifacts with
+source-generation cones, and the Radiant JS-MIR lease session are landed;
+eager-JIT AST-miss reuse and the broad Phase 1–4 exit gates remain open
+(2026-09-14)  
+**Date:** 2026-09-13 (updated 2026-09-14)  
 **Scope:** A single in-process script-cache service for every Lambda, LambdaJS,
 and future hosted-language command pipeline. `InputManager` is the persistent
 central store across disposable script runtimes. Each cached script has a
@@ -14,9 +21,10 @@ D5.4.3 (no context-dependent value at a code-baked address), D4.2.3 (every
 allocator has a named context owner), D7.1.2 (I/O versus derived-artifact
 layering), D7.2.2–D7.2.3 (transactional module initialization and in-process
 import caching), D8.1.3v10 (retained LambdaJS AST and explicit AST tier),
-D8.4.1v2 (immutable generated code), and D8.5.1 (L1 imported-module cache).
+D8.4.1v2 (immutable generated code), D7.1.2v2 (I/O and opaque-artifact
+layering), and D8.5.1v2 (the persistent executable-script cache).
 This proposal records the 2026-09-13 policy decisions in §15; formal rulings
-are revised only when implementation is authorized.
+are kept synchronized as implementation lands.
 
 **Companions:** `Lambda_Design_MIR_Cache.md`, `Lambda_Design_JS_Cache.md`,
 `Lambda_Design_JS_Interpreter.md`, and `doc/Lambda_Formal_Design.md`.
@@ -63,9 +71,9 @@ Executable source is loaded through several unrelated paths:
 
 | Area | Current cache/reuse | Gap |
 |---|---|---|
-| Lambda `.ls` | `Runtime::script_index` and retained `Script` imports in `runner.cpp` | Only Lambda imports; the cache is coupled to `Runtime`, `Script::index`, and its current lifetime. `test-batch` disables retention before each isolated item. |
-| JS AST tier | `JsRuntimeAstCache` in `js_scope.cpp` | Runtime-local and JS-only; source loading still creates a direct runtime-pool `Input`. |
-| JS MIR layout | Batch-owned `JsMirCache` in `js_mir_cache.cpp` | Covers browser preambles and eligible external classic scripts only; owned by the Radiant path. |
+| Lambda `.ls` | `Runtime::loaded_script_index` in `runner.cpp` | Runtime-local source/import registration, not artifact ownership or a retention cache. Closed interpreter units use common AST templates; reusable code uses logical compilation-unit IDs mapped to this runtime's dense module slabs. |
+| JS AST tier | `InputScriptCache` AST template plus `JsScript` execution overlay | Common identity owns immutable parser ASTs; functions, classes, modules, eval, and TypeScript allocate mutable execution facts into a fresh overlay. |
+| JS MIR layout | `JsMirLeaseSession` in `js_mir_cache.cpp` | A bounded Radiant lease/accounting session over common artifacts, not a second cache index; covers browser preambles and eligible external classic scripts. |
 | JS test batches | Retained harness preamble and hot-heap reset contract | Useful but a separate protocol, not a general source/artifact service. |
 | Hosted languages | Jube dispatch chooses a language-specific loader | No common script identity, AST cache, MIR cache, or module-artifact contract. |
 | Input documents | `InputManager` tracks only inputs it directly creates | No content-addressed artifact registry; most script and JS compiler inputs use `Input::create()` directly. |
@@ -106,8 +114,8 @@ execution receives new runtime state.
   cache entries own a parsed document or an execution `Input`.
 - Give every cache entry an explicit source identity, dependency identity,
   cache scope, owner, memory budget, invalidation rule, and metrics.
-- Migrate and delete the duplicated Lambda L1, JS AST, and `JsMirCache`
-  indexes after equivalent coverage exists in the common service.
+- Migrate and retire duplicated Lambda L1, JS AST, and Radiant cache-façade
+  ownership after equivalent coverage exists in the common service.
 
 ### 3.2 Non-goals
 
@@ -225,7 +233,7 @@ and opaque artifact handles, while the LambdaJS/Lambda/guest adapter remains
 the source of the artifact type and finalizer. `lambda/input/` therefore need
 not name `MIR_context_t` or a language AST class. This centralizes lifetime and
 lookup without moving language semantics into the I/O layer. The formal design
-must record this interpretation before implementation lands.
+records this interpretation in **D7.1.2v2**.
 
 ---
 
@@ -294,17 +302,21 @@ instance, or decline AST admission until it is fixed.
 
 ### 7.2 Execution from AST
 
-- Lambda's interpreter/MIR preparation receives a fresh module slab and
-  execution-local `Script` view from the cached artifact.
+- Lambda's interpreter receives a fresh module slab and execution-local
+  `Script` view from a cached T0 artifact. Direct import cones clone fresh
+  Script shells, view registration stores generated anonymous references in
+  that shell, and a cached MIR hit instantiates the complete JIT dependency
+  cone before entering code. Eager JIT AST-miss reuse remains ineligible until
+  MIR's AST-mutated facts move to a lowering overlay.
 - `JS_EXECUTION_BACKEND=ast` instantiates a fresh `JsScript` execution image
   from the frozen JS AST. It does not return a prior realm's interpreter
   objects.
 - A MIR miss starts from the cached AST when compatible, avoiding reparse and
   rebinding.
 
-The existing `JsRuntimeAstCache` becomes an adapter implementation detail
-during migration, then its runtime-local index is deleted. The common service
-is the only owner of AST cache identity and counters.
+The former `JsRuntimeAstCache` runtime-local index is deleted. The common
+service is the only owner of AST cache identity and counters; a reusable
+`JsScript` gets a fresh execution overlay for every run.
 
 ---
 
@@ -340,7 +352,7 @@ On a MIR hit the adapter:
 5. invokes the immutable entry point; and
 6. tears down execution state while leaving only the leased cache artifact.
 
-This is the existing fresh-document-realm rule of `JsMirCache`, generalized to
+This is the fresh-document-realm rule of `JsMirLeaseSession`, generalized to
 every script runner. It is also the requirement that makes a retained Lambda
 MIR module compatible with a fresh heap under D5.4.3.
 
@@ -472,9 +484,14 @@ absent -> source-ready -> ast-compiling -> ast-ready -> mir-compiling -> mir-rea
                             +-> rejected      +-> poisoned   +-> poisoned
 ```
 
-One worker compiles a given key; compatible contenders wait for the result or
-take an ordinary uncached path according to the scope policy. A lease prevents
-an entry from being evicted while an execution instance references it.
+The common service now provides per-AST/MIR-key build claims. One Lambda, JS
+AST, Radiant JS-MIR lease, or synchronous static-JS-import module worker
+compiles a claimed key; compatible fresh runtimes wait and re-enter ordinary
+artifact lookup after publication. A failed non-poisoned owner permits one
+subsequent ordinary retry, while a poisoned key is fail-closed until its source
+generation is invalidated. TLA/dynamic/re-export/CommonJS module-MIR and guest
+adapters have not yet adopted build claims. A lease prevents an entry from
+being evicted while an execution instance references it.
 
 ### 12.2 Memory and eviction
 
@@ -492,10 +509,12 @@ D4.2.3. A cache context is neither a document context nor an execution heap.
 
 ### 12.3 Failure handling
 
-Compiler errors do not publish an artifact. A crash, timeout, link failure,
-cache-integrity failure, or failed fresh-instance cleanup poisons the active
-artifact and releases it when the last lease ends. Existing retry policy may
-allow one uncached retry; it must never execute the poisoned artifact again.
+Compiler errors do not publish an artifact. The initial implementation keeps
+poisoning minimal: an adapter can complete a claimed key as poisoned after a
+crash, timeout, link/cache-integrity failure, or failed fresh-instance cleanup;
+the common entry blocks future artifact reuse/build claims until source
+invalidation. Ordinary compile failures complete unpoisoned and may retry.
+No eviction policy is introduced by this failure handling.
 
 ### 12.4 Counters and controls
 
@@ -525,7 +544,8 @@ only after all callers migrate.
 
 1. Record the resolved §15 policies in the formal design when implementation
    is authorized: persistent manager-owned `ScriptInput` artifacts and default
-   cache admission for every script.
+   cache admission for every script. **Done:** D7.1.2v2 and D8.5.1v2 were
+   ratified on 2026-09-13.
 2. Inventory every direct executable-source read and direct compiler `Input`
    creation; add source-class counters without changing execution.
 3. Audit Lambda and JS ASTs for execution-mutated fields and MIR for
@@ -551,8 +571,12 @@ entry retains an execution `Input` or document allocation.
 
 ### Phase 2 — AST cache
 
-1. Promote Lambda and JS immutable AST artifacts behind adapters.
-2. Replace `JsRuntimeAstCache` lookup ownership with the common service.
+1. Promote Lambda immutable AST artifacts behind an adapter (landed for T0
+   units, including direct import cones and interpreter views); JS AST
+   templates and execution overlays are landed. Eager JIT AST-miss reuse
+   remains blocked on a lowering-fact overlay.
+2. Keep common-service AST lookup ownership; the former `JsRuntimeAstCache`
+   index is retired.
 3. Make the layout test runner's AST backend emit common AST counters.
 4. Route dynamic/eval and REPL snapshots through the same service. Their key
    must include every lexical, preamble, and history dependency; an incomplete
@@ -564,13 +588,17 @@ byte-identical outputs and fresh runtime/realm state.
 ### Phase 3 — Lambda MIR and modules
 
 1. Make `load_script()` acquire/instantiate cache leases instead of owning the
-   `Runtime::script_index` compilation cache.
+   former Runtime compilation cache (landed; the remaining
+   `loaded_script_index` is same-runtime registration only).
 2. Implement stable compilation-unit identities, dependency-cone invalidation,
-   and per-execution BSS/module-slab rebuild.
+   and per-execution BSS/module-slab rebuild. **Landed for Lambda file-backed
+   import cones:** a cached root refreshes changed child source generations
+   before reuse, then retires the importer cone through the common service.
 3. Enable default cache lookup for `test-batch` main scripts and imports after
    the fresh heap/root proof passes.
 4. Delete the old retained-`Script` index, `cache_retain` policy, and its
-   duplicate counters after migration.
+   duplicate counters after migration (landed; current load counters describe
+   only Runtime-local registration).
 
 **Exit gate:** repeated Lambda imports and repeated batch main scripts hit AST
 and MIR independently; source changes invalidate dependents; module failures
@@ -579,21 +607,28 @@ remain transactional.
 ### Phase 4 — JS MIR migration
 
 1. Make `JsPreambleState`/equivalent an adapter-owned `MirArtifact`.
-2. Migrate Radiant preamble, lifecycle, and external classic entries from
-   `JsMirCache` to the common key/scope/lease service.
+2. Migrate Radiant preamble, lifecycle, and external classic entries from the
+   legacy cache façade to the common key/scope/lease service (landed through
+   `JsMirLeaseSession`).
 3. Route JS CLI and `js-test-batch` compatible preambles through the same
    adapter while retaining their explicit hot-heap policy.
-4. Delete `JsMirCache` and its Radiant-specific ownership/index once counters
-   and fresh-realm tests are equivalent.
+4. Retire the legacy `JsMirCache` ownership/index while retaining only the
+   bounded `JsMirLeaseSession` lease boundary (landed; counters and the
+   fresh-realm regression remain required coverage).
 
 **Exit gate:** direct MIR layout batches report common MIR hits; `make layout`
 reports common AST hits; cached and uncached results preserve fresh realms.
 
 ### Phase 5 — modules, guests, and document artifacts
 
-1. Complete JS CommonJS/ESM MIR instantiation after the
-   namespace/live-binding/reset audit; their source and safe AST artifacts use
-   the common service from the earlier phases.
+1. A synchronous ESM module whose transitive static-JS-import closure is itself
+   cache-safe now instantiates a common MIR artifact after rebuilding its
+   namespace and module slab. Its direct/transitive local JS static-import
+   source records form a freshness cone, and each hit recreates those dependency
+   namespaces before entering the parent image. Complete
+   CommonJS, dynamic/re-export, TLA, and cross-language ESM MIR instantiation
+   after the namespace/live-binding/reset audit; their source and safe AST
+   artifacts use the common service from the earlier phases.
 2. Add hosted-language adapters one language at a time. Each script is
    cache-admitted by default; AST-only is acceptable until that guest can prove
    its MIR artifact has a fresh-instance contract.
@@ -650,10 +685,75 @@ one-shot command will normally gain no later hit before process exit, but it
 uses the same `ScriptInput` path. Cache-memory management and selective
 clearing are a future phase; retained-byte accounting starts immediately.
 
-This generalizes D8.5.1 beyond its current imported-module wording and must be
-ratified into the formal design before implementation.
+This generalizes D8.5.1 beyond its former imported-module wording and is
+ratified in **D8.5.1v2**.
 
-### R3 — Stable logical compilation-unit IDs (resolved in principle)
+### Implementation status — 2026-09-14
+
+The first production slice is landed, but this proposal is not complete. The
+common service now provides manager-owned source records, exact-byte identity,
+named cache contexts, scopes/leases, opaque AST/MIR artifact slots, policy
+controls, byte accounting, and diagnostics. Lambda source admission uses the
+service, including AST-dump/validation paths and imported modules; JS CLI,
+Node-style test-runner, module, and interpreter file acquisition use it; hosted
+CLI/Jube source bridges use language/profile keys; and Radiant local external
+JS, URL snapshots, plus its batch preamble/external-classic MIR adapter use it.
+The Radiant remote-fetch LRU remains transport-only and feeds exact URL bytes
+into the common service. Per-document input cleanup now retains the process
+cache so a batch cannot leave an adapter pointing at destroyed cache state, and
+the Radiant MIR adapter holds active artifact leases until batch teardown.
+
+The reusable-artifact slice now includes Lambda interpreter import/view
+overlays and JIT module cones. A cached T0 parent creates fresh Script shells
+for its direct imports; interpreter view registration keeps generated anonymous
+references on that execution shell, not in the frozen parser name pool. A
+cached Lambda MIR hit creates the same full dependency shell graph before
+binding dense module slabs, and P2 satellite imports derive the current
+owner/slot rather than writing resolution state into a cached `NameEntry`.
+P2 promotion counters and boxed satellite entries likewise live in a
+per-`Script` overlay for cached AST instances; an execution can neither read
+an entry from a retired EvalContext nor publish one into the parser-owned
+definition (D8.1.1v2/D8.5.1v2). A P2-touched AST image is conservatively
+excluded from later AST hits until lowering's remaining mutable facts receive
+the same overlay; this is a correctness gate, not poisoning or eviction.
+Eager JIT AST-miss reuse remains excluded because MIR lowering still mutates
+AST facts. The common JS AST adapter replaces `JsRuntimeAstCache` for all
+parsed JS forms. Each hit creates a new `JsScript` shell, module slab, and
+execution overlay; function/class lazy definitions, module/eval bookkeeping,
+and TypeScript facts never mutate the shared parser template. A synchronous
+ESM module whose static-JS-import closure is synchronous and cache-safe now
+retains an immutable MIR image, refreshes every recorded dependency source
+generation before a hit, and recreates its dependency namespaces, module slab,
+property-key image, and declaration metadata on every execution. Radiant's
+preamble and external-classic JS MIR adapter is stored in the same opaque
+common MIR slot, and `JsMirLeaseSession` retains only batch leases/accounting;
+the existing fresh-document-realm regression covers its instantiation path.
+
+TLA/dynamic/re-export/cross-language JS module artifacts, CommonJS module MIR
+artifacts, hosted-language artifact paths, guest single-flight adoption,
+JS/guest dependency-cone invalidation outside static local ESM, richer failure
+recovery, eviction, eager-JIT AST-miss overlays, and the full command-pipeline
+inventory remain open Phase 2–5 work. Lambda file-backed import cones and the
+admitted static-JS-import module cones are recorded by persistent unit ID; a
+cache hit refreshes a changed child generation and retires all affected
+importers before reuse.
+If a dependency-freshness proof or an otherwise-ready artifact cannot be
+instantiated, Lambda retires that logical unit and its importer cone before one
+retry, so it never re-enters the same untrusted image. Active leases defer
+destruction. JS AST template clones also retain their
+logical unit ID and obtain a fresh dense module slab in the receiving runtime.
+The common service single-flights AST/MIR keys. Lambda AST/MIR admission, JS
+AST admission, Radiant's preamble/external-classic JS-MIR lease admission, and
+closed synchronous JS-module MIR admission use those claims; the initial
+per-key poison state is fail-closed and clears only with source-generation
+invalidation.
+`Runtime::loaded_script_index` remains a runtime-local source/import registry,
+not an artifact owner or retention cache. The legacy Radiant cache façade is
+retired: its replacement
+owns only batch accounting and active leases while `InputScriptCache` owns
+artifact identity and lifetime.
+
+### R3 — Stable logical compilation-unit IDs (implemented 2026-09-14; D8.5.1v2)
 
 A stable ID is required only for **reusable Lambda MIR**, not as an additional
 user-visible script identity. Today `write_fn_name_ex()` and `write_var_name()`
@@ -665,12 +765,17 @@ Cached code compiled against `m2._f` would then resolve the wrong function or
 fail to link.
 
 `module_state_id` has the same lifetime issue for compiled module-variable
-access: it is currently allocated by the runtime and appears in generated MIR.
-The cache must distinguish a persistent `ScriptInput::compilation_unit_id`
-used for code identity from a fresh runtime's module-state allocation. The
-latter is bound through a per-runtime map during instantiation. The remaining
-implementation question is the exact map/indirection shape, not whether the
-stable logical identity is necessary.
+access: it is allocated by a runtime and therefore must not be embedded as a
+cache-wide identity. The cache distinguishes a persistent
+`ScriptInput::compilation_unit_id` used for code identity from a fresh
+runtime's dense module-state allocation. `Runtime::module_unit_index` binds
+the former to the latter as each `Script` is registered. Generated layouts and
+ordinary imported-variable access carry the logical unit and resolve it through
+that map; T0 satellite code retains its explicitly physical local slab access.
+The BSS identity marks logical units with a reserved high bit, so an ordinary
+physical slab `n` cannot be redirected when a cached unit also has raw ID `n`.
+Thus a fresh-runtime MIR hit can coexist with independently loaded modules
+without sparse slab growth or recompilation caused by an ID collision.
 
 ### Q1 — What source-snapshot policy applies during a long-running manager?
 

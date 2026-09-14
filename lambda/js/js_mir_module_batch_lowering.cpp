@@ -1,4 +1,5 @@
 #include "js_mir_internal.hpp"
+#include "../input/input-script-cache.h"
 
 #include <limits.h>
 #include "../../lib/file.h"
@@ -6,6 +7,7 @@
 #include "../jube/jube_registry.h"
 
 extern "C" void js_dynfunc_cache_reset(void);
+extern int js_dynamic_import_suppress_module_drain;
 
 static NameEntry* jm_annex_b_publish_binding(NameEntry* binding) {
     if (binding && binding->annex_b_outer_binding) {
@@ -967,7 +969,9 @@ void jm_resolve_module_path(const char* base_file, const char* specifier, int sp
 
 // Forward declarations for module loading
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename);
-void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename);
+bool jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename,
+    const char* importer_source, size_t importer_source_length,
+    bool record_cache_dependencies);
 
 // Helper: emit code to store an exported identifier value into module namespace
 void jm_emit_module_export(JsMirTranspiler* mt, const char* name, int name_len,
@@ -3820,6 +3824,229 @@ static void jm_finish_module_transpile(JsTranspiler* tp, JsMirTranspiler* mt,
     js_transpiler_destroy(tp);
 }
 
+class JsModuleMirBuildScope {
+public:
+    JsCommonMirBuild build = {};
+    bool published = false;
+
+    ~JsModuleMirBuildScope() {
+        // Every eligible owner completes exactly once, including parse/lower
+        // failures after claim acquisition (D8.5.1v2).
+        js_module_mir_cache_complete_build(&build, published, false);
+    }
+};
+
+typedef struct JsModuleMirCacheWalk {
+    bool dynamic_import;
+} JsModuleMirCacheWalk;
+
+static void jm_module_mir_cache_scan_node(JsAstNode* node, void* opaque) {
+    JsModuleMirCacheWalk* walk = (JsModuleMirCacheWalk*)opaque;
+    if (!node || !walk || walk->dynamic_import) return;
+    if (node->node_type == AST_NODE_CALL_EXPR) {
+        JsCallNode* call = (JsCallNode*)node;
+        JsIdentifierNode* callee = call->callee &&
+                call->callee->node_type == AST_NODE_IDENT
+            ? (JsIdentifierNode*)call->callee : NULL;
+        if (callee && !callee->entry && callee->name && callee->name->len == 6 &&
+                memcmp(callee->name->chars, "import", 6) == 0) {
+            walk->dynamic_import = true;
+            return;
+        }
+    }
+    js_ast_visit_children(node, jm_module_mir_cache_scan_node, walk);
+}
+
+static bool jm_module_mir_cache_candidate(JsAstNode* ast,
+        const char* filename) {
+    JsProgramNode* program = ast && ast->node_type == AST_SCRIPT
+        ? (JsProgramNode*)ast : NULL;
+    if (!program) return false;
+    for (JsAstNode* statement = program->body; statement; statement = statement->next) {
+        if (statement->node_type == AST_NODE_EXPORT &&
+                ((JsExportNode*)statement)->source) return false;
+        if (statement->node_type != AST_NODE_IMPORT) continue;
+        JsImportNode* import_node = (JsImportNode*)statement;
+        if (!import_node->source) return false;
+        char resolved[512];
+        if (filename) {
+            jm_resolve_module_path(filename, import_node->source->chars,
+                (int)import_node->source->len, resolved, sizeof(resolved));
+        } else {
+            snprintf(resolved, sizeof(resolved), "%.*s",
+                (int)import_node->source->len, import_node->source->chars);
+        }
+        // Cross-language namespaces have a distinct fresh-instance contract.
+        // Keep their artifact path separate until its adapter is verified.
+        if (jm_path_is_lambda_source(resolved)) return false;
+    }
+    JsModuleMirCacheWalk walk = {};
+    jm_module_mir_cache_scan_node(ast, &walk);
+    return !walk.dynamic_import;
+}
+
+static bool jm_capture_module_mir_dependencies(JsModuleMirArtifact* artifact,
+        JsAstNode* ast, const char* filename) {
+    JsProgramNode* program = artifact && ast && ast->node_type == AST_SCRIPT
+        ? (JsProgramNode*)ast : NULL;
+    if (!program) return false;
+    int count = 0;
+    for (JsAstNode* statement = program->body; statement;
+            statement = statement->next) {
+        if (statement->node_type == AST_NODE_IMPORT &&
+                ((JsImportNode*)statement)->source) {
+            count++;
+        }
+    }
+    if (count == 0) return true;
+    artifact->static_dependency_paths = (char**)mem_calloc((size_t)count,
+        sizeof(char*), MEM_CAT_JS_RUNTIME);
+    if (!artifact->static_dependency_paths) return false;
+    for (JsAstNode* statement = program->body; statement;
+            statement = statement->next) {
+        if (statement->node_type != AST_NODE_IMPORT) continue;
+        JsImportNode* import_node = (JsImportNode*)statement;
+        if (!import_node->source) continue;
+        char resolved[512];
+        if (filename) {
+            jm_resolve_module_path(filename, import_node->source->chars,
+                (int)import_node->source->len, resolved, sizeof(resolved));
+        } else {
+            snprintf(resolved, sizeof(resolved), "%.*s",
+                (int)import_node->source->len, import_node->source->chars);
+        }
+        char* path = mem_strdup(resolved, MEM_CAT_JS_RUNTIME);
+        if (!path) return false;
+        artifact->static_dependency_paths[artifact->static_dependency_count++] = path;
+    }
+    return true;
+}
+
+static bool jm_capture_module_mir_artifact(JsMirTranspiler* mt,
+        MIR_context_t ctx, JsMirMainFunc entry_func, const char* source,
+        JsAstNode* ast, const char* filename, JsModuleMirArtifact** out_artifact) {
+    if (out_artifact) *out_artifact = NULL;
+    if (!mt || !ctx || !entry_func || !source || !out_artifact) return false;
+    JsModuleMirArtifact* artifact = (JsModuleMirArtifact*)mem_calloc(1,
+        sizeof(JsModuleMirArtifact), MEM_CAT_JS_RUNTIME);
+    if (!artifact) return false;
+    JsPreambleState* image = &artifact->image;
+    image->entry_func = (void*)entry_func;
+    image->module_var_count = mt->module_var_count;
+    if (!js_capture_compiled_name_table(mt, image)) {
+        js_module_mir_artifact_destroy(artifact);
+        return false;
+    }
+    if (mt->module_consts && !js_preamble_entries_from_module_consts(
+            mt->module_consts, &image->entry_count, &image->entries)) {
+        js_module_mir_artifact_destroy(artifact);
+        return false;
+    }
+    image->source_buffer = mem_strdup(source, MEM_CAT_JS_RUNTIME);
+    if (!image->source_buffer) {
+        js_module_mir_artifact_destroy(artifact);
+        return false;
+    }
+    if (!jm_capture_module_mir_dependencies(artifact, ast, filename)) {
+        js_module_mir_artifact_destroy(artifact);
+        return false;
+    }
+    image->mir_ctx = ctx;
+    image->owns_compiled_state = true;
+    *out_artifact = artifact;
+    return true;
+}
+
+static Item jm_execute_cached_module_dependencies(Runtime* runtime,
+        const JsModuleMirArtifact* artifact) {
+    if (!runtime || !artifact) return ItemError;
+    for (int i = 0; i < artifact->static_dependency_count; i++) {
+        const char* path = artifact->static_dependency_paths
+            ? artifact->static_dependency_paths[i] : NULL;
+        if (!path || !path[0]) return ItemError;
+        String* spec_str = heap_create_name(path, strlen(path));
+        if (!spec_str) return ItemError;
+        Item specifier = (Item){.item = s2it(spec_str)};
+        if (get_type_id(js_module_get(specifier)) != LMD_TYPE_NULL) continue;
+        // Match ordinary linking: publish the placeholder before the child
+        // enters so a synchronous cycle reads the current realm's namespace.
+        js_module_register(specifier, js_new_object());
+        size_t source_length = 0;
+        char* source = js_load_script_source_from_cache(path,
+            "js-static-import", "module", true, &source_length);
+        if (!source) return js_throw_reference_error(
+            js_make_string("Cannot find cached module dependency"));
+        Item result = transpile_js_module_to_mir(runtime, source, path);
+        mem_free(source);
+        if (item_is_error(result)) return result;
+        Item evaluation_error = js_module_get_evaluation_error(specifier);
+        if (get_type_id(evaluation_error) != LMD_TYPE_NULL) {
+            return js_throw_value(evaluation_error);
+        }
+    }
+    return ItemNull;
+}
+
+static Item jm_execute_cached_module_mir(Runtime* runtime,
+        const JsModuleMirArtifact* artifact, const char* filename) {
+    const JsPreambleState* image = artifact ? &artifact->image : NULL;
+    if (!runtime || !context || !image || !image->entry_func || !image->mir_ctx ||
+            !js_activate_runtime_name_pool()) {
+        return ItemError;
+    }
+    (void)js_get_global_this();
+    String* spec_str = heap_create_name(filename, strlen(filename));
+    if (!spec_str) return ItemError;
+    Item spec_item = (Item){.item = s2it(spec_str)};
+    Item namespace_obj = js_new_object();
+    js_module_register(spec_item, namespace_obj);
+    Item dependency_result = jm_execute_cached_module_dependencies(runtime,
+        artifact);
+    if (item_is_error(dependency_result)) {
+        js_module_record_evaluation_error(spec_item, dependency_result);
+        return dependency_result;
+    }
+    RuntimeCurrentFileScope current_file(context,
+        filename ? filename : context->current_file);
+    RuntimeModuleStateScope module_state(context);
+    RuntimeExecutionScope execution_scope(context);
+    JsModuleNamespaceScope module_namespace(namespace_obj, true);
+    if (!lambda_module_state_reserve_and_activate(
+            (uint32_t)image->module_var_count) ||
+            !lambda_module_state_link_property_keys(lambda_active_module_state_id(),
+                image->module_property_specs, image->module_property_count,
+                image->module_property_bytes_size)) {
+        return ItemError;
+    }
+    if (execution_scope.is_outermost() &&
+            !js_runtime_state.event_loop->callback_running &&
+            js_dynamic_import_suppress_module_drain <= 0) {
+        js_event_loop_init();
+    }
+    js_eval_preamble_entries_free();
+    if (!js_preamble_entries_copy(image->entries, image->entry_count,
+            &g_eval_preamble_entries)) {
+        return ItemError;
+    }
+    g_eval_preamble_entry_count = image->entry_count;
+    g_eval_preamble_var_count = image->module_var_count;
+    js_module_save_context(spec_item, lambda_active_module_state_id());
+    js_module_set_deferred_main_ptr(spec_item, image->entry_func);
+    Item result = js_mir_execute_compiled_entry(image->entry_func);
+    if (item_is_error(result)) {
+        js_module_record_evaluation_error(spec_item, result);
+        return result;
+    }
+    if (js_dynamic_import_suppress_module_drain <= 0) js_event_loop_drain();
+    Item evaluation_error = js_module_get_evaluation_error(spec_item);
+    if (get_type_id(evaluation_error) != LMD_TYPE_NULL) {
+        return js_throw_value(evaluation_error);
+    }
+    js_module_register(spec_item, result);
+    module_register_for_runtime(runtime, filename, "js", result, image->mir_ctx);
+    return result;
+}
+
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename) {
     log_debug("js-mir: compiling module '%s'", filename ? filename : "<module>");
     // Module compilation bypasses transpile_js_to_mir_core_len(), which normally
@@ -3842,6 +4069,23 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         return ItemError;
     }
     js_runtime_set_input(module_input);
+    size_t source_length = strlen(js_source);
+    // Closed modules have no dependency or await execution state to retain.
+    // A cache hit therefore reconstructs only this Runtime's namespace and
+    // slab before entering the immutable image (D8.5.1v2).
+    InputCacheScope* cached_scope = NULL;
+    const JsModuleMirArtifact* cached = js_module_mir_cache_lookup(js_source,
+        source_length, filename, &cached_scope);
+    if (cached) {
+        if (!runtime_hold_js_module_mir_scope(runtime, cached_scope)) {
+            input_script_cache_close_scope(cached_scope);
+            return ItemError;
+        }
+        Item result = jm_execute_cached_module_mir(runtime, cached, filename);
+        input_script_cache_mark_module_hit(input_manager_global_script_cache());
+        log_info("js-mir-module-cache: hit module=%s", filename ? filename : "<module>");
+        return result;
+    }
     extern int js_dynamic_import_suppress_module_drain;
     // Js57 P4 (Track B3): bump depth at the very start so jm_load_imports
     // nested calls see depth >= 2 while the outermost transpile sits at 1;
@@ -3916,13 +4160,48 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     // Detect top-level await after the shared compile unit publishes its index;
     // nested function/class scopes are excluded by the indexed owner relation.
     bool module_has_top_level_await = jm_module_has_top_level_await(mt, js_ast);
+    bool module_cache_candidate = jm_module_mir_cache_candidate(js_ast, filename) &&
+        !module_has_top_level_await;
+    JsModuleMirBuildScope module_cache_build;
+    if (module_cache_candidate) {
+        InputScriptBuildClaim claim = js_module_mir_cache_begin_build(js_source,
+            source_length, filename, &module_cache_build.build);
+        if (claim == INPUT_SCRIPT_BUILD_READY) {
+            InputCacheScope* ready_scope = NULL;
+            const JsModuleMirArtifact* ready = js_module_mir_cache_lookup(
+                js_source, source_length, filename, &ready_scope);
+            if (ready) {
+                // The private compiler image has no execution facts yet. Drop
+                // it before recreating the ordinary fresh namespace/slab from
+                // the published immutable module image.
+                jm_finish_module_transpile(tp, mt, ctx);
+                js_tla_exit_module();
+                if (!runtime_hold_js_module_mir_scope(runtime, ready_scope)) {
+                    input_script_cache_close_scope(ready_scope);
+                    return ItemError;
+                }
+                Item result = jm_execute_cached_module_mir(runtime, ready, filename);
+                input_script_cache_mark_module_hit(input_manager_global_script_cache());
+                log_info("js-mir-module-cache: single-flight hit module=%s",
+                    filename ? filename : "<module>");
+                return result;
+            }
+        }
+    }
     if (js_tla_module_depth_get() >= 2 || js_dynamic_import_suppress_module_drain > 0) {
         if (module_has_top_level_await) {
             js_module_mark_has_tla(p7d_self_spec_item);
             log_debug("P7d-A: module '%s' has TLA (top-level await detected)", filename);
         }
     }
-    if (!transpile_js_mir_ast(mt)) {
+    // An artifact's MIR can outlive this compilation context.  String literal
+    // pools belong to that context, so cached module code must retain literal
+    // bytes in its MIR rather than emit a context-local pool unit id (D8.5.1v2).
+    bool saved_compile_only = g_jm_preamble_compile_only;
+    if (module_cache_candidate) g_jm_preamble_compile_only = true;
+    bool module_transpiled = transpile_js_mir_ast(mt);
+    g_jm_preamble_compile_only = saved_compile_only;
+    if (!module_transpiled) {
         log_error("js-mir: module: collection/allocation failed for '%s'", filename);
         (void)js_mir_compile_unit_fail(ctx, mt, tp, NULL,
             runtime, context, true);
@@ -3954,7 +4233,10 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     }
     // Realm construction is runtime work, after the static root is sealed.
     (void)js_get_global_this();
-    jm_load_imports(runtime, js_ast, filename);
+    bool cache_dependencies_recorded = jm_load_imports(runtime, js_ast, filename,
+        js_source, source_length, module_cache_candidate);
+    bool module_dependencies_sync = !js_module_needs_async_settle(
+        p7d_self_spec_item);
 
     RootFrame import_error_roots(1);
     Rooted<Item> imported_error(import_error_roots,
@@ -4085,6 +4367,45 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
 
     log_debug("js-mir: module '%s' loaded successfully", filename);
 
+    if (module_cache_candidate && cache_dependencies_recorded &&
+            module_dependencies_sync &&
+            module_cache_build.build.state != INPUT_SCRIPT_BUILD_POISONED) {
+        JsModuleMirArtifact* compiled = NULL;
+        if (jm_capture_module_mir_artifact(mt, ctx, js_main, js_source, js_ast,
+                filename, &compiled)) {
+            InputCacheScope* compiled_scope = NULL;
+            const JsModuleMirArtifact* admitted = NULL;
+            if (module_cache_build.build.state == INPUT_SCRIPT_BUILD_OWNER) {
+                admitted = js_module_mir_cache_adopt_build(
+                    &module_cache_build.build, compiled, &compiled_scope);
+            } else {
+                admitted = js_module_mir_cache_adopt(js_source, source_length,
+                    filename, compiled, &compiled_scope);
+            }
+            if (admitted) {
+                module_cache_build.published =
+                    module_cache_build.build.state == INPUT_SCRIPT_BUILD_OWNER;
+                if (!runtime_hold_js_module_mir_scope(runtime, compiled_scope)) {
+                    // The image is already published, so closing this scope
+                    // could release code still referenced by this realm. Keep
+                    // the lease live rather than weakening the code lifetime.
+                    log_error("js-mir-module-cache: could not track module lease");
+                }
+                input_script_cache_mark_module_hit(input_manager_global_script_cache());
+                log_info("js-mir-module-cache: admitted module=%s",
+                    filename ? filename : "<module>");
+                // The artifact owns the context; only parser/lowering state
+                // belongs to this one execution and can be discarded now.
+                jm_clear_active_js_transpile(NULL, mt, NULL);
+                jm_destroy_mir_transpiler(mt);
+                jm_clear_active_js_transpile(tp, NULL, NULL);
+                js_transpiler_destroy(tp);
+                return namespace_obj;
+            }
+            js_module_mir_artifact_destroy(compiled);
+        }
+    }
+
     // Cleanup transpiler state but DEFER MIR context cleanup
     // (module function pointers must remain alive for the main program)
     jm_finish_module_transpile(tp, mt, ctx);
@@ -4103,8 +4424,11 @@ static void jm_propagate_import_evaluation_error(Item parent_specifier,
     }
 }
 
-void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename) {
-    if (!ast || ast->node_type != AST_SCRIPT) return;
+bool jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename,
+        const char* importer_source, size_t importer_source_length,
+        bool record_cache_dependencies) {
+    if (!ast || ast->node_type != AST_SCRIPT) return true;
+    bool cache_dependencies_recorded = true;
     JsProgramNode* program = (JsProgramNode*)ast;
 
     JsAstNode* s = program->body;
@@ -4138,6 +4462,12 @@ void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename) {
                 Item spec_item = (Item){.item = s2it(spec_str)};
                 Item existing = js_module_get(spec_item);
                 if (get_type_id(existing) != LMD_TYPE_NULL) {
+                    if (record_cache_dependencies) {
+                        // No exact child snapshot is available when an older
+                        // module instance already occupies this realm. Do not
+                        // admit an importer image without a freshness edge.
+                        cache_dependencies_recorded = false;
+                    }
                     // Js57 P5: even cached deps still propagate their awaited
                     // target. This is the common case for the second sibling
                     // in `import "a.js"; import "b.js"` where b was already
@@ -4184,11 +4514,41 @@ void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename) {
                     }
                 } else {
                     // Same-language import: read and compile JS module
-                    char* mod_source = read_text_file(resolved);
+                    size_t mod_source_length = 0;
+                    char* mod_source = js_load_script_source_from_cache(
+                        resolved, "js-static-import", "module", true,
+                        &mod_source_length);
                     if (mod_source) {
+                        if (record_cache_dependencies &&
+                                !js_module_mir_cache_record_dependency(
+                                    importer_source, importer_source_length,
+                                    filename, mod_source, mod_source_length,
+                                    resolved)) {
+                            cache_dependencies_recorded = false;
+                        }
                         transpile_js_module_to_mir(runtime, mod_source, resolved);
+                        if (record_cache_dependencies) {
+                            InputCacheScope* dependency_scope = NULL;
+                            const JsModuleMirArtifact* dependency_artifact =
+                                js_module_mir_cache_lookup(mod_source,
+                                    mod_source_length, resolved,
+                                    &dependency_scope);
+                            if (!dependency_artifact) {
+                                // A parent can reuse its image only when every
+                                // child has the same synchronous fresh-realm
+                                // contract; this rejects dynamic, re-export,
+                                // TLA, cyclic, and failed child graphs.
+                                cache_dependencies_recorded = false;
+                            }
+                            if (dependency_scope) {
+                                input_script_cache_close_scope(dependency_scope);
+                            }
+                        }
                         mem_free(mod_source);
                     } else {
+                        if (record_cache_dependencies) {
+                            cache_dependencies_recorded = false;
+                        }
                         log_error("js-mir: cannot read module '%s'", resolved);
                     }
                 }
@@ -4211,6 +4571,7 @@ void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename) {
         }
         s = s->next;
     }
+    return cache_dependencies_recorded;
 }
 
 // eval() preamble: snapshot of the outer script's module_consts so that

@@ -72,6 +72,34 @@ ValidationResult* validate_document(SchemaValidator* validator, Item document,
 // added in the future.
 // =============================================================================
 
+static char* validator_load_lambda_source_from_cache(const char* path,
+        size_t* out_length) {
+    if (out_length) *out_length = 0;
+    if (!path || !path[0]) return nullptr;
+
+    char* canonical = file_realpath(path);
+    const char* identity = canonical ? canonical : path;
+    InputScriptRequest request = {};
+    request.identity = identity;
+    request.source_kind = INPUT_SCRIPT_SOURCE_FILE;
+    request.language = "lambda";
+    request.profile = "validator";
+    request.parser_abi = "lambda-direct-parser-v1";
+    request.parse_flags = "validator";
+    request.resolution_base = identity;
+    request.backend = "ast";
+    request.execution_mode = "validator";
+    request.ast_abi = 1;
+    request.compiler_abi = 1;
+    request.optimize_level = 0;
+    request.module_mode = false;
+
+    char* source = input_script_cache_copy_file_source(
+        input_manager_global_script_cache(), &request, path, out_length);
+    if (canonical) mem_free(canonical);
+    return source;
+}
+
 // Parse and validate a Lambda source file
 // Returns a ValidationResult with any parse errors
 static ValidationResult* validate_lambda_source(const char* source_content, Pool* pool) {
@@ -137,8 +165,8 @@ static ValidationResult* validate_lambda_file(const char* file_path, Pool* pool)
         return result;
     }
 
-    // Read file content
-    char* content = read_text_file(file_path);
+    // acquire an exact source snapshot without retaining validator Input state.
+    char* content = validator_load_lambda_source_from_cache(file_path, nullptr);
     if (!content) {
         ValidationResult* result = create_validation_result(pool);
         char error_msg[256];
@@ -218,8 +246,9 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
         // Use schema-based validation for other formats
         printf("Loading schema and parsing data file...\n");
 
-        // Read schema file
-        char* schema_contents = read_text_file(schema_file);
+        // acquire the executable schema source through the common cache.
+        char* schema_contents = validator_load_lambda_source_from_cache(
+            schema_file, nullptr);
         if (!schema_contents) {
             printf("Error: Could not read schema file '%s'\n", schema_file);
             mem_pool_destroy(pool);

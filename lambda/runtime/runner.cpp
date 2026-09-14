@@ -407,47 +407,81 @@ void print_heap_entries();
 // thread-specific runtime context is provided by runtime/runtime-state.cpp.
 extern __thread Context* input_context;
 
-typedef struct ScriptIndexEntry {
+typedef struct RuntimeLoadedScriptEntry {
     const char* path;
     Script* script;
-} ScriptIndexEntry;
+} RuntimeLoadedScriptEntry;
 
-HASHMAP_DEFINE_STRKEY(script_index, ScriptIndexEntry, path)
+HASHMAP_DEFINE_STRKEY(runtime_loaded_script_index, RuntimeLoadedScriptEntry, path)
 
 #ifndef _WIN32
 // Mutex for thread-safe access to runtime->scripts during parallel compilation
 static pthread_mutex_t scripts_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
-static Script* runtime_script_index_get(Runtime* runtime, const char* path) {
-    if (!runtime || !runtime->script_index || !path) return NULL;
-    ScriptIndexEntry probe = { .path = path, .script = NULL };
-    const ScriptIndexEntry* found = (const ScriptIndexEntry*)hashmap_get(runtime->script_index, &probe);
+static Script* runtime_loaded_script_get(Runtime* runtime, const char* path) {
+    if (!runtime || !runtime->loaded_script_index || !path) return NULL;
+    RuntimeLoadedScriptEntry probe = { .path = path, .script = NULL };
+    const RuntimeLoadedScriptEntry* found = (const RuntimeLoadedScriptEntry*)hashmap_get(
+        runtime->loaded_script_index, &probe);
     return found ? found->script : NULL;
 }
 
-static void runtime_script_index_put(Runtime* runtime, Script* script) {
+static void runtime_loaded_script_put(Runtime* runtime, Script* script) {
     if (!runtime || !script || !script->reference) return;
-    if (!runtime->script_index) {
-        runtime->script_index = script_index_new(64);
+    if (!runtime->loaded_script_index) {
+        runtime->loaded_script_index = runtime_loaded_script_index_new(64);
     }
-    ScriptIndexEntry entry = { .path = script->reference, .script = script };
-    hashmap_set(runtime->script_index, &entry);
-    if (hashmap_oom(runtime->script_index)) {
-        log_error("mir cache index: failed to index script %s", script->reference);
+    RuntimeLoadedScriptEntry entry = { .path = script->reference, .script = script };
+    hashmap_set(runtime->loaded_script_index, &entry);
+    if (hashmap_oom(runtime->loaded_script_index)) {
+        log_error("runtime-script-registry: failed to index %s", script->reference);
     }
 }
 
-static void runtime_script_index_delete(Runtime* runtime, const char* path) {
-    if (!runtime || !runtime->script_index || !path) return;
-    ScriptIndexEntry probe = { .path = path, .script = NULL };
-    hashmap_delete(runtime->script_index, &probe);
+static void runtime_loaded_script_delete(Runtime* runtime, const char* path) {
+    if (!runtime || !runtime->loaded_script_index || !path) return;
+    RuntimeLoadedScriptEntry probe = { .path = path, .script = NULL };
+    hashmap_delete(runtime->loaded_script_index, &probe);
 }
 
-static void runtime_script_index_delete_script(Runtime* runtime, Script* script) {
-    if (!runtime || !runtime->script_index || !script || !script->reference) return;
-    if (runtime_script_index_get(runtime, script->reference) != script) return;
-    runtime_script_index_delete(runtime, script->reference);
+static void runtime_loaded_script_delete_instance(Runtime* runtime, Script* script) {
+    if (!runtime || !runtime->loaded_script_index || !script || !script->reference) return;
+    if (runtime_loaded_script_get(runtime, script->reference) != script) return;
+    runtime_loaded_script_delete(runtime, script->reference);
+}
+
+uint32_t script_compilation_unit_id(const Script* script) {
+    if (!script) return 0;
+    // Uncached and synthetic scripts have no persistent identity, so their
+    // already-dense slab address is also their local link identity.
+    return script->cache_compilation_unit_id != 0
+        ? script->cache_compilation_unit_id : script->module_state_id;
+}
+
+static void runtime_module_unit_index_put(Runtime* runtime, const Script* script) {
+    uint32_t unit_id = script ? script->cache_compilation_unit_id : 0;
+    if (!runtime || !script || unit_id == 0) return;
+    (void)runtime_module_state_bind_unit(runtime, unit_id,
+        script->module_state_id);
+}
+
+static void runtime_module_unit_index_delete_script(Runtime* runtime,
+        const Script* script) {
+    uint32_t unit_id = script ? script->cache_compilation_unit_id : 0;
+    if (!runtime || !script || unit_id == 0) return;
+    runtime_module_state_unbind_unit(runtime, unit_id, script->module_state_id);
+}
+
+static int64_t script_file_mtime_nsec(const struct stat* stat_value) {
+    if (!stat_value) return 0;
+#if defined(__APPLE__)
+    return stat_value->st_mtimespec.tv_nsec;
+#elif defined(_WIN32)
+    return 0;
+#else
+    return stat_value->st_mtim.tv_nsec;
+#endif
 }
 
 static void capture_script_file_stat(Script* script, const char* path, bool file_backed) {
@@ -455,16 +489,20 @@ static void capture_script_file_stat(Script* script, const char* path, bool file
     struct stat st;
     if (stat(path, &st) == 0) {
         script->src_mtime = st.st_mtime;
+        script->src_mtime_nsec = script_file_mtime_nsec(&st);
         script->src_size = st.st_size;
     }
 }
 
 static bool script_file_stat_changed(Script* script, const char* path) {
     if (!script || !path) return false;
-    if (script->src_mtime == 0 && script->src_size == 0) return false;
+    if (script->src_mtime == 0 && script->src_mtime_nsec == 0 &&
+            script->src_size == 0) return false;
     struct stat st;
-    if (stat(path, &st) != 0) return false;
-    return st.st_mtime != script->src_mtime || st.st_size != script->src_size;
+    if (stat(path, &st) != 0) return true;
+    return st.st_mtime != script->src_mtime ||
+        script_file_mtime_nsec(&st) != script->src_mtime_nsec ||
+        st.st_size != script->src_size;
 }
 
 static bool script_ptr_list_contains(ArrayList* list, Script* script) {
@@ -484,13 +522,13 @@ static bool script_imports_retired_dep(Script* script, ArrayList* retired) {
     return false;
 }
 
-static void retire_script_cache_entry(Runtime* runtime, Script* script, ArrayList* retired, const char* reason) {
-    if (!runtime || !script || script->cache_retired) return;
-    script->cache_retired = true;
-    runtime_script_index_delete_script(runtime, script);
+static void retire_runtime_script(Runtime* runtime, Script* script, ArrayList* retired, const char* reason) {
+    if (!runtime || !script || script->is_retired) return;
+    script->is_retired = true;
+    runtime_loaded_script_delete_instance(runtime, script);
     arraylist_append(retired, script);
-    runtime->mir_cache_invalidations++;
-    log_info("mir cache index: retired path=%s index=%d reason=%s",
+    runtime->script_load_invalidations++;
+    log_info("runtime-script-registry: retired path=%s index=%d reason=%s",
              script->reference ? script->reference : "<unknown>", script->index,
              reason ? reason : "changed dependency");
 }
@@ -498,16 +536,16 @@ static void retire_script_cache_entry(Runtime* runtime, Script* script, ArrayLis
 static void retire_script_cone(Runtime* runtime, Script* root) {
     if (!runtime || !runtime->scripts || !root) return;
     ArrayList* retired = arraylist_new(8);
-    retire_script_cache_entry(runtime, root, retired, "source changed");
+    retire_runtime_script(runtime, root, retired, "source changed");
 
     bool changed = true;
     while (changed) {
         changed = false;
         for (int i = 0; i < runtime->scripts->length; i++) {
             Script* candidate = (Script*)runtime->scripts->data[i];
-            if (!candidate || candidate->cache_retired || !candidate->cache_retain) continue;
+            if (!candidate || candidate->is_retired) continue;
             if (script_imports_retired_dep(candidate, retired)) {
-                retire_script_cache_entry(runtime, candidate, retired, "dependent of changed module");
+                retire_runtime_script(runtime, candidate, retired, "dependent of changed module");
                 changed = true;
             }
         }
@@ -515,15 +553,353 @@ static void retire_script_cone(Runtime* runtime, Script* root) {
     arraylist_free(retired);
 }
 
-static Script* runtime_script_index_get_current(Runtime* runtime, const char* path) {
-    Script* script = runtime_script_index_get(runtime, path);
+static Script* runtime_loaded_script_get_current(Runtime* runtime, const char* path) {
+    Script* script = runtime_loaded_script_get(runtime, path);
     if (!script) return NULL;
     if (script_file_stat_changed(script, path)) {
-        log_info("mir cache index: stale path=%s index=%d", path, script->index);
+        log_info("runtime-script-registry: stale path=%s index=%d", path, script->index);
         retire_script_cone(runtime, script);
         return NULL;
     }
     return script;
+}
+
+static bool script_source_matches(Script* script, const char* source,
+        size_t source_length) {
+    if (!script || !script->source || !source) return false;
+    size_t script_length = strlen(script->source);
+    return script_length == source_length &&
+        (source_length == 0 || memcmp(script->source, source, source_length) == 0);
+}
+
+class LambdaScriptSourceLease {
+public:
+    LambdaScriptSourceLease(InputScriptLease* lease, InputCacheScope* scope)
+        : lease_(lease), scope_(scope) {}
+    LambdaScriptSourceLease(const LambdaScriptSourceLease&) = delete;
+    LambdaScriptSourceLease& operator=(const LambdaScriptSourceLease&) = delete;
+    ~LambdaScriptSourceLease() { input_script_cache_close_scope(scope_); }
+
+    InputScriptLease* get() const { return lease_; }
+    const char* source() const {
+        ScriptInput* input = input_script_lease_input(lease_);
+        return input_script_source(input);
+    }
+    size_t source_length() const {
+        ScriptInput* input = input_script_lease_input(lease_);
+        return input_script_source_length(input);
+    }
+    InputCacheScope* scope() const { return scope_; }
+    InputCacheScope* release_scope() {
+        InputCacheScope* scope = scope_;
+        scope_ = NULL;
+        lease_ = NULL;
+        return scope;
+    }
+
+private:
+    InputScriptLease* lease_;
+    InputCacheScope* scope_;
+};
+
+class LambdaScriptBuildClaim {
+public:
+    LambdaScriptBuildClaim(InputScriptLease* lease, InputScriptBuildKind kind)
+        : lease_(lease), kind_(kind), claim_(input_script_cache_claim_build(lease,
+            kind)), completed_(false) {}
+    LambdaScriptBuildClaim(const LambdaScriptBuildClaim&) = delete;
+    LambdaScriptBuildClaim& operator=(const LambdaScriptBuildClaim&) = delete;
+    ~LambdaScriptBuildClaim() {
+        if (claim_ == INPUT_SCRIPT_BUILD_OWNER && !completed_) {
+            input_script_cache_complete_build(lease_, kind_, false, false);
+        }
+    }
+
+    bool is_owner() const { return claim_ == INPUT_SCRIPT_BUILD_OWNER; }
+    bool is_ready() const { return claim_ == INPUT_SCRIPT_BUILD_READY; }
+    bool is_poisoned() const { return claim_ == INPUT_SCRIPT_BUILD_POISONED; }
+    void complete(bool published) {
+        if (!is_owner() || completed_) return;
+        input_script_cache_complete_build(lease_, kind_, published, false);
+        completed_ = true;
+    }
+
+private:
+    InputScriptLease* lease_;
+    InputScriptBuildKind kind_;
+    InputScriptBuildClaim claim_;
+    bool completed_;
+};
+
+static void lambda_script_cache_destroy_artifact(void* value) {
+    Script* script = (Script*)value;
+    runtime_destroy_cached_script_template(script);
+}
+
+static size_t lambda_script_cache_artifact_bytes(const void* value) {
+    const Script* script = (const Script*)value;
+    if (!script) return 0;
+    // The source itself is accounted by ScriptInput. Pools and JIT pages are
+    // opaque to the common cache, so report the owned descriptor exactly and
+    // leave allocator-level attribution to their named memory contexts.
+    return sizeof(Script);
+}
+
+static bool lambda_ast_template_is_reusable_shallow(const Script* script) {
+    if (!script || !script->ast_root || !script->interp_supported ||
+            !script->interp_planned || script->jit_context ||
+            script->cache_cross_lang_tainted) {
+        return false;
+    }
+    return true;
+}
+
+static bool lambda_ast_template_dependencies_reusable(const Script* script,
+        ArrayList* seen) {
+    if (!lambda_ast_template_is_reusable_shallow(script) || !seen) return false;
+    if (script_ptr_list_contains(seen, (Script*)script)) return true;
+    if (!arraylist_append(seen, (void*)script)) return false;
+    if (!script->direct_imports) return true;
+    for (int i = 0; i < script->direct_imports->length; i++) {
+        const Script* dependency = (const Script*)script->direct_imports->data[i];
+        // A cached parent cannot retain a runtime-only child descriptor. The
+        // child must have its own cache lease before the parent is admitted.
+        if (!dependency || !dependency->cache_owned_template ||
+                !lambda_ast_template_dependencies_reusable(dependency, seen)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool lambda_ast_template_is_reusable(const Script* script) {
+    ArrayList* seen = arraylist_new(4);
+    if (!seen) return false;
+    bool reusable = lambda_ast_template_dependencies_reusable(script, seen);
+    arraylist_free(seen);
+    return reusable;
+}
+
+static bool lambda_cache_record_direct_dependencies(InputScriptCache* cache,
+        const Script* importer) {
+    if (!importer || !importer->direct_imports) return true;
+    if (!importer->cache_compilation_unit_id) return false;
+    for (int i = 0; i < importer->direct_imports->length; i++) {
+        const Script* dependency =
+            (const Script*)importer->direct_imports->data[i];
+        if (!dependency || !dependency->cache_compilation_unit_id ||
+                !input_script_cache_record_dependency_by_unit(cache,
+                    importer->cache_compilation_unit_id,
+                    dependency->cache_compilation_unit_id)) {
+            log_error("script-cache: could not record dependency importer=%s",
+                importer->reference ? importer->reference : "<unknown>");
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool lambda_cache_refresh_dependencies(const Script* script,
+        InputScriptCache* cache, ArrayList* seen) {
+    if (!script || !cache || !seen) return false;
+    if (script_ptr_list_contains(seen, (Script*)script)) return false;
+    if (!arraylist_append(seen, (void*)script)) return true;
+    if (!script->direct_imports) return false;
+    for (int i = 0; i < script->direct_imports->length; i++) {
+        const Script* dependency = (const Script*)script->direct_imports->data[i];
+        if (!dependency || !dependency->reference ||
+                !dependency->cache_compilation_unit_id) {
+            // A cache image with an untracked child has no safe freshness
+            // proof, so bypass it rather than serving a stale import graph.
+            return true;
+        }
+        if (script_file_stat_changed((Script*)dependency, dependency->reference)) {
+            bool changed = false;
+            if (!input_script_cache_refresh_file_unit(cache,
+                    dependency->cache_compilation_unit_id, dependency->reference,
+                    &changed) || changed) {
+                log_info("script-cache: dependency changed importer=%s dependency=%s",
+                    script->reference ? script->reference : "<unknown>",
+                    dependency->reference);
+                return true;
+            }
+        }
+        if (lambda_cache_refresh_dependencies(dependency, cache, seen)) return true;
+    }
+    return false;
+}
+
+static bool lambda_cache_dependencies_changed(const Script* script,
+        InputScriptCache* cache) {
+    ArrayList* seen = arraylist_new(4);
+    if (!seen) return true;
+    bool changed = lambda_cache_refresh_dependencies(script, cache, seen);
+    arraylist_free(seen);
+    return changed;
+}
+
+static void lambda_cache_invalidate_untrusted_cone(InputScriptCache* cache,
+        uint32_t compilation_unit_id, const char* lookup_path) {
+    if (!cache || !compilation_unit_id) {
+        return;
+    }
+    size_t retired = input_script_cache_invalidate_unit(cache,
+        compilation_unit_id);
+    if (retired > 0) {
+        log_info("script-cache: retired %zu untrusted Lambda cache generation(s) for %s",
+            retired, lookup_path ? lookup_path : "<unknown>");
+    }
+}
+
+static Script* lambda_script_template_clone(Runtime* runtime, const Script* cached,
+        InputCacheScope* scope) {
+    if (!runtime || !cached) return NULL;
+    Script* instance = (Script*)mem_calloc(1, sizeof(Script), MEM_CAT_SYSTEM);
+    if (!instance) return NULL;
+    memcpy(instance, cached, sizeof(Script));
+    instance->reference = cached->reference
+        ? mem_strdup(cached->reference, MEM_CAT_SYSTEM) : NULL;
+    instance->directory = cached->directory
+        ? mem_strdup(cached->directory, MEM_CAT_SYSTEM) : NULL;
+    if ((cached->reference && !instance->reference) ||
+            (cached->directory && !instance->directory)) {
+        mem_free((void*)instance->reference);
+        mem_free((void*)instance->directory);
+        mem_free(instance);
+        return NULL;
+    }
+    instance->cache_template = cached;
+    instance->cache_scope = scope;
+    instance->cache_owned_template = false;
+    instance->cache_mir_artifact = cached->cache_mir_artifact;
+    instance->is_loading = false;
+    instance->is_retired = false;
+    instance->interp_slab = NULL;
+    instance->interp_views_registered = false;
+    instance->ast_overlay_strings = NULL;
+    instance->ast_promotion_overlay = NULL;
+    if (!instance->cache_mir_artifact) {
+        // AST reuse borrows parser/analysis facts only. A MIR context
+        // (including satellites promoted by an earlier execution) is
+        // runtime-local and must never be copied into the new shell
+        // (D8.5.1v2).
+        instance->jit_context = NULL;
+        instance->main_func = NULL;
+        instance->mir_gen_initialized = false;
+        instance->interp_satellite_count = 0;
+        instance->interp_whole_script_poc_attempted = false;
+        instance->interp_whole_script_poc_active = false;
+    }
+    // The template's dependency list belongs to the cache image. The clone
+    // graph below replaces it with fresh Script shells for this EvalContext.
+    instance->direct_imports = NULL;
+    runtime_register_script(runtime, instance);
+    return instance;
+}
+
+typedef struct LambdaAstCloneGraph {
+    ArrayList* templates;
+    ArrayList* instances;
+} LambdaAstCloneGraph;
+
+static Script* lambda_ast_clone_graph_find(const LambdaAstCloneGraph* graph,
+        const Script* cached) {
+    if (!graph || !graph->templates || !graph->instances) return NULL;
+    for (int i = 0; i < graph->templates->length; i++) {
+        if (graph->templates->data[i] == cached) {
+            return (Script*)graph->instances->data[i];
+        }
+    }
+    return NULL;
+}
+
+static Script* lambda_ast_template_clone_graph(Runtime* runtime,
+        const Script* cached, LambdaAstCloneGraph* graph) {
+    Script* existing = lambda_ast_clone_graph_find(graph, cached);
+    if (existing) return existing;
+    Script* instance = lambda_script_template_clone(runtime, cached, NULL);
+    if (!instance || !arraylist_append(graph->templates, (void*)cached) ||
+            !arraylist_append(graph->instances, instance)) {
+        return NULL;
+    }
+    if (!cached->direct_imports || cached->direct_imports->length == 0) {
+        return instance;
+    }
+    instance->direct_imports = arraylist_new(cached->direct_imports->length);
+    if (!instance->direct_imports) return NULL;
+    for (int i = 0; i < cached->direct_imports->length; i++) {
+        const Script* dependency = (const Script*)cached->direct_imports->data[i];
+        Script* dependency_instance = lambda_ast_template_clone_graph(runtime,
+            dependency, graph);
+        if (!dependency_instance || !arraylist_append(instance->direct_imports,
+                dependency_instance)) {
+            return NULL;
+        }
+    }
+    return instance;
+}
+
+static void lambda_ast_clone_graph_discard(Runtime* runtime,
+        LambdaAstCloneGraph* graph) {
+    if (!runtime || !graph || !graph->instances) return;
+    for (int i = graph->instances->length - 1; i >= 0; i--) {
+        Script* instance = (Script*)graph->instances->data[i];
+        if (!instance) continue;
+        int index = instance->index;
+        runtime_free_script(runtime, instance, true);
+        if (runtime->scripts && index >= 0 && index < runtime->scripts->length) {
+            runtime->scripts->data[index] = NULL;
+        }
+    }
+}
+
+static Script* lambda_ast_template_clone_for_runtime(Runtime* runtime,
+        const Script* cached, InputCacheScope* scope) {
+    LambdaAstCloneGraph graph = {arraylist_new(4), arraylist_new(4)};
+    if (!graph.templates || !graph.instances) {
+        if (graph.templates) arraylist_free(graph.templates);
+        if (graph.instances) arraylist_free(graph.instances);
+        return NULL;
+    }
+    Script* instance = lambda_ast_template_clone_graph(runtime, cached, &graph);
+    if (instance) instance->cache_scope = scope;
+    else lambda_ast_clone_graph_discard(runtime, &graph);
+    arraylist_free(graph.templates);
+    arraylist_free(graph.instances);
+    return instance;
+}
+
+Script* lambda_ast_overlay_import_script(const Script* importer,
+        const AstImportNode* import_node) {
+    if (!import_node || !importer || !importer->cache_template ||
+            import_node->is_cross_lang || !importer->direct_imports) {
+        return import_node ? import_node->script : NULL;
+    }
+    AstScript* root = (AstScript*)importer->ast_root;
+    int direct_index = 0;
+    for (AstNode* child = root ? root->child : NULL; child; child = child->next) {
+        if (child->node_type != AST_NODE_IMPORT) continue;
+        AstImportNode* candidate = (AstImportNode*)child;
+        if (candidate->is_cross_lang) continue;
+        if (candidate == import_node) {
+            return direct_index < importer->direct_imports->length
+                ? (Script*)importer->direct_imports->data[direct_index] : NULL;
+        }
+        direct_index++;
+    }
+    return import_node->script;
+}
+
+const char* lambda_ast_overlay_string(Script* script, const char* text) {
+    if (!script || !text) return NULL;
+    char* copy = mem_strdup(text, MEM_CAT_SYSTEM);
+    if (!copy) return NULL;
+    if (!script->ast_overlay_strings) script->ast_overlay_strings = arraylist_new(2);
+    if (!script->ast_overlay_strings || !arraylist_append(script->ast_overlay_strings, copy)) {
+        mem_free(copy);
+        return NULL;
+    }
+    return copy;
 }
 
 // The canonical EvalContext outlives runners, so error diagnostics remain with
@@ -935,11 +1311,65 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         }
     }
 
+    InputScriptRequest cache_request = {};
+    cache_request.identity = lookup_path;
+    cache_request.source = source;
+    cache_request.source_length = source ? strlen(source) : 0;
+    cache_request.source_kind = source ? INPUT_SCRIPT_SOURCE_INLINE
+        : INPUT_SCRIPT_SOURCE_FILE;
+    cache_request.language = "lambda";
+    cache_request.profile = "lambda";
+    cache_request.parser_abi = "lambda-direct-parser-v1";
+    cache_request.parse_flags = runtime->static_warning ? "static-warning" : "default";
+    cache_request.resolution_base = runtime->import_base_dir
+        ? runtime->import_base_dir : lookup_path;
+    cache_request.backend = "mir-direct";
+    cache_request.execution_mode = is_import ? "module" : "script";
+    cache_request.ast_abi = 1;
+    cache_request.compiler_abi = 1;
+    cache_request.optimize_level = runtime->optimize_level;
+    cache_request.module_mode = is_import;
+    InputScriptCache* script_cache = input_manager_global_script_cache();
+    InputCacheScope* cache_scope = input_script_cache_open_scope(script_cache);
+    if (!cache_scope) {
+        if (canonical_path) mem_free(canonical_path);
+        log_error("script-cache: failed to open Lambda source scope");
+        return NULL;
+    }
+    InputScriptLease* raw_lease = source
+        ? input_script_cache_acquire(cache_scope, &cache_request)
+        : input_script_cache_acquire_file(cache_scope, &cache_request, lookup_path);
+    LambdaScriptSourceLease source_lease(raw_lease, cache_scope);
+    if (!raw_lease) {
+        if (canonical_path) mem_free(canonical_path);
+        log_error("script-cache: failed to acquire Lambda source %s", lookup_path);
+        return NULL;
+    }
+    const char* exact_source = source_lease.source();
+    size_t exact_source_length = source_lease.source_length();
+
     // find the script in the path index (thread-safe)
 #ifndef _WIN32
     pthread_mutex_lock(&scripts_mutex);
 #endif
-    Script* cached_script = runtime_script_index_get_current(runtime, lookup_path);
+    Script* cached_script = runtime_loaded_script_get_current(runtime, lookup_path);
+    if (cached_script) {
+        if (!script_source_matches(cached_script, exact_source, exact_source_length)) {
+            log_info("runtime-script-registry: source bytes changed path=%s index=%d",
+                lookup_path, cached_script->index);
+            retire_script_cone(runtime, cached_script);
+            InputScriptRequest invalidation_request = cache_request;
+            invalidation_request.source = exact_source;
+            invalidation_request.source_length = exact_source_length;
+            size_t retired = input_script_cache_invalidate(script_cache,
+                &invalidation_request);
+            if (retired > 0) {
+                log_info("script-cache: retired %zu stale Lambda source generation(s) for %s",
+                    retired, lookup_path);
+            }
+            cached_script = NULL;
+        }
+    }
     if (cached_script) {
         // circular import detection: script is in list but still being loaded
         if (cached_script->is_loading) {
@@ -954,19 +1384,145 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 #ifndef _WIN32
         pthread_mutex_unlock(&scripts_mutex);
 #endif
-        runtime->mir_cache_hits++;
-        log_info("mir cache index: hit path=%s index=%d retained=%d",
-                 lookup_path, cached_script->index, cached_script->cache_retain ? 1 : 0);
+        runtime->script_load_hits++;
+        log_info("runtime-script-registry: hit path=%s index=%d",
+                 lookup_path, cached_script->index);
         if (canonical_path) mem_free(canonical_path);
         return cached_script;
     }
-    runtime->mir_cache_misses++;
-    log_info("mir cache index: miss path=%s", lookup_path);
+
+    // The process cache owns immutable Lambda images; each Runtime receives a
+    // shell with its own execution lease while code resolves mutable values
+    // through that Runtime's module-state table. Do this after same-runtime
+    // circular-import lookup so an in-flight source never observes itself as
+    // a finished cache artifact.
+    void* cached_image = NULL;
+    bool cache_artifact_rejected = false;
+    if (runtime->use_mir_direct && !runtime->mir_cache_disabled &&
+            lambda_tier_selected() == LAMBDA_TIER_JIT &&
+            input_script_cache_get_mir(raw_lease, &cached_image)) {
+        Script* cached_template = (Script*)cached_image;
+        if (cached_template && cached_template->cache_owned_template &&
+                cached_template->jit_context && cached_template->main_func) {
+            if (lambda_cache_dependencies_changed(cached_template, script_cache)) {
+                // A dependency changed or lost its tracked identity. Retire
+                // this root before retrying so recursion cannot rediscover
+                // the same no-longer-trustworthy artifact.
+                lambda_cache_invalidate_untrusted_cone(script_cache,
+                    cached_template->cache_compilation_unit_id, lookup_path);
+                InputCacheScope* stale_scope = source_lease.release_scope();
+                input_script_cache_close_scope(stale_scope);
+#ifndef _WIN32
+                pthread_mutex_unlock(&scripts_mutex);
+#endif
+                if (canonical_path) mem_free(canonical_path);
+                return load_script(runtime, script_path, source, is_import);
+            }
+            // Generated imports name logical units, but those units still
+            // need this Runtime's dense slabs before the cached root enters
+            // MIR. Instantiate the complete cached dependency cone (D8.5.1v2).
+            Script* instance = lambda_ast_template_clone_for_runtime(runtime,
+                cached_template, source_lease.scope());
+            if (instance) {
+                (void)source_lease.release_scope();
+                runtime->script_load_hits++;
+                input_script_cache_mark_module_hit(script_cache);
+                log_info("script-cache: Lambda MIR hit path=%s unit=%u", lookup_path,
+                    cached_template->cache_compilation_unit_id);
+#ifndef _WIN32
+                // The common entry is immutable and its lease is now owned by
+                // the instance, so no Runtime-index mutation remains under
+                // this lock. Returning with it held deadlocks the next miss.
+                pthread_mutex_unlock(&scripts_mutex);
+#endif
+                if (canonical_path) mem_free(canonical_path);
+                return instance;
+            }
+            log_error("script-cache: failed to instantiate Lambda MIR image %s",
+                lookup_path);
+        }
+        cache_artifact_rejected = true;
+    }
+    // T0 AST templates retain only parser/validation/frame-plan facts. A hit
+    // always receives a new Script and dense module slab, never an old
+    // EvalContext, satisfying D8.5.1v2 without changing tier policy.
+    void* cached_ast = NULL;
+    if (lambda_tier_selected() != LAMBDA_TIER_JIT &&
+            input_script_cache_get_ast(raw_lease, &cached_ast)) {
+        Script* cached_template = (Script*)cached_ast;
+        if (cached_template && cached_template->cache_owned_template &&
+                lambda_ast_template_is_reusable(cached_template)) {
+            if (lambda_cache_dependencies_changed(cached_template, script_cache)) {
+                // See the MIR path: a retry must not reacquire this artifact.
+                lambda_cache_invalidate_untrusted_cone(script_cache,
+                    cached_template->cache_compilation_unit_id, lookup_path);
+                InputCacheScope* stale_scope = source_lease.release_scope();
+                input_script_cache_close_scope(stale_scope);
+#ifndef _WIN32
+                pthread_mutex_unlock(&scripts_mutex);
+#endif
+                if (canonical_path) mem_free(canonical_path);
+                return load_script(runtime, script_path, source, is_import);
+            }
+            Script* instance = lambda_ast_template_clone_for_runtime(runtime, cached_template,
+                source_lease.scope());
+            if (instance) {
+                (void)source_lease.release_scope();
+                runtime->script_load_hits++;
+                input_script_cache_mark_module_hit(script_cache);
+                log_info("script-cache: Lambda AST hit path=%s unit=%u", lookup_path,
+                    cached_template->cache_compilation_unit_id);
+#ifndef _WIN32
+                pthread_mutex_unlock(&scripts_mutex);
+#endif
+                if (canonical_path) mem_free(canonical_path);
+                return instance;
+            }
+            log_error("script-cache: failed to instantiate Lambda AST template %s",
+                lookup_path);
+        }
+        cache_artifact_rejected = true;
+    }
+    InputScriptBuildKind build_kind = lambda_tier_selected() == LAMBDA_TIER_JIT &&
+        runtime->use_mir_direct && !runtime->mir_cache_disabled
+        ? INPUT_SCRIPT_BUILD_MIR : INPUT_SCRIPT_BUILD_AST;
+    LambdaScriptBuildClaim build_claim(raw_lease, build_kind);
+    if (build_claim.is_ready()) {
+        // A waiter can observe READY only after the owner published between
+        // this call's first lookup and claim. Retry that normal hit without
+        // retiring it; only a lookup that actually rejected an artifact is
+        // untrusted (D8.5.1v2).
+        if (cache_artifact_rejected) {
+            lambda_cache_invalidate_untrusted_cone(script_cache,
+                input_script_compilation_unit_id(input_script_lease_input(raw_lease)),
+                lookup_path);
+        }
+        InputCacheScope* ready_scope = source_lease.release_scope();
+        input_script_cache_close_scope(ready_scope);
+#ifndef _WIN32
+        pthread_mutex_unlock(&scripts_mutex);
+#endif
+        if (canonical_path) mem_free(canonical_path);
+        return load_script(runtime, script_path, source, is_import);
+    }
+    if (build_claim.is_poisoned()) {
+        // Source invalidation clears poisoning. This execution stays local and
+        // never republishes a key whose prior builder failed integrity checks.
+        log_info("script-cache: poisoned Lambda artifact bypass path=%s", lookup_path);
+    }
+    runtime->script_load_misses++;
+    log_info("runtime-script-registry: miss path=%s", lookup_path);
     // script not found — create stub and register immediately to prevent duplicates
     Script *new_script = (Script*)mem_calloc(1, sizeof(Script), MEM_CAT_SYSTEM);
     new_script->reference = mem_strdup(lookup_path, MEM_CAT_SYSTEM);
     new_script->is_loading = true;
     new_script->profile = &lambda_profile;
+    uint32_t compilation_unit_id = input_script_compilation_unit_id(
+        input_script_lease_input(raw_lease));
+    // Every source-backed image receives a stable logical identity.  Its
+    // physical module-state ID is assigned only when registered in this
+    // Runtime, keeping the EvalContext table compact across cache reuse.
+    new_script->cache_compilation_unit_id = compilation_unit_id;
     runtime_register_script(runtime, new_script);
 #ifndef _WIN32
     pthread_mutex_unlock(&scripts_mutex);
@@ -974,7 +1530,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 
     // strdup when source is provided externally (e.g. REPL) so the script owns its copy
     // and runtime_cleanup can safely free it without a double-free
-    const char* script_source = source ? mem_strdup(source, MEM_CAT_SYSTEM) : read_text_file(lookup_path);
+    const char* script_source = mem_strdup(exact_source, MEM_CAT_SYSTEM);
     if (!script_source) {
         log_error("Error: Failed to read source code from %s", lookup_path);
         // failed stubs must leave neither a live slot nor an index entry for later imports
@@ -1012,7 +1568,6 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     if (canonical_path) mem_free(canonical_path);
     log_debug("script source length: %d", (int)strlen(new_script->source));
     new_script->is_main = !is_import;  // main script is not an import
-    new_script->cache_retain = false;
 
     // Initialize decimal context (use shared unlimited context for transpiler)
     new_script->decimal_ctx = decimal_unlimited_context();
@@ -1065,13 +1620,44 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         log_error("Error: Failed to compile script %s", script_path);
         return NULL;
     }
-    // L1 cache can be disabled for timing runs while preserving same-run import dedup.
-    new_script->cache_retain = is_import && runtime->use_mir_direct &&
-        !runtime->mir_cache_disabled && !new_script->cache_cross_lang_tainted;
-    if (new_script->cache_retain) {
-        log_info("mir cache index: retaining import path=%s index=%d", new_script->reference, new_script->index);
+    // The common cache accepts only self-contained Lambda MIR images. A
+    // cross-language import can retain guest-owned callbacks or module
+    // namespaces, so it stays source-only until its adapter proves a fresh
+    // instance contract.
+    bool cache_dependencies_valid = !build_claim.is_poisoned() &&
+        lambda_cache_record_direct_dependencies(script_cache, new_script);
+    if (!cache_dependencies_valid) input_script_cache_mark_rejected(script_cache);
+    bool cache_published = false;
+    if (cache_dependencies_valid && new_script->jit_context && runtime->use_mir_direct &&
+            !runtime->mir_cache_disabled && !new_script->cache_cross_lang_tainted) {
+        InputScriptArtifactOps ops = {
+            lambda_script_cache_destroy_artifact,
+            lambda_script_cache_artifact_bytes,
+        };
+        if (input_script_cache_publish_mir(raw_lease, new_script, &ops)) {
+            cache_published = true;
+            new_script->cache_owned_template = true;
+            new_script->cache_mir_artifact = true;
+            new_script->cache_scope = source_lease.release_scope();
+            log_info("script-cache: admitted Lambda MIR path=%s unit=%u",
+                new_script->reference, new_script->cache_compilation_unit_id);
+        }
     }
-    runtime->mir_cache_compiles++;
+    else if (cache_dependencies_valid && lambda_ast_template_is_reusable(new_script)) {
+        InputScriptArtifactOps ops = {
+            lambda_script_cache_destroy_artifact,
+            lambda_script_cache_artifact_bytes,
+        };
+        if (input_script_cache_publish_ast(raw_lease, new_script, &ops)) {
+            cache_published = true;
+            new_script->cache_owned_template = true;
+            new_script->cache_scope = source_lease.release_scope();
+            log_info("script-cache: admitted Lambda AST path=%s unit=%u",
+                new_script->reference, new_script->cache_compilation_unit_id);
+        }
+    }
+    build_claim.complete(cache_published);
+    runtime->script_load_compiles++;
 
     // Register in unified module registry for cross-language imports.
     // Only when the runtime context (heap, name_pool) is already initialized —
@@ -1634,17 +2220,19 @@ void runtime_init(Runtime* runtime) {
     // and import scheduling code that still uses it as a fast-path predicate.
     runtime->use_mir_direct = true;
     runtime->scripts = arraylist_new(16);
-    runtime->script_index = script_index_new(64);
+    runtime->loaded_script_index = runtime_loaded_script_index_new(64);
     runtime->max_errors = 10;  // default error threshold
     runtime->optimize_level = 2;  // default MIR optimization level (0=debug, 2=release)
     runtime->dry_run = false;  // default: real IO
+    InputScriptCache* script_cache = input_manager_global_script_cache();
     const char* disable_mir_cache = shell_getenv("LAMBDA_DISABLE_MIR_CACHE");
     runtime->mir_cache_disabled = (LAMBDA_MIR_CACHE_DEFAULT == 0) ||
+        !input_script_cache_mir_enabled(script_cache) ||
         (disable_mir_cache &&
          (strcmp(disable_mir_cache, "1") == 0 || strcmp(disable_mir_cache, "true") == 0));
     // debug and release builds enable retained MIR imports by default; this opt-out is for timing and emergency bisecting.
     if (runtime->mir_cache_disabled) {
-        log_info("mir cache index: retained module cache disabled by build default or LAMBDA_DISABLE_MIR_CACHE");
+        log_info("runtime-script-registry: process MIR artifacts disabled by build default or LAMBDA_DISABLE_MIR_CACHE");
     }
     // The CLI creates a short-lived selector Runtime before some language
     // subcommands create their execution Runtime. Keep the registry lazy so
@@ -1666,7 +2254,10 @@ void runtime_register_script(Runtime* runtime, Script* script) {
     // changed for module 0", which left the dom package with no templates
     // (ESO34). Allocation comes from the owning Runtime's counter, the same one
     // lambda_module_state_reserve() uses, so Lambda and JS ids never overlap.
+    // Logical cache units are independent from this Runtime's dense physical
+    // slab IDs.  Never let a process-wide cache counter size module_states.
     script->module_state_id = runtime->next_module_state_id++;
+    runtime_module_unit_index_put(runtime, script);
     if (!runtime->scripts) {
         // No script list on this runtime: path dedup and the script index are
         // unavailable, but the identity above is still valid and unique.
@@ -1678,7 +2269,7 @@ void runtime_register_script(Runtime* runtime, Script* script) {
     }
     arraylist_append(runtime->scripts, script);
     script->index = runtime->scripts->length - 1;
-    runtime_script_index_put(runtime, script);
+    runtime_loaded_script_put(runtime, script);
 }
 
 // runtime::type_list can alias a Script's Input-owned list while a nested
@@ -1708,19 +2299,67 @@ void runtime_free_all_scripts(Runtime* runtime) {
         arraylist_free(runtime->scripts);
         runtime->scripts = NULL;
     }
-    if (runtime->script_index) {
-        hashmap_free(runtime->script_index);
-        runtime->script_index = NULL;
+    if (runtime->loaded_script_index) {
+        hashmap_free(runtime->loaded_script_index);
+        runtime->loaded_script_index = NULL;
     }
-    js_runtime_ast_cache_destroy(runtime);
+    if (runtime->module_unit_index) {
+        hashmap_free(runtime->module_unit_index);
+        runtime->module_unit_index = NULL;
+    }
 }
 
 void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     if (!script) return;
+    runtime_module_unit_index_delete_script(runtime, script);
     if (remove_index && script->reference) {
-        runtime_script_index_delete_script(runtime, script);
+        runtime_loaded_script_delete_instance(runtime, script);
     }
-    js_runtime_ast_cache_remove_script(runtime, script);
+    if (script->cache_scope) {
+        input_script_cache_close_scope(script->cache_scope);
+        script->cache_scope = NULL;
+    }
+    if (script->cache_owned_template) {
+        // The persistent cache owns the immutable AST/MIR image. Runtime
+        // teardown releases only its execution lease above; artifact
+        // invalidation later performs the real destruction.
+        return;
+    }
+    if (script->ast_overlay_strings) {
+        for (int i = 0; i < script->ast_overlay_strings->length; i++) {
+            mem_free(script->ast_overlay_strings->data[i]);
+        }
+        arraylist_free(script->ast_overlay_strings);
+        script->ast_overlay_strings = NULL;
+    }
+    if (script->cache_template) {
+        // A cached instance owns only its shell and path copies. AST pools,
+        // compiler state, MIR code, and direct-import graph belong to the
+        // immutable template retained by InputScriptCache.
+        if (script->destroy_extension) {
+            script->destroy_extension(script);
+            script->destroy_extension = NULL;
+        }
+        if (script->ast_promotion_overlay) {
+            for (int i = 0; i < script->ast_promotion_overlay->length; i++) {
+                mem_free(script->ast_promotion_overlay->data[i]);
+            }
+            arraylist_free(script->ast_promotion_overlay);
+            script->ast_promotion_overlay = NULL;
+        }
+        // A cached AST shell can compile its own satellite image. The
+        // immutable template never owns that context, so release it with the
+        // shell rather than leaking it past the execution lease.
+        if (!script->cache_mir_artifact && script->jit_context) {
+            jit_cleanup_mode(script->jit_context,
+                script->mir_gen_initialized ? 1 : 0);
+            script->jit_context = NULL;
+        }
+        if (script->reference) mem_free((void*)script->reference);
+        if (script->directory) mem_free((void*)script->directory);
+        mem_free(script);
+        return;
+    }
     // Hosted owners release their language-specific facts before the shared
     // AST/Input storage disappears. The hook never owns common Script fields.
     if (script->destroy_extension) {
@@ -1767,13 +2406,37 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     mem_free(script);
 }
 
+void runtime_destroy_cached_script_template(Script* script) {
+    if (!script) return;
+    // Artifact destruction runs only after InputScriptCache observed no active
+    // lease. Clear the ownership marker so common Script teardown releases the
+    // retained AST pool and sealed MIR context exactly once.
+    script->cache_owned_template = false;
+    runtime_free_script(NULL, script, false);
+}
+
+bool runtime_hold_js_module_mir_scope(Runtime* runtime, InputCacheScope* scope) {
+    if (!runtime || !scope) return false;
+    if (!runtime->js_module_mir_scopes) runtime->js_module_mir_scopes = arraylist_new(2);
+    return runtime->js_module_mir_scopes && arraylist_append(
+        runtime->js_module_mir_scopes, scope);
+}
+
+static void runtime_close_js_module_mir_scopes(Runtime* runtime) {
+    if (!runtime || !runtime->js_module_mir_scopes) return;
+    for (int i = 0; i < runtime->js_module_mir_scopes->length; i++) {
+        InputCacheScope* scope = (InputCacheScope*)runtime->js_module_mir_scopes->data[i];
+        input_script_cache_close_scope(scope);
+    }
+    arraylist_free(runtime->js_module_mir_scopes);
+    runtime->js_module_mir_scopes = NULL;
+}
+
 void runtime_teardown_batch_scripts(Runtime* runtime) {
     if (!runtime || !runtime->scripts) return;
     for (int i = 0; i < runtime->scripts->length; i++) {
         Script* script = (Script*)runtime->scripts->data[i];
         if (!script) continue;
-        // retained modules keep compile pools/JIT contexts alive until invalidation or cleanup
-        if (script->cache_retain && !script->cache_retired) continue;
         runtime_free_script(runtime, script, true);
         runtime->scripts->data[i] = NULL;
     }
@@ -1805,17 +2468,17 @@ void runtime_release_script_generation(Runtime* runtime, int first_script_index,
     }
 }
 
-void runtime_log_mir_cache_summary(Runtime* runtime) {
+void runtime_log_script_load_summary(Runtime* runtime) {
     if (!runtime) return;
-    int lookups = runtime->mir_cache_hits + runtime->mir_cache_misses;
-    double hit_rate = lookups > 0 ? (100.0 * (double)runtime->mir_cache_hits / (double)lookups) : 0.0;
-    size_t retained = runtime->script_index ? hashmap_count(runtime->script_index) : 0;
-    log_info("mir cache index: summary modules_cached=%zu compiles_saved=%d hit_rate=%.1f%% compiles=%d hits=%d misses=%d invalidations=%d disabled=%d",
-             retained, runtime->mir_cache_hits, hit_rate,
-             runtime->mir_cache_compiles, runtime->mir_cache_hits,
-             runtime->mir_cache_misses, runtime->mir_cache_invalidations,
+    int lookups = runtime->script_load_hits + runtime->script_load_misses;
+    double hit_rate = lookups > 0 ? (100.0 * (double)runtime->script_load_hits / (double)lookups) : 0.0;
+    size_t loaded = runtime->loaded_script_index ? hashmap_count(runtime->loaded_script_index) : 0;
+    log_info("runtime-script-registry: summary loaded=%zu reuses=%d hit_rate=%.1f%% compiles=%d hits=%d misses=%d invalidations=%d artifacts_disabled=%d",
+             loaded, runtime->script_load_hits, hit_rate,
+             runtime->script_load_compiles, runtime->script_load_hits,
+             runtime->script_load_misses, runtime->script_load_invalidations,
              runtime->mir_cache_disabled ? 1 : 0);
-    (void)retained;
+    (void)loaded;
     (void)hit_rate;
 }
 
@@ -2054,5 +2717,6 @@ void runtime_cleanup(Runtime* runtime) {
         runtime->eval_context = NULL;
     }
     lambda_stack_cleanup();
+    runtime_close_js_module_mir_scopes(runtime);
     runtime_free_all_scripts(runtime);
 }

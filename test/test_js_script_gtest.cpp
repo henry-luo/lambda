@@ -9,6 +9,12 @@
 #include "../lambda/js/js_function.hpp"
 #include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/runtime/sys_func_registry.h"
+#include "../lambda/input/input-script-cache.h"
+#include "../lambda/mir/mir.h"
+#include "../lib/mem.h"
+
+#include <pthread.h>
+#include <sched.h>
 
 TEST(JsCallableDefinitions, SharesAstDefinitionWithoutSharingCaptures) {
     Runtime runtime = {};
@@ -240,23 +246,496 @@ TEST(JsInterpreter, ExplicitAstSelectorUsesTheSharedScriptPath) {
     runtime_cleanup(&runtime);
 }
 
-TEST(JsInterpreter, ReusesRuntimeAstCacheThroughSharedScriptPath) {
-    Runtime runtime = {};
-    runtime_init(&runtime);
+TEST(JsInterpreter, ReusesCommonAstCacheAcrossFreshRuntimes) {
+    InputScriptCache* cache = input_manager_global_script_cache();
+    ASSERT_NE(cache, nullptr);
+    InputScriptCacheStats before = {};
+    input_script_cache_get_stats(cache, &before);
     ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
 
-    const char source[] = "21 * 2;";
-    Item first = transpile_js_to_mir(&runtime, source, "<runtime-ast-cache>", NULL);
+    const char source[] = "var answer = 21 * 2; answer;";
+    Runtime first_runtime = {};
+    runtime_init(&first_runtime);
+    Item first = transpile_js_to_mir(&first_runtime, source,
+        "<common-ast-cache>", NULL);
     ASSERT_FALSE(item_is_error(first));
-    ASSERT_EQ(runtime.scripts->length, 1);
+    EXPECT_EQ(first.item, flt2it(42.0).item);
+    ASSERT_NE(first_runtime.scripts, nullptr);
+    JsScript* first_template = (JsScript*)first_runtime.scripts->data[0];
+    ASSERT_TRUE(first_template->cache_owned_template);
+    ASSERT_NE(first_template->cache_compilation_unit_id, 0u);
+    runtime_cleanup(&first_runtime);
 
-    Item second = transpile_js_to_mir(&runtime, source, "<runtime-ast-cache>", NULL);
+    Runtime second_runtime = {};
+    runtime_init(&second_runtime);
+    Item second = transpile_js_to_mir(&second_runtime, source,
+        "<common-ast-cache>", NULL);
     ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
     ASSERT_FALSE(item_is_error(second));
     EXPECT_EQ(second.item, flt2it(42.0).item);
-    EXPECT_EQ(runtime.scripts->length, 1);
+    ASSERT_NE(second_runtime.scripts, nullptr);
+    JsScript* second_instance = (JsScript*)second_runtime.scripts->data[0];
+    EXPECT_EQ(second_instance->cache_template, (Script*)first_template);
+    EXPECT_EQ(second_instance->cache_compilation_unit_id,
+        first_template->cache_compilation_unit_id);
+    uint32_t dense_module_id = UINT32_MAX;
+    EXPECT_TRUE(runtime_module_state_id_for_unit(&second_runtime,
+        second_instance->cache_compilation_unit_id, &dense_module_id));
+    EXPECT_EQ(dense_module_id, second_instance->module_state_id);
+    runtime_cleanup(&second_runtime);
 
+    InputScriptCacheStats after = {};
+    input_script_cache_get_stats(cache, &after);
+    EXPECT_EQ(after.ast_builds, before.ast_builds + 1);
+    EXPECT_EQ(after.ast_hits, before.ast_hits + 1);
+    EXPECT_EQ(after.module_hits, before.module_hits + 1);
+}
+
+struct JsCommonAstBuildWaiter {
+    const char* source;
+    size_t source_length;
+    const char* reference;
+    JsCommonAstBuild build;
+};
+
+static void* js_common_ast_build_waiter_main(void* opaque) {
+    JsCommonAstBuildWaiter* waiter = (JsCommonAstBuildWaiter*)opaque;
+    (void)js_common_ast_cache_begin_build(&waiter->build, waiter->source,
+        waiter->source_length, waiter->reference, false, false);
+    return NULL;
+}
+
+TEST(JsInterpreter, SingleFlightsCommonAstTemplateBuild) {
+    InputScriptCache* cache = input_manager_global_script_cache();
+    ASSERT_NE(cache, nullptr);
+    InputScriptCacheStats before = {};
+    input_script_cache_get_stats(cache, &before);
+
+    static int cache_generation = 0;
+    char reference[64];
+    snprintf(reference, sizeof(reference), "<js-common-ast-claim-%d>",
+        ++cache_generation);
+    const char source[] = "var answer = 21 * 2; answer;";
+
+    JsCommonAstBuild owner = {};
+    ASSERT_EQ(js_common_ast_cache_begin_build(&owner, source,
+        sizeof(source) - 1, reference, false, false), INPUT_SCRIPT_BUILD_OWNER);
+
+    JsCommonAstBuildWaiter waiter = {source, sizeof(source) - 1, reference, {}};
+    pthread_t worker = {};
+    ASSERT_EQ(pthread_create(&worker, NULL, js_common_ast_build_waiter_main,
+        &waiter), 0);
+
+    bool wait_observed = false;
+    for (int attempt = 0; attempt < 100000; attempt++) {
+        InputScriptCacheStats current = {};
+        input_script_cache_get_stats(cache, &current);
+        if (current.single_flight_waits > before.single_flight_waits) {
+            wait_observed = true;
+            break;
+        }
+        sched_yield();
+    }
+
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    bool published = false;
+    JsTranspiler* transpiler = js_transpiler_create(&runtime);
+    if (!transpiler || !js_transpiler_parse_c(transpiler, source,
+            sizeof(source) - 1, JS_PARSE_AUTO) || !transpiler->ast_root ||
+            transpiler->has_errors) {
+        ADD_FAILURE() << "failed to build common JS AST template";
+        js_transpiler_destroy(transpiler);
+    } else {
+        JsScript* script = js_script_adopt_transpiler(transpiler, &runtime,
+            reference);
+        published = script && js_common_ast_cache_admit(&runtime, script, source,
+            sizeof(source) - 1, reference, false, false);
+        if (!published && script) {
+            runtime_free_script(&runtime, (Script*)script, true);
+        }
+    }
+    js_common_ast_cache_complete_build(&owner, published, false);
+    ASSERT_EQ(pthread_join(worker, NULL), 0);
+    EXPECT_TRUE(wait_observed);
+    EXPECT_TRUE(published);
+    EXPECT_EQ(waiter.build.state, INPUT_SCRIPT_BUILD_READY);
+    js_common_ast_cache_complete_build(&waiter.build, false, false);
     runtime_cleanup(&runtime);
+
+    InputScriptCacheStats after = {};
+    input_script_cache_get_stats(cache, &after);
+    EXPECT_EQ(after.ast_builds, before.ast_builds + 1);
+    EXPECT_GE(after.single_flight_waits, before.single_flight_waits + 1);
+}
+
+struct JsCommonMirBuildWaiter {
+    bool module_mode;
+    JsMirLeaseSession* session;
+    const char* source;
+    size_t source_length;
+    const char* reference;
+    JsCommonMirBuild build;
+};
+
+static void* js_common_mir_build_waiter_main(void* opaque) {
+    JsCommonMirBuildWaiter* waiter = (JsCommonMirBuildWaiter*)opaque;
+    if (waiter->module_mode) {
+        (void)js_module_mir_cache_begin_build(waiter->source,
+            waiter->source_length, waiter->reference, &waiter->build);
+    } else {
+        (void)js_mir_lease_session_begin_build(waiter->session, true,
+            waiter->source, waiter->source_length, waiter->reference, NULL,
+            &waiter->build);
+    }
+    return NULL;
+}
+
+TEST(JsInterpreter, SingleFlightsCommonMirLeaseBuild) {
+    InputScriptCache* cache = input_manager_global_script_cache();
+    ASSERT_NE(cache, nullptr);
+    JsMirLeaseSession* session = js_mir_lease_session_create();
+    ASSERT_NE(session, nullptr);
+    InputScriptCacheStats before = {};
+    input_script_cache_get_stats(cache, &before);
+
+    static int cache_generation = 0;
+    char reference[64];
+    snprintf(reference, sizeof(reference), "<js-mir-lease-claim-%d>",
+        ++cache_generation);
+    const char source[] = "var cachedAnswer = 42;";
+
+    JsCommonMirBuild owner = {};
+    ASSERT_EQ(js_mir_lease_session_begin_build(session, true, source,
+        sizeof(source) - 1, reference, NULL, &owner), INPUT_SCRIPT_BUILD_OWNER);
+
+    JsCommonMirBuildWaiter waiter = {false, session, source,
+        sizeof(source) - 1, reference, {}};
+    pthread_t worker = {};
+    int create_result = pthread_create(&worker, NULL,
+        js_common_mir_build_waiter_main, &waiter);
+    if (create_result != 0) {
+        js_mir_lease_session_complete_build(&owner, false, false);
+        js_mir_lease_session_close(session);
+        ADD_FAILURE() << "failed to create MIR lease claim waiter";
+        return;
+    }
+
+    bool wait_observed = false;
+    for (int attempt = 0; attempt < 100000; attempt++) {
+        InputScriptCacheStats current = {};
+        input_script_cache_get_stats(cache, &current);
+        if (current.single_flight_waits > before.single_flight_waits) {
+            wait_observed = true;
+            break;
+        }
+        sched_yield();
+    }
+
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    JsPreambleState compiled = {};
+    Item compile_result = compile_js_mir_preamble_len(&runtime, source,
+        sizeof(source) - 1, reference, &compiled);
+    bool published = !item_is_error(compile_result) &&
+        js_mir_lease_session_adopt_build(session, &owner, &compiled) != NULL;
+    if (!published) preamble_state_destroy(&compiled);
+    js_mir_lease_session_complete_build(&owner, published, false);
+    ASSERT_EQ(pthread_join(worker, NULL), 0);
+    EXPECT_TRUE(wait_observed);
+    EXPECT_TRUE(published);
+    EXPECT_EQ(waiter.build.state, INPUT_SCRIPT_BUILD_READY);
+    js_mir_lease_session_complete_build(&waiter.build, false, false);
+    js_mir_lease_session_close(session);
+    runtime_cleanup(&runtime);
+
+    InputScriptCacheStats after = {};
+    input_script_cache_get_stats(cache, &after);
+    EXPECT_EQ(after.mir_builds, before.mir_builds + 1);
+    EXPECT_GE(after.single_flight_waits, before.single_flight_waits + 1);
+}
+
+TEST(JsInterpreter, SingleFlightsClosedModuleMirBuild) {
+    InputScriptCache* cache = input_manager_global_script_cache();
+    ASSERT_NE(cache, nullptr);
+    InputScriptCacheStats before = {};
+    input_script_cache_get_stats(cache, &before);
+
+    static int cache_generation = 0;
+    char reference[64];
+    snprintf(reference, sizeof(reference), "<js-module-mir-claim-%d>",
+        ++cache_generation);
+    const char source[] = "export const answer = 42;";
+
+    JsCommonMirBuild owner = {};
+    ASSERT_EQ(js_module_mir_cache_begin_build(source, sizeof(source) - 1,
+        reference, &owner), INPUT_SCRIPT_BUILD_OWNER);
+
+    JsCommonMirBuildWaiter waiter = {true, NULL, source,
+        sizeof(source) - 1, reference, {}};
+    pthread_t worker = {};
+    int create_result = pthread_create(&worker, NULL,
+        js_common_mir_build_waiter_main, &waiter);
+    if (create_result != 0) {
+        js_module_mir_cache_complete_build(&owner, false, false);
+        ADD_FAILURE() << "failed to create module MIR claim waiter";
+        return;
+    }
+
+    bool wait_observed = false;
+    for (int attempt = 0; attempt < 100000; attempt++) {
+        InputScriptCacheStats current = {};
+        input_script_cache_get_stats(cache, &current);
+        if (current.single_flight_waits > before.single_flight_waits) {
+            wait_observed = true;
+            break;
+        }
+        sched_yield();
+    }
+
+    // The cache adapter is opaque: exercise its claim/ownership handoff with
+    // a real empty MIR context while the execution semantics stay covered by
+    // ReusesClosedModuleMirArtifactAcrossFreshRuntimes.
+    JsModuleMirArtifact* compiled = (JsModuleMirArtifact*)mem_calloc(1,
+        sizeof(JsModuleMirArtifact), MEM_CAT_JS_RUNTIME);
+    if (!compiled) {
+        js_module_mir_cache_complete_build(&owner, false, false);
+        ASSERT_EQ(pthread_join(worker, NULL), 0);
+        js_module_mir_cache_complete_build(&waiter.build, false, false);
+        ADD_FAILURE() << "failed to allocate module MIR artifact";
+        return;
+    }
+    compiled->image.mir_ctx = MIR_init();
+    compiled->image.entry_func = (void*)js_test_callable_target;
+    compiled->image.owns_compiled_state = true;
+    if (!compiled->image.mir_ctx) {
+        js_module_mir_artifact_destroy(compiled);
+        js_module_mir_cache_complete_build(&owner, false, false);
+        ASSERT_EQ(pthread_join(worker, NULL), 0);
+        js_module_mir_cache_complete_build(&waiter.build, false, false);
+        ADD_FAILURE() << "failed to initialize module MIR context";
+        return;
+    }
+
+    InputCacheScope* scope = NULL;
+    bool published = js_module_mir_cache_adopt_build(&owner, compiled, &scope) != NULL;
+    if (!published) js_module_mir_artifact_destroy(compiled);
+    js_module_mir_cache_complete_build(&owner, published, false);
+    if (scope) input_script_cache_close_scope(scope);
+    ASSERT_EQ(pthread_join(worker, NULL), 0);
+    EXPECT_TRUE(wait_observed);
+    EXPECT_TRUE(published);
+    EXPECT_EQ(waiter.build.state, INPUT_SCRIPT_BUILD_READY);
+    js_module_mir_cache_complete_build(&waiter.build, false, false);
+
+    InputScriptCacheStats after = {};
+    input_script_cache_get_stats(cache, &after);
+    EXPECT_EQ(after.mir_builds, before.mir_builds + 1);
+    EXPECT_GE(after.single_flight_waits, before.single_flight_waits + 1);
+}
+
+TEST(JsInterpreter, ReusesClosedModuleMirArtifactAcrossFreshRuntimes) {
+    InputScriptCache* cache = input_manager_global_script_cache();
+    ASSERT_NE(cache, nullptr);
+    InputScriptCacheStats before = {};
+    input_script_cache_get_stats(cache, &before);
+
+    const char filename[] = "test/js/script_cache/closed_module.mjs";
+    Runtime first = {};
+    runtime_init(&first);
+    Item first_namespace = load_js_module(&first, filename);
+    ASSERT_FALSE(item_is_error(first_namespace));
+    EXPECT_EQ(js_get_key_default(first_namespace, js_make_string("answer")).item,
+        flt2it(42.0).item);
+    runtime_cleanup(&first);
+
+    Runtime second = {};
+    runtime_init(&second);
+    Item second_namespace = load_js_module(&second, filename);
+    ASSERT_FALSE(item_is_error(second_namespace));
+    EXPECT_EQ(js_get_key_default(second_namespace, js_make_string("answer")).item,
+        flt2it(42.0).item);
+    runtime_cleanup(&second);
+
+    InputScriptCacheStats after = {};
+    input_script_cache_get_stats(cache, &after);
+    EXPECT_GE(after.mir_builds, before.mir_builds + 1);
+    EXPECT_GE(after.mir_hits, before.mir_hits + 1);
+    EXPECT_GE(after.module_hits, before.module_hits + 1);
+}
+
+TEST(JsInterpreter, ReusesSynchronousStaticImportModuleMirAcrossFreshRuntimes) {
+    InputScriptCache* cache = input_manager_global_script_cache();
+    ASSERT_NE(cache, nullptr);
+    InputScriptCacheStats before = {};
+    input_script_cache_get_stats(cache, &before);
+
+    const char filename[] = "test/js/script_cache/static_import_module.mjs";
+    Runtime first = {};
+    runtime_init(&first);
+    Item first_namespace = load_js_module(&first, filename);
+    ASSERT_FALSE(item_is_error(first_namespace));
+    EXPECT_EQ(js_get_key_default(first_namespace, js_make_string("answer")).item,
+        flt2it(42.0).item);
+    runtime_cleanup(&first);
+
+    Runtime second = {};
+    runtime_init(&second);
+    Item second_namespace = load_js_module(&second, filename);
+    ASSERT_FALSE(item_is_error(second_namespace));
+    EXPECT_EQ(js_get_key_default(second_namespace, js_make_string("answer")).item,
+        flt2it(42.0).item);
+    runtime_cleanup(&second);
+
+    InputScriptCacheStats after = {};
+    input_script_cache_get_stats(cache, &after);
+    // The child and parent compile once, then both enter fresh second-runtime
+    // namespaces through their retained immutable images (D8.5.1v2).
+    EXPECT_GE(after.mir_builds, before.mir_builds + 2);
+    EXPECT_GE(after.mir_hits, before.mir_hits + 2);
+    EXPECT_GE(after.module_hits, before.module_hits + 2);
+}
+
+TEST(JsInterpreter, RetiresStaticImportModuleMirConeWhenDependencyChanges) {
+    ASSERT_EQ(file_ensure_dir("temp"), 0);
+    static int cache_generation = 0;
+    char root_path[128];
+    char dependency_path[128];
+    char root_source[256];
+    int generation = ++cache_generation;
+    snprintf(root_path, sizeof(root_path),
+        "temp/js-static-cache-root-%d.mjs", generation);
+    snprintf(dependency_path, sizeof(dependency_path),
+        "temp/js-static-cache-dependency-%d.mjs", generation);
+    snprintf(root_source, sizeof(root_source),
+        "import { base } from \"./js-static-cache-dependency-%d.mjs\";\n"
+        "export const answer = base + 1;\n", generation);
+    const char first_dependency[] = "export const base = 41;\n";
+    const char second_dependency[] = "export const base = 52;\n";
+    ASSERT_EQ(write_binary_file(root_path, root_source, strlen(root_source)), 0);
+    ASSERT_EQ(write_binary_file(dependency_path, first_dependency,
+        sizeof(first_dependency) - 1), 0);
+
+    InputScriptCache* cache = input_manager_global_script_cache();
+    ASSERT_NE(cache, nullptr);
+    InputScriptCacheStats before = {};
+    input_script_cache_get_stats(cache, &before);
+
+    Runtime first = {};
+    runtime_init(&first);
+    Item first_namespace = load_js_module(&first, root_path);
+    ASSERT_FALSE(item_is_error(first_namespace));
+    EXPECT_EQ(js_get_key_default(first_namespace, js_make_string("answer")).item,
+        flt2it(42.0).item);
+    runtime_cleanup(&first);
+
+    // A different source generation must retire the cached importer before
+    // the next realm can observe the child namespace (D8.5.1v2).
+    ASSERT_EQ(write_binary_file(dependency_path, second_dependency,
+        sizeof(second_dependency) - 1), 0);
+
+    Runtime second = {};
+    runtime_init(&second);
+    Item second_namespace = load_js_module(&second, root_path);
+    ASSERT_FALSE(item_is_error(second_namespace));
+    EXPECT_EQ(js_get_key_default(second_namespace, js_make_string("answer")).item,
+        flt2it(53.0).item);
+    runtime_cleanup(&second);
+
+    InputScriptCacheStats after = {};
+    input_script_cache_get_stats(cache, &after);
+    EXPECT_GE(after.dependency_invalidations,
+        before.dependency_invalidations + 1);
+}
+
+TEST(JsInterpreter, ReusesAstTemplatesForClassModuleEvalAndTypeScript) {
+    InputScriptCache* cache = input_manager_global_script_cache();
+    ASSERT_NE(cache, nullptr);
+    InputScriptCacheStats before = {};
+    input_script_cache_get_stats(cache, &before);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+
+    const char class_source[] =
+        "class Box { constructor(value) { this.value = value; } "
+        "read() { return this.value; } } "
+        "function make() { return new Box(42).read(); } make();";
+    Runtime class_first = {};
+    runtime_init(&class_first);
+    Item class_first_result = transpile_js_to_mir(&class_first, class_source,
+        "<ast-overlay-class>", NULL);
+    ASSERT_FALSE(item_is_error(class_first_result));
+    EXPECT_EQ(class_first_result.item, flt2it(42.0).item);
+    runtime_cleanup(&class_first);
+
+    Runtime class_second = {};
+    runtime_init(&class_second);
+    Item class_second_result = transpile_js_to_mir(&class_second, class_source,
+        "<ast-overlay-class>", NULL);
+    ASSERT_FALSE(item_is_error(class_second_result));
+    EXPECT_EQ(class_second_result.item, flt2it(42.0).item);
+    runtime_cleanup(&class_second);
+
+    const char module_source[] = "export const answer = 42;";
+    Runtime module_first = {};
+    runtime_init(&module_first);
+    Item module_first_result = js_interp_execute_es_module_source(&module_first,
+        module_source, sizeof(module_source) - 1, "<ast-overlay-module.mjs>", NULL);
+    ASSERT_FALSE(item_is_error(module_first_result));
+    EXPECT_EQ(js_get_key_default(module_first_result, js_make_string("answer")).item,
+        flt2it(42.0).item);
+    runtime_cleanup(&module_first);
+
+    Runtime module_second = {};
+    runtime_init(&module_second);
+    Item module_second_result = js_interp_execute_es_module_source(&module_second,
+        module_source, sizeof(module_source) - 1, "<ast-overlay-module.mjs>", NULL);
+    ASSERT_FALSE(item_is_error(module_second_result));
+    EXPECT_EQ(js_get_key_default(module_second_result, js_make_string("answer")).item,
+        flt2it(42.0).item);
+    runtime_cleanup(&module_second);
+
+    const char eval_source[] = "var answer = 42; answer;";
+    Runtime eval_first = {};
+    runtime_init(&eval_first);
+    Item eval_first_result = js_interp_execute_indirect_eval_source(&eval_first,
+        eval_source, sizeof(eval_source) - 1, "<ast-overlay-eval>", NULL);
+    ASSERT_FALSE(item_is_error(eval_first_result));
+    EXPECT_EQ(eval_first_result.item, flt2it(42.0).item);
+    runtime_cleanup(&eval_first);
+
+    Runtime eval_second = {};
+    runtime_init(&eval_second);
+    Item eval_second_result = js_interp_execute_indirect_eval_source(&eval_second,
+        eval_source, sizeof(eval_source) - 1, "<ast-overlay-eval>", NULL);
+    ASSERT_FALSE(item_is_error(eval_second_result));
+    EXPECT_EQ(eval_second_result.item, flt2it(42.0).item);
+    runtime_cleanup(&eval_second);
+
+    const char typescript_source[] = "const answer: number = 42; answer;";
+    Runtime typescript_first = {};
+    runtime_init(&typescript_first);
+    Item typescript_first_result = transpile_js_typescript_to_mir_len(
+        &typescript_first, typescript_source, sizeof(typescript_source) - 1,
+        "<ast-overlay.ts>", NULL);
+    ASSERT_FALSE(item_is_error(typescript_first_result));
+    EXPECT_EQ(typescript_first_result.item, flt2it(42.0).item);
+    runtime_cleanup(&typescript_first);
+
+    Runtime typescript_second = {};
+    runtime_init(&typescript_second);
+    Item typescript_second_result = transpile_js_typescript_to_mir_len(
+        &typescript_second, typescript_source, sizeof(typescript_source) - 1,
+        "<ast-overlay.ts>", NULL);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_FALSE(item_is_error(typescript_second_result));
+    EXPECT_EQ(typescript_second_result.item, flt2it(42.0).item);
+    runtime_cleanup(&typescript_second);
+
+    InputScriptCacheStats after = {};
+    input_script_cache_get_stats(cache, &after);
+    EXPECT_GE(after.ast_builds, before.ast_builds + 4);
+    EXPECT_GE(after.ast_hits, before.ast_hits + 4);
+    EXPECT_GE(after.module_hits, before.module_hits + 4);
 }
 
 TEST(JsMir, CapturesTopLevelForOfBindingsAfterSiblingFunctionDeclaration) {
@@ -346,7 +825,7 @@ TEST(JsInterpreter, RetainedHarnessRebuildsAfterRealmReplacement) {
     runtime_cleanup(&runtime);
 }
 
-TEST(JsInterpreter, ReusesRuntimeAstCacheAcrossHeapReplacement) {
+TEST(JsInterpreter, ReusesFunctionAstTemplateAcrossHeapReplacement) {
     Runtime runtime = {};
     runtime_init(&runtime);
 
@@ -361,8 +840,11 @@ TEST(JsInterpreter, ReusesRuntimeAstCacheAcrossHeapReplacement) {
     runtime_reset_heap(&runtime);
     JsScript* second = js_interp_prepare_script(&runtime, source, sizeof(source) - 1,
         "cached-harness.js");
-    EXPECT_EQ(second, first);
-    EXPECT_EQ(runtime.scripts->length, 1);
+    // The parsed function is shared, while the replacement realm receives an
+    // execution overlay with its own lazy callable metadata (D8.5.1v2).
+    EXPECT_NE(second, first);
+    EXPECT_EQ(second->cache_template, (Script*)first);
+    EXPECT_EQ(runtime.scripts->length, 2);
     ASSERT_FALSE(item_is_error(js_interp_execute_script(&runtime, second, NULL)));
 
     runtime_cleanup(&runtime);

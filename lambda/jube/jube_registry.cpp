@@ -2,6 +2,7 @@
 #include "../dom/dom_core.h"
 #include "jube_interface.h"
 #include "jube_language.h"
+#include "../input/input-script-cache.h"
 #include "../runtime/ast.hpp"
 #include "../runtime/module_registry.h"
 #include "../runtime/transpiler.hpp"
@@ -1595,6 +1596,17 @@ static const JubeHostRealmAPI jube_host_realm_api = {
 // H7A source records are intentionally plain C data.  A language can retain
 // source text while parsing, but neither its parser nor diagnostics acquire an
 // Input/Pool dependency from the host implementation.
+static const char* jube_host_source_language(const char* path) {
+    const char* ext = path ? strrchr(path, '.') : NULL;
+    if (!ext) return "hosted";
+    if (strcmp(ext, ".py") == 0) return "python";
+    if (strcmp(ext, ".rb") == 0) return "ruby";
+    if (strcmp(ext, ".sh") == 0 || strcmp(ext, ".bash") == 0) return "bash";
+    if (strcmp(ext, ".js") == 0 || strcmp(ext, ".mjs") == 0) return "javascript";
+    if (strcmp(ext, ".ts") == 0) return "typescript";
+    return "hosted";
+}
+
 static int jube_host_source_read(const char* path, JubeHostedSource* out_source) {
     if (!path || !*path || !out_source ||
         out_source->struct_size < JUBE_HOSTED_SOURCE_V1_SIZE) {
@@ -1602,11 +1614,31 @@ static int jube_host_source_read(const char* path, JubeHostedSource* out_source)
     }
     memset(out_source, 0, sizeof(*out_source));
     out_source->struct_size = JUBE_HOSTED_SOURCE_V1_SIZE;
-    char* bytes = read_text_file(path);
-    if (!bytes) return -1;
     char* canonical_path = file_realpath(path);
+    const char* identity = canonical_path ? canonical_path : path;
+    InputScriptRequest request = {};
+    request.identity = identity;
+    request.source_kind = INPUT_SCRIPT_SOURCE_FILE;
+    request.language = jube_host_source_language(path);
+    request.profile = "jube-hosted";
+    request.parser_abi = "hosted-parser-v1";
+    request.parse_flags = "default";
+    request.resolution_base = identity;
+    request.backend = "mir-direct";
+    request.execution_mode = "hosted-module";
+    request.ast_abi = 1;
+    request.compiler_abi = 1;
+    request.optimize_level = 2;
+    request.module_mode = true;
+    size_t source_length = 0;
+    char* bytes = input_script_cache_copy_file_source(
+        input_manager_global_script_cache(), &request, path, &source_length);
+    if (!bytes) {
+        mem_free(canonical_path);
+        return -1;
+    }
     out_source->bytes = bytes;
-    out_source->byte_length = strlen(bytes);
+    out_source->byte_length = source_length;
     out_source->canonical_path = canonical_path ? canonical_path : path;
     // canonical_path is independently owned when available; source_release
     // never frees the caller-owned fallback path pointer.

@@ -10,6 +10,7 @@
 #include "../../lib/url.h"
 #include "../../lib/log.h"
 #include "markup-format.h"  // For MarkupFormat enum
+#include "input-script-cache.h"
 
 // InputManager - manages global pool and input lifecycle
 class InputManager {
@@ -18,10 +19,12 @@ private:
     ArrayList* inputs;              // track all created inputs for cleanup
     ArrayList* thread_pools;        // track per-thread pools for cleanup
     mpd_context_t* decimal_ctx;     // libmpdec context for decimal operations
+    InputScriptCache* script_cache;  // process-persistent executable source/artifacts
 
     // Private constructor for singleton pattern
     InputManager();
     ~InputManager();
+    void reset_inputs();
 
     // Delete copy constructor and assignment operator
     InputManager(const InputManager&) = delete;
@@ -29,6 +32,7 @@ private:
 
 public:
     static mpd_context_t* decimal_context();
+    static InputScriptCache* global_script_cache();
 
     // Create a new input using the managed pool
     static Input* create_input(Url* abs_url);
@@ -36,6 +40,8 @@ public:
 
     // Destroy the global instance (optional cleanup)
     static void destroy_global();
+    // release document inputs while retaining the process-level script cache.
+    static void reset_global_inputs();
 
     // Detach a URL pointer from any tracked Input that owns it (sets that
     // input->url to null). Lets a caller free a URL it handed to create_input
@@ -46,6 +52,7 @@ public:
     Input* create_input_instance(Url* abs_url);
     Input* create_input_instance_with_name_parent(Url* abs_url, NamePool* name_parent);
     Pool* get_pool() const { return global_pool; }
+    InputScriptCache* get_script_cache() const { return script_cache; }
 
     // Audited factory boundary (single construction site) - InputManager has a
     // private constructor, so friend access lets the factory placement-new it.

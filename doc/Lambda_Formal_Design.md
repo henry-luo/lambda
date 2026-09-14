@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 3.0.0 (2026-09-11)
+**Spec version:** 4.0.0 (2026-09-13)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1106,12 +1106,15 @@ loosely across the corpus — context disambiguates, and we live with it.
   headers with null-safe defaults. Exception: **GC allocation is a
   safepoint, not an allocator flavor** — a missing heap service never
   degrades to a weak/null/malloc fallback. [SM1–SM3, SM6]
-- **D7.1.2** **All resource IO lives in `lambda-io`**: bytes and files
-  cache below; **derived artifacts live above** (rt: script/MIR caches;
-  radiant: font/media rendering — *Radiant never fetches*). Raw
-  context-free mechanisms stay `lib`; event-loop/Item-coupled language IO
-  stays rt under an explicit reviewed classification, not a loophole.
-  [SM12]
+- **D7.1.2v2*** **All resource IO lives in `lambda-io`**: source bytes and
+  file acquisition may be retained by the neutral `InputScriptCache` composed
+  into `InputManager`, while **derived artifacts live above** (rt: script/MIR
+  caches; radiant: font/media rendering — *Radiant never fetches*). The cache
+  owns only source identity and opaque artifact lifetime; language adapters
+  own AST/MIR types and finalizers. No execution input, document, heap, or
+  context state crosses this boundary. Raw context-free mechanisms stay `lib`;
+  event-loop/Item-coupled language IO stays rt under an explicit reviewed
+  classification, not a loophole. [SM12]
 - **D7.1.3** **Provider ownership beats include ownership**: every function
   a module's public header declares is defined by that module or a lower
   one; enforced by symbol-provider inventory. Boundary enforcement is
@@ -1575,10 +1578,16 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ### D8.5 MIR module cache
 
-- **D8.5.1** **L1** (landed): persistent in-process cache of imported
-  modules only, keyed by canonical path + mtime/size; name pool promoted
-  to batch lifetime; module indices never compacted. **L2** lazy codegen
-  is an approved experiment.* [MC1, MC2]
+- **D8.5.1v2*** **L1** is a persistent in-process `InputScriptCache` for
+  executable script sources, including main scripts, imports, harnesses, and
+  document/hosted-language scripts. Source identity uses exact bytes plus
+  canonical identity, source kind, language/parser profile, and resolution
+  policy; AST and optional MIR artifacts are subordinate entries. A hit
+  recreates execution, heap, DOM, module, and exception state, and the default
+  policy admits every successful script (`LAMBDA_SCRIPT_CACHE=off|ast|mir|all`).
+  The cache remains source-distributed and in-process; disk/code-image caching
+  stays D8.5.2–D8.5.3. L2 lazy codegen remains an approved experiment. [MC1,
+  MC2]
 - **D8.5.2*** The disk-cache direction is **code image + relocation
   journal** (Route B); a C-source route is rejected (a C toolchain as a
   production dependency), and MIR-bitcode caching is dropped (*it caches
@@ -1633,7 +1642,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ## Appendix A — Implementation Footnotes
 
-Status of `*`-marked rulings as of 2026-09-05.
+Status of `*`-marked rulings as of 2026-09-13.
 
 The D8.2.4–D8.2.6 implementation record now includes P3j, P4l, and the
 post-P6 binding/identity schedule work (2026-08-31):
@@ -1889,6 +1898,7 @@ slice; no formal semantic ruling or document semver changes.
 | D7.4.3 | Hosted-language layering: `lang-python` is the landed DSO reference chain, but Python is currently statically linked and its ten follow-up ADRs (Lang_Hosting §17) are unwritten. |
 | D7.4.4 | Implemented in DOM4 (2026-08-14): `host_ops`, `legacy_ops`, `JubeHostObjectOps`, and the vmap `string_key_item` re-materialization shim were removed; record-owned hooks are the only host-object protocol. The protocol remains unchanged; the D7.4.5v2 TypeId-order revision advances the current Jube ABI to version 6. |
 | D7.4.5v2 | Partially implemented 2026-09-08. Distinct VArray/Velmt TypeIds and GC-traced headers, semantic type/validation/index/iteration/equality/order/printing dispatch, Jube ABI 6 carrier selection, carrier-neutral host metadata, and exact shaped-field storage are landed. The reordered physical tags are `RANGE=16`, `ARRAY_NUM=17`, `ARRAY=18`, `VARRAY=19`, `MAP=20`, `VMAP=21`, `ELEMENT=22`, `VELMT=23`, `TYPE=24`, `FUNC=25`, `ANY=26`, and `ERROR=27`; Error is the last valid TypeId. Native Radiant snapshots are renamed `RadiantVelmt`; custom-layout handles and all shared DOM Node-family wrappers use Velmt. Live child/element/form/lookup/options/selected-options/attribute/token/CSSOM collections and static query/radio/rect/mutation lists use direct or retained VArray backends; Lambda child-list access reads the native backend directly under the fixed-DOM run contract and has no `snapshot_for_lambda` hook. Remaining gates are FileList/DataTransferItemList/SVGTransformList migration, the VMap status-vtable follow-up, synthetic splice/materialization coverage, and the full GC/WPT/performance matrix. Working record: `vibe/Lambda_Design_Type_Virtual.md`. |
+| D7.1.2v2 | Partially implemented 2026-09-14: `InputManager` owns a process-persistent `InputScriptCache` with named cache contexts, exact-byte source identity, scopes/leases, opaque AST/MIR slots, policy controls, accounting, request-scoped source-generation retirement, and Lambda plus JS/Radiant source or MIR adapter entry paths. Lambda source records and admitted synchronous static-JS-import module records retain direct-import edges by persistent unit ID; a changed file-backed dependency retires its full importer cone before a cached artifact is reused, while leases defer destruction. The common cache also owns AST/MIR-key single-flight states; Lambda uses them, and a minimal per-key poison state blocks reuse until source invalidation. Full executable-source inventory, JS/guest adapter adoption, remaining JS/guest dependency cones, richer failure recovery, and eviction remain open. Working record: `vibe/Lambda_Design_Script_Cache.md`. |
 | D7.5.1 | T1 verification layers staged; T2/T3 directional, neither built (not required until a third-party module story). |
 | D7.5.2 | Central IO API direction adopted; surface not extracted (`js_fs`/`js_os`/`js_net` raw-IO violations are the burn-down list); `dynamic_lookup` laxity is acknowledged debt. |
 | D8.1.1v9 | Revised 2026-09-07 (v9): a satellite image co-compiles the target's direct-callee cluster in module order (direct native edges among members, module-wide call-site inference, every member's boxed entry published; compiled/pinned/unsupported callees stay dynamic) -- diviter 20 s → 349 ms, richards 786 → 620 ms, deltablue 464 → 348 ms auto e2e, each at eager parity; DO30 records splay. Revised 2026-09-07 (v8): typed `var` parameters are admitted to satellites -- every `var` position travels through the CW33 home cells on the boxed edges, the `_b` wrapper prepares, admits and stores the container back through the home, and a satellite's dynamic edge transports and reloads typed positions keeping their raw descriptor; a body that rebinds a typed `var` parameter, and every satellite that would call it directly, stays in T0 (navier_stokes, nbody2, json2 promote; DO29 records the eager tier's own rebind loss). Revised 2026-09-07 (v7): a loop-bodied procedure promotes at its first entry (once-called `main` loops: mandelbrot 5.5 s → 0.8 s, matmul 3.2 s → 56 ms auto e2e on the debug build); aggregate/structured value-parameter contracts are admitted to satellites (nbody2, pnpoly2, deriv2, ray2, array1); a satellite's read of an annotated `string[]` module binding takes the generic index path because the T0-initialized slab carries the boundary's native carrier (DO28). Revised 2026-09-06: satellite admission widened to plain `any` parameters, bodies with local `var`/rebinding statements and indexed/member stores, and untyped `var` parameters (write-back through the CW33 home transport on both tier edges, borrowed-call dispatch mode; aggregate contracts and typed `var` parameters stay pinned); satellites rebind the module's static const image after interning, and dynamic-call arguments append verbatim. Decided 2026-08-25. Normal Lambda files/modules use the first-party C hybrid recursive-descent + Pratt parser, which reduces directly to the shared typed AST and retains no Lambda CST. `LAMBDA_PARSER=tree`/`tree-sitter` remains an explicit reference/rollback path; `compare` checks Tree-sitter syntax acceptance while publishing the direct AST. The REPL and legacy inspection paths remain reference-parser consumers until their fragment/source-span migration is complete. The default script selector chooses `AUTO`; `interp` forces T0 and `jit` retains the eager whole-module path. P2 satellite promotion uses a default function-entry threshold of 5. A direct validated self-tail edge uses the same tail-edge threshold and may hand the active activation to an already-published boxed satellite entry; arbitrary-PC / loop OSR is not implemented. P2 fails closed for bodies that rebind a typed `var` parameter (and their direct satellite callers), nested definitions, indirect Lambda calls, object-field identifiers, match expressions, and invalid batch-retained module state; scalar module reads and dynamic multi-argument calls use the shared boxed ABI. Status and gates: `vibe/Lambda_Grammar_Parser.md` §7 and `vibe/impl/Lambda_Impl_Ast_Interp.md` §3.1. |
@@ -1901,7 +1911,7 @@ slice; no formal semantic ruling or document semver changes.
 | D8.4.1v2 | ICs are retired in both lanes: the Lambda lane never had them; the LambdaJS per-site `JsLoadIC`/`JsStoreIC` machinery was deleted 2026-08-15 (IC_Retire IR1–IR8) and the LambdaJS carve-out in LC1 was closed 2026-09-09 (LC1v2). The replacement — compile-predicted literal/constructor shapes with an inline guard, an integer-index lane, and the shared kernel on a miss — is specified in `vibe/jube/JS_Tune10_Fast_Paths.md` (T10-1/T10-2) and is **not implemented**; Result38 measures LambdaJS at 4.35× QuickJS with the unspecialized kernel path. |
 | D8.4.2v2 | Core direct calls pass individual ABI operands. Internal shape-2 results use two MIR results and C-reachable entries use the context companion slot; the trailing scalar-home operand remains retired. Tune24 aggregate-construction plans carry precise record-field destinations as internal operands and return an Item completion. The numeric companion-return ABI is unchanged. |
 | D8.4.3v2 | Landed 2026-08-17 for Lambda, LambdaJS, Jube, and hosted execution boundaries: ordinary failures use explicit returned completions through each frame, while `LambdaRecoveryFrame` is restricted by the recovery-boundary gate to native-fault/test containment sites. The catalog and adapter audits retain the explicit Item/companion-lane contracts; see `vibe/Lambda_Design_Runtime_Error_Handling.md` §10–§12. |
-| D8.5.1 | MIR cache L1 landed; L2 lazy codegen approved but `mir.c` still eager. |
+| D8.5.1v2 | Partially implemented 2026-09-14: the common source registry is live, Lambda and JS CLI/Node-runner/test-batch/module source admission use it, hosted CLI file admission uses language/profile keys, and Radiant's preamble/external-classic JS MIR adapter stores opaque artifacts there. Closed-T0 Lambda AST templates now instantiate import cones and interpreter view registration through fresh Script overlays; cached Lambda MIR hits instantiate the complete JIT dependency cone and its dense per-runtime slabs, while P2 satellite imports derive their owner/slot without mutating the shared AST. P2 promotion counters and boxed satellite entries are also execution-local overlays, so a cached AST definition cannot expose a retired EvalContext's native entry (D8.1.1v2); an AST image that has entered P2 is conservatively excluded from later AST hits until lowering's remaining mutable facts have execution overlays. Lambda file-backed dependency changes and admitted cache-safe static-JS ESM dependency changes are refreshed before an artifact hit and retire the common importer cone; exact source comparison decides the retirement. Common AST/MIR build claims single-flight Lambda artifact construction across fresh runtimes, common JS AST claims single-flight parser-template construction, and the Radiant JS-MIR lease adapter plus synchronous static-JS-import module-MIR adapter claim their eligible artifacts; a minimal poison state is fail-closed until source invalidation, while eviction remains deferred. Eager JIT AST-miss reuse remains excluded because MIR lowering still mutates AST facts. The common JS AST adapter supports function, class, module, eval, and TypeScript parser templates through fresh execution overlays; those clones retain the source logical unit and bind a fresh dense slab. An ESM module whose transitive static-JS-import closure is synchronous and cache-safe can reuse an immutable MIR artifact after rebuilding every dependency namespace, its own namespace, and its module slab; TLA, dynamic/re-export, CommonJS, cycles, and cross-language module artifacts remain excluded. The legacy Runtime retention cache is retired to a local `loaded_script_index` registry, and the legacy Radiant cache façade is retired to a bounded lease/accounting session. Open work includes the excluded JS module families, remaining command pipelines, guest build-claim adoption, and cache lifecycle gates; L2 lazy codegen remains approved but `mir.c` is eager. Working record: `vibe/Lambda_Design_Script_Cache.md`. |
 | D8.5.2–D8.5.3 | L3 code-image cache: nothing landed (D0–D6 sequence); de-pointering (MC4) independently shippable, not started. |
 | D8.6.4v2 | Timing/MIR instrumentation is landed. At commit `44b98dcebd19a548a14bbb75785091b545445f00`, the governed tree is 310,711 lines. The audited atomic direct-frontend retirement `9f3f05e1ff65a2c42acf14776da7361ea1961c0c` is `+1,366/-8,450 = -7,084` in `lambda/runtime` + `lambda/js`; its named deleted files alone credit `-6,204`, excluding the out-of-scope TypeScript deletion. The current checker reports 287,618 against the stricter ≤308,711 cap. The 2026-09-05 prescribed captures (one warm-up, five release samples, identical manifests) compare the pre-bind base with the same two semantic repairs applied to both trees: Lambda compiler median ratio `0.512534` and JS ratio `0.690065`, satisfying the ≤0.90 and ≤0.80 ratchets. Finalized JS MIR diagnostics are complete `1.000181` and library `0.999995`; the complete-corpus change is below 0.02% and the library decreased. Large-library and complete-corpus MIR counts remain required diagnostics, not exit gates. |
 
@@ -2134,13 +2144,13 @@ Numbered `DO#` (design-open); each links to its record.
 | D6.2 | C8.7; Function_Arg; DF7/DF11; SF18; JC1–JC12; JSI5 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Function_Arg.md`, `vibe/jube/JS_Runtime_Callable.md`, `Lambda_Design_JS_Interpreter.md` |
 | D6.3 | K11–K32 (runtime side); ER-D1/D11 | `Lambda_Design_Concurrency.md`, `Lambda_Design_Exec_Recovery.md` |
 | D6.4 | Sys_Func §7–§8 | `Lambda_Design_Sys_Func.md` |
-| D7.1 | SM1–SM14 | `Lambda_Design_Static_Modules.md` |
+| D7.1 | SM1–SM14 | `Lambda_Design_Static_Modules.md`, `Lambda_Design_Script_Cache.md` |
 | D7.2 | RG14; DF15; ER-D2; MC1; UA editing | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md`, `vibe/radiant/Radiant_Design_Editable.md` §20 |
 | D7.3–D7.5 | JA1–JA16; Native_Module §6–§10; Lang_Hosting P/C + §5–§13 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md` |
 | D8.1–D8.2 | U1–U36; AI1–AI22, AIO1–AIO12; JSI1–JSI13 | `Lambda_Design_Unified_AST.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md` |
 | D8.3 | DF1–DF17, O1–O14 | `Lambda_Design_Compiling_Dual_Func.md` |
 | D8.4 | LC1v2 + call-ABI notes; IR1–IR8; T10-0–T10-5; REH-D2–REH-D14 | `Lambda_Design_Compiling.md`, `Lambda_Design_JS_IC_Retire.md`, `jube/JS_Tune10_Fast_Paths.md`, `Lambda_Design_Runtime_Error_Handling.md` |
-| D8.5 | MC1–MC8; L3-1–L3-10 | `Lambda_Design_MIR_Cache.md`, `Lambda_Design_MIR_Cache_L3.md` |
+| D8.5 | MC1–MC8; L3-1–L3-10 | `Lambda_Design_MIR_Cache.md`, `Lambda_Design_MIR_Cache_L3.md`, `Lambda_Design_Script_Cache.md` |
 | D8.6 | MT1–MT8; U33–U36 | `Lambda_Design_MIR_Emission_Test.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md` |
 
 The decision records preserve the full deliberations — every alternative

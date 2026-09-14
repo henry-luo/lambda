@@ -1200,6 +1200,7 @@ extern void lambda_function_mark_lambda_boxed_procedure(Function* fn);
 extern void lambda_function_mark_mir_public_return_shape(Function* fn, uint32_t shape);
 extern void* lambda_module_const_at(const LambdaModuleLayout* layout, uint32_t index);
 extern void* lambda_module_const_at_state(void* module_state, uint32_t index);
+extern void* lambda_module_state_for_unit(void* runtime_context, uint32_t unit_id);
 extern Item lambda_module_var_at(void* module_state, uint32_t slot);
 extern Item lambda_active_module_var_at(uint32_t slot);
 extern void lambda_active_module_var_store(uint32_t slot, Item item);
@@ -1608,6 +1609,12 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"lambda_module_var_at", FPTR(lambda_module_var_at),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"lambda_module_state_for_unit", FPTR(lambda_module_state_for_unit),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
@@ -3428,6 +3435,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_item_adopt_scalar_home", "lambda_item_resolve_pending",
         "lambda_restore_number_frame_top",
         "owned_item_slot_store", "lambda_module_var_store", "lambda_module_var_at",
+        "lambda_module_state_for_unit",
         "lambda_module_const_at_state",
         "lambda_module_name_id_at",
         "lambda_active_module_name_id", "lambda_active_module_name_item",

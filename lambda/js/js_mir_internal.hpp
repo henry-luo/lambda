@@ -779,7 +779,14 @@ bool js_mir_link_runtime_state(JsMirTranspiler* mt);
 bool jm_validate_mir_labels(MIR_context_t ctx);
 bool js_activate_runtime_name_pool(void);
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename);
-void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename);
+char* js_load_script_source_from_cache(const char* path,
+                                       const char* profile,
+                                       const char* execution_mode,
+                                       bool module_mode,
+                                       size_t* out_length);
+bool jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename,
+    const char* importer_source, size_t importer_source_length,
+    bool record_cache_dependencies);
 extern "C" Item js_new_function_from_string(Item* args, int argc);
 extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope);
 void js_normalize_path_separators(char* path);

@@ -3598,6 +3598,19 @@
             "icon": "\ud83d\udcd5"
           },
           {
+            "source": "test_input_script_cache_gtest.cpp",
+            "name": "Input Script Cache Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_input_script_cache_gtest.exe",
+            "icon": "\ud83d\udce6"
+          },
+          {
             "source": "test_pdf_render_visual_gtest.cpp",
             "name": "PDF Render Tests",
             "dependencies": [

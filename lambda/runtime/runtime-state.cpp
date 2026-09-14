@@ -5,10 +5,54 @@
 #include "side_stack.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/log.h"
+#include "../../lib/hashmap_helpers.h"
 #include <string.h>
 
 // The runtime layer owns the active evaluator for runners and fixtures.
 __thread EvalContext* context = nullptr;
+
+typedef struct ModuleUnitIndexEntry {
+    uint32_t unit_id;
+    uint32_t module_state_id;
+} ModuleUnitIndexEntry;
+
+HASHMAP_DEFINE_INTKEY(module_unit_index, ModuleUnitIndexEntry, unit_id)
+
+bool runtime_module_state_id_for_unit(const Runtime* runtime, uint32_t unit_id,
+        uint32_t* out_module_state_id) {
+    if (!runtime || !runtime->module_unit_index || unit_id == 0) return false;
+    ModuleUnitIndexEntry probe = {.unit_id = unit_id, .module_state_id = 0};
+    const ModuleUnitIndexEntry* found = (const ModuleUnitIndexEntry*)hashmap_get(
+        runtime->module_unit_index, &probe);
+    if (!found) return false;
+    if (out_module_state_id) *out_module_state_id = found->module_state_id;
+    return true;
+}
+
+bool runtime_module_state_bind_unit(Runtime* runtime, uint32_t unit_id,
+        uint32_t module_state_id) {
+    if (!runtime || unit_id == 0) return true;
+    if (!runtime->module_unit_index) {
+        runtime->module_unit_index = module_unit_index_new(64);
+    }
+    if (!runtime->module_unit_index) return false;
+    ModuleUnitIndexEntry entry = {.unit_id = unit_id,
+        .module_state_id = module_state_id};
+    hashmap_set(runtime->module_unit_index, &entry);
+    if (!hashmap_oom(runtime->module_unit_index)) return true;
+    log_error("module-unit-index: failed to bind logical unit %u", unit_id);
+    return false;
+}
+
+void runtime_module_state_unbind_unit(Runtime* runtime, uint32_t unit_id,
+        uint32_t module_state_id) {
+    if (!runtime || !runtime->module_unit_index || unit_id == 0) return;
+    uint32_t bound_id = 0;
+    if (!runtime_module_state_id_for_unit(runtime, unit_id, &bound_id) ||
+            bound_id != module_state_id) return;
+    ModuleUnitIndexEntry probe = {.unit_id = unit_id, .module_state_id = 0};
+    hashmap_delete(runtime->module_unit_index, &probe);
+}
 
 bool eval_context_init(EvalContext* owner) {
     if (!owner) {
@@ -144,6 +188,21 @@ static LambdaModuleState* lambda_module_state_at(EvalContext* owner,
     return owner && owner->module_states &&
             module_id < owner->module_state_capacity
         ? owner->module_states[module_id] : NULL;
+}
+
+// Retained code marks a process-stable logical unit, while EvalContext keeps a
+// dense local slab vector. Physical IDs intentionally bypass the map even if
+// a logical unit has the same raw number.
+static uint32_t lambda_module_state_id_for_unit(EvalContext* owner,
+        uint32_t unit_id) {
+    if ((unit_id & LAMBDA_MODULE_ID_LOGICAL_UNIT_FLAG) == 0) return unit_id;
+    unit_id &= ~LAMBDA_MODULE_ID_LOGICAL_UNIT_FLAG;
+    uint32_t module_state_id = 0;
+    if (owner && owner->runtime && runtime_module_state_id_for_unit(
+            owner->runtime, unit_id, &module_state_id)) {
+        return module_state_id;
+    }
+    return unit_id;
 }
 
 static bool lambda_property_key_spec_decode(const PropertyKeySpec* specs,
@@ -484,15 +543,34 @@ extern "C" void lambda_module_state_release_from(uint32_t first_module_id) {
 }
 
 extern "C" bool lambda_module_state_prepare_layout(const LambdaModuleLayout* layout) {
-    if (!layout || !lambda_module_state_prepare(layout->module_id,
+    if (!layout) return false;
+    uint32_t module_state_id = lambda_module_state_id_for_unit(context,
+        layout->module_id);
+    if (!lambda_module_state_prepare(module_state_id,
             layout->var_count)) return false;
     EvalContext* owner = context;
-    LambdaModuleState* state = lambda_module_state_at(owner, layout->module_id);
+    LambdaModuleState* state = lambda_module_state_at(owner, module_state_id);
+    if (layout->reserved & LAMBDA_MODULE_LAYOUT_APPEND_PROPERTY_KEYS) {
+        uint32_t key_base = layout->reserved &
+            LAMBDA_MODULE_LAYOUT_PROPERTY_KEY_BASE_MASK;
+        if (!state || state->property_key_count < key_base) {
+            log_error("module-key-link: satellite key prefix is unavailable for unit %u",
+                layout->module_id);
+            return false;
+        }
+        // A cached satellite's image is shared, while key IDs are local to a
+        // runtime slab. A later prepare sees its already-linked suffix and
+        // must not append it a second time (D4.6.1v2, D8.5.1v2).
+        if (state->property_key_count != key_base) return true;
+        return lambda_module_state_append_property_keys(module_state_id,
+            layout->property_key_specs, layout->property_key_count,
+            layout->property_key_bytes_size);
+    }
     if (!state || state->property_key_count == 0) {
         if (state) state->property_key_count = layout->property_key_count;
     }
     if (!state || state->property_key_count != layout->property_key_count) {
-        log_error("module-key-link: sealed layout changed for module %u", layout->module_id);
+        log_error("module-key-link: sealed layout changed for unit %u", layout->module_id);
         return false;
     }
     return lambda_module_state_link_property_keys_for_state(state, layout->property_key_specs,
@@ -605,6 +683,12 @@ extern "C" bool lambda_module_state_bind_static(uint32_t module_id,
     return true;
 }
 
+extern "C" bool lambda_module_state_bind_static_for_unit(uint32_t unit_id,
+        void* consts, void* type_list) {
+    return lambda_module_state_bind_static(lambda_module_state_id_for_unit(
+        context, unit_id), consts, type_list);
+}
+
 extern "C" uint32_t lambda_module_state_property_key_count(uint32_t module_id) {
     EvalContext* owner = context;
     LambdaModuleState* state = lambda_module_state_at(owner, module_id);
@@ -641,12 +725,25 @@ extern "C" Item lambda_active_module_name_item(uint32_t module_name_index,
 extern "C" void* lambda_module_const_at(const LambdaModuleLayout* layout,
         uint32_t index) {
     EvalContext* owner = context;
-    if (!owner || !layout || layout->module_id >= owner->module_state_capacity) return NULL;
-    LambdaModuleState* state = owner->module_states[layout->module_id];
+    if (!owner || !layout) return NULL;
+    uint32_t module_state_id = lambda_module_state_id_for_unit(owner,
+        layout->module_id);
+    if (module_state_id >= owner->module_state_capacity) return NULL;
+    LambdaModuleState* state = owner->module_states[module_state_id];
     if (!state || !state->consts) return NULL;
     // A generated literal may follow an arbitrary call; resolve through the
     // owning context here so MIR cannot retain a call-clobbered pool register.
     return ((void**)state->consts)[index];
+}
+
+extern "C" void* lambda_module_state_for_unit(void* runtime_context,
+        uint32_t unit_id) {
+    EvalContext* owner = (EvalContext*)runtime_context;
+    // Generated functions carry their Context explicitly. TLS is only the
+    // fallback for legacy entry points which historically had no parameter.
+    if (!owner) owner = context;
+    return lambda_module_state_at(owner, lambda_module_state_id_for_unit(owner,
+        unit_id));
 }
 
 extern "C" void* lambda_module_const_at_state(void* module_state,

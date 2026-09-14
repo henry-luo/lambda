@@ -518,6 +518,9 @@ void ast_visit_binding_pattern_children(AstNode* node, AstChildVisitor visitor,
 bool ast_any_binding_pattern_child(AstNode* node,
     AstBindingChildPredicate predicate, void* ctx);
 bool ast_index_build_profile(AstIndex* index, AstNode* root, const LangProfile* profile);
+// Copy index tables without copying the immutable AST nodes they describe.
+// Cache consumers use this before appending per-execution synthetic nodes.
+bool ast_index_clone(AstIndex* destination, const AstIndex* source);
 int ast_index_compiler_pass(void* opaque);
 // Adds a newly retained AST fragment without invalidating the stable IDs and
 // analysis facts already published for earlier REPL inputs (D8.2.4).

@@ -5963,35 +5963,56 @@ static void emit_module_state_load_insn(MirTranspiler* mt, MIR_insn_t* after,
 
 static MIR_reg_t emit_module_state_load_after(MirTranspiler* mt, MIR_insn_t after,
         MIR_insn_t* out_after) {
-    MIR_reg_t table = new_reg(mt, "module_states", MIR_T_I64);
-    emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, table),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64,
-            offsetof(EvalContext, module_states), mt->em.frame.runtime, 0, 1)));
-    MIR_reg_t module_id = new_reg(mt, "module_id", MIR_T_I64);
     if (mt->interp_module_owner) {
         // T0-backed satellites and the whole-script POC share the owner's slab
         // but have independently linked MIR images. Resolve the owner's
         // reserved id directly instead of reading mutable BSS metadata that
         // another image can relocate during batch compilation (D5.2, D8.2).
+        MIR_reg_t module_id = new_reg(mt, "module_id", MIR_T_I64);
         emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, module_id),
             MIR_new_int_op(mt->ctx, (int64_t)mt->satellite_module_state_id)));
+        MIR_reg_t state = 0;
+        if (mt->satellite_module_state_id & LAMBDA_MODULE_ID_LOGICAL_UNIT_FLAG) {
+            // A retained satellite cannot bake the template runtime's dense
+            // slab id. Resolve its logical owner in the receiving runtime.
+            mt->em.insert_after = after;
+            state = emit_call_2(mt, "lambda_module_state_for_unit", MIR_T_P,
+                MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, module_id));
+            after = mt->em.insert_after;
+            mt->em.insert_after = 0;
+        } else {
+            MIR_reg_t table = new_reg(mt, "module_states", MIR_T_I64);
+            emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, table),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                    offsetof(EvalContext, module_states), mt->em.frame.runtime, 0, 1)));
+            state = new_reg(mt, "module_state", MIR_T_I64);
+            emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, state),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, table, module_id, 8)));
+        }
+        if (out_after) *out_after = after;
+        return state;
     } else {
         MIR_reg_t layout_addr = new_reg(mt, "module_layout", MIR_T_I64);
         emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, layout_addr),
             MIR_new_ref_op(mt->ctx, mt->module_layout_bss)));
+        MIR_reg_t unit_id = new_reg(mt, "module_unit", MIR_T_I64);
         emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, module_id),
+            MIR_new_reg_op(mt->ctx, unit_id),
             MIR_new_mem_op(mt->ctx, MIR_T_U32, 0, layout_addr, 0, 1)));
+        mt->em.insert_after = after;
+        MIR_reg_t state = emit_call_2(mt, "lambda_module_state_for_unit", MIR_T_P,
+            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, unit_id));
+        after = mt->em.insert_after;
+        mt->em.insert_after = 0;
+        if (out_after) *out_after = after;
+        return state;
     }
-    MIR_reg_t state = new_reg(mt, "module_state", MIR_T_I64);
-    emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, state),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, table, module_id, 8)));
-    if (out_after) *out_after = after;
-    return state;
 }
 
 static MIR_reg_t emit_module_state(MirTranspiler* mt) {
@@ -6123,16 +6144,23 @@ static MirValue load_global_var(MirTranspiler* mt, GlobalVarEntry* gvar) {
 }
 
 static MIR_reg_t load_module_var_slots(MirTranspiler* mt, MIR_reg_t module_id,
-        MIR_reg_t slot, TypeId tid) {
-    MIR_reg_t table = new_reg(mt, "module_states", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, table),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(EvalContext, module_states),
-            mt->em.frame.runtime, 0, 1)));
-    MIR_reg_t state = new_reg(mt, "import_module_state", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, state),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, table, module_id, 8)));
+        MIR_reg_t slot, TypeId tid, bool logical_unit) {
+    MIR_reg_t state = 0;
+    if (logical_unit) {
+        state = emit_call_2(mt, "lambda_module_state_for_unit", MIR_T_P,
+            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, module_id));
+    } else {
+        MIR_reg_t table = new_reg(mt, "module_states", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, table),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(EvalContext, module_states),
+                mt->em.frame.runtime, 0, 1)));
+        state = new_reg(mt, "import_module_state", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, state),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, table, module_id, 8)));
+    }
     MIR_reg_t vars = new_reg(mt, "import_module_vars", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, vars),
@@ -6158,7 +6186,7 @@ static MIR_reg_t load_module_var_ref(MirTranspiler* mt, MIR_reg_t ref_addr,
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, slot),
         MIR_new_mem_op(mt->ctx, MIR_T_U32, sizeof(uint32_t), ref_addr, 0, 1)));
-    return load_module_var_slots(mt, module_id, slot, tid);
+    return load_module_var_slots(mt, module_id, slot, tid, true);
 }
 
 // A T0 import has no generated `_gvar_*` descriptor to link against. A
@@ -6166,21 +6194,25 @@ static MIR_reg_t load_module_var_ref(MirTranspiler* mt, MIR_reg_t ref_addr,
 // so it shares the same per-context binding without creating a mixed MIR cone.
 static MIR_reg_t load_interp_import_var(MirTranspiler* mt, NameEntry* entry,
         TypeId tid) {
-    if (!mt || !mt->interp_module_owner ||
-            !interp_satellite_import_supported(entry)) {
+    if (!mt || !mt->interp_module_owner) {
         return 0;
     }
-    Script* owner = entry->import_owner;
-    if (!owner->interp_supported || !owner->interp_planned) return 0;
+    Script* owner = NULL;
+    int slot_value = -1;
+    if (!interp_satellite_import_binding(mt->interp_module_owner, entry,
+            &owner, &slot_value) || !owner->interp_supported ||
+            !owner->interp_planned) return 0;
     MIR_reg_t module_id = new_reg(mt, "t0_import_module_id", MIR_T_I64);
     MIR_reg_t slot = new_reg(mt, "t0_import_slot", MIR_T_I64);
+    uint32_t owner_module_id = script_module_layout_id(owner);
+    bool logical_owner = (owner_module_id & LAMBDA_MODULE_ID_LOGICAL_UNIT_FLAG) != 0;
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, module_id),
-        MIR_new_int_op(mt->ctx, (int64_t)owner->module_state_id)));
+        MIR_new_int_op(mt->ctx, (int64_t)owner_module_id)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, slot),
-        MIR_new_int_op(mt->ctx, (int64_t)entry->slot)));
-    return load_module_var_slots(mt, module_id, slot, tid);
+        MIR_new_int_op(mt->ctx, (int64_t)slot_value)));
+    return load_module_var_slots(mt, module_id, slot, tid, logical_owner);
 }
 #pragma clang diagnostic pop
 
@@ -22902,7 +22934,8 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
         // Handle imported function calls (from another module compiled via C transpiler)
         if (ident->entry && ident->entry->import &&
             !(mt->interp_module_owner &&
-              interp_satellite_import_supported(ident->entry)) && entry_node &&
+              interp_satellite_import_supported(mt->interp_module_owner,
+                  ident->entry)) && entry_node &&
             (entry_node->node_type == AST_NODE_FUNC ||
              entry_node->node_type == AST_NODE_FUNC_EXPR ||
              entry_node->node_type == AST_NODE_PROC)) {
@@ -34229,6 +34262,7 @@ typedef struct MirModuleArtifacts {
     MIR_item_t consts_bss;
     MIR_item_t layout_bss;
     MIR_item_t type_list_bss;
+    MIR_item_t property_specs_bss;
 } MirModuleArtifacts;
 
 static const MirModuleNames MIR_DEFAULT_MODULE_NAMES = {
@@ -34289,7 +34323,7 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
     mt.satellite_cluster_count = satellite_cluster_count;
     mt.whole_script_poc = whole_script_poc;
     mt.satellite_module_state_id = interp_module_owner
-        ? interp_module_owner->module_state_id : 0;
+        ? script_module_layout_id(interp_module_owner) : 0;
     mt.satellite_property_key_base = interp_module_owner
         ? lambda_module_state_property_key_count(interp_module_owner->module_state_id)
         : 0;
@@ -34588,6 +34622,8 @@ static void transpile_mir_ast_finalize(MirModuleBuild* build,
         out_artifacts->consts_bss = mt.consts_bss;
         out_artifacts->layout_bss = mt.module_layout_bss;
         out_artifacts->type_list_bss = mt.type_list_bss;
+        out_artifacts->property_specs_bss = find_import(ctx,
+            build->names->property_specs_bss);
     }
     if (out_property_keys) *out_property_keys = mt.property_keys;
     else if (mt.property_keys) arraylist_free(mt.property_keys);
@@ -34718,6 +34754,7 @@ enum { MIR_SATELLITE_CLUSTER_CAP = 64 };
 
 typedef struct MirSatelliteClusterScan {
     AstScript* root;
+    Script* script;
     AstFuncNode** members;
     int count;
     int capacity;
@@ -34748,7 +34785,8 @@ static void mir_satellite_cluster_visit(AstNode* node, void* opaque) {
                 (((AstNode*)direct)->node_type == AST_NODE_FUNC ||
                  ((AstNode*)direct)->node_type == AST_NODE_PROC) &&
                 mir_satellite_module_definition(scan->root, direct) &&
-                direct->analysis->promotion.state == FN_PROMOTION_INTERP &&
+                interp_promotion_cell(scan->script, direct) &&
+                interp_promotion_cell(scan->script, direct)->state == FN_PROMOTION_INTERP &&
                 interp_satellite_supported(direct)) {
             bool seen = false;
             for (int i = 0; i < scan->count && !seen; i++) seen = scan->members[i] == direct;
@@ -34767,7 +34805,8 @@ static void mir_satellite_cluster_visit(AstNode* node, void* opaque) {
             log_debug("interp-tier: satellite cluster skips function='%s' module_def=%d state=%d supported=%d",
                 direct->name ? direct->name->chars : "<anonymous>",
                 (int)mir_satellite_module_definition(scan->root, direct),
-                direct->analysis ? (int)direct->analysis->promotion.state : -1,
+                interp_promotion_cell(scan->script, direct)
+                    ? (int)interp_promotion_cell(scan->script, direct)->state : -1,
                 (int)interp_satellite_supported(direct));
         }
         break;
@@ -34778,14 +34817,14 @@ static void mir_satellite_cluster_visit(AstNode* node, void* opaque) {
     interp_visit_children(node, mir_satellite_cluster_visit, opaque);
 }
 
-static int mir_satellite_collect_cluster(AstScript* root, AstFuncNode* target,
+static int mir_satellite_collect_cluster(Script* script, AstScript* root, AstFuncNode* target,
         AstFuncNode** members, int capacity) {
     // diagnostics: LAMBDA_SATELLITE_CLUSTER_CAP=N bounds the cluster (1 = the
     // old one-definition image); LAMBDA_SATELLITE_CLUSTER_SKIP=a,b keeps the
     // named definitions out of it (they stay dynamic targets)
     const char* cap_env = getenv("LAMBDA_SATELLITE_CLUSTER_CAP");
     if (cap_env && atoi(cap_env) > 0 && atoi(cap_env) < capacity) capacity = atoi(cap_env);
-    MirSatelliteClusterScan scan = {root, members, 0, capacity};
+    MirSatelliteClusterScan scan = {root, script, members, 0, capacity};
     members[scan.count++] = target;
     // worklist: members appended while scanning are scanned in turn
     for (int i = 0; i < scan.count; i++) {
@@ -34808,6 +34847,9 @@ static int mir_satellite_collect_cluster(AstScript* root, AstFuncNode* target,
     }
     return scan.count;
 }
+
+static bool finalize_module_property_key_specs(MIR_item_t property_specs_bss,
+        LambdaModuleLayout* layout, ArrayList* property_keys);
 
 bool compile_ast_function_satellite(Runtime* runtime, Script* script,
         const AstFuncNode* fn, void** out_boxed_entry) {
@@ -34848,7 +34890,7 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
     // 1.2-1.4x, diviter 66x on the auto tier).
     AstScript* source_root = (AstScript*)script->ast_root;
     AstFuncNode* members[MIR_SATELLITE_CLUSTER_CAP];
-    int member_count = mir_satellite_collect_cluster(source_root, (AstFuncNode*)fn,
+    int member_count = mir_satellite_collect_cluster(script, source_root, (AstFuncNode*)fn,
         members, MIR_SATELLITE_CLUSTER_CAP);
     AstFuncNode* copies = (AstFuncNode*)mem_calloc((size_t)member_count,
         sizeof(AstFuncNode), MEM_CAT_EVAL);
@@ -34886,36 +34928,6 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
     transpile_mir_ast_lower(&build);
     mem_free(copies);
     transpile_mir_ast_finalize(&build, &property_keys, &artifacts);
-    if (property_keys && property_keys->length != 0) {
-        uint64_t capacity = (uint64_t)property_keys->length * sizeof(PropertyKeySpec);
-        for (int index = 0; index < property_keys->length; index++) {
-            MirPropertyKeyEntry* entry = (MirPropertyKeyEntry*)arraylist_get(
-                property_keys, index);
-            if (!entry || !entry->name || entry->predefined_id != NAME_ID_NONE) continue;
-            capacity += (uint64_t)entry->name->len + 1;
-        }
-        if (capacity > UINT32_MAX) {
-            log_error("interp-tier: satellite property key image is too large");
-            arraylist_free(property_keys);
-            return false;
-        }
-        PropertyKeySpec* image = (PropertyKeySpec*)mem_calloc(1,
-            (size_t)capacity, MEM_CAT_EVAL);
-        uint32_t bytes_size = 0;
-        bool image_ok = image && build_property_key_image(property_keys, image,
-            (uint32_t)capacity, &bytes_size);
-        bool linked = image_ok && lambda_module_state_append_property_keys(
-            script->module_state_id, image, (uint32_t)property_keys->length,
-            bytes_size);
-        mem_free(image);
-        if (!linked) {
-            log_error("interp-tier: satellite property key image could not link");
-            arraylist_free(property_keys);
-            return false;
-        }
-    }
-    if (property_keys) arraylist_free(property_keys);
-
     // Follow the same mode branch the module compiler uses so a satellite
     // matches the interface its context actually carries.
     MIR_link(script->jit_context, satellite_interp ? MIR_set_interp_interface :
@@ -34977,9 +34989,18 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
     }
     LambdaModuleLayout* layout = (LambdaModuleLayout*)artifacts.layout_bss->addr;
     memset(layout, 0, sizeof(*layout));
-    layout->module_id = script->module_state_id;
+    layout->module_id = script_module_layout_id(script);
     // Satellites observe the exact T0 slab, including function-value slots.
     layout->var_count = script->interp_slab_count;
+    layout->reserved = LAMBDA_MODULE_LAYOUT_APPEND_PROPERTY_KEYS |
+        build.mt.satellite_property_key_base;
+    if (!finalize_module_property_key_specs(artifacts.property_specs_bss,
+            layout, property_keys) || !lambda_module_state_prepare_layout(layout)) {
+        log_error("interp-tier: satellite property key image could not link");
+        if (property_keys) arraylist_free(property_keys);
+        return false;
+    }
+    if (property_keys) arraylist_free(property_keys);
 
     *out_boxed_entry = entry;
     log_notice("interp-tier: satellite compiled function='%s' image=%u",
@@ -35130,19 +35151,18 @@ static void register_cross_lang_pub_fns(Runtime* runtime, AstImportNode* imp) {
 // Called from transpile_script() when runtime->use_mir_direct is true, for both
 // imported modules and the main script.  Depth-first import loading guarantees that
 // all of this module's sub-imports are already compiled before we are called.
-static bool finalize_module_property_key_specs(MIR_context_t ctx,
+static bool finalize_module_property_key_specs(MIR_item_t property_specs_bss,
         LambdaModuleLayout* layout, ArrayList* property_keys) {
     if (!layout) return false;
     layout->property_key_count = property_keys ? (uint32_t)property_keys->length : 0;
     layout->property_key_bytes_size = 0;
     layout->property_key_specs = NULL;
     if (!property_keys || property_keys->length == 0) return true;
-    MIR_item_t bss_item = find_import(ctx, "_mod_property_specs");
-    if (!bss_item || !bss_item->addr) {
+    if (!property_specs_bss || !property_specs_bss->addr) {
         log_error("module-key-link: property spec BSS missing after link");
         return false;
     }
-    uint8_t* bytes = (uint8_t*)bss_item->addr;
+    uint8_t* bytes = (uint8_t*)property_specs_bss->addr;
     PropertyKeySpec* specs = (PropertyKeySpec*)bytes;
     uint64_t capacity = (uint64_t)property_keys->length * sizeof(PropertyKeySpec);
     for (int index = 0; index < property_keys->length; index++) {
@@ -35180,7 +35200,7 @@ static void finalize_context_module_layout(MIR_context_t ctx, Script* script,
                 layout = (LambdaModuleLayout*)item->addr;
             } else if (strncmp(item->u.bss->name, "_gvar_", 6) == 0) {
                 LambdaModuleVarRef* ref = (LambdaModuleVarRef*)item->addr;
-                ref->module_id = script->module_state_id;
+                ref->module_id = script_module_layout_id(script);
                 ref->slot = slot++;
             }
         }
@@ -35190,10 +35210,11 @@ static void finalize_context_module_layout(MIR_context_t ctx, Script* script,
             script->reference ? script->reference : "<unknown>");
         return;
     }
-    layout->module_id = script->module_state_id;
+    layout->module_id = script_module_layout_id(script);
     layout->var_count = slot;
     layout->reserved = 0;
-    if (!finalize_module_property_key_specs(ctx, layout, property_keys)) {
+    if (!finalize_module_property_key_specs(find_import(ctx,
+            "_mod_property_specs"), layout, property_keys)) {
         log_error("module-key-link: failed to seal property keys for '%s'",
             script->reference ? script->reference : "<unknown>");
     }

@@ -9,12 +9,14 @@
 #include "ast_build.hpp"          // lambda_rd_reduce_ast: the production C parser
 #include "type_contract.hpp"
 #include "../input/input.hpp"
+#include "../input/input-script-cache.h"
 #include "../core/lambda-decimal.hpp"
 #include "../../lib/file.h"
 #include "../../lib/log.h"
 
 struct EmitDirectParseState {
     char* source;
+    size_t source_length;
     Input* input;
 };
 
@@ -37,7 +39,23 @@ static void emit_release_decimal_constants(Transpiler* tp) {
 static bool emit_prepare_direct_parse(const char* script_path,
         EmitDirectParseState* state) {
     memset(state, 0, sizeof(*state));
-    state->source = read_text_file(script_path);
+    char* canonical = file_realpath(script_path);
+    const char* identity = canonical ? canonical : script_path;
+    InputScriptRequest request = {};
+    request.identity = identity;
+    request.source_kind = INPUT_SCRIPT_SOURCE_FILE;
+    request.language = "lambda";
+    request.profile = "lambda-ast-dump";
+    request.parser_abi = "lambda-direct-parser-v1";
+    request.parse_flags = "ast-dump";
+    request.resolution_base = identity;
+    request.backend = "ast";
+    request.execution_mode = "ast-dump";
+    request.ast_abi = 1;
+    state->source = input_script_cache_copy_file_source(
+        input_manager_global_script_cache(), &request, script_path,
+        &state->source_length);
+    if (canonical) mem_free(canonical);
     if (!state->source) {
         fprintf(stderr, "Error: Cannot read '%s'\n", script_path);
         return false;
@@ -74,10 +92,11 @@ static void emit_init_direct_transpiler(Transpiler* tp,
     tp->reference = script_path;
 }
 
-static bool emit_build_direct_ast(Transpiler* tp, const char* source) {
+static bool emit_build_direct_ast(Transpiler* tp, const char* source,
+        size_t source_length) {
     AstScript* direct_root = NULL;
     LambdaParseError parse_error = {};
-    LambdaParseStatus status = lambda_rd_reduce_ast(tp, source, strlen(source),
+    LambdaParseStatus status = lambda_rd_reduce_ast(tp, source, source_length,
         &direct_root, &parse_error);
     if (status != LAMBDA_PARSE_OK || !direct_root) {
         fprintf(stderr, "Error: C parser rejected '%s': %s\n",
@@ -704,7 +723,7 @@ int emit_ast_dump_file(const char* script_path) {
     tp.directory = import_directory;
     tp.runtime = &runtime;
 
-    if (!emit_build_direct_ast(&tp, source)) {
+    if (!emit_build_direct_ast(&tp, source, parse.source_length)) {
         fprintf(stderr, "Error: Failed to build AST for '%s'\n", script_path);
         arraylist_free(tp.const_list);
         mem_free(import_directory);

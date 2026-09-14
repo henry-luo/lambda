@@ -368,7 +368,7 @@ static void render_batch_cleanup_doc(UiContext* ui_context, DomDocument* doc) {
     ui_context->font_face_count = 0;
 
     image_cache_cleanup(ui_context);
-    InputManager::destroy_global();
+    InputManager::reset_global_inputs();
     ui_context->document = nullptr;
 }
 

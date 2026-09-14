@@ -63,7 +63,8 @@ bool needs_fn_call_wrapper(AstFuncNode* fn_node) {
 
 void write_fn_name_ex(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import, const char* suffix) {
     if (import) {
-        strbuf_append_format(strbuf, "m%d.", import->script->index);
+        strbuf_append_format(strbuf, "m%u.",
+            script_compilation_unit_id(import->script));
     }
     strbuf_append_char(strbuf, '_');
     if (fn_node->name) {
@@ -88,7 +89,8 @@ void write_var_name(StrBuf *strbuf, AstNode *node, AstImportNode* import) {
     String* name = node && node->node_type == AST_NODE_VARIABLE_DECLARATOR
         ? ((AstDeclaratorNode*)node)->name : ((AstNamedNode*)node)->name;
     if (import) {
-        strbuf_append_format(strbuf, "m%d.", import->script->index);
+        strbuf_append_format(strbuf, "m%u.",
+            script_compilation_unit_id(import->script));
     }
     // user var name starts with '_'
     strbuf_append_char(strbuf, '_');

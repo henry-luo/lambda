@@ -17,6 +17,7 @@
 #include "bash_runtime.h"
 #include "bash_errors.h"
 #include "../lambda-data.hpp"
+#include "../input/input-script-cache.h"
 #include "../runtime/mir_emitter_shared.hpp"
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
@@ -4620,16 +4621,34 @@ extern "C" Item bash_source_file(Item filename) {
     char path_buf[1024];
     snprintf(path_buf, sizeof(path_buf), "%.*s", s->len, s->chars);
 
-    char* source_text = read_text_file(path_buf);
+    char* canonical = file_realpath(path_buf);
+    const char* identity = canonical ? canonical : path_buf;
+    InputScriptRequest request = {};
+    request.identity = identity;
+    request.source_kind = INPUT_SCRIPT_SOURCE_FILE;
+    request.language = "bash";
+    request.profile = "bash-source";
+    request.parser_abi = "bash-tree-sitter-bash-v1";
+    request.parse_flags = "default";
+    request.resolution_base = identity;
+    request.backend = "mir-direct";
+    request.execution_mode = "source";
+    request.ast_abi = 1;
+    request.compiler_abi = 1;
+    request.optimize_level = 2;
+    request.module_mode = false;
+    char* source_text = input_script_cache_copy_file_source(
+        input_manager_global_script_cache(), &request, path_buf, NULL);
+    if (canonical) mem_free(canonical);
     if (!source_text) {
-        log_error("bash: source: cannot open '%s'", path_buf);
+        log_error("bash: source: cannot acquire '%s'", path_buf);
         bash_set_exit_code(1);
         return (Item){.item = i2it(1)};
     }
 
     if (!bash_source_runtime) {
         log_error("bash: source: no runtime context");
-        mem_free(source_text); // from read_text_file (lib)
+        mem_free(source_text); // cache copy is released after this source operation.
         return (Item){.item = i2it(1)};
     }
 
@@ -4638,7 +4657,7 @@ extern "C" Item bash_source_file(Item filename) {
     BashTranspiler* tp = bash_transpiler_create(bash_source_runtime);
     if (!tp) {
         log_error("bash: source: failed to create transpiler");
-        mem_free(source_text); // from read_text_file (lib)
+        mem_free(source_text); // cache copy is released after this source operation.
         return (Item){.item = i2it(1)};
     }
 
@@ -4680,7 +4699,7 @@ extern "C" Item bash_source_file(Item filename) {
         bash_transpiler_destroy(tp);
         if (preproc_buf) strbuf_free(preproc_buf);
         if (dd_buf) strbuf_free(dd_buf);
-        mem_free(source_text); // from read_text_file (lib)
+        mem_free(source_text); // cache copy is released after this source operation.
         return (Item){.item = i2it(1)};
     }
 
@@ -4693,7 +4712,7 @@ extern "C" Item bash_source_file(Item filename) {
         bash_transpiler_destroy(tp);
         if (preproc_buf) strbuf_free(preproc_buf);
         if (dd_buf) strbuf_free(dd_buf);
-        mem_free(source_text); // from read_text_file (lib)
+        mem_free(source_text); // cache copy is released after this source operation.
         return (Item){.item = i2it(1)};
     }
 
@@ -4705,7 +4724,7 @@ extern "C" Item bash_source_file(Item filename) {
         bash_transpiler_destroy(tp);
         if (preproc_buf) strbuf_free(preproc_buf);
         if (dd_buf) strbuf_free(dd_buf);
-        mem_free(source_text); // from read_text_file (lib)
+        mem_free(source_text); // cache copy is released after this source operation.
         return (Item){.item = i2it(1)};
     }
 

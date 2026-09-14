@@ -105,10 +105,10 @@ struct ModuleRegistry;
 struct Runtime {
     ArrayList* scripts;  // list of (loaded) scripts
     uint32_t next_module_state_id;  // allocator shared by every language's sealed modules
-    struct hashmap* script_index;  // canonical script path -> Script*
-    // AST-mode JavaScript keeps immutable parsed Scripts here. The cache is
-    // runtime-owned so a heap/realm reset rebuilds values without reparsing code.
-    void* js_ast_cache;
+    struct hashmap* loaded_script_index;  // canonical path -> current Runtime Script*
+    // Immutable images carry logical compilation-unit IDs.  This per-Runtime
+    // map assigns each such unit a compact EvalContext module-slab address.
+    struct hashmap* module_unit_index;  // logical unit -> dense module_state_id
     ModuleRegistry* module_registry; // runtime-owned cross-language module definitions
     char* current_dir;
     int max_errors;      // error threshold for type checking (default: 10, 0 = unlimited)
@@ -134,13 +134,16 @@ struct Runtime {
     bool ui_mode;
     Arena* result_arena;
 
-    // level 1 MIR cache counters. Phase 1 records index hits/misses while module
-    // retention stays disabled until cone-based initialization lands.
+    // Runtime-local load counters. InputManager owns process-wide artifact
+    // identity and lifetime under D8.5.1v2.
     bool mir_cache_disabled;
-    int mir_cache_hits;
-    int mir_cache_misses;
-    int mir_cache_compiles;
-    int mir_cache_invalidations;
+    int script_load_hits;
+    int script_load_misses;
+    int script_load_compiles;
+    int script_load_invalidations;
+    // Active closed-JS-module image leases. These keep JIT entry addresses
+    // alive until this Runtime has torn down its realm and module namespaces.
+    ArrayList* js_module_mir_scopes;
     // Canonical runtime-owned execution state.  Runners, callbacks, and guest
     // bridges bind this stable object through TLS; none embeds it on a stack.
     // It is the one owner of the isolate's heap, name pool, type list and
@@ -294,6 +297,28 @@ static inline void runtime_set_scheduler(Runtime* runtime, LambdaScheduler* sche
 }
 void runtime_register_script(Runtime* runtime, Script* script);
 void runtime_free_script(Runtime* runtime, Script* script, bool remove_index);
+bool runtime_hold_js_module_mir_scope(Runtime* runtime,
+                                      struct InputCacheScope* scope);
+// Code images name immutable logical units; these helpers bind them to the
+// receiving runtime's dense EvalContext slab table (D8.5.1v2).
+uint32_t script_compilation_unit_id(const Script* script);
+static inline uint32_t script_module_layout_id(const Script* script) {
+    if (!script) return 0;
+    // Mark only process-cache identities. Uncached modules retain their raw
+    // dense ID so a cached unit can never remap an ordinary local slab.
+    return script->cache_compilation_unit_id != 0
+        ? script->cache_compilation_unit_id | LAMBDA_MODULE_ID_LOGICAL_UNIT_FLAG
+        : script->module_state_id;
+}
+bool runtime_module_state_id_for_unit(const Runtime* runtime, uint32_t unit_id,
+                                      uint32_t* out_module_state_id);
+bool runtime_module_state_bind_unit(Runtime* runtime, uint32_t unit_id,
+                                    uint32_t module_state_id);
+void runtime_module_state_unbind_unit(Runtime* runtime, uint32_t unit_id,
+                                      uint32_t module_state_id);
+// Called only by InputScriptCache artifact destruction after all execution
+// scopes referring to the immutable template have closed.
+void runtime_destroy_cached_script_template(Script* script);
 bool runtime_type_list_is_script_owned(Runtime* runtime);
 // Free every Script a runtime owns, with its script list and path index.
 // runtime_cleanup calls this; hosts that tear a runtime down by hand must too.
@@ -303,7 +328,7 @@ void runtime_teardown_batch_scripts(Runtime* runtime);
 // caller must have cleared all heap-owned references before this operation.
 void runtime_release_script_generation(Runtime* runtime, int first_script_index,
                                        uint32_t first_module_state_id);
-void runtime_log_mir_cache_summary(Runtime* runtime);
+void runtime_log_script_load_summary(Runtime* runtime);
 void path_reset(void);  // reset path scheme roots (must call after runtime_reset_heap in batch)
 
 // JavaScript transpiler integration

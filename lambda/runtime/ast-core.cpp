@@ -595,6 +595,53 @@ bool ast_index_build_profile(AstIndex* index, AstNode* root, const LangProfile* 
     return ast_index_walk_root(index, root, NULL, profile);
 }
 
+bool ast_index_clone(AstIndex* destination, const AstIndex* source) {
+    if (!destination || !source) return false;
+    ast_index_destroy(destination);
+    if (source->count && !ast_index_reserve(destination, source->count)) return false;
+    destination->count = source->count;
+    destination->scope_count = source->scope_count;
+    destination->binding_count = source->binding_count;
+    destination->class_count = source->class_count;
+    destination->const_folded_count = source->const_folded_count;
+    if (source->count) {
+        memcpy(destination->nodes, source->nodes, source->count * sizeof(AstNode*));
+        memcpy(destination->parents, source->parents, source->count * sizeof(AstNode*));
+        memcpy(destination->owner_functions, source->owner_functions,
+            source->count * sizeof(AstFunctionId));
+        memcpy(destination->node_bindings, source->node_bindings,
+            source->count * sizeof(AstBindingId));
+        memcpy(destination->first_children, source->first_children,
+            source->count * sizeof(AstNodeId));
+        memcpy(destination->next_siblings, source->next_siblings,
+            source->count * sizeof(AstNodeId));
+    }
+    if (source->scope_count) memcpy(destination->scopes, source->scopes,
+        source->scope_count * sizeof(NameScope*));
+    if (source->binding_count) memcpy(destination->bindings, source->bindings,
+        source->binding_count * sizeof(NameEntry*));
+    if (source->class_count) memcpy(destination->classes, source->classes,
+        source->class_count * sizeof(AstNode*));
+    if (source->function_count) {
+        destination->functions = (AstFunctionIndexEntry*)malloc(
+            source->function_count * sizeof(AstFunctionIndexEntry));
+        if (!destination->functions) {
+            ast_index_destroy(destination);
+            return false;
+        }
+        memcpy(destination->functions, source->functions,
+            source->function_count * sizeof(AstFunctionIndexEntry));
+        destination->function_count = source->function_count;
+        destination->function_capacity = source->function_count;
+    }
+    if (destination->count && !ast_index_rehash(destination,
+            source->slot_capacity ? source->slot_capacity : 256)) {
+        ast_index_destroy(destination);
+        return false;
+    }
+    return true;
+}
+
 extern "C" int ast_index_compiler_pass(void* opaque) {
     AstIndexPassContext* pass = (AstIndexPassContext*)opaque;
     return pass && pass->index && pass->root && ast_index_build_profile(

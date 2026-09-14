@@ -26,6 +26,8 @@
 #include <stdlib.h>
 
 extern "C" Item lambda_module_var_read_slot(void* module_state, uint32_t slot);
+extern "C" bool prepare_context_module_state(void* mir_ctx, void* consts,
+                                              void* type_list);
 
 // ---------------------------------------------------------------------------
 // Tier selection
@@ -39,6 +41,34 @@ static InterpState* interp_current_state(void);
 static bool interp_whole_script_poc_enabled(void);
 static bool interp_whole_script_publish_function(Script* script,
         AstFuncNode* def, Function* known_fn);
+
+typedef struct AstPromotionOverlayEntry {
+    const AstFuncNode* def;
+    FnPromotionCell cell;
+} AstPromotionOverlayEntry;
+
+FnPromotionCell* interp_promotion_cell(Script* script, const AstFuncNode* def) {
+    if (!def || !def->analysis) return NULL;
+    if (!script || !script->cache_template) return &def->analysis->promotion;
+    if (!script->ast_promotion_overlay) {
+        script->ast_promotion_overlay = arraylist_new(4);
+        if (!script->ast_promotion_overlay) return NULL;
+    }
+    for (int i = 0; i < script->ast_promotion_overlay->length; i++) {
+        AstPromotionOverlayEntry* entry = (AstPromotionOverlayEntry*)
+            script->ast_promotion_overlay->data[i];
+        if (entry && entry->def == def) return &entry->cell;
+    }
+    AstPromotionOverlayEntry* entry = (AstPromotionOverlayEntry*)mem_calloc(1,
+        sizeof(AstPromotionOverlayEntry), MEM_CAT_SYSTEM);
+    if (!entry) return NULL;
+    entry->def = def;
+    if (!arraylist_append(script->ast_promotion_overlay, entry)) {
+        mem_free(entry);
+        return NULL;
+    }
+    return &entry->cell;
+}
 
 LambdaTier lambda_tier_selected(void) { return g_lambda_tier; }
 void lambda_tier_set(LambdaTier tier) { g_lambda_tier = tier; }
@@ -490,7 +520,12 @@ static Item interp_read_binding(InterpFrame* f, NameEntry* entry) {
         // Cross-module reads resolve against the *declaring* Script (§4.1):
         // the two modules number their slabs independently, so an imported
         // name's slot indexes its owner's slab, not this frame's.
-        Script* owner = entry->import_owner ? entry->import_owner : f->module;
+        // A cached AST retains the parser-owned import edge, while the
+        // receiving Script owns the fresh module slab for this execution.
+        Script* owner = entry->import && !entry->import->is_cross_lang
+            ? lambda_ast_overlay_import_script(f->module, entry->import)
+            : entry->import_owner;
+        if (!owner) owner = entry->import_owner ? entry->import_owner : f->module;
         return interp_read_module_slot(owner, entry->slot);
     }
     int cap = interp_capture_index(f->fn, entry);
@@ -543,7 +578,10 @@ static void interp_write_binding(InterpFrame* f, NameEntry* entry, Item value) {
     if (!entry->storage_assigned) return;
     if (entry->binding_storage == BINDING_STORAGE_MODULE) {
         // An imported binding is read-only here: its owner initializes it.
-        Script* owner = entry->import_owner ? entry->import_owner : f->module;
+        Script* owner = entry->import && !entry->import->is_cross_lang
+            ? lambda_ast_overlay_import_script(f->module, entry->import)
+            : entry->import_owner;
+        if (!owner) owner = entry->import_owner ? entry->import_owner : f->module;
         interp_write_module_slot(owner, entry->slot, value);
         return;
     }
@@ -4877,7 +4915,8 @@ static InterpState* interp_current_state(void);
 static void interp_note_backedge(InterpFrame* frame) {
     if (!frame || !frame->fn || lambda_tier_selected() != LAMBDA_TIER_AUTO ||
             !frame->fn->analysis) return;
-    FnPromotionCell* cell = &frame->fn->analysis->promotion;
+    FnPromotionCell* cell = interp_promotion_cell(frame->module, frame->fn);
+    if (!cell) return;
     if (cell->state == FN_PROMOTION_INTERP && cell->backedge_count != UINT32_MAX) {
         cell->backedge_count++;
     }
@@ -4889,7 +4928,8 @@ static void interp_note_backedge(InterpFrame* frame) {
 static bool interp_tail_handoff_candidate(const InterpFrame* frame) {
     if (!frame || !frame->fn || lambda_tier_selected() != LAMBDA_TIER_AUTO ||
             !frame->fn->analysis) return false;
-    const FnPromotionCell* cell = &frame->fn->analysis->promotion;
+    const FnPromotionCell* cell = interp_promotion_cell(frame->module, frame->fn);
+    if (!cell) return false;
     if (cell->state != FN_PROMOTION_INTERP) return false;
     uint32_t threshold = interp_jit_threshold();
     return cell->tail_edge_count == UINT32_MAX ||
@@ -4899,7 +4939,8 @@ static bool interp_tail_handoff_candidate(const InterpFrame* frame) {
 static bool interp_note_tail_call(InterpFrame* frame) {
     if (!frame || !frame->fn || lambda_tier_selected() != LAMBDA_TIER_AUTO ||
             !frame->fn->analysis) return false;
-    FnPromotionCell* cell = &frame->fn->analysis->promotion;
+    FnPromotionCell* cell = interp_promotion_cell(frame->module, frame->fn);
+    if (!cell) return false;
     if (cell->state != FN_PROMOTION_INTERP) return false;
     if (cell->call_count != UINT32_MAX) cell->call_count++;
     if (cell->tail_edge_count != UINT32_MAX) cell->tail_edge_count++;
@@ -5669,8 +5710,10 @@ static bool interp_whole_script_publish_function(Script* script,
     void* entry = interp_whole_script_entry(script, def);
     if (!entry) return false;
     interp_upgrade_function_entry(fn, def, entry);
-    def->analysis->promotion.state = FN_PROMOTION_COMPILED;
-    def->analysis->promotion.boxed_entry = entry;
+    FnPromotionCell* cell = interp_promotion_cell(script, def);
+    if (!cell) return false;
+    cell->state = FN_PROMOTION_COMPILED;
+    cell->boxed_entry = entry;
     return true;
 }
 
@@ -5687,7 +5730,8 @@ bool interp_publish_satellite_member(Script* script, AstFuncNode* def, void* ent
     Function* fn = value.function;
     if (!fn || fn->def != def || fn->def_module != script || fn->closure_env ||
             fn->method) return false;
-    FnPromotionCell* cell = &def->analysis->promotion;
+    FnPromotionCell* cell = interp_promotion_cell(script, def);
+    if (!cell) return false;
     if (fn->entry_abi == FN_ENTRY_ABI_LAMBDA_INTERPRETED) {
         interp_upgrade_function_entry(fn, def, entry);
     }
@@ -5863,7 +5907,8 @@ static bool interp_promote_function(Function* fn, bool count_entry) {
     Script* script = fn->def_module;
     if (!st || !st->runtime || !def || !script || !def->analysis) return false;
 
-    FnPromotionCell* cell = &def->analysis->promotion;
+    FnPromotionCell* cell = interp_promotion_cell(script, def);
+    if (!cell) return false;
     if (cell->state == FN_PROMOTION_COMPILED && cell->boxed_entry) {
         interp_upgrade_function_entry(fn, def, cell->boxed_entry);
         return true;
@@ -5989,8 +6034,8 @@ static void interp_register_view_template(Script* script, AstViewNode* view,
     if (!generated_ref) {
         char ref[48];
         snprintf(ref, sizeof(ref), "_interp_view_%d", ordinal);
-        generated_ref = name_pool_create_len(script->name_pool, ref,
-            strlen(ref))->chars;
+        generated_ref = lambda_ast_overlay_string(script, ref);
+        if (!generated_ref) return;
     }
     entry->template_ref = generated_ref;
     entry->interp_view = view;
@@ -6282,6 +6327,18 @@ static Item interp_execute_module(Runner* runner, InterpState* st, Script* scrip
             script->const_list ? script->const_list->data : NULL,
             script->type_list)) {
         log_error("interp: could not bind static module image for '%s'",
+            script->reference ? script->reference : "<none>");
+        return ItemError;
+    }
+    void* satellite_image = script->cache_template
+        ? script->cache_template->jit_context : script->jit_context;
+    if (satellite_image && !prepare_context_module_state(satellite_image,
+            script->const_list ? script->const_list->data : NULL,
+            script->type_list)) {
+        // Satellites share immutable MIR but re-link their key suffixes into
+        // this module's fresh slab before a promoted closure can run. The
+        // owning template may have promoted after this shell was cloned.
+        log_error("interp: could not prepare cached satellite image for '%s'",
             script->reference ? script->reference : "<none>");
         return ItemError;
     }
