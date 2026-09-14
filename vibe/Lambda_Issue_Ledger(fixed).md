@@ -15,7 +15,7 @@
 
 ## Archive index
 
-This archive contains **92 historical records**: 91 RESOLVED entries and one
+This archive contains **93 historical records**: 92 RESOLVED entries and one
 CLOSED design decision. Duplicate and split records remain separate so their
 provenance is not lost. The first sections contain records formerly
 interleaved with live entries; §15 preserves the 44 records from the former
@@ -563,6 +563,28 @@ an offset-layout issue.
 
 
 ## 9. Runtime builtins (LR_09)
+
+<a id="lr09-2"></a>**LR09-2 · `SysFuncInfo` lacked a data-driven native-argument convention · RESOLVED 2026-09-14**
+The coarse call-wide `c_arg_conv` flag is retired. A fixed-arity registry row
+may now provide a `SysFuncArgDesc` array, one required `ValueRep` per ABI
+parameter; a null array explicitly retains the historical all-`Item` ABI.
+`band`, `bor`, `bxor`, and `bnot` declare their compact integer-lane slots in
+the table.
+
+Generic fixed-arity direct-call lowering now evaluates each argument to a
+`MirValue` and requests that row's carrier through `em_require_rep()` before
+forming the MIR call prototype. Thus the producer's contract and representation
+stay explicit until the ABI boundary, as required by **D2.4.1–D2.4.3**. The
+bitwise code retains only semantic dispatch: dynamic/full-width cases use the
+boxed classifier, while proven compact-int cases use the descriptor-selected
+native carrier. Interpreter planning and dispatch read the same descriptors.
+
+`SysFuncRegistry.NativeBitwiseArgumentsUsePerSlotDescriptors` covers the
+native rows, a mixed Item/F64 descriptor, and the null-array Item default;
+item-representation tests (33/33) and the focused JIT bitwise corpus (4/4)
+pass. The full Lambda baseline completed 3315/3321: its six remaining failures
+are two MIR budget ratchets and four benchmark cases, including two shift-only
+cases that use the untouched all-`Item` ABI.
 
 <a id="lr09-r30"></a>**LR09-R30 · Regex capture groups silently truncate at 256 · RESOLVED (2026-09-08)**
 A regular expression with more than 255 capture groups reports the wrong result

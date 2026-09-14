@@ -891,11 +891,13 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         // cap here was one short of it and excluded any script touching a
         // five-argument row (set_base_and_extent), sending the whole file to
         // the JIT (ESO113).
-        if (!info || !info->func_ptr || info->c_arg_conv != C_ARG_ITEM ||
+        if (!info || !info->func_ptr ||
+                !sysfunc_args_require_rep(info, VALUE_REP_ITEM) ||
                 info->arg_count < 0 || info->arg_count > 5) {
-            log_debug("interp: sys func '%s' unsupported (arity=%d conv=%d ptr=%p)",
+            log_debug("interp: sys func '%s' unsupported (arity=%d all_item=%d ptr=%p)",
                 info && info->name ? info->name : "<null>",
-                info ? info->arg_count : -99, info ? (int)info->c_arg_conv : -1,
+                info ? info->arg_count : -99,
+                info && sysfunc_args_require_rep(info, VALUE_REP_ITEM),
                 info ? (void*)info->func_ptr : NULL);
             sc->ok = false;
             sc->reject = node->node_type;

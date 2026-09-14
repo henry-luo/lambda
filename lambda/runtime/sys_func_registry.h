@@ -38,11 +38,13 @@ typedef enum CRetType {
     C_RET_CONTAINER,   // returns container pointer: Map*, List*, Array*, etc.
 } CRetType;
 
-// C-level argument convention for system functions
-typedef enum CArgConvention {
-    C_ARG_ITEM = 0,    // all arguments are boxed Items (default)
-    C_ARG_NATIVE,      // arguments are native C types (int64_t for bitwise ops)
-} CArgConvention;
+// One physical carrier required by one C ABI parameter. A NULL descriptor
+// array keeps the historical all-Item ABI; an explicit array is indexed by the
+// fixed Lambda arity. This records the ABI slot independently of the semantic
+// argument type (D2.4.1-D2.4.3).
+typedef struct SysFuncArgDesc {
+    ValueRep required_rep;
+} SysFuncArgDesc;
 
 // How a system function's success type is computed [Type_Infer TI4].
 // The zero value must stay FIXED so an unaudited row keeps today's behavior
@@ -83,7 +85,7 @@ typedef struct SysFuncInfo {
     TypeId first_param_type;    // expected type of first param (LMD_TYPE_ANY for any)
     bool can_raise;             // function may return error (T^ return type)
     CRetType c_ret_type;        // C-level return type (default: C_RET_ITEM)
-    CArgConvention c_arg_conv;  // C-level argument convention (default: C_ARG_ITEM)
+    const SysFuncArgDesc* c_arg_descs;  // NULL means every ABI argument is an Item
     const char* c_func_name;    // C function name emitted by transpiler ("fn_len", "pn_print", etc.)
     fn_ptr func_ptr;            // actual C function pointer for JIT import resolution (NULL if unimplemented)
     const char* native_c_name;  // native C math function for optimization ("fabs", "sin", etc.), NULL if none
@@ -101,6 +103,27 @@ typedef struct SysFuncInfo {
     // need the first argument, which only the AST builder can see.
     SysFuncResultKind result_kind;
 } SysFuncInfo;
+
+// Variadic rows currently use the universal Item ABI. A fixed row's descriptor
+// length is its declared arity, so no second arity source can drift from it.
+static inline ValueRep sysfunc_arg_required_rep(const SysFuncInfo* info,
+        int index) {
+    if (!info || !info->c_arg_descs || index < 0 ||
+            info->arg_count < 0 || index >= info->arg_count) {
+        return VALUE_REP_ITEM;
+    }
+    ValueRep rep = info->c_arg_descs[index].required_rep;
+    return rep == VALUE_REP_NONE ? VALUE_REP_ITEM : rep;
+}
+
+static inline bool sysfunc_args_require_rep(const SysFuncInfo* info,
+        ValueRep required_rep) {
+    if (!info || info->arg_count < 0) return false;
+    for (int index = 0; index < info->arg_count; index++) {
+        if (sysfunc_arg_required_rep(info, index) != required_rep) return false;
+    }
+    return true;
+}
 
 // GC effect and representation metadata consumed by MIR emitters. Unknown
 // entries are deliberately conservative: they remain MAY_GC and their value

@@ -1,5 +1,5 @@
 // Test bitwise operations: band, bor, bxor, bnot, shl, shr
-// Verifies native int64_t argument dispatch (C_ARG_NATIVE) from Phase 4
+// Verifies registry-driven native int-lane bitwise lowering.
 
 // ============================================
 // Section 1: Basic bitwise operations

@@ -114,15 +114,15 @@ Counts:
 | LR_06 | C transpiler (legacy C2MIR) | 0 | 0 | 0 | 0 |
 | LR_07 | MIR Direct transpiler & JIT | 9 | 0 | 0 | 9 |
 | LR_08 | Memory management & GC | 6 | 0 | 0 | 6 |
-| LR_09 | Runtime builtins | 4 | 0 | 0 | 4 |
+| LR_09 | Runtime builtins | 3 | 0 | 0 | 3 |
 | LR_10 | Error handling | 1 | 0 | 0 | 1 |
 | LR_11 | Mark data API | 6 | 0 | 0 | 6 |
 | LR_12 | Procedural runtime | 5 | 0 | 0 | 5 |
-| LR_13 | Schema validator | 7 | 0 | 0 | 7 |
+| LR_13 | Schema validator | 6 | 1 | 0 | 7 |
 | TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 6 | 1 | 0 | 7 |
-| **Live total** | | **63** | **10** | **0** | **73** |
+| **Live total** | | **61** | **11** | **0** | **72** |
 
-The active ledger now contains 73 live records, with the 64 previously counted
+The active ledger now contains 72 live records, with the 64 previously counted
 resolved records moved to the archive. Duplicate/split records and
 verification-only findings remain represented there for provenance.
 Two original entries each split into a resolved half and a surviving residue —
@@ -502,13 +502,6 @@ composite `(name, arg_count)` map in `build_ast.cpp` cannot disambiguate them.
 Enabling them requires `first_param_type`-based disambiguation (one is
 `LMD_TYPE_PATH`) in `get_sys_func_info`, which does not exist.
 
-<a id="lr09-2"></a>**LR09-2 · `SysFuncInfo` lacks a data-driven native-argument convention · OPEN**
-`c_arg_conv` is still a coarse `C_ARG_ITEM` / `C_ARG_NATIVE` boolean
-(`sys_func_registry.h:44`–`45`, field `:83`). With no per-argument convention,
-the bitwise ops are special-cased inline in the transpiler ahead of generic
-dispatch ([LR07-8](#lr07-8))
-rather than driven from the table.
-
 <a id="lr09-3"></a>**LR09-3 · Ordered comparison is deliberately partial · OPEN**
 The scalar comparators enumerate numeric/datetime/string cases and return
 `BOOL_ERROR` for other types, bool and null included
@@ -648,23 +641,28 @@ the fixed-length array check is commented out; warning merging exists
 `item.type_id() == type->type_id` (`:431`–`436`); `format_type_name` returns the
 literal `"unknown"` (`error_reporting.cpp:341`–`344`).
 
-<a id="lr13-8"></a>**LR13-8 · The validator runs on the typed boundary's *success* path · OPEN (measured 2026-09-12)**
-`lambda_type_matches` (`lambda/runtime/lambda-eval.cpp:1611`) routes union
-contracts (`TYPE_KIND_BINARY`/`UNARY`) and shaped map/element contracts into
-`runtime_validate_value_against_type`, and it is called from the **accepting**
-path of `runtime_type_admit_value` (`:10606`). `SchemaValidator::validate_type`
-therefore runs per admitted value, not only to build a rejection diagnostic —
-contrary to D3.2.2's "deep, on first crossing". Confirmed by `sample` stack
-(`lambda_type_check` → `SchemaValidator::validate_type` →
-`validate_against_type` → `validate_binary_type` → `validate_against_union_type`);
-self time 18.7% prettier_ast, 19.7% splay, 13.3% three_way_merge, 11.2%
-richards, 8.8% log_pipeline. `prettier_ast` reports 6,615,043
-`union_admit_calls` per run. The existing memo
-`runtime_union_map_rep_proves_cached` (`:10573`) is entered only for
-`LMD_TYPE_MAP` values and never records a **disproof**, so an unprovable
-candidate re-runs the relation and the validator on every crossing.
-S11.4.1v3 grants the proof-reuse licence; D3.2.4v3 supplies the elision test.
-Fix tracked in [Tune27 M1/T27-1](impl/Lambda_Impl_Tune27 (done).md).
+<a id="lr13-8"></a>**LR13-8 · Repeated successful validation of an unproven union member · PARTIAL (re-scoped 2026-09-14)**
+*Resolved portion:* Tune27 removed the measured hot-path regression. A plain
+unary `T[]` crossing now certifies its admitted carrier instead of re-walking
+the whole array; a map whose trusted layout proves a union arm returns through
+`runtime_union_map_rep_proves_cached` (`lambda-eval.cpp:10693`–`:10728`). The
+current release evidence reports 6,615,034 cache hits from 6,615,040
+`prettier_ast` union admissions, and the accepted-path validator cost is gone
+from the former hot rows. `tune27_array_contract_union.ls` passes on interpreter,
+auto, and eager JIT.
+
+*Residue:* the memo records `MAP_CONTRACT_UNION_MEMBER_PROVEN` only. When a
+dynamic/foreign map has no physical-layout proof but the schema validator still
+accepts it, `runtime_union_map_rep_proves_cached` returns false without
+recording that result; `runtime_type_admit_value` then reaches
+`lambda_type_matches` (`:10842`), which invokes
+`runtime_validate_value_against_type` (`:1665`). The first deep validation is
+required by **D3.2.2**; subsequent crossings of that unchanged accepted value
+still revalidate it. **S11.4.1v3** permits reuse, and **D3.2.4v3** defines the
+physical-proof condition. The remaining work is a sound negative-proof or
+post-validation certificate for stable untrusted shapes, with invalidation on
+shape transition. [Tune27 M1/T27-1](impl/Lambda_Impl_Tune27 (done).md) records
+why this residue was not measurable on the frozen benchmark rows.
 
 <a id="lr13-7"></a>**LR13-7 · `printf`/emoji output in production paths · OPEN**
 Contrary to CLAUDE.md rule 4, `ast_validate.cpp` has 59 direct `printf` calls

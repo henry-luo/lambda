@@ -4605,19 +4605,35 @@ static MIR_reg_t emit_coerce_value_to_declared(MirTranspiler* mt, MIR_reg_t val,
     return val;
 }
 
-static MIR_reg_t emit_bitwise_i64_arg(MirTranspiler* mt,
-        const MirValue& value, TypeId tid) {
-    // v5: a bitwise operand is a machine word and `int`'s lane IS a machine
-    // word, so there is nothing to narrow -- the convert-op-convert sandwich
-    // v4 needed here is gone. This is the collatz class the benchmark table
-    // priced at 6.99x.
-    if (tid == LMD_TYPE_INT) return emit_int_native_lane_typed(mt, value).r;
-    if (is_integer_type_id(tid) || tid == LMD_TYPE_UINT64) {
-        return em_require_rep(&mt->em, value,
-            lambda_canonical_rep_for_type_id(tid)).reg;
+static MIR_type_t sysfunc_arg_rep_mir_type(ValueRep rep) {
+    switch (rep) {
+    case VALUE_REP_F64:
+        return MIR_T_D;
+    case VALUE_REP_RAW_GC_POINTER:
+    case VALUE_REP_RAW_NON_GC_POINTER:
+        return MIR_T_P;
+    case VALUE_REP_ITEM:
+    case VALUE_REP_INT_LANE:
+    case VALUE_REP_MACHINE_I64:
+    case VALUE_REP_MACHINE_U64:
+    case VALUE_REP_I64:
+    case VALUE_REP_U64:
+        return MIR_T_I64;
+    default:
+        log_error("mir: unsupported system-function argument representation %d",
+            (int)rep);
+        abort();
     }
-    log_error("mir: non-integer argument reached native bitwise lowering");
-    abort();
+}
+
+// A registry descriptor is the call ABI authority. The producer chooses its
+// own carrier; the direct call boundary requests the descriptor through the
+// shared MirValue conversion firewall (D2.4.1-D2.4.3).
+static MirValue emit_sysfunc_abi_arg(MirTranspiler* mt,
+        const SysFuncInfo* info, int index, AstNode* argument) {
+    MirValue produced = transpile_expr_value(mt, argument);
+    return em_require_rep(&mt->em, produced,
+        sysfunc_arg_required_rep(info, index));
 }
 
 // Unbox boxed Item -> container pointer by stripping the type tag (upper 8 bits)
@@ -24069,13 +24085,9 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 RETURN_CALL_VALUE(mir_emit_u32_bitwise(mt, call_node));
             }
 
-            MirValue a1_value = transpile_expr_value(mt, arg);
-            TypeId a1_tid = mir_value_carrier_type(a1_value);
-            MIR_reg_t a1 = emit_bitwise_i64_arg(mt, a1_value, a1_tid);
+            MIR_reg_t a1 = emit_sysfunc_abi_arg(mt, info, 0, arg).reg;
             arg = arg->next;
-            MirValue a2_value = transpile_expr_value(mt, arg);
-            TypeId a2_tid = mir_value_carrier_type(a2_value);
-            MIR_reg_t a2 = emit_bitwise_i64_arg(mt, a2_value, a2_tid);
+            MIR_reg_t a2 = emit_sysfunc_abi_arg(mt, info, 1, arg).reg;
 
             // band/bor/bxor: single MIR instruction, always safe
             MIR_insn_code_t mir_op = (MIR_insn_code_t)0;
@@ -24197,9 +24209,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 RETURN_CALL_VALUE(boxed_result);
             }
 
-            MirValue a1_value = transpile_expr_value(mt, arg);
-            TypeId a1_tid = mir_value_carrier_type(a1_value);
-            MIR_reg_t a1 = emit_bitwise_i64_arg(mt, a1_value, a1_tid);
+            MIR_reg_t a1 = emit_sysfunc_abi_arg(mt, info, 0, arg).reg;
             // ~a == a XOR -1
             MIR_reg_t result = new_reg(mt, "bnot", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_XOR,
@@ -24327,18 +24337,29 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
         if (info->arg_count != -1) {
             MIR_type_t arg_types[LAMBDA_MAX_FUNCTION_ARGS];
             MIR_op_t arg_ops[LAMBDA_MAX_FUNCTION_ARGS];
-            MIR_reg_t boxed_args[LAMBDA_MAX_FUNCTION_ARGS];
+            MIR_reg_t arg_regs[LAMBDA_MAX_FUNCTION_ARGS];
+            ValueRep arg_reps[LAMBDA_MAX_FUNCTION_ARGS];
             int ai = 0;
             for (arg = call_node->argument; arg && ai < LAMBDA_MAX_FUNCTION_ARGS; arg = arg->next) {
-                boxed_args[ai] = transpile_box_item(mt, arg);
-                arg_types[ai] = MIR_T_I64;
-                arg_ops[ai] = MIR_new_reg_op(mt->ctx, boxed_args[ai]);
+                MirValue abi_arg = emit_sysfunc_abi_arg(mt, info, ai, arg);
+                arg_regs[ai] = abi_arg.reg;
+                arg_reps[ai] = abi_arg.rep;
+                arg_types[ai] = sysfunc_arg_rep_mir_type(abi_arg.rep);
+                arg_ops[ai] = MIR_new_reg_op(mt->ctx, abi_arg.reg);
                 ai++;
             }
             if (sysfunc_params_reject_error(info)) {
-                for (int i = 0; i < ai; i++) emit_return_if_item_error(mt, boxed_args[i]);
+                for (int i = 0; i < ai; i++) {
+                    if (arg_reps[i] == VALUE_REP_ITEM) {
+                        emit_return_if_item_error(mt, arg_regs[i]);
+                    }
+                }
             }
-            for (int i = 0; i < ai; i++) async_track_boxed_item_reg(mt, boxed_args[i]);
+            for (int i = 0; i < ai; i++) {
+                if (arg_reps[i] == VALUE_REP_ITEM) {
+                    async_track_boxed_item_reg(mt, arg_regs[i]);
+                }
+            }
             async_emit_invoke_resume_point(mt, call_node);
             MIR_reg_t result = em_call_with_args(&mt->em, sys_fn_name, mir_ret_type,
                 ai, arg_types, arg_ops, false);
@@ -24354,9 +24375,13 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             MIR_op_t arg_ops[LAMBDA_MAX_FUNCTION_ARGS];
             int ai = 0;
             while (arg && ai < LAMBDA_MAX_FUNCTION_ARGS) {
-                MIR_reg_t boxed = transpile_box_item(mt, arg);
-                async_track_boxed_item_reg(mt, boxed);
-                arg_ops[ai++] = MIR_new_reg_op(mt->ctx, boxed);
+                MirValue abi_arg = emit_sysfunc_abi_arg(mt, info, ai, arg);
+                if (abi_arg.rep != VALUE_REP_ITEM) {
+                    log_error("mir: variadic system function requires non-Item ABI argument");
+                    abort();
+                }
+                async_track_boxed_item_reg(mt, abi_arg.reg);
+                arg_ops[ai++] = MIR_new_reg_op(mt->ctx, abi_arg.reg);
                 arg = arg->next;
             }
 
