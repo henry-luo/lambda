@@ -1148,6 +1148,53 @@ static Item interp_call_js_export(Function* function, const uint64_t* words,
     }
 }
 
+// CW25 / S9.2.2: a mutable borrow of a PLACE (`root.path`, `root[i]`) detaches
+// the root binding and every link down to the leaf, reinstalling each
+// replacement in its parent, and yields the detached leaf -- already installed
+// where it belongs, so in-place writes through it reach the root and nothing
+// else. Returns false when `arg` is not a borrowable place (the caller keeps
+// its ordinary path); *leaf is ItemError on a failed detach. `value_leaf`
+// serves builtin mutators (cow_place_leaf).
+static bool interp_borrow_place_leaf(InterpFrame* f, AstNode* arg, Item* leaf,
+        bool value_leaf) {
+    AstCowPath place = {};
+    if (!ast_collect_cow_path(&place, arg) || place.count == 0 || !place.root ||
+            place.root->node_type != AST_NODE_IDENT) {
+        return false;
+    }
+    NameEntry* root_entry = ((AstIdentNode*)place.root)->entry;
+    if (!root_entry) return false;
+    Scratch root_slot(f);
+    root_slot.set(interp_read_binding(f, root_entry));
+    if (!is_container_type_id(get_type_id(root_slot.get()))) return false;
+    Item private_root = cow_prepare_write(root_slot.get());
+    if (item_is_error(private_root)) {
+        *leaf = private_root;
+        return true;
+    }
+    root_slot.set(private_root);
+    interp_write_binding(f, root_entry, root_slot.get());
+
+    Scratch path_slot(f);
+    path_slot.set(interp_ptr_item(array_plain()));
+    for (int seg = 0; seg < place.count; seg++) {
+        Scratch key_slot(f);
+        key_slot.set(interp_eval_cow_path_key(f, place.segment[seg],
+            place.is_member[seg]));
+        if (interp_frame_pending(f)) {
+            *leaf = ItemNull;
+            return true;
+        }
+        Array* keys = (Array*)(uintptr_t)path_slot.get().item;
+        if (!keys) return false;
+        array_push(keys, key_slot.get());
+    }
+    // a builtin mutator's place hands a non-container link back as its value
+    *leaf = value_leaf ? cow_place_leaf(root_slot.get(), path_slot.get())
+                       : cow_path_borrow(root_slot.get(), path_slot.get());
+    return true;
+}
+
 static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
     int source_argc = 0;
     for (AstNode* a = node->argument; a; a = a->next) source_argc++;
@@ -1374,6 +1421,43 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
             interp_write_binding(f, owner_entry, replacement);
             return replacement;
         }
+        AstCowPath owner_place = {};
+        if (sinfo && !injected && owner_arg && !owner_entry &&
+                (sinfo->fn == SYSPROC_PUSH || sinfo->fn == SYSPROC_SPLICE ||
+                 sinfo->fn == SYSPROC_VMAP_SET) &&
+                ast_collect_cow_path(&owner_place, owner_arg) && owner_place.count > 0 &&
+                owner_place.root && owner_place.root->node_type == AST_NODE_IDENT) {
+            // S9.2.2: `push(m.a, v)` mutates a PLACE. The raw helper wrote
+            // through whatever container the read returned -- a snapshot or a
+            // second slot holding the same array saw the append. Borrow the
+            // place (detach root and spine) after the value operands, as the
+            // binding arm above does, then mutate the private leaf in place.
+            RootSpan place_args((size_t)argc);
+            uint64_t* place_words = place_args.words();
+            AstNode* value_node = node->argument->next;
+            for (int i = 1; value_node; value_node = value_node->next, i++) {
+                place_words[i] = eval_expr(f, value_node).item;
+                if (interp_frame_pending(f)) return ItemNull;
+            }
+            Item leaf = ItemNull;
+            if (interp_borrow_place_leaf(f, node->argument, &leaf, true)) {
+                if (interp_frame_pending(f)) return ItemNull;
+                place_words[0] = leaf.item;
+            } else {
+                // a root that holds no container has nothing to borrow
+                place_words[0] = eval_expr(f, node->argument).item;
+                if (interp_frame_pending(f)) return ItemNull;
+            }
+            // the leaf is unique and installed: the raw helper keeps its
+            // certificate-checked append and writes nowhere else. Growth keeps
+            // the header, so the installed slot needs no store-back.
+            if (sinfo->fn == SYSPROC_VMAP_SET) {
+                return member_set_cow((Item){.item = place_words[0]},
+                    (Item){.item = place_words[1]}, (Item){.item = place_words[2]});
+            }
+            return eval_sys_call(f, sinfo, (const Item*)(void*)place_words, argc,
+                node->type);
+        }
         // Arguments must all be rooted before the C entry runs: the entry may
         // allocate, and an earlier argument would otherwise be unreachable.
         RootSpan arg_roots((size_t)(argc > 0 ? argc : 1));
@@ -1535,36 +1619,9 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
             // caller's container and need no writeback binding. Mirrors the
             // MIR argument-loop hook so the tiers cannot diverge.
             if (!entry && borrow_args[index]) {
-                AstCowPath place = {};
-                if (!ast_collect_cow_path(&place, borrow_args[index]) ||
-                        place.count == 0 || !place.root ||
-                        place.root->node_type != AST_NODE_IDENT) {
-                    continue;
-                }
-                NameEntry* root_entry = ((AstIdentNode*)place.root)->entry;
-                if (!root_entry) continue;
-                Scratch root_slot(f);
-                root_slot.set(interp_read_binding(f, root_entry));
-                if (!is_container_type_id(get_type_id(root_slot.get()))) continue;
-                Item private_root = cow_prepare_write(root_slot.get());
-                if (item_is_error(private_root)) return private_root;
-                root_slot.set(private_root);
-                interp_write_binding(f, root_entry, root_slot.get());
-
-                Scratch path_slot(f);
-                path_slot.set(interp_ptr_item(array_plain()));
-                bool path_ok = true;
-                for (int seg = 0; seg < place.count && path_ok; seg++) {
-                    Scratch key_slot(f);
-                    key_slot.set(interp_eval_cow_path_key(f, place.segment[seg],
-                        place.is_member[seg]));
-                    if (interp_frame_pending(f)) return ItemNull;
-                    Array* keys = (Array*)(uintptr_t)path_slot.get().item;
-                    if (!keys) { path_ok = false; break; }
-                    array_push(keys, key_slot.get());
-                }
-                if (!path_ok) continue;
-                Item leaf = cow_path_borrow(root_slot.get(), path_slot.get());
+                Item leaf = ItemNull;
+                if (!interp_borrow_place_leaf(f, borrow_args[index], &leaf, false)) continue;
+                if (interp_frame_pending(f)) return ItemNull;
                 if (item_is_error(leaf)) return leaf;
                 words[index] = leaf.item;
                 continue;
@@ -5899,12 +5956,14 @@ static bool interp_promote_function(Function* fn, bool count_entry) {
             return false;
         }
     }
-    if (!interp_satellite_supported(def)) {
+    if (const char* refusal = interp_satellite_refusal(def)) {
         // A pinned definition is a declared interpreter policy, never a
-        // fallback to a different module compilation path.
+        // fallback to a different module compilation path. Notice level: a
+        // hot function left in T0 is otherwise visible only as a missing
+        // promotion line (T27-6).
         cell->state = FN_PROMOTION_PINNED_INTERP;
-        log_debug("interp-tier: pinned function='%s' reason=satellite-boundary",
-            def->name ? def->name->chars : "<anonymous>");
+        log_notice("interp-tier: pinned function='%s' reason=%s",
+            def->name ? def->name->chars : "<anonymous>", refusal);
         return false;
     }
 

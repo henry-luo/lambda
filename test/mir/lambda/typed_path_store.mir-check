@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Typed runtime-index stores use guarded packed loads and direct integer/array-pointer stores before cold COW descriptor allocation; typed append enforces its binding contract.",
+  "description": "Typed runtime-index stores use guarded packed loads and direct integer/array-pointer stores before the cold checked store; typed append enforces its binding contract. Tune27 T27-4: a cold arm of up to three keys takes the fixed-key checked setter and allocates no path descriptor.",
   "checks": [
     {
       "in_func": "_bump_#",
@@ -9,8 +9,10 @@
         { "pattern": "mov\t{{r}}, i64:8({{r}})" },
         { "pattern": "mov\t{{r}}, i64:16({{r}})" },
         { "pattern": "mov\ti64:({{r}}), {{r}}" },
-        { "pattern": "call\tarray_plain" },
-        { "pattern": "call\tlambda_map_path_set_checked_inplace" }
+        { "pattern": "call\tlambda_map_path_set_checked_fixed" }
+      ],
+      "forbid": [
+        "call\tarray_plain_p, array_plain"
       ]
     },
     {
@@ -19,8 +21,10 @@
         { "pattern": "call\tlambda_array_push_checked" },
         { "pattern": "mov\t{{r}}, u8:4({{r}})" },
         { "pattern": "mov\ti64:8({{r}}), {{r}}" },
-        { "pattern": "call\tarray_plain" },
-        { "pattern": "call\tlambda_map_path_set_checked_inplace" }
+        { "pattern": "call\tlambda_map_path_set_checked_fixed" }
+      ],
+      "forbid": [
+        "call\tarray_plain_p, array_plain"
       ]
     }
   ]

@@ -2437,6 +2437,9 @@ extern "C" {
     ArrayNum* array_int_new(int64_t length);
     ArrayNum* array_int64_new(int64_t length);
     ArrayNum* array_float_new(int64_t length);
+    // T27-7: republish a packed float literal whose `null_mask` members were
+    // null as generic storage, so the later checked boundary sees the nulls.
+    Item array_float_literal_with_nulls(ArrayNum* packed, uint64_t null_mask);
 
     void array_float_set(ArrayNum *arr, int64_t index, double value);
     void array_int_set(ArrayNum *arr, int64_t index, int64_t lane);
@@ -2688,6 +2691,12 @@ extern "C" {
     // NM-O8 typed arm: validates in place instead of swapping a candidate in.
     Item lambda_map_path_set_checked_inplace(Item owner, Item path, Item value,
         Type* expected, const char* boundary);
+    // T27-4: fixed-key twin of the two setters above; shape = count | inplace<<8
+    // | index-key bits <<16, leaf_contract resolved by the compiler (or NULL).
+    Item lambda_map_path_set_checked_fixed(Item owner, Item value, Item key0, Item key1,
+        Item key2, int64_t shape, Type* expected, Type* leaf_contract);
+    // one link of a declared path's contract walk; *open_leaf below an open array
+    Type* lambda_map_path_contract_step(Type* current, Item key, bool* open_leaf);
     Item lambda_array_set_checked(Item owner, int64_t index, Item value, Type* expected,
         const char* boundary);
     Item lambda_array_set_checked_item(Item owner, Item key, Item value, Type* expected,
@@ -3135,6 +3144,10 @@ extern "C" {
     // CW25: bounded descriptor form for compiler-known member/int paths.
     Item cow_path_borrow_fixed(Item owner, int64_t count,
         Item key0, Item key1, Item key2);
+    // builtin mutator place (push/splice/set): spine detach; a non-container
+    // link is returned as the value for the mutator to reject
+    Item cow_place_leaf(Item owner, Item path);
+    Item cow_place_leaf_fixed(Item owner, int64_t count, Item key0, Item key1, Item key2);
 
     // runtime type coercion for typed array annotations (int[], float[], etc.)
     // converts generic Array/List to typed array, or validates existing typed array

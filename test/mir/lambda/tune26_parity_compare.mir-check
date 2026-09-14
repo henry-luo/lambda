@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "description": "Tune26 T26-4: finite int x % 2 == 0 uses a single low-bit test, while the emitted generic remainder arm preserves sentinel semantics.",
+  "description": "Tune26 T26-4: finite int x % 2 == 0 uses a single low-bit test, while the emitted generic remainder arm preserves sentinel semantics. Tune27 T27-9: the int53 band test is one shared 64-bit `add v, INT53_MAX` / `ule t, 2 * INT53_MAX` pair instead of GE/LE/AND.",
   "checks": [
     {
       "in_func": "_tune26_is_even_#",
       "expect_seq": [
-        "ge\t{{r}}, %p1, -9007199254740991",
-        "le\t{{r}}, %p1, 9007199254740991",
+        "add\t{{r}}, %p1, 9007199254740991",
+        "ule\t{{r}}, {{r}}, 18014398509481982",
         "and\t{{r}}, %p1, 1",
         "eq\t{{r}}, {{r}}, {{r}}"
       ]

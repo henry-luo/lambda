@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "description": "T19-C: an ordered int-lane comparison whose operands are PROVEN non-null lowers to ONE native integer compare plus the sentinel exclusion, instead of widening both operands to the double lane (a band test, an i2d and a cold call per operand). The forbid keeps the widening from coming back. This fixture's `counts[i]` carries the dense-extent proof, so it stays on this arm; a comparison whose operand MAY be null now absorbs to null instead (S6.1.2, emit_ordered_null_absorption) and is covered by InterpWalker.OrderedComparisonAbsorbsNull. Note an earlier revision cited S7.10.3 for \"null comparisons are false\": that ruling is about sys-func return contracts, and its parenthetical means the null RESULT is falsy, not that the result is a bool.",
+  "description": "T19-C: an ordered int-lane comparison whose operands are PROVEN non-null lowers to ONE native integer compare plus the sentinel exclusion, instead of widening both operands to the double lane (a band test, an i2d and a cold call per operand). The forbid keeps the widening from coming back. This fixture's `counts[i]` carries the dense-extent proof, so it stays on this arm; a comparison whose operand MAY be null now absorbs to null instead (S6.1.2, emit_ordered_null_absorption) and is covered by InterpWalker.OrderedComparisonAbsorbsNull. Note an earlier revision cited S7.10.3 for \"null comparisons are false\": that ruling is about sys-func return contracts, and its parenthetical means the null RESULT is falsy, not that the result is a bool. Tune27 T27-9 (2026-09-14): `while (i < 4)` is a literal-bounded finite loop whose dense scan proves `counts`, so the body is emitted twice -- the fast arm under the entry guard and the generic sibling -- and each arm carries exactly one native compare and one sentinel exclusion; the widening stays forbidden in both.",
   "checks": [
     {
       "in_func": "_count_positive_#",
       "count": {
-        "\tgt\t": 1,
-        "\tne\t{{r}}, {{r}}, 72057594037927936": 1
+        "\tgt\t": 2,
+        "\tne\t{{r}}, {{r}}, 72057594037927936": 2
       },
       "forbid": [
         "\tdgt\t",

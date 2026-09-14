@@ -1,0 +1,6 @@
+10
+[1.5, 3.5]
+[2.5, null]
+[array, 3.5, nan]
+[array, nan, 2]
+[[1.5, false, 0], [null, true, 7]]

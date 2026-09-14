@@ -1330,11 +1330,6 @@ typedef struct FnPromotionCell {
     // (a once-called `main` whose loop is the whole workload never reached
     // the entry threshold and there is no loop-entry OSR).
     uint8_t loop_bodied;
-    // D8.1.1v8: 0 = not yet scanned, 1 = no, 2 = the body REBINDS a typed
-    // `var` parameter. Such a body has no raw home to publish through, so it
-    // and every satellite that would call it directly stay in T0, where the
-    // rebind reaches the caller through the CW33 home.
-    uint8_t typed_var_rebind;
 } FnPromotionCell;
 
 // Native JS bodies expose only numeric return lanes; other results stay boxed.

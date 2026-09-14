@@ -1,21 +1,20 @@
 {
   "schema_version": 1,
-  "description": "Tune18 consumes the bounded len() interval before emitting the int53 saturation quartet and second boxing test.",
+  "description": "Tune18 consumes the bounded len() interval before emitting the int53 saturation quartet and second boxing test. Tune27 T27-9: the int53 band test is one shared 64-bit `add v, INT53_MAX` / `ule t, 2 * INT53_MAX` pair instead of GE/LE/AND.",
   "checks": [
     {
       "in_func": "_range18_#",
       "forbid": [
         "call\tlambda_int_lane_add_slow_p, lambda_int_lane_add_slow",
         "call\tint2it_lane_p, int2it_lane",
-        "ge\t{{r}}, {{r}}, -9007199254740991",
-        "le\t{{r}}, {{r}}, 9007199254740991"
+        "18014398509481982"
       ]
     },
     {
       "in_func": "_range18_unproven_#",
       "expect": [
-        "ge\t{{r}}, {{r}}, -9007199254740991",
-        "le\t{{r}}, {{r}}, 9007199254740991"
+        "add\t{{r}}, {{r}}, 9007199254740991",
+        "{{r}}, 18014398509481982"
       ]
     }
   ]

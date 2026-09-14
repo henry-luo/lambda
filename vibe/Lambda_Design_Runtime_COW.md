@@ -41,7 +41,8 @@
 | View-borrow confinement | CW16.3, §11.7 | Not started |
 | ArrayNum COW | CW15–CW16, **CW32v2** (§11.8) | **IMPLEMENTED 2026-08-29** (worktree `nm-impl-work`): mark-only binds, guarded lane stores on marked roots (byte-test at offset 4 → cold detach + republish), `array_num_set_cow_idx`/`index_assign_cow` wrappers, T0 mask fix. Fixture `cow_arraynum_alias.ls`. Mutable views OPEN/TODO by designer ruling |
 | JS↔Lambda ownership boundary | CW17, §9.3 | **Deferred by designer (2026-08-28)** |
-| Read-modify-write handle borrows | **CW34** (§11.11) | **RATIFIED + IMPLEMENTED 2026-09-06**: tier-shared static shape (`build_ast`), runtime spine test `cow_bind_rmw_handle`; fixture `proc/cow_rmw_borrow.ls`, emission fixture `cw34_rmw_borrow` |
+| Move-out binds | **CW35** (§11.12) | **RATIFIED + IMPLEMENTED 2026-09-14**: `rmw_moves_out` in `build_ast`, shares CW34's runtime spine test; fixture `proc/cow_move_out_bind.ls` |
+| Read-modify-write handle borrows | **CW34** (§11.11) | **RATIFIED + IMPLEMENTED 2026-09-06; v2 (sibling members, early returns) 2026-09-14**: tier-shared static shape (`build_ast`), runtime spine test `cow_bind_rmw_handle`; fixture `proc/cow_rmw_borrow.ls`, emission fixture `cw34_rmw_borrow` |
 
 ## 1. Context A — the C4 semantic contract this must implement
 
@@ -1006,6 +1007,36 @@ is a store through the caller's home. Until then the shape is a standing
 T0/MIR divergence for a rarely-written idiom (rebind-through-borrow rather
 than mutate-through-borrow).
 
+**M1a extension — typed scalar and record homes (2026-09-14, D8.1.1v10).**
+The M1a prologue skipped every typed non-array `var` position, so on the
+eager tier `pn inc(var n: int) { n = n + 1 }` rebound only the callee's lane
+register — every scalar lane, `string`, records and their optional forms;
+T0 published them. The transport now covers every publishable `var`
+position under the single boxed convention of the table above's first row
+(the home holds a tagged Item; the lane-address row stays with the full
+pointer-ABI stage):
+
+- callee prologue consumes the cell for every publishable `var` param; the
+  epilogue publishes the param's FINAL value encoded through its declared
+  contract lane (`emit_box_contract_lane`), so a null `float?`/`bool?`
+  lane and a null `string?` pointer publish `ItemNull`;
+- the `_b` adapter forwards the cell it consumed to the raw body through its
+  own binding slot, reloads, and stores back through the caller's home —
+  the only boxed entry T0 and dynamic dispatch reach;
+- a typed argument whose binding is a lane local (int/float/bool register,
+  `String*` pointer) has no Item-classed slot of its own: the caller homes
+  it from the boxed argument's root slot and decodes the published Item back
+  into the lane after the call (`MirVarHomeKind::TYPED_LANE`). The reload
+  never switches a binding's carrier (D3.3.4), which is why a scalar-lane
+  binding passed to an *untyped* `var` parameter still publishes no home.
+
+Two pre-existing lane defects surfaced by the fixture were fixed with it:
+an assignment of `null` to a nullable float/bool/string lane binding decoded
+through the non-nullable decoder (NaN / `false` / a non-null "" pointer), and
+`return g` boxed a lane local without its contract. Fixture
+`test/lambda/proc/cow_var_typed_rebind.ls`; the auto-tier rebind pin of
+D8.1.1v8 is lifted.
+
 ### 11.11 CW34 — read-modify-write handle borrows (RATIFIED 2026-09-06, user; IMPLEMENTED same day)
 
 **The idiom.** Handle-store code reads a level out of a mutable root into a
@@ -1073,6 +1104,34 @@ An error exit inside the region leaves the partial in-place writes visible
 through the root — exactly the rule a `var` parameter already has under
 CW33, which the borrow is.
 
+**Revision v2 (D4.4.4v2, RATIFIED 2026-09-14, user).** Two region rules
+were stricter than P6 needs. (a) *Sibling members.* A region may name the
+root through a member other than the handle's first member segment —
+`var vals = t.vals`, `t.vals = vals`, `len(t.vals)` — because that is a
+different slot; the only way it could see the handle's in-place writes is an
+alias between the two slots, and a field store or literal that publishes a
+named value into a second slot share-marks it (S9.3.1), so the leaf detaches
+on the handle's first write. A sibling store whose value names the handle is
+still refused. (b) *Early returns.* A `return` without the store-back
+immediately before it is admitted when no statement of the region before it
+names the handle and no loop of the region encloses it: no in-place write can
+have happened. Together they let cd's table put borrow both of its handles
+(`test/lambda/proc/cow_rmw_sibling_borrow.ls`, 2,000 → 2 array copies per
+1,000 puts). Found on the way and **fixed 2026-09-14**: a builtin mutator on
+a place (`push(m.a, v)`, `splice(arr[0], s, n)`, `set(m.v, k, v)`) wrote through
+whatever container the read returned — a second slot, a root snapshot, even a
+plain parameter's caller (S9.1.3) saw the write, on every tier. Both tiers
+now borrow the place exactly like a `var` place argument (CW25, S9.2.2):
+value operands first, then `cow_place_leaf[_fixed]` detaches the root and
+every link and hands the raw mutator the installed private leaf (a link that
+holds no container is returned as that value, so the mutator's own soft error
+is unchanged). Fixture `test/lambda/proc/cow_place_mutator.ls`;
+`proc_push.ls`'s `vadd(v, x)` was an unmigrated CW29 reliance site and now
+takes `var v` with its golden unchanged. Copy counts: cd, splay, deltablue and
+richards unchanged; havlak +18.8k small array copies (the `bbs.data` array
+that `loop_add_node` appends to is also held by `lsg.loops`), 1.009x
+min-of-9 time.
+
 **Not covered (measured, deliberately out of scope).** cd's `arr_set` is
 lowered but its root arrives through a plain-parameter chain
 (`recurse_draw(voxel_map, …)`), so the spine is CW29-shared and its 220k
@@ -1082,6 +1141,67 @@ copies are the S9.1.3 snapshot cost of that source; splay's rotations bind
 by an intervening write" rule, not RMW); jetstream deltablue writes through
 plain parameters with no store-back at all. Those are candidates for a
 later ruling, not extensions of this one.
+
+### 11.12 CW35 — move-out binds (RATIFIED 2026-09-14, user; IMPLEMENTED same day)
+
+**The idiom.** A rotation reads a child out of a mutable root, overwrites the
+place, then writes through the child:
+
+```lambda
+pn rotate_right(var node: N?) N? {
+    var left: N? = node.left   // place copy: S9.1.2 marks `left`
+    var branch = left.right    // read through the handle
+    node.left = branch         // the place no longer holds `left`
+    left.right = node          // write: detaches `left` because of the mark
+    return left
+}
+```
+
+The bind's mark is stale by the time of the write — the overwrite removed the
+only other reference — but the monotonic bit (D4.4.1) still forces a copy.
+§11.11's "Not covered" paragraph named this shape ("an observer removed by an
+intervening write") as a candidate for a later ruling.
+
+**The ruling (D4.4.5).** `var h = root.path` binds as a borrow when a later
+statement of the same list is an unconditional store `root.path = e` to the
+same path with `e` not naming `h`, and every statement in between is a
+declaration or plain/indexed/member assignment that (i) names `h` only as the
+object of a member or index read, (ii) names the root only through sibling
+members (D4.4.4v2), (iii) does not write through `h` or rebind it, and (iv)
+contains no branch, loop, return, `raise`, `^`, handler, nested function or
+`start`. Root kinds, key kinds, link count and annotation conditions are
+D4.4.4v2's; the bind uses the same runtime spine test
+(`cow_bind_rmw_handle`), so a shared root or intermediate link keeps the
+snapshot bind, and the leaf's own share bit still decides whether `h`'s later
+writes detach. Between the bind and the overwrite nothing writes through
+either reference, so the two holders cannot diverge; after the overwrite `h`
+is the only holder. No store is flagged release: the overwrite stores `e`
+with its ordinary capture.
+
+**Implementation.** `rmw_moves_out` in `build_ast.cpp` runs when a candidate
+has no store-back and sets the same `NameEntry::cow_borrow_lowered` both tiers
+already consume. Record annotations are admitted when the place's field
+contract and the declaration name the same nominal record with the same
+optionality — the admission is then an identity — which also widens CW34 for
+`var l: T? = root.f`. Fixture `test/lambda/proc/cow_move_out_bind.ls` pins a
+typed and an untyped rotation, a second holder of the moved node, a write
+before the overwrite and an escape before the overwrite, identical on all
+tiers and to the pre-CW35 build.
+
+**Measured limit.** JetStream splay is unchanged (603k map copies).
+`rotate_right` is now statically eligible, but its root arrives shared:
+`splay_node` binds `var left = node.left` and stores it back only inside `if`
+branches, which neither CW34 nor CW35 admits, so `left` is snapshot-marked and
+every nested `branch = splay_node(branch, key)` call hands the rotations a
+marked root. Admitting store-backs in nested lists needs a path-sensitive
+"handle dead after store-back on every path" analysis — including reads of the
+handle after a rotation has written into the same container in place — and is
+left for its own ruling. Two pre-existing value-semantics defects surfaced
+while writing the fixtures: `push` on a place (`push(m.a, v)`) ignored an
+alias left by `m.a = x; m.b = x` (fixed the same day, §11.11 v2 note), and a
+`let before = b` snapshot of a typed optional record is mutated by a later
+`var`-parameter call on `b` (JIT for a simple setter, both tiers for a
+rotation), on clean `713a80c2a` as well.
 
 ## 12. Settled decisions and residual risks
 
