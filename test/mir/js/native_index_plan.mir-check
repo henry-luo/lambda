@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "description": "D1.3/D8.4.1v2: an array-literal receiver with a canonical Number key uses the packed tagged direct plan; stale shape states and partial keys retain JS semantic kernels.",
+  "checks": [
+    {
+      "in_func": "_js_nativeRead_#_body",
+      "expect": [
+        "call\tjs_elements_get_number"
+      ],
+      "forbid": [
+        "call\tjs_get_reference",
+        "call\tjs_to_property_key"
+      ]
+    },
+    {
+      "in_func": "_js_fractionalRead_#_body",
+      "expect": [
+        "call\tjs_elements_get_number"
+      ],
+      "forbid": [
+        "call\tjs_get_reference"
+      ]
+    },
+    {
+      "in_func": "_js_packedTaggedRead_#_body",
+      "expect": [
+        "lsh",
+        "mov\ti64:("
+      ],
+      "forbid": [
+        "call\tjs_to_property_key"
+      ]
+    },
+    {
+      "in_func": "_js_accessorFallbackRead_#_body",
+      "expect": [
+        "call\tjs_elements_get_number"
+      ]
+    },
+    {
+      "in_func": "_js_partialRead_#_body",
+      "expect": [
+        "call\tjs_get_reference"
+      ],
+      "forbid": [
+        "call\tjs_elements_get_number"
+      ]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # LambdaJS — MIR Lowering, Code Generation & Exceptions
 
-> **Last verified against tree:** 2026-08-18 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-09-15
 
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the phase-2/3 lowering mechanics: how typed AST nodes become MIR instructions, the boxed-Item-by-default emission model and its native INT/FLOAT fast paths, boxing/unboxing tag arithmetic, condition lowering and the comparison `_raw` facades, short-circuit operators, constant folding and dead-branch elimination, call emission, the in-band Item exception model (JIT try/catch/finally, signal-based stack overflow), and dynamic code (`eval` / `Function`).
 >
@@ -42,18 +42,62 @@ Boxing and unboxing of the common scalars is emitted **inline as MIR bit-ops**, 
 
 ## 4. Native arithmetic & numeric fast paths
 
-`jm_transpile_binary` (`js_mir_expression_lowering.cpp:1704`) takes the native path when `both_numeric` holds (both effective types are INT or FLOAT) and the operator is not `**`, `&&`, or `||` (`:1763`). Operands are fetched via `jm_transpile_as_native` at the chosen arithmetic width (`use_float` when either side is FLOAT) and combined with a single MIR op, returning a **raw** register:
+`jm_transpile_binary` selects its numeric hit through the shared
+`em_numeric_op_plan` table in `lambda/runtime/mir_emitter_shared.hpp`. The
+table is deliberately physical only: it describes the MIR operation and its
+numeric helper where one is unavoidable; it carries no JavaScript coercion,
+nullability, or truthiness policy. This is the required sharing boundary under
+**D1.3** and **D8.2.3**.
 
-- `+` / `-` → `MIR_DADD`/`MIR_ADD`, `MIR_DSUB`/`MIR_SUB` (`:1780`).
-- `*` → `MIR_DMUL`; notably **INT×INT also multiplies through doubles** then `MIR_D2I`, to match JS double-precision semantics rather than exposing 64-bit int product precision (`:1806`).
-- `/` → always `MIR_DDIV` returning a double, even for INT/INT, because `7/2 === 3.5` (`:1821`).
-- `%` → the runtime `fmod` (so `x % 0 → NaN`) (`:1839`).
-- `**` → no native MIR op; falls through to the boxed `js_power` (`:1848`).
-- comparisons `<` `<=` `>` `>=` → `MIR_DLT`/`MIR_LTS` etc., returning a native 0/1 (`:1852`).
+JavaScript admits the plan only when *both* operands have an INT/FLOAT proof.
+It then obtains native operands via `jm_transpile_as_native` and emits one
+native sequence: `+`, `-`, `*`, and `/` use the appropriate F64 arithmetic;
+`%` uses the numeric remainder helper; equality and relational operations
+return a raw I64 boolean. Integer multiplication still uses the double route
+where that is required to preserve JavaScript Number precision. `**`, bitwise
+operators, and every incomplete/mixed proof use their established JavaScript
+semantic lowering.
 
-Crucially, the native comparison path requires **both** sides to be statically numeric; a mixed/untyped comparison deliberately does **not** take a "semi-native" route (the disabled block at `:2025` explains why: `it2i` on a boxed float, or float-unboxing a non-numeric Item, would produce garbage) and instead falls through to the boxed runtime.
+This restriction is intentional. A String, object, BigInt, or unknown value
+never enters the Number plan for `+`; no native-looking register type is used
+as proof of source semantics. NaN, signed zero, conversion, abrupt completion,
+and overloaded operator behavior therefore stay in the boxed JS kernel when
+the exact Number proof is absent (**D2.4.1–D2.4.3**, **D8.4.1v2**). The
+compiler profile records admission/fallback while emitting; it does not insert
+a generated-code trace call, so trace-on and trace-off have identical finalized
+MIR.
 
-The boxed fallback (`:2154`) maps each operator to a runtime import. Tune8 collapsed several families: `js_compare(op, l, r)` covers `<` `<=` `>` `>=` with `op` a compile-time-constant operand (`:2175`), and `!=` / `!==` reuse `js_equal` / `js_strict_equal` followed by an inline `MIR_XOR` of the low bit rather than dedicated not-equal functions (`:2155`, `invert_box`). String `+` is special-cased to `js_string_concat` when both sides are STRING (`:1766`).
+### 4.1 Physical property plans and compact references
+
+`JsMirReference` separates language-owned reference evaluation from the
+post-evaluation physical decision. It preserves base/key evaluation order,
+optional/private/`super` setup, completion checks, and roots; `jm_emit_get_value`
+and `jm_emit_put_value` then choose either a small guarded hit or exactly one
+existing JS semantic fallback. This leaves uncommon property semantics out of
+the common read path (**D5.3.4**, **D8.4.3v2**).
+
+- A proven computed INT/FLOAT key remains native until the selector. A literal
+  packed tagged Array hit checks its receiver/layout, bounds, and element
+  presence before using the shared element-address emitter and one tagged
+  load. Noncanonical keys, holes, prototype-visible cases, and other receivers
+  use the existing native-key or generic JS kernel once; they are not
+  reimplemented in MIR.
+- Object literals and eligible constructor prefixes receive immutable TypeMap
+  recipes. A predicted ordinary named field checks the exact recipe/layout and
+  slot assumptions, then directly loads or stores. A shape transition,
+  descriptor/exotic receiver, or incompatible store takes `js_get_name_id` or
+  `js_set_name_id`. The recipe is compile metadata, never a mutable feedback
+  cache, as required by **D8.4.1v2**.
+- ASCII string leaves profile search, split, slice, character access, and
+  concat separately from Unicode. The runtime's epoch-guarded, rooted
+  substring cache only reuses eligible ASCII substrings; UTF-16/Unicode cases
+  retain their semantic path.
+
+The known-code source setter used during MIR function setup is no-GC; the
+module-unit state index is likewise a no-GC `ArrayList`. This removes common
+path safepoints without relaxing emitter-owned roots (**D5.3.4**). Focused
+MIR contracts for the Number, index, and field plans, plus Result45 and its
+interleaved A/B, are recorded in [JS Tune11](../../../vibe/jube/JS_Tune11.md).
 
 ---
 
@@ -209,7 +253,11 @@ Grounded in the current code; candidates for cleanup, not necessarily bugs.
 4. **Per-scope strict-mode is an approximation in eval.** The eval/`Function` paths set a single `tp->strict_mode` from the inherited flag (`js_mir_eval_lowering.cpp:1042`) and do a coarse source scan for restricted assignments (`js_eval_strict_assigns_restricted_name`) rather than tracking strictness per lexical scope; some edge cases are handled by string-scanning the source instead of by the parser.
 5. **eval tier selection is textual.** Tiers 3–4 are chosen by hand-written character scans over the source (RegExp-literal recognizer, keyword table, string-aware semicolon search) rather than from the parsed AST, so the bridge between "looks like an expression" and "is an expression" is approximate and the keyword whitelist must be maintained by hand (`:907`–`:1002`).
 6. **Native multiply routes INT×INT through doubles.** Correct for ≤2^53 but means a pure-integer hot loop pays `I2D`/`DMUL`/`D2I` instead of an integer multiply (`js_mir_expression_lowering.cpp:1806`); a range-guarded integer-multiply fast path is possible.
-7. **Recomputed native-path predicates.** `jm_transpile_as_native` re-derives whether a child expression took the native path by re-inspecting the AST and re-running `jm_get_effective_type` (`js_mir_calls_boxing_types.cpp:1356`+), duplicating logic already embedded in `jm_transpile_binary`; the two predicates can drift.
+7. **Native-child materialization is still local.** Tune11 centralizes binary
+   operation selection in `MirNumericOpPlan`, but `jm_transpile_as_native`
+   still consults a child's effective type when it materializes that child.
+   Carrying a richer child-plan carrier could remove that remaining query, but
+   should be attempted only with a measured compiler-time or hot-loop benefit.
 
 ---
 

@@ -465,7 +465,7 @@ TEST_F(StrCaseTest, ToUpper) {
 }
 
 TEST_F(StrCaseTest, ToLowerLong) {
-    // trigger SWAR path (>8 bytes)
+    // exercise the long-input conversion path.
     char src[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     char dst[32];
     str_to_lower(dst, src, 26);
@@ -477,6 +477,19 @@ TEST_F(StrCaseTest, ToUpperLong) {
     char dst[32];
     str_to_upper(dst, src, 26);
     EXPECT_EQ(memcmp(dst, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", 26), 0);
+}
+
+TEST_F(StrCaseTest, MixedBytesAcrossWordBoundaries) {
+    // A packed range test used to let the preceding byte's borrow suppress
+    // conversion of following A/a bytes.
+    const char lower_src[] = "BBAAAABBBBAAAABB";
+    const char upper_src[] = "bbaaaabbbbaaaabb";
+    char lower_dst[sizeof(lower_src)];
+    char upper_dst[sizeof(upper_src)];
+    str_to_lower(lower_dst, lower_src, sizeof(lower_src) - 1);
+    str_to_upper(upper_dst, upper_src, sizeof(upper_src) - 1);
+    EXPECT_EQ(memcmp(lower_dst, "bbaaaabbbbaaaabb", sizeof(lower_src) - 1), 0);
+    EXPECT_EQ(memcmp(upper_dst, "BBAAAABBBBAAAABB", sizeof(upper_src) - 1), 0);
 }
 
 TEST_F(StrCaseTest, MixedAndNonAscii) {
@@ -509,7 +522,7 @@ TEST_F(StrCaseTest, IsAscii) {
 }
 
 TEST_F(StrCaseTest, IsAsciiLong) {
-    // trigger SWAR path
+    // exercise the long-input ASCII scan.
     char buf[64];
     memset(buf, 'A', 64);
     EXPECT_TRUE(str_is_ascii(buf, 64));

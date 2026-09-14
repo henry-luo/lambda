@@ -2313,10 +2313,7 @@ void runtime_free_all_scripts(Runtime* runtime) {
         RuntimeLoadedScriptIndex::destroy(runtime->loaded_script_index);
         runtime->loaded_script_index = NULL;
     }
-    if (runtime->module_unit_index) {
-        hashmap_free(runtime->module_unit_index);
-        runtime->module_unit_index = NULL;
-    }
+    runtime_module_state_clear_unit_index(runtime);
 }
 
 void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {

@@ -1206,6 +1206,54 @@ static inline MIR_type_t em_numeric_storage_type(ArrayNumElemType type) {
     }
 }
 
+// Frontends own the proof that admits a scalar operation, but a proven numeric
+// operation must select the same physical MIR opcode in every frontend.  This
+// table deliberately carries no coercion or nullability policy: Lambda's
+// nullable lanes and JavaScript's Number semantics remain frontend-local.
+typedef struct MirNumericOpPlan {
+    const char* reg_name;
+    MIR_insn_code_t f64_opcode;
+    // Only comparison plans consume this field.  Arithmetic in the shared
+    // scalar domain is explicitly F64 so `/` never inherits integer division.
+    MIR_insn_code_t i64_opcode;
+    const char* helper_name;
+    bool is_comparison;
+} MirNumericOpPlan;
+
+static inline bool em_numeric_op_plan(Operator op, MirNumericOpPlan* plan) {
+    if (!plan) return false;
+    switch (op) {
+    case OPERATOR_ADD:
+        *plan = {"add", MIR_DADD, MIR_MOV, NULL, false}; return true;
+    case OPERATOR_SUB:
+        *plan = {"sub", MIR_DSUB, MIR_MOV, NULL, false}; return true;
+    case OPERATOR_MUL:
+        *plan = {"mul", MIR_DMUL, MIR_MOV, NULL, false}; return true;
+    case OPERATOR_DIV:
+        *plan = {"div", MIR_DDIV, MIR_MOV, NULL, false}; return true;
+    case OPERATOR_MOD:
+        // MIR has no IEEE remainder instruction; the registered fmod import
+        // is the shared scalar leaf selected by a frontend that admits `%`.
+        *plan = {"mod", MIR_MOV, MIR_MOV, "fmod", false}; return true;
+    case OPERATOR_EQ:
+    case OPERATOR_JS_STRICT_EQ:
+        *plan = {"eq", MIR_DEQ, MIR_EQ, NULL, true}; return true;
+    case OPERATOR_NE:
+    case OPERATOR_JS_STRICT_NE:
+        *plan = {"ne", MIR_DNE, MIR_NE, NULL, true}; return true;
+    case OPERATOR_LT:
+        *plan = {"lt", MIR_DLT, MIR_LT, NULL, true}; return true;
+    case OPERATOR_LE:
+        *plan = {"le", MIR_DLE, MIR_LE, NULL, true}; return true;
+    case OPERATOR_GT:
+        *plan = {"gt", MIR_DGT, MIR_GT, NULL, true}; return true;
+    case OPERATOR_GE:
+        *plan = {"ge", MIR_DGE, MIR_GE, NULL, true}; return true;
+    default:
+        return false;
+    }
+}
+
 static inline void em_store_at(MirEmitter* em, MIR_reg_t base, MIR_disp_t offset,
         MIR_type_t type, MIR_reg_t value) {
     MIR_insn_code_t code = type == MIR_T_D ? MIR_DMOV : MIR_MOV;

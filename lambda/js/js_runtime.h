@@ -238,7 +238,10 @@ Item js_typeof(Item value);         // typeof x
 // Object Functions
 // =============================================================================
 
+struct TypeMap;
 Item js_new_object(void);
+Item js_new_object_with_typemap(struct TypeMap* tm);
+Item js_new_literal_object_with_typemap(struct TypeMap* tm);
 // An array's companion property map is created on first use — index accessors,
 // non-index keys and attribute bits all live there. Callers that are about to
 // write must go through this; a bare js_array_props() read can be NULL.
@@ -246,12 +249,12 @@ Map* js_array_props_ensure(Array* arr);
 // Allocate a JS object with its immutable semantic metadata selected before
 // the object is returned to any caller. The class ID is a stable JsClass value.
 Item js_new_object_with_class(int class_id);
-struct TypeMap;
 // Native carriers use the same pre-publication metadata-qualified empty shape.
 struct TypeMap* js_object_type_for_class(int class_id);
 Item js_new_class_function(void);
 void js_set_class_constructor(Item class_function, Item constructor_body);
 void js_set_class_instance_prototype(Item class_function, Item prototype);
+void js_set_class_instance_shape(Item class_function, struct TypeMap* shape);
 void js_set_class_superclass(Item class_function, Item superclass);
 Item js_get_class_superclass(Item class_function);
 bool js_is_class_constructor_value(Item value);
@@ -306,6 +309,7 @@ Item js_array_new_from_item(Item arg);
 Item js_elements_get(Item array, Item index);
 Item js_elements_set(Item array, Item index, Item value);
 Item js_elements_get_int(Item array, int64_t index);
+Item js_elements_get_number(Item array, double index);
 Item js_elements_set_int(Item array, int64_t index, Item value);
 // Returns a boolean Set completion for the narrow ordinary-array index fast
 // path, or ItemNull when descriptor/prototype/exotic checks require fallback.
@@ -372,6 +376,7 @@ Item* js_alloc_env3(Item a, Item b, Item c);
 
 void js_env_rehome_scalars(Item* env);
 void js_set_function_name(Item fn_item, Item name_item);
+void js_set_function_source_known_code(Item fn_item, Item source_item);
 void js_set_function_source(Item fn_item, Item source_item);
 enum {
     JS_FUNC_INIT_GENERATOR = 1u << 0,

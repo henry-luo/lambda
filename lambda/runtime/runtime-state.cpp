@@ -5,7 +5,7 @@
 #include "side_stack.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/log.h"
-#include "../../lib/hashmap_typed.hpp"
+#include "../../lib/arraylist.h"
 #include <string.h>
 
 // The runtime layer owns the active evaluator for runners and fixtures.
@@ -16,16 +16,20 @@ typedef struct ModuleUnitIndexEntry {
     uint32_t module_state_id;
 } ModuleUnitIndexEntry;
 
-typedef TypedHashMap<ModuleUnitIndexEntry,
-    HashMapIntegralMemberKeyOps<ModuleUnitIndexEntry, &ModuleUnitIndexEntry::unit_id>>
-    ModuleUnitIndexMap;
+static ModuleUnitIndexEntry* runtime_module_unit_index_find(
+        const Runtime* runtime, uint32_t unit_id) {
+    if (!runtime || !runtime->module_unit_index || unit_id == 0) return NULL;
+    for (int index = 0; index < runtime->module_unit_index->length; index++) {
+        ModuleUnitIndexEntry* entry = (ModuleUnitIndexEntry*)
+            runtime->module_unit_index->data[index];
+        if (entry && entry->unit_id == unit_id) return entry;
+    }
+    return NULL;
+}
 
 bool runtime_module_state_id_for_unit(const Runtime* runtime, uint32_t unit_id,
         uint32_t* out_module_state_id) {
-    if (!runtime || !runtime->module_unit_index || unit_id == 0) return false;
-    ModuleUnitIndexEntry probe = {.unit_id = unit_id, .module_state_id = 0};
-    const ModuleUnitIndexEntry* found = ModuleUnitIndexMap::get(
-        runtime->module_unit_index, probe);
+    ModuleUnitIndexEntry* found = runtime_module_unit_index_find(runtime, unit_id);
     if (!found) return false;
     if (out_module_state_id) *out_module_state_id = found->module_state_id;
     return true;
@@ -34,14 +38,22 @@ bool runtime_module_state_id_for_unit(const Runtime* runtime, uint32_t unit_id,
 bool runtime_module_state_bind_unit(Runtime* runtime, uint32_t unit_id,
         uint32_t module_state_id) {
     if (!runtime || unit_id == 0) return true;
+    ModuleUnitIndexEntry* found = runtime_module_unit_index_find(runtime, unit_id);
+    if (found) {
+        found->module_state_id = module_state_id;
+        return true;
+    }
     if (!runtime->module_unit_index) {
-        runtime->module_unit_index = ModuleUnitIndexMap::create(64);
+        runtime->module_unit_index = arraylist_new(8);
     }
     if (!runtime->module_unit_index) return false;
-    ModuleUnitIndexEntry entry = {.unit_id = unit_id,
-        .module_state_id = module_state_id};
-    ModuleUnitIndexMap::set(runtime->module_unit_index, entry);
-    if (!ModuleUnitIndexMap::oom(runtime->module_unit_index)) return true;
+    ModuleUnitIndexEntry* entry = (ModuleUnitIndexEntry*)mem_alloc(
+        sizeof(ModuleUnitIndexEntry), MEM_CAT_EVAL);
+    if (!entry) return false;
+    entry->unit_id = unit_id;
+    entry->module_state_id = module_state_id;
+    if (arraylist_append(runtime->module_unit_index, entry)) return true;
+    mem_free(entry);
     log_error("module-unit-index: failed to bind logical unit %u", unit_id);
     return false;
 }
@@ -49,11 +61,24 @@ bool runtime_module_state_bind_unit(Runtime* runtime, uint32_t unit_id,
 void runtime_module_state_unbind_unit(Runtime* runtime, uint32_t unit_id,
         uint32_t module_state_id) {
     if (!runtime || !runtime->module_unit_index || unit_id == 0) return;
-    uint32_t bound_id = 0;
-    if (!runtime_module_state_id_for_unit(runtime, unit_id, &bound_id) ||
-            bound_id != module_state_id) return;
-    ModuleUnitIndexEntry probe = {.unit_id = unit_id, .module_state_id = 0};
-    ModuleUnitIndexMap::erase(runtime->module_unit_index, probe);
+    for (int index = 0; index < runtime->module_unit_index->length; index++) {
+        ModuleUnitIndexEntry* entry = (ModuleUnitIndexEntry*)
+            runtime->module_unit_index->data[index];
+        if (!entry || entry->unit_id != unit_id ||
+                entry->module_state_id != module_state_id) continue;
+        mem_free(entry);
+        arraylist_remove(runtime->module_unit_index, index);
+        return;
+    }
+}
+
+void runtime_module_state_clear_unit_index(Runtime* runtime) {
+    if (!runtime || !runtime->module_unit_index) return;
+    for (int index = 0; index < runtime->module_unit_index->length; index++) {
+        mem_free(runtime->module_unit_index->data[index]);
+    }
+    arraylist_free(runtime->module_unit_index);
+    runtime->module_unit_index = NULL;
 }
 
 bool eval_context_init(EvalContext* owner) {

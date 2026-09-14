@@ -77,6 +77,8 @@ struct JsClassData {
     Item constructor;
     Item instance_prototype;
     Item superclass;
+    // Compiler-pool recipe for a base class's immutable public-field prefix.
+    TypeMap* instance_shape;
     // CustomElementRegistry owns this internal association; keeping it beside
     // the class capability avoids exposing host bookkeeping as a JS property.
     Item custom_element_name;

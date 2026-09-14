@@ -753,14 +753,14 @@ static bool jm_function_source_span(JsMirTranspiler* mt,
         mt->tp->source_length, fn_node, text_out, len_out);
 }
 
-// Helper: emit js_set_function_source call to store original source text for toString
+// New MIR callables always own code before source materialization.
 void jm_emit_set_function_source(JsMirTranspiler* mt, MIR_reg_t fn_reg, JsFunctionNode* fn_node) {
     if (!fn_node) return;
     const char* text = NULL;
     uint32_t len = 0;
     if (!jm_function_source_span(mt, fn_node, &text, &len)) return;
     MIR_reg_t src_reg = jm_box_string_literal(mt, text, len);
-    jm_callr_void_2(mt, "js_set_function_source", fn_reg, src_reg);
+    jm_callr_void_2(mt, "js_set_function_source_known_code", fn_reg, src_reg);
 }
 
 void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
@@ -833,7 +833,7 @@ void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNod
     // Tree-sitter may extend the node end past trailing comments; trim to closing '}'
     while (len > 1 && text[len - 1] != '}') len--;
     MIR_reg_t src_reg = jm_box_string_literal(mt, text, len);
-    jm_callr_void_2(mt, "js_set_function_source", cls_obj, src_reg);
+    jm_callr_void_2(mt, "js_set_function_source_known_code", cls_obj, src_reg);
 }
 
 // ============================================================================

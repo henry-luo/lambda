@@ -446,6 +446,8 @@ struct JsDomPlatformState {
     uint64_t roots_epoch = 0;
 };
 
+enum { JS_ASCII_SUBSTRING_CACHE_CAPACITY = 1024 };
+
 // All realm-owned string fast paths share one contiguous Item range. The
 // finite byte/code-point tables cache value domains; they are not registries.
 struct JsStringCacheState : JsRootedState {
@@ -459,6 +461,9 @@ struct JsStringCacheState : JsRootedState {
     Item ascii_chars[128] = {};
     Item test262_percent_hex[256] = {};
     Item test262_cached_percent_left = {};
+    // Bounded value cache: entries own only short ASCII result values, never
+    // source strings or object identity.
+    Item ascii_substrings[JS_ASCII_SUBSTRING_CACHE_CAPACITY] = {};
     uint32_t last_four_byte_cp = 0;
     uint64_t last_four_byte_epoch = 0;
     uint32_t test262_percent_byte0 = 0;
@@ -471,6 +476,7 @@ struct JsStringCacheState : JsRootedState {
     uint64_t ascii_chars_epoch = ~0ULL;
     uint64_t decode_uri_component_error_epoch = 0;
     uint64_t decode_uri_error_epoch = 0;
+    uint32_t ascii_substring_hashes[JS_ASCII_SUBSTRING_CACHE_CAPACITY] = {};
 };
 
 // One global-environment row represents either a declarative lexical binding,

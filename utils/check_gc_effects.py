@@ -63,13 +63,19 @@ VERIFIED_EXTERNAL_LEAVES = {
     "__builtin_memcpy",
     "lambda_float_ptr_to_item",
     "log_debug",
+    # Diagnostic logging does not enter generated code or Lambda's collector.
+    "log_error",
     "memcpy",
     "memset",
     "mpd_free",
     "mpd_isinfinite",
     "mpd_isinteger",
+    # These scalar inspections/conversions mirror the existing qget_ssize
+    # leaf: they inspect a caller-owned decimal and never enter Lambda.
+    "mpd_isnegative",
     "mpd_isnan",
     "mpd_iszero",
+    "mpd_qget_i64",
     "mpd_qget_ssize",
     "mpd_to_sci",
     "setjmp",
