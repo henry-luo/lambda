@@ -5,7 +5,9 @@
   `int?`, `bool?`, `float?`, widened `i8?`…`u32?`, pointer-backed optionals, and the `Item`
   expression fallback for `i64?`/`u64?` retain explicit native-lane descriptors in eligible
   Lambda arrays and map shapes. Wide nullable native Arrays use destination-owned `TypedItem`
-  slots rather than raw `Item` words; that LR08-4 array correction landed 2026-09-13.
+  slots rather than raw `Item` words; that LR08-4 array correction landed 2026-09-13. The same
+  destination-owned slot is now required for packed `i64?`/`u64?` Map/Shape fields by
+  D2.5.2v3/D2.6.1v3/D2.6.4v3; that map projection is not yet implemented.
   `int?`, `float?`, `bool?`,
   `string?`, `symbol?`, `binary?`, `decimal?`,
   `datetime?`, `complex?`, and the supported nullable container pointers (`array?`, `map?`,
@@ -38,8 +40,9 @@ N(T?) = N(T) | NULL_LANE(T)
 `Item` flowing through a register merely because an expression might be absent. At a box/unbox
 boundary it converts to/from the ordinary `ItemNull` value. The explicit `i64?`/`u64?` exception
 selects `Item` itself as the expression carrier `N(T?)`, because no raw 64-bit null code exists.
-That does not permit persistent native Array storage to retain a scalar-home pointer: an
-`i64?[]`/`u64?[]` stores a destination-owned `TypedItem` per element.
+That does not permit persistent native storage to retain a scalar-home pointer: an
+`i64?[]`/`u64?[]` element and a packed Map/Shape field declared `i64?`/`u64?` each store a
+destination-owned `TypedItem`. [D2.5.2v3, D2.6.1v3, D2.6.4v3]
 
 This applies everywhere a compiler or runtime chooses a physical representation:
 
@@ -93,13 +96,13 @@ but gives up the native array/loop path for every in-bounds iteration.
 | native lane | Unboxed ABI/storage representation selected for a proven concrete type. |
 | lane null | A reserved lane value or null pointer used only for `T?`. |
 | boxed `Item` | The universal tagged representation at dynamic boundaries and the expression carrier for a wide optional with no spare unboxed null representation. `ItemNull` is its null member. |
-| `TypedItem` | A persistent tag plus inline payload slot. For a wide nullable native Array it stores `null`, `i64`, or `u64` directly in the Array's own allocation; it is not a borrowed scalar `Item`. |
+| `TypedItem` | A persistent tag plus inline payload slot. For a wide nullable native Array or packed Map/Shape field it stores `null`, `i64`, or `u64` directly in the destination allocation; it is not a borrowed scalar `Item`. |
 
 A lane null may use the same *bit pattern* as `ItemNull` where that is safe, but it is still a
 member of a lane-specific closed representation. It must never be accepted as an arbitrary boxed
 Item by accident. The `i64?`/`u64?` Item expression carrier is the explicit exception: it admits
-only `ItemNull` or a validated Item for that exact full-width integer type. Its native Array slot
-is instead a `TypedItem` with an inline, destination-owned payload.
+only `ItemNull` or a validated Item for that exact full-width integer type. Its persistent native
+Array or Map/Shape slot is instead a `TypedItem` with an inline, destination-owned payload.
 
 ### 2.2 Required invariants
 
@@ -123,10 +126,11 @@ is instead a `TypedItem` with an inline, destination-owned payload.
    Array representation when null is admitted, but the observable array contract is unchanged.
 8. **GC sees only pointers.** A null pointer lane is not a root; numeric and bool nullable
    sentinels are never roots. Existing `Rooted`/`RootFrame` ownership rules remain unchanged.
-9. **Persistent wide storage owns its payload.** An `i64?[]`/`u64?[]` store validates the value
-   then copies `null`, `int64_t`, or `uint64_t` into its `TypedItem` slot. It must never copy a
-   raw wide-scalar `Item` whose payload points into a number-frame extent; reads reconstruct the
-   consumer's carrier under D5.2.2v3/D5.2.3 rather than exposing that storage as an `Item`.
+9. **Persistent wide storage owns its payload.** An `i64?`/`u64?` native Array element or packed
+   Map/Shape field validates the value then copies `null`, `int64_t`, or `uint64_t` into its
+   `TypedItem` slot. It must never copy a raw wide-scalar `Item` whose payload points into a
+   number-frame extent; reads reconstruct the consumer's carrier under D5.2.2v3/D5.2.3 rather
+   than exposing that storage as an `Item`. [D2.5.2v3, D2.6.4v3]
 
 ---
 
@@ -141,7 +145,7 @@ placed in an unrelated scalar lane.
 | `int` | `IntLane` / `int64_t`; int53 finite values plus `nan`, `-inf`, `+inf` lane sentinels | same `IntLane` | `INT_LANE_NULL`, a fourth value that boxes as `ItemNull` | 8-byte lane | one 64-bit `IntLane` word |
 | `bool` | `uint8_t`: `0=false`, `1=true` | `uint8_t`: `0=false`, `1=true`, `2=null` | `BOOL_LANE_NULL = 2` | one byte | one 64-bit word; its lane value is 0, 1, or 2 |
 | `i8`, `u8`, `i16`, `u16`, `i32`, `u32` | their ordinary width | widened `int64_t` lane | `SIZED_LANE_NULL`, outside the source domain and boxing as `ItemNull` | ordinary width for `T`; eight bytes for `T?` | one 64-bit word holding the ordinary or widened lane |
-| `i64`, `u64` | all 64-bit values are valid | `Item` expression fallback; no spare in-band value | ordinary `ItemNull` | raw eight-byte value for `T`; Item for `T?` | one raw word for `T`; one destination-owned `TypedItem` slot for `T?` |
+| `i64`, `u64` | all 64-bit values are valid | `Item` expression fallback; no spare in-band value | ordinary `ItemNull` | raw eight-byte payload for `T`; one destination-owned `TypedItem` slot for `T?` | one raw word for `T`; one destination-owned `TypedItem` slot for `T?` |
 | `float` / `f64` | canonical IEEE binary64 | same binary64 lane plus one reserved quiet-NaN marker | `FLOAT_LANE_NULL_BITS`, which boxes as `ItemNull` | 8-byte lane | one 64-bit float-lane word |
 | pointer scalar or container: `string`, `binary`, `symbol`, `decimal`, `datetime`, `map`, `array`, `element`, `range`, `function`, `type`, etc. | pointer | same pointer lane | C/C++ `NULL` pointer | pointer-width slot | one 64-bit pointer-lane word |
 | `null` | no payload lane | invalid | invalid | n/a | n/a |
@@ -212,17 +216,20 @@ or wrap a dynamic source just to obtain the compact form.
 bit pattern, so a single raw 64-bit lane has no spare null code. Their `N(T?)` at an expression
 or dynamic boundary is therefore an ordinary 64-bit `Item`, using `ItemNull` directly.
 
-Native Array storage deliberately does **not** retain that Item word. An `i64?[]` or `u64?[]` is
-a native Array with a `TypedItem` element slot: `LMD_TYPE_NULL` for null, `LMD_TYPE_INT64` with
-an inline `long_val` for `i64`, or `LMD_TYPE_UINT64` with an inline `uint64_val` for `u64`. The
-store validates the declared element contract and copies the payload into the Array allocation;
-the read converts from that slot to the consumer carrier. A `TypedItem*` and a number-frame Item
-pointer never escape the Array boundary. This is the required destination-owned storage under
-D5.2.2v3 and prevents a later number-frame reuse from changing an earlier Array value.
+Persistent native storage deliberately does **not** retain that Item word. An `i64?[]` or
+`u64?[]` is a native Array with a `TypedItem` element slot, and a packed field such as
+`{value: i64?}` or `{value: u64?}` is a Map/Shape `TypedItem` slot: `LMD_TYPE_NULL` for null,
+`LMD_TYPE_INT64` with an inline `long_val` for `i64`, or `LMD_TYPE_UINT64` with an inline
+`uint64_val` for `u64`. The store validates the declared contract and copies the payload into its
+destination allocation; the read converts from that slot to the consumer carrier. A `TypedItem*`
+and a number-frame Item pointer never escape the destination boundary. This is the required
+destination-owned storage under D2.5.2v3/D2.6.4v3 and prevents a later number-frame reuse from
+changing an earlier value.
 
-The extra tag is confined to persistent wide-optional Array storage. It does not add a second
-register ABI, reserve a legal integer value, or make the Array dynamically boxed. Wide optionals
-remain outside the unboxed wide `+ - *` path, which admits only non-optional operands.
+The extra tag is confined to persistent wide-optional Array and Map/Shape storage. It does not
+add a second register ABI, reserve a legal integer value, or make either destination dynamically
+boxed. Wide optionals remain outside the unboxed wide `+ - *` path, which admits only
+non-optional operands.
 
 ### 3.4 Pointer-backed values
 
@@ -412,10 +419,10 @@ Each `ShapeEntry` must retain or derive an immutable `LaneStorageDesc` from its 
 ```text
 LaneStorageDesc {
     semantic_contract: Type*
-    storage_kind: INT_LANE | BOOL_LANE | SIZED_NULLABLE_I64 | POINTER | ITEM | ...
-    byte_size: 1 | 8 | 16 ...
+    storage_kind: INT_LANE | BOOL_LANE | SIZED_NULLABLE_I64 | POINTER | ITEM | TYPED_ITEM | ...
+    byte_size: 1 | 8 | 9 | 16 ...
     nullable: bool
-    native_array_word_kind: INT_LANE | BOOL_LANE | POINTER | ITEM | ...
+    native_array_word_kind: INT_LANE | BOOL_LANE | POINTER | ITEM | TYPED_ITEM | ...
 }
 ```
 
@@ -443,6 +450,7 @@ Proposed storage:
 | `score` | 8-byte nullable `IntLane` |
 | `enabled` | one-byte `bool?` lane |
 | `title` | `String*`, where `NULL` is absent |
+| `value: i64?` / `u64?` | 9-byte destination-owned `TypedItem`: null tag or inline exact payload |
 
 Assigning `row.score = null` writes `INT_LANE_NULL`. Assigning `row.title = null` writes a C
 null pointer. Neither action changes the field's representation, field offset, or map `Shape`.
@@ -450,16 +458,18 @@ null pointer. Neither action changes the field's representation, field offset, o
 Changing a field *contract* between `T` and `T?` may require a shape transition. It is a
 descriptor transition, not merely a `TypeId` overwrite. In particular, `i8 -> i8?` widens from
 one byte to eight bytes, so every following packed offset must be rebuilt; the fixed-slot prefix
-must be preserved only when its descriptor and byte offset are unchanged.
+must be preserved only when its descriptor and byte offset are unchanged. `i64 -> i64?` and
+`u64 -> u64?` likewise select the 9-byte `TypedItem` descriptor; a null/non-null write within an
+already nullable field does not change the shape. [D2.5.2v3, D2.6.1v3]
 
 ### 6.3 Arrays have three physical forms
 
 Array packing follows the same lane policy as map packing, but has a deliberately different
 physical granularity. A map puts each field at its descriptor's minimum width; a native Array
 normally uses one fixed 64-bit word per element, irrespective of whether the lane itself is a
-byte or a pointer. `i64?[]` and `u64?[]` are the explicit destination-owned exception: their
-descriptor selects one `TypedItem` slot per element. The descriptor tells the reader how to
-interpret each slot.
+byte or a pointer. The exact `i64?`/`u64?` Map/Shape field and `i64?[]`/`u64?[]` Array element
+are the destination-owned exception: their descriptor selects one `TypedItem` slot. The
+descriptor tells the reader how to interpret each slot. [D2.5.2v3, D2.6.1v3]
 
 | Physical form | Element representation | Use |
 |---|---|---|
@@ -635,7 +645,8 @@ after it proves the value cannot include `undefined`.
    and branch narrowing; then parameters/returns; then bool/pointer lanes and sized integers.
 6. **Implement storage.** Move typed map fields and native Arrays to descriptors, including
    shape transitions/repacking, COW cloning, `ArrayNum`-to-native demotion on an admitted null
-   store, destination-owned `TypedItem` storage for `i64?[]`/`u64?[]`, and JS shaped properties.
+   store, destination-owned `TypedItem` storage for `i64?[]`/`u64?[]` and `i64?`/`u64?`
+   Map/Shape fields, and JS shaped properties. [D2.5.2v3, D2.6.1v3, D2.6.4v3]
 7. **Enable LJS only after bridge tests pass.** Keep its general dynamic value path boxed.
 
 ### 9.1 Implemented first slice (2026-08-05)
@@ -644,15 +655,16 @@ after it proves the value cannot include `undefined`.
   base `TypeId`. It rejects abstract, error-bearing, and `undefined`-containing unions.
 - General native Arrays use descriptor-selected slots. `int?`, `bool?`, and `float?` use their
   respective 64-bit lane words; `i8?`…`u32?` use a widened i64 lane; and pointer-backed `T`/`T?`
-  use a raw pointer word (`NULL` for the optional form). `i64?`/`u64?` Arrays use an array-only
-  `TypedItem` projection: stores copy the validated payload inline, while reification, growth,
+  use a raw pointer word (`NULL` for the optional form). `i64?`/`u64?` Arrays use a
+  destination-owned `TypedItem` projection: stores copy the validated payload inline, while reification, growth,
   COW cloning, and GC compaction use the descriptor's 9-byte slot stride. A null-free non-view
   `ArrayNum` is rebuilt as that general native Array before an admitted nullable store. A plain
   `T[]` rejects null and never widens.
 - Packed Lambda map fields preserve their optional ShapeEntry contract. `int?`, `bool?`,
-  `float?`, `i8?`…`u32?`, and pointer-backed optionals use their native lane storage;
-  `i64?`/`u64?` retain the specified typed-Item field. Null/non-null writes stay on that shape
-  rather than causing a type-change transition.
+  `float?`, `i8?`…`u32?`, and pointer-backed optionals use their native lane storage. The
+  D2.5.2v3 requirement that `i64?`/`u64?` use a destination-owned TypedItem field is pending:
+  the current raw-Item map projection is non-conformant and must be replaced without a
+  null/non-null shape transition.
 - Array admission compares the whole lane descriptor (kind, nullability, and sized/pointer
   detail), not merely whether a source is already native. Thus `int[] -> int?[]` and
   `string[] -> string?[]` give the target its own COW carrier before a nullable store; the
@@ -693,7 +705,7 @@ metadata and their GC treatment is explicit.
 | operations | arithmetic/null propagation, comparisons, truthiness, no raw arithmetic on a null lane |
 | inference | `a[i]: T?`, map/optional-field reads, joins with null, flow narrowing after `is T` |
 | boundaries | dynamic null into `T?` succeeds; dynamic null into `T` fails; return/parameter/closure cases |
-| map storage | nullable scalar and pointer fields, null/non-null write without shape churn, widening `i8 -> i8?`, COW/repack preservation |
+| map storage | nullable scalar and pointer fields, `i64?`/`u64?` destination-owned `TypedItem` fields through construction, mutation, COW/repack, and frame reuse; null/non-null writes without shape churn; widening `i8 -> i8?` |
 | arrays | boxed Array versus native Array representation; normal `T[]` and `T?[]` 64-bit native words; `int?[]`, `bool?[]`, pointer and sized nullable lanes; `i64?[]`/`u64?[]` destination-owned `TypedItem` slots, including function-return escape, frame reuse, COW, and null/full-domain round trips |
 | array variance | ordinary value assignment accepts `int[] -> int?[]`, preserves the source's non-null descriptor/backing after target null writes, rejects `int?[] -> int[]`, and rejects the covariant form for aliasing `pn var` parameters |
 | `ArrayNum` transition | assert that every null encoding is forbidden in `ArrayNum`; an admitted `T?[]` null store copies native values into a native `T?` Array; a rejected `T[] = null` store leaves the original `ArrayNum` unchanged; generic Array demotion is transparent and preserves the generic contract |

@@ -216,7 +216,10 @@ enum JsRealmSlotId {
         JS_INTRINSIC_BINDING_COUNT,
     JS_REALM_SLOT_CONSTRUCTOR_BASE = JS_REALM_SLOT_GLOBAL_BUILTIN_BASE +
         JS_BUILTIN_GLOBAL_MAX,
-    JS_REALM_SLOT_COUNT = JS_REALM_SLOT_CONSTRUCTOR_BASE + JS_CTOR_MAX,
+    JS_REALM_SLOT_INTRINSIC_PROTOTYPE_BASE = JS_REALM_SLOT_CONSTRUCTOR_BASE +
+        JS_CTOR_MAX,
+    JS_REALM_SLOT_COUNT = JS_REALM_SLOT_INTRINSIC_PROTOTYPE_BASE +
+        JS_CLASS__COUNT,
 };
 
 struct JsRealmSlots {
@@ -631,32 +634,6 @@ struct JsRuntimeOperationState {
     HashMap* symbol_description_registry = NULL;
 };
 
-// Generated records are process-pinned, but the table is realm-owned so hot
-// paths never resolve a catalog ID repeatedly and future realm policy stays
-// out of mutable process-global state.
-struct JsWellKnownRefs {
-    NameId constructor = NAME_ID_NONE;
-    NameId prototype = NAME_ID_NONE;
-    NameId name = NAME_ID_NONE;
-    NameId to_string = NAME_ID_NONE;
-    NameId value_of = NAME_ID_NONE;
-    NameId symbol_iterator = NAME_ID_NONE;
-    NameId symbol_to_primitive = NAME_ID_NONE;
-    NameId symbol_has_instance = NAME_ID_NONE;
-    NameId symbol_to_string_tag = NAME_ID_NONE;
-    NameId symbol_async_iterator = NAME_ID_NONE;
-    NameId symbol_species = NAME_ID_NONE;
-    NameId symbol_match = NAME_ID_NONE;
-    NameId symbol_replace = NAME_ID_NONE;
-    NameId symbol_search = NAME_ID_NONE;
-    NameId symbol_split = NAME_ID_NONE;
-    NameId symbol_unscopables = NAME_ID_NONE;
-    NameId symbol_is_concat_spreadable = NAME_ID_NONE;
-    NameId symbol_match_all = NAME_ID_NONE;
-    NameId symbol_async_dispose = NAME_ID_NONE;
-    NameId symbol_dispose = NAME_ID_NONE;
-};
-
 struct JsAsyncHooksState : JsRootedState {
     Item root_resource = {};
     Item current_resource = {};
@@ -930,12 +907,8 @@ void js_eval_state_reset(JsEvalState* state);
 void js_eval_state_assert_clear(JsEvalState* state, const char* reset_name);
 
 struct JsIntrinsicState {
-    // Prototype cache slots are precise GC roots so moving collection updates
-    // every cached Item; name Items are active-name-pool owned.
-    uint64_t* prototype_roots[JS_CLASS__COUNT] = {};
+    // Realm slots own prototype Item roots; this state owns cache validity.
     bool prototype_resolving[JS_CLASS__COUNT] = {};
-    Item constructor_names[JS_CLASS__COUNT] = {};
-    Item prototype_name = {0};
     uint64_t mutation_versions[JS_CLASS__COUNT] = {};
     uint64_t mutation_serial = 1;
     uint64_t owner_heap_epoch = 0;
@@ -1013,7 +986,6 @@ struct JsRuntimeState {
     JsProcessState* process = NULL;
     JsConsoleState console = {};
     JsRuntimeOperationState operations = {};
-    JsWellKnownRefs well_known = {};
     JsAsyncHooksState* async_hooks = NULL;   // JSCU16: allocated with the realm, not embedded
     JsPromiseRuntimeState promises = {};
     JsModuleRuntimeState modules = {};

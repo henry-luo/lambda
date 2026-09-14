@@ -10,6 +10,7 @@
 #include "js_host_hooks.h"
 #include "js_regex_generated_properties.h"
 #include "js_state_guards.h"
+#include "js_well_known_names.h"
 #include "js_exec_profile.h"
 #include "../jube/jube_node_permission.h"
 #include "../jube/jube_registry.h"
@@ -2788,12 +2789,10 @@ static int js_intrinsic_construct_default_class(
 extern "C" Item js_get_prototype_from_constructor_default(Item new_target,
         int default_class, int typed_array_type) {
     JS_ROOTS(roots, target_root, new_target, prototype_root, ItemNull);
-    NameId prototype_name_id = js_runtime_state.well_known.prototype;
     JsPropertyDescriptor descriptor = {};
     bool own_data_prototype = get_type_id(target_root.get()) == LMD_TYPE_FUNC &&
-        prototype_name_id != NAME_ID_NONE &&
         js_get_own_property_descriptor_name_id(target_root.get(),
-            prototype_name_id, &descriptor) &&
+            JS_NAME_PROTOTYPE, &descriptor) &&
         !js_pd_is_accessor(&descriptor);
     if (own_data_prototype) {
         // Canonical constructors keep `prototype` in a real data slot. The
@@ -2805,7 +2804,7 @@ extern "C" Item js_get_prototype_from_constructor_default(Item new_target,
             ? descriptor.value : make_js_undefined());
     } else {
         NameRef prototype_name = name_pool_resolve_id(
-            context ? context->name_pool : NULL, prototype_name_id);
+            context ? context->name_pool : NULL, JS_NAME_PROTOTYPE);
         Item prototype_key = prototype_name
             ? (Item){.item = s2it(prototype_name)}
             : js_name_item("prototype", 9);

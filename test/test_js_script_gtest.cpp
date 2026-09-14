@@ -223,6 +223,39 @@ TEST(JsInterpreter, PreservesMutableClosuresOnTheSharedHeap) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, RetainsIntrinsicPrototypeCacheAcrossCollectionAndMutation) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char initialize[] =
+        "Array.prototype.p1IntrinsicCacheProbe = 41; Array.prototype;";
+    Item result = js_interp_execute_source(&runtime, initialize,
+        sizeof(initialize) - 1, "intrinsic-cache.js", NULL);
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_MAP);
+
+    {
+        PersistentRooted<Item> cached_root(
+            js_get_intrinsic_prototype_for_class(JS_CLASS_ARRAY));
+        ASSERT_TRUE(cached_root.valid());
+        ASSERT_EQ(get_type_id(cached_root.get()), LMD_TYPE_MAP);
+        heap_gc_collect();
+        EXPECT_EQ(cached_root.get().item,
+            js_get_intrinsic_prototype_for_class(JS_CLASS_ARRAY).item);
+
+        const char mutate[] = "Array.prototype.p1IntrinsicCacheProbe = 42;";
+        ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, mutate,
+            sizeof(mutate) - 1, "intrinsic-cache-mutation.js", NULL)));
+        PersistentRooted<Item> refreshed_root(
+            js_get_intrinsic_prototype_for_class(JS_CLASS_ARRAY));
+        ASSERT_TRUE(refreshed_root.valid());
+        EXPECT_EQ(refreshed_root.get().item, cached_root.get().item);
+        EXPECT_EQ(js_get_key_default(refreshed_root.get(),
+            js_name_item("p1IntrinsicCacheProbe", 21)).item, flt2it(42.0).item);
+    }
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, ExplicitAstSelectorUsesTheSharedScriptPath) {
     Runtime runtime = {};
     runtime_init(&runtime);
