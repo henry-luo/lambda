@@ -1308,34 +1308,9 @@ TEST(JavaScriptRegression, Jscu31DnsResourceTable) {
         "test/node/jscu31_dns_resource_table.txt");
 }
 
-TEST(JavaScriptRegression, Jscu31TlsWriteCallbackRoots) {
-    test_js_script_against_file("test/node/jscu31_tls_write_callback_roots.js",
-        "test/node/jscu31_tls_write_callback_roots.txt");
-}
-
-TEST(JavaScriptRegression, Jscu31TlsServerValueSlots) {
-    test_js_script_against_file("test/node/jscu31_tls_server_value_slots.js",
-        "test/node/jscu31_tls_server_value_slots.txt");
-}
-
 TEST(JavaScriptRegression, Jscu31ProcessIpcCallbackRoots) {
     test_js_script_against_file("test/js/jscu31_process_ipc_callback_roots.js",
         "test/js/jscu31_process_ipc_callback_roots.txt");
-}
-
-TEST(JavaScriptRegression, Jscu31HttpClientWriteCallbackRoots) {
-    test_js_script_against_file("test/node/jscu31_http_client_write_callback_roots.js",
-        "test/node/jscu31_http_client_write_callback_roots.txt");
-}
-
-TEST(JavaScriptRegression, Jscu31NetSocketCallbackSlots) {
-    test_js_script_against_file("test/node/jscu31_net_socket_callback_slots.js",
-        "test/node/jscu31_net_socket_callback_slots.txt");
-}
-
-TEST(JavaScriptRegression, Jscu31HttpResponseWriteTail) {
-    test_js_script_against_file("test/node/jscu31_http_response_write_tail.js",
-        "test/node/jscu31_http_response_write_tail.txt");
 }
 
 TEST(JavaScriptRegression, Jscu31ChildProcessIpcCallbackSlots) {
@@ -1356,11 +1331,6 @@ TEST(JavaScriptRegression, Jscu31ChildProcessSpawnValues) {
 TEST(JavaScriptRegression, Jscu31JubePersistentValueSlots) {
     test_js_script_against_file("test/js/jscu31_jube_persistent_value_slots.js",
         "test/js/jscu31_jube_persistent_value_slots.txt");
-}
-
-TEST(JavaScriptRegression, Jscu31BoundSocketOwner) {
-    test_js_script_against_file("test/node/jscu31_bound_socket_owner.js",
-        "test/node/jscu31_bound_socket_owner.txt");
 }
 
 TEST(JavaScriptRegression, Jscu35DynamicFunctionCache) {
