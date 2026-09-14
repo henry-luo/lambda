@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Tune26: a nullable native float read from a dynamic integral subscript is checked for FLOAT_LANE_NULL before the raw destination store; the cold in-place setter retains typed-assignment rejection and S9.2.2 snapshot isolation.",
+  "description": "Tune26: a nullable native float read from a dynamic integral subscript is checked for FLOAT_LANE_NULL before the raw destination store; the cold in-place setter retains typed-assignment rejection and S9.2.2 snapshot isolation. Tune27 T27-3: the loop subscript `i + TUNE26_OFFSET` over an immutable module int is now a native index tree, so the counted-loop store takes the compact COW/OOB helper (array_num_set_cow_idx) after the same null-lane test; the single-store OOB function keeps the checked lane setter. Tune27: both stores carry a nullable RHS; the null arm reaches the checked lane setter (never the widening COW helper) and the fixture's OOB case is rejected on every tier.",
   "checks": [
     {
       "in_func": "_tune26_nullable_float_store_#",

@@ -1,16 +1,16 @@
 {
   "schema_version": 1,
-  "description": "The int53 validity guard in front of a proven raw int[] store must use the 64-bit GE/LE comparisons. MIR's `S` suffix selects the 32-bit form, which truncates the int53 bounds to 1 and -1 and makes the guard unsatisfiable, so every proven store falls through to lambda_array_set_checked_inplace_lane.",
+  "description": "The int53 validity guard in front of a proven raw int[] store must use the 64-bit GE/LE comparisons. MIR's `S` suffix selects the 32-bit form, which truncates the int53 bounds to 1 and -1 and makes the guard unsatisfiable, so every proven store falls through to lambda_array_set_checked_inplace_lane. Tune27 T27-9: the int53 band test is one shared 64-bit `add v, INT53_MAX` / `ule t, 2 * INT53_MAX` pair instead of GE/LE/AND. A branch-only guard uses the fused 64-bit UBGT; neither form may be the truncating ULES/UBGTS.",
   "checks": [
     {
       "in_func": "_tune17b_swap_#",
       "expect": [
-        "ge\t{{r}}, {{r}}, -9007199254740991",
-        "le\t{{r}}, {{r}}, 9007199254740991"
+        "add\t{{r}}, {{r}}, 9007199254740991",
+        "{{r}}, 18014398509481982"
       ],
       "forbid": [
-        "ges\t{{r}}, {{r}}, -9007199254740991",
-        "les\t{{r}}, {{r}}, 9007199254740991"
+        "ules\t{{r}}, {{r}}, 18014398509481982",
+        "ubgts\t"
       ]
     }
   ]

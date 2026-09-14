@@ -6,6 +6,7 @@
 #include "../../../lib/log.h"
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/mempool.h"
+#include "../../../lib/mem_grow.hpp"
 
 #include <assert.h>
 #include <string.h>
@@ -263,15 +264,8 @@ static void style_builder_add(StyleEpochManager* manager,
 static bool style_builder_append(StyleEpochManager* manager,
                                  StyleRecipeBuilder* builder,
                                  CssRule* rule, CssSpecificity specificity) {
-    if (builder->count == builder->capacity) {
-        size_t capacity = builder->capacity ? builder->capacity * 2u : 8u;
-        StyleRecipeEntry* entries = (StyleRecipeEntry*)pool_realloc(
-            manager->doc->document_pool, builder->entries,
-            capacity * sizeof(StyleRecipeEntry));
-        if (!entries) return false;
-        builder->entries = entries;
-        builder->capacity = capacity;
-    }
+    if (!lam::pool_grow_array(manager->doc->document_pool, &builder->entries,
+            &builder->capacity, builder->count + 1, 8)) return false;
     StyleRecipeEntry* entry = &builder->entries[builder->count++];
     entry->rule = rule;
     entry->specificity = specificity;

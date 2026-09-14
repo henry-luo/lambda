@@ -12,6 +12,7 @@
 #include "../../lib/strbuf.h"
 #include "../../lib/arraylist.h"
 #include <mpdecimal.h>  // only included here
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -99,7 +100,10 @@ void lambda_finite_double_to_shortest(double d, char* out, int out_size) {
 
     char sci[64];
     int best_len = 0;
-    for (int prec = 1; prec <= 21; prec++) {
+    // A binary64 round-trip never needs more than DBL_DECIMAL_DIG
+    // significant digits. Limiting the probe to that bound keeps the
+    // S4.7.1 spelling search exact without four impossible retries.
+    for (int prec = 1; prec <= DBL_DECIMAL_DIG; prec++) {
         snprintf(sci, sizeof(sci), "%.*e", prec - 1, d);
         double roundtrip = 0.0;
         sscanf(sci, "%lf", &roundtrip);
@@ -108,7 +112,7 @@ void lambda_finite_double_to_shortest(double d, char* out, int out_size) {
             break;
         }
     }
-    if (best_len == 0) best_len = 17;
+    if (best_len == 0) best_len = DBL_DECIMAL_DIG;
 
     snprintf(sci, sizeof(sci), "%.*e", best_len - 1, d);
 
@@ -216,9 +220,10 @@ bool lambda_numeric_to_canonical_string(Item item, char* out, int out_size) {
         }
     } else if (type == LMD_TYPE_DECIMAL) {
         Decimal* decimal = item.get_decimal();
-        if (!decimal || !decimal->dec_val || mpd_isnan(decimal->dec_val)) return false;
-        if (mpd_isinfinite(decimal->dec_val)) {
-            snprintf(out, out_size, "%sinf", mpd_isnegative(decimal->dec_val) ? "-" : "");
+        const mpd_t* value = decimal_mpd(decimal);
+        if (!value || mpd_isnan(value)) return false;
+        if (mpd_isinfinite(value)) {
+            snprintf(out, out_size, "%sinf", mpd_isnegative(value) ? "-" : "");
             return true;
         }
     }
@@ -303,6 +308,24 @@ mpd_t* decimal_parse_unlimited_str(const char* str) {
 }
 #endif
 
+#ifndef LAMBDA_DECIMAL_RUNTIME_IMPLEMENTATION
+bool decimal_take_mpd(Decimal* decimal, DecimalKind storage_kind, mpd_t* mpd_val) {
+    if (!decimal || !mpd_val) {
+        if (mpd_val) mpd_del(mpd_val);
+        return false;
+    }
+
+    // mpd_del() honours MPD_STATIC: transfer the library-owned header into
+    // Decimal, retain its coefficient allocation, and make the wrapper's
+    // address non-freeable when the GC releases that coefficient later.
+    decimal->storage_kind = storage_kind;
+    decimal->dec_val = *mpd_val;
+    mpd_set_static(&decimal->dec_val);
+    mpd_free(mpd_val);
+    return true;
+}
+#endif
+
 #ifndef LAMBDA_IO_STATIC_VALUES
 // ─────────────────────────────────────────────────────────────────────
 // Forward Declarations
@@ -378,11 +401,11 @@ void decimal_free_string(char* str) {
 #include "../../lib/arena.h"
 extern mpd_context_t* InputManager_decimal_context();  // forward declare
 
-Item decimal_deep_copy(Item item, void* arena_ptr, bool is_unlimited) {
+Item decimal_deep_copy(Item item, void* arena_ptr) {
     if (!decimal_is_any(item)) return ItemNull;
     
     Decimal* src_dec = item.get_decimal();
-    if (!src_dec || !src_dec->dec_val) return ItemNull;
+    if (!decimal_has_payload(src_dec)) return ItemNull;
     
     Arena* arena = (Arena*)arena_ptr;
     mpd_context_t* ctx = decimal_fixed_context();  // use global context
@@ -393,7 +416,7 @@ Item decimal_deep_copy(Item item, void* arena_ptr, bool is_unlimited) {
     
     // Copy using qcopy
     uint32_t status = 0;
-    mpd_qcopy(new_dec_val, src_dec->dec_val, &status);
+    mpd_qcopy(new_dec_val, decimal_mpd(src_dec), &status);
     if (status != 0) {
         mpd_del(new_dec_val);
         return ItemNull;
@@ -406,8 +429,7 @@ Item decimal_deep_copy(Item item, void* arena_ptr, bool is_unlimited) {
         return ItemNull;
     }
     
-    new_dec->unlimited = is_unlimited ? 1 : 0;
-    new_dec->dec_val = new_dec_val;
+    if (!decimal_take_mpd(new_dec, src_dec->storage_kind, new_dec_val)) return ItemNull;
     
     Item result;
     result.item = c2it(new_dec);
@@ -415,7 +437,7 @@ Item decimal_deep_copy(Item item, void* arena_ptr, bool is_unlimited) {
 }
 
 static Item decimal_from_string_arena_with_context(const char* str, void* arena_ptr,
-                                                   mpd_context_t* ctx, uint8_t unlimited) {
+                                                   mpd_context_t* ctx, DecimalKind storage_kind) {
     if (!str || !arena_ptr) return ItemNull;
 
     Arena* arena = (Arena*)arena_ptr;
@@ -437,8 +459,7 @@ static Item decimal_from_string_arena_with_context(const char* str, void* arena_
         return ItemNull;
     }
 
-    dec->unlimited = unlimited;
-    dec->dec_val = dec_val;
+    if (!decimal_take_mpd(dec, storage_kind, dec_val)) return ItemNull;
 
     Item result;
     result.item = c2it(dec);
@@ -452,10 +473,10 @@ static Item decimal_from_string_arena_with_context(const char* str, void* arena_
 static int decimal_count_literal_significant_digits(const char* str);
 
 Item decimal_from_string_arena(const char* str, void* arena_ptr) {
-    uint8_t unlimited = decimal_count_literal_significant_digits(str) >
-        DECIMAL_FIXED_PRECISION;
+    DecimalKind storage_kind = decimal_count_literal_significant_digits(str) >
+        DECIMAL_FIXED_PRECISION ? DECIMAL_EXTENDED : DECIMAL_FIXED;
     return decimal_from_string_arena_with_context(str, arena_ptr,
-        decimal_fixed_context(), unlimited);
+        decimal_fixed_context(), storage_kind);
 }
 
 static int decimal_count_literal_significant_digits(const char* str) {
@@ -479,13 +500,14 @@ Item decimal_from_literal_string_arena(const char* str, void* arena_ptr, bool is
     bool needs_unlimited = is_integer_literal ||
         decimal_count_literal_significant_digits(str) > DECIMAL_FIXED_PRECISION;
     mpd_context_t* ctx = needs_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
-    uint8_t unlimited = is_integer_literal ? DECIMAL_BIGINT : (needs_unlimited ? 1 : 0);
-    return decimal_from_string_arena_with_context(str, arena_ptr, ctx, unlimited);
+    DecimalKind storage_kind = is_integer_literal ? DECIMAL_BIGINT :
+        (needs_unlimited ? DECIMAL_EXTENDED : DECIMAL_FIXED);
+    return decimal_from_string_arena_with_context(str, arena_ptr, ctx, storage_kind);
 }
 
 Item decimal_from_integer_string_arena(const char* str, void* arena_ptr) {
     return decimal_from_string_arena_with_context(str, arena_ptr,
-        decimal_unlimited_context(), 1);
+        decimal_unlimited_context(), DECIMAL_EXTENDED);
 }
 
 // Create a fixed-precision Decimal from a double, arena-allocated.
@@ -513,8 +535,7 @@ Item decimal_from_double_arena(double val, void* arena_ptr) {
         return ItemNull;
     }
     
-    dec->unlimited = 0;
-    dec->dec_val = dec_val;
+    if (!decimal_take_mpd(dec, DECIMAL_FIXED, dec_val)) return ItemNull;
     
     Item result;
     result.item = c2it(dec);
@@ -538,8 +559,7 @@ Item decimal_from_int64_arena(int64_t val, void* arena_ptr) {
         return ItemNull;
     }
     
-    dec->unlimited = 0;
-    dec->dec_val = dec_val;
+    if (!decimal_take_mpd(dec, DECIMAL_FIXED, dec_val)) return ItemNull;
     
     Item result;
     result.item = c2it(dec);
@@ -553,7 +573,8 @@ Item decimal_from_int64_arena(int64_t val, void* arena_ptr) {
 // ─────────────────────────────────────────────────────────────────────
 
 void decimal_print(StrBuf* strbuf, Decimal* decimal) {
-    if (!decimal || !decimal->dec_val) {
+    const mpd_t* value = decimal_mpd(decimal);
+    if (!value) {
         strbuf_append_str(strbuf, "error");
         return;
     }
@@ -565,7 +586,7 @@ void decimal_print(StrBuf* strbuf, Decimal* decimal) {
     }
 
     // Use libmpdec to format finite values with no truncation.
-    char* decimal_str = mpd_to_sci(decimal->dec_val, 1);  // scientific notation
+    char* decimal_str = mpd_to_sci(value, 1);  // scientific notation
     if (!decimal_str) {
         strbuf_append_str(strbuf, "error");
         return;
@@ -592,14 +613,14 @@ void decimal_big_print(StrBuf* strbuf, Decimal* decimal) {
 
 Decimal* decimal_create(mpd_t* mpd_val) {
     if (!mpd_val) return NULL;
-    
+
     Decimal* decimal = (Decimal*)heap_alloc(sizeof(Decimal), LMD_TYPE_DECIMAL);
     if (!decimal) {
         mpd_del(mpd_val);
         return NULL;
     }
-    
-    decimal->dec_val = mpd_val;
+
+    if (!decimal_take_mpd(decimal, DECIMAL_FIXED, mpd_val)) return NULL;
     return decimal;
 }
 
@@ -612,9 +633,10 @@ void decimal_release(Decimal* dec) {
 }
 
 void decimal_payload_release(Decimal* decimal) {
-    if (!decimal || !decimal->dec_val) return;
-    mpd_del(decimal->dec_val);
-    decimal->dec_val = NULL;
+    if (!decimal_has_payload(decimal)) return;
+    mpd_del(&decimal->dec_val);
+    memset(&decimal->dec_val, 0, sizeof(decimal->dec_val));
+    decimal->storage_kind = DECIMAL_FIXED;
 }
 
 void decimal_constants_release(ArrayList* constants) {
@@ -639,11 +661,11 @@ mpd_t* decimal_item_to_mpd(Item item, mpd_context_t* ctx) {
     // If already a decimal, make a copy
     if (type == LMD_TYPE_DECIMAL) {
         Decimal* dec_ptr = item.get_decimal();
-        if (!dec_ptr || !dec_ptr->dec_val) return NULL;
+        if (!decimal_has_payload(dec_ptr)) return NULL;
         
         mpd_t* copy = mpd_new(ctx);
         if (!copy) return NULL;
-        mpd_copy(copy, dec_ptr->dec_val, ctx);
+        mpd_copy(copy, decimal_mpd(dec_ptr), ctx);
         return copy;
     }
     
@@ -721,14 +743,45 @@ bool decimal_mpd_try_to_int64(mpd_t* dec, mpd_context_t* ctx, int64_t* out) {
     return true;
 }
 
-double decimal_mpd_to_double(mpd_t* dec, mpd_context_t* ctx) {
-    if (!dec) return 0.0;
-    
+bool decimal_mpd_try_to_double(mpd_t* dec, mpd_context_t* ctx, double* out) {
+    (void)ctx;
+    if (!dec || !out) return false;
+
+    if (mpd_isnan(dec)) {
+        *out = mpd_isnegative(dec) ? -NAN : NAN;
+        return true;
+    }
+    if (mpd_isinfinite(dec)) {
+        *out = mpd_isnegative(dec) ? -INFINITY : INFINITY;
+        return true;
+    }
+
+    // Integral decimal values in the common machine range do not need a
+    // temporary scientific spelling.
+    if (mpd_isinteger(dec)) {
+        uint32_t status = 0;
+        int64_t integral = mpd_qget_i64(dec, &status);
+        if ((status & MPD_Invalid_operation) == 0) {
+            *out = (double)integral;
+            if (integral == 0 && mpd_isnegative(dec)) *out = -0.0;
+            return true;
+        }
+    }
+
     char* str = mpd_to_sci(dec, 1);
-    if (!str) return 0.0;
-    
-    double result = strtod(str, NULL);
+    if (!str) return false;
+    char* end = NULL;
+    double result = strtod(str, &end);
+    bool complete = end && end != str && *end == '\0';
     mpd_free(str);
+    if (!complete) return false;
+    *out = result;
+    return true;
+}
+
+double decimal_mpd_to_double(mpd_t* dec, mpd_context_t* ctx) {
+    double result = 0.0;
+    if (!decimal_mpd_try_to_double(dec, ctx, &result)) return 0.0;
     return result;
 }
 
@@ -743,7 +796,7 @@ bool decimal_is_zero(mpd_t* dec) {
 bool decimal_is_unlimited(Item item) {
     if (item._type_id != LMD_TYPE_DECIMAL) return false;
     Decimal* dec_ptr = item.get_decimal();
-    return dec_ptr && dec_ptr->unlimited;
+    return dec_ptr && dec_ptr->storage_kind != DECIMAL_FIXED;
 }
 
 bool decimal_is_any(Item item) {
@@ -768,8 +821,8 @@ Item decimal_push_result(mpd_t* mpd_val, bool is_unlimited) {
         return ItemError;
     }
     
-    decimal->unlimited = is_unlimited ? 1 : 0;
-    decimal->dec_val = mpd_val;
+    if (!decimal_take_mpd(decimal,
+            is_unlimited ? DECIMAL_EXTENDED : DECIMAL_FIXED, mpd_val)) return ItemError;
     
     Item result;
     result.item = c2it(decimal);
@@ -785,8 +838,7 @@ static Item decimal_push_bigint_result(mpd_t* mpd_val) {
         return ItemError;
     }
 
-    decimal->unlimited = DECIMAL_BIGINT;
-    decimal->dec_val = mpd_val;
+    if (!decimal_take_mpd(decimal, DECIMAL_BIGINT, mpd_val)) return ItemError;
 
     Item result;
     result.item = c2it(decimal);
@@ -796,7 +848,7 @@ static Item decimal_push_bigint_result(mpd_t* mpd_val) {
 static bool decimal_item_is_bigint(Item item) {
     if (get_type_id(item) != LMD_TYPE_DECIMAL) return false;
     Decimal* dec = item.get_decimal();
-    return dec && dec->unlimited == DECIMAL_BIGINT;
+    return dec && dec->storage_kind == DECIMAL_BIGINT;
 }
 
 static bool decimal_binary_result_is_bigint(Item a, Item b) {
@@ -827,11 +879,11 @@ static bool should_be_unlimited(Item a, Item b) {
     // Check if either operand requires the extended decimal context.
     if (a._type_id == LMD_TYPE_DECIMAL) {
         Decimal* dec_a = a.get_decimal();
-        if (dec_a && dec_a->unlimited) return true;
+        if (dec_a && dec_a->storage_kind != DECIMAL_FIXED) return true;
     }
     if (b._type_id == LMD_TYPE_DECIMAL) {
         Decimal* dec_b = b.get_decimal();
-        if (dec_b && dec_b->unlimited) return true;
+        if (dec_b && dec_b->storage_kind != DECIMAL_FIXED) return true;
     }
     return false;
 }
@@ -857,8 +909,8 @@ static Item decimal_binary_arithmetic(Item a, Item b, DecimalMpdBinaryOp operati
     bool a_is_dec = decimal_is_any(a);
     bool b_is_dec = decimal_is_any(b);
     
-    mpd_t* a_dec = a_is_dec ? a.get_decimal()->dec_val : decimal_item_to_mpd(a, &dec_ctx);
-    mpd_t* b_dec = b_is_dec ? b.get_decimal()->dec_val : decimal_item_to_mpd(b, &dec_ctx);
+    mpd_t* a_dec = a_is_dec ? decimal_mpd(a.get_decimal()) : decimal_item_to_mpd(a, &dec_ctx);
+    mpd_t* b_dec = b_is_dec ? decimal_mpd(b.get_decimal()) : decimal_item_to_mpd(b, &dec_ctx);
     
     if (!a_dec || !b_dec) {
         if (!a_is_dec) cleanup_temp(a_dec, false);
@@ -922,8 +974,8 @@ static bool decimal_prepare_operands(Item a, Item b, const char* operation,
     mpd_context_t* dec_ctx = get_decimal_context(a, b);
     bool a_is_dec = decimal_is_any(a);
     bool b_is_dec = decimal_is_any(b);
-    mpd_t* a_dec = a_is_dec ? a.get_decimal()->dec_val : decimal_item_to_mpd(a, dec_ctx);
-    mpd_t* b_dec = b_is_dec ? b.get_decimal()->dec_val : decimal_item_to_mpd(b, dec_ctx);
+    mpd_t* a_dec = a_is_dec ? decimal_mpd(a.get_decimal()) : decimal_item_to_mpd(a, dec_ctx);
+    mpd_t* b_dec = b_is_dec ? decimal_mpd(b.get_decimal()) : decimal_item_to_mpd(b, dec_ctx);
     if (!a_dec || !b_dec) {
         if (!a_is_dec) cleanup_temp(a_dec, false);
         if (!b_is_dec) cleanup_temp(b_dec, false);
@@ -1029,7 +1081,7 @@ static Item decimal_unary_transform(Item a, bool absolute, const char* operation
     decimal_exact_context(&dec_ctx);
     
     bool a_is_dec = decimal_is_any(a);
-    mpd_t* a_dec = a_is_dec ? a.get_decimal()->dec_val : decimal_item_to_mpd(a, &dec_ctx);
+    mpd_t* a_dec = a_is_dec ? decimal_mpd(a.get_decimal()) : decimal_item_to_mpd(a, &dec_ctx);
     
     if (!a_dec) {
         log_error("%s: conversion failed", operation);
@@ -1074,9 +1126,9 @@ static bool decimal_cmp(Item a, Item b, mpd_context_t* ctx, int* result) {
 
     Decimal* a_decimal = a_is_dec ? a.get_decimal() : NULL;
     Decimal* b_decimal = b_is_dec ? b.get_decimal() : NULL;
-    mpd_t* a_dec = a_is_dec ? (a_decimal ? a_decimal->dec_val : NULL) :
+    mpd_t* a_dec = a_is_dec ? decimal_mpd(a_decimal) :
         decimal_item_to_mpd(a, ctx);
-    mpd_t* b_dec = b_is_dec ? (b_decimal ? b_decimal->dec_val : NULL) :
+    mpd_t* b_dec = b_is_dec ? decimal_mpd(b_decimal) :
         decimal_item_to_mpd(b, ctx);
     
     if (!a_dec || !b_dec) {
@@ -1111,56 +1163,57 @@ bool decimal_cmp_items(Item a, Item b, int* result) {
 bool decimal_item_is_zero(Item item) {
     if (!decimal_is_any(item)) return false;
     Decimal* dec_ptr = item.get_decimal();
-    if (!dec_ptr || !dec_ptr->dec_val) return false;
-    return mpd_iszero(dec_ptr->dec_val);
+    if (!decimal_has_payload(dec_ptr)) return false;
+    return mpd_iszero(decimal_mpd(dec_ptr));
 }
 
 bool decimal_item_is_nan(Item item) {
     if (!decimal_is_any(item)) return false;
     Decimal* decimal = item.get_decimal();
-    return decimal && decimal->dec_val && mpd_isnan(decimal->dec_val);
+    return decimal_has_payload(decimal) && mpd_isnan(decimal_mpd(decimal));
 }
 
 bool decimal_item_is_infinite(Item item) {
     if (!decimal_is_any(item)) return false;
     Decimal* decimal = item.get_decimal();
-    return decimal && decimal->dec_val && mpd_isinfinite(decimal->dec_val);
+    return decimal_has_payload(decimal) && mpd_isinfinite(decimal_mpd(decimal));
 }
 
 const char* decimal_special_literal(Decimal* decimal) {
-    if (!decimal || !decimal->dec_val) return NULL;
-    if (mpd_isnan(decimal->dec_val)) return "decimal.nan";
-    if (!mpd_isinfinite(decimal->dec_val)) return NULL;
-    return mpd_isnegative(decimal->dec_val) ? "-decimal.inf" : "decimal.inf";
+    const mpd_t* value = decimal_mpd(decimal);
+    if (!value) return NULL;
+    if (mpd_isnan(value)) return "decimal.nan";
+    if (!mpd_isinfinite(value)) return NULL;
+    return mpd_isnegative(value) ? "-decimal.inf" : "decimal.inf";
 }
 
 // ─────────────────────────────────────────────────────────────────────
 // Conversion helpers
 // ─────────────────────────────────────────────────────────────────────
 
-double decimal_to_double(Item item) {
-    if (!decimal_is_any(item)) return 0.0;
+bool decimal_try_to_double(Item item, double* out) {
+    if (!decimal_is_any(item) || !out) return false;
     Decimal* dec_ptr = item.get_decimal();
-    if (!dec_ptr || !dec_ptr->dec_val) return 0.0;
-    
-    char* str = mpd_to_sci(dec_ptr->dec_val, 1);
-    if (!str) return 0.0;
-    
-    double result = strtod(str, NULL);
-    mpd_free(str);
+    if (!decimal_has_payload(dec_ptr)) return false;
+    return decimal_mpd_try_to_double(decimal_mpd(dec_ptr), NULL, out);
+}
+
+double decimal_to_double(Item item) {
+    double result = 0.0;
+    if (!decimal_try_to_double(item, &result)) return 0.0;
     return result;
 }
 
 char* decimal_to_string(Item item) {
     if (!decimal_is_any(item)) return NULL;
     Decimal* dec_ptr = item.get_decimal();
-    if (!dec_ptr || !dec_ptr->dec_val) return NULL;
-    return mpd_to_sci(dec_ptr->dec_val, 1);  // caller must free with decimal_free_string
+    if (!decimal_has_payload(dec_ptr)) return NULL;
+    return mpd_to_sci(decimal_mpd(dec_ptr), 1);  // caller must free with decimal_free_string
 }
 
 char* decimal_to_string(Decimal* decimal) {
-    if (!decimal || !decimal->dec_val) return NULL;
-    return mpd_to_sci(decimal->dec_val, 1);  // caller must free with decimal_free_string
+    if (!decimal_has_payload(decimal)) return NULL;
+    return mpd_to_sci(decimal_mpd(decimal), 1);  // caller must free with decimal_free_string
 }
 #endif
 
@@ -1178,12 +1231,12 @@ static Item decimal_unary_rounding(Item a, DecimalMpdUnaryOp operation) {
     mpd_context_t* dec_ctx = is_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
     
     Decimal* dec_ptr = a.get_decimal();
-    if (!dec_ptr || !dec_ptr->dec_val) return ItemError;
+    if (!decimal_has_payload(dec_ptr)) return ItemError;
     
     mpd_t* result = mpd_new(dec_ctx);
     if (!result) return ItemError;
 
-    operation(result, dec_ptr->dec_val, dec_ctx);
+    operation(result, decimal_mpd(dec_ptr), dec_ctx);
     return decimal_push_result(result, is_unlimited);
 }
 
@@ -1201,7 +1254,7 @@ Item decimal_round(Item a) {
     mpd_context_t* dec_ctx = is_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
     
     Decimal* dec_ptr = a.get_decimal();
-    if (!dec_ptr || !dec_ptr->dec_val) return ItemError;
+    if (!decimal_has_payload(dec_ptr)) return ItemError;
     
     // round to nearest integer using quantize with exponent 0
     mpd_t* one = mpd_new(dec_ctx);
@@ -1211,7 +1264,7 @@ Item decimal_round(Item a) {
     mpd_t* result = mpd_new(dec_ctx);
     if (!result) { mpd_del(one); return ItemError; }
     
-    mpd_quantize(result, dec_ptr->dec_val, one, dec_ctx);
+    mpd_quantize(result, decimal_mpd(dec_ptr), one, dec_ctx);
     mpd_del(one);
     
     if (mpd_isnan(result)) {
@@ -1231,15 +1284,15 @@ Item decimal_trunc(Item a) {
 bool decimal_try_to_int64(Item item, int64_t* out) {
     if (!out || !decimal_is_any(item)) return false;
     Decimal* dec_ptr = item.get_decimal();
-    if (!dec_ptr || !dec_ptr->dec_val) return false;
+    if (!decimal_has_payload(dec_ptr)) return false;
     
-    mpd_context_t* dec_ctx = dec_ptr->unlimited ?
+    mpd_context_t* dec_ctx = dec_ptr->storage_kind != DECIMAL_FIXED ?
         decimal_unlimited_context() : decimal_fixed_context();
     
     // truncate first, then convert
     mpd_t* truncated = mpd_new(dec_ctx);
     if (!truncated) return false;
-    mpd_trunc(truncated, dec_ptr->dec_val, dec_ctx);
+    mpd_trunc(truncated, decimal_mpd(dec_ptr), dec_ctx);
     bool converted = decimal_mpd_try_to_int64(truncated, dec_ctx, out);
     mpd_del(truncated);
     return converted;
@@ -1248,32 +1301,32 @@ bool decimal_try_to_int64(Item item, int64_t* out) {
 bool decimal_to_int64_exact(Item item, int64_t* out) {
     if (!out || !decimal_is_any(item)) return false;
     Decimal* decimal = item.get_decimal();
-    if (!decimal || !decimal->dec_val || mpd_isnan(decimal->dec_val) ||
-            mpd_isinfinite(decimal->dec_val) || !mpd_isinteger(decimal->dec_val)) return false;
+    const mpd_t* value = decimal_mpd(decimal);
+    if (!value || mpd_isnan(value) || mpd_isinfinite(value) || !mpd_isinteger(value)) return false;
 
     // Semantic `integer` now reaches ordinary integral consumers after mixed
     // full-width arithmetic; reject out-of-range values instead of inheriting
     // bigint_to_int64's intentional clamping behavior.
     uint32_t status = 0;
-    mpd_ssize_t value = mpd_qget_ssize(decimal->dec_val, &status);
+    mpd_ssize_t int_value = mpd_qget_ssize(value, &status);
     if (status & MPD_Invalid_operation) return false;
-    *out = (int64_t)value;
+    *out = (int64_t)int_value;
     return true;
 }
 
 bool decimal_to_uint64_exact(Item item, uint64_t* out) {
     if (!out || !decimal_is_any(item)) return false;
     Decimal* decimal = item.get_decimal();
-    if (!decimal || !decimal->dec_val || mpd_isnan(decimal->dec_val) ||
-            mpd_isinfinite(decimal->dec_val) || !mpd_isinteger(decimal->dec_val) ||
-            mpd_isnegative(decimal->dec_val)) return false;
+    const mpd_t* value = decimal_mpd(decimal);
+    if (!value || mpd_isnan(value) || mpd_isinfinite(value) || !mpd_isinteger(value) ||
+            mpd_isnegative(value)) return false;
 
     // The boundary admission path must reject an out-of-range decimal before a
     // native unsigned cast; mpdecimal reports that case instead of wrapping it.
     uint32_t status = 0;
-    uint64_t value = mpd_qget_u64(decimal->dec_val, &status);
+    uint64_t uint_value = mpd_qget_u64(value, &status);
     if (status != 0) return false;
-    *out = value;
+    *out = uint_value;
     return true;
 }
 #endif
@@ -1327,8 +1380,7 @@ static Item bigint_push_result(mpd_t* mpd_val) {
     if (!mpd_val) return ItemError;
     Decimal* dec = (Decimal*)heap_alloc(sizeof(Decimal), LMD_TYPE_DECIMAL);
     if (!dec) { mpd_del(mpd_val); return ItemError; }
-    dec->dec_val = mpd_val;
-    dec->unlimited = DECIMAL_BIGINT;  // mark as BigInt
+    if (!decimal_take_mpd(dec, DECIMAL_BIGINT, mpd_val)) return ItemError;
     // encode as tagged pointer with LMD_TYPE_DECIMAL tag
     uint64_t enc = ((uint64_t)LMD_TYPE_DECIMAL << 56) | ((uint64_t)dec & 0x00FFFFFFFFFFFFFF);
     return (Item){.item = enc};
@@ -1338,7 +1390,7 @@ static Item bigint_push_result(mpd_t* mpd_val) {
 mpd_t* bigint_get_mpd(Item bi) {
     Decimal* dec = (Decimal*)(bi.item & 0x00FFFFFFFFFFFFFF);
     if (!dec) return NULL;
-    return dec->dec_val;
+    return decimal_mpd(dec);
 }
 
 // ─── Creation ────────────────────────────────────────────────────────

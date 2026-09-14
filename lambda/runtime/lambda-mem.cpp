@@ -302,12 +302,6 @@ static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
         (void)dv;
         break;
     }
-    case MAP_KIND_ITERATOR:
-        if (map->data && !gc_native_seen_seen_or_add(seen_native, map->data)) {
-            mem_free(map->data);
-        }
-        map->data = NULL;
-        break;
     case MAP_KIND_ARRAY_SPARSE: {
         SparseArrayMap* sm = (SparseArrayMap*)map;
         if (sm->sparse_indices && !gc_native_seen_seen_or_add(seen_native, sm->sparse_indices)) {
@@ -885,6 +879,7 @@ extern "C" String* heap_strcpy(const char* src, int64_t len) {
     // guard against a negative length and against the size overflowing heap_alloc's int
     // parameter (which would otherwise truncate to a small allocation + large memcpy).
     if (len < 0 || (uint64_t)len + 1 + sizeof(String) > (uint64_t)INT_MAX) return NULL;
+    if (len == 0) return it2s(ItemEmptyString);
     String *str = (String *)heap_alloc((int)(len + 1 + sizeof(String)), LMD_TYPE_STRING);
     if (!str) return NULL;         // OOM — propagate instead of dereferencing NULL
     memcpy(str->chars, src, len);  // Safe copy with explicit length
@@ -1292,28 +1287,6 @@ Item box_uint64_value(uint64_t uval) {
     }
     *uptr = uval;
     return {.item = u2it(uptr)};
-}
-
-// Safe version of push_d that detects already-boxed FLOAT Items.
-// When the MIR JIT passes a value that's already a boxed FLOAT Item
-// (from a runtime function return), this prevents double-boxing.
-Item push_d_safe(double val) {
-    uint64_t bits;
-    memcpy(&bits, &val, sizeof(bits));
-    if (bits & ITEM_DBL_MASK) {
-        // Already an inline FLOAT Item — return as-is.
-        return {.item = bits};
-    }
-    uint8_t tag = bits >> 56;
-
-    if (tag == LMD_TYPE_FLOAT) {
-        // Already a boxed FLOAT Item — return as-is
-        Item result;
-        result.item = bits;
-        return result;
-    }
-    // Raw double value — box normally
-    return push_d(val);
 }
 
 extern "C" void heap_finalize_gc_objects(gc_heap_t *gc) {

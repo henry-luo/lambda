@@ -8,6 +8,7 @@
 #include "../../lib/arraylist.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../../lib/byte_builder.h"
 #include <curl/curl.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -33,8 +34,7 @@ typedef struct CurlMultiTransfer {
     CURL* easy;
     struct curl_slist* custom_headers;
     HeaderCallbackCtx* header_ctx;
-    char* data;
-    size_t size;
+    ByteBuilder body;
 } CurlMultiTransfer;
 
 struct CurlMultiBackend {
@@ -76,24 +76,12 @@ static size_t write_response_callback(void* contents,
     if (!transfer) return 0;
 
     size_t total_size = size * nmemb;
-    if (transfer->size + total_size > NETWORK_MAX_RESOURCE_SIZE) {
+    if (!byte_builder_append_limited(&transfer->body, contents, total_size,
+                                     NETWORK_MAX_RESOURCE_SIZE)) {
         log_error("curl-multi: resource exceeds maximum size (%d MB)",
                   NETWORK_MAX_RESOURCE_SIZE / (1024 * 1024));
         return 0;
     }
-
-    char* new_data = (char*)mem_realloc(transfer->data,
-                                        transfer->size + total_size + 1,
-                                        MEM_CAT_NETWORK);
-    if (!new_data) {
-        log_error("curl-multi: memory allocation failed during download");
-        return 0;
-    }
-
-    transfer->data = new_data;
-    memcpy(&transfer->data[transfer->size], contents, total_size);
-    transfer->size += total_size;
-    transfer->data[transfer->size] = '\0';
     return total_size;
 }
 
@@ -199,8 +187,8 @@ static bool persist_response(CurlMultiTransfer* transfer) {
     if (res->cache) {
         char* cached_path = enhanced_cache_try_store(res->cache,
                                                      res->url,
-                                                     transfer->data,
-                                                     transfer->size,
+                                                     (const char*)transfer->body.data,
+                                                     transfer->body.length,
                                                      NULL);
         if (cached_path) {
             if (res->local_path) mem_free(res->local_path);
@@ -218,7 +206,7 @@ static bool persist_response(CurlMultiTransfer* transfer) {
             set_resource_error(res, "Failed to write downloaded resource");
             return false;
         }
-        fwrite(transfer->data, 1, transfer->size, f);
+        fwrite(transfer->body.data, 1, transfer->body.length, f);
         fclose(f);
         res->local_path = mem_strdup(temp_path, MEM_CAT_NETWORK);
         log_debug("curl-multi: saved to temporary file: %s", temp_path);
@@ -252,7 +240,7 @@ static bool finish_transfer(CurlMultiTransfer* transfer, CURLcode result) {
             }
         } else {
             log_debug("curl-multi: downloaded %zu bytes from %s (HTTP %ld)",
-                      transfer->size, res->url, http_code);
+                      transfer->body.length, res->url, http_code);
             success = persist_response(transfer);
         }
     }
@@ -265,7 +253,7 @@ static void transfer_free(CurlMultiTransfer* transfer) {
     if (transfer->custom_headers) curl_slist_free_all(transfer->custom_headers);
     if (transfer->header_ctx) mem_free(transfer->header_ctx);
     if (transfer->easy) curl_easy_cleanup(transfer->easy);
-    if (transfer->data) mem_free(transfer->data);
+    byte_builder_destroy(&transfer->body);
     mem_free(transfer);
 }
 
@@ -355,7 +343,8 @@ static bool add_pending_transfer(CurlMultiBackend* backend, CurlMultiRequest* re
 
     transfer->resource = request->resource;
     transfer->request_data = request->request_data;
-    if (!configure_transfer(transfer)) {
+    if (!byte_builder_init(&transfer->body, 0, MEM_CAT_NETWORK, true) ||
+        !configure_transfer(transfer)) {
         transfer_free(transfer);
         return false;
     }

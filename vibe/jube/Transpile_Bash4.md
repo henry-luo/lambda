@@ -617,24 +617,24 @@ All four new C modules implemented, wired into transpiler, registered, and teste
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `lambda/bash/bash_exec.h` | 83 | Exec engine header — flags, fd redirect, subscript APIs |
-| `lambda/bash/bash_exec.cpp` | 335 | Exec engine impl — exec builtin, fd table, varfd, subscript fork |
-| `lambda/bash/bash_builtins_ext.h` | 89 | Extended builtins header — mapfile, wait, hash, enable, umask, trap print |
-| `lambda/bash/bash_builtins_ext.cpp` | 608 | Extended builtins impl — full option parsing, StrBuf-based line reading |
-| `lambda/bash/bash_cond.h` | 57 | Conditional engine header — regex, BASH_REMATCH, file comparison, pattern |
-| `lambda/bash/bash_cond.cpp` | 264 | Conditional engine impl — regcomp/regexec, BASH_REMATCH array, stat-based file ops |
-| `lambda/bash/bash_heredoc.h` | 56 | Heredoc engine header — expand, herestring, strip tabs, stdin passing |
-| `lambda/bash/bash_heredoc.cpp` | 293 | Heredoc engine impl — char-by-char scanner for $, backtick, backslash |
+| `lambda/module/bash/bash_exec.h` | 83 | Exec engine header — flags, fd redirect, subscript APIs |
+| `lambda/module/bash/bash_exec.cpp` | 335 | Exec engine impl — exec builtin, fd table, varfd, subscript fork |
+| `lambda/module/bash/bash_builtins_ext.h` | 89 | Extended builtins header — mapfile, wait, hash, enable, umask, trap print |
+| `lambda/module/bash/bash_builtins_ext.cpp` | 608 | Extended builtins impl — full option parsing, StrBuf-based line reading |
+| `lambda/module/bash/bash_cond.h` | 57 | Conditional engine header — regex, BASH_REMATCH, file comparison, pattern |
+| `lambda/module/bash/bash_cond.cpp` | 264 | Conditional engine impl — regcomp/regexec, BASH_REMATCH array, stat-based file ops |
+| `lambda/module/bash/bash_heredoc.h` | 56 | Heredoc engine header — expand, herestring, strip tabs, stdin passing |
+| `lambda/module/bash/bash_heredoc.cpp` | 293 | Heredoc engine impl — char-by-char scanner for $, backtick, backslash |
 
 #### Existing Files Modified (6 files)
 
 | File | Changes |
 |------|---------|
-| `lambda/bash/transpile_bash_mir.cpp` | Wired exec/wait/mapfile/readarray/hash/enable/umask/trap-p dispatches; replaced `bash_test_regex`→`bash_cond_regex`, `bash_test_glob`→`bash_cond_pattern`; added -nt/-ot/-ef; added BASH_REMATCH to `special_vars[]` |
-| `lambda/bash/bash_ast.hpp` | Added `BASH_TEST_NT`, `BASH_TEST_OT`, `BASH_TEST_EF` to `BashTestOp` enum |
-| `lambda/bash/build_bash_ast.cpp` | Added `-nt`, `-ot`, `-ef` operator parsing |
-| `lambda/bash/bash_runtime.cpp` | Made `bash_trap_handlers[]` non-static; added nocasematch/extglob shopt options with getters |
-| `lambda/bash/bash_runtime.h` | Added `bash_get_option_nocasematch()` and `bash_get_option_extglob()` declarations |
+| `lambda/module/bash/transpile_bash_mir.cpp` | Wired exec/wait/mapfile/readarray/hash/enable/umask/trap-p dispatches; replaced `bash_test_regex`→`bash_cond_regex`, `bash_test_glob`→`bash_cond_pattern`; added -nt/-ot/-ef; added BASH_REMATCH to `special_vars[]` |
+| `lambda/module/bash/bash_ast.hpp` | Added `BASH_TEST_NT`, `BASH_TEST_OT`, `BASH_TEST_EF` to `BashTestOp` enum |
+| `lambda/module/bash/build_bash_ast.cpp` | Added `-nt`, `-ot`, `-ef` operator parsing |
+| `lambda/module/bash/bash_runtime.cpp` | Made `bash_trap_handlers[]` non-static; added nocasematch/extglob shopt options with getters |
+| `lambda/module/bash/bash_runtime.h` | Added `bash_get_option_nocasematch()` and `bash_get_option_extglob()` declarations |
 | `lambda/sys_func_registry.c` | Added includes for 4 new headers; registered ~30 new functions (Modules 8–11) |
 
 #### Integration Test Scripts Added (4 scripts)

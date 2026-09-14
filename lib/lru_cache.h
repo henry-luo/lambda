@@ -60,6 +60,11 @@ void lru_cache_clear(LruCache* cache);
 // evicts the single least-recently-used entry. returns bytes freed (0 if empty).
 size_t lru_cache_evict_one(LruCache* cache);
 
+// removes every entry selected by predicate. Predicate runs before its entry's
+// eviction callback and may inspect, but must not mutate, the cache.
+typedef bool (*LruRemoveIfFn)(const char* key, void* value, size_t bytes, void* udata);
+size_t lru_cache_remove_if(LruCache* cache, LruRemoveIfFn predicate, void* udata);
+
 size_t lru_cache_count(const LruCache* cache);
 size_t lru_cache_bytes(const LruCache* cache);
 

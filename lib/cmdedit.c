@@ -4,6 +4,7 @@
 #endif
 #include <string.h>
 #include "memtrack.h"
+#include "mem_grow.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -711,27 +712,10 @@ static int editor_ensure_buffer_size(struct line_editor *ed, size_t needed) {
     }
 
     // Use exponential growth for better performance with large inputs
-    size_t new_size = ed->buffer_size;
-    if (new_size == 0) {
-        new_size = BUFFER_GROW_SIZE;
-    }
-
-    while (new_size < needed) {
-        if (new_size > SIZE_MAX / 2) {
-            // Avoid overflow, fall back to exact size
-            new_size = needed;
-            break;
-        }
-        new_size *= 2;
-    }
-
-    char *new_buffer = mem_realloc(ed->buffer, new_size, MEM_CAT_TEMP);
-    if (!new_buffer) {
-        return -1;
-    }
-
-    ed->buffer = new_buffer;
-    ed->buffer_size = new_size;
+    void* buffer = ed->buffer;
+    if (!mem_grow_array_raw(&buffer, sizeof(*ed->buffer), &ed->buffer_size,
+            needed, BUFFER_GROW_SIZE, MEM_CAT_TEMP)) return -1;
+    ed->buffer = (char*)buffer;
     return 0;
 }
 

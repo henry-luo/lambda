@@ -8,6 +8,7 @@
 #include "../../jube/jube_registry.h"
 #include "../../../lib/url.h"
 #include "../../../lib/mem.h"
+#include "../../../lib/mem_grow.hpp"
 #include "../../../lib/hex.h"
 
 #include <cstring>
@@ -710,14 +711,9 @@ static char* node_querystring_encode_value(Item value, Item encoder) {
 static bool node_querystring_append(char** buffer, size_t* capacity, size_t* length,
                                     const char* text, size_t text_length) {
     if (!buffer || !*buffer || !capacity || !length || !text) return false;
-    if (*length + text_length + 1 > *capacity) {
-        size_t next_capacity = *capacity;
-        while (*length + text_length + 1 > next_capacity) next_capacity *= 2;
-        char* grown = (char*)mem_realloc(*buffer, next_capacity, MEM_CAT_TEMP);
-        if (!grown) return false;
-        *buffer = grown;
-        *capacity = next_capacity;
-    }
+    if (*length > SIZE_MAX - 1 || text_length > SIZE_MAX - *length - 1) return false;
+    if (!lam::mem_grow_array(buffer, capacity, *length + text_length + 1,
+                             *capacity, MEM_CAT_TEMP)) return false;
     memcpy(*buffer + *length, text, text_length);
     *length += text_length;
     (*buffer)[*length] = '\0';

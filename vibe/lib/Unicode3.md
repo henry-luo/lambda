@@ -19,7 +19,7 @@ Unicode codepoint handling is duplicated across **20+ files** in the Lambda/Radi
 | `lambda/input/input-utils.cpp:17` | `codepoint_to_utf8()` | Null-terminates output. Does NOT reject surrogates |
 | `radiant/event.cpp:321` | `static codepoint_to_utf8()` | Local static. Null-terminates. No surrogate check |
 | `radiant/pdf/fonts.cpp:1259` | `static encode_utf8()` | Local static. Returns byte count. No surrogate check |
-| `lambda/bash/bash_builtins.cpp:59` | `static utf8_encode()` | Local static. Returns byte count. Uses `< 0x110000` |
+| `lambda/module/bash/bash_builtins.cpp:59` | `static utf8_encode()` | Local static. Returns byte count. Uses `< 0x110000` |
 | `lambda/js/js_runtime.cpp:13781` | `static js_cp_to_utf8()` | Local static. Returns byte count |
 | `test/test_html_roundtrip_gtest.cpp:174` | `static encode_utf8()` | Test-only copy |
 | `lambda/js/build_js_ast.cpp:240,397,821,860` | Inline bit-shifting | 4 separate inline encode blocks |
@@ -208,7 +208,7 @@ float utf_space_width_em(uint32_t cp);          // Unicode-specified space width
 | `lambda/input/input-utils.cpp` `codepoint_to_utf8()` | Thin wrapper calling `utf8_encode_z()` (keep API for compatibility) |
 | `radiant/event.cpp` `codepoint_to_utf8()` | Replace local static → `#include "utf.h"` + `utf8_encode_z()` |
 | `radiant/pdf/fonts.cpp` `encode_utf8()` | Replace local static → `utf8_encode()` |
-| `lambda/bash/bash_builtins.cpp` `utf8_encode()` | Replace local static → `utf8_encode()` |
+| `lambda/module/bash/bash_builtins.cpp` `utf8_encode()` | Replace local static → `utf8_encode()` |
 | `lambda/js/js_runtime.cpp` `js_cp_to_utf8()` | Replace local static → `utf8_encode()` |
 | `test/test_html_roundtrip_gtest.cpp` `encode_utf8()` | Replace local static → `utf8_encode_z()` |
 | `lambda/js/build_js_ast.cpp` (4 inline sites) | Replace inline bit-shifting → `utf8_encode()` |

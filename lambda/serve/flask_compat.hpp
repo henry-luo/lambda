@@ -11,6 +11,7 @@
 //
 
 #include "server.hpp"
+#include "../../lib/line_framer.h"
 #include <uv.h>
 
 #ifdef __cplusplus
@@ -25,9 +26,7 @@ typedef struct WsgiWorker {
     uv_process_t    process;
     uv_pipe_t       stdin_pipe;
     uv_pipe_t       stdout_pipe;
-    char*           read_buf;       // accumulated output
-    int             read_len;
-    int             read_cap;
+    LineFramer      read_lines;     // accumulated output
     int             busy;
     int             alive;
     int             request_id;

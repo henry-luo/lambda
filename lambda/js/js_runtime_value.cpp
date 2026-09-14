@@ -280,7 +280,7 @@ extern "C" Item js_to_number(Item value) {
     case LMD_TYPE_DECIMAL: {
         // ES spec: ToNumber(bigint) throws TypeError
         Decimal* _dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
-        if (_dec && _dec->unlimited == DECIMAL_BIGINT) {
+        if (_dec && _dec->storage_kind == DECIMAL_BIGINT) {
             return js_throw_type_error("Cannot convert a BigInt value to a number");
         }
         // regular decimal egress is intentionally lossy; warn once per native caller so BigInt's TypeError path stays quiet.
@@ -337,7 +337,7 @@ extern "C" Item js_to_numeric(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_DECIMAL) {
         Decimal* _dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
-        if (_dec && _dec->unlimited == DECIMAL_BIGINT) return value;
+        if (_dec && _dec->storage_kind == DECIMAL_BIGINT) return value;
     }
     if (js_is_native_bigint_egress(value)) return js_native_bigint_to_bigint(value);
     // ES spec: Symbol → TypeError in ToNumeric (§7.1.3)
@@ -534,7 +534,7 @@ extern "C" Item js_to_string(Item value) {
 
     case LMD_TYPE_DECIMAL: {
         Decimal* _dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
-        if (_dec && _dec->unlimited == DECIMAL_BIGINT) {
+        if (_dec && _dec->storage_kind == DECIMAL_BIGINT) {
             char* s = bigint_to_cstring_radix(value, 10);
             if (!s) return ItemNull;
             Item result = js_make_string(s);
@@ -1853,7 +1853,7 @@ JS_DEFINE_SHIFT_BINARY(unsigned_right_shift, UNSIGNED_RIGHT_SHIFT)
 
 // v90: BigInt(value) — ES2020 BigInt constructor (called as function, not with new)
 // Calls ToPrimitive(value, "number") to handle valueOf/toString on objects.
-// Returns a BigInt (Decimal with unlimited == DECIMAL_BIGINT).
+// Returns a BigInt (Decimal with storage_kind == DECIMAL_BIGINT).
 extern "C" Item js_bigint_constructor(Item value) {
     // If already a BigInt, return as-is
     if (js_is_bigint(value)) return value;

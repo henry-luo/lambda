@@ -7,7 +7,7 @@
     "lambda/mir",
     "lambda/tree-sitter",
     "lambda/module",
-    "lambda/bash",
+    "lambda/module/bash",
     "lib/sqlite",
     "lib/font/woff2",
     "lib/font/freetype",

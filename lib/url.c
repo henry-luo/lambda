@@ -10,6 +10,7 @@
 #include <ctype.h>
 #include <unistd.h>  // for getcwd and chdir
 #include "url.h"
+#include "file.h"
 #include "log.h"
 #include "str.h"
 #include "hex.h"
@@ -1066,6 +1067,29 @@ size_t url_decode_inplace(char* buf, bool form) {
     }
     *dst = '\0';
     return (size_t)(dst - buf);
+}
+
+bool url_text_path_has_ext_ci(const char* href, const char* ext) {
+    if (!href || !ext) return false;
+
+    size_t path_len = strlen(href);
+    for (size_t i = 0; i < path_len; i++) {
+        if (href[i] == '?' || href[i] == '#') {
+            path_len = i;
+            break;
+        }
+    }
+
+    size_t actual_len = 0;
+    const char* actual = file_path_ext_len(href, path_len, &actual_len);
+    if (!actual) return false;
+    if (actual[0] == '.') {
+        actual++;
+        actual_len--;
+    }
+    if (ext[0] == '.') ext++;
+    size_t expected_len = strlen(ext);
+    return expected_len > 0 && str_ieq(actual, actual_len, ext, expected_len);
 }
 
 // Build a file:// URL from an absolute local file system path.

@@ -5,6 +5,7 @@
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
 
 #include <string.h>
 
@@ -28,17 +29,7 @@ static const char* jube_language_required_host_build_id(const JubeLanguageDef* l
 }
 
 static bool jube_language_ascii_equal(const char* left, const char* right) {
-    if (!left || !right) return false;
-    while (*left && *right) {
-        char a = *left;
-        char b = *right;
-        if (a >= 'A' && a <= 'Z') a = (char)(a + ('a' - 'A'));
-        if (b >= 'A' && b <= 'Z') b = (char)(b + ('a' - 'A'));
-        if (a != b) return false;
-        left++;
-        right++;
-    }
-    return *left == '\0' && *right == '\0';
+    return left && right && str_ieq(left, strlen(left), right, strlen(right));
 }
 
 static bool jube_language_extension_equal(const char* left, const char* right) {

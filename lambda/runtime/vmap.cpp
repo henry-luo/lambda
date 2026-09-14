@@ -94,8 +94,8 @@ static bool vmap_key_is_integer(Item key) {
     }
     if (get_type_id(key) != LMD_TYPE_DECIMAL) return false;
     Decimal* decimal = key.get_decimal();
-    return decimal && decimal->dec_val && !mpd_isnan(decimal->dec_val) &&
-        !mpd_isinfinite(decimal->dec_val) && mpd_isinteger(decimal->dec_val);
+    const mpd_t* value = decimal_mpd(decimal);
+    return value && !mpd_isnan(value) && !mpd_isinfinite(value) && mpd_isinteger(value);
 }
 
 static bool vmap_key_is_supported(Item key) {

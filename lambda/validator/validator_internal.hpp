@@ -228,7 +228,7 @@ static inline bool validator_numeric_type_embeds(TypeId actual_tid, NumSizedType
 static inline bool validator_numeric_item_embeds(ConstItem item, Type* target) {
     TypeId actual = item.type_id();
     // BigInt is carried as `Decimal*` tagged LMD_TYPE_DECIMAL, discriminated by
-    // `unlimited == DECIMAL_BIGINT` -- it has no tag of its own. The runtime's
+    // `storage_kind == DECIMAL_BIGINT` -- it has no tag of its own. The runtime's
     // item_type_is_integer_subtype admits it as `integer`; the validator's
     // TypeId-only lattice could not see it, because the discriminator lives in
     // the VALUE, not the type. That divergence made `c.n = c.n + 1n` on an
@@ -236,7 +236,7 @@ static inline bool validator_numeric_item_embeds(ConstItem item, Type* target) {
     // (D3.2.2's known three-way divergence; Tune19 §12.8).
     if (actual == LMD_TYPE_DECIMAL && unwrap_type(target) == &TYPE_INTEGER) {
         Decimal* dec = ((Item*)&item)->get_decimal();
-        return dec && dec->unlimited == DECIMAL_BIGINT;
+        return dec && dec->storage_kind == DECIMAL_BIGINT;
     }
     // Shared IEEE poison decodes as float, but its surface type is int; keep
     // validator admission aligned with fn_type() and the runtime type boundary.

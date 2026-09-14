@@ -8,7 +8,9 @@
 #include "../lib/log.h"
 #include "../lib/image.h"
 #include "../lib/file_utils.h"
+#include "../lib/file.h"
 #include "../lib/mempool.h"
+#include "../lib/mem_grow.hpp"
 #include "../lib/str.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_parser.hpp"
@@ -27,46 +29,12 @@
 // Helper: Read file contents into a string
 static char* read_file_to_string(const char* path, size_t* out_size) {
     if (!path) return NULL;
-
-    FILE* f = fopen(path, "rb");
-    if (!f) {
-        log_error("resource_loaders: failed to open file: %s", path);
+    char* content = NULL;
+    if (!file_read_all(path, MEM_CAT_NETWORK, &content, out_size)) {
+        log_error("resource_loaders: failed to read file: %s", path);
         return NULL;
     }
-
-    fseek(f, 0, SEEK_END);
-    size_t size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-
-    char* content = (char*)mem_alloc(size + 1, MEM_CAT_NETWORK);
-    if (!content) {
-        fclose(f);
-        return NULL;
-    }
-
-    size_t read = fread(content, 1, size, f);
-    fclose(f);
-
-    if (read != size) {
-        mem_free(content);
-        return NULL;
-    }
-
-    content[size] = '\0';
-    if (out_size) *out_size = size;
     return content;
-}
-
-static bool resource_url_has_extension(const char* url, const char* ext) {
-    if (!url || !ext) return false;
-    size_t ext_len = strlen(ext);
-    const char* end = url + strlen(url);
-    const char* query = strchr(url, '?');
-    const char* fragment = strchr(url, '#');
-    if (query && query < end) end = query;
-    if (fragment && fragment < end) end = fragment;
-    return (size_t)(end - url) >= ext_len &&
-           strncasecmp(end - ext_len, ext, ext_len) == 0;
 }
 
 static bool resource_file_looks_like_svg(const char* path) {
@@ -91,7 +59,6 @@ static bool add_stylesheet_to_document(DomDocument* doc, CssStylesheet* sheet) {
     if (!doc || !sheet) return false;
 
     if (doc->stylesheet_count >= doc->stylesheet_capacity) {
-        int new_capacity = doc->stylesheet_capacity == 0 ? 4 : doc->stylesheet_capacity * 2;
         if (!doc->document_pool) {
             log_error("resource_loaders: cannot expand stylesheet array without document pool");
             return false;
@@ -99,18 +66,12 @@ static bool add_stylesheet_to_document(DomDocument* doc, CssStylesheet* sheet) {
 
         // document stylesheet arrays are pool-owned after initial HTML load, so
         // network CSS must grow by copying instead of reallocating pool memory.
-        size_t new_size = (size_t)new_capacity * sizeof(CssStylesheet*);
-        CssStylesheet** new_sheets = (CssStylesheet**)pool_calloc(doc->document_pool, new_size);
-        if (!new_sheets) {
+        if (!lam::pool_copy_grow_array(doc->document_pool, &doc->stylesheets,
+                                       &doc->stylesheet_capacity, doc->stylesheet_count,
+                                       doc->stylesheet_count + 1, 4, true)) {
             log_error("resource_loaders: failed to expand stylesheet array");
             return false;
         }
-        if (doc->stylesheets && doc->stylesheet_count > 0) {
-            memcpy(new_sheets, doc->stylesheets,
-                   (size_t)doc->stylesheet_count * sizeof(CssStylesheet*));
-        }
-        doc->stylesheets = new_sheets;
-        doc->stylesheet_capacity = new_capacity;
     }
 
     doc->stylesheets[doc->stylesheet_count++] = sheet;
@@ -248,8 +209,8 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
     int img_width = 0;
     int img_height = 0;
     ImageSurface* img_surface = NULL;
-    bool source_is_svg = resource_url_has_extension(res->url, ".svg");
-    bool source_is_webp = resource_url_has_extension(res->url, ".webp");
+    bool source_is_svg = url_text_path_has_ext_ci(res->url, "svg");
+    bool source_is_webp = url_text_path_has_ext_ci(res->url, "webp");
     bool cached_file_is_svg = !source_is_svg && !source_is_webp &&
         resource_file_looks_like_svg(res->local_path);
 

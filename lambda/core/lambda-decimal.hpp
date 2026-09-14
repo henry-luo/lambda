@@ -14,7 +14,7 @@
 // operations use a local maximum-precision context.
 #pragma once
 
-// Forward declarations for mpdecimal types - mpdecimal.h is only included in lambda-decimal.cpp
+// Forward declarations keep scalar users independent from libmpdec's context ABI.
 typedef struct mpd_context_t mpd_context_t;
 typedef struct mpd_t mpd_t;
 
@@ -29,6 +29,7 @@ struct Item;
 struct EvalContext;
 struct _ArrayList;
 typedef uint8_t TypeId;
+enum DecimalKind : uint8_t;
 
 // ─────────────────────────────────────────────────────────────────────
 // Constants
@@ -99,12 +100,12 @@ Item decimal_from_string(const char* str);
 // Free mpdecimal string (wrapper for mpd_free)
 void decimal_free_string(char* str);
 
-// Deep copy a decimal Item (for arena allocation in MarkBuilder)
-// Uses the provided arena or heap depending on allocation mode
-Item decimal_deep_copy(Item item, void* arena, bool is_unlimited);
+// Deep copy a decimal Item (for arena allocation in MarkBuilder), preserving
+// its source storage kind.
+Item decimal_deep_copy(Item item, void* arena);
 
 // Create a decimal Item from a string, with Decimal struct arena-allocated.
-// The mpd_t* inside is heap-allocated (not GC-managed) and will be freed on arena teardown.
+// Its coefficient storage is owned by libmpdec, while the mpd_t itself is embedded.
 // Use this in input parsers where GC-heap allocation is not safe.
 // Returns ItemNull if str is null or parse fails.
 Item decimal_from_string_arena(const char* str, void* arena_ptr);
@@ -136,7 +137,11 @@ void decimal_big_print(StrBuf* strbuf, Decimal* decimal);
 // Memory Management
 // ─────────────────────────────────────────────────────────────────────
 
-// Allocate and initialize a new Decimal from mpd_t* (takes ownership of mpd_val)
+// Move an owned mpd_t allocation into Decimal's embedded payload. The source
+// header is released while its coefficient allocation becomes Decimal-owned.
+bool decimal_take_mpd(Decimal* decimal, DecimalKind storage_kind, mpd_t* mpd_val);
+
+// Allocate and initialize a fixed Decimal from mpd_t* (takes ownership of mpd_val)
 Decimal* decimal_create(mpd_t* mpd_val);
 
 // Increment reference count
@@ -145,11 +150,11 @@ void decimal_retain(Decimal* dec);
 // Decrement reference count, free if zero
 void decimal_release(Decimal* dec);
 
-// Release a Decimal wrapper's external mpd_t and clear it for idempotent GC cleanup.
+// Release a Decimal wrapper's embedded mpd_t coefficient storage.
 void decimal_payload_release(Decimal* dec);
 
 // Release mpdecimal payloads tracked by a compiler-owned constant list.
-// The Decimal wrappers may live in a Pool, but their mpd_t payloads do not.
+// The Decimal wrappers may live in a Pool, but their coefficient payloads do not.
 void decimal_constants_release(struct _ArrayList* constants);
 
 // ─────────────────────────────────────────────────────────────────────
@@ -164,7 +169,11 @@ mpd_t* decimal_item_to_mpd(Item item, mpd_context_t* ctx);
 // Convert mpd_t* to int64 without reserving a numeric error value.
 bool decimal_mpd_try_to_int64(mpd_t* dec, mpd_context_t* ctx, int64_t* out);
 
-// Convert mpd_t* to double
+// Convert finite/special decimal values to double without collapsing a failed
+// conversion into 0.0. The decimal remains owned by the caller.
+bool decimal_mpd_try_to_double(mpd_t* dec, mpd_context_t* ctx, double* out);
+
+// Legacy scalar conversion for callers that have already checked the source.
 double decimal_mpd_to_double(mpd_t* dec, mpd_context_t* ctx);
 
 // ─────────────────────────────────────────────────────────────────────
@@ -173,7 +182,7 @@ double decimal_mpd_to_double(mpd_t* dec, mpd_context_t* ctx);
 
 // All arithmetic operations:
 // - Use the appropriate context based on operand types
-// - If either operand has the unlimited flag set, result is unlimited
+// - If either operand requires the extended tier, result is extended
 // - Otherwise result is fixed precision
 
 // Addition: a + b
@@ -262,7 +271,10 @@ bool decimal_is_any(Item item);
 // Conversion helpers (for integration with existing code)
 // ─────────────────────────────────────────────────────────────────────
 
-// Convert decimal Item to double
+// Convert a decimal Item to double without a silent numeric fallback.
+bool decimal_try_to_double(Item item, double* out);
+
+// Legacy scalar conversion for callers that have already checked the source.
 double decimal_to_double(Item item);
 
 // Convert decimal Item to string (caller must free with decimal_free_string)
@@ -274,7 +286,7 @@ char* decimal_to_string(Decimal* decimal);
 // ─────────────────────────────────────────────────────────────────────
 // BigInt Support (JS BigInt backed by libmpdec integer arithmetic)
 // ─────────────────────────────────────────────────────────────────────
-// BigInt reuses Decimal struct with unlimited == DECIMAL_BIGINT (2).
+// BigInt reuses Decimal storage with storage_kind == DECIMAL_BIGINT.
 // All values are integers (no fractional part). Uses unlimited context.
 
 #ifdef __cplusplus

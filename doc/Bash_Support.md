@@ -675,14 +675,14 @@ All 31 integration tests pass:
 
 | File | Role |
 |------|------|
-| `lambda/bash/bash_ast.hpp` | AST node types, operator enums, struct definitions |
-| `lambda/bash/build_bash_ast.cpp` | Tree-sitter CST → Bash AST builder |
-| `lambda/bash/transpile_bash_mir.cpp` | Bash AST → MIR code generation |
-| `lambda/bash/bash_runtime.h` | C API for all runtime functions (callable from JIT) |
-| `lambda/bash/bash_runtime.cpp` | Runtime function implementations |
-| `lambda/bash/bash_builtins.cpp` | Builtin command implementations |
-| `lambda/bash/bash_scope.cpp` | Variable scope and positional parameter management |
-| `lambda/bash/bash_transpiler.hpp` | Transpiler class header |
+| `lambda/module/bash/bash_ast.hpp` | AST node types, operator enums, struct definitions |
+| `lambda/module/bash/build_bash_ast.cpp` | Tree-sitter CST → Bash AST builder |
+| `lambda/module/bash/transpile_bash_mir.cpp` | Bash AST → MIR code generation |
+| `lambda/module/bash/bash_runtime.h` | C API for all runtime functions (callable from JIT) |
+| `lambda/module/bash/bash_runtime.cpp` | Runtime function implementations |
+| `lambda/module/bash/bash_builtins.cpp` | Builtin command implementations |
+| `lambda/module/bash/bash_scope.cpp` | Variable scope and positional parameter management |
+| `lambda/module/bash/bash_transpiler.hpp` | Transpiler class header |
 
 ### Runtime Data Model
 

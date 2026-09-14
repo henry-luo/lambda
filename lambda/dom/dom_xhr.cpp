@@ -17,6 +17,7 @@
 #include "../input/input.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../../lib/mem_grow.hpp"
 #include "../../lib/url.h"
 #include "../../lib/file.h"
 
@@ -354,14 +355,9 @@ static void xhr_complete_response(XhrState* xhr, long status,
 
 extern "C" Item js_xhr_new(void) {
     if (!js_xhr_runtime_state_ensure()) return ItemNull;
-    if (_xhr_count >= _xhr_capacity) {
-        int capacity = _xhr_capacity ? _xhr_capacity * 2 : 8;
-        XhrState* grown = (XhrState*)mem_realloc(_xhr_pool,
-            (size_t)capacity * sizeof(XhrState), MEM_CAT_JS_RUNTIME);
-        if (!grown) return ItemNull;
-        _xhr_pool = grown;
-        _xhr_capacity = capacity;
-    }
+    if (_xhr_count >= _xhr_capacity &&
+            !lam::mem_grow_array(&_xhr_pool, &_xhr_capacity,
+                                 _xhr_count + 1, 8, MEM_CAT_JS_RUNTIME)) return ItemNull;
 
     int id = _xhr_count++;
     XhrState* xhr = &_xhr_pool[id];
@@ -502,18 +498,11 @@ extern "C" Item js_xhr_set_request_header(Item name_arg, Item value_arg) {
     const char* value = fn_to_cstr(value_arg);
     if (!name || !value) return make_js_undef();
 
-    if (xhr->req_header_count >= xhr->req_header_capacity) {
-        int capacity = xhr->req_header_capacity ? xhr->req_header_capacity * 2 : 8;
-        XhrHeader* grown = (XhrHeader*)mem_realloc(xhr->req_headers,
-            (size_t)capacity * sizeof(XhrHeader), MEM_CAT_JS_RUNTIME);
-        if (!grown) {
-            log_error("xhr: cannot grow request headers");
-            return make_js_undef();
-        }
-        memset(grown + xhr->req_header_capacity, 0,
-               (size_t)(capacity - xhr->req_header_capacity) * sizeof(XhrHeader));
-        xhr->req_headers = grown;
-        xhr->req_header_capacity = capacity;
+    if (xhr->req_header_count >= xhr->req_header_capacity &&
+            !lam::mem_grow_array(&xhr->req_headers, &xhr->req_header_capacity,
+                                 xhr->req_header_count + 1, 8, MEM_CAT_JS_RUNTIME)) {
+        log_error("xhr: cannot grow request headers");
+        return make_js_undef();
     }
 
     xhr->req_headers[xhr->req_header_count].name = xhr_mem_strdup(name);

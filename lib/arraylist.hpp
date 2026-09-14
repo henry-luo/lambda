@@ -6,6 +6,7 @@
 
 #include "log.h"
 #include "mem.h"
+#include "grow_capacity.h"
 #include "ownership.hpp"
 
 namespace lam {
@@ -240,8 +241,9 @@ private:
     }
 
     bool grow() {
-        size_t next_capacity = capacity_ == 0 ? DEFAULT_CAPACITY : capacity_ * 2;
-        if (next_capacity < capacity_) {
+        size_t next_capacity = 0;
+        if (capacity_ == SIZE_MAX || !lib_grow_capacity(capacity_, capacity_ + 1,
+                                                        DEFAULT_CAPACITY, &next_capacity)) {
             log_error("arraylist_grow_overflow: capacity=%zu", capacity_);
             return false;
         }
@@ -491,8 +493,9 @@ private:
     }
 
     bool grow() {
-        size_t next_capacity = capacity_ == 0 ? DEFAULT_CAPACITY : capacity_ * 2;
-        if (next_capacity < capacity_) {
+        size_t next_capacity = 0;
+        if (capacity_ == SIZE_MAX || !lib_grow_capacity(capacity_, capacity_ + 1,
+                                                        DEFAULT_CAPACITY, &next_capacity)) {
             log_error("array_owned_list_grow_overflow: capacity=%zu", capacity_);
             return false;
         }

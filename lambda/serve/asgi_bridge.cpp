@@ -107,32 +107,19 @@ static void on_worker_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *b
         return;
     }
 
-    // accumulate into read buffer
-    if (worker->read_buf_len + nread >= worker->read_buf_cap) {
-        worker->read_buf_cap = (worker->read_buf_len + nread) * 2;
-        worker->read_buf = (char*)mem_realloc(worker->read_buf, worker->read_buf_cap, MEM_CAT_SERVE);
+    if (!line_framer_append(&worker->read_lines, buf->base, (size_t)nread)) {
+        log_error("asgi: failed to append worker response bytes");
+        mem_free(buf->base);
+        return;
     }
-    memcpy(worker->read_buf + worker->read_buf_len, buf->base, nread);
-    worker->read_buf_len += nread;
-    worker->read_buf[worker->read_buf_len] = '\0';
-
     mem_free(buf->base);
 
     // check for complete JSON message (newline-delimited)
-    char *newline = strchr(worker->read_buf, '\n');
-    if (newline) {
-        *newline = '\0';
-        // worker->read_buf now contains the complete JSON response
-        // response will be consumed by the dispatch mechanism
+    size_t line_length = 0;
+    if (line_framer_peek(&worker->read_lines, &line_length)) {
+        // a complete response is available to the dispatch mechanism
         worker->busy = 0;
-
-        // shift remaining data
-        size_t consumed = newline - worker->read_buf + 1;
-        size_t remaining = worker->read_buf_len - consumed;
-        if (remaining > 0) {
-            memmove(worker->read_buf, newline + 1, remaining);
-        }
-        worker->read_buf_len = remaining;
+        (void)line_framer_consume(&worker->read_lines, line_length + 1);
     }
 }
 
@@ -143,9 +130,11 @@ static void alloc_buffer(uv_handle_t *handle, size_t suggested, uv_buf_t *buf) {
 
 static int start_worker(AsgiBridge *bridge, int index) {
     AsgiWorker *worker = (AsgiWorker*)mem_calloc(1, sizeof(AsgiWorker), MEM_CAT_SERVE);
-    worker->read_buf_cap = 4096;
-    worker->read_buf = (char*)mem_alloc(worker->read_buf_cap, MEM_CAT_SERVE);
-    worker->read_buf_len = 0;
+    if (!worker || !line_framer_init(&worker->read_lines, 4096, MEM_CAT_SERVE)) {
+        log_error("asgi: failed to allocate worker line framer");
+        mem_free(worker);
+        return -1;
+    }
 
     uv_pipe_init(bridge->loop, &worker->stdin_pipe, 0);
     uv_pipe_init(bridge->loop, &worker->stdout_pipe, 0);
@@ -190,7 +179,7 @@ static int start_worker(AsgiBridge *bridge, int index) {
     int r = uv_spawn(bridge->loop, &worker->process, &options);
     if (r != 0) {
         log_error("asgi: failed to spawn worker %d: %s", index, uv_strerror(r));
-        mem_free(worker->read_buf);
+        line_framer_destroy(&worker->read_lines);
         mem_free(worker);
         return -1;
     }
@@ -356,7 +345,7 @@ void asgi_bridge_destroy(AsgiBridge *bridge) {
         if (!uv_is_closing((uv_handle_t*)&w->process))
             uv_close((uv_handle_t*)&w->process, close_handle_cb);
 
-        mem_free(w->read_buf);
+        line_framer_destroy(&w->read_lines);
         mem_free(w);
     }
 

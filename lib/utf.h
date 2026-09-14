@@ -65,6 +65,23 @@ size_t utf8_char_to_byte(const char* s, size_t len, size_t char_index);
 /** Convert byte offset → char index. */
 size_t utf8_byte_to_char(const char* s, size_t len, size_t byte_offset);
 
+/* ── UTF-8 / UTF-16 offset conversion ──────────────────────────────── */
+
+/**
+ * Count UTF-16 code units represented by the UTF-8 byte sequence.
+ * A supplementary-plane codepoint contributes two units.  The conversion
+ * follows the runtime's existing structural UTF-8 policy: continuation bytes
+ * are skipped and non-continuation bytes are counted, so callers may use it
+ * on the same buffers accepted by the DOM text/control APIs.
+ */
+size_t utf8_to_utf16_length(const char* s, size_t byte_len);
+
+/** Convert a UTF-16 code-unit offset to a UTF-8 byte offset, clamped to end. */
+size_t utf16_to_utf8_offset(const char* s, size_t byte_len, size_t u16_offset);
+
+/** Convert a UTF-8 byte offset to a UTF-16 code-unit offset, clamped to end. */
+size_t utf8_to_utf16_offset(const char* s, size_t byte_len, size_t byte_offset);
+
 /* ── UTF-16 Surrogate Pairs ───────────────────────────────────────── */
 
 /**

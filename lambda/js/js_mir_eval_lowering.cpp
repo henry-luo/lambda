@@ -122,29 +122,9 @@ struct JsDynFuncCacheEntry {
     int hits;
 };
 
-struct JsDynFuncCacheState {
-    // Each compiled dynamic source owns one stable cache row. The code-store
-    // owns the MIR/source payload; this table owns only lookup metadata.
-    ArrayList* entries;
-};
-
-static JsDynFuncCacheState* js_dynfunc_cache_state_ensure(void) {
-    if (!js_active_runtime_state) return NULL;
-    if (!js_runtime_state.dynamic_function_cache_state) {
-        // Dynamic Function construction is a cold compilation boundary. The
-        // resulting cache remains entirely context-local and lock-free.
-        js_runtime_state.dynamic_function_cache_state = (JsDynFuncCacheState*)mem_calloc(1,
-            sizeof(JsDynFuncCacheState), MEM_CAT_JS_RUNTIME);
-    }
-    return js_runtime_state.dynamic_function_cache_state;
-}
-
-JS_FORWARD_STATIC_EXPRESSION(JsDynFuncCacheState*, js_dynfunc_cache_state_current, (void),
-    js_active_runtime_state ?
-        js_runtime_state.dynamic_function_cache_state : NULL)
-
-#define js_dynfunc_cache_state (*js_dynfunc_cache_state_current())
-#define js_dynfunc_cache_entries (js_dynfunc_cache_state.entries)
+// Each compiled dynamic source owns one stable cache row. The code-store owns
+// the MIR/source payload, and the realm owns this existing pointer list.
+#define js_dynfunc_cache_entries (js_runtime_state.dynamic_function_cache_entries)
 
 static int js_dynfunc_cache_entry_count(void) {
     return js_dynfunc_cache_entries ? js_dynfunc_cache_entries->length : 0;
@@ -156,13 +136,13 @@ static JsDynFuncCacheEntry* js_dynfunc_cache_entry_at(int index) {
         ? (JsDynFuncCacheEntry*)arraylist_get(js_dynfunc_cache_entries, index) : NULL;
 }
 
-static void js_dynfunc_cache_entries_clear(JsDynFuncCacheState* state) {
-    if (!state || !state->entries) return;
-    for (int i = 0; i < state->entries->length; i++) {
-        mem_free(arraylist_get(state->entries, i));
+static void js_dynfunc_cache_entries_clear(ArrayList** entries) {
+    if (!entries || !*entries) return;
+    for (int i = 0; i < (*entries)->length; i++) {
+        mem_free(arraylist_get(*entries, i));
     }
-    arraylist_free(state->entries);
-    state->entries = NULL;
+    arraylist_free(*entries);
+    *entries = NULL;
 }
 
 static int js_dynfunc_kind_from_prefix(const char* parse_prefix);
@@ -555,9 +535,8 @@ static void js_dynfunc_cache_insert(uint64_t hash, char* source, size_t source_l
 }
 
 extern "C" void js_dynfunc_cache_reset(void) {
-    JsDynFuncCacheState* state = js_dynfunc_cache_state_ensure();
-    if (!state) return;
-    js_dynfunc_cache_entries_clear(state);
+    if (!js_active_runtime_state) return;
+    js_dynfunc_cache_entries_clear(&js_dynfunc_cache_entries);
 }
 
 static void js_dynfunc_apply_function_metadata(Item fn_item, Item* args, int argc, const char* source_prefix) {
@@ -636,12 +615,10 @@ static void js_install_realm_global_preamble(JsMirTranspiler* mt,
 // ============================================================================
 static Item js_new_function_from_string_kind(Item* args, int argc, const char* parse_prefix,
         const char* source_prefix, bool inherit_caller_environment) {
-    if (!js_current_runtime()) {
+    if (!js_current_runtime() || !js_active_runtime_state) {
         log_error("js-new-function: no runtime context for dynamic function compilation");
         return ItemNull;
     }
-    JsDynFuncCacheState* state = js_dynfunc_cache_state_ensure();
-    if (!state) return ItemNull;
 
     // Build the JS source for the function expression.
     // new Function("param1", "param2", "body") or new Function("body")
@@ -930,13 +907,10 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
 }
 
 #undef js_dynfunc_cache_entries
-#undef js_dynfunc_cache_state
 
 extern "C" void js_dynfunc_cache_destroy_context(JsRuntimeState* runtime_state) {
-    if (!runtime_state || !runtime_state->dynamic_function_cache_state) return;
-    js_dynfunc_cache_entries_clear(runtime_state->dynamic_function_cache_state);
-    mem_free(runtime_state->dynamic_function_cache_state);
-    runtime_state->dynamic_function_cache_state = NULL;
+    if (!runtime_state) return;
+    js_dynfunc_cache_entries_clear(&runtime_state->dynamic_function_cache_entries);
 }
 
 JS_FORWARD_ITEM(js_new_function_from_string, (Item* args, int argc),

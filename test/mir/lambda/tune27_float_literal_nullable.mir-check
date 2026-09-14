@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "description": "Tune27 T27-7 / D3.2.2 / S7.1.3v2: a float literal whose members may be null evaluates its members first, allocates one packed array and stores into it directly; only a member that is null takes the single out-of-line call that republishes generic storage. No per-member push or set call remains. A literal with a non-float member beside a nullable float stays generic.",
+  "checks": [
+    {
+      "in_func": "_tune27_float_literal_nullable_#",
+      "expect_seq": [
+        {
+          "pattern": "call\tarray_float_new_p, array_float_new"
+        },
+        {
+          "pattern": "dmov\td:8({{r}})"
+        },
+        {
+          "pattern": "call\tarray_float_literal_with_nulls_p, array_float_literal_with_nulls"
+        }
+      ],
+      "forbid": [
+        "call\tarray_push_capture_p, array_push_capture",
+        "call\tarray_float_set_p, array_float_set",
+        "call\tarray_end_p, array_end"
+      ]
+    },
+    {
+      "in_func": "_tune27_float_literal_mixed_#",
+      "forbid": [
+        "call\tarray_float_new_p, array_float_new",
+        "call\tarray_float_literal_with_nulls_p, array_float_literal_with_nulls"
+      ]
+    }
+  ]
+}

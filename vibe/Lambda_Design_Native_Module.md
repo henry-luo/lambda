@@ -127,7 +127,7 @@ Lambda already ships multiple Tree-sitter grammars, and Tree-sitter's own dynami
 Everything a front-end can call lives in **one 2,902-line file**, `lambda/sys_func_registry.c`, feeding three coupled layers:
 
 1. **AST-level metadata** — `sys_func_defs[]` (`sys_func_registry.c:266`): name, arity, `Type*` return, `is_proc`, `can_raise`, method-eligibility, C-level ret/arg conventions, C symbol name. `build_ast.cpp` builds hashmaps over this table (`get_sys_func_info()`, `build_ast.cpp:92–220`) to resolve and type-check calls at compile time.
-2. **JIT link table** — `jit_runtime_imports[]` (`sys_func_registry.c:1145`): ~1,650 `{name, fn_ptr}` entries — Lambda runtime helpers, **all** JS runtime helpers (~685 `js_*` entries), plus every Python/Ruby/Bash helper. The file `#include`s `py/*.h`, `bash/*.h`, `rb/*.h`, `js/*.h` (lines 176–196): every language runtime is compile-time-coupled to one translation unit.
+2. **JIT link table** — `jit_runtime_imports[]` (`sys_func_registry.c:1145`): ~1,650 `{name, fn_ptr}` entries — Lambda runtime helpers, **all** JS runtime helpers (~685 `js_*` entries), plus every Python/Ruby/Bash helper. The file `#include`s `py/*.h`, `module/bash/*.h`, `rb/*.h`, `js/*.h` (lines 176–196): every language runtime is compile-time-coupled to one translation unit.
 3. **Link-time resolution** — `import_resolver()` (`mir.c:106`): checks a thread-local **dynamic import map** (`register_dynamic_import()`, `mir.c:91`) first, then the static table.
 
 ### 3.2 Concrete pain points
@@ -271,7 +271,7 @@ typedef struct JubeLanguageDef {
 } JubeLanguageDef;
 ```
 
-This is a formalization of what `lambda/module/py|lambda/module/rb|lambda/bash/` already are: Tree-sitter front-end → typed AST → MIR lowering into the shared context. `JubeCompileCtx` (part of the host API) exposes the MIR context, `register_dynamic_import`, and the name pool — the things `transpile_py_mir.cpp` reaches into today.
+This is a formalization of what `lambda/module/py|lambda/module/rb|lambda/module/bash/` already are: Tree-sitter front-end → typed AST → MIR lowering into the shared context. `JubeCompileCtx` (part of the host API) exposes the MIR context, `register_dynamic_import`, and the name pool — the things `transpile_py_mir.cpp` reaches into today.
 
 **`JubeFormatDef` — input parsers / output formatters**:
 
@@ -435,7 +435,7 @@ typedef struct JubeHostAPI {
 
 Design rules:
 
-- **Derived by extraction, not speculation**: v1's exact function list = the deduplicated set of runtime symbols `py/`, `rb/`, `bash/`, and the POC modules actually use. Anything in-tree module code needs that isn't in the struct is a bug in the struct.
+- **Derived by extraction, not speculation**: v1's exact function list = the deduplicated set of runtime symbols `py/`, `rb/`, `module/bash/`, and the POC modules actually use. Anything in-tree module code needs that isn't in the struct is a bug in the struct.
 - **Hot inlines live in `jube.h`**: Item packing/unpacking macros (`i2it`, `get_type_id`, …) are already the frozen interop contract (`Lambda_and_JS_Runtime.md` §4), so they may appear as inlines in the public header without freezing anything new. The struct carries everything whose implementation can churn.
 - Struct-of-pointers indirection cost ≈ a PLT call through any dylib — not a real overhead concern; the fast path for hot leaf functions is §6.5, not API bypass.
 

@@ -1525,7 +1525,7 @@ static Type* item_static_type_for_is(Item item, Type* scratch) {
     }
     if (type_id == LMD_TYPE_DECIMAL) {
         Decimal* decimal = item.get_decimal();
-        return decimal && decimal->unlimited == DECIMAL_BIGINT ?
+        return decimal && decimal->storage_kind == DECIMAL_BIGINT ?
             &TYPE_INTEGER_VALUE : &TYPE_DECIMAL;
     }
     type_id = item_semantic_type_id(type_id);
@@ -1540,7 +1540,7 @@ static Type* item_static_type_for_is(Item item, Type* scratch) {
 static bool item_type_is_integer_subtype(Item item, TypeId type_id) {
     if (type_id == LMD_TYPE_DECIMAL) {
         Decimal* dec = item.get_decimal();
-        return dec && dec->unlimited == DECIMAL_BIGINT;
+        return dec && dec->storage_kind == DECIMAL_BIGINT;
     }
     Type actual = {.type_id = type_id};
     if (type_id == LMD_TYPE_NUM_SIZED) actual.kind = item.get_num_type();
@@ -3938,7 +3938,7 @@ Type* fn_type(Item item) {
     }
     if (resolved_type == LMD_TYPE_DECIMAL) {
         Decimal* dec = item.get_decimal();
-        if (dec && dec->unlimited == DECIMAL_BIGINT) {
+        if (dec && dec->storage_kind == DECIMAL_BIGINT) {
             // integer is a language type carried by Decimal storage; hide the carrier from type().
             type->type = &TYPE_INTEGER;
             return (Type*)type;
@@ -7390,7 +7390,7 @@ static bool array_native_lane_supported(const LaneStorageDesc* desc) {
     return desc && (desc->kind == LANE_STORAGE_POINTER || (desc->nullable &&
         (desc->kind == LANE_STORAGE_INT || desc->kind == LANE_STORAGE_BOOL ||
          desc->kind == LANE_STORAGE_FLOAT64 || desc->kind == LANE_STORAGE_ITEM ||
-         desc->kind == LANE_STORAGE_SIZED_I64)));
+         desc->kind == LANE_STORAGE_SIZED_I64 || desc->kind == LANE_STORAGE_TYPED_ITEM)));
 }
 
 static bool runtime_array_representation_matches_contract(Item value,
@@ -7455,7 +7455,10 @@ static bool array_rebuild_native_lane(Item source, const LaneStorageDesc* desc,
     result->capacity = length;
     if (length > 0) {
         size_t bytes = 0;
-        if (!lam::checked_mul((size_t)length, sizeof(Item), &bytes)) return false;
+        if (!lam::checked_mul((size_t)length,
+                array_native_lane_slot_size((LaneStorageKind)desc->kind), &bytes)) {
+            return false;
+        }
         result->items = (Item*)heap_data_calloc(bytes);
         result = rooted_result.get();
         if (!result->items) return false;
@@ -7982,7 +7985,9 @@ static Item clone_mutable_array(Array* src, MutableCloneContext* clone_ctx) {
         dst->capacity = src->capacity;
         if (src->capacity > 0) {
             size_t bytes = 0;
-            if (!lam::checked_mul((size_t)src->capacity, sizeof(Item), &bytes)) return ItemNull;
+            if (!lam::checked_mul((size_t)src->capacity, array_native_lane_slot_size(src), &bytes)) {
+                return ItemNull;
+            }
             dst->items = (Item*)heap_data_alloc(bytes);
             dst = rooted_dst.get();
             src = rooted_src.get();
@@ -8257,7 +8262,8 @@ static CowProfileTypeCounters* cow_profile_for(Item value) {
 static uint64_t cow_one_level_copy_bytes(Item value) {
     switch (get_type_id(value)) {
     case LMD_TYPE_ARRAY:
-        return sizeof(Array) + (uint64_t)value.array->length * sizeof(Item);
+        return sizeof(Array) + (uint64_t)value.array->length *
+            array_native_lane_slot_size(value.array);
     case LMD_TYPE_MAP:
         return sizeof(Map) + (uint64_t)value.map->data_cap;
     case LMD_TYPE_ARRAY_NUM: {
@@ -8531,7 +8537,8 @@ static Item cow_clone_array_one_level(Array* source) {
         copy->capacity = source->capacity;
         if (source->capacity > 0) {
             size_t bytes = 0;
-            if (!lam::checked_mul((size_t)source->capacity, sizeof(Item), &bytes)) {
+            if (!lam::checked_mul((size_t)source->capacity,
+                    array_native_lane_slot_size(source), &bytes)) {
                 return ItemError;
             }
             copy->items = (Item*)heap_data_alloc(bytes);
@@ -8717,36 +8724,41 @@ static ShapeEntry* runtime_named_map_field(Type* expected, Item key) {
 // contract-only: the caller separately proves the current root's physical
 // layout, then validates the selected leaf before the raw COW walk publishes
 // it (D3.2.4v3).
+Type* lambda_map_path_contract_step(Type* current, Item key, bool* open_leaf) {
+    *open_leaf = false;
+    current = runtime_boundary_unwrap_type(current);
+    if (!current) return NULL;
+    Type* map_contract = lambda_type_nonnull_map_contract(current);
+    if (map_contract) {
+        ShapeEntry* field = runtime_named_map_field(map_contract, key);
+        return field ? field->type : NULL;
+    }
+    LambdaArrayContractInfo array_info = {};
+    int64_t array_index = 0;
+    // an open array constrains the carrier, not its descendants. A valid
+    // indexed write below it cannot invalidate the declared outer record;
+    // the COW walker still checks the entire path before the leaf store
+    // (D3.2.4v3, S7.1.3v2).
+    if (current == &TYPE_ARRAY && lambda_item_to_int64_exact(key, &array_index)) {
+        *open_leaf = true;
+        return &TYPE_ANY;
+    }
+    if (!lambda_array_contract_info(current, &array_info) ||
+            !lambda_item_to_int64_exact(key, &array_index)) {
+        return NULL;
+    }
+    return array_info.immediate_element;
+}
+
 static Type* runtime_map_path_leaf_contract(Type* root_contract, Item path) {
     if (get_type_id(path) != LMD_TYPE_ARRAY || !path.array || path.array->length <= 0) {
         return NULL;
     }
     Type* current = root_contract;
-    for (int64_t index = 0; index < path.array->length; index++) {
-        Item key = item_at(path, index);
-        current = runtime_boundary_unwrap_type(current);
-        if (!current) return NULL;
-        Type* map_contract = lambda_type_nonnull_map_contract(current);
-        if (map_contract) {
-            ShapeEntry* field = runtime_named_map_field(map_contract, key);
-            if (!field) return NULL;
-            current = field->type;
-            continue;
-        }
-        LambdaArrayContractInfo array_info = {};
-        int64_t array_index = 0;
-        // an open array constrains the carrier, not its descendants. A valid
-        // indexed write below it cannot invalidate the declared outer record;
-        // the COW walker still checks the entire path before the leaf store
-        // (D3.2.4v3, S7.1.3v2).
-        if (current == &TYPE_ARRAY && lambda_item_to_int64_exact(key, &array_index)) {
-            return &TYPE_ANY;
-        }
-        if (!lambda_array_contract_info(current, &array_info) ||
-                !lambda_item_to_int64_exact(key, &array_index)) {
-            return NULL;
-        }
-        current = array_info.immediate_element;
+    for (int64_t index = 0; index < path.array->length && current; index++) {
+        bool open_leaf = false;
+        current = lambda_map_path_contract_step(current, item_at(path, index), &open_leaf);
+        if (open_leaf) return current;
     }
     return current;
 }
@@ -8766,6 +8778,14 @@ static bool runtime_map_rep_proves_contract(Item value, Type* contract) {
 // the same representation. This never turns an open write into a contract.
 static bool runtime_value_rep_proves_contract(Item value, Type* contract) {
     if (!contract) return false;
+    // an open leaf carries no representation to prove (T27-4)
+    if (contract->type_id == LMD_TYPE_ANY) return get_type_id(value) != LMD_TYPE_ERROR;
+    // a builtin scalar contract is proven by the value's own tag (T27-4)
+    Type* bare = runtime_boundary_unwrap_type(contract);
+    if ((bare == &TYPE_INT || bare == &TYPE_BOOL || bare == &TYPE_FLOAT) &&
+            get_type_id(value) == bare->type_id) {
+        return true;
+    }
     if (get_type_id(value) == LMD_TYPE_NULL) return lambda_type_accepts_null(contract);
     LambdaArrayContractInfo array_info = {};
     if (lambda_array_contract_info(contract, &array_info)) {
@@ -8779,21 +8799,31 @@ static bool runtime_value_rep_proves_contract(Item value, Type* contract) {
         lane.value_domain == get_type_id(value) && lambda_type_matches(value, contract);
 }
 
-static Item runtime_map_path_write_proven(Item owner, Item path, Item value,
-        Type* leaf_contract, const char* boundary, bool inplace) {
-    RootFrame roots(3);
+static Item cow_path_set_impl(Item owner, Item path, int64_t fixed_count,
+    const Item* fixed_keys, Item value, bool publish_in_place);
+
+// `path` is the dynamic descriptor; a NULL path writes through `fixed_count`
+// fixed keys (cow_path_set_impl's two ABI shapes).
+static Item runtime_map_path_write_proven(Item owner, Item path, int64_t fixed_count,
+        const Item* fixed_keys, Item value, Type* leaf_contract, const char* boundary,
+        bool inplace) {
+    // Admit only the incoming leaf. All other fields retain the root's
+    // established contract; COW relinks preserve its layouts (D3.2.4v3).
+    if (runtime_value_rep_proves_contract(value, leaf_contract)) {
+        return cow_path_set_impl(owner, path, fixed_count, fixed_keys, value, inplace);
+    }
+    RootFrame roots(6);
     Rooted<Item> rooted_owner(roots, owner);
     Rooted<Item> rooted_path(roots, path);
     Rooted<Item> rooted_value(roots, value);
-    // Admit only the incoming leaf. All other fields retain the root's
-    // established contract; COW relinks preserve its layouts (D3.2.4v3).
-    if (!runtime_value_rep_proves_contract(rooted_value.get(), leaf_contract)) {
-        rooted_value.set(lambda_type_check(rooted_value.get(), leaf_contract, boundary));
-        if (get_type_id(rooted_value.get()) == LMD_TYPE_ERROR) return rooted_value.get();
-    }
-    return inplace
-        ? cow_path_set_inplace(rooted_owner.get(), rooted_path.get(), rooted_value.get())
-        : cow_path_set(rooted_owner.get(), rooted_path.get(), rooted_value.get());
+    Rooted<Item> rooted_key0(roots, fixed_count > 0 ? fixed_keys[0] : ItemNull);
+    Rooted<Item> rooted_key1(roots, fixed_count > 1 ? fixed_keys[1] : ItemNull);
+    Rooted<Item> rooted_key2(roots, fixed_count > 2 ? fixed_keys[2] : ItemNull);
+    rooted_value.set(lambda_type_check(rooted_value.get(), leaf_contract, boundary));
+    if (get_type_id(rooted_value.get()) == LMD_TYPE_ERROR) return rooted_value.get();
+    Item keys[3] = {rooted_key0.get(), rooted_key1.get(), rooted_key2.get()};
+    return cow_path_set_impl(rooted_owner.get(), rooted_path.get(), fixed_count, keys,
+        rooted_value.get(), inplace);
 }
 
 static bool map_extend_open_shape(Item map_item, Item key, Item value) {
@@ -9022,8 +9052,8 @@ Item lambda_map_path_set_checked(Item owner, Item path, Item value, Type* expect
     }
     Type* leaf_contract = runtime_map_path_leaf_contract(contract, path);
     if (leaf_contract && runtime_map_rep_proves_contract(owner, contract)) {
-        return runtime_map_path_write_proven(owner, path, value, leaf_contract,
-            boundary, false);
+        return runtime_map_path_write_proven(owner, path, 0, NULL, value,
+            leaf_contract, boundary, false);
     }
     RootFrame roots(4);
     Rooted<Item> rooted_owner(roots, owner);
@@ -9061,7 +9091,7 @@ Item lambda_map_path_set_checked_inplace(Item owner, Item path, Item value,
     if (leaf_contract &&
             runtime_map_rep_proves_contract(rooted_owner.get(), contract)) {
         return runtime_map_path_write_proven(rooted_owner.get(), rooted_path.get(),
-            rooted_value.get(), leaf_contract, boundary, true);
+            0, NULL, rooted_value.get(), leaf_contract, boundary, true);
     }
     if (!lambda_type_matches(rooted_owner.get(), contract)) {
         return lambda_type_error(rooted_owner.get(), contract, boundary);
@@ -9094,6 +9124,50 @@ Item lambda_map_path_set_checked_inplace(Item owner, Item path, Item value,
         rooted_leaf.get());
     if (get_type_id(write_result) == LMD_TYPE_ERROR) return write_result;
     return rooted_owner.get();
+}
+
+// T27-4: the fixed-descriptor twin of the two checked path setters above, for
+// one to three keys. The compiler resolved `leaf_contract` from the declared
+// root and the key kinds; bit 16+i of `shape` marks key i as an index, whose
+// exactness is the one part of that resolution only the runtime can confirm.
+// A proven root writes through one rooted walk with no path array and no
+// per-store contract walk; everything else materializes the descriptor and
+// takes the unchanged transactional path (D3.2.4v3).
+Item lambda_map_path_set_checked_fixed(Item owner, Item value, Item key0, Item key1,
+        Item key2, int64_t shape, Type* expected, Type* leaf_contract) {
+    int64_t count = shape & 0xff;
+    bool inplace = (shape & 0x100) != 0;
+    const char* boundary = "typed nested map assignment";
+    Type* contract = runtime_boundary_unwrap_type(expected);
+    Item keys[3] = {key0, key1, key2};
+    bool keys_match_leaf = leaf_contract && count >= 1 && count <= 3 &&
+        contract && contract->type_id == LMD_TYPE_MAP;
+    for (int64_t i = 0; keys_match_leaf && i < count; i++) {
+        int64_t ignored = 0;
+        if ((shape >> (16 + i)) & 1) {
+            keys_match_leaf = lambda_item_to_int64_exact(keys[i], &ignored);
+        }
+    }
+    if (keys_match_leaf && runtime_map_rep_proves_contract(owner, contract)) {
+        return runtime_map_path_write_proven(owner, ItemNull, count, keys, value,
+            leaf_contract, boundary, inplace);
+    }
+    RootFrame roots(6);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_value(roots, value);
+    Rooted<Item> rooted_key0(roots, key0);
+    Rooted<Item> rooted_key1(roots, key1);
+    Rooted<Item> rooted_key2(roots, key2);
+    Rooted<Item> rooted_path(roots, {.array = array_plain()});
+    Rooted<Item>* rooted_keys[3] = {&rooted_key0, &rooted_key1, &rooted_key2};
+    for (int64_t i = 0; i < count && i < 3; i++) {
+        array_push(rooted_path.get().array, rooted_keys[i]->get());
+    }
+    return inplace
+        ? lambda_map_path_set_checked_inplace(rooted_owner.get(), rooted_path.get(),
+            rooted_value.get(), expected, boundary)
+        : lambda_map_path_set_checked(rooted_owner.get(), rooted_path.get(),
+            rooted_value.get(), expected, boundary);
 }
 
 static Type* runtime_array_contract_element(Type* expected) {
@@ -9205,7 +9279,7 @@ static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value,
         lane_desc = *lane_hint;
         has_lane_contract = true;
     } else {
-        has_lane_contract = lambda_type_lane_storage_desc(element_type, &lane_desc);
+        has_lane_contract = lambda_type_array_lane_storage_desc(element_type, &lane_desc);
     }
     bool owner_representation_proven = has_lane_contract &&
         runtime_array_representation_matches_contract(owner, &lane_desc);
@@ -9509,11 +9583,11 @@ static LaneStorageDesc lambda_array_lane_hint(Type* expected, uint8_t lane_kind,
         uint8_t lane_nullable, uint8_t lane_byte_size) {
     LaneStorageDesc hint = {};
     Type* element_type = runtime_array_contract_element(expected);
-    hint.semantic_contract = element_type;
-    hint.base_contract = element_type;
-    hint.kind = lane_kind;
-    hint.nullable = lane_nullable;
-    hint.byte_size = lane_byte_size;
+    if (!lambda_type_array_lane_storage_desc(element_type, &hint) ||
+            hint.kind != lane_kind || hint.nullable != lane_nullable ||
+            hint.byte_size != lane_byte_size) {
+        return {};
+    }
     return hint;
 }
 
@@ -9740,8 +9814,11 @@ Item cow_path_set_raw(Item owner, Item key, Item value) {
 // dynamic descriptor form; otherwise the three rooted fixed operands carry a
 // compiler-proven descriptor.  Keeping one walker makes both ABI shapes obey
 // the same S9.2.2 ownership and shape checks.
+// `value_leaf` serves a builtin mutator's place (`push(m.a, v)`): a link that
+// holds no container ends the walk and is returned as the value the mutator
+// would have read, so the mutator reports its own error exactly as before.
 static Item cow_path_borrow_impl(Item owner, Item path, int64_t fixed_count,
-        Item key0, Item key1, Item key2) {
+        Item key0, Item key1, Item key2, bool value_leaf = false) {
     bool dynamic_path = get_type_id(path) != LMD_TYPE_NULL;
     if (dynamic_path && (get_type_id(path) != LMD_TYPE_ARRAY || !path.array ||
             path.array->length <= 0)) {
@@ -9773,9 +9850,12 @@ static Item cow_path_borrow_impl(Item owner, Item path, int64_t fixed_count,
         } else {
             rooted_key.set(rooted_key2.get());
         }
-        if (get_type_id(rooted_key.get()) == LMD_TYPE_NULL) return ItemError;
+        if (get_type_id(rooted_key.get()) == LMD_TYPE_NULL) {
+            return value_leaf ? ItemNull : ItemError;
+        }
         rooted_child.set(fn_index(rooted_current.get(), rooted_key.get()));
         if (!cow_item_is_container(rooted_child.get())) {
+            if (value_leaf) return rooted_child.get();
             // A borrow of a scalar slot has no storage to write through; the
             // caller must reject it rather than hand the callee a value copy.
             log_error("cow path borrow encountered a non-container link");
@@ -9801,6 +9881,18 @@ Item cow_path_borrow_fixed(Item owner, int64_t count, Item key0, Item key1,
     return cow_path_borrow_impl(owner, ItemNull, count, key0, key1, key2);
 }
 
+// S9.2.2 for builtin in-place mutators: the same spine detach as a `var`
+// place borrow, yielding the installed private leaf -- or, for a place that
+// holds no container, the value itself for the mutator to reject.
+Item cow_place_leaf(Item owner, Item path) {
+    return cow_path_borrow_impl(owner, path, 0, ItemNull, ItemNull, ItemNull, true);
+}
+
+Item cow_place_leaf_fixed(Item owner, int64_t count, Item key0, Item key1,
+        Item key2) {
+    return cow_path_borrow_impl(owner, ItemNull, count, key0, key1, key2, true);
+}
+
 // NM-O8: `publish_in_place` skips the ROOT detach. A `var` parameter's root was
 // already detached by the caller before the call, and a plain `pn` parameter
 // writes through to the caller under the current pn ABI -- which is exactly the
@@ -9810,16 +9902,24 @@ Item cow_path_borrow_fixed(Item owner, int64_t count, Item key0, Item key1,
 // the replacement into the callee's binding: `b.xs[0] = 99` was visible inside
 // the procedure and lost at the caller, while `b.cur = "X"` was not. Children
 // are still detached and reinstalled either way; only the root is left alone.
-static Item cow_path_set_impl(Item owner, Item path, Item value,
-        bool publish_in_place) {
-    if (get_type_id(path) != LMD_TYPE_ARRAY || !path.array || path.array->length <= 0) {
+// `path` selects the dynamic descriptor; a NULL path takes `fixed_count` rooted
+// keys instead, the same two ABI shapes cow_path_borrow_impl accepts (T27-4).
+static Item cow_path_set_impl(Item owner, Item path, int64_t fixed_count,
+        const Item* fixed_keys, Item value, bool publish_in_place) {
+    bool dynamic_path = get_type_id(path) != LMD_TYPE_NULL;
+    if (dynamic_path && (get_type_id(path) != LMD_TYPE_ARRAY || !path.array ||
+            path.array->length <= 0)) {
         log_error("cow path mutation requires a non-empty array path");
+        return ItemError;
+    }
+    if (!dynamic_path && (fixed_count < 1 || fixed_count > 3)) {
+        log_error("cow fixed path mutation requires one to three keys");
         return ItemError;
     }
 
     // Every spine link may allocate while it is detached, so all live owners,
     // keys, and the incoming value need exact roots across raw setter calls.
-    RootFrame roots(7);
+    RootFrame roots(10);
     Rooted<Item> rooted_owner(roots, owner);
     Rooted<Item> rooted_path(roots, path);
     Rooted<Item> rooted_value(roots, value);
@@ -9827,6 +9927,10 @@ static Item cow_path_set_impl(Item owner, Item path, Item value,
     Rooted<Item> rooted_child(roots, ItemNull);
     Rooted<Item> rooted_key(roots, ItemNull);
     Rooted<Item> rooted_replacement(roots, ItemNull);
+    Rooted<Item> rooted_key0(roots, dynamic_path ? ItemNull : fixed_keys[0]);
+    Rooted<Item> rooted_key1(roots, !dynamic_path && fixed_count > 1 ? fixed_keys[1] : ItemNull);
+    Rooted<Item> rooted_key2(roots, !dynamic_path && fixed_count > 2 ? fixed_keys[2] : ItemNull);
+    int64_t count = dynamic_path ? rooted_path.get().array->length : fixed_count;
 
     rooted_current.set(publish_in_place ? rooted_owner.get()
                                         : cow_prepare_write(rooted_owner.get()));
@@ -9835,10 +9939,15 @@ static Item cow_path_set_impl(Item owner, Item path, Item value,
     // unrooted local here used a pre-compaction address for nested writes.
     rooted_replacement.set(rooted_current.get());
 
-    for (int64_t i = 0; i < rooted_path.get().array->length; i++) {
-        rooted_key.set(item_at(rooted_path.get(), i));
+    for (int64_t i = 0; i < count; i++) {
+        if (dynamic_path) {
+            rooted_key.set(item_at(rooted_path.get(), i));
+        } else {
+            rooted_key.set(i == 0 ? rooted_key0.get()
+                : i == 1 ? rooted_key1.get() : rooted_key2.get());
+        }
         if (get_type_id(rooted_key.get()) == LMD_TYPE_NULL) return ItemError;
-        if (i + 1 == rooted_path.get().array->length) {
+        if (i + 1 == count) {
             if (get_type_id(cow_path_set_raw(rooted_current.get(), rooted_key.get(), rooted_value.get())) ==
                     LMD_TYPE_ERROR) return ItemError;
             return rooted_replacement.get();
@@ -9866,11 +9975,11 @@ static Item cow_path_set_impl(Item owner, Item path, Item value,
 }
 
 Item cow_path_set(Item owner, Item path, Item value) {
-    return cow_path_set_impl(owner, path, value, false);
+    return cow_path_set_impl(owner, path, 0, NULL, value, false);
 }
 
 Item cow_path_set_inplace(Item owner, Item path, Item value) {
-    return cow_path_set_impl(owner, path, value, true);
+    return cow_path_set_impl(owner, path, 0, NULL, value, true);
 }
 
 // rebuild a map/element shape when a field's type changes
@@ -10331,7 +10440,7 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
     // out of that carrier, so it keeps the per-element admission below rather
     // than certifying the source in place (D3.3.3v3, D8.3.2).
     bool target_has_native_lane = lambda_type_layout_proves_contract(element_type) &&
-        lambda_type_lane_storage_desc(element_type, &target_lane) &&
+        lambda_type_array_lane_storage_desc(element_type, &target_lane) &&
         array_native_lane_supported(&target_lane);
     if (source_type == LMD_TYPE_ARRAY && value.array &&
             !value.array->is_ndim && !value.array->is_view &&
@@ -10374,7 +10483,18 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
         }
         if (!needs_copy) {
             // Element identity alone does not prove occurrence/rank constraints.
-            if (!lambda_type_matches(rooted_value.get(), expected)) return false;
+            // A plain unary `T[]` has none: every element was just admitted
+            // under T, so the whole-array validator walk only repeats that
+            // proof -- deeply, through every nested element graph. prettier_ast
+            // rebuilt uncertified `Doc[]` accumulators per step and paid the
+            // walk each time (T27-1, D3.2.2 "on first crossing").
+            Type* outer = runtime_boundary_unwrap_type(expected);
+            bool plain_array = outer && outer->type_id == LMD_TYPE_TYPE &&
+                outer->kind == TYPE_KIND_UNARY &&
+                ((TypeUnary*)outer)->op == OPERATOR_ARRAY;
+            if (!plain_array && !lambda_type_matches(rooted_value.get(), expected)) {
+                return false;
+            }
             ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
             if (!cert) return false;
             lambda_array_install_rep_cert(rooted_value.get(), cert);
@@ -10460,7 +10580,7 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
     }
 
     LaneStorageDesc lane_desc = {};
-    if (lambda_type_lane_storage_desc(element_type, &lane_desc) &&
+    if (lambda_type_array_lane_storage_desc(element_type, &lane_desc) &&
             array_native_lane_supported(&lane_desc) &&
             !array_native_lane_matches_desc(rooted_candidate.get().array, &lane_desc)) {
         Item rebuilt = ItemNull;
@@ -10611,6 +10731,15 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
     if (!converted) return false;
     expected = runtime_boundary_unwrap_type(expected);
     if (!expected) return false;
+    // T27-4: `any` admits every non-error value unchanged (lambda_type_matches
+    // answers true at once); the numeric, array and map probes below only
+    // rediscovered that on every open leaf store, e.g. richards'
+    // `w.tasks[tid].pp = ...` below an untyped `array` field. Errors keep the
+    // full path, whose answer depends on the contract accepting error.
+    if (expected->type_id == LMD_TYPE_ANY && get_type_id(value) != LMD_TYPE_ERROR) {
+        *converted = value;
+        return true;
+    }
     if (lambda_type_is_union(expected) && cow_profile_enabled())
         g_cow_profile.union_admit_calls++;
 

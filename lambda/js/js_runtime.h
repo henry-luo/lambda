@@ -78,6 +78,7 @@ static inline int js_utf8_next_codepoint(const char* s, int len, int* index) {
 }
 // Converts a well-known Symbol numeric ID to its generated realm-local ref.
 // Internal runtime code uses this instead of diagnostic "__sym_N" spellings.
+NameId js_well_known_symbol_name_id(int64_t symbol_id);
 Item js_well_known_symbol_key(int64_t symbol_id);
 bool js_is_callable(Item value);
 bool is_callable(Item value);

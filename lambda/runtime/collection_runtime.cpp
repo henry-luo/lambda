@@ -46,14 +46,16 @@ static bool list_reserve_capacity(List* list, int64_t required_capacity,
     int64_t previous_capacity = list->capacity;
     int64_t new_capacity = required_capacity;
     Item* old_items = list->items;
-    if ((uint64_t)new_capacity > SIZE_MAX / sizeof(Item)) return false;
-    size_t new_size = (size_t)new_capacity * sizeof(Item);
+    size_t slot_size = array_has_native_lane((Array*)list)
+        ? array_native_lane_slot_size((Array*)list) : sizeof(Item);
+    if ((uint64_t)new_capacity > SIZE_MAX / slot_size) return false;
+    size_t new_size = (size_t)new_capacity * slot_size;
 
     if (arena && (old_items == nullptr || arena_owns(arena, old_items))) {
         Item* new_items = (Item*)arena_alloc(arena, new_size);
         if (!new_items) return false;
         if (old_items && previous_capacity > 0) {
-            memcpy(new_items, old_items, (size_t)previous_capacity * sizeof(Item));
+            memcpy(new_items, old_items, (size_t)previous_capacity * slot_size);
         }
         list->items = new_items;
         list->capacity = new_capacity;
@@ -71,7 +73,7 @@ static bool list_reserve_capacity(List* list, int64_t required_capacity,
     // copying so a runtime growth path never dereferences nursery storage.
     old_items = list->items;
     if (old_items && previous_capacity > 0) {
-        memcpy(new_items, old_items, (size_t)previous_capacity * sizeof(Item));
+        memcpy(new_items, old_items, (size_t)previous_capacity * slot_size);
     }
     list->items = new_items;
     list->capacity = new_capacity;

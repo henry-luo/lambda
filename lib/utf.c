@@ -188,6 +188,41 @@ size_t utf8_byte_to_char(const char* s, size_t len, size_t byte_offset) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
+ *  UTF-8 / UTF-16 offset conversion
+ * ══════════════════════════════════════════════════════════════════════ */
+
+size_t utf8_to_utf16_length(const char* s, size_t byte_len) {
+    if (!s) return 0;
+    size_t length = 0;
+    const unsigned char* bytes = (const unsigned char*)s;
+    for (size_t i = 0; i < byte_len; i++) {
+        unsigned char byte = bytes[i];
+        if ((byte & 0xC0) == 0x80) continue;
+        length += byte < 0xF0 ? 1 : 2;
+    }
+    return length;
+}
+
+size_t utf16_to_utf8_offset(const char* s, size_t byte_len, size_t u16_offset) {
+    if (!s || u16_offset == 0) return 0;
+    size_t seen = 0;
+    const unsigned char* bytes = (const unsigned char*)s;
+    for (size_t i = 0; i < byte_len; i++) {
+        unsigned char byte = bytes[i];
+        if ((byte & 0xC0) == 0x80) continue;
+        if (seen >= u16_offset) return i;
+        seen += byte < 0xF0 ? 1 : 2;
+    }
+    return byte_len;
+}
+
+size_t utf8_to_utf16_offset(const char* s, size_t byte_len, size_t byte_offset) {
+    if (!s) return 0;
+    if (byte_offset > byte_len) byte_offset = byte_len;
+    return utf8_to_utf16_length(s, byte_offset);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
  *  UTF-16 Surrogate Pairs
  * ══════════════════════════════════════════════════════════════════════ */
 

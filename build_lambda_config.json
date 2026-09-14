@@ -2289,6 +2289,8 @@
               "pthread"
             ],
             "additional_sources": [
+              "lib/byte_builder.c",
+              "lib/line_framer.c",
               "lib/byte_storage.c",
               "lib/mem_context.c",
               "lib/memtrack.c",
@@ -3749,7 +3751,6 @@
               "lambda/input/css/selector_matcher.cpp",
               "radiant/symbol_resolver.cpp",
               "radiant/layout_counters.cpp",
-              "radiant/text_encoding.cpp",
               "radiant/dom_range.cpp",
               "radiant/dom_range_resolver.cpp",
               "radiant/form_control_model.cpp",
@@ -3814,7 +3815,6 @@
               "lambda/runtime/context_capsule.cpp",
               "radiant/symbol_resolver.cpp",
               "radiant/layout_counters.cpp",
-              "radiant/text_encoding.cpp",
               "radiant/dom_range.cpp",
               "radiant/dom_range_resolver.cpp",
               "radiant/form_control_model.cpp",

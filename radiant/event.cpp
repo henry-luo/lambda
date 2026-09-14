@@ -1,4 +1,5 @@
 #include "event.hpp"
+#include "../lib/intrusive_queue.h"
 #include "layout.hpp"
 #include "render.hpp"
 #include "view.hpp"
@@ -9382,6 +9383,8 @@ View* find_view(View* view, DomNode* node) {
 // runs below the event dispatcher and must not retain a stack EventContext.
 // Node references are pinned across that return boundary (D4.5.1v3).
 typedef struct RadiantNavigationRequest {
+    // link is first so the queue core never needs DOM-aware request details.
+    IntrusiveQueueNode link;
     DomDocument* source_document;
     DomNodeRef source_ref;
     DomDocument* target_document;
@@ -9391,12 +9394,10 @@ typedef struct RadiantNavigationRequest {
     char* url;
     char* target_name;
     RadiantNavigationTargetKind target_kind;
-    struct RadiantNavigationRequest* next;
 } RadiantNavigationRequest;
 
 typedef struct RadiantNavigationQueue {
-    RadiantNavigationRequest* first;
-    RadiantNavigationRequest* last;
+    IntrusiveQueue requests;
 } RadiantNavigationQueue;
 
 static void navigation_request_destroy(RadiantNavigationRequest* request) {
@@ -9421,11 +9422,10 @@ static void navigation_request_destroy(RadiantNavigationRequest* request) {
 static void navigation_queue_destroy(void* data) {
     RadiantNavigationQueue* queue = (RadiantNavigationQueue*)data;
     if (!queue) return;
-    RadiantNavigationRequest* request = queue->first;
-    while (request) {
-        RadiantNavigationRequest* next = request->next;
+    IntrusiveQueueNode* link = NULL;
+    while ((link = intrusive_queue_pop(&queue->requests))) {
+        RadiantNavigationRequest* request = (RadiantNavigationRequest*)link;
         navigation_request_destroy(request);
-        request = next;
     }
     mem_free(queue);
 }
@@ -9502,20 +9502,13 @@ bool radiant_queue_navigation_request(DomElement* source, const char* url,
         navigation_request_destroy(request);
         return false;
     }
-    if (queue->last) queue->last->next = request;
-    else queue->first = request;
-    queue->last = request;
+    intrusive_queue_push(&queue->requests, &request->link);
     return true;
 }
 
 static RadiantNavigationRequest* navigation_queue_take(DomDocument* doc) {
     RadiantNavigationQueue* queue = navigation_queue_for_document(doc, false);
-    if (!queue || !queue->first) return nullptr;
-    RadiantNavigationRequest* request = queue->first;
-    queue->first = request->next;
-    if (!queue->first) queue->last = nullptr;
-    request->next = nullptr;
-    return request;
+    return queue ? (RadiantNavigationRequest*)intrusive_queue_pop(&queue->requests) : nullptr;
 }
 
 static bool navigation_request_is_live(const RadiantNavigationRequest* request,

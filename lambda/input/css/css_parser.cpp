@@ -15,6 +15,7 @@
 #include "css_parser.hpp"
 #include "css_style.hpp"
 #include "../../../lib/log.h"
+#include "../../../lib/mem_grow.hpp"
 #include "../../../lib/str.h"
 #include "../../../lib/recursion_guard.hpp"
 #include <stdlib.h>
@@ -1464,12 +1465,9 @@ CssCompoundSelector* css_parse_compound_selector_from_tokens(const CssToken* tok
 
         // Add the simple selector to the compound
         if (compound->simple_selector_count >= capacity) {
-            // Expand array
-            capacity *= 2;
-            CssSimpleSelector** new_array = (CssSimpleSelector**)pool_calloc(pool, capacity * sizeof(CssSimpleSelector*));
-            if (!new_array) return NULL;
-            memcpy(new_array, compound->simple_selectors, compound->simple_selector_count * sizeof(CssSimpleSelector*));
-            compound->simple_selectors = new_array;
+            if (!lam::pool_copy_grow_array(pool, &compound->simple_selectors,
+                                            &capacity, compound->simple_selector_count,
+                                            compound->simple_selector_count + 1, 4, true)) return NULL;
         }
 
         compound->simple_selectors[compound->simple_selector_count++] = simple;
@@ -1632,9 +1630,11 @@ CssSelector* css_parse_selector_with_combinators(const CssToken* tokens, int* po
 
             // Expand arrays if needed
             if (selector->compound_selector_count >= capacity) {
-                capacity *= 2;
-                CssCompoundSelector** new_compounds = (CssCompoundSelector**)pool_calloc(pool, capacity * sizeof(CssCompoundSelector*));
-                CssCombinator* new_combinators = (CssCombinator*)pool_calloc(pool, capacity * sizeof(CssCombinator));
+                size_t next_capacity = 0;
+                if (!lam::grow_capacity(capacity, selector->compound_selector_count + 1,
+                                        4, &next_capacity)) break;
+                CssCompoundSelector** new_compounds = (CssCompoundSelector**)pool_calloc(pool, next_capacity * sizeof(CssCompoundSelector*));
+                CssCombinator* new_combinators = (CssCombinator*)pool_calloc(pool, next_capacity * sizeof(CssCombinator));
                 if (!new_compounds || !new_combinators) break;
 
                 memcpy(new_compounds, selector->compound_selectors, selector->compound_selector_count * sizeof(CssCompoundSelector*));
@@ -1642,6 +1642,7 @@ CssSelector* css_parse_selector_with_combinators(const CssToken* tokens, int* po
 
                 selector->compound_selectors = new_compounds;
                 selector->combinators = new_combinators;
+                capacity = next_capacity;
             }
 
             // Add combinator and compound selector
@@ -1704,14 +1705,11 @@ CssSelectorGroup* css_parse_selector_group_from_tokens(const CssToken* tokens, i
 
         // Expand array if needed
         if (count >= capacity) {
-            capacity *= 2;
-            CssSelector** new_selectors = (CssSelector**)pool_calloc(pool, capacity * sizeof(CssSelector*));
-            if (!new_selectors) {
+            if (!lam::pool_copy_grow_array(pool, &selectors, &capacity, count,
+                                            count + 1, 4, true)) {
                 log_debug("[CSS Parser] ERROR: Failed to expand selector array");
                 break;
             }
-            memcpy(new_selectors, selectors, count * sizeof(CssSelector*));
-            selectors = new_selectors;
         }
 
         selectors[count++] = next;
@@ -2837,12 +2835,10 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                         if (nested_rule) {
                             // Expand array if needed
                             if (rule->data.conditional_rule.rule_count >= (size_t)nested_capacity) {
-                                nested_capacity *= 2;
-                                CssRule** new_rules = (CssRule**)pool_alloc(pool,
-                                    nested_capacity * sizeof(CssRule*));
-                                memcpy(new_rules, rule->data.conditional_rule.rules,
-                                    rule->data.conditional_rule.rule_count * sizeof(CssRule*));
-                                rule->data.conditional_rule.rules = new_rules;
+                                if (!lam::pool_copy_grow_array(pool,
+                                        &rule->data.conditional_rule.rules, &nested_capacity,
+                                        (int)rule->data.conditional_rule.rule_count,
+                                        (int)rule->data.conditional_rule.rule_count + 1, 4, false)) break;
                             }
                             rule->data.conditional_rule.rules[rule->data.conditional_rule.rule_count++] = nested_rule;
                         }
@@ -3304,10 +3300,8 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                         CssDeclaration* idecl = css_parse_declaration_from_tokens(tokens, &inner_pos, inner_end, pool);
                         if (idecl) {
                             if (inner_count >= inner_cap) {
-                                inner_cap *= 2;
-                                CssDeclaration** nd = (CssDeclaration**)pool_calloc(pool, inner_cap * sizeof(CssDeclaration*));
-                                memcpy(nd, inner_decls, inner_count * sizeof(CssDeclaration*));
-                                inner_decls = nd;
+                                if (!lam::pool_copy_grow_array(pool, &inner_decls, &inner_cap,
+                                                                inner_count, inner_count + 1, 4, true)) break;
                             }
                             inner_decls[inner_count++] = idecl;
                         }
@@ -3322,10 +3316,8 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
 
                     // Add to nested_rules array
                     if (nested_rule_count >= nested_rule_capacity) {
-                        nested_rule_capacity = (nested_rule_capacity == 0) ? 4 : nested_rule_capacity * 2;
-                        CssRule** nr = (CssRule**)pool_calloc(pool, nested_rule_capacity * sizeof(CssRule*));
-                        if (nested_rule_count > 0) memcpy(nr, nested_rules, nested_rule_count * sizeof(CssRule*));
-                        nested_rules = nr;
+                        if (!lam::pool_copy_grow_array(pool, &nested_rules, &nested_rule_capacity,
+                                                        nested_rule_count, nested_rule_count + 1, 4, true)) continue;
                     }
                     nested_rules[nested_rule_count++] = nested;
                     seen_nested_rule = true;
@@ -3351,19 +3343,15 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
             if (seen_nested_rule) {
                 // Declaration after nested rule → collect for CSSNestedDeclarations
                 if (post_nested_count >= post_nested_capacity) {
-                    post_nested_capacity = (post_nested_capacity == 0) ? 4 : post_nested_capacity * 2;
-                    CssDeclaration** nd = (CssDeclaration**)pool_calloc(pool, post_nested_capacity * sizeof(CssDeclaration*));
-                    if (post_nested_count > 0) memcpy(nd, post_nested_decls, post_nested_count * sizeof(CssDeclaration*));
-                    post_nested_decls = nd;
+                    if (!lam::pool_copy_grow_array(pool, &post_nested_decls, &post_nested_capacity,
+                                                    post_nested_count, post_nested_count + 1, 4, true)) continue;
                 }
                 post_nested_decls[post_nested_count++] = decl;
             } else {
                 // Expand array if needed
                 if (decl_count >= decl_capacity) {
-                    decl_capacity *= 2;
-                    CssDeclaration** new_decls = (CssDeclaration**)pool_calloc(pool, decl_capacity * sizeof(CssDeclaration*));
-                    memcpy(new_decls, declarations, decl_count * sizeof(CssDeclaration*));
-                    declarations = new_decls;
+                    if (!lam::pool_copy_grow_array(pool, &declarations, &decl_capacity,
+                                                    decl_count, decl_count + 1, 4, true)) return 0;
                 }
                 declarations[decl_count++] = decl;
                 log_debug(" Stored declaration at index %d, now have %d declarations",
@@ -3386,10 +3374,8 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
         nd_rule->data.style_rule.declaration_count = post_nested_count;
         // Add to nested_rules
         if (nested_rule_count >= nested_rule_capacity) {
-            nested_rule_capacity = (nested_rule_capacity == 0) ? 4 : nested_rule_capacity * 2;
-            CssRule** nr = (CssRule**)pool_calloc(pool, nested_rule_capacity * sizeof(CssRule*));
-            if (nested_rule_count > 0) memcpy(nr, nested_rules, nested_rule_count * sizeof(CssRule*));
-            nested_rules = nr;
+            if (!lam::pool_copy_grow_array(pool, &nested_rules, &nested_rule_capacity,
+                                            nested_rule_count, nested_rule_count + 1, 4, true)) return 0;
         }
         nested_rules[nested_rule_count++] = nd_rule;
     }
@@ -3583,13 +3569,10 @@ CssDeclaration** css_parse_declaration_list_text(const char* text, size_t length
             tokens, &pos, (int)token_count, pool);
         if (declaration) {
             if (*declaration_count >= capacity) {
-                size_t new_capacity = capacity * 2;
-                CssDeclaration** expanded = (CssDeclaration**)pool_calloc(
-                    pool, new_capacity * sizeof(CssDeclaration*));
-                if (!expanded) return declarations;
-                memcpy(expanded, declarations, *declaration_count * sizeof(CssDeclaration*));
-                declarations = expanded;
-                capacity = new_capacity;
+                if (!lam::pool_copy_grow_array(pool, &declarations, &capacity,
+                                                *declaration_count, *declaration_count + 1, 8, true)) {
+                    return declarations;
+                }
             }
             declarations[(*declaration_count)++] = declaration;
         }

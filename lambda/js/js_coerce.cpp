@@ -39,7 +39,7 @@ static inline bool is_object_value(Item value) {
 static inline bool js_coerce_is_bigint(Item value) {
     if (get_type_id(value) != LMD_TYPE_DECIMAL) return false;
     Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
-    return dec && dec->unlimited == DECIMAL_BIGINT;
+    return dec && dec->storage_kind == DECIMAL_BIGINT;
 }
 
 extern "C" Item js_to_primitive(Item value, JsHint hint) {

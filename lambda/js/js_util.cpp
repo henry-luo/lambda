@@ -982,7 +982,7 @@ static Item js_util_inspect_value(Item obj_item, JsInspectContext* ctx, int dept
     if (tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT) return js_util_inspect_number(obj_item, ctx);
     if (tid == LMD_TYPE_DECIMAL) {
         Decimal* dec = (Decimal*)(obj_item.item & 0x00FFFFFFFFFFFFFF);
-        if (dec && dec->unlimited == DECIMAL_BIGINT) {
+        if (dec && dec->storage_kind == DECIMAL_BIGINT) {
             // BigInt primitives must be printable diagnostics; falling through to
             // object/stringify paths turns inspect() into a fatal JSON BigInt throw.
             return js_util_inspect_bigint(obj_item, ctx);

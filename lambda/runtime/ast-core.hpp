@@ -301,7 +301,7 @@ struct NameEntry {
     bool is_mutable;
     bool is_var_param;
     bool is_parameter;
-    // CW29/S9.1.3 (gated on LAMBDA_COW_CAPTURE): this plain `pn` parameter's
+    // CW29/S9.1.3: this plain `pn` parameter's
     // body writes through it, so both tiers snapshot it at entry -- one
     // share-mark in the callee prologue; the first write detaches a private
     // copy. Computed once at FUNCTION_END from the shared body walk.
@@ -1333,11 +1333,6 @@ typedef struct FnPromotionCell {
     // (a once-called `main` whose loop is the whole workload never reached
     // the entry threshold and there is no loop-entry OSR).
     uint8_t loop_bodied;
-    // D8.1.1v8: 0 = not yet scanned, 1 = no, 2 = the body REBINDS a typed
-    // `var` parameter. Such a body has no raw home to publish through, so it
-    // and every satellite that would call it directly stay in T0, where the
-    // rebind reaches the caller through the CW33 home.
-    uint8_t typed_var_rebind;
 } FnPromotionCell;
 
 // Native JS bodies expose only numeric return lanes; other results stay boxed.

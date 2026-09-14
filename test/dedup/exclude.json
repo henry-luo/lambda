@@ -950,13 +950,13 @@
         {"file": "lambda/runtime/ast-core.hpp", "start": "typedef enum Operator {", "end": "} Operator;"},
         {"file": "lambda/runtime/ast-core.hpp", "start": "typedef enum AstLiteralType {", "end": "} AstLiteralType;"},
         {"file": "lambda/runtime/ast-core.hpp", "start": "typedef enum ScopeKind {", "end": "} ScopeKind;"},
-        {"file": "lambda/bash/bash_ast.hpp", "start": "typedef enum BashAstNodeType {", "end": "} BashAstNodeType;"},
-        {"file": "lambda/bash/bash_ast.hpp", "start": "typedef enum BashOperator {", "end": "} BashOperator;"},
-        {"file": "lambda/bash/bash_ast.hpp", "start": "typedef enum BashTestOp {", "end": "} BashTestOp;"},
-        {"file": "lambda/bash/bash_ast.hpp", "start": "typedef enum BashExpansionType {", "end": "} BashExpansionType;"},
-        {"file": "lambda/bash/bash_ast.hpp", "start": "typedef enum BashListOp {", "end": "} BashListOp;"},
-        {"file": "lambda/bash/bash_ast.hpp", "start": "typedef enum BashRedirectMode {", "end": "} BashRedirectMode;"},
-        {"file": "lambda/bash/bash_ast.hpp", "start": "typedef enum BashVarAttrFlags {", "end": "} BashVarAttrFlags;"},
+        {"file": "lambda/module/bash/bash_ast.hpp", "start": "typedef enum BashAstNodeType {", "end": "} BashAstNodeType;"},
+        {"file": "lambda/module/bash/bash_ast.hpp", "start": "typedef enum BashOperator {", "end": "} BashOperator;"},
+        {"file": "lambda/module/bash/bash_ast.hpp", "start": "typedef enum BashTestOp {", "end": "} BashTestOp;"},
+        {"file": "lambda/module/bash/bash_ast.hpp", "start": "typedef enum BashExpansionType {", "end": "} BashExpansionType;"},
+        {"file": "lambda/module/bash/bash_ast.hpp", "start": "typedef enum BashListOp {", "end": "} BashListOp;"},
+        {"file": "lambda/module/bash/bash_ast.hpp", "start": "typedef enum BashRedirectMode {", "end": "} BashRedirectMode;"},
+        {"file": "lambda/module/bash/bash_ast.hpp", "start": "typedef enum BashVarAttrFlags {", "end": "} BashVarAttrFlags;"},
         {"file": "lambda/ts/ts_ast.hpp", "start": "typedef enum TsAstNodeType {", "end": "} TsAstNodeType;"}
       ]
     }

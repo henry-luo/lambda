@@ -153,7 +153,7 @@ io.kill(proc)
 
 ### Bash (Transpiler)
 
-Replaces current ad-hoc `posix_spawn` calls in `lambda/bash/` with `shell_exec`:
+Replaces current ad-hoc `posix_spawn` calls in `lambda/module/bash/` with `shell_exec`:
 
 ```c
 // before: direct posix_spawn + manual pipe setup in bash runtime

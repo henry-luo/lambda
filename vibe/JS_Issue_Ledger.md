@@ -25,6 +25,84 @@ numbering spaces cannot collide when the doc sections are folded in later.
 
 ---
 
+## 3. Value model, memory & GC interop (JS_03)
+
+### JS03-L1 — durable JS native state retains raw wide-scalar `Item`s — **OPEN**
+
+**Found:** 2026-09-14 during LR08-4's post-fix ownership audit.
+**Reproduced against:** current MIR-default `./lambda.exe js` with and without
+`LAMBDA_GC_FORCE_EVERY=1`. The AST execution backend passes the collection
+probe; that does not make the default MIR path conformant.
+
+**D2.5.2v3** rules that a raw wide-scalar `Item` pointing into a number frame
+must never be retained. **D5.2.2v3** requires destination-owned scalar storage
+at every ownership boundary. GC tracing the `Item` is insufficient: a scalar
+home is not a GC allocation, and a trace does not copy its payload into the
+durable destination.
+
+Two native JS carriers still violate that rule.
+
+1. **`Error` standard own fields.** `LambdaError` has raw one-word
+   `js_name_item`, `js_message_item`, `js_cause_item`, and `js_stack_item`
+   fields ([`lambda-error.h:220`](../lambda/runtime/lambda-error.h)). Both
+   ordinary property assignment and the completion setter write an incoming
+   `Item` directly ([`js_runtime.cpp:7289`](../lambda/js/js_runtime.cpp) and
+   [`:7431`](../lambda/js/js_runtime.cpp)). `err_gc_trace` marks the words
+   ([`lambda-error.cpp:1250`](../lambda/runtime/lambda-error.cpp)), but has no
+   destination-owned scalar payload to preserve.
+
+   ```js
+   function makeError() {
+     const error = new Error("tiny");
+     error.cause = Number.MIN_VALUE;
+     error.stack = -Number.MIN_VALUE;
+     return error;
+   }
+   const error = makeError();
+   for (let i = 0; i < 128; i++) {
+     const churn = Number.MIN_VALUE * (i + 2);
+     if (churn === 1) console.log("unreachable");
+   }
+   gc();
+   console.log(error.cause === Number.MIN_VALUE);  // false
+   console.log(error.stack === -Number.MIN_VALUE); // false
+   ```
+
+   `cause` and `stack` are reproduced; `name` and `message` take the same raw
+   store path and need the same ownership repair. The separate
+   `thrown_value_item` path was exercised through a throwing callee and passed;
+   it is not part of this defect.
+
+2. **JS `Map` / `Set` collection entries.** `JsCollectionEntry` is copied into
+   the hash table and `JsCollectionOrderNode` duplicates its `key`/`value` in
+   insertion-order storage ([`js_runtime.cpp:998`](../lambda/js/js_runtime.cpp),
+   [`:19490`](../lambda/js/js_runtime.cpp)). `js_collection_method` builds the
+   entry from raw arguments, calls `hashmap_set`, then calls
+   `js_collection_order_upsert` ([`js_runtime.cpp:19708`](../lambda/js/js_runtime.cpp)).
+   Neither destination owns a scalar payload.
+
+   ```js
+   function makeMap() {
+     return new Map([[Number.MIN_VALUE * 3, Number.MIN_VALUE * 5]]);
+   }
+   const map = makeMap();
+   for (let i = 0; i < 128; i++) {
+     const churn = Number.MIN_VALUE * (i + 11);
+     if (churn === 1) console.log("unreachable");
+   }
+   gc();
+   console.log(map.get(Number.MIN_VALUE * 3) === Number.MIN_VALUE * 5); // false
+   ```
+
+   The failure occurs even without forced collection after `makeMap` returns.
+   The shared insertion route also covers `Set` wide-scalar keys and `WeakMap`
+   wide-scalar values (WeakMap keys themselves are objects).
+
+**Repair boundary.** Give each durable Error field and each collection-entry
+copy storage that owns a scalar payload, and route stores/reads through the
+shared rehome helpers. A GC mark alone must not be treated as scalar-lifetime
+ownership. Add default-MIR and forced-GC regressions for both probes.
+
 ## 5. Functions, closures & scope (JS_05)
 
 ### JS05-L1 — `with` scope of a suspended generator leaks to unrelated code — **RESOLVED**

@@ -3180,7 +3180,7 @@ static int jube_host_value_kind(Item value) {
         case LMD_TYPE_SYMBOL: return JUBE_VALUE_SYMBOL;
         case LMD_TYPE_DECIMAL: {
             Decimal* decimal = value.get_decimal();
-            return decimal && decimal->unlimited == DECIMAL_BIGINT
+            return decimal && decimal->storage_kind == DECIMAL_BIGINT
                 ? JUBE_VALUE_BIGINT : JUBE_VALUE_OTHER;
         }
         default: return JUBE_VALUE_OTHER;

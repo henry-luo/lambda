@@ -2,6 +2,7 @@
 #include <mpdecimal.h>
 #include <cstring>
 #include <cstdio>
+#include <float.h>
 
 #ifndef _WIN32
 #include <pthread.h>
@@ -82,14 +83,70 @@ TEST(LambdaDecimal, QuietInt64ExtractionRejectsOverflowAndInvalidComparison) {
     EXPECT_TRUE(decimal_mpd_try_to_int64(large, context, &extracted));
     EXPECT_EQ(extracted, INT64_MAX);
 
-    Decimal valid_decimal = {0, large};
+    Decimal valid_decimal = {};
+    ASSERT_TRUE(decimal_take_mpd(&valid_decimal, DECIMAL_FIXED, large));
     Decimal invalid_decimal = {};
     Item valid = {.item = c2it(&valid_decimal)};
     Item invalid = {.item = c2it(&invalid_decimal)};
     int comparison = 0;
     EXPECT_FALSE(decimal_cmp_items(invalid, valid, &comparison));
 
-    mpd_del(large);
+    decimal_payload_release(&valid_decimal);
+}
+
+TEST(LambdaDecimal, DoubleBoundaryConversionIsFallibleAndExact) {
+    mpd_context_t* context = decimal_fixed_context();
+    mpd_t* decimal = mpd_new(context);
+    ASSERT_NE(decimal, nullptr);
+    uint32_t status = 0;
+    double value = 0.0;
+
+    mpd_qset_string(decimal, "5e-324", context, &status);
+    ASSERT_EQ(status, 0u);
+    ASSERT_TRUE(decimal_mpd_try_to_double(decimal, context, &value));
+    EXPECT_EQ(value, DBL_TRUE_MIN);
+
+    status = 0;
+    mpd_qset_string(decimal, "1.7976931348623157e308", context, &status);
+    ASSERT_EQ(status, 0u);
+    ASSERT_TRUE(decimal_mpd_try_to_double(decimal, context, &value));
+    EXPECT_EQ(value, DBL_MAX);
+
+    char spelling[64] = {};
+    lambda_double_to_shortest(DBL_TRUE_MIN, spelling, sizeof(spelling));
+    status = 0;
+    mpd_qset_string(decimal, spelling, context, &status);
+    ASSERT_EQ(status, 0u);
+    ASSERT_TRUE(decimal_mpd_try_to_double(decimal, context, &value));
+    EXPECT_EQ(value, DBL_TRUE_MIN);
+
+    lambda_double_to_shortest(DBL_MAX, spelling, sizeof(spelling));
+    status = 0;
+    mpd_qset_string(decimal, spelling, context, &status);
+    ASSERT_EQ(status, 0u);
+    ASSERT_TRUE(decimal_mpd_try_to_double(decimal, context, &value));
+    EXPECT_EQ(value, DBL_MAX);
+
+    status = 0;
+    mpd_qset_string(decimal, "9007199254740991", context, &status);
+    ASSERT_EQ(status, 0u);
+    ASSERT_TRUE(decimal_mpd_try_to_double(decimal, context, &value));
+    EXPECT_EQ(value, 9007199254740991.0);
+
+    EXPECT_FALSE(decimal_mpd_try_to_double(nullptr, context, &value));
+    EXPECT_FALSE(item_try_to_double(ItemNull, &value));
+    EXPECT_EQ(get_type_id(coerce_num_sized(ItemNull, NUM_FLOAT32)), LMD_TYPE_ERROR);
+
+    mpd_del(decimal);
+}
+
+TEST(LambdaNumericRuntime, BitwiseRejectsNonIntegerItems) {
+    Item fractional = push_d(1.5);
+    Item one = {.item = i2it(1)};
+
+    EXPECT_EQ(get_type_id(fn_band_item(fractional, one)), LMD_TYPE_ERROR);
+    EXPECT_EQ(get_type_id(fn_bnot_item(fractional)), LMD_TYPE_ERROR);
+    EXPECT_EQ(get_type_id(fn_shl_item(one, fractional)), LMD_TYPE_ERROR);
 }
 
 TEST(LambdaJitDebugInfo, FinalFunctionRangeUsesJitAllocationFrontier) {
@@ -1304,7 +1361,9 @@ static bool shared_module_stress_init_worker(SharedModuleStressWorker* worker) {
     }
     worker->eval.pool = worker->setup_pool;
     worker->eval.runtime = &shared_module_stress_runtime;
-    worker->eval.name_pool = name_pool_create(worker->setup_pool, NULL);
+    // Match runner setup: generated property keys require runtime NameIds,
+    // not an idless AST name pool (D4.6.1v2).
+    worker->eval.name_pool = name_pool_create_runtime(worker->setup_pool);
     heap_init();
     if (!worker->eval.heap) return false;
     worker->eval.pool = worker->eval.heap->pool;
@@ -1478,9 +1537,9 @@ protected:
         // load_script from a worker would test per-thread compilation instead
         // of shared immutable module execution.
         Script* chart_package = load_script_mir_direct(&shared_module_stress_runtime,
-        "lambda/chart/chart.ls", NULL, true);
+        "lambda/package/chart/chart.ls", NULL, true);
         Script* pdf_package = load_script_mir_direct(&shared_module_stress_runtime,
-        "lambda/pdf/pdf.ls", NULL, true);
+        "lambda/package/pdf/pdf.ls", NULL, true);
         ASSERT_NE(chart_package, nullptr);
         ASSERT_NE(pdf_package, nullptr);
         for (int i = 0; i < shared_module_stress_case_count; i++) {

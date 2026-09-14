@@ -43,39 +43,27 @@ static void on_worker_read(uv_stream_t* stream, ssize_t nread, const uv_buf_t* b
         return;
     }
 
-    // ensure capacity
-    if (w->read_len + (int)nread >= w->read_cap) {
-        int new_cap = w->read_cap * 2;
-        if (new_cap < w->read_len + (int)nread + 1) new_cap = w->read_len + (int)nread + 1;
-        char* nb = (char*)mem_realloc(w->read_buf, new_cap, MEM_CAT_SERVE);
-        if (!nb) { mem_free(buf->base); return; }
-        w->read_buf = nb;
-        w->read_cap = new_cap;
+    if (!line_framer_append(&w->read_lines, buf->base, (size_t)nread)) {
+        log_error("WSGI: failed to append worker response bytes");
+        mem_free(buf->base);
+        return;
     }
-
-    memcpy(w->read_buf + w->read_len, buf->base, nread);
-    w->read_len += (int)nread;
     mem_free(buf->base);
 
     // look for complete newline-delimited message
-    char* nl = (char*)memchr(w->read_buf, '\n', w->read_len);
-    if (!nl) return;
-
-    int line_len = (int)(nl - w->read_buf);
+    size_t line_len = 0;
+    const char* line = line_framer_peek(&w->read_lines, &line_len);
+    if (!line) return;
 
     // the response object is stashed in the process user data
     // this is set before dispatch
     HttpResponse* resp = (HttpResponse*)w->stdin_pipe.data;
     if (resp) {
-        ipc_parse_response(w->read_buf, line_len, resp);
+        ipc_parse_response(line, (int)line_len, resp);
         w->stdin_pipe.data = nullptr;
     }
 
-    int remaining = w->read_len - line_len - 1;
-    if (remaining > 0) {
-        memmove(w->read_buf, nl + 1, remaining);
-    }
-    w->read_len = remaining;
+    (void)line_framer_consume(&w->read_lines, line_len + 1);
     w->busy = 0;
 }
 
@@ -83,9 +71,10 @@ static int start_worker(WsgiBridge* bridge, int index) {
     WsgiWorker* w = &bridge->workers[index];
     memset(w, 0, sizeof(WsgiWorker));
 
-    w->read_buf = (char*)mem_alloc(4096, MEM_CAT_SERVE);
-    w->read_cap = 4096;
-    w->read_len = 0;
+    if (!line_framer_init(&w->read_lines, 4096, MEM_CAT_SERVE)) {
+        log_error("WSGI: failed to allocate worker line framer");
+        return -1;
+    }
 
     uv_pipe_init(bridge->loop, &w->stdin_pipe, 0);
     uv_pipe_init(bridge->loop, &w->stdout_pipe, 0);
@@ -215,7 +204,7 @@ void wsgi_bridge_destroy(WsgiBridge* bridge) {
         if (w->alive) {
             uv_process_kill(&w->process, SIGTERM);
         }
-        mem_free(w->read_buf);
+        line_framer_destroy(&w->read_lines);
     }
 
     mem_free(bridge);

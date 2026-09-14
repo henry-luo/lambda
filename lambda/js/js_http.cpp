@@ -22,6 +22,7 @@
 #include "../../lib/log.h"
 #include "../../lib/uv_loop.h"
 #include "../../lib/mem.h"
+#include "../../lib/mem_grow.hpp"
 #include "../../lib/base64.h"
 #include "../../lib/url.h"
 #include "../../lib/strview.h"
@@ -347,14 +348,9 @@ typedef struct HttpRequestHead {
 
 static bool http_field_list_push(HttpFieldList* list, HttpFieldSpan span) {
     if (!list) return false;
-    if (list->count >= list->capacity) {
-        int capacity = list->capacity ? list->capacity * 2 : 16;
-        HttpFieldSpan* items = (HttpFieldSpan*)mem_realloc(list->items,
-            (size_t)capacity * sizeof(HttpFieldSpan), MEM_CAT_JS_RUNTIME);
-        if (!items) return false;
-        list->items = items;
-        list->capacity = capacity;
-    }
+    if (list->count >= list->capacity &&
+            !lam::mem_grow_array(&list->items, &list->capacity,
+                                 list->count + 1, 16, MEM_CAT_JS_RUNTIME)) return false;
     list->items[list->count++] = span;
     return true;
 }

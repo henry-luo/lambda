@@ -504,6 +504,14 @@ TEST_F(UrlExtraTest, DecodeInplaceNoForm) {
     EXPECT_EQ(n, strlen("a+b/c"));
 }
 
+TEST_F(UrlExtraTest, UrlTextPathExtensionIgnoresQueryAndFragment) {
+    EXPECT_TRUE(url_text_path_has_ext_ci("https://example.test/assets/FONT.WOFF2?cache=1#top", "woff2"));
+    EXPECT_TRUE(url_text_path_has_ext_ci("file:///tmp/icon.SVG#fragment", ".svg"));
+    EXPECT_FALSE(url_text_path_has_ext_ci("https://example.test/assets/font.woff2x?format=woff2", "woff2"));
+    EXPECT_FALSE(url_text_path_has_ext_ci("https://example.test/assets/.woff2", "woff2"));
+    EXPECT_FALSE(url_text_path_has_ext_ci(nullptr, "svg"));
+}
+
 // ── url_encode_with_table: caller-supplied keep set ──
 TEST_F(UrlExtraTest, EncodeWithTable) {
     uint8_t keep[256];

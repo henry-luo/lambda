@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mir.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +14,7 @@
 #include "../../lib/strbuf.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/mem_grow.hpp"
 
 struct JsClassEntry;
 struct JubeTypeDef;
@@ -106,6 +108,12 @@ struct VarEntry {
     // cleared on whole-binding replacement; the layout cache alone is only a
     // physical carrier witness and cannot stand in for this contract.
     Type* typed_array_contract_proven;
+    // T27-9: static length of a local array (`fill(K, v)` with literal K, or a
+    // literal of K members); -1 when unknown. `known_length_stable` caches the
+    // body scan proving no rebind/push/splice/borrow/capture can change it:
+    // 0 unscanned, 1 refuted, 2 stable.
+    int64_t known_length;
+    uint8_t known_length_stable;
     bool is_live_default_binding;
     const char* live_binding_specifier;
 };
@@ -694,15 +702,12 @@ static inline bool em_root_ensure_index_map(int** map, int* capacity,
         int key) {
     if (!map || !capacity || key < 0) return false;
     if (key < *capacity) return true;
-    int next_capacity = *capacity ? *capacity : 64;
-    while (next_capacity <= key) next_capacity *= 2;
+    if (key == INT_MAX) return false;
     int old_capacity = *capacity;
-    int* resized = (int*)mem_realloc(*map,
-        (size_t)next_capacity * sizeof(int), MEM_CAT_TEMP);
-    if (!resized) return false;
-    for (int i = old_capacity; i < next_capacity; i++) resized[i] = -1;
-    *map = resized;
-    *capacity = next_capacity;
+    if (!lam::mem_grow_array(map, capacity, key + 1, 64, MEM_CAT_TEMP)) {
+        return false;
+    }
+    for (int i = old_capacity; i < *capacity; i++) (*map)[i] = -1;
     return true;
 }
 
@@ -738,18 +743,11 @@ static inline void em_root_register_binding(MirEmitter* em, MIR_reg_t reg,
         }
         return;
     }
-    if (frame->root_binding_count >= frame->root_binding_capacity) {
-        int next_capacity = frame->root_binding_capacity
-            ? frame->root_binding_capacity * 2 : 32;
-        MirRootBinding* resized = (MirRootBinding*)mem_realloc(
-            frame->root_bindings,
-            (size_t)next_capacity * sizeof(MirRootBinding), MEM_CAT_TEMP);
-        if (!resized) {
-            log_error("mir-root-bindings: binding allocation failed");
-            abort();
-        }
-        frame->root_bindings = resized;
-        frame->root_binding_capacity = next_capacity;
+    if (!lam::mem_grow_array(&frame->root_bindings,
+            &frame->root_binding_capacity, frame->root_binding_count + 1,
+            32, MEM_CAT_TEMP)) {
+        log_error("mir-root-bindings: binding allocation failed");
+        abort();
     }
     index = frame->root_binding_count++;
     MirRootBinding* binding = &frame->root_bindings[index];
@@ -832,16 +830,8 @@ static inline bool em_root_note_candidate(MirRootCandidate** candidates,
         }
         return true;
     }
-    if (*candidate_count >= *candidate_capacity) {
-        int next_capacity = *candidate_capacity
-            ? *candidate_capacity * 2 : 64;
-        MirRootCandidate* resized = (MirRootCandidate*)mem_realloc(
-            *candidates, (size_t)next_capacity * sizeof(MirRootCandidate),
-            MEM_CAT_TEMP);
-        if (!resized) return false;
-        *candidates = resized;
-        *candidate_capacity = next_capacity;
-    }
+    if (!lam::mem_grow_array(candidates, candidate_capacity,
+            *candidate_count + 1, 64, MEM_CAT_TEMP)) return false;
     candidate_index = (*candidate_count)++;
     MirRootCandidate* candidate = &(*candidates)[candidate_index];
     candidate->reg = reg;
@@ -869,15 +859,8 @@ static inline bool em_root_note_call_site(MirGcCallSite** call_sites,
     if (!call_sites || !call_site_count || !call_site_capacity || !insn) {
         return false;
     }
-    if (*call_site_count >= *call_site_capacity) {
-        int next_capacity = *call_site_capacity
-            ? *call_site_capacity * 2 : 64;
-        MirGcCallSite* resized = (MirGcCallSite*)mem_realloc(*call_sites,
-            (size_t)next_capacity * sizeof(MirGcCallSite), MEM_CAT_TEMP);
-        if (!resized) return false;
-        *call_sites = resized;
-        *call_site_capacity = next_capacity;
-    }
+    if (!lam::mem_grow_array(call_sites, call_site_capacity,
+            *call_site_count + 1, 64, MEM_CAT_TEMP)) return false;
     MirGcCallSite* site = &(*call_sites)[(*call_site_count)++];
     site->insn = insn;
     site->effect = effect;
@@ -3394,19 +3377,11 @@ static inline void em_scalar_home_bind(MirEmitter* em, int logical_home_id,
         MIR_reg_t reg) {
     if (!em || logical_home_id <= 0 || !reg) return;
     MirFrameState* frame = &em->frame;
-    if (frame->scalar_home_binding_count >=
-            frame->scalar_home_binding_capacity) {
-        int capacity = frame->scalar_home_binding_capacity
-            ? frame->scalar_home_binding_capacity * 2 : 16;
-        MirScalarHomeBinding* bindings = (MirScalarHomeBinding*)mem_realloc(
-            frame->scalar_home_bindings,
-            (size_t)capacity * sizeof(MirScalarHomeBinding), MEM_CAT_TEMP);
-        if (!bindings) {
-            log_error("mir-scalar-homes: unable to grow binding table");
-            abort();
-        }
-        frame->scalar_home_bindings = bindings;
-        frame->scalar_home_binding_capacity = capacity;
+    if (!lam::mem_grow_array(&frame->scalar_home_bindings,
+            &frame->scalar_home_binding_capacity,
+            frame->scalar_home_binding_count + 1, 16, MEM_CAT_TEMP)) {
+        log_error("mir-scalar-homes: unable to grow binding table");
+        abort();
     }
     frame->scalar_home_bindings[frame->scalar_home_binding_count++] = {
         reg, logical_home_id
@@ -3456,18 +3431,11 @@ static inline MIR_reg_t em_materialize_frame_ref(MirEmitter* em,
         MIR_new_reg_op(em->ctx, frame->number_base),
         MIR_new_int_op(em->ctx, 0));
     em_emit_insn(em, add);
-    if (frame->scalar_home_fixup_count >= frame->scalar_home_fixup_capacity) {
-        int capacity = frame->scalar_home_fixup_capacity
-            ? frame->scalar_home_fixup_capacity * 2 : 16;
-        MirScalarHomeFixup* fixups = (MirScalarHomeFixup*)mem_realloc(
-            frame->scalar_home_fixups,
-            (size_t)capacity * sizeof(MirScalarHomeFixup), MEM_CAT_TEMP);
-        if (!fixups) {
-            log_error("mir-scalar-homes: unable to grow fixup table");
-            abort();
-        }
-        frame->scalar_home_fixups = fixups;
-        frame->scalar_home_fixup_capacity = capacity;
+    if (!lam::mem_grow_array(&frame->scalar_home_fixups,
+            &frame->scalar_home_fixup_capacity,
+            frame->scalar_home_fixup_count + 1, 16, MEM_CAT_TEMP)) {
+        log_error("mir-scalar-homes: unable to grow fixup table");
+        abort();
     }
     frame->scalar_home_fixups[frame->scalar_home_fixup_count++] = {
         add, ref.kind, ref.logical_home_id

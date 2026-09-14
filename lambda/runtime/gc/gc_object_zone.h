@@ -161,8 +161,9 @@ int gc_object_zone_owns(gc_object_zone_t* oz, void* ptr);
  * Register a non-slab address range (a gc_heap bump block) so it participates
  * in the zone's min/max bounds and sorted range array. Such ranges never claim
  * ownership from gc_object_zone_owns — the heap performs their exact-slot check.
+ * @return true when the range is published; false when allocation fails.
  */
-void gc_object_zone_register_range(gc_object_zone_t* oz, uint8_t* base, size_t bytes);
+bool gc_object_zone_register_range(gc_object_zone_t* oz, uint8_t* base, size_t bytes);
 
 /**
  * Get the size class index for a given user data size.

@@ -10,6 +10,7 @@
 #include "../input/css/dom_lifecycle.hpp"
 #include "../../radiant/view.hpp"
 #include "../../lib/log.h"
+#include "../../lib/mem_grow.hpp"
 
 #include <math.h>
 #include <stdlib.h>
@@ -125,14 +126,9 @@ static void observer_register_roots(void) {
 // root slots keep a stable address; only the pointer array grows.
 static JsObserverState* observer_append(void) {
     if (!js_observer_runtime_state()) return nullptr;
-    if (observer_count >= observer_capacity) {
-        int capacity = observer_capacity ? observer_capacity * 2 : 4;
-        JsObserverState** grown = (JsObserverState**)mem_realloc(observers,
-            (size_t)capacity * sizeof(JsObserverState*), MEM_CAT_JS_RUNTIME);
-        if (!grown) return nullptr;
-        observers = grown;
-        observer_capacity = capacity;
-    }
+    if (observer_count >= observer_capacity &&
+            !lam::mem_grow_array(&observers, &observer_capacity,
+                                 observer_count + 1, 4, MEM_CAT_JS_RUNTIME)) return nullptr;
     JsObserverState* observer = (JsObserverState*)mem_calloc(1, sizeof(JsObserverState),
                                                             MEM_CAT_JS_RUNTIME);
     if (!observer) return nullptr;
@@ -147,14 +143,9 @@ static JsObserverState* observer_append(void) {
 // Items, so this array may move freely.
 static JsObserverTarget* observer_append_target(JsObserverState* observer) {
     if (!observer) return nullptr;
-    if (observer->target_count >= observer->target_capacity) {
-        int capacity = observer->target_capacity ? observer->target_capacity * 2 : 4;
-        JsObserverTarget* grown = (JsObserverTarget*)mem_realloc(observer->targets,
-            (size_t)capacity * sizeof(JsObserverTarget), MEM_CAT_JS_RUNTIME);
-        if (!grown) return nullptr;
-        observer->targets = grown;
-        observer->target_capacity = capacity;
-    }
+    if (observer->target_count >= observer->target_capacity &&
+            !lam::mem_grow_array(&observer->targets, &observer->target_capacity,
+                                 observer->target_count + 1, 4, MEM_CAT_JS_RUNTIME)) return nullptr;
     JsObserverTarget* target = &observer->targets[observer->target_count++];
     memset(target, 0, sizeof(*target));
     return target;
@@ -495,14 +486,9 @@ static Item js_observer_deliver(void) {
                     }
                 }
                 if (!owner_doc || known) continue;
-                if (sweep_doc_count >= sweep_doc_capacity) {
-                    int capacity = sweep_doc_capacity ? sweep_doc_capacity * 2 : 8;
-                    DomDocument** grown = (DomDocument**)mem_realloc(sweep_docs,
-                        (size_t)capacity * sizeof(DomDocument*), MEM_CAT_JS_RUNTIME);
-                    if (!grown) break;
-                    sweep_docs = grown;
-                    sweep_doc_capacity = capacity;
-                }
+                if (sweep_doc_count >= sweep_doc_capacity &&
+                        !lam::mem_grow_array(&sweep_docs, &sweep_doc_capacity,
+                                             sweep_doc_count + 1, 8, MEM_CAT_JS_RUNTIME)) break;
                 sweep_docs[sweep_doc_count++] = owner_doc;
             }
         }

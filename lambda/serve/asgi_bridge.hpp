@@ -11,6 +11,7 @@
 
 #include "server.hpp"
 #include "../../lib/arraylist.h"
+#include "../../lib/line_framer.h"
 #include <uv.h>
 
 #ifdef __cplusplus
@@ -33,9 +34,7 @@ typedef struct AsgiWorker {
     int             busy;           // 1 if currently handling a request
     int             alive;          // 1 if process is running
     uint64_t        request_id;     // current request being handled
-    char           *read_buf;       // accumulator for partial reads
-    size_t          read_buf_len;
-    size_t          read_buf_cap;
+    LineFramer      read_lines;     // accumulator for partial reads
 } AsgiWorker;
 
 // ============================================================================

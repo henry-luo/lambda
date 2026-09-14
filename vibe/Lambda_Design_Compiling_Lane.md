@@ -1,7 +1,8 @@
 # Lambda Compiler — Explicit Expression Representations
 
-- **Status:** IMPLEMENTATION CHECKPOINT. D2.4.1–D2.4.3's L0–L4 first slice is landed;
-  remaining raw producers still pass through an explicitly named legacy register shim.
+- **Status:** IMPLEMENTED for Lambda MIR Direct. D2.4.1–D2.4.3's L0–L5 migration is
+  landed; every Lambda expression producer returns `MirValue`, and consumers retain its
+  recorded representation after lowering.
 - **Date:** 2026-08-28
 - **Scope:** how MIR Direct (`lambda/runtime/transpile-mir.cpp`) records and converts the
   representation of an emitted value. This proposal does not choose the native carrier for each
@@ -35,8 +36,15 @@ The first migration slice is implemented in `value_rep.h`, `type_contract.cpp`,
   and double/MIR-instruction helpers.
 
 The `ValueRepresentationTest` contract/transition regressions and the Lambda baseline pass.
-Remaining raw expression producers and the final legacy-shim ratchet stay open; this
-checkpoint does not close LR07-1/OI-5.
+
+### Completion update — 2026-09-14
+
+The final Lambda audit found no `transpile_expr_reg_legacy` or `legacy_expr_value` shim.
+All AST families dispatch through `transpile_expr_value()` and publish `MirValue`. The remaining
+post-lowering re-derivations in machine counts, loop bindings/filters/conditions, multidimensional indices,
+bitwise operands, pipes, paths, declarators, and edit indices now use
+`mir_value_carrier_type(MirValue)`. `mir_expr_carrier_type()` remains only a pre-lowering planner;
+it never interprets an emitted MIR register. This closes **LR07-1** under **D2.4.1–D2.4.3**.
 
 ---
 
@@ -202,14 +210,13 @@ Therefore this proposal must not add a parallel `Emitted {reg, rep, tid}` abstra
 
 ### 3.3 The remaining gaps
 
-1. The legacy expression implementation still returns `MIR_reg_t`, but it is now behind the
-   explicit `transpile_expr_value()`/`transpile_expr_reg_legacy()` boundary.
+1. Every Lambda expression producer returns `MirValue`; no raw-register expression shim remains.
 2. `lambda_convert_rep()` now routes the supported carrier-only transitions and fails closed for
    machine or contract-incompatible requests; direct identity/axis/fail-closed transition
    fixtures are landed in `test_lambda_errors_gtest.cpp`.
 3. `ValueRep` no longer conflates Lambda `int64`, the v5 int lane, and internal machine quantities.
-4. `MirValue` retains the full `Type*` contract; the first producer/call-analysis migration
-   slice is landed, while remaining raw expression callers still need propagation.
+4. `MirValue` retains the full `Type*` contract through every Lambda producer and
+   post-lowering consumer.
 5. Several existing helpers still combine representation movement with semantic coercion or
    use-specific error policy; L4 must separate those paths without changing their semantics.
 
@@ -460,6 +467,11 @@ For each cluster:
 
 **Gate:** all legacy counters are zero; lint passes; emitted-MIR ratchets are unchanged.
 
+**Completed 2026-09-14 for Lambda MIR Direct.** The legacy register shim is absent, core
+expression lowering has no semantic `MIR_reg_type()` query, and all post-lowering carrier choices
+read `MirValue.rep` through `mir_value_carrier_type()`. The residual pre-lowering planner uses AST
+and lowering facts only; it does not recover a representation from MIR.
+
 ### Phase L6 — audit guest emitters, do not bulk-convert them
 
 LambdaJS already uses `MirValue`, `em_require_rep()`, and `jm_convert_rep()`. Its follow-up is an
@@ -504,7 +516,7 @@ For every migration cluster:
 3. `make test-lambda-baseline` green;
 4. `make test262-baseline` green when shared emitter, ABI, or LambdaJS-facing code changes.
 
-Run the final complete gates after the legacy shim and semantic register-type reads are removed.
+The final Lambda gate runs after the legacy shim and semantic register-type reads are removed.
 
 ---
 
@@ -583,22 +595,25 @@ authority decides each field's storage lane, and every writer and reader obeys
 it. Rulings **TB1/TB2** below were given 2026-08-20; the boundary/adoption
 consequences live in [`Lambda_Design_Type_Boundary.md`](Lambda_Design_Type_Boundary.md),
 which defers to this section for the storage rules. Investigation record:
-`impl/Lambda_Impl_Tune19.md` §11.
+`impl/Lambda_Impl_Tune19.md` §11. D2.5.2v3/D2.6.1v3/D2.6.4v3 extend the
+destination-owned `TypedItem` rule to packed `i64?`/`u64?` Map/Shape fields.
+The shared persistent descriptor projection implements that rule as of 2026-09-14.
 
 ### 10.1 The classification authority and the slot formats
 
-`type_field_storage_type_id(entry->type)` (`lambda-data.hpp`) is the single
-authority; `shape_entry_storage_type_id` is its ShapeEntry wrapper. Verified
-slot formats as implemented:
+The full-contract `LaneStorageDesc` is the single storage authority;
+`shape_entry_storage_type_id` is its ShapeEntry wrapper and the destination
+projection selects the packed Map/Shape slot. Required slot formats:
 
 | classification | slot | writer arm |
 |---|---|---|
 | `BOOL` | 1B bool | `set_field_value` |
 | `INT` | 8B i64 lane (sentinels in-band) | same |
-| `INT64`/`UINT64` | 8B raw | same |
+| non-null `INT64`/`UINT64` | 8B inline scalar payload | same |
+| nullable `i64?`/`u64?` | **9B destination-owned `TypedItem`**: null tag or inline exact payload | descriptor-selected native-lane writer/reader |
 | `FLOAT` | 8B double | same |
 | `NUM_SIZED` | 8B packed Item | same |
-| nullable native (`int?`, `float?`, `bool?`, pointer bases) | lane w/ sentinel via `map_shape_field_store_native_lane` | checked before the switch |
+| other nullable native (`int?`, `float?`, `bool?`, sized and pointer bases) | lane w/ sentinel via `map_shape_field_store_native_lane` | checked before the switch |
 | strings/symbols/decimal/dtime/complex/path + all containers | 8B raw pointer, null = 0, pointee self-describes | same |
 | `LMD_TYPE_NULL` (compiler could not resolve the field) | **8B raw tagged Item** | same |
 | `LMD_TYPE_UNDEFINED` | no payload (tag-only) | same |
@@ -606,50 +621,57 @@ slot formats as implemented:
 
 ### 10.2 When is TypedItem used on a store? — the complete inventory
 
-A field stores as TypedItem iff its entry classifies `LMD_TYPE_ANY`, which
-happens in exactly three ways:
+A Map/Shape field stores as `TypedItem` in either of these cases:
 
-1. **The entry's type is `any`** — declared `any` fields, and literal fields
+1. **The exact nullable full-width contract is `i64?` or `u64?`.** Its
+   descriptor selects a 9-byte destination-owned slot. The tag records null,
+   `LMD_TYPE_INT64`, or `LMD_TYPE_UINT64`; the payload is inline. This is a
+   contract-selected exception because no 8-byte nullable lane can represent
+   every full-width value. [D2.5.2v3, D2.6.1v3, D2.6.4v3]
+2. **The entry's type is `any`** — declared `any` fields, and literal fields
    whose value the compiler could not type (ANY-census). This includes
    `{value: v}` where `v` is an untyped parameter — i.e. the splay
    `create_node` literal stores its `value` field as TypedItem TODAY, in the
    literal's own inferred shape.
-2. **Abstract numeric contracts** — historically `TYPE_INTEGER`/`TYPE_NUMBER`
+3. **Abstract numeric contracts** — historically `TYPE_INTEGER`/`TYPE_NUMBER`
    (deliberate: a numeric Item, never a `Type*` payload). After TB4 only
    `number` remains here; `integer` reclassifies to the `Decimal*` lane.
-3. **`LMD_TYPE_TYPE` non-simple contracts** — unions without a
+4. **`LMD_TYPE_TYPE` non-simple contracts** — unions without a
    native-base null form, constrained `T where …`, and occurrence contracts
    `T[]`/`T[]?` (the TB1 gap).
 
 Write sites: `set_field_value` (core; reached from `map_fill`/`set_fields`/
 `set_fields_items` at construction) and `map_field_store` (runtime twin in
-`lambda-eval.cpp`; reached from `map_rebuild_for_type_change`). Read sites:
-`_map_read_field`'s ANY arm → `typeditem_to_item`, wrapped by
-`map_shape_field_to_item` and the validator's field readers. ⚠ The C16
-subtlety: an `int` in a TypedItem stores its VALUE in `double_val`, not an
-Item payload.
+`lambda-eval.cpp`; reached from `map_rebuild_for_type_change`). The
+descriptor-selected native-lane map writer must use the same `typeditem_store_item`
+funnel for `i64?`/`u64?`. Read sites dispatch the descriptor's TypedItem arm to
+`typeditem_to_item`, wrapped by `map_shape_field_to_item` and the validator's
+field readers. ⚠ The C16 subtlety: an `int` in a TypedItem stores its VALUE in
+`double_val`, not an Item payload.
 
 **TB3 (2026-08-20) — why TypedItem exists, and what it does NOT license.**
 TypedItem's purpose is that WIDE SCALARS pack inline: `int64`, `uint64`, and a
 BigInt's `Decimal*` all fit the 9-byte tag+payload slot with **no heap box and
 no extra allocation** — the same rationale as arrays packing wide scalars
 inline in their payload rather than boxing per element. `{a: any}` and
-`{value: v}` with `v` untyped legitimately store as TypedItem. But TypedItem
-is **one possible packing, chosen by the VALUE's own shape** — a contract
-never dictates packing. `{a: true}` packs `a` as a 1-byte bool slot and must
-work where `{a: any}` is expected: readers resolve through the value's own
-`ShapeEntry` (`map_shape_field_to_item` walks the value's TypeMap, never the
-contract's), and the emitter must not assume ANY packing for an any/untyped
-field — no fast lane, generic accessor only. Both halves are already enforced:
+`{value: v}` with `v` untyped legitimately store as TypedItem. Outside the
+exact `i64?`/`u64?` native nullable exception, TypedItem is **one possible
+packing, chosen by the VALUE's own shape** — a contract never dictates
+packing. `{a: true}` packs `a` as a 1-byte bool slot and must work where
+`{a: any}` is expected: readers resolve through the value's own `ShapeEntry`
+(`map_shape_field_to_item` walks the value's TypeMap, never the contract's),
+and the emitter must not assume ANY packing for an any/untyped field — no fast
+lane, generic accessor only. Both halves are already enforced:
 `is_direct_access_type(LMD_TYPE_ANY)` is false, and every reader dispatches on
-the value's entry. TB3 makes them normative.
+the value's entry. [D2.5.2v3]
 
 Three asymmetries worth knowing:
 
-- **Two dynamic conventions coexist**: a `NULL`-classified field stores an
-  8-byte raw Item; an `ANY`-classified field stores a 9-byte TypedItem. The
-  9-byte form exists because full-width `int64`/`uint64` cannot live in an
-  8-byte Item without a heap home; TypedItem gives them an inline payload.
+- **Three dynamic conventions coexist**: a `NULL`-classified field stores an
+  8-byte raw Item; an `ANY`-classified field stores a 9-byte TypedItem; and
+  an exact `i64?`/`u64?` field stores a 9-byte destination-owned TypedItem.
+  The latter form exists because full-width `int64`/`uint64` cannot live in an
+  8-byte nullable lane; TypedItem gives them an inline payload.
 - **The writer is duplicated**: `set_field_value` (core) and
   `map_field_store` (runtime) implement the same convention independently.
 - **The mutation path already drifts to actual-member storage**: `fn_map_set`
@@ -658,7 +680,8 @@ Three asymmetries worth knowing:
   `map_rebuild_for_type_change`, which replaces the entry's type with the
   concrete stored member. TypedItem slots are therefore written at
   CONSTRUCTION and admission-rebuild time; ordinary mutation erases them.
-  This is TB2's storage model already in force on one of the two paths.
+  The exact `i64?`/`u64?` field is different: null/non-null mutation preserves
+  its nullable contract and its TypedItem descriptor. [D2.5.2v3]
 
 ### 10.3 Rulings TB1 and TB2 (2026-08-20)
 
@@ -687,7 +710,7 @@ facts: there is NO `LMD_TYPE_INTEGER` value tag. `TYPE_INTEGER` is an abstract
 `LMD_TYPE_TYPE` singleton; membership (`is`, validator, admission) is
 `item_type_is_integer_subtype` — compact `int` (int53 lane), `int64`,
 `uint64`, integral `NUM_SIZED`, **plus BigInt, which is carried as `Decimal*`
-with `Decimal.unlimited == DECIMAL_BIGINT`** (`lambda.h:1357`);
+with `Decimal.storage_kind == DECIMAL_BIGINT`**;
 `TYPE_INTEGER_VALUE = {.type_id = LMD_TYPE_DECIMAL}` is what `is`/`type()`
 report for a BigInt payload. So `Decimal*` is today the carrier of the
 UNBOUNDED tail only (`123n` literals): a `n: integer` field on the `Decimal*`
@@ -698,20 +721,33 @@ uniform lane, consistent with the `decimal` type. Consequence worth naming: an
 `integer`-contracted field becomes a POINTER lane, so contracts containing
 `integer` fields are storage-valid and adoptable under the Type_Boundary gate.
 
-Recorded refinements, not blockers: (a) Decimal/BigInt sharing one
-`LMD_TYPE_DECIMAL` tag discriminated by `Decimal.unlimited` is accepted for
-now; (b) `Decimal` is currently a two-word wrapper
-`{uint8_t unlimited; mpd_t* dec_val;}` (`lambda-data.hpp:160`) — the
-discriminator should eventually move inside the `mpd_t` allocation so the
-wrapper shrinks, using libmpdec's public fields only (vendored code is off
-limits, CLAUDE.md rule 16).
+**TB4 follow-up (2026-09-14) — Decimal carrier layout.** Per **D2.2.4** and
+**S4.6.1**, Decimal/BigInt continue to share `LMD_TYPE_DECIMAL`, now
+discriminated by an explicit `DecimalKind storage_kind`; the wrapper is
+`{DecimalKind storage_kind; mpd_t dec_val;}`. `mpd_t` is embedded, but its
+coefficient buffer remains libmpdec-owned. `decimal_take_mpd()` transfers an
+owned libmpdec header into that field, marks it `MPD_STATIC`, and frees the
+former standalone header; GC calls `mpd_del(&dec_val)` to release only the
+coefficient storage. The discriminator must not move into `mpd_t`: all eight
+of libmpdec's flag bits are already its numeric/allocation contract, and a
+numeric payload cannot distinguish a fixed value, an extended result, and a
+BigInt with the same coefficient.
 
 **TB5 (2026-08-20) — non-simple contracts never classify ANY.** Each falls to
 an existing lane: occurrence `T[]`/`T[]?` → pointer lane (TB1); constrained
 `T where …` → the BASE type's lane; union → admission-only, storage records
-the actual member (TB2). **Final TypedItem whitelist (confirmed 2026-08-20): exactly `any`, untyped
-(ANY-census), and `number`.** Nothing else classifies to TypedItem; declared
-composite contracts stop producing TypedItem slots entirely.
+the actual member (TB2). The dynamic TypedItem whitelist is `any`, untyped
+(ANY-census), and `number`; the separate native nullable exception is exact
+`i64?`/`u64?` Map/Shape fields under TB6. Nothing else classifies to TypedItem;
+declared composite contracts stop producing TypedItem slots entirely.
+
+**TB6 (2026-09-14) — wide nullable Map/Shape fields own their payload.** An
+exact `i64?` or `u64?` field is a 9-byte destination-owned `TypedItem` slot,
+not an 8-byte raw Item. Construction, mutation, shape rebuilding, COW cloning,
+GC tracing, and every reader/writer must preserve that descriptor; a null/non-null
+write changes the inline tag/payload only, never the shape. This is the Map/Shape
+counterpart of the native Array rule and prevents a retained field from borrowing
+a number-frame payload. [D2.5.2v3, D2.6.1v3, D2.6.4v3]
 
 ### 10.4 Union-typed LOCALS — the register side (verified 2026-08-20)
 

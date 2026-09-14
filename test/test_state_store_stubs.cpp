@@ -217,21 +217,6 @@ FormControlProp* tc_get_or_create_form(DomElement* elem) {
     return NULL;
 }
 
-uint32_t tc_utf8_to_utf16_length(const char* s, uint32_t byte_len) {
-    (void)s;
-    return byte_len;
-}
-
-uint32_t tc_utf16_to_utf8_offset(const char* s, uint32_t byte_len, uint32_t u16) {
-    (void)s;
-    return u16 < byte_len ? u16 : byte_len;
-}
-
-uint32_t tc_utf8_to_utf16_offset(const char* s, uint32_t byte_len, uint32_t u8) {
-    (void)s;
-    return u8 < byte_len ? u8 : byte_len;
-}
-
 void tc_ensure_init(DomElement* elem) {
     (void)elem;
 }

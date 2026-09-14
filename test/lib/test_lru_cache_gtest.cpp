@@ -243,6 +243,20 @@ TEST(LruCacheTest, IterStopsWhenIteratorReturnsFalse) {
     lru_cache_free(c);
 }
 
+TEST(LruCacheTest, RemoveIfDeletesSelectedEntries) {
+    LruCache* c = make_cache();
+    int keep = 1, remove = 2;
+    lru_cache_put(c, "keep", &keep, 1);
+    lru_cache_put(c, "remove", &remove, 1);
+    size_t removed = lru_cache_remove_if(c, [](const char*, void* value, size_t, void* user) {
+        return value == user;
+    }, &remove);
+    EXPECT_EQ(removed, 1u);
+    EXPECT_EQ(lru_cache_get(c, "keep"), &keep);
+    EXPECT_EQ(lru_cache_get(c, "remove"), nullptr);
+    lru_cache_free(c);
+}
+
 TEST(LruCacheTest, NullSafety) {
     EXPECT_EQ(lru_cache_count(nullptr), 0u);
     EXPECT_EQ(lru_cache_bytes(nullptr), 0u);

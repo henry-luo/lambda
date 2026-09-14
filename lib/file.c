@@ -45,6 +45,61 @@ extern char *strdup(const char *s);
 #include "log.h"
 #include "str.h"
 
+bool file_read_all(const char* filename, MemCategory category,
+                   char** out_data, size_t* out_size) {
+    if (out_data) *out_data = NULL;
+    if (out_size) *out_size = 0;
+    if (!filename || !out_data) {
+        log_error("FILE-READ-ALL: invalid arguments");
+        return false;
+    }
+
+    FILE* file = fopen(filename, "rb");
+    if (!file) {
+        log_error("FILE-READ-ALL: cannot open '%s': %s", filename, strerror(errno));
+        return false;
+    }
+
+    struct stat sb;
+    if (fstat(fileno(file), &sb) != 0) {
+        log_error("FILE-READ-ALL: cannot stat '%s': %s", filename, strerror(errno));
+        fclose(file);
+        return false;
+    }
+    if (!S_ISREG(sb.st_mode)) {
+        log_error("FILE-READ-ALL: not a regular file: %s", filename);
+        fclose(file);
+        return false;
+    }
+    if (sb.st_size < 0 || (uintmax_t)sb.st_size > (uintmax_t)(SIZE_MAX - 1)) {
+        log_error("FILE-READ-ALL: file is too large: %s", filename);
+        fclose(file);
+        return false;
+    }
+
+    size_t file_size = (size_t)sb.st_size;
+    char* data = (char*)mem_alloc(file_size + 1, category);
+    if (!data) {
+        log_error("FILE-READ-ALL: allocation failed for '%s'", filename);
+        fclose(file);
+        return false;
+    }
+
+    size_t bytes_read = fread(data, 1, file_size, file);
+    bool complete = bytes_read == file_size && !ferror(file);
+    fclose(file);
+    if (!complete) {
+        log_error("FILE-READ-ALL: short read from '%s'", filename);
+        mem_free(data);
+        return false;
+    }
+
+    data[file_size] = '\0';
+    *out_data = data;
+    if (out_size) *out_size = file_size;
+    return true;
+}
+
 // Function to read and display the content of a text file
 char* read_text_file(const char *filename) {
     FILE *file = fopen(filename, "r"); // open the file in read mode

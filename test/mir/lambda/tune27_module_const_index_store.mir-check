@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "description": "Tune27 T27-3 / S9.2.2: subscripts over immutable module ints (`j * ROW`, `(WIDE + 1) + j * ROW`) are native index trees, so stores through a `var float[]` parameter keep a machine index instead of boxing the key into lambda_array_set_checked_inplace_item.",
+  "checks": [
+    {
+      "in_func": "_tune27_module_const_index_store_#",
+      "forbid": [
+        "call\tlambda_array_set_checked_inplace_item_p, lambda_array_set_checked_inplace_item"
+      ]
+    }
+  ]
+}

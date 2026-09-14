@@ -26,6 +26,7 @@
 #include "lib/log.h"
 #include "lib/mem.h"
 #include "lib/base64.h"
+#include "lib/byte_builder.h"
 #include "lib/str.h"
 #include <stdint.h>
 #include <stdlib.h>
@@ -1356,61 +1357,25 @@ static int color_space_ncomp(Item cs, ObjTable* table) {
     return 0;
 }
 
-// Growable byte buffer for PNG assembly. Backed by mem_alloc; explicit mem_free.
-struct ByteBuf {
-    uint8_t* data;
-    size_t   len;
-    size_t   cap;
-};
-
-static bool bb_init(ByteBuf* b, size_t cap) {
-    b->data = (uint8_t*)mem_alloc(cap > 0 ? cap : 1, MEM_CAT_INPUT_PDF);
-    b->len = 0;
-    b->cap = b->data ? cap : 0;
-    return b->data != nullptr;
-}
-
-static void bb_free(ByteBuf* b) {
-    if (b->data) mem_free(b->data);
-    b->data = nullptr; b->len = 0; b->cap = 0;
-}
-
-static bool bb_reserve(ByteBuf* b, size_t want) {
-    if (b->len + want <= b->cap) return true;
-    size_t newcap = b->cap ? b->cap : 64;
-    while (newcap < b->len + want) newcap *= 2;
-    uint8_t* p = (uint8_t*)mem_realloc(b->data, newcap, MEM_CAT_INPUT_PDF);
-    if (!p) return false;
-    b->data = p; b->cap = newcap;
-    return true;
-}
-
-static bool bb_append(ByteBuf* b, const void* src, size_t n) {
-    if (!bb_reserve(b, n)) return false;
-    memcpy(b->data + b->len, src, n);
-    b->len += n;
-    return true;
-}
-
 static void bb_u32be(uint8_t* p, uint32_t v) {
     p[0] = (uint8_t)(v >> 24); p[1] = (uint8_t)(v >> 16);
     p[2] = (uint8_t)(v >>  8); p[3] = (uint8_t) v;
 }
 
 // Append a PNG chunk (length, type, data, CRC32). type must be 4 ASCII bytes.
-static bool png_chunk(ByteBuf* out, const char type[4],
+static bool png_chunk(ByteBuilder* out, const char type[4],
                       const uint8_t* data, size_t dlen) {
     uint8_t hdr[8];
     bb_u32be(hdr, (uint32_t)dlen);
     memcpy(hdr + 4, type, 4);
-    if (!bb_append(out, hdr, 8)) return false;
-    if (dlen && !bb_append(out, data, dlen)) return false;
+    if (!byte_builder_append(out, hdr, 8)) return false;
+    if (dlen && !byte_builder_append(out, data, dlen)) return false;
     // CRC covers type + data
     uLong crc = crc32(0L, (const Bytef*)hdr + 4, 4);
     if (dlen) crc = crc32(crc, (const Bytef*)data, (uInt)dlen);
     uint8_t crcb[4];
     bb_u32be(crcb, (uint32_t)crc);
-    return bb_append(out, crcb, 4);
+    return byte_builder_append(out, crcb, 4);
 }
 
 // Encode RGBA pixels (width*height*4 bytes, top-down, 8-bit per channel)
@@ -1419,11 +1384,12 @@ static bool png_chunk(ByteBuf* out, const char type[4],
 static bool encode_png_rgba(const uint8_t* pixels, int width, int height,
                             uint8_t** out_data, size_t* out_len) {
     if (!pixels || width <= 0 || height <= 0) return false;
-    ByteBuf png; bb_init(&png, 4096);
+    ByteBuilder png;
+    if (!byte_builder_init(&png, 4096, MEM_CAT_INPUT_PDF, false)) return false;
 
     // PNG signature
     static const uint8_t sig[8] = {137,80,78,71,13,10,26,10};
-    if (!bb_append(&png, sig, 8)) { bb_free(&png); return false; }
+    if (!byte_builder_append(&png, sig, 8)) { byte_builder_destroy(&png); return false; }
 
     // IHDR
     uint8_t ihdr[13];
@@ -1434,14 +1400,14 @@ static bool encode_png_rgba(const uint8_t* pixels, int width, int height,
     ihdr[10] = 0;   // compression
     ihdr[11] = 0;   // filter method
     ihdr[12] = 0;   // interlace
-    if (!png_chunk(&png, "IHDR", ihdr, sizeof(ihdr))) { bb_free(&png); return false; }
+    if (!png_chunk(&png, "IHDR", ihdr, sizeof(ihdr))) { byte_builder_destroy(&png); return false; }
 
     // Build raw scanlines: one filter byte (None=0) per row, then 4*width
     // bytes of pixel data.
     size_t row_bytes = (size_t)width * 4;
     size_t raw_len = (row_bytes + 1) * (size_t)height;
     uint8_t* raw = (uint8_t*)mem_alloc(raw_len, MEM_CAT_INPUT_PDF);
-    if (!raw) { bb_free(&png); return false; }
+    if (!raw) { byte_builder_destroy(&png); return false; }
     for (int y = 0; y < height; y++) {
         raw[y * (row_bytes + 1)] = 0;  // no filter
         memcpy(raw + y * (row_bytes + 1) + 1,
@@ -1451,19 +1417,18 @@ static bool encode_png_rgba(const uint8_t* pixels, int width, int height,
     // Deflate (zlib wrapper) into IDAT
     uLongf zlen = compressBound((uLong)raw_len);
     uint8_t* zbuf = (uint8_t*)mem_alloc(zlen, MEM_CAT_INPUT_PDF);
-    if (!zbuf) { mem_free(raw); bb_free(&png); return false; }
+    if (!zbuf) { mem_free(raw); byte_builder_destroy(&png); return false; }
     int zr = compress2(zbuf, &zlen, raw, (uLong)raw_len, Z_DEFAULT_COMPRESSION);
     mem_free(raw);
-    if (zr != Z_OK) { mem_free(zbuf); bb_free(&png); return false; }
+    if (zr != Z_OK) { mem_free(zbuf); byte_builder_destroy(&png); return false; }
     bool ok = png_chunk(&png, "IDAT", zbuf, (size_t)zlen);
     mem_free(zbuf);
-    if (!ok) { bb_free(&png); return false; }
+    if (!ok) { byte_builder_destroy(&png); return false; }
 
     // IEND
-    if (!png_chunk(&png, "IEND", nullptr, 0)) { bb_free(&png); return false; }
+    if (!png_chunk(&png, "IEND", nullptr, 0)) { byte_builder_destroy(&png); return false; }
 
-    *out_data = png.data;  // transfer ownership
-    *out_len = png.len;
+    *out_data = byte_builder_take(&png, out_len);  // transfer ownership
     return true;
 }
 

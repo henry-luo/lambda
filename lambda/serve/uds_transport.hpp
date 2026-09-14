@@ -8,6 +8,7 @@
 //
 
 #include <uv.h>
+#include "../../lib/line_framer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,9 +24,7 @@ typedef void (*UdsCloseCallback)(void* user_data);
 typedef struct UdsConnection {
     uv_pipe_t       pipe;           // libuv pipe handle
     uv_connect_t    connect_req;    // connect request (client-side)
-    char*           read_buf;       // accumulation buffer
-    int             read_len;       // bytes accumulated
-    int             read_cap;       // buffer capacity
+    LineFramer      read_lines;     // accumulation buffer
     UdsReadCallback read_cb;        // line read callback
     UdsCloseCallback close_cb;      // close callback
     void*           user_data;      // callback context

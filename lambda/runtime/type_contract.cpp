@@ -405,8 +405,8 @@ bool lambda_array_contract_info(Type* contract, LambdaArrayContractInfo* out) {
     if (out->rank == 0) return false;
 
     out->array_contract = root;
-    out->leaf_lane = lambda_lane_storage_desc_for(out->leaf_element);
-    out->has_leaf_lane = out->leaf_lane.kind != LANE_STORAGE_INVALID;
+    out->has_leaf_lane = lambda_type_array_lane_storage_desc(out->leaf_element,
+        &out->leaf_lane);
     return true;
 }
 
@@ -783,6 +783,14 @@ bool lambda_type_lane_storage_desc(Type* type, LaneStorageDesc* out) {
     return true;
 }
 
+bool lambda_type_array_lane_storage_desc(Type* type, LaneStorageDesc* out) {
+    if (!out || !type) return false;
+    LaneStorageDesc desc = lambda_persistent_lane_storage_desc_for(type);
+    if (!desc.native) return false;
+    *out = desc;
+    return true;
+}
+
 bool lambda_type_layout_proves_contract(Type* type) {
     for (int depth = 0; type && depth < 64; depth++) {
         type = contract_unwrap_type(type);
@@ -918,7 +926,8 @@ static bool contract_numeric_is_integral(Item value) {
     }
     if (get_type_id(value) != LMD_TYPE_DECIMAL) return false;
     Decimal* decimal = value.get_decimal();
-    return decimal && decimal->dec_val && mpd_isinteger(decimal->dec_val);
+    const mpd_t* mpd_value = decimal_mpd(decimal);
+    return mpd_value && mpd_isinteger(mpd_value);
 }
 
 static bool contract_numeric_to_uint64_exact(Item value, uint64_t* out) {
@@ -1039,7 +1048,8 @@ static bool contract_numeric_admit_float(Item value, LambdaNumericKind target,
         return true;
     }
 
-    double number = it2d(value);
+    double number = 0.0;
+    if (!item_try_to_double(value, &number)) return false;
     if (target == LAMBDA_NUM_FLOAT) {
         *converted = push_d(number);
     } else if (target == LAMBDA_NUM_F32) {

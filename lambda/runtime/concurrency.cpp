@@ -9,6 +9,7 @@
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/strbuf.h"
+#include "../../lib/intrusive_queue.h"
 #include "../../lib/uv_loop.h"
 
 #include <assert.h>
@@ -150,13 +151,12 @@ struct LambdaTask {
     LambdaTask* next_scope_child;
     LambdaTaskObserver* observers;
     LambdaTask* next_all;
-    LambdaTask* next_run;
+    IntrusiveQueueNode run_link;
 };
 
 struct LambdaScheduler {
     LambdaTask* all_tasks;
-    LambdaTask* run_head;
-    LambdaTask* run_tail;
+    IntrusiveQueue run_queue;
     LambdaTask* current;
     uint64_t next_task_id;
     uint64_t event_sequence;
@@ -343,10 +343,7 @@ static void scheduler_enqueue(LambdaTask* task) {
     if (!task || task->state == LAMBDA_TASK_DONE || task->queued) return;
     task->state = LAMBDA_TASK_RUNNABLE;
     task->queued = true;
-    task->next_run = NULL;
-    if (task->scheduler->run_tail) task->scheduler->run_tail->next_run = task;
-    else task->scheduler->run_head = task;
-    task->scheduler->run_tail = task;
+    intrusive_queue_push(&task->scheduler->run_queue, &task->run_link);
     if (task->scheduler->wake_initialized) {
         if (!task->scheduler->wake_refed) {
             uv_ref((uv_handle_t*)&task->scheduler->wake);
@@ -358,18 +355,16 @@ static void scheduler_enqueue(LambdaTask* task) {
 
 static void scheduler_release_wake_if_idle(LambdaScheduler* scheduler) {
     if (scheduler && scheduler->wake_initialized && scheduler->wake_refed &&
-            !scheduler->run_head) {
+            !scheduler->run_queue.first) {
         uv_unref((uv_handle_t*)&scheduler->wake);
         scheduler->wake_refed = false;
     }
 }
 
 static LambdaTask* scheduler_dequeue(LambdaScheduler* scheduler) {
-    LambdaTask* task = scheduler ? scheduler->run_head : NULL;
-    if (!task) return NULL;
-    scheduler->run_head = task->next_run;
-    if (!scheduler->run_head) scheduler->run_tail = NULL;
-    task->next_run = NULL;
+    IntrusiveQueueNode* node = scheduler ? intrusive_queue_pop(&scheduler->run_queue) : NULL;
+    if (!node) return NULL;
+    LambdaTask* task = INTRUSIVE_QUEUE_CONTAINER_OF(node, LambdaTask, run_link);
     task->queued = false;
     return task;
 }
@@ -639,6 +634,7 @@ extern "C" LambdaScheduler* lambda_scheduler_create(int mailbox_capacity) {
     LambdaScheduler* scheduler = (LambdaScheduler*)mem_calloc(
         1, sizeof(LambdaScheduler), MEM_CAT_EVAL);
     if (!scheduler) return NULL;
+    intrusive_queue_init(&scheduler->run_queue);
     scheduler->mailbox_capacity = mailbox_capacity > 0
         ? mailbox_capacity : LAMBDA_MAILBOX_DEFAULT_CAPACITY;
     scheduler->next_task_id = 1;
@@ -857,11 +853,11 @@ extern "C" int lambda_scheduler_run_ready(LambdaScheduler* scheduler) {
     if (!scheduler || scheduler->draining) return 0;
     scheduler->draining = true;
     int ran = 0;
-    LambdaTask* boundary = scheduler->run_tail;
-    while (scheduler->run_head) {
-        LambdaTask* task = scheduler->run_head;
+    IntrusiveQueueNode* boundary = intrusive_queue_last(&scheduler->run_queue);
+    while (scheduler->run_queue.first) {
+        IntrusiveQueueNode* node = scheduler->run_queue.first;
         ran += lambda_scheduler_run_one(scheduler);
-        if (task == boundary) break;
+        if (node == boundary) break;
     }
     scheduler->draining = false;
     scheduler_release_wake_if_idle(scheduler);
@@ -903,7 +899,7 @@ extern "C" int lambda_scheduler_drain(LambdaScheduler* scheduler) {
         // run_ready intentionally stops at its initial FIFO boundary. A task
         // may enqueue a child behind that boundary; poll only after the next
         // macrotask batch has had a chance to start its I/O/timer wait.
-        if (scheduler->run_head) continue;
+        if (scheduler->run_queue.first) continue;
         if (!loop) break;
         if (!watchdog_initialized && uv_timer_init(loop, &watchdog) == 0) {
             watchdog.data = &watchdog_state;
@@ -921,7 +917,7 @@ extern "C" int lambda_scheduler_drain(LambdaScheduler* scheduler) {
             }
         }
         uv_run(loop, UV_RUN_ONCE);
-        if (step == 0 && !uv_loop_alive(loop) && !scheduler->run_head) break;
+        if (step == 0 && !uv_loop_alive(loop) && !scheduler->run_queue.first) break;
     }
     if (watchdog_initialized) {
         if (watchdog_started) uv_timer_stop(&watchdog);

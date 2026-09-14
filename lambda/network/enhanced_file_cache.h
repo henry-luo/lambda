@@ -9,6 +9,7 @@
 #include <stdbool.h>
 #include <time.h>
 #include <pthread.h>
+#include "../../lib/lru_cache.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,7 +27,6 @@ typedef struct HttpCacheHeaders {
 
 // Cache metadata for a single entry
 typedef struct CacheMetadata {
-    char* url;               // Original URL (key)
     char* cache_path;        // Path to cached file
     char* etag;              // HTTP ETag
     time_t expires;          // Expiration timestamp
@@ -35,22 +35,15 @@ typedef struct CacheMetadata {
     time_t last_accessed;    // Last access time (for LRU)
     time_t created_at;       // Creation timestamp
     
-    // LRU list pointers
-    struct CacheMetadata* lru_prev;
-    struct CacheMetadata* lru_next;
 } CacheMetadata;
 
 // Enhanced file cache manager
 typedef struct EnhancedFileCache {
     char* cache_dir;              // Cache directory path
     size_t max_size_bytes;        // Maximum total cache size
-    size_t current_size_bytes;    // Current total size
     int max_entries;              // Maximum number of entries
-    int entry_count;              // Current entry count
-    
-    void* metadata_map;           // HashMap: URL → CacheMetadata*
-    CacheMetadata* lru_head;      // LRU list head (most recent)
-    CacheMetadata* lru_tail;      // LRU list tail (least recent)
+    LruCache* entries;            // URL → metadata with recency ordering
+    bool remove_files_on_evict;   // Preserves cache files when the manager ends
     
     pthread_rwlock_t rwlock;      // Read-write lock for thread safety
     pthread_mutex_t write_mutex;   // Bounds concurrent cache body writes

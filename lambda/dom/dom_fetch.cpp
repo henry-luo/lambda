@@ -14,6 +14,7 @@
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/uv_loop.h"
+#include "../../lib/byte_builder.h"
 
 #include <curl/curl.h>
 #include <cstring>
@@ -59,9 +60,7 @@ typedef struct JsFetchWork {
     struct curl_slist* req_headers; // owned
 
     // response data (filled by worker thread)
-    char*  response_buf;
-    size_t response_len;
-    size_t response_cap;
+    ByteBuilder response;
     long   status_code;
     int    curl_error;
     char   error_msg[CURL_ERROR_SIZE];
@@ -159,18 +158,7 @@ extern "C" void js_fetch_apply_bootstrap_base_path(void) {
 static size_t fetch_write_cb(char* ptr, size_t size, size_t nmemb, void* userdata) {
     JsFetchWork* fw = (JsFetchWork*)userdata;
     size_t bytes = size * nmemb;
-    if (fw->response_len + bytes >= fw->response_cap) {
-        size_t new_cap = (fw->response_cap == 0) ? 4096 : fw->response_cap * 2;
-        while (new_cap < fw->response_len + bytes + 1) new_cap *= 2;
-        char* new_buf = (char*)mem_realloc(fw->response_buf, new_cap, MEM_CAT_JS_RUNTIME);
-        if (!new_buf) return 0;
-        fw->response_buf = new_buf;
-        fw->response_cap = new_cap;
-    }
-    memcpy(fw->response_buf + fw->response_len, ptr, bytes);
-    fw->response_len += bytes;
-    fw->response_buf[fw->response_len] = '\0';
-    return bytes;
+    return byte_builder_append(&fw->response, ptr, bytes) ? bytes : 0;
 }
 
 // =============================================================================
@@ -348,12 +336,11 @@ static Item build_response_object(JsFetchWork* fw) {
     int body_idx = -1;
     if (response_body_count < MAX_FETCH_RESPONSES) {
         body_idx = response_body_count++;
-        response_bodies[body_idx] = fw->response_buf;
-        response_body_lens[body_idx] = (int)fw->response_len;
+        response_body_lens[body_idx] = (int)fw->response.length;
+        response_bodies[body_idx] = (char*)byte_builder_take(&fw->response, NULL);
         // Cache an inferred MIME for blob().type. Owned: strdup.
         if (response_types[body_idx]) { mem_free(response_types[body_idx]); response_types[body_idx] = NULL; }
         response_types[body_idx] = mem_strdup(mime_from_url(fw->url), MEM_CAT_JS_RUNTIME);
-        fw->response_buf = NULL; // ownership transferred
     }
 
     Item body_idx_key = make_string_item("__body_idx");
@@ -402,7 +389,7 @@ static void fetch_after_work_cb(uv_work_t* req, int status) {
     if (fw->method) mem_free(fw->method);
     if (fw->body) mem_free(fw->body);
     if (fw->req_headers) curl_slist_free_all(fw->req_headers);
-    if (fw->response_buf) mem_free(fw->response_buf);
+    byte_builder_destroy(&fw->response);
     mem_free(fw);
 }
 
@@ -551,22 +538,31 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
         long sz = ftell(f);
         fseek(f, 0, SEEK_SET);
         if (sz < 0) sz = 0;
-        char* buf = (char*)mem_alloc((size_t)sz + 1, MEM_CAT_JS_RUNTIME);
-        size_t got = (sz > 0) ? fread(buf, 1, (size_t)sz, f) : 0;
-        buf[got] = '\0';
+        ByteBuilder response;
+        if (!byte_builder_init(&response, (size_t)sz, MEM_CAT_JS_RUNTIME, true)) {
+            fclose(f);
+            return dom_realm_promise_reject(
+                dom_realm_new_error(make_string_item("fetch: allocation failed")));
+        }
+        size_t got = (sz > 0) ? fread(response.data, 1, (size_t)sz, f) : 0;
+        response.length = got;
+        response.data[got] = '\0';
         fclose(f);
 
         // Build a synthetic JsFetchWork so build_response_object can be reused.
         JsFetchWork* fw = (JsFetchWork*)mem_calloc(1, sizeof(JsFetchWork), MEM_CAT_JS_RUNTIME);
+        if (!fw) {
+            byte_builder_destroy(&response);
+            return dom_realm_promise_reject(
+                dom_realm_new_error(make_string_item("fetch: allocation failed")));
+        }
         snprintf(fw->url, sizeof(fw->url), "%s", url);
         fw->status_code = 200;
-        fw->response_buf = buf;
-        fw->response_len = got;
-        fw->response_cap = (size_t)sz + 1;
+        fw->response = response;
 
         Item resp = build_response_object(fw);
 
-        // build_response_object transferred ownership of response_buf;
+        // build_response_object transferred ownership of response bytes;
         // free the fw struct (curl handle, headers etc. are NULL here).
         if (fw->method) mem_free(fw->method);
         if (fw->body) mem_free(fw->body);
@@ -595,6 +591,10 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
     if (!fw) {
         return dom_realm_promise_reject(dom_realm_new_error(make_string_item("fetch: allocation failed")));
     }
+    if (!byte_builder_init(&fw->response, 0, MEM_CAT_JS_RUNTIME, true)) {
+        mem_free(fw);
+        return dom_realm_promise_reject(dom_realm_new_error(make_string_item("fetch: allocation failed")));
+    }
 
     snprintf(fw->url, sizeof(fw->url), "%s", url);
     fw->work.data = fw;
@@ -619,6 +619,7 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
         if (fw->method) mem_free(fw->method);
         if (fw->body) mem_free(fw->body);
         if (fw->req_headers) curl_slist_free_all(fw->req_headers);
+        byte_builder_destroy(&fw->response);
         mem_free(fw);
     }
 

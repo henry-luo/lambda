@@ -430,6 +430,9 @@ static bool interp_proc_body_is_synchronous(AstFuncNode* fn,
 
 typedef struct SatelliteScanCtx {
     bool ok;
+    // T27-6: the innermost node kind that refused, so a pinned hot function
+    // is a one-line diagnosis instead of a missing promotion log line.
+    AstNodeType reject;
 } SatelliteScanCtx;
 
 static void interp_scan_satellite_node(AstNode* node, void* opaque);
@@ -493,7 +496,7 @@ static bool interp_proc_body_is_synchronous(AstFuncNode* fn,
 // and unsupported module bindings cannot cross the membrane accidentally.
 static bool interp_async_proc_satellite_supported(AstFuncNode* fn) {
     if (!fn || !fn->body || fn->captures || fn->is_generator) return false;
-    SatelliteScanCtx scan = {true};
+    SatelliteScanCtx scan = {true, AST_NODE_NULL};
     interp_scan_satellite_node(fn->body, &scan);
     return scan.ok;
 }
@@ -888,11 +891,13 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         // cap here was one short of it and excluded any script touching a
         // five-argument row (set_base_and_extent), sending the whole file to
         // the JIT (ESO113).
-        if (!info || !info->func_ptr || info->c_arg_conv != C_ARG_ITEM ||
+        if (!info || !info->func_ptr ||
+                !sysfunc_args_require_rep(info, VALUE_REP_ITEM) ||
                 info->arg_count < 0 || info->arg_count > 5) {
-            log_debug("interp: sys func '%s' unsupported (arity=%d conv=%d ptr=%p)",
+            log_debug("interp: sys func '%s' unsupported (arity=%d all_item=%d ptr=%p)",
                 info && info->name ? info->name : "<null>",
-                info ? info->arg_count : -99, info ? (int)info->c_arg_conv : -1,
+                info ? info->arg_count : -99,
+                info && sysfunc_args_require_rep(info, VALUE_REP_ITEM),
                 info ? (void*)info->func_ptr : NULL);
             sc->ok = false;
             sc->reject = node->node_type;
@@ -1902,54 +1907,65 @@ bool interp_satellite_import_supported(const Script* importer,
 // T21-3b (D8.1.1v6): an untyped `var` parameter crosses a tier boundary
 // through the CW33 home-transport cells (Context::mir_var_homes) -- the
 // satellite prologue and epilogue implement the generated side, and T0
-// sets/consumes the same cells around its calls. D8.1.1v8: a TYPED `var`
-// parameter (`var x: float[]`, `var p: Rec`) is admitted too. Its raw-lane
-// ABI has no home, so the callee's writes reach the caller only in place
-// (exactly the eager direct edge's contract: the caller detaches a shared
-// root, the callee writes raw); the boxed wrapper consumes the cell T0
-// published and stores the admitted container back through it, so a
-// carrier admission (an Item array coerced to its packed `T[]`) is
-// visible to the T0 binding as well. What the raw entry cannot publish is
-// a REBIND of the parameter, which T0 does publish through the home, so a
-// body that assigns to a typed `var` parameter stays pinned (scan below).
+// sets/consumes the same cells around its calls. D8.1.1v8 admitted TYPED
+// `var` parameters (`var x: float[]`, `var p: Rec`) with a pin on bodies
+// that REBIND one, because the generated entry then had no home for such a
+// position. D8.1.1v10: every publishable `var` position now consumes its
+// home in the generated prologue and publishes its final boxed value in the
+// epilogue (the `_b` wrapper forwards T0's cell to the raw body), so a
+// rebind reaches the T0 caller exactly as an untyped one does and the pin
+// is gone (fixture `interp_typed_var_rebind.ls`, `cow_var_typed_rebind.ls`).
 
-static void interp_typed_var_rebind_visit(AstNode* node, void* opaque) {
-    bool* found = (bool*)opaque;
-    if (!node || *found) return;
-    switch (node->node_type) {
-    case AST_NODE_ASSIGN_STAM: {
-        NameEntry* target = ((AstAssignNode*)node)->target_entry;
-        if (target && target->is_var_param && target->declared_type) {
-            *found = true;
-            return;
-        }
-        break;
+// T27-6: a `match` needs no T0-owned pattern image when every arm pattern
+// is a type name, a scalar literal, or a union of those -- MIR lowers them as
+// `fn_is`/`fn_eq` against loads from the image's own type list and const
+// pool, exactly as it lowers `x is T` and `x == lit`. Named string/symbol
+// patterns, ranges, and constrained `that` arms stay in T0 (D8.1.1v9).
+static bool interp_satellite_match_pattern_supported(AstNode* pattern) {
+    while (pattern && pattern->node_type == AST_NODE_PRIMARY &&
+            ((AstPrimaryNode*)pattern)->expr) {
+        pattern = ((AstPrimaryNode*)pattern)->expr;
     }
-    case AST_NODE_FUNC: case AST_NODE_PROC: case AST_NODE_FUNC_EXPR:
-    case AST_NODE_ARROW_FUNC:
-        return;
+    if (!pattern) return false;
+    switch (pattern->node_type) {
+    case AST_NODE_PRIMARY:  // a primary without an inner expression is a literal
+    case AST_NODE_TYPE:
+    case AST_NODE_LITERAL:
+        return true;
+    case AST_NODE_BINARY_TYPE: {
+        AstBinaryNode* bi = (AstBinaryNode*)pattern;
+        return bi->op == OPERATOR_UNION &&
+            interp_satellite_match_pattern_supported(bi->left) &&
+            interp_satellite_match_pattern_supported(bi->right);
+    }
     default:
-        break;
+        return false;
     }
-    interp_visit_children(node, interp_typed_var_rebind_visit, opaque);
 }
 
-// scanned once per definition (FnPromotionCell::typed_var_rebind)
-static bool interp_fn_rebinds_typed_var_param(const AstFuncNode* fn) {
-    if (!fn || !fn->analysis) return false;
-    FnPromotionCell* cell = &fn->analysis->promotion;
-    if (cell->typed_var_rebind == 0) {
-        bool found = false;
-        interp_typed_var_rebind_visit(fn->body, &found);
-        cell->typed_var_rebind = found ? 2 : 1;
+static bool interp_satellite_match_supported(AstMatchNode* match) {
+    for (AstNode* arm = (AstNode*)match->first_arm; arm; arm = arm->next) {
+        AstMatchArm* match_arm = (AstMatchArm*)arm;
+        // the default arm has no pattern to lower
+        if (match_arm->pattern &&
+                !interp_satellite_match_pattern_supported(match_arm->pattern)) {
+            return false;
+        }
     }
-    return cell->typed_var_rebind == 2;
+    return true;
 }
+
+static void interp_scan_satellite_node_kind(AstNode* node, SatelliteScanCtx* sc);
 
 static void interp_scan_satellite_node(AstNode* node, void* opaque) {
     SatelliteScanCtx* sc = (SatelliteScanCtx*)opaque;
     if (!node || !sc->ok) return;
+    interp_scan_satellite_node_kind(node, sc);
+    // children refuse first, so the first recorded kind is the innermost one
+    if (!sc->ok && sc->reject == AST_NODE_NULL) sc->reject = node->node_type;
+}
 
+static void interp_scan_satellite_node_kind(AstNode* node, SatelliteScanCtx* sc) {
     switch (node->node_type) {
     case AST_NODE_FUNC:
     case AST_NODE_FUNC_EXPR:
@@ -1970,25 +1986,19 @@ static void interp_scan_satellite_node(AstNode* node, void* opaque) {
     // published to the caller's home by the CW33 epilogue. Refusing them had
     // pinned nearly every procedural body to T0.
     case AST_NODE_MATCH_EXPR:
-        // Pattern arms carry compiled regex/type-list state that is owned by
-        // the T0 module activation. A satellite has no equivalent pattern
-        // image, so keep the whole match expression in T0 (D5.2).
-        sc->ok = false;
-        return;
+        // Pattern arms that carry compiled regex/type-list state are owned by
+        // the T0 module activation; a satellite has no equivalent pattern
+        // image, so those keep the whole match expression in T0 (D5.2). Type
+        // and literal arms have no such state (T27-6).
+        if (!interp_satellite_match_supported((AstMatchNode*)node)) {
+            sc->ok = false;
+            return;
+        }
+        break;
     case AST_NODE_CALL_EXPR: {
         AstCallNode* call = (AstCallNode*)node;
         AstNode* callee = ast_unwrap_primary(call->function);
         AstFuncNode* direct = ast_direct_call_function(call);
-        TypeFunc* signature = direct && ((AstNode*)direct)->type &&
-                ((AstNode*)direct)->type->type_id == LMD_TYPE_FUNC
-            ? (TypeFunc*)((AstNode*)direct)->type : NULL;
-        if (direct && interp_fn_rebinds_typed_var_param(direct)) {
-            // D8.1.1v8: the callee rebinds a typed `var` parameter, which
-            // only a T0 caller can observe (this satellite's raw argument
-            // would not be reloaded), so this body stays in T0 with it.
-            sc->ok = false;
-            return;
-        }
         if (callee && callee->node_type != AST_NODE_SYS_FUNC && !direct) {
             // A satellite cannot prove the target ABI for an indirect Lambda
             // call. An `any` callee may resolve to a `var` procedure after
@@ -2036,20 +2046,21 @@ static void interp_scan_satellite_node(AstNode* node, void* opaque) {
 }
 
 bool interp_satellite_supported(const AstFuncNode* fn) {
-    if (!fn || !fn->analysis || !fn->body || fn->captures || fn->is_generator) {
-        return false;
-    }
+    return interp_satellite_refusal(fn) == NULL;
+}
+
+const char* interp_satellite_refusal(const AstFuncNode* fn) {
+    if (!fn || !fn->analysis || !fn->body) return "no-analysis";
+    if (fn->captures) return "captures";
+    if (fn->is_generator) return "generator";
     bool task_backed = fn->node_type == AST_NODE_PROC &&
         (fn->analysis->may_await || fn->analysis->needs_task_context);
-    if (task_backed) return interp_async_proc_satellite_supported((AstFuncNode*)fn);
-    if (fn->is_async || fn->analysis->may_await || fn->analysis->needs_task_context) {
-        return false;
+    if (task_backed) {
+        return interp_async_proc_satellite_supported((AstFuncNode*)fn)
+            ? NULL : "async-body";
     }
-    if (interp_fn_rebinds_typed_var_param(fn)) {
-        // D8.1.1v8: a typed `var` parameter has no CW33 home under the raw
-        // ABI, so a rebind (`x = fill(...)`) could not reach the caller;
-        // T0 publishes it, so the body keeps T0 semantics by staying there.
-        return false;
+    if (fn->is_async || fn->analysis->may_await || fn->analysis->needs_task_context) {
+        return "async";
     }
     TypeFunc* signature = (TypeFunc*)((AstNode*)fn)->type;
     for (TypeParam* param = signature ? signature->param : NULL;
@@ -2075,12 +2086,8 @@ bool interp_satellite_supported(const AstFuncNode* fn) {
     // that silently dropped layout/PDF/editor state (D8.1.1v4).
     ScanCtx full_scan = {true, AST_NODE_NULL};
     interp_scan_visit(fn->body, &full_scan);
-    if (!full_scan.ok) {
-        log_debug("interp-tier: satellite scan refused function='%s' node=%d",
-            fn->name ? fn->name->chars : "<anonymous>", (int)full_scan.reject);
-        return false;
-    }
-    SatelliteScanCtx sc = {true};
+    if (!full_scan.ok) return interp_node_kind_name(full_scan.reject);
+    SatelliteScanCtx sc = {true, AST_NODE_NULL};
     interp_scan_satellite_node((AstNode*)fn->body, &sc);
-    return sc.ok;
+    return sc.ok ? NULL : interp_node_kind_name(sc.reject);
 }

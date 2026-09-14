@@ -416,6 +416,7 @@ TEST(InterpWalker, NullableNativeTypedArraysKeepTheirDestinationLane) {
         "test/lambda/proc/proc_nullable_native_array.ls",
         "test/lambda/proc/proc_nullable_native_float_array.ls",
         "test/lambda/proc/proc_nullable_native_int64_array.ls",
+        "test/lambda/proc/proc_nullable_native_wide_array_storage.ls",
         "test/lambda/proc/proc_nullable_native_sized_array.ls",
         "test/lambda/proc/proc_nullable_native_pointer.ls",
         "test/lambda/proc/proc_nullable_native_extended_pointer.ls",
@@ -427,6 +428,24 @@ TEST(InterpWalker, NullableNativeTypedArraysKeepTheirDestinationLane) {
         EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text)) << script;
         EXPECT_EQ(jit.exit_code, interp.exit_code) << script;
     }
+}
+
+TEST(InterpWalker, NullableWideMapFieldsOwnTheirDestinationStorage) {
+    const char* script = "test/lambda/proc/proc_nullable_native_wide_map_storage.ls";
+    RunResult jit = run_script(script, "jit", /*procedural=*/true);
+    RunResult interp = run_script(script, "interp", /*procedural=*/true);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
+    EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text));
+    EXPECT_EQ(jit.exit_code, interp.exit_code);
+}
+
+TEST(InterpWalker, GenericSortOwnsWideScalarValues) {
+    const char* script = "test/lambda/proc/proc_sort_wide_scalar_ownership.ls";
+    RunResult jit = run_script(script, "jit", /*procedural=*/true);
+    RunResult interp = run_script(script, "interp", /*procedural=*/true);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
+    EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text));
+    EXPECT_EQ(jit.exit_code, interp.exit_code);
 }
 
 TEST(InterpWalker, NumericMaskAssignmentUsesTheVectorStore) {

@@ -26,8 +26,9 @@ pn t_nested() {
     print("nested: len=" ++ (len(z)) ++ " z0.len=" ++ (len(z[0])) ++ " z1.len=" ++ (len(z[1])) ++ "\n")
 }
 
-// growable array stored in a map field (chunked-vector replacement pattern)
-pn vadd(v, x) {
+// growable array stored in a map field (chunked-vector replacement pattern);
+// `var` is the sole write-through parameter (S9.1.3) -- a plain `v` snapshots
+pn vadd(var v, x) {
     push(v.data, x)
     return 0
 }

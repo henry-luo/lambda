@@ -59,7 +59,7 @@ typedef struct AstNavigationNode : AstNode {
     bool root;                // true for ./, false for .~~
 } AstNavigationNode;
 
-// CRetType, CArgConvention, and SysFuncInfo are now in sys_func_registry.h
+// CRetType, SysFuncArgDesc, and SysFuncInfo are now in sys_func_registry.h
 
 typedef struct AstSysFuncNode : AstNode {
     SysFuncInfo* fn_info;
@@ -963,11 +963,11 @@ typedef struct Transpiler : Script {
     AstObjectTypeNode* method_owner;  // non-null when transpiling a method body
     struct TypeObject* pn_method_obj_type;  // non-null inside pn method body (for field write-back)
 
-    // While-loop cross-dependency analysis: tracks which variables need _store_i64
-    // due to cross-variable read dependencies (lost-copy SSA bug workaround).
+    // While-loop cross-dependency analysis tracks cross-variable read
+    // dependencies so swap-pattern assignments retain their source order.
     // Variables only reading themselves (self-update like q = q + 1) are safe for
     // direct assignment; variables read by other assignments (swap patterns) are unsafe.
-    String** loop_unsafe_vars;  // array of variable names that need _store_i64
+    String** loop_unsafe_vars;  // array of cross-dependent variable names
     int loop_unsafe_count;      // number of unsafe variables
 
     // Variadic function body context: when true, return/raise must emit restore_vargs

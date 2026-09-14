@@ -566,7 +566,7 @@ tree-sitter-libs: tree-sitter-jube-libs
 	    tree-sitter-libs tree-sitter-jube-libs tree-sitter-cst-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
-	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir c2mir-driver verify-mir-patches \
+	    fuzz-lambda fuzz-lambda-extended fuzz-lambda-asan fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir c2mir-driver verify-mir-patches \
 	    ensure-test262-gtest test-js262-prelim test-js-exception-catalog test-js-callable-catalog test-js-opt test262-baseline test262-full \
 	    coverage-tools coverage-build-config coverage-build-config-native coverage-build-config-js coverage-build-all coverage-build-js test-coverage test-js-coverage \
 	test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui view-ui native-gui-ui editable-unit editable-ui editable-editor-e2e test-editable test-wpt-contenteditable test-chromium-contenteditable audit-editable-ownership editable-package-disabled test-editable-ua-focused editable-form-regressions test-editable-ua drawing-editor-e2e test-drawing check-error-recovery \
@@ -666,8 +666,9 @@ help:
 	@echo "  test-coverage - Run all native tests with LLVM C/C++ coverage"
 	@echo "  test-js-coverage - Run JS gtest, Test262, and benchmark scripts with LLVM coverage"
 	@echo "  test-benchmark- Run performance benchmark tests"
-	@echo "  fuzz-lambda    - Run fuzzy tests (5 minutes, mutation + random generation)"
-	@echo "  fuzz-lambda-extended - Run extended fuzzy tests (1 hour)"
+	@echo "  fuzz-lambda    - Run deterministic Lambda fuzz smoke (default: 60s)"
+	@echo "  fuzz-lambda-extended - Run extended Lambda fuzz campaign (default: 1 hour)"
+	@echo "  fuzz-lambda-asan - Run Lambda fuzz smoke with AddressSanitizer"
 	@echo "  test-integration - Run end-to-end integration tests"
 	@echo "  test-all      - Run complete test suite (all test types)"
 
@@ -2876,19 +2877,24 @@ test-benchmark:
 # Fuzzy Testing Framework
 # Shell-based fuzzer for testing Lambda robustness
 
-# Run fuzzy tests (quick mode: 5 minutes)
+# Run deterministic Lambda fuzz smoke (override with duration=N or timeout=N)
 fuzz-lambda: build
-	@echo "Running fuzzy tests (quick mode: 5 minutes)..."
+	@echo "Running Lambda fuzz smoke..."
 	@chmod +x test/fuzzy/lambda/test_fuzzy.sh
-	@./test/fuzzy/lambda/test_fuzzy.sh --duration=300
-	@echo "✅ Fuzzy tests completed"
+	@python3 test/fuzzy/lambda/run_fuzz.py --seconds=$(or $(duration),60) --timeout=$(or $(timeout),5)
+	@echo "✅ Lambda fuzz smoke completed"
 
 # Run extended fuzzy tests (1 hour)
 fuzz-lambda-extended: build
 	@echo "Running extended fuzzy tests (1 hour)..."
 	@chmod +x test/fuzzy/lambda/test_fuzzy.sh
-	@./test/fuzzy/lambda/test_fuzzy.sh --duration=3600
+	@python3 test/fuzzy/lambda/run_fuzz.py --seconds=$(or $(duration),3600) --timeout=$(or $(timeout),10)
 	@echo "✅ Extended fuzzy tests completed"
+
+# Run the same declared seed contracts and adversarial cases under ASan.
+fuzz-lambda-asan: build-debug-asan
+	@echo "Running Lambda fuzz smoke with AddressSanitizer..."
+	@python3 test/fuzzy/lambda/run_fuzz.py --executable=./lambda-debug-asan.exe --seconds=$(or $(duration),60) --timeout=$(or $(timeout),5)
 
 # Radiant Layout Engine Fuzzy Testing
 # Generates adversarial HTML/CSS and tests layout robustness

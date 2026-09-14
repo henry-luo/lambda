@@ -22,6 +22,7 @@
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/mem.h"
+#include "../../lib/mem_grow.hpp"
 #include <string.h>
 
 // helper: get a map attribute by key using the shared packed-slot reader.
@@ -412,12 +413,9 @@ static Item rdb_add_reverse_fk(MarkBuilder& builder, Item target_array,
             if (!entry.rows) continue;
         }
 
-        if (entry.count >= entry.capacity) {
-            entry.capacity *= 2;
-            Item* new_rows = (Item*)mem_realloc(entry.rows, entry.capacity * sizeof(Item), MEM_CAT_INPUT_OTHER);
-            if (!new_rows) continue;
-            entry.rows = new_rows;
-        }
+        if (entry.count >= entry.capacity &&
+                !lam::mem_grow_array(&entry.rows, &entry.capacity,
+                                     entry.count + 1, 4, MEM_CAT_INPUT_OTHER)) continue;
         entry.rows[entry.count++] = src_row;
         hashmap_set(groups, &entry);
     }

@@ -16,7 +16,7 @@ extern "C" {
 
 #include "../lambda.h"
 
-struct JsEventLoopTimerState;
+struct JsEventLoopState;
 
 // =============================================================================
 // Event Loop Lifecycle
@@ -90,7 +90,7 @@ void js_clearInterval(Item timer_id);
 void js_event_loop_cancel_document_timers(void* dom_doc);
 void js_event_loop_abandon_document_timers(void* dom_doc);
 void js_event_loop_abandon_all_timers(void);
-void js_event_loop_timer_state_destroy(struct JsEventLoopTimerState* state);
+void js_event_loop_state_destroy(struct JsEventLoopState* state);
 
 // Dynamic native callers keep every actual in one Array argument pack.
 Item js_pack_args_span(Item* values, int count);

@@ -8,6 +8,7 @@
 #endif
 
 #include "shell.h"
+#include "byte_builder.h"
 #include "memtrack.h"
 #include "log.h"
 
@@ -56,51 +57,22 @@
 
 extern char* strdup(const char* s);
 
-typedef struct {
-    char* data;
-    size_t len;
-    size_t cap;
-} ShellCapture;
+typedef ByteBuilder ShellCapture;
 
 static bool shell_capture_init(ShellCapture* capture) {
-    capture->cap = 4096;
-    capture->len = 0;
-    capture->data = (char*)mem_alloc(capture->cap, MEM_CAT_TEMP);
-    if (!capture->data) return false;
-    capture->data[0] = '\0';
-    return true;
+    return byte_builder_init(capture, 4096, MEM_CAT_TEMP, true);
 }
 
 static bool shell_capture_append(ShellCapture* capture, const char* data, size_t len) {
-    if (len == 0) return true;
-    if (capture->len + len + 1 > capture->cap) {
-        size_t cap = capture->cap;
-        while (capture->len + len + 1 > cap) cap *= 2;
-        char* resized = (char*)mem_realloc(capture->data, cap, MEM_CAT_TEMP);
-        if (!resized) return false;
-        capture->data = resized;
-        capture->cap = cap;
-    }
-    memcpy(capture->data + capture->len, data, len);
-    capture->len += len;
-    capture->data[capture->len] = '\0';
-    return true;
+    return byte_builder_append(capture, data, len);
 }
 
 static char* shell_capture_take(ShellCapture* capture, size_t* out_len) {
-    char* data = capture->data;
-    if (out_len) *out_len = capture->len;
-    capture->data = NULL;
-    capture->len = 0;
-    capture->cap = 0;
-    return data;
+    return (char*)byte_builder_take(capture, out_len);
 }
 
 static void shell_capture_discard(ShellCapture* capture) {
-    mem_free(capture->data);
-    capture->data = NULL;
-    capture->len = 0;
-    capture->cap = 0;
+    byte_builder_destroy(capture);
 }
 
 // ---------------------------------------------------------------------------

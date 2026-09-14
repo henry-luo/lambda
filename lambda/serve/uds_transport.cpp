@@ -22,21 +22,6 @@ void uds_cleanup_socket(const char* socket_path) {
     unlink(socket_path);
 }
 
-// ── read buffer helpers ──
-
-static void ensure_read_capacity(UdsConnection* conn, int needed) {
-    if (conn->read_len + needed <= conn->read_cap) return;
-    int new_cap = conn->read_cap * 2;
-    if (new_cap < conn->read_len + needed) new_cap = conn->read_len + needed;
-    char* new_buf = (char*)mem_realloc(conn->read_buf, new_cap, MEM_CAT_SERVE);
-    if (!new_buf) {
-        log_error("UDS: read buffer realloc failed");
-        return;
-    }
-    conn->read_buf = new_buf;
-    conn->read_cap = new_cap;
-}
-
 // ── libuv callbacks ──
 
 static void alloc_buffer(uv_handle_t* handle, size_t suggested, uv_buf_t* buf) {
@@ -61,26 +46,22 @@ static void on_read(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
         return;
     }
 
-    ensure_read_capacity(conn, (int)nread);
-    memcpy(conn->read_buf + conn->read_len, buf->base, nread);
-    conn->read_len += (int)nread;
+    if (!line_framer_append(&conn->read_lines, buf->base, (size_t)nread)) {
+        log_error("UDS: failed to append incoming line bytes");
+        mem_free(buf->base);
+        return;
+    }
     mem_free(buf->base);
 
     // process complete lines (newline-delimited)
     while (true) {
-        char* nl = (char*)memchr(conn->read_buf, '\n', conn->read_len);
-        if (!nl) break;
-
-        int line_len = (int)(nl - conn->read_buf);
+        size_t line_len = 0;
+        const char* line = line_framer_peek(&conn->read_lines, &line_len);
+        if (!line) break;
         if (conn->read_cb) {
-            conn->read_cb(conn->read_buf, line_len, conn->user_data);
+            conn->read_cb(line, (int)line_len, conn->user_data);
         }
-
-        int remaining = conn->read_len - line_len - 1;
-        if (remaining > 0) {
-            memmove(conn->read_buf, nl + 1, remaining);
-        }
-        conn->read_len = remaining;
+        (void)line_framer_consume(&conn->read_lines, line_len + 1);
     }
 }
 
@@ -90,12 +71,13 @@ UdsConnection* uds_connection_create(uv_loop_t* loop) {
     UdsConnection* conn = (UdsConnection*)mem_calloc(1, sizeof(UdsConnection), MEM_CAT_SERVE);
     if (!conn) return nullptr;
 
+    if (!line_framer_init(&conn->read_lines, UDS_READ_BUF_INITIAL, MEM_CAT_SERVE)) {
+        mem_free(conn);
+        return nullptr;
+    }
+
     uv_pipe_init(loop, &conn->pipe, 0);
     conn->pipe.data = conn;
-
-    conn->read_buf = (char*)mem_alloc(UDS_READ_BUF_INITIAL, MEM_CAT_SERVE);
-    conn->read_len = 0;
-    conn->read_cap = UDS_READ_BUF_INITIAL;
 
     return conn;
 }
@@ -148,7 +130,7 @@ int uds_connection_write(UdsConnection* conn, const char* data, int len) {
 
 static void on_close(uv_handle_t* handle) {
     UdsConnection* conn = (UdsConnection*)handle->data;
-    mem_free(conn->read_buf);
+    line_framer_destroy(&conn->read_lines);
     mem_free(conn);
 }
 

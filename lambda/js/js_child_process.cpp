@@ -18,6 +18,8 @@
 #include "../../lib/arraylist.h"
 #include "../../lib/uv_loop.h"
 #include "../../lib/windows_compat.h"
+#include "../../lib/byte_builder.h"
+#include "../../lib/line_framer.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -206,12 +208,8 @@ typedef struct JsChildProcess {
     uv_pipe_t    stderr_pipe;
 
     // buffered output
-    char*  stdout_buf;
-    size_t stdout_len;
-    size_t stdout_cap;
-    char*  stderr_buf;
-    size_t stderr_len;
-    size_t stderr_cap;
+    ByteBuilder stdout;
+    ByteBuilder stderr;
     size_t max_buffer;
     bool   max_buffer_exceeded;
     char   max_buffer_stream[8];
@@ -278,8 +276,8 @@ static void child_handle_close_cb(uv_handle_t* handle) {
     // all 3 handles (process + 2 pipes) fully closed → safe to free struct
     if (cp->handles_closed >= 3) {
         if (cp->abort_env) cp->abort_env[0] = (Item){.item = 0};
-        if (cp->stdout_buf) mem_free(cp->stdout_buf);
-        if (cp->stderr_buf) mem_free(cp->stderr_buf);
+        byte_builder_destroy(&cp->stdout);
+        byte_builder_destroy(&cp->stderr);
         if (cp->resource_id != 0) {
             uint32_t resource_id = cp->resource_id;
             cp->resource_id = 0;
@@ -302,26 +300,16 @@ static void child_note_max_buffer(JsChildProcess* cp, const char* stream_name) {
 }
 
 static void child_append_buffer(JsChildProcess* cp, const char* stream_name,
-                                char** target_buf, size_t* target_len,
-                                size_t* target_cap, const char* data, size_t data_len) {
-    if (!cp || !data || data_len == 0) return;
+                                ByteBuilder* target, const char* data, size_t data_len) {
+    if (!cp || !target || !data || data_len == 0) return;
     size_t allowed = data_len;
-    if (cp->max_buffer > 0 && *target_len + data_len > cp->max_buffer) {
+    if (cp->max_buffer > 0 && (target->length > cp->max_buffer ||
+        data_len > cp->max_buffer - target->length)) {
         child_note_max_buffer(cp, stream_name);
-        allowed = cp->max_buffer > *target_len ? cp->max_buffer - *target_len : 0;
+        allowed = cp->max_buffer > target->length ? cp->max_buffer - target->length : 0;
     }
     if (allowed == 0) return;
-    if (*target_len + allowed >= *target_cap) {
-        size_t new_cap = (*target_cap == 0) ? 4096 : *target_cap * 2;
-        while (new_cap < *target_len + allowed + 1) new_cap *= 2;
-        char* nb = (char*)mem_realloc(*target_buf, new_cap, MEM_CAT_JS_RUNTIME);
-        if (nb) { *target_buf = nb; *target_cap = new_cap; }
-    }
-    if (*target_buf) {
-        memcpy(*target_buf + *target_len, data, allowed);
-        *target_len += allowed;
-        (*target_buf)[*target_len] = '\0';
-    }
+    byte_builder_append(target, data, allowed);
 }
 
 static void child_output_read_cb(uv_stream_t* stream, ssize_t nread,
@@ -329,9 +317,7 @@ static void child_output_read_cb(uv_stream_t* stream, ssize_t nread,
     JsChildProcess* cp = (JsChildProcess*)stream->data;
     if (nread > 0 && cp) {
         child_append_buffer(cp, is_stderr ? "stderr" : "stdout",
-            is_stderr ? &cp->stderr_buf : &cp->stdout_buf,
-            is_stderr ? &cp->stderr_len : &cp->stdout_len,
-            is_stderr ? &cp->stderr_cap : &cp->stdout_cap,
+            is_stderr ? &cp->stderr : &cp->stdout,
             buf->base, (size_t)nread);
     }
     if (buf->base) mem_free(buf->base);
@@ -385,20 +371,20 @@ static void maybe_complete(JsChildProcess* cp) {
             js_set_key_cstr(err, "code", make_string_item("ERR_CHILD_PROCESS_STDIO_MAXBUFFER"));
         } else if (cp->exit_code != 0) {
             char emsg[1024];
-            if (cp->stderr_buf && cp->stderr_len > 0) {
-                int stderr_len = cp->stderr_len < 800 ? (int)cp->stderr_len : 800;
+            if (cp->stderr.data && cp->stderr.length > 0) {
+                int stderr_len = cp->stderr.length < 800 ? (int)cp->stderr.length : 800;
                 snprintf(emsg, sizeof(emsg), "Command failed with exit code %d\n%.*s",
-                         cp->exit_code, stderr_len, cp->stderr_buf);
+                         cp->exit_code, stderr_len, cp->stderr.data);
             } else {
                 snprintf(emsg, sizeof(emsg), "Command failed with exit code %d", cp->exit_code);
             }
             err = js_new_error(make_string_item(emsg));
         }
-        Item stdout_str = cp->stdout_buf
-            ? make_string_item(cp->stdout_buf, (int)cp->stdout_len)
+        Item stdout_str = cp->stdout.data
+            ? make_string_item((const char*)cp->stdout.data, (int)cp->stdout.length)
             : make_string_item("");
-        Item stderr_str = cp->stderr_buf
-            ? make_string_item(cp->stderr_buf, (int)cp->stderr_len)
+        Item stderr_str = cp->stderr.data
+            ? make_string_item((const char*)cp->stderr.data, (int)cp->stderr.length)
             : make_string_item("");
 
         Item args[3] = {err, stdout_str, stderr_str};
@@ -504,12 +490,22 @@ static Item js_cp_exec_with_options(Item command_item, Item options_item,
         mem_free(cp);
         return ItemNull;
     }
+    if (!byte_builder_init(&cp->stdout, 0, MEM_CAT_JS_RUNTIME, true) ||
+        !byte_builder_init(&cp->stderr, 0, MEM_CAT_JS_RUNTIME, true)) {
+        byte_builder_destroy(&cp->stdout);
+        byte_builder_destroy(&cp->stderr);
+        runtime_value_slots_destroy(&cp->values);
+        mem_free(cp);
+        return ItemNull;
+    }
 
     const RuntimeResourceDescriptor* descriptor =
         runtime_resource_descriptor_from_legacy_name("ChildProcess");
     cp->resource_id = runtime_resource_table_add_owned(
         &js_runtime_state.resources, cp, callback_item, descriptor, NULL, NULL, false);
     if (cp->resource_id == 0) {
+        byte_builder_destroy(&cp->stdout);
+        byte_builder_destroy(&cp->stderr);
         runtime_value_slots_destroy(&cp->values);
         mem_free(cp);
         return ItemNull;
@@ -642,23 +638,19 @@ extern "C" Item js_cp_execSync(Item command_item, Item options_item) {
         return ItemNull;
     }
 
-    char* result_buf = NULL;
-    size_t result_len = 0;
-    size_t result_cap = 0;
+    ByteBuilder result;
+    if (!byte_builder_init(&result, 0, MEM_CAT_JS_RUNTIME, true)) {
+        pclose(fp);
+#ifdef _WIN32
+        remove(script_path);
+#endif
+        return ItemNull;
+    }
     char chunk[4096];
 
     while (fgets(chunk, sizeof(chunk), fp)) {
         size_t chunk_len = strlen(chunk);
-        if (result_len + chunk_len >= result_cap) {
-            size_t new_cap = (result_cap == 0) ? 4096 : result_cap * 2;
-            while (new_cap < result_len + chunk_len + 1) new_cap *= 2;
-            char* nb = (char*)mem_realloc(result_buf, new_cap, MEM_CAT_JS_RUNTIME);
-            if (!nb) break;
-            result_buf = nb;
-            result_cap = new_cap;
-        }
-        memcpy(result_buf + result_len, chunk, chunk_len);
-        result_len += chunk_len;
+        if (!byte_builder_append(&result, chunk, chunk_len)) break;
     }
 
     int status = pclose(fp);
@@ -667,18 +659,14 @@ extern "C" Item js_cp_execSync(Item command_item, Item options_item) {
 #endif
     (void)status; // ignore exit code for execSync
 
-    if (result_buf) {
-        result_buf[result_len] = '\0';
-        // trim trailing newline
-        while (result_len > 0 && (result_buf[result_len - 1] == '\n' || result_buf[result_len - 1] == '\r')) {
-            result_len--;
-        }
-        Item result = make_string_item(result_buf, (int)result_len);
-        mem_free(result_buf);
-        return result;
+    // trim trailing newline
+    while (result.length > 0 && (result.data[result.length - 1] == '\n' ||
+                                 result.data[result.length - 1] == '\r')) {
+        result.length--;
     }
-
-    return make_string_item("");
+    Item output = make_string_item((const char*)result.data, (int)result.length);
+    byte_builder_destroy(&result);
+    return output;
 }
 
 // =============================================================================
@@ -727,9 +715,7 @@ typedef struct JsSpawnProcess {
     Item*        unref_env;
     Item*        abort_env;
     RuntimeCallbackSlots ipc_write_callbacks;
-    char*        ipc_buf;
-    size_t       ipc_len;
-    size_t       ipc_cap;
+    LineFramer   ipc_lines;
     ArrayList*   pending_sent_streams;
     struct SpawnTransferredConnection* transferred_connections_head;
     struct SpawnTransferredConnection* transferred_connections_tail;
@@ -1144,7 +1130,7 @@ static void spawn_release_process(JsSpawnProcess* sp) {
     }
     runtime_value_slots_destroy(&sp->values);
     runtime_callback_slots_destroy(&sp->ipc_write_callbacks);
-    if (sp->ipc_buf) mem_free(sp->ipc_buf);
+    line_framer_destroy(&sp->ipc_lines);
     mem_free(sp);
 }
 
@@ -1517,43 +1503,28 @@ static void spawn_ipc_handle_line(JsSpawnProcess* sp, const char* chars, int len
 }
 
 static void spawn_ipc_consume_lines(JsSpawnProcess* sp) {
-    if (!sp || !sp->ipc_buf || sp->ipc_len == 0) return;
-    size_t start = 0;
-    for (size_t i = 0; i < sp->ipc_len; i++) {
-        if (sp->ipc_buf[i] != '\n') continue;
-        size_t line_len = i - start;
-        if (line_len > 0 && sp->ipc_buf[start + line_len - 1] == '\r') line_len--;
-        spawn_ipc_handle_line(sp, sp->ipc_buf + start, (int)line_len);
-        start = i + 1;
-    }
-    if (start > 0) {
-        size_t remaining = sp->ipc_len - start;
-        if (remaining > 0) memmove(sp->ipc_buf, sp->ipc_buf + start, remaining);
-        sp->ipc_len = remaining;
+    if (!sp) return;
+    while (true) {
+        size_t frame_length = 0;
+        const char* line = line_framer_peek(&sp->ipc_lines, &frame_length);
+        if (!line) break;
+        size_t line_length = frame_length;
+        if (line_length > 0 && line[line_length - 1] == '\r') line_length--;
+        spawn_ipc_handle_line(sp, line, (int)line_length);
+        if (!line_framer_consume(&sp->ipc_lines, frame_length + 1)) break;
     }
 }
 
 static void spawn_ipc_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
     JsSpawnProcess* sp = (JsSpawnProcess*)stream->data;
     if (nread > 0 && sp) {
-        size_t needed = sp->ipc_len + (size_t)nread + 1;
-        if (needed > sp->ipc_cap) {
-            size_t new_cap = sp->ipc_cap ? sp->ipc_cap * 2 : 1024;
-            while (new_cap < needed) new_cap *= 2;
-            char* nb = (char*)mem_realloc(sp->ipc_buf, new_cap, MEM_CAT_JS_RUNTIME);
-            if (nb) {
-                sp->ipc_buf = nb;
-                sp->ipc_cap = new_cap;
-            }
-        }
-        if (sp->ipc_buf && sp->ipc_cap >= needed) {
-            memcpy(sp->ipc_buf + sp->ipc_len, buf->base, (size_t)nread);
-            sp->ipc_len += (size_t)nread;
-            sp->ipc_buf[sp->ipc_len] = '\0';
+        if (line_framer_append(&sp->ipc_lines, buf->base, (size_t)nread)) {
             spawn_ipc_consume_lines(sp);
             // A child IPC reply means delayed descriptor receivers have accepted
             // pending keepOpen duplicates; closing earlier can make writes EBADF.
             spawn_close_pending_sent_stream_wrappers(sp);
+        } else {
+            log_error("child_process: failed to append IPC message bytes");
         }
     }
     if (buf->base) mem_free(buf->base);
@@ -2569,6 +2540,9 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         // ipc stdio pipes need descriptor passing enabled for sendHandle.
         uv_pipe_init(loop, &sp->ipc_pipe, 1);
         sp->ipc_pipe.data = sp;
+        if (!line_framer_init(&sp->ipc_lines, 1024, MEM_CAT_JS_RUNTIME)) {
+            log_error("child_process: failed to allocate IPC message framer");
+        }
         sp->ipc_pipe_active = true;
         sp->handles_expected++;
     }
@@ -3221,29 +3195,22 @@ static char* cp_read_file_to_buffer(const char* path, size_t* out_len) {
     if (out_len) *out_len = 0;
     FILE* fp = fopen(path, "rb");
     if (!fp) return NULL;
-    char* out = NULL;
-    size_t len = 0;
-    size_t cap = 0;
+    ByteBuilder output;
+    if (!byte_builder_init(&output, 0, MEM_CAT_JS_RUNTIME, true)) {
+        fclose(fp);
+        return NULL;
+    }
     char chunk[4096];
     size_t nread = 0;
     while ((nread = fread(chunk, 1, sizeof(chunk), fp)) > 0) {
-        if (len + nread >= cap) {
-            cap = cap == 0 ? 4096 : cap * 2;
-            while (cap < len + nread + 1) cap *= 2;
-            out = (char*)mem_realloc(out, cap, MEM_CAT_JS_RUNTIME);
+        if (!byte_builder_append(&output, chunk, nread)) {
+            byte_builder_destroy(&output);
+            fclose(fp);
+            return NULL;
         }
-        memcpy(out + len, chunk, nread);
-        len += nread;
     }
     fclose(fp);
-    if (!out) {
-        out = (char*)mem_alloc(1, MEM_CAT_JS_RUNTIME);
-        if (out) out[0] = '\0';
-    } else {
-        out[len] = '\0';
-    }
-    if (out_len) *out_len = len;
-    return out;
+    return (char*)byte_builder_take(&output, out_len);
 }
 
 static bool cp_sync_output_wants_string(Item options_item) {

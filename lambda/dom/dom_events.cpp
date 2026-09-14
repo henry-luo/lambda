@@ -24,6 +24,7 @@
 #include "../module/radiant/radiant_dom_bridge.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../../lib/mem_grow.hpp"
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/strbuf.h"
@@ -569,14 +570,12 @@ static NodeListeners* get_or_create_listeners(void* key, DomDocument* owner_doc,
 
     // grow if needed
     if (_entry_count >= _entry_capacity) {
-        int new_cap = _entry_capacity == 0 ? 16 : _entry_capacity * 2;
-        NodeListenerEntry* new_entries = (NodeListenerEntry*)mem_calloc(new_cap, sizeof(NodeListenerEntry), MEM_CAT_JS_RUNTIME);
-        if (_entries && _entry_count > 0) {
-            memcpy(new_entries, _entries, _entry_count * sizeof(NodeListenerEntry));
-            mem_free(_entries);
-        }
-        _entries = new_entries;
-        _entry_capacity = new_cap;
+        int old_capacity = _entry_capacity;
+        if (!lam::mem_grow_array(&_entries, &_entry_capacity,
+                _entry_count + 1, 16, MEM_CAT_JS_RUNTIME)) return nullptr;
+        memset(_entries + old_capacity, 0,
+               (size_t)(_entry_capacity - old_capacity) *
+                   sizeof(NodeListenerEntry));
     }
 
     int new_slot = _entry_count++;

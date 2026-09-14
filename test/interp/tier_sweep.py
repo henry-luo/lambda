@@ -4,8 +4,10 @@ zero-fallback, output-identical set. Output goes to ./temp/ (CLAUDE rule 2).
 
 Usage: python3 test/interp/tier_sweep.py [--dir test/lambda] [--timeout 20]
 """
-import argparse, os, re, signal, subprocess, sys
+import argparse, os, re, sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from lambda_process import run_lambda_process
 
 FALLBACK_RE = re.compile(r"interp: executed=(\d+) fallback=(\d+) excluded=(\d+)")
 
@@ -21,62 +23,13 @@ PROCEDURAL_DIRS = ("test/lambda/proc", "test/lambda/conc", "test/lambda/pdf")
 
 
 def run(script, tier, timeout, procedural=False):
-    env = dict(os.environ)
-    if tier:
-        env["LAMBDA_TIER"] = tier
-    else:
-        env.pop("LAMBDA_TIER", None)
-    argv = ["./lambda.exe", "run", script] if procedural else ["./lambda.exe", script]
-    proc = None
-    try:
-        # A script can start renderer/helper descendants. Give the invocation
-        # its own process group so a timeout closes every inherited pipe; a
-        # bare subprocess.run() kill left those descendants alive and stranded
-        # the worker thread in communicate() during the full corpus sweep.
-        proc = subprocess.Popen(argv, env=env, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, text=True,
-                                errors="replace", start_new_session=os.name != "nt")
-        stdout, stderr = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        if proc:
-            if os.name == "nt":
-                proc.kill()
-            else:
-                try:
-                    os.killpg(proc.pid, signal.SIGKILL)
-                except (ProcessLookupError, PermissionError):
-                    # Sandboxed macOS workers may deny process-group signaling
-                    # even though the direct child is ours; fall back to the
-                    # child handle so one renderer timeout cannot abort the
-                    # whole P1 partition refresh (R4).
-                    try:
-                        proc.kill()
-                    except (ProcessLookupError, PermissionError):
-                        pass
-            # A renderer can fork a helper into another session while retaining
-            # stdout/stderr. Draining with communicate() after killing the
-            # direct process then waits forever for that inherited pipe, even
-            # though the timed-out Lambda invocation has already ended. Reap
-            # only the direct child and close our copies; its descendants no
-            # longer participate in this row's timeout verdict.
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    pass
-            if proc.stdout:
-                proc.stdout.close()
-            if proc.stderr:
-                proc.stderr.close()
+    result = run_lambda_process("./lambda.exe", script, tier, timeout, procedural)
+    if result.timed_out:
         return None, None, "timeout"
-    stats = FALLBACK_RE.search(stderr or "")
+    stats = FALLBACK_RE.search(result.stderr or "")
     fallback = int(stats.group(2)) if stats else 0
     executed = int(stats.group(1)) if stats else 0
-    status = "ok" if proc.returncode == 0 else f"exit{proc.returncode}"
-    return stdout, (executed, fallback), status
+    return result.stdout, (executed, fallback), result.status
 
 
 def main():
@@ -118,7 +71,7 @@ def main():
     # refresh_lists.py (which does) must stay serial.
     def verdict_for(entry):
         script, procedural = entry
-        jit_out, _, jit_status = run(script, None, args.timeout, procedural)
+        jit_out, _, jit_status = run(script, "jit", args.timeout, procedural)
         int_out, stats, int_status = run(script, "interp", args.timeout, procedural)
         # A timeout under N-way parallel load is a scheduling artifact, not a
         # divergence: the same script compared clean when re-run alone. Retry
@@ -127,7 +80,7 @@ def main():
         # folding it into either answer.
         if "timeout" in (jit_status, int_status):
             long_timeout = args.timeout * 3
-            jit_out, _, jit_status = run(script, None, long_timeout, procedural)
+            jit_out, _, jit_status = run(script, "jit", long_timeout, procedural)
             int_out, stats, int_status = run(script, "interp", long_timeout, procedural)
         executed, fallback = stats if stats else (0, 0)
         if "timeout" in (jit_status, int_status):
@@ -140,7 +93,7 @@ def main():
             # (test/lambda/pdf/phase2_font.ls compared clean 9 times in a row).
             # A false alarm here is worse than a slow sweep -- it is what would
             # make the oracle stop being believed.
-            jit_out2, _, jit_status2 = run(script, None, args.timeout * 3, procedural)
+            jit_out2, _, jit_status2 = run(script, "jit", args.timeout * 3, procedural)
             int_out2, _, int_status2 = run(script, "interp", args.timeout * 3, procedural)
             verdict = ("mismatch"
                        if jit_out2 != int_out2 or jit_status2 != int_status2

@@ -8,12 +8,13 @@
 #include "serve_utils.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../../lib/file.h"
+#include "../../lib/str.h"
 #include "../../lib/url.h"
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
 #include <time.h>
-#include <sys/stat.h>
 
 // ============================================================================
 // Memory management
@@ -84,14 +85,7 @@ void serve_clear_error(void) {
 
 int serve_strcasecmp(const char *s1, const char *s2) {
     if (!s1 || !s2) return s1 != s2;
-    while (*s1 && *s2) {
-        int c1 = tolower((unsigned char)*s1);
-        int c2 = tolower((unsigned char)*s2);
-        if (c1 != c2) return c1 - c2;
-        s1++;
-        s2++;
-    }
-    return tolower((unsigned char)*s1) - tolower((unsigned char)*s2);
+    return str_icmp(s1, strlen(s1), s2, strlen(s2));
 }
 
 char* serve_strtrim(char *str) {
@@ -115,15 +109,8 @@ size_t serve_url_decode(char *str) {
 }
 
 const char* serve_get_file_extension(const char *path) {
-    if (!path) return "";
-    const char *dot = NULL;
-    const char *p = path;
-    while (*p) {
-        if (*p == '.') dot = p;
-        if (*p == '/' || *p == '\\') dot = NULL; // reset after directory separator
-        p++;
-    }
-    return dot ? dot : "";
+    const char* ext = file_path_ext(path);
+    return ext ? ext : "";
 }
 
 // ============================================================================
@@ -138,12 +125,12 @@ char* serve_http_date(char *buffer, size_t bufsize) {
 }
 
 char* serve_file_mtime_str(const char *filepath, char *buffer, size_t bufsize) {
-    struct stat st;
-    if (stat(filepath, &st) != 0) {
+    FileStat stat = file_stat(filepath);
+    if (!stat.exists) {
         buffer[0] = '\0';
         return buffer;
     }
-    struct tm *gmt = gmtime(&st.st_mtime);
+    struct tm *gmt = gmtime(&stat.modified);
     strftime(buffer, bufsize, "%a, %d %b %Y %H:%M:%S GMT", gmt);
     return buffer;
 }
@@ -153,47 +140,21 @@ char* serve_file_mtime_str(const char *filepath, char *buffer, size_t bufsize) {
 // ============================================================================
 
 int serve_file_exists(const char *filepath) {
-    if (!filepath) return 0;
-    struct stat st;
-    return stat(filepath, &st) == 0;
+    return filepath && file_exists(filepath);
 }
 
 long serve_file_size(const char *filepath) {
-    if (!filepath) return -1;
-    struct stat st;
-    if (stat(filepath, &st) != 0) return -1;
-    return (long)st.st_size;
+    return filepath ? (long)file_size(filepath) : -1;
 }
 
 char* serve_read_file(const char *filepath, size_t *out_size) {
+    if (out_size) *out_size = 0;
     if (!filepath) return NULL;
 
-    FILE *f = fopen(filepath, "rb");
-    if (!f) {
-        serve_set_error("serve_read_file: cannot open '%s'", filepath);
+    char* data = NULL;
+    if (!file_read_all(filepath, MEM_CAT_SERVE, &data, out_size)) {
+        serve_set_error("serve_read_file: failed to read '%s'", filepath);
         return NULL;
     }
-
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-
-    if (size < 0) {
-        fclose(f);
-        serve_set_error("serve_read_file: cannot determine size of '%s'", filepath);
-        return NULL;
-    }
-
-    char *data = (char *)serve_malloc((size_t)size + 1);
-    if (!data) {
-        fclose(f);
-        return NULL;
-    }
-
-    size_t read = fread(data, 1, (size_t)size, f);
-    fclose(f);
-
-    data[read] = '\0';
-    if (out_size) *out_size = read;
     return data;
 }
