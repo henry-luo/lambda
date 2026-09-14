@@ -5,6 +5,7 @@
 #include "type_contract.hpp"
 #include "lambda-number-runtime.hpp"
 #include "lambda-error.h"
+#include "../../lib/checked_math.hpp"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/sort.h"
@@ -100,19 +101,23 @@ static Array* vector_to_plain_array(Item item, int64_t len) {
     RootFrame roots(2);
     Rooted<Item> rooted_source(roots, item);
     Rooted<Array*> rooted_result(roots, (Array*)NULL);
+    if (len < 0 || len > INT64_MAX / 2) return NULL;
     Array* result = array();
     rooted_result.set(result);
-    // Publish capacity only with its matching buffer. A collection between
-    // those writes must not make the compactor copy from a NULL items pointer.
-    Item* items = (Item*)heap_data_calloc(len * sizeof(Item));
+    int64_t capacity = len * 2;
+    size_t bytes = 0;
+    if (!lam::checked_mul((size_t)capacity, sizeof(Item), &bytes)) return NULL;
+    Item* items = bytes > 0 ? (Item*)heap_data_calloc(bytes) : NULL;
+    if (bytes > 0 && !items) return NULL;
     result = rooted_result.get();
     result->items = items;
-    result->capacity = len;
+    result->capacity = capacity;
     result->length = len;
     for (int64_t i = 0; i < len; i++) {
         Item value = vector_get(rooted_source.get(), i);
         result = rooted_result.get();
-        result->items[i] = value;
+        // rehome wide scalars into the result-owned tail (D2.5.2v2).
+        array_set(result, i, value);
     }
     array_transform_copy_cert(rooted_source.get(), rooted_result.get());
     result->is_spreadable = false;
@@ -2474,6 +2479,7 @@ Item fn_sort1(Item item) {
     }
 
     Array* result = vector_to_plain_array(item, len);
+    if (!result) return ItemError;
     stable_sort_items_by_total_order(result->items, len, false);
     return { .array = result };
 }
@@ -2602,19 +2608,10 @@ Item fn_sort2(Item item, Item dir_item) {
         Rooted<Item> rooted_key_fn(roots, (Item){.function = key_fn});
         Rooted<Array*> rooted_result(roots, (Array*)NULL);
 
-        // build an Array of Items to sort
-        Array* result = array();
+        // rehome wide source scalars before the comparison callback can run.
+        Array* result = vector_to_plain_array(rooted_source.get(), len);
+        if (!result) return ItemError;
         rooted_result.set(result);
-        Item* result_items = (Item*)heap_data_calloc(len * sizeof(Item));
-        result = rooted_result.get();
-        result->capacity = len;
-        result->length = len;
-        result->items = result_items;
-        for (int64_t i = 0; i < len; i++) {
-            Item value = vector_get(rooted_source.get(), i);
-            result = rooted_result.get();
-            result->items[i] = value;
-        }
 
         // extract keys using the key function
         uint64_t** key_slots = (uint64_t**)mem_alloc(len * sizeof(uint64_t*), MEM_CAT_EVAL);
@@ -2680,6 +2677,7 @@ Item fn_sort2(Item item, Item dir_item) {
         return array_num_sort_result(item, len, descending);
     }
     Array* result = vector_to_plain_array(item, len);
+    if (!result) return ItemError;
     stable_sort_items_by_total_order(result->items, len, descending);
     return { .array = result };
 }

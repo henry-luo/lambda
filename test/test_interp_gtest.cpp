@@ -430,6 +430,15 @@ TEST(InterpWalker, NullableNativeTypedArraysKeepTheirDestinationLane) {
     }
 }
 
+TEST(InterpWalker, GenericSortOwnsWideScalarValues) {
+    const char* script = "test/lambda/proc/proc_sort_wide_scalar_ownership.ls";
+    RunResult jit = run_script(script, "jit", /*procedural=*/true);
+    RunResult interp = run_script(script, "interp", /*procedural=*/true);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
+    EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text));
+    EXPECT_EQ(jit.exit_code, interp.exit_code);
+}
+
 TEST(InterpWalker, NumericMaskAssignmentUsesTheVectorStore) {
     // A typed bool mask owns its lane/shape checks in fn_index_assign; T0 must
     // use that same in-place vector store for scalar, block, and N-D writes.
