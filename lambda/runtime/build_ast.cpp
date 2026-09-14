@@ -3610,9 +3610,8 @@ static Type* build_lit_decimal_poison_from_span(Transpiler* tp,
         sizeof(TypeDecimal));
     Decimal* decimal = (Decimal*)pool_alloc(tp->pool, sizeof(Decimal));
     if (!decimal) return &TYPE_ERROR;
-    decimal->unlimited = 0;
-    decimal->dec_val = decimal_parse_str(spelling, decimal_fixed_context());
-    if (!decimal->dec_val) return &TYPE_ERROR;
+    mpd_t* value = decimal_parse_str(spelling, decimal_fixed_context());
+    if (!decimal_take_mpd(decimal, DECIMAL_FIXED, value)) return &TYPE_ERROR;
     if (!track_decimal_constant(tp, decimal)) return &TYPE_ERROR;
     item_type->decimal = decimal;
     arraylist_append(tp->const_list, decimal);
@@ -3695,14 +3694,14 @@ static Type* build_lit_decimal_from_span(Transpiler* tp, SourceSpan span) {
 
     bool needs_unlimited_decimal =
         decimal_literal_significant_digits(num_str) > DECIMAL_FIXED_PRECISION;
-    decimal->unlimited = is_integer_literal ? DECIMAL_BIGINT :
-        (needs_unlimited_decimal ? 1 : 0);
+    DecimalKind storage_kind = is_integer_literal ? DECIMAL_BIGINT :
+        (needs_unlimited_decimal ? DECIMAL_EXTENDED : DECIMAL_FIXED);
 
     // literal digits are preserved exactly by selecting the necessary tier.
     // parse the literal without a precision context; the selected tier must
     // not round away source digits before runtime evaluation sees them.
-    decimal->dec_val = decimal_parse_str_exact(num_str);
-    if (!decimal->dec_val) {
+    mpd_t* value = decimal_parse_str_exact(num_str);
+    if (!decimal_take_mpd(decimal, storage_kind, value)) {
         log_error("Error: Failed to parse decimal: %s", num_str);
         mem_free(num_str);
         return &TYPE_ERROR;

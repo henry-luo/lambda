@@ -251,7 +251,7 @@ static bool js_global_is_bigint(Item value) {
     if (type == LMD_TYPE_INT64 || type == LMD_TYPE_UINT64) return true;
     if (type != LMD_TYPE_DECIMAL) return false;
     Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
-    return dec && dec->unlimited == DECIMAL_BIGINT;
+    return dec && dec->storage_kind == DECIMAL_BIGINT;
 }
 
 // Calendar abbreviations used by Date's toString/toUTCString/toDateString and
@@ -4273,7 +4273,7 @@ Item js_numeric_prototype_algorithm(Item num,
     // BigInt prototype methods
     if (get_type_id(num) == LMD_TYPE_DECIMAL) {
         Decimal* dec = (Decimal*)(num.item & 0x00FFFFFFFFFFFFFF);
-        if (dec && dec->unlimited == DECIMAL_BIGINT) {
+        if (dec && dec->storage_kind == DECIMAL_BIGINT) {
             if (operation == JS_NUMERIC_TO_STRING) {
                 int radix = 10;
                 if (argc > 0 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED) {

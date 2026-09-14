@@ -710,7 +710,7 @@ facts: there is NO `LMD_TYPE_INTEGER` value tag. `TYPE_INTEGER` is an abstract
 `LMD_TYPE_TYPE` singleton; membership (`is`, validator, admission) is
 `item_type_is_integer_subtype` — compact `int` (int53 lane), `int64`,
 `uint64`, integral `NUM_SIZED`, **plus BigInt, which is carried as `Decimal*`
-with `Decimal.unlimited == DECIMAL_BIGINT`** (`lambda.h:1357`);
+with `Decimal.storage_kind == DECIMAL_BIGINT`**;
 `TYPE_INTEGER_VALUE = {.type_id = LMD_TYPE_DECIMAL}` is what `is`/`type()`
 report for a BigInt payload. So `Decimal*` is today the carrier of the
 UNBOUNDED tail only (`123n` literals): a `n: integer` field on the `Decimal*`
@@ -721,13 +721,17 @@ uniform lane, consistent with the `decimal` type. Consequence worth naming: an
 `integer`-contracted field becomes a POINTER lane, so contracts containing
 `integer` fields are storage-valid and adoptable under the Type_Boundary gate.
 
-Recorded refinements, not blockers: (a) Decimal/BigInt sharing one
-`LMD_TYPE_DECIMAL` tag discriminated by `Decimal.unlimited` is accepted for
-now; (b) `Decimal` is currently a two-word wrapper
-`{uint8_t unlimited; mpd_t* dec_val;}` (`lambda-data.hpp:160`) — the
-discriminator should eventually move inside the `mpd_t` allocation so the
-wrapper shrinks, using libmpdec's public fields only (vendored code is off
-limits, CLAUDE.md rule 16).
+**TB4 follow-up (2026-09-14) — Decimal carrier layout.** Per **D2.2.4** and
+**S4.6.1**, Decimal/BigInt continue to share `LMD_TYPE_DECIMAL`, now
+discriminated by an explicit `DecimalKind storage_kind`; the wrapper is
+`{DecimalKind storage_kind; mpd_t dec_val;}`. `mpd_t` is embedded, but its
+coefficient buffer remains libmpdec-owned. `decimal_take_mpd()` transfers an
+owned libmpdec header into that field, marks it `MPD_STATIC`, and frees the
+former standalone header; GC calls `mpd_del(&dec_val)` to release only the
+coefficient storage. The discriminator must not move into `mpd_t`: all eight
+of libmpdec's flag bits are already its numeric/allocation contract, and a
+numeric payload cannot distinguish a fixed value, an extended result, and a
+BigInt with the same coefficient.
 
 **TB5 (2026-08-20) — non-simple contracts never classify ANY.** Each falls to
 an existing lane: occurrence `T[]`/`T[]?` → pointer lane (TB1); constrained

@@ -17,7 +17,7 @@ static inline LambdaNumericKind lambda_numeric_kind_from_type(const Type* type) 
     case LMD_TYPE_DECIMAL:
         if ((type->is_literal || type->is_const) &&
             ((const TypeDecimal*)type)->decimal &&
-            ((const TypeDecimal*)type)->decimal->unlimited == DECIMAL_BIGINT) {
+            ((const TypeDecimal*)type)->decimal->storage_kind == DECIMAL_BIGINT) {
             return LAMBDA_NUM_INTEGER;
         }
         return LAMBDA_NUM_DECIMAL;

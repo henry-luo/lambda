@@ -135,9 +135,9 @@ static void observe_decimal_finalizer_bridge(void* data, uint16_t type_tag) {
     }
     Decimal* decimal = (Decimal*)data;
     decimal_destroy_calls++;
-    decimal_destroy_had_payload = decimal && decimal->dec_val;
+    decimal_destroy_had_payload = decimal_has_payload(decimal);
     heap_gc_destroy_external_payload(data, type_tag);
-    decimal_destroy_released_payload = decimal && !decimal->dec_val;
+    decimal_destroy_released_payload = !decimal_has_payload(decimal);
 }
 
 static void test_weak_clear(uint64_t* slot, void* context) {
@@ -911,8 +911,10 @@ TEST_F(GCHeapTest, DecimalPayloadFinalizerReleasesMpdDuringSweep) {
     Decimal* decimal = (Decimal*)gc_heap_calloc(gc, sizeof(Decimal),
         LMD_TYPE_DECIMAL);
     ASSERT_NE(decimal, nullptr);
-    decimal->dec_val = decimal_parse_fixed_str("123.456");
-    ASSERT_NE(decimal->dec_val, nullptr);
+    ASSERT_TRUE(decimal_take_mpd(decimal, DECIMAL_FIXED,
+        decimal_parse_fixed_str("123.456")));
+    EXPECT_EQ(decimal_mpd(decimal), &decimal->dec_val);
+    EXPECT_NE(decimal->dec_val.flags & MPD_STATIC, 0);
 
     gc_collect(gc, NULL, 0);
 

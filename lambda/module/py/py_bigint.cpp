@@ -1,6 +1,6 @@
 // lambda/module/py/py_bigint.cpp — Python arbitrary-precision integers
 // =============================================================
-// Stores Python bigints as LMD_TYPE_DECIMAL Items with unlimited==PY_BIGINT_FLAG(2).
+// Stores Python bigints as LMD_TYPE_DECIMAL Items with DECIMAL_BIGINT storage.
 // Uses libmpdecimal with a dedicated 4000-digit context (~13,000 bits).
 // Reuses Lambda's mpdecimal infrastructure (heap_alloc, lambda-decimal.hpp).
 
@@ -51,8 +51,7 @@ static Item bigint_wrap(mpd_t* mpd_val) {
     if (!mpd_val) return ItemNull;
     Decimal* dec = (Decimal*)heap_alloc(sizeof(Decimal), LMD_TYPE_DECIMAL);
     if (!dec) { mpd_del(mpd_val); return ItemNull; }
-    dec->unlimited = PY_BIGINT_FLAG;
-    dec->dec_val   = mpd_val;
+    if (!decimal_take_mpd(dec, DECIMAL_BIGINT, mpd_val)) return ItemNull;
     Item result;
     result.item = c2it(dec);
     return result;
@@ -69,8 +68,8 @@ static mpd_t* to_mpd(Item x) {
         mpd_qset_ssize(m, (mpd_ssize_t)lambda_int_item_to_i64(x), ctx, &status);
     } else if (t == LMD_TYPE_DECIMAL) {
         Decimal* d = x.get_decimal();
-        if (d && d->dec_val) {
-            mpd_copy(m, d->dec_val, ctx);
+        if (decimal_has_payload(d)) {
+            mpd_copy(m, decimal_mpd(d), ctx);
         } else {
             mpd_qset_ssize(m, 0, ctx, &status);
         }
@@ -92,7 +91,7 @@ static mpd_t* to_mpd(Item x) {
 bool py_is_bigint(Item x) {
     if (get_type_id(x) != LMD_TYPE_DECIMAL) return false;
     Decimal* d = x.get_decimal();
-    return d && d->unlimited == PY_BIGINT_FLAG;
+    return d && d->storage_kind == DECIMAL_BIGINT;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -150,11 +149,11 @@ Item py_bigint_from_cstr(const char* s) {
 Item py_bigint_normalize(Item x) {
     if (!py_is_bigint(x)) return x;
     Decimal* d = x.get_decimal();
-    if (!d || !d->dec_val) return x;
+    if (!decimal_has_payload(d)) return x;
     mpd_context_t* ctx = bigint_ctx();
     // check if the integer part fits int's literal band (+/-(2^53-1))
     uint32_t status = 0;
-    mpd_ssize_t v = mpd_qget_ssize(d->dec_val, &status);
+    mpd_ssize_t v = mpd_qget_ssize(decimal_mpd(d), &status);
     if (status == 0 && v >= (mpd_ssize_t)INT53_MIN && v <= (mpd_ssize_t)INT53_MAX) {
         return (Item){.item = i2it((int64_t)v)};
     }
@@ -402,7 +401,7 @@ int64_t py_bigint_to_int64(Item x) {
 
 double py_bigint_to_double(Item x) {
     Decimal* d = x.get_decimal();
-    if (!d || !d->dec_val) return 0.0;
+    if (!decimal_has_payload(d)) return 0.0;
     return decimal_to_double(x);
 }
 
@@ -412,15 +411,15 @@ double py_bigint_to_double(Item x) {
 
 Item py_bigint_to_str_item(Item x) {
     Decimal* d = x.get_decimal();
-    if (!d || !d->dec_val) return (Item){.item = s2it(heap_create_name("0"))};
+    if (!decimal_has_payload(d)) return (Item){.item = s2it(heap_create_name("0"))};
     // mpd_to_sci gives decimal string (no scientific notation when fmt=0)
-    char* str = mpd_to_sci(d->dec_val, 0);
+    char* str = mpd_to_sci(decimal_mpd(d), 0);
     if (!str) return (Item){.item = s2it(heap_create_name("0"))};
     // remove any +/E notation — for pure integers mpd_to_sci gives exact string
     // we need to strip the exponent if present (e.g. "1E+100" → not ideal).
     // Use the engine context to get exact decimal string.
     mpd_context_t* ctx = bigint_ctx();
-    char* exact = mpd_to_sci(d->dec_val, 1);  // eng notation flag=1 gives decimal
+    char* exact = mpd_to_sci(decimal_mpd(d), 1);  // eng notation flag=1 gives decimal
     if (!exact) {
         Item r = (Item){.item = s2it(heap_create_name(str))};
         decimal_free_string(str);
@@ -438,7 +437,7 @@ Item py_bigint_to_str_item(Item x) {
     if (quantized && zero_exp) {
         uint32_t status = 0;
         mpd_qset_ssize(zero_exp, 1, ctx, &status);
-        mpd_qquantize(quantized, d->dec_val, zero_exp, ctx, &status);
+        mpd_qquantize(quantized, decimal_mpd(d), zero_exp, ctx, &status);
         decimal_free_string(exact);
         decimal_free_string(str);
         mpd_del(zero_exp);
@@ -487,11 +486,11 @@ static int mpd_to_base(mpd_t* m, int base, char* out, int out_cap, mpd_context_t
 
 static Item bigint_to_base_item(Item x, int base, const char* prefix) {
     Decimal* d = x.get_decimal();
-    if (!d || !d->dec_val) return (Item){.item = s2it(heap_create_name("0"))};
+    if (!decimal_has_payload(d)) return (Item){.item = s2it(heap_create_name("0"))};
     mpd_context_t* ctx = bigint_ctx();
-    bool neg = mpd_isnegative(d->dec_val) && !mpd_iszero(d->dec_val);
+    bool neg = mpd_isnegative(decimal_mpd(d)) && !mpd_iszero(decimal_mpd(d));
     char raw[PY_BIGINT_PREC + 64];
-    int count = mpd_to_base(d->dec_val, base, raw, sizeof(raw) - 4, ctx);
+    int count = mpd_to_base(decimal_mpd(d), base, raw, sizeof(raw) - 4, ctx);
     if (count == 0) return (Item){.item = s2it(heap_create_name("0"))};
     // build result: [-]prefix + reversed(raw)
     StrBuf* sb = strbuf_new();

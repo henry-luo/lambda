@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 6.0.0 (2026-09-14)
+**Spec version:** 6.1.0 (2026-09-14)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -217,6 +217,16 @@ language-visible counterparts are the semantics spec's SI ledger.
   branches) and follow the scalar-home ownership taxonomy (§D5.2);
   `DTIME` is object-backed — GC-owned when dynamic, Input-arena when
   static. [Stack_API §15.1, SF16]
+- **D2.2.4** `LMD_TYPE_DECIMAL` carries a `Decimal` wrapper with an
+  explicit `DecimalKind storage_kind` (`FIXED`, `EXTENDED`, `BIGINT`) and
+  an embedded `mpd_t dec_val`. `mpd_t` describes only the mathematical
+  value; it never determines the Lambda tier or BigInt identity. Its flags
+  remain exclusively libmpdec's numeric/allocation flags. Construction
+  transfers an owned libmpdec header into the embedded field, marks that
+  field `MPD_STATIC`, and releases the original header; destruction calls
+  `mpd_del(&dec_val)`, releasing coefficient storage but never the wrapper.
+  Thus source-level decimal tiers remain invisible while the BigInt carrier
+  stays distinguishable without a new Item tag. [S4.6.1, S4.9.1]
 
 ### D2.3 Boxing and unboxing
 

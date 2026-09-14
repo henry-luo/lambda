@@ -1525,7 +1525,7 @@ static Type* item_static_type_for_is(Item item, Type* scratch) {
     }
     if (type_id == LMD_TYPE_DECIMAL) {
         Decimal* decimal = item.get_decimal();
-        return decimal && decimal->unlimited == DECIMAL_BIGINT ?
+        return decimal && decimal->storage_kind == DECIMAL_BIGINT ?
             &TYPE_INTEGER_VALUE : &TYPE_DECIMAL;
     }
     type_id = item_semantic_type_id(type_id);
@@ -1540,7 +1540,7 @@ static Type* item_static_type_for_is(Item item, Type* scratch) {
 static bool item_type_is_integer_subtype(Item item, TypeId type_id) {
     if (type_id == LMD_TYPE_DECIMAL) {
         Decimal* dec = item.get_decimal();
-        return dec && dec->unlimited == DECIMAL_BIGINT;
+        return dec && dec->storage_kind == DECIMAL_BIGINT;
     }
     Type actual = {.type_id = type_id};
     if (type_id == LMD_TYPE_NUM_SIZED) actual.kind = item.get_num_type();
@@ -3938,7 +3938,7 @@ Type* fn_type(Item item) {
     }
     if (resolved_type == LMD_TYPE_DECIMAL) {
         Decimal* dec = item.get_decimal();
-        if (dec && dec->unlimited == DECIMAL_BIGINT) {
+        if (dec && dec->storage_kind == DECIMAL_BIGINT) {
             // integer is a language type carried by Decimal storage; hide the carrier from type().
             type->type = &TYPE_INTEGER;
             return (Type*)type;

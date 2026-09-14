@@ -316,7 +316,7 @@ separate work.
 
 <a id="lr03-6"></a>**LR03-6 · Overloaded tags · OPEN**
 `BigInt` rides on `LMD_TYPE_DECIMAL`, distinguished only by
-`Decimal.unlimited == DECIMAL_BIGINT` (`lambda/lambda.h:1361`–`1362`);
+`Decimal.storage_kind == DECIMAL_BIGINT` (**D2.2.4**);
 `JsAccessorPair` deliberately begins with `type_id == LMD_TYPE_FUNC`, so a slot
 value mis-reads as a function unless callers check `JSPD_IS_ACCESSOR` first
 (`lambda-data.hpp:281`, warned in the header at `:286`).

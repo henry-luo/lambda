@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string.h>  // moved outside extern "C" block to fix C++ compatibility
+#include <mpdecimal.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -14,9 +15,9 @@ extern "C" {
 #include <inttypes.h>  // for cross-platform integer formatting
 #include <math.h>
 
-// Forward declaration for mpdecimal types (full definition in lambda-decimal.cpp)
+// mpdecimal's value layout is embedded by Decimal, while contexts remain
+// runtime-private implementation detail.
 typedef struct mpd_context_t mpd_context_t;
-typedef struct mpd_t mpd_t;
 
 #include "../lib/strbuf.h"
 #include "../lib/stringbuf.h"
@@ -176,11 +177,28 @@ extern TypeInfo type_info[];
 // const_index, type_index - 32-bit, there should not be more than 4G types and consts in a single Lambda runtime
 // list item count, map size - 64-bit, to support large data files
 
-typedef struct mpd_t mpd_t;
-struct Decimal {
-    uint8_t unlimited;   // 0 fixed, 1 extended decimal, DECIMAL_BIGINT integer carrier
-    mpd_t* dec_val;  // libmpdec decimal number
+enum DecimalKind : uint8_t {
+    DECIMAL_FIXED = 0,
+    DECIMAL_EXTENDED = 1,
+    DECIMAL_BIGINT = 2,
 };
+
+struct Decimal {
+    DecimalKind storage_kind;
+    mpd_t dec_val;  // embedded libmpdec value; its coefficient storage remains libmpdec-owned
+};
+
+static inline bool decimal_has_payload(const Decimal* decimal) {
+    return decimal && (decimal->dec_val.flags & MPD_STATIC) != 0;
+}
+
+static inline mpd_t* decimal_mpd(Decimal* decimal) {
+    return decimal_has_payload(decimal) ? &decimal->dec_val : NULL;
+}
+
+static inline const mpd_t* decimal_mpd(const Decimal* decimal) {
+    return decimal_has_payload(decimal) ? &decimal->dec_val : NULL;
+}
 
 // Complex values are immutable GC objects with no outgoing references.  The
 // leading tag lets a raw-pointer Item participate in the normal type dispatch.
