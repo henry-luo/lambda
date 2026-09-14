@@ -32,7 +32,6 @@ static JsReadlineState* readline_state_require(void) {
 }
 
 #define readline_create_promises_mode (readline_state_require()->create_promises_mode)
-#define readline_input_rows (readline_state_require()->inputs)
 #define readline_input_values (readline_state_require()->input_values)
 
 struct ReadlineRealmItems {
@@ -64,43 +63,29 @@ static bool readline_is_stream_like(Item input) {
     return get_type_id(buffer) == LMD_TYPE_ARRAY;
 }
 
-static void readline_input_rows_clear(JsReadlineState* state) {
+static void readline_input_values_clear(JsReadlineState* state) {
     if (!state) return;
-    root_vector_clear_owned_rows(&state->inputs, &state->input_values);
+    root_vector_clear(&state->input_values);
 }
 
 void js_readline_state_destroy(JsReadlineState* state) {
     if (!state) return;
-    readline_input_rows_clear(state);
+    readline_input_values_clear(state);
     root_vector_destroy(&state->input_values);
 }
 
-static bool readline_input_rows_ensure(void) {
-    JsReadlineState* state = readline_state_require();
-    if (!state) return false;
-    int row_count = state->inputs ? state->inputs->length : 0;
-    if (root_vector_count(&state->input_values) != row_count * 2) {
-        // A replaced heap clears RootVector contents; native rows must not
-        // retain identities from that former heap.
-        readline_input_rows_clear(state);
-    }
-    return true;
-}
-
-static Item readline_input_at(const JsReadlineInput* row, int offset) {
-    Item* value = row ? root_vector_at(&readline_input_values,
-        row->root_slot + offset) : NULL;
+static Item readline_input_at(int64_t root_slot) {
+    Item* value = root_vector_at(&readline_input_values, root_slot);
     return value ? *value : ItemNull;
 }
 
 static void readline_map_input(Item input, Item rl) {
-    if (input.item == 0 || input.item == ITEM_NULL || !readline_input_rows_ensure()) return;
-    int row_count = readline_input_rows ? readline_input_rows->length : 0;
-    for (int i = 0; i < row_count; i++) {
-        JsReadlineInput* row = (JsReadlineInput*)readline_input_rows->data[i];
-        if (readline_item_eq(readline_input_at(row, 0), input)) {
+    if (input.item == 0 || input.item == ITEM_NULL) return;
+    int64_t pair_count = root_vector_count(&readline_input_values);
+    for (int64_t root_slot = 0; root_slot < pair_count; root_slot += 2) {
+        if (readline_item_eq(readline_input_at(root_slot), input)) {
             Item* interface = root_vector_at(&readline_input_values,
-                row->root_slot + 1);
+                root_slot + 1);
             if (interface) *interface = rl;
             return;
         }
@@ -108,30 +93,18 @@ static void readline_map_input(Item input, Item rl) {
     RootFrame roots(2);
     Rooted<Item> input_root(roots, input);
     Rooted<Item> interface_root(roots, rl);
-    JsReadlineInput* row = (JsReadlineInput*)mem_calloc(1,
-        sizeof(JsReadlineInput), MEM_CAT_JS_RUNTIME);
-    if (!row) return;
-    row->root_slot = root_vector_count(&readline_input_values);
+    int64_t root_slot = pair_count;
     if (!root_vector_push(&readline_input_values, input_root.get()) ||
             !root_vector_push(&readline_input_values, interface_root.get())) {
-        root_vector_shrink(&readline_input_values, row->root_slot);
-        mem_free(row);
-        return;
-    }
-    if (!readline_input_rows) readline_input_rows = arraylist_new(8);
-    if (!readline_input_rows || !arraylist_append(readline_input_rows, row)) {
-        root_vector_shrink(&readline_input_values, row->root_slot);
-        mem_free(row);
+        root_vector_shrink(&readline_input_values, root_slot);
     }
 }
 
 static Item readline_find_by_input(Item input) {
-    if (!readline_input_rows_ensure()) return ItemNull;
-    for (int i = readline_input_rows ? readline_input_rows->length - 1 : -1;
-            i >= 0; i--) {
-        JsReadlineInput* row = (JsReadlineInput*)readline_input_rows->data[i];
-        if (readline_item_eq(readline_input_at(row, 0), input)) {
-            return readline_input_at(row, 1);
+    for (int64_t root_slot = root_vector_count(&readline_input_values) - 2;
+            root_slot >= 0; root_slot -= 2) {
+        if (readline_item_eq(readline_input_at(root_slot), input)) {
+            return readline_input_at(root_slot + 1);
         }
     }
     return ItemNull;
@@ -1838,7 +1811,7 @@ extern "C" void js_readline_reset(void) {
     }
     JsReadlineState* state = js_runtime_state.readline;
     if (state) {
-        readline_input_rows_clear(state);
+        readline_input_values_clear(state);
         state->create_promises_mode = false;
     }
 }

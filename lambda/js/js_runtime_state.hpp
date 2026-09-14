@@ -31,7 +31,6 @@ struct TlsClientTicketState;
 struct JsTlsSecureContextOwner;
 struct JsAtomicsRuntimeState;
 struct JsPrototypeSnapshotState;
-struct JsDynFuncCacheState;
 struct JsMirCompileRecoveryState;
 struct JsNetRuntimeState;
 
@@ -289,13 +288,8 @@ JsCompiledArtifact* js_code_store_artifact_at(JsCodeStore* store, int index);
 void js_code_store_clear_rows(JsCodeStore* store);
 void js_code_store_destroy(JsCodeStore* store);
 
-struct JsReadlineInput {
-    int64_t root_slot = -1;
-};
-
 struct JsReadlineState {
-    RootVector input_values = {};
-    ArrayList* inputs = NULL;
+    RootVector input_values = {}; // consecutive input/interface pairs
     bool create_promises_mode = false;
 };
 
@@ -1007,7 +1001,9 @@ struct JsRuntimeState {
     // wrappers while their functions remain live. The table is weak storage;
     // each code record releases itself when its last GC function dies.
     HashMap* callable_code_interned = NULL;
-    JsDynFuncCacheState* dynamic_function_cache_state = NULL;
+    // The dynamic-function cache owns only its entry rows, so the existing
+    // pointer list is the realm state; no companion cache wrapper is needed.
+    ArrayList* dynamic_function_cache_entries = NULL;
     // Timeout recovery may interrupt JS compilation before the ordinary
     // teardown path runs.  Its compiler owners stay with this realm, never in
     // process globals; compilation is cold and generated code never reads it.

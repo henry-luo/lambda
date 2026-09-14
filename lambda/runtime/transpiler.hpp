@@ -108,7 +108,7 @@ struct Runtime {
     struct hashmap* script_index;  // canonical script path -> Script*
     // AST-mode JavaScript keeps immutable parsed Scripts here. The cache is
     // runtime-owned so a heap/realm reset rebuilds values without reparsing code.
-    void* js_ast_cache;
+    struct hashmap* js_ast_cache;
     ModuleRegistry* module_registry; // runtime-owned cross-language module definitions
     char* current_dir;
     int max_errors;      // error threshold for type checking (default: 10, 0 = unlimited)

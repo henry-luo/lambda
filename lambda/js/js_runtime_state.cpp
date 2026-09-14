@@ -926,15 +926,11 @@ bool js_realm_items_fill(void* items, const JsRealmSlotId* slot_ids, int count,
         (Item**)items, count, reserve);
 }
 
-struct JsRuntimeRootResetOptions {
-    bool retain_cluster_primary_options;
-};
-
 static void js_runtime_state_clear_root_vector(RootVector* roots, Item*,
         int, const char*, void* options_data) {
-    JsRuntimeRootResetOptions* options =
-        (JsRuntimeRootResetOptions*)options_data;
-    if (options && options->retain_cluster_primary_options &&
+    bool retain_cluster_primary_options = options_data &&
+        *(const bool*)options_data;
+    if (retain_cluster_primary_options &&
             roots == &js_runtime_state.cluster.roots) {
         return;
     }
@@ -954,10 +950,10 @@ static void js_runtime_state_unbind_root_vectors(JsRuntimeState* state) {
 }
 
 static void js_root_vector_reset_all(bool full_reset) {
-    JsRuntimeRootResetOptions options = {!full_reset};
+    bool retain_cluster_primary_options = !full_reset;
     js_runtime_state_prepare_root_vectors(js_active_runtime_state);
     js_runtime_state_visit_root_vectors(js_active_runtime_state,
-        js_runtime_state_clear_root_vector, &options);
+        js_runtime_state_clear_root_vector, &retain_cluster_primary_options);
 }
 #define js_eval_source_values (js_runtime_state.eval.source.values)
 #define js_eval_source_records (js_runtime_state.eval.source.records)
