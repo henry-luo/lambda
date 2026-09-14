@@ -231,6 +231,10 @@ def discover_repository_seeds() -> list[Seed]:
 def invoke(args: argparse.Namespace, source: Path, tier: str,
            procedural: bool, extra_env: Optional[dict[str, str]] = None) -> LambdaProcessResult:
     environment = {"LC_ALL": "C", "TZ": "UTC"}
+    if tier == "auto":
+        # AUTO normally keeps counters quiet. Its stderr-only report proves this
+        # row selected the policy rather than accidentally using eager JIT.
+        environment["LAMBDA_RSS_REPORT"] = "1"
     if extra_env:
         environment.update(extra_env)
     return run_lambda_process(
@@ -286,6 +290,17 @@ def verify_seed(args: argparse.Namespace, seed: Seed) -> CaseResult:
         if executed == 0 or fallback != 0:
             return CaseResult("tier-fallback",
                               f"{seed.name} interp executed={executed} fallback={fallback}", runs)
+
+    auto_run = next((result for tier, result in runs if tier == "auto"), None)
+    if auto_run is not None:
+        summary = INTERP_SUMMARY_RE.search(auto_run.stderr)
+        if summary is None:
+            return CaseResult("infrastructure-error",
+                              f"{seed.name} auto summary missing", runs)
+        executed, fallback, _ = (int(value) for value in summary.groups())
+        if executed == 0 or fallback != 0:
+            return CaseResult("auto-policy-failure",
+                              f"{seed.name} auto executed={executed} fallback={fallback}", runs)
 
     if len(runs) > 1:
         baseline_tier, baseline = runs[0]
@@ -670,6 +685,7 @@ def main() -> int:
         results: list[CaseResult] = []
         if "parser" in args.targets:
             results.append(verify_parser_source(args, seed.source, reviews, work_dir))
+            results.append(verify_parser_stability(args, seed.source, work_dir))
         if "semantic" in args.targets:
             semantic = verify_seed(args, seed)
             results.append(semantic)
@@ -677,7 +693,7 @@ def main() -> int:
                 results.append(verify_stress_seed(args, seed, semantic))
         for result in results:
             counters[result.outcome] += 1
-            green = ("success", "expected-reject", "parser-agreement", "reviewed-parser-gap", "gc-success")
+            green = ("success", "expected-reject", "parser-agreement", "parser-stable", "reviewed-parser-gap", "gc-success")
             if args.verbose or result.outcome not in green:
                 print(f"seed {result.outcome}: {result.message}")
             if result.outcome not in green:
@@ -736,7 +752,12 @@ def main() -> int:
         case_rng = random.Random(case_seed)
         generated: Optional[GeneratedSource] = None
         case_kind = "adversarial"
-        if "semantic" not in args.targets or case_rng.randrange(2) == 0:
+        if "semantic" not in args.targets and case_rng.randrange(2) == 0:
+            source_text = generate_token_source(case_rng)
+            trace = ("token-sequence",)
+            origin = "generated:token-sequence"
+            case_kind = "parser-adversarial"
+        elif "semantic" not in args.targets or case_rng.randrange(2) == 0:
             generated = LambdaSourceGenerator(case_rng).generate_valid()
             if case_rng.randrange(3) == 0:
                 mutation = mutate_valid(generated.source, case_rng)
@@ -774,17 +795,21 @@ def main() -> int:
         if case_kind.startswith("structured"):
             if "parser" in args.targets:
                 results.append(verify_parser_source(args, case_source, reviews, work_dir))
+                results.append(verify_parser_stability(args, case_source, work_dir))
             if "semantic" in args.targets:
                 if case_kind == "structured-valid":
                     generated_seed = Seed(case_source, "success", "direct", ("interp", "jit"))
                     results.append(verify_seed(args, generated_seed))
                 else:
                     results.append(verify_invalid_source(args, case_source))
-        elif "semantic" in args.targets:
-            results.append(run_adversarial_case(
-                args, case_source, source_text, ",".join(trace), case_index))
+        else:
+            if "parser" in args.targets:
+                results.append(verify_parser_stability(args, case_source, work_dir))
+            if "semantic" in args.targets:
+                results.append(run_adversarial_case(
+                    args, case_source, source_text, ",".join(trace), case_index))
 
-        green = ("accepted", "expected-reject", "success", "parser-agreement", "reviewed-parser-gap")
+        green = ("accepted", "expected-reject", "success", "parser-agreement", "parser-stable", "reviewed-parser-gap")
         for result in results:
             counters[result.outcome] += 1
             if result.outcome not in green:

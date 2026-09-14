@@ -2,3 +2,4 @@
 # Add only manually adjudicated differences. The runner rejects a changed hash,
 # changed classification, unreviewed difference, resolved exception, or any
 # unresolved grammar-bug/c-parser-bug/spec-gap row (D1.10, D8.1.2v3, S16).
+keyword-import-alias	c264578807636bff0bed049a44f09347d60811c66175fc1b3cff04ea1c0c125a	accept	reject	reviewed-reference-gap	S16.10.1v2;D8.1.2v3	corpus/parser_review/keyword_import_alias.ls	grammar.js accepts a keyword import alias; the production parser rejects the barred binding.
