@@ -21,6 +21,7 @@
 #include "template_registry.h"
 #include "template_state.h"
 #include "../../lib/log.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/url.h"
 #include <stdlib.h>
@@ -4125,7 +4126,7 @@ static int const_dedup_cmp(const void* a, const void* b, void* udata) {
 
 static uint64_t const_dedup_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const ConstDedupEntry* entry = (const ConstDedupEntry*)item;
-    return hashmap_sip(&entry->word, sizeof(entry->word), seed0, seed1);
+    return hashmap_hash_bytes(&entry->word, sizeof(entry->word), seed0, seed1);
 }
 
 // RC6: an 8-byte const slot is fully described by its bytes, so two entries

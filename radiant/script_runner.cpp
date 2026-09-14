@@ -48,7 +48,7 @@
 #include "../lib/file.h"
 #include "../lib/lru_cache.h"
 #include "../lib/hashmap.h"
-#include "../lib/hashmap_helpers.h"
+#include "../lib/hashmap_typed.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/time_util.h"
 #include "../lambda/js/js_event_loop.h"
@@ -2723,8 +2723,9 @@ typedef struct InlineHandlerInstallCollection {
     Pool* pool;
 } InlineHandlerInstallCollection;
 
-// hashmap callbacks for DomElement* keys
-HASHMAP_DEFINE_PTRKEY(inline_handler_install, InlineHandlerInstallEntry, element)
+typedef TypedHashMap<InlineHandlerInstallEntry,
+    HashMapPointerMemberKeyOps<InlineHandlerInstallEntry,
+        &InlineHandlerInstallEntry::element>> InlineHandlerInstallMap;
 
 static bool inline_handler_ident_start(char c) {
     return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
@@ -2818,15 +2819,15 @@ static void collect_handlers_recursive(DomElement* elem,
             // Link into collection: find existing chain or create new.
             InlineHandlerInstallEntry key = {};
             key.element = elem;
-            InlineHandlerInstallEntry* existing =
-                (InlineHandlerInstallEntry*)hashmap_get(handlers->element_map, &key);
+            InlineHandlerInstallEntry* existing = InlineHandlerInstallMap::get(
+                handlers->element_map, key);
             if (existing) {
                 // append to linked list
                 InlineHandlerInstallEntry* tail = existing;
                 while (tail->next) tail = tail->next;
                 tail->next = handler;
             } else {
-                hashmap_set(handlers->element_map, handler);
+                InlineHandlerInstallMap::set(handlers->element_map, *handler);
             }
             handlers->count++;
 
@@ -2859,7 +2860,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     InlineHandlerInstallCollection* handlers =
         (InlineHandlerInstallCollection*)pool_calloc(handlers_pool, sizeof(InlineHandlerInstallCollection));
     handlers->pool = handlers_pool;
-    handlers->element_map = inline_handler_install_new(32);
+    handlers->element_map = InlineHandlerInstallMap::create(32);
     handlers->count = 0;
 
     // Collect all inline event handler attributes.
@@ -2870,7 +2871,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     if (handlers->count == 0) {
         log_debug("collect_and_compile_event_handlers: no event handlers found");
         strbuf_free(compile_buf);
-        hashmap_free(handlers->element_map);
+        InlineHandlerInstallMap::destroy(handlers->element_map);
         mem_pool_destroy(handlers_pool);
         return;
     }
@@ -2889,7 +2890,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     if (!handler_compile_ctx || !runtime_heap(runtime) || !runtime_name_pool(runtime)) {
         log_error("collect_and_compile_event_handlers: document runtime is incomplete");
         strbuf_free(compile_buf);
-        hashmap_free(handlers->element_map);
+        InlineHandlerInstallMap::destroy(handlers->element_map);
         mem_pool_destroy(handlers_pool);
         return;
     }
@@ -2897,7 +2898,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
             (js_runtime_state_for(handler_compile_ctx) &&
              !js_runtime_state_init(handler_compile_ctx))) {
         strbuf_free(compile_buf);
-        hashmap_free(handlers->element_map);
+        InlineHandlerInstallMap::destroy(handlers->element_map);
         mem_pool_destroy(handlers_pool);
         return;
     }
@@ -2911,7 +2912,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     TypeId result_type = get_type_id(compile_result);
     if (result_type == LMD_TYPE_ERROR) {
         log_error("collect_and_compile_event_handlers: compilation failed");
-        hashmap_free(handlers->element_map);
+        InlineHandlerInstallMap::destroy(handlers->element_map);
         mem_pool_destroy(handlers_pool);
         return;
     }
@@ -2922,7 +2923,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     MIR_context_t handler_mir_ctx = (MIR_context_t)jm_get_last_deferred_mir_ctx();
     if (!handler_mir_ctx) {
         log_error("collect_and_compile_event_handlers: no deferred MIR context found");
-        hashmap_free(handlers->element_map);
+        InlineHandlerInstallMap::destroy(handlers->element_map);
         mem_pool_destroy(handlers_pool);
         return;
     }
@@ -2933,9 +2934,8 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     Item global = js_get_global_this();
     [[maybe_unused]] int installed = 0;  // only consumed by log_info, which is a no-op in release
     size_t iter = 0;
-    void* item;
-    while (hashmap_iter(handlers->element_map, &iter, &item)) {
-        InlineHandlerInstallEntry* h = (InlineHandlerInstallEntry*)item;
+    InlineHandlerInstallEntry* h = nullptr;
+    while (InlineHandlerInstallMap::next(handlers->element_map, &iter, &h)) {
         while (h) {
             Item fn_key = (Item){.item = s2it(heap_create_name(h->function_name))};
             Item fn_item = js_get_key_default(global, fn_key);
@@ -2959,7 +2959,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     log_info("collect_and_compile_event_handlers: installed %d/%d handlers into EventTarget path",
              installed, handlers->count);
 
-    hashmap_free(handlers->element_map);
+    InlineHandlerInstallMap::destroy(handlers->element_map);
     mem_pool_destroy(handlers_pool);
 }
 

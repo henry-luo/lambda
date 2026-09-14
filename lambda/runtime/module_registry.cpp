@@ -8,7 +8,7 @@
 #include "lambda-root-frame.hpp"
 #include "../../lib/hashmap.h"
 #include "../../lib/mem_factory.h"
-#include "../../lib/hashmap_helpers.h"
+#include "../../lib/hashmap_typed.hpp"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/strbuf.h"
@@ -48,7 +48,8 @@ typedef struct {
     const char* path;       // key (not owned — points to ModuleDescriptor.path)
     ModuleDescriptor* desc; // value (owned)
 } RegistryEntry;
-HASHMAP_DEFINE_STRKEY(registry, RegistryEntry, path)
+typedef TypedHashMap<RegistryEntry,
+    HashMapCStrMemberKeyOps<RegistryEntry, &RegistryEntry::path>> RegistryMap;
 
 static Runtime* module_registry_active_runtime(void) {
     return context ? context->runtime : NULL;
@@ -68,7 +69,7 @@ static ModuleRegistry* module_registry_ensure(Runtime* runtime) {
         1, sizeof(ModuleRegistry), MEM_CAT_SYSTEM);
     if (!registry) return NULL;
     registry->runtime = owner;
-    registry->map = registry_new(32);
+    registry->map = RegistryMap::create(32);
     if (!registry->map) {
         mem_free(registry);
         return NULL;
@@ -136,9 +137,8 @@ void module_registry_cleanup_for_runtime(Runtime* runtime) {
 
     // free all descriptors
     size_t iter = 0;
-    void* item;
-    while (hashmap_iter(registry->map, &iter, &item)) {
-        RegistryEntry* entry = (RegistryEntry*)item;
+    RegistryEntry* entry = NULL;
+    while (RegistryMap::next(registry->map, &iter, &entry)) {
         if (entry->desc) {
             // Descriptors are native allocations, so unregister their exact
             // namespace roots before the owning heap is retired.
@@ -153,7 +153,7 @@ void module_registry_cleanup_for_runtime(Runtime* runtime) {
             mem_free(entry->desc);
         }
     }
-    hashmap_free(registry->map);
+    RegistryMap::destroy(registry->map);
     owner->module_registry = NULL;
     mem_free(registry);
 }
@@ -200,7 +200,7 @@ void module_register_with_namespace_ops_for_runtime(
 
     // check if already registered — update if so
     RegistryEntry lookup = { .path = key_path, .desc = NULL };
-    const RegistryEntry* existing = (const RegistryEntry*)hashmap_get(registry->map, &lookup);
+    const RegistryEntry* existing = RegistryMap::get(registry->map, lookup);
     if (existing && existing->desc) {
         existing->desc->namespace_obj = namespace_obj;
         existing->desc->mir_ctx = mir_ctx;
@@ -232,7 +232,7 @@ void module_register_with_namespace_ops_for_runtime(
     module_descriptor_ensure_roots(desc);
 
     RegistryEntry entry = { .path = desc->path, .desc = desc };
-    hashmap_set(registry->map, &entry);
+    RegistryMap::set(registry->map, entry);
     if (registry->last) registry->last->next = desc;
     else registry->first = desc;
     registry->last = desc;
@@ -273,7 +273,7 @@ ModuleDescriptor* module_get_for_runtime(Runtime* runtime, const char* path) {
     char* key_path = module_registry_key_dup(path);
     if (!key_path) return NULL;
     RegistryEntry lookup = { .path = key_path, .desc = NULL };
-    const RegistryEntry* found = (const RegistryEntry*)hashmap_get(registry->map, &lookup);
+    const RegistryEntry* found = RegistryMap::get(registry->map, lookup);
     mem_free(key_path);
     return found ? found->desc : NULL;
 }
@@ -297,7 +297,7 @@ ModuleDescriptor* module_register_loading_with_namespace_ops_for_runtime(
 
     // check if already registered
     RegistryEntry lookup = { .path = key_path, .desc = NULL };
-    const RegistryEntry* existing = (const RegistryEntry*)hashmap_get(registry->map, &lookup);
+    const RegistryEntry* existing = RegistryMap::get(registry->map, lookup);
     if (existing && existing->desc) {
         existing->desc->loading = true;
         existing->desc->source_lang = lang;
@@ -326,7 +326,7 @@ ModuleDescriptor* module_register_loading_with_namespace_ops_for_runtime(
     module_descriptor_ensure_roots(desc);
 
     RegistryEntry entry = { .path = desc->path, .desc = desc };
-    hashmap_set(registry->map, &entry);
+    RegistryMap::set(registry->map, entry);
     if (registry->last) registry->last->next = desc;
     else registry->first = desc;
     registry->last = desc;

@@ -62,6 +62,57 @@ typedef TypedHashMap<TypedIdentityEntry,
 
 }  // namespace
 
+TEST(HashmapHelpersTest, SharedKeyPrimitiveSemantics) {
+    const uint64_t seed0 = 0x1234u;
+    const uint64_t seed1 = 0x5678u;
+    EXPECT_EQ(hashmap_hash_cstr("alpha", seed0, seed1),
+        hashmap_sip("alpha", strlen("alpha"), seed0, seed1));
+    EXPECT_EQ(hashmap_hash_xxhash3_cstr("alpha", seed0, seed1),
+        hashmap_xxhash3("alpha", strlen("alpha"), seed0, seed1));
+    EXPECT_EQ(hashmap_hash_murmur_bytes("alpha", strlen("alpha"), seed0, seed1),
+        hashmap_murmur("alpha", strlen("alpha"), seed0, seed1));
+    EXPECT_EQ(hashmap_compare_cstr("alpha", "alpha"), 0);
+    EXPECT_LT(hashmap_compare_cstr("alpha", "beta"), 0);
+    EXPECT_EQ(hashmap_compare_cstr(nullptr, nullptr), 0);
+    EXPECT_LT(hashmap_compare_cstr(nullptr, ""), 0);
+    EXPECT_EQ(hashmap_hash_icstr("Alpha", seed0, seed1),
+        hashmap_hash_icstr("aLpHa", seed0, seed1));
+    EXPECT_EQ(hashmap_compare_icstr("Alpha", "aLpHa"), 0);
+    EXPECT_LT(hashmap_compare_icstr(nullptr, ""), 0);
+
+    int target = 0;
+    uintptr_t target_bits = (uintptr_t)&target;
+    EXPECT_EQ(hashmap_hash_pointer_identity(&target, seed0, seed1),
+        hashmap_sip(&target_bits, sizeof(target_bits), seed0, seed1));
+    EXPECT_TRUE(hashmap_pointer_identity_equal(&target, &target));
+
+    const char first[] = {'a', 'b', 'x'};
+    const char second[] = {'a', 'b', 'y'};
+    EXPECT_EQ(hashmap_hash_lenstr(first, 2, seed0, seed1),
+        hashmap_sip(first, 2, seed0, seed1));
+    EXPECT_EQ(hashmap_hash_lenstr("", 0, seed0, seed1),
+        hashmap_sip("", 0, seed0, seed1));
+    EXPECT_EQ(hashmap_compare_lenstr(first, 2, second, 2), 0);
+    EXPECT_EQ(hashmap_compare_lenstr(first, 0, nullptr, 0), 0);
+    EXPECT_TRUE(hashmap_identity2_equal(true, true));
+    EXPECT_FALSE(hashmap_identity3_equal(true, true, false));
+
+    char uppercase[300];
+    char lowercase[300];
+    memset(uppercase, 'A', sizeof(uppercase) - 1);
+    memset(lowercase, 'a', sizeof(lowercase) - 1);
+    uppercase[sizeof(uppercase) - 1] = '\0';
+    lowercase[sizeof(lowercase) - 1] = '\0';
+    const char* stored = uppercase;
+    const char* probe = lowercase;
+    struct hashmap* insensitive = hashmap_new(sizeof(stored), 0, seed0, seed1,
+        hashmap_hash_icstr_ptr, hashmap_compare_icstr_ptr, nullptr, nullptr);
+    ASSERT_NE(insensitive, nullptr);
+    hashmap_set(insensitive, &stored);
+    EXPECT_EQ(hashmap_get(insensitive, &probe), hashmap_get(insensitive, &stored));
+    hashmap_free(insensitive);
+}
+
 TEST(HashmapHelpersTest, StrKeyInlineArray) {
     struct hashmap* m = arr_entry_new(0);
     ASSERT_NE(m, nullptr);

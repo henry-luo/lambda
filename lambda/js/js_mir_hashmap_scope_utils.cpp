@@ -1,7 +1,7 @@
 #include "js_mir_internal.hpp"
 #include "js_exec_profile.h"
 #include "../../lib/mem_grow.hpp"
-#include "../../lib/hashmap_helpers.h"
+#include "../../lib/hashmap_typed.hpp"
 #include <limits.h>
 #include <stdarg.h>
 
@@ -154,32 +154,33 @@ bool jm_var_scope_set(JsMirTranspiler* mt, int depth, struct hashmap* scope) {
     return true;
 }
 
-HASHMAP_DEFINE_PTRKEY(jm_resumable_local, JsMirResumableLocal, binding)
+typedef TypedHashMap<JsMirResumableLocal,
+    HashMapPointerMemberKeyOps<JsMirResumableLocal, &JsMirResumableLocal::binding>>
+    JsMirResumableLocalMap;
 
 bool jm_reserve_resumable_local(JsMirTranspiler* mt, NameEntry* binding,
         int env_slot) {
     if (!mt || !binding || env_slot < 0) return false;
     if (!mt->resumable_locals) {
-        mt->resumable_locals = hashmap_new(sizeof(JsMirResumableLocal), 16, 0,
-            0, jm_resumable_local_hash, jm_resumable_local_cmp, NULL, NULL);
+        mt->resumable_locals = JsMirResumableLocalMap::create(16);
     }
     if (!mt->resumable_locals) return false;
     JsMirResumableLocal local = {binding, env_slot};
-    hashmap_set(mt->resumable_locals, &local);
+    JsMirResumableLocalMap::set(mt->resumable_locals, local);
     return true;
 }
 
 int jm_resumable_local_env_slot(JsMirTranspiler* mt, NameEntry* binding) {
     if (!mt || !binding || !mt->resumable_locals) return -1;
     JsMirResumableLocal lookup = {binding, -1};
-    JsMirResumableLocal* found = (JsMirResumableLocal*)hashmap_get(
-        mt->resumable_locals, &lookup);
+    JsMirResumableLocal* found = JsMirResumableLocalMap::get(
+        mt->resumable_locals, lookup);
     return found ? found->env_slot : -1;
 }
 
 void jm_clear_resumable_locals(JsMirTranspiler* mt) {
     if (!mt || !mt->resumable_locals) return;
-    hashmap_free(mt->resumable_locals);
+    JsMirResumableLocalMap::destroy(mt->resumable_locals);
     mt->resumable_locals = NULL;
 }
 
@@ -269,16 +270,14 @@ int js_local_func_cmp(const void *a, const void *b, void *udata) {
     return strcmp(((JsLocalFuncEntry*)a)->name, ((JsLocalFuncEntry*)b)->name);
 }
 uint64_t js_local_func_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(((JsLocalFuncEntry*)item)->name,
-        strlen(((JsLocalFuncEntry*)item)->name), seed0, seed1);
+    return hashmap_hash_cstr(((JsLocalFuncEntry*)item)->name, seed0, seed1);
 }
 
 int js_module_const_cmp(const void *a, const void *b, void *udata) {
     return strcmp(((JsModuleConstEntry*)a)->name, ((JsModuleConstEntry*)b)->name);
 }
 uint64_t js_module_const_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(((JsModuleConstEntry*)item)->name,
-        strlen(((JsModuleConstEntry*)item)->name), seed0, seed1);
+    return hashmap_hash_cstr(((JsModuleConstEntry*)item)->name, seed0, seed1);
 }
 
 bool jm_capture_uses_live_module_var(JsMirTranspiler* mt, FnCapture* capture) {

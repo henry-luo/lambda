@@ -12,6 +12,7 @@
 #include "interp.hpp"
 #include <limits.h>
 #include "../../lib/log.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/url.h"
 #include "../../lib/checked_math.hpp"
@@ -7851,7 +7852,7 @@ static TypeMap* mutable_shape_type(TypeId container_type, Type* type) {
 
 static uint64_t mutable_clone_entry_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     uintptr_t ptr = (uintptr_t)((const MutableCloneEntry*)item)->src;
-    return hashmap_sip(&ptr, sizeof(ptr), seed0, seed1);
+    return hashmap_hash_bytes(&ptr, sizeof(ptr), seed0, seed1);
 }
 
 static int mutable_clone_entry_cmp(const void* a, const void* b, void* udata) {

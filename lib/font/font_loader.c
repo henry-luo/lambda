@@ -10,6 +10,7 @@
 #include "font_internal.h"
 #include "font_cbdt.h"
 #include "../base64.h"
+#include "../hashmap_helpers.h"
 #include "../memtrack.h"
 
 #include <stdio.h>
@@ -242,7 +243,7 @@ static FontHandle* create_handle(FontContext* ctx,
 static uint64_t file_data_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const FontFileDataEntry* e = (const FontFileDataEntry*)item;
     if (!e || !e->path) return 0;
-    return hashmap_xxhash3(e->path, strlen(e->path), seed0, seed1);
+    return hashmap_hash_xxhash3_cstr(e->path, seed0, seed1);
 }
 
 static int file_data_compare(const void* a, const void* b, void* udata) {

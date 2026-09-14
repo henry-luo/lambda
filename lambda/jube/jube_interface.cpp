@@ -17,8 +17,8 @@
 #include "../runtime/lambda-number-runtime.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
-#include "../../lib/hashmap.h"
 #include "../../lib/hashmap_helpers.h"
+#include "../../lib/hashmap_typed.hpp"
 #include "../../lib/hash.h"
 #include "../runtime/parser/lambda_rd_parser.h"
 #include <errno.h>
@@ -85,8 +85,11 @@ typedef struct JubeMemberIndexEntry {
     JubeMemberRecord* rec;
 } JubeMemberIndexEntry;
 
-HASHMAP_DEFINE_LENSTRKEY(jube_member_index, JubeMemberIndexEntry, chars, len)
-HASHMAP_DEFINE_PTRKEY(jube_type_index, JubeTypeIndexEntry, type)
+typedef TypedHashMap<JubeMemberIndexEntry,
+    HashMapLenStrMemberKeyOps<JubeMemberIndexEntry, &JubeMemberIndexEntry::chars,
+        &JubeMemberIndexEntry::len>> JubeMemberIndex;
+typedef TypedHashMap<JubeTypeIndexEntry,
+    HashMapPointerMemberKeyOps<JubeTypeIndexEntry, &JubeTypeIndexEntry::type>> JubeTypeIndex;
 
 // ============================================================================
 // Small helpers
@@ -165,8 +168,7 @@ static char* jube_derive_camel(const char* snake) {
 static JubeTypeRecord* jube_record_for_type(const void* host_type) {
     if (!host_type || !s_type_index) return NULL;
     JubeTypeIndexEntry probe = {host_type, NULL};
-    const JubeTypeIndexEntry* found =
-        (const JubeTypeIndexEntry*)hashmap_get(s_type_index, &probe);
+    const JubeTypeIndexEntry* found = JubeTypeIndex::get(s_type_index, probe);
     return found ? found->record : NULL;
 }
 
@@ -192,8 +194,7 @@ static JubeMemberRecord* jube_resolve_member(JubeTypeRecord* trec, Item receiver
     uint32_t len = 0;
     if (!trec->index || !jube_item_key_chars(key, &chars, &len)) return NULL;
     JubeMemberIndexEntry probe = {chars, len, NULL};
-    const JubeMemberIndexEntry* found =
-        (const JubeMemberIndexEntry*)hashmap_get(trec->index, &probe);
+    const JubeMemberIndexEntry* found = JubeMemberIndex::get(trec->index, probe);
     if (!found) return NULL;
     return found->rec;
 }
@@ -424,7 +425,7 @@ static JubeTypeRecord* jube_record_for_query(const JubeTypeDef* type, int ordina
 static uint64_t jube_digest_text(uint64_t hash, const char* text) {
     size_t len = text ? strlen(text) : 0;
     hash = hash_combine_u64(hash, (uint64_t)len);
-    if (len > 0) hash = hash_combine_u64(hash, hashmap_xxhash3(text, len, 0, 0));
+    if (len > 0) hash = hash_combine_u64(hash, hashmap_hash_xxhash3_bytes(text, len, 0, 0));
     return hash;
 }
 
@@ -1192,16 +1193,15 @@ static const JubeTypeDef* jube_module_type_by_name(const JubeModuleDef* module,
 static bool jube_index_insert(HashMap* index, const char* chars,
                               JubeMemberRecord* rec) {
     JubeMemberIndexEntry probe = {chars, (uint32_t)strlen(chars), NULL};
-    JubeMemberIndexEntry* existing =
-        (JubeMemberIndexEntry*)hashmap_get(index, &probe);
+    JubeMemberIndexEntry* existing = JubeMemberIndex::get(index, probe);
     if (existing) {
         // duplicate spellings are rejected by declaration validation; retain
         // the first index entry if a malformed binding table slips through.
         return existing->rec == rec;
     }
     probe.rec = rec;
-    hashmap_set(index, &probe);
-    return !hashmap_oom(index);
+    JubeMemberIndex::set(index, probe);
+    return !JubeMemberIndex::oom(index);
 }
 
 // find a previously compiled base type by declared name within the same module
@@ -1313,9 +1313,7 @@ static int jube_compile_type(const JubeModuleDef* module,
         return -1;
     }
     if (!s_type_index) {
-        s_type_index = hashmap_new(sizeof(JubeTypeIndexEntry), 16, 0, 0,
-                                   jube_type_index_hash, jube_type_index_cmp,
-                                   NULL, NULL);
+        s_type_index = JubeTypeIndex::create(16);
         if (!s_type_index) {
             log_error("JUBE_IFACE: failed to allocate type index for '%s'", type_name);
             jube_free_parsed_members(parsed, parsed_count);
@@ -1457,9 +1455,7 @@ static int jube_compile_type(const JubeModuleDef* module,
     }
 #endif
 
-    HashMap* index = hashmap_new(sizeof(JubeMemberIndexEntry), 16, 0, 0,
-                                 jube_member_index_hash, jube_member_index_cmp,
-                                 NULL, NULL);
+    HashMap* index = JubeMemberIndex::create(16);
     for (int i = 0; i < out_count; i++) {
         JubeMemberRecord* rec = &records[i];
         jube_index_insert(index, rec->snake_name, rec);
@@ -1478,8 +1474,8 @@ static int jube_compile_type(const JubeModuleDef* module,
     trec->index = index;
     trec->prototype = ItemNull;
     JubeTypeIndexEntry type_entry = {host_brand, trec};
-    hashmap_set(s_type_index, &type_entry);
-    if (hashmap_oom(s_type_index)) {
+    JubeTypeIndex::set(s_type_index, type_entry);
+    if (JubeTypeIndex::oom(s_type_index)) {
         jube_interface_release_record(trec, false);
         jube_free_parsed_members(parsed, parsed_count);
         return -1;
@@ -1724,7 +1720,7 @@ static void jube_interface_release_record(JubeTypeRecord* trec, bool unregister_
     // The index stores borrowed member-name pointers; release it before the
     // records so hashmap teardown never hashes already-freed key storage.
     if (trec->index) {
-        hashmap_free(trec->index);
+        JubeMemberIndex::destroy(trec->index);
         trec->index = NULL;
     }
     for (int j = 0; j < trec->member_count; j++) {
@@ -1757,7 +1753,7 @@ extern "C" void jube_interface_remove_module(const JubeModuleDef* module) {
         // before dlclose, because the type descriptors live in that image.
         if (s_type_index) {
             JubeTypeIndexEntry probe = {trec->type, NULL};
-            hashmap_delete(s_type_index, &probe);
+            JubeTypeIndex::erase(s_type_index, probe);
         }
         jube_interface_release_record(trec, true);
         s_type_record_count--;
@@ -1776,7 +1772,7 @@ extern "C" void jube_interface_cleanup(void) {
         s_type_records[index] = NULL;
     }
     if (s_type_index) {
-        hashmap_free(s_type_index);
+        JubeTypeIndex::destroy(s_type_index);
         s_type_index = NULL;
     }
 }

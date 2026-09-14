@@ -2,7 +2,7 @@
 #include "../lambda/input/css/css_counter_hook.h"
 #include "../lib/arena.h"
 #include "../lib/hashmap.h"
-#include "../lib/hashmap_helpers.h"
+#include "../lib/hashmap_typed.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
@@ -14,7 +14,8 @@
 #include <limits.h>
 // Counter HashMap Helpers
 
-HASHMAP_DEFINE_STRKEY(counter, CounterValue, name)
+typedef TypedHashMap<CounterValue,
+    HashMapCStrMemberKeyOps<CounterValue, &CounterValue::name>> CounterMap;
 // Counter Context Management
 
 CounterContext* counter_context_create(Arena* arena) {
@@ -69,7 +70,7 @@ void CounterContext::destroy() {
         for (size_t i = 0; i < scope_stack->size(); i++) {
             CounterScope* scope = (*scope_stack)[i];
             if (scope && scope->counters) {
-                hashmap_free(scope->counters);
+                CounterMap::destroy(scope->counters);
             }
         }
         scope_stack->~ArrayList<CounterScope*>();
@@ -95,7 +96,7 @@ void CounterContext::push_scope(bool pseudo_scope) {
     CounterScope* scope = (CounterScope*)arena_alloc(arena, sizeof(CounterScope));
     if (!scope) return;
     // Create hash map for counters in this scope
-    scope->counters = counter_new(16);
+    scope->counters = CounterMap::create(16);
     scope->parent = current_scope;
     scope->owner_depth = current_scope && frame_stack ? (int)frame_stack->size() : -1;
     scope->pseudo_scope = pseudo_scope;
@@ -143,9 +144,8 @@ void CounterContext::pop_scope_propagate(bool propagate_resets, bool preserve_re
 
     if (scope && scope->counters) {
         size_t iter = 0;
-        void* item;
-        while (hashmap_iter(scope->counters, &iter, &item)) {
-            CounterValue* cv = (CounterValue*)item;
+        CounterValue* cv = nullptr;
+        while (CounterMap::next(scope->counters, &iter, &cv)) {
             if (cv->created_by_reset) {
                 has_reset = true;
             }
@@ -156,17 +156,16 @@ void CounterContext::pop_scope_propagate(bool propagate_resets, bool preserve_re
         // the element did not create a nested reset scope of its own.
         if (propagate_resets && !has_reset && entry && entry->counters) {
             iter = 0;
-            while (hashmap_iter(scope->counters, &iter, &item)) {
-                CounterValue* cv = (CounterValue*)item;
+            while (CounterMap::next(scope->counters, &iter, &cv)) {
                 if (cv->created_by_reset) continue;
                 CounterValue search_key = {cv->name, 0, false, false};
-                CounterValue* entry_cv = (CounterValue*)hashmap_get(entry->counters, &search_key);
+                CounterValue* entry_cv = CounterMap::get(entry->counters, search_key);
                 if (entry_cv) {
                     entry_cv->value = cv->value;
                     entry_cv->propagated = true;
                 } else {
                     CounterValue propagated = {cv->name, cv->value, true, false};
-                    hashmap_set(entry->counters, &propagated);
+                    CounterMap::set(entry->counters, propagated);
                 }
             }
         }
@@ -275,7 +274,7 @@ static void parse_counter_spec(const char* spec,
 
 static CounterValue* counter_find(CounterScope* scope, CounterValue* search_key) {
     while (scope) {
-        CounterValue* counter = (CounterValue*)hashmap_get(scope->counters, search_key);
+        CounterValue* counter = CounterMap::get(scope->counters, *search_key);
         if (counter) return counter;
         scope = scope->parent;
     }
@@ -285,7 +284,7 @@ static CounterValue* counter_find(CounterScope* scope, CounterValue* search_key)
 static CounterScope* counter_find_scope(CounterScope* scope,
                                         CounterValue* search_key) {
     while (scope) {
-        if (hashmap_get(scope->counters, search_key)) return scope;
+        if (CounterMap::get(scope->counters, *search_key)) return scope;
         scope = scope->parent;
     }
     return nullptr;
@@ -294,7 +293,7 @@ static CounterScope* counter_find_scope(CounterScope* scope,
 static void counter_create(CounterScope* scope, char* name, int value,
                            bool created_by_reset) {
     CounterValue counter = {name, value, false, created_by_reset};
-    hashmap_set(scope->counters, &counter);
+    CounterMap::set(scope->counters, counter);
 }
 
 struct ParsedCounterSpec {
@@ -319,7 +318,7 @@ void counter_reset(CounterContext* ctx, const char* counter_spec) {
     for (int i = 0; i < parsed.count; i++) {
         // Create or update counter in current scope
         CounterValue search_key = {parsed.names[i], 0, false, false};
-        CounterValue* existing = (CounterValue*)hashmap_get(ctx->current_scope->counters, &search_key);
+        CounterValue* existing = CounterMap::get(ctx->current_scope->counters, search_key);
 
         if (!existing) {
             CounterScope* inherited_scope = nullptr;
@@ -329,14 +328,14 @@ void counter_reset(CounterContext* ctx, const char* counter_spec) {
             }
             CounterScope* previous_sibling = ctx->current_scope->parent;
             CounterValue* previous_value = previous_sibling && previous_sibling->counters
-                ? (CounterValue*)hashmap_get(previous_sibling->counters, &search_key)
+                ? CounterMap::get(previous_sibling->counters, search_key)
                 : nullptr;
             if (previous_value &&
                 (previous_value->propagated ||
                  previous_sibling->owner_depth == ctx->current_scope->owner_depth)) {
                 // CSS Lists 3 §4.4.2: a reset replaces a preceding-sibling
                 // instance, but must leave an ancestor-created instance intact.
-                hashmap_delete(previous_sibling->counters, &search_key);
+                CounterMap::erase(previous_sibling->counters, search_key);
                 ctx->current_scope->reset_replaces_sibling = true;
             }
             // Create new counter
@@ -422,7 +421,7 @@ void counter_get_all_values(CounterContext* ctx, const char* name, int** values,
     int counter_count = 0;
     CounterScope* scope = ctx->current_scope;
     while (scope) {
-        if (hashmap_get(scope->counters, &search_key)) {
+        if (CounterMap::get(scope->counters, search_key)) {
             counter_count++;
         }
         scope = scope->parent;
@@ -438,7 +437,7 @@ void counter_get_all_values(CounterContext* ctx, const char* name, int** values,
 
     scope = ctx->current_scope;
     while (scope && idx < counter_count) {
-        CounterValue* cv = (CounterValue*)hashmap_get(scope->counters, &search_key);
+        CounterValue* cv = CounterMap::get(scope->counters, search_key);
         if (cv) {
             temp[counter_count - 1 - idx] = cv->value;
             idx++;

@@ -16,7 +16,7 @@
 #include "../../../lib/html_entities.h"
 #include "../../../lib/memtrack.h"
 #include "../../../lib/hashmap.h"
-#include "../../../lib/hashmap_helpers.h"
+#include "../../../lib/hashmap_typed.hpp"
 #include "../../../lib/arena.h"
 #include "../input-utils.h"
 #include "../markup-format.h"
@@ -28,6 +28,9 @@
 
 namespace lambda {
 namespace markup {
+
+typedef TypedHashMap<LinkDefinition,
+    HashMapCStrMemberKeyOps<LinkDefinition, &LinkDefinition::label>> LinkDefinitionMap;
 
 // ============================================================================
 // Construction / Destruction
@@ -58,7 +61,7 @@ MarkupParser::MarkupParser(Input* input, const ParseConfig& cfg)
 MarkupParser::~MarkupParser() {
     freeLines();
     // Definition strings live in the Input arena; only the index is ours.
-    if (link_defs_) hashmap_free(link_defs_);
+    LinkDefinitionMap::destroy(link_defs_);
     // html5_parser_ is pool-managed, no explicit cleanup needed
 }
 
@@ -636,8 +639,6 @@ char* MarkupParser::normalizeLabel(const char* label, size_t len) {
 }
 
 // normalized labels are NUL-terminated and remain parser-owned while indexed.
-HASHMAP_DEFINE_STRKEY(link_def, LinkDefinition, label)
-
 bool MarkupParser::addLinkDefinition(const char* label, size_t label_len,
                                       const char* url, size_t url_len,
                                       const char* title, size_t title_len) {
@@ -650,8 +651,7 @@ bool MarkupParser::addLinkDefinition(const char* label, size_t label_len,
     if (!normalized) return false;
 
     if (!link_defs_) {
-        link_defs_ = hashmap_new(sizeof(LinkDefinition), 16, 0, 0,
-            link_def_hash, link_def_cmp, nullptr, nullptr);
+        link_defs_ = LinkDefinitionMap::create(16);
         if (!link_defs_) {
             mem_free(normalized);
             log_error("markup_parser: link definition table allocation failed");
@@ -661,7 +661,7 @@ bool MarkupParser::addLinkDefinition(const char* label, size_t label_len,
 
     // check for duplicate (first definition wins per CommonMark)
     LinkDefinition probe = { normalized, "", "", false };
-    if (hashmap_get(link_defs_, &probe)) {
+    if (LinkDefinitionMap::get(link_defs_, probe)) {
         mem_free(normalized);
         return false;
     }
@@ -699,7 +699,7 @@ bool MarkupParser::addLinkDefinition(const char* label, size_t label_len,
         return false;
     }
 
-    hashmap_set(link_defs_, &def);
+    LinkDefinitionMap::set(link_defs_, def);
     link_def_count_++;
     log_debug("markup_parser: added link definition [%s] -> %s", def.label, def.url);
     return true;
@@ -742,7 +742,7 @@ const LinkDefinition* MarkupParser::getLinkDefinition(const char* label, size_t 
     char* normalized = normalizeLabel(label, label_len);
     if (!normalized) return nullptr;
     LinkDefinition probe = { normalized, "", "", false };
-    const LinkDefinition* found = (const LinkDefinition*)hashmap_get(link_defs_, &probe);
+    const LinkDefinition* found = LinkDefinitionMap::get(link_defs_, probe);
     mem_free(normalized);
     return found;
 }

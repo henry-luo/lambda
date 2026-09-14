@@ -67,7 +67,7 @@ extern "C" Item dom_form_request_submit_bridge(Item form_item, Item submitter);
 #include "../../radiant/render.hpp"
 #include "../input/html5/html5_parser.h"
 #include "../../lib/hashmap.h"
-#include "../../lib/hashmap_helpers.h"
+#include "../../lib/hashmap_typed.hpp"
 
 extern "C" Item vmap_new(void);
 extern "C" Item vmap_backing_get(VMap* vm, Item key);
@@ -1128,14 +1128,14 @@ typedef struct AttachedExpandoEntry {
 // ability. The root table belongs to the bound document realm, not the thread.
 #define s_attached_expando_roots (js_runtime_state.dom_attached_expando_roots)
 
-HASHMAP_DEFINE_PTRKEY(attached_expando, AttachedExpandoEntry, key)
+typedef TypedHashMap<AttachedExpandoEntry,
+    HashMapPointerMemberKeyOps<AttachedExpandoEntry, &AttachedExpandoEntry::key>>
+    AttachedExpandoMap;
 
 static HashMap* attached_expando_table() {
     if (!js_active_runtime_state) return nullptr;
     if (!s_attached_expando_roots) {
-        s_attached_expando_roots = hashmap_new(sizeof(AttachedExpandoEntry),
-            64, 0, 0, attached_expando_hash, attached_expando_cmp,
-            nullptr, nullptr);
+        s_attached_expando_roots = AttachedExpandoMap::create(64);
     }
     return s_attached_expando_roots;
 }
@@ -1144,8 +1144,8 @@ static AttachedExpandoRoot* attached_expando_find(DomNode* node) {
     if (!js_active_runtime_state) return nullptr;
     if (!s_attached_expando_roots || !node) return nullptr;
     AttachedExpandoEntry probe = {.key = node, .root = nullptr};
-    const AttachedExpandoEntry* found = (const AttachedExpandoEntry*)
-        hashmap_get(s_attached_expando_roots, &probe);
+    const AttachedExpandoEntry* found = AttachedExpandoMap::get(
+        s_attached_expando_roots, probe);
     return found ? found->root : nullptr;
 }
 
@@ -1185,8 +1185,8 @@ static void attached_expando_root_add(DomNode* node, Item map,
     root->ref = dom_node_ref(node);
     root->map = map;
     AttachedExpandoEntry entry = {.key = node, .root = root};
-    hashmap_set(table, &entry);
-    if (!hashmap_get(table, &entry)) {
+    AttachedExpandoMap::set(table, entry);
+    if (!AttachedExpandoMap::get(table, entry)) {
         mem_free(root);
         return;
     }
@@ -1200,7 +1200,7 @@ static void attached_expando_root_remove(DomNode* node) {
     if (!root) return;
     AttachedExpandoEntry probe = {.key = node, .root = nullptr};
     heap_unregister_gc_root(&root->map.item);
-    hashmap_delete(s_attached_expando_roots, &probe);
+    AttachedExpandoMap::erase(s_attached_expando_roots, probe);
     mem_free(root);
 }
 
@@ -1273,14 +1273,13 @@ static void expando_reset() {
     if (!js_active_runtime_state) return;
     if (!s_attached_expando_roots) return;
     size_t iter = 0;
-    void* item = nullptr;
-    while (hashmap_iter(s_attached_expando_roots, &iter, &item)) {
-        AttachedExpandoEntry* entry = (AttachedExpandoEntry*)item;
+    AttachedExpandoEntry* entry = nullptr;
+    while (AttachedExpandoMap::next(s_attached_expando_roots, &iter, &entry)) {
         if (!entry->root) continue;
         heap_unregister_gc_root(&entry->root->map.item);
         mem_free(entry->root);
     }
-    hashmap_free(s_attached_expando_roots);
+    AttachedExpandoMap::destroy(s_attached_expando_roots);
     s_attached_expando_roots = nullptr;
 }
 

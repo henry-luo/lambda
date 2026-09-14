@@ -15,7 +15,7 @@
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/hashmap.h"
-#include "../../../lib/hashmap_helpers.h"
+#include "../../../lib/hashmap_typed.hpp"
 #include "../../../lib/mempool.h"
 #include <cstring>
 #include <cstdio>
@@ -205,7 +205,11 @@ struct PyVarScopeEntry {
     PyMirVarEntry var;
 };
 
-HASHMAP_DEFINE_STRKEY(pm_var_scope, PyVarScopeEntry, name)
+typedef TypedHashMap<PyVarScopeEntry,
+    HashMapCStrMemberKeyOps<PyVarScopeEntry, &PyVarScopeEntry::name>> PyVarScopeMap;
+static inline HashMap* pm_var_scope_new(size_t capacity) {
+    return PyVarScopeMap::create(capacity);
+}
 
 struct PyLoopLabels {
     PmCompilerLabel continue_label;
@@ -552,7 +556,11 @@ struct PyLocalFuncEntry {
     char name[128];
     PmCompilerFunctionItem func_item;
 };
-HASHMAP_DEFINE_STRKEY(py_local_func, struct PyLocalFuncEntry, name)
+typedef TypedHashMap<PyLocalFuncEntry,
+    HashMapCStrMemberKeyOps<PyLocalFuncEntry, &PyLocalFuncEntry::name>> PyLocalFuncMap;
+static inline HashMap* py_local_func_new(size_t capacity) {
+    return PyLocalFuncMap::create(capacity);
+}
 
 // ============================================================================
 // Forward declarations

@@ -19,8 +19,9 @@
 #include "../../runtime/transpiler.hpp"
 #include "../../../lib/log.h"
 #include "../../../lib/lambda_alloca.h"
+#include "../../../lib/hash.h"
 #include "../../../lib/hashmap.h"
-#include "../../../lib/hashmap_helpers.h"
+#include "../../../lib/hashmap_typed.hpp"
 #include "../../../lib/strbuf.h"
 #include <cstring>
 #include "../../../lib/mem.h"
@@ -3500,11 +3501,13 @@ typedef struct BashRtVar {
     int attributes;     // BashVarAttrFlags
 } BashRtVar;
 
-HASHMAP_DEFINE_LENSTRKEY(bash_rt_var, BashRtVar, name, name_len)
+typedef TypedHashMap<BashRtVar,
+    HashMapLenStrMemberKeyOps<BashRtVar, &BashRtVar::name, &BashRtVar::name_len>>
+    BashRtVarMap;
 
 static void bash_ensure_var_table(void) {
     if (!bash_var_table) {
-        bash_var_table = bash_rt_var_new(64);
+        bash_var_table = BashRtVarMap::create(64);
     }
 }
 
@@ -3901,10 +3904,7 @@ static uint64_t bash_assoc_entry_hash(const void *item, uint64_t seed0, uint64_t
     // use bash's DJB hash (hash * 33 + c) for matching iteration order
     const BashAssocEntry* e = (const BashAssocEntry*)item;
     (void)seed0; (void)seed1;
-    unsigned int hash = 0;
-    for (size_t i = 0; i < e->key_len; i++)
-        hash = hash * 33 + (unsigned char)e->key[i];
-    return (uint64_t)hash;
+    return (uint32_t)hash_djb2_add_extend(0, e->key, e->key_len);
 }
 
 static int bash_assoc_entry_cmp(const void *a, const void *b, void *udata) {
@@ -4787,7 +4787,7 @@ extern "C" void bash_scope_push(void) {
         log_error("bash: scope stack overflow (max %d nested calls)", BASH_FUNC_SCOPE_STACK_MAX);
         return;
     }
-    bash_func_scope_stack[bash_func_scope_depth] = bash_rt_var_new(16);
+    bash_func_scope_stack[bash_func_scope_depth] = BashRtVarMap::create(16);
     bash_func_scope_depth++;
     bash_getopts_push_state();
     log_debug("bash: scope push → depth %d", bash_func_scope_depth);
@@ -4808,7 +4808,7 @@ extern "C" void bash_scope_pop(void) {
 extern "C" void bash_scope_push_subshell(void) {
     // save the current var table and create a copy for the subshell
     bash_ensure_var_table();
-    struct hashmap* copy = bash_rt_var_new(64);
+    struct hashmap* copy = BashRtVarMap::create(64);
     size_t iter = 0;
     void* item;
     while (hashmap_iter(bash_var_table, &iter, &item)) {
@@ -4940,11 +4940,13 @@ typedef struct BashRtFuncEntry {
 } BashRtFuncEntry;
 
 // inline char[128] name + explicit length; matches LENSTRKEY shape.
-HASHMAP_DEFINE_LENSTRKEY(bash_rt_func, BashRtFuncEntry, name, name_len)
+typedef TypedHashMap<BashRtFuncEntry,
+    HashMapLenStrMemberKeyOps<BashRtFuncEntry, &BashRtFuncEntry::name,
+        &BashRtFuncEntry::name_len>> BashRtFuncMap;
 
 static void bash_ensure_rt_func_table(void) {
     if (!bash_rt_func_table) {
-        bash_rt_func_table = bash_rt_func_new(16);
+        bash_rt_func_table = BashRtFuncMap::create(16);
     }
 }
 
@@ -5192,7 +5194,7 @@ extern "C" void bash_builtin_set_dump(void) {
 
     // collect all variables from global table + scope stack
     // use a temporary hashmap to merge (scoped vars override globals)
-    struct hashmap* merged = bash_rt_var_new(64);
+    struct hashmap* merged = BashRtVarMap::create(64);
     // global vars first
     {
         size_t iter = 0;

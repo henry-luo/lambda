@@ -5,7 +5,7 @@
 
 #include "../lib/image.h"
 #include "../lib/log.h"
-#include "../lib/hashmap_helpers.h"
+#include "../lib/hashmap_typed.hpp"
 #include "../lib/memtrack.h"
 #include "../lib/base64.h"
 #include "../lib/url.h"
@@ -24,7 +24,8 @@ typedef struct ImageEntry {
     ImageSurface *image;
 } ImageEntry;
 
-HASHMAP_DEFINE_STRKEY(image, ImageEntry, path)
+typedef TypedHashMap<ImageEntry,
+    HashMapCStrMemberKeyOps<ImageEntry, &ImageEntry::path>> ImageMap;
 
 static char* resolve_wpt_absolute_image_path(UiContext* uicon, const char* img_url) {
     if (!uicon || !uicon->document) return nullptr;
@@ -467,13 +468,13 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     if (uicon->image_cache == NULL) {
         // create a new hash map. 2nd argument is the initial capacity.
         // 3rd and 4th arguments are optional seeds that are passed to the following hash function.
-        uicon->image_cache = image_new(10);
+        uicon->image_cache = ImageMap::create(10);
     }
 
     // Handle data: URIs
     if (strncmp(img_url, "data:", 5) == 0) {
         ImageEntry search_key = {.path = (char*)img_url, .image = NULL};
-        ImageEntry* entry = (ImageEntry*) hashmap_get(uicon->image_cache, &search_key);
+        ImageEntry* entry = ImageMap::get(uicon->image_cache, search_key);
         if (entry) {
             log_debug("[BG-IMAGE] Data URI image loaded from cache");
             return entry->image;
@@ -571,7 +572,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         // had no owner to release their decoded pixels.
         surface->cache_owned = true;
         ImageEntry new_entry = {.path = (char*)cache_path, .image = surface};
-        hashmap_set(uicon->image_cache, &new_entry);
+        ImageMap::set(uicon->image_cache, new_entry);
         log_debug("[BG-IMAGE] Loaded data URI image: %dx%d", surface->width, surface->height);
         return surface;
     }
@@ -628,7 +629,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
             return NULL;
         }
         ImageEntry search_key = {.path = (char*)file_path, .image = NULL};
-        ImageEntry* entry = (ImageEntry*) hashmap_get(uicon->image_cache, &search_key);
+        ImageEntry* entry = ImageMap::get(uicon->image_cache, search_key);
         if (entry) {
             log_debug("Image loaded from cache: %s", file_path);
             mem_free(file_path);
@@ -677,7 +678,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     }
 
     ImageEntry search_key = {.path = (char*)file_path, .image = NULL};
-    ImageEntry* entry = (ImageEntry*) hashmap_get(uicon->image_cache, &search_key);
+    ImageEntry* entry = ImageMap::get(uicon->image_cache, search_key);
     if (entry) {
         log_debug("Image loaded from cache: %s", file_path);
         // HTTP cache lookup normally happens before download; keep this cleanup
@@ -889,7 +890,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
 
     ImageEntry new_entry = {.path = (char*)file_path, .image = surface};
     surface->cache_owned = true;
-    hashmap_set(uicon->image_cache, &new_entry);
+    ImageMap::set(uicon->image_cache, new_entry);
     return surface;
 }
 
@@ -907,7 +908,7 @@ void image_cache_cleanup(UiContext* uicon) {
     if (uicon->image_cache) {
         log_debug("Cleaning up cached images");
         hashmap_scan(uicon->image_cache, image_entry_free, NULL);
-        hashmap_free(uicon->image_cache);
+        ImageMap::destroy(uicon->image_cache);
         uicon->image_cache = NULL;
     }
 }

@@ -1,6 +1,6 @@
 #include "../../lib/log.h"
 #include "../../lib/string.h"
-#include "../../lib/hashmap_helpers.h"
+#include "../../lib/hashmap_typed.hpp"
 #include "../../lib/ref_counted_pool.hpp"
 #include "../lambda-data.hpp"
 #include "name_identity.h"
@@ -136,8 +136,16 @@ static String* find_well_known_name(StrView view) {
 static void (*g_name_pool_node_release)(void*) = nullptr;
 extern "C" void name_pool_set_node_release_hook(void (*fn)(void*)) { g_name_pool_node_release = fn; }
 
-// Hash + compare via lib/hashmap_helpers — StrView (str, length) key shape.
-HASHMAP_DEFINE_LENSTRKEY(name_entry, NamePoolEntry, view.str, view.length)
+static const char* name_pool_entry_chars(const NamePoolEntry& entry) {
+    return entry.view.str;
+}
+
+static size_t name_pool_entry_length(const NamePoolEntry& entry) {
+    return entry.view.length;
+}
+
+typedef TypedHashMap<NamePoolEntry,
+    HashMapLenStrKeyOps<NamePoolEntry, name_pool_entry_chars, name_pool_entry_length>> NameEntryMap;
 
 // Helper function to find string by content in the name pool
 static String* find_string_by_content(NamePool* pool, const char* content, size_t len) {
@@ -146,7 +154,7 @@ static String* find_string_by_content(NamePool* pool, const char* content, size_
     // Create search entry using StrView for lookup
     StrView temp_view = {.str = content, .length = len};
     NamePoolEntry search_entry = {nullptr, temp_view};
-    const NamePoolEntry* found = (const NamePoolEntry*)hashmap_get(pool->names, &search_entry);
+    const NamePoolEntry* found = NameEntryMap::get(pool->names, search_entry);
 
     return found ? found->name : nullptr;
 }
@@ -262,7 +270,7 @@ static NamePool* name_pool_allocate_segment(Pool* memory_pool,
     pool->owns_identity_backing = owned_backing ? 1 : 0;
 
     // Create C hashmap with NamePoolEntry
-    pool->names = name_entry_new(32);
+    pool->names = NameEntryMap::create(32);
 
     if (!pool->names) {
         if (pool->parent) {
@@ -357,7 +365,7 @@ void name_pool_release(NamePool* pool) {
             for (uint32_t number = 0x8000u; number < end; number++) {
                 NamePool* segment = root->segments ? root->segments[number] : NULL;
                 if (segment && segment != pool && segment->names) {
-                    hashmap_free(segment->names);
+                    NameEntryMap::destroy(segment->names);
                     segment->names = NULL;
                 }
             }
@@ -366,7 +374,7 @@ void name_pool_release(NamePool* pool) {
                 pool->mem_node = NULL;
             }
             if (pool->names) {
-                hashmap_free(pool->names);
+                NameEntryMap::destroy(pool->names);
                 pool->names = NULL;
             }
             // The dynamic child owns no backing of its own. Clear the root's
@@ -382,7 +390,7 @@ void name_pool_release(NamePool* pool) {
             for (uint32_t number = 3; number < pool->next_static_pool; number++) {
                 NamePool* segment = pool->segments[number];
                 if (segment && segment != pool && segment->names) {
-                    hashmap_free(segment->names);
+                    NameEntryMap::destroy(segment->names);
                     segment->names = NULL;
                 }
             }
@@ -496,8 +504,8 @@ String* name_pool_create_strview(NamePool* pool, StrView name) {
     }
     StrView str_view = {.str = str->chars, .length = str->len};
     NamePoolEntry entry = {str, str_view};
-    hashmap_set(allocation_pool->names, &entry);
-    if (hashmap_oom(allocation_pool->names)) {
+    NameEntryMap::set(allocation_pool->names, entry);
+    if (NameEntryMap::oom(allocation_pool->names)) {
         if (ordinal != 0) name_pool_retire_record_slot(allocation_pool, ordinal);
         log_error("name-id spelling publication failed");
         return NULL;
@@ -577,7 +585,7 @@ bool name_pool_contains_strview(NamePool* pool, StrView name) {
 
 size_t name_pool_count(NamePool* pool) {
     if (!pool || !pool->names) return 0;
-    return hashmap_count(pool->names);
+    return NameEntryMap::count(pool->names);
 }
 
 void name_pool_print_stats(NamePool* pool) {

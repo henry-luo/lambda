@@ -9,6 +9,7 @@
  */
 
 #include "str.h"
+#include "hash.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -128,6 +129,10 @@ int str_icmp(const char* a, size_t a_len, const char* b, size_t b_len) {
         if (ca != cb) return ca - cb;
     }
     return (a_len > b_len) - (a_len < b_len);
+}
+
+int str_icmp_cstr(const char* a, const char* b) {
+    return str_icmp(a, a ? strlen(a) : 0, b, b ? strlen(b) : 0);
 }
 
 bool str_eq(const char* a, size_t a_len, const char* b, size_t b_len) {
@@ -1001,21 +1006,15 @@ const char* str_file_basename(const char* path, size_t path_len,
 
 uint64_t str_hash(const char* s, size_t len) {
     if (!s) return 0;
-    uint64_t h = 0xCBF29CE484222325ULL; /* FNV offset basis */
-    for (size_t i = 0; i < len; i++) {
-        h ^= (uint64_t)(unsigned char)s[i];
-        h *= 0x100000001B3ULL;           /* FNV prime */
-    }
-    return h;
+    return hash_fnv1a_64(s, len);
 }
 
 uint64_t str_ihash(const char* s, size_t len) {
     if (!s) return 0;
     _ensure_luts();
-    uint64_t h = 0xCBF29CE484222325ULL;
+    uint64_t h = HASH_FNV1A_64_OFFSET_BASIS;
     for (size_t i = 0; i < len; i++) {
-        h ^= (uint64_t)_lut_lower[(unsigned char)s[i]];
-        h *= 0x100000001B3ULL;
+        h = hash_fnv1a_64_extend_byte(h, _lut_lower[(unsigned char)s[i]]);
     }
     return h;
 }

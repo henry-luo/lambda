@@ -9,7 +9,7 @@
 #include "transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
-#include "../../lib/hashmap_helpers.h"
+#include "../../lib/hashmap_typed.hpp"
 #include <limits.h>
 #include <string.h>
 #include <stdio.h>
@@ -133,16 +133,12 @@ typedef struct ReverseMapEntry {
     RenderMapKey key;            // source_item + template_ref
 } ReverseMapEntry;
 
-HASHMAP_DEFINE_INTKEY(reverse_map, ReverseMapEntry, result_item_bits)
+typedef TypedHashMap<ReverseMapEntry,
+    HashMapIntegralMemberKeyOps<ReverseMapEntry, &ReverseMapEntry::result_item_bits>> ReverseMap;
 
 static HashMap* ensure_reverse_map(void) {
     if (!s_reverse_map) {
-        s_reverse_map = hashmap_new(
-            sizeof(ReverseMapEntry), 64,
-            0xABCD1234, 0x5678FACE,
-            reverse_map_hash, reverse_map_cmp,
-            NULL, NULL
-        );
+        s_reverse_map = ReverseMap::create(64, 0xABCD1234, 0x5678FACE);
     }
     return s_reverse_map;
 }
@@ -158,11 +154,11 @@ static void render_map_record_reverse_result_tree(HashMap* reverse_map,
     // A direct template result can reuse a fat-element address after a
     // retransform. Refresh that root mapping; nested apply() results below
     // it still retain their more specific reverse ownership.
-    if (depth == 0 || !hashmap_get(reverse_map, &query)) {
+    if (depth == 0 || !ReverseMap::get(reverse_map, query)) {
         ReverseMapEntry entry = {};
         entry.result_item_bits = result_node.item;
         entry.key = key;
-        hashmap_set(reverse_map, &entry);
+        ReverseMap::set(reverse_map, entry);
     }
 
     TypeId result_type = get_type_id(result_node);
@@ -183,7 +179,16 @@ static void render_map_record_reverse_result_tree(HashMap* reverse_map,
     }
 }
 
-HASHMAP_DEFINE_FIELD2_KEY(render_map, RenderMapEntry, key.source_item.item, key.template_ref)
+static uint64_t render_map_source_item(const RenderMapEntry& entry) {
+    return entry.key.source_item.item;
+}
+
+static const char* render_map_template_ref(const RenderMapEntry& entry) {
+    return entry.key.template_ref;
+}
+
+typedef TypedHashMap<RenderMapEntry,
+    HashMapIdentity2KeyOps<RenderMapEntry, render_map_source_item, render_map_template_ref>> RenderMap;
 
 // ============================================================================
 // Ensure map exists (lazy creation)
@@ -191,12 +196,7 @@ HASHMAP_DEFINE_FIELD2_KEY(render_map, RenderMapEntry, key.source_item.item, key.
 
 static HashMap* ensure_map(void) {
     if (!s_render_map) {
-        s_render_map = hashmap_new(
-            sizeof(RenderMapEntry), 64,
-            0xFACE1234, 0x5678DEAD,
-            render_map_hash, render_map_cmp,
-            NULL, NULL
-        );
+        s_render_map = RenderMap::create(64, 0xFACE1234, 0x5678DEAD);
         s_owns_map = true;
     }
     return s_render_map;
@@ -221,10 +221,10 @@ void render_map_destroy(void) {
         context, CONTEXT_CAPSULE_RENDER_MAP);
     if (!state) return;
     if (state->render_map && state->owns_map) {
-        hashmap_free(state->render_map);
+        RenderMap::destroy(state->render_map);
     }
     if (state->reverse_map) {
-        hashmap_free(state->reverse_map);
+        ReverseMap::destroy(state->reverse_map);
     }
     if (state->roots_registered) {
         heap_unregister_gc_root_range(&state->doc_root.item);
@@ -249,7 +249,7 @@ void render_map_record(Item source_item, const char* template_ref,
     entry.child_index = child_index;
     entry.child_count = result_node.item ? 1 : 0;
     entry.dirty = false;
-    hashmap_set(map, &entry);
+    RenderMap::set(map, entry);
 
     // Also record every DOM-reachable result node. Template bodies may return
     // a fragment list that the parent flattens, so registering only the outer
@@ -262,7 +262,7 @@ void render_map_record(Item source_item, const char* template_ref,
     log_debug("render_map_record: tmpl=%s result=0x%llx reverse_map_count=%zu",
               template_ref ? template_ref : "(anon)",
               (unsigned long long)result_node.item,
-              s_reverse_map ? hashmap_count(s_reverse_map) : 0);
+              ReverseMap::count(s_reverse_map));
 }
 
 void render_map_bind_fragment_parent(Item fragment_result, Item parent_result,
@@ -293,13 +293,13 @@ void render_map_mark_dirty(Item source_item, const char* template_ref) {
     memset(&query, 0, sizeof(query));
     query.key.source_item = source_item;
     query.key.template_ref = template_ref;
-    RenderMapEntry* found = (RenderMapEntry*)hashmap_get(map, &query);
+    RenderMapEntry* found = RenderMap::get(map, query);
     if (found) {
         // hashmap_get returns const, but we need to mutate dirty flag
         // re-insert with dirty=true
         RenderMapEntry updated = *found;
         updated.dirty = true;
-        hashmap_set(map, &updated);
+        RenderMap::set(map, updated);
         log_debug("render_map_mark_dirty: tmpl=%s marked dirty",
                   template_ref ? template_ref : "(anon)");
     } else {
@@ -325,7 +325,7 @@ Item render_map_get_result(Item source_item, const char* template_ref) {
     memset(&query, 0, sizeof(query));
     query.key.source_item = source_item;
     query.key.template_ref = template_ref;
-    const RenderMapEntry* found = (const RenderMapEntry*)hashmap_get(map, &query);
+    const RenderMapEntry* found = RenderMap::get(map, query);
     return found ? found->result_node : ItemNull;
 }
 
@@ -392,7 +392,7 @@ int render_map_retransform(void) {
         RenderMapEntry updated = saved;
         updated.result_node = new_result;
         updated.dirty = false;
-        hashmap_set(map, &updated);
+        RenderMap::set(map, updated);
 
         count++;
         log_debug("render_map_retransform: re-transformed tmpl=%s (entry %d)",
@@ -475,7 +475,7 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
         RenderMapEntry updated = saved;
         updated.result_node = new_result;
         updated.dirty = false;
-        hashmap_set(map, &updated);
+        RenderMap::set(map, updated);
 
         count++;
         log_debug("render_map_retransform_with_results: re-transformed tmpl=%s (entry %d)",
@@ -505,7 +505,7 @@ struct hashmap* render_map_get_map(void) {
 
 void render_map_set_map(struct hashmap* map) {
     if (s_render_map && s_owns_map) {
-        hashmap_free(s_render_map);
+        RenderMap::destroy(s_render_map);
     }
     s_render_map = map;
     s_owns_map = false;
@@ -521,7 +521,7 @@ bool render_map_reverse_lookup(Item result_node, RenderMapLookup* out) {
     ReverseMapEntry query;
     memset(&query, 0, sizeof(query));
     query.result_item_bits = result_node.item;
-    const ReverseMapEntry* found = (const ReverseMapEntry*)hashmap_get(rmap, &query);
+    const ReverseMapEntry* found = ReverseMap::get(rmap, query);
     if (found) {
         out->source_item = found->key.source_item;
         out->template_ref = found->key.template_ref;

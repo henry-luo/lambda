@@ -19,6 +19,17 @@ TEST(HashTest, Djb2DistinguishesShortInputs) {
     EXPECT_NE(hash_djb2_cstr("ab"), hash_djb2_cstr("ba"));
 }
 
+TEST(HashTest, Djb2AddExtendPreservesInitialState) {
+    const char* text = "lambda";
+    uint64_t expected = 0;
+    for (const char* cursor = text; *cursor; cursor++) {
+        expected = expected * 33 + (unsigned char)*cursor;
+    }
+    EXPECT_EQ(hash_djb2_add_extend(0, text, strlen(text)), expected);
+    EXPECT_EQ(hash_djb2_add_extend_cstr(5381, text),
+        hash_djb2_add_extend(5381, text, strlen(text)));
+}
+
 TEST(HashTest, Fnv1a32DeterministicAndMatchesCstrVariant) {
     const char* s = "lambda";
     EXPECT_EQ(hash_fnv1a_32(s, strlen(s)), hash_fnv1a_32_cstr(s));
@@ -32,6 +43,15 @@ TEST(HashTest, Fnv1a64DeterministicAndMatchesCstrVariant) {
 
 TEST(HashTest, Fnv1a32EmptyStringSeed) {
     EXPECT_EQ(hash_fnv1a_32("", 0), 0x811c9dc5u);
+}
+
+TEST(HashTest, Fnv1a32ExtendPreservesCustomSeed) {
+    const char* text = "lambda";
+    uint32_t expected = 0x12345678u;
+    for (const char* cursor = text; *cursor; cursor++) {
+        expected = (expected ^ (unsigned char)*cursor) * 0x01000193u;
+    }
+    EXPECT_EQ(hash_fnv1a_32_extend(0x12345678u, text, strlen(text)), expected);
 }
 
 TEST(HashTest, Fnv1a64EmptyStringSeed) {

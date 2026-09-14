@@ -42,6 +42,7 @@
 extern char *strdup(const char *s);
 #include <stdbool.h>
 #include "file.h"
+#include "hash.h"
 #include "log.h"
 #include "str.h"
 
@@ -993,11 +994,7 @@ char* file_cache_path(const char* key, const char* cache_dir, const char* ext) {
     if (!key || !cache_dir) return NULL;
     if (!ext) ext = ".cache";
 
-    // DJB2 hash
-    unsigned long hash = 5381;
-    for (const char* s = key; *s; s++) {
-        hash = ((hash << 5) + hash) + (unsigned char)*s;
-    }
+    unsigned long hash = (unsigned long)hash_djb2_add_extend_cstr(5381, key);
 
     size_t dir_len = strlen(cache_dir);
     size_t ext_len = strlen(ext);

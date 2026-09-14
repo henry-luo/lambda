@@ -2,6 +2,7 @@
  * JavaScript runtime built-in registry tables for Lambda.
  */
 #include "js_runtime_internal.hpp"
+#include "../../lib/hash.h"
 
 // =============================================================================
 // Built-in registry
@@ -68,11 +69,7 @@ static_assert(sizeof(JS_BUILTIN_GLOBAL_SPECS) / sizeof(JS_BUILTIN_GLOBAL_SPECS[0
               "global builtin catalog IDs must remain dense");
 
 static uint32_t js_builtin_name_hash(uint32_t seed, const char* name, int len) {
-    uint32_t h = seed;
-    for (int i = 0; i < len; i++) {
-        h ^= (uint8_t)name[i];
-        h *= 16777619u;
-    }
+    uint32_t h = hash_fnv1a_32_extend(seed, name, len > 0 ? (size_t)len : 0);
     return h ? h : 1u;
 }
 

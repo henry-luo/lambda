@@ -12,7 +12,7 @@
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
 #include "../lib/hashmap.h"
-#include "../lib/hashmap_helpers.h"
+#include "../lib/hashmap_typed.hpp"
 #include "../lib/hash.h"
 #include "../lib/log.h"
 #include "../lib/arena.h"
@@ -57,12 +57,14 @@ static SvgImageResolverRegistry g_svg_image_resolvers = {};
 static bool svg_item_number_equals(ItemReader item, int value);
 static const char* svg_pdf_registered_image_resolver(void* context, int object_num);
 
-HASHMAP_DEFINE_PTRKEY(svg_image_resolver, SvgImageResolverEntry, svg_root)
+typedef TypedHashMap<SvgImageResolverEntry,
+    HashMapPointerMemberKeyOps<SvgImageResolverEntry, &SvgImageResolverEntry::svg_root>>
+    SvgImageResolverMap;
 
 static bool svg_image_resolver_registry_stat(void* allocator, MemStatSample* sample) {
     SvgImageResolverRegistry* registry = (SvgImageResolverRegistry*)allocator;
     if (!registry || !registry->entries || !sample) return false;
-    sample->alloc_count = hashmap_count(registry->entries);
+    sample->alloc_count = SvgImageResolverMap::count(registry->entries);
     sample->bytes_in_use = sample->alloc_count * sizeof(SvgImageResolverEntry);
     sample->bytes_reserved = sample->bytes_in_use;
     return true;
@@ -73,14 +75,12 @@ static void svg_image_resolver_registry_destroy(void* allocator) {
     if (!registry) return;
     HashMap* entries = registry->entries;
     registry->entries = nullptr;
-    if (entries) hashmap_free(entries);
+    SvgImageResolverMap::destroy(entries);
 }
 
 static bool svg_image_resolver_registry_ensure() {
     if (g_svg_image_resolvers.entries) return true;
-    g_svg_image_resolvers.entries = hashmap_new(
-        sizeof(SvgImageResolverEntry), 16, 0, 0,
-        svg_image_resolver_hash, svg_image_resolver_cmp, NULL, NULL);
+    g_svg_image_resolvers.entries = SvgImageResolverMap::create(16);
     if (!g_svg_image_resolvers.entries) return false;
     g_svg_image_resolvers.context = mem_context_create(
         mem_context_root(), MEM_ROLE_RENDER, "render.svg.image_resolvers");
@@ -97,7 +97,7 @@ static SvgImageResolverEntry* svg_find_image_resolver_entry(Element* svg_root) {
     if (!g_svg_image_resolvers.entries || !svg_root) return nullptr;
     SvgImageResolverEntry query = {};
     query.svg_root = svg_root;
-    return (SvgImageResolverEntry*)hashmap_get(g_svg_image_resolvers.entries, &query);
+    return SvgImageResolverMap::get(g_svg_image_resolvers.entries, query);
 }
 
 extern "C" void svg_register_pdf_image_resolver(Element* svg_root, Item pdf_root) {
@@ -107,8 +107,8 @@ extern "C" void svg_register_pdf_image_resolver(Element* svg_root, Item pdf_root
     SvgImageResolverEntry entry = {};
     entry.svg_root = svg_root;
     entry.pdf_root = pdf_root;
-    hashmap_set(g_svg_image_resolvers.entries, &entry);
-    if (hashmap_oom(g_svg_image_resolvers.entries)) {
+    SvgImageResolverMap::set(g_svg_image_resolvers.entries, entry);
+    if (SvgImageResolverMap::oom(g_svg_image_resolvers.entries)) {
         log_error("[SVG] failed to register PDF image resolver");
     }
 }
@@ -147,11 +147,11 @@ extern "C" void svg_unregister_image_resolvers_for_tree(Element* root) {
         if (removal.svg_root) {
             SvgImageResolverEntry query = {};
             query.svg_root = removal.svg_root;
-            hashmap_delete(g_svg_image_resolvers.entries, &query);
+            SvgImageResolverMap::erase(g_svg_image_resolvers.entries, query);
         }
     } while (removal.svg_root);
 
-    if (hashmap_count(g_svg_image_resolvers.entries) == 0) {
+    if (SvgImageResolverMap::count(g_svg_image_resolvers.entries) == 0) {
         // Resolver registry lifetime follows its last owning DOM tree, so empty
         // registries do not survive into the process leak report.
         MemContext* context = g_svg_image_resolvers.context;

@@ -4,7 +4,7 @@
 #include <cstdint>
 #include "../../lib/hashmap.h"
 #include "../../lib/mem_factory.h"
-#include "../../lib/hashmap_helpers.h"
+#include "../../lib/hashmap_typed.hpp"
 #include "../../lib/mempool.h"
 #include "../../lib/log.h"
 #include "../../lib/arraylist.h"
@@ -100,8 +100,27 @@ AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source) {
 
 // ==================== Hash Functions for Type Registry ====================
 
-HASHMAP_DEFINE_LENSTRKEY(type_entry, TypeRegistryEntry, name_key.str, name_key.length)
-HASHMAP_DEFINE_LENSTRKEY(visited_entry, VisitedEntry, key.str, key.length)
+static const char* type_registry_entry_chars(const TypeRegistryEntry& entry) {
+    return entry.name_key.str;
+}
+
+static size_t type_registry_entry_length(const TypeRegistryEntry& entry) {
+    return entry.name_key.length;
+}
+
+static const char* visited_entry_chars(const VisitedEntry& entry) {
+    return entry.key.str;
+}
+
+static size_t visited_entry_length(const VisitedEntry& entry) {
+    return entry.key.length;
+}
+
+typedef TypedHashMap<TypeRegistryEntry,
+    HashMapLenStrKeyOps<TypeRegistryEntry, type_registry_entry_chars,
+        type_registry_entry_length>> TypeRegistryMap;
+typedef TypedHashMap<VisitedEntry,
+    HashMapLenStrKeyOps<VisitedEntry, visited_entry_chars, visited_entry_length>> VisitedMap;
 
 // ==================== Core Validator Functions ====================
 
@@ -122,13 +141,13 @@ SchemaValidator* SchemaValidator::create(Pool* pool) {
     }
 
     // Initialize type definitions registry
-    validator->type_definitions = type_entry_new(0);
+    validator->type_definitions = TypeRegistryMap::create(0);
     if (!validator->type_definitions) {
         return nullptr;
     }
 
     // Initialize visited nodes for circular reference detection
-    validator->visited_nodes = visited_entry_new(0);
+    validator->visited_nodes = VisitedMap::create(0);
     if (!validator->visited_nodes) {
         return nullptr;
     }
@@ -146,11 +165,11 @@ SchemaValidator* SchemaValidator::create(Pool* pool) {
 
 void SchemaValidator::destroy() {
     if (this->type_definitions) {
-        hashmap_free(this->type_definitions);
+        TypeRegistryMap::destroy(this->type_definitions);
     }
 
     if (this->visited_nodes) {
-        hashmap_free(this->visited_nodes);
+        VisitedMap::destroy(this->visited_nodes);
     }
 
     if (this->transpiler) {
@@ -203,7 +222,7 @@ static int validator_register_type_declaration(SchemaValidator* validator,
     TypeRegistryEntry entry;
     entry.definition = definition;
     entry.name_key = definition->name;
-    hashmap_set(validator->get_type_definitions(), &entry);
+    TypeRegistryMap::set(validator->get_type_definitions(), entry);
 
     log_debug("validator: registered type %.*s (type_id=%d)",
         (int)definition->name.length, definition->name.str,
@@ -287,7 +306,7 @@ Type* SchemaValidator::find_type(const char* type_name) {
     StrView name_view = strview_from_cstr(type_name);
     TypeRegistryEntry key = {.definition = nullptr, .name_key = name_view};
 
-    const TypeRegistryEntry* entry = (const TypeRegistryEntry*)hashmap_get(this->type_definitions, &key);
+    const TypeRegistryEntry* entry = TypeRegistryMap::get(this->type_definitions, key);
     return entry && entry->definition ? entry->definition->runtime_type : nullptr;
 }
 
@@ -300,7 +319,7 @@ Type* SchemaValidator::resolve_type_reference(const char* type_name) {
 
     // Check if we're already visiting this type (circular reference)
     VisitedEntry visited_key = {.key = name_view, .visited = false};
-    const VisitedEntry* existing = (const VisitedEntry*)hashmap_get(this->visited_nodes, &visited_key);
+    const VisitedEntry* existing = VisitedMap::get(this->visited_nodes, visited_key);
 
     if (existing && existing->visited) {
         log_error("[AST_VALIDATOR] Circular type reference detected: %.*s",
@@ -310,14 +329,14 @@ Type* SchemaValidator::resolve_type_reference(const char* type_name) {
 
     // Mark this type as being visited
     VisitedEntry visit_entry = {.key = name_view, .visited = true};
-    hashmap_set(this->visited_nodes, &visit_entry);
+    VisitedMap::set(this->visited_nodes, visit_entry);
 
     // Look up the type
     Type* resolved_type = this->find_type(type_name);
 
     // Unmark after resolution (allow revisiting in different validation paths)
     VisitedEntry unvisit_entry = {.key = name_view, .visited = false};
-    hashmap_set(this->visited_nodes, &unvisit_entry);
+    VisitedMap::set(this->visited_nodes, unvisit_entry);
 
     return resolved_type;
 }

@@ -18,7 +18,7 @@
 #include "../../../radiant/render.hpp"
 #include "../../../radiant/event.hpp"
 #include "../../../lib/log.h"
-#include "../../../lib/hashmap.h"
+#include "../../../lib/hashmap_helpers.h"
 #include "../../../lib/mem.h"
 #include "../../../lib/str.h"
 #include "../../../lib/strbuf.h"
@@ -182,7 +182,7 @@ static void radiant_dom_cache_free(void* ptr) {
 
 static uint64_t radiant_dom_cache_index_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const RadiantDomWrapperCacheIndexEntry* entry = (const RadiantDomWrapperCacheIndexEntry*)item;
-    return hashmap_sip(&entry->node, sizeof(entry->node), seed0, seed1);
+    return hashmap_hash_bytes(&entry->node, sizeof(entry->node), seed0, seed1);
 }
 
 static int radiant_dom_cache_index_compare(const void* a, const void* b, void* udata) {

@@ -7,7 +7,7 @@
 #include "network_resource_manager.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/hashmap.h"
-#include "../../lib/hashmap_helpers.h"
+#include "../../lib/hashmap_typed.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/url.h"
@@ -49,12 +49,14 @@ struct NetworkScheduler {
     bool stop_workers;
 };
 
-HASHMAP_DEFINE_STRKEY(origin_counter, OriginCounter, origin)
-
 static void origin_counter_free(void* item) {
     OriginCounter* counter = (OriginCounter*)item;
     if (counter->origin) mem_free(counter->origin);
 }
+
+typedef TypedHashMap<OriginCounter,
+    HashMapCStrMemberKeyOps<OriginCounter, &OriginCounter::origin>, origin_counter_free>
+    OriginCounterMap;
 
 static char* scheduler_origin_from_url(const char* url_text) {
     if (!url_text || url_text[0] == '\0') {
@@ -106,14 +108,14 @@ static OriginCounter* get_origin_counter_locked(NetworkScheduler* scheduler,
     if (!scheduler || !scheduler->origin_counters || !origin) return NULL;
 
     OriginCounter key = { .origin = (char*)origin, .active_count = 0 };
-    OriginCounter* found = (OriginCounter*)hashmap_get((struct hashmap*)scheduler->origin_counters, &key);
+    OriginCounter* found = OriginCounterMap::get((struct hashmap*)scheduler->origin_counters, key);
     if (found || !create) return found;
 
     OriginCounter entry = { .origin = mem_strdup(origin, MEM_CAT_NETWORK), .active_count = 0 };
     if (!entry.origin) return NULL;
 
-    hashmap_set((struct hashmap*)scheduler->origin_counters, &entry);
-    return (OriginCounter*)hashmap_get((struct hashmap*)scheduler->origin_counters, &key);
+    OriginCounterMap::set((struct hashmap*)scheduler->origin_counters, entry);
+    return OriginCounterMap::get((struct hashmap*)scheduler->origin_counters, key);
 }
 
 static bool can_dispatch_locked(NetworkScheduler* scheduler, ScheduledTask* task) {
@@ -309,7 +311,7 @@ NetworkScheduler* network_scheduler_create(NetworkThreadPool* backend_pool,
         }
     }
 
-    scheduler->origin_counters = origin_counter_new_with_free(0, origin_counter_free);
+    scheduler->origin_counters = OriginCounterMap::create(0);
     if (!scheduler->origin_counters) {
         for (int i = 0; i < NETWORK_PRIORITY_COUNT; i++) arraylist_free(scheduler->queues[i]);
         pthread_cond_destroy(&scheduler->cond);
@@ -334,7 +336,7 @@ NetworkScheduler* network_scheduler_create(NetworkThreadPool* backend_pool,
                                                 sizeof(pthread_t),
                                                 MEM_CAT_NETWORK);
     if (!scheduler->workers) {
-        hashmap_free((struct hashmap*)scheduler->origin_counters);
+        OriginCounterMap::destroy((struct hashmap*)scheduler->origin_counters);
         for (int i = 0; i < NETWORK_PRIORITY_COUNT; i++) arraylist_free(scheduler->queues[i]);
         pthread_cond_destroy(&scheduler->cond);
         pthread_mutex_destroy(&scheduler->mutex);
@@ -358,7 +360,7 @@ NetworkScheduler* network_scheduler_create(NetworkThreadPool* backend_pool,
             if (scheduler->curl_multi_backend) {
                 curl_multi_backend_destroy(scheduler->curl_multi_backend);
             }
-            hashmap_free((struct hashmap*)scheduler->origin_counters);
+            OriginCounterMap::destroy((struct hashmap*)scheduler->origin_counters);
             for (int j = 0; j < NETWORK_PRIORITY_COUNT; j++) arraylist_free(scheduler->queues[j]);
             pthread_cond_destroy(&scheduler->cond);
             pthread_mutex_destroy(&scheduler->mutex);
@@ -412,7 +414,7 @@ void network_scheduler_destroy(NetworkScheduler* scheduler) {
     }
 
     if (scheduler->origin_counters) {
-        hashmap_free((struct hashmap*)scheduler->origin_counters);
+        OriginCounterMap::destroy((struct hashmap*)scheduler->origin_counters);
     }
     pthread_cond_destroy(&scheduler->cond);
     pthread_mutex_destroy(&scheduler->mutex);

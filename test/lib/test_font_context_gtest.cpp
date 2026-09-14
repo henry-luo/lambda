@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "../../lib/font/font_internal.h"
+#include "../../lib/hashmap_helpers.h"
 
 static uint64_t test_loaded_glyph_cache_hash(const void* item,
                                              uint64_t seed0, uint64_t seed1) {
@@ -12,7 +13,7 @@ static uint64_t test_loaded_glyph_cache_hash(const void* item,
     data[1] = ((uint64_t)entry->codepoint << 2) |
               ((uint64_t)(entry->for_rendering ? 1 : 0) << 1) |
               (uint64_t)(entry->emoji_presentation ? 1 : 0);
-    return hashmap_xxhash3(data, sizeof(data), seed0, seed1);
+    return hashmap_hash_xxhash3_bytes(data, sizeof(data), seed0, seed1);
 }
 
 static int test_loaded_glyph_cache_compare(const void* left, const void* right,

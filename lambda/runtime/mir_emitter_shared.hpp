@@ -11,7 +11,7 @@
 #include "mir_dump.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/hashmap.h"
-#include "../../lib/hashmap_helpers.h"
+#include "../../lib/hashmap_typed.hpp"
 #include "../../lib/strbuf.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
@@ -129,8 +129,18 @@ struct VarScopeEntry {
 
 typedef VarScopeEntry JsVarScopeEntry;
 
-HASHMAP_DEFINE_STRKEY(em_var_scope, VarScopeEntry, name)
-HASHMAP_DEFINE_STRKEY(em_import_cache, MirImportCacheEntry, name)
+typedef TypedHashMap<VarScopeEntry,
+    HashMapCStrMemberKeyOps<VarScopeEntry, &VarScopeEntry::name>> EmVarScopeMap;
+typedef TypedHashMap<MirImportCacheEntry,
+    HashMapCStrMemberKeyOps<MirImportCacheEntry, &MirImportCacheEntry::name>> EmImportCacheMap;
+
+static inline HashMap* em_var_scope_new(size_t capacity) {
+    return EmVarScopeMap::create(capacity);
+}
+
+static inline HashMap* em_import_cache_new(size_t capacity) {
+    return EmImportCacheMap::create(capacity);
+}
 
 static inline MIR_type_t mir_reg_type_for_alloc(MIR_type_t type,
                                                 bool coerce_float32) {

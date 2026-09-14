@@ -7,7 +7,7 @@
 #include "../../lib/str.h"
 #include "../../lib/arraylist.hpp"
 #include "../../lib/checked_math.hpp"
-#include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/hash.h"
 #include "../../lib/byte_storage.h"
 #include "../input/css/dom_element.hpp"  // DomElement, dom_element_to_element, element_to_dom_element
@@ -1845,23 +1845,23 @@ uint64_t lambda_item_hash(Item key, uint64_t seed0, uint64_t seed1) {
         RootFrame roots(1);
         Rooted<Item> rooted_key(roots, key);
         Complex* value = rooted_key.get().get_complex();
-        if (!value) return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);
+        if (!value) return hashmap_hash_bytes(&key.item, sizeof(uint64_t), seed0, seed1);
         // Zero-imaginary values share the real numeric hash so equal map keys
         // cannot land in different buckets across the real/complex boundary.
         if (value->imag == 0.0) {
             Item real_item = push_d(value->real);
             char real_buf[128];
             if (lambda_numeric_to_canonical_string(real_item, real_buf, sizeof(real_buf))) {
-                return hashmap_sip(real_buf, strlen(real_buf), seed0, seed1);
+                return hashmap_hash_cstr(real_buf, seed0, seed1);
             }
         }
         value = rooted_key.get().get_complex();
-        if (!value) return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);
+        if (!value) return hashmap_hash_bytes(&key.item, sizeof(uint64_t), seed0, seed1);
         char real_buf[64], imag_buf[64], pair_buf[160];
         lambda_double_to_shortest(value->real, real_buf, sizeof(real_buf));
         lambda_double_to_shortest(value->imag, imag_buf, sizeof(imag_buf));
         snprintf(pair_buf, sizeof(pair_buf), "complex:%s:%s", real_buf, imag_buf);
-        return hashmap_sip(pair_buf, strlen(pair_buf), seed0, seed1);
+        return hashmap_hash_cstr(pair_buf, seed0, seed1);
     }
     case LMD_TYPE_INT:
     case LMD_TYPE_INT64:
@@ -1871,29 +1871,29 @@ uint64_t lambda_item_hash(Item key, uint64_t seed0, uint64_t seed1) {
     case LMD_TYPE_NUM_SIZED: {
         char num_buf[128];
         if (lambda_numeric_to_canonical_string(key, num_buf, sizeof(num_buf))) {
-            return hashmap_sip(num_buf, strlen(num_buf), seed0, seed1);
+            return hashmap_hash_cstr(num_buf, seed0, seed1);
         }
-        return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);
+        return hashmap_hash_bytes(&key.item, sizeof(uint64_t), seed0, seed1);
     }
     case LMD_TYPE_DTIME: {
         DateTime value = key.get_datetime();
-        return hashmap_sip(&value, sizeof(value), seed0, seed1);
+        return hashmap_hash_bytes(&value, sizeof(value), seed0, seed1);
     }
     case LMD_TYPE_STRING: {
         String* s = key.get_safe_string();
-        if (s) return hashmap_sip(s->chars, s->len, seed0, seed1);
-        return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);
+        if (s) return hashmap_hash_bytes(s->chars, s->len, seed0, seed1);
+        return hashmap_hash_bytes(&key.item, sizeof(uint64_t), seed0, seed1);
     }
     case LMD_TYPE_SYMBOL: {
         Symbol* s = key.get_safe_symbol();
-        if (s) return hashmap_sip(s->chars, s->len, seed0, seed1);
-        return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);
+        if (s) return hashmap_hash_bytes(s->chars, s->len, seed0, seed1);
+        return hashmap_hash_bytes(&key.item, sizeof(uint64_t), seed0, seed1);
     }
     case LMD_TYPE_ARRAY: {
-        uint64_t h = hashmap_sip(&type_id, sizeof(type_id), seed0, seed1);
+        uint64_t h = hashmap_hash_bytes(&type_id, sizeof(type_id), seed0, seed1);
         Array* arr = key.array;
         int64_t len = arr ? arr->length : 0;
-        h ^= hashmap_sip(&len, sizeof(len), seed0, seed1);
+        h ^= hashmap_hash_bytes(&len, sizeof(len), seed0, seed1);
         for (int64_t i = 0; arr && i < arr->length; i++) {
             uint64_t child = lambda_item_hash(arr->items[i], seed0, seed1);
             h = hash_combine_u64(h, child);
@@ -1903,7 +1903,7 @@ uint64_t lambda_item_hash(Item key, uint64_t seed0, uint64_t seed1) {
     case LMD_TYPE_PATH:
         return path_hash(key.path, seed0, seed1);
     default:
-        return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);
+        return hashmap_hash_bytes(&key.item, sizeof(uint64_t), seed0, seed1);
     }
 }
 

@@ -5,6 +5,7 @@
 #include "../../lib/lambda_alloca.h"
 #include "../../lib/string.h"
 #include "../../lib/ref_counted_pool.hpp"
+#include "../../lib/hashmap_helpers.h"
 #include <string.h>
 
 // Hook to release a memory-context node when a registered shape pool is freed
@@ -21,13 +22,9 @@ typedef struct ShapePoolEntry {
 
 static uint64_t shape_entry_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const ShapePoolEntry* entry = (const ShapePoolEntry*)item;
-    uint64_t hash = hashmap_murmur(&entry->signature.hash,
-        sizeof(entry->signature.hash), seed0, seed1);
-    hash ^= hashmap_murmur(&entry->signature.length,
-        sizeof(entry->signature.length), seed0, seed1) * 0x9e3779b97f4a7c15ULL;
-    hash ^= hashmap_murmur(&entry->signature.byte_size,
-        sizeof(entry->signature.byte_size), seed0, seed1) * 0x517cc1b727220a95ULL;
-    return hash;
+    return hashmap_hash_identity3(&entry->signature.hash, sizeof(entry->signature.hash),
+        &entry->signature.length, sizeof(entry->signature.length),
+        &entry->signature.byte_size, sizeof(entry->signature.byte_size), seed0, seed1);
 }
 
 static int shape_entry_cmp(const void* a, const void* b, void* udata) {
@@ -74,7 +71,7 @@ static uint64_t calculate_shape_hash(const char** field_names, TypeId* field_typ
         const char* name = field_names[i];
         if (!name) { name = ""; } // use empty string for null field names (nested maps)
         size_t name_len = strlen(name);
-        hash = hashmap_sip(name, name_len, hash, i);
+        hash = hashmap_hash_bytes(name, name_len, hash, i);
         
         // Hash field type (combine with existing hash)
         uint64_t type_bits = (uint64_t)field_types[i];

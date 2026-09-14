@@ -15,6 +15,7 @@
  */
 
 #include "font_internal.h"
+#include "../hashmap_helpers.h"
 #include "../memtrack.h"
 #include "../str.h"
 #include "../strbuf.h"
@@ -143,55 +144,12 @@ static const struct {
 // ============================================================================
 
 // missing_families: simple string-key set using FontFamily struct (only family_name used)
-// Reuses family_hash/family_compare for case-insensitive matching.
+// Reuses shared case-insensitive matching for both family maps.
+HASHMAP_DEFINE_ICSTRKEY(font_database_family, FontFamily, family_name)
 
-static uint64_t family_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const FontFamily* f = (const FontFamily*)item;
-    if (!f || !f->family_name) return 0;
-    size_t len = strlen(f->family_name);
-    char lower[256];
-    size_t n = len < sizeof(lower) - 1 ? len : sizeof(lower) - 1;
-    for (size_t i = 0; i < n; i++) lower[i] = (char)tolower((unsigned char)f->family_name[i]);
-    lower[n] = '\0';
-    return hashmap_xxhash3(lower, n, seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(font_database_file_path, FontEntry, file_path)
 
-static int family_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const FontFamily* fa = (const FontFamily*)a;
-    const FontFamily* fb = (const FontFamily*)b;
-    if (!fa || !fb || !fa->family_name || !fb->family_name) return -1;
-    return str_icmp(fa->family_name, strlen(fa->family_name),
-                    fb->family_name, strlen(fb->family_name));
-}
-
-static uint64_t file_path_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const FontEntry* e = (const FontEntry*)item;
-    if (!e || !e->file_path) return 0;
-    return hashmap_xxhash3(e->file_path, strlen(e->file_path), seed0, seed1);
-}
-
-static int file_path_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const FontEntry* ea = (const FontEntry*)a;
-    const FontEntry* eb = (const FontEntry*)b;
-    if (!ea || !eb || !ea->file_path || !eb->file_path) return -1;
-    return strcmp(ea->file_path, eb->file_path);
-}
-
-static uint64_t ps_name_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const FontEntry* e = (const FontEntry*)item;
-    if (!e || !e->postscript_name) return 0;
-    return hashmap_xxhash3(e->postscript_name, strlen(e->postscript_name), seed0, seed1);
-}
-
-static int ps_name_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const FontEntry* ea = (const FontEntry*)a;
-    const FontEntry* eb = (const FontEntry*)b;
-    if (!ea || !eb || !ea->postscript_name || !eb->postscript_name) return -1;
-    return strcmp(ea->postscript_name, eb->postscript_name);
-}
+HASHMAP_DEFINE_STRKEY(font_database_ps_name, FontEntry, postscript_name)
 
 static void font_family_release(void* item) {
     FontFamily* family = (FontFamily*)item;
@@ -214,10 +172,10 @@ FontDatabase* font_database_create_internal(Pool* pool, Arena* arena) {
     db->organized_up_to = 0;
 
     // create hashmaps
-    db->families        = hashmap_new(sizeof(FontFamily), 64, 0, 0, family_hash, family_compare, font_family_release, NULL);
-    db->postscript_names = hashmap_new(sizeof(FontEntry), 64, 0, 0, ps_name_hash, ps_name_compare, NULL, NULL);
-    db->file_paths      = hashmap_new(sizeof(FontEntry), 256, 0, 0, file_path_hash, file_path_compare, NULL, NULL);
-    db->missing_families = hashmap_new(sizeof(FontFamily), 32, 0, 0, family_hash, family_compare, font_family_release, NULL);
+    db->families        = font_database_family_new_with_free(64, font_family_release);
+    db->postscript_names = font_database_ps_name_new(64);
+    db->file_paths      = font_database_file_path_new(256);
+    db->missing_families = font_database_family_new_with_free(32, font_family_release);
 
     // create arraylists
     db->all_fonts        = arraylist_new(0);

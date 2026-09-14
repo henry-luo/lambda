@@ -29,12 +29,30 @@ static inline uint32_t hash_djb2_cstr(const char* s) {
     return h;
 }
 
-// FNV-1a 32-bit.
-static inline uint32_t hash_fnv1a_32(const void* data, size_t len) {
+// Original DJB2 addition form. Keep the initial state explicit because some
+// language runtimes use zero rather than the conventional 5381 basis.
+static inline uint64_t hash_djb2_add_extend(uint64_t hash, const void* data,
+                                            size_t len) {
     const unsigned char* p = (const unsigned char*)data;
-    uint32_t h = 0x811c9dc5u;
-    for (size_t i = 0; i < len; i++) h = (h ^ p[i]) * 0x01000193u;
-    return h;
+    for (size_t i = 0; i < len; i++) hash = hash * 33 + p[i];
+    return hash;
+}
+
+static inline uint64_t hash_djb2_add_extend_cstr(uint64_t hash, const char* s) {
+    for (unsigned char c; (c = (unsigned char)*s) != 0; s++) hash = hash * 33 + c;
+    return hash;
+}
+
+// FNV-1a 32-bit.
+static inline uint32_t hash_fnv1a_32_extend(uint32_t hash, const void* data,
+                                            size_t len) {
+    const unsigned char* p = (const unsigned char*)data;
+    for (size_t i = 0; i < len; i++) hash = (hash ^ p[i]) * 0x01000193u;
+    return hash;
+}
+
+static inline uint32_t hash_fnv1a_32(const void* data, size_t len) {
+    return hash_fnv1a_32_extend(0x811c9dc5u, data, len);
 }
 
 static inline uint32_t hash_fnv1a_32_cstr(const char* s) {
@@ -48,16 +66,20 @@ static inline uint32_t hash_fnv1a_32_cstr(const char* s) {
 #define HASH_FNV1A_64_OFFSET_BASIS UINT64_C(0xcbf29ce484222325)
 #define HASH_FNV1A_64_PRIME UINT64_C(0x100000001b3)
 
+static inline uint64_t hash_fnv1a_64_extend_byte(uint64_t hash, uint8_t byte) {
+    return (hash ^ byte) * HASH_FNV1A_64_PRIME;
+}
+
 static inline uint64_t hash_fnv1a_64_extend(uint64_t hash, const void* data,
                                             size_t len) {
     const unsigned char* p = (const unsigned char*)data;
-    for (size_t i = 0; i < len; i++) hash = (hash ^ p[i]) * HASH_FNV1A_64_PRIME;
+    for (size_t i = 0; i < len; i++) hash = hash_fnv1a_64_extend_byte(hash, p[i]);
     return hash;
 }
 
 static inline uint64_t hash_fnv1a_64_extend_cstr(uint64_t hash, const char* s) {
     for (unsigned char c; (c = (unsigned char)*s) != 0; s++) {
-        hash = (hash ^ c) * HASH_FNV1A_64_PRIME;
+        hash = hash_fnv1a_64_extend_byte(hash, c);
     }
     return hash;
 }
@@ -65,7 +87,7 @@ static inline uint64_t hash_fnv1a_64_extend_cstr(uint64_t hash, const char* s) {
 // Feed a fixed-width scalar in little-endian order, independent of host ABI.
 static inline uint64_t hash_fnv1a_64_extend_u64le(uint64_t hash, uint64_t value) {
     for (size_t i = 0; i < sizeof(value); i++) {
-        hash = (hash ^ ((value >> (i * 8u)) & 0xffu)) * HASH_FNV1A_64_PRIME;
+        hash = hash_fnv1a_64_extend_byte(hash, (uint8_t)(value >> (i * 8u)));
     }
     return hash;
 }

@@ -9,10 +9,7 @@
 // Helper Functions
 // ============================================================================
 
-// Case-insensitive string comparison — delegates to str_icmp
-static int strcasecmp_local(const char* s1, const char* s2) {
-    return str_icmp(s1, strlen(s1), s2, strlen(s2));
-}
+// Case-insensitive string comparison — delegates to str_icmp_cstr.
 
 // Case-insensitive substring search — delegates to str_ifind
 static bool contains_substring_case_insensitive(const char* haystack, const char* needle) {
@@ -506,7 +503,7 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
                     return false;
                 }
                 // Use case-insensitive comparison for HTML element names (standard)
-                return strcasecmp_local(element->tag_name, simple_selector->value) == 0;
+                return str_icmp_cstr(element->tag_name, simple_selector->value) == 0;
             }
             return true; // No type specified matches any element
 
@@ -516,7 +513,7 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
             for (int i = 0; i < element->class_count; i++) {
                 int cmp = matcher->case_sensitive_classes
                     ? strcmp(element->class_names[i], simple_selector->value)
-                    : strcasecmp_local(element->class_names[i], simple_selector->value);
+                    : str_icmp_cstr(element->class_names[i], simple_selector->value);
                 if (cmp == 0) return true;
             }
             return false;
@@ -702,7 +699,7 @@ bool selector_matcher_matches_attribute(SelectorMatcher* matcher,
 
     // Determine comparison function - respect both parameter AND matcher configuration
     bool use_case_insensitive = case_insensitive || !matcher->case_sensitive_attrs;
-    int (*compare_func)(const char*, const char*) = use_case_insensitive ? strcasecmp_local : strcmp;
+    int (*compare_func)(const char*, const char*) = use_case_insensitive ? str_icmp_cstr : strcmp;
 
     switch (attr_type) {
         case CSS_SELECTOR_ATTR_EXACT:
@@ -1394,7 +1391,7 @@ bool selector_matcher_same_tag(DomElement* element1, DomElement* element2) {
         return false;
     }
 
-    return strcasecmp_local(element1->tag_name, element2->tag_name) == 0;
+    return str_icmp_cstr(element1->tag_name, element2->tag_name) == 0;
 }
 
 bool selector_matcher_parse_nth_formula(const char* formula_str, CssNthFormula* formula) {

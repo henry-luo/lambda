@@ -2,7 +2,8 @@
 #include "input.hpp"
 
 #include "../../lib/file.h"
-#include "../../lib/hashmap.h"
+#include "../../lib/hash.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/mem_factory.h"
@@ -96,44 +97,39 @@ static char* cache_copy_text(const char* value) {
     return mem_strdup(text, MEM_CAT_CACHE_OTHER);
 }
 
-static uint64_t cache_mix(uint64_t hash, uint64_t value) {
-    hash ^= value + 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2);
-    return hash;
-}
-
 static uint64_t cache_text_hash(const char* value) {
     const char* text = value ? value : "";
-    return hashmap_xxhash3(text, strlen(text), 0, 0);
+    return hashmap_hash_xxhash3_cstr(text, 0, 0);
 }
 
 static uint64_t cache_source_key(const ScriptInput* input) {
     uint64_t hash = input->source_hash;
-    hash = cache_mix(hash, input->source_length);
-    hash = cache_mix(hash, (uint64_t)input->source_kind);
-    hash = cache_mix(hash, cache_text_hash(input->identity));
-    hash = cache_mix(hash, cache_text_hash(input->language));
-    hash = cache_mix(hash, cache_text_hash(input->profile));
-    hash = cache_mix(hash, cache_text_hash(input->parser_abi));
-    hash = cache_mix(hash, cache_text_hash(input->parse_flags));
-    hash = cache_mix(hash, cache_text_hash(input->resolution_base));
-    hash = cache_mix(hash, input->module_mode ? 1 : 0);
+    hash = hash_combine_u64(hash, input->source_length);
+    hash = hash_combine_u64(hash, (uint64_t)input->source_kind);
+    hash = hash_combine_u64(hash, cache_text_hash(input->identity));
+    hash = hash_combine_u64(hash, cache_text_hash(input->language));
+    hash = hash_combine_u64(hash, cache_text_hash(input->profile));
+    hash = hash_combine_u64(hash, cache_text_hash(input->parser_abi));
+    hash = hash_combine_u64(hash, cache_text_hash(input->parse_flags));
+    hash = hash_combine_u64(hash, cache_text_hash(input->resolution_base));
+    hash = hash_combine_u64(hash, input->module_mode ? 1 : 0);
     return hash;
 }
 
 static uint64_t cache_ast_key(const ScriptInput* input, uint64_t ast_abi) {
-    return cache_mix(input->source_key, ast_abi);
+    return hash_combine_u64(input->source_key, ast_abi);
 }
 
 static uint64_t cache_mir_key(const ScriptInput* input,
         const InputScriptRequest* request) {
     uint64_t hash = cache_ast_key(input, request->ast_abi);
-    hash = cache_mix(hash, request->compiler_abi);
-    hash = cache_mix(hash, request->interface_abi);
-    hash = cache_mix(hash, request->dependency_digest);
-    hash = cache_mix(hash, request->optimize_level);
-    hash = cache_mix(hash, request->module_mode ? 1 : 0);
-    hash = cache_mix(hash, cache_text_hash(request->backend));
-    hash = cache_mix(hash, cache_text_hash(request->execution_mode));
+    hash = hash_combine_u64(hash, request->compiler_abi);
+    hash = hash_combine_u64(hash, request->interface_abi);
+    hash = hash_combine_u64(hash, request->dependency_digest);
+    hash = hash_combine_u64(hash, request->optimize_level);
+    hash = hash_combine_u64(hash, request->module_mode ? 1 : 0);
+    hash = hash_combine_u64(hash, cache_text_hash(request->backend));
+    hash = hash_combine_u64(hash, cache_text_hash(request->execution_mode));
     return hash;
 }
 
@@ -163,7 +159,7 @@ static uint64_t cache_entry_hash(const void* item, uint64_t seed0,
         uint64_t seed1) {
     const InputScriptMapEntry* entry = (const InputScriptMapEntry*)item;
     const ScriptInput* input = entry ? entry->input : NULL;
-    return input ? cache_mix(input->source_key, seed0 ^ seed1) : 0;
+    return input ? hash_combine_u64(input->source_key, seed0 ^ seed1) : 0;
 }
 
 static int cache_entry_compare(const void* left, const void* right,
@@ -400,7 +396,7 @@ static bool cache_make_input(const InputScriptRequest* request,
     }
     if (source_length > 0) memcpy(input->source, source, source_length);
     input->source[source_length] = '\0';
-    input->source_hash = hashmap_xxhash3(input->source, source_length, 0, 0);
+    input->source_hash = hashmap_hash_xxhash3_bytes(input->source, source_length, 0, 0);
     input->source_key = cache_source_key(input);
     input->cache_context = mem_context_create(NULL, MEM_ROLE_CODE,
         "script.cache.input");
@@ -443,7 +439,7 @@ static InputScriptMapEntry* cache_find_entry(InputScriptCache* cache,
     probe_input.parse_flags = (char*)cache_text(request->parse_flags, "");
     probe_input.resolution_base = (char*)cache_text(request->resolution_base, "");
     probe_input.module_mode = request->module_mode;
-    probe_input.source_hash = hashmap_xxhash3(probe_input.source,
+    probe_input.source_hash = hashmap_hash_xxhash3_bytes(probe_input.source,
         source_length, 0, 0);
     probe_input.source_key = cache_source_key(&probe_input);
     InputScriptMapEntry probe = {&probe_input};

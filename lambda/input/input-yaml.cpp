@@ -7,7 +7,7 @@
 #include "../../lib/str.h"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
-#include "../../lib/hashmap_helpers.h"
+#include "../../lib/hashmap_typed.hpp"
 #include "../../lib/arena.h"
 
 using namespace lambda;
@@ -74,7 +74,8 @@ struct YamlParser {
 // SCU16 size budget: no embedded anchor table
 static_assert(sizeof(YamlParser) < 256, "YamlParser must not embed document-sized tables");
 
-HASHMAP_DEFINE_STRKEY(anchor, AnchorEntry, name)
+typedef TypedHashMap<AnchorEntry,
+    HashMapCStrMemberKeyOps<AnchorEntry, &AnchorEntry::name>> AnchorMap;
 
 struct YamlCursor {
     int pos;
@@ -280,8 +281,7 @@ static bool is_doc_end_at(YamlParser* p, int pos) {
 
 static void store_anchor(YamlParser* p, const char* name, Item value) {
     if (!p->anchors) {
-        p->anchors = hashmap_new(sizeof(AnchorEntry), 16, 0, 0,
-            anchor_hash, anchor_cmp, NULL, NULL);
+        p->anchors = AnchorMap::create(16);
         if (!p->anchors) {
             p->ctx->addError("yaml: anchor table allocation failed");
             return;
@@ -289,13 +289,13 @@ static void store_anchor(YamlParser* p, const char* name, Item value) {
     }
     // redefinition overwrites: a later &name shadows the earlier one
     AnchorEntry entry = { name, value };
-    hashmap_set(p->anchors, &entry);
+    AnchorMap::set(p->anchors, entry);
 }
 
 static Item resolve_alias(YamlParser* p, const char* name) {
     if (p->anchors) {
         AnchorEntry probe = { name, ITEM_NULL };
-        const AnchorEntry* found = (const AnchorEntry*)hashmap_get(p->anchors, &probe);
+        const AnchorEntry* found = AnchorMap::get(p->anchors, probe);
         if (found) return found->value;
     }
     log_debug("yaml: unresolved alias *%s", name);
@@ -2294,7 +2294,7 @@ void parse_yaml(Input *input, const char* yaml_str) {
     // the anchor index is parse-scoped; release it on every exit path
     struct AnchorGuard {
         YamlParser* p;
-        ~AnchorGuard() { if (p->anchors) hashmap_free(p->anchors); }
+        ~AnchorGuard() { AnchorMap::destroy(p->anchors); }
     } anchor_guard{p};
 
     // skip BOM

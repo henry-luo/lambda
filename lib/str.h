@@ -44,6 +44,9 @@ int str_cmp(const char* a, size_t a_len, const char* b, size_t b_len);
 /** case-insensitive compare (ASCII). */
 int str_icmp(const char* a, size_t a_len, const char* b, size_t b_len);
 
+/** case-insensitive compare of NUL-terminated strings (ASCII). */
+int str_icmp_cstr(const char* a, const char* b);
+
 /** exact equality. */
 bool str_eq(const char* a, size_t a_len, const char* b, size_t b_len);
 

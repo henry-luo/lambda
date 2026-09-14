@@ -6,7 +6,7 @@ extern "C" {
 #include "../../../lib/log.h"
 #include "../../../lib/str.h"
 #include "../../../lib/mempool.h"
-#include "../../../lib/hashmap.h"
+#include "../../../lib/hashmap_helpers.h"
 }
 #include "css_value.hpp"
 #include "css_style.hpp"
@@ -546,24 +546,9 @@ const CssEnumInfo* css_enum_info(CssEnum id) {
     return &css_value_definitions[0]; // return _undef for unknown IDs
 }
 
-// hash function for CSS keyword strings (case-insensitive)
-static uint64_t css_keyword_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const char* str = *(const char**)item;
-    // convert to lowercase for case-insensitive hashing
-    char lower[256];
-    size_t i = strlen(str);
-    if (i > 255) i = 255;
-    str_to_lower(lower, str, i);
-    lower[i] = '\0';
-    return hashmap_sip(lower, i, seed0, seed1);
-}
+// hash function for CSS keyword strings (case-insensitive) uses the shared callback.
 
-// comparison function for CSS keyword strings (case-insensitive)
-static int css_keyword_compare(const void *a, const void *b, void *udata) {
-    const char* str_a = *(const char**)a;
-    const char* str_b = *(const char**)b;
-    return str_icmp(str_a, strlen(str_a), str_b, strlen(str_b));
-}
+// comparison function for CSS keyword strings (case-insensitive) uses the shared callback.
 
 // Look up CSS value by name (case-insensitive)
 // Returns the LXB_CSS_VALUE enum, or CSS_VALUE__UNDEF if not found
@@ -586,8 +571,8 @@ CssEnum css_enum_by_name(const char* name) {
             sizeof(const char*),  // key is pointer to string
             css_value_definitions_count,  // initial capacity
             0, 0,                 // seeds (0 means random)
-            css_keyword_hash,
-            css_keyword_compare,
+            hashmap_hash_icstr_ptr,
+            hashmap_compare_icstr_ptr,
             NULL,                 // no element free function
             (void*)css_value_definitions  // udata pointing to value table
         );

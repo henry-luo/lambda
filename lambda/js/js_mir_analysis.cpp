@@ -1,8 +1,9 @@
 #include "js_mir_internal.hpp"
+#include "../../lib/hashmap_helpers.h"
 
 uint64_t jm_name_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const JsNameSetEntry* e = (const JsNameSetEntry*)item;
-    return hashmap_sip(e->name, strlen(e->name), seed0, seed1);
+    return hashmap_hash_cstr(e->name, seed0, seed1);
 }
 
 int jm_name_cmp(const void* a, const void* b, void* udata) {

@@ -8,7 +8,7 @@
 #include "../lib/lambda_alloca.h"
 #include "../lib/mem_grow.hpp"
 #include "../lib/mem_factory.h"
-#include "../lib/hashmap.h"
+#include "../lib/hashmap_helpers.h"
 #include "../lib/hash.h"
 #include <thorvg_capi.h>
 #include "../lib/mem.h"
@@ -305,7 +305,7 @@ static bool picture_cache_data_matches(RdtPictureCacheEntry* e, const char* data
 static uint64_t picture_path_cache_hash(const void* item, uint64_t s0, uint64_t s1) {
     const RdtPictureCacheEntry* e = (const RdtPictureCacheEntry*)item;
     const char* key = e->path_key ? e->path_key : "";
-    return hashmap_sip(key, strlen(key), s0, s1);
+    return hashmap_hash_cstr(key, s0, s1);
 }
 
 static int picture_path_cache_cmp(const void* a, const void* b, void* udata) {
@@ -319,10 +319,10 @@ static int picture_path_cache_cmp(const void* a, const void* b, void* udata) {
 
 static uint64_t picture_data_cache_hash(const void* item, uint64_t s0, uint64_t s1) {
     const RdtPictureCacheEntry* e = (const RdtPictureCacheEntry*)item;
-    uint64_t h = hashmap_sip(&e->data_hash, sizeof(e->data_hash), s0, s1);
-    h ^= hashmap_sip(&e->data_size, sizeof(e->data_size), s0, s1);
+    uint64_t h = hashmap_hash_bytes(&e->data_hash, sizeof(e->data_hash), s0, s1);
+    h ^= hashmap_hash_bytes(&e->data_size, sizeof(e->data_size), s0, s1);
     const char* mime = e->mime_key ? e->mime_key : "";
-    h ^= hashmap_sip(mime, strlen(mime), s0, s1);
+    h ^= hashmap_hash_cstr(mime, s0, s1);
     return h;
 }
 
@@ -536,8 +536,8 @@ static bool paint_cache_entry_matches_gradient(RdtPaintCacheEntry* e, uint64_t h
 
 static uint64_t paint_cache_hash_entry(const void* item, uint64_t s0, uint64_t s1) {
     const RdtPaintCacheEntry* e = (const RdtPaintCacheEntry*)item;
-    uint64_t h = hashmap_sip(&e->hash, sizeof(e->hash), s0, s1);
-    h ^= hashmap_sip(&e->kind, sizeof(e->kind), s0, s1);
+    uint64_t h = hashmap_hash_bytes(&e->hash, sizeof(e->hash), s0, s1);
+    h ^= hashmap_hash_bytes(&e->kind, sizeof(e->kind), s0, s1);
     return h;
 }
 
@@ -809,11 +809,11 @@ static Tvg_Paint image_paint_cache_dup_locked(const uint32_t* pixels, int src_w,
 
 static uint64_t image_paint_cache_hash(const void* item, uint64_t s0, uint64_t s1) {
     const RdtImagePaintCacheEntry* e = (const RdtImagePaintCacheEntry*)item;
-    uint64_t h = hashmap_sip(&e->pixels, sizeof(e->pixels), s0, s1);
-    h ^= hashmap_sip(&e->generation, sizeof(e->generation), s0, s1);
-    h ^= hashmap_sip(&e->src_w, sizeof(e->src_w), s0, s1);
-    h ^= hashmap_sip(&e->src_h, sizeof(e->src_h), s0, s1);
-    h ^= hashmap_sip(&e->src_stride, sizeof(e->src_stride), s0, s1);
+    uint64_t h = hashmap_hash_bytes(&e->pixels, sizeof(e->pixels), s0, s1);
+    h ^= hashmap_hash_bytes(&e->generation, sizeof(e->generation), s0, s1);
+    h ^= hashmap_hash_bytes(&e->src_w, sizeof(e->src_w), s0, s1);
+    h ^= hashmap_hash_bytes(&e->src_h, sizeof(e->src_h), s0, s1);
+    h ^= hashmap_hash_bytes(&e->src_stride, sizeof(e->src_stride), s0, s1);
     return h;
 }
 

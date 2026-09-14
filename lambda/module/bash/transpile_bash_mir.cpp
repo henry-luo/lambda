@@ -24,7 +24,7 @@
 #include "../../../lib/lambda_alloca.h"
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/hashmap.h"
-#include "../../../lib/hashmap_helpers.h"
+#include "../../../lib/hashmap_typed.hpp"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/file.h"
 #include <tree_sitter/tree-sitter-bash.h>
@@ -52,7 +52,11 @@ typedef struct BashMirVar {
     int index;           // module variable table index
 } BashMirVar;
 
-HASHMAP_DEFINE_STRKEY(bash_var, BashMirVar, name)
+typedef TypedHashMap<BashMirVar,
+    HashMapCStrMemberKeyOps<BashMirVar, &BashMirVar::name>> BashMirVarMap;
+static inline HashMap* bash_var_new(size_t capacity) {
+    return BashMirVarMap::create(capacity);
+}
 
 typedef struct BashMirTranspiler {
     BashTranspiler* tp;
@@ -91,7 +95,11 @@ typedef struct BashMirUserFunc {
     int source_len;
 } BashMirUserFunc;
 
-HASHMAP_DEFINE_STRKEY(bm_user_func, BashMirUserFunc, name)
+typedef TypedHashMap<BashMirUserFunc,
+    HashMapCStrMemberKeyOps<BashMirUserFunc, &BashMirUserFunc::name>> BashMirUserFuncMap;
+static inline HashMap* bm_user_func_new(size_t capacity) {
+    return BashMirUserFuncMap::create(capacity);
+}
 
 // ============================================================================
 // Special variable registry — eliminates repetitive memcmp chains

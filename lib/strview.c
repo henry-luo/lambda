@@ -2,7 +2,7 @@
 #include "strview.h"
 #include "memtrack.h"
 #include "mempool.h"
-#include "hashmap.h"
+#include "hashmap_helpers.h"
 #include "str.h"
 #include <string.h>
 #include <stdlib.h>
@@ -98,7 +98,7 @@ bool strview_to_double(const StrView* s, double* out) {
 
 uint64_t strview_hash(const StrView* s) {
     if (!s || !s->length) return 0;
-    return hashmap_sip(s->str, s->length, 0, 0);
+    return hashmap_hash_lenstr(s->str, s->length, 0, 0);
 }
 
 char* strview_dup_with_pool(const StrView* s, Pool* pool) {

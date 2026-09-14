@@ -10,6 +10,7 @@
 #include "../../../lambda-data.hpp"
 #include "../../../runtime/transpiler.hpp"
 #include "../../../lib/log.h"
+#include "../../../lib/hash.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/sort.h"
 #include <cstring>
@@ -414,10 +415,8 @@ extern "C" Item py_builtin_hash(Item obj) {
     case LMD_TYPE_STRING: {
         // simple string hash
         String* s = it2s(obj);
-        uint64_t h = 5381;
-        for (int64_t i = 0; i < s->len; i++) {
-            h = ((h << 5) + h) + (uint8_t)s->chars[i];
-        }
+        uint64_t h = hash_djb2_add_extend(5381, s->chars,
+            s->len > 0 ? (size_t)s->len : 0);
         return (Item){.item = i2it((int64_t)h)};
     }
     case LMD_TYPE_NULL:   return (Item){.item = i2it(0)};
