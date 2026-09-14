@@ -6,6 +6,9 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <assert.h>
+#include <ctype.h>
+#include <math.h>
+#include <stdlib.h>
 #include "../../../lib/str.h"
 
 // Forward declarations for validator functions
@@ -1254,6 +1257,69 @@ bool css_parse_hex_to_rgba(const char* hex_str, uint8_t* r, uint8_t* g, uint8_t*
     return color_parse_hex(hex_str, r, g, b, a);
 }
 
+static const char* css_color_skip_whitespace(const char* cursor) {
+    while (cursor && isspace((unsigned char)*cursor)) cursor++;
+    return cursor;
+}
+
+static bool css_color_parse_component(const char** cursor, bool alpha,
+                                      uint8_t* out) {
+    if (!cursor || !*cursor || !out) return false;
+    const char* start = css_color_skip_whitespace(*cursor);
+    char* end = nullptr;
+    float value = strtof(start, &end);
+    if (end == start || !isfinite(value)) return false;
+    bool percentage = *end == '%';
+    if (percentage) end++;
+    if (alpha) {
+        if (percentage) value *= 0.01f;
+        if (value < 0.0f) value = 0.0f;
+        if (value > 1.0f) value = 1.0f;
+        *out = (uint8_t)(value * 255.0f + 0.5f);
+    } else {
+        if (percentage) value = value * 255.0f / 100.0f;
+        if (value < 0.0f) value = 0.0f;
+        if (value > 255.0f) value = 255.0f;
+        *out = (uint8_t)(value + 0.5f);
+    }
+    *cursor = end;
+    return true;
+}
+
+static bool css_color_parse_function(const char* value_str, CssColor* color) {
+    if (!value_str || !color) return false;
+    bool rgba = strncasecmp(value_str, "rgba(", 5) == 0;
+    bool rgb = strncasecmp(value_str, "rgb(", 4) == 0;
+    if (!rgb && !rgba) return false;
+    const char* cursor = value_str + (rgba ? 5 : 4);
+    uint8_t channels[3] = {};
+    for (int index = 0; index < 3; index++) {
+        if (!css_color_parse_component(&cursor, false, &channels[index])) return false;
+        const char* next = css_color_skip_whitespace(cursor);
+        if (index < 2 && *next == ',') next++;
+        if (index < 2 && next == cursor) return false;
+        cursor = next;
+    }
+    cursor = css_color_skip_whitespace(cursor);
+    uint8_t alpha = 255;
+    bool has_alpha = false;
+    if (*cursor == ',' || *cursor == '/') {
+        cursor++;
+        if (!css_color_parse_component(&cursor, true, &alpha)) return false;
+        has_alpha = true;
+        cursor = css_color_skip_whitespace(cursor);
+    }
+    if (*cursor != '\0' && *cursor != ')') return false;
+    if (*cursor == ')') cursor = css_color_skip_whitespace(cursor + 1);
+    if (*cursor != '\0' || (rgba && !has_alpha)) return false;
+    color->r = channels[0];
+    color->g = channels[1];
+    color->b = channels[2];
+    color->a = alpha;
+    color->type = CSS_COLOR_RGB;
+    return true;
+}
+
 bool css_parse_color(const char* value_str, CssColor* color) {
     if (!value_str || !color) return false;
 
@@ -1267,6 +1333,8 @@ bool css_parse_color(const char* value_str, CssColor* color) {
         }
         return false;
     }
+
+    if (css_color_parse_function(value_str, color)) return true;
 
     CssEnum keyword = css_enum_by_name(value_str);
     if (keyword == CSS_VALUE_CURRENTCOLOR) {

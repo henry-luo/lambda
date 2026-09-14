@@ -15,13 +15,27 @@
 
 ## Archive index
 
-This archive contains **79 historical records**: 78 RESOLVED entries and one
+This archive contains **90 historical records**: 89 RESOLVED entries and one
 CLOSED design decision. Duplicate and split records remain separate so their
-provenance is not lost. The first sections contain the 34 records formerly
+provenance is not lost. The first sections contain records formerly
 interleaved with live entries; §15 preserves the 44 records from the former
 resolved/obsolete appendix.
 
 ## 1. Compilation pipeline, CLI & REPL (LR_01)
+
+<a id="lr01-r12"></a>**LR01-R12 · `g_template_registry` was a process-global registry · RESOLVED 2026-09-13**
+The runtime-globals migration in `46a2c9ee72` moved the registry into
+`EvalContext::template_registry`. `template_registry_current_slot()` now resolves
+the active TLS-bound context slot, while `g_template_registry` is only the
+compatibility macro `(*template_registry_current_slot())`; destruction clears
+the active context slot. This removes cross-isolate template visibility and
+collision.
+
+Current source confirms there is no process-global registry pointer. The focused
+concurrency coverage is present, but its module-state test currently stops at a
+separate `module-key-link: name allocation failed for property key 4` in
+`chart/vega.ls`; that failure does not restore a global registry and remains an
+independent open issue.
 
 <a id="lr01-8"></a>**LR01-8 · `init_module_import` pointer-walk is layout-coupled · RESOLVED 2026-09-05**
 `init_module_import` was unreachable legacy C2MIR glue: no MIR Direct path
@@ -252,6 +266,70 @@ workspace allocation failure. The complete representation suite passes 29/29;
 
 ## 7. MIR Direct transpiler & JIT (LR_07)
 
+<a id="lr07-1"></a>**LR07-1 · Numeric semantic result and physical representation were coupled · RESOLVED 2026-09-14**
+Every Lambda AST family now enters `transpile_expr_value()` and publishes a
+`MirValue` carrying the full `Type*` contract and its actual `ValueRep`. The
+legacy raw-register expression shim is absent. Consumers request their needed
+carrier through `em_require_rep()` and read a lowered value's carrier only
+through `mir_value_carrier_type(MirValue)`; they do not recreate it from the
+AST or from `MIR_reg_type()`.
+
+The final audit replaced post-lowering carrier re-derivations in machine-count,
+loop binding/filter/condition, multidimensional-index, bitwise, pipe, path, declarator,
+and edit-index lowering. `mir_expr_carrier_type()` remains a pre-lowering
+planner only, using AST/lowering facts to select an emission path; it never
+observes an emitted MIR register. This enforces the four-authority split in
+**D2.4.1–D2.4.3**: semantics in `Type*`, planned representation in lowering,
+emitted representation/provenance in `MirValue`, and physical register class
+only in named physical helpers.
+
+Regression evidence: `ValueRepresentationTest` covers canonical contracts and
+fail-closed carrier transitions; `index_value_rep.ls`,
+`bitwise_lane_preservation.ls`, `proc_assignment_error_carrier.ls`, and
+`proc_var_type_widen.ls` pass under eager JIT. The compiler audit finds no
+`transpile_expr_reg_legacy` or `legacy_expr_value` symbol and no semantic
+`MIR_reg_type()` query in Lambda expression lowering.
+
+<a id="lr07-4"></a>**LR07-4 · Type widening is truncate-or-box · RESOLVED 2026-09-14**
+`transpile_assign_stam` now preserves both the declared destination contract
+and the producer's physical carrier. A FLOAT assigned to a declared `int`
+crosses `emit_checked_boundary` before any lane conversion, so a non-integral
+value returns E201 instead of reaching an incompatible move or a lossy cast.
+An inferred `var` that is written with a wider scalar in a control region is
+pre-widened at its declaration, ensuring every path observes one boxed carrier.
+
+The remaining boxed-to-native assignment arm now tests `ItemError` before
+unboxing. An `any` producer that yields an error therefore exits on the error
+channel; it can never be decoded as `0`, `0.0`, or `false` in a native local.
+This implements the destination-admission rule in **S7.8.1** and keeps the
+carrier/value distinction required by **D2.4.1–D2.4.3**. The old division-zero
+example was stale: **S4.5.1–S4.5.3** define computed zero divisors as numeric
+poison, not `ItemError`.
+
+`MIR_D2I` remains only in the guarded float-index normalization path; an
+out-of-domain magnitude maps to a non-indexable value that every bounds path
+rejects, so it is not an assignment-widening conversion.
+
+Regression: `test/lambda/proc/proc_assignment_error_carrier.ls` covers an
+`any`-returned `ItemError` assigned to an inferred native `var value = 7`, an inferred loop
+widening to `1.5`, and rejection of `1.5` at a declared `int` assignment.
+It produces `[true, 1.5, true]` under both `LAMBDA_TIER=jit` and the default
+tier. `proc_var_type_widen.ls` also passes under eager JIT.
+
+<a id="lr07-r7"></a>**LR07-R7 · Precise-root classification trusted dishonest static types · RESOLVED 2026-09-13**
+The producer and consumer halves now share the value-side TypeId
+classification: `mir_value_type_id` handles the overloaded `LMD_TYPE_TYPE`,
+and `lambda_gc_value_class` fails closed when the semantic contract is
+unresolved. This preserves the precise RootFrame/Rooted ownership required by
+**D2.4.1–D2.4.3** and **D5.4.2** without restoring conservative native-stack
+scanning.
+
+`LAMBDA_ROOT_WITNESS=2` covers named locals and expression temporaries across
+may-GC calls. The current whole-corpus sweep reports zero violations, while the
+negative control reproduces the pre-fix violations; focused fixtures also pass
+with forced GC and freed-object poisoning. The collector-side duplicate is
+archived as [LR08-R3](#lr08-r3).
+
 <a id="lr07-15"></a>**LR07-15 · Object methods read the receiver as zero on the eager JIT tier · RESOLVED 2026-09-03**
 An SI3v2 tier-divergence: the same script yields different results under
 `LAMBDA_TIER=jit` than under `interp`/`auto`. Implicit receiver-field reads
@@ -338,6 +416,119 @@ That gap is now closed by `test/lambda/element_content_axes.ls`, which pins both
 
 ## 8. Memory management & GC (LR_08)
 
+<a id="lr08-r3"></a>**LR08-R3 · JIT rooting hinged on dishonest static types · RESOLVED 2026-09-13**
+The collector-side face is resolved with the same fail-closed
+`lambda_gc_value_class` classification and the runtime root witness archived as
+[LR07-R7](#lr07-r7). Level-2 witness coverage checks both candidate bindings and
+non-candidate expression temporaries against actual GC-managed pointer lanes;
+the current corpus sweep reports zero violations. The implementation remains
+precise `RootFrame`/`Rooted` ownership, as required by **D2.4.1–D2.4.3** and
+**D5.4.2**, never conservative stack scanning.
+
+<a id="lr08-4"></a>**LR08-4 · Wide scalar ownership at Lambda escaping stores · RESOLVED 2026-09-14**
+The Lambda-core audit is complete: native Arrays and packed Map/Shape fields
+now use their destination-owned layouts; generic containers, closure
+environments, VMap, module storage, concurrency/task state, and async paths
+route escaping scalar Items through their owning store/rehome helpers. Concat
+rebases through `array_set`, and a wide intermediate held across `wait` remains
+correct under forced collection. This satisfies **D2.5.2v3**, **D2.6.1v3**,
+**D2.6.4v3**, and **D5.2.2v3** for the Lambda runtime.
+
+The audit found two JavaScript-native carrier defects after the Lambda-core
+paths were closed: Error standard own fields and JS collection entry storage.
+They are tracked separately as [JS03-L1](JS_Issue_Ledger.md#js03-l1); they do
+not leave a remaining Lambda-core runtime path under this record.
+
+<a id="lr08-r12"></a>**LR08-R12 · Generator/async suspension states capped at 64 · RESOLVED (2026-09-08)**
+`JsMirTranspiler::gen_state_labels` was `MIR_label_t[64]`, and two clamps
+matched it — `if (yield_count > 63) yield_count = 63;` and the identical line
+for `await_count`. Both truncated silently: a 100-yield generator summed only
+its first 62 values (1891 instead of 4950), and a 150-await async function was
+wrong the same way. Fixed by exact-sizing the label array from the pre-counted
+state count, checking that capacity in `jm_next_resume_state` instead of a
+literal 64, and deleting both clamps. Same sweep produced LR09-30 above.
+
+
+<a id="lr08-r11"></a>**LR08-R11 · Native realm construction is not GC-safe · RESOLVED (2026-09-08)**
+The JS realm's native module builders were written against an implicit
+"no collection happens here" assumption. Under
+`LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1` this fails in three distinct
+ways, all violating **D5.4.2** (a value under construction is live and needs an
+exact root); D2.1.7 pins the heap as non-moving, so these are liveness bugs, not
+address-stability bugs.
+
+1. **Root ranges registered one Item too high.** Five `JsNamespaceState`-derived
+   caches (`stream`, `http`, `https`, `net`, `fs`) registered their precise root
+   range at the first *derived* field rather than the inherited
+   `namespace_object`, which the base lays out first. Each range therefore left
+   its namespace object unrooted *and* scanned one Item past the end of the
+   struct. `require("stream")` returned a namespace with **zero** properties
+   under forced GC. Fixed 2026-09-08 in `js_runtime_state.cpp`; the catalog now
+   starts every such range at `namespace_object`, and a one-time runtime check
+   (`js-root-range:` in the log) pins the start/count pair for all seven
+   namespace states. These states are not standard-layout, so `offsetof` on them
+   is ill-formed and the guard cannot be a `static_assert`.
+
+2. **Factories that build an object on a bare C local.** `js_new_object()`
+   followed by a run of allocating property installs, with the only reference in
+   a C automatic. The object is reachable from nowhere until the last store, so
+   a collection mid-construction reclaims it and the finished object comes back
+   missing methods, or a later store writes into reclaimed memory and crashes.
+   Fixed: the four `node_crypto` factories, both `node_path` parse factories and
+   `path.win32` (this one crashed `require("path")` outright), `node_os`
+   `networkInterfaces`/`userInfo`, the `stream` base constructor and its
+   prototype, and `http.STATUS_CODES`.
+
+3. **Two allocating arguments in one store.** `set(obj, make_string(k),
+   make_string(v))` — argument evaluation order is unspecified, so whichever
+   operand is built first is an unrooted temporary while its sibling allocates.
+   The canonical rooted publisher `js_install_native_*`
+   (`js_runtime_function.cpp`) already carries this rule as a comment citing
+   D5.2/D6.2.2v2, but hand-rolled `*_set_method` clones bypassed it. Fixed:
+   `stream_set_method`, `assert_set_method`/`assert_set_fresh_method`/
+   `assert_set_method_item`, `js_path_set_method`, `dns_set_constant`,
+   `js_message_port_data_clone_error`, and the `js_net` address-property and
+   `node_events` unhandled-error stores. The 15 Jube-module `*_set_method`
+   clones were already correct.
+
+**Second pass (2026-09-08) closed it.** All 26 built-in modules now report
+byte-identical key sets with and without
+`LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`, and
+`make test-jube-node-core-dynamic` — whose forced-GC arm produced 7 of 35
+registry lines on pristine `HEAD` and 11 after the first pass — passes.
+
+A fourth shape appeared in this pass, and it is the most dangerous of the four:
+
+4. **A cache slot published before its root exists, or with no root at all.**
+   `js_get_internal_stream_state_namespace` assigned the fresh object into a
+   `JsStreamState` slot without first calling `stream_ensure_roots()`, so the
+   range backing that slot was not yet registered. The object was reclaimed and
+   its storage reused by the two native functions installed immediately after,
+   which is why the module registry reported this namespace as a **function**
+   rather than an object. `js_get_internal_stream_add_abort_signal_namespace`
+   was worse: it cached into a function-local `static Item`, which a precise
+   collector never scans at all. That namespace now has a real slot in
+   `JsStreamState` (range 44 → 45, guard's last field updated accordingly), and
+   both getters plus `js_get_internal_stream_end_of_stream_namespace` register
+   the range before publishing. The other 13 function-local `static Item`
+   namespace caches in `js_runtime.cpp` were audited and all call
+   `heap_register_gc_root`, so this was the only unrooted one.
+
+Also fixed in this pass: `tls` rootCertificates key (freed across the
+certificate-bundle build) and the bundled-pem push; `http` `METHODS` array and
+`globalAgent` (both unreachable across their own construction); the three `dns`
+server-array builders (`dns_load_system_servers`, `dns_array_copy`,
+`dns_validated_servers_copy`, whose arrays were bare locals across push loops —
+this is why `dns.__dns_servers__` was absent while `getServers()` still worked);
+and `zlib` `constants`, which was created and then left unrooted while the
+sibling `codes` object allocated, so its root slot received a reclaimed pointer.
+
+**Rule of thumb the four shapes reduce to:** publish into a registered root
+*before* the next allocation, never between two of them. The ~194-site shape
+scan of `lambda/{js,module,dom}` remains a starting point for future audits, not
+a defect list — most entries are reachable through an already-rooted owner.
+
+
 <a id="lr08-1"></a>**LR08-1 · Decimal `mpd_t` leak (in-code TODO) · RESOLVED 2026-09-05**
 Per **D4.3.3**, the GC delegates out-of-zone cleanup to the C++
 `heap_gc_destroy_external_payload` bridge. For `LMD_TYPE_DECIMAL`, it calls
@@ -360,6 +551,62 @@ an offset-layout issue.
 
 
 ## 9. Runtime builtins (LR_09)
+
+<a id="lr09-r30"></a>**LR09-R30 · Regex capture groups silently truncate at 256 · RESOLVED (2026-09-08)**
+A regular expression with more than 255 capture groups reports the wrong result
+and gives no diagnostic. Repro:
+
+```js
+const n = 300;
+const re = new RegExp('(a)'.repeat(n));
+const m = 'a'.repeat(n).match(re);
+console.log(m.length - 1, m[n]);   // Lambda: 255 undefined   Node: 300 a
+```
+
+`$300` in a `replace` pattern likewise resolves to nothing. The cause is
+`JS_REGEX_MAX_GROUPS` (256, `js_regex_wrapper.h:25`) with clamps of the form
+`if (ngroups > JS_REGEX_MAX_GROUPS) ngroups = JS_REGEX_MAX_GROUPS;` at seven
+sites across `js_runtime.cpp` and `js_regex_wrapper.cpp`. The constant sizes
+about a dozen **stack** arrays (`re2::StringPiece matches[...]`,
+`int starts[...]/ends[...]`, `RegexGroupInfo groups[...]`), so removing it means
+either heap-allocating on the match path or sizing from the compiled pattern's
+group count. ECMAScript sets no such limit and V8 allows 32,767.
+
+**Fixed 2026-09-08.** `JS_REGEX_MAX_GROUPS` is gone. Match scratch is sized
+from the compiled pattern's own group count through one `JsRegexScratch<T>`
+helper (`js_regex_wrapper.h`) that keeps `JS_REGEX_INLINE_GROUPS` (32) slots
+inline and heap-allocates only above that, so an ordinary pattern still
+allocates nothing on the match path. Every clamp is deleted.
+
+**There were three caps, not one, and the first fix only moved the boundary.**
+After the match-scratch conversion a 300-group pattern matched correctly but a
+*lookahead* over 128 groups still failed. Two more fixed limits stood behind it:
+
+- `erased_original_group[256]` in the wrapper's assertion-rewrite pass, whose
+  guards silently stopped the erased-group remap partway, producing a wrong
+  rewritten pattern. Now sized from `original_group_count`.
+- The backtracking matcher (`js_bt_regex.cpp`), which had `int cap_start[256]`,
+  `cap_end[256]`, per-iteration `saved_s/saved_e[256]` and per-lookaround
+  `sv_s/sv_e[256]`, plus an explicit `if (ng + 1 > 256) return 0; // fall back`.
+  That return is reported to the caller as **no match**, so it was not a
+  fallback at all — a large lookahead pattern silently failed. All four arrays
+  are sized from the pattern and the refusal is deleted.
+
+Verified against Node on match, `exec`, high-numbered `$n` replacement and
+lookahead at 128/150/200/300 groups: byte-identical output. Regression test
+`test/js/regex_many_capture_groups.{js,txt}` covers all six cases; JS gtest is
+371 tests, up from 370.
+
+No performance cost: the ordinary-pattern match path got *faster* in a
+debug-build A/B (813 ms vs 1017 ms over 600k matches), which is consistent with
+no longer placing 4 KB of `re2::StringPiece[256]` and 2 KB of `int[256]` on the
+stack per match. Per rule 10 that debug figure is directional only; the point is
+that it is not a regression.
+
+Gates: test262 40261/40261 with 0 regressions, JS gtest 371/371, script gtest,
+rooting core, MIR GC stress, lambda baseline 5078/5078 (the memtrack gate), node
+slice identical to pristine.
+
 
 <a id="lr09-6"></a>**LR09-6 · `set_runtime_error` message buffer cap · RESOLVED 2026-08-28**
 `set_runtime_error` and `err_createf` formatted into fixed 1024-byte stack
@@ -1280,6 +1527,18 @@ textile, wiki) calls `list_push` and merges them. `input-ics.cpp` and
 `input-mark.cpp` use both and so mix the two policies — worth reconciling, along
 with retiring the dead flag.
 
+<a id="lr09-r4-index"></a>**LR09-R4-index · `fn_index` invalid reads return `null` · RESOLVED 2026-09-13 (not a defect — ruled by S7.1.1v3 and S8.2.1v4)**
+The former LR09-4 entry misclassified the implementation as swallowing errors.
+The formal semantics explicitly require every invalid member/index **read** to
+yield `null`, including fractional or negative sequence positions, out-of-range
+positions, and keys outside a container's domain. Invalid **writes** remain hard
+errors under S7.1.3v2, which is what `proc_invalid_member_access.ls` verifies.
+`oob_read_null.ls` covers out-of-range, negative, and chained reads. The
+type-dependent JIT float-OOB residue is not closed here; it remains in
+[LR07-10](../Lambda_Issue_Ledger.md#lr07-10). The `-index` archive suffix
+disambiguates this original LR09-4 record from an unrelated legacy LR09-R4
+anchor already present in this archive.
+
 <a id="lr09-r4"></a><a id="lr10-3"></a>**LR09-R4 · `set_runtime_error` message buffer cap · RESOLVED 2026-08-28**
 `err_createf` and `set_runtime_error` now share the exact-size variadic
 formatter backed by `mem_alloc`, so long diagnostics are not silently
@@ -1315,6 +1574,15 @@ construction, rather than silently copying in the COW path. This enforces
 `S9.1.1` and `S9.1.6`: mutation through a module-level `let` is rejected, while
 the caller must use an allowed mutable owner. A targeted module-let probe now
 raises E211 and the full baseline passes 3914/3914.
+
+<a id="lr12-r9"></a>**LR12-R9 · Construction/insertion aliases instead of capturing by value · RESOLVED 2026-09-13**
+The **S9.1.2/S9.1.3/S9.3.1** COW implementation is now unconditional. Commit
+`b588f3f191` flipped capture on by default, and `9600c94d94` retired the
+`LAMBDA_COW_CAPTURE` escape hatch; current runtime code no longer consults it.
+Insertion capture and plain-parameter snapshot coverage pass on both tiers,
+including the two-node-cycle and nested-update probes. The dedicated COW
+fixtures pass under JIT with forced collection and freed-object poisoning, with
+the ruled value preserved.
 
 ---
 

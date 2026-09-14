@@ -599,10 +599,13 @@ test/lambda/proc/proc_nullable_native_array.ls	run
 test/lambda/proc/proc_nullable_native_extended_pointer.ls	run
 test/lambda/proc/proc_nullable_native_float_array.ls	run
 test/lambda/proc/proc_nullable_native_i64_map.ls	run
+test/lambda/proc/proc_nullable_native_wide_map_storage.ls	run
 test/lambda/proc/proc_nullable_native_int64_array.ls	run
+test/lambda/proc/proc_nullable_native_wide_array_storage.ls	run
 test/lambda/proc/proc_nullable_native_map.ls	run
 test/lambda/proc/proc_nullable_native_pointer.ls	run
 test/lambda/proc/proc_nullable_native_sized_array.ls	run
+test/lambda/proc/proc_sort_wide_scalar_ownership.ls	run
 test/lambda/proc/proc_nullable_native_sized_map.ls	run
 test/lambda/proc/proc_nullable_pointer_lane_local.ls	run
 test/lambda/proc/proc_nullable_pointer_scalar_extended_function_boundary.ls	run

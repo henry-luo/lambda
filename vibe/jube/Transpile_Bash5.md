@@ -601,14 +601,14 @@ If time is limited, implement in this order for maximum impact:
 
 #### Files Modified This Session
 
-1. `lambda/bash/bash_runtime.cpp` — sorted function printing, `declare_print_func`, `bash_append_newline`
-2. `lambda/bash/bash_runtime.h` — new declarations
-3. `lambda/bash/transpile_bash_mir.cpp` — function source extraction, `declare -f` handler, herestring newline, compgen routing, eval syntax error detection, `bash_errors.h` include
-4. `lambda/bash/build_bash_ast.cpp` — `BASH_ATTR_FUNC` flag, synthetic declare -f node, herestring expansion handlers, `heredoc_escape_text()` helper
-5. `lambda/bash/bash_ast.hpp` — `BASH_ATTR_FUNC = 1 << 10`
-6. `lambda/bash/bash_builtins.cpp` — `type` function body printing, `read -d` newline fix
-7. `lambda/bash/bash_builtins_ext.cpp` — `bash_builtin_compgen` stub
-8. `lambda/bash/bash_builtins_ext.h` — `bash_builtin_compgen` declaration
+1. `lambda/module/bash/bash_runtime.cpp` — sorted function printing, `declare_print_func`, `bash_append_newline`
+2. `lambda/module/bash/bash_runtime.h` — new declarations
+3. `lambda/module/bash/transpile_bash_mir.cpp` — function source extraction, `declare -f` handler, herestring newline, compgen routing, eval syntax error detection, `bash_errors.h` include
+4. `lambda/module/bash/build_bash_ast.cpp` — `BASH_ATTR_FUNC` flag, synthetic declare -f node, herestring expansion handlers, `heredoc_escape_text()` helper
+5. `lambda/module/bash/bash_ast.hpp` — `BASH_ATTR_FUNC = 1 << 10`
+6. `lambda/module/bash/bash_builtins.cpp` — `type` function body printing, `read -d` newline fix
+7. `lambda/module/bash/bash_builtins_ext.cpp` — `bash_builtin_compgen` stub
+8. `lambda/module/bash/bash_builtins_ext.h` — `bash_builtin_compgen` declaration
 9. `lambda/sys_func_registry.c` — registered new functions
 10. `test/bash/gnu_baseline.json` — updated from 12 to 17 entries
 

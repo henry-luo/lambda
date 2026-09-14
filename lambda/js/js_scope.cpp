@@ -25,10 +25,6 @@ struct JsRuntimeAstCacheEntry {
     JsScript* script;
 };
 
-struct JsRuntimeAstCache {
-    HashMap* entries;
-};
-
 static uint64_t js_runtime_ast_cache_mix(uint64_t hash, uint64_t value) {
     return hash ^ (value + 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2));
 }
@@ -63,18 +59,12 @@ static int js_runtime_ast_cache_entry_compare(const void* left, const void* righ
     return memcmp(a->source, b->source, a->source_length);
 }
 
-static JsRuntimeAstCache* js_runtime_ast_cache_ensure(Runtime* runtime) {
+static HashMap* js_runtime_ast_cache_ensure(Runtime* runtime) {
     if (!runtime || !runtime->scripts) return NULL;
-    if (runtime->js_ast_cache) return (JsRuntimeAstCache*)runtime->js_ast_cache;
-    JsRuntimeAstCache* cache = (JsRuntimeAstCache*)mem_calloc(1,
-        sizeof(JsRuntimeAstCache), MEM_CAT_JS_RUNTIME);
-    if (!cache) return NULL;
-    cache->entries = hashmap_new(sizeof(JsRuntimeAstCacheEntry), 16, 0, 0,
+    if (runtime->js_ast_cache) return runtime->js_ast_cache;
+    HashMap* cache = hashmap_new(sizeof(JsRuntimeAstCacheEntry), 16, 0, 0,
         js_runtime_ast_cache_entry_hash, js_runtime_ast_cache_entry_compare, NULL, NULL);
-    if (!cache->entries) {
-        mem_free(cache);
-        return NULL;
-    }
+    if (!cache) return NULL;
     runtime->js_ast_cache = cache;
     return cache;
 }
@@ -95,12 +85,12 @@ static JsRuntimeAstCacheEntry js_runtime_ast_cache_probe(const char* source,
 JsScript* js_runtime_ast_cache_lookup(Runtime* runtime, const char* source,
         size_t source_length, const char* reference, bool strict,
         bool typescript_profile) {
-    JsRuntimeAstCache* cache = runtime ? (JsRuntimeAstCache*)runtime->js_ast_cache : NULL;
-    if (!cache || !cache->entries || !source) return NULL;
+    HashMap* cache = runtime ? runtime->js_ast_cache : NULL;
+    if (!cache || !source) return NULL;
     JsRuntimeAstCacheEntry probe = js_runtime_ast_cache_probe(source, source_length,
         reference, strict, typescript_profile);
     const JsRuntimeAstCacheEntry* found = (const JsRuntimeAstCacheEntry*)hashmap_get(
-        cache->entries, &probe);
+        cache, &probe);
     // ES modules retain evaluation/link state in their ModuleDescriptor. Keep
     // their existing module path rather than treating them as repeatable scripts.
     return found && found->script && !found->script->is_es_module ? found->script : NULL;
@@ -108,37 +98,35 @@ JsScript* js_runtime_ast_cache_lookup(Runtime* runtime, const char* source,
 
 static void js_runtime_ast_cache_insert(Runtime* runtime, JsScript* script) {
     if (!runtime || !script || !script->source || !script->reference) return;
-    JsRuntimeAstCache* cache = js_runtime_ast_cache_ensure(runtime);
+    HashMap* cache = js_runtime_ast_cache_ensure(runtime);
     if (!cache) return;
     JsRuntimeAstCacheEntry entry = js_runtime_ast_cache_probe(script->source,
         script->source_length, script->reference, script->ast_cache_requested_strict,
         script->ast_cache_typescript_profile);
     entry.script = script;
-    if (hashmap_get(cache->entries, &entry)) return;
-    hashmap_set(cache->entries, &entry);
-    if (hashmap_oom(cache->entries)) {
-        hashmap_delete(cache->entries, &entry);
+    if (hashmap_get(cache, &entry)) return;
+    hashmap_set(cache, &entry);
+    if (hashmap_oom(cache)) {
+        hashmap_delete(cache, &entry);
         log_error("js-ast-cache: failed to index retained script %s", script->reference);
     }
 }
 
 void js_runtime_ast_cache_remove_script(Runtime* runtime, Script* base_script) {
-    JsRuntimeAstCache* cache = runtime ? (JsRuntimeAstCache*)runtime->js_ast_cache : NULL;
+    HashMap* cache = runtime ? runtime->js_ast_cache : NULL;
     JsScript* script = js_script_from_script(base_script);
-    if (!cache || !cache->entries || !script || !script->source || !script->reference) return;
+    if (!cache || !script || !script->source || !script->reference) return;
     JsRuntimeAstCacheEntry probe = js_runtime_ast_cache_probe(script->source,
         script->source_length, script->reference, script->ast_cache_requested_strict,
         script->ast_cache_typescript_profile);
     const JsRuntimeAstCacheEntry* found = (const JsRuntimeAstCacheEntry*)hashmap_get(
-        cache->entries, &probe);
-    if (found && found->script == script) hashmap_delete(cache->entries, &probe);
+        cache, &probe);
+    if (found && found->script == script) hashmap_delete(cache, &probe);
 }
 
 void js_runtime_ast_cache_destroy(Runtime* runtime) {
     if (!runtime || !runtime->js_ast_cache) return;
-    JsRuntimeAstCache* cache = (JsRuntimeAstCache*)runtime->js_ast_cache;
-    hashmap_free(cache->entries);
-    mem_free(cache);
+    hashmap_free(runtime->js_ast_cache);
     runtime->js_ast_cache = NULL;
 }
 

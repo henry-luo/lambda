@@ -405,8 +405,8 @@ bool lambda_array_contract_info(Type* contract, LambdaArrayContractInfo* out) {
     if (out->rank == 0) return false;
 
     out->array_contract = root;
-    out->leaf_lane = lambda_lane_storage_desc_for(out->leaf_element);
-    out->has_leaf_lane = out->leaf_lane.kind != LANE_STORAGE_INVALID;
+    out->has_leaf_lane = lambda_type_array_lane_storage_desc(out->leaf_element,
+        &out->leaf_lane);
     return true;
 }
 
@@ -778,6 +778,14 @@ bool lambda_type_lane_storage_desc(Type* type, LaneStorageDesc* out) {
     *out = {};
     if (!type) return false;
     LaneStorageDesc desc = lambda_lane_storage_desc_for(type);
+    if (!desc.native) return false;
+    *out = desc;
+    return true;
+}
+
+bool lambda_type_array_lane_storage_desc(Type* type, LaneStorageDesc* out) {
+    if (!out || !type) return false;
+    LaneStorageDesc desc = lambda_persistent_lane_storage_desc_for(type);
     if (!desc.native) return false;
     *out = desc;
     return true;

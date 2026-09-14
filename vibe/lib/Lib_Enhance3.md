@@ -219,7 +219,7 @@ One decode site is a clean migration:
 
 ## 5. Verbatim `utf8_encode` copy in bash → `lib/utf.h` ❌
 
-[lambda/bash/bash_expand.cpp:231](../../lambda/bash/bash_expand.cpp) defines a
+[lambda/module/bash/bash_expand.cpp:231](../../lambda/module/bash/bash_expand.cpp) defines a
 local `static int utf8_encode(int codepoint, char* buf)` that is a **byte-for-byte
 reimplementation** of `lib/utf.h::utf8_encode(uint32_t, char[4])`. Used by the
 `$'...'` ANSI-C `\u`/`\U` escape handler (:330, :346).
@@ -239,7 +239,7 @@ hex *digit* step is `lib/hex.h::hex_decode_byte`, but the **multi-digit,
 bounded-width scan** (`parse N hex/octal digits, stop early, report consumed`) is
 duplicated:
 
-- [lambda/bash/bash_expand.cpp:203](../../lambda/bash/bash_expand.cpp) `parse_hex` + :219 `parse_octal`
+- [lambda/module/bash/bash_expand.cpp:203](../../lambda/module/bash/bash_expand.cpp) `parse_hex` + :219 `parse_octal`
 - [lambda/input/input-pdf-postprocess.cpp:397](../../lambda/input/input-pdf-postprocess.cpp) `parse_hex_token`
 - [lambda/js/js_bt_regex.cpp:230](../../lambda/js/js_bt_regex.cpp) `parse_hex_escape`
 - plus `strtoul(hex, .., 16)` one-offs in [build_ast.cpp:2058](../../lambda/build_ast.cpp), [js/build_js_ast.cpp:34](../../lambda/js/build_js_ast.cpp), [input/build_py_ast.cpp:133](../../lambda/input/build_py_ast.cpp), and TOML/YAML/RTF `\u` handlers.

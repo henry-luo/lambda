@@ -167,11 +167,12 @@ struct DomDocumentServices {
     uint32_t layout_cache_allocations;
     void* node_registry;       // external generations, pins, and detached candidates
     void* style_epoch_manager; // versioned canonical specified-style pools
+    void* canvas_registry;     // document-owned HTMLCanvasElement backing surfaces
 
     DomDocumentServices() : mem_ctx(nullptr), cached_css_engine(nullptr),
         keyframe_registry(nullptr), element_count(0), ext_allocations(0),
         layout_cache_allocations(0), node_registry(nullptr),
-        style_epoch_manager(nullptr) {}
+        style_epoch_manager(nullptr), canvas_registry(nullptr) {}
 };
 
 static inline const char* dom_reconcile_mode_name(DomReconcileMode mode) {

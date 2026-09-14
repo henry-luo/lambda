@@ -302,12 +302,6 @@ static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
         (void)dv;
         break;
     }
-    case MAP_KIND_ITERATOR:
-        if (map->data && !gc_native_seen_seen_or_add(seen_native, map->data)) {
-            mem_free(map->data);
-        }
-        map->data = NULL;
-        break;
     case MAP_KIND_ARRAY_SPARSE: {
         SparseArrayMap* sm = (SparseArrayMap*)map;
         if (sm->sparse_indices && !gc_native_seen_seen_or_add(seen_native, sm->sparse_indices)) {
@@ -885,6 +879,7 @@ extern "C" String* heap_strcpy(const char* src, int64_t len) {
     // guard against a negative length and against the size overflowing heap_alloc's int
     // parameter (which would otherwise truncate to a small allocation + large memcpy).
     if (len < 0 || (uint64_t)len + 1 + sizeof(String) > (uint64_t)INT_MAX) return NULL;
+    if (len == 0) return it2s(ItemEmptyString);
     String *str = (String *)heap_alloc((int)(len + 1 + sizeof(String)), LMD_TYPE_STRING);
     if (!str) return NULL;         // OOM — propagate instead of dereferencing NULL
     memcpy(str->chars, src, len);  // Safe copy with explicit length

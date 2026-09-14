@@ -31,7 +31,6 @@ struct TlsClientTicketState;
 struct JsTlsSecureContextOwner;
 struct JsAtomicsRuntimeState;
 struct JsPrototypeSnapshotState;
-struct JsDynFuncCacheState;
 struct JsMirCompileRecoveryState;
 struct JsNetRuntimeState;
 
@@ -74,7 +73,7 @@ struct JsMockSchedulerWait {
     int64_t due_ms = 0;
 };
 
-struct JsEventLoopQueueState {
+struct JsEventLoopState {
     // Each queue owns a GC Array of one RuntimeJob shape. Queue order stays
     // policy-specific while storage and captured context are shared (JSCU30).
     Item queue_storage[3] = {};
@@ -91,9 +90,6 @@ struct JsEventLoopQueueState {
     bool shutting_down = false;
     // Dynamic source compiled from a queued callback belongs to its parent turn.
     bool callback_running = false;
-};
-
-struct JsEventLoopTimerState {
     // Timer scheduling stays policy-specific; live handles are rows in the
     // context-wide JsRuntimeState resource table.
     int64_t next_id = 1;
@@ -124,10 +120,6 @@ struct JsRegexpLastMatch {
 // spans for legacy semantic records, so there is one root carrier (D5.3).
 struct JsRootedState {
     RootVector roots = {};
-};
-
-struct JsNamespaceState : JsRootedState {
-    Item namespace_object = {};
 };
 
 // Fixed realm singleton/cache values converge here. Callers reserve the
@@ -216,7 +208,10 @@ enum JsRealmSlotId {
         JS_INTRINSIC_BINDING_COUNT,
     JS_REALM_SLOT_CONSTRUCTOR_BASE = JS_REALM_SLOT_GLOBAL_BUILTIN_BASE +
         JS_BUILTIN_GLOBAL_MAX,
-    JS_REALM_SLOT_COUNT = JS_REALM_SLOT_CONSTRUCTOR_BASE + JS_CTOR_MAX,
+    JS_REALM_SLOT_INTRINSIC_PROTOTYPE_BASE = JS_REALM_SLOT_CONSTRUCTOR_BASE +
+        JS_CTOR_MAX,
+    JS_REALM_SLOT_COUNT = JS_REALM_SLOT_INTRINSIC_PROTOTYPE_BASE +
+        JS_CLASS__COUNT,
 };
 
 struct JsRealmSlots {
@@ -293,13 +288,8 @@ JsCompiledArtifact* js_code_store_artifact_at(JsCodeStore* store, int index);
 void js_code_store_clear_rows(JsCodeStore* store);
 void js_code_store_destroy(JsCodeStore* store);
 
-struct JsReadlineInput {
-    int64_t root_slot = -1;
-};
-
 struct JsReadlineState {
-    RootVector input_values = {};
-    ArrayList* inputs = NULL;
+    RootVector input_values = {}; // consecutive input/interface pairs
     bool create_promises_mode = false;
 };
 
@@ -308,7 +298,8 @@ struct JsTlsNativeState {
     JsTlsSecureContextOwner* secure_context_owners = NULL;
 };
 
-struct JsStreamState : JsNamespaceState {
+struct JsStreamState : JsRootedState {
+    Item namespace_object = {};
     Item key_on = {}; Item key_emit = {}; Item key_push = {}; Item key_write = {};
     Item key_end = {}; Item key_pipe = {}; Item key_read = {}; Item key_destroy = {};
     Item key_readable = {}; Item key_writable = {}; Item key_flowing = {}; Item key_ended = {};
@@ -542,13 +533,21 @@ void js_global_environment_release_module_bindings(
 
 #define JS_TYPED_ARRAY_CACHE_TYPE_COUNT 12
 
-// Catalog state retains only initialization policy. Every cached Item,
-// including catalog-indexed callable and constructor identities, lives in the
-// dynamic JsRealmSlots carrier above (D5.3.5; JSCU29).
-struct JsRealmIntrinsicSlots {
+// Every cached Item, including catalog-indexed callable and constructor
+// identities, lives in the dynamic JsRealmSlots carrier above. This record
+// retains only native initialization and cache-validity state (D5.3.5; JSCU29).
+struct JsRealmIntrinsicState {
     bool builtin_function_initialized = false;
     bool global_builtin_initialized = false;
     bool constructors_initialized = false;
+    bool prototype_resolving[JS_CLASS__COUNT] = {};
+    uint64_t mutation_versions[JS_CLASS__COUNT] = {};
+    uint64_t mutation_serial = 1;
+    uint64_t owner_heap_epoch = 0;
+    uint64_t array_proto_clean_epoch = 0;
+    bool array_proto_clean = false;
+    uint32_t initialization_depth = 0;
+    int array_sym_iter_ever_set = 0;
 };
 
 struct JsTest262AgentReport {
@@ -631,32 +630,6 @@ struct JsRuntimeOperationState {
     HashMap* symbol_description_registry = NULL;
 };
 
-// Generated records are process-pinned, but the table is realm-owned so hot
-// paths never resolve a catalog ID repeatedly and future realm policy stays
-// out of mutable process-global state.
-struct JsWellKnownRefs {
-    NameId constructor = NAME_ID_NONE;
-    NameId prototype = NAME_ID_NONE;
-    NameId name = NAME_ID_NONE;
-    NameId to_string = NAME_ID_NONE;
-    NameId value_of = NAME_ID_NONE;
-    NameId symbol_iterator = NAME_ID_NONE;
-    NameId symbol_to_primitive = NAME_ID_NONE;
-    NameId symbol_has_instance = NAME_ID_NONE;
-    NameId symbol_to_string_tag = NAME_ID_NONE;
-    NameId symbol_async_iterator = NAME_ID_NONE;
-    NameId symbol_species = NAME_ID_NONE;
-    NameId symbol_match = NAME_ID_NONE;
-    NameId symbol_replace = NAME_ID_NONE;
-    NameId symbol_search = NAME_ID_NONE;
-    NameId symbol_split = NAME_ID_NONE;
-    NameId symbol_unscopables = NAME_ID_NONE;
-    NameId symbol_is_concat_spreadable = NAME_ID_NONE;
-    NameId symbol_match_all = NAME_ID_NONE;
-    NameId symbol_async_dispose = NAME_ID_NONE;
-    NameId symbol_dispose = NAME_ID_NONE;
-};
-
 struct JsAsyncHooksState : JsRootedState {
     Item root_resource = {};
     Item current_resource = {};
@@ -683,7 +656,6 @@ struct JsPromise : VMap {
     uint64_t result_scalar = 0;
     Item reactions = {};
     Item reject_domain = {};
-    Item expando = {};
     Item prototype_override = {};
     bool has_prototype_override = false;
     bool extensible = true;
@@ -930,22 +902,6 @@ void js_eval_state_vectors_destroy(JsEvalState* state);
 void js_eval_state_reset(JsEvalState* state);
 void js_eval_state_assert_clear(JsEvalState* state, const char* reset_name);
 
-struct JsIntrinsicState {
-    // Prototype cache slots are precise GC roots so moving collection updates
-    // every cached Item; name Items are active-name-pool owned.
-    uint64_t* prototype_roots[JS_CLASS__COUNT] = {};
-    bool prototype_resolving[JS_CLASS__COUNT] = {};
-    Item constructor_names[JS_CLASS__COUNT] = {};
-    Item prototype_name = {0};
-    uint64_t mutation_versions[JS_CLASS__COUNT] = {};
-    uint64_t mutation_serial = 1;
-    uint64_t owner_heap_epoch = 0;
-    uint64_t array_proto_clean_epoch = 0;
-    bool array_proto_clean = false;
-    uint32_t initialization_depth = 0;
-    int array_sym_iter_ever_set = 0;
-};
-
 // A synchronous call has one ambient owner. Its Item homes are either the
 // context-owned base RootVector or one exact native RootFrame, so a nested
 // call replaces one activation link instead of mutating parallel globals
@@ -1009,12 +965,11 @@ struct JsRuntimeState {
     HashMap* dom_attached_expando_roots = NULL;
     JsStringCacheState* string_caches = NULL;
     JsGlobalEnvironment* global_environment = NULL;   // one dynamic realm binding table (JSCU29)
-    JsRealmIntrinsicSlots* intrinsic_slots = NULL;
+    JsRealmIntrinsicState* intrinsics = NULL;
     JsTest262AgentState* test262_agent = NULL;
     JsProcessState* process = NULL;
     JsConsoleState console = {};
     JsRuntimeOperationState operations = {};
-    JsWellKnownRefs well_known = {};
     JsAsyncHooksState* async_hooks = NULL;   // JSCU16: allocated with the realm, not embedded
     JsPromiseRuntimeState promises = {};
     JsModuleRuntimeState modules = {};
@@ -1030,10 +985,8 @@ struct JsRuntimeState {
     void* regex_permanent_cache = NULL;
     Input* input = NULL;
     bool strict_mode = false;
-    JsIntrinsicState* intrinsics = NULL;
     JsEvalState eval = {};
-    JsEventLoopQueueState* event_loop = NULL;   // JSCU16: allocated with the realm, not embedded
-    JsEventLoopTimerState* timers = NULL;   // JSCU16: allocated with the realm, not embedded
+    JsEventLoopState* event_loop = NULL;   // JSCU16: allocated with the realm, not embedded
     // The sole generation-checked native-resource registry for this context.
     // Timer and Node/Jube records use distinct lifecycle-owner keys within it.
     RuntimeResourceTable resources = {};
@@ -1048,7 +1001,9 @@ struct JsRuntimeState {
     // wrappers while their functions remain live. The table is weak storage;
     // each code record releases itself when its last GC function dies.
     HashMap* callable_code_interned = NULL;
-    JsDynFuncCacheState* dynamic_function_cache_state = NULL;
+    // The dynamic-function cache owns only its entry rows, so the existing
+    // pointer list is the realm state; no companion cache wrapper is needed.
+    ArrayList* dynamic_function_cache_entries = NULL;
     // Timeout recovery may interrupt JS compilation before the ordinary
     // teardown path runs.  Its compiler owners stay with this realm, never in
     // process globals; compilation is cold and generated code never reads it.

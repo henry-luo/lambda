@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../../jube/jube.h"
+#include <stdint.h>
 
 #ifdef __cplusplus
 #define RADIANT_C_API extern "C"
@@ -9,6 +10,85 @@
 #endif
 
 struct DomDocument;
+
+// Canvas owns document-lifetime pixels in Radiant.  DOM bindings pass only a
+// native DOM-node handle through this waist; the backing surface never crosses
+// into the script value domain (D7.4.1v2, D7.5.3).
+#define RADIANT_CANVAS_FONT_TEXT_MAX 512
+
+// A plain-value projection lets DOM restore the observable context state after
+// Radiant restores its authoritative native frame.  It contains no script
+// values or retained renderer pointers (D7.4.1v2, D7.5.3).
+typedef struct RadiantCanvasStateSnapshot {
+    uint8_t fill_r, fill_g, fill_b, fill_a;
+    uint8_t stroke_r, stroke_g, stroke_b, stroke_a;
+    uint8_t line_cap;
+    uint8_t line_join;
+    uint8_t text_align;
+    float line_width;
+    float global_alpha;
+    char font[RADIANT_CANVAS_FONT_TEXT_MAX];
+} RadiantCanvasStateSnapshot;
+
+RADIANT_C_API bool radiant_canvas_ensure(void* canvas_element);
+RADIANT_C_API bool radiant_canvas_set_dimension(void* canvas_element,
+                                                bool is_width,
+                                                uint32_t value);
+RADIANT_C_API bool radiant_canvas_reset_from_attributes(void* canvas_element);
+RADIANT_C_API bool radiant_canvas_set_fill_color(void* canvas_element,
+                                                 uint8_t r, uint8_t g,
+                                                 uint8_t b, uint8_t a);
+RADIANT_C_API bool radiant_canvas_set_stroke_color(void* canvas_element,
+                                                   uint8_t r, uint8_t g,
+                                                   uint8_t b, uint8_t a);
+RADIANT_C_API bool radiant_canvas_set_line_width(void* canvas_element,
+                                                 float width);
+RADIANT_C_API bool radiant_canvas_set_global_alpha(void* canvas_element,
+                                                   float alpha);
+RADIANT_C_API bool radiant_canvas_set_line_cap(void* canvas_element,
+                                               uint8_t cap);
+RADIANT_C_API bool radiant_canvas_set_line_join(void* canvas_element,
+                                                uint8_t join);
+RADIANT_C_API bool radiant_canvas_set_text_align(void* canvas_element,
+                                                  uint8_t align);
+RADIANT_C_API bool radiant_canvas_set_font(void* canvas_element,
+                                            const char* font, int font_len);
+RADIANT_C_API bool radiant_canvas_get_state(void* canvas_element,
+                                             RadiantCanvasStateSnapshot* out);
+RADIANT_C_API bool radiant_canvas_save(void* canvas_element);
+RADIANT_C_API bool radiant_canvas_restore(void* canvas_element);
+RADIANT_C_API bool radiant_canvas_scale(void* canvas_element, float x, float y);
+RADIANT_C_API bool radiant_canvas_translate(void* canvas_element, float x, float y);
+RADIANT_C_API bool radiant_canvas_rotate(void* canvas_element, float radians);
+RADIANT_C_API bool radiant_canvas_begin_path(void* canvas_element);
+RADIANT_C_API bool radiant_canvas_close_path(void* canvas_element);
+RADIANT_C_API bool radiant_canvas_move_to(void* canvas_element, float x, float y);
+RADIANT_C_API bool radiant_canvas_line_to(void* canvas_element, float x, float y);
+RADIANT_C_API bool radiant_canvas_bezier_curve_to(void* canvas_element,
+                                                   float cp1x, float cp1y,
+                                                   float cp2x, float cp2y,
+                                                   float x, float y);
+RADIANT_C_API bool radiant_canvas_quadratic_curve_to(void* canvas_element,
+                                                      float cpx, float cpy,
+                                                      float x, float y);
+RADIANT_C_API bool radiant_canvas_rect(void* canvas_element,
+                                       float x, float y, float width, float height);
+RADIANT_C_API bool radiant_canvas_arc(void* canvas_element, float x, float y,
+                                      float radius, float start_angle,
+                                      float end_angle, bool counter_clockwise);
+RADIANT_C_API bool radiant_canvas_clip(void* canvas_element);
+RADIANT_C_API bool radiant_canvas_fill(void* canvas_element);
+RADIANT_C_API bool radiant_canvas_stroke(void* canvas_element);
+RADIANT_C_API bool radiant_canvas_fill_rect(void* canvas_element,
+                                            float x, float y, float width, float height);
+RADIANT_C_API bool radiant_canvas_stroke_rect(void* canvas_element,
+                                              float x, float y, float width, float height);
+RADIANT_C_API bool radiant_canvas_clear_rect(void* canvas_element,
+                                             float x, float y, float width, float height);
+// The font handle is borrowed for this synchronous raster operation only.
+RADIANT_C_API bool radiant_canvas_fill_text(void* canvas_element, void* font_handle,
+                                            const char* text, int text_len,
+                                            float x, float y, float max_width);
 
 // Shared structural backend for every DOM Node-family Jube brand.
 RADIANT_C_API const VelmtVtable radiant_dom_node_velmt_vtable;

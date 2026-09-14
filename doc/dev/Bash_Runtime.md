@@ -628,7 +628,7 @@ MIR:     var_ext = CALL bash_get_var("ext")
 
 ## 7. File Organization
 
-### 7.1 New Source Files (`lambda/bash/`)
+### 7.1 New Source Files (`lambda/module/bash/`)
 
 | File | LOC (est.) | Purpose |
 |------|-----------|---------|
@@ -666,7 +666,7 @@ Add to `build_lambda_config.json`:
 Add source directory to compilation units:
 ```json
 {
-    "sources": ["lambda/bash/*.cpp"]
+    "sources": ["lambda/module/bash/*.cpp"]
 }
 ```
 

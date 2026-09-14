@@ -550,9 +550,13 @@ Type* lambda_type_nullable_lane_base(Type* type, bool* nullable);
 // contract logs and yields LANE_STORAGE_INVALID (D1.9: never a guess).
 LaneStorageDesc lambda_lane_storage_desc_for(Type* type);
 
+// Persistent native destinations refine the scalar ABI only where an optional
+// full-width integer cannot encode null in one raw word (D2.5.2v3).
+LaneStorageDesc lambda_persistent_lane_storage_desc_for(Type* type);
+
 // Width projection: the packed slot size of a field holding `type`.
 static inline int lambda_lane_storage_size(Type* type) {
-    return lambda_lane_storage_desc_for(type).byte_size;
+    return lambda_persistent_lane_storage_desc_for(type).byte_size;
 }
 
 // Decoding-TypeId projection (what map_field_to_item and the collector read).
@@ -1247,6 +1251,7 @@ extern TypeMap ArrayPropsShape;
 extern TypeElmt EmptyElmt;
 extern const Item ItemNull;
 extern const Item ItemError;
+extern const Item ItemEmptyString;
 extern TypeInfo type_info[];
 
 typedef struct Input {

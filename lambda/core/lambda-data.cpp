@@ -192,6 +192,19 @@ TypeObject EmptyObject;
 const Item ItemNull = {._type_id = LMD_TYPE_NULL};
 const Item ItemError = {._type_id = LMD_TYPE_ERROR};
 
+// A process-pinned empty string survives runtime heap resets and name-pool teardown.
+struct StaticEmptyString {
+    uint32_t len;
+    uint8_t flags;
+    char chars[1];
+};
+static_assert(offsetof(StaticEmptyString, chars) == offsetof(String, chars),
+    "static empty string must match String layout");
+static const StaticEmptyString item_empty_string_storage = {0, 1, {'\0'}};
+const Item ItemEmptyString = {
+    .item = s2it((String*)&item_empty_string_storage)
+};
+
 // Note: ConstItem has const members and cannot be assigned after initialization.
 // These are zero-initialized and should be used via reinterpret_cast from appropriate Items.
 alignas(ConstItem) static uint64_t error_result_storage = ITEM_ERROR;
@@ -741,6 +754,74 @@ ConstItem List::get(int index) const {
 // One shaped-field store. Shared by the varargs filler and the array filler so
 // a map literal lands identically whether the values arrive from generated
 // code's varargs call or from the T0 walker's rooted Item span.
+bool typeditem_store_item(TypedItem* titem, Item item) {
+    if (!titem) return false;
+    TypeId type_id = get_type_id(item);
+    TypedItem stored = {.type_id = type_id, .item = item.item};
+    switch (type_id) {
+    case LMD_TYPE_NULL:
+        break;
+    case LMD_TYPE_BOOL:
+        stored.bool_val = item.bool_val;
+        break;
+    case LMD_TYPE_INT:
+        // C16: carry the numeric value; an int Item payload is not its value.
+        stored.double_val = lambda_int_item_value(item);
+        break;
+    case LMD_TYPE_INT64:
+        stored.long_val = item.get_int64();
+        break;
+    case LMD_TYPE_UINT64:
+        stored.uint64_val = item.get_uint64();
+        break;
+    case LMD_TYPE_FLOAT:
+        stored.double_val = item.get_double();
+        break;
+    case LMD_TYPE_DECIMAL:
+        stored.decimal = item.get_decimal();
+        break;
+    case LMD_TYPE_DTIME:
+        stored.datetime_ptr = item.get_datetime_ptr();
+        break;
+    case LMD_TYPE_STRING:
+        stored.string = item.get_safe_string();
+        break;
+    case LMD_TYPE_BINARY:
+        stored.binary = item.get_safe_binary();
+        break;
+    case LMD_TYPE_COMPLEX:
+        stored.pointer = item.get_complex();
+        break;
+    case LMD_TYPE_SYMBOL:
+        stored.symbol = item.get_safe_symbol();
+        break;
+    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
+    case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
+    case LMD_TYPE_VARRAY: case LMD_TYPE_VELMT:
+    case LMD_TYPE_ELEMENT:
+        stored.container = item.container;
+        break;
+    case LMD_TYPE_TYPE:
+        stored.type = item.type;
+        break;
+    case LMD_TYPE_FUNC:
+        stored.function = item.function;
+        break;
+    case LMD_TYPE_PATH:
+        stored.path = item.path;
+        break;
+    case LMD_TYPE_ERROR:
+    case LMD_TYPE_UNDEFINED:
+        // The type tag alone round-trips these sentinels.
+        break;
+    default:
+        log_error("typeditem store: unknown type %s", get_type_name(type_id));
+        return false;
+    }
+    *titem = stored;
+    return true;
+}
+
 void set_field_value(ShapeEntry* field, void* field_ptr, Item item) {
     if (!field->name) { // nested map
         TypeId type_id = get_type_id(item);
@@ -891,70 +972,9 @@ void set_field_value(ShapeEntry* field, void* field_ptr, Item item) {
             break;
         }
         case LMD_TYPE_ANY: { // a special case
-            TypeId type_id = get_type_id(item);
-            TypedItem titem = {.type_id = type_id, .item = item.item};
-            switch (type_id) {
-            case LMD_TYPE_NULL: ;
-                break; // no extra work needed
-            case LMD_TYPE_BOOL:
-                titem.bool_val = item.bool_val;  break;
-            case LMD_TYPE_INT:
-                // C16: carry the numeric value; an int Item payload is not its value.
-                titem.double_val = lambda_int_item_value(item);  break;
-            case LMD_TYPE_INT64:
-                titem.long_val = item.get_int64();  break;
-            case LMD_TYPE_UINT64:
-                titem.uint64_val = item.get_uint64();  break;
-            case LMD_TYPE_FLOAT:
-                titem.double_val = item.get_double();  break;
-            case LMD_TYPE_DECIMAL:
-                // Preserve both decimal and integer-domain payloads in `any` fields.
-                titem.decimal = item.get_decimal();  break;
-            case LMD_TYPE_DTIME:
-                titem.datetime_ptr = item.get_datetime_ptr();  break;
-            case LMD_TYPE_STRING:
-                titem.string = item.get_safe_string();
-                break;
-            case LMD_TYPE_BINARY:
-                titem.binary = item.get_safe_binary();
-                break;
-            case LMD_TYPE_COMPLEX:
-                titem.pointer = item.get_complex();
-                break;
-            case LMD_TYPE_SYMBOL:
-                titem.symbol = item.get_safe_symbol();
-                break;
-            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
-            case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
-            case LMD_TYPE_VARRAY: case LMD_TYPE_VELMT:
-            case LMD_TYPE_ELEMENT:   {
-                Container *container = item.container;
-                titem.container = container;
-                break;
+            if (!typeditem_store_item((TypedItem*)field_ptr, item)) {
+                *(TypedItem*)field_ptr = {.type_id = LMD_TYPE_ERROR};
             }
-            case LMD_TYPE_TYPE:
-                titem.type = item.type;
-                break;
-            case LMD_TYPE_FUNC: {
-                Function* fn = item.function;
-                titem.function = fn;
-                break;
-            }
-            case LMD_TYPE_PATH:
-                titem.path = item.path;
-                break;
-            case LMD_TYPE_ERROR:
-            case LMD_TYPE_UNDEFINED:
-                // store sentinel — the type_id alone is enough to round-trip
-                // through typeditem_to_item. No payload to copy.
-                break;
-            default:
-                log_error("unknown type %s in set_fields", get_type_name(type_id));
-                // set as ERROR
-                titem = {.type_id = LMD_TYPE_ERROR};
-            }
-            // set in map
-            *(TypedItem*)field_ptr = titem;
             break;
         }
         default:
@@ -1097,6 +1117,13 @@ Item map_shape_field_to_item(void* map_data, const ShapeEntry* field) {
             if (lambda_float_lane_is_null(bits)) return ItemNull;
             return lambda_float_ptr_to_item((const double*)field_ptr);
         }
+        if (lane.kind == LANE_STORAGE_TYPED_ITEM) {
+            Item item = typeditem_to_item((TypedItem*)field_ptr);
+            TypeId actual = get_type_id(item);
+            if (actual == LMD_TYPE_NULL || actual == lane.base_contract->type_id) return item;
+            log_error("map native lane: invalid wide optional tag %s", get_type_name(actual));
+            return ItemError;
+        }
         if (lane.kind == LANE_STORAGE_ITEM) return *(Item*)field_ptr;
         if (lane.kind == LANE_STORAGE_SIZED_I64) {
             int64_t stored = *(int64_t*)field_ptr;
@@ -1157,6 +1184,12 @@ bool map_shape_field_store_native_lane(void* field_ptr, const ShapeEntry* field,
             *(uint64_t*)field_ptr = lambda_float_lane_from_double(value.get_double());
             return true;
         }
+    }
+    if (lane.kind == LANE_STORAGE_TYPED_ITEM) {
+        if (value_type != LMD_TYPE_NULL && value_type != lane.base_contract->type_id) return false;
+        // The map field owns this TypedItem, so a caller's number-frame
+        // payload cannot escape through a retained i64?/u64? value.
+        return typeditem_store_item((TypedItem*)field_ptr, value);
     }
     if (lane.kind == LANE_STORAGE_ITEM &&
             (value_type == LMD_TYPE_NULL || value_type == lane.base_contract->type_id)) {
@@ -1670,6 +1703,19 @@ LaneStorageDesc lambda_lane_storage_desc_for(Type* type) {
     return desc;
 }
 
+LaneStorageDesc lambda_persistent_lane_storage_desc_for(Type* type) {
+    LaneStorageDesc desc = lambda_lane_storage_desc_for(type);
+    if (desc.native && desc.nullable && desc.base_contract &&
+            (desc.base_contract->type_id == LMD_TYPE_INT64 ||
+             desc.base_contract->type_id == LMD_TYPE_UINT64)) {
+        // Persistent destinations own wide optional payloads inline; the
+        // scalar Item ABI remains unchanged (D2.5.2v3, D2.6.4v3).
+        desc.kind = LANE_STORAGE_TYPED_ITEM;
+        desc.byte_size = (uint8_t)sizeof(TypedItem);
+    }
+    return desc;
+}
+
 TypeId type_field_storage_type_id(const Type* type) {
     if (!type) return LMD_TYPE_NULL;
     return (TypeId)lambda_lane_storage_desc_for((Type*)type).value_domain;
@@ -1681,7 +1727,7 @@ TypeId type_field_storage_type_id(const Type* type) {
 void shape_entry_set_type(ShapeEntry* entry, Type* type) {
     if (!entry) return;
     entry->type = type;
-    entry->storage = type ? lambda_lane_storage_desc_for(type) : LaneStorageDesc{};
+    entry->storage = type ? lambda_persistent_lane_storage_desc_for(type) : LaneStorageDesc{};
 }
 
 const LaneStorageDesc* shape_entry_storage(const ShapeEntry* entry) {
@@ -1692,7 +1738,7 @@ const LaneStorageDesc* shape_entry_storage(const ShapeEntry* entry) {
         // readers stay coherent, and say so: this is a missed site, not a
         // supported path. `kind` is written last so a concurrent reader never
         // sees a half-filled record as valid.
-        LaneStorageDesc derived = lambda_lane_storage_desc_for(entry->type);
+        LaneStorageDesc derived = lambda_persistent_lane_storage_desc_for(entry->type);
         ShapeEntry* mutable_entry = (ShapeEntry*)entry;
         uint8_t kind = derived.kind;
         derived.kind = LANE_STORAGE_INVALID;

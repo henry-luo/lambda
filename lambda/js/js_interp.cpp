@@ -5254,10 +5254,6 @@ static bool js_interp_operator_supported(Operator op) {
     }
 }
 
-struct JsInterpSupportState {
-    bool supported;
-};
-
 struct JsInterpPatternSupportState {
     bool supported;
     bool has_child;
@@ -5332,8 +5328,8 @@ static bool js_interp_iteration_head_supported(JsAstNode* left) {
         js_interp_pattern_supported((JsAstNode*)declarator->id);
 }
 
-static void js_interp_check_node(JsAstNode* node, JsInterpSupportState* state) {
-    if (!node || !state || !state->supported) return;
+static void js_interp_check_node(JsAstNode* node, bool* supported) {
+    if (!node || !supported || !*supported) return;
     switch (node->node_type) {
     case AST_SCRIPT: case AST_NODE_BLOCK: case AST_NODE_EXPR_STMT:
     case AST_NODE_VAR_STAM:
@@ -5362,7 +5358,7 @@ static void js_interp_check_node(JsAstNode* node, JsInterpSupportState* state) {
     case AST_NODE_METHOD: {
         JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)node;
         if ((method->kind == JsMethodDefinitionNode::JS_METHOD_CONSTRUCTOR &&
-                 method->static_method)) state->supported = false;
+                 method->static_method)) *supported = false;
         break;
     }
     case AST_NODE_FIELD: {
@@ -5380,13 +5376,13 @@ static void js_interp_check_node(JsAstNode* node, JsInterpSupportState* state) {
         // may be syntactically valid in an uninvoked async body even though
         // iteration itself is deferred until that function resumes.
         if (!js_interp_iteration_head_supported((JsAstNode*)loop->left)) {
-            state->supported = false;
+            *supported = false;
         }
         break;
     }
     case AST_NODE_FUNC: case AST_NODE_FUNC_EXPR: case AST_NODE_ARROW_FUNC: {
         JsFunctionNode* function = (JsFunctionNode*)node;
-        if (!js_interp_function_params_supported(function)) state->supported = false;
+        if (!js_interp_function_params_supported(function)) *supported = false;
         break;
     }
     case AST_NODE_IDENT:
@@ -5396,7 +5392,7 @@ static void js_interp_check_node(JsAstNode* node, JsInterpSupportState* state) {
     case AST_NODE_VARIABLE_DECLARATOR:
         if (!((JsVariableDeclaratorNode*)node)->id ||
                 !js_interp_pattern_supported((JsAstNode*)((JsVariableDeclaratorNode*)node)->id)) {
-            state->supported = false;
+            *supported = false;
         }
         break;
     case AST_NODE_CALL_EXPR:
@@ -5410,35 +5406,35 @@ static void js_interp_check_node(JsAstNode* node, JsInterpSupportState* state) {
     case AST_NODE_CATCH_CLAUSE: {
         JsCatchNode* handler = (JsCatchNode*)node;
         if (handler->param && !js_interp_pattern_supported((JsAstNode*)handler->param)) {
-            state->supported = false;
+            *supported = false;
         }
         break;
     }
     case AST_NODE_UNARY:
-        if (!js_interp_operator_supported(((JsUnaryNode*)node)->op)) state->supported = false;
+        if (!js_interp_operator_supported(((JsUnaryNode*)node)->op)) *supported = false;
         break;
     case AST_NODE_BINARY:
-        if (!js_interp_operator_supported(((JsBinaryNode*)node)->op)) state->supported = false;
+        if (!js_interp_operator_supported(((JsBinaryNode*)node)->op)) *supported = false;
         break;
     case AST_NODE_ASSIGN:
-        if (!js_interp_operator_supported(((JsAssignmentNode*)node)->op)) state->supported = false;
+        if (!js_interp_operator_supported(((JsAssignmentNode*)node)->op)) *supported = false;
         break;
     default:
-        state->supported = false;
+        *supported = false;
         break;
     }
-    if (state->supported) js_ast_visit_children(node, js_interp_check_child, state);
+    if (*supported) js_ast_visit_children(node, js_interp_check_child, supported);
 }
 
 static void js_interp_check_child(JsAstNode* child, void* opaque) {
-    js_interp_check_node(child, (JsInterpSupportState*)opaque);
+    js_interp_check_node(child, (bool*)opaque);
 }
 
 bool js_interp_script_is_supported(JsScript* script) {
     if (!script || !script->ast_root) return false;
-    JsInterpSupportState state = {true};
-    js_interp_check_node((JsAstNode*)script->ast_root, &state);
-    return state.supported;
+    bool supported = true;
+    js_interp_check_node((JsAstNode*)script->ast_root, &supported);
+    return supported;
 }
 
 static Item js_interp_configure_function_metadata(Item function_item) {

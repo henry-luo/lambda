@@ -10,6 +10,7 @@
  */
 #include "js_runtime.h"
 #include "js_typed_array.h"
+#include "js_well_known_names.h"
 #include "../dom/dom_events.h"
 #include "js_error_codes.h"
 #include "../jube/jube_node_permission.h"
@@ -4683,6 +4684,7 @@ static inline String* js_ascii_char_intern(int code) {
 }
 
 static inline Item js_make_small_string(char* chars, int len, bool is_ascii) {
+    if (len == 0) return ItemEmptyString;
     // §7.2.B fast path: a single ASCII byte has only 128 possible values, all
     // immutable; share the interned String* instead of heap-allocating.
     if (len == 1 && is_ascii) {
@@ -11856,7 +11858,7 @@ extern "C" Item js_json_parse_full(Item str_item, Item reviver) {
         JsJsonReviveState state = {sources.items, sources.count, NULL, 0, 0};
         // Create a wrapper object {"": result} as the root holder
         Item wrapper = js_new_object();
-        Item empty_key = js_name_item("", 0);
+        Item empty_key = ItemEmptyString;
         JS_ASSIGN_OR_RETURN(create_result, js_create_data_property(wrapper, empty_key, result));
         int source_index = 0;
         js_json_build_source_entries(&state, wrapper, empty_key, result, &source_index);
@@ -12311,7 +12313,7 @@ extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
 
     // Create wrapper object per spec step 9-10
     StrBuf* sb = strbuf_new();
-    Item empty_key = js_name_item("", 0);
+    Item empty_key = ItemEmptyString;
     Item holder = js_new_object();
     Item create_result = js_create_data_property(holder, empty_key, value);
     if (item_is_error(create_result)) {
@@ -12706,14 +12708,14 @@ static Item js_throw_domexception_invalid_char(const char* msg) {
 extern "C" Item js_atob(Item str_item) {
     Item str_val = js_to_string(str_item);
     String* s = it2s(str_val);
-    if (!s || s->len == 0) return js_name_item("", 0);
+    if (!s || s->len == 0) return ItemEmptyString;
 
     const char* src = s->chars;
     int src_len = s->len;
 
     // Step 1: remove ASCII whitespace from data
     char* cleaned = (char*)mem_alloc(src_len + 1, MEM_CAT_JS_RUNTIME);
-    if (!cleaned) return js_name_item("", 0);
+    if (!cleaned) return ItemEmptyString;
     int clen = 0;
     for (int i = 0; i < src_len; i++) {
         unsigned char c = (unsigned char)src[i];
@@ -12748,7 +12750,7 @@ extern "C" Item js_atob(Item str_item) {
 extern "C" Item js_btoa(Item str_item) {
     Item str_val = js_to_string(str_item);
     String* s = it2s(str_val);
-    if (!s || s->len == 0) return js_name_item("", 0);
+    if (!s || s->len == 0) return ItemEmptyString;
 
     // Check for characters outside Latin1 range (> 0xFF)
     // In UTF-8, any byte >= 0xC4 followed by >= 0x80 means code point > 0xFF
@@ -12763,7 +12765,7 @@ extern "C" Item js_btoa(Item str_item) {
     }
     size_t out_len = base64_encoded_len((size_t)src_len, BASE64_STD);
     char* buf = (char*)mem_alloc(out_len + 1, MEM_CAT_JS_RUNTIME);
-    if (!buf) return js_name_item("", 0);
+    if (!buf) return ItemEmptyString;
 
     size_t out = base64_encode(src, (size_t)src_len, buf, BASE64_STD);
 
@@ -12833,7 +12835,11 @@ static bool js_uri_decode_to_item(String* s, bool component, Item* result) {
     }
     size_t out_len = 0;
     bool ok = url_decode_strict(s->chars, (size_t)s->len, component, out, &out_len);
-    if (ok) *result = (Item){.item = s2it(heap_create_name(out, out_len))};
+    if (ok) {
+        // Decoded URI text is value data and may contain non-ASCII UTF-8.
+        *result = js_make_small_string(out, (int)out_len,
+            str_is_ascii(out, out_len));
+    }
     if (heap_out) mem_free(out);
     return ok;
 }
@@ -12852,19 +12858,21 @@ static Item js_uri_encode_to_item(Item str_val, String* s, bool component) {
     if (out_len > sizeof(stack_buf)) {
         out = (char*)mem_alloc(out_len + 1, MEM_CAT_TEMP);
         // parity with the previous allocating encoder, which also degraded to ""
-        if (!out) return js_name_item("", 0);
+        if (!out) return ItemEmptyString;
         heap_out = true;
     }
     size_t j = url_encode_write(s->chars, (size_t)s->len, keep, false, out);
-    String* encoded = heap_create_name(out, j);
+    // URI output is ASCII value data, not a structural name. Interning every
+    // distinct result retained exhaustive-call intermediates for the batch.
+    Item encoded = js_make_small_string(out, (int)j, true);
     if (heap_out) mem_free(out);
-    return (Item){.item = s2it(encoded)};
+    return encoded;
 }
 
 static Item js_encode_uri_common(Item str_item, bool component) {
     JS_ASSIGN_OR_RETURN(str_val, js_to_string(str_item));
     String* s = it2s(str_val);
-    if (!s || s->len == 0) return js_name_item("", 0);
+    if (!s || s->len == 0) return ItemEmptyString;
     // ES spec: throw URIError for lone surrogates
     if (js_has_lone_surrogate(s->chars, s->len)) {
         return js_throw_uri_error("URI malformed");
@@ -12941,7 +12949,7 @@ static Item js_decode_uri_common(Item str_item, bool component,
     bool cache_rooted = js_global_string_caches_ensure_roots();
     Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
     String* s = it2s(str_val);
-    if (!s || s->len == 0) return js_name_item("", 0);
+    if (!s || s->len == 0) return ItemEmptyString;
     if (!js_string_has_percent(s)) return str_val;
     int64_t cached_cp = js_string_last_four_byte_uri_escape_cp(str_val);
     if (cached_cp >= 0) return js_uri_make_four_byte_string_from_cp((uint32_t)cached_cp);
@@ -12982,7 +12990,7 @@ extern "C" Item js_unescape(Item str_item) {
     // ERROR Item into the empty result below.
     if (item_is_error(str_val)) return str_val;
     String* s = it2s(str_val);
-    if (!s || s->len == 0) return js_name_item("", 0);
+    if (!s || s->len == 0) return ItemEmptyString;
 
     const char* src = s->chars;
     int src_len = s->len;
@@ -12990,7 +12998,7 @@ extern "C" Item js_unescape(Item str_item) {
     // allocate output buffer (worst case: all %XX with values >= 0x80 → 2 bytes each,
     // but that's still ≤ src_len since 3 input bytes → 2 output bytes)
     char* buf = (char*)mem_alloc(src_len * 2 + 1, MEM_CAT_JS_RUNTIME);
-    if (!buf) return js_name_item("", 0);
+    if (!buf) return ItemEmptyString;
 
     int out = 0;
     int i = 0;
@@ -13061,14 +13069,14 @@ extern "C" Item js_escape(Item str_item) {
     // abrupt completion instead of treating the failed value as an empty string.
     if (item_is_error(str_val)) return str_val;
     String* s = it2s(str_val);
-    if (!s || s->len == 0) return js_name_item("", 0);
+    if (!s || s->len == 0) return ItemEmptyString;
 
     const char* src = s->chars;
     int src_len = s->len;
 
     // worst case: every char becomes %uXXXX (6 bytes per input byte)
     char* buf = (char*)mem_alloc(src_len * 6 + 1, MEM_CAT_JS_RUNTIME);
-    if (!buf) return js_name_item("", 0);
+    if (!buf) return ItemEmptyString;
 
     static const char hex[] = "0123456789ABCDEF";
     int out = 0;
@@ -15878,7 +15886,7 @@ extern "C" Item js_resolve_unresolved_binding(Item value, NameId name_id, int64_
 // Global builtin function values retain the catalog ID that selected them.
 // The registry is the sole owner of names, arities, and cache identity.
 #define global_builtin_fn_cache_at(index) (*js_realm_intrinsic_slot(JS_REALM_SLOT_GLOBAL_BUILTIN_BASE, (index)))
-#define global_builtin_fn_cache_init (js_runtime_state.intrinsic_slots->global_builtin_initialized)
+#define global_builtin_fn_cache_init (js_runtime_state.intrinsics->global_builtin_initialized)
 
 // The preamble snapshot owns the realm's catalog-backed global functions too;
 // partial reset must keep their identity alongside Number.parseFloat and the
@@ -15948,7 +15956,7 @@ extern "C" Item js_get_global_builtin_fn_by_id(Item global_id_item) {
 // =============================================================================
 
 #define js_constructor_cache_at(index) (*js_realm_intrinsic_slot(JS_REALM_SLOT_CONSTRUCTOR_BASE, (index)))
-#define js_ctor_cache_init (js_runtime_state.intrinsic_slots->constructors_initialized)
+#define js_ctor_cache_init (js_runtime_state.intrinsics->constructors_initialized)
 static void js_typed_array_base_reset();
 
 // Forward declaration: snapshot mechanism preserves ctor identity across batch resets.
@@ -15960,25 +15968,33 @@ static uint64_t js_intrinsic_next_mutation_version() {
     return version;
 }
 
-static void js_intrinsic_clear_prototype_roots() {
+static Item* js_intrinsic_prototype_slot_existing(int class_id) {
+    if (!js_active_runtime_state || class_id < 0 ||
+            class_id >= (int)JS_CLASS__COUNT) return NULL;
+    return js_realm_slot_existing(&js_runtime_state.realm_slots,
+        (JsRealmSlotId)(JS_REALM_SLOT_INTRINSIC_PROTOTYPE_BASE + class_id));
+}
+
+static Item* js_intrinsic_prototype_slot(int class_id) {
+    if (class_id < 0 || class_id >= (int)JS_CLASS__COUNT ||
+            !js_realm_intrinsic_slots_ensure_roots()) return NULL;
+    return js_realm_intrinsic_slot(JS_REALM_SLOT_INTRINSIC_PROTOTYPE_BASE,
+        class_id);
+}
+
+static void js_intrinsic_clear_prototype_slots() {
     for (int class_id = 0; class_id < (int)JS_CLASS__COUNT; class_id++) {
-        uint64_t* root = js_intrinsic_state.prototype_roots[class_id];
-        if (!root) continue;
-        heap_unregister_gc_root(root);
-        mem_free(root);
-        js_intrinsic_state.prototype_roots[class_id] = NULL;
+        Item* slot = js_intrinsic_prototype_slot_existing(class_id);
+        if (slot) *slot = ItemNull;
     }
 }
 
 static void js_intrinsic_state_ensure_epoch() {
     if (js_intrinsic_state.owner_heap_epoch == js_heap_epoch) return;
     // Heap/name-pool replacement invalidates every rooted cached Item as one owner unit.
-    js_intrinsic_clear_prototype_roots();
+    js_intrinsic_clear_prototype_slots();
     memset(js_intrinsic_state.prototype_resolving, 0,
         sizeof(js_intrinsic_state.prototype_resolving));
-    memset(js_intrinsic_state.constructor_names, 0,
-        sizeof(js_intrinsic_state.constructor_names));
-    js_intrinsic_state.prototype_name = (Item){0};
     js_intrinsic_state.initialization_depth = 0;
     js_intrinsic_state.array_proto_clean_epoch = 0;
     js_intrinsic_state.array_proto_clean = false;
@@ -16011,7 +16027,7 @@ extern "C" void js_intrinsic_initialization_end_for_constructor(int active) {
 }
 
 static void js_intrinsic_proto_cache_reset() {
-    js_intrinsic_clear_prototype_roots();
+    js_intrinsic_clear_prototype_slots();
     js_intrinsic_state.owner_heap_epoch = 0;
     js_intrinsic_state_ensure_epoch();
 }
@@ -16021,9 +16037,7 @@ extern "C" void js_intrinsic_state_reset() {
 }
 
 extern "C" void js_intrinsic_state_teardown() {
-    // Intrinsic prototype cache slots are native precise roots, so final runtime
-    // teardown must unregister and free them before leak accounting and heap destruction.
-    js_intrinsic_clear_prototype_roots();
+    js_intrinsic_clear_prototype_slots();
     memset(&js_intrinsic_state, 0, sizeof(js_intrinsic_state));
 }
 
@@ -17133,12 +17147,7 @@ static Item js_get_constructor_intrinsic_prototype(Item ctor) {
     JsCtor* fn = (JsCtor*)ctor.function;
     if (fn && (get_type_id(fn->prototype) == LMD_TYPE_MAP ||
             get_type_id(fn->prototype) == LMD_TYPE_FUNC)) return fn->prototype;
-    js_intrinsic_state_ensure_epoch();
-    if (js_intrinsic_state.prototype_name.item == 0) {
-        js_intrinsic_state.prototype_name = js_name_item("prototype", 9);
-    }
-    Item proto_key = js_intrinsic_state.prototype_name;
-    Item proto = js_get_key_default(ctor, proto_key);
+    Item proto = js_get_name_id(ctor, JS_NAME_PROTOTYPE);
     if (get_type_id(proto) == LMD_TYPE_MAP ||
             get_type_id(proto) == LMD_TYPE_FUNC) return proto;
     if (fn && (get_type_id(fn->prototype) == LMD_TYPE_MAP ||
@@ -17173,19 +17182,15 @@ extern "C" Item js_get_intrinsic_prototype_for_class(int class_id) {
     js_intrinsic_state_ensure_epoch();
     JsClass cls = (JsClass)class_id;
     if (cls == JS_CLASS_TYPED_ARRAY) return js_get_typed_array_base_proto();
-    uint64_t* cached_root = js_intrinsic_state.prototype_roots[class_id];
-    if (cached_root) return (Item){.item = *cached_root};
+    Item* cached_slot = js_intrinsic_prototype_slot(class_id);
+    if (!cached_slot) return ItemNull;
+    if (!js_intrinsic_cache_slot_empty(*cached_slot)) return *cached_slot;
     if (js_intrinsic_state.prototype_resolving[class_id]) return ItemNull;
     const char* name = NULL;
     int len = 0;
     if (!js_intrinsic_proto_ctor_name_for_class(cls, &name, &len)) return ItemNull;
     js_intrinsic_state.prototype_resolving[class_id] = true;
-    Item ctor_name = js_intrinsic_state.constructor_names[class_id];
-    if (ctor_name.item == 0) {
-        ctor_name = js_name_item(name, len);
-        js_intrinsic_state.constructor_names[class_id] = ctor_name;
-    }
-    Item ctor = js_get_constructor(ctor_name);
+    Item ctor = js_get_constructor(js_name_item(name, len));
     Item proto = js_get_constructor_intrinsic_prototype(ctor);
     JsClass parent_class = js_intrinsic_prototype_parent_class(cls);
     if (get_type_id(proto) == LMD_TYPE_MAP && parent_class != JS_CLASS_NONE) {
@@ -17202,10 +17207,7 @@ extern "C" Item js_get_intrinsic_prototype_for_class(int class_id) {
     }
     if (get_type_id(proto) == LMD_TYPE_MAP ||
             get_type_id(proto) == LMD_TYPE_FUNC) {
-        // Cached prototypes outlive allocating calls and may move; a raw Item
-        // here previously became a stale Map pointer during long DOM runs.
-        js_intrinsic_state.prototype_roots[class_id] =
-            heap_gc_root_slot_new(proto.item);
+        *cached_slot = proto;
     }
     js_intrinsic_state.prototype_resolving[class_id] = false;
     return proto;
@@ -17237,8 +17239,8 @@ extern "C" void js_intrinsic_note_property_mutation(Item object, Item key) {
     bool invalidated = false;
     for (int class_id = (int)JS_CLASS_NONE + 1;
          class_id < (int)JS_CLASS__COUNT; class_id++) {
-        uint64_t* proto_root = js_intrinsic_state.prototype_roots[class_id];
-        if (proto_root && *proto_root == object.item) {
+        Item* proto_slot = js_intrinsic_prototype_slot_existing(class_id);
+        if (proto_slot && proto_slot->item == object.item) {
             js_intrinsic_invalidate_class(class_id, key);
             invalidated = true;
         }
@@ -17270,7 +17272,7 @@ extern "C" void js_intrinsic_note_property_mutation(Item object, Item key) {
         }
         // Replacing a constructor prototype invalidates cached identity for all
         // classes because several constructors share intrinsic ancestors.
-        js_intrinsic_clear_prototype_roots();
+        js_intrinsic_clear_prototype_slots();
         g_array_sym_iter_ever_set = 1;
         for (int class_id = (int)JS_CLASS_NONE + 1;
              class_id < (int)JS_CLASS__COUNT; class_id++) {
@@ -17418,36 +17420,11 @@ static const JsWellKnownSymbolSpec* js_well_known_symbol_spec(uint64_t id) {
     return &js_well_known_symbol_specs[id - JS_SYMBOL_ID_ITERATOR];
 }
 
-static NameId js_well_known_symbol_name_id(uint64_t id) {
-    JsRuntimeState* state = js_runtime_state_for(context);
-    if (!state) return NULL;
-    JsWellKnownRefs* refs = &state->well_known;
-    NameId key = NAME_ID_NONE;
-    switch (id) {
-    case JS_SYMBOL_ID_ITERATOR: key = refs->symbol_iterator; break;
-    case JS_SYMBOL_ID_TO_PRIMITIVE: key = refs->symbol_to_primitive; break;
-    case JS_SYMBOL_ID_HAS_INSTANCE: key = refs->symbol_has_instance; break;
-    case JS_SYMBOL_ID_TO_STRING_TAG: key = refs->symbol_to_string_tag; break;
-    case JS_SYMBOL_ID_ASYNC_ITERATOR: key = refs->symbol_async_iterator; break;
-    case JS_SYMBOL_ID_SPECIES: key = refs->symbol_species; break;
-    case JS_SYMBOL_ID_MATCH: key = refs->symbol_match; break;
-    case JS_SYMBOL_ID_REPLACE: key = refs->symbol_replace; break;
-    case JS_SYMBOL_ID_SEARCH: key = refs->symbol_search; break;
-    case JS_SYMBOL_ID_SPLIT: key = refs->symbol_split; break;
-    case JS_SYMBOL_ID_UNSCOPABLES: key = refs->symbol_unscopables; break;
-    case JS_SYMBOL_ID_IS_CONCAT_SPREADABLE: key = refs->symbol_is_concat_spreadable; break;
-    case JS_SYMBOL_ID_MATCH_ALL: key = refs->symbol_match_all; break;
-    case JS_SYMBOL_ID_ASYNC_DISPOSE: key = refs->symbol_async_dispose; break;
-    case JS_SYMBOL_ID_DISPOSE: key = refs->symbol_dispose; break;
-    default: return NAME_ID_NONE;
-    }
-    return key;
-}
-
 extern "C" NameId js_symbol_name_id(Item sym) {
     if (!js_is_symbol_item(sym)) return NAME_ID_NONE;
+    if (!js_runtime_state_for(context)) return NAME_ID_NONE;
     uint64_t id = js_symbol_item_id(sym);
-    NameId well_known = js_well_known_symbol_name_id(id);
+    NameId well_known = js_well_known_symbol_name_id((int64_t)id);
     if (well_known != NAME_ID_NONE) return well_known;
     if (js_symbol_desc_registry) {
         JsSymbolDesc lookup = {};
@@ -17771,7 +17748,7 @@ static Item js_url_to_object(Url* url) {
     #define URL_SET_PROP(propname, getter) do { \
         const char* _v = getter(url); \
         Item _key = js_name_item(propname); \
-        Item _val = _v ? js_name_item(_v, strlen(_v)) : js_name_item("", 0); \
+        Item _val = _v ? js_name_item(_v, strlen(_v)) : ItemEmptyString; \
         js_set_key_default(obj, _key, _val); \
     } while(0)
 
@@ -17815,7 +17792,7 @@ static Item js_url_to_object(Url* url) {
         if (search && search[0]) {
             search_str = js_name_item(search, strlen(search));
         } else {
-            search_str = js_name_item("", 0);
+            search_str = ItemEmptyString;
         }
         js_set_key_cstr(obj, "searchParams", js_url_search_params_new(search_str));
     }

@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 3.3.0 (2026-09-14)
+**Spec version:** 5.1.0 (2026-09-14)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -114,7 +114,8 @@ language-visible counterparts are the semantics spec's SI ledger.
   [D2.6.2]
 - **DI9 — Container-owned scalars.** A container's wide-scalar Items point
   only into its own buffer; headers are never reallocated out from under
-  an identity. [D2.6.4]
+  an identity. `i64?`/`u64?` native Array and packed Map/Shape slots are
+  destination-owned `TypedItem`s, never raw scalar Items. [D2.6.4v3]
 - **DI10 — The safepoint contract.** GC begins only inside a `MAY_GC`
   call; `MAY_GC` is the default and `NO_GC` a mechanically verified claim;
   all `MAY_GC` cleanup runs before watermark restoration. [D5.3.2, D5.1.4]
@@ -264,23 +265,23 @@ language-visible counterparts are the semantics spec's SI ledger.
   sentinel; representation follows the **full type contract**, never
   TypeId alone; **GC sees only pointers** — numeric sentinels are never
   roots. [Nullable §1–2]
-- **D2.5.2** Sentinels: `INT_LANE_NULL` (numerically the `ItemNull` word —
-  what makes box/unbox exact) joins the three poison sentinels; `bool?` is
+- **D2.5.2v3** Sentinels: `INT_LANE_NULL` (numerically the `ItemNull` word
+  — what makes box/unbox exact) joins the three poison sentinels; `bool?` is
   one byte 0/1/2 with C-truthiness banned; sized `i8?`…`u32?` widen to the
-  i64 lane; `i64?`/`u64?` are the deliberate exception (every bit pattern
-  valid → ordinary Item lane); `float?` reserves a distinct NaN payload
-  (`ItemNull`'s bits are a valid finite double) — the null test is a bit
-  compare, never IEEE `==`, and other NaNs canonicalize on store.
-  **Consequence, accepted:** `i64?`/`u64?` therefore forgo the native lane
-  outright — a wide optional stays a boxed Item paying a scalar home per
-  value (D2.2.3), and never enters the unboxed wide `+ - *` path, which
-  admits only non-optional operands. Closed, not deferred: recovering a null
-  code costs either a reserved value (deleting a legal member from a
-  full-domain type) or a tagged pair (a second word on every wide optional),
-  and the case is judged rare — wide integers carry exact ids, counters,
-  hashes, and bit patterns, the uses that least often admit absence. Revisit
-  only on evidence that `i64?`/`u64?` are hot in real code. *Not every type
-  earns a lane.* [Nullable §3–4]
+  i64 lane; `float?` reserves a distinct NaN payload (`ItemNull`'s bits are
+  a valid finite double) — the null test is a bit compare, never IEEE `==`,
+  and other NaNs canonicalize on store. `i64?`/`u64?` have no spare raw
+  one-word null code, so their expression and dynamic-boundary carrier is an
+  ordinary Item. Every persistent native destination for an `i64?`/`u64?`
+  payload — a native-Array element or packed Map/Shape field — is nevertheless
+  a destination-owned `TypedItem`: a null tag, or an inline `int64_t`/
+  `uint64_t` payload with its exact tag. The store validates then copies that
+  payload into its destination; the read reconstructs the consumer carrier.
+  A raw wide-scalar Item pointing into a number frame must never be retained.
+  Thus wide optionals preserve their native typed representation without
+  borrowing a scalar home; the extra tag is confined to persistent storage,
+  not the register ABI. Wide optionals remain outside the unboxed wide `+ - *`
+  path, which admits only non-optional operands. [Nullable §3–4; D5.2.2v3–D5.2.3]
 - **D2.5.3** `a[i]` with an unproven index infers `T?` — not `T`, not
   `any`; flow-sensitive proofs may use the payload directly but never
   change the public inferred type. `any`, `number`, `integer`, and
@@ -288,12 +289,15 @@ language-visible counterparts are the semantics spec's SI ledger.
 
 ### D2.6 Containers and array storage
 
-- **D2.6.1** Three physical array forms: boxed Array (Items), native Array
-  (uniform 64-bit lane word per element), ArrayNum (specialized numeric
-  layout). Map/shape packing uses minimum field width; array packing the
-  uniform word — a deliberate granularity difference. Shapes carry an
-  immutable `LaneStorageDesc` from **one shared descriptor resolver** for
-  MIR, map layout, arrays, and guests. [Nullable §6]
+- **D2.6.1v3** Three physical array forms: boxed Array (Items), native Array
+  (uniform descriptor-selected native slot per element), ArrayNum
+  (specialized numeric layout). Native slots are normally one 64-bit lane
+  word; `i64?[]`/`u64?[]` use a destination-owned `TypedItem` slot.
+  Map/shape packing uses minimum field width, except that an `i64?`/`u64?`
+  field is its descriptor-selected 9-byte destination-owned `TypedItem` slot.
+  The native Array's uniform descriptor slot remains a deliberate granularity
+  difference. Shapes carry an immutable `LaneStorageDesc` from **one shared
+  descriptor resolver** for MIR, map layout, arrays, and guests. [Nullable §6]
 - **D2.6.2** **ArrayNum is strictly non-null**: an admitted null store
   performs a one-way, atomic demotion to native `Array<T?>`; `int[]`
   rejects the store outright. Covariant `int[] → int?[]` assignment may
@@ -304,9 +308,12 @@ language-visible counterparts are the semantics spec's SI ledger.
 - **D2.6.3** `ELEM_INT` element storage is the i64 lane (finite values or
   poison sentinels), mapped to IEEE at print/box boundaries; both int
   element kinds share the i64 kernel path.* [Int_Type §5.8]
-- **D2.6.4** Wide-scalar Items inside a container point **only into that
-  container's own buffer** (tail regions, `extra` = uniform tail count);
-  headers are never reallocated out from under an identity. [SF15]
+- **D2.6.4v3** A container that retains a raw wide-scalar Item points **only
+  into that container's own buffer** (tail regions, `extra` = uniform tail
+  count); headers are never reallocated out from under an identity.
+  `i64?[]`/`u64?[]` and packed Map/Shape fields of those types instead retain
+  no raw scalar Item: each is an inline, destination-owned `TypedItem` slot
+  under D2.5.2v3. [SF15]
 - **D2.6.5** **The append API selects content normalization.** Two runtime
   appends exist and they are not interchangeable. `list_push()` is the
   **content** constructor: it applies S16.7's normalization — a `null` is
@@ -350,7 +357,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   pointer. Instance layout follows the declared structure, so an
   attribute-only nominal type is a 32-byte map, not a 64-byte element.
   JavaScript arrays hold their properties in their own attribute face, and
-  the reserved JS-properties slot in `extra` (D2.6.4) retires. *Accepted
+  the reserved JS-properties slot in `extra` (D2.6.4v3) retires. *Accepted
   cost:* every array header grows by the map face; array-heavy benchmarks
   gate the change. *Sequencing:* the layout change lands first as its own
   verified change, then the nominal-descriptor change and the TypeId
@@ -438,7 +445,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   are error-free **by representation** — there is no Item word to put an
   error in, and no lane encoding is ever spent on one: the int lane's
   out-of-band encodings denote `int.nan`/`int.inf` values (D2.2.2), the
-  null sentinels denote null (D2.5.2), and dense sized lanes have no spare
+  null sentinels denote null (D2.5.2v3), and dense sized lanes have no spare
   pattern at all. Both escape hatches are rejected rulings, not unbuilt
   options: an **in-band error sentinel** records only *that* a failure
   happened (contradicting rich error payloads) and re-creates the
@@ -624,7 +631,7 @@ that carries them.
   `var`/procedural code can, and an annotated root must keep conforming.
   [TE §6 B7b, Transpiler DD3]
 - **D3.4.6** Shapes carry the immutable `LaneStorageDesc` derived from the
-  full `Type*` via the one shared descriptor resolver (D2.6.1); changing
+  full `Type*` via the one shared descriptor resolver (D2.6.1v3); changing
   a field's *contract* re-derives layout, writing a null into a `T?`
   field does not. [Nullable §6]
 - **D3.4.7** A runtime JavaScript `TypeMap` may carry one immutable
@@ -1171,14 +1178,17 @@ loosely across the corpus — context disambiguates, and we live with it.
   typesetting package moves (`lambda.package.math` → `lambda.doc.math`),
   keeping `lambda.math` for the built-in math module. A package path names
   exactly one thing: no path may be both a built-in module and a shipped
-  package. [S17.2.1, S17.2.2, S16.10.1v2]
+  package. Namespace resolution maps shipped paths to the source tree under
+  `<lambda-home>/package/`: `lambda.<package>.*` maps beneath its matching
+  package directory, while `lambda.doc.math.*` maps to `package/math/`.
+  [S17.2.1, S17.2.2, S16.10.1v2]
 - **D7.2.5*** **Full user-agent editing policy belongs to the shipped Lambda
   DOM behavior package, never to Radiant's native implementation.** Radiant
   owns the platform-input gate and standard DOM mechanisms—editing-host
   recognition,
   events, Selection/Range, clipboard/composition transport, observation,
   geometry, and checked generic DOM mutation primitives. The behavior package
-  (currently sourced under `lambda/dom`) owns uncanceled
+  (currently sourced under `lambda/package/dom`) owns uncanceled
   `contenteditable` default actions, structural normalization, editing
   history, `designMode`, and the complete
   `execCommand`/`queryCommand*` compatibility surface. User input and legacy
@@ -1861,6 +1871,7 @@ slice; no formal semantic ruling or document semver changes.
 | D2.6.5 | The append-site split is landed and the `disable_string_merging` flag it replaced has been retired from both context structs. One wrinkle remains: `list_push`'s normalization is asymmetric — null-stripping is unconditional, but string merging additionally requires an active `input_context`/`input_allocation_context` (`collection_runtime.cpp:323`), so outside an input parse the merge half of S16.7 does not run. Also unreconciled: `input-ics.cpp` and `input-mark.cpp` use MarkBuilder *and* call `list_push` directly, so those two formats mix normalizing and verbatim appends within one document. |
 | D2.4.1–D2.4.3 | L0–L4 first slice landed 2026-08-28: explicit `INT_LANE`/machine reps, full-contract `MirValue`, canonical contract mapping, fail-closed carrier router, direct transition/fail-closed fixtures, and migration of arithmetic, branch, binding, index, call, and return consumers. Semantic `MIR_reg_type()` probes are removed from Lambda expression lowering. The 2026-08-31 P5 follow-up makes `transpile_primary_value()` publish literal/primary `MirValue` descriptors directly and retires its raw dispatcher arm. **Implemented boundary audit 2026-09-05:** `transpile_expr_value_core()`/`transpile_expr_value()` and `jm_transpile_expression_direct()`/`jm_transpile_expression_value()` now form the respective core demand-driven `MirValue` boundaries; no core `transpile_expr*` or `jm_transpile_expression*` function returns `MIR_reg_t`. Internal physical-register helpers remain below the boundary. |
 | D2.5.1 | Nullable-lane first slice landed 2026-08-05 (LaneStorageDesc, native arrays, packed nullable fields, scalar ABI); `f16?`/`f32?`, JS IC lowering, mutable ArrayNum views, vector/N-D kernels pending. |
+| D2.5.2v3, D2.6.1v3, D2.6.4v3 | **Implemented 2026-09-14.** `i64?`/`u64?` native Arrays and packed Map/Shape fields use descriptor-selected, destination-owned `TypedItem` slots. Construction, mutation, static materialization, rebuilding, COW, reads, and GC tracing preserve the selected layout; the regression covers JIT/interpreter plus forced-GC number-frame reuse. |
 | D2.6.2 | ArrayNum `==` representation-sensitivity is a known live bug (also gates the data-processing engines). |
 | D2.6.3 | ELEM_INT i64 revert landed; SIMD kernels only partly re-enabled (C16-era gating comments remain). |
 | D2.6.9v3, D2.6.11 | **Ruled 2026-09-03 (USER), not implemented** — both belong to phase 2 of D2.6.6v2. Shipped state is the v2 description below. |
@@ -1900,8 +1911,8 @@ slice; no formal semantic ruling or document semver changes.
 | D6.3.1 | JS async activations as `LambdaTask`s (JSCU25, ratified 2026-09-07) are not implemented: readiness stays with the microtask queue (the reaction job resumes the task; the FIFO run queue never resumes a JS frame), the Promise is the handle, the mailbox is lazy, and the scheduler holds JS activation tasks weakly so an unreachable pending activation is collected. `lambda_task_create` today allocates a mailbox and registers four roots per task (`concurrency.cpp:737–774`). |
 | D6.3.2 | Worker tier pending entirely: process isolation first, thread isolation gated on the isolate-state audit and DO20. |
 | D7.1.3 | Static modules implemented (rev 29, P0–P6) except Class F: the rt→radiant boundary is a ratcheted 165-import baseline; P1c constructor consolidation deferred. |
-| D7.2.4 | **Implemented 2026-09-08.** The direct AST resolver exposes `lambda.sys.*` through the existing sys-function registry, aliases `lambda.math`/`lambda.io` to the built-in module rows, reserves the `lambda` root, and maps the shipped package tree to `lambda/{chart,dom,editor,graph,latex,openapi,pdf}` with typesetting under `lambda/doc/math`. Live imports, bridges, tests, and release preparation use the canonical paths; regressions are `test/lambda/lambda_namespace.ls` and the reserved-root negative fixture. |
-| D7.2.5 | Implemented 2026-09-07. The shipped `lambda/dom` behavior package owns the shared descriptor/context/plan/result pipeline, text and structural editing, formatting, objects, clipboard, history, `designMode`, `execCommand`, and all five `queryCommand*` surfaces. Native Radiant retains only platform transport and generic, checked DOM/Selection/Range/clipboard transaction mechanisms. Applicable WPT and pinned Chromium contenteditable manifests, package-disabled behavior, editor integration, form regressions, Lambda/Radiant baselines, and lint pass; the release/lifecycle record is `vibe/radiant/Radiant_Editable_UA6_Report.md`. The separate `Radiant_Design_Edit_History.md` expansion (including form-history migration and its different retention contract) remains a proposal and does not alter this ruling. |
+| D7.2.4 | **Implemented 2026-09-08.** The direct AST resolver exposes `lambda.sys.*` through the existing sys-function registry, aliases `lambda.math`/`lambda.io` to the built-in module rows, reserves the `lambda` root, and resolves shipped source from `<lambda-home>/package/` while exposing `lambda/{chart,dom,editor,graph,latex,openapi,pdf}` and typesetting under `lambda/doc/math`. Live imports, bridges, tests, and release preparation use the canonical paths; regressions are `test/lambda/lambda_namespace.ls` and the reserved-root negative fixture. |
+| D7.2.5 | Implemented 2026-09-07. The shipped `lambda/package/dom` behavior package owns the shared descriptor/context/plan/result pipeline, text and structural editing, formatting, objects, clipboard, history, `designMode`, `execCommand`, and all five `queryCommand*` surfaces. Native Radiant retains only platform transport and generic, checked DOM/Selection/Range/clipboard transaction mechanisms. Applicable WPT and pinned Chromium contenteditable manifests, package-disabled behavior, editor integration, form regressions, Lambda/Radiant baselines, and lint pass; the release/lifecycle record is `vibe/radiant/Radiant_Editable_UA6_Report.md`. The separate `Radiant_Design_Edit_History.md` expansion (including form-history migration and its different retention contract) remains a proposal and does not alter this ruling. |
 | D7.4.1v2 | Native-module POC 1 remains unstarted; the engine-owned Promise VMap is designed by JR7/Tune7 but not yet implemented. |
 | D7.4.3 | Hosted-language layering: `lang-python` is the landed DSO reference chain, but Python is currently statically linked and its ten follow-up ADRs (Lang_Hosting §17) are unwritten. |
 | D7.4.4 | Implemented in DOM4 (2026-08-14): `host_ops`, `legacy_ops`, `JubeHostObjectOps`, and the vmap `string_key_item` re-materialization shim were removed; record-owned hooks are the only host-object protocol. The protocol remains unchanged; the D7.4.5v2 TypeId-order revision advances the current Jube ABI to version 6. |

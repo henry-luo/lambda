@@ -79,38 +79,6 @@ extern "C" void js_atomics_destroy_context(JsRuntimeState* state);
 extern "C" void js_dynfunc_cache_destroy_context(JsRuntimeState* state);
 static void js_release_input_resources(void);
 
-static bool js_runtime_state_init_well_known_refs(JsRuntimeState* state) {
-    if (!state) return false;
-    JsWellKnownRefs* refs = &state->well_known;
-    refs->constructor = JS_NAME_CONSTRUCTOR;
-    refs->prototype = JS_NAME_PROTOTYPE;
-    refs->name = JS_NAME_NAME;
-    refs->to_string = JS_NAME_TO_STRING;
-    refs->value_of = JS_NAME_VALUE_OF;
-    refs->symbol_iterator = JS_SYMBOL_ITERATOR;
-    refs->symbol_to_primitive = JS_SYMBOL_TO_PRIMITIVE;
-    refs->symbol_has_instance = JS_SYMBOL_HAS_INSTANCE;
-    refs->symbol_to_string_tag = JS_SYMBOL_TO_STRING_TAG;
-    refs->symbol_async_iterator = JS_SYMBOL_ASYNC_ITERATOR;
-    refs->symbol_species = JS_SYMBOL_SPECIES;
-    refs->symbol_match = JS_SYMBOL_MATCH;
-    refs->symbol_replace = JS_SYMBOL_REPLACE;
-    refs->symbol_search = JS_SYMBOL_SEARCH;
-    refs->symbol_split = JS_SYMBOL_SPLIT;
-    refs->symbol_unscopables = JS_SYMBOL_UNSCOPABLES;
-    refs->symbol_is_concat_spreadable = JS_SYMBOL_IS_CONCAT_SPREADABLE;
-    refs->symbol_match_all = JS_SYMBOL_MATCH_ALL;
-    refs->symbol_async_dispose = JS_SYMBOL_ASYNC_DISPOSE;
-    refs->symbol_dispose = JS_SYMBOL_DISPOSE;
-    return refs->constructor != NAME_ID_NONE && refs->prototype != NAME_ID_NONE &&
-        refs->name != NAME_ID_NONE && refs->to_string != NAME_ID_NONE &&
-        refs->value_of && refs->symbol_iterator && refs->symbol_to_primitive &&
-        refs->symbol_has_instance && refs->symbol_to_string_tag && refs->symbol_async_iterator &&
-        refs->symbol_species && refs->symbol_match && refs->symbol_replace && refs->symbol_search &&
-        refs->symbol_split && refs->symbol_unscopables && refs->symbol_is_concat_spreadable &&
-        refs->symbol_match_all && refs->symbol_async_dispose && refs->symbol_dispose;
-}
-
 static void js_runtime_state_prepare_root_vectors(JsRuntimeState* state);
 static void js_runtime_state_unbind_root_vectors(JsRuntimeState* state);
 
@@ -425,10 +393,9 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
         js_global_environment_destroy(state->global_environment);
         mem_free(state->global_environment);
     }
-    if (state->event_loop) mem_free(state->event_loop);
-    if (state->timers) {
-        js_event_loop_timer_state_destroy(state->timers);
-        mem_free(state->timers);
+    if (state->event_loop) {
+        js_event_loop_state_destroy(state->event_loop);
+        mem_free(state->event_loop);
     }
     runtime_resource_table_destroy(&state->resources);
     if (state->console.labels) {
@@ -450,7 +417,6 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
     }
     state->global_environment = NULL;
     state->event_loop = NULL;
-    state->timers = NULL;
     state->async_hooks = NULL;
     if (state->readline) {
         js_readline_state_destroy(state->readline);
@@ -471,7 +437,6 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
         mem_free(state->async_local_storage);
     }
     root_vector_destroy(&state->modules.values);
-    if (state->intrinsic_slots) mem_free(state->intrinsic_slots);
     if (state->test262_agent) {
         js_test262_agent_state_destroy(state->test262_agent);
         mem_free(state->test262_agent);
@@ -485,7 +450,6 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
     state->assert = NULL;
     state->intrinsics = NULL;
     state->async_local_storage = NULL;
-    state->intrinsic_slots = NULL;
     state->test262_agent = NULL;
     state->process = NULL;
 }
@@ -602,19 +566,15 @@ JsProcessState* js_process_state_ensure(JsRuntimeState* state) {
 static bool js_runtime_state_alloc_records(JsRuntimeState* state) {
     state->global_environment = (JsGlobalEnvironment*)mem_calloc(1,
         sizeof(JsGlobalEnvironment), MEM_CAT_JS_RUNTIME);
-    state->event_loop = (JsEventLoopQueueState*)mem_calloc(1,
-        sizeof(JsEventLoopQueueState), MEM_CAT_JS_RUNTIME);
-    state->timers = (JsEventLoopTimerState*)mem_calloc(1,
-        sizeof(JsEventLoopTimerState), MEM_CAT_JS_RUNTIME);
+    state->event_loop = (JsEventLoopState*)mem_calloc(1,
+        sizeof(JsEventLoopState), MEM_CAT_JS_RUNTIME);
     state->string_caches = (JsStringCacheState*)mem_calloc(1,
         sizeof(JsStringCacheState), MEM_CAT_JS_RUNTIME);
-    state->intrinsics = (JsIntrinsicState*)mem_calloc(1, sizeof(JsIntrinsicState), MEM_CAT_JS_RUNTIME);
-    state->intrinsic_slots = (JsRealmIntrinsicSlots*)mem_calloc(1,
-        sizeof(JsRealmIntrinsicSlots), MEM_CAT_JS_RUNTIME);
-    if (!state->global_environment || !state->event_loop || !state->timers ||
+    state->intrinsics = (JsRealmIntrinsicState*)mem_calloc(1,
+        sizeof(JsRealmIntrinsicState), MEM_CAT_JS_RUNTIME);
+    if (!state->global_environment || !state->event_loop ||
             !state->string_caches ||
-            !state->intrinsics ||
-            !state->intrinsic_slots) {
+            !state->intrinsics) {
         log_error("js-runtime-state: failed to allocate realm records");
         js_runtime_state_free_records(state);
         return false;
@@ -677,16 +637,9 @@ bool js_runtime_state_init(EvalContext* runtime_context) {
             &state->event_loop->queue_storage[2]);
         runtime_job_queue_init(&state->promises.unhandled_queue,
             &state->promises.unhandled_storage);
-        state->timers->next_id = 1;
+        state->event_loop->next_id = 1;
         state->execution.call_stack_limit = js_initial_call_stack_limit();
         state->operations.next_symbol_id = 100;
-        if (!js_runtime_state_init_well_known_refs(state)) {
-            // A missing generated record would make pointer identity silently
-            // fall back to bytes, so fail before any realm executes code.
-            log_error("js-runtime-state: incomplete generated well-known key table");
-            context_capsule_drop(runtime_context, CONTEXT_CAPSULE_JS_RUNTIME);
-            return false;
-        }
         state->string_caches->last_from_char_code_cp = -1;
         state->string_caches->ascii_chars_epoch = ~0ULL;
         state->stream.default_byte_hwm = 16 * 1024;
@@ -869,13 +822,12 @@ static void js_runtime_state_prepare_root_vectors(JsRuntimeState* state) {
     js_runtime_state_visit_root_vectors(state,
         js_runtime_state_configure_root_vector, NULL);
 
-    // A JsNamespaceState-derived cache lays its inherited `namespace_object`
-    // out FIRST, before the fields the subsystem adds, so a range registered at
-    // the first DERIVED field leaves the namespace itself unrooted and scans one
-    // Item past the struct. That is exactly how `require("stream")` came back
-    // with an empty namespace under LAMBDA_GC_FORCE_EVERY (fixed 2026-09-08).
-    // These states are not standard-layout, so offsetof on them is ill-formed;
-    // check the start/count pair against the real addresses once at setup (D5.3).
+    // Stream keeps `namespace_object` FIRST, before the fields the subsystem
+    // adds, so a range registered at the first key leaves the namespace unrooted
+    // and scans one Item past the struct. That is exactly how `require("stream")`
+    // came back with an empty namespace under LAMBDA_GC_FORCE_EVERY (fixed 2026-09-08).
+    // The state is not standard-layout, so offsetof is ill-formed; check the
+    // start/count pair against the real addresses once at setup (D5.3).
 #define JS_CHECK_NAMESPACE_ROOT_RANGE(field, last_field, count) \
     if (&state->field.namespace_object + ((count) - 1) != &state->field.last_field) { \
         log_error("js-root-vector: %s span must start at namespace_object and end at %s", \
@@ -892,7 +844,7 @@ bool js_root_vector_ensure_registered(RootVector* roots) {
 }
 
 bool js_realm_intrinsic_slots_ensure_roots(void) {
-    if (!js_active_runtime_state || !js_runtime_state.intrinsic_slots) return false;
+    if (!js_active_runtime_state || !js_runtime_state.intrinsics) return false;
     // Fixed semantic spans must be bound before this lazy catalog reservation;
     // registration can otherwise let a bootstrap collection observe an
     // unconfigured owner range while the realm store grows (D5.3.5).
@@ -974,15 +926,11 @@ bool js_realm_items_fill(void* items, const JsRealmSlotId* slot_ids, int count,
         (Item**)items, count, reserve);
 }
 
-struct JsRuntimeRootResetOptions {
-    bool retain_cluster_primary_options;
-};
-
 static void js_runtime_state_clear_root_vector(RootVector* roots, Item*,
         int, const char*, void* options_data) {
-    JsRuntimeRootResetOptions* options =
-        (JsRuntimeRootResetOptions*)options_data;
-    if (options && options->retain_cluster_primary_options &&
+    bool retain_cluster_primary_options = options_data &&
+        *(const bool*)options_data;
+    if (retain_cluster_primary_options &&
             roots == &js_runtime_state.cluster.roots) {
         return;
     }
@@ -1002,10 +950,10 @@ static void js_runtime_state_unbind_root_vectors(JsRuntimeState* state) {
 }
 
 static void js_root_vector_reset_all(bool full_reset) {
-    JsRuntimeRootResetOptions options = {!full_reset};
+    bool retain_cluster_primary_options = !full_reset;
     js_runtime_state_prepare_root_vectors(js_active_runtime_state);
     js_runtime_state_visit_root_vectors(js_active_runtime_state,
-        js_runtime_state_clear_root_vector, &options);
+        js_runtime_state_clear_root_vector, &retain_cluster_primary_options);
 }
 #define js_eval_source_values (js_runtime_state.eval.source.values)
 #define js_eval_source_records (js_runtime_state.eval.source.records)
@@ -1409,31 +1357,31 @@ Map* js_resolve_object_prototype() {
 // extern "C" wrapper for js_key_is_symbol — callable from MIR JIT
 JS_FORWARD_EXPRESSION(int64_t, js_key_is_symbol_c, (Item key), (js_key_is_symbol(key) ? 1 : 0))
 
-extern "C" Item js_well_known_symbol_key(int64_t symbol_id) {
-    JsRuntimeState* state = js_active_runtime_state;
-    if (!state) return ItemNull;
-    JsWellKnownRefs* refs = &state->well_known;
-    NameId key_id = NAME_ID_NONE;
+extern "C" NameId js_well_known_symbol_name_id(int64_t symbol_id) {
     switch (symbol_id) {
-    case 1: key_id = refs->symbol_iterator; break;
-    case 2: key_id = refs->symbol_to_primitive; break;
-    case 3: key_id = refs->symbol_has_instance; break;
-    case 4: key_id = refs->symbol_to_string_tag; break;
-    case 5: key_id = refs->symbol_async_iterator; break;
-    case 6: key_id = refs->symbol_species; break;
-    case 7: key_id = refs->symbol_match; break;
-    case 8: key_id = refs->symbol_replace; break;
-    case 9: key_id = refs->symbol_search; break;
-    case 10: key_id = refs->symbol_split; break;
-    case 11: key_id = refs->symbol_unscopables; break;
-    case 12: key_id = refs->symbol_is_concat_spreadable; break;
-    case 13: key_id = refs->symbol_match_all; break;
-    case 14: key_id = refs->symbol_async_dispose; break;
-    case 15: key_id = refs->symbol_dispose; break;
-    default: return ItemNull;
+    case 1: return JS_SYMBOL_ITERATOR;
+    case 2: return JS_SYMBOL_TO_PRIMITIVE;
+    case 3: return JS_SYMBOL_HAS_INSTANCE;
+    case 4: return JS_SYMBOL_TO_STRING_TAG;
+    case 5: return JS_SYMBOL_ASYNC_ITERATOR;
+    case 6: return JS_SYMBOL_SPECIES;
+    case 7: return JS_SYMBOL_MATCH;
+    case 8: return JS_SYMBOL_REPLACE;
+    case 9: return JS_SYMBOL_SEARCH;
+    case 10: return JS_SYMBOL_SPLIT;
+    case 11: return JS_SYMBOL_UNSCOPABLES;
+    case 12: return JS_SYMBOL_IS_CONCAT_SPREADABLE;
+    case 13: return JS_SYMBOL_MATCH_ALL;
+    case 14: return JS_SYMBOL_ASYNC_DISPOSE;
+    case 15: return JS_SYMBOL_DISPOSE;
+    default: return NAME_ID_NONE;
     }
-    // Initialization rejects an incomplete table, so a NULL here means an
-    // invalid internal ID rather than a spelling-compatible fallback.
+}
+
+extern "C" Item js_well_known_symbol_key(int64_t symbol_id) {
+    if (!js_active_runtime_state) return ItemNull;
+    NameId key_id = js_well_known_symbol_name_id(symbol_id);
+    if (key_id == NAME_ID_NONE) return ItemNull;
     NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL, key_id);
     return key ? (Item){.item = s2it(key)} : ItemNull;
 }
@@ -2128,7 +2076,7 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
             ? message_root.get() : js_to_string(message_root.get()));
         if (item_is_error(message_string_root.get())) return message_string_root.get();
     } else {
-        message_string_root.set(js_name_item("", 0));
+        message_string_root.set(ItemEmptyString);
     }
     String* message_string = it2s(message_string_root.get());
     const char* message_chars = message_string ? message_string->chars : "";

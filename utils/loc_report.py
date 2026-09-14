@@ -220,7 +220,7 @@ MODULES = OrderedDict([
         ('output formatters', [('output formatters', under('lambda/format'))]),
         ('jube node', JUBE_NODE_SUBMODULES),
         ('js runtime', JS_SUBMODULES),
-        ('bash runtime', [('bash runtime', under('lambda/bash'))]),
+        ('bash runtime', [('bash runtime', under('lambda/module/bash'))]),
         ('python runtime', [('python runtime', under('lambda/module/py'))]),
         ('ruby runtime', [('ruby runtime', under('lambda/module/rb'))]),
         ('typescript runtime', [('typescript runtime', under('lambda/ts'))]),

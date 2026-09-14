@@ -1086,13 +1086,13 @@ _Static_assert(JS_ELEMENTS_STATE_MASK == (uint8_t)(0x20u | 0x40u | 0x80u),
 // the JIT and the array boundary make -- is a projection of this record.
 typedef enum LaneStorageKind {
     LANE_STORAGE_INVALID = 0,
-    LANE_STORAGE_ITEM,        // one boxed Item word (nullable int64/uint64, compact NumSized, dynamic `null` slots)
+    LANE_STORAGE_ITEM,        // one boxed Item word (wide optional scalar ABI, compact NumSized, dynamic `null` slots)
     LANE_STORAGE_INT,         // int lane word (INT_LANE_NULL when nullable)
     LANE_STORAGE_BOOL,        // one byte (2 = null when nullable; also `undefined`)
     LANE_STORAGE_SIZED_I64,   // raw 64-bit integer word: nullable sized ints, full-width int64/uint64
     LANE_STORAGE_FLOAT64,     // raw double (NaN-boxed null when nullable)
     LANE_STORAGE_POINTER,     // raw pointer word (containers, strings, datetime, type, ...)
-    LANE_STORAGE_TYPED_ITEM,  // self-describing TypedItem: `any`, unions, abstract numerics
+    LANE_STORAGE_TYPED_ITEM,  // self-describing TypedItem: dynamic values and persistent wide optionals
 } LaneStorageKind;
 
 typedef struct LaneStorageDesc {
@@ -3107,8 +3107,8 @@ extern "C" {
     Item index_assign_cow(Item owner, Item key, Item value);
     Item cow_capture_value(Item value);
     Item cow_bind_rmw_handle(Item root, Item value, int64_t count, Item key1, Item key2);  // CW34
-    // Whether S9.3.1 insertion capture is active (LAMBDA_COW_CAPTURE). The
-    // transpiler reads it too, so flag-off emits the pre-capture code exactly.
+    // S9.3.1 insertion capture is unconditional; the helper remains the
+    // shared runtime entry point for marking captured values.
     // Capture every field of a freshly built shaped literal (S9.3.1).
     void cow_mark_shape_children(struct TypeMap* type, void* data);
     Item cow_bind_var(Item value);

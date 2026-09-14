@@ -368,8 +368,6 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
 #define LMD_TYPE_ERROR_       LMD_TYPE_ERROR
 #define LMD_TYPE_UNDEFINED_   LMD_TYPE_UNDEFINED
 
-#define MAP_KIND_ITERATOR_ 6
-#define MAP_KIND_PROXY_    9
 #define MAP_KIND_ARRAY_SPARSE_ 14
 #define MAP_KIND_ERROR_    15
 
@@ -1829,20 +1827,8 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         void* data_ptr = *(void**)(p + LAMBDA_GC_OFF_MAP_DATA);
         int data_cap = *(int*)(p + LAMBDA_GC_OFF_MAP_DATA_CAP);
         if (tag == LMD_TYPE_MAP_ && gc->js_native_trace) {
+            // JS trailing carriers own their precise edges through this hook.
             gc->js_native_trace(obj, gc);
-        }
-        if (tag == LMD_TYPE_MAP_ && map_kind == MAP_KIND_ITERATOR_) {
-            if (data_ptr) gc_mark_item(gc, *(uint64_t*)data_ptr);
-            break;
-        }
-        if (tag == LMD_TYPE_MAP_ && map_kind == MAP_KIND_PROXY_) {
-            if (data_ptr) {
-                uint64_t* slots = (uint64_t*)data_ptr;
-                gc_mark_item(gc, slots[0]);
-                gc_mark_item(gc, slots[1]);
-                gc_mark_item(gc, slots[2]);
-            }
-            break;
         }
         if (tag == LMD_TYPE_MAP_ && map_kind == MAP_KIND_ARRAY_SPARSE_) {
             gc_trace_sparse_array_map_entries(gc, obj);
@@ -2047,9 +2033,13 @@ static int gc_compact_content_items(gc_heap_t* gc, uint8_t* p) {
     int64_t extra = *(int64_t*)(p + LAMBDA_GC_OFF_LIST_EXTRA);
     int64_t capacity = *(int64_t*)(p + LAMBDA_GC_OFF_LIST_CAPACITY);
     if (!*items_slot || !gc_data_zone_owns(gc->data_zone, *items_slot)) return 0;
+    uint8_t lane_kind = p[LAMBDA_GC_OFF_CONTAINER_MAP_KIND] & 0x07;
+    bool native_lane = (p[LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS] & 0x10) != 0;
+    size_t slot_size = native_lane && lane_kind == LANE_STORAGE_TYPED_ITEM
+        ? LAMBDA_GC_OFF_TYPED_ITEM_VALUE + sizeof(uint64_t) : sizeof(uint64_t);
     uint64_t* old_items = (uint64_t*)*items_slot;
     void* new_items = gc_data_zone_copy(gc->tenured_data, *items_slot,
-        (size_t)capacity * sizeof(uint64_t));
+        (size_t)capacity * slot_size);
     if (!new_items) return 0;
     *items_slot = new_items;
     // Fix embedded float/int64/datetime pointers into the old buffer's tail.
@@ -2169,7 +2159,11 @@ static void gc_compact_data(gc_heap_t* gc) {
             int64_t capacity = *(int64_t*)(p + LAMBDA_GC_OFF_LIST_CAPACITY);
             if (*items_slot && gc_data_zone_owns(gc->data_zone, *items_slot)) {
                 uint64_t* old_items = (uint64_t*)*items_slot;
-                size_t size = capacity * sizeof(uint64_t); // sizeof(Item)
+                uint8_t lane_kind = p[LAMBDA_GC_OFF_CONTAINER_MAP_KIND] & 0x07;
+                bool native_lane = (p[LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS] & 0x10) != 0;
+                size_t slot_size = native_lane && lane_kind == LANE_STORAGE_TYPED_ITEM
+                    ? LAMBDA_GC_OFF_TYPED_ITEM_VALUE + sizeof(uint64_t) : sizeof(uint64_t);
+                size_t size = capacity * slot_size;
                 void* new_items = gc_data_zone_copy(gc->tenured_data, *items_slot, size);
                 if (new_items) {
                     *items_slot = new_items;
@@ -2368,13 +2362,6 @@ static void gc_finalize_dead_object(gc_heap_t* gc, gc_header_t* header) {
         uint8_t map_kind = p[LAMBDA_GC_OFF_CONTAINER_MAP_KIND];
         if (map_kind == MAP_KIND_ARRAY_SPARSE_) {
             gc_free_sparse_array_map_entries(obj);
-        }
-        if (map_kind == MAP_KIND_ITERATOR_ || map_kind == MAP_KIND_PROXY_) {
-            void* data = *(void**)(p + LAMBDA_GC_OFF_MAP_DATA);
-            if (data) {
-                mem_free(data);
-                *(void**)(p + LAMBDA_GC_OFF_MAP_DATA) = NULL;
-            }
         }
     }
     // Other types: sub-allocations (items[], data, closure_env) are in data zone

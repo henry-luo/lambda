@@ -132,7 +132,7 @@ RULES
     --globs '!**/tree-sitter*/**' \
     --globs '!lambda/mir/**' \
     --globs '!lambda/module/**' \
-    --globs '!lambda/bash/**' \
+    --globs '!lambda/module/bash/**' \
     --globs '!lambda/serve/**' \
     --globs '!lambda/network/**' \
     --globs '!lambda/jube/**' "${SCAN_PATHS[@]}" 2> "$TMP/ast-grep.stderr" \

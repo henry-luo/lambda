@@ -1204,8 +1204,8 @@ TEST(JavaScriptRegression, Jscu29DynamicGlobalEnvironmentAndJobs) {
 }
 
 TEST(JavaScriptRegression, Jscu29RealmSlotsUtil) {
-    test_js_script_against_file("test/js/jscu29_realm_slots_util.js",
-        "test/js/jscu29_realm_slots_util.txt");
+    test_js_script_against_file("test/node/jscu29_realm_slots_util.js",
+        "test/node/jscu29_realm_slots_util.txt");
 }
 
 TEST(JavaScriptRegression, Jscu31TimerResourceTable) {
@@ -1259,13 +1259,13 @@ TEST(JavaScriptRegression, Jscu29TypedArrayIntrinsicSlots) {
 }
 
 TEST(JavaScriptRegression, Jscu29CryptoNamespaceRoot) {
-    test_js_script_against_file("test/js/jscu29_crypto_namespace_root.js",
-        "test/js/jscu29_crypto_namespace_root.txt");
+    test_js_script_against_file("test/node/jscu29_crypto_namespace_root.js",
+        "test/node/jscu29_crypto_namespace_root.txt");
 }
 
 TEST(JavaScriptRegression, Jscu29DnsRootedState) {
-    test_js_script_against_file("test/js/jscu29_dns_rooted_state.js",
-        "test/js/jscu29_dns_rooted_state.txt");
+    test_js_script_against_file("test/node/jscu29_dns_rooted_state.js",
+        "test/node/jscu29_dns_rooted_state.txt");
 }
 
 TEST(JavaScriptRegression, Jscu29ModuleNamespaceSlots) {
@@ -1299,43 +1299,18 @@ TEST(JavaScriptRegression, Jscu31CjsModuleStack) {
 }
 
 TEST(JavaScriptRegression, Jscu31NetBlockList) {
-    test_js_script_against_file("test/js/jscu31_net_block_list.js",
-        "test/js/jscu31_net_block_list.txt");
+    test_js_script_against_file("test/node/jscu31_net_block_list.js",
+        "test/node/jscu31_net_block_list.txt");
 }
 
 TEST(JavaScriptRegression, Jscu31DnsResourceTable) {
-    test_js_script_against_file("test/js/jscu31_dns_resource_table.js",
-        "test/js/jscu31_dns_resource_table.txt");
-}
-
-TEST(JavaScriptRegression, Jscu31TlsWriteCallbackRoots) {
-    test_js_script_against_file("test/js/jscu31_tls_write_callback_roots.js",
-        "test/js/jscu31_tls_write_callback_roots.txt");
-}
-
-TEST(JavaScriptRegression, Jscu31TlsServerValueSlots) {
-    test_js_script_against_file("test/js/jscu31_tls_server_value_slots.js",
-        "test/js/jscu31_tls_server_value_slots.txt");
+    test_js_script_against_file("test/node/jscu31_dns_resource_table.js",
+        "test/node/jscu31_dns_resource_table.txt");
 }
 
 TEST(JavaScriptRegression, Jscu31ProcessIpcCallbackRoots) {
     test_js_script_against_file("test/js/jscu31_process_ipc_callback_roots.js",
         "test/js/jscu31_process_ipc_callback_roots.txt");
-}
-
-TEST(JavaScriptRegression, Jscu31HttpClientWriteCallbackRoots) {
-    test_js_script_against_file("test/js/jscu31_http_client_write_callback_roots.js",
-        "test/js/jscu31_http_client_write_callback_roots.txt");
-}
-
-TEST(JavaScriptRegression, Jscu31NetSocketCallbackSlots) {
-    test_js_script_against_file("test/js/jscu31_net_socket_callback_slots.js",
-        "test/js/jscu31_net_socket_callback_slots.txt");
-}
-
-TEST(JavaScriptRegression, Jscu31HttpResponseWriteTail) {
-    test_js_script_against_file("test/js/jscu31_http_response_write_tail.js",
-        "test/js/jscu31_http_response_write_tail.txt");
 }
 
 TEST(JavaScriptRegression, Jscu31ChildProcessIpcCallbackSlots) {
@@ -1356,11 +1331,6 @@ TEST(JavaScriptRegression, Jscu31ChildProcessSpawnValues) {
 TEST(JavaScriptRegression, Jscu31JubePersistentValueSlots) {
     test_js_script_against_file("test/js/jscu31_jube_persistent_value_slots.js",
         "test/js/jscu31_jube_persistent_value_slots.txt");
-}
-
-TEST(JavaScriptRegression, Jscu31BoundSocketOwner) {
-    test_js_script_against_file("test/js/jscu31_bound_socket_owner.js",
-        "test/js/jscu31_bound_socket_owner.txt");
 }
 
 TEST(JavaScriptRegression, Jscu35DynamicFunctionCache) {
@@ -1409,8 +1379,8 @@ TEST(JavaScriptRegression, Jscu35DecoratorSequence) {
 }
 
 TEST(JavaScriptRegression, Jscu31NetCreateConnectionArguments) {
-    test_js_script_against_file("test/js/jscu31_net_create_connection_arguments.js",
-        "test/js/jscu31_net_create_connection_arguments.txt");
+    test_js_script_against_file("test/node/jscu31_net_create_connection_arguments.js",
+        "test/node/jscu31_net_create_connection_arguments.txt");
 }
 
 TEST(JavaScriptRegression, Jscu29WithScopeStack) {

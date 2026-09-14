@@ -2,6 +2,7 @@
 
 extern "C" {
 #include "../lib/log.h"
+#include "../lib/str.h"
 }
 
 #include <ctype.h>
@@ -25,12 +26,8 @@ static bool env_enabled(const char* value) {
 }
 
 static bool token_equals(const char* token, int len, const char* expected) {
-    int expected_len = (int)strlen(expected); // INT_CAST_OK: token length comparison
-    if (len != expected_len) return false;
-    for (int i = 0; i < len; i++) {
-        if ((char)tolower(token[i]) != expected[i]) return false;
-    }
-    return true;
+    if (!token || !expected || len < 0) return false;
+    return str_ieq_const(token, (size_t)len, expected); // INT_CAST_OK: token length is nonnegative.
 }
 
 static uint32_t category_from_token(const char* token, int len) {

@@ -56,7 +56,7 @@ The table lists every **high-severity** finding plus the most consequential medi
 | 8 | **High** | HTTP **header-value injection**: only `undefined` rejected, no CRLF/control-char check → response splitting via `res.setHeader(name, userValue)` | `lambda/js/js_http.cpp:1055` | security |
 | 9 | **High** | Python function with **>16 params**: fill loop capped at 16 but `mir_param_count` / `varargs_param_offset` uncapped → uninitialized read, then OOB write past `params[20]` (stack corruption) | `lambda/module/py/transpile_py_mir.cpp:6784` | mem-safety |
 | 10 | **High** | Thread-local `context` left **dangling to a dead stack frame** after every script run; REPL/Radiant do work in that window | `lambda/runner.cpp:1609,1636` | mem-safety |
-| 11 | **High** | `LAMBDA_ALLOCA` bound is **assert-only** (vanishes in release) + 2 raw bash `alloca` on user-sized input → stack-clash on large scripts | `lib/lambda_alloca.h:43`, `bash/transpile_bash_mir.cpp:1634` | mem-safety |
+| 11 | **High** | `LAMBDA_ALLOCA` bound is **assert-only** (vanishes in release) + 2 raw bash `alloca` on user-sized input → stack-clash on large scripts | `lib/lambda_alloca.h:43`, `lambda/module/bash/transpile_bash_mir.cpp:1634` | mem-safety |
 | 12 | **High** | `resolve_css_property` is a **single 5,978-line function** (262 property cases, inlined shorthand parsers) | `radiant/resolve_css_style.cpp:5777` | structure |
 | 13 | **High** | `js_runtime.cpp`: 39,481 lines, 1,125 functions, **12 functions >300 lines** (`js_dispatch_builtin` = 2,545) | `lambda/js/js_runtime.cpp` | structure |
 | 14 | **High** | Radiant mega-functions: **11 functions ≥1,000 lines**, 52 ≥300; top three each run to their file's EOF | `radiant/` (see §5) | structure |
@@ -150,7 +150,7 @@ Two lower-grade but pervasive consistency problems:
 
 ---
 
-## 3. Lambda Core Runtime (`lambda/` top-level, py/, bash/)
+## 3. Lambda Core Runtime (`lambda/` top-level, lambda/module/py/, lambda/module/bash/)
 
 **Scale:** ~105k lines; `transpile-mir.cpp` 14.8k, `build_ast.cpp` 10.3k, `transpile.cpp` 8.3k, `lambda-eval.cpp` 6.6k.
 

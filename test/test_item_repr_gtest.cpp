@@ -238,6 +238,17 @@ protected:
 
 } // namespace
 
+TEST_F(RuntimeShapeTransition, EmptyStringUsesPinnedSharedItem) {
+    String* empty = it2s(ItemEmptyString);
+    ASSERT_NE(empty, nullptr);
+    EXPECT_EQ(get_type_id(ItemEmptyString), LMD_TYPE_STRING);
+    EXPECT_EQ(empty->len, 0u);
+    EXPECT_TRUE(empty->is_ascii);
+    EXPECT_FALSE(empty->is_pooled);
+    EXPECT_EQ(heap_strcpy("", 0), empty);
+    EXPECT_EQ(heap_strcpy("", 0), empty);
+}
+
 TEST(ItemRepresentation, SharedMasksKeepSentinelsOutOfDoubleSpace) {
     EXPECT_TRUE(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_NULL >> 56)));
     EXPECT_TRUE(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_JS_UNDEFINED >> 56)));

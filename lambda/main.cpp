@@ -60,8 +60,8 @@
 #include "../lib/uv_loop.h"          // JS worker cleanup for libuv loop
 #include "../lib/time_util.h"
 #ifdef LAMBDA_BASH
-#include "bash/bash_transpiler.hpp"  // Bash transpiler
-#include "bash/bash_runtime.h"       // bash_exit_code()
+#include "module/bash/bash_transpiler.hpp"  // Bash transpiler
+#include "module/bash/bash_runtime.h"       // bash_exit_code()
 #endif
 #ifdef LAMBDA_RUBY
 #include "module/rb/rb_transpiler.hpp"      // Ruby transpiler
