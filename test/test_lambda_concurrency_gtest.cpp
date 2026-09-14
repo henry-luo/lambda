@@ -906,7 +906,9 @@ static bool shared_module_stress_init_worker(SharedModuleStressWorker* worker) {
     }
     worker->eval.pool = worker->setup_pool;
     worker->eval.runtime = &shared_module_stress_runtime;
-    worker->eval.name_pool = name_pool_create(worker->setup_pool, NULL);
+    // Match runner setup: generated property keys require runtime NameIds,
+    // not an idless AST name pool (D4.6.1v2).
+    worker->eval.name_pool = name_pool_create_runtime(worker->setup_pool);
     heap_init();
     if (!worker->eval.heap) return false;
     worker->eval.pool = worker->eval.heap->pool;
@@ -1080,9 +1082,9 @@ protected:
         // load_script from a worker would test per-thread compilation instead
         // of shared immutable module execution.
         Script* chart_package = load_script_mir_direct(&shared_module_stress_runtime,
-        "lambda/chart/chart.ls", NULL, true);
+        "lambda/package/chart/chart.ls", NULL, true);
         Script* pdf_package = load_script_mir_direct(&shared_module_stress_runtime,
-        "lambda/pdf/pdf.ls", NULL, true);
+        "lambda/package/pdf/pdf.ls", NULL, true);
         ASSERT_NE(chart_package, nullptr);
         ASSERT_NE(pdf_package, nullptr);
         for (int i = 0; i < shared_module_stress_case_count; i++) {

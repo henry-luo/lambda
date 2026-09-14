@@ -76,8 +76,8 @@ the fixed issue ledger: LR01-12 (`g_template_registry` is now owned by
 consumer now have fail-closed coverage), and LR12-9 (S9.1.2/S9.1.3/S9.3.1 COW
 capture is unconditional; the escape hatch is retired). The root-witness
 level-2 corpus sweep reports zero violations, and the COW fixtures pass under
-forced GC and poison mode on JIT. LR07-1 (representation coupling), LR13-8
-(validator success-path work), and LR12-6 (`g_dry_run`) remain active.
+forced GC and poison mode on JIT. LR13-8 (validator success-path work) and
+LR12-6 (`g_dry_run`) remain active.
 
 The same pass also moved the stale RESOLVED records LR09-30, LR08-12, and
 LR08-11. The duplicate active notices for LR11-6 and LR12-3 were removed; both
@@ -98,7 +98,7 @@ Counts:
 | LR_04 | Numbers, decimal & datetime | 6 | 0 | 0 | 6 |
 | LR_05 | Strings, symbols & vectors | 2 | 1 | 0 | 3 |
 | LR_06 | C transpiler (legacy C2MIR) | 0 | 0 | 0 | 0 |
-| LR_07 | MIR Direct transpiler & JIT | 10 | 1 | 0 | 11 |
+| LR_07 | MIR Direct transpiler & JIT | 9 | 1 | 0 | 10 |
 | LR_08 | Memory management & GC | 6 | 0 | 0 | 6 |
 | LR_09 | Runtime builtins | 4 | 0 | 0 | 4 |
 | LR_10 | Error handling | 1 | 0 | 0 | 1 |
@@ -106,9 +106,9 @@ Counts:
 | LR_12 | Procedural runtime | 5 | 0 | 0 | 5 |
 | LR_13 | Schema validator | 7 | 0 | 0 | 7 |
 | TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 6 | 1 | 0 | 7 |
-| **Live total** | | **66** | **10** | **0** | **76** |
+| **Live total** | | **65** | **10** | **0** | **75** |
 
-The active ledger now contains 76 live records, with the 63 previously counted
+The active ledger now contains 75 live records, with the 64 previously counted
 resolved records moved to the archive. Duplicate/split records and
 verification-only findings remain represented there for provenance.
 Two original entries each split into a resolved half and a surviving residue —
@@ -292,8 +292,7 @@ likewise fixed. `ArrayNumShape.ndim` is bounded 1..32 — see [LR05-1](<Lambda_I
 `_store_i64` / `_store_f64` prevent MIR SSA reordering in swap-pattern loops;
 `push_d_safe` guards a representation ambiguity at float boxing boundaries;
 `_barg` accepts tagged Items or raw integer values for bitwise ops. These
-couplings should shrink as the common representation contract becomes
-authoritative — see [LR07-1](#7-mir-direct-transpiler--jit-lr_07).
+couplings remain under the broader return-convention work in LR07-14.
 *Note:* the doc framed this partly as C2MIR/MIR-Direct divergence; with C2MIR
 removed it is now purely a MIR Direct ↔ value-model coupling.
 *Implementation note (2026-08-28, D2.4.1–D2.4.3):* the shared carrier vocabulary and
@@ -376,22 +375,6 @@ this sits outside the pool/GC discipline.
 These cluster around three structural facts: MIR's immutable register types, the
 dual native-or-boxed value representation, and GC rooting under a non-moving
 collector.
-
-<a id="lr07-1"></a>**LR07-1 · Numeric semantic result and physical representation are still coupled · OPEN**
-`mir_expr_carrier_type` (aliased as `get_effective_type`,
-`transpile-mir.cpp:2190`), `transpile_binary`, and `transpile_box_item` each
-carry separate repairs for runtime helpers that return boxed Items even when the
-AST names a concrete numeric type. All three sites must consume one shared
-result-domain decision or a raw register can be mistaken for an Item.
-Cross-link: this is the same "expression results carry no ValueRep" root cause
-recorded in [Result32 lane-parity + Tune19] and [Compiling lane design].
-*Implementation note (2026-08-28, D2.4.1–D2.4.3):* L0–L4's first slice landed: `MirValue`
-carries the full contract, `ValueRep` separates `INT_LANE`/machine quantities, arithmetic,
-branch, binding, index, call, and return consumers now use explicit carriers, and direct
-identity/axis/fail-closed transition fixtures cover the router. Lambda expression lowering
-has zero semantic `MIR_reg_type()` probes; ten remaining probes are physical-only. Raw
-expression producers still cross the explicit `transpile_expr_reg_legacy` shim, so this issue
-remains open.
 
 <a id="lr07-2"></a>**LR07-2 · "undeclared reg 0" guard · OPEN**
 Value-less statements would return the invalid register 0 and crash MIR;
@@ -912,16 +895,14 @@ and points at the generator that actually conflicts.
   heuristic routing can silently yield wrong captures; the backtracking engine
   bails to "no match" at its 8M-step budget. Needs an explicit decision: own
   backtracking engine as primary, vs proven-equivalence routing.
-- **OI-5 · MIR value-representation contract (MIR Direct).** No single canonical
-  type↔representation contract per boundary. Casualties: INT64 arithmetic never
-  native, FLOAT→INT widening truncating in loops, indirect/closure calls past
-  three arguments returning wrong values, and errors silently coercing to
-  `0`/`0.0`/`false` when unboxed.
-  *Implementation note (2026-08-28, D2.4.1–D2.4.3):* the L0–L4 first slice is now
-  present in the shared MIR metadata and Lambda adapter. Arithmetic, branch, binding,
-  index, call, and return consumers use explicit carriers; direct identity/axis/fail-closed
-  transition fixtures are landed; and semantic `MIR_reg_type()` probes are gone from Lambda
-  expression lowering. Remaining raw producers and the final legacy-shim ratchet stay open.
+- **OI-5 · MIR value-representation contract (MIR Direct) · RESOLVED 2026-09-14.**
+  The canonical boundary is `MirValue`: it carries the full `Type*` contract and
+  actual `ValueRep`; consumers request a carrier through `em_require_rep()`.
+  Lambda expression lowering has no semantic `MIR_reg_type()` probe or raw-register
+  expression shim. The historical truncation, boxed-result, and error-unboxing
+  failures are resolved by the implementation records, including
+  [LR07-1](Lambda_Issue_Ledger(fixed).md#lr07-1) and
+  [LR07-4](Lambda_Issue_Ledger(fixed).md#lr07-4), under **D2.4.1–D2.4.3**.
 - **OI-6 · Codegen quality cluster (JS).** Destination-passing lowering
   (66–88% of emitted MIR is MOVs); shape-based polymorphic inline caching;
   de-pointered relocatable MIR (~59 baked realm pointers) blocking artifact
@@ -977,7 +958,7 @@ No new decisions needed; each has an owning design doc.
 
 | Work | Design doc | Unblocks |
 |---|---|---|
-| Unified AST Phases 0–5 | `Lambda_Design_Unified_AST.md` (U1–U26) | shared emitter/inference, guest ports, OI-5 partially |
+| Unified AST Phases 0–5 | `Lambda_Design_Unified_AST.md` (U1–U26) | shared emitter/inference and guest ports; Lambda MIR Direct OI-5 is resolved |
 | K27 shared stream core | `Lambda_Design_Concurrency.md` §11 | OI-7 streams, fs/event-loop integration |
 | De-pointered MIR P1–P5 | `Lambda_Design_MIR_Cache.md` (MC1–MC8) | OI-6 artifact caching |
 | JS threading P1–P3 | `Lambda_Js_Thread.md` (JT1–JT7) | worker isolation/watchdog; feeds `vm` realm isolation |
@@ -995,7 +976,7 @@ together, not individually.
 | Cluster | Entries | Root |
 |---|---|---|
 | **TCO safety proof residue** | LR07-13 | The former root-classification faces LR07-7/LR08-3 are resolved and archived. The surviving TCO face is the unused `is_tco_function_safe` proof, now tracked independently under LR07-13. |
-| **Representation ↔ semantics coupling** | LR03-3, LR07-1, LR07-5, LR07-14 | Expression results carry no `ValueRep`; each consumer re-derives it. See [Result32 lane-parity + Tune19], [Compiling lane design]. |
+| **Representation ↔ semantics coupling** | LR03-3, LR07-5, LR07-14 | Remaining container and result-domain cases. Lambda expression lowering carries `MirValue`; see resolved [LR07-1](Lambda_Issue_Ledger(fixed).md#lr07-1). |
 | **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-6, LR08-10, LR11-4, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency (LR11-4) is the clearest statement of the pattern. |
 | **Surface syntax (S16) residue** | S16.9.5, i8-genafterlet, SO36, O3, §7.17 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). |
 | **Process globals** | LR12-6 | `g_template_registry` is now context-local; `g_dry_run` remains process-global and blocks per-run dry-run semantics. See RG1–RG14 in [Runtime globals audit], RC1–RC8 in [Radiant concurrency design]. |

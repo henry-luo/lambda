@@ -15,7 +15,7 @@
 
 ## Archive index
 
-This archive contains **89 historical records**: 88 RESOLVED entries and one
+This archive contains **90 historical records**: 89 RESOLVED entries and one
 CLOSED design decision. Duplicate and split records remain separate so their
 provenance is not lost. The first sections contain records formerly
 interleaved with live entries; §15 preserves the 44 records from the former
@@ -265,6 +265,30 @@ workspace allocation failure. The complete representation suite passes 29/29;
 **All nine issues are archived below as [LR06-R1…R9](#lr06-r1r9).** The C2MIR backend no longer exists in the tree.
 
 ## 7. MIR Direct transpiler & JIT (LR_07)
+
+<a id="lr07-1"></a>**LR07-1 · Numeric semantic result and physical representation were coupled · RESOLVED 2026-09-14**
+Every Lambda AST family now enters `transpile_expr_value()` and publishes a
+`MirValue` carrying the full `Type*` contract and its actual `ValueRep`. The
+legacy raw-register expression shim is absent. Consumers request their needed
+carrier through `em_require_rep()` and read a lowered value's carrier only
+through `mir_value_carrier_type(MirValue)`; they do not recreate it from the
+AST or from `MIR_reg_type()`.
+
+The final audit replaced post-lowering carrier re-derivations in machine-count,
+loop binding/filter/condition, multidimensional-index, bitwise, pipe, path, declarator,
+and edit-index lowering. `mir_expr_carrier_type()` remains a pre-lowering
+planner only, using AST/lowering facts to select an emission path; it never
+observes an emitted MIR register. This enforces the four-authority split in
+**D2.4.1–D2.4.3**: semantics in `Type*`, planned representation in lowering,
+emitted representation/provenance in `MirValue`, and physical register class
+only in named physical helpers.
+
+Regression evidence: `ValueRepresentationTest` covers canonical contracts and
+fail-closed carrier transitions; `index_value_rep.ls`,
+`bitwise_lane_preservation.ls`, `proc_assignment_error_carrier.ls`, and
+`proc_var_type_widen.ls` pass under eager JIT. The compiler audit finds no
+`transpile_expr_reg_legacy` or `legacy_expr_value` symbol and no semantic
+`MIR_reg_type()` query in Lambda expression lowering.
 
 <a id="lr07-4"></a>**LR07-4 · Type widening is truncate-or-box · RESOLVED 2026-09-14**
 `transpile_assign_stam` now preserves both the declared destination contract

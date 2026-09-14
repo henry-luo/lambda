@@ -1,5 +1,5 @@
 // latex/math_bridge.ls - Bridge to the math package
-// Delegates math AST rendering to lambda/doc/math/math.ls
+// Delegates math AST rendering to lambda/package/math/math.ls
 
 import math: lambda.doc.math.math
 

@@ -10550,6 +10550,32 @@ static AstNode* direct_complete_function(Transpiler* tp, SourceSpan span,
     return (AstNode*)fn;
 }
 
+static bool append_shipped_package_module_path(StrBuf* path, StrView module) {
+    const char* namespace_prefix = NULL;
+    const char* source_prefix = "";
+    if (strview_starts_with(&module, "lambda.doc.math.")) {
+        namespace_prefix = "lambda.doc.math.";
+        source_prefix = "math/";
+    } else if (strview_starts_with(&module, "lambda.") &&
+            !strview_starts_with(&module, "lambda.math.") &&
+            !strview_starts_with(&module, "lambda.io.") &&
+            !strview_starts_with(&module, "lambda.sys.")) {
+        namespace_prefix = "lambda.";
+    } else {
+        return false;
+    }
+
+    // D7.2.4 separates the public lambda.* namespace from the packaged
+    // source layout, so logical package names never depend on source moves.
+    size_t prefix_len = strlen(namespace_prefix);
+    StrView physical = {module.str + prefix_len, module.length - prefix_len};
+    strbuf_append_format(path, "%s/package/%s", g_lambda_home, source_prefix);
+    for (size_t i = 0; i < physical.length; i++) {
+        strbuf_append_char(path, physical.str[i] == '.' ? '/' : physical.str[i]);
+    }
+    return true;
+}
+
 static AstNode* build_module_import_from_parts(Transpiler* tp,
         SourceSpan span, StrView alias_view, StrView module) {
     AstImportNode* node = (AstImportNode*)alloc_ast_node_from_span(tp,
@@ -10597,6 +10623,8 @@ static AstNode* build_module_import_from_parts(Transpiler* tp,
     }
     StrBuf* path = strbuf_new();
     bool relative = module.str[0] == '.';
+    bool shipped_package = !relative &&
+        append_shipped_package_module_path(path, module);
     if (relative) {
         const char* base = tp->directory ? tp->directory : "./";
         size_t base_len = strlen(base);
@@ -10606,7 +10634,7 @@ static AstNode* build_module_import_from_parts(Transpiler* tp,
         // directory may legitimately contain a dot component (a checkout under
         // `.claude/`, `~/.local/...`), and rewriting those produced `//claude`.
         for (char* ch = path->str + base_len; *ch; ch++) if (*ch == '.') *ch = '/';
-    } else {
+    } else if (!shipped_package) {
         strbuf_append_format(path, "./%.*s", (int)module.length, module.str);
         for (char* ch = path->str + 2; *ch; ch++) if (*ch == '.') *ch = '/';
         char* slash = strchr(path->str + 2, '/');
