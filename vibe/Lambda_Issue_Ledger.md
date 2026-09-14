@@ -662,7 +662,7 @@ richards, 8.8% log_pipeline. `prettier_ast` reports 6,615,043
 `LMD_TYPE_MAP` values and never records a **disproof**, so an unprovable
 candidate re-runs the relation and the validator on every crossing.
 S11.4.1v3 grants the proof-reuse licence; D3.2.4v3 supplies the elision test.
-Fix tracked in [Tune27 M1/T27-1](impl/Lambda_Impl_Tune27.md).
+Fix tracked in [Tune27 M1/T27-1](impl/Lambda_Impl_Tune27 (done).md).
 
 <a id="lr13-7"></a>**LR13-7 · `printf`/emoji output in production paths · OPEN**
 Contrary to CLAUDE.md rule 4, `ast_validate.cpp` has 59 direct `printf` calls

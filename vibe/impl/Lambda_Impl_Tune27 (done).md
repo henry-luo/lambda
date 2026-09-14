@@ -2,8 +2,8 @@
 
 - **Date:** 2026-09-13 (rev 2, same day: Result43 read folded in, scope
   extended by M5–M8 and T27-6..9; rev 3, same day: first implementation
-  slices, §10; rev 4, 2026-09-14: round 2, §10.11; rev 5, same day: round 3, §10.12; rev 6, same day: round 4, §10.13 -- typed `var` rebinds on every tier, T27-0 census refresh; rev 7, same day: round 5, §10.14 -- contract proofs reused, static array lengths; rev 8, same day: round 6, §10.15 -- the null lane as an immediate, the nullable store fixed, JIT-tier parity census; rev 9, same day: round 7, §10.16 -- literal loop extents and nested counters in the dense proof).
-- **Status:** **IN PROGRESS — twenty-nine slices implemented, gates open.** §2, §2.1
+  slices, §10; rev 4, 2026-09-14: round 2, §10.11; rev 5, same day: round 3, §10.12; rev 6, same day: round 4, §10.13 -- typed `var` rebinds on every tier, T27-0 census refresh; rev 7, same day: round 5, §10.14 -- contract proofs reused, static array lengths; rev 8, same day: round 6, §10.15 -- the null lane as an immediate, the nullable store fixed, JIT-tier parity census; rev 9, same day: round 7, §10.16 -- literal loop extents and nested counters in the dense proof; rev 10, same day: T27-5 case study §10.17, G9 probes in tree, completion §11).
+- **Status:** **COMPLETE 2026-09-14 (rev 10) — thirty-one slices landed over seven rounds; §11 records the gates met, the gates not met, and the deferred items.** §2, §2.1
   and §3 are measured; §4 states tracks and exit evidence; §10 records what
   landed, what it measured, and one correction to §3 (M1).
 - **User requirement:** the slow typed rows must stop paying a per-value
@@ -705,9 +705,9 @@ genuinely unknown. Those are the language, not the implementation.
 | T27-2 | elide identical-contract re-crossings | landed as the T27-8 structural key (§10.14): a declared binding, record field, `null` or non-raising call result whose contract is structurally the target's crosses nothing; cube3d `lambda_type_check` x17 → 0 mandatory, splay_node x23 → 0 (G2 met) |
 | T27-3 | native stores for `var T[]` parameters | module-constant subscripts landed (§10.6): navier's mandatory Item setter gone; the lane setter is still a call on its guarded arm |
 | T27-4 | RMW place borrow: richards pilot, then cd/splay/deltablue | `any`-leaf admission fast path (§10.6); fixed-key checked path setter with compiler-resolved leaf + builtin scalar contract fast path (§10.11): richards 0.58x, deltablue 0.62–0.85x, splay 0.80x, G7 met for richards; COW prologue and cd open; puzzle withdrawn as a target 2026-09-13 (S9.1.3 fix, v42 JIT was wrong); D4.4.4v2 sibling-field handles + early returns and D4.4.5 move-out binds (§10.12): cd 0.91x, table puts 2,000 → 2 copies; splay unchanged (store-backs inside `if` branches need a nested-list ruling) |
-| T27-5 | `cd` + `queens` generic-operator case studies | blocked on T27-1..4 |
+| T27-5 | `cd` + `queens` generic-operator case studies | reported (§10.17): cd's residue is the port's shape (untyped `[voxels, seen]` return, linear key table), queens has one `fn_ne` on a proven `int` compare -- no per-operator special case is warranted |
 | T27-6 | auto-tier admission: refusal log, `match`, typed `var` rebinds | refusal log + type/literal `match` landed (§10.2); typed `var` rebinds landed on every tier and the D8.1.1v8 pin lifted (§10.13, D8.1.1v10) |
-| T27-7 | emission diet + per-function size gate + satellite re-link | packed nullable float literals, dead layout-reload pruning (§10.4); scalar capture elision, NaN-first literal null test with packed-array reuse (§10.11); nullable-literal member predicate fixed (§10.13); `run_cube` 20,499 → 15,850 insns from the §10.14 proofs; the float null lane is a double immediate (§10.15, the withdrawn form went through the bitcast scratch); satellite re-link already fixed by D8.1.1v9 (`find_func`); size gate open (G9 not met) |
+| T27-7 | emission diet + per-function size gate + satellite re-link | packed nullable float literals, dead layout-reload pruning (§10.4); scalar capture elision, NaN-first literal null test with packed-array reuse (§10.11); nullable-literal member predicate fixed (§10.13); `run_cube` 20,499 → 15,514 insns from the §10.14 proofs; the float null lane is a double immediate (§10.15); satellite re-link already fixed by D8.1.1v9 (`find_func`); per-function budgets for cube3d/deltablue/prettier_ast recorded as MT7 probes (§11); the 10,000 target is not met |
 | T27-8 | callee-only admission (D8.3.2), structural elision key, record ABI | call-defined local bindings skip caller re-admission (§10.11); structural key through `T?`, record-field and alias proofs, float literals admitted by construction under a `float[]` contract, declared `T[]` locals from a proving call no longer re-admitted (§10.14); callee-only admission and record ABI not started |
 | T27-9 | interval analysis: int53 band + BCE | band test consolidated; sentinel-operand defect fixed (§10.7); loop-accumulator proof and fused band branches recover array1/fib/triangl (§10.9); static array lengths for `fill(K, v)`/literal locals prove constant-index reads non-null (§10.14); literal loop bounds enter the finite plan and the dense extent proof, nested counters declared inside the body join it, and a finite fact starting at zero proves a counter non-negative (§10.16: quicksort 0.62x, nbody recovers 3% of its §10.15 cost); general interval/BCE extension open |
 
@@ -1639,3 +1639,95 @@ still forbidden in both) and the `lambda_tune4_typed_array_guard` ratchet
 (+10, one literal-bounded loop's entry guard). Instrumentation kept as
 `log_debug`: `mir-dense:` (scan result, ineligible roots, refused reads) and
 `mir-finite:` (plan admission), beside §10.14's `mir-boundary:`.
+
+### 10.17 T27-5: the `cd` and `queens` case studies
+
+**cd (JIT, `_handle_new_frame`/`_recurse_draw`, dominator-exact).** After
+D4.4.4v2 (§10.12) and the §10.14 proofs the mandatory-path census reads
+`array_push:8, lambda_type_check:7, item_at:4, fn_ne:3, is_truthy:3,
+fn_add:3, member_set_cow:2`. Every one attributes to the port, not to an
+operator that lacks a proof:
+
+- `lambda_type_check` ×7 and `item_at` ×4: `recurse_draw` returns its two
+  typed tables as an untyped `[voxels, seen]` array and its callers rebind
+  `voxels = step[0]; seen = step[1]`. Those reads are genuinely `any`; the
+  next `recurse_draw(voxels, seen, …)` must admit them (the §10.14 alias
+  proof stops exactly here, at an untyped element read). A `RbtTable`
+  pair record or `var` positions would remove all eleven; that is a port
+  change, not an emitter one.
+- `array_push` ×8 and `member_set_cow` ×2: `rbt_put` on the linear key
+  table (`push(keys, key); push(vals, value); tree.keys = keys; …`) -- the
+  data structure the port substituted for the JS red-black tree. The COW
+  copies are gone (2,000 → 2 per 1,000 puts); the pushes are the work.
+- `fn_ne` ×3, `fn_add` ×3, `is_truthy` ×3: `rbt_find_node`'s
+  `keys[i] == key` over an untyped `array` field (`keys: array`), and the
+  `if (old_seen != null)` tests on `any` results. Typing `keys` as `int[]`
+  would give the native compare; on `array` the generic operator is the
+  correct lowering.
+
+**queens (JIT, `_is_valid`).** One `fn_ne` on the mandatory path; the
+double loop over `queen_rows: int[]` with literal bounds is now dense
+(§10.16), so the reads are raw and the three-way `or` compares on `c1`,
+`c2` are int-lane. The residual `fn_ne` is `c1 == c2` where the boxed join
+of the `or` arms reaches the generic compare; a lane-preserving `or` join
+is the only lever and it is worth less than a microsecond on this row.
+
+**Conclusion.** Neither row needs a per-operator special case; §3's M4
+("residual generic Item operators") is a port-shape residue on cd and a
+sub-microsecond join on queens. The 63-row geomean's array-and-recursion
+cluster (nqueens, towers, list, storage) moved with the §10.14 proofs and
+§10.16 literal-bound loops instead (list 0.68, towers 0.97).
+
+## 11. Completion (2026-09-14, rev 10)
+
+Seven rounds, thirty-one slices, release candidates `temp/t27/lambda-t27-r1
+… r46`; r46 is the post-merge build (`9d467bf4c`). Every gate below is
+measured on r46, JIT-pinned, min of 5 interleaved runs (9 on rechecks),
+output identical on all 138 benchmark scripts and on all 69 typed rows
+against both the pre-Tune27 HEAD `713a80c2a` and the Result43 archive
+`lambda-v43-fabc412146`.
+
+| Gate | Target | Result |
+|---|---|---|
+| G1 | validator self time < 2% on prettier_ast, splay, three_way_merge, richards, log_pipeline | **met** by construction: the contract proofs of §10.3/§10.11/§10.14 remove the validator from the accepted path on those rows (prettier_ast 0.666x HEAD, splay 0.756x, richards 0.53x) |
+| G2 | cube3d, splay ≤ 2 mandatory `lambda_type_check` per loop | **met**: 0 on both (§10.14) |
+| G3 | navier_stokes: zero mandatory `..._item` setters | **met** (§10.6) |
+| G4 | deltablue, navier, nbody ≤ 2 mandatory `cow_prepare_write` per loop | **met** on navier (2) and nbody (0); awfy/deltablue keeps 10 on `_c_choose_method` (a `var` root re-borrowed per call) -- **not met** there |
+| G5 | no row > 3% slower than the T27-0 archive | **met with three attributed exceptions**: spectralnorm 1.089 (round-1 `eval_A` parameter-range residue, §10.8), nbody 1.040 (the §10.15 null-rejection correctness checks the dense proof does not yet remove), permute 1.053 (record-home transport, §10.13). Everything else within noise at 9 runs (havlak 0.996, text_search 0.982) |
+| G6 | baseline 100%, forced-GC stress green | **met**: 5432/5432 after each round; forced-GC stress on every `var` fixture on three tiers |
+| G7 | richards, splay, mbrot typed ≤ untyped | **met** on richards (408 vs 430 ms) and splay (343 vs 368); **not met** on mbrot (0.976 vs 0.785 ms, 1.24x; was 1.41x in Result43) |
+| G8 | §7 typed rows: auto wall ≤ JIT exec + 1.2x untyped-auto compile | **met** on deltablue, richards, crypto_sha1 (`core_sha1` promotes), splay, cd, hashmap, navier, prettier_ast; **not met** on cube3d (180 ms, compile-bound) and nbody (80 ms) |
+| G9 | per-function budget in tree; `run_cube` < 10,000 | budgets **recorded** (`lambda_corpus_cube3d/deltablue/prettier_ast`, MT7); `run_cube` 36,161 → 15,514, target **not met** |
+| G10 | collatz, mandelbrot ≤ 1.15x C2MIR | not re-measured: the C2MIR lane is removed (CLAUDE.md rule 14); collatz2's `%` lowers to at most two tests (§10.7) |
+
+**Headline.** 69-row typed geomean 0.930x HEAD / 0.939x Result43 with
+richards 0.53x, deltablue 0.58x (JetStream) / 0.80x (AWFY), cube3d 0.62x,
+quicksort 0.63x, list 0.66x, prettier_ast 0.67x, raytrace3d 0.74x, splay
+0.76x, navier_stokes 0.78x, puzzle 0.82x. Six correctness defects fixed on
+the way, each a tier divergence (S9.1.2/S9.1.3/S7.1.3v2): the place-mutator
+aliasing, the nullable-record `var` borrow, every typed scalar/record `var`
+rebind on the eager tier, `x = null` into a nullable lane, `return g` of a
+nullable lane, and the nullable float store. Two rulings ratified (D4.4.4v2,
+D4.4.5) and one revised (D8.1.1v10); formal design 5.1.0 after the merge.
+
+**Deferred (each with the evidence that scopes it).**
+- T27-8 record ABI and callee-only admission on the direct typed edge (§8
+  obligations 1–2): the remaining boundaries on the hot rows are `_b`
+  parameter admissions (one per T0 crossing, required) and the cd port's
+  untyped `[voxels, seen]` return (§10.17); the structural key already
+  elides the typed→typed edge. A raw record ABI is a new proposal.
+- T27-9 general interval analysis / BCE: literal and binding extents,
+  nested counters and constant indices are proven; the matrix-index dense
+  arm's address arithmetic (`i*n` recomputed per access, matmul 1.025x
+  HEAD) and affine `i*c + k` extents are the next items.
+- G9's 10,000-instruction `run_cube`: the remaining size is the 51-iteration
+  face-drawing code (`is_truthy` ×12, `fill` ×9, 48 `draw_line` calls);
+  MIR's generator dominates its compile (§10.15), so the lever is a lighter
+  lowering of those calls, not the emitter's speed.
+- The splay nested-list store-back ruling (§10.12) -- a design question for
+  the user (D4.4.4 admits store-backs only at the handle's own list level).
+- The pre-existing JIT-tier defects of §10.15 (`action_c_error_lane`,
+  `tune24_branch_proofs`, `tune26_dense_carried_index`, four
+  `proc_nullable_*` crashes): none introduced here; all reproduce on HEAD.
+- mbrot's annotation penalty (G7) and spectralnorm's `eval_A` residue
+  (G5): both are the typed float parameter range question of §10.8.
