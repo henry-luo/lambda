@@ -5,6 +5,7 @@
 #include "cookie_jar.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../../lib/mem_grow.hpp"
 #include "../../lib/url.h"
 
 #include <string.h>
@@ -186,12 +187,8 @@ static char* path_from_url(const char* url) {
 // Grow entries array if needed
 static void jar_ensure_capacity(CookieJar* jar) {
     if (jar->count < jar->capacity) return;
-    int new_cap = jar->capacity < 16 ? 16 : jar->capacity * 2;
-    CookieEntry** new_entries = (CookieEntry**)mem_realloc(jar->entries,
-        (size_t)new_cap * sizeof(CookieEntry*), MEM_CAT_NETWORK);
-    if (!new_entries) return;
-    jar->entries = new_entries;
-    jar->capacity = new_cap;
+    (void)lam::mem_grow_array(&jar->entries, &jar->capacity,
+                               jar->count + 1, 16, MEM_CAT_NETWORK);
 }
 
 // Skip whitespace

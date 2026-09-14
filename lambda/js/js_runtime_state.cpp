@@ -10,6 +10,7 @@
 #include "../dom/dom_events.h"
 #include "../dom/dom_observers.h"
 #include "../dom/dom_platform.h"
+#include "../../lib/mem_grow.hpp"
 
 __thread JsRuntimeState* js_active_runtime_state = NULL;
 extern __thread EvalContext* context;
@@ -245,17 +246,11 @@ int js_global_environment_find(JsGlobalEnvironment* environment,
 static bool js_global_environment_grow_bindings(
         JsGlobalEnvironment* environment) {
     if (environment->binding_count < environment->binding_capacity) return true;
-    int capacity = environment->binding_capacity ?
-        environment->binding_capacity * 2 : 16;
-    JsGlobalBinding* bindings = (JsGlobalBinding*)mem_realloc(
-        environment->bindings, (size_t)capacity * sizeof(JsGlobalBinding),
-        MEM_CAT_JS_RUNTIME);
-    if (!bindings) {
-        log_error("js-global-environment: cannot grow to %d bindings", capacity);
+    if (!lam::mem_grow_array(&environment->bindings, &environment->binding_capacity,
+                             environment->binding_count + 1, 16, MEM_CAT_JS_RUNTIME)) {
+        log_error("js-global-environment: cannot grow bindings");
         return false;
     }
-    environment->bindings = bindings;
-    environment->binding_capacity = capacity;
     return true;
 }
 

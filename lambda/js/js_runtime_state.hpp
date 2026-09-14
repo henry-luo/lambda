@@ -14,6 +14,7 @@
 #include "../runtime/root_vector.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/arraylist.h"
+#include "../../lib/line_framer.h"
 
 struct JsFunction;
 struct JsCallableCode;
@@ -590,9 +591,7 @@ struct JsProcessState : JsRootedState {
     // store; request structs retain only a POD slot index (JSCU31).
     RuntimeCallbackSlots ipc_write_callbacks = {};
     uint32_t ipc_resource_id = 0;
-    char* ipc_buffer = NULL;
-    size_t ipc_length = 0;
-    size_t ipc_capacity = 0;
+    LineFramer ipc_lines = {};
 };
 
 JsProcessState* js_process_state_ensure(JsRuntimeState* state);

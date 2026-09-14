@@ -1,5 +1,6 @@
 #include "stringbuf.h"
 #include "str.h"
+#include "grow_capacity.h"
 #include "string.h"
 #include <string.h>
 #include <stdint.h>
@@ -83,6 +84,7 @@ bool stringbuf_ensure_cap(StringBuf *sb, size_t min_capacity) {
     if (!sb) return false;
 
     // Calculate required capacity including String header
+    if (min_capacity > SIZE_MAX - sizeof(String)) return false;
     size_t required_capacity = sizeof(String) + min_capacity;
 
     if (required_capacity <= sb->capacity) {
@@ -94,16 +96,9 @@ bool stringbuf_ensure_cap(StringBuf *sb, size_t min_capacity) {
         return false;
     }
 
-    size_t new_capacity = sb->capacity ? sb->capacity : sizeof(String) + INITIAL_CAPACITY;
-
-    while (new_capacity < required_capacity) {
-        // Check for overflow before doubling
-        if (new_capacity > SIZE_MAX / 2) {
-            new_capacity = required_capacity;
-            break;
-        }
-        new_capacity *= 2;
-    }
+    size_t new_capacity = 0;
+    if (!lib_grow_capacity(sb->capacity, required_capacity,
+                           sizeof(String) + INITIAL_CAPACITY, &new_capacity)) return false;
 
     String *new_str;
     if (!sb->str) {

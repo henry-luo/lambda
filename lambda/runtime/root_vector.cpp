@@ -5,6 +5,7 @@
 #include "root_vector.h"
 #include "heap_api.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/mem_grow.hpp"
 #include "../../lib/log.h"
 #include <string.h>
 
@@ -69,14 +70,9 @@ static bool root_vector_sync_heap(RootVector* v) {
 }
 
 static bool root_vector_grow(RootVector* v, Context* owner) {
-    if (v->block_count >= v->block_capacity) {
-        int capacity = v->block_capacity ? v->block_capacity * 2 : 4;
-        RootVectorBlock** blocks = (RootVectorBlock**)mem_realloc(v->blocks,
-            (size_t)capacity * sizeof(RootVectorBlock*), MEM_CAT_EVAL);
-        if (!blocks) return false;
-        v->blocks = blocks;
-        v->block_capacity = capacity;
-    }
+    if (v->block_count >= v->block_capacity &&
+            !lam::mem_grow_array(&v->blocks, &v->block_capacity,
+                                 v->block_count + 1, 4, MEM_CAT_EVAL)) return false;
     RootVectorBlock* block = (RootVectorBlock*)mem_calloc(1, sizeof(RootVectorBlock),
                                                           MEM_CAT_EVAL);
     if (!block) return false;
