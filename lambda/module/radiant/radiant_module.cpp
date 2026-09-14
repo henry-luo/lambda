@@ -15,6 +15,7 @@
 #include "../../../lib/mem_context.h"
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/mempool.h"
+#include "../../../lib/str.h"
 #include "../../runtime/side_stack.h"
 #include "../../runtime/gc/gc_heap.h"
 #include "../../../lib/url.h"
@@ -1625,11 +1626,11 @@ static void radiant_option_selection_changed(DomElement* option, DocState* state
     for (DomNode* node = option ? option->parent : nullptr; node; node = node->parent) {
         if (!node->is_element()) continue;
         DomElement* ancestor = node->as_element();
-        if (ancestor->tag_name && strcasecmp(ancestor->tag_name, "select") == 0) {
+        if (ancestor->tag_name && str_icmp_cstr(ancestor->tag_name, "select") == 0) {
             select = ancestor;
             break;
         }
-        if (ancestor->tag_name && strcasecmp(ancestor->tag_name, "optgroup") != 0) break;
+        if (ancestor->tag_name && str_icmp_cstr(ancestor->tag_name, "optgroup") != 0) break;
     }
     if (!select || !state) return;
     int index = -1, i = 0;
@@ -1678,7 +1679,7 @@ RADIANT_C_API Item fn_radiant_set_state(Item node_item, Item name_item, Item val
         return (Item){.item = b2it(1)};
     }
     if (kind == RSTATE_OPTION_SELECTED) {
-        if (!elem->tag_name || strcasecmp(elem->tag_name, "option") != 0) {
+        if (!elem->tag_name || str_icmp_cstr(elem->tag_name, "option") != 0) {
             log_error("JUBE_RADIANT_SET_STATE: 'selected' is only defined on <option>");
             return (Item){.item = b2it(0)};
         }
@@ -1857,7 +1858,7 @@ static void* radiant_optional_dom_element(Item node_item) {
 // the resulting entry list and owns serialization/order decisions.
 RADIANT_C_API Item fn_radiant_form_entries(Item form_item, Item submitter_item) {
     DomElement* form = radiant_dom_element_from_item(form_item, "FORM_ENTRIES");
-    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+    if (!form || !form->tag_name || str_icmp_cstr(form->tag_name, "form") != 0) {
         return ItemNull;
     }
     return js_formdata_collect_form_entries(
@@ -1887,7 +1888,7 @@ RADIANT_C_API Item fn_radiant_form_encode(Item value_item) {
 
 RADIANT_C_API Item fn_radiant_submit_event(Item form_item, Item submitter_item) {
     DomElement* form = radiant_dom_element_from_item(form_item, "SUBMIT_EVENT");
-    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+    if (!form || !form->tag_name || str_icmp_cstr(form->tag_name, "form") != 0) {
         return radiant_bool_item(false);
     }
     return radiant_bool_item(radiant_dispatch_submit_event_from_script(
@@ -1896,10 +1897,10 @@ RADIANT_C_API Item fn_radiant_submit_event(Item form_item, Item submitter_item) 
 
 static bool radiant_is_constraint_control(DomElement* elem) {
     if (!elem || !elem->tag_name) return false;
-    return strcasecmp(elem->tag_name, "input") == 0 ||
-           strcasecmp(elem->tag_name, "select") == 0 ||
-           strcasecmp(elem->tag_name, "textarea") == 0 ||
-           strcasecmp(elem->tag_name, "button") == 0;
+    return str_icmp_cstr(elem->tag_name, "input") == 0 ||
+           str_icmp_cstr(elem->tag_name, "select") == 0 ||
+           str_icmp_cstr(elem->tag_name, "textarea") == 0 ||
+           str_icmp_cstr(elem->tag_name, "button") == 0;
 }
 
 static DomElement* radiant_first_invalid_form_control(DomNode* node,
@@ -1920,7 +1921,7 @@ static DomElement* radiant_first_invalid_form_control(DomNode* node,
 
 RADIANT_C_API Item fn_radiant_check_validity(Item form_item) {
     DomElement* form = radiant_dom_element_from_item(form_item, "CHECK_VALIDITY");
-    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+    if (!form || !form->tag_name || str_icmp_cstr(form->tag_name, "form") != 0) {
         return radiant_bool_item(false);
     }
     DomDocument* doc = radiant_dom_document_from_node((DomNode*)form);
@@ -1949,7 +1950,7 @@ RADIANT_C_API Item fn_radiant_check_validity(Item form_item) {
 
 RADIANT_C_API Item fn_radiant_reset_form(Item form_item) {
     DomElement* form = radiant_dom_element_from_item(form_item, "RESET_FORM");
-    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+    if (!form || !form->tag_name || str_icmp_cstr(form->tag_name, "form") != 0) {
         return radiant_bool_item(false);
     }
     dom_form_reset_bridge(form_item);

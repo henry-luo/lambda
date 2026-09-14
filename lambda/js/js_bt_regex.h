@@ -7,7 +7,7 @@
  * backtracking-sensitive quantifier semantics (nullable-quantifier discard).
  *
  * It is a fallback engine: RE2 stays the default for all linear-time patterns;
- * js_create_regex only routes patterns that trip js_regex_needs_backtrack().
+ * js_create_regex only routes patterns that trip js_regex_scanner_needs_backtrack().
  *
  * Input/output contract mirrors js_regex_wrapper_exec: it operates on UTF-8
  * byte offsets, group 0 is the whole match, non-participating groups are -1.

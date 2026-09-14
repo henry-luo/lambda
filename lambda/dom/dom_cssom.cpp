@@ -16,6 +16,7 @@
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/mempool.h"
@@ -1127,7 +1128,7 @@ static bool dom_cssom_remove_inline_stylesheet(DomDocument* doc,
 extern "C" bool dom_cssom_sync_inline_style_element(void* dom_elem) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem || !elem->doc || !elem->tag_name ||
-        strcasecmp(elem->tag_name, "style") != 0) {
+        str_icmp_cstr(elem->tag_name, "style") != 0) {
         return false;
     }
 
@@ -1178,8 +1179,8 @@ extern "C" Item dom_cssom_get_element_sheet(Item elem_item) {
     DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) return ItemNull;
 
-    bool is_inline_style = elem->tag_name && strcasecmp(elem->tag_name, "style") == 0;
-    bool is_stylesheet_link = elem->tag_name && strcasecmp(elem->tag_name, "link") == 0;
+    bool is_inline_style = elem->tag_name && str_icmp_cstr(elem->tag_name, "style") == 0;
+    bool is_stylesheet_link = elem->tag_name && str_icmp_cstr(elem->tag_name, "link") == 0;
     if (!is_inline_style && !is_stylesheet_link) {
         return ItemNull;
     }

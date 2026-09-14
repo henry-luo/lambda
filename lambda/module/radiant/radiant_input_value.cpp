@@ -4,6 +4,7 @@
 #include "../../input/css/css_style.hpp"
 #include "../../../lib/arraylist.h"
 #include "../../../lib/mem.h"
+#include "../../../lib/str.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -23,7 +24,7 @@ typedef struct RadiantInputState {
 } RadiantInputState;
 
 static bool riv_type_is(const char* type, const char* name) {
-    return type && strcasecmp(type, name) == 0;
+    return type && str_icmp_cstr(type, name) == 0;
 }
 
 extern "C" RadiantInputValueKind radiant_input_value_kind(const char* type) {
@@ -57,9 +58,7 @@ extern "C" const char* radiant_input_type_normalize(const char* type,
         snprintf(output, output_size, "text");
         return output;
     }
-    for (size_t i = 0; i < length; i++) {
-        output[i] = (char)tolower((unsigned char)type[i]);
-    }
+    str_to_lower(output, type, length);
     output[length] = '\0';
     if (radiant_input_value_kind(output) == RADIANT_INPUT_VALUE_UNSUPPORTED) {
         snprintf(output, output_size, "text");
@@ -275,9 +274,7 @@ extern "C" bool radiant_input_value_sanitize(const char* type, const char* value
                     css_parse_color(source, &color) && color.a == 255;
             if (!valid) return riv_copy("#000000", output, output_size);
             if (!riv_copy(source, output, output_size)) return false;
-            for (size_t i = 1; output[i]; i++) {
-                output[i] = (char)tolower((unsigned char)output[i]);
-            }
+            str_lower_inplace(output, strlen(output));
             return true;
         }
         case RADIANT_INPUT_VALUE_FILE:
@@ -434,7 +431,7 @@ static double riv_step_base(const char* type, const char* min_value) {
 
 static bool riv_step_number(const char* value, double default_value, double* output) {
     if (!value || !value[0]) { *output = default_value; return true; }
-    if (strcasecmp(value, "any") == 0) return false;
+    if (str_icmp_cstr(value, "any") == 0) return false;
     return riv_parse_finite_number(value, output) && *output > 0.0;
 }
 
@@ -623,4 +620,3 @@ extern "C" void radiant_input_set_files(DomElement* element, Item files) {
         entry->files_rooted = true;
     }
 }
-

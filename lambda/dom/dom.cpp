@@ -518,7 +518,7 @@ static void dom_record_inline_stylesheets_in_subtree(DomDocument* doc,
     if (!node) return;
     if (node->is_element()) {
         DomElement* element = static_cast<DomElement*>(node);
-        if (element->tag_name && strcasecmp(element->tag_name, "style") == 0) {
+        if (element->tag_name && str_icmp_cstr(element->tag_name, "style") == 0) {
             dom_record_inline_stylesheet_owner(doc, element);
         }
         for (DomNode* child = element->first_child; child; child = child->next_sibling) {
@@ -536,7 +536,7 @@ static DomElement* dom_inline_stylesheet_mutation_owner(DomNode* target,
             ? static_cast<DomElement*>(node)
             : (node->parent && node->parent->is_element()
                 ? static_cast<DomElement*>(node->parent) : nullptr);
-        if (element && element->tag_name && strcasecmp(element->tag_name, "style") == 0) {
+        if (element && element->tag_name && str_icmp_cstr(element->tag_name, "style") == 0) {
             return element;
         }
     }
@@ -842,8 +842,8 @@ static inline void dom_pre_remove(DomNode* child, bool record_mutation = true) {
                 DomElement* focused_elem = ((DomNode*)focused)->as_element();
                 const char* tag = focused_elem ? focused_elem->tag_name : nullptr;
                 if (tag &&
-                    (strcasecmp(tag, "textarea") == 0 ||
-                     strcasecmp(tag, "input") == 0) &&
+                    (str_icmp_cstr(tag, "textarea") == 0 ||
+                     str_icmp_cstr(tag, "input") == 0) &&
                     child->parent) {
                     uint32_t index = dom_node_child_index(child);
                     if (index != UINT32_MAX) {
@@ -1457,7 +1457,7 @@ extern "C" bool dom_set_event_handler_function(void* dom_elem,
 // Lowercase tag-name comparison helper. Returns true if elem->tag_name
 // case-insensitively matches `name`.
 static inline bool _is_tag(DomElement* elem, const char* name) {
-    return elem && elem->tag_name && strcasecmp(elem->tag_name, name) == 0;
+    return elem && elem->tag_name && str_icmp_cstr(elem->tag_name, name) == 0;
 }
 
 static bool dom_resolve_selector_pseudo_state(void* context,
@@ -1496,12 +1496,8 @@ static const char* _input_type_lower(DomElement* elem) {
     static __thread char buf[24];
     const char* raw = elem->get_attribute("type");
     if (!raw || !*raw) return "text";
-    int n = 0;
-    while (raw[n] && n < (int)sizeof(buf) - 1) {
-        buf[n] = (char)tolower((unsigned char)raw[n]);
-        n++;
-    }
-    buf[n] = '\0';
+    size_t n = str_copy(buf, sizeof(buf), raw, strlen(raw));
+    str_lower_inplace(buf, n);
     return buf;
 }
 
@@ -1861,7 +1857,7 @@ static const char* dom_html_interface_name(DomElement* elem) {
     int count = (int)(sizeof(s_dom_html_interfaces) /
         sizeof(s_dom_html_interfaces[0]));
     for (int i = 0; i < count; i++) {
-        if (strcasecmp(elem->tag_name, s_dom_html_interfaces[i].tag_name) == 0) {
+        if (str_icmp_cstr(elem->tag_name, s_dom_html_interfaces[i].tag_name) == 0) {
             return s_dom_html_interfaces[i].constructor_name;
         }
     }
@@ -1877,7 +1873,7 @@ static bool dom_element_is_svg(DomElement* elem) {
     for (DomNode* current = (DomNode*)elem; current; current = current->parent) {
         if (!current->is_element()) continue;
         DomElement* ancestor = current->as_element();
-        if (ancestor && ancestor->tag_name && strcasecmp(ancestor->tag_name, "svg") == 0) {
+        if (ancestor && ancestor->tag_name && str_icmp_cstr(ancestor->tag_name, "svg") == 0) {
             return true;
         }
     }
@@ -1886,18 +1882,18 @@ static bool dom_element_is_svg(DomElement* elem) {
 
 static const char* dom_svg_interface_name(DomElement* elem) {
     if (!dom_element_is_svg(elem)) return nullptr;
-    if (strcasecmp(elem->tag_name, "svg") == 0) return "SVGSVGElement";
-    if (strcasecmp(elem->tag_name, "path") == 0) return "SVGPathElement";
-    if (strcasecmp(elem->tag_name, "text") == 0 ||
-        strcasecmp(elem->tag_name, "tspan") == 0) return "SVGTextContentElement";
-    if (strcasecmp(elem->tag_name, "g") == 0 ||
-        strcasecmp(elem->tag_name, "rect") == 0 ||
-        strcasecmp(elem->tag_name, "circle") == 0 ||
-        strcasecmp(elem->tag_name, "ellipse") == 0 ||
-        strcasecmp(elem->tag_name, "line") == 0 ||
-        strcasecmp(elem->tag_name, "polyline") == 0 ||
-        strcasecmp(elem->tag_name, "polygon") == 0 ||
-        strcasecmp(elem->tag_name, "image") == 0) {
+    if (str_icmp_cstr(elem->tag_name, "svg") == 0) return "SVGSVGElement";
+    if (str_icmp_cstr(elem->tag_name, "path") == 0) return "SVGPathElement";
+    if (str_icmp_cstr(elem->tag_name, "text") == 0 ||
+        str_icmp_cstr(elem->tag_name, "tspan") == 0) return "SVGTextContentElement";
+    if (str_icmp_cstr(elem->tag_name, "g") == 0 ||
+        str_icmp_cstr(elem->tag_name, "rect") == 0 ||
+        str_icmp_cstr(elem->tag_name, "circle") == 0 ||
+        str_icmp_cstr(elem->tag_name, "ellipse") == 0 ||
+        str_icmp_cstr(elem->tag_name, "line") == 0 ||
+        str_icmp_cstr(elem->tag_name, "polyline") == 0 ||
+        str_icmp_cstr(elem->tag_name, "polygon") == 0 ||
+        str_icmp_cstr(elem->tag_name, "image") == 0) {
         return "SVGGraphicsElement";
     }
     return "SVGElement";
@@ -2015,13 +2011,13 @@ static bool dom_collection_varray_matches(DomElement* elem,
         ? collection->query.get_chars() : "";
     switch (collection->kind) {
     case DOM_VARRAY_DOCUMENT_FORMS:
-        return elem->tag_name && strcasecmp(elem->tag_name, "form") == 0;
+        return elem->tag_name && str_icmp_cstr(elem->tag_name, "form") == 0;
     case DOM_VARRAY_FORM_ELEMENTS:
         return _is_listed_form_control(elem);
     case DOM_VARRAY_LOOKUP_TAG:
         return elem->tag_name && query &&
             ((query[0] == '*' && query[1] == '\0') ||
-             strcasecmp(elem->tag_name, query) == 0);
+             str_icmp_cstr(elem->tag_name, query) == 0);
     case DOM_VARRAY_LOOKUP_CLASS:
         for (int index = 0; query && index < elem->class_count; index++) {
             if (elem->class_names[index] &&
@@ -2061,15 +2057,15 @@ static DomElement* dom_collection_varray_find_option_rec(DomNode* node,
         if (node->is_element()) {
             DomElement* elem = node->as_element();
             const char* tag = elem->tag_name;
-            if (tag && strcasecmp(tag, "option") == 0) {
+            if (tag && str_icmp_cstr(tag, "option") == 0) {
                 if (!selected_only || _get_selectedness(elem)) {
                     if (*seen == target) return elem;
                     (*seen)++;
                 }
-            } else if (tag && (strcasecmp(tag, "select") == 0 ||
-                               strcasecmp(tag, "hr") == 0)) {
+            } else if (tag && (str_icmp_cstr(tag, "select") == 0 ||
+                               str_icmp_cstr(tag, "hr") == 0)) {
                 // nested selects and horizontal rules own no options here
-            } else if (tag && strcasecmp(tag, "optgroup") == 0) {
+            } else if (tag && str_icmp_cstr(tag, "optgroup") == 0) {
                 if (allow_optgroup) {
                     DomElement* found = dom_collection_varray_find_option_rec(
                         elem->first_child, false, selected_only, target, seen);
@@ -3115,11 +3111,11 @@ extern "C" Item dom_parser_parse_from_string(Item source_item, Item type_item) {
     const char* type = fn_to_cstr(type_item);
     if (!source) source = "";
     if (!type) type = "text/html";
-    if (strcasecmp(type, "text/html") != 0) {
-        if (strcasecmp(type, "text/xml") == 0 ||
-            strcasecmp(type, "application/xml") == 0 ||
-            strcasecmp(type, "image/svg+xml") == 0 ||
-            strcasecmp(type, "application/xhtml+xml") == 0) {
+    if (str_icmp_cstr(type, "text/html") != 0) {
+        if (str_icmp_cstr(type, "text/xml") == 0 ||
+            str_icmp_cstr(type, "application/xml") == 0 ||
+            str_icmp_cstr(type, "image/svg+xml") == 0 ||
+            str_icmp_cstr(type, "application/xhtml+xml") == 0) {
             return dom_parser_parse_xml(source);
         }
         return dom_raise_type_error("Unsupported DOMParser MIME type");
@@ -3421,7 +3417,7 @@ static DomElement* dom_find_iframe_by_name(DomNode* node, const char* target_nam
     while (node) {
         if (node->is_element()) {
             DomElement* elem = node->as_element();
-            if (elem->tag_name && strcasecmp(elem->tag_name, "iframe") == 0) {
+            if (elem->tag_name && str_icmp_cstr(elem->tag_name, "iframe") == 0) {
                 const char* name = elem->get_attribute("name");
                 if (name && strcmp(name, target_name) == 0) {
                     return elem;
@@ -4251,7 +4247,7 @@ extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name)
 
     if (strcmp(css_prop, "content-visibility") == 0) {
         const char* hidden = elem->get_attribute("hidden");
-        if (hidden && strcasecmp(hidden, "until-found") == 0) {
+        if (hidden && str_icmp_cstr(hidden, "until-found") == 0) {
             return js_name_item("hidden");
         }
         return js_name_item("");
@@ -4423,7 +4419,7 @@ DomElement* dom_find_element_by_id(DomElement* root, const char* id) {
 extern "C" void* dom_popover_target_for_button(void* button_ptr) {
     DomElement* button = (DomElement*)button_ptr;
     if (!button || !button->doc || !button->tag_name ||
-        strcasecmp(button->tag_name, "button") != 0) {
+        str_icmp_cstr(button->tag_name, "button") != 0) {
         return nullptr;
     }
     const char* target_id = button->get_attribute("popovertarget");
@@ -4435,9 +4431,9 @@ extern "C" void* dom_popover_target_for_button(void* button_ptr) {
 extern "C" int dom_popover_target_action(void* button_ptr) {
     DomElement* button = (DomElement*)button_ptr;
     const char* action = button ? button->get_attribute("popovertargetaction") : nullptr;
-    if (!action || strcasecmp(action, "toggle") == 0) return 0;
-    if (strcasecmp(action, "show") == 0) return 1;
-    if (strcasecmp(action, "hide") == 0) return 2;
+    if (!action || str_icmp_cstr(action, "toggle") == 0) return 0;
+    if (str_icmp_cstr(action, "show") == 0) return 1;
+    if (str_icmp_cstr(action, "hide") == 0) return 2;
     return 0;
 }
 
@@ -4454,20 +4450,20 @@ extern "C" bool dom_activate_popover(void* popover_ptr, int action) {
 }
 
 static const char* dom_normalize_contenteditable(const char* value) {
-    if (!value || *value == '\0' || strcasecmp(value, "true") == 0) return "true";
-    if (strcasecmp(value, "false") == 0) return "false";
-    if (strcasecmp(value, "plaintext-only") == 0) return "plaintext-only";
-    if (strcasecmp(value, "inherit") == 0) return "inherit";
+    if (!value || *value == '\0' || str_icmp_cstr(value, "true") == 0) return "true";
+    if (str_icmp_cstr(value, "false") == 0) return "false";
+    if (str_icmp_cstr(value, "plaintext-only") == 0) return "plaintext-only";
+    if (str_icmp_cstr(value, "inherit") == 0) return "inherit";
     return nullptr;
 }
 
 static const char* dom_autocapitalize_state(const char* value, bool missing_is_empty) {
     if (!value) return missing_is_empty ? "" : "sentences";
     if (*value == '\0') return "";
-    if (strcasecmp(value, "off") == 0 || strcasecmp(value, "none") == 0) return "none";
-    if (strcasecmp(value, "on") == 0 || strcasecmp(value, "sentences") == 0) return "sentences";
-    if (strcasecmp(value, "characters") == 0) return "characters";
-    if (strcasecmp(value, "words") == 0) return "words";
+    if (str_icmp_cstr(value, "off") == 0 || str_icmp_cstr(value, "none") == 0) return "none";
+    if (str_icmp_cstr(value, "on") == 0 || str_icmp_cstr(value, "sentences") == 0) return "sentences";
+    if (str_icmp_cstr(value, "characters") == 0) return "characters";
+    if (str_icmp_cstr(value, "words") == 0) return "words";
     return "sentences";
 }
 JS_FORWARD_STATIC_RETURN(bool, dom_autocapitalize_inherits_from_form, (DomElement* elem), _is_tag, (elem, "button") || _is_tag(elem, "fieldset") || _is_tag(elem, "input") || _is_tag(elem, "output") || _is_tag(elem, "select") || _is_tag(elem, "textarea"))
@@ -4504,15 +4500,15 @@ static const char* dom_get_autocapitalize(DomElement* elem) {
     }
     return "";
 }
-JS_FORWARD_STATIC_EXPRESSION(bool, dom_autocorrect_attr_state, (const char* value), (!(value && strcasecmp(value, "off") == 0)))
+JS_FORWARD_STATIC_EXPRESSION(bool, dom_autocorrect_attr_state, (const char* value), (!(value && str_icmp_cstr(value, "off") == 0)))
 
 static bool dom_autocorrect_disabled_by_input_type(DomElement* elem) {
     if (!_is_tag(elem, "input")) return false;
     const char* type = elem->get_attribute("type");
     if (!type) return false;
-    return strcasecmp(type, "password") == 0 ||
-        strcasecmp(type, "email") == 0 ||
-        strcasecmp(type, "url") == 0;
+    return str_icmp_cstr(type, "password") == 0 ||
+        str_icmp_cstr(type, "email") == 0 ||
+        str_icmp_cstr(type, "url") == 0;
 }
 
 static bool dom_get_autocorrect(DomElement* elem) {
@@ -4533,11 +4529,11 @@ static bool dom_get_autocorrect(DomElement* elem) {
 }
 
 static bool dom_spellcheck_state_from_value(const char* value, bool* out) {
-    if (!value || *value == '\0' || strcasecmp(value, "true") == 0) {
+    if (!value || *value == '\0' || str_icmp_cstr(value, "true") == 0) {
         *out = true;
         return true;
     }
-    if (strcasecmp(value, "false") == 0) {
+    if (str_icmp_cstr(value, "false") == 0) {
         *out = false;
         return true;
     }
@@ -4559,8 +4555,8 @@ static bool dom_get_spellcheck(DomElement* elem) {
 }
 
 static const char* dom_writing_suggestions_attr_state(const char* value) {
-    if (!value || *value == '\0' || strcasecmp(value, "true") == 0) return "true";
-    if (strcasecmp(value, "false") == 0) return "false";
+    if (!value || *value == '\0' || str_icmp_cstr(value, "true") == 0) return "true";
+    if (str_icmp_cstr(value, "false") == 0) return "false";
     return "true";
 }
 
@@ -4688,7 +4684,7 @@ static bool dom_is_script_focusable(DomElement* elem) {
     if (dom_has_valid_int_attr(elem, "tabindex", &tabindex)) return true;
     if (_is_tag(elem, "input")) {
         const char* type = elem->get_attribute("type");
-        return !type || strcasecmp(type, "hidden") != 0;
+        return !type || str_icmp_cstr(type, "hidden") != 0;
     }
     if (_is_tag(elem, "button") || _is_tag(elem, "select") ||
         _is_tag(elem, "textarea") || _is_tag(elem, "iframe") ||
@@ -5008,8 +5004,7 @@ static bool dom_style_decl_name_matches(const char* seg, const char* end,
     while (name_start < name_end && dom_ascii_space(*name_start)) name_start++;
     while (name_end > name_start && dom_ascii_space(name_end[-1])) name_end--;
     size_t name_len = (size_t)(name_end - name_start);
-    bool matches = strlen(prop_name) == name_len &&
-        strncasecmp(name_start, prop_name, name_len) == 0;
+    bool matches = str_ieq_const(name_start, name_len, prop_name);
     if (matches && colon_out) *colon_out = colon;
     return matches;
 }
@@ -5110,7 +5105,7 @@ static float dom_parse_positive_css_dimension(const char* value) {
     double parsed = strtod(value, &end);
     if (end == value || parsed <= 0.0) return 0.0f;
     while (end && dom_ascii_space(*end)) end++;
-    if (end && *end && strncasecmp(end, "px", 2) != 0) return 0.0f;
+    if (end && *end && !str_istarts_with_cstr(end, "px")) return 0.0f;
     return (float)parsed;
 }
 
@@ -5574,7 +5569,7 @@ static bool dom_replace_text_content(DomElement* elem, const char* text) {
         dom_post_insert((DomNode*)elem, (DomNode*)text_node, false);
     }
     // Stylesheet text changes CSS globally; ordinary text is subtree-local.
-    DomJsMutationKind kind = elem->tag_name && strcasecmp(elem->tag_name, "style") == 0
+    DomJsMutationKind kind = elem->tag_name && str_icmp_cstr(elem->tag_name, "style") == 0
         ? DOM_JS_MUTATION_STYLE : DOM_JS_MUTATION_TEXT;
     dom_mutation_notify(kind, (DomNode*)elem, (DomNode*)elem);
     return true;
@@ -5736,9 +5731,7 @@ static String* uppercase_tag_name(const char* tag_name) {
     // allocate temp on stack for short names
     char buf[64];
     char* upper = (len < sizeof(buf)) ? buf : (char*)mem_alloc(len + 1, MEM_CAT_JS_RUNTIME);
-    for (size_t i = 0; i < len; i++) {
-        upper[i] = (char)toupper((unsigned char)tag_name[i]);
-    }
+    str_to_upper(upper, tag_name, len);
     upper[len] = '\0';
     String* result = heap_create_name(upper);
     if (upper != buf) mem_free(upper);
@@ -5787,7 +5780,7 @@ static DomElement* dom_inline_offset_scope(DomElement* elem) {
             current_elem->get_attribute("contenteditable");
         if (editable) return current_elem;
         if (current_elem->tag_name &&
-            strcasecmp(current_elem->tag_name, "body") == 0) {
+            str_icmp_cstr(current_elem->tag_name, "body") == 0) {
             return current_elem;
         }
     }
@@ -5971,7 +5964,7 @@ static bool dom_append_document_text(DomDocument* doc, const char* text) {
     while (*cursor) {
         const char* br = nullptr;
         for (const char* scan = cursor; *scan; scan++) {
-            if (*scan == '<' && strncasecmp(scan, "<br", 3) == 0) {
+            if (*scan == '<' && str_istarts_with_cstr(scan, "<br")) {
                 const char* end = strchr(scan, '>');
                 if (end) {
                     br = scan;
@@ -6339,7 +6332,7 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
         while (child) {
             if (child->is_element()) {
                 DomElement* elem = child->as_element();
-                if (elem->tag_name && strcasecmp(elem->tag_name, "body") == 0) {
+                if (elem->tag_name && str_icmp_cstr(elem->tag_name, "body") == 0) {
                     return dom_wrap_element(elem);
                 }
             }
@@ -6354,7 +6347,7 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
         while (child) {
             if (child->is_element()) {
                 DomElement* elem = child->as_element();
-                if (elem->tag_name && strcasecmp(elem->tag_name, "head") == 0) {
+                if (elem->tag_name && str_icmp_cstr(elem->tag_name, "head") == 0) {
                     return dom_wrap_element(elem);
                 }
             }
@@ -6370,13 +6363,13 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
         while (child) {
             if (child->is_element()) {
                 DomElement* elem = child->as_element();
-                if (elem->tag_name && strcasecmp(elem->tag_name, "head") == 0) {
+                if (elem->tag_name && str_icmp_cstr(elem->tag_name, "head") == 0) {
                     DomNode* hchild = elem->first_child;
                     while (hchild) {
                         if (hchild->is_element()) {
                             DomElement* title_elem = hchild->as_element();
                             if (title_elem->tag_name &&
-                                strcasecmp(title_elem->tag_name, "title") == 0) {
+                                str_icmp_cstr(title_elem->tag_name, "title") == 0) {
                                 StrBuf* sb = strbuf_new_cap(64);
                                 collect_text_content((DomNode*)title_elem, sb);
                                 String* result = heap_create_name(sb->str ? sb->str : "");
@@ -6926,11 +6919,11 @@ extern "C" Item dom_click_method_bridge(Item elem_item) {
     if (elem->tag_name) {
         const char* tag = elem->tag_name;
         bool is_form_ctrl =
-            strcasecmp(tag, "button") == 0 ||
-            strcasecmp(tag, "input") == 0 ||
-            strcasecmp(tag, "select") == 0 ||
-            strcasecmp(tag, "textarea") == 0 ||
-            strcasecmp(tag, "fieldset") == 0;
+            str_icmp_cstr(tag, "button") == 0 ||
+            str_icmp_cstr(tag, "input") == 0 ||
+            str_icmp_cstr(tag, "select") == 0 ||
+            str_icmp_cstr(tag, "textarea") == 0 ||
+            str_icmp_cstr(tag, "fieldset") == 0;
         if (is_form_ctrl && elem->has_attribute("disabled")) {
             return make_js_undefined();
         }
@@ -7116,8 +7109,8 @@ static Item js_text_data_body(Item callee, Item this_value, Item* args,
 static bool _elem_is_barred(DomElement* elem) {
     if (!elem || !elem->tag_name) return true;
     const char* tag = elem->tag_name;
-    if (strcasecmp(tag, "output") == 0 || strcasecmp(tag, "object") == 0 ||
-        strcasecmp(tag, "fieldset") == 0 || strcasecmp(tag, "datalist") == 0) {
+    if (str_icmp_cstr(tag, "output") == 0 || str_icmp_cstr(tag, "object") == 0 ||
+        str_icmp_cstr(tag, "fieldset") == 0 || str_icmp_cstr(tag, "datalist") == 0) {
         return true;
     }
     // Constraint validation, selector matching, and focusability share the
@@ -7127,7 +7120,7 @@ static bool _elem_is_barred(DomElement* elem) {
                                  static_cast<View*>(elem))) return true;
     // barred if readonly
     if (elem->has_attribute("readonly")) return true;
-    if (strcasecmp(tag, "input") == 0) {
+    if (str_icmp_cstr(tag, "input") == 0) {
         const char* type = dom_input_type_lower(elem);
         // Per HTML spec, input types hidden, reset, button are barred
         // from constraint validation.
@@ -7136,21 +7129,21 @@ static bool _elem_is_barred(DomElement* elem) {
             return true;
         }
     }
-    if (strcasecmp(tag, "button") == 0) {
+    if (str_icmp_cstr(tag, "button") == 0) {
         // <button type=reset|button> is barred. Default and submit are not.
         const char* btype = elem->get_attribute("type");
-        if (btype && (strcasecmp(btype, "reset") == 0 || strcasecmp(btype, "button") == 0)) {
+        if (btype && (str_icmp_cstr(btype, "reset") == 0 || str_icmp_cstr(btype, "button") == 0)) {
             return true;
         }
     }
-    if (strcasecmp(tag, "input") == 0 || strcasecmp(tag, "button") == 0 ||
-        strcasecmp(tag, "select") == 0 || strcasecmp(tag, "textarea") == 0) {
+    if (str_icmp_cstr(tag, "input") == 0 || str_icmp_cstr(tag, "button") == 0 ||
+        str_icmp_cstr(tag, "select") == 0 || str_icmp_cstr(tag, "textarea") == 0) {
         // check for datalist ancestor
         DomNode* p = elem->parent;
         while (p) {
             if (p->is_element()) {
                 DomElement* pe = p->as_element();
-                if (pe->tag_name && strcasecmp(pe->tag_name, "datalist") == 0) return true;
+                if (pe->tag_name && str_icmp_cstr(pe->tag_name, "datalist") == 0) return true;
             }
             p = p->parent;
         }
@@ -7163,7 +7156,7 @@ static bool _elem_is_barred(DomElement* elem) {
 static const char* _elem_current_value(DomElement* elem) {
     if (!elem || !elem->tag_name) return "";
     const char* tag = elem->tag_name;
-    if (strcasecmp(tag, "input") == 0) {
+    if (str_icmp_cstr(tag, "input") == 0) {
         RadiantInputValueKind kind = (RadiantInputValueKind)dom_engine_input_value_kind(
             elem->get_attribute("type"));
         if (kind != RADIANT_INPUT_VALUE_TEXT &&
@@ -7177,7 +7170,7 @@ static const char* _elem_current_value(DomElement* elem) {
         const char* v = elem->get_attribute("value");
         return v ? v : "";
     }
-    if (strcasecmp(tag, "textarea") == 0) {
+    if (str_icmp_cstr(tag, "textarea") == 0) {
         tc_ensure_init(elem);
         return (elem->form && elem->form->current_value) ? elem->form->current_value : "";
     }
@@ -7203,12 +7196,12 @@ static void _collect_options_impl(DomNode* node, Item arr, bool allow_optgroup) 
         if (node->is_element()) {
             DomElement* ce = (DomElement*)node;
             if (ce->tag_name) {
-                if (strcasecmp(ce->tag_name, "option") == 0) {
+                if (str_icmp_cstr(ce->tag_name, "option") == 0) {
                     js_array_push(arr, dom_wrap_element(ce));
-                } else if (strcasecmp(ce->tag_name, "select") == 0 ||
-                           strcasecmp(ce->tag_name, "hr") == 0) {
+                } else if (str_icmp_cstr(ce->tag_name, "select") == 0 ||
+                           str_icmp_cstr(ce->tag_name, "hr") == 0) {
                     // skip nested select/hr subtrees
-                } else if (strcasecmp(ce->tag_name, "optgroup") == 0) {
+                } else if (str_icmp_cstr(ce->tag_name, "optgroup") == 0) {
                     if (allow_optgroup) _collect_options_impl(ce->first_child, arr, false);
                 } else {
                     _collect_options_impl(ce->first_child, arr, allow_optgroup);
@@ -7319,7 +7312,7 @@ extern "C" Item dom_text_control_set_value_bridge(void* dom_elem, Item value) {
     if (!elem || !tc_is_text_control_elem(elem)) return value;
     const char* s = fn_to_cstr(value);
     if (!s) s = "";
-    if (elem->tag_name && strcasecmp(elem->tag_name, "input") == 0) {
+    if (elem->tag_name && str_icmp_cstr(elem->tag_name, "input") == 0) {
         const char* itype = _input_type_lower(elem);
         bool single_line = strcmp(itype, "text") == 0 || strcmp(itype, "search") == 0 ||
                            strcmp(itype, "tel") == 0 || strcmp(itype, "url") == 0 ||
@@ -7416,7 +7409,7 @@ extern "C" Item dom_text_control_set_default_value_bridge(void* dom_elem, Item v
     if (!elem || !tc_is_text_control_elem(elem)) return value;
     const char* s = fn_to_cstr(value);
     if (!s) s = "";
-    if (elem->tag_name && strcasecmp(elem->tag_name, "textarea") == 0) {
+    if (elem->tag_name && str_icmp_cstr(elem->tag_name, "textarea") == 0) {
         bool dom_children_changed = elem->first_child != nullptr || *s;
         dom_detach_all_children(elem);
         if (*s) {
@@ -7625,7 +7618,7 @@ static void dom_reinit_behavior_if_constraint_attr(DomElement* elem,
         "min", "max", "disabled", "readonly", "value",
     };
     for (size_t i = 0; i < sizeof(kConstraintAttrs)/sizeof(kConstraintAttrs[0]); i++) {
-        if (strcasecmp(attr_name, kConstraintAttrs[i]) == 0) {
+        if (str_icmp_cstr(attr_name, kConstraintAttrs[i]) == 0) {
             form_control_invalidate_behavior_init((DocState*)elem->doc->state,
                                                   (View*)elem);
             return;
@@ -7637,7 +7630,7 @@ static void _after_image_src_set(DomElement* elem, const char* attr_name,
                                  const char* attr_value) {
     // Image decoding belongs to the host engine; DOM schedules `load` only
     // after the engine has accepted the new source and attached its surface.
-    if (!_is_tag(elem, "img") || strcasecmp(attr_name, "src") != 0) return;
+    if (!_is_tag(elem, "img") || str_icmp_cstr(attr_name, "src") != 0) return;
     if (dom_engine_set_image_source(elem, attr_value)) {
         _schedule_image_load(elem);
     }
@@ -7650,13 +7643,13 @@ extern "C" void dom_after_set_attribute(void* elem_ptr,
     if (!elem || !attr_name || !attr_value) return;
     dom_compile_event_attr_to_expando(elem, attr_name, attr_value);
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
-    if (_is_tag(elem, "option") && strcasecmp(attr_name, "selected") == 0) {
+    if (_is_tag(elem, "option") && str_icmp_cstr(attr_name, "selected") == 0) {
         DomElement* sel = _nearest_select_for_node((DomNode*)elem);
         if (sel && !sel->has_attribute("multiple")) _select_ask_for_reset(sel);
     }
     _after_image_src_set(elem, attr_name, attr_value);
     if (elem->tag() == MARKUP_NAME_CANVAS &&
-        (strcasecmp(attr_name, "width") == 0 || strcasecmp(attr_name, "height") == 0)) {
+        (str_icmp_cstr(attr_name, "width") == 0 || str_icmp_cstr(attr_name, "height") == 0)) {
         // Content-attribute mutations reset exactly like the reflected IDL
         // setters; both replace the authoritative bitmap and context state.
         if (!radiant_canvas_reset_from_attributes(elem)) {
@@ -7673,13 +7666,13 @@ extern "C" void dom_after_remove_attribute(void* elem_ptr,
     dom_clear_event_attr_expando(elem, attr_name);
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
     if (elem->tag() == MARKUP_NAME_CANVAS &&
-        (strcasecmp(attr_name, "width") == 0 || strcasecmp(attr_name, "height") == 0)) {
+        (str_icmp_cstr(attr_name, "width") == 0 || str_icmp_cstr(attr_name, "height") == 0)) {
         if (!radiant_canvas_reset_from_attributes(elem)) {
             log_error("canvas: could not reset backing surface after removing %s", attr_name);
         }
         dom_canvas_reset_context(dom_wrap_element(elem));
     }
-    if (_is_tag(elem, "select") && strcasecmp(attr_name, "multiple") == 0) {
+    if (_is_tag(elem, "select") && str_icmp_cstr(attr_name, "multiple") == 0) {
         _select_ask_for_reset(elem);
     }
 }
@@ -7690,7 +7683,7 @@ extern "C" void dom_after_toggle_attribute_remove(void* elem_ptr,
     if (!elem || !attr_name) return;
     // toggleAttribute historically only ran the select reset side effect for
     // removing "multiple"; keep the moved dispatch behavior-compatible.
-    if (_is_tag(elem, "select") && strcasecmp(attr_name, "multiple") == 0) {
+    if (_is_tag(elem, "select") && str_icmp_cstr(attr_name, "multiple") == 0) {
         _select_ask_for_reset(elem);
     }
 }
@@ -7701,7 +7694,7 @@ static DomElement* _option_owner_select(DomElement* opt) {
     for (DomNode* p = opt->parent; p; p = p->parent) {
         if (p->is_element()) {
             DomElement* pe = (DomElement*)p;
-            if (pe->tag_name && strcasecmp(pe->tag_name, "select") == 0) return pe;
+            if (pe->tag_name && str_icmp_cstr(pe->tag_name, "select") == 0) return pe;
         }
     }
     return nullptr;
@@ -8044,7 +8037,7 @@ static bool _select_value_missing(DomElement* sel) {
 static void _reset_form_control(DomElement* elem) {
     if (!elem || !elem->tag_name) return;
     const char* tag = elem->tag_name;
-    if (strcasecmp(tag, "input") == 0) {
+    if (str_icmp_cstr(tag, "input") == 0) {
         const char* itype = _input_type_lower(elem);
         if (strcmp(itype, "checkbox") == 0 || strcmp(itype, "radio") == 0) {
             // checked := defaultChecked (presence of "checked" content attr)
@@ -8081,7 +8074,7 @@ static void _reset_form_control(DomElement* elem) {
         }
         return;
     }
-    if (strcasecmp(tag, "textarea") == 0) {
+    if (str_icmp_cstr(tag, "textarea") == 0) {
         if (tc_is_text_control_elem(elem)) {
             tc_ensure_init(elem);
             // textarea defaultValue = descendant text content of original markup
@@ -8094,7 +8087,7 @@ static void _reset_form_control(DomElement* elem) {
         }
         return;
     }
-    if (strcasecmp(tag, "select") == 0) {
+    if (str_icmp_cstr(tag, "select") == 0) {
         // Reset selectedness of all options to their defaults, then run
         // ask-for-reset for non-multiple selects.
         Item arr = js_array_new(0);
@@ -8115,7 +8108,7 @@ static void _reset_form_control(DomElement* elem) {
         }
         return;
     }
-    if (strcasecmp(tag, "output") == 0) {
+    if (str_icmp_cstr(tag, "output") == 0) {
         Item default_value = dom_output_default_value(elem);
         const char* raw = fn_to_cstr(default_value);
         char* text = mem_strdup(raw ? raw : "", MEM_CAT_JS_RUNTIME);
@@ -8147,10 +8140,10 @@ typedef struct FormResetCtx {
 
 static bool _is_form_control_tag(DomElement* elem) {
     return elem->tag_name &&
-        (strcasecmp(elem->tag_name, "input") == 0 ||
-         strcasecmp(elem->tag_name, "textarea") == 0 ||
-         strcasecmp(elem->tag_name, "select") == 0 ||
-         strcasecmp(elem->tag_name, "output") == 0);
+        (str_icmp_cstr(elem->tag_name, "input") == 0 ||
+         str_icmp_cstr(elem->tag_name, "textarea") == 0 ||
+         str_icmp_cstr(elem->tag_name, "select") == 0 ||
+         str_icmp_cstr(elem->tag_name, "output") == 0);
 }
 
 // nearest ancestor <form> of `elem`, stopping at (and including) `limit`
@@ -8159,7 +8152,7 @@ static DomElement* _nearest_enclosing_form(DomElement* elem, DomElement* limit) 
         if (p == (DomNode*)limit) return limit;
         if (!p->is_element()) continue;
         DomElement* pe = (DomElement*)p;
-        if (pe->tag_name && strcasecmp(pe->tag_name, "form") == 0) return pe;
+        if (pe->tag_name && str_icmp_cstr(pe->tag_name, "form") == 0) return pe;
     }
     return NULL;
 }
@@ -8218,7 +8211,7 @@ typedef struct RadioGroupScanCtx {
 
 static bool _radio_group_visit(DomElement* elem, void* ctx) {
     RadioGroupScanCtx* state = (RadioGroupScanCtx*)ctx;
-    if (!elem->tag_name || strcasecmp(elem->tag_name, "input") != 0) return true;
+    if (!elem->tag_name || str_icmp_cstr(elem->tag_name, "input") != 0) return true;
     if (strcmp(dom_input_type_lower(elem), "radio") != 0) return true;
     const char* name = elem->get_attribute("name");
     if (!name || strcmp(name, state->name) != 0) return true;
@@ -8265,7 +8258,7 @@ static Item _build_validity_state(DomElement* elem) {
         // Typed value setters already sanitize through the module codec. Keeping
         // validity on that same grammar prevents calendar and step semantics
         // from disagreeing with the value exposed through the IDL.
-        if (!val_empty && strcasecmp(tag, "input") == 0) {
+        if (!val_empty && str_icmp_cstr(tag, "input") == 0) {
             char sanitized[128];
             dom_engine_input_value_sanitize(dom_input_type_lower(elem), val,
                                           sanitized, sizeof(sanitized));
@@ -8277,7 +8270,7 @@ static Item _build_validity_state(DomElement* elem) {
         // group when any member is required and none is checked, even if
         // this particular element does not carry the required attribute.
         bool radio_handled = false;
-        if (strcasecmp(tag, "input") == 0) {
+        if (str_icmp_cstr(tag, "input") == 0) {
             const char* itype0 = dom_input_type_lower(elem);
             if (strcmp(itype0, "radio") == 0) {
                 radio_handled = true;
@@ -8296,7 +8289,7 @@ static Item _build_validity_state(DomElement* elem) {
                     for (DomNode* p = elem->parent; p; p = p->parent) {
                         if (p->is_element()) {
                             DomElement* pe = (DomElement*)p;
-                            if (pe->tag_name && strcasecmp(pe->tag_name, "form") == 0) {
+                            if (pe->tag_name && str_icmp_cstr(pe->tag_name, "form") == 0) {
                                 form_scope = pe; break;
                             }
                         }
@@ -8315,7 +8308,7 @@ static Item _build_validity_state(DomElement* elem) {
         }
 
         if (!radio_handled && elem->has_attribute("required")) {
-            if (strcasecmp(tag, "input") == 0) {
+            if (str_icmp_cstr(tag, "input") == 0) {
                 const char* itype = dom_input_type_lower(elem);
                 if (strcmp(itype, "checkbox") == 0) {
                     value_missing = !dom_get_checkedness(elem);
@@ -8326,7 +8319,7 @@ static Item _build_validity_state(DomElement* elem) {
                 } else {
                     value_missing = val_empty;
                 }
-            } else if (strcasecmp(tag, "select") == 0) {
+            } else if (str_icmp_cstr(tag, "select") == 0) {
                 // select with required: missing iff no option selected
                 // OR the selected option has empty value.
                 value_missing = _select_value_missing(elem);
@@ -8336,7 +8329,7 @@ static Item _build_validity_state(DomElement* elem) {
         }
 
         // typeMismatch: email / url with non-empty invalid value
-        if (!val_empty && strcasecmp(tag, "input") == 0) {
+        if (!val_empty && str_icmp_cstr(tag, "input") == 0) {
             const char* itype = dom_input_type_lower(elem);
             if (strcmp(itype, "email") == 0) {
                 // simple email check: must contain @
@@ -8354,7 +8347,7 @@ static Item _build_validity_state(DomElement* elem) {
         }
 
         // patternMismatch: pattern attr + non-empty value + regex doesn't match
-        if (!val_empty && !type_mismatch && strcasecmp(tag, "input") == 0) {
+        if (!val_empty && !type_mismatch && str_icmp_cstr(tag, "input") == 0) {
             const char* pattern = elem->get_attribute("pattern");
             if (pattern && *pattern) {
                 // HTML pattern anchors the whole value (^(?:pattern)$)
@@ -8375,7 +8368,7 @@ static Item _build_validity_state(DomElement* elem) {
 
         // Numeric value states share their scalar conversion and step base with
         // valueAsNumber/stepUp, including ISO week and calendar-month rules.
-        if (!val_empty && strcasecmp(tag, "input") == 0) {
+        if (!val_empty && str_icmp_cstr(tag, "input") == 0) {
             const char* itype = dom_input_type_lower(elem);
             RadiantInputValidity typed = {};
             dom_engine_input_value_validate(itype, val,
@@ -8399,7 +8392,7 @@ static Item _build_validity_state(DomElement* elem) {
     // but their suffering condition isn't gated on mutability).
     if (barred) {
         const char* tag = elem ? elem->tag_name : "";
-        bool is_input = elem && tag && strcasecmp(tag, "input") == 0;
+        bool is_input = elem && tag && str_icmp_cstr(tag, "input") == 0;
         bool gate_value_missing = false;
         if (is_input) {
             const char* itype = dom_input_type_lower(elem);
@@ -8408,11 +8401,11 @@ static Item _build_validity_state(DomElement* elem) {
                 strcmp(itype, "file") != 0) {
                 gate_value_missing = true;
             }
-        } else if (tag && (strcasecmp(tag, "textarea") == 0 ||
-                           strcasecmp(tag, "select") == 0)) {
+        } else if (tag && (str_icmp_cstr(tag, "textarea") == 0 ||
+                           str_icmp_cstr(tag, "select") == 0)) {
             // textarea is text-like; select per spec also gated.
             // WPT shows select expected==expectedImmutable so gate it.
-            gate_value_missing = (strcasecmp(tag, "textarea") == 0);
+            gate_value_missing = (str_icmp_cstr(tag, "textarea") == 0);
         }
         if (gate_value_missing) value_missing = false;
         too_long = false;
@@ -8439,10 +8432,10 @@ JS_FORWARD_STATIC_EXPRESSION(bool, dom_validity_item_is_valid, (Item flag), (((f
 
 static bool dom_is_constraint_control(DomElement* elem) {
     if (!elem || !elem->tag_name || _elem_is_barred(elem)) return false;
-    return strcasecmp(elem->tag_name, "input") == 0 ||
-           strcasecmp(elem->tag_name, "select") == 0 ||
-           strcasecmp(elem->tag_name, "textarea") == 0 ||
-           strcasecmp(elem->tag_name, "button") == 0;
+    return str_icmp_cstr(elem->tag_name, "input") == 0 ||
+           str_icmp_cstr(elem->tag_name, "select") == 0 ||
+           str_icmp_cstr(elem->tag_name, "textarea") == 0 ||
+           str_icmp_cstr(elem->tag_name, "button") == 0;
 }
 
 static void dom_dispatch_invalid_event(Item target_item, bool include_bubbles) {
@@ -8475,7 +8468,7 @@ static void dom_check_form_control_descendants(DomNode* node, bool* all_valid) {
 
 extern "C" Item dom_form_reset_bridge(Item form_item) {
     DomElement* elem = (DomElement*)dom_unwrap_element(form_item);
-    if (!elem || !elem->tag_name || strcasecmp(elem->tag_name, "form") != 0) {
+    if (!elem || !elem->tag_name || str_icmp_cstr(elem->tag_name, "form") != 0) {
         return make_js_undefined();
     }
     Item ev = js_create_event("reset", /*bubbles=*/true, /*cancelable=*/true);
@@ -8490,7 +8483,7 @@ static Item dom_check_or_report_validity(Item elem_item, bool report) {
     DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem || !elem->tag_name) return (Item){.item = ITEM_TRUE};
 
-    if (strcasecmp(elem->tag_name, "form") == 0) {
+    if (str_icmp_cstr(elem->tag_name, "form") == 0) {
         bool all_valid = true;
         dom_check_form_control_descendants(elem->first_child, &all_valid);
         return (Item){.item = b2it(all_valid)};
@@ -8530,7 +8523,7 @@ static DomElement* dom_first_invalid_control(DomNode* node) {
 // side effect required by the form submission policy.
 extern "C" bool dom_focus_first_invalid_form_control(void* form_ptr) {
     DomElement* form = (DomElement*)form_ptr;
-    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+    if (!form || !form->tag_name || str_icmp_cstr(form->tag_name, "form") != 0) {
         return false;
     }
     DomElement* invalid = dom_first_invalid_control(form->first_child);
@@ -8578,7 +8571,7 @@ static const uint32_t DOM_TAG_ANY = 0xFFFFFFFFu;
 static uint32_t dom_tag_bit(const DomElement* elem) {
     if (!elem || !elem->tag_name) return 0;
 #define JS_DOM_TAG_BIT_MATCH(name, text) \
-    if (strcasecmp(elem->tag_name, text) == 0) return DOM_TAG_##name;
+    if (str_icmp_cstr(elem->tag_name, text) == 0) return DOM_TAG_##name;
     JS_DOM_TAGS(JS_DOM_TAG_BIT_MATCH)
 #undef JS_DOM_TAG_BIT_MATCH
     return 0;
@@ -8757,15 +8750,15 @@ static bool _is_write_reflected(DomElement* elem, const char* prop,
 // Returns the lowercased input `formmethod` value or "get" default.
 static const char* _normalise_method(const char* v) {
     if (v) {
-        if (strcasecmp(v, "post") == 0) return "post";
-        if (strcasecmp(v, "dialog") == 0) return "dialog";
+        if (str_icmp_cstr(v, "post") == 0) return "post";
+        if (str_icmp_cstr(v, "dialog") == 0) return "dialog";
     }
     return "get";
 }
 static const char* _normalise_enctype(const char* v) {
     if (v) {
-        if (strcasecmp(v, "multipart/form-data") == 0) return "multipart/form-data";
-        if (strcasecmp(v, "text/plain") == 0) return "text/plain";
+        if (str_icmp_cstr(v, "multipart/form-data") == 0) return "multipart/form-data";
+        if (str_icmp_cstr(v, "text/plain") == 0) return "text/plain";
     }
     return "application/x-www-form-urlencoded";
 }
@@ -8779,16 +8772,16 @@ static const char* _normalise_enctype(const char* v) {
 static bool _is_listed_form_control(DomElement* e) {
     if (!e || !e->tag_name) return false;
     const char* t = e->tag_name;
-    if (strcasecmp(t, "input") == 0) {
+    if (str_icmp_cstr(t, "input") == 0) {
         const char* it = _input_type_lower(e);
         return strcmp(it, "image") != 0;
     }
-    return strcasecmp(t, "button") == 0 ||
-           strcasecmp(t, "select") == 0 ||
-           strcasecmp(t, "textarea") == 0 ||
-           strcasecmp(t, "fieldset") == 0 ||
-           strcasecmp(t, "object") == 0 ||
-           strcasecmp(t, "output") == 0;
+    return str_icmp_cstr(t, "button") == 0 ||
+           str_icmp_cstr(t, "select") == 0 ||
+           str_icmp_cstr(t, "textarea") == 0 ||
+           str_icmp_cstr(t, "fieldset") == 0 ||
+           str_icmp_cstr(t, "object") == 0 ||
+           str_icmp_cstr(t, "output") == 0;
 }
 
 // Walk a subtree and append each listed control to `arr` (in tree order).
@@ -8799,7 +8792,7 @@ static void _collect_form_related_rec(DomNode* node, Item arr, bool controls) {
             DomElement* elem = node->as_element();
             bool selected = controls
                 ? _is_listed_form_control(elem)
-                : (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0);
+                : (elem->tag_name && str_icmp_cstr(elem->tag_name, "form") == 0);
             if (selected) {
                 js_array_push(arr, dom_wrap_element(elem));
             }
@@ -9288,7 +9281,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // html requires template contents to be exposed through a detached
     // DocumentFragment, so cloning does not clone the hidden template wrapper.
     if (prop_id == JS_DOM_PROP_CONTENT &&
-        elem->tag_name && strcasecmp(elem->tag_name, "template") == 0) {
+        elem->tag_name && str_icmp_cstr(elem->tag_name, "template") == 0) {
         return dom_template_content(elem);
     }
 
@@ -9307,13 +9300,13 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     if (prop_id == JS_DOM_PROP_OWNER_SVGELEMENT) {
-        if (!dom_element_is_svg(elem) || strcasecmp(elem->tag_name, "svg") == 0) {
+        if (!dom_element_is_svg(elem) || str_icmp_cstr(elem->tag_name, "svg") == 0) {
             return ItemNull;
         }
         for (DomNode* current = elem->parent; current; current = current->parent) {
             if (!current->is_element()) continue;
             DomElement* ancestor = current->as_element();
-            if (ancestor && ancestor->tag_name && strcasecmp(ancestor->tag_name, "svg") == 0) {
+            if (ancestor && ancestor->tag_name && str_icmp_cstr(ancestor->tag_name, "svg") == 0) {
                 return dom_wrap_element(ancestor);
             }
         }
@@ -9328,7 +9321,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // iframe.contentDocument / contentWindow — lazy-create a foreign HTML
     // document that backs the iframe's browsing context. Cached per element
     // so identity comparisons (===) work.
-    if (elem->tag_name && strcasecmp(elem->tag_name, "iframe") == 0 &&
+    if (elem->tag_name && str_icmp_cstr(elem->tag_name, "iframe") == 0 &&
         (prop_id == JS_DOM_PROP_CONTENT_DOCUMENT || prop_id == JS_DOM_PROP_CONTENT_WINDOW)) {
         extern Item dom_iframe_get_content_document(DomElement* iframe);
         extern Item dom_iframe_get_content_window  (DomElement* iframe);
@@ -9688,7 +9681,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
                 for (DomNode* p = sel->parent; p; p = p->parent) {
                     if (p->is_element()) {
                         DomElement* pe = (DomElement*)p;
-                        if (pe->tag_name && strcasecmp(pe->tag_name, "form") == 0)
+                        if (pe->tag_name && str_icmp_cstr(pe->tag_name, "form") == 0)
                             return dom_wrap_element(pe);
                     }
                 }
@@ -9731,7 +9724,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         }
         if (prop_id == JS_DOM_PROP_DEFAULT_VALUE) {
             // <input>: getAttribute("value"); <textarea>: text content of children.
-            if (elem->tag_name && strcasecmp(elem->tag_name, "textarea") == 0) {
+            if (elem->tag_name && str_icmp_cstr(elem->tag_name, "textarea") == 0) {
                 StrBuf* sb = strbuf_new_cap(64);
                 collect_text_content((DomNode*)elem, sb);
                 String* s = heap_create_name(sb->str ? sb->str : "");
@@ -9831,9 +9824,10 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // type for button (default "submit"; only valid values: "submit","reset","button")
     if (prop_id == JS_DOM_PROP_TYPE && _is_tag(elem, "button")) {
         const char* v = elem->get_attribute("type");
-        if (v && (strcasecmp(v, "submit") == 0 || strcasecmp(v, "reset") == 0 || strcasecmp(v, "button") == 0)) {
+        if (v && (str_icmp_cstr(v, "submit") == 0 || str_icmp_cstr(v, "reset") == 0 || str_icmp_cstr(v, "button") == 0)) {
             char buf[8];
-            for (int i = 0; v[i] && i < 7; i++) buf[i] = (char)tolower((unsigned char)v[i]), buf[i+1] = '\0';
+            size_t len = str_copy(buf, sizeof(buf), v, strlen(v));
+            str_lower_inplace(buf, len);
             return js_name_item(buf);
         }
         return js_name_item("submit");
@@ -9980,10 +9974,9 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         const char* v = elem->get_attribute("inputmode");
         if (!v) return js_name_item("");
         // Canonicalise to lowercase and validate against the spec keyword set.
-        char buf[16]; size_t i = 0;
-        for (; v[i] && i < sizeof(buf) - 1; i++)
-            buf[i] = (char)tolower((unsigned char)v[i]);
-        buf[i] = '\0';
+        char buf[16];
+        size_t len = str_copy(buf, sizeof(buf), v, strlen(v));
+        str_lower_inplace(buf, len);
         const char* keywords[] = {
             "none", "text", "decimal", "numeric",
             "tel", "search", "email", "url", nullptr
@@ -9997,10 +9990,9 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     if (prop_id == JS_DOM_PROP_ENTER_KEY_HINT) {
         const char* v = elem->get_attribute("enterkeyhint");
         if (!v) return js_name_item("");
-        char buf[16]; size_t i = 0;
-        for (; v[i] && i < sizeof(buf) - 1; i++)
-            buf[i] = (char)tolower((unsigned char)v[i]);
-        buf[i] = '\0';
+        char buf[16];
+        size_t len = str_copy(buf, sizeof(buf), v, strlen(v));
+        str_lower_inplace(buf, len);
         const char* keywords[] = {
             "enter", "done", "go", "next", "previous", "search", "send", nullptr
         };
@@ -10033,11 +10025,11 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
                 DomElement* e = (DomElement*)p;
                 if (e->has_attribute("contenteditable")) {
                     const char* v = e->get_attribute("contenteditable");
-                    if (!v || *v == '\0' || strcasecmp(v, "true") == 0 ||
-                        strcasecmp(v, "plaintext-only") == 0) {
+                    if (!v || *v == '\0' || str_icmp_cstr(v, "true") == 0 ||
+                        str_icmp_cstr(v, "plaintext-only") == 0) {
                         return (Item){.item = b2it(!saw_false)};
                     }
-                    if (strcasecmp(v, "false") == 0) {
+                    if (str_icmp_cstr(v, "false") == 0) {
                         saw_false = true;
                     }
                 }
@@ -10101,10 +10093,10 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // willValidate: true if element is a candidate for constraint validation
     if (prop_id == JS_DOM_PROP_WILL_VALIDATE) {
         bool is_form_ctrl = elem->tag_name && (
-            strcasecmp(elem->tag_name, "input") == 0 ||
-            strcasecmp(elem->tag_name, "select") == 0 ||
-            strcasecmp(elem->tag_name, "textarea") == 0 ||
-            strcasecmp(elem->tag_name, "button") == 0);
+            str_icmp_cstr(elem->tag_name, "input") == 0 ||
+            str_icmp_cstr(elem->tag_name, "select") == 0 ||
+            str_icmp_cstr(elem->tag_name, "textarea") == 0 ||
+            str_icmp_cstr(elem->tag_name, "button") == 0);
         if (!is_form_ctrl) return (Item){.item = ITEM_FALSE};
         return (Item){.item = b2it(!_elem_is_barred(elem))};
     }
@@ -10116,10 +10108,10 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     if (prop_id == JS_DOM_PROP_VALIDATION_MESSAGE) {
         // Barred elements (disabled, readonly, etc.) always have empty validationMessage
         bool is_form_ctrl = elem->tag_name && (
-            strcasecmp(elem->tag_name, "input") == 0 ||
-            strcasecmp(elem->tag_name, "select") == 0 ||
-            strcasecmp(elem->tag_name, "textarea") == 0 ||
-            strcasecmp(elem->tag_name, "button") == 0);
+            str_icmp_cstr(elem->tag_name, "input") == 0 ||
+            str_icmp_cstr(elem->tag_name, "select") == 0 ||
+            str_icmp_cstr(elem->tag_name, "textarea") == 0 ||
+            str_icmp_cstr(elem->tag_name, "button") == 0);
         if (!is_form_ctrl || _elem_is_barred(elem)) {
             return js_name_item("");
         }
@@ -10242,7 +10234,7 @@ static bool js_inline_style_cssom_property_exposed(const char* css_prop) {
     // object-view-box is parsed for stylesheet layout tests, but the browser
     // reference CSSOM does not expose dynamic inline writes for this draft
     // property; treating it as writable changes pre-screenshot WPT geometry.
-    if (strcasecmp(css_prop, "object-view-box") == 0) return false;
+    if (str_icmp_cstr(css_prop, "object-view-box") == 0) return false;
     return true;
 }
 
@@ -10333,8 +10325,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
 
         bool is_vertical = prop_id == JS_DOM_PROP_SCROLL_TOP;
         bool is_root_scroll_target =
-            (elem->tag_name && (strcasecmp(elem->tag_name, "html") == 0 ||
-                                strcasecmp(elem->tag_name, "body") == 0));
+            (elem->tag_name && (str_icmp_cstr(elem->tag_name, "html") == 0 ||
+                                str_icmp_cstr(elem->tag_name, "body") == 0));
 
         if (is_root_scroll_target && elem->doc) {
             // A pending viewport request has no signed element range yet;
@@ -10849,10 +10841,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             const char* s = dom_to_attr_cstr(value);
             if (*s) {
                 char buf[32];
-                size_t i = 0;
-                for (; s[i] && i < sizeof(buf) - 1; i++)
-                    buf[i] = (char)tolower((unsigned char)s[i]);
-                buf[i] = '\0';
+                size_t len = str_copy(buf, sizeof(buf), s, strlen(s));
+                str_lower_inplace(buf, len);
                 elem->set_attribute("type", buf);
             } else {
                 elem->set_attribute("type", "text");
@@ -11512,7 +11502,7 @@ static RdtMatrix dom_svg_transform_from_element(DomElement* elem) {
             transform.e23 = components[5];
         }
     }
-    if (elem->tag_name && strcasecmp(elem->tag_name, "svg") == 0 && elem->parent) {
+    if (elem->tag_name && str_icmp_cstr(elem->tag_name, "svg") == 0 && elem->parent) {
         RdtMatrix viewport_offset = rdt_matrix_translate(
             dom_svg_attribute_number(elem, "x", 0.0f),
             dom_svg_attribute_number(elem, "y", 0.0f));
@@ -11557,36 +11547,36 @@ static JsDomSvgBounds dom_svg_bounds_for_element(DomElement* elem) {
     JsDomSvgBounds bounds = {};
     if (!elem || !elem->tag_name) return bounds;
     const char* tag = elem->tag_name;
-    if (strcasecmp(tag, "rect") == 0 || strcasecmp(tag, "image") == 0 ||
-        strcasecmp(tag, "foreignObject") == 0) {
+    if (str_icmp_cstr(tag, "rect") == 0 || str_icmp_cstr(tag, "image") == 0 ||
+        str_icmp_cstr(tag, "foreignObject") == 0) {
         dom_svg_bounds_include_rect(&bounds,
             dom_svg_attribute_number(elem, "x", 0.0f),
             dom_svg_attribute_number(elem, "y", 0.0f),
             dom_svg_attribute_number(elem, "width", 0.0f),
             dom_svg_attribute_number(elem, "height", 0.0f));
-    } else if (strcasecmp(tag, "circle") == 0) {
+    } else if (str_icmp_cstr(tag, "circle") == 0) {
         float radius = dom_svg_attribute_number(elem, "r", 0.0f);
         dom_svg_bounds_include_rect(&bounds,
             dom_svg_attribute_number(elem, "cx", 0.0f) - radius,
             dom_svg_attribute_number(elem, "cy", 0.0f) - radius,
             radius * 2.0f, radius * 2.0f);
-    } else if (strcasecmp(tag, "ellipse") == 0) {
+    } else if (str_icmp_cstr(tag, "ellipse") == 0) {
         float rx = dom_svg_attribute_number(elem, "rx", 0.0f);
         float ry = dom_svg_attribute_number(elem, "ry", 0.0f);
         dom_svg_bounds_include_rect(&bounds,
             dom_svg_attribute_number(elem, "cx", 0.0f) - rx,
             dom_svg_attribute_number(elem, "cy", 0.0f) - ry,
             rx * 2.0f, ry * 2.0f);
-    } else if (strcasecmp(tag, "line") == 0) {
+    } else if (str_icmp_cstr(tag, "line") == 0) {
         dom_svg_bounds_include_point(&bounds,
             dom_svg_attribute_number(elem, "x1", 0.0f),
             dom_svg_attribute_number(elem, "y1", 0.0f));
         dom_svg_bounds_include_point(&bounds,
             dom_svg_attribute_number(elem, "x2", 0.0f),
             dom_svg_attribute_number(elem, "y2", 0.0f));
-    } else if (strcasecmp(tag, "polyline") == 0 || strcasecmp(tag, "polygon") == 0) {
+    } else if (str_icmp_cstr(tag, "polyline") == 0 || str_icmp_cstr(tag, "polygon") == 0) {
         dom_svg_bounds_from_points(elem->get_attribute("points"), &bounds);
-    } else if (strcasecmp(tag, "path") == 0) {
+    } else if (str_icmp_cstr(tag, "path") == 0) {
         // `getBBox()` is consumed immediately by SVG callers; preserve the
         // renderer's path parser so malformed geometry cannot turn into a
         // latent ItemError in an unrelated constructor call.
@@ -11602,7 +11592,7 @@ static JsDomSvgBounds dom_svg_bounds_for_element(DomElement* elem) {
             }
             rdt_path_free(path);
         }
-    } else if (strcasecmp(tag, "text") == 0 || strcasecmp(tag, "tspan") == 0) {
+    } else if (str_icmp_cstr(tag, "text") == 0 || str_icmp_cstr(tag, "tspan") == 0) {
         StrBuf* text = strbuf_new_cap(32);
         collect_text_content((DomNode*)elem, text);
         float font_size = dom_svg_attribute_number(elem, "font-size",
@@ -11623,8 +11613,8 @@ static JsDomSvgBounds dom_svg_bounds_for_element(DomElement* elem) {
         dom_svg_bounds_include_rect(&bounds, x, y - metrics.ascent,
                                         metrics.width, metrics.ascent + metrics.descent);
         if (text) strbuf_free(text);
-    } else if (strcasecmp(tag, "g") == 0 || strcasecmp(tag, "svg") == 0 ||
-               strcasecmp(tag, "a") == 0 || strcasecmp(tag, "switch") == 0) {
+    } else if (str_icmp_cstr(tag, "g") == 0 || str_icmp_cstr(tag, "svg") == 0 ||
+               str_icmp_cstr(tag, "a") == 0 || str_icmp_cstr(tag, "switch") == 0) {
         for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
             if (!child->is_element()) continue;
             DomElement* child_elem = child->as_element();
@@ -11724,7 +11714,7 @@ static RdtMatrix dom_svg_ctm(DomElement* elem, bool screen_space) {
         if (!current->is_element()) continue;
         DomElement* candidate = current->as_element();
         chain[count++] = candidate;
-        if (candidate && candidate->tag_name && strcasecmp(candidate->tag_name, "svg") == 0) {
+        if (candidate && candidate->tag_name && str_icmp_cstr(candidate->tag_name, "svg") == 0) {
             outermost_svg = candidate;
         }
     }
@@ -11732,7 +11722,7 @@ static RdtMatrix dom_svg_ctm(DomElement* elem, bool screen_space) {
     for (int i = count - 1; i >= 0; i--) {
         DomElement* current = chain[i];
         if (!current || !current->tag_name) continue;
-        if (strcasecmp(current->tag_name, "svg") == 0) {
+        if (str_icmp_cstr(current->tag_name, "svg") == 0) {
             in_svg = true;
             RdtMatrix viewbox_transform = dom_svg_viewbox_transform(current);
             matrix = rdt_matrix_multiply(&matrix, &viewbox_transform);
@@ -12189,23 +12179,23 @@ static bool dom_svg_path_add_points(RdtPath* path, const char* points,
 static bool dom_svg_is_basic_shape(DomElement* elem) {
     if (!elem || !elem->tag_name) return false;
     const char* tag = elem->tag_name;
-    return strcasecmp(tag, "rect") == 0 || strcasecmp(tag, "circle") == 0 ||
-        strcasecmp(tag, "ellipse") == 0 || strcasecmp(tag, "line") == 0 ||
-        strcasecmp(tag, "polyline") == 0 || strcasecmp(tag, "polygon") == 0 ||
-        strcasecmp(tag, "path") == 0;
+    return str_icmp_cstr(tag, "rect") == 0 || str_icmp_cstr(tag, "circle") == 0 ||
+        str_icmp_cstr(tag, "ellipse") == 0 || str_icmp_cstr(tag, "line") == 0 ||
+        str_icmp_cstr(tag, "polyline") == 0 || str_icmp_cstr(tag, "polygon") == 0 ||
+        str_icmp_cstr(tag, "path") == 0;
 }
 
 static RdtPath* dom_svg_basic_shape_path(DomElement* elem) {
     if (!dom_svg_is_basic_shape(elem)) return nullptr;
     const char* tag = elem->tag_name;
-    if (strcasecmp(tag, "path") == 0) {
+    if (str_icmp_cstr(tag, "path") == 0) {
         const char* d = elem->get_attribute("d");
         return d && *d ? svg_parse_path_d(d) : nullptr;
     }
     RdtPath* path = rdt_path_new();
     if (!path) return nullptr;
     bool valid = false;
-    if (strcasecmp(tag, "rect") == 0) {
+    if (str_icmp_cstr(tag, "rect") == 0) {
         float width = dom_svg_attribute_number(elem, "width", 0.0f);
         float height = dom_svg_attribute_number(elem, "height", 0.0f);
         const char* rx_attr = elem->get_attribute("rx");
@@ -12219,7 +12209,7 @@ static RdtPath* dom_svg_basic_shape_path(DomElement* elem) {
                 dom_svg_attribute_number(elem, "y", 0.0f), width, height, rx, ry);
             valid = true;
         }
-    } else if (strcasecmp(tag, "circle") == 0) {
+    } else if (str_icmp_cstr(tag, "circle") == 0) {
         float radius = dom_svg_attribute_number(elem, "r", 0.0f);
         if (radius > 0.0f) {
             dom_svg_path_add_ellipse(path,
@@ -12227,7 +12217,7 @@ static RdtPath* dom_svg_basic_shape_path(DomElement* elem) {
                 dom_svg_attribute_number(elem, "cy", 0.0f), radius, radius);
             valid = true;
         }
-    } else if (strcasecmp(tag, "ellipse") == 0) {
+    } else if (str_icmp_cstr(tag, "ellipse") == 0) {
         float rx = dom_svg_attribute_number(elem, "rx", 0.0f);
         float ry = dom_svg_attribute_number(elem, "ry", 0.0f);
         if (rx > 0.0f && ry > 0.0f) {
@@ -12236,7 +12226,7 @@ static RdtPath* dom_svg_basic_shape_path(DomElement* elem) {
                 dom_svg_attribute_number(elem, "cy", 0.0f), rx, ry);
             valid = true;
         }
-    } else if (strcasecmp(tag, "line") == 0) {
+    } else if (str_icmp_cstr(tag, "line") == 0) {
         rdt_path_move_to(path, dom_svg_attribute_number(elem, "x1", 0.0f),
                          dom_svg_attribute_number(elem, "y1", 0.0f));
         rdt_path_line_to(path, dom_svg_attribute_number(elem, "x2", 0.0f),
@@ -12244,7 +12234,7 @@ static RdtPath* dom_svg_basic_shape_path(DomElement* elem) {
         valid = true;
     } else {
         valid = dom_svg_path_add_points(path, elem->get_attribute("points"),
-            strcasecmp(tag, "polygon") == 0);
+            str_icmp_cstr(tag, "polygon") == 0);
     }
     if (!valid) {
         rdt_path_free(path);
@@ -12389,7 +12379,7 @@ static bool dom_svg_paint_is_present(DomElement* elem, const char* paint_name,
     char paint_buffer[256] = {};
     const char* paint = dom_svg_presentation_value(elem, paint_name, true,
         paint_buffer, sizeof(paint_buffer));
-    if (paint && (!*paint || strcasecmp(paint, "none") == 0)) return false;
+    if (paint && (!*paint || str_icmp_cstr(paint, "none") == 0)) return false;
     return paint || paint_is_present_by_default;
 }
 
@@ -12416,10 +12406,10 @@ static void dom_svg_configure_stroke_hit(DomElement* elem, float min_scale,
         cap_buffer, sizeof(cap_buffer));
     const char* join = dom_svg_presentation_value(elem, "stroke-linejoin", true,
         join_buffer, sizeof(join_buffer));
-    if (cap && strcasecmp(cap, "round") == 0) context->stroke_cap = RDT_CAP_ROUND;
-    else if (cap && strcasecmp(cap, "square") == 0) context->stroke_cap = RDT_CAP_SQUARE;
-    if (join && strcasecmp(join, "round") == 0) context->stroke_join = RDT_JOIN_ROUND;
-    else if (join && strcasecmp(join, "bevel") == 0) context->stroke_join = RDT_JOIN_BEVEL;
+    if (cap && str_icmp_cstr(cap, "round") == 0) context->stroke_cap = RDT_CAP_ROUND;
+    else if (cap && str_icmp_cstr(cap, "square") == 0) context->stroke_cap = RDT_CAP_SQUARE;
+    if (join && str_icmp_cstr(join, "round") == 0) context->stroke_join = RDT_JOIN_ROUND;
+    else if (join && str_icmp_cstr(join, "bevel") == 0) context->stroke_join = RDT_JOIN_BEVEL;
     context->stroke_miter_limit = dom_svg_presentation_number(elem,
         "stroke-miterlimit", 4.0f, true);
     if (context->stroke_miter_limit < 1.0f) context->stroke_miter_limit = 1.0f;
@@ -12427,7 +12417,7 @@ static void dom_svg_configure_stroke_hit(DomElement* elem, float min_scale,
         "stroke-dashoffset", 0.0f, true);
     const char* dasharray = dom_svg_presentation_value(elem, "stroke-dasharray", true,
         dash_buffer, sizeof(dash_buffer));
-    if (!dasharray || !*dasharray || strcasecmp(dasharray, "none") == 0) return;
+    if (!dasharray || !*dasharray || str_icmp_cstr(dasharray, "none") == 0) return;
     const char* cursor = dasharray;
     while (*cursor && context->stroke_dash_count < 16) {
         cursor = dom_svg_skip_number_separators(cursor);
@@ -12481,7 +12471,7 @@ static JsDomSvgShapeHit dom_svg_basic_shape_hit_local_point(DomElement* elem,
         char fill_rule_buffer[64] = {};
         const char* fill_rule = dom_svg_presentation_value(elem, "fill-rule", true,
             fill_rule_buffer, sizeof(fill_rule_buffer));
-        bool even_odd = fill_rule && strcasecmp(fill_rule, "evenodd") == 0;
+        bool even_odd = fill_rule && str_icmp_cstr(fill_rule, "evenodd") == 0;
         if (context.fill_on_edge || (even_odd
                 ? (context.fill_crossings & 1) != 0
                 : context.fill_winding != 0)) {
@@ -12510,7 +12500,7 @@ static JsDomSvgShapeHit dom_svg_basic_shape_hit_viewport_point(DomElement* elem,
     if (min_scale < 0.0001f) min_scale = 0.0001f;
     return dom_svg_basic_shape_hit_local_point(elem, local_x, local_y, min_scale);
 }
-JS_FORWARD_STATIC_EXPRESSION(bool, dom_svg_tag_is, (DomElement* elem, const char* tag), (elem && elem->tag_name && tag && strcasecmp(elem->tag_name, tag) == 0))
+JS_FORWARD_STATIC_EXPRESSION(bool, dom_svg_tag_is, (DomElement* elem, const char* tag), (elem && elem->tag_name && tag && str_icmp_cstr(elem->tag_name, tag) == 0))
 
 static bool dom_svg_viewport_local_bounds(DomElement* elem, float* left, float* top,
                                              float* right, float* bottom) {
@@ -12662,19 +12652,19 @@ static JsDomSvgPointerEventsMode dom_svg_pointer_events_mode(DomElement* elem) {
     char pointer_events_buffer[64] = {};
     const char* value = dom_svg_presentation_value(elem, "pointer-events", true,
         pointer_events_buffer, sizeof(pointer_events_buffer));
-    if (!value || !*value || strcasecmp(value, "auto") == 0 ||
-        strcasecmp(value, "visiblePainted") == 0) {
+    if (!value || !*value || str_icmp_cstr(value, "auto") == 0 ||
+        str_icmp_cstr(value, "visiblePainted") == 0) {
         return JS_DOM_SVG_POINTER_EVENTS_VISIBLE_PAINTED;
     }
-    if (strcasecmp(value, "visibleFill") == 0) return JS_DOM_SVG_POINTER_EVENTS_VISIBLE_FILL;
-    if (strcasecmp(value, "visibleStroke") == 0) return JS_DOM_SVG_POINTER_EVENTS_VISIBLE_STROKE;
-    if (strcasecmp(value, "visible") == 0) return JS_DOM_SVG_POINTER_EVENTS_VISIBLE;
-    if (strcasecmp(value, "painted") == 0) return JS_DOM_SVG_POINTER_EVENTS_PAINTED;
-    if (strcasecmp(value, "fill") == 0) return JS_DOM_SVG_POINTER_EVENTS_FILL;
-    if (strcasecmp(value, "stroke") == 0) return JS_DOM_SVG_POINTER_EVENTS_STROKE;
-    if (strcasecmp(value, "all") == 0) return JS_DOM_SVG_POINTER_EVENTS_ALL;
-    if (strcasecmp(value, "bounding-box") == 0) return JS_DOM_SVG_POINTER_EVENTS_BOUNDING_BOX;
-    if (strcasecmp(value, "none") == 0) return JS_DOM_SVG_POINTER_EVENTS_NONE;
+    if (str_icmp_cstr(value, "visibleFill") == 0) return JS_DOM_SVG_POINTER_EVENTS_VISIBLE_FILL;
+    if (str_icmp_cstr(value, "visibleStroke") == 0) return JS_DOM_SVG_POINTER_EVENTS_VISIBLE_STROKE;
+    if (str_icmp_cstr(value, "visible") == 0) return JS_DOM_SVG_POINTER_EVENTS_VISIBLE;
+    if (str_icmp_cstr(value, "painted") == 0) return JS_DOM_SVG_POINTER_EVENTS_PAINTED;
+    if (str_icmp_cstr(value, "fill") == 0) return JS_DOM_SVG_POINTER_EVENTS_FILL;
+    if (str_icmp_cstr(value, "stroke") == 0) return JS_DOM_SVG_POINTER_EVENTS_STROKE;
+    if (str_icmp_cstr(value, "all") == 0) return JS_DOM_SVG_POINTER_EVENTS_ALL;
+    if (str_icmp_cstr(value, "bounding-box") == 0) return JS_DOM_SVG_POINTER_EVENTS_BOUNDING_BOX;
+    if (str_icmp_cstr(value, "none") == 0) return JS_DOM_SVG_POINTER_EVENTS_NONE;
     return JS_DOM_SVG_POINTER_EVENTS_VISIBLE_PAINTED;
 }
 
@@ -12682,8 +12672,8 @@ static bool dom_svg_element_is_visible_for_pointer_events(DomElement* elem) {
     char visibility_buffer[64] = {};
     const char* visibility = dom_svg_presentation_value(elem, "visibility", true,
         visibility_buffer, sizeof(visibility_buffer));
-    return !visibility || (strcasecmp(visibility, "hidden") != 0 &&
-        strcasecmp(visibility, "collapse") != 0);
+    return !visibility || (str_icmp_cstr(visibility, "hidden") != 0 &&
+        str_icmp_cstr(visibility, "collapse") != 0);
 }
 
 static bool dom_svg_pointer_events_selects_geometry(JsDomSvgPointerEventsMode mode,
@@ -12720,11 +12710,11 @@ static bool dom_svg_pointer_events_selects_geometry(JsDomSvgPointerEventsMode mo
 static bool dom_svg_element_skips_hit_test(DomElement* elem) {
     if (!elem || !elem->tag_name) return true;
     const char* tag = elem->tag_name;
-    if (strcasecmp(tag, "defs") == 0 || strcasecmp(tag, "clipPath") == 0 ||
-        strcasecmp(tag, "mask") == 0 || strcasecmp(tag, "marker") == 0 ||
-        strcasecmp(tag, "pattern") == 0 || strcasecmp(tag, "linearGradient") == 0 ||
-        strcasecmp(tag, "radialGradient") == 0 || strcasecmp(tag, "title") == 0 ||
-        strcasecmp(tag, "desc") == 0 || strcasecmp(tag, "metadata") == 0) {
+    if (str_icmp_cstr(tag, "defs") == 0 || str_icmp_cstr(tag, "clipPath") == 0 ||
+        str_icmp_cstr(tag, "mask") == 0 || str_icmp_cstr(tag, "marker") == 0 ||
+        str_icmp_cstr(tag, "pattern") == 0 || str_icmp_cstr(tag, "linearGradient") == 0 ||
+        str_icmp_cstr(tag, "radialGradient") == 0 || str_icmp_cstr(tag, "title") == 0 ||
+        str_icmp_cstr(tag, "desc") == 0 || str_icmp_cstr(tag, "metadata") == 0) {
         return true;
     }
     char display_buffer[64] = {};
@@ -12732,7 +12722,7 @@ static bool dom_svg_element_skips_hit_test(DomElement* elem) {
         display_buffer, sizeof(display_buffer));
     // visibility and pointer-events are inherited, but descendants may
     // override either one. Only display:none removes the entire subtree.
-    return display && strcasecmp(display, "none") == 0;
+    return display && str_icmp_cstr(display, "none") == 0;
 }
 
 static bool dom_svg_point_is_within_viewports(DomElement* elem, float x, float y) {
@@ -12742,7 +12732,7 @@ static bool dom_svg_point_is_within_viewports(DomElement* elem, float x, float y
         char overflow_buffer[64] = {};
         const char* overflow = dom_svg_presentation_value(current, "overflow", false,
             overflow_buffer, sizeof(overflow_buffer));
-        if (overflow && strcasecmp(overflow, "visible") == 0) continue;
+        if (overflow && str_icmp_cstr(overflow, "visible") == 0) continue;
         float local_x = 0.0f;
         float local_y = 0.0f;
         RdtMatrix ctm = dom_svg_ctm(current, true);
@@ -12819,7 +12809,7 @@ static DomElement* dom_svg_element_from_document_point_walk(DomNode* node,
     for (DomNode* child = elem->last_child; child; child = child->prev_sibling) {
         if (!child->is_element()) continue;
         DomElement* child_elem = child->as_element();
-        if (child_elem->tag_name && strcasecmp(child_elem->tag_name, "svg") == 0) {
+        if (child_elem->tag_name && str_icmp_cstr(child_elem->tag_name, "svg") == 0) {
             DomElement* hit = dom_svg_element_from_point_walk(child_elem, x, y);
             if (hit) return hit;
         }
@@ -12844,12 +12834,12 @@ static DomElement* dom_offset_parent_element(DomElement* elem) {
     while (p) {
         if (p->is_element()) {
             DomElement* pe = p->as_element();
-            if (pe->tag_name && strcasecmp(pe->tag_name, "body") == 0)
+            if (pe->tag_name && str_icmp_cstr(pe->tag_name, "body") == 0)
                 return pe;
             if (pe->tag_name &&
-                (strcasecmp(pe->tag_name, "table") == 0 ||
-                 strcasecmp(pe->tag_name, "td") == 0 ||
-                 strcasecmp(pe->tag_name, "th") == 0)) {
+                (str_icmp_cstr(pe->tag_name, "table") == 0 ||
+                 str_icmp_cstr(pe->tag_name, "td") == 0 ||
+                 str_icmp_cstr(pe->tag_name, "th") == 0)) {
                 return pe;
             }
             if (pe->position && pe->positionp()->position != CSS_VALUE_STATIC)
@@ -12869,7 +12859,7 @@ static int64_t dom_offset_coordinate(DomElement* elem, bool x_axis) {
     DomElement* offset_parent = dom_offset_parent_element(elem);
     if (offset_parent) {
         if (!offset_parent->tag_name ||
-            strcasecmp(offset_parent->tag_name, "body") != 0) {
+            str_icmp_cstr(offset_parent->tag_name, "body") != 0) {
             RdtLogicalPoint parent_origin = view_geometry_node_document_origin(
                 static_cast<View*>(offset_parent));
             value -= x_axis ? parent_origin.x : parent_origin.y;
@@ -12973,7 +12963,7 @@ static DomElement* dom_element_from_point_walk(DomNode* node,
 
     DomElement* elem = node->as_element();
     if (dom_element_from_point_skips_subtree(elem)) return nullptr;
-    if (elem->tag_name && strcasecmp(elem->tag_name, "svg") == 0) {
+    if (elem->tag_name && str_icmp_cstr(elem->tag_name, "svg") == 0) {
         // SVG's geometry walker is authoritative: falling through to the DOM
         // layout box would resurrect elements rejected by pointer-events.
         return dom_svg_element_from_point_walk(elem, px, py);
@@ -13101,7 +13091,7 @@ static Item dom_boundary_from_point(DomElement* elem,
         editing_boundary_clear(&hit);
         EditingPointBehavior behavior = EDITING_POINT_BEHAVIOR_DEFAULT;
         const char* behavior_text = fn_to_cstr(behavior_arg);
-        if (behavior_text && strcasecmp(behavior_text, "mac") == 0) {
+        if (behavior_text && str_icmp_cstr(behavior_text, "mac") == 0) {
             behavior = EDITING_POINT_BEHAVIOR_MAC;
         }
         if (editing_geometry_hit_test_boundary(_js_current_ui_context,
@@ -14461,18 +14451,18 @@ extern "C" Item dom_insert_adjacent_element_bridge(void* elem_ptr, Item position
         new_node->parent->remove_child(new_node);
     }
     DomNode* new_parent = nullptr;
-    if (strcasecmp(position, "beforebegin") == 0) {
+    if (str_icmp_cstr(position, "beforebegin") == 0) {
         if (elem->parent && elem->parent->is_element()) {
             elem->parent->insert_before(new_node, (DomNode*)elem);
             new_parent = elem->parent;
         }
-    } else if (strcasecmp(position, "afterbegin") == 0) {
+    } else if (str_icmp_cstr(position, "afterbegin") == 0) {
         ((DomNode*)elem)->insert_before(new_node, elem->first_child);
         new_parent = (DomNode*)elem;
-    } else if (strcasecmp(position, "beforeend") == 0) {
+    } else if (str_icmp_cstr(position, "beforeend") == 0) {
         ((DomNode*)elem)->append_child(new_node);
         new_parent = (DomNode*)elem;
-    } else if (strcasecmp(position, "afterend") == 0) {
+    } else if (str_icmp_cstr(position, "afterend") == 0) {
         if (elem->parent && elem->parent->is_element()) {
             elem->parent->insert_before(new_node, elem->next_sibling);
             new_parent = elem->parent;
@@ -14498,17 +14488,17 @@ extern "C" Item dom_insert_adjacent_html_bridge(void* elem_ptr, Item position_ar
 
     DomElement* target_parent = nullptr;
     DomNode* ref_node = nullptr;
-    if (strcasecmp(position, "beforebegin") == 0) {
+    if (str_icmp_cstr(position, "beforebegin") == 0) {
         if (!elem->parent || !elem->parent->is_element()) return ItemNull;
         target_parent = elem->parent->as_element();
         ref_node = (DomNode*)elem;
-    } else if (strcasecmp(position, "afterbegin") == 0) {
+    } else if (str_icmp_cstr(position, "afterbegin") == 0) {
         target_parent = elem;
         ref_node = elem->first_child;
-    } else if (strcasecmp(position, "beforeend") == 0) {
+    } else if (str_icmp_cstr(position, "beforeend") == 0) {
         target_parent = elem;
         ref_node = nullptr;
-    } else if (strcasecmp(position, "afterend") == 0) {
+    } else if (str_icmp_cstr(position, "afterend") == 0) {
         if (!elem->parent || !elem->parent->is_element()) return ItemNull;
         target_parent = elem->parent->as_element();
         ref_node = elem->next_sibling;
@@ -14725,7 +14715,7 @@ extern "C" Item dom_core_set_attribute(Item n, Item name, Item value) {
     elem->set_attribute(attr_name, attr_val);
     dom_compile_event_attr_to_expando(elem, attr_name, attr_val);
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
-    if (_is_tag(elem, "option") && strcasecmp(attr_name, "selected") == 0) {
+    if (_is_tag(elem, "option") && str_icmp_cstr(attr_name, "selected") == 0) {
         DomElement* sel = _nearest_select_for_node((DomNode*)elem);
         if (sel && !sel->has_attribute("multiple")) _select_ask_for_reset(sel);
     }
@@ -14744,7 +14734,7 @@ extern "C" Item dom_core_remove_attribute(Item n, Item name) {
     elem->remove_attribute(attr_name);
     dom_clear_event_attr_expando(elem, attr_name);
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
-    if (_is_tag(elem, "select") && strcasecmp(attr_name, "multiple") == 0) {
+    if (_is_tag(elem, "select") && str_icmp_cstr(attr_name, "multiple") == 0) {
         _select_ask_for_reset(elem);
     }
     dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
@@ -15054,7 +15044,7 @@ extern "C" Item dom_core_toggle_attribute(Item n, Item name, Item force) {
         elem->set_attribute(attr_name, "");
     } else if (!should_have && has) {
         elem->remove_attribute(attr_name);
-        if (_is_tag(elem, "select") && strcasecmp(attr_name, "multiple") == 0) {
+        if (_is_tag(elem, "select") && str_icmp_cstr(attr_name, "multiple") == 0) {
             _select_ask_for_reset(elem);
         }
     }
@@ -15191,7 +15181,7 @@ extern "C" Item dom_core_attach_shadow(Item n, Item init) {
 
     Item exp_map = expando_get_or_create_map((DomNode*)elem);
     if (exp_map.item != ITEM_NULL) {
-        Item visible_root = (strcasecmp(mode, "closed") == 0) ? ItemNull : root;
+        Item visible_root = (str_icmp_cstr(mode, "closed") == 0) ? ItemNull : root;
         dom_realm_set_cstr(exp_map, "shadowRoot", visible_root);
         dom_realm_set_cstr(exp_map, "__shadowRootInternal", root);
     }
@@ -15787,16 +15777,16 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
     // F-3: form.reset() — fire `reset` event (cancelable), then run reset
     // algorithm on all listed form controls.
     // ----------------------------------------------------------------
-    if (operation == JUBE_DOM_RESET && elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
+    if (operation == JUBE_DOM_RESET && elem->tag_name && str_icmp_cstr(elem->tag_name, "form") == 0) {
         return dom_form_reset_bridge(elem_item);
     }
 
     if (operation == JUBE_DOM_SUBMIT && elem->tag_name &&
-        strcasecmp(elem->tag_name, "form") == 0) {
+        str_icmp_cstr(elem->tag_name, "form") == 0) {
         return dom_form_submit_bridge(elem_item);
     }
     if (operation == JUBE_DOM_REQUEST_SUBMIT && elem->tag_name &&
-        strcasecmp(elem->tag_name, "form") == 0) {
+        str_icmp_cstr(elem->tag_name, "form") == 0) {
         return dom_form_request_submit_bridge(elem_item,
             argc >= 1 ? args[0] : make_js_undefined());
     }
@@ -16218,7 +16208,7 @@ static Item dom_style_set_property_for_elem(DomElement* elem, Item prop_arg,
     const char* priority = nullptr;
     if (has_priority) {
         const char* requested_priority = fn_to_cstr(priority_arg);
-        if (requested_priority && strcasecmp(requested_priority, "important") == 0) {
+        if (requested_priority && str_icmp_cstr(requested_priority, "important") == 0) {
             priority = "important";
         }
     }
@@ -16415,8 +16405,8 @@ JS_FORWARD_STATIC_EXPRESSION(float, js_web_animation_number, (Item value, float 
 
 static CssAnimComposite js_web_animation_composite(Item value) {
     const char* text = fn_to_cstr(value);
-    if (text && strcasecmp(text, "add") == 0) return CSS_ANIM_COMPOSITE_ADD;
-    if (text && strcasecmp(text, "accumulate") == 0) {
+    if (text && str_icmp_cstr(text, "add") == 0) return CSS_ANIM_COMPOSITE_ADD;
+    if (text && str_icmp_cstr(text, "accumulate") == 0) {
         return CSS_ANIM_COMPOSITE_ACCUMULATE;
     }
     return CSS_ANIM_COMPOSITE_REPLACE;

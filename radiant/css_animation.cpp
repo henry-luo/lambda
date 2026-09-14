@@ -48,12 +48,6 @@ Color css_interpolate_color(Color a, Color b, float t) {
 // Keyframe Content Parsing
 // ============================================================================
 
-// Skip whitespace in a string
-static const char* skip_ws(const char* s) {
-    while (*s && isspace((unsigned char)*s)) s++;
-    return s;
-}
-
 // Parse a float number from string, advance pointer
 static float parse_float(const char** s) {
     char* end;
@@ -63,25 +57,25 @@ static float parse_float(const char** s) {
 }
 
 static float parse_transform_angle(const char** source) {
-    const char* value = skip_ws(*source);
+    const char* value = str_skip_ascii_space(*source);
     char* end = NULL;
     float angle = strtof(value, &end);
     if (end == value) return 0.0f;
 
     const char* unit = end;
-    if (strncasecmp(unit, "rad", 3) == 0) {
+    if (str_istarts_with_cstr(unit, "rad")) {
         *source = unit + 3;
         return angle;
     }
-    if (strncasecmp(unit, "grad", 4) == 0) {
+    if (str_istarts_with_cstr(unit, "grad")) {
         *source = unit + 4;
         return angle * (float)M_PI / 200.0f;
     }
-    if (strncasecmp(unit, "turn", 4) == 0) {
+    if (str_istarts_with_cstr(unit, "turn")) {
         *source = unit + 4;
         return angle * 2.0f * (float)M_PI;
     }
-    if (strncasecmp(unit, "deg", 3) == 0) {
+    if (str_istarts_with_cstr(unit, "deg")) {
         *source = unit + 3;
         return angle * (float)M_PI / 180.0f;
     }
@@ -107,7 +101,7 @@ static const char* skip_css_balanced_block(const char* source) {
 
 static void parse_transform_translate_component(const char** source, float* length,
                                                 float* percentage) {
-    const char* value = skip_ws(*source);
+    const char* value = str_skip_ascii_space(*source);
     char* end = NULL;
     float parsed = strtof(value, &end);
     if (end == value) return;
@@ -125,7 +119,7 @@ static void parse_transform_translate_component(const char** source, float* leng
 
 // Parse a CSS color value from string (supports: named colors, #hex, rgb())
 static bool parse_color_value(const char* val, Color* out) {
-    val = skip_ws(val);
+    val = str_skip_ascii_space(val);
 
     // hex color — count the hex-digit run (tolerates trailing content) and let
     // lib/color.h handle the digit-count expansion.
@@ -172,7 +166,7 @@ static bool parse_color_value(const char* val, Color* out) {
     }
 
     // transparent
-    if (strncasecmp(val, "transparent", 11) == 0) {
+    if (str_istarts_with_cstr(val, "transparent")) {
         out->r = out->g = out->b = out->a = 0;
         return true;
     }
@@ -189,7 +183,7 @@ static CssAnimValueType property_value_type(CssPropertyCode id) {
 // Parse a single transform function from string (e.g., "translateX(20px)")
 // Returns a TransformFunction allocated from pool, or NULL
 static TransformFunction* parse_transform_func(const char** s, Pool* pool) {
-    const char* p = skip_ws(*s);
+    const char* p = str_skip_ascii_space(*s);
 
     // find function name
     const char* name_start = p;
@@ -219,7 +213,7 @@ static TransformFunction* parse_transform_func(const char** s, Pool* pool) {
         tf->type = TRANSFORM_TRANSLATE;
         parse_transform_translate_component(&p, &tf->params.translate.x,
                                             &tf->translate_x_percent);
-        p = skip_ws(p);
+        p = str_skip_ascii_space(p);
         if (*p == ',') p++;
         if (*p != ')') {
             parse_transform_translate_component(&p, &tf->params.translate.y,
@@ -248,7 +242,7 @@ static TransformFunction* parse_transform_func(const char** s, Pool* pool) {
     } else if (name_len == 4 && strncmp(name_start, "skew", 4) == 0) {
         tf->type = TRANSFORM_SKEW;
         tf->params.skew.x = parse_transform_angle(&p);
-        p = skip_ws(p);
+        p = str_skip_ascii_space(p);
         if (*p == ',') p++;
         if (*p != ')') tf->params.skew.y = parse_transform_angle(&p);
         while (*p && *p != ')') p++;
@@ -277,10 +271,10 @@ static TransformFunction* parse_transform_func(const char** s, Pool* pool) {
 static TransformFunction* parse_transform_value(const char* val, Pool* pool) {
     TransformFunction* head = NULL;
     TransformFunction* tail = NULL;
-    const char* p = skip_ws(val);
+    const char* p = str_skip_ascii_space(val);
 
     while (*p) {
-        p = skip_ws(p);
+        p = str_skip_ascii_space(p);
         if (!*p) break;
 
         TransformFunction* tf = parse_transform_func(&p, pool);
@@ -299,8 +293,8 @@ static TransformFunction* parse_transform_value(const char* val, Pool* pool) {
 static bool parse_aspect_ratio_value(const char* val, CssAnimatedProp* out) {
     if (!val || !out) return false;
 
-    const char* p = skip_ws(val);
-    bool is_auto = strncasecmp(p, "auto", 4) == 0 &&
+    const char* p = str_skip_ascii_space(val);
+    bool is_auto = str_istarts_with_cstr(p, "auto") &&
         !isalnum((unsigned char)p[4]);
     if (is_auto) p += 4;
 
@@ -389,8 +383,8 @@ bool css_animation_parse_property_value(CssPropertyCode property,
 
 static CssAnimComposite parse_animation_composition(const char* value) {
     if (!value) return CSS_ANIM_COMPOSITE_REPLACE;
-    if (strcasecmp(value, "add") == 0) return CSS_ANIM_COMPOSITE_ADD;
-    if (strcasecmp(value, "accumulate") == 0) return CSS_ANIM_COMPOSITE_ACCUMULATE;
+    if (str_icmp_cstr(value, "add") == 0) return CSS_ANIM_COMPOSITE_ADD;
+    if (str_icmp_cstr(value, "accumulate") == 0) return CSS_ANIM_COMPOSITE_ACCUMULATE;
     return CSS_ANIM_COMPOSITE_REPLACE;
 }
 
@@ -399,7 +393,7 @@ static CssAnimComposite parse_animation_composition(const char* value) {
 static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
     if (!content || !pool) return NULL;
 
-    const char* p = skip_ws(content);
+    const char* p = str_skip_ascii_space(content);
 
     // extract animation name (everything before first '{')
     const char* name_start = p;
@@ -426,7 +420,7 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
     CssAnimatedProp temp_props[32];
 
     while (*p && stop_count < 64) {
-        p = skip_ws(p);
+        p = str_skip_ascii_space(p);
         if (*p == '}') break; // end of @keyframes
 
         // parse keyframe selector: "from", "to", or "N%"
@@ -452,7 +446,7 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
             continue;
         }
 
-        p = skip_ws(p);
+        p = str_skip_ascii_space(p);
         if (*p != '{') continue;
         p++; // skip '{'
 
@@ -461,7 +455,7 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
         CssAnimComposite stop_composite = CSS_ANIM_COMPOSITE_REPLACE;
 
         while (*p && *p != '}' && prop_count < 32) {
-            p = skip_ws(p);
+            p = str_skip_ascii_space(p);
             if (*p == '}') break;
 
             // parse property name
@@ -479,7 +473,7 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
             prop_name[plen] = '\0';
 
             p++; // skip ':'
-            p = skip_ws(p);
+            p = str_skip_ascii_space(p);
 
             // parse property value (up to ';' or '}')
             const char* val_start = p;
@@ -501,7 +495,7 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
 
             if (*p == ';') p++;
 
-            if (strcasecmp(prop_name, "animation-composition") == 0) {
+            if (str_icmp_cstr(prop_name, "animation-composition") == 0) {
                 stop_composite = parse_animation_composition(val_buf);
                 continue;
             }
@@ -1438,51 +1432,51 @@ static void parse_timing_function_value(const CssValue* value, TimingFunction* o
 bool css_animation_parse_timing_function_text(const char* value,
                                               TimingFunction* out) {
     if (!value || !out) return false;
-    const char* p = skip_ws(value);
-    if (strcasecmp(p, "linear") == 0) {
+    const char* p = str_skip_ascii_space(value);
+    if (str_icmp_cstr(p, "linear") == 0) {
         out->type = TIMING_LINEAR;
         return true;
     }
-    if (strcasecmp(p, "ease") == 0) {
+    if (str_icmp_cstr(p, "ease") == 0) {
         *out = TIMING_EASE;
         return true;
     }
-    if (strcasecmp(p, "ease-in") == 0) {
+    if (str_icmp_cstr(p, "ease-in") == 0) {
         *out = TIMING_EASE_IN;
         return true;
     }
-    if (strcasecmp(p, "ease-out") == 0) {
+    if (str_icmp_cstr(p, "ease-out") == 0) {
         *out = TIMING_EASE_OUT;
         return true;
     }
-    if (strcasecmp(p, "ease-in-out") == 0) {
+    if (str_icmp_cstr(p, "ease-in-out") == 0) {
         *out = TIMING_EASE_IN_OUT;
         return true;
     }
 
-    if (strncasecmp(p, "steps(", 6) == 0) {
+    if (str_istarts_with_cstr(p, "steps(")) {
         p += 6;
         char* end = nullptr;
         long count = strtol(p, &end, 10);
         if (end == p || count < 1) return false;
-        p = skip_ws(end);
+        p = str_skip_ascii_space(end);
         if (*p == ',') p++;
-        p = skip_ws(p);
+        p = str_skip_ascii_space(p);
         out->type = TIMING_STEPS;
         out->steps.count = (int)count;
         out->steps.position = STEP_JUMP_END;
-        if (strncasecmp(p, "start", 5) == 0) {
+        if (str_istarts_with_cstr(p, "start")) {
             out->steps.position = STEP_JUMP_START;
         }
         return true;
     }
 
-    if (strncasecmp(p, "cubic-bezier(", 13) == 0) {
+    if (str_istarts_with_cstr(p, "cubic-bezier(")) {
         p += 13;
         float values[4];
         for (int i = 0; i < 4; i++) {
-            p = skip_ws(p);
-            if (*p == ',') p = skip_ws(p + 1);
+            p = str_skip_ascii_space(p);
+            if (*p == ',') p = str_skip_ascii_space(p + 1);
             char* end = nullptr;
             values[i] = strtof(p, &end);
             if (end == p) return false;

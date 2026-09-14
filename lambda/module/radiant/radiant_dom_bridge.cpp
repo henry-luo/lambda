@@ -332,7 +332,7 @@ static bool radiant_dom_is_attr_name_projection(const char* name) {
 }
 
 static bool radiant_dom_is_tag(DomElement* elem, const char* tag) {
-    return elem && elem->tag_name && tag && strcasecmp(elem->tag_name, tag) == 0;
+    return elem && elem->tag_name && tag && str_icmp_cstr(elem->tag_name, tag) == 0;
 }
 
 static bool radiant_dom_node_is_dom_element(DomNode* node) {
@@ -381,12 +381,9 @@ static const char* radiant_dom_canonical_token_attr(DomElement* elem, const char
     if (!value) return "";
 
     char lowered[32];
-    size_t len = 0;
-    while (value[len] && len < sizeof(lowered) - 1) {
-        lowered[len] = (char)tolower((unsigned char)value[len]);
-        len++;
-    }
-    if (value[len] != '\0') return "";
+    size_t len = strlen(value);
+    if (len >= sizeof(lowered)) return "";
+    str_to_lower(lowered, value, len);
     lowered[len] = '\0';
 
     for (int i = 0; keywords[i]; i++) {
@@ -396,10 +393,10 @@ static const char* radiant_dom_canonical_token_attr(DomElement* elem, const char
 }
 
 static const char* radiant_dom_normalize_contenteditable(const char* value) {
-    if (!value || *value == '\0' || strcasecmp(value, "true") == 0) return "true";
-    if (strcasecmp(value, "false") == 0) return "false";
-    if (strcasecmp(value, "plaintext-only") == 0) return "plaintext-only";
-    if (strcasecmp(value, "inherit") == 0) return "inherit";
+    if (!value || *value == '\0' || str_icmp_cstr(value, "true") == 0) return "true";
+    if (str_icmp_cstr(value, "false") == 0) return "false";
+    if (str_icmp_cstr(value, "plaintext-only") == 0) return "plaintext-only";
+    if (str_icmp_cstr(value, "inherit") == 0) return "inherit";
     return nullptr;
 }
 
@@ -432,9 +429,7 @@ static String* radiant_dom_uppercase_name(const char* name) {
     char stack_buf[64];
     char* upper = (len < sizeof(stack_buf)) ? stack_buf : (char*)mem_alloc(len + 1, MEM_CAT_JS_RUNTIME);
     if (!upper) return heap_create_name("");
-    for (size_t i = 0; i < len; i++) {
-        upper[i] = (char)toupper((unsigned char)name[i]);
-    }
+    str_to_upper(upper, name, len);
     upper[len] = '\0';
     String* result = heap_create_name(upper);
     if (upper != stack_buf) mem_free(upper);
@@ -1734,8 +1729,8 @@ static bool radiant_dom_member_tag_set(Item receiver, const char* tags) {
         while (*tag == ' ') tag++;
         const char* end = tag;
         while (*end && *end != ' ') end++;
-        if (end != tag && strlen(elem->tag_name) == (size_t)(end - tag) &&
-            strncasecmp(elem->tag_name, tag, (size_t)(end - tag)) == 0) return true;
+        if (end != tag && str_ieq(elem->tag_name, strlen(elem->tag_name),
+                                  tag, (size_t)(end - tag))) return true;
         tag = end;
     }
     return false;
@@ -1903,7 +1898,7 @@ static int radiant_dom_reflected_string_set(Item receiver, Item value, Item* out
     if (!elem || !out) return 0;
     const char* text = dom_to_attribute_cstr(value);
     elem->set_attribute(attribute, text ? text : "");
-    if (strcasecmp(attribute, "src") == 0 && radiant_dom_is_tag(elem, "img")) {
+    if (str_icmp_cstr(attribute, "src") == 0 && radiant_dom_is_tag(elem, "img")) {
         dom_after_set_attribute((void*)elem, attribute, text ? text : "");
     }
     dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);

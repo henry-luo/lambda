@@ -10,6 +10,7 @@
 #include "../input/css/dom_lifecycle.hpp"
 #include "../../radiant/view.hpp"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
 #include "../../lib/mem_grow.hpp"
 
 #include <math.h>
@@ -608,7 +609,7 @@ static bool observer_attribute_filter_matches(JsObserverTarget* registration,
     if (registration->attribute_filter_count <= 0) return true;
     if (!attribute_name) return false;
     for (int i = 0; i < registration->attribute_filter_count; i++) {
-        if (strcasecmp(registration->attribute_filter[i], attribute_name) == 0) return true;
+        if (str_icmp_cstr(registration->attribute_filter[i], attribute_name) == 0) return true;
     }
     return false;
 }

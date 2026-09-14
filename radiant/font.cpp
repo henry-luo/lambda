@@ -1,12 +1,12 @@
 
 #include <string.h>
-#include <strings.h>
 #include <stdlib.h>
 #include <math.h>
 #include "view.hpp"
 #include "../lambda/input/css/css_value.hpp"
 
 #include "../lib/log.h"
+#include "../lib/str.h"
 #include "../lib/font/font.h"
 #include "../lib/memtrack.h"
 
@@ -62,12 +62,12 @@ static bool font_handle_matches_prop(FontHandle* handle, FontProp* fprop,
     bool family_matches = handle_family && strcmp(handle_family, family) == 0;
 #ifdef __APPLE__
     if (!family_matches && handle_family &&
-        (strcasecmp(family, "system-ui") == 0 ||
-         strcasecmp(family, "-apple-system") == 0 ||
-         strcasecmp(family, "BlinkMacSystemFont") == 0)) {
+        (str_icmp_cstr(family, "system-ui") == 0 ||
+         str_icmp_cstr(family, "-apple-system") == 0 ||
+         str_icmp_cstr(family, "BlinkMacSystemFont") == 0)) {
         // CoreText reports the resolved macOS system face as "System Font";
         // treating that as stale made event reflows retain replacement handles.
-        family_matches = strcasecmp(handle_family, "System Font") == 0;
+        family_matches = str_icmp_cstr(handle_family, "System Font") == 0;
     }
 #endif
     return family_matches &&

@@ -6,10 +6,10 @@
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/mem_grow.hpp"
+#include "../../lib/str.h"
 #include "../../lib/url.h"
 
 #include <string.h>
-#include <strings.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -72,7 +72,7 @@ static void cookie_entry_free(CookieEntry* e) {
 // Case-insensitive domain comparison
 static bool domain_eq(const char* a, const char* b) {
     if (!a || !b) return false;
-    return strcasecmp(a, b) == 0;
+    return str_icmp_cstr(a, b) == 0;
 }
 
 // RFC 6265 §5.1.3: domain-match
@@ -92,12 +92,12 @@ static bool domain_matches(const char* request_host, const char* cookie_domain) 
     size_t cd_len = strlen(cd);
 
     // exact match
-    if (host_len == cd_len && strcasecmp(request_host, cd) == 0) return true;
+    if (host_len == cd_len && str_icmp_cstr(request_host, cd) == 0) return true;
 
     // suffix match: host must be longer and end with '.domain'
     if (host_len > cd_len) {
         const char* suffix = request_host + (host_len - cd_len);
-        if (suffix[-1] == '.' && strcasecmp(suffix, cd) == 0) {
+        if (suffix[-1] == '.' && str_icmp_cstr(suffix, cd) == 0) {
             // verify not an IP address (simple heuristic: last char is digit)
             char last = request_host[host_len - 1];
             if (last >= '0' && last <= '9') return false;  // looks like IP
@@ -191,12 +191,6 @@ static void jar_ensure_capacity(CookieJar* jar) {
                                jar->count + 1, 16, MEM_CAT_NETWORK);
 }
 
-// Skip whitespace
-static const char* skip_ws(const char* p) {
-    while (*p && (*p == ' ' || *p == '\t')) p++;
-    return p;
-}
-
 // ============================================================================
 // Parse Set-Cookie header (RFC 6265 §5.2)
 // ============================================================================
@@ -206,8 +200,8 @@ static CookieEntry* parse_set_cookie(const char* header, const char* request_url
 
     const char* p = header;
     // skip "Set-Cookie:" prefix if present
-    if (strncasecmp(p, "Set-Cookie:", 11) == 0) p += 11;
-    p = skip_ws(p);
+    if (str_istarts_with_cstr(p, "Set-Cookie:")) p += 11;
+    p = str_skip_line_space(p);
 
     // parse name=value
     const char* eq = strchr(p, '=');
@@ -222,7 +216,7 @@ static CookieEntry* parse_set_cookie(const char* header, const char* request_url
 
     // value is after '=' until ';' or end
     const char* val_start = eq + 1;
-    val_start = skip_ws(val_start);
+    val_start = str_skip_line_space(val_start);
     const char* val_end = val_start;
     while (*val_end && *val_end != ';') val_end++;
     // trim trailing whitespace from value
@@ -256,7 +250,7 @@ static CookieEntry* parse_set_cookie(const char* header, const char* request_url
     // parse attributes (everything after first ';')
     p = *val_end == ';' ? val_end + 1 : val_end;
     while (*p) {
-        p = skip_ws(p);
+        p = str_skip_line_space(p);
         if (!*p) break;
 
         // find attribute name (up to '=' or ';')
@@ -272,7 +266,7 @@ static CookieEntry* parse_set_cookie(const char* header, const char* request_url
         size_t attr_val_len = 0;
         if (*p == '=') {
             p++;
-            const char* av_start = skip_ws(p);
+            const char* av_start = str_skip_line_space(p);
             const char* av_end = av_start;
             while (*av_end && *av_end != ';') av_end++;
             while (av_end > av_start && (av_end[-1] == ' ' || av_end[-1] == '\t'))
@@ -285,7 +279,7 @@ static CookieEntry* parse_set_cookie(const char* header, const char* request_url
         }
 
         // match attribute name (case-insensitive)
-        if (attr_len == 6 && strncasecmp(attr_start, "Domain", 6) == 0) {
+        if (str_ieq_const(attr_start, attr_len, "Domain")) {
             if (attr_val_len > 0) {
                 mem_free(entry->domain);
                 // RFC 6265: strip leading dot but store with it for matching
@@ -296,18 +290,16 @@ static CookieEntry* parse_set_cookie(const char* header, const char* request_url
                 entry->domain[0] = '.';
                 memcpy(entry->domain + 1, d, attr_val_len);
                 entry->domain[attr_val_len + 1] = '\0';
-                // lowercase
-                for (size_t i = 0; entry->domain[i]; i++)
-                    entry->domain[i] = (char)tolower((unsigned char)entry->domain[i]);
+                str_lower_inplace(entry->domain, attr_val_len + 1);
             }
-        } else if (attr_len == 4 && strncasecmp(attr_start, "Path", 4) == 0) {
+        } else if (str_ieq_const(attr_start, attr_len, "Path")) {
             if (attr_val_len > 0) {
                 mem_free(entry->path);
                 entry->path = (char*)mem_alloc(attr_val_len + 1, MEM_CAT_NETWORK);
                 memcpy(entry->path, attr_val, attr_val_len);
                 entry->path[attr_val_len] = '\0';
             }
-        } else if (attr_len == 7 && strncasecmp(attr_start, "Expires", 7) == 0) {
+        } else if (str_ieq_const(attr_start, attr_len, "Expires")) {
             if (attr_val_len > 0 && entry->expires == 0) {
                 // parse HTTP date: "Thu, 01 Jan 2030 00:00:00 GMT"
                 struct tm tm_val = {};
@@ -319,7 +311,7 @@ static CookieEntry* parse_set_cookie(const char* header, const char* request_url
                     entry->expires = timegm(&tm_val);
                 }
             }
-        } else if (attr_len == 7 && strncasecmp(attr_start, "Max-Age", 7) == 0) {
+        } else if (str_ieq_const(attr_start, attr_len, "Max-Age")) {
             if (attr_val_len > 0) {
                 char buf[32];
                 size_t copy_len = attr_val_len < sizeof(buf) - 1 ? attr_val_len : sizeof(buf) - 1;
@@ -332,16 +324,16 @@ static CookieEntry* parse_set_cookie(const char* header, const char* request_url
                     entry->expires = time(NULL) + max_age;
                 }
             }
-        } else if (attr_len == 6 && strncasecmp(attr_start, "Secure", 6) == 0) {
+        } else if (str_ieq_const(attr_start, attr_len, "Secure")) {
             entry->secure = true;
-        } else if (attr_len == 8 && strncasecmp(attr_start, "HttpOnly", 8) == 0) {
+        } else if (str_ieq_const(attr_start, attr_len, "HttpOnly")) {
             entry->http_only = true;
-        } else if (attr_len == 8 && strncasecmp(attr_start, "SameSite", 8) == 0) {
-            if (attr_val_len == 6 && strncasecmp(attr_val, "Strict", 6) == 0)
+        } else if (str_ieq_const(attr_start, attr_len, "SameSite")) {
+            if (str_ieq_const(attr_val, attr_val_len, "Strict"))
                 entry->same_site = SAME_SITE_STRICT;
-            else if (attr_val_len == 3 && strncasecmp(attr_val, "Lax", 3) == 0)
+            else if (str_ieq_const(attr_val, attr_val_len, "Lax"))
                 entry->same_site = SAME_SITE_LAX;
-            else if (attr_val_len == 4 && strncasecmp(attr_val, "None", 4) == 0)
+            else if (str_ieq_const(attr_val, attr_val_len, "None"))
                 entry->same_site = SAME_SITE_NONE;
         }
     }

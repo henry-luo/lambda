@@ -4,7 +4,6 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <string.h>
-#include <strings.h>  // for strcasecmp
 #include <math.h>
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"

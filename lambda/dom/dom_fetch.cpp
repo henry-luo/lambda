@@ -13,6 +13,7 @@
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
 #include "../../lib/uv_loop.h"
 #include "../../lib/byte_builder.h"
 
@@ -221,16 +222,16 @@ static const char* mime_from_url(const char* url) {
     const char* dot = strrchr(url, '.');
     if (!dot) return "application/octet-stream";
     const char* ext = dot + 1;
-    if (!strcasecmp(ext, "png"))  return "image/png";
-    if (!strcasecmp(ext, "jpg") || !strcasecmp(ext, "jpeg")) return "image/jpeg";
-    if (!strcasecmp(ext, "gif"))  return "image/gif";
-    if (!strcasecmp(ext, "svg"))  return "image/svg+xml";
-    if (!strcasecmp(ext, "html") || !strcasecmp(ext, "htm")) return "text/html";
-    if (!strcasecmp(ext, "css"))  return "text/css";
-    if (!strcasecmp(ext, "js"))   return "application/javascript";
-    if (!strcasecmp(ext, "json")) return "application/json";
-    if (!strcasecmp(ext, "txt"))  return "text/plain";
-    if (!strcasecmp(ext, "xml"))  return "application/xml";
+    if (!str_icmp_cstr(ext, "png"))  return "image/png";
+    if (!str_icmp_cstr(ext, "jpg") || !str_icmp_cstr(ext, "jpeg")) return "image/jpeg";
+    if (!str_icmp_cstr(ext, "gif"))  return "image/gif";
+    if (!str_icmp_cstr(ext, "svg"))  return "image/svg+xml";
+    if (!str_icmp_cstr(ext, "html") || !str_icmp_cstr(ext, "htm")) return "text/html";
+    if (!str_icmp_cstr(ext, "css"))  return "text/css";
+    if (!str_icmp_cstr(ext, "js"))   return "application/javascript";
+    if (!str_icmp_cstr(ext, "json")) return "application/json";
+    if (!str_icmp_cstr(ext, "txt"))  return "text/plain";
+    if (!str_icmp_cstr(ext, "xml"))  return "application/xml";
     return "application/octet-stream";
 }
 

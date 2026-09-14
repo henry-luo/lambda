@@ -8,12 +8,12 @@
 #include "../../lib/arraylist.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../../lib/str.h"
 #include "../../lib/byte_builder.h"
 #include <curl/curl.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
-#include <strings.h>
 
 #define CURL_MULTI_POLL_TIMEOUT_MS 100
 #define NETWORK_MAX_RESOURCE_SIZE (100 * 1024 * 1024)
@@ -110,7 +110,7 @@ static size_t header_callback(char* buffer, size_t size, size_t nitems, void* us
     HeaderCallbackCtx* ctx = (HeaderCallbackCtx*)userdata;
     if (!ctx || !ctx->jar) return total;
 
-    if (total > 12 && strncasecmp(buffer, "Set-Cookie:", 11) == 0) {
+    if (total > 12 && str_istarts_with(buffer, total, "Set-Cookie:", 11)) {
         size_t len = total;
         while (len > 0 && (buffer[len - 1] == '\r' || buffer[len - 1] == '\n')) {
             len--;
@@ -288,7 +288,7 @@ static bool configure_transfer(CurlMultiTransfer* transfer) {
 
     CookieJar* jar = (res->manager) ? res->manager->cookie_jar : NULL;
     if (jar) {
-        bool is_secure = (strncasecmp(res->url, "https://", 8) == 0);
+        bool is_secure = str_istarts_with_cstr(res->url, "https://");
         char* cookie_value = cookie_jar_build_request_header(jar, res->url, is_secure);
         if (cookie_value) {
             size_t hdr_len = strlen(cookie_value) + 9;

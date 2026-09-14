@@ -325,7 +325,7 @@ static bool sim_element_matches_assertions(const char* assertion, DomDocument* d
     DomElement* found_elem = found->as_element();
     if (ev->expected_at_tag && found_elem) {
         const char* tag = found_elem->tag_name;
-        if (!tag || strcasecmp(tag, ev->expected_at_tag) != 0) {
+        if (!tag || str_icmp_cstr(tag, ev->expected_at_tag) != 0) {
             log_error("event_sim: %s FAIL - expected tag '%s', got '%s' at (%.2f, %.2f)",
                       assertion, ev->expected_at_tag, tag ? tag : "(null)", x, y);
             passed = false;
@@ -2343,8 +2343,8 @@ static void assert_event_log_impl(EventSimContext* ctx, UiContext* uicon, SimEve
 
 static bool sim_state_dump_update_enabled(void) {
     const char* env = getenv("RADIANT_UPDATE_STATE_DUMPS");
-    return env && (strcmp(env, "1") == 0 || strcasecmp(env, "true") == 0 ||
-                   strcasecmp(env, "yes") == 0);
+    return env && (strcmp(env, "1") == 0 || str_icmp_cstr(env, "true") == 0 ||
+                   str_icmp_cstr(env, "yes") == 0);
 }
 
 static const char* event_sim_view_state_kind_name(int kind) {
@@ -3567,8 +3567,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 bool ok = draggable && strcmp(draggable, "true") == 0;
                 if (!ok && !(draggable && strcmp(draggable, "false") == 0)) {
                     const char* tag = src_dom->tag_name;
-                    if (tag && (strcasecmp(tag, "img") == 0 ||
-                                (strcasecmp(tag, "a") == 0 &&
+                    if (tag && (str_icmp_cstr(tag, "img") == 0 ||
+                                (str_icmp_cstr(tag, "a") == 0 &&
                                  src_dom->get_attribute("href")))) {
                         ok = true;
                     }

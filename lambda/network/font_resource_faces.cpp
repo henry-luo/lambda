@@ -1,7 +1,7 @@
 #include "font_resource_faces.h"
 #include "../../lib/mem.h"
+#include "../../lib/str.h"
 #include "../../lib/intrusive_queue.h"
-#include <strings.h>
 
 typedef struct FontResourceFaceNode {
     // link is first so this domain record can stay allocation/lifecycle-owned here.
@@ -32,7 +32,7 @@ static CssFontFaceDescriptor* clone_font_resource_face(
 static bool font_resource_faces_match(const CssFontFaceDescriptor* left,
                                       const CssFontFaceDescriptor* right) {
     if (!left || !right || !left->family_name || !right->family_name) return false;
-    return strcasecmp(left->family_name, right->family_name) == 0 &&
+    return str_icmp_cstr(left->family_name, right->family_name) == 0 &&
            left->font_style == right->font_style &&
            left->font_weight == right->font_weight;
 }

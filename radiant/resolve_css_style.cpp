@@ -9,7 +9,6 @@
 #include "../lib/str.h"
 #include "../lib/tagged.hpp"
 #include <string.h>
-#include <strings.h>  // for strcasecmp
 #include <sys/stat.h>
 #include <cmath>
 
@@ -1494,7 +1493,7 @@ static const char* css_value_identifier_name(const CssValue* value) {
 
 static bool css_value_identifier_is(const CssValue* value, const char* name) {
     const char* ident = css_value_identifier_name(value);
-    return ident && name && strcasecmp(ident, name) == 0;
+    return ident && name && str_icmp_cstr(ident, name) == 0;
 }
 
 static bool resolve_nonnegative_css_length(LayoutContext* lycon, uintptr_t property,

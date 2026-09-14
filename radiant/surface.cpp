@@ -10,13 +10,13 @@
 #include "../lib/base64.h"
 #include "../lib/url.h"
 #include "../lib/file.h"
+#include "../lib/str.h"
 #include "../lib/endian.h"
 #include "../lambda/input/input.hpp"  // for download_http_content
 #include "../lambda/network/network_resource_manager.h"
 
 #include <stdlib.h>
 #include <unistd.h>
-#include <strings.h>
 
 typedef struct ImageEntry {
     // ImageFormat format;
@@ -453,8 +453,8 @@ static bool image_path_has_declared_non_svg_extension(const char* file_path) {
     const char* dot = file_path_ext(file_path);
     if (!dot) return false;
     // cached network resources keep a synthetic suffix, so sniff their bytes for SVG.
-    if (strcasecmp(dot, ".cache") == 0) return false;
-    if (strcasecmp(dot, ".svg") == 0 || strcasecmp(dot, ".svgz") == 0) return false;
+    if (str_icmp_cstr(dot, ".cache") == 0) return false;
+    if (str_icmp_cstr(dot, ".svg") == 0 || str_icmp_cstr(dot, ".svgz") == 0) return false;
     return true;
 }
 
@@ -490,7 +490,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         const char* meta = img_url + 5;  // after "data:"
         size_t meta_len = comma - meta;
         for (size_t i = 0; i + 5 < meta_len; i++) {
-            if (strncasecmp(meta + i, "base64", 6) == 0) {
+            if (str_istarts_with(meta + i, meta_len - i, "base64", 6)) {
                 is_base64 = true;
                 break;
             }

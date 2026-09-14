@@ -223,6 +223,20 @@ bool str_istarts_with_const(const char* s, size_t s_len, const char* prefix) {
     return str_istarts_with(s, s_len, prefix, strlen(prefix));
 }
 
+bool str_istarts_with_cstr(const char* s, const char* prefix) {
+    if (!prefix) return true;
+    if (!s) return *prefix == '\0';
+    _ensure_luts();
+    while (*prefix) {
+        if (!*s || _lut_lower[(unsigned char)*s] != _lut_lower[(unsigned char)*prefix]) {
+            return false;
+        }
+        s++;
+        prefix++;
+    }
+    return true;
+}
+
 bool str_iends_with_const(const char* s, size_t s_len, const char* suffix) {
     if (!suffix) return true;
     return str_iends_with(s, s_len, suffix, strlen(suffix));

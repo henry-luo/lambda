@@ -732,13 +732,7 @@ Input* input_rdb_from_path_with_name_parent(const char* pathname,
     }
 
     // extract filename for the db element name
-    const char* basename = pathname;
-    const char* slash = strrchr(pathname, '/');
-    if (slash) basename = slash + 1;
-    #ifdef _WIN32
-    const char* bslash = strrchr(pathname, '\\');
-    if (bslash && bslash > slash) basename = bslash + 1;
-    #endif
+    const char* basename = file_path_basename(pathname);
 
     // build top-level <db> element
     ElementBuilder db_el = builder.element("db");

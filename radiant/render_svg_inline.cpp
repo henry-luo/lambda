@@ -29,7 +29,6 @@
 #include "../lib/base64.h"
 #include <ctype.h>
 #include <math.h>
-#include <strings.h>
 #include <inttypes.h>
 
 #ifndef LAMBDA_HEADLESS
@@ -797,7 +796,7 @@ static Color parse_svg_color(const char* value) {
 }
 
 static Color svg_resolve_color_keyword(SvgInlineRenderContext* ctx, const char* value) {
-    if (ctx && value && strcasecmp(value, "currentColor") == 0) {
+    if (ctx && value && str_icmp_cstr(value, "currentColor") == 0) {
         return ctx->current_color;
     }
     return parse_svg_color(value);
@@ -2642,9 +2641,9 @@ static char* resolve_font_via_fontface(FontContext* font_ctx, const char* family
         const char* ext = "ttf";
         const char* fmt = entry->sources[i].format;
         if (fmt) {
-            if (strcasecmp(fmt, "opentype") == 0 || strcasecmp(fmt, "otf") == 0) ext = "otf";
-            else if (strcasecmp(fmt, "woff2") == 0) ext = "woff2";
-            else if (strcasecmp(fmt, "woff") == 0) ext = "woff";
+            if (str_icmp_cstr(fmt, "opentype") == 0 || str_icmp_cstr(fmt, "otf") == 0) ext = "otf";
+            else if (str_icmp_cstr(fmt, "woff2") == 0) ext = "woff2";
+            else if (str_icmp_cstr(fmt, "woff") == 0) ext = "woff";
         } else {
             // sniff from mime: data:font/ttf;... or data:font/otf;...
             if (strncmp(src, "data:font/otf", 13) == 0 ||
@@ -2798,11 +2797,11 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
             &family_cursor, candidate_storage[candidate_count],
             sizeof(candidate_storage[candidate_count]))) {
         const char* candidate = candidate_storage[candidate_count];
-        if (strcasecmp(candidate, "serif") == 0)            candidate = "Times New Roman";
-        else if (strcasecmp(candidate, "sans-serif") == 0)  candidate = "Arial";
-        else if (strcasecmp(candidate, "monospace") == 0)   candidate = "Courier New";
-        else if (strcasecmp(candidate, "cursive") == 0)     candidate = "Comic Sans MS";
-        else if (strcasecmp(candidate, "fantasy") == 0)     candidate = "Impact";
+        if (str_icmp_cstr(candidate, "serif") == 0)            candidate = "Times New Roman";
+        else if (str_icmp_cstr(candidate, "sans-serif") == 0)  candidate = "Arial";
+        else if (str_icmp_cstr(candidate, "monospace") == 0)   candidate = "Courier New";
+        else if (str_icmp_cstr(candidate, "cursive") == 0)     candidate = "Comic Sans MS";
+        else if (str_icmp_cstr(candidate, "fantasy") == 0)     candidate = "Impact";
         candidates[candidate_count++] = candidate;
     }
 
@@ -2928,9 +2927,9 @@ static const char* resolve_svg_radiant_font_family(const char* font_family,
         while (tail > start && (tail[-1] == ' ' || tail[-1] == '\t')) tail--;
         *tail = '\0';
         if (!*start) continue;
-        if (strcasecmp(start, "serif") == 0 || strcasecmp(start, "sans-serif") == 0 ||
-            strcasecmp(start, "monospace") == 0 || strcasecmp(start, "cursive") == 0 ||
-            strcasecmp(start, "fantasy") == 0) {
+        if (str_icmp_cstr(start, "serif") == 0 || str_icmp_cstr(start, "sans-serif") == 0 ||
+            str_icmp_cstr(start, "monospace") == 0 || str_icmp_cstr(start, "cursive") == 0 ||
+            str_icmp_cstr(start, "fantasy") == 0) {
             return mem_strdup(start, MEM_CAT_RENDER);
         }
         if (font_face_find_internal(font_ctx, start, fw, slant) ||

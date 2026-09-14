@@ -3,6 +3,7 @@
 
 #include "view.hpp"
 #include "../lib/tagged.hpp"
+#include "../lib/str.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/font/font.h"
 #include "../lib/log.h"
@@ -81,9 +82,9 @@ static bool editing_geometry_text_control_line_is_rtl(DomElement* elem,
                                                       uint32_t line_len) {
     const char* dir = elem ? elem->get_attribute("dir") : NULL;
     if (dir) {
-        if (strcasecmp(dir, "rtl") == 0) return true;
-        if (strcasecmp(dir, "ltr") == 0) return false;
-        if (strcasecmp(dir, "auto") == 0) {
+        if (str_icmp_cstr(dir, "rtl") == 0) return true;
+        if (str_icmp_cstr(dir, "ltr") == 0) return false;
+        if (str_icmp_cstr(dir, "auto") == 0) {
             int first = editing_geometry_first_strong_direction(
                 value ? value + line_start : NULL, line_len);
             if (first != 0) return first > 0;

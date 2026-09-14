@@ -1288,8 +1288,8 @@ static bool css_color_parse_component(const char** cursor, bool alpha,
 
 static bool css_color_parse_function(const char* value_str, CssColor* color) {
     if (!value_str || !color) return false;
-    bool rgba = strncasecmp(value_str, "rgba(", 5) == 0;
-    bool rgb = strncasecmp(value_str, "rgb(", 4) == 0;
+    bool rgba = str_istarts_with_cstr(value_str, "rgba(");
+    bool rgb = str_istarts_with_cstr(value_str, "rgb(");
     if (!rgb && !rgba) return false;
     const char* cursor = value_str + (rgba ? 5 : 4);
     uint8_t channels[3] = {};

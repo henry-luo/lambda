@@ -10,6 +10,7 @@
 #include <curl/curl.h>
 #include <string.h>
 #include "../../lib/mem.h"
+#include "../../lib/str.h"
 #include "../../lib/byte_builder.h"
 #include <time.h>
 #include <pthread.h>
@@ -118,7 +119,7 @@ static size_t header_callback(char* buffer, size_t size, size_t nitems, void* us
     if (!ctx || !ctx->jar) return total;
 
     // check for "Set-Cookie:" prefix (case-insensitive)
-    if (total > 12 && strncasecmp(buffer, "Set-Cookie:", 11) == 0) {
+    if (total > 12 && str_istarts_with(buffer, total, "Set-Cookie:", 11)) {
         // make null-terminated copy (strip trailing \r\n)
         size_t len = total;
         while (len > 0 && (buffer[len - 1] == '\r' || buffer[len - 1] == '\n'))
@@ -236,7 +237,7 @@ bool network_download_resource(NetworkResource* res) {
     
     if (jar) {
         // inject Cookie header from jar
-        bool is_secure = (strncasecmp(res->url, "https://", 8) == 0);
+        bool is_secure = str_istarts_with_cstr(res->url, "https://");
         char* cookie_value = cookie_jar_build_request_header(jar, res->url, is_secure);
         if (cookie_value) {
             // build "Cookie: name=val; name2=val2" header

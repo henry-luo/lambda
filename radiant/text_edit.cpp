@@ -8,11 +8,11 @@
 #include "view.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/log.h"
+#include "../lib/str.h"
 #include "../lib/memtrack.h"
 
 #include <stdint.h>
 #include <string.h>
-#include <strings.h>    // strcasecmp (F5 input type checks)
 
 // F4: tc_set_value pushes a history snapshot on every mutation. To prevent
 // undo/redo restores from re-pushing (and corrupting the cursor), they

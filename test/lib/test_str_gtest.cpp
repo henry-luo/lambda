@@ -170,6 +170,12 @@ TEST_F(StrPrefixTest, IStartsWithConst) {
     EXPECT_FALSE(str_istarts_with_const("", 0, "a"));
 }
 
+TEST_F(StrPrefixTest, IStartsWithCstr) {
+    EXPECT_TRUE(str_istarts_with_cstr("HTTP://example.com", "http://"));
+    EXPECT_FALSE(str_istarts_with_cstr("ftp://example.com", "http://"));
+    EXPECT_FALSE(str_istarts_with_cstr(NULL, "http://"));
+}
+
 TEST_F(StrPrefixTest, IEndsWithConst) {
     EXPECT_TRUE(str_iends_with_const("FILE.JSON", 9, ".json"));
     EXPECT_TRUE(str_iends_with_const("image.PNG", 9, ".png"));

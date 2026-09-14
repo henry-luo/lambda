@@ -18,6 +18,7 @@
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/mem_grow.hpp"
+#include "../../lib/str.h"
 #include "../../lib/url.h"
 #include "../../lib/file.h"
 
@@ -766,7 +767,7 @@ extern "C" Item js_xhr_get_response_header(Item name_arg) {
     for (int i = 0; i < xhr->resp_header_count; i++) {
         const char* h = xhr->resp_headers[i];
         // headers are "Name: Value" format
-        if (strncasecmp(h, name, name_len) == 0 && h[name_len] == ':') {
+        if (str_istarts_with_cstr(h, name) && h[name_len] == ':') {
             const char* val = h + name_len + 1;
             while (*val == ' ') val++;
             return js_name_item(val);
