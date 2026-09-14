@@ -28925,7 +28925,6 @@ static void js_promise_vmap_trace(void* data, gc_heap_t* gc) {
     gc_mark_item(gc, promise->result.item);
     gc_mark_item(gc, promise->reactions.item);
     gc_mark_item(gc, promise->reject_domain.item);
-    gc_mark_item(gc, promise->expando.item);
     gc_mark_item(gc, promise->prototype_override.item);
 }
 

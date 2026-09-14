@@ -683,7 +683,6 @@ struct JsPromise : VMap {
     uint64_t result_scalar = 0;
     Item reactions = {};
     Item reject_domain = {};
-    Item expando = {};
     Item prototype_override = {};
     bool has_prototype_override = false;
     bool extensible = true;
