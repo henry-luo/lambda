@@ -1251,6 +1251,7 @@ extern TypeMap ArrayPropsShape;
 extern TypeElmt EmptyElmt;
 extern const Item ItemNull;
 extern const Item ItemError;
+extern const Item ItemEmptyString;
 extern TypeInfo type_info[];
 
 typedef struct Input {

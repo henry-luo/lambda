@@ -4684,6 +4684,7 @@ static inline String* js_ascii_char_intern(int code) {
 }
 
 static inline Item js_make_small_string(char* chars, int len, bool is_ascii) {
+    if (len == 0) return ItemEmptyString;
     // §7.2.B fast path: a single ASCII byte has only 128 possible values, all
     // immutable; share the interned String* instead of heap-allocating.
     if (len == 1 && is_ascii) {
@@ -11857,7 +11858,7 @@ extern "C" Item js_json_parse_full(Item str_item, Item reviver) {
         JsJsonReviveState state = {sources.items, sources.count, NULL, 0, 0};
         // Create a wrapper object {"": result} as the root holder
         Item wrapper = js_new_object();
-        Item empty_key = js_name_item("", 0);
+        Item empty_key = ItemEmptyString;
         JS_ASSIGN_OR_RETURN(create_result, js_create_data_property(wrapper, empty_key, result));
         int source_index = 0;
         js_json_build_source_entries(&state, wrapper, empty_key, result, &source_index);
@@ -12312,7 +12313,7 @@ extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
 
     // Create wrapper object per spec step 9-10
     StrBuf* sb = strbuf_new();
-    Item empty_key = js_name_item("", 0);
+    Item empty_key = ItemEmptyString;
     Item holder = js_new_object();
     Item create_result = js_create_data_property(holder, empty_key, value);
     if (item_is_error(create_result)) {
@@ -12707,14 +12708,14 @@ static Item js_throw_domexception_invalid_char(const char* msg) {
 extern "C" Item js_atob(Item str_item) {
     Item str_val = js_to_string(str_item);
     String* s = it2s(str_val);
-    if (!s || s->len == 0) return js_name_item("", 0);
+    if (!s || s->len == 0) return ItemEmptyString;
 
     const char* src = s->chars;
     int src_len = s->len;
 
     // Step 1: remove ASCII whitespace from data
     char* cleaned = (char*)mem_alloc(src_len + 1, MEM_CAT_JS_RUNTIME);
-    if (!cleaned) return js_name_item("", 0);
+    if (!cleaned) return ItemEmptyString;
     int clen = 0;
     for (int i = 0; i < src_len; i++) {
         unsigned char c = (unsigned char)src[i];
@@ -12749,7 +12750,7 @@ extern "C" Item js_atob(Item str_item) {
 extern "C" Item js_btoa(Item str_item) {
     Item str_val = js_to_string(str_item);
     String* s = it2s(str_val);
-    if (!s || s->len == 0) return js_name_item("", 0);
+    if (!s || s->len == 0) return ItemEmptyString;
 
     // Check for characters outside Latin1 range (> 0xFF)
     // In UTF-8, any byte >= 0xC4 followed by >= 0x80 means code point > 0xFF
@@ -12764,7 +12765,7 @@ extern "C" Item js_btoa(Item str_item) {
     }
     size_t out_len = base64_encoded_len((size_t)src_len, BASE64_STD);
     char* buf = (char*)mem_alloc(out_len + 1, MEM_CAT_JS_RUNTIME);
-    if (!buf) return js_name_item("", 0);
+    if (!buf) return ItemEmptyString;
 
     size_t out = base64_encode(src, (size_t)src_len, buf, BASE64_STD);
 
@@ -12834,7 +12835,11 @@ static bool js_uri_decode_to_item(String* s, bool component, Item* result) {
     }
     size_t out_len = 0;
     bool ok = url_decode_strict(s->chars, (size_t)s->len, component, out, &out_len);
-    if (ok) *result = (Item){.item = s2it(heap_create_name(out, out_len))};
+    if (ok) {
+        // Decoded URI text is value data and may contain non-ASCII UTF-8.
+        *result = js_make_small_string(out, (int)out_len,
+            str_is_ascii(out, out_len));
+    }
     if (heap_out) mem_free(out);
     return ok;
 }
@@ -12853,7 +12858,7 @@ static Item js_uri_encode_to_item(Item str_val, String* s, bool component) {
     if (out_len > sizeof(stack_buf)) {
         out = (char*)mem_alloc(out_len + 1, MEM_CAT_TEMP);
         // parity with the previous allocating encoder, which also degraded to ""
-        if (!out) return js_name_item("", 0);
+        if (!out) return ItemEmptyString;
         heap_out = true;
     }
     size_t j = url_encode_write(s->chars, (size_t)s->len, keep, false, out);
@@ -12867,7 +12872,7 @@ static Item js_uri_encode_to_item(Item str_val, String* s, bool component) {
 static Item js_encode_uri_common(Item str_item, bool component) {
     JS_ASSIGN_OR_RETURN(str_val, js_to_string(str_item));
     String* s = it2s(str_val);
-    if (!s || s->len == 0) return js_name_item("", 0);
+    if (!s || s->len == 0) return ItemEmptyString;
     // ES spec: throw URIError for lone surrogates
     if (js_has_lone_surrogate(s->chars, s->len)) {
         return js_throw_uri_error("URI malformed");
@@ -12944,7 +12949,7 @@ static Item js_decode_uri_common(Item str_item, bool component,
     bool cache_rooted = js_global_string_caches_ensure_roots();
     Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
     String* s = it2s(str_val);
-    if (!s || s->len == 0) return js_name_item("", 0);
+    if (!s || s->len == 0) return ItemEmptyString;
     if (!js_string_has_percent(s)) return str_val;
     int64_t cached_cp = js_string_last_four_byte_uri_escape_cp(str_val);
     if (cached_cp >= 0) return js_uri_make_four_byte_string_from_cp((uint32_t)cached_cp);
@@ -12985,7 +12990,7 @@ extern "C" Item js_unescape(Item str_item) {
     // ERROR Item into the empty result below.
     if (item_is_error(str_val)) return str_val;
     String* s = it2s(str_val);
-    if (!s || s->len == 0) return js_name_item("", 0);
+    if (!s || s->len == 0) return ItemEmptyString;
 
     const char* src = s->chars;
     int src_len = s->len;
@@ -12993,7 +12998,7 @@ extern "C" Item js_unescape(Item str_item) {
     // allocate output buffer (worst case: all %XX with values >= 0x80 → 2 bytes each,
     // but that's still ≤ src_len since 3 input bytes → 2 output bytes)
     char* buf = (char*)mem_alloc(src_len * 2 + 1, MEM_CAT_JS_RUNTIME);
-    if (!buf) return js_name_item("", 0);
+    if (!buf) return ItemEmptyString;
 
     int out = 0;
     int i = 0;
@@ -13064,14 +13069,14 @@ extern "C" Item js_escape(Item str_item) {
     // abrupt completion instead of treating the failed value as an empty string.
     if (item_is_error(str_val)) return str_val;
     String* s = it2s(str_val);
-    if (!s || s->len == 0) return js_name_item("", 0);
+    if (!s || s->len == 0) return ItemEmptyString;
 
     const char* src = s->chars;
     int src_len = s->len;
 
     // worst case: every char becomes %uXXXX (6 bytes per input byte)
     char* buf = (char*)mem_alloc(src_len * 6 + 1, MEM_CAT_JS_RUNTIME);
-    if (!buf) return js_name_item("", 0);
+    if (!buf) return ItemEmptyString;
 
     static const char hex[] = "0123456789ABCDEF";
     int out = 0;
@@ -17743,7 +17748,7 @@ static Item js_url_to_object(Url* url) {
     #define URL_SET_PROP(propname, getter) do { \
         const char* _v = getter(url); \
         Item _key = js_name_item(propname); \
-        Item _val = _v ? js_name_item(_v, strlen(_v)) : js_name_item("", 0); \
+        Item _val = _v ? js_name_item(_v, strlen(_v)) : ItemEmptyString; \
         js_set_key_default(obj, _key, _val); \
     } while(0)
 
@@ -17787,7 +17792,7 @@ static Item js_url_to_object(Url* url) {
         if (search && search[0]) {
             search_str = js_name_item(search, strlen(search));
         } else {
-            search_str = js_name_item("", 0);
+            search_str = ItemEmptyString;
         }
         js_set_key_cstr(obj, "searchParams", js_url_search_params_new(search_str));
     }

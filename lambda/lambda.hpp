@@ -351,6 +351,7 @@ static inline Item lambda_float_ptr_to_item(const double* double_ptr) {
 
 extern const Item ItemNull;
 extern const Item ItemError;
+extern const Item ItemEmptyString;
 
 // ============================================================================
 // Error propagation guard macros (Phase 1 of error handling improvements)

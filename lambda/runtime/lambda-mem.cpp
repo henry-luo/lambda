@@ -879,6 +879,7 @@ extern "C" String* heap_strcpy(const char* src, int64_t len) {
     // guard against a negative length and against the size overflowing heap_alloc's int
     // parameter (which would otherwise truncate to a small allocation + large memcpy).
     if (len < 0 || (uint64_t)len + 1 + sizeof(String) > (uint64_t)INT_MAX) return NULL;
+    if (len == 0) return it2s(ItemEmptyString);
     String *str = (String *)heap_alloc((int)(len + 1 + sizeof(String)), LMD_TYPE_STRING);
     if (!str) return NULL;         // OOM — propagate instead of dereferencing NULL
     memcpy(str->chars, src, len);  // Safe copy with explicit length
