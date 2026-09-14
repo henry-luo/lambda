@@ -69,6 +69,7 @@ RADIANT_DOM2_WPT_RUNNERS := input_events
 # preliminary projects remain excluded by that runner.
 LAMBDA_BASELINE_TEST_PROJECTS := \
 	test_lambda_gtest \
+	test_input_script_cache_gtest \
 	test_lambda_parser_poc_gtest \
 	test_mir_gc_stress_gtest \
 	test_mir_ratchet_gtest \
@@ -2875,20 +2876,17 @@ test-benchmark:
 		exit 1; \
 	fi
 
-# Fuzzy Testing Framework
-# Shell-based fuzzer for testing Lambda robustness
+# Lambda fuzz testing
 
 # Run deterministic Lambda fuzz smoke (override with duration=N or timeout=N)
 fuzz-lambda: build lambda-cst
 	@echo "Running Lambda fuzz smoke..."
-	@chmod +x test/fuzzy/lambda/test_fuzzy.sh
 	@python3 test/fuzzy/lambda/run_fuzz.py --seconds=$(or $(duration),60) --timeout=$(or $(timeout),5) --gc-stress --root-witness
 	@echo "✅ Lambda fuzz smoke completed"
 
 # Run extended fuzzy tests (1 hour)
 fuzz-lambda-extended: build lambda-cst
 	@echo "Running extended fuzzy tests (1 hour)..."
-	@chmod +x test/fuzzy/lambda/test_fuzzy.sh
 	@python3 test/fuzzy/lambda/run_fuzz.py --seconds=$(or $(duration),3600) --timeout=$(or $(timeout),10) --gc-stress --root-witness
 	@echo "✅ Extended fuzzy tests completed"
 

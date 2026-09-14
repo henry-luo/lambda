@@ -128,11 +128,14 @@ present in every build because `lambda/main.cpp` reads it with an ungated
 
 ## Radiant, rendering, and document JavaScript
 
+`RADIANT_JS_SOURCE_CACHE` and `RADIANT_JS_SOURCE_CACHE_BYTES` are retired.
+Remote JavaScript source snapshots are cache-admitted through `InputManager`
+after generic HTTP disk-fetch reuse (D8.5.1v2); neither setting has a runtime
+effect.
+
 | Variable | Effect / accepted value | Debug | Release | Release profile |
 |---|---|:---:|:---:|:---:|
 | `LAMBDA_JS_EXEC_TIMEOUT_SECONDS` | Positive document-script timeout override. | ✓ | ✓ | ✓ |
-| `RADIANT_JS_SOURCE_CACHE` | Default on; `0` disables external script-source cache. | ✓ | ✓ | ✓ |
-| `RADIANT_JS_SOURCE_CACHE_BYTES` | Positive source-cache byte limit. | ✓ | ✓ | ✓ |
 | `RADIANT_JS_PRELAYOUT_DEFER_BYTES` | Positive pre-layout script deferral threshold. | ✓ | ✓ | ✓ |
 | `RADIANT_JS_EXTERNAL_SCRIPT_BYTES` | Positive external-script byte limit. | ✓ | ✓ | ✓ |
 | `RADIANT_JS_TOTAL_SCRIPT_BYTES` | Positive total document-script byte limit. | ✓ | ✓ | ✓ |
@@ -290,7 +293,7 @@ application semantics.
 |---|---|
 | Memory instrumentation mode (1) | `MEMTRACK_MODE` |
 | JS execution and optimization gates (6) | `LAMBDA_JS_LARGE_INTERP`, `LAMBDA_JS_LARGE_INTERP_BYTES`, `LAMBDA_DISABLE_JS_MIR_CACHE`, `JS_MIR_INTERP`, `JS_LAZY_MIR`, `LAMBDA_JS_CONST_FOLD` |
-| Radiant cache/render tuning (4) | `RADIANT_JS_SOURCE_CACHE`, `RADIANT_JS_SOURCE_CACHE_BYTES`, `RADIANT_TILE_STRIP_H`, `RADIANT_TILE_THRESHOLD` |
+| Radiant render tuning (2) | `RADIANT_TILE_STRIP_H`, `RADIANT_TILE_THRESHOLD` |
 
 These should not become a permanent configuration API. After differential
 tests establish the invariant, delete the variable and generic fallback rather

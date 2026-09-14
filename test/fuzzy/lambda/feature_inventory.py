@@ -17,6 +17,17 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parents[2]
 LOCK_PATH = SCRIPT_DIR / "feature_inventory.lock"
 CAMPAIGN_PATH = SCRIPT_DIR / "feature_campaigns.tsv"
+SEMANTIC_CAMPAIGN_PATH = SCRIPT_DIR / "semantic_campaigns.tsv"
+SEMANTIC_CAMPAIGNS = {
+    "syntax-parser",
+    "values-types-representation",
+    "operators-equality-order",
+    "errors-functions-resources",
+    "mutation-lifetime",
+    "concurrency",
+    "data-processing",
+    "modules",
+}
 
 
 def enum_values(path: Path, declaration: str, prefix: str) -> list[str]:
@@ -103,10 +114,16 @@ def check_inventory(lock_path: Path = LOCK_PATH,
         raise ValueError(
             "feature inventory changed; review campaign coverage and update "
             "test/fuzzy/lambda/feature_inventory.lock")
+    semantic_campaigns = campaign_statuses(SEMANTIC_CAMPAIGN_PATH)
+    semantic_missing = sorted(SEMANTIC_CAMPAIGNS - semantic_campaigns.keys())
+    semantic_stale = sorted(semantic_campaigns.keys() - SEMANTIC_CAMPAIGNS)
+    if semantic_missing or semantic_stale:
+        raise ValueError(
+            f"semantic campaign map mismatch: missing={semantic_missing} stale={semantic_stale}")
     summary = ", ".join(
         f"{surface}={sum(1 for row in rows if row.startswith(surface + chr(9)))}"
         for surface in sorted(surfaces))
-    return f"feature inventory verified: {summary}"
+    return f"feature inventory verified: {summary}; campaigns={len(semantic_campaigns)}"
 
 
 def main() -> int:

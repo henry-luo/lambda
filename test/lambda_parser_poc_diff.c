@@ -66,7 +66,8 @@ static bool parse_report_equal(const LambdaParseReport* left,
 // C/Tree-sitter agreement as sufficient evidence (D1.9, D1.10, D8.1.2v3).
 static bool lambda_parser_stable(const char* source, size_t length,
                                  LambdaParseStatus* status_out,
-                                 LambdaParseError* error_out) {
+                                 LambdaParseError* error_out,
+                                 LambdaParseMetrics* metrics_out) {
     LambdaParseMetrics first_metrics = {0};
     LambdaParseMetrics second_metrics = {0};
     LambdaParseError first_error = {0};
@@ -83,6 +84,7 @@ static bool lambda_parser_stable(const char* source, size_t length,
         &second_report);
     if (status_out) *status_out = first_status;
     if (error_out) *error_out = first_error;
+    if (metrics_out) *metrics_out = first_metrics;
     return first_status == second_status &&
         parse_error_equal(&first_error, &second_error) &&
         parse_metrics_equal(&first_metrics, &second_metrics) &&
@@ -115,7 +117,7 @@ static int run_lambda_manifest(const char* manifest_path) {
         bool tree_ok = !ts_node_has_error(ts_tree_root_node(tree));
         LambdaParseError error = {0};
         LambdaParseStatus rd_status = LAMBDA_PARSE_ERROR;
-        bool stable = lambda_parser_stable(source, length, &rd_status, &error);
+        bool stable = lambda_parser_stable(source, length, &rd_status, &error, NULL);
         total++;
         if (tree_ok) ts_ok++;
         if (rd_status == LAMBDA_PARSE_OK) rd_ok++;
@@ -160,10 +162,42 @@ static int run_lambda_stability_manifest(const char* manifest_path) {
         char* source = read_source(line, &length);
         if (!source) { fclose(manifest); return 3; }
         LambdaParseStatus status = LAMBDA_PARSE_ERROR;
-        if (!lambda_parser_stable(source, length, &status, NULL)) {
+        if (!lambda_parser_stable(source, length, &status, NULL, NULL)) {
             unstable++;
             fprintf(stdout, "unstable\t%s\n", line);
         }
+        total++;
+        free(source);
+    }
+    fprintf(stderr, "total=%u unstable=%u\n", total, unstable);
+    fclose(manifest);
+    return unstable ? 1 : 0;
+}
+
+// Structural fingerprints provide feedback for the parser-only corpus without
+// equating a grammar acceptance result with production-parser correctness.
+static int run_lambda_coverage_manifest(const char* manifest_path) {
+    FILE* manifest = fopen(manifest_path, "rb");
+    if (!manifest) return 3;
+    unsigned int total = 0;
+    unsigned int unstable = 0;
+    char line[4096];
+    while (fgets(line, sizeof(line), manifest)) {
+        if (line[0] == '#' || strncmp(line, "path\t", 5) == 0) continue;
+        char* tab = strchr(line, '\t');
+        if (tab) *tab = '\0';
+        char* line_end = strpbrk(line, "\r\n");
+        if (line_end) *line_end = '\0';
+        size_t length = 0;
+        char* source = read_source(line, &length);
+        if (!source) { fclose(manifest); return 3; }
+        LambdaParseMetrics metrics = {0};
+        if (!lambda_parser_stable(source, length, NULL, NULL, &metrics)) {
+            unstable++;
+        }
+        fprintf(stdout, "coverage\t%s\t%u\t%u\t%u\t%llu\n", line,
+            metrics.token_count, metrics.reduction_count, metrics.max_recursion_depth,
+            (unsigned long long)metrics.structural_hash);
         total++;
         free(source);
     }
@@ -249,6 +283,9 @@ static int run_js_manifest(const char* manifest_path) {
 int main(int argc, char** argv) {
     if (argc == 3 && strcmp(argv[1], "--lambda-stability") == 0) {
         return run_lambda_stability_manifest(argv[2]);
+    }
+    if (argc == 3 && strcmp(argv[1], "--lambda-coverage") == 0) {
+        return run_lambda_coverage_manifest(argv[2]);
     }
     if (argc == 2) return run_lambda_manifest(argv[1]);
     if (argc == 3 && strcmp(argv[1], "--js") == 0) {

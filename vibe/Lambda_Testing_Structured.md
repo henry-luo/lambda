@@ -385,22 +385,23 @@ Lambda uses reference counting for memory management. Critical paths:
 
 ### 7.1 Current State
 
-- 28 corpus scripts (valid + edge + negative)
-- Grammar-based generator (`grammar_gen.cpp`)
-- Mutation-based fuzzer (`mutator.cpp`)
-- 5-minute default duration, 5-second timeout per test
+Core Lambda fuzzing is implemented by `test/fuzzy/lambda/run_fuzz.py`, with a
+reviewed corpus manifest, stateful source producer, recorded structural
+mutator, explicit T0/eager-JIT/AUTO comparison, grammar.js/C-parser review,
+forced-GC/root-witness rows, and replayable artifacts. This older overview
+defers to `vibe/Lambda_Test_Fuzzy.md` for the authoritative campaign contract
+and commands (D1.10, D8.1.1v10, D8.1.2v3).
 
 ### 7.2 Proposed Improvements
 
 | Enhancement | Description | Priority |
 |-------------|-------------|----------|
-| **Expand corpus to 100+** | Add scripts exercising every grammar rule | High |
-| **Coverage-guided fuzzing** | Instrument runtime with code coverage, prefer inputs reaching new code | Medium |
-| **Differential testing** | Compare interpreter vs JIT output for same script | High |
-| **Long-running soak test** | Run fuzzer for 1+ hour in CI nightly | Medium |
-| **Input format fuzzing** | Fuzz JSON/XML/HTML/CSS/Markdown parsers too | High |
-| **Add ASan/UBSan builds** | Compile with AddressSanitizer to detect memory errors | High |
-| **Minimizer** | Auto-minimize crash inputs to smallest reproducer | Low |
+| **Corpus/admission** | Reviewed contracts and D1.10 inventory ratchet | Implemented |
+| **Differential testing** | Explicit T0/JIT/AUTO plus grammar.js/C-parser review | Implemented |
+| **Long-running soak test** | Bounded extended target and scheduled CI campaign | Implemented |
+| **ASan/GC/rooting** | ASan target plus forced-GC/poison/root-witness equality row | Implemented |
+| **Minimizer** | Oracle-preserving replay and reduction | Implemented |
+| **Input-format fuzzing** | Independent campaigns only; out of core-Lambda scope | Separate work |
 
 ### 7.3 Differential Testing (Interpreter vs JIT)
 

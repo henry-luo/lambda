@@ -25,6 +25,7 @@ from lambda_process import LambdaProcessResult, run_process
 SUMMARY_RE = re.compile(
     r"total=(\d+)\s+ts_ok=(\d+)\s+rd_ok=(\d+)\s+missing=(\d+)\s+extra=(\d+)")
 STABILITY_RE = re.compile(r"total=(\d+)\s+unstable=(\d+)")
+COVERAGE_RE = re.compile(r"^coverage\t.+\t(\d+)\t(\d+)\t(\d+)\t(\d+)$", re.MULTILINE)
 REVIEW_RULINGS = {
     "grammar-bug",
     "c-parser-bug",
@@ -45,6 +46,20 @@ class ParserStatus:
 
 
 @dataclass(frozen=True)
+class ParserCoverage:
+    token_count: int
+    reduction_count: int
+    max_recursion_depth: int
+    structural_hash: int
+    result: LambdaProcessResult
+
+    @property
+    def signature(self) -> str:
+        return (f"{self.token_count}:{self.reduction_count}:"
+                f"{self.max_recursion_depth}:{self.structural_hash:016x}")
+
+
+@dataclass(frozen=True)
 class ReviewEntry:
     case_id: str
     source_hash: str
@@ -58,6 +73,14 @@ class ReviewEntry:
 
 def _source_hash(source: Path) -> str:
     return hashlib.sha256(source.read_bytes()).hexdigest()
+
+
+def _single_source_manifest(work_dir: Path, prefix: str, source: Path) -> Path:
+    work_dir.mkdir(parents=True, exist_ok=True)
+    manifest = work_dir / f"{prefix}-{_source_hash(source)[:20]}.tsv"
+    # lambda-cst consumes the first tab-separated field as a source path.
+    manifest.write_text(f"path\tbytes\tsha256\n{source}\t0\t0\n", encoding="utf-8")
+    return manifest
 
 
 def load_review_manifest(manifest: Path) -> dict[Path, ReviewEntry]:
@@ -93,10 +116,7 @@ def load_review_manifest(manifest: Path) -> dict[Path, ReviewEntry]:
 def check_source(executable: Path, source: Path, work_dir: Path,
                  timeout: float) -> ParserStatus:
     """Runs the existing isolated `lambda-cst` verifier for one source."""
-    work_dir.mkdir(parents=True, exist_ok=True)
-    manifest = work_dir / f"parser-{_source_hash(source)[:20]}.tsv"
-    # lambda-cst consumes the first tab-separated field as a source path.
-    manifest.write_text(f"path\tbytes\tsha256\n{source}\t0\t0\n", encoding="utf-8")
+    manifest = _single_source_manifest(work_dir, "parser", source)
     result = run_process([str(executable), str(manifest)], timeout)
     if result.launch_error or result.timed_out:
         return ParserStatus("error", "error", result)
@@ -116,9 +136,7 @@ def check_source(executable: Path, source: Path, work_dir: Path,
 def check_stability(executable: Path, source: Path, work_dir: Path,
                     timeout: float) -> LambdaProcessResult:
     """Checks fail-fast/recovery determinism without requiring grammar agreement."""
-    work_dir.mkdir(parents=True, exist_ok=True)
-    manifest = work_dir / f"parser-stability-{_source_hash(source)[:20]}.tsv"
-    manifest.write_text(f"path\tbytes\tsha256\n{source}\t0\t0\n", encoding="utf-8")
+    manifest = _single_source_manifest(work_dir, "parser-stability", source)
     result = run_process(
         [str(executable), "--lambda-stability", str(manifest)], timeout)
     if result.launch_error or result.timed_out:
@@ -129,6 +147,22 @@ def check_stability(executable: Path, source: Path, work_dir: Path,
             result.argv, result.stdout, result.stderr, 1, False,
             "parser stability verifier did not report one stable source")
     return result
+
+
+def check_coverage(executable: Path, source: Path, work_dir: Path,
+                   timeout: float) -> ParserCoverage:
+    """Returns a deterministic C-parser structural-coverage signature."""
+    manifest = _single_source_manifest(work_dir, "parser-coverage", source)
+    result = run_process([str(executable), "--lambda-coverage", str(manifest)], timeout)
+    if result.launch_error or result.timed_out or result.return_code != 0:
+        raise ValueError(f"parser coverage command failed: {result.status}")
+    match = COVERAGE_RE.search(result.stdout)
+    if match is None:
+        raise ValueError("parser coverage command did not report one source")
+    token_count, reduction_count, max_recursion_depth, structural_hash = (
+        int(value) for value in match.groups())
+    return ParserCoverage(token_count, reduction_count, max_recursion_depth,
+                          structural_hash, result)
 
 
 def review_source(status: ParserStatus, source: Path,

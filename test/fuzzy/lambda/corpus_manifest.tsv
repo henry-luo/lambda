@@ -1,14 +1,20 @@
-# source	contract	driver	tiers
+# source	role	contract	driver	tiers	deterministic
 # `@root/` sources are relative to the repository root. Other sources are
 # relative to this manifest, which keeps the reviewed local corpus portable.
 # These are reviewed current-syntax seeds. Legacy corpus files stay unlisted
 # until they are migrated to S16 and assigned an explicit contract.
-corpus/valid/closures.ls	success	direct	interp,jit
-corpus/valid/control_flow.ls	success	direct	interp,jit
-corpus/valid/data_types.ls	success	direct	interp,jit
-corpus/valid/pipe_expressions.ls	success	direct	interp,jit
-corpus/valid/vectors.ls	success	direct	interp,jit
-corpus/edge_cases/collections.ls	success	direct	interp,jit
-corpus/edge_cases/strings.ls	success	direct	interp,jit
-@root/test/lambda/negative/fuzzy_crashes/empty_parenthesized_expr.ls	reject	direct	interp
-@root/test/lambda/proc/proc1.ls	success	run	interp,jit
+corpus/valid/closures.ls	functional-valid	success	direct	interp,jit	true
+corpus/valid/control_flow.ls	functional-valid	success	direct	interp,jit	true
+corpus/valid/data_types.ls	functional-valid	success	direct	interp,jit	true
+corpus/valid/pipe_expressions.ls	functional-valid	success	direct	interp,jit	true
+corpus/valid/vectors.ls	functional-valid	success	direct	interp,jit	true
+corpus/edge_cases/collections.ls	functional-valid	success	direct	interp,jit	true
+corpus/edge_cases/strings.ls	functional-valid	success	direct	interp,jit	true
+@root/test/lambda/negative/fuzzy_crashes/empty_parenthesized_expr.ls	syntax-invalid	reject	direct	interp	true
+@root/test/lambda/proc/proc1.ls	procedural-valid	success	run	interp,jit	true
+@root/test/lambda/proc/tune27_loop_accumulator.ls	auto-promotion	success	run	interp,jit,auto	true
+@root/test/lambda/import_vars.ls	module-root	success	direct	interp,jit	true
+@root/test/lambda/conc/message_fifo.ls	concurrency-scenario	success	run	interp,jit	true
+@root/test/lambda/proc/proc_binary_output.ls	resource-scenario	success	run	interp,jit	true
+@root/test/lambda/proc/cow_alias.ls	lifetime-scenario	success	run	interp,jit	true
+@root/test/lambda/proc/proc_fill_gc_nested.ls	lifetime-scenario	success	run	interp,jit	true
