@@ -96,6 +96,8 @@ typedef struct InputScriptCacheStats {
     uint64_t retained_ast_bytes;
     uint64_t retained_mir_bytes;
     uint64_t peak_bytes;
+    uint64_t retention_limit_bytes;
+    uint64_t retention_pressure;
     uint64_t scopes_opened;
     uint64_t leases_acquired;
     uint64_t leases_released;
@@ -160,7 +162,7 @@ bool input_script_cache_refresh_file_unit(InputScriptCache* cache,
     uint32_t compilation_unit_id, const char* path, bool* out_changed);
 // Refresh every file-backed dependency reachable from one logical unit. A
 // failed freshness proof retires that unit's importer cone before a caller can
-// reuse its compiled image (D8.5.1v2).
+// reuse its compiled image (D8.5.1v3).
 bool input_script_cache_refresh_file_dependencies(InputScriptCache* cache,
     uint32_t compilation_unit_id, bool* out_changed);
 

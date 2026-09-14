@@ -606,9 +606,11 @@ private:
 
 class LambdaScriptBuildClaim {
 public:
-    LambdaScriptBuildClaim(InputScriptLease* lease, InputScriptBuildKind kind)
-        : lease_(lease), kind_(kind), claim_(input_script_cache_claim_build(lease,
-            kind)), completed_(false) {}
+    LambdaScriptBuildClaim(InputScriptLease* lease, InputScriptBuildKind kind,
+            bool enabled)
+        : lease_(lease), kind_(kind), claim_(enabled
+            ? input_script_cache_claim_build(lease, kind)
+            : INPUT_SCRIPT_BUILD_BYPASS), completed_(false) {}
     LambdaScriptBuildClaim(const LambdaScriptBuildClaim&) = delete;
     LambdaScriptBuildClaim& operator=(const LambdaScriptBuildClaim&) = delete;
     ~LambdaScriptBuildClaim() {
@@ -784,7 +786,7 @@ static Script* lambda_script_template_clone(Runtime* runtime, const Script* cach
         // AST reuse borrows parser/analysis facts only. A MIR context
         // (including satellites promoted by an earlier execution) is
         // runtime-local and must never be copied into the new shell
-        // (D8.5.1v2).
+        // (D8.5.1v3).
         instance->jit_context = NULL;
         instance->main_func = NULL;
         instance->mir_gen_initialized = false;
@@ -1349,6 +1351,9 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     }
     const char* exact_source = source_lease.source();
     size_t exact_source_length = source_lease.source_length();
+    // REPL fragments append mutable AST/source history. Until that history is
+    // part of its key, retain only its common source record (D8.5.1v3).
+    bool cache_artifact_enabled = strcmp(lookup_path, "<repl-session>") != 0;
 
     // find the script in the path index (thread-safe)
 #ifndef _WIN32
@@ -1400,7 +1405,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     // a finished cache artifact.
     void* cached_image = NULL;
     bool cache_artifact_rejected = false;
-    if (runtime->use_mir_direct && !runtime->mir_cache_disabled &&
+    if (cache_artifact_enabled && runtime->use_mir_direct && !runtime->mir_cache_disabled &&
             lambda_tier_selected() == LAMBDA_TIER_JIT &&
             input_script_cache_get_mir(raw_lease, &cached_image)) {
         Script* cached_template = (Script*)cached_image;
@@ -1422,7 +1427,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
             }
             // Generated imports name logical units, but those units still
             // need this Runtime's dense slabs before the cached root enters
-            // MIR. Instantiate the complete cached dependency cone (D8.5.1v2).
+            // MIR. Instantiate the complete cached dependency cone (D8.5.1v3).
             Script* instance = lambda_ast_template_clone_for_runtime(runtime,
                 cached_template, source_lease.scope());
             if (instance) {
@@ -1447,9 +1452,9 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     }
     // T0 AST templates retain only parser/validation/frame-plan facts. A hit
     // always receives a new Script and dense module slab, never an old
-    // EvalContext, satisfying D8.5.1v2 without changing tier policy.
+    // EvalContext, satisfying D8.5.1v3 without changing tier policy.
     void* cached_ast = NULL;
-    if (lambda_tier_selected() != LAMBDA_TIER_JIT &&
+    if (cache_artifact_enabled && lambda_tier_selected() != LAMBDA_TIER_JIT &&
             input_script_cache_get_ast(raw_lease, &cached_ast)) {
         Script* cached_template = (Script*)cached_ast;
         if (cached_template && cached_template->cache_owned_template &&
@@ -1488,12 +1493,13 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     InputScriptBuildKind build_kind = lambda_tier_selected() == LAMBDA_TIER_JIT &&
         runtime->use_mir_direct && !runtime->mir_cache_disabled
         ? INPUT_SCRIPT_BUILD_MIR : INPUT_SCRIPT_BUILD_AST;
-    LambdaScriptBuildClaim build_claim(raw_lease, build_kind);
+    LambdaScriptBuildClaim build_claim(raw_lease, build_kind,
+        cache_artifact_enabled);
     if (build_claim.is_ready()) {
         // A waiter can observe READY only after the owner published between
         // this call's first lookup and claim. Retry that normal hit without
         // retiring it; only a lookup that actually rejected an artifact is
-        // untrusted (D8.5.1v2).
+        // untrusted (D8.5.1v3).
         if (cache_artifact_rejected) {
             lambda_cache_invalidate_untrusted_cone(script_cache,
                 input_script_compilation_unit_id(input_script_lease_input(raw_lease)),
@@ -1626,11 +1632,12 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     // cross-language import can retain guest-owned callbacks or module
     // namespaces, so it stays source-only until its adapter proves a fresh
     // instance contract.
-    bool cache_dependencies_valid = !build_claim.is_poisoned() &&
-        lambda_cache_record_direct_dependencies(script_cache, new_script);
+    bool cache_dependencies_valid = !cache_artifact_enabled ||
+        (!build_claim.is_poisoned() && lambda_cache_record_direct_dependencies(
+            script_cache, new_script));
     if (!cache_dependencies_valid) input_script_cache_mark_rejected(script_cache);
     bool cache_published = false;
-    if (cache_dependencies_valid && new_script->jit_context && runtime->use_mir_direct &&
+    if (cache_artifact_enabled && cache_dependencies_valid && new_script->jit_context && runtime->use_mir_direct &&
             !runtime->mir_cache_disabled && !new_script->cache_cross_lang_tainted) {
         InputScriptArtifactOps ops = {
             lambda_script_cache_destroy_artifact,
@@ -1645,7 +1652,8 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
                 new_script->reference, new_script->cache_compilation_unit_id);
         }
     }
-    else if (cache_dependencies_valid && lambda_ast_template_is_reusable(new_script)) {
+    else if (cache_artifact_enabled && cache_dependencies_valid &&
+            lambda_ast_template_is_reusable(new_script)) {
         InputScriptArtifactOps ops = {
             lambda_script_cache_destroy_artifact,
             lambda_script_cache_artifact_bytes,

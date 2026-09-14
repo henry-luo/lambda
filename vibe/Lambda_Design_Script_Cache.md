@@ -5,8 +5,10 @@ import/view overlays, Lambda fresh-runtime MIR dependency cones with
 logical-to-dense module-slab mapping, source-change retirement, and
 single-flight artifact builds, broad JS AST templates with execution
 overlays, synchronous static-JS-import module MIR artifacts with
-source-generation cones, and the Radiant JS-MIR lease session are landed;
-eager-JIT AST-miss reuse and the broad Phase 1–4 exit gates remain open
+source-generation cones, the Radiant JS-MIR lease session, command-path
+inventory, managed abandoned-build recovery, and opt-in inactive-entry byte
+retention are landed; eager-JIT AST-miss reuse and the remaining Phase 2–5
+gates remain open
 (2026-09-14)  
 **Date:** 2026-09-13 (updated 2026-09-14)  
 **Scope:** A single in-process script-cache service for every Lambda, LambdaJS,
@@ -22,7 +24,7 @@ allocator has a named context owner), D7.1.2 (I/O versus derived-artifact
 layering), D7.2.2–D7.2.3 (transactional module initialization and in-process
 import caching), D8.1.3v10 (retained LambdaJS AST and explicit AST tier),
 D8.4.1v2 (immutable generated code), D7.1.2v2 (I/O and opaque-artifact
-layering), and D8.5.1v2 (the persistent executable-script cache).
+layering), and D8.5.1v3 (the persistent executable-script cache).
 This proposal records the 2026-09-13 policy decisions in §15; formal rulings
 are kept synchronized as implementation lands.
 
@@ -491,18 +493,23 @@ artifact lookup after publication. A failed non-poisoned owner permits one
 subsequent ordinary retry, while a poisoned key is fail-closed until its source
 generation is invalidated. TLA/dynamic/re-export/CommonJS module-MIR and guest
 adapters have not yet adopted build claims. A lease prevents an entry from
-being evicted while an execution instance references it.
+being evicted while an execution instance references it. If scope recovery
+releases an owner without `complete_build()`, the common service poisons that
+key, broadcasts every waiter, and requires source invalidation before retry.
 
 ### 12.2 Memory and eviction
 
 Each artifact reports retained source, AST, compiler-pool, MIR-code, and
-metadata bytes. The initial generalized mode retains every successfully
+metadata bytes. The default generalized mode retains every successfully
 admitted `ScriptInput` for the `InputManager` lifetime and records its growth.
-It does not add eviction as a hidden admission condition. A later cache-memory
-phase will add high-water limits and clear only unleased entries and, for
-modules, only a dependency cone whose compiled artifacts no longer reference
-one another. Engine-owned preambles and ordinary main scripts follow the same
-default retention rule until that phase is implemented.
+`LAMBDA_SCRIPT_CACHE_MAX_BYTES` is an opt-in retained-byte cap; unset or `0`
+keeps that default. A positive cap removes only the least-recently-used cache
+entry with no active lease and no dependency edges. If every candidate is
+leased or part of a freshness cone, the cache preserves those images,
+temporarily exceeds the cap, and records retention pressure. It does not clear
+a dependency cone or add a hidden admission condition.
+Priority classes, dependency-cone reclamation, and an automatic high-water
+policy remain later cache-memory work.
 
 Every allocation used by a cache artifact receives a named cache context under
 D4.2.3. A cache context is neither a document context nor an execution heap.
@@ -524,14 +531,16 @@ The unified report records, by language and source class:
 source_lookups, source_hits, source_misses
 ast_lookups, ast_hits, ast_misses, ast_builds
 mir_lookups, mir_hits, mir_misses, mir_builds
-module_hits, dependency_invalidations, rejected, poisoned, evictions
+module_hits, dependency_invalidations, rejected, poisoned, evictions,
+retention_limit_bytes, retention_pressure
 retained_source_bytes, retained_ast_bytes, retained_mir_bytes, peak_bytes
 parse_us, bind_us, lower_us, link_us, instantiate_us, execute_us, reset_us
 ```
 
 The proposed control is `LAMBDA_SCRIPT_CACHE=off|ast|mir|all`; the default is
-`all`. Memory-limit controls are deferred to the cache-memory phase. During
-migration, `LAMBDA_DISABLE_MIR_CACHE` and
+`all`. `LAMBDA_SCRIPT_CACHE_MAX_BYTES=positive-integer` is the optional
+inactive-only retained-byte cap; unset or `0` leaves retention unlimited.
+During migration, `LAMBDA_DISABLE_MIR_CACHE` and
 `LAMBDA_DISABLE_JS_MIR_CACHE` are compatibility aliases that map to the
 corresponding common policy and emit one migration diagnostic. They are removed
 only after all callers migrate.
@@ -544,10 +553,11 @@ only after all callers migrate.
 
 1. Record the resolved §15 policies in the formal design when implementation
    is authorized: persistent manager-owned `ScriptInput` artifacts and default
-   cache admission for every script. **Done:** D7.1.2v2 and D8.5.1v2 were
-   ratified on 2026-09-13.
+   cache admission for every script. **Done:** D7.1.2v2 and D8.5.1v3 are
+   ratified; v3 records managed abandoned-build recovery and bounded retention.
 2. Inventory every direct executable-source read and direct compiler `Input`
-   creation; add source-class counters without changing execution.
+   creation; add source-class counters without changing execution. **Done:**
+   the 2026-09-14 command-path audit is recorded below.
 3. Audit Lambda and JS ASTs for execution-mutated fields and MIR for
    context-dependent addresses.
 4. Define a stable compilation-unit identity that preserves current Lambda
@@ -580,7 +590,9 @@ entry retains an execution `Input` or document allocation.
 3. Make the layout test runner's AST backend emit common AST counters.
 4. Route dynamic/eval and REPL snapshots through the same service. Their key
    must include every lexical, preamble, and history dependency; an incomplete
-   key is rejected as unsafe rather than excluded by source class.
+   key is rejected as unsafe rather than excluded by source class. **Current
+   REPL rule:** its empty bootstrap is source-admitted but artifact-bypassed,
+   because its append-only history is not yet an artifact-key component.
 
 **Exit gate:** AST-enabled Lambda and JS batches show repeat hits with
 byte-identical outputs and fresh runtime/realm state.
@@ -612,7 +624,7 @@ remain transactional.
    `JsMirLeaseSession`). The duplicate `RADIANT_JS_SOURCE_CACHE` URL-source
    LRU and its private counters are retired: remote snapshots are admitted by
    `InputManager` after the generic HTTP disk-fetch cache, as required by
-   D8.5.1v2.
+   D8.5.1v3.
 3. Route JS CLI and `js-test-batch` compatible preambles through the same
    adapter while retaining their explicit hot-heap policy.
 4. Retire the legacy `JsMirCache` ownership/index while retaining only the
@@ -685,11 +697,11 @@ All successfully compiled Lambda, JS, and hosted-language scripts are cached
 by default, including main scripts and scripts reached by every command
 pipeline. This is not restricted to imported modules or batch runs. A
 one-shot command will normally gain no later hit before process exit, but it
-uses the same `ScriptInput` path. Cache-memory management and selective
-clearing are a future phase; retained-byte accounting starts immediately.
+uses the same `ScriptInput` path. Retention is unlimited by default; an
+explicit `LAMBDA_SCRIPT_CACHE_MAX_BYTES` cap reclaims inactive entries only.
 
 This generalizes D8.5.1 beyond its former imported-module wording and is
-ratified in **D8.5.1v2**.
+ratified in **D8.5.1v3**.
 
 ### Implementation status — 2026-09-14
 
@@ -701,10 +713,39 @@ service, including AST-dump/validation paths and imported modules; JS CLI,
 Node-style test-runner, module, and interpreter file acquisition use it; hosted
 CLI/Jube source bridges use language/profile keys; and Radiant local external
 JS, URL snapshots, plus its batch preamble/external-classic MIR adapter use it.
-The Radiant remote-fetch LRU remains transport-only and feeds exact URL bytes
-into the common service. Per-document input cleanup now retains the process
+The generic HTTP disk-fetch cache is transport-only and feeds exact URL bytes
+into the common service; the old Radiant remote-source LRU is retired.
+Per-document input cleanup now retains the process
 cache so a batch cannot leave an adapter pointing at destroyed cache state, and
 the Radiant MIR adapter holds active artifact leases until batch teardown.
+
+### Command-path audit — 2026-09-14
+
+The executable-source audit covers every loader below. Each terminal method
+creates a common source record or a lease under the process `InputManager`; no
+row owns a second source/artifact index.
+
+| Executable entry path | Common-service terminal | Source-level evidence |
+|---|---|---|
+| Lambda run, `transpile-mir`, imports, and REPL | `load_script()` → `input_script_cache_acquire[_file]()` | `lambda/runtime/runner.cpp`; import dispatch in `build_ast.cpp` |
+| Lambda AST dump and validator | `input_script_cache_copy_file_source()` | `lambda/runtime/emit_ast_dump.cpp`, `lambda/validator/ast_validate.cpp` |
+| JS CLI, Node/test runner, `require`, interpreter, module batch, and JS AST dump | `js_load_script_source_from_cache()` → `input_script_cache_copy_file_source()` | `lambda/main.cpp`, `lambda/js/js_mir_entrypoints_require.cpp`, `js_interp.cpp`, `js_mir_module_batch_lowering.cpp`, `js_emit_ast_dump.cpp` |
+| Radiant local external JS and URL snapshots | JS common helper or `script_runner_admit_url_source()` → `input_script_cache_copy_source()` | `radiant/script_runner.cpp`; generic HTTP disk reuse precedes URL admission |
+| Jube hosted CLI and direct Bash/Ruby guest loaders | `jube_host_source_read()` or `input_script_cache_copy_file_source()` | `lambda/jube/jube_registry.cpp`, `lambda/module/bash/transpile_bash_mir.cpp`, `lambda/module/rb/rb_runtime.cpp` |
+
+The companion direct-read sweep classified `radiant/cmd_layout.cpp` and
+`lambda/input/` documents, `js_require` JSON/package metadata, Node/JS
+filesystem APIs, npm manifests/tarballs, and generic HTTP transfer cache as
+data or transport, not executable-language loader paths. They intentionally do
+not participate in D8.5.1v3 script admission. This is a source-level inventory
+proof for this tree; new executable loaders must terminate at one of the
+common-service methods above and extend this table.
+
+The Lambda REPL is included in the first row: its empty bootstrap source is
+cache-admitted, but its mutable append-only AST/history remains source-only
+until the full history identity is part of an artifact key. This prevents a
+`clear` or a fresh session from mutating a template that another session can
+observe (D8.5.1v3).
 
 The reusable-artifact slice now includes Lambda interpreter import/view
 overlays and JIT module cones. A cached T0 parent creates fresh Script shells
@@ -716,7 +757,7 @@ owner/slot rather than writing resolution state into a cached `NameEntry`.
 P2 promotion counters and boxed satellite entries likewise live in a
 per-`Script` overlay for cached AST instances; an execution can neither read
 an entry from a retired EvalContext nor publish one into the parser-owned
-definition (D8.1.1v2/D8.5.1v2). A P2-touched AST image is conservatively
+definition (D8.1.1v2/D8.5.1v3). A P2-touched AST image is conservatively
 excluded from later AST hits until lowering's remaining mutable facts receive
 the same overlay; this is a correctness gate, not poisoning or eviction.
 Eager JIT AST-miss reuse remains excluded because MIR lowering still mutates
@@ -734,9 +775,10 @@ the existing fresh-document-realm regression covers its instantiation path.
 
 TLA/dynamic/re-export/cross-language JS module artifacts, CommonJS module MIR
 artifacts, hosted-language artifact paths, guest single-flight adoption,
-JS/guest dependency-cone invalidation outside static local ESM, richer failure
-recovery, eviction, eager-JIT AST-miss overlays, and the full command-pipeline
-inventory remain open Phase 2–5 work. Lambda file-backed import cones and the
+JS/guest dependency-cone invalidation outside static local ESM, broader
+timeout/crash containment, richer budget policy, and eager-JIT AST-miss
+overlays plus REPL history-keyed artifact reuse remain open Phase 2–5 work.
+Lambda file-backed import cones and the
 admitted static-JS-import module cones are recorded by persistent unit ID; a
 cache hit refreshes a changed child generation and retires all affected
 importers before reuse.
@@ -756,7 +798,7 @@ retired: its replacement
 owns only batch accounting and active leases while `InputScriptCache` owns
 artifact identity and lifetime.
 
-### R3 — Stable logical compilation-unit IDs (implemented 2026-09-14; D8.5.1v2)
+### R3 — Stable logical compilation-unit IDs (implemented 2026-09-14; D8.5.1v3)
 
 A stable ID is required only for **reusable Lambda MIR**, not as an additional
 user-visible script identity. Today `write_fn_name_ex()` and `write_var_name()`
@@ -795,12 +837,13 @@ tree, a replay representation, or only source bytes. It is intentionally out
 of the script implementation path; the recommended default is immutable
 artifact plus fresh consumer view, never shared mutable `Input` state.
 
-### Deferred — Cache memory policy
+### Deferred — Rich cache-memory policy
 
-There is no default eviction or high-water clearing policy in this proposal's
-first implementation. It retains all successfully admitted script inputs under
-the persistent manager and records exact retained bytes. A later cache-memory
-proposal chooses limits, priorities, and safe dependency-cone clearing.
+The first implementation retains all successfully admitted script inputs by
+default and has only an opt-in inactive-entry LRU byte cap. It deliberately
+does not evict an active lease, prioritize artifact classes, or clear module
+dependency cones under memory pressure. A later cache-memory proposal chooses
+those priorities and safe dependency-cone reclamation rules.
 
 ---
 
