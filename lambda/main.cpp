@@ -6,6 +6,7 @@
 #include "../lib/mem_context.h"
 #include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
+#include "../lib/byte_builder.h"
 #include "jube/jube_interface.h"
 #include "jube/jube_language.h"
 #include "jube/jube_registry.h"
@@ -802,29 +803,23 @@ static void default_render_cmd_to_interp(void) {
 }
 
 static char* read_stdin_source(size_t* out_len) {
-    size_t cap = 4096;
-    size_t len = 0;
-    char* buf = (char*)mem_alloc(cap + 1, MEM_CAT_SYSTEM);
-    if (!buf) {
+    ByteBuilder source;
+    if (!byte_builder_init(&source, 4096, MEM_CAT_SYSTEM, true)) {
         if (out_len) *out_len = 0;
         return NULL;
     }
+
+    uint8_t chunk[4096];
     for (;;) {
-        if (len == cap) {
-            cap *= 2;
-            buf = (char*)mem_realloc(buf, cap + 1, MEM_CAT_SYSTEM);
-            if (!buf) {
-                if (out_len) *out_len = 0;
-                return NULL;
-            }
+        size_t length = fread(chunk, 1, sizeof(chunk), stdin);
+        if (!byte_builder_append(&source, chunk, length)) {
+            byte_builder_destroy(&source);
+            if (out_len) *out_len = 0;
+            return NULL;
         }
-        size_t n = fread(buf + len, 1, cap - len, stdin);
-        len += n;
-        if (n == 0) break;
+        if (length < sizeof(chunk)) break;
     }
-    buf[len] = '\0';
-    if (out_len) *out_len = len;
-    return buf;
+    return (char*)byte_builder_take(&source, out_len);
 }
 
 // External function declarations

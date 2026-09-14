@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "../../lib/mem.h"
+#include "../../lib/byte_builder.h"
 #include "input.hpp"
 #include "../../lib/file.h"
 #include "../../lib/log.h"
@@ -14,8 +15,7 @@
 
 // Structure to hold response data
 typedef struct {
-    char* data;
-    size_t size;
+    ByteBuilder body;
 } HttpResponse;
 
 // HttpConfig is now defined in input.h
@@ -42,26 +42,12 @@ static void http_set_request_body(CURL* curl, const FetchConfig* config) {
 // Callback function to write response data
 static size_t write_response_callback(void* contents, size_t size, size_t nmemb, HttpResponse* response) {
     size_t total_size = size * nmemb;
-
-    // enforce maximum response size
-    if (response->size + total_size > HTTP_MAX_RESPONSE_SIZE) {
+    if (!response || !byte_builder_append_limited(&response->body, contents,
+                                                   total_size, HTTP_MAX_RESPONSE_SIZE)) {
         log_error("HTTP: Response exceeds maximum size (%d MB), aborting download",
                   HTTP_MAX_RESPONSE_SIZE / (1024 * 1024));
         return 0;  // returning 0 causes curl to abort with CURLE_WRITE_ERROR
     }
-
-    char* new_data = (char*)mem_realloc(response->data, response->size + total_size + 1, MEM_CAT_TEMP);  // tracked realloc: callers use mem_free()
-
-    if (!new_data) {
-        log_error("HTTP: Memory allocation failed");
-        return 0;
-    }
-
-    response->data = new_data;
-    memcpy(&(response->data[response->size]), contents, total_size);
-    response->size += total_size;
-    response->data[response->size] = '\0';
-
     return total_size;
 }
 
@@ -108,6 +94,10 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
     }
 
     HttpResponse response = {0};
+    if (!byte_builder_init(&response.body, 0, MEM_CAT_TEMP, true)) {
+        curl_easy_cleanup(curl);
+        return NULL;
+    }
     CURLcode res;
 
     // Configure curl options
@@ -168,7 +158,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
                 log_error("HTTP: Download failed for %s: %s", url, curl_easy_strerror(res));
                 break;
         }
-        mem_free(response.data);  // tracked free: matches mem_realloc in write_response_callback
+        byte_builder_destroy(&response.body);
         curl_easy_cleanup(curl);
         return NULL;
     }
@@ -179,24 +169,13 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
 
     if (response_code >= 400) {
         log_error("HTTP: Server returned error %ld for %s", response_code, url);
-        mem_free(response.data);  // tracked free: matches mem_realloc in write_response_callback
+        byte_builder_destroy(&response.body);
         curl_easy_cleanup(curl);
         return NULL;
     }
 
-    log_debug("HTTP: Successfully downloaded %zu bytes from %s (HTTP %ld)\n", response.size, url, response_code);
-
-    if (!response.data) {
-        // Successful zero-byte responses do not call the curl write callback;
-        // return an allocated empty buffer so callers can distinguish them from
-        // transport failures.
-        response.data = (char*)mem_alloc(1, MEM_CAT_TEMP);
-        if (!response.data) {
-            curl_easy_cleanup(curl);
-            return NULL;
-        }
-        response.data[0] = '\0';
-    }
+    log_debug("HTTP: Successfully downloaded %zu bytes from %s (HTTP %ld)\n",
+              response.body.length, url, response_code);
 
     // Capture effective URL after redirects (may differ from original url)
     if (effective_url) {
@@ -211,11 +190,11 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
     }
 
     if (content_size) {
-        *content_size = response.size;
+        *content_size = response.body.length;
     }
 
     curl_easy_cleanup(curl);
-    return response.data;
+    return (char*)byte_builder_take(&response.body, NULL);
 }
 
 // Download HTTP/HTTPS resource to cache, return local file path or memory buffer

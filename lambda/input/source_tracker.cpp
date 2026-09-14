@@ -2,6 +2,7 @@
 #include "../../lib/log.h"
 #include "../../lib/str.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/mem_grow.hpp"
 #include <cstring>
 
 namespace lambda {
@@ -29,18 +30,12 @@ SourceTracker::~SourceTracker() {
 bool SourceTracker::pushLineStart(size_t offset) {
     if (line_index_failed_) return false;
     if (line_count_ == line_cap_) {
-        // Size the first block from the source so small documents allocate
-        // once; grow geometrically afterwards.
-        size_t new_cap = line_cap_ ? line_cap_ * 2 : (source_len_ / 40 + 16);
-        size_t* grown = (size_t*)mem_realloc(line_starts_, new_cap * sizeof(size_t),
-            MEM_CAT_INPUT_OTHER);
-        if (!grown) {
+        if (!lam::mem_grow_array(&line_starts_, &line_cap_, line_count_ + 1,
+                                 source_len_ / 40 + 16, MEM_CAT_INPUT_OTHER)) {
             log_error("SourceTracker: line index allocation failed at %zu lines", line_count_);
             line_index_failed_ = true;
             return false;
         }
-        line_starts_ = grown;
-        line_cap_ = new_cap;
     }
     line_starts_[line_count_++] = offset;
     return true;

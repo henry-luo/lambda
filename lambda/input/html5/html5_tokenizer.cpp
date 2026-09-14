@@ -2,6 +2,7 @@
 #include "html5_token.h"
 #include "../../../lib/log.h"
 #include "../../../lib/str.h"
+#include "../../../lib/mem_grow.hpp"
 #include "../../io/mark_builder.hpp"
 #include "../../../lib/html_entities.h"
 #include "../input-utils.h"
@@ -293,22 +294,14 @@ void html5_error_list_init(Html5ErrorList* list, Arena* arena) {
     list->arena = arena;
 }
 
-static void html5_error_list_grow(Html5ErrorList* list) {
-    size_t new_capacity = list->capacity == 0 ? 16 : list->capacity * 2;
-    Html5Error* new_errors = (Html5Error*)arena_alloc(list->arena,
-                                                       new_capacity * sizeof(Html5Error));
-    if (list->errors && list->count > 0) {
-        memcpy(new_errors, list->errors, list->count * sizeof(Html5Error));
-    }
-    list->errors = new_errors;
-    list->capacity = new_capacity;
+static bool html5_error_list_grow(Html5ErrorList* list) {
+    return list && lam::arena_grow_array(list->arena, &list->errors,
+        &list->capacity, list->count, list->count + 1, 16);
 }
 
 void html5_error_list_add(Html5ErrorList* list, Html5ErrorType type,
                           Html5SourcePosition pos, const char* original_text) {
-    if (list->count >= list->capacity) {
-        html5_error_list_grow(list);
-    }
+    if (list->count >= list->capacity && !html5_error_list_grow(list)) return;
     Html5Error* err = &list->errors[list->count++];
     err->type = type;
     err->position = pos;
@@ -318,9 +311,7 @@ void html5_error_list_add(Html5ErrorList* list, Html5ErrorType type,
 
 void html5_error_list_add_codepoint(Html5ErrorList* list, Html5ErrorType type,
                                     Html5SourcePosition pos, int codepoint) {
-    if (list->count >= list->capacity) {
-        html5_error_list_grow(list);
-    }
+    if (list->count >= list->capacity && !html5_error_list_grow(list)) return;
     Html5Error* err = &list->errors[list->count++];
     err->type = type;
     err->position = pos;
@@ -330,9 +321,7 @@ void html5_error_list_add_codepoint(Html5ErrorList* list, Html5ErrorType type,
 
 void html5_error_list_add_tag(Html5ErrorList* list, Html5ErrorType type,
                               Html5SourcePosition pos, const char* tag_name) {
-    if (list->count >= list->capacity) {
-        html5_error_list_grow(list);
-    }
+    if (list->count >= list->capacity && !html5_error_list_grow(list)) return;
     Html5Error* err = &list->errors[list->count++];
     err->type = type;
     err->position = pos;
@@ -404,14 +393,9 @@ static String* html5_create_lowercase_string_from_temp_buffer(Html5Parser* parse
 
 // helper: append character to temp buffer
 static void html5_append_to_temp_buffer(Html5Parser* parser, char c) {
-    if (parser->temp_buffer_len >= parser->temp_buffer_capacity) {
-        // resize temp buffer
-        size_t new_capacity = parser->temp_buffer_capacity * 2;
-        char* new_buffer = (char*)arena_alloc(parser->arena, new_capacity);
-        memcpy(new_buffer, parser->temp_buffer, parser->temp_buffer_len);
-        parser->temp_buffer = new_buffer;
-        parser->temp_buffer_capacity = new_capacity;
-    }
+    if (!lam::arena_grow_array(parser->arena, &parser->temp_buffer,
+            &parser->temp_buffer_capacity, parser->temp_buffer_len,
+            parser->temp_buffer_len + 1, 4096)) return;
     parser->temp_buffer[parser->temp_buffer_len++] = c;
 }
 
@@ -436,18 +420,9 @@ static void html5_clear_temp_buffer(Html5Parser* parser) {
 
 // helper: append to attribute name buffer
 static void html5_append_to_attr_name(Html5Parser* parser, char c) {
-    if (parser->current_attr_name == nullptr) {
-        parser->current_attr_name_capacity = 32;
-        parser->current_attr_name = (char*)arena_alloc(parser->arena, parser->current_attr_name_capacity);
-        parser->current_attr_name_len = 0;
-    }
-    if (parser->current_attr_name_len >= parser->current_attr_name_capacity - 1) {
-        size_t new_capacity = parser->current_attr_name_capacity * 2;
-        char* new_buffer = (char*)arena_alloc(parser->arena, new_capacity);
-        memcpy(new_buffer, parser->current_attr_name, parser->current_attr_name_len);
-        parser->current_attr_name = new_buffer;
-        parser->current_attr_name_capacity = new_capacity;
-    }
+    if (!lam::arena_grow_array(parser->arena, &parser->current_attr_name,
+            &parser->current_attr_name_capacity, parser->current_attr_name_len,
+            parser->current_attr_name_len + 2, 32)) return;
     parser->current_attr_name[parser->current_attr_name_len++] = c;
     parser->current_attr_name[parser->current_attr_name_len] = '\0';
 }

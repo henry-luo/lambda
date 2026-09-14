@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "../../lib/byte_storage.h"
+#include "../../lib/byte_builder.h"
 
 typedef struct ReleaseProbe {
     int calls;
@@ -18,6 +19,22 @@ static void release_probe_callback(void* data, size_t capacity, void* context) {
     EXPECT_EQ(data, probe->expected_data);
     EXPECT_EQ(capacity, probe->expected_capacity);
     free(data);
+}
+
+TEST(ByteBuilderTest, AppendsBoundedTextAndTransfersOwnership) {
+    ByteBuilder builder = {};
+    ASSERT_TRUE(byte_builder_init(&builder, 0, MEM_CAT_CONTAINER, true));
+    EXPECT_TRUE(byte_builder_append(&builder, "ab", 2));
+    EXPECT_TRUE(byte_builder_append_limited(&builder, "cd", 2, 4));
+    EXPECT_FALSE(byte_builder_append_limited(&builder, "e", 1, 4));
+    ASSERT_NE(builder.data, nullptr);
+    EXPECT_STREQ((const char*)builder.data, "abcd");
+    size_t length = 0;
+    uint8_t* data = byte_builder_take(&builder, &length);
+    ASSERT_NE(data, nullptr);
+    EXPECT_EQ(length, 4u);
+    EXPECT_STREQ((const char*)data, "abcd");
+    mem_free(data);
 }
 
 TEST(ByteStorageTest, EmptyStorageHasAValidEmptySpan) {

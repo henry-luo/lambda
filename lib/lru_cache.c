@@ -209,6 +209,20 @@ size_t lru_cache_evict_one(LruCache* c) {
     return freed;
 }
 
+size_t lru_cache_remove_if(LruCache* c, LruRemoveIfFn predicate, void* udata) {
+    if (!c || !predicate) return 0;
+    size_t removed = 0;
+    for (LruNode* node = c->head; node;) {
+        LruNode* next = node->next;
+        if (predicate(node->key, node->value, node->bytes, udata)) {
+            lru_destroy_node(c, node);
+            removed++;
+        }
+        node = next;
+    }
+    return removed;
+}
+
 size_t lru_cache_count(const LruCache* c) { return c ? c->count : 0; }
 size_t lru_cache_bytes(const LruCache* c) { return c ? c->bytes : 0; }
 

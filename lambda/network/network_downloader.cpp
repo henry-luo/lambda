@@ -10,6 +10,7 @@
 #include <curl/curl.h>
 #include <string.h>
 #include "../../lib/mem.h"
+#include "../../lib/byte_builder.h"
 #include <time.h>
 #include <pthread.h>
 
@@ -63,8 +64,7 @@ void network_downloader_cleanup_shared(void) {
 
 // Response data structure
 typedef struct {
-    char* data;
-    size_t size;
+    ByteBuilder body;
 } HttpResponse;
 
 typedef struct {
@@ -77,26 +77,12 @@ typedef struct {
 // Callback for curl to write response data
 static size_t write_response_callback(void* contents, size_t size, size_t nmemb, HttpResponse* response) {
     size_t total_size = size * nmemb;
-    
-    // enforce maximum resource size
-    if (response->size + total_size > NETWORK_MAX_RESOURCE_SIZE) {
+    if (!response || !byte_builder_append_limited(&response->body, contents,
+                                                   total_size, NETWORK_MAX_RESOURCE_SIZE)) {
         log_error("network: resource exceeds maximum size (%d MB), aborting download",
                   NETWORK_MAX_RESOURCE_SIZE / (1024 * 1024));
         return 0;  // returning 0 causes curl to abort with CURLE_WRITE_ERROR
     }
-    
-    char* new_data = (char*)mem_realloc(response->data, response->size + total_size + 1, MEM_CAT_NETWORK);
-    
-    if (!new_data) {
-        log_error("network: memory allocation failed during download");
-        return 0;
-    }
-    
-    response->data = new_data;
-    memcpy(&(response->data[response->size]), contents, total_size);
-    response->size += total_size;
-    response->data[response->size] = '\0';
-    
     return total_size;
 }
 
@@ -199,6 +185,10 @@ bool network_download_resource(NetworkResource* res) {
     }
     
     HttpResponse response = {0};
+    if (!byte_builder_init(&response.body, 0, MEM_CAT_NETWORK, true)) {
+        curl_easy_cleanup(curl);
+        return false;
+    }
     DownloadProgressCtx progress_ctx = { .resource = res };
     CURLcode curl_res;
     
@@ -314,7 +304,7 @@ bool network_download_resource(NetworkResource* res) {
         if (res->error_message) mem_free(res->error_message);
         res->error_message = mem_strdup(error_msg, MEM_CAT_NETWORK);
         
-        mem_free(response.data);
+        byte_builder_destroy(&response.body);
         if (custom_headers) curl_slist_free_all(custom_headers);
         curl_easy_cleanup(curl);
         return false;
@@ -340,7 +330,7 @@ bool network_download_resource(NetworkResource* res) {
         if (res->error_message) mem_free(res->error_message);
         res->error_message = mem_strdup(error_msg, MEM_CAT_NETWORK);
         
-        mem_free(response.data);
+        byte_builder_destroy(&response.body);
         if (custom_headers) curl_slist_free_all(custom_headers);
         curl_easy_cleanup(curl);
         return false;
@@ -351,14 +341,15 @@ bool network_download_resource(NetworkResource* res) {
     curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &final_url);
     
     log_debug("network: successfully downloaded %zu bytes from %s (HTTP %ld)",
-              response.size, res->url, http_code);
+              response.body.length, res->url, http_code);
     
     // Store in cache opportunistically. If the bounded cache pipeline is full,
     // skip persistence and fall back to a per-resource temp file; page loading
     // must not wait behind cache body writes.
     if (res->cache) {
         char* cached_path = enhanced_cache_try_store(res->cache, res->url,
-                                                     response.data, response.size, NULL);
+                                                     (const char*)response.body.data,
+                                                     response.body.length, NULL);
         if (cached_path) {
             if (res->local_path) mem_free(res->local_path);
             res->local_path = cached_path;
@@ -375,7 +366,7 @@ bool network_download_resource(NetworkResource* res) {
         // Write content to file
         FILE* f = fopen(temp_path, "wb");
         if (f) {
-            fwrite(response.data, 1, response.size, f);
+            fwrite(response.body.data, 1, response.body.length, f);
             fclose(f);
             res->local_path = mem_strdup(temp_path, MEM_CAT_NETWORK);
             log_debug("network: saved to temporary file: %s", temp_path);
@@ -384,7 +375,7 @@ bool network_download_resource(NetworkResource* res) {
         }
     }
     
-    mem_free(response.data);
+    byte_builder_destroy(&response.body);
     if (custom_headers) curl_slist_free_all(custom_headers);
     curl_easy_cleanup(curl);
     

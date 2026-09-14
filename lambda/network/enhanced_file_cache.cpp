@@ -1,38 +1,16 @@
 // enhanced_file_cache.cpp
-// Full implementation with hashmap-based cache lookup and LRU eviction
+// Shared-LRU implementation with HTTP cache policy
 
 #include "enhanced_file_cache.h"
 #include "../../lib/file_utils.h"
 #include "../../lib/file.h"
 #include "../../lib/log.h"
-#include "../../lib/hashmap.h"
-#include "../../lib/hashmap_helpers.h"
 #include "../../lib/str.h"
 #include "../../lib/mem.h"
 #include "../../lib/hex.h"
 #include "../../lib/digest.h"
 #include <string.h>
 #include <errno.h>
-
-// hashmap entry for URL→CacheMetadata lookup
-typedef struct {
-    char* url;              // key (owned)
-    CacheMetadata* meta;    // value (owned)
-} CacheEntry;
-
-HASHMAP_DEFINE_STRKEY(cache_entry, CacheEntry, url)
-
-// free function for cache entries
-static void cache_entry_free(void* item) {
-    CacheEntry* entry = (CacheEntry*)item;
-    if (entry->url) mem_free(entry->url);
-    if (entry->meta) {
-        mem_free(entry->meta->url);
-        mem_free(entry->meta->cache_path);
-        mem_free(entry->meta->etag);
-        mem_free(entry->meta);
-    }
-}
 
 // compute sha-256 hash through the shared digest facade
 static void compute_sha256(const char* input, unsigned char* output) {
@@ -50,40 +28,44 @@ static char* sha256_to_hex(const unsigned char* hash) {
     return hex;
 }
 
-// LRU list helpers
-static void lru_remove(EnhancedFileCache* cache, CacheMetadata* meta) {
-    if (meta->lru_prev) meta->lru_prev->lru_next = meta->lru_next;
-    if (meta->lru_next) meta->lru_next->lru_prev = meta->lru_prev;
-    if (cache->lru_head == meta) cache->lru_head = meta->lru_next;
-    if (cache->lru_tail == meta) cache->lru_tail = meta->lru_prev;
-    meta->lru_prev = meta->lru_next = NULL;
-}
-
-static void lru_insert_front(EnhancedFileCache* cache, CacheMetadata* meta) {
-    meta->lru_prev = NULL;
-    meta->lru_next = cache->lru_head;
-    if (cache->lru_head) cache->lru_head->lru_prev = meta;
-    cache->lru_head = meta;
-    if (!cache->lru_tail) cache->lru_tail = meta;
-}
-
-static void lru_touch(EnhancedFileCache* cache, CacheMetadata* meta) {
-    lru_remove(cache, meta);
-    lru_insert_front(cache, meta);
-    meta->last_accessed = time(NULL);
+static void cache_entry_evict(const char* url, void* value, size_t bytes, void* udata) {
+    (void)bytes;
+    CacheMetadata* meta = (CacheMetadata*)value;
+    if (!meta) return;
+    log_debug("cache: removing entry: %s", url);
+    EnhancedFileCache* cache = (EnhancedFileCache*)udata;
+    if ((!cache || cache->remove_files_on_evict) && meta->cache_path) {
+        file_delete(meta->cache_path);
+    }
+    mem_free(meta->cache_path);
+    mem_free(meta->etag);
+    mem_free(meta);
 }
 
 static bool enhanced_cache_evict_lru_locked(EnhancedFileCache* cache) {
-    if (!cache || !cache->lru_tail) return false;
-    CacheMetadata* victim = cache->lru_tail;
-    log_debug("cache: evicting LRU entry: %s", victim->url);
-    lru_remove(cache, victim);
-    if (victim->cache_path) file_delete(victim->cache_path);
-    cache->current_size_bytes -= victim->content_size;
-    cache->entry_count--;
-    CacheEntry key = { .url = victim->url, .meta = NULL };
-    hashmap_delete((struct hashmap*)cache->metadata_map, &key);
+    if (!cache || lru_cache_count(cache->entries) == 0) return false;
+    lru_cache_evict_one(cache->entries);
     return true;
+}
+
+static bool cache_metadata_expired(const CacheMetadata* meta, time_t now) {
+    return meta && meta->expires > 0 && meta->expires < now;
+}
+
+static bool cache_metadata_is_expired(const char* key, void* value,
+                                      size_t bytes, void* user_data) {
+    (void)key;
+    (void)bytes;
+    return cache_metadata_expired((const CacheMetadata*)value, *(const time_t*)user_data);
+}
+
+static void cache_metadata_apply_headers(CacheMetadata* meta,
+                                         const HttpCacheHeaders* headers) {
+    if (!meta || !headers) return;
+    mem_free(meta->etag);
+    meta->etag = headers->etag ? mem_strdup(headers->etag, MEM_CAT_NETWORK) : NULL;
+    meta->expires = headers->expires > 0 ? headers->expires :
+        (headers->max_age > 0 ? time(NULL) + headers->max_age : 0);
 }
 
 static bool cache_acquire_write_slot(EnhancedFileCache* cache, bool wait_for_slot) {
@@ -121,20 +103,14 @@ EnhancedFileCache* enhanced_cache_create(const char* cache_dir, size_t max_size,
     cache->cache_dir = mem_strdup(cache_dir ? cache_dir : "./temp/radiant_cache", MEM_CAT_NETWORK);
     cache->max_size_bytes = max_size;
     cache->max_entries = max_entries > 0 ? max_entries : 10000;
-    cache->current_size_bytes = 0;
-    cache->entry_count = 0;
-    cache->hit_count = 0;
-    cache->miss_count = 0;
-    cache->lru_head = NULL;
-    cache->lru_tail = NULL;
     cache->max_concurrent_writes = 2;
-    cache->active_writes = 0;
-    cache->skipped_write_count = 0;
-
-    // create hashmap for URL→CacheMetadata lookup
-    cache->metadata_map = cache_entry_new_with_free(0, cache_entry_free);
-
-    if (!cache->metadata_map) {
+    cache->remove_files_on_evict = true;
+    LruCacheConfig config = {};
+    config.on_evict = cache_entry_evict;
+    config.udata = cache;
+    cache->entries = lru_cache_new(&config);
+    if (!cache->cache_dir || !cache->entries) {
+        lru_cache_free(cache->entries);
         mem_free(cache->cache_dir);
         mem_free(cache);
         return NULL;
@@ -154,14 +130,15 @@ EnhancedFileCache* enhanced_cache_create(const char* cache_dir, size_t max_size,
 void enhanced_cache_destroy(EnhancedFileCache* cache) {
     if (!cache) return;
 
+    pthread_rwlock_wrlock(&cache->rwlock);
+    cache->remove_files_on_evict = false;
+    lru_cache_free(cache->entries);
+    cache->entries = NULL;
+    pthread_rwlock_unlock(&cache->rwlock);
+
     pthread_rwlock_destroy(&cache->rwlock);
     pthread_mutex_destroy(&cache->write_mutex);
     pthread_cond_destroy(&cache->write_cond);
-
-    // hashmap_free also calls cache_entry_free on each entry
-    if (cache->metadata_map) {
-        hashmap_free((struct hashmap*)cache->metadata_map);
-    }
 
     mem_free(cache->cache_dir);
     mem_free(cache);
@@ -172,49 +149,23 @@ void enhanced_cache_destroy(EnhancedFileCache* cache) {
 char* enhanced_cache_lookup(EnhancedFileCache* cache, const char* url) {
     if (!cache || !url) return NULL;
 
-    pthread_rwlock_rdlock(&cache->rwlock);
-
-    // lookup in hashmap
-    CacheEntry key = { .url = (char*)url, .meta = NULL };
-    const CacheEntry* found = (const CacheEntry*)hashmap_get(
-        (struct hashmap*)cache->metadata_map, &key);
-
-    if (found && found->meta && found->meta->cache_path) {
-        // check if file still exists
-        if (file_exists(found->meta->cache_path)) {
-            // check if expired
-            if (found->meta->expires > 0 && found->meta->expires < time(NULL)) {
-                log_debug("cache: expired entry for %s", url);
-                pthread_rwlock_unlock(&cache->rwlock);
-
-                // upgrade to write lock to update miss count
-                pthread_rwlock_wrlock(&cache->rwlock);
-                ((EnhancedFileCache*)cache)->miss_count++;
-                pthread_rwlock_unlock(&cache->rwlock);
-                return NULL;
-            }
-
-            // cache hit
-            char* result = mem_strdup(found->meta->cache_path, MEM_CAT_NETWORK);
-            pthread_rwlock_unlock(&cache->rwlock);
-
-            // upgrade to write lock for LRU update
-            pthread_rwlock_wrlock(&cache->rwlock);
-            lru_touch(cache, found->meta);
-            cache->hit_count++;
-            pthread_rwlock_unlock(&cache->rwlock);
-
-            log_debug("cache: hit for %s -> %s", url, result);
-            return result;
+    pthread_rwlock_wrlock(&cache->rwlock);
+    CacheMetadata* meta = (CacheMetadata*)lru_cache_get(cache->entries, url);
+    bool valid = meta && meta->cache_path && file_exists(meta->cache_path) &&
+        !cache_metadata_expired(meta, time(NULL));
+    char* result = valid ? mem_strdup(meta->cache_path, MEM_CAT_NETWORK) : NULL;
+    if (valid && result) cache->hit_count++;
+    else {
+        if (meta && (!meta->cache_path || !file_exists(meta->cache_path) ||
+                     cache_metadata_expired(meta, time(NULL)))) {
+            lru_cache_delete(cache->entries, url);
         }
+        cache->miss_count++;
     }
-
-    // cache miss
-    ((EnhancedFileCache*)cache)->miss_count++;
     pthread_rwlock_unlock(&cache->rwlock);
-
-    log_debug("cache: miss for %s", url);
-    return NULL;
+    if (result) log_debug("cache: hit for %s -> %s", url, result);
+    else log_debug("cache: miss for %s", url);
+    return result;
 }
 
 static char* enhanced_cache_store_impl(EnhancedFileCache* cache, const char* url,
@@ -224,10 +175,20 @@ static char* enhanced_cache_store_impl(EnhancedFileCache* cache, const char* url
 
     pthread_rwlock_wrlock(&cache->rwlock);
 
-    // evict if needed before storing
-    while (cache->entry_count >= cache->max_entries ||
-           (cache->current_size_bytes + size > cache->max_size_bytes && cache->entry_count > 0)) {
+    // Touch a replacement before eviction so its metadata stays live while
+    // capacity pressure removes older entries.
+    CacheMetadata* meta = (CacheMetadata*)lru_cache_get(cache->entries, url);
+    size_t retained_bytes = lru_cache_bytes(cache->entries) -
+        (meta ? meta->content_size : 0);
+    while ((!meta && cache->max_entries > 0 &&
+            lru_cache_count(cache->entries) >= (size_t)cache->max_entries) ||
+           (cache->max_size_bytes > 0 &&
+            (retained_bytes > cache->max_size_bytes ||
+             size > cache->max_size_bytes - retained_bytes) &&
+            lru_cache_count(cache->entries) > (meta ? 1u : 0u))) {
         if (!enhanced_cache_evict_lru_locked(cache)) break;
+        retained_bytes = lru_cache_bytes(cache->entries) -
+            (meta ? meta->content_size : 0);
     }
 
     // compute hash for filename
@@ -242,6 +203,11 @@ static char* enhanced_cache_store_impl(EnhancedFileCache* cache, const char* url
     // create path: cache_dir/AB/ABCDEF...cache
     size_t path_cap = strlen(cache->cache_dir) + 80;
     char* path = (char*)mem_alloc(path_cap, MEM_CAT_NETWORK);
+    if (!path) {
+        mem_free(hex);
+        pthread_rwlock_unlock(&cache->rwlock);
+        return NULL;
+    }
     str_fmt(path, path_cap, "%s/%c%c/%s.cache", cache->cache_dir, hex[0], hex[1], hex);
 
     // create subdirectory
@@ -262,56 +228,46 @@ static char* enhanced_cache_store_impl(EnhancedFileCache* cache, const char* url
     fwrite(content, 1, size, f);
     fclose(f);
 
-    // check if entry already exists (update case)
-    CacheEntry key = { .url = (char*)url, .meta = NULL };
-    const CacheEntry* existing = (const CacheEntry*)hashmap_get(
-        (struct hashmap*)cache->metadata_map, &key);
-
-    if (existing && existing->meta) {
-        // update existing entry
-        CacheMetadata* meta = existing->meta;
-        lru_touch(cache, meta);
-
-        cache->current_size_bytes -= meta->content_size;
-        meta->content_size = size;
-        cache->current_size_bytes += size;
-
-        mem_free(meta->cache_path);
-        meta->cache_path = mem_strdup(path, MEM_CAT_NETWORK);
-
-        if (headers) {
-            mem_free(meta->etag);
-            meta->etag = headers->etag ? mem_strdup(headers->etag, MEM_CAT_NETWORK) : NULL;
-            meta->expires = headers->expires > 0 ? headers->expires :
-                           (headers->max_age > 0 ? time(NULL) + headers->max_age : 0);
+    if (meta) {
+        char* replacement_path = mem_strdup(path, MEM_CAT_NETWORK);
+        if (!replacement_path) {
+            mem_free(hex);
+            mem_free(path);
+            pthread_rwlock_unlock(&cache->rwlock);
+            return NULL;
         }
-
+        mem_free(meta->cache_path);
+        meta->cache_path = replacement_path;
+        meta->content_size = size;
+        meta->last_accessed = time(NULL);
+        cache_metadata_apply_headers(meta, headers);
+        if (!meta->cache_path || !lru_cache_put(cache->entries, url, meta, size)) {
+            mem_free(hex);
+            mem_free(path);
+            pthread_rwlock_unlock(&cache->rwlock);
+            return NULL;
+        }
         log_debug("cache: updated %s (%zu bytes) -> %s", url, size, path);
     } else {
-        // create new metadata entry
-        CacheMetadata* meta = (CacheMetadata*)mem_calloc(1, sizeof(CacheMetadata), MEM_CAT_NETWORK);
-        meta->url = mem_strdup(url, MEM_CAT_NETWORK);
+        meta = (CacheMetadata*)mem_calloc(1, sizeof(CacheMetadata), MEM_CAT_NETWORK);
+        if (!meta) {
+            mem_free(hex);
+            mem_free(path);
+            pthread_rwlock_unlock(&cache->rwlock);
+            return NULL;
+        }
         meta->cache_path = mem_strdup(path, MEM_CAT_NETWORK);
         meta->content_size = size;
         meta->created_at = time(NULL);
         meta->last_accessed = time(NULL);
-
-        if (headers) {
-            meta->etag = headers->etag ? mem_strdup(headers->etag, MEM_CAT_NETWORK) : NULL;
-            meta->expires = headers->expires > 0 ? headers->expires :
-                           (headers->max_age > 0 ? time(NULL) + headers->max_age : 0);
+        cache_metadata_apply_headers(meta, headers);
+        if (!meta->cache_path || !lru_cache_put(cache->entries, url, meta, size)) {
+            cache_entry_evict(url, meta, size, NULL);
+            mem_free(hex);
+            mem_free(path);
+            pthread_rwlock_unlock(&cache->rwlock);
+            return NULL;
         }
-
-        // add to LRU list
-        lru_insert_front(cache, meta);
-
-        // add to hashmap
-        CacheEntry entry = { .url = mem_strdup(url, MEM_CAT_NETWORK), .meta = meta };
-        hashmap_set((struct hashmap*)cache->metadata_map, &entry);
-
-        cache->current_size_bytes += size;
-        cache->entry_count++;
-
         log_debug("cache: stored %s (%zu bytes) -> %s", url, size, path);
     }
 
@@ -369,26 +325,13 @@ void enhanced_cache_evict_expired(EnhancedFileCache* cache) {
     pthread_rwlock_wrlock(&cache->rwlock);
 
     time_t now = time(NULL);
-    int evicted = 0;
-
-    // iterate through hashmap and collect expired entries
-    size_t iter = 0;
-    void* item;
-    while (hashmap_iter((struct hashmap*)cache->metadata_map, &iter, &item)) {
-        CacheEntry* entry = (CacheEntry*)item;
-        if (entry->meta && entry->meta->expires > 0 && entry->meta->expires < now) {
-            // mark for removal (can't remove during iteration)
-            // for simplicity, just log and continue - real eviction happens on lookup
-            log_debug("cache: found expired entry: %s (expired %ld seconds ago)",
-                      entry->url, now - entry->meta->expires);
-            evicted++;
-        }
-    }
+    size_t evicted = lru_cache_remove_if(cache->entries,
+        cache_metadata_is_expired, &now);
 
     pthread_rwlock_unlock(&cache->rwlock);
 
     if (evicted > 0) {
-        log_debug("cache: found %d expired entries", evicted);
+        log_debug("cache: removed %zu expired entries", evicted);
     }
 }
 
@@ -397,35 +340,18 @@ void enhanced_cache_clear(EnhancedFileCache* cache) {
 
     pthread_rwlock_wrlock(&cache->rwlock);
 
-    log_debug("cache: clearing all %d entries", cache->entry_count);
-
-    // iterate and remove files
-    size_t iter = 0;
-    void* item;
-    while (hashmap_iter((struct hashmap*)cache->metadata_map, &iter, &item)) {
-        CacheEntry* entry = (CacheEntry*)item;
-        if (entry->meta && entry->meta->cache_path) {
-            file_delete(entry->meta->cache_path);
-        }
-    }
-
-    // clear hashmap (frees entries via cache_entry_free)
-    hashmap_clear((struct hashmap*)cache->metadata_map, false);
-
-    cache->lru_head = NULL;
-    cache->lru_tail = NULL;
-    cache->current_size_bytes = 0;
-    cache->entry_count = 0;
+    log_debug("cache: clearing all %zu entries", lru_cache_count(cache->entries));
+    lru_cache_clear(cache->entries);
 
     pthread_rwlock_unlock(&cache->rwlock);
 }
 
 size_t enhanced_cache_get_size(const EnhancedFileCache* cache) {
-    return cache ? cache->current_size_bytes : 0;
+    return cache ? lru_cache_bytes(cache->entries) : 0;
 }
 
 int enhanced_cache_get_entry_count(const EnhancedFileCache* cache) {
-    return cache ? cache->entry_count : 0;
+    return cache ? (int)lru_cache_count(cache->entries) : 0;
 }
 
 float enhanced_cache_get_hit_rate(const EnhancedFileCache* cache) {
@@ -439,19 +365,11 @@ bool enhanced_cache_is_valid(EnhancedFileCache* cache, const char* url) {
 
     pthread_rwlock_rdlock(&cache->rwlock);
 
-    CacheEntry key = { .url = (char*)url, .meta = NULL };
-    const CacheEntry* found = (const CacheEntry*)hashmap_get(
-        (struct hashmap*)cache->metadata_map, &key);
-
+    CacheMetadata* meta = (CacheMetadata*)lru_cache_peek(cache->entries, url);
     bool valid = false;
-    if (found && found->meta && found->meta->cache_path) {
-        // check file exists
-        if (file_exists(found->meta->cache_path)) {
-            // check not expired
-            if (found->meta->expires == 0 || found->meta->expires >= time(NULL)) {
-                valid = true;
-            }
-        }
+    if (meta && meta->cache_path && file_exists(meta->cache_path) &&
+        !cache_metadata_expired(meta, time(NULL))) {
+        valid = true;
     }
 
     pthread_rwlock_unlock(&cache->rwlock);
@@ -463,16 +381,13 @@ bool enhanced_cache_is_expired(EnhancedFileCache* cache, const char* url) {
 
     pthread_rwlock_rdlock(&cache->rwlock);
 
-    CacheEntry key = { .url = (char*)url, .meta = NULL };
-    const CacheEntry* found = (const CacheEntry*)hashmap_get(
-        (struct hashmap*)cache->metadata_map, &key);
-
+    CacheMetadata* meta = (CacheMetadata*)lru_cache_peek(cache->entries, url);
     bool expired = true;
-    if (found && found->meta) {
-        if (found->meta->expires == 0) {
+    if (meta) {
+        if (meta->expires == 0) {
             // no expiration set, consider valid
             expired = false;
-        } else if (found->meta->expires >= time(NULL)) {
+        } else if (meta->expires >= time(NULL)) {
             expired = false;
         }
     }
