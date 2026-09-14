@@ -609,7 +609,10 @@ remain transactional.
 1. Make `JsPreambleState`/equivalent an adapter-owned `MirArtifact`.
 2. Migrate Radiant preamble, lifecycle, and external classic entries from the
    legacy cache façade to the common key/scope/lease service (landed through
-   `JsMirLeaseSession`).
+   `JsMirLeaseSession`). The duplicate `RADIANT_JS_SOURCE_CACHE` URL-source
+   LRU and its private counters are retired: remote snapshots are admitted by
+   `InputManager` after the generic HTTP disk-fetch cache, as required by
+   D8.5.1v2.
 3. Route JS CLI and `js-test-batch` compatible preambles through the same
    adapter while retaining their explicit hot-heap policy.
 4. Retire the legacy `JsMirCache` ownership/index while retaining only the

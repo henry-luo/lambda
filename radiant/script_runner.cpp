@@ -46,7 +46,6 @@
 #include "../lib/str.h"
 #include "../lib/url.h"
 #include "../lib/file.h"
-#include "../lib/lru_cache.h"
 #include "../lib/hashmap.h"
 #include "../lib/hashmap_typed.hpp"
 #include "../lib/tagged.hpp"
@@ -60,7 +59,6 @@
 #include <cstdlib>
 #include <signal.h>
 #include <setjmp.h>
-#include <sys/stat.h>
 #ifndef _WIN32
 #include <unistd.h>
 #include <sys/time.h>
@@ -173,7 +171,6 @@ static void js_exec_watchdog_disarm(void) {
 }
 #endif  // !_WIN32
 
-static LruCache* s_script_source_cache = nullptr;
 static JsMirLeaseSession* s_js_mir_lease_session = nullptr;
 static bool s_retain_js_state = true;
 static bool s_execute_external_scripts = true;
@@ -205,16 +202,8 @@ extern "C" void script_runner_set_js_mir_lease_session(JsMirLeaseSession* sessio
     s_js_mir_lease_session = session;
 }
 
-static void script_runner_cleanup_source_cache() {
-    if (s_script_source_cache) {
-        lru_cache_free(s_script_source_cache);
-        s_script_source_cache = nullptr;
-    }
-}
-
 extern "C" void script_runner_cleanup_heap() {
     jm_cleanup_deferred_mir();
-    script_runner_cleanup_source_cache();
 }
 
 typedef enum JsScriptTaskKind {
@@ -233,7 +222,6 @@ typedef enum JsScriptTaskScheduling {
 typedef enum JsScriptCompilePolicy {
     JS_SCRIPT_COMPILE_INLINE_IMMEDIATE,
     JS_SCRIPT_COMPILE_EXTERNAL_SEPARATE,
-    JS_SCRIPT_COMPILE_EXTERNAL_SOURCE_CACHED,
     JS_SCRIPT_COMPILE_MODULE_SEPARATE,
     JS_SCRIPT_COMPILE_HANDLER_EAGER
 } JsScriptCompilePolicy;
@@ -268,7 +256,6 @@ typedef struct JsScriptTask {
     bool ready_to_execute;
     bool load_blocking;
     bool executed;
-    bool source_cache_hit;
     int source_line;
     int source_column;
     int document_order;
@@ -286,9 +273,6 @@ typedef struct JsScriptTaskCollection {
     int async_ready_scripts;
     int defer_scripts;
     int load_blocking_scripts;
-    int source_cache_hits;
-    int source_cache_misses;
-    int source_cache_stale;
     size_t inline_source_bytes;
     size_t external_source_bytes;
     size_t onload_source_bytes;
@@ -300,14 +284,6 @@ typedef struct JsScriptSchedulerQueues {
     ArrayList* async_ready;
     ArrayList* defer;
 } JsScriptSchedulerQueues;
-
-typedef struct JsScriptSourceCacheEntry {
-    char* source;
-    size_t source_len;
-    bool is_http;
-    time_t mtime;
-    uint64_t file_size;
-} JsScriptSourceCacheEntry;
 
 #ifndef NDEBUG
 static long script_runner_wall_now_us();
@@ -512,132 +488,6 @@ static char* resolve_script_url(const char* src, Url* base_url, bool* out_is_htt
  * @return               Allocated string with script content, or nullptr on failure.
  *                       Caller must free() the returned string.
  */
-static bool script_source_cache_enabled() {
-    const char* env = getenv("RADIANT_JS_SOURCE_CACHE");
-    return !(env && strcmp(env, "0") == 0);
-}
-
-static size_t script_source_cache_limit_bytes() {
-    const char* env = getenv("RADIANT_JS_SOURCE_CACHE_BYTES");
-    if (env && env[0]) {
-        char* end = nullptr;
-        unsigned long long parsed = strtoull(env, &end, 10);
-        if (end != env && parsed > 0) {
-            return (size_t)parsed;
-        }
-    }
-    return 8u * 1024u * 1024u;
-}
-
-static void script_source_cache_entry_free(const char* key, void* value, size_t bytes, void* udata) {
-    (void)key;
-    (void)bytes;
-    (void)udata;
-    JsScriptSourceCacheEntry* entry = (JsScriptSourceCacheEntry*)value;
-    if (!entry) return;
-    if (entry->source) mem_free(entry->source);
-    mem_free(entry);
-}
-
-static LruCache* script_source_cache_get() {
-    if (!script_source_cache_enabled()) return nullptr;
-    if (s_script_source_cache) return s_script_source_cache;
-
-    LruCacheConfig cfg = {};
-    cfg.max_entries = 128;
-    cfg.max_bytes = script_source_cache_limit_bytes();
-    cfg.on_evict = script_source_cache_entry_free;
-    s_script_source_cache = lru_cache_new(&cfg);
-    if (!s_script_source_cache) {
-        log_error("script_runner_cache: failed to initialize external script source cache");
-    }
-    return s_script_source_cache;
-}
-
-static bool script_source_file_metadata(const char* path, time_t* out_mtime, uint64_t* out_size) {
-    if (out_mtime) *out_mtime = 0;
-    if (out_size) *out_size = 0;
-    if (!path || !path[0]) return false;
-
-    struct stat sb;
-    if (stat(path, &sb) != 0 || !S_ISREG(sb.st_mode)) {
-        return false;
-    }
-    if (out_mtime) *out_mtime = sb.st_mtime;
-    if (out_size) *out_size = (uint64_t)sb.st_size;
-    return true;
-}
-
-static bool script_source_cache_entry_valid(const char* resolved_path, bool is_http,
-                                            JsScriptSourceCacheEntry* entry) {
-    if (!entry) return false;
-    if (entry->is_http || is_http) {
-        return entry->is_http == is_http;
-    }
-
-    time_t mtime = 0;
-    uint64_t file_size = 0;
-    if (!script_source_file_metadata(resolved_path, &mtime, &file_size)) {
-        return false;
-    }
-    return entry->mtime == mtime && entry->file_size == file_size;
-}
-
-static char* script_source_cache_lookup(const char* resolved_path, bool is_http,
-                                        JsScriptTaskCollection* collection) {
-    LruCache* cache = script_source_cache_get();
-    if (!cache || !resolved_path || !resolved_path[0]) return nullptr;
-
-    JsScriptSourceCacheEntry* entry = (JsScriptSourceCacheEntry*)lru_cache_get(cache, resolved_path);
-    if (!entry) {
-        if (collection) collection->source_cache_misses++;
-        return nullptr;
-    }
-    if (!script_source_cache_entry_valid(resolved_path, is_http, entry)) {
-        if (collection) collection->source_cache_stale++;
-        lru_cache_delete(cache, resolved_path);
-        return nullptr;
-    }
-
-    char* source = mem_strndup(entry->source ? entry->source : "", entry->source_len, MEM_CAT_JS_RUNTIME);
-    if (!source) return nullptr;
-    if (collection) collection->source_cache_hits++;
-    log_debug("script_runner_cache: external script source cache hit: %s (%zu bytes)",
-              resolved_path, entry->source_len);
-    return source;
-}
-
-static void script_source_cache_store(const char* resolved_path, bool is_http,
-                                      const char* source, size_t source_len) {
-    LruCache* cache = script_source_cache_get();
-    if (!cache || !resolved_path || !resolved_path[0] || !source) return;
-
-    JsScriptSourceCacheEntry* entry = (JsScriptSourceCacheEntry*)mem_calloc(
-        1, sizeof(JsScriptSourceCacheEntry), MEM_CAT_JS_RUNTIME);
-    if (!entry) return;
-    entry->source = mem_strndup(source, source_len, MEM_CAT_JS_RUNTIME);
-    if (!entry->source) {
-        mem_free(entry);
-        return;
-    }
-    entry->source_len = source_len;
-    entry->is_http = is_http;
-
-    if (!is_http && !script_source_file_metadata(resolved_path, &entry->mtime, &entry->file_size)) {
-        script_source_cache_entry_free(resolved_path, entry, 0, nullptr);
-        return;
-    }
-
-    size_t cache_bytes = sizeof(JsScriptSourceCacheEntry) + source_len + 1;
-    if (!lru_cache_put(cache, resolved_path, entry, cache_bytes)) {
-        script_source_cache_entry_free(resolved_path, entry, cache_bytes, nullptr);
-        log_error("script_runner_cache: failed to store external script source: %s", resolved_path);
-        return;
-    }
-    log_debug("script_runner_cache: stored external script source: %s (%zu bytes)",
-              resolved_path, source_len);
-}
-
 static char* script_runner_admit_url_source(const char* resolved_url,
                                             const char* source,
                                             size_t source_length,
@@ -775,50 +625,13 @@ static char* load_script_content(const char* resolved_path, bool is_http,
     return content;
 }
 
-static char* load_script_content_with_source_cache(const char* resolved_path, bool is_http,
-                                                  bool module_mode,
-                                                  JsScriptTaskCollection* collection,
-                                                  bool* out_cache_hit) {
-    if (out_cache_hit) *out_cache_hit = false;
-
+static char* load_script_content_profiled(const char* resolved_path, bool is_http,
+                                          bool module_mode) {
 #ifndef NDEBUG
     bool timing_enabled = script_task_timing_enabled();
     long load_start_us = timing_enabled ? script_runner_wall_now_us() : 0;
 #endif
-    // Local executable sources are owned by the common cache; the legacy LRU
-    // remains only for remote fetch bytes until URL admission is migrated.
-    if (!is_http) {
-        return load_script_content(resolved_path, false, module_mode);
-    }
-
-    char* cached = script_source_cache_lookup(resolved_path, is_http, collection);
-    if (cached) {
-        size_t admitted_length = 0;
-        char* admitted = script_runner_admit_url_source(
-            resolved_path, cached, strlen(cached), module_mode, &admitted_length);
-        mem_free(cached);
-        cached = admitted;
-        if (!cached) {
-            if (collection) collection->source_cache_stale++;
-            return nullptr;
-        }
-        if (out_cache_hit) *out_cache_hit = true;
-#ifndef NDEBUG
-        if (timing_enabled) {
-            log_notice("script_runner_timing: phase=source-load kind=%s status=source-cache-hit wall_us=%ld bytes=%zu src=%s",
-                       is_http ? "remote" : "local",
-                       script_runner_wall_now_us() - load_start_us,
-                       strlen(cached),
-                       resolved_path ? resolved_path : "<null>");
-        }
-#endif
-        return cached;
-    }
-
     char* content = load_script_content(resolved_path, is_http, module_mode);
-    if (content) {
-        script_source_cache_store(resolved_path, is_http, content, strlen(content));
-    }
 #ifndef NDEBUG
     if (timing_enabled) {
         log_notice("script_runner_timing: phase=source-load kind=%s status=%s wall_us=%ld bytes=%zu src=%s",
@@ -856,7 +669,6 @@ static const char* script_compile_policy_name(JsScriptCompilePolicy policy) {
     switch (policy) {
         case JS_SCRIPT_COMPILE_INLINE_IMMEDIATE: return "inline-immediate";
         case JS_SCRIPT_COMPILE_EXTERNAL_SEPARATE: return "external-separate";
-        case JS_SCRIPT_COMPILE_EXTERNAL_SOURCE_CACHED: return "external-source-cached";
         case JS_SCRIPT_COMPILE_MODULE_SEPARATE: return "module-separate";
         case JS_SCRIPT_COMPILE_HANDLER_EAGER: return "handler-eager";
         default: return "unknown";
@@ -1430,14 +1242,12 @@ static int failed_external_scripts = 0;
 static void log_script_task_diagnostics(JsScriptTaskCollection* collection) {
     if (!collection) return;
 
-    log_debug("script_runner_tasks: scripts=%d inline=%d external=%d loaded=%d failed=%d skipped=%d onload=%d async_ready=%d defer=%d load_blocking=%d source_cache=[hits:%d misses:%d stale:%d] bytes inline=%zu external=%zu onload=%zu",
+    log_debug("script_runner_tasks: scripts=%d inline=%d external=%d loaded=%d failed=%d skipped=%d onload=%d async_ready=%d defer=%d load_blocking=%d bytes inline=%zu external=%zu onload=%zu",
         collection->total_script_elements, collection->inline_scripts,
         collection->external_scripts, loaded_external_scripts,
         failed_external_scripts, collection->skipped_scripts,
         collection->onload_handlers_count, collection->async_ready_scripts,
         collection->defer_scripts, collection->load_blocking_scripts,
-        collection->source_cache_hits, collection->source_cache_misses,
-        collection->source_cache_stale,
         collection->inline_source_bytes,
         collection->external_source_bytes, collection->onload_source_bytes);
 
@@ -1446,14 +1256,13 @@ static void log_script_task_diagnostics(JsScriptTaskCollection* collection) {
 
     for (int i = 0; i < collection->scripts->length; i++) {
         JsScriptTask* task = (JsScriptTask*)arraylist_get(collection->scripts, i);
-        log_info("script_runner_task: #%d kind=%s scheduling=%s compile=%s status=%s external=%d source_cache_hit=%d ready=%d load_blocking=%d attrs=[async:%d defer:%d nomodule:%d] src=%s bytes=%zu",
+        log_info("script_runner_task: #%d kind=%s scheduling=%s compile=%s status=%s external=%d ready=%d load_blocking=%d attrs=[async:%d defer:%d nomodule:%d] src=%s bytes=%zu",
             task ? task->document_order : -1,
             task ? script_task_kind_name(task->kind) : "null",
             task ? script_task_scheduling_name(task->scheduling) : "null",
             task ? script_compile_policy_name(task->compile_policy) : "null",
             task ? script_task_status_name(task->status) : "null",
             task && task->external ? 1 : 0,
-            task && task->source_cache_hit ? 1 : 0,
             task && task->ready_to_execute ? 1 : 0,
             task && task->load_blocking ? 1 : 0,
             task && task->async_attr ? 1 : 0,
@@ -1585,17 +1394,11 @@ static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* col
             if (strcmp(task->resolved_url, "builtin:wpt-testharness.js") == 0) {
                 collection->testharness_seen = true;
             }
-            bool source_cache_hit = false;
-            char* content = load_script_content_with_source_cache(task->resolved_url, is_http,
-                                                                  task->kind == JS_SCRIPT_TASK_MODULE,
-                                                                  collection, &source_cache_hit);
+            char* content = load_script_content_profiled(task->resolved_url, is_http,
+                                                         task->kind == JS_SCRIPT_TASK_MODULE);
             if (content) {
                 task->source = content;
                 task->source_len = strlen(content);
-                task->source_cache_hit = source_cache_hit;
-                if (source_cache_hit && task->kind == JS_SCRIPT_TASK_CLASSIC) {
-                    task->compile_policy = JS_SCRIPT_COMPILE_EXTERNAL_SOURCE_CACHED;
-                }
                 collection->external_source_bytes += task->source_len;
                 script_task_mark_ready(collection, task);
                 loaded_external_scripts++;
@@ -2351,7 +2154,6 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     if (!script_task_collection_has_executable_tasks(&script_tasks)) {
         log_debug("execute_document_scripts: no scripts found");
         script_task_collection_free(&script_tasks);
-        script_runner_cleanup_source_cache();
         return;
     }
     size_t watchdog_source_len = script_task_collection_source_bytes(&script_tasks);
@@ -2370,7 +2172,6 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
                  watchdog_source_len,
                  browser_js_limit);
         script_task_collection_free(&script_tasks);
-        script_runner_cleanup_source_cache();
         return;
     }
 
@@ -2387,7 +2188,6 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     if (!runtime) {
         log_error("execute_document_scripts: failed to allocate document runtime");
         script_task_collection_free(&script_tasks);
-        script_runner_cleanup_source_cache();
         return;
     }
     // Initialize it as a real Runtime. It was previously left as bare zeroed
@@ -2409,7 +2209,6 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     if (!document_context) {
         mem_free(runtime);
         script_task_collection_free(&script_tasks);
-        script_runner_cleanup_source_cache();
         return;
     }
     // EO5v2: this document — a top-level page or an iframe's — manages its own
@@ -2428,7 +2227,6 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         }
         mem_free(runtime);
         script_task_collection_free(&script_tasks);
-        script_runner_cleanup_source_cache();
         return;
     }
     js_host_hooks_set_redirect_stdout_to_stderr(dom_doc->js.redirect_stdout_to_stderr);
@@ -2662,7 +2460,6 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 
     phase_start_us = timing ? time_now_us() : 0;
     script_task_collection_free(&script_tasks);
-    script_runner_cleanup_source_cache();
     js_batch_cleanup_unsafe = 0;
     if (timing) timing->source_cleanup_us += time_now_us() - phase_start_us;
 }
