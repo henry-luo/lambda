@@ -816,25 +816,16 @@ static Item js_define_property_validate_nonconfigurable_update(
         }
     } else {
         // 7e: accessor property: reject if get/set differ from
-        // the current JsAccessorPair stored at slot X.
+        // the current virtual JsAccessorPair on the ShapeEntry.
         Item cur_pair_get = make_js_undefined();
         Item cur_pair_set = make_js_undefined();
         bool have_pair = false;
         if (_se_acc_chk && jspd_is_accessor(_se_acc_chk)) {
-            Map* _m = (get_type_id(obj) == LMD_TYPE_MAP) ? obj.map :
-                      (get_type_id(obj) == LMD_TYPE_ARRAY)
-                          ? js_array_props(obj.array) : nullptr;
-            if (_m) {
-                bool sf = false;
-                Item sv = js_map_shape_lookup_ext(_m, ns_check->chars, (int)ns_check->len, &sf);
-                if (sf) {
-                    JsAccessorPair* pair = js_item_to_accessor_pair(sv);
-                    if (pair) {
-                        cur_pair_get = (pair->getter.item != ItemNull.item) ? pair->getter : make_js_undefined();
-                        cur_pair_set = (pair->setter.item != ItemNull.item) ? pair->setter : make_js_undefined();
-                        have_pair = true;
-                    }
-                }
+            JsAccessorPair* pair = js_shape_entry_accessor_pair(_se_acc_chk);
+            if (pair) {
+                cur_pair_get = (pair->getter.item != ItemNull.item) ? pair->getter : make_js_undefined();
+                cur_pair_set = (pair->setter.item != ItemNull.item) ? pair->setter : make_js_undefined();
+                have_pair = true;
             }
         }
         if (it2b(js_in(get_key_check, descriptor))) {
@@ -867,7 +858,7 @@ static Item js_define_property_apply_validated_descriptor(Item obj, Item name,
     //
     // The kernel performs all storage writes:
     //   - Accessor: install via the IS_ACCESSOR chokepoint (`js_define_accessor_partial`).
-    //               Tombstones data slot when converting data to accessor.
+    //               It replaces any physical data field with a virtual descriptor.
     //   - Data: clears IS_ACCESSOR shape flag if previously accessor and tracks
     //           was_accessor.
     //   - Attribute flags: write inverse ShapeEntry bits from HAS_* fields;
@@ -5834,9 +5825,8 @@ extern "C" Item js_in(Item key, Item object) {
             JsShapeSlotStatus own_status = js_own_shape_slot_status_key(
                 object, key, NULL, NULL);
             if (own_status == JS_SHAPE_SLOT_DATA || own_status == JS_SHAPE_SLOT_ACCESSOR) return (Item){.item = b2it(true)};
-            // 2. Phase-5D: legacy __get_/__set_ probes removed. Bare-name shape
-            //    entry with IS_ACCESSOR flag is detected by step 1 (own data probe
-            //    finds the JsAccessorPair slot under the bare key).
+            // 2. Phase-5D: legacy __get_/__set_ probes removed. A bare-name
+            //    virtual IS_ACCESSOR entry is reported directly by step 1.
             // 3. walk the heterogeneous prototype chain without invoking
             // getters. %Function.prototype% is a FUNC carrier, so a MAP-only
             // loop made class constructors fail ordinary HasProperty.
@@ -7424,7 +7414,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                     JsShapeSlotStatus status = js_own_shape_slot_status(
                         pm_item, name_str->chars, (int)name_str->len, &slot_val, NULL);
                     if (status == JS_SHAPE_SLOT_ACCESSOR) {
-                        JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+                        JsAccessorPair* pair = js_shape_entry_accessor_pair(_se_idx);
                         bool is_enumerable = jspd_is_enumerable(_se_idx);
                         bool is_configurable = jspd_is_configurable(_se_idx);
                         return js_make_accessor_descriptor(
@@ -10709,10 +10699,9 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
                     status == JS_SHAPE_SLOT_ACCESSOR)};
             }
             // Phase-5D: legacy __get_/__set_ accessor-marker probes removed.
-            // Phase-4 intercept routes function-property accessors into a single
-            // bare-name slot containing a JsAccessorPair, with IS_ACCESSOR shape
-            // flag. The bare-name fast probe above returns own=true with a
-            // non-sentinel value for IS_ACCESSOR slots.
+            // Function-property accessors are virtual bare-name descriptors.
+            // The shape-status probe above reports them as own properties
+            // without exposing their cells as values.
         }
         if (!identity_key && ks->len == 9 && strncmp(ks->chars, "prototype", 9) == 0) {
             if (!js_function_has_own_prototype(obj)) return (Item){.item = b2it(false)};
@@ -12580,16 +12569,10 @@ static Item js_delete_array_property(Item obj, Item key, bool strict) {
                 String* ks = it2s(k_str);
                 if (ks && ks->len > 0 && ks->len < 200) {
                     Item pm_item = (Item){.map = js_array_props(arr)};
-                    // Phase 5 / A2-T3: clear IS_ACCESSOR shape flag on the
-                    // bare-key slot (which holds JsAccessorPair*) before
-                    // tombstoning, so reads no longer dispatch to the
-                    // deleted accessor. Routed through the per-Map clone
-                    // primitive so sibling Maps sharing this TypeMap
-                    // (shape cache) keep their IS_ACCESSOR untouched.
+                    // A virtual accessor remains descriptor-owned while
+                    // tombstoned. js_own_shape_slot_status checks DELETED
+                    // before IS_ACCESSOR, preserving the -1 offset invariant.
                     ShapeEntry* _se = js_find_shape_entry(pm_item, ks->chars, (int)ks->len);
-                    if (_se && jspd_is_accessor(_se)) {
-                        js_shape_entry_set_accessor(pm_item, ks->chars, (int)ks->len, /*is_accessor=*/false);
-                    }
                     if (_se) {
                         js_shape_entry_update_flags(pm_item, ks->chars, (int)ks->len, 0,
                             (uint8_t)(JSPD_NON_WRITABLE | JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE));
@@ -16438,8 +16421,8 @@ static void js_proto_snapshot_count_function_slots(MapSnapshot* snap,
     TypeMap* type = (TypeMap*)snap->m->type;
     int* count = (int*)data;
     if (type->length <= 0) return;
-    // Every data slot can contribute one function and every accessor slot can
-    // contribute a getter plus a setter, so this is an exact safe upper bound.
+    // Every data entry can contribute one function and every virtual accessor
+    // can contribute a getter plus a setter, so this is an exact safe bound.
     *count += (int)(type->length * 2);
 }
 
@@ -16538,17 +16521,18 @@ static void js_proto_snapshot_add_intrinsic_function(
 static void js_proto_snapshot_collect_intrinsic_functions(MapSnapshot* snap,
         void* data) {
     JsPrototypeSnapshotState* state = (JsPrototypeSnapshotState*)data;
-    if (!state || !snap || !snap->m || !snap->m->type || !snap->m->data) return;
+    if (!state || !snap || !snap->m || !snap->m->type) return;
     TypeMap* type = (TypeMap*)snap->m->type;
     for (ShapeEntry* entry = type->shape; entry; entry = entry->next) {
         if (jspd_is_deleted(entry)) continue;
-        Item value = _map_read_field(entry, snap->m->data);
         if (jspd_is_accessor(entry)) {
-            JsAccessorPair* pair = js_item_to_accessor_pair(value);
+            JsAccessorPair* pair = js_shape_entry_accessor_pair(entry);
             if (!pair) continue;
             js_proto_snapshot_add_intrinsic_function(state, pair->getter);
             js_proto_snapshot_add_intrinsic_function(state, pair->setter);
         } else {
+            if (!snap->m->data || entry->byte_offset < 0) continue;
+            Item value = _map_read_field(entry, snap->m->data);
             js_proto_snapshot_add_intrinsic_function(state, value);
         }
     }

@@ -559,6 +559,16 @@ static TypeMap* map_shape_transition_root(Input* input,
     return root;
 }
 
+static ShapeEntry* map_existing_shape_entry(TypeMap* map_type, String* key) {
+    if (!map_type || !key) return NULL;
+    NameId key_id = property_key_id(key);
+    if (key_id != NAME_ID_NONE) {
+        return typemap_hash_lookup_by_name_id(map_type, key_id,
+            property_key_hash(key));
+    }
+    return typemap_hash_lookup(map_type, key->chars, (int)key->len);
+}
+
 // One add through the shared shape graph. Returns true when this call owns the
 // outcome — the value was stored, or capacity growth failed and the caller must
 // give up exactly as the private path does.
@@ -635,6 +645,30 @@ void map_put_with_data_growth(Map* mp, String* key, Item value, Input *input,
         // exists, clone before appending a new ShapeEntry to this map only.
         TypeMap* clone = map_clone_typemap_for_mutation(mp, input);
         if (clone) map_type = clone;
+    }
+
+    ShapeEntry* existing = map_existing_shape_entry(map_type, key);
+    if (existing && existing->byte_offset < 0) {
+        // A virtual JS accessor becomes a data property only through a
+        // DefineOwn storage write. Materialize its first physical lane here;
+        // accessor cells themselves are never written to Map::data.
+        int bsize = type_info[type_id].byte_size;
+        int64_t byte_offset = map_type->byte_size;
+        int64_t byte_end = byte_offset + bsize;
+        if (bsize <= 0 || byte_end > INT_MAX) return;
+        String* keys[1] = {key};
+        Item values[1] = {value};
+        if (!map_ensure_data_capacity_for_end(&mp, input->pool, byte_end,
+                map_type->byte_size, grow, grow_context, keys, 1, values, 1)) {
+            return;
+        }
+        shape_entry_set_type(existing, type_info[type_id].type);
+        existing->byte_offset = byte_offset;
+        existing->accessor = NULL;
+        existing->flags &= (uint8_t)~(JSPD_IS_ACCESSOR | JSPD_DELETED);
+        map_type->byte_size = byte_end;
+        map_store_field_value((char*)mp->data + byte_offset, type_id, values[0]);
+        return;
     }
 
     ShapeEntry* shape_entry = alloc_shape_entry(input->pool, key, type_id, map_type->last);

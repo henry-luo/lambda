@@ -463,10 +463,48 @@ All 17 corpus cases now match Node on both lanes.
 `race-double-result`); Node cannot run that fixture, so the new order was
 verified against Node with an isolated three-combinator repro.
 
-### Still open
+### AST `for await` resumption (2026-09-14)
 
-- **`for await` over an async generator** is a tick out on MIR; the AST lane
-  rejects `for await` outright.
+The AST walker now executes `for await (... of ...)` through the same shared
+async-iterator protocol as MIR: `js_get_async_iterator`, the raw `next()`
+result, an implicit await before `done`, then an implicit await of `value`.
+The loop continuation retains the iterator result between those awaits and
+the async-frame tracer marks that retained edge. Focused tests cover two
+generator values, both implicit awaits, a body await, forced collection, and
+IteratorClose after a rejected iterator value.
+
+### AST async IteratorClose (2026-09-14)
+
+Abrupt AST `for await` exits now retain the original completion, await the
+iterator's raw `return()` result, validate its resolved object, and then apply
+IteratorClose precedence: a close failure overrides `break`/`return`, while an
+original throw wins after cleanup. The raw close helper distinguishes an absent
+`return` from a callable that returns `undefined`, so only the latter is
+awaited and validated. Focused tests cover deferred close timing, both
+completion-precedence cases, and forced collection.
+
+### MIR async IteratorClose (2026-09-14)
+
+MIR `for await` now carries the raw `return()` result across a dedicated async
+resume state, awaits it, and validates the fulfilled result as an object before
+the surrounding completion continues. The shared runtime API uses an internal
+close-absent marker, so a missing `return` is not awaited while a callable
+`return` that yields `undefined` is awaited and correctly raises `TypeError`.
+
+The same close sequence is used for normal `break`, source `return`, a rejected
+iterator value, and labeled jumps that leave nested async iterators. A close
+failure overrides `break` or `return`; a source throw remains the completion
+after the required cleanup. The MIR suspension budget includes these synthetic
+close states, and the original throw is rooted across the close await. This
+keeps the emitted completion/error-lane flow within **D8.4.3v2**, rather than
+settling the enclosing async function before IteratorClose completes.
+
+Focused AST/MIR coverage exercises deferred close timing, rejection and object
+validation, missing-vs-`undefined` `return`, source-completion precedence,
+nested return, actual async-generator cleanup, and labeled break/continue
+cleanup. The async-generator yield wrapper now exact-roots its pending promise
+and fulfillment wrapper across the allocating handoff, which keeps close
+settlement valid under forced collection.
 (A third defect found here, a throw swallowed by a natively-typed body, is
 fixed below.)
 

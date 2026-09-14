@@ -11,7 +11,7 @@
 > This document owns **JSCU9–JSCU44** and the open items **JSCUO1–JSCUO7**.
 >
 > **Authority.** **D1.3**, **D1.5**, **D1.8–D1.9**, **D2.4.1–D2.4.3**,
-> **D3.3.2v2–D3.3.4**, **D3.4.1–D3.4.6**, **D4.6.1v2**, **D5.1–D5.4**,
+> **D3.3.2v2–D3.3.4**, **D3.4.1–D3.4.8**, **D4.6.1v2**, **D5.1–D5.4**,
 > **D6.2.1–D6.2.3v2**, **D7.4.1v2**, **D8.2.3–D8.2.6**, **D8.3.1–D8.3.4**,
 > **D8.4.1v2–D8.4.3v2**, **D8.6.1–D8.6.4v2**. These rulings implement existing
 > contracts; none revises a language ruling, authorizes a new value layout, or
@@ -551,13 +551,12 @@ universal; it must not be removed earlier." It is universal as of
 ### 4.2 What the tree actually does
 
 - `Function` (`lambda/lambda.h:1336`, 72 B) and `JsFunction`
-  (`lambda/js/js_function.hpp`, 328 B) both carry `LMD_TYPE_FUNC`. So does
-  `JsAccessorPair` (`lambda-data.hpp:301`). The collector's `FUNC` arm
-  (`gc_heap.c:1874`) first calls the `js_function_trace` hook;
-  `js_function_gc_trace` (`js_runtime_function.cpp:190`) tells the three
-  layouts apart by a 32-bit magic at byte 4 and returns 0 for the Lambda
-  layout, which then falls through to the `closure_field_count` walk. Two
-  tracers, one tag, a magic byte as the type system.
+  (`lambda/js/js_function.hpp`, 328 B) carry `LMD_TYPE_FUNC`; only callable
+  values reach the FUNC tracer. `JsAccessorCell` is separately tagged
+  `GC_TYPE_JS_ACCESSOR` and is traced only from a private virtual
+  `ShapeEntry` under **D3.4.8**. `js_function_gc_trace`
+  (`js_runtime_function.cpp`) distinguishes the two callable layouts, while
+  the accessor cell has its own fixed collector case.
 - Both records mix the two lifetimes. Code facts on `Function`: `fn_type`,
   `ptr`, `entry_abi`, `name`, `def`, `def_module`, `method`, the
   `mir_public_return_shape` bits. On `JsFunction`: `func_ptr`,
@@ -821,16 +820,16 @@ universal; it must not be removed earlier." It is universal as of
   the code record points at them.
 - Catalog aliases still control `===` (parent §8): two values may share one
   `JsCallableCode` without being the same value.
-- `JsAccessorPair` stays a FUNC-tagged two-Item record; it gains the layout
-  byte and loses its magic.
+- `JsAccessorCell` stays a dedicated GC record with two Item edges; its
+  `JsAccessorPair` compatibility alias never enters an Item or FUNC carrier.
 - The realm function cache keeps its semantics (same MIR function → same
   wrapper); its storage moves to `RootVector` under item 2.
 
 ### 4.5 Acceptance
 
 - Grep gate: `runtime_context` 0 hits on `Function` and `JsFunction`;
-  `JS_FUNCTION_LAYOUT_MAGIC` and `JS_ACCESSOR_PAIR_LAYOUT_MAGIC` 0 hits;
-  `js_function_trace` 0 hits in `gc_heap.c`.
+  `JS_FUNCTION_LAYOUT_MAGIC` is retired from the layout discriminator;
+  `js_function_trace` has no accessor-cell branch in `gc_heap.c`.
 - `sizeof(Function)` ≤ 72 B, `sizeof(JsFunction)` ≤ 160 B, both
   static-asserted beside the pinned-offset asserts; the JSCUO6 inventory is
   checked in as a static-assert block before any field moves.
@@ -1334,18 +1333,70 @@ one authority while preserving D6.2.2v2's separate JavaScript `[[Call]]` and
 `[[Construct]]` capabilities. Any generated-code offset migration retains the
 JSCUO6 static-assert inventory and lands only with release call/new gates.
 
-**Decision B: accessors.** Replace `JsAccessorPair`'s fake `LMD_TYPE_FUNC`
-layout with a dedicated internal `JsAccessorCell` carrier and trace rule. A
-shape marked `JSPD_IS_ACCESSOR` stores the internal cell pointer; generic Item
-or function operations never observe it. Its getter and setter Items are the
-only outgoing edges.
+**Decision B: accessors — LANDED 2026-09-14.** This section is the detailed
+implementation design for **D3.4.8**. `JsAccessorCell` is a dedicated
+`GC_TYPE_JS_ACCESSOR` record; the compatibility name `JsAccessorPair` aliases
+that record only. It is descriptor metadata, never a callable value and never
+an `Item` carrier.
 
-An accessor pair is property storage, not a function value. The present
-`layout_magic` branch makes every FUNC tracer/destructor responsible for three
-unrelated layouts and makes safety depend on every consumer checking the
-shape flag first. The dedicated carrier restores D2.4.1's single authority
-and D6.2.1's meaning of a function value. Transient `JsPropertyDescriptor`
-remains distinct because it describes an operation, not stored identity.
+**Stored representation.** An accessor is represented exclusively by its
+object's `ShapeEntry`. The active entry satisfies all of these invariants:
+
+- `JSPD_IS_ACCESSOR` is set;
+- `byte_offset == -1` exactly — no other negative offset has accessor meaning;
+- `ShapeEntry::accessor` is non-null and points to the `JsAccessorCell`; and
+- no bytes in `Map.data` encode the getter, setter, or cell pointer.
+
+`byte_offset == -1` is a virtual-field sentinel, not a physical lane. Generic
+Map readers return absence for it, and a direct field store may neither perform
+pointer arithmetic on the sentinel nor surface the cell as an `Item`. Only the
+explicit JS descriptor-transition path may materialize a fresh data lane. A
+property operation first resolves its `ShapeEntry`, tests
+`JSPD_DELETED`, then interprets `JSPD_IS_ACCESSOR` only inside the JS property
+kernel. Thus a deleted accessor cannot accidentally invoke its getter.
+
+The same rule applies to ordinary object maps, an Array's named-property
+companion map, and a Function's property map. Indexed Array element storage is
+not an accessor lane and remains owned by the Array implementation.
+
+**Ownership and publication.** `ShapeEntry::accessor` is mutable per object,
+whereas ordinary constructor and transition shapes may be structurally shared.
+Before installing or replacing an accessor, the runtime clones the `TypeMap`
+and makes it private to the target object. It then creates or updates the
+entry and only publishes the cell through that private shape. Shape cloning,
+rebuilding, and extension preserve an existing virtual entry's sentinel,
+flags, and cell edge while skipping it during physical data copying. A virtual
+accessor shape is never a reusable transition or pool-deduplicated shape.
+
+**GC ownership.** `JsAccessorCell` contains exactly the getter and setter
+`Item` edges; either may be `ItemNull`. Once published, its owning edge is
+`Map → TypeMap → ShapeEntry → JsAccessorCell`, which the collector traces even
+when the map has no `data` allocation. Between heap allocation and publication
+the producer holds an exact temporary object root. It releases that root after
+the shape edge exists. There is no permanent root, fake `LMD_TYPE_FUNC`
+carrier, encoded map slot, or side table.
+
+**Descriptor transitions.** A data-to-accessor redefinition first privatizes
+the shape, then retires the old data lane by clearing its physical bytes before
+changing the entry to `byte_offset == -1`; the map's byte-size accounting is
+not compacted, so the old position is a retired hole. This prevents a stale
+pointer word from surviving a descriptor-kind change. An accessor-to-data
+redefinition never writes through the virtual entry or reuses that retired
+position. The JS `DefineOwn` path allocates a fresh lane at the current end of
+the map layout, stores the data value there, clears `accessor`, and clears
+`JSPD_IS_ACCESSOR` and `JSPD_DELETED`. Ordinary assignment instead dispatches
+the setter (or follows the missing-setter semantics); it does not materialize a
+data property.
+
+Deletion is represented by `JSPD_DELETED` on the private entry. The cell stays
+owned and traced with the tombstone until the map itself becomes unreachable;
+a subsequent definition uses the normal descriptor transition rules rather
+than treating the cell as a stored value.
+
+This restores **D2.4.1**'s single authority, implements **D3.4.8**, and leaves
+`LMD_TYPE_FUNC` allocations to callable values only. Transient
+`JsPropertyDescriptor` remains distinct because it describes an operation, not
+stored identity.
 
 ### 8.10 JSCU34 — one ArrayBuffer-view authority
 
@@ -1401,8 +1452,8 @@ Recommended order:
    registry before more state begins depending on either.
 4. **Land JSCU30–JSCU31.** Move jobs first, then resource owners, preserving
    queue policy while deleting fixed handle tables.
-5. **Land JSCU33's accessor correction, then JSCU34.** Both are contained
-   carrier changes with direct conformance suites.
+5. **JSCU33's accessor correction landed 2026-09-14; land JSCU34 next.**
+   Both are contained carrier changes with direct conformance suites.
 6. **Land JSCU32 and JSCU33's callable-code half.** These touch generated ABI
    and GC tracing, so they follow the ownership/lifecycle foundation and
    require the broadest forced-GC gates.

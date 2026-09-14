@@ -320,13 +320,13 @@ typedef TypeArray TypeList;
 #define JSPD_NON_WRITABLE     0x01u  // 1 = property is read-only
 #define JSPD_NON_ENUMERABLE   0x02u  // 1 = property hidden from for-in / Object.keys
 #define JSPD_NON_CONFIGURABLE 0x04u  // 1 = property cannot be deleted/redefined
-#define JSPD_IS_ACCESSOR      0x08u  // 1 = slot holds JsAccessorCell*, not data value
+#define JSPD_IS_ACCESSOR      0x08u  // 1 = virtual JsAccessorCell* descriptor
 #define JSPD_DELETED          0x10u  // 1 = property logically deleted (tombstone bit;
                                      //     A2-T8 successor to JS_DELETED_SENTINEL_VAL).
 
-// A stored accessor is property storage, never a callable value. Its GC
-// allocation uses GC_TYPE_JS_ACCESSOR; the in-band tag is deliberately
-// undefined so an unchecked generic Item path cannot mistake it for Function.
+// A stored accessor is property metadata, never a callable value. Its GC
+// allocation uses GC_TYPE_JS_ACCESSOR; a private ShapeEntry owns the only
+// strong edge and publishes it as a virtual field (byte_offset == -1).
 #define JS_ACCESSOR_CELL_LAYOUT_MAGIC 0x4A534143u
 typedef struct JsAccessorCell {
     uint8_t type_id;   // = LMD_TYPE_UNDEFINED; ShapeEntry owns interpretation
@@ -336,8 +336,8 @@ typedef struct JsAccessorCell {
     Item setter;       // ItemNull or LMD_TYPE_FUNC
 } JsAccessorCell;
 
-// Compatibility spelling for property-layer APIs while callers migrate. This
-// is an alias only: there is one cell allocation and no FUNC-layout carrier.
+// Compatibility spelling for property-layer APIs. This is an alias only:
+// there is one cell allocation and no Item/FUNC-layout carrier.
 typedef JsAccessorCell JsAccessorPair;
 
 typedef struct ShapeEntry {
@@ -360,6 +360,9 @@ typedef struct ShapeEntry {
     // record; none re-derives a lane from `type`. Trailing so the GC ABI view
     // (LambdaGcShapeEntryLayout: type, byte_offset, next) is untouched.
     LaneStorageDesc storage;
+    // JS accessor descriptors are virtual fields. Their entries are private to
+    // one object, carry byte_offset == -1, and never consume Map::data space.
+    JsAccessorCell* accessor;
 } ShapeEntry;
 
 // Both shape walks (map_get_by_name_id_keyed and fn_map_set) confirm a field by

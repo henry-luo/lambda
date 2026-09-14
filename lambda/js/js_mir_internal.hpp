@@ -128,7 +128,8 @@ typedef struct JsMirLexicalThisRebind {
 typedef enum JsMirSuspendKind {
     JS_MIR_SUSPEND_YIELD = 0,
     JS_MIR_SUSPEND_AWAIT,
-    JS_MIR_SUSPEND_IMPLICIT_AWAIT
+    JS_MIR_SUSPEND_IMPLICIT_AWAIT,
+    JS_MIR_SUSPEND_ASYNC_ITERATOR_CLOSE
 } JsMirSuspendKind;
 
 typedef enum JsMirCompletionKind {
@@ -298,6 +299,11 @@ MIR_reg_t jm_emit_iterator_done_test(JsMirTranspiler* mt, MIR_reg_t step_result,
 MIR_reg_t jm_emit_iterator_collect_rest(JsMirTranspiler* mt, MIR_reg_t iterator);
 void jm_emit_iterator_close(JsMirTranspiler* mt, MIR_reg_t iterator);
 void jm_emit_iterator_close_checked(JsMirTranspiler* mt, MIR_reg_t iterator);
+void jm_emit_async_iterator_close_checked(JsMirTranspiler* mt, MIR_reg_t iterator);
+void jm_emit_loop_iterator_close_checked(JsMirTranspiler* mt,
+    const JsLoopLabels* loop);
+void jm_emit_async_iterator_close_preserving_throw(JsMirTranspiler* mt,
+    MIR_reg_t iterator, MIR_reg_t thrown_value);
 void jm_emit_iterator_close_on_error_lane_if_open(JsMirTranspiler* mt, MIR_reg_t iterator,
     MIR_reg_t iter_done, MIR_label_t target);
 void jm_emit_abrupt_jump_cleanup(JsMirTranspiler* mt, int target_loop_index);
@@ -305,7 +311,7 @@ void jm_emit_break_completion(JsMirTranspiler* mt, JsBreakContinueNode* brk);
 void jm_emit_continue_completion(JsMirTranspiler* mt, JsBreakContinueNode* cont);
 int jm_next_resume_state(JsMirTranspiler* mt, JsMirSuspendKind kind);
 MIR_reg_t jm_emit_await_value_reg(JsMirTranspiler* mt, MIR_reg_t promise_val,
-    JsMirSuspendKind kind);
+    JsMirSuspendKind kind, bool route_rejection = true);
 void jm_emit_suspend_env_save(JsMirTranspiler* mt);
 void jm_emit_resume_env_restore(JsMirTranspiler* mt);
 void jm_emit_try_state_save(JsMirTranspiler* mt);

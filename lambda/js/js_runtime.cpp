@@ -3825,6 +3825,10 @@ Item js_map_shape_lookup(Map* m, const char* key_str, int key_len, bool* out_fou
     // when the table is unpopulated or saturated.
     ShapeEntry* entry = typemap_hash_lookup(map_type, key_str, key_len);
     if (entry) {
+        if (entry->byte_offset < 0) {
+            if (out_found) *out_found = true;
+            return ItemNull;
+        }
         if (map_ctor_offset_is_reserved(m, entry->byte_offset)) {
             if (out_found) *out_found = false;
             return ItemNull;
@@ -5160,9 +5164,11 @@ extern "C" Item js_get_key_core(Item object, Item key,
             const char* idx_buf = js_property_index_chars(idx, &idx_len);
             Item pm_item = (Item){.map = props};
             Item slot_val = ItemNull;
-            JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, idx_len, &slot_val, NULL);
+            ShapeEntry* accessor_entry = NULL;
+            JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, idx_len,
+                &slot_val, &accessor_entry);
             if (status == JS_SHAPE_SLOT_ACCESSOR) {
-                JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+                JsAccessorPair* pair = js_shape_entry_accessor_pair(accessor_entry);
                 if (pair && pair->getter.item != ItemNull.item) {
                     return js_call_accessor_getter(pair->getter, object);
                 }
@@ -6569,7 +6575,7 @@ static Item js_set_array_core(Item object, Item key, Item value,
             JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, idx_len, &slot_val, NULL);
             if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) {
                 if (status == JS_SHAPE_SLOT_ACCESSOR) {
-                    JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+                    JsAccessorPair* pair = js_shape_entry_accessor_pair(_se_idx);
                     if (pair && pair->setter.item != ItemNull.item) {
                         Item args[1] = { value };
                         js_call_function(pair->setter, object, args, 1);
@@ -6819,12 +6825,9 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
     }
     // v16: Enforce non-writable properties via shape flags.
     // Phase 4: define-own storage bypasses Set-time writability checks — that
-    // flag indicates
-    // the caller is installing engine-internal accessor storage (e.g.
-    // js_define_accessor_partial writing a JsAccessorPair* to the slot during
-    // data→accessor conversion via Object.defineProperty). Honoring __nw_ here
-    // would leave the slot at the stale data value while IS_ACCESSOR gets set,
-    // causing reads to dereference the integer as a JsAccessorPair* and crash.
+    // flag indicates the caller is performing [[DefineOwnProperty]]
+    // descriptor storage. Accessor installation is virtual and must not be
+    // blocked by the data property's old writable bit during conversion.
     if (get_type_id(key) == LMD_TYPE_STRING && !bypass_accessor_dispatch) {
         String* str_key = it2s(key);
         if (str_key && str_key->len < 200) {
@@ -6985,6 +6988,15 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
                 ? js_find_shape_entry_name_id(object, property_key_id(str_key))
                 : js_find_shape_entry(object, str_key->chars, (int)str_key->len);
             if (found_entry) {
+                if (found_entry->byte_offset < 0) {
+                    // DefineOwn writes may replace a virtual accessor with a
+                    // data descriptor. map_put_heap materializes the first
+                    // physical lane and clears the descriptor ownership.
+                    if (!bypass_accessor_dispatch || !js_input) return value;
+                    map_put_heap(m, str_key, value, js_input);
+                    js_sync_global_var_module_binding(object, key, value);
+                    return value;
+                }
                 // v37: If deleted sentinel, move entry to end of list for correct enum order
                 JsShapeSlotStatus slot_status = identity_key
                     ? js_own_shape_slot_status_name_id(object, property_key_id(str_key), NULL, NULL)
@@ -7594,8 +7606,7 @@ static Item js_private_property_set_checked(Item object, Item key, Item value,
             return value_root.get();
         }
         if (own_status == JS_SHAPE_SLOT_ACCESSOR) {
-            JsAccessorPair* pair = NULL;
-            pair = js_item_to_accessor_pair(own_slot);
+            JsAccessorPair* pair = js_shape_entry_accessor_pair(own_se);
             if (pair && pair->setter.item != ItemNull.item &&
                     js_is_callable(pair->setter)) {
                 Item setter_args[1] = { value_root.get() };
@@ -7626,6 +7637,25 @@ extern "C" Item js_private_property_set(Item object, Item key, Item value, int64
     return js_private_property_set_checked(object, key, value, strict != 0);
 }
 
+extern "C" Map* js_function_props_ensure(Item fn_item) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return NULL;
+    RootFrame roots(1);
+    Rooted<Item> function_root(roots, fn_item);
+    if (!roots.valid()) return NULL;
+    JsFunction* fn = (JsFunction*)function_root.get().function;
+    if (!fn) return NULL;
+    if (fn->properties_map.item == 0) {
+        Item properties_map = js_new_object();
+        if (get_type_id(properties_map) != LMD_TYPE_MAP) return NULL;
+        // The function can move while its first properties map is allocated.
+        fn = (JsFunction*)function_root.get().function;
+        fn->properties_map = properties_map;
+        js_function_root_item_if_needed(fn, &fn->properties_map);
+    }
+    return get_type_id(fn->properties_map) == LMD_TYPE_MAP
+        ? fn->properties_map.map : NULL;
+}
+
 // v23: Force-store a property on a function's properties_map, bypassing writability checks.
 // Used by class initialization (transpiler) and Object.defineProperty.
 extern "C" void js_func_init_property(Item fn_item, Item key, Item value) {
@@ -7636,15 +7666,8 @@ extern "C" void js_func_init_property(Item fn_item, Item key, Item value) {
     Rooted<Item> value_root(roots, value);
     if (!roots.valid()) return;
     JsFunction* fn = (JsFunction*)function_root.get().function;
-    if (fn->properties_map.item == 0) {
-        Item properties_map = js_new_object();
-        // GC-owned functions can move while their first properties map is
-        // allocated. Refresh before publishing the map; writing through the
-        // stale pre-allocation pointer corrupted adjacent callable state.
-        fn = (JsFunction*)function_root.get().function;
-        fn->properties_map = properties_map;
-        js_function_root_item_if_needed(fn, &fn->properties_map);
-    }
+    if (!js_function_props_ensure(function_root.get())) return;
+    fn = (JsFunction*)function_root.get().function;
     if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
         // This is the internal [[DefineOwnProperty]] initialization path. A
         // normal [[Set]] would reject updates to the non-writable name/length
@@ -7934,7 +7957,7 @@ extern "C" Item js_super_instance_method_get(Item receiver, Item key) {
     }
 
     // A2-T7: legacy __get_X marker fallback retired. js_ordinary_get_own above
-    // already handles IS_ACCESSOR on `proto` via the modern shape+slot path.
+    // already handles IS_ACCESSOR on `proto` via the modern shape path.
     Item result;
     result = js_prototype_lookup(proto, key);
     if (result.item != ItemNull.item) return result;
@@ -8731,10 +8754,11 @@ static Item js_array_get_index(Item array, int64_t idx, Item fallback_key,
         Map* props = js_array_props(arr);
         Item pm_item = (Item){.map = props};
         Item slot_val = ItemNull;
+        ShapeEntry* accessor_entry = NULL;
         JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf,
-            idx_len, &slot_val, NULL);
+            idx_len, &slot_val, &accessor_entry);
         if (status == JS_SHAPE_SLOT_ACCESSOR) {
-            JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+            JsAccessorPair* pair = js_shape_entry_accessor_pair(accessor_entry);
             if (pair && pair->getter.item != ItemNull.item) {
                 return js_call_accessor_getter(pair->getter, array);
             }
@@ -9015,7 +9039,7 @@ static Item js_elements_set_int_mode(Item array, int64_t index, Item value,
         JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, idx_len, &slot_val, NULL);
         if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) {
             if (status == JS_SHAPE_SLOT_ACCESSOR) {
-                JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+                JsAccessorPair* pair = js_shape_entry_accessor_pair(_se_idx);
                 if (pair && pair->setter.item != ItemNull.item) {
                     js_call_function(pair->setter, array, &value, 1);
                     return value;
@@ -23149,10 +23173,11 @@ static inline Item js_array_element(Item arr_item, int64_t idx) {
         const char* idx_buf = js_property_index_chars(idx, &idx_len);
         Item pm_item = (Item){.map = props};
         Item slot_val = ItemNull;
+        ShapeEntry* accessor_entry = NULL;
         JsShapeSlotStatus status = js_own_shape_slot_status(
-            pm_item, idx_buf, idx_len, &slot_val, NULL);
+            pm_item, idx_buf, idx_len, &slot_val, &accessor_entry);
         if (status == JS_SHAPE_SLOT_ACCESSOR) {
-            JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+            JsAccessorPair* pair = js_shape_entry_accessor_pair(accessor_entry);
             if (pair && pair->getter.item != ItemNull.item) {
                 return js_call_accessor_getter(pair->getter, arr_item);
             }
@@ -23398,10 +23423,11 @@ static bool js_array_has_element(Item arr, lam::GcPtr<Array> a, int64_t idx, Ite
         const char* idx_buf = js_property_index_chars(idx, &idx_len);
         Item pm_item = (Item){.map = props};
         Item slot_val = ItemNull;
+        ShapeEntry* accessor_entry = NULL;
         JsShapeSlotStatus status = js_own_shape_slot_status(
-            pm_item, idx_buf, idx_len, &slot_val, NULL);
+            pm_item, idx_buf, idx_len, &slot_val, &accessor_entry);
         if (status == JS_SHAPE_SLOT_ACCESSOR) {
-            JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+            JsAccessorPair* pair = js_shape_entry_accessor_pair(accessor_entry);
             if (pair && pair->getter.item != ItemNull.item) {
                 *out = js_call_accessor_getter(pair->getter, arr);
             } else {
@@ -26374,18 +26400,19 @@ static ShapeEntry* js_proto_shape_entry(TypeMap* tm, const char* name,
 static JsShapeSlotStatus js_proto_shape_slot_status(Map* m, ShapeEntry* se,
         Item* out_slot) {
     if (out_slot) *out_slot = ItemNull;
-    if (!m || !se || !m->data || !shape_entry_storage_fits_data(se, m->data_cap)) {
-        return JS_SHAPE_SLOT_ABSENT;
-    }
+    if (!m || !se) return JS_SHAPE_SLOT_ABSENT;
+    if (jspd_is_deleted(se)) return JS_SHAPE_SLOT_DELETED;
+    if (jspd_is_accessor(se)) return JS_SHAPE_SLOT_ACCESSOR;
+    if (!m->data || !shape_entry_storage_fits_data(se, m->data_cap)) return JS_SHAPE_SLOT_ABSENT;
     if (map_ctor_offset_is_reserved(m, se->byte_offset)) {
         return JS_SHAPE_SLOT_ABSENT;
     }
     Item slot = _map_read_field(se, m->data);
     if (out_slot) *out_slot = slot;
-    if (jspd_is_deleted(se) || js_is_deleted_sentinel(slot)) {
+    if (js_is_deleted_sentinel(slot)) {
         return JS_SHAPE_SLOT_DELETED;
     }
-    return jspd_is_accessor(se) ? JS_SHAPE_SLOT_ACCESSOR : JS_SHAPE_SLOT_DATA;
+    return JS_SHAPE_SLOT_DATA;
 }
 
 // J39-7: ES B.3.7 PropertyDefinitionEvaluation for `__proto__: expr` in
@@ -27182,10 +27209,16 @@ JS_FORWARD_STATIC_ITEM(js_async_generator_wrap_yield_value, (Item value),
     js_make_iter_result, (value, false))
 
 static Item js_async_generator_yield_result(Item value) {
-    Item promise = js_promise_resolve(value);
-    if (item_is_error(promise)) return js_promise_reject(js_error_lane_payload(promise));
-    Item wrap_fn = js_new_native_function(js_async_generator_wrap_yield_value);
-    return js_promise_then(promise, wrap_fn, make_js_undefined());
+    JS_ROOTS(roots, value_root, value, promise_root, ItemNull, wrap_root,
+        ItemNull);
+    // Promise resolution and callback construction both allocate. The pending
+    // close result must retain its value and wrapper until then() owns them.
+    promise_root.set(js_promise_resolve(value_root.get()));
+    if (item_is_error(promise_root.get()))
+        return js_promise_reject(js_error_lane_payload(promise_root.get()));
+    wrap_root.set(js_new_native_function(js_async_generator_wrap_yield_value));
+    return js_promise_then(promise_root.get(), wrap_root.get(),
+        make_js_undefined());
 }
 
 // v15: Create a 2-element array [value, next_state] for state machine returns
@@ -28659,47 +28692,57 @@ extern "C" Item js_iterator_step(Item iterator) {
     return js_throw_type_error("iterator next is not a function");
 }
 
+// Sync IteratorClose validates the direct result; async callers retain it and
+// validate only after their required await has settled.
+static Item js_iterator_call_return(Item iterator, bool validate_result) {
+    JS_ROOTS(roots, iterator_root, iterator, return_fn_root, ItemNull);
+    if (js_is_generator(iterator_root.get())) {
+        Item result = js_generator_return(iterator_root.get(), make_js_undefined());
+        if (item_is_error(result) || !validate_result) return result;
+        return js_is_object_value(result) ? result
+            : js_throw_type_error("Iterator result is not an object");
+    }
+
+    if (!js_is_object_value(iterator_root.get())) {
+        return validate_result ? make_js_undefined()
+            : (Item){.item = JS_ITER_CLOSE_ABSENT_SENTINEL};
+    }
+    if (get_type_id(iterator_root.get()) == LMD_TYPE_MAP &&
+            js_is_fixed_layout_iterator(iterator_root.get())) {
+        return validate_result ? make_js_undefined()
+            : (Item){.item = JS_ITER_CLOSE_ABSENT_SENTINEL};
+    }
+
+    return_fn_root.set(js_name_item("return", 6));
+    return_fn_root.set(js_get_key_default(iterator_root.get(), return_fn_root.get()));
+    if (item_is_error(return_fn_root.get())) return return_fn_root.get();
+    if (js_is_callable(return_fn_root.get())) {
+        Item result = js_call_function(return_fn_root.get(), iterator_root.get(), NULL, 0);
+        if (item_is_error(result) || !validate_result) return result;
+        return js_is_object_value(result) ? result
+            : js_throw_type_error("Iterator result is not an object");
+    }
+    TypeId return_tid = get_type_id(return_fn_root.get());
+    if (return_tid == LMD_TYPE_UNDEFINED || return_tid == LMD_TYPE_NULL ||
+            return_fn_root.get().item == ITEM_JS_UNDEFINED) {
+        return validate_result ? make_js_undefined()
+            : (Item){.item = JS_ITER_CLOSE_ABSENT_SENTINEL};
+    }
+    return js_throw_type_error("iterator return is not a function");
+}
+
+extern "C" Item js_async_iterator_close_result(Item iterator) {
+    return js_iterator_call_return(iterator, false);
+}
+
+extern "C" bool js_async_iterator_close_needs_await(Item result) {
+    return result.item != JS_ITER_CLOSE_ABSENT_SENTINEL;
+}
+
 // IteratorClose: call iterator.return() if it exists (ES spec §7.4.6)
 extern "C" Item js_iterator_close(Item iterator) {
-    JS_ROOTS(roots, iterator_root, iterator, return_fn_root, ItemNull, result_root, ItemNull);
-    // A custom .return() may collect before its result is validated.
-    // Generators: call js_generator_return
-    if (js_is_generator(iterator_root.get())) {
-        // Send a return signal to the generator
-        js_generator_return(iterator_root.get(), make_js_undefined());
-        return make_js_undefined();
-    }
-
-    // Generic iterator: call .return() if available
-    TypeId tid = get_type_id(iterator_root.get());
-
-    // Fixed-layout built-in iterators have no `return` method, so IteratorClose
-    // completes without a property lookup.
-    if (tid == LMD_TYPE_MAP &&
-            js_is_fixed_layout_iterator(iterator_root.get())) {
-        return make_js_undefined();
-    }
-
-    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT || tid == LMD_TYPE_VMAP) {
-        return_fn_root.set(js_name_item("return", 6));
-        return_fn_root.set(js_get_key_default(iterator_root.get(), return_fn_root.get()));
-        if (item_is_error(return_fn_root.get())) return return_fn_root.get();
-        if (js_is_callable(return_fn_root.get())) {
-            result_root.set(js_call_function(return_fn_root.get(), iterator_root.get(), NULL, 0));
-            if (item_is_error(result_root.get())) return result_root.get();
-            TypeId result_tid = get_type_id(result_root.get());
-            if (result_tid != LMD_TYPE_MAP && result_tid != LMD_TYPE_ELEMENT &&
-                result_tid != LMD_TYPE_ARRAY && result_tid != LMD_TYPE_FUNC && result_tid != LMD_TYPE_VMAP) {
-                return js_throw_type_error("Iterator result is not an object");
-            }
-        } else {
-            TypeId rtid = get_type_id(return_fn_root.get());
-            if (rtid != LMD_TYPE_UNDEFINED && rtid != LMD_TYPE_NULL && return_fn_root.get().item != ITEM_JS_UNDEFINED) {
-                return js_throw_type_error("iterator return is not a function");
-            }
-        }
-    }
-    return make_js_undefined();
+    Item result = js_iterator_call_return(iterator, true);
+    return item_is_error(result) ? result : make_js_undefined();
 }
 
 // collect remaining iterator values into a new array (for rest elements in destructuring)

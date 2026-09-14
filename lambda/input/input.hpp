@@ -72,6 +72,11 @@ void input_release_auxiliary_resources(Input* input);
 InputManager* input_manager_create();
 void input_manager_destroy(InputManager* mgr);
 
+// Shared shape-entry factory. It owns a stable copy of the key spelling, so a
+// runtime-created private shape can safely outlive the transient JS key Item.
+ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id,
+                              ShapeEntry* prev_entry);
+
 #include "../io/mark_builder.hpp"
 
 #ifdef __cplusplus

@@ -7,6 +7,8 @@
 #include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_interp.hpp"
 #include "../lambda/js/js_function.hpp"
+#include "../lambda/js/js_property_attrs.h"
+#include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/runtime/sys_func_registry.h"
 #include "../lambda/input/input-script-cache.h"
@@ -95,6 +97,41 @@ TEST(JsScalarAnalysis, ResultFactsDoNotWeakenCallEffects) {
     EXPECT_EQ(jit_scalar_return_class_for_type(LMD_TYPE_FLOAT), SCALAR_RETURN_F64);
     EXPECT_EQ(jit_scalar_return_class_for_type(LMD_TYPE_INT64), SCALAR_RETURN_I64);
     EXPECT_EQ(jit_scalar_return_class_for_type(LMD_TYPE_STRING), SCALAR_RETURN_NONE);
+}
+
+static Item js_test_async_close_returns_undefined() {
+    return make_js_undefined();
+}
+
+TEST(JsIteratorClose, RawAsyncCloseDistinguishesAbsentReturnFromUndefined) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char bootstrap_source[] = "0;";
+    ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime,
+        bootstrap_source, sizeof(bootstrap_source) - 1,
+        "iterator-close-unit-bootstrap.js", NULL)));
+
+    {
+        RootFrame roots(4);
+        Rooted<Item> absent_iterator(roots, js_new_object());
+        Rooted<Item> callable_iterator(roots, js_new_object());
+        Rooted<Item> return_fn(roots,
+            js_new_native_function(js_test_async_close_returns_undefined));
+        Rooted<Item> return_key(roots, js_name_item("return", 6));
+        ASSERT_FALSE(item_is_error(js_set_key_default(callable_iterator.get(),
+            return_key.get(), return_fn.get())));
+
+        Item absent_result = js_async_iterator_close_result(absent_iterator.get());
+        ASSERT_FALSE(item_is_error(absent_result));
+        EXPECT_FALSE(js_async_iterator_close_needs_await(absent_result));
+
+        Item undefined_result = js_async_iterator_close_result(callable_iterator.get());
+        ASSERT_FALSE(item_is_error(undefined_result));
+        EXPECT_TRUE(js_async_iterator_close_needs_await(undefined_result));
+        EXPECT_EQ(undefined_result.item, make_js_undefined().item);
+    }
+
+    runtime_cleanup(&runtime);
 }
 
 TEST(JsAstStructure, ExtensionChildCatalogIsComplete) {
@@ -1365,6 +1402,72 @@ TEST(JsInterpreter, DefinesObjectAccessorsThroughTheSharedPropertyKernel) {
 
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(js_strict_equal(result, flt2it(44.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, KeepsAccessorCellsVirtualAndAliveAcrossCollection) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "let point = { get answer() { return 42; } }; point;";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "virtual-accessor-cell.js", NULL);
+
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_MAP);
+    PersistentRooted<Item> point_root(result);
+    ASSERT_TRUE(point_root.valid());
+    ShapeEntry* entry = js_find_shape_entry(point_root.get(), "answer", 6);
+    ASSERT_NE(entry, nullptr);
+    ASSERT_TRUE(jspd_is_accessor(entry));
+    EXPECT_EQ(entry->byte_offset, -1);
+    ASSERT_NE(entry->accessor, nullptr);
+
+    heap_gc_collect();
+    Item answer = js_get_key_default(point_root.get(), js_name_item("answer", 6));
+    ASSERT_FALSE(item_is_error(answer));
+    EXPECT_EQ(js_strict_equal(answer, flt2it(42.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ConvertsAccessorDescriptorsBetweenVirtualAndDataStorage) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char install_source[] =
+        "let point = { answer: 1 }; "
+        "Object.defineProperty(point, 'answer', { "
+        "get() { return 42; }, configurable: true }); point;";
+    Item point = js_interp_execute_source(&runtime, install_source,
+        sizeof(install_source) - 1, "virtual-accessor-convert.js", NULL);
+
+    ASSERT_EQ(get_type_id(point), LMD_TYPE_MAP);
+    PersistentRooted<Item> point_root(point);
+    ASSERT_TRUE(point_root.valid());
+    ShapeEntry* entry = js_find_shape_entry(point_root.get(), "answer", 6);
+    ASSERT_NE(entry, nullptr);
+    EXPECT_TRUE(jspd_is_accessor(entry));
+    EXPECT_EQ(entry->byte_offset, -1);
+    ASSERT_NE(entry->accessor, nullptr);
+    EXPECT_EQ(js_strict_equal(js_get_key_default(point_root.get(),
+        js_name_item("answer", 6)), flt2it(42.0)).item, b2it(true));
+
+    const char materialize_source[] =
+        "Object.defineProperty(point, 'answer', { value: 9, writable: true, "
+        "enumerable: true, configurable: true }); point;";
+    point_root.set(js_interp_execute_source(&runtime, materialize_source,
+        sizeof(materialize_source) - 1, "virtual-accessor-materialize.js", NULL));
+
+    ASSERT_EQ(get_type_id(point_root.get()), LMD_TYPE_MAP);
+    entry = js_find_shape_entry(point_root.get(), "answer", 6);
+    ASSERT_NE(entry, nullptr);
+    EXPECT_FALSE(jspd_is_accessor(entry));
+    EXPECT_GE(entry->byte_offset, 0);
+    EXPECT_EQ(entry->accessor, nullptr);
+    EXPECT_EQ(js_strict_equal(js_get_key_default(point_root.get(),
+        js_name_item("answer", 6)), flt2it(9.0)).item, b2it(true));
 
     runtime_cleanup(&runtime);
 }
@@ -2759,6 +2862,262 @@ TEST(JsInterpreter, ExecutesSupportedAsyncGeneratorForm) {
     EXPECT_EQ(runtime.scripts->length, 1);
     EXPECT_NE(runtime.eval_context, nullptr);
     EXPECT_EQ(js_global_binding_exists(js_make_string("sideEffect")), 1);
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, IteratesAsyncGeneratorsWithForAwait) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "async function* values() { yield 40; yield 2; } "
+        "async function sum() { let total = 0; "
+        "for await (let value of values()) { "
+        "total += await Promise.resolve(value); } return total; } "
+        "sum();";
+    Item promise = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "for-await-async-generator.js", NULL);
+
+    ASSERT_FALSE(item_is_error(promise));
+    Item result = js_await_sync_incremental(promise);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(42.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ClosesForAwaitIteratorAfterValueAwaitRejection) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "async function run() { let closed = false; let iterator = { "
+        "next: function() { return Promise.resolve({ value: Promise.reject('x'), done: false }); }, "
+        "return: function() { closed = true; return Promise.resolve({ done: true }); } }; "
+        "iterator[Symbol.asyncIterator] = function() { return iterator; }; "
+        "try { for await (let value of iterator) {} } catch (error) {} return closed; } run();";
+    Item promise = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "for-await-value-rejection.js", NULL);
+
+    ASSERT_FALSE(item_is_error(promise));
+    Item result = js_await_sync_incremental(promise);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AwaitsForAwaitIteratorCloseBeforeReturning) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "async function run() { let closed = false; let iterator = { "
+        "next: function() { return Promise.resolve({ value: 1, done: false }); }, "
+        "return: function() { return Promise.resolve().then(function() { closed = true; return {}; }); } }; "
+        "iterator[Symbol.asyncIterator] = function() { return iterator; }; "
+        "for await (let value of iterator) { break; } return closed; } run();";
+    Item promise = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "for-await-close.js", NULL);
+
+    ASSERT_FALSE(item_is_error(promise));
+    Item result = js_await_sync_incremental(promise);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PreservesForAwaitCloseCompletionPrecedence) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "function iterator(close) { let value = { next: function() { return Promise.resolve({ value: 1, done: false }); }, "
+        "return: function() { return close(); } }; "
+        "value[Symbol.asyncIterator] = function() { return value; }; return value; } "
+        "async function returnCompletion() { try { for await (let value of iterator(function() { return Promise.reject('close'); })) { return 'source'; } } "
+        "catch (error) { return error; } } "
+        "async function throwCompletion() { try { for await (let value of iterator(function() { return Promise.reject('close'); })) { throw 'source'; } } "
+        "catch (error) { return error; } } "
+        "async function primitiveCompletion() { try { for await (let value of iterator(function() { return Promise.resolve(1); })) { break; } } "
+        "catch (error) { return error instanceof TypeError; } return false; } "
+        "async function undefinedCompletion() { try { for await (let value of iterator(function() { return undefined; })) { break; } } "
+        "catch (error) { return error instanceof TypeError; } return false; } "
+        "async function check() { let returned = await returnCompletion(); "
+        "let thrown = await throwCompletion(); let primitive = await primitiveCompletion(); "
+        "let undefinedClose = await undefinedCompletion(); "
+        "return returned === 'close' && thrown === 'source' && primitive && undefinedClose; } check();";
+    Item promise = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "for-await-close-precedence.js", NULL);
+
+    ASSERT_FALSE(item_is_error(promise));
+    Item result = js_await_sync_incremental(promise);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsMir, AwaitsForAwaitIteratorCloseBeforeReturning) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "mir", 1), 0);
+
+    const char source[] =
+        "async function run() { let closed = false; let iterator = { "
+        "next: function() { return Promise.resolve({ value: 1, done: false }); }, "
+        "return: function() { return Promise.resolve().then(function() { closed = true; return {}; }); } }; "
+        "iterator[Symbol.asyncIterator] = function() { return iterator; }; "
+        "for await (let value of iterator) { break; } return closed; } run();";
+    Item promise = transpile_js_to_mir(&runtime, source, "for-await-mir-close.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_FALSE(item_is_error(promise));
+    Item result = js_await_sync_incremental(promise);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsMir, AwaitsAsyncGeneratorCloseBeforeReturning) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "mir", 1), 0);
+
+    const char source[] =
+        "async function* values() { try { yield 1; } finally { "
+        "await Promise.resolve().then(function() { globalThis.generatorClosed = true; }); } } "
+        "async function run() { globalThis.generatorClosed = false; "
+        "for await (let value of values()) { break; } return globalThis.generatorClosed; } run();";
+    Item promise = transpile_js_to_mir(&runtime, source,
+        "for-await-mir-async-generator-close.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_FALSE(item_is_error(promise));
+    Item result = js_await_sync_incremental(promise);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsMir, ClosesForAwaitIteratorAfterValueAwaitRejection) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "mir", 1), 0);
+
+    const char source[] =
+        "async function run() { let closed = false; let iterator = { "
+        "next: function() { return Promise.resolve({ value: Promise.reject('x'), done: false }); }, "
+        "return: function() { closed = true; return Promise.resolve({ done: true }); } }; "
+        "iterator[Symbol.asyncIterator] = function() { return iterator; }; "
+        "try { for await (let value of iterator) {} } catch (error) {} return closed; } run();";
+    Item promise = transpile_js_to_mir(&runtime, source,
+        "for-await-mir-value-rejection.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_FALSE(item_is_error(promise));
+    Item result = js_await_sync_incremental(promise);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsMir, AwaitsNestedForAwaitCloseBeforeReturning) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "mir", 1), 0);
+
+    const char source[] =
+        "function iterator(mark) { let sent = false; let value = { "
+        "next: function() { if (sent) return Promise.resolve({ done: true }); sent = true; return Promise.resolve({ value: 1, done: false }); }, "
+        "return: function() { return Promise.resolve().then(function() { globalThis[mark] = true; return {}; }); } }; "
+        "value[Symbol.asyncIterator] = function() { return value; }; return value; } "
+        "async function run() { globalThis.outerClosed = false; globalThis.innerClosed = false; "
+        "let outer = iterator('outerClosed'); let inner = iterator('innerClosed'); "
+        "for await (let outerValue of outer) { for await (let innerValue of inner) { return 'done'; } } } "
+        "async function check() { await run(); return globalThis.outerClosed && globalThis.innerClosed; } check();";
+    Item promise = transpile_js_to_mir(&runtime, source,
+        "for-await-mir-nested-close.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_FALSE(item_is_error(promise));
+    Item result = js_await_sync_incremental(promise);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsMir, AwaitsForAwaitCloseOnLabeledAbruptJumps) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "mir", 1), 0);
+
+    const char source[] =
+        "function iterator(mark) { let sent = false; let value = { "
+        "next: function() { if (sent) return Promise.resolve({ done: true }); sent = true; return Promise.resolve({ value: 1, done: false }); }, "
+        "return: function() { return Promise.resolve().then(function() { globalThis[mark] = true; return {}; }); } }; "
+        "value[Symbol.asyncIterator] = function() { return value; }; return value; } "
+        "async function labeledBreak() { globalThis.breakOuter = false; globalThis.breakInner = false; "
+        "let outer = iterator('breakOuter'); let inner = iterator('breakInner'); "
+        "outer: for await (let outerValue of outer) { for await (let innerValue of inner) { break outer; } } "
+        "return globalThis.breakOuter && globalThis.breakInner; } "
+        "async function labeledContinue() { globalThis.continueOuter = false; globalThis.continueInner = false; "
+        "let outer = iterator('continueOuter'); let inner = iterator('continueInner'); "
+        "outer: for await (let outerValue of outer) { for await (let innerValue of inner) { continue outer; } } "
+        "return !globalThis.continueOuter && globalThis.continueInner; } "
+        "async function check() { return await labeledBreak() && await labeledContinue(); } check();";
+    Item promise = transpile_js_to_mir(&runtime, source,
+        "for-await-mir-labeled-close.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_FALSE(item_is_error(promise));
+    Item result = js_await_sync_incremental(promise);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsMir, PreservesForAwaitCloseCompletionPrecedence) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "mir", 1), 0);
+
+    const char source[] =
+        "function iterator(close) { let value = { next: function() { return Promise.resolve({ value: 1, done: false }); }, "
+        "return: function() { return close(); } }; "
+        "value[Symbol.asyncIterator] = function() { return value; }; return value; } "
+        "async function returnCompletion() { try { for await (let value of iterator(function() { return Promise.reject('close'); })) { return 'source'; } } "
+        "catch (error) { return error; } } "
+        "async function throwCompletion() { try { for await (let value of iterator(function() { return Promise.reject('close'); })) { throw 'source'; } } "
+        "catch (error) { return error; } } "
+        "async function primitiveCompletion() { try { for await (let value of iterator(function() { return Promise.resolve(1); })) { break; } } "
+        "catch (error) { return error instanceof TypeError; } return false; } "
+        "async function undefinedCompletion() { try { for await (let value of iterator(function() { return undefined; })) { break; } } "
+        "catch (error) { return error instanceof TypeError; } return false; } "
+        "async function check() { let returned = await returnCompletion(); "
+        "let thrown = await throwCompletion(); let primitive = await primitiveCompletion(); "
+        "let undefinedClose = await undefinedCompletion(); "
+        "return [returned, thrown, primitive, undefinedClose]; } check();";
+    Item promise = transpile_js_to_mir(&runtime, source,
+        "for-await-mir-close-precedence.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_FALSE(item_is_error(promise));
+    Item result = js_await_sync_incremental(promise);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0),
+        js_make_string("close")).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1),
+        js_make_string("source")).item, b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 2).item, b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 3).item, b2it(true));
 
     runtime_cleanup(&runtime);
 }

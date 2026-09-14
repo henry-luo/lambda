@@ -2148,13 +2148,14 @@ void jm_transpile_do_while(JsMirTranspiler* mt, JsDoWhileNode* dw) {
 }
 
 MIR_reg_t jm_emit_await_value_reg(JsMirTranspiler* mt, MIR_reg_t promise_val,
-        JsMirSuspendKind kind) {
+        JsMirSuspendKind kind, bool route_rejection) {
     if (mt->in_generator && mt->in_async) {
         int next_state = jm_next_resume_state(mt, kind);
         if (next_state < 0) return promise_val;
 
         (void)jm_callr_1(mt, "js_async_prepare_await", MIR_T_I64, promise_val);
-        jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_AWAIT_REJECTION);
+        if (route_rejection)
+            jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_AWAIT_REJECTION);
 
         MIR_reg_t await_result = jm_new_reg(mt, "await_res", MIR_T_I64);
         jm_emit_suspend_env_save(mt);
@@ -2173,7 +2174,8 @@ MIR_reg_t jm_emit_await_value_reg(JsMirTranspiler* mt, MIR_reg_t promise_val,
         // rejection marker because both resumes share one state label.
         jm_publish_call_result(mt, mt->gen_input_reg);
         jm_emit_async_resume_refresh(mt);
-        jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_AWAIT_REJECTION);
+        if (route_rejection)
+            jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_AWAIT_REJECTION);
         return await_result;
     }
 
@@ -2570,7 +2572,10 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     mt->iteration_depth++;
     if (mt->loop_depth > 0) {
         JsLoopLabels* loop = jm_loop_label_at(mt, mt->loop_depth - 1);
-        if (loop) loop->iterator_to_close = iterator;
+        if (loop) {
+            loop->iterator_to_close = iterator;
+            loop->is_async_iterator = is_for_await;
+        }
     }
 
     // Pre-initialize delayed-return registers BEFORE the loop test label,
@@ -2580,12 +2585,21 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     bool pushed_try = false;
     MIR_reg_t forit_return_val = 0;
     MIR_reg_t forit_has_return = 0;
+    MIR_reg_t forit_async_return_close_done = 0;
     MIR_label_t l_forit_ret = jm_new_label(mt);
     if (JsTryContext* tc = jm_try_context_push(mt)) {
         forit_return_val = jm_new_reg(mt, "_forit_ret", MIR_T_I64);
         forit_has_return = jm_new_reg(mt, "_forit_hret", MIR_T_I64);
+        if (is_for_await) {
+            forit_async_return_close_done = jm_new_reg(mt, "_forit_close_done",
+                MIR_T_I64);
+        }
         jm_emit_reg_op(mt, MIR_MOV, forit_return_val, MIR_new_int_op(mt->ctx, 0));
         jm_emit_reg_op(mt, MIR_MOV, forit_has_return, MIR_new_int_op(mt->ctx, 0));
+        if (forit_async_return_close_done) {
+            jm_emit_reg_op(mt, MIR_MOV, forit_async_return_close_done,
+                MIR_new_int_op(mt->ctx, 0));
+        }
         // In generators: register forit_return_val and forit_has_return as env-stored
         // so they survive yield suspend/resume inside the for-of body
         if (mt->in_generator && mt->gen_env_reg) {
@@ -2593,10 +2607,22 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
             int hret_slot = mt->gen_local_slot_count++;
             jm_install_for_generator_var(mt, forit_return_val, 'i', ret_slot);
             jm_install_for_generator_var(mt, forit_has_return, 'h', hret_slot);
+            if (forit_async_return_close_done) {
+                int close_slot = mt->gen_local_slot_count++;
+                jm_install_for_generator_var(mt, forit_async_return_close_done,
+                    'c', close_slot);
+            }
             mt->func_em->em.label_counter++;
         }
         jm_try_context_setup(tc, l_iter_error, 0, l_forit_ret,
             forit_return_val, forit_has_return, true, false, NULL, 0);
+        if (mt->loop_depth > 0) {
+            JsLoopLabels* loop = jm_loop_label_at(mt, mt->loop_depth - 1);
+            if (loop) {
+                loop->async_return_close_done = forit_async_return_close_done;
+                loop->iterator_cleanup_try_depth = mt->try_ctx_depth - 1;
+            }
+        }
         pushed_try = true;
     }
 
@@ -2679,7 +2705,8 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     // the enclosing completion context; otherwise a failing return() is
     // mistaken for another body exception and the iterator is closed twice.
     if (pushed_try) mt->try_ctx_depth--;
-    jm_emit_iterator_close_checked(mt, iterator);
+    jm_emit_loop_iterator_close_checked(mt,
+        jm_loop_label_at(mt, mt->loop_depth - 1));
     if (pushed_try) mt->try_ctx_depth++;
     // fall through to l_end
 
@@ -2697,8 +2724,12 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         // closing may execute user code and overwrite the transition lane.
         MIR_reg_t routed_exc = jm_emit_error_lane_return(mt);
         MIR_reg_t saved_exc = jm_callr_1(mt, "js_error_lane_payload", MIR_T_I64, routed_exc);
-        jm_emit_iterator_close(mt, iterator);
-        jm_callr_1(mt, "js_throw_value", MIR_T_I64, saved_exc);
+        if (is_for_await) {
+            jm_emit_async_iterator_close_preserving_throw(mt, iterator, saved_exc);
+        } else {
+            jm_emit_iterator_close(mt, iterator);
+            jm_callr_1(mt, "js_throw_value", MIR_T_I64, saved_exc);
+        }
         // Re-propagate only after IteratorClose, and hide this context for the
         // route so the cleanup handler cannot jump back to itself.  The
         // rethrow helper always returns an ERROR Item; leaving the lane
@@ -2734,7 +2765,19 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         // Return completion closes this iterator before the value leaves the
         // loop. The body-catch context was removed above, so return() errors
         // override the source return value and route to the outer context.
-        jm_emit_iterator_close_checked(mt, iterator);
+        if (is_for_await) {
+            MIR_label_t close_already_done = jm_new_label(mt);
+            jm_emit_branch(mt, MIR_BT, close_already_done,
+                forit_async_return_close_done);
+            jm_emit_loop_iterator_close_checked(mt,
+                jm_loop_label_at(mt, mt->loop_depth - 1));
+            jm_emit_reg_op(mt, MIR_MOV, forit_async_return_close_done,
+                MIR_new_int_op(mt->ctx, 1));
+            jm_emit_label_with_state(mt, close_already_done,
+                JS_ERROR_LANE_CLEAN);
+        } else {
+            jm_emit_iterator_close_checked(mt, iterator);
+        }
         if (!jm_emit_delayed_return_completion(mt, forit_return_val,
                 JS_MIR_COMPLETION_RETURN_THROUGH_CLEANUP)) {
             // No outer try — emit actual return
@@ -2824,9 +2867,17 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
         if (loop && loop->iterator_to_close) {
             if (defer_nearest_iterator_close) {
                 defer_nearest_iterator_close = false;
+                if (loop->is_async_iterator) {
+                    jm_emit_loop_iterator_close_checked(mt, loop);
+                    if (loop->async_return_close_done) {
+                        jm_emit_reg_op(mt, MIR_MOV,
+                            loop->async_return_close_done,
+                            MIR_new_int_op(mt->ctx, 1));
+                    }
+                }
                 continue;
             }
-            jm_emit_iterator_close(mt, loop->iterator_to_close);
+            jm_emit_loop_iterator_close_checked(mt, loop);
         }
     }
 

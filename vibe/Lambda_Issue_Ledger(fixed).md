@@ -716,6 +716,22 @@ produce `error()` under eager JIT; `transpile_bitwise.ls`,
 `sized_numeric_ushr.ls`, and `proc_bitwise_int64.ls` preserve valid compact,
 sized, and wide-lane behavior.
 
+<a id="lr03-6"></a>**LR03-6 · JS accessor-pair tag overloading · RESOLVED 2026-09-14**
+`JsAccessorPair` no longer occupies a fake `LMD_TYPE_FUNC` value lane.
+`JsAccessorCell` has the distinct `GC_TYPE_JS_ACCESSOR` collector tag, and an
+accessor `ShapeEntry` is a map-private virtual descriptor with
+`byte_offset == -1` and a direct cell pointer. The collector follows the
+`Map → TypeMap → ShapeEntry → cell` edge; producers use an exact temporary
+object root only until that edge is published. Generic Map readers never
+decode the cell as an `Item`. Descriptor conversion materializes a fresh
+physical lane before accessor→data, and abandons a former data lane for
+data→accessor, as required by **D3.4.8**.
+
+Regression: `JsInterpreter.KeepsAccessorCellsVirtualAndAliveAcrossCollection`
+forces a collection after accessor installation, and
+`JsInterpreter.ConvertsAccessorDescriptorsBetweenVirtualAndDataStorage`
+verifies both conversion directions and the `byte_offset` invariant.
+
 <a id="lr03-10"></a>**LR03-10 · A type with no TypeId of its own resolves to the wrong singleton · RESOLVED 2026-09-03**
 `lambda_type_node_singleton` (`runtime/ast.hpp`) turns a type-annotation AST
 node into the runtime type value both tiers compare against. It arms a short

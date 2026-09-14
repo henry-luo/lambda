@@ -13,6 +13,7 @@ extern "C" bool js_proto_snapshot_requires_typemap_detach(Item obj);
 #include "js_state_guards.h"
 #include "../lambda.hpp"
 #include "../lambda-data.hpp"
+#include "../input/input.hpp"
 #include "../runtime/heap_api.h"
 #include "../core/name_pool.hpp"
 #include "../../lib/log.h"
@@ -164,6 +165,7 @@ static TypeMap* js_typemap_clone_for_mutation_ex(Item obj, bool force_clone) {
         dst->name_id = src->name_id;
         dst->key_kind = src->key_kind;
         dst->flags = src->flags;
+        dst->accessor = src->accessor;
         if (!first_clone) first_clone = dst;
         if (prev_clone) prev_clone->next = dst;
         prev_clone = dst;
@@ -582,46 +584,96 @@ extern "C" void js_attr_set_configurable(Item obj, const char* name, int name_le
     else              js_attr_apply_shape_flags(obj, name, name_len, JSPD_NON_CONFIGURABLE, 0);
 }
 
-static Item js_accessor_cell_storage_item(Item cell_item) {
-    JsAccessorCell* cell = (JsAccessorCell*)cell_item.function;
-    if (!cell || cell->layout_magic != JS_ACCESSOR_CELL_LAYOUT_MAGIC) {
-        return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
-            "invalid accessor cell storage");
+class JsAccessorPairRoot {
+private:
+    JsAccessorPair* pair_;
+    bool registered_;
+
+public:
+    explicit JsAccessorPairRoot(JsAccessorPair* pair)
+        : pair_(pair), registered_(heap_try_register_gc_object_root(pair)) {}
+    ~JsAccessorPairRoot() {
+        if (registered_) heap_unregister_gc_object_root(pair_);
     }
-    // Map shapes need a pointer-width lane. FUNC supplies that physical lane,
-    // but this tagged word is confined to the store boundary: readers recover
-    // the raw cell only after ShapeEntry marks the slot as an accessor.
-    return (Item){.item = ((uint64_t)LMD_TYPE_FUNC << 56) |
-        (uint64_t)(uintptr_t)cell};
+    bool is_registered() const { return registered_; }
+};
+
+static ShapeEntry* js_accessor_shape_entry(TypeMap* type, String* name) {
+    if (!type || !name) return NULL;
+    NameId name_id = property_key_id(name);
+    return name_id != NAME_ID_NONE
+        ? typemap_hash_lookup_by_name_id(type, name_id, property_key_hash(name))
+        : typemap_hash_lookup(type, name->chars, (int)name->len);
 }
 
-static Item js_store_accessor_pair_slot(Item obj, Item name, Item pair) {
-    JS_ASSIGN_OR_RETURN(storage_item, js_accessor_cell_storage_item(pair));
-    if (get_type_id(obj) == LMD_TYPE_FUNC) {
-        // Function name/length are non-writable but configurable. Descriptor
-        // replacement is [[DefineOwnProperty]], so routing the pair through
-        // ordinary [[Set]] leaves the old data value under an accessor shape.
-        js_func_init_property(obj, name, storage_item);
-        return js_status_ok();
+static Map* js_accessor_ensure_property_map(Item obj) {
+    TypeId type = get_type_id(obj);
+    if (type == LMD_TYPE_MAP) return obj.map;
+    if (type == LMD_TYPE_ARRAY || js_is_ordinary_numeric_array(obj)) {
+        return js_array_props_ensure(obj.array);
     }
-    return js_define_own_key_storage(obj, name, storage_item);
+    if (type == LMD_TYPE_FUNC) return js_function_props_ensure(obj);
+    return NULL;
+}
+
+static Item js_store_virtual_accessor_pair(Item obj, Item name,
+                                            JsAccessorPair* pair, uint8_t attrs) {
+    String* key = it2s(name);
+    if (!key || !pair || pair->layout_magic != JS_ACCESSOR_CELL_LAYOUT_MAGIC) {
+        return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
+            "invalid virtual accessor descriptor");
+    }
+    if (!js_obj_underlying_map(obj)) {
+        return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
+            "accessor property map is unavailable");
+    }
+    TypeMap* type = js_typemap_clone_for_mutation(obj);
+    if (!type || !js_input || !js_input->pool) {
+        return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
+            "accessor shape privatization failed");
+    }
+    ShapeEntry* entry = js_accessor_shape_entry(type, key);
+    if (!entry) {
+        entry = alloc_shape_entry(js_input->pool, key, LMD_TYPE_UNDEFINED,
+            type->last);
+        if (!entry) {
+            return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
+                "accessor shape entry allocation failed");
+        }
+        entry->byte_offset = -1;
+        if (!type->shape) type->shape = entry;
+        type->last = entry;
+        type->length++;
+        typemap_hash_insert_owned(type, entry, js_input->pool);
+    }
+    // The cell is descriptor metadata, not a data-lane value. Retire any
+    // prior physical bytes so the raw-word GC safety sweep cannot retain the
+    // former data value after this entry becomes virtual (D3.4.8).
+    if (entry->byte_offset >= 0) {
+        Map* property_map = js_obj_underlying_map(obj);
+        int storage_size = shape_entry_storage_size(entry);
+        if (property_map && property_map->data && storage_size > 0 &&
+                entry->byte_offset + storage_size <= property_map->data_cap) {
+            memset((char*)property_map->data + entry->byte_offset, 0,
+                (size_t)storage_size);
+        }
+    }
+    // A later accessor-to-data conversion allocates a fresh physical lane.
+    entry->byte_offset = -1;
+    entry->accessor = pair;
+    entry->flags |= (uint8_t)(JSPD_IS_ACCESSOR | (attrs &
+        (JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE)));
+    entry->flags &= (uint8_t)~JSPD_DELETED;
+    js_map_promote_descriptor_kind(js_obj_underlying_map(obj));
+    return js_status_ok();
 }
 
 // =============================================================================
 // Phase 3+4 Stage C: unified accessor producer (single-mode storage)
 // =============================================================================
 //
-// Stage C: single-mode storage. Writes ONLY a JsAccessorPair Item under the
-// actual property name X, with JSPD_IS_ACCESSOR + JSPD_NON_ENUMERABLE bits on
-// the shape entry. Reader fast-paths in js_get_key_default / js_prototype_lookup
-// / js_object_get_own_property_descriptor detect IS_ACCESSOR and dispatch via
-// pair->getter directly (no snprintf, no separate slot, no legacy magic keys).
-//
-// The pair Item read raw has type_id=LMD_TYPE_FUNC (intentional, for tag-safety)
-// so any code path that returns the slot as a value without checking the
-// IS_ACCESSOR shape flag would deliver a fake Function. Mitigation: shape entry
-// X is always marked NON_ENUMERABLE, keeping it out of for-in / Object.keys /
-// JSON.stringify / Object spread.
+// Stage C: accessor descriptors are virtual. A private ShapeEntry owns the
+// JsAccessorPair directly, so no property read can surface a cell as a value.
 extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
                                            Item setter, uint8_t attrs) {
     if (get_type_id(name) != LMD_TYPE_STRING) return;
@@ -629,8 +681,7 @@ extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
         obj_root, obj,
         name_root, name,
         getter_root, getter,
-        setter_root, setter,
-        pair_root, ItemNull);
+        setter_root, setter);
 
     String* ns = it2s(name_root.get());
     if (!ns || ns->len == 0) return;
@@ -638,29 +689,26 @@ extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
     int nl = (int)ns->len;
     if (nl > 248) return; // defensive bound retained for the transition helpers.
 
+    if (!js_accessor_ensure_property_map(obj_root.get())) {
+        log_error("js-accessor: native property map allocation failed");
+        return;
+    }
+
     // Allocate pair and store under name X. Use ItemNull as the slot for
     // missing getter/setter (per ES spec — absent half is undefined).
     Item g = (getter_root.get().item != ItemNull.item) ? getter_root.get() : ItemNull;
     Item s = (setter_root.get().item != ItemNull.item) ? setter_root.get() : ItemNull;
     JsAccessorPair* pair = js_alloc_accessor_pair(g, s);
-    if (pair) {
-        // The accessor installation path can allocate repeatedly; keep every
-        // participating value rooted until both the slot and shape are durable.
-        pair_root.set(js_accessor_pair_to_item(pair));
-        js_store_accessor_pair_slot(obj_root.get(), name_root.get(), pair_root.get());
-        // Set IS_ACCESSOR + force NON_ENUMERABLE on the shape entry so the
-        // pair slot is not visible to enumeration/JSON/spread.
-        uint8_t set_mask = JSPD_IS_ACCESSOR | JSPD_NON_ENUMERABLE;
-        if (attrs & JSPD_NON_CONFIGURABLE) set_mask |= JSPD_NON_CONFIGURABLE;
-        ns = it2s(name_root.get());
-        if (property_key_requires_identity(ns)) {
-            // A Symbol/private accessor slot is addressed only by its record;
-            // a byte update would leave the raw pair visible to ordinary get.
-            js_shape_entry_update_flags_name_id(obj_root.get(),
-                property_key_id(ns), set_mask, JSPD_DELETED);
-        } else {
-            js_shape_entry_update_flags(obj_root.get(), ns->chars, nl, set_mask, JSPD_DELETED);
-        }
+    if (!pair) return;
+    JsAccessorPairRoot pair_root(pair);
+    if (!pair_root.is_registered()) {
+        log_error("js-accessor: native cell root registration failed");
+        return;
+    }
+    Item result = js_store_virtual_accessor_pair(obj_root.get(), name_root.get(), pair,
+        (uint8_t)(attrs | JSPD_NON_ENUMERABLE));
+    if (item_is_error(result)) {
+        log_error("js-accessor: native descriptor installation failed");
     }
 
     // NON_CONFIGURABLE is encoded in the shape entry flags above.
@@ -677,8 +725,8 @@ extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
 // separate top-level calls during class/object body traversal.
 //
 // Storage scheme is identical to js_install_native_accessor (Stage C):
-//   - Slot at name X holds a JsAccessorPair* Item.
-//   - Shape entry for X has JSPD_IS_ACCESSOR + caller-requested attrs bits.
+//   - Shape entry for X owns a JsAccessorPair* virtual descriptor.
+//   - byte_offset is -1 and Map::data has no accessor-cell carrier.
 //   - No legacy __get_X/__set_X writes.
 extern "C" Map* js_obj_underlying_map(Item obj) {
     TypeId t = get_type_id(obj);
@@ -712,7 +760,6 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
         obj_root, obj,
         name_root, name,
         fn_root, fn,
-        pair_root, ItemNull,
         getter_root, ItemNull,
         setter_root, ItemNull);
     obj = obj_root.get();
@@ -728,10 +775,13 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
     String* ns = it2s(name);
     if (!ns) return js_status_ok();
 
-    // Accessor installation can add a new shape before setting its descriptor
-    // flags. Detach a snapshot-backed target so the intrinsic blueprint stays
-    // immutable across hot-batch realm resets (D6.2.2v2).
-    js_typemap_clone_for_mutation(obj_root.get());
+    // A new virtual descriptor needs a concrete backing Map for its private
+    // TypeMap. Refresh the rooted receiver after the allocation boundary.
+    if (!js_accessor_ensure_property_map(obj_root.get())) {
+        return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
+            "accessor property map allocation failed");
+    }
+    obj = obj_root.get();
 
     // Normalize "absent half" to ItemNull so read paths that gate on
     // `pair->getter.item != ItemNull.item` correctly treat an explicit-undefined
@@ -751,13 +801,7 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
     ShapeEntry* se = identity_key ? js_find_shape_entry_name_id(obj, identity_id) :
         js_find_shape_entry(obj, ns->chars, (int)ns->len);
     if (se && jspd_is_accessor(se)) {
-        Item slot_val = ItemNull;
-        JsShapeSlotStatus status = identity_key
-            ? js_own_shape_slot_status_name_id(obj, identity_id, &slot_val, NULL)
-            : js_own_shape_slot_status(obj, ns->chars, (int)ns->len, &slot_val, NULL);
-        if (status == JS_SHAPE_SLOT_ACCESSOR && slot_val.item != ItemNull.item) {
-            pair = js_item_to_accessor_pair(slot_val);
-        }
+        pair = js_shape_entry_accessor_pair(se);
     }
     if (se && !jspd_is_configurable(se)) {
         if (!jspd_is_accessor(se)) {
@@ -782,21 +826,13 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
     pair = js_alloc_accessor_pair(getter_root.get(), setter_root.get());
     if (!pair) return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
                                                "accessor pair allocation failed");
-    pair_root.set(js_accessor_pair_to_item(pair));
-    JS_ASSIGN_OR_RETURN(set_result, js_store_accessor_pair_slot(
-        obj_root.get(), name_root.get(), pair_root.get()));
-
-    // Set IS_ACCESSOR + caller-requested attribute bits on the shape entry.
-    uint8_t set_mask = JSPD_IS_ACCESSOR;
-    if (attrs & JSPD_NON_ENUMERABLE)   set_mask |= JSPD_NON_ENUMERABLE;
-    if (attrs & JSPD_NON_CONFIGURABLE) set_mask |= JSPD_NON_CONFIGURABLE;
-    if (identity_key) {
-        // Symbol text is diagnostic-only; mutate the exact installed key.
-        js_shape_entry_update_flags_name_id(obj, identity_id, set_mask,
-            JSPD_DELETED);
-    } else {
-        js_shape_entry_update_flags(obj, ns->chars, (int)ns->len, set_mask, JSPD_DELETED);
+    JsAccessorPairRoot pair_root(pair);
+    if (!pair_root.is_registered()) {
+        return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
+            "accessor cell root registration failed");
     }
+    JS_ASSIGN_OR_RETURN(set_result, js_store_virtual_accessor_pair(
+        obj_root.get(), name_root.get(), pair, attrs));
     // D3.4.4v2: pooled string identity does not erase array-index shape facts.
     // Missing this mark let dense stores bypass numeric accessors installed in
     // an Array companion map through the NameId branch.
@@ -828,15 +864,11 @@ extern "C" JsAccessorPair* js_find_accessor_pair_inheritable_name_id(Item obj,
     while (depth < 16) {
         ShapeEntry* se = js_find_shape_entry_name_id(cur.get(), name_id);
         Map* m = se ? js_obj_underlying_map(cur.get()) : NULL;
-        if (se && m && map_ctor_offset_is_reserved(m, se->byte_offset)) se = NULL;
+        if (se && m && se->byte_offset >= 0 &&
+                map_ctor_offset_is_reserved(m, se->byte_offset)) se = NULL;
         if (se) {
             if (jspd_is_accessor(se)) {
-                Item slot_val = ItemNull;
-                if (js_own_shape_slot_status_name_id(cur.get(), name_id,
-                        &slot_val, NULL) == JS_SHAPE_SLOT_ACCESSOR &&
-                        slot_val.item != ItemNull.item) {
-                    return js_item_to_accessor_pair(slot_val);
-                }
+                return js_shape_entry_accessor_pair(se);
             }
             return nullptr;
         }

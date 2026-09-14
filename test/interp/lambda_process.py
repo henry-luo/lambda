@@ -31,6 +31,42 @@ class LambdaProcessResult:
         return f"exit{self.return_code}"
 
 
+def run_process(argv: Sequence[str], timeout: float,
+                extra_env: Optional[Mapping[str, Optional[str]]] = None) -> LambdaProcessResult:
+    """Runs an arbitrary test command in an isolated process group."""
+    env = dict(os.environ)
+    if extra_env:
+        for name, value in extra_env.items():
+            if value is None:
+                env.pop(name, None)
+            else:
+                env[name] = value
+    command = list(argv)
+
+    proc = None
+    try:
+        proc = subprocess.Popen(
+            command,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            errors="replace",
+            start_new_session=os.name != "nt",
+        )
+        stdout, stderr = proc.communicate(timeout=timeout)
+        return LambdaProcessResult(command, stdout, stderr, proc.returncode, False)
+    except subprocess.TimeoutExpired as error:
+        if proc is None:
+            return LambdaProcessResult(command, "", "launcher timeout", None, True)
+        _terminate_process_group(proc)
+        stdout = error.stdout if isinstance(error.stdout, str) else ""
+        stderr = error.stderr if isinstance(error.stderr, str) else ""
+        return LambdaProcessResult(command, stdout, stderr, None, True)
+    except OSError as error:
+        return LambdaProcessResult(command, "", "", None, False, str(error))
+
+
 def run_lambda_process(executable: str, script: str, tier: Optional[str],
                        timeout: float, procedural: bool = False,
                        dry_run: bool = False,
@@ -41,14 +77,11 @@ def run_lambda_process(executable: str, script: str, tier: Optional[str],
     A missing tier deliberately means AUTO. Callers that need eager MIR Direct
     must pass ``jit`` rather than relying on the default (D8.1.1v10).
     """
-    env = dict(os.environ)
+    env: dict[str, Optional[str]] = dict(extra_env or {})
     if tier is None:
-        env.pop("LAMBDA_TIER", None)
+        env["LAMBDA_TIER"] = None
     else:
         env["LAMBDA_TIER"] = tier
-    if extra_env:
-        env.update(extra_env)
-
     argv = [executable]
     if procedural:
         argv.append("run")
@@ -57,29 +90,7 @@ def run_lambda_process(executable: str, script: str, tier: Optional[str],
     if no_log:
         argv.append("--no-log")
     argv.append(script)
-
-    proc = None
-    try:
-        proc = subprocess.Popen(
-            argv,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            errors="replace",
-            start_new_session=os.name != "nt",
-        )
-        stdout, stderr = proc.communicate(timeout=timeout)
-        return LambdaProcessResult(argv, stdout, stderr, proc.returncode, False)
-    except subprocess.TimeoutExpired as error:
-        if proc is None:
-            return LambdaProcessResult(argv, "", "launcher timeout", None, True)
-        _terminate_process_group(proc)
-        stdout = error.stdout if isinstance(error.stdout, str) else ""
-        stderr = error.stderr if isinstance(error.stderr, str) else ""
-        return LambdaProcessResult(argv, stdout, stderr, None, True)
-    except OSError as error:
-        return LambdaProcessResult(argv, "", "", None, False, str(error))
+    return run_process(argv, timeout, env)
 
 
 def _terminate_process_group(proc: subprocess.Popen[str]) -> None:

@@ -7917,6 +7917,10 @@ static void clone_mutable_shape_data(TypeMap* map_type, Item dst_owner, Item src
             !mutable_clone_owner_data(src_owner)) return;
     ShapeEntry* entry = map_type->shape;
     while (entry) {
+        if (entry->byte_offset < 0) {
+            entry = entry->next;
+            continue;
+        }
         void* src_data = mutable_clone_owner_data(src_owner);
         if (!entry->name) {
             // Map spread slots are recursive raw Map* links, not normal typed
@@ -8503,6 +8507,7 @@ Item cow_bind_rmw_handle(Item root, Item value, int64_t count, Item key1, Item k
 static void cow_unmark_shape_children(TypeMap* type, void* data) {
     if (!type || !data) return;
     for (ShapeEntry* entry = type->shape; entry; entry = entry->next) {
+        if (entry->byte_offset < 0) continue;
         Item child = entry->name ? _map_read_field(entry, data)
                                  : (Item){.map = map_shape_field_to_map(data, entry)};
         Container* container = cow_item_container(child);
@@ -8518,6 +8523,7 @@ static void cow_unmark_shape_children(TypeMap* type, void* data) {
 void cow_mark_shape_children(TypeMap* type, void* data) {
     if (!type || !data) return;
     for (ShapeEntry* entry = type->shape; entry; entry = entry->next) {
+        if (entry->byte_offset < 0) continue;
         if (!entry->name) {
             Map* spread = map_shape_field_to_map(data, entry);
             if (spread) cow_mark_shared({.map = spread});
@@ -8862,12 +8868,12 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     if (!key_chars) return false;
 
     TypeMap* old_type = (TypeMap*)map->type;
-    if (!map->data && old_type->length > 0) return false;
+    if (!map->data && old_type->byte_size > 0) return false;
     int old_count = 0;
     int64_t new_size = 0;
     for (ShapeEntry* entry = old_type->shape; entry; entry = entry->next) {
         old_count++;
-        new_size += shape_entry_storage_size(entry);
+        if (entry->byte_offset >= 0) new_size += shape_entry_storage_size(entry);
     }
     TypeId value_type = get_type_id(value);
     new_size += type_info[value_type].byte_size;
@@ -8900,11 +8906,16 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
         ShapeEntry* entry = (ShapeEntry*)pool_calloc(context->pool, sizeof(ShapeEntry));
         if (!entry) return false;
         *entry = *old;
-        entry->byte_offset = offset;
         entry->next = NULL;
-        int size = shape_entry_storage_size(old);
-        memcpy((char*)new_data + offset, (char*)map->data + old->byte_offset, (size_t)size);
-        offset += size;
+        if (old->byte_offset >= 0) {
+            entry->byte_offset = offset;
+            int size = shape_entry_storage_size(old);
+            memcpy((char*)new_data + offset, (char*)map->data + old->byte_offset,
+                (size_t)size);
+            offset += size;
+        } else {
+            entry->byte_offset = -1;
+        }
         if (last) last->next = entry;
         else first = entry;
         last = entry;
@@ -10053,8 +10064,9 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         // union with its LMD_TYPE_TYPE carrier makes the packed Item look like
         // a Type* and corrupts it on the next validation read.
         shape_entry_set_type(ne, field_contract);
-        bool fixed_slot = field_index < fixed_slot_count;
-        ne->byte_offset = fixed_slot ? e->byte_offset : byte_offset;
+        bool virtual_field = e->byte_offset < 0;
+        bool fixed_slot = !virtual_field && field_index < fixed_slot_count;
+        ne->byte_offset = virtual_field ? -1 : (fixed_slot ? e->byte_offset : byte_offset);
         ne->next = NULL;
         ne->ns = e->ns;
         // Preserve property attribute flags (JSPD_IS_ACCESSOR, NW, NE, NC, etc.)
@@ -10063,12 +10075,13 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         // defaults whenever a sibling field's type transitions trigger a rebuild.
         ne->flags = e->flags;
         ne->default_value = e->default_value;
+        ne->accessor = e->accessor;
 
         if (!first) first = ne;
         if (prev) prev->next = ne;
         last = ne;
         prev = ne;
-        if (!fixed_slot) {
+        if (!fixed_slot && !virtual_field) {
             byte_offset += ne->storage.byte_size;
         }
         field_index++;
@@ -10110,6 +10123,12 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
     ShapeEntry* new_e = first;
     field_index = 0;
     while (old_e && new_e) {
+        if (old_e->byte_offset < 0 || new_e->byte_offset < 0) {
+            old_e = old_e->next;
+            new_e = new_e->next;
+            field_index++;
+            continue;
+        }
         void* old_field = (char*)old_data + old_e->byte_offset;
         void* new_field = (char*)new_data + new_e->byte_offset;
 
@@ -11023,6 +11042,10 @@ Item fn_map_set(Item map_item, Item key, Item value) {
             name_matches = shape_field_name_equals(entry, key_cstr, key_len);
         }
         if (name_matches) {
+            if (entry->byte_offset < 0) {
+                log_error("fn_map_set: attempted store to virtual shape field");
+                return ItemError;
+            }
             if (map_type_id == LMD_TYPE_MAP &&
                     map_ctor_offset_is_reserved(map_item.map, entry->byte_offset)) {
                 // An RHS, parameter initializer or inherited setter can publish

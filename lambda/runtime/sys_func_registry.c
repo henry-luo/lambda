@@ -69,6 +69,9 @@ extern Item js_get_async_iterator(Item iterable);
 extern Item js_async_iterator_step_result(Item iterator);
 extern Item js_iterator_result_done(Item result);
 extern Item js_iterator_result_value(Item result);
+extern Item js_async_iterator_close_result(Item iterator);
+extern bool js_async_iterator_close_needs_await(Item result);
+extern bool js_is_object_value(Item value);
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
 extern Item js_super_call_class(Item callee, Item this_val, Item* args, int argc);
 extern Item js_check_class_heritage_constructor(Item superclass);
@@ -2033,6 +2036,9 @@ JitImport jit_runtime_imports[] = {
     {"js_is_nullish", FPTR(js_is_nullish),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM), 0, JIT_EXCEPTION_PRESERVES}},
+    {"js_is_object_value", FPTR(js_is_object_value),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM), 0, JIT_EXCEPTION_PRESERVES}},
     {"js_increment", FPTR(js_increment)},
     {"js_decrement", FPTR(js_decrement)},
     {"js_number_function", FPTR(js_number_function)},
@@ -2656,6 +2662,12 @@ JitImport jit_runtime_imports[] = {
     {"js_async_iterator_step_result", FPTR(js_async_iterator_step_result)},
     {"js_iterator_result_done", FPTR(js_iterator_result_done)},
     {"js_iterator_result_value", FPTR(js_iterator_result_value)},
+    {"js_async_iterator_close_result", FPTR(js_async_iterator_close_result),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM), JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"js_async_iterator_close_needs_await", FPTR(js_async_iterator_close_needs_await),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM), 0, JIT_EXCEPTION_PRESERVES}},
     {"js_iterator_close", FPTR(js_iterator_close)},
     {"js_iterator_collect_rest", FPTR(js_iterator_collect_rest)},
     // v14: Promise runtime
@@ -3454,7 +3466,8 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_double_to_int_lane_c", "lambda_item_to_int_lane_c",
         "lambda_int_lane_add_slow", "lambda_int_lane_sub_slow", "lambda_int_lane_mul_slow",
         "lambda_int_lane_divmod_slow", "int2it_lane",
-        "js_is_truthy", "js_is_nullish",
+        "js_is_truthy", "js_is_nullish", "js_is_object_value",
+        "js_async_iterator_close_needs_await",
         "fn_min2_u",
         "fn_max2_u",
         "fn_abs_i",

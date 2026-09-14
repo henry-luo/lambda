@@ -314,11 +314,6 @@ unproven Item to NaN. It is retained for callers that have already established a
 numeric source; migrating every such native/guest call to a fallible boundary is
 separate work.
 
-<a id="lr03-6"></a>**LR03-6 · JS accessor-pair tag overloading · OPEN**
-`JsAccessorPair` deliberately begins with `type_id == LMD_TYPE_FUNC`, so a slot
-value mis-reads as a function unless callers check `JSPD_IS_ACCESSOR` first
-(`lambda-data.hpp:281`, warned in the header at `:286`).
-
 ---
 
 

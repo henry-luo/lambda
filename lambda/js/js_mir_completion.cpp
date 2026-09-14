@@ -9,6 +9,7 @@ static const char* jm_suspend_kind_name(JsMirSuspendKind kind) {
     case JS_MIR_SUSPEND_YIELD: return "yield";
     case JS_MIR_SUSPEND_AWAIT: return "await";
     case JS_MIR_SUSPEND_IMPLICIT_AWAIT: return "implicit await";
+    case JS_MIR_SUSPEND_ASYNC_ITERATOR_CLOSE: return "async iterator close";
     }
     return "suspend";
 }
@@ -634,9 +635,7 @@ void jm_emit_abrupt_jump_cleanup(JsMirTranspiler* mt, int target_loop_index) {
 static void jm_emit_close_intervening_iterators(JsMirTranspiler* mt, int target_index) {
     for (int i = mt->loop_depth - 1; i > target_index; i--) {
         JsLoopLabels* loop = jm_loop_label_at(mt, i);
-        if (loop && loop->iterator_to_close) {
-            jm_emit_iterator_close(mt, loop->iterator_to_close);
-        }
+        jm_emit_loop_iterator_close_checked(mt, loop);
     }
 }
 

@@ -4,14 +4,13 @@
  * Replaces the legacy `__get_X`/`__set_X`/`__nw_X`/`__ne_X`/`__nc_X` magic-key
  * scheme with first-class metadata carried inline on `ShapeEntry::flags`.
  *
- * Storage scheme (dedicated accessor-cell carrier):
+ * Storage scheme (shape-owned virtual descriptor):
  * - `ShapeEntry::flags` holds the JSPD_* attribute bits (W/E/C/IS_ACCESSOR).
  *   Inverse-bit encoded so 0 == JS default (writable, enumerable, configurable, data).
  * - For data props, the map data slot at `byte_offset` holds the value Item directly.
- * - For accessor props (IS_ACCESSOR set), the slot holds an Item whose pointer
- *   points to a heap-allocated `JsAccessorCell`. The cell has its own GC tag
- *   and is not a function Item; consumers consult the shape flag to interpret
- *   the storage as getter/setter edges.
+ * - For accessor props (IS_ACCESSOR set), `ShapeEntry::accessor` points to a
+ *   heap-allocated `JsAccessorCell`, `byte_offset == -1`, and no Map data slot
+ *   exists. The private shape is the cell's exact GC owner.
  *
  * Phase 1a (this file) provides foundation primitives only. Phase 1b will
  * migrate `js_globals.cpp` ValidateAndApplyPropertyDescriptor and
@@ -67,27 +66,19 @@ static inline void jspd_set_accessor(ShapeEntry* se, bool a) {
     else   se->flags &= (uint8_t)~JSPD_IS_ACCESSOR;
 }
 // =============================================================================
-// JsAccessorCell allocation and storage conversion
+// JsAccessorCell allocation and ShapeEntry ownership
 // =============================================================================
 
 // Allocate a fresh JsAccessorCell on the JS GC heap. Either getter or setter
 // may be ItemNull (representing absent get / absent set per ES spec).
 JsAccessorPair* js_alloc_accessor_pair(Item getter, Item setter);
 
-// Wrap an accessor cell as its raw, non-callable Item identity. The store
-// boundary supplies the pointer-width map lane; callers MUST set IS_ACCESSOR
-// before readers may interpret this storage.
-static inline Item js_accessor_pair_to_item(JsAccessorPair* p) {
-    Item it; it.function = (Function*)p; return it;
-}
-
-// Recover a JsAccessorPair* from a slot Item. Accessor storage borrows the
-// FUNC tag to select the pointer-width Map lane, so strip that carrier tag
-// before dereferencing the raw cell pointer. Caller is responsible for
-// verifying `jspd_is_accessor(shape_entry)` first; otherwise behavior is
-// undefined.
-static inline JsAccessorPair* js_item_to_accessor_pair(Item it) {
-    return (JsAccessorPair*)(uintptr_t)(it.item & 0x00FFFFFFFFFFFFFFULL);
+// Recover the accessor directly from its descriptor owner. `byte_offset == -1`
+// is the virtual-field invariant; a non-null cell with any physical offset is
+// a corrupted shape rather than an alternate storage representation.
+static inline JsAccessorPair* js_shape_entry_accessor_pair(const ShapeEntry* se) {
+    return se && jspd_is_accessor(se) && se->byte_offset == -1
+        ? se->accessor : NULL;
 }
 
 // =============================================================================
@@ -224,8 +215,8 @@ static inline int js_prop_attrs_fast_path_name_id(Item obj, NameId name_id,
 // `js_install_native_accessor` is the single chokepoint for installing native
 // (C/builtin) accessor properties — RegExp prototype getters, length getter,
 // Symbol.species, Symbol.iterator, TypedArray buffer/byteLength/byteOffset, etc.
-// Stores a `JsAccessorPair` Item in the visible property slot with
-// `JSPD_IS_ACCESSOR` set on the shape entry.
+// Installs a virtual `JsAccessorCell` on the private shape entry with
+// `JSPD_IS_ACCESSOR` set. The descriptor has no visible data slot.
 //
 // `attrs` uses the JSPD_* inverse-bit encoding: pass 0 for ES default
 // (enumerable + configurable). For ES accessor defaults (non-enumerable,
