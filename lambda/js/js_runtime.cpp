@@ -26,6 +26,7 @@
 #include "../runtime/gc/gc_heap.h"
 #include "../../lib/lambda_alloca.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/mem_grow.hpp"
 #include "../../lib/re2_glue.hpp"
 #include "../../lib/utf.h"
 #include <stdarg.h>
@@ -31612,21 +31613,16 @@ extern "C" void js_module_register_async_parent(Item dep_specifier, Item parent_
         if (dep->async_parents[i] == par) return;
     }
     if (dep->async_parent_count >= dep->async_parent_capacity) {
-        int next_capacity = dep->async_parent_capacity == 0
-            ? 4 : dep->async_parent_capacity * 2;
-        ModuleDescriptor** next = (ModuleDescriptor**)mem_calloc(next_capacity,
-            sizeof(ModuleDescriptor*), MEM_CAT_JS_RUNTIME);
-        if (!next) {
+        int old_capacity = dep->async_parent_capacity;
+        if (!lam::mem_grow_array(&dep->async_parents,
+                &dep->async_parent_capacity, dep->async_parent_count + 1, 4,
+                MEM_CAT_JS_RUNTIME)) {
             log_error("P7d: failed to grow async parent list");
             return;
         }
-        if (dep->async_parents && dep->async_parent_count > 0) {
-            memcpy(next, dep->async_parents,
-            (size_t)dep->async_parent_count * sizeof(ModuleDescriptor*));
-        }
-        mem_free(dep->async_parents);
-        dep->async_parents = next;
-        dep->async_parent_capacity = next_capacity;
+        memset(dep->async_parents + old_capacity, 0,
+               (size_t)(dep->async_parent_capacity - old_capacity) *
+                   sizeof(ModuleDescriptor*));
     }
     dep->async_parents[dep->async_parent_count++] = par;
     par->pending_async_deps++;

@@ -913,7 +913,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         return dt ? createDateTime(*dt) : ItemNull;
     } else if constexpr (Tag == LMD_TYPE_DECIMAL) {
         // Use centralized decimal_deep_copy function
-        return decimal_deep_copy(item, arena_, false);
+        return decimal_deep_copy(item, arena_);
     } else if constexpr (Tag == LMD_TYPE_RANGE) {
         Range* src_range = typed.ptr();
         Item copied = createRange(src_range->start, src_range->end);

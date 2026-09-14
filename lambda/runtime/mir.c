@@ -1,6 +1,7 @@
- #include <stdio.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include "../../lib/memtrack.h"
+#include "../../lib/mem_grow.h"
 #include <string.h>
 #include <stdarg.h>  // for va_list
 #include <math.h>
@@ -616,14 +617,14 @@ void* build_debug_info_table(void* mir_ctx, void* func_name_map) {
 
                 // grow list if needed
                 if (debug_list->length >= debug_list->capacity) {
-                    size_t new_cap = debug_list->capacity * 2;
-                    FuncDebugInfo** new_items = (FuncDebugInfo**)mem_realloc(debug_list->items, sizeof(FuncDebugInfo*) * new_cap, MEM_CAT_EVAL);
-                    if (!new_items) {
+                    void* items = debug_list->items;
+                    if (!mem_grow_array_raw(&items, sizeof(*debug_list->items),
+                            &debug_list->capacity, debug_list->length + 1,
+                            64, MEM_CAT_EVAL)) {
                         mem_free(info);
                         continue;
                     }
-                    debug_list->items = new_items;
-                    debug_list->capacity = new_cap;
+                    debug_list->items = (FuncDebugInfo**)items;
                 }
                 debug_list->items[debug_list->length++] = info;
 

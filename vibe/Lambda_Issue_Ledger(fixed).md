@@ -15,7 +15,7 @@
 
 ## Archive index
 
-This archive contains **93 historical records**: 92 RESOLVED entries and one
+This archive contains **94 historical records**: 93 RESOLVED entries and one
 CLOSED design decision. Duplicate and split records remain separate so their
 provenance is not lost. The first sections contain records formerly
 interleaved with live entries; §15 preserves the 44 records from the former
@@ -544,9 +544,10 @@ a defect list — most entries are reachable through an already-rooted owner.
 <a id="lr08-1"></a>**LR08-1 · Decimal `mpd_t` leak (in-code TODO) · RESOLVED 2026-09-05**
 Per **D4.3.3**, the GC delegates out-of-zone cleanup to the C++
 `heap_gc_destroy_external_payload` bridge. For `LMD_TYPE_DECIMAL`, it calls
-`decimal_payload_release`, which runs `mpd_del` and clears `dec_val` before
-sweep reclaims the wrapper. Teardown uses the same bridge, so it has one
-idempotent ownership path rather than a Decimal-specific second free.
+`decimal_payload_release`, which runs `mpd_del(&dec_val)` and clears the
+embedded payload before sweep reclaims the wrapper. Teardown uses the same
+bridge, so it has one idempotent ownership path rather than a Decimal-specific
+second free.
 `GCHeapTest.DecimalPayloadFinalizerReleasesMpdDuringSweep` verifies that a
 dead Decimal's real `mpd_t` payload is released during collection, not only at
 context teardown.
@@ -791,6 +792,22 @@ both tiers and under forced GC.
 
 
 ## 14. Sibling vibe ledgers (TS, Issues8)
+
+<a id="ts-4"></a>**TS-4 · A named map type on a *local* is a COW value root, not a borrow · RESOLVED 2026-09-14**
+The historical report predates the current COW model. A local map binding is a
+snapshot by default, not an unconstrained alias; this is the required semantic
+behaviour under **D4.4.1–D4.4.2**. The narrowly proven read-modify-write place
+case receives a runtime-guarded borrow only when it satisfies **D4.4.4**;
+otherwise the snapshot remains required.
+
+The old correctness repro no longer reproduces: release `splay2` completes
+with `splay: PASS (nodes=8000)`. Its rotations now rebuild and store back
+subtrees rather than relying on mutable cursor aliases. The retained release
+`raytrace3d2` also passes (`pixels=7200`, 11.98 ms internal timing). A
+release-only one-million-iteration A/B probe of
+`var tri: Triangle = scene.triangles[...]` measured typed reads at 18.8 ms and
+17.2 ms, versus 40.8 ms and 46.7 ms untyped, with equal results. Thus the
+reported 120 s versus 80 ms regression is absent on the current tree.
 
 <a id="ts-8"></a>**TS-8 · No arity overloading for user definitions · RESOLVED (not a defect — ruled S12.3.6)**
 `impl/Lambda_Issue_Type_Support (retired).md`. `pn f(a)` plus `pn f(a, b)` in

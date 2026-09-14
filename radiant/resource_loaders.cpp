@@ -10,6 +10,7 @@
 #include "../lib/file_utils.h"
 #include "../lib/file.h"
 #include "../lib/mempool.h"
+#include "../lib/mem_grow.hpp"
 #include "../lib/str.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_parser.hpp"
@@ -58,7 +59,6 @@ static bool add_stylesheet_to_document(DomDocument* doc, CssStylesheet* sheet) {
     if (!doc || !sheet) return false;
 
     if (doc->stylesheet_count >= doc->stylesheet_capacity) {
-        int new_capacity = doc->stylesheet_capacity == 0 ? 4 : doc->stylesheet_capacity * 2;
         if (!doc->document_pool) {
             log_error("resource_loaders: cannot expand stylesheet array without document pool");
             return false;
@@ -66,18 +66,12 @@ static bool add_stylesheet_to_document(DomDocument* doc, CssStylesheet* sheet) {
 
         // document stylesheet arrays are pool-owned after initial HTML load, so
         // network CSS must grow by copying instead of reallocating pool memory.
-        size_t new_size = (size_t)new_capacity * sizeof(CssStylesheet*);
-        CssStylesheet** new_sheets = (CssStylesheet**)pool_calloc(doc->document_pool, new_size);
-        if (!new_sheets) {
+        if (!lam::pool_copy_grow_array(doc->document_pool, &doc->stylesheets,
+                                       &doc->stylesheet_capacity, doc->stylesheet_count,
+                                       doc->stylesheet_count + 1, 4, true)) {
             log_error("resource_loaders: failed to expand stylesheet array");
             return false;
         }
-        if (doc->stylesheets && doc->stylesheet_count > 0) {
-            memcpy(new_sheets, doc->stylesheets,
-                   (size_t)doc->stylesheet_count * sizeof(CssStylesheet*));
-        }
-        doc->stylesheets = new_sheets;
-        doc->stylesheet_capacity = new_capacity;
     }
 
     doc->stylesheets[doc->stylesheet_count++] = sheet;

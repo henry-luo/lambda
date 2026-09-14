@@ -20,6 +20,7 @@ extern "C" int lambda_mir_lazy_enabled(void);
 #include "../../lib/log.h"
 #include "../../lib/lambda_alloca.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/mem_grow.hpp"
 #include "../../lib/mem_factory.h"
 #include "../../lib/url.h"
 #include "../../lib/hashmap.h"
@@ -1515,16 +1516,8 @@ static void async_track_reg(MirTranspiler* mt, MIR_reg_t reg, MIR_type_t type,
             }
             return;
         }
-        if (mt->async_spill_count >= mt->async_spill_capacity) {
-            int next_capacity = mt->async_spill_capacity > 0
-                ? mt->async_spill_capacity * 2 : 64;
-            AsyncRegSpill* resized = (AsyncRegSpill*)mem_realloc(mt->async_spills,
-                sizeof(AsyncRegSpill) * (size_t)next_capacity, MEM_CAT_EVAL);
-            if (resized) {
-                mt->async_spills = resized;
-                mt->async_spill_capacity = next_capacity;
-            }
-        }
+        (void)lam::mem_grow_array(&mt->async_spills, &mt->async_spill_capacity,
+            mt->async_spill_count + 1, 64, MEM_CAT_EVAL);
         if (mt->async_spill_count < mt->async_spill_capacity) {
             AsyncRegSpill* spill = &mt->async_spills[mt->async_spill_count++];
             spill->reg = reg;
@@ -2312,13 +2305,9 @@ struct MirLayoutReload {
 };
 
 static void mir_record_layout_reload(MirTranspiler* mt, MIR_insn_t insn) {
-    if (mt->layout_reload_count == mt->layout_reload_capacity) {
-        int capacity = mt->layout_reload_capacity ? mt->layout_reload_capacity * 2 : 256;
-        MirLayoutReload* grown = (MirLayoutReload*)mem_realloc(mt->layout_reloads,
-            (size_t)capacity * sizeof(MirLayoutReload), MEM_CAT_TEMP);
-        if (!grown) return;  // an unrecorded reload is merely kept
-        mt->layout_reloads = grown;
-        mt->layout_reload_capacity = capacity;
+    if (!lam::mem_grow_array(&mt->layout_reloads, &mt->layout_reload_capacity,
+            mt->layout_reload_count + 1, 256, MEM_CAT_TEMP)) {
+        return;  // an unrecorded reload is merely kept
     }
     mt->layout_reloads[mt->layout_reload_count++] = {mt->em.func_item, insn};
 }

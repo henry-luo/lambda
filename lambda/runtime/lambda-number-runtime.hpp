@@ -17,7 +17,7 @@ static inline LambdaNumericKind lambda_numeric_kind_from_item_type(
         return lambda_numeric_kind_from_sized_type(item.get_num_type());
     case LMD_TYPE_DECIMAL: {
         Decimal* decimal = item.get_decimal();
-        return decimal && decimal->unlimited == DECIMAL_BIGINT ?
+        return decimal && decimal->storage_kind == DECIMAL_BIGINT ?
             LAMBDA_NUM_INTEGER : LAMBDA_NUM_DECIMAL;
     }
     default:

@@ -46,7 +46,7 @@ extern "C" int js_262_agent_current_slot_for_atomics(void);
 static bool js_dataview_is_bigint(Item value) {
     if (get_type_id(value) != LMD_TYPE_DECIMAL) return false;
     Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFFULL);
-    return dec && dec->unlimited == DECIMAL_BIGINT;
+    return dec && dec->storage_kind == DECIMAL_BIGINT;
 }
 
 static Item js_dataview_to_bigint_value(Item value, Item* out_bigint) {
@@ -2223,7 +2223,7 @@ static Item js_typed_array_set_numeric_impl(Item ta_item, double numeric_index,
         bool is_bi = false;
         if (vt == LMD_TYPE_DECIMAL) {
             Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFFULL);
-            is_bi = dec && dec->unlimited == DECIMAL_BIGINT;
+            is_bi = dec && dec->storage_kind == DECIMAL_BIGINT;
         }
         Item bi;
         if (is_bi) {

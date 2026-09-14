@@ -1,0 +1,12 @@
+# source	contract	driver	tiers
+# These are reviewed current-syntax seeds. Legacy corpus files stay unlisted
+# until they are migrated to S16 and assigned an explicit contract.
+corpus/valid/closures.ls	success	direct	interp,jit
+corpus/valid/control_flow.ls	success	direct	interp,jit
+corpus/valid/data_types.ls	success	direct	interp,jit
+corpus/valid/pipe_expressions.ls	success	direct	interp,jit
+corpus/valid/vectors.ls	success	direct	interp,jit
+corpus/edge_cases/collections.ls	success	direct	interp,jit
+corpus/edge_cases/strings.ls	success	direct	interp,jit
+corpus/negative/syntax_errors.ls	reject	direct	interp
+corpus/negative/semantic_errors.ls	reject	direct	interp

@@ -4,6 +4,7 @@
 #include "js_props.h"
 #include "../../lib/lambda_alloca.h"
 #include "../../lib/hashmap_helpers.h"
+#include "../../lib/mem_grow.hpp"
 
 
 MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc);
@@ -6465,21 +6466,17 @@ static void jm_track_tdz_closure_captures(JsMirTranspiler* mt, MIR_reg_t env,
             JM_CAPTURE_ARRAY(fc)[ci].entry);
         if (!var || !var->is_let_const || !var->tdz_active) continue;
         if (mt->tdz_closure_capture_count >= mt->tdz_closure_capture_capacity) {
-            int capacity = mt->tdz_closure_capture_capacity
-                ? mt->tdz_closure_capture_capacity * 2 : 16;
-            JsMirTdzClosureCapture* grown =
-                (JsMirTdzClosureCapture*)mem_realloc(mt->tdz_closure_captures,
-                    (size_t)capacity * sizeof(JsMirTdzClosureCapture),
-                    MEM_CAT_JS_RUNTIME);
-            if (!grown) {
+            int old_capacity = mt->tdz_closure_capture_capacity;
+            if (!lam::mem_grow_array(&mt->tdz_closure_captures,
+                    &mt->tdz_closure_capture_capacity,
+                    mt->tdz_closure_capture_count + 1, 16,
+                    MEM_CAT_JS_RUNTIME)) {
                 log_error("js-mir: cannot grow TDZ closure capture tracker");
                 return;
             }
-            memset(grown + mt->tdz_closure_capture_capacity, 0,
-                   (size_t)(capacity - mt->tdz_closure_capture_capacity) *
+            memset(mt->tdz_closure_captures + old_capacity, 0,
+                   (size_t)(mt->tdz_closure_capture_capacity - old_capacity) *
                        sizeof(JsMirTdzClosureCapture));
-            mt->tdz_closure_captures = grown;
-            mt->tdz_closure_capture_capacity = capacity;
         }
         JsMirTdzClosureCapture* tracked =
             &mt->tdz_closure_captures[mt->tdz_closure_capture_count++];

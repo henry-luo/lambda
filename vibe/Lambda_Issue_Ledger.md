@@ -119,10 +119,10 @@ Counts:
 | LR_11 | Mark data API | 6 | 0 | 0 | 6 |
 | LR_12 | Procedural runtime | 5 | 0 | 0 | 5 |
 | LR_13 | Schema validator | 6 | 1 | 0 | 7 |
-| TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 6 | 1 | 0 | 7 |
-| **Live total** | | **61** | **11** | **0** | **72** |
+| TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 5 | 1 | 0 | 6 |
+| **Live total** | | **60** | **11** | **0** | **71** |
 
-The active ledger now contains 72 live records, with the 64 previously counted
+The active ledger now contains 71 live records, with the 64 previously counted
 resolved records moved to the archive. Duplicate/split records and
 verification-only findings remain represented there for provenance.
 Two original entries each split into a resolved half and a surviving residue —
@@ -314,9 +314,7 @@ unproven Item to NaN. It is retained for callers that have already established a
 numeric source; migrating every such native/guest call to a fallible boundary is
 separate work.
 
-<a id="lr03-6"></a>**LR03-6 · Overloaded tags · OPEN**
-`BigInt` rides on `LMD_TYPE_DECIMAL`, distinguished only by
-`Decimal.unlimited == DECIMAL_BIGINT` (`lambda/lambda.h:1361`–`1362`);
+<a id="lr03-6"></a>**LR03-6 · JS accessor-pair tag overloading · OPEN**
 `JsAccessorPair` deliberately begins with `type_id == LMD_TYPE_FUNC`, so a slot
 value mis-reads as a function unless callers check `JSPD_IS_ACCESSOR` first
 (`lambda-data.hpp:281`, warned in the header at `:286`).
@@ -739,12 +737,6 @@ The error-handling concerns have no source-level marker.
 `var_tid = LMD_TYPE_ANY` assignment and its *"treat as ANY"* comment are gone
 from `transpile-mir.cpp` — but the regression itself was not re-measured, which
 needs a release build and the typed benchmark column.
-
-<a id="ts-4"></a>**TS-4 · A named map type on a *local* is a COW value root, not a borrow · OPEN (not re-verified)**
-`impl/Lambda_Issue_Type_Support (retired).md`. Carries both a performance claim (raytrace3d2
-120 s → 80 ms when the annotations are stripped) and a **correctness** one
-(splay2 collapsing to 1 node instead of 8000 because rotations mutated copies).
-The correctness half overlaps the map-aliasing-vs-reification rule.
 
 <a id="ts-6"></a>**TS-6 · Binding a map literal to a local kills region allocation · OPEN**
 `impl/Lambda_Issue_Type_Support (retired).md`. Structurally unchanged, only relocated:

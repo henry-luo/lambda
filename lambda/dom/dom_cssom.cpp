@@ -538,13 +538,11 @@ extern "C" Item dom_cssom_insert_rule(Item sheet_item, Item text_arg, Item index
 
     // ensure capacity
     if (sheet->rule_count >= sheet->rule_capacity) {
-        size_t new_cap = sheet->rule_capacity ? sheet->rule_capacity * 2 : 8;
-        CssRule** new_rules = (CssRule**)pool_calloc(pool, new_cap * sizeof(CssRule*));
-        if (sheet->rules) {
-            memcpy(new_rules, sheet->rules, sheet->rule_count * sizeof(CssRule*));
+        if (!lam::pool_copy_grow_array(pool, &sheet->rules, &sheet->rule_capacity,
+                                       sheet->rule_count, sheet->rule_count + 1, 8, true)) {
+            log_error("js_cssom_stylesheet_method insertRule: failed to grow rule list");
+            return ItemNull;
         }
-        sheet->rules = new_rules;
-        sheet->rule_capacity = new_cap;
     }
 
     // shift rules to make room
@@ -1098,19 +1096,11 @@ static bool dom_cssom_append_document_stylesheet(DomDocument* doc,
                                                   CssStylesheet* sheet) {
     if (!doc || !doc->document_pool || !sheet) return false;
     if (doc->stylesheet_count >= doc->stylesheet_capacity) {
-        int capacity = doc->stylesheet_capacity > 0
-            ? doc->stylesheet_capacity * 2 : 4;
-        CssStylesheet** sheets = (CssStylesheet**)pool_alloc(
-            doc->document_pool, (size_t)capacity * sizeof(CssStylesheet*));
-        if (!sheets) return false;
-        if (doc->stylesheets && doc->stylesheet_count > 0) {
-            memcpy(sheets, doc->stylesheets,
-                   (size_t)doc->stylesheet_count * sizeof(CssStylesheet*));
-        }
         // Loader-owned sheet arrays can outlive a document but are not owned by
         // its pool, so append by copying instead of reallocating foreign storage.
-        doc->stylesheets = sheets;
-        doc->stylesheet_capacity = capacity;
+        if (!lam::pool_copy_grow_array(doc->document_pool, &doc->stylesheets,
+                                       &doc->stylesheet_capacity, doc->stylesheet_count,
+                                       doc->stylesheet_count + 1, 4, false)) return false;
     }
     doc->stylesheets[doc->stylesheet_count++] = sheet;
     dom_cssom_reorder_owned_document_stylesheets(doc);
