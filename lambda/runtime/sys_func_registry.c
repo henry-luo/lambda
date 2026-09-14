@@ -244,7 +244,7 @@ static Item pipe_map_key(void* keys_ptr, int64_t index) {
 // ============================================================================
 // Fields: {id, name, arg_count, return_type, is_proc, is_overloaded,
 //          is_method_eligible, first_param_type, can_raise,
-//          c_ret_type, c_arg_conv,
+//          c_ret_type, c_arg_descs,
 //          c_func_name, func_ptr,
 //          native_c_name, native_func_ptr, native_returns_float, native_arg_count,
 //          is_async, success_type, may_return_error}
@@ -255,7 +255,7 @@ static Item pipe_map_key(void* keys_ptr, int64_t index) {
 
 // FPTR()/NPTR() deliberately erase every system function's real signature to the
 // uniform `fn_ptr` (void*(*)()) so heterogeneous functions can share one registry
-// table; the matching ABI is recorded per-row (c_ret_type/c_arg_conv) and MIR calls
+// table; the matching ABI is recorded per-row (c_ret_type/c_arg_descs) and MIR calls
 // each through the correct prototype at JIT dispatch. clang's -Wcast-function-type-mismatch
 // fires on every such erase (~952 here) but the round-trip is sound by construction.
 // Suppress it for the registry tables only; the flag stays on globally so genuinely
@@ -263,27 +263,38 @@ static Item pipe_map_key(void* keys_ptr, int64_t index) {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
 
+// `int` lanes are ABI-compatible with int64_t but retain their semantic
+// carrier identity until this direct native call boundary (D2.4.1-D2.4.3).
+static const SysFuncArgDesc sysfunc_int_lane_args_1[] = {
+    {VALUE_REP_INT_LANE},
+};
+
+static const SysFuncArgDesc sysfunc_int_lane_args_2[] = {
+    {VALUE_REP_INT_LANE},
+    {VALUE_REP_INT_LANE},
+};
+
 SysFuncInfo sys_func_defs[] = {
     // ========================================================================
     // Type/conversion functions — all method-eligible
     // ========================================================================
     {SYSFUNC_LEN, "len", 1, &TYPE_INT, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_INT64, C_ARG_ITEM, "fn_len", FPTR(fn_len), NULL, NULL, false, 0},
+     C_RET_INT64, NULL, "fn_len", FPTR(fn_len), NULL, NULL, false, 0},
 
     // content(e) returns a read-only VIEW over the element's content items, so
     // `len(content(e))` is the child count and `content(e)[i]` the child index
     // walk that `len(e)`-based indexing can no longer provide (LR09-9).
     {SYSFUNC_CONTENT, "content", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_content", FPTR(fn_content), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_content", FPTR(fn_content), NULL, NULL, false, 0},
 
     {SYSFUNC_TYPE, "type", 1, &TYPE_TYPE, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_TYPE_PTR, C_ARG_ITEM, "fn_type", FPTR(fn_type), NULL, NULL, false, 0},
+     C_RET_TYPE_PTR, NULL, "fn_type", FPTR(fn_type), NULL, NULL, false, 0},
 
     {SYSFUNC_NAME, "name", 1, &TYPE_SYMBOL, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_SYMBOL, C_ARG_ITEM, "fn_name", FPTR(fn_name), NULL, NULL, false, 0},
+     C_RET_SYMBOL, NULL, "fn_name", FPTR(fn_name), NULL, NULL, false, 0},
 
     {SYSFUNC_INT, "int", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_int", FPTR(fn_int), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_int", FPTR(fn_int), NULL, NULL, false, 0,
      false, &TYPE_NUMBER, true},
 
     // `i64` is the one surface spelling of this type (S2.1.1): the former
@@ -293,404 +304,404 @@ SysFuncInfo sys_func_defs[] = {
     // to LMD_TYPE_INT64 rather than the NUM_SIZED family that makes the
     // others callable, so it needs this explicit row.
     {SYSFUNC_INT64, "i64", 1, &TYPE_INT64, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_int64", FPTR(fn_int64), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_int64", FPTR(fn_int64), NULL, NULL, false, 0,
      false, &TYPE_INT64, true},
 
     {SYSFUNC_FLOAT, "float", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_float", FPTR(fn_float), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_float", FPTR(fn_float), NULL, NULL, false, 0,
      false, &TYPE_FLOAT, true},
 
     {SYSFUNC_COMPLEX, "complex", 1, &TYPE_COMPLEX, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_complex1", FPTR(fn_complex1), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_complex1", FPTR(fn_complex1), NULL, NULL, false, 0},
 
     {SYSFUNC_COMPLEX2, "complex", 2, &TYPE_COMPLEX, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_complex2", FPTR(fn_complex2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_complex2", FPTR(fn_complex2), NULL, NULL, false, 0},
 
     {SYSFUNC_REAL, "real", 1, &TYPE_FLOAT, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_real", FPTR(fn_real), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_real", FPTR(fn_real), NULL, NULL, false, 0},
 
     {SYSFUNC_IMAG, "imag", 1, &TYPE_FLOAT, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_imag", FPTR(fn_imag), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_imag", FPTR(fn_imag), NULL, NULL, false, 0},
 
     {SYSFUNC_CONJ, "conj", 1, &TYPE_COMPLEX, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_conj", FPTR(fn_conj), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_conj", FPTR(fn_conj), NULL, NULL, false, 0},
 
     {SYSFUNC_DECIMAL, "decimal", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_decimal", FPTR(fn_decimal), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_decimal", FPTR(fn_decimal), NULL, NULL, false, 0,
      false, &TYPE_DECIMAL, true},
 
     {SYSFUNC_BINARY, "binary", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_binary", FPTR(fn_binary), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_binary", FPTR(fn_binary), NULL, NULL, false, 0,
      false, &TYPE_BINARY, true},
 
     {SYSFUNC_NUMBER, "number", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_number", NULL, NULL, NULL, false, 0},  // unimplemented
+     C_RET_ITEM, NULL, "fn_number", NULL, NULL, NULL, false, 0},  // unimplemented
 
     {SYSFUNC_STRING, "string", 1, &TYPE_STRING, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_STRING, C_ARG_ITEM, "fn_string", FPTR(fn_string), NULL, NULL, false, 0},
+     C_RET_STRING, NULL, "fn_string", FPTR(fn_string), NULL, NULL, false, 0},
 
     {SYSFUNC_SYMBOL, "symbol", 1, &TYPE_SYMBOL, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_SYMBOL, C_ARG_ITEM, "fn_symbol1", FPTR(fn_symbol), NULL, NULL, false, 0},
+     C_RET_SYMBOL, NULL, "fn_symbol1", FPTR(fn_symbol), NULL, NULL, false, 0},
 
     {SYSFUNC_SYMBOL2, "symbol", 2, &TYPE_SYMBOL, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_symbol2", FPTR(fn_symbol2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_symbol2", FPTR(fn_symbol2), NULL, NULL, false, 0},
 
     // ========================================================================
     // DateTime functions — overloaded with arg count suffix
     // ========================================================================
     {SYSFUNC_DATETIME0, "datetime", 0, &TYPE_DTIME, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_DTIME, C_ARG_ITEM, "fn_datetime0", FPTR(fn_datetime0), NULL, NULL, false, 0},
+     C_RET_DTIME, NULL, "fn_datetime0", FPTR(fn_datetime0), NULL, NULL, false, 0},
 
     {SYSFUNC_DATETIME, "datetime", 1, &TYPE_DTIME, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_DTIME, C_ARG_ITEM, "fn_datetime1", FPTR(fn_datetime1), NULL, NULL, false, 0},
+     C_RET_DTIME, NULL, "fn_datetime1", FPTR(fn_datetime1), NULL, NULL, false, 0},
 
     {SYSFUNC_DATE0, "date", 0, &TYPE_DTIME, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_DTIME, C_ARG_ITEM, "fn_date0", FPTR(fn_date0), NULL, NULL, false, 0},
+     C_RET_DTIME, NULL, "fn_date0", FPTR(fn_date0), NULL, NULL, false, 0},
 
     {SYSFUNC_DATE, "date", 1, &TYPE_DTIME, false, true, true, LMD_TYPE_DTIME, false,
-     C_RET_DTIME, C_ARG_ITEM, "fn_date1", FPTR(fn_date1), NULL, NULL, false, 0},
+     C_RET_DTIME, NULL, "fn_date1", FPTR(fn_date1), NULL, NULL, false, 0},
 
     {SYSFUNC_DATE3, "date", 3, &TYPE_DTIME, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_DTIME, C_ARG_ITEM, "fn_date3", FPTR(fn_date3), NULL, NULL, false, 0},
+     C_RET_DTIME, NULL, "fn_date3", FPTR(fn_date3), NULL, NULL, false, 0},
 
     {SYSFUNC_TIME0, "time", 0, &TYPE_DTIME, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_DTIME, C_ARG_ITEM, "fn_time0", FPTR(fn_time0), NULL, NULL, false, 0},
+     C_RET_DTIME, NULL, "fn_time0", FPTR(fn_time0), NULL, NULL, false, 0},
 
     {SYSFUNC_TIME, "time", 1, &TYPE_DTIME, false, true, true, LMD_TYPE_DTIME, false,
-     C_RET_DTIME, C_ARG_ITEM, "fn_time1", FPTR(fn_time1), NULL, NULL, false, 0},
+     C_RET_DTIME, NULL, "fn_time1", FPTR(fn_time1), NULL, NULL, false, 0},
 
     {SYSFUNC_TIME3, "time", 3, &TYPE_DTIME, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_DTIME, C_ARG_ITEM, "fn_time3", FPTR(fn_time3), NULL, NULL, false, 0},
+     C_RET_DTIME, NULL, "fn_time3", FPTR(fn_time3), NULL, NULL, false, 0},
 
     {SYSFUNC_JUSTNOW, "justnow", 0, &TYPE_DTIME, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_DTIME, C_ARG_ITEM, "fn_justnow", FPTR(fn_justnow), NULL, NULL, false, 0},
+     C_RET_DTIME, NULL, "fn_justnow", FPTR(fn_justnow), NULL, NULL, false, 0},
 
     // ========================================================================
     // Collection functions
     // ========================================================================
     {SYSFUNC_SET, "set", -1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_set", NULL, NULL, NULL, false, 0},  // variadic, unimplemented
+     C_RET_ITEM, NULL, "fn_set", NULL, NULL, NULL, false, 0},  // variadic, unimplemented
 
     {SYSFUNC_SLICE, "slice", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_slice2", FPTR(fn_slice2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_slice2", FPTR(fn_slice2), NULL, NULL, false, 0},
 
     {SYSFUNC_SLICE, "slice", 3, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_slice3", FPTR(fn_slice3), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_slice3", FPTR(fn_slice3), NULL, NULL, false, 0},
 
     {SYSFUNC_VIEW, "subview", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_subview", FPTR(fn_subview), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_subview", FPTR(fn_subview), NULL, NULL, false, 0},
 
     {SYSFUNC_IS_VIEW, "is_view", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_is_view", FPTR(fn_is_view), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_is_view", FPTR(fn_is_view), NULL, NULL, false, 0},
 
     {SYSFUNC_RESHAPE, "reshape", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_reshape", FPTR(fn_reshape), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_reshape", FPTR(fn_reshape), NULL, NULL, false, 0},
 
     {SYSFUNC_SHAPE, "shape", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_shape", FPTR(fn_shape), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_shape", FPTR(fn_shape), NULL, NULL, false, 0},
 
     {SYSFUNC_NDIM, "ndim", 1, &TYPE_INT, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_ndim", FPTR(fn_ndim), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_ndim", FPTR(fn_ndim), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ &TYPE_INT, /* may_error */ false,
      /* result */ SYS_RESULT_FIXED},
 
     {SYSFUNC_TRANSPOSE, "transpose", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_transpose", FPTR(fn_transpose), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_transpose", FPTR(fn_transpose), NULL, NULL, false, 0},
 
     {SYSFUNC_FLATTEN, "flatten", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_flatten", FPTR(fn_flatten), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_flatten", FPTR(fn_flatten), NULL, NULL, false, 0},
 
     {SYSFUNC_RAVEL, "ravel", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_ravel", FPTR(fn_ravel), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_ravel", FPTR(fn_ravel), NULL, NULL, false, 0},
 
     {SYSFUNC_MATMUL, "matmul", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_matmul", FPTR(fn_matmul), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_matmul", FPTR(fn_matmul), NULL, NULL, false, 0},
 
     {SYSFUNC_CONCAT, "concat", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_concat", FPTR(fn_concat), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_concat", FPTR(fn_concat), NULL, NULL, false, 0},
 
     {SYSFUNC_STACK, "stack", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_stack", FPTR(fn_stack), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_stack", FPTR(fn_stack), NULL, NULL, false, 0},
 
     // push(arr, val) — append to a growable generic array in place (amortized O(1)).
     // Procedural: mutates arr and returns it. Replaces chunked-vector + .sz workarounds.
     {SYSPROC_PUSH, "push", 2, &TYPE_ANY, true, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "pn_push", FPTR(pn_push), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "pn_push", FPTR(pn_push), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ &TYPE_ANY, /* may_error */ true},
 
     // splice(arr, start, count) — remove `count` elements at `start` from a growable
     // generic array, in place (shift the tail down, shrink length). Procedural: mutates
     // arr and returns it. Enables pop/dequeue/middle-removal without a chunked + .sz wrapper.
     {SYSPROC_SPLICE, "splice", 3, &TYPE_ANY, true, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "pn_splice", FPTR(pn_splice), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "pn_splice", FPTR(pn_splice), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ &TYPE_ANY, /* may_error */ true},
 
     // image stencil engine (windowed neighbourhood ops over ArrayNum)
     {SYSFUNC_CONVOLVE, "convolve", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_convolve", FPTR(fn_convolve), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_convolve", FPTR(fn_convolve), NULL, NULL, false, 0},
     {SYSFUNC_BLUR, "blur", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_blur", FPTR(fn_blur), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_blur", FPTR(fn_blur), NULL, NULL, false, 0},
     {SYSFUNC_ERODE, "erode", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_erode", FPTR(fn_erode), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_erode", FPTR(fn_erode), NULL, NULL, false, 0},
     {SYSFUNC_DILATE, "dilate", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_dilate", FPTR(fn_dilate), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_dilate", FPTR(fn_dilate), NULL, NULL, false, 0},
     {SYSFUNC_MEDIAN_FILT, "median_filter", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_median_filter", FPTR(fn_median_filter), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_median_filter", FPTR(fn_median_filter), NULL, NULL, false, 0},
     {SYSFUNC_MAXPOOL, "maxpool", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_maxpool", FPTR(fn_maxpool), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_maxpool", FPTR(fn_maxpool), NULL, NULL, false, 0},
     {SYSFUNC_AVGPOOL, "avgpool", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_avgpool", FPTR(fn_avgpool), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_avgpool", FPTR(fn_avgpool), NULL, NULL, false, 0},
 
     // image I/O bridge
     {SYSFUNC_LOAD_IMAGE, "load", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_load", FPTR(fn_load), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_load", FPTR(fn_load), NULL, NULL, false, 0},
     {SYSFUNC_SAVE_IMAGE, "save", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_BOOL, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_save", FPTR(fn_save), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_save", FPTR(fn_save), NULL, NULL, false, 0},
     {SYSFUNC_AS_FLOAT, "as_float", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_as_float", FPTR(fn_as_float), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_as_float", FPTR(fn_as_float), NULL, NULL, false, 0},
     {SYSFUNC_AS_UBYTE, "as_ubyte", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_as_ubyte", FPTR(fn_as_ubyte), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_as_ubyte", FPTR(fn_as_ubyte), NULL, NULL, false, 0},
 
     // point / colour / geometric image ops
     {SYSFUNC_INVERT, "invert", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_invert", FPTR(fn_invert), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_invert", FPTR(fn_invert), NULL, NULL, false, 0},
     {SYSFUNC_GAMMA, "gamma", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_gamma", FPTR(fn_gamma), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_gamma", FPTR(fn_gamma), NULL, NULL, false, 0},
     {SYSFUNC_THRESHOLD, "threshold", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_threshold", FPTR(fn_threshold), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_threshold", FPTR(fn_threshold), NULL, NULL, false, 0},
     {SYSFUNC_GRAYSCALE, "grayscale", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_grayscale", FPTR(fn_grayscale), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_grayscale", FPTR(fn_grayscale), NULL, NULL, false, 0},
     {SYSFUNC_FLIP, "flip", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_flip", FPTR(fn_flip), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_flip", FPTR(fn_flip), NULL, NULL, false, 0},
     {SYSFUNC_ROT90, "rot90", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_rot90", FPTR(fn_rot90), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_rot90", FPTR(fn_rot90), NULL, NULL, false, 0},
     {SYSFUNC_CROP, "crop", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_crop", FPTR(fn_crop), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_crop", FPTR(fn_crop), NULL, NULL, false, 0},
 
     // histogram / segmentation / resize / warp
     {SYSFUNC_HISTOGRAM, "histogram", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_histogram", FPTR(fn_histogram), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_histogram", FPTR(fn_histogram), NULL, NULL, false, 0},
     {SYSFUNC_OTSU, "otsu", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_otsu", FPTR(fn_otsu), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_otsu", FPTR(fn_otsu), NULL, NULL, false, 0},
     {SYSFUNC_LABEL, "label", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_label", FPTR(fn_label), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_label", FPTR(fn_label), NULL, NULL, false, 0},
     {SYSFUNC_RESIZE, "resize", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_resize", FPTR(fn_resize), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_resize", FPTR(fn_resize), NULL, NULL, false, 0},
     {SYSFUNC_ROTATE, "rotate", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_rotate", FPTR(fn_rotate), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_rotate", FPTR(fn_rotate), NULL, NULL, false, 0},
     {SYSFUNC_AFFINE_WARP, "affine_warp", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_affine_warp", FPTR(fn_affine_warp), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_affine_warp", FPTR(fn_affine_warp), NULL, NULL, false, 0},
 
     {SYSFUNC_ALL, "all", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_all", FPTR(fn_all), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_all", FPTR(fn_all), NULL, NULL, false, 0},
 
     {SYSFUNC_ANY, "any", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_any", FPTR(fn_any), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_any", FPTR(fn_any), NULL, NULL, false, 0},
 
     // min/max — 1-arg is method-eligible, 2-arg is not
     {SYSFUNC_MIN1, "min", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_min1", FPTR(fn_min1), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_min1", FPTR(fn_min1), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_ELEM_OF_ARG0},
 
     {SYSFUNC_MIN2, "min", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_min2", FPTR(fn_min2), "fn_min2_u", NPTR(fn_min2_u), true, 2},
+     C_RET_ITEM, NULL, "fn_min2", FPTR(fn_min2), "fn_min2_u", NPTR(fn_min2_u), true, 2},
 
     {SYSFUNC_MAX1, "max", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_max1", FPTR(fn_max1), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_max1", FPTR(fn_max1), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_ELEM_OF_ARG0},
 
     {SYSFUNC_MAX2, "max", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_max2", FPTR(fn_max2), "fn_max2_u", NPTR(fn_max2_u), true, 2},
+     C_RET_ITEM, NULL, "fn_max2", FPTR(fn_max2), "fn_max2_u", NPTR(fn_max2_u), true, 2},
 
     // Aggregation functions — method-eligible on collections
     {SYSFUNC_SUM, "sum", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_sum1", FPTR(fn_sum1), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_sum1", FPTR(fn_sum1), NULL, NULL, false, 0},
 
     {SYSFUNC_SUM2, "sum", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_sum2", FPTR(fn_sum2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_sum2", FPTR(fn_sum2), NULL, NULL, false, 0},
 
     {SYSFUNC_AVG, "avg", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_avg1", FPTR(fn_avg1), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_avg1", FPTR(fn_avg1), NULL, NULL, false, 0},
 
     {SYSFUNC_AVG2, "avg", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_avg2", FPTR(fn_avg2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_avg2", FPTR(fn_avg2), NULL, NULL, false, 0},
 
     // ========================================================================
     // Math functions — method-eligible on numbers
     // ========================================================================
     {SYSFUNC_ABS, "abs", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_abs", FPTR(fn_abs), "fabs", NPTR(fabs), true, 1,
+     C_RET_ITEM, NULL, "fn_abs", FPTR(fn_abs), "fabs", NPTR(fabs), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_ARG0_NUMERIC},
 
     {SYSFUNC_ROUND, "round", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_round", FPTR(fn_round), "round", NPTR(round), true, 1,
+     C_RET_ITEM, NULL, "fn_round", FPTR(fn_round), "round", NPTR(round), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_ARG0_NUMERIC},
 
     {SYSFUNC_FLOOR, "floor", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_floor", FPTR(fn_floor), "floor", NPTR(floor), true, 1,
+     C_RET_ITEM, NULL, "fn_floor", FPTR(fn_floor), "floor", NPTR(floor), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_ARG0_NUMERIC},
 
     {SYSFUNC_CEIL, "ceil", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_ceil", FPTR(fn_ceil), "ceil", NPTR(ceil), true, 1,
+     C_RET_ITEM, NULL, "fn_ceil", FPTR(fn_ceil), "ceil", NPTR(ceil), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_ARG0_NUMERIC},
 
     {SYSFUNC_TRUNC, "trunc", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_trunc", FPTR(fn_trunc), "trunc", NPTR(trunc), true, 1,
+     C_RET_ITEM, NULL, "fn_trunc", FPTR(fn_trunc), "trunc", NPTR(trunc), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_ARG0_NUMERIC},
 
     {SYSFUNC_SIGN, "sign", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_sign", FPTR(fn_sign), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_sign", FPTR(fn_sign), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_ARG0_NUMERIC},
 
     {SYSFUNC_CLIP, "clip", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_clip", FPTR(fn_clip), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_clip", FPTR(fn_clip), NULL, NULL, false, 0},
 
     // ========================================================================
     // I/O functions — can_raise=true for functions that may fail
     // ========================================================================
     {SYSFUNC_INPUT1, "input", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "fn_input1", FPTR(fn_input1), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_input1", FPTR(fn_input1), NULL, NULL, false, 0},
 
     {SYSFUNC_INPUT2, "input", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "fn_input2", FPTR(fn_input2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_input2", FPTR(fn_input2), NULL, NULL, false, 0},
 
     {SYSFUNC_FORMAT1, "format", 1, &TYPE_STRING, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_STRING, C_ARG_ITEM, "fn_format1", FPTR(fn_format1), NULL, NULL, false, 0},
+     C_RET_STRING, NULL, "fn_format1", FPTR(fn_format1), NULL, NULL, false, 0},
 
     {SYSFUNC_FORMAT2, "format", 2, &TYPE_STRING, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_STRING, C_ARG_ITEM, "fn_format2", FPTR(fn_format2), NULL, NULL, false, 0},
+     C_RET_STRING, NULL, "fn_format2", FPTR(fn_format2), NULL, NULL, false, 0},
 
     {SYSFUNC_ERROR, "error", 1, &TYPE_ERROR, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_error", FPTR(fn_error), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_error", FPTR(fn_error), NULL, NULL, false, 0},
 
     // ========================================================================
     // String functions — method-eligible on strings
     // ========================================================================
     {SYSFUNC_NORMALIZE, "normalize", 1, &TYPE_STRING, false, true, true, LMD_TYPE_STRING, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_normalize1", FPTR(fn_normalize1), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_normalize1", FPTR(fn_normalize1), NULL, NULL, false, 0},
 
     {SYSFUNC_NORMALIZE2, "normalize", 2, &TYPE_STRING, false, true, true, LMD_TYPE_STRING, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_normalize2", FPTR(fn_normalize), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_normalize2", FPTR(fn_normalize), NULL, NULL, false, 0},
 
     {SYSFUNC_CONTAINS, "contains", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_STRING, false,
-     C_RET_BOOL, C_ARG_ITEM, "fn_contains", FPTR(fn_contains), NULL, NULL, false, 0},
+     C_RET_BOOL, NULL, "fn_contains", FPTR(fn_contains), NULL, NULL, false, 0},
 
     {SYSFUNC_STARTS_WITH, "starts_with", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_STRING, false,
-     C_RET_BOOL, C_ARG_ITEM, "fn_starts_with", FPTR(fn_starts_with), NULL, NULL, false, 0},
+     C_RET_BOOL, NULL, "fn_starts_with", FPTR(fn_starts_with), NULL, NULL, false, 0},
 
     {SYSFUNC_ENDS_WITH, "ends_with", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_STRING, false,
-     C_RET_BOOL, C_ARG_ITEM, "fn_ends_with", FPTR(fn_ends_with), NULL, NULL, false, 0},
+     C_RET_BOOL, NULL, "fn_ends_with", FPTR(fn_ends_with), NULL, NULL, false, 0},
 
     {SYSFUNC_INDEX_OF, "index_of", 2, &TYPE_INT, false, false, true, LMD_TYPE_STRING, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_index_of", FPTR(fn_index_of), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_index_of", FPTR(fn_index_of), NULL, NULL, false, 0},
 
     {SYSFUNC_LAST_INDEX_OF, "last_index_of", 2, &TYPE_INT, false, false, true, LMD_TYPE_STRING, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_last_index_of", FPTR(fn_last_index_of), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_last_index_of", FPTR(fn_last_index_of), NULL, NULL, false, 0},
 
     {SYSFUNC_TRIM, "trim", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_trim", FPTR(fn_trim), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_trim", FPTR(fn_trim), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_TEXT_SAME_AS_ARG0},
 
     {SYSFUNC_TRIM_START, "trim_start", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_trim_start", FPTR(fn_trim_start), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_trim_start", FPTR(fn_trim_start), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_TEXT_SAME_AS_ARG0},
 
     {SYSFUNC_TRIM_END, "trim_end", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_trim_end", FPTR(fn_trim_end), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_trim_end", FPTR(fn_trim_end), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_TEXT_SAME_AS_ARG0},
 
     {SYSFUNC_LOWER, "lower", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_lower", FPTR(fn_lower), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_lower", FPTR(fn_lower), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_TEXT_SAME_AS_ARG0},
 
     {SYSFUNC_UPPER, "upper", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_upper", FPTR(fn_upper), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_upper", FPTR(fn_upper), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_TEXT_SAME_AS_ARG0},
 
     {SYSFUNC_URL_RESOLVE, "url_resolve", 2, &TYPE_STRING, false, false, false, LMD_TYPE_STRING, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_url_resolve", FPTR(fn_url_resolve), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_url_resolve", FPTR(fn_url_resolve), NULL, NULL, false, 0},
 
     {SYSFUNC_SPLIT, "split", 2, (Type*)&TYPE_ARRAY, false, true, true, LMD_TYPE_STRING, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_split2", FPTR(fn_split), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_split2", FPTR(fn_split), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ (Type*)&TYPE_ARRAY, /* may_error */ true,
      /* result */ SYS_RESULT_TEXT_SPLIT},
 
     {SYSFUNC_SPLIT3, "split", 3, (Type*)&TYPE_ARRAY, false, true, true, LMD_TYPE_STRING, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_split3", FPTR(fn_split3), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_split3", FPTR(fn_split3), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ (Type*)&TYPE_ARRAY, /* may_error */ true,
      /* result */ SYS_RESULT_TEXT_SPLIT},
 
     {SYSFUNC_JOIN, "join", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_join2", FPTR(fn_join2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_join2", FPTR(fn_join2), NULL, NULL, false, 0},
 
     {SYSFUNC_REPLACE, "replace", 3, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_replace3", FPTR(fn_replace), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_replace3", FPTR(fn_replace), NULL, NULL, false, 0},
 
     {SYSFUNC_REPLACE4, "replace", 4, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_replace4", FPTR(fn_replace4), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_replace4", FPTR(fn_replace4), NULL, NULL, false, 0},
 
     {SYSFUNC_FIND, "find", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_find2", FPTR(fn_find2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_find2", FPTR(fn_find2), NULL, NULL, false, 0},
 
     {SYSFUNC_FIND3, "find", 3, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_find3", FPTR(fn_find3), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_find3", FPTR(fn_find3), NULL, NULL, false, 0},
 
     {SYSFUNC_ORD, "ord", 1, &TYPE_INT, false, false, false, LMD_TYPE_STRING, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_ord", FPTR(fn_ord), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_ord", FPTR(fn_ord), NULL, NULL, false, 0},
 
     {SYSFUNC_CHR, "chr", 1, &TYPE_STRING, false, false, false, LMD_TYPE_INT, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_chr", FPTR(fn_chr), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_chr", FPTR(fn_chr), NULL, NULL, false, 0},
 
     // ========================================================================
     // Vector/array functions — math module
     // ========================================================================
     {SYSFUNC_PROD, "math_prod", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_prod1", FPTR(fn_math_prod1), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_math_prod1", FPTR(fn_math_prod1), NULL, NULL, false, 0},
 
     {SYSFUNC_PROD2, "math_prod", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_prod2", FPTR(fn_math_prod2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_math_prod2", FPTR(fn_math_prod2), NULL, NULL, false, 0},
 
     {SYSFUNC_CUMSUM, "math_cumsum", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_cumsum1", FPTR(fn_math_cumsum1), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_math_cumsum1", FPTR(fn_math_cumsum1), NULL, NULL, false, 0},
 
     {SYSFUNC_CUMSUM2, "math_cumsum", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_cumsum2", FPTR(fn_math_cumsum2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_math_cumsum2", FPTR(fn_math_cumsum2), NULL, NULL, false, 0},
 
     {SYSFUNC_CUMPROD, "math_cumprod", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_cumprod1", FPTR(fn_math_cumprod1), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_math_cumprod1", FPTR(fn_math_cumprod1), NULL, NULL, false, 0},
 
     {SYSFUNC_CUMPROD2, "math_cumprod", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_cumprod2", FPTR(fn_math_cumprod2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_math_cumprod2", FPTR(fn_math_cumprod2), NULL, NULL, false, 0},
 
     {SYSFUNC_ARGMIN, "argmin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_argmin", FPTR(fn_argmin), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_argmin", FPTR(fn_argmin), NULL, NULL, false, 0},
 
     {SYSFUNC_ARGMAX, "argmax", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_argmax", FPTR(fn_argmax), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_argmax", FPTR(fn_argmax), NULL, NULL, false, 0},
 
     {SYSFUNC_FILL, "fill", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_fill", FPTR(fn_fill), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_fill", FPTR(fn_fill), NULL, NULL, false, 0},
 
     {SYSFUNC_DOT, "math_dot", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_dot", FPTR(fn_math_dot), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_math_dot", FPTR(fn_math_dot), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_NORM, "math_norm", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_norm", FPTR(fn_math_norm), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_math_norm", FPTR(fn_math_norm), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
@@ -698,356 +709,356 @@ SysFuncInfo sys_func_defs[] = {
     // Statistical functions — math module
     // ========================================================================
     {SYSFUNC_MEAN, "math_mean", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_mean1", FPTR(fn_math_mean1), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_math_mean1", FPTR(fn_math_mean1), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_MEAN2, "math_mean", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_mean2", FPTR(fn_math_mean2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_math_mean2", FPTR(fn_math_mean2), NULL, NULL, false, 0},
 
     {SYSFUNC_MEDIAN, "math_median", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_median1", FPTR(fn_math_median1), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_math_median1", FPTR(fn_math_median1), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_MEDIAN2, "math_median", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_median2", FPTR(fn_math_median2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_math_median2", FPTR(fn_math_median2), NULL, NULL, false, 0},
 
     {SYSFUNC_VARIANCE, "math_variance", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_variance1", FPTR(fn_math_variance1), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_math_variance1", FPTR(fn_math_variance1), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_VARIANCE2, "math_variance", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_variance2", FPTR(fn_math_variance2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_math_variance2", FPTR(fn_math_variance2), NULL, NULL, false, 0},
 
     {SYSFUNC_DEVIATION, "math_deviation", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_deviation1", FPTR(fn_math_deviation1), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_math_deviation1", FPTR(fn_math_deviation1), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_DEVIATION2, "math_deviation", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_deviation2", FPTR(fn_math_deviation2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_math_deviation2", FPTR(fn_math_deviation2), NULL, NULL, false, 0},
 
     // ========================================================================
     // Element-wise math functions — math module (with native C math optimization)
     // ========================================================================
     {SYSFUNC_SQRT, "math_sqrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_sqrt", FPTR(fn_math_sqrt), "sqrt", NPTR(sqrt), true, 1,
+     C_RET_ITEM, NULL, "fn_math_sqrt", FPTR(fn_math_sqrt), "sqrt", NPTR(sqrt), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_LOG, "math_log", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_log", FPTR(fn_math_log), "log", NPTR(log), true, 1,
+     C_RET_ITEM, NULL, "fn_math_log", FPTR(fn_math_log), "log", NPTR(log), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_LOG10, "math_log10", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_log10", FPTR(fn_math_log10), "log10", NPTR(log10), true, 1,
+     C_RET_ITEM, NULL, "fn_math_log10", FPTR(fn_math_log10), "log10", NPTR(log10), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_EXP, "math_exp", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_exp", FPTR(fn_math_exp), "exp", NPTR(exp), true, 1,
+     C_RET_ITEM, NULL, "fn_math_exp", FPTR(fn_math_exp), "exp", NPTR(exp), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_SIN, "math_sin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_sin", FPTR(fn_math_sin), "sin", NPTR(sin), true, 1,
+     C_RET_ITEM, NULL, "fn_math_sin", FPTR(fn_math_sin), "sin", NPTR(sin), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_COS, "math_cos", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_cos", FPTR(fn_math_cos), "cos", NPTR(cos), true, 1,
+     C_RET_ITEM, NULL, "fn_math_cos", FPTR(fn_math_cos), "cos", NPTR(cos), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_TAN, "math_tan", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_tan", FPTR(fn_math_tan), "tan", NPTR(tan), true, 1,
+     C_RET_ITEM, NULL, "fn_math_tan", FPTR(fn_math_tan), "tan", NPTR(tan), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     // inverse trigonometric
     {SYSFUNC_ASIN, "math_asin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_asin", FPTR(fn_math_asin), "asin", NPTR(asin), true, 1,
+     C_RET_ITEM, NULL, "fn_math_asin", FPTR(fn_math_asin), "asin", NPTR(asin), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_ACOS, "math_acos", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_acos", FPTR(fn_math_acos), "acos", NPTR(acos), true, 1,
+     C_RET_ITEM, NULL, "fn_math_acos", FPTR(fn_math_acos), "acos", NPTR(acos), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_ATAN, "math_atan", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_atan", FPTR(fn_math_atan), "atan", NPTR(atan), true, 1,
+     C_RET_ITEM, NULL, "fn_math_atan", FPTR(fn_math_atan), "atan", NPTR(atan), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_ATAN2, "math_atan2", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_atan2", FPTR(fn_math_atan2), "atan2", NPTR(atan2), true, 2,
+     C_RET_ITEM, NULL, "fn_math_atan2", FPTR(fn_math_atan2), "atan2", NPTR(atan2), true, 2,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     // hyperbolic
     {SYSFUNC_SINH, "math_sinh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_sinh", FPTR(fn_math_sinh), "sinh", NPTR(sinh), true, 1,
+     C_RET_ITEM, NULL, "fn_math_sinh", FPTR(fn_math_sinh), "sinh", NPTR(sinh), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_COSH, "math_cosh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_cosh", FPTR(fn_math_cosh), "cosh", NPTR(cosh), true, 1,
+     C_RET_ITEM, NULL, "fn_math_cosh", FPTR(fn_math_cosh), "cosh", NPTR(cosh), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_TANH, "math_tanh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_tanh", FPTR(fn_math_tanh), "tanh", NPTR(tanh), true, 1,
+     C_RET_ITEM, NULL, "fn_math_tanh", FPTR(fn_math_tanh), "tanh", NPTR(tanh), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     // inverse hyperbolic
     {SYSFUNC_ASINH, "math_asinh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_asinh", FPTR(fn_math_asinh), "asinh", NPTR(asinh), true, 1,
+     C_RET_ITEM, NULL, "fn_math_asinh", FPTR(fn_math_asinh), "asinh", NPTR(asinh), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_ACOSH, "math_acosh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_acosh", FPTR(fn_math_acosh), "acosh", NPTR(acosh), true, 1,
+     C_RET_ITEM, NULL, "fn_math_acosh", FPTR(fn_math_acosh), "acosh", NPTR(acosh), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_ATANH, "math_atanh", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_atanh", FPTR(fn_math_atanh), "atanh", NPTR(atanh), true, 1,
+     C_RET_ITEM, NULL, "fn_math_atanh", FPTR(fn_math_atanh), "atanh", NPTR(atanh), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     // exponential/logarithmic variants
     {SYSFUNC_EXP2, "math_exp2", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_exp2", FPTR(fn_math_exp2), "exp2", NPTR(exp2), true, 1,
+     C_RET_ITEM, NULL, "fn_math_exp2", FPTR(fn_math_exp2), "exp2", NPTR(exp2), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_EXPM1, "math_expm1", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_expm1", FPTR(fn_math_expm1), "expm1", NPTR(expm1), true, 1,
+     C_RET_ITEM, NULL, "fn_math_expm1", FPTR(fn_math_expm1), "expm1", NPTR(expm1), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_LOG2, "math_log2", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_log2", FPTR(fn_math_log2), "log2", NPTR(log2), true, 1,
+     C_RET_ITEM, NULL, "fn_math_log2", FPTR(fn_math_log2), "log2", NPTR(log2), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     // power/root
     {SYSFUNC_POW_MATH, "math_pow", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_pow", FPTR(fn_math_pow), "fn_pow_u", NPTR(fn_pow_u), true, 2,
+     C_RET_ITEM, NULL, "fn_math_pow", FPTR(fn_math_pow), "fn_pow_u", NPTR(fn_pow_u), true, 2,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_CBRT, "math_cbrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_cbrt", FPTR(fn_math_cbrt), "cbrt", NPTR(cbrt), true, 1,
+     C_RET_ITEM, NULL, "fn_math_cbrt", FPTR(fn_math_cbrt), "cbrt", NPTR(cbrt), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_HYPOT, "math_hypot", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_hypot", FPTR(fn_math_hypot), "hypot", NPTR(hypot), true, 2,
+     C_RET_ITEM, NULL, "fn_math_hypot", FPTR(fn_math_hypot), "hypot", NPTR(hypot), true, 2,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_LOG1P, "math_log1p", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_log1p", FPTR(fn_math_log1p), "log1p", NPTR(log1p), true, 1,
+     C_RET_ITEM, NULL, "fn_math_log1p", FPTR(fn_math_log1p), "log1p", NPTR(log1p), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     // random number generation (pure functional, SplitMix64)
     {SYSFUNC_RANDOM, "math_random", 1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_random", FPTR(fn_math_random), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_math_random", FPTR(fn_math_random), NULL, NULL, false, 0},
 
     // ========================================================================
     // Vector manipulation functions — method-eligible on collections
     // ========================================================================
     {SYSFUNC_REVERSE, "reverse", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_reverse", FPTR(fn_reverse), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_reverse", FPTR(fn_reverse), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_SAME_AS_ARG0},
 
     {SYSFUNC_SORT, "sort", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_sort1", FPTR(fn_sort1), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_sort1", FPTR(fn_sort1), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_SAME_AS_ARG0},
 
     {SYSFUNC_SORT2, "sort", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_sort2", FPTR(fn_sort2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_sort2", FPTR(fn_sort2), NULL, NULL, false, 0},
 
     {SYSFUNC_UNIQUE, "unique", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_unique", FPTR(fn_unique), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_unique", FPTR(fn_unique), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_SAME_AS_ARG0},
 
     {SYSFUNC_TAKE, "take", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_take", FPTR(fn_take), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_take", FPTR(fn_take), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_SAME_AS_ARG0},
 
     {SYSFUNC_DROP, "drop", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_drop", FPTR(fn_drop), NULL, NULL, false, 0,
+     C_RET_ITEM, NULL, "fn_drop", FPTR(fn_drop), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_SAME_AS_ARG0},
 
     {SYSFUNC_ZIP, "zip", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_zip", FPTR(fn_zip), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_zip", FPTR(fn_zip), NULL, NULL, false, 0},
 
     {SYSFUNC_RANGE3, "range", 3, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_range3", FPTR(fn_range3), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_range3", FPTR(fn_range3), NULL, NULL, false, 0},
 
     {SYSFUNC_QUANTILE, "math_quantile", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_quantile2", FPTR(fn_math_quantile2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_math_quantile2", FPTR(fn_math_quantile2), NULL, NULL, false, 0},
 
     {SYSFUNC_QUANTILE3, "math_quantile", 3, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_quantile3", FPTR(fn_math_quantile3), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_math_quantile3", FPTR(fn_math_quantile3), NULL, NULL, false, 0},
 
     {SYSFUNC_REDUCE, "reduce", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_reduce", FPTR(fn_reduce), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_reduce", FPTR(fn_reduce), NULL, NULL, false, 0},
 
     // ========================================================================
     // Parse string functions — overloaded with arg count
     // ========================================================================
     {SYSFUNC_PARSE1, "parse", 1, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, true,
-     C_RET_ITEM, C_ARG_ITEM, "fn_parse1", FPTR(fn_parse1), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_parse1", FPTR(fn_parse1), NULL, NULL, false, 0},
 
     {SYSFUNC_PARSE2, "parse", 2, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, true,
-     C_RET_ITEM, C_ARG_ITEM, "fn_parse2", FPTR(fn_parse2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_parse2", FPTR(fn_parse2), NULL, NULL, false, 0},
 
     {SYSFUNC_PARSE_HTML_FRAGMENT, "parse_html_fragment", 1, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false,
-        C_RET_ITEM, C_ARG_ITEM, "fn_parse_html_fragment1", FPTR(fn_parse_html_fragment1), NULL, NULL, false, 0,
+        C_RET_ITEM, NULL, "fn_parse_html_fragment1", FPTR(fn_parse_html_fragment1), NULL, NULL, false, 0,
         false, &TYPE_ANY, true},
 
     // ========================================================================
     // Variadic parameter access — not method-eligible
     // ========================================================================
     {SYSFUNC_VARG0, "varg", 0, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_varg0", FPTR(fn_varg0), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_varg0", FPTR(fn_varg0), NULL, NULL, false, 0},
 
     {SYSFUNC_VARG1, "varg", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_varg1", FPTR(fn_varg1), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_varg1", FPTR(fn_varg1), NULL, NULL, false, 0},
 
     {SYSFUNC_TO_PROMISE, "toPromise", 1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_to_promise", FPTR(fn_to_promise), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_to_promise", FPTR(fn_to_promise), NULL, NULL, false, 0},
 
     // ========================================================================
     // Procedural functions — not method-eligible (side effects)
     // ========================================================================
     {SYSPROC_NOW, "now", 0, &TYPE_DTIME, true, false, false, LMD_TYPE_ANY, false,
-     C_RET_DTIME, C_ARG_ITEM, "pn_now", NULL, NULL, NULL, false, 0},  // unimplemented
+     C_RET_DTIME, NULL, "pn_now", NULL, NULL, NULL, false, 0},  // unimplemented
 
     {SYSPROC_TODAY, "today", 0, &TYPE_DTIME, true, false, false, LMD_TYPE_ANY, false,
-     C_RET_DTIME, C_ARG_ITEM, "pn_today", NULL, NULL, NULL, false, 0},  // unimplemented
+     C_RET_DTIME, NULL, "pn_today", NULL, NULL, NULL, false, 0},  // unimplemented
 
     {SYSPROC_PRINT, "print", -1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "pn_print", FPTR(pn_print), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_print", FPTR(pn_print), NULL, NULL, false, 0},
 
     {SYSPROC_CLOCK, "clock", 0, &TYPE_FLOAT, true, false, false, LMD_TYPE_ANY, false,
-     C_RET_DOUBLE, C_ARG_ITEM, "pn_clock", FPTR(pn_clock), NULL, NULL, false, 0},
+     C_RET_DOUBLE, NULL, "pn_clock", FPTR(pn_clock), NULL, NULL, false, 0},
 
     // `start` uses ordinary call grammar but remains a compiler intrinsic so
     // structured ownership and capture checks stay visible in AstStartNode.
     {SYSPROC_START, "start", -1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "pn_start", NULL, NULL, NULL, false, 0, false},
+     C_RET_ITEM, NULL, "pn_start", NULL, NULL, NULL, false, 0, false},
 
     {SYSPROC_SEND, "send", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_send", FPTR(pn_send), NULL, NULL, false, 0, false},
+     C_RET_ITEM, NULL, "pn_send", FPTR(pn_send), NULL, NULL, false, 0, false},
 
     {SYSPROC_RECEIVE, "receive", 0, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_receive", FPTR(pn_receive), NULL, NULL, false, 0, true},
+     C_RET_ITEM, NULL, "pn_receive", FPTR(pn_receive), NULL, NULL, false, 0, true},
 
     {SYSPROC_WAIT, "wait", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_wait1", FPTR(pn_wait1), NULL, NULL, false, 0, true},
+     C_RET_ITEM, NULL, "pn_wait1", FPTR(pn_wait1), NULL, NULL, false, 0, true},
 
     {SYSPROC_WAIT, "wait", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_wait2", FPTR(pn_wait2), NULL, NULL, false, 0, true},
+     C_RET_ITEM, NULL, "pn_wait2", FPTR(pn_wait2), NULL, NULL, false, 0, true},
 
     {SYSPROC_SELECT, "select", -1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_select", NULL, NULL, NULL, false, 0, true},
+     C_RET_ITEM, NULL, "pn_select", NULL, NULL, NULL, false, 0, true},
 
     {SYSPROC_SLEEP, "sleep", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_sleep", FPTR(pn_sleep), NULL, NULL, false, 0, true},
+     C_RET_ITEM, NULL, "pn_sleep", FPTR(pn_sleep), NULL, NULL, false, 0, true},
 
     {SYSPROC_SELF, "self", 0, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "pn_self", FPTR(pn_self), NULL, NULL, false, 0, false},
+     C_RET_ITEM, NULL, "pn_self", FPTR(pn_self), NULL, NULL, false, 0, false},
 
     {SYSPROC_CANCEL, "cancel", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "pn_cancel", FPTR(pn_cancel), NULL, NULL, false, 0, false},
+     C_RET_ITEM, NULL, "pn_cancel", FPTR(pn_cancel), NULL, NULL, false, 0, false},
 
     {SYSPROC_FETCH, "fetch", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_fetch", FPTR(pn_fetch), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_fetch", FPTR(pn_fetch), NULL, NULL, false, 0},
 
     {SYSPROC_OUTPUT2, "output", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_output2", FPTR(pn_output2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_output2", FPTR(pn_output2), NULL, NULL, false, 0},
 
     {SYSPROC_OUTPUT3, "output", 3, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_output3", FPTR(pn_output3), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_output3", FPTR(pn_output3), NULL, NULL, false, 0},
 
     {SYSPROC_CMD1, "cmd", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_cmd1", FPTR(pn_cmd1), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_cmd1", FPTR(pn_cmd1), NULL, NULL, false, 0},
 
     {SYSPROC_CMD, "cmd", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_cmd2", FPTR(pn_cmd2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_cmd2", FPTR(pn_cmd2), NULL, NULL, false, 0},
 
     // ========================================================================
     // IO module procedures — all can_raise=true for I/O errors
     // ========================================================================
     {SYSPROC_IO_COPY, "io_copy", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_io_copy", FPTR(pn_io_copy), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_copy", FPTR(pn_io_copy), NULL, NULL, false, 0},
 
     {SYSPROC_IO_READ, "io_read", 1, &TYPE_STRING, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_io_read", FPTR(pn_io_read), NULL, NULL, false, 0, true},
+     C_RET_ITEM, NULL, "pn_io_read", FPTR(pn_io_read), NULL, NULL, false, 0, true},
 
     {SYSPROC_IO_MOVE, "io_move", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_io_move", FPTR(pn_io_move), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_move", FPTR(pn_io_move), NULL, NULL, false, 0},
 
     {SYSPROC_IO_DELETE, "io_delete", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_io_delete", FPTR(pn_io_delete), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_delete", FPTR(pn_io_delete), NULL, NULL, false, 0},
 
     {SYSPROC_IO_MKDIR, "io_mkdir", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_io_mkdir", FPTR(pn_io_mkdir), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_mkdir", FPTR(pn_io_mkdir), NULL, NULL, false, 0},
 
     {SYSPROC_IO_TOUCH, "io_touch", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_io_touch", FPTR(pn_io_touch), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_touch", FPTR(pn_io_touch), NULL, NULL, false, 0},
 
     {SYSPROC_IO_SYMLINK, "io_symlink", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_io_symlink", FPTR(pn_io_symlink), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_symlink", FPTR(pn_io_symlink), NULL, NULL, false, 0},
 
     {SYSPROC_IO_CHMOD, "io_chmod", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_io_chmod", FPTR(pn_io_chmod), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_chmod", FPTR(pn_io_chmod), NULL, NULL, false, 0},
 
     {SYSPROC_IO_RENAME, "io_rename", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_io_rename", FPTR(pn_io_rename), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_rename", FPTR(pn_io_rename), NULL, NULL, false, 0},
 
     {SYSPROC_IO_FETCH, "io_fetch", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_io_fetch1", FPTR(pn_io_fetch1), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_fetch1", FPTR(pn_io_fetch1), NULL, NULL, false, 0},
 
     {SYSPROC_IO_FETCH, "io_fetch", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_io_fetch2", FPTR(pn_io_fetch2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_fetch2", FPTR(pn_io_fetch2), NULL, NULL, false, 0},
 
     // io.http module
     {SYSPROC_IO_HTTP_CREATE_SERVER, "io_http_create_server", 1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_io_http_create_server", FPTR(pn_io_http_create_server), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_http_create_server", FPTR(pn_io_http_create_server), NULL, NULL, false, 0},
 
     {SYSPROC_IO_HTTP_LISTEN, "io_http_listen", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_io_http_listen", FPTR(pn_io_http_listen), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_http_listen", FPTR(pn_io_http_listen), NULL, NULL, false, 0},
 
     {SYSPROC_IO_HTTP_ROUTE, "io_http_route", 4, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_io_http_route", FPTR(pn_io_http_route), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_http_route", FPTR(pn_io_http_route), NULL, NULL, false, 0},
 
     {SYSPROC_IO_HTTP_USE, "io_http_use", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_io_http_use", FPTR(pn_io_http_use), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_http_use", FPTR(pn_io_http_use), NULL, NULL, false, 0},
 
     {SYSPROC_IO_HTTP_STATIC, "io_http_static", 3, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_io_http_static", FPTR(pn_io_http_static), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_http_static", FPTR(pn_io_http_static), NULL, NULL, false, 0},
 
     {SYSPROC_IO_HTTP_STOP, "io_http_stop", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_ITEM, C_ARG_ITEM, "pn_io_http_stop", FPTR(pn_io_http_stop), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_io_http_stop", FPTR(pn_io_http_stop), NULL, NULL, false, 0},
 
     {SYSFUNC_EXISTS, "exists", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_BOOL, C_ARG_ITEM, "fn_exists", FPTR(fn_exists), NULL, NULL, false, 0},
+     C_RET_BOOL, NULL, "fn_exists", FPTR(fn_exists), NULL, NULL, false, 0},
 
     // ========================================================================
     // Bitwise functions — operate on integers, not method-eligible
@@ -1057,37 +1068,37 @@ SysFuncInfo sys_func_defs[] = {
     // classifier, so no single static type describes them. `int` was a lie for
     // i64/sized operands and would let callers trust a lane the value is not in.
     {SYSFUNC_BAND, "band", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_INT64, C_ARG_NATIVE, "fn_band", FPTR(fn_band), NULL, NULL, false, 0},
+     C_RET_INT64, sysfunc_int_lane_args_2, "fn_band", FPTR(fn_band), NULL, NULL, false, 0},
 
     {SYSFUNC_BOR, "bor", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_INT64, C_ARG_NATIVE, "fn_bor", FPTR(fn_bor), NULL, NULL, false, 0},
+     C_RET_INT64, sysfunc_int_lane_args_2, "fn_bor", FPTR(fn_bor), NULL, NULL, false, 0},
 
     {SYSFUNC_BXOR, "bxor", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_INT64, C_ARG_NATIVE, "fn_bxor", FPTR(fn_bxor), NULL, NULL, false, 0},
+     C_RET_INT64, sysfunc_int_lane_args_2, "fn_bxor", FPTR(fn_bxor), NULL, NULL, false, 0},
 
     {SYSFUNC_BNOT, "bnot", 1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_INT64, C_ARG_NATIVE, "fn_bnot", FPTR(fn_bnot), NULL, NULL, false, 0},
+     C_RET_INT64, sysfunc_int_lane_args_1, "fn_bnot", FPTR(fn_bnot), NULL, NULL, false, 0},
 
     {SYSFUNC_SHL, "shl", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_shl_item", FPTR(fn_shl_item), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_shl_item", FPTR(fn_shl_item), NULL, NULL, false, 0},
 
     {SYSFUNC_SHR, "shr", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_shr_item", FPTR(fn_shr_item), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_shr_item", FPTR(fn_shr_item), NULL, NULL, false, 0},
 
     {SYSFUNC_USHR, "ushr", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_ushr_item", FPTR(fn_ushr_item), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_ushr_item", FPTR(fn_ushr_item), NULL, NULL, false, 0},
 
     // ========================================================================
     // VMap functions — handled by special transpiler paths
     // ========================================================================
     {SYSFUNC_VMAP_NEW, "map", 0, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_map0", NULL, NULL, NULL, false, 0},  // transpiler special case
+     C_RET_ITEM, NULL, "fn_map0", NULL, NULL, NULL, false, 0},  // transpiler special case
 
     {SYSFUNC_VMAP_NEW, "map", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_map1", NULL, NULL, NULL, false, 0},  // transpiler special case
+     C_RET_ITEM, NULL, "fn_map1", NULL, NULL, NULL, false, 0},  // transpiler special case
 
     {SYSPROC_VMAP_SET, "set", 3, &TYPE_NULL, true, true, true, LMD_TYPE_VMAP, false,
-     C_RET_ITEM, C_ARG_ITEM, "pn_set3", NULL, NULL, NULL, false, 0},  // transpiler special case
+     C_RET_ITEM, NULL, "pn_set3", NULL, NULL, NULL, false, 0},  // transpiler special case
 
     // ========================================================================
     // Replace-in-file procedures (sed-like) — NOT YET IMPLEMENTED
@@ -1095,54 +1106,54 @@ SysFuncInfo sys_func_defs[] = {
     // Needs first_param_type-based disambiguation in build_ast before enabling.
     // ========================================================================
     // {SYSPROC_REPLACE_FILE, "replace", 3, &TYPE_NULL, true, true, false, LMD_TYPE_PATH, true,
-    //  C_RET_ITEM, C_ARG_ITEM, "pn_replace_file3", NULL, NULL, NULL, false, 0},
+    //  C_RET_ITEM, NULL, "pn_replace_file3", NULL, NULL, NULL, false, 0},
     // {SYSPROC_REPLACE_FILE4, "replace", 4, &TYPE_NULL, true, true, false, LMD_TYPE_PATH, true,
-    //  C_RET_ITEM, C_ARG_ITEM, "pn_replace_file4", NULL, NULL, NULL, false, 0},
+    //  C_RET_ITEM, NULL, "pn_replace_file4", NULL, NULL, NULL, false, 0},
 
     // ========================================================================
     // S12.3.4 dynamic application. Two rows, one surface name: the AST builder
     // picks fn_ or pn_ by ENCLOSING colour, which fixes the error convention.
     // is_proc marks only the pn row, so an fn context resolves the fn row.
     {SYSFUNC_CALL, "call", 2, &TYPE_ANY, false, true, false, LMD_TYPE_FUNC, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_apply_args", FPTR(fn_apply_args), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_apply_args", FPTR(fn_apply_args), NULL, NULL, false, 0},
 
     {SYSPROC_CALL, "call", 2, &TYPE_ANY, true, true, false, LMD_TYPE_FUNC, false,
-     C_RET_ITEM, C_ARG_ITEM, "pn_apply_args", FPTR(pn_apply_args), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_apply_args", FPTR(pn_apply_args), NULL, NULL, false, 0},
 
     // View/edit template apply
     // ========================================================================
     {SYSFUNC_APPLY1, "apply", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_apply1", FPTR(fn_apply1), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_apply1", FPTR(fn_apply1), NULL, NULL, false, 0},
 
     {SYSFUNC_APPLY2, "apply", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_apply2", FPTR(fn_apply2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_apply2", FPTR(fn_apply2), NULL, NULL, false, 0},
 
     // ========================================================================
     // Edit bridge version control (reactive UI Phase 4)
     // ========================================================================
     {SYSFUNC_EDIT_UNDO, "undo", 0, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_undo", FPTR(fn_undo), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_undo", FPTR(fn_undo), NULL, NULL, false, 0},
 
     {SYSFUNC_EDIT_REDO, "redo", 0, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_redo", FPTR(fn_redo), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_redo", FPTR(fn_redo), NULL, NULL, false, 0},
 
     {SYSFUNC_EDIT_COMMIT, "commit", 0, &TYPE_INT, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_commit0", FPTR(fn_commit0), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_commit0", FPTR(fn_commit0), NULL, NULL, false, 0},
 
     {SYSFUNC_EDIT_COMMIT1, "commit", 1, &TYPE_INT, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_commit1", FPTR(fn_commit1), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_commit1", FPTR(fn_commit1), NULL, NULL, false, 0},
 
     // reactive UI: emit event to parent template handler
     {SYSPROC_EMIT, "emit", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "pn_emit", FPTR(pn_emit), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "pn_emit", FPTR(pn_emit), NULL, NULL, false, 0},
 
     // PDF package: native content stream tokenizer for dense vector pages
     {SYSFUNC_PDF_PARSE_CONTENT_STREAM, "pdf_parse_content_stream", 1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_pdf_parse_content_stream", FPTR(fn_pdf_parse_content_stream), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_pdf_parse_content_stream", FPTR(fn_pdf_parse_content_stream), NULL, NULL, false, 0},
 
     // PDF package: bind page SVG roots to their parsed PDF object tree for image handle resolution
     {SYSFUNC_PDF_REGISTER_SVG_IMAGE_RESOLVER, "pdf_register_svg_image_resolver", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_pdf_register_svg_image_resolver", FPTR(fn_pdf_register_svg_image_resolver), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_pdf_register_svg_image_resolver", FPTR(fn_pdf_register_svg_image_resolver), NULL, NULL, false, 0},
 };
 
 // note: sizeof(sys_func_defs) may fail with incomplete type because the header

@@ -59,7 +59,7 @@ typedef struct AstNavigationNode : AstNode {
     bool root;                // true for ./, false for .~~
 } AstNavigationNode;
 
-// CRetType, CArgConvention, and SysFuncInfo are now in sys_func_registry.h
+// CRetType, SysFuncArgDesc, and SysFuncInfo are now in sys_func_registry.h
 
 typedef struct AstSysFuncNode : AstNode {
     SysFuncInfo* fn_info;

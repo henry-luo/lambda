@@ -357,7 +357,7 @@ static void register_jube_sys_funcs(void) {
             record->info.first_param_type = jube_signature_first_param_type_id(fn->signature);
             record->info.can_raise = false;
             record->info.c_ret_type = C_RET_ITEM;
-            record->info.c_arg_conv = C_ARG_ITEM;
+            record->info.c_arg_descs = NULL;
             record->info.c_func_name = record->c_func_name;
             record->info.func_ptr = fn->native_func ? fn->native_func : fn->func;
             record->info.native_c_name = NULL;
