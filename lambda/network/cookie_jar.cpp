@@ -191,12 +191,6 @@ static void jar_ensure_capacity(CookieJar* jar) {
                                jar->count + 1, 16, MEM_CAT_NETWORK);
 }
 
-// Skip whitespace
-static const char* skip_ws(const char* p) {
-    while (*p && (*p == ' ' || *p == '\t')) p++;
-    return p;
-}
-
 // ============================================================================
 // Parse Set-Cookie header (RFC 6265 §5.2)
 // ============================================================================
@@ -207,7 +201,7 @@ static CookieEntry* parse_set_cookie(const char* header, const char* request_url
     const char* p = header;
     // skip "Set-Cookie:" prefix if present
     if (str_istarts_with_cstr(p, "Set-Cookie:")) p += 11;
-    p = skip_ws(p);
+    p = str_skip_line_space(p);
 
     // parse name=value
     const char* eq = strchr(p, '=');
@@ -222,7 +216,7 @@ static CookieEntry* parse_set_cookie(const char* header, const char* request_url
 
     // value is after '=' until ';' or end
     const char* val_start = eq + 1;
-    val_start = skip_ws(val_start);
+    val_start = str_skip_line_space(val_start);
     const char* val_end = val_start;
     while (*val_end && *val_end != ';') val_end++;
     // trim trailing whitespace from value
@@ -256,7 +250,7 @@ static CookieEntry* parse_set_cookie(const char* header, const char* request_url
     // parse attributes (everything after first ';')
     p = *val_end == ';' ? val_end + 1 : val_end;
     while (*p) {
-        p = skip_ws(p);
+        p = str_skip_line_space(p);
         if (!*p) break;
 
         // find attribute name (up to '=' or ';')
@@ -272,7 +266,7 @@ static CookieEntry* parse_set_cookie(const char* header, const char* request_url
         size_t attr_val_len = 0;
         if (*p == '=') {
             p++;
-            const char* av_start = skip_ws(p);
+            const char* av_start = str_skip_line_space(p);
             const char* av_end = av_start;
             while (*av_end && *av_end != ';') av_end++;
             while (av_end > av_start && (av_end[-1] == ' ' || av_end[-1] == '\t'))
@@ -296,9 +290,7 @@ static CookieEntry* parse_set_cookie(const char* header, const char* request_url
                 entry->domain[0] = '.';
                 memcpy(entry->domain + 1, d, attr_val_len);
                 entry->domain[attr_val_len + 1] = '\0';
-                // lowercase
-                for (size_t i = 0; entry->domain[i]; i++)
-                    entry->domain[i] = (char)tolower((unsigned char)entry->domain[i]);
+                str_lower_inplace(entry->domain, attr_val_len + 1);
             }
         } else if (str_ieq_const(attr_start, attr_len, "Path")) {
             if (attr_val_len > 0) {

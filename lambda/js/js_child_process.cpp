@@ -16,6 +16,8 @@
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/arraylist.h"
+#include "../../lib/file.h"
+#include "../../lib/str.h"
 #include "../../lib/uv_loop.h"
 #include "../../lib/windows_compat.h"
 #include "../../lib/byte_builder.h"
@@ -138,20 +140,15 @@ static bool item_has_js_extension(Item item) {
     if (s->len < 3) return false;
     const char* chars = s->chars;
     size_t len = s->len;
-    if (len >= 3 && memcmp(chars + len - 3, ".js", 3) == 0) return true;
-    if (len >= 4 && memcmp(chars + len - 4, ".mjs", 4) == 0) return true;
-    if (len >= 4 && memcmp(chars + len - 4, ".cjs", 4) == 0) return true;
+    if (str_ends_with_const(chars, len, ".js")) return true;
+    if (str_ends_with_const(chars, len, ".mjs")) return true;
+    if (str_ends_with_const(chars, len, ".cjs")) return true;
     return false;
 }
 
 static bool is_lambda_executable_path(const char* path) {
     if (!path) return false;
-    const char* base = strrchr(path, '/');
-#ifdef _WIN32
-    const char* slash = strrchr(path, '\\');
-    if (slash && (!base || slash > base)) base = slash;
-#endif
-    base = base ? base + 1 : path;
+    const char* base = file_path_basename(path);
     return strcmp(base, "lambda.exe") == 0 || strcmp(base, "lambda") == 0;
 }
 

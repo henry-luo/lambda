@@ -1907,12 +1907,7 @@ static void node_runner_set_env(const char* name, const char* value) {
 
 static const char* node_runner_basename(const char* path) {
     if (!path) return "";
-    const char* slash = strrchr(path, '/');
-#ifdef _WIN32
-    const char* backslash = strrchr(path, '\\');
-    if (!slash || (backslash && backslash > slash)) slash = backslash;
-#endif
-    return slash ? slash + 1 : path;
+    return file_path_basename(path);
 }
 
 static bool node_runner_reporter_contains(const char* reporter, const char* needle) {

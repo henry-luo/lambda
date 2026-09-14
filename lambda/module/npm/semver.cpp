@@ -3,6 +3,7 @@
 #include "semver.h"
 #include "../../../lib/log.h"
 #include "../../../lib/memtrack.h"
+#include "../../../lib/str.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -12,11 +13,6 @@
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-static const char* skip_ws(const char* s) {
-    while (*s == ' ' || *s == '\t') s++;
-    return s;
-}
 
 // parse a non-negative integer, advance *p past it. Returns -1 on failure.
 static int parse_int(const char** p) {
@@ -104,7 +100,7 @@ SemVer semver_parse(const char* version_str) {
     // skip leading 'v' or '='
     if (*s == 'v' || *s == 'V') s++;
     if (*s == '=') s++;
-    s = skip_ws(s);
+    s = str_skip_line_space(s);
 
     v.major = parse_int(&s);
     if (v.major < 0) return v;
@@ -159,7 +155,7 @@ void semver_format(const SemVer* v, char* buf, int buf_size) {
 
 // parse a single comparator like ">=1.2.3" or "1.2.3"
 static bool parse_comparator(const char** p, SemVerComparator* cmp) {
-    const char* s = skip_ws(*p);
+    const char* s = str_skip_line_space(*p);
 
     memset(cmp, 0, sizeof(*cmp));
 
@@ -171,7 +167,7 @@ static bool parse_comparator(const char** p, SemVerComparator* cmp) {
     else if (s[0] == '<') { cmp->op = CMP_LT; s += 1; }
     else if (s[0] == '=') { cmp->op = CMP_EQ; s += 1; }
 
-    s = skip_ws(s);
+    s = str_skip_line_space(s);
 
     // skip leading v
     if (*s == 'v' || *s == 'V') s++;
@@ -237,7 +233,7 @@ static bool parse_comparator(const char** p, SemVerComparator* cmp) {
 static void expand_tilde(const char** p, SemVerComparatorSet* set) {
     const char* s = *p;
     s++; // skip ~
-    s = skip_ws(s);
+    s = str_skip_line_space(s);
     if (*s == 'v' || *s == 'V') s++;
 
     int major = parse_int(&s);
@@ -275,7 +271,7 @@ static void expand_tilde(const char** p, SemVerComparatorSet* set) {
 static void expand_caret(const char** p, SemVerComparatorSet* set) {
     const char* s = *p;
     s++; // skip ^
-    s = skip_ws(s);
+    s = str_skip_line_space(s);
     if (*s == 'v' || *s == 'V') s++;
 
     int major = parse_int(&s);
@@ -320,7 +316,7 @@ static void parse_comparator_set(const char** p, SemVerComparatorSet* set) {
     const char* s = *p;
 
     while (*s && *s != '|') {
-        s = skip_ws(s);
+        s = str_skip_line_space(s);
         if (!*s || *s == '|') break;
 
         if (*s == '~') {
@@ -343,7 +339,7 @@ static void parse_comparator_set(const char** p, SemVerComparatorSet* set) {
             // check for hyphen range: "1.2.3 - 2.3.4"
             SemVerComparator low;
             if (parse_comparator(&s, &low)) {
-                s = skip_ws(s);
+                s = str_skip_line_space(s);
                 if (*s == '-' && s[1] == ' ') {
                     s += 2; // skip "- "
                     SemVerComparator high;
@@ -388,7 +384,7 @@ SemVerRange semver_range_parse(const char* range_str) {
     const char* s = range_str;
 
     while (*s && range.set_count < SEMVER_MAX_SETS) {
-        s = skip_ws(s);
+        s = str_skip_line_space(s);
         if (!*s) break;
 
         SemVerComparatorSet* set = &range.sets[range.set_count];
@@ -400,7 +396,7 @@ SemVerRange semver_range_parse(const char* range_str) {
         }
 
         // skip "||"
-        s = skip_ws(s);
+        s = str_skip_line_space(s);
         if (s[0] == '|' && s[1] == '|') {
             s += 2;
         } else if (*s == '|') {

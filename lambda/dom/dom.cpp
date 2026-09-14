@@ -1496,12 +1496,8 @@ static const char* _input_type_lower(DomElement* elem) {
     static __thread char buf[24];
     const char* raw = elem->get_attribute("type");
     if (!raw || !*raw) return "text";
-    int n = 0;
-    while (raw[n] && n < (int)sizeof(buf) - 1) {
-        buf[n] = (char)tolower((unsigned char)raw[n]);
-        n++;
-    }
-    buf[n] = '\0';
+    size_t n = str_copy(buf, sizeof(buf), raw, strlen(raw));
+    str_lower_inplace(buf, n);
     return buf;
 }
 
@@ -5735,9 +5731,7 @@ static String* uppercase_tag_name(const char* tag_name) {
     // allocate temp on stack for short names
     char buf[64];
     char* upper = (len < sizeof(buf)) ? buf : (char*)mem_alloc(len + 1, MEM_CAT_JS_RUNTIME);
-    for (size_t i = 0; i < len; i++) {
-        upper[i] = (char)toupper((unsigned char)tag_name[i]);
-    }
+    str_to_upper(upper, tag_name, len);
     upper[len] = '\0';
     String* result = heap_create_name(upper);
     if (upper != buf) mem_free(upper);
@@ -9832,7 +9826,8 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         const char* v = elem->get_attribute("type");
         if (v && (str_icmp_cstr(v, "submit") == 0 || str_icmp_cstr(v, "reset") == 0 || str_icmp_cstr(v, "button") == 0)) {
             char buf[8];
-            for (int i = 0; v[i] && i < 7; i++) buf[i] = (char)tolower((unsigned char)v[i]), buf[i+1] = '\0';
+            size_t len = str_copy(buf, sizeof(buf), v, strlen(v));
+            str_lower_inplace(buf, len);
             return js_name_item(buf);
         }
         return js_name_item("submit");
@@ -9979,10 +9974,9 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         const char* v = elem->get_attribute("inputmode");
         if (!v) return js_name_item("");
         // Canonicalise to lowercase and validate against the spec keyword set.
-        char buf[16]; size_t i = 0;
-        for (; v[i] && i < sizeof(buf) - 1; i++)
-            buf[i] = (char)tolower((unsigned char)v[i]);
-        buf[i] = '\0';
+        char buf[16];
+        size_t len = str_copy(buf, sizeof(buf), v, strlen(v));
+        str_lower_inplace(buf, len);
         const char* keywords[] = {
             "none", "text", "decimal", "numeric",
             "tel", "search", "email", "url", nullptr
@@ -9996,10 +9990,9 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     if (prop_id == JS_DOM_PROP_ENTER_KEY_HINT) {
         const char* v = elem->get_attribute("enterkeyhint");
         if (!v) return js_name_item("");
-        char buf[16]; size_t i = 0;
-        for (; v[i] && i < sizeof(buf) - 1; i++)
-            buf[i] = (char)tolower((unsigned char)v[i]);
-        buf[i] = '\0';
+        char buf[16];
+        size_t len = str_copy(buf, sizeof(buf), v, strlen(v));
+        str_lower_inplace(buf, len);
         const char* keywords[] = {
             "enter", "done", "go", "next", "previous", "search", "send", nullptr
         };
@@ -10848,10 +10841,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             const char* s = dom_to_attr_cstr(value);
             if (*s) {
                 char buf[32];
-                size_t i = 0;
-                for (; s[i] && i < sizeof(buf) - 1; i++)
-                    buf[i] = (char)tolower((unsigned char)s[i]);
-                buf[i] = '\0';
+                size_t len = str_copy(buf, sizeof(buf), s, strlen(s));
+                str_lower_inplace(buf, len);
                 elem->set_attribute("type", buf);
             } else {
                 elem->set_attribute("type", "text");
