@@ -72,7 +72,7 @@ Originally 4+ hand-rolled copies. Now centralised:
 - ✅ **36 cmp/hash function pairs eliminated** across:
   - [lambda/transpile-mir.cpp:247](../lambda/transpile-mir.cpp) — 6 entries (5 STRKEY + 1 PTRKEY)
   - [lambda/module/py/transpile_py_mir.cpp:218](../lambda/module/py/transpile_py_mir.cpp) — 4 entries
-  - [lambda/bash/transpile_bash_mir.cpp:49](../lambda/bash/transpile_bash_mir.cpp) — 3 entries
+  - [lambda/module/bash/transpile_bash_mir.cpp:49](../lambda/module/bash/transpile_bash_mir.cpp) — 3 entries
   - [lambda/module/rb/transpile_rb_mir.cpp:154](../lambda/module/rb/transpile_rb_mir.cpp) — 3 entries
   - [lambda/ts/ts_type_builder.cpp:280](../lambda/ts/ts_type_builder.cpp) — 1 entry
   - [lambda/js/js_early_errors.cpp:393](../lambda/js/js_early_errors.cpp) — 1 entry
@@ -91,7 +91,7 @@ Originally 4+ hand-rolled copies. Now centralised:
   - [radiant/retained_display_list.cpp:34](../radiant/retained_display_list.cpp) — 1 INTKEY entry
   - [radiant/surface.cpp:22](../radiant/surface.cpp) — 1 STRKEY entry
   - [radiant/script_runner.cpp:709](../radiant/script_runner.cpp) — 1 PTRKEY entry
-  - [lambda/bash/bash_runtime.cpp:3580, 5024](../lambda/bash/bash_runtime.cpp) — 2 LENSTRKEY entries (BashRtVar, BashRtFuncEntry)
+  - [lambda/module/bash/bash_runtime.cpp:3580, 5024](../lambda/module/bash/bash_runtime.cpp) — 2 LENSTRKEY entries (BashRtVar, BashRtFuncEntry)
   - [lambda/name_pool.cpp:6](../lambda/name_pool.cpp) — 1 LENSTRKEY entry
   - [lambda/validator/doc_validator.cpp:145, 162](../lambda/validator/doc_validator.cpp) — 2 LENSTRKEY entries (TypeRegistryEntry, VisitedEntry)
 - ⛔ Composite-key sites (state_store StateKey, template_state TemplateStateKey, render_map RenderMapKey) are too varied to fit a single-field macro.
@@ -652,7 +652,7 @@ perf issues. Defer real introsort port until there's a measured need.
 
 ## F. Length-prefix `BashAssocEntry` migration
 
-**Rationale.** `BashAssocEntry` in `lambda/bash/bash_runtime.cpp:3991` is one
+**Rationale.** `BashAssocEntry` in `lambda/module/bash/bash_runtime.cpp:3991` is one
 of the few remaining length-prefix hashmap sites that I didn't migrate to
 `HASHMAP_DEFINE_LENSTRKEY`. The reason: it uses bash's *custom additive DJB
 hash* (`hash * 33 + c`), not `hashmap_sip`, to match bash's iteration order

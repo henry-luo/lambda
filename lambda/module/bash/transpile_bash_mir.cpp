@@ -13,22 +13,22 @@
  * Variables are stored as Items in a module variable table (like Python).
  */
 #include "bash_transpiler.hpp"
-#include "../runtime/mir_dump.h"
+#include "../../runtime/mir_dump.h"
 #include "bash_runtime.h"
 #include "bash_errors.h"
-#include "../lambda-data.hpp"
-#include "../runtime/mir_emitter_shared.hpp"
-#include "../runtime/transpiler.hpp"
-#include "../../lib/log.h"
-#include "../../lib/lambda_alloca.h"
-#include "../../lib/mem_factory.h"
-#include "../../lib/hashmap.h"
-#include "../../lib/hashmap_helpers.h"
-#include "../../lib/strbuf.h"
-#include "../../lib/file.h"
+#include "../../lambda-data.hpp"
+#include "../../runtime/mir_emitter_shared.hpp"
+#include "../../runtime/transpiler.hpp"
+#include "../../../lib/log.h"
+#include "../../../lib/lambda_alloca.h"
+#include "../../../lib/mem_factory.h"
+#include "../../../lib/hashmap.h"
+#include "../../../lib/hashmap_helpers.h"
+#include "../../../lib/strbuf.h"
+#include "../../../lib/file.h"
 #include <tree_sitter/tree-sitter-bash.h>
 #include <cstring>
-#include "../../lib/mem.h"
+#include "../../../lib/mem.h"
 #include <cstdio>
 
 // external MIR functions

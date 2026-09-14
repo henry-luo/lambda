@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#include "../lambda.h"
+#include "../../lambda.h"
 
 // Evaluate an arithmetic expression string, return the integer result as Item.
 // Supports: +, -, *, /, %, **, <<, >>, &, |, ^, ~, !, &&, ||,

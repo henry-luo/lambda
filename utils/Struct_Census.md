@@ -146,7 +146,7 @@ libclang is driven through the C API, so nothing computes the builtin-header pat
 
 ## What the census cannot see
 
-- **Hosted language modules.** `lambda/module/**` (Python, Ruby, Node) and `lambda/bash/**` are excluded by configuration. They are Jube-hosted guests rather than part of the D7.1.1 archive set, and their data structures would swamp the layers the split is actually about.
+- **Hosted language modules.** `lambda/module/**` (Python, Ruby, Bash, Node) are excluded by configuration. They are Jube-hosted guests rather than part of the D7.1.1 archive set, and their data structures would swamp the layers the split is actually about.
 - **Function-local types.** Parsing runs with `PARSE_SKIP_FUNCTION_BODIES`, which is what makes a cold run 40 s instead of several minutes. A struct declared inside a function body is not counted.
 - **Templates.** A class template has no layout until it is instantiated, so `size` and `align` come back `null`.
 - **Unreferenced headers.** A header that no `.cpp` or `.c` in `source_dirs` includes is never parsed. In practice this is a small set, but it is not zero.
@@ -157,4 +157,4 @@ libclang is driven through the C API, so nothing computes the builtin-header pat
 
 The run reports how many TUs produced hard errors, and their records are flagged as possibly incomplete rather than silently dropped. The tree currently reports **zero** across all 526 TUs. A number appearing here is a signal about the tree or the config, not noise to tune out.
 
-One known break sits outside the census's scope: `lambda/bash/bash_runtime.cpp` redefines the enumerators of `BashTestOp` (declared in the `bash_ast.hpp` it includes) under a second name, `BashTestComparison`, so the file does not compile. It stopped showing up here when `lambda/bash` was excluded, and nothing in `lambda/bash/` is currently built, so the breakage is latent rather than live.
+One known break sits outside the census's scope: `lambda/module/bash/bash_runtime.cpp` redefines the enumerators of `BashTestOp` (declared in the `bash_ast.hpp` it includes) under a second name, `BashTestComparison`, so the file does not compile. It stopped showing up here when `lambda/module/bash` was excluded, and nothing in `lambda/module/bash/` is currently built, so the breakage is latent rather than live.

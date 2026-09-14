@@ -6,15 +6,15 @@
 #include "bash_builtins_ext.h"
 #include "bash_runtime.h"
 #include "bash_errors.h"
-#include "../lambda-data.hpp"
-#include "../runtime/transpiler.hpp"
-#include "../../lib/log.h"
-#include "../../lib/strbuf.h"
+#include "../../lambda-data.hpp"
+#include "../../runtime/transpiler.hpp"
+#include "../../../lib/log.h"
+#include "../../../lib/strbuf.h"
 
 #include <cstring>
 #include <cerrno>
 #include <cstdio>
-#include "../../lib/mem.h"
+#include "../../../lib/mem.h"
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/stat.h>

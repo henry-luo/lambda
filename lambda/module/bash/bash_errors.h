@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#include "../lambda.h"
+#include "../../lambda.h"
 
 // ========================================================================
 // Shell identity (for error prefix)

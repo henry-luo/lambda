@@ -8,14 +8,14 @@
  * - Subshells get a copy of the current scope (snapshot + restore)
  */
 #include "bash_transpiler.hpp"
-#include "../lambda-data.hpp"
-#include "../../lib/log.h"
-#include "../../lib/mem_factory.h"
-#include "../../lib/strbuf.h"
-#include "../../lib/mempool.h"
-#include "../../lib/hashmap.h"
+#include "../../lambda-data.hpp"
+#include "../../../lib/log.h"
+#include "../../../lib/mem_factory.h"
+#include "../../../lib/strbuf.h"
+#include "../../../lib/mempool.h"
+#include "../../../lib/hashmap.h"
 #include <cstring>
-#include "../../lib/mem.h"
+#include "../../../lib/mem.h"
 
 // ============================================================================
 // Scope management (compile-time, for the transpiler)

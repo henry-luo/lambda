@@ -635,8 +635,8 @@ If all seven modules are implemented and integrated:
 #### Module 2: Pattern Matching Engine (`bash_pattern.h` / `bash_pattern.cpp`) — ✅ Complete
 
 **Files created:**
-- `lambda/bash/bash_pattern.h` (37 lines) — Public API
-- `lambda/bash/bash_pattern.cpp` (~400 lines) — Full implementation
+- `lambda/module/bash/bash_pattern.h` (37 lines) — Public API
+- `lambda/module/bash/bash_pattern.cpp` (~400 lines) — Full implementation
 - `test/test_bash_pattern_gtest.cpp` — 51 GTest unit tests (all passing)
 
 **Implementation:**
@@ -650,7 +650,7 @@ If all seven modules are implemented and integrated:
 
 **Test coverage:** 51 tests covering literal matching, `*`/`?` wildcards, bracket expressions with POSIX classes and ranges, negated brackets, extglob patterns (all 5 operators), nested extglobs, case-insensitive mode, pathname mode, dotglob, empty patterns, and edge cases.
 
-**Build config:** Added `test_bash_pattern_gtest` entry to `build_lambda_config.json` with `additional_sources: ["lambda/bash/bash_pattern.cpp"]`.
+**Build config:** Added `test_bash_pattern_gtest` entry to `build_lambda_config.json` with `additional_sources: ["lambda/module/bash/bash_pattern.cpp"]`.
 
 #### Module 3: Variable Attribute Engine — ✅ Complete (integrated into `bash_runtime`)
 
@@ -681,8 +681,8 @@ Rather than a separate file, attribute operations were added directly to `bash_r
 #### Module 1: Word Expansion Engine (`bash_expand.h` / `bash_expand.cpp`) — ✅ Complete
 
 **Files created:**
-- `lambda/bash/bash_expand.h` (82 lines) — Public API with expansion flags
-- `lambda/bash/bash_expand.cpp` (410 lines) — Full implementation
+- `lambda/module/bash/bash_expand.h` (82 lines) — Public API with expansion flags
+- `lambda/module/bash/bash_expand.cpp` (410 lines) — Full implementation
 
 **Implementation:**
 - `bash_word_split(str, ifs)` — Creates new array, delegates to `bash_word_split_into`
@@ -721,13 +721,13 @@ Rather than a separate file, attribute operations were added directly to `bash_r
 
 | File | Action | Description |
 |------|--------|-------------|
-| `lambda/bash/bash_pattern.h` | Created | Pattern matching API (37 lines) |
-| `lambda/bash/bash_pattern.cpp` | Created | Glob + extglob engine (~400 lines) |
-| `lambda/bash/bash_expand.h` | Created | Word expansion API (82 lines) |
-| `lambda/bash/bash_expand.cpp` | Created | IFS split, quote removal, ANSI-C escapes, pipeline (410 lines) |
-| `lambda/bash/bash_runtime.h` | Modified | +8 function declarations for attribute operations |
-| `lambda/bash/bash_runtime.cpp` | Modified | +~150 lines new functions, 4 functions refactored |
-| `lambda/bash/transpile_bash_mir.cpp` | Modified | Nameref handling in `declare -n` |
+| `lambda/module/bash/bash_pattern.h` | Created | Pattern matching API (37 lines) |
+| `lambda/module/bash/bash_pattern.cpp` | Created | Glob + extglob engine (~400 lines) |
+| `lambda/module/bash/bash_expand.h` | Created | Word expansion API (82 lines) |
+| `lambda/module/bash/bash_expand.cpp` | Created | IFS split, quote removal, ANSI-C escapes, pipeline (410 lines) |
+| `lambda/module/bash/bash_runtime.h` | Modified | +8 function declarations for attribute operations |
+| `lambda/module/bash/bash_runtime.cpp` | Modified | +~150 lines new functions, 4 functions refactored |
+| `lambda/module/bash/transpile_bash_mir.cpp` | Modified | Nameref handling in `declare -n` |
 | `lambda/sys_func_registry.c` | Modified | +7 new function registrations, +1 include |
 | `build_lambda_config.json` | Modified | +1 test entry (bash_pattern_gtest) |
 | `test/test_bash_pattern_gtest.cpp` | Created | 51 GTest unit tests |
@@ -835,8 +835,8 @@ Rather than a separate file, attribute operations were added directly to `bash_r
 #### Module 4: Error Formatting Engine (`bash_errors.h` / `bash_errors.cpp`) — ✅ Complete
 
 **Files created:**
-- `lambda/bash/bash_errors.h` (92 lines) — Error formatting API
-- `lambda/bash/bash_errors.cpp` (~210 lines) — Full implementation
+- `lambda/module/bash/bash_errors.h` (92 lines) — Error formatting API
+- `lambda/module/bash/bash_errors.cpp` (~210 lines) — Full implementation
 
 **Implementation:**
 - `bash_errmsg(fmt, ...)` — Generic error: `"shell: message\n"` → stderr
@@ -872,7 +872,7 @@ Rather than a separate file, attribute operations were added directly to `bash_r
 #### Module 5: Printf Engine Enhancements — ✅ Complete
 
 **Files modified:**
-- `lambda/bash/bash_builtins.cpp` — Enhanced printf + shared escape processor
+- `lambda/module/bash/bash_builtins.cpp` — Enhanced printf + shared escape processor
 
 **New features added to printf:**
 - **`%(fmt)T`** — strftime-based date/time formatting. Supports arbitrary strftime format strings (e.g., `%(Y-%m-%d)T`). Arguments: -1 or -2 = current time, positive integer = epoch seconds, no argument = current time.
@@ -903,11 +903,11 @@ Rather than a separate file, attribute operations were added directly to `bash_r
 
 | File | Action | Description |
 |------|--------|-------------|
-| `lambda/bash/bash_errors.h` | Created | Error formatting API (92 lines) |
-| `lambda/bash/bash_errors.cpp` | Created | 15 error producers + 2 generic formatters (~210 lines) |
-| `lambda/bash/bash_builtins.cpp` | Modified | +shared escape processor, +%(fmt)T, +\xHH/\uHHHH/\UHHHHHHHH, +\e, +\c, echo -e upgraded |
-| `lambda/bash/bash_runtime.h` | Modified | +1 declaration (bash_process_escapes) |
-| `lambda/bash/bash_runtime.cpp` | Modified | +include bash_errors.h, 10+ error sites refactored, expand_error bug fixed, script_name/lineno non-static |
+| `lambda/module/bash/bash_errors.h` | Created | Error formatting API (92 lines) |
+| `lambda/module/bash/bash_errors.cpp` | Created | 15 error producers + 2 generic formatters (~210 lines) |
+| `lambda/module/bash/bash_builtins.cpp` | Modified | +shared escape processor, +%(fmt)T, +\xHH/\uHHHH/\UHHHHHHHH, +\e, +\c, echo -e upgraded |
+| `lambda/module/bash/bash_runtime.h` | Modified | +1 declaration (bash_process_escapes) |
+| `lambda/module/bash/bash_runtime.cpp` | Modified | +include bash_errors.h, 10+ error sites refactored, expand_error bug fixed, script_name/lineno non-static |
 | `lambda/sys_func_registry.c` | Modified | +18 new function registrations (17 error + 1 escape processor) |
 - **GNU test re-evaluation:** Re-run the 82-test suite to measure how many tests flip with the new modules
 

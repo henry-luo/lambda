@@ -57,7 +57,7 @@ All files under `lambda/` and `radiant/` have been migrated to use `lib/file.h` 
 - `lambda/input/` — all input parsers
 - `lambda/format/` — all output formatters
 - `lambda/` core — runner, target, main, lambda-proc, sysinfo, path, parse
-- `lambda/bash/` — bash runtime
+- `lambda/module/bash/` — bash runtime
 - `lambda/module/py/` — Python stdlib
 - `lambda/js/` — JS filesystem
 - `lambda/network/` — enhanced file cache

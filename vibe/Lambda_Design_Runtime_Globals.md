@@ -15,7 +15,7 @@ helper ABI, and stable eval-thread identity. The 2026-07-29 cleanup removed the
 remaining scoped `EvalContext` rebinding APIs and call sites. Production native
 execution helpers now read the current evaluator from TLS; only generated MIR
 functions receive the hidden context argument.
-**Scope:** `lambda/runtime/`, `lambda/core/`, `lambda/js/`, `lambda/jube/`, guest runtimes (`py/`, `bash/`), `lambda/module/`, and the `lib/` infra they lean on.
+**Scope:** `lambda/runtime/`, `lambda/core/`, `lambda/js/`, `lambda/jube/`, guest runtimes (`lambda/module/py/`, `lambda/module/bash/`), `lambda/module/`, and the `lib/` infra they lean on.
 **Relation to prior docs:** expands the global-state ledger in `vibe/Lambda_Js_Thread.md` §6.5 into a full inventory and migration design. The Js_Thread JT decisions (JT1 context-thread rule, JT4 per-thread recovery, JT6 loop affinity) are taken as given; this doc is the state-ownership side of the same program.
 
 ---

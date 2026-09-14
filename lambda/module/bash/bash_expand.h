@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#include "../lambda.h"
+#include "../../lambda.h"
 
 // ========================================================================
 // Expansion flags (for bash_expand_word)

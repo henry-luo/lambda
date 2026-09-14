@@ -584,8 +584,8 @@ it. Rulings **TB1/TB2** below were given 2026-08-20; the boundary/adoption
 consequences live in [`Lambda_Design_Type_Boundary.md`](Lambda_Design_Type_Boundary.md),
 which defers to this section for the storage rules. Investigation record:
 `impl/Lambda_Impl_Tune19.md` §11. D2.5.2v3/D2.6.1v3/D2.6.4v3 extend the
-destination-owned `TypedItem` rule to packed `i64?`/`u64?` Map/Shape fields;
-the implementation must converge on that rule.
+destination-owned `TypedItem` rule to packed `i64?`/`u64?` Map/Shape fields.
+The shared persistent descriptor projection implements that rule as of 2026-09-14.
 
 ### 10.1 The classification authority and the slot formats
 

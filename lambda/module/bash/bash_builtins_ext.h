@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#include "../lambda.h"
+#include "../../lambda.h"
 
 // ============================================================================
 // mapfile / readarray

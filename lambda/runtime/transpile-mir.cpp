@@ -6462,8 +6462,11 @@ static bool static_const_map_from_node(const ConstMaterializeCtx* cx, AstMapNode
         AstNamedNode* key_expr = (AstNamedNode*)item;
         Item value = ItemNull;
         if (key_expr->as && !static_const_item_from_node(cx, key_expr->as, &value)) return false;
-        if (!static_store_field_value((char*)map->data + field->byte_offset,
-                field->type->type_id, value)) return false;
+        void* field_ptr = (char*)map->data + field->byte_offset;
+        if (!map_shape_field_store_native_lane(field_ptr, field, value) &&
+                !static_store_field_value(field_ptr, shape_entry_storage_type_id(field), value)) {
+            return false;
+        }
         item = item->next;
         field = field->next;
     }
@@ -18170,6 +18173,15 @@ static MIR_reg_t emit_map_storage(MirTranspiler* mt, AstMapNode* map_node) {
         while (check) {
             if (!check->name || !check->type ||
                 check->byte_offset % sizeof(void*) != 0) {
+                all_direct = false;
+                break;
+            }
+            LaneStorageDesc check_lane = {};
+            if (shape_entry_uses_native_lane(check, &check_lane) &&
+                    check_lane.kind == LANE_STORAGE_TYPED_ITEM) {
+                // The direct loop writes one raw word, while a wide optional
+                // field owns a tagged TypedItem. Route it through map_fill's
+                // descriptor-aware writer (D2.5.2v3, D2.6.4v3).
                 all_direct = false;
                 break;
             }

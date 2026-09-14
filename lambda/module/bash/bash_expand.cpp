@@ -5,14 +5,14 @@
 
 #include "bash_expand.h"
 #include "bash_runtime.h"
-#include "../runtime/transpiler.hpp"
-#include "../../lib/strbuf.h"
-#include "../../lib/log.h"
-#include "../../lib/utf.h"
+#include "../../runtime/transpiler.hpp"
+#include "../../../lib/strbuf.h"
+#include "../../../lib/log.h"
+#include "../../../lib/utf.h"
 
 #include <string.h>
 #include <ctype.h>
-#include "../../lib/mem.h"
+#include "../../../lib/mem.h"
 
 // local helper: convert Item to C string (mirrors bash_runtime.cpp static helper)
 static const char* item_to_cstr(Item value) {

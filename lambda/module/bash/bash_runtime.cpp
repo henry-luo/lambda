@@ -15,15 +15,15 @@
 #include "bash_pattern.h"
 #include "bash_ast.hpp"
 #include "bash_errors.h"
-#include "../lambda-data.hpp"
-#include "../runtime/transpiler.hpp"
-#include "../../lib/log.h"
-#include "../../lib/lambda_alloca.h"
-#include "../../lib/hashmap.h"
-#include "../../lib/hashmap_helpers.h"
-#include "../../lib/strbuf.h"
+#include "../../lambda-data.hpp"
+#include "../../runtime/transpiler.hpp"
+#include "../../../lib/log.h"
+#include "../../../lib/lambda_alloca.h"
+#include "../../../lib/hashmap.h"
+#include "../../../lib/hashmap_helpers.h"
+#include "../../../lib/strbuf.h"
 #include <cstring>
-#include "../../lib/mem.h"
+#include "../../../lib/mem.h"
 #include <cstdio>
 #include <cmath>
 #include <cctype>
@@ -794,7 +794,7 @@ extern "C" Item bash_test_n(Item value) {
 }
 
 // file test operators
-#include "../../lib/file.h"
+#include "../../../lib/file.h"
 #include <unistd.h>  // for pipe, read, write, close, getuid, fork
 
 static const char* bash_item_to_cstr(Item value) {

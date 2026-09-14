@@ -4,9 +4,9 @@
 
 #include "bash_redir.h"
 #include "bash_runtime.h"
-#include "../lambda-data.hpp"
-#include "../../lib/log.h"
-#include "../../lib/strbuf.h"
+#include "../../lambda-data.hpp"
+#include "../../../lib/log.h"
+#include "../../../lib/strbuf.h"
 
 #include <cstring>
 #include <cerrno>

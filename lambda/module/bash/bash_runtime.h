@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#include "../lambda.h"
+#include "../../lambda.h"
 
 // ========================================================================
 // Type conversion (Bash string-first semantics)

@@ -12,7 +12,7 @@
 extern "C" {
 #endif
 
-#include "../lambda.h"
+#include "../../lambda.h"
 
 // ============================================================================
 // exec builtin flags

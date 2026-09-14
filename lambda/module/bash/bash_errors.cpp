@@ -5,7 +5,7 @@
 
 #include "bash_errors.h"
 #include "bash_runtime.h"
-#include "../../lib/log.h"
+#include "../../../lib/log.h"
 
 #include <stdio.h>
 #include <stdarg.h>

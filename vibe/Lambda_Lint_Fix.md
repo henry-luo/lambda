@@ -224,7 +224,7 @@ The findings by file (Top 12, covering 96 % of the corpus):
 | `lambda/module/rb/rb_print.cpp` + `rb_runtime.cpp` | 111 | Ruby `print`/`puts`/`p` builtin implementations. |
 | `radiant/webdriver/cmd_webdriver.cpp` | 45 | CLI subcommand handler — same family as `lambda/main.cpp` (already excluded). |
 | `lambda/main-repl.cpp` | 51 | REPL output. Same family as `lambda/cli/` and `lambda/repl/` already excluded. |
-| `lambda/bash/transpile_bash_mir.cpp` + `bash_runtime.cpp` | 68 | Bash `echo`/`printf` builtin implementations. |
+| `lambda/module/bash/transpile_bash_mir.cpp` + `bash_runtime.cpp` | 68 | Bash `echo`/`printf` builtin implementations. |
 | `lambda/module/py/py_stdlib.cpp` | 60 | Python `print` builtin and stdlib output. |
 | `lambda/validator/ast_validate.cpp` | 55 | `lambda validate` CLI subcommand. |
 | `radiant/cmd_layout.cpp` | 14 | `lambda layout` CLI subcommand. |
@@ -263,8 +263,8 @@ ignores:
   # stdout-writing side of the runtime, not debug prints).
   - "lambda/module/rb/rb_print.cpp"
   - "lambda/module/rb/rb_runtime.cpp"
-  - "lambda/bash/transpile_bash_mir.cpp"
-  - "lambda/bash/bash_runtime.cpp"
+  - "lambda/module/bash/transpile_bash_mir.cpp"
+  - "lambda/module/bash/bash_runtime.cpp"
   - "lambda/module/py/py_stdlib.cpp"
   # Lambda's own AST dumper
   - "lambda/runtime/emit_ast_dump.cpp"
@@ -397,7 +397,7 @@ limits.
 | `lambda/js/js_mir_*_lowering.cpp` | 9 | `alloca(param_count * sizeof(MIR_var_t))` |
 | `lambda/module/rb/transpile_rb_mir.cpp` | 7 | same shape |
 | `lambda/transpile-mir.cpp` | 6 | same shape |
-| `lambda/bash/transpile_bash_mir.cpp` | 2 | `alloca(item_count * sizeof(MIR_label_t))` |
+| `lambda/module/bash/transpile_bash_mir.cpp` | 2 | `alloca(item_count * sizeof(MIR_label_t))` |
 | radiant gradient/font stops, shape pool, rb_class | 6 | `alloca(n * sizeof(stop_t))` — bounded by parser |
 | miscellaneous | 14 | scattered |
 

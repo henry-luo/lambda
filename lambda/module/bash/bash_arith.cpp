@@ -8,11 +8,11 @@
 #include "bash_arith.h"
 #include "bash_runtime.h"
 #include "bash_errors.h"
-#include "../lambda-data.hpp"
-#include "../../lib/log.h"
+#include "../../lambda-data.hpp"
+#include "../../../lib/log.h"
 
 #include <cstring>
-#include "../../lib/mem.h"
+#include "../../../lib/mem.h"
 #include <cctype>
 
 // ============================================================================

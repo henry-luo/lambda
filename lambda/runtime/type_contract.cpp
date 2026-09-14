@@ -784,14 +784,10 @@ bool lambda_type_lane_storage_desc(Type* type, LaneStorageDesc* out) {
 }
 
 bool lambda_type_array_lane_storage_desc(Type* type, LaneStorageDesc* out) {
-    if (!out || !lambda_type_lane_storage_desc(type, out) || !out->base_contract) return false;
-    if (out->nullable && (out->base_contract->type_id == LMD_TYPE_INT64 ||
-            out->base_contract->type_id == LMD_TYPE_UINT64)) {
-        // Array slots outlive number frames, so wide optionals use the shared
-        // inline TypedItem representation instead of a borrowed Item pointer.
-        out->kind = LANE_STORAGE_TYPED_ITEM;
-        out->byte_size = (uint8_t)sizeof(TypedItem);
-    }
+    if (!out || !type) return false;
+    LaneStorageDesc desc = lambda_persistent_lane_storage_desc_for(type);
+    if (!desc.native) return false;
+    *out = desc;
     return true;
 }
 

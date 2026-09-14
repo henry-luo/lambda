@@ -79,7 +79,7 @@ Split the current monolithic `build_lambda_config.json` into two distinct build 
 
 **Additional language runtimes:**
 - Python (`lambda/module/py/` — 17 files)
-- Bash (`lambda/bash/` — 8 files)
+- Bash (`lambda/module/bash/` — 8 files)
 - Ruby (`lambda/module/rb/` — 10 files)
 
 **Additional tree-sitter parsers (3):**
@@ -107,7 +107,7 @@ Add compile-time guards for Python, Bash, and Ruby (Ruby already has `LAMBDA_RUB
 | Flag | Guards |
 |------|--------|
 | `LAMBDA_PYTHON` | `lambda/module/py/` includes, `backend_python.cpp`, Python CLI handler |
-| `LAMBDA_BASH` | `lambda/bash/` includes, `backend_bash.cpp`, Bash CLI handler |
+| `LAMBDA_BASH` | `lambda/module/bash/` includes, `backend_bash.cpp`, Bash CLI handler |
 | `LAMBDA_RUBY` | Already exists — no changes needed |
 | `LAMBDA_JUBE` | Master flag: implies all three above |
 
@@ -120,8 +120,8 @@ Apply the existing `LAMBDA_RUBY` pattern to Python and Bash:
 #endif
 
 #ifdef LAMBDA_BASH
-#include "bash/bash_transpiler.hpp"
-#include "bash/bash_runtime.h"
+#include "module/bash/bash_transpiler.hpp"
+#include "module/bash/bash_runtime.h"
 #endif
 ```
 
@@ -153,7 +153,7 @@ Extend `build_lambda_config.json` with a new `jube` platform variant, similar to
             "source_dirs": [
                 // inherit all from top-level, explicitly include:
                 "lambda/module/py",
-                "lambda/bash",
+                "lambda/module/bash",
                 "lambda/module/rb"
             ],
             "defines": [
@@ -182,7 +182,7 @@ Extend `build_lambda_config.json` with a new `jube` platform variant, similar to
 
 Then modify the **top-level** config to be the focused Lambda build:
 
-1. Remove from top-level `source_dirs`: `lambda/module/py`, `lambda/bash`, `lambda/module/rb`
+1. Remove from top-level `source_dirs`: `lambda/module/py`, `lambda/module/bash`, `lambda/module/rb`
 2. Remove from top-level `defines`: `LAMBDA_RUBY`
 3. Remove from top-level `libraries`: `tree-sitter-python`, `tree-sitter-ruby`, `tree-sitter-bash`
 4. Remove from top-level `includes`: the Python/Ruby/Bash tree-sitter binding paths
@@ -268,11 +268,11 @@ lambda/module/py/py_bigint.hpp
 
 **Bash runtime (8 files):**
 ```
-lambda/bash/bash_transpiler.cpp  lambda/bash/bash_transpiler.hpp
-lambda/bash/bash_ast_builder.cpp lambda/bash/bash_ast_builder.hpp
-lambda/bash/bash_builtins.cpp    lambda/bash/bash_builtins.hpp
-lambda/bash/bash_runtime.c       lambda/bash/bash_runtime.h
-lambda/bash/bash_scope.cpp       lambda/bash/bash_scope.hpp
+lambda/module/bash/bash_transpiler.cpp  lambda/module/bash/bash_transpiler.hpp
+lambda/module/bash/bash_ast_builder.cpp lambda/module/bash/bash_ast_builder.hpp
+lambda/module/bash/bash_builtins.cpp    lambda/module/bash/bash_builtins.hpp
+lambda/module/bash/bash_runtime.c       lambda/module/bash/bash_runtime.h
+lambda/module/bash/bash_scope.cpp       lambda/module/bash/bash_scope.hpp
 ```
 
 **Ruby runtime (10 files):**
@@ -321,7 +321,7 @@ lambda/serve/wsgi_bridge.py
 - [ ] Guard Python/Bash includes and CLI handlers in `main.cpp`
 - [ ] Guard language-specific registrations in `sys_func_registry.c`
 - [ ] Guard serve backends with feature flags
-- [ ] Remove `lambda/module/py`, `lambda/bash`, `lambda/module/rb` from top-level `source_dirs`
+- [ ] Remove `lambda/module/py`, `lambda/module/bash`, `lambda/module/rb` from top-level `source_dirs`
 - [ ] Remove `LAMBDA_RUBY` from top-level `defines`
 - [ ] Remove Python/Ruby/Bash tree-sitter from top-level `libraries` and `includes`
 - [ ] Add `jube` platform variant to `build_lambda_config.json`
@@ -457,7 +457,7 @@ These files contain AST/debug print functions that have **no external callers**.
 | `lambda/js/transpile_js_mir.cpp` | ~18788 | `temp/js_mir_dump.txt` | `JS_MIR_DUMP` env var |
 | `lambda/module/py/transpile_py_mir.cpp` | ~7525 | `temp/py_mir_dump.txt` | — |
 | `lambda/module/rb/transpile_rb_mir.cpp` | ~3663 | `temp/rb_mir_dump.txt` | — |
-| `lambda/bash/transpile_bash_mir.cpp` | ~4964 | `temp/bash_mir_dump.txt` | — |
+| `lambda/module/bash/transpile_bash_mir.cpp` | ~4964 | `temp/bash_mir_dump.txt` | — |
 
 **View tree dumps:**
 - `radiant/view_pool.cpp` `print_view_tree()` delegates to the JSON serializer; the legacy text side-channel was removed by Radiant Clean-Up 3

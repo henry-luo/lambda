@@ -6,8 +6,8 @@
   expression fallback for `i64?`/`u64?` retain explicit native-lane descriptors in eligible
   Lambda arrays and map shapes. Wide nullable native Arrays use destination-owned `TypedItem`
   slots rather than raw `Item` words; that LR08-4 array correction landed 2026-09-13. The same
-  destination-owned slot is now required for packed `i64?`/`u64?` Map/Shape fields by
-  D2.5.2v3/D2.6.1v3/D2.6.4v3; that map projection is not yet implemented.
+  destination-owned slot is used for packed `i64?`/`u64?` Map/Shape fields by
+  D2.5.2v3/D2.6.1v3/D2.6.4v3; that map projection landed 2026-09-14.
   `int?`, `float?`, `bool?`,
   `string?`, `symbol?`, `binary?`, `decimal?`,
   `datetime?`, `complex?`, and the supported nullable container pointers (`array?`, `map?`,
@@ -661,10 +661,10 @@ after it proves the value cannot include `undefined`.
   `ArrayNum` is rebuilt as that general native Array before an admitted nullable store. A plain
   `T[]` rejects null and never widens.
 - Packed Lambda map fields preserve their optional ShapeEntry contract. `int?`, `bool?`,
-  `float?`, `i8?`…`u32?`, and pointer-backed optionals use their native lane storage. The
-  D2.5.2v3 requirement that `i64?`/`u64?` use a destination-owned TypedItem field is pending:
-  the current raw-Item map projection is non-conformant and must be replaced without a
-  null/non-null shape transition.
+  `float?`, `i8?`…`u32?`, and pointer-backed optionals use their native lane storage. Exact
+  `i64?`/`u64?` instead select a 9-byte, destination-owned `TypedItem` field through the
+  shared persistent descriptor projection. Null/non-null mutation changes its inline tag and
+  payload without a shape transition. [D2.5.2v3, D2.6.1v3, D2.6.4v3]
 - Array admission compares the whole lane descriptor (kind, nullability, and sized/pointer
   detail), not merely whether a source is already native. Thus `int[] -> int?[]` and
   `string[] -> string?[]` give the target its own COW carrier before a nullable store; the

@@ -8,12 +8,12 @@
  * this file can be compiled. See doc/dev/Bash_Runtime.md Phase 1.
  */
 #include "bash_transpiler.hpp"
-#include "../lambda-data.hpp"
-#include "../../lib/log.h"
-#include "../../lib/strbuf.h"
+#include "../../lambda-data.hpp"
+#include "../../../lib/log.h"
+#include "../../../lib/strbuf.h"
 #include <tree_sitter/tree-sitter-bash.h>
 #include <cstring>
-#include "../../lib/mem.h"
+#include "../../../lib/mem.h"
 #include <cstdio>
 #include <cstdint>
 

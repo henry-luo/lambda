@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-#include "../lambda.h"
+#include "../../lambda.h"
 
 // ============================================================================
 // Regex match with BASH_REMATCH

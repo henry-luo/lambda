@@ -82,7 +82,7 @@
 | 17 | `lambda/input/markup/inline/inline_format_specific.cpp` | Temp string buffers |
 | 14 | `lambda/module/py/py_builtins.cpp` | String operation buffers |
 | 14 | `lambda/js/js_globals.cpp` | String operation buffers |
-| 13 | `lambda/bash/bash_runtime.cpp` | Command/env buffers |
+| 13 | `lambda/module/bash/bash_runtime.cpp` | Command/env buffers |
 | 12 | `lambda/transpile-mir.cpp` | MIR transpiler allocations |
 | 12 | `lambda/lambda-error.cpp` | Error message formatting |
 | 10 | `radiant/layout_graph.cpp` | Graph layout structs |
@@ -273,7 +273,7 @@ Core runtime, AST, eval, memory, data:
 |----------|--------|-------|-------|----------|
 | P1 | JavaScript | `js/*.cpp` (12 files) | ~75 | `MEM_CAT_JS_RUNTIME` (new) |
 | P1 | Python | `py/*.cpp` (6 files) | ~35 | `MEM_CAT_PY_RUNTIME` (new) |
-| P2 | Bash | `bash/*.cpp` (5 files) | ~35 | `MEM_CAT_BASH_RUNTIME` (new) |
+| P2 | Bash | `lambda/module/bash/*.cpp` (5 files) | ~35 | `MEM_CAT_BASH_RUNTIME` (new) |
 | P2 | Ruby | `rb/*.cpp` (4 files) | ~15 | `MEM_CAT_RB_RUNTIME` (new) |
 | P3 | TypeScript | `ts/*.cpp` (1 file) | ~1 | `MEM_CAT_TEMP` |
 

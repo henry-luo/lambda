@@ -49,11 +49,11 @@ ignores:
   # the runtime, not debug prints).
   - "lambda/module/rb/rb_print.cpp"
   - "lambda/module/rb/rb_runtime.cpp"
-  - "lambda/bash/transpile_bash_mir.cpp"
-  - "lambda/bash/bash_runtime.cpp"
-  - "lambda/bash/bash_builtins.cpp"        # echo/printf/pwd/type/caller builtins
-  - "lambda/bash/bash_errors.cpp"          # GNU-Bash-compatible error formatter
-  - "lambda/bash/bash_exec.cpp"            # exec builtin's stderr-on-failure
+  - "lambda/module/bash/transpile_bash_mir.cpp"
+  - "lambda/module/bash/bash_runtime.cpp"
+  - "lambda/module/bash/bash_builtins.cpp"        # echo/printf/pwd/type/caller builtins
+  - "lambda/module/bash/bash_errors.cpp"          # GNU-Bash-compatible error formatter
+  - "lambda/module/bash/bash_exec.cpp"            # exec builtin's stderr-on-failure
   - "lambda/module/py/py_stdlib.cpp"
   - "lambda/module/py/py_builtins.cpp"            # print/sys.stdout.write builtins
   - "lambda/module/py/py_print.cpp"               # py AST printer (debug build only)

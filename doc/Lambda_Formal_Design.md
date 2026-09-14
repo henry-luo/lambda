@@ -265,7 +265,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   sentinel; representation follows the **full type contract**, never
   TypeId alone; **GC sees only pointers** — numeric sentinels are never
   roots. [Nullable §1–2]
-- **D2.5.2v3*** Sentinels: `INT_LANE_NULL` (numerically the `ItemNull` word
+- **D2.5.2v3** Sentinels: `INT_LANE_NULL` (numerically the `ItemNull` word
   — what makes box/unbox exact) joins the three poison sentinels; `bool?` is
   one byte 0/1/2 with C-truthiness banned; sized `i8?`…`u32?` widen to the
   i64 lane; `float?` reserves a distinct NaN payload (`ItemNull`'s bits are
@@ -289,7 +289,7 @@ language-visible counterparts are the semantics spec's SI ledger.
 
 ### D2.6 Containers and array storage
 
-- **D2.6.1v3*** Three physical array forms: boxed Array (Items), native Array
+- **D2.6.1v3** Three physical array forms: boxed Array (Items), native Array
   (uniform descriptor-selected native slot per element), ArrayNum
   (specialized numeric layout). Native slots are normally one 64-bit lane
   word; `i64?[]`/`u64?[]` use a destination-owned `TypedItem` slot.
@@ -308,7 +308,7 @@ language-visible counterparts are the semantics spec's SI ledger.
 - **D2.6.3** `ELEM_INT` element storage is the i64 lane (finite values or
   poison sentinels), mapped to IEEE at print/box boundaries; both int
   element kinds share the i64 kernel path.* [Int_Type §5.8]
-- **D2.6.4v3*** A container that retains a raw wide-scalar Item points **only
+- **D2.6.4v3** A container that retains a raw wide-scalar Item points **only
   into that container's own buffer** (tail regions, `extra` = uniform tail
   count); headers are never reallocated out from under an identity.
   `i64?[]`/`u64?[]` and packed Map/Shape fields of those types instead retain
@@ -1852,7 +1852,7 @@ slice; no formal semantic ruling or document semver changes.
 | D2.6.5 | The append-site split is landed and the `disable_string_merging` flag it replaced has been retired from both context structs. One wrinkle remains: `list_push`'s normalization is asymmetric — null-stripping is unconditional, but string merging additionally requires an active `input_context`/`input_allocation_context` (`collection_runtime.cpp:323`), so outside an input parse the merge half of S16.7 does not run. Also unreconciled: `input-ics.cpp` and `input-mark.cpp` use MarkBuilder *and* call `list_push` directly, so those two formats mix normalizing and verbatim appends within one document. |
 | D2.4.1–D2.4.3 | L0–L4 first slice landed 2026-08-28: explicit `INT_LANE`/machine reps, full-contract `MirValue`, canonical contract mapping, fail-closed carrier router, direct transition/fail-closed fixtures, and migration of arithmetic, branch, binding, index, call, and return consumers. Semantic `MIR_reg_type()` probes are removed from Lambda expression lowering. The 2026-08-31 P5 follow-up makes `transpile_primary_value()` publish literal/primary `MirValue` descriptors directly and retires its raw dispatcher arm. **Implemented boundary audit 2026-09-05:** `transpile_expr_value_core()`/`transpile_expr_value()` and `jm_transpile_expression_direct()`/`jm_transpile_expression_value()` now form the respective core demand-driven `MirValue` boundaries; no core `transpile_expr*` or `jm_transpile_expression*` function returns `MIR_reg_t`. Internal physical-register helpers remain below the boundary. |
 | D2.5.1 | Nullable-lane first slice landed 2026-08-05 (LaneStorageDesc, native arrays, packed nullable fields, scalar ABI); `f16?`/`f32?`, JS IC lowering, mutable ArrayNum views, vector/N-D kernels pending. |
-| D2.5.2v3, D2.6.1v3, D2.6.4v3 | **Ruled 2026-09-14, not implemented for Map/Shape fields.** `i64?`/`u64?` native Arrays already use destination-owned `TypedItem` slots. The packed Map/Shape projection still stores a raw Item and must move to the same descriptor-selected TypedItem layout through construction, mutation, rebuilding, COW, and reads; [LR08-4](../vibe/Lambda_Issue_Ledger.md) tracks the conformance defect. |
+| D2.5.2v3, D2.6.1v3, D2.6.4v3 | **Implemented 2026-09-14.** `i64?`/`u64?` native Arrays and packed Map/Shape fields use descriptor-selected, destination-owned `TypedItem` slots. Construction, mutation, static materialization, rebuilding, COW, reads, and GC tracing preserve the selected layout; the regression covers JIT/interpreter plus forced-GC number-frame reuse. |
 | D2.6.2 | ArrayNum `==` representation-sensitivity is a known live bug (also gates the data-processing engines). |
 | D2.6.3 | ELEM_INT i64 revert landed; SIMD kernels only partly re-enabled (C16-era gating comments remain). |
 | D2.6.9v3, D2.6.11 | **Ruled 2026-09-03 (USER), not implemented** — both belong to phase 2 of D2.6.6v2. Shipped state is the v2 description below. |

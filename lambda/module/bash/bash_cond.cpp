@@ -7,10 +7,10 @@
 #include "bash_runtime.h"
 #include "bash_pattern.h"
 #include "bash_errors.h"
-#include "../lambda-data.hpp"
-#include "../runtime/transpiler.hpp"
-#include "../../lib/log.h"
-#include "../../lib/memtrack.h"
+#include "../../lambda-data.hpp"
+#include "../../runtime/transpiler.hpp"
+#include "../../../lib/log.h"
+#include "../../../lib/memtrack.h"
 
 #include <cstring>
 #include <cerrno>

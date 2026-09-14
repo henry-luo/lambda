@@ -96,6 +96,14 @@ TEST(ValueRepresentationTest, NullableWideArraysUseDestinationOwnedTypedItems) {
         EXPECT_EQ((int)array.nullable, 1);
         EXPECT_EQ((int)array.native, 1);
 
+        ShapeEntry map_field = {};
+        shape_entry_set_type(&map_field, contract);
+        const LaneStorageDesc* map = shape_entry_storage(&map_field);
+        EXPECT_EQ((int)map->kind, (int)LANE_STORAGE_TYPED_ITEM);
+        EXPECT_EQ((int)map->byte_size, (int)sizeof(TypedItem));
+        EXPECT_EQ((int)map->nullable, 1);
+        EXPECT_EQ((int)map->native, 1);
+
         Array storage = {};
         storage.type_id = LMD_TYPE_ARRAY;
         array_native_lane_configure(&storage, &array);

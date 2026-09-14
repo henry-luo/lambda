@@ -49,7 +49,7 @@ Phases 1–9a are complete (~93% feature coverage). This document tracks the rem
 ### Architecture
 
 ```
-lambda/bash/
+lambda/module/bash/
 ├── bash_ast.hpp              567 LOC   AST node types, operator/expansion enums
 ├── build_bash_ast.cpp       2037 LOC   Tree-sitter CST → Bash AST (brace detection)
 ├── transpile_bash_mir.cpp   2824 LOC   Bash AST → MIR code generation
@@ -726,25 +726,25 @@ Phase 5's word splitting (`$IFS`) may be revisited if needed by real-world scrip
 |------|--------|
 | `Makefile` | Added `test-bash-baseline` target |
 | `lambda/main.cpp` | Propagate bash exit code to process exit |
-| `lambda/bash/transpile_bash_mir.cpp` | Pipeline capture chain; external command fallback; `bm_transpile_cmd_arg()` for context-aware glob/brace expansion; arithmetic `&&`/`||` short-circuit; `bash_eval_string()`; `BASH_AST_NODE_EXIT` case; `trap` builtin; `bash_trap_check()` in loops; `bash_trap_run_exit()` before main return |
-| `lambda/bash/bash_runtime.h` | Stdin item API; file redirect API; expansion functions; external exec API; assoc array API; env import/export API; shell option flags; trap API |
-| `lambda/bash/bash_runtime.cpp` | Pipeline data passing; file redirects; external exec via `posix_spawn`; tilde/brace/glob expansion; assoc arrays; env import (`bash_env_import()`); `bash_trap_set/run_exit/check`; OS signal handlers via `sigaction()` |
-| `lambda/bash/bash_builtins.cpp` | Added `cat`, `wc`, `head`, `tail`, `grep`, `sort`, `tr`, `cut`; `source`/`.`; `declare`; `set` |
-| `lambda/bash/build_bash_ast.cpp` | Brace pattern detection in `build_concatenation()`; redirect handling; `declare` command parsing |
-| `lambda/bash/bash_ast.hpp` | Variable attribute flags for `declare` |
+| `lambda/module/bash/transpile_bash_mir.cpp` | Pipeline capture chain; external command fallback; `bm_transpile_cmd_arg()` for context-aware glob/brace expansion; arithmetic `&&`/`||` short-circuit; `bash_eval_string()`; `BASH_AST_NODE_EXIT` case; `trap` builtin; `bash_trap_check()` in loops; `bash_trap_run_exit()` before main return |
+| `lambda/module/bash/bash_runtime.h` | Stdin item API; file redirect API; expansion functions; external exec API; assoc array API; env import/export API; shell option flags; trap API |
+| `lambda/module/bash/bash_runtime.cpp` | Pipeline data passing; file redirects; external exec via `posix_spawn`; tilde/brace/glob expansion; assoc arrays; env import (`bash_env_import()`); `bash_trap_set/run_exit/check`; OS signal handlers via `sigaction()` |
+| `lambda/module/bash/bash_builtins.cpp` | Added `cat`, `wc`, `head`, `tail`, `grep`, `sort`, `tr`, `cut`; `source`/`.`; `declare`; `set` |
+| `lambda/module/bash/build_bash_ast.cpp` | Brace pattern detection in `build_concatenation()`; redirect handling; `declare` command parsing |
+| `lambda/module/bash/bash_ast.hpp` | Variable attribute flags for `declare` |
 | `lambda/sys_func_registry.c` | Registered all new runtime functions for JIT linking |
 
 ### Files Modified (Phase 8b)
 | File | Changes |
 |------|--------|
 | `lambda/main.cpp` | `--posix` flag parsing; calls `bash_set_posix_mode(true)` when detected |
-| `lambda/bash/bash_runtime.h` | Added POSIX mode API: `bash_set_posix_mode()`, `bash_get_posix_mode()` |
-| `lambda/bash/bash_runtime.cpp` | `bash_func_scope_stack[256]` state; implemented `bash_scope_push/pop`; rewrote `bash_get/set_var`, `bash_set_local_var`, `bash_unset_var` to walk scope stack; added `bash_posix_mode` flag and getter/setter |
-| `lambda/bash/transpile_bash_mir.cpp` | `bm_emit_set_local_var()` helper; fixed `local` builtin handler; `bash_scope_push/pop` wired into `bm_transpile_function_def()`; `bash_scope_pop` before `bash_pop_positional` in `BASH_AST_NODE_RETURN`; `is_local` flag honored in `bm_transpile_assignment()` |
+| `lambda/module/bash/bash_runtime.h` | Added POSIX mode API: `bash_set_posix_mode()`, `bash_get_posix_mode()` |
+| `lambda/module/bash/bash_runtime.cpp` | `bash_func_scope_stack[256]` state; implemented `bash_scope_push/pop`; rewrote `bash_get/set_var`, `bash_set_local_var`, `bash_unset_var` to walk scope stack; added `bash_posix_mode` flag and getter/setter |
+| `lambda/module/bash/transpile_bash_mir.cpp` | `bm_emit_set_local_var()` helper; fixed `local` builtin handler; `bash_scope_push/pop` wired into `bm_transpile_function_def()`; `bash_scope_pop` before `bash_pop_positional` in `BASH_AST_NODE_RETURN`; `is_local` flag honored in `bm_transpile_assignment()` |
 
 ### Files Still to Modify (Phase 9)
 | File | Changes |
 |------|--------|
-| `lambda/bash/bash_builtins.cpp` | `json_parse`, `yaml_parse`, `xml_parse`, `csv_parse`, `regex`, `lambda_eval` builtins |
-| `lambda/bash/bash_runtime.cpp` | Lambda interop bridge for `lambda_eval` |
+| `lambda/module/bash/bash_builtins.cpp` | `json_parse`, `yaml_parse`, `xml_parse`, `csv_parse`, `regex`, `lambda_eval` builtins |
+| `lambda/module/bash/bash_runtime.cpp` | Lambda interop bridge for `lambda_eval` |
 | `lambda/sys_func_registry.c` | Register new Phase 9 functions |

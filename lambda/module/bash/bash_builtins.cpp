@@ -10,15 +10,15 @@
  */
 #include "bash_runtime.h"
 #include "bash_errors.h"
-#include "../lambda-data.hpp"
-#include "../runtime/transpiler.hpp"
-#include "../../lib/log.h"
-#include "../../lib/str.h"
-#include "../../lib/strbuf.h"
-#include "../../lib/utf.h"
+#include "../../lambda-data.hpp"
+#include "../../runtime/transpiler.hpp"
+#include "../../../lib/log.h"
+#include "../../../lib/str.h"
+#include "../../../lib/strbuf.h"
+#include "../../../lib/utf.h"
 #include <cstring>
 #include <cstdio>
-#include "../../lib/mem.h"
+#include "../../../lib/mem.h"
 #include <cctype>
 #include <ctime>
 #include <unistd.h>

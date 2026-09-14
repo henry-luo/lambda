@@ -623,7 +623,7 @@ static inline bool array_native_lane_store(Array* array, int64_t index, Item val
             return false;
         }
         // The TypedItem slot is owned by the Array, so no number-frame pointer
-        // can survive this store (D2.5.2v2, D5.2.2v3).
+        // can survive this store (D2.5.2v3, D5.2.2v3).
         return typeditem_store_item((TypedItem*)array_native_lane_slot(array, index), value);
     }
     switch (kind) {
