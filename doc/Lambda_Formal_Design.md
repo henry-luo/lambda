@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 6.1.1 (2026-09-14)
+**Spec version:** 6.1.2 (2026-09-14)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1626,13 +1626,20 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ### D8.5 MIR module cache
 
-- **D8.5.1v2*** **L1** is a persistent in-process `InputScriptCache` for
+- **D8.5.1v3*** **L1** is a persistent in-process `InputScriptCache` for
   executable script sources, including main scripts, imports, harnesses, and
   document/hosted-language scripts. Source identity uses exact bytes plus
   canonical identity, source kind, language/parser profile, and resolution
   policy; AST and optional MIR artifacts are subordinate entries. A hit
   recreates execution, heap, DOM, module, and exception state, and the default
   policy admits every successful script (`LAMBDA_SCRIPT_CACHE=off|ast|mir|all`).
+  `LAMBDA_SCRIPT_CACHE_MAX_BYTES` is an optional retained-byte limit: unset or
+  `0` retains without a limit, while a positive limit evicts only inactive,
+  dependency-free entries in least-recently-used order. A live lease or
+  dependency cone may exceed the limit and records retention pressure rather
+  than losing an artifact it still references.
+  If recovery closes a scope that owns an unfinished AST/MIR build claim, the
+  common service wakes waiters and poisons that key until source invalidation.
   The cache remains source-distributed and in-process; disk/code-image caching
   stays D8.5.2–D8.5.3. L2 lazy codegen remains an approved experiment. [MC1,
   MC2]
@@ -1962,6 +1969,7 @@ slice; no formal semantic ruling or document semver changes.
 | D8.4.2v2 | Core direct calls pass individual ABI operands. Internal shape-2 results use two MIR results and C-reachable entries use the context companion slot; the trailing scalar-home operand remains retired. Tune24 aggregate-construction plans carry precise record-field destinations as internal operands and return an Item completion. The numeric companion-return ABI is unchanged. |
 | D8.4.3v2 | Landed 2026-08-17 for Lambda, LambdaJS, Jube, and hosted execution boundaries: ordinary failures use explicit returned completions through each frame, while `LambdaRecoveryFrame` is restricted by the recovery-boundary gate to native-fault/test containment sites. The catalog and adapter audits retain the explicit Item/companion-lane contracts; see `vibe/Lambda_Design_Runtime_Error_Handling.md` §10–§12. |
 | D8.5.1v2 | Partially implemented 2026-09-14: the common source registry is live, Lambda and JS CLI/Node-runner/test-batch/module source admission use it, hosted CLI file admission uses language/profile keys, and Radiant's preamble/external-classic JS MIR adapter stores opaque artifacts there. Closed-T0 Lambda AST templates now instantiate import cones and interpreter view registration through fresh Script overlays; cached Lambda MIR hits instantiate the complete JIT dependency cone and its dense per-runtime slabs, while P2 satellite imports derive their owner/slot without mutating the shared AST. P2 promotion counters and boxed satellite entries are also execution-local overlays, so a cached AST definition cannot expose a retired EvalContext's native entry (D8.1.1v2); an AST image that has entered P2 is conservatively excluded from later AST hits until lowering's remaining mutable facts have execution overlays. Lambda file-backed dependency changes and admitted cache-safe static-JS ESM dependency changes are refreshed before an artifact hit and retire the common importer cone; exact source comparison decides the retirement. Common AST/MIR build claims single-flight Lambda artifact construction across fresh runtimes, common JS AST claims single-flight parser-template construction, and the Radiant JS-MIR lease adapter plus synchronous static-JS-import module-MIR adapter claim their eligible artifacts; a minimal poison state is fail-closed until source invalidation, while eviction remains deferred. Eager JIT AST-miss reuse remains excluded because MIR lowering still mutates AST facts. The common JS AST adapter supports function, class, module, eval, and TypeScript parser templates through fresh execution overlays; those clones retain the source logical unit and bind a fresh dense slab. An ESM module whose transitive static-JS-import closure is synchronous and cache-safe can reuse an immutable MIR artifact after rebuilding every dependency namespace, its own namespace, and its module slab; TLA, dynamic/re-export, CommonJS, cycles, and cross-language module artifacts remain excluded. The legacy Runtime retention cache is retired to a local `loaded_script_index` registry, and the legacy Radiant cache façade is retired to a bounded lease/accounting session. Open work includes the excluded JS module families, remaining command pipelines, guest build-claim adoption, and cache lifecycle gates; L2 lazy codegen remains approved but `mir.c` is eager. Working record: `vibe/Lambda_Design_Script_Cache.md`. |
+| D8.5.1v3 | Revised 2026-09-14 (v3): a source-level command-path audit closes the executable loader inventory: Lambda run/import/REPL/AST-dump/validator, JS CLI/require/interpreter/module/AST-dump/batch, Radiant local and URL scripts, Jube hosted sources, and direct Bash/Ruby guest loaders all reach `InputScriptCache`; ordinary document, JSON/package-metadata, filesystem, and transfer payload reads remain outside the executable-source contract. An owner scope that closes with an unfinished AST/MIR claim poisons the key and broadcasts its waiters, covering managed parse/compile recovery without inventing a broad crash cache. `LAMBDA_SCRIPT_CACHE_MAX_BYTES` provides an opt-in, inactive-only LRU byte limit; active leases retain their images and report pressure. This supersedes the v2 implementation status above; guest build-claim adoption, broader timeout/crash containment, dependency cones outside the admitted module families, and richer budget policy remain open. Working record: `vibe/Lambda_Design_Script_Cache.md`. |
 | D8.5.2–D8.5.3 | L3 code-image cache: nothing landed (D0–D6 sequence); de-pointering (MC4) independently shippable, not started. |
 | D8.6.4v2 | Timing/MIR instrumentation is landed. At commit `44b98dcebd19a548a14bbb75785091b545445f00`, the governed tree is 310,711 lines. The audited atomic direct-frontend retirement `9f3f05e1ff65a2c42acf14776da7361ea1961c0c` is `+1,366/-8,450 = -7,084` in `lambda/runtime` + `lambda/js`; its named deleted files alone credit `-6,204`, excluding the out-of-scope TypeScript deletion. The current checker reports 287,618 against the stricter ≤308,711 cap. The 2026-09-05 prescribed captures (one warm-up, five release samples, identical manifests) compare the pre-bind base with the same two semantic repairs applied to both trees: Lambda compiler median ratio `0.512534` and JS ratio `0.690065`, satisfying the ≤0.90 and ≤0.80 ratchets. Finalized JS MIR diagnostics are complete `1.000181` and library `0.999995`; the complete-corpus change is below 0.02% and the library decreased. Large-library and complete-corpus MIR counts remain required diagnostics, not exit gates. |
 

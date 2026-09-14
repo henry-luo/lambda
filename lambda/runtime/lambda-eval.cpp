@@ -4984,6 +4984,10 @@ Item fn_member(Item item, Item key) {
         return ItemNull;  // null-safe: null.field returns null
     case LMD_TYPE_ERROR: {
         // error member properties: .code and .message
+        // Error propagation accepts only named properties. A numeric computed
+        // member must preserve the error instead of treating its payload bits
+        // as a Symbol pointer (S7.1.1).
+        if (!is_text_type_id(get_type_id(key))) return item;
         const char* k = key.get_chars();
         if (!k) return item;  // error propagation
 
@@ -5009,6 +5013,9 @@ Item fn_member(Item item, Item key) {
     case LMD_TYPE_DTIME: {
         // datetime member properties
         DateTime dt = item.get_datetime();
+        // Datetime properties are named; protect the text accessor from a
+        // numeric member key on malformed/adversarial source (S4, S7.1.1).
+        if (!is_text_type_id(get_type_id(key))) return ItemNull;
         const char* k = key.get_chars();
         if (!k) return ItemNull;
 
