@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "description": "Tune27 T27-8 (\u00a710.11, D8.3.2): `m` is defined only by non-raising local calls returning `float[]`, so neither the declaration nor any `rotate(m, ...)` argument re-admits it; the one remaining check is the function's own `float` return of a generic element sum.",
+  "checks": [
+    {
+      "in_func": "_chain_#",
+      "count": {
+        "call\tlambda_type_check_p, lambda_type_check": {
+          "max": 1
+        }
+      }
+    }
+  ]
+}

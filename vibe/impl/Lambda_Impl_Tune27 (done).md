@@ -1765,3 +1765,58 @@ the checked arm. Stores now branch on a separate `typed_array_dense_store_guard`
 word of `c`'s write guard fails (its certificate identity is the suspect) is
 a follow-up: it only costs `c`'s own stores, exactly what the untyped twin
 pays through its `cow_marked` snapshot root.
+
+## 13. Regression pins added after Result44 (2026-09-14)
+
+The rounds' tunings were pinned by output goldens and by a few `.mir-check`
+sidecars; the Result44 read showed where that left gaps (a JIT-only store
+defect behind a T0 golden, a 20x LambdaJS regression with no census row, a
+dense-guard split no wildcard pattern can see). Added:
+
+- **Tier matrix** (`test_lambda_gtest`, `LambdaTierParityTests`): eighteen
+  fixtures from rounds 3–7 run on interp, jit and auto against one golden --
+  every `cow_*`, the typed-`var` rebinds, the nullable-lane stores, the
+  contract-reuse and literal-extent fixtures. The baseline alone runs auto,
+  where a once-called body never reaches the JIT.
+- **Emission sidecars** (`test/mir/lambda/tune27_*`): `place_borrow`
+  (`cow_place_leaf_fixed` + raw `pn_push`, exactly two captures for the two
+  named array insertions, none for the scalar), `literal_extent_dense` (no
+  checked load, no null-lane call, the null lane as `dmov r, nan`, the
+  literal extent as an immediate; the only checks are the two parameter
+  admissions and the sibling arms' declaration null rejections),
+  `call_defined_binding` (at most one check in a four-call `rotate` chain),
+  `dense_store_guard` (the `{{r:g}}`/`{{r!g}}` pin of §12's split).
+- **Census pins** (`test_lambda_opt_gtest`, `LambdaOptCow`/`LambdaOptJs`):
+  the exec-profile reader now exposes the per-type COW rows
+  (`array_shared_copies`, `array_num_unique_mutations`, …), and five tests
+  pin D4.4.4v2 (29 array copies), D4.4.5 (83 map copies), the place
+  mutators (7 + 1 detaches, ≥1,000 unique appends), D8.1.1v10 (no array
+  copy on a typed `var` rebind) and the fixed-key path setter (1 + 2
+  detaches) on both tiers. A new row `js_realm_slot_reservations` counts
+  LambdaJS's full realm-slot walks; the JS test drives 20,000 intrinsic
+  prototype lookups through the `js` subcommand and requires exactly one.
+- **G9 probes**: `lambda_corpus_cube3d/deltablue/prettier_ast` budgets are
+  the debug build's counts (the baseline's configuration). The "release
+  emits 154 fewer instructions on `run_cube`" observation recorded here on
+  2026-09-14 was not a build difference: the r47 release binary predates
+  commit `294df06dc` (per-argument `ValueRep` ABI descriptors), which the
+  working tree had merged. That commit produced every system-call argument
+  in the producer's own rep and converted afterwards, so `fill(4, 0.0)`'s
+  literal became a run-time float box block instead of the RC8 folded
+  constant Item; and it asked the shl/shr/ushr registry rows (NULL
+  descriptor = the boxed `fn_*_item` ABI) for the operands of the *inline*
+  native shift, boxing both and shifting the tag bits (`shr(n, 1)` of an
+  `int` parameter returned `inf`; paraffins/paraffins2/mandelbrot2/base642
+  failed on every tier that JIT-compiled them, and
+  `transpile_bitwise.ls` failed outright). Both fixed 2026-09-14:
+  `emit_sysfunc_abi_arg` requests the descriptor at production
+  (`transpile_expr_value(..., required)`), and the inline bitwise/shift
+  lowering opens each operand's proven `int` lane through
+  `emit_native_bitwise_lane_arg` (D2.4.1-D2.4.3). Pinned by
+  `test/mir/lambda/tune20_shift_native_lane` (`rsh r, %p1, c` / `lsh r,
+  %p1, %p2` / `and r, %p1, n` on the raw parameter registers, at most one
+  `int2it_lane` per body -- the earlier `tune16_native_bitwise` sidecar
+  matched `and {{r}}` with boxed operands and missed it). Re-captured after
+  the fix: `lambda_corpus_cube3d` 20,809 -> 20,571 (`_run_cube_#` 15,668 ->
+  15,514, the r47 release count exactly) and `lambda_tune4_typed_array_guard`
+  1,181 -> 1,162; deltablue and prettier_ast were unchanged.

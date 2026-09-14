@@ -3121,6 +3121,8 @@ extern "C" {
     void cow_profile_note_vmap_snapshot(void);
     void cow_profile_note_vmap_rejection(void);
     void cow_profile_dump(void);
+    // LambdaJS realm-slot reservation census row (exec profile)
+    void cow_profile_count_js_realm_reservation(void);
     Item array_set_cow(Item owner, Item key, Item value);
     Item member_set_cow(Item owner, Item key, Item value);
     Item map_set_cow(Item owner, Item key, Item value);

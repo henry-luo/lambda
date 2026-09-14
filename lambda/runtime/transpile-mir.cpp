@@ -4631,9 +4631,25 @@ static MIR_type_t sysfunc_arg_rep_mir_type(ValueRep rep) {
 // shared MirValue conversion firewall (D2.4.1-D2.4.3).
 static MirValue emit_sysfunc_abi_arg(MirTranspiler* mt,
         const SysFuncInfo* info, int index, AstNode* argument) {
-    MirValue produced = transpile_expr_value(mt, argument);
-    return em_require_rep(&mt->em, produced,
-        sysfunc_arg_required_rep(info, index));
+    ValueRep required = sysfunc_arg_required_rep(info, index);
+    // Request the descriptor at production, not after: the core boundary then
+    // bakes a folded literal in that rep (RC8) and lets a primary publish it
+    // directly. Producing first and converting later re-boxed `fill(4, 0.0)`'s
+    // 0.0 through a run-time float box block on every call (cube3d +154 insns).
+    MirValue produced = transpile_expr_value(mt, argument, MIR_VALUE_ANY,
+        required);
+    return em_require_rep(&mt->em, produced, required);
+}
+
+// The inline native bitwise/shift lowering is a MIR word instruction, not the
+// registry row's C call: shl/shr/ushr rows describe fn_*_item's Item ABI, so
+// asking the descriptor here boxed both operands and shifted the tagged bits
+// (shr(n, 1) of an int param returned inf). The classifier already proved an
+// `int` carrier on both operands; open that lane directly (D2.4.1-D2.4.3).
+static MIR_reg_t emit_native_bitwise_lane_arg(MirTranspiler* mt,
+        AstNode* argument) {
+    return emit_int_native_lane_typed(mt,
+        transpile_expr_value(mt, argument)).r;
 }
 
 // Unbox boxed Item -> container pointer by stripping the type tag (upper 8 bits)
@@ -24085,9 +24101,9 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 RETURN_CALL_VALUE(mir_emit_u32_bitwise(mt, call_node));
             }
 
-            MIR_reg_t a1 = emit_sysfunc_abi_arg(mt, info, 0, arg).reg;
+            MIR_reg_t a1 = emit_native_bitwise_lane_arg(mt, arg);
             arg = arg->next;
-            MIR_reg_t a2 = emit_sysfunc_abi_arg(mt, info, 1, arg).reg;
+            MIR_reg_t a2 = emit_native_bitwise_lane_arg(mt, arg);
 
             // band/bor/bxor: single MIR instruction, always safe
             MIR_insn_code_t mir_op = (MIR_insn_code_t)0;
@@ -24209,7 +24225,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 RETURN_CALL_VALUE(boxed_result);
             }
 
-            MIR_reg_t a1 = emit_sysfunc_abi_arg(mt, info, 0, arg).reg;
+            MIR_reg_t a1 = emit_native_bitwise_lane_arg(mt, arg);
             // ~a == a XOR -1
             MIR_reg_t result = new_reg(mt, "bnot", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_XOR,

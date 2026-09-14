@@ -280,6 +280,48 @@ TEST(LambdaTypedPathTests, PreservesSnapshotsAndRejectsInvalidWritesJit) {
         "test/mir/lambda/typed_path_store.txt", true, "jit");
 }
 
+// Tune27 (§10.15): the baseline runs the auto tier, where a once-called body
+// stays in T0 and a JIT-only defect hides behind a T0 golden -- the nullable
+// float store that stored its null sentinel as an element was found only by
+// running every goldened fixture on every tier. These pin the rounds' fixtures
+// on interp, jit and auto (S9.1.2, S9.1.3, S7.1.3v2, D8.1.1v10).
+struct TierParityFixture {
+    const char* script;
+    const char* expected;
+};
+static const TierParityFixture kTune27TierParity[] = {
+    {"test/lambda/proc/cow_var_typed_rebind.ls", "test/lambda/proc/cow_var_typed_rebind.txt"},
+    {"test/lambda/proc/cow_var_nullable_record.ls", "test/lambda/proc/cow_var_nullable_record.txt"},
+    {"test/lambda/proc/cow_var_nullable_record_typed_handle.ls",
+     "test/lambda/proc/cow_var_nullable_record_typed_handle.txt"},
+    {"test/lambda/proc/cow_place_mutator.ls", "test/lambda/proc/cow_place_mutator.txt"},
+    {"test/lambda/proc/cow_rmw_sibling_borrow.ls", "test/lambda/proc/cow_rmw_sibling_borrow.txt"},
+    {"test/lambda/proc/cow_move_out_bind.ls", "test/lambda/proc/cow_move_out_bind.txt"},
+    {"test/lambda/proc/tune27_nullable_lane_store.ls", "test/lambda/proc/tune27_nullable_lane_store.txt"},
+    {"test/lambda/proc/tune27_fixed_path_store.ls", "test/lambda/proc/tune27_fixed_path_store.txt"},
+    {"test/lambda/proc/tune27_loop_accumulator.ls", "test/lambda/proc/tune27_loop_accumulator.txt"},
+    {"test/lambda/proc/tune27_int_sentinel_arith.ls", "test/lambda/proc/tune27_int_sentinel_arith.txt"},
+    {"test/lambda/proc/interp_typed_var_rebind.ls", "test/lambda/proc/interp_typed_var_rebind.txt"},
+    {"test/mir/lambda/tune26_nullable_float_store.ls", "test/mir/lambda/tune26_nullable_float_store.txt"},
+    {"test/mir/lambda/tune27_contract_reuse.ls", "test/mir/lambda/tune27_contract_reuse.txt"},
+    {"test/mir/lambda/tune27_literal_extent_dense.ls", "test/mir/lambda/tune27_literal_extent_dense.txt"},
+    {"test/mir/lambda/tune27_dense_store_guard.ls", "test/mir/lambda/tune27_dense_store_guard.txt"},
+    {"test/mir/lambda/tune27_place_borrow.ls", "test/mir/lambda/tune27_place_borrow.txt"},
+    {"test/mir/lambda/tune27_call_defined_binding.ls", "test/mir/lambda/tune27_call_defined_binding.txt"},
+    {"test/mir/lambda/tune27_float_literal_nullable.ls", "test/mir/lambda/tune27_float_literal_nullable.txt"},
+};
+
+TEST(LambdaTierParityTests, Tune27FixturesAgreeOnEveryTier) {
+    static const char* const tiers[] = {"interp", "jit", "auto"};
+    for (size_t f = 0; f < sizeof(kTune27TierParity) / sizeof(kTune27TierParity[0]); f++) {
+        for (size_t t = 0; t < 3; t++) {
+            SCOPED_TRACE(std::string(kTune27TierParity[f].script) + " on " + tiers[t]);
+            test_lambda_script_against_file(kTune27TierParity[f].script,
+                kTune27TierParity[f].expected, true, tiers[t]);
+        }
+    }
+}
+
 TEST(LambdaTypedPathTests, ReusesFullArrayContractsAcrossCalls) {
     test_lambda_script_against_file("test/mir/lambda/typed_array_reuse.ls",
         "test/mir/lambda/typed_array_reuse.txt", true);
