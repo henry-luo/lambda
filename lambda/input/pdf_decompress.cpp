@@ -1,5 +1,7 @@
 #include "pdf_decompress.h"
+#include "../../lib/byte_builder.h"
 #include "../../lib/mem.h"
+#include <limits.h>
 #include <string.h>
 #include <zlib.h>
 #include "lib/log.h"
@@ -20,6 +22,22 @@ void pdf_decode_params_init(PDFDecodeParams* params) {
     params->early_change = 1;   // Standard PDF LZW
 }
 
+static bool pdf_inflate_prepare_output(z_stream* stream, ByteBuilder* output,
+                                       size_t minimum_writable, size_t* writable) {
+    if (!byte_builder_reserve(output, minimum_writable)) return false;
+    stream->next_out = byte_builder_writable_tail(output, writable);
+    if (*writable == 0) return false;
+    if (*writable > UINT_MAX) *writable = UINT_MAX;
+    stream->avail_out = (uInt)*writable;
+    return true;
+}
+
+static char* pdf_inflate_fail(z_stream* stream, ByteBuilder* output) {
+    inflateEnd(stream);
+    byte_builder_destroy(output);
+    return NULL;
+}
+
 /**
  * Decompress FlateDecode (zlib/deflate) compressed data
  */
@@ -28,20 +46,19 @@ char* flate_decode(const char* compressed_data, size_t compressed_len, size_t* o
         return NULL;
     }
 
-    // initial buffer size estimate (typically 2-10x compression ratio)
-    size_t buffer_size = compressed_len * 4;
-    char* output = (char*)mem_alloc(buffer_size, MEM_CAT_INPUT_PDF);
-    if (!output) {
+    if (compressed_len > UINT_MAX || compressed_len > SIZE_MAX / 4u) {
         return NULL;
     }
+
+    // initial buffer size estimate (typically 2-10x compression ratio)
+    ByteBuilder output = {};
+    if (!byte_builder_init(&output, compressed_len * 4u, MEM_CAT_INPUT_PDF, true)) return NULL;
 
     // initialize zlib stream
     z_stream stream;
     memset(&stream, 0, sizeof(stream));
     stream.next_in = (Bytef*)compressed_data;
-    stream.avail_in = compressed_len;
-    stream.next_out = (Bytef*)output;
-    stream.avail_out = buffer_size;
+    stream.avail_in = (uInt)compressed_len;
 
     // try different zlib initialization modes
     // try with zlib header first (most common in PDF after ASCII85)
@@ -53,77 +70,60 @@ char* flate_decode(const char* compressed_data, size_t compressed_len, size_t* o
             // try auto-detect
             ret = inflateInit2(&stream, 15 + 32);
             if (ret != Z_OK) {
-                mem_free(output);
+                byte_builder_destroy(&output);
                 return NULL;
             }
         }
     }
 
     // decompress
+    size_t writable = 0;
+    if (!pdf_inflate_prepare_output(&stream, &output, 64u, &writable)) {
+        return pdf_inflate_fail(&stream, &output);
+    }
     ret = inflate(&stream, Z_FINISH);
+    if (!byte_builder_commit(&output, writable - (size_t)stream.avail_out)) {
+        return pdf_inflate_fail(&stream, &output);
+    }
 
     // handle need for larger buffer
-    size_t last_total_out = stream.total_out;
+    size_t last_output_length = output.length;
     int stall_count = 0;
     while (ret == Z_BUF_ERROR || (ret == Z_OK && stream.avail_out == 0)) {
-        size_t old_size = buffer_size;
-        buffer_size *= 2;
-        char* new_output = (char*)mem_realloc(output, buffer_size, MEM_CAT_INPUT_PDF);
-        if (!new_output) {
-            inflateEnd(&stream);
-            mem_free(output);
-            return NULL;
+        if (!pdf_inflate_prepare_output(&stream, &output, 64u, &writable)) {
+            return pdf_inflate_fail(&stream, &output);
         }
-        output = new_output;
-        stream.next_out = (Bytef*)(output + old_size);
-        stream.avail_out = buffer_size - old_size;
         ret = inflate(&stream, Z_FINISH);
+        if (!byte_builder_commit(&output, writable - (size_t)stream.avail_out)) {
+            return pdf_inflate_fail(&stream, &output);
+        }
 
         // safety check: if no progress, break out
-        if (stream.total_out == last_total_out) {
+        if (output.length == last_output_length) {
             stall_count++;
             if (stall_count > 3) {
                 break;
             }
         } else {
             stall_count = 0;
-            last_total_out = stream.total_out;
+            last_output_length = output.length;
         }
     }
 
     if (ret != Z_STREAM_END) {
         // if we have output and input is consumed, accept partial success
-        if (stream.total_out > 0 && stream.avail_in == 0) {
-            *out_len = stream.total_out;
+        if (output.length > 0 && stream.avail_in == 0) {
+            *out_len = output.length;
             inflateEnd(&stream);
-
-            // shrink buffer to actual size
-            char* final_output = (char*)mem_realloc(output, *out_len + 1, MEM_CAT_INPUT_PDF);
-            if (final_output) {
-                final_output[*out_len] = '\0';
-                return final_output;
-            }
-            output[*out_len] = '\0';
-            return output;
+            return (char*)byte_builder_take(&output, NULL);
         }
 
-        inflateEnd(&stream);
-        mem_free(output);
-        return NULL;
+        return pdf_inflate_fail(&stream, &output);
     }
 
-    *out_len = stream.total_out;
+    *out_len = output.length;
     inflateEnd(&stream);
-
-    // shrink buffer to actual size
-    char* final_output = (char*)mem_realloc(output, *out_len + 1, MEM_CAT_INPUT_PDF);
-    if (final_output) {
-        final_output[*out_len] = '\0'; // null terminate for convenience
-        return final_output;
-    }
-
-    output[*out_len] = '\0';
-    return output;
+    return (char*)byte_builder_take(&output, NULL);
 }
 
 /**
@@ -143,12 +143,9 @@ char* lzw_decode(const char* compressed_data, size_t compressed_len,
         return NULL;
     }
 
-    // allocate output buffer
-    size_t buffer_size = compressed_len * 4;
-    char* output = (char*)mem_alloc(buffer_size, MEM_CAT_INPUT_PDF);
-    if (!output) {
-        return NULL;
-    }
+    if (compressed_len > SIZE_MAX / 4u) return NULL;
+    ByteBuilder output = {};
+    if (!byte_builder_init(&output, compressed_len * 4u, MEM_CAT_INPUT_PDF, true)) return NULL;
 
     // LZW dictionary
     uint8_t dict_values[LZW_MAX_DICT_SIZE];
@@ -166,7 +163,6 @@ char* lzw_decode(const char* compressed_data, size_t compressed_len,
     int next_code = 258;
     int code_length = 9;
     int prev_code = -1;
-    size_t output_pos = 0;
     
     // bit reading state
     uint32_t cached_data = 0;
@@ -230,20 +226,11 @@ char* lzw_decode(const char* compressed_data, size_t compressed_len,
             break;
         }
         
-        // ensure output buffer has space
-        if (output_pos + current_len > buffer_size) {
-            buffer_size = (output_pos + current_len) * 2;
-            char* new_output = (char*)mem_realloc(output, buffer_size, MEM_CAT_INPUT_PDF);
-            if (!new_output) {
-                mem_free(output);
-                return NULL;
-            }
-            output = new_output;
-        }
-        
         // copy to output
-        memcpy(output + output_pos, current_sequence, current_len);
-        output_pos += current_len;
+        if (!byte_builder_append(&output, current_sequence, (size_t)current_len)) {
+            byte_builder_destroy(&output);
+            return NULL;
+        }
         
         // add new dictionary entry
         if (prev_code >= 0 && next_code < LZW_MAX_DICT_SIZE) {
@@ -262,16 +249,8 @@ char* lzw_decode(const char* compressed_data, size_t compressed_len,
         prev_code = code;
     }
     
-    *out_len = output_pos;
-    
-    // shrink buffer
-    char* final_output = (char*)mem_realloc(output, output_pos + 1, MEM_CAT_INPUT_PDF);
-    if (final_output) {
-        final_output[output_pos] = '\0';
-        return final_output;
-    }
-    output[output_pos] = '\0';
-    return output;
+    *out_len = output.length;
+    return (char*)byte_builder_take(&output, NULL);
 }
 
 /**
@@ -439,15 +418,12 @@ char* runlength_decode(const char* encoded_data, size_t encoded_len, size_t* out
     }
 
     // estimate output size (could be larger or smaller)
-    size_t buffer_size = encoded_len * 2;
-    char* output = (char*)mem_alloc(buffer_size, MEM_CAT_INPUT_PDF);
-    if (!output) {
-        return NULL;
-    }
+    if (encoded_len > SIZE_MAX / 2u) return NULL;
+    ByteBuilder output = {};
+    if (!byte_builder_init(&output, encoded_len * 2u, MEM_CAT_INPUT_PDF, true)) return NULL;
 
     const uint8_t* in = (const uint8_t*)encoded_data;
     const uint8_t* in_end = in + encoded_len;
-    size_t out_pos = 0;
 
     while (in < in_end) {
         uint8_t n = *in++;
@@ -459,57 +435,36 @@ char* runlength_decode(const char* encoded_data, size_t encoded_len, size_t* out
 
         if (n < 128) {
             // copy next n+1 bytes
-            int copy_count = n + 1;
-            
-            // ensure buffer space
-            if (out_pos + copy_count > buffer_size) {
-                buffer_size = (out_pos + copy_count) * 2;
-                char* new_output = (char*)mem_realloc(output, buffer_size, MEM_CAT_INPUT_PDF);
-                if (!new_output) {
-                    mem_free(output);
-                    return NULL;
-                }
-                output = new_output;
+            size_t copy_count = (size_t)n + 1u;
+            size_t available = (size_t)(in_end - in);
+            if (copy_count > available) copy_count = available;
+            if (!byte_builder_append(&output, in, copy_count)) {
+                byte_builder_destroy(&output);
+                return NULL;
             }
-            
-            // copy bytes
-            for (int i = 0; i < copy_count && in < in_end; i++) {
-                output[out_pos++] = *in++;
-            }
+            in += copy_count;
         } else {
             // repeat next byte (257-n) times
-            int repeat_count = 257 - n;
+            size_t repeat_count = 257u - (size_t)n;
             
             if (in >= in_end) break;
             uint8_t repeat_byte = *in++;
             
-            // ensure buffer space
-            if (out_pos + repeat_count > buffer_size) {
-                buffer_size = (out_pos + repeat_count) * 2;
-                char* new_output = (char*)mem_realloc(output, buffer_size, MEM_CAT_INPUT_PDF);
-                if (!new_output) {
-                    mem_free(output);
-                    return NULL;
-                }
-                output = new_output;
-            }
-            
             // fill with repeated byte
-            memset(output + out_pos, repeat_byte, repeat_count);
-            out_pos += repeat_count;
+            if (!byte_builder_reserve(&output, repeat_count)) {
+                byte_builder_destroy(&output);
+                return NULL;
+            }
+            memset(byte_builder_writable_tail(&output, NULL), repeat_byte, repeat_count);
+            if (!byte_builder_commit(&output, repeat_count)) {
+                byte_builder_destroy(&output);
+                return NULL;
+            }
         }
     }
 
-    *out_len = out_pos;
-    
-    // shrink buffer
-    char* final_output = (char*)mem_realloc(output, out_pos + 1, MEM_CAT_INPUT_PDF);
-    if (final_output) {
-        final_output[out_pos] = '\0';
-        return final_output;
-    }
-    output[out_pos] = '\0';
-    return output;
+    *out_len = output.length;
+    return (char*)byte_builder_take(&output, NULL);
 }
 
 /**

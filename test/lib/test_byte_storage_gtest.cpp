@@ -28,13 +28,21 @@ TEST(ByteBuilderTest, AppendsBoundedTextAndTransfersOwnership) {
     EXPECT_TRUE(byte_builder_append(&builder, "ab", 2));
     EXPECT_TRUE(byte_builder_append_limited(&builder, "cd", 2, 4));
     EXPECT_FALSE(byte_builder_append_limited(&builder, "e", 1, 4));
+    ASSERT_TRUE(byte_builder_reserve(&builder, 3));
+    size_t writable = 0;
+    uint8_t* tail = byte_builder_writable_tail(&builder, &writable);
+    ASSERT_NE(tail, nullptr);
+    ASSERT_GE(writable, 3u);
+    memcpy(tail, "efg", 3);
+    ASSERT_TRUE(byte_builder_commit(&builder, 3));
+    EXPECT_FALSE(byte_builder_commit(&builder, writable + 1));
     ASSERT_NE(builder.data, nullptr);
-    EXPECT_STREQ((const char*)builder.data, "abcd");
+    EXPECT_STREQ((const char*)builder.data, "abcdefg");
     size_t length = 0;
     uint8_t* data = byte_builder_take(&builder, &length);
     ASSERT_NE(data, nullptr);
-    EXPECT_EQ(length, 4u);
-    EXPECT_STREQ((const char*)data, "abcd");
+    EXPECT_EQ(length, 7u);
+    EXPECT_STREQ((const char*)data, "abcdefg");
     mem_free(data);
 }
 

@@ -5,6 +5,7 @@
 #include "npm_lockfile.h"
 #include "semver.h"
 #include "../../../lib/log.h"
+#include "../../../lib/mem_grow.hpp"
 #include "../../../lib/memtrack.h"
 
 #include <string.h>
@@ -18,6 +19,37 @@ typedef struct {
     char* name;
     char* range;
 } ResolveTask;
+
+static void resolve_task_list_free(ResolveTask* tasks, int task_count) {
+    for (int i = 0; i < task_count; i++) {
+        mem_free(tasks[i].name);
+        mem_free(tasks[i].range);
+    }
+    mem_free(tasks);
+}
+
+static bool resolve_task_append(ResolveTask** tasks, int* task_count, int* task_capacity,
+                                const char* name, const char* range) {
+    if (!lam::mem_grow_array(tasks, task_capacity, *task_count + 1, 128,
+                             MEM_CAT_JS_RUNTIME)) {
+        return false;
+    }
+    (*tasks)[*task_count].name = mem_strdup(name, MEM_CAT_JS_RUNTIME);
+    (*tasks)[*task_count].range = mem_strdup(range, MEM_CAT_JS_RUNTIME);
+    (*task_count)++;
+    return true;
+}
+
+static NpmResolutionResult* npm_resolution_fail(NpmResolutionResult* result,
+                                                ResolveTask* queue, int queue_count,
+                                                NpmLockFile* lockfile,
+                                                const char* message) {
+    resolve_task_list_free(queue, queue_count);
+    if (lockfile) npm_lockfile_free(lockfile);
+    result->error = mem_strdup(message, MEM_CAT_JS_RUNTIME);
+    result->success = false;
+    return result;
+}
 
 // check if a package name is already resolved (any version)
 static bool has_package(NpmResolutionResult* result, const char* name) {
@@ -41,15 +73,14 @@ static bool resolved_satisfies(NpmResolutionResult* result, const char* name, co
     return false;
 }
 
-static void add_resolved(NpmResolutionResult* result, NpmRegistryVersion* ver) {
-    if (result->count >= result->cap) {
-        result->cap *= 2;
-        result->packages = (NpmResolvedPackage*)mem_realloc(
-            result->packages, result->cap * sizeof(NpmResolvedPackage), MEM_CAT_JS_RUNTIME);
+static bool add_resolved(NpmResolutionResult* result, const NpmRegistryVersion* ver) {
+    if (!lam::mem_grow_array(&result->packages, &result->cap, result->count + 1, 64,
+                             MEM_CAT_JS_RUNTIME)) {
+        return false;
     }
 
     NpmResolvedPackage* pkg = &result->packages[result->count++];
-    memset(pkg, 0, sizeof(NpmResolvedPackage));
+    memset(pkg, 0, sizeof(*pkg));
     pkg->name = mem_strdup(ver->name, MEM_CAT_JS_RUNTIME);
     pkg->version = mem_strdup(ver->version, MEM_CAT_JS_RUNTIME);
     pkg->tarball_url = ver->tarball_url ? mem_strdup(ver->tarball_url, MEM_CAT_JS_RUNTIME) : NULL;
@@ -64,6 +95,7 @@ static void add_resolved(NpmResolutionResult* result, NpmRegistryVersion* ver) {
         }
         pkg->dep_count = ver->dep_count;
     }
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,8 +109,7 @@ NpmResolutionResult* npm_resolve_dependencies(
     const char* lockfile_path)
 {
     NpmResolutionResult* result = (NpmResolutionResult*)mem_calloc(1, sizeof(NpmResolutionResult), MEM_CAT_JS_RUNTIME);
-    result->cap = 64;
-    result->packages = (NpmResolvedPackage*)mem_calloc(result->cap, sizeof(NpmResolvedPackage), MEM_CAT_JS_RUNTIME);
+    if (!result) return NULL;
 
     // load lockfile if available
     NpmLockFile* lockfile = NULL;
@@ -87,19 +118,16 @@ NpmResolutionResult* npm_resolve_dependencies(
     }
 
     // task queue (BFS)
-    int queue_cap = 128;
+    int queue_cap = 0;
     int queue_count = 0;
-    ResolveTask* queue = (ResolveTask*)mem_calloc(queue_cap, sizeof(ResolveTask), MEM_CAT_JS_RUNTIME);
+    ResolveTask* queue = NULL;
 
     // seed queue with top-level deps
     for (int i = 0; i < dep_count; i++) {
-        if (queue_count >= queue_cap) {
-            queue_cap *= 2;
-            queue = (ResolveTask*)mem_realloc(queue, queue_cap * sizeof(ResolveTask), MEM_CAT_JS_RUNTIME);
+        if (!resolve_task_append(&queue, &queue_count, &queue_cap, dep_names[i], dep_ranges[i])) {
+            return npm_resolution_fail(result, queue, queue_count, lockfile,
+                                       "out of memory while creating dependency queue");
         }
-        queue[queue_count].name = mem_strdup(dep_names[i], MEM_CAT_JS_RUNTIME);
-        queue[queue_count].range = mem_strdup(dep_ranges[i], MEM_CAT_JS_RUNTIME);
-        queue_count++;
     }
 
     // BFS resolution
@@ -148,17 +176,18 @@ NpmResolutionResult* npm_resolve_dependencies(
                         fake.dep_names = le->dep_names;
                         fake.dep_ranges = le->dep_versions;
                         fake.dep_count = le->dep_count;
-                        add_resolved(result, &fake);
+                        if (!add_resolved(result, &fake)) {
+                            return npm_resolution_fail(result, queue, queue_count, lockfile,
+                                                       "out of memory while recording resolved package");
+                        }
 
                         // enqueue transitive deps
                         for (int j = 0; j < le->dep_count; j++) {
-                            if (queue_count >= queue_cap) {
-                                queue_cap *= 2;
-                                queue = (ResolveTask*)mem_realloc(queue, queue_cap * sizeof(ResolveTask), MEM_CAT_JS_RUNTIME);
+                            if (!resolve_task_append(&queue, &queue_count, &queue_cap,
+                                                     le->dep_names[j], le->dep_versions[j])) {
+                                return npm_resolution_fail(result, queue, queue_count, lockfile,
+                                                           "out of memory while extending dependency queue");
                             }
-                            queue[queue_count].name = mem_strdup(le->dep_names[j], MEM_CAT_JS_RUNTIME);
-                            queue[queue_count].range = mem_strdup(le->dep_versions[j], MEM_CAT_JS_RUNTIME);
-                            queue_count++;
                         }
                         goto next_task;
                     }
@@ -173,35 +202,23 @@ NpmResolutionResult* npm_resolve_dependencies(
                 char err_buf[256];
                 snprintf(err_buf, sizeof(err_buf),
                          "could not resolve %s@%s", task->name, task->range);
-                result->error = mem_strdup(err_buf, MEM_CAT_JS_RUNTIME);
-                result->success = false;
-
-                // cleanup queue
-                for (int i = qi; i < queue_count; i++) {
-                    mem_free(queue[i].name);
-                    mem_free(queue[i].range);
-                }
-                // cleanup processed tasks
-                for (int i = 0; i < qi; i++) {
-                    mem_free(queue[i].name);
-                    mem_free(queue[i].range);
-                }
-                mem_free(queue);
-                if (lockfile) npm_lockfile_free(lockfile);
-                return result;
+                return npm_resolution_fail(result, queue, queue_count, lockfile, err_buf);
             }
 
-            add_resolved(result, ver);
+            if (!add_resolved(result, ver)) {
+                npm_registry_version_free(ver);
+                return npm_resolution_fail(result, queue, queue_count, lockfile,
+                                           "out of memory while recording resolved package");
+            }
 
             // enqueue transitive dependencies
             for (int i = 0; i < ver->dep_count; i++) {
-                if (queue_count >= queue_cap) {
-                    queue_cap *= 2;
-                    queue = (ResolveTask*)mem_realloc(queue, queue_cap * sizeof(ResolveTask), MEM_CAT_JS_RUNTIME);
+                if (!resolve_task_append(&queue, &queue_count, &queue_cap,
+                                         ver->dep_names[i], ver->dep_ranges[i])) {
+                    npm_registry_version_free(ver);
+                    return npm_resolution_fail(result, queue, queue_count, lockfile,
+                                               "out of memory while extending dependency queue");
                 }
-                queue[queue_count].name = mem_strdup(ver->dep_names[i], MEM_CAT_JS_RUNTIME);
-                queue[queue_count].range = mem_strdup(ver->dep_ranges[i], MEM_CAT_JS_RUNTIME);
-                queue_count++;
             }
 
             npm_registry_version_free(ver);
@@ -210,12 +227,7 @@ NpmResolutionResult* npm_resolve_dependencies(
         next_task:;
     }
 
-    // cleanup queue
-    for (int i = 0; i < queue_count; i++) {
-        mem_free(queue[i].name);
-        mem_free(queue[i].range);
-    }
-    mem_free(queue);
+    resolve_task_list_free(queue, queue_count);
     if (lockfile) npm_lockfile_free(lockfile);
 
     result->success = true;
