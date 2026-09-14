@@ -12,6 +12,7 @@
 #include "../../lib/strbuf.h"
 #include "../../lib/arraylist.h"
 #include <mpdecimal.h>  // only included here
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -99,7 +100,10 @@ void lambda_finite_double_to_shortest(double d, char* out, int out_size) {
 
     char sci[64];
     int best_len = 0;
-    for (int prec = 1; prec <= 21; prec++) {
+    // A binary64 round-trip never needs more than DBL_DECIMAL_DIG
+    // significant digits. Limiting the probe to that bound keeps the
+    // S4.7.1 spelling search exact without four impossible retries.
+    for (int prec = 1; prec <= DBL_DECIMAL_DIG; prec++) {
         snprintf(sci, sizeof(sci), "%.*e", prec - 1, d);
         double roundtrip = 0.0;
         sscanf(sci, "%lf", &roundtrip);
@@ -108,7 +112,7 @@ void lambda_finite_double_to_shortest(double d, char* out, int out_size) {
             break;
         }
     }
-    if (best_len == 0) best_len = 17;
+    if (best_len == 0) best_len = DBL_DECIMAL_DIG;
 
     snprintf(sci, sizeof(sci), "%.*e", best_len - 1, d);
 
@@ -721,14 +725,45 @@ bool decimal_mpd_try_to_int64(mpd_t* dec, mpd_context_t* ctx, int64_t* out) {
     return true;
 }
 
-double decimal_mpd_to_double(mpd_t* dec, mpd_context_t* ctx) {
-    if (!dec) return 0.0;
-    
+bool decimal_mpd_try_to_double(mpd_t* dec, mpd_context_t* ctx, double* out) {
+    (void)ctx;
+    if (!dec || !out) return false;
+
+    if (mpd_isnan(dec)) {
+        *out = mpd_isnegative(dec) ? -NAN : NAN;
+        return true;
+    }
+    if (mpd_isinfinite(dec)) {
+        *out = mpd_isnegative(dec) ? -INFINITY : INFINITY;
+        return true;
+    }
+
+    // Integral decimal values in the common machine range do not need a
+    // temporary scientific spelling.
+    if (mpd_isinteger(dec)) {
+        uint32_t status = 0;
+        int64_t integral = mpd_qget_i64(dec, &status);
+        if ((status & MPD_Invalid_operation) == 0) {
+            *out = (double)integral;
+            if (integral == 0 && mpd_isnegative(dec)) *out = -0.0;
+            return true;
+        }
+    }
+
     char* str = mpd_to_sci(dec, 1);
-    if (!str) return 0.0;
-    
-    double result = strtod(str, NULL);
+    if (!str) return false;
+    char* end = NULL;
+    double result = strtod(str, &end);
+    bool complete = end && end != str && *end == '\0';
     mpd_free(str);
+    if (!complete) return false;
+    *out = result;
+    return true;
+}
+
+double decimal_mpd_to_double(mpd_t* dec, mpd_context_t* ctx) {
+    double result = 0.0;
+    if (!decimal_mpd_try_to_double(dec, ctx, &result)) return 0.0;
     return result;
 }
 
@@ -1138,16 +1173,16 @@ const char* decimal_special_literal(Decimal* decimal) {
 // Conversion helpers
 // ─────────────────────────────────────────────────────────────────────
 
-double decimal_to_double(Item item) {
-    if (!decimal_is_any(item)) return 0.0;
+bool decimal_try_to_double(Item item, double* out) {
+    if (!decimal_is_any(item) || !out) return false;
     Decimal* dec_ptr = item.get_decimal();
-    if (!dec_ptr || !dec_ptr->dec_val) return 0.0;
-    
-    char* str = mpd_to_sci(dec_ptr->dec_val, 1);
-    if (!str) return 0.0;
-    
-    double result = strtod(str, NULL);
-    mpd_free(str);
+    if (!dec_ptr || !dec_ptr->dec_val) return false;
+    return decimal_mpd_try_to_double(dec_ptr->dec_val, NULL, out);
+}
+
+double decimal_to_double(Item item) {
+    double result = 0.0;
+    if (!decimal_try_to_double(item, &result)) return 0.0;
     return result;
 }
 

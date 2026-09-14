@@ -352,31 +352,42 @@ extern "C" {
 // Old it2l - redirects to the canonical int accessor for int type
 // Note: The main it2l function is defined below it2i
 
-double it2d(Item itm) {
+bool item_try_to_double(Item itm, double* out) {
+    if (!out) return false;
     TypeId type_id = get_type_id(itm);
     if (type_id == LMD_TYPE_INT) {
-        return lambda_int_item_value(itm);
+        *out = lambda_int_item_value(itm);
+        return true;
     }
     else if (type_id == LMD_TYPE_INT64) {
-        return (double)itm.get_int64();
+        *out = (double)itm.get_int64();
+        return true;
     }
     else if (is_float_type_id(type_id)) {
-        return itm.get_double();
+        *out = itm.get_double();
+        return true;
     }
     else if (type_id == LMD_TYPE_DECIMAL) {
-        return decimal_to_double(itm);
+        return decimal_try_to_double(itm, out);
     }
     else if (type_id == LMD_TYPE_NUM_SIZED) {
-        return itm.get_num_sized_as_double();
+        *out = itm.get_num_sized_as_double();
+        return true;
     }
     else if (type_id == LMD_TYPE_UINT64) {
-        return (double)itm.get_uint64();
+        *out = (double)itm.get_uint64();
+        return true;
     }
-    else if (type_id == LMD_TYPE_ERROR) {
-        return NAN;  // poison NaN — auto-propagates through all downstream arithmetic
-    }
+
+    return false;
+}
+
+double it2d(Item itm) {
+    double result = NAN;
+    if (item_try_to_double(itm, &result)) return result;
+    TypeId type_id = get_type_id(itm);
     log_debug("it2d: cannot convert type %s to double", get_type_name(type_id));
-    return NAN;  // NaN for unrecognized types (was 0.0 — silent data corruption)
+    return NAN;  // legacy scalar ABI has no error channel
 }
 
 bool it2b(Item itm) {
@@ -488,11 +499,6 @@ int64_t it2i(Item itm) {
     // error and unsupported values retain the historical zero conversion.
     return item_to_int64_or(itm, 0);
 }
-
-// MIR JIT workaround: opaque store functions to prevent SSA optimizer from
-// reordering swap-pattern assignments inside while loops.
-void _store_i64(int64_t* dst, int64_t val) { *dst = val; }
-void _store_f64(double* dst, double val) { *dst = val; }
 
 // Legacy lane accessor. Fallible machine-i64 conversion callers must use
 // item_try_to_int64(); only an IntLane boundary may receive its poison values.

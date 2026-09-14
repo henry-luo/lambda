@@ -301,6 +301,30 @@ a NaN, it is canonicalized before it becomes a lane value.
 canonicalize all semantic NaNs to a different payload. The exact bit constants are format-sized,
 but the Item boundary still maps their null marker to `ItemNull`.
 
+### 4.1 Why `float?` keeps the NaN marker
+
+The current `float?` design is retained (confirmed 2026-09-14, user). Expression/native ABI
+carriers and persistent storage have distinct requirements. [D2.5.2v3, D2.6.1v3]
+
+| Type | Expression / native ABI carrier | Native array / packed field |
+|---|---|---|
+| `i64?`, `u64?` | `Item` | 9-byte `TypedItem` |
+| `float?` | Double with reserved NaN marker | Same 8-byte lane |
+
+The key reason is preserving the **single-double expression and native ABI lane**. A
+`TypedItem` contains a tag plus an eight-byte payload and cannot fit in one `MIR_T_D` register.
+Using it for float expressions would require a different carrier and ABI, such as a separate
+tag/payload pair or a boxed carrier. It is possible with a redesign, but is not a replacement
+within the current lane. Even `i64?`/`u64?` use `TypedItem` only in persistent storage; their
+expression carrier remains `Item`. [D2.5.2v3]
+
+Changing only float storage to `TypedItem` would retain the expression lane's NaN rules, add
+load/store conversions, and grow packed slots from eight to nine bytes. The existing float slot
+already owns its payload inline. Full-width integers need the extra tag because every raw
+64-bit integer pattern is valid, and their persistent storage must not borrow a number-frame
+payload. Float's reserved NaN marker lets expressions and storage share one eight-byte carrier.
+[D2.5.2v3, D2.6.1v3, D2.6.4v3]
+
 ---
 
 ## 5. Type inference and flow facts

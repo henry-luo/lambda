@@ -164,7 +164,11 @@ mpd_t* decimal_item_to_mpd(Item item, mpd_context_t* ctx);
 // Convert mpd_t* to int64 without reserving a numeric error value.
 bool decimal_mpd_try_to_int64(mpd_t* dec, mpd_context_t* ctx, int64_t* out);
 
-// Convert mpd_t* to double
+// Convert finite/special decimal values to double without collapsing a failed
+// conversion into 0.0. The decimal remains owned by the caller.
+bool decimal_mpd_try_to_double(mpd_t* dec, mpd_context_t* ctx, double* out);
+
+// Legacy scalar conversion for callers that have already checked the source.
 double decimal_mpd_to_double(mpd_t* dec, mpd_context_t* ctx);
 
 // ─────────────────────────────────────────────────────────────────────
@@ -262,7 +266,10 @@ bool decimal_is_any(Item item);
 // Conversion helpers (for integration with existing code)
 // ─────────────────────────────────────────────────────────────────────
 
-// Convert decimal Item to double
+// Convert a decimal Item to double without a silent numeric fallback.
+bool decimal_try_to_double(Item item, double* out);
+
+// Legacy scalar conversion for callers that have already checked the source.
 double decimal_to_double(Item item);
 
 // Convert decimal Item to string (caller must free with decimal_free_string)

@@ -1289,28 +1289,6 @@ Item box_uint64_value(uint64_t uval) {
     return {.item = u2it(uptr)};
 }
 
-// Safe version of push_d that detects already-boxed FLOAT Items.
-// When the MIR JIT passes a value that's already a boxed FLOAT Item
-// (from a runtime function return), this prevents double-boxing.
-Item push_d_safe(double val) {
-    uint64_t bits;
-    memcpy(&bits, &val, sizeof(bits));
-    if (bits & ITEM_DBL_MASK) {
-        // Already an inline FLOAT Item — return as-is.
-        return {.item = bits};
-    }
-    uint8_t tag = bits >> 56;
-
-    if (tag == LMD_TYPE_FLOAT) {
-        // Already a boxed FLOAT Item — return as-is
-        Item result;
-        result.item = bits;
-        return result;
-    }
-    // Raw double value — box normally
-    return push_d(val);
-}
-
 extern "C" void heap_finalize_gc_objects(gc_heap_t *gc) {
     if (!gc) return;
     gc_finalize_all_objects(gc);

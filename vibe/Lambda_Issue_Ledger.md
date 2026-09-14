@@ -85,8 +85,22 @@ were already archived as LR11-R6 and LR12-R3.
 
 LR09-4 was also reclassified on 2026-09-13. **S7.1.1v3** and **S8.2.1v4**
 define invalid member/index reads as `null`, while invalid writes take the hard
-error channel. The remaining JIT float-OOB lane mismatch is a separate residue
-already tracked by LR07-10.
+error channel. The former JIT float-OOB lane mismatch is resolved as LR07-10
+in the fixed issue ledger.
+
+### Numeric and native-ABI pass — 2026-09-14
+
+LR03-3 and LR07-10 were reproduced and resolved without changing a ruling.
+The retired JIT workaround helpers are gone; bitwise lowering now requires both
+an integer semantic contract and an actual native integer carrier. Every native
+double out-of-bounds path produces the nullable-float lane, as **S7.1.1v3**
+requires. `bitwise_invalid_operands.ls`, the wide/sized bitwise fixtures, and
+the nullable-float fixtures pass under eager JIT.
+
+LR03-5 and LR04-5 remain PARTIAL. A fallible numeric conversion boundary now
+protects float admission and typed-lane storage, and the float/decimal edges
+are regression-tested; the legacy scalar ABI and general decimal spelling path
+still need larger architectural work.
 
 Counts:
 
@@ -94,11 +108,11 @@ Counts:
 |---|---|---:|---:|---:|---:|
 | LR_01 | Compilation pipeline, CLI & REPL | 7 | 2 | 0 | 9 |
 | LR_02 | Parsing & AST construction | 2 | 4 | 0 | 6 |
-| LR_03 | Value & type model | 4 | 1 | 0 | 5 |
-| LR_04 | Numbers, decimal & datetime | 6 | 0 | 0 | 6 |
+| LR_03 | Value & type model | 3 | 1 | 0 | 4 |
+| LR_04 | Numbers, decimal & datetime | 5 | 1 | 0 | 6 |
 | LR_05 | Strings, symbols & vectors | 2 | 1 | 0 | 3 |
 | LR_06 | C transpiler (legacy C2MIR) | 0 | 0 | 0 | 0 |
-| LR_07 | MIR Direct transpiler & JIT | 9 | 1 | 0 | 10 |
+| LR_07 | MIR Direct transpiler & JIT | 9 | 0 | 0 | 9 |
 | LR_08 | Memory management & GC | 6 | 0 | 0 | 6 |
 | LR_09 | Runtime builtins | 4 | 0 | 0 | 4 |
 | LR_10 | Error handling | 1 | 0 | 0 | 1 |
@@ -106,9 +120,9 @@ Counts:
 | LR_12 | Procedural runtime | 5 | 0 | 0 | 5 |
 | LR_13 | Schema validator | 7 | 0 | 0 | 7 |
 | TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 6 | 1 | 0 | 7 |
-| **Live total** | | **65** | **10** | **0** | **75** |
+| **Live total** | | **63** | **10** | **0** | **73** |
 
-The active ledger now contains 75 live records, with the 64 previously counted
+The active ledger now contains 73 live records, with the 64 previously counted
 resolved records moved to the archive. Duplicate/split records and
 verification-only findings remain represented there for provenance.
 Two original entries each split into a resolved half and a surviving residue —
@@ -136,8 +150,8 @@ deleted from the tree** (`lambda/transpile.cpp`, `transpile-call.cpp`,
 `lambda-embed.h`, `jit_compile_to_mir` all gone; no build defines
 `LAMBDA_C2MIR`; the `--c2mir` CLI flag is not parsed). All nine LR_06 issues are
 therefore archived as obsolete, and every cross-doc "diverges from C2MIR"
-framing (LR07-3, LR03-3) now reads as a plain MIR Direct gap rather than a
-backend divergence.
+framing (LR07-3) now reads as a plain MIR Direct gap rather than a backend
+divergence.
 This is consistent with CLAUDE.md rule 14.
 
 ---
@@ -288,26 +302,17 @@ lookups silently fall back to the O(n) shape chain. `NAME_POOL_SYMBOL_LIMIT` 32
 (`lambda/lambda.h:77`) and `LAMBDA_TCO_MAX_ITERATIONS` 1000000 (`:83`) are
 likewise fixed. `ArrayNumShape.ndim` is bounded 1..32 — see [LR05-1](<Lambda_Issue_Ledger(fixed).md#lr05-1>).
 
-<a id="lr03-3"></a>**LR03-3 · MIR-JIT workarounds embedded in the value model · OPEN**
-`_store_i64` / `_store_f64` prevent MIR SSA reordering in swap-pattern loops;
-`push_d_safe` guards a representation ambiguity at float boxing boundaries;
-`_barg` accepts tagged Items or raw integer values for bitwise ops. These
-couplings remain under the broader return-convention work in LR07-14.
-*Note:* the doc framed this partly as C2MIR/MIR-Direct divergence; with C2MIR
-removed it is now purely a MIR Direct ↔ value-model coupling.
-*Implementation note (2026-08-28, D2.4.1–D2.4.3):* the shared carrier vocabulary and
-fail-closed conversion boundary now distinguish the int lane from machine/full-width
-integers. Remaining workaround reduction is gated on expression-producer migration.
-
 <a id="lr03-5"></a>**LR03-5 · `it2d` / `it2b` coercions · PARTIAL**
-*Reframed as deliberate:* `it2d` poisons unrecognized types to `NaN`
-(`lambda-data.cpp:353`) with an in-code note that the previous `0.0` was silent
-data corruption; `it2b` returns `true` for all numbers including floats
-(`:368`–`:372`) with a comment stating Lambda truthiness deliberately rejects
-JS-style zero/NaN falsiness.
-*Residue:* `it2d`'s NaN is still an unraised poison value rather than an error
-Item, so a downstream consumer that does not check `isnan` silently produces a
-wrong number instead of propagating.
+*Improved 2026-09-14:* `item_try_to_double` is now the fallible numeric boundary.
+Float contract admission, typed-array construction/storage, interpreter typed
+float literals, and `float(decimal)` use it, so a nonnumeric Item or failed
+decimal conversion returns `ItemError` before it can become a lane value.
+`it2b` remains deliberate: all numbers, including floats and NaN, are truthy
+under **S3.1–S3.2**.
+*Residue:* the legacy `it2d` scalar ABI has no error return and still maps an
+unproven Item to NaN. It is retained for callers that have already established a
+numeric source; migrating every such native/guest call to a fallible boundary is
+separate work.
 
 <a id="lr03-6"></a>**LR03-6 · Overloaded tags · OPEN**
 `BigInt` rides on `LMD_TYPE_DECIMAL`, distinguished only by
@@ -329,12 +334,17 @@ value mis-reads as a function unless callers check `JSPD_IS_ACCESSOR` first
 Implementation guardrails, not mathematical limits in the surface model.
 
 
-<a id="lr04-5"></a>**LR04-5 · Float↔decimal round-trip via text is lossy and hot · OPEN**
-`decimal_mpd_to_double` reverses through `mpd_to_sci` + `strtod`
-(`lambda-decimal.cpp:664`–`673`), and the forward direction goes through a
-`snprintf`-formatted string into `mpd_qset_string`. Round-trip-safe for most
-doubles but fragile at subnormals and edge magnitudes, and the string detour is
-a hot-path cost.
+<a id="lr04-5"></a>**LR04-5 · Float↔decimal round-trip via text is lossy and hot · PARTIAL**
+*Improved 2026-09-14:* float spelling now probes at most `DBL_DECIMAL_DIG`
+significant digits, the mathematically sufficient binary64 bound, rather than
+21. Decimal→float accepts specials and in-range integral decimals directly and
+has a fallible `decimal_try_to_double` boundary; it never silently substitutes
+`0.0` on conversion failure. Subnormal and maximum-finite values round-trip in
+the regression suite, satisfying **S4.7.1**.
+*Residue:* mpdecimal exposes no direct binary64 import/export API. General
+non-integral decimal conversion still needs its scientific spelling and `strtod`;
+replacing that path requires a dedicated correctly-rounded converter or an
+approved dependency.
 
 <a id="lr04-6"></a>**LR04-6 · `error_code` / sentinel coupling · OPEN**
 Division-by-zero and invalid decimal results can still collapse to a generic
@@ -412,14 +422,6 @@ because `SysFuncInfo` has no per-argument native-convention field. Paired with
 Runtime functions returning a `uint8_t` bool leave garbage in the upper 56 bits
 of the MIR return register, so every bool box/unbox must call `emit_uext8`
 (`transpile-mir.cpp:2796`, used `:3355`, `:8576`).
-
-<a id="lr07-10"></a>**LR07-10 · Out-of-bounds index semantics differ by type · PARTIAL**
-*Improved:* OOB behaviour is now policy-driven — `MIR_INDEX_OOB_ITEM_NULL`,
-`MIR_INDEX_OOB_FLOAT_ZERO`, `MIR_INDEX_OOB_FLOAT_NULL`
-(`transpile-mir.cpp:14692`–`14694`), selected at `:15038`–`:15042`.
-*Residue:* `MIR_INDEX_OOB_FLOAT_ZERO` still exists and still yields `0.0` rather
-than null for a float-index OOB read whenever the result register is `MIR_T_D`,
-so the type-dependent semantic split is real, just now explicit.
 
 <a id="lr07-11"></a>**LR07-11 · Fixed-size structural caps · OPEN**
 `var_scopes[64]` (`transpile-mir.cpp:153`, overflow errors at
@@ -976,7 +978,7 @@ together, not individually.
 | Cluster | Entries | Root |
 |---|---|---|
 | **TCO safety proof residue** | LR07-13 | The former root-classification faces LR07-7/LR08-3 are resolved and archived. The surviving TCO face is the unused `is_tco_function_safe` proof, now tracked independently under LR07-13. |
-| **Representation ↔ semantics coupling** | LR03-3, LR07-5, LR07-14 | Remaining container and result-domain cases. Lambda expression lowering carries `MirValue`; see resolved [LR07-1](Lambda_Issue_Ledger(fixed).md#lr07-1). |
+| **Representation ↔ semantics coupling** | LR07-5, LR07-14 | Remaining container and result-domain cases. Lambda expression lowering carries `MirValue`; see resolved [LR07-1](Lambda_Issue_Ledger(fixed).md#lr07-1). |
 | **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-6, LR08-10, LR11-4, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency (LR11-4) is the clearest statement of the pattern. |
 | **Surface syntax (S16) residue** | S16.9.5, i8-genafterlet, SO36, O3, §7.17 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). |
 | **Process globals** | LR12-6 | `g_template_registry` is now context-local; `g_dry_run` remains process-global and blocks per-run dry-run semantics. See RG1–RG14 in [Runtime globals audit], RC1–RC8 in [Radiant concurrency design]. |
