@@ -12,3 +12,4 @@ corpus/edge_cases/collections.ls	success	direct	interp,jit
 corpus/edge_cases/strings.ls	success	direct	interp,jit
 @root/test/lambda/negative/fuzzy_crashes/empty_parenthesized_expr.ls	reject	direct	interp
 @root/test/lambda/proc/proc1.ls	success	run	interp,jit
+@root/test/lambda/proc/tune27_loop_accumulator.ls	success	run	interp,jit,auto
