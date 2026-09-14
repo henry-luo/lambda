@@ -2122,9 +2122,7 @@ JS_FORWARD_STATIC_EXPRESSION(bool*, js_process_exit_requested_slot, (void),
 #define js_process_ipc_force_ref (js_process_state->ipc_force_ref)
 #define js_process_ipc_pending_messages (js_process_state->ipc_pending_messages)
 #define js_process_ipc_write_callbacks (js_process_state->ipc_write_callbacks)
-#define js_process_ipc_buf (js_process_state->ipc_buffer)
-#define js_process_ipc_len (js_process_state->ipc_length)
-#define js_process_ipc_cap (js_process_state->ipc_capacity)
+#define js_process_ipc_lines (js_process_state->ipc_lines)
 JS_FORWARD_STATIC_EXPRESSION(bool, js_process_ensure_roots, (void),
     (js_process_state && js_root_vector_ensure_registered(&js_process_state->roots)))
 
@@ -3222,12 +3220,7 @@ static void js_process_ipc_close_cb(uv_handle_t* handle) {
     }
     js_process_ipc_active = false;
     js_process_ipc_closing = false;
-    if (js_process_ipc_buf) {
-        mem_free(js_process_ipc_buf);
-        js_process_ipc_buf = NULL;
-    }
-    js_process_ipc_len = 0;
-    js_process_ipc_cap = 0;
+    line_framer_destroy(&js_process_ipc_lines);
     if (js_process_state && js_process_state->ipc_resource_id != 0) {
         uint32_t resource_id = js_process_state->ipc_resource_id;
         js_process_state->ipc_resource_id = 0;
@@ -3399,19 +3392,14 @@ static void js_process_ipc_handle_line(const char* chars, int len) {
 }
 
 static void js_process_ipc_consume_lines(void) {
-    if (!js_process_ipc_buf || js_process_ipc_len == 0) return;
-    size_t start = 0;
-    for (size_t i = 0; i < js_process_ipc_len; i++) {
-        if (js_process_ipc_buf[i] != '\n') continue;
-        size_t line_len = i - start;
-        if (line_len > 0 && js_process_ipc_buf[start + line_len - 1] == '\r') line_len--;
-        js_process_ipc_handle_line(js_process_ipc_buf + start, (int)line_len);
-        start = i + 1;
-    }
-    if (start > 0) {
-        size_t remaining = js_process_ipc_len - start;
-        if (remaining > 0) memmove(js_process_ipc_buf, js_process_ipc_buf + start, remaining);
-        js_process_ipc_len = remaining;
+    while (true) {
+        size_t frame_length = 0;
+        const char* line = line_framer_peek(&js_process_ipc_lines, &frame_length);
+        if (!line) break;
+        size_t line_length = frame_length;
+        if (line_length > 0 && line[line_length - 1] == '\r') line_length--;
+        js_process_ipc_handle_line(line, (int)line_length);
+        if (!line_framer_consume(&js_process_ipc_lines, frame_length + 1)) break;
     }
 }
 
@@ -3421,23 +3409,10 @@ static void js_process_ipc_read_cb(uv_stream_t* stream, ssize_t nread, const uv_
         if (buf->base) mem_free(buf->base);
         return;
     }
-    if (nread > 0) {
-        size_t needed = js_process_ipc_len + (size_t)nread + 1;
-        if (needed > js_process_ipc_cap) {
-            size_t new_cap = js_process_ipc_cap ? js_process_ipc_cap * 2 : 1024;
-            while (new_cap < needed) new_cap *= 2;
-            char* nb = (char*)mem_realloc(js_process_ipc_buf, new_cap, MEM_CAT_JS_RUNTIME);
-            if (nb) {
-                js_process_ipc_buf = nb;
-                js_process_ipc_cap = new_cap;
-            }
-        }
-        if (js_process_ipc_buf && js_process_ipc_cap >= needed) {
-            memcpy(js_process_ipc_buf + js_process_ipc_len, buf->base, (size_t)nread);
-            js_process_ipc_len += (size_t)nread;
-            js_process_ipc_buf[js_process_ipc_len] = '\0';
-            js_process_ipc_consume_lines();
-        }
+    if (nread > 0 && !line_framer_append(&js_process_ipc_lines, buf->base, (size_t)nread)) {
+        log_error("js-process-ipc: failed to append incoming message bytes");
+    } else if (nread > 0) {
+        js_process_ipc_consume_lines();
     }
     if (buf->base) mem_free(buf->base);
     if (nread < 0 && js_process_ipc_active && !js_process_ipc_closing) {
@@ -3481,6 +3456,15 @@ static void js_process_ipc_init_from_env(void) {
         log_error("process_ipc: failed to register context-owned pipe");
         return;
     }
+    if (!line_framer_init(&js_process_ipc_lines, 1024, MEM_CAT_JS_RUNTIME)) {
+        log_error("process_ipc: failed to allocate message framer");
+        uint32_t resource_id = js_process_state->ipc_resource_id;
+        js_process_state->ipc_resource_id = 0;
+        runtime_resource_table_forget_owned(&js_runtime_state.resources,
+            js_process_state, resource_id);
+        mem_free(pipe);
+        return;
+    }
     // child IPC pipes must opt into descriptor passing for ChildProcess.send(handle).
     uv_pipe_init(loop, &js_process_ipc_pipe, 1);
     int r = uv_pipe_open(&js_process_ipc_pipe, fd);
@@ -3490,6 +3474,7 @@ static void js_process_ipc_init_from_env(void) {
         js_process_state->ipc_resource_id = 0;
         runtime_resource_table_forget_owned(&js_runtime_state.resources,
             js_process_state, resource_id);
+        line_framer_destroy(&js_process_ipc_lines);
         mem_free(pipe);
         return;
     }
@@ -13246,12 +13231,7 @@ extern "C" void js_globals_batch_reset() {
     js_process_ipc_disconnect_emitted = false;
     js_process_ipc_force_ref = false;
     js_process_ipc_pending_messages = (Item){0};
-    if (js_process_ipc_buf) {
-        mem_free(js_process_ipc_buf);
-        js_process_ipc_buf = NULL;
-    }
-    js_process_ipc_len = 0;
-    js_process_ipc_cap = 0;
+    line_framer_destroy(&js_process_ipc_lines);
     // Preserve immutable CLI bootstrap inputs across realm teardown. Clearing
     // them here made a newly created process object lose its script arguments.
     // reset with-statement scope stack — stale Items become dangling after heap reset

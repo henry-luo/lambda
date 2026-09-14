@@ -1,5 +1,6 @@
 #include "strbuf.h"
 #include "str.h"
+#include "grow_capacity.h"
 #include <string.h>
 #include <stdint.h>
 #include <inttypes.h>
@@ -62,19 +63,8 @@ bool strbuf_ensure_cap(StrBuf *sb, size_t min_capacity) {
         return false; // Refuse to allocate more than half of address space
     }
 
-    size_t new_capacity = sb->capacity ? sb->capacity : INITIAL_CAPACITY;
-
-    while (new_capacity < min_capacity) {
-        // Check for overflow before doubling
-        if (new_capacity > SIZE_MAX / 2) {
-            log_debug("strbuf overflow detected in doubling loop - new_capacity=%zu, min_capacity=%zu",
-                      new_capacity, min_capacity);
-            new_capacity = min_capacity; // Use minimum required instead of doubling
-            break;
-        }
-        // log_debug("doubling strbuf new_capacity: %zu -> %zu", new_capacity, new_capacity * 2);
-        new_capacity *= 2;
-    }
+    size_t new_capacity = 0;
+    if (!lib_grow_capacity(sb->capacity, min_capacity, INITIAL_CAPACITY, &new_capacity)) return false;
     char *new_s = (char*)realloc(sb->str, new_capacity);
     if (!new_s) return false;
     sb->str = new_s;  sb->capacity = new_capacity;

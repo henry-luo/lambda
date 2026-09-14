@@ -1,9 +1,9 @@
 // byte_builder.c - see byte_builder.h
 #include "byte_builder.h"
 
+#include "grow_capacity.h"
 #include "mem.h"
 
-#include <limits.h>
 #include <string.h>
 
 bool byte_builder_init(ByteBuilder* builder, size_t initial_capacity,
@@ -22,14 +22,8 @@ bool byte_builder_reserve(ByteBuilder* builder, size_t append_bytes) {
         terminator > SIZE_MAX - builder->length - append_bytes) return false;
     size_t required = builder->length + append_bytes + terminator;
     if (required <= builder->capacity) return true;
-    size_t capacity = builder->capacity ? builder->capacity : 64u;
-    while (capacity < required) {
-        if (capacity > SIZE_MAX / 2u) {
-            capacity = required;
-            break;
-        }
-        capacity *= 2u;
-    }
+    size_t capacity = 0;
+    if (!lib_grow_capacity(builder->capacity, required, 64u, &capacity)) return false;
     uint8_t* data = (uint8_t*)mem_realloc(builder->data, capacity, builder->category);
     if (!data) return false;
     builder->data = data;

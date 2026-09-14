@@ -142,21 +142,13 @@ void add_grid_line_name(GridContainerLayout* grid, const char* name, int line_nu
     // table so the grid container mark can release every generation at once.
     if (grid->line_name_count >= grid->allocated_line_names) {
         if (!grid->lycon) return;
-        int new_capacity = grid->allocated_line_names > 0
-            ? grid->allocated_line_names * 2 : 8;
-        while (new_capacity <= grid->line_name_count) new_capacity *= 2;
-        GridLineName* grown = (GridLineName*)scratch_calloc(&grid->lycon->scratch,
-            (size_t)new_capacity * sizeof(GridLineName));
-        if (!grown) {
-            log_error("grid_utils: unable to grow grid line-name scratch table to %d", new_capacity);
+        if (!lam::scratch_grow_array(&grid->lycon->scratch, &grid->line_names,
+                                     &grid->allocated_line_names, grid->line_name_count,
+                                     grid->line_name_count + 1, 8)) {
+            log_error("grid_utils: unable to grow grid line-name scratch table to %d",
+                      grid->line_name_count + 1);
             return;
         }
-        if (grid->line_names && grid->line_name_count > 0) {
-            memcpy(grown, grid->line_names,
-                   (size_t)grid->line_name_count * sizeof(GridLineName));
-        }
-        grid->line_names = grown;
-        grid->allocated_line_names = new_capacity;
     }
 
     GridLineName* line_name = &grid->line_names[grid->line_name_count];

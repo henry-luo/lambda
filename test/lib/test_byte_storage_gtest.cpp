@@ -6,6 +6,7 @@
 
 #include "../../lib/byte_storage.h"
 #include "../../lib/byte_builder.h"
+#include "../../lib/line_framer.h"
 
 typedef struct ReleaseProbe {
     int calls;
@@ -35,6 +36,25 @@ TEST(ByteBuilderTest, AppendsBoundedTextAndTransfersOwnership) {
     EXPECT_EQ(length, 4u);
     EXPECT_STREQ((const char*)data, "abcd");
     mem_free(data);
+}
+
+TEST(LineFramerTest, RetainsPartialFramesAcrossAppends) {
+    LineFramer framer = {};
+    ASSERT_TRUE(line_framer_init(&framer, 0, MEM_CAT_CONTAINER));
+    ASSERT_TRUE(line_framer_append(&framer, "one\ntw", 6));
+    size_t length = 0;
+    const char* line = line_framer_peek(&framer, &length);
+    ASSERT_NE(line, nullptr);
+    EXPECT_EQ(length, 3u);
+    EXPECT_EQ(memcmp(line, "one", length), 0);
+    ASSERT_TRUE(line_framer_consume(&framer, length + 1));
+    EXPECT_EQ(line_framer_peek(&framer, &length), nullptr);
+    ASSERT_TRUE(line_framer_append(&framer, "o\n", 2));
+    line = line_framer_peek(&framer, &length);
+    ASSERT_NE(line, nullptr);
+    EXPECT_EQ(length, 3u);
+    EXPECT_EQ(memcmp(line, "two", length), 0);
+    line_framer_destroy(&framer);
 }
 
 TEST(ByteStorageTest, EmptyStorageHasAValidEmptySpan) {
