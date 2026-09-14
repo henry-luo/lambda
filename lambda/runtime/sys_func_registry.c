@@ -1325,6 +1325,7 @@ JitImport jit_runtime_imports[] = {
     {"fn_pdf_register_svg_image_resolver", FPTR(fn_pdf_register_svg_image_resolver)},
     // typed array constructors
     {"array_float_new", FPTR(array_float_new)},
+    {"array_float_literal_with_nulls", FPTR(array_float_literal_with_nulls)},
     {"array_float_set", FPTR(array_float_set)},
     {"array_int_new", FPTR(array_int_new)},
     {"array_int_set", FPTR(array_int_set)},
@@ -1654,9 +1655,6 @@ JitImport jit_runtime_imports[] = {
       // The helper only selects a sealed NameId and resolves an existing
       // NamePool entry; it neither allocates nor publishes an error carrier.
       JIT_EXCEPTION_PRESERVES}},
-    {"push_d_safe", FPTR(push_d_safe),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     // push_k returns a GC-owned DateTime Item, so generic scalar-home adoption
     // would only add a dead number slot after the DateTime stack cutover.
     {"push_k", FPTR(push_k),
@@ -1819,11 +1817,6 @@ JitImport jit_runtime_imports[] = {
     {"fn_ord_str_item", FPTR(fn_ord_str_item)},
 
     // ========================================================================
-    // MIR swap-safe store functions
-    // ========================================================================
-    {"_store_i64", FPTR(_store_i64)},
-    {"_store_f64", FPTR(_store_f64)},
-
     // ========================================================================
     // Function creation and calls
     // ========================================================================
@@ -1948,6 +1941,8 @@ JitImport jit_runtime_imports[] = {
     {"cow_path_set", FPTR(cow_path_set)},
     {"cow_path_borrow", FPTR(cow_path_borrow)},
     {"cow_path_borrow_fixed", FPTR(cow_path_borrow_fixed)},
+    {"cow_place_leaf", FPTR(cow_place_leaf)},
+    {"cow_place_leaf_fixed", FPTR(cow_place_leaf_fixed)},
     {"cow_path_set_inplace", FPTR(cow_path_set_inplace)},
     {"pn_push_cow", FPTR(pn_push_cow)},
     {"pn_splice_cow", FPTR(pn_splice_cow)},
@@ -1955,7 +1950,6 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     // Bitwise helper
     // ========================================================================
-    {"_barg", FPTR(_barg)},
 
     // ========================================================================
     // VMap functions
@@ -1977,6 +1971,7 @@ JitImport jit_runtime_imports[] = {
     {"lambda_map_set_checked_inplace", FPTR(lambda_map_set_checked_inplace)},
     {"lambda_map_path_set_checked", FPTR(lambda_map_path_set_checked)},
     {"lambda_map_path_set_checked_inplace", FPTR(lambda_map_path_set_checked_inplace)},
+    {"lambda_map_path_set_checked_fixed", FPTR(lambda_map_path_set_checked_fixed)},
     {"lambda_array_push_checked", FPTR(lambda_array_push_checked)},
     {"lambda_array_set_checked", FPTR(lambda_array_set_checked)},
     {"lambda_array_set_checked_inplace", FPTR(lambda_array_set_checked_inplace)},

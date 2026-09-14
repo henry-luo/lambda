@@ -2437,6 +2437,9 @@ extern "C" {
     ArrayNum* array_int_new(int64_t length);
     ArrayNum* array_int64_new(int64_t length);
     ArrayNum* array_float_new(int64_t length);
+    // T27-7: republish a packed float literal whose `null_mask` members were
+    // null as generic storage, so the later checked boundary sees the nulls.
+    Item array_float_literal_with_nulls(ArrayNum* packed, uint64_t null_mask);
 
     void array_float_set(ArrayNum *arr, int64_t index, double value);
     void array_int_set(ArrayNum *arr, int64_t index, int64_t lane);
@@ -2541,7 +2544,6 @@ extern "C" {
     Item push_d(double dval);
     Item box_int64_value(int64_t lval);
     Item box_uint64_value(uint64_t uval);
-    Item push_d_safe(double val);   // safe boxing: detects already-boxed FLOAT Items
     Item push_k(DateTime dtval);
     Item push_c(int64_t cval);
 
@@ -2563,6 +2565,7 @@ extern "C" {
 
     // item unboxing
     bool item_try_to_int64(Item item, int64_t* out);
+    bool item_try_to_double(Item item, double* out);
     int64_t it2l(Item item);
     uint64_t it2u(Item item);
     double it2d(Item item);
@@ -2574,17 +2577,6 @@ extern "C" {
     const char* fn_to_cstr(Item item);  // convert Item to C string (for path segment names)
     Item coerce_num_sized(Item value, int64_t num_type);
     Item coerce_uint64(Item value);
-
-    // MIR JIT workaround: opaque store functions prevent SSA optimizer from
-    // reordering swap-pattern assignments inside while loops.
-    // Since these are external functions, MIR can't inline or reorder them.
-    void _store_i64(int64_t* dst, int64_t val);
-    void _store_f64(double* dst, double val);
-
-    // Safe unbox to int64_t for bitwise operation arguments.
-    // Handles both tagged Items (type tag in high byte) and raw int64_t values
-    // (from other bitwise ops or literals, with high byte == 0).
-    int64_t _barg(Item v);
 
     // generic field access function
     Item fn_index(Item item, Item index);
@@ -2688,6 +2680,12 @@ extern "C" {
     // NM-O8 typed arm: validates in place instead of swapping a candidate in.
     Item lambda_map_path_set_checked_inplace(Item owner, Item path, Item value,
         Type* expected, const char* boundary);
+    // T27-4: fixed-key twin of the two setters above; shape = count | inplace<<8
+    // | index-key bits <<16, leaf_contract resolved by the compiler (or NULL).
+    Item lambda_map_path_set_checked_fixed(Item owner, Item value, Item key0, Item key1,
+        Item key2, int64_t shape, Type* expected, Type* leaf_contract);
+    // one link of a declared path's contract walk; *open_leaf below an open array
+    Type* lambda_map_path_contract_step(Type* current, Item key, bool* open_leaf);
     Item lambda_array_set_checked(Item owner, int64_t index, Item value, Type* expected,
         const char* boundary);
     Item lambda_array_set_checked_item(Item owner, Item key, Item value, Type* expected,
@@ -3135,6 +3133,10 @@ extern "C" {
     // CW25: bounded descriptor form for compiler-known member/int paths.
     Item cow_path_borrow_fixed(Item owner, int64_t count,
         Item key0, Item key1, Item key2);
+    // builtin mutator place (push/splice/set): spine detach; a non-container
+    // link is returned as the value for the mutator to reject
+    Item cow_place_leaf(Item owner, Item path);
+    Item cow_place_leaf_fixed(Item owner, int64_t count, Item key0, Item key1, Item key2);
 
     // runtime type coercion for typed array annotations (int[], float[], etc.)
     // converts generic Array/List to typed array, or validates existing typed array

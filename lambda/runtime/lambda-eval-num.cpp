@@ -688,27 +688,8 @@ static bool read_bitwise_integer(Item item, BitwiseIntegerValue* out) {
         out->value.sval = item.get_int64();
         out->value.raw = (uint64_t)out->value.sval;
         return true;
-    case LMD_TYPE_FLOAT:
-        out->value.sval = (int64_t)item.get_double();
-        out->value.raw = (uint64_t)out->value.sval;
-        return true;
-    case LMD_TYPE_BOOL:
-        out->value.sval = item.bool_val ? 1 : 0;
-        out->value.raw = (uint64_t)out->value.sval;
-        return true;
-    case LMD_TYPE_RAW_POINTER:
-        out->value.raw = item.item;
-        out->value.sval = int64_from_bits(out->value.raw);
-        return true;
-    case LMD_TYPE_NULL:
-    case LMD_TYPE_ERROR:
-        out->value.sval = 0;
-        out->value.raw = 0;
-        return true;
     default:
-        out->value.sval = 0;
-        out->value.raw = 0;
-        return true;
+        return false;
     }
 }
 
@@ -1872,7 +1853,8 @@ Item fn_float(Item item) {
         return push_d((double)item.get_uint64());
     }
     else if (get_type_id(item) == LMD_TYPE_DECIMAL) {
-        double dval = decimal_to_double(item);
+        double dval = 0.0;
+        if (!decimal_try_to_double(item, &dval)) return ItemError;
         return push_d(dval);
     }
     else if (is_text_type_id(get_type_id(item))) {
@@ -2023,33 +2005,9 @@ extern "C" int64_t fn_round_i(int64_t x) {
 // BITWISE OPERATIONS
 // ============================================================================
 
-// Safe unbox to int64_t for bitwise operation arguments.
-// Handles both tagged Items (type tag in high byte) and raw int64_t values
-// (from other bitwise ops or literals, with high byte == 0).
-extern "C" int64_t _barg(Item v) {
-    uint8_t tag = get_type_id(v);
-    switch (tag) {
-    case LMD_TYPE_INT:
-        return lambda_int_item_to_i64(v);
-    case LMD_TYPE_INT64:
-        return v.get_int64();
-    case LMD_TYPE_FLOAT:
-        return (int64_t)v.get_double();
-    case LMD_TYPE_BOOL:
-        return v.bool_val ? 1 : 0;
-    case LMD_TYPE_NUM_SIZED:
-        return v.get_num_sized_as_int64();
-    case LMD_TYPE_UINT64:
-        return (int64_t)v.get_uint64();
-    case LMD_TYPE_RAW_POINTER:
-        // raw int64_t (high byte == 0): from other bitwise ops or literals
-        return (int64_t)v.item;
-    case LMD_TYPE_NULL:
-    case LMD_TYPE_ERROR:
-        return 0;
-    default:
-        return 0;
-    }
+static Item bitwise_type_error(const char* name) {
+    log_error("%s: operands must be integer", name);
+    return ItemError;
 }
 
 extern "C" int64_t fn_band(int64_t a, int64_t b) {
@@ -2059,7 +2017,7 @@ extern "C" int64_t fn_band(int64_t a, int64_t b) {
 extern "C" Item fn_band_item(Item a, Item b) {
     Item result;
     if (apply_classified_bitwise(a, b, SIZED_BITWISE_AND, &result)) return result;
-    return box_int64_value(fn_band(_barg(a), _barg(b)));
+    return bitwise_type_error("band");
 }
 
 extern "C" int64_t fn_bor(int64_t a, int64_t b) {
@@ -2069,7 +2027,7 @@ extern "C" int64_t fn_bor(int64_t a, int64_t b) {
 extern "C" Item fn_bor_item(Item a, Item b) {
     Item result;
     if (apply_classified_bitwise(a, b, SIZED_BITWISE_OR, &result)) return result;
-    return box_int64_value(fn_bor(_barg(a), _barg(b)));
+    return bitwise_type_error("bor");
 }
 
 extern "C" int64_t fn_bxor(int64_t a, int64_t b) {
@@ -2079,7 +2037,7 @@ extern "C" int64_t fn_bxor(int64_t a, int64_t b) {
 extern "C" Item fn_bxor_item(Item a, Item b) {
     Item result;
     if (apply_classified_bitwise(a, b, SIZED_BITWISE_XOR, &result)) return result;
-    return box_int64_value(fn_bxor(_barg(a), _barg(b)));
+    return bitwise_type_error("bxor");
 }
 
 extern "C" int64_t fn_bnot(int64_t a) {
@@ -2089,12 +2047,17 @@ extern "C" int64_t fn_bnot(int64_t a) {
 extern "C" Item fn_bnot_item(Item a) {
     Item result;
     if (sized_bitwise_not(a, &result)) return result;
-    if (lambda_numeric_kind_from_item(a) == LAMBDA_NUM_INTEGER) {
+    LambdaNumericKind kind = lambda_numeric_kind_from_item(a);
+    if (kind == LAMBDA_NUM_INTEGER) {
         // Integer is unbounded, so preserve its two's-complement identity in
         // the bigint domain instead of truncating it through an int64 lane.
         return bigint_bitwise_not(a);
     }
-    return box_int64_value(fn_bnot(_barg(a)));
+    if (kind == LAMBDA_NUM_INT) {
+        int64_t value = runtime_integral_as_int64(a, kind);
+        return pack_compact_int((__int128)int64_from_bits(~(uint64_t)value));
+    }
+    return bitwise_type_error("bnot");
 }
 
 extern "C" int64_t fn_shl(int64_t a, int64_t b) {
@@ -2106,11 +2069,7 @@ extern "C" int64_t fn_shl(int64_t a, int64_t b) {
 extern "C" Item fn_shl_item(Item a, Item b) {
     Item result;
     if (apply_classified_shift(a, b, true, &result)) return result;
-    if (_barg(b) < 0) {
-        log_error("integer negative shift count");
-        return ItemError;
-    }
-    return box_int64_value(fn_shl(_barg(a), _barg(b)));
+    return bitwise_type_error("shl");
 }
 
 extern "C" int64_t fn_shr(int64_t a, int64_t b) {
@@ -2122,17 +2081,14 @@ extern "C" int64_t fn_shr(int64_t a, int64_t b) {
 extern "C" Item fn_shr_item(Item a, Item b) {
     Item result;
     if (apply_classified_shift(a, b, false, &result)) return result;
-    if (_barg(b) < 0) {
-        log_error("integer negative shift count");
-        return ItemError;
-    }
-    return box_int64_value(fn_shr(_barg(a), _barg(b)));
+    return bitwise_type_error("shr");
 }
 
 extern "C" Item fn_ushr_item(Item a, Item b) {
     BitwiseIntegerValue left, right;
-    read_bitwise_integer(a, &left);
-    read_bitwise_integer(b, &right);
+    if (!read_bitwise_integer(a, &left) || !read_bitwise_integer(b, &right)) {
+        return bitwise_type_error("ushr");
+    }
     int64_t count = right.value.sval;
     if (count < 0) {
         log_error("integer unsigned right shift negative count");
@@ -2144,7 +2100,7 @@ extern "C" Item fn_ushr_item(Item a, Item b) {
     int bits = left.is_sized ? left.value.bits : 32;
     uint64_t raw = left.is_sized
         ? sized_operand_raw(&left.value) & sized_mask(bits)
-        : (uint32_t)_barg(a);
+        : (uint32_t)left.value.raw;
     raw = count >= bits ? 0 : raw >> count;
     return pack_sized_integer(true, bits, raw);
 }

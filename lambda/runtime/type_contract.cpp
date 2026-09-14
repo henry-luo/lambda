@@ -1047,7 +1047,8 @@ static bool contract_numeric_admit_float(Item value, LambdaNumericKind target,
         return true;
     }
 
-    double number = it2d(value);
+    double number = 0.0;
+    if (!item_try_to_double(value, &number)) return false;
     if (target == LAMBDA_NUM_FLOAT) {
         *converted = push_d(number);
     } else if (target == LAMBDA_NUM_F32) {

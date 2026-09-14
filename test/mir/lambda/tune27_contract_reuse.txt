@@ -1,0 +1,4 @@
+[{ key: 1.5, left: null}, null, { key: 1.5, left: null}, { root: { key: 1.5, left: null}}]
+[6, 3, 5, error]
+[2.5, 1]
+

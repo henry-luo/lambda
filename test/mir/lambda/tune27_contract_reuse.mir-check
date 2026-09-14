@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "description": "Tune27 T27-8 / T27-9 / S11.4.1v3 / D3.2.4v3: an already-admitted value does not re-cross a structurally identical contract (declared binding or record field through the optional wrapper, null against T?, a declared-binding alias, a non-raising call's declared return); a float literal under a float[] contract admits only its null-member arm; a constant index into a known-length local needs no null boundary, while a pushed local keeps it.",
+  "checks": [
+    {
+      "in_func": "_ret_param_#",
+      "forbid": [
+        "call\tlambda_type_check_p, lambda_type_check"
+      ]
+    },
+    {
+      "in_func": "_ret_null_#",
+      "forbid": [
+        "call\tlambda_type_check_p, lambda_type_check"
+      ]
+    },
+    {
+      "in_func": "_read_field_#",
+      "forbid": [
+        "call\tlambda_type_check_p, lambda_type_check"
+      ]
+    },
+    {
+      "in_func": "_alias_param_#",
+      "forbid": [
+        "call\tlambda_type_check_p, lambda_type_check"
+      ]
+    },
+    {
+      "in_func": "_const_index_#",
+      "forbid": [
+        "call\tlambda_type_check_p, lambda_type_check"
+      ]
+    },
+    {
+      "in_func": "_literal_arg_#",
+      "expect_seq": [
+        {
+          "pattern": "call\tarray_float_new_p, array_float_new"
+        },
+        {
+          "pattern": "call\tarray_float_literal_with_nulls_p, array_float_literal_with_nulls"
+        }
+      ],
+      "forbid": [
+        "call\tarray_push_p, array_push",
+        "call\tarray_push_capture_p, array_push_capture"
+      ]
+    },
+    {
+      "in_func": "_const_index_pushed_#",
+      "expect": [
+        "call\tlambda_type_check_p, lambda_type_check"
+      ]
+    }
+  ]
+}

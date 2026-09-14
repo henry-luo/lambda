@@ -328,17 +328,20 @@ so the adapter is all it needs:
   rebuilt the carrier is visible to the caller too. The raw entry is
   unchanged: it writes its typed `var` parameter in place, as on the eager
   direct edge.
-- *Pin.* What the raw entry cannot publish is a rebind of the parameter.
-  `interp_fn_rebinds_typed_var_param` (cached in
-  `FnPromotionCell::typed_var_rebind`) keeps such a body in T0, and the
-  satellite scan keeps every body that calls it directly in T0 as well,
-  because a raw argument would not be reloaded; T0 publishes the rebind
-  through the home. The eager tier's own rebind loss is DO29.
+- *Pin (retired 2026-09-14, D8.1.1v10).* Until then the raw entry could not
+  publish a rebind of a typed `var` parameter, so
+  `interp_fn_rebinds_typed_var_param` kept such a body -- and every body
+  calling it directly -- in T0. Every publishable `var` position now
+  consumes its home in the generated prologue and publishes its final value
+  in the epilogue, the `_b` adapter forwards T0's cell to the raw body, and
+  the scan and its `FnPromotionCell` flag are gone (COW doc §11.10, M1a
+  extension).
 
 Fixtures: `test/lambda/proc/interp_typed_var_param.ls` (in-place stores,
 records, nested and recursive `var` chains, aliasing inside the callee,
-three tiers byte-identical) and `interp_typed_var_rebind.ls` (golden is
-T0's; the auto tier matches, the eager tier does not -- DO29).
+three tiers byte-identical), `interp_typed_var_rebind.ls` and
+`cow_var_typed_rebind.ls` (rebinds of every scalar lane, string, record and
+their optional forms; three tiers byte-identical since D8.1.1v10).
 
 **D8.1.1v9 (2026-09-07) -- the satellite cluster.** With every scan pin
 gone, the remaining auto residue was the satellite's own shape: one

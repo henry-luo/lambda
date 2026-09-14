@@ -904,6 +904,24 @@ ArrayNum* array_float_new(int64_t length) {
     return array_num_new(ELEM_FLOAT64, length);
 }
 
+// T27-7: the cold arm of an emitted float literal. A compact array cannot
+// carry null, so a literal with a null member is rebuilt as generic storage;
+// the emitted fast arm keeps one allocation and direct stores.
+Item array_float_literal_with_nulls(ArrayNum* packed, uint64_t null_mask) {
+    if (!packed) return ItemNull;
+    RootFrame roots(2);
+    Rooted<ArrayNum*> source(roots, packed);
+    Rooted<Array*> result(roots, array());
+    int64_t length = source.get()->length;
+    for (int64_t i = 0; i < length; i++) {
+        bool is_null = i < 64 && ((null_mask >> i) & 1) != 0;
+        // push_d may collect; array_push roots the value before it grows
+        Item member = is_null ? ItemNull : push_d(source.get()->float_items[i]);
+        array_push(result.get(), member);
+    }
+    return array_end(result.get());
+}
+
 ArrayNum* array_float_fill(ArrayNum *arr, int count, ...) {
     if (array_num_prepare_fill(arr, ELEM_FLOAT64, count, sizeof(double))) {
         va_list args;
@@ -1021,10 +1039,15 @@ static uint64_t item_to_uint64_value(Item value) {
     return it2u(value);
 }
 
-// helper: extract any numeric Item as double for compact float store
-static double item_to_float_value(Item value) {
-    if (get_type_id(value) == LMD_TYPE_BOOL) return value.bool_val ? 1.0 : 0.0;
-    return it2d(value);
+// Compact float lanes may admit bool explicitly, but every other input must
+// cross the fallible numeric boundary before its payload is stored.
+static bool item_try_to_float_value(Item value, double* out) {
+    if (!out) return false;
+    if (get_type_id(value) == LMD_TYPE_BOOL) {
+        *out = value.bool_val ? 1.0 : 0.0;
+        return true;
+    }
+    return item_try_to_double(value, out);
 }
 
 static bool item_is_integer_typed_array_source(Item value) {
@@ -1044,8 +1067,16 @@ extern "C" Item coerce_num_sized(Item value, int64_t num_type_int) {
     case NUM_UINT8:   return (Item){ .item = u8_to_item((uint8_t)item_to_int_value(value)) };
     case NUM_UINT16:  return (Item){ .item = u16_to_item((uint16_t)item_to_int_value(value)) };
     case NUM_UINT32:  return (Item){ .item = u32_to_item((uint32_t)item_to_int_value(value)) };
-    case NUM_FLOAT16: return (Item){ .item = f16_to_item((float)item_to_float_value(value)) };
-    case NUM_FLOAT32: return (Item){ .item = f32_to_item((float)item_to_float_value(value)) };
+    case NUM_FLOAT16: {
+        double number = 0.0;
+        if (!item_try_to_float_value(value, &number)) return ItemError;
+        return (Item){ .item = f16_to_item((float)number) };
+    }
+    case NUM_FLOAT32: {
+        double number = 0.0;
+        if (!item_try_to_float_value(value, &number)) return ItemError;
+        return (Item){ .item = f32_to_item((float)number) };
+    }
     default:          return ItemError;
     }
 }
@@ -1348,17 +1379,32 @@ void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
         return;
     }
     if (!array_num_resolve_data(arr, true) && arr->capacity > 0) return;
+    double numeric_value = 0.0;
+    switch (arr->get_elem_type()) {
+    case ELEM_INT:
+    case ELEM_FLOAT64:
+    case ELEM_UINT8_CLAMPED:
+    case ELEM_FLOAT16:
+    case ELEM_FLOAT32:
+        if (!item_try_to_float_value(value, &numeric_value)) {
+            log_error("array_num_set_item: non-numeric value rejected by numeric lane");
+            return;
+        }
+        break;
+    default:
+        break;
+    }
     switch (arr->get_elem_type()) {
     case ELEM_INT:
         // v5: store the LANE value -- poison becomes its lane sentinel here and
         // is mapped back to the shared IEEE value on read.
-        arr->items[index] = lambda_double_to_int_lane(item_to_float_value(value));
+        arr->items[index] = lambda_double_to_int_lane(numeric_value);
         break;
     case ELEM_INT64:
         arr->items[index] = item_to_int_value(value);
         break;
     case ELEM_FLOAT64:
-        arr->float_items[index] = item_to_float_value(value);
+        arr->float_items[index] = numeric_value;
         break;
     case ELEM_INT8:
         ((int8_t*)arr->data)[index] = (int8_t)item_to_int_value(value);
@@ -1373,7 +1419,7 @@ void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
         ((uint8_t*)arr->data)[index] = (uint8_t)item_to_int_value(value);
         break;
     case ELEM_UINT8_CLAMPED:
-        ((uint8_t*)arr->data)[index] = array_num_clamp_uint8_even(item_to_float_value(value));
+        ((uint8_t*)arr->data)[index] = array_num_clamp_uint8_even(numeric_value);
         break;
     case ELEM_UINT16:
         ((uint16_t*)arr->data)[index] = (uint16_t)item_to_int_value(value);
@@ -1382,10 +1428,10 @@ void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
         ((uint32_t*)arr->data)[index] = (uint32_t)item_to_int_value(value);
         break;
     case ELEM_FLOAT16:
-        ((uint16_t*)arr->data)[index] = f32_to_f16_bits((float)item_to_float_value(value));
+        ((uint16_t*)arr->data)[index] = f32_to_f16_bits((float)numeric_value);
         break;
     case ELEM_FLOAT32:
-        ((float*)arr->data)[index] = (float)item_to_float_value(value);
+        ((float*)arr->data)[index] = (float)numeric_value;
         break;
     case ELEM_UINT64:
         // Signed extraction is implementation-defined above INT64_MAX; use the
@@ -1400,7 +1446,9 @@ void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
         } else if (is_integer_type_id(vt) || vt == LMD_TYPE_UINT64) {
             b = item_to_int_value(value) ? 1 : 0;
         } else if (vt == LMD_TYPE_FLOAT) {
-            b = item_to_float_value(value) != 0.0 ? 1 : 0;
+            double number = 0.0;
+            if (!item_try_to_float_value(value, &number)) return;
+            b = number != 0.0 ? 1 : 0;
         } else {
             b = 0;
         }
@@ -3538,8 +3586,9 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
                 // compact ArrayNum lanes do not live in items[]; widen through
                 // Item access so sized numeric payloads are decoded first.
                 // v5: the int lane is i64, so land the LANE value here.
-                typed->items[i] = lambda_double_to_int_lane(
-                    item_to_float_value(array_num_get(src, i)));
+                double number = 0.0;
+                if (!item_try_to_float_value(array_num_get(src, i), &number)) return NULL;
+                typed->items[i] = lambda_double_to_int_lane(number);
             }
             return typed;
         }
@@ -3548,7 +3597,8 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
             for (int64_t i = 0; i < length; i++) {
                 // compact ArrayNum lanes do not live in items[]; widen through
                 // Item access so sized numeric payloads are decoded first.
-                typed->float_items[i] = item_to_float_value(array_num_get(src, i));
+                if (!item_try_to_float_value(array_num_get(src, i),
+                        &typed->float_items[i])) return NULL;
             }
             return typed;
         }
@@ -3603,8 +3653,9 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
                 // v5: ELEM_INT stores an i64 lane in items[], so land the LANE
                 // value — writing raw double bits through float_items[] here
                 // made every element read back as a >INT53_MAX lane, i.e. `inf`.
-                typed->items[i] = lambda_double_to_int_lane(
-                    item_to_float_value(items[i]));
+                double number = 0.0;
+                if (!item_try_to_float_value(items[i], &number)) return NULL;
+                typed->items[i] = lambda_double_to_int_lane(number);
             }
             return typed;
         }
@@ -3622,8 +3673,8 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
                 }
                 if (elem_tid == LMD_TYPE_BOOL)
                     typed->float_items[i] = items[i].bool_val ? 1.0 : 0.0;
-                else
-                    typed->float_items[i] = item_to_float_value(items[i]);
+                else if (!item_try_to_float_value(items[i], &typed->float_items[i]))
+                    return NULL;
             }
             return typed;
         }

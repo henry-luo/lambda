@@ -106,6 +106,12 @@ struct VarEntry {
     // cleared on whole-binding replacement; the layout cache alone is only a
     // physical carrier witness and cannot stand in for this contract.
     Type* typed_array_contract_proven;
+    // T27-9: static length of a local array (`fill(K, v)` with literal K, or a
+    // literal of K members); -1 when unknown. `known_length_stable` caches the
+    // body scan proving no rebind/push/splice/borrow/capture can change it:
+    // 0 unscanned, 1 refuted, 2 stable.
+    int64_t known_length;
+    uint8_t known_length_stable;
     bool is_live_default_binding;
     const char* live_binding_specifier;
 };

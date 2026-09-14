@@ -293,12 +293,15 @@ static void expect_no_unresolved_type_warning(const FixtureRun& run, const char*
 // fixture was calls=20, reifications=20; what separates health from that is the
 // reification/copy counters, not the call count.
 //
-// The call count is NOT zero and must not be asserted to be. A `Node?` contract
-// only reaches the classifier at all because runtime_type_admit_value now takes
-// the named contract through its non-null arm. Before that it fell through to
-// the lambda_type_matches shortcut — invisible to these counters, and the exact
-// bypass that let an unreified literal shape sit behind a contract-shaped
-// direct field read and segfault the JIT.
+// Tune27 T27-8 (S11.4.1v3, D3.2.4v3): the JIT no longer crosses at all. The
+// argument `n.next` is a field read of a trusted record whose field contract
+// is structurally the parameter's `Node?`, and `head` is a declared binding
+// admitted at its own declaration -- both proofs are reached through the
+// non-null arm, so the direct edge carries no runtime admission. The v34
+// ANY-degradation signature for this fixture was calls=20, reifications=20;
+// an unreified literal shape behind a contract-shaped field read is still
+// what the warning check and the reification/copy counters guard against.
+// The interp tier (next test) keeps its 60 trusted crossings.
 TEST(LambdaOptAdmission, RecursiveContractJitFullyStatic) {
     FixtureRun run = run_fixture("recursive_link", "jit", kRecursiveLinkSource, true);
     ASSERT_TRUE(run.ok);
@@ -308,7 +311,7 @@ TEST(LambdaOptAdmission, RecursiveContractJitFullyStatic) {
     EXPECT_EQ(run.profile.get("map_admit_exact_shape_hits") +
               run.profile.get("map_admit_storage_compatible_hits"),
               run.profile.get("map_admit_calls"));
-    EXPECT_EQ(run.profile.get("map_admit_exact_shape_hits"), 20u);
+    EXPECT_EQ(run.profile.get("map_admit_calls"), 0u);
     EXPECT_EQ(run.profile.get("map_admit_reifications"), 0u);
     EXPECT_EQ(run.profile.get("map_admit_deep_clone_calls"), 0u);
     EXPECT_EQ(run.profile.get("map_admit_fields_visited"), 0u);
