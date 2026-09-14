@@ -98,7 +98,7 @@ Counts:
 | LR_04 | Numbers, decimal & datetime | 6 | 0 | 0 | 6 |
 | LR_05 | Strings, symbols & vectors | 2 | 1 | 0 | 3 |
 | LR_06 | C transpiler (legacy C2MIR) | 0 | 0 | 0 | 0 |
-| LR_07 | MIR Direct transpiler & JIT | 11 | 1 | 0 | 12 |
+| LR_07 | MIR Direct transpiler & JIT | 10 | 1 | 0 | 11 |
 | LR_08 | Memory management & GC | 6 | 0 | 0 | 6 |
 | LR_09 | Runtime builtins | 4 | 0 | 0 | 4 |
 | LR_10 | Error handling | 1 | 0 | 0 | 1 |
@@ -106,9 +106,9 @@ Counts:
 | LR_12 | Procedural runtime | 5 | 0 | 0 | 5 |
 | LR_13 | Schema validator | 7 | 0 | 0 | 7 |
 | TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 6 | 1 | 0 | 7 |
-| **Live total** | | **67** | **10** | **0** | **77** |
+| **Live total** | | **66** | **10** | **0** | **76** |
 
-The active ledger now contains 77 live records, with the 62 previously counted
+The active ledger now contains 76 live records, with the 63 previously counted
 resolved records moved to the archive. Duplicate/split records and
 verification-only findings remain represented there for provenance.
 Two original entries each split into a resolved half and a surviving residue —
@@ -409,15 +409,6 @@ frequent `item_at` / `fn_array_set` fallbacks.
 *Reframed:* the doc described this as "diverges from C2MIR, in C2MIR's favour,
 port it into MIR Direct." With C2MIR deleted there is no reference
 implementation left to port — this is now a from-scratch MIR Direct feature.
-
-<a id="lr07-4"></a>**LR07-4 · Type widening is truncate-or-box · OPEN**
-`transpile_assign_stam` assigns a FLOAT to an INT variable by truncating via
-`MIR_D2I` inside loops (lossy, but required to keep the register type stable)
-and by boxing to `ANY` outside loops. Related sharp edge: an error Item (e.g.
-from division by zero) is silently coerced to `0` / `0.0` / `false` when a boxed
-value is unboxed into a native variable. The range-checked conversion helper at
-`transpile-mir.cpp:15435`–`15451` narrows this for indices only (out-of-range
-yields the legitimate finite value `INT64_MAX`).
 
 <a id="lr07-5"></a>**LR07-5 · `get_effective_type` only narrows IDENTs to ANY · OPEN**
 It does not catch every post-mutation type change, leaving a stale-type boxing
@@ -1005,7 +996,6 @@ together, not individually.
 |---|---|---|
 | **TCO safety proof residue** | LR07-13 | The former root-classification faces LR07-7/LR08-3 are resolved and archived. The surviving TCO face is the unused `is_tco_function_safe` proof, now tracked independently under LR07-13. |
 | **Representation ↔ semantics coupling** | LR03-3, LR07-1, LR07-5, LR07-14 | Expression results carry no `ValueRep`; each consumer re-derives it. See [Result32 lane-parity + Tune19], [Compiling lane design]. |
-| **`INT64_MAX` sentinel residue** | LR07-4 | [LR03-R4](Lambda_Issue_Ledger(fixed).md#lr03-r4) removed `INT64_ERROR`; index OOB still lands on the legitimate finite value `INT64_MAX` and must get an explicit failure channel. |
 | **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-6, LR08-10, LR11-4, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency (LR11-4) is the clearest statement of the pattern. |
 | **Surface syntax (S16) residue** | S16.9.5, i8-genafterlet, SO36, O3, §7.17 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). |
 | **Process globals** | LR12-6 | `g_template_registry` is now context-local; `g_dry_run` remains process-global and blocks per-run dry-run semantics. See RG1–RG14 in [Runtime globals audit], RC1–RC8 in [Radiant concurrency design]. |

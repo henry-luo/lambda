@@ -25434,6 +25434,7 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
             VALUE_REP_INT_LANE);
     }
     if (var) {
+        bool boxed_assignment_error_checked = false;
         // An explicit `var x: T` remains T across rebinding. Check dynamic
         // values before ownership/COW work or native unboxing so a rejected
         // assignment leaves both the old binding and its snapshots intact.
@@ -25447,6 +25448,11 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
             contract->type_id != LMD_TYPE_ANY &&
             !mir_boundary_is_redundant(mt, assign->value, contract) &&
             (val_tid == LMD_TYPE_ANY || val_tid == LMD_TYPE_NULL ||
+             // A float has a different carrier from int. The runtime
+             // contract owns exact-integrality admission before a float can
+             // enter the int lane (D2.4.1-D2.4.3, S4.4.1, S7.8.1).
+             (contract->kind == TYPE_KIND_SIMPLE &&
+              contract->type_id == LMD_TYPE_INT && val_tid == LMD_TYPE_FLOAT) ||
              // G6: a union contract admits by MEMBERSHIP, so a concrete but
              // unproven RHS still needs the runtime check -- `a = 1.5` into
              // `int | string` previously skipped the boundary entirely because
@@ -25488,6 +25494,7 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
                 (int)assign->target->len, assign->target->chars);
             val = emit_checked_boundary(mt, val, val_tid, contract, boundary);
             emit_return_if_item_error(mt, val);
+            boxed_assignment_error_checked = true;
             val_tid = LMD_TYPE_ANY;
             value_producer = mir_value_from_reg(mt, assign->value, val,
                 VALUE_REP_ITEM);
@@ -25702,7 +25709,11 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
             // stored in INT64 variables; boxed fallback results must be unboxed.
             // String included: boxed fn_join results in branch assignments must
             // not widen empty-string accumulators to branch-local ANY registers.
-            // Error items (div-by-zero) get silently converted to 0/0.0/false.
+            // A native lane cannot carry ItemError, so preserve the error
+            // channel before reopening the scalar lane (D2.4.1-D2.4.3).
+            if (!boxed_assignment_error_checked) {
+                emit_return_if_item_error(mt, val);
+            }
             MIR_reg_t unboxed = emit_unbox(mt, val, var_tid);
             if (var->mir_type == MIR_T_D) {
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, var->reg),

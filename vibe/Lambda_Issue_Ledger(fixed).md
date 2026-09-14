@@ -15,7 +15,7 @@
 
 ## Archive index
 
-This archive contains **88 historical records**: 87 RESOLVED entries and one
+This archive contains **89 historical records**: 88 RESOLVED entries and one
 CLOSED design decision. Duplicate and split records remain separate so their
 provenance is not lost. The first sections contain records formerly
 interleaved with live entries; §15 preserves the 44 records from the former
@@ -265,6 +265,32 @@ workspace allocation failure. The complete representation suite passes 29/29;
 **All nine issues are archived below as [LR06-R1…R9](#lr06-r1r9).** The C2MIR backend no longer exists in the tree.
 
 ## 7. MIR Direct transpiler & JIT (LR_07)
+
+<a id="lr07-4"></a>**LR07-4 · Type widening is truncate-or-box · RESOLVED 2026-09-14**
+`transpile_assign_stam` now preserves both the declared destination contract
+and the producer's physical carrier. A FLOAT assigned to a declared `int`
+crosses `emit_checked_boundary` before any lane conversion, so a non-integral
+value returns E201 instead of reaching an incompatible move or a lossy cast.
+An inferred `var` that is written with a wider scalar in a control region is
+pre-widened at its declaration, ensuring every path observes one boxed carrier.
+
+The remaining boxed-to-native assignment arm now tests `ItemError` before
+unboxing. An `any` producer that yields an error therefore exits on the error
+channel; it can never be decoded as `0`, `0.0`, or `false` in a native local.
+This implements the destination-admission rule in **S7.8.1** and keeps the
+carrier/value distinction required by **D2.4.1–D2.4.3**. The old division-zero
+example was stale: **S4.5.1–S4.5.3** define computed zero divisors as numeric
+poison, not `ItemError`.
+
+`MIR_D2I` remains only in the guarded float-index normalization path; an
+out-of-domain magnitude maps to a non-indexable value that every bounds path
+rejects, so it is not an assignment-widening conversion.
+
+Regression: `test/lambda/proc/proc_assignment_error_carrier.ls` covers an
+`any`-returned `ItemError` assigned to an inferred native `var value = 7`, an inferred loop
+widening to `1.5`, and rejection of `1.5` at a declared `int` assignment.
+It produces `[true, 1.5, true]` under both `LAMBDA_TIER=jit` and the default
+tier. `proc_var_type_widen.ls` also passes under eager JIT.
 
 <a id="lr07-r7"></a>**LR07-R7 · Precise-root classification trusted dishonest static types · RESOLVED 2026-09-13**
 The producer and consumer halves now share the value-side TypeId
