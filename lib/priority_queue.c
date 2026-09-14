@@ -2,6 +2,7 @@
 // Min-heap implementation for priority queue
 
 #include "priority_queue.h"
+#include "grow_capacity.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -95,7 +96,10 @@ bool priority_queue_push(PriorityQueue* pq, void* data, int priority) {
     
     // Resize if needed
     if (pq->size >= pq->capacity) {
-        size_t new_capacity = pq->capacity * 2;
+        size_t new_capacity = 0;
+        if (!lib_grow_capacity(pq->capacity, pq->size + 1, INITIAL_CAPACITY,
+                               &new_capacity) ||
+            new_capacity > SIZE_MAX / sizeof(PriorityQueueEntry)) return false;
         PriorityQueueEntry* new_entries = (PriorityQueueEntry*)realloc(
             pq->entries, new_capacity * sizeof(PriorityQueueEntry));
         

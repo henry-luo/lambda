@@ -2,6 +2,7 @@
 
 #include "checked_math.hpp"
 #include "grow_capacity.h"
+#include "mem_grow.h"
 #include "arena.h"
 #include "mempool.h"
 #include "memtrack.h"
@@ -32,28 +33,20 @@ inline bool grow_capacity(size_t current_capacity, size_t min_capacity,
 template <typename T>
 inline bool mem_grow_array(T** data, int* capacity, int min_capacity,
                            int initial_capacity, MemCategory category) {
-    if (!data || !capacity || initial_capacity <= 0) return false;
-    if (*capacity >= min_capacity) return true;
-
-    int new_capacity = 0;
-    if (!grow_capacity(*capacity, min_capacity, initial_capacity, &new_capacity)) return false;
-
-    size_t bytes;
-    if (!checked_mul((size_t)new_capacity, sizeof(T), &bytes)) return false;
-
-    T* grown = (T*)mem_realloc(*data, bytes, category);
-    if (!grown) return false;
-
-    *data = grown;
-    *capacity = new_capacity;
+    if (!data || !capacity) return false;
+    void* raw = *data;
+    if (!mem_grow_array_raw_int(&raw, sizeof(T), capacity, min_capacity,
+                                initial_capacity, category)) return false;
+    *data = (T*)raw;
     return true;
 }
 
 template <typename T>
 inline bool pool_grow_array(Pool* pool, T** data, int* capacity,
                             int min_capacity, int initial_capacity) {
-    if (!pool || !data || !capacity || initial_capacity <= 0) return false;
+    if (!data || !capacity || initial_capacity <= 0) return false;
     if (*capacity >= min_capacity) return true;
+    if (!pool) return false;
 
     int new_capacity = 0;
     if (!grow_capacity(*capacity, min_capacity, initial_capacity, &new_capacity)) return false;
@@ -113,12 +106,26 @@ template <typename T>
 inline bool mem_grow_array(T** data, size_t* capacity, size_t min_capacity,
                            size_t initial_capacity, MemCategory category) {
     if (!data || !capacity || initial_capacity == 0) return false;
+    void* raw = *data;
+    if (!mem_grow_array_raw(&raw, sizeof(T), capacity, min_capacity,
+                            initial_capacity, category)) return false;
+    *data = (T*)raw;
+    return true;
+}
+
+template <typename T>
+inline bool pool_grow_array(Pool* pool, T** data, size_t* capacity,
+                            size_t min_capacity, size_t initial_capacity) {
+    if (!data || !capacity || initial_capacity == 0) return false;
     if (*capacity >= min_capacity) return true;
+    if (!pool) return false;
+
     size_t next = 0;
     if (!grow_capacity(*capacity, min_capacity, initial_capacity, &next)) return false;
     size_t bytes;
     if (!checked_mul(next, sizeof(T), &bytes)) return false;
-    T* grown = (T*)mem_realloc(*data, bytes, category);
+
+    T* grown = (T*)pool_realloc(pool, *data, bytes);
     if (!grown) return false;
     *data = grown;
     *capacity = next;

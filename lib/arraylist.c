@@ -23,6 +23,7 @@ CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include <limits.h>
 
 #include "arraylist.h"
+#include "grow_capacity.h"
 
 /* malloc() / free() testing */
 
@@ -78,32 +79,18 @@ void arraylist_free(ArrayList *arraylist)
 
 static int arraylist_enlarge(ArrayList *arraylist)
 {
-	ArrayListValue *data;
-	int newsize;
-
 	/* Double the allocated size */
 
-	newsize = arraylist->_alloced * 2;
-
 	/* Guard against int overflow in the doubling: _alloced is always >= 16, so
-	   newsize <= _alloced means the multiply wrapped (practically unreachable — needs
-	   ~1 billion entries — but otherwise a negative size reaches realloc). */
-	if (newsize <= arraylist->_alloced) {
+	   no larger capacity exists once the representable int ceiling is reached.
+	   The shared growth helper then selects the next geometric capacity. */
+	if (arraylist->_alloced >= INT_MAX) {
 		return 0;
 	}
 
 	/* Reallocate the array to the new size */
 
-	data = realloc(arraylist->data, sizeof(ArrayListValue) * newsize);
-
-	if (data == NULL) {
-		return 0;
-	} else {
-		arraylist->data = data;
-		arraylist->_alloced = newsize;
-
-		return 1;
-	}
+	return arraylist_reserve(arraylist, arraylist->_alloced + 1);
 }
 
 int arraylist_insert(ArrayList *arraylist, int index, ArrayListValue data)
@@ -296,15 +283,14 @@ int arraylist_reserve(ArrayList *arraylist, int capacity)
 {
 	if (!arraylist) return 0;
 	if (capacity <= arraylist->_alloced) return 1;
-	int newsize = arraylist->_alloced > 0 ? arraylist->_alloced : 1;
-	while (newsize < capacity) {
-		if (newsize > INT_MAX / 2) return 0;   /* next doubling would overflow / loop forever */
-		newsize *= 2;
-	}
+	size_t newsize = 0;
+	/* next doubling would overflow / loop forever without the common capacity check. */
+	if (!lib_grow_capacity((size_t)arraylist->_alloced, (size_t)capacity, 1,
+	                       &newsize) || newsize > INT_MAX ||
+	    newsize > SIZE_MAX / sizeof(ArrayListValue)) return 0;
 	ArrayListValue *data = realloc(arraylist->data, sizeof(ArrayListValue) * newsize);
 	if (!data) return 0;
 	arraylist->data = data;
-	arraylist->_alloced = newsize;
+	arraylist->_alloced = (int)newsize;
 	return 1;
 }
-

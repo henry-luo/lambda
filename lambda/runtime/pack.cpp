@@ -2,6 +2,7 @@
 #include "../../lib/log.h"
 #include <stdlib.h>
 #include "../../lib/memtrack.h"
+#include "../../lib/mem_grow.h"
 #include <string.h>
 
 #if defined(__APPLE__) || defined(__linux__)
@@ -104,6 +105,16 @@ static int convert_to_virtual(Pack* pack) {
     return convert_to_virtual_impl(pack);
 }
 
+// Regular packs share the checked geometric tracked-buffer growth contract.
+static bool pack_grow_regular(Pack* pack, size_t needed_size) {
+    if (!pack) return false;
+    void* data = pack->data;
+    if (!mem_grow_array_raw(&data, sizeof(char), &pack->capacity,
+            needed_size, INITIAL_PACK_SIZE, MEM_CAT_EVAL)) return false;
+    pack->data = data;
+    return true;
+}
+
 // Update the pack_alloc function to use vm_grow for virtual memory
 void* pack_alloc(Pack* pack, size_t size) {
     if (pack->size + size > pack->capacity) {
@@ -113,32 +124,14 @@ void* pack_alloc(Pack* pack, size_t size) {
             // Convert to virtual memory pack
             if (!convert_to_virtual(pack)) {
                 // If conversion fails, try to grow normally
-                size_t new_capacity = pack->capacity * 2;
-                while (new_capacity < pack->size + size) {
-                    new_capacity *= 2;
-                }
-                
-                void* new_data = mem_realloc(pack->data, new_capacity, MEM_CAT_EVAL);
-                if (!new_data) return NULL;
-                
-                pack->data = new_data;
-                pack->capacity = new_capacity;
+                if (!pack_grow_regular(pack, pack->size + size)) return NULL;
             }
         } else if (pack->committed_size > 0) {
             // Grow virtual memory
             vm_grow(pack, pack->size + size);
         } else {
             // Grow regular memory
-            size_t new_capacity = pack->capacity * 2;
-            while (new_capacity < pack->size + size) {
-                new_capacity *= 2;
-            }
-            
-            void* new_data = mem_realloc(pack->data, new_capacity, MEM_CAT_EVAL);
-            if (!new_data) return NULL;
-            
-            pack->data = new_data;
-            pack->capacity = new_capacity;
+            if (!pack_grow_regular(pack, pack->size + size)) return NULL;
         }
     }
     
@@ -270,17 +263,8 @@ static int convert_to_virtual_impl(Pack* pack) {
 
 static void vm_grow(Pack* pack, size_t needed_size) {
     // Fallback implementation using regular malloc/realloc
-    size_t new_capacity = pack->capacity * 2;
-    while (new_capacity < needed_size) {
-        new_capacity *= 2;
-    }
-    
-    void* new_data = mem_realloc(pack->data, new_capacity, MEM_CAT_EVAL);
-    if (new_data) {
-        pack->data = new_data;
-        pack->capacity = new_capacity;
-        pack->committed_size = new_capacity;
-    }
+    if (!pack_grow_regular(pack, needed_size)) return;
+    pack->committed_size = pack->capacity;
 }
 
 void pack_free(Pack* pack) {

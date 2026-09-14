@@ -1,5 +1,6 @@
 #include "js_mir_internal.hpp"
 #include "js_exec_profile.h"
+#include "../../lib/mem_grow.hpp"
 #include <limits.h>
 #include <stdarg.h>
 
@@ -463,13 +464,12 @@ void jm_register_owned_env(JsMirTranspiler* mt, MIR_reg_t reg) {
     for (int i = 0; i < mt->func_em->em.frame.env_binding_count; i++) {
         if (mt->func_em->em.frame.env_bindings[i].source_reg == reg) return;
     }
-    if (mt->func_em->em.frame.env_binding_count >= mt->func_em->em.frame.env_binding_capacity) {
-        int next_capacity = mt->func_em->em.frame.env_binding_capacity
-            ? mt->func_em->em.frame.env_binding_capacity * 2 : 8;
-        mt->func_em->em.frame.env_bindings = (JsMirEnvBinding*)mem_realloc(
-            mt->func_em->em.frame.env_bindings,
-            (size_t)next_capacity * sizeof(JsMirEnvBinding), MEM_CAT_JS_RUNTIME);
-        mt->func_em->em.frame.env_binding_capacity = next_capacity;
+    if (!lam::mem_grow_array(&mt->func_em->em.frame.env_bindings,
+            &mt->func_em->em.frame.env_binding_capacity,
+            mt->func_em->em.frame.env_binding_count + 1, 8,
+            MEM_CAT_JS_RUNTIME)) {
+        log_error("js-mir-owned-env: unable to grow binding table");
+        return;
     }
     // MIR name reuse can overwrite an allocation-result register before the
     // unified epilogue. Preserve the environment pointer in a dedicated SSA-like
@@ -1032,15 +1032,12 @@ JsMirVarEntry* jm_find_var_at(JsMirTranspiler* mt, const char* name,
 bool jm_closure_tracker_reserve(JsClosureTracker* tracker, int n) {
     if (!tracker || n < 0) return false;
     if (n <= tracker->capacity) return true;
-    int capacity = tracker->capacity ? tracker->capacity : 8;
-    while (capacity < n) capacity *= 2;
-    JsClosureCapture* grown = (JsClosureCapture*)mem_realloc(tracker->captures,
-        (size_t)capacity * sizeof(JsClosureCapture), MEM_CAT_JS_RUNTIME);
-    if (!grown) return false;
-    memset(grown + tracker->capacity, 0,
-           (size_t)(capacity - tracker->capacity) * sizeof(JsClosureCapture));
-    tracker->captures = grown;
-    tracker->capacity = capacity;
+    int old_capacity = tracker->capacity;
+    if (!lam::mem_grow_array(&tracker->captures, &tracker->capacity, n, 8,
+            MEM_CAT_JS_RUNTIME)) return false;
+    memset(tracker->captures + old_capacity, 0,
+           (size_t)(tracker->capacity - old_capacity) *
+               sizeof(JsClosureCapture));
     return true;
 }
 
@@ -1053,16 +1050,11 @@ void jm_closure_checkpoint_save(JsMirTranspiler* mt,
     checkpoint->capture_count = mt->last_closure.count;
     checkpoint->journal_mark = mt->last_closure.journal_count;
     int needed = mt->last_closure.journal_count + mt->last_closure.count;
-    if (needed > mt->last_closure.journal_capacity) {
-        int capacity = mt->last_closure.journal_capacity
-            ? mt->last_closure.journal_capacity : 16;
-        while (capacity < needed) capacity *= 2;
-        JsClosureCapture* grown = (JsClosureCapture*)mem_realloc(
-            mt->last_closure.journal,
-            (size_t)capacity * sizeof(JsClosureCapture), MEM_CAT_JS_RUNTIME);
-        if (!grown) { checkpoint->capture_count = 0; return; }
-        mt->last_closure.journal = grown;
-        mt->last_closure.journal_capacity = capacity;
+    if (!lam::mem_grow_array(&mt->last_closure.journal,
+            &mt->last_closure.journal_capacity, needed, 16,
+            MEM_CAT_JS_RUNTIME)) {
+        checkpoint->capture_count = 0;
+        return;
     }
     for (int i = 0; i < mt->last_closure.count; i++) {
         JsClosureCapture entry = mt->last_closure.captures[i];

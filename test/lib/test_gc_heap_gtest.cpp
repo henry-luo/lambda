@@ -32,6 +32,7 @@ extern "C" {
 #include "../../lambda/runtime/gc/gc_object_zone.h"
 #include "../../lambda/runtime/gc/gc_data_zone.h"
 #include "../../lib/mempool.h"
+#include "../../lib/memtrack.h"
 #include "../../lambda/runtime/side_stack.h"
 #include "../../lambda/runtime/recovery_frame.h"
 #include "../../lambda/runtime/lambda-stack.h"
@@ -811,6 +812,81 @@ TEST_F(GCHeapTest, ParallelSlabOwnersStayAlignedAcrossRangeGrowth) {
     }
 
     free(objects);
+}
+
+TEST_F(GCHeapTest, RangeGrowthFailureIsAtomicAndReleasesUnregisteredSlab) {
+    static_assert(sizeof(gc_slab_range_t) == 2 * sizeof(void*),
+        "slab-range search entries must stay cache-dense");
+
+    gc_object_zone_t* zone = gc->object_zone;
+    ASSERT_NE(zone, nullptr);
+    ASSERT_LT(zone->range_count, zone->range_capacity);
+
+    // Fill the existing capacity without allocating so the next registration
+    // must grow both parallel arrays.
+    size_t filler_count = zone->range_capacity - zone->range_count;
+    uint8_t* filler = (uint8_t*)calloc(filler_count + 2, 2);
+    ASSERT_NE(filler, nullptr);
+    for (size_t i = 0; i < filler_count; i++) {
+        ASSERT_TRUE(gc_object_zone_register_range(zone, filler + i * 2, 1));
+    }
+    ASSERT_EQ(zone->range_count, zone->range_capacity);
+
+    gc_slab_range_t* ranges_before = zone->slab_ranges;
+    gc_object_slab_t** owners_before = zone->range_slabs;
+    size_t count_before = zone->range_count;
+    size_t capacity_before = zone->range_capacity;
+    uint8_t* min_before = zone->min_addr;
+    uint8_t* max_before = zone->max_addr;
+
+    // Cover failure of each allocation in the paired resize. Neither attempt
+    // may publish a new array, range, or bound.
+    memtrack_fault_inject(0);
+    EXPECT_FALSE(gc_object_zone_register_range(zone, filler + filler_count * 2, 1));
+    memtrack_fault_clear();
+    EXPECT_EQ(zone->slab_ranges, ranges_before);
+    EXPECT_EQ(zone->range_slabs, owners_before);
+    EXPECT_EQ(zone->range_count, count_before);
+    EXPECT_EQ(zone->range_capacity, capacity_before);
+    EXPECT_EQ(zone->min_addr, min_before);
+    EXPECT_EQ(zone->max_addr, max_before);
+
+    memtrack_fault_inject(1);
+    EXPECT_FALSE(gc_object_zone_register_range(zone, filler + (filler_count + 1) * 2, 1));
+    memtrack_fault_clear();
+    EXPECT_EQ(zone->slab_ranges, ranges_before);
+    EXPECT_EQ(zone->range_slabs, owners_before);
+    EXPECT_EQ(zone->range_count, count_before);
+    EXPECT_EQ(zone->range_capacity, capacity_before);
+    EXPECT_EQ(zone->min_addr, min_before);
+    EXPECT_EQ(zone->max_addr, max_before);
+
+    // Exhaust a class's initial slab, then fail the second allocation of its
+    // range-table resize. The failed slab must not be linked or counted.
+    int cls = gc_object_zone_class_index(16);
+    ASSERT_GE(cls, 0);
+    gc_object_slab_t* initial_slab = zone->fresh_slabs[cls];
+    ASSERT_NE(initial_slab, nullptr);
+    for (size_t i = 0; i < initial_slab->slot_count; i++) {
+        ASSERT_NE(gc_object_zone_alloc(zone, 16, LMD_TYPE_STRING, &gc->all_objects), nullptr);
+    }
+    ASSERT_EQ(initial_slab->next_fresh, initial_slab->slot_count);
+    size_t slab_count_before = zone->slab_count;
+
+    // VM reserve/commit and slab metadata consume five allocation-fault slots;
+    // the sixth reaches the first range array and the seventh rejects its owner array.
+    memtrack_fault_inject(6);
+    EXPECT_EQ(gc_object_zone_alloc(zone, 16, LMD_TYPE_STRING, &gc->all_objects), nullptr);
+    memtrack_fault_clear();
+    EXPECT_EQ(zone->slabs[cls], initial_slab);
+    EXPECT_EQ(zone->fresh_slabs[cls], initial_slab);
+    EXPECT_EQ(zone->slab_count, slab_count_before);
+    EXPECT_EQ(zone->slab_ranges, ranges_before);
+    EXPECT_EQ(zone->range_slabs, owners_before);
+    EXPECT_EQ(zone->range_count, count_before);
+    EXPECT_EQ(zone->range_capacity, capacity_before);
+
+    free(filler);
 }
 
 TEST_F(GCHeapTest, ExternalPayloadFinalizerRunsDuringSweep) {

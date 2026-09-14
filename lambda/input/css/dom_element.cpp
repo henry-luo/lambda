@@ -17,6 +17,7 @@
 #include "../../../lib/str.h"
 #include "../../../lib/arena.h"
 #include "../../../lib/memtrack.h"
+#include "../../../lib/mem_grow.hpp"
 #include "../../lambda-data.hpp"  // For get_type_id, and proper type definitions
 #include "../../core/well_known_markup_names.h"
 #include "../../core/mark_reader.hpp"  // For ElementReader
@@ -767,15 +768,10 @@ static bool dom_element_set_synthetic_attribute(DomElement* element,
         return true;
     }
     if (data->synthetic_attribute_count == data->synthetic_attribute_capacity) {
-        int next_capacity = data->synthetic_attribute_capacity == 0 ? 4
-                          : data->synthetic_attribute_capacity * 2;
-        DomSyntheticAttribute* attrs =
-            static_cast<DomSyntheticAttribute*>(pool_realloc(
-                element->doc->document_pool, data->synthetic_attributes,
-                (size_t)next_capacity * sizeof(DomSyntheticAttribute)));
-        if (!attrs) return false;
-        data->synthetic_attributes = attrs;
-        data->synthetic_attribute_capacity = next_capacity;
+        if (!lam::pool_grow_array(element->doc->document_pool,
+                                  &data->synthetic_attributes,
+                                  &data->synthetic_attribute_capacity,
+                                  data->synthetic_attribute_count + 1, 4)) return false;
     }
     char* name_copy = pool_strdup(element->doc->document_pool, lower_name);
     char* value_copy = pool_strdup(element->doc->document_pool, value);
@@ -1049,13 +1045,10 @@ const char** DomElement::attribute_names(int* count) {
         DomElementExt* data = element->ext;
         int attr_count = data ? data->synthetic_attribute_count : 0;
         if (attr_count == 0) return nullptr;
-        if (attr_count > data->attribute_names_capacity) {
-            const char** names = (const char**)pool_realloc(
-                element->doc->document_pool, (void*)data->attribute_names_cache,
-                attr_count * sizeof(const char*));
-            if (!names) return nullptr;
-            data->attribute_names_cache = names;
-            data->attribute_names_capacity = attr_count;
+        if (!lam::pool_grow_array(element->doc->document_pool,
+                &data->attribute_names_cache,
+                &data->attribute_names_capacity, attr_count, 16)) {
+            return nullptr;
         }
         for (int i = 0; i < attr_count; i++) {
             data->attribute_names_cache[i] = data->synthetic_attributes[i].name;
@@ -1071,14 +1064,9 @@ const char** DomElement::attribute_names(int* count) {
 
     DomElementExt* data = element->ensure_ext();
     if (!data) return nullptr;
-    if (attr_count > data->attribute_names_capacity) {
-        const char** names = (const char**)pool_realloc(
-            element->doc->document_pool, (void*)data->attribute_names_cache,
-            attr_count * sizeof(const char*));
-        if (!names) return nullptr;
-        data->attribute_names_cache = names;
-        data->attribute_names_capacity = attr_count;
-    }
+    if (!lam::pool_grow_array(element->doc->document_pool,
+            &data->attribute_names_cache, &data->attribute_names_capacity,
+            attr_count, 16)) return nullptr;
     const char** names = data->attribute_names_cache;
 
     // Iterate through shape to collect names
