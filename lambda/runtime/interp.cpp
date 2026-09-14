@@ -951,13 +951,11 @@ static void interp_upgrade_function_entry(Function* fn, const AstFuncNode* def,
 
 
 bool interp_native_sys_item_supported(const SysFuncInfo* info) {
-    if (!info || info->c_arg_conv != C_ARG_NATIVE) return false;
+    if (!info || !sysfunc_args_require_rep(info, VALUE_REP_INT_LANE)) return false;
     switch (info->fn) {
     case SYSFUNC_BAND:
     case SYSFUNC_BOR:
     case SYSFUNC_BXOR:
-    case SYSFUNC_SHL:
-    case SYSFUNC_SHR:
         return info->arg_count == 2;
     case SYSFUNC_BNOT:
         return info->arg_count == 1;
@@ -1018,7 +1016,7 @@ static Item eval_sys_call(InterpFrame* f, SysFuncInfo* info, const Item* args,
         }
     }
 
-    if (info->c_arg_conv == C_ARG_NATIVE) {
+    if (interp_native_sys_item_supported(info)) {
         return eval_native_sys_item_call(info, args, argc, result_type);
     }
 

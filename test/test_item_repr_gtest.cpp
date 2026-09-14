@@ -13,6 +13,7 @@
 #include "../lambda/runtime/heap_api.h"
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/side_stack.h"
+#include "../lambda/runtime/sys_func_registry.h"
 #include "../lib/memtrack.h"
 
 extern "C" {
@@ -21,6 +22,13 @@ extern "C" {
 }
 
 namespace {
+
+static const SysFuncInfo* item_repr_sysfunc_info(SysFunc fn) {
+    for (int index = 0; index < sys_func_def_count; index++) {
+        if (sys_func_defs[index].fn == fn) return &sys_func_defs[index];
+    }
+    return NULL;
+}
 
 static void expect_raw_item_header(void* ptr, TypeId expected_type) {
     // Constructors must write byte-zero TypeId before exposing raw-pointer Items.
@@ -60,6 +68,42 @@ protected:
         }
     }
 };
+
+TEST(SysFuncRegistry, NativeBitwiseArgumentsUsePerSlotDescriptors) {
+    const SysFunc native_binary[] = {SYSFUNC_BAND, SYSFUNC_BOR, SYSFUNC_BXOR};
+    for (int index = 0; index < 3; index++) {
+        const SysFuncInfo* info = item_repr_sysfunc_info(native_binary[index]);
+        ASSERT_NE(info, nullptr);
+        ASSERT_EQ(info->arg_count, 2);
+        ASSERT_NE(info->c_arg_descs, nullptr);
+        EXPECT_EQ(sysfunc_arg_required_rep(info, 0), VALUE_REP_INT_LANE);
+        EXPECT_EQ(sysfunc_arg_required_rep(info, 1), VALUE_REP_INT_LANE);
+        EXPECT_TRUE(sysfunc_args_require_rep(info, VALUE_REP_INT_LANE));
+    }
+
+    const SysFuncInfo* bnot = item_repr_sysfunc_info(SYSFUNC_BNOT);
+    ASSERT_NE(bnot, nullptr);
+    ASSERT_EQ(bnot->arg_count, 1);
+    ASSERT_NE(bnot->c_arg_descs, nullptr);
+    EXPECT_EQ(sysfunc_arg_required_rep(bnot, 0), VALUE_REP_INT_LANE);
+
+    const SysFuncArgDesc mixed_args[] = {
+        {VALUE_REP_ITEM},
+        {VALUE_REP_F64},
+    };
+    SysFuncInfo mixed = {};
+    mixed.arg_count = 2;
+    mixed.c_arg_descs = mixed_args;
+    EXPECT_EQ(sysfunc_arg_required_rep(&mixed, 0), VALUE_REP_ITEM);
+    EXPECT_EQ(sysfunc_arg_required_rep(&mixed, 1), VALUE_REP_F64);
+    EXPECT_FALSE(sysfunc_args_require_rep(&mixed, VALUE_REP_ITEM));
+
+    const SysFuncInfo* len = item_repr_sysfunc_info(SYSFUNC_LEN);
+    ASSERT_NE(len, nullptr);
+    EXPECT_EQ(len->c_arg_descs, nullptr);
+    EXPECT_EQ(sysfunc_arg_required_rep(len, 0), VALUE_REP_ITEM);
+    EXPECT_TRUE(sysfunc_args_require_rep(len, VALUE_REP_ITEM));
+}
 
 static String* shape_transition_test_name(Pool* pool, const char* text) {
     size_t length = strlen(text);
