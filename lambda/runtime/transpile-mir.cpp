@@ -278,6 +278,13 @@ struct MirTranspiler {
     // A dense typed-array loop may prove its full index extent once at entry;
     // the guard is consulted only by the nullable-float arithmetic fast arm.
     MIR_reg_t typed_array_inbounds_guard;
+    // T26-4's unique-owner proof conjoined with the read guard, for stores
+    // only: a `var` root whose ownership/certificate word fails at loop entry
+    // must not void the READ proofs of its sibling roots (typed matmul ran
+    // its whole nest on the checked arm, 3x, because `var c: float[]`'s
+    // write guard was ANDed into the one register every `a[..]`/`b[..]`
+    // read branched on).
+    MIR_reg_t typed_array_dense_store_guard;
     NameEntry* typed_array_inbounds_extent;
     NameEntry* typed_array_inbounds_roots[8];
     int typed_array_inbounds_root_count;
@@ -11888,11 +11895,14 @@ static MirValue emit_binary_value(MirTranspiler* mt, AstBinaryNode* bi,
 
         emit_label(mt, slow);
         MIR_reg_t saved_guard = mt->typed_array_inbounds_guard;
+        MIR_reg_t saved_store_guard = mt->typed_array_dense_store_guard;
         mt->typed_array_inbounds_guard = 0;
+        mt->typed_array_dense_store_guard = 0;
         MirValue slow_value = emit_binary_value(mt, bi, native_int_out);
         MIR_reg_t fallback = em_require_rep(&mt->em, slow_value,
             VALUE_REP_F64).reg;
         mt->typed_array_inbounds_guard = saved_guard;
+        mt->typed_array_dense_store_guard = saved_store_guard;
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
             MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, fallback)));
         emit_label(mt, done);
@@ -15691,6 +15701,10 @@ static MIR_reg_t mir_prepare_dense_loop_guard(MirTranspiler* mt,
             continue;
         }
         Type* contract = mir_var_array_contract(root);
+        log_debug("mir-dense: guarded root '%.*s' proven=%d var_param=%d cow_marked=%d write_guard=%d",
+            (int)scan.roots[i].binding->name->len, scan.roots[i].binding->name->chars,
+            (int)mir_typed_array_contract_is_proven(root, contract), (int)root->is_var_param,
+            (int)root->cow_marked, (int)mir_typed_array_write_guard_root(mt, root));
         if (contract && !mir_typed_array_contract_is_proven(root, contract)) {
             LambdaArrayContractInfo contract_info = {};
             ArrayNumElemType expected_elem = ELEM_INT;
@@ -15722,6 +15736,7 @@ static MIR_reg_t mir_prepare_dense_loop_guard(MirTranspiler* mt,
             scan.roots[i].binding;
     }
     mt->typed_array_inbounds_guard = guard;
+    mt->typed_array_dense_store_guard = guard;
     mt->typed_array_inbounds_extent = extent;
     mt->typed_array_inbounds_root_count = guarded_root_count;
     memcpy(mt->typed_array_inbounds_indices, scan.bounded_indices,
@@ -15732,11 +15747,15 @@ static MIR_reg_t mir_prepare_dense_loop_guard(MirTranspiler* mt,
             mt->typed_array_inbounds_roots[i]);
         if (mir_typed_array_write_guard_root(mt, root)) {
             // A dense write needs both the full length proof and T26-4's
-            // unique owner proof. Keep one combined guard so each hot store
-            // takes a single branch directly to its raw address calculation.
+            // unique owner proof: one combined register so each hot store
+            // takes a single branch to its raw address calculation. It is a
+            // SEPARATE register from the read guard -- a store root's failed
+            // ownership word must not send every read to the checked arm.
+            MIR_reg_t store_guard = new_reg(mt, "dense_store_ok", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
-                MIR_new_reg_op(mt->ctx, guard), MIR_new_reg_op(mt->ctx, guard),
+                MIR_new_reg_op(mt->ctx, store_guard), MIR_new_reg_op(mt->ctx, guard),
                 MIR_new_reg_op(mt->ctx, mt->typed_array_write_guard)));
+            mt->typed_array_dense_store_guard = store_guard;
             break;
         }
     }
@@ -15751,6 +15770,7 @@ static MIR_reg_t transpile_while_core(MirTranspiler* mt, AstWhileNode* while_nod
     NameEntry* saved_compact_rhs = mt->compact_loop_sub_rhs;
     NameEntry* saved_compact_counter = mt->compact_loop_add_lhs;
     MIR_reg_t saved_inbounds_guard = mt->typed_array_inbounds_guard;
+    MIR_reg_t saved_dense_store_guard = mt->typed_array_dense_store_guard;
     NameEntry* saved_inbounds_extent = mt->typed_array_inbounds_extent;
     NameEntry* saved_inbounds_roots[8];
     memcpy(saved_inbounds_roots, mt->typed_array_inbounds_roots,
@@ -15869,6 +15889,7 @@ static MIR_reg_t transpile_while_core(MirTranspiler* mt, AstWhileNode* while_nod
     pop_scope(mt);
 
     mt->typed_array_inbounds_guard = saved_inbounds_guard;
+    mt->typed_array_dense_store_guard = saved_dense_store_guard;
     mt->typed_array_inbounds_extent = saved_inbounds_extent;
     memcpy(mt->typed_array_inbounds_roots, saved_inbounds_roots,
         sizeof(mt->typed_array_inbounds_roots));
@@ -27886,12 +27907,12 @@ static void emit_array_num_direct_store(MirTranspiler* mt,
     }
     if (dense_write_guard) {
         // T26-2 proved every scanned read and write index is within the
-        // stable extent; T26-4 is conjoined into this guard at loop entry.
-        // The raw store therefore needs neither a carrier recheck nor a
-        // repeated bounds branch in the hot arm.
+        // stable extent; T26-4 is conjoined into the STORE guard at loop
+        // entry. The raw store therefore needs neither a carrier recheck nor
+        // a repeated bounds branch in the hot arm.
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
             MIR_new_label_op(mt->ctx, dense_store),
-            MIR_new_reg_op(mt->ctx, mt->typed_array_inbounds_guard)));
+            MIR_new_reg_op(mt->ctx, mt->typed_array_dense_store_guard)));
     }
     if (loop_write_guard) {
         // T26-4 proves the receiver's exact lane, certificate, and unique
@@ -32974,6 +32995,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     bool saved_in_user_func = mt->in_user_func;
     AstNode* saved_func_body = mt->func_body;
     MIR_reg_t saved_typed_array_inbounds_guard = mt->typed_array_inbounds_guard;
+    MIR_reg_t saved_typed_array_dense_store_guard = mt->typed_array_dense_store_guard;
     NameEntry* saved_typed_array_inbounds_extent = mt->typed_array_inbounds_extent;
     NameEntry* saved_typed_array_inbounds_roots[8];
     memcpy(saved_typed_array_inbounds_roots, mt->typed_array_inbounds_roots,
@@ -33015,6 +33037,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->in_user_func = true;
     mt->func_body = fn_node->body;  // P4-3.2: for mutation analysis
     mt->typed_array_inbounds_guard = 0;
+    mt->typed_array_dense_store_guard = 0;
     mt->typed_array_inbounds_extent = NULL;
     memset(mt->typed_array_inbounds_roots, 0,
         sizeof(mt->typed_array_inbounds_roots));
@@ -33967,6 +33990,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->in_user_func = saved_in_user_func;
     mt->func_body = saved_func_body;
     mt->typed_array_inbounds_guard = saved_typed_array_inbounds_guard;
+    mt->typed_array_dense_store_guard = saved_typed_array_dense_store_guard;
     mt->typed_array_inbounds_extent = saved_typed_array_inbounds_extent;
     memcpy(mt->typed_array_inbounds_roots, saved_typed_array_inbounds_roots,
         sizeof(mt->typed_array_inbounds_roots));

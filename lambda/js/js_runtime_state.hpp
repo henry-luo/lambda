@@ -217,6 +217,10 @@ enum JsRealmSlotId {
 
 struct JsRealmSlots {
     RootVector values = {};
+    // The dynamic suffix (typed-array base .. JS_REALM_SLOT_COUNT) is reserved
+    // once per realm store; cleared with the store. Without it every intrinsic
+    // prototype lookup re-walked the reservation (LambdaJS 20x, Result44).
+    bool suffix_reserved = false;
 };
 
 void js_realm_slots_init(JsRealmSlots* slots, Context* owner);

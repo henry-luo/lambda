@@ -840,6 +840,12 @@ bool js_root_vector_ensure_registered(RootVector* roots) {
 
 bool js_realm_intrinsic_slots_ensure_roots(void) {
     if (!js_active_runtime_state || !js_runtime_state.intrinsics) return false;
+    // Once reserved, the suffix stays reserved until the store is cleared or
+    // destroyed (js_realm_slots_clear/destroy drop the flag). This sits on the
+    // intrinsic-prototype lookup path since c7e285e51, where re-walking the
+    // reservation on every `js_get_prototype_of` cost LambdaJS 20x (Result44:
+    // 94% of samples inside this function).
+    if (js_runtime_state.realm_slots.suffix_reserved) return true;
     // Fixed semantic spans must be bound before this lazy catalog reservation;
     // registration can otherwise let a bootstrap collection observe an
     // unconfigured owner range while the realm store grows (D5.3.5).
@@ -852,6 +858,7 @@ bool js_realm_intrinsic_slots_ensure_roots(void) {
         if (!js_realm_slot(&js_runtime_state.realm_slots,
                 (JsRealmSlotId)slot)) return false;
     }
+    js_runtime_state.realm_slots.suffix_reserved = true;
     return true;
 }
 
@@ -860,11 +867,15 @@ void js_realm_slots_init(JsRealmSlots* slots, Context* owner) {
 }
 
 void js_realm_slots_destroy(JsRealmSlots* slots) {
-    if (slots) root_vector_destroy(&slots->values);
+    if (!slots) return;
+    root_vector_destroy(&slots->values);
+    slots->suffix_reserved = false;
 }
 
 void js_realm_slots_clear(JsRealmSlots* slots) {
-    if (slots) root_vector_clear(&slots->values);
+    if (!slots) return;
+    root_vector_clear(&slots->values);
+    slots->suffix_reserved = false;
 }
 
 void js_realm_slots_clear_transient(JsRealmSlots* slots) {
