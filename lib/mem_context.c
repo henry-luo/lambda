@@ -112,8 +112,7 @@ static uint32_t current_thread_id(void) {
 #else
     pthread_t t = pthread_self();
     // FNV-1a over the opaque pthread_t bytes -> 32-bit id
-    const unsigned char* p = (const unsigned char*)&t;
-    uint64_t h = hash_fnv1a_64_extend(1469598103934665603ULL, p, sizeof(t));
+    uint64_t h = hash_fnv1a_64(&t, sizeof(t));
     return (uint32_t)(h ^ (h >> 32));
 #endif
 }

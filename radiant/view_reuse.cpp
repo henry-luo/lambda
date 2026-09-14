@@ -22,7 +22,7 @@ static uint32_t inline_float_hash_bits(float value) {
 
 uint64_t inline_prop_hash(const InlineProp* value) {
     if (!value) return 0;
-    uint64_t hash = 1469598103934665603ULL;
+    uint64_t hash = HASH_FNV1A_64_OFFSET_BASIS;
 #define INLINE_HASH_FIELD(field) hash = hash_fnv1a_64_extend_u64le(hash, (uint64_t)value->field)
     INLINE_HASH_FIELD(cursor);
     INLINE_HASH_FIELD(caret_shape);

@@ -20,8 +20,7 @@ extern "C" Item interp_eval_view_template(Context* context, Script* module,
 // no-false-negative prefilter before its exact strcmp lookup.
 static uint64_t template_event_mask_bit(const char* event_name) {
     if (!event_name || !event_name[0]) return 0;
-    uint64_t hash = UINT64_C(1469598103934665603);
-    hash = hash_fnv1a_64_extend_cstr(hash, event_name);
+    uint64_t hash = hash_fnv1a_64_cstr(event_name);
     return UINT64_C(1) << (hash & 63u);
 }
 

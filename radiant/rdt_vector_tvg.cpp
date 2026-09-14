@@ -223,14 +223,14 @@ static RdtPath::Entry* path_append_entry(RdtPath* path, RdtPath::Cmd command) {
 }
 
 static uint64_t rdt_picture_data_hash(const char* data, int size, const char* mime_type) {
-    uint64_t h = 1469598103934665603ULL;
+    uint64_t h = HASH_FNV1A_64_OFFSET_BASIS;
     if (size > 0) h = hash_fnv1a_64_extend(h, data, (size_t)size);
     if (mime_type) h = hash_fnv1a_64_extend_cstr(h, mime_type);
     return h;
 }
 
 static uint64_t rdt_paint_hash_path(const RdtPath* path) {
-    uint64_t h = 1469598103934665603ULL;
+    uint64_t h = HASH_FNV1A_64_OFFSET_BASIS;
     if (!path) return h;
     h = hash_fnv1a_64_extend(h, &path->count, sizeof(path->count));
     for (int i = 0; i < path->count; i++) {

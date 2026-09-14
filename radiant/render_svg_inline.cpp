@@ -2655,7 +2655,7 @@ static char* resolve_font_via_fontface(FontContext* font_ctx, const char* family
 
         // hash the data URI suffix (after comma) for a stable filename
         // simple FNV-1a 64-bit
-        uint64_t h = hash_fnv1a_64_extend_cstr(1469598103934665603ULL, comma + 1);
+        uint64_t h = hash_fnv1a_64_cstr(comma + 1);
 
         char temp_path[512];
         snprintf(temp_path, sizeof(temp_path), "./temp/lambda_font_%016llx.%s",
