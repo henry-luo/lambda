@@ -1731,3 +1731,37 @@ D4.4.5) and one revised (D8.1.1v10); formal design 5.1.0 after the merge.
   `proc_nullable_*` crashes): none introduced here; all reproduce on HEAD.
 - mbrot's annotation penalty (G7) and spectralnorm's `eval_A` residue
   (G5): both are the typed float parameter range question of §10.8.
+
+## 12. Post-Result44 fixes (2026-09-14)
+
+Result44 (`acd1e88d1`, the Tune27 merge plus upstream's libify/JS-simplify
+commits) carried two regressions that a per-row read against Result43
+exposed; both are root-caused and fixed here.
+
+**LambdaJS 20x (upstream `c7e285e51 "JS simplify"`, not Tune27).**
+LambdaJS/Node went 19.9x → 55.0x; on the binaries sieve2.js 3.2 → 68 ms,
+puzzle 54 → 1,304, base64 522 → 10,572, r45 (pre-merge) fast and r46
+(post-merge) slow. A `sample` put 94% of the run inside
+`js_realm_intrinsic_slots_ensure_roots()`: the commit replaced the per-class
+cached prototype root in `js_get_intrinsic_prototype_for_class` with
+`js_intrinsic_prototype_slot()`, which calls `ensure_roots` on **every**
+prototype lookup, and that routine re-ran `js_runtime_state_prepare_root_vectors`
+plus a reservation loop over every realm slot from the typed-array base each
+time. Its own comment says "reserve the complete suffix once"; the code now
+does: `JsRealmSlots::suffix_reserved` is set after the first successful
+reservation and dropped by `js_realm_slots_clear`/`destroy` (the full-reset
+path; a transient reset keeps the vector's length and therefore the
+reservation). Output identical to v43 on the JS rows.
+
+**Typed matmul 3.0x slower than untyped (T27-9 residue, §11).** Untyped
+matmul dropped 17.7 → 5.9 ms with the §10.16 proofs; the typed twin stayed
+at 17.7. The only difference is `var c: float[]`; with the store moved out of
+the loop nest the typed body runs in 5.7 ms. `mir_prepare_dense_loop_guard`
+ANDed T26-4's unique-owner write guard for `c` (carrier, certificate and COW
+words at loop entry) into the single register every `a[..]`/`b[..]` read
+branched on; one of `c`'s words fails at run time and the whole nest ran on
+the checked arm. Stores now branch on a separate `typed_array_dense_store_guard`
+(inbounds ∧ write guard); the read guard stays the pure extent proof. Which
+word of `c`'s write guard fails (its certificate identity is the suspect) is
+a follow-up: it only costs `c`'s own stores, exactly what the untyped twin
+pays through its `cow_marked` snapshot root.

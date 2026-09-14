@@ -43,6 +43,7 @@ extern "C" bool js_promise_vmap_is(Item value);
 #include "../../lib/base64.h"
 #include "../../lib/escape.h"
 #include "../../lib/log.h"
+#include "../../lib/mem_grow.hpp"
 #include "../../lib/time_util.h"
 #include "../../lib/utf.h"
 #include <assert.h>
@@ -11579,13 +11580,8 @@ static void js_json_scan_number_token(const char** p) {
 }
 
 static void js_json_source_list_add(JsJsonSourceList* list, const char* start, int len) {
-    if (list->count >= list->capacity) {
-        int new_capacity = list->capacity ? list->capacity * 2 : 16;
-        Item* new_items = (Item*)mem_realloc(list->items, sizeof(Item) * (size_t)new_capacity, MEM_CAT_JS_RUNTIME);
-        if (!new_items) return;
-        list->items = new_items;
-        list->capacity = new_capacity;
-    }
+    if (!lam::mem_grow_array(&list->items, &list->capacity,
+            list->count + 1, 16, MEM_CAT_JS_RUNTIME)) return;
     list->items[list->count++] = js_name_item(start, len);
 }
 
@@ -11661,14 +11657,8 @@ static bool js_json_value_has_source(Item value) {
 static void js_json_source_entry_add(JsJsonReviveState* state, Item holder, Item key,
         int source_index, Item original_value) {
     if (!state) return;
-    if (state->entry_count >= state->entry_capacity) {
-        int new_capacity = state->entry_capacity ? state->entry_capacity * 2 : 16;
-        JsJsonSourceEntry* new_entries = (JsJsonSourceEntry*)mem_realloc(state->entries,
-            sizeof(JsJsonSourceEntry) * (size_t)new_capacity, MEM_CAT_JS_RUNTIME);
-        if (!new_entries) return;
-        state->entries = new_entries;
-        state->entry_capacity = new_capacity;
-    }
+    if (!lam::mem_grow_array(&state->entries, &state->entry_capacity,
+            state->entry_count + 1, 16, MEM_CAT_JS_RUNTIME)) return;
     JsJsonSourceEntry* entry = &state->entries[state->entry_count++];
     entry->holder_item = holder.item;
     entry->key = key;

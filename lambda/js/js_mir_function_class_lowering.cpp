@@ -1,6 +1,7 @@
 #include "js_mir_internal.hpp"
 #include "js_exec_profile.h"
 #include "../../lib/lambda_alloca.h"
+#include "../../lib/mem_grow.hpp"
 
 // ============================================================================
 // Function definition transpiler
@@ -1029,19 +1030,17 @@ static MIR_label_t jm_emit_resumable_state_dispatch(JsMirTranspiler* mt,
         int state_count, bool needs_error_lane) {
     // states are 0..state_count inclusive, so the array must hold one more
     int needed = state_count + 1;
-    if (needed > mt->gen_state_label_capacity) {
-        MIR_label_t* grown = (MIR_label_t*)mem_realloc(mt->gen_state_labels,
-            (size_t)needed * sizeof(MIR_label_t), MEM_CAT_JS_RUNTIME);
-        if (!grown) {
-            log_error("js-mir: cannot size generator resume labels for %d states",
-                      state_count);
-            return 0;
-        }
-        memset(grown + mt->gen_state_label_capacity, 0,
-               (size_t)(needed - mt->gen_state_label_capacity) * sizeof(MIR_label_t));
-        mt->gen_state_labels = grown;
-        mt->gen_state_label_capacity = needed;
+    int old_capacity = mt->gen_state_label_capacity;
+    if (!lam::mem_grow_array(&mt->gen_state_labels,
+            &mt->gen_state_label_capacity, needed, 16,
+            MEM_CAT_JS_RUNTIME)) {
+        log_error("js-mir: cannot size generator resume labels for %d states",
+                  state_count);
+        return 0;
     }
+    memset(mt->gen_state_labels + old_capacity, 0,
+           (size_t)(mt->gen_state_label_capacity - old_capacity) *
+               sizeof(MIR_label_t));
     for (int si = 0; si <= state_count; si++) {
         mt->gen_state_labels[si] = jm_new_label(mt);
     }

@@ -23,6 +23,7 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 #include "../../../lib/log.h"
 #include <cstring>
 #include "../../../lib/mem.h"
+#include "../../../lib/mem_grow.hpp"
 #include "../../../lib/hex.h"
 #include "../../../lib/base64.h"
 #include "../../../lib/uuid.h"
@@ -1356,18 +1357,19 @@ static void hmac_ctx_free(HmacCtx* ctx) {
     else hmac_ctx_release(ctx);
 }
 
-static void crypto_append_bytes(uint8_t** data, int* data_len, int* data_cap,
+static bool crypto_append_bytes(uint8_t** data, int* data_len, int* data_cap,
         const uint8_t* buf, int len) {
-    if (!data || !data_len || !data_cap || len <= 0) return;
+    if (!data || !data_len || !data_cap || len < 0 || (len > 0 && !buf)) return false;
+    if (len == 0) return true;
     int need = *data_len + len;
-    if (need > *data_cap) {
-        int cap = *data_cap == 0 ? 1024 : *data_cap;
-        while (cap < need) cap *= 2;
-        *data = (uint8_t*)mem_realloc(*data, (size_t)cap, MEM_CAT_JS_RUNTIME);
-        *data_cap = cap;
+    if (!lam::mem_grow_array(data, data_cap, need, 1024,
+            MEM_CAT_JS_RUNTIME)) {
+        log_error("crypto-buffer: unable to grow streaming input");
+        return false;
     }
     memcpy(*data + *data_len, buf, (size_t)len);
     *data_len += len;
+    return true;
 }
 
 static Item crypto_append_stream_input(Item value, Item encoding_item,
@@ -1379,7 +1381,10 @@ static Item crypto_append_stream_input(Item value, Item encoding_item,
     Item status = crypto_stream_input_bytes(value, encoding_item,
         raw_string, reject_invalid, &bytes, &len, &owned);
     if (item_is_error(status) || status.item == ItemNull.item) return status;
-    if (bytes) crypto_append_bytes(data, data_len, data_cap, bytes, len);
+    if (bytes && !crypto_append_bytes(data, data_len, data_cap, bytes, len)) {
+        if (owned) mem_free((void*)bytes);
+        return ItemError;
+    }
     if (owned) mem_free((void*)bytes);
     return status;
 }
@@ -3912,15 +3917,8 @@ struct CipherCtx {
 
 static void cipher_ctx_append_data(CipherCtx* ctx, const uint8_t* buf, int len) {
     if (!ctx || len <= 0) return;
-    int need = ctx->data_len + len;
-    if (need > ctx->data_cap) {
-        int cap = ctx->data_cap == 0 ? 1024 : ctx->data_cap;
-        while (cap < need) cap *= 2;
-        ctx->data = (uint8_t*)mem_realloc(ctx->data, (size_t)cap, MEM_CAT_JS_RUNTIME);
-        ctx->data_cap = cap;
-    }
-    memcpy(ctx->data + ctx->data_len, buf, (size_t)len);
-    ctx->data_len += len;
+    if (!crypto_append_bytes(&ctx->data, &ctx->data_len, &ctx->data_cap,
+            buf, len)) return;
     if (len > 0) {
         if (ctx->total_input_len <= 2147483647 - len) {
             ctx->total_input_len += len;

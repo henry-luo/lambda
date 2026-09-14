@@ -74,7 +74,24 @@
     "typed_variants": true,
     "legacy_variants": false,
     "mir_key_source": "untyped <bench>.ls",
-    "finished_at": "2026-09-14T16:02:44"
+    "finished_at": "2026-09-14T16:02:44",
+    "merged_engines": [
+      {
+        "engines": [
+          "lambdajs",
+          "lambdajs_e2e"
+        ],
+        "source": "temp/benchmark_v44_ljsfix.json",
+        "source_started_at": "2026-09-14T16:56:49",
+        "source_finished_at": "2026-09-14T17:08:48",
+        "source_runs": 3,
+        "source_platform": "Darwin arm64",
+        "source_lambda_commit": "acd1e88d1b",
+        "merged_at": "2026-09-14T17:11:40",
+        "cells": 126,
+        "note": "LambdaJS refresh after fixing the c7e285e51 regression (js_realm_intrinsic_slots_ensure_roots on every prototype lookup, 20x); measured with cached release test/benchmark/exe/lambda-v44-acd1e88d1b-ljsfix (sha256 3b43e87bb518f9fd6ed71aa78b93561f949a6b8fcc3ec09c02053cf28b98dbbe), the Result44 tree plus the two uncommitted fixes described in vibe/impl/Lambda_Impl_Tune27 (done).md \u00a712"
+      }
+    ]
   },
   "r7rs": {
     "fib": {
@@ -252,20 +269,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 58.081917,
-              "exec_ms": 15.841708,
+              "wall_ms": 43.425208,
+              "exec_ms": 15.589167,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 59.114417,
-              "exec_ms": 15.740875,
+              "wall_ms": 40.607333,
+              "exec_ms": 15.454667,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 57.395,
-              "exec_ms": 15.484083,
+              "wall_ms": 41.76575,
+              "exec_ms": 15.43325,
               "status": "ok"
             }
           ]
@@ -277,20 +294,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 58.081917,
-              "exec_ms": 15.841708,
+              "wall_ms": 43.425208,
+              "exec_ms": 15.589167,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 59.114417,
-              "exec_ms": 15.740875,
+              "wall_ms": 40.607333,
+              "exec_ms": 15.454667,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 57.395,
-              "exec_ms": 15.484083,
+              "wall_ms": 41.76575,
+              "exec_ms": 15.43325,
               "status": "ok"
             }
           ]
@@ -401,8 +418,8 @@
       "mir_typed_auto_e2e": 16.981042,
       "c2mir": 1.120117,
       "c2mir_e2e": 47.582083,
-      "lambdajs": 15.740875,
-      "lambdajs_e2e": 58.081917,
+      "lambdajs": 15.454667,
+      "lambdajs_e2e": 41.76575,
       "quickjs": 18.722,
       "quickjs_e2e": 25.062917,
       "nodejs": 1.829416,
@@ -583,20 +600,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 55.053125,
-              "exec_ms": 15.205417,
+              "wall_ms": 41.027958,
+              "exec_ms": 15.553042,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 55.336708,
-              "exec_ms": 15.081542,
+              "wall_ms": 41.278959,
+              "exec_ms": 15.651042,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 54.173208,
-              "exec_ms": 15.149542,
+              "wall_ms": 40.894792,
+              "exec_ms": 15.525959,
               "status": "ok"
             }
           ]
@@ -608,20 +625,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 55.053125,
-              "exec_ms": 15.205417,
+              "wall_ms": 41.027958,
+              "exec_ms": 15.553042,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 55.336708,
-              "exec_ms": 15.081542,
+              "wall_ms": 41.278959,
+              "exec_ms": 15.651042,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 54.173208,
-              "exec_ms": 15.149542,
+              "wall_ms": 40.894792,
+              "exec_ms": 15.525959,
               "status": "ok"
             }
           ]
@@ -732,8 +749,8 @@
       "mir_typed_auto_e2e": 16.144583,
       "c2mir": 1.125,
       "c2mir_e2e": 46.226209,
-      "lambdajs": 15.149542,
-      "lambdajs_e2e": 55.053125,
+      "lambdajs": 15.553042,
+      "lambdajs_e2e": 41.027958,
       "quickjs": 18.747,
       "quickjs_e2e": 24.988792,
       "nodejs": 1.774916,
@@ -914,20 +931,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 42.301833,
-              "exec_ms": 1.342375,
+              "wall_ms": 28.243458,
+              "exec_ms": 1.37875,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 42.078667,
-              "exec_ms": 1.354625,
+              "wall_ms": 27.715291,
+              "exec_ms": 1.368542,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 42.142875,
-              "exec_ms": 1.368208,
+              "wall_ms": 28.151,
+              "exec_ms": 1.369666,
               "status": "ok"
             }
           ]
@@ -939,20 +956,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 42.301833,
-              "exec_ms": 1.342375,
+              "wall_ms": 28.243458,
+              "exec_ms": 1.37875,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 42.078667,
-              "exec_ms": 1.354625,
+              "wall_ms": 27.715291,
+              "exec_ms": 1.368542,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 42.142875,
-              "exec_ms": 1.368208,
+              "wall_ms": 28.151,
+              "exec_ms": 1.369666,
               "status": "ok"
             }
           ]
@@ -1063,8 +1080,8 @@
       "mir_typed_auto_e2e": 15.262292,
       "c2mir": 0.118164,
       "c2mir_e2e": 45.387417,
-      "lambdajs": 1.354625,
-      "lambdajs_e2e": 42.142875,
+      "lambdajs": 1.369666,
+      "lambdajs_e2e": 28.151,
       "quickjs": 2.771,
       "quickjs_e2e": 8.4125,
       "nodejs": 0.793583,
@@ -1245,20 +1262,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 43.989,
-              "exec_ms": 2.663417,
+              "wall_ms": 30.887542,
+              "exec_ms": 2.715667,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 44.06825,
-              "exec_ms": 2.678125,
+              "wall_ms": 29.939542,
+              "exec_ms": 2.971458,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 44.1065,
-              "exec_ms": 2.682542,
+              "wall_ms": 29.874375,
+              "exec_ms": 2.717166,
               "status": "ok"
             }
           ]
@@ -1270,20 +1287,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 43.989,
-              "exec_ms": 2.663417,
+              "wall_ms": 30.887542,
+              "exec_ms": 2.715667,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 44.06825,
-              "exec_ms": 2.678125,
+              "wall_ms": 29.939542,
+              "exec_ms": 2.971458,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 44.1065,
-              "exec_ms": 2.682542,
+              "wall_ms": 29.874375,
+              "exec_ms": 2.717166,
               "status": "ok"
             }
           ]
@@ -1394,8 +1411,8 @@
       "mir_typed_auto_e2e": 15.287333,
       "c2mir": 0.234131,
       "c2mir_e2e": 45.20125,
-      "lambdajs": 2.678125,
-      "lambdajs_e2e": 44.06825,
+      "lambdajs": 2.717166,
+      "lambdajs_e2e": 29.939542,
       "quickjs": 5.554,
       "quickjs_e2e": 10.9705,
       "nodejs": 0.980375,
@@ -1576,20 +1593,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 68.392833,
-              "exec_ms": 28.253833,
+              "wall_ms": 53.940417,
+              "exec_ms": 28.284083,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 68.938292,
-              "exec_ms": 28.381584,
+              "wall_ms": 54.185875,
+              "exec_ms": 28.371583,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 67.145167,
-              "exec_ms": 27.120583,
+              "wall_ms": 54.718625,
+              "exec_ms": 28.851167,
               "status": "ok"
             }
           ]
@@ -1601,20 +1618,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 68.392833,
-              "exec_ms": 28.253833,
+              "wall_ms": 53.940417,
+              "exec_ms": 28.284083,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 68.938292,
-              "exec_ms": 28.381584,
+              "wall_ms": 54.185875,
+              "exec_ms": 28.371583,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 67.145167,
-              "exec_ms": 27.120583,
+              "wall_ms": 54.718625,
+              "exec_ms": 28.851167,
               "status": "ok"
             }
           ]
@@ -1725,8 +1742,8 @@
       "mir_typed_auto_e2e": 15.322083,
       "c2mir": 0.269043,
       "c2mir_e2e": 45.25975,
-      "lambdajs": 28.253833,
-      "lambdajs_e2e": 68.392833,
+      "lambdajs": 28.371583,
+      "lambdajs_e2e": 54.185875,
       "quickjs": 31.034,
       "quickjs_e2e": 36.652208,
       "nodejs": 1.181708,
@@ -1907,20 +1924,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 44.021291,
-              "exec_ms": 2.834208,
+              "wall_ms": 29.144875,
+              "exec_ms": 2.814417,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 43.723625,
-              "exec_ms": 2.6915,
+              "wall_ms": 28.475833,
+              "exec_ms": 2.913958,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 43.929,
-              "exec_ms": 2.689834,
+              "wall_ms": 28.28675,
+              "exec_ms": 2.78225,
               "status": "ok"
             }
           ]
@@ -1932,20 +1949,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 44.021291,
-              "exec_ms": 2.834208,
+              "wall_ms": 29.144875,
+              "exec_ms": 2.814417,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 43.723625,
-              "exec_ms": 2.6915,
+              "wall_ms": 28.475833,
+              "exec_ms": 2.913958,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 43.929,
-              "exec_ms": 2.689834,
+              "wall_ms": 28.28675,
+              "exec_ms": 2.78225,
               "status": "ok"
             }
           ]
@@ -2056,8 +2073,8 @@
       "mir_typed_auto_e2e": 15.367083,
       "c2mir": 0.082031,
       "c2mir_e2e": 44.6065,
-      "lambdajs": 2.6915,
-      "lambdajs_e2e": 43.929,
+      "lambdajs": 2.814417,
+      "lambdajs_e2e": 28.475833,
       "quickjs": 3.701,
       "quickjs_e2e": 9.130375,
       "nodejs": 0.87525,
@@ -2238,20 +2255,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 352.743584,
-              "exec_ms": 267.344041,
+              "wall_ms": 160.13475,
+              "exec_ms": 63.1265,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 352.632166,
-              "exec_ms": 267.786,
+              "wall_ms": 184.997166,
+              "exec_ms": 113.101417,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 352.281125,
-              "exec_ms": 267.311041,
+              "wall_ms": 127.402375,
+              "exec_ms": 56.523417,
               "status": "ok"
             }
           ]
@@ -2263,20 +2280,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 352.743584,
-              "exec_ms": 267.344041,
+              "wall_ms": 160.13475,
+              "exec_ms": 63.1265,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 352.632166,
-              "exec_ms": 267.786,
+              "wall_ms": 184.997166,
+              "exec_ms": 113.101417,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 352.281125,
-              "exec_ms": 267.311041,
+              "wall_ms": 127.402375,
+              "exec_ms": 56.523417,
               "status": "ok"
             }
           ]
@@ -2387,8 +2404,8 @@
       "mir_typed_auto_e2e": 27.694,
       "c2mir": 0.12793,
       "c2mir_e2e": 45.438416,
-      "lambdajs": 267.344041,
-      "lambdajs_e2e": 352.632166,
+      "lambdajs": 63.1265,
+      "lambdajs_e2e": 160.13475,
       "quickjs": 7.866,
       "quickjs_e2e": 13.444083,
       "nodejs": 1.743833,
@@ -2569,20 +2586,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 73.935083,
-              "exec_ms": 25.620917,
+              "wall_ms": 57.483792,
+              "exec_ms": 23.821042,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 73.772542,
-              "exec_ms": 25.676417,
+              "wall_ms": 58.075209,
+              "exec_ms": 23.983709,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 74.908708,
-              "exec_ms": 25.958167,
+              "wall_ms": 58.699958,
+              "exec_ms": 24.152,
               "status": "ok"
             }
           ]
@@ -2594,20 +2611,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 73.935083,
-              "exec_ms": 25.620917,
+              "wall_ms": 57.483792,
+              "exec_ms": 23.821042,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 73.772542,
-              "exec_ms": 25.676417,
+              "wall_ms": 58.075209,
+              "exec_ms": 23.983709,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 74.908708,
-              "exec_ms": 25.958167,
+              "wall_ms": 58.699958,
+              "exec_ms": 24.152,
               "status": "ok"
             }
           ]
@@ -2718,8 +2735,8 @@
       "mir_typed_auto_e2e": 25.639875,
       "c2mir": 0.024902,
       "c2mir_e2e": 45.361833,
-      "lambdajs": 25.676417,
-      "lambdajs_e2e": 73.935083,
+      "lambdajs": 23.983709,
+      "lambdajs_e2e": 58.075209,
       "quickjs": 2.731,
       "quickjs_e2e": 9.010833,
       "nodejs": 1.622833,
@@ -2900,20 +2917,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 65.748083,
-              "exec_ms": 21.111417,
+              "wall_ms": 48.866167,
+              "exec_ms": 18.589209,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 65.787291,
-              "exec_ms": 21.391625,
+              "wall_ms": 48.289167,
+              "exec_ms": 18.528,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 65.091375,
-              "exec_ms": 21.049708,
+              "wall_ms": 47.643334,
+              "exec_ms": 18.582,
               "status": "ok"
             }
           ]
@@ -2925,20 +2942,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 65.748083,
-              "exec_ms": 21.111417,
+              "wall_ms": 48.866167,
+              "exec_ms": 18.589209,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 65.787291,
-              "exec_ms": 21.391625,
+              "wall_ms": 48.289167,
+              "exec_ms": 18.528,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 65.091375,
-              "exec_ms": 21.049708,
+              "wall_ms": 47.643334,
+              "exec_ms": 18.582,
               "status": "ok"
             }
           ]
@@ -3049,8 +3066,8 @@
       "mir_typed_auto_e2e": 19.098125,
       "c2mir": 0.448975,
       "c2mir_e2e": 45.333875,
-      "lambdajs": 21.111417,
-      "lambdajs_e2e": 65.748083,
+      "lambdajs": 18.582,
+      "lambdajs_e2e": 48.289167,
       "quickjs": 17.659,
       "quickjs_e2e": 23.381125,
       "nodejs": 1.823709,
@@ -3231,20 +3248,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 123.376667,
-              "exec_ms": 83.620625,
+              "wall_ms": 110.904875,
+              "exec_ms": 85.444833,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 128.815708,
-              "exec_ms": 89.0415,
+              "wall_ms": 109.28775,
+              "exec_ms": 83.99725,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 123.566,
-              "exec_ms": 83.683166,
+              "wall_ms": 110.209667,
+              "exec_ms": 84.370292,
               "status": "ok"
             }
           ]
@@ -3256,20 +3273,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 123.376667,
-              "exec_ms": 83.620625,
+              "wall_ms": 110.904875,
+              "exec_ms": 85.444833,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 128.815708,
-              "exec_ms": 89.0415,
+              "wall_ms": 109.28775,
+              "exec_ms": 83.99725,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 123.566,
-              "exec_ms": 83.683166,
+              "wall_ms": 110.209667,
+              "exec_ms": 84.370292,
               "status": "ok"
             }
           ]
@@ -3380,8 +3397,8 @@
       "mir_typed_auto_e2e": 24.83925,
       "c2mir": 11.733154,
       "c2mir_e2e": 56.880416,
-      "lambdajs": 83.683166,
-      "lambdajs_e2e": 123.566,
+      "lambdajs": 84.370292,
+      "lambdajs_e2e": 110.209667,
       "quickjs": 101.314,
       "quickjs_e2e": 107.359167,
       "nodejs": 13.397,
@@ -3564,20 +3581,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 118.107458,
-              "exec_ms": 72.019209,
+              "wall_ms": 34.342334,
+              "exec_ms": 3.314125,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 117.838417,
-              "exec_ms": 72.031833,
+              "wall_ms": 34.278834,
+              "exec_ms": 3.301667,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 118.042584,
-              "exec_ms": 72.110917,
+              "wall_ms": 34.157458,
+              "exec_ms": 3.272458,
               "status": "ok"
             }
           ]
@@ -3589,20 +3606,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 118.107458,
-              "exec_ms": 72.019209,
+              "wall_ms": 34.342334,
+              "exec_ms": 3.314125,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 117.838417,
-              "exec_ms": 72.031833,
+              "wall_ms": 34.278834,
+              "exec_ms": 3.301667,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 118.042584,
-              "exec_ms": 72.110917,
+              "wall_ms": 34.157458,
+              "exec_ms": 3.272458,
               "status": "ok"
             }
           ]
@@ -3713,8 +3730,8 @@
       "mir_typed_auto_e2e": 16.630375,
       "c2mir": 0.016113,
       "c2mir_e2e": 45.074208,
-      "lambdajs": 72.031833,
-      "lambdajs_e2e": 118.042584,
+      "lambdajs": 3.301667,
+      "lambdajs_e2e": 34.278834,
       "quickjs": 0.616,
       "quickjs_e2e": 6.209208,
       "nodejs": 0.378458,
@@ -3895,20 +3912,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 180.682375,
-              "exec_ms": 132.710167,
+              "wall_ms": 41.449958,
+              "exec_ms": 8.380917,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 179.914291,
-              "exec_ms": 132.565167,
+              "wall_ms": 40.495209,
+              "exec_ms": 8.438292,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 180.055333,
-              "exec_ms": 132.742166,
+              "wall_ms": 40.538166,
+              "exec_ms": 8.351958,
               "status": "ok"
             }
           ]
@@ -3920,20 +3937,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 180.682375,
-              "exec_ms": 132.710167,
+              "wall_ms": 41.449958,
+              "exec_ms": 8.380917,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 179.914291,
-              "exec_ms": 132.565167,
+              "wall_ms": 40.495209,
+              "exec_ms": 8.438292,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 180.055333,
-              "exec_ms": 132.742166,
+              "wall_ms": 40.538166,
+              "exec_ms": 8.351958,
               "status": "ok"
             }
           ]
@@ -4044,8 +4061,8 @@
       "mir_typed_auto_e2e": 17.090417,
       "c2mir": 0.025879,
       "c2mir_e2e": 45.086125,
-      "lambdajs": 132.710167,
-      "lambdajs_e2e": 180.055333,
+      "lambdajs": 8.380917,
+      "lambdajs_e2e": 40.538166,
       "quickjs": 1.554,
       "quickjs_e2e": 7.014,
       "nodejs": 0.828,
@@ -4226,20 +4243,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 103.524,
-              "exec_ms": 52.2585,
+              "wall_ms": 40.249541,
+              "exec_ms": 4.693083,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 103.578167,
-              "exec_ms": 52.336208,
+              "wall_ms": 39.690875,
+              "exec_ms": 4.611708,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 103.437917,
-              "exec_ms": 52.264625,
+              "wall_ms": 40.086833,
+              "exec_ms": 4.744292,
               "status": "ok"
             }
           ]
@@ -4251,20 +4268,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 103.524,
-              "exec_ms": 52.2585,
+              "wall_ms": 40.249541,
+              "exec_ms": 4.693083,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 103.578167,
-              "exec_ms": 52.336208,
+              "wall_ms": 39.690875,
+              "exec_ms": 4.611708,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 103.437917,
-              "exec_ms": 52.264625,
+              "wall_ms": 40.086833,
+              "exec_ms": 4.744292,
               "status": "ok"
             }
           ]
@@ -4375,8 +4392,8 @@
       "mir_typed_auto_e2e": 23.587708,
       "c2mir": 0.018066,
       "c2mir_e2e": 45.379709,
-      "lambdajs": 52.264625,
-      "lambdajs_e2e": 103.524,
+      "lambdajs": 4.693083,
+      "lambdajs_e2e": 40.086833,
       "quickjs": 1.047,
       "quickjs_e2e": 6.508291,
       "nodejs": 0.656583,
@@ -4557,20 +4574,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 197.423917,
-              "exec_ms": 146.510833,
+              "wall_ms": 55.138834,
+              "exec_ms": 19.678,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 197.896458,
-              "exec_ms": 146.292292,
+              "wall_ms": 55.332042,
+              "exec_ms": 19.6465,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 197.518333,
-              "exec_ms": 146.474209,
+              "wall_ms": 55.094125,
+              "exec_ms": 19.804041,
               "status": "ok"
             }
           ]
@@ -4582,20 +4599,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 197.423917,
-              "exec_ms": 146.510833,
+              "wall_ms": 55.138834,
+              "exec_ms": 19.678,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 197.896458,
-              "exec_ms": 146.292292,
+              "wall_ms": 55.332042,
+              "exec_ms": 19.6465,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 197.518333,
-              "exec_ms": 146.474209,
+              "wall_ms": 55.094125,
+              "exec_ms": 19.804041,
               "status": "ok"
             }
           ]
@@ -4706,8 +4723,8 @@
       "mir_typed_auto_e2e": 21.907667,
       "c2mir": 0.0271,
       "c2mir_e2e": 45.317458,
-      "lambdajs": 146.474209,
-      "lambdajs_e2e": 197.518333,
+      "lambdajs": 19.678,
+      "lambdajs_e2e": 55.138834,
       "quickjs": 2.223,
       "quickjs_e2e": 7.995709,
       "nodejs": 1.102333,
@@ -4888,20 +4905,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 135.973709,
-              "exec_ms": 9.166458,
+              "wall_ms": 114.545542,
+              "exec_ms": 3.988625,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 154.69825,
-              "exec_ms": 9.322625,
+              "wall_ms": 114.753792,
+              "exec_ms": 3.99175,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 136.163,
-              "exec_ms": 9.248708,
+              "wall_ms": 114.185417,
+              "exec_ms": 3.95725,
               "status": "ok"
             }
           ]
@@ -4913,20 +4930,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 135.973709,
-              "exec_ms": 9.166458,
+              "wall_ms": 114.545542,
+              "exec_ms": 3.988625,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 154.69825,
-              "exec_ms": 9.322625,
+              "wall_ms": 114.753792,
+              "exec_ms": 3.99175,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 136.163,
-              "exec_ms": 9.248708,
+              "wall_ms": 114.185417,
+              "exec_ms": 3.95725,
               "status": "ok"
             }
           ]
@@ -5037,8 +5054,8 @@
       "mir_typed_auto_e2e": 25.138459,
       "c2mir": 0.02417,
       "c2mir_e2e": 45.447583,
-      "lambdajs": 9.248708,
-      "lambdajs_e2e": 136.163,
+      "lambdajs": 3.988625,
+      "lambdajs_e2e": 114.545542,
       "quickjs": 0.877,
       "quickjs_e2e": 7.210958,
       "nodejs": 0.544833,
@@ -5219,20 +5236,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 51.85,
-              "exec_ms": 2.639417,
+              "wall_ms": 36.292417,
+              "exec_ms": 2.108917,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 52.014708,
-              "exec_ms": 2.643833,
+              "wall_ms": 36.399666,
+              "exec_ms": 2.148125,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 51.525459,
-              "exec_ms": 2.704084,
+              "wall_ms": 36.600625,
+              "exec_ms": 2.145042,
               "status": "ok"
             }
           ]
@@ -5244,20 +5261,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 51.85,
-              "exec_ms": 2.639417,
+              "wall_ms": 36.292417,
+              "exec_ms": 2.108917,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 52.014708,
-              "exec_ms": 2.643833,
+              "wall_ms": 36.399666,
+              "exec_ms": 2.148125,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 51.525459,
-              "exec_ms": 2.704084,
+              "wall_ms": 36.600625,
+              "exec_ms": 2.145042,
               "status": "ok"
             }
           ]
@@ -5368,8 +5385,8 @@
       "mir_typed_auto_e2e": 19.157375,
       "c2mir": 0.021973,
       "c2mir_e2e": 45.022375,
-      "lambdajs": 2.643833,
-      "lambdajs_e2e": 51.85,
+      "lambdajs": 2.145042,
+      "lambdajs_e2e": 36.399666,
       "quickjs": 0.907,
       "quickjs_e2e": 6.450833,
       "nodejs": 0.492791,
@@ -5550,20 +5567,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 201.49375,
-              "exec_ms": 82.530917,
+              "wall_ms": 108.73675,
+              "exec_ms": 6.343167,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 201.574375,
-              "exec_ms": 82.155625,
+              "wall_ms": 110.015041,
+              "exec_ms": 6.506625,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 202.136417,
-              "exec_ms": 82.070416,
+              "wall_ms": 110.230417,
+              "exec_ms": 6.4115,
               "status": "ok"
             }
           ]
@@ -5575,20 +5592,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 201.49375,
-              "exec_ms": 82.530917,
+              "wall_ms": 108.73675,
+              "exec_ms": 6.343167,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 201.574375,
-              "exec_ms": 82.155625,
+              "wall_ms": 110.015041,
+              "exec_ms": 6.506625,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 202.136417,
-              "exec_ms": 82.070416,
+              "wall_ms": 110.230417,
+              "exec_ms": 6.4115,
               "status": "ok"
             }
           ]
@@ -5699,8 +5716,8 @@
       "mir_typed_auto_e2e": 17.970834,
       "c2mir": 0.089111,
       "c2mir_e2e": 44.966291,
-      "lambdajs": 82.155625,
-      "lambdajs_e2e": 201.574375,
+      "lambdajs": 6.4115,
+      "lambdajs_e2e": 110.015041,
       "quickjs": 2.074,
       "quickjs_e2e": 8.334375,
       "nodejs": 0.625541,
@@ -5881,20 +5898,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 1061.466167,
-              "exec_ms": 1009.037166,
+              "wall_ms": 1078.03525,
+              "exec_ms": 1041.440375,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 1055.153,
-              "exec_ms": 1002.166667,
+              "wall_ms": 1075.237875,
+              "exec_ms": 1037.108959,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 1066.037459,
-              "exec_ms": 1011.86375,
+              "wall_ms": 1049.241917,
+              "exec_ms": 1010.478541,
               "status": "ok"
             }
           ]
@@ -5906,20 +5923,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 1061.466167,
-              "exec_ms": 1009.037166,
+              "wall_ms": 1078.03525,
+              "exec_ms": 1041.440375,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 1055.153,
-              "exec_ms": 1002.166667,
+              "wall_ms": 1075.237875,
+              "exec_ms": 1037.108959,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 1066.037459,
-              "exec_ms": 1011.86375,
+              "wall_ms": 1049.241917,
+              "exec_ms": 1010.478541,
               "status": "ok"
             }
           ]
@@ -6030,8 +6047,8 @@
       "mir_typed_auto_e2e": 61.099625,
       "c2mir": 30.653809,
       "c2mir_e2e": 76.204916,
-      "lambdajs": 1009.037166,
-      "lambdajs_e2e": 1061.466167,
+      "lambdajs": 1037.108959,
+      "lambdajs_e2e": 1075.237875,
       "quickjs": 869.177,
       "quickjs_e2e": 876.210042,
       "nodejs": 31.106417,
@@ -6212,20 +6229,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 2060.882458,
-              "exec_ms": 1973.04625,
+              "wall_ms": 637.159458,
+              "exec_ms": 570.348875,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 2077.549958,
-              "exec_ms": 1996.955042,
+              "wall_ms": 639.408208,
+              "exec_ms": 574.399834,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 2061.152833,
-              "exec_ms": 1981.463,
+              "wall_ms": 641.516708,
+              "exec_ms": 576.757791,
               "status": "ok"
             }
           ]
@@ -6237,20 +6254,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 2060.882458,
-              "exec_ms": 1973.04625,
+              "wall_ms": 637.159458,
+              "exec_ms": 570.348875,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 2077.549958,
-              "exec_ms": 1996.955042,
+              "wall_ms": 639.408208,
+              "exec_ms": 574.399834,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 2061.152833,
-              "exec_ms": 1981.463,
+              "wall_ms": 641.516708,
+              "exec_ms": 576.757791,
               "status": "ok"
             }
           ]
@@ -6361,8 +6378,8 @@
       "mir_typed_auto_e2e": 81.082125,
       "c2mir": 1.490967,
       "c2mir_e2e": 47.7515,
-      "lambdajs": 1981.463,
-      "lambdajs_e2e": 2061.152833,
+      "lambdajs": 574.399834,
+      "lambdajs_e2e": 639.408208,
       "quickjs": 159.457,
       "quickjs_e2e": 165.809625,
       "nodejs": 5.53025,
@@ -6543,20 +6560,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 2307.378125,
-              "exec_ms": 2191.281917,
+              "wall_ms": 1289.588,
+              "exec_ms": 1190.834167,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 2323.150709,
-              "exec_ms": 2206.891541,
+              "wall_ms": 1290.872416,
+              "exec_ms": 1164.82025,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 2298.657416,
-              "exec_ms": 2182.796375,
+              "wall_ms": 1267.590333,
+              "exec_ms": 1167.357458,
               "status": "ok"
             }
           ]
@@ -6568,20 +6585,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 2307.378125,
-              "exec_ms": 2191.281917,
+              "wall_ms": 1289.588,
+              "exec_ms": 1190.834167,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 2323.150709,
-              "exec_ms": 2206.891541,
+              "wall_ms": 1290.872416,
+              "exec_ms": 1164.82025,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 2298.657416,
-              "exec_ms": 2182.796375,
+              "wall_ms": 1267.590333,
+              "exec_ms": 1167.357458,
               "status": "ok"
             }
           ]
@@ -6692,8 +6709,8 @@
       "mir_typed_auto_e2e": 442.161334,
       "c2mir": 29.11499,
       "c2mir_e2e": 77.049875,
-      "lambdajs": 2191.281917,
-      "lambdajs_e2e": 2307.378125,
+      "lambdajs": 1167.357458,
+      "lambdajs_e2e": 1289.588,
       "quickjs": 190.756,
       "quickjs_e2e": 197.984125,
       "nodejs": 47.37575,
@@ -6874,20 +6891,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 402.132708,
-              "exec_ms": 198.079042,
+              "wall_ms": 232.727792,
+              "exec_ms": 45.537125,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 402.299708,
-              "exec_ms": 197.700958,
+              "wall_ms": 229.338125,
+              "exec_ms": 44.833666,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 403.969958,
-              "exec_ms": 198.382167,
+              "wall_ms": 231.428167,
+              "exec_ms": 45.092792,
               "status": "ok"
             }
           ]
@@ -6899,20 +6916,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 402.132708,
-              "exec_ms": 198.079042,
+              "wall_ms": 232.727792,
+              "exec_ms": 45.537125,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 402.299708,
-              "exec_ms": 197.700958,
+              "wall_ms": 229.338125,
+              "exec_ms": 44.833666,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 403.969958,
-              "exec_ms": 198.382167,
+              "wall_ms": 231.428167,
+              "exec_ms": 45.092792,
               "status": "ok"
             }
           ]
@@ -7023,8 +7040,8 @@
       "mir_typed_auto_e2e": 51.601625,
       "c2mir": 0.26001,
       "c2mir_e2e": 52.632625,
-      "lambdajs": 198.079042,
-      "lambdajs_e2e": 402.299708,
+      "lambdajs": 45.092792,
+      "lambdajs_e2e": 231.428167,
       "quickjs": 10.728,
       "quickjs_e2e": 18.333458,
       "nodejs": 2.628416,
@@ -7205,20 +7222,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 2365.098875,
-              "exec_ms": 2120.874708,
+              "wall_ms": 760.852875,
+              "exec_ms": 534.845292,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 2349.677083,
-              "exec_ms": 2108.854542,
+              "wall_ms": 762.739917,
+              "exec_ms": 536.190709,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 2388.179,
-              "exec_ms": 2140.181875,
+              "wall_ms": 786.656625,
+              "exec_ms": 559.809083,
               "status": "ok"
             }
           ]
@@ -7230,20 +7247,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 2365.098875,
-              "exec_ms": 2120.874708,
+              "wall_ms": 760.852875,
+              "exec_ms": 534.845292,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 2349.677083,
-              "exec_ms": 2108.854542,
+              "wall_ms": 762.739917,
+              "exec_ms": 536.190709,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 2388.179,
-              "exec_ms": 2140.181875,
+              "wall_ms": 786.656625,
+              "exec_ms": 559.809083,
               "status": "ok"
             }
           ]
@@ -7354,8 +7371,8 @@
       "mir_typed_auto_e2e": 191.078,
       "c2mir": 1.144043,
       "c2mir_e2e": 53.592333,
-      "lambdajs": 2120.874708,
-      "lambdajs_e2e": 2365.098875,
+      "lambdajs": 536.190709,
+      "lambdajs_e2e": 762.739917,
       "quickjs": 99.424,
       "quickjs_e2e": 107.26125,
       "nodejs": 11.620542,
@@ -7536,20 +7553,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 129955.834167,
-              "exec_ms": 129620.327833,
+              "wall_ms": 22436.530792,
+              "exec_ms": 22090.105209,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 129657.017166,
-              "exec_ms": 129291.638458,
+              "wall_ms": 21609.559417,
+              "exec_ms": 21290.22425,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 130021.330875,
-              "exec_ms": 129649.155584,
+              "wall_ms": 21593.982083,
+              "exec_ms": 21279.17475,
               "status": "ok"
             }
           ]
@@ -7561,20 +7578,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 129955.834167,
-              "exec_ms": 129620.327833,
+              "wall_ms": 22436.530792,
+              "exec_ms": 22090.105209,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 129657.017166,
-              "exec_ms": 129291.638458,
+              "wall_ms": 21609.559417,
+              "exec_ms": 21290.22425,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 130021.330875,
-              "exec_ms": 129649.155584,
+              "wall_ms": 21593.982083,
+              "exec_ms": 21279.17475,
               "status": "ok"
             }
           ]
@@ -7685,8 +7702,8 @@
       "mir_typed_auto_e2e": 158.168916,
       "c2mir": 1.798096,
       "c2mir_e2e": 53.982208,
-      "lambdajs": 129620.327833,
-      "lambdajs_e2e": 129955.834167,
+      "lambdajs": 21290.22425,
+      "lambdajs_e2e": 21609.559417,
       "quickjs": 3325.125,
       "quickjs_e2e": 3337.596625,
       "nodejs": 95.702292,
@@ -7867,20 +7884,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 30750.463709,
-              "exec_ms": 30422.305542,
+              "wall_ms": 5664.323709,
+              "exec_ms": 5355.186208,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 30792.462833,
-              "exec_ms": 30464.207834,
+              "wall_ms": 5640.534583,
+              "exec_ms": 5330.163583,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 30779.342667,
-              "exec_ms": 30436.225209,
+              "wall_ms": 5750.839375,
+              "exec_ms": 5444.860875,
               "status": "ok"
             }
           ]
@@ -7892,20 +7909,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 30750.463709,
-              "exec_ms": 30422.305542,
+              "wall_ms": 5664.323709,
+              "exec_ms": 5355.186208,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 30792.462833,
-              "exec_ms": 30464.207834,
+              "wall_ms": 5640.534583,
+              "exec_ms": 5330.163583,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 30779.342667,
-              "exec_ms": 30436.225209,
+              "wall_ms": 5750.839375,
+              "exec_ms": 5444.860875,
               "status": "ok"
             }
           ]
@@ -8016,8 +8033,8 @@
       "mir_typed_auto_e2e": 559.408292,
       "c2mir": 15.11499,
       "c2mir_e2e": 67.718333,
-      "lambdajs": 30436.225209,
-      "lambdajs_e2e": 30779.342667,
+      "lambdajs": 5355.186208,
+      "lambdajs_e2e": 5664.323709,
       "quickjs": 959.329,
       "quickjs_e2e": 967.756375,
       "nodejs": 36.037167,
@@ -8200,20 +8217,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 80.064959,
-              "exec_ms": 33.747708,
+              "wall_ms": 63.240625,
+              "exec_ms": 31.889333,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 80.419583,
-              "exec_ms": 33.988167,
+              "wall_ms": 63.550417,
+              "exec_ms": 32.275792,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 79.579334,
-              "exec_ms": 33.251541,
+              "wall_ms": 62.333375,
+              "exec_ms": 31.903959,
               "status": "ok"
             }
           ]
@@ -8225,20 +8242,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 80.064959,
-              "exec_ms": 33.747708,
+              "wall_ms": 63.240625,
+              "exec_ms": 31.889333,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 80.419583,
-              "exec_ms": 33.988167,
+              "wall_ms": 63.550417,
+              "exec_ms": 32.275792,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 79.579334,
-              "exec_ms": 33.251541,
+              "wall_ms": 62.333375,
+              "exec_ms": 31.903959,
               "status": "ok"
             }
           ]
@@ -8349,8 +8366,8 @@
       "mir_typed_auto_e2e": 22.273291,
       "c2mir": 3.080078,
       "c2mir_e2e": 48.621625,
-      "lambdajs": 33.747708,
-      "lambdajs_e2e": 80.064959,
+      "lambdajs": 31.903959,
+      "lambdajs_e2e": 63.240625,
       "quickjs": 23.187,
       "quickjs_e2e": 29.290792,
       "nodejs": 4.152667,
@@ -8531,20 +8548,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 90.366875,
-              "exec_ms": 43.268291,
+              "wall_ms": 74.5845,
+              "exec_ms": 42.511666,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 90.764,
-              "exec_ms": 43.415833,
+              "wall_ms": 74.22075,
+              "exec_ms": 42.86725,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 90.962125,
-              "exec_ms": 43.379292,
+              "wall_ms": 74.207625,
+              "exec_ms": 42.833458,
               "status": "ok"
             }
           ]
@@ -8556,20 +8573,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 90.366875,
-              "exec_ms": 43.268291,
+              "wall_ms": 74.5845,
+              "exec_ms": 42.511666,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 90.764,
-              "exec_ms": 43.415833,
+              "wall_ms": 74.22075,
+              "exec_ms": 42.86725,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 90.962125,
-              "exec_ms": 43.379292,
+              "wall_ms": 74.207625,
+              "exec_ms": 42.833458,
               "status": "ok"
             }
           ]
@@ -8680,8 +8697,8 @@
       "mir_typed_auto_e2e": 24.216209,
       "c2mir": 0.1521,
       "c2mir_e2e": 45.317041,
-      "lambdajs": 43.379292,
-      "lambdajs_e2e": 90.764,
+      "lambdajs": 42.833458,
+      "lambdajs_e2e": 74.22075,
       "quickjs": 7.232,
       "quickjs_e2e": 13.1375,
       "nodejs": 3.989458,
@@ -8862,20 +8879,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 357.819791,
-              "exec_ms": 305.177458,
+              "wall_ms": 82.903,
+              "exec_ms": 46.577917,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 357.924541,
-              "exec_ms": 305.310625,
+              "wall_ms": 83.870375,
+              "exec_ms": 47.015583,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 357.981834,
-              "exec_ms": 304.634292,
+              "wall_ms": 83.139333,
+              "exec_ms": 46.595917,
               "status": "ok"
             }
           ]
@@ -8887,20 +8904,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 357.819791,
-              "exec_ms": 305.177458,
+              "wall_ms": 82.903,
+              "exec_ms": 46.577917,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 357.924541,
-              "exec_ms": 305.310625,
+              "wall_ms": 83.870375,
+              "exec_ms": 47.015583,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 357.981834,
-              "exec_ms": 304.634292,
+              "wall_ms": 83.139333,
+              "exec_ms": 46.595917,
               "status": "ok"
             }
           ]
@@ -9011,8 +9028,8 @@
       "mir_typed_auto_e2e": 27.627542,
       "c2mir": 0.248047,
       "c2mir_e2e": 45.618,
-      "lambdajs": 305.177458,
-      "lambdajs_e2e": 357.924541,
+      "lambdajs": 46.595917,
+      "lambdajs_e2e": 83.139333,
       "quickjs": 8.766,
       "quickjs_e2e": 14.511042,
       "nodejs": 6.2605,
@@ -9193,20 +9210,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 277.667791,
-              "exec_ms": 219.847541,
+              "wall_ms": 199.578083,
+              "exec_ms": 163.982084,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 272.068542,
-              "exec_ms": 219.768291,
+              "wall_ms": 197.725875,
+              "exec_ms": 163.790375,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 271.47725,
-              "exec_ms": 219.732459,
+              "wall_ms": 198.511625,
+              "exec_ms": 164.498708,
               "status": "ok"
             }
           ]
@@ -9218,20 +9235,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 277.667791,
-              "exec_ms": 219.847541,
+              "wall_ms": 199.578083,
+              "exec_ms": 163.982084,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 272.068542,
-              "exec_ms": 219.768291,
+              "wall_ms": 197.725875,
+              "exec_ms": 163.790375,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 271.47725,
-              "exec_ms": 219.732459,
+              "wall_ms": 198.511625,
+              "exec_ms": 164.498708,
               "status": "ok"
             }
           ]
@@ -9342,8 +9359,8 @@
       "mir_typed_auto_e2e": 37.874459,
       "c2mir": 0.280029,
       "c2mir_e2e": 46.094833,
-      "lambdajs": 219.768291,
-      "lambdajs_e2e": 272.068542,
+      "lambdajs": 163.982084,
+      "lambdajs_e2e": 198.511625,
       "quickjs": 7.652,
       "quickjs_e2e": 13.265375,
       "nodejs": 4.898083,
@@ -9524,20 +9541,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 50.320209,
-              "exec_ms": 0.550084,
+              "wall_ms": 34.717167,
+              "exec_ms": 0.462667,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 50.118292,
-              "exec_ms": 0.590667,
+              "wall_ms": 34.751666,
+              "exec_ms": 0.446042,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 50.03525,
-              "exec_ms": 0.556375,
+              "wall_ms": 34.395541,
+              "exec_ms": 0.449291,
               "status": "ok"
             }
           ]
@@ -9549,20 +9566,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 50.320209,
-              "exec_ms": 0.550084,
+              "wall_ms": 34.717167,
+              "exec_ms": 0.462667,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 50.118292,
-              "exec_ms": 0.590667,
+              "wall_ms": 34.751666,
+              "exec_ms": 0.446042,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 50.03525,
-              "exec_ms": 0.556375,
+              "wall_ms": 34.395541,
+              "exec_ms": 0.449291,
               "status": "ok"
             }
           ]
@@ -9673,8 +9690,8 @@
       "mir_typed_auto_e2e": 19.969334,
       "c2mir": 0.046875,
       "c2mir_e2e": 47.181292,
-      "lambdajs": 0.556375,
-      "lambdajs_e2e": 50.118292,
+      "lambdajs": 0.449291,
+      "lambdajs_e2e": 34.717167,
       "quickjs": 0.13,
       "quickjs_e2e": 5.593208,
       "nodejs": 1.922458,
@@ -9855,20 +9872,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 163.731875,
-              "exec_ms": 90.577417,
+              "wall_ms": 64.415125,
+              "exec_ms": 31.028625,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 141.202375,
-              "exec_ms": 90.909667,
+              "wall_ms": 63.974084,
+              "exec_ms": 30.8,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 141.109,
-              "exec_ms": 90.39975,
+              "wall_ms": 64.110917,
+              "exec_ms": 31.046333,
               "status": "ok"
             }
           ]
@@ -9880,20 +9897,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 163.731875,
-              "exec_ms": 90.577417,
+              "wall_ms": 64.415125,
+              "exec_ms": 31.028625,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 141.202375,
-              "exec_ms": 90.909667,
+              "wall_ms": 63.974084,
+              "exec_ms": 30.8,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 141.109,
-              "exec_ms": 90.39975,
+              "wall_ms": 64.110917,
+              "exec_ms": 31.046333,
               "status": "ok"
             }
           ]
@@ -10004,8 +10021,8 @@
       "mir_typed_auto_e2e": 15.158875,
       "c2mir": 1.141113,
       "c2mir_e2e": 47.844542,
-      "lambdajs": 90.577417,
-      "lambdajs_e2e": 141.202375,
+      "lambdajs": 31.028625,
+      "lambdajs_e2e": 64.110917,
       "quickjs": 5.591,
       "quickjs_e2e": 11.501792,
       "nodejs": 2.461667,
@@ -10186,20 +10203,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 152.320417,
-              "exec_ms": 100.108917,
+              "wall_ms": 73.14525,
+              "exec_ms": 37.803417,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 152.886667,
-              "exec_ms": 100.36025,
+              "wall_ms": 71.897917,
+              "exec_ms": 37.274417,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 152.748667,
-              "exec_ms": 100.360042,
+              "wall_ms": 71.489875,
+              "exec_ms": 37.374917,
               "status": "ok"
             }
           ]
@@ -10211,20 +10228,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 152.320417,
-              "exec_ms": 100.108917,
+              "wall_ms": 73.14525,
+              "exec_ms": 37.803417,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 152.886667,
-              "exec_ms": 100.36025,
+              "wall_ms": 71.897917,
+              "exec_ms": 37.274417,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 152.748667,
-              "exec_ms": 100.360042,
+              "wall_ms": 71.489875,
+              "exec_ms": 37.374917,
               "status": "ok"
             }
           ]
@@ -10335,8 +10352,8 @@
       "mir_typed_auto_e2e": 22.641875,
       "c2mir": 0.37207,
       "c2mir_e2e": 45.603,
-      "lambdajs": 100.360042,
-      "lambdajs_e2e": 152.748667,
+      "lambdajs": 37.374917,
+      "lambdajs_e2e": 71.897917,
       "quickjs": 2.523,
       "quickjs_e2e": 8.214792,
       "nodejs": 3.339417,
@@ -10517,20 +10534,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 298.101625,
-              "exec_ms": 246.69075,
+              "wall_ms": 279.358458,
+              "exec_ms": 244.773959,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 301.166083,
-              "exec_ms": 249.615958,
+              "wall_ms": 280.368375,
+              "exec_ms": 245.699458,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 298.619375,
-              "exec_ms": 246.910417,
+              "wall_ms": 280.011208,
+              "exec_ms": 245.379875,
               "status": "ok"
             }
           ]
@@ -10542,20 +10559,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 298.101625,
-              "exec_ms": 246.69075,
+              "wall_ms": 279.358458,
+              "exec_ms": 244.773959,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 301.166083,
-              "exec_ms": 249.615958,
+              "wall_ms": 280.368375,
+              "exec_ms": 245.699458,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 298.619375,
-              "exec_ms": 246.910417,
+              "wall_ms": 280.011208,
+              "exec_ms": 245.379875,
               "status": "ok"
             }
           ]
@@ -10666,8 +10683,8 @@
       "mir_typed_auto_e2e": 26.550292,
       "c2mir": 0.365967,
       "c2mir_e2e": 45.4705,
-      "lambdajs": 246.910417,
-      "lambdajs_e2e": 298.619375,
+      "lambdajs": 245.379875,
+      "lambdajs_e2e": 280.011208,
       "quickjs": 65.075,
       "quickjs_e2e": 70.911083,
       "nodejs": 2.546083,
@@ -10850,20 +10867,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 18324.47425,
-              "exec_ms": 18273.934667,
+              "wall_ms": 3106.5355,
+              "exec_ms": 3072.568125,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 18309.237584,
-              "exec_ms": 18242.538167,
+              "wall_ms": 3148.223667,
+              "exec_ms": 3114.299916,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 18367.655083,
-              "exec_ms": 18317.655709,
+              "wall_ms": 3111.032583,
+              "exec_ms": 3076.072459,
               "status": "ok"
             }
           ]
@@ -10875,20 +10892,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 18324.47425,
-              "exec_ms": 18273.934667,
+              "wall_ms": 3106.5355,
+              "exec_ms": 3072.568125,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 18309.237584,
-              "exec_ms": 18242.538167,
+              "wall_ms": 3148.223667,
+              "exec_ms": 3114.299916,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 18367.655083,
-              "exec_ms": 18317.655709,
+              "wall_ms": 3111.032583,
+              "exec_ms": 3076.072459,
               "status": "ok"
             }
           ]
@@ -10999,8 +11016,8 @@
       "mir_typed_auto_e2e": 216.074208,
       "c2mir": 28.157959,
       "c2mir_e2e": 73.797333,
-      "lambdajs": 18273.934667,
-      "lambdajs_e2e": 18324.47425,
+      "lambdajs": 3076.072459,
+      "lambdajs_e2e": 3111.032583,
       "quickjs": 887.74,
       "quickjs_e2e": 894.920875,
       "nodejs": 33.7705,
@@ -11181,20 +11198,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 1478.76125,
-              "exec_ms": 1428.708208,
+              "wall_ms": 1434.564667,
+              "exec_ms": 1400.863208,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 1487.485083,
-              "exec_ms": 1435.513875,
+              "wall_ms": 1433.801042,
+              "exec_ms": 1400.726416,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 1461.564166,
-              "exec_ms": 1410.407417,
+              "wall_ms": 1429.814333,
+              "exec_ms": 1396.380917,
               "status": "ok"
             }
           ]
@@ -11206,20 +11223,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 1478.76125,
-              "exec_ms": 1428.708208,
+              "wall_ms": 1434.564667,
+              "exec_ms": 1400.863208,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 1487.485083,
-              "exec_ms": 1435.513875,
+              "wall_ms": 1433.801042,
+              "exec_ms": 1400.726416,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 1461.564166,
-              "exec_ms": 1410.407417,
+              "wall_ms": 1429.814333,
+              "exec_ms": 1396.380917,
               "status": "ok"
             }
           ]
@@ -11330,8 +11347,8 @@
       "mir_typed_auto_e2e": 41.745083,
       "c2mir": 6.105225,
       "c2mir_e2e": 51.227958,
-      "lambdajs": 1428.708208,
-      "lambdajs_e2e": 1478.76125,
+      "lambdajs": 1400.726416,
+      "lambdajs_e2e": 1433.801042,
       "quickjs": 539.508,
       "quickjs_e2e": 545.859084,
       "nodejs": 15.339917,
@@ -11512,20 +11529,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 1850.549542,
-              "exec_ms": 1800.619917,
+              "wall_ms": 1792.2475,
+              "exec_ms": 1754.421417,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 1836.98825,
-              "exec_ms": 1786.44425,
+              "wall_ms": 1798.309416,
+              "exec_ms": 1764.309583,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 1814.928958,
-              "exec_ms": 1764.588875,
+              "wall_ms": 1788.004458,
+              "exec_ms": 1754.839708,
               "status": "ok"
             }
           ]
@@ -11537,20 +11554,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 1850.549542,
-              "exec_ms": 1800.619917,
+              "wall_ms": 1792.2475,
+              "exec_ms": 1754.421417,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 1836.98825,
-              "exec_ms": 1786.44425,
+              "wall_ms": 1798.309416,
+              "exec_ms": 1764.309583,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 1814.928958,
-              "exec_ms": 1764.588875,
+              "wall_ms": 1788.004458,
+              "exec_ms": 1754.839708,
               "status": "ok"
             }
           ]
@@ -11661,8 +11678,8 @@
       "mir_typed_auto_e2e": 19.559084,
       "c2mir": 1.579834,
       "c2mir_e2e": 46.492667,
-      "lambdajs": 1786.44425,
-      "lambdajs_e2e": 1836.98825,
+      "lambdajs": 1754.839708,
+      "lambdajs_e2e": 1792.2475,
       "quickjs": 94.583,
       "quickjs_e2e": 100.806542,
       "nodejs": 4.393,
@@ -11843,20 +11860,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 10900.528334,
-              "exec_ms": 10834.548583,
+              "wall_ms": 594.341166,
+              "exec_ms": 561.665791,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 10952.197334,
-              "exec_ms": 10887.892875,
+              "wall_ms": 590.676875,
+              "exec_ms": 558.078042,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 10960.664666,
-              "exec_ms": 10911.433375,
+              "wall_ms": 594.805625,
+              "exec_ms": 562.032292,
               "status": "ok"
             }
           ]
@@ -11868,20 +11885,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 10900.528334,
-              "exec_ms": 10834.548583,
+              "wall_ms": 594.341166,
+              "exec_ms": 561.665791,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 10952.197334,
-              "exec_ms": 10887.892875,
+              "wall_ms": 590.676875,
+              "exec_ms": 558.078042,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 10960.664666,
-              "exec_ms": 10911.433375,
+              "wall_ms": 594.805625,
+              "exec_ms": 562.032292,
               "status": "ok"
             }
           ]
@@ -11992,8 +12009,8 @@
       "mir_typed_auto_e2e": 38.470959,
       "c2mir": 0.554932,
       "c2mir_e2e": 45.853125,
-      "lambdajs": 10887.892875,
-      "lambdajs_e2e": 10952.197334,
+      "lambdajs": 561.665791,
+      "lambdajs_e2e": 594.341166,
       "quickjs": 159.107,
       "quickjs_e2e": 165.706417,
       "nodejs": 17.354166,
@@ -12174,20 +12191,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 960.296458,
-              "exec_ms": 908.827125,
+              "wall_ms": 299.766208,
+              "exec_ms": 264.401791,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 959.015583,
-              "exec_ms": 908.143666,
+              "wall_ms": 298.98875,
+              "exec_ms": 264.149333,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 961.636792,
-              "exec_ms": 910.27875,
+              "wall_ms": 298.006209,
+              "exec_ms": 263.343041,
               "status": "ok"
             }
           ]
@@ -12199,20 +12216,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 960.296458,
-              "exec_ms": 908.827125,
+              "wall_ms": 299.766208,
+              "exec_ms": 264.401791,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 959.015583,
-              "exec_ms": 908.143666,
+              "wall_ms": 298.98875,
+              "exec_ms": 264.149333,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 961.636792,
-              "exec_ms": 910.27875,
+              "wall_ms": 298.006209,
+              "exec_ms": 263.343041,
               "status": "ok"
             }
           ]
@@ -12323,8 +12340,8 @@
       "mir_typed_auto_e2e": 31.916791,
       "c2mir": 0.913086,
       "c2mir_e2e": 46.101542,
-      "lambdajs": 908.827125,
-      "lambdajs_e2e": 960.296458,
+      "lambdajs": 264.149333,
+      "lambdajs_e2e": 298.98875,
       "quickjs": 54.241,
       "quickjs_e2e": 60.397458,
       "nodejs": 4.033375,
@@ -12505,20 +12522,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 248.061542,
-              "exec_ms": 198.651625,
+              "wall_ms": 75.561,
+              "exec_ms": 42.091791,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 247.835584,
-              "exec_ms": 198.667833,
+              "wall_ms": 76.411542,
+              "exec_ms": 42.958416,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 247.832166,
-              "exec_ms": 198.594208,
+              "wall_ms": 75.514875,
+              "exec_ms": 42.180125,
               "status": "ok"
             }
           ]
@@ -12530,20 +12547,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 248.061542,
-              "exec_ms": 198.651625,
+              "wall_ms": 75.561,
+              "exec_ms": 42.091791,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 247.835584,
-              "exec_ms": 198.667833,
+              "wall_ms": 76.411542,
+              "exec_ms": 42.958416,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 247.832166,
-              "exec_ms": 198.594208,
+              "wall_ms": 75.514875,
+              "exec_ms": 42.180125,
               "status": "ok"
             }
           ]
@@ -12654,8 +12671,8 @@
       "mir_typed_auto_e2e": 35.904083,
       "c2mir": 1.552002,
       "c2mir_e2e": 46.977833,
-      "lambdajs": 198.651625,
-      "lambdajs_e2e": 247.835584,
+      "lambdajs": 42.180125,
+      "lambdajs_e2e": 75.561,
       "quickjs": 19.956,
       "quickjs_e2e": 25.888875,
       "nodejs": 6.201625,
@@ -12836,20 +12853,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 7554.786,
-              "exec_ms": 7513.299875,
+              "wall_ms": 7428.830292,
+              "exec_ms": 7402.265667,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 7542.83375,
-              "exec_ms": 7500.658208,
+              "wall_ms": 7424.086208,
+              "exec_ms": 7397.578458,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 7508.0755,
-              "exec_ms": 7465.548417,
+              "wall_ms": 7428.213459,
+              "exec_ms": 7401.609667,
               "status": "ok"
             }
           ]
@@ -12861,20 +12878,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 7554.786,
-              "exec_ms": 7513.299875,
+              "wall_ms": 7428.830292,
+              "exec_ms": 7402.265667,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 7542.83375,
-              "exec_ms": 7500.658208,
+              "wall_ms": 7424.086208,
+              "exec_ms": 7397.578458,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 7508.0755,
-              "exec_ms": 7465.548417,
+              "wall_ms": 7428.213459,
+              "exec_ms": 7401.609667,
               "status": "ok"
             }
           ]
@@ -12985,8 +13002,8 @@
       "mir_typed_auto_e2e": 330.444708,
       "c2mir": 225.784912,
       "c2mir_e2e": 271.181083,
-      "lambdajs": 7500.658208,
-      "lambdajs_e2e": 7542.83375,
+      "lambdajs": 7401.609667,
+      "lambdajs_e2e": 7428.213459,
       "quickjs": 6242.76,
       "quickjs_e2e": 6249.621208,
       "nodejs": 1418.663625,
@@ -13169,20 +13186,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 7674.896791,
-              "exec_ms": 7623.11875,
+              "wall_ms": 7631.65925,
+              "exec_ms": 7595.158625,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 7682.714875,
-              "exec_ms": 7630.044,
+              "wall_ms": 7760.161125,
+              "exec_ms": 7723.695,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 7704.145834,
-              "exec_ms": 7651.72325,
+              "wall_ms": 7644.188625,
+              "exec_ms": 7608.487708,
               "status": "ok"
             }
           ]
@@ -13194,20 +13211,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 7674.896791,
-              "exec_ms": 7623.11875,
+              "wall_ms": 7631.65925,
+              "exec_ms": 7595.158625,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 7682.714875,
-              "exec_ms": 7630.044,
+              "wall_ms": 7760.161125,
+              "exec_ms": 7723.695,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 7704.145834,
-              "exec_ms": 7651.72325,
+              "wall_ms": 7644.188625,
+              "exec_ms": 7608.487708,
               "status": "ok"
             }
           ]
@@ -13318,8 +13335,8 @@
       "mir_typed_auto_e2e": 211.836709,
       "c2mir": 60.535156,
       "c2mir_e2e": 105.897042,
-      "lambdajs": 7630.044,
-      "lambdajs_e2e": 7682.714875,
+      "lambdajs": 7608.487708,
+      "lambdajs_e2e": 7644.188625,
       "quickjs": 2178.923,
       "quickjs_e2e": 2185.960084,
       "nodejs": 66.46725,
@@ -13500,20 +13517,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 130.578166,
-              "exec_ms": 88.922833,
+              "wall_ms": 113.013917,
+              "exec_ms": 86.538666,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 130.217875,
-              "exec_ms": 88.461291,
+              "wall_ms": 113.252292,
+              "exec_ms": 87.521542,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 129.8025,
-              "exec_ms": 88.302792,
+              "wall_ms": 112.892,
+              "exec_ms": 87.074875,
               "status": "ok"
             }
           ]
@@ -13525,20 +13542,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 130.578166,
-              "exec_ms": 88.922833,
+              "wall_ms": 113.013917,
+              "exec_ms": 86.538666,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 130.217875,
-              "exec_ms": 88.461291,
+              "wall_ms": 113.252292,
+              "exec_ms": 87.521542,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 129.8025,
-              "exec_ms": 88.302792,
+              "wall_ms": 112.892,
+              "exec_ms": 87.074875,
               "status": "ok"
             }
           ]
@@ -13649,8 +13666,8 @@
       "mir_typed_auto_e2e": 16.233458,
       "c2mir": 0.317139,
       "c2mir_e2e": 45.150833,
-      "lambdajs": 88.461291,
-      "lambdajs_e2e": 130.217875,
+      "lambdajs": 87.074875,
+      "lambdajs_e2e": 113.013917,
       "quickjs": 36.166,
       "quickjs_e2e": 41.863875,
       "nodejs": 1.905125,
@@ -13831,20 +13848,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 124.2685,
-              "exec_ms": 77.579833,
+              "wall_ms": 107.385958,
+              "exec_ms": 76.81875,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 143.423875,
-              "exec_ms": 96.34675,
+              "wall_ms": 107.736875,
+              "exec_ms": 76.947834,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 124.494083,
-              "exec_ms": 78.055459,
+              "wall_ms": 108.43025,
+              "exec_ms": 77.397333,
               "status": "ok"
             }
           ]
@@ -13856,20 +13873,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 124.2685,
-              "exec_ms": 77.579833,
+              "wall_ms": 107.385958,
+              "exec_ms": 76.81875,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 143.423875,
-              "exec_ms": 96.34675,
+              "wall_ms": 107.736875,
+              "exec_ms": 76.947834,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 124.494083,
-              "exec_ms": 78.055459,
+              "wall_ms": 108.43025,
+              "exec_ms": 77.397333,
               "status": "ok"
             }
           ]
@@ -13980,8 +13997,8 @@
       "mir_typed_auto_e2e": 27.483416,
       "c2mir": 2.812988,
       "c2mir_e2e": 49.066916,
-      "lambdajs": 78.055459,
-      "lambdajs_e2e": 124.494083,
+      "lambdajs": 76.947834,
+      "lambdajs_e2e": 107.736875,
       "quickjs": 59.471,
       "quickjs_e2e": 65.436791,
       "nodejs": 3.670167,
@@ -14162,20 +14179,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 15139.242833,
-              "exec_ms": 15097.212125,
+              "wall_ms": 15053.5445,
+              "exec_ms": 15027.263542,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 15123.2875,
-              "exec_ms": 15063.209666,
+              "wall_ms": 15056.791666,
+              "exec_ms": 15029.014375,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 15178.286458,
-              "exec_ms": 15135.443833,
+              "wall_ms": 15054.3545,
+              "exec_ms": 15026.891292,
               "status": "ok"
             }
           ]
@@ -14187,20 +14204,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 15139.242833,
-              "exec_ms": 15097.212125,
+              "wall_ms": 15053.5445,
+              "exec_ms": 15027.263542,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 15123.2875,
-              "exec_ms": 15063.209666,
+              "wall_ms": 15056.791666,
+              "exec_ms": 15029.014375,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 15178.286458,
-              "exec_ms": 15135.443833,
+              "wall_ms": 15054.3545,
+              "exec_ms": 15026.891292,
               "status": "ok"
             }
           ]
@@ -14311,8 +14328,8 @@
       "mir_typed_auto_e2e": 278.3845,
       "c2mir": 260.815918,
       "c2mir_e2e": 306.377209,
-      "lambdajs": 15097.212125,
-      "lambdajs_e2e": 15139.242833,
+      "lambdajs": 15027.263542,
+      "lambdajs_e2e": 15054.3545,
       "quickjs": 26751.55,
       "quickjs_e2e": 26758.463541,
       "nodejs": 467.938584,
@@ -14493,20 +14510,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 65.126334,
-              "exec_ms": 23.776583,
+              "wall_ms": 51.082333,
+              "exec_ms": 23.789167,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 65.123375,
-              "exec_ms": 23.745375,
+              "wall_ms": 50.091375,
+              "exec_ms": 23.780417,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 65.40325,
-              "exec_ms": 23.887208,
+              "wall_ms": 50.268833,
+              "exec_ms": 23.924959,
               "status": "ok"
             }
           ]
@@ -14518,20 +14535,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 65.126334,
-              "exec_ms": 23.776583,
+              "wall_ms": 51.082333,
+              "exec_ms": 23.789167,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 65.123375,
-              "exec_ms": 23.745375,
+              "wall_ms": 50.091375,
+              "exec_ms": 23.780417,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 65.40325,
-              "exec_ms": 23.887208,
+              "wall_ms": 50.268833,
+              "exec_ms": 23.924959,
               "status": "ok"
             }
           ]
@@ -14642,8 +14659,8 @@
       "mir_typed_auto_e2e": 16.543041,
       "c2mir": 4.830078,
       "c2mir_e2e": 48.787542,
-      "lambdajs": 23.776583,
-      "lambdajs_e2e": 65.126334,
+      "lambdajs": 23.789167,
+      "lambdajs_e2e": 50.268833,
       "quickjs": 35.497,
       "quickjs_e2e": 40.914,
       "nodejs": 7.470792,
@@ -14824,20 +14841,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 829.832625,
-              "exec_ms": 778.136166,
+              "wall_ms": 814.454041,
+              "exec_ms": 779.241083,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 836.127084,
-              "exec_ms": 784.275167,
+              "wall_ms": 817.04025,
+              "exec_ms": 780.301458,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 835.043875,
-              "exec_ms": 783.446667,
+              "wall_ms": 812.457334,
+              "exec_ms": 776.2395,
               "status": "ok"
             }
           ]
@@ -14849,20 +14866,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 829.832625,
-              "exec_ms": 778.136166,
+              "wall_ms": 814.454041,
+              "exec_ms": 779.241083,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 836.127084,
-              "exec_ms": 784.275167,
+              "wall_ms": 817.04025,
+              "exec_ms": 780.301458,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 835.043875,
-              "exec_ms": 783.446667,
+              "wall_ms": 812.457334,
+              "exec_ms": 776.2395,
               "status": "ok"
             }
           ]
@@ -14973,8 +14990,8 @@
       "mir_typed_auto_e2e": 121.960166,
       "c2mir": 70.52417,
       "c2mir_e2e": 115.439917,
-      "lambdajs": 783.446667,
-      "lambdajs_e2e": 835.043875,
+      "lambdajs": 779.241083,
+      "lambdajs_e2e": 814.454041,
       "quickjs": 545.272,
       "quickjs_e2e": 556.298333,
       "nodejs": 23.11925,
@@ -15155,20 +15172,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 70.587125,
-              "exec_ms": 11.741416,
+              "wall_ms": 51.653625,
+              "exec_ms": 6.846458,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 70.655334,
-              "exec_ms": 11.811708,
+              "wall_ms": 51.6435,
+              "exec_ms": 6.850375,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 71.308708,
-              "exec_ms": 11.779916,
+              "wall_ms": 51.096375,
+              "exec_ms": 6.865833,
               "status": "ok"
             }
           ]
@@ -15180,20 +15197,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 70.587125,
-              "exec_ms": 11.741416,
+              "wall_ms": 51.653625,
+              "exec_ms": 6.846458,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 70.655334,
-              "exec_ms": 11.811708,
+              "wall_ms": 51.6435,
+              "exec_ms": 6.850375,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 71.308708,
-              "exec_ms": 11.779916,
+              "wall_ms": 51.096375,
+              "exec_ms": 6.865833,
               "status": "ok"
             }
           ]
@@ -15304,8 +15321,8 @@
       "mir_typed_auto_e2e": 27.783542,
       "c2mir": 0.046875,
       "c2mir_e2e": 44.774125,
-      "lambdajs": 11.779916,
-      "lambdajs_e2e": 70.655334,
+      "lambdajs": 6.850375,
+      "lambdajs_e2e": 51.6435,
       "quickjs": 2.511,
       "quickjs_e2e": 7.95925,
       "nodejs": 0.982084,
@@ -15486,20 +15503,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 171.444375,
-              "exec_ms": 127.56725,
+              "wall_ms": 158.335833,
+              "exec_ms": 129.327041,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 171.233333,
-              "exec_ms": 127.375542,
+              "wall_ms": 158.109417,
+              "exec_ms": 129.209917,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 171.023708,
-              "exec_ms": 127.201083,
+              "wall_ms": 159.371208,
+              "exec_ms": 130.551625,
               "status": "ok"
             }
           ]
@@ -15511,20 +15528,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 171.444375,
-              "exec_ms": 127.56725,
+              "wall_ms": 158.335833,
+              "exec_ms": 129.327041,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 171.233333,
-              "exec_ms": 127.375542,
+              "wall_ms": 158.109417,
+              "exec_ms": 129.209917,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 171.023708,
-              "exec_ms": 127.201083,
+              "wall_ms": 159.371208,
+              "exec_ms": 130.551625,
               "status": "ok"
             }
           ]
@@ -15635,8 +15652,8 @@
       "mir_typed_auto_e2e": 31.252583,
       "c2mir": 1.936035,
       "c2mir_e2e": 45.951083,
-      "lambdajs": 127.375542,
-      "lambdajs_e2e": 171.233333,
+      "lambdajs": 129.327041,
+      "lambdajs_e2e": 158.335833,
       "quickjs": 200.336,
       "quickjs_e2e": 206.281958,
       "nodejs": 5.76325,
@@ -15817,20 +15834,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 1413.3925,
-              "exec_ms": 1368.3635,
+              "wall_ms": 90.043667,
+              "exec_ms": 61.523,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 1417.695,
-              "exec_ms": 1371.371333,
+              "wall_ms": 89.370167,
+              "exec_ms": 61.113875,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 1415.626916,
-              "exec_ms": 1369.157792,
+              "wall_ms": 90.521708,
+              "exec_ms": 61.808916,
               "status": "ok"
             }
           ]
@@ -15842,20 +15859,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 1413.3925,
-              "exec_ms": 1368.3635,
+              "wall_ms": 90.043667,
+              "exec_ms": 61.523,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 1417.695,
-              "exec_ms": 1371.371333,
+              "wall_ms": 89.370167,
+              "exec_ms": 61.113875,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 1415.626916,
-              "exec_ms": 1369.157792,
+              "wall_ms": 90.521708,
+              "exec_ms": 61.808916,
               "status": "ok"
             }
           ]
@@ -15966,8 +15983,8 @@
       "mir_typed_auto_e2e": 34.407917,
       "c2mir": 1.277832,
       "c2mir_e2e": 45.446625,
-      "lambdajs": 1369.157792,
-      "lambdajs_e2e": 1415.626916,
+      "lambdajs": 61.523,
+      "lambdajs_e2e": 90.043667,
       "quickjs": 29.108,
       "quickjs_e2e": 34.481917,
       "nodejs": 3.276917,
@@ -16148,20 +16165,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 194.0405,
-              "exec_ms": 148.574292,
+              "wall_ms": 182.560291,
+              "exec_ms": 151.859666,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 194.221208,
-              "exec_ms": 148.710458,
+              "wall_ms": 182.591917,
+              "exec_ms": 151.853375,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 191.681875,
-              "exec_ms": 145.928167,
+              "wall_ms": 181.312583,
+              "exec_ms": 150.509834,
               "status": "ok"
             }
           ]
@@ -16173,20 +16190,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 194.0405,
-              "exec_ms": 148.574292,
+              "wall_ms": 182.560291,
+              "exec_ms": 151.859666,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 194.221208,
-              "exec_ms": 148.710458,
+              "wall_ms": 182.591917,
+              "exec_ms": 151.853375,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 191.681875,
-              "exec_ms": 145.928167,
+              "wall_ms": 181.312583,
+              "exec_ms": 150.509834,
               "status": "ok"
             }
           ]
@@ -16297,8 +16314,8 @@
       "mir_typed_auto_e2e": 22.4275,
       "c2mir": 0.197021,
       "c2mir_e2e": 45.384708,
-      "lambdajs": 148.574292,
-      "lambdajs_e2e": 194.0405,
+      "lambdajs": 151.853375,
+      "lambdajs_e2e": 182.560291,
       "quickjs": 19.034,
       "quickjs_e2e": 24.875166,
       "nodejs": 1.644791,
@@ -16479,20 +16496,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 71.843167,
-              "exec_ms": 22.420958,
+              "wall_ms": 56.2025,
+              "exec_ms": 21.328917,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 71.488209,
-              "exec_ms": 22.256583,
+              "wall_ms": 55.908084,
+              "exec_ms": 21.494333,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 71.399667,
-              "exec_ms": 22.250041,
+              "wall_ms": 56.264667,
+              "exec_ms": 21.549917,
               "status": "ok"
             }
           ]
@@ -16504,20 +16521,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 71.843167,
-              "exec_ms": 22.420958,
+              "wall_ms": 56.2025,
+              "exec_ms": 21.328917,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 71.488209,
-              "exec_ms": 22.256583,
+              "wall_ms": 55.908084,
+              "exec_ms": 21.494333,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 71.399667,
-              "exec_ms": 22.250041,
+              "wall_ms": 56.264667,
+              "exec_ms": 21.549917,
               "status": "ok"
             }
           ]
@@ -16628,8 +16645,8 @@
       "mir_typed_auto_e2e": 20.571209,
       "c2mir": 0.171875,
       "c2mir_e2e": 44.7275,
-      "lambdajs": 22.256583,
-      "lambdajs_e2e": 71.488209,
+      "lambdajs": 21.494333,
+      "lambdajs_e2e": 56.2025,
       "quickjs": 13.741,
       "quickjs_e2e": 19.055542,
       "nodejs": 3.532,
@@ -16812,20 +16829,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 25969.022417,
-              "exec_ms": 25783.962,
+              "wall_ms": 3058.307667,
+              "exec_ms": 2886.692,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 26004.151458,
-              "exec_ms": 25818.831,
+              "wall_ms": 3021.272833,
+              "exec_ms": 2851.237,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 25991.393,
-              "exec_ms": 25806.533,
+              "wall_ms": 3026.933583,
+              "exec_ms": 2857.632,
               "status": "ok"
             }
           ]
@@ -16837,20 +16854,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 25969.022417,
-              "exec_ms": 25783.962,
+              "wall_ms": 3058.307667,
+              "exec_ms": 2886.692,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 26004.151458,
-              "exec_ms": 25818.831,
+              "wall_ms": 3021.272833,
+              "exec_ms": 2851.237,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 25991.393,
-              "exec_ms": 25806.533,
+              "wall_ms": 3026.933583,
+              "exec_ms": 2857.632,
               "status": "ok"
             }
           ]
@@ -16961,8 +16978,8 @@
       "mir_typed_auto_e2e": 161.859416,
       "c2mir": 12.950928,
       "c2mir_e2e": 58.074375,
-      "lambdajs": 25806.533,
-      "lambdajs_e2e": 25991.393,
+      "lambdajs": 2857.632,
+      "lambdajs_e2e": 3026.933583,
       "quickjs": 608.05,
       "quickjs_e2e": 615.913209,
       "nodejs": 38.922,
@@ -17143,20 +17160,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 5637.369625,
-              "exec_ms": 5562.399,
+              "wall_ms": 1317.249959,
+              "exec_ms": 1258.433,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 5632.637833,
-              "exec_ms": 5557.664,
+              "wall_ms": 1314.341083,
+              "exec_ms": 1255.551,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 5633.636166,
-              "exec_ms": 5557.58,
+              "wall_ms": 1313.321375,
+              "exec_ms": 1254.794,
               "status": "ok"
             }
           ]
@@ -17168,20 +17185,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 5637.369625,
-              "exec_ms": 5562.399,
+              "wall_ms": 1317.249959,
+              "exec_ms": 1258.433,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 5632.637833,
-              "exec_ms": 5557.664,
+              "wall_ms": 1314.341083,
+              "exec_ms": 1255.551,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 5633.636166,
-              "exec_ms": 5557.58,
+              "wall_ms": 1313.321375,
+              "exec_ms": 1254.794,
               "status": "ok"
             }
           ]
@@ -17292,8 +17309,8 @@
       "mir_typed_auto_e2e": 90.188416,
       "c2mir": 2.609863,
       "c2mir_e2e": 50.5945,
-      "lambdajs": 5557.664,
-      "lambdajs_e2e": 5633.636166,
+      "lambdajs": 1255.551,
+      "lambdajs_e2e": 1314.341083,
       "quickjs": 109.608,
       "quickjs_e2e": 116.220208,
       "nodejs": 16.028,
@@ -17474,20 +17491,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 2085.561958,
-              "exec_ms": 799.861,
+              "wall_ms": 1782.210375,
+              "exec_ms": 534.244,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 2084.172292,
-              "exec_ms": 797.526,
+              "wall_ms": 1786.43125,
+              "exec_ms": 534.057,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 2286.018,
-              "exec_ms": 825.461,
+              "wall_ms": 1777.80225,
+              "exec_ms": 533.636,
               "status": "ok"
             }
           ]
@@ -17499,20 +17516,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 2085.561958,
-              "exec_ms": 799.861,
+              "wall_ms": 1782.210375,
+              "exec_ms": 534.244,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 2084.172292,
-              "exec_ms": 797.526,
+              "wall_ms": 1786.43125,
+              "exec_ms": 534.057,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 2286.018,
-              "exec_ms": 825.461,
+              "wall_ms": 1777.80225,
+              "exec_ms": 533.636,
               "status": "ok"
             }
           ]
@@ -17623,8 +17640,8 @@
       "mir_typed_auto_e2e": 116.490916,
       "c2mir": 1.475098,
       "c2mir_e2e": 74.882084,
-      "lambdajs": 799.861,
-      "lambdajs_e2e": 2085.561958,
+      "lambdajs": 534.057,
+      "lambdajs_e2e": 1782.210375,
       "quickjs": 80.337,
       "quickjs_e2e": 101.458625,
       "nodejs": 6.815,
@@ -17805,20 +17822,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 15896.218,
-              "exec_ms": 15661.146291,
+              "wall_ms": 5221.394792,
+              "exec_ms": 5017.482084,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 15810.715333,
-              "exec_ms": 15575.664,
+              "wall_ms": 5249.912708,
+              "exec_ms": 5050.906125,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 15793.002375,
-              "exec_ms": 15555.776917,
+              "wall_ms": 5217.834416,
+              "exec_ms": 5016.258792,
               "status": "ok"
             }
           ]
@@ -17830,20 +17847,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 15896.218,
-              "exec_ms": 15661.146291,
+              "wall_ms": 5221.394792,
+              "exec_ms": 5017.482084,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 15810.715333,
-              "exec_ms": 15575.664,
+              "wall_ms": 5249.912708,
+              "exec_ms": 5050.906125,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 15793.002375,
-              "exec_ms": 15555.776917,
+              "wall_ms": 5217.834416,
+              "exec_ms": 5016.258792,
               "status": "ok"
             }
           ]
@@ -17954,8 +17971,8 @@
       "mir_typed_auto_e2e": 778.59625,
       "c2mir": 41.447021,
       "c2mir_e2e": 104.89175,
-      "lambdajs": 15575.664,
-      "lambdajs_e2e": 15810.715333,
+      "lambdajs": 5017.482084,
+      "lambdajs_e2e": 5221.394792,
       "quickjs": 1421.058,
       "quickjs_e2e": 1430.583875,
       "nodejs": 99.784708,
@@ -18136,20 +18153,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 148048.36025,
-              "exec_ms": 147654.418583,
+              "wall_ms": 117975.438042,
+              "exec_ms": 117912.796958,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 147786.865791,
-              "exec_ms": 147374.7025,
+              "wall_ms": 117836.509834,
+              "exec_ms": 117773.854416,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 148001.616666,
-              "exec_ms": 147591.731875,
+              "wall_ms": 118407.875792,
+              "exec_ms": 118343.563333,
               "status": "ok"
             }
           ]
@@ -18161,20 +18178,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 148048.36025,
-              "exec_ms": 147654.418583,
+              "wall_ms": 117975.438042,
+              "exec_ms": 117912.796958,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 147786.865791,
-              "exec_ms": 147374.7025,
+              "wall_ms": 117836.509834,
+              "exec_ms": 117773.854416,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 148001.616666,
-              "exec_ms": 147591.731875,
+              "wall_ms": 118407.875792,
+              "exec_ms": 118343.563333,
               "status": "ok"
             }
           ]
@@ -18285,8 +18302,8 @@
       "mir_typed_auto_e2e": 1821.216833,
       "c2mir": 538.656006,
       "c2mir_e2e": 585.995417,
-      "lambdajs": 147591.731875,
-      "lambdajs_e2e": 148001.616666,
+      "lambdajs": 117912.796958,
+      "lambdajs_e2e": 117975.438042,
       "quickjs": 38989.975,
       "quickjs_e2e": 39000.40075,
       "nodejs": 780.885834,
@@ -18467,20 +18484,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 162990.936792,
-              "exec_ms": 162918.019625,
+              "wall_ms": 15045.5215,
+              "exec_ms": 15005.426209,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 163026.856458,
-              "exec_ms": 162936.588125,
+              "wall_ms": 15060.448417,
+              "exec_ms": 15020.338708,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 162643.043166,
-              "exec_ms": 162558.499042,
+              "wall_ms": 15055.329583,
+              "exec_ms": 15015.546083,
               "status": "ok"
             }
           ]
@@ -18492,20 +18509,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 162990.936792,
-              "exec_ms": 162918.019625,
+              "wall_ms": 15045.5215,
+              "exec_ms": 15005.426209,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 163026.856458,
-              "exec_ms": 162936.588125,
+              "wall_ms": 15060.448417,
+              "exec_ms": 15020.338708,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 162643.043166,
-              "exec_ms": 162558.499042,
+              "wall_ms": 15055.329583,
+              "exec_ms": 15015.546083,
               "status": "ok"
             }
           ]
@@ -18616,8 +18633,8 @@
       "mir_typed_auto_e2e": 3770.734917,
       "c2mir": 2133.065186,
       "c2mir_e2e": 2181.775958,
-      "lambdajs": 162918.019625,
-      "lambdajs_e2e": 162990.936792,
+      "lambdajs": 15015.546083,
+      "lambdajs_e2e": 15055.329583,
       "quickjs": 6182.608,
       "quickjs_e2e": 6189.738667,
       "nodejs": 966.337666,
@@ -18798,20 +18815,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 90481.514584,
-              "exec_ms": 90275.917916,
+              "wall_ms": 17326.935625,
+              "exec_ms": 17230.603208,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 90461.46875,
-              "exec_ms": 90239.337083,
+              "wall_ms": 17257.563708,
+              "exec_ms": 17161.800667,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 91289.268167,
-              "exec_ms": 91068.177208,
+              "wall_ms": 17313.23425,
+              "exec_ms": 17217.153375,
               "status": "ok"
             }
           ]
@@ -18823,20 +18840,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 90481.514584,
-              "exec_ms": 90275.917916,
+              "wall_ms": 17326.935625,
+              "exec_ms": 17230.603208,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 90461.46875,
-              "exec_ms": 90239.337083,
+              "wall_ms": 17257.563708,
+              "exec_ms": 17161.800667,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 91289.268167,
-              "exec_ms": 91068.177208,
+              "wall_ms": 17313.23425,
+              "exec_ms": 17217.153375,
               "status": "ok"
             }
           ]
@@ -18947,8 +18964,8 @@
       "mir_typed_auto_e2e": 6116.315042,
       "c2mir": 620.261963,
       "c2mir_e2e": 669.215458,
-      "lambdajs": 90275.917916,
-      "lambdajs_e2e": 90481.514584,
+      "lambdajs": 17217.153375,
+      "lambdajs_e2e": 17313.23425,
       "quickjs": 9418.546,
       "quickjs_e2e": 9450.176625,
       "nodejs": 943.878084,
@@ -19131,20 +19148,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 4855.736542,
-              "exec_ms": 4744.553,
+              "wall_ms": 523.841208,
+              "exec_ms": 419.107,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 4869.797334,
-              "exec_ms": 4757.926,
+              "wall_ms": 521.92575,
+              "exec_ms": 418.099,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 4877.574958,
-              "exec_ms": 4766.184,
+              "wall_ms": 520.469792,
+              "exec_ms": 415.496,
               "status": "ok"
             }
           ]
@@ -19156,20 +19173,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 4855.736542,
-              "exec_ms": 4744.553,
+              "wall_ms": 523.841208,
+              "exec_ms": 419.107,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 4869.797334,
-              "exec_ms": 4757.926,
+              "wall_ms": 521.92575,
+              "exec_ms": 418.099,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 4877.574958,
-              "exec_ms": 4766.184,
+              "wall_ms": 520.469792,
+              "exec_ms": 415.496,
               "status": "ok"
             }
           ]
@@ -19280,8 +19297,8 @@
       "mir_typed_auto_e2e": 172.26625,
       "c2mir": 0.527832,
       "c2mir_e2e": 49.829917,
-      "lambdajs": 4757.926,
-      "lambdajs_e2e": 4869.797334,
+      "lambdajs": 418.099,
+      "lambdajs_e2e": 521.92575,
       "quickjs": 216.197,
       "quickjs_e2e": 223.188042,
       "nodejs": 17.703,
@@ -19462,20 +19479,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 9724.607083,
-              "exec_ms": 6626.637,
+              "wall_ms": 566.431917,
+              "exec_ms": 390.764,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 9726.363459,
-              "exec_ms": 6634.682,
+              "wall_ms": 561.849791,
+              "exec_ms": 384.8,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 9710.414417,
-              "exec_ms": 6630.437,
+              "wall_ms": 561.595792,
+              "exec_ms": 386.691,
               "status": "ok"
             }
           ]
@@ -19487,20 +19504,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 9724.607083,
-              "exec_ms": 6626.637,
+              "wall_ms": 566.431917,
+              "exec_ms": 390.764,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 9726.363459,
-              "exec_ms": 6634.682,
+              "wall_ms": 561.849791,
+              "exec_ms": 384.8,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 9710.414417,
-              "exec_ms": 6630.437,
+              "wall_ms": 561.595792,
+              "exec_ms": 386.691,
               "status": "ok"
             }
           ]
@@ -19611,8 +19628,8 @@
       "mir_typed_auto_e2e": 177.8625,
       "c2mir": 46.922119,
       "c2mir_e2e": 95.131917,
-      "lambdajs": 6630.437,
-      "lambdajs_e2e": 9724.607083,
+      "lambdajs": 386.691,
+      "lambdajs_e2e": 561.849791,
       "quickjs": 98.57,
       "quickjs_e2e": 109.86325,
       "nodejs": 14.007,
@@ -19793,20 +19810,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 2780.2495,
-              "exec_ms": 1226.906,
+              "wall_ms": 1227.281125,
+              "exec_ms": 491.689,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 2788.1275,
-              "exec_ms": 1224.563,
+              "wall_ms": 1232.742708,
+              "exec_ms": 490.062,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 2779.65725,
-              "exec_ms": 1226.985,
+              "wall_ms": 1223.776333,
+              "exec_ms": 492.315,
               "status": "ok"
             }
           ]
@@ -19818,20 +19835,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 2780.2495,
-              "exec_ms": 1226.906,
+              "wall_ms": 1227.281125,
+              "exec_ms": 491.689,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 2788.1275,
-              "exec_ms": 1224.563,
+              "wall_ms": 1232.742708,
+              "exec_ms": 490.062,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 2779.65725,
-              "exec_ms": 1226.985,
+              "wall_ms": 1223.776333,
+              "exec_ms": 492.315,
               "status": "ok"
             }
           ]
@@ -19942,8 +19959,8 @@
       "mir_typed_auto_e2e": 361.4325,
       "c2mir": 18.887939,
       "c2mir_e2e": 66.437625,
-      "lambdajs": 1226.906,
-      "lambdajs_e2e": 2780.2495,
+      "lambdajs": 491.689,
+      "lambdajs_e2e": 1227.281125,
       "quickjs": 143.625,
       "quickjs_e2e": 552.008417,
       "nodejs": 18.236,
@@ -20124,20 +20141,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 9617.601375,
-              "exec_ms": 9513.473,
+              "wall_ms": 1817.844541,
+              "exec_ms": 1721.589,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 9597.522375,
-              "exec_ms": 9494.101,
+              "wall_ms": 1805.064,
+              "exec_ms": 1709.834,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 9549.097792,
-              "exec_ms": 9445.647,
+              "wall_ms": 1821.410125,
+              "exec_ms": 1725.446,
               "status": "ok"
             }
           ]
@@ -20149,20 +20166,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 9617.601375,
-              "exec_ms": 9513.473,
+              "wall_ms": 1817.844541,
+              "exec_ms": 1721.589,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 9597.522375,
-              "exec_ms": 9494.101,
+              "wall_ms": 1805.064,
+              "exec_ms": 1709.834,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 9549.097792,
-              "exec_ms": 9445.647,
+              "wall_ms": 1821.410125,
+              "exec_ms": 1725.446,
               "status": "ok"
             }
           ]
@@ -20273,8 +20290,8 @@
       "mir_typed_auto_e2e": 76.908458,
       "c2mir": 2.797119,
       "c2mir_e2e": 48.292375,
-      "lambdajs": 9494.101,
-      "lambdajs_e2e": 9597.522375,
+      "lambdajs": 1721.589,
+      "lambdajs_e2e": 1817.844541,
       "quickjs": 315.634,
       "quickjs_e2e": 322.95775,
       "nodejs": 15.211,
@@ -20455,20 +20472,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 5238.769209,
-              "exec_ms": 5187.921,
+              "wall_ms": 431.050084,
+              "exec_ms": 386.337,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 5216.945375,
-              "exec_ms": 5165.262,
+              "wall_ms": 431.605167,
+              "exec_ms": 387.109,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 5233.073458,
-              "exec_ms": 5181.058,
+              "wall_ms": 431.227375,
+              "exec_ms": 386.803,
               "status": "ok"
             }
           ]
@@ -20480,20 +20497,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 5238.769209,
-              "exec_ms": 5187.921,
+              "wall_ms": 431.050084,
+              "exec_ms": 386.337,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 5216.945375,
-              "exec_ms": 5165.262,
+              "wall_ms": 431.605167,
+              "exec_ms": 387.109,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 5233.073458,
-              "exec_ms": 5181.058,
+              "wall_ms": 431.227375,
+              "exec_ms": 386.803,
               "status": "ok"
             }
           ]
@@ -20604,8 +20621,8 @@
       "mir_typed_auto_e2e": 55.58975,
       "c2mir": 2.642822,
       "c2mir_e2e": 49.240875,
-      "lambdajs": 5181.058,
-      "lambdajs_e2e": 5233.073458,
+      "lambdajs": 386.803,
+      "lambdajs_e2e": 431.227375,
       "quickjs": 218.622,
       "quickjs_e2e": 225.374166,
       "nodejs": 8.771,
@@ -20786,20 +20803,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 2108.14475,
-              "exec_ms": 2003.835,
+              "wall_ms": 722.023792,
+              "exec_ms": 624.496,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 2081.7035,
-              "exec_ms": 1976.563,
+              "wall_ms": 717.330083,
+              "exec_ms": 620.068,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 2076.123542,
-              "exec_ms": 1971.006,
+              "wall_ms": 722.056375,
+              "exec_ms": 625.919,
               "status": "ok"
             }
           ]
@@ -20811,20 +20828,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 2108.14475,
-              "exec_ms": 2003.835,
+              "wall_ms": 722.023792,
+              "exec_ms": 624.496,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 2081.7035,
-              "exec_ms": 1976.563,
+              "wall_ms": 717.330083,
+              "exec_ms": 620.068,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 2076.123542,
-              "exec_ms": 1971.006,
+              "wall_ms": 722.056375,
+              "exec_ms": 625.919,
               "status": "ok"
             }
           ]
@@ -20935,8 +20952,8 @@
       "mir_typed_auto_e2e": 78.6735,
       "c2mir": 2.170898,
       "c2mir_e2e": 52.028875,
-      "lambdajs": 1976.563,
-      "lambdajs_e2e": 2081.7035,
+      "lambdajs": 624.496,
+      "lambdajs_e2e": 722.023792,
       "quickjs": 162.768,
       "quickjs_e2e": 169.973583,
       "nodejs": 18.282,

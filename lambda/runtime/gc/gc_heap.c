@@ -12,6 +12,7 @@
 #include "../../js/js_interp_env.h"
 #include "../../../lib/log.h"
 #include "../../../lib/memtrack.h"
+#include "../../../lib/mem_grow.h"
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/hashmap.h"
 #include "../../lambda.h"
@@ -115,13 +116,10 @@ int gc_native_seen_seen_or_add(gc_native_seen_t* seen, void* ptr) {
         if (seen->data[i] == ptr) return 1;
     }
     if (seen->length >= seen->capacity) {
-        int new_capacity = seen->capacity ? seen->capacity * 2 : 32;
-        void** new_data = (void**)mem_realloc(seen->data,
-                                              (size_t)new_capacity * sizeof(void*),
-                                              MEM_CAT_CONTAINER);
-        if (!new_data) return 1;
-        seen->data = new_data;
-        seen->capacity = new_capacity;
+        void* data = seen->data;
+        if (!mem_grow_array_raw_int(&data, sizeof(void*), &seen->capacity,
+                                    seen->length + 1, 32, MEM_CAT_CONTAINER)) return 1;
+        seen->data = (void**)data;
     }
     seen->data[seen->length++] = ptr;
     return 0;
@@ -315,18 +313,23 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
                   "— ownership queries fall back to linear scan", reserved);
     }
 
-    // Widen the bump bounds so a pointer outside every block is rejected in O(1).
-    if (!gc->bump_min_addr || memory < gc->bump_min_addr) gc->bump_min_addr = memory;
-    if (!gc->bump_max_addr || memory + block_size > gc->bump_max_addr) {
-        gc->bump_max_addr = memory + block_size;
-    }
-
     // Register the block with the object zone's sorted range array so it joins
     // the zone's min/max fast-rejection bounds. The zone reports no ownership
     // for these ranges (slab == NULL); gc_bump_block_owns_exact does the exact
     // slot check for bump-allocated objects.
-    if (gc->object_zone) {
-        gc_object_zone_register_range(gc->object_zone, memory, block_size);
+    if (gc->object_zone && !gc_object_zone_register_range(gc->object_zone, memory, reserved)) {
+        // An unregistered block would be invisible to the zone's ownership index.
+        log_error("gc_alloc_bump_block: failed to register %zu byte bump block", reserved);
+        mem_free(block->alloc_bits);
+        mem_free(block);
+        mem_vm_region_release(region);
+        return NULL;
+    }
+
+    // Widen the bump bounds only after its ownership range is published.
+    if (!gc->bump_min_addr || memory < gc->bump_min_addr) gc->bump_min_addr = memory;
+    if (!gc->bump_max_addr || memory + reserved > gc->bump_max_addr) {
+        gc->bump_max_addr = memory + reserved;
     }
 
     log_debug("gc_alloc_bump_block: allocated %zu byte bump block at %p", block_size, memory);
@@ -1023,17 +1026,17 @@ int gc_try_register_root(gc_heap_t* gc, uint64_t* slot) {
         if (gc->root_slots[i] == slot) return 1;
     }
     if (gc->root_slot_count >= gc->root_slot_capacity) {
-        int new_cap = gc->root_slot_capacity ? gc->root_slot_capacity * 2 : GC_ROOT_SLOTS_INITIAL;
-        uint64_t** new_slots = (uint64_t**)mem_realloc(
-            gc->root_slots, (size_t)new_cap * sizeof(uint64_t*), MEM_CAT_CONTAINER);
-        if (!new_slots) {
-            log_error("gc_register_root: realloc failed for %d slots", new_cap);
+        int old_capacity = gc->root_slot_capacity;
+        void* slots = gc->root_slots;
+        if (!mem_grow_array_raw_int(&slots, sizeof(uint64_t*),
+                                    &gc->root_slot_capacity, gc->root_slot_count + 1,
+                                    GC_ROOT_SLOTS_INITIAL, MEM_CAT_CONTAINER)) {
+            log_error("gc_register_root: failed to grow slot registry");
             return 0;
         }
-        memset(new_slots + gc->root_slot_capacity, 0,
-            (size_t)(new_cap - gc->root_slot_capacity) * sizeof(uint64_t*));
-        gc->root_slots = new_slots;
-        gc->root_slot_capacity = new_cap;
+        gc->root_slots = (uint64_t**)slots;
+        memset(gc->root_slots + old_capacity, 0,
+            (size_t)(gc->root_slot_capacity - old_capacity) * sizeof(uint64_t*));
     }
     gc->root_slots[gc->root_slot_count++] = slot;
     log_debug("gc_register_root: registered slot %p (total: %d)", (void*)slot, gc->root_slot_count);
@@ -1068,17 +1071,14 @@ int gc_try_register_object_root(gc_heap_t* gc, void* object) {
         }
     }
     if (gc->object_root_count >= gc->object_root_capacity) {
-        int new_cap = gc->object_root_capacity ? gc->object_root_capacity * 2
-            : GC_ROOT_SLOTS_INITIAL;
-        gc_object_root_t* roots = (gc_object_root_t*)mem_realloc(
-            gc->object_roots, (size_t)new_cap * sizeof(gc_object_root_t),
-            MEM_CAT_CONTAINER);
-        if (!roots) {
-            log_error("gc-object-root: realloc failed for %d roots", new_cap);
+        void* roots = gc->object_roots;
+        if (!mem_grow_array_raw_int(&roots, sizeof(gc_object_root_t),
+                                    &gc->object_root_capacity, gc->object_root_count + 1,
+                                    GC_ROOT_SLOTS_INITIAL, MEM_CAT_CONTAINER)) {
+            log_error("gc-object-root: failed to grow registry");
             return 0;
         }
-        gc->object_roots = roots;
-        gc->object_root_capacity = new_cap;
+        gc->object_roots = (gc_object_root_t*)roots;
     }
     gc->object_roots[gc->object_root_count].object = object;
     gc->object_roots[gc->object_root_count].ref_count = 1;
@@ -1145,18 +1145,14 @@ void gc_register_weak(gc_heap_t* gc, uint64_t* slot,
         }
     }
     if (gc->weak_slot_count >= gc->weak_slot_capacity) {
-        int new_capacity = gc->weak_slot_capacity
-            ? gc->weak_slot_capacity * 2 : GC_ROOT_SLOTS_INITIAL;
-        gc_weak_slot_t* slots = (gc_weak_slot_t*)mem_realloc(
-            gc->weak_slots, (size_t)new_capacity * sizeof(gc_weak_slot_t),
-            MEM_CAT_CONTAINER);
-        if (!slots) {
-            log_error("gc_register_weak: failed to grow weak slot registry to %d",
-                      new_capacity);
+        void* slots = gc->weak_slots;
+        if (!mem_grow_array_raw_int(&slots, sizeof(gc_weak_slot_t),
+                                    &gc->weak_slot_capacity, gc->weak_slot_count + 1,
+                                    GC_ROOT_SLOTS_INITIAL, MEM_CAT_CONTAINER)) {
+            log_error("gc_register_weak: failed to grow weak slot registry");
             return;
         }
-        gc->weak_slots = slots;
-        gc->weak_slot_capacity = new_capacity;
+        gc->weak_slots = (gc_weak_slot_t*)slots;
     }
     gc_weak_slot_t* weak = &gc->weak_slots[gc->weak_slot_count++];
     weak->slot = slot;
@@ -1181,18 +1177,14 @@ int gc_register_ephemeron(gc_heap_t* gc, uint64_t* key_slot,
                           gc_ephemeron_clear_fn on_clear, void* context) {
     if (!gc || !key_slot || !value_slot) return 0;
     if (gc->ephemeron_count >= gc->ephemeron_capacity) {
-        int new_capacity = gc->ephemeron_capacity
-            ? gc->ephemeron_capacity * 2 : GC_ROOT_SLOTS_INITIAL;
-        gc_ephemeron_t* entries = (gc_ephemeron_t*)mem_realloc(
-            gc->ephemerons,
-            (size_t)new_capacity * sizeof(gc_ephemeron_t),
-            MEM_CAT_CONTAINER);
-        if (!entries) {
-            log_error("gc-ephemeron: failed to grow registry to %d", new_capacity);
+        void* entries = gc->ephemerons;
+        if (!mem_grow_array_raw_int(&entries, sizeof(gc_ephemeron_t),
+                                    &gc->ephemeron_capacity, gc->ephemeron_count + 1,
+                                    GC_ROOT_SLOTS_INITIAL, MEM_CAT_CONTAINER)) {
+            log_error("gc-ephemeron: failed to grow registry");
             return 0;
         }
-        gc->ephemerons = entries;
-        gc->ephemeron_capacity = new_capacity;
+        gc->ephemerons = (gc_ephemeron_t*)entries;
     }
     gc_ephemeron_t* entry = &gc->ephemerons[gc->ephemeron_count++];
     entry->key_slot = key_slot;
@@ -1211,15 +1203,14 @@ void gc_register_root_range(gc_heap_t* gc, uint64_t* base, int count) {
         }
     }
     if (gc->root_range_count >= gc->root_range_capacity) {
-        int new_cap = gc->root_range_capacity ? gc->root_range_capacity * 2 : 256;
-        gc_root_range_t* new_arr = (gc_root_range_t*)mem_realloc(
-            gc->root_ranges, new_cap * sizeof(gc_root_range_t), MEM_CAT_CONTAINER);
-        if (!new_arr) {
-            log_error("gc_register_root_range: realloc failed for %d ranges", new_cap);
+        void* ranges = gc->root_ranges;
+        if (!mem_grow_array_raw_int(&ranges, sizeof(gc_root_range_t),
+                                    &gc->root_range_capacity, gc->root_range_count + 1,
+                                    256, MEM_CAT_CONTAINER)) {
+            log_error("gc_register_root_range: failed to grow registry");
             return;
         }
-        gc->root_ranges = new_arr;
-        gc->root_range_capacity = new_cap;
+        gc->root_ranges = (gc_root_range_t*)ranges;
     }
     gc->root_ranges[gc->root_range_count].base = base;
     gc->root_ranges[gc->root_range_count].count = count;

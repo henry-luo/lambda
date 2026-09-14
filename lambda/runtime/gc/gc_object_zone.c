@@ -46,30 +46,44 @@ size_t gc_object_zone_class_size(int cls) {
 
 // register a slab's address range for fast binary-search ownership lookup.
 // `slab` may be NULL for non-slab ranges (bump blocks registered by gc_heap.c).
-static void register_slab_range(gc_object_zone_t* oz, uint8_t* base, size_t bytes,
+static bool register_slab_range(gc_object_zone_t* oz, uint8_t* base, size_t bytes,
                                 gc_object_slab_t* slab) {
     uint8_t* end = base + bytes;
 
-    // update global min/max bounds
-    if (!oz->min_addr || base < oz->min_addr) oz->min_addr = base;
-    if (!oz->max_addr || end > oz->max_addr) oz->max_addr = end;
-
-    // grow arrays if needed (slab_ranges and range_slabs stay parallel)
+    // Grow the paired arrays transactionally. A successful resize of only one
+    // side would detach slab ownership from its binary-search range.
     if (oz->range_count >= oz->range_capacity) {
+        if (oz->range_capacity > SIZE_MAX / 2) {
+            log_error("gc_object_zone: range capacity overflow");
+            return false;
+        }
         size_t new_cap = oz->range_capacity ? oz->range_capacity * 2 : GC_INITIAL_RANGE_CAPACITY;
-        gc_slab_range_t* new_ranges = (gc_slab_range_t*)mem_realloc(oz->slab_ranges,
+        if (new_cap > SIZE_MAX / sizeof(gc_slab_range_t) ||
+            new_cap > SIZE_MAX / sizeof(gc_object_slab_t*)) {
+            log_error("gc_object_zone: range array size overflow");
+            return false;
+        }
+
+        gc_slab_range_t* new_ranges = (gc_slab_range_t*)mem_alloc(
             new_cap * sizeof(gc_slab_range_t), MEM_CAT_CONTAINER);
-        if (!new_ranges) {
-            log_error("gc_object_zone: failed to grow slab_ranges array");
-            return;
-        }
-        oz->slab_ranges = new_ranges;
-        gc_object_slab_t** new_slabs = (gc_object_slab_t**)mem_realloc(oz->range_slabs,
+        gc_object_slab_t** new_slabs = (gc_object_slab_t**)mem_alloc(
             new_cap * sizeof(gc_object_slab_t*), MEM_CAT_CONTAINER);
-        if (!new_slabs) {
-            log_error("gc_object_zone: failed to grow range_slabs array");
-            return;
+        if (!new_ranges || !new_slabs) {
+            mem_free(new_ranges);
+            mem_free(new_slabs);
+            log_error("gc_object_zone: failed to grow paired slab range arrays");
+            return false;
         }
+
+        if (oz->range_count) {
+            memcpy(new_ranges, oz->slab_ranges,
+                   oz->range_count * sizeof(gc_slab_range_t));
+            memcpy(new_slabs, oz->range_slabs,
+                   oz->range_count * sizeof(gc_object_slab_t*));
+        }
+        mem_free(oz->slab_ranges);
+        mem_free(oz->range_slabs);
+        oz->slab_ranges = new_ranges;
         oz->range_slabs = new_slabs;
         oz->range_capacity = new_cap;
     }
@@ -94,12 +108,17 @@ static void register_slab_range(gc_object_zone_t* oz, uint8_t* base, size_t byte
     oz->slab_ranges[lo].end = end;
     oz->range_slabs[lo] = slab;
     oz->range_count++;
+
+    // Publish bounds only after the paired entry is fully present.
+    if (!oz->min_addr || base < oz->min_addr) oz->min_addr = base;
+    if (!oz->max_addr || end > oz->max_addr) oz->max_addr = end;
+    return true;
 }
 
 // Public entry for gc_heap.c to register a non-slab ownership range (bump block).
-void gc_object_zone_register_range(gc_object_zone_t* oz, uint8_t* base, size_t bytes) {
-    if (!oz || !base || bytes == 0) return;
-    register_slab_range(oz, base, bytes, NULL);
+bool gc_object_zone_register_range(gc_object_zone_t* oz, uint8_t* base, size_t bytes) {
+    if (!oz || !base || bytes == 0) return false;
+    return register_slab_range(oz, base, bytes, NULL);
 }
 
 // allocate a new slab for the given size class from a dedicated VM extent
@@ -136,8 +155,14 @@ static gc_object_slab_t* allocate_slab(gc_object_zone_t* oz, int cls) {
     slab->next_fresh = 0;
     slab->next = NULL;
 
+    if (!register_slab_range(oz, memory, slab_bytes, slab)) {
+        // The collector must never retain a slab it cannot identify as owned.
+        log_error("gc_object_zone: failed to register slab class=%d", cls);
+        mem_free(slab);
+        mem_vm_region_release(region);
+        return NULL;
+    }
     oz->slab_count++;
-    register_slab_range(oz, memory, slab_bytes, slab);
     log_debug("gc_object_zone: allocated slab class=%d slot_size=%zu slots=%zu bytes=%zu",
               cls, slot_size, slot_count, slab_bytes);
     return slab;

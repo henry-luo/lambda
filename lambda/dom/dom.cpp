@@ -41,6 +41,7 @@
 #include "../../lib/mem_factory.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mempool.h"
+#include "../../lib/mem_grow.hpp"
 
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" void heap_unregister_gc_weak(uint64_t* slot);
@@ -499,22 +500,14 @@ static void dom_record_inline_stylesheet_owner(DomDocument* doc,
     }
     if (js->inline_stylesheet_mutation_count >=
         js->inline_stylesheet_mutation_capacity) {
-        int capacity = js->inline_stylesheet_mutation_capacity > 0
-            ? js->inline_stylesheet_mutation_capacity * 2 : 4;
-        DomElement** styles = (DomElement**)pool_alloc(
-            doc->document_pool, (size_t)capacity * sizeof(DomElement*));
-        if (!styles) {
+        if (!lam::pool_copy_grow_array(doc->document_pool,
+                                       &js->inline_stylesheet_mutations,
+                                       &js->inline_stylesheet_mutation_capacity,
+                                       js->inline_stylesheet_mutation_count,
+                                       js->inline_stylesheet_mutation_count + 1, 4, false)) {
             log_error("dom mutation: failed to retain inline stylesheet owner");
             return;
         }
-        if (js->inline_stylesheet_mutations &&
-            js->inline_stylesheet_mutation_count > 0) {
-            memcpy(styles, js->inline_stylesheet_mutations,
-                   (size_t)js->inline_stylesheet_mutation_count *
-                       sizeof(DomElement*));
-        }
-        js->inline_stylesheet_mutations = styles;
-        js->inline_stylesheet_mutation_capacity = capacity;
     }
     js->inline_stylesheet_mutations[js->inline_stylesheet_mutation_count++] = style;
 }

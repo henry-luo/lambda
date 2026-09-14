@@ -18,6 +18,7 @@
 #include "../../lib/strbuf.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/mempool.h"
+#include "../../lib/mem_grow.hpp"
 #include "../../lib/file_utils.h"
 #include "../../lib/file.h"
 #include "../runtime/transpiler.hpp"
@@ -318,16 +319,13 @@ static void jm_free_scope_env_names(JsFuncCollected* func_entries, int func_coun
 static void __attribute__((unused)) jm_ensure_captures_capacity(JsFuncCollected* fc) {
     FnAnalysis* analysis = jm_function_analysis(fc);
     if (!analysis) return;
-    if (analysis->capture_count >= analysis->capture_capacity) {
-        int new_cap = analysis->capture_capacity == 0 ? 16 : analysis->capture_capacity * 2;
-        FnCapture* new_arr = (FnCapture*)mem_calloc(new_cap, sizeof(FnCapture), MEM_CAT_JS_RUNTIME);
-        if (analysis->captures && analysis->capture_count > 0) {
-            memcpy(new_arr, analysis->captures, analysis->capture_count * sizeof(FnCapture));
-        }
-        mem_free(analysis->captures);
-        analysis->captures = new_arr;
-        analysis->capture_capacity = new_cap;
-    }
+    int old_capacity = analysis->capture_capacity;
+    if (!lam::mem_grow_array(&analysis->captures,
+            &analysis->capture_capacity, analysis->capture_count + 1,
+            16, MEM_CAT_JS_RUNTIME)) return;
+    memset(analysis->captures + old_capacity, 0,
+           (size_t)(analysis->capture_capacity - old_capacity) *
+               sizeof(FnCapture));
 }
 
 // Class method info for transpiler
