@@ -12857,9 +12857,11 @@ static Item js_uri_encode_to_item(Item str_val, String* s, bool component) {
         heap_out = true;
     }
     size_t j = url_encode_write(s->chars, (size_t)s->len, keep, false, out);
-    String* encoded = heap_create_name(out, j);
+    // URI output is ASCII value data, not a structural name. Interning every
+    // distinct result retained exhaustive-call intermediates for the batch.
+    Item encoded = js_make_small_string(out, (int)j, true);
     if (heap_out) mem_free(out);
-    return (Item){.item = s2it(encoded)};
+    return encoded;
 }
 
 static Item js_encode_uri_common(Item str_item, bool component) {
