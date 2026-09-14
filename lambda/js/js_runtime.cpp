@@ -27181,10 +27181,16 @@ JS_FORWARD_STATIC_ITEM(js_async_generator_wrap_yield_value, (Item value),
     js_make_iter_result, (value, false))
 
 static Item js_async_generator_yield_result(Item value) {
-    Item promise = js_promise_resolve(value);
-    if (item_is_error(promise)) return js_promise_reject(js_error_lane_payload(promise));
-    Item wrap_fn = js_new_native_function(js_async_generator_wrap_yield_value);
-    return js_promise_then(promise, wrap_fn, make_js_undefined());
+    JS_ROOTS(roots, value_root, value, promise_root, ItemNull, wrap_root,
+        ItemNull);
+    // Promise resolution and callback construction both allocate. The pending
+    // close result must retain its value and wrapper until then() owns them.
+    promise_root.set(js_promise_resolve(value_root.get()));
+    if (item_is_error(promise_root.get()))
+        return js_promise_reject(js_error_lane_payload(promise_root.get()));
+    wrap_root.set(js_new_native_function(js_async_generator_wrap_yield_value));
+    return js_promise_then(promise_root.get(), wrap_root.get(),
+        make_js_undefined());
 }
 
 // v15: Create a 2-element array [value, next_state] for state machine returns
@@ -28658,47 +28664,57 @@ extern "C" Item js_iterator_step(Item iterator) {
     return js_throw_type_error("iterator next is not a function");
 }
 
+// Sync IteratorClose validates the direct result; async callers retain it and
+// validate only after their required await has settled.
+static Item js_iterator_call_return(Item iterator, bool validate_result) {
+    JS_ROOTS(roots, iterator_root, iterator, return_fn_root, ItemNull);
+    if (js_is_generator(iterator_root.get())) {
+        Item result = js_generator_return(iterator_root.get(), make_js_undefined());
+        if (item_is_error(result) || !validate_result) return result;
+        return js_is_object_value(result) ? result
+            : js_throw_type_error("Iterator result is not an object");
+    }
+
+    if (!js_is_object_value(iterator_root.get())) {
+        return validate_result ? make_js_undefined()
+            : (Item){.item = JS_ITER_CLOSE_ABSENT_SENTINEL};
+    }
+    if (get_type_id(iterator_root.get()) == LMD_TYPE_MAP &&
+            js_is_fixed_layout_iterator(iterator_root.get())) {
+        return validate_result ? make_js_undefined()
+            : (Item){.item = JS_ITER_CLOSE_ABSENT_SENTINEL};
+    }
+
+    return_fn_root.set(js_name_item("return", 6));
+    return_fn_root.set(js_get_key_default(iterator_root.get(), return_fn_root.get()));
+    if (item_is_error(return_fn_root.get())) return return_fn_root.get();
+    if (js_is_callable(return_fn_root.get())) {
+        Item result = js_call_function(return_fn_root.get(), iterator_root.get(), NULL, 0);
+        if (item_is_error(result) || !validate_result) return result;
+        return js_is_object_value(result) ? result
+            : js_throw_type_error("Iterator result is not an object");
+    }
+    TypeId return_tid = get_type_id(return_fn_root.get());
+    if (return_tid == LMD_TYPE_UNDEFINED || return_tid == LMD_TYPE_NULL ||
+            return_fn_root.get().item == ITEM_JS_UNDEFINED) {
+        return validate_result ? make_js_undefined()
+            : (Item){.item = JS_ITER_CLOSE_ABSENT_SENTINEL};
+    }
+    return js_throw_type_error("iterator return is not a function");
+}
+
+extern "C" Item js_async_iterator_close_result(Item iterator) {
+    return js_iterator_call_return(iterator, false);
+}
+
+extern "C" bool js_async_iterator_close_needs_await(Item result) {
+    return result.item != JS_ITER_CLOSE_ABSENT_SENTINEL;
+}
+
 // IteratorClose: call iterator.return() if it exists (ES spec §7.4.6)
 extern "C" Item js_iterator_close(Item iterator) {
-    JS_ROOTS(roots, iterator_root, iterator, return_fn_root, ItemNull, result_root, ItemNull);
-    // A custom .return() may collect before its result is validated.
-    // Generators: call js_generator_return
-    if (js_is_generator(iterator_root.get())) {
-        // Send a return signal to the generator
-        js_generator_return(iterator_root.get(), make_js_undefined());
-        return make_js_undefined();
-    }
-
-    // Generic iterator: call .return() if available
-    TypeId tid = get_type_id(iterator_root.get());
-
-    // Fixed-layout built-in iterators have no `return` method, so IteratorClose
-    // completes without a property lookup.
-    if (tid == LMD_TYPE_MAP &&
-            js_is_fixed_layout_iterator(iterator_root.get())) {
-        return make_js_undefined();
-    }
-
-    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT || tid == LMD_TYPE_VMAP) {
-        return_fn_root.set(js_name_item("return", 6));
-        return_fn_root.set(js_get_key_default(iterator_root.get(), return_fn_root.get()));
-        if (item_is_error(return_fn_root.get())) return return_fn_root.get();
-        if (js_is_callable(return_fn_root.get())) {
-            result_root.set(js_call_function(return_fn_root.get(), iterator_root.get(), NULL, 0));
-            if (item_is_error(result_root.get())) return result_root.get();
-            TypeId result_tid = get_type_id(result_root.get());
-            if (result_tid != LMD_TYPE_MAP && result_tid != LMD_TYPE_ELEMENT &&
-                result_tid != LMD_TYPE_ARRAY && result_tid != LMD_TYPE_FUNC && result_tid != LMD_TYPE_VMAP) {
-                return js_throw_type_error("Iterator result is not an object");
-            }
-        } else {
-            TypeId rtid = get_type_id(return_fn_root.get());
-            if (rtid != LMD_TYPE_UNDEFINED && rtid != LMD_TYPE_NULL && return_fn_root.get().item != ITEM_JS_UNDEFINED) {
-                return js_throw_type_error("iterator return is not a function");
-            }
-        }
-    }
-    return make_js_undefined();
+    Item result = js_iterator_call_return(iterator, true);
+    return item_is_error(result) ? result : make_js_undefined();
 }
 
 // collect remaining iterator values into a new array (for rest elements in destructuring)

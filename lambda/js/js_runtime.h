@@ -96,10 +96,16 @@ bool js_has_construct_capability(Item value);
 // valid JS value including null, undefined, false, 0, or empty string.
 #define JS_ITER_DONE_SENTINEL ITEM_JS_ITER_DONE_SENTINEL
 
+// Async IteratorClose uses this only between the raw `return` call and its
+// immediate consumer, so an absent method never becomes an awaitable value.
+#define JS_ITER_CLOSE_ABSENT_SENTINEL ITEM_JS_ITER_CLOSE_ABSENT_SENTINEL
+
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(JS_DELETED_SENTINEL_VAL >> 56)),
                      "JS deleted sentinel tag must stay out of double discriminator space");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(JS_ITER_DONE_SENTINEL >> 56)),
                      "JS iterator-done sentinel tag must stay out of double discriminator space");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(JS_ITER_CLOSE_ABSENT_SENTINEL >> 56)),
+                     "JS iterator-close sentinel tag must stay out of double discriminator space");
 
 // Maximum module-level live bindings tracked in the compact slot table.
 // Generated Unicode identifier tests declare thousands of top-level vars; keep
@@ -1058,6 +1064,16 @@ Item js_get_async_iterator(Item iterable);
 Item js_get_iterator_lazy(Item iterable);
 bool js_is_fixed_layout_iterator(Item object);
 Item js_iterator_step(Item iterator);
+// Async iteration keeps the protocol result intact until its promise settles,
+// then reads `done` and `value` through these shared runtime accessors.
+Item js_async_iterator_step_result(Item iterator);
+Item js_iterator_result_done(Item result);
+Item js_iterator_result_value(Item result);
+// Returns the raw `return()` result. An absent method produces the internal
+// close-absent sentinel, while a callable that returns undefined stays an
+// awaitable result.
+Item js_async_iterator_close_result(Item iterator);
+bool js_async_iterator_close_needs_await(Item result);
 Item js_iterator_close(Item iterator);
 Item js_iterator_collect_rest(Item iterator);
 
