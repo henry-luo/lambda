@@ -612,6 +612,7 @@ def reduce_source(args: argparse.Namespace, source_text: str, metadata: dict,
                   wanted_signature: str) -> tuple[str, int]:
     """Hierarchically deletes lines then byte spans while preserving the oracle."""
     candidate_path = work_dir / "minimize-candidate.ls"
+    candidate_path.parent.mkdir(parents=True, exist_ok=True)
     attempts = 0
 
     def preserves(candidate: str) -> bool:
@@ -666,6 +667,7 @@ def reduce_bytes(args: argparse.Namespace, source_bytes: bytes, metadata: dict,
                  wanted_signature: str) -> tuple[bytes, int]:
     """Deletes raw byte spans without decoding a parser-only reproducer."""
     candidate_path = work_dir / "minimize-candidate.ls"
+    candidate_path.parent.mkdir(parents=True, exist_ok=True)
     attempts = 0
 
     def preserves(candidate: bytes) -> bool:
