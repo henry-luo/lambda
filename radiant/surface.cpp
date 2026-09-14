@@ -10,6 +10,7 @@
 #include "../lib/base64.h"
 #include "../lib/url.h"
 #include "../lib/file.h"
+#include "../lib/endian.h"
 #include "../lambda/input/input.hpp"  // for download_http_content
 #include "../lambda/network/network_resource_manager.h"
 
@@ -305,17 +306,11 @@ static void image_surface_apply_svg_metadata(ImageSurface* surface,
 }
 
 static uint16_t read_exif_u16(const unsigned char* p, bool little_endian) {
-    if (little_endian) return (uint16_t)(p[0] | (p[1] << 8));
-    return (uint16_t)((p[0] << 8) | p[1]);
+    return little_endian ? read_le16((const uint8_t*)p) : read_be16((const uint8_t*)p);
 }
 
 static uint32_t read_exif_u32(const unsigned char* p, bool little_endian) {
-    if (little_endian) {
-        return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
-               ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-    }
-    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
-           ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+    return little_endian ? read_le32((const uint8_t*)p) : read_be32((const uint8_t*)p);
 }
 
 static int jpeg_exif_orientation_from_memory(const unsigned char* data, size_t size) {

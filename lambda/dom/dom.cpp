@@ -49,6 +49,7 @@ extern "C" Item dom_form_submit_bridge(Item form_item);
 extern "C" Item dom_form_request_submit_bridge(Item form_item, Item submitter);
 #include "../../lib/arena.h"
 #include "../../lib/str.h"
+#include "../../lib/utf.h"
 #include "../../lib/url.h"
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_node.hpp"
@@ -970,20 +971,6 @@ JS_FORWARD_STATIC_RETURN(DomNode*, dom_first_script_visible_child,
 JS_FORWARD_STATIC_RETURN(DomNode*, dom_last_script_visible_child,
     (DomElement* elem), dom_visible_child, (elem, false))
 
-static uint32_t dom_utf16_length_from_utf8(const char* text, size_t len) {
-    if (!text) return 0;
-    uint32_t n = 0;
-    const unsigned char* p = (const unsigned char*)text;
-    for (size_t i = 0; i < len; i++) {
-        unsigned char b = p[i];
-        if ((b & 0xC0) == 0x80) continue;
-        if (b < 0x80) n += 1;
-        else if (b < 0xF0) n += 1;
-        else n += 2;
-    }
-    return n;
-}
-
 static int64_t dom_to_integer_or_zero(Item value) {
     Item num = js_to_number(value);
     TypeId t = get_type_id(num);
@@ -1018,7 +1005,7 @@ static Item dom_replace_text_data(DomText* text_node, uint32_t offset,
     if (count > available) count = available;
 
     size_t repl_len = strlen(repl_chars);
-    uint32_t repl_u16_len = dom_utf16_length_from_utf8(repl_chars, repl_len);
+    uint32_t repl_u16_len = (uint32_t)utf8_to_utf16_length(repl_chars, repl_len);
     const char* old_text = text_node->text ? text_node->text : "";
     DocState* state = dom_state_for_nodes(
         (DomNode*)text_node, text_node->parent);
@@ -4787,7 +4774,7 @@ static bool dom_text_initial_offset(DomText* text, bool preserve_ws, uint32_t* o
         first_visible++;
     }
     if (first_visible == len) return false;
-    *out_offset = dom_utf16_length_from_utf8(chars, first_visible);
+    *out_offset = (uint32_t)utf8_to_utf16_length(chars, first_visible);
     return true;
 }
 

@@ -10,6 +10,7 @@
 #ifndef RADIANT_EVENT_CORE_ONLY
 #include "../lib/arraylist.h"
 #include "../lib/strbuf.h"
+#include "../lib/utf.h"
 #include "../lambda/runtime/template_state.h"
 #include "../lambda/runtime/render_map.h"
 #endif
@@ -1688,11 +1689,24 @@ bool tc_is_text_control(DomElement* elem);
 FormControlProp* tc_get_or_create_form(DomElement* elem);
 
 // UTF-8 ↔ UTF-16 conversion ----------------------------------------------
-// Surrogate pair = 2 UTF-16 code units for codepoints >= U+10000.
+// implementation is shared in lib/utf.c. keep these source-compatible names
+// for existing text-control callers while they migrate to size_t APIs.
+static inline uint32_t tc_utf8_to_utf16_length(const char* s, uint32_t byte_len) {
+    size_t units = utf8_to_utf16_length(s, (size_t)byte_len);
+    return units > UINT32_MAX ? UINT32_MAX : (uint32_t)units;
+}
 
-uint32_t tc_utf8_to_utf16_length(const char* s, uint32_t byte_len);
-uint32_t tc_utf16_to_utf8_offset(const char* s, uint32_t byte_len, uint32_t u16);
-uint32_t tc_utf8_to_utf16_offset(const char* s, uint32_t byte_len, uint32_t u8);
+static inline uint32_t tc_utf16_to_utf8_offset(const char* s, uint32_t byte_len,
+                                               uint32_t u16) {
+    size_t offset = utf16_to_utf8_offset(s, (size_t)byte_len, (size_t)u16);
+    return offset > UINT32_MAX ? UINT32_MAX : (uint32_t)offset;
+}
+
+static inline uint32_t tc_utf8_to_utf16_offset(const char* s, uint32_t byte_len,
+                                               uint32_t u8) {
+    size_t offset = utf8_to_utf16_offset(s, (size_t)byte_len, (size_t)u8);
+    return offset > UINT32_MAX ? UINT32_MAX : (uint32_t)offset;
+}
 
 // Lazy initialization + writes -------------------------------------------
 

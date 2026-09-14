@@ -29,19 +29,11 @@ bool radiant_is_supported_web_font_source(const char* url, const char* format) {
         return false;
     }
 
-    if (!url) return false;
-    const char* clean_end = url + strlen(url);
-    const char* query = strchr(url, '?');
-    const char* fragment = strchr(url, '#');
-    if (query && query < clean_end) clean_end = query;
-    if (fragment && fragment < clean_end) clean_end = fragment;
-
-    size_t len = (size_t)(clean_end - url);
-    return (len >= 6 && strncasecmp(clean_end - 6, ".woff2", 6) == 0) ||
-           (len >= 5 && strncasecmp(clean_end - 5, ".woff", 5) == 0) ||
-           (len >= 4 && strncasecmp(clean_end - 4, ".ttf", 4) == 0) ||
-           (len >= 4 && strncasecmp(clean_end - 4, ".otf", 4) == 0) ||
-           (len >= 4 && strncasecmp(clean_end - 4, ".ttc", 4) == 0);
+    return url_text_path_has_ext_ci(url, "woff2") ||
+           url_text_path_has_ext_ci(url, "woff") ||
+           url_text_path_has_ext_ci(url, "ttf") ||
+           url_text_path_has_ext_ci(url, "otf") ||
+           url_text_path_has_ext_ci(url, "ttc");
 }
 
 static void resolve_missing_font_source_path(char** source, const char* base_path) {

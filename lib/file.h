@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <time.h>
+#include "memtrack.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,6 +20,12 @@ char* read_text_file(const char *filename);
 
 // Read binary file with explicit size output. Caller must free().
 char* read_binary_file(const char *filename, size_t *out_size);
+
+// read a regular file into a NUL-terminated buffer owned by mem_alloc().
+// the caller supplies the allocation category and may receive the byte count.
+// the returned buffer must be released with mem_free().
+bool file_read_all(const char* filename, MemCategory category,
+                   char** out_data, size_t* out_size);
 
 // Write string content to a text file.
 void write_text_file(const char *filename, const char *content);

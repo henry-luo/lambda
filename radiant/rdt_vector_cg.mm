@@ -4,6 +4,7 @@
 #include "../lib/mem_factory.h"
 #include "../lib/mem.h"
 #include "../lib/mempool.h"
+#include "../lib/file.h"
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/input-parsers.h"
 #include "../lambda/lambda-data.hpp"
@@ -861,17 +862,6 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
 // Picture (SVG / vector image files)
 // ============================================================================
 
-static bool cg_ascii_ends_with_svg(const char* path) {
-    if (!path) return false;
-    size_t len = strlen(path);
-    if (len < 4) return false;
-    const char* ext = path + len - 4;
-    return (ext[0] == '.') &&
-           (ext[1] == 's' || ext[1] == 'S') &&
-           (ext[2] == 'v' || ext[2] == 'V') &&
-           (ext[3] == 'g' || ext[3] == 'G');
-}
-
 static bool cg_mime_is_svg(const char* mime_type) {
     return mime_type && (strstr(mime_type, "svg") || strstr(mime_type, "xml"));
 }
@@ -1021,7 +1011,7 @@ static const char* cg_picture_elem_attr(Element* element, const char* attr_name)
 RdtPicture* rdt_picture_load(const char* path) {
     if (!path) return nullptr;
 
-    if (cg_ascii_ends_with_svg(path)) {
+    if (file_path_has_ext_ci(path, "svg")) {
         RdtPicture* svg = cg_svg_picture_load_file(path);
         if (svg) return svg;
     }
