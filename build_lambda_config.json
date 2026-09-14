@@ -2313,7 +2313,6 @@
               "gtest_main"
             ],
             "additional_sources": [
-              "lib/hashmap_helpers.c",
               "lib/hashmap.c"
             ],
             "binary": "test_hashmap_helpers_gtest.exe",

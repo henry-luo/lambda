@@ -3,8 +3,7 @@
 #include "ts_type_parser.hpp"
 #include "../js/js_c_ast_helpers.hpp"
 #include "../../lib/mempool.h"
-#include "../../lib/hashmap.h"
-#include "../../lib/hashmap_helpers.h"
+#include "../../lib/hashmap_typed.hpp"
 #include "../../lib/log.h"
 
 #include <cctype>
@@ -371,11 +370,12 @@ TsTypeFactNode* ts_parse_type_text(JsTranspiler* tp, const char* text, int len) 
     return fact;
 }
 
-HASHMAP_DEFINE_STRKEY(ts_type_reg, TsTypeRegistryEntry, name)
+typedef TypedHashMap<TsTypeRegistryEntry,
+    HashMapCStrMemberKeyOps<TsTypeRegistryEntry, &TsTypeRegistryEntry::name>>
+    TsTypeRegistryMap;
 
 void ts_type_registry_init(JsTranspiler* tp) {
-    tp->type_registry = hashmap_new(sizeof(TsTypeRegistryEntry), 32, 0, 0,
-        ts_type_reg_hash, ts_type_reg_cmp, NULL, NULL);
+    tp->type_registry = TsTypeRegistryMap::create(32);
 }
 
 void ts_type_registry_add(JsTranspiler* tp, const char* name, Type* type) {
@@ -386,7 +386,7 @@ void ts_type_registry_add(JsTranspiler* tp, const char* name, Type* type) {
     memcpy(entry.name, name, name_len);
     entry.name[name_len] = '\0';
     entry.type = type;
-    hashmap_set(tp->type_registry, &entry);
+    TsTypeRegistryMap::set(tp->type_registry, entry);
 }
 
 Type* ts_type_registry_lookup(JsTranspiler* tp, const char* name) {
@@ -396,7 +396,6 @@ Type* ts_type_registry_lookup(JsTranspiler* tp, const char* name) {
     if (name_len >= sizeof(query.name)) name_len = sizeof(query.name) - 1;
     memcpy(query.name, name, name_len);
     query.name[name_len] = '\0';
-    const TsTypeRegistryEntry* found =
-        (const TsTypeRegistryEntry*)hashmap_get(tp->type_registry, &query);
+    const TsTypeRegistryEntry* found = TsTypeRegistryMap::get(tp->type_registry, query);
     return found ? found->type : NULL;
 }

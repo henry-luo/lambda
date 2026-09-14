@@ -5,6 +5,7 @@
 extern "C" {
 #include "../../lib/hashmap_helpers.h"
 }
+#include "../../lib/hashmap_typed.hpp"
 
 namespace {
 
@@ -49,6 +50,15 @@ HASHMAP_DEFINE_FIELD2_KEY(field2_entry, struct Field2Entry, id, tag)
 
 struct Field3Entry { uint64_t id; const char* tag; const char* state; int value; };
 HASHMAP_DEFINE_FIELD3_KEY(field3_entry, struct Field3Entry, id, tag, state)
+
+struct TypedCStrEntry { const char* name; int value; };
+typedef TypedHashMap<TypedCStrEntry,
+    HashMapCStrMemberKeyOps<TypedCStrEntry, &TypedCStrEntry::name>> TypedCStrMap;
+
+struct TypedIdentityEntry { void* target; uint64_t signature; int value; };
+typedef TypedHashMap<TypedIdentityEntry,
+    HashMapIdentity2MemberKeyOps<TypedIdentityEntry, &TypedIdentityEntry::target,
+        &TypedIdentityEntry::signature>> TypedIdentityMap;
 
 }  // namespace
 
@@ -124,47 +134,48 @@ TEST(HashmapHelpersTest, PtrKey) {
     hashmap_free(m);
 }
 
-TEST(HashmapHelpersTest, OffsetBasedCstrAt) {
-    struct InlineKey { char name[16]; int v; };
-    InlineKey a; strcpy(a.name, "foo"); a.v = 1;
-    InlineKey b; strcpy(b.name, "foo"); b.v = 2;
-    InlineKey c; strcpy(c.name, "bar"); c.v = 3;
-    size_t off = offsetof(InlineKey, name);
-    EXPECT_EQ(hashmap_cmp_cstr_at(&a, &b, off), 0);
-    EXPECT_NE(hashmap_cmp_cstr_at(&a, &c, off), 0);
-    EXPECT_EQ(hashmap_hash_cstr_at(&a, off, 0, 0),
-              hashmap_hash_cstr_at(&b, off, 0, 0));
-    EXPECT_NE(hashmap_hash_cstr_at(&a, off, 0, 0),
-              hashmap_hash_cstr_at(&c, off, 0, 0));
+TEST(TypedHashMapTest, CStrMemberKey) {
+    TypedCStrMap map = {};
+    ASSERT_TRUE(map.init(0));
+
+    TypedCStrEntry first{"alpha", 1};
+    TypedCStrEntry second{"beta", 2};
+    EXPECT_EQ(map.set(first), nullptr);
+    EXPECT_EQ(map.set(second), nullptr);
+
+    char key_storage[] = "alpha";
+    TypedCStrEntry query{key_storage, 0};
+    const TypedCStrEntry* found = map.get(query);
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->value, 1);
+
+    TypedCStrEntry replacement{"alpha", 3};
+    const TypedCStrEntry* replaced = map.set(replacement);
+    ASSERT_NE(replaced, nullptr);
+    EXPECT_EQ(replaced->value, 1);
+    EXPECT_EQ(map.count(), 2u);
+    map.destroy();
 }
 
-TEST(HashmapHelpersTest, OffsetBasedCstrPtrAt) {
-    struct PtrKey { const char* name; int v; };
-    PtrKey a{"foo", 1};
-    char buf[8] = "foo";
-    PtrKey b{buf, 2};
-    PtrKey c{"bar", 3};
-    size_t off = offsetof(PtrKey, name);
-    EXPECT_EQ(hashmap_cmp_cstrptr_at(&a, &b, off), 0);
-    EXPECT_NE(hashmap_cmp_cstrptr_at(&a, &c, off), 0);
-    EXPECT_EQ(hashmap_hash_cstrptr_at(&a, off, 0, 0),
-              hashmap_hash_cstrptr_at(&b, off, 0, 0));
-}
+TEST(TypedHashMapTest, CompositeIdentityKey) {
+    int first_target = 0;
+    int second_target = 0;
+    HashMap* raw = TypedIdentityMap::create(0, 0x1234u, 0x5678u);
+    ASSERT_NE(raw, nullptr);
 
-TEST(HashmapHelpersTest, OffsetBasedIntAndPtr) {
-    struct IntKey { int v; };
-    IntKey a{5}, b{5}, c{7};
-    size_t off = offsetof(IntKey, v);
-    EXPECT_EQ(hashmap_cmp_int_at(&a, &b, off), 0);
-    EXPECT_LT(hashmap_cmp_int_at(&a, &c, off), 0);
-    EXPECT_GT(hashmap_cmp_int_at(&c, &a, off), 0);
+    TypedIdentityEntry first{&first_target, 9, 10};
+    TypedIdentityEntry second{&second_target, 9, 20};
+    EXPECT_EQ(TypedIdentityMap::set(raw, first), nullptr);
+    EXPECT_EQ(TypedIdentityMap::set(raw, second), nullptr);
 
-    struct PK { void* p; };
-    int x = 0, y = 0;
-    PK pa{&x}, pb{&x}, pc{&y};
-    size_t poff = offsetof(PK, p);
-    EXPECT_EQ(hashmap_cmp_ptr_at(&pa, &pb, poff), 0);
-    EXPECT_NE(hashmap_cmp_ptr_at(&pa, &pc, poff), 0);
+    TypedIdentityEntry query{&second_target, 9, 0};
+    const TypedIdentityEntry* found = TypedIdentityMap::get(raw, query);
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->value, 20);
+
+    EXPECT_NE(TypedIdentityMap::erase(raw, query), nullptr);
+    EXPECT_EQ(TypedIdentityMap::get(raw, query), nullptr);
+    hashmap_free(raw);
 }
 
 TEST(HashmapHelpersTest, IntKeyInt64) {
