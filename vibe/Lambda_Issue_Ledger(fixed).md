@@ -15,7 +15,7 @@
 
 ## Archive index
 
-This archive contains **94 historical records**: 93 RESOLVED entries and one
+This archive contains **95 historical records**: 94 RESOLVED entries and one
 CLOSED design decision. Duplicate and split records remain separate so their
 provenance is not lost. The first sections contain records formerly
 interleaved with live entries; §15 preserves the 44 records from the former
@@ -315,6 +315,22 @@ Regression: `test/lambda/proc/proc_assignment_error_carrier.ls` covers an
 widening to `1.5`, and rejection of `1.5` at a declared `int` assignment.
 It produces `[true, 1.5, true]` under both `LAMBDA_TIER=jit` and the default
 tier. `proc_var_type_widen.ls` also passes under eager JIT.
+
+<a id="lr07-5"></a>**LR07-5 · AST “effective type” carrier guessing · RESOLVED 2026-09-14**
+The Lambda MIR Direct `get_effective_type` helper and its cited source anchor
+are gone; the former line now belongs to unrelated import-prototype emission.
+Every emitted expression instead publishes a `MirValue` with its semantic
+contract and actual `ValueRep`, and consumers convert only through
+`em_require_rep()` under **D2.4.1–D2.4.3**. This removes the original failure
+mode: interpreting a boxed `Item` as a native scalar merely because the AST
+retained a precise type.
+
+`mir_expr_carrier_type` remains solely a pre-lowering planning oracle. Its
+unproven, fallible, control-flow, and mixed-representation cases fail closed to
+the boxed Item carrier, while emitted values preserve the exact producer fact.
+The audit found no reproducible non-identifier stale-type boxing failure. Any
+future planner coverage gap belongs to the broader LR07-14 representation audit,
+not this retired helper defect.
 
 <a id="lr07-10"></a>**LR07-10 · Out-of-bounds index semantics differed by type · RESOLVED 2026-09-14**
 `MIR_INDEX_OOB_FLOAT_ZERO` is removed. `emit_checked_index_load` now emits the
