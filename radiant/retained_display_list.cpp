@@ -1,8 +1,7 @@
 #include "render.hpp"
 
-#include "../lib/hashmap.h"
 #include "../lib/mem_factory.h"
-#include "../lib/hashmap_helpers.h"
+#include "../lib/hashmap_typed.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/arena.h"
@@ -24,10 +23,14 @@ typedef struct RetainedDisplayListEntry {
     RetainedDisplayListFragment* fragment;
 } RetainedDisplayListEntry;
 
+typedef TypedHashMap<RetainedDisplayListEntry,
+    HashMapIntegralMemberKeyOps<RetainedDisplayListEntry,
+        &RetainedDisplayListEntry::view_id>> RetainedDisplayListMap;
+
 struct RetainedDisplayListCache {
     Pool* pool;
     Arena* arena;
-    HashMap* map;
+    RetainedDisplayListMap map;
     uint32_t epoch;
     RetainedDisplayListStats stats;
 
@@ -36,8 +39,6 @@ struct RetainedDisplayListCache {
     void begin_frame();
     RetainedDisplayListStats snapshot_stats() const;
 };
-
-HASHMAP_DEFINE_INTKEY(retained_dl_entry, RetainedDisplayListEntry, view_id)
 
 static void retained_dl_copy_clip_shape_stack(DisplayList* dst,
                                               DlClipShapeStack* out,
@@ -187,8 +188,7 @@ bool RetainedDisplayListCache::init(Pool* owner_pool) {
     pool = owner_pool;
     // Retained fragments intentionally share this cache arena so captures survive frame scratch resets.
     arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "retained_dl.arena");
-    map = retained_dl_entry_new(128);
-    if (!arena || !map) {
+    if (!arena || !map.init(128)) {
         destroy();
         return false;
     }
@@ -197,18 +197,16 @@ bool RetainedDisplayListCache::init(Pool* owner_pool) {
 }
 
 void RetainedDisplayListCache::destroy() {
-    if (map) {
+    if (map.initialized()) {
         size_t iter = 0;
-        void* item = nullptr;
-        while (hashmap_iter(map, &iter, &item)) {
-            RetainedDisplayListEntry* entry = (RetainedDisplayListEntry*)item;
+        RetainedDisplayListEntry* entry = nullptr;
+        while (map.next(&iter, &entry)) {
             if (entry && entry->fragment) {
                 dl_destroy(&entry->fragment->list);
                 mem_free(entry->fragment);
             }
         }
-        hashmap_free(map);
-        map = nullptr;
+        map.destroy();
     }
     if (arena) {
         // Factory-created retained arena must unregister before the borrowed parent pool is released.
@@ -264,11 +262,10 @@ void retained_dl_cache_note_reuse_hit(RetainedDisplayListCache* cache) {
 
 static RetainedDisplayListFragment* retained_dl_fragment_get_or_create(
     RetainedDisplayListCache* cache, uint32_t view_id) {
-    if (!cache || !cache->map || view_id == 0) return nullptr;
+    if (!cache || !cache->map.initialized() || view_id == 0) return nullptr;
 
     RetainedDisplayListEntry query = { view_id, nullptr };
-    RetainedDisplayListEntry* found =
-        (RetainedDisplayListEntry*)hashmap_get(cache->map, &query);
+    RetainedDisplayListEntry* found = cache->map.get(query);
     if (found) return found->fragment;
 
     RetainedDisplayListFragment* fragment =
@@ -280,8 +277,8 @@ static RetainedDisplayListFragment* retained_dl_fragment_get_or_create(
     fragment->initialized = true;
 
     RetainedDisplayListEntry entry = { view_id, fragment };
-    hashmap_set(cache->map, &entry);
-    if (hashmap_oom(cache->map)) {
+    cache->map.set(entry);
+    if (cache->map.oom()) {
         dl_destroy(&fragment->list);
         mem_free(fragment);
         return nullptr;
@@ -356,10 +353,9 @@ void retained_dl_cache_capture(RetainedDisplayListCache* cache, const DisplayLis
 
 const RetainedDisplayListFragment* retained_dl_cache_get(RetainedDisplayListCache* cache,
                                                          uint32_t view_id) {
-    if (!cache || !cache->map || view_id == 0) return nullptr;
+    if (!cache || !cache->map.initialized() || view_id == 0) return nullptr;
     RetainedDisplayListEntry query = { view_id, nullptr };
-    RetainedDisplayListEntry* found =
-        (RetainedDisplayListEntry*)hashmap_get(cache->map, &query);
+    RetainedDisplayListEntry* found = cache->map.get(query);
     if (!found || !found->fragment || found->fragment->list.count <= 0) return nullptr;
     return found->fragment;
 }

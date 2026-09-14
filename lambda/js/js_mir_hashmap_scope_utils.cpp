@@ -863,6 +863,9 @@ void jm_push_loop_labels(JsMirTranspiler* mt, MIR_label_t continue_label, MIR_la
         labels->continue_label = continue_label;
         labels->break_label = break_label;
         labels->iterator_to_close = 0;
+        labels->async_return_close_done = 0;
+        labels->iterator_cleanup_try_depth = -1;
+        labels->is_async_iterator = false;
         labels->label_name = mt->pending_label_name;
         labels->label_name_len = mt->pending_label_len;
         labels->with_depth_at_push = mt->with_depth;

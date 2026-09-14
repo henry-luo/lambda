@@ -167,6 +167,9 @@ struct JsLoopLabels {
     MIR_label_t continue_label;
     MIR_label_t break_label;
     MIR_reg_t iterator_to_close;   // nonzero for for-of entries that need IteratorClose on outer abrupt jumps
+    MIR_reg_t async_return_close_done; // async return cleanup already emitted at the source return
+    int iterator_cleanup_try_depth; // synthetic IteratorClose context, or -1
+    bool is_async_iterator;
     const char* label_name;       // v11: named label (NULL if anonymous)
     int label_name_len;           // v11: length of label name
     // `with` nesting when this target was pushed. An abrupt jump unwinds only

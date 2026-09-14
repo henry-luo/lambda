@@ -218,6 +218,8 @@ static int jm_count_indexed_suspensions(JsMirTranspiler* mt, JsAstNode* root,
     if (root_id == AST_NODE_ID_INVALID) return 0;
     AstFunctionId owner = index->owner_functions[root_id];
     int count = 0;
+    int async_for_await_count = 0;
+    int abrupt_completion_count = 0;
     for (uint32_t i = 0; i < index->count; i++) {
         AstNode* node = index->nodes[i];
         if (!node) continue;
@@ -247,7 +249,21 @@ static int jm_count_indexed_suspensions(JsMirTranspiler* mt, JsAstNode* root,
                 node->node_type == AST_NODE_FOR_OF_STAM &&
                 ((JsForOfNode*)node)->is_await) {
             count += 2;
+            async_for_await_count++;
         }
+        if (kind == JS_SUSPENSION_AWAIT &&
+                (node->node_type == AST_NODE_RETURN_STAM ||
+                 node->node_type == AST_NODE_BREAK_STAM ||
+                 node->node_type == AST_NODE_CONTINUE_STAM)) {
+            abrupt_completion_count++;
+        }
+    }
+    if (kind == JS_SUSPENSION_AWAIT && async_for_await_count > 0) {
+        // Each for-await lowers three local AsyncIteratorClose edges (break,
+        // return and throw). A source abrupt completion can additionally leave
+        // any enclosing async iterator, so reserve the structural upper bound
+        // for those repeated lowering sites. Unused labels are emitted safely.
+        count += async_for_await_count * (3 + abrupt_completion_count);
     }
     return count;
 }

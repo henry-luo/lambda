@@ -4,9 +4,10 @@
 // first field is a C-string key (either `char name[N]` or `const char* name`),
 // compared with strcmp and hashed with hashmap_sip. This header provides:
 //
-//   1. Reusable cmp/hash callbacks for common key shapes.
+//   1. C macro factories for common key shapes.
 //   2. HASHMAP_DEFINE_STRKEY(name, struct_type, key_field) - emits cmp/hash
 //      functions plus a `<name>_new(cap)` factory in one line.
+//   3. hashmap_typed.hpp supplies the equivalent typed facade for C++ callers.
 //
 // Example:
 //   struct VarScopeEntry { char name[128]; MirVarEntry var; };
@@ -32,25 +33,24 @@ extern "C" {
 #define HASHMAP_HELPER_UNUSED
 #endif
 
-// --- generic offset-based callbacks ----------------------------------------
-// These read the key from a fixed byte offset within the struct. Useful when a
-// macro emit is overkill (e.g. when computing the offset dynamically).
+static inline uint64_t hashmap_hash_identity2(const void* first, size_t first_size,
+                                               const void* second, size_t second_size,
+                                               uint64_t seed0, uint64_t seed1) {
+    uint64_t h1 = hashmap_murmur(first, first_size, seed0, seed1);
+    uint64_t h2 = hashmap_murmur(second, second_size, seed0, seed1);
+    return h1 ^ (h2 * UINT64_C(0x9e3779b97f4a7c15));
+}
 
-// key is `const char*` stored at the given offset.
-uint64_t hashmap_hash_cstrptr_at(const void* item, size_t off, uint64_t s0, uint64_t s1);
-int hashmap_cmp_cstrptr_at(const void* a, const void* b, size_t off);
-
-// key is an inline char array starting at the given offset (treated as cstr).
-uint64_t hashmap_hash_cstr_at(const void* item, size_t off, uint64_t s0, uint64_t s1);
-int hashmap_cmp_cstr_at(const void* a, const void* b, size_t off);
-
-// key is `void*`/pointer identity at the given offset.
-uint64_t hashmap_hash_ptr_at(const void* item, size_t off, uint64_t s0, uint64_t s1);
-int hashmap_cmp_ptr_at(const void* a, const void* b, size_t off);
-
-// key is `int` at the given offset.
-uint64_t hashmap_hash_int_at(const void* item, size_t off, uint64_t s0, uint64_t s1);
-int hashmap_cmp_int_at(const void* a, const void* b, size_t off);
+static inline uint64_t hashmap_hash_identity3(const void* first, size_t first_size,
+                                               const void* second, size_t second_size,
+                                               const void* third, size_t third_size,
+                                               uint64_t seed0, uint64_t seed1) {
+    uint64_t h1 = hashmap_murmur(first, first_size, seed0, seed1);
+    uint64_t h2 = hashmap_murmur(second, second_size, seed0, seed1);
+    uint64_t h3 = hashmap_murmur(third, third_size, seed0, seed1);
+    return h1 ^ (h2 * UINT64_C(0x9e3779b97f4a7c15)) ^
+        (h3 * UINT64_C(0x517cc1b727220a95));
+}
 
 // --- macro: emit cmp/hash/new for a struct keyed by a C-string field --------
 // Works for both `char name[N]` and `const char* name` because `e->field` decays
@@ -86,8 +86,7 @@ int hashmap_cmp_int_at(const void* a, const void* b, size_t off);
         (void)udata; \
         const struct_type* ea = (const struct_type*)a; \
         const struct_type* eb = (const struct_type*)b; \
-        if (ea->key_field == eb->key_field) return 0; \
-        return ea->key_field < eb->key_field ? -1 : 1; \
+        return ea->key_field == eb->key_field ? 0 : 1; \
     } \
     static inline HASHMAP_HELPER_UNUSED struct hashmap* name##_new(size_t cap) { \
         return hashmap_new(sizeof(struct_type), cap, 0, 0, \
@@ -151,46 +150,39 @@ int hashmap_cmp_int_at(const void* a, const void* b, size_t off);
                            name##_hash, name##_cmp, elfree, NULL); \
     }
 
-// emit cmp/hash/new for a struct keyed by two scalar or pointer identity fields.
+// emit cmp/hash/new for a struct keyed by two integral or pointer identity fields.
 // field expressions may name nested fields, e.g. `key.source_item.item`.
 #define HASHMAP_DEFINE_FIELD2_KEY(name, struct_type, field1, field2) \
     static uint64_t name##_hash(const void* item, uint64_t s0, uint64_t s1) { \
         const struct_type* e = (const struct_type*)item; \
-        uint64_t h1 = hashmap_murmur(&e->field1, sizeof(e->field1), s0, s1); \
-        uint64_t h2 = hashmap_murmur(&e->field2, sizeof(e->field2), s0, s1); \
-        return h1 ^ (h2 * 0x9e3779b97f4a7c15ULL); \
+        return hashmap_hash_identity2(&e->field1, sizeof(e->field1), \
+            &e->field2, sizeof(e->field2), s0, s1); \
     } \
     static int name##_cmp(const void* a, const void* b, void* udata) { \
         (void)udata; \
         const struct_type* ea = (const struct_type*)a; \
         const struct_type* eb = (const struct_type*)b; \
-        if (ea->field1 != eb->field1) return ea->field1 < eb->field1 ? -1 : 1; \
-        if (ea->field2 != eb->field2) return ea->field2 < eb->field2 ? -1 : 1; \
-        return 0; \
+        return ea->field1 == eb->field1 && ea->field2 == eb->field2 ? 0 : 1; \
     } \
     static inline HASHMAP_HELPER_UNUSED struct hashmap* name##_new(size_t cap) { \
         return hashmap_new(sizeof(struct_type), cap, 0, 0, \
                            name##_hash, name##_cmp, NULL, NULL); \
     }
 
-// emit cmp/hash/new for a struct keyed by three scalar or pointer identity fields.
+// emit cmp/hash/new for a struct keyed by three integral or pointer identity fields.
 // field expressions may name nested fields, e.g. `key.model_item.item`.
 #define HASHMAP_DEFINE_FIELD3_KEY(name, struct_type, field1, field2, field3) \
     static uint64_t name##_hash(const void* item, uint64_t s0, uint64_t s1) { \
         const struct_type* e = (const struct_type*)item; \
-        uint64_t h1 = hashmap_murmur(&e->field1, sizeof(e->field1), s0, s1); \
-        uint64_t h2 = hashmap_murmur(&e->field2, sizeof(e->field2), s0, s1); \
-        uint64_t h3 = hashmap_murmur(&e->field3, sizeof(e->field3), s0, s1); \
-        return h1 ^ (h2 * 0x9e3779b97f4a7c15ULL) ^ (h3 * 0x517cc1b727220a95ULL); \
+        return hashmap_hash_identity3(&e->field1, sizeof(e->field1), \
+            &e->field2, sizeof(e->field2), &e->field3, sizeof(e->field3), s0, s1); \
     } \
     static int name##_cmp(const void* a, const void* b, void* udata) { \
         (void)udata; \
         const struct_type* ea = (const struct_type*)a; \
         const struct_type* eb = (const struct_type*)b; \
-        if (ea->field1 != eb->field1) return ea->field1 < eb->field1 ? -1 : 1; \
-        if (ea->field2 != eb->field2) return ea->field2 < eb->field2 ? -1 : 1; \
-        if (ea->field3 != eb->field3) return ea->field3 < eb->field3 ? -1 : 1; \
-        return 0; \
+        return ea->field1 == eb->field1 && ea->field2 == eb->field2 && \
+            ea->field3 == eb->field3 ? 0 : 1; \
     } \
     static inline HASHMAP_HELPER_UNUSED struct hashmap* name##_new(size_t cap) { \
         return hashmap_new(sizeof(struct_type), cap, 0, 0, \

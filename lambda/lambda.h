@@ -1652,6 +1652,9 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 #define ITEM_SENTINEL_TAG   UINT64_C(0x1F)
 #define ITEM_JS_DELETED_SENTINEL   ((ITEM_SENTINEL_TAG << 56) | UINT64_C(0x00DEAD00DEAD00))
 #define ITEM_JS_ITER_DONE_SENTINEL ((ITEM_SENTINEL_TAG << 56) | UINT64_C(0x00DEAD00000000))
+// Internal-only AsyncIteratorClose marker. It never crosses the protocol
+// boundary: the caller consumes it before awaiting a callable `return()`.
+#define ITEM_JS_ITER_CLOSE_ABSENT_SENTINEL ((ITEM_SENTINEL_TAG << 56) | UINT64_C(0x00DEAD00000001))
 
 // ---------------------------------------------------------------------------
 // Pending Items — return-value convention v3 (RV3, see
@@ -1837,6 +1840,7 @@ LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_JS_TDZ >> 56)), "ITEM
 //  the int encoder produces — nothing tag-specific left to assert here)
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_JS_DELETED_SENTINEL >> 56)), "ITEM_JS_DELETED_SENTINEL tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_JS_ITER_DONE_SENTINEL >> 56)), "ITEM_JS_ITER_DONE_SENTINEL tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_JS_ITER_CLOSE_ABSENT_SENTINEL >> 56)), "ITEM_JS_ITER_CLOSE_ABSENT_SENTINEL tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_INT >> 56)), "ITEM_INT tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_ERROR >> 56)), "ITEM_ERROR tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_TRUE >> 56)), "ITEM_TRUE tag must be non-double");
@@ -1851,7 +1855,9 @@ LAMBDA_STATIC_ASSERT(ITEM_SENTINEL_TAG >= LMD_CONTAINER_HEAP_START,
                      "sentinel tag must sit above every TypeId");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NOT_INLINE_INT((uint8_t)ITEM_SENTINEL_TAG),
                      "sentinel tag must stay out of the inline-int octant");
-LAMBDA_STATIC_ASSERT(ITEM_JS_DELETED_SENTINEL != ITEM_JS_ITER_DONE_SENTINEL,
+LAMBDA_STATIC_ASSERT(ITEM_JS_DELETED_SENTINEL != ITEM_JS_ITER_DONE_SENTINEL &&
+                     ITEM_JS_DELETED_SENTINEL != ITEM_JS_ITER_CLOSE_ABSENT_SENTINEL &&
+                     ITEM_JS_ITER_DONE_SENTINEL != ITEM_JS_ITER_CLOSE_ABSENT_SENTINEL,
                      "internal sentinels must stay distinct");
 // The pending tag (RV3) has the same unreachability requirements as the
 // sentinel tag, plus it must stay distinct from the sentinel family: JS
@@ -1868,7 +1874,8 @@ LAMBDA_STATIC_ASSERT(ITEM_PENDING_TAG < LAMBDA_TAG_SPACE_SIZE,
 LAMBDA_STATIC_ASSERT(ITEM_PENDING_TAG != ITEM_SENTINEL_TAG,
                      "pending tag must stay distinct from the sentinel tag");
 LAMBDA_STATIC_ASSERT((uint8_t)(ITEM_JS_DELETED_SENTINEL >> 56) != (uint8_t)ITEM_PENDING_TAG &&
-                     (uint8_t)(ITEM_JS_ITER_DONE_SENTINEL >> 56) != (uint8_t)ITEM_PENDING_TAG,
+                     (uint8_t)(ITEM_JS_ITER_DONE_SENTINEL >> 56) != (uint8_t)ITEM_PENDING_TAG &&
+                     (uint8_t)(ITEM_JS_ITER_CLOSE_ABSENT_SENTINEL >> 56) != (uint8_t)ITEM_PENDING_TAG,
                      "storable JS sentinels must not share the pending high byte");
 LAMBDA_STATIC_ASSERT(PENDING_KIND_FLOAT <= PENDING_KIND_MASK,
                      "pending kinds must fit the reserved low bits");
