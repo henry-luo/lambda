@@ -302,12 +302,6 @@ static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
         (void)dv;
         break;
     }
-    case MAP_KIND_ITERATOR:
-        if (map->data && !gc_native_seen_seen_or_add(seen_native, map->data)) {
-            mem_free(map->data);
-        }
-        map->data = NULL;
-        break;
     case MAP_KIND_ARRAY_SPARSE: {
         SparseArrayMap* sm = (SparseArrayMap*)map;
         if (sm->sparse_indices && !gc_native_seen_seen_or_add(seen_native, sm->sparse_indices)) {

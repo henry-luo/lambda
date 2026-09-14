@@ -368,8 +368,6 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
 #define LMD_TYPE_ERROR_       LMD_TYPE_ERROR
 #define LMD_TYPE_UNDEFINED_   LMD_TYPE_UNDEFINED
 
-#define MAP_KIND_ITERATOR_ 6
-#define MAP_KIND_PROXY_    9
 #define MAP_KIND_ARRAY_SPARSE_ 14
 #define MAP_KIND_ERROR_    15
 
@@ -1829,20 +1827,8 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         void* data_ptr = *(void**)(p + LAMBDA_GC_OFF_MAP_DATA);
         int data_cap = *(int*)(p + LAMBDA_GC_OFF_MAP_DATA_CAP);
         if (tag == LMD_TYPE_MAP_ && gc->js_native_trace) {
+            // JS trailing carriers own their precise edges through this hook.
             gc->js_native_trace(obj, gc);
-        }
-        if (tag == LMD_TYPE_MAP_ && map_kind == MAP_KIND_ITERATOR_) {
-            if (data_ptr) gc_mark_item(gc, *(uint64_t*)data_ptr);
-            break;
-        }
-        if (tag == LMD_TYPE_MAP_ && map_kind == MAP_KIND_PROXY_) {
-            if (data_ptr) {
-                uint64_t* slots = (uint64_t*)data_ptr;
-                gc_mark_item(gc, slots[0]);
-                gc_mark_item(gc, slots[1]);
-                gc_mark_item(gc, slots[2]);
-            }
-            break;
         }
         if (tag == LMD_TYPE_MAP_ && map_kind == MAP_KIND_ARRAY_SPARSE_) {
             gc_trace_sparse_array_map_entries(gc, obj);
@@ -2376,13 +2362,6 @@ static void gc_finalize_dead_object(gc_heap_t* gc, gc_header_t* header) {
         uint8_t map_kind = p[LAMBDA_GC_OFF_CONTAINER_MAP_KIND];
         if (map_kind == MAP_KIND_ARRAY_SPARSE_) {
             gc_free_sparse_array_map_entries(obj);
-        }
-        if (map_kind == MAP_KIND_ITERATOR_ || map_kind == MAP_KIND_PROXY_) {
-            void* data = *(void**)(p + LAMBDA_GC_OFF_MAP_DATA);
-            if (data) {
-                mem_free(data);
-                *(void**)(p + LAMBDA_GC_OFF_MAP_DATA) = NULL;
-            }
         }
     }
     // Other types: sub-allocations (items[], data, closure_env) are in data zone

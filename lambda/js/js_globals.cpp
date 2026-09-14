@@ -15879,7 +15879,7 @@ extern "C" Item js_resolve_unresolved_binding(Item value, NameId name_id, int64_
 // Global builtin function values retain the catalog ID that selected them.
 // The registry is the sole owner of names, arities, and cache identity.
 #define global_builtin_fn_cache_at(index) (*js_realm_intrinsic_slot(JS_REALM_SLOT_GLOBAL_BUILTIN_BASE, (index)))
-#define global_builtin_fn_cache_init (js_runtime_state.intrinsic_slots->global_builtin_initialized)
+#define global_builtin_fn_cache_init (js_runtime_state.intrinsics->global_builtin_initialized)
 
 // The preamble snapshot owns the realm's catalog-backed global functions too;
 // partial reset must keep their identity alongside Number.parseFloat and the
@@ -15949,7 +15949,7 @@ extern "C" Item js_get_global_builtin_fn_by_id(Item global_id_item) {
 // =============================================================================
 
 #define js_constructor_cache_at(index) (*js_realm_intrinsic_slot(JS_REALM_SLOT_CONSTRUCTOR_BASE, (index)))
-#define js_ctor_cache_init (js_runtime_state.intrinsic_slots->constructors_initialized)
+#define js_ctor_cache_init (js_runtime_state.intrinsics->constructors_initialized)
 static void js_typed_array_base_reset();
 
 // Forward declaration: snapshot mechanism preserves ctor identity across batch resets.

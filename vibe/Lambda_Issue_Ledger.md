@@ -489,14 +489,6 @@ Root and raw-number regions have fixed virtual limits. Checked prologues fail
 deterministically instead of corrupting adjacent memory, but workloads that
 genuinely exceed those reservations cannot grow them dynamically.
 
-<a id="lr08-4"></a>**LR08-4 · Wide scalar ownership must be explicit at every escaping store · OPEN**
-Number-frame temporaries are reclaimed at return, so containers, JS
-environments, exceptions, and other longer-lived stores must rehome payloads
-into storage-owned lanes. The shared store/rehome helpers enforce the current
-paths; a new raw Item store that bypasses them creates a dangling scalar
-pointer.
-
-
 <a id="lr08-6"></a>**LR08-6 · `SHAPE_POOL_MAX_CHAIN_LENGTH` = 64 silently returns NULL · OPEN**
 Maps/elements with more than 64 fields get no pooled shape
 (`lambda/core/shape_pool.cpp:182`–`183`, `:247`) — only a `log_warn`, with a

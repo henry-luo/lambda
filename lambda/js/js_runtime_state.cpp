@@ -393,10 +393,9 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
         js_global_environment_destroy(state->global_environment);
         mem_free(state->global_environment);
     }
-    if (state->event_loop) mem_free(state->event_loop);
-    if (state->timers) {
-        js_event_loop_timer_state_destroy(state->timers);
-        mem_free(state->timers);
+    if (state->event_loop) {
+        js_event_loop_state_destroy(state->event_loop);
+        mem_free(state->event_loop);
     }
     runtime_resource_table_destroy(&state->resources);
     if (state->console.labels) {
@@ -418,7 +417,6 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
     }
     state->global_environment = NULL;
     state->event_loop = NULL;
-    state->timers = NULL;
     state->async_hooks = NULL;
     if (state->readline) {
         js_readline_state_destroy(state->readline);
@@ -439,7 +437,6 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
         mem_free(state->async_local_storage);
     }
     root_vector_destroy(&state->modules.values);
-    if (state->intrinsic_slots) mem_free(state->intrinsic_slots);
     if (state->test262_agent) {
         js_test262_agent_state_destroy(state->test262_agent);
         mem_free(state->test262_agent);
@@ -453,7 +450,6 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
     state->assert = NULL;
     state->intrinsics = NULL;
     state->async_local_storage = NULL;
-    state->intrinsic_slots = NULL;
     state->test262_agent = NULL;
     state->process = NULL;
 }
@@ -570,19 +566,15 @@ JsProcessState* js_process_state_ensure(JsRuntimeState* state) {
 static bool js_runtime_state_alloc_records(JsRuntimeState* state) {
     state->global_environment = (JsGlobalEnvironment*)mem_calloc(1,
         sizeof(JsGlobalEnvironment), MEM_CAT_JS_RUNTIME);
-    state->event_loop = (JsEventLoopQueueState*)mem_calloc(1,
-        sizeof(JsEventLoopQueueState), MEM_CAT_JS_RUNTIME);
-    state->timers = (JsEventLoopTimerState*)mem_calloc(1,
-        sizeof(JsEventLoopTimerState), MEM_CAT_JS_RUNTIME);
+    state->event_loop = (JsEventLoopState*)mem_calloc(1,
+        sizeof(JsEventLoopState), MEM_CAT_JS_RUNTIME);
     state->string_caches = (JsStringCacheState*)mem_calloc(1,
         sizeof(JsStringCacheState), MEM_CAT_JS_RUNTIME);
-    state->intrinsics = (JsIntrinsicState*)mem_calloc(1, sizeof(JsIntrinsicState), MEM_CAT_JS_RUNTIME);
-    state->intrinsic_slots = (JsRealmIntrinsicSlots*)mem_calloc(1,
-        sizeof(JsRealmIntrinsicSlots), MEM_CAT_JS_RUNTIME);
-    if (!state->global_environment || !state->event_loop || !state->timers ||
+    state->intrinsics = (JsRealmIntrinsicState*)mem_calloc(1,
+        sizeof(JsRealmIntrinsicState), MEM_CAT_JS_RUNTIME);
+    if (!state->global_environment || !state->event_loop ||
             !state->string_caches ||
-            !state->intrinsics ||
-            !state->intrinsic_slots) {
+            !state->intrinsics) {
         log_error("js-runtime-state: failed to allocate realm records");
         js_runtime_state_free_records(state);
         return false;
@@ -645,7 +637,7 @@ bool js_runtime_state_init(EvalContext* runtime_context) {
             &state->event_loop->queue_storage[2]);
         runtime_job_queue_init(&state->promises.unhandled_queue,
             &state->promises.unhandled_storage);
-        state->timers->next_id = 1;
+        state->event_loop->next_id = 1;
         state->execution.call_stack_limit = js_initial_call_stack_limit();
         state->operations.next_symbol_id = 100;
         state->string_caches->last_from_char_code_cp = -1;
@@ -830,13 +822,12 @@ static void js_runtime_state_prepare_root_vectors(JsRuntimeState* state) {
     js_runtime_state_visit_root_vectors(state,
         js_runtime_state_configure_root_vector, NULL);
 
-    // A JsNamespaceState-derived cache lays its inherited `namespace_object`
-    // out FIRST, before the fields the subsystem adds, so a range registered at
-    // the first DERIVED field leaves the namespace itself unrooted and scans one
-    // Item past the struct. That is exactly how `require("stream")` came back
-    // with an empty namespace under LAMBDA_GC_FORCE_EVERY (fixed 2026-09-08).
-    // These states are not standard-layout, so offsetof on them is ill-formed;
-    // check the start/count pair against the real addresses once at setup (D5.3).
+    // Stream keeps `namespace_object` FIRST, before the fields the subsystem
+    // adds, so a range registered at the first key leaves the namespace unrooted
+    // and scans one Item past the struct. That is exactly how `require("stream")`
+    // came back with an empty namespace under LAMBDA_GC_FORCE_EVERY (fixed 2026-09-08).
+    // The state is not standard-layout, so offsetof is ill-formed; check the
+    // start/count pair against the real addresses once at setup (D5.3).
 #define JS_CHECK_NAMESPACE_ROOT_RANGE(field, last_field, count) \
     if (&state->field.namespace_object + ((count) - 1) != &state->field.last_field) { \
         log_error("js-root-vector: %s span must start at namespace_object and end at %s", \
@@ -853,7 +844,7 @@ bool js_root_vector_ensure_registered(RootVector* roots) {
 }
 
 bool js_realm_intrinsic_slots_ensure_roots(void) {
-    if (!js_active_runtime_state || !js_runtime_state.intrinsic_slots) return false;
+    if (!js_active_runtime_state || !js_runtime_state.intrinsics) return false;
     // Fixed semantic spans must be bound before this lazy catalog reservation;
     // registration can otherwise let a bootstrap collection observe an
     // unconfigured owner range while the realm store grows (D5.3.5).

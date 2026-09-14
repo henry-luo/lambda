@@ -10,7 +10,7 @@
 // Intrinsic functions are realm-owned binding values. A shared target never
 // implies JavaScript identity; only an explicit binding alias can share a slot.
 #define js_builtin_cache_at(index) (*js_realm_intrinsic_slot(JS_REALM_SLOT_BUILTIN_FUNCTION_BASE, (index)))
-#define js_builtin_cache_init (js_runtime_state.intrinsic_slots->builtin_function_initialized)
+#define js_builtin_cache_init (js_runtime_state.intrinsics->builtin_function_initialized)
 
 
 static const JsIntrinsicTargetSpec JS_INTRINSIC_TARGET_SPECS[] = {

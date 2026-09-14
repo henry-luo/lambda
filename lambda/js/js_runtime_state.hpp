@@ -74,7 +74,7 @@ struct JsMockSchedulerWait {
     int64_t due_ms = 0;
 };
 
-struct JsEventLoopQueueState {
+struct JsEventLoopState {
     // Each queue owns a GC Array of one RuntimeJob shape. Queue order stays
     // policy-specific while storage and captured context are shared (JSCU30).
     Item queue_storage[3] = {};
@@ -91,9 +91,6 @@ struct JsEventLoopQueueState {
     bool shutting_down = false;
     // Dynamic source compiled from a queued callback belongs to its parent turn.
     bool callback_running = false;
-};
-
-struct JsEventLoopTimerState {
     // Timer scheduling stays policy-specific; live handles are rows in the
     // context-wide JsRuntimeState resource table.
     int64_t next_id = 1;
@@ -124,10 +121,6 @@ struct JsRegexpLastMatch {
 // spans for legacy semantic records, so there is one root carrier (D5.3).
 struct JsRootedState {
     RootVector roots = {};
-};
-
-struct JsNamespaceState : JsRootedState {
-    Item namespace_object = {};
 };
 
 // Fixed realm singleton/cache values converge here. Callers reserve the
@@ -311,7 +304,8 @@ struct JsTlsNativeState {
     JsTlsSecureContextOwner* secure_context_owners = NULL;
 };
 
-struct JsStreamState : JsNamespaceState {
+struct JsStreamState : JsRootedState {
+    Item namespace_object = {};
     Item key_on = {}; Item key_emit = {}; Item key_push = {}; Item key_write = {};
     Item key_end = {}; Item key_pipe = {}; Item key_read = {}; Item key_destroy = {};
     Item key_readable = {}; Item key_writable = {}; Item key_flowing = {}; Item key_ended = {};
@@ -545,13 +539,21 @@ void js_global_environment_release_module_bindings(
 
 #define JS_TYPED_ARRAY_CACHE_TYPE_COUNT 12
 
-// Catalog state retains only initialization policy. Every cached Item,
-// including catalog-indexed callable and constructor identities, lives in the
-// dynamic JsRealmSlots carrier above (D5.3.5; JSCU29).
-struct JsRealmIntrinsicSlots {
+// Every cached Item, including catalog-indexed callable and constructor
+// identities, lives in the dynamic JsRealmSlots carrier above. This record
+// retains only native initialization and cache-validity state (D5.3.5; JSCU29).
+struct JsRealmIntrinsicState {
     bool builtin_function_initialized = false;
     bool global_builtin_initialized = false;
     bool constructors_initialized = false;
+    bool prototype_resolving[JS_CLASS__COUNT] = {};
+    uint64_t mutation_versions[JS_CLASS__COUNT] = {};
+    uint64_t mutation_serial = 1;
+    uint64_t owner_heap_epoch = 0;
+    uint64_t array_proto_clean_epoch = 0;
+    bool array_proto_clean = false;
+    uint32_t initialization_depth = 0;
+    int array_sym_iter_ever_set = 0;
 };
 
 struct JsTest262AgentReport {
@@ -906,18 +908,6 @@ void js_eval_state_vectors_destroy(JsEvalState* state);
 void js_eval_state_reset(JsEvalState* state);
 void js_eval_state_assert_clear(JsEvalState* state, const char* reset_name);
 
-struct JsIntrinsicState {
-    // Realm slots own prototype Item roots; this state owns cache validity.
-    bool prototype_resolving[JS_CLASS__COUNT] = {};
-    uint64_t mutation_versions[JS_CLASS__COUNT] = {};
-    uint64_t mutation_serial = 1;
-    uint64_t owner_heap_epoch = 0;
-    uint64_t array_proto_clean_epoch = 0;
-    bool array_proto_clean = false;
-    uint32_t initialization_depth = 0;
-    int array_sym_iter_ever_set = 0;
-};
-
 // A synchronous call has one ambient owner. Its Item homes are either the
 // context-owned base RootVector or one exact native RootFrame, so a nested
 // call replaces one activation link instead of mutating parallel globals
@@ -981,7 +971,7 @@ struct JsRuntimeState {
     HashMap* dom_attached_expando_roots = NULL;
     JsStringCacheState* string_caches = NULL;
     JsGlobalEnvironment* global_environment = NULL;   // one dynamic realm binding table (JSCU29)
-    JsRealmIntrinsicSlots* intrinsic_slots = NULL;
+    JsRealmIntrinsicState* intrinsics = NULL;
     JsTest262AgentState* test262_agent = NULL;
     JsProcessState* process = NULL;
     JsConsoleState console = {};
@@ -1001,10 +991,8 @@ struct JsRuntimeState {
     void* regex_permanent_cache = NULL;
     Input* input = NULL;
     bool strict_mode = false;
-    JsIntrinsicState* intrinsics = NULL;
     JsEvalState eval = {};
-    JsEventLoopQueueState* event_loop = NULL;   // JSCU16: allocated with the realm, not embedded
-    JsEventLoopTimerState* timers = NULL;   // JSCU16: allocated with the realm, not embedded
+    JsEventLoopState* event_loop = NULL;   // JSCU16: allocated with the realm, not embedded
     // The sole generation-checked native-resource registry for this context.
     // Timer and Node/Jube records use distinct lifecycle-owner keys within it.
     RuntimeResourceTable resources = {};

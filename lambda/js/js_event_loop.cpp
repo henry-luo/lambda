@@ -360,18 +360,18 @@ typedef struct JsTimerHandle {
 
 #define timer_resources (js_runtime_state.resources)
 #define timer_handle_count runtime_resource_table_active_count_owned(\
-    &timer_resources, js_runtime_state.timers)
+    &timer_resources, js_runtime_state.event_loop)
 #define timer_slot_count runtime_resource_table_slot_count(&timer_resources)
-#define next_timer_id (js_runtime_state.timers->next_id)
-#define timer_progress_generation (js_runtime_state.timers->progress_generation)
-#define timer_force_shutdown (js_runtime_state.timers->force_shutdown)
-#define timer_nan_warning_emitted (js_runtime_state.timers->nan_warning_emitted)
-#define timer_negative_warning_emitted (js_runtime_state.timers->negative_warning_emitted)
-#define virtual_clock_enabled (js_runtime_state.timers->virtual_clock_enabled)
-#define virtual_clock_ms (js_runtime_state.timers->virtual_clock_ms)
-#define mock_scheduler_enabled (js_runtime_state.timers->mock_scheduler_enabled)
-#define mock_scheduler_now_ms (js_runtime_state.timers->mock_scheduler_now_ms)
-#define mock_scheduler_waits (js_runtime_state.timers->mock_waits)
+#define next_timer_id (js_runtime_state.event_loop->next_id)
+#define timer_progress_generation (js_runtime_state.event_loop->progress_generation)
+#define timer_force_shutdown (js_runtime_state.event_loop->force_shutdown)
+#define timer_nan_warning_emitted (js_runtime_state.event_loop->nan_warning_emitted)
+#define timer_negative_warning_emitted (js_runtime_state.event_loop->negative_warning_emitted)
+#define virtual_clock_enabled (js_runtime_state.event_loop->virtual_clock_enabled)
+#define virtual_clock_ms (js_runtime_state.event_loop->virtual_clock_ms)
+#define mock_scheduler_enabled (js_runtime_state.event_loop->mock_scheduler_enabled)
+#define mock_scheduler_now_ms (js_runtime_state.event_loop->mock_scheduler_now_ms)
+#define mock_scheduler_waits (js_runtime_state.event_loop->mock_waits)
 
 static void close_all_timer_handles(void);
 static void timer_close_native_handle(JsTimerHandle* th);
@@ -379,7 +379,7 @@ static void timer_close_native_handle(JsTimerHandle* th);
 static JsTimerHandle* timer_handle_at(int index) {
     const RuntimeResourceEntry* entry = runtime_resource_table_entry_at(
         &timer_resources, index);
-    return entry && entry->lifecycle_owner == js_runtime_state.timers
+    return entry && entry->lifecycle_owner == js_runtime_state.event_loop
         ? (JsTimerHandle*)entry->close_user : NULL;
 }
 
@@ -390,7 +390,7 @@ static void timer_resource_close(void* user) {
 static Item timer_resource_owner(JsTimerHandle* handle) {
     if (!handle || handle->resource_id == 0) return ItemNull;
     const RuntimeResourceEntry* entry = runtime_resource_table_entry_owned(
-        &timer_resources, js_runtime_state.timers, handle->resource_id);
+        &timer_resources, js_runtime_state.event_loop, handle->resource_id);
     return runtime_resource_table_value(&timer_resources, entry);
 }
 
@@ -411,13 +411,13 @@ static bool timer_registry_append(JsTimerHandle* handle, Item owner) {
     const RuntimeResourceDescriptor* descriptor =
         runtime_resource_descriptor_from_legacy_name("timer");
     handle->resource_id = runtime_resource_table_add_root_span_owned(
-        &timer_resources, js_runtime_state.timers, root_values, 6, descriptor,
+        &timer_resources, js_runtime_state.event_loop, root_values, 6, descriptor,
         timer_resource_close, handle, true);
     return handle->resource_id != 0;
 }
 
 static void timer_registry_clear(void) {
-    runtime_resource_table_clear_owned(&timer_resources, js_runtime_state.timers);
+    runtime_resource_table_clear_owned(&timer_resources, js_runtime_state.event_loop);
 }
 
 typedef struct JsTimerRuntimeScope {
@@ -507,7 +507,7 @@ static void timer_close_handle(JsTimerHandle *th) {
         uint32_t resource_id = th->resource_id;
         th->resource_id = 0;
         runtime_resource_table_remove_owned(&timer_resources,
-            js_runtime_state.timers, resource_id);
+            js_runtime_state.event_loop, resource_id);
         return;
     }
     timer_close_native_handle(th);
@@ -547,7 +547,7 @@ static void timer_abandon_all_without_uv(const char* reason_prefix) {
         uint32_t resource_id = th->resource_id;
         th->resource_id = 0;
         runtime_resource_table_forget_owned(&timer_resources,
-            js_runtime_state.timers, resource_id);
+            js_runtime_state.event_loop, resource_id);
         timer_forget_unsafe_handle(th);
     }
     timer_registry_clear();
@@ -1168,7 +1168,7 @@ static void mock_scheduler_wait_destroy(JsMockSchedulerWait* wait) {
     mem_free(wait);
 }
 
-static void mock_scheduler_clear_state(JsEventLoopTimerState* state) {
+static void mock_scheduler_clear_state(JsEventLoopState* state) {
     if (!state || !state->mock_waits) return;
     for (int i = state->mock_waits->length - 1; i >= 0; i--) {
         mock_scheduler_wait_destroy((JsMockSchedulerWait*)
@@ -1178,13 +1178,13 @@ static void mock_scheduler_clear_state(JsEventLoopTimerState* state) {
     state->mock_waits = NULL;
 }
 
-extern "C" void js_event_loop_timer_state_destroy(JsEventLoopTimerState* state) {
+extern "C" void js_event_loop_state_destroy(JsEventLoopState* state) {
     mock_scheduler_clear_state(state);
 }
 
 static void mock_scheduler_clear(void) {
     mock_scheduler_clear_state(js_active_runtime_state
-        ? js_runtime_state.timers : NULL);
+        ? js_runtime_state.event_loop : NULL);
 }
 
 static void mock_scheduler_wait_remove(int index) {

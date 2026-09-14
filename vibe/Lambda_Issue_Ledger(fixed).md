@@ -15,7 +15,7 @@
 
 ## Archive index
 
-This archive contains **87 historical records**: 86 RESOLVED entries and one
+This archive contains **88 historical records**: 87 RESOLVED entries and one
 CLOSED design decision. Duplicate and split records remain separate so their
 provenance is not lost. The first sections contain records formerly
 interleaved with live entries; §15 preserves the 44 records from the former
@@ -374,6 +374,20 @@ non-candidate expression temporaries against actual GC-managed pointer lanes;
 the current corpus sweep reports zero violations. The implementation remains
 precise `RootFrame`/`Rooted` ownership, as required by **D2.4.1–D2.4.3** and
 **D5.4.2**, never conservative stack scanning.
+
+<a id="lr08-4"></a>**LR08-4 · Wide scalar ownership at Lambda escaping stores · RESOLVED 2026-09-14**
+The Lambda-core audit is complete: native Arrays and packed Map/Shape fields
+now use their destination-owned layouts; generic containers, closure
+environments, VMap, module storage, concurrency/task state, and async paths
+route escaping scalar Items through their owning store/rehome helpers. Concat
+rebases through `array_set`, and a wide intermediate held across `wait` remains
+correct under forced collection. This satisfies **D2.5.2v3**, **D2.6.1v3**,
+**D2.6.4v3**, and **D5.2.2v3** for the Lambda runtime.
+
+The audit found two JavaScript-native carrier defects after the Lambda-core
+paths were closed: Error standard own fields and JS collection entry storage.
+They are tracked separately as [JS03-L1](JS_Issue_Ledger.md#js03-l1); they do
+not leave a remaining Lambda-core runtime path under this record.
 
 <a id="lr08-r12"></a>**LR08-R12 · Generator/async suspension states capped at 64 · RESOLVED (2026-09-08)**
 `JsMirTranspiler::gen_state_labels` was `MIR_label_t[64]`, and two clamps
