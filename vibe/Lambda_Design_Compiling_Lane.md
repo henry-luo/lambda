@@ -1,7 +1,8 @@
 # Lambda Compiler — Explicit Expression Representations
 
-- **Status:** IMPLEMENTATION CHECKPOINT. D2.4.1–D2.4.3's L0–L4 first slice is landed;
-  remaining raw producers still pass through an explicitly named legacy register shim.
+- **Status:** IMPLEMENTED for Lambda MIR Direct. D2.4.1–D2.4.3's L0–L5 migration is
+  landed; every Lambda expression producer returns `MirValue`, and consumers retain its
+  recorded representation after lowering.
 - **Date:** 2026-08-28
 - **Scope:** how MIR Direct (`lambda/runtime/transpile-mir.cpp`) records and converts the
   representation of an emitted value. This proposal does not choose the native carrier for each
@@ -35,8 +36,15 @@ The first migration slice is implemented in `value_rep.h`, `type_contract.cpp`,
   and double/MIR-instruction helpers.
 
 The `ValueRepresentationTest` contract/transition regressions and the Lambda baseline pass.
-Remaining raw expression producers and the final legacy-shim ratchet stay open; this
-checkpoint does not close LR07-1/OI-5.
+
+### Completion update — 2026-09-14
+
+The final Lambda audit found no `transpile_expr_reg_legacy` or `legacy_expr_value` shim.
+All AST families dispatch through `transpile_expr_value()` and publish `MirValue`. The remaining
+post-lowering re-derivations in machine counts, loop bindings/filters/conditions, multidimensional indices,
+bitwise operands, pipes, paths, declarators, and edit indices now use
+`mir_value_carrier_type(MirValue)`. `mir_expr_carrier_type()` remains only a pre-lowering planner;
+it never interprets an emitted MIR register. This closes **LR07-1** under **D2.4.1–D2.4.3**.
 
 ---
 
@@ -202,14 +210,13 @@ Therefore this proposal must not add a parallel `Emitted {reg, rep, tid}` abstra
 
 ### 3.3 The remaining gaps
 
-1. The legacy expression implementation still returns `MIR_reg_t`, but it is now behind the
-   explicit `transpile_expr_value()`/`transpile_expr_reg_legacy()` boundary.
+1. Every Lambda expression producer returns `MirValue`; no raw-register expression shim remains.
 2. `lambda_convert_rep()` now routes the supported carrier-only transitions and fails closed for
    machine or contract-incompatible requests; direct identity/axis/fail-closed transition
    fixtures are landed in `test_lambda_errors_gtest.cpp`.
 3. `ValueRep` no longer conflates Lambda `int64`, the v5 int lane, and internal machine quantities.
-4. `MirValue` retains the full `Type*` contract; the first producer/call-analysis migration
-   slice is landed, while remaining raw expression callers still need propagation.
+4. `MirValue` retains the full `Type*` contract through every Lambda producer and
+   post-lowering consumer.
 5. Several existing helpers still combine representation movement with semantic coercion or
    use-specific error policy; L4 must separate those paths without changing their semantics.
 
@@ -460,6 +467,11 @@ For each cluster:
 
 **Gate:** all legacy counters are zero; lint passes; emitted-MIR ratchets are unchanged.
 
+**Completed 2026-09-14 for Lambda MIR Direct.** The legacy register shim is absent, core
+expression lowering has no semantic `MIR_reg_type()` query, and all post-lowering carrier choices
+read `MirValue.rep` through `mir_value_carrier_type()`. The residual pre-lowering planner uses AST
+and lowering facts only; it does not recover a representation from MIR.
+
 ### Phase L6 — audit guest emitters, do not bulk-convert them
 
 LambdaJS already uses `MirValue`, `em_require_rep()`, and `jm_convert_rep()`. Its follow-up is an
@@ -504,7 +516,7 @@ For every migration cluster:
 3. `make test-lambda-baseline` green;
 4. `make test262-baseline` green when shared emitter, ABI, or LambdaJS-facing code changes.
 
-Run the final complete gates after the legacy shim and semantic register-type reads are removed.
+The final Lambda gate runs after the legacy shim and semantic register-type reads are removed.
 
 ---
 

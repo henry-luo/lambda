@@ -9601,7 +9601,7 @@ static bool mir_matches_compact_loop_add(MirTranspiler* mt, AstBinaryNode* binar
 // same way or a double reaches an i64 parameter.
 static MIR_reg_t emit_machine_count(MirTranspiler* mt, AstNode* node) {
     MirValue value = transpile_expr_value(mt, node);
-    TypeId tid = mir_expr_carrier_type(mt, node);
+    TypeId tid = mir_value_carrier_type(value);
     if (!is_integer_type_id(tid)) {
         MirValue boxed = em_require_rep(&mt->em, value, VALUE_REP_ITEM);
         MIR_reg_t val = emit_unbox(mt, boxed.reg, LMD_TYPE_INT);
@@ -12207,8 +12207,9 @@ static MIR_reg_t mir_profile_emit_condition(void* owner, MirValue value) {
 static MIR_reg_t mir_profile_emit_loop_condition(void* owner, MirValue value) {
     MirTranspiler* mt = (MirTranspiler*)owner;
     AstNode* condition_node = ast_unwrap_primary((AstNode*)value.provenance_node);
-    TypeId condition_type = condition_node
-        ? mir_expr_carrier_type(mt, condition_node) : value.semantic_type;
+    // Branch lowering consumes the emitted descriptor; the AST remains only
+    // for the numeric-comparison proof (D2.4.1-D2.4.3).
+    TypeId condition_type = mir_value_carrier_type(value);
     if (condition_type != LMD_TYPE_BOOL &&
             mir_numeric_comparison_native_lane(mt, condition_node)) {
         // Numeric comparisons already produce the 0/1 branch lane.
@@ -12791,7 +12792,7 @@ static void mir_emit_for_let_clause(MirTranspiler* mt, AstForNode* for_node) {
             char lc_name[128];
             snprintf(lc_name, sizeof(lc_name), "%.*s",
                 (int)let_node->name->len, let_node->name->chars);
-            TypeId lc_tid = mir_expr_carrier_type(mt, let_node->init);
+            TypeId lc_tid = mir_value_carrier_type(value);
             MirValue stored = em_require_rep(&mt->em, value,
                 lambda_canonical_rep_for_type_id(lc_tid));
             set_var(mt, lc_name, stored.reg, stored.mir_type, lc_tid);
@@ -12805,7 +12806,7 @@ static void mir_emit_for_where_clause(MirTranspiler* mt, AstForNode* for_node,
         MIR_label_t continue_label) {
     if (!for_node->where) return;
     MirValue where_value = transpile_expr_value(mt, for_node->where);
-    TypeId where_tid = mir_expr_carrier_type(mt, for_node->where);
+    TypeId where_tid = mir_value_carrier_type(where_value);
     MIR_reg_t where_test = where_tid == LMD_TYPE_BOOL
         ? em_require_rep(&mt->em, where_value, VALUE_REP_I64).reg : 0;
     if (where_tid != LMD_TYPE_BOOL) {
@@ -21388,7 +21389,7 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
         int slot = 0;
         for (AstNode* it = field_node->field; it; it = it->next) {
             MirValue index_value = transpile_expr_value(mt, it);
-            TypeId vt = mir_expr_carrier_type(mt, it);
+            TypeId vt = mir_value_carrier_type(index_value);
             MIR_reg_t val;
             if (!is_integer_type_id(vt)) {
                 // Semantic integer and exactly integral float indices are boxed;
@@ -22585,13 +22586,13 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 RETURN_CALL_VALUE(mir_emit_u32_bitwise(mt, call_node));
             }
 
-            TypeId a1_tid = mir_expr_carrier_type(mt, arg);
-            MIR_reg_t a1 = emit_bitwise_i64_arg(mt,
-                transpile_expr_value(mt, arg), a1_tid);
+            MirValue a1_value = transpile_expr_value(mt, arg);
+            TypeId a1_tid = mir_value_carrier_type(a1_value);
+            MIR_reg_t a1 = emit_bitwise_i64_arg(mt, a1_value, a1_tid);
             arg = arg->next;
-            TypeId a2_tid = mir_expr_carrier_type(mt, arg);
-            MIR_reg_t a2 = emit_bitwise_i64_arg(mt,
-                transpile_expr_value(mt, arg), a2_tid);
+            MirValue a2_value = transpile_expr_value(mt, arg);
+            TypeId a2_tid = mir_value_carrier_type(a2_value);
+            MIR_reg_t a2 = emit_bitwise_i64_arg(mt, a2_value, a2_tid);
 
             // band/bor/bxor: single MIR instruction, always safe
             MIR_insn_code_t mir_op = (MIR_insn_code_t)0;
@@ -22712,9 +22713,9 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 RETURN_CALL_VALUE(boxed_result);
             }
 
-            TypeId a1_tid = mir_expr_carrier_type(mt, arg);
-            MIR_reg_t a1 = emit_bitwise_i64_arg(mt,
-                transpile_expr_value(mt, arg), a1_tid);
+            MirValue a1_value = transpile_expr_value(mt, arg);
+            TypeId a1_tid = mir_value_carrier_type(a1_value);
+            MIR_reg_t a1 = emit_bitwise_i64_arg(mt, a1_value, a1_tid);
             // ~a == a XOR -1
             MIR_reg_t result = new_reg(mt, "bnot", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_XOR,
@@ -25066,10 +25067,9 @@ static MirValue emit_pipe_value(MirTranspiler* mt, AstPipeNode* pipe_node) {
 
     // Evaluate right-side expression
     MirValue right_value = transpile_expr_value(mt, pipe_node->right);
-    // Use mir_expr_carrier_type to account for expressions where AST type (e.g. BOOL
-    // from chained comparison transformation) doesn't match runtime behavior
-    // (e.g. boxed AND returning Item when ~ has type ANY)
-    TypeId right_tid = mir_expr_carrier_type(mt, (AstNode*)pipe_node->right);
+    // The lowered descriptor distinguishes a native predicate from a boxed
+    // value whose AST contract happens to be bool (D2.4.1-D2.4.3).
+    TypeId right_tid = mir_value_carrier_type(right_value);
     MIR_reg_t boxed_right = em_require_rep(&mt->em, right_value, VALUE_REP_ITEM).reg;
 
     // Restore old pipe state
@@ -27059,7 +27059,7 @@ static MirValue transpile_path_value(MirTranspiler* mt, AstNode* node) {
         MirValue base = em_require_rep(&mt->em,
             transpile_expr_value(mt, index->base_path), VALUE_REP_RAW_GC_POINTER);
         MirValue segment = transpile_expr_value(mt, index->segment_expr);
-        if (mir_expr_carrier_type(mt, index->segment_expr) == LMD_TYPE_INT) {
+        if (mir_value_carrier_type(segment) == LMD_TYPE_INT) {
             MirValue int_segment = em_require_rep(&mt->em, segment, VALUE_REP_INT_LANE);
             reg = emit_call_3(mt, "path_extend_int", MIR_T_P,
                 MIR_T_P, MIR_new_reg_op(mt->ctx, pool),
@@ -27081,7 +27081,7 @@ static MirValue transpile_path_value(MirTranspiler* mt, AstNode* node) {
         AstNavigationNode* navigation = (AstNavigationNode*)node;
         if (navigation->object) {
             MirValue object = transpile_expr_value(mt, navigation->object);
-            TypeId object_type = mir_expr_carrier_type(mt, navigation->object);
+            TypeId object_type = mir_value_carrier_type(object);
             if (object_type == LMD_TYPE_PATH) {
                 MirValue path = em_require_rep(&mt->em, object, VALUE_REP_RAW_GC_POINTER);
                 MIR_reg_t pool = emit_runtime_pool(mt);
@@ -27189,7 +27189,7 @@ static MirValue transpile_declarator_value(MirTranspiler* mt,
     char name[128];
     snprintf(name, sizeof(name), "%.*s", (int)declarator->name->len,
         declarator->name->chars);
-    TypeId type_id = mir_expr_carrier_type(mt, declarator->init);
+    TypeId type_id = mir_value_carrier_type(value);
     set_var(mt, name, value.reg, value.mir_type, type_id);
     publish_var_binding(mt, name, declarator->entry);
     return value;
@@ -27744,7 +27744,7 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
             int slot = 0;
             for (AstNode* it = ca->key; it; it = it->next) {
                 MirValue index_value = transpile_expr_value(mt, it);
-                TypeId vt = mir_expr_carrier_type(mt, it);
+                TypeId vt = mir_value_carrier_type(index_value);
                 MIR_reg_t val = is_integer_type_id(vt)
                     ? (vt == LMD_TYPE_INT
                         ? emit_int_native_lane_typed(mt, index_value).r
@@ -27910,7 +27910,7 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
         if (mt->in_view_handler && mt->view_is_edit) {
             MIR_reg_t obj = transpile_box_item(mt, ca->object);
             MirValue key_value = transpile_expr_value(mt, ca->key);
-            TypeId idx_tid = mir_expr_carrier_type(mt, ca->key);
+            TypeId idx_tid = mir_value_carrier_type(key_value);
             MIR_reg_t idx_int = is_integer_type_id(idx_tid)
                 ? (idx_tid == LMD_TYPE_INT
                     ? emit_int_native_lane_typed(mt, key_value).r
