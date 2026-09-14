@@ -7,6 +7,7 @@
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/hash.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -20,10 +21,7 @@ extern "C" Item interp_eval_view_template(Context* context, Script* module,
 static uint64_t template_event_mask_bit(const char* event_name) {
     if (!event_name || !event_name[0]) return 0;
     uint64_t hash = UINT64_C(1469598103934665603);
-    for (const unsigned char* p = (const unsigned char*)event_name; *p; p++) {
-        hash ^= *p;
-        hash *= UINT64_C(1099511628211);
-    }
+    hash = hash_fnv1a_64_extend_cstr(hash, event_name);
     return UINT64_C(1) << (hash & 63u);
 }
 

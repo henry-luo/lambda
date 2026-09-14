@@ -7,6 +7,7 @@
 #include "../../lib/str.h"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/arena.h"
 
 using namespace lambda;
@@ -73,14 +74,7 @@ struct YamlParser {
 // SCU16 size budget: no embedded anchor table
 static_assert(sizeof(YamlParser) < 256, "YamlParser must not embed document-sized tables");
 
-static uint64_t anchor_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const AnchorEntry* e = (const AnchorEntry*)item;
-    return hashmap_sip(e->name, strlen(e->name), seed0, seed1);
-}
-
-static int anchor_compare(const void* a, const void* b, void*) {
-    return strcmp(((const AnchorEntry*)a)->name, ((const AnchorEntry*)b)->name);
-}
+HASHMAP_DEFINE_STRKEY(anchor, AnchorEntry, name)
 
 struct YamlCursor {
     int pos;
@@ -287,7 +281,7 @@ static bool is_doc_end_at(YamlParser* p, int pos) {
 static void store_anchor(YamlParser* p, const char* name, Item value) {
     if (!p->anchors) {
         p->anchors = hashmap_new(sizeof(AnchorEntry), 16, 0, 0,
-            anchor_hash, anchor_compare, NULL, NULL);
+            anchor_hash, anchor_cmp, NULL, NULL);
         if (!p->anchors) {
             p->ctx->addError("yaml: anchor table allocation failed");
             return;

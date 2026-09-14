@@ -18,6 +18,8 @@
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
+#include "../../lib/hash.h"
 #include "../runtime/parser/lambda_rd_parser.h"
 #include <errno.h>
 #include <stdio.h>
@@ -83,31 +85,8 @@ typedef struct JubeMemberIndexEntry {
     JubeMemberRecord* rec;
 } JubeMemberIndexEntry;
 
-static uint64_t jube_member_index_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const JubeMemberIndexEntry* entry = (const JubeMemberIndexEntry*)item;
-    return hashmap_sip(entry->chars, entry->len, seed0, seed1);
-}
-
-static int jube_member_index_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const JubeMemberIndexEntry* ea = (const JubeMemberIndexEntry*)a;
-    const JubeMemberIndexEntry* eb = (const JubeMemberIndexEntry*)b;
-    if (ea->len != eb->len) return 1;
-    return memcmp(ea->chars, eb->chars, ea->len);
-}
-
-static uint64_t jube_type_index_hash(const void* item, uint64_t seed0,
-                                     uint64_t seed1) {
-    const JubeTypeIndexEntry* entry = (const JubeTypeIndexEntry*)item;
-    return hashmap_sip(&entry->type, sizeof(entry->type), seed0, seed1);
-}
-
-static int jube_type_index_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const JubeTypeIndexEntry* ea = (const JubeTypeIndexEntry*)a;
-    const JubeTypeIndexEntry* eb = (const JubeTypeIndexEntry*)b;
-    return ea->type == eb->type ? 0 : 1;
-}
+HASHMAP_DEFINE_LENSTRKEY(jube_member_index, JubeMemberIndexEntry, chars, len)
+HASHMAP_DEFINE_PTRKEY(jube_type_index, JubeTypeIndexEntry, type)
 
 // ============================================================================
 // Small helpers
@@ -442,35 +421,30 @@ static JubeTypeRecord* jube_record_for_query(const JubeTypeDef* type, int ordina
     return trec;
 }
 
-static uint64_t jube_digest_mix(uint64_t hash, uint64_t value) {
-    hash ^= value + 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2);
-    return hash;
-}
-
 static uint64_t jube_digest_text(uint64_t hash, const char* text) {
     size_t len = text ? strlen(text) : 0;
-    hash = jube_digest_mix(hash, (uint64_t)len);
-    if (len > 0) hash = jube_digest_mix(hash, hashmap_xxhash3(text, len, 0, 0));
+    hash = hash_combine_u64(hash, (uint64_t)len);
+    if (len > 0) hash = hash_combine_u64(hash, hashmap_xxhash3(text, len, 0, 0));
     return hash;
 }
 
 extern "C" uint64_t jube_interface_registry_digest(void) {
     uint64_t hash = 0xcbf29ce484222325ULL;
-    hash = jube_digest_mix(hash, (uint64_t)JUBE_ABI_VERSION);
-    hash = jube_digest_mix(hash, (uint64_t)s_type_record_count);
+    hash = hash_combine_u64(hash, (uint64_t)JUBE_ABI_VERSION);
+    hash = hash_combine_u64(hash, (uint64_t)s_type_record_count);
     for (int i = 0; i < s_type_record_count; i++) {
         JubeTypeRecord* trec = s_type_records[i];
         if (!trec) continue;
         hash = jube_digest_text(hash, trec->type ? trec->type->name : NULL);
-        hash = jube_digest_mix(hash, (uint64_t)trec->family_root_slot);
-        hash = jube_digest_mix(hash, (uint64_t)trec->member_count);
+        hash = hash_combine_u64(hash, (uint64_t)trec->family_root_slot);
+        hash = hash_combine_u64(hash, (uint64_t)trec->member_count);
         for (int ordinal = 0; ordinal < trec->member_count; ordinal++) {
             JubeMemberRecord* rec = &trec->members[ordinal];
             hash = jube_digest_text(hash, rec->snake_name);
             hash = jube_digest_text(hash, rec->camel_name);
-            hash = jube_digest_mix(hash, (uint64_t)rec->kind);
-            hash = jube_digest_mix(hash, (uint64_t)rec->arity);
-            hash = jube_digest_mix(hash, rec->can_raise ? 1 : 0);
+            hash = hash_combine_u64(hash, (uint64_t)rec->kind);
+            hash = hash_combine_u64(hash, (uint64_t)rec->arity);
+            hash = hash_combine_u64(hash, rec->can_raise ? 1 : 0);
             hash = jube_digest_text(hash,
                 rec->result_type ? rec->result_type->name : NULL);
             hash = jube_digest_text(hash, rec->bind ? rec->bind->name : NULL);
@@ -1340,7 +1314,7 @@ static int jube_compile_type(const JubeModuleDef* module,
     }
     if (!s_type_index) {
         s_type_index = hashmap_new(sizeof(JubeTypeIndexEntry), 16, 0, 0,
-                                   jube_type_index_hash, jube_type_index_compare,
+                                   jube_type_index_hash, jube_type_index_cmp,
                                    NULL, NULL);
         if (!s_type_index) {
             log_error("JUBE_IFACE: failed to allocate type index for '%s'", type_name);
@@ -1484,7 +1458,7 @@ static int jube_compile_type(const JubeModuleDef* module,
 #endif
 
     HashMap* index = hashmap_new(sizeof(JubeMemberIndexEntry), 16, 0, 0,
-                                 jube_member_index_hash, jube_member_index_compare,
+                                 jube_member_index_hash, jube_member_index_cmp,
                                  NULL, NULL);
     for (int i = 0; i < out_count; i++) {
         JubeMemberRecord* rec = &records[i];

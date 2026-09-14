@@ -94,8 +94,33 @@ static bool parse_profile(const std::string& path, AdmitProfile* out) {
         if (!line.empty() && line[line.size() - 1] == '\r') line.erase(line.size() - 1);
         size_t first_tab = line.find('\t');
         if (first_tab == std::string::npos) continue;
-        if (line.find('\t', first_tab + 1) != std::string::npos) continue;  // per-type table row
         std::string key = line.substr(0, first_tab);
+        if (line.find('\t', first_tab + 1) != std::string::npos) {
+            // per-type COW table row: `<type>\tshare_marks\tunique_mutations\tshared_copies\tcopied_bytes`
+            // (the header row's cells are not numbers and are skipped below).
+            // Exposed as `<type>_share_marks` etc.; `array[num]` spells `array_num`.
+            static const char* kColumns[] = {"share_marks", "unique_mutations", "shared_copies", "copied_bytes"};
+            std::string type_key;
+            for (size_t i = 0; i < key.size(); i++) {
+                char c = key[i];
+                if (c == '[') type_key += '_';
+                else if (c == ']') continue;
+                else type_key += c;
+            }
+            size_t pos = first_tab + 1;
+            for (int col = 0; col < 4 && pos <= line.size(); col++) {
+                size_t next = line.find('\t', pos);
+                std::string cell = line.substr(pos, next == std::string::npos ? std::string::npos : next - pos);
+                char* cell_end = NULL;
+                unsigned long long cell_value = strtoull(cell.c_str(), &cell_end, 10);
+                if (!cell.empty() && cell_end && *cell_end == '\0') {
+                    out->counters[type_key + "_" + kColumns[col]] = (uint64_t)cell_value;
+                }
+                if (next == std::string::npos) break;
+                pos = next + 1;
+            }
+            continue;
+        }
         std::string value = line.substr(first_tab + 1);
         if (value.empty()) continue;
         char* end = NULL;
@@ -132,12 +157,15 @@ struct FixtureRun {
 // tier must prove admitted recursive boundaries statically, while the interp
 // tier exercises the runtime relation classifier — letting the auto tier
 // choose would make the counters depend on its heuristics.
+// `tier == NULL` runs the script through the `js` subcommand (LambdaJS), so
+// its exec-profile rows -- the same TSV -- can be pinned by the same reader.
 static FixtureRun run_fixture(const char* name, const char* tier,
                               const std::string& source, bool profile_enabled) {
     FixtureRun run;
     ensure_opt_dir();
-    std::string script_path = std::string(kOptDir) + "/" + name + ".ls";
-    run.profile_path = std::string(kOptDir) + "/" + name + "_" + tier +
+    bool js = tier == NULL;
+    std::string script_path = std::string(kOptDir) + "/" + name + (js ? ".js" : ".ls");
+    run.profile_path = std::string(kOptDir) + "/" + name + "_" + (js ? "js" : tier) +
         (profile_enabled ? "" : "_off") + ".tsv";
     remove(run.profile_path.c_str());
     if (!write_text(script_path, source)) {
@@ -145,9 +173,11 @@ static FixtureRun run_fixture(const char* name, const char* tier,
         return run;
     }
 
-    std::string tier_arg = std::string("--tier=") + tier;
+    std::string tier_arg = std::string("--tier=") + (js ? "" : tier);
     const char* executable = opt_executable();
-    const char* args[] = {executable, "run", tier_arg.c_str(), script_path.c_str(), NULL};
+    const char* run_args[] = {executable, "run", tier_arg.c_str(), script_path.c_str(), NULL};
+    const char* js_args[] = {executable, "js", script_path.c_str(), NULL};
+    const char** args = js ? js_args : run_args;
     ShellEnvEntry env[] = {
         {"COW_EXEC_PROFILE", profile_enabled ? "1" : "0"},
         {"COW_EXEC_PROFILE_OUT", run.profile_path.c_str()},
@@ -169,7 +199,7 @@ static FixtureRun run_fixture(const char* name, const char* tier,
     shell_result_free(&result);
 
     if (!exited_clean) {
-        ADD_FAILURE() << "fixture '" << name << "' (" << tier << "): child "
+        ADD_FAILURE() << "fixture '" << name << "' (" << (js ? "js" : tier) << "): child "
             << executable << " exited " << exit_code
             << (timed_out ? " (timed out)" : "")
             << "\n--- stderr ---\n" << run.std_err;
@@ -337,6 +367,110 @@ TEST(LambdaOptAdmission, RecursiveContractInterpAdmitsWithoutCopy) {
 // Interp tier, one shared node: 10 boundary crossings must all be
 // EXACT_TRUSTED — the adopted construction and the declared parameter carry
 // the same TypeMap identity.
+// A checked-in fixture (with its own golden) run under the census: the COW
+// rulings of Tune27 rounds 3-4 are pinned by their copy counts, not only by
+// their output, so a lost borrow (S9.2.2 un-share back on the hot path) or a
+// lost detach (an aliased write) fails here before a benchmark sees it.
+static std::string fixture_source(const char* path) {
+    std::ifstream in(path);
+    std::stringstream buffer;
+    buffer << in.rdbuf();
+    return buffer.str();
+}
+
+// D4.4.4v2 sibling-field handles + early return (cd's rbt_put): 29 array
+// copies are the fixture's deliberate snapshots (S9.1.2), down from 90 before
+// the ruling; the one map copy is `let before = t`.
+TEST(LambdaOptCow, RmwSiblingHandlesBorrowWithoutCopies) {
+    static const char* const tiers[] = {"jit", "interp"};
+    for (int t = 0; t < 2; t++) {
+        FixtureRun run = run_fixture("cow_rmw_sibling_borrow", tiers[t],
+            fixture_source("test/lambda/proc/cow_rmw_sibling_borrow.ls"), true);
+        ASSERT_TRUE(run.ok) << tiers[t];
+        EXPECT_EQ(run.profile.get("array_shared_copies"), 29u) << tiers[t];
+        EXPECT_EQ(run.profile.get("map_shared_copies"), 1u) << tiers[t];
+    }
+}
+
+// D4.4.5 move-out binds (splay rotations): 83 map copies, down from 123, on
+// both tiers; every rotation in the 40-iteration loop borrows.
+TEST(LambdaOptCow, MoveOutBindsBorrow) {
+    static const char* const tiers[] = {"jit", "interp"};
+    for (int t = 0; t < 2; t++) {
+        FixtureRun run = run_fixture("cow_move_out_bind", tiers[t],
+            fixture_source("test/lambda/proc/cow_move_out_bind.ls"), true);
+        ASSERT_TRUE(run.ok) << tiers[t];
+        EXPECT_EQ(run.profile.get("map_shared_copies"), 83u) << tiers[t];
+        EXPECT_EQ(run.profile.get("map_share_marks"), 164u) << tiers[t];
+    }
+}
+
+// S9.2.2 place mutators (`push(m.a, v)` with `m.a = x; m.b = x`): each aliased
+// slot detaches exactly once; the 1,000 appends through one unique place
+// never copy (array_unique_mutations counts them).
+TEST(LambdaOptCow, PlaceMutatorDetachesEachAliasedSlotOnce) {
+    static const char* const tiers[] = {"jit", "interp"};
+    for (int t = 0; t < 2; t++) {
+        FixtureRun run = run_fixture("cow_place_mutator", tiers[t],
+            fixture_source("test/lambda/proc/cow_place_mutator.ls"), true);
+        ASSERT_TRUE(run.ok) << tiers[t];
+        // the map rows are not pinned: the census prints two container kinds
+        // under the `map` label, and the reader keeps the last one
+        EXPECT_EQ(run.profile.get("array_shared_copies"), 7u) << tiers[t];
+        EXPECT_EQ(run.profile.get("array_num_shared_copies"), 1u) << tiers[t];
+        EXPECT_GE(run.profile.get("array_unique_mutations"), 1000u) << tiers[t];
+    }
+}
+
+// D8.1.1v10: a typed `var` rebind reaches the caller through its home on
+// every tier without copying the array; the one map copy is `let` snapshot.
+TEST(LambdaOptCow, TypedVarRebindPublishesWithoutArrayCopies) {
+    static const char* const tiers[] = {"jit", "interp"};
+    for (int t = 0; t < 2; t++) {
+        FixtureRun run = run_fixture("cow_var_typed_rebind", tiers[t],
+            fixture_source("test/lambda/proc/cow_var_typed_rebind.ls"), true);
+        ASSERT_TRUE(run.ok) << tiers[t];
+        EXPECT_EQ(run.profile.get("array_num_shared_copies"), 0u) << tiers[t];
+        EXPECT_EQ(run.profile.get("map_shared_copies"), 1u) << tiers[t];
+    }
+}
+
+// T27-4 fixed-key path setter: the snapshot detaches once per container kind
+// and the 800 in-place stores through a proven root never copy.
+TEST(LambdaOptCow, FixedKeyPathStoreDetachesOnce) {
+    static const char* const tiers[] = {"jit", "interp"};
+    for (int t = 0; t < 2; t++) {
+        FixtureRun run = run_fixture("tune27_fixed_path_store", tiers[t],
+            fixture_source("test/lambda/proc/tune27_fixed_path_store.ls"), true);
+        ASSERT_TRUE(run.ok) << tiers[t];
+        EXPECT_EQ(run.profile.get("array_shared_copies"), 1u) << tiers[t];
+        EXPECT_EQ(run.profile.get("map_shared_copies"), 2u) << tiers[t];
+        EXPECT_GE(run.profile.get("array_unique_mutations"), 800u) << tiers[t];
+    }
+}
+
+// Result44 (Tune27 §12): LambdaJS reserves the realm-slot suffix ONCE per
+// realm store. c7e285e51 put js_realm_intrinsic_slots_ensure_roots on every
+// intrinsic prototype lookup and re-walked the reservation each time (20x);
+// the census row counts full walks, so the pin is one, not a wall-clock bound.
+static const char* kJsRealmSlotsSource =
+    "var arr = [];\n"
+    "var total = 0;\n"
+    "for (var i = 0; i < 20000; i++) {\n"
+    "    arr.push(i);\n"
+    "    total += arr.length + Object.getPrototypeOf(arr).constructor.name.length;\n"
+    "    var s = 'x' + i;\n"
+    "    total += s.length + Math.floor(i / 3);\n"
+    "}\n"
+    "console.log(total);\n";
+
+TEST(LambdaOptJs, IntrinsicPrototypeLookupsReserveRealmSlotsOnce) {
+    FixtureRun run = run_fixture("js_realm_slots_once", NULL, kJsRealmSlotsSource, true);
+    ASSERT_TRUE(run.ok);
+    EXPECT_TRUE(run.profile.has("js_realm_slot_reservations"));
+    EXPECT_EQ(run.profile.get("js_realm_slot_reservations"), 1u);
+}
+
 TEST(LambdaOptAdmission, RecursiveShapeIdentityInterpExactHits) {
     FixtureRun run = run_fixture("shape_identity", "interp", kShapeIdentitySource, true);
     ASSERT_TRUE(run.ok);

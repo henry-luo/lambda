@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "description": "T20-3 #3 (D2.4.1-D2.4.3): the inline native shift/bitwise lowering opens each operand's proven `int` lane -- the word instruction consumes the raw parameter registers directly. The shl/shr registry rows describe only the boxed fn_*_item fallback; when the emitter requested that Item descriptor for the inline operands, both were boxed before the shift and the tag bits were shifted (paraffins nb(23) = inf, mandelbrot2 `bor: operands must be integer`). The single int2it_lane per function is the result box.",
+  "checks": [
+    {
+      "in_func": "_half_#",
+      "expect_seq": [
+        { "pattern": "mov\t{{r:c}}, 1" },
+        { "pattern": "rsh\t{{r}}, %p1, {{r:c}}" }
+      ],
+      "forbid": [
+        "call\tfn_shr_item_p, fn_shr_item"
+      ],
+      "count": {
+        "call\tint2it_lane_p, int2it_lane": { "max": 1 }
+      }
+    },
+    {
+      "in_func": "_shift_#",
+      "expect": [
+        "lsh\t{{r}}, %p1, %p2"
+      ],
+      "forbid": [
+        "call\tfn_shl_item_p, fn_shl_item"
+      ],
+      "count": {
+        "call\tint2it_lane_p, int2it_lane": { "max": 1 }
+      }
+    },
+    {
+      "in_func": "_mask_#",
+      "expect_seq": [
+        { "pattern": "xor\t{{r:n}}, %p2, -1" },
+        { "pattern": "and\t{{r}}, %p1, {{r:n}}" }
+      ],
+      "forbid": [
+        "call\tfn_band_item_p, fn_band_item",
+        "call\tfn_bnot_item_p, fn_bnot_item"
+      ],
+      "count": {
+        "call\tint2it_lane_p, int2it_lane": { "max": 1 }
+      }
+    }
+  ]
+}

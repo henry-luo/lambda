@@ -12,6 +12,8 @@
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
 #include "../lib/hashmap.h"
+#include "../lib/hashmap_helpers.h"
+#include "../lib/hash.h"
 #include "../lib/log.h"
 #include "../lib/arena.h"
 #include "../lib/font/font.h"
@@ -55,19 +57,7 @@ static SvgImageResolverRegistry g_svg_image_resolvers = {};
 static bool svg_item_number_equals(ItemReader item, int value);
 static const char* svg_pdf_registered_image_resolver(void* context, int object_num);
 
-static uint64_t svg_image_resolver_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const SvgImageResolverEntry* entry = (const SvgImageResolverEntry*)item;
-    return hashmap_sip(&entry->svg_root, sizeof(entry->svg_root), seed0, seed1);
-}
-
-static int svg_image_resolver_compare(const void* left, const void* right, void* udata) {
-    (void)udata;
-    const SvgImageResolverEntry* a = (const SvgImageResolverEntry*)left;
-    const SvgImageResolverEntry* b = (const SvgImageResolverEntry*)right;
-    uintptr_t a_address = (uintptr_t)a->svg_root;
-    uintptr_t b_address = (uintptr_t)b->svg_root;
-    return a_address == b_address ? 0 : (a_address < b_address ? -1 : 1);
-}
+HASHMAP_DEFINE_PTRKEY(svg_image_resolver, SvgImageResolverEntry, svg_root)
 
 static bool svg_image_resolver_registry_stat(void* allocator, MemStatSample* sample) {
     SvgImageResolverRegistry* registry = (SvgImageResolverRegistry*)allocator;
@@ -90,7 +80,7 @@ static bool svg_image_resolver_registry_ensure() {
     if (g_svg_image_resolvers.entries) return true;
     g_svg_image_resolvers.entries = hashmap_new(
         sizeof(SvgImageResolverEntry), 16, 0, 0,
-        svg_image_resolver_hash, svg_image_resolver_compare, NULL, NULL);
+        svg_image_resolver_hash, svg_image_resolver_cmp, NULL, NULL);
     if (!g_svg_image_resolvers.entries) return false;
     g_svg_image_resolvers.context = mem_context_create(
         mem_context_root(), MEM_ROLE_RENDER, "render.svg.image_resolvers");
@@ -2665,11 +2655,7 @@ static char* resolve_font_via_fontface(FontContext* font_ctx, const char* family
 
         // hash the data URI suffix (after comma) for a stable filename
         // simple FNV-1a 64-bit
-        uint64_t h = 1469598103934665603ULL;
-        for (const char* p = comma + 1; *p; p++) {
-            h ^= (uint8_t)*p;
-            h *= 1099511628211ULL;
-        }
+        uint64_t h = hash_fnv1a_64_extend_cstr(1469598103934665603ULL, comma + 1);
 
         char temp_path[512];
         snprintf(temp_path, sizeof(temp_path), "./temp/lambda_font_%016llx.%s",

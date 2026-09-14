@@ -860,6 +860,7 @@ bool js_realm_intrinsic_slots_ensure_roots(void) {
                 (JsRealmSlotId)slot)) return false;
     }
     js_runtime_state.realm_slots.suffix_reserved = true;
+    cow_profile_count_js_realm_reservation();
     return true;
 }
 

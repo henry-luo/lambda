@@ -1,6 +1,7 @@
 #include "view.hpp"
 
 #include "../lib/mem_factory.h"
+#include "../lib/hash.h"
 
 #include <math.h>
 #include <string.h>
@@ -10,14 +11,6 @@ struct CanonicalInlineEntry {
     InlineProp* value;
     CanonicalInlineEntry* next;
 };
-
-static uint64_t inline_hash_word(uint64_t hash, uint64_t word) {
-    for (size_t i = 0; i < sizeof(word); i++) {
-        hash ^= (word >> (i * 8u)) & 0xffu;
-        hash *= 1099511628211ULL;
-    }
-    return hash;
-}
 
 static uint32_t inline_float_hash_bits(float value) {
     if (value == 0.0f) return 0; // CSS treats positive and negative zero as the same value.
@@ -30,7 +23,7 @@ static uint32_t inline_float_hash_bits(float value) {
 uint64_t inline_prop_hash(const InlineProp* value) {
     if (!value) return 0;
     uint64_t hash = 1469598103934665603ULL;
-#define INLINE_HASH_FIELD(field) hash = inline_hash_word(hash, (uint64_t)value->field)
+#define INLINE_HASH_FIELD(field) hash = hash_fnv1a_64_extend_u64le(hash, (uint64_t)value->field)
     INLINE_HASH_FIELD(cursor);
     INLINE_HASH_FIELD(caret_shape);
     INLINE_HASH_FIELD(color.c);
@@ -40,8 +33,9 @@ uint64_t inline_prop_hash(const InlineProp* value) {
     INLINE_HASH_FIELD(svg_fill_color.c);
     INLINE_HASH_FIELD(svg_stroke_color.c);
     INLINE_HASH_FIELD(vertical_align);
-    hash = inline_hash_word(hash, inline_float_hash_bits(value->vertical_align_offset));
-    hash = inline_hash_word(hash, inline_float_hash_bits(value->opacity));
+    hash = hash_fnv1a_64_extend_u64le(hash,
+        inline_float_hash_bits(value->vertical_align_offset));
+    hash = hash_fnv1a_64_extend_u64le(hash, inline_float_hash_bits(value->opacity));
     INLINE_HASH_FIELD(visibility);
     INLINE_HASH_FIELD(mix_blend_mode);
     INLINE_HASH_FIELD(has_svg_fill);
@@ -49,7 +43,8 @@ uint64_t inline_prop_hash(const InlineProp* value) {
     INLINE_HASH_FIELD(has_svg_stroke);
     INLINE_HASH_FIELD(svg_stroke_none);
     INLINE_HASH_FIELD(has_svg_stroke_width);
-    hash = inline_hash_word(hash, inline_float_hash_bits(value->svg_stroke_width));
+    hash = hash_fnv1a_64_extend_u64le(hash,
+        inline_float_hash_bits(value->svg_stroke_width));
 #undef INLINE_HASH_FIELD
     return hash;
 }

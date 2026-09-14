@@ -30,6 +30,7 @@
 #include <string.h>
 
 #include "../lib/hashmap.h"
+#include "../lib/hashmap_helpers.h"
 #include "../lib/memtrack.h"
 #include "../lib/tagged.hpp"
 #include "../lambda/core/mark_reader.hpp"
@@ -154,24 +155,7 @@ static void source_path_bridge_state_destroy(void* opaque) {
     mem_free(state);
 }
 
-static uint64_t path_hash(const void* item, uint64_t s0, uint64_t s1) {
-    const PathTableEntry* e = (const PathTableEntry*)item;
-    uint64_t h1 = hashmap_murmur(&e->source_item_bits, sizeof(uint64_t), s0, s1);
-    uint64_t h2 = hashmap_murmur(&e->template_ref, sizeof(void*), s0, s1);
-    return h1 ^ (h2 * 0x9e3779b97f4a7c15ULL);
-}
-
-static int path_compare(const void* a, const void* b, void* /*udata*/) {
-    const PathTableEntry* ea = (const PathTableEntry*)a;
-    const PathTableEntry* eb = (const PathTableEntry*)b;
-    if (ea->source_item_bits != eb->source_item_bits) {
-        return ea->source_item_bits < eb->source_item_bits ? -1 : 1;
-    }
-    if (ea->template_ref != eb->template_ref) {
-        return ea->template_ref < eb->template_ref ? -1 : 1;
-    }
-    return 0;
-}
+HASHMAP_DEFINE_FIELD2_KEY(path, PathTableEntry, source_item_bits, template_ref)
 
 // Called by hashmap when an entry is replaced or removed: free the owned
 // indices buffer so we don't leak.
@@ -201,7 +185,7 @@ static HashMap* ensure_path_table(void) {
         state->path_table = hashmap_new(
             sizeof(PathTableEntry), 64,
             0xBEEF1234u, 0x5678CAFEu,
-            path_hash, path_compare,
+            path_hash, path_cmp,
             path_entry_free, NULL);
     }
     return state->path_table;

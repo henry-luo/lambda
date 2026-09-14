@@ -34,6 +34,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <map>
 #include <vector>
 #include <utility>
 
@@ -1083,9 +1084,18 @@ inline bool select_scope(const MirDump& dump, const CheckGroup& group,
     return true;
 }
 
-inline bool line_contains(const std::string& line, const std::string& pattern) {
-    static const char kGeneratedRegisterToken[] = "{{r}}";
-    if (pattern.find(kGeneratedRegisterToken) == std::string::npos) {
+// Register tokens: `{{r}}` matches any generated register; `{{r:name}}`
+// binds `name` to the register on first use within one expect_seq and must
+// match the same register afterwards; `{{r!name}}` must be a register other
+// than the one bound to `name`. Captures live only for the duration of one
+// expect_seq (the `captures` map its evaluator threads through); outside a
+// sequence every register token matches any register, so `expect`/`forbid`/
+// `count` patterns can reuse a sequence's spelling unchanged.
+typedef std::map<std::string, std::string> RegisterCaptures;
+
+inline bool line_contains(const std::string& line, const std::string& pattern,
+        RegisterCaptures* captures = NULL) {
+    if (pattern.find("{{r") == std::string::npos) {
         return line.find(pattern) != std::string::npos;
     }
 
@@ -1096,9 +1106,12 @@ inline bool line_contains(const std::string& line, const std::string& pattern) {
         size_t line_index = start;
         size_t pattern_index = 0;
         bool matched = true;
+        RegisterCaptures attempt = captures ? *captures : RegisterCaptures();
         while (pattern_index < pattern.size()) {
-            if (pattern.compare(pattern_index, sizeof(kGeneratedRegisterToken) - 1,
-                    kGeneratedRegisterToken) == 0) {
+            if (pattern.compare(pattern_index, 3, "{{r") == 0) {
+                size_t close = pattern.find("}}", pattern_index);
+                if (close == std::string::npos) { matched = false; break; }
+                std::string token = pattern.substr(pattern_index + 3, close - pattern_index - 3);
                 if (line_index + 2 > line.size() || line[line_index] != '%' ||
                         line[line_index + 1] != 'r') {
                     matched = false;
@@ -1115,7 +1128,22 @@ inline bool line_contains(const std::string& line, const std::string& pattern) {
                     matched = false;
                     break;
                 }
-                pattern_index += sizeof(kGeneratedRegisterToken) - 1;
+                if (captures && !token.empty()) {
+                    std::string reg = line.substr(hex_start, line_index - hex_start);
+                    std::string name = token.substr(1);
+                    RegisterCaptures::iterator bound = attempt.find(name);
+                    if (token[0] == ':') {
+                        if (bound == attempt.end()) attempt[name] = reg;
+                        else if (bound->second != reg) { matched = false; break; }
+                    } else if (token[0] == '!') {
+                        // an unbound name cannot certify difference
+                        if (bound == attempt.end() || bound->second == reg) { matched = false; break; }
+                    } else {
+                        matched = false;
+                        break;
+                    }
+                }
+                pattern_index = close + 2;
                 continue;
             }
             if (line_index >= line.size() || line[line_index] != pattern[pattern_index]) {
@@ -1125,7 +1153,10 @@ inline bool line_contains(const std::string& line, const std::string& pattern) {
             line_index++;
             pattern_index++;
         }
-        if (matched) return true;
+        if (matched) {
+            if (captures) *captures = attempt;
+            return true;
+        }
     }
     return false;
 }
@@ -1283,17 +1314,18 @@ inline void run_fixture(const std::string& script_path, const std::string& sidec
             size_t cursor = 0;
             bool matched_all = true;
             std::string trace;
+            RegisterCaptures seq_captures;   // {{r:name}} / {{r!name}} scope
             for (size_t step = 0; step < group.expect_seq.size(); step++) {
                 const SeqExpectation& want = group.expect_seq[step];
                 size_t found = std::string::npos;
                 if (want.next_line) {
                     // CHECK-NEXT analogue: the very next line must match.
-                    if (cursor < lines.size() && line_contains(lines[cursor].text, want.pattern)) {
+                    if (cursor < lines.size() && line_contains(lines[cursor].text, want.pattern, &seq_captures)) {
                         found = cursor;
                     }
                 } else {
                     for (size_t i = cursor; i < lines.size(); i++) {
-                        if (line_contains(lines[i].text, want.pattern)) { found = i; break; }
+                        if (line_contains(lines[i].text, want.pattern, &seq_captures)) { found = i; break; }
                     }
                 }
                 if (found == std::string::npos) {

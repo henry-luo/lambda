@@ -9,6 +9,7 @@
 #include "../lib/mem_grow.hpp"
 #include "../lib/mem_factory.h"
 #include "../lib/hashmap.h"
+#include "../lib/hash.h"
 #include <thorvg_capi.h>
 #include "../lib/mem.h"
 #include "../lib/mempool.h"
@@ -223,44 +224,26 @@ static RdtPath::Entry* path_append_entry(RdtPath* path, RdtPath::Cmd command) {
 
 static uint64_t rdt_picture_data_hash(const char* data, int size, const char* mime_type) {
     uint64_t h = 1469598103934665603ULL;
-    const unsigned char* bytes = (const unsigned char*)data;
-    for (int i = 0; i < size; i++) {
-        h ^= bytes[i];
-        h *= 1099511628211ULL;
-    }
-    if (mime_type) {
-        const unsigned char* mime = (const unsigned char*)mime_type;
-        while (*mime) {
-            h ^= *mime++;
-            h *= 1099511628211ULL;
-        }
-    }
+    if (size > 0) h = hash_fnv1a_64_extend(h, data, (size_t)size);
+    if (mime_type) h = hash_fnv1a_64_extend_cstr(h, mime_type);
     return h;
-}
-
-static void rdt_hash_bytes(uint64_t* h, const void* data, size_t size) {
-    const unsigned char* bytes = (const unsigned char*)data;
-    for (size_t i = 0; i < size; i++) {
-        *h ^= bytes[i];
-        *h *= 1099511628211ULL;
-    }
 }
 
 static uint64_t rdt_paint_hash_path(const RdtPath* path) {
     uint64_t h = 1469598103934665603ULL;
     if (!path) return h;
-    rdt_hash_bytes(&h, &path->count, sizeof(path->count));
+    h = hash_fnv1a_64_extend(h, &path->count, sizeof(path->count));
     for (int i = 0; i < path->count; i++) {
         const RdtPath::Entry* e = &path->entries[i];
-        rdt_hash_bytes(&h, &e->cmd, sizeof(e->cmd));
-        rdt_hash_bytes(&h, e->args, sizeof(e->args));
+        h = hash_fnv1a_64_extend(h, &e->cmd, sizeof(e->cmd));
+        h = hash_fnv1a_64_extend(h, e->args, sizeof(e->args));
     }
     return h;
 }
 
 static uint64_t rdt_paint_hash_common(RdtPaintCacheKind kind, const RdtPath* path) {
     uint64_t h = rdt_paint_hash_path(path);
-    rdt_hash_bytes(&h, &kind, sizeof(kind));
+    h = hash_fnv1a_64_extend(h, &kind, sizeof(kind));
     return h;
 }
 
@@ -1417,10 +1400,10 @@ static void tvg_draw_stored_or_original(RdtVectorImpl* impl, Tvg_Paint stored,
 static uint64_t tvg_paint_hash_color(RdtPaintCacheKind type, RdtPath* path,
                                      Color color) {
     uint64_t hash = rdt_paint_hash_common(type, path);
-    rdt_hash_bytes(&hash, &color.r, sizeof(color.r));
-    rdt_hash_bytes(&hash, &color.g, sizeof(color.g));
-    rdt_hash_bytes(&hash, &color.b, sizeof(color.b));
-    rdt_hash_bytes(&hash, &color.a, sizeof(color.a));
+    hash = hash_fnv1a_64_extend(hash, &color.r, sizeof(color.r));
+    hash = hash_fnv1a_64_extend(hash, &color.g, sizeof(color.g));
+    hash = hash_fnv1a_64_extend(hash, &color.b, sizeof(color.b));
+    hash = hash_fnv1a_64_extend(hash, &color.a, sizeof(color.a));
     return hash;
 }
 
@@ -1458,7 +1441,7 @@ void rdt_fill_path(RdtVector* vec, RdtPath* p, Color color,
     }
 
     uint64_t hash = tvg_paint_hash_color(RDT_PAINT_CACHE_FILL_PATH, p, color);
-    rdt_hash_bytes(&hash, &rule, sizeof(rule));
+    hash = hash_fnv1a_64_extend(hash, &rule, sizeof(rule));
     pthread_mutex_lock(&g_paint_cache_mutex);
     Tvg_Paint cached = paint_cache_dup_fill_locked(hash, RDT_PAINT_CACHE_FILL_PATH, p, color, rule);
     pthread_mutex_unlock(&g_paint_cache_mutex);
@@ -1517,13 +1500,14 @@ void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
     }
 
     uint64_t hash = tvg_paint_hash_color(RDT_PAINT_CACHE_STROKE_PATH, p, color);
-    rdt_hash_bytes(&hash, &width, sizeof(width));
-    rdt_hash_bytes(&hash, &cap, sizeof(cap));
-    rdt_hash_bytes(&hash, &join, sizeof(join));
-    rdt_hash_bytes(&hash, &dash_count, sizeof(dash_count));
-    rdt_hash_bytes(&hash, &dash_phase, sizeof(dash_phase));
+    hash = hash_fnv1a_64_extend(hash, &width, sizeof(width));
+    hash = hash_fnv1a_64_extend(hash, &cap, sizeof(cap));
+    hash = hash_fnv1a_64_extend(hash, &join, sizeof(join));
+    hash = hash_fnv1a_64_extend(hash, &dash_count, sizeof(dash_count));
+    hash = hash_fnv1a_64_extend(hash, &dash_phase, sizeof(dash_phase));
     if (dash_array && dash_count > 0) {
-        rdt_hash_bytes(&hash, dash_array, (size_t)dash_count * sizeof(float));
+        hash = hash_fnv1a_64_extend(hash, dash_array,
+            (size_t)dash_count * sizeof(float));
     }
     pthread_mutex_lock(&g_paint_cache_mutex);
     Tvg_Paint cached = paint_cache_dup_stroke_locked(hash, p, color, width, cap, join,
@@ -1583,11 +1567,14 @@ static uint64_t tvg_gradient_hash(RdtPaintCacheKind kind, RdtPath* path,
                                   RdtFillRule rule,
                                   const RdtMatrix* gradient_transform) {
     uint64_t hash = rdt_paint_hash_common(kind, path);
-    rdt_hash_bytes(&hash, values, values_size);
-    rdt_hash_bytes(&hash, &stop_count, sizeof(stop_count));
-    rdt_hash_bytes(&hash, stops, (size_t)stop_count * sizeof(RdtGradientStop));
-    rdt_hash_bytes(&hash, &rule, sizeof(rule));
-    if (gradient_transform) rdt_hash_bytes(&hash, gradient_transform, sizeof(RdtMatrix));
+    hash = hash_fnv1a_64_extend(hash, values, values_size);
+    hash = hash_fnv1a_64_extend(hash, &stop_count, sizeof(stop_count));
+    hash = hash_fnv1a_64_extend(hash, stops,
+        (size_t)stop_count * sizeof(RdtGradientStop));
+    hash = hash_fnv1a_64_extend(hash, &rule, sizeof(rule));
+    if (gradient_transform) {
+        hash = hash_fnv1a_64_extend(hash, gradient_transform, sizeof(RdtMatrix));
+    }
     return hash;
 }
 
