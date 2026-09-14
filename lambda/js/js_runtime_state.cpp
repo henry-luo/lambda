@@ -371,12 +371,10 @@ void js_global_environment_release_module_bindings(
 }
 
 static void js_runtime_state_free_records(JsRuntimeState* state) {
-    // the wrapper cache tables are separate allocations now
+    // the wrapper cache entries are a separate allocation now
     if (state) {
-        if (state->function_cache_keys) mem_free(state->function_cache_keys);
-        if (state->function_cache_values) mem_free(state->function_cache_values);
-        state->function_cache_keys = NULL;
-        state->function_cache_values = NULL;
+        mem_free(state->function_cache_entries);
+        state->function_cache_entries = NULL;
         state->function_cache_capacity = 0;
         state->function_cache_count = 0;
         if (state->callable_code_interned) {

@@ -1013,7 +1013,7 @@ struct JsRuntimeState {
     JsMirCompileRecoveryState* mir_compile_recovery_state = NULL;
     // Wrapper identity is observable through .prototype and must therefore be
     // private to the context that owns the function objects and their heap.
-    // §14.1: the two fixed 512-entry tables were 12,288 B — 57 % of this
+    // §14.1: the fixed 512-entry cache was 12,288 B — 57 % of this
     // record — while a bare realm already reaches thousands of functions, so
     // the cache saturated in ordinary use and simply stopped deduplicating.
     // The cached wrappers are pool-backed and carry no registered GC root, so
@@ -1025,8 +1025,11 @@ struct JsRuntimeState {
         uint8_t policy;
         uint8_t capabilities;
     };
-    JsFunctionCacheKey* function_cache_keys = nullptr;
-    JsFunction** function_cache_values = nullptr;
+    struct JsFunctionCacheEntry {
+        JsFunctionCacheKey key;
+        JsFunction* value;
+    };
+    JsFunctionCacheEntry* function_cache_entries = nullptr;
     int function_cache_count = 0;
     int function_cache_capacity = 0;
     int function_cache_suppress_depth = 0;

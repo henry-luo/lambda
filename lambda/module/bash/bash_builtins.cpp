@@ -13,8 +13,10 @@
 #include "../../lambda-data.hpp"
 #include "../../runtime/transpiler.hpp"
 #include "../../../lib/log.h"
+#include "../../../lib/arraylist.hpp"
 #include "../../../lib/str.h"
 #include "../../../lib/strbuf.h"
+#include "../../../lib/strview.h"
 #include "../../../lib/utf.h"
 #include <cstring>
 #include <cstdio>
@@ -1557,63 +1559,52 @@ extern "C" Item bash_builtin_sort(Item* args, int argc) {
         return (Item){.item = i2it(0)};
     }
 
-    int max_lines = 1024;
-    const char** lines = (const char**)mem_alloc(max_lines * sizeof(const char*), MEM_CAT_BASH_RUNTIME);
-    int* lens = (int*)mem_alloc(max_lines * sizeof(int), MEM_CAT_BASH_RUNTIME);
-    int line_count = 0;
+    lam::ArrayList<StrView> lines(MEM_CAT_BASH_RUNTIME, 1024);
     int line_start = 0;
 
     for (int i = 0; i <= (int)s->len; i++) {
         if (i == (int)s->len || s->chars[i] == '\n') {
-            if (line_count >= max_lines) {
-                max_lines *= 2;
-                lines = (const char**)mem_realloc(lines, max_lines * sizeof(const char*), MEM_CAT_BASH_RUNTIME);
-                lens = (int*)mem_realloc(lens, max_lines * sizeof(int), MEM_CAT_BASH_RUNTIME);
+            StrView line = strview_init(s->chars + line_start, (size_t)(i - line_start));
+            if (!lines.append(line)) {
+                bash_set_exit_code(1);
+                return (Item){.item = i2it(1)};
             }
-            lines[line_count] = s->chars + line_start;
-            lens[line_count] = i - line_start;
-            line_count++;
             line_start = i + 1;
         }
     }
 
-    if (line_count > 0 && lens[line_count - 1] == 0 && s->len > 0 && s->chars[s->len - 1] == '\n') {
-        line_count--;
+    if (!lines.empty() && lines.back().length == 0 && s->len > 0 && s->chars[s->len - 1] == '\n') {
+        lines.remove(lines.size() - 1);
     }
 
     // insertion sort
-    for (int i = 1; i < line_count; i++) {
-        const char* key_line = lines[i];
-        int key_len = lens[i];
-        int j = i - 1;
-        while (j >= 0) {
+    for (size_t i = 1; i < lines.size(); i++) {
+        StrView key_line = lines[i];
+        size_t insertion = i;
+        while (insertion > 0) {
+            size_t previous = insertion - 1;
             int cmp;
             if (flag_n) {
-                long a = strtol(lines[j], NULL, 10);
-                long b = strtol(key_line, NULL, 10);
+                long a = strtol(lines[previous].str, NULL, 10);
+                long b = strtol(key_line.str, NULL, 10);
                 cmp = (a > b) ? 1 : (a < b) ? -1 : 0;
             } else {
-                int min_len = lens[j] < key_len ? lens[j] : key_len;
-                cmp = memcmp(lines[j], key_line, min_len);
-                if (cmp == 0) cmp = lens[j] - key_len;
+                cmp = str_cmp(lines[previous].str, lines[previous].length,
+                              key_line.str, key_line.length);
             }
             if (flag_r) cmp = -cmp;
             if (cmp <= 0) break;
-            lines[j + 1] = lines[j];
-            lens[j + 1] = lens[j];
-            j--;
+            lines[insertion] = lines[previous];
+            insertion--;
         }
-        lines[j + 1] = key_line;
-        lens[j + 1] = key_len;
+        lines[insertion] = key_line;
     }
 
-    for (int i = 0; i < line_count; i++) {
-        bash_raw_write(lines[i], lens[i]);
+    for (size_t i = 0; i < lines.size(); i++) {
+        bash_raw_write(lines[i].str, (int)lines[i].length);
         bash_raw_putc('\n');
     }
 
-    mem_free(lines);
-    mem_free(lens);
     bash_set_exit_code(0);
     return (Item){.item = i2it(0)};
 }

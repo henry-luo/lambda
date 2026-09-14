@@ -1,10 +1,12 @@
 // npm_tarball.cpp — Extract .tgz (gzipped tar) archives for npm packages
 
 #include "npm_tarball.h"
+#include "../../../lib/byte_builder.h"
 #include "../../../lib/file.h"
 #include "../../../lib/log.h"
 #include "../../../lib/memtrack.h"
 
+#include <limits.h>
 #include <zlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -58,6 +60,15 @@ static bool is_zero_block(const char* block) {
     return true;
 }
 
+static int tarball_inflate_fail(z_stream* stream, ByteBuilder* output,
+                                char* input, const char* message) {
+    log_error("npm tarball: %s", message);
+    inflateEnd(stream);
+    byte_builder_destroy(output);
+    mem_free(input);
+    return -1;
+}
+
 // construct full path from tar header, stripping npm's "package/" prefix
 static void tar_entry_path(const TarHeader* hdr, char* out, int out_size) {
     // build full name from prefix + name
@@ -100,6 +111,11 @@ int npm_extract_tarball(const char* tgz_path, const char* dest_dir) {
     // gzip decompress using zlib
     z_stream strm = {};
     strm.next_in = (Bytef*)tgz_data;
+    if (tgz_size > UINT_MAX || tgz_size > SIZE_MAX / 4u) {
+        log_error("npm tarball: input is too large");
+        mem_free(tgz_data);
+        return -1;
+    }
     strm.avail_in = (uInt)tgz_size;
 
     // 15 + 16 = gzip decoding
@@ -109,33 +125,36 @@ int npm_extract_tarball(const char* tgz_path, const char* dest_dir) {
         return -1;
     }
 
-    // decompress into growing buffer
-    size_t tar_cap = tgz_size * 4;  // initial estimate
-    size_t tar_len = 0;
-    char* tar_data = (char*)mem_alloc(tar_cap, MEM_CAT_JS_RUNTIME);
+    // decompress into a shared growing byte buffer
+    ByteBuilder tar = {};
+    if (!byte_builder_init(&tar, tgz_size * 4u, MEM_CAT_JS_RUNTIME, false)) {
+        return tarball_inflate_fail(&strm, &tar, tgz_data, "output allocation failed");
+    }
 
     int zret;
     do {
-        if (tar_len + 65536 > tar_cap) {
-            tar_cap *= 2;
-            tar_data = (char*)mem_realloc(tar_data, tar_cap, MEM_CAT_JS_RUNTIME);
+        if (!byte_builder_reserve(&tar, 65536u)) {
+            return tarball_inflate_fail(&strm, &tar, tgz_data, "output growth failed");
         }
-        strm.next_out = (Bytef*)(tar_data + tar_len);
-        strm.avail_out = (uInt)(tar_cap - tar_len);
+        size_t writable = 0;
+        strm.next_out = byte_builder_writable_tail(&tar, &writable);
+        if (writable > UINT_MAX) writable = UINT_MAX;
+        strm.avail_out = (uInt)writable;
 
         zret = inflate(&strm, Z_NO_FLUSH);
-        tar_len = tar_cap - strm.avail_out;
+        if (!byte_builder_commit(&tar, writable - (size_t)strm.avail_out)) {
+            return tarball_inflate_fail(&strm, &tar, tgz_data, "output accounting failed");
+        }
 
-        if (zret == Z_MEM_ERROR || zret == Z_DATA_ERROR) {
-            log_error("npm tarball: zlib inflate error %d", zret);
-            inflateEnd(&strm);
-            mem_free(tar_data);
-            mem_free(tgz_data);
-            return -1;
+        if (zret != Z_OK && zret != Z_STREAM_END) {
+            char error[32];
+            snprintf(error, sizeof(error), "zlib inflate error %d", zret);
+            return tarball_inflate_fail(&strm, &tar, tgz_data, error);
         }
     } while (zret != Z_STREAM_END);
 
-    tar_len = strm.total_out;
+    size_t tar_len = tar.length;
+    char* tar_data = (char*)byte_builder_take(&tar, NULL);
     inflateEnd(&strm);
     mem_free(tgz_data);
 

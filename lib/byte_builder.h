@@ -25,6 +25,10 @@ typedef struct ByteBuilder {
 bool byte_builder_init(ByteBuilder* builder, size_t initial_capacity,
                        MemCategory category, bool nul_terminated);
 bool byte_builder_reserve(ByteBuilder* builder, size_t append_bytes);
+// reserve may relocate data. Obtain this pointer only after the final reserve,
+// then commit exactly the number of bytes written through it.
+uint8_t* byte_builder_writable_tail(ByteBuilder* builder, size_t* out_writable_bytes);
+bool byte_builder_commit(ByteBuilder* builder, size_t written_bytes);
 bool byte_builder_append(ByteBuilder* builder, const void* data, size_t length);
 bool byte_builder_append_limited(ByteBuilder* builder, const void* data,
                                  size_t length, size_t max_length);

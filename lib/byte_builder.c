@@ -32,12 +32,29 @@ bool byte_builder_reserve(ByteBuilder* builder, size_t append_bytes) {
     return true;
 }
 
-bool byte_builder_append(ByteBuilder* builder, const void* data, size_t length) {
-    if (!builder || (length > 0 && !data) || !byte_builder_reserve(builder, length)) return false;
-    if (length > 0) memmove(builder->data + builder->length, data, length);
-    builder->length += length;
+uint8_t* byte_builder_writable_tail(ByteBuilder* builder, size_t* out_writable_bytes) {
+    if (!builder || !builder->data || builder->length >= builder->capacity) {
+        if (out_writable_bytes) *out_writable_bytes = 0;
+        return NULL;
+    }
+    size_t writable = builder->capacity - builder->length - (builder->nul_terminated ? 1u : 0u);
+    if (out_writable_bytes) *out_writable_bytes = writable;
+    return writable > 0 ? builder->data + builder->length : NULL;
+}
+
+bool byte_builder_commit(ByteBuilder* builder, size_t written_bytes) {
+    size_t writable = 0;
+    byte_builder_writable_tail(builder, &writable);
+    if (!builder || written_bytes > writable) return false;
+    builder->length += written_bytes;
     if (builder->nul_terminated) builder->data[builder->length] = '\0';
     return true;
+}
+
+bool byte_builder_append(ByteBuilder* builder, const void* data, size_t length) {
+    if (!builder || (length > 0 && !data) || !byte_builder_reserve(builder, length)) return false;
+    if (length > 0) memmove(byte_builder_writable_tail(builder, NULL), data, length);
+    return byte_builder_commit(builder, length);
 }
 
 bool byte_builder_append_limited(ByteBuilder* builder, const void* data,
