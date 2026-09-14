@@ -2168,7 +2168,7 @@ extern "C" Item js_constructor_create_object(Item callee, Item new_target) {
                             }
                             case JS_CLASS_REGEXP: {
                                 aux_one_root.set(js_name_item("(?:)", 4));
-                                aux_two_root.set(js_name_item("", 0));
+                                aux_two_root.set(ItemEmptyString);
                                 object_root.set(js_regexp_construct(aux_one_root.get(), aux_two_root.get()));
                                 created_builtin = true;
                                 break;
@@ -2945,7 +2945,7 @@ static Item js_intrinsic_construct_allocate(JsIntrinsicConstructPolicy policy,
         return js_new_function_from_string(args, argc);
     case JS_INTRINSIC_CONSTRUCT_STRING:
         return js_new_string_wrapper(argc > 0 ? first :
-            js_name_item("", 0));
+            ItemEmptyString);
     case JS_INTRINSIC_CONSTRUCT_NUMBER:
         return js_new_number_checked(argc > 0 ? first : (Item){.item = i2it(0)});
     case JS_INTRINSIC_CONSTRUCT_BOOLEAN:
@@ -3182,7 +3182,7 @@ JS_DYNAMIC_FUNCTION_TARGETS(JS_DEFINE_DYNAMIC_FUNCTION_TARGET)
 
 Item js_intrinsic_ctor_string_call_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
-    if (argc == 0 || !args) return js_name_item("", 0);
+    if (argc == 0 || !args) return ItemEmptyString;
     Item value = args[0];
     if (get_type_id(value) == LMD_TYPE_INT &&
             it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
@@ -4677,7 +4677,7 @@ static void js_materialize_builtin_proto_specs(Item prototype,
             value = js_make_number(0);
             break;
         case JS_PROTO_VALUE_EMPTY_STRING:
-            value = js_name_item("", 0);
+            value = ItemEmptyString;
             break;
         }
         js_define_data_prop(prototype, spec->property_name,
@@ -5460,7 +5460,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
                         bool is_error = js_intrinsic_is_error_name(nm, nl);
                         if (is_error) {
                             js_define_data_prop(fn->prototype, "name", 4, js_name_item(nm, nl), JS_PROTO_PROP_NON_ENUMERABLE);
-                            js_define_data_prop(fn->prototype, "message", 7, js_name_item("", 0), JS_PROTO_PROP_NON_ENUMERABLE);
+                            js_define_data_prop(fn->prototype, "message", 7, ItemEmptyString, JS_PROTO_PROP_NON_ENUMERABLE);
                             // Set Error.prototype.toString to generic Error toString builtin
                             js_define_data_prop(fn->prototype, "toString", 8,
                                 js_intrinsic_binding_get(JS_BUILTIN_OWNER_ERROR_INTERNAL, "toString", 8), JS_PROTO_PROP_NON_ENUMERABLE);
@@ -5625,7 +5625,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
                             }
                             js_define_data_prop(fn->prototype, "length", 6, (Item){.item = i2it(0)},
                                 JS_PROTO_PROP_NON_ENUMERABLE | JS_PROTO_PROP_NON_WRITABLE);
-                            js_define_data_prop(fn->prototype, "name", 4, js_name_item("", 0),
+                            js_define_data_prop(fn->prototype, "name", 4, ItemEmptyString,
                                 JS_PROTO_PROP_NON_ENUMERABLE | JS_PROTO_PROP_NON_WRITABLE);
                             js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
                             Item thrower = js_intrinsic_binding_get(
@@ -8319,7 +8319,7 @@ static int js_encode_utf16_unit_wtf8(char* buf, uint32_t code_unit) {
 // use_slice_semantics: true = slice (negative counts from end), false = substring (clamp to 0).
 static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
     String* s = it2s(str_item);
-    if (!s) return js_name_item("", 0);
+    if (!s) return ItemEmptyString;
     if (s->is_ascii) {
         // ASCII: UTF-16 idx == byte idx == codepoint idx
         int64_t len = (int64_t)s->len;
@@ -8327,7 +8327,7 @@ static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
         if (end < 0) end = 0;
         if (start > len) start = len;
         if (end > len) end = len;
-        if (start >= end) return js_name_item("", 0);
+        if (start >= end) return ItemEmptyString;
         int64_t rlen = end - start;
         // §7.2.B: a single ASCII byte has only 128 possible values; route
         // 1-char ASCII substrings (the str[i]/charAt hot path) through the
@@ -8379,7 +8379,7 @@ static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
         }
         pos += bytes;
     }
-    if (buf->length == 0) { strbuf_free(buf); return js_name_item("", 0); }
+    if (buf->length == 0) { strbuf_free(buf); return ItemEmptyString; }
     String* result = heap_strcpy(buf->str, (int)buf->length);
     strbuf_free(buf);
     return (Item){.item = s2it(result)};
@@ -10884,7 +10884,7 @@ Item js_intrinsic_string_raw_body(Item callee, Item this_value, Item* args,
 static Item js_intrinsic_string_from_code(Item* args, int argc,
         Item (*single)(Item), Item (*multiple)(Item), bool empty) {
     if (argc == 0 && empty) {
-        return js_name_item("", 0);
+        return ItemEmptyString;
     }
     if (argc == 1) return single(args[0]);
     Item values = js_array_new(argc);
@@ -19034,7 +19034,7 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
                 strbuf_free(rb);
                 replacement_str = (Item){.item = s2it(repl_result)};
             } else {
-                replacement_str = js_name_item("", 0);
+                replacement_str = ItemEmptyString;
             }
         }
         value_root.set(replacement_str);
@@ -19303,7 +19303,7 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
                 // i. T = substring(S, p, q)
                 int t_len = q - p;
                 Item T = (t_len > 0) ? js_str_substring_utf16(str, p, q)
-                                     : js_name_item("", 0);
+                                     : ItemEmptyString;
                 // ii. Append T to A; lengthA++; if lengthA == lim, return A
                 js_array_push(A, T); lengthA++;
                 if ((uint32_t)lengthA == lim) return A;
@@ -19334,7 +19334,7 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
     // Step 17-18: T = substring(S, p, size); append T
     int t_len = size - p;
     Item T = (t_len > 0) ? js_str_substring_utf16(str, p, size)
-                         : js_name_item("", 0);
+                         : ItemEmptyString;
     js_array_push(A, T);
     return A;
 }
@@ -20032,7 +20032,7 @@ static Item js_array_like_join(Item obj, Item* args, int argc, bool typed_array)
 
 static Item js_array_like_to_locale_string(Item obj, bool typed_array) {
     int64_t length = typed_array ? js_typed_array_length(obj) : obj.array->length;
-    if (length <= 0) return js_name_item("", 0);
+    if (length <= 0) return ItemEmptyString;
     return js_array_like_join_kernel(obj, typed_array, length, ",", 1, true);
 }
 
@@ -21400,7 +21400,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
             // single match at position 0, produce replacement
             if (replacement_is_func) {
                 Item fn_args[3];
-                fn_args[0] = js_name_item("", 0);
+                fn_args[0] = ItemEmptyString;
                 fn_args[1] = (Item){.item = i2it(0)};
                 fn_args[2] = str;
                 Item result = js_call_function(replacement_arg, make_js_undefined(), fn_args, 3);
@@ -21427,7 +21427,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
             for (int pos = 0; pos <= slen; pos++) {
                 if (replacement_is_func) {
                     Item fn_args[3];
-                    fn_args[0] = js_name_item("", 0);
+                    fn_args[0] = ItemEmptyString;
                     fn_args[1] = (Item){.item = i2it(pos)};
                     fn_args[2] = str;
                     Item result = js_call_function(replacement_arg, make_js_undefined(), fn_args, 3);
@@ -21450,7 +21450,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
         // .replace("", repl) — single replacement at position 0
         if (replacement_is_func) {
             Item fn_args[3];
-            fn_args[0] = js_name_item("", 0);
+            fn_args[0] = ItemEmptyString;
             fn_args[1] = (Item){.item = i2it(0)};
             fn_args[2] = str;
             JS_ASSIGN_OR_RETURN(result, js_call_function(replacement_arg, make_js_undefined(), fn_args, 3));
@@ -22023,7 +22023,7 @@ static Item js_string_coerce_receiver(Item* value) {
             bool pv_found = false;
             Item pv = js_map_shape_lookup(value->map, "__primitiveValue__", 18, &pv_found);
             if (pv_found && get_type_id(pv) == LMD_TYPE_STRING) *value = pv;
-            else *value = js_name_item("", 0);
+            else *value = ItemEmptyString;
         } else {
             *value = js_to_string(*value);
             if (item_is_error(*value)) return *value;
@@ -22158,7 +22158,7 @@ static Item js_string_intrinsic_algorithm(Item str,
                             str = pv;
                         } else {
                             // String.prototype-style: default to empty string
-                            str = js_name_item("", 0);
+                            str = ItemEmptyString;
                         }
                 }
             }
@@ -22190,7 +22190,7 @@ static Item js_string_intrinsic_algorithm(Item str,
             if (!js_is_whitespace_at(s->chars, s->len, prev)) break;
             end = prev;
         }
-        if (start >= end) return js_name_item("", 0);
+        if (start >= end) return ItemEmptyString;
         return js_name_item(s->chars + start, end - start);
     }
     if (operation == JS_STRING_INTRINSIC_TRIM_START) {
@@ -22200,7 +22200,7 @@ static Item js_string_intrinsic_algorithm(Item str,
         while (start < s->len && js_is_whitespace_at(s->chars, s->len, start))
             start += js_utf8_char_len((unsigned char)s->chars[start]);
         if (start == 0) return str;
-        if (start >= s->len) return js_name_item("", 0);
+        if (start >= s->len) return ItemEmptyString;
         return js_name_item(s->chars + start, s->len - start);
     }
     if (operation == JS_STRING_INTRINSIC_TRIM_END) {
@@ -22214,7 +22214,7 @@ static Item js_string_intrinsic_algorithm(Item str,
             end = prev;
         }
         if (end == s->len) return str;
-        if (end == 0) return js_name_item("", 0);
+        if (end == 0) return ItemEmptyString;
         return js_name_item(s->chars, end);
     }
     if (operation == JS_STRING_INTRINSIC_TO_LOWER_CASE) {
@@ -22357,7 +22357,7 @@ static Item js_string_intrinsic_algorithm(Item str,
             }
             // "".split(sep) → [""] when sep doesn't match
             Item result = js_array_new(0);
-            js_array_push(result, js_name_item("", 0));
+            js_array_push(result, ItemEmptyString);
             return result;
         }
         String* sep_str = it2s(sep);
@@ -22701,7 +22701,7 @@ static Item js_string_intrinsic_algorithm(Item str,
         }
         if (argc < 1 || args[0].item == ITEM_JS_UNDEFINED) {
             Item result = js_array_new(1);
-            Item empty_str = js_name_item("", 0);
+            Item empty_str = ItemEmptyString;
             js_elements_set_int(result, 0, empty_str);
             // Set index = 0 and input = str
             Item idx_key = js_name_item("index", 5);
@@ -29955,7 +29955,7 @@ static void js_promise_mark_anonymous_builtin(Item fn_item) {
     fn->flags |= JS_FUNC_FLAG_ARROW;
     js_function_finalize_capabilities(fn);
     Item name_key = js_name_item("name", 4);
-    Item empty_name = js_name_item("", 0);
+    Item empty_name = ItemEmptyString;
     js_func_init_property(fn_item, name_key, empty_name);
     js_mark_non_writable(fn_item, name_key);
     js_mark_non_enumerable(fn_item, name_key);
@@ -33341,7 +33341,7 @@ JS_FORWARD_STATIC_ITEM(js_repl_input_end, (Item repl), js_call_function,
     (js_get_key_default(repl, js_repl_key("close")), repl, NULL, 0))
 
 static Item js_repl_input_keypress(Item repl, Item ch, Item key) {
-    Item args[2] = { js_name_item("", 0), key };
+    Item args[2] = { ItemEmptyString, key };
     return js_call_function(js_get_key_default(repl, js_repl_key("write")), repl, args, 2);
 }
 
@@ -33637,7 +33637,7 @@ static Item js_als_constructor(Item options) {
     Item self = js_get_this();
     // handle options: { defaultValue, name }
     Item default_val = (Item){.item = ITEM_JS_UNDEFINED};
-    Item name_val = js_name_item("", 0);
+    Item name_val = ItemEmptyString;
     if (get_type_id(options) == LMD_TYPE_MAP) {
         Item dv = js_get_key_default(options, js_name_item("defaultValue", 12));
         if (get_type_id(dv) != LMD_TYPE_UNDEFINED) default_val = dv;

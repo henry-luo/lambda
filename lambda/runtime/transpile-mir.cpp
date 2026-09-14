@@ -5103,7 +5103,8 @@ static MIR_reg_t mir_root_slot_address(MirTranspiler* mt, int slot) {
 }
 
 static MIR_reg_t mir_empty_string_pointer(MirTranspiler* mt) {
-    String* empty = name_pool_create_len(mt->name_pool, "", 0);
+    // Keep emitted empty values out of the per-transpiler structural name pool.
+    String* empty = it2s(ItemEmptyString);
     MIR_reg_t pointer = new_reg(mt, "empty_string", MIR_T_P);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, pointer),
         MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)empty)));

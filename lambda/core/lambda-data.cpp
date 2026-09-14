@@ -192,6 +192,19 @@ TypeObject EmptyObject;
 const Item ItemNull = {._type_id = LMD_TYPE_NULL};
 const Item ItemError = {._type_id = LMD_TYPE_ERROR};
 
+// A process-pinned empty string survives runtime heap resets and name-pool teardown.
+struct StaticEmptyString {
+    uint32_t len;
+    uint8_t flags;
+    char chars[1];
+};
+static_assert(offsetof(StaticEmptyString, chars) == offsetof(String, chars),
+    "static empty string must match String layout");
+static const StaticEmptyString item_empty_string_storage = {0, 1, {'\0'}};
+const Item ItemEmptyString = {
+    .item = s2it((String*)&item_empty_string_storage)
+};
+
 // Note: ConstItem has const members and cannot be assigned after initialization.
 // These are zero-initialized and should be used via reinterpret_cast from appropriate Items.
 alignas(ConstItem) static uint64_t error_result_storage = ITEM_ERROR;

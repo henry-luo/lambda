@@ -2076,7 +2076,7 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
             ? message_root.get() : js_to_string(message_root.get()));
         if (item_is_error(message_string_root.get())) return message_string_root.get();
     } else {
-        message_string_root.set(js_name_item("", 0));
+        message_string_root.set(ItemEmptyString);
     }
     String* message_string = it2s(message_string_root.get());
     const char* message_chars = message_string ? message_string->chars : "";
