@@ -3,8 +3,9 @@
 
 #include "event.hpp"
 
+#include "../lib/str.h"
+
 #include <string.h>
-#include <strings.h>  // strcasecmp
 
 #include "../lib/log.h"
 
@@ -30,17 +31,17 @@ static CeClass classify_ce_attr(DomElement* e) {
     c.has_attr = true;
     const char* v = e->get_attribute("contenteditable");
     // bool-style: <div contenteditable> -> v is "" or nullptr.
-    if (!v || *v == '\0' || strcasecmp(v, "true") == 0) {
+    if (!v || *v == '\0' || str_icmp_cstr(v, "true") == 0) {
         c.is_host = true;
         c.mode = EditingHost::Rich;
         return c;
     }
-    if (strcasecmp(v, "plaintext-only") == 0) {
+    if (str_icmp_cstr(v, "plaintext-only") == 0) {
         c.is_host = true;
         c.mode = EditingHost::PlaintextOnly;
         return c;
     }
-    if (strcasecmp(v, "false") == 0) {
+    if (str_icmp_cstr(v, "false") == 0) {
         c.is_false = true;
         return c;
     }
@@ -107,9 +108,9 @@ const char* html_element_get_contentEditable(DomElement* element) {
     if (!element) return "inherit";
     if (!element->has_attribute("contenteditable")) return "inherit";
     const char* v = element->get_attribute("contenteditable");
-    if (!v || *v == '\0' || strcasecmp(v, "true") == 0) return "true";
-    if (strcasecmp(v, "false") == 0) return "false";
-    if (strcasecmp(v, "plaintext-only") == 0) return "plaintext-only";
+    if (!v || *v == '\0' || str_icmp_cstr(v, "true") == 0) return "true";
+    if (str_icmp_cstr(v, "false") == 0) return "false";
+    if (str_icmp_cstr(v, "plaintext-only") == 0) return "plaintext-only";
     return "inherit";
 }
 
@@ -117,17 +118,17 @@ bool html_element_set_contentEditable(DomElement* element, const char* value) {
     if (!element || !value) return false;
 
     // Empty string is treated as "inherit" per WHATWG HTML.
-    if (*value == '\0' || strcasecmp(value, "inherit") == 0) {
+    if (*value == '\0' || str_icmp_cstr(value, "inherit") == 0) {
         element->remove_attribute("contenteditable");
         return true;
     }
-    if (strcasecmp(value, "true") == 0) {
+    if (str_icmp_cstr(value, "true") == 0) {
         return element->set_attribute("contenteditable", "true");
     }
-    if (strcasecmp(value, "false") == 0) {
+    if (str_icmp_cstr(value, "false") == 0) {
         return element->set_attribute("contenteditable", "false");
     }
-    if (strcasecmp(value, "plaintext-only") == 0) {
+    if (str_icmp_cstr(value, "plaintext-only") == 0) {
         return element->set_attribute("contenteditable", "plaintext-only");
     }
     // SyntaxError — log and refuse. Caller (JS bridge) is responsible for

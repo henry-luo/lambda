@@ -24,7 +24,6 @@
 #include <string.h>
 #include "../lib/mem.h"
 #include "../lib/url.h"
-#include <strings.h>  // for strcasecmp
 
 // Helper: Read file contents into a string
 static char* read_file_to_string(const char* path, size_t* out_size) {
@@ -46,8 +45,8 @@ static bool resource_file_looks_like_svg(const char* path) {
     fclose(file);
     if (size == 0) return false;
     for (size_t i = 0; i + 4 < size; i++) {
-        if (probe[i] == '<' &&
-            strncasecmp((const char*)probe + i + 1, "svg", 3) == 0) {
+        if (probe[i] == '<' && str_istarts_with((const char*)probe + i + 1,
+                                                 size - i - 1, "svg", 3)) {
             return true;
         }
     }

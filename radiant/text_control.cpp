@@ -4,10 +4,10 @@
 #include "event.hpp"
 #include "view.hpp"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lib/str.h"
 #include "../lib/strbuf.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
-#include <strings.h>    // strcasecmp
 #include <string.h>
 
 // Phase 8E: per-text-control selectionchange dispatch. Strong impl lives in
@@ -47,8 +47,8 @@ static void tc_collect_text(DomNode* n, StrBuf* sb) {
 
 bool tc_is_text_control(DomElement* elem) {
     if (!elem || !elem->tag_name) return false;
-    if (strcasecmp(elem->tag_name, "textarea") == 0) return true;
-    if (strcasecmp(elem->tag_name, "input") == 0) {
+    if (str_icmp_cstr(elem->tag_name, "textarea") == 0) return true;
+    if (str_icmp_cstr(elem->tag_name, "input") == 0) {
         // Button/select form props can temporarily lack input_type; HTML's
         // missing-value default is text only for input elements.
         const char* input_type = elem->form_control() ? elem->form->input_type
@@ -109,14 +109,14 @@ FormControlProp* tc_get_or_create_form(DomElement* elem) {
     form_control_prop_init(f);
     f->heap_allocated = 1;
     f->state_ref = elem->doc ? (DocState*)elem->doc->state : nullptr;
-    if (elem->tag_name && strcasecmp(elem->tag_name, "textarea") == 0) {
+    if (elem->tag_name && str_icmp_cstr(elem->tag_name, "textarea") == 0) {
         f->control_type = FORM_CONTROL_TEXTAREA;
-    } else if (elem->tag_name && strcasecmp(elem->tag_name, "input") == 0) {
+    } else if (elem->tag_name && str_icmp_cstr(elem->tag_name, "input") == 0) {
         f->input_type = elem->get_attribute("type");
         f->control_type = get_input_control_type(f->input_type);
-    } else if (elem->tag_name && strcasecmp(elem->tag_name, "select") == 0) {
+    } else if (elem->tag_name && str_icmp_cstr(elem->tag_name, "select") == 0) {
         f->control_type = FORM_CONTROL_SELECT;
-    } else if (elem->tag_name && strcasecmp(elem->tag_name, "button") == 0) {
+    } else if (elem->tag_name && str_icmp_cstr(elem->tag_name, "button") == 0) {
         f->control_type = FORM_CONTROL_BUTTON;
     } else {
         // This allocator is also the script-before-layout path; refuse a
@@ -156,7 +156,7 @@ void form_control_release_prop(DomElement* elem) {
 static char* tc_initial_value(DomElement* elem, uint32_t* out_len) {
     *out_len = 0;
     if (!elem) return nullptr;
-    if (elem->tag_name && strcasecmp(elem->tag_name, "textarea") == 0) {
+    if (elem->tag_name && str_icmp_cstr(elem->tag_name, "textarea") == 0) {
         StrBuf* sb = strbuf_new_cap(64);
         tc_collect_text((DomNode*)elem, sb);
         size_t len = sb->str ? strlen(sb->str) : 0;

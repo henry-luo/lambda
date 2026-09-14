@@ -559,7 +559,7 @@ static char* find_refresh_url_in_content(const char* content) {
     const char* p = content;
     while (*p) {
         while (*p && (*p == ' ' || *p == '\t' || *p == ';')) p++;
-        if (strncasecmp(p, "url", 3) == 0) {
+        if (str_istarts_with_cstr(p, "url")) {
             const char* q = p + 3;
             while (*q && (*q == ' ' || *q == '\t')) q++;
             if (*q == '=') {
@@ -906,9 +906,9 @@ const char* detect_css_encoding(const char* data, size_t len, const char* docume
     if (http_charset) {
         if (str_ieq_cstr(http_charset, "utf-8")) return nullptr;
         // validate: only use if it's a recognized charset we can convert
-        if (strncasecmp(http_charset, "windows-", 8) == 0 ||
-            strncasecmp(http_charset, "iso-8859", 8) == 0 ||
-            strncasecmp(http_charset, "utf-16", 6) == 0) {
+        if (str_istarts_with_cstr(http_charset, "windows-") ||
+            str_istarts_with_cstr(http_charset, "iso-8859") ||
+            str_istarts_with_cstr(http_charset, "utf-16")) {
             return http_charset;
         }
         // bogus/unrecognized HTTP charset → ignore, fall through
@@ -952,8 +952,8 @@ const char* detect_css_encoding(const char* data, size_t len, const char* docume
     if (link_charset) {
         if (str_ieq_cstr(link_charset, "utf-8")) return nullptr;
         // validate: only use if recognized
-        if (strncasecmp(link_charset, "windows-", 8) == 0 ||
-            strncasecmp(link_charset, "iso-8859", 8) == 0) {
+        if (str_istarts_with_cstr(link_charset, "windows-") ||
+            str_istarts_with_cstr(link_charset, "iso-8859")) {
             return link_charset;
         }
     }
@@ -1360,7 +1360,7 @@ void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, const c
     if (depth > MAX_RADIANT_CSS_TREE_DEPTH) return;
 
     // Check if this is a <style> element
-    if (elem->tag_name && strcasecmp(elem->tag_name, "style") == 0) {
+    if (elem->tag_name && str_icmp_cstr(elem->tag_name, "style") == 0) {
         // Check disabled attribute — skip disabled stylesheets
         if (!elem->has_attribute("disabled")) {
             // Check media attribute
@@ -1472,7 +1472,7 @@ static bool stylesheet_owner_is_in_head(const CssStylesheet* stylesheet) {
          node; node = node->parent) {
         if (!node->is_element()) continue;
         DomElement* element = node->as_element();
-        if (element->tag_name && strcasecmp(element->tag_name, "head") == 0) return true;
+        if (element->tag_name && str_icmp_cstr(element->tag_name, "head") == 0) return true;
     }
     return false;
 }

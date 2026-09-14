@@ -1041,14 +1041,14 @@ static void append_body_onload_source(const char* onload, StrBuf* onload_buf) {
 
 static bool is_supported_classic_script_type(const char* type_attr) {
     if (!type_attr || !type_attr[0]) return true;
-    return strcasecmp(type_attr, "text/javascript") == 0 ||
-           strcasecmp(type_attr, "application/javascript") == 0 ||
-           strcasecmp(type_attr, "text/ecmascript") == 0 ||
-           strcasecmp(type_attr, "application/ecmascript") == 0;
+    return str_icmp_cstr(type_attr, "text/javascript") == 0 ||
+           str_icmp_cstr(type_attr, "application/javascript") == 0 ||
+           str_icmp_cstr(type_attr, "text/ecmascript") == 0 ||
+           str_icmp_cstr(type_attr, "application/ecmascript") == 0;
 }
 
 static bool is_module_script_type(const char* type_attr) {
-    return type_attr && strcasecmp(type_attr, "module") == 0;
+    return type_attr && str_icmp_cstr(type_attr, "module") == 0;
 }
 
 static void emit_body_onload_source(StrBuf* script_buf, ArrayList* onload_tasks) {

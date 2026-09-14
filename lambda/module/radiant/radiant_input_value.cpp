@@ -4,6 +4,7 @@
 #include "../../input/css/css_style.hpp"
 #include "../../../lib/arraylist.h"
 #include "../../../lib/mem.h"
+#include "../../../lib/str.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -23,7 +24,7 @@ typedef struct RadiantInputState {
 } RadiantInputState;
 
 static bool riv_type_is(const char* type, const char* name) {
-    return type && strcasecmp(type, name) == 0;
+    return type && str_icmp_cstr(type, name) == 0;
 }
 
 extern "C" RadiantInputValueKind radiant_input_value_kind(const char* type) {
@@ -434,7 +435,7 @@ static double riv_step_base(const char* type, const char* min_value) {
 
 static bool riv_step_number(const char* value, double default_value, double* output) {
     if (!value || !value[0]) { *output = default_value; return true; }
-    if (strcasecmp(value, "any") == 0) return false;
+    if (str_icmp_cstr(value, "any") == 0) return false;
     return riv_parse_finite_number(value, output) && *output > 0.0;
 }
 
@@ -623,4 +624,3 @@ extern "C" void radiant_input_set_files(DomElement* element, Item files) {
         entry->files_rooted = true;
     }
 }
-

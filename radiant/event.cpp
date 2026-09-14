@@ -3613,7 +3613,7 @@ extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
     DomNode* node = static_cast<DomNode*>(form_node);
     if (!node || !node->is_element()) return false;
     DomElement* form = node->as_element();
-    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+    if (!form || !form->tag_name || str_icmp_cstr(form->tag_name, "form") != 0) {
         return false;
     }
     DomDocument* doc = g_emit_handler_ctx ? g_emit_handler_ctx->doc
@@ -6066,8 +6066,8 @@ static bool dom_js_node_is_stylesheet_related(DomNode* node) {
         elem = lam::dom_require_element(node->parent);
     }
     if (!elem || !elem->tag_name) return false;
-    return strcasecmp(elem->tag_name, "style") == 0 ||
-           strcasecmp(elem->tag_name, "link") == 0;
+    return str_icmp_cstr(elem->tag_name, "style") == 0 ||
+           str_icmp_cstr(elem->tag_name, "link") == 0;
 }
 
 typedef enum DomJsStructuralDependency {
@@ -8634,7 +8634,7 @@ static bool run_form_submit_activation(EventContext* evcon, View* target) {
             return false;
         }
         owner = dom_find_form_owner((void*)elem);
-    } else if (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
+    } else if (elem->tag_name && str_icmp_cstr(elem->tag_name, "form") == 0) {
         owner = elem;
     }
     if (!owner) return false;
@@ -11339,8 +11339,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     if (!is_draggable &&
                         !(draggable && strcmp(draggable, "false") == 0)) {
                         const char* tag = elem->tag_name;
-                        if (tag && (strcasecmp(tag, "img") == 0 ||
-                                    (strcasecmp(tag, "a") == 0 &&
+                        if (tag && (str_icmp_cstr(tag, "img") == 0 ||
+                                    (str_icmp_cstr(tag, "a") == 0 &&
                                      elem->get_attribute("href")))) {
                             is_draggable = true;
                         }

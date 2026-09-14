@@ -1,6 +1,5 @@
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 
 extern "C" {
 #include "../../../lib/log.h"

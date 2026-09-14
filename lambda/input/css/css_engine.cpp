@@ -605,7 +605,7 @@ static bool css_condition_find_operator(CssConditionSpan span, const char* op,
             if (depth > 0) depth--;
             continue;
         }
-        if (depth != 0 || strncasecmp(span.start + i, op, op_len) != 0) continue;
+        if (depth != 0 || !str_ieq(span.start + i, op_len, op, op_len)) continue;
         bool left_space = i == 0 || span.start[i - 1] == ' ' ||
             span.start[i - 1] == '\t' || span.start[i - 1] == '\n' || span.start[i - 1] == '\r';
         size_t end = i + op_len;
@@ -625,7 +625,7 @@ static bool css_evaluate_supports_span(CssEngine* engine, CssConditionSpan span)
     span = css_condition_trim(span);
     if (span.length == 0) return false;
 
-    if (span.length >= 4 && strncasecmp(span.start, "not ", 4) == 0) {
+    if (str_istarts_with(span.start, span.length, "not ", 4)) {
         CssConditionSpan operand = {span.start + 4, span.length - 4};
         return !css_evaluate_supports_span(engine, operand);
     }

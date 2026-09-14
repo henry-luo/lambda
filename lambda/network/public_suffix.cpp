@@ -3,8 +3,8 @@
 // A full PSL implementation would load from data/public_suffix_list.dat.
 
 #include "public_suffix.h"
+#include "../../lib/str.h"
 #include <string.h>
-#include <strings.h>
 
 // Common TLDs and well-known public suffixes
 // This is a subset; a full implementation would load the Mozilla PSL.
@@ -68,7 +68,7 @@ bool is_public_suffix(const char* domain) {
     if (!domain || !domain[0]) return false;
 
     for (int i = 0; PUBLIC_SUFFIXES[i]; i++) {
-        if (strcasecmp(domain, PUBLIC_SUFFIXES[i]) == 0) {
+        if (str_icmp_cstr(domain, PUBLIC_SUFFIXES[i]) == 0) {
             return true;
         }
     }

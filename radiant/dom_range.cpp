@@ -12,6 +12,7 @@
 #include "../lib/arena.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include "../lib/str.h"
 #include "../lib/strbuf.h"
 #include "../lib/tagged.hpp"
 #include "../lib/utf.h"
@@ -1770,17 +1771,17 @@ static bool node_is_in_non_selectable_subtree(const DomNode* n) {
         if (!p->is_element()) continue;
         const char* tag = p->as_element()->tag_name;
         if (!tag) continue;
-        if (strcasecmp(tag, "script") == 0 ||
-            strcasecmp(tag, "style") == 0 ||
-            strcasecmp(tag, "head") == 0 ||
-            strcasecmp(tag, "title") == 0 ||
-            strcasecmp(tag, "noscript") == 0 ||
-            strcasecmp(tag, "template") == 0 ||
-            strcasecmp(tag, "iframe") == 0 ||
-            strcasecmp(tag, "textarea") == 0 ||
-            strcasecmp(tag, "input") == 0 ||
-            strcasecmp(tag, "select") == 0 ||
-            strcasecmp(tag, "button") == 0) {
+        if (str_icmp_cstr(tag, "script") == 0 ||
+            str_icmp_cstr(tag, "style") == 0 ||
+            str_icmp_cstr(tag, "head") == 0 ||
+            str_icmp_cstr(tag, "title") == 0 ||
+            str_icmp_cstr(tag, "noscript") == 0 ||
+            str_icmp_cstr(tag, "template") == 0 ||
+            str_icmp_cstr(tag, "iframe") == 0 ||
+            str_icmp_cstr(tag, "textarea") == 0 ||
+            str_icmp_cstr(tag, "input") == 0 ||
+            str_icmp_cstr(tag, "select") == 0 ||
+            str_icmp_cstr(tag, "button") == 0) {
             return true;
         }
     }
@@ -3638,8 +3639,8 @@ static bool effective_dir_is_rtl(DomNode* n) {
         if (!cur->is_element()) continue;
         const char* dir = cur->as_element()->get_attribute("dir");
         if (!dir) continue;
-        if (strcasecmp(dir, "rtl") == 0) return true;
-        if (strcasecmp(dir, "ltr") == 0) return false;
+        if (str_icmp_cstr(dir, "rtl") == 0) return true;
+        if (str_icmp_cstr(dir, "ltr") == 0) return false;
     }
     return false;
 }

@@ -86,6 +86,9 @@ bool str_iends_with(const char* s, size_t s_len,
 bool str_istarts_with_const(const char* s, size_t s_len, const char* prefix);
 bool str_iends_with_const(const char* s, size_t s_len, const char* suffix);
 
+/** case-insensitive prefix check for NUL-terminated strings (ASCII). */
+bool str_istarts_with_cstr(const char* s, const char* prefix);
+
 /* ──────────────────────────────────────────────────────────────────────
  *  3. Search
  * ────────────────────────────────────────────────────────────────────── */

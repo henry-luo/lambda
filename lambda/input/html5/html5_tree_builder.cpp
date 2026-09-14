@@ -1854,12 +1854,12 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             Element* elem = (Element*)parser->open_elements->items[i].element;
             const char* elem_tag = ((TypeElmt*)elem->type)->name.str;
 
-            if (strcasecmp(elem_tag, tag) == 0) {
+            if (str_icmp_cstr(elem_tag, tag) == 0) {
                 // found matching element, generate implied end tags and pop
                 html5_generate_implied_end_tags_except(parser, tag);
                 while (parser->open_elements->length > 0) {
                     Element* popped = html5_pop_element(parser);
-                    if (strcasecmp(((TypeElmt*)popped->type)->name.str, tag) == 0) {
+                    if (str_icmp_cstr(((TypeElmt*)popped->type)->name.str, tag) == 0) {
                         break;
                     }
                 }

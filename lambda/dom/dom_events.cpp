@@ -27,6 +27,7 @@
 #include "../../lib/mem_grow.hpp"
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_typed.hpp"
+#include "../../lib/str.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/url.h"
 #include "../input/css/dom_node.hpp"
@@ -132,7 +133,7 @@ static void dom_run_form_submit_navigation(DomElement* form, DomElement* submitt
     if (!action || !*action) return;
 
     char* nav_url = nullptr;
-    if (strcasecmp(method, "get") == 0) {
+    if (str_icmp_cstr(method, "get") == 0) {
         Item entries = js_formdata_collect_form_entries(form, submitter);
         char* query = dom_build_submit_query(entries);
         size_t action_len = strlen(action);
@@ -241,7 +242,7 @@ extern "C" DomElement* dom_find_form_owner(void* control_ptr) {
     DomNode* p = control->parent;
     while (p && p->is_element()) {
         DomElement* elem = p->as_element();
-        if (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) return elem;
+        if (elem->tag_name && str_icmp_cstr(elem->tag_name, "form") == 0) return elem;
         p = p->parent;
     }
     return nullptr;
@@ -250,11 +251,11 @@ extern "C" DomElement* dom_find_form_owner(void* control_ptr) {
 extern "C" bool dom_is_submit_button(void* elem_ptr) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem || !elem->tag_name) return false;
-    if (strcasecmp(elem->tag_name, "input") == 0) {
+    if (str_icmp_cstr(elem->tag_name, "input") == 0) {
         const char* type = dom_input_type_lower(elem);
         return strcmp(type, "submit") == 0 || strcmp(type, "image") == 0;
     }
-    if (strcasecmp(elem->tag_name, "button") == 0) {
+    if (str_icmp_cstr(elem->tag_name, "button") == 0) {
         const char* type = dom_input_type_lower(elem);
         return strcmp(type, "text") == 0 || strcmp(type, "submit") == 0;
     }
@@ -264,10 +265,10 @@ extern "C" bool dom_is_submit_button(void* elem_ptr) {
 extern "C" bool dom_is_reset_button(void* elem_ptr) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem || !elem->tag_name) return false;
-    if (strcasecmp(elem->tag_name, "input") == 0) {
+    if (str_icmp_cstr(elem->tag_name, "input") == 0) {
         return strcmp(dom_input_type_lower(elem), "reset") == 0;
     }
-    if (strcasecmp(elem->tag_name, "button") == 0) {
+    if (str_icmp_cstr(elem->tag_name, "button") == 0) {
         return strcmp(dom_input_type_lower(elem), "reset") == 0;
     }
     return false;
@@ -315,7 +316,7 @@ static bool dom_should_validate_submit(DomElement* form, DomElement* submitter) 
 extern "C" Item dom_form_submit_bridge(Item form_item) {
     DomNode* node = (DomNode*)dom_unwrap_element(form_item);
     DomElement* form = (node && node->is_element()) ? node->as_element() : nullptr;
-    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+    if (!form || !form->tag_name || str_icmp_cstr(form->tag_name, "form") != 0) {
         return make_js_undefined();
     }
 
@@ -328,7 +329,7 @@ extern "C" Item dom_form_submit_bridge(Item form_item) {
 extern "C" Item dom_form_request_submit_bridge(Item form_item, Item submitter_item) {
     DomNode* node = (DomNode*)dom_unwrap_element(form_item);
     DomElement* form = (node && node->is_element()) ? node->as_element() : nullptr;
-    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+    if (!form || !form->tag_name || str_icmp_cstr(form->tag_name, "form") != 0) {
         return make_js_undefined();
     }
 
@@ -915,8 +916,8 @@ void dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item o
             } else {
                 DomElement* el = (DomElement*)dom_unwrap_element(elem_item);
                 if (el && el->tag_name &&
-                    (strcasecmp(el->tag_name, "html") == 0 ||
-                     strcasecmp(el->tag_name, "body") == 0)) {
+                    (str_icmp_cstr(el->tag_name, "html") == 0 ||
+                     str_icmp_cstr(el->tag_name, "body") == 0)) {
                     is_root_target = true;
                 }
             }

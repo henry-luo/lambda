@@ -69,19 +69,19 @@ static float parse_transform_angle(const char** source) {
     if (end == value) return 0.0f;
 
     const char* unit = end;
-    if (strncasecmp(unit, "rad", 3) == 0) {
+    if (str_istarts_with_cstr(unit, "rad")) {
         *source = unit + 3;
         return angle;
     }
-    if (strncasecmp(unit, "grad", 4) == 0) {
+    if (str_istarts_with_cstr(unit, "grad")) {
         *source = unit + 4;
         return angle * (float)M_PI / 200.0f;
     }
-    if (strncasecmp(unit, "turn", 4) == 0) {
+    if (str_istarts_with_cstr(unit, "turn")) {
         *source = unit + 4;
         return angle * 2.0f * (float)M_PI;
     }
-    if (strncasecmp(unit, "deg", 3) == 0) {
+    if (str_istarts_with_cstr(unit, "deg")) {
         *source = unit + 3;
         return angle * (float)M_PI / 180.0f;
     }
@@ -172,7 +172,7 @@ static bool parse_color_value(const char* val, Color* out) {
     }
 
     // transparent
-    if (strncasecmp(val, "transparent", 11) == 0) {
+    if (str_istarts_with_cstr(val, "transparent")) {
         out->r = out->g = out->b = out->a = 0;
         return true;
     }
@@ -300,7 +300,7 @@ static bool parse_aspect_ratio_value(const char* val, CssAnimatedProp* out) {
     if (!val || !out) return false;
 
     const char* p = skip_ws(val);
-    bool is_auto = strncasecmp(p, "auto", 4) == 0 &&
+    bool is_auto = str_istarts_with_cstr(p, "auto") &&
         !isalnum((unsigned char)p[4]);
     if (is_auto) p += 4;
 
@@ -389,8 +389,8 @@ bool css_animation_parse_property_value(CssPropertyCode property,
 
 static CssAnimComposite parse_animation_composition(const char* value) {
     if (!value) return CSS_ANIM_COMPOSITE_REPLACE;
-    if (strcasecmp(value, "add") == 0) return CSS_ANIM_COMPOSITE_ADD;
-    if (strcasecmp(value, "accumulate") == 0) return CSS_ANIM_COMPOSITE_ACCUMULATE;
+    if (str_icmp_cstr(value, "add") == 0) return CSS_ANIM_COMPOSITE_ADD;
+    if (str_icmp_cstr(value, "accumulate") == 0) return CSS_ANIM_COMPOSITE_ACCUMULATE;
     return CSS_ANIM_COMPOSITE_REPLACE;
 }
 
@@ -501,7 +501,7 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
 
             if (*p == ';') p++;
 
-            if (strcasecmp(prop_name, "animation-composition") == 0) {
+            if (str_icmp_cstr(prop_name, "animation-composition") == 0) {
                 stop_composite = parse_animation_composition(val_buf);
                 continue;
             }
@@ -1439,28 +1439,28 @@ bool css_animation_parse_timing_function_text(const char* value,
                                               TimingFunction* out) {
     if (!value || !out) return false;
     const char* p = skip_ws(value);
-    if (strcasecmp(p, "linear") == 0) {
+    if (str_icmp_cstr(p, "linear") == 0) {
         out->type = TIMING_LINEAR;
         return true;
     }
-    if (strcasecmp(p, "ease") == 0) {
+    if (str_icmp_cstr(p, "ease") == 0) {
         *out = TIMING_EASE;
         return true;
     }
-    if (strcasecmp(p, "ease-in") == 0) {
+    if (str_icmp_cstr(p, "ease-in") == 0) {
         *out = TIMING_EASE_IN;
         return true;
     }
-    if (strcasecmp(p, "ease-out") == 0) {
+    if (str_icmp_cstr(p, "ease-out") == 0) {
         *out = TIMING_EASE_OUT;
         return true;
     }
-    if (strcasecmp(p, "ease-in-out") == 0) {
+    if (str_icmp_cstr(p, "ease-in-out") == 0) {
         *out = TIMING_EASE_IN_OUT;
         return true;
     }
 
-    if (strncasecmp(p, "steps(", 6) == 0) {
+    if (str_istarts_with_cstr(p, "steps(")) {
         p += 6;
         char* end = nullptr;
         long count = strtol(p, &end, 10);
@@ -1471,13 +1471,13 @@ bool css_animation_parse_timing_function_text(const char* value,
         out->type = TIMING_STEPS;
         out->steps.count = (int)count;
         out->steps.position = STEP_JUMP_END;
-        if (strncasecmp(p, "start", 5) == 0) {
+        if (str_istarts_with_cstr(p, "start")) {
             out->steps.position = STEP_JUMP_START;
         }
         return true;
     }
 
-    if (strncasecmp(p, "cubic-bezier(", 13) == 0) {
+    if (str_istarts_with_cstr(p, "cubic-bezier(")) {
         p += 13;
         float values[4];
         for (int i = 0; i < 4; i++) {

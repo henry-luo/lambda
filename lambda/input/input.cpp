@@ -1268,7 +1268,7 @@ static Input* input_from_local_path(const char* pathname, Url* abs_url,
         is_binary_pdf = true;
     } else if (pathname) {
         size_t plen = strlen(pathname);
-        if (plen >= 4 && strcasecmp(pathname + plen - 4, ".pdf") == 0) {
+        if (plen >= 4 && str_icmp_cstr(pathname + plen - 4, ".pdf") == 0) {
             is_binary_pdf = true;
         }
     }

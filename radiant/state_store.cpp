@@ -6,6 +6,7 @@
 #include "../lib/memtrack.h"
 #include "../lib/hashmap_typed.hpp"
 #include "../lib/escape.h"
+#include "../lib/str.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "render.hpp"
@@ -1339,15 +1340,15 @@ extern "C" bool state_store_modify_selection(DocState* state,
 extern "C" void state_store_set_editing_behavior(DocState* state,
                                                   const char* behavior) {
     if (!state) return;
-    if (!behavior || behavior[0] == '\0' || strcasecmp(behavior, "mac") == 0) {
+    if (!behavior || behavior[0] == '\0' || str_icmp_cstr(behavior, "mac") == 0) {
         state->editing_behavior = EDITING_BEHAVIOR_MAC;
-    } else if (strcasecmp(behavior, "win") == 0 ||
-            strcasecmp(behavior, "windows") == 0) {
+    } else if (str_icmp_cstr(behavior, "win") == 0 ||
+            str_icmp_cstr(behavior, "windows") == 0) {
         state->editing_behavior = EDITING_BEHAVIOR_WIN;
-    } else if (strcasecmp(behavior, "unix") == 0 ||
-            strcasecmp(behavior, "linux") == 0) {
+    } else if (str_icmp_cstr(behavior, "unix") == 0 ||
+            str_icmp_cstr(behavior, "linux") == 0) {
         state->editing_behavior = EDITING_BEHAVIOR_UNIX;
-    } else if (strcasecmp(behavior, "android") == 0) {
+    } else if (str_icmp_cstr(behavior, "android") == 0) {
         state->editing_behavior = EDITING_BEHAVIOR_ANDROID;
     } else {
         state->editing_behavior = EDITING_BEHAVIOR_MAC;
@@ -3348,13 +3349,13 @@ static bool view_element_has_attr(View* view, const char* attr_name) {
 static bool form_element_supports_disabled_state(DomElement* element) {
     if (!element || !element->tag_name) return false;
     const char* tag = element->tag_name;
-    return strcasecmp(tag, "button") == 0 ||
-        strcasecmp(tag, "fieldset") == 0 ||
-        strcasecmp(tag, "input") == 0 ||
-        strcasecmp(tag, "optgroup") == 0 ||
-        strcasecmp(tag, "option") == 0 ||
-        strcasecmp(tag, "select") == 0 ||
-        strcasecmp(tag, "textarea") == 0;
+    return str_icmp_cstr(tag, "button") == 0 ||
+        str_icmp_cstr(tag, "fieldset") == 0 ||
+        str_icmp_cstr(tag, "input") == 0 ||
+        str_icmp_cstr(tag, "optgroup") == 0 ||
+        str_icmp_cstr(tag, "option") == 0 ||
+        str_icmp_cstr(tag, "select") == 0 ||
+        str_icmp_cstr(tag, "textarea") == 0;
 }
 
 bool form_control_supports_disabled_state(View* view) {
@@ -3365,11 +3366,11 @@ bool form_control_supports_disabled_state(View* view) {
 static bool form_control_is_disabled_by_fieldset(DomElement* element) {
     if (!element || !element->tag_name) return false;
     const char* tag = element->tag_name;
-    if (strcasecmp(tag, "button") != 0 &&
-        strcasecmp(tag, "fieldset") != 0 &&
-        strcasecmp(tag, "input") != 0 &&
-        strcasecmp(tag, "select") != 0 &&
-        strcasecmp(tag, "textarea") != 0) {
+    if (str_icmp_cstr(tag, "button") != 0 &&
+        str_icmp_cstr(tag, "fieldset") != 0 &&
+        str_icmp_cstr(tag, "input") != 0 &&
+        str_icmp_cstr(tag, "select") != 0 &&
+        str_icmp_cstr(tag, "textarea") != 0) {
         return false;
     }
 
@@ -3379,7 +3380,7 @@ static bool form_control_is_disabled_by_fieldset(DomElement* element) {
         if (!parent->is_element()) continue;
         DomElement* fieldset = parent->as_element();
         if (!fieldset || !fieldset->tag_name ||
-            strcasecmp(fieldset->tag_name, "fieldset") != 0 ||
+            str_icmp_cstr(fieldset->tag_name, "fieldset") != 0 ||
             !fieldset->has_attribute("disabled")) {
             continue;
         }
@@ -3391,7 +3392,7 @@ static bool form_control_is_disabled_by_fieldset(DomElement* element) {
         if (first_element && first_element->is_element()) {
             DomElement* first_legend = first_element->as_element();
             if (first_legend && first_legend->tag_name &&
-                strcasecmp(first_legend->tag_name, "legend") == 0 &&
+                str_icmp_cstr(first_legend->tag_name, "legend") == 0 &&
                 child_on_path == first_element) {
                 continue;
             }

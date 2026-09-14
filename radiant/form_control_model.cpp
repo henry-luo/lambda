@@ -1,5 +1,7 @@
 #include "view.hpp"
 
+#include "../lib/str.h"
+
 #include <string.h>
 
 // Static input metadata is the single classification source for HTML input
@@ -57,7 +59,7 @@ const FormInputDescriptor* form_input_descriptor(const char* type) {
     if (!type || !*type) return &kInputDescriptors[0];
     size_t count = sizeof(kInputDescriptors) / sizeof(kInputDescriptors[0]);
     for (size_t i = 0; i < count; i++) {
-        if (strcasecmp(type, kInputDescriptors[i].keyword) == 0) {
+        if (str_icmp_cstr(type, kInputDescriptors[i].keyword) == 0) {
             return &kInputDescriptors[i];
         }
     }

@@ -31,6 +31,7 @@
 #include "../../radiant/event.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../../lib/str.h"
 #include <cstring>
 #include <cctype>
 #include <cinttypes>
@@ -137,9 +138,9 @@ static const char* fd_compute_dirname_direction(DomElement* elem, const char* va
         DomElement* cur_elem = (DomElement*)cur;
         const char* dir = cur_elem->get_attribute("dir");
         if (!dir || !*dir) continue;
-        if (strcasecmp(dir, "rtl") == 0) return "rtl";
-        if (strcasecmp(dir, "ltr") == 0) return "ltr";
-        if (strcasecmp(dir, "auto") == 0) return fd_direction_from_auto_value(value_hint);
+        if (str_icmp_cstr(dir, "rtl") == 0) return "rtl";
+        if (str_icmp_cstr(dir, "ltr") == 0) return "ltr";
+        if (str_icmp_cstr(dir, "auto") == 0) return fd_direction_from_auto_value(value_hint);
     }
     return "ltr";
 }
@@ -558,7 +559,7 @@ static void fd_append_select_entries(Item entries, DomElement* select_elem) {
         // attribute is only the *default* selection, so a user-chosen option
         // submitted the page's initial one (F21). dom_option_is_selected falls
         // back to the attribute when nothing has selected anything yet.
-        if (ce && ce->tag_name && strcasecmp(ce->tag_name, "option") == 0 &&
+        if (ce && ce->tag_name && str_icmp_cstr(ce->tag_name, "option") == 0 &&
             dom_option_is_selected(ce) &&
             !ce->has_attribute("disabled")) {
             // Spec: option value = value attr if present, else text content
@@ -579,12 +580,12 @@ static void fd_append_select_entries(Item entries, DomElement* select_elem) {
             if (!is_multiple) break; // single select: first selected wins
         }
         // optgroup children
-        if (ce && ce->tag_name && strcasecmp(ce->tag_name, "optgroup") == 0) {
+        if (ce && ce->tag_name && str_icmp_cstr(ce->tag_name, "optgroup") == 0) {
             bool og_disabled = ce->has_attribute("disabled");
             DomNode* ogchild = ce->first_child;
             while (ogchild) {
                 DomElement* oce = ogchild->is_element() ? (DomElement*)ogchild : nullptr;
-                if (oce && oce->tag_name && strcasecmp(oce->tag_name, "option") == 0 &&
+                if (oce && oce->tag_name && str_icmp_cstr(oce->tag_name, "option") == 0 &&
                     dom_option_is_selected(oce) &&
                     !oce->has_attribute("disabled") && !og_disabled) {
                     const char* opt_val = oce->get_attribute("value");
@@ -620,17 +621,17 @@ static void fd_walk_form_controls(Item entries, DomNode* node, DomElement* form)
         }
         DomElement* elem = (DomElement*)node;
         const char* tag = elem->tag_name ? elem->tag_name : "";
-        bool is_form_control = strcasecmp(tag, "input") == 0 ||
-            strcasecmp(tag, "textarea") == 0 ||
-            strcasecmp(tag, "select") == 0 ||
-            strcasecmp(tag, "button") == 0;
+        bool is_form_control = str_icmp_cstr(tag, "input") == 0 ||
+            str_icmp_cstr(tag, "textarea") == 0 ||
+            str_icmp_cstr(tag, "select") == 0 ||
+            str_icmp_cstr(tag, "button") == 0;
         if (is_form_control && form &&
             dom_find_form_owner((void*)elem) != form) {
             node = node->next_sibling;
             continue;
         }
 
-        if (strcasecmp(tag, "input") == 0) {
+        if (str_icmp_cstr(tag, "input") == 0) {
             const char* name = elem->get_attribute("name");
             if (name && *name && !dom_is_disabled(elem)) {                const char* itype = dom_input_type_lower(elem);
                 // excluded from form data: type=submit, reset, button, image
@@ -702,7 +703,7 @@ static void fd_walk_form_controls(Item entries, DomNode* node, DomElement* form)
                     }
                 }
             }
-        } else if (strcasecmp(tag, "textarea") == 0) {
+        } else if (str_icmp_cstr(tag, "textarea") == 0) {
             const char* name = elem->get_attribute("name");
             if (name && *name && !dom_is_disabled(elem)) {
                 tc_ensure_init(elem);
@@ -724,13 +725,13 @@ static void fd_walk_form_controls(Item entries, DomNode* node, DomElement* form)
                     js_array_push(entries, dir_pair);
                 }
             }
-        } else if (strcasecmp(tag, "select") == 0) {
+        } else if (str_icmp_cstr(tag, "select") == 0) {
             if (!dom_is_disabled(elem)) {
                 fd_append_select_entries(entries, elem);
             }
-        } else if (strcasecmp(tag, "button") == 0) {
+        } else if (str_icmp_cstr(tag, "button") == 0) {
             // buttons are excluded from form data by default (only included on submit)
-        } else if (strcasecmp(tag, "fieldset") == 0) {
+        } else if (str_icmp_cstr(tag, "fieldset") == 0) {
             // recurse into fieldset unless it's disabled (disabled fieldset disables children)
             if (!elem->has_attribute("disabled")) {
                 fd_walk_form_controls(entries, elem->first_child, form);
@@ -739,11 +740,11 @@ static void fd_walk_form_controls(Item entries, DomNode* node, DomElement* form)
 
         // Recurse into non-replaced children (except fieldset which is handled above,
         // and datalist which is not form-associated per spec)
-        if (strcasecmp(tag, "fieldset") != 0 &&
-            strcasecmp(tag, "input") != 0 &&
-            strcasecmp(tag, "select") != 0 &&
-            strcasecmp(tag, "textarea") != 0 &&
-            strcasecmp(tag, "datalist") != 0) {
+        if (str_icmp_cstr(tag, "fieldset") != 0 &&
+            str_icmp_cstr(tag, "input") != 0 &&
+            str_icmp_cstr(tag, "select") != 0 &&
+            str_icmp_cstr(tag, "textarea") != 0 &&
+            str_icmp_cstr(tag, "datalist") != 0) {
             fd_walk_form_controls(entries, elem->first_child, form);
         }
 
@@ -849,7 +850,7 @@ static void fd_append_submitter_entry(Item entries, DomElement* elem) {
     const char* name = elem->get_attribute("name");
     if (!name || !*name) return;
 
-    if (strcasecmp(tag, "input") == 0) {
+    if (str_icmp_cstr(tag, "input") == 0) {
         const char* itype = dom_input_type_lower(elem);
         if (strcmp(itype, "submit") != 0) return;
         const char* val = elem->get_attribute("value");
@@ -869,9 +870,9 @@ static void fd_append_submitter_entry(Item entries, DomElement* elem) {
         return;
     }
 
-    if (strcasecmp(tag, "button") == 0) {
+    if (str_icmp_cstr(tag, "button") == 0) {
         const char* type = elem->get_attribute("type");
-        if (type && *type && strcasecmp(type, "submit") != 0) return;
+        if (type && *type && str_icmp_cstr(type, "submit") != 0) return;
         const char* val = elem->get_attribute("value");
         if (!val) val = "";
         Item pair = js_array_new(0);
@@ -896,7 +897,7 @@ static Item js_formdata_construct(Item first, Item submitter) {
         DomNode* node = (DomNode*)node_raw;
         if (node && node->is_element()) {
             DomElement* elem = (DomElement*)node;
-            if (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
+            if (elem->tag_name && str_icmp_cstr(elem->tag_name, "form") == 0) {
                 is_form_elem = true;
             }
         }

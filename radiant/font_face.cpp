@@ -12,18 +12,17 @@ extern "C" {
 }
 #include "../lib/mem_grow.hpp"
 #include <string.h>
-#include <strings.h>  // for strcasecmp
 #include <stdlib.h>
 #include "../lib/file.h"
 
 bool radiant_is_supported_web_font_source(const char* url, const char* format) {
     if (format && *format) {
-        if (strcasecmp(format, "woff2") == 0 ||
-            strcasecmp(format, "woff") == 0 ||
-            strcasecmp(format, "truetype") == 0 ||
-            strcasecmp(format, "opentype") == 0 ||
-            strcasecmp(format, "ttf") == 0 ||
-            strcasecmp(format, "otf") == 0) {
+        if (str_icmp_cstr(format, "woff2") == 0 ||
+            str_icmp_cstr(format, "woff") == 0 ||
+            str_icmp_cstr(format, "truetype") == 0 ||
+            str_icmp_cstr(format, "opentype") == 0 ||
+            str_icmp_cstr(format, "ttf") == 0 ||
+            str_icmp_cstr(format, "otf") == 0) {
             return true;
         }
         return false;

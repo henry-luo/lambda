@@ -24,7 +24,6 @@
 #include <stddef.h>
 #include <math.h>
 #include <string.h>
-#include <strings.h>
 
 // Glyph-precise X resolver injected by event.cpp at static-init time. Kept
 // as a function pointer so this TU stays free of GLFW/event.hpp transitively
@@ -615,7 +614,7 @@ static void find_vertical_writing_boundary_hit(View* node, float vx, float vy,
 static bool is_contenteditable_false_island(DomElement* elem) {
     if (!elem || !elem->has_attribute("contenteditable")) return false;
     const char* ce = elem->get_attribute("contenteditable");
-    return ce && strcasecmp(ce, "false") == 0;
+    return ce && str_icmp_cstr(ce, "false") == 0;
 }
 
 static bool boundary_before_or_after_node(DomNode* node, bool after,
