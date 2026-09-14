@@ -17,6 +17,7 @@
 #include "../lib/font/font.h"
 #include "../lib/font/font_internal.h"
 #include "../lib/mempool.h"
+#include "../lib/mem_grow.hpp"
 #include "../lib/str.h"
 #include "../lib/file.h"
 #include "../lib/escape.h"
@@ -531,23 +532,15 @@ static void svg_add_style_rule(SvgInlineRenderContext* ctx, const char* selector
     if (!ctx || !selector_start || !name_start || !value_start) return;
     if (ctx->style_rule_count >= 256) return;
     if (ctx->style_rule_count >= ctx->style_rule_capacity) {
-        if (!ctx->resource_scratch) return;
-        int next_capacity = ctx->style_rule_capacity > 0
-            ? ctx->style_rule_capacity * 2 : 64;
-        while (next_capacity <= ctx->style_rule_count) next_capacity *= 2;
-        SvgStyleRule* grown = (SvgStyleRule*)scratch_calloc(
-            ctx->resource_scratch, (size_t)next_capacity * sizeof(SvgStyleRule));
-        if (!grown) {
+        SvgStyleRule* rules = (SvgStyleRule*)ctx->style_rules;
+        if (!lam::scratch_grow_array(ctx->resource_scratch, &rules,
+                                     &ctx->style_rule_capacity, ctx->style_rule_count,
+                                     ctx->style_rule_count + 1, 64, 256)) {
             log_error("[SVG] failed to grow inline style rule scratch table to %d entries",
                       ctx->style_rule_count + 1);
             return;
         }
-        if (ctx->style_rules && ctx->style_rule_count > 0) {
-            memcpy(grown, ctx->style_rules,
-                   (size_t)ctx->style_rule_count * sizeof(SvgStyleRule));
-        }
-        ctx->style_rules = grown;
-        ctx->style_rule_capacity = next_capacity;
+        ctx->style_rules = rules;
     }
     SvgStyleRule* rules = (SvgStyleRule*)ctx->style_rules;
     SvgStyleRule* rule = &rules[ctx->style_rule_count];
@@ -1129,34 +1122,16 @@ static Element* lookup_elem_def(SvgDefTable* table, const char* id) {
 
 static bool grow_svg_grad_defs(SvgInlineRenderContext* ctx, SvgDefTable* table) {
     if (!ctx || !table || table->grad_capacity >= SVG_MAX_GRAD_DEFS) return false;
-    int next_capacity = table->grad_capacity > 0
-        ? table->grad_capacity * 2 : SVG_DEF_INITIAL_CAPACITY;
-    if (next_capacity > SVG_MAX_GRAD_DEFS) next_capacity = SVG_MAX_GRAD_DEFS;
-    SvgGradDef* defs = (SvgGradDef*)scratch_calloc(
-        ctx->resource_scratch, (size_t)next_capacity * sizeof(SvgGradDef));
-    if (!defs) return false;
-    if (table->grads && table->grad_count > 0) {
-        memcpy(defs, table->grads, (size_t)table->grad_count * sizeof(SvgGradDef));
-    }
-    table->grads = defs;
-    table->grad_capacity = next_capacity;
-    return true;
+    return lam::scratch_grow_array(ctx->resource_scratch, &table->grads,
+        &table->grad_capacity, table->grad_count, table->grad_count + 1,
+        SVG_DEF_INITIAL_CAPACITY, SVG_MAX_GRAD_DEFS);
 }
 
 static bool grow_svg_elem_defs(SvgInlineRenderContext* ctx, SvgDefTable* table) {
     if (!ctx || !table || table->elem_capacity >= SVG_MAX_ELEM_DEFS) return false;
-    int next_capacity = table->elem_capacity > 0
-        ? table->elem_capacity * 2 : SVG_DEF_INITIAL_CAPACITY;
-    if (next_capacity > SVG_MAX_ELEM_DEFS) next_capacity = SVG_MAX_ELEM_DEFS;
-    SvgElemDef* defs = (SvgElemDef*)scratch_calloc(
-        ctx->resource_scratch, (size_t)next_capacity * sizeof(SvgElemDef));
-    if (!defs) return false;
-    if (table->elems && table->elem_count > 0) {
-        memcpy(defs, table->elems, (size_t)table->elem_count * sizeof(SvgElemDef));
-    }
-    table->elems = defs;
-    table->elem_capacity = next_capacity;
-    return true;
+    return lam::scratch_grow_array(ctx->resource_scratch, &table->elems,
+        &table->elem_capacity, table->elem_count, table->elem_count + 1,
+        SVG_DEF_INITIAL_CAPACITY, SVG_MAX_ELEM_DEFS);
 }
 
 static SvgDefTable* ensure_svg_def_table(SvgInlineRenderContext* ctx) {

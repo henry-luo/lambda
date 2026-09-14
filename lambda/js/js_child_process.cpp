@@ -19,6 +19,7 @@
 #include "../../lib/uv_loop.h"
 #include "../../lib/windows_compat.h"
 #include "../../lib/byte_builder.h"
+#include "../../lib/line_framer.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -714,9 +715,7 @@ typedef struct JsSpawnProcess {
     Item*        unref_env;
     Item*        abort_env;
     RuntimeCallbackSlots ipc_write_callbacks;
-    char*        ipc_buf;
-    size_t       ipc_len;
-    size_t       ipc_cap;
+    LineFramer   ipc_lines;
     ArrayList*   pending_sent_streams;
     struct SpawnTransferredConnection* transferred_connections_head;
     struct SpawnTransferredConnection* transferred_connections_tail;
@@ -1131,7 +1130,7 @@ static void spawn_release_process(JsSpawnProcess* sp) {
     }
     runtime_value_slots_destroy(&sp->values);
     runtime_callback_slots_destroy(&sp->ipc_write_callbacks);
-    if (sp->ipc_buf) mem_free(sp->ipc_buf);
+    line_framer_destroy(&sp->ipc_lines);
     mem_free(sp);
 }
 
@@ -1504,43 +1503,28 @@ static void spawn_ipc_handle_line(JsSpawnProcess* sp, const char* chars, int len
 }
 
 static void spawn_ipc_consume_lines(JsSpawnProcess* sp) {
-    if (!sp || !sp->ipc_buf || sp->ipc_len == 0) return;
-    size_t start = 0;
-    for (size_t i = 0; i < sp->ipc_len; i++) {
-        if (sp->ipc_buf[i] != '\n') continue;
-        size_t line_len = i - start;
-        if (line_len > 0 && sp->ipc_buf[start + line_len - 1] == '\r') line_len--;
-        spawn_ipc_handle_line(sp, sp->ipc_buf + start, (int)line_len);
-        start = i + 1;
-    }
-    if (start > 0) {
-        size_t remaining = sp->ipc_len - start;
-        if (remaining > 0) memmove(sp->ipc_buf, sp->ipc_buf + start, remaining);
-        sp->ipc_len = remaining;
+    if (!sp) return;
+    while (true) {
+        size_t frame_length = 0;
+        const char* line = line_framer_peek(&sp->ipc_lines, &frame_length);
+        if (!line) break;
+        size_t line_length = frame_length;
+        if (line_length > 0 && line[line_length - 1] == '\r') line_length--;
+        spawn_ipc_handle_line(sp, line, (int)line_length);
+        if (!line_framer_consume(&sp->ipc_lines, frame_length + 1)) break;
     }
 }
 
 static void spawn_ipc_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
     JsSpawnProcess* sp = (JsSpawnProcess*)stream->data;
     if (nread > 0 && sp) {
-        size_t needed = sp->ipc_len + (size_t)nread + 1;
-        if (needed > sp->ipc_cap) {
-            size_t new_cap = sp->ipc_cap ? sp->ipc_cap * 2 : 1024;
-            while (new_cap < needed) new_cap *= 2;
-            char* nb = (char*)mem_realloc(sp->ipc_buf, new_cap, MEM_CAT_JS_RUNTIME);
-            if (nb) {
-                sp->ipc_buf = nb;
-                sp->ipc_cap = new_cap;
-            }
-        }
-        if (sp->ipc_buf && sp->ipc_cap >= needed) {
-            memcpy(sp->ipc_buf + sp->ipc_len, buf->base, (size_t)nread);
-            sp->ipc_len += (size_t)nread;
-            sp->ipc_buf[sp->ipc_len] = '\0';
+        if (line_framer_append(&sp->ipc_lines, buf->base, (size_t)nread)) {
             spawn_ipc_consume_lines(sp);
             // A child IPC reply means delayed descriptor receivers have accepted
             // pending keepOpen duplicates; closing earlier can make writes EBADF.
             spawn_close_pending_sent_stream_wrappers(sp);
+        } else {
+            log_error("child_process: failed to append IPC message bytes");
         }
     }
     if (buf->base) mem_free(buf->base);
@@ -2556,6 +2540,9 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         // ipc stdio pipes need descriptor passing enabled for sendHandle.
         uv_pipe_init(loop, &sp->ipc_pipe, 1);
         sp->ipc_pipe.data = sp;
+        if (!line_framer_init(&sp->ipc_lines, 1024, MEM_CAT_JS_RUNTIME)) {
+            log_error("child_process: failed to allocate IPC message framer");
+        }
         sp->ipc_pipe_active = true;
         sp->handles_expected++;
     }

@@ -14,6 +14,9 @@ typedef struct IntrusiveQueue {
     size_t count;
 } IntrusiveQueue;
 
+#define INTRUSIVE_QUEUE_CONTAINER_OF(node, type, member) \
+    ((type*)((char*)(node) - offsetof(type, member)))
+
 static inline void intrusive_queue_init(IntrusiveQueue* queue) {
     if (queue) *queue = (IntrusiveQueue){0};
 }
@@ -35,6 +38,10 @@ static inline IntrusiveQueueNode* intrusive_queue_pop(IntrusiveQueue* queue) {
     node->next = NULL;
     queue->count--;
     return node;
+}
+
+static inline IntrusiveQueueNode* intrusive_queue_last(const IntrusiveQueue* queue) {
+    return queue ? queue->last : NULL;
 }
 
 #endif

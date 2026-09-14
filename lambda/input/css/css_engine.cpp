@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include "../../../lib/mem_grow.hpp"
 #include "../../../lib/str.h"
 
 // Enhanced CSS Engine creation
@@ -241,14 +242,9 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
             if (rule) {
                 // Add rule to stylesheet
                 if (stylesheet->rule_count >= stylesheet->rule_capacity) {
-                    // Expand capacity
-                    stylesheet->rule_capacity *= 2;
-                    CssRule** new_rules = (CssRule**)pool_alloc(engine->pool,
-                                                                             stylesheet->rule_capacity * sizeof(CssRule*));
-                    if (new_rules) {
-                        memcpy(new_rules, stylesheet->rules, stylesheet->rule_count * sizeof(CssRule*));
-                        stylesheet->rules = new_rules;
-                    }
+                    (void)lam::pool_copy_grow_array(engine->pool, &stylesheet->rules,
+                        &stylesheet->rule_capacity, stylesheet->rule_count,
+                        stylesheet->rule_count + 1, 64, false);
                 }
 
                 if (stylesheet->rule_count < stylesheet->rule_capacity) {

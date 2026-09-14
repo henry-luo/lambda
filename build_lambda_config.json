@@ -2290,6 +2290,7 @@
             ],
             "additional_sources": [
               "lib/byte_builder.c",
+              "lib/line_framer.c",
               "lib/byte_storage.c",
               "lib/mem_context.c",
               "lib/memtrack.c",

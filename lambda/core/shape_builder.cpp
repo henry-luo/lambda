@@ -2,6 +2,7 @@
 #include "../lambda-data.hpp"  // For full ShapeEntry definition
 #include "../../lib/log.h"
 #include "../../lib/arena.h"
+#include "../../lib/mem_grow.hpp"
 #include <string.h>
 #include <assert.h>
 
@@ -36,19 +37,12 @@ static bool shape_builder_reserve(ShapeBuilder* builder, size_t needed) {
         log_error("shape_builder_reserve: builder has no pool arena");
         return false;
     }
-    size_t new_cap = builder->capacity ? builder->capacity * 2 : 8;
-    while (new_cap < needed) new_cap *= 2;
-    ShapeFieldDraft* grown = (ShapeFieldDraft*)arena_alloc(builder->pool->arena,
-        new_cap * sizeof(ShapeFieldDraft));
-    if (!grown) {
+    if (!lam::arena_grow_array(builder->pool->arena, &builder->fields,
+                                &builder->capacity, builder->field_count,
+                                needed, 8)) {
         log_error("shape_builder_reserve: draft allocation failed at %zu fields", needed);
         return false;
     }
-    if (builder->field_count) {
-        memcpy(grown, builder->fields, builder->field_count * sizeof(ShapeFieldDraft));
-    }
-    builder->fields = grown;
-    builder->capacity = new_cap;
     return true;
 }
 
