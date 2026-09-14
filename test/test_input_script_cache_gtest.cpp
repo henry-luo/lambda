@@ -1,0 +1,595 @@
+#include <gtest/gtest.h>
+#include <string.h>
+#include <pthread.h>
+#include <unistd.h>
+
+#include "../lib/file.h"
+#include "../lambda/input/input-script-cache.h"
+#include "../lib/mem.h"
+#include "../lib/shell.h"
+
+static int g_cache_test_destroyed_artifacts = 0;
+
+typedef struct CacheSingleFlightThread {
+    InputScriptCache* cache;
+    InputScriptRequest request;
+    InputScriptBuildClaim claim;
+    bool artifact_ready;
+    pthread_mutex_t mutex;
+    pthread_cond_t entered_cond;
+    bool entered;
+} CacheSingleFlightThread;
+
+static void* cache_single_flight_waiter(void* value) {
+    CacheSingleFlightThread* thread = (CacheSingleFlightThread*)value;
+    InputCacheScope* scope = input_script_cache_open_scope(thread->cache);
+    InputScriptLease* lease = scope
+        ? input_script_cache_acquire(scope, &thread->request) : nullptr;
+    pthread_mutex_lock(&thread->mutex);
+    thread->entered = true;
+    pthread_cond_signal(&thread->entered_cond);
+    pthread_mutex_unlock(&thread->mutex);
+    if (lease) {
+        thread->claim = input_script_cache_claim_build(lease,
+            INPUT_SCRIPT_BUILD_AST);
+        void* artifact = nullptr;
+        thread->artifact_ready = thread->claim == INPUT_SCRIPT_BUILD_READY &&
+            input_script_cache_get_ast(lease, &artifact) && artifact != nullptr;
+    }
+    if (scope) input_script_cache_close_scope(scope);
+    return nullptr;
+}
+
+static void cache_test_destroy_artifact(void* artifact) {
+    (void)artifact;
+    g_cache_test_destroyed_artifacts++;
+}
+
+TEST(InputScriptCacheTest, ReusesSourceAndKeepsArtifactsByCompilerKey) {
+    const char* previous_value = shell_getenv("LAMBDA_SCRIPT_CACHE");
+    char* previous_policy = previous_value
+        ? mem_strdup(previous_value, MEM_CAT_CACHE_OTHER) : nullptr;
+    ASSERT_TRUE(shell_setenv("LAMBDA_SCRIPT_CACHE", "all"));
+
+    InputScriptCache* cache = input_script_cache_create();
+    ASSERT_NE(cache, nullptr);
+    ASSERT_EQ(input_script_cache_policy(cache), INPUT_SCRIPT_CACHE_ALL);
+
+    InputScriptRequest request = {};
+    request.identity = "./temp/script-cache-test.ls";
+    request.source = "1 + 2";
+    request.source_length = 5;
+    request.source_kind = INPUT_SCRIPT_SOURCE_FILE;
+    request.language = "lambda";
+    request.profile = "lambda";
+    request.parser_abi = "parser-v1";
+    request.parse_flags = "default";
+    request.resolution_base = "./temp/";
+    request.backend = "mir-direct";
+    request.execution_mode = "script";
+    request.ast_abi = 7;
+    request.compiler_abi = 11;
+    request.optimize_level = 2;
+
+    InputCacheScope* first_scope = input_script_cache_open_scope(cache);
+    ASSERT_NE(first_scope, nullptr);
+    InputScriptLease* first = input_script_cache_acquire(first_scope, &request);
+    ASSERT_NE(first, nullptr);
+    ScriptInput* first_input = input_script_lease_input(first);
+    ASSERT_NE(first_input, nullptr);
+    EXPECT_STREQ(input_script_source(first_input), "1 + 2");
+    EXPECT_EQ(input_script_source_length(first_input), 5u);
+    uint32_t unit_id = input_script_compilation_unit_id(first_input);
+    EXPECT_NE(unit_id, 0u);
+
+    int ast_value = 1;
+    int mir_value = 2;
+    InputScriptArtifactOps ops = {};
+    void* artifact = nullptr;
+    EXPECT_FALSE(input_script_cache_get_ast(first, &artifact));
+    EXPECT_TRUE(input_script_cache_publish_ast(first, &ast_value, &ops));
+    EXPECT_TRUE(input_script_cache_get_ast(first, &artifact));
+    EXPECT_EQ(artifact, &ast_value);
+    EXPECT_FALSE(input_script_cache_get_mir(first, &artifact));
+    EXPECT_TRUE(input_script_cache_publish_mir(first, &mir_value, &ops));
+    EXPECT_TRUE(input_script_cache_get_mir(first, &artifact));
+    EXPECT_EQ(artifact, &mir_value);
+    input_script_cache_close_scope(first_scope);
+
+    InputCacheScope* second_scope = input_script_cache_open_scope(cache);
+    InputScriptLease* second = input_script_cache_acquire(second_scope, &request);
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(input_script_compilation_unit_id(input_script_lease_input(second)), unit_id);
+    EXPECT_TRUE(input_script_cache_get_ast(second, &artifact));
+    EXPECT_TRUE(input_script_cache_get_mir(second, &artifact));
+    input_script_cache_close_scope(second_scope);
+
+    request.compiler_abi = 12;
+    InputCacheScope* third_scope = input_script_cache_open_scope(cache);
+    InputScriptLease* third = input_script_cache_acquire(third_scope, &request);
+    ASSERT_NE(third, nullptr);
+    EXPECT_EQ(input_script_compilation_unit_id(input_script_lease_input(third)), unit_id);
+    EXPECT_TRUE(input_script_cache_get_ast(third, &artifact));
+    EXPECT_FALSE(input_script_cache_get_mir(third, &artifact));
+    input_script_cache_close_scope(third_scope);
+
+    // A failed artifact-instantiation certificate can retire this logical
+    // source generation without inventing a changed byte snapshot.
+    EXPECT_EQ(input_script_cache_invalidate_unit(cache, unit_id), 1u);
+
+    InputScriptCacheStats stats = {};
+    input_script_cache_get_stats(cache, &stats);
+    EXPECT_EQ(stats.retained_entries, 0u);
+    EXPECT_EQ(stats.source_misses, 1u);
+    EXPECT_EQ(stats.source_hits, 2u);
+    EXPECT_EQ(stats.ast_builds, 1u);
+    EXPECT_EQ(stats.mir_builds, 1u);
+    EXPECT_EQ(stats.retained_source_bytes, 0u);
+    input_script_cache_destroy(cache);
+
+    if (previous_policy) {
+        shell_setenv("LAMBDA_SCRIPT_CACHE", previous_policy);
+        mem_free(previous_policy);
+    }
+    else shell_unsetenv("LAMBDA_SCRIPT_CACHE");
+}
+
+TEST(InputScriptCacheTest, SingleFlightsArtifactBuildAndFailsClosedWhenPoisoned) {
+    const char* previous_value = shell_getenv("LAMBDA_SCRIPT_CACHE");
+    char* previous_policy = previous_value
+        ? mem_strdup(previous_value, MEM_CAT_CACHE_OTHER) : nullptr;
+    ASSERT_TRUE(shell_setenv("LAMBDA_SCRIPT_CACHE", "all"));
+
+    InputScriptCache* cache = input_script_cache_create();
+    ASSERT_NE(cache, nullptr);
+    InputScriptRequest request = {};
+    request.identity = "./temp/script-cache-single-flight.ls";
+    request.source = "42";
+    request.source_length = 2;
+    request.source_kind = INPUT_SCRIPT_SOURCE_FILE;
+    request.language = "lambda";
+    request.profile = "single-flight";
+    request.parser_abi = "parser-v1";
+    request.parse_flags = "default";
+    request.resolution_base = "./temp/";
+    request.backend = "mir-direct";
+    request.execution_mode = "script";
+    request.ast_abi = 1;
+
+    InputCacheScope* owner_scope = input_script_cache_open_scope(cache);
+    ASSERT_NE(owner_scope, nullptr);
+    InputScriptLease* owner = input_script_cache_acquire(owner_scope, &request);
+    ASSERT_NE(owner, nullptr);
+    ASSERT_EQ(input_script_cache_claim_build(owner, INPUT_SCRIPT_BUILD_AST),
+        INPUT_SCRIPT_BUILD_OWNER);
+
+    CacheSingleFlightThread waiter = {};
+    waiter.cache = cache;
+    waiter.request = request;
+    ASSERT_EQ(pthread_mutex_init(&waiter.mutex, nullptr), 0);
+    ASSERT_EQ(pthread_cond_init(&waiter.entered_cond, nullptr), 0);
+    pthread_t waiter_thread;
+    ASSERT_EQ(pthread_create(&waiter_thread, nullptr, cache_single_flight_waiter,
+        &waiter), 0);
+    pthread_mutex_lock(&waiter.mutex);
+    while (!waiter.entered) pthread_cond_wait(&waiter.entered_cond, &waiter.mutex);
+    pthread_mutex_unlock(&waiter.mutex);
+
+    InputScriptCacheStats during = {};
+    for (int i = 0; i < 100; i++) {
+        input_script_cache_get_stats(cache, &during);
+        if (during.single_flight_waits > 0) break;
+        usleep(1000);
+    }
+    EXPECT_GE(during.single_flight_waits, 1u);
+
+    int ast_value = 42;
+    InputScriptArtifactOps ops = {};
+    ASSERT_TRUE(input_script_cache_publish_ast(owner, &ast_value, &ops));
+    input_script_cache_complete_build(owner, INPUT_SCRIPT_BUILD_AST, true, false);
+    ASSERT_EQ(pthread_join(waiter_thread, nullptr), 0);
+    EXPECT_EQ(waiter.claim, INPUT_SCRIPT_BUILD_READY);
+    EXPECT_TRUE(waiter.artifact_ready);
+    pthread_cond_destroy(&waiter.entered_cond);
+    pthread_mutex_destroy(&waiter.mutex);
+    input_script_cache_close_scope(owner_scope);
+
+    InputScriptRequest poison_request = request;
+    poison_request.identity = "./temp/script-cache-poisoned.ls";
+    poison_request.source = "bad";
+    poison_request.source_length = 3;
+    InputCacheScope* poison_scope = input_script_cache_open_scope(cache);
+    ASSERT_NE(poison_scope, nullptr);
+    InputScriptLease* poison_owner = input_script_cache_acquire(poison_scope,
+        &poison_request);
+    ASSERT_NE(poison_owner, nullptr);
+    ASSERT_EQ(input_script_cache_claim_build(poison_owner, INPUT_SCRIPT_BUILD_AST),
+        INPUT_SCRIPT_BUILD_OWNER);
+    input_script_cache_complete_build(poison_owner, INPUT_SCRIPT_BUILD_AST, false,
+        true);
+    input_script_cache_close_scope(poison_scope);
+
+    InputCacheScope* poisoned_scope = input_script_cache_open_scope(cache);
+    ASSERT_NE(poisoned_scope, nullptr);
+    InputScriptLease* poisoned = input_script_cache_acquire(poisoned_scope,
+        &poison_request);
+    ASSERT_NE(poisoned, nullptr);
+    EXPECT_EQ(input_script_cache_claim_build(poisoned, INPUT_SCRIPT_BUILD_AST),
+        INPUT_SCRIPT_BUILD_POISONED);
+    input_script_cache_close_scope(poisoned_scope);
+
+    InputScriptRequest changed_request = poison_request;
+    changed_request.source = "good";
+    changed_request.source_length = 4;
+    EXPECT_EQ(input_script_cache_invalidate(cache, &changed_request), 1u);
+    InputCacheScope* replacement_scope = input_script_cache_open_scope(cache);
+    ASSERT_NE(replacement_scope, nullptr);
+    InputScriptLease* replacement = input_script_cache_acquire(replacement_scope,
+        &changed_request);
+    ASSERT_NE(replacement, nullptr);
+    EXPECT_EQ(input_script_cache_claim_build(replacement, INPUT_SCRIPT_BUILD_AST),
+        INPUT_SCRIPT_BUILD_OWNER);
+    input_script_cache_complete_build(replacement, INPUT_SCRIPT_BUILD_AST, false,
+        false);
+    input_script_cache_close_scope(replacement_scope);
+
+    InputScriptCacheStats stats = {};
+    input_script_cache_get_stats(cache, &stats);
+    EXPECT_EQ(stats.ast_builds, 1u);
+    EXPECT_EQ(stats.poisoned, 1u);
+    EXPECT_GE(stats.single_flight_waits, 1u);
+    input_script_cache_destroy(cache);
+
+    if (previous_policy) {
+        shell_setenv("LAMBDA_SCRIPT_CACHE", previous_policy);
+        mem_free(previous_policy);
+    }
+    else shell_unsetenv("LAMBDA_SCRIPT_CACHE");
+}
+
+TEST(InputScriptCacheTest, DefersInvalidationUntilActiveLeaseCloses) {
+    const char* previous_value = shell_getenv("LAMBDA_SCRIPT_CACHE");
+    char* previous_policy = previous_value
+        ? mem_strdup(previous_value, MEM_CAT_CACHE_OTHER) : nullptr;
+    ASSERT_TRUE(shell_setenv("LAMBDA_SCRIPT_CACHE", "all"));
+
+    InputScriptCache* cache = input_script_cache_create();
+    ASSERT_NE(cache, nullptr);
+    InputScriptRequest old_request = {};
+    old_request.identity = "./temp/script-cache-invalidation.ls";
+    old_request.source = "old";
+    old_request.source_length = 3;
+    old_request.source_kind = INPUT_SCRIPT_SOURCE_FILE;
+    old_request.language = "lambda";
+    old_request.profile = "lambda";
+    old_request.parser_abi = "parser-v1";
+    old_request.parse_flags = "default";
+    old_request.resolution_base = "./temp/";
+    old_request.backend = "mir-direct";
+    old_request.execution_mode = "script";
+    old_request.ast_abi = 7;
+    old_request.compiler_abi = 11;
+
+    InputCacheScope* old_scope = input_script_cache_open_scope(cache);
+    ASSERT_NE(old_scope, nullptr);
+    InputScriptLease* old_lease = input_script_cache_acquire(old_scope,
+        &old_request);
+    ASSERT_NE(old_lease, nullptr);
+    int old_ast = 1;
+    InputScriptArtifactOps ops = {cache_test_destroy_artifact, nullptr};
+    ASSERT_TRUE(input_script_cache_publish_ast(old_lease, &old_ast, &ops));
+
+    InputScriptRequest new_request = old_request;
+    new_request.source = "new";
+    InputCacheScope* new_scope = input_script_cache_open_scope(cache);
+    ASSERT_NE(new_scope, nullptr);
+    ASSERT_NE(input_script_cache_acquire(new_scope, &new_request), nullptr);
+
+    g_cache_test_destroyed_artifacts = 0;
+    EXPECT_EQ(input_script_cache_invalidate(cache, &new_request), 1u);
+    EXPECT_EQ(g_cache_test_destroyed_artifacts, 0);
+    EXPECT_STREQ(input_script_source(input_script_lease_input(old_lease)), "old");
+
+    input_script_cache_close_scope(old_scope);
+    EXPECT_EQ(g_cache_test_destroyed_artifacts, 1);
+    input_script_cache_close_scope(new_scope);
+
+    InputScriptCacheStats stats = {};
+    input_script_cache_get_stats(cache, &stats);
+    EXPECT_EQ(stats.invalidations, 1u);
+    EXPECT_EQ(stats.retained_entries, 1u);
+    input_script_cache_destroy(cache);
+
+    if (previous_policy) {
+        shell_setenv("LAMBDA_SCRIPT_CACHE", previous_policy);
+        mem_free(previous_policy);
+    }
+    else shell_unsetenv("LAMBDA_SCRIPT_CACHE");
+}
+
+TEST(InputScriptCacheTest, RetiresDependencyConeAfterDependencySourceChanges) {
+    const char* previous_value = shell_getenv("LAMBDA_SCRIPT_CACHE");
+    char* previous_policy = previous_value
+        ? mem_strdup(previous_value, MEM_CAT_CACHE_OTHER) : nullptr;
+    ASSERT_TRUE(shell_setenv("LAMBDA_SCRIPT_CACHE", "all"));
+
+    InputScriptCache* cache = input_script_cache_create();
+    ASSERT_NE(cache, nullptr);
+    InputScriptRequest importer_request = {};
+    importer_request.identity = "./temp/script-cache-importer.ls";
+    importer_request.source = "import dependency";
+    importer_request.source_length = strlen(importer_request.source);
+    importer_request.source_kind = INPUT_SCRIPT_SOURCE_FILE;
+    importer_request.language = "lambda";
+    importer_request.profile = "dependency-test";
+    importer_request.parser_abi = "parser-v1";
+    importer_request.parse_flags = "default";
+    importer_request.resolution_base = "./temp/";
+    importer_request.backend = "mir-direct";
+    importer_request.execution_mode = "script";
+
+    InputScriptRequest dependency_request = importer_request;
+    dependency_request.identity = "./temp/script-cache-dependency.ls";
+    dependency_request.source = "old";
+    dependency_request.source_length = 3;
+
+    InputCacheScope* importer_scope = input_script_cache_open_scope(cache);
+    InputCacheScope* dependency_scope = input_script_cache_open_scope(cache);
+    ASSERT_NE(importer_scope, nullptr);
+    ASSERT_NE(dependency_scope, nullptr);
+    InputScriptLease* importer = input_script_cache_acquire(importer_scope,
+        &importer_request);
+    InputScriptLease* dependency = input_script_cache_acquire(dependency_scope,
+        &dependency_request);
+    ASSERT_NE(importer, nullptr);
+    ASSERT_NE(dependency, nullptr);
+    int importer_ast = 1;
+    int dependency_ast = 2;
+    InputScriptArtifactOps ops = {cache_test_destroy_artifact, nullptr};
+    ASSERT_TRUE(input_script_cache_publish_ast(importer, &importer_ast, &ops));
+    ASSERT_TRUE(input_script_cache_publish_ast(dependency, &dependency_ast, &ops));
+    ASSERT_TRUE(input_script_cache_record_dependency_by_unit(cache,
+        input_script_compilation_unit_id(input_script_lease_input(importer)),
+        input_script_compilation_unit_id(input_script_lease_input(dependency))));
+
+    InputScriptRequest changed_dependency = dependency_request;
+    changed_dependency.source = "new";
+    g_cache_test_destroyed_artifacts = 0;
+    EXPECT_EQ(input_script_cache_invalidate(cache, &changed_dependency), 2u);
+    EXPECT_EQ(g_cache_test_destroyed_artifacts, 0);
+    EXPECT_STREQ(input_script_source(input_script_lease_input(importer)),
+        "import dependency");
+    EXPECT_STREQ(input_script_source(input_script_lease_input(dependency)), "old");
+
+    input_script_cache_close_scope(importer_scope);
+    EXPECT_EQ(g_cache_test_destroyed_artifacts, 1);
+    input_script_cache_close_scope(dependency_scope);
+    EXPECT_EQ(g_cache_test_destroyed_artifacts, 2);
+
+    InputScriptCacheStats stats = {};
+    input_script_cache_get_stats(cache, &stats);
+    EXPECT_EQ(stats.invalidations, 2u);
+    EXPECT_EQ(stats.dependency_invalidations, 1u);
+    EXPECT_EQ(stats.retained_entries, 0u);
+    input_script_cache_destroy(cache);
+
+    if (previous_policy) {
+        shell_setenv("LAMBDA_SCRIPT_CACHE", previous_policy);
+        mem_free(previous_policy);
+    }
+    else shell_unsetenv("LAMBDA_SCRIPT_CACHE");
+}
+
+TEST(InputScriptCacheTest, AcquiresExactFileSnapshot) {
+    const char* previous_value = shell_getenv("LAMBDA_SCRIPT_CACHE");
+    char* previous_policy = previous_value
+        ? mem_strdup(previous_value, MEM_CAT_CACHE_OTHER) : nullptr;
+    ASSERT_TRUE(shell_setenv("LAMBDA_SCRIPT_CACHE", "all"));
+
+    const char* path = "test/lambda/import_vars.ls";
+    size_t expected_length = 0;
+    char* expected_source = read_binary_file(path, &expected_length);
+    ASSERT_NE(expected_source, nullptr);
+
+    InputScriptCache* cache = input_script_cache_create();
+    ASSERT_NE(cache, nullptr);
+    InputScriptRequest request = {};
+    request.identity = path;
+    request.source_kind = INPUT_SCRIPT_SOURCE_FILE;
+    request.language = "lambda";
+    request.profile = "lambda-file";
+    request.parser_abi = "parser-v1";
+    request.parse_flags = "default";
+    request.resolution_base = "test/lambda/";
+    request.backend = "mir-direct";
+    request.execution_mode = "script";
+    request.ast_abi = 7;
+    request.compiler_abi = 11;
+
+    InputCacheScope* first_scope = input_script_cache_open_scope(cache);
+    ASSERT_NE(first_scope, nullptr);
+    InputScriptLease* first = input_script_cache_acquire_file(
+        first_scope, &request, path);
+    ASSERT_NE(first, nullptr);
+    ScriptInput* first_input = input_script_lease_input(first);
+    ASSERT_NE(first_input, nullptr);
+    EXPECT_EQ(input_script_source_length(first_input), expected_length);
+    EXPECT_EQ(memcmp(input_script_source(first_input), expected_source,
+        expected_length), 0);
+
+    InputCacheScope* second_scope = input_script_cache_open_scope(cache);
+    ASSERT_NE(second_scope, nullptr);
+    InputScriptLease* second = input_script_cache_acquire_file(
+        second_scope, &request, path);
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(input_script_source(input_script_lease_input(second)),
+        input_script_source(first_input));
+    input_script_cache_close_scope(second_scope);
+    input_script_cache_close_scope(first_scope);
+
+    InputScriptCacheStats stats = {};
+    input_script_cache_get_stats(cache, &stats);
+    EXPECT_EQ(stats.source_misses, 1u);
+    EXPECT_EQ(stats.source_hits, 1u);
+    EXPECT_EQ(stats.retained_source_bytes, expected_length);
+    input_script_cache_destroy(cache);
+    mem_free(expected_source);
+
+    if (previous_policy) {
+        shell_setenv("LAMBDA_SCRIPT_CACHE", previous_policy);
+        mem_free(previous_policy);
+    }
+    else shell_unsetenv("LAMBDA_SCRIPT_CACHE");
+}
+
+TEST(InputScriptCacheTest, SeparatesModuleAndScriptSourceKeys) {
+    const char* previous_value = shell_getenv("LAMBDA_SCRIPT_CACHE");
+    char* previous_policy = previous_value
+        ? mem_strdup(previous_value, MEM_CAT_CACHE_OTHER) : nullptr;
+    ASSERT_TRUE(shell_setenv("LAMBDA_SCRIPT_CACHE", "all"));
+
+    InputScriptCache* cache = input_script_cache_create();
+    ASSERT_NE(cache, nullptr);
+    InputScriptRequest request = {};
+    request.identity = "module-key-test";
+    request.source = "export_value";
+    request.source_length = strlen(request.source);
+    request.source_kind = INPUT_SCRIPT_SOURCE_INLINE;
+    request.language = "javascript";
+    request.profile = "module-key-test";
+    request.parser_abi = "parser-v1";
+    request.parse_flags = "default";
+    request.resolution_base = "./temp/";
+    request.backend = "mir-direct";
+    request.execution_mode = "script";
+    request.ast_abi = 1;
+
+    InputCacheScope* scope = input_script_cache_open_scope(cache);
+    ASSERT_NE(scope, nullptr);
+    InputScriptLease* script = input_script_cache_acquire(scope, &request);
+    ASSERT_NE(script, nullptr);
+    request.module_mode = true;
+    request.execution_mode = "module";
+    InputScriptLease* module = input_script_cache_acquire(scope, &request);
+    ASSERT_NE(module, nullptr);
+    EXPECT_NE(input_script_lease_input(script), input_script_lease_input(module));
+    EXPECT_NE(input_script_compilation_unit_id(input_script_lease_input(script)),
+        input_script_compilation_unit_id(input_script_lease_input(module)));
+    input_script_cache_close_scope(scope);
+
+    InputScriptCacheStats stats = {};
+    input_script_cache_get_stats(cache, &stats);
+    EXPECT_EQ(stats.source_misses, 2u);
+    EXPECT_EQ(stats.source_hits, 0u);
+    EXPECT_EQ(stats.retained_entries, 2u);
+    input_script_cache_destroy(cache);
+
+    if (previous_policy) {
+        shell_setenv("LAMBDA_SCRIPT_CACHE", previous_policy);
+        mem_free(previous_policy);
+    }
+    else shell_unsetenv("LAMBDA_SCRIPT_CACHE");
+}
+
+TEST(InputScriptCacheTest, RetiresChangedFileGeneration) {
+    const char* previous_value = shell_getenv("LAMBDA_SCRIPT_CACHE");
+    char* previous_policy = previous_value
+        ? mem_strdup(previous_value, MEM_CAT_CACHE_OTHER) : nullptr;
+    ASSERT_TRUE(shell_setenv("LAMBDA_SCRIPT_CACHE", "all"));
+
+    const char* path = "./temp/script-cache-generation.ls";
+    ASSERT_EQ(write_binary_file(path, "old", 3), 0);
+    InputScriptCache* cache = input_script_cache_create();
+    ASSERT_NE(cache, nullptr);
+    InputScriptRequest request = {};
+    request.identity = path;
+    request.source_kind = INPUT_SCRIPT_SOURCE_FILE;
+    request.language = "lambda";
+    request.profile = "generation-test";
+    request.parser_abi = "parser-v1";
+    request.parse_flags = "default";
+    request.resolution_base = "./temp/";
+    request.backend = "mir-direct";
+    request.execution_mode = "script";
+
+    InputCacheScope* old_scope = input_script_cache_open_scope(cache);
+    ASSERT_NE(old_scope, nullptr);
+    InputScriptLease* old_lease = input_script_cache_acquire_file(
+        old_scope, &request, path);
+    ASSERT_NE(old_lease, nullptr);
+    EXPECT_STREQ(input_script_source(input_script_lease_input(old_lease)), "old");
+    input_script_cache_close_scope(old_scope);
+
+    ASSERT_EQ(write_binary_file(path, "newer", 5), 0);
+    InputCacheScope* new_scope = input_script_cache_open_scope(cache);
+    ASSERT_NE(new_scope, nullptr);
+    InputScriptLease* new_lease = input_script_cache_acquire_file(
+        new_scope, &request, path);
+    ASSERT_NE(new_lease, nullptr);
+    EXPECT_STREQ(input_script_source(input_script_lease_input(new_lease)), "newer");
+    input_script_cache_close_scope(new_scope);
+
+    InputScriptCacheStats stats = {};
+    input_script_cache_get_stats(cache, &stats);
+    EXPECT_EQ(stats.invalidations, 1u);
+    EXPECT_EQ(stats.retained_entries, 1u);
+    EXPECT_EQ(stats.source_misses, 2u);
+    EXPECT_EQ(stats.source_hits, 0u);
+    input_script_cache_destroy(cache);
+    EXPECT_EQ(file_delete(path), 0);
+
+    if (previous_policy) {
+        shell_setenv("LAMBDA_SCRIPT_CACHE", previous_policy);
+        mem_free(previous_policy);
+    }
+    else shell_unsetenv("LAMBDA_SCRIPT_CACHE");
+}
+
+TEST(InputScriptCacheTest, CopiesSuppliedUrlSnapshot) {
+    const char* previous_value = shell_getenv("LAMBDA_SCRIPT_CACHE");
+    char* previous_policy = previous_value
+        ? mem_strdup(previous_value, MEM_CAT_CACHE_OTHER) : nullptr;
+    ASSERT_TRUE(shell_setenv("LAMBDA_SCRIPT_CACHE", "all"));
+
+    InputScriptCache* cache = input_script_cache_create();
+    ASSERT_NE(cache, nullptr);
+    InputScriptRequest request = {};
+    request.identity = "https://example.test/script.js";
+    request.source_kind = INPUT_SCRIPT_SOURCE_URL;
+    request.language = "javascript";
+    request.profile = "url-test";
+    request.parser_abi = "parser-v1";
+    request.parse_flags = "classic";
+    request.resolution_base = request.identity;
+    request.backend = "mir-direct";
+    request.execution_mode = "classic";
+
+    size_t first_length = 0;
+    char* first = input_script_cache_copy_source(cache, &request,
+        "remote-source", 13, &first_length);
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(first_length, 13u);
+    EXPECT_EQ(memcmp(first, "remote-source", first_length), 0);
+
+    size_t second_length = 0;
+    char* second = input_script_cache_copy_source(cache, &request,
+        "remote-source", 13, &second_length);
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(second_length, first_length);
+    EXPECT_EQ(memcmp(second, first, first_length), 0);
+    mem_free(second);
+    mem_free(first);
+
+    InputScriptCacheStats stats = {};
+    input_script_cache_get_stats(cache, &stats);
+    EXPECT_EQ(stats.source_misses, 1u);
+    EXPECT_EQ(stats.source_hits, 1u);
+    EXPECT_EQ(stats.retained_entries, 1u);
+    input_script_cache_destroy(cache);
+
+    if (previous_policy) {
+        shell_setenv("LAMBDA_SCRIPT_CACHE", previous_policy);
+        mem_free(previous_policy);
+    }
+    else shell_unsetenv("LAMBDA_SCRIPT_CACHE");
+}

@@ -1,4 +1,5 @@
 #include "js_interp.hpp"
+#include "js_mir_internal.hpp"
 
 #include <limits.h>
 
@@ -756,7 +757,8 @@ static JsInterpImportBinding* js_interp_import_binding(JsScript* script,
 
 static JsInterpExportBinding* js_interp_add_reexport_binding(JsScript* script,
         String* local_name, String* export_name, String* source) {
-    if (!script || !script->pool || !script->name_pool || !local_name ||
+    if (!script || !js_script_execution_pool(script) ||
+            !js_script_execution_name_pool(script) || !local_name ||
             !export_name || !source) return NULL;
     for (JsInterpExportBinding* binding = script->interp_exports; binding;
             binding = binding->next) {
@@ -766,14 +768,16 @@ static JsInterpExportBinding* js_interp_add_reexport_binding(JsScript* script,
             return binding;
         }
     }
-    JsInterpExportBinding* binding = (JsInterpExportBinding*)pool_calloc(script->pool,
+    Pool* overlay_pool = js_script_execution_pool(script);
+    NamePool* overlay_names = js_script_execution_name_pool(script);
+    JsInterpExportBinding* binding = (JsInterpExportBinding*)pool_calloc(overlay_pool,
         sizeof(JsInterpExportBinding));
     if (!binding) return NULL;
-    binding->local_name = name_pool_create_len(script->name_pool, local_name->chars,
+    binding->local_name = name_pool_create_len(overlay_names, local_name->chars,
         local_name->len);
-    binding->export_name = name_pool_create_len(script->name_pool, export_name->chars,
+    binding->export_name = name_pool_create_len(overlay_names, export_name->chars,
         export_name->len);
-    binding->source = name_pool_create_len(script->name_pool, source->chars, source->len);
+    binding->source = name_pool_create_len(overlay_names, source->chars, source->len);
     if (!binding->local_name || !binding->export_name || !binding->source) return NULL;
     binding->star_export = true;
     binding->next = script->interp_exports;
@@ -6072,17 +6076,19 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
 JsScript* js_interp_prepare_script(Runtime* runtime, const char* source,
         size_t source_length, const char* filename, bool strict) {
     if (!runtime || !source) return NULL;
-    JsScript* cached = js_runtime_ast_cache_lookup(runtime, source, source_length,
-        filename, strict, false);
-    if (cached) {
-        // `prepare_script` promises a classic Script even when its parse facts
-        // were last used by eval/new Function in the same Runtime.
-        cached->is_module = false;
-        cached->is_es_module = false;
-        cached->is_eval_script = false;
-        cached->test262_native_harness = false;
-        cached->test262_native_build_string = false;
-        return cached;
+    // Parse templates are independent from eval/module execution state. The
+    // returned adapter has a fresh overlay for lexical bridges, module cells,
+    // and lazy function/class facts (D8.5.1v2).
+    JsScript* cached = js_common_ast_cache_lookup(runtime, source, source_length,
+        filename ? filename : "<inline-js>", strict, false);
+    if (cached) return cached;
+    JsCommonAstBuild cache_build = {};
+    InputScriptBuildClaim claim = js_common_ast_cache_begin_build(&cache_build,
+        source, source_length, filename ? filename : "<inline-js>", strict, false);
+    if (claim == INPUT_SCRIPT_BUILD_READY) {
+        cached = js_common_ast_cache_lookup(runtime, source, source_length,
+            filename ? filename : "<inline-js>", strict, false);
+        if (cached) return cached;
     }
     JsTranspiler* transpiler = js_transpiler_create(runtime);
     if (transpiler && strict) {
@@ -6092,15 +6098,21 @@ JsScript* js_interp_prepare_script(Runtime* runtime, const char* source,
     if (!transpiler || !js_transpiler_parse_c(transpiler, source, source_length,
             JS_PARSE_AUTO)) {
         js_transpiler_destroy(transpiler);
+        js_common_ast_cache_complete_build(&cache_build, false, false);
         return NULL;
     }
     JsAstNode* ast = (JsAstNode*)transpiler->ast_root;
     if (!ast || transpiler->has_errors) {
         js_transpiler_destroy(transpiler);
+        js_common_ast_cache_complete_build(&cache_build, false, false);
         return NULL;
     }
     JsScript* script = js_script_adopt_transpiler(transpiler, runtime,
         filename ? filename : "<inline-js>");
+    bool published = script && claim != INPUT_SCRIPT_BUILD_POISONED &&
+        js_common_ast_cache_admit(runtime, script, source, source_length,
+            filename ? filename : "<inline-js>", strict, false);
+    js_common_ast_cache_complete_build(&cache_build, published, false);
     return script;
 }
 
@@ -6172,10 +6184,12 @@ static Item js_interp_load_es_module(Runtime* runtime, const char* filename) {
         }
         return lambda_module->namespace_obj;
     }
-    char* source = read_text_file(filename);
+    size_t source_length = 0;
+    char* source = js_load_script_source_from_cache(
+        filename, "js-interpreter-module", "module", true, &source_length);
     if (!source) return js_throw_reference_error(js_make_string("Cannot find module"));
     Item result = js_interp_execute_es_module_source(runtime, source,
-        strlen(source), filename, NULL);
+        source_length, filename, NULL);
     mem_free(source);
     return result;
 }

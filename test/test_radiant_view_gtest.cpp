@@ -285,7 +285,7 @@ TEST(RadiantViewTest, PromotesCachedPngDecodeFromThumbnailToFullSize) {
         "[image] Decoded local image on demand: 640x427 (intrinsic 640x427, target 640x427)"));
 }
 
-TEST(RadiantViewTest, JsMirCacheKeepsFreshDocumentRealms) {
+TEST(RadiantViewTest, JsMirLeaseSessionKeepsFreshDocumentRealms) {
     ASSERT_TRUE(test_radiant_view_file_readable("test/html/js_cache_realm_mutate.html"));
     ASSERT_TRUE(test_radiant_view_file_readable("test/html/js_cache_realm_verify.html"));
     ASSERT_TRUE(test_radiant_view_file_readable("test/html/js_cache_external_classic.js"));

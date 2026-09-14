@@ -2394,8 +2394,14 @@ typedef struct PropertyKeySpec {
     uint32_t reserved;
 } PropertyKeySpec;
 
-// Immutable BSS metadata for one sealed MIR module. It describes code only;
-// mutable bindings are allocated per EvalContext.
+// Sealed layouts distinguish a cache-wide logical unit from a runtime-local
+// dense slab with this bit. Logical compilation-unit allocation reserves it.
+#define LAMBDA_MODULE_ID_LOGICAL_UNIT_FLAG ((uint32_t)1u << 31)
+
+// Immutable BSS metadata for one sealed MIR module. `module_id` is either a
+// dense slab ID or a logical compilation unit marked by the flag above; each
+// Runtime resolves the latter to a dense local slab. Mutable bindings remain
+// per EvalContext (D8.5.1v2).
 typedef struct LambdaModuleLayout {
     uint32_t module_id;
     uint32_t var_count;
@@ -2405,7 +2411,14 @@ typedef struct LambdaModuleLayout {
     const PropertyKeySpec* property_key_specs;
 } LambdaModuleLayout;
 
+// A satellite contributes a sealed suffix to its owner's key table. The low
+// bits record the exact prefix length so a fresh runtime can link each suffix
+// once in image order (D4.6.1v2, D8.5.1v2).
+#define LAMBDA_MODULE_LAYOUT_APPEND_PROPERTY_KEYS 0x80000000u
+#define LAMBDA_MODULE_LAYOUT_PROPERTY_KEY_BASE_MASK 0x7fffffffu
+
 typedef struct LambdaModuleVarRef {
+    // Uses the same physical-or-flagged-logical encoding as LambdaModuleLayout.
     uint32_t module_id;
     uint32_t slot;
 } LambdaModuleVarRef;

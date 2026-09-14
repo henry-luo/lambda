@@ -3,6 +3,7 @@
 #include "js_ast.hpp"
 #include "parser/js_parser.h"
 #include "../runtime/transpiler.hpp"
+#include "../input/input-script-cache.h"
 #include "../../lib/strbuf.h"
 
 #ifdef __cplusplus
@@ -14,6 +15,14 @@ typedef struct JsScript JsScript;
 typedef struct JsTranspiler JsTranspiler;
 typedef NameScope JsScope;
 struct hashmap;
+
+// An AST owner keeps this claim across parsing and publication. Waiters close
+// their temporary scope in begin and re-enter ordinary lookup on READY.
+typedef struct JsCommonAstBuild {
+    InputCacheScope* scope;
+    InputScriptLease* lease;
+    InputScriptBuildClaim state;
+} JsCommonAstBuild;
 
 // Import/export plans retain only AST/name-pool data. The actual namespace
 // Items stay rooted by the single runtime module registry.
@@ -91,6 +100,11 @@ struct JsScript : Script {
     struct hashmap* type_registry; // TS name → Type* facts for this JS/TS unit
     JsInterpImportBinding* interp_imports;
     JsInterpExportBinding* interp_exports;
+    // A common AST template never receives execution-local synthetic nodes or
+    // callable facts. Reused instances retain those in this overlay.
+    Pool* ast_overlay_pool;
+    NamePool* ast_overlay_name_pool;
+    bool ast_index_overlay;
     HashMap* ast_definitions;
     HashMap* field_initializers;
 };
@@ -166,18 +180,26 @@ void js_syntax_error(JsTranspiler* tp, SourceSpan span, const char* message);
 JsTranspiler* js_transpiler_create(Runtime* runtime);
 void js_transpiler_destroy(JsTranspiler* tp);
 JsFunctionNode* js_script_field_initializer_ensure(JsScript* script, JsFieldDefinitionNode* field);
+Pool* js_script_execution_pool(JsScript* script);
+NamePool* js_script_execution_name_pool(JsScript* script);
 int js_transpiler_parse_error_get(const JsTranspiler* tp, int64_t* out_row,
                                   int64_t* out_col, char* out_message,
                                   int64_t out_message_size);
 JsScript* js_script_adopt_transpiler(JsTranspiler* tp, Runtime* runtime,
                                      const char* reference);
-// Runtime-owned source cache for immutable AST/binding facts. Execution state
-// stays on the document realm and is rebuilt for each execution.
-JsScript* js_runtime_ast_cache_lookup(Runtime* runtime, const char* source,
-                                      size_t source_length, const char* reference,
-                                      bool strict, bool typescript_profile);
-void js_runtime_ast_cache_remove_script(Runtime* runtime, Script* script);
-void js_runtime_ast_cache_destroy(Runtime* runtime);
+// Common-cache AST adapter. Only ASTs with no lazy, per-realm compiler facts
+// are admitted; execution state remains local to the receiving Runtime.
+JsScript* js_common_ast_cache_lookup(Runtime* runtime, const char* source,
+                                     size_t source_length, const char* reference,
+                                     bool strict, bool typescript_profile);
+InputScriptBuildClaim js_common_ast_cache_begin_build(JsCommonAstBuild* build,
+    const char* source, size_t source_length, const char* reference,
+    bool strict, bool typescript_profile);
+void js_common_ast_cache_complete_build(JsCommonAstBuild* build,
+    bool published, bool poison);
+bool js_common_ast_cache_admit(Runtime* runtime, JsScript* script, const char* source,
+                               size_t source_length, const char* reference,
+                               bool strict, bool typescript_profile);
 static inline JsScript* js_script_from_script(Script* script) {
     return script && script->profile == &js_profile ? (JsScript*)script : NULL;
 }
@@ -218,9 +240,22 @@ struct JsPreambleState {
     bool owns_compiled_state;   // clones share the immutable MIR context
 };
 
-struct JsMirCache;
+// A synchronous ES module has no inherited declaration slab, but it still
+// needs a sealed property-name image and module-const snapshot to enter a
+// fresh realm. Its static dependency paths are immutable compiler metadata;
+// every hit reloads those modules into the receiving realm before execution
+// (D8.5.1v2).
+struct JsModuleMirArtifact {
+    JsPreambleState image;
+    char** static_dependency_paths;
+    int static_dependency_count;
+};
 
-struct JsMirCacheStats {
+// Radiant owns only bounded InputManager artifact leases; it does not own a
+// second JavaScript MIR cache.
+struct JsMirLeaseSession;
+
+struct JsMirLeaseSessionStats {
     uint64_t lookups;
     uint64_t hits;
     uint64_t misses;
@@ -230,17 +265,58 @@ struct JsMirCacheStats {
     size_t retained_metadata_bytes;
 };
 
-JsMirCache* js_mir_cache_create(void);
-void js_mir_cache_destroy(JsMirCache* cache);
-const JsPreambleState* js_mir_cache_lookup(
-    JsMirCache* cache, bool preamble_mode,
+// A MIR owner retains this only through compile-and-publication. The adapter
+// transfers its scope to the execution owner after a successful publication.
+struct JsCommonMirBuild {
+    InputCacheScope* scope;
+    InputScriptLease* lease;
+    InputScriptBuildClaim state;
+};
+
+JsMirLeaseSession* js_mir_lease_session_create(void);
+void js_mir_lease_session_close(JsMirLeaseSession* session);
+const JsPreambleState* js_mir_lease_session_lookup(
+    JsMirLeaseSession* session, bool preamble_mode,
     const char* source, size_t source_len, const char* filename,
     const JsPreambleState* preamble);
-const JsPreambleState* js_mir_cache_adopt(
-    JsMirCache* cache, bool preamble_mode,
+const JsPreambleState* js_mir_lease_session_adopt(
+    JsMirLeaseSession* session, bool preamble_mode,
     const char* source, size_t source_len, const char* filename,
     const JsPreambleState* preamble, JsPreambleState* compiled_state);
-void js_mir_cache_record_instantiation(JsMirCache* cache);
+InputScriptBuildClaim js_mir_lease_session_begin_build(
+    JsMirLeaseSession* session, bool preamble_mode,
+    const char* source, size_t source_len, const char* filename,
+    const JsPreambleState* preamble, JsCommonMirBuild* build);
+const JsPreambleState* js_mir_lease_session_adopt_build(
+    JsMirLeaseSession* session, JsCommonMirBuild* build,
+    JsPreambleState* compiled_state);
+void js_mir_lease_session_complete_build(JsCommonMirBuild* build,
+    bool published, bool poison);
+void js_mir_lease_session_record_instantiation(JsMirLeaseSession* session);
+
+// Direct module artifacts use the same manager-owned opaque MIR slot as
+// document scripts. The returned scope pins a live module image until its
+// Runtime has destroyed the realm that may hold pointers into that code.
+const JsModuleMirArtifact* js_module_mir_cache_lookup(const char* source,
+    size_t source_len, const char* filename, struct InputCacheScope** out_scope);
+const JsModuleMirArtifact* js_module_mir_cache_adopt(const char* source,
+    size_t source_len, const char* filename, JsModuleMirArtifact* compiled,
+    struct InputCacheScope** out_scope);
+InputScriptBuildClaim js_module_mir_cache_begin_build(const char* source,
+    size_t source_len, const char* filename, JsCommonMirBuild* build);
+const JsModuleMirArtifact* js_module_mir_cache_adopt_build(
+    JsCommonMirBuild* build, JsModuleMirArtifact* compiled,
+    struct InputCacheScope** out_scope);
+void js_module_mir_cache_complete_build(JsCommonMirBuild* build,
+    bool published, bool poison);
+// Link exact module source generations so a changed static dependency retires
+// every importer before its cached MIR can be reused (D8.5.1v2).
+bool js_module_mir_cache_record_dependency(const char* importer_source,
+    size_t importer_source_len, const char* importer_filename,
+    const char* dependency_source, size_t dependency_source_len,
+    const char* dependency_filename);
+void js_module_mir_artifact_destroy(JsModuleMirArtifact* artifact);
+Item load_js_module(Runtime* runtime, const char* js_path);
 
 Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const char* filename,
                                    JsPreambleState* out_state, uint64_t* result_home);

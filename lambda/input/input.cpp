@@ -1575,19 +1575,47 @@ InputManager::InputManager() {
     }
     inputs = arraylist_new(16);
     thread_pools = arraylist_new(4);
+    script_cache = input_script_cache_create();
     // Use shared global decimal context
     decimal_ctx = decimal_fixed_context();
 }
 
 InputManager::~InputManager() {
+    if (script_cache) {
+        input_script_cache_log_summary(script_cache);
+        input_script_cache_destroy(script_cache);
+        script_cache = nullptr;
+    }
     // clean up all tracked inputs
+    reset_inputs();
+    if (inputs) {
+        arraylist_free(inputs);
+        inputs = nullptr;
+    }
+    if (thread_pools) {
+        arraylist_free(thread_pools);
+        thread_pools = nullptr;
+    }
+
+    // destroy the global pool (this frees all pool-allocated memory)
+    if (global_pool) {
+        log_debug("InputManager::~InputManager destroying global_pool=%p", (void*)global_pool);
+        mem_pool_destroy(global_pool);
+        global_pool = nullptr;
+    }
+
+    // decimal_ctx is now shared global - don't free
+    decimal_ctx = nullptr;
+}
+
+void InputManager::reset_inputs() {
     if (inputs) {
         for (int i = 0; i < inputs->length; i++) {
             Input* input = (Input*)inputs->data[i];
             input_release_auxiliary_resources(input);
             if (input && input->mem_ctx) {
-                // destroy the document-owned allocator context before process
-                // shutdown can walk stale arena or semantic-owner nodes.
+                // destroy document-owned allocators before the next document
+                // can observe stale arena or semantic-owner nodes.
                 mem_context_destroy((MemContext*)input->mem_ctx);
                 input->mem_ctx = nullptr;
                 input->arena = nullptr;
@@ -1598,7 +1626,7 @@ InputManager::~InputManager() {
                 input->url = nullptr;
             }
         }
-        arraylist_free(inputs);
+        arraylist_clear(inputs);
     }
 
     if (thread_pools) {
@@ -1606,19 +1634,12 @@ InputManager::~InputManager() {
             Pool* pool = (Pool*)thread_pools->data[i];
             if (pool) mem_pool_destroy(pool);
         }
-        arraylist_free(thread_pools);
-        thread_pools = nullptr;
+        arraylist_clear(thread_pools);
     }
-
-    // Destroy the global pool (this frees all pool-allocated memory)
-    if (global_pool) {
-        log_debug("InputManager::~InputManager destroying global_pool=%p", (void*)global_pool);
-        mem_pool_destroy(global_pool);
-        global_pool = nullptr;
+    if (g_input_thread_manager == this) {
+        g_input_thread_manager = nullptr;
+        g_input_thread_pool = nullptr;
     }
-
-    // decimal_ctx is now shared global - don't free
-    decimal_ctx = nullptr;
 }
 
 //------------------------------------------------------------------------------
@@ -1647,6 +1668,15 @@ mpd_context_t* InputManager::decimal_context() {
     mpd_context_t* context = g_input_manager ? g_input_manager->decimal_ctx : nullptr;
     pthread_mutex_unlock(&g_input_manager_mutex);
     return context;
+}
+
+InputScriptCache* InputManager::global_script_cache() {
+    pthread_mutex_lock(&g_input_manager_mutex);
+    if (!g_input_manager) g_input_manager = input_manager_create();
+    InputScriptCache* cache = g_input_manager
+        ? g_input_manager->get_script_cache() : nullptr;
+    pthread_mutex_unlock(&g_input_manager_mutex);
+    return cache;
 }
 
 // Static method to create input using global manager
@@ -1723,6 +1753,12 @@ void InputManager::destroy_global() {
         g_input_thread_manager = nullptr;
         g_input_thread_pool = nullptr;
     }
+    pthread_mutex_unlock(&g_input_manager_mutex);
+}
+
+void InputManager::reset_global_inputs() {
+    pthread_mutex_lock(&g_input_manager_mutex);
+    if (g_input_manager) g_input_manager->reset_inputs();
     pthread_mutex_unlock(&g_input_manager_mutex);
 }
 

@@ -81,10 +81,13 @@ static inline Item js_accessor_pair_to_item(JsAccessorPair* p) {
     Item it; it.function = (Function*)p; return it;
 }
 
-// Recover a JsAccessorPair* from a slot Item. Caller is responsible for verifying
-// `jspd_is_accessor(shape_entry)` first; otherwise behavior is undefined.
+// Recover a JsAccessorPair* from a slot Item. Accessor storage borrows the
+// FUNC tag to select the pointer-width Map lane, so strip that carrier tag
+// before dereferencing the raw cell pointer. Caller is responsible for
+// verifying `jspd_is_accessor(shape_entry)` first; otherwise behavior is
+// undefined.
 static inline JsAccessorPair* js_item_to_accessor_pair(Item it) {
-    return (JsAccessorPair*)it.function;
+    return (JsAccessorPair*)(uintptr_t)(it.item & 0x00FFFFFFFFFFFFFFULL);
 }
 
 // =============================================================================

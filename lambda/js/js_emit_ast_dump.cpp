@@ -1,6 +1,7 @@
 #include "../runtime/emit_ast_dump.h"
 #include "../runtime/type_contract.hpp"
 #include "js_transpiler.hpp"
+#include "js_mir_internal.hpp"
 #include "../ts/ts_ast.hpp"
 #include "../../lib/file.h"
 #include "../../lib/mem.h"
@@ -390,7 +391,9 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
 }
 
 extern "C" int emit_js_ast_dump_file(const char* script_path) {
-    char* source = read_text_file(script_path);
+    size_t source_length = 0;
+    char* source = js_load_script_source_from_cache(
+        script_path, "js-ast-dump", "ast-dump", false, &source_length);
     if (!source) {
         fprintf(stderr, "Error: Cannot read '%s'\n", script_path);
         return 1;
@@ -403,8 +406,7 @@ extern "C" int emit_js_ast_dump_file(const char* script_path) {
         return 1;
     }
 
-    size_t length = strlen(source);
-    if (!js_transpiler_parse_c(tp, source, length, JS_PARSE_AUTO)) {
+    if (!js_transpiler_parse_c(tp, source, source_length, JS_PARSE_AUTO)) {
         fprintf(stderr, "Error: Failed to parse '%s'\n", script_path);
         js_transpiler_destroy(tp);
         mem_free(source);

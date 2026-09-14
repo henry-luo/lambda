@@ -8,7 +8,7 @@
 #include "../../lib/mempool.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_helpers.h"
-#include "../../lib/hash.h"
+#include "../input/input-script-cache.h"
 #include <cstring>
 #include <cstdarg>
 #include <cstdio>
@@ -16,115 +16,211 @@
 
 static void js_script_destroy_extension(Script* base_script);
 
-struct JsRuntimeAstCacheEntry {
-    const char* source;
-    size_t source_length;
-    const char* reference;
-    size_t reference_length;
-    bool strict;
-    bool typescript_profile;
-    JsScript* script;
-};
-
-static uint64_t js_runtime_ast_cache_entry_hash(const void* item,
-        uint64_t seed0, uint64_t seed1) {
-    const JsRuntimeAstCacheEntry* entry = (const JsRuntimeAstCacheEntry*)item;
-    uint64_t hash = hashmap_xxhash3(entry->source, entry->source_length, seed0, seed1);
-    hash = hash_combine_u64(hash,
-        hashmap_xxhash3(entry->reference, entry->reference_length, seed0, seed1));
-    hash = hash_combine_u64(hash, entry->strict ? 1 : 0);
-    return hash_combine_u64(hash, entry->typescript_profile ? 1 : 0);
-}
-
-static int js_runtime_ast_cache_entry_compare(const void* left, const void* right,
-        void* udata) {
-    const JsRuntimeAstCacheEntry* a = (const JsRuntimeAstCacheEntry*)left;
-    const JsRuntimeAstCacheEntry* b = (const JsRuntimeAstCacheEntry*)right;
-    if (a->strict != b->strict) return a->strict ? -1 : 1;
-    if (a->typescript_profile != b->typescript_profile) {
-        return a->typescript_profile ? -1 : 1;
-    }
-    if (a->source_length != b->source_length) {
-        return a->source_length < b->source_length ? -1 : 1;
-    }
-    if (a->reference_length != b->reference_length) {
-        return a->reference_length < b->reference_length ? -1 : 1;
-    }
-    int reference_compare = memcmp(a->reference, b->reference, a->reference_length);
-    if (reference_compare != 0) return reference_compare;
-    if (a->source_length == 0) return 0;
-    return memcmp(a->source, b->source, a->source_length);
-}
-
-static HashMap* js_runtime_ast_cache_ensure(Runtime* runtime) {
-    if (!runtime || !runtime->scripts) return NULL;
-    if (runtime->js_ast_cache) return runtime->js_ast_cache;
-    HashMap* cache = hashmap_new(sizeof(JsRuntimeAstCacheEntry), 16, 0, 0,
-        js_runtime_ast_cache_entry_hash, js_runtime_ast_cache_entry_compare, NULL, NULL);
-    if (!cache) return NULL;
-    runtime->js_ast_cache = cache;
-    return cache;
-}
-
-static JsRuntimeAstCacheEntry js_runtime_ast_cache_probe(const char* source,
+static InputScriptRequest js_common_ast_cache_request(const char* source,
         size_t source_length, const char* reference, bool strict,
         bool typescript_profile) {
-    JsRuntimeAstCacheEntry probe = {};
-    probe.source = source ? source : "";
-    probe.source_length = source ? source_length : 0;
-    probe.reference = reference ? reference : "<inline-js>";
-    probe.reference_length = strlen(probe.reference);
-    probe.strict = strict;
-    probe.typescript_profile = typescript_profile;
-    return probe;
+    const char* identity = reference ? reference : "<inline-js>";
+    InputScriptRequest request = {};
+    request.identity = identity;
+    request.source = source;
+    request.source_length = source_length;
+    request.source_kind = identity[0] == '<'
+        ? INPUT_SCRIPT_SOURCE_INLINE : INPUT_SCRIPT_SOURCE_FILE;
+    request.language = "javascript";
+    request.profile = typescript_profile ? "typescript-ast" : "javascript-ast";
+    request.parser_abi = "js-direct-parser-v1";
+    request.parse_flags = strict ? "strict" : "sloppy";
+    request.resolution_base = identity;
+    request.backend = "ast";
+    request.execution_mode = "ast-template";
+    request.ast_abi = 1;
+    return request;
 }
 
-JsScript* js_runtime_ast_cache_lookup(Runtime* runtime, const char* source,
+static bool js_common_ast_cache_eligible(const JsScript* script,
+        bool typescript_profile) {
+    (void)typescript_profile;
+    // Parser output is immutable for every JS shape. Functions, classes,
+    // modules, evals, and TS attach execution facts only to a clone overlay.
+    return script != NULL;
+}
+
+static void js_common_ast_cache_destroy(void* value) {
+    runtime_destroy_cached_script_template((Script*)value);
+}
+
+static size_t js_common_ast_cache_artifact_bytes(const void* value) {
+    return value ? sizeof(JsScript) : 0;
+}
+
+static JsScript* js_common_ast_cache_clone(Runtime* runtime,
+        const JsScript* cached, InputCacheScope* scope) {
+    if (!runtime || !cached || !scope) return NULL;
+    JsScript* instance = (JsScript*)mem_calloc(1, sizeof(JsScript), MEM_CAT_SYSTEM);
+    if (!instance) return NULL;
+    memcpy(instance, cached, sizeof(JsScript));
+    instance->reference = cached->reference
+        ? mem_strdup(cached->reference, MEM_CAT_SYSTEM) : NULL;
+    instance->directory = cached->directory
+        ? mem_strdup(cached->directory, MEM_CAT_SYSTEM) : NULL;
+    if ((cached->reference && !instance->reference) ||
+            (cached->directory && !instance->directory)) {
+        mem_free((void*)instance->reference);
+        mem_free((void*)instance->directory);
+        mem_free(instance);
+        return NULL;
+    }
+    AstIndex cached_index = cached->ast_index;
+    memset(&instance->ast_index, 0, sizeof(instance->ast_index));
+    instance->ast_overlay_pool = mem_pool_create(NULL, MEM_ROLE_AST,
+        "js.ast.overlay");
+    if (!instance->ast_overlay_pool || !ast_index_clone(&instance->ast_index,
+            &cached_index)) {
+        if (instance->ast_overlay_pool) pool_destroy(instance->ast_overlay_pool);
+        mem_free((void*)instance->reference);
+        mem_free((void*)instance->directory);
+        mem_free(instance);
+        return NULL;
+    }
+    instance->cache_template = (const Script*)cached;
+    instance->cache_scope = scope;
+    instance->cache_owned_template = false;
+    // The parser image names one process-wide logical unit; runtime_register
+    // below maps it to this Runtime's dense module slab (D8.5.1v2).
+    instance->cache_compilation_unit_id = cached->cache_compilation_unit_id;
+    instance->is_loading = false;
+    instance->is_retired = false;
+    instance->ast_overlay_name_pool = NULL;
+    instance->ast_index_overlay = true;
+    instance->type_registry = NULL;
+    // Module declaration instantiation belongs to this fresh execution even
+    // though the parse-time module shape itself is shared.
+    instance->es_module_scope_initialized = false;
+    instance->ast_definitions = NULL;
+    instance->field_initializers = NULL;
+    runtime_register_script(runtime, (Script*)instance);
+    return instance;
+}
+
+Pool* js_script_execution_pool(JsScript* script) {
+    return script && script->ast_overlay_pool ? script->ast_overlay_pool
+        : script ? script->pool : NULL;
+}
+
+NamePool* js_script_execution_name_pool(JsScript* script) {
+    if (!script) return NULL;
+    if (!script->ast_overlay_pool) return script->name_pool;
+    if (!script->ast_overlay_name_pool) {
+        script->ast_overlay_name_pool = name_pool_create(script->ast_overlay_pool,
+            NULL);
+    }
+    return script->ast_overlay_name_pool;
+}
+
+JsScript* js_common_ast_cache_lookup(Runtime* runtime, const char* source,
         size_t source_length, const char* reference, bool strict,
         bool typescript_profile) {
-    HashMap* cache = runtime ? runtime->js_ast_cache : NULL;
-    if (!cache || !source) return NULL;
-    JsRuntimeAstCacheEntry probe = js_runtime_ast_cache_probe(source, source_length,
+    InputScriptCache* cache = input_manager_global_script_cache();
+    if (!runtime || !source || !input_script_cache_ast_enabled(cache)) return NULL;
+    InputCacheScope* scope = input_script_cache_open_scope(cache);
+    InputScriptRequest request = js_common_ast_cache_request(source, source_length,
         reference, strict, typescript_profile);
-    const JsRuntimeAstCacheEntry* found = (const JsRuntimeAstCacheEntry*)hashmap_get(
-        cache, &probe);
-    // ES modules retain evaluation/link state in their ModuleDescriptor. Keep
-    // their existing module path rather than treating them as repeatable scripts.
-    return found && found->script && !found->script->is_es_module ? found->script : NULL;
-}
-
-static void js_runtime_ast_cache_insert(Runtime* runtime, JsScript* script) {
-    if (!runtime || !script || !script->source || !script->reference) return;
-    HashMap* cache = js_runtime_ast_cache_ensure(runtime);
-    if (!cache) return;
-    JsRuntimeAstCacheEntry entry = js_runtime_ast_cache_probe(script->source,
-        script->source_length, script->reference, script->ast_cache_requested_strict,
-        script->ast_cache_typescript_profile);
-    entry.script = script;
-    if (hashmap_get(cache, &entry)) return;
-    hashmap_set(cache, &entry);
-    if (hashmap_oom(cache)) {
-        hashmap_delete(cache, &entry);
-        log_error("js-ast-cache: failed to index retained script %s", script->reference);
+    InputScriptLease* lease = input_script_cache_acquire(scope, &request);
+    void* value = NULL;
+    if (!lease || !input_script_cache_get_ast(lease, &value)) {
+        input_script_cache_close_scope(scope);
+        return NULL;
     }
+    JsScript* cached = (JsScript*)value;
+    JsScript* instance = js_common_ast_cache_eligible(cached, typescript_profile)
+        ? js_common_ast_cache_clone(runtime, cached, scope) : NULL;
+    if (!instance) {
+        input_script_cache_close_scope(scope);
+        return NULL;
+    }
+    input_script_cache_mark_module_hit(cache);
+    log_info("js common ast cache: hit script=%s", reference ? reference : "<inline-js>");
+    return instance;
 }
 
-void js_runtime_ast_cache_remove_script(Runtime* runtime, Script* base_script) {
-    HashMap* cache = runtime ? runtime->js_ast_cache : NULL;
-    JsScript* script = js_script_from_script(base_script);
-    if (!cache || !script || !script->source || !script->reference) return;
-    JsRuntimeAstCacheEntry probe = js_runtime_ast_cache_probe(script->source,
-        script->source_length, script->reference, script->ast_cache_requested_strict,
-        script->ast_cache_typescript_profile);
-    const JsRuntimeAstCacheEntry* found = (const JsRuntimeAstCacheEntry*)hashmap_get(
-        cache, &probe);
-    if (found && found->script == script) hashmap_delete(cache, &probe);
+InputScriptBuildClaim js_common_ast_cache_begin_build(JsCommonAstBuild* build,
+        const char* source, size_t source_length, const char* reference,
+        bool strict, bool typescript_profile) {
+    if (!build) return INPUT_SCRIPT_BUILD_BYPASS;
+    memset(build, 0, sizeof(*build));
+    build->state = INPUT_SCRIPT_BUILD_BYPASS;
+    InputScriptCache* cache = input_manager_global_script_cache();
+    if (!source || !input_script_cache_ast_enabled(cache)) return build->state;
+    InputCacheScope* scope = input_script_cache_open_scope(cache);
+    if (!scope) return build->state;
+    InputScriptRequest request = js_common_ast_cache_request(source,
+        source_length, reference, strict, typescript_profile);
+    InputScriptLease* lease = input_script_cache_acquire(scope, &request);
+    if (!lease) {
+        input_script_cache_close_scope(scope);
+        return build->state;
+    }
+    build->state = input_script_cache_claim_build(lease, INPUT_SCRIPT_BUILD_AST);
+    if (build->state == INPUT_SCRIPT_BUILD_OWNER) {
+        build->scope = scope;
+        build->lease = lease;
+        return build->state;
+    }
+    // A non-owner has no outstanding build transition. Its ordinary lookup
+    // takes a fresh lease after the publishing owner has completed.
+    input_script_cache_close_scope(scope);
+    return build->state;
 }
 
-void js_runtime_ast_cache_destroy(Runtime* runtime) {
-    if (!runtime || !runtime->js_ast_cache) return;
-    hashmap_free(runtime->js_ast_cache);
-    runtime->js_ast_cache = NULL;
+void js_common_ast_cache_complete_build(JsCommonAstBuild* build,
+        bool published, bool poison) {
+    if (!build) return;
+    if (build->state == INPUT_SCRIPT_BUILD_OWNER && build->lease) {
+        input_script_cache_complete_build(build->lease, INPUT_SCRIPT_BUILD_AST,
+            published, poison);
+    }
+    if (build->scope) input_script_cache_close_scope(build->scope);
+    memset(build, 0, sizeof(*build));
+    build->state = INPUT_SCRIPT_BUILD_BYPASS;
+}
+
+bool js_common_ast_cache_admit(Runtime* runtime, JsScript* script, const char* source,
+        size_t source_length, const char* reference, bool strict,
+        bool typescript_profile) {
+    InputScriptCache* cache = input_manager_global_script_cache();
+    if (!runtime || !source || !input_script_cache_ast_enabled(cache) ||
+            !js_common_ast_cache_eligible(script, typescript_profile)) return false;
+    InputCacheScope* scope = input_script_cache_open_scope(cache);
+    InputScriptRequest request = js_common_ast_cache_request(source, source_length,
+        reference, strict, typescript_profile);
+    InputScriptLease* lease = input_script_cache_acquire(scope, &request);
+    void* existing = NULL;
+    if (!lease || input_script_cache_get_ast(lease, &existing)) {
+        input_script_cache_close_scope(scope);
+        return false;
+    }
+    uint32_t unit_id = input_script_compilation_unit_id(
+        input_script_lease_input(lease));
+    if (!unit_id || !runtime_module_state_bind_unit(runtime, unit_id,
+            script->module_state_id)) {
+        input_script_cache_mark_rejected(cache);
+        input_script_cache_close_scope(scope);
+        return false;
+    }
+    InputScriptArtifactOps ops = {js_common_ast_cache_destroy,
+        js_common_ast_cache_artifact_bytes};
+    if (!input_script_cache_publish_ast(lease, script, &ops)) {
+        runtime_module_state_unbind_unit(runtime, unit_id, script->module_state_id);
+        input_script_cache_close_scope(scope);
+        return false;
+    }
+    // The artifact is immutable, while every clone gets a fresh dense slab.
+    // The temporary runtime binding above is removed at template teardown.
+    script->cache_compilation_unit_id = unit_id;
+    script->cache_owned_template = true;
+    script->cache_scope = scope;
+    log_info("js common ast cache: admitted script=%s", reference ? reference : "<inline-js>");
+    return true;
 }
 
 int js_transpiler_parse_error_get(const JsTranspiler* tp, int64_t* out_row,
@@ -431,11 +527,23 @@ static void js_script_destroy_extension(Script* base_script) {
         hashmap_free(script->field_initializers);
         script->field_initializers = NULL;
     }
+    if (script->ast_overlay_name_pool) {
+        name_pool_release(script->ast_overlay_name_pool);
+        script->ast_overlay_name_pool = NULL;
+    }
+    if (script->ast_index_overlay) {
+        ast_index_destroy(&script->ast_index);
+        script->ast_index_overlay = false;
+    }
     // NamePool owns hash tables outside the AST pool. Release it before base
     // Script cleanup destroys the backing pool.
-    if (script->name_pool) {
+    if (script->name_pool && !script->cache_template) {
         name_pool_release(script->name_pool);
         script->name_pool = NULL;
+    }
+    if (script->ast_overlay_pool) {
+        pool_destroy(script->ast_overlay_pool);
+        script->ast_overlay_pool = NULL;
     }
 }
 
@@ -457,10 +565,11 @@ JsFunctionNode* js_script_field_initializer_ensure(JsScript* script,
     const JsFieldInitializerEntry* found = (const JsFieldInitializerEntry*)hashmap_get(
         script->field_initializers, &key);
     if (found) return found->function;
-    JsFunctionNode* function = (JsFunctionNode*)pool_calloc(script->pool, sizeof(JsFunctionNode));
-    JsBlockNode* body = (JsBlockNode*)pool_calloc(script->pool, sizeof(JsBlockNode));
-    JsReturnNode* result = (JsReturnNode*)pool_calloc(script->pool, sizeof(JsReturnNode));
-    NameScope* scope = (NameScope*)pool_calloc(script->pool, sizeof(NameScope));
+    Pool* overlay_pool = js_script_execution_pool(script);
+    JsFunctionNode* function = (JsFunctionNode*)pool_calloc(overlay_pool, sizeof(JsFunctionNode));
+    JsBlockNode* body = (JsBlockNode*)pool_calloc(overlay_pool, sizeof(JsBlockNode));
+    JsReturnNode* result = (JsReturnNode*)pool_calloc(overlay_pool, sizeof(JsReturnNode));
+    NameScope* scope = (NameScope*)pool_calloc(overlay_pool, sizeof(NameScope));
     if (!function || !body || !result || !scope) return NULL;
     // one indexed definition per field; each class evaluation supplies its own environment.
     function->node_type = AST_NODE_FUNC_EXPR;
@@ -509,7 +618,7 @@ JsAstDefinition* js_script_ast_definition_ensure(JsScript* script,
         script->ast_definitions, &key);
     if (found) return found->definition;
     JsAstDefinition* definition = (JsAstDefinition*)pool_calloc(
-        script->pool, sizeof(JsAstDefinition));
+        js_script_execution_pool(script), sizeof(JsAstDefinition));
     if (!definition) return NULL;
     JsAstFunctionFacts facts = js_ast_collect_function_facts(
         (JsAstNode*)function->params, (JsAstNode*)function->body);
@@ -533,7 +642,7 @@ JsCallableCode* js_script_ast_definition_code_ensure(
     if (!definition || !definition->script || !definition->script->pool) return NULL;
     if (definition->code) return definition->code;
     JsCallableCode* code = (JsCallableCode*)pool_calloc(
-        definition->script->pool, sizeof(JsCallableCode));
+        js_script_execution_pool(definition->script), sizeof(JsCallableCode));
     if (!code) return NULL;
     code->param_count = param_count;
     code->formal_length = (int16_t)param_count;
@@ -593,7 +702,6 @@ JsScript* js_script_adopt_transpiler(JsTranspiler* tp, Runtime* runtime,
 
     if (runtime) {
         runtime_register_script(runtime, (Script*)script);
-        js_runtime_ast_cache_insert(runtime, script);
     }
     return script;
 }

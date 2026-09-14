@@ -496,22 +496,35 @@ void jit_cleanup(MIR_context_t ctx) {
     jit_cleanup_mode(ctx, !g_mir_interp_mode);
 }
 
+static bool module_layout_bss_name(const char* name) {
+    if (!name) return false;
+    if (strcmp(name, "_mod_layout") == 0) return true;
+    if (strncmp(name, "_sat_", 5) != 0) return false;
+    const char* suffix = strrchr(name, '_');
+    return suffix && strcmp(suffix, "_layout") == 0;
+}
+
 bool prepare_context_module_state(void* mir_ctx, void* consts, void* type_list) {
     if (!eval_context_tls_runtime() || !mir_ctx) return false;
     MIR_context_t ctx = (MIR_context_t)mir_ctx;
+    bool prepared = false;
     for (MIR_module_t module = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx));
          module != NULL; module = DLIST_NEXT(MIR_module_t, module)) {
         for (MIR_item_t item = DLIST_HEAD(MIR_item_t, module->items);
              item != NULL; item = DLIST_NEXT(MIR_item_t, item)) {
             if (item->item_type != MIR_bss_item || !item->u.bss->name || !item->addr ||
-                    strcmp(item->u.bss->name, "_mod_layout") != 0) continue;
+                    !module_layout_bss_name(item->u.bss->name)) continue;
             LambdaModuleLayout* layout = (LambdaModuleLayout*)item->addr;
             if (!lambda_module_state_prepare_layout(layout)) return false;
-            return lambda_module_state_bind_static(layout->module_id, consts, type_list);
+            if (!lambda_module_state_bind_static_for_unit(layout->module_id,
+                    consts, type_list)) return false;
+            prepared = true;
         }
     }
-    log_error("module-state: sealed MIR module has no layout descriptor");
-    return false;
+    if (!prepared) {
+        log_error("module-state: sealed MIR module has no layout descriptor");
+    }
+    return prepared;
 }
 
 

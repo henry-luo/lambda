@@ -777,11 +777,18 @@ struct Script : Input {
     const char* reference;      // path (relative to the main script) and name of the script
     const char* directory;      // directory containing this script (for relative imports)
     int index;                  // index of the script in the runtime scripts list
-    uint32_t module_state_id;   // stable shared module-state identity, independent of list position
+    uint32_t module_state_id;   // runtime-local dense EvalContext module-slab ID
+    uint32_t cache_compilation_unit_id; // process-cache logical unit, never reused after admission
+    // A cache template owns immutable parser/compiler storage. Runtime
+    // instances borrow it and keep only their execution scope and module slab
+    // local to the receiving EvalContext (D7.1.2v2/D8.5.1v2).
+    const Script* cache_template;
+    struct InputCacheScope* cache_scope;
+    bool cache_owned_template;
+    bool cache_mir_artifact; // otherwise retained image is AST-only
     bool is_main;               // true if this is the main entry-point script
     bool is_loading;            // true while script is being loaded (for circular import detection)
-    bool cache_retain;          // true when an imported module may survive per-script teardown
-    bool cache_retired;         // true when a retained cache slot has been invalidated
+    bool is_retired;            // removed from the current Runtime load registry
     bool cache_cross_lang_tainted;  // true when the import subtree contains a cross-language module
     const char* source;
     LangProfile* profile;       // dormant Phase-1 language profile hook table
@@ -789,6 +796,7 @@ struct Script : Input {
     // common Script fields remain owned by runtime_free_script().
     void (*destroy_extension)(Script* script);
     time_t src_mtime;           // file timestamp captured when loaded
+    int64_t src_mtime_nsec;     // sub-second file timestamp for cache freshness
     off_t src_size;             // file size captured when loaded
     // AST-specific fields (beyond Input)
     AstNode *ast_root;
@@ -826,6 +834,15 @@ struct Script : Input {
     bool interp_whole_script_poc_attempted; // opt-in AUTO whole-module POC gate
     bool interp_whole_script_poc_active;    // whole-module image published
     bool interp_views_registered;   // T0 view entries published in this context
+    // Per-execution strings produced while registering an immutable AST
+    // template. The parser-owned name pool stays frozen in the cache image
+    // (D8.5.1v2); anonymous view refs live only with this Script shell.
+    ArrayList* ast_overlay_strings;
+    // P2 counters and boxed entries belong to one execution image, not to
+    // the parser-owned function definition. Cached AST instances allocate
+    // entries here so a satellite from a retired EvalContext cannot be
+    // published into a later runtime (D8.1.1v2/D8.5.1v2).
+    ArrayList* ast_promotion_overlay;
 
     // The REPL keeps its append-only source buffer alive because AST source
     // spans point into it. `source` aliases repl_source->str in that mode.

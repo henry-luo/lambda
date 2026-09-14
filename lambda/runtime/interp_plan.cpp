@@ -1856,35 +1856,51 @@ bool interp_plan_repl_fragment(Script* script, AstNode* fragment) {
 // resumable task ABI, while the bounded synchronous path admits only reads and
 // stable imports; captures, nested definitions, generators, and replacement
 // writes remain on T0 (D8.1.1v2 §5.2-§5.3).
-bool interp_satellite_import_supported(const NameEntry* entry) {
-    // Function-local imported names are not part of the module-global scope
-    // walk. Rebind that view lazily to the already-planned export slot before
-    // the satellite membrane checks its ABI (D8.1.1v2 / D7.2.1).
-    if (entry && entry->import && !entry->import_owner && entry->import->script &&
-            !entry->import->is_cross_lang && entry->node) {
-        NameEntry* mutable_entry = (NameEntry*)entry;
-        AstScript* owner_root = (AstScript*)entry->import->script->ast_root;
+bool interp_satellite_import_binding(const Script* importer,
+        const NameEntry* entry, Script** out_owner, int* out_slot) {
+    if (out_owner) *out_owner = NULL;
+    if (out_slot) *out_slot = -1;
+    if (!entry || !entry->import || entry->import->is_cross_lang) return false;
+    Script* owner = entry && entry->import && !entry->import->is_cross_lang
+        ? lambda_ast_overlay_import_script(importer, entry->import) : NULL;
+    if (!owner && entry) owner = entry->import_owner;
+    bool storage_assigned = entry->storage_assigned;
+    BindingStorage storage = entry->binding_storage;
+    int slot = entry->slot;
+    // Function-local imported names do not receive their own module-slab
+    // entry. Derive their exported slot for this lowering only; cache templates
+    // must not retain a prior execution's resolution in NameEntry (D8.5.1v2).
+    if ((!storage_assigned || storage != BINDING_STORAGE_MODULE || slot < 0) &&
+            owner && entry->node) {
+        AstScript* owner_root = (AstScript*)owner->ast_root;
         for (NameEntry* exported = owner_root && owner_root->global_vars
                 ? owner_root->global_vars->first : NULL;
                 exported; exported = exported->next) {
-            if (exported->node != entry->node || !exported->storage_assigned) continue;
-            mutable_entry->slot = exported->slot;
-            mutable_entry->binding_storage = exported->binding_storage;
-            mutable_entry->import_owner = entry->import->script;
-            mutable_entry->storage_assigned = true;
+            if (exported->node != entry->node || !exported->storage_assigned ||
+                    exported->binding_storage != BINDING_STORAGE_MODULE ||
+                    exported->slot < 0) continue;
+            storage_assigned = true;
+            storage = exported->binding_storage;
+            slot = exported->slot;
             break;
         }
     }
-    if (!entry || !entry->import || entry->import->is_cross_lang ||
-            !entry->import_owner || !entry->storage_assigned ||
-            entry->binding_storage != BINDING_STORAGE_MODULE || entry->slot < 0) {
+    if (!owner || !storage_assigned || storage != BINDING_STORAGE_MODULE || slot < 0) {
         return false;
     }
+    if (out_owner) *out_owner = owner;
+    if (out_slot) *out_slot = slot;
+    return true;
+}
+
+bool interp_satellite_import_supported(const Script* importer,
+        const NameEntry* entry) {
+    Script* owner = NULL;
+    if (!interp_satellite_import_binding(importer, entry, &owner, NULL)) return false;
     // The target module must already be a planned T0 module; the satellite
     // embeds this stable module id and slot rather than asking MIR to link a
     // missing generated import symbol.
-    bool supported = entry->import_owner->interp_supported &&
-        entry->import_owner->interp_planned;
+    bool supported = owner->interp_supported && owner->interp_planned;
     return supported;
 }
 
@@ -2018,7 +2034,7 @@ static void interp_scan_satellite_node_kind(AstNode* node, SatelliteScanCtx* sc)
         bool hosted_js = entry->import && entry->import->is_cross_lang &&
             entry->import->script && entry->import->script->profile == &js_profile;
         if (entry->import && !hosted_js &&
-                !interp_satellite_import_supported(entry)) {
+                !interp_satellite_import_supported(NULL, entry)) {
             sc->ok = false;
         }
         break;

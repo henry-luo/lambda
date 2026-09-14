@@ -53,6 +53,7 @@
 #include "../lib/time_util.h"
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/jube/jube_registry.h"
+#include "../lambda/jube/jube_interface.h"
 #include "../lambda/network/network_resource_manager.h"
 
 #include <cstring>
@@ -68,7 +69,13 @@
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
 extern "C" int g_mir_interp_mode;
+extern unsigned int g_js_mir_optimize_level;
 extern Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename);
+extern char* js_load_script_source_from_cache(const char* path,
+                                              const char* profile,
+                                              const char* execution_mode,
+                                              bool module_mode,
+                                              size_t* out_length);
 extern void jm_cleanup_active_mir(void);
 extern void jm_abandon_active_mir_after_signal(void);
 
@@ -167,7 +174,7 @@ static void js_exec_watchdog_disarm(void) {
 #endif  // !_WIN32
 
 static LruCache* s_script_source_cache = nullptr;
-static JsMirCache* s_js_mir_cache = nullptr;
+static JsMirLeaseSession* s_js_mir_lease_session = nullptr;
 static bool s_retain_js_state = true;
 static bool s_execute_external_scripts = true;
 
@@ -192,10 +199,10 @@ extern "C" void script_runner_set_execute_external_scripts(bool execute) {
     s_execute_external_scripts = execute;
 }
 
-extern "C" void script_runner_set_js_mir_cache(JsMirCache* cache) {
-    // The layout batch owns the cache. The runner only borrows it so cached
-    // code cannot outlive the process-level batch that established its ABI.
-    s_js_mir_cache = cache;
+extern "C" void script_runner_set_js_mir_lease_session(JsMirLeaseSession* session) {
+    // The layout batch owns leases only. InputManager remains the cache owner,
+    // so the runner cannot retain code beyond the batch lifetime.
+    s_js_mir_lease_session = session;
 }
 
 static void script_runner_cleanup_source_cache() {
@@ -631,7 +638,41 @@ static void script_source_cache_store(const char* resolved_path, bool is_http,
               resolved_path, source_len);
 }
 
-static char* load_script_content(const char* resolved_path, bool is_http) {
+static char* script_runner_admit_url_source(const char* resolved_url,
+                                            const char* source,
+                                            size_t source_length,
+                                            bool module_mode,
+                                            size_t* out_length) {
+    if (out_length) *out_length = 0;
+    if (!resolved_url || !resolved_url[0] || !source) return nullptr;
+
+    InputScriptRequest request = {};
+    request.identity = resolved_url;
+    request.source_kind = INPUT_SCRIPT_SOURCE_URL;
+    request.language = "javascript";
+    request.profile = "radiant-external";
+    request.parser_abi = "js-direct-parser-v1";
+    request.parse_flags = module_mode ? "module" : "classic";
+    request.resolution_base = resolved_url;
+    request.backend = "mir-direct";
+    request.execution_mode = module_mode ? "module" : "classic";
+    request.ast_abi = 1;
+    request.compiler_abi = 1;
+    request.interface_abi = jube_interface_registry_digest();
+    request.dependency_digest = jube_interface_registry_digest();
+    request.optimize_level = g_js_mir_optimize_level;
+    request.module_mode = module_mode;
+    InputScriptCache* cache = input_manager_global_script_cache();
+    InputScriptRequest source_request = request;
+    source_request.source = source;
+    source_request.source_length = source_length;
+    input_script_cache_invalidate(cache, &source_request);
+    return input_script_cache_copy_source(cache, &request, source, source_length,
+        out_length);
+}
+
+static char* load_script_content(const char* resolved_path, bool is_http,
+                                 bool module_mode) {
     char* content = nullptr;
     if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testharness.js") == 0) {
         // Layout snapshots avoid the full harness, but must run synchronous
@@ -706,14 +747,27 @@ static char* load_script_content(const char* resolved_path, bool is_http) {
         size_t content_size = 0;
         content = download_http_content_cached(resolved_path, &content_size, "./temp/cache");
         if (content) {
-            log_debug("script_runner: downloaded external script from URL: %s (%zu bytes)", resolved_path, content_size);
+            size_t admitted_length = 0;
+            char* admitted = script_runner_admit_url_source(
+                resolved_path, content, content_size, module_mode,
+                &admitted_length);
+            mem_free(content);
+            content = admitted;
+            if (content) {
+                log_debug("script_runner: admitted external URL script: %s (%zu bytes)",
+                          resolved_path, admitted_length);
+            }
         } else {
             log_warn("script_runner: optional external script unavailable: %s", resolved_path);
         }
     } else {
-        content = read_text_file(resolved_path);
+        size_t source_length = 0;
+        content = js_load_script_source_from_cache(
+            resolved_path, "radiant-external",
+            module_mode ? "module" : "classic", module_mode, &source_length);
         if (content) {
-            log_debug("script_runner: loaded external script from file: %s (%zu bytes)", resolved_path, strlen(content));
+            log_debug("script_runner: loaded external script from common cache: %s (%zu bytes)",
+                      resolved_path, source_length);
         } else {
             log_warn("script_runner: optional external script file unavailable: %s", resolved_path);
         }
@@ -722,6 +776,7 @@ static char* load_script_content(const char* resolved_path, bool is_http) {
 }
 
 static char* load_script_content_with_source_cache(const char* resolved_path, bool is_http,
+                                                  bool module_mode,
                                                   JsScriptTaskCollection* collection,
                                                   bool* out_cache_hit) {
     if (out_cache_hit) *out_cache_hit = false;
@@ -730,8 +785,23 @@ static char* load_script_content_with_source_cache(const char* resolved_path, bo
     bool timing_enabled = script_task_timing_enabled();
     long load_start_us = timing_enabled ? script_runner_wall_now_us() : 0;
 #endif
+    // Local executable sources are owned by the common cache; the legacy LRU
+    // remains only for remote fetch bytes until URL admission is migrated.
+    if (!is_http) {
+        return load_script_content(resolved_path, false, module_mode);
+    }
+
     char* cached = script_source_cache_lookup(resolved_path, is_http, collection);
     if (cached) {
+        size_t admitted_length = 0;
+        char* admitted = script_runner_admit_url_source(
+            resolved_path, cached, strlen(cached), module_mode, &admitted_length);
+        mem_free(cached);
+        cached = admitted;
+        if (!cached) {
+            if (collection) collection->source_cache_stale++;
+            return nullptr;
+        }
         if (out_cache_hit) *out_cache_hit = true;
 #ifndef NDEBUG
         if (timing_enabled) {
@@ -745,7 +815,7 @@ static char* load_script_content_with_source_cache(const char* resolved_path, bo
         return cached;
     }
 
-    char* content = load_script_content(resolved_path, is_http);
+    char* content = load_script_content(resolved_path, is_http, module_mode);
     if (content) {
         script_source_cache_store(resolved_path, is_http, content, strlen(content));
     }
@@ -1517,6 +1587,7 @@ static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* col
             }
             bool source_cache_hit = false;
             char* content = load_script_content_with_source_cache(task->resolved_url, is_http,
+                                                                  task->kind == JS_SCRIPT_TASK_MODULE,
                                                                   collection, &source_cache_hit);
             if (content) {
                 task->source = content;
@@ -1617,18 +1688,29 @@ static Item execute_cached_external_classic(Runtime* runtime,
                                             const char* source, size_t source_len,
                                             const char* filename,
                                             DocumentScriptPhaseTiming* timing) {
-    if (!runtime || !preamble || !s_js_mir_cache ||
+    if (!runtime || !preamble || !s_js_mir_lease_session ||
             !script_eval_context_activate(runtime)) {
         return ItemError;
     }
 
     if (timing) timing->cache_lookups++;
-    const JsPreambleState* cached = js_mir_cache_lookup(
-        s_js_mir_cache, false,
+    const JsPreambleState* cached = js_mir_lease_session_lookup(
+        s_js_mir_lease_session, false,
         source, source_len, filename, preamble);
     if (timing) {
         if (cached) timing->cache_hits++;
         else timing->cache_misses++;
+    }
+
+    JsCommonMirBuild cache_build = {};
+    if (!cached) {
+        InputScriptBuildClaim claim = js_mir_lease_session_begin_build(
+            s_js_mir_lease_session, false, source, source_len, filename,
+            preamble, &cache_build);
+        if (claim == INPUT_SCRIPT_BUILD_READY) {
+            cached = js_mir_lease_session_lookup(s_js_mir_lease_session, false,
+                source, source_len, filename, preamble);
+        }
     }
 
     JsPreambleState compiled = {};
@@ -1637,12 +1719,18 @@ static Item execute_cached_external_classic(Runtime* runtime,
             runtime, source, source_len, filename, preamble, &compiled);
         js_mir_accumulate_last_phase_timing(false);
         if (get_type_id(compile_result) == LMD_TYPE_ERROR) {
+            js_mir_lease_session_complete_build(&cache_build, false, false);
             preamble_state_destroy(&compiled);
             return compile_result;
         }
-        cached = js_mir_cache_adopt(
-            s_js_mir_cache, false,
-            source, source_len, filename, preamble, &compiled);
+        if (cache_build.state == INPUT_SCRIPT_BUILD_OWNER) {
+            cached = js_mir_lease_session_adopt_build(s_js_mir_lease_session,
+                &cache_build, &compiled);
+        } else if (cache_build.state != INPUT_SCRIPT_BUILD_POISONED) {
+            cached = js_mir_lease_session_adopt(s_js_mir_lease_session, false,
+                source, source_len, filename, preamble, &compiled);
+        }
+        js_mir_lease_session_complete_build(&cache_build, cached != nullptr, false);
         if (cached && timing) timing->cache_compiles++;
         if (!cached) {
             // Functions materialized by a compiled unit retain its MIR code.
@@ -1658,7 +1746,7 @@ static Item execute_cached_external_classic(Runtime* runtime,
 
     Item result = execute_compiled_js_in_current_realm(
         runtime, preamble, cached, true);
-    js_mir_cache_record_instantiation(s_js_mir_cache);
+    js_mir_lease_session_record_instantiation(s_js_mir_lease_session);
     if (timing) timing->cache_instantiations++;
     js_mir_accumulate_last_phase_timing(false);
     if (get_type_id(result) != LMD_TYPE_ERROR &&
@@ -1887,7 +1975,7 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
         if (task->kind == JS_SCRIPT_TASK_MODULE) {
             result = execute_js_module_source(
                 runtime, source, task->source_len, filename);
-        } else if (task->external && s_js_mir_cache && !s_retain_js_state &&
+        } else if (task->external && s_js_mir_lease_session && !s_retain_js_state &&
                    !runtime->js_ast_backend) {
             result = execute_cached_external_classic(
                 runtime, preamble, source, task->source_len, filename, timing);
@@ -2040,30 +2128,48 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
 #endif
     const char* preamble_filename = "<document-preamble>";
     const JsPreambleState* cached_preamble = nullptr;
-    if (s_js_mir_cache && !s_retain_js_state && !runtime->js_ast_backend) {
+    JsCommonMirBuild preamble_build = {};
+    if (s_js_mir_lease_session && !s_retain_js_state && !runtime->js_ast_backend) {
         if (timing) timing->cache_lookups++;
-        cached_preamble = js_mir_cache_lookup(
-            s_js_mir_cache, true,
+        cached_preamble = js_mir_lease_session_lookup(
+            s_js_mir_lease_session, true,
             preamble_buf->str, preamble_buf->length, preamble_filename, nullptr);
         if (timing) {
             if (cached_preamble) timing->cache_hits++;
             else timing->cache_misses++;
         }
+        if (!cached_preamble) {
+            InputScriptBuildClaim claim = js_mir_lease_session_begin_build(
+                s_js_mir_lease_session, true, preamble_buf->str,
+                preamble_buf->length, preamble_filename, nullptr,
+                &preamble_build);
+            if (claim == INPUT_SCRIPT_BUILD_READY) {
+                cached_preamble = js_mir_lease_session_lookup(
+                    s_js_mir_lease_session, true, preamble_buf->str,
+                    preamble_buf->length, preamble_filename, nullptr);
+            }
+        }
     }
 
-    if (s_js_mir_cache && !s_retain_js_state && !runtime->js_ast_backend) {
+    if (s_js_mir_lease_session && !s_retain_js_state && !runtime->js_ast_backend) {
         if (!cached_preamble) {
             result = compile_js_mir_preamble_len(runtime, preamble_buf->str,
                                                  preamble_buf->length,
                                                  preamble_filename, preamble);
             js_mir_accumulate_last_phase_timing(true);
             if (get_type_id(result) != LMD_TYPE_ERROR) {
-                cached_preamble = js_mir_cache_adopt(
-                    s_js_mir_cache, true,
-                    preamble_buf->str, preamble_buf->length, preamble_filename,
-                    nullptr, preamble);
+                if (preamble_build.state == INPUT_SCRIPT_BUILD_OWNER) {
+                    cached_preamble = js_mir_lease_session_adopt_build(
+                        s_js_mir_lease_session, &preamble_build, preamble);
+                } else if (preamble_build.state != INPUT_SCRIPT_BUILD_POISONED) {
+                    cached_preamble = js_mir_lease_session_adopt(
+                        s_js_mir_lease_session, true, preamble_buf->str,
+                        preamble_buf->length, preamble_filename, nullptr, preamble);
+                }
                 if (cached_preamble && timing) timing->cache_compiles++;
             }
+            js_mir_lease_session_complete_build(&preamble_build,
+                cached_preamble != nullptr, false);
 
             // Compile-only preambles allocate a temporary realm. Destroy it
             // before compiling dependent units or instantiating the document.
@@ -2073,7 +2179,7 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
 
         if (cached_preamble) {
             result = instantiate_js_preamble(runtime, cached_preamble, preamble);
-            js_mir_cache_record_instantiation(s_js_mir_cache);
+            js_mir_lease_session_record_instantiation(s_js_mir_lease_session);
             if (timing) timing->cache_instantiations++;
             js_mir_accumulate_last_phase_timing(true);
         } else {
@@ -2329,7 +2435,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     dom_set_ui_context(runtime->dom_ui_context);
     dom_set_host_driven_loop(dom_doc->js.host_driven_loop);
 
-    if (s_js_mir_cache && !s_retain_js_state && !runtime->js_ast_backend) {
+    if (s_js_mir_lease_session && !s_retain_js_state && !runtime->js_ast_backend) {
         const JubeModuleDef* radiant = jube_find_static_module("radiant");
         // The compile-only preamble runs before normal document binding, but
         // its document member ordinals must see the same Jube registry as the
@@ -2400,6 +2506,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 #ifndef _WIN32
         js_exec_guarded = 0;
         js_exec_watchdog_disarm();
+
         sigaction(SIGSEGV, &js_exec_old_segv, NULL);
         sigaction(SIGBUS, &js_exec_old_bus, NULL);
 	    } else if (jmp_val == 2) {
@@ -2410,8 +2517,8 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 	        // handlers here so teardown does not run under the JS crash guard.
 	        js_exec_guarded = 0;
 	        js_exec_watchdog_disarm();
-	        sigaction(SIGSEGV, &js_exec_old_segv, NULL);
-	        sigaction(SIGBUS, &js_exec_old_bus, NULL);
+        sigaction(SIGSEGV, &js_exec_old_segv, NULL);
+        sigaction(SIGBUS, &js_exec_old_bus, NULL);
 		        // siglongjmp skips MIR/transpiler destructors; clean the active stack
 		        // before releasing the wrapper so large code pages are not orphaned.
 		        jm_cleanup_active_mir();
@@ -2433,8 +2540,8 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 	        // handlers here so teardown does not run under the JS crash guard.
 	        js_exec_guarded = 0;
 	        js_exec_watchdog_disarm();
-	        sigaction(SIGSEGV, &js_exec_old_segv, NULL);
-	        sigaction(SIGBUS, &js_exec_old_bus, NULL);
+        sigaction(SIGSEGV, &js_exec_old_segv, NULL);
+        sigaction(SIGBUS, &js_exec_old_bus, NULL);
 		        // the native signal may have interrupted MIR/JIT state in-place;
 		        // abandon active MIR contexts instead of finalizing corrupted lists.
 		        jm_abandon_active_mir_after_signal();

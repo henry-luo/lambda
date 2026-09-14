@@ -76,6 +76,44 @@
 extern __thread EvalContext* context;
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source,
                                 const char* filename);
+char* js_load_script_source_from_cache(const char* path,
+                                       const char* profile,
+                                       const char* execution_mode,
+                                       bool module_mode,
+                                       size_t* out_length);
+extern unsigned int g_js_mir_optimize_level;
+
+static char* lambda_load_hosted_source_from_cache(const char* path,
+        const char* language, const char* profile, const char* execution_mode,
+        size_t* out_length) {
+    if (out_length) *out_length = 0;
+    if (!path || !path[0] || !language || !language[0]) return NULL;
+
+    char* canonical = file_realpath(path);
+    const char* identity = canonical ? canonical : path;
+    InputScriptRequest request = {};
+    request.identity = identity;
+    request.source_kind = INPUT_SCRIPT_SOURCE_FILE;
+    request.language = language;
+    request.profile = profile ? profile : language;
+    request.parser_abi = "hosted-direct-parser-v1";
+    request.parse_flags = "default";
+    request.resolution_base = identity;
+    request.backend = "mir-direct";
+    request.execution_mode = execution_mode ? execution_mode : "script";
+    request.ast_abi = 1;
+    request.compiler_abi = 1;
+    request.optimize_level = 2;
+    request.module_mode = false;
+
+    char* source = input_script_cache_copy_file_source(
+        input_manager_global_script_cache(), &request, path, out_length);
+    if (canonical) mem_free(canonical);
+    if (!source) {
+        log_error("script-cache: failed to acquire hosted source %s", path);
+    }
+    return source;
+}
 
 static long js_batch_process_cpu_us(void) {
 #ifdef _WIN32
@@ -777,9 +815,6 @@ extern void event_sim_set_result_path(const char* result_path);
 // REPL functions from main-repl.cpp
 extern int lambda_repl_init();
 extern void lambda_repl_cleanup();
-
-// MIR JIT optimization level for JS (from transpile_js_mir.cpp)
-extern unsigned int g_js_mir_optimize_level;
 
 // MIR interpreter mode (from mir.c)
 extern "C" int g_mir_interp_mode;
@@ -2026,7 +2061,8 @@ static int node_runner_run_file(const char* exe_path, const char* file,
     js_store_process_exec_argv(0, NULL);
 
     size_t js_source_len = 0;
-    char* js_source = read_binary_file(file, &js_source_len);
+    char* js_source = js_load_script_source_from_cache(
+        file, "node", "node-test", false, &js_source_len);
     int exit_code = 1;
     if (js_source) {
         uint64_t result_home = 0;
@@ -2515,7 +2551,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 }
             } else {
                 if (!js_file) js_file = argv[2];  // fallback
-                js_source = read_binary_file(js_file, &js_source_len);
+                js_source = js_load_script_source_from_cache(
+                    js_file, "js-cli", input_type_module ? "module" : "classic",
+                    input_type_module, &js_source_len);
                 if (!js_source) {
                     printf("Error: Could not read file '%s'\n", js_file);
                     runtime_cleanup(&runtime);
@@ -2877,7 +2915,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
         if (argc >= 3) {
             const char* rb_file = argv[2];
-            char* rb_source = read_text_file(rb_file);
+            char* rb_source = lambda_load_hosted_source_from_cache(
+                rb_file, "ruby", "ruby-cli", "script", NULL);
             if (!rb_source) {
                 printf("Error: Could not read file '%s'\n", rb_file);
                 runtime_cleanup(&runtime);
@@ -3050,7 +3089,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
             bash_transpile_failed = result.item == ITEM_ERROR;
             mem_free(bash_source);
         } else if (bash_file) {
-            char* bash_source = read_text_file(bash_file);
+            char* bash_source = lambda_load_hosted_source_from_cache(
+                bash_file, "bash", "bash-cli", "script", NULL);
             if (!bash_source) {
                 printf("Error: Could not read file '%s'\n", bash_file);
                 runtime_cleanup(&runtime);
@@ -3112,7 +3152,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
         if (argc >= 3) {
             const char* ts_file = argv[2];
-            char* ts_source = read_text_file(ts_file);
+            size_t ts_source_length = 0;
+            char* ts_source = lambda_load_hosted_source_from_cache(
+                ts_file, "javascript", "typescript-cli", "script",
+                &ts_source_length);
             if (!ts_source) {
                 printf("Error: Could not read file '%s'\n", ts_file);
                 runtime_cleanup(&runtime);
@@ -3121,7 +3164,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
             uint64_t result_home = 0;
             Item result = transpile_js_typescript_to_mir_len(&runtime, ts_source,
-                strlen(ts_source), ts_file, &result_home);
+                ts_source_length, ts_file, &result_home);
 
             TypeId result_type = get_type_id(result);
             // TypeScript scripts share JavaScript's non-printing completion
@@ -4278,11 +4321,11 @@ static int lambda_main_impl(int argc, char *argv[]) {
             // to corrupted path traversal (infinite loop / SIGSEGV).
             path_reset();
 
-            // Clean up per-run scripts; retained modules will survive once Phase 2 enables caching.
+            // Clean up per-run execution scripts; InputManager retains only cache artifacts.
             runtime_teardown_batch_scripts(&runtime);
         }
 
-        runtime_log_mir_cache_summary(&runtime);
+        runtime_log_script_load_summary(&runtime);
         runtime_cleanup(&runtime);
         return lambda_main_finish(0);
     }
@@ -4621,7 +4664,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     continue;
                 }
 
-                js_source = read_binary_file(script_path, &js_source_len);
+                js_source = js_load_script_source_from_cache(
+                    script_path, "js-test-batch",
+                    inline_module_source ? "module" : "classic",
+                    inline_module_source, &js_source_len);
                 if (!js_source) {
                     fprintf(stderr, "Error: Could not read file '%s'\n", script_path);
                     printf("\x01" "BATCH_END 1 0\n");

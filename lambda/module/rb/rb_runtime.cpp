@@ -3,9 +3,11 @@
 #include "rb_runtime.h"
 #include "rb_transpiler.hpp"
 #include "../../../lambda-data.hpp"
+#include "../../../input/input-script-cache.h"
 #include "../../../runtime/heap_api.h"
 #include "../../../lib/log.h"
 #include "../../../lib/strbuf.h"
+#include "../../../lib/file.h"
 
 #include <cstring>
 #include <cstdio>
@@ -928,24 +930,29 @@ extern "C" Item rb_builtin_require_relative(Item path) {
         strncat(resolved, ".rb", sizeof(resolved) - strlen(resolved) - 1);
     }
 
-    // read the file
-    FILE* f = fopen(resolved, "r");
-    if (!f) {
-        log_error("require_relative: cannot open '%s'", resolved);
-        return (Item){.item = ITEM_NULL};
-    }
-    fseek(f, 0, SEEK_END);
-    long fsize = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    char* source = (char*)mem_alloc(fsize + 1, MEM_CAT_RB_RUNTIME);
+    char* canonical = file_realpath(resolved);
+    const char* identity = canonical ? canonical : resolved;
+    InputScriptRequest request = {};
+    request.identity = identity;
+    request.source_kind = INPUT_SCRIPT_SOURCE_FILE;
+    request.language = "ruby";
+    request.profile = "ruby-module";
+    request.parser_abi = "ruby-direct-parser-v1";
+    request.parse_flags = "default";
+    request.resolution_base = identity;
+    request.backend = "mir-direct";
+    request.execution_mode = "module";
+    request.ast_abi = 1;
+    request.compiler_abi = 1;
+    request.optimize_level = 2;
+    request.module_mode = true;
+    char* source = input_script_cache_copy_file_source(
+        input_manager_global_script_cache(), &request, resolved, NULL);
+    if (canonical) mem_free(canonical);
     if (!source) {
-        fclose(f);
-        log_error("require_relative: out of memory");
+        log_error("require_relative: cannot acquire '%s'", resolved);
         return (Item){.item = ITEM_NULL};
     }
-    size_t nread = fread(source, 1, fsize, f);
-    source[nread] = '\0';
-    fclose(f);
 
     // save and restore current file context
     const char* prev_file = rb_current_file;

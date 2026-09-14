@@ -5069,7 +5069,7 @@ static bool layout_single_file(
 
     image_cache_cleanup(ui_context);
 
-    InputManager::destroy_global();
+    InputManager::reset_global_inputs();
 
     ui_context->document = nullptr;
 
@@ -5260,14 +5260,12 @@ int cmd_layout(int argc, char** argv) {
 #endif
     signal(SIGABRT, crash_signal_handler);
 #ifndef _WIN32
-    {
-        struct sigaction sa;
-        memset(&sa, 0, sizeof(sa));
-        sa.sa_sigaction = layout_crash_handler;
-        sa.sa_flags = SA_SIGINFO;
-        sigaction(SIGSEGV, &sa, NULL);
-        sigaction(SIGBUS, &sa, NULL);
-    }
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = layout_crash_handler;
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
 #endif
 
     if (!log_is_disabled() && file_exists("log.conf")) {
@@ -5315,13 +5313,18 @@ int cmd_layout(int argc, char** argv) {
     // AST execution does not consume cached MIR preambles or units; entering
     // the cache's compile-only MIR realm path leaves DOM registration state
     // incompatible with the AST document realm.
+    InputScriptCache* script_cache = input_manager_global_script_cache();
+    const char* js_alias = shell_getenv("LAMBDA_DISABLE_JS_MIR_CACHE");
+    bool js_alias_disabled = js_alias &&
+        (strcmp(js_alias, "1") == 0 || strcmp(js_alias, "true") == 0);
     bool js_mir_cache_enabled = batch_mode && !js_ast_interpreter_requested() &&
-        shell_getenv("LAMBDA_DISABLE_JS_MIR_CACHE") == nullptr;
-    JsMirCache* js_mir_cache = js_mir_cache_enabled ? js_mir_cache_create() : nullptr;
-    if (js_mir_cache_enabled && !js_mir_cache) {
-        log_error("layout_js_mir_cache: failed to create batch cache; continuing uncached");
+        input_script_cache_mir_enabled(script_cache) && !js_alias_disabled;
+    JsMirLeaseSession* js_mir_session = js_mir_cache_enabled
+        ? js_mir_lease_session_create() : nullptr;
+    if (js_mir_cache_enabled && !js_mir_session) {
+        log_error("layout_js_mir_lease: failed to create batch lease session; continuing uncached");
     }
-    script_runner_set_js_mir_cache(js_mir_cache);
+    script_runner_set_js_mir_lease_session(js_mir_session);
 
     for (int i = 0; i < opts.font_dir_count; i++) {
         font_context_add_scan_directory(ui_context.font_ctx, opts.font_dirs[i]);
@@ -5401,7 +5404,6 @@ int cmd_layout(int argc, char** argv) {
             _exit(1);
         }
 #endif
-
         if (!success && opts.stream_layout_results) {
             // Every non-crashing input gets a terminal frame so the runner retries only true gaps.
             write_layout_result_frame(stdout, input_file, false);
@@ -5443,8 +5445,8 @@ int cmd_layout(int argc, char** argv) {
         fclose(timing_file);
         timing_file = nullptr;
     }
-    script_runner_set_js_mir_cache(nullptr);
-    js_mir_cache_destroy(js_mir_cache);
+    script_runner_set_js_mir_lease_session(nullptr);
+    js_mir_lease_session_close(js_mir_session);
     ui_context_cleanup(&ui_context);
     if (cwd) url_destroy(cwd);
 

@@ -271,7 +271,7 @@ Per-script static spelling tables may remain owner-local, but every runtime prop
 
 ### JSI29 — Script and module identity are runtime-wide
 
-`JsScript : Script` is stored directly as a `Script*` in `Runtime::scripts` and `script_index`; no wrapper header, parallel JS catalog, or `void* language_owner` indirection is introduced. The inherited `profile`, `reference`, cache fields, and `module_state_id` remain the one script identity. `Runtime::next_module_state_id` remains the only allocator, the canonical module registry remains the descriptor authority, and `EvalContext::module_states` remains the only slab index space.
+`JsScript : Script` is stored directly as a `Script*` in `Runtime::scripts` and `loaded_script_index`; no wrapper header, parallel JS catalog, or `void* language_owner` indirection is introduced. The inherited `profile`, `reference`, cache fields, and `module_state_id` remain the one script identity. `Runtime::next_module_state_id` remains the only allocator, the canonical module registry remains the descriptor authority, and `EvalContext::module_states` remains the only slab index space.
 
 ### JSI30 — Realms and lexical environments remain separate
 
@@ -344,7 +344,7 @@ This refactor deletes the present duplication of `ast_pool`, `name_pool`, `sourc
 
 ### 4.3 Runtime catalog and lifecycle
 
-`Runtime::scripts` remains an `ArrayList` of `Script*`, and `script_index` remains canonical path → `Script*`. `runtime_register_script()` assigns the inherited `module_state_id` before list bookkeeping exactly once for either subtype. A `JsScript*` upcasts without allocation or an extra lookup.
+`Runtime::scripts` remains an `ArrayList` of `Script*`, and `loaded_script_index` remains canonical path → current-runtime `Script*`. `runtime_register_script()` assigns the inherited `module_state_id` before list bookkeeping exactly once for either subtype. A `JsScript*` upcasts without allocation or an extra lookup.
 
 `runtime_free_script()` becomes profile-aware at the cold cleanup boundary: it first invokes the optional profile cleanup hook for JS-only facts and artifacts, then runs the existing base cleanup exactly once. Base cleanup continues to own `reference`, `source`, directory, `AstIndex`, `Input` pool/type list, imports, T0 state, and inherited MIR context. The JS hook must not free an inherited field.
 
