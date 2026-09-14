@@ -17,6 +17,7 @@
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
 #include "../../lib/strbuf.h"
 
 #include <cstring>
@@ -1923,7 +1924,7 @@ static bool js_assert_is_date_value(Item value) {
     char ctor_name[64];
     if (!js_get_constructor_name(value, ctor_name, sizeof(ctor_name))) return false;
     size_t len = strlen(ctor_name);
-    return len >= 4 && memcmp(ctor_name + len - 4, "Date", 4) == 0;
+    return str_ends_with_const(ctor_name, len, "Date");
 }
 
 static bool js_assert_date_iso(Item value, StrBuf* sb) {

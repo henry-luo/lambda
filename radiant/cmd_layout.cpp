@@ -2552,8 +2552,8 @@ static DomDocument* load_dom_backed_image_document(Url* image_url, int viewport_
     char* image_filepath = url_to_local_path(image_url);
     const char* image_href = url_get_href(image_url);
     const char* src_value = image_href && image_href[0] ? image_href : image_filepath;
-    const char* filename = image_filepath ? strrchr(image_filepath, '/') : nullptr;
-    filename = filename ? filename + 1 : (src_value ? src_value : "image");
+    const char* filename = image_filepath ? file_path_basename(image_filepath)
+                                          : (src_value ? src_value : "image");
 
     char* src_attr = escape_image_document_html_attr(src_value);
     char* title_attr = escape_image_document_html_attr(filename);
@@ -2785,8 +2785,7 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
 
     auto step3_start = std::chrono::high_resolution_clock::now();
 
-    const char* filename = strrchr(text_filepath, '/');
-    filename = filename ? filename + 1 : text_filepath;
+    const char* filename = file_path_basename(text_filepath);
 
     const char* html_template =
         "<!DOCTYPE html>\n"

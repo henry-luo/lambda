@@ -381,12 +381,9 @@ static const char* radiant_dom_canonical_token_attr(DomElement* elem, const char
     if (!value) return "";
 
     char lowered[32];
-    size_t len = 0;
-    while (value[len] && len < sizeof(lowered) - 1) {
-        lowered[len] = (char)tolower((unsigned char)value[len]);
-        len++;
-    }
-    if (value[len] != '\0') return "";
+    size_t len = strlen(value);
+    if (len >= sizeof(lowered)) return "";
+    str_to_lower(lowered, value, len);
     lowered[len] = '\0';
 
     for (int i = 0; keywords[i]; i++) {
@@ -432,9 +429,7 @@ static String* radiant_dom_uppercase_name(const char* name) {
     char stack_buf[64];
     char* upper = (len < sizeof(stack_buf)) ? stack_buf : (char*)mem_alloc(len + 1, MEM_CAT_JS_RUNTIME);
     if (!upper) return heap_create_name("");
-    for (size_t i = 0; i < len; i++) {
-        upper[i] = (char)toupper((unsigned char)name[i]);
-    }
+    str_to_upper(upper, name, len);
     upper[len] = '\0';
     String* result = heap_create_name(upper);
     if (upper != stack_buf) mem_free(upper);

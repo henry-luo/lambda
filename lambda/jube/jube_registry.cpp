@@ -33,6 +33,7 @@
 #include "../../lib/hex.h"
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
+#include "../../lib/str.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/arraylist.h"
@@ -4413,7 +4414,7 @@ static bool jube_specifier_normalize(const char* name, char* out, size_t out_siz
         cursor += 5;
     }
     size_t length = strlen(cursor);
-    if (length > 3 && memcmp(cursor + length - 3, ".js", 3) == 0) length -= 3;
+    if (str_ends_with_const(cursor, length, ".js")) length -= 3;
     if (length == 0 || length >= out_size) return false;
     memcpy(out, cursor, length);
     out[length] = '\0';

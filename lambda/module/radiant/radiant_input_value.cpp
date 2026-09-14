@@ -58,9 +58,7 @@ extern "C" const char* radiant_input_type_normalize(const char* type,
         snprintf(output, output_size, "text");
         return output;
     }
-    for (size_t i = 0; i < length; i++) {
-        output[i] = (char)tolower((unsigned char)type[i]);
-    }
+    str_to_lower(output, type, length);
     output[length] = '\0';
     if (radiant_input_value_kind(output) == RADIANT_INPUT_VALUE_UNSUPPORTED) {
         snprintf(output, output_size, "text");
@@ -276,9 +274,7 @@ extern "C" bool radiant_input_value_sanitize(const char* type, const char* value
                     css_parse_color(source, &color) && color.a == 255;
             if (!valid) return riv_copy("#000000", output, output_size);
             if (!riv_copy(source, output, output_size)) return false;
-            for (size_t i = 1; output[i]; i++) {
-                output[i] = (char)tolower((unsigned char)output[i]);
-            }
+            str_lower_inplace(output, strlen(output));
             return true;
         }
         case RADIANT_INPUT_VALUE_FILE:
