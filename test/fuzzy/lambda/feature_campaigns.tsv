@@ -1,0 +1,6 @@
+# surface	status	evidence	formal_refs
+token	covered	grammar.js first-cut plus corpus and source_generator.py lexical families	S16;D8.1.2v3;D1.10
+reduction-kind	covered	lambda-cst parser differential runs every reviewed seed and structured candidate	S16;D8.1.2v3;D1.10
+reduction-form	covered	lambda-cst parser differential runs every reviewed seed and structured candidate	S16;D8.1.2v3;D1.10
+ast	covered	semantic seed corpus and stateful source_generator.py execute parser-built ASTs	D8.2.5v2;D1.10
+sysfunc	unsupported-with-reason	only deterministic dry-run-safe rows are generated directly; registry additions require an explicit campaign decision	D1.10;D8.6.3

@@ -7,6 +7,7 @@
 #include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_interp.hpp"
 #include "../lambda/js/js_function.hpp"
+#include "../lambda/js/js_property_attrs.h"
 #include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/runtime/sys_func_registry.h"
 #include "../lambda/input/input-script-cache.h"
@@ -1365,6 +1366,72 @@ TEST(JsInterpreter, DefinesObjectAccessorsThroughTheSharedPropertyKernel) {
 
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(js_strict_equal(result, flt2it(44.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, KeepsAccessorCellsVirtualAndAliveAcrossCollection) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "let point = { get answer() { return 42; } }; point;";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "virtual-accessor-cell.js", NULL);
+
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_MAP);
+    PersistentRooted<Item> point_root(result);
+    ASSERT_TRUE(point_root.valid());
+    ShapeEntry* entry = js_find_shape_entry(point_root.get(), "answer", 6);
+    ASSERT_NE(entry, nullptr);
+    ASSERT_TRUE(jspd_is_accessor(entry));
+    EXPECT_EQ(entry->byte_offset, -1);
+    ASSERT_NE(entry->accessor, nullptr);
+
+    heap_gc_collect();
+    Item answer = js_get_key_default(point_root.get(), js_name_item("answer", 6));
+    ASSERT_FALSE(item_is_error(answer));
+    EXPECT_EQ(js_strict_equal(answer, flt2it(42.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ConvertsAccessorDescriptorsBetweenVirtualAndDataStorage) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char install_source[] =
+        "let point = { answer: 1 }; "
+        "Object.defineProperty(point, 'answer', { "
+        "get() { return 42; }, configurable: true }); point;";
+    Item point = js_interp_execute_source(&runtime, install_source,
+        sizeof(install_source) - 1, "virtual-accessor-convert.js", NULL);
+
+    ASSERT_EQ(get_type_id(point), LMD_TYPE_MAP);
+    PersistentRooted<Item> point_root(point);
+    ASSERT_TRUE(point_root.valid());
+    ShapeEntry* entry = js_find_shape_entry(point_root.get(), "answer", 6);
+    ASSERT_NE(entry, nullptr);
+    EXPECT_TRUE(jspd_is_accessor(entry));
+    EXPECT_EQ(entry->byte_offset, -1);
+    ASSERT_NE(entry->accessor, nullptr);
+    EXPECT_EQ(js_strict_equal(js_get_key_default(point_root.get(),
+        js_name_item("answer", 6)), flt2it(42.0)).item, b2it(true));
+
+    const char materialize_source[] =
+        "Object.defineProperty(point, 'answer', { value: 9, writable: true, "
+        "enumerable: true, configurable: true }); point;";
+    point_root.set(js_interp_execute_source(&runtime, materialize_source,
+        sizeof(materialize_source) - 1, "virtual-accessor-materialize.js", NULL));
+
+    ASSERT_EQ(get_type_id(point_root.get()), LMD_TYPE_MAP);
+    entry = js_find_shape_entry(point_root.get(), "answer", 6);
+    ASSERT_NE(entry, nullptr);
+    EXPECT_FALSE(jspd_is_accessor(entry));
+    EXPECT_GE(entry->byte_offset, 0);
+    EXPECT_EQ(entry->accessor, nullptr);
+    EXPECT_EQ(js_strict_equal(js_get_key_default(point_root.get(),
+        js_name_item("answer", 6)), flt2it(9.0)).item, b2it(true));
 
     runtime_cleanup(&runtime);
 }

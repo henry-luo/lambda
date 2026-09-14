@@ -732,7 +732,8 @@ const char* ElementReader::get_attr_string(const char* key) const {
         if (field->name && field->name->str && field->name->length == key_len &&
             strncmp(field->name->str, key, key_len) == 0) {
 
-            if (field->type && field->type->type_id == LMD_TYPE_STRING) {
+            if (field->byte_offset >= 0 && field->type &&
+                    field->type->type_id == LMD_TYPE_STRING) {
                 const void* data = ((const char*)attr_data) + field->byte_offset;
                 const String* str = *(const String**)data;
                 return str ? str->chars : nullptr;

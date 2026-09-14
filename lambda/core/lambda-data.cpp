@@ -1098,7 +1098,7 @@ Item typeditem_to_item(TypedItem *titem) {
 }
 
 Item map_shape_field_to_item(void* map_data, const ShapeEntry* field) {
-    if (!map_data || !field) return ItemNull;
+    if (!map_data || !field || field->byte_offset < 0) return ItemNull;
     void* field_ptr = map_field_ptr(map_data, field);
     if (!field->name) {
         // spread fields store a raw nested Map*, not a TypedItem; treating the
@@ -1106,12 +1106,7 @@ Item map_shape_field_to_item(void* map_data, const ShapeEntry* field) {
         Map* nested = map_shape_field_to_map(map_data, field);
         return nested ? (Item){.map = nested} : ItemNull;
     }
-    if (field->flags & JSPD_IS_ACCESSOR) {
-        // Accessor cells occupy the FUNC-sized pointer lane, but are not
-        // callable values. Property kernels use the shape flag to decode the
-        // raw cell; generic map readers see its undefined identity instead.
-        return (Item){.item = *(uint64_t*)field_ptr};
-    }
+    if (field->flags & JSPD_IS_ACCESSOR) return ItemNull;
     LaneStorageDesc lane = {};
     if (shape_entry_uses_native_lane(field, &lane)) {
         if (lane.kind == LANE_STORAGE_INT) {
@@ -1338,7 +1333,8 @@ ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, boo
             target_equal(field->ns, key_ns)) {
             *is_found = true;
             TypeId type_id = shape_entry_storage_type_id(field);
-            void* field_ptr = map_field_ptr(map_data, field);
+            void* field_ptr = field->byte_offset >= 0
+                ? map_field_ptr(map_data, field) : NULL;
             // map fields are packed by their storage width; an 8-byte debug
             // peek here crossed bool/narrow scalar fields under exact sizing.
             log_debug("_map_get_const: key='%s' semantic_type=%d storage_type=%d byte_offset=%d field_ptr=%p map_type=%p map_data=%p",
@@ -1763,6 +1759,11 @@ extern "C" void lambda_shape_entry_lane(const void* shape_entry, uint8_t* kind,
     if (kind) *kind = desc->kind;
     if (nullable) *nullable = desc->nullable;
     if (value_domain) *value_domain = desc->value_domain;
+}
+
+extern "C" void* lambda_shape_entry_accessor(const void* shape_entry) {
+    const ShapeEntry* entry = (const ShapeEntry*)shape_entry;
+    return entry ? entry->accessor : NULL;
 }
 
 bool shape_entry_uses_native_lane(const ShapeEntry* field,

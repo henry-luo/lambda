@@ -2316,10 +2316,16 @@ Map* map_fill_items(Map* map, const Item* values, int value_count);
 // walk above all -- reads the descriptor the entry stores (SCU9/D3.4.6): its
 // kind, nullability and decoding TypeId, never Type::type_id.
 #ifdef __cplusplus
-extern "C"
+extern "C" {
 #endif
 void lambda_shape_entry_lane(const void* shape_entry, uint8_t* kind,
     uint8_t* nullable, uint8_t* value_domain);
+// JS accessor cells are ShapeEntry-owned virtual edges. The collector uses
+// this bridge instead of duplicating the trailing C++ ShapeEntry layout.
+void* lambda_shape_entry_accessor(const void* shape_entry);
+#ifdef __cplusplus
+}
+#endif
 
 typedef struct Element Element;
 Element* elmt_fill(Element *elmt, ...);

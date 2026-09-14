@@ -1,0 +1,4 @@
+# case_id	source_sha256	tree_status	c_status	ruling	formal_refs	fixture	issue
+# Add only manually adjudicated differences. The runner rejects a changed hash,
+# changed classification, unreviewed difference, resolved exception, or any
+# unresolved grammar-bug/c-parser-bug/spec-gap row (D1.10, D8.1.2v3, S16).

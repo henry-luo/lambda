@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 6.1.0 (2026-09-14)
+**Spec version:** 6.1.1 (2026-09-14)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -653,6 +653,18 @@ that carries them.
   different metadata families are never interchangeable runtime blueprints.
   Foreign/Input TypeMaps may retain null metadata until the explicit JS
   boundary creates a runtime family. [JS_Runtime_Object_Property JOP1–JOP5]
+- **D3.4.8** A JavaScript accessor descriptor is a **virtual**, map-local
+  `ShapeEntry`: `JSPD_IS_ACCESSOR` is set, `byte_offset == -1`, and the
+  entry's `JsAccessorCell*` is its only descriptor payload. It consumes no
+  `Map.data` bytes and no generic Map reader may surface the cell as an
+  `Item`; only the JS property kernel may dispatch its getter/setter. Because
+  the pointer is mutable per object, the containing `TypeMap` is private to
+  that object before the cell is attached and is never structurally shared.
+  The collector follows the direct `Map → TypeMap → ShapeEntry → cell` edge;
+  the allocating code holds an exact temporary object root only until that
+  edge is published, with no permanent root or side table. Data→accessor
+  conversion retires the old physical lane, and accessor→data allocates a
+  fresh lane before clearing the virtual descriptor. [JSCU33]
 
 ## D4 Memory Management
 
@@ -2184,7 +2196,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D2.7 | SG1–SG8 | `Lambda_Design_Scalar_GC_Invariant.md` |
 | D2.8 | TE-15/TE-17/TE-18; IEH I1–I4 | `Lambda_Design_Type_Enforcement.md`, `vibe/impl/Lambda_Impl_Error_Handling (done).md` |
 | D3.1–D3.3 | C8.5-4, C9a; TE-1/TE-6/TE-10/TE-13; DF12/DF13; B7; Lane §1 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Compiling_Dual_Func.md` |
-| D3.4 | Shape_Pool §1–§8; Transpiler DD1–DD4; NI10/NI13; Nullable §6; TE §6 B7b | `Lambda_Shape_Pool.md`, `Lambda_Transpiler.md`, `Lambda_Design_Name_Identity.md` |
+| D3.4 | Shape_Pool §1–§8; Transpiler DD1–DD4; NI10/NI13; Nullable §6; TE §6 B7b; JSCU33 | `Lambda_Shape_Pool.md`, `Lambda_Transpiler.md`, `Lambda_Design_Name_Identity.md`, `Lambda_Design_Structs_JS.md` |
 | D4.1 | GC1 §2.10.4; CW8; SF16; CR8; Mem_Heap §1 (MP-12, MP-15) | `Lambda_Garbage_Collector.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Stack_Rooting.md`, `Lambda_Design_Mem_Heap.md` |
 | D4.2 | Memory_Context stages; Mem_Heap §1.3–§1.4, §2, §9 (MP-13, MP-14, MP-16–MP-18) | `vibe/Memory_Context.md`, `Lambda_Design_Mem_Heap.md` |
 | D4.3 | GC2 §4–§12 | `Lambda_Garbage_Collector2.md` |

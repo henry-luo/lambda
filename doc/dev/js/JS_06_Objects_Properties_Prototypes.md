@@ -1,6 +1,6 @@
 # LambdaJS — Objects, Properties & Prototypes
 
-> **Last verified against tree:** 2026-09-03 *(object/map representation re-verified for D2.6.9; the rest still carries its initial stamp from git history)*
+> **Last verified against tree:** 2026-09-14 *(including virtual accessor descriptors under D3.4.8)*
 
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers how JS objects are represented (Lambda `Map` + `TypeMap` shape), how property attributes are stored, the `[[Get]]`/`[[Set]]` dispatch pipelines, `Object.defineProperty`, the prototype chain, realm-local intrinsic properties, symbol-keyed properties, and constructor shape pre-allocation.
 >
@@ -14,9 +14,10 @@
 JS objects are Lambda `Map` structs (`LMD_TYPE_MAP`) carrying a `TypeMap` "shape" descriptor — **never Lambda `Object`s** (`LMD_TYPE_OBJECT`), which today is a separate kind produced only by a Lambda `type T { … }` declaration and reaches guest code only inbound (**D2.6.9v2**, the shipped state). **Ruled forward as D2.6.9v3:** once nominal-ness becomes a descriptor property and the object TypeId retires (D2.6.6v2 phase 2), a JS object is a *nominal* Lambda map — its class is its nominal record — and therefore IS a Lambda object; the naming trap below then dissolves. The naming is the trap: "object" here means Lambda's nominal kind, while the thing a JS program calls an object is a map. Since D2.6.6 made `Object` an alias of `struct Element`, an inbound Lambda object is element-shaped, so any guest path that accepts `LMD_TYPE_OBJECT` must read its attribute face through `lambda_attr_shape`/`lambda_attr_data` — punning it to a `Map*` reads its `items` pointer as `type`. Map-only machinery (the property extension table, iterator/proxy/sparse map kinds, the `js_native_trace` hook) stays gated to `LMD_TYPE_MAP`.
 Functions (`LMD_TYPE_FUNC`) and arrays (`LMD_TYPE_ARRAY`) keep ordinary properties in side maps. Property semantics (attributes, accessors, prototype lookup, exotic objects) are layered on top of this representation. The shape *layout* and GC handling are shared with [JS_03 — Value Model & Memory](JS_03_Value_Model.md); this document focuses on the property/prototype machinery. Symbol *values* (the `Symbol` builtin) are in [JS_10 — Standard Built-in Library](JS_10_Builtins.md); here we cover only their use as property keys.
 
-The Tune6 object migration applies **D3.4.7**: descriptor metadata is
-`ShapeEntry::flags`, accessors are `JsAccessorPair` slots, and built-in brands
-resolve through immutable `TypeMap::js_meta` via `js_object_meta(Item)`.
+The Tune6 object migration applies **D3.4.7/D3.4.8**: descriptor metadata is
+`ShapeEntry::flags`, accessors are virtual `JsAccessorCell` descriptors on
+private shapes, and built-in brands resolve through immutable `TypeMap::js_meta`
+via `js_object_meta(Item)`.
 `map_kind` is physical storage information only. Public properties whose names
 resemble former markers are ordinary JS properties; private engine names use
 NamePool identity rather than spelling prefixes.
@@ -28,10 +29,10 @@ NamePool identity rather than spelling prefixes.
 <img alt="Object & shape layout" src="diagram/object_layout.svg" width="325">
 
 - **`Container`** (`lambda.h`) — base header plus the physical flags union. `map_kind` remains a four-bit storage/allocation tag; it is not an object classifier.
-- **`Map`** (`lambda.hpp` / mirror `lambda.h`) — `Container` header + `void* type` (a valid `TypeMap*` for runtime JS Maps), `void* data` (packed field-value buffer), and `data_cap`. Native engine state is held in typed trailing carrier storage; host state remains in VMaps. `Map.data` therefore retains its TypeMap-described meaning under **D3.4.1/D3.4.5**.
+- **`Map`** (`lambda.hpp` / mirror `lambda.h`) — `Container` header + `void* type` (a valid `TypeMap*` for runtime JS Maps), `void* data` (packed field-value buffer), and `data_cap`. Native engine state is held in typed trailing carrier storage; host state remains in VMaps. `Map.data` contains physical fields only under **D3.4.1/D3.4.5/D3.4.8**.
 - **`TypeMap`** (`lambda-data.hpp`) — the shape plus its immutable `const JsClassMeta* js_meta` refinement. The metadata is selected before publication and preserved by shape/descriptor transitions under **D3.4.7**; it contains no realm `Item`, GC edge, mutable cache, or context-owned pointer.
-- **`ShapeEntry`** (`lambda-data.hpp:227`) — per field: `StrView* name`, `Type* type`, `int64_t byte_offset` (offset into `Map.data`), `ShapeEntry* next`, and **`uint8_t flags`** (the `JSPD_*` bits; 0 = JS defaults).
-- **`JsAccessorPair`** (`lambda-data.hpp:220`) — `{ uint8_t type_id (= LMD_TYPE_FUNC), Item getter, Item setter }`, stored **directly in the field's data slot** when the shape entry has `JSPD_IS_ACCESSOR`. Because the slot's `type_id` reads `LMD_TYPE_FUNC`, **every reader must test `jspd_is_accessor()` before treating the slot as a value** (`js_property_attrs.h:104`).
+- **`ShapeEntry`** (`lambda-data.hpp`) — a physical field has a non-negative `byte_offset` into `Map.data`. A JS accessor has `byte_offset == -1`, `JSPD_IS_ACCESSOR`, and an `accessor` pointer instead. That entry is virtual and its `TypeMap` is private to the one owner object.
+- **`JsAccessorCell`** (`lambda-data.hpp`) — a `GC_TYPE_JS_ACCESSOR` object containing getter/setter `Item` edges. The collector follows `Map → TypeMap → ShapeEntry → cell`; the cell is never encoded as an `Item`, never stored in `Map.data`, and never reaches the Function tracer. Setup holds it in an exact temporary object root only until the shape publishes that edge. `JsAccessorPair` remains the property-layer compatibility alias.
 
 The hash table is last-writer-wins and linear-probe (`lambda-data.hpp:280`). Small or stack-only maps use the inline 32-slot table; pool-owned builders call `typemap_hash_build` / `typemap_hash_insert_owned` to grow the active table for larger shapes. The shape chain remains authoritative when a table is unpopulated or saturated.
 
@@ -46,13 +47,13 @@ The **primary** representation is the `ShapeEntry::flags` byte, inverse-encoded 
 | `JSPD_NON_WRITABLE` | `0x01` | property is read-only |
 | `JSPD_NON_ENUMERABLE` | `0x02` | hidden from enumeration |
 | `JSPD_NON_CONFIGURABLE` | `0x04` | cannot be redefined/deleted |
-| `JSPD_IS_ACCESSOR` | `0x08` | slot holds a `JsAccessorPair*` |
+| `JSPD_IS_ACCESSOR` | `0x08` | virtual entry owns a `JsAccessorCell*`; `byte_offset == -1` |
 | `JSPD_DELETED` | `0x10` | tombstone (successor to the slot sentinel) |
 
 Inline predicates/mutators (`jspd_is_writable`, `jspd_set_*`, …) are in `js_property_attrs.h:37`. Higher-level helpers in `js_property_attrs.cpp`: `js_find_shape_entry` (resolves the right `TypeMap` for MAP/ARRAY/FUNC then hash+linear lookup, `:61`); `js_typemap_clone_for_mutation` (copy-on-write before any flag change, `:129`); the flag-first query/write helpers `js_props_query_{writable,enumerable,configurable}` (`:294`) and `js_attr_set_{writable,enumerable,configurable}` (`:416`); and the accessor producers `js_install_native_accessor`, `js_define_accessor_partial`, `js_find_accessor_pair_inheritable` (own+proto walk, depth cap 16, `:699`).
 
 Retired metadata strings:
-- `__get_X` / `__set_X` are no longer accessor storage. Accessor producers install a `JsAccessorPair` under the visible property name and set `JSPD_IS_ACCESSOR`.
+- `__get_X` / `__set_X` are no longer accessor storage. Accessor producers attach a `JsAccessorCell` to the visible property's private `ShapeEntry`, set `JSPD_IS_ACCESSOR`, and set `byte_offset == -1`.
 - `__nw_` / `__ne_` / `__nc_` are no longer attribute storage or fallback. Attribute reads and writes use `ShapeEntry::flags`; array descriptor-special indices and `length` are materialized in the companion map before flags are mutated.
 - `__class_name__` is no longer built-in brand metadata. Built-in identity is
   the immutable `TypeMap::js_meta` resolved by `js_object_meta(Item)` under
@@ -126,7 +127,7 @@ The spec-named kernels `js_ordinary_set` / `js_ordinary_set_via_accessor` live i
 - existing-property state collection via `js_define_property_collect_existing_state`;
 - array companion-map index invariants via `js_define_property_validate_array_companion_index`;
 - **non-configurable invariant checks** via `js_define_property_validate_nonconfigurable_update` (no config/enumerable change; no data<->accessor conversion; non-writable value/writable change via SameValue `js_object_is`; accessor get/set change) using the flag-first `js_props_obj_query_*` helpers and the live `JsAccessorPair`;
-- storage apply via `js_define_property_apply_validated_descriptor` -> `js_descriptor_from_object` -> `js_define_own_property_from_descriptor` (`js_props.cpp`), which clears/sets `IS_ACCESSOR`, writes data via `fn_map_set`, clears `JSPD_DELETED` on resurrection, and mutates attribute flags through `js_attr_set_*`.
+- storage apply via `js_define_property_apply_validated_descriptor` -> `js_descriptor_from_object` -> `js_define_own_property_from_descriptor` (`js_props.cpp`), which creates a virtual accessor or materializes a fresh physical data lane on accessor→data conversion, clears `JSPD_DELETED` on resurrection, and mutates attribute flags through `js_attr_set_*`.
 
 ---
 

@@ -626,6 +626,9 @@ void js_object_proto_setter(Item object, Item value);
 void js_mark_non_enumerable(Item object, Item name);
 void js_mark_non_writable(Item object, Item name);
 void js_mark_non_configurable(Item object, Item name);
+// Allocate a function's ordinary properties Map without materializing a data
+// property. Virtual accessor descriptors use this before private-shape setup.
+Map* js_function_props_ensure(Item fn);
 void js_func_init_property(Item fn, Item key, Item value);
 void js_mark_all_non_enumerable(Item object);
 Item js_new_number_wrapper(Item arg);

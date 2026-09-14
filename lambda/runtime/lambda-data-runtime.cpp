@@ -2600,6 +2600,7 @@ Item _map_read_field(ShapeEntry* field, void* map_data) {
 
 static Item map_read_field_for_owner(Container* owner, ShapeEntry* field,
                                      void* map_data) {
+    if (!field || field->byte_offset < 0) return ItemNull;
     if (!owner || !owner->is_immortal) return _map_read_field(field, map_data);
     void* field_ptr = (char*)map_data + field->byte_offset;
     switch (shape_entry_storage_type_id(field)) {

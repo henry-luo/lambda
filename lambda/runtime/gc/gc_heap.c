@@ -1353,13 +1353,6 @@ static void* item_to_ptr(gc_heap_t* gc, uint64_t item) {
         return (void*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFF);
     }
 
-    // Accessor cells use the otherwise-unused FUNC tag to distinguish their
-    // raw pointer from a callable value in a shaped property slot.  They have
-    // a dedicated GC header and must remain traceable through that slot.
-    if (tag == LMD_TYPE_FUNC_) {
-        return (void*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFF);
-    }
-
     // Raw container pointers have a zero high byte; unknown high tags are
     // sentinels or invalid Items, not recoverable pointer encodings.
     if (tag >= LMD_TYPE_RANGE_) return NULL;
@@ -1653,9 +1646,15 @@ static void gc_trace_shape_fields(gc_heap_t* gc, void* type_ptr, void* data_ptr,
                                   int64_t byte_size) {
     uint8_t* shape = (uint8_t*)*(void**)((uint8_t*)type_ptr + LAMBDA_GC_OFF_TYPE_MAP_SHAPE);
     while (shape) {
-        gc_trace_shape_field(gc, shape,
-            *(int64_t*)(shape + LAMBDA_GC_OFF_SHAPE_ENTRY_BYTE_OFFSET),
-            data_ptr, byte_size);
+        // A JS accessor is a virtual ShapeEntry field (byte_offset == -1), so
+        // trace its exact cell edge even when this Map has no packed data.
+        void* accessor = lambda_shape_entry_accessor(shape);
+        if (accessor) gc_mark_object_ptr(gc, accessor);
+        if (data_ptr) {
+            gc_trace_shape_field(gc, shape,
+                *(int64_t*)(shape + LAMBDA_GC_OFF_SHAPE_ENTRY_BYTE_OFFSET),
+                data_ptr, byte_size);
+        }
         shape = (uint8_t*)*(void**)(shape + LAMBDA_GC_OFF_SHAPE_ENTRY_NEXT);
     }
 }
@@ -1738,11 +1737,11 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         {
             void* attr_type = *(void**)(p + LAMBDA_GC_OFF_MAP_TYPE);
             void* attr_data = *(void**)(p + LAMBDA_GC_OFF_MAP_DATA);
-            if (attr_type && attr_data) {
-                int64_t byte_size = gc_packed_data_allocation_size(
-                    attr_type, *(int*)(p + LAMBDA_GC_OFF_MAP_DATA_CAP));
+            if (attr_type) {
+                int64_t byte_size = attr_data ? gc_packed_data_allocation_size(
+                    attr_type, *(int*)(p + LAMBDA_GC_OFF_MAP_DATA_CAP)) : 0;
                 gc_trace_shape_fields(gc, attr_type, attr_data, byte_size);
-                gc_trace_data_words(gc, attr_data, byte_size);
+                if (attr_data) gc_trace_data_words(gc, attr_data, byte_size);
             }
         }
         if (array_flags & 0x02) {  // Container.is_view in array_flags byte
@@ -1799,11 +1798,11 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         {
             void* attr_type = *(void**)(p + LAMBDA_GC_OFF_MAP_TYPE);
             void* attr_data = *(void**)(p + LAMBDA_GC_OFF_MAP_DATA);
-            if (attr_type && attr_data) {
-                int64_t byte_size = gc_packed_data_allocation_size(
-                    attr_type, *(int*)(p + LAMBDA_GC_OFF_MAP_DATA_CAP));
+            if (attr_type) {
+                int64_t byte_size = attr_data ? gc_packed_data_allocation_size(
+                    attr_type, *(int*)(p + LAMBDA_GC_OFF_MAP_DATA_CAP)) : 0;
                 gc_trace_shape_fields(gc, attr_type, attr_data, byte_size);
-                gc_trace_data_words(gc, attr_data, byte_size);
+                if (attr_data) gc_trace_data_words(gc, attr_data, byte_size);
             }
         }
         break;
@@ -1824,14 +1823,15 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         if (tag == LMD_TYPE_MAP_ && map_kind == MAP_KIND_ARRAY_SPARSE_) {
             gc_trace_sparse_array_map_entries(gc, obj);
         }
-        if (!type_ptr || !data_ptr) break;
+        if (!type_ptr) break;
 
         // D4.3.1: the object owns one fixup for its complete data allocation.
         // Dynamic JS shapes may reserve pointer-width slots beyond byte_size;
         // bounding tracing by the packed logical size skipped those live slots.
-        int64_t byte_size = gc_packed_data_allocation_size(type_ptr, data_cap);
+        int64_t byte_size = data_ptr
+            ? gc_packed_data_allocation_size(type_ptr, data_cap) : 0;
         gc_trace_shape_fields(gc, type_ptr, data_ptr, byte_size);
-        gc_trace_data_words(gc, data_ptr, byte_size);
+        if (data_ptr) gc_trace_data_words(gc, data_ptr, byte_size);
         break;
     }
 
@@ -1857,10 +1857,11 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         }
 
         // trace attributes (same shape-walk as Map)
-        if (type_ptr && data_ptr) {
-            int64_t byte_size = gc_packed_data_allocation_size(type_ptr, data_cap);
+        if (type_ptr) {
+            int64_t byte_size = data_ptr
+                ? gc_packed_data_allocation_size(type_ptr, data_cap) : 0;
             gc_trace_shape_fields(gc, type_ptr, data_ptr, byte_size);
-            gc_trace_data_words(gc, data_ptr, byte_size);
+            if (data_ptr) gc_trace_data_words(gc, data_ptr, byte_size);
         }
         break;
     }

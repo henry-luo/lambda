@@ -24,7 +24,7 @@ extern "C" NameId js_symbol_name_id(Item sym);
 //   js_call_function      — js_runtime.h
 //   js_throw_type_error   — js_runtime.h
 //   js_find_shape_entry   — js_property_attrs.h
-//   js_item_to_accessor_pair, jspd_is_accessor — js_property_attrs.h (inline)
+//   js_shape_entry_accessor_pair, jspd_is_accessor — js_property_attrs.h (inline)
 //
 // Item helpers (encoding-private to js_runtime.cpp at present): replicate the
 // constants we need here. Keep these in lockstep with js_runtime.cpp:188 and
@@ -163,7 +163,7 @@ extern Item fn_map_set(Item map_item, Item key, Item value);
        assert(!(js_props_is_deleted_sentinel(slot) && (se) && jspd_is_accessor(se)))
 #  define JS_PROPS_ASSERT_ACCESSOR_PAIR(slot, se) \
        assert(!((se) && jspd_is_accessor(se)) || \
-              js_item_to_accessor_pair(slot) != NULL)
+              js_shape_entry_accessor_pair(se) != NULL)
 #else
 #  define JS_PROPS_ASSERT_KEY(name, len)            ((void)0)
 #  define JS_PROPS_ASSERT_NOT_DEL_ACCESSOR(slot, se) ((void)0)
@@ -218,13 +218,16 @@ static JsShapeSlotStatus js_own_shape_slot_status_impl(Item object,
     if (out_se) *out_se = NULL;
     if (out_borrowed) *out_borrowed = false;
 
-    void* m_data = NULL; int m_cap = 0;
-    if (!js_props_storage(object, &m_data, &m_cap)) return JS_SHAPE_SLOT_ABSENT;
-
     ShapeEntry* se = name_id != NAME_ID_NONE
         ? js_find_shape_entry_name_id(object, name_id)
         : js_find_shape_entry(object, name, name_len);
     if (out_se) *out_se = se;
+
+    if (se && jspd_is_deleted(se)) return JS_SHAPE_SLOT_DELETED;
+    if (se && jspd_is_accessor(se)) return JS_SHAPE_SLOT_ACCESSOR;
+
+    void* m_data = NULL; int m_cap = 0;
+    if (!js_props_storage(object, &m_data, &m_cap)) return JS_SHAPE_SLOT_ABSENT;
 
     if (se && m_data && shape_entry_storage_fits_data(se, m_cap)) {
         if (get_type_id(object) == LMD_TYPE_MAP &&
@@ -235,9 +238,7 @@ static JsShapeSlotStatus js_own_shape_slot_status_impl(Item object,
         }
         Item slot = _map_read_field(se, m_data);
         if (out_slot) *out_slot = slot;
-        if (jspd_is_deleted(se)) return JS_SHAPE_SLOT_DELETED;
         if (js_props_is_deleted_sentinel(slot)) return JS_SHAPE_SLOT_DELETED;
-        if (jspd_is_accessor(se)) return JS_SHAPE_SLOT_ACCESSOR;
         if (out_borrowed) *out_borrowed = lambda_item_uses_scalar_home(slot);
         return JS_SHAPE_SLOT_DATA;
     }
@@ -251,10 +252,8 @@ static JsShapeSlotStatus js_own_shape_slot_status_impl(Item object,
     Item slot = js_map_shape_lookup_ext(object.map, name, name_len, &found);
     if (out_slot) *out_slot = slot;
 
-    if (se && jspd_is_deleted(se)) return JS_SHAPE_SLOT_DELETED;
     if (!found) return JS_SHAPE_SLOT_ABSENT;
     if (js_props_is_deleted_sentinel(slot)) return JS_SHAPE_SLOT_DELETED;
-    if (se && jspd_is_accessor(se)) return JS_SHAPE_SLOT_ACCESSOR;
     return JS_SHAPE_SLOT_DATA;
 }
 
@@ -337,7 +336,7 @@ extern "C" JsOwnGetStatus js_ordinary_get_own_ex(Item object, Item key,
         if (status == JS_SHAPE_SLOT_ABSENT) return JS_OWN_NOT_FOUND;
         if (status == JS_SHAPE_SLOT_DELETED) return JS_OWN_DELETED;
         if (status == JS_SHAPE_SLOT_ACCESSOR) {
-            JsAccessorPair* pair = js_item_to_accessor_pair(slot);
+            JsAccessorPair* pair = js_shape_entry_accessor_pair(se);
             if (pair && pair->getter.item != ItemNull.item) {
                 Item this_val = (Receiver.item ? Receiver : object);
                 Item getter_result = js_call_accessor_getter(pair->getter, this_val);
@@ -429,12 +428,12 @@ extern "C" JsOwnDescKind js_ordinary_get_own_descriptor(Item object,
     JS_PROPS_ASSERT_NOT_DEL_ACCESSOR(slot, se);
     JS_PROPS_ASSERT_ACCESSOR_PAIR(slot, se);
     if (status == JS_SHAPE_SLOT_ACCESSOR) {
-        JsAccessorPair* pair = js_item_to_accessor_pair(slot);
+        JsAccessorPair* pair = js_shape_entry_accessor_pair(se);
         if (pair) {
             if (out_pair) *out_pair = pair;
             return JS_DESC_ACCESSOR;
         }
-        // Shape says accessor but slot isn't a pair — treat as data
+        // Shape says accessor but has no cell — treat as data
         // (defensive; should not happen with intact invariants).
     }
     if (out_value) *out_value = slot;
@@ -482,9 +481,6 @@ extern "C" bool js_shape_mark_deleted_own(Item object, const char* name, int nam
         se = js_find_shape_entry(object, name, name_len);
     }
     if (!se) return false;
-    if (jspd_is_accessor(se)) {
-        js_shape_entry_set_accessor(object, name, name_len, /*is_accessor=*/false);
-    }
     js_shape_entry_update_flags(object, name, name_len, 0,
         (uint8_t)(JSPD_NON_WRITABLE | JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE));
     js_shape_entry_set_deleted(object, name, name_len, /*is_deleted=*/true);
@@ -514,13 +510,9 @@ extern "C" JsResolveFieldStatus js_ordinary_resolve_shape_value(ShapeEntry* e,
                                                                   Map* m,
                                                                   Item receiver,
                                                                   Item* out_value) {
-    if (map_ctor_offset_is_reserved(m, e->byte_offset)) return JS_RESOLVE_DELETED;
-    Item slot = _map_read_field(e, m->data);
     if (jspd_is_deleted(e)) return JS_RESOLVE_DELETED;
-    if (js_props_is_deleted_sentinel(slot)) return JS_RESOLVE_DELETED;
-
     if (jspd_is_accessor(e)) {
-        JsAccessorPair* pair = js_item_to_accessor_pair(slot);
+        JsAccessorPair* pair = js_shape_entry_accessor_pair(e);
         if (pair && pair->getter.item != ItemNull.item) {
             Item v = js_call_accessor_getter(pair->getter, receiver);
             if (item_is_error(v)) return JS_RESOLVE_THREW;
@@ -532,6 +524,9 @@ extern "C" JsResolveFieldStatus js_ordinary_resolve_shape_value(ShapeEntry* e,
         if (out_value) *out_value = js_props_undefined();
         return JS_RESOLVE_VALUE;
     }
+    if (map_ctor_offset_is_reserved(m, e->byte_offset)) return JS_RESOLVE_DELETED;
+    Item slot = _map_read_field(e, m->data);
+    if (js_props_is_deleted_sentinel(slot)) return JS_RESOLVE_DELETED;
     if (out_value) *out_value = slot;
     return JS_RESOLVE_VALUE;
 }
@@ -546,7 +541,7 @@ static bool js_props_desc_from_shape_slot(JsShapeSlotStatus status, Item slot,
     if (status == JS_SHAPE_SLOT_ABSENT || status == JS_SHAPE_SLOT_DELETED) return false;
 
     if (status == JS_SHAPE_SLOT_ACCESSOR) {
-        JsAccessorPair* pair = js_item_to_accessor_pair(slot);
+        JsAccessorPair* pair = js_shape_entry_accessor_pair(se);
         if (pair) {
             out->flags |= JS_PD_HAS_GET;
             out->getter = (pair->getter.item != ItemNull.item)
@@ -777,7 +772,7 @@ static bool js_props_store_raw_data_slot(Item target, ShapeEntry* entry, Item va
         NameId entry_name_id = entry->name_id;
         const char* entry_name = entry->name ? entry->name->str : NULL;
         int entry_name_len = entry->name ? (int)entry->name->length : 0;
-        // Accessor-to-data conversion changes the slot's tracing/read type.
+        // Accessor-to-data conversion changes the descriptor's tracing/read type.
         // Detach the intrinsic snapshot blueprint before retagging it, or a
         // later reset inherits this test's descriptor mutation (D6.2.2v2).
         if (!js_typemap_clone_for_mutation_pub(target)) return false;
@@ -1024,7 +1019,8 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
         if (is_array_exotic) {
             // Numeric (index) array properties: use the companion map digit
             // entry. Writing the pair into arr->items[idx] would clobber a data
-            // slot/hole, so the companion-map shape entry owns IS_ACCESSOR.
+            // dense element/hole, so the companion-map shape entry owns the
+            // virtual IS_ACCESSOR descriptor.
             //
             // Non-numeric (named) array properties: route through the IS_ACCESSOR
             // chokepoint just like regular objects. The companion map carries
@@ -1041,8 +1037,7 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
                 // Calling js_define_accessor_partial(arr, ...) would recurse into
                 // js_set_key_default(arr, "<idx>", pair) which routes to js_elements_set
                 // and clobbers arr->items[idx]. Targeting the companion map keeps
-                // the bare-name slot under the digit-string key with IS_ACCESSOR
-                // on its shape entry.
+                // the digit-string descriptor on its private shape entry.
                 Item target;
                 if (js_props_is_array(object)) {
                     Array* arr = object.array;
@@ -1083,7 +1078,7 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
         }
     } else if (pd->flags & JS_PD_HAS_VALUE) {
         // ----- Data descriptor: write the value, clearing IS_ACCESSOR if
-        //       the previous slot held an accessor pair.
+        //       the previous descriptor was an accessor.
         Item value_storage_target = ItemNull;
         if (!is_new_property) {
             Item accessor_target = existing_accessor ?
@@ -1137,9 +1132,9 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
                 JS_ASSIGN_OR_RETURN(set_result, js_define_own_key_storage(
                     accessor_data_target, name_item, pd->value));
             }
-            // Clear IS_ACCESSOR only after replacing the JsAccessorPair slot.
-            // Attribute probes between the two operations must continue to see
-            // the slot as an accessor, not as a real Function data property.
+            // Clear IS_ACCESSOR only after materializing the physical data lane.
+            // Attribute probes between the two operations must still dispatch
+            // through the virtual descriptor rather than decode stale bytes.
             js_props_clear_descriptor_accessor(accessor_data_target, name_item,
                 name, name_len);
         } else if (!is_new_property && get_type_id(object) == LMD_TYPE_MAP &&

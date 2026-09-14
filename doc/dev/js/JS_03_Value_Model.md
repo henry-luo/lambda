@@ -1,6 +1,6 @@
 # LambdaJS — Value Model, Memory & GC Interop
 
-> **Last verified against tree:** 2026-08-18 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-09-14 *(including D3.4.8 accessor-cell ownership)*
 
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers how a JavaScript value is represented at runtime: the `Item` tagged-value layout, the JS type ↔ Lambda `TypeId` mapping, the `undefined`/`null`/TDZ/deleted sentinels, the BigInt and Symbol-key encodings, the GC heap + side-stack memory model, `JsFunction`/closure-env ownership, the transient call-argument stack, module-variable storage, the `JsRuntimeState` capsule, and which Lambda subsystems LambdaJS reuses.
 >
@@ -105,7 +105,7 @@ container.
 
 LambdaJS allocates from the `EvalContext`'s three regions, all shared with Lambda script.
 
-- **GC heap** (`gc_heap_t`) — a **dual-zone non-moving mark-and-sweep** collector (`lib/gc/gc_heap.c:4`). The *object zone* is a size-class free-list allocator for object structs (`Map`, `List`, `String`, `Decimal`, `JsAccessorPair`, …); the *data zone* is a bump-pointer allocator for variable-size buffers such as `Map.data` (`gc_heap.h:96`). JS objects are created via `heap_calloc` (`lambda-mem.cpp:381`), which zeroes the struct and sets `Container::is_heap` for heap-vs-arena discrimination. `map_kind` records physical storage only; immutable `TypeMap::js_meta` carries semantic object identity under **D3.4.7**. The JIT hot path uses `heap_calloc_class` (`:395`) with a pre-computed size class and a bump-pointer fast path. **Non-moving headers** are the load-bearing property: a pointer handed to JIT code, stored in a traced environment, or sitting in the arg stack stays valid across a collection. Object structs never relocate; variable data buffers can move and their owner pointers/interior scalar references are rewritten.
+- **GC heap** (`gc_heap_t`) — a **dual-zone non-moving mark-and-sweep** collector (`lib/gc/gc_heap.c:4`). The *object zone* is a size-class free-list allocator for object structs (`Map`, `List`, `String`, `Decimal`, `JsAccessorCell`, …); the *data zone* is a bump-pointer allocator for variable-size buffers such as `Map.data` (`gc_heap.h:96`). JS objects are created via `heap_calloc` (`lambda-mem.cpp:381`), which zeroes the struct and sets `Container::is_heap` for heap-vs-arena discrimination. `map_kind` records physical storage only; immutable `TypeMap::js_meta` carries semantic object identity under **D3.4.7**. Under **D3.4.8**, an accessor cell has `GC_TYPE_JS_ACCESSOR` and is reached directly from its owning private `ShapeEntry`; setup uses only an exact temporary object root until that edge is installed. The JIT hot path uses `heap_calloc_class` (`:395`) with a pre-computed size class and a bump-pointer fast path. **Non-moving headers** are the load-bearing property: a pointer handed to JIT code, stored in a traced environment, or sitting in the arg stack stays valid across a collection. Object structs never relocate; variable data buffers can move and their owner pointers/interior scalar references are rewritten.
 - **Execution side stacks** — each context reserves stable root and number regions. Generated JS saves both watermarks at function entry. Heap-capable register values are published to the precise root region; out-of-band doubles and full-width integer temporaries use the raw number region. The single epilogue copies escaping numerics to caller-donated homes before restoring the complete callee extent. The collector scans only `[side_root_base, side_root_top)` and never interprets raw number slots as Items. Datetime is owner-backed and does not use the number region; dynamic values use GC storage and static Mark values may retain Input-arena storage.
 - **Module-lifetime pool** (`js_input->pool`, a `mempool`) — cache-addressable compiled wrappers returned by the cached `js_new_function` path remain module-lifetime because the function cache embeds them. Uncached method/`with` wrappers, escaping closures, bound functions, and other dynamically created wrappers are ordinary GC objects.
 
@@ -169,7 +169,7 @@ LambdaJS is an embedding, so much of the runtime is borrowed wholesale:
 | File | Responsibility (this doc) |
 |---|---|
 | `lambda/lambda.h`, `lambda/lambda.hpp` | `Item` union + bitfields, `Container`/`Map`, `EnumTypeId`, packing macros (`i2it`/`d2it`/`s2it`/…), sentinel macros. |
-| `lambda/lambda-data.hpp` | `TypeMap`/`ShapeEntry`/`JsAccessorPair` (shape owned by JS_06). |
+| `lambda/lambda-data.hpp` | `TypeMap`/`ShapeEntry`/`JsAccessorCell` (shape owned by JS_06). |
 | `lambda/js/js_runtime.h` | `ITEM_JS_UNDEFINED`/`ITEM_JS_TDZ`, `JS_SYMBOL_BASE`, `JS_DELETED_SENTINEL_VAL`, `JS_ITER_DONE_SENTINEL`, arg-stack API. |
 | `lambda/js/js_runtime_internal.hpp` | `js_is_symbol`/`js_is_bigint`/`js_key_is_symbol`/`js_symbol_to_key`, `JsFunction` struct, `make_js_undefined`. |
 | `lambda/js/js_runtime_value.cpp` | `js_typeof`, `js_make_number`, `js_to_string`/`js_to_boolean`/`js_to_numeric`, BigInt arithmetic dispatch. |

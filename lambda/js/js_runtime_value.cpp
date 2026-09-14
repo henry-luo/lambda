@@ -675,7 +675,7 @@ extern "C" Item js_to_string(Item value) {
             Item ts_fn = ItemNull;
             // Track ownership for valueOf gating, but always route through
             // js_get_key_default so that accessor (getter) toString is invoked,
-            // not the raw JsAccessorPair* slot value.
+            // not the virtual JsAccessorPair descriptor cell.
             bool own_ts = false;
             (void)js_map_shape_lookup(value.map, "toString", 8, &own_ts);
             bool ts_found = own_ts || js_ordinary_has_property(value, "toString", 8);
