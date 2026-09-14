@@ -904,6 +904,24 @@ ArrayNum* array_float_new(int64_t length) {
     return array_num_new(ELEM_FLOAT64, length);
 }
 
+// T27-7: the cold arm of an emitted float literal. A compact array cannot
+// carry null, so a literal with a null member is rebuilt as generic storage;
+// the emitted fast arm keeps one allocation and direct stores.
+Item array_float_literal_with_nulls(ArrayNum* packed, uint64_t null_mask) {
+    if (!packed) return ItemNull;
+    RootFrame roots(2);
+    Rooted<ArrayNum*> source(roots, packed);
+    Rooted<Array*> result(roots, array());
+    int64_t length = source.get()->length;
+    for (int64_t i = 0; i < length; i++) {
+        bool is_null = i < 64 && ((null_mask >> i) & 1) != 0;
+        // push_d may collect; array_push roots the value before it grows
+        Item member = is_null ? ItemNull : push_d(source.get()->float_items[i]);
+        array_push(result.get(), member);
+    }
+    return array_end(result.get());
+}
+
 ArrayNum* array_float_fill(ArrayNum *arr, int count, ...) {
     if (array_num_prepare_fill(arr, ELEM_FLOAT64, count, sizeof(double))) {
         va_list args;

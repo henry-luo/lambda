@@ -97,6 +97,21 @@ TEST_F(FileWriteTest, WriteBinaryNull) {
     EXPECT_EQ(write_binary_file("test.bin", NULL, 4), -1);
 }
 
+TEST_F(FileWriteTest, ReadAllPreservesBinaryData) {
+    const char* path = "temp/test_file_module/read_all.bin";
+    const char payload[] = {'a', '\0', 'b', (char)0xFF};
+    ASSERT_EQ(write_binary_file(path, payload, sizeof(payload)), 0);
+
+    char* data = NULL;
+    size_t size = 0;
+    ASSERT_TRUE(file_read_all(path, MEM_CAT_NETWORK, &data, &size));
+    ASSERT_NE(data, nullptr);
+    EXPECT_EQ(size, sizeof(payload));
+    EXPECT_EQ(memcmp(data, payload, sizeof(payload)), 0);
+
+    mem_free(data);
+}
+
 TEST_F(FileWriteTest, AppendTextFile) {
     std::string path = test_path("append.txt");
     write_text_file(path.c_str(), "hello");

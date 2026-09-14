@@ -192,6 +192,10 @@ char* url_decode_form(const char* str, size_t len, size_t* out_len);
 // it is safe to decode a buffer onto itself (zero-alloc request parsing).
 size_t url_decode_inplace(char* buf, bool form);
 
+// case-insensitive extension check on URL text; query and fragment are ignored.
+// `ext` may be supplied with or without its leading dot.
+bool url_text_path_has_ext_ci(const char* href, const char* ext);
+
 // Percent-encode `str[0..len)` using a caller-supplied 256-entry "keep" table:
 // table[c] != 0 means byte c is emitted literally; otherwise it is %XX-encoded
 // (uppercase hex). Returns a newly allocated string. Caller must free.

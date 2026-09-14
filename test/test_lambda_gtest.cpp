@@ -272,6 +272,14 @@ TEST(LambdaTypedPathTests, PreservesSnapshotsAndRejectsInvalidWrites) {
         "test/mir/lambda/typed_path_store.txt", true);
 }
 
+// The default auto tier interprets this cold main, so pin the JIT as well: its
+// typed index guard dereferenced a null `rows[1].values` receiver (SIGSEGV)
+// while auto and interp printed the golden.
+TEST(LambdaTypedPathTests, PreservesSnapshotsAndRejectsInvalidWritesJit) {
+    test_lambda_script_against_file("test/mir/lambda/typed_path_store.ls",
+        "test/mir/lambda/typed_path_store.txt", true, "jit");
+}
+
 TEST(LambdaTypedPathTests, ReusesFullArrayContractsAcrossCalls) {
     test_lambda_script_against_file("test/mir/lambda/typed_array_reuse.ls",
         "test/mir/lambda/typed_array_reuse.txt", true);
@@ -285,6 +293,21 @@ TEST(LambdaTypedPathTests, CertifiesMatchingPrimitiveArrayNumCarriers) {
 TEST(LambdaTypedPathTests, ReusesDeclaredBoolArrayProofAcrossDenseLoop) {
     test_lambda_script_against_file("test/mir/lambda/tune26_dense_declared_bool.ls",
         "test/mir/lambda/tune26_dense_declared_bool.txt", true);
+}
+
+TEST(LambdaTypedPathTests, PacksNullableFloatLiteralsAndPreservesNullMembers) {
+    test_lambda_script_against_file("test/mir/lambda/tune27_float_literal_nullable.ls",
+        "test/mir/lambda/tune27_float_literal_nullable.txt", true);
+}
+
+TEST(LambdaTypedPathTests, PrunesDeadLayoutReloadsWithoutStaleArrayReads) {
+    test_lambda_script_against_file("test/mir/lambda/tune27_layout_reload_liveness.ls",
+        "test/mir/lambda/tune27_layout_reload_liveness.txt", true);
+}
+
+TEST(LambdaTypedPathTests, StoresThroughModuleConstantSubscriptsInPlace) {
+    test_lambda_script_against_file("test/mir/lambda/tune27_module_const_index_store.ls",
+        "test/mir/lambda/tune27_module_const_index_store.txt", true);
 }
 
 TEST(LambdaTypedPathTests, ReusesFiniteProofAcrossPositiveSubtractionLoop) {

@@ -139,21 +139,30 @@ inline bool is_slow_benchmark(const std::string& test_name) {
 
 // Helper function to execute a lambda script and capture output
 // is_procedural: if true, uses "./lambda.exe run <script>" for procedural scripts
-inline char* execute_lambda_script(const char* script_path, bool is_procedural = false) {
+// `tier` pins LAMBDA_TIER (e.g. "jit"); NULL keeps the default auto tier, which
+// only reaches the JIT for functions hot enough to promote.
+inline char* execute_lambda_script(const char* script_path, bool is_procedural = false,
+        const char* tier = NULL) {
     char command[512];
     const char* exe = "lambda.exe";
     const char* no_log_flag = " --no-log";  // always disable logging in tests for performance
+    char tier_prefix[48] = "";
+#ifdef _WIN32
+    if (tier) snprintf(tier_prefix, sizeof(tier_prefix), "set \"LAMBDA_TIER=%s\" && ", tier);
+#else
+    if (tier) snprintf(tier_prefix, sizeof(tier_prefix), "LAMBDA_TIER=%s ", tier);
+#endif
 #ifdef _WIN32
     if (is_procedural) {
-        snprintf(command, sizeof(command), "%s run%s \"%s\"", exe, no_log_flag, script_path);
+        snprintf(command, sizeof(command), "%s%s run%s \"%s\"", tier_prefix, exe, no_log_flag, script_path);
     } else {
-        snprintf(command, sizeof(command), "%s%s \"%s\"", exe, no_log_flag, script_path);
+        snprintf(command, sizeof(command), "%s%s%s \"%s\"", tier_prefix, exe, no_log_flag, script_path);
     }
 #else
     if (is_procedural) {
-        snprintf(command, sizeof(command), "./%s run%s \"%s\"", exe, no_log_flag, script_path);
+        snprintf(command, sizeof(command), "%s./%s run%s \"%s\"", tier_prefix, exe, no_log_flag, script_path);
     } else {
-        snprintf(command, sizeof(command), "./%s%s \"%s\"", exe, no_log_flag, script_path);
+        snprintf(command, sizeof(command), "%s./%s%s \"%s\"", tier_prefix, exe, no_log_flag, script_path);
     }
 #endif
 
@@ -416,15 +425,17 @@ inline void strip_lambda_protocol_lines(char* output) {
 }
 
 // Helper function to test lambda script against expected output file
-inline void test_lambda_script_against_file(const char* script_path, const char* expected_file_path, bool is_procedural) {
+inline void test_lambda_script_against_file(const char* script_path, const char* expected_file_path,
+        bool is_procedural, const char* tier = NULL) {
     const char* script_name = strrchr(script_path, '/');
     script_name = script_name ? script_name + 1 : script_path;
 
     char* expected_output = read_expected_output(expected_file_path);
     ASSERT_NE(expected_output, nullptr) << "Could not read expected output file: " << expected_file_path;
 
-    char* actual_output = execute_lambda_script(script_path, is_procedural);
-    ASSERT_NE(actual_output, nullptr) << "Could not execute lambda script: " << script_path;
+    char* actual_output = execute_lambda_script(script_path, is_procedural, tier);
+    ASSERT_NE(actual_output, nullptr) << "Could not execute lambda script: " << script_path
+        << (tier ? " (LAMBDA_TIER=" : "") << (tier ? tier : "") << (tier ? ")" : "");
 
     // Trim whitespace from actual output
     trim_trailing_whitespace(actual_output);
