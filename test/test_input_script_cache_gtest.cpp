@@ -45,6 +45,32 @@ static void cache_test_destroy_artifact(void* artifact) {
     g_cache_test_destroyed_artifacts++;
 }
 
+static void cache_test_restore_env(const char* name, char* previous_value) {
+    if (previous_value) {
+        shell_setenv(name, previous_value);
+        mem_free(previous_value);
+    } else {
+        shell_unsetenv(name);
+    }
+}
+
+static InputScriptRequest cache_test_lifecycle_request(const char* identity,
+        const char* source) {
+    InputScriptRequest request = {};
+    request.identity = identity;
+    request.source = source;
+    request.source_length = strlen(source);
+    request.source_kind = INPUT_SCRIPT_SOURCE_INLINE;
+    request.language = "lambda";
+    request.profile = "lifecycle-test";
+    request.parser_abi = "parser-v1";
+    request.parse_flags = "default";
+    request.resolution_base = "<inline>";
+    request.backend = "mir-direct";
+    request.execution_mode = "script";
+    return request;
+}
+
 TEST(InputScriptCacheTest, ReusesSourceAndKeepsArtifactsByCompilerKey) {
     const char* previous_value = shell_getenv("LAMBDA_SCRIPT_CACHE");
     char* previous_policy = previous_value
@@ -305,6 +331,150 @@ TEST(InputScriptCacheTest, DefersInvalidationUntilActiveLeaseCloses) {
         mem_free(previous_policy);
     }
     else shell_unsetenv("LAMBDA_SCRIPT_CACHE");
+}
+
+TEST(InputScriptCacheTest, AbandonedBuildClaimPoisonsAndWakesWaiters) {
+    const char* previous_value = shell_getenv("LAMBDA_SCRIPT_CACHE");
+    char* previous_policy = previous_value
+        ? mem_strdup(previous_value, MEM_CAT_CACHE_OTHER) : nullptr;
+    ASSERT_TRUE(shell_setenv("LAMBDA_SCRIPT_CACHE", "all"));
+
+    InputScriptCache* cache = input_script_cache_create();
+    ASSERT_NE(cache, nullptr);
+    InputScriptRequest request = cache_test_lifecycle_request("abandoned-claim",
+        "42");
+
+    InputCacheScope* owner_scope = input_script_cache_open_scope(cache);
+    ASSERT_NE(owner_scope, nullptr);
+    InputScriptLease* owner = input_script_cache_acquire(owner_scope, &request);
+    ASSERT_NE(owner, nullptr);
+    ASSERT_EQ(input_script_cache_claim_build(owner, INPUT_SCRIPT_BUILD_AST),
+        INPUT_SCRIPT_BUILD_OWNER);
+
+    CacheSingleFlightThread waiter = {};
+    waiter.cache = cache;
+    waiter.request = request;
+    ASSERT_EQ(pthread_mutex_init(&waiter.mutex, nullptr), 0);
+    ASSERT_EQ(pthread_cond_init(&waiter.entered_cond, nullptr), 0);
+    pthread_t waiter_thread;
+    ASSERT_EQ(pthread_create(&waiter_thread, nullptr, cache_single_flight_waiter,
+        &waiter), 0);
+    pthread_mutex_lock(&waiter.mutex);
+    while (!waiter.entered) pthread_cond_wait(&waiter.entered_cond, &waiter.mutex);
+    pthread_mutex_unlock(&waiter.mutex);
+    bool waiter_waiting = false;
+    for (int attempt = 0; attempt < 50; attempt++) {
+        InputScriptCacheStats stats = {};
+        input_script_cache_get_stats(cache, &stats);
+        if (stats.single_flight_waits > 0) {
+            waiter_waiting = true;
+            break;
+        }
+        usleep(1000);
+    }
+    ASSERT_TRUE(waiter_waiting);
+
+    input_script_cache_close_scope(owner_scope);
+    ASSERT_EQ(pthread_join(waiter_thread, nullptr), 0);
+    EXPECT_EQ(waiter.claim, INPUT_SCRIPT_BUILD_POISONED);
+    pthread_cond_destroy(&waiter.entered_cond);
+    pthread_mutex_destroy(&waiter.mutex);
+
+    InputScriptCacheStats stats = {};
+    input_script_cache_get_stats(cache, &stats);
+    EXPECT_EQ(stats.poisoned, 1u);
+    EXPECT_GE(stats.single_flight_waits, 1u);
+    input_script_cache_destroy(cache);
+    cache_test_restore_env("LAMBDA_SCRIPT_CACHE", previous_policy);
+}
+
+TEST(InputScriptCacheTest, EvictsOnlyInactiveEntriesAtConfiguredByteLimit) {
+    const char* previous_policy_value = shell_getenv("LAMBDA_SCRIPT_CACHE");
+    char* previous_policy = previous_policy_value
+        ? mem_strdup(previous_policy_value, MEM_CAT_CACHE_OTHER) : nullptr;
+    const char* previous_limit_value = shell_getenv("LAMBDA_SCRIPT_CACHE_MAX_BYTES");
+    char* previous_limit = previous_limit_value
+        ? mem_strdup(previous_limit_value, MEM_CAT_CACHE_OTHER) : nullptr;
+    ASSERT_TRUE(shell_setenv("LAMBDA_SCRIPT_CACHE", "all"));
+    ASSERT_TRUE(shell_setenv("LAMBDA_SCRIPT_CACHE_MAX_BYTES", "5"));
+
+    InputScriptCache* cache = input_script_cache_create();
+    ASSERT_NE(cache, nullptr);
+    InputScriptRequest first_request = cache_test_lifecycle_request(
+        "cache-budget-first", "aaaa");
+    InputScriptRequest second_request = cache_test_lifecycle_request(
+        "cache-budget-second", "bbbb");
+
+    InputCacheScope* first_scope = input_script_cache_open_scope(cache);
+    ASSERT_NE(first_scope, nullptr);
+    InputScriptLease* first = input_script_cache_acquire(first_scope,
+        &first_request);
+    ASSERT_NE(first, nullptr);
+    InputCacheScope* second_scope = input_script_cache_open_scope(cache);
+    ASSERT_NE(second_scope, nullptr);
+    ASSERT_NE(input_script_cache_acquire(second_scope, &second_request), nullptr);
+
+    InputScriptCacheStats before_release = {};
+    input_script_cache_get_stats(cache, &before_release);
+    EXPECT_EQ(before_release.evictions, 0u);
+    EXPECT_EQ(before_release.retained_entries, 2u);
+    EXPECT_EQ(before_release.retention_limit_bytes, 5u);
+    EXPECT_EQ(before_release.retention_pressure, 1u);
+
+    input_script_cache_close_scope(second_scope);
+    InputScriptCacheStats after_second_release = {};
+    input_script_cache_get_stats(cache, &after_second_release);
+    EXPECT_EQ(after_second_release.evictions, 1u);
+    EXPECT_EQ(after_second_release.retained_entries, 1u);
+    EXPECT_EQ(after_second_release.retained_source_bytes, 4u);
+    EXPECT_STREQ(input_script_source(input_script_lease_input(first)), "aaaa");
+
+    input_script_cache_close_scope(first_scope);
+    input_script_cache_destroy(cache);
+    cache_test_restore_env("LAMBDA_SCRIPT_CACHE_MAX_BYTES", previous_limit);
+    cache_test_restore_env("LAMBDA_SCRIPT_CACHE", previous_policy);
+}
+
+TEST(InputScriptCacheTest, RetainsDependencyConeAtConfiguredByteLimit) {
+    const char* previous_policy_value = shell_getenv("LAMBDA_SCRIPT_CACHE");
+    char* previous_policy = previous_policy_value
+        ? mem_strdup(previous_policy_value, MEM_CAT_CACHE_OTHER) : nullptr;
+    const char* previous_limit_value = shell_getenv("LAMBDA_SCRIPT_CACHE_MAX_BYTES");
+    char* previous_limit = previous_limit_value
+        ? mem_strdup(previous_limit_value, MEM_CAT_CACHE_OTHER) : nullptr;
+    ASSERT_TRUE(shell_setenv("LAMBDA_SCRIPT_CACHE", "all"));
+    ASSERT_TRUE(shell_setenv("LAMBDA_SCRIPT_CACHE_MAX_BYTES", "5"));
+
+    InputScriptCache* cache = input_script_cache_create();
+    ASSERT_NE(cache, nullptr);
+    InputScriptRequest importer_request = cache_test_lifecycle_request(
+        "cache-budget-importer", "aaaa");
+    InputScriptRequest dependency_request = cache_test_lifecycle_request(
+        "cache-budget-dependency", "bbbb");
+    InputCacheScope* importer_scope = input_script_cache_open_scope(cache);
+    InputCacheScope* dependency_scope = input_script_cache_open_scope(cache);
+    ASSERT_NE(importer_scope, nullptr);
+    ASSERT_NE(dependency_scope, nullptr);
+    InputScriptLease* importer = input_script_cache_acquire(importer_scope,
+        &importer_request);
+    InputScriptLease* dependency = input_script_cache_acquire(dependency_scope,
+        &dependency_request);
+    ASSERT_NE(importer, nullptr);
+    ASSERT_NE(dependency, nullptr);
+    ASSERT_TRUE(input_script_cache_record_dependency_by_unit(cache,
+        input_script_compilation_unit_id(input_script_lease_input(importer)),
+        input_script_compilation_unit_id(input_script_lease_input(dependency))));
+
+    input_script_cache_close_scope(importer_scope);
+    input_script_cache_close_scope(dependency_scope);
+    InputScriptCacheStats stats = {};
+    input_script_cache_get_stats(cache, &stats);
+    EXPECT_EQ(stats.evictions, 0u);
+    EXPECT_EQ(stats.retained_entries, 2u);
+    EXPECT_GE(stats.retention_pressure, 1u);
+    input_script_cache_destroy(cache);
+    cache_test_restore_env("LAMBDA_SCRIPT_CACHE_MAX_BYTES", previous_limit);
+    cache_test_restore_env("LAMBDA_SCRIPT_CACHE", previous_policy);
 }
 
 TEST(InputScriptCacheTest, RetiresDependencyConeAfterDependencySourceChanges) {

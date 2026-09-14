@@ -11,6 +11,7 @@
 #include "../../lib/arraylist.h"
 
 #include <pthread.h>
+#include <stdlib.h>
 #include <string.h>
 
 struct InputScriptArtifact {
@@ -56,6 +57,7 @@ struct ScriptInput {
     ArrayList* dependencies;
     ArrayList* dependents;
     int lease_count;
+    uint64_t last_access_epoch;
 };
 
 struct InputScriptMapEntry {
@@ -68,6 +70,8 @@ struct InputScriptLease {
     ScriptInput* input;
     bool released;
     bool persistent;
+    bool ast_build_claimed;
+    bool mir_build_claimed;
     uint64_t ast_key;
     uint64_t mir_key;
 };
@@ -83,7 +87,9 @@ struct InputScriptCache {
     pthread_mutex_t mutex;
     InputScriptCachePolicy policy;
     bool mir_disabled_by_alias;
+    size_t retention_limit_bytes;
     uint32_t next_compilation_unit_id;
+    uint64_t next_access_epoch;
     InputScriptCacheStats stats;
     ArrayList* retired_inputs;
 };
@@ -367,6 +373,23 @@ static bool cache_alias_disables_mir(void) {
     return disabled;
 }
 
+static size_t cache_parse_retention_limit_bytes(void) {
+    const char* value = shell_getenv("LAMBDA_SCRIPT_CACHE_MAX_BYTES");
+    if (!value || !value[0] || strcmp(value, "0") == 0) return 0;
+    char* end = NULL;
+    unsigned long long parsed = strtoull(value, &end, 10);
+    if (end == value || !end || *end != '\0' || parsed == 0) {
+        log_error("script-cache: invalid LAMBDA_SCRIPT_CACHE_MAX_BYTES='%s'; retaining without a byte limit", value);
+        return 0;
+    }
+    unsigned long long max_size = (unsigned long long)(size_t)-1;
+    if (parsed > max_size) {
+        log_error("script-cache: LAMBDA_SCRIPT_CACHE_MAX_BYTES='%s' exceeds size_t; clamping", value);
+        return (size_t)-1;
+    }
+    return (size_t)parsed;
+}
+
 static bool cache_make_input(const InputScriptRequest* request,
         const char* source, size_t source_length, ScriptInput** out_input) {
     if (!request || !request->identity || !request->identity[0] ||
@@ -493,6 +516,9 @@ static InputScriptLease* cache_make_lease(InputScriptCache* cache,
         mem_free(lease);
         return NULL;
     }
+    cache->next_access_epoch++;
+    if (cache->next_access_epoch == 0) cache->next_access_epoch = 1;
+    input->last_access_epoch = cache->next_access_epoch;
     cache->stats.leases_acquired++;
     return lease;
 }
@@ -507,6 +533,54 @@ static void cache_update_peak(InputScriptCache* cache) {
     if (current > cache->stats.peak_bytes) cache->stats.peak_bytes = current;
 }
 
+static bool cache_input_retention_evictable(const ScriptInput* input) {
+    return input && !input->retired && input->lease_count == 0 &&
+        (!input->dependencies || input->dependencies->length == 0) &&
+        (!input->dependents || input->dependents->length == 0);
+}
+
+static bool cache_evict_inactive_input_locked(InputScriptCache* cache,
+        ScriptInput* input) {
+    if (!cache || !cache_input_retention_evictable(input)) {
+        return false;
+    }
+    InputScriptMapEntry probe = {input};
+    const InputScriptMapEntry* removed =
+        (const InputScriptMapEntry*)hashmap_delete(cache->entries, &probe);
+    if (!removed) return false;
+    ((InputScriptMapEntry*)removed)->input = NULL;
+    input->retired = true;
+    cache_account_retired_input(cache, input);
+    cache->stats.evictions++;
+    cache_destroy_input(input);
+    return true;
+}
+
+static void cache_enforce_retention_limit_locked(InputScriptCache* cache) {
+    if (!cache || cache->retention_limit_bytes == 0) return;
+    while (cache_retained_bytes(cache) > cache->retention_limit_bytes) {
+        ScriptInput* oldest = NULL;
+        size_t cursor = 0;
+        void* item = NULL;
+        while (hashmap_iter(cache->entries, &cursor, &item)) {
+            InputScriptMapEntry* entry = (InputScriptMapEntry*)item;
+            ScriptInput* candidate = entry ? entry->input : NULL;
+            // Preserve live images and complete freshness cones in this
+            // minimal policy; cone reclamation needs a dedicated rule.
+            if (!cache_input_retention_evictable(candidate)) {
+                continue;
+            }
+            if (!oldest || candidate->last_access_epoch < oldest->last_access_epoch) {
+                oldest = candidate;
+            }
+        }
+        if (!oldest || !cache_evict_inactive_input_locked(cache, oldest)) {
+            cache->stats.retention_pressure++;
+            return;
+        }
+    }
+}
+
 InputScriptCache* input_script_cache_create(void) {
     InputScriptCache* cache = (InputScriptCache*)mem_calloc(1,
         sizeof(InputScriptCache), MEM_CAT_CACHE_OTHER);
@@ -514,7 +588,10 @@ InputScriptCache* input_script_cache_create(void) {
     pthread_mutex_init(&cache->mutex, NULL);
     cache->policy = cache_parse_policy();
     cache->mir_disabled_by_alias = cache_alias_disables_mir();
+    cache->retention_limit_bytes = cache_parse_retention_limit_bytes();
     cache->next_compilation_unit_id = 1;
+    cache->next_access_epoch = 1;
+    cache->stats.retention_limit_bytes = cache->retention_limit_bytes;
     cache->entries = hashmap_new(sizeof(InputScriptMapEntry), 32, 0, 0,
         cache_entry_hash, cache_entry_compare, cache_entry_free, NULL);
     cache->retired_inputs = arraylist_new(4);
@@ -525,7 +602,8 @@ InputScriptCache* input_script_cache_create(void) {
         mem_free(cache);
         return NULL;
     }
-    log_info("script-cache: initialized policy=%d", (int)cache->policy);
+    log_info("script-cache: initialized policy=%d retention_limit=%zu",
+        (int)cache->policy, cache->retention_limit_bytes);
     return cache;
 }
 
@@ -533,7 +611,7 @@ void input_script_cache_destroy(InputScriptCache* cache) {
     if (!cache) return;
     pthread_mutex_lock(&cache->mutex);
     InputScriptCacheStats stats = cache->stats;
-    log_notice("script-cache: shutdown entries=%llu source_lookups=%llu source_hits=%llu source_misses=%llu ast_hits=%llu mir_hits=%llu invalidations=%llu waits=%llu poisoned=%llu retained=%llu peak=%llu",
+    log_notice("script-cache: shutdown entries=%llu source_lookups=%llu source_hits=%llu source_misses=%llu ast_hits=%llu mir_hits=%llu invalidations=%llu waits=%llu poisoned=%llu evictions=%llu retention_limit=%llu retention_pressure=%llu retained=%llu peak=%llu",
         (unsigned long long)stats.retained_entries,
         (unsigned long long)stats.source_lookups,
         (unsigned long long)stats.source_hits,
@@ -543,6 +621,9 @@ void input_script_cache_destroy(InputScriptCache* cache) {
         (unsigned long long)stats.invalidations,
         (unsigned long long)stats.single_flight_waits,
         (unsigned long long)stats.poisoned,
+        (unsigned long long)stats.evictions,
+        (unsigned long long)stats.retention_limit_bytes,
+        (unsigned long long)stats.retention_pressure,
         (unsigned long long)(stats.retained_source_bytes +
             stats.retained_ast_bytes + stats.retained_mir_bytes),
         (unsigned long long)stats.peak_bytes);
@@ -697,6 +778,7 @@ InputScriptLease* input_script_cache_acquire(InputCacheScope* scope,
     }
     lease->ast_key = cache_ast_key(input, request->ast_abi);
     lease->mir_key = cache_mir_key(input, request);
+    cache_enforce_retention_limit_locked(cache);
     pthread_mutex_unlock(&cache->mutex);
     return lease;
 }
@@ -771,7 +853,7 @@ static size_t cache_invalidate_input_cone_locked(InputScriptCache* cache,
     }
     // Every map owner is detached before an unleased image is destroyed: a
     // dependency and an importer can otherwise observe each other's edge
-    // during one cone teardown (D8.5.1v2).
+    // during one cone teardown (D8.5.1v3).
     for (int i = 0; i < cone->length; i++) {
         ScriptInput* input = (ScriptInput*)cone->data[i];
         if (input && input->lease_count == 0) cache_destroy_input(input);
@@ -869,12 +951,22 @@ char* input_script_cache_copy_file_source(InputScriptCache* cache,
     return copy;
 }
 
+static void cache_abandon_build_claim_locked(InputScriptLease* lease,
+        InputScriptBuildKind kind);
+
 void input_script_cache_release(InputScriptLease* lease) {
     if (!lease || lease->released) return;
     InputScriptCache* cache = lease->cache;
     InputCacheScope* scope = lease->scope;
     ScriptInput* input = lease->input;
     if (cache) pthread_mutex_lock(&cache->mutex);
+    if (cache && lease->ast_build_claimed) {
+        // Never strand concurrent claimants if recovery closes an owner scope.
+        cache_abandon_build_claim_locked(lease, INPUT_SCRIPT_BUILD_AST);
+    }
+    if (cache && lease->mir_build_claimed) {
+        cache_abandon_build_claim_locked(lease, INPUT_SCRIPT_BUILD_MIR);
+    }
     if (input && input->lease_count > 0) input->lease_count--;
     if (scope && scope->leases) {
         for (int i = 0; i < scope->leases->length; i++) {
@@ -890,6 +982,8 @@ void input_script_cache_release(InputScriptLease* lease) {
         if (lease->persistent && input && input->retired &&
                 input->lease_count == 0) {
             cache_reap_retired_input_locked(cache, input);
+        } else if (lease->persistent) {
+            cache_enforce_retention_limit_locked(cache);
         }
         pthread_mutex_unlock(&cache->mutex);
     }
@@ -1179,6 +1273,28 @@ static InputScriptBuildState* cache_get_build_state(ScriptInput* input,
     return state;
 }
 
+static void cache_abandon_build_claim_locked(InputScriptLease* lease,
+        InputScriptBuildKind kind) {
+    if (!lease || !lease->cache || !lease->input) return;
+    bool* claimed = kind == INPUT_SCRIPT_BUILD_AST
+        ? &lease->ast_build_claimed : &lease->mir_build_claimed;
+    if (!*claimed) return;
+    InputScriptBuildState* state = cache_find_build_state(lease->input, kind,
+        cache_build_key(lease, kind));
+    if (state && state->building) {
+        state->building = false;
+        if (!state->poisoned) {
+            state->poisoned = true;
+            lease->cache->stats.poisoned++;
+        }
+        pthread_cond_broadcast(&state->completed);
+        log_error("script-cache: abandoned %s build for %s; poisoned until source invalidation",
+            kind == INPUT_SCRIPT_BUILD_AST ? "AST" : "MIR",
+            lease->input->identity ? lease->input->identity : "<unknown>");
+    }
+    *claimed = false;
+}
+
 InputScriptBuildClaim input_script_cache_claim_build(InputScriptLease* lease,
         InputScriptBuildKind kind) {
     if (!lease || lease->released || !lease->cache || !lease->input ||
@@ -1219,6 +1335,8 @@ InputScriptBuildClaim input_script_cache_claim_build(InputScriptLease* lease,
         return INPUT_SCRIPT_BUILD_POISONED;
     }
     state->building = true;
+    if (kind == INPUT_SCRIPT_BUILD_AST) lease->ast_build_claimed = true;
+    else lease->mir_build_claimed = true;
     pthread_mutex_unlock(&cache->mutex);
     return INPUT_SCRIPT_BUILD_OWNER;
 }
@@ -1244,6 +1362,8 @@ void input_script_cache_complete_build(InputScriptLease* lease,
         (void)published;
         pthread_cond_broadcast(&state->completed);
     }
+    if (kind == INPUT_SCRIPT_BUILD_AST) lease->ast_build_claimed = false;
+    else lease->mir_build_claimed = false;
     pthread_mutex_unlock(&cache->mutex);
 }
 
@@ -1315,6 +1435,7 @@ bool input_script_cache_publish_ast(InputScriptLease* lease, void* ast,
     cache->stats.ast_builds++;
     cache->stats.retained_ast_bytes += artifact->retained_bytes;
     cache_update_peak(cache);
+    cache_enforce_retention_limit_locked(cache);
     pthread_mutex_unlock(&cache->mutex);
     return true;
 }
@@ -1382,6 +1503,7 @@ bool input_script_cache_publish_mir(InputScriptLease* lease, void* mir,
     cache->stats.mir_builds++;
     cache->stats.retained_mir_bytes += artifact->retained_bytes;
     cache_update_peak(cache);
+    cache_enforce_retention_limit_locked(cache);
     pthread_mutex_unlock(&cache->mutex);
     return true;
 }
@@ -1423,7 +1545,7 @@ void input_script_cache_log_summary(InputScriptCache* cache) {
     if (!cache) return;
     InputScriptCacheStats stats;
     input_script_cache_get_stats(cache, &stats);
-    log_notice("script-cache: summary entries=%llu source_lookups=%llu source_hits=%llu source_misses=%llu ast_hits=%llu ast_misses=%llu mir_hits=%llu mir_misses=%llu invalidations=%llu waits=%llu poisoned=%llu retained_source=%llu retained_ast=%llu retained_mir=%llu peak=%llu",
+    log_notice("script-cache: summary entries=%llu source_lookups=%llu source_hits=%llu source_misses=%llu ast_hits=%llu ast_misses=%llu mir_hits=%llu mir_misses=%llu invalidations=%llu waits=%llu poisoned=%llu evictions=%llu retention_limit=%llu retention_pressure=%llu retained_source=%llu retained_ast=%llu retained_mir=%llu peak=%llu",
         (unsigned long long)stats.retained_entries,
         (unsigned long long)stats.source_lookups,
         (unsigned long long)stats.source_hits,
@@ -1435,6 +1557,9 @@ void input_script_cache_log_summary(InputScriptCache* cache) {
         (unsigned long long)stats.invalidations,
         (unsigned long long)stats.single_flight_waits,
         (unsigned long long)stats.poisoned,
+        (unsigned long long)stats.evictions,
+        (unsigned long long)stats.retention_limit_bytes,
+        (unsigned long long)stats.retention_pressure,
         (unsigned long long)stats.retained_source_bytes,
         (unsigned long long)stats.retained_ast_bytes,
         (unsigned long long)stats.retained_mir_bytes,
