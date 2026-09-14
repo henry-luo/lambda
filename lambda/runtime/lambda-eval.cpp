@@ -1525,7 +1525,7 @@ static Type* item_static_type_for_is(Item item, Type* scratch) {
     }
     if (type_id == LMD_TYPE_DECIMAL) {
         Decimal* decimal = item.get_decimal();
-        return decimal && decimal->unlimited == DECIMAL_BIGINT ?
+        return decimal && decimal->storage_kind == DECIMAL_BIGINT ?
             &TYPE_INTEGER_VALUE : &TYPE_DECIMAL;
     }
     type_id = item_semantic_type_id(type_id);
@@ -1540,7 +1540,7 @@ static Type* item_static_type_for_is(Item item, Type* scratch) {
 static bool item_type_is_integer_subtype(Item item, TypeId type_id) {
     if (type_id == LMD_TYPE_DECIMAL) {
         Decimal* dec = item.get_decimal();
-        return dec && dec->unlimited == DECIMAL_BIGINT;
+        return dec && dec->storage_kind == DECIMAL_BIGINT;
     }
     Type actual = {.type_id = type_id};
     if (type_id == LMD_TYPE_NUM_SIZED) actual.kind = item.get_num_type();
@@ -3938,7 +3938,7 @@ Type* fn_type(Item item) {
     }
     if (resolved_type == LMD_TYPE_DECIMAL) {
         Decimal* dec = item.get_decimal();
-        if (dec && dec->unlimited == DECIMAL_BIGINT) {
+        if (dec && dec->storage_kind == DECIMAL_BIGINT) {
             // integer is a language type carried by Decimal storage; hide the carrier from type().
             type->type = &TYPE_INTEGER;
             return (Type*)type;
@@ -8205,6 +8205,10 @@ typedef struct CowProfileCounters {
     uint64_t array_checked_store_rebuild;
     uint64_t array_checked_store_full_clone;
     uint64_t array_checked_store_bytes_copied;
+    // LambdaJS: full realm-slot reservation walks (js_realm_intrinsic_slots_
+    // ensure_roots). One per realm store; Result44 found it on every
+    // intrinsic prototype lookup (20x), so the count is pinned by test.
+    uint64_t js_realm_slot_reservations;
     uint64_t string_builder[STRING_BUILDER_COUNTER_COUNT];
 } CowProfileCounters;
 
@@ -8310,6 +8314,10 @@ void cow_profile_note_vmap_rejection(void) {
     if (cow_profile_enabled()) g_cow_profile.vmap_rejections++;
 }
 
+void cow_profile_count_js_realm_reservation(void) {
+    if (cow_profile_enabled()) g_cow_profile.js_realm_slot_reservations++;
+}
+
 void cow_profile_dump(void) {
     if (!cow_profile_enabled()) return;
     create_dir("temp");
@@ -8348,6 +8356,8 @@ void cow_profile_dump(void) {
     strbuf_append_uint64(output, g_cow_profile.union_map_rep_cache_misses);
     strbuf_append_str(output, "\nmap_admit_calls\t");
     strbuf_append_uint64(output, g_cow_profile.map_admit_calls);
+    strbuf_append_str(output, "\njs_realm_slot_reservations\t");
+    strbuf_append_uint64(output, g_cow_profile.js_realm_slot_reservations);
     strbuf_append_str(output, "\nmap_admit_relation_cache_hits\t");
     strbuf_append_uint64(output, g_cow_profile.map_admit_relation_cache_hits);
     strbuf_append_str(output, "\nmap_admit_relation_cache_misses\t");

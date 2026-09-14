@@ -80,14 +80,15 @@ TEST(LambdaDecimal, QuietInt64ExtractionRejectsOverflowAndInvalidComparison) {
     EXPECT_TRUE(decimal_mpd_try_to_int64(large, context, &extracted));
     EXPECT_EQ(extracted, INT64_MAX);
 
-    Decimal valid_decimal = {0, large};
+    Decimal valid_decimal = {};
+    ASSERT_TRUE(decimal_take_mpd(&valid_decimal, DECIMAL_FIXED, large));
     Decimal invalid_decimal = {};
     Item valid = {.item = c2it(&valid_decimal)};
     Item invalid = {.item = c2it(&invalid_decimal)};
     int comparison = 0;
     EXPECT_FALSE(decimal_cmp_items(invalid, valid, &comparison));
 
-    mpd_del(large);
+    decimal_payload_release(&valid_decimal);
 }
 
 TEST(LambdaDecimal, DoubleBoundaryConversionIsFallibleAndExact) {

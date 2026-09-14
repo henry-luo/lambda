@@ -185,7 +185,7 @@ static inline bool js_is_symbol(Item v) {
 static inline bool js_is_bigint(Item v) {
     if (get_type_id(v) != LMD_TYPE_DECIMAL) return false;
     Decimal* dec = (Decimal*)(v.item & 0x00FFFFFFFFFFFFFFULL);
-    return dec && dec->unlimited == DECIMAL_BIGINT;
+    return dec && dec->storage_kind == DECIMAL_BIGINT;
 }
 
 static inline bool js_is_native_bigint_egress(Item v) {

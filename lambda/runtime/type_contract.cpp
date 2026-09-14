@@ -926,7 +926,8 @@ static bool contract_numeric_is_integral(Item value) {
     }
     if (get_type_id(value) != LMD_TYPE_DECIMAL) return false;
     Decimal* decimal = value.get_decimal();
-    return decimal && decimal->dec_val && mpd_isinteger(decimal->dec_val);
+    const mpd_t* mpd_value = decimal_mpd(decimal);
+    return mpd_value && mpd_isinteger(mpd_value);
 }
 
 static bool contract_numeric_to_uint64_exact(Item value, uint64_t* out) {

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "description": "Result44 fix (Tune27 \u00a712): after the extent product (mulo) and the per-root length folds `and g, g, len_ok`, the store guard is a NEW register `and s, g, write_guard` -- the read guard `g` is never folded with T26-4's ownership word, so a `var` store root whose word fails at loop entry cannot send the reads of its sibling roots to the checked arm (typed matmul 3x).",
+  "checks": [
+    {
+      "in_func": "_matmul_#",
+      "expect_seq": [
+        {
+          "pattern": "mulo\t{{r}}, {{r}}, {{r}}"
+        },
+        {
+          "pattern": "and\t{{r:g}}, {{r:g}}, {{r}}"
+        },
+        {
+          "pattern": "and\t{{r!g}}, {{r:g}}, {{r}}"
+        }
+      ]
+    }
+  ]
+}

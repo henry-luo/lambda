@@ -103,7 +103,7 @@ extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
 static bool buffer_value_is_bigint(Item value) {
     if (get_type_id(value) != LMD_TYPE_DECIMAL) return false;
     Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFFULL);
-    return dec && dec->unlimited == DECIMAL_BIGINT;
+    return dec && dec->storage_kind == DECIMAL_BIGINT;
 }
 
 static Item buffer_to_bigint_value(Item value, Item* out_bigint) {

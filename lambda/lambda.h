@@ -1713,8 +1713,7 @@ static inline uint64_t lambda_item_pending_kind(uint64_t bits) {
 
 #define ITEM_INT            ((uint64_t)LMD_TYPE_INT << 56)
 #define ITEM_INT64          ((uint64_t)LMD_TYPE_INT64 << 56)
-// BigInt reuses LMD_TYPE_DECIMAL; distinguished by Decimal.unlimited == DECIMAL_BIGINT
-#define DECIMAL_BIGINT      2
+// BigInt reuses LMD_TYPE_DECIMAL; Decimal::storage_kind supplies the subtype.
 #define ITEM_ERROR          ((uint64_t)LMD_TYPE_ERROR << 56)
 
 // numeric type check: `number` is a type-language union, not a runtime TypeId.
@@ -2157,7 +2156,7 @@ inline uint64_t b2it(uint8_t bool_val) {
 // out-of-band input saturates to the shared IEEE infinity instead of wrapping,
 // silently rounding, or producing an error Item.
 #define i2it(int_val)        lambda_int_box_lane((int64_t)(int_val))
-// BigInt: same as decimal tagged pointer (Decimal.unlimited == DECIMAL_BIGINT)
+// BigInt: same as decimal tagged pointer (Decimal::storage_kind == DECIMAL_BIGINT)
 #define bi2it(decimal_ptr)   c2it(decimal_ptr)
 #define l2it(long_ptr)       lambda_int64_ptr_to_item_bits((const int64_t*)(long_ptr))
 #define d2it(double_ptr)     ((double_ptr)? ((((uint64_t)LMD_TYPE_FLOAT)<<56) | (uint64_t)(double_ptr)): ITEM_NULL)
@@ -3121,6 +3120,8 @@ extern "C" {
     void cow_profile_note_vmap_snapshot(void);
     void cow_profile_note_vmap_rejection(void);
     void cow_profile_dump(void);
+    // LambdaJS realm-slot reservation census row (exec profile)
+    void cow_profile_count_js_realm_reservation(void);
     Item array_set_cow(Item owner, Item key, Item value);
     Item member_set_cow(Item owner, Item key, Item value);
     Item map_set_cow(Item owner, Item key, Item value);

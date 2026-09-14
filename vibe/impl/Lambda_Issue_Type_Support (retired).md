@@ -10,7 +10,7 @@
 > | TS-1 | **FIXED** — `var s: int = "abc"` now raises `E201` at the declaration |
 > | TS-2 | **FIXED** — `LMD_TYPE_STRING` admitted to the native scalar return set |
 > | TS-3 | Open, **needs re-measurement** — the cited cause is gone from the source, the benchmark was not re-run → ledger §14 |
-> | TS-4 | Open, **not re-verified** (perf + a correctness half) → ledger §14 |
+> | TS-4 | **RESOLVED 2026-09-14** — current release evidence is archived in the fixed ledger §14 |
 > | TS-5 | Dead-code half **FIXED** — the `if (false && …)` guard is gone |
 > | TS-6 | **Open**, structurally unchanged → ledger §14 |
 > | TS-7 | **FIXED** — `bool[]` and `string[]` work |
@@ -146,7 +146,15 @@ several other `*2.ls` typed benchmarks carry the same pattern.
 the coercion target is int/float/int64/uint64. This is the single highest-leverage item in this
 document — it would improve the typed benchmark column across the board.
 
-### TS-4 — A named map type on a **local** is a COW value root, not a borrow *(user-reported)*
+### TS-4 — A named map type on a **local** is a COW value root, not a borrow — **RESOLVED 2026-09-14**
+
+> **Status update.** The historical aliasing expectation is not the current
+> rule: a local map binding is a COW snapshot under **D4.4.1–D4.4.2**, with a
+> guarded borrow only for D4.4.4's proven read-modify-write place. Release
+> `splay2` now preserves all 8,000 nodes, `raytrace3d2` passes, and the
+> current one-million-iteration typed-local probe is faster than its untyped
+> counterpart. The central fixed ledger §14 preserves the measurements; the
+> text below is the historical report.
 
 `var x: SomeMapType = expr` makes the local a fresh COW value root rather than a borrow. Two
 distinct failure modes, both observed:

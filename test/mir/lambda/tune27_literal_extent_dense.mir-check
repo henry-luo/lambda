@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "description": "Tune27 T27-9 (\u00a710.16): `while (i < 4)` is a literal extent, the nested counter `j` declared inside the body joins the proof, and the finite fact starting at zero proves it non-negative -- so pair_sums has no contract boundary and no checked load; the literal extent base is an immediate and the reads are raw lane loads (the null arms in the generic sibling stay as double immediates, never calls). Tune27 \u00a710.15: the float null lane is a double immediate (`dmov r, nan`), never the zero-argument lambda_float_null_lane_c call. The body's checks are the raw entry's two `float[]` parameter admissions (D8.3.2: the check lives in the callee, once per crossing) and the terminal null rejections of the `dx`/`dy` float declarations in the finite loops' generic sibling arms; the dense arm has none, and no read is a checked load.",
+  "checks": [
+    {
+      "in_func": "_pair_sums_#",
+      "expect": [
+        "mov\t{{r}}, 4",
+        "dmov\t{{r}}, d:({{r}})",
+        "dmov\t{{r}}, nan"
+      ],
+      "forbid": [
+        "call\titem_at_p, item_at",
+        "call\tlambda_float_null_lane_c_p, lambda_float_null_lane_c"
+      ],
+      "count": {
+        "call\tlambda_type_check_p, lambda_type_check": {
+          "max": 6
+        }
+      }
+    }
+  ]
+}

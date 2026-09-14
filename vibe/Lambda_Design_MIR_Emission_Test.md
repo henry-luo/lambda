@@ -251,6 +251,21 @@ applies to Lambda regression scripts added under `test/lambda`; the emission
 fixtures under `test/mir/lambda` are governed by their `.mir-check` sidecars
 and do not require behavioral `.txt` companions.
 
+**MT1 addendum (2026-09-14, Tune27 pins).** Register tokens gained named
+captures scoped to one `expect_seq`: `{{r:name}}` binds the register on first
+use and must match it afterwards, `{{r!name}}` must be a register other than
+the bound one. Needed to pin the Result44 dense-guard fix, which is
+invisible to a wildcard: the store guard must be `and s, g, w` with `s != g`
+where the read guard `g` is the target of the preceding length folds
+(`test/mir/lambda/tune27_dense_store_guard.mir-check`). Outside a sequence a
+named token matches any register, so `expect`/`forbid`/`count` patterns can
+reuse a sequence's spelling. Also learned while re-baselining the corpus
+probes: the ratchet counts exclude `local` declarations (an `awk` over
+`^\t[a-z]` lines overcounts `_run_cube` by ~1,000), and `make build` does
+not relink a `lambda.exe` that a later `make release` left newer than the
+debug objects -- capture budgets only from a binary the ratchet itself just
+built.
+
 ### MT2 — promote dumps to env-opt-in in all builds. *(DECIDED)*
 
 Establish one explicit artifact contract, available in debug and release:

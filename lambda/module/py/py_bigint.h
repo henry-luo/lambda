@@ -1,15 +1,11 @@
 // lambda/module/py/py_bigint.h — Python arbitrary-precision integers
 // ===========================================================
-// Python bigints are stored as LMD_TYPE_DECIMAL Items with
-// Decimal::unlimited == PY_BIGINT_FLAG (value 2, distinct from Lambda's
-// fixed=0 and unlimited=1 decimal modes).
+// Python bigints share Lambda's LMD_TYPE_DECIMAL integer carrier
+// (Decimal::storage_kind == DECIMAL_BIGINT).
 // Backed by libmpdecimal with PY_BIGINT_PREC-digit precision (~13,000 bits).
 #pragma once
 
 #include "../../../lambda.h"
-
-// Marker in Decimal::unlimited to identify Python bigint items.
-#define PY_BIGINT_FLAG  2
 
 // Precision in decimal digits (~13,000 bits = 2^43300).
 #define PY_BIGINT_PREC  4000

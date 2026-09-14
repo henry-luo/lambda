@@ -147,7 +147,7 @@ static void print_complex(StrBuf* strbuf, Complex* value) {
 }
 
 void print_decimal(StrBuf *strbuf, Decimal *decimal) {
-    if (!decimal || !decimal->dec_val) { strbuf_append_str(strbuf, "error");  return; }
+    if (!decimal_has_payload(decimal)) { strbuf_append_str(strbuf, "error");  return; }
     const char* special = decimal_special_literal(decimal);
     if (special) { strbuf_append_str(strbuf, special); return; }
     // Use centralized decimal_to_string function

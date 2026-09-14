@@ -492,7 +492,7 @@ extern "C" Item js_fs_closeSync(Item fd_item);
 static bool fs_is_bigint(Item value) {
     if (get_type_id(value) != LMD_TYPE_DECIMAL) return false;
     Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
-    return dec && dec->unlimited == DECIMAL_BIGINT;
+    return dec && dec->storage_kind == DECIMAL_BIGINT;
 }
 
 static bool fs_is_options_object(Item value) {
