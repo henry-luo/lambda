@@ -11,6 +11,7 @@ corpus/valid/vectors.ls	functional-valid	success	direct	interp,jit	true
 corpus/edge_cases/collections.ls	functional-valid	success	direct	interp,jit	true
 corpus/edge_cases/strings.ls	functional-valid	success	direct	interp,jit	true
 @root/test/lambda/negative/fuzzy_crashes/empty_parenthesized_expr.ls	syntax-invalid	reject	direct	interp	true
+@root/test/lambda/negative/fuzzy_crashes/error_numeric_member.ls	semantic-invalid	reject	direct	interp	true
 @root/test/lambda/proc/proc1.ls	procedural-valid	success	run	interp,jit	true
 @root/test/lambda/proc/tune27_loop_accumulator.ls	auto-promotion	success	run	interp,jit,auto	true
 @root/test/lambda/import_vars.ls	module-root	success	direct	interp,jit	true

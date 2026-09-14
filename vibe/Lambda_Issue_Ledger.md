@@ -902,9 +902,14 @@ and points at the generator that actually conflicts.
   mutation) vs per-shape counters (+8 B per TypeMap; recommended). Companion:
   re-key duplicate-class-name deopt by constructor/`TypeMap` identity rather than
   class-name strings.
-- **OI-7 · Node compat majors.** Async `fs` runs synchronously inline; stream
-  internals are stubs (K27 shared stream core is the settled fix); `vm` does not
-  isolate (security-relevant); crypto lacks asymmetric primitives.
+- **OI-7 · Node compatibility gaps · RE-SCOPED 2026-09-14.** `vm` is
+  intentionally absent: `require('vm')` / `require('node:vm')` return
+  `MODULE_NOT_FOUND`, after the non-isolating implementation was retired. It is
+  therefore not an outstanding sandboxing defect. The remaining compatibility
+  work is that callback-style `fs` operations can run synchronously and invoke
+  callbacks inline; stream internals remain partial (K27 shared stream core is
+  the settled fix); and crypto lacks asymmetric primitives and complete
+  Node-style error behavior. See `doc/dev/js/JS_14_Node_Compat.md` §11.
 - **OI-8 · DOM fidelity.** No on-read layout flush, so mutate-then-read
   `offsetWidth` sees stale pixels; framework-blocking API gaps fail as silent
   `undefined`; O(n) listener/wrapper storage degrades quadratically; no text

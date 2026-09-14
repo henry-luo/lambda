@@ -1754,6 +1754,11 @@ TEST_F(NegativeScriptTest, FuzzyCrash_TypeValidationGenericMapArray) {
     ExpectErrorWithoutCrash("test/lambda/negative/fuzzy_crashes/type_validation_generic_map_array.ls");
 }
 
+TEST_F(NegativeScriptTest, FuzzyCrash_ErrorNumericMember) {
+    ExpectErrorCode("test/lambda/negative/fuzzy_crashes/error_numeric_member.ls",
+                    "Script execution failed");
+}
+
 // --- I/O Error Tests (4xx) ---
 
 TEST_F(NegativeScriptTest, IOError_FileNotFound) {
