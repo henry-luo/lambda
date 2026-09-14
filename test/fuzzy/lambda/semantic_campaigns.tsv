@@ -1,0 +1,9 @@
+# campaign	status	evidence	formal_refs
+syntax-parser	covered	parser_review.tsv; corpus_manifest.tsv; parser stability target	S16;D1.9;D8.1.2v3
+values-types-representation	covered	data_types.ls; vectors.ls; source_generator.py typed-binding family	S4;S11;D2.5;D2.6
+operators-equality-order	covered	pipe_expressions.ls; vectors.ls; source_generator.py arithmetic and pipeline families	S5;S6;S8;S10
+errors-functions-resources	covered	closures.ls; empty_parenthesized_expr.ls; proc_binary_output.ls dry-run scenario	S7;S12;D1.9
+mutation-lifetime	covered	cow_alias.ls; proc_fill_gc_nested.ls; forced GC/poison/root witness equality row	S9;D4.4;D5.3;D8.6.3
+concurrency	covered	message_fifo.ls run-driver scenario and explicit tier equality	S13
+data-processing	covered	control_flow.ls; collections.ls; source_generator.py query family	S14
+modules	covered	import_vars.ls module-root scenario and explicit tier equality	D8.2.5v2;D8.1.1v10

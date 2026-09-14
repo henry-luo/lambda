@@ -2,9 +2,8 @@
 
 **Date:** 2026-09-14
 
-**Status:** **PROPOSED** for the harness, corpus, generators, execution matrix,
-triage, and CI rollout. The parser-reference contract in §3 is **DECIDED by
-user ruling on 2026-09-14** and ratified as **D8.1.2v3**.
+**Status:** **IMPLEMENTED** on 2026-09-14. The parser-reference contract in §3
+is **DECIDED by user ruling on 2026-09-14** and ratified as **D8.1.2v3**.
 
 **Formal linkage:** `doc/Lambda_Formal_Design.md` — **D1.6** (MIR Direct is the
 only native backend), **D1.9** (malformed input must fail closed, never reach
@@ -27,6 +26,38 @@ previously occupied this path. Its Tree-sitter-production pipeline, corpus
 counts, syntax examples, reference-counting model, target names, and completion
 claims are retained only in Git history.
 
+## Implementation record
+
+The maintained entry point is `test/fuzzy/lambda/run_fuzz.py`; the legacy
+`test/test_fuzz.sh` and stale C++ generator/mutator were removed after a
+repository-wide consumer check. The implementation is complete against the
+acceptance criteria in §16:
+
+| Responsibility | Implemented location | Verification |
+|---|---|---|
+| Seed roles/contracts and drivers | `corpus_manifest.tsv` | Every row records role, success/reject contract, `direct`/`run`, tiers, and determinism. |
+| State-aware generation/mutation | `source_generator.py`, `source_mutator.py` | Scoped declarations, calls, closures, types, maps, query forms, valid/invalid contracts, and recorded operations. |
+| Parser stability/differential | `lambda_parser_poc_diff.c`, `parser_differential.py`, `parser_review.tsv` | Repeats fail-fast/recovery parsing, retains structural-novel raw-byte inputs, uses grammar.js as first cut, and hash/status-ratchets reviewed differences. |
+| Tier/lifetime matrix | `run_fuzz.py`, `lambda_process.py` | Explicit T0, eager JIT, AUTO hot scenario, forced GC, poison, and root witness preserve byte output. |
+| Findings lifecycle | `run_fuzz.py` | Content/signature deduplication, bounded artifacts, replay, oracle-preserving reduction, and a non-automatic promotion review. |
+| Feature/campaign ratchets | `feature_inventory.py`, `feature_inventory.lock`, `feature_campaigns.tsv`, `semantic_campaigns.tsv` | New production inventory items or unowned semantic campaigns fail **D1.10** review. |
+| Automation | `Makefile`, `.github/workflows/fuzz-lambda*.yml` | PR smoke, ASan nightly, and scheduled/manual soak retain only `temp/lambda-fuzz/` artifacts. |
+
+Current local gates:
+
+```text
+make fuzz-lambda-inventory
+bash test/lambda_parser_diff.sh
+python3 test/fuzzy/lambda/run_fuzz.py --verify-only --gc-stress --root-witness
+make fuzz-lambda-asan duration=60
+make fuzz-lambda-extended duration=3600
+```
+
+The first three commands are the deterministic implementation gates. The
+ASan and extended commands are bounded campaigns; a finding is only promoted
+after replay, minimization, and human root-cause review, per **D1.9**, **D1.10**,
+and **D8.6.3**.
+
 ---
 
 ## 0. Executive decision
@@ -37,7 +68,7 @@ non-crashing exit is called a pass.
 
 The system has five independently useful layers:
 
-1. a fast in-process lexer/parser target for arbitrary bytes;
+1. a bounded parser target for arbitrary bytes with structural-feedback corpus retention;
 2. grammar-guided source generation and C/Tree-sitter differential review;
 3. front-end fuzzing through parse, build, bind, validation, index, inference,
    and execution planning;
@@ -80,10 +111,10 @@ reviewed seeds + grammar.js + feature inventory
 
 ## 1. Current-state audit
 
-### 1.1 Maintained path
+### 1.1 Superseded maintained-path audit
 
-The Make targets `fuzz-lambda` and `fuzz-lambda-extended` invoke
-`test/fuzzy/lambda/test_fuzzy.sh`. The runner performs three operations:
+Before this implementation, the Make targets invoked the removed shell runner
+`test/fuzzy/lambda/test_fuzzy.sh`. It performed three operations:
 
 1. run the local `valid` and `edge_cases` corpora;
 2. load small `*.ls` files recursively from `test/lambda` and `test/std`, then
@@ -95,7 +126,7 @@ Dry-run is a useful safety boundary because it exercises the ordinary compile
 and runtime path while fabricating external I/O; it is not the cause of the
 current compiler-coverage gap.
 
-### 1.2 Measured snapshot
+### 1.2 Superseded measured snapshot
 
 The following is an audit snapshot from 2026-09-14, not a permanent corpus
 promise:
@@ -302,8 +333,8 @@ output, and distinguish an engine timeout from a harness failure.
 
 | Target | Isolation | Input contract | Primary oracle |
 |---|---|---|---|
-| Lexer | in process | arbitrary bytes | Always advances or returns an error; spans remain in bounds; no sanitizer failure. |
-| C parser | in process | arbitrary bytes and structured source | Terminates within budgets; stable status, diagnostic, metrics, and structural hash; recovery publishes no partial sink. |
+| Lexer | isolated helper process over C API | arbitrary bytes | Always advances or returns an error; spans remain in bounds; no sanitizer failure. |
+| C parser | isolated helper process over C API | arbitrary bytes and structured source | Terminates within budgets; stable status, diagnostic, metrics, and structural hash; recovery publishes no partial sink. |
 | Parser differential | isolated batch or process | grammar-guided and reviewed fixtures | Agreement or a reviewed discrepancy under §3. |
 | Front end | subprocess initially | expected-valid and expected-invalid source | Expected phase and diagnostic class; no partial execution after failure. |
 | Semantic tier differential | subprocess | deterministic, expected-valid source | Explicit T0 and eager JIT have identical exit class and byte output; T0 fallback is zero. |
@@ -312,12 +343,13 @@ output, and distinguish an engine timeout from a harness failure.
 | Procedure/module/resource | subprocess with scenario fixture | manifest-declared entry contract | Correct driver, hermetic fixture, stable scenario invariant. |
 | Concurrency | subprocess with repeat schedule seeds | deterministic assertions or invariant checks | No crash/deadlock/leak; cancellation, scope, and message invariants hold under **S13**. |
 
-### 4.3 Why only the parser begins in process
+### 4.3 Why the parser is the only direct C-API target
 
 `lambda_lexer_next`, `lambda_rd_parse_source`, and
-`lambda_rd_parse_recovering` already expose bounded C APIs suitable for a
-coverage-guided target. Their metrics and structural hash provide cheap
-determinism checks.
+`lambda_rd_parse_recovering` already expose bounded C APIs. The isolated
+`lambda-cst` helper invokes them on raw bytes and feeds novel structural
+signatures back into a temporary corpus; their metrics and structural hash
+also provide cheap determinism checks.
 
 The complete runtime owns global compiler, module, GC, cache, and execution
 state. Reusing it inside one libFuzzer process before a reset audit would trade
@@ -744,26 +776,26 @@ campaigns.
 
 ## 10. Command and configuration surface
 
-The exact implementation language is left to the implementation plan, but the
-user-facing contract should converge on one entry point:
+The implemented user-facing contract has one entry point:
 
 ```text
 make fuzz-lambda                         # deterministic PR smoke
 make fuzz-lambda-extended                # longer local campaign
-test/fuzzy/lambda/run_fuzz --target parser --seconds 60 --seed 1234
-test/fuzzy/lambda/run_fuzz --target tier-diff --corpus baseline --jobs 4
-test/fuzzy/lambda/run_fuzz --replay ./temp/lambda-fuzz/<case>/metadata.json
-test/fuzzy/lambda/run_fuzz --minimize ./temp/lambda-fuzz/<case>/metadata.json
+python3 test/fuzzy/lambda/run_fuzz.py --target parser --seconds=60 --seed=1234
+python3 test/fuzzy/lambda/run_fuzz.py --target semantic --cases=128 --shard-count=4 --shard-index=2
+python3 test/fuzzy/lambda/run_fuzz.py --replay ./temp/lambda-fuzz/<case>
+python3 test/fuzzy/lambda/run_fuzz.py --minimize ./temp/lambda-fuzz/<case>
 ```
 
 Required configuration includes target, duration or case count, master seed,
-per-case timeout, jobs, executable(s), corpus roles, dry-run policy, artifact
-root, and output cap. Defaults are printed at startup and repeated in the run
-summary.
+per-case timeout, shard count/index, executable(s), corpus roles, dry-run
+policy, artifact root, parser corpus cap, and output cap. Defaults are printed
+at startup and repeated in the run summary.
 
-The random stream derives each case seed from `(master_seed, worker_id,
-case_ordinal)` so scheduling does not change generated content. A deterministic
-case-count mode is the PR default; wall-clock mode is suitable for soak runs.
+The random stream derives each case seed from `(master_seed, case_ordinal)`;
+`--shard-count` advances ordinals by a fixed stride, so scheduling does not
+change generated content. A deterministic case-count mode is the PR default;
+wall-clock mode is suitable for soak runs.
 
 ## 11. CI tiers and metrics
 
@@ -772,7 +804,7 @@ case-count mode is the PR default; wall-clock mode is suitable for soak runs.
 | Tier | Budget | Contents | Merge behavior |
 |---|---:|---|---|
 | Pull request smoke | 30–60 seconds plus fixed regressions | Parser corpus, feature manifest, reviewed discrepancy ratchet, small valid generator set, explicit T0/JIT comparison | Blocks on every new finding or missing feature row. |
-| Nightly | about 30 minutes per shard | Coverage-guided parser, structured generation, ASan, forced GC/poison, broader tier matrix | Opens/updates deduplicated findings; no silent count baseline. |
+| Nightly | about 30 minutes per shard | Structural-feedback parser corpus, structured generation, ASan, forced GC/poison, broader tier matrix | Opens/updates deduplicated findings; no silent count baseline. |
 | Weekly/manual soak | 1–6 hours | Module graphs, AUTO thresholds, large structures, concurrency schedules, slower sanitizers | Produces retained artifacts and trend report. |
 
 Parallel workers isolate their temporary directories and processes. Sharding is
@@ -781,7 +813,7 @@ original worker count.
 
 ### 11.2 Metrics that matter
 
-- unique covered edges/regions per target and their ratcheted baseline;
+- unique C-parser structural signatures and retained parser-corpus inputs;
 - feature-inventory coverage by token, reduction, AST kind, system function,
   and semantic campaign;
 - valid-generation rate and the deepest phase reached;
@@ -799,9 +831,9 @@ global percentages misleading.
 
 ## 12. Implementation plan
 
-Full progress tracking should move to a later `vibe/impl/Lambda_Impl_Fuzzy_Test.md`
-once this proposal is approved. The design divides naturally into the following
-slices.
+All phases below are implemented. The maintained operational guide is
+`test/fuzzy/lambda/README.md`; this section remains the design-to-code audit
+trail, with the concrete mappings recorded above.
 
 ### Phase 0 — restore trust in the existing runner
 
@@ -884,23 +916,18 @@ do not pollute the source corpus with untriaged files.
 
 ```text
 test/fuzzy/lambda/
-├── run_fuzz                         # single orchestrator
+├── run_fuzz.py                      # single orchestrator
 ├── corpus_manifest.tsv              # seed role and driver contracts
 ├── parser_review.tsv                # reviewed C/Tree-sitter disagreements
+├── parser_differential.py           # grammar/C and structural-signature adapter
+├── source_generator.py              # stateful valid/invalid producer
+├── source_mutator.py                # recorded structured mutations
+├── feature_inventory.py             # D1.10 production-surface ratchet
+├── semantic_campaigns.tsv           # formal-family coverage ledger
 ├── corpus/
-│   ├── functional_valid/
-│   ├── procedural_valid/
-│   ├── syntax_invalid/
-│   ├── semantic_invalid/
+│   ├── valid/
+│   ├── edge_cases/
 │   └── parser_review/
-├── harness/
-│   ├── parser_fuzz.cpp              # C ABI coverage-guided entry
-│   ├── feature_inventory.cpp
-│   └── shared_executor.*
-├── generator/
-│   ├── source_generator.*
-│   ├── source_mutator.*
-│   └── mutation_trace.*
 └── README.md                         # commands and triage workflow
 
 temp/lambda-fuzz/                    # untracked run artifacts only
@@ -1002,14 +1029,14 @@ named symbols and targets are the verification points.
 
 | Area | Current anchor | Audit significance |
 |---|---|---|
-| Maintained runner | `test/fuzzy/lambda/test_fuzzy.sh`, `run_test`, `generate_random_code`, `mutate_program` | Exit classification, stale generation, seed loading, and artifact behavior. |
-| Make integration | `Makefile`, `fuzz-lambda`, `fuzz-lambda-extended` | Both currently build/use the ordinary executable rather than a fuzz matrix. |
-| Parser API | `lambda/runtime/parser/lambda_rd_parser.h`, `lambda_rd_parse_source`, `lambda_rd_parse_recovering` | Suitable bounded in-process target surface. |
+| Maintained runner | `test/fuzzy/lambda/run_fuzz.py`, `test/interp/lambda_process.py` | Deterministic seed contracts, process isolation, classification, artifacts, replay, and minimization. |
+| Make integration | `Makefile`, `fuzz-lambda`, `fuzz-lambda-extended`, `fuzz-lambda-asan` | Builds the required executable matrix and invokes the shared runner. |
+| Parser API | `lambda/runtime/parser/lambda_rd_parser.h`, `lambda_rd_parse_source`, `lambda_rd_parse_recovering` | Isolated byte-input target with stable metrics, recovery, and structural-signature feedback. |
 | Reference grammar | `lambda/tree-sitter-lambda/grammar.js` | Best first-cut structural reference under D8.1.2v3. |
-| Parser differential | `test/lambda_parser_diff.sh`, `test/lambda_parser_poc_diff.c` | Existing comparison infrastructure to extend. |
-| Tier sweep | `test/interp/tier_sweep.py`, `run`, `verdict_for` | Reusable process isolation, but the supposed JIT row currently selects AUTO. |
+| Parser differential | `test/lambda_parser_diff.sh`, `test/lambda_parser_poc_diff.c`, `parser_differential.py` | grammar.js first cut, C-parser production comparison, reviewed differences, stability, and structural feedback. |
+| Tier sweep | `test/interp/tier_sweep.py`, `test/interp/lambda_process.py` | Explicit interpreter/JIT/AUTO selection and reusable process isolation. |
 | Production pipeline | `lambda/runtime/runner.cpp` | Parse/build/bind/validate, T0, and MIR Direct phase boundaries. |
-| ASan build | `build_lambda_config.json`, `lambda-debug-asan.exe`; `Makefile`, `build-debug-asan` | Existing sanitizer executable not selected by the current fuzz runner. |
+| ASan build | `build_lambda_config.json`, `lambda-debug-asan.exe`; `Makefile`, `fuzz-lambda-asan` | ASan binary participates in the same declared seed and fuzz matrix. |
 | GC stress | `lambda/runtime/lambda-mem.cpp` | Implements force interval/seed, freed-memory poison, and root witness. |
 | Regressions | `test/test_lambda_errors_gtest.cpp`; `test/lambda/negative/fuzzy_crashes/` | Existing destination for minimized rejection/crash cases. |
 
@@ -1026,8 +1053,8 @@ by this design:
 - The dormant C++ generator/mutator are not an implemented generation phase.
 - Lambda uses GC and precise roots, not reference counting.
 - `make test-fuzzy` is not the maintained Make target.
-- ASan, differential testing, minimization, coverage guidance, and extended CI
-  are proposed work, not completed phases.
+- ASan, differential testing, minimization, structural feedback, and extended
+  CI are implemented phases rather than future recommendations.
 
 Historical measurements and crash discoveries in the old document may still
 motivate seed reuse, but they are not current acceptance evidence.

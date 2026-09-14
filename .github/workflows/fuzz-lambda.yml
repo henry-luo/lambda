@@ -1,0 +1,48 @@
+name: Lambda Fuzz Smoke
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'lambda/**'
+      - 'test/fuzzy/lambda/**'
+      - 'test/interp/lambda_process.py'
+      - 'test/lambda_parser_poc_diff.c'
+      - 'test/lambda_parser_diff.sh'
+      - 'build_lambda_config.json'
+      - 'Makefile'
+  workflow_dispatch:
+
+env:
+  DOCKER_IMAGE: lambda-linux-ci
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build Linux test image
+        run: docker build -t "$DOCKER_IMAGE" -f .github/workflows/Dockerfile.linux .
+
+      - name: Run deterministic fuzz smoke
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/lambda" \
+            -w /lambda \
+            "$DOCKER_IMAGE" \
+            bash -lc 'bash setup-linux-deps.sh && make fuzz-lambda duration=60 timeout=5'
+
+      - name: Upload fuzz findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-fuzz-smoke-artifacts
+          path: temp/lambda-fuzz/
+          retention-days: 14
+          if-no-files-found: ignore

@@ -1,10 +1,10 @@
 name: Nightly Linux Build & Test
 
 on:
-  workflow_dispatch:  # Disabled automatic triggers until nightly CI stabilizes
-  # schedule:
-  #   # 3:00 PM Singapore Time (SGT = UTC+8) = 07:00 UTC
-  #   - cron: '0 7 * * *'
+  workflow_dispatch:
+  schedule:
+    # 3:00 PM Singapore Time (SGT = UTC+8) = 07:00 UTC
+    - cron: '0 7 * * 1-6'
 
 env:
   DOCKER_IMAGE: lambda-linux-ci
@@ -12,7 +12,7 @@ env:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
 
     steps:
       - name: Checkout repository
@@ -49,6 +49,14 @@ jobs:
             $DOCKER_IMAGE \
             bash .github/workflows/run-tests-linux.sh
 
+      - name: Run ASan fuzz campaign
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/lambda \
+            -w /lambda \
+            $DOCKER_IMAGE \
+            bash -lc 'make fuzz-lambda-asan duration=300 timeout=10'
+
       - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -57,6 +65,7 @@ jobs:
           path: |
             log.txt
             test_output.txt
+            temp/lambda-fuzz/
           retention-days: 30
           if-no-files-found: ignore
 
