@@ -1411,11 +1411,11 @@ bool selector_matcher_parse_nth_formula(const char* formula_str, CssNthFormula* 
     }
 
     // Check for "odd" or "even"
-    if (str_ieq_const(formula_str, strlen(formula_str), "odd")) {
+    if (str_ieq_cstr(formula_str, "odd")) {
         formula->odd = true;
         return true;
     }
-    if (str_ieq_const(formula_str, strlen(formula_str), "even")) {
+    if (str_ieq_cstr(formula_str, "even")) {
         formula->even = true;
         return true;
     }

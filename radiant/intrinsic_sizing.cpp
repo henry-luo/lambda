@@ -498,9 +498,9 @@ static void intrinsic_apply_monospace_font_size_quirk(FontProp* font,
         return;
     }
     bool current_is_mono =
-        str_ieq_const(font->family, strlen(font->family), "monospace");
+        str_ieq_cstr(font->family, "monospace");
     bool parent_is_mono = parent_font && parent_font->family &&
-        str_ieq_const(parent_font->family, strlen(parent_font->family), "monospace");
+        str_ieq_cstr(parent_font->family, "monospace");
     if (!current_is_mono || parent_is_mono) return;
 
     float original_size = font->font_size;

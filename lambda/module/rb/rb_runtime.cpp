@@ -925,8 +925,8 @@ extern "C" Item rb_builtin_require_relative(Item path) {
     }
 
     // add .rb extension if no extension present
-    const char* ext = strrchr(resolved, '.');
-    if (!ext || (ext < strrchr(resolved, '/'))) {
+    const char* ext = file_path_ext(resolved);
+    if (!ext) {
         strncat(resolved, ".rb", sizeof(resolved) - strlen(resolved) - 1);
     }
 
@@ -959,7 +959,7 @@ extern "C" Item rb_builtin_require_relative(Item path) {
     rb_current_file = resolved;
 
     // determine language by extension and compile+execute
-    ext = strrchr(resolved, '.');
+    ext = file_path_ext(resolved);
     Item result = (Item){.item = ITEM_NULL};
 
     if (ext && strcmp(ext, ".rb") == 0) {

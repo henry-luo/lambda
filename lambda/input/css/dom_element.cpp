@@ -3108,7 +3108,7 @@ DomComment* DomComment::create_detached(Element* native_element, DomDocument* do
     }
 
     DomNodeType node_type;
-    if (str_ieq_const(tag_name, strlen(tag_name), "!DOCTYPE")) {
+    if (str_ieq_cstr(tag_name, "!DOCTYPE")) {
         node_type = DOM_NODE_DOCTYPE;
     } else if (strcmp(tag_name, "!--") == 0 || strcmp(tag_name, "#comment") == 0) {
         node_type = DOM_NODE_COMMENT;
@@ -3493,7 +3493,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
 
     // Skip comments and DOCTYPE - they will be created as DomComment nodes below
     // HTML5 parser uses "#comment", CSS/older parsers use "!--"
-    if (strcmp(tag_name, "!--") == 0 || strcmp(tag_name, "#comment") == 0 || str_ieq_const(tag_name, strlen(tag_name), "!DOCTYPE")) {
+    if (strcmp(tag_name, "!--") == 0 || strcmp(tag_name, "#comment") == 0 || str_ieq_cstr(tag_name, "!DOCTYPE")) {
         return nullptr;  // Not a layout element, processed as child below
     }
 
@@ -3537,7 +3537,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     }
 
     // extract rowspan and colspan attributes for table cells (td, th)
-    if (str_ieq_const(tag_name, strlen(tag_name), "td") || str_ieq_const(tag_name, strlen(tag_name), "th")) {
+    if (str_ieq_cstr(tag_name, "td") || str_ieq_cstr(tag_name, "th")) {
         const char* rowspan_value = extract_element_attribute(elem, "rowspan", nullptr);
         if (rowspan_value) {
             dom_elem->set_attribute("rowspan", rowspan_value);
@@ -3551,7 +3551,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
 
     // Store href for anchor and area elements; selector matching derives :link
     // from attributes when no StateStore resolver is installed.
-    if (str_ieq_const(tag_name, strlen(tag_name), "a") || str_ieq_const(tag_name, strlen(tag_name), "area")) {
+    if (str_ieq_cstr(tag_name, "a") || str_ieq_cstr(tag_name, "area")) {
         const char* href_value = extract_element_attribute(elem, "href", nullptr);
         if (href_value && strlen(href_value) > 0) {
             dom_elem->set_attribute("href", href_value);
@@ -3560,7 +3560,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
 
     // Store form attributes; selector matching derives static pseudo-class
     // defaults from attributes before StateStore-backed view state exists.
-    if (str_ieq_const(tag_name, strlen(tag_name), "input")) {
+    if (str_ieq_cstr(tag_name, "input")) {
         const char* type_value = extract_element_attribute(elem, "type", nullptr);
         const char* name_value = extract_element_attribute(elem, "name", nullptr);
         const char* ph_value = extract_element_attribute(elem, "placeholder", nullptr);
@@ -3594,12 +3594,12 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     }
     // :disabled also applies to <select>, <textarea>, <button>, <optgroup>, <option>,
     // <fieldset> per HTML spec: https://html.spec.whatwg.org/#selector-disabled
-    else if (str_ieq_const(tag_name, strlen(tag_name), "select") ||
-             str_ieq_const(tag_name, strlen(tag_name), "textarea") ||
-             str_ieq_const(tag_name, strlen(tag_name), "button") ||
-             str_ieq_const(tag_name, strlen(tag_name), "optgroup") ||
-             str_ieq_const(tag_name, strlen(tag_name), "option") ||
-             str_ieq_const(tag_name, strlen(tag_name), "fieldset")) {
+    else if (str_ieq_cstr(tag_name, "select") ||
+             str_ieq_cstr(tag_name, "textarea") ||
+             str_ieq_cstr(tag_name, "button") ||
+             str_ieq_cstr(tag_name, "optgroup") ||
+             str_ieq_cstr(tag_name, "option") ||
+             str_ieq_cstr(tag_name, "fieldset")) {
         const char* ph_value = extract_element_attribute(elem, "placeholder", nullptr);
         const char* val_attr = extract_element_attribute(elem, "value", nullptr);
         if (elem->has_attr("disabled")) {
@@ -3663,7 +3663,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
 
             // Check if this is a comment or DOCTYPE
             // HTML5 parser uses "#comment", CSS/older parsers use "!--"
-            if (strcmp(child_tag_name, "!--") == 0 || strcmp(child_tag_name, "#comment") == 0 || str_ieq_const(child_tag_name, strlen(child_tag_name), "!DOCTYPE")) {
+            if (strcmp(child_tag_name, "!--") == 0 || strcmp(child_tag_name, "#comment") == 0 || str_ieq_cstr(child_tag_name, "!DOCTYPE")) {
                 // Create DomComment node backed by Lambda Element
                 DomComment* comment_node = DomComment::create(child_elem, dom_elem);
                 if (comment_node) {

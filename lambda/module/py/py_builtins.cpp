@@ -11,6 +11,7 @@
 #include "../../../runtime/transpiler.hpp"
 #include "../../../lib/log.h"
 #include "../../../lib/hash.h"
+#include "../../../lib/str.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/sort.h"
 #include <cstring>
@@ -838,7 +839,7 @@ extern "C" Item py_builtin_tuple(Item iterable) {
 
 static Item py_str_upper(String* s) {
     char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_PY_RUNTIME);
-    for (int64_t i = 0; i < s->len; i++) buf[i] = toupper((uint8_t)s->chars[i]);
+    str_to_upper(buf, s->chars, s->len);
     buf[s->len] = '\0';
     Item result = (Item){.item = s2it(heap_strcpy(buf, s->len))};
     mem_free(buf);
@@ -847,7 +848,7 @@ static Item py_str_upper(String* s) {
 
 static Item py_str_lower(String* s) {
     char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_PY_RUNTIME);
-    for (int64_t i = 0; i < s->len; i++) buf[i] = tolower((uint8_t)s->chars[i]);
+    str_to_lower(buf, s->chars, s->len);
     buf[s->len] = '\0';
     Item result = (Item){.item = s2it(heap_strcpy(buf, s->len))};
     mem_free(buf);

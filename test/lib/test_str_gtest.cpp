@@ -115,6 +115,12 @@ TEST_F(StrCmpTest, IEqLit) {
     EXPECT_FALSE(str_ieq_const("abc", 3, "abd"));
 }
 
+TEST_F(StrCmpTest, CstrCaseInsensitiveEquality) {
+    EXPECT_TRUE(str_ieq_cstr("Content-Type", "content-type"));
+    EXPECT_FALSE(str_ieq_cstr("html", "body"));
+    EXPECT_TRUE(str_ieq_cstr(NULL, ""));
+}
+
 /* ================================================================== *
  *  §2  Prefix / Suffix                                               *
  * ================================================================== */
@@ -909,12 +915,26 @@ TEST_F(StrPathTest, FileExtAfterSlash) {
     EXPECT_EQ(ext_len, 0u);
 }
 
+TEST_F(StrPathTest, FileExtAfterWindowsSlash) {
+    size_t ext_len;
+    const char* ext = str_file_ext("dir\\file.txt", 12, &ext_len);
+    ASSERT_NE(ext, nullptr);
+    EXPECT_EQ(ext_len, 4u);
+    EXPECT_EQ(memcmp(ext, ".txt", 4), 0);
+}
+
 TEST_F(StrPathTest, FileExtMultipleDots) {
     size_t ext_len;
     const char* ext = str_file_ext("archive.tar.gz", 14, &ext_len);
     ASSERT_NE(ext, nullptr);
     EXPECT_EQ(ext_len, 3u);
     EXPECT_EQ(memcmp(ext, ".gz", 3), 0);
+}
+
+TEST_F(StrPathTest, FileExtRejectsNonExtensions) {
+    EXPECT_EQ(str_file_ext(".gitignore", 10, nullptr), nullptr);
+    EXPECT_EQ(str_file_ext("dir/file.txt/", 13, nullptr), nullptr);
+    EXPECT_EQ(str_file_ext("dir/file.", 9, nullptr), nullptr);
 }
 
 TEST_F(StrPathTest, Basename) {

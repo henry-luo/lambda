@@ -135,6 +135,10 @@ int str_icmp_cstr(const char* a, const char* b) {
     return str_icmp(a, a ? strlen(a) : 0, b, b ? strlen(b) : 0);
 }
 
+bool str_ieq_cstr(const char* a, const char* b) {
+    return str_icmp_cstr(a, b) == 0;
+}
+
 bool str_eq(const char* a, size_t a_len, const char* b, size_t b_len) {
     if (!a) a_len = 0;
     if (!b) b_len = 0;
@@ -961,19 +965,25 @@ char* str_replace_first(const char* s, size_t s_len,
  * ══════════════════════════════════════════════════════════════════════ */
 
 const char* str_file_ext(const char* path, size_t path_len, size_t* ext_len) {
-    if (!path || path_len == 0) { if (ext_len) *ext_len = 0; return NULL; }
-
-    /* scan backwards for '.', but stop at '/' or '\\' */
-    for (size_t i = path_len; i > 0; ) {
-        i--;
-        char c = path[i];
-        if (c == '.') {
-            if (ext_len) *ext_len = path_len - i;
-            return path + i;
-        }
-        if (c == '/' || c == '\\') break;
-    }
     if (ext_len) *ext_len = 0;
+    if (!path || path_len == 0 || path[path_len - 1] == '/' || path[path_len - 1] == '\\') {
+        return NULL;
+    }
+
+    size_t base_start = 0;
+    for (size_t i = path_len; i > 0; i--) {
+        if (path[i - 1] == '/' || path[i - 1] == '\\') {
+            base_start = i;
+            break;
+        }
+    }
+
+    for (size_t i = path_len; i > base_start; i--) {
+        if (path[i - 1] != '.') continue;
+        if (i - 1 == base_start || i == path_len) return NULL;
+        if (ext_len) *ext_len = path_len - i + 1;
+        return path + i - 1;
+    }
     return NULL;
 }
 

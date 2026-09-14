@@ -450,9 +450,8 @@ static ImageSurface* image_surface_decode_file(const char* path) {
 
 static bool image_path_has_declared_non_svg_extension(const char* file_path) {
     if (!file_path) return false;
-    const char* slash = strrchr(file_path, '/');
-    const char* dot = strrchr(file_path, '.');
-    if (!dot || (slash && dot < slash)) return false;
+    const char* dot = file_path_ext(file_path);
+    if (!dot) return false;
     // cached network resources keep a synthetic suffix, so sniff their bytes for SVG.
     if (strcasecmp(dot, ".cache") == 0) return false;
     if (strcasecmp(dot, ".svg") == 0 || strcasecmp(dot, ".svgz") == 0) return false;

@@ -6,6 +6,7 @@
 #include "../lib/mem_factory.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include "../lib/file.h"
 #include "../lib/str.h"
 #include <chrono>
 #include <pthread.h>
@@ -68,7 +69,7 @@ static RenderOutputKind render_output_kind_from_file(const char* output_file) {
         return RENDER_OUTPUT_SCREEN;
     }
 
-    const char* ext = strrchr(output_file, '.');
+    const char* ext = file_path_ext(output_file);
     if (!ext) {
         return RENDER_OUTPUT_PNG;
     }
@@ -390,7 +391,7 @@ static uint32_t render_output_canvas_background(View* root_view) {
         if (child->view_type == RDT_VIEW_BLOCK) {
             ViewBlock* child_block = lam::view_require_block(child);
             const char* name = child_block->node_name();
-            if (name && str_ieq_const(name, strlen(name), "body")) {
+            if (name && str_ieq_cstr(name, "body")) {
                 if (child_block->bound && child_block->boundary_mut()->background &&
                     child_block->boundary()->background->color.a > 0) {
                     return child_block->boundary()->background->color.c;
@@ -514,7 +515,7 @@ static void render_output_save_surface(ImageSurface* surface, const char* output
         return;
     }
 
-    const char* ext = strrchr(output_file, '.');
+    const char* ext = file_path_ext(output_file);
     if (ext && (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0)) {
         save_surface_to_jpeg(surface, output_file, 85);
     } else {

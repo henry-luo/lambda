@@ -144,7 +144,7 @@ static void lambda_cli_jube_write(void* user, const char* bytes, size_t length) 
 
 static bool lambda_cli_has_core_source_extension(const char* path) {
     if (!path) return false;
-    const char* extension = strrchr(path, '.');
+    const char* extension = file_path_ext(path);
     if (!extension) return false;
     return strcmp(extension, ".ls") == 0 || strcmp(extension, ".js") == 0 ||
         strcmp(extension, ".mjs") == 0 || strcmp(extension, ".cjs") == 0 ||

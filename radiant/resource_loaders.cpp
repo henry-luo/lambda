@@ -291,11 +291,11 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
     // only raster fallback surfaces need URL-extension format inference.
     if (img_surface->format != IMAGE_FORMAT_SVG) {
         img_surface->format = IMAGE_FORMAT_PNG;  // default
-        const char* ext = strrchr(res->url, '.');
+        const char* ext = file_path_ext(res->url);
         if (ext) {
-            if (str_ieq_const(ext, strlen(ext), ".jpg") || str_ieq_const(ext, strlen(ext), ".jpeg")) {
+            if (str_ieq_cstr(ext, ".jpg") || str_ieq_cstr(ext, ".jpeg")) {
                 img_surface->format = IMAGE_FORMAT_JPEG;
-            } else if (str_ieq_const(ext, strlen(ext), ".gif")) {
+            } else if (str_ieq_cstr(ext, ".gif")) {
                 img_surface->format = IMAGE_FORMAT_GIF;
             }
             // PNG is the default, WEBP not yet supported in ImageFormat enum

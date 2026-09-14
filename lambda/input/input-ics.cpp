@@ -293,7 +293,7 @@ void parse_ics(Input* input, const char* ics_string) {
 
         // Handle calendar start and end
         if (strcmp(property_name->chars, "BEGIN") == 0) {
-            if (str_ieq_const(property_value->chars, strlen(property_value->chars), "VCALENDAR")) {
+            if (str_ieq_cstr(property_value->chars, "VCALENDAR")) {
                 in_calendar = true;
             } else if (in_calendar) {
                 // Start of a component (VEVENT, VTODO, etc.)
@@ -319,7 +319,7 @@ void parse_ics(Input* input, const char* ics_string) {
         }
 
         if (strcmp(property_name->chars, "END") == 0) {
-            if (str_ieq_const(property_value->chars, strlen(property_value->chars), "VCALENDAR")) {
+            if (str_ieq_cstr(property_value->chars, "VCALENDAR")) {
                 in_calendar = false;
             } else if (current_component && current_component_type &&
                       str_ieq(property_value->chars, strlen(property_value->chars), current_component_type->chars, strlen(current_component_type->chars))) {

@@ -47,6 +47,9 @@ int str_icmp(const char* a, size_t a_len, const char* b, size_t b_len);
 /** case-insensitive compare of NUL-terminated strings (ASCII). */
 int str_icmp_cstr(const char* a, const char* b);
 
+/** case-insensitive equality of NUL-terminated strings (ASCII). */
+bool str_ieq_cstr(const char* a, const char* b);
+
 /** exact equality. */
 bool str_eq(const char* a, size_t a_len, const char* b, size_t b_len);
 
@@ -289,7 +292,8 @@ char* str_replace_first(const char* s, size_t s_len,
  *  11. File path helpers (common in Lambda for format detection)
  * ────────────────────────────────────────────────────────────────────── */
 
-/** return pointer to file extension including '.', or NULL.
+/** return pointer to a terminal file extension including '.', or NULL.
+ *  Dotfiles and paths ending in a separator or dot have no extension.
  *  e.g. str_file_ext("doc.json", 8, &ext_len) → ".json", ext_len=5. */
 const char* str_file_ext(const char* path, size_t path_len, size_t* ext_len);
 

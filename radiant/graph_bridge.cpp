@@ -37,7 +37,7 @@ static char* graph_bridge_escape_lambda_string(const char* value) {
 }
 
 const char* graph_bridge_flavor_for_path(const char* graph_file) {
-    const char* ext = graph_file ? strrchr(graph_file, '.') : nullptr;
+    const char* ext = file_path_ext(graph_file);
     if (ext && strcmp(ext, ".mmd") == 0) return "mermaid";
     if (ext && strcmp(ext, ".d2") == 0) return "d2";
     if (ext && (strcmp(ext, ".dsl") == 0 || strcmp(ext, ".structurizr") == 0))
@@ -46,7 +46,7 @@ const char* graph_bridge_flavor_for_path(const char* graph_file) {
 }
 
 bool graph_bridge_path_is_graph(const char* graph_file) {
-    const char* ext = graph_file ? strrchr(graph_file, '.') : nullptr;
+    const char* ext = file_path_ext(graph_file);
     if (!ext) return false;
     if (strcmp(ext, ".mmd") == 0 || strcmp(ext, ".d2") == 0 ||
             strcmp(ext, ".dot") == 0 || strcmp(ext, ".gv") == 0 ||

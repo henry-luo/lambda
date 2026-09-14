@@ -253,7 +253,7 @@ static const TransformFunctionSpec TRANSFORM_FUNCTION_SPECS[] = {
 static TransformFunctionType transform_function_type(const char* name) {
     if (!name) return TRANSFORM_NONE;
     for (const TransformFunctionSpec& spec : TRANSFORM_FUNCTION_SPECS) {
-        if (str_ieq_const(name, strlen(name), spec.name)) return spec.type;
+        if (str_ieq_cstr(name, spec.name)) return spec.type;
     }
     return TRANSFORM_NONE;
 }
@@ -2142,7 +2142,7 @@ static bool css_text_has_top_level_comma(const char* text, size_t len) {
 
 static void resolve_background_url_function(LayoutContext* lycon, const CssDeclaration* decl, const CssValue* value) {
     if (!value || value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function ||
-        !value->data.function->name || !str_ieq_const(value->data.function->name, strlen(value->data.function->name), "url")) {
+        !value->data.function->name || !str_ieq_cstr(value->data.function->name, "url")) {
         return;
     }
     lam::CssTempDecl img_decl(decl, CSS_PROPERTY_BACKGROUND_IMAGE, (CssValue*)value);
@@ -2794,7 +2794,7 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
         if (!func || !func->name) break;
 
 
-        if (str_ieq_const(func->name, strlen(func->name), "rgb") || str_ieq_const(func->name, strlen(func->name), "rgba")) {
+        if (str_ieq_cstr(func->name, "rgb") || str_ieq_cstr(func->name, "rgba")) {
             if (func->arg_count == 1 && func->args[0] && func->args[0]->type == CSS_VALUE_TYPE_LIST) {
                 const CssValue* list = func->args[0];
                 double r = 0, g = 0, b = 0, a = 255;
@@ -2848,7 +2848,7 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
                 }
             }
         }
-        else if (str_ieq_const(func->name, strlen(func->name), "hsl") || str_ieq_const(func->name, strlen(func->name), "hsla")) {
+        else if (str_ieq_cstr(func->name, "hsl") || str_ieq_cstr(func->name, "hsla")) {
             double h = 0, s = 0, l = 0, a = 1.0;
             if (func->arg_count == 1 && func->args[0] && func->args[0]->type == CSS_VALUE_TYPE_LIST) {
                 const CssValue* list = func->args[0];
@@ -4745,9 +4745,9 @@ static bool apply_chromium_monospace_font_size_quirk(StyleTree* style_tree,
         style_tree_get_declaration(style_tree, CSS_PROPERTY_FONT_FAMILY) != nullptr ||
         style_tree_get_declaration(style_tree, CSS_PROPERTY_FONT) != nullptr;
     bool current_is_mono =
-        str_ieq_const(span->fontp()->family, strlen(span->fontp()->family), "monospace");
+        str_ieq_cstr(span->fontp()->family, "monospace");
     bool parent_is_mono = parent_font_style && parent_font_style->family &&
-        str_ieq_const(parent_font_style->family, strlen(parent_font_style->family), "monospace");
+        str_ieq_cstr(parent_font_style->family, "monospace");
     bool textarea_font_size_override = element &&
         element->tag() == MARKUP_NAME_TEXTAREA &&
         style_tree_get_declaration(style_tree, CSS_PROPERTY_FONT_SIZE) != nullptr;
@@ -4855,7 +4855,7 @@ static bool preserve_html_ua_font_size(LayoutContext* lycon, DomElement* element
     if (tag == MARKUP_NAME_CODE || tag == MARKUP_NAME_KBD ||
         tag == MARKUP_NAME_SAMP || tag == MARKUP_NAME_TT) {
         return span->font && span->fontp()->family &&
-            str_ieq_const(span->fontp()->family, strlen(span->fontp()->family), "monospace") &&
+            str_ieq_cstr(span->fontp()->family, "monospace") &&
             span->fontp()->font_size > 0 && span->fontp()->font_size_from_medium;
     }
     if (tag >= MARKUP_NAME_H1 && tag <= MARKUP_NAME_H6) {
@@ -4870,7 +4870,7 @@ static bool preserve_html_ua_font_size(LayoutContext* lycon, DomElement* element
         tag == MARKUP_NAME_SELECT || tag == MARKUP_NAME_TEXTAREA) {
         bool textarea_medium = tag == MARKUP_NAME_TEXTAREA && span->font &&
             span->fontp()->family &&
-            str_ieq_const(span->fontp()->family, strlen(span->fontp()->family), "monospace") &&
+            str_ieq_cstr(span->fontp()->family, "monospace") &&
             span->fontp()->font_size > 0 && span->fontp()->font_size_from_medium;
         return span->font && span->fontp()->font_size > 0 &&
             (!span->fontp()->font_size_from_medium || textarea_medium);
@@ -5041,7 +5041,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 CssDeclaration* font_family_decl = style_tree_get_declaration(style_tree, CSS_PROPERTY_FONT_FAMILY);
                 bool has_author_monospace_family = font_family_decl && inheritance_span->font &&
                     inheritance_span->fontp()->family &&
-                    str_ieq_const(inheritance_span->fontp()->family, strlen(inheritance_span->fontp()->family), "monospace");
+                    str_ieq_cstr(inheritance_span->fontp()->family, "monospace");
                 if (has_author_monospace_family) {
                     continue;
                 }
@@ -6008,7 +6008,7 @@ static const char* css_text_emphasis_value_name(const CssValue* value) {
 static bool css_text_emphasis_value_is_name(const CssValue* value,
                                             const char* name) {
     const char* value_name = css_text_emphasis_value_name(value);
-    return value_name && str_ieq_const(value_name, strlen(value_name), name);
+    return value_name && str_ieq_cstr(value_name, name);
 }
 
 static bool css_text_emphasis_value_is_color(const CssValue* value) {
@@ -8458,8 +8458,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                         last_layer->type == CSS_VALUE_TYPE_KEYWORD ||
                         (last_layer->type == CSS_VALUE_TYPE_FUNCTION && last_layer->data.function &&
                          last_layer->data.function->name &&
-                         (str_ieq_const(last_layer->data.function->name, strlen(last_layer->data.function->name), "rgb") ||
-                          str_ieq_const(last_layer->data.function->name, strlen(last_layer->data.function->name), "rgba")))) {
+                         (str_ieq_cstr(last_layer->data.function->name, "rgb") ||
+                          str_ieq_cstr(last_layer->data.function->name, "rgba")))) {
                         bg->color = resolve_color_value(lycon, last_layer);
                     }
                 }
@@ -8569,14 +8569,14 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 return;
             }
             if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function && value->data.function->name &&
-                str_ieq_const(value->data.function->name, strlen(value->data.function->name), "url")) {
+                str_ieq_cstr(value->data.function->name, "url")) {
                 resolve_background_url_function(lycon, decl, value);
                 return;
             }
             if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function && value->data.function->name) {
                 const char* func_name = value->data.function->name;
-                if (str_ieq_const(func_name, strlen(func_name), "rgb") || str_ieq_const(func_name, strlen(func_name), "rgba") ||
-                    str_ieq_const(func_name, strlen(func_name), "hsl") || str_ieq_const(func_name, strlen(func_name), "hsla")) {
+                if (str_ieq_cstr(func_name, "rgb") || str_ieq_cstr(func_name, "rgba") ||
+                    str_ieq_cstr(func_name, "hsl") || str_ieq_cstr(func_name, "hsla")) {
                     layout_ensure_background(lycon, span);
                     span->boundary_mut()->background->color = resolve_color_value(lycon, value);
                     return;

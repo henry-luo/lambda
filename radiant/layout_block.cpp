@@ -82,7 +82,7 @@ typedef struct CssContentImage {
 
 static bool css_function_name_is(const CssFunction* func, const char* name) {
     return func && func->name && name &&
-        str_ieq_const(func->name, strlen(func->name), name);
+        str_ieq_cstr(func->name, name);
 }
 
 static bool css_image_set_resolution_from_value(const CssValue* value, float* out_resolution) {

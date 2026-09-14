@@ -195,11 +195,11 @@ static bool initial_letter_value_has_identifier(const CssValue* value,
     if (!value || !identifier) return false;
     if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
         const char* name = value->data.custom_property.name;
-        return str_ieq_const(name, strlen(name), identifier);
+        return str_ieq_cstr(name, identifier);
     }
     if (value->type == CSS_VALUE_TYPE_STRING && value->data.string) {
         const char* name = value->data.string;
-        return str_ieq_const(name, strlen(name), identifier);
+        return str_ieq_cstr(name, identifier);
     }
     return false;
 }

@@ -1598,7 +1598,7 @@ static const JubeHostRealmAPI jube_host_realm_api = {
 // source text while parsing, but neither its parser nor diagnostics acquire an
 // Input/Pool dependency from the host implementation.
 static const char* jube_host_source_language(const char* path) {
-    const char* ext = path ? strrchr(path, '.') : NULL;
+    const char* ext = file_path_ext(path);
     if (!ext) return "hosted";
     if (strcmp(ext, ".py") == 0) return "python";
     if (strcmp(ext, ".rb") == 0) return "ruby";

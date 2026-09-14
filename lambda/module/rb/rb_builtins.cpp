@@ -7,6 +7,7 @@
 #include "rb_transpiler.hpp"
 #include "../../../lambda-data.hpp"
 #include "../../../lib/log.h"
+#include "../../../lib/str.h"
 #include "../../../lib/strbuf.h"
 
 #include <cstring>
@@ -65,7 +66,7 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
     // .upcase
     if (strcmp(m, "upcase") == 0) {
         char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_RB_RUNTIME);
-        for (int64_t i = 0; i < s->len; i++) buf[i] = toupper((unsigned char)s->chars[i]);
+        str_to_upper(buf, s->chars, s->len);
         buf[s->len] = '\0';
         Item result = rb_sitem_n(buf, s->len);
         mem_free(buf);
@@ -75,7 +76,7 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
     // .downcase
     if (strcmp(m, "downcase") == 0) {
         char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_RB_RUNTIME);
-        for (int64_t i = 0; i < s->len; i++) buf[i] = tolower((unsigned char)s->chars[i]);
+        str_to_lower(buf, s->chars, s->len);
         buf[s->len] = '\0';
         Item result = rb_sitem_n(buf, s->len);
         mem_free(buf);
@@ -86,8 +87,8 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
     if (strcmp(m, "capitalize") == 0) {
         if (s->len == 0) return self;
         char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_RB_RUNTIME);
-        buf[0] = toupper((unsigned char)s->chars[0]);
-        for (int64_t i = 1; i < s->len; i++) buf[i] = tolower((unsigned char)s->chars[i]);
+        str_to_upper(buf, s->chars, 1);
+        str_to_lower(buf + 1, s->chars + 1, s->len - 1);
         buf[s->len] = '\0';
         Item result = rb_sitem_n(buf, s->len);
         mem_free(buf);

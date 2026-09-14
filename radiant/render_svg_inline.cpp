@@ -2762,6 +2762,19 @@ static bool font_file_has_unicode_cmap(const char* path) {
     return has_unicode;
 }
 
+static void svg_font_name_from_path(char* out, size_t out_cap, const char* path) {
+    if (!out || out_cap == 0) return;
+    out[0] = '\0';
+    if (!path) return;
+
+    const char* base = file_path_basename(path);
+    const char* ext = file_path_ext(path);
+    size_t name_len = ext ? (size_t)(ext - base) : strlen(base);
+    if (name_len >= out_cap) name_len = out_cap - 1;
+    memcpy(out, base, name_len);
+    out[name_len] = '\0';
+}
+
 static char* resolve_svg_font_path(const char* font_family, const char** out_font_name,
                                     FontContext* font_ctx = nullptr, int weight = 400,
                                     FontSlant slant = FONT_SLANT_NORMAL,
@@ -2810,15 +2823,9 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
             if (match.found && match.file_path && !strstr(match.file_path, ".ttc")) {
                 char* path = mem_strdup(match.file_path, MEM_CAT_RENDER);
                 if (out_font_name) {
-                    const char* slash = strrchr(match.file_path, '/');
-                    if (!slash) slash = strrchr(match.file_path, '\\');
-                    const char* base = slash ? slash + 1 : match.file_path;
-                    const char* dot = strrchr(base, '.');
                     static char bold_font_name[256];
-                    int name_len = dot ? (int)(dot - base) : (int)strlen(base);
-                    if (name_len > 255) name_len = 255;
-                    memcpy(bold_font_name, base, name_len);
-                    bold_font_name[name_len] = '\0';
+                    svg_font_name_from_path(bold_font_name, sizeof(bold_font_name),
+                                            match.file_path);
                     *out_font_name = bold_font_name;
                 }
                 return path;
@@ -2833,14 +2840,7 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
                 // candidate `fam` may live in a stack buffer that goes out of
                 // scope after this function returns.
                 static char platform_font_name[256];
-                const char* slash = strrchr(p, '/');
-                if (!slash) slash = strrchr(p, '\\');
-                const char* base = slash ? slash + 1 : p;
-                const char* dot = strrchr(base, '.');
-                int name_len = dot ? (int)(dot - base) : (int)strlen(base);
-                if (name_len > 255) name_len = 255;
-                memcpy(platform_font_name, base, name_len);
-                platform_font_name[name_len] = '\0';
+                svg_font_name_from_path(platform_font_name, sizeof(platform_font_name), p);
                 *out_font_name = platform_font_name;
             }
             return p;
@@ -2856,14 +2856,7 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
                         strncpy(db_font_name, dbname, sizeof(db_font_name) - 1);
                         db_font_name[sizeof(db_font_name) - 1] = '\0';
                     } else {
-                        const char* slash = strrchr(p, '/');
-                        if (!slash) slash = strrchr(p, '\\');
-                        const char* base = slash ? slash + 1 : p;
-                        const char* dot = strrchr(base, '.');
-                        int name_len = dot ? (int)(dot - base) : (int)strlen(base);
-                        if (name_len > 255) name_len = 255;
-                        memcpy(db_font_name, base, name_len);
-                        db_font_name[name_len] = '\0';
+                        svg_font_name_from_path(db_font_name, sizeof(db_font_name), p);
                     }
                     *out_font_name = db_font_name;
                 }

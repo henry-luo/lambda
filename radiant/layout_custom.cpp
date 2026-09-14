@@ -401,7 +401,7 @@ bool custom_layout_result_place(CustomLayoutResult* result, int child_index, flo
 const char* custom_layout_name_from_css_value(const CssValue* value) {
     if (!value || value->type != CSS_VALUE_TYPE_FUNCTION) return nullptr;
     CssFunction* fn = value->data.function;
-    if (!fn || !fn->name || !str_ieq_const(fn->name, strlen(fn->name), "layout") ||
+    if (!fn || !fn->name || !str_ieq_cstr(fn->name, "layout") ||
         !fn->args || fn->arg_count < 1 || !fn->args[0]) {
         return nullptr;
     }

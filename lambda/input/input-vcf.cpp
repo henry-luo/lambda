@@ -190,14 +190,14 @@ void parse_vcf(Input* input, const char* vcf_string) {
 
         // Handle vCard start and end
         if (strcmp(property_name->chars, "begin") == 0) {
-            if (str_ieq_const(property_value->chars, strlen(property_value->chars), "VCARD")) {
+            if (str_ieq_cstr(property_value->chars, "VCARD")) {
                 in_vcard = true;
             }
             continue;
         }
 
         if (strcmp(property_name->chars, "end") == 0) {
-            if (str_ieq_const(property_value->chars, strlen(property_value->chars), "VCARD")) {
+            if (str_ieq_cstr(property_value->chars, "VCARD")) {
                 in_vcard = false;
             }
             continue;

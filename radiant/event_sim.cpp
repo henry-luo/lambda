@@ -5192,7 +5192,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             {
                 log_info("event_sim: render to %s", ev->file_path);
                 // Determine format from extension
-                const char* ext = strrchr(ev->file_path, '.');
+                const char* ext = file_path_ext(ev->file_path);
                 if (ext && (strcmp(ext, ".svg") == 0 || strcmp(ext, ".SVG") == 0)) {
                     render_uicontext_to_svg(uicon, ev->file_path);
                 } else {

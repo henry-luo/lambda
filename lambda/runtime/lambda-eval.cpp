@@ -4889,9 +4889,9 @@ extern "C" Item path_property_get(Path* path, const char* k) {
     if (strcmp(k, "extension") == 0) {
         // return file extension (e.g. "txt" from "file.txt")
         if (path->name) {
-            const char* dot = strrchr(path->name, '.');
-            if (dot && dot != path->name) {
-                return {.item = s2it(heap_create_name(dot + 1))};
+            const char* ext = file_path_ext(path->name);
+            if (ext) {
+                return {.item = s2it(heap_create_name(ext + 1))};
             }
         }
         return ItemNull;
@@ -5919,10 +5919,7 @@ Item fn_lower(Item str_item) {
         // create new lowercase symbol - use stack buffer for small strings, malloc for large
         char stack_buf[256];
         char* lower_chars = (len < sizeof(stack_buf)) ? stack_buf : (char*)mem_alloc(len + 1, MEM_CAT_EVAL);
-        for (uint32_t i = 0; i < len; i++) {
-            char c = chars[i];
-            lower_chars[i] = (c >= 'A' && c <= 'Z') ? (c + 32) : c;
-        }
+        str_to_lower(lower_chars, chars, len);
         lower_chars[len] = '\0';
         Symbol* sym = heap_create_symbol(lower_chars, len);
         if (lower_chars != stack_buf) mem_free(lower_chars);
@@ -5934,10 +5931,7 @@ Item fn_lower(Item str_item) {
     result->flags = 0;
     String* src = str_item.get_safe_string();
     result->is_ascii = src ? src->is_ascii : 0;  // case conversion preserves ASCII status
-    for (uint32_t i = 0; i < len; i++) {
-        char c = chars[i];
-        result->chars[i] = (c >= 'A' && c <= 'Z') ? (c + 32) : c;
-    }
+    str_to_lower(result->chars, chars, len);
     result->chars[len] = '\0';
     return {.item = s2it(result)};
 }
@@ -5977,10 +5971,7 @@ Item fn_upper(Item str_item) {
         // create new uppercase symbol - use stack buffer for small strings, malloc for large
         char stack_buf[256];
         char* upper_chars = (len < sizeof(stack_buf)) ? stack_buf : (char*)mem_alloc(len + 1, MEM_CAT_EVAL);
-        for (uint32_t i = 0; i < len; i++) {
-            char c = chars[i];
-            upper_chars[i] = (c >= 'a' && c <= 'z') ? (c - 32) : c;
-        }
+        str_to_upper(upper_chars, chars, len);
         upper_chars[len] = '\0';
         Symbol* sym = heap_create_symbol(upper_chars, len);
         if (upper_chars != stack_buf) mem_free(upper_chars);
@@ -5992,10 +5983,7 @@ Item fn_upper(Item str_item) {
     result->flags = 0;
     String* src = str_item.get_safe_string();
     result->is_ascii = src ? src->is_ascii : 0;  // case conversion preserves ASCII status
-    for (uint32_t i = 0; i < len; i++) {
-        char c = chars[i];
-        result->chars[i] = (c >= 'a' && c <= 'z') ? (c - 32) : c;
-    }
+    str_to_upper(result->chars, chars, len);
     result->chars[len] = '\0';
     return {.item = s2it(result)};
 }

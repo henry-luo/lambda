@@ -926,32 +926,7 @@ const char* file_path_ext(const char* path) {
 }
 
 const char* file_path_ext_len(const char* path, size_t path_len, size_t* ext_len) {
-    if (ext_len) *ext_len = 0;
-    if (!path || path_len == 0) return NULL;
-    if (IS_SEP(path[path_len - 1])) return NULL;
-
-    size_t end = path_len;
-    while (end > 0 && IS_SEP(path[end - 1])) end--;
-    if (end == 0) return NULL;
-
-    size_t base_start = 0;
-    for (size_t i = end; i > 0; i--) {
-        if (IS_SEP(path[i - 1])) {
-            base_start = i;
-            break;
-        }
-    }
-
-    const char* dot = NULL;
-    for (size_t i = end; i > base_start; i--) {
-        if (path[i - 1] == '.') {
-            dot = path + i - 1;
-            break;
-        }
-    }
-    if (!dot || dot == path + base_start || dot == path + end - 1) return NULL;
-    if (ext_len) *ext_len = (size_t)(path + end - dot);
-    return dot;
+    return str_file_ext(path, path_len, ext_len);
 }
 
 bool file_path_has_ext_ci(const char* path, const char* ext) {

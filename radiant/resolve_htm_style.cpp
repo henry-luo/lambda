@@ -711,12 +711,12 @@ static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_n
             current, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
         const char* dir = current->get_attribute("dir");
         if (specified_direction == CSS_VALUE_RTL ||
-            (dir && str_ieq_const(dir, strlen(dir), "rtl"))) {
+            (dir && str_ieq_cstr(dir, "rtl"))) {
             cell_is_rtl = true;
             break;
         }
         if (specified_direction == CSS_VALUE_LTR ||
-            (dir && str_ieq_const(dir, strlen(dir), "ltr"))) {
+            (dir && str_ieq_cstr(dir, "ltr"))) {
             break;
         }
         DomNode* parent = current->parent;
@@ -1035,11 +1035,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         CssEnum direction = layout_specified_keyword(
             elmt->as_element(), CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
         const char* dir_attr = elmt->get_attribute("dir");
-        if (dir_attr && str_ieq_const(dir_attr, strlen(dir_attr), "rtl")) {
+        if (dir_attr && str_ieq_cstr(dir_attr, "rtl")) {
             // HTML §3.2.6: dir=rtl maps to direction before the UA list
             // padding-inline-start rule is applied.
             direction = CSS_VALUE_RTL;
-        } else if (dir_attr && str_ieq_const(dir_attr, strlen(dir_attr), "ltr")) {
+        } else if (dir_attr && str_ieq_cstr(dir_attr, "ltr")) {
             direction = CSS_VALUE_LTR;
         }
         if (direction != CSS_VALUE_RTL) direction = CSS_VALUE_LTR;
@@ -1212,7 +1212,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case MARKUP_NAME_CODE:  case MARKUP_NAME_KBD:  case MARKUP_NAME_SAMP:  case MARKUP_NAME_TT: {
         // monospace font family
         bool had_monospace_family = span->font && span->fontp()->family &&
-            str_ieq_const(span->fontp()->family, strlen(span->fontp()->family), "monospace");
+            str_ieq_cstr(span->fontp()->family, "monospace");
         radiant_retain_font_family(span->ensure_font(lycon), lam::GcPtr<char>((char*)"monospace"));
         // Browser quirk (Chromium CheckForGenericFamilyChange): when font-family
         // transitions to monospace and no explicit font-size on this element,
@@ -1220,7 +1220,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // originates from the CSS 'medium' keyword (initial value), not from an
         // explicit font-size declaration like '12px'.
         bool parent_is_mono = lycon->font.style && lycon->font.style->family &&
-            str_ieq_const(lycon->font.style->family, strlen(lycon->font.style->family), "monospace");
+            str_ieq_cstr(lycon->font.style->family, "monospace");
         // Default-style resolution can run again after intrinsic measurement;
         // do not scale a UA monospace size that was already established.
         if (!had_monospace_family && !parent_is_mono &&
@@ -1240,7 +1240,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         float pre_font_size = lycon->font.style->font_size;
         {
             bool parent_is_mono = lycon->font.style && lycon->font.style->family &&
-                str_ieq_const(lycon->font.style->family, strlen(lycon->font.style->family), "monospace");
+                str_ieq_cstr(lycon->font.style->family, "monospace");
             if (!parent_is_mono && block->fontp()->font_size > 0 && block->fontp()->font_size_from_medium) {
                 block->font->font_size = block->font->font_size * 13.0f / 16.0f;
             }
@@ -1821,17 +1821,17 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     const char* dir_attr = elmt->get_attribute("dir");
     if (dir_attr) {
         block->ensure_block(lycon);
-        if (str_ieq_const(dir_attr, strlen(dir_attr), "rtl")) {
+        if (str_ieq_cstr(dir_attr, "rtl")) {
             block->blk->direction = CSS_VALUE_RTL;
             // HTML rendering §15.3.5: recognized dir values isolate the element
             // from the surrounding bidi paragraph.
             block->blk->unicode_bidi = CSS_VALUE_ISOLATE;
-        } else if (str_ieq_const(dir_attr, strlen(dir_attr), "ltr")) {
+        } else if (str_ieq_cstr(dir_attr, "ltr")) {
             block->blk->direction = CSS_VALUE_LTR;
             // HTML rendering §15.3.5: recognized dir values isolate the element
             // from the surrounding bidi paragraph.
             block->blk->unicode_bidi = CSS_VALUE_ISOLATE;
-        } else if (str_ieq_const(dir_attr, strlen(dir_attr), "auto")) {
+        } else if (str_ieq_cstr(dir_attr, "auto")) {
             // HTML5 §14.3.4: dir="auto" — resolve direction from first strong character
             CssEnum resolved = resolve_dir_auto(lam::dom_require_element(elmt));
             block->blk->direction = resolved;

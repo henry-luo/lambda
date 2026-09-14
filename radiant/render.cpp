@@ -133,7 +133,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                             if (c->view_type == RDT_VIEW_BLOCK) {
                                 ViewBlock* cb = lam::view_require_block(c);
                                 const char* nm = cb->node_name();
-                                if (nm && str_ieq_const(nm, strlen(nm), "body")) {
+                                if (nm && str_ieq_cstr(nm, "body")) {
                                     if (cb->bound && cb->boundary_mut()->background &&
                                         cb->boundary()->background->color.a > 0) {
                                         canvas_bg = cb->boundary()->background->color;

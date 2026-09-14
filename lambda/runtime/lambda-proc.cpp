@@ -264,9 +264,9 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
     const char* effective_format = format_str;
     if (!effective_format) {
         // auto-detect format from file extension
-        const char* dot = strrchr(file_path, '.');
-        if (dot) {
-            const char* ext = dot + 1;
+        const char* extension = file_path_ext(file_path);
+        if (extension) {
+            const char* ext = extension + 1;
             if (strcmp(ext, "json") == 0) effective_format = "json";
             else if (strcmp(ext, "yaml") == 0 || strcmp(ext, "yml") == 0) effective_format = "yaml";
             else if (strcmp(ext, "xml") == 0) effective_format = "xml";
