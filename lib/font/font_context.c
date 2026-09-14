@@ -8,6 +8,7 @@
  */
 
 #include "font_internal.h"
+#include "../hashmap_helpers.h"
 #include <time.h>
 #include <math.h>
 #ifndef _WIN32
@@ -28,7 +29,7 @@ static inline int munmap(void* addr, size_t len) { (void)addr; (void)len; return
 static uint64_t face_cache_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const FontCacheKey* entry = (const FontCacheKey*)item;
     if (!entry || !entry->key_str) return 0;
-    return hashmap_xxhash3(entry->key_str, strlen(entry->key_str), seed0, seed1);
+    return hashmap_hash_xxhash3_cstr(entry->key_str, seed0, seed1);
 }
 
 static int face_cache_compare(const void* a, const void* b, void* udata) {

@@ -15,7 +15,7 @@
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/hashmap.h"
-#include "../../../lib/hashmap_helpers.h"
+#include "../../../lib/hashmap_typed.hpp"
 #include "../../../lib/mempool.h"
 #include "../../../runtime/transpiler.hpp"
 #include "../../../runtime/heap_api.h"
@@ -152,13 +152,21 @@ struct RbVarScopeEntry {
     char name[128];
     RbMirVarEntry var;
 };
-HASHMAP_DEFINE_STRKEY(rb_var_scope, struct RbVarScopeEntry, name)
+typedef TypedHashMap<RbVarScopeEntry,
+    HashMapCStrMemberKeyOps<RbVarScopeEntry, &RbVarScopeEntry::name>> RbVarScopeMap;
+static inline HashMap* rb_var_scope_new(size_t capacity) {
+    return RbVarScopeMap::create(capacity);
+}
 
 struct RbLocalFuncEntry {
     char name[128];
     MIR_item_t func_item;
 };
-HASHMAP_DEFINE_STRKEY(rb_local_func, struct RbLocalFuncEntry, name)
+typedef TypedHashMap<RbLocalFuncEntry,
+    HashMapCStrMemberKeyOps<RbLocalFuncEntry, &RbLocalFuncEntry::name>> RbLocalFuncMap;
+static inline HashMap* rb_local_func_new(size_t capacity) {
+    return RbLocalFuncMap::create(capacity);
+}
 
 // ============================================================================
 // Forward declarations

@@ -22,6 +22,7 @@
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include "../lib/log.h"
+#include "../lib/hashmap_helpers.h"
 #include "../lib/strbuf.h"
 #include "../lib/url.h"
 #include "../lib/test_utils.h"
@@ -60,9 +61,9 @@ static Target* test_item_to_target(uint64_t raw, Url* cwd) {
             case URL_SCHEME_FILE:  target->scheme = TARGET_SCHEME_FILE; break;
             default: target->scheme = TARGET_SCHEME_UNKNOWN; break;
         }
-        // compute hash from href string using hashmap_sip (matching target.cpp)
+        // compute the href hash through the shared c-string helper (matching target.cpp)
         if (url->href) {
-            target->url_hash = hashmap_sip(url->href->chars, strlen(url->href->chars),
+            target->url_hash = hashmap_hash_cstr(url->href->chars,
                                            0x12AE406AB1E59A3CULL, 0x7F4A519D3E2B8C01ULL);
         }
         return target;

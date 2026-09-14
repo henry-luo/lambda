@@ -7,7 +7,7 @@
 #include "../../lib/strbuf.h"
 #include "../../lib/mempool.h"
 #include "../../lib/hashmap.h"
-#include "../../lib/hashmap_helpers.h"
+#include "../../lib/hashmap_typed.hpp"
 #include "../input/input-script-cache.h"
 #include <cstring>
 #include <cstdarg>
@@ -551,7 +551,9 @@ struct JsFieldInitializerEntry {
     AstNodeId field_id;
     JsFunctionNode* function;
 };
-HASHMAP_DEFINE_INTKEY(js_field_initializer_table, JsFieldInitializerEntry, field_id)
+typedef TypedHashMap<JsFieldInitializerEntry,
+    HashMapIntegralMemberKeyOps<JsFieldInitializerEntry, &JsFieldInitializerEntry::field_id>>
+    JsFieldInitializerMap;
 
 JsFunctionNode* js_script_field_initializer_ensure(JsScript* script,
         JsFieldDefinitionNode* field) {
@@ -559,11 +561,11 @@ JsFunctionNode* js_script_field_initializer_ensure(JsScript* script,
     AstNodeId field_id = ast_index_find(&script->ast_index, (AstNode*)field);
     if (field_id == AST_NODE_ID_INVALID) return NULL;
     if (!script->field_initializers)
-        script->field_initializers = js_field_initializer_table_new(8);
+        script->field_initializers = JsFieldInitializerMap::create(8);
     if (!script->field_initializers) return NULL;
     JsFieldInitializerEntry key = {field_id, NULL};
-    const JsFieldInitializerEntry* found = (const JsFieldInitializerEntry*)hashmap_get(
-        script->field_initializers, &key);
+    const JsFieldInitializerEntry* found = JsFieldInitializerMap::get(
+        script->field_initializers, key);
     if (found) return found->function;
     Pool* overlay_pool = js_script_execution_pool(script);
     JsFunctionNode* function = (JsFunctionNode*)pool_calloc(overlay_pool, sizeof(JsFunctionNode));
@@ -588,21 +590,23 @@ JsFunctionNode* js_script_field_initializer_ensure(JsScript* script,
     if (!ast_index_append_profile(&script->ast_index, (AstNode*)function,
             (AstNode*)field, script->profile)) return NULL;
     key.function = function;
-    hashmap_set(script->field_initializers, &key);
-    return hashmap_oom(script->field_initializers) ? NULL : function;
+    JsFieldInitializerMap::set(script->field_initializers, key);
+    return JsFieldInitializerMap::oom(script->field_initializers) ? NULL : function;
 }
 
 struct JsAstDefinitionEntry {
     AstFunctionId function_id;
     JsAstDefinition* definition;
 };
-HASHMAP_DEFINE_INTKEY(js_ast_definition_table, JsAstDefinitionEntry, function_id)
+typedef TypedHashMap<JsAstDefinitionEntry,
+    HashMapIntegralMemberKeyOps<JsAstDefinitionEntry, &JsAstDefinitionEntry::function_id>>
+    JsAstDefinitionMap;
 
 JsAstDefinition* js_script_ast_definition_ensure(JsScript* script,
         AstFuncNode* function) {
     if (!script || !script->pool || !function) return NULL;
     if (!script->ast_definitions) {
-        script->ast_definitions = js_ast_definition_table_new(8);
+        script->ast_definitions = JsAstDefinitionMap::create(8);
         if (!script->ast_definitions) return NULL;
     }
     AstNodeId node_id = ast_index_find(&script->ast_index, (AstNode*)function);
@@ -614,8 +618,7 @@ JsAstDefinition* js_script_ast_definition_ensure(JsScript* script,
         return NULL;
     }
     JsAstDefinitionEntry key = {function_id, NULL};
-    const JsAstDefinitionEntry* found = (const JsAstDefinitionEntry*)hashmap_get(
-        script->ast_definitions, &key);
+    const JsAstDefinitionEntry* found = JsAstDefinitionMap::get(script->ast_definitions, key);
     if (found) return found->definition;
     JsAstDefinition* definition = (JsAstDefinition*)pool_calloc(
         js_script_execution_pool(script), sizeof(JsAstDefinition));
@@ -628,8 +631,8 @@ JsAstDefinition* js_script_ast_definition_ensure(JsScript* script,
     definition->uses_arguments = facts.observations & JS_AST_OBSERVES_ARGUMENTS;
     definition->tail_reuse_safe = facts.tail_reuse_safe;
     key.definition = definition;
-    hashmap_set(script->ast_definitions, &key);
-    if (hashmap_oom(script->ast_definitions)) return NULL;
+    JsAstDefinitionMap::set(script->ast_definitions, key);
+    if (JsAstDefinitionMap::oom(script->ast_definitions)) return NULL;
     return definition;
 }
 

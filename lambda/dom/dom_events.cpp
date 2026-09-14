@@ -26,7 +26,7 @@
 #include "../../lib/mem.h"
 #include "../../lib/mem_grow.hpp"
 #include "../../lib/hashmap.h"
-#include "../../lib/hashmap_helpers.h"
+#include "../../lib/hashmap_typed.hpp"
 #include "../../lib/strbuf.h"
 #include "../../lib/url.h"
 #include "../input/css/dom_node.hpp"
@@ -390,7 +390,9 @@ struct EventTargetIndexEntry {
     void* key;
     int slot;
 };
-HASHMAP_DEFINE_PTRKEY(event_target_index, EventTargetIndexEntry, key)
+typedef TypedHashMap<EventTargetIndexEntry,
+    HashMapPointerMemberKeyOps<EventTargetIndexEntry, &EventTargetIndexEntry::key>>
+    EventTargetIndexMap;
 
 struct EventTypeCountEntry {
     const char* type;
@@ -402,7 +404,9 @@ static void event_type_count_entry_free(void* item) {
     if (entry && entry->type) mem_free((void*)entry->type);
 }
 
-HASHMAP_DEFINE_STRKEY(event_type_count, EventTypeCountEntry, type)
+typedef TypedHashMap<EventTypeCountEntry,
+    HashMapCStrMemberKeyOps<EventTypeCountEntry, &EventTypeCountEntry::type>,
+    event_type_count_entry_free> EventTypeCountMap;
 
 // DOM listener registration is semantic realm state. The state capsule is
 // entered once at a JS/host boundary; all dispatch and lookup code below then
@@ -521,8 +525,7 @@ static int find_listener_entry_slot(void* key) {
     if (!key) return -1;
     if (_entry_index) {
         EventTargetIndexEntry lookup = {key, -1};
-        const EventTargetIndexEntry* found =
-            (const EventTargetIndexEntry*)hashmap_get(_entry_index, &lookup);
+        const EventTargetIndexEntry* found = EventTargetIndexMap::get(_entry_index, lookup);
         if (found && found->slot >= 0 && found->slot < _entry_count) {
             return found->slot;
         }
@@ -536,19 +539,19 @@ static int find_listener_entry_slot(void* key) {
 
 static bool index_listener_entry(void* key, int slot) {
     if (!_entry_index) {
-        _entry_index = event_target_index_new(16);
+        _entry_index = EventTargetIndexMap::create(16);
         if (_entry_index) {
             for (int i = 0; i < _entry_count; i++) {
                 EventTargetIndexEntry existing = {_entries[i].key, i};
-                hashmap_set(_entry_index, &existing);
+                EventTargetIndexMap::set(_entry_index, existing);
             }
         }
     }
     if (!_entry_index) return false;
     EventTargetIndexEntry entry = {key, slot};
-    hashmap_set(_entry_index, &entry);
-    if (hashmap_oom(_entry_index)) {
-        hashmap_free(_entry_index);
+    EventTargetIndexMap::set(_entry_index, entry);
+    if (EventTargetIndexMap::oom(_entry_index)) {
+        EventTargetIndexMap::destroy(_entry_index);
         _entry_index = nullptr;
         return false;
     }
@@ -614,18 +617,16 @@ static NodeListeners* find_listeners(void* key) {
 static void note_listener_type(const char* type, int delta) {
     if (!type || !type[0] || delta == 0) return;
     if (!_type_counts && delta > 0) {
-        _type_counts = event_type_count_new_with_free(16, event_type_count_entry_free);
+        _type_counts = EventTypeCountMap::create(16);
     }
     if (!_type_counts) return;
     EventTypeCountEntry lookup = {type, 0};
-    const EventTypeCountEntry* found =
-        (const EventTypeCountEntry*)hashmap_get(_type_counts, &lookup);
+    const EventTypeCountEntry* found = EventTypeCountMap::get(_type_counts, lookup);
     int old_count = found ? found->count : 0;
     int new_count = old_count + delta;
     if (new_count <= 0) {
         if (found) {
-            const EventTypeCountEntry* removed =
-                (const EventTypeCountEntry*)hashmap_delete(_type_counts, &lookup);
+            const EventTypeCountEntry* removed = EventTypeCountMap::erase(_type_counts, lookup);
             if (removed && removed->type) mem_free((void*)removed->type);
         }
         return;
@@ -636,10 +637,10 @@ static void note_listener_type(const char* type, int delta) {
     const char* owned_type = found ? found->type : mem_strdup(type, MEM_CAT_JS_RUNTIME);
     if (!owned_type) return;
     EventTypeCountEntry updated = {owned_type, new_count};
-    hashmap_set(_type_counts, &updated);
-    if (hashmap_oom(_type_counts)) {
+    EventTypeCountMap::set(_type_counts, updated);
+    if (EventTypeCountMap::oom(_type_counts)) {
         if (!found) mem_free((void*)owned_type);
-        hashmap_free(_type_counts);
+        EventTypeCountMap::destroy(_type_counts);
         _type_counts = nullptr;
         log_error("js-dom-events: listener type index allocation failed");
     }
@@ -648,8 +649,7 @@ static void note_listener_type(const char* type, int delta) {
 static bool has_listener_type(const char* type) {
     if (!_type_counts || !type || !type[0]) return false;
     EventTypeCountEntry lookup = {type, 0};
-    const EventTypeCountEntry* found =
-        (const EventTypeCountEntry*)hashmap_get(_type_counts, &lookup);
+    const EventTypeCountEntry* found = EventTypeCountMap::get(_type_counts, lookup);
     return found && found->count > 0;
 }
 
@@ -2412,11 +2412,11 @@ void dom_events_reset(void) {
     _entry_count = 0;
     _entry_capacity = 0;
     if (_entry_index) {
-        hashmap_free(_entry_index);
+        EventTargetIndexMap::destroy(_entry_index);
         _entry_index = nullptr;
     }
     if (_type_counts) {
-        hashmap_free(_type_counts);
+        EventTypeCountMap::destroy(_type_counts);
         _type_counts = nullptr;
     }
     _event_registration_order = 0;

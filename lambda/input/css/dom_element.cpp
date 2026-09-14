@@ -8,7 +8,7 @@
 #include "css_counter_hook.h"
 #include "../../../lib/hashmap.h"
 #include "../../../lib/mem_factory.h"
-#include "../../../lib/hashmap_helpers.h"
+#include "../../../lib/hashmap_typed.hpp"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/stringbuf.h"
 #include "../../../lib/string.h"
@@ -3427,10 +3427,12 @@ typedef struct ElementDomMapEntry {
     Element* element;       // key: Lambda Element pointer
     DomElement* dom_elem;   // value: corresponding DomElement
 } ElementDomMapEntry;
-HASHMAP_DEFINE_PTRKEY(element_dom_map, ElementDomMapEntry, element)
+typedef TypedHashMap<ElementDomMapEntry,
+    HashMapPointerMemberKeyOps<ElementDomMapEntry, &ElementDomMapEntry::element>>
+    ElementDomMap;
 
 HashMap* element_dom_map_create(void) {
-    return element_dom_map_new(64);
+    return ElementDomMap::create(64);
 }
 
 static bool dom_element_has_embedded_ui_storage(DomDocument* doc, Element* elem) {
@@ -3445,7 +3447,7 @@ void element_dom_map_insert(HashMap* map, Element* elem, DomElement* dom_elem) {
     ElementDomMapEntry entry;
     entry.element = elem;
     entry.dom_elem = dom_elem;
-    hashmap_set(map, &entry);
+    ElementDomMap::set(map, entry);
 }
 
 DomElement* element_dom_map_lookup(HashMap* map, Element* elem) {
@@ -3453,14 +3455,14 @@ DomElement* element_dom_map_lookup(HashMap* map, Element* elem) {
     ElementDomMapEntry key;
     key.element = elem;
     key.dom_elem = nullptr;
-    const ElementDomMapEntry* found = (const ElementDomMapEntry*)hashmap_get(map, &key);
+    const ElementDomMapEntry* found = ElementDomMap::get(map, key);
     return found ? found->dom_elem : nullptr;
 }
 
 void element_dom_map_remove(HashMap* map, Element* elem) {
     if (!map || !elem) return;
     ElementDomMapEntry key = {.element = elem, .dom_elem = nullptr};
-    hashmap_delete(map, &key);
+    ElementDomMap::erase(map, key);
 }
 
 static const int MAX_DOM_BUILD_DEPTH = 512;

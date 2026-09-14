@@ -11,6 +11,7 @@
 #include "font_internal.h"
 #include "font_gpos.h"
 
+#include "../hashmap_helpers.h"
 #include "../memtrack.h"
 #include "../utf.h"
 #include <math.h>
@@ -58,7 +59,7 @@ static bool should_use_ct_advance_override(FontHandle* handle) {
 
 static uint64_t advance_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const GlyphAdvanceEntry* entry = (const GlyphAdvanceEntry*)item;
-    return hashmap_xxhash3(&entry->codepoint, sizeof(uint32_t), seed0, seed1);
+    return hashmap_hash_xxhash3_bytes(&entry->codepoint, sizeof(uint32_t), seed0, seed1);
 }
 
 static int advance_compare(const void* a, const void* b, void* udata) {
@@ -85,7 +86,7 @@ static uint64_t bitmap_cache_hash(const void* item, uint64_t seed0, uint64_t see
     data[0] = ((uint64_t)entry->codepoint << 8) | (uint64_t)entry->mode;
     data[1] = (uint64_t)(uintptr_t)entry->handle;
     data[2] = entry->handle_identity;
-    return hashmap_xxhash3(data, sizeof(data), seed0, seed1);
+    return hashmap_hash_xxhash3_bytes(data, sizeof(data), seed0, seed1);
 }
 
 static int bitmap_cache_compare(const void* a, const void* b, void* udata) {
@@ -125,7 +126,7 @@ static uint64_t loaded_glyph_cache_hash(const void* item, uint64_t seed0, uint64
     data[2] = ((uint64_t)entry->codepoint << 2) |
               ((uint64_t)(entry->for_rendering ? 1 : 0) << 1) |
               (uint64_t)(entry->emoji_presentation ? 1 : 0);
-    return hashmap_xxhash3(data, sizeof(data), seed0, seed1);
+    return hashmap_hash_xxhash3_bytes(data, sizeof(data), seed0, seed1);
 }
 
 static int loaded_glyph_cache_compare(const void* a, const void* b, void* udata) {
@@ -352,7 +353,7 @@ apply_overrides:
 static uint64_t kern_pair_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const KernPairEntry* e = (const KernPairEntry*)item;
     uint64_t key = ((uint64_t)e->left_cp << 32) | (uint64_t)e->right_cp;
-    return hashmap_xxhash3(&key, sizeof(key), seed0, seed1);
+    return hashmap_hash_xxhash3_bytes(&key, sizeof(key), seed0, seed1);
 }
 
 static int kern_pair_compare(const void* a, const void* b, void* udata) {

@@ -21,7 +21,7 @@
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/url.h"
-#include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/file.h"
 
 #ifdef _WIN32
@@ -126,7 +126,8 @@ static uint64_t target_compute_hash(Target* target) {
 
     uint64_t hash = 0;
     if (buf->length > 0) {
-        hash = hashmap_sip(buf->str, buf->length, TARGET_HASH_SEED0, TARGET_HASH_SEED1);
+        hash = hashmap_hash_bytes(buf->str, buf->length,
+            TARGET_HASH_SEED0, TARGET_HASH_SEED1);
     }
 
     strbuf_free(buf);

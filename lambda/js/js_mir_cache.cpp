@@ -5,7 +5,8 @@
 
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
-#include "../../lib/hashmap.h"
+#include "../../lib/hash.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/shell.h"
 #include "../../lib/arraylist.h"
 
@@ -17,38 +18,33 @@ struct JsMirLeaseSession {
     JsMirLeaseSessionStats stats;
 };
 
-static uint64_t js_mir_lease_mix(uint64_t hash, uint64_t value) {
-    hash ^= value + 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2);
-    return hash;
-}
-
 static uint64_t js_mir_lease_preamble_abi_hash(const JsPreambleState* preamble) {
     // DOM4 ordinal sites bake registry-local slots and declaration ordinals;
     // a changed interface must invalidate an otherwise identical source.
-    uint64_t hash = js_mir_lease_mix(0xcbf29ce484222325ULL,
+    uint64_t hash = hash_combine_u64(0xcbf29ce484222325ULL,
                                      jube_interface_registry_digest());
     if (!preamble) return hash;
 
-    hash = js_mir_lease_mix(hash, (uint64_t)preamble->module_var_count);
-    hash = js_mir_lease_mix(hash, 0x4e494431u);
-    hash = js_mir_lease_mix(hash, (uint64_t)preamble->module_property_count);
-    hash = js_mir_lease_mix(hash, (uint64_t)preamble->module_property_bytes_size);
+    hash = hash_combine_u64(hash, (uint64_t)preamble->module_var_count);
+    hash = hash_combine_u64(hash, 0x4e494431u);
+    hash = hash_combine_u64(hash, (uint64_t)preamble->module_property_count);
+    hash = hash_combine_u64(hash, (uint64_t)preamble->module_property_bytes_size);
     if (preamble->module_property_specs && preamble->module_property_bytes_size > 0) {
-        hash = js_mir_lease_mix(hash, hashmap_xxhash3(
+        hash = hash_combine_u64(hash, hashmap_hash_xxhash3_bytes(
             preamble->module_property_specs,
             preamble->module_property_bytes_size, 0, 0));
     }
     for (int i = 0; preamble->entries && i < preamble->entry_count; i++) {
         const JsModuleConstEntry* entry = &preamble->entries[i];
         size_t name_len = entry->name ? strlen(entry->name) : 0;
-        hash = js_mir_lease_mix(hash, hashmap_xxhash3(entry->name, name_len, 0, 0));
-        hash = js_mir_lease_mix(hash, (uint64_t)entry->const_type);
-        hash = js_mir_lease_mix(hash, (uint64_t)entry->int_val);
-        hash = js_mir_lease_mix(hash, (uint64_t)entry->var_kind);
-        hash = js_mir_lease_mix(hash, (uint64_t)entry->modvar_type);
-        hash = js_mir_lease_mix(hash, entry->is_nested_func_hoist ? 1 : 0);
-        hash = js_mir_lease_mix(hash, entry->is_iife_func_decl ? 1 : 0);
-        hash = js_mir_lease_mix(hash, entry->is_live_default_binding ? 1 : 0);
+        hash = hash_combine_u64(hash, hashmap_hash_xxhash3_bytes(entry->name, name_len, 0, 0));
+        hash = hash_combine_u64(hash, (uint64_t)entry->const_type);
+        hash = hash_combine_u64(hash, (uint64_t)entry->int_val);
+        hash = hash_combine_u64(hash, (uint64_t)entry->var_kind);
+        hash = hash_combine_u64(hash, (uint64_t)entry->modvar_type);
+        hash = hash_combine_u64(hash, entry->is_nested_func_hoist ? 1 : 0);
+        hash = hash_combine_u64(hash, entry->is_iife_func_decl ? 1 : 0);
+        hash = hash_combine_u64(hash, entry->is_live_default_binding ? 1 : 0);
     }
     return hash;
 }

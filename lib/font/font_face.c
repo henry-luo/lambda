@@ -107,7 +107,7 @@ static const FontFaceEntry* font_face_find_matching(FontContext* ctx, const char
     for (int i = ctx->face_descriptor_count - 1; i >= 0; i--) {
         FontFaceEntry* entry = ctx->face_descriptors[i];
         if (!entry || !entry->family) continue;
-        if (str_icmp(entry->family, strlen(entry->family), family, strlen(family)) != 0) continue;
+        if (str_icmp_cstr(entry->family, family) != 0) continue;
         if (filter_codepoint && !font_face_range_includes(entry, codepoint)) continue;
 
         int entry_slant_distance = slant_distance(entry->slant, slant);
@@ -141,8 +141,7 @@ bool font_face_family_registered(FontContext* ctx, const char* family) {
     for (int i = 0; i < ctx->face_descriptor_count; i++) {
         FontFaceEntry* entry = ctx->face_descriptors[i];
         if (!entry || !entry->family) continue;
-        if (str_icmp(entry->family, strlen(entry->family),
-                     family, strlen(family)) == 0) {
+        if (str_icmp_cstr(entry->family, family) == 0) {
             return true;
         }
     }
@@ -203,7 +202,7 @@ int font_face_list(FontContext* ctx, const char* family,
     for (int i = 0; i < ctx->face_descriptor_count && count < max_out && count < 64; i++) {
         FontFaceEntry* entry = ctx->face_descriptors[i];
         if (!entry || !entry->family) continue;
-        if (str_icmp(entry->family, strlen(entry->family), family, strlen(family)) != 0) continue;
+        if (str_icmp_cstr(entry->family, family) != 0) continue;
 
         FontFaceDesc* d = &descs[count];
         d->family = entry->family;

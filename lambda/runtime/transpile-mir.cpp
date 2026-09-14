@@ -24,7 +24,7 @@ extern "C" int lambda_mir_lazy_enabled(void);
 #include "../../lib/mem_factory.h"
 #include "../../lib/url.h"
 #include "../../lib/hashmap.h"
-#include "../../lib/hashmap_helpers.h"
+#include "../../lib/hashmap_typed.hpp"
 #include "lambda/runtime/gc/gc_heap.h"
 #include "../validator/validator.hpp"
 #include "lambda-stack.h"
@@ -559,7 +559,11 @@ struct LocalFuncEntry {
     const FnVariantAnalysis* raw_variant;
     const FnVariantAnalysis* public_variant;
 };
-HASHMAP_DEFINE_STRKEY(local_func, struct LocalFuncEntry, name)
+typedef TypedHashMap<LocalFuncEntry,
+    HashMapCStrMemberKeyOps<LocalFuncEntry, &LocalFuncEntry::name>> LocalFuncMap;
+static inline HashMap* local_func_new(size_t capacity) {
+    return LocalFuncMap::create(capacity);
+}
 
 // Native function info: tracks parameter types and return type for functions
 // that have a dual native+boxed version (Phase 4 optimization).
@@ -579,7 +583,11 @@ struct NativeFuncInfo {
     int record_prefix_index;
     TypeMap* record_params[10];
 };
-HASHMAP_DEFINE_STRKEY(native_func, struct NativeFuncInfo, name)
+typedef TypedHashMap<NativeFuncInfo,
+    HashMapCStrMemberKeyOps<NativeFuncInfo, &NativeFuncInfo::name>> NativeFuncMap;
+static inline HashMap* native_func_new(size_t capacity) {
+    return NativeFuncMap::create(capacity);
+}
 
 static bool mir_native_func_param_uses_lane(const NativeFuncInfo* info, int index);
 static Type* mir_unwrap_decl_contract(Type* type);
@@ -593,7 +601,11 @@ struct GlobalVarEntry {
     TypeId type_id;
     MIR_type_t mir_type;
 };
-HASHMAP_DEFINE_STRKEY(global_var, struct GlobalVarEntry, name)
+typedef TypedHashMap<GlobalVarEntry,
+    HashMapCStrMemberKeyOps<GlobalVarEntry, &GlobalVarEntry::name>> GlobalVarMap;
+static inline HashMap* global_var_new(size_t capacity) {
+    return GlobalVarMap::create(capacity);
+}
 
 // M2: per-function summary of how the compilation unit calls it. Body evidence
 // alone cannot narrow `fn f(x, y) { x - y }` — there is no literal to learn
@@ -648,7 +660,11 @@ struct CallSiteEntry {
     Type* param_shape[LAMBDA_MAX_FUNCTION_ARGS];  // resolved candidate, or NULL
     Type* return_shape;                            // resolved candidate, or NULL
 };
-HASHMAP_DEFINE_PTRKEY(callsite_info, struct CallSiteEntry, fn)
+typedef TypedHashMap<CallSiteEntry,
+    HashMapPointerMemberKeyOps<CallSiteEntry, &CallSiteEntry::fn>> CallSiteInfoMap;
+static inline HashMap* callsite_info_new(size_t capacity) {
+    return CallSiteInfoMap::create(capacity);
+}
 
 // T20-1c: candidate literal shape carried to a parameter declaration node, so a
 // member site inside the body can name a constant for its guard.
@@ -656,7 +672,11 @@ struct ShapeHintEntry {
     AstNode* node;   // the AST_NODE_PARAM declaration
     Type* shape;     // an addressable, untrusted TypeMap
 };
-HASHMAP_DEFINE_PTRKEY(shape_hint, struct ShapeHintEntry, node)
+typedef TypedHashMap<ShapeHintEntry,
+    HashMapPointerMemberKeyOps<ShapeHintEntry, &ShapeHintEntry::node>> ShapeHintMap;
+static inline HashMap* shape_hint_new(size_t capacity) {
+    return ShapeHintMap::create(capacity);
+}
 
 // ============================================================================
 // Helpers

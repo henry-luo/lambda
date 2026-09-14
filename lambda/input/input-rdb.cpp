@@ -20,7 +20,7 @@
 #include "../../lib/strbuf.h"
 #include "../../lib/file.h"
 #include "../../lib/hashmap.h"
-#include "../../lib/hashmap_helpers.h"
+#include "../../lib/hashmap_typed.hpp"
 #include "../../lib/mem.h"
 #include "../../lib/mem_grow.hpp"
 #include <string.h>
@@ -181,7 +181,8 @@ struct PkEntry {
     int row_index;
 };
 
-HASHMAP_DEFINE_INTKEY(pk, PkEntry, pk_value)
+typedef TypedHashMap<PkEntry,
+    HashMapIntegralMemberKeyOps<PkEntry, &PkEntry::pk_value>> PkMap;
 
 // find the index of the primary key column in a table (first PK column, -1 if none)
 static int rdb_find_pk_column(RdbTable* tbl) {
@@ -215,7 +216,8 @@ struct RevFkEntry {
     Item* rows;  // dynamically grown array of row Items
 };
 
-HASHMAP_DEFINE_INTKEY(revfk, RevFkEntry, pk_value)
+typedef TypedHashMap<RevFkEntry,
+    HashMapIntegralMemberKeyOps<RevFkEntry, &RevFkEntry::pk_value>> RevFkMap;
 
 /**
  * Fetch table rows with FK forward navigation.
@@ -296,8 +298,7 @@ static Item rdb_fetch_table_with_fks(MarkBuilder& builder, RdbConn* conn,
             // look up referenced row by PK value
             int64_t fk_int = fk_val.int_val;
             PkEntry lookup = {.pk_value = fk_int, .row_index = -1};
-            const PkEntry* found = (const PkEntry*)hashmap_get(
-                fk_info[f].ref_pk_index, &lookup);
+            const PkEntry* found = PkMap::get(fk_info[f].ref_pk_index, lookup);
 
             if (found && found->row_index >= 0) {
                 // get the referenced row from the already-built table array
@@ -328,7 +329,7 @@ static HashMap* rdb_build_pk_index_for(Item table_array, const char* pk_col_name
     Array* arr = table_array.array;
     if (!arr || arr->length == 0) return NULL;
 
-    HashMap* idx = pk_new((size_t)(arr->length < 8 ? 16 : arr->length * 2));
+    HashMap* idx = PkMap::create((size_t)(arr->length < 8 ? 16 : arr->length * 2));
     if (!idx) return NULL;
 
     for (int64_t r = 0; r < arr->length; r++) {
@@ -347,7 +348,7 @@ static HashMap* rdb_build_pk_index_for(Item table_array, const char* pk_col_name
         }
 
         PkEntry entry = {.pk_value = pk_val, .row_index = (int)r};
-        hashmap_set(idx, &entry);
+        PkMap::set(idx, entry);
     }
 
     return idx;
@@ -373,7 +374,7 @@ static Item rdb_add_reverse_fk(MarkBuilder& builder, Item target_array,
     if (!tgt_arr || !src_arr || tgt_arr->length == 0) return target_array;
 
     // build a grouping map: target_pk_value → list of source row items
-    HashMap* groups = revfk_new((size_t)(tgt_arr->length < 8 ? 16 : tgt_arr->length * 2));
+    HashMap* groups = RevFkMap::create((size_t)(tgt_arr->length < 8 ? 16 : tgt_arr->length * 2));
     if (!groups) return target_array;
 
     // rfk fields (from target's perspective):
@@ -400,7 +401,7 @@ static Item rdb_add_reverse_fk(MarkBuilder& builder, Item target_array,
         }
 
         RevFkEntry lookup = {.pk_value = fk_val, .count = 0, .capacity = 0, .rows = NULL};
-        const RevFkEntry* existing = (const RevFkEntry*)hashmap_get(groups, &lookup);
+        const RevFkEntry* existing = RevFkMap::get(groups, lookup);
 
         RevFkEntry entry;
         if (existing) {
@@ -417,7 +418,7 @@ static Item rdb_add_reverse_fk(MarkBuilder& builder, Item target_array,
                 !lam::mem_grow_array(&entry.rows, &entry.capacity,
                                      entry.count + 1, 4, MEM_CAT_INPUT_OTHER)) continue;
         entry.rows[entry.count++] = src_row;
-        hashmap_set(groups, &entry);
+        RevFkMap::set(groups, entry);
     }
 
     // rebuild target rows with reverse FK array attributes
@@ -457,7 +458,7 @@ static Item rdb_add_reverse_fk(MarkBuilder& builder, Item target_array,
             }
 
             RevFkEntry lookup = {.pk_value = pk_val, .count = 0, .capacity = 0, .rows = NULL};
-            const RevFkEntry* group = (const RevFkEntry*)hashmap_get(groups, &lookup);
+            const RevFkEntry* group = RevFkMap::get(groups, lookup);
             if (group && group->count > 0) {
                 ArrayBuilder rev_arr = builder.array();
                 for (int i = 0; i < group->count; i++) {
@@ -477,12 +478,11 @@ static Item rdb_add_reverse_fk(MarkBuilder& builder, Item target_array,
 
     // free group entries
     size_t iter = 0;
-    void* grp_item;
-    while (hashmap_iter(groups, &iter, &grp_item)) {
-        RevFkEntry* e = (RevFkEntry*)grp_item;
+    RevFkEntry* e = NULL;
+    while (RevFkMap::next(groups, &iter, &e)) {
         mem_free(e->rows);
     }
-    hashmap_free(groups);
+    RevFkMap::destroy(groups);
 
     return new_arr.final();
 }
@@ -728,7 +728,7 @@ Input* input_rdb_from_path_with_name_parent(const char* pathname,
 
     // free PK index hashmaps
     for (int t = 0; t < table_count; t++) {
-        if (pk_indexes[t]) hashmap_free(pk_indexes[t]);
+        PkMap::destroy(pk_indexes[t]);
     }
 
     // extract filename for the db element name

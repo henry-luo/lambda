@@ -4,7 +4,7 @@
 #include "../lib/log.h"
 #include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
-#include "../lib/hashmap_helpers.h"
+#include "../lib/hashmap_typed.hpp"
 #include "../lib/escape.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
@@ -41,8 +41,14 @@ extern __thread EvalContext* context;
 
 static void focus_sync_text_control_state(DocState* state, View* view);
 
-HASHMAP_DEFINE_FIELD2_KEY(state_key, StateEntry, key.node, key.name)
-HASHMAP_DEFINE_FIELD2_KEY(view_state_entry, ViewStateEntry, view_id, kind)
+static auto state_entry_node(const StateEntry& entry) { return entry.key.node; }
+static auto state_entry_name(const StateEntry& entry) { return entry.key.name; }
+
+typedef TypedHashMap<StateEntry,
+    HashMapIdentity2KeyOps<StateEntry, state_entry_node, state_entry_name>> StateMap;
+typedef TypedHashMap<ViewStateEntry,
+    HashMapIdentity2MemberKeyOps<ViewStateEntry, &ViewStateEntry::view_id,
+        &ViewStateEntry::kind>> ViewStateMap;
 
 static void view_state_release_payload(ViewState* view_state);
 static ViewState* view_state_get_for_kind(DocState* state, View* view, ViewStateKind kind);
@@ -85,7 +91,8 @@ typedef struct DumpNodeState {
     int64_t sel_end;
 } DumpNodeState;
 
-HASHMAP_DEFINE_PTRKEY(dump_node_state, DumpNodeState, node)
+typedef TypedHashMap<DumpNodeState,
+    HashMapPointerMemberKeyOps<DumpNodeState, &DumpNodeState::node>> DumpNodeStateMap;
 
 typedef struct StateDumpLog {
     FILE* out;
@@ -758,7 +765,7 @@ static Item state_dump_build_doc_item(DocState* state, Input* input) {
     }
 
     MarkBuilder builder(input);
-    HashMap* by_node = dump_node_state_new(64);
+    HashMap* by_node = DumpNodeStateMap::create(64);
     state_dump_collect_state_map(state, by_node);
 
     DumpBuildContext ctx;
@@ -773,7 +780,7 @@ static Item state_dump_build_doc_item(DocState* state, Input* input) {
     Item root_item = state_dump_build_element(&ctx, state->owner_store->document->root);
     if (root_item.item != ItemNull.item) doc.child(root_item);
 
-    if (by_node) hashmap_free(by_node);
+    DumpNodeStateMap::destroy(by_node);
     return doc.final();
 }
 
@@ -852,22 +859,14 @@ bool DocState::init(Pool* backing_pool, StateUpdateMode update_mode) {
     }
 
     // Create state hashmap
-    state_map = hashmap_new(
-        sizeof(StateEntry),
-        64,  // initial capacity
-        0x12345678, 0x87654321,  // hash seeds
-        state_key_hash,
-        state_key_cmp,
-        NULL,  // no element free function
-        NULL   // no user data
-    );
+    state_map = StateMap::create(64, 0x12345678, 0x87654321);
     if (!state_map) {
         log_error("radiant_state_create: failed to create state_map");
         destroy();
         return false;
     }
 
-    view_state_map = view_state_entry_new(64);
+    view_state_map = ViewStateMap::create(64);
     if (!view_state_map) {
         log_error("radiant_state_create: failed to create view_state_map");
         destroy();
@@ -5198,14 +5197,8 @@ DocState* state_set_immutable(DocState* state, void* node, const char* name, Ite
 
     // TODO: implement proper HAMT for structural sharing
     // For now, just create a new hashmap (not truly immutable)
-    new_state->state_map = hashmap_new(
-        sizeof(StateEntry),
-        hashmap_count(state->state_map) + 16,
-        0x12345678, 0x87654321,
-        state_key_hash,
-        state_key_cmp,
-        NULL, NULL
-    );
+    new_state->state_map = StateMap::create(
+        hashmap_count(state->state_map) + 16, 0x12345678, 0x87654321);
 
     // Copy all entries
     size_t iter = 0;
@@ -5248,14 +5241,8 @@ DocState* state_remove_immutable(DocState* state, void* node, const char* name) 
     new_state->version = state->version + 1;
     new_state->prev_version = state;
 
-    new_state->state_map = hashmap_new(
-        sizeof(StateEntry),
-        hashmap_count(state->state_map),
-        0x12345678, 0x87654321,
-        state_key_hash,
-        state_key_cmp,
-        NULL, NULL
-    );
+    new_state->state_map = StateMap::create(
+        hashmap_count(state->state_map), 0x12345678, 0x87654321);
 
     const char* interned = intern_state_name(new_state, name);
 
@@ -5633,7 +5620,8 @@ void visited_links_destroy(VisitedLinks* visited) {
 void visited_links_add(VisitedLinks* visited, const char* url) {
     if (!visited || !url) return;
 
-    uint64_t hash = hashmap_murmur(url, strlen(url), visited->seed0, visited->seed1);
+    uint64_t hash = hashmap_hash_murmur_bytes(url, strlen(url), visited->seed0,
+        visited->seed1);
     hashmap_set(visited->url_hash_set, &hash);
 
     log_debug("visited_links_add: hash=0x%llx", hash);

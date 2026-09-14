@@ -6,7 +6,7 @@
 #include "runtime-state.h"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
-#include "../../lib/hashmap_helpers.h"
+#include "../../lib/hashmap_typed.hpp"
 #include <string.h>
 #include <stdio.h>
 
@@ -44,8 +44,21 @@ static TemplateStateStore* tmpl_state_store(void) {
 #define s_template_state_map (tmpl_state_store()->map)
 #define s_owns_map (tmpl_state_store()->owns_map)
 
-HASHMAP_DEFINE_FIELD3_KEY(tmpl_state, TemplateStateEntry,
-                          key.model_item.item, key.template_ref, key.state_name)
+static uint64_t template_state_model_item(const TemplateStateEntry& entry) {
+    return entry.key.model_item.item;
+}
+
+static const char* template_state_template_ref(const TemplateStateEntry& entry) {
+    return entry.key.template_ref;
+}
+
+static const char* template_state_name(const TemplateStateEntry& entry) {
+    return entry.key.state_name;
+}
+
+typedef TypedHashMap<TemplateStateEntry,
+    HashMapIdentity3KeyOps<TemplateStateEntry, template_state_model_item,
+        template_state_template_ref, template_state_name>> TemplateStateMap;
 
 // ============================================================================
 // Ensure map exists (lazy creation)
@@ -53,12 +66,7 @@ HASHMAP_DEFINE_FIELD3_KEY(tmpl_state, TemplateStateEntry,
 
 static HashMap* ensure_map(void) {
     if (!s_template_state_map) {
-        s_template_state_map = hashmap_new(
-            sizeof(TemplateStateEntry), 64,
-            0xABCD1234, 0x5678EFAB,
-            tmpl_state_hash, tmpl_state_cmp,
-            NULL, NULL
-        );
+        s_template_state_map = TemplateStateMap::create(64, 0xABCD1234, 0x5678EFAB);
         s_owns_map = true;
     }
     return s_template_state_map;
@@ -79,7 +87,7 @@ void tmpl_state_destroy(void) {
         context, CONTEXT_CAPSULE_TEMPLATE_STATE);
     if (!store) return;
     if (store->map && store->owns_map) {
-        hashmap_free(store->map);
+        TemplateStateMap::destroy(store->map);
     }
     context_capsule_drop(context, CONTEXT_CAPSULE_TEMPLATE_STATE);
 }
@@ -91,7 +99,7 @@ Item tmpl_state_get(Item model_item, const char* template_ref, const char* state
     query.key.model_item = model_item;
     query.key.template_ref = template_ref;
     query.key.state_name = state_name;
-    const TemplateStateEntry* found = (const TemplateStateEntry*)hashmap_get(map, &query);
+    const TemplateStateEntry* found = TemplateStateMap::get(map, query);
     return found ? found->value : ItemNull;
 }
 
@@ -104,7 +112,7 @@ void tmpl_state_set(Item model_item, const char* template_ref,
     entry.key.template_ref = template_ref;
     entry.key.state_name = state_name;
     entry.value = value;
-    hashmap_set(map, &entry);
+    TemplateStateMap::set(map, entry);
 
     // mark the render map entry dirty for observer-based reconciliation
     render_map_mark_dirty(model_item, template_ref);
@@ -118,7 +126,7 @@ Item tmpl_state_get_or_init(Item model_item, const char* template_ref,
     query.key.model_item = model_item;
     query.key.template_ref = template_ref;
     query.key.state_name = state_name;
-    const TemplateStateEntry* found = (const TemplateStateEntry*)hashmap_get(map, &query);
+    const TemplateStateEntry* found = TemplateStateMap::get(map, query);
     if (found) {
         return found->value;
     }
@@ -129,7 +137,7 @@ Item tmpl_state_get_or_init(Item model_item, const char* template_ref,
     entry.key.template_ref = template_ref;
     entry.key.state_name = state_name;
     entry.value = default_value;
-    hashmap_set(map, &entry);
+    TemplateStateMap::set(map, entry);
 
     log_debug("tmpl_state_get_or_init: initialized tmpl=%s state=%s",
               template_ref ? template_ref : "(anon)", state_name);
@@ -143,7 +151,7 @@ bool tmpl_state_has(Item model_item, const char* template_ref, const char* state
     query.key.model_item = model_item;
     query.key.template_ref = template_ref;
     query.key.state_name = state_name;
-    return hashmap_get(map, &query) != NULL;
+    return TemplateStateMap::get(map, query) != NULL;
 }
 
 void tmpl_state_reset(void) {
@@ -159,7 +167,7 @@ struct hashmap* tmpl_state_get_map(void) {
 
 void tmpl_state_set_map(struct hashmap* map) {
     if (s_template_state_map && s_owns_map) {
-        hashmap_free(s_template_state_map);
+        TemplateStateMap::destroy(s_template_state_map);
     }
     s_template_state_map = map;
     s_owns_map = false;

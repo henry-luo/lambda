@@ -24,7 +24,7 @@
 #include "../mempool.h"
 #include "../arena.h"
 #include "../arraylist.h"
-#include "../hashmap.h"
+#include "../hashmap_helpers.h"
 #include "../str.h"
 #include "../strbuf.h"
 #include "../file.h"
@@ -257,7 +257,7 @@ typedef struct FontCacheEntry {
 static uint64_t font_entry_ptr_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     const FontEntry **font_ptr = (const FontEntry**)item;
     if (!font_ptr || !*font_ptr || !(*font_ptr)->file_path) return 0;
-    return hashmap_xxhash3((*font_ptr)->file_path, strlen((*font_ptr)->file_path), seed0, seed1);
+    return hashmap_hash_xxhash3_cstr((*font_ptr)->file_path, seed0, seed1);
 }
 
 // Comparison function for font entry pointers (for hashmaps storing FontEntry*)
@@ -278,37 +278,10 @@ static int font_entry_ptr_compare(const void *a, const void *b, void *udata) {
     return strcmp(fa->file_path, fb->file_path);
 }
 
-// Hash function for font families (for hashmap)
-static uint64_t font_family_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const FontFamily *family = (const FontFamily*)item;
-    if (!family || !family->family_name) return 0;
+// Hash function for font families (for hashmap) uses shared case-insensitive keys.
 
-    // Convert to lowercase for case-insensitive hashing
-    // This must match the case-insensitive compare function
-    size_t len = strlen(family->family_name);
-    char lower_name[256];
-    size_t copy_len = len < sizeof(lower_name) - 1 ? len : sizeof(lower_name) - 1;
-    for (size_t i = 0; i < copy_len; i++) {
-        lower_name[i] = tolower((unsigned char)family->family_name[i]);
-    }
-    lower_name[copy_len] = '\0';
-
-    return hashmap_xxhash3(lower_name, copy_len, seed0, seed1);
-}
-
-// Comparison function for font families (for hashmap)
-static int font_family_compare(const void *a, const void *b, void *udata) {
-    (void)udata;  // Suppress unused parameter warning
-    const FontFamily *fa = (const FontFamily*)a;
-    const FontFamily *fb = (const FontFamily*)b;
-
-    if (!fa || !fb) return 0;
-    if (!fa->family_name && !fb->family_name) return 0;
-    if (!fa->family_name) return -1;
-    if (!fb->family_name) return 1;
-
-    return str_icmp(fa->family_name, strlen(fa->family_name), fb->family_name, strlen(fb->family_name));
-}
+// Comparison function for font families (for hashmap) uses shared case-insensitive keys.
+HASHMAP_DEFINE_ICSTRKEY(font_config_family, FontFamily, family_name)
 
 // Case-insensitive string comparison for font matching
 static bool string_match_ignore_case(const char *a, const char *b) {
@@ -1114,8 +1087,7 @@ FontDatabase* font_database_create(struct Pool* pool, struct Arena* arena) {
     }
 
     // Initialize hashmaps
-    db->families = hashmap_new(sizeof(FontFamily), 0, 0, 0,
-        font_family_hash, font_family_compare, NULL, NULL);
+    db->families = font_config_family_new(0);
     db->postscript_names = hashmap_new(sizeof(FontEntry*), 0, 0, 0,
         font_entry_ptr_hash, font_entry_ptr_compare, NULL, NULL);
     db->file_paths = hashmap_new(sizeof(FontEntry*), 0, 0, 0,

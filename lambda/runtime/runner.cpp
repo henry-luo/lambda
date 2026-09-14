@@ -9,7 +9,7 @@
 #endif
 #include "transpiler.hpp"
 #include "ast_build.hpp"
-#include "../../lib/hashmap_helpers.h"
+#include "../../lib/hashmap_typed.hpp"
 #include "../../lib/thread_pool.h"
 #include "../io/mark_builder.hpp"
 #include "../core/lambda-decimal.hpp"
@@ -412,7 +412,9 @@ typedef struct RuntimeLoadedScriptEntry {
     Script* script;
 } RuntimeLoadedScriptEntry;
 
-HASHMAP_DEFINE_STRKEY(runtime_loaded_script_index, RuntimeLoadedScriptEntry, path)
+typedef TypedHashMap<RuntimeLoadedScriptEntry,
+    HashMapCStrMemberKeyOps<RuntimeLoadedScriptEntry, &RuntimeLoadedScriptEntry::path>>
+    RuntimeLoadedScriptIndex;
 
 #ifndef _WIN32
 // Mutex for thread-safe access to runtime->scripts during parallel compilation
@@ -422,19 +424,19 @@ static pthread_mutex_t scripts_mutex = PTHREAD_MUTEX_INITIALIZER;
 static Script* runtime_loaded_script_get(Runtime* runtime, const char* path) {
     if (!runtime || !runtime->loaded_script_index || !path) return NULL;
     RuntimeLoadedScriptEntry probe = { .path = path, .script = NULL };
-    const RuntimeLoadedScriptEntry* found = (const RuntimeLoadedScriptEntry*)hashmap_get(
-        runtime->loaded_script_index, &probe);
+    const RuntimeLoadedScriptEntry* found = RuntimeLoadedScriptIndex::get(
+        runtime->loaded_script_index, probe);
     return found ? found->script : NULL;
 }
 
 static void runtime_loaded_script_put(Runtime* runtime, Script* script) {
     if (!runtime || !script || !script->reference) return;
     if (!runtime->loaded_script_index) {
-        runtime->loaded_script_index = runtime_loaded_script_index_new(64);
+        runtime->loaded_script_index = RuntimeLoadedScriptIndex::create(64);
     }
     RuntimeLoadedScriptEntry entry = { .path = script->reference, .script = script };
-    hashmap_set(runtime->loaded_script_index, &entry);
-    if (hashmap_oom(runtime->loaded_script_index)) {
+    RuntimeLoadedScriptIndex::set(runtime->loaded_script_index, entry);
+    if (RuntimeLoadedScriptIndex::oom(runtime->loaded_script_index)) {
         log_error("runtime-script-registry: failed to index %s", script->reference);
     }
 }
@@ -442,7 +444,7 @@ static void runtime_loaded_script_put(Runtime* runtime, Script* script) {
 static void runtime_loaded_script_delete(Runtime* runtime, const char* path) {
     if (!runtime || !runtime->loaded_script_index || !path) return;
     RuntimeLoadedScriptEntry probe = { .path = path, .script = NULL };
-    hashmap_delete(runtime->loaded_script_index, &probe);
+    RuntimeLoadedScriptIndex::erase(runtime->loaded_script_index, probe);
 }
 
 static void runtime_loaded_script_delete_instance(Runtime* runtime, Script* script) {
@@ -2220,7 +2222,7 @@ void runtime_init(Runtime* runtime) {
     // and import scheduling code that still uses it as a fast-path predicate.
     runtime->use_mir_direct = true;
     runtime->scripts = arraylist_new(16);
-    runtime->loaded_script_index = runtime_loaded_script_index_new(64);
+    runtime->loaded_script_index = RuntimeLoadedScriptIndex::create(64);
     runtime->max_errors = 10;  // default error threshold
     runtime->optimize_level = 2;  // default MIR optimization level (0=debug, 2=release)
     runtime->dry_run = false;  // default: real IO
@@ -2300,7 +2302,7 @@ void runtime_free_all_scripts(Runtime* runtime) {
         runtime->scripts = NULL;
     }
     if (runtime->loaded_script_index) {
-        hashmap_free(runtime->loaded_script_index);
+        RuntimeLoadedScriptIndex::destroy(runtime->loaded_script_index);
         runtime->loaded_script_index = NULL;
     }
     if (runtime->module_unit_index) {
@@ -2472,7 +2474,7 @@ void runtime_log_script_load_summary(Runtime* runtime) {
     if (!runtime) return;
     int lookups = runtime->script_load_hits + runtime->script_load_misses;
     double hit_rate = lookups > 0 ? (100.0 * (double)runtime->script_load_hits / (double)lookups) : 0.0;
-    size_t loaded = runtime->loaded_script_index ? hashmap_count(runtime->loaded_script_index) : 0;
+    size_t loaded = RuntimeLoadedScriptIndex::count(runtime->loaded_script_index);
     log_info("runtime-script-registry: summary loaded=%zu reuses=%d hit_rate=%.1f%% compiles=%d hits=%d misses=%d invalidations=%d artifacts_disabled=%d",
              loaded, runtime->script_load_hits, hit_rate,
              runtime->script_load_compiles, runtime->script_load_hits,

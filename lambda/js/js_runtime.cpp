@@ -25,6 +25,8 @@
 #include "../core/lambda_typed.hpp"
 #include "../runtime/gc/gc_heap.h"
 #include "../../lib/lambda_alloca.h"
+#include "../../lib/hash.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/mem_grow.hpp"
 #include "../../lib/re2_glue.hpp"
@@ -369,7 +371,7 @@ typedef struct JsArrayRuntimeItemsEntry {
 
 static uint64_t js_array_runtime_items_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const JsArrayRuntimeItemsEntry* entry = (const JsArrayRuntimeItemsEntry*)item;
-    return hashmap_sip(&entry->items, sizeof(entry->items), seed0, seed1);
+    return hashmap_hash_bytes(&entry->items, sizeof(entry->items), seed0, seed1);
 }
 
 static int js_array_runtime_items_compare(const void* left, const void* right, void* udata) {
@@ -5814,7 +5816,7 @@ typedef struct JsArraySparseHashEntry {
 
 static uint64_t js_array_sparse_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const JsArraySparseHashEntry* entry = (const JsArraySparseHashEntry*)item;
-    return hashmap_sip(&entry->index, sizeof(entry->index), seed0, seed1);
+    return hashmap_hash_bytes(&entry->index, sizeof(entry->index), seed0, seed1);
 }
 
 static int js_array_sparse_compare(const void* left, const void* right, void* udata) {
@@ -15813,11 +15815,10 @@ extern "C" void js_runtime_regex_cache_destroy_context(JsRuntimeState* state) {
 
 // Content-based hash for permanent cache — valid across batch resets (uses string content, not pointers)
 static inline uint64_t js_regex_content_hash(const char* pat, int plen, const char* flg, int flen) {
-    uint64_t h = 14695981039346656037ULL;
-    for (int i = 0; i < plen; i++) { h ^= (uint8_t)pat[i]; h *= 1099511628211ULL; }
+    uint64_t h = hash_fnv1a_64_extend(HASH_FNV1A_64_OFFSET_BASIS, pat,
+        plen > 0 ? (size_t)plen : 0);
     h ^= 0xFFFFFFFFFFFFFFFFULL; // separator
-    for (int i = 0; i < flen; i++) { h ^= (uint8_t)flg[i]; h *= 1099511628211ULL; }
-    return h;
+    return hash_fnv1a_64_extend(h, flg, flen > 0 ? (size_t)flen : 0);
 }
 
 // Helper: get the correct number of capturing groups for output.
@@ -19381,7 +19382,7 @@ static uint64_t js_collection_hash(const void *item, uint64_t seed0, uint64_t se
     TypeId tid = get_type_id(k);
     if (tid == LMD_TYPE_STRING) {
         String* s = it2s(k);
-        return hashmap_sip(s->chars, s->len, seed0, seed1);
+        return hashmap_hash_bytes(s->chars, s->len, seed0, seed1);
     }
     // Numeric types: hash as double for SameValueZero consistency
     if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT) {
@@ -19392,12 +19393,12 @@ static uint64_t js_collection_hash(const void *item, uint64_t seed0, uint64_t se
         // SameValueZero: -0 and +0 are the same → normalize to +0
         if (d == 0.0) d = 0.0;
         // SameValueZero: all NaN values are equal → use canonical NaN bits
-        if (d != d) { uint64_t nan_marker = 0x7FF8000000000001ULL; return hashmap_sip(&nan_marker, sizeof(nan_marker), seed0, seed1); }
-        return hashmap_sip(&d, sizeof(d), seed0, seed1);
+        if (d != d) { uint64_t nan_marker = 0x7FF8000000000001ULL; return hashmap_hash_bytes(&nan_marker, sizeof(nan_marker), seed0, seed1); }
+        return hashmap_hash_bytes(&d, sizeof(d), seed0, seed1);
     }
     // fallback: hash the raw item bits
     uint64_t bits = k.item;
-    return hashmap_sip(&bits, sizeof(bits), seed0, seed1);
+    return hashmap_hash_bytes(&bits, sizeof(bits), seed0, seed1);
 }
 
 static int js_collection_compare(const void *a, const void *b, void *udata) {

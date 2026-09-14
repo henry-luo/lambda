@@ -37,7 +37,7 @@
 #include "../../lib/mem_factory.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/hashmap.h"
-#include "../../lib/hashmap_helpers.h"
+#include "../../lib/hashmap_typed.hpp"
 #include "../../lib/atomic.h"
 #include "../../lib/uv_loop.h"
 #include "../runtime/gc/gc_heap.h"
@@ -4420,13 +4420,14 @@ static bool jube_specifier_normalize(const char* name, char* out, size_t out_siz
     return true;
 }
 
-HASHMAP_DEFINE_STRKEY(jube_specifier_entry, JubeSpecifierEntry, normalized)
+typedef TypedHashMap<JubeSpecifierEntry,
+    HashMapCStrMemberKeyOps<JubeSpecifierEntry, &JubeSpecifierEntry::normalized>>
+    JubeSpecifierIndex;
 
 static bool jube_specifier_index_init(void) {
     if (jube_specifier_index) return true;
-    jube_specifier_index = hashmap_new(sizeof(JubeSpecifierEntry), 64,
-        0x4a5542455f535045ULL, 0x4349464945525f31ULL,
-        jube_specifier_entry_hash, jube_specifier_entry_cmp, NULL, NULL);
+    jube_specifier_index = JubeSpecifierIndex::create(64,
+        0x4a5542455f535045ULL, 0x4349464945525f31ULL);
     if (!jube_specifier_index) {
         log_error("JUBE_SPEC: failed to allocate specifier index");
         return false;

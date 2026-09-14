@@ -1,4 +1,5 @@
 #include "js_mir_internal.hpp"
+#include "../../lib/hashmap_helpers.h"
 #include "../input/input-script-cache.h"
 
 #include <limits.h>
@@ -229,7 +230,7 @@ static int js_debug_func_name_cmp(const void *a, const void *b, void *udata) {
 
 static uint64_t js_debug_func_name_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     const char* name = *(const char**)item;
-    return hashmap_sip(name, strlen(name), seed0, seed1);
+    return hashmap_hash_cstr(name, seed0, seed1);
 }
 
 static void js_debug_func_name_entry_free(void* item) {

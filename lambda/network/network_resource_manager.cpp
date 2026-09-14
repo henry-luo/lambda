@@ -12,7 +12,7 @@
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/time_util.h"
-#include "../../lib/hashmap_helpers.h"
+#include "../../lib/hashmap_typed.hpp"
 #include "../../lib/arraylist.h"
 #include "../../lib/mem.h"
 #include <string.h>
@@ -26,14 +26,16 @@ typedef struct {
 
 static uint64_t g_next_document_id = 1;
 
-HASHMAP_DEFINE_STRKEY(resource_entry, ResourceEntry, url)
-
 // free function for resource entries (only frees URL, not resource)
 static void resource_entry_free(void* item) {
     ResourceEntry* entry = (ResourceEntry*)item;
     if (entry->url) mem_free(entry->url);
     // note: resource itself freed via resource_release
 }
+
+typedef TypedHashMap<ResourceEntry,
+    HashMapCStrMemberKeyOps<ResourceEntry, &ResourceEntry::url>, resource_entry_free>
+    ResourceMap;
 
 // CPP internal helpers
 namespace {
@@ -386,7 +388,7 @@ NetworkResourceManager* resource_manager_create(struct DomDocument* doc,
     }
     
     // create hashmap for URL→NetworkResource* lookup (deduplication)
-    mgr->resources = resource_entry_new_with_free(0, resource_entry_free);
+    mgr->resources = ResourceMap::create(0);
     
     if (!mgr->resources) {
         network_scheduler_destroy(mgr->scheduler);
@@ -403,7 +405,7 @@ NetworkResourceManager* resource_manager_create(struct DomDocument* doc,
     if (!mgr->pending_ready || !mgr->pending_failed ||
         !mgr->pending_reflows || !mgr->pending_repaints ||
         pthread_mutex_init(&mgr->mutex, NULL) != 0) {
-        hashmap_free((struct hashmap*)mgr->resources);
+        ResourceMap::destroy((struct hashmap*)mgr->resources);
         if (mgr->pending_ready) arraylist_free((ArrayList*)mgr->pending_ready);
         if (mgr->pending_failed) arraylist_free((ArrayList*)mgr->pending_failed);
         if (mgr->pending_reflows) arraylist_free((ArrayList*)mgr->pending_reflows);
@@ -462,7 +464,7 @@ void resource_manager_destroy(NetworkResourceManager* mgr) {
                 resource_release(entry->res);
             }
         }
-        hashmap_free((struct hashmap*)mgr->resources);
+        ResourceMap::destroy((struct hashmap*)mgr->resources);
     }
     
     // free arraylists
@@ -525,8 +527,7 @@ NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
     
     // check for existing resource (deduplication)
     ResourceEntry key = { .url = (char*)url, .res = NULL };
-    const ResourceEntry* existing = (const ResourceEntry*)hashmap_get(
-        (struct hashmap*)mgr->resources, &key);
+    const ResourceEntry* existing = ResourceMap::get((struct hashmap*)mgr->resources, key);
     
     if (existing && existing->res) {
         // resource already exists
@@ -578,7 +579,7 @@ NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
                 
                 // add to hashmap
                 ResourceEntry entry = { .url = mem_strdup(url, MEM_CAT_NETWORK), .res = res };
-                hashmap_set((struct hashmap*)mgr->resources, &entry);
+                ResourceMap::set((struct hashmap*)mgr->resources, entry);
                 
                 mgr->total_resources++;
                 mgr->completed_resources++;
@@ -612,7 +613,7 @@ NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
     
     // add to hashmap
     ResourceEntry entry = { .url = mem_strdup(url, MEM_CAT_NETWORK), .res = res };
-    hashmap_set((struct hashmap*)mgr->resources, &entry);
+    ResourceMap::set((struct hashmap*)mgr->resources, entry);
     
     mgr->total_resources++;
     

@@ -9,7 +9,7 @@
 //     during eviction sweeps in put().
 
 #include "lru_cache.h"
-#include "hashmap.h"
+#include "hashmap_helpers.h"
 #include "log.h"
 #include "time_util.h"
 
@@ -43,7 +43,7 @@ struct LruCache {
 
 static uint64_t lru_rec_hash(const void* item, uint64_t s0, uint64_t s1) {
     const LruRecord* r = (const LruRecord*)item;
-    return hashmap_sip(r->node->key, strlen(r->node->key), s0, s1);
+    return hashmap_hash_cstr(r->node->key, s0, s1);
 }
 
 static int lru_rec_cmp(const void* a, const void* b, void* udata) {

@@ -42,6 +42,7 @@ extern "C" bool js_promise_vmap_is(Item value);
 #include "../jube/jube_interface.h"
 #include "../../lib/base64.h"
 #include "../../lib/escape.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/log.h"
 #include "../../lib/mem_grow.hpp"
 #include "../../lib/time_util.h"
@@ -8830,7 +8831,7 @@ static void js_for_in_seen_entry_set(JsForInSeenEntry* entry, const char* name, 
 
 static uint64_t js_for_in_seen_hash(const void* item, uint64_t s0, uint64_t s1) {
     const JsForInSeenEntry* entry = (const JsForInSeenEntry*)item;
-    return hashmap_sip(entry->name, (size_t)entry->len, s0, s1);
+    return hashmap_hash_lenstr(entry->name, (size_t)entry->len, s0, s1);
 }
 
 static int js_for_in_seen_compare(const void* a, const void* b, void*) {
@@ -17245,7 +17246,7 @@ extern "C" void js_intrinsic_note_prototype_mutation(Item object) {
 // =============================================================================
 
 #include "../../lib/hashmap.h"
-#include "../../lib/hashmap_helpers.h"
+#include "../../lib/hashmap_typed.hpp"
 
 // symbol registry entry for Symbol.for() / Symbol.keyFor()
 struct JsSymbolEntry {
@@ -17267,12 +17268,12 @@ struct JsSymbolDesc {
 
 #define js_symbol_desc_registry (js_runtime_state.operations.symbol_description_registry)
 
-HASHMAP_DEFINE_INTKEY(js_symbol_desc, JsSymbolDesc, symbol_id)
+typedef TypedHashMap<JsSymbolDesc,
+    HashMapIntegralMemberKeyOps<JsSymbolDesc, &JsSymbolDesc::symbol_id>> JsSymbolDescMap;
 
 static void js_symbol_desc_init() {
     if (!js_symbol_desc_registry) {
-        js_symbol_desc_registry = hashmap_new(sizeof(JsSymbolDesc), 16, 0, 0,
-            js_symbol_desc_hash, js_symbol_desc_cmp, NULL, NULL);
+        js_symbol_desc_registry = JsSymbolDescMap::create(16);
     }
 }
 
@@ -17293,12 +17294,12 @@ static void js_symbol_desc_init() {
 #define JS_SYMBOL_ID_ASYNC_DISPOSE 14
 #define JS_SYMBOL_ID_DISPOSE       15
 
-HASHMAP_DEFINE_STRKEY(js_symbol_entry, JsSymbolEntry, key)
+typedef TypedHashMap<JsSymbolEntry,
+    HashMapCStrMemberKeyOps<JsSymbolEntry, &JsSymbolEntry::key>> JsSymbolEntryMap;
 
 static void js_symbol_init_registry() {
     if (!js_symbol_registry) {
-        js_symbol_registry = hashmap_new(sizeof(JsSymbolEntry), 16, 0, 0,
-            js_symbol_entry_hash, js_symbol_entry_cmp, NULL, NULL);
+        js_symbol_registry = JsSymbolEntryMap::create(16);
     }
 }
 
@@ -17307,11 +17308,11 @@ extern "C" void js_symbol_registry_batch_reset(void) {
     // Dynamic Symbol records own unique NamePool keys, so a realm reset must
     // discard both registries before their backing pool is released.
     if (js_symbol_registry) {
-        hashmap_free(js_symbol_registry);
+        JsSymbolEntryMap::destroy(js_symbol_registry);
         js_symbol_registry = NULL;
     }
     if (js_symbol_desc_registry) {
-        hashmap_free(js_symbol_desc_registry);
+        JsSymbolDescMap::destroy(js_symbol_desc_registry);
         js_symbol_desc_registry = NULL;
     }
     js_symbol_next_id = 100;
@@ -17370,7 +17371,7 @@ extern "C" NameId js_symbol_name_id(Item sym) {
     if (js_symbol_desc_registry) {
         JsSymbolDesc lookup = {};
         lookup.symbol_id = id;
-        JsSymbolDesc* found = (JsSymbolDesc*)hashmap_get(js_symbol_desc_registry, &lookup);
+        JsSymbolDesc* found = JsSymbolDescMap::get(js_symbol_desc_registry, lookup);
         if (found) return found->name_id;
     }
     if (js_symbol_registry) {
@@ -17474,7 +17475,7 @@ extern "C" Item js_symbol_create(Item description) {
     if (entry.name_id == NAME_ID_NONE) {
         return js_throw_type_error("failed to allocate symbol property key");
     }
-    hashmap_set(js_symbol_desc_registry, &entry);
+    JsSymbolDescMap::set(js_symbol_desc_registry, entry);
 
     return sym;
 }
@@ -17491,7 +17492,7 @@ extern "C" Item js_symbol_for(Item key) {
     memcpy(lookup.key, s->chars, klen);
     lookup.key[klen] = '\0';
 
-    JsSymbolEntry* found = (JsSymbolEntry*)hashmap_get(js_symbol_registry, &lookup);
+    JsSymbolEntry* found = JsSymbolEntryMap::get(js_symbol_registry, lookup);
     if (found) return js_make_symbol_item(found->symbol_id);
 
     // create new entry
@@ -17503,7 +17504,7 @@ extern "C" Item js_symbol_for(Item key) {
     if (lookup.name_id == NAME_ID_NONE) {
         return js_throw_type_error("failed to allocate registry symbol property key");
     }
-    hashmap_set(js_symbol_registry, &lookup);
+    JsSymbolEntryMap::set(js_symbol_registry, lookup);
     return js_make_symbol_item(lookup.symbol_id);
 }
 
@@ -17557,7 +17558,7 @@ extern "C" Item js_symbol_to_string(Item sym) {
     if (js_symbol_desc_registry) {
         JsSymbolDesc lookup;
         lookup.symbol_id = id;
-        JsSymbolDesc* found = (JsSymbolDesc*)hashmap_get(js_symbol_desc_registry, &lookup);
+        JsSymbolDesc* found = JsSymbolDescMap::get(js_symbol_desc_registry, lookup);
         if (found && found->desc_len >= 0) {
             char buf[160];
             snprintf(buf, sizeof(buf), "Symbol(%s)", found->desc);
@@ -17596,7 +17597,7 @@ extern "C" Item js_symbol_get_description(Item sym) {
     if (js_symbol_desc_registry) {
         JsSymbolDesc lookup;
         lookup.symbol_id = id;
-        JsSymbolDesc* found = (JsSymbolDesc*)hashmap_get(js_symbol_desc_registry, &lookup);
+        JsSymbolDesc* found = JsSymbolDescMap::get(js_symbol_desc_registry, lookup);
         if (found) {
             if (found->desc_len < 0) return make_js_undefined();  // Symbol() with no arg
             return js_name_item(found->desc, found->desc_len);

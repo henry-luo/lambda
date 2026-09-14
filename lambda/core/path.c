@@ -12,7 +12,7 @@
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
 #include "../../lib/arraylist.h"
-#include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/shell.h"
 #include "../../lib/mem.h"
 #include "../lambda.h"
@@ -353,10 +353,10 @@ bool path_equal(Path* left, Path* right) {
 }
 
 uint64_t path_hash(Path* path, uint64_t seed0, uint64_t seed1) {
-    if (!path) return hashmap_sip("path:null", 9, seed0, seed1);
+    if (!path) return hashmap_hash_cstr("path:null", seed0, seed1);
     StrBuf* buf = strbuf_new();
     path_to_string(path, buf);
-    uint64_t hash = hashmap_sip(buf->str, buf->length, seed0, seed1);
+    uint64_t hash = hashmap_hash_bytes(buf->str, buf->length, seed0, seed1);
     strbuf_free(buf);
     return hash;
 }

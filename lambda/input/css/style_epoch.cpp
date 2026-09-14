@@ -4,6 +4,7 @@
 #include "css_style_node.hpp"
 #include "dom_element.hpp"
 #include "../../../lib/log.h"
+#include "../../../lib/hash.h"
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/mempool.h"
 #include "../../../lib/mem_grow.hpp"
@@ -78,9 +79,7 @@ static StyleEpochManager* style_manager(DomDocument* doc) {
 }
 
 static uint64_t style_hash_mix(uint64_t hash, uint64_t value) {
-    hash ^= value + 0x9e3779b97f4a7c15ULL + (hash << 6u) + (hash >> 2u);
-    hash *= 0xbf58476d1ce4e5b9ULL;
-    return hash;
+    return hash_combine_u64(hash, value) * UINT64_C(0xbf58476d1ce4e5b9);
 }
 
 static uint64_t style_environment_key(CssEngine* engine) {

@@ -13,6 +13,7 @@
  */
 
 #include "font_internal.h"
+#include "../hashmap_helpers.h"
 #include "../str.h"
 #include "../memtrack.h"
 #include "../utf.h"
@@ -271,7 +272,7 @@ static uint64_t cp_fallback_hash(const void* item, uint64_t seed0, uint64_t seed
         const char* platform_family;
     } key = {e->codepoint, e->size_px, e->source_handle,
              e->platform_fallback_family};
-    return hashmap_xxhash3(&key, sizeof(key), seed0, seed1);
+    return hashmap_hash_xxhash3_bytes(&key, sizeof(key), seed0, seed1);
 }
 
 static int cp_fallback_compare(const void* a, const void* b, void* udata) {

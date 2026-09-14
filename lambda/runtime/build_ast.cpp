@@ -12,7 +12,7 @@
 #include "../jube/jube_language.h"
 #include "../jube/jube_registry.h"
 #endif
-#include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/datetime.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
@@ -147,7 +147,7 @@ static int jube_sys_func_record_count = 0;
 static uint64_t sys_func_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const SysFuncEntry* e = (const SysFuncEntry*)item;
     // hash the name and mix in arg_count
-    uint64_t h = hashmap_xxhash3(e->name, e->name_len, seed0, seed1);
+    uint64_t h = hashmap_hash_xxhash3_bytes(e->name, e->name_len, seed0, seed1);
     h ^= (uint64_t)(e->arg_count + 2) * 0x9E3779B97F4A7C15ULL;  // +2 to keep -1 distinct
     return h;
 }
@@ -162,7 +162,7 @@ static int sys_func_compare(const void* a, const void* b, void* udata) {
 
 static uint64_t sys_func_name_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const SysFuncNameEntry* e = (const SysFuncNameEntry*)item;
-    return hashmap_xxhash3(e->name, e->name_len, seed0, seed1);
+    return hashmap_hash_xxhash3_bytes(e->name, e->name_len, seed0, seed1);
 }
 
 static int sys_func_name_compare(const void* a, const void* b, void* udata) {
@@ -3151,7 +3151,7 @@ static int string_dedup_cmp(const void* a, const void* b, void* udata) {
 
 static uint64_t string_dedup_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const StringDedupEntry* entry = (const StringDedupEntry*)item;
-    uint64_t h = hashmap_sip(entry->chars, entry->len, seed0, seed1);
+    uint64_t h = hashmap_hash_bytes(entry->chars, entry->len, seed0, seed1);
     return entry->is_symbol ? h ^ UINT64_C(0x9E3779B97F4A7C15) : h;
 }
 
@@ -6726,7 +6726,7 @@ typedef struct DirectBindContext {
 static uint64_t direct_bind_pointer_hash(const void* item, uint64_t seed0,
         uint64_t seed1) {
     const void* pointer = *(const void* const*)item;
-    return hashmap_xxhash3(&pointer, sizeof(pointer), seed0, seed1);
+    return hashmap_hash_xxhash3_bytes(&pointer, sizeof(pointer), seed0, seed1);
 }
 
 static int direct_bind_pointer_compare(const void* a, const void* b,
@@ -7590,7 +7590,7 @@ typedef struct DirectAppendTail {
 static uint64_t direct_append_tail_hash(const void* item, uint64_t seed0,
         uint64_t seed1) {
     const DirectAppendTail* entry = (const DirectAppendTail*)item;
-    return hashmap_xxhash3(&entry->head, sizeof(entry->head), seed0, seed1);
+    return hashmap_hash_xxhash3_bytes(&entry->head, sizeof(entry->head), seed0, seed1);
 }
 
 static int direct_append_tail_compare(const void* a, const void* b,
