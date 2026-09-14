@@ -1,4 +1,5 @@
 #include "lambda_rd_parser.h"
+#include "../../../lib/hash.h"
 #include <string.h>
 enum {
     LAMBDA_RD_MAX_DEPTH = 1000, LAMBDA_BP_PIPE = 10, LAMBDA_BP_OR = 20, LAMBDA_BP_AND = 30, LAMBDA_BP_NOT = 35, LAMBDA_BP_MEMBERSHIP = 40, LAMBDA_BP_SET = 50, LAMBDA_BP_EQUALITY = 60, LAMBDA_BP_RELATION = 70, LAMBDA_BP_ADD = 80, LAMBDA_BP_MULTIPLY = 90, LAMBDA_BP_POWER = 100, LAMBDA_BP_PREFIX = 105, LAMBDA_BP_POSTFIX = 110,
@@ -183,30 +184,27 @@ static const char* const error_expected_greater_than = "expected '>'";
 static const char* const error_expected_path_introducer = "expected path introducer";
 static const char* const error_expected_token = "expected token";
 
-static uint64_t mix_hash(uint64_t hash, uint64_t value) {
-    hash ^= value + UINT64_C(0x9e3779b97f4a7c15) + (hash << 6) + (hash >> 2);
-    return hash;
-}
-
 static LambdaParseValue parser_reduce_detail_ex(LambdaRdParser* parser, LambdaReductionKind kind, LambdaReductionForm form, SourceSpan span, LambdaToken detail_token, LambdaToken secondary_token, uint32_t flags, const LambdaToken* name_tokens, uint32_t name_count, const LambdaParseValue* children, uint32_t child_count) {
     uint64_t value = UINT64_C(0xcbf29ce484222325);
-    value = mix_hash(value, (uint64_t)kind);
-    value = mix_hash(value, (uint64_t)form);
-    value = mix_hash(value, span.start_byte);
-    value = mix_hash(value, span.end_byte);
-    value = mix_hash(value, (uint64_t)detail_token.kind);
-    value = mix_hash(value, detail_token.span.start_byte);
-    value = mix_hash(value, detail_token.span.end_byte);
-    value = mix_hash(value, (uint64_t)secondary_token.kind);
-    value = mix_hash(value, secondary_token.span.start_byte);
-    value = mix_hash(value, secondary_token.span.end_byte);
-    value = mix_hash(value, flags);
+    value = hash_combine_u64(value, (uint64_t)kind);
+    value = hash_combine_u64(value, (uint64_t)form);
+    value = hash_combine_u64(value, span.start_byte);
+    value = hash_combine_u64(value, span.end_byte);
+    value = hash_combine_u64(value, (uint64_t)detail_token.kind);
+    value = hash_combine_u64(value, detail_token.span.start_byte);
+    value = hash_combine_u64(value, detail_token.span.end_byte);
+    value = hash_combine_u64(value, (uint64_t)secondary_token.kind);
+    value = hash_combine_u64(value, secondary_token.span.start_byte);
+    value = hash_combine_u64(value, secondary_token.span.end_byte);
+    value = hash_combine_u64(value, flags);
     for (uint32_t i = 0; i < name_count; i++) {
-        value = mix_hash(value, (uint64_t)name_tokens[i].kind);
-        value = mix_hash(value, name_tokens[i].span.start_byte);
-        value = mix_hash(value, name_tokens[i].span.end_byte);
+        value = hash_combine_u64(value, (uint64_t)name_tokens[i].kind);
+        value = hash_combine_u64(value, name_tokens[i].span.start_byte);
+        value = hash_combine_u64(value, name_tokens[i].span.end_byte);
     }
-    for (uint32_t i = 0; i < child_count; i++) value = mix_hash(value, children[i]);
+    for (uint32_t i = 0; i < child_count; i++) {
+        value = hash_combine_u64(value, children[i]);
+    }
     if (parser->sink && parser->sink->reduce) {
         LambdaParseReduction reduction = {
             .kind = kind,
@@ -225,7 +223,8 @@ static LambdaParseValue parser_reduce_detail_ex(LambdaRdParser* parser, LambdaRe
     }
     if (parser->metrics) {
         parser->metrics->reduction_count++;
-        parser->metrics->structural_hash = mix_hash(parser->metrics->structural_hash, value);
+        parser->metrics->structural_hash = hash_combine_u64(
+            parser->metrics->structural_hash, value);
     }
     return value;
 }

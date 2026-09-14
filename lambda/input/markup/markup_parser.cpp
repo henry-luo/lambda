@@ -16,6 +16,7 @@
 #include "../../../lib/html_entities.h"
 #include "../../../lib/memtrack.h"
 #include "../../../lib/hashmap.h"
+#include "../../../lib/hashmap_helpers.h"
 #include "../../../lib/arena.h"
 #include "../input-utils.h"
 #include "../markup-format.h"
@@ -634,15 +635,8 @@ char* MarkupParser::normalizeLabel(const char* label, size_t len) {
     return out;
 }
 
-// hashmap callbacks: entries are LinkDefinition, keyed by the normalized label
-static uint64_t link_def_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const LinkDefinition* def = (const LinkDefinition*)item;
-    return hashmap_sip(def->label, strlen(def->label), seed0, seed1);
-}
-
-static int link_def_compare(const void* a, const void* b, void*) {
-    return strcmp(((const LinkDefinition*)a)->label, ((const LinkDefinition*)b)->label);
-}
+// normalized labels are NUL-terminated and remain parser-owned while indexed.
+HASHMAP_DEFINE_STRKEY(link_def, LinkDefinition, label)
 
 bool MarkupParser::addLinkDefinition(const char* label, size_t label_len,
                                       const char* url, size_t url_len,
@@ -657,7 +651,7 @@ bool MarkupParser::addLinkDefinition(const char* label, size_t label_len,
 
     if (!link_defs_) {
         link_defs_ = hashmap_new(sizeof(LinkDefinition), 16, 0, 0,
-            link_def_hash, link_def_compare, nullptr, nullptr);
+            link_def_hash, link_def_cmp, nullptr, nullptr);
         if (!link_defs_) {
             mem_free(normalized);
             log_error("markup_parser: link definition table allocation failed");

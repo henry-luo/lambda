@@ -1,4 +1,5 @@
 #include "mem_context.h"
+#include "hash.h"
 #include "log.h"
 
 #include <stdio.h>
@@ -111,9 +112,8 @@ static uint32_t current_thread_id(void) {
 #else
     pthread_t t = pthread_self();
     // FNV-1a over the opaque pthread_t bytes -> 32-bit id
-    uint64_t h = 1469598103934665603ULL;
     const unsigned char* p = (const unsigned char*)&t;
-    for (size_t i = 0; i < sizeof(t); i++) { h ^= p[i]; h *= 1099511628211ULL; }
+    uint64_t h = hash_fnv1a_64_extend(1469598103934665603ULL, p, sizeof(t));
     return (uint32_t)(h ^ (h >> 32));
 #endif
 }

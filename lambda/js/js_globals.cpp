@@ -17261,6 +17261,7 @@ extern "C" void js_intrinsic_note_prototype_mutation(Item object) {
 // =============================================================================
 
 #include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 
 // symbol registry entry for Symbol.for() / Symbol.keyFor()
 struct JsSymbolEntry {
@@ -17282,19 +17283,12 @@ struct JsSymbolDesc {
 
 #define js_symbol_desc_registry (js_runtime_state.operations.symbol_description_registry)
 
-static int js_symbol_desc_compare(const void* a, const void* b, void* udata) {
-    return ((const JsSymbolDesc*)a)->symbol_id != ((const JsSymbolDesc*)b)->symbol_id;
-}
-
-static uint64_t js_symbol_desc_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const JsSymbolDesc* e = (const JsSymbolDesc*)item;
-    return hashmap_sip(&e->symbol_id, sizeof(uint64_t), seed0, seed1);
-}
+HASHMAP_DEFINE_INTKEY(js_symbol_desc, JsSymbolDesc, symbol_id)
 
 static void js_symbol_desc_init() {
     if (!js_symbol_desc_registry) {
         js_symbol_desc_registry = hashmap_new(sizeof(JsSymbolDesc), 16, 0, 0,
-            js_symbol_desc_hash, js_symbol_desc_compare, NULL, NULL);
+            js_symbol_desc_hash, js_symbol_desc_cmp, NULL, NULL);
     }
 }
 
@@ -17315,19 +17309,12 @@ static void js_symbol_desc_init() {
 #define JS_SYMBOL_ID_ASYNC_DISPOSE 14
 #define JS_SYMBOL_ID_DISPOSE       15
 
-static int js_symbol_entry_compare(const void* a, const void* b, void* udata) {
-    return strcmp(((const JsSymbolEntry*)a)->key, ((const JsSymbolEntry*)b)->key);
-}
-
-static uint64_t js_symbol_entry_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const JsSymbolEntry* e = (const JsSymbolEntry*)item;
-    return hashmap_sip(e->key, strlen(e->key), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(js_symbol_entry, JsSymbolEntry, key)
 
 static void js_symbol_init_registry() {
     if (!js_symbol_registry) {
         js_symbol_registry = hashmap_new(sizeof(JsSymbolEntry), 16, 0, 0,
-            js_symbol_entry_hash, js_symbol_entry_compare, NULL, NULL);
+            js_symbol_entry_hash, js_symbol_entry_cmp, NULL, NULL);
     }
 }
 

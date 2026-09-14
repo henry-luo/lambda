@@ -67,6 +67,7 @@ extern "C" Item dom_form_request_submit_bridge(Item form_item, Item submitter);
 #include "../../radiant/render.hpp"
 #include "../input/html5/html5_parser.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 
 extern "C" Item vmap_new(void);
 extern "C" Item vmap_backing_get(VMap* vm, Item key);
@@ -1127,23 +1128,13 @@ typedef struct AttachedExpandoEntry {
 // ability. The root table belongs to the bound document realm, not the thread.
 #define s_attached_expando_roots (js_runtime_state.dom_attached_expando_roots)
 
-static uint64_t attached_expando_hash(const void* item,
-        uint64_t seed0, uint64_t seed1) {
-    const AttachedExpandoEntry* entry = (const AttachedExpandoEntry*)item;
-    return hashmap_sip(&entry->key, sizeof(entry->key), seed0, seed1);
-}
-
-static int attached_expando_compare(const void* left, const void* right, void*) {
-    const AttachedExpandoEntry* a = (const AttachedExpandoEntry*)left;
-    const AttachedExpandoEntry* b = (const AttachedExpandoEntry*)right;
-    return a->key == b->key ? 0 : ((uintptr_t)a->key < (uintptr_t)b->key ? -1 : 1);
-}
+HASHMAP_DEFINE_PTRKEY(attached_expando, AttachedExpandoEntry, key)
 
 static HashMap* attached_expando_table() {
     if (!js_active_runtime_state) return nullptr;
     if (!s_attached_expando_roots) {
         s_attached_expando_roots = hashmap_new(sizeof(AttachedExpandoEntry),
-            64, 0, 0, attached_expando_hash, attached_expando_compare,
+            64, 0, 0, attached_expando_hash, attached_expando_cmp,
             nullptr, nullptr);
     }
     return s_attached_expando_roots;

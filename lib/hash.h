@@ -43,18 +43,39 @@ static inline uint32_t hash_fnv1a_32_cstr(const char* s) {
     return h;
 }
 
-// FNV-1a 64-bit.
-static inline uint64_t hash_fnv1a_64(const void* data, size_t len) {
+// FNV-1a 64-bit. Stateful updates let composite keys retain their exact
+// field order without open-coding the byte loop at each call site.
+#define HASH_FNV1A_64_OFFSET_BASIS UINT64_C(0xcbf29ce484222325)
+#define HASH_FNV1A_64_PRIME UINT64_C(0x100000001b3)
+
+static inline uint64_t hash_fnv1a_64_extend(uint64_t hash, const void* data,
+                                            size_t len) {
     const unsigned char* p = (const unsigned char*)data;
-    uint64_t h = 0xcbf29ce484222325ULL;
-    for (size_t i = 0; i < len; i++) h = (h ^ p[i]) * 0x100000001b3ULL;
-    return h;
+    for (size_t i = 0; i < len; i++) hash = (hash ^ p[i]) * HASH_FNV1A_64_PRIME;
+    return hash;
+}
+
+static inline uint64_t hash_fnv1a_64_extend_cstr(uint64_t hash, const char* s) {
+    for (unsigned char c; (c = (unsigned char)*s) != 0; s++) {
+        hash = (hash ^ c) * HASH_FNV1A_64_PRIME;
+    }
+    return hash;
+}
+
+// Feed a fixed-width scalar in little-endian order, independent of host ABI.
+static inline uint64_t hash_fnv1a_64_extend_u64le(uint64_t hash, uint64_t value) {
+    for (size_t i = 0; i < sizeof(value); i++) {
+        hash = (hash ^ ((value >> (i * 8u)) & 0xffu)) * HASH_FNV1A_64_PRIME;
+    }
+    return hash;
+}
+
+static inline uint64_t hash_fnv1a_64(const void* data, size_t len) {
+    return hash_fnv1a_64_extend(HASH_FNV1A_64_OFFSET_BASIS, data, len);
 }
 
 static inline uint64_t hash_fnv1a_64_cstr(const char* s) {
-    uint64_t h = 0xcbf29ce484222325ULL;
-    for (unsigned char c; (c = (unsigned char)*s) != 0; s++) h = (h ^ c) * 0x100000001b3ULL;
-    return h;
+    return hash_fnv1a_64_extend_cstr(HASH_FNV1A_64_OFFSET_BASIS, s);
 }
 
 // default C-string hasher (FNV-1a 64). Sized via strlen at call site.
@@ -74,6 +95,13 @@ static inline uint64_t hash_ptr(const void* p) {
     x =  x ^ (x >> 28);
     x =  x + (x << 31);
     return x;
+}
+
+// Ordered hash combination for structural cache keys. This exact operation
+// is deliberately non-finalizing: callers may continue combining fields.
+static inline uint64_t hash_combine_u64(uint64_t hash, uint64_t value) {
+    return hash ^ (value + UINT64_C(0x9e3779b97f4a7c15) +
+                   (hash << 6u) + (hash >> 2u));
 }
 
 #ifdef __cplusplus

@@ -205,21 +205,7 @@ struct PyVarScopeEntry {
     PyMirVarEntry var;
 };
 
-static int pm_var_scope_cmp(const void* left, const void* right, void* user_data) {
-    (void)user_data;
-    return strcmp(((const PyVarScopeEntry*)left)->name,
-        ((const PyVarScopeEntry*)right)->name);
-}
-
-static uint64_t pm_var_scope_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const PyVarScopeEntry* entry = (const PyVarScopeEntry*)item;
-    return hashmap_sip(entry->name, strlen(entry->name), seed0, seed1);
-}
-
-static struct hashmap* pm_var_scope_new(int capacity) {
-    return hashmap_new(sizeof(PyVarScopeEntry), capacity, 0, 0,
-        pm_var_scope_hash, pm_var_scope_cmp, NULL, NULL);
-}
+HASHMAP_DEFINE_STRKEY(pm_var_scope, PyVarScopeEntry, name)
 
 struct PyLoopLabels {
     PmCompilerLabel continue_label;

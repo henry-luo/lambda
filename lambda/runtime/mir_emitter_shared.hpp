@@ -11,6 +11,7 @@
 #include "mir_dump.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
@@ -128,37 +129,8 @@ struct VarScopeEntry {
 
 typedef VarScopeEntry JsVarScopeEntry;
 
-static inline int em_var_scope_cmp(const void *a, const void *b, void *udata) {
-    (void)udata;
-    return strcmp(((const VarScopeEntry*)a)->name,
-                  ((const VarScopeEntry*)b)->name);
-}
-
-static inline uint64_t em_var_scope_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const VarScopeEntry* entry = (const VarScopeEntry*)item;
-    return hashmap_sip(entry->name, strlen(entry->name), seed0, seed1);
-}
-
-static inline struct hashmap* em_var_scope_new(int capacity) {
-    return hashmap_new(sizeof(VarScopeEntry), capacity, 0, 0,
-        em_var_scope_hash, em_var_scope_cmp, NULL, NULL);
-}
-
-static inline int em_import_cache_cmp(const void *a, const void *b, void *udata) {
-    (void)udata;
-    return strcmp(((const MirImportCacheEntry*)a)->name,
-                  ((const MirImportCacheEntry*)b)->name);
-}
-
-static inline uint64_t em_import_cache_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const MirImportCacheEntry* entry = (const MirImportCacheEntry*)item;
-    return hashmap_sip(entry->name, strlen(entry->name), seed0, seed1);
-}
-
-static inline struct hashmap* em_import_cache_new(int capacity) {
-    return hashmap_new(sizeof(MirImportCacheEntry), capacity, 0, 0,
-        em_import_cache_hash, em_import_cache_cmp, NULL, NULL);
-}
+HASHMAP_DEFINE_STRKEY(em_var_scope, VarScopeEntry, name)
+HASHMAP_DEFINE_STRKEY(em_import_cache, MirImportCacheEntry, name)
 
 static inline MIR_type_t mir_reg_type_for_alloc(MIR_type_t type,
                                                 bool coerce_float32) {

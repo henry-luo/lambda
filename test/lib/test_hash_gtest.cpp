@@ -38,6 +38,27 @@ TEST(HashTest, Fnv1a64EmptyStringSeed) {
     EXPECT_EQ(hash_fnv1a_64("", 0), 0xcbf29ce484222325ULL);
 }
 
+TEST(HashTest, Fnv1a64ExtendMatchesOneShotAndCstr) {
+    const char* prefix = "lambda ";
+    const char* suffix = "script";
+    uint64_t hash = hash_fnv1a_64_extend(HASH_FNV1A_64_OFFSET_BASIS,
+        prefix, strlen(prefix));
+    hash = hash_fnv1a_64_extend_cstr(hash, suffix);
+    EXPECT_EQ(hash, hash_fnv1a_64_cstr("lambda script"));
+}
+
+TEST(HashTest, Fnv1a64ExtendU64LeMatchesExplicitBytes) {
+    const unsigned char bytes[] = {0xef, 0xcd, 0xab, 0x89, 0x67, 0x45, 0x23, 0x01};
+    uint64_t hash = hash_fnv1a_64_extend_u64le(HASH_FNV1A_64_OFFSET_BASIS,
+        UINT64_C(0x0123456789abcdef));
+    EXPECT_EQ(hash, hash_fnv1a_64(bytes, sizeof(bytes)));
+}
+
+TEST(HashTest, CombineU64MatchesStableValue) {
+    EXPECT_EQ(hash_combine_u64(UINT64_C(0xcbf29ce484222325),
+        UINT64_C(0x0123456789abcdef)), UINT64_C(0x050c039fb6a5bf28));
+}
+
 TEST(HashTest, Fnv1a64DistributesCommonWords) {
     const char* words[] = {
         "alpha","beta","gamma","delta","epsilon","zeta","eta","theta",

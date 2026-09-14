@@ -8,6 +8,7 @@
 #include "../../lib/arraylist.hpp"
 #include "../../lib/checked_math.hpp"
 #include "../../lib/hashmap.h"
+#include "../../lib/hash.h"
 #include "../../lib/byte_storage.h"
 #include "../input/css/dom_element.hpp"  // DomElement, dom_element_to_element, element_to_dom_element
 #include "../input/css/dom_node.hpp"     // DomText, dom_text_to_string, string_to_dom_text
@@ -1895,7 +1896,7 @@ uint64_t lambda_item_hash(Item key, uint64_t seed0, uint64_t seed1) {
         h ^= hashmap_sip(&len, sizeof(len), seed0, seed1);
         for (int64_t i = 0; arr && i < arr->length; i++) {
             uint64_t child = lambda_item_hash(arr->items[i], seed0, seed1);
-            h ^= child + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+            h = hash_combine_u64(h, child);
         }
         return h;
     }

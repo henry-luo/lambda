@@ -8,6 +8,7 @@
 #include "../../lib/mempool.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_helpers.h"
+#include "../../lib/hash.h"
 #include <cstring>
 #include <cstdarg>
 #include <cstdio>
@@ -25,18 +26,14 @@ struct JsRuntimeAstCacheEntry {
     JsScript* script;
 };
 
-static uint64_t js_runtime_ast_cache_mix(uint64_t hash, uint64_t value) {
-    return hash ^ (value + 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2));
-}
-
 static uint64_t js_runtime_ast_cache_entry_hash(const void* item,
         uint64_t seed0, uint64_t seed1) {
     const JsRuntimeAstCacheEntry* entry = (const JsRuntimeAstCacheEntry*)item;
     uint64_t hash = hashmap_xxhash3(entry->source, entry->source_length, seed0, seed1);
-    hash = js_runtime_ast_cache_mix(hash,
+    hash = hash_combine_u64(hash,
         hashmap_xxhash3(entry->reference, entry->reference_length, seed0, seed1));
-    hash = js_runtime_ast_cache_mix(hash, entry->strict ? 1 : 0);
-    return js_runtime_ast_cache_mix(hash, entry->typescript_profile ? 1 : 0);
+    hash = hash_combine_u64(hash, entry->strict ? 1 : 0);
+    return hash_combine_u64(hash, entry->typescript_profile ? 1 : 0);
 }
 
 static int js_runtime_ast_cache_entry_compare(const void* left, const void* right,

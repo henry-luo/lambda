@@ -1,6 +1,7 @@
 #include "js_mir_internal.hpp"
 #include "js_exec_profile.h"
 #include "../../lib/mem_grow.hpp"
+#include "../../lib/hashmap_helpers.h"
 #include <limits.h>
 #include <stdarg.h>
 
@@ -153,17 +154,7 @@ bool jm_var_scope_set(JsMirTranspiler* mt, int depth, struct hashmap* scope) {
     return true;
 }
 
-static int jm_resumable_local_cmp(const void* a, const void* b, void* udata) {
-    const JsMirResumableLocal* left = (const JsMirResumableLocal*)a;
-    const JsMirResumableLocal* right = (const JsMirResumableLocal*)b;
-    return left->binding == right->binding ? 0 : 1;
-}
-
-static uint64_t jm_resumable_local_hash(const void* item, uint64_t seed0,
-        uint64_t seed1) {
-    const JsMirResumableLocal* local = (const JsMirResumableLocal*)item;
-    return hashmap_sip(&local->binding, sizeof(local->binding), seed0, seed1);
-}
+HASHMAP_DEFINE_PTRKEY(jm_resumable_local, JsMirResumableLocal, binding)
 
 bool jm_reserve_resumable_local(JsMirTranspiler* mt, NameEntry* binding,
         int env_slot) {
