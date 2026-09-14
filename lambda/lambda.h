@@ -2544,7 +2544,6 @@ extern "C" {
     Item push_d(double dval);
     Item box_int64_value(int64_t lval);
     Item box_uint64_value(uint64_t uval);
-    Item push_d_safe(double val);   // safe boxing: detects already-boxed FLOAT Items
     Item push_k(DateTime dtval);
     Item push_c(int64_t cval);
 
@@ -2566,6 +2565,7 @@ extern "C" {
 
     // item unboxing
     bool item_try_to_int64(Item item, int64_t* out);
+    bool item_try_to_double(Item item, double* out);
     int64_t it2l(Item item);
     uint64_t it2u(Item item);
     double it2d(Item item);
@@ -2577,17 +2577,6 @@ extern "C" {
     const char* fn_to_cstr(Item item);  // convert Item to C string (for path segment names)
     Item coerce_num_sized(Item value, int64_t num_type);
     Item coerce_uint64(Item value);
-
-    // MIR JIT workaround: opaque store functions prevent SSA optimizer from
-    // reordering swap-pattern assignments inside while loops.
-    // Since these are external functions, MIR can't inline or reorder them.
-    void _store_i64(int64_t* dst, int64_t val);
-    void _store_f64(double* dst, double val);
-
-    // Safe unbox to int64_t for bitwise operation arguments.
-    // Handles both tagged Items (type tag in high byte) and raw int64_t values
-    // (from other bitwise ops or literals, with high byte == 0).
-    int64_t _barg(Item v);
 
     // generic field access function
     Item fn_index(Item item, Item index);

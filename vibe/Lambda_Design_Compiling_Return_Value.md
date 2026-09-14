@@ -215,7 +215,7 @@ holds for all eight benchmarks with no residual.
    opt-out flag (`RESULT_SCALAR_STABLE`), so marking helpers stable appears
    to dissolve it. It does not. Verified by reading the sources, these
    genuinely allocate on the number stack — `box_int64_value`,
-   `box_uint64_value`, `box_int64_result_or_error`, `push_d_safe`,
+   `box_uint64_value`, `box_int64_result_or_error`, `push_d`,
    `js_profiled_push_d` (boxing *is* their job), and, the common case,
    everything that materializes a wide scalar out of non-Item storage:
    `array_num_read_item` (`ELEM_INT64` → `box_int64_value`, `ELEM_FLOAT64`

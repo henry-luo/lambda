@@ -976,19 +976,16 @@ static Item eval_native_sys_item_call(const SysFuncInfo* info, const Item* args,
         return ItemError;
     }
 
-    bool int_result = result_type && result_type->type_id == LMD_TYPE_INT;
+    (void)result_type;
     switch (info->fn) {
     case SYSFUNC_BAND:
-        return int_result ? int2it_i64(fn_band(_barg(args[0]), _barg(args[1])))
-            : fn_band_item(args[0], args[1]);
+        return fn_band_item(args[0], args[1]);
     case SYSFUNC_BOR:
-        return int_result ? int2it_i64(fn_bor(_barg(args[0]), _barg(args[1])))
-            : fn_bor_item(args[0], args[1]);
+        return fn_bor_item(args[0], args[1]);
     case SYSFUNC_BXOR:
-        return int_result ? int2it_i64(fn_bxor(_barg(args[0]), _barg(args[1])))
-            : fn_bxor_item(args[0], args[1]);
+        return fn_bxor_item(args[0], args[1]);
     case SYSFUNC_BNOT:
-        return int_result ? int2it_i64(fn_bnot(_barg(args[0]))) : fn_bnot_item(args[0]);
+        return fn_bnot_item(args[0]);
     case SYSFUNC_SHL:
         return fn_shl_item(args[0], args[1]);
     case SYSFUNC_SHR:
@@ -1938,7 +1935,9 @@ static Item eval_array(InterpFrame* f, AstArrayNode* node) {
             if (kind == INTERP_ARRAY_INT) {
                 array_int_set(arr, index, it2l(value));
             } else if (kind == INTERP_ARRAY_FLOAT) {
-                array_float_set(arr, index, it2d(value));
+                double number = 0.0;
+                if (!item_try_to_double(value, &number)) return ItemError;
+                array_float_set(arr, index, number);
             } else {
                 array_num_set_item(arr, index, value);
             }

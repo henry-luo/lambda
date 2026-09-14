@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <mpdecimal.h>
 #include <cstring>
+#include <float.h>
 
 #ifndef _WIN32
 #include <pthread.h>
@@ -87,6 +88,61 @@ TEST(LambdaDecimal, QuietInt64ExtractionRejectsOverflowAndInvalidComparison) {
     EXPECT_FALSE(decimal_cmp_items(invalid, valid, &comparison));
 
     mpd_del(large);
+}
+
+TEST(LambdaDecimal, DoubleBoundaryConversionIsFallibleAndExact) {
+    mpd_context_t* context = decimal_fixed_context();
+    mpd_t* decimal = mpd_new(context);
+    ASSERT_NE(decimal, nullptr);
+    uint32_t status = 0;
+    double value = 0.0;
+
+    mpd_qset_string(decimal, "5e-324", context, &status);
+    ASSERT_EQ(status, 0u);
+    ASSERT_TRUE(decimal_mpd_try_to_double(decimal, context, &value));
+    EXPECT_EQ(value, DBL_TRUE_MIN);
+
+    status = 0;
+    mpd_qset_string(decimal, "1.7976931348623157e308", context, &status);
+    ASSERT_EQ(status, 0u);
+    ASSERT_TRUE(decimal_mpd_try_to_double(decimal, context, &value));
+    EXPECT_EQ(value, DBL_MAX);
+
+    char spelling[64] = {};
+    lambda_double_to_shortest(DBL_TRUE_MIN, spelling, sizeof(spelling));
+    status = 0;
+    mpd_qset_string(decimal, spelling, context, &status);
+    ASSERT_EQ(status, 0u);
+    ASSERT_TRUE(decimal_mpd_try_to_double(decimal, context, &value));
+    EXPECT_EQ(value, DBL_TRUE_MIN);
+
+    lambda_double_to_shortest(DBL_MAX, spelling, sizeof(spelling));
+    status = 0;
+    mpd_qset_string(decimal, spelling, context, &status);
+    ASSERT_EQ(status, 0u);
+    ASSERT_TRUE(decimal_mpd_try_to_double(decimal, context, &value));
+    EXPECT_EQ(value, DBL_MAX);
+
+    status = 0;
+    mpd_qset_string(decimal, "9007199254740991", context, &status);
+    ASSERT_EQ(status, 0u);
+    ASSERT_TRUE(decimal_mpd_try_to_double(decimal, context, &value));
+    EXPECT_EQ(value, 9007199254740991.0);
+
+    EXPECT_FALSE(decimal_mpd_try_to_double(nullptr, context, &value));
+    EXPECT_FALSE(item_try_to_double(ItemNull, &value));
+    EXPECT_EQ(get_type_id(coerce_num_sized(ItemNull, NUM_FLOAT32)), LMD_TYPE_ERROR);
+
+    mpd_del(decimal);
+}
+
+TEST(LambdaNumericRuntime, BitwiseRejectsNonIntegerItems) {
+    Item fractional = push_d(1.5);
+    Item one = {.item = i2it(1)};
+
+    EXPECT_EQ(get_type_id(fn_band_item(fractional, one)), LMD_TYPE_ERROR);
+    EXPECT_EQ(get_type_id(fn_bnot_item(fractional)), LMD_TYPE_ERROR);
+    EXPECT_EQ(get_type_id(fn_shl_item(one, fractional)), LMD_TYPE_ERROR);
 }
 
 TEST(LambdaJitDebugInfo, FinalFunctionRangeUsesJitAllocationFrontier) {

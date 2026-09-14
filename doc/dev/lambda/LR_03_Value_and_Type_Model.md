@@ -1,6 +1,6 @@
 # Lambda Runtime — Value & Type Model
 
-> **Last verified against tree:** 2026-08-24 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-09-14
 
 > **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers how a Lambda value is represented at runtime: the 64-bit tagged `Item` layout, the `TypeId` enum and its three storage classes, the boxing/unboxing rules, the `Container` struct family (range, list/array, numeric array, map, object, element, vmap), the map *shape* machinery (`TypeMap`/`ShapeEntry`), and the static `Type*` family used for compile-time typing.
 >
@@ -53,7 +53,13 @@ Boxing is the act of turning a native C value (an `int64_t`, a `double`, a `Stri
 - **Numeric temporaries (`int64`, `uint64`, and out-of-band double) use the raw number execution side-stack.** `box_int64_value`/`box_uint64_value` and the rare `push_d` residue reserve activation-owned words. Generated Item returns copy into caller-donated homes; retaining containers/environments copy into storage-owned tails. `DateTime` is deliberately excluded: `push_k` allocates dynamic values in GC storage, while `MarkBuilder` owns static parser values in the `Input` arena. [LR_08](LR_08_Memory_and_GC.md) owns the lifetime rules and the counted ownerless-persistence fallback.
 - **Strings, symbols and decimals** are heap- or pool-allocated and GC-managed; boxing is a pure tag-OR (`s2it`/`y2it`/`c2it`), and a NULL pointer always boxes to `ITEM_NULL`.
 - **Containers never box or unbox** — the pointer *is* the Item (`p2it`, `it2map`, …); `type_id()` recovers the tag by dereferencing.
-- **Float double-box guard.** `push_d_safe` recognizes canonical self-tagged or pointer-backed float Items before falling back to `push_d`. Full-width integer boxing uses the explicit `box_int64_value`/`box_uint64_value` paths; datetime uses `push_k`. Generated lowering must track these representations rather than guessing from raw high bytes.
+- **Float and wide-scalar boundaries.** `push_d` receives only native doubles;
+  the obsolete `push_d_safe` identity workaround is removed. Full-width integer
+  boxing uses `box_int64_value`/`box_uint64_value`; datetime uses `push_k`.
+  `item_try_to_double` is the fallible boundary for an unproven `Item`, while
+  legacy `it2d` is reserved for callers that have already proved numeric input.
+  Generated lowering must track the actual representation rather than guessing
+  from raw high bytes, as required by **D2.4.1–D2.4.3**.
 
 The JIT-facing scalar unbox entry points are `it2d` (`lambda-data.cpp:309`), `it2b` (JS-style truthiness, `:335`), `it2i` (`:358`), `it2l` (`:383`), and `it2s` (`:399`). Container element reads box at the boundary: `array_num_get` returns a fresh `push_l`/`push_d` per the array's `elem_type` (`lambda-data-runtime.cpp:198`,`373`), and map/object/element field reads box the stored native field on the way out (`:1176`). The coercion helpers `ensure_typed_array`/`ensure_sized_array` unbox each Item into a compact buffer (`:1934`). Error Items propagate *without* unboxing through the `GUARD_ERROR*` macros (`lambda.hpp:304`).
 

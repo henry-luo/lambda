@@ -15,7 +15,7 @@
 
 ## Archive index
 
-This archive contains **90 historical records**: 89 RESOLVED entries and one
+This archive contains **92 historical records**: 91 RESOLVED entries and one
 CLOSED design decision. Duplicate and split records remain separate so their
 provenance is not lost. The first sections contain records formerly
 interleaved with live entries; §15 preserves the 44 records from the former
@@ -315,6 +315,18 @@ Regression: `test/lambda/proc/proc_assignment_error_carrier.ls` covers an
 widening to `1.5`, and rejection of `1.5` at a declared `int` assignment.
 It produces `[true, 1.5, true]` under both `LAMBDA_TIER=jit` and the default
 tier. `proc_var_type_widen.ls` also passes under eager JIT.
+
+<a id="lr07-10"></a>**LR07-10 · Out-of-bounds index semantics differed by type · RESOLVED 2026-09-14**
+`MIR_INDEX_OOB_FLOAT_ZERO` is removed. `emit_checked_index_load` now emits the
+reserved nullable-float lane for every native-double out-of-bounds path, even
+if a future policy accidentally omits the explicit float-null classification.
+The Item boundary translates that lane to `null`; `0.0` is no longer an OOB
+fallback. This implements total invalid reads under **S7.1.1v3** while retaining
+the semantic/carrier split of **D2.4.1–D2.4.3**.
+
+Regression: `proc_nullable_float_lane_read.ls` and
+`proc_nullable_lane_comparisons.ls` pass under eager JIT, alongside the
+general OOB-read coverage in `oob_read_null.ls`.
 
 <a id="lr07-r7"></a>**LR07-R7 · Precise-root classification trusted dishonest static types · RESOLVED 2026-09-13**
 The producer and consumer halves now share the value-side TypeId
@@ -664,6 +676,22 @@ hint appears and that disabling the option omits it.
 
 
 ## 13.1 Verification-pass records (LR_03 and ledger hygiene)
+
+<a id="lr03-3"></a>**LR03-3 · MIR-JIT workarounds embedded in the value model · RESOLVED 2026-09-14**
+The obsolete `_store_i64`, `_store_f64`, and `push_d_safe` helpers and their JIT
+registry imports are deleted. `_barg` is also deleted: it formerly accepted raw
+words, fractional floats, null, errors, and arbitrary tagged values as bitwise
+integers. The interpreter now always uses the Item-aware bitwise helpers, which
+reject noninteger operands. MIR emits a raw word instruction only when both the
+numeric classifier and `MirValue` carrier prove a native `int`; guarded or boxed
+results route through the shared Item helper instead. This preserves **S4.1.2**
+and the representation authority split in **D2.4.1–D2.4.3**.
+
+Regression: `bitwise_invalid_operands.ls` verifies that fractional operands
+produce `error()` under eager JIT; `transpile_bitwise.ls`,
+`bitwise_lane_preservation.ls`, `sized_numeric_bitwise_go.ls`,
+`sized_numeric_ushr.ls`, and `proc_bitwise_int64.ls` preserve valid compact,
+sized, and wide-lane behavior.
 
 <a id="lr03-10"></a>**LR03-10 · A type with no TypeId of its own resolves to the wrong singleton · RESOLVED 2026-09-03**
 `lambda_type_node_singleton` (`runtime/ast.hpp`) turns a type-annotation AST
@@ -1278,8 +1306,8 @@ frozen; per this verification it is absent. Retired with it:
    [LR07-3](<Lambda_Issue_Ledger.md#lr07-3>), but there is no longer
    a more-complete backend to port from.
 4. `_store_i64`/`_store_f64` SSA-reorder workaround with `MAX_LOOP_ASSIGN` cap —
-   *note:* the runtime-side helpers persist as
-   [LR03-3](<Lambda_Issue_Ledger.md#lr03-3>).
+   its runtime-side helper residue was subsequently removed as
+   [LR03-3](#lr03-3).
 5. `is_idiv_expr` boxed-result / INT-static-type mismatch.
 6. `MAX_INFER_PROCS 32` / `MAX_INFER_CALL_SITES 64` silent inference truncation.
 7. TCO iteration ceiling — *note:* survives on the MIR Direct side as
@@ -1534,8 +1562,8 @@ yield `null`, including fractional or negative sequence positions, out-of-range
 positions, and keys outside a container's domain. Invalid **writes** remain hard
 errors under S7.1.3v2, which is what `proc_invalid_member_access.ls` verifies.
 `oob_read_null.ls` covers out-of-range, negative, and chained reads. The
-type-dependent JIT float-OOB residue is not closed here; it remains in
-[LR07-10](../Lambda_Issue_Ledger.md#lr07-10). The `-index` archive suffix
+former type-dependent JIT float-OOB residue is resolved as
+[LR07-10](#lr07-10). The `-index` archive suffix
 disambiguates this original LR09-4 record from an unrelated legacy LR09-R4
 anchor already present in this archive.
 

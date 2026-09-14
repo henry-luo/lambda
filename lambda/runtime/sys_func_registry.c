@@ -1655,9 +1655,6 @@ JitImport jit_runtime_imports[] = {
       // The helper only selects a sealed NameId and resolves an existing
       // NamePool entry; it neither allocates nor publishes an error carrier.
       JIT_EXCEPTION_PRESERVES}},
-    {"push_d_safe", FPTR(push_d_safe),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     // push_k returns a GC-owned DateTime Item, so generic scalar-home adoption
     // would only add a dead number slot after the DateTime stack cutover.
     {"push_k", FPTR(push_k),
@@ -1820,11 +1817,6 @@ JitImport jit_runtime_imports[] = {
     {"fn_ord_str_item", FPTR(fn_ord_str_item)},
 
     // ========================================================================
-    // MIR swap-safe store functions
-    // ========================================================================
-    {"_store_i64", FPTR(_store_i64)},
-    {"_store_f64", FPTR(_store_f64)},
-
     // ========================================================================
     // Function creation and calls
     // ========================================================================
@@ -1958,7 +1950,6 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     // Bitwise helper
     // ========================================================================
-    {"_barg", FPTR(_barg)},
 
     // ========================================================================
     // VMap functions

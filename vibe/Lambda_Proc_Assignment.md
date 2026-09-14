@@ -31,10 +31,10 @@ This proposal analyzes the current implementation, catalogs every gap and bug, a
 ```
 Source Code        Grammar             AST Builder           Transpiler (C)            MIR JIT           Runtime
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-var x = 5       → var_stam          → AST_NODE_VAR_STAM   → "int64_t _x = 5;"      → native i64     → C stack var
+var x = 5       → var_stam          → AST_NODE_VAR_STAM   → native int lane         → MIR register   → runtime lane
 
-x = 10          → assign_stam       → AST_NODE_ASSIGN_    → "_x = 10;"             → native write   → C stack var
-                   (identifier)        STAM                  (while: _store_i64)
+x = 10          → assign_stam       → AST_NODE_ASSIGN_    → MIR move/checked store  → native write   → runtime lane
+                   (identifier)        STAM
 
 arr[i] = val    → assign_stam       → AST_NODE_INDEX_     → "fn_array_set(          → call extern   → fn_array_set()
                    (index_expr)        ASSIGN_STAM            (Array*)arr,i,val);"
@@ -65,8 +65,7 @@ The `Item` type (64-bit tagged value) is the only C type that supports runtime t
 | `fn_array_set(Array*, int, Item)` | lambda-eval.cpp:3122 | Array element assignment |
 | `fn_map_set(Item, Item, Item)` | lambda-eval.cpp:3167 | Map field assignment |
 | `array_set(Array*, int, Item)` | lambda-data.cpp:375 | Internal generic array store |
-| `_store_i64(int64_t*, int64_t)` | lambda-data.cpp:251 | MIR SSA barrier for int store in while loops |
-| `_store_f64(double*, double)` | lambda-data.cpp:252 | MIR SSA barrier for float store in while loops |
+| native scalar write | `transpile-mir.cpp` | direct MIR move or checked Item boundary |
 
 ### 2.4 MarkEditor (Existing Structural Mutation Engine)
 
@@ -293,7 +292,9 @@ The transpiler checks `type_widened` at three points:
 | **Reference** (`transpile_primary_expr`) | `_x` (native) | `it2i(_x)` (unbox from Item) |
 | **Boxing** (`transpile_box_item`) | `i2it(_x)` (box native) | `_x` (already Item, skip boxing) |
 
-The MIR JIT SSA workaround (`_store_i64`/`_store_f64`) is disabled for widened vars since they are `Item`-typed and don't trigger the MIR optimizer bug.
+The retired C2MIR SSA workaround has no MIR Direct equivalent. Widened vars use
+the checked Item boundary, while native vars retain their proven carrier under
+**D2.4.1–D2.4.3**.
 
 ### 4.2 Immutability Enforcement
 

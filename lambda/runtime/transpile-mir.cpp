@@ -4609,8 +4609,8 @@ static MIR_reg_t emit_bitwise_i64_arg(MirTranspiler* mt,
         return em_require_rep(&mt->em, value,
             lambda_canonical_rep_for_type_id(tid)).reg;
     }
-    MIR_reg_t boxed = em_require_rep(&mt->em, value, VALUE_REP_ITEM).reg;
-    return emit_call_1(mt, "_barg", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+    log_error("mir: non-integer argument reached native bitwise lowering");
+    abort();
 }
 
 // Unbox boxed Item -> container pointer by stripping the type tag (upper 8 bits)
@@ -8550,7 +8550,12 @@ static bool mir_bitwise_binary_decision(AstCallNode* call,
     if (decision) *decision = resolved;
     if (native_int_path) {
         *native_int_path = resolved.valid && resolved.result == LAMBDA_NUM_INT &&
-            first_kind == LAMBDA_NUM_INT && second_kind == LAMBDA_NUM_INT;
+            first_kind == LAMBDA_NUM_INT && second_kind == LAMBDA_NUM_INT &&
+            // Semantic `int` alone is insufficient: a guarded shift retains
+            // an Item carrier so it can return an error. Do not send that
+            // carrier through the native word instruction (D2.4.1–D2.4.3).
+            mir_expr_carrier_type(mt, first) == LMD_TYPE_INT &&
+            mir_expr_carrier_type(mt, second) == LMD_TYPE_INT;
     }
     return true;
 }
@@ -21170,7 +21175,6 @@ typedef enum MirIndexGuardKind {
 
 typedef enum MirIndexOobKind {
     MIR_INDEX_OOB_ITEM_NULL,
-    MIR_INDEX_OOB_FLOAT_ZERO,
     MIR_INDEX_OOB_FLOAT_NULL,
 } MirIndexOobKind;
 
@@ -21994,13 +21998,13 @@ static MIR_reg_t emit_checked_index_load(MirTranspiler* mt, MIR_reg_t arr_ptr,
                     MIR_new_reg_op(mt->ctx, result),
                     MIR_new_int_op(mt->ctx, 0)));
             }
-        } else if (policy.oob_kind == MIR_INDEX_OOB_FLOAT_NULL) {
+        } else if (policy.oob_kind == MIR_INDEX_OOB_FLOAT_NULL ||
+                result_type == MIR_T_D) {
+            // A native double result has no Item-null bit pattern. Its total
+            // read must therefore use the nullable float lane (S7.1.1v3).
             MIR_reg_t null_lane = emit_float_null_lane(mt);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
                 MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, null_lane)));
-        } else if (policy.oob_kind == MIR_INDEX_OOB_FLOAT_ZERO || result_type == MIR_T_D) {
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, result),
-                MIR_new_double_op(mt->ctx, 0.0)));
         } else if (policy.result_kind == MIR_INDEX_RESULT_NATIVE_INT_FROM_DOUBLE) {
             // This legacy result-kind name is now the IntLane read path. Int64
             // keeps its Item fallback, so only IntLane may use this sentinel.
@@ -24159,7 +24163,8 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             arg = call_node->argument;
             LambdaNumericKind arg_kind = lambda_numeric_kind_from_type(
                 arg ? arg->type : NULL);
-            if (arg_kind != LAMBDA_NUM_INT) {
+            if (arg_kind != LAMBDA_NUM_INT ||
+                    mir_expr_carrier_type(mt, arg) != LMD_TYPE_INT) {
                 MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
                 MIR_reg_t boxed_result = emit_call_1(mt, "fn_bnot_item", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1));
