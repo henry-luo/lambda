@@ -1333,23 +1333,70 @@ one authority while preserving D6.2.2v2's separate JavaScript `[[Call]]` and
 `[[Construct]]` capabilities. Any generated-code offset migration retains the
 JSCUO6 static-assert inventory and lands only with release call/new gates.
 
-**Decision B: accessors — LANDED 2026-09-14.** `JsAccessorCell` is a dedicated
+**Decision B: accessors — LANDED 2026-09-14.** This section is the detailed
+implementation design for **D3.4.8**. `JsAccessorCell` is a dedicated
 `GC_TYPE_JS_ACCESSOR` record; the compatibility name `JsAccessorPair` aliases
-that record only. A `JSPD_IS_ACCESSOR` `ShapeEntry` is a virtual descriptor:
-it carries the cell pointer, has `byte_offset == -1`, and never consumes a
-`Map.data` lane. Generic Map and function paths cannot observe the cell as an
-`Item`; only the JS property kernel resolves and dispatches it.
+that record only. It is descriptor metadata, never a callable value and never
+an `Item` carrier.
 
-The cell is reached by the direct GC edge `Map → TypeMap → ShapeEntry → cell`.
-The containing shape is cloned and private before attachment, which prevents a
-cell from leaking to another object through structural shape sharing. The
-producer holds an exact temporary object root only between allocation and
-attachment; there is no permanent root or side table. Data→accessor conversion
-retires the prior physical lane; accessor→data allocates a fresh lane before
-clearing the virtual descriptor. This restores **D2.4.1**'s single authority,
-implements **D3.4.8**, and leaves `LMD_TYPE_FUNC` allocations to callable
-values only. Transient `JsPropertyDescriptor` remains distinct because it
-describes an operation, not stored identity.
+**Stored representation.** An accessor is represented exclusively by its
+object's `ShapeEntry`. The active entry satisfies all of these invariants:
+
+- `JSPD_IS_ACCESSOR` is set;
+- `byte_offset == -1` exactly — no other negative offset has accessor meaning;
+- `ShapeEntry::accessor` is non-null and points to the `JsAccessorCell`; and
+- no bytes in `Map.data` encode the getter, setter, or cell pointer.
+
+`byte_offset == -1` is a virtual-field sentinel, not a physical lane. Generic
+Map readers return absence for it, and a direct field store may neither perform
+pointer arithmetic on the sentinel nor surface the cell as an `Item`. Only the
+explicit JS descriptor-transition path may materialize a fresh data lane. A
+property operation first resolves its `ShapeEntry`, tests
+`JSPD_DELETED`, then interprets `JSPD_IS_ACCESSOR` only inside the JS property
+kernel. Thus a deleted accessor cannot accidentally invoke its getter.
+
+The same rule applies to ordinary object maps, an Array's named-property
+companion map, and a Function's property map. Indexed Array element storage is
+not an accessor lane and remains owned by the Array implementation.
+
+**Ownership and publication.** `ShapeEntry::accessor` is mutable per object,
+whereas ordinary constructor and transition shapes may be structurally shared.
+Before installing or replacing an accessor, the runtime clones the `TypeMap`
+and makes it private to the target object. It then creates or updates the
+entry and only publishes the cell through that private shape. Shape cloning,
+rebuilding, and extension preserve an existing virtual entry's sentinel,
+flags, and cell edge while skipping it during physical data copying. A virtual
+accessor shape is never a reusable transition or pool-deduplicated shape.
+
+**GC ownership.** `JsAccessorCell` contains exactly the getter and setter
+`Item` edges; either may be `ItemNull`. Once published, its owning edge is
+`Map → TypeMap → ShapeEntry → JsAccessorCell`, which the collector traces even
+when the map has no `data` allocation. Between heap allocation and publication
+the producer holds an exact temporary object root. It releases that root after
+the shape edge exists. There is no permanent root, fake `LMD_TYPE_FUNC`
+carrier, encoded map slot, or side table.
+
+**Descriptor transitions.** A data-to-accessor redefinition first privatizes
+the shape, then retires the old data lane by clearing its physical bytes before
+changing the entry to `byte_offset == -1`; the map's byte-size accounting is
+not compacted, so the old position is a retired hole. This prevents a stale
+pointer word from surviving a descriptor-kind change. An accessor-to-data
+redefinition never writes through the virtual entry or reuses that retired
+position. The JS `DefineOwn` path allocates a fresh lane at the current end of
+the map layout, stores the data value there, clears `accessor`, and clears
+`JSPD_IS_ACCESSOR` and `JSPD_DELETED`. Ordinary assignment instead dispatches
+the setter (or follows the missing-setter semantics); it does not materialize a
+data property.
+
+Deletion is represented by `JSPD_DELETED` on the private entry. The cell stays
+owned and traced with the tombstone until the map itself becomes unreachable;
+a subsequent definition uses the normal descriptor transition rules rather
+than treating the cell as a stored value.
+
+This restores **D2.4.1**'s single authority, implements **D3.4.8**, and leaves
+`LMD_TYPE_FUNC` allocations to callable values only. Transient
+`JsPropertyDescriptor` remains distinct because it describes an operation, not
+stored identity.
 
 ### 8.10 JSCU34 — one ArrayBuffer-view authority
 

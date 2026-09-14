@@ -653,18 +653,13 @@ that carries them.
   different metadata families are never interchangeable runtime blueprints.
   Foreign/Input TypeMaps may retain null metadata until the explicit JS
   boundary creates a runtime family. [JS_Runtime_Object_Property JOP1–JOP5]
-- **D3.4.8** A JavaScript accessor descriptor is a **virtual**, map-local
-  `ShapeEntry`: `JSPD_IS_ACCESSOR` is set, `byte_offset == -1`, and the
-  entry's `JsAccessorCell*` is its only descriptor payload. It consumes no
-  `Map.data` bytes and no generic Map reader may surface the cell as an
-  `Item`; only the JS property kernel may dispatch its getter/setter. Because
-  the pointer is mutable per object, the containing `TypeMap` is private to
-  that object before the cell is attached and is never structurally shared.
-  The collector follows the direct `Map → TypeMap → ShapeEntry → cell` edge;
-  the allocating code holds an exact temporary object root only until that
-  edge is published, with no permanent root or side table. Data→accessor
-  conversion retires the old physical lane, and accessor→data allocates a
-  fresh lane before clearing the virtual descriptor. [JSCU33]
+- **D3.4.8** A JavaScript accessor descriptor is a virtual, object-local
+  `ShapeEntry`: it owns a `JsAccessorCell*`, has `JSPD_IS_ACCESSOR` and
+  `byte_offset == -1`, and consumes no `Map.data` lane. Only the JS property
+  kernel may dispatch it; its containing `TypeMap` is private before
+  attachment and the collector follows its direct shape-to-cell edge.
+  Descriptor transitions do not reinterpret an accessor cell as an `Item`.
+  Detailed representation, GC, and transition rules: [JSCU33].
 
 ## D4 Memory Management
 
