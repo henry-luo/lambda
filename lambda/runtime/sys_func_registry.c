@@ -1628,6 +1628,7 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    // Logical cached units scan an already-allocated Runtime index.
     {"lambda_module_state_for_unit", FPTR(lambda_module_state_for_unit),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
@@ -2088,6 +2089,14 @@ JitImport jit_runtime_imports[] = {
     {"js_eq_raw", FPTR(js_eq_raw), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_loose_eq_raw", FPTR(js_loose_eq_raw), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_new_object", FPTR(js_new_object)},
+    {"js_new_object_with_typemap", FPTR(js_new_object_with_typemap),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES}},
+    {"js_new_literal_object_with_typemap", FPTR(js_new_literal_object_with_typemap),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES}},
 #ifdef LAMBDA_JS_EXEC_PROFILE
     {"js_opt_trace_record", FPTR(js_opt_trace_record),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
@@ -2270,6 +2279,11 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"js_elements_get_number", FPTR(js_elements_get_number),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"js_elements_set_int", FPTR(js_elements_set_int)},
     {"js_get_this", FPTR(js_get_this)},
     {"js_get_lexical_this_binding", FPTR(js_get_lexical_this_binding)},
@@ -2387,14 +2401,25 @@ JitImport jit_runtime_imports[] = {
     {"js_new_class_function", FPTR(js_new_class_function)},
     {"js_set_class_constructor", FPTR(js_set_class_constructor), JIT_IMPORT_VOID_PRESERVES},
     {"js_set_class_instance_prototype", FPTR(js_set_class_instance_prototype), JIT_IMPORT_VOID_PRESERVES},
+    {"js_set_class_instance_shape", FPTR(js_set_class_instance_shape), JIT_IMPORT_VOID_PRESERVES},
     {"js_set_class_superclass", FPTR(js_set_class_superclass), JIT_IMPORT_VOID_PRESERVES},
     {"js_get_class_superclass", FPTR(js_get_class_superclass)},
     {"js_set_default_constructor_property", FPTR(js_set_default_constructor_property), JIT_IMPORT_VOID_PRESERVES},
     {"js_check_class_static_field_key", FPTR(js_check_class_static_field_key)},
     {"js_mark_non_configurable", FPTR(js_mark_non_configurable), JIT_IMPORT_VOID_PRESERVES},
     {"js_to_property_key", FPTR(js_to_property_key)},
-    {"js_set_function_source", FPTR(js_set_function_source),
+    {"js_set_function_source_known_code",
+     FPTR(js_set_function_source_known_code),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES,
+      JIT_EXCEPTION_PRESERVES,
+      JIT_ARG_EFFECT(0, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(1, JIT_ARG_BORROWED)}},
+    {"js_set_function_source", FPTR(js_set_function_source),
+     // Lazily materializes callable-code metadata and pool-root entries.
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM),
       JIT_IMPORT_NUMBER_STACK_PRESERVES,
@@ -2569,8 +2594,9 @@ JitImport jit_runtime_imports[] = {
     {"js_with_save_depth", FPTR(js_with_save_depth),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0,
       JIT_IMPORT_NUMBER_STACK_PRESERVES, JIT_EXCEPTION_PRESERVES, 0}},
+    // Closing owned with frames releases allocator records.
     {"js_with_restore_depth", FPTR(js_with_restore_depth),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES,
       JIT_EXCEPTION_PRESERVES,
@@ -3453,8 +3479,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_item_adopt_scalar_home", "lambda_item_resolve_pending",
         "lambda_restore_number_frame_top",
         "owned_item_slot_store", "lambda_module_var_store", "lambda_module_var_at",
-        "lambda_module_state_for_unit",
-        "lambda_module_const_at_state",
+        "lambda_module_state_for_unit", "lambda_module_const_at_state",
         "lambda_module_name_id_at",
         "lambda_active_module_name_id", "lambda_active_module_name_item",
         "lambda_async_frame_get_word",
@@ -3490,11 +3515,11 @@ bool jit_import_validate_no_gc_allowlist(void) {
 #endif
         "js_error_lane_payload",
         "js_set_this", "js_get_new_target",
-        "js_set_direct_new_target", "js_set_function_source",
+        "js_set_direct_new_target", "js_set_function_source_known_code",
         "lambda_active_module_var_store",
         "lambda_active_module_var_at",
         "lambda_unit_const_at",
-        "js_with_save_depth", "js_with_restore_depth",
+        "js_with_save_depth",
         // LR07-7 root-honesty probe. Reads one machine word, compares it
         // against the GC zone (`gc_is_managed`, a pure range query) and may
         // log; it allocates no GC object, never calls gc_collect, and never

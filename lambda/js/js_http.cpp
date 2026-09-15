@@ -24,6 +24,7 @@
 #include "../../lib/mem.h"
 #include "../../lib/mem_grow.hpp"
 #include "../../lib/base64.h"
+#include "../../lib/str.h"
 #include "../../lib/url.h"
 #include "../../lib/strview.h"
 
@@ -599,8 +600,7 @@ static int parse_http_request(char* data, int data_len, HttpRequestHead* req, in
     if (!sp1) return -1;
     int mlen = (int)(sp1 - p);
     if (mlen >= 16) mlen = 15;
-    memcpy(req->method, p, mlen);
-    req->method[mlen] = '\0';
+    str_copy(req->method, sizeof(req->method), p, mlen);
 
     // url
     p = sp1 + 1;
@@ -613,8 +613,7 @@ static int parse_http_request(char* data, int data_len, HttpRequestHead* req, in
     p = sp2 + 1;
     int vlen = (int)(line_end - p);
     if (vlen >= 16) vlen = 15;
-    memcpy(req->http_version, p, vlen);
-    req->http_version[vlen] = '\0';
+    str_copy(req->http_version, sizeof(req->http_version), p, vlen);
 
     // parse headers
     p = line_end + 2; // skip \r\n
@@ -1313,8 +1312,7 @@ static bool http_response_header_has_token(Item self, const char* name, const ch
     if (!s) return false;
     char buf[512];
     int len = (int)s->len < (int)sizeof(buf) - 1 ? (int)s->len : (int)sizeof(buf) - 1;
-    memcpy(buf, s->chars, (size_t)len);
-    buf[len] = '\0';
+    str_copy(buf, sizeof(buf), s->chars, len);
     return http_header_has_token(buf, token);
 }
 JS_FORWARD_STATIC_EXPRESSION(bool, http_header_value_is_array, (Item value), (get_type_id(value) == LMD_TYPE_ARRAY))
@@ -1767,8 +1765,7 @@ static void http_response_flush(Item self) {
         String* cms = it2s(committed_status_message);
         int msg_len = (int)cms->len < (int)sizeof(committed_message_buf) - 1 ?
             (int)cms->len : (int)sizeof(committed_message_buf) - 1;
-        memcpy(committed_message_buf, cms->chars, (size_t)msg_len);
-        committed_message_buf[msg_len] = '\0';
+        str_copy(committed_message_buf, sizeof(committed_message_buf), cms->chars, msg_len);
         status_message = committed_message_buf;
     }
 
@@ -3393,8 +3390,7 @@ extern "C" Item js_http_server_listen(Item self, Item port_item, Item host_item,
         String* path = it2s(port_item);
         int len = (int)path->len < (int)sizeof(pipe_path) - 1 ?
             (int)path->len : (int)sizeof(pipe_path) - 1;
-        memcpy(pipe_path, path->chars, (size_t)len);
-        pipe_path[len] = '\0';
+        str_copy(pipe_path, sizeof(pipe_path), path->chars, len);
         use_pipe = true;
     } else if (port_item.item == 0 ||
                get_type_id(port_item) == LMD_TYPE_UNDEFINED ||
@@ -3411,8 +3407,7 @@ extern "C" Item js_http_server_listen(Item self, Item port_item, Item host_item,
     } else if (get_type_id(host_item) == LMD_TYPE_STRING) {
         String* h = it2s(host_item);
         int len = (int)h->len < 255 ? (int)h->len : 255;
-        memcpy(host_buf, h->chars, (size_t)len);
-        host_buf[len] = '\0';
+        str_copy(host_buf, sizeof(host_buf), h->chars, len);
     }
 
     if (js_node_is_plain_object(port_item) && js_http_object_has_key(port_item, "fd")) {
@@ -4281,8 +4276,7 @@ static bool js_http_response_has_header_token(Item headers, const char* name, co
     if (!s) return false;
     char buf[512];
     int len = (int)s->len < (int)sizeof(buf) - 1 ? (int)s->len : (int)sizeof(buf) - 1;
-    memcpy(buf, s->chars, (size_t)len);
-    buf[len] = '\0';
+    str_copy(buf, sizeof(buf), s->chars, len);
     return http_header_has_token(buf, token);
 }
 
@@ -5282,8 +5276,7 @@ static bool http_client_parse_port(Item port_item, int* out_port) {
         String* s = it2s(port_item);
         if (!s || s->len == 0 || s->len >= 64) return false;
         char buf[64];
-        memcpy(buf, s->chars, s->len);
-        buf[s->len] = '\0';
+        str_copy(buf, sizeof(buf), s->chars, s->len);
         char* end = NULL;
         long port = strtol(buf, &end, 10);
         if (end == buf || *end != '\0' || port < 0 || port > 65535) return false;
@@ -5361,8 +5354,7 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
             String* ss = it2s(spath);
             int len = (int)ss->len < (int)sizeof(socket_path) - 1 ?
                 (int)ss->len : (int)sizeof(socket_path) - 1;
-            memcpy(socket_path, ss->chars, (size_t)len);
-            socket_path[len] = '\0';
+            str_copy(socket_path, sizeof(socket_path), ss->chars, len);
             use_pipe = true;
         }
         Item p = js_get_key_cstr(options_item, "port");
@@ -5373,16 +5365,14 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
         if (get_type_id(h) == LMD_TYPE_STRING) {
             String* hs = it2s(h);
             int len = (int)hs->len < 255 ? (int)hs->len : 255;
-            memcpy(host_buf, hs->chars, (size_t)len);
-            host_buf[len] = '\0';
+            str_copy(host_buf, sizeof(host_buf), hs->chars, len);
         }
         Item m = js_get_key_cstr(options_item, "method");
         if (get_type_id(m) == LMD_TYPE_STRING) {
             String* ms = it2s(m);
             if (ms->len > 0) {
                 int len = (int)ms->len < 15 ? (int)ms->len : 15;
-                memcpy(method_buf, ms->chars, (size_t)len);
-                method_buf[len] = '\0';
+                str_copy(method_buf, sizeof(method_buf), ms->chars, len);
             }
         } else if (get_type_id(m) != LMD_TYPE_UNDEFINED && get_type_id(m) != LMD_TYPE_NULL) {
             // invalid methods must fail before socket allocation; otherwise mustNotCall callbacks can leak into live requests.
@@ -5393,8 +5383,7 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
             String* ps = it2s(pa);
             if (ps->len > 0) {
                 int len = (int)ps->len < 4095 ? (int)ps->len : 4095;
-                memcpy(path_buf, ps->chars, (size_t)len);
-                path_buf[len] = '\0';
+                str_copy(path_buf, sizeof(path_buf), ps->chars, len);
             }
         } else {
             http_client_copy_path_from_url_parts(options_item, path_buf, (int)sizeof(path_buf));
@@ -5412,21 +5401,18 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
         if (colon) {
             int hn_len = (int)(colon - s);
             if (hn_len > 255) hn_len = 255;
-            memcpy(host_buf, s, hn_len);
-            host_buf[hn_len] = '\0';
+            str_copy(host_buf, sizeof(host_buf), s, hn_len);
             port = atoi(colon + 1);
         } else {
             if (host_len > 255) host_len = 255;
-            memcpy(host_buf, s, host_len);
-            host_buf[host_len] = '\0';
+            str_copy(host_buf, sizeof(host_buf), s, host_len);
         }
         if (slash) {
             int plen = slen - (int)(slash - (url->chars + (url->len - slen)));
             // recalculate
             plen = (int)(url->chars + url->len - slash);
             if (plen > 4095) plen = 4095;
-            memcpy(path_buf, slash, plen);
-            path_buf[plen] = '\0';
+            str_copy(path_buf, sizeof(path_buf), slash, plen);
         }
     }
 
@@ -5744,8 +5730,7 @@ extern "C" Item js_http_agent_getName(Item options) {
         if (get_type_id(h) == LMD_TYPE_STRING) {
             String* s = it2s(h);
             int len = (int)s->len < 255 ? (int)s->len : 255;
-            memcpy(host, s->chars, len);
-            host[len] = '\0';
+            str_copy(host, sizeof(host), s->chars, len);
         }
         Item p = js_get_key_cstr(options, "port");
         TypeId p_type = get_type_id(p);
@@ -5760,15 +5745,13 @@ extern "C" Item js_http_agent_getName(Item options) {
         } else if (get_type_id(p) == LMD_TYPE_STRING) {
             String* s = it2s(p);
             int len = (int)s->len < 31 ? (int)s->len : 31;
-            memcpy(port, s->chars, len);
-            port[len] = '\0';
+            str_copy(port, sizeof(port), s->chars, len);
         }
         Item la = js_get_key_cstr(options, "localAddress");
         if (get_type_id(la) == LMD_TYPE_STRING) {
             String* s = it2s(la);
             int len = (int)s->len < 255 ? (int)s->len : 255;
-            memcpy(local_addr, s->chars, len);
-            local_addr[len] = '\0';
+            str_copy(local_addr, sizeof(local_addr), s->chars, len);
         }
         Item fam = js_get_key_cstr(options, "family");
         TypeId fam_type = get_type_id(fam);
@@ -5788,8 +5771,7 @@ extern "C" Item js_http_agent_getName(Item options) {
         if (get_type_id(sp) == LMD_TYPE_STRING) {
             String* s = it2s(sp);
             int len = (int)s->len < 255 ? (int)s->len : 255;
-            memcpy(socket_path, s->chars, len);
-            socket_path[len] = '\0';
+            str_copy(socket_path, sizeof(socket_path), s->chars, len);
         }
     }
     char result[600];

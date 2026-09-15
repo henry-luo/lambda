@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.4.1v2/D8.4.3v2: member lowering uses canonical semantic reference kernels, with no predicted-shape or numeric-index ABI lane. Runtime and GC oracles cover hit/miss behavior.",
+  "description": "D8.4.1v2/D8.4.3v2: a Number-proven computed read uses the native-key element kernel while its write retains the canonical Set kernel.",
   "checks": [
     {
       "in_func": "_js_readRecord_#_body",
@@ -26,7 +26,7 @@
     {
       "in_func": "_js_numericRegion_#_body",
       "expect": [
-        "call\tjs_get_reference",
+        "call\tjs_elements_get_number",
         "call\tjs_set"
       ],
       "forbid": [

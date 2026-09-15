@@ -1952,10 +1952,8 @@ static RdtPicture* svg_picture_create(const char* data, int size, const char* so
 
     // html5_parse_svg_document expects a null-terminated string and applies the
     // same SVG tag/attribute correction path used by inline HTML SVG.
-    char* buf = (char*)mem_alloc(size + 1, MEM_CAT_RENDER);
+    char* buf = mem_dup_n((const char*)data, size, MEM_CAT_RENDER);
     if (!buf) { mem_pool_destroy(pool); return nullptr; }
-    memcpy(buf, data, size);
-    buf[size] = '\0';
     Element* svg_root = html5_parse_svg_document(input, buf, nullptr);
     mem_free(buf);
 

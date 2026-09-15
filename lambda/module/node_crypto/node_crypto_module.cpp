@@ -24,6 +24,7 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 #include <cstring>
 #include "../../../lib/mem.h"
 #include "../../../lib/mem_grow.hpp"
+#include "../../../lib/str.h"
 #include "../../../lib/hex.h"
 #include "../../../lib/base64.h"
 #include "../../../lib/uuid.h"
@@ -2644,8 +2645,7 @@ extern "C" Item js_crypto_hash(Item alg_item, Item data_item, Item encoding_item
         }
         String* s = it2s(output_encoding_item);
         int len = (int)s->len < (int)sizeof(enc_buf) - 1 ? (int)s->len : (int)sizeof(enc_buf) - 1;
-        memcpy(enc_buf, s->chars, (size_t)len);
-        enc_buf[len] = '\0';
+        str_copy(enc_buf, sizeof(enc_buf), s->chars, len);
         enc = enc_buf;
         if (strcmp(enc, "hex") != 0 && strcmp(enc, "base64") != 0 &&
             strcmp(enc, "base64url") != 0 && strcmp(enc, "buffer") != 0) {
@@ -3324,8 +3324,7 @@ static void crypto_format_ecdh_format_value(Item item, char* out, int out_size) 
     if (type == LMD_TYPE_STRING) {
         String* s = it2s(item);
         int len = s && s->len < (size_t)(out_size - 1) ? (int)s->len : out_size - 1;
-        if (len > 0 && s) memcpy(out, s->chars, (size_t)len);
-        out[len] = '\0';
+        str_copy(out, out_size, s ? s->chars : "", len);
         return;
     }
     crypto_format_number_for_error(item, out, out_size);
@@ -3983,8 +3982,7 @@ static Item cipher_accept_output_encoding(CipherCtx* ctx, const char* enc, bool 
     if (!ctx->has_output_encoding) {
         int len = (int)strlen(enc);
         if (len >= (int)sizeof(ctx->output_encoding)) len = (int)sizeof(ctx->output_encoding) - 1;
-        memcpy(ctx->output_encoding, enc, (size_t)len);
-        ctx->output_encoding[len] = '\0';
+        str_copy(ctx->output_encoding, sizeof(ctx->output_encoding), enc, len);
         ctx->has_output_encoding = true;
         return js_status_ok();
     }
@@ -6616,8 +6614,7 @@ static Item create_cipher_object(const char* alg, bool encrypting,
     CipherCtx* ctx = (CipherCtx*)mem_calloc(1, sizeof(CipherCtx), MEM_CAT_JS_RUNTIME);
     int alen = (int)strlen(alg);
     if (alen > 31) alen = 31;
-    memcpy(ctx->alg, alg, (size_t)alen);
-    ctx->alg[alen] = '\0';
+    str_copy(ctx->alg, sizeof(ctx->alg), alg, alen);
     ctx->encrypting = encrypting;
     ctx->key = key;
     ctx->key_len = key_len;
@@ -6692,8 +6689,7 @@ static Item js_crypto_create_cipheriv_common(Item alg_item, Item key_item, Item 
     String* alg = it2s(alg_item);
     char alg_buf[32];
     int alen = (int)alg->len < 31 ? (int)alg->len : 31;
-    memcpy(alg_buf, alg->chars, (size_t)alen);
-    alg_buf[alen] = '\0';
+    str_copy(alg_buf, sizeof(alg_buf), alg->chars, alen);
 
     uint8_t* key = NULL; int key_len = 0;
     uint8_t* iv = NULL; int iv_len = 0;

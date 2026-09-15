@@ -399,7 +399,7 @@ static bool cache_make_input(const InputScriptRequest* request,
         MEM_CAT_CACHE_OTHER);
     if (!input) return false;
     input->identity = cache_copy_text(request->identity);
-    input->source = (char*)mem_alloc(source_length + 1, MEM_CAT_CACHE_OTHER);
+    input->source = mem_dup_n(source ? source : "", source_length, MEM_CAT_CACHE_OTHER);
     input->language = cache_copy_text(request->language);
     input->profile = cache_copy_text(request->profile);
     input->parser_abi = cache_copy_text(request->parser_abi);
@@ -417,8 +417,6 @@ static bool cache_make_input(const InputScriptRequest* request,
         cache_destroy_input(input);
         return false;
     }
-    if (source_length > 0) memcpy(input->source, source, source_length);
-    input->source[source_length] = '\0';
     input->source_hash = hashmap_hash_xxhash3_bytes(input->source, source_length, 0, 0);
     input->source_key = cache_source_key(input);
     input->cache_context = mem_context_create(NULL, MEM_ROLE_CODE,
@@ -913,11 +911,9 @@ char* input_script_cache_copy_source(InputScriptCache* cache,
     if (lease) {
         ScriptInput* input = input_script_lease_input(lease);
         size_t cached_length = input_script_source_length(input);
-        copy = (char*)mem_alloc(cached_length + 1, MEM_CAT_CACHE_OTHER);
+        const char* cached_source = input_script_source(input);
+        copy = mem_dup_n(cached_source, cached_length, MEM_CAT_CACHE_OTHER);
         if (copy) {
-            const char* cached_source = input_script_source(input);
-            if (cached_length > 0) memcpy(copy, cached_source, cached_length);
-            copy[cached_length] = '\0';
             if (out_length) *out_length = cached_length;
         }
     }

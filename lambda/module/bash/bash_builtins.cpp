@@ -1170,8 +1170,7 @@ extern "C" Item bash_builtin_caller(Item* args, int argc) {
         }
         char buf[64];
         int copy_len = arg->len < (int)sizeof(buf) - 1 ? arg->len : (int)sizeof(buf) - 1;
-        memcpy(buf, arg->chars, copy_len);
-        buf[copy_len] = '\0';
+        str_copy(buf, sizeof(buf), arg->chars, copy_len);
         char* end = NULL;
         long parsed = strtol(buf, &end, 10);
         if (!end || *end != '\0' || parsed < 0) {
@@ -1505,9 +1504,7 @@ extern "C" Item bash_builtin_grep(Item* args, int argc) {
                 // skip trailing empty line (input ends with \n)
                 if (i == (int)s->len && i == line_start) break;
                 int line_len = i - line_start;
-                char* line_buf = (char*)mem_alloc(line_len + 1, MEM_CAT_BASH_RUNTIME);
-                memcpy(line_buf, s->chars + line_start, line_len);
-                line_buf[line_len] = '\0';
+                char* line_buf = mem_dup_n(s->chars + line_start, line_len, MEM_CAT_BASH_RUNTIME);
 
                 bool matched = (regexec(&regex, line_buf, 0, NULL, 0) == 0);
                 if (flag_v) matched = !matched;
@@ -2164,8 +2161,7 @@ static bool bash_find_in_path(const char* name, int len, char* out_path, int out
     for (int i = 0; i < len; i++) {
         if (name[i] == '/') {
             if (len < out_size) {
-                memcpy(out_path, name, len);
-                out_path[len] = '\0';
+                str_copy(out_path, out_size, name, len);
                 return access(out_path, X_OK) == 0;
             }
             return false;
@@ -2718,8 +2714,7 @@ extern "C" Item bash_builtin_pushd(Item* args, int argc) {
     // pushd dir: push current dir, cd to new dir
     char path[4096];
     int copy_len = arg->len < (int)sizeof(path) - 1 ? arg->len : (int)sizeof(path) - 1;
-    memcpy(path, arg->chars, copy_len);
-    path[copy_len] = '\0';
+    str_copy(path, sizeof(path), arg->chars, copy_len);
 
     // check if directory exists
     struct stat st;

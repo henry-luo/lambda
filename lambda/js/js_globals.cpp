@@ -45,6 +45,7 @@ extern "C" bool js_promise_vmap_is(Item value);
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/log.h"
 #include "../../lib/mem_grow.hpp"
+#include "../../lib/str.h"
 #include "../../lib/time_util.h"
 #include "../../lib/utf.h"
 #include <assert.h>
@@ -2593,8 +2594,7 @@ extern "C" Item js_process_exit(Item code_item) {
         String* s = it2s(code_item);
         char buf[64];
         int len = (int)s->len < (int)sizeof(buf) - 1 ? (int)s->len : (int)sizeof(buf) - 1;
-        memcpy(buf, s->chars, (size_t)len);
-        buf[len] = '\0';
+        str_copy(buf, sizeof(buf), s->chars, len);
         code = atoi(buf);
     }
     // process.exit is a hard termination request; any remaining refed handles
@@ -3894,8 +3894,7 @@ extern "C" Item js_parseInt(Item str_item, Item radix_item) {
     // Null-terminate
     char buf[256];
     int len = s->len < 255 ? s->len : 255;
-    memcpy(buf, s->chars, len);
-    buf[len] = '\0';
+    str_copy(buf, sizeof(buf), s->chars, len);
 
     char* end_buf = buf + len;
     char* start = js_skip_ecma_whitespace(buf, end_buf);
@@ -3949,8 +3948,7 @@ extern "C" Item js_parseFloat(Item str_item) {
 
     char buf[256];
     int len = s->len < 255 ? s->len : 255;
-    memcpy(buf, s->chars, len);
-    buf[len] = '\0';
+    str_copy(buf, sizeof(buf), s->chars, len);
 
     char* p = js_skip_ecma_whitespace(buf, buf + len);
 
@@ -5227,13 +5225,11 @@ static JsConsoleLabel* js_console_label_get_or_create(const char* chars, int len
     JsConsoleLabel* label = (JsConsoleLabel*)mem_calloc(1, sizeof(JsConsoleLabel),
         MEM_CAT_JS_RUNTIME);
     if (!label) return NULL;
-    label->chars = (char*)mem_alloc((size_t)length + 1, MEM_CAT_JS_RUNTIME);
+    label->chars = mem_dup_n(chars, (size_t)length, MEM_CAT_JS_RUNTIME);
     if (!label->chars) {
         mem_free(label);
         return NULL;
     }
-    memcpy(label->chars, chars, (size_t)length);
-    label->chars[length] = '\0';
     label->length = length;
     if (!js_console_labels) js_console_labels = arraylist_new(8);
     if (!js_console_labels || !arraylist_append(js_console_labels, label)) {
@@ -5260,8 +5256,7 @@ static void js_console_resolve_label(Item label_item, bool coerce, char* label_b
         String* s = it2s(string_item);
         if (s && s->len > 0) {
             int copy = (int)s->len < label_buf_len - 1 ? (int)s->len : label_buf_len - 1;
-            memcpy(label_buf, s->chars, copy);
-            label_buf[copy] = '\0';
+            str_copy(label_buf, label_buf_len, s->chars, copy);
             *label = label_buf;
             *label_len = copy;
         }
@@ -11715,8 +11710,7 @@ extern "C" Item js_json_parse(Item str_item) {
     if (!buf) {
         return js_throw_range_error("Invalid string length");
     }
-    memcpy(buf, s->chars, s->len);
-    buf[s->len] = '\0';
+    str_copy(buf, buf_len, s->chars, s->len);
 
     bool ok = false;
     Item result = parse_json_to_item_strict(js_input, buf, &ok);
@@ -11869,8 +11863,7 @@ static bool js_json_validate_raw_text(String* s) {
         return false;
     }
     char* buf = LAMBDA_ALLOCA(s->len + 1, char);
-    memcpy(buf, s->chars, s->len);
-    buf[s->len] = '\0';
+    str_copy(buf, s->len + 1, s->chars, s->len);
     bool ok = false;
     parse_json_to_item_strict(js_input, buf, &ok);
     return ok;
@@ -12212,8 +12205,7 @@ extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
         if (space_str && space_str->len > 0) {
             int n = (int)space_str->len;
             if (n > 10) n = 10;
-            memcpy(gap_buf, space_str->chars, n);
-            gap_buf[n] = '\0';
+            str_copy(gap_buf, sizeof(gap_buf), space_str->chars, n);
             gap = gap_buf;
         }
     }
@@ -13180,6 +13172,10 @@ extern "C" void js_globals_batch_reset() {
     memset(js_runtime_state.string_caches->test262_percent_hex, 0,
            sizeof(js_runtime_state.string_caches->test262_percent_hex));
     js_runtime_state.string_caches->test262_cached_percent_left = (Item){0};
+    memset(js_runtime_state.string_caches->ascii_substrings, 0,
+           sizeof(js_runtime_state.string_caches->ascii_substrings));
+    memset(js_runtime_state.string_caches->ascii_substring_hashes, 0,
+           sizeof(js_runtime_state.string_caches->ascii_substring_hashes));
     js_runtime_state.string_caches->last_four_byte_cp = 0;
     js_runtime_state.string_caches->last_four_byte_epoch = 0;
     js_runtime_state.string_caches->uri_last_four_byte_epoch = 0;
@@ -17459,8 +17455,7 @@ extern "C" Item js_symbol_create(Item description) {
         String* s = it2s(string_root.get());
         if (s) {
             int len = s->len < 127 ? (int)s->len : 127;
-            memcpy(entry.desc, s->chars, len);
-            entry.desc[len] = '\0';
+            str_copy(entry.desc, sizeof(entry.desc), s->chars, len);
             entry.desc_len = len;
         } else {
             entry.desc[0] = '\0';
@@ -17489,8 +17484,7 @@ extern "C" Item js_symbol_for(Item key) {
 
     JsSymbolEntry lookup;
     int klen = s->len < 127 ? (int)s->len : 127;
-    memcpy(lookup.key, s->chars, klen);
-    lookup.key[klen] = '\0';
+    str_copy(lookup.key, sizeof(lookup.key), s->chars, klen);
 
     JsSymbolEntry* found = JsSymbolEntryMap::get(js_symbol_registry, lookup);
     if (found) return js_make_symbol_item(found->symbol_id);

@@ -691,8 +691,7 @@ static Item throw_assert_msg_or_auto(Item message, const char* default_msg,
         String* s = get_type_id(formatted) == LMD_TYPE_STRING ? it2s(formatted) : NULL;
         char buf[512];
         int len = s && (int)s->len < 500 ? (int)s->len : 500;
-        if (s) memcpy(buf, s->chars, len);
-        buf[len] = '\0';
+        str_copy(buf, sizeof(buf), s ? s->chars : "", len);
         return throw_assertion_error_full(buf, actual, expected, op_str, false);
     }
     return throw_assertion_error_full(default_msg, actual, expected, op_str, true);
@@ -2684,8 +2683,7 @@ extern "C" Item js_assert_fail(Item message) {
         String* s = it2s(message);
         char buf[512];
         int len = (int)s->len < 500 ? (int)s->len : 500;
-        memcpy(buf, s->chars, len);
-        buf[len] = '\0';
+        str_copy(buf, sizeof(buf), s->chars, len);
         return throw_assertion_error_full(buf, make_js_undefined(), make_js_undefined(), "fail", false);
     }
     // if message is an Error object, re-throw it directly (Node.js behavior)
@@ -4498,8 +4496,7 @@ static Item js_assert_missing_rejection_error(Item error_expected) {
         String* ns = get_type_id(name) == LMD_TYPE_STRING ? it2s(name) : NULL;
         if (ns && ns->len > 0) {
             int len = (int)(ns->len < (int)sizeof(name_buf) - 1 ? ns->len : (int)sizeof(name_buf) - 1);
-            memcpy(name_buf, ns->chars, len);
-            name_buf[len] = '\0';
+            str_copy(name_buf, sizeof(name_buf), ns->chars, len);
             suffix = name_buf;
         }
     }

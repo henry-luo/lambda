@@ -1019,10 +1019,10 @@ extern "C" bool js_dispatch_clipboard_event_to_element(Item target_item, const c
         // buffer — the second call invalidates the first, so copy text/plain
         // before reading text/html.
         const char* plain_raw = clipboard_store_read_mime("text/plain");
-        char* plain = (plain_raw && *plain_raw) ? strdup(plain_raw) : NULL;
+        char* plain = (plain_raw && *plain_raw) ? mem_strdup(plain_raw, MEM_CAT_DOM) : NULL;
         const char* html = clipboard_store_read_mime("text/html");
         dt = js_data_transfer_new_with_strings(plain, html);
-        free(plain);
+        mem_free(plain);
     } else {
         dt = js_make_data_transfer_object();
     }
@@ -1229,18 +1229,14 @@ static char* blob_like_get_text(Item blob, size_t* out_len) {
     if (get_type_id(blob) == LMD_TYPE_STRING) {
         String* s = it2s(blob);
         if (!s) return NULL;
-        char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_JS_RUNTIME);
-        memcpy(buf, s->chars, s->len);
-        buf[s->len] = '\0';
+        char* buf = mem_dup_n(s->chars, s->len, MEM_CAT_JS_RUNTIME);
         if (out_len) *out_len = s->len;
         return buf;
     }
     size_t n = 0;
     const char* t = str_prop_get(blob, "_text", &n);
     if (t) {
-        char* buf = (char*)mem_alloc(n + 1, MEM_CAT_JS_RUNTIME);
-        memcpy(buf, t, n);
-        buf[n] = '\0';
+        char* buf = mem_dup_n(t, n, MEM_CAT_JS_RUNTIME);
         if (out_len) *out_len = n;
         return buf;
     }
@@ -1293,9 +1289,7 @@ static Item js_clipboard_materialise(Item items_array, Item resolved_values) {
                 StrBuf* sb = strbuf_new();
                 strip_html_script_style(sb, tbuf, tlen);
                 mem_free(tbuf);
-                tbuf = (char*)mem_alloc(sb->length + 1, MEM_CAT_JS_RUNTIME);
-                memcpy(tbuf, sb->str ? sb->str : "", sb->length);
-                tbuf[sb->length] = '\0';
+                tbuf = mem_dup_n(sb->str ? sb->str : "", sb->length, MEM_CAT_JS_RUNTIME);
                 tlen = sb->length;
                 strbuf_free(sb);
             }
@@ -1596,13 +1590,9 @@ extern "C" Item js_lambda_clipboard_write_records(Item arr) {
 
             ClipboardEntry* ce = (ClipboardEntry*)mem_calloc(1, sizeof(ClipboardEntry), MEM_CAT_JS_RUNTIME);
             if (!ce) continue;
-            ce->mime = (char*)mem_alloc(ks->len + 1, MEM_CAT_JS_RUNTIME);
-            memcpy(ce->mime, ks->chars, ks->len);
-            ce->mime[ks->len] = '\0';
+            ce->mime = mem_dup_n(ks->chars, ks->len, MEM_CAT_JS_RUNTIME);
             ce->data_len = vs->len;
-            ce->data = (char*)mem_alloc(vs->len + 1, MEM_CAT_JS_RUNTIME);
-            memcpy(ce->data, vs->chars, vs->len);
-            ce->data[vs->len] = '\0';
+            ce->data = mem_dup_n(vs->chars, vs->len, MEM_CAT_JS_RUNTIME);
             arraylist_append(citem->entries, ce);
         }
         arraylist_append(items, citem);

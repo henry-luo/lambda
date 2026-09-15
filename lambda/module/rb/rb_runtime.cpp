@@ -6,6 +6,7 @@
 #include "../../../input/input-script-cache.h"
 #include "../../../runtime/heap_api.h"
 #include "../../../lib/log.h"
+#include "../../../lib/str.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/file.h"
 
@@ -906,8 +907,7 @@ extern "C" Item rb_builtin_require_relative(Item path) {
     if (rb_current_file) {
         // get directory of current file
         char dir[1024];
-        strncpy(dir, rb_current_file, sizeof(dir) - 1);
-        dir[sizeof(dir) - 1] = '\0';
+        str_copy(dir, sizeof(dir), rb_current_file, strlen(rb_current_file));
         char* last_sep = strrchr(dir, '/');
         if (!last_sep) last_sep = strrchr(dir, '\\');
         if (last_sep) {
@@ -927,7 +927,7 @@ extern "C" Item rb_builtin_require_relative(Item path) {
     // add .rb extension if no extension present
     const char* ext = file_path_ext(resolved);
     if (!ext) {
-        strncat(resolved, ".rb", sizeof(resolved) - strlen(resolved) - 1);
+        str_cat(resolved, strlen(resolved), sizeof(resolved), ".rb", sizeof(".rb") - 1);
     }
 
     char* canonical = file_realpath(resolved);
@@ -1190,9 +1190,7 @@ extern "C" Item rb_file_write(Item path, Item content) {
     if (!p || !c) return (Item){.item = ITEM_NULL};
     char filepath[1024];
     snprintf(filepath, sizeof(filepath), "%.*s", (int)p->len, p->chars);
-    char* buf = (char*)mem_alloc(c->len + 1, MEM_CAT_RB_RUNTIME);
-    memcpy(buf, c->chars, c->len);
-    buf[c->len] = '\0';
+    char* buf = mem_dup_n(c->chars, c->len, MEM_CAT_RB_RUNTIME);
     write_text_file(filepath, buf);
     mem_free(buf);
     return (Item){.item = i2it(c->len)};

@@ -4001,7 +4001,7 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
         const char* p = var_start + 4;  // skip "var("
 
         // skip whitespace
-        while (*p == ' ' || *p == '\t') p++;
+        p = str_skip_line_space(p);
 
         // extract variable name (must start with --)
         if (p[0] != '-' || p[1] != '-') {
@@ -4024,8 +4024,7 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
 
         char var_name[128];
         if (name_len >= sizeof(var_name)) name_len = sizeof(var_name) - 1;
-        memcpy(var_name, name_start, name_len);
-        var_name[name_len] = '\0';
+        str_copy(var_name, sizeof(var_name), name_start, name_len);
 
         // check for fallback
         const char* fallback = nullptr;
@@ -4033,7 +4032,7 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
         if (*p == ',') {
             p++; // skip comma
             // skip whitespace
-            while (*p == ' ' || *p == '\t') p++;
+            p = str_skip_line_space(p);
             fallback = p;
             // find matching closing paren, accounting for nested parens
             int paren_depth = 1;
@@ -4092,10 +4091,8 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
 
         if (resolved && resolved_len > 0) {
             // recursively resolve nested var() in the resolved value
-            char* resolved_copy = (char*)pool_alloc(pool, resolved_len + 1);
+            char* resolved_copy = pool_dup_n(pool, resolved, resolved_len);
             if (resolved_copy) {
-                memcpy(resolved_copy, resolved, resolved_len);
-                resolved_copy[resolved_len] = '\0';
                 const char* nested = js_resolve_custom_property_value(elem, resolved_copy, pool, depth + 1);
                 if (nested) {
                     // strip exterior comments from var() result
@@ -4127,10 +4124,8 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
             }
         } else if (fallback && fallback_len > 0) {
             // use fallback value
-            char* fb_copy = (char*)pool_alloc(pool, fallback_len + 1);
+            char* fb_copy = pool_dup_n(pool, fallback, fallback_len);
             if (fb_copy) {
-                memcpy(fb_copy, fallback, fallback_len);
-                fb_copy[fallback_len] = '\0';
                 const char* resolved_fb = js_resolve_custom_property_value(elem, fb_copy, pool, depth + 1);
                 segments[seg_count].text = resolved_fb ? resolved_fb : fb_copy;
                 segments[seg_count].len = strlen(segments[seg_count].text);
@@ -4162,14 +4157,9 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
                 if (prev_len > 0 && cur_len > 0) {
                     // tokenize the last few chars of prev and first few chars of cur
                     // to determine if they'd be ambiguous
-                    char* prev_copy = (char*)pool_alloc(pool, prev_len + 1);
-                    char* cur_copy = (char*)pool_alloc(pool, cur_len + 1);
+                    char* prev_copy = pool_dup_n(pool, prev_text, prev_len);
+                    char* cur_copy = pool_dup_n(pool, cur_text, cur_len);
                     if (prev_copy && cur_copy) {
-                        memcpy(prev_copy, prev_text, prev_len);
-                        prev_copy[prev_len] = '\0';
-                        memcpy(cur_copy, cur_text, cur_len);
-                        cur_copy[cur_len] = '\0';
-
                         size_t prev_tok_count = 0, cur_tok_count = 0;
                         CssToken* prev_tokens = css_tokenize(prev_copy, prev_len, pool, &prev_tok_count);
                         CssToken* cur_tokens = css_tokenize(cur_copy, cur_len, pool, &cur_tok_count);
@@ -4201,10 +4191,8 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
         }
 
         // append segment text
-        char* seg_copy = (char*)pool_alloc(pool, segments[s].len + 1);
+        char* seg_copy = pool_dup_n(pool, segments[s].text, segments[s].len);
         if (seg_copy) {
-            memcpy(seg_copy, segments[s].text, segments[s].len);
-            seg_copy[segments[s].len] = '\0';
             stringbuf_append_str(result, seg_copy);
         }
     }
@@ -4270,8 +4258,8 @@ extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name)
                 while (*val == ' ' || *val == '\t' || *val == '\n' || *val == '\r') val++;
                 size_t vlen = strlen(val);
                 while (vlen > 0 && (val[vlen-1] == ' ' || val[vlen-1] == '\t' || val[vlen-1] == '\n' || val[vlen-1] == '\r')) vlen--;
-                char* trimmed = (char*)pool_alloc(pool, vlen + 1);
-                if (trimmed) { memcpy(trimmed, val, vlen); trimmed[vlen] = '\0'; val = trimmed; }
+                char* trimmed = pool_dup_n(pool, val, vlen);
+                if (trimmed) val = trimmed;
 
                 // resolve var() references in the value
                 if (val && strstr(val, "var(")) {
@@ -5036,8 +5024,7 @@ static bool dom_style_decl_value(const char* style_text,
 
                 size_t value_len = (size_t)(value_end - value_start);
                 if (value_len >= out_size) value_len = out_size - 1;
-                memcpy(out, value_start, value_len);
-                out[value_len] = '\0';
+                str_copy(out, out_size, value_start, value_len);
                 return true;
         }
 
@@ -10497,9 +10484,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         const char* id_str = dom_to_attr_cstr(value);
         if (elem->doc && elem->doc->document_pool) {
             size_t len = strlen(id_str);
-            char* id_copy = (char*)pool_alloc(elem->doc->document_pool, len + 1);
-            memcpy(id_copy, id_str, len);
-            id_copy[len] = '\0';
+            char* id_copy = pool_dup_n(elem->doc->document_pool, id_str, len);
             elem->id = id_copy;
             elem->set_attribute("id", id_str);
             dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
@@ -12337,8 +12322,7 @@ static const char* dom_svg_cascaded_property_value(DomElement* elem,
     if (!serialized || !*serialized) return nullptr;
     size_t length = strlen(serialized);
     if (length >= buffer_size) length = buffer_size - 1;
-    memcpy(buffer, serialized, length);
-    buffer[length] = '\0';
+    str_copy(buffer, buffer_size, serialized, length);
     return buffer;
 }
 
@@ -16058,9 +16042,7 @@ static Url* dom_make_fallback_url(const char* raw_url) {
     else if (hash) path_end = hash;
 
     size_t pathname_len = (size_t)(path_end - raw_url);
-    char* pathname = (char*)mem_alloc(pathname_len + 1, MEM_CAT_DOM);
-    memcpy(pathname, raw_url, pathname_len);
-    pathname[pathname_len] = '\0';
+    char* pathname = mem_dup_n(raw_url, pathname_len, MEM_CAT_DOM);
 
     url->href = url_create_string(raw_url);
     url->pathname = url_create_string(pathname);

@@ -3485,8 +3485,7 @@ static void rm_compile_block(RbMirTranspiler* mt, RbBlockCollected* bc) {
     int offset = 0;
 
     if (bc->is_closure) {
-        char* env_name = (char*)pool_alloc(mt->tp->ast_pool, 16);
-        strcpy(env_name, "_rb__env"); // UNSAFE_LIBC_OK: dst allocated 16 bytes for 9-byte literal
+        char* env_name = pool_strdup(mt->tp->ast_pool, "_rb__env");
         params[0] = {MIR_T_I64, env_name, 0};
         offset = 1;
     }
@@ -3505,8 +3504,7 @@ static void rm_compile_block(RbMirTranspiler* mt, RbBlockCollected* bc) {
         } else {
             snprintf(pname, sizeof(pname), "_rb_bp%d", i);
         }
-        char* stable_name = (char*)pool_alloc(mt->tp->ast_pool, strlen(pname) + 1);
-        strcpy(stable_name, pname); // UNSAFE_LIBC_OK: dst allocated with strlen(pname)+1
+        char* stable_name = pool_strdup(mt->tp->ast_pool, pname);
         params[i + offset] = {MIR_T_I64, stable_name, 0};
         p = p->next;
     }
@@ -3636,8 +3634,7 @@ static void rm_compile_class_method(RbMirTranspiler* mt, RbFuncCollected* fc,
     MIR_var_t* params = LAMBDA_ALLOCA(total_params, MIR_var_t);
 
     // first param: self
-    char* self_name = (char*)pool_alloc(mt->tp->ast_pool, 16);
-    strcpy(self_name, "_rb_self"); // UNSAFE_LIBC_OK: dst allocated 16 bytes for 9-byte literal
+    char* self_name = pool_strdup(mt->tp->ast_pool, "_rb_self");
     params[0] = {MIR_T_I64, self_name, 0};
 
     // user params
@@ -3653,16 +3650,14 @@ static void rm_compile_class_method(RbMirTranspiler* mt, RbFuncCollected* fc,
         } else {
             snprintf(pname, sizeof(pname), "_rb_p%d", i);
         }
-        char* stable_name = (char*)pool_alloc(mt->tp->ast_pool, strlen(pname) + 1);
-        strcpy(stable_name, pname); // UNSAFE_LIBC_OK: dst allocated with strlen(pname)+1
+        char* stable_name = pool_strdup(mt->tp->ast_pool, pname);
         params[1 + i] = {MIR_T_I64, stable_name, 0};
         p = p->next;
     }
 
     // &block parameter
     if (method_has_block) {
-        char* block_name = (char*)pool_alloc(mt->tp->ast_pool, 16);
-        strcpy(block_name, "_rb__block"); // UNSAFE_LIBC_OK: dst allocated 16 bytes for 11-byte literal
+        char* block_name = pool_strdup(mt->tp->ast_pool, "_rb__block");
         params[total_params - 1] = {MIR_T_I64, block_name, 0};
     }
 
@@ -4282,15 +4277,13 @@ static void rm_compile_function(RbMirTranspiler* mt, RbFuncCollected* fc) {
             snprintf(pname, sizeof(pname), "_rb_%.*s",
                 pp->name ? (int)pp->name->len : 0,
                 pp->name ? pp->name->chars : "p");
-            char* stable_name = (char*)pool_alloc(mt->tp->ast_pool, strlen(pname) + 1);
-            strcpy(stable_name, pname); // UNSAFE_LIBC_OK: dst allocated with strlen(pname)+1
+            char* stable_name = pool_strdup(mt->tp->ast_pool, pname);
             params[pi] = {MIR_T_I64, stable_name, 0};
             pi++;
         } else {
             char pname[128];
             snprintf(pname, sizeof(pname), "_rb_p%d", pi);
-            char* stable_name = (char*)pool_alloc(mt->tp->ast_pool, strlen(pname) + 1);
-            strcpy(stable_name, pname); // UNSAFE_LIBC_OK: dst allocated with strlen(pname)+1
+            char* stable_name = pool_strdup(mt->tp->ast_pool, pname);
             params[pi] = {MIR_T_I64, stable_name, 0};
             pi++;
         }
@@ -4299,8 +4292,7 @@ static void rm_compile_function(RbMirTranspiler* mt, RbFuncCollected* fc) {
 
     // &block parameter at the end
     if (func_has_block) {
-        char* block_name = (char*)pool_alloc(mt->tp->ast_pool, 16);
-        strcpy(block_name, "_rb__block"); // UNSAFE_LIBC_OK: dst allocated 16 bytes for 11-byte literal
+        char* block_name = pool_strdup(mt->tp->ast_pool, "_rb__block");
         params[nparams - 1] = {MIR_T_I64, block_name, 0};
     }
 

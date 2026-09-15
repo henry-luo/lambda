@@ -50,7 +50,7 @@ public:
         ul += str_count_run(ul, 0, ul_char);
 
         // Must be only underline characters (and trailing whitespace)
-        while (*ul == ' ' || *ul == '\t') ul++;
+        ul = str_skip_line_space(ul);
         if (*ul != '\0' && *ul != '\r' && *ul != '\n') return info;
 
         // Underline must be at least as long as text

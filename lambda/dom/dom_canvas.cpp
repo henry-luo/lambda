@@ -26,6 +26,7 @@
 #include "../../lib/font/font.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../../lib/str.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -634,33 +635,33 @@ static FontHandle* parse_css_font_shorthand(const char* font_str, int len) {
     const char* family_start = nullptr;
 
     // tokenize: walk through space-separated tokens
-    char* p = buf;
+    const char* p = buf;
 
     // skip leading whitespace
-    while (*p && isspace((unsigned char)*p)) p++;
+    p = str_skip_ascii_space(p);
 
     // parse optional style
     if (strncmp(p, "italic", 6) == 0 && (p[6] == ' ' || p[6] == '\0')) {
         slant = FONT_SLANT_ITALIC;
         p += 6;
-        while (*p && isspace((unsigned char)*p)) p++;
+        p = str_skip_ascii_space(p);
     } else if (strncmp(p, "oblique", 7) == 0 && (p[7] == ' ' || p[7] == '\0')) {
         slant = FONT_SLANT_OBLIQUE;
         p += 7;
-        while (*p && isspace((unsigned char)*p)) p++;
+        p = str_skip_ascii_space(p);
     } else if (strncmp(p, "normal", 6) == 0 && (p[6] == ' ' || p[6] == '\0')) {
         p += 6;
-        while (*p && isspace((unsigned char)*p)) p++;
+        p = str_skip_ascii_space(p);
     }
 
     // parse optional weight
     if (strncmp(p, "bold", 4) == 0 && (p[4] == ' ' || p[4] == '\0')) {
         weight = FONT_WEIGHT_BOLD;
         p += 4;
-        while (*p && isspace((unsigned char)*p)) p++;
+        p = str_skip_ascii_space(p);
     } else if (strncmp(p, "normal", 6) == 0 && (p[6] == ' ' || p[6] == '\0')) {
         p += 6;
-        while (*p && isspace((unsigned char)*p)) p++;
+        p = str_skip_ascii_space(p);
     } else if (isdigit((unsigned char)*p)) {
         // numeric weight like "700" — but only if followed by a space (not "700px")
         char* end;
@@ -669,7 +670,7 @@ static FontHandle* parse_css_font_shorthand(const char* font_str, int len) {
             // it's a weight (100-900), not a size
             weight = (FontWeight)w;
             p = end;
-            while (*p && isspace((unsigned char)*p)) p++;
+            p = str_skip_ascii_space(p);
         }
         // if end points to 'p' like "16px", fall through to size parsing
     }
@@ -695,7 +696,7 @@ static FontHandle* parse_css_font_shorthand(const char* font_str, int len) {
                 if (strncmp(p, "px", 2) == 0) p += 2;
             }
         }
-        while (*p && isspace((unsigned char)*p)) p++;
+        p = str_skip_ascii_space(p);
     }
 
     // remainder is font family

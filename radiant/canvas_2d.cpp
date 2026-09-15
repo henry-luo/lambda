@@ -104,10 +104,8 @@ static void canvas_state_destroy(CanvasState* state) {
 static bool canvas_state_set_font(CanvasState* state, const char* font, int font_len) {
     if (!state || !font || font_len <= 0 ||
         font_len >= RADIANT_CANVAS_FONT_TEXT_MAX) return false;
-    char* copy = (char*)mem_alloc((size_t)font_len + 1, MEM_CAT_LAYOUT);
+    char* copy = mem_dup_n(font, (size_t)font_len, MEM_CAT_LAYOUT);
     if (!copy) return false;
-    memcpy(copy, font, (size_t)font_len);
-    copy[font_len] = '\0';
     if (state->font) mem_free(state->font);
     state->font = copy;
     return true;

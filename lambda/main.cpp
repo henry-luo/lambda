@@ -1566,8 +1566,7 @@ int exec_convert(int argc, char* argv[]) {
             // Split into type and flavor
             size_t type_len = colon - from_format;
             char* type_buf = (char*)pool_calloc(temp_pool, type_len + 1);
-            strncpy(type_buf, from_format, type_len);
-            type_buf[type_len] = '\0';
+            str_copy(type_buf, type_len + 1, from_format, type_len);
             type_string = create_string(temp_pool, type_buf);
             flavor_string = create_string(temp_pool, colon + 1);
         } else {
@@ -2532,8 +2531,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     snprintf(js_source, js_source_len + 1, "console.log(%s)", eval_source_arg);
                 } else {
                     js_source_len = strlen(eval_source_arg);
-                    js_source = (char*)mem_alloc(js_source_len + 1, MEM_CAT_SYSTEM);
-                    memcpy(js_source, eval_source_arg, js_source_len);
+                    js_source = mem_dup_n(eval_source_arg, js_source_len, MEM_CAT_SYSTEM);
                 }
                 js_source[js_source_len] = '\0';
             } else if (input_type_module && !js_file) {

@@ -36,7 +36,16 @@ static const char* g_js_opt_event_names[JS_OPT_EVENT_COUNT] = {
     "mir_box_value", "mir_unbox_value", "mir_root_store",
     "module_cache_hit", "module_cache_miss", "tla_deferred_body",
     "tla_drain", "uri_error_cache_hit", "uri_error_cache_miss",
-    "named_fast_probe", "named_fast_hit", "named_fast_miss"
+    "named_fast_probe", "named_fast_hit", "named_fast_miss",
+    "mir_number_admitted", "mir_number_fallback",
+    "mir_native_index_admitted", "mir_native_index_fallback",
+    "mir_dense_index_admitted", "mir_literal_field_admitted",
+    "string_search_ascii", "string_search_unicode",
+    "string_split_ascii", "string_split_unicode",
+    "string_slice_ascii", "string_slice_unicode",
+    "string_char_access_ascii", "string_char_access_unicode",
+    "string_concat_ascii", "string_concat_unicode",
+    "ascii_substring_cache_hit", "ascii_substring_cache_miss"
 };
 
 static const char* g_js_opt_reason_names[JS_OPT_REASON_COUNT] = {

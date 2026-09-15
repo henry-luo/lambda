@@ -129,8 +129,7 @@ static bool parse_color_value(const char* val, Color* out) {
         while (isxdigit((unsigned char)p[len])) len++;
         if (len == 3 || len == 4 || len == 6 || len == 8) {
             char tmp[9];
-            memcpy(tmp, p, (size_t)len);
-            tmp[len] = '\0';
+            str_copy(tmp, sizeof(tmp), p, len);
             uint8_t r, g, b, a;
             if (color_parse_hex(tmp, &r, &g, &b, &a)) {
                 out->r = r; out->g = g; out->b = b; out->a = a;
@@ -406,9 +405,7 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
     size_t name_len = name_end - name_start;
     if (name_len == 0) return NULL;
 
-    char* name = (char*)pool_alloc(pool, name_len + 1);
-    memcpy(name, name_start, name_len);
-    name[name_len] = '\0';
+    char* name = pool_dup_n(pool, name_start, name_len);
 
     p++; // skip outer '{'
 
@@ -469,8 +466,7 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
             char prop_name[64];
             size_t plen = prop_end - prop_start;
             if (plen >= sizeof(prop_name)) plen = sizeof(prop_name) - 1;
-            memcpy(prop_name, prop_start, plen);
-            prop_name[plen] = '\0';
+            str_copy(prop_name, sizeof(prop_name), prop_start, plen);
 
             p++; // skip ':'
             p = str_skip_ascii_space(p);
@@ -490,8 +486,7 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
             char val_buf[256];
             size_t vlen = val_end - val_start;
             if (vlen >= sizeof(val_buf)) vlen = sizeof(val_buf) - 1;
-            memcpy(val_buf, val_start, vlen);
-            val_buf[vlen] = '\0';
+            str_copy(val_buf, sizeof(val_buf), val_start, vlen);
 
             if (*p == ';') p++;
 

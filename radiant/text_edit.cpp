@@ -265,10 +265,8 @@ void te_focus_capture_value(DomElement* elem) {
     if (f->value_at_focus) { mem_free(f->value_at_focus); f->value_at_focus = nullptr; }
     f->value_at_focus_len = 0;
     if (buf) {
-        f->value_at_focus = (char*)mem_alloc((size_t)blen + 1, MEM_CAT_DOM);
+        f->value_at_focus = mem_dup_n(buf, blen, MEM_CAT_DOM);
         if (f->value_at_focus) {
-            if (blen) memcpy(f->value_at_focus, buf, blen);
-            f->value_at_focus[blen] = '\0';
             f->value_at_focus_len = blen;
         }
     }
@@ -395,10 +393,8 @@ void te_history_push(DomElement* elem) {
     EditHistoryEntry* slot = &h->ring[h->head];
     if (slot->snapshot) { mem_free(slot->snapshot); slot->snapshot = nullptr; }
     slot->length = blen;
-    slot->snapshot = (char*)mem_alloc((size_t)blen + 1, MEM_CAT_DOM);
+    slot->snapshot = mem_dup_n(buf, blen, MEM_CAT_DOM);
     if (!slot->snapshot) return;
-    if (blen) memcpy(slot->snapshot, buf, blen);
-    slot->snapshot[blen] = '\0';
     slot->sel_start_u16 = f->selection_start;
     slot->sel_end_u16   = f->selection_end;
     slot->sel_dir       = f->selection_direction;

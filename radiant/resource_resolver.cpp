@@ -4,6 +4,7 @@
 #include "../lib/url.h"
 #include "../lib/file.h"
 #include "../lambda/input/css/css_parser.hpp"
+#include "../lib/str.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -281,7 +282,7 @@ bool radiant_resolve_shared_data_resource_path(const char* href, const char* bas
 
     // Local file runs open category pages directly, but browser references serve
     // shared res/... assets from the layout/data root.
-    memcpy(out_path, local_base, data_root_len);
+    str_copy(out_path, out_size, local_base, data_root_len);
     out_path[data_root_len] = '/';
     memcpy(out_path + data_root_len + 1, rel_href, href_len);
     out_path[data_root_len + 1 + href_len] = '\0';
@@ -328,10 +329,10 @@ bool radiant_resolve_layout_support_resource_path(const char* href, const char* 
 
     size_t data_root_len = data_marker - base_local + marker_prefix_len + strlen("data");
     if (data_root_len + strlen("/support") + strlen(href) + 1 > out_size) return false;
-    memcpy(out_path, base_local, data_root_len);
-    out_path[data_root_len] = '\0';
-    strncat(out_path, "/support", out_size - strlen(out_path) - 1);
-    strncat(out_path, href, out_size - strlen(out_path) - 1);
+    str_copy(out_path, out_size, base_local, data_root_len);
+    size_t out_len = str_cat(out_path, data_root_len, out_size, "/support",
+                             sizeof("/support") - 1);
+    str_cat(out_path, out_len, out_size, href, strlen(href));
     if (access(out_path, R_OK) == 0) return true;
     return radiant_resolve_wpt_root_resource_path(href, out_path, out_size);
 }

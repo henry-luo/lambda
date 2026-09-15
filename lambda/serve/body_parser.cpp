@@ -70,14 +70,12 @@ ParsedJson* body_parse_json(const char *data, size_t len) {
     ParsedJson *pj = (ParsedJson *)serve_calloc(1, sizeof(ParsedJson));
     if (!pj) return NULL;
 
-    pj->json_str = (char *)serve_malloc(len + 1);
+    pj->json_str = mem_dup_n(data, len, MEM_CAT_SERVE);
     if (!pj->json_str) {
         serve_free(pj);
         return NULL;
     }
 
-    memcpy(pj->json_str, data, len);
-    pj->json_str[len] = '\0';
     pj->len = len;
     return pj;
 }
@@ -108,16 +106,12 @@ HttpHeader* body_parse_form(const char *data, size_t len) {
             size_t key_len = (size_t)(eq - key_start);
             size_t val_len = (size_t)(pair_end - eq - 1);
 
-            char *key = (char *)serve_malloc(key_len + 1);
-            char *val = (char *)serve_malloc(val_len + 1);
+            char *key = mem_dup_n(key_start, key_len, MEM_CAT_SERVE);
+            char *val = mem_dup_n(eq + 1, val_len, MEM_CAT_SERVE);
 
             if (key && val) {
-                memcpy(key, key_start, key_len);
-                key[key_len] = '\0';
                 serve_url_decode(key);
 
-                memcpy(val, eq + 1, val_len);
-                val[val_len] = '\0';
                 serve_url_decode(val);
 
                 list = http_header_add(list, key, val);

@@ -82,8 +82,7 @@ static void tokenize_number(const char* input, size_t length, size_t start,
     // parse the numeric value
     char* num_str = static_cast<char*>(pool_alloc(pool, number_end - start + 1));
     if (num_str) {
-        strncpy(num_str, token->start, number_end - start);
-        num_str[number_end - start] = '\0';
+        str_copy(num_str, number_end - start + 1, token->start, number_end - start);
         if (token->type == CSS_TOKEN_DIMENSION) {
             token->data.dimension.value = str_to_double_default(num_str, number_end - start, 0.0);
         } else {
@@ -872,10 +871,8 @@ static void css_token_set_value(CssToken* token, Pool* pool) {
     }
 
     // Default: copy entire token value
-    char* value = (char*)pool_alloc(pool, token->length + 1);
+    char* value = pool_dup_n(pool, token->start, token->length);
     if (value) {
-        memcpy(value, token->start, token->length);
-        value[token->length] = '\0';
         token->value = value;
     }
 }
@@ -1406,8 +1403,7 @@ char* css_token_to_string(const CssToken* token, Pool* pool) {
     char* result = static_cast<char*>(pool_alloc(pool, token->length + 1));
     if (!result) return NULL;
 
-    strncpy(result, token->start, token->length);
-    result[token->length] = '\0';
+    str_copy(result, token->length + 1, token->start, token->length);
     return result;
 }
 

@@ -110,11 +110,8 @@ Item parse_header(MarkupParser* parser, const char* line) {
 
     // Create content string and parse inline elements
     if (text_len > 0) {
-        char* header_text = (char*)mem_alloc(text_len + 1, MEM_CAT_INPUT_MARKUP);
+        char* header_text = mem_dup_n(text_start, text_len, MEM_CAT_INPUT_MARKUP);
         if (header_text) {
-            memcpy(header_text, text_start, text_len);
-            header_text[text_len] = '\0';
-
             // Trim trailing whitespace
             while (text_len > 0 &&
                    (header_text[text_len-1] == ' ' ||

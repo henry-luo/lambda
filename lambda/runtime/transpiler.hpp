@@ -108,7 +108,7 @@ struct Runtime {
     struct hashmap* loaded_script_index;  // canonical path -> current Runtime Script*
     // Immutable images carry logical compilation-unit IDs.  This per-Runtime
     // map assigns each such unit a compact EvalContext module-slab address.
-    struct hashmap* module_unit_index;  // logical unit -> dense module_state_id
+    ArrayList* module_unit_index;  // logical unit -> dense module_state_id
     ModuleRegistry* module_registry; // runtime-owned cross-language module definitions
     char* current_dir;
     int max_errors;      // error threshold for type checking (default: 10, 0 = unlimited)
@@ -316,6 +316,7 @@ bool runtime_module_state_bind_unit(Runtime* runtime, uint32_t unit_id,
                                     uint32_t module_state_id);
 void runtime_module_state_unbind_unit(Runtime* runtime, uint32_t unit_id,
                                       uint32_t module_state_id);
+void runtime_module_state_clear_unit_index(Runtime* runtime);
 // Called only by InputScriptCache artifact destruction after all execution
 // scopes referring to the immutable template have closed.
 void runtime_destroy_cached_script_template(Script* script);

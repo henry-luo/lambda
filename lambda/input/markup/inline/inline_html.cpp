@@ -379,9 +379,7 @@ Item parse_autolink(MarkupParser* parser, const char** text) {
 
     // Extract URL/email text
     size_t url_len = url_end - url_start;
-    char* url_buf = (char*)arena_alloc(parser->input()->arena, url_len + 1);
-    memcpy(url_buf, url_start, url_len);
-    url_buf[url_len] = '\0';
+    char* url_buf = arena_dup_n(parser->input()->arena, url_start, url_len);
 
     // Add href attribute (mailto: for email)
     String* href_key = parser->builder.createString("href");
@@ -454,9 +452,7 @@ Item parse_raw_html(MarkupParser* parser, const char** text) {
     // Feed HTML content to the shared HTML5 parser
     // This accumulates all HTML into a single DOM tree
     // Create a null-terminated copy for the fragment parser
-    char* html_copy = (char*)arena_alloc(parser->input()->arena, len + 1);
-    memcpy(html_copy, start, len);
-    html_copy[len] = '\0';
+    char* html_copy = arena_dup_n(parser->input()->arena, start, len);
     parser->parseHtmlFragment(html_copy);
 
     // Create content string for the raw-html element

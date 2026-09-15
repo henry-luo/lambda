@@ -500,10 +500,8 @@ char* apply_predictor(const char* data, size_t data_len, size_t* out_len,
     
     // no predictor
     if (predictor <= 1) {
-        char* output = (char*)mem_alloc(data_len + 1, MEM_CAT_INPUT_PDF);
+        char* output = mem_dup_n(data, data_len, MEM_CAT_INPUT_PDF);
         if (!output) return NULL;
-        memcpy(output, data, data_len);
-        output[data_len] = '\0';
         *out_len = data_len;
         return output;
     }
@@ -672,19 +670,15 @@ char* pdf_decompress_stream_with_params(const char* data, size_t data_len,
             decoded_data = runlength_decode(current_data, current_len, &decoded_len);
         } else if (strcmp(filter, "DCTDecode") == 0 || strcmp(filter, "DCT") == 0) {
             // DCT is JPEG - pass through unchanged (decoded by image handler)
-            decoded_data = (char*)mem_alloc(current_len + 1, MEM_CAT_INPUT_PDF);
+            decoded_data = mem_dup_n(current_data, current_len, MEM_CAT_INPUT_PDF);
             if (decoded_data) {
-                memcpy(decoded_data, current_data, current_len);
-                decoded_data[current_len] = '\0';
                 decoded_len = current_len;
             }
             log_debug("DCTDecode (JPEG) - passing through %zu bytes", decoded_len);
         } else if (strcmp(filter, "JPXDecode") == 0 || strcmp(filter, "JPX") == 0) {
             // JPX is JPEG2000 - pass through unchanged (decoded by image handler)
-            decoded_data = (char*)mem_alloc(current_len + 1, MEM_CAT_INPUT_PDF);
+            decoded_data = mem_dup_n(current_data, current_len, MEM_CAT_INPUT_PDF);
             if (decoded_data) {
-                memcpy(decoded_data, current_data, current_len);
-                decoded_data[current_len] = '\0';
                 decoded_len = current_len;
             }
             log_debug("JPXDecode (JPEG2000) - passing through %zu bytes", decoded_len);

@@ -579,9 +579,7 @@ char* schema_validation_error_json(const ValidationResult *result) {
 
     strbuf_append_str(buf, "]}");
 
-    size_t len = buf->length;
-    char *json = (char*)mem_alloc(len + 1, MEM_CAT_SERVE);
-    memcpy(json, buf->str, len + 1);
+    char *json = mem_strdup(buf->str, MEM_CAT_SERVE);
     strbuf_free(buf);
 
     return json;

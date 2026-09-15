@@ -13,6 +13,7 @@
 #include "../../../jube/jube_language.h"
 #include "../../../lib/log.h"
 #include "../../../lib/mem_factory.h"
+#include "../../../lib/str.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/hashmap.h"
 #include "../../../lib/hashmap_typed.hpp"
@@ -5958,12 +5959,12 @@ static void pm_collect_functions_r(PyMirTranspiler* mt, PyAstNode* node, int par
                 if (attr_dec->attribute) {
                     if (attr_dec->attribute->len == 6 &&
                         strncmp(attr_dec->attribute->chars, "setter", 6) == 0) {
-                        strncat(fc->name, "__setter",
-                            sizeof(fc->name) - strlen(fc->name) - 1);
+                        str_cat(fc->name, strlen(fc->name), sizeof(fc->name), "__setter",
+                                sizeof("__setter") - 1);
                     } else if (attr_dec->attribute->len == 7 &&
                                strncmp(attr_dec->attribute->chars, "deleter", 7) == 0) {
-                        strncat(fc->name, "__deleter",
-                            sizeof(fc->name) - strlen(fc->name) - 1);
+                        str_cat(fc->name, strlen(fc->name), sizeof(fc->name), "__deleter",
+                                sizeof("__deleter") - 1);
                     }
                 }
             }

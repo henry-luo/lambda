@@ -361,17 +361,18 @@ void* arena_calloc(Arena* arena, size_t size) {
     return ptr;
 }
 
-char* arena_strdup(Arena* arena, const char* str) {
-    if (!arena || !str) {
-        return NULL;
-    }
-
-    size_t len = strlen(str) + 1;  // include null terminator
-    char* dup = (char*)arena_alloc(arena, len);
+char* arena_dup_n(Arena* arena, const char* data, size_t len) {
+    if (!arena || !data || len == SIZE_MAX) return NULL;
+    char* dup = (char*)arena_alloc(arena, len + 1);
     if (dup) {
-        memcpy(dup, str, len);
+        memcpy(dup, data, len);
+        dup[len] = '\0';
     }
     return dup;
+}
+
+char* arena_strdup(Arena* arena, const char* str) {
+    return str ? arena_dup_n(arena, str, strlen(str)) : NULL;
 }
 
 char* arena_strndup(Arena* arena, const char* str, size_t n) {
@@ -385,12 +386,7 @@ char* arena_strndup(Arena* arena, const char* str, size_t n) {
         len++;
     }
 
-    char* dup = (char*)arena_alloc(arena, len + 1);
-    if (dup) {
-        memcpy(dup, str, len);
-        dup[len] = '\0';
-    }
-    return dup;
+    return arena_dup_n(arena, str, len);
 }
 
 char* arena_sprintf(Arena* arena, const char* fmt, ...) {

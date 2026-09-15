@@ -365,11 +365,12 @@ JsMirTranspiler* jm_create_mir_transpiler(
     mt->local_funcs = hashmap_new(sizeof(JsLocalFuncEntry), local_func_capacity, 0, 0,
         js_local_func_hash, js_local_func_cmp, NULL, NULL);
     mt->var_scopes = arraylist_new(8);
+    mt->literal_shape_plans = arraylist_new(8);
     mt->loop_stack = arraylist_new(8);
     mt->with_stack = arraylist_new(4);
     mt->for_of_iterators = arraylist_new(8);
     mt->try_ctx_stack = arraylist_new(8);
-    if (!mt->var_scopes || !mt->loop_stack || !mt->for_of_iterators ||
+    if (!mt->var_scopes || !mt->literal_shape_plans || !mt->loop_stack || !mt->for_of_iterators ||
             !mt->try_ctx_stack) {
         jm_destroy_mir_transpiler(mt);
         return NULL;
@@ -391,6 +392,8 @@ void jm_destroy_mir_transpiler(JsMirTranspiler* mt) {
     if (mt && mt->func_em) { mem_free(mt->func_em); mt->func_em = NULL; }
     // §9.3: one closure tracker owns both the active list and save journal.
     if (mt) {
+        arraylist_free(mt->literal_shape_plans);
+        mt->literal_shape_plans = NULL;
         if (mt->last_closure.captures) mem_free(mt->last_closure.captures);
         if (mt->last_closure.journal) mem_free(mt->last_closure.journal);
         if (mt->tdz_closure_captures) mem_free(mt->tdz_closure_captures);

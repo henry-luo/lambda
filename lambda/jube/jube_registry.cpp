@@ -3240,8 +3240,7 @@ static bool jube_host_value_string_copy(Item value, char* out, size_t out_size,
     if (!out || out_size == 0 || get_type_id(value) != LMD_TYPE_STRING) return false;
     String* string = it2s(value);
     if (!string || string->len >= out_size) return false;
-    memcpy(out, string->chars, string->len);
-    out[string->len] = '\0';
+    str_copy(out, out_size, string->chars, string->len);
     if (out_length) *out_length = string->len;
     return true;
 }
@@ -4416,8 +4415,7 @@ static bool jube_specifier_normalize(const char* name, char* out, size_t out_siz
     size_t length = strlen(cursor);
     if (str_ends_with_const(cursor, length, ".js")) length -= 3;
     if (length == 0 || length >= out_size) return false;
-    memcpy(out, cursor, length);
-    out[length] = '\0';
+    str_copy(out, out_size, cursor, length);
     return true;
 }
 
@@ -5192,10 +5190,10 @@ static bool jube_manifest_string(const char* text, const char* key,
     const char* cursor = strstr(text, quoted_key);
     if (!cursor) return false;
     cursor += key_length;
-    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n') cursor++;
+    cursor = str_skip_ascii_space(cursor);
     if (*cursor != ':') return false;
     cursor++;
-    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n') cursor++;
+    cursor = str_skip_ascii_space(cursor);
     if (*cursor != '\"') return false;
     cursor++;
     const char* end = cursor;
@@ -5204,8 +5202,7 @@ static bool jube_manifest_string(const char* text, const char* key,
         end++;
     }
     if (*end != '\"' || (size_t)(end - cursor) >= out_size) return false;
-    memcpy(out, cursor, (size_t)(end - cursor));
-    out[end - cursor] = '\0';
+    str_copy(out, out_size, cursor, (size_t)(end - cursor));
     return true;
 }
 
@@ -5231,10 +5228,10 @@ static bool jube_manifest_array_contains(const char* text, const char* key,
     const char* cursor = strstr(text, quoted_key);
     if (!cursor) return false;
     cursor += key_length;
-    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n') cursor++;
+    cursor = str_skip_ascii_space(cursor);
     if (*cursor != ':') return false;
     cursor++;
-    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n') cursor++;
+    cursor = str_skip_ascii_space(cursor);
     if (*cursor != '[') return false;
     cursor++;
     while (*cursor && *cursor != ']') {
@@ -5266,10 +5263,10 @@ static bool jube_manifest_string_array(const char* text, const char* key,
     const char* cursor = strstr(text, quoted_key);
     if (!cursor) return true;
     cursor += key_length;
-    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n') cursor++;
+    cursor = str_skip_ascii_space(cursor);
     if (*cursor != ':') return false;
     cursor++;
-    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n') cursor++;
+    cursor = str_skip_ascii_space(cursor);
     if (*cursor != '[') return false;
     cursor++;
     while (*cursor && *cursor != ']') {
@@ -5287,8 +5284,7 @@ static bool jube_manifest_string_array(const char* text, const char* key,
         if (*end != '\"' || value_length == 0 || value_length >= sizeof(values[0])) {
             return false;
         }
-        memcpy(values[*out_count], cursor, value_length);
-        values[*out_count][value_length] = '\0';
+        str_copy(values[*out_count], sizeof(values[0]), cursor, value_length);
         (*out_count)++;
         cursor = end + 1;
     }
@@ -5337,8 +5333,7 @@ static bool jube_find_sibling_manifest(const char* manifest_path, const char* mo
     size_t module_dir_length = (size_t)(slash - manifest_path);
     if (module_dir_length == 0 || module_dir_length >= JUBE_MANIFEST_PATH_CAPACITY) return false;
     char module_dir[JUBE_MANIFEST_PATH_CAPACITY];
-    memcpy(module_dir, manifest_path, module_dir_length);
-    module_dir[module_dir_length] = '\0';
+    str_copy(module_dir, sizeof(module_dir), manifest_path, module_dir_length);
     char* parent_slash = strrchr(module_dir, '/');
     if (parent_slash) *parent_slash = '\0';
     const char* root = module_dir[0] ? module_dir : "/";
@@ -5398,10 +5393,10 @@ static bool jube_manifest_uint32(const char* text, const char* key, uint32_t* ou
     const char* cursor = strstr(text, quoted_key);
     if (!cursor) return false;
     cursor += key_length;
-    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n') cursor++;
+    cursor = str_skip_ascii_space(cursor);
     if (*cursor != ':') return false;
     cursor++;
-    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n') cursor++;
+    cursor = str_skip_ascii_space(cursor);
     char* end = NULL;
     unsigned long value = strtoul(cursor, &end, 10);
     if (end == cursor || value > UINT32_MAX) return false;
@@ -5769,8 +5764,7 @@ static bool jube_specifier_catalog_build(void) {
             size_t length = end ? (size_t)(end - cursor) : strlen(cursor);
             char root[JUBE_MANIFEST_PATH_CAPACITY];
             if (length > 0 && length < sizeof(root)) {
-                memcpy(root, cursor, length);
-                root[length] = '\0';
+                str_copy(root, sizeof(root), cursor, length);
                 if (!jube_specifier_catalog_scan_root(root)) return false;
             }
             if (!end) break;
@@ -5876,8 +5870,7 @@ bool jube_discover_hosted_language(const char* selector) {
             size_t length = end ? (size_t)(end - cursor) : strlen(cursor);
             char root[1024];
             if (length > 0 && length < sizeof(root)) {
-                memcpy(root, cursor, length);
-                root[length] = '\0';
+                str_copy(root, sizeof(root), cursor, length);
                 if (jube_scan_manifest_root(root, selector)) return true;
             }
             if (!end) break;
@@ -5932,8 +5925,7 @@ bool jube_node_module_enabled(const char* module_name) {
             char root[JUBE_MANIFEST_PATH_CAPACITY];
             if (length > 0 && length < sizeof(root)) {
                 configured_root_seen = true;
-                memcpy(root, cursor, length);
-                root[length] = '\0';
+                str_copy(root, sizeof(root), cursor, length);
                 bool found = false;
                 bool enabled = jube_module_set_read_node_module(root, module_name, &found);
                 if (found) {

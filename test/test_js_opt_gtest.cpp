@@ -62,7 +62,25 @@ static const char* kEventNames[JS_OPT_EVENT_COUNT] = {
     "uri_error_cache_miss",
     "named_fast_probe",
     "named_fast_hit",
-    "named_fast_miss"
+    "named_fast_miss",
+    "mir_number_admitted",
+    "mir_number_fallback",
+    "mir_native_index_admitted",
+    "mir_native_index_fallback",
+    "mir_dense_index_admitted",
+    "mir_literal_field_admitted",
+    "string_search_ascii",
+    "string_search_unicode",
+    "string_split_ascii",
+    "string_split_unicode",
+    "string_slice_ascii",
+    "string_slice_unicode",
+    "string_char_access_ascii",
+    "string_char_access_unicode",
+    "string_concat_ascii",
+    "string_concat_unicode",
+    "ascii_substring_cache_hit",
+    "ascii_substring_cache_miss"
 };
 
 static const char* kReasonNames[JS_OPT_REASON_COUNT] = {
@@ -441,7 +459,7 @@ static const char* find_last_before(const char* begin, const char* end,
     return last;
 }
 
-static bool mir_branch_join_uses_merged_carrier(const char* mir,
+static bool mir_branch_join_has_defined_carrier(const char* mir,
         const char* function_prefix, const char* branch_anchor,
         const char* branch_opcode) {
     const char* function = mir && function_prefix
@@ -518,16 +536,29 @@ static bool mir_branch_join_uses_merged_carrier(const char* mir,
     const char* join = strstr(branch_target, join_marker);
     if (!join) join = strstr(branch_target, join_marker_crlf);
     const char* error_test = join ? strstr(join, "\n\tursh\t") : NULL;
-    if (!error_test || error_test >= function_end) return false;
-    const char* first_comma = strchr(error_test, ',');
-    if (!first_comma || first_comma >= function_end) return false;
-    const char* carrier = first_comma + 1;
-    while (*carrier == ' ' || *carrier == '\t') carrier++;
-    size_t carrier_len = 0;
-    while (carrier[carrier_len] && carrier[carrier_len] != ',' &&
-            carrier[carrier_len] != '\n') carrier_len++;
-    return carrier_len == strlen(merged) &&
-        strncmp(carrier, merged, carrier_len) == 0;
+    if (error_test && error_test < function_end) {
+        const char* first_comma = strchr(error_test, ',');
+        if (!first_comma || first_comma >= function_end) return false;
+        const char* carrier = first_comma + 1;
+        while (*carrier == ' ' || *carrier == '\t') carrier++;
+        size_t carrier_len = 0;
+        while (carrier[carrier_len] && carrier[carrier_len] != ',' &&
+                carrier[carrier_len] != '\n') carrier_len++;
+        if (carrier_len == strlen(merged) &&
+                strncmp(carrier, merged, carrier_len) == 0) {
+            return true;
+        }
+    }
+
+    // A branch may already have routed every fallible helper before its
+    // normal edge. In that form D8.4.3 still requires the right arm to
+    // define the same merged result rather than leaking an arm-local value.
+    char right_move[40];
+    int move_len = snprintf(right_move, sizeof(right_move), "\n\tmov\t%s,",
+        merged);
+    if (move_len <= 0 || move_len >= (int)sizeof(right_move)) return false;
+    const char* right_publish = strstr(branch_target, right_move);
+    return right_publish && right_publish < join;
 }
 
 }  // namespace
@@ -641,6 +672,200 @@ TEST(JsOpt, DenseArrayStoreTakesFastPath) {
     expect_trace_off_same("array_dense_store", source, output);
 }
 
+TEST(JsOpt, MirNumberPlanUsesF64AndKeepsPartialFactsBoxed) {
+    const char* source =
+        "function nativeNumberLoop() {\n"
+        "  let total = 0; for (let i = 0; i < 16; i++) total = total + 0.5;\n"
+        "  return total === 8;\n"
+        "}\n"
+        "function boolMutation() {\n"
+        "  let value = true; value = value + 0.5; return value === 1.5;\n"
+        "}\n"
+        "function partialNumber(value) { return value + 1; }\n"
+        "if (!nativeNumberLoop() || !boolMutation() || partialNumber('n') !== 'n1') "
+        "throw new Error('number plan changed semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("mir_number_plan", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_MIR_NUMBER_ADMITTED][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_MIR_NUMBER_FALLBACK][2], 0u);
+
+    char* mir = read_fixture_mir("mir_number_plan");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "dadd"), nullptr);
+    EXPECT_NE(strstr(mir, "dlt"), nullptr);
+    EXPECT_NE(strstr(mir, "call\tjs_add"), nullptr);
+    free(mir);
+    expect_trace_off_same("mir_number_plan", source, output);
+}
+
+TEST(JsOpt, MirNativeNumberIndexKeepsKeyUnboxed) {
+    const char* source =
+        "function nativeRead(value) { return value[0]; }\n"
+        "function numericSum(value) {\n"
+        "  let total = 0; for (let i = 0; i < value.length; i++) total += value[i];\n"
+        "  return total;\n"
+        "}\n"
+        "function negativeZeroRead(value) { return value[-0]; }\n"
+        "function negativeRead(value) { return value[-1]; }\n"
+        "function fractionalRead(value) { const index = 1.5; return value[index]; }\n"
+        "function nanRead(value) { return value[0 / 0]; }\n"
+        "function infinityRead(value) { return value[1 / 0]; }\n"
+        "function largeRead(value) { return value[4294967295]; }\n"
+        "function stringRead(value) { return value[1]; }\n"
+        "function partialRead(value, index) { return value[index]; }\n"
+        "function packedTaggedRead() {\n"
+        "  const values = ['dense', 'read']; let text = '';\n"
+        "  for (let i = 0; i < values.length; i++) text += values[i]; return text;\n"
+        "}\n"
+        "function accessorFallbackRead() {\n"
+        "  const values = ['stale']; Object.defineProperty(values, '0', {\n"
+        "    get: function() { return 'accessor'; }, configurable: true });\n"
+        "  return values[0];\n"
+        "}\n"
+        "var array = [4, 5]; array[-1] = 'negative'; array[1.5] = 'fractional';\n"
+        "array[NaN] = 'nan'; array[Infinity] = 'infinity'; array[4294967295] = 'large';\n"
+        "var hole = new Array(1); Object.prototype[0] = 'proto-index';\n"
+        "var result = nativeRead(array) === 4 && numericSum(array) === 9 &&\n"
+        "  numericSum(new Uint8Array([4, 5])) === 9 && fractionalRead(array) === 'fractional' &&\n"
+        "  negativeZeroRead(array) === 4 && negativeRead(array) === 'negative' &&\n"
+        "  nanRead(array) === 'nan' && infinityRead(array) === 'infinity' &&\n"
+        "  largeRead(array) === 'large' && largeRead(new Uint8Array(1)) === undefined &&\n"
+        "  stringRead('abc') === 'b' && partialRead(array, 1) === 5 &&\n"
+        "  packedTaggedRead() === 'denseread' && accessorFallbackRead() === 'accessor' &&\n"
+        "  nativeRead(hole) === 'proto-index';\n"
+        "delete Object.prototype[0];\n"
+        "if (!result) throw new Error('native index changed semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("mir_native_index", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_MIR_NATIVE_INDEX_ADMITTED][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_MIR_NATIVE_INDEX_FALLBACK][2], 0u);
+    EXPECT_GT(trace.events[JS_OPT_MIR_DENSE_INDEX_ADMITTED][1], 0u);
+
+    char* mir = read_fixture_mir("mir_native_index");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "call\tjs_elements_get_number"), nullptr);
+    EXPECT_NE(strstr(mir, "call\tjs_get_reference"), nullptr);
+    EXPECT_NE(strstr(mir, "\tlsh\t"), nullptr);
+    free(mir);
+    expect_trace_off_same("mir_native_index", source, output);
+}
+
+TEST(JsOpt, MirLiteralFieldPlanUsesExactShape) {
+    const char* source =
+        "function literalFields() {\n"
+        "  const point = { x: 7.5, label: 'field' };\n"
+        "  return point.x + ':' + point.label;\n"
+        "}\n"
+        "function makeReturnedPoint() { return { x: 3.5, label: 'returned' }; }\n"
+        "function returnedFields() {\n"
+        "  return makeReturnedPoint().x + ':' + makeReturnedPoint().label;\n"
+        "}\n"
+        "function consumeDirectArgument(point) { return point.x + ':' + point.label; }\n"
+        "function directArgumentFields() {\n"
+        "  return consumeDirectArgument({ x: 5.5, label: 'argument' });\n"
+        "}\n"
+        "function typeTransitionFallback() {\n"
+        "  const point = { x: 1.5 }; point.x = 'changed'; return point.x;\n"
+        "}\n"
+        "function directStore() {\n"
+        "  const point = { x: 1.5 }; point.x = 2.5; return point.x;\n"
+        "}\n"
+        "function frozenStoreFallback() {\n"
+        "  const point = { x: 1.5 }; Object.freeze(point); point.x = 2.5; return point.x;\n"
+        "}\n"
+        "function accessorFallback() {\n"
+        "  const point = { x: 1.5 }; let stored = 'accessor'; Object.defineProperty(point, 'x', {\n"
+        "    get: function() { return stored; }, set: function(value) { stored = value; }, configurable: true });\n"
+        "  point.x = 'setter';\n"
+        "  return point.x;\n"
+        "}\n"
+        "class ClassFieldPlan {\n"
+        "  x = 6.5; label = 'class';\n"
+        "  read() { return this.x + ':' + this.label; }\n"
+        "  store() { this.x = 8.5; return this.x; }\n"
+        "}\n"
+        "function classFields() {\n"
+        "  const point = new ClassFieldPlan(); return point.read() + ':' + point.store();\n"
+        "}\n"
+        "function classAccessorEscapeFallback() {\n"
+        "  const point = new ClassFieldPlan();\n"
+        "  Object.defineProperty(point, 'x', { get: function() { return 'escaped'; }, configurable: true });\n"
+        "  return point.read();\n"
+        "}\n"
+        "if (literalFields() !== '7.5:field' || returnedFields() !== '3.5:returned' ||\n"
+        "    directArgumentFields() !== '5.5:argument' ||\n"
+        "    directStore() !== 2.5 ||\n"
+        "    typeTransitionFallback() !== 'changed' || frozenStoreFallback() !== 1.5 ||\n"
+        "    accessorFallback() !== 'setter' || classFields() !== '6.5:class:8.5' ||\n"
+        "    classAccessorEscapeFallback() !== 'escaped:class') throw new Error('field plan changed semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("mir_literal_field", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_MIR_LITERAL_FIELD_ADMITTED][1], 0u);
+
+    char* mir = read_fixture_mir("mir_literal_field");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "js_new_literal_object_with_typemap"), nullptr);
+    EXPECT_NE(strstr(mir, "js_set_class_instance_shape"), nullptr);
+    EXPECT_NE(strstr(mir, "call\tjs_get_name_id"), nullptr);
+    free(mir);
+    expect_trace_off_same("mir_literal_field", source, output);
+}
+
+TEST(JsOpt, StringLeavesProfileAsciiAndUnicode) {
+    const char* source =
+        "var ascii = 'ab,cd'; var unicode = 'A😀,B';\n"
+        "var value = ascii.indexOf('b') + ascii.split(',').length + ascii.slice(1).length +\n"
+        "  ascii.charCodeAt(0) + (ascii + 'z').length;\n"
+        "value += unicode.indexOf('😀') + unicode.split(',').length + unicode.slice(1).length +\n"
+        "  unicode.charCodeAt(1) + (unicode + 'z').length;\n"
+        "if (!(value > 0)) throw new Error('string leaf profile changed semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("string_leaves", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_STRING_SEARCH_ASCII][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_STRING_SEARCH_UNICODE][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_STRING_SPLIT_ASCII][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_STRING_SPLIT_UNICODE][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_STRING_SLICE_ASCII][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_STRING_SLICE_UNICODE][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_STRING_CHAR_ACCESS_ASCII][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_STRING_CHAR_ACCESS_UNICODE][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_STRING_CONCAT_ASCII][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_STRING_CONCAT_UNICODE][1], 0u);
+    expect_trace_off_same("string_leaves", source, output);
+}
+
+TEST(JsOpt, AsciiSubstringValueCacheReusesLeaves) {
+    const char* source =
+        "var source = 'alpha:bravo'; var text = '';\n"
+        "for (var i = 0; i < 4; i++) text += source.slice(0, 5);\n"
+        "if (text !== 'alphaalphaalphaalpha') throw new Error('substring cache changed semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("ascii_substring_cache", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_ASCII_SUBSTRING_CACHE_MISS][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_ASCII_SUBSTRING_CACHE_HIT][1], 0u);
+    expect_trace_off_same("ascii_substring_cache", source, output);
+}
+
 TEST(JsOpt, NonExtensibleArrayFallsBack) {
     const char* source =
         "var a = [1, 'seed']; Object.preventExtensions(a); a[2] = 1;\n"
@@ -669,9 +894,9 @@ TEST(JsOpt, Result29NumberIndexedLaneUsesSharedReferenceSemantics) {
 
     char* mir = read_fixture_mir("result29_number_indexed_lane");
     ASSERT_NE(mir, nullptr);
-    // D1.3: numeric keys use the same property read/write kernels as every
-    // other indexed key, so reference semantics have one compiler path.
-    EXPECT_NE(strstr(mir, "js_get_reference"), nullptr);
+    // D1.3: known Number keys use the native-key element kernel; the write
+    // stays on the canonical Set completion path.
+    EXPECT_NE(strstr(mir, "js_elements_get_number"), nullptr);
     EXPECT_NE(strstr(mir, "js_set"), nullptr);
     EXPECT_EQ(strstr(mir, "js_get_number_reference"), nullptr);
     EXPECT_EQ(strstr(mir, "js_set_number_assignment"), nullptr);
@@ -836,10 +1061,12 @@ TEST(JsOpt, NamedLoadStoreUsesTierBPath) {
 TEST(JsOpt, MirLogicalJoinPublishesMergedCarrier) {
     const char* source =
         "function logicalJoinCarrier(e) {\n"
-        "  return (null == e._pf && (e._pf = {ready: true}), e._pf);\n"
+        "  try { return (null == e._pf && (e._pf = {ready: true}), e._pf); }\n"
+        "  catch (error) { return 'threw'; }\n"
         "}\n"
         "var state = {_pf: {ready: true}};\n"
-        "if (!logicalJoinCarrier(state).ready) throw new Error('bad join');\n"
+        "var throwing = {}; Object.defineProperty(throwing, '_pf', {get: function() { throw new Error('expected'); }});\n"
+        "if (!logicalJoinCarrier(state).ready || logicalJoinCarrier(throwing) !== 'threw') throw new Error('bad join');\n"
         "console.log('OPT_OK');\n";
     TraceResult trace;
     char output[4096];
@@ -852,9 +1079,10 @@ TEST(JsOpt, MirLogicalJoinPublishesMergedCarrier) {
         "mir_logical_join_carrier");
     char* mir = read_text(mir_path);
     ASSERT_NE(mir, nullptr);
-    // D8.4.3: a branch-local RHS register is undefined on the short-circuit
-    // edge; the post-join ERROR test must consume the merged expression value.
-    EXPECT_TRUE(mir_branch_join_uses_merged_carrier(
+    // D8.4.3: a short-circuit RHS value is undefined on the other edge. The
+    // normal join must use one carrier, whether completion is checked there
+    // or each fallible arm has already routed before reaching the join.
+    EXPECT_TRUE(mir_branch_join_has_defined_carrier(
         mir, "_js_logicalJoinCarrier_", "js_equal,", "bt"));
     free(mir);
     expect_trace_off_same("mir_logical_join_carrier", source, output);
@@ -863,10 +1091,14 @@ TEST(JsOpt, MirLogicalJoinPublishesMergedCarrier) {
 TEST(JsOpt, MirConditionalJoinPublishesMergedCarrier) {
     const char* source =
         "function conditionalJoinCarrier(flag, state) {\n"
-        "  return ((flag ? (state.x = {ready: true}) : state.x), state.x);\n"
+        "  'use strict';\n"
+        "  try { return ((flag ? (state.x = {ready: true}) : state.x), state.x); }\n"
+        "  catch (error) { return 'threw'; }\n"
         "}\n"
         "var state = {x: {ready: true}};\n"
-        "if (!conditionalJoinCarrier(false, state).ready) throw new Error('bad join');\n"
+        "var throwingGet = {}; Object.defineProperty(throwingGet, 'x', {get: function() { throw new Error('expected'); }});\n"
+        "var throwingSet = {}; Object.defineProperty(throwingSet, 'x', {value: 0, writable: false});\n"
+        "if (!conditionalJoinCarrier(false, state).ready || conditionalJoinCarrier(false, throwingGet) !== 'threw' || conditionalJoinCarrier(true, throwingSet) !== 'threw') throw new Error('bad join');\n"
         "console.log('OPT_OK');\n";
     TraceResult trace;
     char output[4096];
@@ -879,9 +1111,9 @@ TEST(JsOpt, MirConditionalJoinPublishesMergedCarrier) {
         "mir_conditional_join_carrier");
     char* mir = read_text(mir_path);
     ASSERT_NE(mir, nullptr);
-    // D8.4.3: both conditional arms must publish the merged destination before
-    // the post-join ERROR test; neither arm-local helper register dominates it.
-    EXPECT_TRUE(mir_branch_join_uses_merged_carrier(
+    // D8.4.3: both conditional arms publish one result, while the throwing
+    // getter/setter calls above exercise the arm-local completion routes.
+    EXPECT_TRUE(mir_branch_join_has_defined_carrier(
         mir, "_js_conditionalJoinCarrier_", "js_is_truthy,", "bf"));
     free(mir);
     expect_trace_off_same("mir_conditional_join_carrier", source, output);

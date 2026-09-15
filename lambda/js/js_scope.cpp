@@ -674,7 +674,7 @@ JsScript* js_script_adopt_transpiler(JsTranspiler* tp, Runtime* runtime,
     if (!tp || !tp->source) return NULL;
 
     const char* script_reference = reference ? reference : "<inline-js>";
-    char* source_copy = (char*)mem_alloc(tp->source_length + 1, MEM_CAT_SYSTEM);
+    char* source_copy = mem_dup_n(tp->source, tp->source_length, MEM_CAT_SYSTEM);
     char* reference_copy = mem_strdup(script_reference, MEM_CAT_SYSTEM);
     JsScript* script = (JsScript*)mem_calloc(1, sizeof(JsScript), MEM_CAT_SYSTEM);
     if (!source_copy || !reference_copy || !script) {
@@ -684,8 +684,6 @@ JsScript* js_script_adopt_transpiler(JsTranspiler* tp, Runtime* runtime,
         return NULL;
     }
 
-    memcpy(source_copy, tp->source, tp->source_length);
-    source_copy[tp->source_length] = '\0';
     memcpy(script, tp, sizeof(JsScript));
     script->source = source_copy;
     script->reference = reference_copy;

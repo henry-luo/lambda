@@ -394,9 +394,7 @@ int rdb_query_build(Pool* pool, RdbSchema* schema, const RdbQueryDesc* desc,
     }
 
     // copy SQL string
-    size_t sql_len = strlen(qb.sql->str);
-    out_query->sql = (char*)mem_alloc(sql_len + 1, MEM_CAT_INPUT_OTHER);
-    memcpy(out_query->sql, qb.sql->str, sql_len + 1);
+    out_query->sql = mem_strdup(qb.sql->str, MEM_CAT_INPUT_OTHER);
     strbuf_free(qb.sql);
 
     // copy params

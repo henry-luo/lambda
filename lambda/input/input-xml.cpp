@@ -571,8 +571,7 @@ static Item parse_element(InputContext& ctx, const char **xml, int depth) {
                         Input* input = ctx.input();
                         input->xml_stylesheet_href = (char*)pool_alloc(input->pool, href_len + 1);
                         if (input->xml_stylesheet_href) {
-                            strncpy(input->xml_stylesheet_href, href_start, href_len);
-                            input->xml_stylesheet_href[href_len] = '\0';
+                            str_copy(input->xml_stylesheet_href, href_len + 1, href_start, href_len);
                             log_debug("[XML Parser] Found xml-stylesheet href: %s", input->xml_stylesheet_href);
                         }
                     }

@@ -119,7 +119,7 @@ static inline bool is_attribute_name_char(char c) {
  * skip_ws - Skip whitespace
  */
 static inline const char* skip_ws(const char* p) {
-    while (*p == ' ' || *p == '\t') p++;
+    p = str_skip_line_space(p);
     return p;
 }
 
@@ -305,7 +305,7 @@ HtmlBlockType detect_html_block_type(const char* line) {
         if (tag_end) {
             // Check if rest of line is only whitespace
             const char* rest = tag_end;
-            while (*rest == ' ' || *rest == '\t') rest++;
+            rest = str_skip_line_space(rest);
             if (*rest == '\0' || *rest == '\n' || *rest == '\r') {
                 return HtmlBlockType::TYPE_7;
             }

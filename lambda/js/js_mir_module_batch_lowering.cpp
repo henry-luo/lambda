@@ -240,21 +240,15 @@ static void js_debug_func_name_entry_free(void* item) {
 }
 
 static char* js_debug_strdup(const char* s) {
-    if (!s) return NULL;
-    size_t len = strlen(s) + 1;
-    char* copy = (char*)mem_alloc(len, MEM_CAT_JS_RUNTIME);
-    if (copy) memcpy(copy, s, len);
-    return copy;
+    return s ? mem_strdup(s, MEM_CAT_JS_RUNTIME) : NULL;
 }
 
 static char* js_debug_display_name(JsFuncCollected* fc) {
     if (!fc) return js_debug_strdup("<anonymous>");
     if (fc->node && fc->node->name && fc->node->name->len > 0) {
         int len = (int)fc->node->name->len;
-        char* name = (char*)mem_alloc((size_t)len + 1, MEM_CAT_JS_RUNTIME);
+        char* name = mem_dup_n(fc->node->name->chars, len, MEM_CAT_JS_RUNTIME);
         if (!name) return NULL;
-        memcpy(name, fc->node->name->chars, (size_t)len);
-        name[len] = '\0';
         return name;
     }
     const char* raw = fc->name;
@@ -265,10 +259,8 @@ static char* js_debug_display_name(JsFuncCollected* fc) {
     while (end > 0 && raw[end - 1] >= '0' && raw[end - 1] <= '9') end--;
     if (end > 0 && end < len && raw[end - 1] == '_') len = end - 1;
     if (len <= 0) return js_debug_strdup("<anonymous>");
-    char* name = (char*)mem_alloc((size_t)len + 1, MEM_CAT_JS_RUNTIME);
+    char* name = mem_dup_n(raw, len, MEM_CAT_JS_RUNTIME);
     if (!name) return NULL;
-    memcpy(name, raw, (size_t)len);
-    name[len] = '\0';
     return name;
 }
 

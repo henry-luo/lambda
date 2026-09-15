@@ -7,6 +7,7 @@
 #include "event.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include "../lib/str.h"
 #include "../lambda/input/css/dom_element.hpp"
 
 #include <ctype.h>
@@ -355,14 +356,10 @@ bool EventStateLog::init(const char* doc_name, const char* doc_url) {
     category->enabled = 1;
     category->level = LOG_LEVEL_DEBUG;
     category->output = out;
-    strncpy(category->output_filename, path,
-            sizeof(category->output_filename) - 1);
-    category->output_filename[sizeof(category->output_filename) - 1] = '\0';
+    str_copy(category->output_filename, sizeof(category->output_filename), path, strlen(path));
 
     if (doc_url && *doc_url) {
-        size_t n = strlen(doc_url);
-        this->doc_url = (char*)mem_alloc(n + 1, MEM_CAT_SYSTEM);
-        if (this->doc_url) memcpy(this->doc_url, doc_url, n + 1);
+        this->doc_url = mem_strdup(doc_url, MEM_CAT_SYSTEM);
     }
 
     enabled = true;

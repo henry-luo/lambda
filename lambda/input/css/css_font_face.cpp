@@ -35,6 +35,10 @@ static void css_font_face_clear_heap_src(CssFontFaceDescriptor* descriptor) {
     descriptor->src_count = 0;
 }
 
+static char* css_font_face_dup(Pool* pool, const char* text, size_t len) {
+    return pool ? pool_dup_n(pool, text, len) : mem_dup_n(text, len, MEM_CAT_INPUT_CSS);
+}
+
 static void css_font_face_clear_heap_unicode_ranges(CssFontFaceDescriptor* descriptor) {
     if (!descriptor) return;
     if (descriptor->unicode_ranges) {
@@ -130,18 +134,7 @@ static char* trim_and_unquote(const char* str, size_t len, Pool* pool) {
         len -= 2;
     }
 
-    // Allocate and copy result
-    char* result;
-    if (pool) {
-        result = (char*)pool_alloc(pool, len + 1);
-    } else {
-        result = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_CSS);
-    }
-    if (result) {
-        memcpy(result, str, len);
-        result[len] = '\0';
-    }
-    return result;
+    return css_font_face_dup(pool, str, len);
 }
 
 // Helper: extract format from "format('truetype')" or "format(woff)"
@@ -154,7 +147,7 @@ static char* extract_format_value(const char* str, Pool* pool) {
     fmt_start += 7; // skip "format("
 
     // Skip whitespace
-    while (*fmt_start == ' ' || *fmt_start == '\t') fmt_start++;
+    fmt_start = str_skip_line_space(fmt_start);
 
     // Skip opening quote if present
     char quote_char = 0;
@@ -173,17 +166,7 @@ static char* extract_format_value(const char* str, Pool* pool) {
     size_t len = fmt_end - fmt_start;
     if (len == 0) return nullptr;
 
-    char* result;
-    if (pool) {
-        result = (char*)pool_alloc(pool, len + 1);
-    } else {
-        result = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_CSS);
-    }
-    if (result) {
-        memcpy(result, fmt_start, len);
-        result[len] = '\0';
-    }
-    return result;
+    return css_font_face_dup(pool, fmt_start, len);
 }
 
 // Helper: extract URL from "url( path )" format
@@ -200,7 +183,7 @@ static char* extract_url_value(const char* src_value, Pool* pool) {
     url_start += 4; // skip "url("
 
     // Skip whitespace after "url("
-    while (*url_start == ' ' || *url_start == '\t') url_start++;
+    url_start = str_skip_line_space(url_start);
 
     // Skip opening quote if present
     char quote_char = 0;
@@ -219,17 +202,7 @@ static char* extract_url_value(const char* src_value, Pool* pool) {
     }
 
     size_t len = url_end - url_start;
-    char* result;
-    if (pool) {
-        result = (char*)pool_alloc(pool, len + 1);
-    } else {
-        result = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_CSS);
-    }
-    if (result) {
-        memcpy(result, url_start, len);
-        result[len] = '\0';
-    }
-    return result;
+    return css_font_face_dup(pool, url_start, len);
 }
 
 // Parse all src entries from a src declaration value
@@ -325,16 +298,8 @@ static int parse_src_entries(const char* src_value, CssFontFaceSrc* entries, int
         size_t entry_len = entry_end - url_start;
         log_debug("[CSS FontFace] Entry string length: %zu", entry_len);
 
-        char* entry_str;
-        if (pool) {
-            entry_str = (char*)pool_alloc(pool, entry_len + 1);
-        } else {
-            entry_str = (char*)mem_alloc(entry_len + 1, MEM_CAT_INPUT_CSS);
-        }
+        char* entry_str = css_font_face_dup(pool, url_start, entry_len);
         if (!entry_str) break;
-
-        memcpy(entry_str, url_start, entry_len);
-        entry_str[entry_len] = '\0';
 
         // Extract URL and format from this entry
         entries[count].url = extract_url_value(entry_str, pool);
@@ -349,8 +314,7 @@ static int parse_src_entries(const char* src_value, CssFontFaceSrc* entries, int
             if (url_len > 60) {
                 snprintf(url_preview, sizeof(url_preview), "%.57s...", entries[count].url);
             } else {
-                strncpy(url_preview, entries[count].url, sizeof(url_preview) - 1);
-                url_preview[sizeof(url_preview) - 1] = '\0';
+                str_copy(url_preview, sizeof(url_preview), entries[count].url, url_len);
             }
             log_debug("[CSS FontFace] Parsed src entry %d: url='%s' (len=%zu), format='%s'",
                 count, url_preview, url_len, entries[count].format ? entries[count].format : "(none)");

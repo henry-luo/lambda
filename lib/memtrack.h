@@ -217,12 +217,17 @@ void* mem_realloc(void* ptr, size_t new_size, MemCategory category);
 void mem_free(void* ptr);
 
 /**
+ * Duplicate exactly len bytes and append a null terminator
+ */
+char* mem_dup_n(const char* data, size_t len, MemCategory category);
+
+/**
  * Duplicate string with tracking
  */
 char* mem_strdup(const char* str, MemCategory category);
 
 /**
- * Duplicate string with length limit
+ * Duplicate at most max_len bytes and append a null terminator
  */
 char* mem_strndup(const char* str, size_t max_len, MemCategory category);
 
@@ -234,6 +239,7 @@ void* mem_alloc_loc(size_t size, MemCategory category, int line);
 void* mem_calloc_loc(size_t count, size_t size, MemCategory category, int line);
 void* mem_realloc_loc(void* ptr, size_t new_size, MemCategory category, int line);
 void mem_free_loc(void* ptr, int line);
+char* mem_dup_n_loc(const char* data, size_t len, MemCategory category, int line);
 char* mem_strdup_loc(const char* str, MemCategory category, int line);
 char* mem_strndup_loc(const char* str, size_t max_len, MemCategory category, int line);
 
@@ -243,6 +249,7 @@ char* mem_strndup_loc(const char* str, size_t max_len, MemCategory category, int
 #define mem_calloc(count, size, cat)   mem_calloc_loc(count, size, cat, __LINE__)
 #define mem_realloc(ptr, size, cat)    mem_realloc_loc(ptr, size, cat, __LINE__)
 #define mem_free(ptr)                  mem_free_loc(ptr, __LINE__)
+#define mem_dup_n(data, len, cat)      mem_dup_n_loc(data, len, cat, __LINE__)
 #define mem_strdup(str, cat)           mem_strdup_loc(str, cat, __LINE__)
 #define mem_strndup(str, max_len, cat) mem_strndup_loc(str, max_len, cat, __LINE__)
 

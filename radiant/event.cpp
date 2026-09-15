@@ -4841,10 +4841,8 @@ static bool dispatch_form_copy_selection(EventContext* evcon, DomElement* elem,
         return false;
     }
     FormControlProp* form = elem->form;
-    char* buf = (char*)mem_alloc((size_t)(end - start) + 1, MEM_CAT_TEMP);
+    char* buf = mem_dup_n(form->current_value + start, end - start, MEM_CAT_TEMP);
     if (!buf) return false;
-    memcpy(buf, form->current_value + start, end - start);
-    buf[end - start] = '\0';
     clipboard_copy_text(buf);
     log_debug("%s: copied form selection bytes=%u",
               prefix ? prefix : "form copy", end - start);
@@ -5368,8 +5366,6 @@ static char* editing_text_drag_copy_range_text(View* range_view,
     if (!range_view || !surface) return nullptr;
     editing_text_drag_clamp_range(range_view, surface, &start, &end);
     uint32_t len = end > start ? end - start : 0;
-    char* out = (char*)mem_alloc((size_t)len + 1, MEM_CAT_TEMP);
-    if (!out) return nullptr;
     const char* src = "";
     if (editing_surface_is_text_control(surface)) {
         DomElement* elem = surface->owner;
@@ -5381,9 +5377,7 @@ static char* editing_text_drag_copy_range_text(View* range_view,
         DomText* text = lam::dom_require_text(static_cast<DomNode*>(range_view));
         src = (text && text->text) ? text->text : "";
     }
-    if (len > 0) memcpy(out, src + start, len);
-    out[len] = '\0';
-    return out;
+    return mem_dup_n(len > 0 ? src + start : "", len, MEM_CAT_TEMP);
 }
 
 static uint32_t editing_text_drag_adjust_after_delete(uint32_t pos,

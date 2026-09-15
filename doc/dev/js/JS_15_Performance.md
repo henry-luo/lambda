@@ -1,11 +1,11 @@
 # LambdaJS — Performance & Optimization
 
-> **Last verified against tree:** 2026-08-16 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-09-15
 
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document is the cross-cutting performance catalog. It records the optimizations that exist in the engine today (each grounded in code with a `file:line` anchor), summarizes the benchmark findings from the development tuning logs, and points to the sibling doc that *owns* each mechanism in full detail. It does not re-derive any mechanism — for the how, follow the link.
 >
-> **Primary sources (mechanisms):** `lambda/js/js_runtime_function.cpp` (transient args stack), `lambda/js/js_mir_expression_lowering.cpp` (constant folding, native arithmetic, const-bound dispatch), `lambda/js/js_mir_calls_boxing_types.cpp` (boxing/native predicates), `lambda/js/js_mir_function_collection_class_inference.cpp` (dual-version inference), `lambda/js/js_runtime.cpp` (`js_map_get_fast`, `js_get_shaped_slot`, shape cache, regex cursor), `lambda/lambda-data.hpp` (`TypeMap` hash + `slot_entries`), `lambda/js/js_mir_entrypoints_require.cpp` (interpreter-vs-JIT selection), `lambda/js/js_typed_array.cpp` (raw bulk paths), `lambda/js/js_globals.cpp` (ASCII interning), `lambda/sys_func_registry.c` (import table).
-> **Primary sources (numbers):** the `vibe/jube/Transpile_Js_Tune*.md` and `Transpile_Js2{6,7,8}*.md` development logs.
+> **Primary sources (mechanisms):** `lambda/js/js_runtime_function.cpp` (transient args stack and known-code source setup), `lambda/js/js_mir_expression_lowering.cpp` (constant folding, numeric/property plans, const-bound dispatch), `lambda/js/js_mir_calls_boxing_types.cpp` (boxing/native predicates), `lambda/js/js_mir_function_collection_class_inference.cpp` (dual-version inference), `lambda/js/js_runtime.cpp` (TypeMap object creation, string leaves, regex cursor), `lambda/js/js_runtime_state.hpp` (rooted ASCII substring cache), `lambda/runtime/mir_emitter_shared.hpp` (shared numeric/address plans), `lambda/lambda-data.hpp` (`TypeMap` hash + `slot_entries`), `lambda/js/js_mir_entrypoints_require.cpp` (interpreter-vs-JIT selection), `lambda/js/js_typed_array.cpp` (raw bulk paths), `lambda/js/js_globals.cpp` (ASCII interning), `lambda/sys_func_registry.c` (import table).
+> **Primary sources (numbers):** [JS Tune11](../../../vibe/jube/JS_Tune11.md) Result45 and paired A/B, plus the historical `vibe/jube/Transpile_Js_Tune*.md` and `Transpile_Js2{6,7,8}*.md` development logs.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
 
 ---
@@ -72,12 +72,41 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
 
 - **Constant folding + dead-branch elimination.** `jm_try_fold_const` (`js_mir_expression_lowering.cpp:1552`) is a conservative compile-time evaluator over literal/unary/binary subtrees, gated by `jm_const_fold_enabled` (`:1543`, on unless `LAMBDA_JS_CONST_FOLD=0`); folded values are emitted at value sites through `jm_emit_folded_at_value_site` (`:1661`) and a folded `if` condition lets `jm_transpile_if` drop the dead branch. *Owner:* [JS_04 §7](JS_04_MIR_Lowering.md). *Measured (Tune3):* the shift-operator straight-line cluster (`S11.7.*_A4`, 12 tests) fell 4.55 s → 0.63 s (−86%) in a controlled A/B, with differential fold-vs-runtime tests confirming bit-identical results.
 - **Native arithmetic & dual `_n` versions.** Numeric chains stay unboxed in native `MIR_T_I64`/`MIR_T_D` registers whenever inference proves operand and consumer are numeric — `jm_is_native_type` admits exactly INT/FLOAT/BOOL (`js_mir_calls_boxing_types.cpp:1125`), and `jm_box_native` (`:767`) crosses back to a boxed Item only at a sink. On top of this, type inference can build a separate native-signature version of a user function: the collection/inference pass keys call rewrites off `fc->has_native_version` + `fc->native_func_item` + the per-parameter `fc->param_types` (`js_mir_function_collection_class_inference.cpp:158`, `:213`). *Owner:* [JS_04 §2–4](JS_04_MIR_Lowering.md), [JS_05](JS_05_Functions_Closures.md). *Measured (Js26):* pure-numeric benchmarks (fannkuch, pidigits, ack, nqueens, sieve) reached or beat V8; the gap is widest exactly where values cannot stay native (see §4).
+- **Tune11 shared numeric and native-key plans.** `em_numeric_op_plan` is a
+  physical MIR table shared below the language boundary: JavaScript admits it
+  only after both operands prove INT/FLOAT, while a String/object/BigInt or
+  incomplete proof takes the existing JS kernel. `JsMirReference` keeps a
+  proven computed Number key native until the post-evaluation selector; a
+  packed tagged literal read then pays only its receiver/layout/bounds/presence
+  checks and the shared element-address/load. Exact literal/constructor
+  TypeMap recipes similarly select a guarded direct own-field slot, with one
+  NameId fallback. These are immutable plans, not ICs (**D1.3**, **D5.3.4**,
+  **D8.4.1v2–D8.4.3v2**). *Owner:* [JS_04 §4–4.1](JS_04_MIR_Lowering.md),
+  [JS Tune11](../../../vibe/jube/JS_Tune11.md). *Measured:* the same-source
+  11-pair A/B gives `spectralnorm` 0.5048x, `matmul` 0.5546x, and `array1`
+  0.5785x candidate/control, with exact output on every pair.
 - **1-character ASCII interning.** A single-byte ASCII result of `str[i]` / `charAt` is returned from a process-wide 128-entry pool `g_ascii_char_pool` via `js_intern_ascii_char` (`js_globals.cpp:4356`, `:4394`), used by the string-index fast path (`js_runtime.cpp:6410`), instead of allocating a fresh `String`. Strings are immutable so reference identity is unobservable, making interning behaviorally identical. *Owner:* [JS_10 — Built-ins](JS_10_Builtins.md). *Measured (Tune1 §7.2.B):* 2M `str[i]` calls −14%, 2M of a hex-format helper −12%; the only piece of that round's string-alloc proposals that survived verification (the multi-operand concat fusion and an inliner widening were both reverted).
+- **ASCII substring reuse and leaf profiling.** Search, split, slice,
+  character-access, and concat record distinct ASCII/Unicode trace events.
+  The 1,024-entry epoch-guarded rooted substring cache only reuses eligible
+  2–32 byte ASCII substrings; Unicode remains in the existing semantic path.
+  *Owner:* [JS Tune11](../../../vibe/jube/JS_Tune11.md) T11-4. *Measured:*
+  `log_pipeline` recorded 24.66M cache hits versus 4.12M misses (85.7% hit
+  rate) and a 0.9865x exact-A/B candidate/control ratio; `three_way_merge` is
+  the neutral 1.0090x control (95% upper bound 1.0114x).
 
 ### 2.3 Object & property tier
 
 - **Metadata-selected exotic dispatch.** Tune6 resolves immutable `TypeMap::js_meta` and performs one nullable `JsPropertyOps` table check; ordinary objects do not pay a per-kind callback. Physical `map_kind` remains only in allocation, tracing, finalization, and checked payload accessors. *Owner:* [JS_06 — Objects, Properties & Prototypes §4](JS_06_Objects_Properties_Prototypes.md). The older kind/sentinel gate was measured as runtime-neutral in Js27; the architectural benefit is deletion of competing semantic classifiers.
-- **Constructor shape pre-allocation + fast map lookup — RETIRED (2026-08-15).** The mechanism below was removed with the IC machinery (IC_Retire IR6) and no longer exists in the tree; a replacement built as immutable compile-time metadata rather than a runtime cache is specified in `vibe/jube/JS_Tune10_Fast_Paths.md` T10-2. Historical description: `js_set_class_ctor_shape_metadata` (`js_runtime.cpp:2526`) recorded the constructor's `this.prop` field names; `js_constructor_create_object_shaped_cached` (`:2566`) captures the first instance's `TypeMap*` into a per-call-site cache so siblings share the blueprint; `js_get_shaped_slot` (`:2584`) reads by slot index via the O(1) `slot_entries[]` array on `TypeMap` (`lambda-data.hpp:255`). Ordinary named lookups go through `js_map_get_fast` (`:2765`), which probes the inline FNV-1a hash table first (`lambda-data.hpp:251`, capacity `TYPEMAP_HASH_CAPACITY == 32`) and falls back to a linear `ShapeEntry` walk. *Owner:* [JS_06 §10](JS_06_Objects_Properties_Prototypes.md), [JS_07](JS_07_Classes.md), [JS_03](JS_03_Value_Model.md). *Measured (Js27 §6–7):* with call-site type propagation feeding the shaped-slot path, nbody fell 741 ms → 288 ms (≈2.5×); the inline shape-pointer guard (validating all field types with one compare) added only ≈0–2% on top because `js_get_slot_f` is already tiny.
+- **Compile-predicted literal and constructor TypeMaps.** Tune11 replaces the
+  retired mutable shape cache with immutable source-derived recipes.
+  `js_new_literal_object_with_typemap` allocates an eligible object with its
+  predicted TypeMap; field lowering guards that exact physical layout before a
+  direct slot read/store and uses the normal NameId kernel on every miss. The
+  compiler neither observes runtime feedback nor patches MIR. *Owner:* [JS_04
+  §4.1](JS_04_MIR_Lowering.md), [JS Tune11](../../../vibe/jube/JS_Tune11.md)
+  T11-3. *Measured:* `log_pipeline` is 0.9865x and the `havlak` neutral
+  control 0.9984x candidate/control in the same-source interleaved A/B.
 - **Iterator fast path.** Synthetic iterators use iterator metadata and typed
   trailing state; physical carrier tags are consulted only by checked payload
   accessors. `js_iterator_step` reads/advances the carrier directly. This
@@ -107,7 +136,29 @@ A correctness caveat: the MIR interpreter does **not** perform tail-call optimiz
 
 ---
 
-## 4. Benchmark results vs V8/Node (development-time)
+## 4. Benchmark evidence
+
+### 4.1 Result45 current release snapshot and causal Tune11 A/B
+
+[Result45](../../../test/benchmark/Overall_Result45.md) is the current full
+standard-runner release snapshot: 63 rows, three fresh medians per row,
+zero missing timing cells, and a 40,261/40,261 Test262 gate. Its exact archive
+SHA-256 is
+`be0abf995ec22252c9fa70253a1f4dc5d89ecd7e81c6e71a3677772c400232ed`.
+Workload geomeans are LambdaJS/QuickJS **2.588x**, LambdaJS/MIR-U **14.020x**,
+and LambdaJS/Node **18.728x**; the sum of LambdaJS workload medians is
+**228.399 s**. Those values improve versus Result44, but snapshots do not
+attribute a change because host and source change together.
+
+The causal record is the clean same-source interleaved 11-pair archive A/B in
+[JS Tune11](../../../vibe/jube/JS_Tune11.md) §2.4. Every pair had equal output:
+`spectralnorm` 0.5048x, `matmul` 0.5546x, `array1` 0.5785x, and
+`log_pipeline` 0.9865x candidate/control; `havlak` (0.9984x) and
+`three_way_merge` (1.0090x) are neutral controls. No row's one-sided 95%
+upper bound crosses the 3% regression threshold. The aggregate goals remain
+open debt: 2.0x to QuickJS, 10x to MIR-U, and 160 s total median target.
+
+### 4.2 Historical development-time V8/Node comparison
 
 The table below summarizes the AWFY/R7RS/JetStream-style suite comparison against V8 (Node.js) from the Js26 log, as a geometric-mean LambdaJS/V8 ratio (lower is better; <1× means LambdaJS was faster). **These are development-time figures on Apple Silicon from a specific commit window; they are not a current guarantee.** The P3 column measured a receiver/name optimization later retired by Tune4 for violating observable `Get`; it is retained only as historical input to a future guarded identity IC.
 
@@ -129,7 +180,13 @@ Grounded in the tuning logs; these are known-open or accepted-cost, not claims o
 
 1. **Float boxing in hot loops.** Shaped float fields round-trip through boxed `Item`s on every read/write (`jm_box_float` → `push_d` — now an inline-double encode, with only the out-of-band residue taking a frame-reclaimed number-side-stack slot; the old GC-nursery allocation is retired). The remaining cost is the boxing *traffic* itself: values bounce between native registers and Item-typed storage instead of staying register-resident across iterations. This is the dominant residual on float-field-in-loop benchmarks (nbody, matmul, mandelbrot, spectralnorm) — the class-based nbody variant is ≈2× faster than the object-literal one precisely because the shaped-slot path removes some boxing, and eliminating the remaining boxing round-trips is the next target (Js27 §7.11, Js26 §6b; tracked as JO13 in `vibe/Lambda_Design_Stack_Frame_JS.md`). Native multiply also routes INT×INT through doubles to match JS semantics (JS_04 §4), so a pure-integer hot loop pays `I2D`/`DMUL`/`D2I` rather than an integer multiply.
 2. **Observable `Get -> Call` is unspecialized.** Every ordinary method call performs the required property lookup before invoking the resulting function. This removed the unsound receiver/name shortcut, but hot pristine-prototype calls such as `arr.push(x)` pay the full lookup. **The JR8 feedback-vector/callee-cache answer is retired**: **D8.4.1v2** and **LC1v2** ban per-site caches in LambdaJS as well as in the Lambda lane (2026-09-09). The sanctioned route is a compile-predicted shape/prototype guard emitted inline, with the shared kernel on a miss — `vibe/jube/JS_Tune10_Fast_Paths.md` T10-2/T10-5. A process-global intrinsic cache remains separately forbidden by **D5.4**.
-3. **Method calls on predicted shapes are unspecialized.** Rich object-oriented workloads still pay the uncached `Get` at every stable site. The former plan — a bounded mono/poly call-site cache (JR8) — is **rejected by D8.4.1v2/LC1v2**. The replacement is compile-time: predict the receiver shape at the site, guard it inline, and reach the method through the guarded slot; a miss runs the ordinary observable `Get -> Call` (D6.2.2v2). It must never infer a target from class plus spelling (Js26 P3 historical evidence).
+3. **Prototype method calls remain unspecialized.** Tune11 directly serves
+   predicted *own data fields* with immutable TypeMap recipes, but it does not
+   cache callees or skip observable prototype `Get -> Call`. The former
+   mono/poly call-site cache (JR8) remains rejected by **D8.4.1v2/LC1v2**. Any
+   future method work must be a compile-time guarded shape/prototype plan with
+   the ordinary observable `Get -> Call` on a miss (**D6.2.2v2**); it must
+   never infer a target from class plus spelling.
 4. **Conservative ADD inference loses native typing.** A correctness fix made `+` inference conservative (a param used in `x + y` is no longer inferred numeric, since `+` is overloaded add/concat), which boxed arithmetic in additive/recursive numeric functions — ack went ≈12 ns/call → ≈208 ns/call (Tune5 §6c). The safe fix (infer ADD numeric only when both operands are provably non-string, plus fixed-point return-type inference for self-recursion) is deferred behind a 0-regression gate.
 5. **Destination-passing lowering deferred.** A per-opcode histogram showed emitted MIR is 66–88% data-movement MOVs (lodash 88%), from the value-returning "materialize into a temp, then MOV into the destination" style. A destination-passing rewrite (caller names the target register) could roughly halve MOVs but touches every expression-lowering path and is a deep codegen project, explicitly not scheduled (Tune6 §3.3, JS_04 "Known Issues" #1).
 6. **Lazy per-function generation is non-viable.** As in §3, MIR's native lazy-gen interface is ≈80× costlier per function and ≈O(n²) at opt≥2; coarse batched deferral at opt=0 is the only redesign worth revisiting, and only for compute-heavy apps that call part of their code (Tune6 §0.2b–c).
@@ -142,7 +199,7 @@ Caching compiled output across repeated compiles (the web-template suite recompi
 
 ---
 
-## 7. Benchmark suite & current JS pass rate
+## 7. Benchmark suite and broader-suite history
 
 LambdaJS's primary performance test is the multi-suite benchmark harness under `test/benchmark/`. It doubles as a broad real-world correctness check: each suite is a set of standard JavaScript programs (ported from the V8/AWFY/Octane and Scheme R7RS/Larceny corpora, plus the Benchmarks-Game and kostya cross-language sets) that a conformant engine should run to completion and — where the program self-verifies — produce the correct result. The historical performance ratios versus V8 are in [§4](#4-benchmark-results-vs-v8node-development-time); this section records the *current, as-shipped* run on the release engine.
 
@@ -160,9 +217,9 @@ Invocation is `./lambda.exe js <file>` from the repo root (the engine exposes `c
 | octane | V8 Octane | each file only registers a `BenchmarkSuite`; needs a synchronous driver (none ships for Lambda JS) | internal `throw` on checksum mismatch |
 | jetstream | JetStream subset | `run_jetstream_ljs.py` strips the trailing `class Benchmark {}` and appends a timing loop | ran-to-completion (only crypto-md5 self-checks a result) |
 
-### 7.2 Current pass rate
+### 7.2 Historical wider-suite audit
 
-The table is the initial audit (release build, 2026-06-16) **updated for the three wrong-result fixes landed afterward** (bounce, levenshtein, crypto-md5 — see §7.3). Those are correctness fixes in the transpiler, so they hold on any build; each was verified by the benchmark passing on JIT *and* interpreter and `make test-lambda-baseline` at 3169/3169. Timing figures should be refreshed on a fresh release build. "Verified" means the benchmark self-checked a result/checksum; "ran-only" means it completed without error but the program has no built-in result check (so it confirms "executes without error", not "verified correct").
+The table is a historical initial audit (release build, 2026-06-16) **updated for the three wrong-result fixes landed afterward** (bounce, levenshtein, crypto-md5 — see §7.3). It is not the current Result45 status: the current standard matrix ran all 63 configured rows without missing timing/output cells under the full Test262 gate (§4.1). "Verified" means the historical benchmark self-checked a result/checksum; "ran-only" means it completed without error but the program has no built-in result check.
 
 | Suite | Pass / total | Quality | Remaining failures |
 |---|---:|---|---|
@@ -196,8 +253,17 @@ Caveats: Octane needs a hand-rolled synchronous driver because no in-repo Lambda
 Still-open performance work, distilled from the logs:
 
 1. **Inline float fields without boxing** — the single biggest remaining gap (§5.1). Keep shaped float fields in native registers across a loop iteration (scalar replacement of aggregates), or store doubles unboxed in shaped slots, to remove per-access boxing traffic on float-heavy loops (the allocation half is already retired by the side-stack architecture).
-2. **Compile-predicted shapes for literals and constructors** (§5.2, §5.3) — per-site literal shapes and constructor `this.x = …` pre-shaping, so ordinary property adds become existing-slot writes; `vibe/jube/JS_Tune10_Fast_Paths.md` T10-2/T10-3. Not a cache: the prediction is immutable compile-time metadata, guarded inline, with the kernel on a miss (**D8.4.1v2**, **LC1v2**).
-3. **Integer-index lane for `a[i]`** (§5.3) — carry the index in a native lane and guard the receiver inline instead of routing every element access through `ToPropertyKey`; T10-1. The former "bounded polymorphic call IC (JR8)" item is retired by **D8.4.1v2**.
+2. **Broaden the measured TypeMap family only where warranted.** Literal and
+   eligible constructor recipes now serve exact ordinary fields with a guarded
+   direct slot and one NameId miss. Do not revive a runtime shape cache;
+   additional construction/field families need a profile, a fixed MIR contract,
+   and the same immutable metadata rule (**D8.4.1v2**, **LC1v2**).
+3. **Broaden native-index physical hits only where warranted.** A computed
+   Number key now stays native to the selector and packed tagged literal reads
+   use the shared address/load plan. Other receivers correctly use their
+   existing native-key or generic semantic kernels. A new direct family must
+   prove its receiver invariants and preserve the one-miss structure; the
+   former bounded polymorphic call IC (JR8) remains retired by **D8.4.1v2**.
 4. **Two-operand-non-string ADD inference + fixed-point return types** (§5.4) — recover native integer typing for additive/recursive numeric functions without resurrecting the string-concat unsoundness.
 5. **Destination-passing lowering** (§5.5) — the structural fix for the 66–88% MOV volume; a scoped codegen-quality project, gated on full test262 + Radiant re-validation.
 6. **De-pointered relocatable MIR + module cache** (§6) — unblock cross-compile/cross-realm artifact reuse for the repeated-vendor-JS workload.

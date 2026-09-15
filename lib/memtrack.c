@@ -876,16 +876,25 @@ void mem_free(void* ptr) {
     mem_free_loc(ptr, 0);
 }
 
-char* mem_strdup_loc(const char* str, MemCategory category, int line) {
-    if (!str) return NULL;
-    size_t raw_len = strlen(str);
-    size_t len = 0;
-    if (!checked_add_size(raw_len, 1, &len)) return NULL;
-    char* dup = (char*)mem_alloc_loc(len, category, line);
+char* mem_dup_n_loc(const char* data, size_t len, MemCategory category, int line) {
+    if (!data) return NULL;
+    size_t alloc_size = 0;
+    if (!checked_add_size(len, 1, &alloc_size)) return NULL;
+    char* dup = (char*)mem_alloc_loc(alloc_size, category, line);
     if (dup) {
-        memcpy(dup, str, len);
+        memcpy(dup, data, len);
+        dup[len] = '\0';
     }
     return dup;
+}
+
+char* mem_dup_n(const char* data, size_t len, MemCategory category) {
+    return mem_dup_n_loc(data, len, category, 0);
+}
+
+char* mem_strdup_loc(const char* str, MemCategory category, int line) {
+    if (!str) return NULL;
+    return mem_dup_n_loc(str, strlen(str), category, line);
 }
 
 char* mem_strdup(const char* str, MemCategory category) {
@@ -894,16 +903,9 @@ char* mem_strdup(const char* str, MemCategory category) {
 
 char* mem_strndup_loc(const char* str, size_t max_len, MemCategory category, int line) {
     if (!str) return NULL;
-    size_t len = strlen(str);
-    if (len > max_len) len = max_len;
-    size_t alloc_size = 0;
-    if (!checked_add_size(len, 1, &alloc_size)) return NULL;
-    char* dup = (char*)mem_alloc_loc(alloc_size, category, line);
-    if (dup) {
-        memcpy(dup, str, len);
-        dup[len] = '\0';
-    }
-    return dup;
+    size_t len = 0;
+    while (len < max_len && str[len] != '\0') len++;
+    return mem_dup_n_loc(str, len, category, line);
 }
 
 char* mem_strndup(const char* str, size_t max_len, MemCategory category) {

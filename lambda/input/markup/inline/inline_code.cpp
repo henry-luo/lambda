@@ -81,11 +81,8 @@ Item parse_code_span(MarkupParser* parser, const char** text) {
 
     // Extract code content (no further inline parsing for code)
     size_t content_len = end - start;
-    char* content = (char*)mem_alloc(content_len + 1, MEM_CAT_INPUT_MARKUP);
+    char* content = mem_strndup(start, content_len, MEM_CAT_INPUT_MARKUP);
     if (content) {
-        strncpy(content, start, content_len);
-        content[content_len] = '\0';
-
         // CommonMark spec: Line endings are converted to spaces
         // Replace \r\n, \r, \n with single space
         char* write_ptr = content;
@@ -129,10 +126,8 @@ Item parse_code_span(MarkupParser* parser, const char** text) {
         // Create content string (use trimmed if applicable)
         String* code_text;
         if (trimmed != content || trimmed_len != normalized_len) {
-            char* final_content = (char*)mem_alloc(trimmed_len + 1, MEM_CAT_INPUT_MARKUP);
+            char* final_content = mem_strndup(trimmed, trimmed_len, MEM_CAT_INPUT_MARKUP);
             if (final_content) {
-                strncpy(final_content, trimmed, trimmed_len);
-                final_content[trimmed_len] = '\0';
                 code_text = create_string(parser, final_content);
                 mem_free(final_content);
             } else {

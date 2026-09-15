@@ -770,7 +770,8 @@ static void js_runtime_state_visit_root_vectors(JsRuntimeState* state,
         "DOM singleton wrappers", data);
     if (state->string_caches) {
         visit(&state->string_caches->roots,
-            &state->string_caches->last_four_byte_escape, 662,
+            &state->string_caches->last_four_byte_escape,
+            662 + JS_ASCII_SUBSTRING_CACHE_CAPACITY,
             "realm string caches", data);
     }
     if (state->assert) {

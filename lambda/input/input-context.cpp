@@ -180,10 +180,8 @@ void InputContext::logErrors() const {
     const char* formatted = const_cast<ParseErrorList&>(errors_).formatErrors();
     if (input_ && errors_.hasErrors() && !input_->parse_error_message &&
             formatted && input_->pool) {
-        size_t message_len = strlen(formatted);
-        char* message_copy = (char*)pool_alloc(input_->pool, message_len + 1);
+        char* message_copy = pool_strdup(input_->pool, formatted);
         if (message_copy) {
-            memcpy(message_copy, formatted, message_len + 1);
             input_->parse_error_message = message_copy;
         }
     }

@@ -16,6 +16,7 @@
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
 #include "../../lib/uv_loop.h"
 #include "../../lib/mem.h"
 #include "../serve/tls_handler.hpp"
@@ -217,16 +218,14 @@ static bool tls_copy_cipher_option(Item value, char* node_buf, int node_cap,
     }
     if (len <= 0) return false;
     if (len >= node_cap) len = node_cap - 1;
-    memcpy(node_buf, s->chars, (size_t)len);
-    node_buf[len] = '\0';
+    str_copy(node_buf, node_cap, s->chars, len);
 
     const TlsCipherNameMap* entry = tls_find_cipher_name(node_buf);
     const char* iana = entry ? entry->iana_name : node_buf;
     int iana_len = (int)strlen(iana);
     if (iana_buf && iana_cap > 0) {
         if (iana_len >= iana_cap) iana_len = iana_cap - 1;
-        memcpy(iana_buf, iana, (size_t)iana_len);
-        iana_buf[iana_len] = '\0';
+        str_copy(iana_buf, iana_cap, iana, iana_len);
     }
     return true;
 }
@@ -2617,8 +2616,7 @@ extern "C" Item js_tls_server_listen(Item port_item, Item host_item, Item callba
     } else if (get_type_id(host_item) == LMD_TYPE_STRING) {
         String* h = it2s(host_item);
         int len = (int)h->len < 255 ? (int)h->len : 255;
-        memcpy(host_buf, h->chars, (size_t)len);
-        host_buf[len] = '\0';
+        str_copy(host_buf, sizeof(host_buf), h->chars, len);
     }
 
     struct sockaddr_in addr;

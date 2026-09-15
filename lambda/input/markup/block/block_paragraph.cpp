@@ -197,7 +197,7 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
             Element* strong = create_element(parser, "strong");
             if (strong) {
                 const char* content = first_line + 3;
-                while (*content == ' ' || *content == '\t') content++;
+                content = str_skip_line_space(content);
                 if (*content) {
                     // Parse the content for nested formatting
                     Item inner = parse_inline_spans(parser, content);
@@ -224,7 +224,7 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
             Element* em = create_element(parser, "em");
             if (em) {
                 const char* content = first_line + 3;
-                while (*content == ' ' || *content == '\t') content++;
+                content = str_skip_line_space(content);
                 if (*content) {
                     // Parse the content for nested formatting
                     Item inner = parse_inline_spans(parser, content);
@@ -811,7 +811,7 @@ Item parse_rst_definition_list(MarkupParser* parser, const char* line) {
 
                     // Strip leading whitespace
                     const char* dp = dl_line;
-                    while (*dp == ' ' || *dp == '\t') dp++;
+                    dp = str_skip_line_space(dp);
 
                     if (sb->length > 0) stringbuf_append_char(sb, ' ');
                     while (*dp && *dp != '\n' && *dp != '\r') {

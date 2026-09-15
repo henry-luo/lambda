@@ -8,6 +8,7 @@
 #include "../../jube/jube_registry.h"
 #include "node_core_common.hpp"
 #include "../../../lib/shell.h"
+#include "../../../lib/str.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -285,8 +286,7 @@ extern "C" Item js_os_tmpdir(void) {
         len--;
     }
     char buf[MAX_PATH];
-    memcpy(buf, temp, len);
-    buf[len] = '\0';
+    str_copy(buf, sizeof(buf), temp, len);
     return make_string_item(buf);
 #else
     // Unix: check TMPDIR, then TMP, then TEMP, fallback to /tmp
@@ -299,8 +299,7 @@ extern "C" Item js_os_tmpdir(void) {
     while (len > 1 && temp[len-1] == '/') len--;
     char buf[4096];
     if (len >= sizeof(buf)) len = sizeof(buf) - 1;
-    memcpy(buf, temp, len);
-    buf[len] = '\0';
+    str_copy(buf, sizeof(buf), temp, len);
     return make_string_item(buf);
 #endif
 }
@@ -457,8 +456,7 @@ extern "C" Item js_os_cpus(void) {
                     if (nl) *nl = '\0';
                     int mlen = (int)strlen(colon);
                     if (mlen >= (int)sizeof(model_buf)) mlen = (int)sizeof(model_buf) - 1;
-                    memcpy(model_buf, colon, mlen);
-                    model_buf[mlen] = '\0';
+                    str_copy(model_buf, sizeof(model_buf), colon, mlen);
                 }
                 break;
             }

@@ -300,6 +300,50 @@ static bool jm_native_mutation_is_relevant(const AstIndex* index,
     return true;
 }
 
+// The mutation census runs before the declarator has installed its local entry.
+// Recognize only a self-contained Number tree here, so `x = x + 0.5` retains
+// its established Number carrier without treating a call or coercible object
+// as a numeric fact (D2.4.3).
+static bool jm_native_self_number_rhs(JsAstNode* node, NameEntry* binding) {
+    if (!node || !binding) return false;
+    switch (node->node_type) {
+    case AST_NODE_LITERAL: {
+        JsLiteralNode* literal = (JsLiteralNode*)node;
+        return literal->literal_type == AST_LITERAL_NUMBER && !literal->is_bigint;
+    }
+    case AST_NODE_IDENT:
+        return ((JsIdentifierNode*)node)->entry == binding;
+    case AST_NODE_UNARY: {
+        JsUnaryNode* unary = (JsUnaryNode*)node;
+        return (unary->op == OPERATOR_POS || unary->op == OPERATOR_ADD ||
+                unary->op == OPERATOR_NEG || unary->op == OPERATOR_SUB ||
+                unary->op == OPERATOR_JS_BIT_NOT) &&
+            jm_native_self_number_rhs(unary->operand, binding);
+    }
+    case AST_NODE_BINARY: {
+        JsBinaryNode* binary = (JsBinaryNode*)node;
+        switch (binary->op) {
+        case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL:
+        case OPERATOR_DIV: case OPERATOR_MOD: case OPERATOR_JS_EXP:
+        case OPERATOR_JS_BIT_AND: case OPERATOR_JS_BIT_OR:
+        case OPERATOR_JS_BIT_XOR: case OPERATOR_JS_LSHIFT:
+        case OPERATOR_JS_RSHIFT: case OPERATOR_JS_URSHIFT:
+            return jm_native_self_number_rhs(binary->left, binding) &&
+                jm_native_self_number_rhs(binary->right, binding);
+        default:
+            return false;
+        }
+    }
+    case AST_NODE_CONDITIONAL_EXPR: {
+        JsConditionalNode* conditional = (JsConditionalNode*)node;
+        return jm_native_self_number_rhs(conditional->consequent, binding) &&
+            jm_native_self_number_rhs(conditional->alternate, binding);
+    }
+    default:
+        return false;
+    }
+}
+
 static bool jm_scan_native_mutation(const AstIndex* index, AstNodeId node_id,
         void* opaque) {
     JmNativeMutationScan* scan = (JmNativeMutationScan*)opaque;
@@ -310,6 +354,11 @@ static bool jm_scan_native_mutation(const AstIndex* index, AstNodeId node_id,
     JsAssignmentNode* assignment = (JsAssignmentNode*)node;
     if (!jm_assignment_targets_binding(assignment->left, scan->binding)) return true;
     TypeId rhs_type = jm_get_effective_type(scan->mt, assignment->right);
+    if ((scan->native_type == LMD_TYPE_INT || scan->native_type == LMD_TYPE_FLOAT) &&
+            rhs_type == LMD_TYPE_ANY && assignment->op == OPERATOR_ASSIGN &&
+            jm_native_self_number_rhs(assignment->right, scan->binding)) {
+        rhs_type = scan->native_type;
+    }
     scan->needs_boxing = assignment->op == OPERATOR_ASSIGN
         ? rhs_type != scan->native_type
         : rhs_type != scan->native_type && rhs_type != LMD_TYPE_ANY;

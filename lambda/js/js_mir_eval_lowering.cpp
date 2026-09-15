@@ -12,12 +12,7 @@ JsModuleConstEntry* g_eval_preamble_entries = NULL;
 int g_eval_preamble_entry_count = 0;
 int g_eval_preamble_var_count = 0;
 static char* js_preamble_name_copy(const char* name) {
-    if (!name) return NULL;
-    size_t length = strlen(name);
-    char* copy = (char*)mem_alloc(length + 1, MEM_CAT_JS_RUNTIME);
-    if (!copy) return NULL;
-    memcpy(copy, name, length + 1);
-    return copy;
+    return name ? mem_strdup(name, MEM_CAT_JS_RUNTIME) : NULL;
 }
 
 bool js_preamble_entry_copy(const JsModuleConstEntry* source,
@@ -716,14 +711,12 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     size_t source_len = sb->length;
 
     // null-terminate — use malloc; the transpiler will copy as needed
-    char* source = (char*)mem_alloc(source_len + 1, MEM_CAT_JS_RUNTIME);
+    char* source = mem_strdup(sb->str, MEM_CAT_JS_RUNTIME);
     if (!source) {
         strbuf_free(sb);
         log_error("js-new-function: malloc failed for source buffer");
         return ItemNull;
     }
-    memcpy(source, sb->str, source_len);
-    source[source_len] = '\0';
     strbuf_free(sb);
 
     int dynfunc_kind = js_dynfunc_kind_from_prefix(parse_prefix);

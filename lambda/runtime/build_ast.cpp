@@ -56,7 +56,7 @@ static StrView ast_node_source(Transpiler* tp, const AstNode* node) {
 // keep fallible literal source copies in one checked path.
 static char* ast_copy_source_text(Transpiler* tp, StrView source,
         SourceSpan diagnostic_span) {
-    char* copy = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
+    char* copy = mem_dup_n(source.str, source.length, MEM_CAT_AST);
     if (!copy) {
         record_semantic_error_span(tp, diagnostic_span, ERR_OUT_OF_MEMORY,
             "out of memory while reading literal source");
@@ -65,8 +65,6 @@ static char* ast_copy_source_text(Transpiler* tp, StrView source,
         tp->build_allocation_failed = true;
         return NULL;
     }
-    memcpy(copy, source.str, source.length);
-    copy[source.length] = '\0';
     return copy;
 }
 
@@ -301,8 +299,7 @@ static bool jube_extract_native_c_name(const char* native_signature, char* out, 
 
     size_t len = (size_t)(end - start);
     if (len >= out_size) len = out_size - 1;
-    memcpy(out, start, len);
-    out[len] = '\0';
+    str_copy(out, out_size, start, len);
     return true;
 }
 
@@ -2511,8 +2508,7 @@ static const char* registered_jube_module_name(StrView* name) {
 #ifndef SIMPLE_SCHEMA_PARSER
     char module_name[128];
     if (!name || name->length >= sizeof(module_name)) return NULL;
-    memcpy(module_name, name->str, name->length);
-    module_name[name->length] = '\0';
+    str_copy(module_name, sizeof(module_name), name->str, name->length);
     jube_register_builtin_modules();
     const JubeModuleDef* module = jube_find_static_module(module_name);
     return module ? module->name : NULL;
@@ -3637,10 +3633,8 @@ static Type* build_lit_imaginary_from_span(Transpiler* tp,
         SourceSpan span) {
     StrView source = source_span_text(tp, span);
     if (source.length < 2 || source.str[source.length - 1] != 'j') return &TYPE_ERROR;
-    char* coefficient = (char*)mem_alloc(source.length, MEM_CAT_AST);
+    char* coefficient = mem_dup_n(source.str, source.length - 1, MEM_CAT_AST);
     if (!coefficient) return &TYPE_ERROR;
-    memcpy(coefficient, source.str, source.length - 1);
-    coefficient[source.length - 1] = '\0';
 
     double imag = 0.0;
     if (strcmp(coefficient, "inf") == 0) imag = INFINITY;
@@ -10763,8 +10757,7 @@ static AstNode* build_module_import_from_parts(Transpiler* tp,
 #ifndef SIMPLE_SCHEMA_PARSER
     char module_buf[128];
     if (module.length < sizeof(module_buf)) {
-        memcpy(module_buf, module.str, module.length);
-        module_buf[module.length] = '\0';
+        str_copy(module_buf, sizeof(module_buf), module.str, module.length);
         jube_register_builtin_modules();
         const JubeModuleDef* jube = jube_find_static_module(module_buf);
         if (jube) {

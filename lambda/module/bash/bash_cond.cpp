@@ -44,9 +44,7 @@ static void rematch_store(const char* text, regmatch_t* matches, int nmatch) {
             rematch_groups[i] = NULL;
         } else {
             int len = (int)(matches[i].rm_eo - matches[i].rm_so);
-            rematch_groups[i] = (char*)mem_alloc(len + 1, MEM_CAT_BASH_RUNTIME);
-            memcpy(rematch_groups[i], text + matches[i].rm_so, len);
-            rematch_groups[i][len] = '\0';
+            rematch_groups[i] = mem_dup_n(text + matches[i].rm_so, len, MEM_CAT_BASH_RUNTIME);
         }
         rematch_count = i + 1;
     }

@@ -392,8 +392,7 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
                 while (*p && *p != ']' && *p != ',' && *p != '\n') p++;
                 size_t lang_len = p - lang_start;
                 if (lang_len > 0 && lang_len < sizeof(asciidoc_lang)) {
-                    memcpy(asciidoc_lang, lang_start, lang_len);
-                    asciidoc_lang[lang_len] = '\0';
+                    str_copy(asciidoc_lang, sizeof(asciidoc_lang), lang_start, lang_len);
                 }
             }
             // Skip to next line (should be ----)
@@ -446,8 +445,7 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
                 }
                 size_t word_len = word_end - fence_info.info_string;
                 size_t copy_len = word_len < sizeof(lang) - 1 ? word_len : sizeof(lang) - 1;
-                memcpy(lang, fence_info.info_string, copy_len);
-                lang[copy_len] = '\0';
+                str_copy(lang, sizeof(lang), fence_info.info_string, copy_len);
                 // Process backslash escapes and entity references in info string
                 process_escapes_and_entities(lang, copy_len);
             }
@@ -468,8 +466,7 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
 
     // Use AsciiDoc [source,lang] language if present and no fence info
     if (asciidoc_lang[0] && !lang[0]) {
-        strncpy(lang, asciidoc_lang, sizeof(lang) - 1);
-        lang[sizeof(lang) - 1] = '\0';
+        str_copy(lang, sizeof(lang), asciidoc_lang, strlen(asciidoc_lang));
     }
 
     // Add language attribute if present
@@ -565,7 +562,7 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
                 pos++;
             }
             // Check rest of line is whitespace only (CommonMark requirement)
-            while (*pos == ' ' || *pos == '\t') pos++;
+            pos = str_skip_line_space(pos);
             if (close_len >= fence_len && (*pos == '\0' || *pos == '\n' || *pos == '\r')) {
                 parser->current_line++; // Skip closing fence
                 found_close = true;

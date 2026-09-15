@@ -327,10 +327,8 @@ static char* node_querystring_decode_or_copy(const char* text, size_t length,
                                              size_t* out_length) {
     char* decoded = url_decode_component(text, length, out_length);
     if (decoded) return decoded;
-    char* copy = (char*)mem_alloc(length + 1, MEM_CAT_TEMP);
+    char* copy = mem_dup_n(text, length, MEM_CAT_TEMP);
     if (!copy) return NULL;
-    memcpy(copy, text, length);
-    copy[length] = '\0';
     if (out_length) *out_length = length;
     return copy;
 }
@@ -458,8 +456,7 @@ static bool node_querystring_coerce_delimiter(Item value, char* buffer, int buff
         return false;
     }
     if (length >= (size_t)buffer_size) length = (size_t)buffer_size - 1;
-    memcpy(buffer, bytes, length);
-    buffer[length] = '\0';
+    str_copy(buffer, buffer_size, bytes, length);
     mem_free(bytes);
     *out_text = buffer;
     *out_length = (int)length;

@@ -713,7 +713,7 @@ bool selector_matcher_matches_attribute(SelectorMatcher* matcher,
                 const char* pos = element_attr;
                 while (*pos) {
                     // Skip whitespace
-                    while (*pos && str_char_is_ascii_space(*pos)) pos++;
+                    pos = str_skip_ascii_space(pos);
                     if (!*pos) break;
 
                     // Check if this word matches
@@ -1430,7 +1430,7 @@ bool selector_matcher_parse_nth_formula(const char* formula_str, CssNthFormula* 
         p++;
 
         // Check for +b or -b
-        while (*p && str_char_is_ascii_space(*p)) p++;
+        p = str_skip_ascii_space(p);
         if (*p == '+' || *p == '-') {
             formula->b = (int)str_to_int64_default(p, strlen(p), 0);
         }
@@ -1452,14 +1452,14 @@ bool selector_matcher_parse_nth_formula(const char* formula_str, CssNthFormula* 
     }
 
     // Skip whitespace
-    while (*p && str_char_is_ascii_space(*p)) p++;
+    p = str_skip_ascii_space(p);
 
     // Check for 'n'
     if (*p == 'n' || *p == 'N') {
         p++;
 
         // Skip whitespace
-        while (*p && str_char_is_ascii_space(*p)) p++;
+        p = str_skip_ascii_space(p);
 
         // Parse constant 'b'
         if (*p == '+' || *p == '-') {

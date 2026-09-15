@@ -18,6 +18,7 @@
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
 #include "../../lib/uv_loop.h"
 #include "../../lib/mem.h"
 
@@ -2270,8 +2271,7 @@ static Item make_invalid_ip_address_error(Item address) {
     if (get_type_id(address_str) == LMD_TYPE_STRING) {
         String* s = it2s(address_str);
         int len = (int)s->len < (int)sizeof(value) - 1 ? (int)s->len : (int)sizeof(value) - 1;
-        memcpy(value, s->chars, (size_t)len);
-        value[len] = '\0';
+        str_copy(value, sizeof(value), s->chars, len);
     }
     char msg[256];
     snprintf(msg, sizeof(msg), "Invalid IP address: %s", value);
@@ -2286,8 +2286,7 @@ static Item throw_invalid_ip_address(Item address) {
     if (get_type_id(address_str) == LMD_TYPE_STRING) {
         String* s = it2s(address_str);
         int len = (int)s->len < (int)sizeof(value) - 1 ? (int)s->len : (int)sizeof(value) - 1;
-        memcpy(value, s->chars, (size_t)len);
-        value[len] = '\0';
+        str_copy(value, sizeof(value), s->chars, len);
     }
     return js_throw_type_error_codef("ERR_INVALID_IP_ADDRESS", "Invalid IP address: %s", value);
 }
@@ -2311,8 +2310,7 @@ static Item throw_bad_port(Item value) {
         String* s = it2s(value);
         int len = (int)s->len < 80 ? (int)s->len : 80;
         char buf[96];
-        memcpy(buf, s->chars, (size_t)len);
-        buf[len] = '\0';
+        str_copy(buf, sizeof(buf), s->chars, len);
         snprintf(msg, sizeof(msg), "Port should be >= 0 and < 65536. Received %s", buf);
     } else if (type == LMD_TYPE_INT) {
         snprintf(msg, sizeof(msg), "Port should be >= 0 and < 65536. Received %lld",
@@ -2357,8 +2355,7 @@ static Item parse_port(Item value, int* out_port) {
             return throw_bad_port(value);
         }
         char buf[64];
-        memcpy(buf, s->chars, s->len);
-        buf[s->len] = '\0';
+        str_copy(buf, sizeof(buf), s->chars, s->len);
         char* end = NULL;
         long p = strtol(buf, &end, 0);
         if (end == buf || *end != '\0' || p < 0 || p > 65535) {
@@ -4748,8 +4745,7 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
         String* s = it2s(port_item);
         char first[256];
         int len = (int)s->len < 255 ? (int)s->len : 255;
-        memcpy(first, s->chars, (size_t)len);
-        first[len] = '\0';
+        str_copy(first, sizeof(first), s->chars, len);
 
         char* end = NULL;
         long parsed = strtol(first, &end, 0);
@@ -4771,8 +4767,7 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
     if (get_type_id(host_item) == LMD_TYPE_STRING) {
         String* h = it2s(host_item);
         int len = (int)h->len < 255 ? (int)h->len : 255;
-        memcpy(host_buf, h->chars, (size_t)len);
-        host_buf[len] = '\0';
+        str_copy(host_buf, sizeof(host_buf), h->chars, len);
     }
 
     struct sockaddr_storage addr;
