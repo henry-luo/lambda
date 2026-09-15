@@ -15938,21 +15938,28 @@ static int js_regex_num_groups(JsRegexData* rd) {
     return rd->re2->NumberOfCapturingGroups() + 1;
 }
 
-// Helper: match with the backtracker for assertions, otherwise direct RE2.
-// Returns true if matched. Fills `matches` array with StringPiece groups.
-static bool js_regex_match_internal(JsRegexData* rd, const char* input, int input_len,
-                                     int start_pos, re2::RE2::Anchor anchor,
-                                     re2::StringPiece* matches, int num_groups) {
+enum JsRegexMatchResult {
+    JS_REGEX_MATCH_NO_MATCH = 0,
+    JS_REGEX_MATCH_FOUND = 1,
+    JS_REGEX_MATCH_RESOURCE_ERROR = -1,
+};
+
+// Match with the backtracker for routed patterns, otherwise direct RE2.
+// Resource exhaustion remains distinct from no match so callers do not lie about results.
+static JsRegexMatchResult js_regex_match_internal(JsRegexData* rd, const char* input, int input_len,
+                                                   int start_pos, re2::RE2::Anchor anchor,
+                                                   re2::StringPiece* matches, int num_groups) {
     if (rd->special_property_kind != 0) {
         return js_regex_match_special_property(rd->special_property_kind, input, input_len,
-                                               start_pos, matches, num_groups);
+                                               start_pos, matches, num_groups) ?
+            JS_REGEX_MATCH_FOUND : JS_REGEX_MATCH_NO_MATCH;
     }
     if (rd->simple_class_kind != JS_REGEX_SIMPLE_CLASS_NONE) {
         return js_regex_match_simple_class(rd, input, input_len, start_pos,
-            anchor, matches, num_groups);
+            anchor, matches, num_groups) ? JS_REGEX_MATCH_FOUND : JS_REGEX_MATCH_NO_MATCH;
     }
     if (rd->literal_fast) {
-        if (start_pos < 0 || start_pos > input_len) return false;
+        if (start_pos < 0 || start_pos > input_len) return JS_REGEX_MATCH_NO_MATCH;
         int pat_len = rd->literal_pattern_len;
         const char* found = NULL;
         if (anchor == re2::RE2::ANCHOR_START) {
@@ -15969,9 +15976,9 @@ static bool js_regex_match_internal(JsRegexData* rd, const char* input, int inpu
                 }
             }
         }
-        if (!found) return false;
+        if (!found) return JS_REGEX_MATCH_NO_MATCH;
         if (num_groups > 0) matches[0] = re2::StringPiece(found, pat_len);
-        return true;
+        return JS_REGEX_MATCH_FOUND;
     }
     if (rd->bt) {
         // spec backtracking matcher for backref / hard-lookbehind patterns
@@ -15980,7 +15987,9 @@ static bool js_regex_match_internal(JsRegexData* rd, const char* input, int inpu
         bool anchor_start = (anchor == re2::RE2::ANCHOR_START);
         int result = js_bt_exec(rd->bt, input, input_len, start_pos, anchor_start,
                                 starts, ends, num_groups);
-        if (result <= 0) return false;
+        if (result == JS_BT_EXEC_RESOURCE_EXHAUSTED ||
+            result == JS_BT_EXEC_ALLOCATION_FAILURE) return JS_REGEX_MATCH_RESOURCE_ERROR;
+        if (result != JS_BT_EXEC_MATCH) return JS_REGEX_MATCH_NO_MATCH;
         for (int i = 0; i < num_groups; i++) {
             if (starts[i] >= 0 && ends[i] >= starts[i]) {
                 matches[i] = re2::StringPiece(input + starts[i], ends[i] - starts[i]);
@@ -15988,11 +15997,12 @@ static bool js_regex_match_internal(JsRegexData* rd, const char* input, int inpu
                 matches[i] = re2::StringPiece();
             }
         }
-        return true;
+        return JS_REGEX_MATCH_FOUND;
     }
     // direct RE2 match (the routing scan already excluded assertions)
     return rd->re2->Match(re2::StringPiece(input, input_len), start_pos, input_len,
-                           anchor, matches, num_groups);
+                          anchor, matches, num_groups) ?
+        JS_REGEX_MATCH_FOUND : JS_REGEX_MATCH_NO_MATCH;
 }
 
 static bool js_regex_pattern_group_is_capturing(const std::string& pattern, int pos) {
@@ -17246,9 +17256,15 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     // behavior that the backtracker already implements.  The Unicode-sets
     // class rewriter runs before this decision, so both paths consume its
     // normalized character classes.
+    JsRegexScannerAnalysis route_analysis = js_regex_scanner_analyze(
+        effective_pattern, effective_pattern_len, compile_info.multiline);
+    if (route_analysis.reasons & (JS_REGEX_SCANNER_REASON_ALLOCATION_FAILURE |
+                                  JS_REGEX_SCANNER_REASON_UNSUPPORTED)) {
+        // A scanner failure must not certify the RE2 path for a pattern it could not classify.
+        return js_throw_range_error("RegExp routing analysis cannot classify pattern");
+    }
     bool route_to_bt = (special_property_kind == 0) &&
-        js_regex_scanner_needs_backtrack(effective_pattern, effective_pattern_len,
-            compile_info.multiline);
+        route_analysis.reasons != JS_REGEX_SCANNER_REASON_NONE;
     const char* bt_pattern = effective_pattern;
     int bt_pattern_len = effective_pattern_len;
 
@@ -17703,8 +17719,9 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
         btflags.sticky = compile_info.sticky;
         bt = js_bt_compile(bt_pattern, bt_pattern_len, btflags, js_input->pool);
         if (!bt) {
-            log_debug("js bt regex: compile failed for /%.*s/, falling back to RE2",
-                      pattern_len, pattern);
+            // A required backtracking pattern cannot fall through to RE2, which changes its captures.
+            log_debug("js regex router: backtracker failed to compile a required pattern");
+            return js_throw_range_error("RegExp backtracking matcher cannot compile required pattern");
         }
     }
     // 3b. Lookbehind and all other assertions compile through the backtracker.
@@ -18267,9 +18284,12 @@ extern "C" Item js_regex_test(Item regex, Item str) {
     re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED;
     int match_start_pos = utf16_subject ?
         js_utf16_idx_to_byte(match_chars, match_len, start_pos) : start_pos;
-    bool matched = js_regex_match_internal(rd, match_chars, match_len, match_start_pos,
-        anchor, matches, num_groups);
-    if (!matched) {
+    JsRegexMatchResult match_result = js_regex_match_internal(
+        rd, match_chars, match_len, match_start_pos, anchor, matches, num_groups);
+    if (match_result == JS_REGEX_MATCH_RESOURCE_ERROR) {
+        return js_throw_range_error("RegExp match exceeded engine resources");
+    }
+    if (match_result != JS_REGEX_MATCH_FOUND) {
         if (uses_last_index) {
             JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(regex, li_key, 0));
         }
@@ -18282,7 +18302,7 @@ extern "C" Item js_regex_test(Item regex, Item str) {
         JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(regex, li_key, match_end));
     }
     js_regexp_update_last_match(utf16_subject ? match_s : input_s, matches, num_groups);
-    return (Item){.item = b2it(matched ? BOOL_TRUE : BOOL_FALSE)};
+    return (Item){.item = b2it(BOOL_TRUE)};
 }
 
 // Spec-internal Set(rx, "lastIndex", v, Throw=true): always throws TypeError on non-writable.
@@ -18519,9 +18539,12 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED;
     int match_start_pos = code_unit_indices ?
         js_utf16_idx_to_byte(match_chars, match_len, start_pos) : start_pos;
-    bool matched = js_regex_match_internal(rd, match_chars, match_len, match_start_pos,
-        anchor, matches, num_groups);
-    if (!matched) {
+    JsRegexMatchResult match_result = js_regex_match_internal(
+        rd, match_chars, match_len, match_start_pos, anchor, matches, num_groups);
+    if (match_result == JS_REGEX_MATCH_RESOURCE_ERROR) {
+        return js_throw_range_error("RegExp match exceeded engine resources");
+    }
+    if (match_result != JS_REGEX_MATCH_FOUND) {
         if (uses_last_index) {
             JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(
                 regex_root.get(), key_root.get(), 0));
@@ -21371,9 +21394,13 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
         int pos = 0;
         bool found_match = false;
         while (pos <= (int)s->len) {
-            bool matched = js_regex_match_internal(rd, s->chars, (int)s->len, pos,
-                re2::RE2::UNANCHORED, matches, ngroups);
-            if (!matched) break;
+            JsRegexMatchResult match_result = js_regex_match_internal(
+                rd, s->chars, (int)s->len, pos, re2::RE2::UNANCHORED, matches, ngroups);
+            if (match_result == JS_REGEX_MATCH_RESOURCE_ERROR) {
+                strbuf_free(buf);
+                return js_throw_range_error("RegExp match exceeded engine resources");
+            }
+            if (match_result != JS_REGEX_MATCH_FOUND) break;
             found_match = true;
             int match_start = (int)(matches[0].data() - s->chars);
             int match_len = (int)matches[0].size();
@@ -22707,8 +22734,12 @@ static Item js_string_intrinsic_algorithm(Item str,
                 String* s = it2s(str);
                 if (!s) return (Item){.item = i2it(-1)};
                 re2::StringPiece match;
-                if (js_regex_match_internal(rd, s->chars, (int)s->len, 0,
-                                   re2::RE2::UNANCHORED, &match, 1)) {
+                JsRegexMatchResult match_result = js_regex_match_internal(
+                    rd, s->chars, (int)s->len, 0, re2::RE2::UNANCHORED, &match, 1);
+                if (match_result == JS_REGEX_MATCH_RESOURCE_ERROR) {
+                    return js_throw_range_error("RegExp match exceeded engine resources");
+                }
+                if (match_result == JS_REGEX_MATCH_FOUND) {
                     return (Item){.item = i2it((int)(match.data() - s->chars))};
                 }
                 return (Item){.item = i2it(-1)};
@@ -22790,9 +22821,13 @@ static Item js_string_intrinsic_algorithm(Item str,
                 num_groups = matches_buf.count;
                 re2::StringPiece* matches = matches_buf.slots;
                 while (offset < (int)s->len) {
-                    bool matched = js_regex_match_internal(rd, s->chars, (int)s->len, offset,
-                        re2::RE2::UNANCHORED, matches, num_groups);
-                    if (!matched) break;
+                    JsRegexMatchResult match_result = js_regex_match_internal(
+                        rd, s->chars, (int)s->len, offset, re2::RE2::UNANCHORED,
+                        matches, num_groups);
+                    if (match_result == JS_REGEX_MATCH_RESOURCE_ERROR) {
+                        return js_throw_range_error("RegExp match exceeded engine resources");
+                    }
+                    if (match_result != JS_REGEX_MATCH_FOUND) break;
                     int mlen = (int)matches[0].size();
                     Item ms = (Item){.item = s2it(heap_strcpy((char*)matches[0].data(), mlen))};
                     js_array_push_item_direct(result.array, ms);

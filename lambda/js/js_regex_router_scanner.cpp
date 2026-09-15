@@ -1,86 +1,428 @@
-// Lexical compatibility router for the JS RegExp backtracking engine.
+// Structural compatibility router for the JS RegExp backtracking engine.
 #include "js_regex_router_scanner.h"
 
 #include "js_regex_wrapper.h"
 
-static bool js_regex_has_unescaped_anchor(const char* pattern, int pattern_len) {
-    bool in_class = false;
-    for (int i = 0; i < pattern_len; i++) {
-        char c = pattern[i];
-        if (c == '\\') {
-            if (i + 1 < pattern_len) i++;
+#include <limits.h>
+#include <string.h>
+
+struct JsRegexScannerSummary {
+    bool nullable;
+    bool has_capture;
+    bool may_skip_capture;
+};
+
+struct JsRegexScannerFrame {
+    JsRegexScannerSummary sequence;
+    JsRegexScannerSummary alternatives;
+    bool has_alternatives;
+    bool capturing;
+    bool assertion;
+};
+
+struct JsRegexScannerFrameStack {
+    JsRegexScannerFrame inline_frames[16];
+    JsRegexScannerFrame* frames;
+    int count;
+    int capacity;
+
+    JsRegexScannerFrameStack() : frames(inline_frames), count(0), capacity(16) {}
+
+    ~JsRegexScannerFrameStack() {
+        if (frames != inline_frames) mem_free(frames);
+    }
+
+    bool push(const JsRegexScannerFrame& frame) {
+        if (count == capacity) {
+            int new_capacity = capacity * 2;
+            if (new_capacity <= capacity ||
+                new_capacity > INT_MAX / (int)sizeof(JsRegexScannerFrame)) return false;
+            JsRegexScannerFrame* replacement = nullptr;
+            if (frames == inline_frames) {
+                replacement = (JsRegexScannerFrame*)mem_alloc(
+                    (size_t)new_capacity * sizeof(JsRegexScannerFrame), MEM_CAT_JS_RUNTIME);
+                if (replacement) memcpy(replacement, inline_frames,
+                                        (size_t)count * sizeof(JsRegexScannerFrame));
+            } else {
+                replacement = (JsRegexScannerFrame*)mem_realloc(frames,
+                    (size_t)new_capacity * sizeof(JsRegexScannerFrame), MEM_CAT_JS_RUNTIME);
+            }
+            if (!replacement) return false;
+            frames = replacement;
+            capacity = new_capacity;
+        }
+        frames[count++] = frame;
+        return true;
+    }
+
+    JsRegexScannerFrame* top() {
+        return count > 0 ? &frames[count - 1] : nullptr;
+    }
+
+    JsRegexScannerFrame pop() {
+        return frames[--count];
+    }
+};
+
+struct JsRegexScannerQuantifier {
+    bool present;
+    int min;
+    int max;
+};
+
+enum JsRegexScannerQuantifierParse {
+    JS_REGEX_SCANNER_QUANTIFIER_NONE,
+    JS_REGEX_SCANNER_QUANTIFIER_OK,
+    JS_REGEX_SCANNER_QUANTIFIER_UNSUPPORTED,
+};
+
+static JsRegexScannerSummary js_regex_scanner_empty_summary() {
+    JsRegexScannerSummary summary = {true, false, false};
+    return summary;
+}
+
+static JsRegexScannerSummary js_regex_scanner_consuming_summary() {
+    JsRegexScannerSummary summary = {false, false, false};
+    return summary;
+}
+
+static JsRegexScannerSummary js_regex_scanner_join_sequence(JsRegexScannerSummary left,
+                                                              JsRegexScannerSummary right) {
+    JsRegexScannerSummary joined = {
+        left.nullable && right.nullable,
+        left.has_capture || right.has_capture,
+        left.may_skip_capture || right.may_skip_capture,
+    };
+    return joined;
+}
+
+static JsRegexScannerSummary js_regex_scanner_join_alternative(JsRegexScannerSummary left,
+                                                                 JsRegexScannerSummary right) {
+    JsRegexScannerSummary joined = {
+        left.nullable || right.nullable,
+        left.has_capture || right.has_capture,
+        left.may_skip_capture || right.may_skip_capture || left.has_capture || right.has_capture,
+    };
+    return joined;
+}
+
+static void js_regex_scanner_finish_alternative(JsRegexScannerFrame* frame) {
+    if (frame->has_alternatives) {
+        frame->alternatives = js_regex_scanner_join_alternative(frame->alternatives,
+                                                                 frame->sequence);
+    } else {
+        frame->alternatives = frame->sequence;
+        frame->has_alternatives = true;
+    }
+    frame->sequence = js_regex_scanner_empty_summary();
+}
+
+static JsRegexScannerSummary js_regex_scanner_frame_summary(const JsRegexScannerFrame& frame) {
+    if (!frame.has_alternatives) return frame.sequence;
+    return js_regex_scanner_join_alternative(frame.alternatives, frame.sequence);
+}
+
+static bool js_regex_scanner_is_digit(char c) {
+    return c >= '0' && c <= '9';
+}
+
+static bool js_regex_scanner_parse_decimal(const char* pattern, int pattern_len, int* position,
+                                           int* value) {
+    int result = 0;
+    int cursor = *position;
+    if (cursor >= pattern_len || !js_regex_scanner_is_digit(pattern[cursor])) return false;
+    while (cursor < pattern_len && js_regex_scanner_is_digit(pattern[cursor])) {
+        int digit = pattern[cursor] - '0';
+        if (result > (INT_MAX - digit) / 10) return false;
+        result = result * 10 + digit;
+        cursor++;
+    }
+    *position = cursor;
+    *value = result;
+    return true;
+}
+
+static JsRegexScannerQuantifierParse js_regex_scanner_parse_quantifier(
+    const char* pattern, int pattern_len, int* position, JsRegexScannerQuantifier* quantifier) {
+    int cursor = *position;
+    quantifier->present = false;
+    quantifier->min = 1;
+    quantifier->max = 1;
+    if (cursor >= pattern_len) return JS_REGEX_SCANNER_QUANTIFIER_NONE;
+
+    char c = pattern[cursor];
+    if (c == '*' || c == '+' || c == '?') {
+        quantifier->present = true;
+        quantifier->min = c == '+' ? 1 : 0;
+        quantifier->max = c == '?' ? 1 : -1;
+        cursor++;
+    } else if (c == '{') {
+        int decimal_position = cursor + 1;
+        int min = 0;
+        if (decimal_position >= pattern_len || !js_regex_scanner_is_digit(pattern[decimal_position])) {
+            return JS_REGEX_SCANNER_QUANTIFIER_NONE;
+        }
+        if (!js_regex_scanner_parse_decimal(pattern, pattern_len, &decimal_position, &min)) {
+            return JS_REGEX_SCANNER_QUANTIFIER_UNSUPPORTED;
+        }
+        int max = min;
+        if (decimal_position < pattern_len && pattern[decimal_position] == ',') {
+            decimal_position++;
+            if (decimal_position < pattern_len && js_regex_scanner_is_digit(pattern[decimal_position])) {
+                if (!js_regex_scanner_parse_decimal(pattern, pattern_len, &decimal_position, &max)) {
+                    return JS_REGEX_SCANNER_QUANTIFIER_UNSUPPORTED;
+                }
+            } else {
+                max = -1;
+            }
+        }
+        if (decimal_position >= pattern_len || pattern[decimal_position] != '}' ||
+            (max >= 0 && max < min)) return JS_REGEX_SCANNER_QUANTIFIER_NONE;
+        quantifier->present = true;
+        quantifier->min = min;
+        quantifier->max = max;
+        cursor = decimal_position + 1;
+    } else {
+        return JS_REGEX_SCANNER_QUANTIFIER_NONE;
+    }
+    if (cursor < pattern_len && pattern[cursor] == '?') cursor++;
+    *position = cursor;
+    return JS_REGEX_SCANNER_QUANTIFIER_OK;
+}
+
+static JsRegexScannerSummary js_regex_scanner_apply_quantifier(
+    JsRegexScannerSummary body, const JsRegexScannerQuantifier& quantifier,
+    JsRegexScannerAnalysis* analysis) {
+    if (!quantifier.present) return body;
+    bool has_optional_iteration = quantifier.max < 0 || quantifier.max > quantifier.min;
+    bool can_repeat = quantifier.max < 0 || quantifier.max > 1;
+    if (has_optional_iteration && body.nullable) {
+        analysis->reasons |= JS_REGEX_SCANNER_REASON_EMPTY_OPTIONAL_ITERATION;
+    }
+    if (can_repeat && body.may_skip_capture) {
+        analysis->reasons |= JS_REGEX_SCANNER_REASON_CAPTURE_RESET;
+    }
+    JsRegexScannerSummary quantified = {
+        quantifier.min == 0 || body.nullable,
+        body.has_capture,
+        body.may_skip_capture || (quantifier.min == 0 && body.has_capture),
+    };
+    return quantified;
+}
+
+static bool js_regex_scanner_skip_class(const char* pattern, int pattern_len, int* position) {
+    int cursor = *position + 1;
+    while (cursor < pattern_len) {
+        if (pattern[cursor] == '\\') {
+            if (cursor + 1 >= pattern_len) return false;
+            cursor += 2;
             continue;
         }
-        if (c == '[') { in_class = true; continue; }
-        if (c == ']' && in_class) { in_class = false; continue; }
-        if (!in_class && (c == '^' || c == '$')) return true;
+        if (pattern[cursor] == ']') {
+            *position = cursor + 1;
+            return true;
+        }
+        cursor++;
     }
     return false;
 }
 
-bool js_regex_scanner_needs_backtrack(const char* pattern, int pattern_len, bool multiline) {
-    if (multiline && js_regex_has_unescaped_anchor(pattern, pattern_len)) return true;
+static bool js_regex_scanner_skip_braced_escape(const char* pattern, int pattern_len, int* position) {
+    int cursor = *position + 3;
+    while (cursor < pattern_len && pattern[cursor] != '}') cursor++;
+    if (cursor >= pattern_len) return false;
+    *position = cursor + 1;
+    return true;
+}
 
-    if (pattern_len <= 0) return false;
-    struct JsRegexQuantifierFacts {
-        bool optional;
-        bool unbounded;
-    };
-    JsRegexScratch<JsRegexQuantifierFacts> group_facts_buf(pattern_len);
-    if (group_facts_buf.count != pattern_len) {
-        log_error("js-regex backtrack analysis: cannot retain group quantifier facts");
+static bool js_regex_scanner_parse_escape(const char* pattern, int pattern_len, int* position,
+                                          int* lowest_decimal_backreference,
+                                          JsRegexScannerSummary* summary,
+                                          JsRegexScannerAnalysis* analysis) {
+    int cursor = *position;
+    if (cursor + 1 >= pattern_len) return false;
+    char escaped = pattern[cursor + 1];
+    *summary = js_regex_scanner_consuming_summary();
+    if (escaped == 'b' || escaped == 'B') *summary = js_regex_scanner_empty_summary();
+    if (escaped >= '1' && escaped <= '9') {
+        if (escaped - '0' < *lowest_decimal_backreference) {
+            *lowest_decimal_backreference = escaped - '0';
+        }
+        cursor += 2;
+        while (cursor < pattern_len && js_regex_scanner_is_digit(pattern[cursor])) cursor++;
+        *position = cursor;
         return true;
     }
-    JsRegexQuantifierFacts* group_facts = group_facts_buf.slots;
-    bool in_class = false;
-    // group stack: per open group, track whether its body contains a bounded
-    // optional ('?') and whether it contains an unbounded quantifier ('*'/'+').
-    // A quantifier applied to a group that is optional but NOT unbounded is the
-    // nullable-discard shape RE2 mishandles (e.g. (a?b??)* ); route it. We must
-    // NOT route when the body is also unbounded (e.g. (.*\n?)* ) — that is the
-    // catastrophic-backtracking shape RE2 already handles correctly and linearly.
-    int grp_depth = 0;
-    for (int i = 0; i < pattern_len; i++) {
-        char c = pattern[i];
-        if (c == '\\') {
-            if (i + 1 >= pattern_len) return false;
-            char next = pattern[i + 1];
-            if (!in_class && next >= '1' && next <= '9') return true;
-            if (!in_class && next == 'k') return true;
-            i++;
-            continue;
-        }
-        if (c == '[') { in_class = true; continue; }
-        if (c == ']' && in_class) { in_class = false; continue; }
-        if (in_class) continue;
-        if (c == '(' && i + 2 < pattern_len && pattern[i + 1] == '?' &&
-            (pattern[i + 2] == '=' || pattern[i + 2] == '!' ||
-             (pattern[i + 2] == '<' && i + 3 < pattern_len &&
-              (pattern[i + 3] == '=' || pattern[i + 3] == '!')))) return true;
-        if (c == '(') {
-            if (grp_depth >= group_facts_buf.count) {
-                log_error("js-regex backtrack analysis: group depth exceeds capacity");
-                return true;
+    if (escaped == 'k') {
+        if (cursor + 2 >= pattern_len || pattern[cursor + 2] != '<') return false;
+        cursor += 3;
+        while (cursor < pattern_len && pattern[cursor] != '>') cursor++;
+        if (cursor >= pattern_len) return false;
+        analysis->reasons |= JS_REGEX_SCANNER_REASON_BACKREFERENCE;
+        *position = cursor + 1;
+        return true;
+    }
+    if ((escaped == 'p' || escaped == 'P' || escaped == 'u') &&
+        cursor + 2 < pattern_len && pattern[cursor + 2] == '{') {
+        return js_regex_scanner_skip_braced_escape(pattern, pattern_len, position);
+    }
+    *position = cursor + 2;
+    return true;
+}
+
+static bool js_regex_scanner_open_group(const char* pattern, int pattern_len, int* position,
+                                        JsRegexScannerFrame* frame,
+                                        JsRegexScannerAnalysis* analysis) {
+    int cursor = *position + 1;
+    bool capturing = true;
+    bool assertion = false;
+    if (cursor < pattern_len && pattern[cursor] == '?') {
+        cursor++;
+        if (cursor >= pattern_len) return false;
+        if (pattern[cursor] == ':') {
+            capturing = false;
+            cursor++;
+        } else if (pattern[cursor] == '=' || pattern[cursor] == '!') {
+            capturing = false;
+            assertion = true;
+            cursor++;
+        } else if (pattern[cursor] == '<') {
+            if (cursor + 1 < pattern_len && (pattern[cursor + 1] == '=' || pattern[cursor + 1] == '!')) {
+                capturing = false;
+                assertion = true;
+                cursor += 2;
+            } else {
+                cursor++;
+                while (cursor < pattern_len && pattern[cursor] != '>') cursor++;
+                if (cursor >= pattern_len) return false;
+                cursor++;
             }
-            group_facts[grp_depth].optional = false;
-            group_facts[grp_depth].unbounded = false;
-            grp_depth++;
-        } else if (c == ')') {
-            if (grp_depth > 0) grp_depth--;
-            // a quantifier applied to an optional-but-not-unbounded group -> route
-            if (i + 1 < pattern_len && grp_depth < group_facts_buf.count) {
-                char q = pattern[i + 1];
-                if ((q == '*' || q == '+' || q == '{') &&
-                    group_facts[grp_depth].optional &&
-                    !group_facts[grp_depth].unbounded) return true;
-            }
-        } else if (grp_depth > 0 && grp_depth <= group_facts_buf.count &&
-                   !(i > 0 && pattern[i - 1] == '(')) {
-            // record bounded vs unbounded quantifiers in the innermost open group
-            // (skip the '?' of a (?: / (?= / (?<name> group marker via the guard).
-            if (c == '?') group_facts[grp_depth - 1].optional = true;
-            else if (c == '*' || c == '+') group_facts[grp_depth - 1].unbounded = true;
+        } else {
+            return false;
         }
     }
-    return false;
+    if (assertion) analysis->reasons |= JS_REGEX_SCANNER_REASON_ASSERTION;
+    frame->sequence = js_regex_scanner_empty_summary();
+    frame->alternatives = js_regex_scanner_empty_summary();
+    frame->has_alternatives = false;
+    frame->capturing = capturing;
+    frame->assertion = assertion;
+    *position = cursor;
+    return true;
+}
+
+JsRegexScannerAnalysis js_regex_scanner_analyze(const char* pattern, int pattern_len,
+                                                 bool multiline) {
+    JsRegexScannerAnalysis analysis = {JS_REGEX_SCANNER_REASON_NONE, true};
+    if (!pattern || pattern_len < 0) {
+        analysis.complete = false;
+        return analysis;
+    }
+
+    JsRegexScannerFrameStack frames;
+    JsRegexScannerFrame root = {
+        js_regex_scanner_empty_summary(), js_regex_scanner_empty_summary(), false, false, false,
+    };
+    if (!frames.push(root)) {
+        analysis.reasons |= JS_REGEX_SCANNER_REASON_ALLOCATION_FAILURE;
+        return analysis;
+    }
+
+    int capture_count = 0;
+    int lowest_decimal_backreference = 10;
+    int position = 0;
+    while (position < pattern_len) {
+        char c = pattern[position];
+        JsRegexScannerFrame* current = frames.top();
+        if (c == '|') {
+            js_regex_scanner_finish_alternative(current);
+            position++;
+            continue;
+        }
+        if (c == ')') {
+            if (frames.count == 1) {
+                analysis.complete = false;
+                return analysis;
+            }
+            JsRegexScannerFrame group = frames.pop();
+            JsRegexScannerSummary group_summary = js_regex_scanner_frame_summary(group);
+            if (group.capturing) {
+                group_summary.has_capture = true;
+                capture_count++;
+            }
+            if (group.assertion) group_summary.nullable = true;
+            position++;
+            JsRegexScannerQuantifier quantifier;
+            JsRegexScannerQuantifierParse parsed = js_regex_scanner_parse_quantifier(
+                pattern, pattern_len, &position, &quantifier);
+            if (parsed == JS_REGEX_SCANNER_QUANTIFIER_UNSUPPORTED) {
+                analysis.reasons |= JS_REGEX_SCANNER_REASON_UNSUPPORTED;
+                return analysis;
+            }
+            group_summary = js_regex_scanner_apply_quantifier(group_summary, quantifier, &analysis);
+            frames.top()->sequence = js_regex_scanner_join_sequence(frames.top()->sequence, group_summary);
+            continue;
+        }
+        if (c == '(') {
+            JsRegexScannerFrame group;
+            if (!js_regex_scanner_open_group(pattern, pattern_len, &position, &group, &analysis)) {
+                analysis.complete = false;
+                return analysis;
+            }
+            if (!frames.push(group)) {
+                analysis.reasons |= JS_REGEX_SCANNER_REASON_ALLOCATION_FAILURE;
+                return analysis;
+            }
+            continue;
+        }
+        if (c == '*' || c == '+' || c == '?') {
+            analysis.complete = false;
+            return analysis;
+        }
+
+        JsRegexScannerSummary atom;
+        if (c == '[') {
+            if (!js_regex_scanner_skip_class(pattern, pattern_len, &position)) {
+                analysis.complete = false;
+                return analysis;
+            }
+            atom = js_regex_scanner_consuming_summary();
+        } else if (c == '\\') {
+            if (!js_regex_scanner_parse_escape(pattern, pattern_len, &position,
+                                               &lowest_decimal_backreference, &atom, &analysis)) {
+                analysis.complete = false;
+                return analysis;
+            }
+        } else {
+            if (c == '^' || c == '$') {
+                atom = js_regex_scanner_empty_summary();
+                if (multiline) analysis.reasons |= JS_REGEX_SCANNER_REASON_MULTILINE_ANCHOR;
+            } else {
+                atom = js_regex_scanner_consuming_summary();
+            }
+            position++;
+        }
+        JsRegexScannerQuantifier quantifier;
+        JsRegexScannerQuantifierParse parsed = js_regex_scanner_parse_quantifier(
+            pattern, pattern_len, &position, &quantifier);
+        if (parsed == JS_REGEX_SCANNER_QUANTIFIER_UNSUPPORTED) {
+            analysis.reasons |= JS_REGEX_SCANNER_REASON_UNSUPPORTED;
+            return analysis;
+        }
+        atom = js_regex_scanner_apply_quantifier(atom, quantifier, &analysis);
+        frames.top()->sequence = js_regex_scanner_join_sequence(frames.top()->sequence, atom);
+    }
+    if (frames.count != 1) {
+        analysis.complete = false;
+        return analysis;
+    }
+    if (capture_count >= lowest_decimal_backreference) {
+        analysis.reasons |= JS_REGEX_SCANNER_REASON_BACKREFERENCE;
+    }
+    return analysis;
+}
+
+bool js_regex_scanner_needs_backtrack(const char* pattern, int pattern_len, bool multiline) {
+    return js_regex_scanner_analyze(pattern, pattern_len, multiline).reasons !=
+           JS_REGEX_SCANNER_REASON_NONE;
 }

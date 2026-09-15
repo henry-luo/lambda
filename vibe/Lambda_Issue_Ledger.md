@@ -873,10 +873,6 @@ and points at the generator that actually conflicts.
   is first-await-only; `js_await_sync` busy-drains. The Lambda side has the same
   gap from the other direction — cross-language import skips `pub` vars
   ([LR01-11](#lr01-11)). One cross-language design.
-- **OI-4 · RegExp semantics.** RE2 leftmost-longest ≠ JS leftmost-greedy;
-  heuristic routing can silently yield wrong captures; the backtracking engine
-  bails to "no match" at its 8M-step budget. Needs an explicit decision: own
-  backtracking engine as primary, vs proven-equivalence routing.
 - **OI-5 · MIR value-representation contract (MIR Direct) · RESOLVED 2026-09-14.**
   The canonical boundary is `MirValue`: it carries the full `Type*` contract and
   actual `ValueRep`; consumers request a carrier through `em_require_rep()`.
