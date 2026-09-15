@@ -2779,22 +2779,6 @@ static int js_mir_analyze_and_plan(void* opaque) {
                 fc->name, JM_PARAM_COUNT(fc),
                 JM_JS_FACT(fc, return_type) == LMD_TYPE_INT ? "INT" : "FLOAT");
         }
-
-        // Mixed native/Item entries keep the Item formal stable across every
-        // tail iteration. Retain TCO for all-native signatures only.
-        JM_JS_FACT(fc, is_tco_eligible) = false;
-        if (eligible && has_native_param) {
-            for (int j = 0; j < JM_PARAM_COUNT(fc); j++) {
-                if (jm_param_type(fc, j) == LMD_TYPE_ANY) {
-                    has_native_param = false;
-                    break;
-                }
-            }
-        }
-        if (eligible && has_native_param && jm_has_tail_call(mt, fc)) {
-            JM_JS_FACT(fc, is_tco_eligible) = true;
-            log_debug("js-mir TCO: %s eligible for tail-call optimization", fc->name);
-        }
     }
 
     // Phase 1.9: Create forward declarations for all functions.

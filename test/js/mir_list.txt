@@ -1,5 +1,7 @@
 # Tests with a clear MIR wall-time advantage over the AST interpreter.
 # Measurements: release build, focused one-test runs, MIR faster by >=5 ms.
+# Also: regressions for MIR-only lowering, which mixed mode would otherwise
+# run on AST.
 collection_gc_retention
 dynamic_string_no_name_id_exhaustion
 for_destructure_closure
@@ -15,3 +17,4 @@ tco
 tune6_intrinsic_reflect_define
 typed_arrays
 type_infer_ip6
+regression_mir_native_return_completion

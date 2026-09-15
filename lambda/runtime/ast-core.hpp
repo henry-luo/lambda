@@ -1368,7 +1368,6 @@ typedef struct FnAnalysis {
     bool js_is_reassigned;
     // JS collection/planning facts stay with the source function rather than
     // the post-order MIR-emission entry (D8.2.4).
-    bool js_is_tco_eligible;
     bool js_is_iife_body;
     bool js_is_iife_func_decl;
     bool js_is_constructor;

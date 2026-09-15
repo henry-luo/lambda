@@ -2354,7 +2354,7 @@ struct Context {
     Url* cwd;  // current working directory
     void* (*context_alloc)(int size, TypeId type_id);
     bool run_main; // whether to run main procedure on start
-    uintptr_t stack_limit; // stack overflow check limit (from lambda_stack_init)
+    uintptr_t stack_limit; // recoverable native stack limit of the executing thread (JC23)
     bool ui_mode; // allocate fat DomElement/DomText on arena for unified DOM tree
     uint64_t* side_root_base;
     uint64_t* side_root_top;

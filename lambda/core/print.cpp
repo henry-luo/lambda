@@ -21,7 +21,9 @@ static char* binary_literal_text(Binary* bin, size_t* text_len) {
     char* text = (char*)mem_alloc(len + 1, MEM_CAT_TEMP);
     if (!text) return NULL;
     text[0] = 'b'; text[1] = '\''; text[2] = '\\'; text[3] = 'x';
-    str_hex_encode(text + 4, (const char*)bytes, byte_len);
+    // Lambda_Data.md: printed and string() binaries use the canonical
+    // uppercase form b'\x<HEX>'
+    str_hex_encode_upper(text + 4, (const char*)bytes, byte_len);
     text[len - 1] = '\'';
     text[len] = '\0';
     if (text_len) *text_len = len;

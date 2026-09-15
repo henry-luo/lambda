@@ -946,8 +946,6 @@ struct JsExecutionState {
     Item base_activation_fallback[JS_CALL_ACTIVATION_ITEM_COUNT] = {};
     JsCallActivation base_activation = {};
     JsCallActivation* current_activation = NULL;
-    int call_depth = 0;
-    int call_stack_limit = 4096;
 };
 
 // Await's result handoff is the one realm-owned async Item that outlives the

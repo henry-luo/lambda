@@ -158,7 +158,6 @@ struct JsAstFunctionFactWalk {
     bool direct_eval_active;
     bool observations_active;
     bool with_active;
-    bool tail_active;
     bool direct_body_active;
     JsAstNode* parent;
 };
@@ -207,7 +206,6 @@ static void js_ast_collect_function_facts_node(JsAstNode* node,
         JsAstFunctionFactWalk walk) {
     if (!node || !walk.facts) return;
     if (js_ast_function_boundary(node, NULL)) {
-        if (walk.tail_active) walk.facts->tail_reuse_safe = false;
         walk.direct_eval_active = false;
         walk.with_active = false;
         if (js_ast_lexical_function_boundary(node, NULL)) {
@@ -215,7 +213,7 @@ static void js_ast_collect_function_facts_node(JsAstNode* node,
         }
     }
     if (!walk.direct_eval_active && !walk.observations_active &&
-            !walk.with_active && !walk.tail_active) return;
+            !walk.with_active) return;
     if (walk.direct_eval_active && js_ast_call_is_direct_eval(node)) {
         walk.facts->has_direct_eval = true;
     }
@@ -259,11 +257,6 @@ static void js_ast_collect_function_facts_node(JsAstNode* node,
     if (walk.with_active && node->node_type == JS_AST_NODE_WITH_STATEMENT) {
         walk.facts->has_with = true;
     }
-    if (walk.tail_active && (node->node_type == JS_AST_NODE_WITH_STATEMENT ||
-            node->node_type == AST_NODE_TRY_STAM ||
-            js_ast_identifier_named(node, "eval", 4))) {
-        walk.facts->tail_reuse_safe = false;
-    }
     walk.parent = node;
     js_ast_visit_children(node, js_ast_collect_function_facts_child, &walk);
 }
@@ -271,15 +264,12 @@ static void js_ast_collect_function_facts_node(JsAstNode* node,
 JsAstFunctionFacts js_ast_collect_function_facts(JsAstNode* params,
         JsAstNode* body) {
     JsAstFunctionFacts facts = {};
-    facts.tail_reuse_safe = true;
     for (JsAstNode* param = params; param;
             param = (JsAstNode*)param->next) {
-        js_ast_collect_function_facts_node(param, {&facts, true, true, false, true, false, NULL});
+        js_ast_collect_function_facts_node(param, {&facts, true, true, false, false, NULL});
     }
     js_ast_collect_function_facts_node(body,
-        {&facts, true, true, true, true, true, NULL});
-    facts.tail_reuse_safe = facts.tail_reuse_safe &&
-        !(facts.observations & JS_AST_OBSERVES_ARGUMENTS);
+        {&facts, true, true, true, true, NULL});
     return facts;
 }
 

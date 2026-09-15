@@ -132,7 +132,7 @@ This drives a source-shape policy (`:698`): count total MIR instructions post-lo
 
 Two important nuances the logs pinned down. First, this must use the *link-interface* interpreter path (`MIR_set_interp_interface` with the JIT generator still initialized, `g_mir_interp_mode` left 0), not the pure-interpreter path that skips `MIR_gen_init` — the latter regressed 49 interactive UI-automation tests because paths that still need the generator (eval/batch lowering) diverged (Tune6 §0.2e). Second, the per-function lazy-JIT interface MIR ships (`MIR_set_lazy_gen_interface`) collapses link but makes on-demand generation ≈80× costlier per function and scales ≈O(n²) at opt≥2 under interleaved generation, so it was rejected as net-negative; the interpreter, which does no per-function codegen at all, is the usable lever. *Owner:* [JS_01 §4, §7](JS_01_Compilation_Pipeline.md). *Measured (Tune6 §0.2e):* large libraries 4–6× faster total (lodash 6.7 s → 1.3 s); the web-template Radiant suite ≈3× faster wall and CPU, at 0 test262 regressions and a green Radiant baseline.
 
-A correctness caveat: the MIR interpreter does **not** perform tail-call optimization, so TCO-dependent deep recursion that passes under JIT (`test/js/tco.js`) overflows the stack under the interpreter (Tune7 §2) — a known engine-dependent divergence, not a flake.
+A depth caveat: no backend eliminates tail calls (JC24). Deep recursion ends at the JC23 stack guard, and the depth at which it does depends on each backend's frame size. `test/js/tco.js` (100k and 500k self-tail levels) fits the JIT's native frames within the default budget but not the interpreter's larger ones (Tune7 §2). That is an engine-dependent depth, which S7.11.4 permits, not a flake.
 
 ---
 

@@ -1348,11 +1348,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         JsFuncCollected* saved_fc = mt->current_fc;
         JsClassEntry* saved_class_n = mt->current_class;
         MIR_reg_t saved_eval_completion_n = mt->eval_completion_reg;
-        // Save TCO state
-        JsFuncCollected* saved_tco_func = mt->tco_func;
-        MIR_label_t saved_tco_label = mt->tco_label;
-        MIR_reg_t saved_tco_count = mt->tco_count_reg;
-        bool saved_tail_pos = mt->in_tail_position;
         // Save exception label — must not leak from outer function into native version
         MIR_label_t saved_error_lane_label = mt->func_error_lane_label;
         JsErrorLaneTrack saved_error_lane_track = mt->error_lane_track;
@@ -1369,9 +1364,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->in_main = false;
         mt->current_fc = fc;
         mt->eval_completion_reg = 0;  // disable in native functions
-        mt->tco_func = NULL;
-        mt->in_tail_position = false;
-        mt->tco_jumped = false;
         mt->func_error_lane_label = 0;    // reset — native func needs its own exception label
 
         jm_begin_function_frame(mt, native_ret_type, false,
@@ -1399,38 +1391,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     parameter_id ? parameter_id->entry : NULL);
             }
             param_node = param_node ? param_node->next : NULL;
-        }
-
-        // TCO setup: wrap body in a loop if this function has tail-recursive calls
-        if (JM_JS_FACT(fc, is_tco_eligible)) {
-            log_debug("js-mir TCO: enabling loop transform for %s", fc->name);
-            mt->tco_func = fc;
-
-            // Create iteration counter, init to 0
-            mt->tco_count_reg = jm_new_reg(mt, "tco_count", MIR_T_I64);
-            jm_emit_reg_op(mt, MIR_MOV, mt->tco_count_reg, MIR_new_int_op(mt->ctx, 0));
-
-            // TCO loop label
-            mt->tco_label = jm_new_label(mt);
-            jm_emit_label(mt, mt->tco_label);
-
-            // Increment: tco_count += 1
-            jm_emit_reg_binary_op(mt, MIR_ADD, mt->tco_count_reg, mt->tco_count_reg, MIR_new_int_op(mt->ctx, 1));
-
-            // Guard: if (tco_count <= 1000000) goto ok
-            MIR_label_t ok_label = jm_new_label(mt);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BLE, MIR_new_label_op(mt->ctx, ok_label),
-                MIR_new_reg_op(mt->ctx, mt->tco_count_reg),
-                MIR_new_int_op(mt->ctx, 1000000)));
-
-            // Overflow: return 0 (safety net — should never trigger for correct code)
-            if (native_ret_type == MIR_T_D) {
-                jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_double_op(mt->ctx, 0.0)));
-            } else {
-                jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_int_op(mt->ctx, 0)));
-            }
-
-            jm_emit_label(mt, ok_label);
         }
 
         // P9: Pre-scan variable types before transpiling native body
@@ -1490,20 +1450,14 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->current_fc = saved_fc;
         mt->current_class = saved_class_n;
         mt->eval_completion_reg = saved_eval_completion_n;
-        mt->tco_func = saved_tco_func;
-        mt->tco_label = saved_tco_label;
-        mt->tco_count_reg = saved_tco_count;
-        mt->in_tail_position = saved_tail_pos;
-        mt->tco_jumped = false;
         mt->func_error_lane_label = saved_error_lane_label;  // restore outer function's error exit
         mt->error_lane_track = saved_error_lane_track;
         mt->func_em->last_call_result = saved_last_call_result;
         mt->func_error_lane_value_reg = saved_func_error_lane_value;
 
-        log_debug("js-mir P4: generated native version %s (params: %d, ret: %s%s)",
+        log_debug("js-mir P4: generated native version %s (params: %d, ret: %s)",
             native_name, param_count,
-            JM_JS_FACT(fc, return_type) == LMD_TYPE_INT ? "INT" : "FLOAT",
-            JM_JS_FACT(fc, is_tco_eligible) ? ", TCO" : "");
+            JM_JS_FACT(fc, return_type) == LMD_TYPE_INT ? "INT" : "FLOAT");
     }
 
     // --- v15: Generate generator state machine function if is_generator ---

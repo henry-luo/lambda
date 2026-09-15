@@ -37393,7 +37393,7 @@ static void* interp_worker_entry(void* opaque) {
     args->initialized = true;
     input_context = (Context*)eval;
     lambda_stack_init();
-    eval->stack_limit = _lambda_stack_limit;
+    eval->stack_limit = lambda_stack_recoverable_limit();
     if (!lambda_side_stack_bind()) {
         log_error("interp-worker: failed to bind side-stack regions");
         args->result = ItemError;

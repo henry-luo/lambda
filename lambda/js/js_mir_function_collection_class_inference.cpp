@@ -81,19 +81,6 @@ JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call) {
     return fc;
 }
 
-// ============================================================================
-// TCO: Tail-call detection
-// ============================================================================
-
-// Tail recursion is a binding relation: same-spelled local shadows must retain
-// their ordinary Call semantics instead of targeting the enclosing function.
-bool jm_is_recursive_call(JsCallNode* call, JsFuncCollected* fc) {
-    if (!call || !call->callee || !fc || !fc->node || !fc->node->entry) return false;
-    if (call->callee->node_type != AST_NODE_IDENT) return false;
-    JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
-    return id->entry && id->entry == fc->node->entry;
-}
-
 bool jm_call_result_uses_native_register(JsMirTranspiler* mt, JsCallNode* call, JsFuncCollected* fc) {
     if (!mt || !call || !fc) return false;
     // A known native body is not enough: an unmatched direct call is lowered
@@ -102,25 +89,6 @@ bool jm_call_result_uses_native_register(JsMirTranspiler* mt, JsCallNode* call, 
     // already boxed string/object result.
     return JM_JS_FACT(fc, native_return_kind) != NATIVE_RETURN_NONE && fc->native_func_item &&
         jm_resolve_native_call(mt, call) == fc;
-}
-
-// Indexed return ownership excludes nested functions from tail-call evidence.
-// A tail call is `return f(...)` where f is the function itself.
-bool jm_has_tail_call(JsMirTranspiler* mt, JsFuncCollected* fc) {
-    if (!mt || !fc || !fc->node || !mt->tp) return false;
-    AstIndex* index = &mt->tp->ast_index;
-    AstNodeId fn_node_id = ast_index_find(index, (AstNode*)fc->node);
-    AstFunctionId owner = fn_node_id == AST_NODE_ID_INVALID ?
-        AST_FUNCTION_ID_INVALID : index->owner_functions[fn_node_id];
-    if (owner == AST_FUNCTION_ID_INVALID) return false;
-    for (uint32_t i = 0; i < index->count; i++) {
-        if (index->owner_functions[i] != owner ||
-                index->nodes[i]->node_type != AST_NODE_RETURN_STAM) continue;
-        JsReturnNode* ret = (JsReturnNode*)index->nodes[i];
-        if (ret->argument && ret->argument->node_type == AST_NODE_CALL_EXPR &&
-                jm_is_recursive_call((JsCallNode*)ret->argument, fc)) return true;
-    }
-    return false;
 }
 
 // ============================================================================

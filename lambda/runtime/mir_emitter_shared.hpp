@@ -357,12 +357,6 @@ struct MirCallOptions {
     MIR_reg_t hidden_env;
 };
 
-// a profile supplies its context-owned counter and overflow semantics.
-struct MirInvocationDepthPlan {
-    MIR_reg_t owner;
-    MIR_disp_t depth_offset;
-    MIR_disp_t limit_offset;
-};
 struct MirCallResult {
     MirValue normal;
     MirValue error;
@@ -549,6 +543,10 @@ struct MirEmitter {
     // stale register can never leak into a different function's body.
     MIR_item_t bitcast_slot_func;
     MIR_reg_t bitcast_slot_addr;
+    // Per-function native stack pointer captured once at the function head
+    // for the JC23 stack guard; keyed by func_item like the bitcast slot.
+    MIR_item_t stack_ptr_func;
+    MIR_reg_t stack_ptr_reg;
 };
 
 // Profiles locate Item-only module slots; the common layer owns conversion.
@@ -1271,21 +1269,30 @@ static inline void em_store_at(MirEmitter* em, MIR_reg_t base, MIR_disp_t offset
         MIR_new_reg_op(em->ctx, value)));
 }
 
-static inline void em_change_invocation_depth(MirEmitter* em,
-        const MirInvocationDepthPlan& plan, int delta, MIR_label_t overflow = 0) {
-    MIR_reg_t depth = em_load_at(em, plan.owner, plan.depth_offset, MIR_T_I32, "call_depth");
-    if (overflow) {
-        MIR_reg_t limit = em_load_at(em, plan.owner, plan.limit_offset, MIR_T_I32, "call_limit");
-        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BGE,
-            MIR_new_label_op(em->ctx, overflow), MIR_new_reg_op(em->ctx, depth),
-            MIR_new_reg_op(em->ctx, limit)));
+// JC23: the language-level stack guard compares the native stack pointer with
+// the thread's recoverable limit (`Context::stack_limit`). It writes nothing,
+// so the call's exit has no matching step and a fault landing has no counter
+// to rewind. MIR has no SP operand; BSTART stores SP (`mov rd, sp`) without an
+// alloca, and under the MIR interpreter it yields the interpreter's native
+// frame, which lives on the same stack. Emitted functions use no ALLOCA
+// outside their head, so SP is constant for the body: one BSTART prepended at
+// the head serves every guard. Release A/B on r7rs/ack: a BSTART per call
+// site cost +9.5%, the head BSTART +3.0%, and a constant in its place +0.4%
+// (so the residue is BSTART's presence in mir-gen, not the compare).
+static inline void em_branch_if_stack_exhausted(MirEmitter* em,
+        MIR_label_t overflow) {
+    if (!em->stack_ptr_reg || em->stack_ptr_func != em->func_item) {
+        em->stack_ptr_reg = em_new_reg(em, "stack_ptr", MIR_T_I64);
+        em->stack_ptr_func = em->func_item;
+        MIR_prepend_insn(em->ctx, em->func_item, MIR_new_insn(em->ctx,
+            MIR_BSTART, MIR_new_reg_op(em->ctx, em->stack_ptr_reg)));
     }
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_ADD,
-        MIR_new_reg_op(em->ctx, depth), MIR_new_reg_op(em->ctx, depth),
-        MIR_new_int_op(em->ctx, delta)));
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
-        MIR_new_mem_op(em->ctx, MIR_T_I32, plan.depth_offset, plan.owner, 0, 1),
-        MIR_new_reg_op(em->ctx, depth)));
+    MIR_reg_t sp = em->stack_ptr_reg;
+    MIR_reg_t limit = em_load_at(em, em->frame.runtime,
+        (MIR_disp_t)offsetof(Context, stack_limit), MIR_T_I64, "stack_limit");
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_UBLT,
+        MIR_new_label_op(em->ctx, overflow), MIR_new_reg_op(em->ctx, sp),
+        MIR_new_reg_op(em->ctx, limit)));
 }
 
 // Establish pointer/kind before dereferencing an inferred container candidate.

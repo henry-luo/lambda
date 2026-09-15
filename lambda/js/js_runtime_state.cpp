@@ -2,6 +2,7 @@
 #include "js_well_known_names.h"
 #include "js_exec_profile.h"
 #include "../runtime/lambda-error.h"
+#include "../runtime/lambda-stack.h"
 #include "../runtime/runtime-state.h"
 #include "../lambda.hpp"
 #include "../input/input.hpp"
@@ -15,7 +16,6 @@
 __thread JsRuntimeState* js_active_runtime_state = NULL;
 extern __thread EvalContext* context;
 
-extern "C" int js_initial_call_stack_limit(void);
 extern "C" void js_runtime_owned_cache_destroy_context(JsRuntimeState* state);
 extern "C" void js_runtime_prototype_snapshot_destroy_context(JsRuntimeState* state);
 extern "C" bool js_proto_snapshot_is_valid(void);
@@ -632,7 +632,6 @@ bool js_runtime_state_init(EvalContext* runtime_context) {
         runtime_job_queue_init(&state->promises.unhandled_queue,
             &state->promises.unhandled_storage);
         state->event_loop->next_id = 1;
-        state->execution.call_stack_limit = js_initial_call_stack_limit();
         state->operations.next_symbol_id = 100;
         state->string_caches->last_from_char_code_cp = -1;
         state->string_caches->ascii_chars_epoch = ~0ULL;
@@ -653,6 +652,9 @@ bool js_runtime_state_init(EvalContext* runtime_context) {
         return false;
     }
     js_active_runtime_state = state;
+    // JC23: the call guards compare the native stack pointer with this limit,
+    // so it must describe the thread that binds (and executes) the context.
+    runtime_context->stack_limit = lambda_stack_recoverable_limit();
     if (!js_execution_state_prepare(state, runtime_context)) {
         log_error("js-call-activation: failed to prepare base activation roots");
         js_active_runtime_state = NULL;
