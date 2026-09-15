@@ -1035,8 +1035,7 @@ static void append_body_onload_source(const char* onload, StrBuf* onload_buf) {
         }
     }
 
-    strbuf_append_str(onload_buf, onload);
-    strbuf_append_str(onload_buf, "\n");
+    strbuf_append_all(onload_buf, 2, onload, "\n");
 }
 
 static bool is_supported_classic_script_type(const char* type_attr) {
@@ -2574,8 +2573,8 @@ static bool append_global_call_inline_handler(StrBuf* compile_buf,
     strbuf_append_str_n(compile_buf, name_start, name_len);
     strbuf_append_str(compile_buf,
         "\"]; } if (typeof __lambda_inline_fn === 'function') { return __lambda_inline_fn.call(this");
-    if (pass_event) strbuf_append_str(compile_buf, ", event");
-    strbuf_append_str(compile_buf, "); } return undefined;");
+    strbuf_append_all(compile_buf, 2, pass_event ? ", event" : "",
+                      "); } return undefined;");
     return true;
 }
 
@@ -2600,8 +2599,7 @@ static void collect_handlers_recursive(DomElement* elem,
             char func_name[64];
             snprintf(func_name, sizeof(func_name), "__evt_handler_%d", id);
 
-            strbuf_append_str(compile_buf, "function ");
-            strbuf_append_str(compile_buf, func_name);
+            strbuf_append_all(compile_buf, 2, "function ", func_name);
             strbuf_append_str(compile_buf, "(event) { ");
             if (!append_global_call_inline_handler(compile_buf, attr_val)) {
                 strbuf_append_str(compile_buf, attr_val);
@@ -2609,10 +2607,7 @@ static void collect_handlers_recursive(DomElement* elem,
             strbuf_append_str(compile_buf, " }\n");
 
             // store func_name on pool for later lookup
-            size_t func_name_len = strlen(func_name);
-            char* stored_name = (char*)pool_alloc(handlers->pool, func_name_len + 1);
-            str_copy(stored_name, func_name_len + 1, func_name, func_name_len);
-            handler->function_name = stored_name;
+            handler->function_name = pool_strdup(handlers->pool, func_name);
 
             // Link into collection: find existing chain or create new.
             InlineHandlerInstallEntry key = {};

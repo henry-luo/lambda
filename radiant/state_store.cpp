@@ -8007,8 +8007,7 @@ static bool clipboard_inline_tag(const char* tag) {
 
 static void append_open_tag_for_clipboard(StrBuf* sb, DomElement* element) {
     if (!sb || !element || !element->tag_name) return;
-    strbuf_append_char(sb, '<');
-    strbuf_append_str(sb, element->tag_name);
+    strbuf_append_all(sb, 2, "<", element->tag_name);
     if (strcmp(element->tag_name, "a") == 0) {
         const char* href = (static_cast<DomNode*>(element))->get_attribute("href");
         const char* title = (static_cast<DomNode*>(element))->get_attribute("title");
@@ -8028,8 +8027,7 @@ static void append_open_tag_for_clipboard(StrBuf* sb, DomElement* element) {
 
 static void append_close_tag_for_clipboard(StrBuf* sb, DomElement* element) {
     if (!sb || !element || !element->tag_name) return;
-    strbuf_append_str(sb, "</");
-    strbuf_append_str(sb, element->tag_name);
+    strbuf_append_all(sb, 2, "</", element->tag_name);
     strbuf_append_char(sb, '>');
 }
 
@@ -8140,8 +8138,7 @@ static bool extract_html_visitor(View* view, bool entering, void* context) {
         // Opening tag
         const char* tag_name = element->tag_name;
         if (tag_name) {
-            strbuf_append_char(sb, '<');
-            strbuf_append_str(sb, tag_name);
+            strbuf_append_all(sb, 2, "<", tag_name);
             // TODO: add attributes if needed
             strbuf_append_char(sb, '>');
         }
@@ -8150,8 +8147,7 @@ static bool extract_html_visitor(View* view, bool entering, void* context) {
         ViewElement* element = lam::view_require_element(view);
         const char* tag_name = element->tag_name;
         if (tag_name) {
-            strbuf_append_str(sb, "</");
-            strbuf_append_str(sb, tag_name);
+            strbuf_append_all(sb, 2, "</", tag_name);
             strbuf_append_char(sb, '>');
         }
     }

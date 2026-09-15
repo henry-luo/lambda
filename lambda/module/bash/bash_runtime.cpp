@@ -1835,8 +1835,7 @@ extern "C" Item bash_glob_expand(Item pattern) {
     // Return space-separated string for simplicity.
     StrBuf* sb = strbuf_new();
     for (size_t i = 0; i < g.gl_pathc; i++) {
-        if (i > 0) strbuf_append_char(sb, ' ');
-        strbuf_append_str(sb, g.gl_pathv[i]);
+        strbuf_append_all(sb, 2, i > 0 ? " " : "", g.gl_pathv[i]);
     }
     String* result = heap_create_name(sb->str, sb->length);
     strbuf_free(sb);

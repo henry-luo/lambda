@@ -47,6 +47,7 @@ void strbuf_append_str_n(StrBuf *sb, const char *str, size_t n);
 void strbuf_append_char(StrBuf *sb, char c);
 // append character c n times
 void strbuf_append_char_n(StrBuf *sb, char c, size_t n);
+bool strbuf_append_utf8(StrBuf *sb, uint32_t codepoint);
 void strbuf_append_int(StrBuf *buf, int value);
 void strbuf_append_int64(StrBuf *buf, int64_t value);
 void strbuf_append_uint64(StrBuf *buf, uint64_t value);

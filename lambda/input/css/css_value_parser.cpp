@@ -132,9 +132,8 @@ CssValue* css_value_create_keyword(Pool* pool, const char* keyword) {
     } else {
         // Unknown keyword - store as custom property string
         value->type = CSS_VALUE_TYPE_CUSTOM;
-        char* keyword_copy = (char*)pool_alloc(pool, strlen(keyword_to_lookup) + 1);
+        char* keyword_copy = pool_strdup(pool, keyword_to_lookup);
         if (keyword_copy) {
-            str_copy(keyword_copy, strlen(keyword_to_lookup) + 1, keyword_to_lookup, strlen(keyword_to_lookup));
             value->data.custom_property.name = keyword_copy;
             value->data.custom_property.fallback = NULL;
         }
@@ -848,10 +847,8 @@ void css_property_value_parser_add_error(CssPropertyValueParser* parser, const c
     if (parser->error_count >= parser->error_capacity) return;
 
     // Copy error message
-    size_t len = strlen(message);
-    char* error_copy = (char*)pool_alloc(parser->pool, len + 1);
+    char* error_copy = pool_strdup(parser->pool, message);
     if (error_copy) {
-        str_copy(error_copy, len + 1, message, len);
         parser->error_messages[parser->error_count++] = error_copy;
     }
 }

@@ -36,6 +36,7 @@ static bool lambda_parse_int_literal(const char* text, int64_t* out) {
 
 
 #include "../../lib/str.h"
+#include "../../lib/string.h"
 #include "../../lib/strview.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/file.h"
@@ -3272,11 +3273,7 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
             sym->len = content_len;
             str = (String*)sym;  // store as String* in TypeString (const pool uses raw pointer)
         } else {
-            str = (String*)pool_alloc(tp->pool, sizeof(String) + content_len + 1);
-            str_copy(str->chars, content_len + 1, content_start, content_len);
-            str->len = content_len;
-            str->flags = 0;
-            str->is_ascii = str_is_ascii(str->chars, content_len) ? 1 : 0;
+            str = string_from_strview(strview_init(content_start, content_len), tp->pool);
         }
         str_type->string = str;
     }
@@ -3361,23 +3358,7 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
                                 code_point = 0xFFFD;
                             }
 
-                            // Convert Unicode code point to UTF-8
-                            if (code_point <= 0x7F) {
-                                stringbuf_append_char(str_buf, (char)code_point);
-                            } else if (code_point <= 0x7FF) {
-                                stringbuf_append_char(str_buf, 0xC0 | (code_point >> 6));
-                                stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
-                            } else if (code_point <= 0xFFFF) {
-                                stringbuf_append_char(str_buf, 0xE0 | (code_point >> 12));
-                                stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
-                                stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
-                            } else {
-                                // 4-byte UTF-8 encoding for code points > 0xFFFF (emojis, etc.)
-                                stringbuf_append_char(str_buf, 0xF0 | (code_point >> 18));
-                                stringbuf_append_char(str_buf, 0x80 | ((code_point >> 12) & 0x3F));
-                                stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
-                                stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
-                            }
+                            stringbuf_append_utf8(str_buf, code_point);
                             i += 5;  // skip \uXXXX
                         } else {
                             log_error("Invalid Unicode escape: \\u%s", hex_digits);
@@ -3404,23 +3385,7 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
                             char* endptr;
                             uint32_t code_point = strtoul(hex_str, &endptr, 16);
                             if (endptr == hex_str + hex_source.length && code_point <= 0x10FFFF) {
-                                // Convert Unicode code point to UTF-8
-                                if (code_point <= 0x7F) {
-                                    stringbuf_append_char(str_buf, (char)code_point);
-                                } else if (code_point <= 0x7FF) {
-                                    stringbuf_append_char(str_buf, 0xC0 | (code_point >> 6));
-                                    stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
-                                } else if (code_point <= 0xFFFF) {
-                                    stringbuf_append_char(str_buf, 0xE0 | (code_point >> 12));
-                                    stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
-                                    stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
-                                } else {
-                                    // 4-byte UTF-8 encoding for code points > 0xFFFF
-                                    stringbuf_append_char(str_buf, 0xF0 | (code_point >> 18));
-                                    stringbuf_append_char(str_buf, 0x80 | ((code_point >> 12) & 0x3F));
-                                    stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
-                                    stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
-                                }
+                                stringbuf_append_utf8(str_buf, code_point);
                                 i = (hex_end - content_start);  // position at '}'
                             } else {
                                 log_error("Invalid Unicode escape: \\u{%s}", hex_str);
@@ -10788,8 +10753,7 @@ static AstNode* build_module_import_from_parts(Transpiler* tp,
             StrBuf* fixed = strbuf_new();
             const char* home = g_lambda_home;
             if (home[0] == '.' && home[1] == '/') home += 2;
-            strbuf_append_str(fixed, "./");
-            strbuf_append_str(fixed, home);
+            strbuf_append_all(fixed, 2, "./", home);
             strbuf_append_str(fixed, slash);
             strbuf_free(path);
             path = fixed;

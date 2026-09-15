@@ -494,8 +494,7 @@ static Item bigint_to_base_item(Item x, int base, const char* prefix) {
     if (count == 0) return (Item){.item = s2it(heap_create_name("0"))};
     // build result: [-]prefix + reversed(raw)
     StrBuf* sb = strbuf_new();
-    if (neg) strbuf_append_char(sb, '-');
-    strbuf_append_str(sb, prefix);
+    strbuf_append_all(sb, 2, neg ? "-" : "", prefix);
     for (int i = count - 1; i >= 0; i--) strbuf_append_char(sb, raw[i]);
     Item r = (Item){.item = s2it(heap_create_name(sb->str ? sb->str : "0"))};
     strbuf_free(sb);

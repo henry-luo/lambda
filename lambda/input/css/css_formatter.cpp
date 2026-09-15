@@ -259,8 +259,7 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
 
         case CSS_VALUE_TYPE_STRING:
             if (value->data.string) {
-                stringbuf_append_str(formatter->output, "\"");
-                stringbuf_append_str(formatter->output, value->data.string);
+                stringbuf_append_all(formatter->output, 2, "\"", value->data.string);
                 stringbuf_append_str(formatter->output, "\"");
             }
             break;
@@ -281,8 +280,7 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
 
         case CSS_VALUE_TYPE_FUNCTION:
             if (value->data.function && value->data.function->name) {
-                stringbuf_append_str(formatter->output, value->data.function->name);
-                stringbuf_append_str(formatter->output, "(");
+                stringbuf_append_all(formatter->output, 2, value->data.function->name, "(");
                 // Format function arguments (comma-separated at top level, space-separated within)
                 for (size_t i = 0; i < (size_t)value->data.function->arg_count; i++) {
                     if (i > 0) {
@@ -440,8 +438,7 @@ const char* css_format_declaration_full(CssFormatter* formatter, CssDeclaration*
         property_name = "<unknown-property>";
     }
 
-    stringbuf_append_str(formatter->output, property_name);
-    stringbuf_append_str(formatter->output, ":");
+    stringbuf_append_all(formatter->output, 2, property_name, ":");
     append_space(formatter);
 
     // Format value - use temporary buffer with property context
@@ -470,8 +467,7 @@ const char* css_format_declaration(CssFormatter* formatter, CssPropertyCode prop
         property_name = "<unknown-property>";
     }
 
-    stringbuf_append_str(formatter->output, property_name);
-    stringbuf_append_str(formatter->output, ":");
+    stringbuf_append_all(formatter->output, 2, property_name, ":");
     append_space(formatter);
 
     // Format value - use temporary buffer with property context
@@ -649,8 +645,8 @@ const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup*
                                         stringbuf_append_str(formatter->output, "=\"");
                                         break;
                                 }
-                                stringbuf_append_str(formatter->output, simple->attribute.value);
-                                stringbuf_append_str(formatter->output, "\"");
+                                stringbuf_append_all(formatter->output, 2,
+                                                     simple->attribute.value, "\"");
                                 if (simple->attribute.case_insensitive) {
                                     stringbuf_append_str(formatter->output, " i");
                                 }
@@ -706,8 +702,7 @@ const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup*
                             stringbuf_append_str(formatter->output, simple->value);
                         }
                         if (simple->argument) {
-                            stringbuf_append_str(formatter->output, "(");
-                            stringbuf_append_str(formatter->output, simple->argument);
+                            stringbuf_append_all(formatter->output, 2, "(", simple->argument);
                             stringbuf_append_str(formatter->output, ")");
                         }
                         break;
@@ -721,12 +716,10 @@ const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup*
                     default:
                         // For other pseudo-classes/elements with values
                         if (simple->value) {
-                            stringbuf_append_str(formatter->output, ":");
-                            stringbuf_append_str(formatter->output, simple->value);
+                            stringbuf_append_all(formatter->output, 2, ":", simple->value);
                             // Include argument for functional pseudo-classes like :where(), :not(), :is(), :has()
                             if (simple->argument) {
-                                stringbuf_append_str(formatter->output, "(");
-                                stringbuf_append_str(formatter->output, simple->argument);
+                                stringbuf_append_all(formatter->output, 2, "(", simple->argument);
                                 stringbuf_append_str(formatter->output, ")");
                             }
                         }
@@ -819,8 +812,7 @@ const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
                                (rule->type == CSS_RULE_SUPPORTS) ? "supports" :
                                (rule->type == CSS_RULE_CONTAINER) ? "container" : "layer";
 
-        stringbuf_append_str(formatter->output, "@");
-        stringbuf_append_str(formatter->output, rule_name);
+        stringbuf_append_all(formatter->output, 2, "@", rule_name);
 
         if (rule->data.conditional_rule.condition) {
             append_space(formatter);
@@ -884,8 +876,7 @@ const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
         // Format @charset rule
         stringbuf_append_str(formatter->output, "@charset ");
         if (rule->data.charset_rule.charset) {
-            stringbuf_append_str(formatter->output, "\"");
-            stringbuf_append_str(formatter->output, rule->data.charset_rule.charset);
+            stringbuf_append_all(formatter->output, 2, "\"", rule->data.charset_rule.charset);
             stringbuf_append_str(formatter->output, "\"");
         }
         stringbuf_append_str(formatter->output, ";");
@@ -898,8 +889,7 @@ const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
             append_space(formatter);
         }
         if (rule->data.namespace_rule.namespace_url) {
-            stringbuf_append_str(formatter->output, "url(");
-            stringbuf_append_str(formatter->output, rule->data.namespace_rule.namespace_url);
+            stringbuf_append_all(formatter->output, 2, "url(", rule->data.namespace_rule.namespace_url);
             stringbuf_append_str(formatter->output, ")");
         }
         stringbuf_append_str(formatter->output, ";");

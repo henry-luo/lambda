@@ -13,7 +13,7 @@
  */
 #include "inline_common.hpp"
 #include "../../../../lib/html_entities.h"
-#include "../../input-utils.h"
+#include "../../../../lib/strbuf.h"
 #include <cstring>
 
 namespace lambda {
@@ -26,103 +26,11 @@ namespace markup {
  * Caller must free the result.
  */
 static char* unescape_string(const char* start, size_t len) {
-    char* result = (char*)mem_alloc(len * 4 + 1, MEM_CAT_INPUT_MARKUP); // Worst case: all entities expand
-    if (!result) return nullptr;
-
-    char* out = result;
-    const char* pos = start;
-    const char* end = start + len;
-
-    while (pos < end) {
-        if (*pos == '\\' && pos + 1 < end && is_escapable(*(pos + 1))) {
-            // Backslash escape - skip backslash, copy escaped char
-            pos++;
-            *out++ = *pos++;
-        } else if (*pos == '&') {
-            // Try to parse entity reference
-            const char* entity_start = pos + 1;
-            const char* entity_pos = entity_start;
-
-            if (*entity_pos == '#') {
-                // Numeric entity
-                entity_pos++;
-                uint32_t codepoint = 0;
-                bool valid = false;
-
-                if (*entity_pos == 'x' || *entity_pos == 'X') {
-                    // Hex
-                    entity_pos++;
-                    const char* num_start = entity_pos;
-                    while (entity_pos < end &&
-                           ((*entity_pos >= '0' && *entity_pos <= '9') ||
-                            (*entity_pos >= 'a' && *entity_pos <= 'f') ||
-                            (*entity_pos >= 'A' && *entity_pos <= 'F'))) {
-                        codepoint *= 16;
-                        if (*entity_pos >= '0' && *entity_pos <= '9')
-                            codepoint += *entity_pos - '0';
-                        else if (*entity_pos >= 'a' && *entity_pos <= 'f')
-                            codepoint += *entity_pos - 'a' + 10;
-                        else
-                            codepoint += *entity_pos - 'A' + 10;
-                        entity_pos++;
-                        if (codepoint > 0x10FFFF) break;
-                    }
-                    if (entity_pos > num_start && entity_pos < end && *entity_pos == ';' && codepoint <= 0x10FFFF) {
-                        valid = true;
-                    }
-                } else {
-                    // Decimal
-                    const char* num_start = entity_pos;
-                    while (entity_pos < end && *entity_pos >= '0' && *entity_pos <= '9') {
-                        codepoint = codepoint * 10 + (*entity_pos - '0');
-                        entity_pos++;
-                        if (codepoint > 0x10FFFF) break;
-                    }
-                    if (entity_pos > num_start && entity_pos < end && *entity_pos == ';' && codepoint <= 0x10FFFF) {
-                        valid = true;
-                    }
-                }
-
-                if (valid) {
-                    if (codepoint == 0) codepoint = 0xFFFD;
-                    int utf8_len = codepoint_to_utf8(codepoint, out);
-                    if (utf8_len > 0) {
-                        out += utf8_len;
-                        pos = entity_pos + 1;
-                        continue;
-                    }
-                }
-            } else {
-                // Named entity
-                while (entity_pos < end &&
-                       ((*entity_pos >= 'a' && *entity_pos <= 'z') ||
-                        (*entity_pos >= 'A' && *entity_pos <= 'Z') ||
-                        (*entity_pos >= '0' && *entity_pos <= '9'))) {
-                    entity_pos++;
-                }
-
-                if (entity_pos > entity_start && entity_pos < end && *entity_pos == ';') {
-                    size_t name_len = entity_pos - entity_start;
-                    const char* replacement = html_entity_lookup(entity_start, name_len);
-
-                    if (replacement) {
-                        size_t rep_len = strlen(replacement);
-                        memcpy(out, replacement, rep_len);
-                        out += rep_len;
-                        pos = entity_pos + 1;
-                        continue;
-                    }
-                }
-            }
-
-            // Not a valid entity, copy & literally
-            *out++ = *pos++;
-        } else {
-            *out++ = *pos++;
-        }
-    }
-
-    *out = '\0';
+    StrBuf* decoded = strbuf_new();
+    if (!decoded) return nullptr;
+    html_entities_decode_markdown_append(decoded, start, len);
+    char* result = mem_dup_n(decoded->str, decoded->length, MEM_CAT_INPUT_MARKUP);
+    strbuf_free(decoded);
     return result;
 }
 

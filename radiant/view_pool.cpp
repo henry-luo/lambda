@@ -1041,8 +1041,7 @@ void append_json_string(StrBuf* buf, const char* str) {
 static void append_json_key(StrBuf* buf, int indent, const char* key) {
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_char(buf, '"');
-    strbuf_append_str(buf, key);
-    strbuf_append_str(buf, "\": ");
+    strbuf_append_all(buf, 2, key, "\": ");
 }
 
 static void append_json_comma_newline(StrBuf* buf, bool comma) {
@@ -3572,8 +3571,7 @@ static StrBuf* build_view_tree_json(ViewElement* view_root, Url* url, int schema
         return json_buf;
     }
 
-    strbuf_append_str(json_buf, "{\n");
-    strbuf_append_str(json_buf, "  \"test_info\": {\n");
+    strbuf_append_all(json_buf, 2, "{\n", "  \"test_info\": {\n");
 
     // Add timestamp
     strbuf_append_str(json_buf, "    \"timestamp\": \"");
@@ -3585,10 +3583,11 @@ static StrBuf* build_view_tree_json(ViewElement* view_root, Url* url, int schema
     }
     strbuf_append_str(json_buf, "\",\n");
 
-    strbuf_append_str(json_buf, "    \"radiant_version\": \"1.0\",\n");
-    strbuf_append_str(json_buf, "    \"coordinate_system\": \"css_logical_pixels\",\n");
-    strbuf_append_str(json_buf, "    \"viewport\": { \"width\": 1200, \"height\": 800 }\n");
-    strbuf_append_str(json_buf, "  },\n");
+    strbuf_append_all(json_buf, 4,
+                      "    \"radiant_version\": \"1.0\",\n",
+                      "    \"coordinate_system\": \"css_logical_pixels\",\n",
+                      "    \"viewport\": { \"width\": 1200, \"height\": 800 }\n",
+                      "  },\n");
 
     strbuf_append_str(json_buf, "  \"layout_tree\": ");
     if (view_root) {

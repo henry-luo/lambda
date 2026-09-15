@@ -1111,12 +1111,9 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
                                                 // Store flag
                                                 String* flag_key = ctx.builder.createString("flag");
                                                 if (flag_key) {
-                                                    String* flag_val;
-                                                    flag_val = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 2);
+                                                    String* flag_val = string_from_strview(
+                                                        strview_init(&flag, 1), ctx.input()->pool);
                                                     if (flag_val) {
-                                                        flag_val->chars[0] = flag;
-                                                        flag_val->chars[1] = '\0';
-                                                        flag_val->len = 1;
                                                         Item flag_item = {.item = s2it(flag_val)};
                                                         ctx.builder.putToMap(lam::gc_borrow(entry_map), flag_key, flag_item);
                                                     }

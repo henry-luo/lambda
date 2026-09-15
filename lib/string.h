@@ -7,6 +7,8 @@
 #endif
 
 #include <stdint.h>
+#include "arena.h"
+#include "memtrack.h"
 #include "mempool.h"
 #include "strview.h"
 
@@ -35,6 +37,8 @@ typedef struct String {
 // String creation and manipulation functions
 String* create_string(Pool* pool, const char* str);
 String* string_from_strview(StrView view, Pool* pool);
+String* string_from_strview_arena(StrView view, Arena* arena);
+String* string_from_strview_mem(StrView view, MemCategory category);
 
 // String comparison, hashing (delegates to str.h)
 #include <stdbool.h>

@@ -632,8 +632,7 @@ struct PrintItemVisitor {
             // indent mode too (a bare newline is not a boundary; S16.1.1 gives line
             // breaks no meaning). Content children then juxtapose: any separator
             // between them would re-parse as a statement separator, not as siblings.
-            if (attr_count) strbuf_append_char(strbuf, ',');
-            strbuf_append_str(strbuf, indent ? "\n" : " ");
+            strbuf_append_all(strbuf, 2, attr_count ? "," : "", indent ? "\n" : " ");
             for (long i = 0; i < child_count; i++) {
                 if (i) strbuf_append_str(strbuf, indent ? "\n" : " ");
                 if (indent) { for (int j=0; j<depth+1; j++) strbuf_append_str(strbuf, indent); }

@@ -16,6 +16,7 @@
 #include "../../lib/log.h"
 #include "../../lib/file.h"
 #include "../../lib/str.h"
+#include "../../lib/string.h"
 #include "../../lib/strview.h"
 #include "../../lib/url.h"
 #include <cstdio>
@@ -368,21 +369,16 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
         snprintf(file_url, sizeof(file_url), "%s", furl ? furl : "");
         if (furl) mem_free(furl);
 
-        String* url_string = (String*)mem_alloc(sizeof(String) + strlen(file_url) + 1, MEM_CAT_SYSTEM);
+        String* url_string = string_from_strview_mem(
+            strview_from_cstr(file_url), MEM_CAT_SYSTEM);
         String* type_string = nullptr;
         if (input_format && strcmp(input_format, "auto-detect") != 0) {
-            type_string = (String*)mem_alloc(sizeof(String) + strlen(input_format) + 1, MEM_CAT_SYSTEM);
-            if (type_string) {
-                type_string->len = strlen(input_format);
-                str_copy(type_string->chars, type_string->len + 1, input_format, type_string->len);
-            }
+            type_string = string_from_strview_mem(
+                strview_from_cstr(input_format), MEM_CAT_SYSTEM);
         }
 
         Item data_item = {.item = ITEM_ERROR};
         if (url_string) {
-            url_string->len = strlen(file_url);
-            str_copy(url_string->chars, url_string->len + 1, file_url, url_string->len);
-
             Input* input = input_from_url(url_string, type_string, nullptr, nullptr);
             if (input && input->root.item != ITEM_ERROR) {
                 data_item = input->root;

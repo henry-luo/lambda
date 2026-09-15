@@ -429,13 +429,11 @@ void DomNode::print(StrBuf* buf, int indent) const {
         strbuf_append_char_n(buf, ' ', indent);
 
         // Print opening tag
-        strbuf_append_char(buf, '<');
-        strbuf_append_str(buf, element->tag_name ? element->tag_name : "unknown");
+        strbuf_append_all(buf, 2, "<", element->tag_name ? element->tag_name : "unknown");
 
         // Print id attribute first if present
         if (element->id && element->id[0] != '\0') {
-            strbuf_append_str(buf, " id=\"");
-            strbuf_append_str(buf, element->id);
+            strbuf_append_all(buf, 2, " id=\"", element->id);
             strbuf_append_char(buf, '"');
         }
 
@@ -462,9 +460,7 @@ void DomNode::print(StrBuf* buf, int indent) const {
                 // Skip id and class as they're already printed above
                 if (strcmp(name, "id") != 0 && strcmp(name, "class") != 0 && value) {
                     strbuf_append_char(buf, ' ');
-                    strbuf_append_str(buf, name);
-                    strbuf_append_str(buf, "=\"");
-                    strbuf_append_str(buf, value);
+                    strbuf_append_all(buf, 3, name, "=\"", value);
                     strbuf_append_char(buf, '"');
                 }
             }
@@ -572,8 +568,7 @@ void DomNode::print(StrBuf* buf, int indent) const {
                 strbuf_append_char(buf, '\n');
                 strbuf_append_char_n(buf, ' ', indent);
             }
-            strbuf_append_str(buf, "</");
-            strbuf_append_str(buf, element->tag_name ? element->tag_name : "unknown");
+            strbuf_append_all(buf, 2, "</", element->tag_name ? element->tag_name : "unknown");
             strbuf_append_char(buf, '>');
 
             // Add trailing newline only for root element (indent == 0)

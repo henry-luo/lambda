@@ -272,8 +272,7 @@ static void path_print_name(StrBuf* out, const char* seg) {
     // Numeric-looking names must stay quoted so NameKey("1") cannot
     // canonicalize into the distinct IntKey(1) spelling.
     if (all_digits) needs_quote = true;
-    if (needs_quote) strbuf_append_char(out, '\'');
-    strbuf_append_str(out, text);
+    strbuf_append_all(out, 2, needs_quote ? "'" : "", text);
     if (needs_quote) strbuf_append_char(out, '\'');
 }
 
@@ -429,8 +428,7 @@ void path_to_os_path(Path* path, void* out_ptr) {
         strbuf_append_char(out, '/');
 #endif
     } else {
-        strbuf_append_str(out, scheme_names[scheme]);
-        strbuf_append_str(out, "://");
+        strbuf_append_all(out, 2, scheme_names[scheme], "://");
     }
 
     for (int i = ops->length - 1; i >= 0; i--) {

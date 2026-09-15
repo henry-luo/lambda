@@ -322,8 +322,8 @@ static void format_dot_statements(StringBuf* sb, const ElementReader& owner,
 }
 
 static void format_dot_document(StringBuf* sb, const ElementReader& graph, bool canonical) {
-    if (graph.get_bool_attr("strict")) stringbuf_append_str(sb, "strict ");
-    stringbuf_append_str(sb, graph.get_bool_attr("directed", true) ? "digraph" : "graph");
+    stringbuf_append_all(sb, 2, graph.get_bool_attr("strict") ? "strict " : "",
+                         graph.get_bool_attr("directed", true) ? "digraph" : "graph");
     const char* id = get_element_attribute(graph, "id");
     if (id) {
         stringbuf_append_char(sb, ' ');
@@ -517,8 +517,7 @@ static void format_graph_element_with_syn(StringBuf* sb, const ElementReader& el
             stringbuf_append_str(sb, "# Graph: ");
             if (graph_name)  stringbuf_append_str(sb, graph_name);
             if (graph_type) {
-                stringbuf_append_str(sb, " (");
-                stringbuf_append_str(sb, graph_type);
+                stringbuf_append_all(sb, 2, " (", graph_type);
                 stringbuf_append_char(sb, ')');
             }
             stringbuf_append_char(sb, '\n');

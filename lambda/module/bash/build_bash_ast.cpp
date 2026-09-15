@@ -1188,22 +1188,7 @@ static String* process_ansi_c_content(NamePool* np, const char* s, int len) {
                 have_digits = true;
                 i++;
             }
-            if (have_digits) {
-                if (value <= 0x7f) strbuf_append_char(sb, (char)value);
-                else if (value <= 0x7ff) {
-                    strbuf_append_char(sb, (char)(0xc0 | ((value >> 6) & 0x1f)));
-                    strbuf_append_char(sb, (char)(0x80 | (value & 0x3f)));
-                } else if (value <= 0xffff) {
-                    strbuf_append_char(sb, (char)(0xe0 | ((value >> 12) & 0x0f)));
-                    strbuf_append_char(sb, (char)(0x80 | ((value >> 6) & 0x3f)));
-                    strbuf_append_char(sb, (char)(0x80 | (value & 0x3f)));
-                } else {
-                    strbuf_append_char(sb, (char)(0xf0 | ((value >> 18) & 0x07)));
-                    strbuf_append_char(sb, (char)(0x80 | ((value >> 12) & 0x3f)));
-                    strbuf_append_char(sb, (char)(0x80 | ((value >> 6) & 0x3f)));
-                    strbuf_append_char(sb, (char)(0x80 | (value & 0x3f)));
-                }
-            }
+            if (have_digits) strbuf_append_utf8(sb, (uint32_t)value);
             break;
         }
         case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': {

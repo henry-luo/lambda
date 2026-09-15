@@ -94,6 +94,14 @@ void strbuf_append_char(StrBuf *sb, char c) {
     sb->length++;
 }
 
+bool strbuf_append_utf8(StrBuf *sb, uint32_t codepoint) {
+    char encoded[4];
+    size_t length = str_utf8_encode(codepoint, encoded, sizeof(encoded));
+    if (length == 0) return false;
+    strbuf_append_str_n(sb, encoded, length);
+    return true;
+}
+
 // append char `c` `n` times
 void strbuf_append_char_n(StrBuf *buf, char c, size_t n) {
     if (!strbuf_ensure_cap(buf, buf->length + n + 1)) return;

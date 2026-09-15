@@ -540,8 +540,7 @@ static Item parse_element(InputContext& ctx, const char **xml, int depth) {
         // Create processing instruction element name "?target"
         StringBuf* sb = ctx.sb;
         stringbuf_reset(sb);
-        stringbuf_append_char(sb, '?');
-        stringbuf_append_str(sb, target_name->chars);
+        stringbuf_append_all(sb, 2, "?", target_name->chars);
         String* pi_name = builder.createString(sb->str->chars, sb->length);
 
         // Parse PI data (everything until ?>)
@@ -569,9 +568,8 @@ static Item parse_element(InputContext& ctx, const char **xml, int depth) {
                         size_t href_len = href_end - href_start;
                         // Allocate from pool and store in input
                         Input* input = ctx.input();
-                        input->xml_stylesheet_href = (char*)pool_alloc(input->pool, href_len + 1);
+                        input->xml_stylesheet_href = pool_dup_n(input->pool, href_start, href_len);
                         if (input->xml_stylesheet_href) {
-                            str_copy(input->xml_stylesheet_href, href_len + 1, href_start, href_len);
                             log_debug("[XML Parser] Found xml-stylesheet href: %s", input->xml_stylesheet_href);
                         }
                     }

@@ -5,6 +5,7 @@
 #include "../../lib/mem.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/str.h"
+#include "../../lib/string.h"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_typed.hpp"
@@ -311,10 +312,7 @@ static Item resolve_alias(YamlParser* p, const char* name) {
 // so we directly allocate a String with len=0 to represent a genuine empty string.
 static Item make_empty_string(YamlParser* p) {
     Arena* arena = p->ctx->builder.arena();
-    String* s = (String*)arena_alloc(arena, sizeof(String) + 1);
-    s->len = 0;
-    s->flags = 0;
-    s->chars[0] = '\0';
+    String* s = string_from_strview_arena(strview_init("", 0), arena);
     return (Item){.item = s2it(s)};
 }
 
@@ -328,10 +326,7 @@ static void put_key_value(YamlParser* p, MapBuilder& map, Item key_item, Item va
         } else {
             // empty string key: createName("") returns null, so allocate directly
             Arena* arena = p->ctx->builder.arena();
-            String* name = (String*)arena_alloc(arena, sizeof(String) + 1);
-            name->len = 0;
-            name->flags = 0;
-            name->chars[0] = '\0';
+            String* name = string_from_strview_arena(strview_init("", 0), arena);
             map.put(name, value_item);
         }
         return;

@@ -910,15 +910,12 @@ static void decompress_streams(Input* input, MarkBuilder& builder, Array* object
         const char* dec = get_decompressed_stream(sm, &out_len, &needs_free);
         if (!dec) continue;
 
-        // Pool-allocate the new String so it survives with the input pool.
-        String* new_data = (String*)pool_calloc(input->pool, sizeof(String) + out_len + 1);
+        // Copy decompressed bytes into a String owned by the input pool.
+        String* new_data = string_from_strview(strview_init(dec, out_len), input->pool);
         if (!new_data) {
             if (needs_free) mem_free((void*)dec);
             continue;
         }
-        str_copy(new_data->chars, out_len + 1, dec, out_len);
-        new_data->len = (uint32_t)out_len;
-        new_data->is_ascii = 1;
         // Buffers from pdf_decompress_stream are mem_alloc'd, not malloc'd —
         // must use mem_free() to avoid corrupting the memtrack tinfo header.
         if (needs_free) mem_free((void*)dec);

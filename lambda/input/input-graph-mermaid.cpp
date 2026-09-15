@@ -1834,8 +1834,7 @@ static Element* parse_mermaid_class_namespace_path(InputContext& ctx, Element* g
         StringBuf* id = ctx.sb;
         stringbuf_reset(id);
         if (parent_id && *parent_id) {
-            stringbuf_append_str(id, parent_id);
-            stringbuf_append_char(id, '.');
+            stringbuf_append_all(id, 2, parent_id, ".");
         }
         stringbuf_append_str_n(id, segment->chars, segment->len);
         String* namespace_id = ctx.builder.createString(id->str->chars, id->str->len);

@@ -561,8 +561,7 @@ static void js_util_inspect_append_named_value(StrBuf* sb, const char* name, Ite
     if (js_util_inspect_is_undefined(value)) return;
     if (!*first) strbuf_append_str(sb, ", ");
     *first = false;
-    strbuf_append_str(sb, name);
-    strbuf_append_str(sb, ": ");
+    strbuf_append_all(sb, 2, name, ": ");
     if (assertion_string && get_type_id(value) == LMD_TYPE_STRING) {
         js_util_inspect_append_assertion_string(sb, value, assertion_string_limit);
         return;
@@ -641,8 +640,8 @@ static Item js_util_inspect_assertion_error(Item obj_item, JsInspectContext* ctx
 static Item js_util_inspect_abort_signal(Item obj_item) {
     Item aborted = js_get_key_cstr(obj_item, "aborted");
     StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, "AbortSignal { aborted: ");
-    strbuf_append_str(sb, (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) ? "true" : "false");
+    strbuf_append_all(sb, 2, "AbortSignal { aborted: ",
+                      (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) ? "true" : "false");
     strbuf_append_str(sb, " }");
     return js_util_inspect_make_string(sb);
 }
@@ -676,8 +675,7 @@ static Item js_util_inspect_date(Item obj_item, JsInspectContext* ctx, int depth
     char ctor_name[64];
     if (js_get_constructor_name(obj_item, ctor_name, sizeof(ctor_name)) &&
             strcmp(ctor_name, "Date") != 0) {
-        strbuf_append_str(sb, ctor_name);
-        strbuf_append_char(sb, ' ');
+        strbuf_append_all(sb, 2, ctor_name, " ");
     }
     bool found_time = false;
     Item time_value = js_map_shape_lookup_ext(obj_item.map, "__time__", 8, &found_time);
@@ -761,8 +759,7 @@ static Item js_util_inspect_regexp(Item obj_item, JsInspectContext* ctx, int dep
     char ctor_name[64];
     if (js_get_constructor_name(obj_item, ctor_name, sizeof(ctor_name)) &&
             strcmp(ctor_name, "RegExp") != 0) {
-        strbuf_append_str(sb, ctor_name);
-        strbuf_append_char(sb, ' ');
+        strbuf_append_all(sb, 2, ctor_name, " ");
     }
     if (rs) strbuf_append_str_n(sb, rs->chars, rs->len);
     else strbuf_append_str(sb, "/(?:)/");
@@ -796,8 +793,7 @@ static Item js_util_inspect_typed_array(Item obj_item, JsInspectContext* ctx, in
     if (!type_name) type_name = "Uint8Array";
     int len = js_typed_array_length(obj_item);
     StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, type_name);
-    strbuf_append_char(sb, '(');
+    strbuf_append_all(sb, 2, type_name, "(");
     strbuf_append_int64(sb, len < 0 ? 0 : len);
     if (ta && ta->is_buffer) strbuf_append_str(sb, ") [Uint8Array] [");
     else strbuf_append_str(sb, ") [");

@@ -11,6 +11,7 @@
 #include "../../lib/file.h"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
+#include "../../lib/string.h"
 #include "../../lib/mime-detect.h"
 
 // Structure to hold response data
@@ -392,21 +393,11 @@ Input* input_from_http_with_name_parent(const char* url, const char* type,
     String* flavor_str = NULL;
 
     if (type) {
-        type_str = (String*)mem_alloc(sizeof(String) + strlen(type) + 1, MEM_CAT_INPUT_OTHER);
-        if (type_str) {
-            type_str->len = strlen(type);
-            type_str->flags = 0;
-            str_copy(type_str->chars, type_str->len + 1, type, type_str->len);
-        }
+        type_str = string_from_strview_mem(strview_from_cstr(type), MEM_CAT_INPUT_OTHER);
     }
 
     if (flavor) {
-        flavor_str = (String*)mem_alloc(sizeof(String) + strlen(flavor) + 1, MEM_CAT_INPUT_OTHER);
-        if (flavor_str) {
-            flavor_str->len = strlen(flavor);
-            flavor_str->flags = 0;
-            str_copy(flavor_str->chars, flavor_str->len + 1, flavor, flavor_str->len);
-        }
+        flavor_str = string_from_strview_mem(strview_from_cstr(flavor), MEM_CAT_INPUT_OTHER);
     }
 
     // Parse content using existing input system

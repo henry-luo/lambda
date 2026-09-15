@@ -207,10 +207,8 @@ String* generate_json_report(ValidationResult* result, Pool* pool) {
 
     StringBuf* json = stringbuf_new(pool);
 
-    stringbuf_append_str(json, "{\n");
-    stringbuf_append_str(json, "  \"valid\": ");
-    stringbuf_append_str(json, result->valid ? "true" : "false");
-    stringbuf_append_str(json, ",\n");
+    stringbuf_append_all(json, 4, "{\n", "  \"valid\": ",
+                         result->valid ? "true" : "false", ",\n");
 
     char counts[128];
     snprintf(counts, sizeof(counts),

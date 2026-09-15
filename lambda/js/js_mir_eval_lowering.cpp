@@ -537,8 +537,7 @@ static void js_dynfunc_apply_function_metadata(Item fn_item, Item* args, int arg
     js_set_function_name(fn_item, anon_name);
 
     StrBuf* src_buf = strbuf_new_cap(256);
-    strbuf_append_str(src_buf, source_prefix);
-    strbuf_append_str(src_buf, "(");
+    strbuf_append_all(src_buf, 2, source_prefix, "(");
     for (int i = 0; i < argc - 1; i++) {
         if (i > 0) strbuf_append_str(src_buf, ",");
         String* ps2 = it2s(args[i]);
@@ -617,8 +616,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     // → (function(param1, param2) { body })
     // new Function() with no args → (function() {})
     StrBuf* sb = strbuf_new_cap(256);
-    strbuf_append_str(sb, "(");
-    strbuf_append_str(sb, parse_prefix);
+    strbuf_append_all(sb, 2, "(", parse_prefix);
     strbuf_append_str(sb, "(");
 
     // params are args[0..argc-2], body is args[argc-1]

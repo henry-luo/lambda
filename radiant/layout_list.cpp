@@ -179,15 +179,13 @@ const char* extract_counter_spec_from_style(StyleTree* style, CssPropertyCode cs
             if (item->type == CSS_VALUE_TYPE_KEYWORD) {
                 const CssEnumInfo* info = css_enum_info(item->data.keyword);
                 if (info) {
-                    if (sb->length > 0) stringbuf_append_char(sb, ' ');
-                    stringbuf_append_str(sb, info->name);
+                    stringbuf_append_all(sb, 2, sb->length > 0 ? " " : "", info->name);
                 }
             } else if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
-                if (sb->length > 0) stringbuf_append_char(sb, ' ');
-                stringbuf_append_str(sb, item->data.custom_property.name);
+                stringbuf_append_all(sb, 2, sb->length > 0 ? " " : "",
+                                     item->data.custom_property.name);
             } else if (item->type == CSS_VALUE_TYPE_STRING && item->data.string) {
-                if (sb->length > 0) stringbuf_append_char(sb, ' ');
-                stringbuf_append_str(sb, item->data.string);
+                stringbuf_append_all(sb, 2, sb->length > 0 ? " " : "", item->data.string);
             } else if (item->type == CSS_VALUE_TYPE_NUMBER) {
                 if (sb->length > 0) stringbuf_append_char(sb, ' ');
                 stringbuf_append_int(sb, (int)item->data.number.value); // INT_CAST_OK: CSS numeric value to int

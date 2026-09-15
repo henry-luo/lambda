@@ -9,6 +9,7 @@
 #include "../../lib/log.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/str.h"
+#include "../../lib/string.h"
 #include "../../lib/strview.h"
 #include "../../lib/memtrack.h"
 #include "../runtime/transpiler.hpp"
@@ -390,13 +391,9 @@ ValidationError* create_validation_error(ValidationErrorCode code, const char* m
         if (pool) {
             error->message = create_string(pool, message);
         } else {
-            // For non-pool allocation, create a simple string copy
-            size_t len = strlen(message);
-            error->message = (String*)mem_alloc(sizeof(String) + len + 1, MEM_CAT_EVAL);
-            if (error->message) {
-                error->message->len = len;
-                str_copy(error->message->chars, error->message->len + 1, message, error->message->len);
-            }
+            // Retain the message outside the optional caller-owned pool.
+            error->message = string_from_strview_mem(
+                strview_from_cstr(message), MEM_CAT_EVAL);
         }
     }
 

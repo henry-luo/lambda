@@ -100,8 +100,7 @@ static int create_parent_dirs(const char* file_path) {
 // Helper: Generate a unique temp file path for atomic writes
 static void generate_temp_path(const char* file_path, StrBuf* temp_buf) {
     static int counter = 0;
-    strbuf_append_str(temp_buf, file_path);
-    strbuf_append_str(temp_buf, ".tmp.");
+    strbuf_append_all(temp_buf, 2, file_path, ".tmp.");
     strbuf_append_int(temp_buf, ++counter);
     strbuf_append_char(temp_buf, '.');
     strbuf_append_int(temp_buf, (int)time(NULL));
@@ -746,8 +745,7 @@ String* format_cmd_args(String* cmd, Item args) {
             String* arg_str = fn_string(arg_item);
             if (arg_str && arg_str->len > 0) {
                 String* escaped = escape_shell_arg(arg_str);
-                strbuf_append_char(sb, ' ');
-                strbuf_append_str(sb, escaped->chars);
+                strbuf_append_all(sb, 2, " ", escaped->chars);
             }
         }
     }
@@ -780,8 +778,7 @@ String* format_cmd_args(String* cmd, Item args) {
             if (value_str && value_str->len > 0) {
                 if (!(value_item._type_id == LMD_TYPE_BOOL && value_item.bool_val == true)) {
                     String* escaped = escape_shell_arg(value_str);
-                    strbuf_append_char(sb, '=');
-                    strbuf_append_str(sb, escaped->chars);
+                    strbuf_append_all(sb, 2, "=", escaped->chars);
                 }
                 // else skip boolean true values (just add the flag)
             }
@@ -794,8 +791,7 @@ String* format_cmd_args(String* cmd, Item args) {
         String* arg_str = fn_string(args);
         if (arg_str && arg_str->len > 0) {
             String* escaped = escape_shell_arg(arg_str);
-            strbuf_append_char(sb, ' ');
-            strbuf_append_str(sb, escaped->chars);
+            strbuf_append_all(sb, 2, " ", escaped->chars);
         }
     }
 

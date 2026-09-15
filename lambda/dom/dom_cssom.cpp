@@ -310,8 +310,7 @@ static void append_rule_declaration_text(StringBuf* buf, CssDeclaration* decl, P
     const char* name = decl->property_name ? decl->property_name : css_property_spelling_from_code(decl->property_code);
     if (!name) return;
 
-    stringbuf_append_str(buf, name);
-    stringbuf_append_str(buf, ": ");
+    stringbuf_append_all(buf, 2, name, ": ");
     stringbuf_append_str(buf, css_serialize_declaration_value(decl, pool));
     if (decl->important) {
         stringbuf_append_str(buf, " !important");
@@ -324,8 +323,7 @@ static const char* serialize_style_rule_css_text(CssRule* rule, Pool* pool) {
     StringBuf* buf = stringbuf_new(pool);
     if (!buf) return "";
 
-    stringbuf_append_str(buf, serialize_selector_text(rule, pool));
-    stringbuf_append_str(buf, "{");
+    stringbuf_append_all(buf, 2, serialize_selector_text(rule, pool), "{");
     for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
         CssDeclaration* decl = rule->data.style_rule.declarations[i];
         if (!decl) continue;
@@ -837,8 +835,7 @@ extern "C" Item dom_cssom_rule_decl_set_property(Item decl_item, Item prop_name,
         // create a declaration with the canonical value
         CssDeclaration* new_decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
         if (!new_decl) return value;
-        new_decl->property_name = (char*)pool_alloc(pool, strlen(css_prop) + 1);
-        if (new_decl->property_name) strcpy((char*)new_decl->property_name, css_prop); // UNSAFE_LIBC_OK: dst allocated with strlen(css_prop)+1
+        new_decl->property_name = pool_strdup(pool, css_prop);
         new_decl->value_text = canonical;
         new_decl->value_text_len = strlen(canonical);
         new_decl->valid = true;

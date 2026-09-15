@@ -457,7 +457,6 @@ Item parse_citation(MarkupParser* parser, const char** text) {
 // ============================================================================
 
 #include "../../../../lib/html_entities.h"
-#include "../../input-utils.h"
 
 /**
  * parse_entity_reference - Parse HTML entity and numeric character references
@@ -471,117 +470,18 @@ Item parse_citation(MarkupParser* parser, const char** text) {
  * Invalid entities are left as literal text.
  */
 Item parse_entity_reference(MarkupParser* parser, const char** text) {
-    const char* pos = *text;
-
-    // Must start with &
-    if (*pos != '&') {
+    HtmlEntityDecodeResult decoded;
+    if (!text || !*text || !html_entity_decode_reference(
+            *text, strlen(*text), &decoded)) {
         return Item{.item = ITEM_UNDEFINED};
     }
 
-    pos++; // Skip &
-
-    char decoded[8] = {0}; // UTF-8 can be up to 4 bytes + null
-    bool valid = false;
-
-    if (*pos == '#') {
-        // Numeric character reference
-        pos++; // Skip #
-
-        uint32_t codepoint = 0;
-        const char* num_start = pos;
-
-        if (*pos == 'x' || *pos == 'X') {
-            // Hexadecimal: &#xHHHH;
-            pos++; // Skip x
-            num_start = pos;
-
-            while ((*pos >= '0' && *pos <= '9') ||
-                   (*pos >= 'a' && *pos <= 'f') ||
-                   (*pos >= 'A' && *pos <= 'F')) {
-                codepoint *= 16;
-                if (*pos >= '0' && *pos <= '9') {
-                    codepoint += *pos - '0';
-                } else if (*pos >= 'a' && *pos <= 'f') {
-                    codepoint += *pos - 'a' + 10;
-                } else {
-                    codepoint += *pos - 'A' + 10;
-                }
-                pos++;
-
-                // Prevent overflow
-                if (codepoint > 0x10FFFF) {
-                    return Item{.item = ITEM_UNDEFINED};
-                }
-            }
-
-            if (pos > num_start && *pos == ';') {
-                valid = true;
-                pos++; // Skip ;
-            }
-        } else {
-            // Decimal: &#NNNN;
-            while (*pos >= '0' && *pos <= '9') {
-                codepoint = codepoint * 10 + (*pos - '0');
-                pos++;
-
-                // Prevent overflow
-                if (codepoint > 0x10FFFF) {
-                    return Item{.item = ITEM_UNDEFINED};
-                }
-            }
-
-            if (pos > num_start && *pos == ';') {
-                valid = true;
-                pos++; // Skip ;
-            }
-        }
-
-        if (valid) {
-            // Convert codepoint to UTF-8
-            // Handle special case: codepoint 0 becomes replacement character
-            if (codepoint == 0) {
-                codepoint = 0xFFFD; // Unicode replacement character
-            }
-
-            int len = codepoint_to_utf8(codepoint, decoded);
-            if (len == 0) {
-                return Item{.item = ITEM_UNDEFINED};
-            }
-        }
-    } else {
-        // Named entity: &name;
-        const char* name_start = pos;
-
-        // Entity names are alphanumeric
-        while ((*pos >= 'a' && *pos <= 'z') ||
-               (*pos >= 'A' && *pos <= 'Z') ||
-               (*pos >= '0' && *pos <= '9')) {
-            pos++;
-        }
-
-        if (pos > name_start && *pos == ';') {
-            size_t name_len = pos - name_start;
-            const char* replacement = html_entity_lookup(name_start, name_len);
-
-            if (replacement) {
-                str_copy(decoded, sizeof(decoded), replacement, strlen(replacement));
-                valid = true;
-                pos++; // Skip ;
-            }
-        }
-    }
-
-    if (!valid) {
-        return Item{.item = ITEM_UNDEFINED};
-    }
-
-    // Create string with decoded character
-    String* str = create_string(parser, decoded);
+    String* str = parser->builder.createString(decoded.chars, decoded.length);
     if (!str) {
         return Item{.item = ITEM_ERROR};
     }
 
-    *text = pos;
+    *text += decoded.consumed;
     return Item{.item = s2it(str)};
 }
 

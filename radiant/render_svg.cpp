@@ -1024,8 +1024,7 @@ static void svg_append_graph_semantic_attrs(SvgRenderContext* ctx,
         const char* value = block->get_attribute(name);
         if (!value) continue;
         strbuf_append_char(ctx->svg_content, ' ');
-        strbuf_append_str(ctx->svg_content, name);
-        strbuf_append_str(ctx->svg_content, "=\"");
+        strbuf_append_all(ctx->svg_content, 2, name, "=\"");
         escape_append(ctx->svg_content, value, strlen(value), ESCAPE_RULES_HTML_ATTR,
                       ESCAPE_RULES_HTML_ATTR_COUNT, ESCAPE_CTRL_NONE);
         strbuf_append_char(ctx->svg_content, '\"');

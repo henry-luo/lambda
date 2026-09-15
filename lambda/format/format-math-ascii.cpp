@@ -437,8 +437,7 @@ static void format_infix_frac(StringBuf* sb, const ElementReader& elem, int dept
 static void format_text_command(StringBuf* sb, const ElementReader& elem, int depth) {
     ItemReader content = elem.get_attr("content");
     if (!content.isNull() && content.isString()) {
-        stringbuf_append_str(sb, "\"");
-        stringbuf_append_str(sb, content.asString()->chars);
+        stringbuf_append_all(sb, 2, "\"", content.asString()->chars);
         stringbuf_append_str(sb, "\"");
     } else {
         // May have children instead (textstyle_command merged format)
@@ -671,8 +670,7 @@ static void format_children_range(StringBuf* sb, const ElementReader& elem,
                     int64_t after_word = i + best_len;
                     int64_t paren_end = find_matching_paren(elem, after_word, end);
                     if (paren_end > 0) {
-                        stringbuf_append_str(sb, word);
-                        stringbuf_append_str(sb, "(");
+                        stringbuf_append_all(sb, 2, word, "(");
                         // Format inner paren content with coalescing
                         format_children_range(sb, elem, after_word + 1, paren_end - 1, depth + 1, sep);
                         stringbuf_append_str(sb, ")");

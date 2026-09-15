@@ -5383,22 +5383,7 @@ static const char* preprocess_ansi_c_string(const char* src, size_t src_len, Str
                         else break;
                         value = value * 16 + digit; have_digits = true; p++;
                     }
-                    if (have_digits) {
-                        if (value <= 0x7f) strbuf_append_char(processed, (char)value);
-                        else if (value <= 0x7ff) {
-                            strbuf_append_char(processed, (char)(0xc0 | ((value >> 6) & 0x1f)));
-                            strbuf_append_char(processed, (char)(0x80 | (value & 0x3f)));
-                        } else if (value <= 0xffff) {
-                            strbuf_append_char(processed, (char)(0xe0 | ((value >> 12) & 0x0f)));
-                            strbuf_append_char(processed, (char)(0x80 | ((value >> 6) & 0x3f)));
-                            strbuf_append_char(processed, (char)(0x80 | (value & 0x3f)));
-                        } else {
-                            strbuf_append_char(processed, (char)(0xf0 | ((value >> 18) & 0x07)));
-                            strbuf_append_char(processed, (char)(0x80 | ((value >> 12) & 0x3f)));
-                            strbuf_append_char(processed, (char)(0x80 | ((value >> 6) & 0x3f)));
-                            strbuf_append_char(processed, (char)(0x80 | (value & 0x3f)));
-                        }
-                    }
+                    if (have_digits) strbuf_append_utf8(processed, (uint32_t)value);
                     break;
                 }
                 case '0': case '1': case '2': case '3':

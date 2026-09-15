@@ -3704,8 +3704,7 @@ static Item js_classlist_value_item(DomElement* elem) {
     }
     StrBuf* sb = strbuf_new_cap(64);
     for (int i = 0; i < elem->class_count; i++) {
-        if (i > 0) strbuf_append_char(sb, ' ');
-        strbuf_append_str(sb, elem->class_names[i]);
+        strbuf_append_all(sb, 2, i > 0 ? " " : "", elem->class_names[i]);
     }
     Item result = js_name_item(sb->str ? sb->str : "");
     strbuf_free(sb);
@@ -5060,12 +5059,9 @@ static bool dom_update_inline_style_attribute(DomElement* elem,
 
     if (value[0]) {
         if (updated->length > 0) strbuf_append_char(updated, ' ');
-        strbuf_append_str(updated, prop_name);
-        strbuf_append_str(updated, ": ");
-        strbuf_append_str(updated, value);
+        strbuf_append_all(updated, 3, prop_name, ": ", value);
         if (priority && priority[0]) {
-            strbuf_append_str(updated, " !");
-            strbuf_append_str(updated, priority);
+            strbuf_append_all(updated, 2, " !", priority);
         }
         strbuf_append_char(updated, ';');
     }
@@ -5255,8 +5251,7 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
     if (node->is_element()) {
         DomElement* elem = node->as_element();
         // opening tag
-        strbuf_append_char(sb, '<');
-        strbuf_append_str(sb, elem->tag_name ? elem->tag_name : "unknown");
+        strbuf_append_all(sb, 2, "<", elem->tag_name ? elem->tag_name : "unknown");
 
         int attr_count = 0;
         const char** attr_names = elem->attribute_names(&attr_count);
@@ -5267,8 +5262,7 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
                 if (!name) continue;
                 if (dom_is_internal_attr(name)) continue;
                 strbuf_append_char(sb, ' ');
-                strbuf_append_str(sb, name);
-                strbuf_append_str(sb, "=\"");
+                strbuf_append_all(sb, 2, name, "=\"");
                 // A present valueless HTML attribute serializes with an empty
                 // value; null here represents presence, not attribute absence.
                 if (value) collect_html_attr_value(value, sb);
@@ -5289,8 +5283,7 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
         if (tag && strcmp(tag, "br") != 0 && strcmp(tag, "hr") != 0 &&
             strcmp(tag, "img") != 0 && strcmp(tag, "input") != 0 &&
             strcmp(tag, "meta") != 0 && strcmp(tag, "link") != 0) {
-            strbuf_append_str(sb, "</");
-            strbuf_append_str(sb, tag);
+            strbuf_append_all(sb, 2, "</", tag);
             strbuf_append_char(sb, '>');
         }
     }
@@ -5341,8 +5334,7 @@ static void collect_xml_node(DomNode* node, StrBuf* sb) {
         return;
     }
 
-    strbuf_append_char(sb, '<');
-    strbuf_append_str(sb, tag);
+    strbuf_append_all(sb, 2, "<", tag);
     int attr_count = 0;
     const char** attr_names = elem->attribute_names(&attr_count);
     bool has_xlink_attr = false;
@@ -5369,8 +5361,7 @@ static void collect_xml_node(DomNode* node, StrBuf* sb) {
         bool is_xlink_attr = elem->get_attribute(xlink_name) != nullptr;
         strbuf_append_char(sb, ' ');
         if (is_xlink_attr) strbuf_append_str(sb, "xlink:");
-        strbuf_append_str(sb, name);
-        strbuf_append_str(sb, "=\"");
+        strbuf_append_all(sb, 2, name, "=\"");
         const char* value = elem->get_attribute(name);
         if (value) collect_xml_attr_value(value, sb);
         strbuf_append_char(sb, '"');
@@ -5386,8 +5377,7 @@ static void collect_xml_node(DomNode* node, StrBuf* sb) {
         collect_xml_node(child, sb);
         child = dom_next_script_visible_sibling(child);
     }
-    strbuf_append_str(sb, "</");
-    strbuf_append_str(sb, tag);
+    strbuf_append_all(sb, 2, "</", tag);
     strbuf_append_char(sb, '>');
 }
 JS_FORWARD_ITEM(dom_xml_serializer_constructor, (void), make_js_undefined, ())

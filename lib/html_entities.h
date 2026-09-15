@@ -17,6 +17,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "strbuf.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -30,6 +32,27 @@ extern "C" {
  *         the name is not a known entity.
  */
 const char* html_entity_lookup(const char* name, size_t len);
+
+typedef struct {
+    const char* chars;
+    size_t length;
+    size_t consumed;
+    char numeric_chars[5];
+} HtmlEntityDecodeResult;
+
+/** Decode one bounded, semicolon-terminated HTML reference beginning at '&'. */
+bool html_entity_decode_reference(const char* source, size_t len,
+                                  HtmlEntityDecodeResult* result);
+
+/**
+ * Decode HTML references and CommonMark punctuation escapes from a bounded
+ * source span into a string buffer. Malformed references remain literal.
+ */
+void html_entities_decode_markdown_append(StrBuf* out, const char* source,
+                                          size_t len);
+
+/** Decode in place. The output never exceeds the bounded source length. */
+size_t html_entities_decode_markdown_inplace(char* source, size_t len);
 
 /**
  * Check if an entity name is one of the five XML/ASCII escapes
