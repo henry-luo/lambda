@@ -4361,16 +4361,13 @@ extern "C" void radiant_jube_register_static(void);
 extern "C" void dom_jube_register_static(void);
 extern "C" void hostobj_demo_jube_register_static(void);
 
-static bool jube_module_name_equals(const char* a, const char* b) {
-    if (!a || !b) return false;
-    return strcmp(a, b) == 0;
-}
-
 static int jube_find_static_module_index(const char* name) {
     if (!name) return -1;
+    size_t name_len = strlen(name);
     for (int i = 0; i < jube_static_modules_count; i++) {
         const JubeModuleDef* module = jube_static_modules[i].module;
-        if (module && jube_module_name_equals(module->name, name)) return i;
+        if (module && module->name &&
+            str_eq(module->name, strlen(module->name), name, name_len)) return i;
     }
     return -1;
 }
@@ -5196,26 +5193,9 @@ static bool jube_manifest_string(const char* text, const char* key,
     cursor = str_skip_ascii_space(cursor);
     if (*cursor != '\"') return false;
     cursor++;
-    const char* end = cursor;
-    while (*end && *end != '\"') {
-        if (*end == '\\') return false; // manifests use literal UTF-8 paths/names
-        end++;
-    }
+    const char* end = str_scan_until_any(cursor, "\"\\\\");
     if (*end != '\"' || (size_t)(end - cursor) >= out_size) return false;
     str_copy(out, out_size, cursor, (size_t)(end - cursor));
-    return true;
-}
-
-static bool jube_manifest_value_ascii_equal(const char* value, size_t value_length,
-                                            const char* expected) {
-    if (!value || !expected || value_length != strlen(expected)) return false;
-    for (size_t i = 0; i < value_length; i++) {
-        char left = value[i];
-        char right = expected[i];
-        if (left >= 'A' && left <= 'Z') left = (char)(left + ('a' - 'A'));
-        if (right >= 'A' && right <= 'Z') right = (char)(right + ('a' - 'A'));
-        if (left != right) return false;
-    }
     return true;
 }
 
@@ -5235,19 +5215,14 @@ static bool jube_manifest_array_contains(const char* text, const char* key,
     if (*cursor != '[') return false;
     cursor++;
     while (*cursor && *cursor != ']') {
-        while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
-               *cursor == '\n' || *cursor == ',') cursor++;
+        cursor = str_skip_chars(cursor, " \t\r\n,");
         if (*cursor != '\"') return false;
         cursor++;
-        const char* end = cursor;
-        while (*end && *end != '\"') {
-            if (*end == '\\') return false;
-            end++;
-        }
+        const char* end = str_scan_until_any(cursor, "\"\\\\");
         if (*end != '\"') return false;
         // Discovery precedes descriptor registration, so aliases and source
         // extensions must normalize here as well as in the loaded registry.
-        if (jube_manifest_value_ascii_equal(cursor, (size_t)(end - cursor), value)) return true;
+        if (str_ieq_const(cursor, (size_t)(end - cursor), value)) return true;
         cursor = end + 1;
     }
     return false;
@@ -5270,16 +5245,11 @@ static bool jube_manifest_string_array(const char* text, const char* key,
     if (*cursor != '[') return false;
     cursor++;
     while (*cursor && *cursor != ']') {
-        while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
-               *cursor == '\n' || *cursor == ',') cursor++;
+        cursor = str_skip_chars(cursor, " \t\r\n,");
         if (*cursor == ']') break;
         if (*cursor != '\"' || *out_count >= capacity) return false;
         cursor++;
-        const char* end = cursor;
-        while (*end && *end != '\"') {
-            if (*end == '\\') return false;
-            end++;
-        }
+        const char* end = str_scan_until_any(cursor, "\"\\\\");
         size_t value_length = (size_t)(end - cursor);
         if (*end != '\"' || value_length == 0 || value_length >= sizeof(values[0])) {
             return false;
@@ -5420,7 +5390,7 @@ static bool jube_manifest_matches_selector(const char* text, const char* selecto
     if (extension) return jube_manifest_array_contains(text, "extensions", extension);
     char language[128];
     if (jube_manifest_string(text, "language", language, sizeof(language)) &&
-        jube_manifest_value_ascii_equal(language, strlen(language), selector)) return true;
+        str_ieq_const(language, strlen(language), selector)) return true;
     return jube_manifest_array_contains(text, "aliases", selector);
 }
 
@@ -5664,8 +5634,8 @@ static bool jube_specifier_catalog_manifest_path(const char* manifest_path) {
     if (ok && provide_count > 0) {
         ok = jube_manifest_string(text, "kind", kind, sizeof(kind)) &&
             jube_manifest_string(text, "engine", engine, sizeof(engine)) &&
-            jube_manifest_value_ascii_equal(kind, strlen(kind), "runtime-library") &&
-            jube_manifest_value_ascii_equal(engine, strlen(engine), "js");
+            str_ieq_const(kind, strlen(kind), "runtime-library") &&
+            str_ieq_const(engine, strlen(engine), "js");
     }
     if (ok && !has_language && provide_count == 0) {
         log_error("JUBE_SPEC: manifest '%s' declares neither language nor provides", manifest_path);

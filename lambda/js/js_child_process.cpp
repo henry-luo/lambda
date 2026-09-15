@@ -2137,12 +2137,6 @@ static Item validate_uid_gid_option(Item options, const char* name) {
     return js_status_ok();
 }
 
-static bool item_string_equals(Item item, const char* text) {
-    if (get_type_id(item) != LMD_TYPE_STRING || !text) return false;
-    String* s = it2s(item);
-    size_t len = strlen(text);
-    return s->len == len && memcmp(s->chars, text, len) == 0;
-}
 JS_FORWARD_STATIC_ITEM(throw_invalid_stdio_value, (void), js_throw_type_error_code, ("ERR_INVALID_ARG_VALUE", "The argument 'stdio' is invalid"))
 
 static Item apply_stdio_ipc(SpawnRequest* req) {
@@ -2158,18 +2152,18 @@ static Item apply_stdio_entry(SpawnRequest* req, int index, Item entry) {
     if (index < 0 || index >= CP_STDIO_MAX) return throw_invalid_stdio_value();
     if (index + 1 > req->stdio_count) req->stdio_count = index + 1;
     if (is_nullish_item(entry)) return js_status_ok();
-    if (item_string_equals(entry, "ipc")) {
+    if (js_string_equals(entry, "ipc")) {
         JS_RETURN_IF_ERROR(apply_stdio_ipc(req));
         req->stdio_mode[index] = CP_STDIO_IPC;
         req->ipc_index = index;
         return js_status_ok();
     }
-    if (item_string_equals(entry, "inherit")) {
+    if (js_string_equals(entry, "inherit")) {
         req->stdio_mode[index] = CP_STDIO_INHERIT;
         req->stdio_fd[index] = index;
-    } else if (item_string_equals(entry, "ignore")) {
+    } else if (js_string_equals(entry, "ignore")) {
         req->stdio_mode[index] = CP_STDIO_IGNORE;
-    } else if (item_string_equals(entry, "pipe") || item_string_equals(entry, "overlapped")) {
+    } else if (js_string_equals(entry, "pipe") || js_string_equals(entry, "overlapped")) {
         req->stdio_mode[index] = CP_STDIO_PIPE;
     } else if (get_type_id(entry) == LMD_TYPE_STRING) {
         return throw_invalid_stdio_value();
@@ -2191,7 +2185,7 @@ static Item normalize_stdio_options(SpawnRequest* req) {
     if (!is_object_item(req->options)) return js_status_ok();
     JS_ASSIGN_OR_RETURN(stdio, js_get_key_cstr(req->options, "stdio"));
     if (is_nullish_item(stdio)) return js_status_ok();
-    if (item_string_equals(stdio, "inherit")) {
+    if (js_string_equals(stdio, "inherit")) {
         req->stdio_mode[0] = CP_STDIO_INHERIT;
         req->stdio_mode[1] = CP_STDIO_INHERIT;
         req->stdio_mode[2] = CP_STDIO_INHERIT;
@@ -2200,13 +2194,13 @@ static Item normalize_stdio_options(SpawnRequest* req) {
         req->stdio_fd[2] = 2;
         return js_status_ok();
     }
-    if (item_string_equals(stdio, "ignore")) {
+    if (js_string_equals(stdio, "ignore")) {
         req->stdio_mode[0] = CP_STDIO_IGNORE;
         req->stdio_mode[1] = CP_STDIO_IGNORE;
         req->stdio_mode[2] = CP_STDIO_IGNORE;
         return js_status_ok();
     }
-    if (item_string_equals(stdio, "pipe") || item_string_equals(stdio, "overlapped")) {
+    if (js_string_equals(stdio, "pipe") || js_string_equals(stdio, "overlapped")) {
         req->stdio_mode[0] = CP_STDIO_PIPE;
         req->stdio_mode[1] = CP_STDIO_PIPE;
         req->stdio_mode[2] = CP_STDIO_PIPE;
@@ -2913,9 +2907,9 @@ extern "C" Item js_cp_fork(Item rest_args) {
     if (is_object_item(options)) {
         JS_ASSIGN_OR_RETURN(opt_stdio, js_get_key_cstr(options, "stdio"));
         if (!is_nullish_item(opt_stdio)) {
-            if (item_string_equals(opt_stdio, "pipe") ||
-                item_string_equals(opt_stdio, "inherit") ||
-                item_string_equals(opt_stdio, "ignore")) {
+            if (js_string_equals(opt_stdio, "pipe") ||
+                js_string_equals(opt_stdio, "inherit") ||
+                js_string_equals(opt_stdio, "ignore")) {
                 js_array_push(stdio, opt_stdio);
                 js_array_push(stdio, opt_stdio);
                 js_array_push(stdio, opt_stdio);
@@ -2924,7 +2918,7 @@ extern "C" Item js_cp_fork(Item rest_args) {
                 return throw_invalid_stdio_value();
             } else if (get_type_id(opt_stdio) == LMD_TYPE_ARRAY) {
                 JS_ARRAY_FOREACH(entry, opt_stdio) {
-                    if (item_string_equals(entry, "ipc")) stdio_has_ipc = true;
+                    if (js_string_equals(entry, "ipc")) stdio_has_ipc = true;
                     js_array_push(stdio, entry);
                 }
                 copied_stdio = true;

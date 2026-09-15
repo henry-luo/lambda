@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include "../../lib/str.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -61,9 +62,7 @@ int input_count_leading_chars(const char* str, char ch);
 
 /** Skip horizontal whitespace (space and tab) only. */
 static inline void skip_line_whitespace(const char** p) {
-    while (**p && (**p == ' ' || **p == '\t')) {
-        (*p)++;
-    }
+    if (p && *p) *p = str_skip_chars(*p, " \t");
 }
 
 static inline bool input_match_marker(const char* p, const char* marker) {
@@ -82,9 +81,7 @@ static inline void skip_line_comment_markers(const char** p,
     if (!p || !*p) return;
     if ((line_comment1 && input_match_marker(*p, line_comment1)) ||
         (line_comment2 && input_match_marker(*p, line_comment2))) {
-        while (**p && **p != '\n' && **p != '\r') {
-            (*p)++;
-        }
+        *p = str_scan_until_any(*p, "\n\r");
     }
 }
 
@@ -100,9 +97,7 @@ static inline void skip_line_whitespace_and_comment_markers(const char** p,
  * Handles \n, \r, and \r\n.
  */
 static inline void skip_to_newline(const char** p) {
-    while (**p && **p != '\n' && **p != '\r') {
-        (*p)++;
-    }
+    *p = str_scan_until_any(*p, "\n\r");
     if (**p == '\r' && *(*p + 1) == '\n') {
         (*p) += 2; // skip \r\n
     } else if (**p == '\n' || **p == '\r') {
@@ -116,9 +111,7 @@ static inline void skip_whitespace_and_comment_markers(const char** p,
                                                        bool block_comments) {
     if (!p || !*p) return;
     while (**p) {
-        while (**p && (**p == ' ' || **p == '\n' || **p == '\r' || **p == '\t')) {
-            (*p)++;
-        }
+        *p = str_skip_chars(*p, " \n\r\t");
         if (block_comments && **p == '/' && *(*p + 1) == '*') {
             *p += 2;
             while (**p && !(**p == '*' && *(*p + 1) == '/')) {

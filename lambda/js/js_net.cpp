@@ -5218,13 +5218,10 @@ JS_FORWARD_STATIC_ITEM(js_stream_wrap_emit_end, (Item env_item), js_stream_wrap_
 JS_FORWARD_STATIC_ITEM(js_stream_wrap_emit_close, (Item env_item), js_stream_wrap_emit_terminal, (env_item, true))
 
 static bool js_stream_wrap_terminal_event_observed(Item self, Item event_item) {
-    if (get_type_id(event_item) != LMD_TYPE_STRING) return false;
-    String* ev = it2s(event_item);
-    if (!ev) return false;
-    if (ev->len == 3 && memcmp(ev->chars, "end", 3) == 0) {
+    if (js_string_equals(event_item, "end")) {
         return js_get_key_cstr(self, "__stream_wrap_ended__").item == ITEM_TRUE;
     }
-    if (ev->len == 5 && memcmp(ev->chars, "close", 5) == 0) {
+    if (js_string_equals(event_item, "close")) {
         return js_get_key_cstr(self, "__stream_wrap_closed__").item == ITEM_TRUE;
     }
     return false;

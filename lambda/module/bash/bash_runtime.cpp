@@ -32,6 +32,7 @@
 #include <regex.h>
 #include <fnmatch.h>
 #include <signal.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <time.h>
 
@@ -2122,29 +2123,17 @@ extern "C" Item bash_string_replace(Item str, Item pattern, Item replacement, bo
     String* p = it2s(bash_to_string(pattern));
     String* r = it2s(bash_to_string(replacement));
     if (!s || !p || p->len == 0) return str;
-    if (!r) r = heap_create_name("", 0);
-
-    StrBuf* sb = strbuf_new();
-    const char* src = s->chars;
-    int src_len = s->len;
-    int pat_len = p->len;
-
-    for (int i = 0; i < src_len; ) {
-        if (i + pat_len <= src_len && memcmp(src + i, p->chars, pat_len) == 0) {
-            strbuf_append_str_n(sb, r->chars, r->len);
-            i += pat_len;
-            if (!all) {
-                strbuf_append_str_n(sb, src + i, src_len - i);
-                break;
-            }
-        } else {
-            strbuf_append_char(sb, src[i]);
-            i++;
-        }
-    }
-
-    String* result = heap_create_name(sb->str, sb->length);
-    strbuf_free(sb);
+    const char* replacement_chars = r ? r->chars : "";
+    size_t replacement_len = r ? r->len : 0;
+    size_t result_len = 0;
+    char* result_chars = all
+        ? str_replace_all(s->chars, s->len, p->chars, p->len,
+                          replacement_chars, replacement_len, &result_len)
+        : str_replace_first(s->chars, s->len, p->chars, p->len,
+                            replacement_chars, replacement_len, &result_len);
+    if (!result_chars) return str;
+    String* result = heap_create_name(result_chars, result_len);
+    free(result_chars);
     return (Item){.item = s2it(result)};
 }
 
@@ -2152,20 +2141,11 @@ static Item bash_string_change_case(Item str, bool all, bool upper) {
     String* s = it2s(bash_to_string(str));
     if (!s || s->len == 0) return str;
 
-    StrBuf* sb = strbuf_new_cap(s->len + 1);
-    for (int i = 0; i < (int)s->len; i++) {
-        char c = s->chars[i];
-        if (all || i == 0) {
-            if (upper) {
-                if (c >= 'a' && c <= 'z') c -= 32;
-            } else if (c >= 'A' && c <= 'Z') {
-                c += 32;
-            }
-        }
-        strbuf_append_char(sb, c);
-    }
-    String* result = heap_create_name(sb->str, sb->length);
-    strbuf_free(sb);
+    char* chars = mem_dup_n(s->chars, s->len, MEM_CAT_BASH_RUNTIME);
+    if (upper) str_to_upper(chars, chars, all ? s->len : 1);
+    else str_to_lower(chars, chars, all ? s->len : 1);
+    String* result = heap_create_name(chars, s->len);
+    mem_free(chars);
     return (Item){.item = s2it(result)};
 }
 
@@ -2300,10 +2280,10 @@ extern "C" Item bash_words_split_into(Item arr, Item words_str) {
     const char* p = s;
     while (*p) {
         // skip leading spaces
-        while (*p == ' ' || *p == '\t' || *p == '\n') p++;
+        p = str_skip_chars(p, " \t\n");
         if (!*p) break;
         const char* start = p;
-        while (*p && *p != ' ' && *p != '\t' && *p != '\n') p++;
+        p = str_scan_until_any(p, " \t\n");
         int wlen = (int)(p - start);
         if (wlen > 0) {
             String* ws = heap_create_name(start, wlen);

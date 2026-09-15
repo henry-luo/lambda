@@ -113,13 +113,8 @@ static Item js_http_receiver(Item candidate, const char* marker) {
 }
 
 static bool http_header_name_equals(String* name, const char* text, int text_len) {
-    if (!name || (int)name->len != text_len) return false;
-    for (int i = 0; i < text_len; i++) {
-        char c = name->chars[i];
-        if (c >= 'A' && c <= 'Z') c = c + 32;
-        if (c != text[i]) return false;
-    }
-    return true;
+    return name && text && text_len >= 0 &&
+        str_ieq(name->chars, name->len, text, (size_t)text_len);
 }
 
 // =============================================================================

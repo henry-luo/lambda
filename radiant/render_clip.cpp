@@ -126,17 +126,13 @@ static bool render_clip_parse_polygon_len(const char*& s, float ref, float* out_
     return true;
 }
 
-static void render_clip_skip_wsp_comma(const char** s) {
-    while (**s && (isspace((unsigned char)**s) || **s == ',')) (*s)++;
-}
-
 static bool render_clip_peek_number(const char* s) {
-    render_clip_skip_wsp_comma(&s);
+    s = str_skip_chars(s, ", \t\n\r\f\v");
     return *s == '-' || *s == '+' || *s == '.' || isdigit((unsigned char)*s);
 }
 
 static float render_clip_parse_number(const char** s) {
-    render_clip_skip_wsp_comma(s);
+    *s = str_skip_chars(*s, ", \t\n\r\f\v");
     char* end = nullptr;
     float value = strtof(*s, &end);
     if (end == *s) {
@@ -162,7 +158,7 @@ static RdtPath* render_clip_parse_path_function(const char* value,
     bool any_draw = false;
 
     while (*s && *s != quote) {
-        render_clip_skip_wsp_comma(&s);
+        s = str_skip_chars(s, ", \t\n\r\f\v");
         if (!*s || *s == quote) break;
 
         char cmd = *s;

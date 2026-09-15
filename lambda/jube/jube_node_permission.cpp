@@ -76,13 +76,6 @@ static Item js_perm_string_item(const char* str) {
 #define js_perm_item_to_cstr(value, buf, buf_size) \
     (js_item_to_cstr((value), (buf), (buf_size)) != NULL)
 
-static bool js_perm_scope_equals(Item value, const char* lit) {
-    if (get_type_id(value) != LMD_TYPE_STRING || !lit) return false;
-    String* s = it2s(value);
-    size_t len = strlen(lit);
-    return s->len == len && memcmp(s->chars, lit, len) == 0;
-}
-
 static void js_permission_clear_grants(JsPermissionPolicy* policy) {
     if (!policy || !policy->grants) return;
     for (int i = 0; i < policy->grants->length; i++) {
@@ -445,13 +438,13 @@ static void js_permission_drop_grants(JsPermissionPolicy* policy, uint8_t access
 }
 
 static bool js_permission_scope_kind(Item scope_item, JsPermissionFsKind* kind) {
-    if (js_perm_scope_equals(scope_item, "fs.read") ||
-        js_perm_scope_equals(scope_item, "FileSystemRead")) {
+    if (js_string_equals(scope_item, "fs.read") ||
+        js_string_equals(scope_item, "FileSystemRead")) {
         *kind = JS_PERMISSION_FS_READ;
         return true;
     }
-    if (js_perm_scope_equals(scope_item, "fs.write") ||
-        js_perm_scope_equals(scope_item, "FileSystemWrite")) {
+    if (js_string_equals(scope_item, "fs.write") ||
+        js_string_equals(scope_item, "FileSystemWrite")) {
         *kind = JS_PERMISSION_FS_WRITE;
         return true;
     }
@@ -472,19 +465,19 @@ extern "C" Item js_process_permission_has(Item scope_item, Item resource_item) {
                                             JS_PERMISSION_GRANT_WRITE, path);
         return (Item){.item = b2it(ok)};
     }
-    if (js_perm_scope_equals(scope_item, "child")) {
+    if (js_string_equals(scope_item, "child")) {
         return (Item){.item = b2it(!g_permission_enabled || g_permission_child_process)};
     }
-    if (js_perm_scope_equals(scope_item, "net")) {
+    if (js_string_equals(scope_item, "net")) {
         return (Item){.item = b2it(!g_permission_enabled || g_permission_net)};
     }
-    if (js_perm_scope_equals(scope_item, "inspector")) {
+    if (js_string_equals(scope_item, "inspector")) {
         return (Item){.item = b2it(!g_permission_enabled || g_permission_inspector)};
     }
-    if (js_perm_scope_equals(scope_item, "addon")) {
+    if (js_string_equals(scope_item, "addon")) {
         return (Item){.item = b2it(!g_permission_enabled || g_permission_addon)};
     }
-    if (js_perm_scope_equals(scope_item, "wasi")) {
+    if (js_string_equals(scope_item, "wasi")) {
         return (Item){.item = b2it(!g_permission_enabled || g_permission_wasi)};
     }
     return (Item){.item = ITEM_FALSE};

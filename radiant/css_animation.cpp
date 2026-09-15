@@ -464,15 +464,10 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
 
             // parse property value (up to ';' or '}')
             const char* val_start = p;
-            // handle nested parens (for transform functions, rgb(), etc.)
-            int paren_depth = 0;
-            while (*p && (paren_depth > 0 || (*p != ';' && *p != '}'))) {
-                if (*p == '(') paren_depth++;
-                else if (*p == ')') paren_depth--;
-                p++;
-            }
-            const char* val_end = p;
-            while (val_end > val_start && isspace((unsigned char)*(val_end - 1))) val_end--;
+            p = str_scan_top_level(p, ";}", '(', ')', "\"'", true);
+            size_t val_len = (size_t)(p - val_start);
+            str_rtrim(&val_start, &val_len);
+            const char* val_end = val_start + val_len;
 
             char val_buf[256];
             size_t vlen = val_end - val_start;
@@ -1460,14 +1455,7 @@ bool css_animation_parse_timing_function_text(const char* value,
     if (str_istarts_with_cstr(p, "cubic-bezier(")) {
         p += 13;
         float values[4];
-        for (int i = 0; i < 4; i++) {
-            p = str_skip_ascii_space(p);
-            if (*p == ',') p = str_skip_ascii_space(p + 1);
-            char* end = nullptr;
-            values[i] = strtof(p, &end);
-            if (end == p) return false;
-            p = end;
-        }
+        if (str_parse_float_list(p, ", \t\n\r\f\v", values, 4, nullptr) != 4) return false;
         timing_cubic_bezier_init(out, values[0], values[1], values[2], values[3]);
         return true;
     }

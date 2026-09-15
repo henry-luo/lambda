@@ -925,14 +925,6 @@ static bool is_js_identifier_part_char(char ch) {
     return is_js_identifier_start_char(ch) || (ch >= '0' && ch <= '9');
 }
 
-static const char* skip_js_ascii_space(const char* p) {
-    while (p && (*p == ' ' || *p == '\t' || *p == '\n' ||
-                 *p == '\r' || *p == '\f' || *p == '\v')) {
-        p++;
-    }
-    return p;
-}
-
 static bool is_js_identifier_boundary(char ch) {
     return ch == '\0' || !is_js_identifier_part_char(ch);
 }
@@ -954,10 +946,10 @@ static void append_classic_script_window_function_exports(const char* source, St
             cursor += 8;
             continue;
         }
-        p = skip_js_ascii_space(p);
+        p = str_skip_ascii_space(p);
         if (*p == '*') {
             p++;
-            p = skip_js_ascii_space(p);
+            p = str_skip_ascii_space(p);
         }
         if (!is_js_identifier_start_char(*p)) {
             cursor += 8;
@@ -966,7 +958,7 @@ static void append_classic_script_window_function_exports(const char* source, St
         const char* name_start = p;
         p++;
         while (is_js_identifier_part_char(*p)) p++;
-        const char* after_name = skip_js_ascii_space(p);
+        const char* after_name = str_skip_ascii_space(p);
         if (!after_name || *after_name != '(') {
             cursor = p;
             continue;
@@ -1014,12 +1006,12 @@ static void append_body_onload_source(const char* onload, StrBuf* onload_buf) {
         // onload="setTimeout(test, 0)" depends on resolving a prior classic
         // script's top-level function as a later task callback. Static layout
         // drains zero-delay onload timers before capture, so emit a direct call.
-        p = skip_js_ascii_space(p);
+        p = str_skip_ascii_space(p);
         if (p && is_js_identifier_start_char(*p)) {
             const char* name_start = p;
             p++;
             while (is_js_identifier_part_char(*p)) p++;
-            const char* after_name = skip_js_ascii_space(p);
+            const char* after_name = str_skip_ascii_space(p);
             if (after_name && *after_name == ',') {
                 strbuf_append_str(onload_buf, "if (typeof window !== 'undefined' && typeof window.");
                 strbuf_append_str_n(onload_buf, name_start, (size_t)(p - name_start));
@@ -2532,16 +2524,11 @@ static bool inline_handler_ident_part(char c) {
     return inline_handler_ident_start(c) || (c >= '0' && c <= '9');
 }
 
-static const char* inline_handler_skip_space(const char* p) {
-    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
-    return p;
-}
-
 static bool append_global_call_inline_handler(StrBuf* compile_buf,
                                               const char* attr_val) {
-    const char* p = inline_handler_skip_space(attr_val);
+    const char* p = str_skip_chars(attr_val, " \t\n\r");
     if (strncmp(p, "return", 6) == 0 && !inline_handler_ident_part(p[6])) {
-        p = inline_handler_skip_space(p + 6);
+        p = str_skip_chars(p + 6, " \t\n\r");
     }
     if (!inline_handler_ident_start(*p)) return false;
 
@@ -2551,18 +2538,18 @@ static bool append_global_call_inline_handler(StrBuf* compile_buf,
     size_t name_len = (size_t)(p - name_start);
     if (name_len == 0 || name_len > 128) return false;
 
-    p = inline_handler_skip_space(p);
+    p = str_skip_chars(p, " \t\n\r");
     if (*p != '(') return false;
-    p = inline_handler_skip_space(p + 1);
+    p = str_skip_chars(p + 1, " \t\n\r");
 
     bool pass_event = false;
     if (strncmp(p, "event", 5) == 0 && !inline_handler_ident_part(p[5])) {
         pass_event = true;
-        p = inline_handler_skip_space(p + 5);
+        p = str_skip_chars(p + 5, " \t\n\r");
     }
     if (*p != ')') return false;
-    p = inline_handler_skip_space(p + 1);
-    if (*p == ';') p = inline_handler_skip_space(p + 1);
+    p = str_skip_chars(p + 1, " \t\n\r");
+    if (*p == ';') p = str_skip_chars(p + 1, " \t\n\r");
     if (*p != '\0') return false;
 
     strbuf_append_str(compile_buf,

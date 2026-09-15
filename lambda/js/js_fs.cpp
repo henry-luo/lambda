@@ -131,12 +131,7 @@ static FsPathResult fs_path_to_cstr(Item value, const char* name, char* buf, int
     FS_PATH_OR(var, value, name, ItemNull); \
     if (!js_permission_has_fs_##mode(var)) return js_permission_check_fs_##mode(var)
 
-static bool fs_string_equals(String* s, const char* lit) {
-    if (!s || !lit) return false;
-    size_t len = strlen(lit);
-    return s->len == len && memcmp(s->chars, lit, len) == 0;
-}
-JS_FORWARD_STATIC_RETURN(bool, fs_is_valid_encoding, (String* s), fs_string_equals, (s, "utf8") || fs_string_equals(s, "utf-8") || fs_string_equals(s, "buffer") || fs_string_equals(s, "ascii") || fs_string_equals(s, "base64") || fs_string_equals(s, "base64url") || fs_string_equals(s, "hex") || fs_string_equals(s, "latin1") || fs_string_equals(s, "binary") || fs_string_equals(s, "ucs2") || fs_string_equals(s, "ucs-2") || fs_string_equals(s, "utf16le") || fs_string_equals(s, "utf-16le"))
+JS_FORWARD_STATIC_EXPRESSION(bool, fs_is_valid_encoding, (String* s), s && (str_eq_const(s->chars, s->len, "utf8") || str_eq_const(s->chars, s->len, "utf-8") || str_eq_const(s->chars, s->len, "buffer") || str_eq_const(s->chars, s->len, "ascii") || str_eq_const(s->chars, s->len, "base64") || str_eq_const(s->chars, s->len, "base64url") || str_eq_const(s->chars, s->len, "hex") || str_eq_const(s->chars, s->len, "latin1") || str_eq_const(s->chars, s->len, "binary") || str_eq_const(s->chars, s->len, "ucs2") || str_eq_const(s->chars, s->len, "ucs-2") || str_eq_const(s->chars, s->len, "utf16le") || str_eq_const(s->chars, s->len, "utf-16le")))
 
 static Item fs_validate_encoding_item(Item encoding_item) {
     TypeId type = get_type_id(encoding_item);
@@ -171,7 +166,10 @@ static Item fs_validate_encoding_options(Item options_item) {
 static bool fs_read_file_should_return_buffer(Item options_item) {
     TypeId type = get_type_id(options_item);
     if (type == LMD_TYPE_UNDEFINED || type == LMD_TYPE_NULL) return true;
-    if (type == LMD_TYPE_STRING) return fs_string_equals(it2s(options_item), "buffer");
+    if (type == LMD_TYPE_STRING) {
+        String* encoding = it2s(options_item);
+        return encoding && str_eq_const(encoding->chars, encoding->len, "buffer");
+    }
     if (type == LMD_TYPE_MAP) {
         Item encoding = js_get_key_cstr(options_item, "encoding");
         return fs_read_file_should_return_buffer(encoding);

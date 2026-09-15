@@ -11,11 +11,7 @@
 
 // Case-insensitive string comparison — delegates to str_icmp_cstr.
 
-// Case-insensitive substring search — delegates to str_ifind
-static bool contains_substring_case_insensitive(const char* haystack, const char* needle) {
-    if (!haystack || !needle) return false;
-    return str_ifind(haystack, strlen(haystack), needle, strlen(needle)) != STR_NPOS;
-}
+// Case-insensitive substring search — str_ifind handles the bounded comparison.
 
 // ============================================================================
 // Selector Matcher Creation and Destruction
@@ -762,7 +758,8 @@ bool selector_matcher_matches_attribute(SelectorMatcher* matcher,
         case CSS_SELECTOR_ATTR_SUBSTRING:
             // [attr*="value"] - contains substring
             if (use_case_insensitive) {
-                return contains_substring_case_insensitive(element_attr, attr_value);
+                return str_ifind(element_attr, strlen(element_attr), attr_value,
+                                 strlen(attr_value)) != STR_NPOS;
             } else {
                 return strstr(element_attr, attr_value) != NULL;
             }

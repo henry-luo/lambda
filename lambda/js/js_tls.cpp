@@ -230,25 +230,11 @@ static bool tls_copy_cipher_option(Item value, char* node_buf, int node_cap,
     return true;
 }
 
-static bool tls_string_equals_lit(Item value, const char* lit) {
-    if (get_type_id(value) != LMD_TYPE_STRING || !lit) return false;
-    String* s = it2s(value);
-    int len = (int)strlen(lit);
-    return s && s->len == (uint64_t)len && memcmp(s->chars, lit, (size_t)len) == 0;
-}
-
-static bool tls_string_items_equal(Item a, Item b) {
-    if (get_type_id(a) != LMD_TYPE_STRING || get_type_id(b) != LMD_TYPE_STRING) return false;
-    String* as = it2s(a);
-    String* bs = it2s(b);
-    return as && bs && as->len == bs->len && memcmp(as->chars, bs->chars, (size_t)as->len) == 0;
-}
-
 static bool tls_array_includes_string(Item array, Item value) {
     if (get_type_id(array) != LMD_TYPE_ARRAY) return false;
     int64_t len = js_array_length(array);
     for (int64_t i = 0; i < len; i++) {
-        if (tls_string_items_equal(js_elements_get_int(array, i), value)) return true;
+        if (js_string_items_equal(js_elements_get_int(array, i), value)) return true;
     }
     return false;
 }
@@ -514,15 +500,15 @@ static Item tls_get_default_certificates(void) {
 }
 
 extern "C" Item js_tls_getCACertificates(Item type_item) {
-    if (tls_is_missing(type_item) || tls_string_equals_lit(type_item, "default")) {
+    if (tls_is_missing(type_item) || js_string_equals(type_item, "default")) {
         return tls_get_default_certificates();
     }
     if (get_type_id(type_item) != LMD_TYPE_STRING) {
         return js_throw_invalid_arg_type("type", "string", type_item);
     }
-    if (tls_string_equals_lit(type_item, "bundled")) return tls_get_bundled_certificates();
-    if (tls_string_equals_lit(type_item, "system")) return tls_get_system_certificates();
-    if (tls_string_equals_lit(type_item, "extra")) return tls_get_extra_certificates();
+    if (js_string_equals(type_item, "bundled")) return tls_get_bundled_certificates();
+    if (js_string_equals(type_item, "system")) return tls_get_system_certificates();
+    if (js_string_equals(type_item, "extra")) return tls_get_extra_certificates();
     return js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
         "The argument 'type' must be one of: 'default', 'system', 'bundled', 'extra'");
 }
@@ -2242,7 +2228,7 @@ static void schedule_tls_attach_existing_socket(Item tls_obj, Item socket_obj) {
         js_microtask_flush();
     }
     Item ready_state = js_get_key_cstr(socket_obj, "readyState");
-    if (tls_string_equals_lit(ready_state, "open")) {
+    if (js_string_equals(ready_state, "open")) {
         js_next_tick_enqueue(attach);
     }
 }
@@ -2252,7 +2238,7 @@ extern "C" Item js_tls_server_emit(Item event_item, Item socket_item) {
     JsTlsServer* srv = tls_server_from_object(self);
     if (!srv || get_type_id(event_item) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
 
-    if (tls_string_equals_lit(event_item, "connection") && js_node_is_object_like(socket_item)) {
+    if (js_string_equals(event_item, "connection") && js_node_is_object_like(socket_item)) {
         JsTlsSocket* client = tls_socket_alloc();
         if (!client) return (Item){.item = b2it(false)};
         client->tls_ctx = srv->tls_ctx;

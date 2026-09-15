@@ -1195,13 +1195,6 @@ bool js_property_ops_own_property_descriptor(Item obj, Item name,
 // =============================================================================
 JS_FORWARD_STATIC_EXPRESSION(Item, js_process_stdio_key, (const char* key, int len), (js_name_item(key, len)))
 
-static bool js_process_string_equals(Item item, const char* expected, int expected_len) {
-    if (get_type_id(item) != LMD_TYPE_STRING) return false;
-    String* s = it2s(item);
-    return s && s->len == (size_t)expected_len &&
-           memcmp(s->chars, expected, (size_t)expected_len) == 0;
-}
-
 static Item js_process_stdio_write(Item str_item, FILE* stream) {
     // A host may reserve stdout for a machine protocol; page output remains
     // observable on stderr without corrupting that protocol.
@@ -1303,9 +1296,9 @@ static Item js_process_stdin_drain(Item self, Item dest, bool pipe_to_dest) {
 extern "C" Item js_process_stdin_on(Item event_item, Item callback) {
     Item self = js_get_this();
     if (!js_is_callable(callback)) return self;
-    if (js_process_string_equals(event_item, "data", 4)) {
+    if (js_string_equals(event_item, "data")) {
         js_process_stdin_add_listener(self, "data", 4, callback);
-    } else if (js_process_string_equals(event_item, "end", 3)) {
+    } else if (js_string_equals(event_item, "end")) {
         js_process_stdin_add_listener(self, "end", 3, callback);
     } else {
         return self;
@@ -2887,12 +2880,7 @@ static Item get_process_listener_map() {
     return process_listener_map;
 }
 
-static bool process_event_name_equals(Item event_name, const char* name, int name_len) {
-    if (get_type_id(event_name) != LMD_TYPE_STRING) return false;
-    String* ev = it2s(event_name);
-    return ev && ev->len == (uint64_t)name_len && memcmp(ev->chars, name, (size_t)name_len) == 0;
-}
-JS_FORWARD_STATIC_RETURN(bool, js_process_is_ipc_event, (Item event_name), process_event_name_equals, (event_name, "message", 7) || process_event_name_equals(event_name, "disconnect", 10))
+JS_FORWARD_STATIC_RETURN(bool, js_process_is_ipc_event, (Item event_name), js_string_equals, (event_name, "message") || js_string_equals(event_name, "disconnect"))
 
 static void js_process_record_uncaught_handler_failure(void) {
     js_process_exit_code_value = 1;
@@ -2923,7 +2911,7 @@ extern "C" Item js_process_on(Item event_name, Item listener) {
         // fork().send() must not lose the child before the parent writes.
         process_ipc_liveness_listener_count++;
         js_process_ipc_refresh_ref();
-        if (process_event_name_equals(event_name, "message", 7)) {
+        if (js_string_equals(event_name, "message")) {
             js_process_ipc_flush_pending();
         }
     }
@@ -2936,7 +2924,7 @@ static Item js_process_emit_args(Item event_name, Item* args, int arg_count) {
     TypeId etype = get_type_id(event_name);
     if (etype != LMD_TYPE_STRING && !js_key_is_symbol_c(event_name)) return (Item){.item = b2it(false)};
 
-    bool is_uncaught = process_event_name_equals(event_name, "uncaughtException", 17);
+    bool is_uncaught = js_string_equals(event_name, "uncaughtException");
 
     Item map = get_process_listener_map();
     Item arr = js_get_key_default(map, event_name);
@@ -3091,7 +3079,7 @@ extern "C" Item js_process_removeAllListeners(Item event_name) {
     if (etype != LMD_TYPE_STRING && !is_sym) return js_process_object;
 
     if (etype == LMD_TYPE_STRING &&
-            process_event_name_equals(event_name, "unhandledRejection", 18)) {
+            js_string_equals(event_name, "unhandledRejection")) {
         js_promise_note_unhandled_listener_reset();
     }
 
@@ -11456,24 +11444,11 @@ struct JsJsonReviveState {
 };
 
 static void js_json_skip_ws(const char** p) {
-    while (**p == ' ' || **p == '\t' || **p == '\r' || **p == '\n') (*p)++;
+    *p = str_skip_ascii_space(*p);
 }
 
 static void js_json_scan_string_token(const char** p) {
-    if (**p != '"') return;
-    (*p)++;
-    while (**p) {
-        if (**p == '\\') {
-            (*p)++;
-            if (**p) (*p)++;
-            continue;
-        }
-        if (**p == '"') {
-            (*p)++;
-            return;
-        }
-        (*p)++;
-    }
+    if (**p == '"') *p = str_scan_quoted(*p, '"', true, NULL);
 }
 
 static void js_json_scan_number_token(const char** p) {
@@ -13444,13 +13419,6 @@ extern "C" Item js_abort_controller_abort(Item reason) {
 JS_FORWARD_STATIC_EXPRESSION(Item, js_mp_stub_noop, (void),
     (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)})
 
-static bool js_message_port_event_name_matches(Item event, const char* expected) {
-    if (get_type_id(event) != LMD_TYPE_STRING || !expected) return false;
-    String* s = it2s(event);
-    size_t len = strlen(expected);
-    return s->len == (int64_t)len && memcmp(s->chars, expected, len) == 0;
-}
-
 static bool js_message_port_is_object(Item value) {
     TypeId type = get_type_id(value);
     return type == LMD_TYPE_MAP || is_virtual_container_type_id(type);
@@ -13503,7 +13471,7 @@ static const struct JsMessagePortEventSpec {
 static const JsMessagePortEventSpec* js_message_port_event_spec(Item event) {
     for (size_t i = 0; i < sizeof(js_message_port_events) /
             sizeof(js_message_port_events[0]); i++) {
-        if (js_message_port_event_name_matches(event, js_message_port_events[i].event)) {
+        if (js_string_equals(event, js_message_port_events[i].event)) {
             return &js_message_port_events[i];
         }
     }
@@ -17090,13 +17058,6 @@ extern "C" Item js_get_intrinsic_prototype_for_class(int class_id) {
     return proto;
 }
 
-static bool js_intrinsic_key_equals(Item key, const char* name, int len) {
-    if (get_type_id(key) != LMD_TYPE_STRING) return false;
-    String* string = it2s(key);
-    return string && (int)string->len == len &&
-        memcmp(string->chars, name, (size_t)len) == 0;
-}
-
 static void js_intrinsic_invalidate_class(int class_id, Item key) {
     if (class_id <= (int)JS_CLASS_NONE || class_id >= (int)JS_CLASS__COUNT) return;
     js_intrinsic_state.mutation_versions[class_id] =
@@ -17141,7 +17102,7 @@ extern "C" void js_intrinsic_note_property_mutation(Item object, Item key) {
         }
     }
 
-    if (!js_intrinsic_key_equals(key, "prototype", 9)) return;
+    if (!js_string_equals(key, "prototype")) return;
     for (int ctor_id = 0; ctor_id < JS_CTOR_MAX; ctor_id++) {
         if (js_constructor_cache_at(ctor_id).item == 0 ||
             js_constructor_cache_at(ctor_id).item != object.item) {

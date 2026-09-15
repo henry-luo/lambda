@@ -182,6 +182,9 @@ size_t str_collapse_ascii_whitespace(char* dst, size_t dst_cap,
 void str_trim_chars(const char** s, size_t* len,
                     const char* chars, size_t chars_len);
 
+/** trim ASCII whitespace, then remove matching single or double quotes. */
+void str_trim_and_unquote(const char** s, size_t* len);
+
 /* ──────────────────────────────────────────────────────────────────────
  *  6. Case conversion (ASCII-only, in-place or into dst)
  * ────────────────────────────────────────────────────────────────────── */
@@ -253,6 +256,12 @@ char* str_dup_upper(const char* s, size_t len);
 bool str_to_int64(const char* s, size_t len, int64_t* out, const char** end);
 bool str_to_uint64(const char* s, size_t len, uint64_t* out, const char** end);
 bool str_to_double(const char* s, size_t len, double* out, const char** end);
+
+/** parse up to `capacity` floats separated by bytes from `separators`.
+ *  Returns the number parsed; `end` (if non-NULL) receives the first
+ *  unparsed byte. */
+size_t str_parse_float_list(const char* s, const char* separators,
+                            float* values, size_t capacity, const char** end);
 
 /** convenience: parse or return default_val. */
 int64_t  str_to_int64_default(const char* s, size_t len, int64_t default_val);
@@ -509,6 +518,15 @@ const char* strn_scan_quoted(const char* p, const char* end, char quote,
  * matching close or `end`; `closed` reports whether a matching close was found. */
 const char* strn_scan_balanced(const char* p, const char* end, char open, char close,
                                bool skip_escaped, bool* closed);
+/* As strn_scan_balanced, while ignoring delimiters inside `quotes`. */
+const char* strn_scan_balanced_quoted(const char* p, const char* end, char open, char close,
+                                      const char* quotes, bool skip_escaped, bool* closed);
+/* Scan until a stop byte that is outside nested delimiters and quotes. `quotes`
+ * is a NUL-terminated set such as "\"'"; when `skip_escaped` is true, an escaped
+ * byte is ignored both inside and outside a quote. */
+const char* strn_scan_top_level(const char* p, const char* end, const char* stops,
+                                char open, char close, const char* quotes,
+                                bool skip_escaped);
 size_t      strn_count_run(const char* p, const char* end, char marker);  /* 0 if marker=='\0' */
 
 /* 17.3 — NUL-terminated scanners (convenience exception; not safe on
@@ -520,8 +538,14 @@ const char* str_skip_digits(const char* p);
 const char* str_scan_until_char(const char* p, char stop);
 const char* str_scan_until_any(const char* p, const char* stops);
 const char* str_scan_to_line_end(const char* p);
+const char* str_scan_quoted(const char* p, char quote, bool skip_escaped, bool* closed);
 const char* str_scan_balanced(const char* p, char open, char close,
                               bool skip_escaped, bool* closed);
+const char* str_scan_balanced_quoted(const char* p, char open, char close,
+                                     const char* quotes, bool skip_escaped, bool* closed);
+const char* str_scan_top_level(const char* p, const char* stops,
+                               char open, char close, const char* quotes,
+                               bool skip_escaped);
 /** count a run of `marker`. max_len==0 means NUL-terminated mode.
  *  returns 0 when marker is '\0' (prevents the NUL-run failure class). */
 size_t str_count_run(const char* p, size_t max_len, char marker);

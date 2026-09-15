@@ -92,10 +92,6 @@ static JsAstNode* js_c_make_enum_number(JsCAstSink* sink, SourceSpan span,
     return (JsAstNode*)literal;
 }
 
-static bool js_c_is_space(char c) {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
-}
-
 static bool js_c_source_is_module(const char* source, size_t length) {
     if (!source) return false;
     JsLexer lexer;
@@ -141,8 +137,7 @@ static bool js_c_source_is_module(const char* source, size_t length) {
 }
 
 static size_t js_c_skip_space(const char* source, size_t offset, size_t end) {
-    while (offset < end && js_c_is_space(source[offset])) offset++;
-    return offset;
+    return (size_t)(strn_skip_chars(source + offset, source + end, " \t\n\r") - source);
 }
 
 static size_t js_c_program_start(const char* source, size_t body_start,
