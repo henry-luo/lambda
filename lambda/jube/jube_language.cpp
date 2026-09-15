@@ -29,7 +29,7 @@ static const char* jube_language_required_host_build_id(const JubeLanguageDef* l
 }
 
 static bool jube_language_ascii_equal(const char* left, const char* right) {
-    return left && right && str_ieq(left, strlen(left), right, strlen(right));
+    return left && right && str_ieq_cstr(left, right);
 }
 
 static bool jube_language_extension_equal(const char* left, const char* right) {

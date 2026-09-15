@@ -17,6 +17,7 @@
 #include "../runtime/lambda-number-runtime.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../../lib/str.h"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/hashmap_typed.hpp"
 #include "../../lib/hash.h"
@@ -135,16 +136,10 @@ static bool jube_index_from_key(Item key, int64_t* out) {
     return true;
 }
 
-static char* jube_strndup(const char* src, size_t len) {
-    // Interface metadata outlives individual JS heaps and is released after
-    // memtrack may change mode, so it cannot use a phase-bound tracked block.
-    return str_dup(src, len);
-}
-
 // snake_case -> camelCase; returns owned copy (identity copy when no '_')
 static char* jube_derive_camel(const char* snake) {
     size_t len = strlen(snake);
-    // Matches jube_strndup(): member metadata is released outside a JS heap
+    // Matches str_dup(): member metadata is released outside a JS heap
     // lifetime, so its ownership must not depend on memtrack's current mode.
     char* out = (char*)malloc(len + 1);
     if (!out) return NULL;
@@ -1052,9 +1047,9 @@ static void jube_member_record_init(JubeMemberRecord* record,
     jube_member_record_release_owned(record);
     memset(record, 0, sizeof(*record));
     record->bind = bind;
-    record->snake_name = jube_strndup(parsed->name, strlen(parsed->name));
+    record->snake_name = str_dup(parsed->name, strlen(parsed->name));
     record->camel_name = (bind && bind->js_name)
-        ? jube_strndup(bind->js_name, strlen(bind->js_name))
+        ? str_dup(bind->js_name, strlen(bind->js_name))
         : jube_derive_camel(record->snake_name);
     if (parsed->is_method) {
         record->kind = JUBE_MEMBER_METHOD;
@@ -1069,7 +1064,7 @@ static void jube_member_record_init(JubeMemberRecord* record,
         record->const_int = parsed->default_int;
         record->const_is_str = parsed->default_is_str;
         record->const_str = parsed->default_str
-            ? jube_strndup(parsed->default_str, strlen(parsed->default_str)) : NULL;
+            ? str_dup(parsed->default_str, strlen(parsed->default_str)) : NULL;
         record->result_type = parsed->result_type_name
             ? jube_module_type_by_name(module, parsed->result_type_name) : NULL;
     } else {
@@ -1127,7 +1122,7 @@ static void jube_parse_fn_type_text(char* text, int* arity, bool* can_raise,
         // trim trailing spaces
         const char* end = result_start + strlen(result_start);
         while (end > result_start && (end[-1] == ' ' || end[-1] == '\t')) end--;
-        *result_type_name = jube_strndup(result_start, (size_t)(end - result_start));
+        *result_type_name = str_dup(result_start, (size_t)(end - result_start));
     }
     free(text);
 }
@@ -1353,8 +1348,8 @@ static int jube_compile_type(const JubeModuleDef* module,
         JubeMemberRecord* src = &base_rec->members[i];
         JubeMemberRecord* dst = &records[out_count++];
         dst->bind = src->bind;
-        dst->snake_name = jube_strndup(src->snake_name, strlen(src->snake_name));
-        dst->camel_name = jube_strndup(src->camel_name, strlen(src->camel_name));
+        dst->snake_name = str_dup(src->snake_name, strlen(src->snake_name));
+        dst->camel_name = str_dup(src->camel_name, strlen(src->camel_name));
         dst->kind = src->kind;
         dst->readonly = src->readonly;
         dst->enumerable = src->enumerable;
@@ -1364,7 +1359,7 @@ static int jube_compile_type(const JubeModuleDef* module,
         dst->const_int = src->const_int;
         dst->const_is_str = src->const_is_str;
         dst->const_str = src->const_str
-            ? jube_strndup(src->const_str, strlen(src->const_str)) : NULL;
+            ? str_dup(src->const_str, strlen(src->const_str)) : NULL;
     }
 
     // release strips log_info(), so keep diagnostic counters out of NDEBUG builds.
@@ -1520,7 +1515,7 @@ static char* jube_direct_span_text(const JubeDirectSink* sink,
                                    SourceSpan span) {
     if (!sink || !sink->source || span.end_byte < span.start_byte ||
             span.end_byte > sink->source_length) return NULL;
-    return jube_strndup(sink->source + span.start_byte,
+    return str_dup(sink->source + span.start_byte,
                         span.end_byte - span.start_byte);
 }
 
@@ -1554,7 +1549,7 @@ static bool jube_direct_copy_name(const JubeDirectSink* sink, LambdaToken token,
     size_t length = strlen(text);
     if (token.kind == LAMBDA_TOK_SYMBOL && length >= 2 &&
             text[0] == '\'' && text[length - 1] == '\'') {
-        char* bare = jube_strndup(text + 1, length - 2);
+        char* bare = str_dup(text + 1, length - 2);
         free(text);
         text = bare;
     }
@@ -1575,7 +1570,7 @@ static bool jube_direct_parse_default(const JubeDirectSink* sink,
             free(text);
             return false;
         }
-        member->default_str = jube_strndup(text + 1, length - 2);
+        member->default_str = str_dup(text + 1, length - 2);
         free(text);
         member->default_is_str = true;
         member->has_default = member->default_str != NULL;

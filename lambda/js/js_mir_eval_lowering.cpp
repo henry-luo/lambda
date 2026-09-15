@@ -4,6 +4,7 @@
 #include "js_function.hpp"
 #include "js_exec_profile.h"
 #include "../../lib/hash.h"
+#include "../../lib/str.h"
 
 void js_function_finalize_capabilities(JsFunction* fn);
 Item js_native_construct_via_call_body(Item callee, Item* args, int argc,
@@ -954,13 +955,7 @@ static bool js_eval_skip_string_or_comment(const char* source, size_t len, size_
     size_t p = *pos;
     char ch = source[p];
     if (ch == '\'' || ch == '"' || ch == '`') {
-        char quote = ch;
-        p++;
-        while (p < len) {
-            if (source[p] == '\\' && p + 1 < len) { p += 2; continue; }
-            if (source[p] == quote) { p++; break; }
-            p++;
-        }
+        p = (size_t)(strn_scan_quoted(source + p, source + len, ch, true, NULL) - source);
         *pos = p;
         return true;
     }
@@ -1092,13 +1087,8 @@ static JsEvalInitializerScan js_eval_scan_initializer_source(const char* source,
     for (size_t pos = 0; pos < len; pos++) {
         char ch = source[pos];
         if (ch == '\'' || ch == '"' || ch == '`') {
-            char quote = ch;
-            pos++;
-            while (pos < len) {
-                if (source[pos] == '\\' && pos + 1 < len) { pos += 2; continue; }
-                if (source[pos] == quote) break;
-                pos++;
-            }
+            pos = (size_t)(strn_scan_quoted(source + pos, source + len, ch, true, NULL) - source);
+            if (pos > 0) pos--;
             continue;
         }
         if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
@@ -1337,36 +1327,14 @@ static bool js_eval_source_is_v8_native_probe(String* code_str, bool* result_val
         if (pos + name_len > len || memcmp(source + pos, probe->name, name_len) != 0) continue;
         size_t open = js_eval_skip_space_and_comments(source, len, pos + name_len);
         if (open >= len || source[open] != '(') return false;
-        int depth = 1;
-        bool in_string = false;
-        char quote = '\0';
-        bool escaped = false;
-        size_t p = open + 1;
-        while (p < len) {
-            char ch = source[p];
-            if (in_string) {
-                if (escaped) escaped = false;
-                else if (ch == '\\') escaped = true;
-                else if (ch == quote) in_string = false;
-            } else {
-                if (ch == '\'' || ch == '"' || ch == '`') {
-                    in_string = true;
-                    quote = ch;
-                } else if (ch == '(') {
-                    depth++;
-                } else if (ch == ')') {
-                    depth--;
-                    if (depth == 0) {
-                        size_t tail = js_eval_skip_space_and_comments(source, len, p + 1);
-                        if (tail != len) return false;
-                        if (result_value) *result_value = probe->bool_value;
-                        return true;
-                    }
-                }
-            }
-            p++;
-        }
-        return false;
+        bool closed = false;
+        const char* after = strn_scan_balanced_quoted(source + open, source + len, '(', ')',
+                                                       "\"'`", true, &closed);
+        if (!closed) return false;
+        size_t tail = js_eval_skip_space_and_comments(source, len, (size_t)(after - source));
+        if (tail != len) return false;
+        if (result_value) *result_value = probe->bool_value;
+        return true;
     }
     return false;
 }

@@ -18,9 +18,7 @@ static inline bool jsx_is_whitespace(char c) {
 }
 
 static inline void jsx_skip_whitespace(const char** p, const char* end) {
-    while (*p < end && jsx_is_whitespace(**p)) {
-        (*p)++;
-    }
+    *p = strn_skip_chars(*p, end, " \t\n\r");
 }
 
 static inline bool jsx_is_component_tag(const char* tag_name) {

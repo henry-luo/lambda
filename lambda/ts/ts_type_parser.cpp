@@ -4,6 +4,7 @@
 #include "../js/js_c_ast_helpers.hpp"
 #include "../../lib/mempool.h"
 #include "../../lib/string.h"
+#include "../../lib/str.h"
 #include "../../lib/hashmap_typed.hpp"
 #include "../../lib/log.h"
 
@@ -317,12 +318,8 @@ struct TsDirectTypeParser {
     }
 
     Type* parse_string_literal() {
-        char quote = text[pos++];
-        while (pos < len && text[pos] != quote) {
-            if (text[pos] == '\\' && pos + 1 < len) pos++;
-            pos++;
-        }
-        if (pos < len) pos++;
+        char quote = text[pos];
+        pos = (int)(strn_scan_quoted(text + pos, text + len, quote, true, NULL) - text);
         return make_base(LMD_TYPE_STRING);
     }
 

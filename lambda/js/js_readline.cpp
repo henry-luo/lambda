@@ -440,13 +440,6 @@ static void readline_emit_history(Item rl, Item history) {
     }
 }
 
-static bool readline_string_items_equal(Item a, Item b) {
-    if (get_type_id(a) != LMD_TYPE_STRING || get_type_id(b) != LMD_TYPE_STRING) return false;
-    String* sa = it2s(a);
-    String* sb = it2s(b);
-    return sa && sb && sa->len == sb->len && memcmp(sa->chars, sb->chars, (size_t)sa->len) == 0;
-}
-
 static Item readline_history_entry_from_line(Item line) {
     if (get_type_id(line) != LMD_TYPE_STRING) return line;
     String* s = it2s(line);
@@ -758,7 +751,7 @@ static void readline_history_add(Item rl, Item line) {
     int64_t old_len = js_array_length(history);
     for (int64_t i = 0; i < old_len && js_array_length(next) < limit; i++) {
         Item old_line = js_elements_get_int(history, i);
-        if (remove_duplicates && readline_string_items_equal(old_line, entry)) continue;
+        if (remove_duplicates && js_string_items_equal(old_line, entry)) continue;
         if (get_type_id(old_line) == LMD_TYPE_STRING) js_array_push(next, old_line);
     }
     readline_set(rl, "history", next);
@@ -805,7 +798,7 @@ static void readline_history_move(Item rl, int delta) {
         if (index + 1 < len) index++;
         Item current_line = readline_get(rl, "line");
         while (index + 1 < len &&
-               readline_string_items_equal(js_elements_get_int(history, index), current_line)) {
+               js_string_items_equal(js_elements_get_int(history, index), current_line)) {
             index++;
         }
     } else if (delta > 0) {
@@ -923,11 +916,6 @@ static int readline_common_prefix_len(Item matches) {
     return prefix_len;
 }
 
-static bool readline_string_starts_with(String* value, String* prefix) {
-    if (!value || !prefix || value->len < prefix->len) return false;
-    return memcmp(value->chars, prefix->chars, (size_t)prefix->len) == 0;
-}
-
 static bool readline_apply_common_completion(Item rl, Item matches, String* line) {
     if (!line) return false;
     int prefix_len = readline_common_prefix_len(matches);
@@ -935,7 +923,7 @@ static bool readline_apply_common_completion(Item rl, Item matches, String* line
     Item first_item = js_to_string(js_elements_get_int(matches, 0));
     if (get_type_id(first_item) != LMD_TYPE_STRING) return false;
     String* first = it2s(first_item);
-    if (!readline_string_starts_with(first, line)) return false;
+    if (!str_starts_with(first->chars, first->len, line->chars, line->len)) return false;
     int suffix_len = prefix_len - (int)line->len;
     readline_append_line(rl, first->chars + line->len, suffix_len);
     readline_completion_output_write(rl, make_string_item(first->chars + line->len, suffix_len));

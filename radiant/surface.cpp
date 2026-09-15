@@ -59,14 +59,6 @@ static bool is_svg_content(const unsigned char* data, size_t size) {
     return false;
 }
 
-static const char* find_bytes(const char* data, size_t size, const char* needle, size_t needle_len) {
-    if (!data || !needle || needle_len == 0 || size < needle_len) return NULL;
-    for (size_t i = 0; i <= size - needle_len; i++) {
-        if (memcmp(data + i, needle, needle_len) == 0) return data + i;
-    }
-    return NULL;
-}
-
 typedef struct SvgImageIntrinsicMetadata {
     float width;
     float height;
@@ -77,21 +69,8 @@ typedef struct SvgImageIntrinsicMetadata {
 
 static const char* svg_root_tag_end(const char* svg, const char* end) {
     if (!svg || !end) return NULL;
-
-    const char* tag_end = svg;
-    char quote = 0;
-    while (tag_end < end) {
-        char c = *tag_end;
-        if (quote) {
-            if (c == quote) quote = 0;
-        } else if (c == '"' || c == '\'') {
-            quote = c;
-        } else if (c == '>') {
-            return tag_end;
-        }
-        tag_end++;
-    }
-    return NULL;
+    const char* tag_end = strn_scan_top_level(svg, end, ">", '(', ')', "\"'", false);
+    return tag_end < end ? tag_end : NULL;
 }
 
 static bool svg_find_root_attr(const char* svg, const char* tag_end, const char* name,
@@ -144,31 +123,13 @@ static bool svg_find_root_attr(const char* svg, const char* tag_end, const char*
     return false;
 }
 
-static bool svg_parse_number_token(const char** cursor, float* out_value) {
-    if (!cursor || !*cursor || !out_value) return false;
-
-    const char* p = *cursor;
-    while (*p && (isspace((unsigned char)*p) || *p == ',')) p++;
-    char* end_ptr = NULL;
-    float value = strtof(p, &end_ptr);
-    if (end_ptr == p) return false;
-    *out_value = value;
-    *cursor = end_ptr;
-    return true;
-}
-
 static bool svg_parse_viewbox_attr(const char* value, float* width, float* height) {
     if (!value || !width || !height) return false;
 
-    const char* p = value;
-    float min_x = 0.0f;
-    float min_y = 0.0f;
-    float vb_width = 0.0f;
-    float vb_height = 0.0f;
-    if (!svg_parse_number_token(&p, &min_x)) return false;
-    if (!svg_parse_number_token(&p, &min_y)) return false;
-    if (!svg_parse_number_token(&p, &vb_width)) return false;
-    if (!svg_parse_number_token(&p, &vb_height)) return false;
+    float values[4];
+    if (str_parse_float_list(value, ", \t\n\r\f\v", values, 4, NULL) != 4) return false;
+    float vb_width = values[2];
+    float vb_height = values[3];
     if (vb_width <= 0.0f || vb_height <= 0.0f) return false;
 
     *width = vb_width;
@@ -220,7 +181,8 @@ static SvgImageIntrinsicMetadata svg_read_intrinsic_metadata_in_memory(const cha
     if (!data || size == 0) return meta;
 
     const char* end = data + size;
-    const char* svg = find_bytes(data, size, "<svg", 4);
+    size_t svg_offset = str_find(data, size, "<svg", 4);
+    const char* svg = svg_offset == STR_NPOS ? NULL : data + svg_offset;
     if (!svg) return meta;
 
     const char* tag_end = svg_root_tag_end(svg, end);

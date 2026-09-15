@@ -11430,11 +11430,6 @@ static float dom_svg_attribute_number(DomElement* elem, const char* name,
     return end != value ? parsed : fallback;
 }
 
-static const char* dom_svg_skip_number_separators(const char* cursor) {
-    while (cursor && (*cursor == ',' || str_char_is_ascii_space(*cursor))) cursor++;
-    return cursor;
-}
-
 static RdtMatrix dom_svg_transform_from_element(DomElement* elem) {
     RdtMatrix transform = rdt_matrix_identity();
     if (!elem) return transform;
@@ -11462,16 +11457,9 @@ static RdtMatrix dom_svg_transform_from_element(DomElement* elem) {
 static void dom_svg_bounds_from_points(const char* points, JsDomSvgBounds* bounds) {
     const char* cursor = points;
     while (cursor && *cursor) {
-        cursor = dom_svg_skip_number_separators(cursor);
-        if (!*cursor) break;
-        char* end = nullptr;
-        float x = strtof(cursor, &end);
-        if (end == cursor) break;
-        cursor = dom_svg_skip_number_separators(end);
-        float y = strtof(cursor, &end);
-        if (end == cursor) break;
-        dom_svg_bounds_include_point(bounds, x, y);
-        cursor = end;
+        float point[2];
+        if (str_parse_float_list(cursor, ", \t\n\r\f\v", point, 2, &cursor) != 2) break;
+        dom_svg_bounds_include_point(bounds, point[0], point[1]);
     }
 }
 
@@ -11587,14 +11575,7 @@ static bool dom_svg_parse_viewbox(const char* value, float* min_x, float* min_y,
                                      float* width, float* height) {
     if (!value || !min_x || !min_y || !width || !height) return false;
     float values[4] = {};
-    const char* cursor = value;
-    for (int i = 0; i < 4; i++) {
-        cursor = dom_svg_skip_number_separators(cursor);
-        char* end = nullptr;
-        values[i] = strtof(cursor, &end);
-        if (end == cursor) return false;
-        cursor = end;
-    }
+    if (str_parse_float_list(value, ", \t\n\r\f\v", values, 4, nullptr) != 4) return false;
     if (values[2] <= 0.0f || values[3] <= 0.0f) return false;
     *min_x = values[0];
     *min_y = values[1];
@@ -12107,18 +12088,11 @@ static bool dom_svg_path_add_points(RdtPath* path, const char* points,
     bool has_point = false;
     const char* cursor = points;
     while (cursor && *cursor) {
-        cursor = dom_svg_skip_number_separators(cursor);
-        if (!*cursor) break;
-        char* end = nullptr;
-        float x = strtof(cursor, &end);
-        if (end == cursor) break;
-        cursor = dom_svg_skip_number_separators(end);
-        float y = strtof(cursor, &end);
-        if (end == cursor) break;
-        if (has_point) rdt_path_line_to(path, x, y);
-        else rdt_path_move_to(path, x, y);
+        float point[2];
+        if (str_parse_float_list(cursor, ", \t\n\r\f\v", point, 2, &cursor) != 2) break;
+        if (has_point) rdt_path_line_to(path, point[0], point[1]);
+        else rdt_path_move_to(path, point[0], point[1]);
         has_point = true;
-        cursor = end;
     }
     if (has_point && close_path) rdt_path_close(path);
     return has_point;
@@ -12365,17 +12339,12 @@ static void dom_svg_configure_stroke_hit(DomElement* elem, float min_scale,
     const char* dasharray = dom_svg_presentation_value(elem, "stroke-dasharray", true,
         dash_buffer, sizeof(dash_buffer));
     if (!dasharray || !*dasharray || str_icmp_cstr(dasharray, "none") == 0) return;
-    const char* cursor = dasharray;
-    while (*cursor && context->stroke_dash_count < 16) {
-        cursor = dom_svg_skip_number_separators(cursor);
-        if (!*cursor) break;
-        char* end = nullptr;
-        float dash = strtof(cursor, &end);
-        if (end == cursor) break;
-        if (dash > 0.0f) {
-            context->stroke_dash[context->stroke_dash_count++] = dash;
+    size_t dash_count = str_parse_float_list(dasharray, ", \t\n\r\f\v",
+        context->stroke_dash, 16, nullptr);
+    for (size_t index = 0; index < dash_count; index++) {
+        if (context->stroke_dash[index] > 0.0f) {
+            context->stroke_dash[context->stroke_dash_count++] = context->stroke_dash[index];
         }
-        cursor = end;
     }
     if (context->stroke_dash_count & 1) {
         int original_count = context->stroke_dash_count;

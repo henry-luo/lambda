@@ -46,23 +46,6 @@ static const char* type6_tags[] = {
 // Helper Functions
 // ============================================================================
 
-// Case-insensitive prefix match
-static bool starts_with_ci(const char* str, const char* prefix) {
-    while (*prefix) {
-        if (*str == '\0') return false;
-        char str_ch = *str;
-        char prefix_ch = *prefix;
-        str_to_lower(&str_ch, &str_ch, 1);
-        str_to_lower(&prefix_ch, &prefix_ch, 1);
-        if (str_ch != prefix_ch) {
-            return false;
-        }
-        str++;
-        prefix++;
-    }
-    return true;
-}
-
 // Check if character ends a tag name (space, tab, >, />, or end of line)
 static bool is_tag_name_end(char c) {
     return c == ' ' || c == '\t' || c == '>' || c == '/' || c == '\0' || c == '\n' || c == '\r';
@@ -70,13 +53,8 @@ static bool is_tag_name_end(char c) {
 
 // Check if line contains a string (case-insensitive)
 static bool line_contains_ci(const char* line, const char* needle) {
-    while (*line) {
-        if (starts_with_ci(line, needle)) {
-            return true;
-        }
-        line++;
-    }
-    return false;
+    return line && needle && *line &&
+        str_ifind(line, strlen(line), needle, strlen(needle)) != STR_NPOS;
 }
 
 // Check if line contains a string (case-sensitive)
@@ -86,13 +64,7 @@ static bool line_contains(const char* line, const char* needle) {
 
 // Check if a line is blank (only whitespace)
 static bool is_blank(const char* line) {
-    while (*line) {
-        if (*line != ' ' && *line != '\t' && *line != '\r' && *line != '\n') {
-            return false;
-        }
-        line++;
-    }
-    return true;
+    return str_find_not_any(line, strlen(line), " \t\r\n", 4) == STR_NPOS;
 }
 
 // ============================================================================

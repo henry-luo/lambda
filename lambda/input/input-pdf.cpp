@@ -356,9 +356,7 @@ typedef struct {
 } StreamObject;
 
 static void skip_pdf_whitespace(const char **pdf) {
-    while (**pdf && (**pdf == ' ' || **pdf == '\n' || **pdf == '\r' || **pdf == '\t' || **pdf == '\f')) {
-        (*pdf)++;
-    }
+    *pdf = str_skip_chars(*pdf, " \n\r\t\f");
 }
 
 static void skip_comments(const char **pdf) {

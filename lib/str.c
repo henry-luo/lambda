@@ -596,6 +596,17 @@ void str_trim_chars(const char** s, size_t* len,
     *len = n;
 }
 
+void str_trim_and_unquote(const char** s, size_t* len) {
+    if (!s || !len) return;
+    str_trim(s, len);
+    if (*len < 2 || !*s) return;
+    char quote = (*s)[0];
+    if ((quote == '\'' || quote == '"') && (*s)[*len - 1] == quote) {
+        (*s)++;
+        *len -= 2;
+    }
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  6. Case conversion (LUT-based, SWAR-accelerated)
  * ══════════════════════════════════════════════════════════════════════ */
@@ -841,6 +852,22 @@ bool str_to_double(const char* s, size_t len, double* out, const char** end) {
     }
     if (heap) free(buf);
     return ok;
+}
+
+size_t str_parse_float_list(const char* s, const char* separators,
+                            float* values, size_t capacity, const char** end) {
+    const char* p = s ? s : "";
+    size_t count = 0;
+    while (values && count < capacity) {
+        p = str_skip_chars(p, separators);
+        char* parsed_end = NULL;
+        float value = strtof(p, &parsed_end);
+        if (parsed_end == p) break;
+        values[count++] = value;
+        p = parsed_end;
+    }
+    if (end) *end = p;
+    return count;
 }
 
 int64_t str_to_int64_default(const char* s, size_t len, int64_t default_val) {
@@ -1516,6 +1543,72 @@ const char* strn_scan_balanced(const char* p, const char* end, char open, char c
     return p;
 }
 
+const char* strn_scan_balanced_quoted(const char* p, const char* end, char open, char close,
+                                      const char* quotes, bool skip_escaped, bool* closed) {
+    if (closed) *closed = false;
+    if (!p || !end || p >= end || *p != open) return p;
+    size_t depth = 0;
+    char quote = '\0';
+    while (p < end) {
+        char c = *p++;
+        if (skip_escaped && c == '\\' && p < end) {
+            p++;
+            continue;
+        }
+        if (quote) {
+            if (c == quote) quote = '\0';
+            continue;
+        }
+        if (quotes && str_char_in_set(c, quotes)) {
+            quote = c;
+        } else if (c == open) {
+            depth++;
+        } else if (c == close && --depth == 0) {
+            if (closed) *closed = true;
+            return p;
+        }
+    }
+    return p;
+}
+
+const char* strn_scan_top_level(const char* p, const char* end, const char* stops,
+                                char open, char close, const char* quotes,
+                                bool skip_escaped) {
+    if (!p || !end || p > end) return p;
+    int depth = 0;
+    char quote = '\0';
+    while (p < end) {
+        char c = *p;
+        if (skip_escaped && c == '\\' && p + 1 < end) {
+            p += 2;
+            continue;
+        }
+        if (quote) {
+            if (c == quote) quote = '\0';
+            p++;
+            continue;
+        }
+        if (quotes && str_char_in_set(c, quotes)) {
+            quote = c;
+            p++;
+            continue;
+        }
+        if (c == open) {
+            depth++;
+            p++;
+            continue;
+        }
+        if (c == close && depth > 0) {
+            depth--;
+            p++;
+            continue;
+        }
+        if (depth == 0 && str_char_in_set(c, stops)) break;
+        p++;
+    }
+    return p;
+}
+
 size_t strn_count_run(const char* p, const char* end, char marker) {
     if (!p || marker == '\0') return 0;
     size_t n = 0;
@@ -1567,23 +1660,30 @@ const char* str_scan_to_line_end(const char* p) {
     return p;
 }
 
+const char* str_scan_quoted(const char* p, char quote, bool skip_escaped, bool* closed) {
+    if (!p) return NULL;
+    return strn_scan_quoted(p, p + strlen(p), quote, skip_escaped, closed);
+}
+
 const char* str_scan_balanced(const char* p, char open, char close,
                               bool skip_escaped, bool* closed) {
-    if (closed) *closed = false;
-    if (!p || *p != open) return p;
-    size_t depth = 0;
-    while (*p) {
-        char ch = *p++;
-        if (skip_escaped && ch == '\\' && *p) {
-            p++;
-        } else if (ch == open) {
-            depth++;
-        } else if (ch == close && --depth == 0) {
-            if (closed) *closed = true;
-            return p;
-        }
-    }
-    return p;
+    if (!p) return NULL;
+    return strn_scan_balanced(p, p + strlen(p), open, close, skip_escaped, closed);
+}
+
+const char* str_scan_balanced_quoted(const char* p, char open, char close,
+                                     const char* quotes, bool skip_escaped, bool* closed) {
+    if (!p) return NULL;
+    return strn_scan_balanced_quoted(p, p + strlen(p), open, close, quotes,
+                                     skip_escaped, closed);
+}
+
+const char* str_scan_top_level(const char* p, const char* stops,
+                               char open, char close, const char* quotes,
+                               bool skip_escaped) {
+    if (!p) return NULL;
+    return strn_scan_top_level(p, p + strlen(p), stops, open, close, quotes,
+                               skip_escaped);
 }
 
 size_t str_count_run(const char* p, size_t max_len, char marker) {

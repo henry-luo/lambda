@@ -41,6 +41,7 @@ Item js_strbuf_take_item(StrBuf* sb);
 Item js_make_string(const char* str);
 Item js_domexception_new(Item message, Item name_arg);
 bool js_string_equals(Item value, const char* expected);
+bool js_string_items_equal(Item left, Item right);
 bool js_is_vm_context_error(Item value);
 bool js_descriptor_is_enumerable(Item descriptor);
 

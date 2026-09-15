@@ -8,6 +8,7 @@
 
 #include "schema_validator.hpp"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
 #include "../../lib/strbuf.h"
 #include <cstring>
 #include "../../lib/mem.h"
@@ -33,8 +34,7 @@ typedef enum JsonType {
 // ============================================================================
 
 static const char* skip_ws(const char* p) {
-    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
-    return p;
+    return str_skip_ascii_space(p);
 }
 
 static JsonType detect_type(const char* p) {
@@ -50,13 +50,7 @@ static JsonType detect_type(const char* p) {
 
 // helper: skip a quoted JSON string, including escaped characters
 static const char* skip_json_string(const char* p) {
-    if (*p == '"') p++;
-    while (*p && *p != '"') {
-        if (*p == '\\') p++;
-        p++;
-    }
-    if (*p == '"') p++;
-    return p;
+    return str_scan_quoted(p, '"', true, NULL);
 }
 
 // skip a JSON value and return pointer past it
@@ -66,28 +60,10 @@ static const char* skip_value(const char* p) {
         case '"': {
             return skip_json_string(p);
         }
-        case '{': {
-            p++;
-            int depth = 1;
-            while (*p && depth > 0) {
-                if (*p == '{') depth++;
-                else if (*p == '}') depth--;
-                else if (*p == '"') p = skip_json_string(p);
-                p++;
-            }
-            return p;
-        }
-        case '[': {
-            p++;
-            int depth = 1;
-            while (*p && depth > 0) {
-                if (*p == '[') depth++;
-                else if (*p == ']') depth--;
-                else if (*p == '"') p = skip_json_string(p);
-                p++;
-            }
-            return p;
-        }
+        case '{':
+            return str_scan_balanced_quoted(p, '{', '}', "\"", true, NULL);
+        case '[':
+            return str_scan_balanced_quoted(p, '[', ']', "\"", true, NULL);
         case 't': return p + 4; // true
         case 'f': return p + 5; // false
         case 'n': return p + 4; // null

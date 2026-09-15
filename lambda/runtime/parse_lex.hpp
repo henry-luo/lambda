@@ -4,6 +4,7 @@
 // Both parsers receive a committed source span, so these helpers deliberately
 // operate on a pointer/end pair and never allocate or own parser state.
 
+#include "../../lib/str.h"
 #include "../../lib/strview.h"
 
 #include <string.h>
@@ -25,8 +26,7 @@ static inline void lambda_lex_skip_space(const char** cursor, const char* end) {
     if (!cursor || !*cursor) return;
     const char*& p = *cursor;
     for (;;) {
-        while (p < end && (*p == ' ' || *p == '\t' || *p == '\r' ||
-                *p == '\n' || *p == '\f' || *p == '\v')) p++;
+        p = strn_skip_ascii_space(p, end);
         if (p + 1 < end && p[0] == '/' && p[1] == '/') {
             while (p < end && *p != '\n') p++;
             continue;

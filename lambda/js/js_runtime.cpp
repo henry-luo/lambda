@@ -32785,8 +32785,15 @@ static Item js_domain_create(void) {
 extern "C" bool js_string_equals(Item value, const char* expected) {
     if (get_type_id(value) != LMD_TYPE_STRING || !expected) return false;
     String* s = it2s(value);
-    size_t len = strlen(expected);
-    return s && s->len == (int64_t)len && memcmp(s->chars, expected, len) == 0;
+    return s && str_eq_const(s->chars, s->len, expected);
+}
+
+extern "C" bool js_string_items_equal(Item left, Item right) {
+    if (get_type_id(left) != LMD_TYPE_STRING || get_type_id(right) != LMD_TYPE_STRING) return false;
+    String* left_string = it2s(left);
+    String* right_string = it2s(right);
+    return left_string && right_string && str_eq(left_string->chars, left_string->len,
+                                                  right_string->chars, right_string->len);
 }
 
 extern "C" bool js_is_vm_context_error(Item value) {
@@ -33059,17 +33066,11 @@ static void js_repl_prompt(Item repl) {
 }
 
 static bool js_repl_starts_with(const char* s, int len, const char* prefix) {
-    int plen = (int)strlen(prefix);
-    return len >= plen && memcmp(s, prefix, (size_t)plen) == 0;
+    return s && prefix && len >= 0 && str_starts_with_const(s, (size_t)len, prefix);
 }
 
 static bool js_repl_contains(const char* s, int len, const char* needle) {
-    int needle_len = (int)strlen(needle);
-    if (!s || needle_len <= 0 || len < needle_len) return false;
-    for (int i = 0; i <= len - needle_len; i++) {
-        if (memcmp(s + i, needle, (size_t)needle_len) == 0) return true;
-    }
-    return false;
+    return s && needle && len >= 0 && str_contains(s, (size_t)len, needle, strlen(needle));
 }
 
 static Item js_repl_eval_callback(Item repl, Item err, Item result);
@@ -33347,12 +33348,6 @@ static Item js_repl_recoverable_ctor(void) {
     return obj;
 }
 
-static bool js_repl_key_equals(Item key, const char* name, int len) {
-    if (get_type_id(key) != LMD_TYPE_STRING) return false;
-    String* s = it2s(key);
-    return s && s->len == (uint32_t)len && memcmp(s->chars, name, (size_t)len) == 0;
-}
-
 static Item js_repl_create_context(Item opts, bool old_signature) {
     Item global = js_get_global_this();
     Item use_global = old_signature ? make_js_undefined() : js_get_key_default(opts, js_repl_key("useGlobal"));
@@ -33362,10 +33357,10 @@ static Item js_repl_create_context(Item opts, bool old_signature) {
     Item names = js_object_get_own_property_names(global);
     if (get_type_id(names) == LMD_TYPE_ARRAY) {
         JS_ARRAY_FOREACH(key, names) {
-            if (js_repl_key_equals(key, "globalThis", 10) ||
-                js_repl_key_equals(key, "global", 6) ||
-                js_repl_key_equals(key, "self", 4) ||
-                js_repl_key_equals(key, "window", 6)) {
+            if (js_string_equals(key, "globalThis") ||
+                js_string_equals(key, "global") ||
+                js_string_equals(key, "self") ||
+                js_string_equals(key, "window")) {
                 continue;
             }
             js_set_key_default(repl_context, key, js_get_key_default(global, key));
@@ -35028,14 +35023,7 @@ extern "C" Item js_text_encoder_encode_method(Item encoder, Item* args,
 }
 
 static bool js_text_decoder_label_equals(String* s, const char* literal) {
-    if (!s || !literal) return false;
-    int len = (int)strlen(literal);
-    if ((int)s->len != len) return false;
-    for (int i = 0; i < len; i++) {
-        char a = (char)tolower((unsigned char)s->chars[i]);
-        if (a != literal[i]) return false;
-    }
-    return true;
+    return s && str_ieq_const(s->chars, s->len, literal);
 }
 
 static const char* js_text_decoder_canonical_label(Item encoding_item) {

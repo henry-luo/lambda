@@ -2105,33 +2105,7 @@ static bool parse_object_position_component(LayoutContext* lycon, const CssValue
 }
 
 static bool css_text_has_top_level_comma(const char* text, size_t len) {
-    if (!text) return false;
-    int paren_depth = 0;
-    char quote = '\0';
-    bool escaping = false;
-    for (size_t i = 0; i < len; i++) {
-        char ch = text[i];
-        if (quote) {
-            if (escaping) {
-                escaping = false;
-            } else if (ch == '\\') {
-                escaping = true;
-            } else if (ch == quote) {
-                quote = '\0';
-            }
-            continue;
-        }
-        if (ch == '\'' || ch == '"') {
-            quote = ch;
-        } else if (ch == '(') {
-            paren_depth++;
-        } else if (ch == ')') {
-            if (paren_depth > 0) paren_depth--;
-        } else if (ch == ',' && paren_depth == 0) {
-            return true;
-        }
-    }
-    return false;
+    return text && strn_scan_top_level(text, text + len, ",", '(', ')', "\"'", true) < text + len;
 }
 
 static void resolve_background_url_function(LayoutContext* lycon, const CssDeclaration* decl, const CssValue* value) {
