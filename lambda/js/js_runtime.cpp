@@ -16227,13 +16227,6 @@ static bool js_regex_pattern_has_re2_name_alias(const char* pattern, int pattern
     return false;
 }
 
-static int js_regex_hex_value(char ch) {
-    if (ch >= '0' && ch <= '9') return ch - '0';
-    if (ch >= 'a' && ch <= 'f') return 10 + ch - 'a';
-    if (ch >= 'A' && ch <= 'F') return 10 + ch - 'A';
-    return -1;
-}
-
 static bool js_regex_pattern_has_surrogate_unit(const char* pattern, int pattern_len) {
     if (!pattern || pattern_len <= 0) return false;
     for (int i = 0; i < pattern_len; i++) {
@@ -16249,7 +16242,7 @@ static bool js_regex_pattern_has_surrogate_unit(const char* pattern, int pattern
         int value = 0;
         bool all_hex = true;
         for (int j = i + 2; j < i + 6; j++) {
-            int hv = js_regex_hex_value(pattern[j]);
+            int hv = str_hex_val(pattern[j]);
             if (hv < 0) { all_hex = false; break; }
             value = (value << 4) | hv;
         }
@@ -16654,7 +16647,7 @@ static bool js_regex_append_decoded_name(const char* pat, int len, int* pi, std:
             if (i + 2 < len && pat[i + 2] == '{') {
                 int j = i + 3, val = 0, digits = 0;
                 while (j < len && pat[j] != '}') {
-                    int hv = js_regex_hex_value(pat[j]);
+                    int hv = str_hex_val(pat[j]);
                     if (hv < 0) { digits = -1; break; }
                     val = val * 16 + hv; digits++; j++;
                 }
@@ -16662,16 +16655,16 @@ static bool js_regex_append_decoded_name(const char* pat, int len, int* pi, std:
                     cp = (uint32_t)val; consumed = (j + 1) - i;
                 }
             } else if (i + 5 < len) {
-                int h0 = js_regex_hex_value(pat[i + 2]), h1 = js_regex_hex_value(pat[i + 3]);
-                int h2 = js_regex_hex_value(pat[i + 4]), h3 = js_regex_hex_value(pat[i + 5]);
+                int h0 = str_hex_val(pat[i + 2]), h1 = str_hex_val(pat[i + 3]);
+                int h2 = str_hex_val(pat[i + 4]), h3 = str_hex_val(pat[i + 5]);
                 if (h0 >= 0 && h1 >= 0 && h2 >= 0 && h3 >= 0) {
                     uint32_t u = (uint32_t)((h0 << 12) | (h1 << 8) | (h2 << 4) | h3);
                     consumed = 6;
                     // Combine a high+low surrogate pair into one code point.
                     if (utf_is_high_surrogate(u) && i + 11 < len &&
                         pat[i + 6] == '\\' && pat[i + 7] == 'u') {
-                        int l0 = js_regex_hex_value(pat[i + 8]), l1 = js_regex_hex_value(pat[i + 9]);
-                        int l2 = js_regex_hex_value(pat[i + 10]), l3 = js_regex_hex_value(pat[i + 11]);
+                        int l0 = str_hex_val(pat[i + 8]), l1 = str_hex_val(pat[i + 9]);
+                        int l2 = str_hex_val(pat[i + 10]), l3 = str_hex_val(pat[i + 11]);
                         if (l0 >= 0 && l1 >= 0 && l2 >= 0 && l3 >= 0) {
                             uint32_t lo = (uint32_t)((l0 << 12) | (l1 << 8) | (l2 << 4) | l3);
                             uint32_t pair_cp = utf16_decode_pair((uint16_t)u, (uint16_t)lo);
@@ -16856,7 +16849,7 @@ static bool js_regex_parse_x_escape(const std::string& pat, int i, int n, uint32
     if (i + 2 < n && pat[i + 2] == '{') {
         int j = i + 3; uint32_t v = 0; int digits = 0;
         while (j < n && pat[j] != '}') {
-            int hv = js_regex_hex_value(pat[j]);
+            int hv = str_hex_val(pat[j]);
             if (hv < 0) return false;
             v = (v << 4) | (uint32_t)hv; digits++; j++;
         }
@@ -16864,7 +16857,7 @@ static bool js_regex_parse_x_escape(const std::string& pat, int i, int n, uint32
         *cp = v; *adv = (j + 1) - i; return true;
     }
     if (i + 3 < n) {
-        int h0 = js_regex_hex_value(pat[i + 2]), h1 = js_regex_hex_value(pat[i + 3]);
+        int h0 = str_hex_val(pat[i + 2]), h1 = str_hex_val(pat[i + 3]);
         if (h0 < 0 || h1 < 0) return false;
         *cp = (uint32_t)((h0 << 4) | h1); *adv = 4; return true;
     }
@@ -17436,7 +17429,7 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
                     int value = 0;
                     bool all_hex = true;
                     for (int j = i + 2; j < i + 6; j++) {
-                        int hv = js_regex_hex_value(effective_pattern[j]);
+                        int hv = str_hex_val(effective_pattern[j]);
                         if (hv < 0) {
                             all_hex = false; break;
                         }
@@ -17451,7 +17444,7 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
                             int low = 0;
                             bool low_hex = true;
                             for (int j = i + 8; j < i + 12; j++) {
-                                int hv = js_regex_hex_value(effective_pattern[j]);
+                                int hv = str_hex_val(effective_pattern[j]);
                                 if (hv < 0) { low_hex = false; break; }
                                 low = (low << 4) | hv;
                             }

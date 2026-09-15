@@ -95,10 +95,7 @@ static void append_xml_reference(StringBuf* sb, const char** xml, const char* li
         } else {
             // Unknown entity references are preserved for roundtrip compatibility.
             stringbuf_append_char(sb, '&');
-            for (const char* p = entity_start; p < *xml - 1; p++) {
-                stringbuf_append_char(sb, *p);
-            }
-            stringbuf_append_char(sb, ';');
+            stringbuf_append_str_n(sb, entity_start, (size_t)(*xml - entity_start));
         }
     } else {
         stringbuf_append_char(sb, '&');
@@ -207,10 +204,7 @@ static Item parse_comment(InputContext& ctx, const char **xml) {
     if (comment_end > comment_start) {
         StringBuf* sb = ctx.sb;
         stringbuf_reset(sb);
-        while (comment_start < comment_end) {
-            stringbuf_append_char(sb, *comment_start);
-            comment_start++;
-        }
+        stringbuf_append_str_n(sb, comment_start, (size_t)(comment_end - comment_start));
         String* comment_text = builder.createString(sb->str->chars, sb->length);
         if (comment_text && comment_text->len > 0) {
             element.child(Item{.item = s2it(comment_text)});
@@ -240,10 +234,7 @@ static Item parse_cdata(InputContext& ctx, const char **xml) {
     // Create CDATA content string
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
-    while (cdata_start < *xml) {
-        stringbuf_append_char(sb, *cdata_start);
-        cdata_start++;
-    }
+    stringbuf_append_str_n(sb, cdata_start, (size_t)(*xml - cdata_start));
 
     if (**xml && strncmp(*xml, "]]>", 3) == 0) {
         *xml += 3; // skip ]]>
@@ -311,11 +302,8 @@ static Item parse_entity(InputContext& ctx, const char **xml) {
     if (entity_name_end > entity_name_start) {
         StringBuf* sb = ctx.sb;
         stringbuf_reset(sb);
-        const char* temp = entity_name_start;
-        while (temp < entity_name_end) {
-            stringbuf_append_char(sb, *temp);
-            temp++;
-        }
+        stringbuf_append_str_n(sb, entity_name_start,
+                               (size_t)(entity_name_end - entity_name_start));
         String* name_str = builder.createString(sb->str->chars, sb->length);
         element.attr("name", Item{.item = s2it(name_str)});
     }
@@ -324,11 +312,8 @@ static Item parse_entity(InputContext& ctx, const char **xml) {
     if (entity_value_end > entity_value_start) {
         StringBuf* sb = ctx.sb;
         stringbuf_reset(sb);
-        const char* temp = entity_value_start;
-        while (temp < entity_value_end) {
-            stringbuf_append_char(sb, *temp);
-            temp++;
-        }
+        stringbuf_append_str_n(sb, entity_value_start,
+                               (size_t)(entity_value_end - entity_value_start));
         String* value_str = builder.createString(sb->str->chars, sb->length);
         element.attr("value", Item{.item = s2it(value_str)});
     }
@@ -359,11 +344,7 @@ static Item parse_dtd_declaration(InputContext& ctx, const char **xml) {
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     stringbuf_append_char(sb, '!');
-    const char* temp = decl_start;
-    while (temp < decl_name_end) {
-        stringbuf_append_char(sb, *temp);
-        temp++;
-    }
+    stringbuf_append_str_n(sb, decl_start, (size_t)(decl_name_end - decl_start));
     String* decl_element_name = builder.createString(sb->str->chars, sb->length);
 
     skip_whitespace(xml);
@@ -388,11 +369,7 @@ static Item parse_dtd_declaration(InputContext& ctx, const char **xml) {
     // Add declaration content as text
     if (content_end > content_start) {
         stringbuf_reset(sb);
-        temp = content_start;
-        while (temp < content_end) {
-            stringbuf_append_char(sb, *temp);
-            temp++;
-        }
+        stringbuf_append_str_n(sb, content_start, (size_t)(content_end - content_start));
         String* content_text = builder.createString(sb->str->chars, sb->length);
         if (content_text && content_text->len > 0) {
             element.child(Item{.item = s2it(content_text)});
@@ -588,10 +565,8 @@ static Item parse_element(InputContext& ctx, const char **xml, int depth) {
         // Add PI data as text content
         if (pi_data_end > pi_data_start) {
             stringbuf_reset(sb);
-            while (pi_data_start < pi_data_end) {
-                stringbuf_append_char(sb, *pi_data_start);
-                pi_data_start++;
-            }
+            stringbuf_append_str_n(sb, pi_data_start,
+                                   (size_t)(pi_data_end - pi_data_start));
             String* pi_data = builder.createString(sb->str->chars, sb->length);
             if (pi_data && pi_data->len > 0) {
                 element.child(Item{.item = s2it(pi_data)});

@@ -50,28 +50,12 @@ typedef struct PdfCsReadResult {
     bool has_value;
 } PdfCsReadResult;
 
-static inline bool pdf_cs_is_ws(char c) {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
-}
-
-static inline bool pdf_cs_is_digit(char c) {
-    return c >= '0' && c <= '9';
-}
-
-static inline bool pdf_cs_is_alpha(char c) {
-    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
-}
-
 static inline bool pdf_cs_is_op_char(char c) {
-    return pdf_cs_is_alpha(c) || c == '*' || c == '\'' || c == '"';
+    return str_char_is_alpha(c) || c == '*' || c == '\'' || c == '"';
 }
 
 static inline bool pdf_cs_is_num_start(char c) {
-    return pdf_cs_is_digit(c) || c == '+' || c == '-' || c == '.';
-}
-
-static inline bool pdf_cs_is_hex_digit(char c) {
-    return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
+    return str_char_is_digit(c) || c == '+' || c == '-' || c == '.';
 }
 
 static inline bool pdf_cs_is_octal(char c) {
@@ -79,13 +63,11 @@ static inline bool pdf_cs_is_octal(char c) {
 }
 
 static const char* pdf_cs_skip_ws(const char* p, const char* end) {
-    while (p < end && pdf_cs_is_ws(*p)) p++;
-    return p;
+    return strn_skip_chars(p, end, " \t\n\r\f");
 }
 
 static const char* pdf_cs_skip_comment(const char* p, const char* end) {
-    while (p < end && *p != '\n' && *p != '\r') p++;
-    return p;
+    return strn_scan_to_line_end(p, end);
 }
 
 static Item pdf_cs_string_item(MarkBuilder& builder, const char* start, size_t len) {
@@ -120,7 +102,7 @@ static PdfCsReadResult pdf_cs_read_number(MarkBuilder& builder, const char* p, c
             has_dot = true;
             q++;
         }
-        else if (pdf_cs_is_digit(*q)) {
+        else if (str_char_is_digit(*q)) {
             has_digit = true;
             q++;
         }
@@ -140,7 +122,7 @@ static PdfCsReadResult pdf_cs_read_name(MarkBuilder& builder, const char* p, con
     const char* q = p + 1;
     while (q < end) {
         char c = *q;
-        if (pdf_cs_is_ws(c) || c == '/' || c == '[' || c == ']' ||
+        if (str_is_html_space(c) || c == '/' || c == '[' || c == ']' ||
             c == '(' || c == ')' || c == '<' || c == '>') break;
         q++;
     }
@@ -162,7 +144,7 @@ static PdfCsReadResult pdf_cs_read_hex_string(MarkBuilder& builder, const char* 
     StrBuf* buf = strbuf_new_cap((size_t)(q - (p + 1)) + 1);
     if (!buf) return {pdf_cs_kind_value(builder, "hex", "", 0), q < end ? q + 1 : q, true};
     for (const char* r = p + 1; r < q; r++) {
-        if (!pdf_cs_is_ws(*r) && pdf_cs_is_hex_digit(*r)) strbuf_append_char(buf, *r);
+        if (!str_is_html_space(*r) && str_is_hex(*r)) strbuf_append_char(buf, *r);
     }
     Item value = pdf_cs_kind_value(builder, "hex", buf->str ? buf->str : "", buf->length);
     strbuf_free(buf);
@@ -260,12 +242,12 @@ static const char* pdf_cs_read_op(const char* p, const char* end, const char** o
 }
 
 static bool pdf_cs_is_inline_id(const char* p, const char* end) {
-    return p + 2 <= end && p[0] == 'I' && p[1] == 'D' && (p + 2 == end || pdf_cs_is_ws(p[2]));
+    return p + 2 <= end && p[0] == 'I' && p[1] == 'D' && (p + 2 == end || str_is_html_space(p[2]));
 }
 
 static bool pdf_cs_is_inline_ei(const char* p, const char* end) {
-    return p + 3 <= end && pdf_cs_is_ws(p[0]) && p[1] == 'E' && p[2] == 'I' &&
-        (p + 3 == end || pdf_cs_is_ws(p[3]) || p[3] == '/' || p[3] == '<' || p[3] == '(');
+    return p + 3 <= end && str_is_html_space(p[0]) && p[1] == 'E' && p[2] == 'I' &&
+        (p + 3 == end || str_is_html_space(p[3]) || p[3] == '/' || p[3] == '<' || p[3] == '(');
 }
 
 static Item pdf_cs_inline_info(MarkBuilder& builder, const char* p, const char* end, const char** out_end) {
@@ -289,7 +271,7 @@ static Item pdf_cs_inline_info(MarkBuilder& builder, const char* p, const char* 
         if (*q == '/') {
             const char* key_start = q + 1;
             const char* key_end = key_start;
-            while (key_end < end && !pdf_cs_is_ws(*key_end) && *key_end != '/') key_end++;
+            while (key_end < end && !str_is_html_space(*key_end) && *key_end != '/') key_end++;
             const char* val_start = pdf_cs_skip_ws(key_end, end);
             PdfCsReadResult val = pdf_cs_read_operand(builder, val_start, end);
             MapBuilder pair = builder.map();
@@ -338,7 +320,7 @@ extern "C" Item pdf_parse_content_stream_io(Pool* pool, Item bytes_item) {
 
     while (p < end) {
         char c = *p;
-        if (pdf_cs_is_ws(c)) { p++; continue; }
+        if (str_is_html_space(c)) { p++; continue; }
         if (c == '%') { p = pdf_cs_skip_comment(p, end); continue; }
         if (pdf_cs_is_op_char(c)) {
             const char* op_start = nullptr;

@@ -241,10 +241,8 @@ const char* openapi_generate_spec(OpenApiContext *ctx) {
                         const char *end = t;
                         while (*end && *end != ',') end++;
                         while (end > t && *(end-1) == ' ') end--;
-                        while (t < end) {
-                            strbuf_append_char(buf, *t);
-                            t++;
-                        }
+                        strbuf_append_str_n(buf, t, (size_t)(end - t));
+                        t = end;
                         while (*t && *t != ',') t++;
                     }
                     strbuf_append_char(buf, '"');

@@ -277,7 +277,7 @@ static Item node_process_chdir(Item directory) {
     const uint8_t* bytes = node_process_host->value->string_bytes(directory);
     char path[2048];
     size_t copy_length = length < sizeof(path) - 1 ? length : sizeof(path) - 1;
-    str_copy(path, sizeof(path), bytes, copy_length);
+    str_copy(path, sizeof(path), (const char*)bytes, copy_length);
 #ifdef _WIN32
     int status = _chdir(path);
 #else
@@ -327,7 +327,7 @@ static Item node_process_umask(Item mask_item) {
         if (bytes && length > 0) {
             char buffer[16];
             size_t copy_length = length < 15 ? length : 15;
-            str_copy(buffer, sizeof(buffer), bytes, copy_length);
+            str_copy(buffer, sizeof(buffer), (const char*)bytes, copy_length);
             char* end = NULL;
             long parsed = strtol(buffer, &end, 8);
             if (end == buffer || *end != '\0' || parsed < 0 || parsed > 0777) {

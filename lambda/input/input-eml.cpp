@@ -50,10 +50,7 @@ static String* extract_email_address(InputContext& ctx, const char* header_value
         start++;
         end = strchr(start, '>');
         if (end) {
-            while (start < end) {
-                stringbuf_append_char(sb, *start);
-                start++;
-            }
+            stringbuf_append_str_n(sb, start, (size_t)(end - start));
         }
     } else {
         // Format: "email@domain.com" or "Name email@domain.com"
@@ -71,10 +68,7 @@ static String* extract_email_address(InputContext& ctx, const char* header_value
                 end++;
             }
 
-            while (start < end) {
-                stringbuf_append_char(sb, *start);
-                start++;
-            }
+            stringbuf_append_str_n(sb, start, (size_t)(end - start));
         }
     }
 
@@ -227,11 +221,7 @@ void parse_eml(Input* input, const char* eml_string) {
     // Parse body
     StringBuf* body_sb = ctx.sb;
     stringbuf_reset(body_sb);
-
-    while (*eml) {
-        stringbuf_append_char(body_sb, *eml);
-        eml++;
-    }
+    stringbuf_append_str(body_sb, eml);
 
     if (body_sb->str && body_sb->str->len > 0) {
         String* body_string = ctx.builder.createString(body_sb->str->chars, body_sb->length);

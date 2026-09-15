@@ -135,9 +135,7 @@ static bool parse_jsx_named_entity(StringBuf* sb, const char** jsx, const char* 
     }
 
     stringbuf_append_char(sb, '&');
-    for (const char* p = entity_start; p <= entity_end; p++) {
-        stringbuf_append_char(sb, *p);
-    }
+    stringbuf_append_str_n(sb, entity_start, (size_t)(entity_end - entity_start + 1));
     *jsx = entity_end + 1;
     return true;
 }

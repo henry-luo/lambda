@@ -5160,7 +5160,7 @@ static const char* preprocess_ansi_c_string(const char* src, size_t src_len, Str
         if (in_heredoc_body) {
             // extract current line
             size_t line_start = i;
-            while (i < src_len && src[i] != '\n') i++;
+            i = (size_t)(strn_scan_until_char(src + i, src + src_len, '\n') - src);
             size_t line_end = i;
             if (i < src_len) i++; // skip '\n'
 
@@ -5173,23 +5173,18 @@ static const char* preprocess_ansi_c_string(const char* src, size_t src_len, Str
             }
             const char* delim = heredoc_delims[heredoc_body_idx];
             size_t delim_len = strlen(delim);
-            if (line_len - cmp_start == delim_len &&
-                memcmp(line + cmp_start, delim, delim_len) == 0) {
+            bool is_delimiter = line_len - cmp_start == delim_len &&
+                memcmp(line + cmp_start, delim, delim_len) == 0;
+            strbuf_append_str_n(buf, line, line_len);
+            if (line_end < src_len) strbuf_append_char(buf, '\n');
+            if (is_delimiter) {
                 // delimiter found — emit it and move to next heredoc or exit
-                for (size_t k = line_start; k < line_end; k++)
-                    strbuf_append_char(buf, src[k]);
-                if (line_end < src_len) strbuf_append_char(buf, '\n');
                 heredoc_body_idx++;
                 if (heredoc_body_idx >= heredoc_count) {
                     in_heredoc_body = false;
                     heredoc_count = 0;
                     heredoc_body_idx = 0;
                 }
-            } else {
-                // body line — copy verbatim
-                for (size_t k = line_start; k < line_end; k++)
-                    strbuf_append_char(buf, src[k]);
-                if (line_end < src_len) strbuf_append_char(buf, '\n');
             }
             continue;
         }
@@ -5260,42 +5255,33 @@ static const char* preprocess_ansi_c_string(const char* src, size_t src_len, Str
         // skip comments (# to end of line)
         if (src[i] == '#' && (i == 0 || src[i-1] == ' ' || src[i-1] == '\t' || src[i-1] == '\n'
                               || src[i-1] == ';' || src[i-1] == '{' || src[i-1] == '(')) {
-            while (i < src_len && src[i] != '\n') {
-                strbuf_append_char(buf, src[i]); i++;
-            }
+            const char* comment_end = strn_scan_until_char(src + i, src + src_len, '\n');
+            strbuf_append_str_n(buf, src + i, (size_t)(comment_end - src - i));
+            i = (size_t)(comment_end - src);
             continue;
         }
         // skip single-quoted strings
         if (src[i] == '\'' && !(i > 0 && src[i-1] == '$')) {
-            strbuf_append_char(buf, src[i]); i++;
-            while (i < src_len && src[i] != '\'') {
-                strbuf_append_char(buf, src[i]); i++;
-            }
-            if (i < src_len) { strbuf_append_char(buf, src[i]); i++; }
+            const char* quote_end = strn_scan_quoted(src + i, src + src_len,
+                                                      '\'', false, NULL);
+            strbuf_append_str_n(buf, src + i, (size_t)(quote_end - src - i));
+            i = (size_t)(quote_end - src);
             continue;
         }
         // skip double-quoted strings
         if (src[i] == '"') {
-            strbuf_append_char(buf, src[i]); i++;
-            while (i < src_len && src[i] != '"') {
-                if (src[i] == '\\' && i + 1 < src_len) {
-                    strbuf_append_char(buf, src[i]); i++;
-                }
-                strbuf_append_char(buf, src[i]); i++;
-            }
-            if (i < src_len) { strbuf_append_char(buf, src[i]); i++; }
+            const char* quote_end = strn_scan_quoted(src + i, src + src_len,
+                                                      '"', true, NULL);
+            strbuf_append_str_n(buf, src + i, (size_t)(quote_end - src - i));
+            i = (size_t)(quote_end - src);
             continue;
         }
         // skip backtick strings
         if (src[i] == '`') {
-            strbuf_append_char(buf, src[i]); i++;
-            while (i < src_len && src[i] != '`') {
-                if (src[i] == '\\' && i + 1 < src_len) {
-                    strbuf_append_char(buf, src[i]); i++;
-                }
-                strbuf_append_char(buf, src[i]); i++;
-            }
-            if (i < src_len) { strbuf_append_char(buf, src[i]); i++; }
+            const char* quote_end = strn_scan_quoted(src + i, src + src_len,
+                                                      '`', true, NULL);
+            strbuf_append_str_n(buf, src + i, (size_t)(quote_end - src - i));
+            i = (size_t)(quote_end - src);
             continue;
         }
         // match $'...'
@@ -5303,13 +5289,11 @@ static const char* preprocess_ansi_c_string(const char* src, size_t src_len, Str
             i += 2; // skip $'
             // find end of ANSI-C string (handling \' inside)
             size_t content_start = i;
-            while (i < src_len) {
-                if (src[i] == '\\' && i + 1 < src_len) { i += 2; continue; }
-                if (src[i] == '\'') break;
-                i++;
-            }
-            size_t content_end = i;
-            if (i < src_len) i++; // skip closing '
+            bool closed = false;
+            const char* quote_end = strn_scan_quoted(src + content_start - 1,
+                                                      src + src_len, '\'', true, &closed);
+            size_t content_end = (size_t)(quote_end - src) - (closed ? 1 : 0);
+            i = (size_t)(quote_end - src);
 
             StrBuf* processed = strbuf_new_cap(content_end - content_start + 1);
             escape_append_bash_ansi(processed, src + content_start,
@@ -5325,9 +5309,7 @@ static const char* preprocess_ansi_c_string(const char* src, size_t src_len, Str
             if (has_nul) {
                 // emit original $'...' unchanged
                 strbuf_append_str(buf, "$'");
-                for (size_t k = content_start; k < content_end; k++) {
-                    strbuf_append_char(buf, src[k]);
-                }
+                strbuf_append_str_n(buf, src + content_start, content_end - content_start);
                 strbuf_append_char(buf, '\'');
                 strbuf_free(processed);
                 continue;
@@ -5668,9 +5650,7 @@ static const char* preprocess_bash_source(const char* src, size_t src_len, StrBu
                 // we must handle: single-quoted, double-quoted, and unquoted values
                 // position: we are at 'i' (start of first assignment token)
                 // emit leading whitespace first
-                for (size_t k = line_start; k < content_start; k++) {
-                    strbuf_append_char(buf, src[k]);
-                }
+                strbuf_append_str_n(buf, src + line_start, content_start - line_start);
 
                 bool any_extra = false;
                 size_t pos = i;
@@ -5691,9 +5671,8 @@ static const char* preprocess_bash_source(const char* src, size_t src_len, StrBu
                         // emit this assignment
                         pos = name_end + 1; // skip past '='
                         // emit NAME=
-                        for (size_t k = name_start; k <= name_end; k++) {
-                            strbuf_append_char(buf, src[k]);
-                        }
+                        strbuf_append_str_n(buf, src + name_start,
+                                            name_end - name_start + 1);
                         // emit value until next unquoted space, newline, `;`, `|`, `&`, `>`
                         while (pos < src_len) {
                             char c = src[pos];
@@ -5711,21 +5690,18 @@ static const char* preprocess_bash_source(const char* src, size_t src_len, StrBu
                                 }
                             } else if (c == '\'' ) {
                                 // single-quoted: copy verbatim until closing '
-                                strbuf_append_char(buf, c); pos++;
-                                while (pos < src_len && src[pos] != '\'') {
-                                    strbuf_append_char(buf, src[pos]); pos++;
-                                }
-                                if (pos < src_len) { strbuf_append_char(buf, src[pos]); pos++; }
+                                const char* quote_end = strn_scan_quoted(
+                                    src + pos, src + src_len, '\'', false, NULL);
+                                strbuf_append_str_n(buf, src + pos,
+                                                    (size_t)(quote_end - src - pos));
+                                pos = (size_t)(quote_end - src);
                             } else if (c == '"') {
                                 // double-quoted: copy until closing "
-                                strbuf_append_char(buf, c); pos++;
-                                while (pos < src_len && src[pos] != '"') {
-                                    if (src[pos] == '\\' && pos+1 < src_len) {
-                                        strbuf_append_char(buf, src[pos]); pos++;
-                                    }
-                                    strbuf_append_char(buf, src[pos]); pos++;
-                                }
-                                if (pos < src_len) { strbuf_append_char(buf, src[pos]); pos++; }
+                                const char* quote_end = strn_scan_quoted(
+                                    src + pos, src + src_len, '"', true, NULL);
+                                strbuf_append_str_n(buf, src + pos,
+                                                    (size_t)(quote_end - src - pos));
+                                pos = (size_t)(quote_end - src);
                             } else if (c == '$' && pos+1 < src_len && src[pos+1] == '(') {
                                 // command substitution: copy until matching )
                                 strbuf_append_char(buf, c); pos++;
@@ -5768,16 +5744,14 @@ static const char* preprocess_bash_source(const char* src, size_t src_len, StrBu
                             any_extra = true;
                         } else {
                             // preserve whitespace before non-assignment token (e.g., comment)
-                            for (size_t k = ws_start; k < pos; k++) {
-                                strbuf_append_char(buf, src[k]);
-                            }
+                            strbuf_append_str_n(buf, src + ws_start, pos - ws_start);
                         }
                         // continue to next assignment (or end of line)
                     } else {
                         // not an assignment: emit remaining line verbatim
-                        while (pos < src_len && src[pos] != '\n' && src[pos] != '\r') {
-                            strbuf_append_char(buf, src[pos]); pos++;
-                        }
+                        const char* line_end = strn_scan_to_line_end(src + pos, src + src_len);
+                        strbuf_append_str_n(buf, src + pos, (size_t)(line_end - src - pos));
+                        pos = (size_t)(line_end - src);
                         break;
                     }
                 }
@@ -5799,12 +5773,10 @@ static const char* preprocess_bash_source(const char* src, size_t src_len, StrBu
         // normal line: emit verbatim until end of line
         i = content_start;
         // re-emit leading whitespace
-        for (size_t k = line_start; k < i; k++) {
-            strbuf_append_char(buf, src[k]);
-        }
-        while (i < src_len && src[i] != '\n' && src[i] != '\r') {
-            strbuf_append_char(buf, src[i]); i++;
-        }
+        strbuf_append_str_n(buf, src + line_start, i - line_start);
+        size_t line_end = (size_t)(strn_scan_to_line_end(src + i, src + src_len) - src);
+        strbuf_append_str_n(buf, src + i, line_end - i);
+        i = line_end;
         if (i < src_len) {
             strbuf_append_char(buf, src[i]); // '\n' or '\r'
             if (src[i] == '\r' && i+1 < src_len && src[i+1] == '\n') {

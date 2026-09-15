@@ -2557,31 +2557,6 @@ static bool text_preserves_whitespace(const DomText* t) {
     return false;
 }
 
-// Append `[buf, buf+len)` to `sb`, collapsing runs of [\t\n\r ]+ into a
-// single ASCII space. Used for DOM_STRINGIFY_RENDERED text in normal
-// (white-space:normal) context. If `suppress_leading_ws` is true the
-// segment's leading whitespace is dropped (used when the previous emission
-// flowed into this one continuously); otherwise it is preserved (used when
-// a skipped text node separated the segments — both flank-whitespaces are
-// retained, matching browser behavior, e.g. WPT toString-user-select-none
-// "start  end" with two spaces from skipped <span>).
-static void append_collapsed(StrBuf* sb, const char* buf, size_t len,
-                             bool suppress_leading_ws) {
-    bool in_ws = suppress_leading_ws;
-    for (size_t i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)buf[i];
-        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
-            if (!in_ws) {
-                strbuf_append_char(sb, ' ');
-                in_ws = true;
-            }
-        } else {
-            strbuf_append_char(sb, (char)c);
-            in_ws = false;
-        }
-    }
-}
-
 static bool range_stringify_advance(DomText** current,
                                     const DomBoundary* text_end,
                                     const DomBoundary* range_end) {
@@ -2722,9 +2697,7 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
                         sb->length--;
                         sb->str[sb->length] = '\0';
                     }
-                    for (int i = 0; i < pending_nl; i++) {
-                        strbuf_append_char(sb, '\n');
-                    }
+                    strbuf_append_char_n(sb, '\n', (size_t)pending_nl);
                 }
                 bool just_emitted_nl = (pending_nl > 0);
                 pending_nl = 0;
@@ -2742,8 +2715,9 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
                     // "start  end").
                     bool suppress = just_emitted_nl ||
                                     (buf_ends_in_ws && !prev_skipped);
-                    append_collapsed(sb, cur->text + b_start, b_end - b_start,
-                                     suppress);
+                    // A skipped text node preserves both whitespace flanks.
+                    strbuf_append_collapsed_ascii_whitespace(
+                        sb, cur->text + b_start, b_end - b_start, false, suppress);
                 } else {
                     strbuf_append_str_n(sb, cur->text + b_start, b_end - b_start);
                 }

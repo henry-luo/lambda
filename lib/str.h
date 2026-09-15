@@ -171,6 +171,13 @@ void str_rtrim(const char** s, size_t* len);
 void str_rtrim_chars(const char** s, size_t* len,
                      const char* chars, size_t chars_len);
 
+/** collapse ASCII whitespace runs into single spaces. Leading and trailing
+ * runs are removed; returns the output length excluding the NUL terminator.
+ * `include_form_feed` selects the HTML whitespace set when true. */
+size_t str_collapse_ascii_whitespace(char* dst, size_t dst_cap,
+                                     const char* s, size_t len,
+                                     bool include_form_feed);
+
 /** trim specific characters from both ends. */
 void str_trim_chars(const char** s, size_t* len,
                     const char* chars, size_t chars_len);
@@ -434,6 +441,13 @@ int str_fmt(char* dst, size_t cap, const char* fmt, ...)
 int str_fmt(char* dst, size_t cap, const char* fmt, ...);
 #endif
 
+/** decimal byte count and writer for an unsigned 64-bit value. The writer
+ * returns the byte count and does not append a NUL terminator. */
+size_t str_uint64_decimal_len(uint64_t value);
+size_t str_uint64_decimal_write(char* dst, uint64_t value);
+/** count decimal literal significand digits, ignoring leading zeroes and exponent. */
+int str_decimal_significant_digits(const char* value);
+
 /** hex encode [s, s+len) into dst. dst must have 2*len+1 bytes.
  *  returns dst. */
 char* str_hex_encode(char* dst, const char* s, size_t len);
@@ -487,6 +501,14 @@ const char* strn_skip_digits(const char* p, const char* end);
 const char* strn_scan_until_char(const char* p, const char* end, char stop);
 const char* strn_scan_until_any(const char* p, const char* end, const char* stops);
 const char* strn_scan_to_line_end(const char* p, const char* end);  /* stops at '\n'/'\r'/end */
+/* Scan a quoted span beginning at `p`. Returns just after its closing quote or
+ * `end`; `closed` reports whether a closing quote was found. */
+const char* strn_scan_quoted(const char* p, const char* end, char quote,
+                             bool skip_escaped, bool* closed);
+/* Scan a nested delimiter span beginning at `p`. Returns just after the
+ * matching close or `end`; `closed` reports whether a matching close was found. */
+const char* strn_scan_balanced(const char* p, const char* end, char open, char close,
+                               bool skip_escaped, bool* closed);
 size_t      strn_count_run(const char* p, const char* end, char marker);  /* 0 if marker=='\0' */
 
 /* 17.3 — NUL-terminated scanners (convenience exception; not safe on
@@ -498,6 +520,8 @@ const char* str_skip_digits(const char* p);
 const char* str_scan_until_char(const char* p, char stop);
 const char* str_scan_until_any(const char* p, const char* stops);
 const char* str_scan_to_line_end(const char* p);
+const char* str_scan_balanced(const char* p, char open, char close,
+                              bool skip_escaped, bool* closed);
 /** count a run of `marker`. max_len==0 means NUL-terminated mode.
  *  returns 0 when marker is '\0' (prevents the NUL-run failure class). */
 size_t str_count_run(const char* p, size_t max_len, char marker);

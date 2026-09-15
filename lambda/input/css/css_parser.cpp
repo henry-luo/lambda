@@ -27,17 +27,6 @@
 // reports a parse failure instead of recursing until the stack overflows.
 #define MAX_CSS_FUNC_DEPTH 256
 
-static bool css_parser_is_hex_digit(char c) {
-    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-}
-
-static unsigned int css_parser_hex_value(char c) {
-    if (c >= '0' && c <= '9') return (unsigned int)(c - '0');
-    if (c >= 'a' && c <= 'f') return (unsigned int)(c - 'a' + 10);
-    if (c >= 'A' && c <= 'F') return (unsigned int)(c - 'A' + 10);
-    return 0;
-}
-
 static char* css_parser_unescape_url_component(const char* str, size_t len, Pool* pool) {
     return escape_css_unescape_pool(pool, str, len, true,
         ESCAPE_CSS_EOF_REPLACEMENT, true, true);
@@ -57,14 +46,10 @@ static const char* css_unicode_skip_ignorable(const char* p, const char* end) {
     return p;
 }
 
-static bool css_unicode_is_hex(char c) {
-    return css_parser_is_hex_digit(c);
-}
-
 static uint32_t css_unicode_parse_hex(const char* chars, int count) {
     uint32_t value = 0;
     for (int i = 0; i < count; i++) {
-        value = (value << 4) | css_parser_hex_value(chars[i]);
+        value = (value << 4) | (uint32_t)str_hex_val(chars[i]);
     }
     return value;
 }
@@ -124,7 +109,7 @@ static bool css_parse_unicode_range_parts(const char* input, size_t length,
 
     char start_chars[7];
     int start_count = 0;
-    while (p < end && css_unicode_is_hex(p[0]) && start_count < 6) {
+    while (p < end && str_is_hex(p[0]) && start_count < 6) {
         start_chars[start_count++] = p[0];
         p++;
     }
@@ -155,7 +140,7 @@ static bool css_parse_unicode_range_parts(const char* input, size_t length,
     }
 
     // more than six leading hex digits are not a valid unicode-range.
-    if (p < end && css_unicode_is_hex(p[0])) return false;
+    if (p < end && str_is_hex(p[0])) return false;
 
     p = css_unicode_skip_ignorable(p, end);
     bool has_range = p < end && p[0] == '-';
@@ -165,11 +150,11 @@ static bool css_parse_unicode_range_parts(const char* input, size_t length,
         p = css_unicode_skip_ignorable(p, end);
         char end_chars[7];
         int end_count = 0;
-        while (p < end && css_unicode_is_hex(p[0]) && end_count < 6) {
+        while (p < end && str_is_hex(p[0]) && end_count < 6) {
             end_chars[end_count++] = p[0];
             p++;
         }
-        if (end_count == 0 || (p < end && css_unicode_is_hex(p[0]))) return false;
+        if (end_count == 0 || (p < end && str_is_hex(p[0]))) return false;
         if (p < end && p[0] == '?') return false;
         finish = css_unicode_parse_hex(end_chars, end_count);
     }

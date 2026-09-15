@@ -180,9 +180,7 @@ static String* parse_bare_key(InputContext& ctx, const char **toml) {
     }
 
     int len = *toml - start;
-    for (int i = 0; i < len; i++) {
-        stringbuf_append_char(sb, start[i]);
-    }
+    stringbuf_append_str_n(sb, start, (size_t)len);
     return builder->createString(sb->str->chars, sb->length);
 }
 
@@ -598,9 +596,7 @@ static String* create_string_key(InputContext& ctx, const char* key_str) {
     stringbuf_reset(sb);
 
     int len = strlen(key_str);
-    for (int i = 0; i < len; i++) {
-        stringbuf_append_char(sb, key_str[i]);
-    }
+    stringbuf_append_str_n(sb, key_str, (size_t)len);
 
     String* key = builder.createName(sb->str->chars, sb->length);
     return key;

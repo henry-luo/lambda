@@ -781,7 +781,7 @@ static Item py_string_format_percent(Item left, Item right) {
             char pad = (flag_zero && !flag_minus) ? '0' : ' ';
             if (flag_minus) {
                 strbuf_append_str_n(sb, formatted, flen);
-                for (int j = flen; j < width; j++) strbuf_append_char(sb, ' ');
+                strbuf_append_char_n(sb, ' ', (size_t)(width - flen));
             } else {
                 // for zero-padding, handle sign
                 int start = 0;
@@ -789,7 +789,7 @@ static Item py_string_format_percent(Item left, Item right) {
                     strbuf_append_char(sb, formatted[0]);
                     start = 1;
                 }
-                for (int j = flen; j < width; j++) strbuf_append_char(sb, pad);
+                strbuf_append_char_n(sb, pad, (size_t)(width - flen));
                 strbuf_append_str_n(sb, formatted + start, flen - start);
             }
         } else {
@@ -1910,15 +1910,15 @@ extern "C" Item py_format_value(Item value, Item spec_item) {
         StrBuf* sb = strbuf_new();
         if (align == '<') {
             strbuf_append_str_n(sb, formatted, flen);
-            for (int j = 0; j < pad; j++) strbuf_append_char(sb, fill);
+            strbuf_append_char_n(sb, fill, (size_t)pad);
         } else if (align == '^') {
             int left_pad = pad / 2;
             int right_pad = pad - left_pad;
-            for (int j = 0; j < left_pad; j++) strbuf_append_char(sb, fill);
+            strbuf_append_char_n(sb, fill, (size_t)left_pad);
             strbuf_append_str_n(sb, formatted, flen);
-            for (int j = 0; j < right_pad; j++) strbuf_append_char(sb, fill);
+            strbuf_append_char_n(sb, fill, (size_t)right_pad);
         } else { // '>'
-            for (int j = 0; j < pad; j++) strbuf_append_char(sb, fill);
+            strbuf_append_char_n(sb, fill, (size_t)pad);
             strbuf_append_str_n(sb, formatted, flen);
         }
         Item result = (Item){.item = s2it(heap_create_name(sb->str ? sb->str : ""))};

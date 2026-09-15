@@ -516,22 +516,7 @@ static void js_util_inspect_append_quoted_key(StrBuf* sb, String* key, bool hidd
         if (hidden) strbuf_append_char(sb, ']');
         return;
     }
-    bool identifier = key->len > 0 &&
-        ((key->chars[0] >= 'A' && key->chars[0] <= 'Z') ||
-         (key->chars[0] >= 'a' && key->chars[0] <= 'z') ||
-         key->chars[0] == '_' || key->chars[0] == '$');
-    for (size_t i = 1; identifier && i < key->len; i++) {
-        char ch = key->chars[i];
-        identifier = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
-            (ch >= '0' && ch <= '9') || ch == '_' || ch == '$';
-    }
-    if (identifier) {
-        strbuf_append_str_n(sb, key->chars, key->len);
-    } else {
-        strbuf_append_char(sb, '\'');
-        escape_append_js_quoted(sb, key->chars, key->len, '\'');
-        strbuf_append_char(sb, '\'');
-    }
+    escape_append_js_property_key(sb, key->chars, key->len);
     if (hidden) strbuf_append_char(sb, ']');
 }
 

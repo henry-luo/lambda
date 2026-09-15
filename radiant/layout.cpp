@@ -1447,23 +1447,7 @@ float layout_measure_space_advance(LayoutContext* lycon, FontHandle* handle,
 
 size_t layout_normalize_collapsible_whitespace(const char* text, size_t length,
                                                char* buffer, size_t buffer_size) {
-    if (!text || !buffer || buffer_size == 0) return 0;
-    size_t out_pos = 0;
-    bool in_whitespace = true;
-    for (size_t i = 0; i < length && out_pos + 1 < buffer_size; i++) {
-        unsigned char ch = (unsigned char)text[i];
-        bool whitespace = ch == ' ' || ch == '\t' || ch == '\n' ||
-                          ch == '\r' || ch == '\f';
-        if (whitespace) {
-            if (!in_whitespace) buffer[out_pos++] = ' ';
-        } else {
-            buffer[out_pos++] = (char)ch;
-        }
-        in_whitespace = whitespace;
-    }
-    if (out_pos > 0 && buffer[out_pos - 1] == ' ') out_pos--;
-    buffer[out_pos] = '\0';
-    return out_pos;
+    return str_collapse_ascii_whitespace(buffer, buffer_size, text, length, true);
 }
 
 LayoutTextRun layout_prepare_text_run(const char* text, size_t length,

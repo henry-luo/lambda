@@ -2,6 +2,7 @@
 #include "lambda-decimal.hpp"
 #include "lambda_typed.hpp"
 #include "../../lib/log.h"
+#include "../../lib/escape.h"
 #include "../../lib/str.h"
 #include <math.h>
 #include <inttypes.h>  // for PRId64
@@ -19,13 +20,8 @@ static char* binary_literal_text(Binary* bin, size_t* text_len) {
     size_t len = byte_len * 2 + 5;
     char* text = (char*)mem_alloc(len + 1, MEM_CAT_TEMP);
     if (!text) return NULL;
-    static const char HEX[] = "0123456789ABCDEF";
     text[0] = 'b'; text[1] = '\''; text[2] = '\\'; text[3] = 'x';
-    for (size_t i = 0; i < byte_len; i++) {
-        unsigned char byte = bytes[i];
-        text[4 + i * 2] = HEX[byte >> 4];
-        text[5 + i * 2] = HEX[byte & 0x0F];
-    }
+    str_hex_encode(text + 4, (const char*)bytes, byte_len);
     text[len - 1] = '\'';
     text[len] = '\0';
     if (text_len) *text_len = len;
@@ -64,20 +60,7 @@ static void print_quoted_text(StrBuf* strbuf, const char* chars, size_t length,
         strbuf_append_char(strbuf, quote);
         return;
     }
-    for (size_t i = 0; i < length; i++) {
-        switch (chars[i]) {
-        case '\\': strbuf_append_str(strbuf, "\\\\"); break;
-        case '\b': strbuf_append_str(strbuf, "\\b"); break;
-        case '\f': strbuf_append_str(strbuf, "\\f"); break;
-        case '\n': strbuf_append_str(strbuf, "\\n"); break;
-        case '\r': strbuf_append_str(strbuf, "\\r"); break;
-        case '\t': strbuf_append_str(strbuf, "\\t"); break;
-        default:
-            if (chars[i] == quote) strbuf_append_char(strbuf, '\\');
-            strbuf_append_char(strbuf, chars[i]);
-            break;
-        }
-    }
+    escape_append_c_quoted(strbuf, chars, length, quote);
     strbuf_append_char(strbuf, quote);
 }
 

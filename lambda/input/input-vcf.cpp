@@ -39,80 +39,57 @@ static void normalize_property_name(char* name) {
     str_lower_inplace(name, strlen(name));
 }
 
-// Helper function to parse structured name (N property)
-static Map* parse_structured_name(InputContext& ctx, const char* value) {
+// Parse a semicolon-delimited vCard field sequence into its named map form.
+static Map* parse_semicolon_fields(InputContext& ctx, const char* value,
+                                   const char* const* field_names, int field_count) {
     Input* input = ctx.input();
     MarkBuilder& builder = ctx.builder;
 
-    Map* name_map = map_pooled(input->pool);
-    if (!name_map) return NULL;
-
-    // N property format: Family;Given;Additional;Prefix;Suffix
+    Map* fields = map_pooled(input->pool);
+    if (!fields) return NULL;
     const char* ptr = value;
-    const char* field_names[] = {"family", "given", "additional", "prefix", "suffix"};
-    int field_count = sizeof(field_names) / sizeof(field_names[0]);
 
     for (int i = 0; i < field_count && *ptr; i++) {
         StringBuf* sb = ctx.sb;
         stringbuf_reset(sb);
 
-        // Parse until semicolon or end
-        while (*ptr && *ptr != ';') {
-            stringbuf_append_char(sb, *ptr);
-            ptr++;
-        }
+        const char* field_end = str_scan_until_char(ptr, ';');
+        stringbuf_append_str_n(sb, ptr, (size_t)(field_end - ptr));
+        ptr = field_end;
 
         if (sb->length > 0) {
             String* field_value = builder.createString(sb->str->chars, sb->length);
             if (field_value && field_value->len > 0) {
                 String* field_key = builder.createName(field_names[i]);
                 Item value_item = {.item = s2it(field_value)};
-                ctx.builder.putToMap(lam::gc_borrow(name_map), field_key, value_item);
+                ctx.builder.putToMap(lam::gc_borrow(fields), field_key, value_item);
             }
         }
 
         if (*ptr == ';') ptr++; // skip semicolon
     }
 
-    return name_map;
+    return fields;
+}
+
+// Helper function to parse structured name (N property)
+static Map* parse_structured_name(InputContext& ctx, const char* value) {
+    // N property format: Family;Given;Additional;Prefix;Suffix
+    static const char* const field_names[] = {
+        "family", "given", "additional", "prefix", "suffix"
+    };
+    return parse_semicolon_fields(ctx, value, field_names,
+                                  sizeof(field_names) / sizeof(field_names[0]));
 }
 
 // Helper function to parse address (ADR property)
 static Map* parse_address(InputContext& ctx, const char* value) {
-    Input* input = ctx.input();
-    MarkBuilder& builder = ctx.builder;
-
-    Map* addr_map = map_pooled(input->pool);
-    if (!addr_map) return NULL;
-
     // ADR property format: PO Box;Extended;Street;City;State;Postal Code;Country
-    const char* ptr = value;
-    const char* field_names[] = {"po_box", "extended", "street", "city", "state", "postal_code", "country"};
-    int field_count = sizeof(field_names) / sizeof(field_names[0]);
-
-    for (int i = 0; i < field_count && *ptr; i++) {
-        StringBuf* sb = ctx.sb;
-        stringbuf_reset(sb);
-
-        // Parse until semicolon or end
-        while (*ptr && *ptr != ';') {
-            stringbuf_append_char(sb, *ptr);
-            ptr++;
-        }
-
-        if (sb->length > 0) {
-            String* field_value = builder.createString(sb->str->chars, sb->length);
-            if (field_value && field_value->len > 0) {
-                String* field_key = builder.createName(field_names[i]);
-                Item value_item = {.item = s2it(field_value)};
-                ctx.builder.putToMap(lam::gc_borrow(addr_map), field_key, value_item);
-            }
-        }
-
-        if (*ptr == ';') ptr++; // skip semicolon
-    }
-
-    return addr_map;
+    static const char* const field_names[] = {
+        "po_box", "extended", "street", "city", "state", "postal_code", "country"
+    };
+    return parse_semicolon_fields(ctx, value, field_names,
+                                  sizeof(field_names) / sizeof(field_names[0]));
 }
 
 typedef Map* (*VcfStructuredParser)(InputContext&, const char*);

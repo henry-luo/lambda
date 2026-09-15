@@ -133,7 +133,7 @@ static void yaml_fold_quoted_line(YamlParser* p, StrBuf* sb, size_t min_len) {
         }
     }
     if (empty_lines > 0) {
-        for (int i = 0; i < empty_lines; i++) strbuf_append_char(sb, '\n');
+        strbuf_append_char_n(sb, '\n', (size_t)empty_lines);
     } else {
         strbuf_append_char(sb, ' ');
     }
@@ -841,7 +841,7 @@ static Item parse_plain_scalar(YamlParser* p, int min_indent, bool in_flow) {
                 }
             }
             if (empty_lines > 0) {
-                for (int i = 0; i < empty_lines; i++) strbuf_append_char(sb, '\n');
+                strbuf_append_char_n(sb, '\n', (size_t)empty_lines);
             } else {
                 strbuf_append_char(sb, ' ');
             }
@@ -895,7 +895,7 @@ static Item parse_plain_scalar(YamlParser* p, int min_indent, bool in_flow) {
         }
 
         if (empty_lines > 0) {
-            for (int i = 0; i < empty_lines; i++) strbuf_append_char(sb, '\n');
+            strbuf_append_char_n(sb, '\n', (size_t)empty_lines);
         } else {
             strbuf_append_char(sb, ' ');
         }
@@ -993,10 +993,10 @@ static Item parse_block_scalar(YamlParser* p, int base_indent) {
             // if this line had whitespace beyond content_indent, it's content
             if (spaces >= content_indent && spaces > 0) {
                 // a trailing line of spaces - counts as content line
-                for (int i = 0; i < trailing_newlines; i++) strbuf_append_char(sb, '\n');
+                strbuf_append_char_n(sb, '\n', (size_t)trailing_newlines);
                 trailing_newlines = 0;
                 if (indicator == '|') {
-                    for (int i = content_indent; i < spaces; i++) strbuf_append_char(sb, ' ');
+                    strbuf_append_char_n(sb, ' ', (size_t)(spaces - content_indent));
                 }
                 strbuf_append_char(sb, '\n');
                 trailing_newlines = 0;
@@ -1010,17 +1010,17 @@ static Item parse_block_scalar(YamlParser* p, int base_indent) {
             // empty line: check if line had spaces BEYOND content_indent (whitespace content)
             if (spaces > content_indent) {
                 // whitespace-only content line (spaces beyond indent are content)
-                for (int i = 0; i < trailing_newlines; i++) strbuf_append_char(sb, '\n');
+                strbuf_append_char_n(sb, '\n', (size_t)trailing_newlines);
                 trailing_newlines = 0;
                 if (indicator == '|') {
-                    for (int i = content_indent; i < spaces; i++) strbuf_append_char(sb, ' ');
+                    strbuf_append_char_n(sb, ' ', (size_t)(spaces - content_indent));
                     strbuf_append_char(sb, '\n');
                 } else {
                     // folded: whitespace-only line
                     if (sb->length > 0 && sb->str[sb->length - 1] == ' ') {
                         sb->str[sb->length - 1] = '\n';
                     }
-                    for (int i = content_indent; i < spaces; i++) strbuf_append_char(sb, ' ');
+                    strbuf_append_char_n(sb, ' ', (size_t)(spaces - content_indent));
                     strbuf_append_char(sb, '\n');
                     trailing_newlines = 0;
                 }
@@ -1051,12 +1051,14 @@ static Item parse_block_scalar(YamlParser* p, int base_indent) {
 
         // output buffered newlines
         int flushed_newlines = trailing_newlines;
-        for (int i = 0; i < trailing_newlines; i++) strbuf_append_char(sb, '\n');
+        strbuf_append_char_n(sb, '\n', (size_t)trailing_newlines);
         trailing_newlines = 0;
 
         if (indicator == '|') {
             // literal: preserve extra indentation
-            for (int i = content_indent; i < spaces; i++) strbuf_append_char(sb, ' ');
+            if (spaces > content_indent) {
+                strbuf_append_char_n(sb, ' ', (size_t)(spaces - content_indent));
+            }
             // also output any tabs
             if (has_tab_content) {
                 while (!at_end(p) && peek(p) == '\t') {
@@ -1083,7 +1085,9 @@ static Item parse_block_scalar(YamlParser* p, int base_indent) {
                     }
                 }
                 last_content_more = true;
-                for (int i = content_indent; i < spaces; i++) strbuf_append_char(sb, ' ');
+                if (spaces > content_indent) {
+                    strbuf_append_char_n(sb, ' ', (size_t)(spaces - content_indent));
+                }
                 if (has_tab_content) {
                     while (!at_end(p) && peek(p) == '\t') {
                         strbuf_append_char(sb, '\t');
@@ -1172,7 +1176,7 @@ static Item parse_block_scalar(YamlParser* p, int base_indent) {
     } else if (chomp == 2) {
         // keep: preserve all trailing newlines
         if (has_content) strbuf_append_char(sb, '\n');
-        for (int i = 0; i < trailing_newlines; i++) strbuf_append_char(sb, '\n');
+        strbuf_append_char_n(sb, '\n', (size_t)trailing_newlines);
     }
 
     Item result;

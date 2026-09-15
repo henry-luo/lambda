@@ -126,9 +126,9 @@ static Map* parse_duration(InputContext& ctx, const char* value) {
 
         // Parse number
         stringbuf_reset(sb);
-        while (str_char_is_digit(*ptr)) {
-            stringbuf_append_char(sb, *ptr++);
-        }
+        const char* digits_end = str_skip_digits(ptr);
+        stringbuf_append_str_n(sb, ptr, (size_t)(digits_end - ptr));
+        ptr = digits_end;
 
         if (sb->length == 0) {
             ptr++; // skip the unit character

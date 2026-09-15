@@ -444,23 +444,13 @@ public:
         if (*pos != '[') return info;
 
         const char* text_start = pos + 1;
-        int bracket_depth = 1;
         const char* p = text_start;
 
         // Find matching ]
-        while (*p && bracket_depth > 0) {
-            if (*p == '\\' && *(p+1)) {
-                p += 2; // Skip escaped char
-                continue;
-            }
-            if (*p == '[') bracket_depth++;
-            else if (*p == ']') bracket_depth--;
-            if (bracket_depth > 0) p++;
-        }
-
-        if (bracket_depth != 0) return info;
-        const char* text_end = p;
-        p++; // Skip ]
+        bool bracket_closed = false;
+        p = str_scan_balanced(p - 1, '[', ']', true, &bracket_closed);
+        if (!bracket_closed) return info;
+        const char* text_end = p - 1;
 
         // Check what follows ]
         if (*p == '(') {

@@ -195,11 +195,8 @@ void format_markup_string_safe_ex(StringBuf* sb, String* str, bool is_attribute,
 
             if (is_html_entity(s, len, i, &entity_end)) {
                 // copy the entire entity as-is (already encoded)
-                while (i <= entity_end && i < len) {
-                    stringbuf_append_char(sb, s[i]);
-                    i++;
-                }
-                i--; // adjust because loop will increment
+                stringbuf_append_str_n(sb, s + i, entity_end - i + 1);
+                i = entity_end;
                 continue;
             } else {
                 // not an entity, encode the ampersand

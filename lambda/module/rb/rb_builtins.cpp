@@ -141,25 +141,21 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
     if ((strcmp(m, "include?") == 0 || strcmp(m, "include") == 0) && argc >= 1) {
         String* sub = it2s(args[0]);
         if (!sub) return rb_bitem(false);
-        if (sub->len == 0) return rb_bitem(true);
-        if (sub->len > s->len) return rb_bitem(false);
-        return rb_bitem(strstr(s->chars, sub->chars) != NULL);
+        return rb_bitem(str_contains(s->chars, s->len, sub->chars, sub->len));
     }
 
     // .start_with?(prefix)
     if ((strcmp(m, "start_with?") == 0 || strcmp(m, "start_with") == 0) && argc >= 1) {
         String* prefix = it2s(args[0]);
         if (!prefix) return rb_bitem(false);
-        if (prefix->len > s->len) return rb_bitem(false);
-        return rb_bitem(strncmp(s->chars, prefix->chars, prefix->len) == 0);
+        return rb_bitem(str_starts_with(s->chars, s->len, prefix->chars, prefix->len));
     }
 
     // .end_with?(suffix)
     if ((strcmp(m, "end_with?") == 0 || strcmp(m, "end_with") == 0) && argc >= 1) {
         String* suffix = it2s(args[0]);
         if (!suffix) return rb_bitem(false);
-        if (suffix->len > s->len) return rb_bitem(false);
-        return rb_bitem(strncmp(s->chars + s->len - suffix->len, suffix->chars, suffix->len) == 0);
+        return rb_bitem(str_ends_with(s->chars, s->len, suffix->chars, suffix->len));
     }
 
     // .split(sep=nil)
@@ -168,7 +164,7 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
         result->type_id = LMD_TYPE_ARRAY;
 
         const char* sep = NULL;
-        int64_t sep_len = 0;
+        size_t sep_len = 0;
         if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_STRING) {
             String* sep_s = it2s(args[0]);
             if (sep_s && sep_s->len > 0) { sep = sep_s->chars; sep_len = sep_s->len; }
@@ -185,16 +181,12 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
                 rb_arr_push(result, rb_sitem_n(s->chars + start, i - start));
             }
         } else {
-            int64_t i = 0;
-            while (i <= s->len) {
-                const char* found = (i < s->len) ? strstr(s->chars + i, sep) : NULL;
-                if (!found || found >= s->chars + s->len) {
-                    rb_arr_push(result, rb_sitem_n(s->chars + i, s->len - i));
-                    break;
-                }
-                int64_t pos = found - s->chars;
-                rb_arr_push(result, rb_sitem_n(s->chars + i, pos - i));
-                i = pos + sep_len;
+            StrSplitIter split;
+            str_split_init(&split, s->chars, s->len, sep, sep_len);
+            const char* part;
+            size_t part_len;
+            while (str_split_next(&split, &part, &part_len)) {
+                rb_arr_push(result, rb_sitem_n(part, (int64_t)part_len));
             }
         }
         return (Item){.array = result};
@@ -261,22 +253,15 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
     if (strcmp(m, "count") == 0 && argc >= 1) {
         String* sub = it2s(args[0]);
         if (!sub || sub->len == 0) return rb_iitem(0);
-        int64_t count = 0;
-        const char* p = s->chars;
-        while ((p = strstr(p, sub->chars)) != NULL) {
-            count++;
-            p += sub->len;
-        }
-        return rb_iitem(count);
+        return rb_iitem((int64_t)str_count(s->chars, s->len, sub->chars, sub->len));
     }
 
     // .index(substr)
     if (strcmp(m, "index") == 0 && argc >= 1) {
         String* sub = it2s(args[0]);
         if (!sub) return (Item){.item = ITEM_NULL};
-        const char* found = strstr(s->chars, sub->chars);
-        if (!found) return (Item){.item = ITEM_NULL};
-        return rb_iitem(found - s->chars);
+        size_t found = str_find(s->chars, s->len, sub->chars, sub->len);
+        return found == STR_NPOS ? (Item){.item = ITEM_NULL} : rb_iitem((int64_t)found);
     }
 
     // .chars

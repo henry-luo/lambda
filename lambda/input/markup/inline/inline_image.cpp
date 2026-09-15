@@ -9,6 +9,7 @@
  * Extracted from input-markup.cpp parse_image() (lines 2226-2290)
  */
 #include "inline_common.hpp"
+#include "../../../../lib/str.h"
 #include <cstring>
 
 namespace lambda {
@@ -46,14 +47,7 @@ static char* extract_alt_text(const char* start, size_t len) {
     };
     auto skip_reference_target = [&]() {
         if (pos < end && *pos == '(') {
-            int depth = 1;
-            pos++;
-            while (pos < end && depth > 0) {
-                if (*pos == '\\' && pos + 1 < end) pos += 2;
-                else if (*pos == '(') { depth++; pos++; }
-                else if (*pos == ')') { depth--; pos++; }
-                else pos++;
-            }
+            pos = strn_scan_balanced(pos, end, '(', ')', true, NULL);
         } else if (pos < end && *pos == '[') {
             pos++;
             while (pos < end && *pos != ']') pos++;
@@ -130,26 +124,12 @@ Item parse_image(MarkupParser* parser, const char** text) {
 
     // Find closing ]
     const char* alt_start = pos;
-    const char* alt_end = nullptr;
-    int bracket_depth = 1;
-
-    while (*pos && bracket_depth > 0) {
-        if (*pos == '\\' && *(pos + 1)) {
-            pos += 2;
-            continue;
-        }
-        if (*pos == '[') bracket_depth++;
-        else if (*pos == ']') bracket_depth--;
-
-        if (bracket_depth == 0) {
-            alt_end = pos;
-        }
-        pos++;
-    }
-
-    if (!alt_end) {
+    bool alt_closed = false;
+    pos = str_scan_balanced(pos - 1, '[', ']', true, &alt_closed);
+    if (!alt_closed) {
         return Item{.item = ITEM_UNDEFINED};
     }
+    const char* alt_end = pos - 1;
 
     // Check for (src) after ] - inline image
     if (*pos == '(') {

@@ -3,8 +3,6 @@
 #include "grow_capacity.h"
 #include <string.h>
 #include <stdint.h>
-#include <inttypes.h>
-#include "log.h"
 
 #define INITIAL_CAPACITY 32
 
@@ -110,6 +108,39 @@ void strbuf_append_char_n(StrBuf *buf, char c, size_t n) {
     buf->str[buf->length] = '\0';
 }
 
+void strbuf_append_replace_char_n(StrBuf* buf, const char* str, size_t n,
+                                  char from, char to) {
+    if (!buf || !str) return;
+
+    size_t segment_start = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (str[i] != from) continue;
+        strbuf_append_str_n(buf, str + segment_start, i - segment_start);
+        strbuf_append_char(buf, to);
+        segment_start = i + 1;
+    }
+    strbuf_append_str_n(buf, str + segment_start, n - segment_start);
+}
+
+bool strbuf_append_collapsed_ascii_whitespace(StrBuf* buf, const char* str,
+                                              size_t n, bool include_form_feed,
+                                              bool previous_whitespace) {
+    if (!buf || !str) return previous_whitespace;
+
+    for (size_t i = 0; i < n; i++) {
+        char c = str[i];
+        bool whitespace = c == ' ' || c == '\t' || c == '\n' || c == '\r' ||
+            (include_form_feed && c == '\f');
+        if (whitespace) {
+            if (!previous_whitespace) strbuf_append_char(buf, ' ');
+        } else {
+            strbuf_append_char(buf, c);
+        }
+        previous_whitespace = whitespace;
+    }
+    return previous_whitespace;
+}
+
 void strbuf_append_all(StrBuf *sb, int num_args, ...) {
     va_list args;
     va_start(args, num_args);
@@ -165,88 +196,12 @@ StrBuf* strbuf_dup(const StrBuf *sb) {
     return new_sb;
 }
 
-/*
- * Integer to string functions adapted from:
- *   https://www.facebook.com/notes/facebook-engineering/three-optimization-tips-for-c/10151361643253920
- */
-
- #define P01 10
- #define P02 100
- #define P03 1000
- #define P04 10000
- #define P05 100000
- #define P06 1000000
- #define P07 10000000
- #define P08 100000000
- #define P09 1000000000
- #define P10 10000000000
- #define P11 100000000000
- #define P12 1000000000000
-
-/**
- * Return number of digits required to represent `num` in base 10.
- * Uses binary search to find number.
- * Examples:
- *   num_of_digits(0)   = 1
- *   num_of_digits(1)   = 1
- *   num_of_digits(10)  = 2
- *   num_of_digits(123) = 3
- */
-static inline size_t num_of_digits(uint64_t v) {
-  if(v < P01) return 1;
-  if(v < P02) return 2;
-  if(v < P03) return 3;
-  if(v < P12) {
-    if(v < P08) {
-      if(v < P06) {
-        if(v < P04) return 4;
-        return 5 + (v >= P05);
-      }
-      return 7 + (v >= P07);
-    }
-    if(v < P10) {
-      return 9 + (v >= P09);
-    }
-    return 11 + (v >= P11);
-  }
-  return 12 + num_of_digits(v / P12);
-}
-
 void strbuf_append_uint64(StrBuf *buf, uint64_t value) {
-    // Append two digits at a time
-    static const char digits[201] =
-        "0001020304050607080910111213141516171819"
-        "2021222324252627282930313233343536373839"
-        "4041424344454647484950515253545556575859"
-        "6061626364656667686970717273747576777879"
-        "8081828384858687888990919293949596979899";
-
-    size_t num_digits = num_of_digits(value);
-    size_t pos = num_digits - 1;
-
-    if (!strbuf_ensure_cap(buf, buf->length + num_digits + 1)) {
-        // failed to allocate enough memory, early return
-        log_error("strbuf_append_uint64: Memory allocation failed: %d, %" PRIu64, buf->length + num_digits + 1, value);
-        return;
-    }
-    char *dst = buf->str + buf->length;
-
-    while(value >= 100) {
-        uint64_t v = value % 100;
-        value /= 100;
-        dst[pos] = digits[v * 2 + 1];
-        dst[pos - 1] = digits[v * 2];
-        pos -= 2;
-    }
-
-    // Handle last 1-2 digits
-    if (value < 10) {
-        dst[pos] = '0' + value;
-    } else {
-        dst[pos] = digits[value * 2 + 1];
-        dst[pos - 1] = digits[value * 2];
-    }
-    buf->length += num_digits;
+    if (!buf) return;
+    size_t length = str_uint64_decimal_len(value);
+    if (!strbuf_ensure_cap(buf, buf->length + length + 1)) return;
+    str_uint64_decimal_write(buf->str + buf->length, value);
+    buf->length += length;
     buf->str[buf->length] = '\0';
 }
 

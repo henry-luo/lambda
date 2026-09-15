@@ -97,37 +97,23 @@ enum MarkQuotedEscapePolicy {
 };
 
 static void append_mark_string_escape(StringBuf* sb, const char** mark) {
-    switch (**mark) {
-        case '"': stringbuf_append_char(sb, '"'); break;
-        case '\\': stringbuf_append_char(sb, '\\'); break;
-        case '/': stringbuf_append_char(sb, '/'); break;
-        case 'b': stringbuf_append_char(sb, '\b'); break;
-        case 'f': stringbuf_append_char(sb, '\f'); break;
-        case 'n': stringbuf_append_char(sb, '\n'); break;
-        case 'r': stringbuf_append_char(sb, '\r'); break;
-        case 't': stringbuf_append_char(sb, '\t'); break;
-        case 'u': {
-            uint32_t codepoint = 0;
-            size_t consumed = 0;
-            if (escape_decode_utf16_escape(*mark + 1, strlen(*mark + 1), true,
-                                           &codepoint, &consumed)) {
-                stringbuf_append_utf8(sb, codepoint);
-                *mark += consumed; // trailing ++ moves past the escape.
-            }
-        } break;
-        default: break; // invalid escape
+    if (strchr("\"\\/bfnrt", **mark)) {
+        stringbuf_append_char(sb, escape_decode_c_char(**mark));
+    } else if (**mark == 'u') {
+        uint32_t codepoint = 0;
+        size_t consumed = 0;
+        if (escape_decode_utf16_escape(*mark + 1, strlen(*mark + 1), true,
+                                       &codepoint, &consumed)) {
+            stringbuf_append_utf8(sb, codepoint);
+            *mark += consumed; // trailing ++ moves past the escape.
+        }
     }
 }
 
 static void append_mark_symbol_escape(StringBuf* sb, const char** mark) {
-    switch (**mark) {
-        case '\'': stringbuf_append_char(sb, '\''); break;
-        case '\\': stringbuf_append_char(sb, '\\'); break;
-        case 'n': stringbuf_append_char(sb, '\n'); break;
-        case 'r': stringbuf_append_char(sb, '\r'); break;
-        case 't': stringbuf_append_char(sb, '\t'); break;
-        default: stringbuf_append_char(sb, **mark); break;
-    }
+    char escaped = **mark;
+    if (strchr("'\\nrt", escaped)) escaped = escape_decode_c_char(escaped);
+    stringbuf_append_char(sb, escaped);
 }
 
 static String* parse_mark_quoted_string(InputContext& ctx, const char **mark, char quote,

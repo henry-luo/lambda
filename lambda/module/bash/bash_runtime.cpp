@@ -1274,126 +1274,71 @@ static bool casemod_char_matches(char c, const char* pat) {
     return c == pat[0]; // literal single char
 }
 
-// ${var^} — uppercase first char
-extern "C" Item bash_expand_upper_first(Item val, Item pat_item) {
+typedef enum {
+    BASH_CASE_UPPER,
+    BASH_CASE_LOWER,
+    BASH_CASE_TOGGLE
+} BashCaseTransform;
+
+static char bash_casemod_transform(char c, BashCaseTransform transform) {
+    unsigned char byte = (unsigned char)c;
+    if (transform == BASH_CASE_UPPER) return (char)toupper(byte);
+    if (transform == BASH_CASE_LOWER) return (char)tolower(byte);
+    if (isupper(byte)) return (char)tolower(byte);
+    if (islower(byte)) return (char)toupper(byte);
+    return c;
+}
+
+static Item bash_expand_casemod(Item val, Item pat_item, BashCaseTransform transform,
+                                bool first_only) {
     char buf[512], pbuf[128];
     const char* str = bash_item_cstr(val, buf, sizeof(buf));
     const char* pat = bash_item_cstr(pat_item, pbuf, sizeof(pbuf));
     if (!pat[0]) pat = "?"; // default pattern: match any
-    size_t slen = strlen(str);
-    if (slen == 0) return val;
-    StrBuf* sb = strbuf_new_cap(slen + 1);
-    if (casemod_char_matches(str[0], pat))
-        strbuf_append_char(sb, (char)toupper((unsigned char)str[0]));
-    else
-        strbuf_append_char(sb, str[0]);
-    if (slen > 1) strbuf_append_str_n(sb, str + 1, slen - 1);
+    size_t length = strlen(str);
+    if (first_only && length == 0) return val;
+
+    StrBuf* sb = strbuf_new_cap(length + 1);
+    size_t changed_length = first_only ? 1 : length;
+    for (size_t i = 0; i < changed_length; i++) {
+        char c = str[i];
+        strbuf_append_char(sb, casemod_char_matches(c, pat)
+            ? bash_casemod_transform(c, transform) : c);
+    }
+    if (first_only && length > 1) strbuf_append_str_n(sb, str + 1, length - 1);
     Item result = bash_make_string(sb->str, sb->length);
     strbuf_free(sb);
     return result;
+}
+
+// ${var^} — uppercase first char
+extern "C" Item bash_expand_upper_first(Item val, Item pat_item) {
+    return bash_expand_casemod(val, pat_item, BASH_CASE_UPPER, true);
 }
 
 // ${var^^} — uppercase all
 extern "C" Item bash_expand_upper_all(Item val, Item pat_item) {
-    char buf[512], pbuf[128];
-    const char* str = bash_item_cstr(val, buf, sizeof(buf));
-    const char* pat = bash_item_cstr(pat_item, pbuf, sizeof(pbuf));
-    if (!pat[0]) pat = "?"; // default pattern: match any
-    size_t slen = strlen(str);
-    StrBuf* sb = strbuf_new_cap(slen + 1);
-    for (size_t i = 0; i < slen; i++) {
-        if (casemod_char_matches(str[i], pat))
-            strbuf_append_char(sb, (char)toupper((unsigned char)str[i]));
-        else
-            strbuf_append_char(sb, str[i]);
-    }
-    Item result = bash_make_string(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return bash_expand_casemod(val, pat_item, BASH_CASE_UPPER, false);
 }
 
 // ${var,} — lowercase first char
 extern "C" Item bash_expand_lower_first(Item val, Item pat_item) {
-    char buf[512], pbuf[128];
-    const char* str = bash_item_cstr(val, buf, sizeof(buf));
-    const char* pat = bash_item_cstr(pat_item, pbuf, sizeof(pbuf));
-    if (!pat[0]) pat = "?"; // default pattern: match any
-    size_t slen = strlen(str);
-    if (slen == 0) return val;
-    StrBuf* sb = strbuf_new_cap(slen + 1);
-    if (casemod_char_matches(str[0], pat))
-        strbuf_append_char(sb, (char)tolower((unsigned char)str[0]));
-    else
-        strbuf_append_char(sb, str[0]);
-    if (slen > 1) strbuf_append_str_n(sb, str + 1, slen - 1);
-    Item result = bash_make_string(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return bash_expand_casemod(val, pat_item, BASH_CASE_LOWER, true);
 }
 
 // ${var,,} — lowercase all
 extern "C" Item bash_expand_lower_all(Item val, Item pat_item) {
-    char buf[512], pbuf[128];
-    const char* str = bash_item_cstr(val, buf, sizeof(buf));
-    const char* pat = bash_item_cstr(pat_item, pbuf, sizeof(pbuf));
-    if (!pat[0]) pat = "?"; // default pattern: match any
-    size_t slen = strlen(str);
-    StrBuf* sb = strbuf_new_cap(slen + 1);
-    for (size_t i = 0; i < slen; i++) {
-        if (casemod_char_matches(str[i], pat))
-            strbuf_append_char(sb, (char)tolower((unsigned char)str[i]));
-        else
-            strbuf_append_char(sb, str[i]);
-    }
-    Item result = bash_make_string(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return bash_expand_casemod(val, pat_item, BASH_CASE_LOWER, false);
 }
 
 // ${var~} — toggle case of first character
 extern "C" Item bash_expand_toggle_first(Item val, Item pat_item) {
-    char buf[512], pbuf[128];
-    const char* str = bash_item_cstr(val, buf, sizeof(buf));
-    const char* pat = bash_item_cstr(pat_item, pbuf, sizeof(pbuf));
-    if (!pat[0]) pat = "?"; // default pattern: match any
-    size_t slen = strlen(str);
-    if (slen == 0) return val;
-    StrBuf* sb = strbuf_new_cap(slen + 1);
-    unsigned char c = (unsigned char)str[0];
-    if (casemod_char_matches(str[0], pat)) {
-        if (isupper(c)) strbuf_append_char(sb, (char)tolower(c));
-        else if (islower(c)) strbuf_append_char(sb, (char)toupper(c));
-        else strbuf_append_char(sb, (char)c);
-    } else {
-        strbuf_append_char(sb, (char)c);
-    }
-    if (slen > 1) strbuf_append_str_n(sb, str + 1, slen - 1);
-    Item result = bash_make_string(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return bash_expand_casemod(val, pat_item, BASH_CASE_TOGGLE, true);
 }
 
 // ${var~~} — toggle case of all characters
 extern "C" Item bash_expand_toggle_all(Item val, Item pat_item) {
-    char buf[512], pbuf[128];
-    const char* str = bash_item_cstr(val, buf, sizeof(buf));
-    const char* pat = bash_item_cstr(pat_item, pbuf, sizeof(pbuf));
-    if (!pat[0]) pat = "?"; // default pattern: match any
-    size_t slen = strlen(str);
-    StrBuf* sb = strbuf_new_cap(slen + 1);
-    for (size_t i = 0; i < slen; i++) {
-        unsigned char c = (unsigned char)str[i];
-        if (casemod_char_matches(str[i], pat)) {
-            if (isupper(c)) strbuf_append_char(sb, (char)tolower(c));
-            else if (islower(c)) strbuf_append_char(sb, (char)toupper(c));
-            else strbuf_append_char(sb, (char)c);
-        } else {
-            strbuf_append_char(sb, (char)c);
-        }
-    }
-    Item result = bash_make_string(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    return bash_expand_casemod(val, pat_item, BASH_CASE_TOGGLE, false);
 }
 
 // apply case modification to each element of an array, return space-joined result
@@ -3259,20 +3204,7 @@ extern "C" Item bash_cmd_sub_word_split(Item s) {
     const char* src = str->chars;
     int len = str->len;
     StrBuf* buf = strbuf_new();
-    bool in_ws = true;  // start as true to trim leading whitespace
-    for (int i = 0; i < len; i++) {
-        char c = src[i];
-        bool is_ifs = (c == ' ' || c == '\t' || c == '\n' || c == '\r');
-        if (is_ifs) {
-            if (!in_ws) {
-                strbuf_append_char(buf, ' ');
-                in_ws = true;
-            }
-        } else {
-            strbuf_append_char(buf, c);
-            in_ws = false;
-        }
-    }
+    strbuf_append_collapsed_ascii_whitespace(buf, src, (size_t)len, false, true);
     // trim trailing space added above
     if (buf->length > 0 && buf->str[buf->length - 1] == ' ') buf->length--;
     Item result = {.item = s2it(heap_create_name(buf->str, (int)buf->length))};

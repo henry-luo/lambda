@@ -5,6 +5,7 @@
 
 #include "body_parser.hpp"
 #include "serve_utils.hpp"
+#include "../../lib/mem.h"
 #include <string.h>
 #include <ctype.h>
 
