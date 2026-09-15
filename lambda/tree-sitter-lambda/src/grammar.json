@@ -4195,6 +4195,83 @@
                 "name": "operator",
                 "content": {
                   "type": "STRING",
+                  "value": "<:"
+                }
+              },
+              {
+                "type": "FIELD",
+                "name": "right",
+                "content": {
+                  "type": "CHOICE",
+                  "members": [
+                    {
+                      "type": "SYMBOL",
+                      "name": "primary_expr"
+                    },
+                    {
+                      "type": "SYMBOL",
+                      "name": "unary_expr"
+                    },
+                    {
+                      "type": "SYMBOL",
+                      "name": "not_expr"
+                    },
+                    {
+                      "type": "ALIAS",
+                      "content": {
+                        "type": "SYMBOL",
+                        "name": "element_binary_expr"
+                      },
+                      "named": true,
+                      "value": "binary_expr"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "PREC_LEFT",
+          "value": "is_in",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "FIELD",
+                "name": "left",
+                "content": {
+                  "type": "CHOICE",
+                  "members": [
+                    {
+                      "type": "SYMBOL",
+                      "name": "primary_expr"
+                    },
+                    {
+                      "type": "SYMBOL",
+                      "name": "unary_expr"
+                    },
+                    {
+                      "type": "SYMBOL",
+                      "name": "not_expr"
+                    },
+                    {
+                      "type": "ALIAS",
+                      "content": {
+                        "type": "SYMBOL",
+                        "name": "element_binary_expr"
+                      },
+                      "named": true,
+                      "value": "binary_expr"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "FIELD",
+                "name": "operator",
+                "content": {
+                  "type": "STRING",
                   "value": "in"
                 }
               },
@@ -5971,6 +6048,39 @@
                 "name": "operator",
                 "content": {
                   "type": "STRING",
+                  "value": "<:"
+                }
+              },
+              {
+                "type": "FIELD",
+                "name": "right",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "_expr"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "PREC_LEFT",
+          "value": "is_in",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "FIELD",
+                "name": "left",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "_expr"
+                }
+              },
+              {
+                "type": "FIELD",
+                "name": "operator",
+                "content": {
+                  "type": "STRING",
                   "value": "in"
                 }
               },
@@ -6365,7 +6475,7 @@
                       "name": "type",
                       "content": {
                         "type": "SYMBOL",
-                        "name": "_annotation_type"
+                        "name": "_parameter_annotation_type"
                       }
                     }
                   ]
@@ -9026,7 +9136,7 @@
             "members": [
               {
                 "type": "SYMBOL",
-                "name": "_type_pattern"
+                "name": "_binder_capable_type"
               },
               {
                 "type": "REPEAT",
@@ -9039,7 +9149,7 @@
                     },
                     {
                       "type": "SYMBOL",
-                      "name": "_type_pattern"
+                      "name": "_binder_capable_type"
                     }
                   ]
                 }
@@ -9068,7 +9178,7 @@
               "members": [
                 {
                   "type": "SYMBOL",
-                  "name": "_type_pattern"
+                  "name": "_binder_capable_type"
                 },
                 {
                   "type": "REPEAT",
@@ -9081,7 +9191,7 @@
                       },
                       {
                         "type": "SYMBOL",
-                        "name": "_type_pattern"
+                        "name": "_binder_capable_type"
                       }
                     ]
                   }
@@ -9135,7 +9245,7 @@
           "name": "as",
           "content": {
             "type": "SYMBOL",
-            "name": "_type_pattern"
+            "name": "_binder_capable_type"
           }
         }
       ]
@@ -9225,7 +9335,7 @@
             "name": "as",
             "content": {
               "type": "SYMBOL",
-              "name": "_type_pattern"
+              "name": "_binder_capable_type"
             }
           },
           {
@@ -9261,7 +9371,7 @@
       "members": [
         {
           "type": "SYMBOL",
-          "name": "_type_pattern"
+          "name": "_binder_capable_type"
         },
         {
           "type": "REPEAT",
@@ -9274,7 +9384,7 @@
               },
               {
                 "type": "SYMBOL",
-                "name": "_type_pattern"
+                "name": "_binder_capable_type"
               }
             ]
           }
@@ -9778,6 +9888,88 @@
           "name": "fn_type"
         }
       ]
+    },
+    "_parameter_annotation_type": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "binder_type"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_annotation_type"
+        }
+      ]
+    },
+    "_binder_capable_type": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "binder_type"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_type_pattern"
+        }
+      ]
+    },
+    "_binder_name": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "identifier"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_base_type_kw"
+          },
+          "named": true,
+          "value": "base_type"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "STRING",
+            "value": "type"
+          },
+          "named": true,
+          "value": "base_type"
+        }
+      ]
+    },
+    "binder_type": {
+      "type": "PREC_RIGHT",
+      "value": 0,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "FIELD",
+            "name": "base",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_annotation_type"
+            }
+          },
+          {
+            "type": "STRING",
+            "value": "as"
+          },
+          {
+            "type": "FIELD",
+            "name": "binder",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_binder_name"
+            }
+          }
+        ]
+      }
     },
     "_annotation_type": {
       "type": "CHOICE",

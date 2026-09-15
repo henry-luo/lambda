@@ -79,6 +79,10 @@
           "named": true
         },
         {
+          "type": "binder_type",
+          "named": true
+        },
+        {
           "type": "fn_type",
           "named": true
         },
@@ -283,6 +287,10 @@
           },
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "binder_type",
             "named": true
           },
           {
@@ -542,6 +550,10 @@
             "named": false
           },
           {
+            "type": "<:",
+            "named": false
+          },
+          {
             "type": "<=",
             "named": false
           },
@@ -741,6 +753,48 @@
           },
           {
             "type": "unary_type",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "binder_type",
+    "named": true,
+    "fields": {
+      "base": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "constrained_type",
+            "named": true
+          },
+          {
+            "type": "fn_type",
+            "named": true
+          },
+          {
+            "type": "unary_type",
+            "named": true
+          }
+        ]
+      },
+      "binder": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "base_type",
+            "named": true
+          },
+          {
+            "type": "identifier",
             "named": true
           }
         ]
@@ -1525,6 +1579,10 @@
       "types": [
         {
           "type": "binary_type",
+          "named": true
+        },
+        {
+          "type": "binder_type",
           "named": true
         },
         {
@@ -2873,6 +2931,10 @@
           "named": true
         },
         {
+          "type": "binder_type",
+          "named": true
+        },
+        {
           "type": "fn_type",
           "named": true
         },
@@ -3145,6 +3207,10 @@
         "types": [
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "binder_type",
             "named": true
           },
           {
@@ -3861,6 +3927,10 @@
         "types": [
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "binder_type",
             "named": true
           },
           {
@@ -5055,6 +5125,10 @@
   },
   {
     "type": "<",
+    "named": false
+  },
+  {
+    "type": "<:",
     "named": false
   },
   {

@@ -289,6 +289,8 @@ test/lambda/transpile_typed_closure.ls	direct
 test/lambda/trim.ls	direct
 test/lambda/type.ls	direct
 test/lambda/type2.ls	direct
+test/lambda/type_binder.ls	direct
+test/lambda/type_subtype_op.ls	direct
 test/lambda/type_contract_metadata.ls	direct
 test/lambda/type_contract_metadata_import.ls	direct
 test/lambda/type_contract_metadata_module.ls	direct

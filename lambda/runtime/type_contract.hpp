@@ -98,6 +98,10 @@ MapContractRelation lambda_map_contract_relation(const TypeMap* candidate,
 // exposing the relation's recursive implementation to the MIR transpiler.
 bool lambda_type_contract_semantically_compatible(Type* candidate, Type* expected);
 
+// Value-set inclusion for first-class type values. Unlike boundary
+// compatibility, this relation never relies on a value conversion.
+bool lambda_type_contract_is_subtype(Type* candidate, Type* expected);
+
 // Resolve a concrete record layout through aliases and nullable spellings.
 // A nullable receiver still needs its own value/null guard (D3.2.4v3).
 Type* lambda_type_nonnull_map_contract(Type* contract);

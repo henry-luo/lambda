@@ -762,7 +762,7 @@ bytes[1] = 9u8
 
 Typed numeric arrays may use compact native lanes internally. That carrier is
 an implementation detail: assigning a value still validates the full Lambda
-element contract before the lane is written (**D3.1.1v3**, **D3.3.3v3**).
+element contract before the lane is written (**D3.1.1v4**, **D3.3.3v3**).
 
 #### Array Operations
 

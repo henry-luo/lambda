@@ -620,6 +620,10 @@ LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
     }
     if (ch == '<') {
         lexer_advance_byte(lexer);
+        if (lexer_peek(lexer, 0) == ':') {
+            lexer_advance_byte(lexer);
+            return lexer_make_token(LAMBDA_TOK_SUBTYPE, start, line, column, lexer->offset);
+        }
         if (lexer_peek(lexer, 0) == '=') {
             lexer_advance_byte(lexer);
             return lexer_make_token(LAMBDA_TOK_LT_EQ, start, line, column, lexer->offset);
@@ -712,6 +716,7 @@ const char* lambda_token_kind_name(LambdaTokenKind kind) {
     case LAMBDA_TOK_BANG_EQ: return "!=";
     case LAMBDA_TOK_LT: return "<";
     case LAMBDA_TOK_LT_EQ: return "<=";
+    case LAMBDA_TOK_SUBTYPE: return "<:";
     case LAMBDA_TOK_GT: return ">";
     case LAMBDA_TOK_GT_EQ: return ">=";
     case LAMBDA_TOK_ARROW: return "=>";

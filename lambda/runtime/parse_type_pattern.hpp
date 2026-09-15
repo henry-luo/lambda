@@ -32,7 +32,9 @@ AstNode* parse_primary_type_text_span(Transpiler* tp, const char* begin,
 // Parse the restricted declaration return contract: `T`, `T | U`, `T^`, or
 // `T^E`. It returns the same AST_NODE_FUNC_TYPE wrapper as build_return_type.
 AstNode* parse_return_type_text_span(Transpiler* tp, const char* begin,
-        const char* end, SourceSpan span);
+    const char* end, SourceSpan span);
+AstNode* parse_return_value_type_text_span(Transpiler* tp, const char* begin,
+    const char* end, SourceSpan span);
 
 // Parse a view/edit model pattern: an element, name/base type, or `|` union.
 AstNode* parse_view_pattern_text_span(Transpiler* tp, const char* begin,

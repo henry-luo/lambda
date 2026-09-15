@@ -223,6 +223,53 @@ TEST(InterpWalker, ContainersAndAccess) {
         "nums\nwords\nm\nnums[0]\nnums[2]\nm.x\nm.y\nlen(nums)\n");
 }
 
+TEST(InterpWalker, TypeBinderContractsAgreeAcrossAllTiers) {
+    // S4.2.2/D8.1.1v10: binder joining and dependent-result specialization
+    // stay on the boxed boundary, so T0, eager MIR, and the shipped default agree.
+    const char* path = "test/lambda/type_binder.ls";
+    RunResult default_tier = run_script(path, NULL);
+    RunResult jit = run_script(path, "jit");
+    RunResult interp = run_script(path, "interp");
+    EXPECT_EQ(trim_trailing(default_tier.stdout_text), "[int, 1, 3, 2, 2, 2]");
+    EXPECT_EQ(trim_trailing(default_tier.stdout_text), trim_trailing(jit.stdout_text));
+    EXPECT_EQ(trim_trailing(default_tier.stdout_text), trim_trailing(interp.stdout_text));
+    EXPECT_EQ(default_tier.exit_code, 0);
+    EXPECT_EQ(jit.exit_code, 0);
+    EXPECT_EQ(interp.exit_code, 0);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
+
+    // D8.3.1v2: the fifth exact key crosses the bounded raw-variant cap;
+    // direct scalar and shape-guarded container-pointer edges stay tier-identical.
+    const char* raw_variant_path = "test/lambda/type_binder_raw_variants.ls";
+    RunResult raw_default = run_script(raw_variant_path, NULL);
+    RunResult raw_jit = run_script(raw_variant_path, "jit");
+    RunResult raw_interp = run_script(raw_variant_path, "interp");
+    EXPECT_EQ(trim_trailing(raw_default.stdout_text),
+        "[1, 2.5, true, \"four\", 5, 6, 11, 2.5, 13, 1, 2, int, int, 2, 2, \"Shape\", \"Circle\"]");
+    EXPECT_EQ(trim_trailing(raw_default.stdout_text),
+        trim_trailing(raw_jit.stdout_text));
+    EXPECT_EQ(trim_trailing(raw_default.stdout_text),
+        trim_trailing(raw_interp.stdout_text));
+    EXPECT_EQ(raw_default.exit_code, 0);
+    EXPECT_EQ(raw_jit.exit_code, 0);
+    EXPECT_EQ(raw_interp.exit_code, 0);
+
+    // A caller can pre-admit this map without an environment. The callee must
+    // still walk its nested binder and reject the mismatched dependent value.
+    write_script("temp/interp_type_binder_nested.ls",
+        "fn select(a: {x: any as V}, b: V) V => b;\n"
+        "let source: any = {x: 1};\n"
+        "select(source, \"wrong\")\n");
+    RunResult nested_jit = run_script("temp/interp_type_binder_nested.ls", "jit");
+    RunResult nested_interp = run_script("temp/interp_type_binder_nested.ls", "interp");
+    EXPECT_NE(nested_jit.exit_code, 0);
+    EXPECT_EQ(nested_jit.exit_code, nested_interp.exit_code);
+    EXPECT_EQ(trim_trailing(nested_jit.stdout_text), trim_trailing(nested_interp.stdout_text));
+    EXPECT_NE(nested_jit.stderr_text.find("type check at parameter 'b'"),
+        decltype(nested_jit.stderr_text)::npos);
+    EXPECT_EQ(summary_field(nested_interp.stderr_text, "fallback="), 0);
+}
+
 TEST(InterpWalker, SystemFunctionsAndMethods) {
     expect_tiers_agree("sysfuncs",
         "let s = \"Hello\"\nlen(s)\nupper(s)\nlower(s)\ncontains(s, \"ell\")\n"

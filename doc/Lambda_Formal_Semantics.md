@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 24.0.1 (2026-09-09)
+**Spec version:** 24.2.1 (2026-09-15)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1243,6 +1243,16 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   errors, not coercions. The same membership rule applies in annotations,
   match arms, and value expressions; indexing or iteration materializes each
   character-range member as a one-codepoint string. [S7.1.1v3, S11.2.1]
+- **S11.1.4v2** The binary type relation is spelled `<:`. Its operands are
+  type values and it returns `bool`: `A <: B` holds exactly when every value
+  admitted by `A` is admitted by `B`. It is neither value membership (`is`)
+  nor magnitude comparison (`<`); non-type operands are a type error. The
+  relation is the conversion-free static subtype relation, not declared
+  boundary compatibility: a boundary may convert a value, but conversion
+  never makes a type's value set a subtype. It includes structural and
+  nominal-base admission. Function-type variance is pending; until ruled,
+  function-type operands are rejected. [S1.7, S6.1.1, S11.3.1v2, D3.2.1,
+  D3.2.5v2]
 
 ### S11.2 Match
 
@@ -1322,6 +1332,20 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
 - **S11.4.7** Containment and discharge follow §S7.7–S7.8: skip at
   declaration boundaries, destination-contract container acceptance, and
   `^ { }` as the engagement form that suppresses the skip.
+- **S11.4.8** A function signature may establish a **type binder** with an
+  explicit `T: type` parameter or a parameter-contract site `B as T`. The
+  bound name scopes over later parameter annotations, the return annotation,
+  and the function body; reading it in the body yields its selected
+  first-class type value. At each invocation the binder site admits its value
+  against `B` before selecting its narrowest type (S4.2.2); a later `T`
+  contract admits against that selection. Repeated `as T` sites in one
+  signature join their selections through the promotion/nominal-base relation
+  and never fabricate a union; incompatible bounds or no join are errors.
+  A nested site binds the encountered subvalue, and an empty container falls
+  back to its declared bound. Binders are valid only in `fn`/`pn` parameter
+  contracts: a return contract may *refer* to an established `T`, but may not
+  introduce one. These rules are identical at every execution tier. [TG2–TG7,
+  TG9, TG13v2, TG15–TG18, D3.1.4]
 
 ---
 

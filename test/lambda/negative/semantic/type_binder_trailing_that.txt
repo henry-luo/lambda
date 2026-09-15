@@ -1,0 +1,1 @@
+error[E237]: a binder must follow the complete parameter contract
