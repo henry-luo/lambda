@@ -3,6 +3,7 @@
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/mem_factory.h"
+#include "../../lib/math_checked.hpp"
 #include "../../lib/str.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/hashmap.h"
@@ -44,10 +45,6 @@ struct LambdaRegion {
 
 static const size_t LAMBDA_REGION_BLOCK_BYTES = 64 * 1024;
 
-static size_t lambda_region_align_up(size_t value) {
-    return (value + 15u) & ~(size_t)15u;
-}
-
 static LambdaRegionBlock* lambda_region_take_block(Heap* heap, size_t required) {
     if (!heap) return NULL;
     LambdaRegionBlock** link = &heap->region_free_blocks;
@@ -62,9 +59,10 @@ static LambdaRegionBlock* lambda_region_take_block(Heap* heap, size_t required) 
         link = &block->next;
     }
     size_t capacity = LAMBDA_REGION_BLOCK_BYTES;
-    if (capacity < required) capacity = lambda_region_align_up(required);
-    LambdaRegionBlock* block = (LambdaRegionBlock*)mem_alloc(
-        sizeof(LambdaRegionBlock) + capacity, MEM_CAT_EVAL);
+    if (capacity < required && !math_size_align_up(required, 16u, &capacity)) return NULL;
+    size_t block_bytes = 0;
+    if (!lam::checked_add(sizeof(LambdaRegionBlock), capacity, &block_bytes)) return NULL;
+    LambdaRegionBlock* block = (LambdaRegionBlock*)mem_alloc(block_bytes, MEM_CAT_EVAL);
     if (!block) return NULL;
     block->next = NULL;
     block->capacity = capacity;
@@ -94,7 +92,9 @@ extern "C" void* lambda_region_calloc(LambdaRegion* region, size_t size,
     // are intentionally absent from all_objects, and this summary guarantees
     // they have no outgoing ordinary-GC edge to trace.
     gc_heap_maybe_force_collect(context->heap->gc, "lambda_region_calloc");
-    size_t slot_size = lambda_region_align_up(sizeof(gc_header_t) + size);
+    size_t slot_size = 0;
+    if (!lam::checked_add(sizeof(gc_header_t), size, &slot_size) ||
+        !math_size_align_up(slot_size, 16u, &slot_size)) return NULL;
     LambdaRegionBlock* block = region->blocks;
     if (!block || block->capacity - block->used < slot_size) {
         block = lambda_region_take_block(context->heap, slot_size);

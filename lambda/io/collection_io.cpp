@@ -5,7 +5,7 @@
 #include "../../lib/arena.h"
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
-#include "../../lib/checked_math.hpp"
+#include "../../lib/math_checked.hpp"
 
 static Item ui_copy_string_to_arena(Arena* arena, Item str_item) {
     String* src = str_item.get_safe_string();

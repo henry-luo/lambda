@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <limits.h>
 
-#include "../../lib/checked_math.hpp"
+#include "../../lib/math_checked.hpp"
 #include "../../lib/checked_alloc.hpp"
 #include "../../lib/ownership.hpp"   // NonNull + arena helpers
 
@@ -25,6 +25,16 @@ TEST(CheckedMath, AddOverflow) {
     EXPECT_TRUE(lam::checked_add(100, 28, &out));
     EXPECT_EQ(out, 128u);
     EXPECT_FALSE(lam::checked_add(SIZE_MAX, 1, &out));
+}
+
+TEST(CheckedMath, SizeRoundingAndAlignment) {
+    size_t out = 0;
+    EXPECT_TRUE(math_size_round_up(17, 8, &out));
+    EXPECT_EQ(out, 24u);
+    EXPECT_TRUE(math_size_align_up(16, 16, &out));
+    EXPECT_EQ(out, 16u);
+    EXPECT_FALSE(math_size_round_up(SIZE_MAX, 2, &out));
+    EXPECT_FALSE(math_size_align_up(1, 3, &out));
 }
 
 TEST(CheckedMath, MulAddCombines) {

@@ -6,6 +6,7 @@
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/memtrack.h"
+#include "../lib/math_utils.h"
 #include "../lib/str.h"
 #include "../lib/tagged.hpp"
 #include <string.h>
@@ -93,8 +94,7 @@ static float resolve_filter_amount(const CssValue* value, bool clamp_unit_interv
         amount = (float)value->data.number.value;
     }
     if (clamp_unit_interval) {
-        if (amount > 1.0f) amount = 1.0f;
-        if (amount < 0.0f) amount = 0.0f;
+        amount = clamp_unit(amount);
     }
     return amount;
 }
@@ -2687,7 +2687,7 @@ static double resolve_color_component(const CssValue* v, bool is_alpha = false) 
 }
 
 static uint8_t css_color_byte(double value) {
-    return (uint8_t)(value < 0.0 ? 0.0 : (value > 255.0 ? 255.0 : value));
+    return (uint8_t)lib_math::clamp(value, 0.0, 255.0);
 }
 
 // CSS Color Level 4 §4.2.4: Convert HSL to RGB
@@ -4654,8 +4654,7 @@ static void resolve_placeholder_pseudo_style(DomElement* dom_elem, LayoutContext
         } else if (value && value->type == CSS_VALUE_TYPE_PERCENTAGE) {
             opacity = (float)(value->data.percentage.value / 100.0);
         }
-        if (opacity < 0.0f) opacity = 0.0f;
-        if (opacity > 1.0f) opacity = 1.0f;
+        opacity = clamp_unit(opacity);
         form->placeholder_opacity = opacity;
         form->placeholder_has_opacity = 1;
     }
@@ -6417,7 +6416,7 @@ static void resolve_inline_visibility_opacity(LayoutContext* lycon, ViewSpan* sp
     else if (value->type == CSS_VALUE_TYPE_NUMBER) opacity =
         (float)value->data.number.value;
     else return;
-    span->in_line->opacity = opacity < 0.0f ? 0.0f : opacity > 1.0f ? 1.0f : opacity;
+    span->in_line->opacity = clamp_unit(opacity);
 }
 
 static void resolve_line_count_property(LayoutContext* lycon, ViewBlock* block,

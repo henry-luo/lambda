@@ -6,7 +6,7 @@
 #include "../lib/log.h"
 #include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
-#include "../lib/checked_math.hpp"
+#include "../lib/math_checked.hpp"
 #include <string.h>
 #include <limits.h>
 

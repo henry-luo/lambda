@@ -55,7 +55,7 @@ static inline uint8_t render_composite_blend_channel(uint8_t Cb_byte, uint8_t Cs
         default:                    result = Cs; break;
     }
     int value = (int)(result * 255.0f + 0.5f);
-    return (uint8_t)(value < 0 ? 0 : (value > 255 ? 255 : value));
+    return clamp_byte(value);
 }
 
 uint32_t render_composite_blend_pixel(uint32_t backdrop, uint32_t source, CssEnum blend_mode) {
@@ -86,7 +86,7 @@ uint32_t render_composite_blend_pixel(uint32_t backdrop, uint32_t source, CssEnu
         float Bb = render_composite_blend_channel(Cb_b, Cs_b, blend_mode) / 255.0f;
         float Co = (p * (Cs_b / 255.0f) + q * (Cb_b / 255.0f) + t * Bb) / ra;
         int value = (int)(Co * 255.0f + 0.5f);
-        return (uint8_t)(value < 0 ? 0 : (value > 255 ? 255 : value));
+        return clamp_byte(value);
     };
     uint8_t rr = blendch(br, sr);
     uint8_t rg = blendch(bg, sg);

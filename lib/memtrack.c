@@ -12,6 +12,7 @@
 #include "hashmap.h"
 #include "arraylist.h"
 #include "log.h"
+#include "math_checked.hpp"
 #include "str.h"
 
 #include <stdlib.h>
@@ -235,22 +236,6 @@ static inline void lock_tracker(void) {
 
 static inline void unlock_tracker(void) {
     pthread_mutex_unlock(&g_memtrack.lock);
-}
-
-static bool checked_add_size(size_t left, size_t right, size_t* out) {
-    if (right > SIZE_MAX - left) {
-        return false;
-    }
-    *out = left + right;
-    return true;
-}
-
-static bool checked_mul_size(size_t left, size_t right, size_t* out) {
-    if (left != 0 && right > SIZE_MAX / left) {
-        return false;
-    }
-    *out = left * right;
-    return true;
 }
 
 static MemCategory normalize_category(MemCategory category) {
@@ -637,8 +622,8 @@ void* mem_alloc_loc(size_t size, MemCategory category, int line)
 
     if (g_memtrack.mode == MEMTRACK_MODE_DEBUG) {
         // Allocate with guard bytes
-        if (!checked_add_size(size, GUARD_SIZE, &real_size) ||
-            !checked_add_size(real_size, GUARD_SIZE, &real_size)) {
+        if (!math_checked_add(size, GUARD_SIZE, &real_size) ||
+            !math_checked_add(real_size, GUARD_SIZE, &real_size)) {
             return NULL;
         }
         real_ptr = malloc(real_size);
@@ -653,7 +638,7 @@ void* mem_alloc_loc(size_t size, MemCategory category, int line)
         memset(user_ptr, FILL_BYTE_ALLOC, size);
     } else {
         // STATS mode: prepend MemAllocHeader so mem_free can recover size/category
-        if (!checked_add_size(sizeof(MemAllocHeader), size, &real_size)) {
+        if (!math_checked_add(sizeof(MemAllocHeader), size, &real_size)) {
             return NULL;
         }
         real_ptr = malloc(real_size);
@@ -711,7 +696,7 @@ void* mem_alloc(size_t size, MemCategory category) {
 void* mem_calloc_loc(size_t count, size_t size, MemCategory category, int line)
 {
     size_t total = 0;
-    if (count == 0 || size == 0 || !checked_mul_size(count, size, &total)) {
+    if (count == 0 || size == 0 || !math_checked_mul(count, size, &total)) {
         return NULL;
     }
     if (!g_memtrack.initialized || g_memtrack.mode == MEMTRACK_MODE_OFF ||
@@ -880,7 +865,7 @@ void mem_free(void* ptr) {
 char* mem_dup_n_loc(const char* data, size_t len, MemCategory category, int line) {
     if (!data) return NULL;
     size_t alloc_size = 0;
-    if (!checked_add_size(len, 1, &alloc_size)) return NULL;
+    if (!math_checked_add(len, 1, &alloc_size)) return NULL;
     char* dup = (char*)mem_alloc_loc(alloc_size, category, line);
     if (dup) {
         memcpy(dup, data, len);

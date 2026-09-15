@@ -9,7 +9,7 @@
 #include "../lib/mem_factory.h"
 #include "../lib/mem.h"
 #include "../lib/memtrack.h"
-#include "../lib/checked_math.hpp"
+#include "../lib/math_checked.hpp"
 #include <string.h>
 #include <math.h>
 #ifdef _WIN32

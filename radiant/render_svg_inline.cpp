@@ -20,6 +20,7 @@
 #include "../lib/font/font_internal.h"
 #include "../lib/mempool.h"
 #include "../lib/mem_grow.hpp"
+#include "../lib/math_utils.h"
 #include "../lib/str.h"
 #include "../lib/file.h"
 #include "../lib/escape.h"
@@ -743,9 +744,9 @@ static Color parse_svg_color(const char* value) {
             if (sscanf(p, "%d,%d,%d,%f", &r, &g, &b, &a) >= 3 ||
                 sscanf(p, "%d %d %d / %f", &r, &g, &b, &a) >= 3 ||
                 sscanf(p, "%d %d %d", &r, &g, &b) == 3) {
-                c.r = (uint8_t)(r < 0 ? 0 : (r > 255 ? 255 : r));
-                c.g = (uint8_t)(g < 0 ? 0 : (g > 255 ? 255 : g));
-                c.b = (uint8_t)(b < 0 ? 0 : (b > 255 ? 255 : b));
+                c.r = clamp_byte(r);
+                c.g = clamp_byte(g);
+                c.b = clamp_byte(b);
                 c.a = (uint8_t)(a * 255);
             }
         }
@@ -1389,8 +1390,7 @@ static void draw_gradient_fill(SvgInlineRenderContext* ctx, RdtPath* path, SvgGr
                                const RdtMatrix* transform, RdtFillRule fill_rule,
                                float opacity) {
     if (!path || !def || def->stop_count < 2) return;
-    if (opacity < 0.0f) opacity = 0.0f;
-    if (opacity > 1.0f) opacity = 1.0f;
+    opacity = clamp_unit(opacity);
 
     RdtGradientStop stops[SVG_MAX_GRAD_STOPS];
     for (int i = 0; i < def->stop_count; i++) {
@@ -4660,8 +4660,7 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
     if (initial_stroke_width >= 0.0f) {
         ctx.stroke_width = initial_stroke_width;
     }
-    if (initial_opacity < 0.0f) initial_opacity = 0.0f;
-    if (initial_opacity > 1.0f) initial_opacity = 1.0f;
+    initial_opacity = clamp_unit(initial_opacity);
     ctx.opacity = initial_opacity;
 
     // start with base transform (document position/scale)
@@ -4787,8 +4786,7 @@ void render_svg_build_subscene(PaintSvgSubscene* subscene,
     subscene->stroke_none = initial_stroke_none;
     subscene->stroke_width = initial_stroke_width;
     subscene->source_path = source_path;  // RETAINED_FIELD_OK: subscene-local field, not a retained DOM field
-    if (initial_opacity < 0.0f) initial_opacity = 0.0f;
-    if (initial_opacity > 1.0f) initial_opacity = 1.0f;
+    initial_opacity = clamp_unit(initial_opacity);
     subscene->opacity = initial_opacity;
     subscene->resource_generation = (uint64_t)(uintptr_t)svg_element;
 }

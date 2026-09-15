@@ -6,7 +6,7 @@
 #include "../../lib/log.h"
 #include "../../lib/str.h"
 #include "../../lib/arraylist.hpp"
-#include "../../lib/checked_math.hpp"
+#include "../../lib/math_checked.hpp"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/hash.h"
 #include "../../lib/byte_storage.h"

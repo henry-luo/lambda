@@ -8,20 +8,16 @@
 #define MEMTRACK_NO_LOCATION_MACROS
 #include "../../../lib/memtrack.h"
 #include "../../../lib/log.h"
+#include "../../../lib/math_checked.hpp"
 #include <stdlib.h>
 #include <string.h>
-
-// align size up to GC_DATA_ZONE_ALIGN boundary
-static inline size_t align_up(size_t size) {
-    return (size + GC_DATA_ZONE_ALIGN - 1) & ~(GC_DATA_ZONE_ALIGN - 1);
-}
 
 // allocate a new data block from a VM-owned extent
 static gc_data_block_t* allocate_block(gc_data_zone_t* dz, size_t min_size) {
     size_t capacity = dz->block_size;
     if (min_size > capacity) {
         // oversized allocation: create a block large enough
-        capacity = align_up(min_size);
+        if (!math_size_align_up(min_size, GC_DATA_ZONE_ALIGN, &capacity)) return NULL;
     }
 
     MemVmRegion* region = mem_vm_region_reserve(dz->context, dz->owner,
@@ -102,7 +98,7 @@ void gc_data_zone_destroy(gc_data_zone_t* dz) {
 void* gc_data_zone_alloc(gc_data_zone_t* dz, size_t size) {
     if (!dz || size == 0) return NULL;
 
-    size = align_up(size);
+    if (!math_size_align_up(size, GC_DATA_ZONE_ALIGN, &size)) return NULL;
 
     // try current block
     gc_data_block_t* block = dz->current;
