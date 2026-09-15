@@ -526,8 +526,7 @@ static void emit_image_textile(StringBuf* sb, const char* url, const char* alt) 
 // Markdown image: ![alt](url)
 static void emit_image_markdown(StringBuf* sb, const char* url, const char* alt) {
     stringbuf_append_format(sb, "![%s](", alt ? alt : "");
-    if (url) stringbuf_append_str(sb, url);
-    stringbuf_append_char(sb, ')');
+    stringbuf_append_all(sb, 2, url ? url : "", ")");
 }
 
 // ==============================================================================

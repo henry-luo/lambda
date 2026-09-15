@@ -1312,17 +1312,10 @@ void paint_svg_append_color(StrBuf* out, Color color) {
     strbuf_append_str(out, color_str);
 }
 
-static void paint_svg_append_attr_escaped(StrBuf* out, const char* value) {
-    if (!out || !value) return;
-    escape_append(out, value, strlen(value), ESCAPE_RULES_XML_ATTR,
-                  ESCAPE_RULES_XML_ATTR_COUNT, ESCAPE_CTRL_XML_NUMERIC);
-}
-
 static void paint_svg_append_text_escaped(StrBuf* out, const char* value, int len) {
     if (!out || !value) return;
     if (len < 0) len = (int)strlen(value); // INT_CAST_OK: text run byte length is bounded by source string.
-    escape_append(out, value, (size_t)len, ESCAPE_RULES_HTML_TEXT,
-                  ESCAPE_RULES_HTML_TEXT_COUNT, ESCAPE_CTRL_NONE);
+    escape_append_html_text(out, value, (size_t)len);
 }
 
 static void paint_svg_append_matrix_attr(StrBuf* out, const RdtMatrix* matrix) {
@@ -1824,7 +1817,7 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             strbuf_append_format(out,
                 "<image x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" href=\"",
                 p->dst_x, p->dst_y, p->dst_w, p->dst_h);
-            paint_svg_append_attr_escaped(out, href);
+            escape_append_xml_attr(out, href, strlen(href));
             strbuf_append_str(out, "\" preserveAspectRatio=\"none\"");
             if (p->opacity < 255) {
                 strbuf_append_format(out, " opacity=\"%.4f\"", p->opacity / 255.0f);
@@ -1902,7 +1895,8 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             strbuf_append_format(out,
                 "<text x=\"%.2f\" y=\"%.2f\" font-family=\"",
                 p->x, p->baseline_y);
-            paint_svg_append_attr_escaped(out, p->font_family ? p->font_family : "Arial");
+            const char* font_family = p->font_family ? p->font_family : "Arial";
+            escape_append_xml_attr(out, font_family, strlen(font_family));
             strbuf_append_format(out, "\" font-size=\"%.2f\" fill=\"",
                                  p->font_size > 0.0f ? p->font_size : 16.0f);
             paint_svg_append_color(out, p->color);

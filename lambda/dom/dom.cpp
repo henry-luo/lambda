@@ -39,6 +39,7 @@
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/mem_factory.h"
+#include "../../lib/escape.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mempool.h"
 #include "../../lib/mem_grow.hpp"
@@ -3703,8 +3704,7 @@ static Item js_classlist_value_item(DomElement* elem) {
     }
     StrBuf* sb = strbuf_new_cap(64);
     for (int i = 0; i < elem->class_count; i++) {
-        if (i > 0) strbuf_append_char(sb, ' ');
-        strbuf_append_str(sb, elem->class_names[i]);
+        strbuf_append_all(sb, 2, i > 0 ? " " : "", elem->class_names[i]);
     }
     Item result = js_name_item(sb->str ? sb->str : "");
     strbuf_free(sb);
@@ -4001,7 +4001,7 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
         const char* p = var_start + 4;  // skip "var("
 
         // skip whitespace
-        while (*p == ' ' || *p == '\t') p++;
+        p = str_skip_line_space(p);
 
         // extract variable name (must start with --)
         if (p[0] != '-' || p[1] != '-') {
@@ -4024,8 +4024,7 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
 
         char var_name[128];
         if (name_len >= sizeof(var_name)) name_len = sizeof(var_name) - 1;
-        memcpy(var_name, name_start, name_len);
-        var_name[name_len] = '\0';
+        str_copy(var_name, sizeof(var_name), name_start, name_len);
 
         // check for fallback
         const char* fallback = nullptr;
@@ -4033,7 +4032,7 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
         if (*p == ',') {
             p++; // skip comma
             // skip whitespace
-            while (*p == ' ' || *p == '\t') p++;
+            p = str_skip_line_space(p);
             fallback = p;
             // find matching closing paren, accounting for nested parens
             int paren_depth = 1;
@@ -4092,10 +4091,8 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
 
         if (resolved && resolved_len > 0) {
             // recursively resolve nested var() in the resolved value
-            char* resolved_copy = (char*)pool_alloc(pool, resolved_len + 1);
+            char* resolved_copy = pool_dup_n(pool, resolved, resolved_len);
             if (resolved_copy) {
-                memcpy(resolved_copy, resolved, resolved_len);
-                resolved_copy[resolved_len] = '\0';
                 const char* nested = js_resolve_custom_property_value(elem, resolved_copy, pool, depth + 1);
                 if (nested) {
                     // strip exterior comments from var() result
@@ -4127,10 +4124,8 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
             }
         } else if (fallback && fallback_len > 0) {
             // use fallback value
-            char* fb_copy = (char*)pool_alloc(pool, fallback_len + 1);
+            char* fb_copy = pool_dup_n(pool, fallback, fallback_len);
             if (fb_copy) {
-                memcpy(fb_copy, fallback, fallback_len);
-                fb_copy[fallback_len] = '\0';
                 const char* resolved_fb = js_resolve_custom_property_value(elem, fb_copy, pool, depth + 1);
                 segments[seg_count].text = resolved_fb ? resolved_fb : fb_copy;
                 segments[seg_count].len = strlen(segments[seg_count].text);
@@ -4162,14 +4157,9 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
                 if (prev_len > 0 && cur_len > 0) {
                     // tokenize the last few chars of prev and first few chars of cur
                     // to determine if they'd be ambiguous
-                    char* prev_copy = (char*)pool_alloc(pool, prev_len + 1);
-                    char* cur_copy = (char*)pool_alloc(pool, cur_len + 1);
+                    char* prev_copy = pool_dup_n(pool, prev_text, prev_len);
+                    char* cur_copy = pool_dup_n(pool, cur_text, cur_len);
                     if (prev_copy && cur_copy) {
-                        memcpy(prev_copy, prev_text, prev_len);
-                        prev_copy[prev_len] = '\0';
-                        memcpy(cur_copy, cur_text, cur_len);
-                        cur_copy[cur_len] = '\0';
-
                         size_t prev_tok_count = 0, cur_tok_count = 0;
                         CssToken* prev_tokens = css_tokenize(prev_copy, prev_len, pool, &prev_tok_count);
                         CssToken* cur_tokens = css_tokenize(cur_copy, cur_len, pool, &cur_tok_count);
@@ -4201,10 +4191,8 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
         }
 
         // append segment text
-        char* seg_copy = (char*)pool_alloc(pool, segments[s].len + 1);
+        char* seg_copy = pool_dup_n(pool, segments[s].text, segments[s].len);
         if (seg_copy) {
-            memcpy(seg_copy, segments[s].text, segments[s].len);
-            seg_copy[segments[s].len] = '\0';
             stringbuf_append_str(result, seg_copy);
         }
     }
@@ -4270,8 +4258,8 @@ extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name)
                 while (*val == ' ' || *val == '\t' || *val == '\n' || *val == '\r') val++;
                 size_t vlen = strlen(val);
                 while (vlen > 0 && (val[vlen-1] == ' ' || val[vlen-1] == '\t' || val[vlen-1] == '\n' || val[vlen-1] == '\r')) vlen--;
-                char* trimmed = (char*)pool_alloc(pool, vlen + 1);
-                if (trimmed) { memcpy(trimmed, val, vlen); trimmed[vlen] = '\0'; val = trimmed; }
+                char* trimmed = pool_dup_n(pool, val, vlen);
+                if (trimmed) val = trimmed;
 
                 // resolve var() references in the value
                 if (val && strstr(val, "var(")) {
@@ -4744,14 +4732,7 @@ static bool dom_text_initial_offset(DomText* text, bool preserve_ws, uint32_t* o
 
     const char* chars = text->text;
     size_t len = text->length;
-    size_t first_visible = 0;
-    while (first_visible < len) {
-        unsigned char ch = (unsigned char)chars[first_visible];
-        if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r' && ch != '\f') {
-            break;
-        }
-        first_visible++;
-    }
+    size_t first_visible = str_span(chars, len, str_is_html_space);
     if (first_visible == len) return false;
     *out_offset = (uint32_t)utf8_to_utf16_length(chars, first_visible);
     return true;
@@ -5036,8 +5017,7 @@ static bool dom_style_decl_value(const char* style_text,
 
                 size_t value_len = (size_t)(value_end - value_start);
                 if (value_len >= out_size) value_len = out_size - 1;
-                memcpy(out, value_start, value_len);
-                out[value_len] = '\0';
+                str_copy(out, out_size, value_start, value_len);
                 return true;
         }
 
@@ -5079,12 +5059,9 @@ static bool dom_update_inline_style_attribute(DomElement* elem,
 
     if (value[0]) {
         if (updated->length > 0) strbuf_append_char(updated, ' ');
-        strbuf_append_str(updated, prop_name);
-        strbuf_append_str(updated, ": ");
-        strbuf_append_str(updated, value);
+        strbuf_append_all(updated, 3, prop_name, ": ", value);
         if (priority && priority[0]) {
-            strbuf_append_str(updated, " !");
-            strbuf_append_str(updated, priority);
+            strbuf_append_all(updated, 2, " !", priority);
         }
         strbuf_append_char(updated, ';');
     }
@@ -5274,8 +5251,7 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
     if (node->is_element()) {
         DomElement* elem = node->as_element();
         // opening tag
-        strbuf_append_char(sb, '<');
-        strbuf_append_str(sb, elem->tag_name ? elem->tag_name : "unknown");
+        strbuf_append_all(sb, 2, "<", elem->tag_name ? elem->tag_name : "unknown");
 
         int attr_count = 0;
         const char** attr_names = elem->attribute_names(&attr_count);
@@ -5286,8 +5262,7 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
                 if (!name) continue;
                 if (dom_is_internal_attr(name)) continue;
                 strbuf_append_char(sb, ' ');
-                strbuf_append_str(sb, name);
-                strbuf_append_str(sb, "=\"");
+                strbuf_append_all(sb, 2, name, "=\"");
                 // A present valueless HTML attribute serializes with an empty
                 // value; null here represents presence, not attribute absence.
                 if (value) collect_html_attr_value(value, sb);
@@ -5308,8 +5283,7 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
         if (tag && strcmp(tag, "br") != 0 && strcmp(tag, "hr") != 0 &&
             strcmp(tag, "img") != 0 && strcmp(tag, "input") != 0 &&
             strcmp(tag, "meta") != 0 && strcmp(tag, "link") != 0) {
-            strbuf_append_str(sb, "</");
-            strbuf_append_str(sb, tag);
+            strbuf_append_all(sb, 2, "</", tag);
             strbuf_append_char(sb, '>');
         }
     }
@@ -5327,14 +5301,7 @@ static void collect_xml_attr_value(const char* value, StrBuf* sb) {
 }
 
 static void collect_xml_text_value(const char* value, size_t length, StrBuf* sb) {
-    if (!value || !sb) return;
-    for (size_t i = 0; i < length; i++) {
-        char ch = value[i];
-        if (ch == '&') strbuf_append_str(sb, "&amp;");
-        else if (ch == '<') strbuf_append_str(sb, "&lt;");
-        else if (ch == '>') strbuf_append_str(sb, "&gt;");
-        else strbuf_append_char(sb, ch);
-    }
+    escape_append_html_text(sb, value, length);
 }
 
 static void collect_xml_node(DomNode* node, StrBuf* sb) {
@@ -5367,8 +5334,7 @@ static void collect_xml_node(DomNode* node, StrBuf* sb) {
         return;
     }
 
-    strbuf_append_char(sb, '<');
-    strbuf_append_str(sb, tag);
+    strbuf_append_all(sb, 2, "<", tag);
     int attr_count = 0;
     const char** attr_names = elem->attribute_names(&attr_count);
     bool has_xlink_attr = false;
@@ -5395,8 +5361,7 @@ static void collect_xml_node(DomNode* node, StrBuf* sb) {
         bool is_xlink_attr = elem->get_attribute(xlink_name) != nullptr;
         strbuf_append_char(sb, ' ');
         if (is_xlink_attr) strbuf_append_str(sb, "xlink:");
-        strbuf_append_str(sb, name);
-        strbuf_append_str(sb, "=\"");
+        strbuf_append_all(sb, 2, name, "=\"");
         const char* value = elem->get_attribute(name);
         if (value) collect_xml_attr_value(value, sb);
         strbuf_append_char(sb, '"');
@@ -5412,8 +5377,7 @@ static void collect_xml_node(DomNode* node, StrBuf* sb) {
         collect_xml_node(child, sb);
         child = dom_next_script_visible_sibling(child);
     }
-    strbuf_append_str(sb, "</");
-    strbuf_append_str(sb, tag);
+    strbuf_append_all(sb, 2, "</", tag);
     strbuf_append_char(sb, '>');
 }
 JS_FORWARD_ITEM(dom_xml_serializer_constructor, (void), make_js_undefined, ())
@@ -6775,14 +6739,9 @@ static Item js_text_control_set_range_text_for_elem(DomElement* elem,
     uint32_t prefix_len = start_u8;
     uint32_t suffix_len = f->current_value_len > end_u8 ? f->current_value_len - end_u8 : 0;
     uint32_t new_len = prefix_len + replacement_len + suffix_len;
-    char* new_value = (char*)mem_alloc((size_t)new_len + 1, MEM_CAT_JS_RUNTIME);
+    char* new_value = mem_join3(old_value, prefix_len, replacement, replacement_len,
+                                old_value + end_u8, suffix_len, MEM_CAT_JS_RUNTIME);
     if (!new_value) return make_js_undefined();
-    if (prefix_len > 0) memcpy(new_value, old_value, prefix_len);
-    if (replacement_len > 0) memcpy(new_value + prefix_len, replacement, replacement_len);
-    if (suffix_len > 0) {
-        memcpy(new_value + prefix_len + replacement_len, old_value + end_u8, suffix_len);
-    }
-    new_value[new_len] = '\0';
 
     uint32_t final_start = old_selection_start;
     uint32_t final_end = old_selection_end;
@@ -8353,9 +8312,9 @@ static Item _build_validity_state(DomElement* elem) {
                 // HTML pattern anchors the whole value (^(?:pattern)$)
                 // Build anchored pattern
                 size_t plen = strlen(pattern);
-                char* full_pattern = (char*)mem_alloc(plen + 8, MEM_CAT_JS_RUNTIME);
+                char* full_pattern = mem_join3("^(?:", 4, pattern, plen, ")$", 2,
+                                               MEM_CAT_JS_RUNTIME);
                 if (full_pattern) {
-                    snprintf(full_pattern, plen + 8, "^(?:%s)$", pattern);
                     Item re = js_create_regex(full_pattern, (int)strlen(full_pattern), "", 0);
                     mem_free(full_pattern);
                     Item val_item = js_name_item(val);
@@ -10497,9 +10456,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         const char* id_str = dom_to_attr_cstr(value);
         if (elem->doc && elem->doc->document_pool) {
             size_t len = strlen(id_str);
-            char* id_copy = (char*)pool_alloc(elem->doc->document_pool, len + 1);
-            memcpy(id_copy, id_str, len);
-            id_copy[len] = '\0';
+            char* id_copy = pool_dup_n(elem->doc->document_pool, id_str, len);
             elem->id = id_copy;
             elem->set_attribute("id", id_str);
             dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
@@ -12337,8 +12294,7 @@ static const char* dom_svg_cascaded_property_value(DomElement* elem,
     if (!serialized || !*serialized) return nullptr;
     size_t length = strlen(serialized);
     if (length >= buffer_size) length = buffer_size - 1;
-    memcpy(buffer, serialized, length);
-    buffer[length] = '\0';
+    str_copy(buffer, buffer_size, serialized, length);
     return buffer;
 }
 
@@ -14071,13 +14027,9 @@ extern "C" Item dom_normalize_bridge(void* elem_ptr) {
                 uint32_t head_u16  = dom_text_utf16_length(text);
                 uint32_t tail_u16  = dom_text_utf16_length(next_text);
                 size_t new_len = text->length + next_text->length;
-                char* combined = (char*)pool_alloc(elem->doc->document_pool, new_len + 1);
+                char* combined = pool_join2(elem->doc->document_pool, text->text, text->length,
+                                            next_text->text, next_text->length);
                 if (!combined) break;
-                if (text->text && text->length > 0)
-                    memcpy(combined, text->text, text->length);
-                if (next_text->text && next_text->length > 0)
-                    memcpy(combined + text->length, next_text->text, next_text->length);
-                combined[new_len] = '\0';
                 String* s = dom_document_create_string(elem->doc, combined, new_len);
                 pool_free(elem->doc->document_pool, combined);
                 if (!s) break;
@@ -16058,9 +16010,7 @@ static Url* dom_make_fallback_url(const char* raw_url) {
     else if (hash) path_end = hash;
 
     size_t pathname_len = (size_t)(path_end - raw_url);
-    char* pathname = (char*)mem_alloc(pathname_len + 1, MEM_CAT_DOM);
-    memcpy(pathname, raw_url, pathname_len);
-    pathname[pathname_len] = '\0';
+    char* pathname = mem_dup_n(raw_url, pathname_len, MEM_CAT_DOM);
 
     url->href = url_create_string(raw_url);
     url->pathname = url_create_string(pathname);

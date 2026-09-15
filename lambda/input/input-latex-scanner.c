@@ -1,4 +1,5 @@
 #include "input-latex-scanner.h"
+#include "../../lib/str.h"
 
 #include <ctype.h>
 #include <string.h>
@@ -54,11 +55,9 @@ size_t latex_scan_command(const char* source, size_t length, size_t start,
     }
     size_t name_length = cursor - name_start;
     if (name_length >= name_capacity) name_length = name_capacity - 1;
-    memcpy(name, source + name_start, name_length);
-    name[name_length] = '\0';
+    str_copy(name, name_length + 1, source + name_start, name_length);
     size_t full_length = cursor - start;
     if (full_length >= full_capacity) full_length = full_capacity - 1;
-    memcpy(full, source + start, full_length);
-    full[full_length] = '\0';
+    str_copy(full, full_length + 1, source + start, full_length);
     return cursor;
 }

@@ -406,9 +406,7 @@ static void fetch_apply_options(JsFetchWork* fw, Item options) {
     Item method_val = dom_realm_get(options, method_key);
     if (get_type_id(method_val) == LMD_TYPE_STRING) {
         String* ms = it2s(method_val);
-        fw->method = (char*)mem_alloc(ms->len + 1, MEM_CAT_JS_RUNTIME);
-        memcpy(fw->method, ms->chars, ms->len);
-        fw->method[ms->len] = '\0';
+        fw->method = mem_dup_n(ms->chars, ms->len, MEM_CAT_JS_RUNTIME);
     }
 
     // body
@@ -416,9 +414,7 @@ static void fetch_apply_options(JsFetchWork* fw, Item options) {
     Item body_val = dom_realm_get(options, body_key);
     if (get_type_id(body_val) == LMD_TYPE_STRING) {
         String* bs = it2s(body_val);
-        fw->body = (char*)mem_alloc(bs->len + 1, MEM_CAT_JS_RUNTIME);
-        memcpy(fw->body, bs->chars, bs->len);
-        fw->body[bs->len] = '\0';
+        fw->body = mem_dup_n(bs->chars, bs->len, MEM_CAT_JS_RUNTIME);
         fw->body_len = bs->len;
     }
 

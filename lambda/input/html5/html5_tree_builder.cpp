@@ -514,13 +514,9 @@ Element* html5_parse_svg_document(Input* input, const char* svg_source, Html5Par
     size_t prefix_len = strlen(prefix);
     size_t body_len = strlen(svg_body);
     size_t suffix_len = strlen(suffix);
-    char* html = (char*)mem_alloc(prefix_len + body_len + suffix_len + 1, MEM_CAT_INPUT_HTML);
+    char* html = mem_join3(prefix, prefix_len, svg_body, body_len, suffix, suffix_len,
+                           MEM_CAT_INPUT_HTML);
     if (!html) return nullptr;
-
-    memcpy(html, prefix, prefix_len);
-    memcpy(html + prefix_len, svg_body, body_len);
-    memcpy(html + prefix_len + body_len, suffix, suffix_len);
-    html[prefix_len + body_len + suffix_len] = '\0';
 
     Element* doc = html5_parse_ex(input, html, opts);
     mem_free(html);
@@ -754,14 +750,7 @@ static bool is_whitespace_token(Html5Token* token) {
     if (token->data == nullptr || token->data->len == 0) {
         return false;
     }
-    // Check if ALL characters are whitespace, not just the first one
-    for (size_t i = 0; i < token->data->len; i++) {
-        char c = token->data->chars[i];
-        if (!(c == '\t' || c == '\n' || c == '\f' || c == '\r' || c == ' ')) {
-            return false;
-        }
-    }
-    return true;
+    return str_all(token->data->chars, token->data->len, str_is_html_space);
 }
 
 // ===== INITIAL MODE =====
@@ -896,15 +885,7 @@ static void html5_process_in_head_mode(Html5Parser* parser, Html5Token* token) {
     // Handle CHARACTER tokens with special whitespace splitting
     if (token->type == HTML5_TOKEN_CHARACTER) {
         if (token->data && token->data->len > 0) {
-            // Check if entire token is whitespace
-            bool all_ws = true;
-            for (size_t i = 0; i < token->data->len; i++) {
-                char c = token->data->chars[i];
-                if (!(c == '\t' || c == '\n' || c == '\f' || c == '\r' || c == ' ')) {
-                    all_ws = false;
-                    break;
-                }
-            }
+            bool all_ws = str_all(token->data->chars, token->data->len, str_is_html_space);
 
             // If entire token is whitespace, insert all and return
             if (all_ws) {
@@ -1180,14 +1161,8 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
         if (token->data && token->data->len > 0) {
             // Reconstruct active formatting elements before inserting text
             // (but not for whitespace-only text)
-            bool has_non_whitespace = false;
-            for (uint32_t i = 0; i < token->data->len; i++) {
-                char c = token->data->chars[i];
-                if (c != '\t' && c != '\n' && c != '\f' && c != '\r' && c != ' ') {
-                    has_non_whitespace = true;
-                    break;
-                }
-            }
+            bool has_non_whitespace = !str_all(token->data->chars, token->data->len,
+                                                str_is_html_space);
             if (has_non_whitespace) {
                 html5_reconstruct_active_formatting_elements(parser);
             }
@@ -2026,16 +2001,8 @@ static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token) 
             }
         }
         // Check if text contains any non-whitespace characters
-        bool has_non_whitespace = false;
-        if (token->data != nullptr && token->data->len > 0) {
-            for (size_t i = 0; i < token->data->len; i++) {
-                char c = token->data->chars[i];
-                if (c != ' ' && c != '\t' && c != '\n' && c != '\f' && c != '\r') {
-                    has_non_whitespace = true;
-                    break;
-                }
-            }
-        }
+        bool has_non_whitespace = token->data != nullptr && token->data->len > 0 &&
+            !str_all(token->data->chars, token->data->len, str_is_html_space);
         if (has_non_whitespace) {
             // Parse error. Foster parent the text.
             log_error("html5: non-whitespace text in table context, foster parenting");

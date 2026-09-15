@@ -89,9 +89,7 @@ static Path* path_alloc_op(Pool* pool, Path* base, LPathSegmentType type,
     path->authority_name = base->authority_name;
     path->int_value = int_value;
     if (name && len > 0 && type == LPATH_SEG_NORMAL) {
-        char* name_copy = (char*)pool_alloc(pool, len + 1);
-        memcpy(name_copy, name, len);
-        name_copy[len] = '\0';
+        char* name_copy = pool_dup_n(pool, name, len);
         path->name = name_copy;
     }
     return path;
@@ -196,9 +194,7 @@ Path* path_new_authority(Pool* pool, int scheme, const char* authority) {
     if (!root) return NULL;
     root->authority_kind = PATH_AUTHORITY_NAMED;
     size_t len = strlen(authority);
-    char* copy = (char*)pool_alloc(pool, len + 1);
-    memcpy(copy, authority, len);
-    copy[len] = '\0';
+    char* copy = pool_dup_n(pool, authority, len);
     root->authority_name = copy;
     return root;
 }
@@ -276,8 +272,7 @@ static void path_print_name(StrBuf* out, const char* seg) {
     // Numeric-looking names must stay quoted so NameKey("1") cannot
     // canonicalize into the distinct IntKey(1) spelling.
     if (all_digits) needs_quote = true;
-    if (needs_quote) strbuf_append_char(out, '\'');
-    strbuf_append_str(out, text);
+    strbuf_append_all(out, 2, needs_quote ? "'" : "", text);
     if (needs_quote) strbuf_append_char(out, '\'');
 }
 
@@ -433,8 +428,7 @@ void path_to_os_path(Path* path, void* out_ptr) {
         strbuf_append_char(out, '/');
 #endif
     } else {
-        strbuf_append_str(out, scheme_names[scheme]);
-        strbuf_append_str(out, "://");
+        strbuf_append_all(out, 2, scheme_names[scheme], "://");
     }
 
     for (int i = ops->length - 1; i >= 0; i--) {

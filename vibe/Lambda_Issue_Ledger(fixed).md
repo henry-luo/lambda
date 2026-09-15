@@ -15,7 +15,7 @@
 
 ## Archive index
 
-This archive contains **95 historical records**: 94 RESOLVED entries and one
+This archive contains **96 historical records**: 95 RESOLVED entries and one
 CLOSED design decision. Duplicate and split records remain separate so their
 provenance is not lost. The first sections contain records formerly
 interleaved with live entries; §15 preserves the 44 records from the former
@@ -1718,5 +1718,28 @@ introducing a new data structure or design rule.
 Regression: `AstBuildAllocationTest.SizedLiteralCopyFailureDoesNotCrash`.
 The focused error suite passes 120/120 and `make test-lambda-baseline` passes
 3976/3976.
+
+### A.14 Design-gap closures
+
+<a id="oi-4"></a>**OI-4 · RegExp semantics · RESOLVED 2026-09-15**
+The runtime now uses selective structural-equivalence routing rather than the
+former token-presence heuristic. `js_regex_scanner_analyze` reduces
+`nullable`, `has_capture`, and `may_skip_capture` facts through a depth-bounded
+open-group stack, with no routing AST. It selects `js_bt_regex` for
+backreferences, assertions, multiline anchors, optional nullable iterations,
+and repeated bodies that may skip a capture; ordinary exact repetition shapes
+remain on RE2.
+
+`js_create_regex` now treats a required backtracker compilation failure as an
+explicit error instead of falling through to RE2. `JsBtExecResult` also
+separates no-match from budget exhaustion and allocation failure; shared
+RegExp/String consumers propagate the latter outcomes without no-match state
+updates. This fulfils the guest-semantics and explicit-failure requirements of
+**D1.3**, **D1.4v3**, and **D8.4.3v2**.
+
+Focused evidence: `test_js_regex_router_poc_gtest` passes its 4,260-case route
+audit, 13-pattern × 765-subject Node differential (zero divergent digests),
+and explicit resource-error probe. `test_js_bt_regex_gtest` passes all 50
+matcher tests, including all three anti-DoS budget tests.
 
 ---

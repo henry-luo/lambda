@@ -299,11 +299,8 @@ static const char* serialize_selector_text(CssRule* rule, Pool* pool) {
 
 static const char* copy_cssom_value_text(const char* value, Pool* pool) {
     if (!value || !pool) return "";
-    size_t len = strlen(value);
-    char* copy = (char*)pool_calloc(pool, len + 1);
+    char* copy = pool_strdup(pool, value);
     if (!copy) return "";
-    memcpy(copy, value, len);
-    copy[len] = '\0';
     return copy;
 }
 
@@ -313,8 +310,7 @@ static void append_rule_declaration_text(StringBuf* buf, CssDeclaration* decl, P
     const char* name = decl->property_name ? decl->property_name : css_property_spelling_from_code(decl->property_code);
     if (!name) return;
 
-    stringbuf_append_str(buf, name);
-    stringbuf_append_str(buf, ": ");
+    stringbuf_append_all(buf, 2, name, ": ");
     stringbuf_append_str(buf, css_serialize_declaration_value(decl, pool));
     if (decl->important) {
         stringbuf_append_str(buf, " !important");
@@ -327,8 +323,7 @@ static const char* serialize_style_rule_css_text(CssRule* rule, Pool* pool) {
     StringBuf* buf = stringbuf_new(pool);
     if (!buf) return "";
 
-    stringbuf_append_str(buf, serialize_selector_text(rule, pool));
-    stringbuf_append_str(buf, "{");
+    stringbuf_append_all(buf, 2, serialize_selector_text(rule, pool), "{");
     for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
         CssDeclaration* decl = rule->data.style_rule.declarations[i];
         if (!decl) continue;
@@ -599,9 +594,7 @@ extern "C" Item dom_cssom_rule_get_selector_text(Item rule_item) {
     if (rule->parent && sel_text && sel_text[0] != '\0') {
         // Always prepend '& ' for nested selectors
         size_t len = strlen(sel_text);
-        char* nested_text = (char*)pool_calloc(pool, len + 3);
-        memcpy(nested_text, "& ", 2);
-        memcpy(nested_text + 2, sel_text, len + 1);
+        char* nested_text = pool_join2(pool, "& ", 2, sel_text, len);
         return make_string_item(nested_text);
     }
     return make_string_item(sel_text);
@@ -842,8 +835,7 @@ extern "C" Item dom_cssom_rule_decl_set_property(Item decl_item, Item prop_name,
         // create a declaration with the canonical value
         CssDeclaration* new_decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
         if (!new_decl) return value;
-        new_decl->property_name = (char*)pool_alloc(pool, strlen(css_prop) + 1);
-        if (new_decl->property_name) strcpy((char*)new_decl->property_name, css_prop); // UNSAFE_LIBC_OK: dst allocated with strlen(css_prop)+1
+        new_decl->property_name = pool_strdup(pool, css_prop);
         new_decl->value_text = canonical;
         new_decl->value_text_len = strlen(canonical);
         new_decl->valid = true;
@@ -1243,13 +1235,11 @@ static Item js_css_supports(Item* args, int argc) {
         // check if property is known (custom properties always pass). Keep the
         // complete JS string; CSS parsing is length-aware and must not truncate.
         size_t prop_len = prop_s->len;
-        char* prop_buf = (char*)pool_alloc(pool, prop_len + 1);
+        char* prop_buf = pool_dup_n(pool, prop_s->chars, prop_len);
         if (!prop_buf) {
             if (free_pool) mem_pool_destroy(pool);
             return (Item){.item = b2it(false)};
         }
-        memcpy(prop_buf, prop_s->chars, prop_len);
-        prop_buf[prop_len] = '\0';
 
         bool is_custom = (prop_len >= 2 && prop_buf[0] == '-' && prop_buf[1] == '-');
         if (!is_custom) {

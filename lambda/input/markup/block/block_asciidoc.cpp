@@ -26,7 +26,7 @@ extern Item parse_inline_spans(MarkupParser* parser, const char* text);
  */
 static const char* get_admonition_type(const char* line, const char** out_content) {
     const char* p = line;
-    while (*p == ' ' || *p == '\t') p++;
+    p = str_skip_line_space(p);
 
     const char* type = nullptr;
     const char* content = nullptr;
@@ -124,7 +124,7 @@ Item parse_asciidoc_admonition(MarkupParser* parser, const char* line) {
 
         // Check if next line is another block type
         const char* p = next_line;
-        while (*p == ' ' || *p == '\t') p++;
+        p = str_skip_line_space(p);
 
         // If it starts with an admonition label, header marker, etc., stop
         if (get_admonition_type(next_line, nullptr) ||
@@ -181,7 +181,7 @@ Item parse_asciidoc_definition_list(MarkupParser* parser, const char* line) {
             if (parser->current_line < parser->line_count) {
                 const char* next = parser->lines[parser->current_line];
                 const char* p = next;
-                while (*p == ' ' || *p == '\t') p++;
+                p = str_skip_line_space(p);
 
                 // If not a definition term, end the list
                 bool is_term = false;
@@ -201,7 +201,7 @@ Item parse_asciidoc_definition_list(MarkupParser* parser, const char* line) {
 
         // Find :: marker
         const char* p = current;
-        while (*p == ' ' || *p == '\t') p++;
+        p = str_skip_line_space(p);
 
         const char* term_start = p;
         while (*p && !(*p == ':' && *(p+1) == ':')) {
@@ -219,17 +219,14 @@ Item parse_asciidoc_definition_list(MarkupParser* parser, const char* line) {
         while (*p == ':') p++;
 
         // Skip whitespace after colons
-        while (*p == ' ' || *p == '\t') p++;
+        p = str_skip_line_space(p);
 
         // Create term element
         Element* dt = create_element(parser, "dt");
         if (dt) {
             size_t term_len = term_end - term_start;
-            char* term_text = (char*)mem_alloc(term_len + 1, MEM_CAT_INPUT_MARKUP);
+            char* term_text = mem_dup_n(term_start, term_len, MEM_CAT_INPUT_MARKUP);
             if (term_text) {
-                memcpy(term_text, term_start, term_len);
-                term_text[term_len] = '\0';
-
                 Item term_content = parse_inline_spans(parser, term_text);
                 if (term_content.item != ITEM_ERROR && term_content.item != ITEM_UNDEFINED) {
                     list_push((List*)dt, term_content);
@@ -275,7 +272,7 @@ const char* parse_asciidoc_attribute(MarkupParser* parser, const char* line,
     if (!parser || !line) return nullptr;
 
     const char* p = line;
-    while (*p == ' ' || *p == '\t') p++;
+    p = str_skip_line_space(p);
 
     if (*p != '[') return nullptr;
     p++;
@@ -286,8 +283,7 @@ const char* parse_asciidoc_attribute(MarkupParser* parser, const char* line,
     size_t len = p - start;
     if (len == 0 || len >= buf_size) return nullptr;
 
-    memcpy(attr_buf, start, len);
-    attr_buf[len] = '\0';
+    str_copy(attr_buf, buf_size, start, len);
 
     return attr_buf;
 }
@@ -297,7 +293,7 @@ const char* parse_asciidoc_attribute(MarkupParser* parser, const char* line,
  */
 const char* get_asciidoc_language(const char* line, char* lang_buf, size_t buf_size) {
     const char* p = line;
-    while (*p == ' ' || *p == '\t') p++;
+    p = str_skip_line_space(p);
 
     if (*p != '[') return nullptr;
 
@@ -314,8 +310,7 @@ const char* get_asciidoc_language(const char* line, char* lang_buf, size_t buf_s
     size_t len = end - comma;
     if (len == 0 || len >= buf_size) return nullptr;
 
-    memcpy(lang_buf, comma, len);
-    lang_buf[len] = '\0';
+    str_copy(lang_buf, buf_size, comma, len);
 
     return lang_buf;
 }

@@ -136,8 +136,7 @@ static bool svg_find_root_attr(const char* svg, const char* tag_end, const char*
         if (attr_len == name_len && strncmp(attr_start, name, name_len) == 0) {
             size_t value_len = (size_t)(value_end - value_start);
             if (value_len >= out_cap) value_len = out_cap - 1;
-            memcpy(out, value_start, value_len);
-            out[value_len] = '\0';
+            str_copy(out, out_cap, value_start, value_len);
             return true;
         }
     }
@@ -181,12 +180,12 @@ static bool svg_parse_definite_length_attr(const char* value, float* out_value) 
     if (!value || !out_value) return false;
 
     const char* p = value;
-    while (*p && isspace((unsigned char)*p)) p++;
-    char* end_ptr = NULL;
-    float length = strtof(p, &end_ptr);
-    if (end_ptr == p || length <= 0.0f) return false;
+    p = str_skip_ascii_space(p);
+    char* parsed_end = NULL;
+    float length = strtof(p, &parsed_end);
+    if (parsed_end == p || length <= 0.0f) return false;
 
-    while (*end_ptr && isspace((unsigned char)*end_ptr)) end_ptr++;
+    const char* end_ptr = str_skip_ascii_space(parsed_end);
     if (*end_ptr == '%') return false;
     if (strncmp(end_ptr, "px", 2) == 0 || *end_ptr == '\0') {
         *out_value = length;

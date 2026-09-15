@@ -1,6 +1,7 @@
 #include "html5_token.h"
 #include "../../io/mark_builder.hpp"
 #include "../../../lib/log.h"
+#include "../../../lib/string.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -45,12 +46,8 @@ Html5Token* html5_token_create_character(Pool* pool, Arena* arena, char c) {
     Html5Token* token = (Html5Token*)pool_calloc(pool, sizeof(Html5Token));
     token->type = HTML5_TOKEN_CHARACTER;
 
-    // Create single-character string using arena
-    String* s = (String*)arena_alloc(arena, sizeof(String) + 2);
-    s->len = 1;
-    s->flags = 0;
-    s->chars[0] = c;
-    s->chars[1] = '\0';
+    // Create the token text in the parser arena.
+    String* s = string_from_strview_arena(strview_init(&c, 1), arena);
 
     token->data = s;
     token->pool = pool;
@@ -62,12 +59,8 @@ Html5Token* html5_token_create_character_string(Pool* pool, Arena* arena, const 
     Html5Token* token = (Html5Token*)pool_calloc(pool, sizeof(Html5Token));
     token->type = HTML5_TOKEN_CHARACTER;
 
-    // Create multi-character string using arena
-    String* s = (String*)arena_alloc(arena, sizeof(String) + len + 1);
-    s->len = len;
-    s->flags = 0;
-    memcpy(s->chars, chars, len);
-    s->chars[len] = '\0';
+    // Create the token text in the parser arena.
+    String* s = string_from_strview_arena(strview_init(chars, (size_t)len), arena);
 
     token->data = s;
     token->pool = pool;

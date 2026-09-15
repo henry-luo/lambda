@@ -5,6 +5,7 @@
 #include "../../../lib/file.h"
 #include "../../../lib/log.h"
 #include "../../../lib/memtrack.h"
+#include "../../../lib/str.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -117,7 +118,7 @@ static bool is_esm_file(const char* file_path) {
     char dir[2048];
     char* dirname = file_path_dirname(file_path);
     if (!dirname) return false;
-    strncpy(dir, dirname, sizeof(dir) - 1);
+    str_copy(dir, sizeof(dir), dirname, strlen(dirname));
     mem_free(dirname);
 
     while (dir[0]) {
@@ -137,7 +138,7 @@ static bool is_esm_file(const char* file_path) {
             mem_free(parent);
             break;
         }
-        strncpy(dir, parent, sizeof(dir) - 1);
+        str_copy(dir, sizeof(dir), parent, strlen(parent));
         mem_free(parent);
     }
     return false; // default: CJS
@@ -267,8 +268,7 @@ NpmModuleResolution npm_resolve_module(const char* specifier,
 
     // walk up from from_dir looking for node_modules/<pkg_name>
     char dir[2048];
-    strncpy(dir, from_dir, sizeof(dir) - 1);
-    dir[sizeof(dir) - 1] = '\0';
+    str_copy(dir, sizeof(dir), from_dir, strlen(from_dir));
 
     while (dir[0]) {
         char nm_path[2048];
@@ -305,7 +305,7 @@ NpmModuleResolution npm_resolve_module(const char* specifier,
             mem_free(parent);
             break;
         }
-        strncpy(dir, parent, sizeof(dir) - 1);
+        str_copy(dir, sizeof(dir), parent, strlen(parent));
         mem_free(parent);
     }
 

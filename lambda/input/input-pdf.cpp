@@ -8,6 +8,7 @@
 #include "lib/log.h"
 #include "lib/str.h"
 #include <stdlib.h>
+#include "../../lib/string.h"
 
 using namespace lambda;
 
@@ -130,8 +131,7 @@ static PdfCsReadResult pdf_cs_read_number(MarkBuilder& builder, const char* p, c
     size_t len = (size_t)(q - p);
     char buf[128];
     if (len >= sizeof(buf)) len = sizeof(buf) - 1;
-    memcpy(buf, p, len);
-    buf[len] = '\0';
+    str_copy(buf, sizeof(buf), p, len);
     if (has_dot) return {builder.createFloat(strtod(buf, nullptr)), q, true};
     return {builder.createInt(strtoll(buf, nullptr, 10)), q, true};
 }
@@ -994,13 +994,9 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict, siz
     // Store stream data as a string (truncated for safety)
     String* data_key = ctx.builder.createString("data");
     if (data_key) {
-        String* stream_data;
-        stream_data = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + data_length + 1);
+        String* stream_data = string_from_strview(strview_init(*pdf, data_length),
+                                                  ctx.input()->pool);
         if (stream_data) {
-            memcpy(stream_data->chars, *pdf, data_length);
-            stream_data->chars[data_length] = '\0';
-            stream_data->len = data_length;
-
             Item data_item = {.item = s2it(stream_data)};
             ctx.builder.putToMap(lam::gc_borrow(stream_map), data_key, data_item);
 
@@ -1115,12 +1111,9 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
                                                 // Store flag
                                                 String* flag_key = ctx.builder.createString("flag");
                                                 if (flag_key) {
-                                                    String* flag_val;
-                                                    flag_val = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 2);
+                                                    String* flag_val = string_from_strview(
+                                                        strview_init(&flag, 1), ctx.input()->pool);
                                                     if (flag_val) {
-                                                        flag_val->chars[0] = flag;
-                                                        flag_val->chars[1] = '\0';
-                                                        flag_val->len = 1;
                                                         Item flag_item = {.item = s2it(flag_val)};
                                                         ctx.builder.putToMap(lam::gc_borrow(entry_map), flag_key, flag_item);
                                                     }

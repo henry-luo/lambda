@@ -11,6 +11,7 @@
 #include "../../lib/file.h"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
+#include "../../lib/string.h"
 #include "../../lib/mime-detect.h"
 
 // Structure to hold response data
@@ -392,21 +393,11 @@ Input* input_from_http_with_name_parent(const char* url, const char* type,
     String* flavor_str = NULL;
 
     if (type) {
-        type_str = (String*)mem_alloc(sizeof(String) + strlen(type) + 1, MEM_CAT_INPUT_OTHER);
-        if (type_str) {
-            type_str->len = strlen(type);
-            type_str->flags = 0;
-            str_copy(type_str->chars, type_str->len + 1, type, type_str->len);
-        }
+        type_str = string_from_strview_mem(strview_from_cstr(type), MEM_CAT_INPUT_OTHER);
     }
 
     if (flavor) {
-        flavor_str = (String*)mem_alloc(sizeof(String) + strlen(flavor) + 1, MEM_CAT_INPUT_OTHER);
-        if (flavor_str) {
-            flavor_str->len = strlen(flavor);
-            flavor_str->flags = 0;
-            str_copy(flavor_str->chars, flavor_str->len + 1, flavor, flavor_str->len);
-        }
+        flavor_str = string_from_strview_mem(strview_from_cstr(flavor), MEM_CAT_INPUT_OTHER);
     }
 
     // Parse content using existing input system
@@ -440,8 +431,8 @@ static size_t header_callback(char* buffer, size_t size, size_t nitems, FetchRes
 
     // Extract Content-Type header
     if (str_istarts_with_const(buffer, header_size, "content-type:")) {
-        char* value_start = buffer + 13;
-        while (*value_start == ' ' || *value_start == '\t') value_start++;
+        const char* value_start = buffer + 13;
+        value_start = str_skip_line_space(value_start);
 
         size_t value_len = header_size - (value_start - buffer);
         // Remove trailing CRLF
@@ -450,22 +441,15 @@ static size_t header_callback(char* buffer, size_t size, size_t nitems, FetchRes
         }
 
         if (response->content_type) mem_free(response->content_type);
-        response->content_type = (char*)mem_alloc(value_len + 1, MEM_CAT_INPUT_OTHER);
-        if (response->content_type) {
-            memcpy(response->content_type, value_start, value_len);
-            response->content_type[value_len] = '\0';
-        }
+        response->content_type = mem_dup_n(value_start, value_len, MEM_CAT_INPUT_OTHER);
     }
 
     // Store all headers
     response->response_headers = (char**)mem_realloc(response->response_headers,
                                                (response->response_header_count + 1) * sizeof(char*), MEM_CAT_INPUT_OTHER);
     if (response->response_headers) {
-        char* header_copy = (char*)mem_alloc(header_size + 1, MEM_CAT_INPUT_OTHER);
+        char* header_copy = mem_dup_n(buffer, header_size, MEM_CAT_INPUT_OTHER);
         if (header_copy) {
-            memcpy(header_copy, buffer, header_size);
-            header_copy[header_size] = '\0';
-
             // Remove trailing CRLF
             size_t len = header_size;
             while (len > 0 && (header_copy[len-1] == '\r' || header_copy[len-1] == '\n')) {

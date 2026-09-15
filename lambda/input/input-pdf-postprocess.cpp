@@ -28,6 +28,7 @@
 #include "lib/base64.h"
 #include "lib/byte_builder.h"
 #include "lib/str.h"
+#include "lib/string.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -909,16 +910,12 @@ static void decompress_streams(Input* input, MarkBuilder& builder, Array* object
         const char* dec = get_decompressed_stream(sm, &out_len, &needs_free);
         if (!dec) continue;
 
-        // Pool-allocate the new String so it survives with the input pool.
-        String* new_data = (String*)pool_calloc(input->pool, sizeof(String) + out_len + 1);
+        // Copy decompressed bytes into a String owned by the input pool.
+        String* new_data = string_from_strview(strview_init(dec, out_len), input->pool);
         if (!new_data) {
             if (needs_free) mem_free((void*)dec);
             continue;
         }
-        memcpy(new_data->chars, dec, out_len);
-        new_data->chars[out_len] = '\0';
-        new_data->len = (uint32_t)out_len;
-        new_data->is_ascii = 1;
         // Buffers from pdf_decompress_stream are mem_alloc'd, not malloc'd —
         // must use mem_free() to avoid corrupting the memtrack tinfo header.
         if (needs_free) mem_free((void*)dec);
@@ -975,13 +972,7 @@ static int osp_hex_value(char c) {
 }
 
 static String* osp_make_string(Input* input, const char* data, size_t len) {
-    String* s = (String*)pool_calloc(input->pool, sizeof(String) + len + 1);
-    if (!s) return nullptr;
-    if (len > 0) memcpy(s->chars, data, len);
-    s->chars[len] = '\0';
-    s->len = (uint32_t)len;
-    s->is_ascii = 1;
-    return s;
+    return string_from_strview(strview_init(data, len), input->pool);
 }
 
 static String* osp_parse_name(ObjStreamParser* p) {

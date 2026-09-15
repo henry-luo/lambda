@@ -223,11 +223,8 @@ void lambda_home_init(void) {
 char* lambda_home_path(const char* rel) {
     size_t home_len = strlen(g_lambda_home);
     size_t rel_len  = strlen(rel);
-    char* out = (char*)mem_alloc(home_len + 1 + rel_len + 1, MEM_CAT_SYSTEM);
+    char* out = mem_join3(g_lambda_home, home_len, "/", 1, rel, rel_len, MEM_CAT_SYSTEM);
     if (!out) return NULL;
-    memcpy(out, g_lambda_home, home_len);
-    out[home_len] = '/';
-    memcpy(out + home_len + 1, rel, rel_len + 1);
     return out;
 }
 
@@ -1563,9 +1560,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         new_script->directory = mem_strdup(runtime->import_base_dir, MEM_CAT_SYSTEM);
     } else if (last_slash) {
         int dir_len = (int)(last_slash - lookup_path + 1);
-        char* dir = (char*)mem_alloc(dir_len + 1, MEM_CAT_SYSTEM);
-        memcpy(dir, lookup_path, dir_len);
-        dir[dir_len] = '\0';
+        char* dir = mem_dup_n(lookup_path, dir_len, MEM_CAT_SYSTEM);
         new_script->directory = dir;
     } else {
         new_script->directory = mem_strdup("./", MEM_CAT_SYSTEM);

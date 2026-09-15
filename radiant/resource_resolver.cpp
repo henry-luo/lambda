@@ -4,6 +4,7 @@
 #include "../lib/url.h"
 #include "../lib/file.h"
 #include "../lambda/input/css/css_parser.hpp"
+#include "../lib/str.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -75,12 +76,9 @@ static char* radiant_try_wpt_root(const char* root, const char* href,
         const char* query = strpbrk(path, "?#");
         size_t path_len = query ? (size_t)(query - path) : strlen(path);
         size_t separator = i == 0 ? 0 : 1;
-        char* candidate = (char*)mem_alloc(root_len + path_len + separator + 1, category);
+        char* candidate = mem_join3(root, root_len, separator ? "/" : "", separator,
+                                    path, path_len, category);
         if (!candidate) continue;
-        memcpy(candidate, root, root_len);
-        if (separator) candidate[root_len++] = '/';
-        memcpy(candidate + root_len, path, path_len);
-        candidate[root_len + path_len] = '\0';
         if (file_exists(candidate)) return candidate;
         mem_free(candidate);
     }
@@ -92,11 +90,8 @@ static char* radiant_try_wpt_prefix(const char* prefix, size_t prefix_len,
                                     MemCategory category) {
     if (!prefix || prefix_len == 0) return nullptr;
     size_t suffix_len = suffix ? strlen(suffix) : 0;
-    char* root = (char*)mem_alloc(prefix_len + suffix_len + 1, category);
+    char* root = mem_join2(prefix, prefix_len, suffix, suffix_len, category);
     if (!root) return nullptr;
-    memcpy(root, prefix, prefix_len);
-    if (suffix_len) memcpy(root + prefix_len, suffix, suffix_len);
-    root[prefix_len + suffix_len] = '\0';
     char* result = radiant_try_wpt_root(root, href, category);
     mem_free(root);
     return result;
@@ -196,10 +191,8 @@ char* radiant_resolve_resource_path(const char* href, const char* base_path,
         if (slash) {
             size_t dir_len = (size_t)(slash - base_path) + 1;
             size_t href_len = strlen(href);
-            char* joined = (char*)mem_alloc(dir_len + href_len + 1, category);
+            char* joined = mem_join2(base_path, dir_len, href, href_len, category);
             if (joined) {
-                memcpy(joined, base_path, dir_len);
-                memcpy(joined + dir_len, href, href_len + 1);
                 mem_free(resolved);
                 return joined;
             }
@@ -281,7 +274,7 @@ bool radiant_resolve_shared_data_resource_path(const char* href, const char* bas
 
     // Local file runs open category pages directly, but browser references serve
     // shared res/... assets from the layout/data root.
-    memcpy(out_path, local_base, data_root_len);
+    str_copy(out_path, out_size, local_base, data_root_len);
     out_path[data_root_len] = '/';
     memcpy(out_path + data_root_len + 1, rel_href, href_len);
     out_path[data_root_len + 1 + href_len] = '\0';
@@ -328,10 +321,10 @@ bool radiant_resolve_layout_support_resource_path(const char* href, const char* 
 
     size_t data_root_len = data_marker - base_local + marker_prefix_len + strlen("data");
     if (data_root_len + strlen("/support") + strlen(href) + 1 > out_size) return false;
-    memcpy(out_path, base_local, data_root_len);
-    out_path[data_root_len] = '\0';
-    strncat(out_path, "/support", out_size - strlen(out_path) - 1);
-    strncat(out_path, href, out_size - strlen(out_path) - 1);
+    str_copy(out_path, out_size, base_local, data_root_len);
+    size_t out_len = str_cat(out_path, data_root_len, out_size, "/support",
+                             sizeof("/support") - 1);
+    str_cat(out_path, out_len, out_size, href, strlen(href));
     if (access(out_path, R_OK) == 0) return true;
     return radiant_resolve_wpt_root_resource_path(href, out_path, out_size);
 }

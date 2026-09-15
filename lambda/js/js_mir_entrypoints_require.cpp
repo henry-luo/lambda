@@ -12,6 +12,7 @@
 #include "../../lib/file.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/path_str.h"
+#include "../../lib/str.h"
 #include "../../lib/time_util.h"
 #include <cstdio>
 #include <cstdlib>
@@ -668,13 +669,11 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     log_debug("js-mir: starting direct MIR transpilation for '%s'", filename ? filename : "<string>");
     log_mem_stage("js-core: enter");
 
-    char* owned_source = (char*)mem_alloc(js_source_len + 1, MEM_CAT_JS_RUNTIME);
+    char* owned_source = mem_dup_n(js_source, js_source_len, MEM_CAT_JS_RUNTIME);
     if (!owned_source) {
         log_error("js-mir: failed to allocate source buffer");
         return (Item){.item = ITEM_ERROR};
     }
-    memcpy(owned_source, js_source, js_source_len);
-    owned_source[js_source_len] = '\0';
     js_source = owned_source;
     jm_track_active_js_transpile(NULL, NULL, owned_source);
 
@@ -714,11 +713,9 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
             abs_path, dir_len, dir_str);
         if (off < 0 || (size_t)off >= sizeof(commonjs_header)) off = 0;
         size_t insert_at = js_commonjs_injection_offset(js_source, js_source_len);
-        injected_source = (char*)mem_alloc(js_source_len + (size_t)off + 1, MEM_CAT_JS_RUNTIME);
-        memcpy(injected_source, js_source, insert_at);
-        memcpy(injected_source + insert_at, commonjs_header, (size_t)off);
-        memcpy(injected_source + insert_at + (size_t)off, js_source + insert_at, js_source_len - insert_at);
-        injected_source[js_source_len + (size_t)off] = '\0';
+        injected_source = mem_join3(js_source, insert_at, commonjs_header, (size_t)off,
+                                    js_source + insert_at, js_source_len - insert_at,
+                                    MEM_CAT_JS_RUNTIME);
         jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
         owned_source = injected_source;
@@ -1841,7 +1838,7 @@ static char* js_require_read_resolved_path_internal(char* path_buf, int path_buf
         if (source) return source;
     }
     if (plen + strlen("/index.js") < (size_t)path_buf_size) {
-        strncat(path_buf, "/index.js", path_buf_size - strlen(path_buf) - 1);
+        str_cat(path_buf, plen, path_buf_size, "/index.js", sizeof("/index.js") - 1);
         source = js_require_read_source(path_buf);
         if (source) {
             js_require_canonicalize_existing_path(path_buf, path_buf_size);

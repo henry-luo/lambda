@@ -697,12 +697,7 @@ Item fn_normalize(Item str_item, Item type_item) {
     }
 
     // Create new string with normalized content
-    String* result = (String*)heap_alloc(sizeof(String) + normalized_len + 1, LMD_TYPE_STRING);
-    result->len = normalized_len;
-    result->flags = 0;
-    result->is_ascii = str_is_ascii((const char*)normalized, normalized_len) ? 1 : 0;
-    memcpy(result->chars, normalized, normalized_len);
-    result->chars[normalized_len] = '\0';
+    String* result = heap_strcpy((const char*)normalized, normalized_len);
 
     // utf8proc_map allocates outside Lambda memtrack; keep the allocator pair matched.
     free_utf8proc_result((char*)normalized);
@@ -4533,12 +4528,7 @@ String* fn_format2(Item item, Item type) {
         }
 
         size_t len = buf->length;
-        String* result = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
-        result->len = len;
-        result->flags = 0;
-        result->is_ascii = 1;  // datetime format strings are always ASCII
-        memcpy(result->chars, buf->str, len);
-        result->chars[len] = '\0';
+        String* result = heap_strcpy(buf->str, len);
         strbuf_free(buf);
         return result;
     }
@@ -5464,8 +5454,7 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
         result->len = result_len;
         result->flags = 0;
         result->is_ascii = 1;
-        memcpy(result->chars, chars + start, result_len);
-        result->chars[result_len] = '\0';
+        str_copy(result->chars, result_len + 1, chars + start, result_len);
         return {.item = s2it(result)};
     }
 
@@ -5502,8 +5491,7 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
     result->len = result_len;
     result->flags = 0;
     result->is_ascii = 0;  // UTF-8 path — not necessarily ASCII
-    memcpy(result->chars, chars + byte_start, result_len);
-    result->chars[result_len] = '\0';
+    str_copy(result->chars, result_len + 1, chars + byte_start, result_len);
 
     return {.item = s2it(result)};
 }
@@ -5788,8 +5776,7 @@ Item fn_trim(Item str_item) {
     result->len = result_len;
     result->flags = 0;
     result->is_ascii = str_is_ascii(chars + start, result_len) ? 1 : 0;
-    memcpy(result->chars, chars + start, result_len);
-    result->chars[result_len] = '\0';
+    str_copy(result->chars, result_len + 1, chars + start, result_len);
     return {.item = s2it(result)};
 }
 
@@ -5837,8 +5824,7 @@ Item fn_trim_start(Item str_item) {
     result->len = result_len;
     result->flags = 0;
     result->is_ascii = str_is_ascii(chars + start, result_len) ? 1 : 0;
-    memcpy(result->chars, chars + start, result_len);
-    result->chars[result_len] = '\0';
+    str_copy(result->chars, result_len + 1, chars + start, result_len);
     return {.item = s2it(result)};
 }
 
@@ -5886,8 +5872,7 @@ Item fn_trim_end(Item str_item) {
     result->len = end;
     result->flags = 0;
     result->is_ascii = str_is_ascii(chars, end) ? 1 : 0;
-    memcpy(result->chars, chars, end);
-    result->chars[end] = '\0';
+    str_copy(result->chars, end + 1, chars, end);
     return {.item = s2it(result)};
 }
 
@@ -6039,12 +6024,7 @@ Item fn_url_resolve(Item base_item, Item relative_item) {
     }
 
     uint32_t len = (uint32_t)strlen(href);
-    String* result = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
-    result->len = len;
-    result->flags = 0;
-    result->is_ascii = 1;  // URLs are ASCII
-    memcpy(result->chars, href, len);
-    result->chars[len] = '\0';
+    String* result = heap_strcpy(href, len);
 
     url_destroy(resolved);
     url_destroy(base_url);
@@ -6076,8 +6056,7 @@ static String* split_heap_string_slice(Rooted<Item>& rooted_source, size_t offse
     // A source's false bit is conservative, but its true bit proves every
     // substring ASCII. This avoids re-scanning each copied split segment.
     part->is_ascii = source_is_ascii ? 1 : 0;
-    memcpy(part->chars, chars, len);
-    part->chars[len] = '\0';
+    str_copy(part->chars, len + 1, chars, len);
     return part;
 }
 
@@ -8396,8 +8375,7 @@ void cow_profile_dump(void) {
         "string_generic_joins"
     };
     for (int i = 0; i < STRING_BUILDER_COUNTER_COUNT; i++) {
-        strbuf_append_char(output, '\n');
-        strbuf_append_str(output, string_counters[i]);
+        strbuf_append_all(output, 2, "\n", string_counters[i]);
         strbuf_append_char(output, '\t');
         strbuf_append_uint64(output, g_cow_profile.string_builder[i]);
     }

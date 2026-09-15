@@ -108,7 +108,7 @@ public:
         const char* p = line;
 
         // skip leading whitespace
-        while (*p == ' ' || *p == '\t') p++;
+        p = str_skip_line_space(p);
 
         if (strncmp(p, "NOTE:", 5) == 0) {
             info.type = AdmonitionType::NOTE;
@@ -162,7 +162,7 @@ public:
         const char* p = line;
 
         // skip leading whitespace
-        while (*p == ' ' || *p == '\t') p++;
+        p = str_skip_line_space(p);
 
         if (*p != '[') return info;
         p++;
@@ -232,7 +232,7 @@ public:
         const char* p = line;
 
         // skip leading whitespace
-        while (*p == ' ' || *p == '\t') p++;
+        p = str_skip_line_space(p);
 
         info.term_start = p;
 
@@ -255,7 +255,7 @@ public:
         if (info.colons < 2) return info;
 
         // skip whitespace after colons
-        while (*p == ' ' || *p == '\t') p++;
+        p = str_skip_line_space(p);
 
         info.def_start = p;
         info.valid = true;
@@ -268,7 +268,7 @@ public:
      */
     bool isDelimitedBlockStart(const char* line, char* out_char = nullptr, int* out_len = nullptr) {
         const char* p = line;
-        while (*p == ' ' || *p == '\t') p++;
+        p = str_skip_line_space(p);
 
         // check for 4+ repeated characters
         if (*p == '=' || *p == '*' || *p == '_' || *p == '-' || *p == '+') {
@@ -277,7 +277,7 @@ public:
             while (*p == c) { len++; p++; }
 
             // skip trailing whitespace
-            while (*p == ' ' || *p == '\t') p++;
+            p = str_skip_line_space(p);
 
             if (len >= 4 && (*p == '\0' || *p == '\n' || *p == '\r')) {
                 if (out_char) *out_char = c;
@@ -298,7 +298,7 @@ public:
             while (*p == '=') { level++; p++; }
 
             if (*p == ' ' || *p == '\t') {
-                while (*p == ' ' || *p == '\t') p++;
+                p = str_skip_line_space(p);
                 info.level = level > 6 ? 6 : level;
                 info.text_start = p;
                 info.text_end = p + strlen(p);
@@ -322,7 +322,7 @@ public:
         // Setext-style with underlines (next_line check)
         if (!info.valid && next_line) {
             const char* ul = next_line;
-            while (*ul == ' ' || *ul == '\t') ul++;
+            ul = str_skip_line_space(ul);
             if (!*ul) return info;
             static const char* ul_chars = "=-~^+";
             if (str_char_in_set(*ul, ul_chars)) {
@@ -575,7 +575,7 @@ public:
     bool detectIncludeDirective(const char* line, const char** path_start = nullptr,
                                  const char** path_end = nullptr) {
         const char* p = line;
-        while (*p == ' ' || *p == '\t') p++;
+        p = str_skip_line_space(p);
 
         if (strncmp(p, "include::", 9) != 0) return false;
 

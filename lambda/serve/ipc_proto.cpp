@@ -6,6 +6,8 @@
 #include "http_request.hpp"
 #include "http_response.hpp"
 #include "../../lib/strbuf.h"
+#include "../../lib/escape.h"
+#include "../../lib/str.h"
 #include "../../lib/log.h"
 
 #include "../../lib/mem.h"
@@ -16,16 +18,7 @@
 // ── JSON string escaping ──
 
 static void json_escape_str(StrBuf* buf, const char* s) {
-    strbuf_append_char(buf, '"');
-    for (const char* p = s; *p; p++) {
-        if (*p == '"')      strbuf_append_str(buf, "\\\"");
-        else if (*p == '\\') strbuf_append_str(buf, "\\\\");
-        else if (*p == '\n') strbuf_append_str(buf, "\\n");
-        else if (*p == '\r') strbuf_append_str(buf, "\\r");
-        else if (*p == '\t') strbuf_append_str(buf, "\\t");
-        else                 strbuf_append_char(buf, *p);
-    }
-    strbuf_append_char(buf, '"');
+    escape_append_json_string(buf, s ? s : "", s ? strlen(s) : 0, true, false);
 }
 
 // ── request serialization ──
@@ -36,8 +29,7 @@ char* ipc_build_request(HttpRequest* req, int request_id) {
     strbuf_append_str(buf, "{\"type\":\"request\",\"id\":");
     strbuf_append_int(buf, request_id);
 
-    strbuf_append_str(buf, ",\"method\":\"");
-    strbuf_append_str(buf, http_method_to_string(req->method));
+    strbuf_append_all(buf, 2, ",\"method\":\"", http_method_to_string(req->method));
     strbuf_append_char(buf, '"');
 
     strbuf_append_str(buf, ",\"path\":");
@@ -72,9 +64,7 @@ char* ipc_build_request(HttpRequest* req, int request_id) {
     strbuf_append_char(buf, '"');
     strbuf_append_str(buf, "}\n");
 
-    size_t len = buf->length;
-    char* result = (char*)mem_alloc(len + 1, MEM_CAT_SERVE);
-    if (result) memcpy(result, buf->str, len + 1);
+    char* result = mem_strdup(buf->str, MEM_CAT_SERVE);
     strbuf_free(buf);
     return result;
 }
@@ -127,10 +117,8 @@ void ipc_parse_response(const char* json, int json_len, HttpResponse* resp) {
 
                 char name_buf[256], val_buf[1024];
                 if (name_len < (int)sizeof(name_buf) && val_len < (int)sizeof(val_buf)) {
-                    memcpy(name_buf, name_start, name_len);
-                    name_buf[name_len] = '\0';
-                    memcpy(val_buf, val_start, val_len);
-                    val_buf[val_len] = '\0';
+                    str_copy(name_buf, sizeof(name_buf), name_start, name_len);
+                    str_copy(val_buf, sizeof(val_buf), val_start, val_len);
                     http_response_set_header(resp, name_buf, val_buf);
                 }
 
@@ -148,11 +136,8 @@ void ipc_parse_response(const char* json, int json_len, HttpResponse* resp) {
         const char* body_end = strchr(body_field, '"');
         if (body_end) {
             int b64_len = (int)(body_end - body_field);
-            char* b64 = (char*)mem_alloc(b64_len + 1, MEM_CAT_SERVE);
+            char* b64 = mem_dup_n(body_field, b64_len, MEM_CAT_SERVE);
             if (b64) {
-                memcpy(b64, body_field, b64_len);
-                b64[b64_len] = '\0';
-
                 size_t decoded_len = 0;
                 char* decoded = (char*)base64_decode(b64, 0, &decoded_len);
                 mem_free(b64);

@@ -36,8 +36,7 @@ static char* build_request_message(uint64_t id, HttpRequest *req) {
         case HTTP_HEAD:   method_str = "HEAD";    break;
         default:          method_str = "GET";     break;
     }
-    strbuf_append_str(buf, ",\"method\":\"");
-    strbuf_append_str(buf, method_str);
+    strbuf_append_all(buf, 2, ",\"method\":\"", method_str);
     strbuf_append_char(buf, '"');
 
     // path
@@ -58,10 +57,8 @@ static char* build_request_message(uint64_t id, HttpRequest *req) {
         if (!first) strbuf_append_char(buf, ',');
         first = 0;
         strbuf_append_str(buf, "[\"");
-        if (h->name) strbuf_append_str(buf, h->name);
-        strbuf_append_str(buf, "\",\"");
-        if (h->value) strbuf_append_str(buf, h->value);
-        strbuf_append_str(buf, "\"]");
+        strbuf_append_all(buf, 4, h->name ? h->name : "", "\",\"",
+                          h->value ? h->value : "", "\"]");
         h = h->next;
     }
     strbuf_append_char(buf, ']');
@@ -77,9 +74,7 @@ static char* build_request_message(uint64_t id, HttpRequest *req) {
 
     strbuf_append_str(buf, "}\n");
 
-    size_t len = buf->length;
-    char *result = (char*)mem_alloc(len + 1, MEM_CAT_SERVE);
-    memcpy(result, buf->str, len + 1);
+    char *result = mem_strdup(buf->str, MEM_CAT_SERVE);
     strbuf_free(buf);
 
     return result;

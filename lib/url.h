@@ -187,6 +187,10 @@ char* url_decode_component(const char* str, size_t len, size_t* out_len);
 // Caller must free. If out_len is non-NULL, stores the decoded length.
 char* url_decode_form(const char* str, size_t len, size_t* out_len);
 
+// Lenient percent-decode into caller-provided storage. Malformed escapes are
+// copied literally; when `form` is true, '+' maps to a space. Returns bytes written.
+size_t url_decode_lenient_write(const char* str, size_t len, bool form, char* out);
+
 // Percent-decode in place into `buf` (NUL-terminated), returning the new length.
 // Decodes %XX and, if form is true, maps '+' → ' '. Never grows the string, so
 // it is safe to decode a buffer onto itself (zero-alloc request parsing).

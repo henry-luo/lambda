@@ -13,6 +13,7 @@
 #include "serve_utils.hpp"
 #include <string.h>
 #include "../../lib/mem.h"
+#include "../../lib/str.h"
 
 // ============================================================================
 // Internal helpers
@@ -125,8 +126,7 @@ static int next_segment(const char **pattern, char *buf, size_t bufsize,
             len--;
         }
         if (len >= bufsize) len = bufsize - 1;
-        memcpy(buf, start, len);
-        buf[len] = '\0';
+        str_copy(buf, bufsize, start, len);
     } else if (*p == '*') {
         // wildcard catch-all *name
         *out_wildcard = 1;
@@ -135,15 +135,13 @@ static int next_segment(const char **pattern, char *buf, size_t bufsize,
         while (*p && *p != '/') p++;
         size_t len = (size_t)(p - start);
         if (len >= bufsize) len = bufsize - 1;
-        memcpy(buf, start, len);
-        buf[len] = '\0';
+        str_copy(buf, bufsize, start, len);
     } else {
         // static segment
         while (*p && *p != '/') p++;
         size_t len = (size_t)(p - start);
         if (len >= bufsize) len = bufsize - 1;
-        memcpy(buf, start, len);
-        buf[len] = '\0';
+        str_copy(buf, bufsize, start, len);
     }
 
     *pattern = p;
@@ -224,8 +222,7 @@ static RequestHandler match_node(RouteNode *node, PathSegments *segs, int seg_in
                         char val[256];
                         int len = segs->lengths[seg_index];
                         if (len > 255) len = 255;
-                        memcpy(val, segs->parts[seg_index], len);
-                        val[len] = '\0';
+                        str_copy(val, sizeof(val), segs->parts[seg_index], len);
                         *out_params = http_header_add(*out_params, child->segment, val);
                     }
                     return h;
@@ -349,8 +346,7 @@ int router_mount(Router *parent, Router *child) {
     if (!new_prefix) return -1;
 
     if (plen > 0) memcpy(new_prefix, parent->prefix, plen);
-    if (clen > 0) memcpy(new_prefix + plen, child->prefix, clen);
-    new_prefix[plen + clen] = '\0';
+    str_copy(new_prefix + plen, clen + 1, child->prefix, clen);
 
     serve_free(child->prefix);
     child->prefix = new_prefix;

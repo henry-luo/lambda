@@ -299,6 +299,44 @@ TEST_F(MemtrackTest, StrdupNullReturnsNull) {
     EXPECT_EQ(duplicate, nullptr);
 }
 
+TEST_F(MemtrackTest, DupNPreservesExactBytes) {
+    const char source[] = {'a', '\0', 'b'};
+    char* duplicate = mem_dup_n(source, sizeof(source), MEM_CAT_TEMP);
+
+    ASSERT_NE(duplicate, nullptr);
+    EXPECT_EQ(memcmp(duplicate, source, sizeof(source)), 0);
+    EXPECT_EQ(duplicate[sizeof(source)], '\0');
+    mem_free(duplicate);
+}
+
+TEST_F(MemtrackTest, JoinPreservesExactParts) {
+    const char middle[] = {'-', '\0'};
+    char* joined = mem_join3("alpha", 5, middle, sizeof(middle), "omega", 5,
+                             MEM_CAT_TEMP);
+
+    ASSERT_NE(joined, nullptr);
+    EXPECT_EQ(memcmp(joined, "alpha-\0omega", 12), 0);
+    EXPECT_EQ(joined[12], '\0');
+    mem_free(joined);
+}
+
+TEST_F(MemtrackTest, StrndupCopiesBoundedSlice) {
+    const char source[] = {'a', 'b', 'c', 'd'};
+    char* duplicate = mem_strndup(source, sizeof(source), MEM_CAT_TEMP);
+
+    ASSERT_NE(duplicate, nullptr);
+    EXPECT_STREQ(duplicate, "abcd");
+    mem_free(duplicate);
+}
+
+TEST_F(MemtrackTest, StrndupStopsAtTerminator) {
+    char* duplicate = mem_strndup("abc", 8, MEM_CAT_TEMP);
+
+    ASSERT_NE(duplicate, nullptr);
+    EXPECT_STREQ(duplicate, "abc");
+    mem_free(duplicate);
+}
+
 // ============================================================================
 // Test 9: Peak Usage Tracking
 // ============================================================================

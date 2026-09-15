@@ -2,6 +2,7 @@
 #include "js_exec_profile.h"
 #include "js_object_meta.h"
 #include "../core/lambda-decimal.hpp"
+#include "../../lib/str.h"
 
 extern __thread EvalContext* context;
 
@@ -204,12 +205,10 @@ extern "C" Item js_to_number(Item value) {
         int trimmed_len = (int)(end - start);
         char buf[128];
         if (trimmed_len < (int)sizeof(buf)) {
-            memcpy(buf, start, trimmed_len);
-            buf[trimmed_len] = '\0';
+            str_copy(buf, sizeof(buf), start, trimmed_len);
         } else {
             // Fallback for very long strings
-            memcpy(buf, start, sizeof(buf) - 1);
-            buf[sizeof(buf) - 1] = '\0';
+            str_copy(buf, sizeof(buf), start, sizeof(buf) - 1);
         }
         // v20: Handle binary (0b/0B) and octal (0o/0O) literals
         if (trimmed_len > 2 && buf[0] == '0' && (buf[1] == 'b' || buf[1] == 'B')) {
@@ -811,8 +810,7 @@ extern "C" bool js_get_constructor_name(Item value, char* out, int out_size) {
     String* ns = get_type_id(name) == LMD_TYPE_STRING ? it2s(name) : NULL;
     if (!ns || ns->len == 0) return false;
     int len = (int)(ns->len < (size_t)out_size - 1 ? ns->len : (size_t)out_size - 1);
-    memcpy(out, ns->chars, len);
-    out[len] = '\0';
+    str_copy(out, out_size, ns->chars, len);
     return true;
 }
 
@@ -1002,8 +1000,7 @@ bool js_ta_key_canonical_numeric(Item key, double* numeric_index, bool* is_negat
         return true;
     }
     char buf[128];
-    memcpy(buf, chars, len);
-    buf[len] = '\0';
+    str_copy(buf, sizeof(buf), chars, len);
     char* endptr = NULL;
     double value = strtod(buf, &endptr);
     if (!endptr || *endptr != '\0') return false;
@@ -1311,8 +1308,7 @@ static inline Item js_concat_strings_fast(String* left, String* right) {
     result->flags = 0;
     result->is_ascii = left->is_ascii && right->is_ascii;
     memcpy(result->chars, left->chars, left_len);
-    memcpy(result->chars + left_len, right->chars, right_len);
-    result->chars[result->len] = '\0';
+    str_copy(result->chars + left_len, right_len + 1, right->chars, right_len);
     Item result_item = (Item){.item = s2it(result)};
     uint32_t cp = 0;
     if (cache_rooted && result->len == 12 &&

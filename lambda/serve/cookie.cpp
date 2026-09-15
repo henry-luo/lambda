@@ -45,14 +45,9 @@ HttpHeader* cookie_parse(const char *cookie_header) {
             name_len--;
 
         if (name_len > 0) {
-            char *name = (char *)serve_malloc(name_len + 1);
-            char *value = (char *)serve_malloc(val_len + 1);
+            char *name = mem_dup_n(name_start, name_len, MEM_CAT_SERVE);
+            char *value = mem_dup_n(val_start, val_len, MEM_CAT_SERVE);
             if (name && value) {
-                memcpy(name, name_start, name_len);
-                name[name_len] = '\0';
-                memcpy(value, val_start, val_len);
-                value[val_len] = '\0';
-
                 HttpHeader *entry = (HttpHeader *)serve_calloc(1, sizeof(HttpHeader));
                 if (entry) {
                     entry->name = name;

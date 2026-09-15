@@ -144,13 +144,7 @@ static String* dom_create_mutation_string(MarkBuilder* builder, const char* cont
     }
 
     // dom text mutations need a real empty string, while normal Lambda "" maps to null.
-    String* s = (String*)arena_alloc(builder->arena(), sizeof(String) + 1);
-    if (!s) return nullptr;
-    s->len = 0;
-    s->flags = 0;
-    s->is_ascii = 1;
-    s->chars[0] = '\0';
-    return s;
+    return string_from_strview_arena(strview_init("", 0), builder->arena());
 }
 
 // helper: extract a name string from a CssValue (works for counter names, attr names, etc.)
@@ -509,16 +503,13 @@ DomElement* DomElement::create_in(DomElement* element, DomDocument* doc,
                 // Parse classes - make a copy for strtok
                 char* class_copy = pool_strdup(doc->document_pool, class_str);
                 if (class_copy) {
-                    str_copy(class_copy, strlen(class_str) + 1, class_str, strlen(class_str));
-
                     int index = 0;
                     char* token = strtok(class_copy, " \t\n\r");
                     while (token && index < count) {
                         // Allocate permanent copy of each class from arena
                         size_t token_len = strlen(token);
-                        char* class_perm = (char*)pool_alloc(doc->document_pool, token_len + 1);
+                        char* class_perm = pool_dup_n(doc->document_pool, token, token_len);
                         if (class_perm) {
-                            str_copy(class_perm, token_len + 1, token, token_len);
                             class_names[index++] = class_perm;
                         }
                         token = strtok(NULL, " \t\n\r");
@@ -829,7 +820,6 @@ static void dom_element_attribute_did_set(DomElement* element,
         if (value[0] != '\0') {
             char* class_copy = pool_strdup(element->doc->document_pool, value);
             if (class_copy) {
-                str_copy(class_copy, strlen(value) + 1, value, strlen(value));
                 char* token = strtok(class_copy, " \t\n\r");
                 while (token) {
                     if (token[0] != '\0') {
@@ -1122,12 +1112,11 @@ static bool dom_element_add_cached_class(DomElement* element, const char* class_
 
     // Add new class
     size_t class_len = strlen(class_name);
-    char* class_copy = (char*)pool_alloc(element->doc->document_pool, class_len + 1);
+    char* class_copy = pool_dup_n(element->doc->document_pool, class_name, class_len);
     if (!class_copy) {
         pool_free(element->doc->document_pool, (void*)new_classes);
         return false;
     }
-    str_copy(class_copy, class_len + 1, class_name, class_len);
 
     new_classes[element->class_count] = class_copy;
     const char** old_classes = element->class_names;
@@ -1253,7 +1242,7 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
     // Parse the style text - split by semicolons
     // Example: "color: red; font-size: 14px; background: blue"
     size_t style_len = strlen(style_text);
-    char* text_copy = (char*)pool_alloc(element->doc->document_pool, style_len + 1);
+    char* text_copy = pool_dup_n(element->doc->document_pool, style_text, style_len);
     if (!text_copy) {
         return 0;
     }
@@ -1261,9 +1250,6 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
     // Copy text for in-place modification, preserving CSS comments intact.
     // Comments inside custom property values must be preserved per CSS spec.
     // We split by semicolons that are NOT inside comments.
-    memcpy(text_copy, style_text, style_len);
-    text_copy[style_len] = '\0';
-
     // Find semicolons not inside comments and replace them with NUL for splitting
     {
         size_t i = 0;
@@ -2163,10 +2149,8 @@ const char* dom_element_get_pseudo_element_content_with_counters(
 
         // Copy result to arena-allocated buffer
         if (result_len > 0) {
-            char* result = (char*)arena_alloc(arena, result_len + 1);
+            char* result = arena_dup_n(arena, result_buffer, result_len);
             if (result) {
-                memcpy(result, result_buffer, result_len);
-                result[result_len] = '\0';
                 log_debug("[Counter] Final content: '%s'", result);
                 return result;
             }
@@ -2661,14 +2645,7 @@ DomText* DomText::create_detached(String* native_string, DomDocument* doc) {
 
 String* dom_document_create_string(DomDocument* doc, const char* text, size_t len) {
     if (!doc || !doc->document_pool || (!text && len > 0)) return nullptr;
-    String* string = (String*)pool_alloc(doc->document_pool, sizeof(String) + len + 1);
-    if (!string) return nullptr;
-    string->len = (uint32_t)len;
-    string->flags = 0;
-    string->is_ascii = str_is_ascii(text ? text : "", len) ? 1 : 0;
-    if (len > 0) memcpy(string->chars, text, len);
-    string->chars[len] = '\0';
-    return string;
+    return string_from_strview(strview_init(text ? text : "", len), doc->document_pool);
 }
 
 bool dom_text_adopt_document_string(DomText* text_node, DomDocument* doc,
@@ -2705,8 +2682,7 @@ DomText* DomText::create_detached_copy(DomDocument* doc,
     text_node->node_flags |= DOM_NODE_FLAG_TEXT_REINSERTABLE;
     string->flags = 0;
     string->is_ascii = str_is_ascii(text ? text : "", len) ? 1 : 0;
-    if (len) memcpy(string->chars, text, len);
-    string->chars[len] = '\0';
+    str_copy(string->chars, len + 1, text, len);
     text_node->id = dom_document_alloc_node_id(doc);
     size_t primary_size = sizeof(DomText) + sizeof(String) + len + 1;
     if (!dom_node_registry_register(doc, text_node, primary_size, true)) return nullptr;

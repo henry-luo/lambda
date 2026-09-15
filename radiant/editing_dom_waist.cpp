@@ -890,6 +890,41 @@ static DomNode* editing_dom_element_child_at(DomElement* element,
     return nullptr;
 }
 
+// Text and break insertion both split an interior text boundary before linking.
+static bool editing_dom_resolve_insert_boundary(DocState* state,
+                                                DomBoundary boundary,
+                                                DomElement** out_parent,
+                                                DomNode** out_reference) {
+    if (!state || !boundary.node || !out_parent || !out_reference) return false;
+    *out_parent = nullptr;
+    *out_reference = nullptr;
+    if (boundary.node->is_text()) {
+        DomText* text = boundary.node->as_text();
+        uint32_t length = dom_text_utf16_length(text);
+        if (!text->parent || !text->parent->is_element() || boundary.offset > length) {
+            return false;
+        }
+        *out_parent = text->parent->as_element();
+        if (boundary.offset == 0) {
+            *out_reference = static_cast<DomNode*>(text);
+        } else if (boundary.offset == length) {
+            *out_reference = text->next_sibling;
+        } else {
+            DomText* right = dom_text_split_at(state, text, boundary.offset);
+            if (!right) return false;
+            *out_reference = static_cast<DomNode*>(right);
+        }
+        return true;
+    }
+    if (!boundary.node->is_element() ||
+        boundary.offset > dom_node_boundary_length(boundary.node)) {
+        return false;
+    }
+    *out_parent = boundary.node->as_element();
+    *out_reference = editing_dom_element_child_at(*out_parent, boundary.offset);
+    return true;
+}
+
 // Range insertion links a node into sibling pointers only. Editing must also
 // update the backing Lambda Element, so route the detached text through the
 // shared Mark-aware DOM bridge (D5.3.3).
@@ -918,31 +953,10 @@ static bool editing_dom_insert_detached_text(DomElement* parent,
 static bool editing_dom_insert_text_at_boundary(DocState* state,
                                                 DomBoundary boundary,
                                                 DomText* text) {
-    if (!state || !boundary.node || !text) return false;
+    if (!text) return false;
     DomElement* parent = nullptr;
     DomNode* reference = nullptr;
-    if (boundary.node->is_text()) {
-        DomText* existing = boundary.node->as_text();
-        uint32_t length = dom_text_utf16_length(existing);
-        if (!existing->parent || boundary.offset > length) return false;
-        parent = existing->parent->as_element();
-        if (!parent) return false;
-        if (boundary.offset == 0) {
-            reference = static_cast<DomNode*>(existing);
-        } else if (boundary.offset == length) {
-            reference = existing->next_sibling;
-        } else {
-            DomText* right = dom_text_split_at(state, existing, boundary.offset);
-            if (!right) return false;
-            reference = static_cast<DomNode*>(right);
-        }
-    } else if (boundary.node->is_element()) {
-        parent = boundary.node->as_element();
-        if (boundary.offset > dom_node_boundary_length(boundary.node)) return false;
-        reference = editing_dom_element_child_at(parent, boundary.offset);
-    } else {
-        return false;
-    }
+    if (!editing_dom_resolve_insert_boundary(state, boundary, &parent, &reference)) return false;
     return editing_dom_insert_detached_text(parent, reference, text);
 }
 
@@ -1897,31 +1911,10 @@ static bool editing_dom_split_block(DocState* state, DomElement* host,
 
 static bool editing_dom_insert_break_at(DocState* state, DomBoundary caret,
                                         DomBoundary* out_caret) {
-    if (!state || !out_caret || !caret.node) return false;
+    if (!out_caret) return false;
     DomElement* parent = nullptr;
     DomNode* reference = nullptr;
-    if (caret.node->is_text()) {
-        DomText* text = caret.node->as_text();
-        if (!text->parent || !text->parent->is_element()) return false;
-        parent = text->parent->as_element();
-        uint32_t length = dom_text_utf16_length(text);
-        if (caret.offset > length) return false;
-        if (caret.offset == 0) {
-            reference = static_cast<DomNode*>(text);
-        } else if (caret.offset == length) {
-            reference = text->next_sibling;
-        } else {
-            DomText* right = dom_text_split_at(state, text, caret.offset);
-            if (!right) return false;
-            reference = static_cast<DomNode*>(right);
-        }
-    } else if (caret.node->is_element()) {
-        parent = caret.node->as_element();
-        if (caret.offset > dom_node_boundary_length(caret.node)) return false;
-        reference = editing_dom_element_child_at(parent, caret.offset);
-    } else {
-        return false;
-    }
+    if (!editing_dom_resolve_insert_boundary(state, caret, &parent, &reference)) return false;
 
     DomElement* br = (DomElement*)dom_create_backed_element_bridge(parent->doc, "br");
     if (!br || !editing_dom_insert_child(state, parent, static_cast<DomNode*>(br),

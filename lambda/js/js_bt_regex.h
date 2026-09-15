@@ -31,13 +31,19 @@ struct JsBtFlags {
     bool sticky;       // y
 };
 
+enum JsBtExecResult {
+    JS_BT_EXEC_NO_MATCH = 0,
+    JS_BT_EXEC_MATCH = 1,
+    JS_BT_EXEC_RESOURCE_EXHAUSTED = -1,
+    JS_BT_EXEC_ALLOCATION_FAILURE = -2,
+};
+
 /**
  * Compile a *normalized* JS regex pattern into a backtracking matcher.
  * The pattern is expected post-preprocessing: \uHHHH/\u{} already lowered to
  * \x{}, \s/\S and \p{} expanded to classes, but named groups still spelled
  * (?<name>...) and backreferences still \N / \k<name>.
- * Everything is allocated from `pool`. Returns NULL on parse failure (the
- * caller then falls back to the RE2 path).
+ * Everything is allocated from `pool`. Returns NULL on parse failure.
  */
 JsBtRegex* js_bt_compile(const char* pattern, int pattern_len, JsBtFlags flags, Pool* pool);
 
@@ -48,7 +54,7 @@ int js_bt_group_count(JsBtRegex* bt);
  * Execute the matcher. Searches from start_pos forward (or only at start_pos
  * when anchor_start or the sticky flag is set). Fills match_starts[]/match_ends[]
  * with byte offsets; group 0 is the whole match, -1 marks non-participating
- * groups. Returns 1 on match, 0 on no match (including step-budget exhaustion).
+ * groups. Returns JsBtExecResult; resource exhaustion is distinct from no match.
  */
 int js_bt_exec(JsBtRegex* bt, const char* input, int input_len, int start_pos,
                bool anchor_start, int* match_starts, int* match_ends, int max_groups);

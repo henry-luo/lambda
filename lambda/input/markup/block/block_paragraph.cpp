@@ -102,8 +102,7 @@ static Item parse_rst_literal_block(MarkupParser* parser) {
     StringBuf* sb = parser->sb;
     stringbuf_reset(sb);
     for (int i = 0; i < code_lines->length; i++) {
-        if (i > 0) stringbuf_append_char(sb, '\n');
-        stringbuf_append_str(sb, (const char*)code_lines->data[i]);
+        stringbuf_append_all(sb, 2, i > 0 ? "\n" : "", (const char*)code_lines->data[i]);
     }
     arraylist_free(code_lines);
 
@@ -197,7 +196,7 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
             Element* strong = create_element(parser, "strong");
             if (strong) {
                 const char* content = first_line + 3;
-                while (*content == ' ' || *content == '\t') content++;
+                content = str_skip_line_space(content);
                 if (*content) {
                     // Parse the content for nested formatting
                     Item inner = parse_inline_spans(parser, content);
@@ -224,7 +223,7 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
             Element* em = create_element(parser, "em");
             if (em) {
                 const char* content = first_line + 3;
-                while (*content == ' ' || *content == '\t') content++;
+                content = str_skip_line_space(content);
                 if (*content) {
                     // Parse the content for nested formatting
                     Item inner = parse_inline_spans(parser, content);
@@ -401,8 +400,7 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
             }
 
             // CommonMark: Add newline between lines (soft line break), not space
-            stringbuf_append_char(sb, '\n');
-            stringbuf_append_str(sb, content);
+            stringbuf_append_all(sb, 2, "\n", content);
             parser->current_line++;
         }
     }
@@ -694,8 +692,7 @@ Item parse_rst_image_directive(MarkupParser* parser, const char* line) {
             attr_name = "class";
         } else if (opt_name_len < 60) {
             // Use the option name as-is for other attributes
-            memcpy(attr_buf, opt_name_start, opt_name_len);
-            attr_buf[opt_name_len] = '\0';
+            str_copy(attr_buf, sizeof(attr_buf), opt_name_start, opt_name_len);
             attr_name = attr_buf;
         }
 
@@ -811,7 +808,7 @@ Item parse_rst_definition_list(MarkupParser* parser, const char* line) {
 
                     // Strip leading whitespace
                     const char* dp = dl_line;
-                    while (*dp == ' ' || *dp == '\t') dp++;
+                    dp = str_skip_line_space(dp);
 
                     if (sb->length > 0) stringbuf_append_char(sb, ' ');
                     while (*dp && *dp != '\n' && *dp != '\r') {

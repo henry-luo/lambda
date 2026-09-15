@@ -315,14 +315,6 @@ void dom_range_invalidate_layout(DomRange* range) {
 // Range invariants & boundary setters
 // ============================================================================
 
-// Walk to the topmost ancestor (no parent). Used to detect cross-root
-// boundary moves (DocumentFragment, sub-document via iframe).
-static DomNode* range_root_of(DomNode* n) {
-    if (!n) return nullptr;
-    while (n->parent) n = n->parent;
-    return n;
-}
-
 // After a Range boundary mutation, if the Range is the active range of an
 // owning DomSelection AND its new root differs from the document root the
 // selection was associated with when the range was added, drop it from the
@@ -333,7 +325,7 @@ static void range_check_cross_root_drop(DomRange* r) {
     DomSelection* s = dom_range_state_selection(r->state);
     if (!s || s->range_count == 0 || s->ranges[0] != r) return;
     if (!s->associated_doc_root) return;
-    DomNode* now_root = range_root_of(r->start.node);
+    DomNode* now_root = view_geometry_dom_tree_root(r->start.node);
     if (now_root != s->associated_doc_root) {
         log_debug("dom_range: dropping range from selection (root changed)");
         // Hold a temp ref so removal doesn't free the range mid-mutation.
@@ -729,7 +721,7 @@ void dom_selection_add_range(DomSelection* s, DomRange* range) {
     // Snapshot the document root for cross-root drop detection (§ Range
     // mutators check this against any future boundary moves).
     if (range->start.node) {
-        s->associated_doc_root = range_root_of(range->start.node);
+        s->associated_doc_root = view_geometry_dom_tree_root(range->start.node);
     }
     sync_anchor_focus(s, /*forward=*/true);
 }
@@ -1335,12 +1327,9 @@ bool dom_text_replace_data_contents(DocState* st, DomText* t,
     size_t suffix_len = (t->length > u8_end) ? (t->length - u8_end) : 0;
     size_t new_len    = prefix + repl_bytes + suffix_len;
 
-    char* buf = (char*)mem_alloc(new_len + 1, MEM_CAT_TEMP);
+    char* buf = mem_join3(t->text, prefix, repl_chars, repl_bytes,
+                          t->text ? t->text + u8_end : NULL, suffix_len, MEM_CAT_TEMP);
     if (!buf) return false;
-    if (prefix)     memcpy(buf,                      t->text,         prefix);
-    if (repl_bytes) memcpy(buf + prefix,             repl_chars,      repl_bytes);
-    if (suffix_len) memcpy(buf + prefix + repl_bytes, t->text + u8_end, suffix_len);
-    buf[new_len] = '\0';
 
     DomDocument* doc = node_doc(static_cast<DomNode*>(t));
     String* s = dom_document_create_string(doc, buf, new_len);
@@ -1793,31 +1782,38 @@ static bool is_in_non_selectable_subtree(const DomText* t) {
              : false;
 }
 
-static DomText* next_text_after_impl(DomNode* n) {
+static DomText* adjacent_text_impl(DomNode* n, bool previous) {
     if (!n) return nullptr;
-    // descend into right-siblings/their subtrees, then ascend
+    // Descend through the adjacent sibling subtree, then ascend when it has
+    // no further node in the requested document-order direction.
     DomNode* cur = n;
     while (cur) {
-        if (cur->next_sibling) {
-            DomNode* w = cur->next_sibling;
-            // descend leftmost
+        DomNode* sibling = previous ? cur->prev_sibling : cur->next_sibling;
+        if (sibling) {
+            DomNode* w = sibling;
             while (true) {
                 if (w->is_text()) return w->as_text();
                 if (w->is_element()) {
-                    DomNode* fc = w->as_element()->first_child;
-                    if (fc) { w = fc; continue; }
+                    DomNode* child = previous ? w->as_element()->last_child
+                                              : w->as_element()->first_child;
+                    if (child) { w = child; continue; }
                 }
-                // leaf non-text: try sibling
-                if (w->next_sibling) { w = w->next_sibling; continue; }
-                // back up
-                while (w && !w->next_sibling) w = w->parent;
+                DomNode* next = previous ? w->prev_sibling : w->next_sibling;
+                if (next) { w = next; continue; }
+                while (w && !(previous ? w->prev_sibling : w->next_sibling)) {
+                    w = w->parent;
+                }
                 if (!w) break;
-                w = w->next_sibling;
+                w = previous ? w->prev_sibling : w->next_sibling;
             }
         }
         cur = cur->parent;
     }
     return nullptr;
+}
+
+static DomText* next_text_after_impl(DomNode* n) {
+    return adjacent_text_impl(n, false);
 }
 
 static DomText* next_text_after(DomNode* n) {
@@ -1839,27 +1835,7 @@ DomText* dom_range_next_text_after_any(DomNode* n) {
 
 // Walk to the previous text node in document order preceding `n` (skipping `n`).
 static DomText* prev_text_before_impl(DomNode* n) {
-    if (!n) return nullptr;
-    DomNode* cur = n;
-    while (cur) {
-        if (cur->prev_sibling) {
-            DomNode* w = cur->prev_sibling;
-            // descend rightmost
-            while (true) {
-                if (w->is_text()) return w->as_text();
-                if (w->is_element()) {
-                    DomNode* lc = w->as_element()->last_child;
-                    if (lc) { w = lc; continue; }
-                }
-                if (w->prev_sibling) { w = w->prev_sibling; continue; }
-                while (w && !w->prev_sibling) w = w->parent;
-                if (!w) break;
-                w = w->prev_sibling;
-            }
-        }
-        cur = cur->parent;
-    }
-    return nullptr;
+    return adjacent_text_impl(n, true);
 }
 
 static DomText* prev_text_before(DomNode* n) {
@@ -1971,11 +1947,7 @@ static DomElement* nearest_block_ancestor_or_self(DomNode* n) {
 // True iff text node holds only ASCII whitespace.
 static bool text_is_ws_only(DomText* t) {
     if (!t || !t->text || t->length == 0) return false;
-    for (size_t i = 0; i < t->length; i++) {
-        unsigned char c = (unsigned char)t->text[i];
-        if (c != ' ' && c != '\n' && c != '\r' && c != '\t' && c != '\f') return false;
-    }
-    return true;
+    return str_all(t->text, t->length, str_is_html_space);
 }
 
 // Step to the previous node in document order.
@@ -2804,11 +2776,7 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
         }
     }
     size_t out_len = len - off;
-    char* out = (char*)mem_alloc(out_len + 1, MEM_CAT_DOM);
-    if (out) {
-        if (out_len > 0 && sb->str) memcpy(out, sb->str + off, out_len);
-        out[out_len] = '\0';
-    }
+    char* out = mem_dup_n(sb->str ? sb->str + off : "", out_len, MEM_CAT_DOM);
     strbuf_free(sb);
     return out;
 }
@@ -4190,7 +4158,7 @@ static bool line_stop_list_move(DomBoundary focus,
     if (!focus.node || !out) return false;
     DomElement* root = host;
     if (!root) {
-        DomNode* doc_root = range_root_of(focus.node);
+        DomNode* doc_root = view_geometry_dom_tree_root(focus.node);
         root = doc_root && doc_root->is_element() ? doc_root->as_element() : nullptr;
     }
     if (!root) return false;
@@ -4234,7 +4202,7 @@ DomBoundary dom_boundary_move(DomBoundary b, DomModGranularity gran, int32_t cou
     int32_t n = (count > 0) ? count : -count;
 
     if (gran == DOM_MOD_DOCUMENT) {
-        DomNode* r = range_root_of(b.node);
+        DomNode* r = view_geometry_dom_tree_root(b.node);
         if (dir > 0) {
             DomNode* tail = last_in_subtree(r);
             if (tail && tail->is_text()) return DomBoundary{ tail, dom_text_utf16_length(tail->as_text()) };
@@ -4437,17 +4405,7 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
                 it = (dir > 0) ? next_text_after(static_cast<DomNode*>(it))
                                : prev_text_before(static_cast<DomNode*>(it));
                 if (!it) break;
-                bool ws_only = true;
-                if (it->text) {
-                    for (size_t i = 0; i < it->length; i++) {
-                        unsigned char c = (unsigned char)it->text[i];
-                        if (c != ' ' && c != '\n' && c != '\r' && c != '\t' && c != '\f') {
-                            ws_only = false; break;
-                        }
-                    }
-                } else {
-                    ws_only = false;
-                }
+                bool ws_only = it->text && str_all(it->text, it->length, str_is_html_space);
                 if (!ws_only) { target = it; break; }
             }
         } else {

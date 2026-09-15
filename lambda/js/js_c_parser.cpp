@@ -6,6 +6,7 @@
 #include "../../lib/mempool.h"
 #include "../../lib/mem.h"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
 #include <string.h>
 
 // This sink is intentionally small until every reduction carries the child
@@ -1956,9 +1957,7 @@ static void js_c_set_parse_error(JsTranspiler* tp, const char* source,
     tp->parse_error_col = col;
     const char* message = error && error->message ? error->message :
         "JavaScript C parser rejected the source";
-    strncpy(tp->parse_error_message, message,
-        sizeof(tp->parse_error_message) - 1);
-    tp->parse_error_message[sizeof(tp->parse_error_message) - 1] = '\0';
+    str_copy(tp->parse_error_message, sizeof(tp->parse_error_message), message, strlen(message));
 }
 
 typedef struct JsCCompilePassContext {
@@ -2011,22 +2010,19 @@ static int js_parse_build_compiler_pass(void* opaque) {
                 (int)sink_context.rejected_kind,
                 (int)sink_context.rejected_form,
                 sink_context.rejected_start, sink_context.rejected_end);
-            strncpy(tp->parse_error_message,
-                "JavaScript C AST reduction rejected: ",
-                sizeof(tp->parse_error_message) - 1);
-            strncat(tp->parse_error_message,
-                js_c_reduction_form_name(sink_context.rejected_form),
-                sizeof(tp->parse_error_message) -
-                    strlen(tp->parse_error_message) - 1);
-            tp->parse_error_message[sizeof(tp->parse_error_message) - 1] = '\0';
+            size_t message_len = str_copy(tp->parse_error_message,
+                sizeof(tp->parse_error_message), "JavaScript C AST reduction rejected: ",
+                sizeof("JavaScript C AST reduction rejected: ") - 1);
+            const char* form_name = js_c_reduction_form_name(sink_context.rejected_form);
+            str_cat(tp->parse_error_message, message_len, sizeof(tp->parse_error_message),
+                    form_name, strlen(form_name));
         } else if (status != JS_PARSE_OK) {
             js_c_set_parse_error(tp, source, length, &error);
         } else {
             tp->parse_error_valid = true;
-            strncpy(tp->parse_error_message,
-                "JavaScript C AST root was not published",
-                sizeof(tp->parse_error_message) - 1);
-            tp->parse_error_message[sizeof(tp->parse_error_message) - 1] = '\0';
+            str_copy(tp->parse_error_message, sizeof(tp->parse_error_message),
+                     "JavaScript C AST root was not published",
+                     sizeof("JavaScript C AST root was not published") - 1);
         }
         return 0;
     }
@@ -2048,10 +2044,9 @@ static int js_bind_compiler_pass(void* opaque) {
     if (!js_rebuild_direct_scope_graph(tp, pass->root)) {
         tp->has_errors = true;
         tp->parse_error_valid = true;
-        strncpy(tp->parse_error_message,
-            "JavaScript C scope graph construction failed",
-            sizeof(tp->parse_error_message) - 1);
-        tp->parse_error_message[sizeof(tp->parse_error_message) - 1] = '\0';
+        str_copy(tp->parse_error_message, sizeof(tp->parse_error_message),
+                 "JavaScript C scope graph construction failed",
+                 sizeof("JavaScript C scope graph construction failed") - 1);
         return 0;
     }
     // The shared Script owner is the AST lifetime authority after adoption.
@@ -2100,9 +2095,9 @@ bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
     if (pass_context.validation_errors > 0) return true;
     if (!tp->has_errors) {
         tp->parse_error_valid = tp->has_errors = true;
-        strncpy(tp->parse_error_message, "JavaScript C AST indexing failed",
-            sizeof(tp->parse_error_message) - 1);
-        tp->parse_error_message[sizeof(tp->parse_error_message) - 1] = '\0';
+        str_copy(tp->parse_error_message, sizeof(tp->parse_error_message),
+                 "JavaScript C AST indexing failed",
+                 sizeof("JavaScript C AST indexing failed") - 1);
     }
     tp->ast_root = NULL;
     return false;

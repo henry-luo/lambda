@@ -16,6 +16,7 @@
 #include "../lambda.hpp"
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
+#include "../../lib/escape.h"
 #include "../../lib/file.h"
 #include "../../lib/mem.h"
 #include "../../lib/strbuf.h"
@@ -307,8 +308,6 @@ struct JsInspectContext {
 };
 
 static Item js_util_inspect_value(Item obj_item, JsInspectContext* ctx, int depth_left);
-static void js_util_inspect_append_escaped_char(StrBuf* sb, char ch);
-
 static Item js_util_inspect_make_string(StrBuf* sb) {
     Item result = make_string_item(sb->str ? sb->str : "", (int)sb->length);
     strbuf_free(sb);
@@ -439,15 +438,6 @@ static Item js_util_inspect_bigint(Item obj_item, JsInspectContext* ctx) {
     return js_util_inspect_make_string(sb);
 }
 
-static void js_util_inspect_append_escaped_char(StrBuf* sb, char ch) {
-    if (ch == '\\') strbuf_append_str(sb, "\\\\");
-    else if (ch == '\'') strbuf_append_str(sb, "\\'");
-    else if (ch == '\n') strbuf_append_str(sb, "\\n");
-    else if (ch == '\r') strbuf_append_str(sb, "\\r");
-    else if (ch == '\t') strbuf_append_str(sb, "\\t");
-    else strbuf_append_char(sb, ch);
-}
-
 static void js_util_inspect_append_assertion_string(StrBuf* sb, Item value, size_t long_limit) {
     String* s = get_type_id(value) == LMD_TYPE_STRING ? it2s(value) : NULL;
     if (s && s->len > 0) {
@@ -460,9 +450,7 @@ static void js_util_inspect_append_assertion_string(StrBuf* sb, Item value, size
                         // Very short repeated lines stay readable as one escaped
                         // literal in Node's AssertionError inspect output.
                         strbuf_append_char(sb, '\'');
-                        for (size_t k = 0; k <= i; k++) {
-                            js_util_inspect_append_escaped_char(sb, s->chars[k]);
-                        }
+                        escape_append_js_quoted(sb, s->chars, i + 1, '\'');
                         strbuf_append_str(sb, "...'");
                         return;
                     }
@@ -475,9 +463,7 @@ static void js_util_inspect_append_assertion_string(StrBuf* sb, Item value, size
                         if (s->chars[j] != '\n') continue;
                         if (line > 0) strbuf_append_str(sb, "    ");
                         strbuf_append_char(sb, '\'');
-                        for (size_t k = start; k <= j; k++) {
-                            js_util_inspect_append_escaped_char(sb, s->chars[k]);
-                        }
+                        escape_append_js_quoted(sb, s->chars + start, j - start + 1, '\'');
                         strbuf_append_str(sb, "' +\n");
                         start = j + 1;
                         line++;
@@ -500,9 +486,7 @@ static void js_util_inspect_append_assertion_string(StrBuf* sb, Item value, size
             limit = long_limit;
             append_ellipsis = true;
         }
-        for (size_t i = 0; i < limit; i++) {
-            js_util_inspect_append_escaped_char(sb, s->chars[i]);
-        }
+        escape_append_js_quoted(sb, s->chars, limit, '\'');
         if (append_ellipsis) strbuf_append_str(sb, "...");
     }
     strbuf_append_char(sb, '\'');
@@ -545,9 +529,7 @@ static void js_util_inspect_append_quoted_key(StrBuf* sb, String* key, bool hidd
         strbuf_append_str_n(sb, key->chars, key->len);
     } else {
         strbuf_append_char(sb, '\'');
-        for (size_t i = 0; i < key->len; i++) {
-            js_util_inspect_append_escaped_char(sb, key->chars[i]);
-        }
+        escape_append_js_quoted(sb, key->chars, key->len, '\'');
         strbuf_append_char(sb, '\'');
     }
     if (hidden) strbuf_append_char(sb, ']');
@@ -579,8 +561,7 @@ static void js_util_inspect_append_named_value(StrBuf* sb, const char* name, Ite
     if (js_util_inspect_is_undefined(value)) return;
     if (!*first) strbuf_append_str(sb, ", ");
     *first = false;
-    strbuf_append_str(sb, name);
-    strbuf_append_str(sb, ": ");
+    strbuf_append_all(sb, 2, name, ": ");
     if (assertion_string && get_type_id(value) == LMD_TYPE_STRING) {
         js_util_inspect_append_assertion_string(sb, value, assertion_string_limit);
         return;
@@ -659,8 +640,8 @@ static Item js_util_inspect_assertion_error(Item obj_item, JsInspectContext* ctx
 static Item js_util_inspect_abort_signal(Item obj_item) {
     Item aborted = js_get_key_cstr(obj_item, "aborted");
     StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, "AbortSignal { aborted: ");
-    strbuf_append_str(sb, (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) ? "true" : "false");
+    strbuf_append_all(sb, 2, "AbortSignal { aborted: ",
+                      (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) ? "true" : "false");
     strbuf_append_str(sb, " }");
     return js_util_inspect_make_string(sb);
 }
@@ -694,8 +675,7 @@ static Item js_util_inspect_date(Item obj_item, JsInspectContext* ctx, int depth
     char ctor_name[64];
     if (js_get_constructor_name(obj_item, ctor_name, sizeof(ctor_name)) &&
             strcmp(ctor_name, "Date") != 0) {
-        strbuf_append_str(sb, ctor_name);
-        strbuf_append_char(sb, ' ');
+        strbuf_append_all(sb, 2, ctor_name, " ");
     }
     bool found_time = false;
     Item time_value = js_map_shape_lookup_ext(obj_item.map, "__time__", 8, &found_time);
@@ -779,8 +759,7 @@ static Item js_util_inspect_regexp(Item obj_item, JsInspectContext* ctx, int dep
     char ctor_name[64];
     if (js_get_constructor_name(obj_item, ctor_name, sizeof(ctor_name)) &&
             strcmp(ctor_name, "RegExp") != 0) {
-        strbuf_append_str(sb, ctor_name);
-        strbuf_append_char(sb, ' ');
+        strbuf_append_all(sb, 2, ctor_name, " ");
     }
     if (rs) strbuf_append_str_n(sb, rs->chars, rs->len);
     else strbuf_append_str(sb, "/(?:)/");
@@ -814,8 +793,7 @@ static Item js_util_inspect_typed_array(Item obj_item, JsInspectContext* ctx, in
     if (!type_name) type_name = "Uint8Array";
     int len = js_typed_array_length(obj_item);
     StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, type_name);
-    strbuf_append_char(sb, '(');
+    strbuf_append_all(sb, 2, type_name, "(");
     strbuf_append_int64(sb, len < 0 ? 0 : len);
     if (ta && ta->is_buffer) strbuf_append_str(sb, ") [Uint8Array] [");
     else strbuf_append_str(sb, ") [");

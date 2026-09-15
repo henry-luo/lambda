@@ -48,6 +48,16 @@ size_t utf8_encode(uint32_t codepoint, char buf[4]) {
     return 0; /* invalid codepoint */
 }
 
+size_t utf8_encode_wtf8(uint32_t codepoint, char buf[4]) {
+    if (utf_is_surrogate(codepoint) && buf) {
+        buf[0] = (char)(0xE0 | (codepoint >> 12));
+        buf[1] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        buf[2] = (char)(0x80 | (codepoint & 0x3F));
+        return 3;
+    }
+    return utf8_encode(codepoint, buf);
+}
+
 size_t utf8_encode_z(uint32_t codepoint, char buf[5]) {
     if (!buf) return 0;
     size_t n = utf8_encode(codepoint, buf);

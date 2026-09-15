@@ -24,6 +24,7 @@
 #include "../core/mark_reader.hpp"  // for ArrayReader
 #include "../core/lambda_typed.hpp"
 #include "../../lib/str.h"
+#include "../../lib/string.h"
 #include "../input/input.hpp"
 #include "../input/css/dom_node.hpp"      // for DomText, dom_text_to_string
 #include "../input/css/dom_element.hpp"   // for DomElement, dom_element_to_element
@@ -128,8 +129,7 @@ Symbol* MarkBuilder::createSymbol(const char* symbol, size_t len) {
     Symbol* sym = (Symbol*)arena_alloc(arena_, sizeof(Symbol) + len + 1);
     sym->len = len;
     sym->ns = nullptr;
-    memcpy(sym->chars, symbol, len);
-    sym->chars[len] = '\0';
+    str_copy(sym->chars, len + 1, symbol, len);
     return sym;
 }
 
@@ -150,13 +150,7 @@ String* MarkBuilder::createString(const char* str, size_t len) {
     if (!str) return nullptr;
 
     // Empty strings are values in Phase 3, so content producers must not collapse them to null.
-    String* s = (String*)arena_alloc(arena_, sizeof(String) + len + 1);
-    s->len = len;
-    s->flags = 0;
-    s->is_ascii = str_is_ascii(str, len) ? 1 : 0;
-    memcpy(s->chars, str, len);
-    s->chars[len] = '\0';
-    return s;
+    return string_from_strview_arena(strview_init(str, len), arena_);
 }
 
 Binary* MarkBuilder::createBinary(const void* bytes, size_t len) {
@@ -191,8 +185,7 @@ String* MarkBuilder::createDomTextString(const char* str, size_t len) {
     String* s = dom_text_to_string(dt);
     s->flags = 0;
     s->is_ascii = str_is_ascii(str, len) ? 1 : 0;
-    memcpy(s->chars, str, len);
-    s->chars[len] = '\0';
+    str_copy(s->chars, len + 1, str, len);
     return s;
 }
 

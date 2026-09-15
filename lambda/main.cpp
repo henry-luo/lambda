@@ -1197,43 +1197,9 @@ int run_script_file(Runtime *runtime, const char *script_path, bool run_main = f
     return 0;  // success
 }
 
-static char* lambda_string_literal_escape(const char* value) {
-    if (!value) return nullptr;
-    size_t out_len = 0;
-    for (const char* cursor = value; *cursor; cursor++) {
-        unsigned char ch = (unsigned char)*cursor;
-        if (ch == '\\' || ch == '"' || ch == '\n' || ch == '\r' || ch == '\t') {
-            out_len += 2;
-        } else {
-            out_len++;
-        }
-    }
-    char* out = (char*)mem_alloc(out_len + 1, MEM_CAT_TEMP);
-    if (!out) return nullptr;
-    size_t pos = 0;
-    for (const char* cursor = value; *cursor; cursor++) {
-        unsigned char ch = (unsigned char)*cursor;
-        if (ch == '\\') {
-            out[pos++] = '\\'; out[pos++] = '\\';
-        } else if (ch == '"') {
-            out[pos++] = '\\'; out[pos++] = '"';
-        } else if (ch == '\n') {
-            out[pos++] = '\\'; out[pos++] = 'n';
-        } else if (ch == '\r') {
-            out[pos++] = '\\'; out[pos++] = 'r';
-        } else if (ch == '\t') {
-            out[pos++] = '\\'; out[pos++] = 't';
-        } else {
-            out[pos++] = (char)ch;
-        }
-    }
-    out[pos] = '\0';
-    return out;
-}
-
 static char* build_pdf_to_html_bridge_script(const char* pdf_file, const char* opts_expr,
                                              const char* log_prefix) {
-    char* escaped_pdf = lambda_string_literal_escape(pdf_file);
+    char* escaped_pdf = mem_escape_lambda_literal(pdf_file, MEM_CAT_TEMP);
     if (!escaped_pdf) {
         log_error("[%s] PDF package: failed to escape input path", log_prefix);
         return nullptr;
@@ -1269,7 +1235,7 @@ static char* build_latex_to_html_bridge_script(const char* latex_file,
                                                bool full_document,
                                                const char* font_option,
                                                const char* log_prefix) {
-    char* escaped_latex = lambda_string_literal_escape(latex_file);
+    char* escaped_latex = mem_escape_lambda_literal(latex_file, MEM_CAT_TEMP);
     if (!escaped_latex) {
         log_error("[%s] LaTeX package: failed to escape input path", log_prefix);
         return nullptr;
@@ -1566,8 +1532,7 @@ int exec_convert(int argc, char* argv[]) {
             // Split into type and flavor
             size_t type_len = colon - from_format;
             char* type_buf = (char*)pool_calloc(temp_pool, type_len + 1);
-            strncpy(type_buf, from_format, type_len);
-            type_buf[type_len] = '\0';
+            str_copy(type_buf, type_len + 1, from_format, type_len);
             type_string = create_string(temp_pool, type_buf);
             flavor_string = create_string(temp_pool, colon + 1);
         } else {
@@ -2532,8 +2497,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     snprintf(js_source, js_source_len + 1, "console.log(%s)", eval_source_arg);
                 } else {
                     js_source_len = strlen(eval_source_arg);
-                    js_source = (char*)mem_alloc(js_source_len + 1, MEM_CAT_SYSTEM);
-                    memcpy(js_source, eval_source_arg, js_source_len);
+                    js_source = mem_dup_n(eval_source_arg, js_source_len, MEM_CAT_SYSTEM);
                 }
                 js_source[js_source_len] = '\0';
             } else if (input_type_module && !js_file) {

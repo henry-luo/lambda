@@ -10,6 +10,7 @@
 #include "bash_transpiler.hpp"
 #include "../../lambda-data.hpp"
 #include "../../../lib/log.h"
+#include "../../../lib/escape.h"
 #include "../../../lib/strbuf.h"
 #include <tree_sitter/tree-sitter-bash.h>
 #include <cstring>
@@ -1105,121 +1106,7 @@ static BashAstNode* build_raw_string(BashTranspiler* tp, TSNode node) {
 // process ANSI-C escape sequences from content between $' and '
 static String* process_ansi_c_content(NamePool* np, const char* s, int len) {
     StrBuf* sb = strbuf_new_cap(len + 1);
-    int i = 0;
-    while (i < len) {
-        char c = s[i++];
-        if (c != '\\' || i >= len) {
-            strbuf_append_char(sb, c);
-            continue;
-        }
-
-        char esc = s[i++];
-        switch (esc) {
-        case 'a': strbuf_append_char(sb, '\a'); break;
-        case 'b': strbuf_append_char(sb, '\b'); break;
-        case 'e': case 'E': strbuf_append_char(sb, 27); break;
-        case 'f': strbuf_append_char(sb, '\f'); break;
-        case 'n': strbuf_append_char(sb, '\n'); break;
-        case 'r': strbuf_append_char(sb, '\r'); break;
-        case 't': strbuf_append_char(sb, '\t'); break;
-        case 'v': strbuf_append_char(sb, '\v'); break;
-        case '\\': strbuf_append_char(sb, '\\'); break;
-        case '\'': strbuf_append_char(sb, '\''); break;
-        case '"': strbuf_append_char(sb, '"'); break;
-        case 'c': {
-            if (i < len) {
-                unsigned char ctrl = (unsigned char)s[i++];
-                strbuf_append_char(sb, (char)(ctrl ^ 0x40));
-            }
-            break;
-        }
-        case 'x': {
-            int value = 0;
-            bool have_digits = false;
-            if (i < len && s[i] == '{') {
-                i++;
-                while (i < len && s[i] != '}') {
-                    char h = s[i];
-                    int digit = -1;
-                    if (h >= '0' && h <= '9') digit = h - '0';
-                    else if (h >= 'a' && h <= 'f') digit = h - 'a' + 10;
-                    else if (h >= 'A' && h <= 'F') digit = h - 'A' + 10;
-                    else break;
-                    value = value * 16 + digit;
-                    have_digits = true;
-                    i++;
-                }
-                if (i < len && s[i] == '}') {
-                    i++;
-                }
-                if (!have_digits) {
-                    i = len;
-                    break;
-                }
-            } else {
-                for (int j = 0; j < 2 && i < len; j++) {
-                    char h = s[i];
-                    int digit = -1;
-                    if (h >= '0' && h <= '9') digit = h - '0';
-                    else if (h >= 'a' && h <= 'f') digit = h - 'a' + 10;
-                    else if (h >= 'A' && h <= 'F') digit = h - 'A' + 10;
-                    else break;
-                    value = value * 16 + digit;
-                    have_digits = true;
-                    i++;
-                }
-            }
-            if (have_digits) strbuf_append_char(sb, (char)value);
-            break;
-        }
-        case 'u':
-        case 'U': {
-            int max_digits = (esc == 'u') ? 4 : 8;
-            int value = 0;
-            bool have_digits = false;
-            for (int j = 0; j < max_digits && i < len; j++) {
-                char h = s[i];
-                int digit = -1;
-                if (h >= '0' && h <= '9') digit = h - '0';
-                else if (h >= 'a' && h <= 'f') digit = h - 'a' + 10;
-                else if (h >= 'A' && h <= 'F') digit = h - 'A' + 10;
-                else break;
-                value = value * 16 + digit;
-                have_digits = true;
-                i++;
-            }
-            if (have_digits) {
-                if (value <= 0x7f) strbuf_append_char(sb, (char)value);
-                else if (value <= 0x7ff) {
-                    strbuf_append_char(sb, (char)(0xc0 | ((value >> 6) & 0x1f)));
-                    strbuf_append_char(sb, (char)(0x80 | (value & 0x3f)));
-                } else if (value <= 0xffff) {
-                    strbuf_append_char(sb, (char)(0xe0 | ((value >> 12) & 0x0f)));
-                    strbuf_append_char(sb, (char)(0x80 | ((value >> 6) & 0x3f)));
-                    strbuf_append_char(sb, (char)(0x80 | (value & 0x3f)));
-                } else {
-                    strbuf_append_char(sb, (char)(0xf0 | ((value >> 18) & 0x07)));
-                    strbuf_append_char(sb, (char)(0x80 | ((value >> 12) & 0x3f)));
-                    strbuf_append_char(sb, (char)(0x80 | ((value >> 6) & 0x3f)));
-                    strbuf_append_char(sb, (char)(0x80 | (value & 0x3f)));
-                }
-            }
-            break;
-        }
-        case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': {
-            int value = esc - '0';
-            for (int j = 0; j < 2 && i < len && s[i] >= '0' && s[i] <= '7'; j++) {
-                value = value * 8 + (s[i++] - '0');
-            }
-            strbuf_append_char(sb, (char)value);
-            break;
-        }
-        default:
-            strbuf_append_char(sb, '\\');
-            strbuf_append_char(sb, esc);
-            break;
-        }
-    }
+    escape_append_bash_ansi(sb, s, (size_t)len, ESCAPE_BASH_ANSI_LITERAL);
 
     String* result = name_pool_create_len(np, sb->str, sb->length);
     strbuf_free(sb);

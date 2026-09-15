@@ -980,8 +980,7 @@ Symbol* heap_create_symbol(const char* symbol, size_t len) {
     Symbol* sym = (Symbol*)heap_alloc(sizeof(Symbol) + len + 1, LMD_TYPE_SYMBOL);
     sym->len = len;
     sym->ns = nullptr;
-    memcpy(sym->chars, symbol, len);
-    sym->chars[len] = '\0';
+    str_copy(sym->chars, len + 1, symbol, len);
     return sym;
 }
 

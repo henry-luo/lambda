@@ -39,7 +39,7 @@ public:
 
         // Must have space after stars
         if (*p != ' ' && *p != '\t') return info;
-        while (*p == ' ' || *p == '\t') p++;
+        p = str_skip_line_space(p);
 
         info.level = (level > 6) ? 6 : level;
         info.text_start = p;
@@ -51,7 +51,7 @@ public:
             if (strncmp(p, todo_keywords[i], kw_len) == 0 &&
                 (p[kw_len] == ' ' || p[kw_len] == '\t')) {
                 p += kw_len;
-                while (*p == ' ' || *p == '\t') p++;
+                p = str_skip_line_space(p);
                 info.text_start = p;
                 break;
             }

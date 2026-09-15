@@ -168,6 +168,14 @@ void stringbuf_append_char(StringBuf *sb, char c) {
     sb->str->len = sb->length;
 }
 
+bool stringbuf_append_utf8(StringBuf *sb, uint32_t codepoint) {
+    char encoded[4];
+    size_t length = str_utf8_encode(codepoint, encoded, sizeof(encoded));
+    if (length == 0) return false;
+    stringbuf_append_str_n(sb, encoded, length);
+    return true;
+}
+
 void stringbuf_append_char_n(StringBuf *sb, char c, size_t n) {
     if (!sb) return;
 

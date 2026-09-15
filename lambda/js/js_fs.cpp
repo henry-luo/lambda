@@ -19,6 +19,7 @@
 #include "../lambda.hpp"
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
 #include "../../lib/uv_loop.h"
 
 #include <cstring>
@@ -88,8 +89,7 @@ static FsPathResult fs_path_to_cstr(Item value, const char* name, char* buf, int
                     "The argument 'path' must be a string, Uint8Array, or URL without null bytes.")};
             }
         }
-        memcpy(buf, data, len);
-        buf[len] = '\0';
+    str_copy(buf, len + 1, (const char*)data, len);
         return {buf, js_status_ok()};
     }
     if (get_type_id(value) != LMD_TYPE_STRING) {
@@ -2849,8 +2849,7 @@ static void fs_append_async_access_stack(Item err) {
         int len = (int)stack->len;
         int max_len = (int)sizeof(stack_buf) - (int)strlen(async_frame) - 1;
         if (len > max_len) len = max_len;
-        memcpy(stack_buf, stack->chars, (size_t)len);
-        stack_buf[len] = '\0';
+        str_copy(stack_buf, sizeof(stack_buf), stack->chars, len);
         snprintf(stack_buf + len, sizeof(stack_buf) - (size_t)len, "%s", async_frame);
     } else {
         snprintf(stack_buf, sizeof(stack_buf), "%s", async_frame + 1);
@@ -3147,8 +3146,7 @@ static Item js_fs_toUnixTimestamp(Item value) {
         String* s = it2s(value);
         int len = (int)s->len;
         if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
-        memcpy(buf, s->chars, (size_t)len);
-        buf[len] = '\0';
+        str_copy(buf, sizeof(buf), s->chars, len);
         char* end = NULL;
         number = strtod(buf, &end);
         if (end == buf || *end != '\0') {

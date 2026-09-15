@@ -1,6 +1,7 @@
 // node_fs_module.cpp -- callback fs slice owned by the node-fs Jube module.
 #include "../../jube/jube.h"
 #include "../../jube/jube_registry.h"
+#include "../../../lib/str.h"
 
 #include <cerrno>
 #include <climits>
@@ -214,10 +215,8 @@ static bool node_fs_copy_string(Item value, char** out_bytes, size_t* out_length
     const uint8_t* bytes = node_fs_host->value->string_bytes(value);
     size_t length = node_fs_host->value->string_length(value);
     if ((length > 0 && !bytes) || length > INT_MAX) return false;
-    char* copy = (char*)malloc(length + 1);
+    char* copy = str_dup((const char*)bytes, length);
     if (!copy) return false;
-    if (length > 0) memcpy(copy, bytes, length);
-    copy[length] = '\0';
     *out_bytes = copy;
     *out_length = length;
     return true;
@@ -2888,13 +2887,11 @@ static Item node_fs_to_unix_timestamp(Item value) {
     } else if (kind == JUBE_VALUE_STRING) {
         size_t length = node_fs_host->value->string_length(value);
         const uint8_t* bytes = node_fs_host->value->string_bytes(value);
-        char* text = (char*)malloc(length + 1);
+        char* text = str_dup((const char*)bytes, length);
         if (!text || (length > 0 && !bytes)) {
             free(text);
             return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "time must be a number");
         }
-        if (length > 0) memcpy(text, bytes, length);
-        text[length] = '\0';
         char* end = NULL;
         number = strtod(text, &end);
         bool valid = end && end != text && *end == '\0';

@@ -511,7 +511,7 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
 
         // Check if this line is empty after stripping (just ">")
         const char* check = content;
-        while (*check == ' ' || *check == '\t') check++;
+        check = str_skip_line_space(check);
         last_was_empty_quote = (*check == '\0' || *check == '\n' || *check == '\r');
 
         // Track fenced code blocks to prevent lazy continuation inside them
@@ -531,7 +531,7 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
                         fence_length = count;
                     } else if (c == fence_char && count >= fence_length) {
                         // Closing fence
-                        while (*p == ' ' || *p == '\t') p++;
+                        p = str_skip_line_space(p);
                         if (*p == '\0' || *p == '\n' || *p == '\r') {
                             in_fenced_code = false;
                         }

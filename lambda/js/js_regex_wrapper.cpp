@@ -868,10 +868,8 @@ extern "C" bool js_regex_wrapper_rewrite_v_flag_classes_c(const char* in_buf, in
     std::string in(in_buf, in_len);
     std::string out;
     if (!rewrite_v_flag_classes(in, out)) return false;
-    char* dst = (char*)mem_alloc(out.size() + 1, MEM_CAT_JS_RUNTIME);
+    char* dst = mem_dup_n(out.data(), out.size(), MEM_CAT_JS_RUNTIME);
     if (!dst) return false;
-    memcpy(dst, out.data(), out.size());
-    dst[out.size()] = '\0';
     *out_buf = dst;
     *out_len = (int)out.size();
     return true;

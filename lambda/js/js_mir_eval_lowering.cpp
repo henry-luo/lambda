@@ -11,15 +11,6 @@ Item js_native_construct_via_call_body(Item callee, Item* args, int argc,
 JsModuleConstEntry* g_eval_preamble_entries = NULL;
 int g_eval_preamble_entry_count = 0;
 int g_eval_preamble_var_count = 0;
-static char* js_preamble_name_copy(const char* name) {
-    if (!name) return NULL;
-    size_t length = strlen(name);
-    char* copy = (char*)mem_alloc(length + 1, MEM_CAT_JS_RUNTIME);
-    if (!copy) return NULL;
-    memcpy(copy, name, length + 1);
-    return copy;
-}
-
 bool js_preamble_entry_copy(const JsModuleConstEntry* source,
                             JsModuleConstEntry* target) {
     if (!source || !target) return false;
@@ -27,8 +18,9 @@ bool js_preamble_entry_copy(const JsModuleConstEntry* source,
     *target = *source;
     target->name = NULL;
     target->live_binding_specifier = NULL;
-    target->name = js_preamble_name_copy(source->name);
-    target->live_binding_specifier = js_preamble_name_copy(source->live_binding_specifier);
+    target->name = source->name ? mem_strdup(source->name, MEM_CAT_JS_RUNTIME) : NULL;
+    target->live_binding_specifier = source->live_binding_specifier
+        ? mem_strdup(source->live_binding_specifier, MEM_CAT_JS_RUNTIME) : NULL;
     if ((source->name && !target->name) ||
             (source->live_binding_specifier && !target->live_binding_specifier)) {
         mem_free((void*)target->name);
@@ -545,8 +537,7 @@ static void js_dynfunc_apply_function_metadata(Item fn_item, Item* args, int arg
     js_set_function_name(fn_item, anon_name);
 
     StrBuf* src_buf = strbuf_new_cap(256);
-    strbuf_append_str(src_buf, source_prefix);
-    strbuf_append_str(src_buf, "(");
+    strbuf_append_all(src_buf, 2, source_prefix, "(");
     for (int i = 0; i < argc - 1; i++) {
         if (i > 0) strbuf_append_str(src_buf, ",");
         String* ps2 = it2s(args[i]);
@@ -625,8 +616,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     // → (function(param1, param2) { body })
     // new Function() with no args → (function() {})
     StrBuf* sb = strbuf_new_cap(256);
-    strbuf_append_str(sb, "(");
-    strbuf_append_str(sb, parse_prefix);
+    strbuf_append_all(sb, 2, "(", parse_prefix);
     strbuf_append_str(sb, "(");
 
     // params are args[0..argc-2], body is args[argc-1]
@@ -716,14 +706,12 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     size_t source_len = sb->length;
 
     // null-terminate — use malloc; the transpiler will copy as needed
-    char* source = (char*)mem_alloc(source_len + 1, MEM_CAT_JS_RUNTIME);
+    char* source = mem_strdup(sb->str, MEM_CAT_JS_RUNTIME);
     if (!source) {
         strbuf_free(sb);
         log_error("js-new-function: malloc failed for source buffer");
         return ItemNull;
     }
-    memcpy(source, sb->str, source_len);
-    source[source_len] = '\0';
     strbuf_free(sb);
 
     int dynfunc_kind = js_dynfunc_kind_from_prefix(parse_prefix);
@@ -1639,17 +1627,14 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             const char* prefix = inherited_strict ? "\"use strict\";\nreturn (" : "return (";
             const char* suffix = "\n)";
             size_t plen = strlen(prefix), slen2 = strlen(suffix);
-            size_t total = plen + code_len + slen2 + 1;
-            char* body = (char*)mem_alloc(total, MEM_CAT_JS_RUNTIME);
+            size_t total = plen + code_len + slen2;
+            char* body = mem_join3(prefix, plen, code_str->chars, code_len, suffix, slen2,
+                                   MEM_CAT_JS_RUNTIME);
             if (!body) {
                 return ItemNull;
             }
-            memcpy(body, prefix, plen);
-            memcpy(body + plen, code_str->chars, code_len);
-            memcpy(body + plen + code_len, suffix, slen2);
-            body[total - 1] = '\0';
 
-            Item body_item = js_name_item(body, total - 1);
+            Item body_item = js_name_item(body, total);
             mem_free(body);
             fn_item = js_new_function_from_string_kind(&body_item, 1,
                 "function", "function anonymous", is_direct_eval);

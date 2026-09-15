@@ -210,14 +210,6 @@ static void xhr_free_state(XhrState* xhr) {
     xhr->in_use = false;
 }
 
-static char* xhr_mem_strdup(const char* s) {
-    if (!s) return nullptr;
-    size_t len = strlen(s);
-    char* dup = (char*)mem_calloc(1, len + 1, MEM_CAT_JS_RUNTIME);
-    memcpy(dup, s, len);
-    return dup;
-}
-
 static void xhr_free_request_header_lines(char** lines, int count) {
     if (!lines) return;
     for (int i = 0; i < count; i++) {
@@ -232,69 +224,65 @@ extern "C" void js_xhr_set_base_url(const char* base_url) {
         _xhr_base_url = nullptr;
     }
     if (base_url && base_url[0]) {
-        _xhr_base_url = xhr_mem_strdup(base_url);
+        _xhr_base_url = mem_strdup(base_url, MEM_CAT_JS_RUNTIME);
     }
 }
 
 static char* xhr_resolve_url(const char* url) {
     if (!url || !url[0]) return nullptr;
     if (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0) {
-        return xhr_mem_strdup(url);
+        return mem_strdup(url, MEM_CAT_JS_RUNTIME);
     }
     if (!_xhr_base_url || !_xhr_base_url[0]) {
-        return xhr_mem_strdup(url);
+        return mem_strdup(url, MEM_CAT_JS_RUNTIME);
     }
 
     if (url[0] == '/' && url[1] == '/') {
         const char* scheme_end = strstr(_xhr_base_url, "://");
-        if (!scheme_end) return xhr_mem_strdup(url);
+        if (!scheme_end) return mem_strdup(url, MEM_CAT_JS_RUNTIME);
         size_t scheme_len = (size_t)(scheme_end - _xhr_base_url);
         size_t url_len = strlen(url);
-        char* out = (char*)mem_alloc(scheme_len + 1 + url_len + 1, MEM_CAT_JS_RUNTIME);
+        char* out = mem_join3(_xhr_base_url, scheme_len, ":", 1, url, url_len,
+                              MEM_CAT_JS_RUNTIME);
         if (!out) return nullptr;
-        memcpy(out, _xhr_base_url, scheme_len);
-        out[scheme_len] = ':';
-        memcpy(out + scheme_len + 1, url, url_len + 1);
         return out;
     }
 
     if (url[0] == '/') {
         const char* scheme_end = strstr(_xhr_base_url, "://");
-        if (!scheme_end) return xhr_mem_strdup(url);
+        if (!scheme_end) return mem_strdup(url, MEM_CAT_JS_RUNTIME);
         const char* host_start = scheme_end + 3;
         const char* host_end = host_start;
         while (*host_end && *host_end != '/' && *host_end != '?' && *host_end != '#') {
             host_end++;
         }
         if (host_end == host_start) {
-            return xhr_mem_strdup(url);
+            return mem_strdup(url, MEM_CAT_JS_RUNTIME);
         }
         size_t origin_len = (size_t)(host_end - _xhr_base_url);
         size_t url_len = strlen(url);
-        char* out = (char*)mem_alloc(origin_len + url_len + 1, MEM_CAT_JS_RUNTIME);
+        char* out = mem_join2(_xhr_base_url, origin_len, url, url_len, MEM_CAT_JS_RUNTIME);
         if (!out) {
             return nullptr;
         }
-        memcpy(out, _xhr_base_url, origin_len);
-        memcpy(out + origin_len, url, url_len + 1);
         return out;
     }
 
     Url* base = url_parse(_xhr_base_url);
     if (!base || !base->is_valid) {
         if (base) url_destroy(base);
-        return xhr_mem_strdup(url);
+        return mem_strdup(url, MEM_CAT_JS_RUNTIME);
     }
 
     Url* resolved = parse_url(base, url);
     char* out = nullptr;
     if (resolved && resolved->is_valid) {
         const char* href = url_get_href(resolved);
-        if (href) out = xhr_mem_strdup(href);
+        if (href) out = mem_strdup(href, MEM_CAT_JS_RUNTIME);
     }
     if (resolved) url_destroy(resolved);
     url_destroy(base);
-    return out ? out : xhr_mem_strdup(url);
+    return out ? out : mem_strdup(url, MEM_CAT_JS_RUNTIME);
 }
 
 static const char* status_text_for_code(long code) {
@@ -320,7 +308,7 @@ static void xhr_complete_response(XhrState* xhr, long status,
                                   const char* data, size_t size) {
     if (!xhr) return;
     xhr->status = status;
-    xhr->status_text = xhr_mem_strdup(status_text_for_code(status));
+    xhr->status_text = mem_strdup(status_text_for_code(status), MEM_CAT_JS_RUNTIME);
     if (data && size > 0) {
         xhr->response_text = (char*)mem_calloc(1, size + 1, MEM_CAT_JS_RUNTIME);
         memcpy(xhr->response_text, data, size);
@@ -464,7 +452,7 @@ extern "C" Item js_xhr_open(Item method_arg, Item url_arg, Item async_arg) {
     }
     xhr->req_header_count = 0;
 
-    xhr->method = xhr_mem_strdup(method);
+    xhr->method = mem_strdup(method, MEM_CAT_JS_RUNTIME);
     xhr->url = xhr_resolve_url(url);
     TypeId async_type = get_type_id(async_arg);
     bool async_argument_omitted = async_type == LMD_TYPE_UNDEFINED ||
@@ -506,8 +494,8 @@ extern "C" Item js_xhr_set_request_header(Item name_arg, Item value_arg) {
         return make_js_undef();
     }
 
-    xhr->req_headers[xhr->req_header_count].name = xhr_mem_strdup(name);
-    xhr->req_headers[xhr->req_header_count].value = xhr_mem_strdup(value);
+    xhr->req_headers[xhr->req_header_count].name = mem_strdup(name, MEM_CAT_JS_RUNTIME);
+    xhr->req_headers[xhr->req_header_count].value = mem_strdup(value, MEM_CAT_JS_RUNTIME);
     xhr->req_header_count++;
 
     return make_js_undef();
@@ -521,7 +509,7 @@ extern "C" Item js_xhr_override_mime_type(Item mime_arg) {
     if (xhr->override_mime_type) mem_free(xhr->override_mime_type);
     // Responses are decoded into responseText, but retaining the override is
     // required because callers may set it between open() and send().
-    xhr->override_mime_type = xhr_mem_strdup(mime);
+    xhr->override_mime_type = mem_strdup(mime, MEM_CAT_JS_RUNTIME);
     return make_js_undef();
 }
 
@@ -582,7 +570,7 @@ extern "C" Item js_xhr_send(Item body_arg) {
         TypeId body_type = get_type_id(body_arg);
         if (body_type != LMD_TYPE_NULL && body_type != LMD_TYPE_UNDEFINED) {
             const char* body = fn_to_cstr(body_arg);
-            if (body) xhr->request_body = xhr_mem_strdup(body);
+            if (body) xhr->request_body = mem_strdup(body, MEM_CAT_JS_RUNTIME);
         }
         xhr->send_pending = true;
         xhr->request_token++;
@@ -689,7 +677,7 @@ extern "C" Item js_xhr_send(Item body_arg) {
         if (resp->response_header_count > 0 && resp->response_headers) {
             char** copied = (char**)mem_calloc(resp->response_header_count, sizeof(char*), MEM_CAT_JS_RUNTIME);
             for (int i = 0; i < resp->response_header_count; i++) {
-                copied[i] = xhr_mem_strdup(resp->response_headers[i]);
+                copied[i] = mem_strdup(resp->response_headers[i], MEM_CAT_JS_RUNTIME);
             }
             xhr->resp_headers = copied;
             xhr->resp_header_count = resp->response_header_count;
@@ -701,7 +689,7 @@ extern "C" Item js_xhr_send(Item body_arg) {
     } else {
         // Network error
         xhr->status = 0;
-        xhr->status_text = xhr_mem_strdup("");
+        xhr->status_text = mem_strdup("", MEM_CAT_JS_RUNTIME);
         xhr->ready_state = 4;
         xhr_set_int(xhr->js_object, "readyState", 4);
         xhr_set_int(xhr->js_object, "status", 0);

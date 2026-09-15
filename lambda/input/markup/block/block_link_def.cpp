@@ -147,7 +147,7 @@ label_done:
     size_t label_len = label_buf->length;
 
     // Skip optional whitespace (space, tab)
-    while (*p == ' ' || *p == '\t') p++;
+    p = str_skip_line_space(p);
 
     // Track additional lines consumed beyond the first line
     // Start with lines consumed by multi-line label
@@ -163,7 +163,7 @@ label_done:
         }
         const char* next_line = parser->lines[next_line_idx];
         const char* np = next_line;
-        while (*np == ' ' || *np == '\t') np++;
+        np = str_skip_line_space(np);
         if (*np == '\0' || *np == '\n' || *np == '\r') {
             mem_free(label_copy);
             return false;  // next line is blank, no URL
@@ -223,7 +223,7 @@ label_done:
     const char* before_ws = p;
 
     // Skip whitespace before optional title
-    while (*p == ' ' || *p == '\t') p++;
+    p = str_skip_line_space(p);
 
     // Check if we had whitespace - needed for same-line title
     bool had_whitespace_before_title = (p != before_ws);
@@ -242,7 +242,7 @@ label_done:
         if (next_line_idx < (size_t)parser->line_count) {
             const char* next_line = parser->lines[next_line_idx];
             const char* np = next_line;
-            while (*np == ' ' || *np == '\t') np++;
+            np = str_skip_line_space(np);
 
             if (*np == '"' || *np == '\'' || *np == '(') {
                 // Title starts on next line - whitespace is implicit (newline)
@@ -308,7 +308,7 @@ label_done:
                 const char* next_line = parser->lines[check_line];
                 // Check if next line is blank - blank line terminates title (invalid)
                 const char* check = next_line;
-                while (*check == ' ' || *check == '\t') check++;
+                check = str_skip_line_space(check);
                 if (*check == '\0' || *check == '\n' || *check == '\r') {
                     // Blank line - title not valid
                     break;
@@ -326,7 +326,7 @@ label_done:
 
         if (found_close) {
             // Rest of line should be whitespace only
-            while (*p == ' ' || *p == '\t') p++;
+            p = str_skip_line_space(p);
             if (*p != '\0' && *p != '\n' && *p != '\r') {
                 // Extra content after title - not a valid title
                 // If title was on same line as URL, definition is invalid
@@ -382,7 +382,7 @@ label_done:
 add_without_title:
 
     // Rest of line should be whitespace only
-    while (*p == ' ' || *p == '\t') p++;
+    p = str_skip_line_space(p);
     if (*p != '\0' && *p != '\n' && *p != '\r') {
         // Extra content after URL - not a valid definition
         mem_free(label_copy);

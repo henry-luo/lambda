@@ -838,28 +838,26 @@ extern "C" Item py_builtin_tuple(Item iterable) {
 // ============================================================================
 
 static Item py_str_upper(String* s) {
-    char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_PY_RUNTIME);
-    str_to_upper(buf, s->chars, s->len);
-    buf[s->len] = '\0';
+    char* buf = mem_dup_n(s->chars, s->len, MEM_CAT_PY_RUNTIME);
+    str_to_upper(buf, buf, s->len);
     Item result = (Item){.item = s2it(heap_strcpy(buf, s->len))};
     mem_free(buf);
     return result;
 }
 
 static Item py_str_lower(String* s) {
-    char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_PY_RUNTIME);
-    str_to_lower(buf, s->chars, s->len);
-    buf[s->len] = '\0';
+    char* buf = mem_dup_n(s->chars, s->len, MEM_CAT_PY_RUNTIME);
+    str_to_lower(buf, buf, s->len);
     Item result = (Item){.item = s2it(heap_strcpy(buf, s->len))};
     mem_free(buf);
     return result;
 }
 
 static Item py_str_strip(String* s) {
-    int64_t start = 0, end = s->len;
-    while (start < end && isspace((uint8_t)s->chars[start])) start++;
-    while (end > start && isspace((uint8_t)s->chars[end - 1])) end--;
-    return (Item){.item = s2it(heap_strcpy(s->chars + start, end - start))};
+    const char* text = s->chars;
+    size_t length = s->len;
+    str_trim(&text, &length);
+    return (Item){.item = s2it(heap_strcpy(text, length))};
 }
 
 static Item py_str_lstrip(String* s) {
@@ -1072,7 +1070,7 @@ extern "C" Item py_string_method(Item str_item, Item method_name, Item* args, in
     if (strcmp(method->chars, "isdigit") == 0) return py_str_isdigit(s);
     if (strcmp(method->chars, "isalpha") == 0) return py_str_isalpha(s);
     if (strcmp(method->chars, "title") == 0) {
-        char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_PY_RUNTIME);
+        char* buf = mem_dup_n(s->chars, s->len, MEM_CAT_PY_RUNTIME);
         bool next_upper = true;
         for (int64_t i = 0; i < s->len; i++) {
             if (isspace((uint8_t)s->chars[i]) || !isalpha((uint8_t)s->chars[i])) {
@@ -1085,17 +1083,13 @@ extern "C" Item py_string_method(Item str_item, Item method_name, Item* args, in
                 buf[i] = tolower((uint8_t)s->chars[i]);
             }
         }
-        buf[s->len] = '\0';
         Item result = (Item){.item = s2it(heap_strcpy(buf, s->len))};
         mem_free(buf);
         return result;
     }
     if (strcmp(method->chars, "capitalize") == 0) {
-        char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_PY_RUNTIME);
-        for (int64_t i = 0; i < s->len; i++) {
-            buf[i] = (i == 0) ? toupper((uint8_t)s->chars[i]) : tolower((uint8_t)s->chars[i]);
-        }
-        buf[s->len] = '\0';
+        char* buf = mem_dup_n(s->chars, s->len, MEM_CAT_PY_RUNTIME);
+        str_capitalize_ascii(buf, buf, s->len);
         Item result = (Item){.item = s2it(heap_strcpy(buf, s->len))};
         mem_free(buf);
         return result;
@@ -1153,8 +1147,7 @@ extern "C" Item py_string_method(Item str_item, Item method_name, Item* args, in
                 if (spec_start && spec_len > 0) {
                     char spec[64];
                     int slen = spec_len < 63 ? spec_len : 63;
-                    memcpy(spec, spec_start, slen);
-                    spec[slen] = '\0';
+                    str_copy(spec, sizeof(spec), spec_start, slen);
 
                     // parse format spec: [[fill]align][sign][#][0][width][grouping_option][.precision][type]
                     char fill = ' ';
@@ -1351,13 +1344,8 @@ extern "C" Item py_string_method(Item str_item, Item method_name, Item* args, in
         return (Item){.item = b2it(has_cased)};
     }
     if (strcmp(method->chars, "swapcase") == 0) {
-        char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_PY_RUNTIME);
-        for (int64_t i = 0; i < s->len; i++) {
-            if (islower((uint8_t)s->chars[i])) buf[i] = toupper((uint8_t)s->chars[i]);
-            else if (isupper((uint8_t)s->chars[i])) buf[i] = tolower((uint8_t)s->chars[i]);
-            else buf[i] = s->chars[i];
-        }
-        buf[s->len] = '\0';
+        char* buf = mem_dup_n(s->chars, s->len, MEM_CAT_PY_RUNTIME);
+        str_swapcase_ascii(buf, buf, s->len);
         Item result = (Item){.item = s2it(heap_strcpy(buf, s->len))};
         mem_free(buf);
         return result;
@@ -1412,8 +1400,7 @@ extern "C" Item py_string_method(Item str_item, Item method_name, Item* args, in
         int64_t pad = width - s->len;
         char* buf = (char*)mem_alloc(width + 1, MEM_CAT_PY_RUNTIME);
         for (int64_t i = 0; i < pad; i++) buf[i] = fill;
-        memcpy(buf + pad, s->chars, s->len);
-        buf[width] = '\0';
+        str_copy(buf + pad, s->len + 1, s->chars, s->len);
         Item result = (Item){.item = s2it(heap_strcpy(buf, width))};
         mem_free(buf);
         return result;

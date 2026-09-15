@@ -3,6 +3,7 @@
 #include "render.hpp"
 #include "../lib/log.h"
 #include "../lib/strview.h"
+#include "../lib/str.h"
 #include "../lib/arraylist.h"
 #include "../lib/arraylist.hpp"
 #include "../lib/utf.h"
@@ -320,12 +321,9 @@ static float table_resolve_relative_width(LayoutContext* lycon, const CssValue* 
         return resolve_length_value(lycon, property, value);
     }
     if (value->type == CSS_VALUE_TYPE_CALC || value->type == CSS_VALUE_TYPE_FUNCTION) {
-        BlockContext percentage_base = {};
-        percentage_base.content_width = table_content_width;
-        BlockContext* saved_parent = lycon->block.parent;
-        lycon->block.parent = &percentage_base;
+        LayoutContainingBlockScope percentage_base(
+            lycon, LAYOUT_AXIS_X, table_content_width);
         float resolved = resolve_length_value(lycon, property, value);
-        lycon->block.parent = saved_parent;
         return isnan(resolved) ? 0.0f : resolved;
     }
     return 0.0f;
@@ -6105,13 +6103,7 @@ static bool should_prevent_wrapping(ViewTableCell* cell) {
 }
 
 static bool is_all_whitespace(const char* text, size_t length) {
-    for (size_t i = 0; i < length; i++) {
-        unsigned char ch = (unsigned char)text[i];
-        if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r' && ch != '\f') {
-            return false;
-        }
-    }
-    return true;
+    return str_all(text, length, str_is_html_space);
 }
 
 static float table_cell_width_constraint_border_box(ViewTableCell* cell, float css_width,

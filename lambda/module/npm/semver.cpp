@@ -216,7 +216,8 @@ static bool parse_comparator(const char** p, SemVerComparator* cmp) {
     cmp->version.minor = minor >= 0 ? minor : 0;
     cmp->version.patch = patch >= 0 ? patch : 0;
     if (prerelease[0]) {
-        strncpy(cmp->version.prerelease, prerelease, sizeof(cmp->version.prerelease) - 1);
+        str_copy(cmp->version.prerelease, sizeof(cmp->version.prerelease), prerelease,
+                 strlen(prerelease));
     }
     cmp->version.valid = true;
 
@@ -258,7 +259,8 @@ static void expand_tilde(const char** p, SemVerComparatorSet* set) {
         SemVerComparator* c1 = &set->comparators[set->count++];
         c1->op = CMP_GE;
         c1->version = (SemVer){major, minor, patch >= 0 ? patch : 0, "", "", true};
-        if (pre[0]) strncpy(c1->version.prerelease, pre, sizeof(c1->version.prerelease) - 1);
+        if (pre[0]) str_copy(c1->version.prerelease, sizeof(c1->version.prerelease), pre,
+                             strlen(pre));
         SemVerComparator* c2 = &set->comparators[set->count++];
         c2->op = CMP_LT;
         c2->version = (SemVer){major, minor + 1, 0, "", "", true};
@@ -286,7 +288,8 @@ static void expand_caret(const char** p, SemVerComparatorSet* set) {
     SemVerComparator* c1 = &set->comparators[set->count++];
     c1->op = CMP_GE;
     c1->version = (SemVer){major, minor >= 0 ? minor : 0, patch >= 0 ? patch : 0, "", "", true};
-    if (pre[0]) strncpy(c1->version.prerelease, pre, sizeof(c1->version.prerelease) - 1);
+    if (pre[0]) str_copy(c1->version.prerelease, sizeof(c1->version.prerelease), pre,
+                         strlen(pre));
 
     SemVerComparator* c2 = &set->comparators[set->count++];
     c2->op = CMP_LT;

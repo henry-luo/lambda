@@ -528,7 +528,7 @@ static const char* get_home_dir(void) {
     if (home[0] == 0) {
         const char* userprofile = shell_getenv("USERPROFILE");
         if (userprofile) {
-            strncpy(home, userprofile, sizeof(home) - 1);
+            str_copy(home, sizeof(home), userprofile, strlen(userprofile));
         }
     }
     return home;
@@ -784,8 +784,7 @@ static Item resolve_proc(const char** segments, int count) {
                             size_t name_len = eq - *e;
                             char name[256];
                             if (name_len < sizeof(name)) {
-                                strncpy(name, *e, name_len);
-                                name[name_len] = '\0';
+                                str_copy(name, sizeof(name), *e, name_len);
                                 env.put(name, eq + 1);
                             }
                         }

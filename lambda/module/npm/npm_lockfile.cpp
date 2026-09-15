@@ -7,6 +7,7 @@
 #include "../../../lib/memtrack.h"
 #include "../../../lib/mempool.h"
 #include "../../../lib/mem_factory.h"
+#include "../../../lib/escape.h"
 #include "../../../lib/stringbuf.h"
 #include "../../../lambda-data.hpp"
 #include "../../../core/mark_reader.hpp"
@@ -192,22 +193,9 @@ NpmLockFile* npm_lockfile_read(const char* path) {
 // Write (generate JSON)
 // ---------------------------------------------------------------------------
 
-// escape a JSON string value (minimal: just backslash and quotes)
 static void json_escape_string(StringBuf* sb, const char* s) {
-    stringbuf_append_char(sb, '"');
-    if (s) {
-        for (const char* p = s; *p; p++) {
-            switch (*p) {
-                case '"':  stringbuf_append_str(sb, "\\\""); break;
-                case '\\': stringbuf_append_str(sb, "\\\\"); break;
-                case '\n': stringbuf_append_str(sb, "\\n"); break;
-                case '\r': stringbuf_append_str(sb, "\\r"); break;
-                case '\t': stringbuf_append_str(sb, "\\t"); break;
-                default:   stringbuf_append_char(sb, *p); break;
-            }
-        }
-    }
-    stringbuf_append_char(sb, '"');
+    const char* value = s ? s : "";
+    escape_append_json_stringbuf(sb, value, strlen(value), true, false);
 }
 
 int npm_lockfile_write(const NpmLockFile* lockfile, const char* path) {
@@ -216,8 +204,7 @@ int npm_lockfile_write(const NpmLockFile* lockfile, const char* path) {
     Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "npm.lockfile");
     StringBuf* sb = stringbuf_new(pool);
 
-    stringbuf_append_str(sb, "{\n");
-    stringbuf_append_str(sb, "  \"version\": 1,\n");
+    stringbuf_append_all(sb, 2, "{\n", "  \"version\": 1,\n");
     stringbuf_append_str(sb, "  \"packages\": {\n");
 
     for (int i = 0; i < lockfile->entry_count; i++) {
@@ -247,20 +234,16 @@ int npm_lockfile_write(const NpmLockFile* lockfile, const char* path) {
                 json_escape_string(sb, e->dep_names[j]);
                 stringbuf_append_str(sb, ": ");
                 json_escape_string(sb, e->dep_versions[j]);
-                if (j < e->dep_count - 1) stringbuf_append_str(sb, ",");
-                stringbuf_append_str(sb, "\n");
+                stringbuf_append_all(sb, 2, j < e->dep_count - 1 ? "," : "", "\n");
             }
             stringbuf_append_str(sb, "      ");
         }
         stringbuf_append_str(sb, "}\n");
 
-        stringbuf_append_str(sb, "    }");
-        if (i < lockfile->entry_count - 1) stringbuf_append_str(sb, ",");
-        stringbuf_append_str(sb, "\n");
+        stringbuf_append_all(sb, 3, "    }", i < lockfile->entry_count - 1 ? "," : "", "\n");
     }
 
-    stringbuf_append_str(sb, "  }\n");
-    stringbuf_append_str(sb, "}\n");
+    stringbuf_append_all(sb, 2, "  }\n", "}\n");
 
     String* result = stringbuf_to_string(sb);
     int ret = write_text_file_atomic(path, result->chars);

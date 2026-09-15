@@ -85,6 +85,18 @@ void pool_free(Pool* pool, void* ptr);
 void* pool_realloc(Pool* pool, void* ptr, size_t size);
 
 /**
+ * Duplicate exactly len bytes in a pool and append a null terminator
+ */
+char* pool_dup_n(Pool* pool, const char* data, size_t len);
+
+/** join exact-length string parts in a pool-owned allocation. */
+char* pool_join2(Pool* pool, const char* first, size_t first_len,
+                 const char* second, size_t second_len);
+char* pool_join3(Pool* pool, const char* first, size_t first_len,
+                 const char* second, size_t second_len,
+                 const char* third, size_t third_len);
+
+/**
  * Duplicate a string in a pool
  * @param pool Pool to allocate from
  * @param str String to duplicate

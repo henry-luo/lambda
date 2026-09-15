@@ -15,6 +15,7 @@
 #include "../../runtime/transpiler.hpp"
 #include "../../runtime/async.h"
 #include "../../../lib/log.h"
+#include "../../../lib/str.h"
 #include "../../../lib/uv_loop.h"
 #include "../../../lib/mem.h"
 
@@ -181,8 +182,7 @@ static Item throw_invalid_local_address_value(Item address_item) {
     if (get_type_id(address_item) == LMD_TYPE_STRING) {
         String* s = it2s(address_item);
         int len = (int)s->len < (int)sizeof(value) - 1 ? (int)s->len : (int)sizeof(value) - 1;
-        memcpy(value, s->chars, (size_t)len);
-        value[len] = '\0';
+        str_copy(value, sizeof(value), s->chars, len);
     }
     return js_throw_type_error_codef("ERR_INVALID_IP_ADDRESS", "Invalid IP address: %s", value);
 }
@@ -584,8 +584,7 @@ static bool copy_hostname(Item hostname_item, char* out, int out_size) {
     if (get_type_id(hostname_item) != LMD_TYPE_STRING) return false;
     String* hostname = it2s(hostname_item);
     int len = (int)hostname->len < out_size - 1 ? (int)hostname->len : out_size - 1;
-    memcpy(out, hostname->chars, (size_t)len);
-    out[len] = '\0';
+    str_copy(out, out_size, hostname->chars, len);
     return true;
 }
 
@@ -1475,7 +1474,7 @@ static Item dns_load_system_servers(void) {
         char line[512];
         while (fgets(line, sizeof(line), file)) {
             const char* p = line;
-            while (*p == ' ' || *p == '\t') p++;
+            p = str_skip_line_space(p);
             if (memcmp(p, "nameserver", 10) != 0 ||
                 (p[10] != ' ' && p[10] != '\t')) {
                 continue;

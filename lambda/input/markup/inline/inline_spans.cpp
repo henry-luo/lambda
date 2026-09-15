@@ -69,11 +69,7 @@ static void parse_emphasis_item(MarkupParser* parser, Element* span, StringBuf* 
     char* saved_buffer = nullptr;
     size_t saved_length = sb->length;
     if (saved_length > 0) {
-        saved_buffer = (char*)mem_alloc(saved_length + 1, MEM_CAT_INPUT_MARKUP);
-        if (saved_buffer) {
-            memcpy(saved_buffer, sb->str->chars, saved_length);
-            saved_buffer[saved_length] = '\0';
-        }
+        saved_buffer = mem_dup_n(sb->str->chars, saved_length, MEM_CAT_INPUT_MARKUP);
     }
 
     const char* try_pos = *pos;
@@ -153,12 +149,11 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
     // Make a local copy of the text since we use the shared parser->sb which
     // might be the source of the text pointer (e.g., when called from block_quote)
     size_t text_len = strlen(text);
-    char* text_copy = (char*)mem_alloc(text_len + 1, MEM_CAT_INPUT_MARKUP);
+    char* text_copy = mem_dup_n(text, text_len, MEM_CAT_INPUT_MARKUP);
     if (!text_copy) {
         String* content = create_string(parser, text);
         return Item{.item = s2it(content)};
     }
-    memcpy(text_copy, text, text_len + 1);
 
     // Get string buffer from parser context
     StringBuf* sb = parser->sb;
@@ -280,8 +275,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                     size_t ref_len = sb->length - word_start;
                     char ref_name[256];
                     if (ref_len < 255) {
-                        strncpy(ref_name, sb->str->chars + word_start, ref_len);
-                        ref_name[ref_len] = '\0';
+                        str_copy(ref_name, sizeof(ref_name), sb->str->chars + word_start, ref_len);
 
                         // Look up the reference in the normalized-label index
                         const char* url = nullptr;

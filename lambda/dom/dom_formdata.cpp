@@ -498,9 +498,8 @@ static Item fd_normalize_surrogates(const char* s) {
     }
     if (!has_surrogate) return make_str(s);
     // same-length replacement (3 bytes → 3 bytes), copy then patch in-place
-    char* buf = (char*)mem_alloc(len + 1, MEM_CAT_JS_RUNTIME);
+    char* buf = mem_dup_n(s, len, MEM_CAT_JS_RUNTIME);
     if (!buf) return make_str(s);
-    memcpy(buf, s, len + 1);
     for (size_t i = 0; i + 2 < len; i++) {
         unsigned char b1 = (unsigned char)buf[i];
         unsigned char b2 = (unsigned char)buf[i+1];

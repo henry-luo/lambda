@@ -18,106 +18,8 @@
 namespace lambda {
 namespace markup {
 
-/**
- * is_escapable_punctuation - Check if character is escapable in CommonMark
- */
-static inline bool is_escapable_punctuation(char c) {
-    return c && strchr("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~", c) != nullptr;
-}
-
-/**
- * process_escapes_and_entities - Process backslash escapes AND entity references
- * Returns new length after processing
- */
 static size_t process_escapes_and_entities(char* str, size_t len) {
-    size_t read = 0, write = 0;
-    while (read < len) {
-        if (str[read] == '\\' && read + 1 < len && is_escapable_punctuation(str[read + 1])) {
-            // Skip backslash, keep the escaped character
-            read++;
-            str[write++] = str[read++];
-        } else if (str[read] == '&') {
-            // Check for entity reference
-            size_t entity_start = read;
-            read++; // skip '&'
-
-            if (read < len && str[read] == '#') {
-                // Numeric entity: &#123; or &#x7B;
-                read++;
-                bool is_hex = (read < len && (str[read] == 'x' || str[read] == 'X'));
-                if (is_hex) read++;
-
-                size_t digit_start = read;
-                uint32_t codepoint = 0;
-
-                if (is_hex) {
-                    while (read < len && ((str[read] >= '0' && str[read] <= '9') ||
-                           (str[read] >= 'a' && str[read] <= 'f') ||
-                           (str[read] >= 'A' && str[read] <= 'F'))) {
-                        int d;
-                        if (str[read] >= '0' && str[read] <= '9') d = str[read] - '0';
-                        else if (str[read] >= 'a' && str[read] <= 'f') d = 10 + str[read] - 'a';
-                        else d = 10 + str[read] - 'A';
-                        codepoint = codepoint * 16 + d;
-                        read++;
-                    }
-                } else {
-                    while (read < len && str[read] >= '0' && str[read] <= '9') {
-                        codepoint = codepoint * 10 + (str[read] - '0');
-                        read++;
-                    }
-                }
-
-                if (read > digit_start && read < len && str[read] == ';') {
-                    read++; // skip ';'
-                    // Replace 0 with replacement character
-                    if (codepoint == 0) codepoint = 0xFFFD;
-                    // Encode as UTF-8
-                    char utf8_buf[5];
-                    size_t utf8_len = codepoint_to_utf8(codepoint, utf8_buf);
-                    for (size_t i = 0; i < utf8_len; i++) {
-                        str[write++] = utf8_buf[i];
-                    }
-                } else {
-                    // Not a valid numeric entity, copy literally
-                    read = entity_start;
-                    str[write++] = str[read++];
-                }
-            } else {
-                // Named entity: &ouml;
-                size_t name_start = read;
-                while (read < len && ((str[read] >= 'a' && str[read] <= 'z') ||
-                       (str[read] >= 'A' && str[read] <= 'Z') ||
-                       (str[read] >= '0' && str[read] <= '9'))) {
-                    read++;
-                }
-
-                if (read > name_start && read < len && str[read] == ';') {
-                    size_t name_len = read - name_start;
-
-                    const char* replacement = html_entity_lookup(str + name_start, name_len);
-                    if (replacement) {
-                        read++; // skip ';'
-                        while (*replacement) {
-                            str[write++] = *replacement++;
-                        }
-                    } else {
-                        // Unknown entity, copy literally
-                        read = entity_start;
-                        str[write++] = str[read++];
-                    }
-                } else {
-                    // Not a valid named entity, copy literally
-                    read = entity_start;
-                    str[write++] = str[read++];
-                }
-            }
-        } else {
-            str[write++] = str[read++];
-        }
-    }
-    str[write] = '\0';
-    return write;
+    return html_entities_decode_markdown_inplace(str, len);
 }
 
 /**
@@ -392,8 +294,7 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
                 while (*p && *p != ']' && *p != ',' && *p != '\n') p++;
                 size_t lang_len = p - lang_start;
                 if (lang_len > 0 && lang_len < sizeof(asciidoc_lang)) {
-                    memcpy(asciidoc_lang, lang_start, lang_len);
-                    asciidoc_lang[lang_len] = '\0';
+                    str_copy(asciidoc_lang, sizeof(asciidoc_lang), lang_start, lang_len);
                 }
             }
             // Skip to next line (should be ----)
@@ -446,8 +347,7 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
                 }
                 size_t word_len = word_end - fence_info.info_string;
                 size_t copy_len = word_len < sizeof(lang) - 1 ? word_len : sizeof(lang) - 1;
-                memcpy(lang, fence_info.info_string, copy_len);
-                lang[copy_len] = '\0';
+                str_copy(lang, sizeof(lang), fence_info.info_string, copy_len);
                 // Process backslash escapes and entity references in info string
                 process_escapes_and_entities(lang, copy_len);
             }
@@ -468,8 +368,7 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
 
     // Use AsciiDoc [source,lang] language if present and no fence info
     if (asciidoc_lang[0] && !lang[0]) {
-        strncpy(lang, asciidoc_lang, sizeof(lang) - 1);
-        lang[sizeof(lang) - 1] = '\0';
+        str_copy(lang, sizeof(lang), asciidoc_lang, strlen(asciidoc_lang));
     }
 
     // Add language attribute if present
@@ -565,7 +464,7 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
                 pos++;
             }
             // Check rest of line is whitespace only (CommonMark requirement)
-            while (*pos == ' ' || *pos == '\t') pos++;
+            pos = str_skip_line_space(pos);
             if (close_len >= fence_len && (*pos == '\0' || *pos == '\n' || *pos == '\r')) {
                 parser->current_line++; // Skip closing fence
                 found_close = true;

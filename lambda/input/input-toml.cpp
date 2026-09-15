@@ -50,40 +50,17 @@ static bool handle_escape_sequence(InputContext& ctx, StringBuf* sb, const char 
             (*toml)++; // skip 'u'
             tracker.advance(1);
 
-            const char* hex_start = *toml;
-            uint32_t codepoint = parse_hex_codepoint(toml, 4);
-            if (codepoint == 0xFFFFFFFF) {
+            uint32_t codepoint = 0;
+            size_t consumed = 0;
+            if (!escape_decode_utf16_escape(*toml, strlen(*toml), false,
+                                            &codepoint, &consumed)) {
                 ctx.addError(esc_loc, "Invalid \\u escape sequence: expected 4 hex digits");
                 return false;
             }
-            tracker.advance((int)(*toml - hex_start));
-
-            // check for surrogate pairs (used for characters > U+FFFF like emojis)
-            // high surrogate: 0xD800-0xDBFF, low surrogate: 0xDC00-0xDFFF
-            if (codepoint >= 0xD800 && codepoint <= 0xDBFF) {
-                // this is a high surrogate, look for low surrogate
-                if (**toml == '\\' && *(*toml + 1) == 'u') {
-                    const char* low_start = *toml;
-                    const char* low_pos = *toml + 2;
-                    uint32_t low_surrogate = parse_hex_codepoint(&low_pos, 4);
-                    uint32_t combined = decode_surrogate_pair((uint16_t)codepoint, (uint16_t)low_surrogate);
-                    if (low_surrogate != 0xFFFFFFFF && combined != 0) {
-                        // valid surrogate pair - combine into full codepoint
-                        codepoint = combined;
-                        *toml = low_pos;
-                        tracker.advance((int)(*toml - low_start));
-                    } else {
-                        // not a valid low surrogate - output replacement char
-                        codepoint = 0xFFFD;
-                    }
-                } else {
-                    // lone high surrogate - output replacement character
-                    codepoint = 0xFFFD;
-                }
-            }
-
-            // convert codepoint to UTF-8
-            append_codepoint_utf8(sb, (uint32_t)codepoint);
+            *toml += consumed;
+            tracker.advance((int)consumed);
+            if (codepoint >= 0xD800 && codepoint <= 0xDBFF) codepoint = 0xFFFD;
+            stringbuf_append_utf8(sb, codepoint);
             (*toml)--; // Back up one since we'll increment at end
             tracker.advance(-1);
         } break;
@@ -103,7 +80,7 @@ static bool handle_escape_sequence(InputContext& ctx, StringBuf* sb, const char 
                 return false;
             }
 
-            append_codepoint_utf8(sb, codepoint);
+            stringbuf_append_utf8(sb, codepoint);
             (*toml)--; // Back up one since we'll increment at end
             tracker.advance(-1);
         } break;

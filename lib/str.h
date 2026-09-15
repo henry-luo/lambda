@@ -197,6 +197,10 @@ void str_to_upper(char* dst, const char* src, size_t len);
 void str_lower_inplace(char* s, size_t len);
 void str_upper_inplace(char* s, size_t len);
 
+/** ASCII case transforms for a length-bounded source. */
+void str_capitalize_ascii(char* dst, const char* src, size_t len);
+void str_swapcase_ascii(char* dst, const char* src, size_t len);
+
 /** predicate: is the whole string ASCII? (SWAR-accelerated). */
 bool str_is_ascii(const char* s, size_t len);
 
@@ -213,6 +217,11 @@ size_t str_copy(char* dst, size_t dst_cap,
  *  returns new total length, or dst_len if no room. */
 size_t str_cat(char* dst, size_t dst_len, size_t dst_cap,
                const char* src, size_t src_len);
+
+/** allocate a NUL-terminated join through the caller's ownership allocator. */
+typedef void* (*StrAllocFn)(void* context, size_t size);
+char* str_join_parts_alloc(const char* const* parts, const size_t* lengths,
+                           size_t count, StrAllocFn allocator, void* context);
 
 /** fill dst with `n` copies of byte `c`. */
 void str_fill(char* dst, size_t n, char c);
@@ -360,6 +369,7 @@ typedef enum {
     STR_ESC_XML,      /* &amp; &lt; &gt; &quot; &apos; */
     STR_ESC_HTML,     /* same as XML plus numeric entities */
     STR_ESC_URL,      /* percent-encoding for non-URL chars */
+    STR_ESC_LAMBDA,   /* \\, \", \\n, \\r, \\t */
 } StrEscapeMode;
 
 /** escape [s, s_len) into dst (must be pre-allocated with enough space).
@@ -369,6 +379,14 @@ size_t str_escape(char* dst, const char* s, size_t s_len, StrEscapeMode mode);
 
 /** compute required buffer size for escaping (excluding NUL). */
 size_t str_escape_len(const char* s, size_t s_len, StrEscapeMode mode);
+
+/** escape into a newly allocated, null-terminated buffer. */
+char* str_escape_alloc(const char* s, size_t s_len, StrEscapeMode mode,
+                       StrAllocFn allocator, void* context);
+
+/** write a POSIX shell single-quoted representation and return its full length.
+ *  output is always NUL-terminated when cap is nonzero. */
+size_t str_shell_quote_posix(char* dst, size_t cap, const char* s, size_t s_len);
 
 /* ──────────────────────────────────────────────────────────────────────
  *  15. Span / Predicate helpers
@@ -453,6 +471,7 @@ int str_binary_payload_decode(const char* content, int len, StrBuf* out, int* er
 /* 17.1 — NUL-safe character classes. Every one returns false for '\0'. */
 bool str_char_in_set(char c, const char* chars);  /* false if c=='\0' or chars==NULL */
 bool str_char_is_ascii_space(char c);  /* ' ', '\t', '\n', '\r', '\f', '\v' */
+bool str_is_html_space(char c);         /* ' ', '\t', '\n', '\r', '\f' */
 bool str_char_is_line_space(char c);   /* ' ', '\t' */
 bool str_char_is_digit(char c);        /* '0'..'9' */
 bool str_char_is_alpha(char c);        /* a-z, A-Z */

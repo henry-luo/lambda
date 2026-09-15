@@ -20,6 +20,7 @@
 #endif
 
 #include "../../../lib/log.h"
+#include "../../../lib/str.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/stringbuf.h"
 #include "../../../lib/file.h"
@@ -326,8 +327,7 @@ static Item py_os_path_dirname(Item p) {
     int dlen = (int)(last_slash - s->chars);
     char buf[1024];
     if (dlen >= (int)sizeof(buf)) dlen = (int)sizeof(buf) - 1;
-    memcpy(buf, s->chars, dlen);
-    buf[dlen] = '\0';
+    str_copy(buf, sizeof(buf), s->chars, dlen);
     return mk_str(buf);
 }
 
@@ -372,8 +372,7 @@ static Item py_os_path_splitext(Item p) {
         int root_len = (int)(dot - s->chars);
         char buf[1024];
         if (root_len >= (int)sizeof(buf)) root_len = (int)sizeof(buf) - 1;
-        memcpy(buf, s->chars, root_len);
-        buf[root_len] = '\0';
+        str_copy(buf, sizeof(buf), s->chars, root_len);
         Item tup = py_tuple_new(2);
         py_tuple_set(tup, 0, mk_str(buf));
         py_tuple_set(tup, 1, mk_str(dot));
@@ -510,8 +509,7 @@ static Item make_match_object(const char* str, int start, int end, const char* g
             char buf[4096];
             int glen = (int)groups[i].size();
             if (glen >= (int)sizeof(buf)) glen = (int)sizeof(buf) - 1;
-            memcpy(buf, groups[i].data(), glen);
-            buf[glen] = '\0';
+            str_copy(buf, sizeof(buf), groups[i].data(), glen);
             py_list_append(group_list, mk_str(buf));
         } else {
             py_list_append(group_list, ItemNull);
@@ -600,8 +598,7 @@ static Item py_re_match(Item pattern, Item string) {
     char full_buf[4096];
     int flen = (int)all_groups[0].size();
     if (flen >= (int)sizeof(full_buf)) flen = (int)sizeof(full_buf) - 1;
-    memcpy(full_buf, all_groups[0].data(), flen);
-    full_buf[flen] = '\0';
+    str_copy(full_buf, sizeof(full_buf), all_groups[0].data(), flen);
 
     int start = (int)(all_groups[0].data() - str_s->chars);
     int end = start + flen;
@@ -636,8 +633,7 @@ static Item py_re_search(Item pattern, Item string) {
     char full_buf[4096];
     int flen = (int)all_groups[0].size();
     if (flen >= (int)sizeof(full_buf)) flen = (int)sizeof(full_buf) - 1;
-    memcpy(full_buf, all_groups[0].data(), flen);
-    full_buf[flen] = '\0';
+    str_copy(full_buf, sizeof(full_buf), all_groups[0].data(), flen);
 
     int start = (int)(all_groups[0].data() - str_s->chars);
     int end = start + flen;
@@ -675,16 +671,14 @@ static Item py_re_findall(Item pattern, Item string) {
             char buf[4096];
             int mlen = (int)groups[0].size();
             if (mlen >= (int)sizeof(buf)) mlen = (int)sizeof(buf) - 1;
-            memcpy(buf, groups[0].data(), mlen);
-            buf[mlen] = '\0';
+            str_copy(buf, sizeof(buf), groups[0].data(), mlen);
             py_list_append(result, mk_str(buf));
         } else if (ngroups == 1) {
             // single capture group — return strings
             char buf[4096];
             int mlen = (int)groups[1].size();
             if (mlen >= (int)sizeof(buf)) mlen = (int)sizeof(buf) - 1;
-            memcpy(buf, groups[1].data(), mlen);
-            buf[mlen] = '\0';
+            str_copy(buf, sizeof(buf), groups[1].data(), mlen);
             py_list_append(result, mk_str(buf));
         } else {
             // multiple capture groups — return tuples
@@ -693,8 +687,7 @@ static Item py_re_findall(Item pattern, Item string) {
                 char buf[4096];
                 int mlen = (int)groups[g].size();
                 if (mlen >= (int)sizeof(buf)) mlen = (int)sizeof(buf) - 1;
-                memcpy(buf, groups[g].data(), mlen);
-                buf[mlen] = '\0';
+                str_copy(buf, sizeof(buf), groups[g].data(), mlen);
                 py_tuple_set(tup, g - 1, mk_str(buf));
             }
             py_list_append(result, tup);
@@ -780,8 +773,7 @@ static Item py_re_split(Item pattern, Item string) {
         int seg_len = (int)(match_start - pos);
         char buf[4096];
         if (seg_len >= (int)sizeof(buf)) seg_len = (int)sizeof(buf) - 1;
-        memcpy(buf, str_s->chars + pos, seg_len);
-        buf[seg_len] = '\0';
+        str_copy(buf, sizeof(buf), str_s->chars + pos, seg_len);
         py_list_append(result, mk_str(buf));
 
         size_t match_end = match_start + match.size();

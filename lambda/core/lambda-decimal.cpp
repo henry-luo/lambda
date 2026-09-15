@@ -1446,10 +1446,8 @@ Item bigint_from_string(const char* str, int len) {
     mpd_context_t* ctx = &parse_ctx;
 
     // handle hex, octal, binary prefixes
-    char* buf = (char*)mem_alloc(len + 1, MEM_CAT_STRING);
+    char* buf = mem_dup_n(str, len, MEM_CAT_STRING);
     if (!buf) return ItemError;
-    memcpy(buf, str, len);
-    buf[len] = '\0';
 
     mpd_t* dec_val = mpd_new(ctx);
     if (!dec_val) {

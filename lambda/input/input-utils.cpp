@@ -131,8 +131,7 @@ Item parse_integer_token_exact(InputContext& ctx, const char* str, size_t len) {
         if (!num_str) return ItemNull;
         heap_buf = true;
     }
-    memcpy(num_str, str, len);
-    num_str[len] = '\0';
+    str_copy(num_str, heap_buf ? len + 1 : sizeof(stack_buf), str, len);
 
     char* end;
     errno = 0;
@@ -245,11 +244,7 @@ bool input_is_whitespace_char(char c) {
 }
 
 bool input_is_empty_line(const char* line) {
-    while (*line) {
-        if (!str_char_is_ascii_space(*line)) return false;
-        line++;
-    }
-    return true;
+    return str_all(line, line ? strlen(line) : 0, str_char_is_ascii_space);
 }
 
 int input_count_leading_chars(const char* str, char ch) {

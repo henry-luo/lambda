@@ -45,6 +45,7 @@ extern "C" bool js_promise_vmap_is(Item value);
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/log.h"
 #include "../../lib/mem_grow.hpp"
+#include "../../lib/str.h"
 #include "../../lib/time_util.h"
 #include "../../lib/utf.h"
 #include <assert.h>
@@ -2593,8 +2594,7 @@ extern "C" Item js_process_exit(Item code_item) {
         String* s = it2s(code_item);
         char buf[64];
         int len = (int)s->len < (int)sizeof(buf) - 1 ? (int)s->len : (int)sizeof(buf) - 1;
-        memcpy(buf, s->chars, (size_t)len);
-        buf[len] = '\0';
+        str_copy(buf, sizeof(buf), s->chars, len);
         code = atoi(buf);
     }
     // process.exit is a hard termination request; any remaining refed handles
@@ -2800,10 +2800,7 @@ extern "C" Item js_process_emitWarning(Item warning, Item type_item, Item code_i
     if (get_type_id(warning_message) == LMD_TYPE_STRING) {
         String* msg = it2s(warning_message);
         if (msg) {
-            char* line = (char*)mem_alloc(msg->len + 2, MEM_CAT_JS_RUNTIME);
-            memcpy(line, msg->chars, msg->len);
-            line[msg->len] = '\n';
-            line[msg->len + 1] = '\0';
+            char* line = mem_join2(msg->chars, msg->len, "\n", 1, MEM_CAT_JS_RUNTIME);
             Item line_item = (Item){.item = s2it(heap_strcpy(line, msg->len + 1))};
             mem_free(line);
 
@@ -3894,8 +3891,7 @@ extern "C" Item js_parseInt(Item str_item, Item radix_item) {
     // Null-terminate
     char buf[256];
     int len = s->len < 255 ? s->len : 255;
-    memcpy(buf, s->chars, len);
-    buf[len] = '\0';
+    str_copy(buf, sizeof(buf), s->chars, len);
 
     char* end_buf = buf + len;
     char* start = js_skip_ecma_whitespace(buf, end_buf);
@@ -3949,8 +3945,7 @@ extern "C" Item js_parseFloat(Item str_item) {
 
     char buf[256];
     int len = s->len < 255 ? s->len : 255;
-    memcpy(buf, s->chars, len);
-    buf[len] = '\0';
+    str_copy(buf, sizeof(buf), s->chars, len);
 
     char* p = js_skip_ecma_whitespace(buf, buf + len);
 
@@ -4598,8 +4593,6 @@ Item js_numeric_prototype_algorithm(Item num,
 // String Methods (v5 additions)
 // =============================================================================
 
-static int encode_charcode_utf8(char* buf, int code);
-static int encode_codepoint_utf8(char* buf, int code);
 static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out);
 static Item js_uri_make_four_byte_string_from_cp(uint32_t cp);
 extern "C" int64_t js_string_last_four_byte_uri_escape_cp(Item str_item);
@@ -4630,8 +4623,7 @@ static inline Item js_uri_make_four_byte_string(char* decoded) {
     result->len = 4;
     result->flags = 0;
     result->is_ascii = false;
-    memcpy(result->chars, decoded, 4);
-    result->chars[4] = '\0';
+    str_copy(result->chars, 5, decoded, 4);
     return (Item){.item = s2it(result)};
 }
 
@@ -4676,8 +4668,7 @@ static inline Item js_make_small_string(char* chars, int len, bool is_ascii) {
     result->len = len;
     result->flags = 0;
     result->is_ascii = is_ascii;
-    memcpy(result->chars, chars, len);
-    result->chars[len] = '\0';
+    str_copy(result->chars, len + 1, chars, len);
     return (Item){.item = s2it(result)};
 }
 
@@ -4723,20 +4714,7 @@ static Item js_from_char_code_to_uint16(Item code_item) {
 
 static Item js_string_from_char_code_uint16(int code) {
     char buf[5]; // max 4 bytes for UTF-8 + null
-    int len = 0;
-    if (code < 128) {
-        buf[0] = (char)code;
-        len = 1;
-    } else if (code < 0x800) {
-        buf[0] = (char)(0xC0 | (code >> 6));
-        buf[1] = (char)(0x80 | (code & 0x3F));
-        len = 2;
-    } else {
-        buf[0] = (char)(0xE0 | (code >> 12));
-        buf[1] = (char)(0x80 | ((code >> 6) & 0x3F));
-        buf[2] = (char)(0x80 | (code & 0x3F));
-        len = 3;
-    }
+    int len = (int)utf8_encode_wtf8((uint32_t)code, buf);
     buf[len] = '\0';
 
     Item result = js_make_small_string(buf, len, code < 128);
@@ -4778,10 +4756,10 @@ extern "C" Item js_string_fromCharCode2(Item first_item, Item second_item) {
             g_uri_last_four_byte_epoch == js_get_heap_epoch()) {
             return g_uri_last_four_byte_string;
         }
-        pos += encode_codepoint_utf8(buf + pos, (int)cp);
+        pos += (int)utf8_encode_wtf8(cp, buf + pos);
     } else {
-        pos += encode_charcode_utf8(buf + pos, first);
-        pos += encode_charcode_utf8(buf + pos, second);
+        pos += (int)utf8_encode_wtf8((uint32_t)first, buf + pos);
+        pos += (int)utf8_encode_wtf8((uint32_t)second, buf + pos);
     }
     return js_make_small_string(buf, pos, first < 128 && second < 128);
 }
@@ -4810,26 +4788,6 @@ extern "C" Item js_uri_decode_equals_from_char_code(Item str_item, Item first_it
     return js_strict_equal(decoded, expected);
 }
 
-// Helper: encode a UTF-16 code unit to UTF-8 into buf, return bytes written
-static int encode_charcode_utf8(char* buf, int code) {
-    code &= 0xFFFF; // truncate to 16-bit (JS fromCharCode uses UTF-16 code units)
-    if (code < 128) {
-        buf[0] = (char)code;
-        return 1;
-    } else if (code < 0x800) {
-        buf[0] = (char)(0xC0 | (code >> 6));
-        buf[1] = (char)(0x80 | (code & 0x3F));
-        return 2;
-    } else {
-        buf[0] = (char)(0xE0 | (code >> 12));
-        buf[1] = (char)(0x80 | ((code >> 6) & 0x3F));
-        buf[2] = (char)(0x80 | (code & 0x3F));
-        return 3;
-    }
-}
-
-static int encode_codepoint_utf8(char* buf, int code);
-
 static Item js_string_from_char_code_sequence(Item source, bool typed_array) {
     int len = typed_array ? js_typed_array_length(source) : source.array->length;
     if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
@@ -4857,12 +4815,12 @@ static Item js_string_from_char_code_sequence(Item source, bool typed_array) {
             int lo = (int)it2i(lo_value);
             uint32_t cp = utf16_decode_pair((uint16_t)code, (uint16_t)lo);
             if (cp != 0) {
-                pos += encode_codepoint_utf8(buf + pos, (int)cp);
+                pos += (int)utf8_encode_wtf8(cp, buf + pos);
                 i++; // skip the low surrogate
                 continue;
             }
         }
-        pos += encode_charcode_utf8(buf + pos, code);
+        pos += (int)utf8_encode_wtf8((uint32_t)code, buf + pos);
     }
     buf[pos] = '\0';
     Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
@@ -4880,30 +4838,6 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
     return js_string_from_char_code_sequence(arr_item, false);
 }
 
-// Helper: encode a full Unicode code point to UTF-8 (up to 4 bytes)
-static int encode_codepoint_utf8(char* buf, int code) {
-    if (code < 0 || code > 0x10FFFF) return 0;
-    if (code < 0x80) {
-        buf[0] = (char)code;
-        return 1;
-    } else if (code < 0x800) {
-        buf[0] = (char)(0xC0 | (code >> 6));
-        buf[1] = (char)(0x80 | (code & 0x3F));
-        return 2;
-    } else if (code < 0x10000) {
-        buf[0] = (char)(0xE0 | (code >> 12));
-        buf[1] = (char)(0x80 | ((code >> 6) & 0x3F));
-        buf[2] = (char)(0x80 | (code & 0x3F));
-        return 3;
-    } else {
-        buf[0] = (char)(0xF0 | (code >> 18));
-        buf[1] = (char)(0x80 | ((code >> 12) & 0x3F));
-        buf[2] = (char)(0x80 | ((code >> 6) & 0x3F));
-        buf[3] = (char)(0x80 | (code & 0x3F));
-        return 4;
-    }
-}
-
 // String.fromCodePoint(cp) — single code point
 extern "C" Item js_string_fromCodePoint(Item code_item) {
     JS_ASSIGN_OR_RETURN(num_item, js_to_number(code_item));
@@ -4913,7 +4847,7 @@ extern "C" Item js_string_fromCodePoint(Item code_item) {
     }
     int code = (int)code_num;
     char buf[5];
-    int len = encode_codepoint_utf8(buf, code);
+    int len = (int)utf8_encode_wtf8((uint32_t)code, buf);
     buf[len] = '\0';
     return (Item){.item = s2it(heap_strcpy(buf, len))};
 }
@@ -4937,7 +4871,7 @@ extern "C" Item js_string_fromCodePoint_array(Item arr_item) {
             return js_throw_range_error("Invalid code point");
         }
         int code = (int)code_num;
-        pos += encode_codepoint_utf8(buf + pos, code);
+        pos += (int)utf8_encode_wtf8((uint32_t)code, buf + pos);
     }
     buf[pos] = '\0';
     Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
@@ -4968,7 +4902,7 @@ static int64_t js_test262_build_string_count_range(Item range_item) {
 
 static int js_test262_build_string_append_cp(char* buf, int pos, int cp) {
     if (cp < 0 || cp > 0x10FFFF) return pos;
-    return pos + encode_codepoint_utf8(buf + pos, cp);
+    return pos + (int)utf8_encode_wtf8((uint32_t)cp, buf + pos);
 }
 
 // buildString(args) — test262 RegExp property-escape harness helper.
@@ -5227,13 +5161,11 @@ static JsConsoleLabel* js_console_label_get_or_create(const char* chars, int len
     JsConsoleLabel* label = (JsConsoleLabel*)mem_calloc(1, sizeof(JsConsoleLabel),
         MEM_CAT_JS_RUNTIME);
     if (!label) return NULL;
-    label->chars = (char*)mem_alloc((size_t)length + 1, MEM_CAT_JS_RUNTIME);
+    label->chars = mem_dup_n(chars, (size_t)length, MEM_CAT_JS_RUNTIME);
     if (!label->chars) {
         mem_free(label);
         return NULL;
     }
-    memcpy(label->chars, chars, (size_t)length);
-    label->chars[length] = '\0';
     label->length = length;
     if (!js_console_labels) js_console_labels = arraylist_new(8);
     if (!js_console_labels || !arraylist_append(js_console_labels, label)) {
@@ -5260,8 +5192,7 @@ static void js_console_resolve_label(Item label_item, bool coerce, char* label_b
         String* s = it2s(string_item);
         if (s && s->len > 0) {
             int copy = (int)s->len < label_buf_len - 1 ? (int)s->len : label_buf_len - 1;
-            memcpy(label_buf, s->chars, copy);
-            label_buf[copy] = '\0';
+            str_copy(label_buf, label_buf_len, s->chars, copy);
             *label = label_buf;
             *label_len = copy;
         }
@@ -9792,10 +9723,8 @@ static Item js_test262_error_with_message(const char* prefix, Item message) {
     String* ms = (get_type_id(message) == LMD_TYPE_STRING) ? it2s(message) : NULL;
     int prefix_len = (int)strlen(prefix);
     int total = prefix_len + (ms ? (int)ms->len : 0);
-    char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
-    memcpy(buf, prefix, (size_t)prefix_len);
-    if (ms) memcpy(buf + prefix_len, ms->chars, ms->len);
-    buf[total] = '\0';
+    char* buf = mem_join2(prefix, (size_t)prefix_len, ms ? ms->chars : "",
+                          ms ? ms->len : 0, MEM_CAT_JS_RUNTIME);
     Item err_name = js_name_item("Test262Error");
     Item err_msg = js_name_item(buf, total);
     mem_free(buf);
@@ -9810,18 +9739,13 @@ static Item js_test262_error_with_values(Item left, const char* between,
     int total = (int)strlen(between) + (int)strlen(suffix) +
         (ls ? (int)ls->len : 0) + (rs ? (int)rs->len : 0) +
         (ms ? (int)ms->len : 0);
-    char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
-    int pos = 0;
-    if (ls) { memcpy(buf + pos, ls->chars, ls->len); pos += (int)ls->len; }
-    int len = (int)strlen(between);
-    memcpy(buf + pos, between, (size_t)len); pos += len;
-    if (rs) { memcpy(buf + pos, rs->chars, rs->len); pos += (int)rs->len; }
-    len = (int)strlen(suffix);
-    memcpy(buf + pos, suffix, (size_t)len); pos += len;
-    if (ms) { memcpy(buf + pos, ms->chars, ms->len); pos += (int)ms->len; }
-    buf[pos] = '\0';
+    const char* parts[] = {ls ? ls->chars : "", between, rs ? rs->chars : "", suffix,
+                           ms ? ms->chars : ""};
+    const size_t lengths[] = {ls ? ls->len : 0, strlen(between), rs ? rs->len : 0,
+                              strlen(suffix), ms ? ms->len : 0};
+    char* buf = mem_join_parts(parts, lengths, 5, MEM_CAT_JS_RUNTIME);
     Item err_name = js_name_item("Test262Error");
-    Item err_msg = js_name_item(buf, pos);
+    Item err_msg = js_name_item(buf, total);
     mem_free(buf);
     return js_new_error_with_name(err_name, err_msg);
 }
@@ -10364,10 +10288,7 @@ extern "C" Item js_assert_base(Item must_be_true, Item message) {
     int plen = (int)strlen(prefix);
     int vlen = vs ? (int)vs->len : 9;
     const char* vchars = vs ? vs->chars : "undefined";
-    char* buf = (char*)mem_alloc(plen + vlen + 1, MEM_CAT_JS_RUNTIME);
-    memcpy(buf, prefix, plen);
-    memcpy(buf + plen, vchars, vlen);
-    buf[plen + vlen] = '\0';
+    char* buf = mem_join2(prefix, plen, vchars, vlen, MEM_CAT_JS_RUNTIME);
     Item err_name = js_name_item("Test262Error");
     Item err_msg  = js_name_item(buf, plen + vlen);
     mem_free(buf);
@@ -11715,8 +11636,7 @@ extern "C" Item js_json_parse(Item str_item) {
     if (!buf) {
         return js_throw_range_error("Invalid string length");
     }
-    memcpy(buf, s->chars, s->len);
-    buf[s->len] = '\0';
+    str_copy(buf, buf_len, s->chars, s->len);
 
     bool ok = false;
     Item result = parse_json_to_item_strict(js_input, buf, &ok);
@@ -11869,8 +11789,7 @@ static bool js_json_validate_raw_text(String* s) {
         return false;
     }
     char* buf = LAMBDA_ALLOCA(s->len + 1, char);
-    memcpy(buf, s->chars, s->len);
-    buf[s->len] = '\0';
+    str_copy(buf, s->len + 1, s->chars, s->len);
     bool ok = false;
     parse_json_to_item_strict(js_input, buf, &ok);
     return ok;
@@ -12212,8 +12131,7 @@ extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
         if (space_str && space_str->len > 0) {
             int n = (int)space_str->len;
             if (n > 10) n = 10;
-            memcpy(gap_buf, space_str->chars, n);
-            gap_buf[n] = '\0';
+            str_copy(gap_buf, sizeof(gap_buf), space_str->chars, n);
             gap = gap_buf;
         }
     }
@@ -17463,8 +17381,7 @@ extern "C" Item js_symbol_create(Item description) {
         String* s = it2s(string_root.get());
         if (s) {
             int len = s->len < 127 ? (int)s->len : 127;
-            memcpy(entry.desc, s->chars, len);
-            entry.desc[len] = '\0';
+            str_copy(entry.desc, sizeof(entry.desc), s->chars, len);
             entry.desc_len = len;
         } else {
             entry.desc[0] = '\0';
@@ -17493,8 +17410,7 @@ extern "C" Item js_symbol_for(Item key) {
 
     JsSymbolEntry lookup;
     int klen = s->len < 127 ? (int)s->len : 127;
-    memcpy(lookup.key, s->chars, klen);
-    lookup.key[klen] = '\0';
+    str_copy(lookup.key, sizeof(lookup.key), s->chars, klen);
 
     JsSymbolEntry* found = JsSymbolEntryMap::get(js_symbol_registry, lookup);
     if (found) return js_make_symbol_item(found->symbol_id);

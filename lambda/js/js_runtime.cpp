@@ -31,6 +31,7 @@
 #include "../../lib/memtrack.h"
 #include "../../lib/mem_grow.hpp"
 #include "../../lib/re2_glue.hpp"
+#include "../../lib/str.h"
 #include "../../lib/utf.h"
 #include <stdarg.h>
 #include "../dom/dom.h"
@@ -200,8 +201,7 @@ extern "C" const char* js_item_to_cstr(Item value, char* buf, int buf_size) {
     String* s = it2s(value);
     int len = (int)s->len;
     if (len >= buf_size) len = buf_size - 1;
-    memcpy(buf, s->chars, len);
-    buf[len] = '\0';
+    str_copy(buf, buf_size, s->chars, len);
     return buf;
 }
 
@@ -8383,23 +8383,6 @@ static int js_utf16_idx_to_byte(const char* chars, int str_len, int64_t utf16_id
     return pos;
 }
 
-static int js_encode_utf16_unit_wtf8(char* buf, uint32_t code_unit) {
-    code_unit &= 0xFFFF;
-    if (code_unit < 0x80) {
-        buf[0] = (char)code_unit;
-        return 1;
-    }
-    if (code_unit < 0x800) {
-        buf[0] = (char)(0xC0 | (code_unit >> 6));
-        buf[1] = (char)(0x80 | (code_unit & 0x3F));
-        return 2;
-    }
-    buf[0] = (char)(0xE0 | (code_unit >> 12));
-    buf[1] = (char)(0x80 | ((code_unit >> 6) & 0x3F));
-    buf[2] = (char)(0x80 | (code_unit & 0x3F));
-    return 3;
-}
-
 // Only the first registration needs to walk the realm root catalog. Once the
 // fixed cache range is registered for this heap, the ASCII hit path is direct.
 static inline bool js_ascii_substring_cache_is_ready(void) {
@@ -8471,8 +8454,7 @@ static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
         result->len = (int)rlen;
         result->flags = 0;
         result->is_ascii = 1;
-        memcpy(result->chars, s->chars + start, (int)rlen);
-        result->chars[rlen] = '\0';
+        str_copy(result->chars, rlen + 1, s->chars + start, rlen);
         Item result_item = (Item){.item = s2it(result)};
         if (cache_ready) js_ascii_substring_cache_store(result_item, cache_hash);
         return result_item;
@@ -8495,11 +8477,11 @@ static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
             } else {
                 char out[3];
                 if (include_high) {
-                    int out_len = js_encode_utf16_unit_wtf8(out, units[0]);
+                    int out_len = (int)utf8_encode_wtf8(units[0], out);
                     strbuf_append_str_n(buf, out, (size_t)out_len);
                 }
                 if (include_low) {
-                    int out_len = js_encode_utf16_unit_wtf8(out, units[1]);
+                    int out_len = (int)utf8_encode_wtf8(units[1], out);
                     strbuf_append_str_n(buf, out, (size_t)out_len);
                 }
             }
@@ -8579,9 +8561,9 @@ static String* js_string_expand_utf16_subject(String* s) {
             uint16_t units[2];
             utf16_encode(cp, units);
             char out[3];
-            int out_len = js_encode_utf16_unit_wtf8(out, units[0]);
+            int out_len = (int)utf8_encode_wtf8(units[0], out);
             strbuf_append_str_n(buf, out, (size_t)out_len);
-            out_len = js_encode_utf16_unit_wtf8(out, units[1]);
+            out_len = (int)utf8_encode_wtf8(units[1], out);
             strbuf_append_str_n(buf, out, (size_t)out_len);
         } else {
             strbuf_append_str_n(buf, s->chars + byte_start, (size_t)bytes);
@@ -12818,8 +12800,7 @@ static Item js_intrinsic_regexp_operation(JsRegExpIntrinsicOp operation,
         buf[0] = '/';
         memcpy(buf + 1, src_str, src_len);
         buf[1 + src_len] = '/';
-        memcpy(buf + 2 + src_len, flg_str, flg_len);
-        buf[2 + src_len + flg_len] = '\0';
+        str_copy(buf + 2 + src_len, flg_len + 1, flg_str, flg_len);
         return js_name_item(buf, 2 + src_len + flg_len);
     }
 
@@ -14426,11 +14407,9 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this,
         ? it2s(target_name_root.get()) : NULL;
     if (target_name && target_name->len > 0) {
         int name_len = 6 + (int)target_name->len;
-        char* name_buf = (char*)mem_alloc((size_t)name_len + 1, MEM_CAT_JS_RUNTIME);
+        char* name_buf = mem_join2("bound ", 6, target_name->chars, target_name->len,
+                                   MEM_CAT_JS_RUNTIME);
         if (!name_buf) return ItemError;
-        memcpy(name_buf, "bound ", 6);
-        memcpy(name_buf + 6, target_name->chars, target_name->len);
-        name_buf[name_len] = '\0';
         String* bound_name = heap_create_name(name_buf, name_len);
         mem_free(name_buf);
         bound = (JsFunction*)bound_root.get().function;
@@ -15841,21 +15820,28 @@ static int js_regex_num_groups(JsRegexData* rd) {
     return rd->re2->NumberOfCapturingGroups() + 1;
 }
 
-// Helper: match with the backtracker for assertions, otherwise direct RE2.
-// Returns true if matched. Fills `matches` array with StringPiece groups.
-static bool js_regex_match_internal(JsRegexData* rd, const char* input, int input_len,
-                                     int start_pos, re2::RE2::Anchor anchor,
-                                     re2::StringPiece* matches, int num_groups) {
+enum JsRegexMatchResult {
+    JS_REGEX_MATCH_NO_MATCH = 0,
+    JS_REGEX_MATCH_FOUND = 1,
+    JS_REGEX_MATCH_RESOURCE_ERROR = -1,
+};
+
+// Match with the backtracker for routed patterns, otherwise direct RE2.
+// Resource exhaustion remains distinct from no match so callers do not lie about results.
+static JsRegexMatchResult js_regex_match_internal(JsRegexData* rd, const char* input, int input_len,
+                                                   int start_pos, re2::RE2::Anchor anchor,
+                                                   re2::StringPiece* matches, int num_groups) {
     if (rd->special_property_kind != 0) {
         return js_regex_match_special_property(rd->special_property_kind, input, input_len,
-                                               start_pos, matches, num_groups);
+                                               start_pos, matches, num_groups) ?
+            JS_REGEX_MATCH_FOUND : JS_REGEX_MATCH_NO_MATCH;
     }
     if (rd->simple_class_kind != JS_REGEX_SIMPLE_CLASS_NONE) {
         return js_regex_match_simple_class(rd, input, input_len, start_pos,
-            anchor, matches, num_groups);
+            anchor, matches, num_groups) ? JS_REGEX_MATCH_FOUND : JS_REGEX_MATCH_NO_MATCH;
     }
     if (rd->literal_fast) {
-        if (start_pos < 0 || start_pos > input_len) return false;
+        if (start_pos < 0 || start_pos > input_len) return JS_REGEX_MATCH_NO_MATCH;
         int pat_len = rd->literal_pattern_len;
         const char* found = NULL;
         if (anchor == re2::RE2::ANCHOR_START) {
@@ -15872,9 +15858,9 @@ static bool js_regex_match_internal(JsRegexData* rd, const char* input, int inpu
                 }
             }
         }
-        if (!found) return false;
+        if (!found) return JS_REGEX_MATCH_NO_MATCH;
         if (num_groups > 0) matches[0] = re2::StringPiece(found, pat_len);
-        return true;
+        return JS_REGEX_MATCH_FOUND;
     }
     if (rd->bt) {
         // spec backtracking matcher for backref / hard-lookbehind patterns
@@ -15883,7 +15869,9 @@ static bool js_regex_match_internal(JsRegexData* rd, const char* input, int inpu
         bool anchor_start = (anchor == re2::RE2::ANCHOR_START);
         int result = js_bt_exec(rd->bt, input, input_len, start_pos, anchor_start,
                                 starts, ends, num_groups);
-        if (result <= 0) return false;
+        if (result == JS_BT_EXEC_RESOURCE_EXHAUSTED ||
+            result == JS_BT_EXEC_ALLOCATION_FAILURE) return JS_REGEX_MATCH_RESOURCE_ERROR;
+        if (result != JS_BT_EXEC_MATCH) return JS_REGEX_MATCH_NO_MATCH;
         for (int i = 0; i < num_groups; i++) {
             if (starts[i] >= 0 && ends[i] >= starts[i]) {
                 matches[i] = re2::StringPiece(input + starts[i], ends[i] - starts[i]);
@@ -15891,11 +15879,12 @@ static bool js_regex_match_internal(JsRegexData* rd, const char* input, int inpu
                 matches[i] = re2::StringPiece();
             }
         }
-        return true;
+        return JS_REGEX_MATCH_FOUND;
     }
     // direct RE2 match (the routing scan already excluded assertions)
     return rd->re2->Match(re2::StringPiece(input, input_len), start_pos, input_len,
-                           anchor, matches, num_groups);
+                          anchor, matches, num_groups) ?
+        JS_REGEX_MATCH_FOUND : JS_REGEX_MATCH_NO_MATCH;
 }
 
 static bool js_regex_pattern_group_is_capturing(const std::string& pattern, int pos) {
@@ -17149,9 +17138,15 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     // behavior that the backtracker already implements.  The Unicode-sets
     // class rewriter runs before this decision, so both paths consume its
     // normalized character classes.
+    JsRegexScannerAnalysis route_analysis = js_regex_scanner_analyze(
+        effective_pattern, effective_pattern_len, compile_info.multiline);
+    if (route_analysis.reasons & (JS_REGEX_SCANNER_REASON_ALLOCATION_FAILURE |
+                                  JS_REGEX_SCANNER_REASON_UNSUPPORTED)) {
+        // A scanner failure must not certify the RE2 path for a pattern it could not classify.
+        return js_throw_range_error("RegExp routing analysis cannot classify pattern");
+    }
     bool route_to_bt = (special_property_kind == 0) &&
-        js_regex_scanner_needs_backtrack(effective_pattern, effective_pattern_len,
-            compile_info.multiline);
+        route_analysis.reasons != JS_REGEX_SCANNER_REASON_NONE;
     const char* bt_pattern = effective_pattern;
     int bt_pattern_len = effective_pattern_len;
 
@@ -17606,8 +17601,9 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
         btflags.sticky = compile_info.sticky;
         bt = js_bt_compile(bt_pattern, bt_pattern_len, btflags, js_input->pool);
         if (!bt) {
-            log_debug("js bt regex: compile failed for /%.*s/, falling back to RE2",
-                      pattern_len, pattern);
+            // A required backtracking pattern cannot fall through to RE2, which changes its captures.
+            log_debug("js regex router: backtracker failed to compile a required pattern");
+            return js_throw_range_error("RegExp backtracking matcher cannot compile required pattern");
         }
     }
     // 3b. Lookbehind and all other assertions compile through the backtracker.
@@ -17643,15 +17639,12 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
                 char alias_buf[32];
                 int alias_len = snprintf(alias_buf, sizeof(alias_buf), "JsCap%d",
                     named_aliases.count() + 1);
-                char* re2_copy = (char*)pool_calloc(js_input->pool, alias_len + 1);
-                char* js_copy = (char*)pool_calloc(js_input->pool, name_len + 1);
+                char* re2_copy = pool_dup_n(js_input->pool, alias_buf, alias_len);
+                char* js_copy = pool_dup_n(js_input->pool,
+                    processed_pattern.c_str() + after, name_len);
                 if (!re2_copy || !js_copy) {
                     return js_throw_range_error("Cannot retain RegExp capture-name alias");
                 }
-                memcpy(re2_copy, alias_buf, alias_len);
-                re2_copy[alias_len] = '\0';
-                memcpy(js_copy, processed_pattern.c_str() + after, name_len);
-                js_copy[name_len] = '\0';
                 if (!named_aliases.append(re2_copy, alias_len, js_copy, name_len)) {
                     return js_throw_range_error("Cannot retain RegExp capture-name alias");
                 }
@@ -17742,8 +17735,8 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     char canonical_flags[sizeof(compile_info.canonical_flags)];
     // v89: store flags in canonical order dgimsuy (ES spec §22.2.5.4)
     {
-        memcpy(canonical_flags, compile_info.canonical_flags, compile_info.canonical_flags_len);
-        canonical_flags[compile_info.canonical_flags_len] = '\0';
+        str_copy(canonical_flags, sizeof(canonical_flags), compile_info.canonical_flags,
+            compile_info.canonical_flags_len);
         flags_len = compile_info.canonical_flags_len;
     }
     bool dot_all = opts.dot_nl();
@@ -18173,9 +18166,12 @@ extern "C" Item js_regex_test(Item regex, Item str) {
     re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED;
     int match_start_pos = utf16_subject ?
         js_utf16_idx_to_byte(match_chars, match_len, start_pos) : start_pos;
-    bool matched = js_regex_match_internal(rd, match_chars, match_len, match_start_pos,
-        anchor, matches, num_groups);
-    if (!matched) {
+    JsRegexMatchResult match_result = js_regex_match_internal(
+        rd, match_chars, match_len, match_start_pos, anchor, matches, num_groups);
+    if (match_result == JS_REGEX_MATCH_RESOURCE_ERROR) {
+        return js_throw_range_error("RegExp match exceeded engine resources");
+    }
+    if (match_result != JS_REGEX_MATCH_FOUND) {
         if (uses_last_index) {
             JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(regex, li_key, 0));
         }
@@ -18188,7 +18184,7 @@ extern "C" Item js_regex_test(Item regex, Item str) {
         JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(regex, li_key, match_end));
     }
     js_regexp_update_last_match(utf16_subject ? match_s : input_s, matches, num_groups);
-    return (Item){.item = b2it(matched ? BOOL_TRUE : BOOL_FALSE)};
+    return (Item){.item = b2it(BOOL_TRUE)};
 }
 
 // Spec-internal Set(rx, "lastIndex", v, Throw=true): always throws TypeError on non-writable.
@@ -18425,9 +18421,12 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED;
     int match_start_pos = code_unit_indices ?
         js_utf16_idx_to_byte(match_chars, match_len, start_pos) : start_pos;
-    bool matched = js_regex_match_internal(rd, match_chars, match_len, match_start_pos,
-        anchor, matches, num_groups);
-    if (!matched) {
+    JsRegexMatchResult match_result = js_regex_match_internal(
+        rd, match_chars, match_len, match_start_pos, anchor, matches, num_groups);
+    if (match_result == JS_REGEX_MATCH_RESOURCE_ERROR) {
+        return js_throw_range_error("RegExp match exceeded engine resources");
+    }
+    if (match_result != JS_REGEX_MATCH_FOUND) {
         if (uses_last_index) {
             JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(
                 regex_root.get(), key_root.get(), 0));
@@ -21277,9 +21276,13 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
         int pos = 0;
         bool found_match = false;
         while (pos <= (int)s->len) {
-            bool matched = js_regex_match_internal(rd, s->chars, (int)s->len, pos,
-                re2::RE2::UNANCHORED, matches, ngroups);
-            if (!matched) break;
+            JsRegexMatchResult match_result = js_regex_match_internal(
+                rd, s->chars, (int)s->len, pos, re2::RE2::UNANCHORED, matches, ngroups);
+            if (match_result == JS_REGEX_MATCH_RESOURCE_ERROR) {
+                strbuf_free(buf);
+                return js_throw_range_error("RegExp match exceeded engine resources");
+            }
+            if (match_result != JS_REGEX_MATCH_FOUND) break;
             found_match = true;
             int match_start = (int)(matches[0].data() - s->chars);
             int match_len = (int)matches[0].size();
@@ -22613,8 +22616,12 @@ static Item js_string_intrinsic_algorithm(Item str,
                 String* s = it2s(str);
                 if (!s) return (Item){.item = i2it(-1)};
                 re2::StringPiece match;
-                if (js_regex_match_internal(rd, s->chars, (int)s->len, 0,
-                                   re2::RE2::UNANCHORED, &match, 1)) {
+                JsRegexMatchResult match_result = js_regex_match_internal(
+                    rd, s->chars, (int)s->len, 0, re2::RE2::UNANCHORED, &match, 1);
+                if (match_result == JS_REGEX_MATCH_RESOURCE_ERROR) {
+                    return js_throw_range_error("RegExp match exceeded engine resources");
+                }
+                if (match_result == JS_REGEX_MATCH_FOUND) {
                     return (Item){.item = i2it((int)(match.data() - s->chars))};
                 }
                 return (Item){.item = i2it(-1)};
@@ -22696,9 +22703,13 @@ static Item js_string_intrinsic_algorithm(Item str,
                 num_groups = matches_buf.count;
                 re2::StringPiece* matches = matches_buf.slots;
                 while (offset < (int)s->len) {
-                    bool matched = js_regex_match_internal(rd, s->chars, (int)s->len, offset,
-                        re2::RE2::UNANCHORED, matches, num_groups);
-                    if (!matched) break;
+                    JsRegexMatchResult match_result = js_regex_match_internal(
+                        rd, s->chars, (int)s->len, offset, re2::RE2::UNANCHORED,
+                        matches, num_groups);
+                    if (match_result == JS_REGEX_MATCH_RESOURCE_ERROR) {
+                        return js_throw_range_error("RegExp match exceeded engine resources");
+                    }
+                    if (match_result != JS_REGEX_MATCH_FOUND) break;
                     int mlen = (int)matches[0].size();
                     Item ms = (Item){.item = s2it(heap_strcpy((char*)matches[0].data(), mlen))};
                     js_array_push_item_direct(result.array, ms);
@@ -25566,9 +25577,7 @@ extern "C" Item js_intl_segmenter_segment(Item text_item) {
         }
         Item entry = js_new_object();
         js_set_key_default(entry, idx_key, (Item){.item = i2it((int64_t)i)});
-        char* seg = (char*)pool_calloc(js_input->pool, j - i + 1);
-        memcpy(seg, s->chars + i, j - i);
-        seg[j - i] = '\0';
+        char* seg = pool_dup_n(js_input->pool, s->chars + i, j - i);
         js_set_key_default(entry, seg_key, js_name_item(seg, (size_t)(j - i)));
         js_set_key_default(entry, wordy_key, (Item){.item = b2it(is_word ? 1 : 0)});
         js_array_push(arr_item, entry);
@@ -32976,8 +32985,7 @@ static Item js_cluster_fork(Item fork_env) {
     if (had_ipc_ref) {
         int old_len = (int)strlen(old_ipc_ref);
         if (old_len >= (int)sizeof(old_ipc_ref_buf)) old_len = (int)sizeof(old_ipc_ref_buf) - 1;
-        memcpy(old_ipc_ref_buf, old_ipc_ref, (size_t)old_len);
-        old_ipc_ref_buf[old_len] = '\0';
+        str_copy(old_ipc_ref_buf, sizeof(old_ipc_ref_buf), old_ipc_ref, old_len);
     }
     // cluster workers use IPC as an internal readiness channel even without public message listeners.
     setenv("LAMBDA_JS_IPC_REF", "1", 1);
@@ -33105,8 +33113,7 @@ static void js_repl_eval_line(Item repl, const char* line, int len) {
         int path_len = len - 6;
         char path_buf[1024];
         if (path_len >= (int)sizeof(path_buf)) path_len = (int)sizeof(path_buf) - 1;
-        memcpy(path_buf, path, (size_t)path_len);
-        path_buf[path_len] = '\0';
+        str_copy(path_buf, sizeof(path_buf), path, path_len);
         FILE* fp = fopen(path_buf, "rb");
         if (fp) {
             fseek(fp, 0, SEEK_END);
@@ -33212,11 +33219,9 @@ static void js_repl_editor_data(Item repl, const char* data, int len) {
     Item old_item = js_get_key_default(repl, js_repl_key("__editor_buffer__"));
     int old_len = 0;
     const char* old = js_repl_cstr(old_item, &old_len);
-    char* combined = (char*)mem_alloc((size_t)old_len + (size_t)len + 1, MEM_CAT_JS_RUNTIME);
-    if (old_len > 0) memcpy(combined, old, (size_t)old_len);
-    if (len > 0) memcpy(combined + old_len, data, (size_t)len);
+    char* combined = mem_join2(old, (size_t)old_len, data, (size_t)len,
+                               MEM_CAT_JS_RUNTIME);
     int total = old_len + len;
-    combined[total] = '\0';
     js_repl_set_str(repl, "__editor_buffer__", combined);
     if (total > 0 && combined[total - 1] == '\n') {
         int prev_end = total - 1;
@@ -33333,11 +33338,8 @@ static Item js_repl_eval_callback(Item repl, Item err, Item result) {
     if (get_type_id(out) == LMD_TYPE_STRING) {
         String* s = it2s(out);
         if (s) {
-            char* line = (char*)mem_alloc((size_t)s->len + 2, MEM_CAT_JS_RUNTIME);
+            char* line = mem_join2(s->chars, s->len, "\n", 1, MEM_CAT_JS_RUNTIME);
             if (!line) return (Item){.item = ITEM_JS_UNDEFINED};
-            memcpy(line, s->chars, (size_t)s->len);
-            line[s->len] = '\n';
-            line[s->len + 1] = '\0';
             // Custom eval callbacks observe each rendered result as one write.
             js_repl_output(repl, line, (int)s->len + 1);
             mem_free(line);
@@ -34523,8 +34525,7 @@ static bool js_cc_get_string(Item value, char* out, int out_size) {
     String* s = it2s(value);
     int len = (int)s->len;
     if (len >= out_size) len = out_size - 1;
-    memcpy(out, s->chars, (size_t)len);
-    out[len] = '\0';
+    str_copy(out, out_size, s->chars, len);
     return true;
 }
 
@@ -35132,8 +35133,7 @@ extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
         if (get_type_id(enc_val) == LMD_TYPE_STRING) {
             String* s = it2s(enc_val);
             if (s && s->len > 0 && s->len < 32) {
-                memcpy(enc_buf, s->chars, s->len);
-                enc_buf[s->len] = '\0';
+                str_copy(enc_buf, sizeof(enc_buf), s->chars, s->len);
                 encoding = enc_buf;
             }
         }

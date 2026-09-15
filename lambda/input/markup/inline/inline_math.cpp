@@ -70,12 +70,10 @@ Item parse_inline_math(MarkupParser* parser, const char** text) {
     add_attribute_to_element(parser, math_elem, "type", "inline");
 
     // Create content string
-    char* content = (char*)mem_alloc(content_len + 1, MEM_CAT_INPUT_MARKUP);
+    char* content = mem_strndup(content_start, content_len, MEM_CAT_INPUT_MARKUP);
     if (!content) {
         return Item{.item = ITEM_ERROR};
     }
-    strncpy(content, content_start, content_len);
-    content[content_len] = '\0';
 
     // Add math content as string
     // Note: Full math parsing is done later by the math parser

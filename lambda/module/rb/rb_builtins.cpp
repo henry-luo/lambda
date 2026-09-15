@@ -44,6 +44,20 @@ static inline Item rb_sitem_n(const char* s, int64_t len) { return (Item){.item 
 // helper: make true/false
 static inline Item rb_bitem(bool v) { return (Item){.item = v ? ITEM_TRUE : ITEM_FALSE}; }
 
+static Item rb_replace_literal(Item self, String* source, String* pattern,
+                               String* replacement, bool replace_all) {
+    size_t result_len = 0;
+    char* result = replace_all
+        ? str_replace_all(source->chars, source->len, pattern->chars, pattern->len,
+                          replacement->chars, replacement->len, &result_len)
+        : str_replace_first(source->chars, source->len, pattern->chars, pattern->len,
+                            replacement->chars, replacement->len, &result_len);
+    if (!result) return self;
+    Item item = rb_sitem_n(result, result_len);
+    free(result);
+    return item;
+}
+
 // ============================================================================
 // String methods
 // ============================================================================
@@ -65,9 +79,8 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
 
     // .upcase
     if (strcmp(m, "upcase") == 0) {
-        char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_RB_RUNTIME);
-        str_to_upper(buf, s->chars, s->len);
-        buf[s->len] = '\0';
+        char* buf = mem_dup_n(s->chars, s->len, MEM_CAT_RB_RUNTIME);
+        str_to_upper(buf, buf, s->len);
         Item result = rb_sitem_n(buf, s->len);
         mem_free(buf);
         return result;
@@ -75,9 +88,8 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
 
     // .downcase
     if (strcmp(m, "downcase") == 0) {
-        char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_RB_RUNTIME);
-        str_to_lower(buf, s->chars, s->len);
-        buf[s->len] = '\0';
+        char* buf = mem_dup_n(s->chars, s->len, MEM_CAT_RB_RUNTIME);
+        str_to_lower(buf, buf, s->len);
         Item result = rb_sitem_n(buf, s->len);
         mem_free(buf);
         return result;
@@ -86,10 +98,8 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
     // .capitalize
     if (strcmp(m, "capitalize") == 0) {
         if (s->len == 0) return self;
-        char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_RB_RUNTIME);
-        str_to_upper(buf, s->chars, 1);
-        str_to_lower(buf + 1, s->chars + 1, s->len - 1);
-        buf[s->len] = '\0';
+        char* buf = mem_dup_n(s->chars, s->len, MEM_CAT_RB_RUNTIME);
+        str_capitalize_ascii(buf, buf, s->len);
         Item result = rb_sitem_n(buf, s->len);
         mem_free(buf);
         return result;
@@ -97,10 +107,10 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
 
     // .strip
     if (strcmp(m, "strip") == 0) {
-        int64_t start = 0, end = s->len;
-        while (start < end && isspace((unsigned char)s->chars[start])) start++;
-        while (end > start && isspace((unsigned char)s->chars[end - 1])) end--;
-        return rb_sitem_n(s->chars + start, end - start);
+        const char* text = s->chars;
+        size_t length = s->len;
+        str_trim(&text, &length);
+        return rb_sitem_n(text, length);
     }
 
     // .lstrip
@@ -199,22 +209,7 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
         String* new_s = it2s(args[1]);
         if (!old_s || !new_s || old_s->len == 0) return self;
 
-        StrBuf* buf = strbuf_new_cap(s->len);
-        int64_t i = 0;
-        while (i < s->len) {
-            const char* found = strstr(s->chars + i, old_s->chars);
-            if (!found || found >= s->chars + s->len) {
-                strbuf_append_str_n(buf, s->chars + i, s->len - i);
-                break;
-            }
-            int64_t pos = found - s->chars;
-            strbuf_append_str_n(buf, s->chars + i, pos - i);
-            strbuf_append_str_n(buf, new_s->chars, new_s->len);
-            i = pos + old_s->len;
-        }
-        Item result = rb_sitem(buf->str);
-        strbuf_free(buf);
-        return result;
+        return rb_replace_literal(self, s, old_s, new_s, true);
     }
 
     // .gsub(pattern, replacement) — supports regex and string patterns
@@ -227,22 +222,7 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
         String* rep = it2s(args[1]);
         if (!pat || !rep || pat->len == 0) return self;
 
-        StrBuf* buf = strbuf_new_cap(s->len);
-        int64_t i = 0;
-        while (i < s->len) {
-            const char* found = strstr(s->chars + i, pat->chars);
-            if (!found || found >= s->chars + s->len) {
-                strbuf_append_str_n(buf, s->chars + i, s->len - i);
-                break;
-            }
-            int64_t pos = found - s->chars;
-            strbuf_append_str_n(buf, s->chars + i, pos - i);
-            strbuf_append_str_n(buf, rep->chars, rep->len);
-            i = pos + pat->len;
-        }
-        Item result = rb_sitem(buf->str);
-        strbuf_free(buf);
-        return result;
+        return rb_replace_literal(self, s, pat, rep, true);
     }
 
     // .sub(pattern, replacement) — first occurrence only, supports regex
@@ -254,18 +234,8 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
         String* pat = it2s(args[0]);
         String* rep = it2s(args[1]);
         if (!pat || !rep || pat->len == 0) return self;
-
-        const char* found = strstr(s->chars, pat->chars);
-        if (!found) return self;
-
-        int64_t pos = found - s->chars;
-        StrBuf* buf = strbuf_new_cap(s->len);
-        strbuf_append_str_n(buf, s->chars, pos);
-        strbuf_append_str_n(buf, rep->chars, rep->len);
-        strbuf_append_str_n(buf, s->chars + pos + pat->len, s->len - pos - pat->len);
-        Item result = rb_sitem(buf->str);
-        strbuf_free(buf);
-        return result;
+        if (str_find(s->chars, s->len, pat->chars, pat->len) == STR_NPOS) return self;
+        return rb_replace_literal(self, s, pat, rep, false);
     }
 
     // .match(regex_or_str) — returns matched string or nil
@@ -435,12 +405,8 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
 
     // .swapcase
     if (strcmp(m, "swapcase") == 0) {
-        char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_RB_RUNTIME);
-        for (int64_t i = 0; i < s->len; i++) {
-            unsigned char c = (unsigned char)s->chars[i];
-            buf[i] = isupper(c) ? tolower(c) : (islower(c) ? toupper(c) : c);
-        }
-        buf[s->len] = '\0';
+        char* buf = mem_dup_n(s->chars, s->len, MEM_CAT_RB_RUNTIME);
+        str_swapcase_ascii(buf, buf, s->len);
         Item result = rb_sitem_n(buf, s->len);
         mem_free(buf);
         return result;
@@ -451,9 +417,8 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
         String* from = it2s(args[0]);
         String* to = it2s(args[1]);
         if (!from || !to) return self;
-        char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_RB_RUNTIME);
+        char* buf = mem_dup_n(s->chars, s->len, MEM_CAT_RB_RUNTIME);
         for (int64_t i = 0; i < s->len; i++) {
-            buf[i] = s->chars[i];
             for (int64_t j = 0; j < from->len; j++) {
                 if (s->chars[i] == from->chars[j]) {
                     buf[i] = (j < to->len) ? to->chars[j] : to->chars[to->len - 1];
@@ -461,7 +426,6 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
                 }
             }
         }
-        buf[s->len] = '\0';
         Item result = rb_sitem_n(buf, s->len);
         mem_free(buf);
         return result;

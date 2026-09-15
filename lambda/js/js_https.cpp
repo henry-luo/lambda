@@ -16,6 +16,7 @@
 #include "js_typed_array.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../../lib/str.h"
 #include "../../lib/url.h"
 
 #include <cstdio>
@@ -137,8 +138,7 @@ extern "C" Item js_https_agent_getName(Item options) {
         if (get_type_id(host_item) == LMD_TYPE_STRING) {
             String* s = it2s(host_item);
             int len = (int)s->len < (int)sizeof(host) - 1 ? (int)s->len : (int)sizeof(host) - 1;
-            memcpy(host, s->chars, (size_t)len);
-            host[len] = '\0';
+            str_copy(host, sizeof(host), s->chars, len);
         }
 
         Item port_item = js_get_key_cstr(options, "port");
@@ -148,26 +148,20 @@ extern "C" Item js_https_agent_getName(Item options) {
         } else if (get_type_id(port_item) == LMD_TYPE_STRING) {
             String* s = it2s(port_item);
             int len = (int)s->len < (int)sizeof(port) - 1 ? (int)s->len : (int)sizeof(port) - 1;
-            memcpy(port, s->chars, (size_t)len);
-            port[len] = '\0';
+            str_copy(port, sizeof(port), s->chars, len);
         }
 
         Item local_item = js_get_key_cstr(options, "localAddress");
         if (get_type_id(local_item) == LMD_TYPE_STRING) {
             String* s = it2s(local_item);
             int len = (int)s->len < (int)sizeof(local_addr) - 1 ? (int)s->len : (int)sizeof(local_addr) - 1;
-            memcpy(local_addr, s->chars, (size_t)len);
-            local_addr[len] = '\0';
+            str_copy(local_addr, sizeof(local_addr), s->chars, len);
         }
 
     }
 
     StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, host);
-    strbuf_append_char(sb, ':');
-    strbuf_append_str(sb, port);
-    strbuf_append_char(sb, ':');
-    strbuf_append_str(sb, local_addr);
+    strbuf_append_all(sb, 5, host, ":", port, ":", local_addr);
 
     agent_key_segment(sb, options, "ca");
     agent_key_segment(sb, options, "cert");

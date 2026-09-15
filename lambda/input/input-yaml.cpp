@@ -5,6 +5,7 @@
 #include "../../lib/mem.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/str.h"
+#include "../../lib/string.h"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_typed.hpp"
@@ -311,10 +312,7 @@ static Item resolve_alias(YamlParser* p, const char* name) {
 // so we directly allocate a String with len=0 to represent a genuine empty string.
 static Item make_empty_string(YamlParser* p) {
     Arena* arena = p->ctx->builder.arena();
-    String* s = (String*)arena_alloc(arena, sizeof(String) + 1);
-    s->len = 0;
-    s->flags = 0;
-    s->chars[0] = '\0';
+    String* s = string_from_strview_arena(strview_init("", 0), arena);
     return (Item){.item = s2it(s)};
 }
 
@@ -328,10 +326,7 @@ static void put_key_value(YamlParser* p, MapBuilder& map, Item key_item, Item va
         } else {
             // empty string key: createName("") returns null, so allocate directly
             Arena* arena = p->ctx->builder.arena();
-            String* name = (String*)arena_alloc(arena, sizeof(String) + 1);
-            name->len = 0;
-            name->flags = 0;
-            name->chars[0] = '\0';
+            String* name = string_from_strview_arena(strview_init("", 0), arena);
             map.put(name, value_item);
         }
         return;
@@ -405,15 +400,12 @@ static Item make_scalar(YamlParser* p, const char* str, bool quoted) {
 
     char buf[256];
     if (slen >= sizeof(buf)) {
-        char* tmp = (char*)mem_alloc(slen + 1, MEM_CAT_INPUT_YAML);
-        memcpy(tmp, start, slen);
-        tmp[slen] = '\0';
+        char* tmp = mem_dup_n(start, slen, MEM_CAT_INPUT_YAML);
         Item result = p->ctx->builder.createStringItem(tmp);
         mem_free(tmp);
         return result;
     }
-    memcpy(buf, start, slen);
-    buf[slen] = '\0';
+    str_copy(buf, sizeof(buf), start, slen);
 
     if (strcmp(buf, ".inf") == 0 || strcmp(buf, ".Inf") == 0 || strcmp(buf, ".INF") == 0) {
         return p->ctx->builder.createFloat(1.0 / 0.0);
@@ -496,17 +488,17 @@ static Item parse_double_quoted(YamlParser* p) {
                     break;
                 case 'x': {
                     uint32_t val = yaml_parse_hex_codepoint(p, 2);
-                    if (val != 0xFFFFFFFF) append_codepoint_utf8_strbuf(sb, val);
+                    if (val != 0xFFFFFFFF) strbuf_append_utf8(sb, val);
                     break;
                 }
                 case 'u': {
                     uint32_t val = yaml_parse_hex_codepoint(p, 4);
-                    if (val != 0xFFFFFFFF) append_codepoint_utf8_strbuf(sb, val);
+                    if (val != 0xFFFFFFFF) strbuf_append_utf8(sb, val);
                     break;
                 }
                 case 'U': {
                     uint32_t val = yaml_parse_hex_codepoint(p, 8);
-                    if (val != 0xFFFFFFFF) append_codepoint_utf8_strbuf(sb, val);
+                    if (val != 0xFFFFFFFF) strbuf_append_utf8(sb, val);
                     break;
                 }
                 case '\n': {

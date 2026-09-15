@@ -45,6 +45,123 @@ const char* html_entity_lookup(const char* name, size_t len) {
     return nullptr;
 }
 
+bool html_entity_decode_reference(const char* source, size_t len,
+                                  HtmlEntityDecodeResult* result) {
+    if (!source || !result || len < 4 || source[0] != '&') return false;
+
+    result->chars = nullptr;
+    result->length = 0;
+    result->consumed = 0;
+    const char* entity_start = source + 1;
+    const char* end = source + len;
+    const char* entity_end = entity_start;
+    if (*entity_start == '#') {
+        entity_end++;
+        bool hexadecimal = entity_end < end &&
+            (*entity_end == 'x' || *entity_end == 'X');
+        if (hexadecimal) entity_end++;
+
+        const char* digits = entity_end;
+        uint32_t codepoint = 0;
+        while (entity_end < end) {
+            char c = *entity_end;
+            int digit = c >= '0' && c <= '9' ? c - '0' :
+                c >= 'a' && c <= 'f' ? c - 'a' + 10 :
+                c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+            if (digit < 0 || (!hexadecimal && digit >= 10)) break;
+            codepoint = codepoint * (hexadecimal ? 16 : 10) + (uint32_t)digit;
+            entity_end++;
+            if (codepoint > 0x10FFFF) return false;
+        }
+        if (entity_end == digits || entity_end == end || *entity_end != ';') return false;
+        if (codepoint == 0) codepoint = 0xFFFD;
+        result->length = utf8_encode_z(codepoint, result->numeric_chars);
+        if (result->length == 0) return false;
+        result->chars = result->numeric_chars;
+        result->consumed = (size_t)(entity_end + 1 - source);
+        return true;
+    }
+
+    while (entity_end < end &&
+           ((*entity_end >= 'a' && *entity_end <= 'z') ||
+            (*entity_end >= 'A' && *entity_end <= 'Z') ||
+            (*entity_end >= '0' && *entity_end <= '9'))) {
+        entity_end++;
+    }
+    if (entity_end == entity_start || entity_end == end || *entity_end != ';') return false;
+    const char* replacement = html_entity_lookup(
+        entity_start, (size_t)(entity_end - entity_start));
+    if (!replacement) return false;
+    result->chars = replacement;
+    result->length = strlen(replacement);
+    result->consumed = (size_t)(entity_end + 1 - source);
+    return true;
+}
+
+static bool html_entity_markdown_escapable(char c) {
+    return (c >= '!' && c <= '/') || (c >= ':' && c <= '@') ||
+           (c >= '[' && c <= '`') || (c >= '{' && c <= '~');
+}
+
+typedef void (*HtmlEntityAppendFn)(void* output, const char* bytes, size_t len);
+
+typedef struct {
+    char* chars;
+    size_t length;
+} HtmlEntityWriteBuffer;
+
+static void html_entity_append_strbuf(void* output, const char* bytes, size_t len) {
+    strbuf_append_str_n((StrBuf*)output, bytes, len);
+}
+
+static void html_entity_append_write(void* output, const char* bytes, size_t len) {
+    HtmlEntityWriteBuffer* buffer = (HtmlEntityWriteBuffer*)output;
+    memcpy(buffer->chars + buffer->length, bytes, len);
+    buffer->length += len;
+}
+
+static void html_entities_decode_markdown(void* output, HtmlEntityAppendFn append,
+                                          const char* source, size_t len) {
+    if (!output || !append || !source) return;
+
+    const char* pos = source;
+    const char* end = source + len;
+    while (pos < end) {
+        if (*pos == '\\' && pos + 1 < end &&
+            html_entity_markdown_escapable(pos[1])) {
+            append(output, pos + 1, 1);
+            pos += 2;
+            continue;
+        }
+        if (*pos != '&') {
+            append(output, pos++, 1);
+            continue;
+        }
+
+        HtmlEntityDecodeResult decoded;
+        if (html_entity_decode_reference(pos, (size_t)(end - pos), &decoded)) {
+            append(output, decoded.chars, decoded.length);
+            pos += decoded.consumed;
+            continue;
+        }
+
+        append(output, pos++, 1);
+    }
+}
+
+void html_entities_decode_markdown_append(StrBuf* out, const char* source,
+                                          size_t len) {
+    html_entities_decode_markdown(out, html_entity_append_strbuf, source, len);
+}
+
+size_t html_entities_decode_markdown_inplace(char* source, size_t len) {
+    if (!source) return 0;
+    HtmlEntityWriteBuffer output = {source, 0};
+    html_entities_decode_markdown(&output, html_entity_append_write, source, len);
+    source[output.length] = '\0';
+    return output.length;
+}
+
 // ── ASCII-escape check ─────────────────────────────────────────────
 bool html_entity_is_ascii_escape(const char* name, size_t len) {
     // Five XML built-in entities

@@ -14,6 +14,7 @@
 #include "../../lib/strbuf.h"
 #include "../../lib/file.h"
 #include "../../lib/path_str.h"
+#include "../../lib/string.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -542,12 +543,9 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
             fn_node->source_span = (SourceSpan){synthetic_offset, synthetic_offset};
             synthetic_offset++;
 
-            // Create name string in pool
-            fn_node->name = (String*)pool_calloc(pool, sizeof(String) + shape->name->length + 1);
-            fn_node->name->len = (uint32_t)shape->name->length;
-            fn_node->name->is_ascii = 1;
-            memcpy(fn_node->name->chars, shape->name->str, shape->name->length);
-            fn_node->name->chars[shape->name->length] = '\0';
+            // Copy the external shape name into the AST pool.
+            fn_node->name = string_from_strview(
+                strview_init(shape->name->str, shape->name->length), pool);
 
             // Create TypeFunc — all params as Item (boxed), public
             TypeFunc* fn_type = (TypeFunc*)pool_calloc(pool, sizeof(TypeFunc));
@@ -591,12 +589,9 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
             named->init = NULL;
             named->type = &TYPE_ANY;
 
-            // Create name in pool
-            named->name = (String*)pool_calloc(pool, sizeof(String) + shape->name->length + 1);
-            named->name->len = (uint32_t)shape->name->length;
-            named->name->is_ascii = 1;
-            memcpy(named->name->chars, shape->name->str, shape->name->length);
-            named->name->chars[shape->name->length] = '\0';
+            // Copy the external shape name into the AST pool.
+            named->name = string_from_strview(
+                strview_init(shape->name->str, shape->name->length), pool);
 
             AstIdentNode* id = (AstIdentNode*)pool_calloc(pool, sizeof(AstIdentNode));
             id->node_type = AST_NODE_IDENT;

@@ -124,15 +124,6 @@ static void media_queries_clear(JsDomPlatformState* state) {
     }
 }
 
-static char* platform_strdup(const char* value) {
-    const char* source = value ? value : "";
-    size_t len = strlen(source);
-    char* copy = (char*)mem_alloc(len + 1, MEM_CAT_JS_RUNTIME);
-    if (!copy) return nullptr;
-    memcpy(copy, source, len + 1);
-    return copy;
-}
-
 static const char* platform_string(Item value) {
     Item converted = js_to_string(value);
     const char* result = fn_to_cstr(converted);
@@ -181,9 +172,9 @@ static Item js_storage_set_item(Item key_item, Item value_item) {
     JsStorageState* storage = storage_from_this();
     if (!storage) return make_js_undefined();
     const char* key = platform_string(key_item);
-    char* stable_key = platform_strdup(key);
+    char* stable_key = mem_strdup(key ? key : "", MEM_CAT_JS_RUNTIME);
     const char* value = platform_string(value_item);
-    char* stable_value = platform_strdup(value);
+    char* stable_value = mem_strdup(value ? value : "", MEM_CAT_JS_RUNTIME);
     if (!stable_key || !stable_value) {
         if (stable_key) mem_free(stable_key);
         if (stable_value) mem_free(stable_value);
@@ -326,7 +317,7 @@ extern "C" Item dom_match_media(Item query_item) {
         mem_free(state);
         return ItemNull;
     }
-    state->query = platform_strdup(platform_string(query_item));
+    state->query = mem_strdup(platform_string(query_item), MEM_CAT_JS_RUNTIME);
     if (!state->query) {
         arraylist_remove(dom_media_query_records, media_query_count(platform) - 1);
         mem_free(state);

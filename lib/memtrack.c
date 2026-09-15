@@ -12,6 +12,7 @@
 #include "hashmap.h"
 #include "arraylist.h"
 #include "log.h"
+#include "str.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -876,16 +877,84 @@ void mem_free(void* ptr) {
     mem_free_loc(ptr, 0);
 }
 
-char* mem_strdup_loc(const char* str, MemCategory category, int line) {
-    if (!str) return NULL;
-    size_t raw_len = strlen(str);
-    size_t len = 0;
-    if (!checked_add_size(raw_len, 1, &len)) return NULL;
-    char* dup = (char*)mem_alloc_loc(len, category, line);
+char* mem_dup_n_loc(const char* data, size_t len, MemCategory category, int line) {
+    if (!data) return NULL;
+    size_t alloc_size = 0;
+    if (!checked_add_size(len, 1, &alloc_size)) return NULL;
+    char* dup = (char*)mem_alloc_loc(alloc_size, category, line);
     if (dup) {
-        memcpy(dup, str, len);
+        memcpy(dup, data, len);
+        dup[len] = '\0';
     }
     return dup;
+}
+
+char* mem_dup_n(const char* data, size_t len, MemCategory category) {
+    return mem_dup_n_loc(data, len, category, 0);
+}
+
+typedef struct MemJoinContext {
+    MemCategory category;
+    int line;
+} MemJoinContext;
+
+static void* mem_join_alloc(void* context, size_t size) {
+    MemJoinContext* join = (MemJoinContext*)context;
+    return mem_alloc_loc(size, join->category, join->line);
+}
+
+char* mem_join_parts_loc(const char* const* parts, const size_t* lengths,
+                         size_t count, MemCategory category, int line) {
+    MemJoinContext context = {category, line};
+    return str_join_parts_alloc(parts, lengths, count, mem_join_alloc, &context);
+}
+
+char* mem_join_parts(const char* const* parts, const size_t* lengths, size_t count,
+                     MemCategory category) {
+    return mem_join_parts_loc(parts, lengths, count, category, 0);
+}
+
+char* mem_join2_loc(const char* first, size_t first_len,
+                    const char* second, size_t second_len,
+                    MemCategory category, int line) {
+    const char* parts[] = {first, second};
+    const size_t lengths[] = {first_len, second_len};
+    return mem_join_parts_loc(parts, lengths, 2, category, line);
+}
+
+char* mem_join2(const char* first, size_t first_len,
+                const char* second, size_t second_len, MemCategory category) {
+    return mem_join2_loc(first, first_len, second, second_len, category, 0);
+}
+
+char* mem_join3_loc(const char* first, size_t first_len,
+                    const char* second, size_t second_len,
+                    const char* third, size_t third_len,
+                    MemCategory category, int line) {
+    const char* parts[] = {first, second, third};
+    const size_t lengths[] = {first_len, second_len, third_len};
+    return mem_join_parts_loc(parts, lengths, 3, category, line);
+}
+
+char* mem_join3(const char* first, size_t first_len,
+                const char* second, size_t second_len,
+                const char* third, size_t third_len, MemCategory category) {
+    return mem_join3_loc(first, first_len, second, second_len, third, third_len, category, 0);
+}
+
+char* mem_escape_lambda_literal_loc(const char* value, MemCategory category, int line) {
+    if (!value) return NULL;
+    MemJoinContext context = {category, line};
+    return str_escape_alloc(value, strlen(value), STR_ESC_LAMBDA, mem_join_alloc, &context);
+}
+
+char* mem_escape_lambda_literal(const char* value, MemCategory category) {
+    return mem_escape_lambda_literal_loc(value, category, 0);
+}
+
+char* mem_strdup_loc(const char* str, MemCategory category, int line) {
+    if (!str) return NULL;
+    return mem_dup_n_loc(str, strlen(str), category, line);
 }
 
 char* mem_strdup(const char* str, MemCategory category) {
@@ -894,16 +963,9 @@ char* mem_strdup(const char* str, MemCategory category) {
 
 char* mem_strndup_loc(const char* str, size_t max_len, MemCategory category, int line) {
     if (!str) return NULL;
-    size_t len = strlen(str);
-    if (len > max_len) len = max_len;
-    size_t alloc_size = 0;
-    if (!checked_add_size(len, 1, &alloc_size)) return NULL;
-    char* dup = (char*)mem_alloc_loc(alloc_size, category, line);
-    if (dup) {
-        memcpy(dup, str, len);
-        dup[len] = '\0';
-    }
-    return dup;
+    size_t len = 0;
+    while (len < max_len && str[len] != '\0') len++;
+    return mem_dup_n_loc(str, len, category, line);
 }
 
 char* mem_strndup(const char* str, size_t max_len, MemCategory category) {

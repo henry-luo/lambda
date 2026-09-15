@@ -627,6 +627,22 @@ void str_upper_inplace(char* s, size_t len) {
     str_to_upper(s, s, len);
 }
 
+void str_capitalize_ascii(char* dst, const char* src, size_t len) {
+    if (!dst || !src || len == 0) return;
+    unsigned char first = (unsigned char)src[0];
+    dst[0] = (char)(first - ((first >= 'a' && first <= 'z') ? 0x20 : 0));
+    str_to_lower(dst + 1, src + 1, len - 1);
+}
+
+void str_swapcase_ascii(char* dst, const char* src, size_t len) {
+    if (!dst || !src) return;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char ch = (unsigned char)src[i];
+        dst[i] = (char)(ch >= 'a' && ch <= 'z' ? ch - 0x20 :
+                        (ch >= 'A' && ch <= 'Z' ? ch + 0x20 : ch));
+    }
+}
+
 bool str_is_ascii(const char* s, size_t len) {
     if (!s) return true;
     size_t i = 0;
@@ -663,6 +679,25 @@ size_t str_cat(char* dst, size_t dst_len, size_t dst_cap,
     if (copy_len > 0) memcpy(dst + dst_len, src, copy_len);
     dst[dst_len + copy_len] = '\0';
     return dst_len + copy_len;
+}
+
+char* str_join_parts_alloc(const char* const* parts, const size_t* lengths,
+                           size_t count, StrAllocFn allocator, void* context) {
+    if (!lengths || !allocator || (count > 0 && !parts)) return NULL;
+    size_t total = 0;
+    for (size_t i = 0; i < count; i++) {
+        if ((lengths[i] > 0 && !parts[i]) || lengths[i] > SIZE_MAX - total - 1) return NULL;
+        total += lengths[i];
+    }
+    char* result = (char*)allocator(context, total + 1);
+    if (!result) return NULL;
+    size_t offset = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (lengths[i] > 0) memcpy(result + offset, parts[i], lengths[i]);
+        offset += lengths[i];
+    }
+    result[total] = '\0';
+    return result;
 }
 
 void str_fill(char* dst, size_t n, char c) {
@@ -1134,6 +1169,28 @@ static size_t _escape_url(char* dst, const char* s, size_t len) {
     return w;
 }
 
+static size_t _escape_lambda(char* dst, const char* s, size_t len) {
+    size_t w = 0;
+    for (size_t i = 0; i < len; i++) {
+        char c = s[i];
+        switch (c) {
+            case '\\': case '"':
+                if (dst) { dst[w] = '\\'; dst[w + 1] = c; }
+                w += 2;
+                break;
+            case '\n': case '\r': case '\t':
+                if (dst) { dst[w] = '\\'; dst[w + 1] = c == '\n' ? 'n' : c == '\r' ? 'r' : 't'; }
+                w += 2;
+                break;
+            default:
+                if (dst) dst[w] = c;
+                w++;
+                break;
+        }
+    }
+    return w;
+}
+
 size_t str_escape(char* dst, const char* s, size_t s_len, StrEscapeMode mode) {
     if (!s) return 0;
     switch (mode) {
@@ -1141,12 +1198,53 @@ size_t str_escape(char* dst, const char* s, size_t s_len, StrEscapeMode mode) {
         case STR_ESC_XML:
         case STR_ESC_HTML: return _escape_xml(dst, s, s_len);
         case STR_ESC_URL:  return _escape_url(dst, s, s_len);
+        case STR_ESC_LAMBDA: return _escape_lambda(dst, s, s_len);
     }
     return 0;
 }
 
 size_t str_escape_len(const char* s, size_t s_len, StrEscapeMode mode) {
     return str_escape(NULL, s, s_len, mode);
+}
+
+char* str_escape_alloc(const char* s, size_t s_len, StrEscapeMode mode,
+                       StrAllocFn allocator, void* context) {
+    if (!s || !allocator) return NULL;
+    size_t output_len = str_escape_len(s, s_len, mode);
+    if (output_len == SIZE_MAX) return NULL;
+    char* dst = (char*)allocator(context, output_len + 1);
+    if (!dst) return NULL;
+    str_escape(dst, s, s_len, mode);
+    dst[output_len] = '\0';
+    return dst;
+}
+
+size_t str_shell_quote_posix(char* dst, size_t cap, const char* s, size_t s_len) {
+    if (!s) s_len = 0;
+    size_t required = 2;
+    for (size_t i = 0; i < s_len; i++) {
+        if (s[i] == '\'') required += 4;
+        else required++;
+    }
+
+    size_t written = 0;
+#define STR_SHELL_QUOTE_APPEND(ch) do { \
+    if (dst && written + 1 < cap) dst[written] = (ch); \
+    written++; \
+} while (0)
+    STR_SHELL_QUOTE_APPEND('\'');
+    for (size_t i = 0; i < s_len; i++) {
+        if (s[i] == '\'') {
+            STR_SHELL_QUOTE_APPEND('\'');
+            STR_SHELL_QUOTE_APPEND('\\');
+            STR_SHELL_QUOTE_APPEND('\'');
+        }
+        STR_SHELL_QUOTE_APPEND(s[i]);
+    }
+    STR_SHELL_QUOTE_APPEND('\'');
+#undef STR_SHELL_QUOTE_APPEND
+    if (dst && cap > 0) dst[written < cap ? written : cap - 1] = '\0';
+    return required;
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -1252,6 +1350,10 @@ bool str_char_in_set(char c, const char* chars) {
 
 bool str_char_is_ascii_space(char c) {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+}
+
+bool str_is_html_space(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
 }
 
 bool str_char_is_line_space(char c) {

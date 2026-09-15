@@ -128,10 +128,8 @@ HttpRequest* http_request_parse(const char *data, size_t len) {
 
     // parse request line: METHOD SP URI SP HTTP/x.x
     size_t rline_len = (size_t)(line_end - data);
-    char *rline = (char *)serve_malloc(rline_len + 1);
+    char *rline = mem_dup_n(data, rline_len, MEM_CAT_SERVE);
     if (!rline) { serve_free(req); return NULL; }
-    memcpy(rline, data, rline_len);
-    rline[rline_len] = '\0';
 
     // extract method
     char *sp = strchr(rline, ' ');
@@ -196,18 +194,13 @@ HttpRequest* http_request_parse(const char *data, size_t len) {
         const char *colon = (const char *)memchr(hdr_start, ':', (size_t)(hdr_end - hdr_start));
         if (colon) {
             size_t name_len = (size_t)(colon - hdr_start);
-            char *name = (char *)serve_malloc(name_len + 1);
+            char *name = mem_dup_n(hdr_start, name_len, MEM_CAT_SERVE);
             if (name) {
-                memcpy(name, hdr_start, name_len);
-                name[name_len] = '\0';
-
                 const char *val_start = colon + 1;
                 while (val_start < hdr_end && *val_start == ' ') val_start++;
                 size_t val_len = (size_t)(hdr_end - val_start);
-                char *value = (char *)serve_malloc(val_len + 1);
+                char *value = mem_dup_n(val_start, val_len, MEM_CAT_SERVE);
                 if (value) {
-                    memcpy(value, val_start, val_len);
-                    value[val_len] = '\0';
                     req->headers = http_header_add(req->headers, name, value);
                     serve_free(value);
                 }
@@ -224,10 +217,8 @@ HttpRequest* http_request_parse(const char *data, size_t len) {
     if (hdr_start < end_ptr) {
         size_t body_len = (size_t)(end_ptr - hdr_start);
         if (body_len > 0) {
-            req->body = (char *)serve_malloc(body_len + 1);
+            req->body = mem_dup_n(hdr_start, body_len, MEM_CAT_SERVE);
             if (req->body) {
-                memcpy(req->body, hdr_start, body_len);
-                req->body[body_len] = '\0';
                 req->body_len = body_len;
             }
         }

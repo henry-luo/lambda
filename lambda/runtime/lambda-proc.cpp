@@ -4,6 +4,7 @@
 #include "../../lib/mem_factory.h"
 #include "../../lib/file.h"
 #include "../../lib/shell.h"
+#include "../../lib/str.h"
 #include "../core/utf_string.h"
 #include "../format/format.h"
 #include "radiant_event_hook.h"
@@ -99,8 +100,7 @@ static int create_parent_dirs(const char* file_path) {
 // Helper: Generate a unique temp file path for atomic writes
 static void generate_temp_path(const char* file_path, StrBuf* temp_buf) {
     static int counter = 0;
-    strbuf_append_str(temp_buf, file_path);
-    strbuf_append_str(temp_buf, ".tmp.");
+    strbuf_append_all(temp_buf, 2, file_path, ".tmp.");
     strbuf_append_int(temp_buf, ++counter);
     strbuf_append_char(temp_buf, '.');
     strbuf_append_int(temp_buf, (int)time(NULL));
@@ -715,36 +715,14 @@ String* escape_shell_arg(String* arg) {
 
     return escaped;
 #else
-    // Use single quotes for safety and escape any single quotes in the string
-    size_t escaped_len = arg->len + 2; // Start with quotes
-    for (int i = 0; i < (int)arg->len; i++) {
-        if (arg->chars[i] == '\'') {
-            escaped_len += 3; // Replace ' with '\''
-        }
-    }
+    size_t escaped_len = str_shell_quote_posix(NULL, 0, arg->chars, arg->len);
 
     String* escaped = (String*)heap_alloc(sizeof(String) + escaped_len + 1, LMD_TYPE_STRING);
     escaped->len = escaped_len;
     escaped->flags = 0;
     escaped->is_ascii = 1;  // shell escaping produces ASCII
 
-    char* dst = escaped->chars;
-    *dst++ = '\''; // Opening quote
-
-    for (int i = 0; i < (int)arg->len; i++) {
-        if (arg->chars[i] == '\'') {
-            // Escape single quote: ' becomes '\''
-            *dst++ = '\'';
-            *dst++ = '\\';
-            *dst++ = '\'';
-            *dst++ = '\'';
-        } else {
-            *dst++ = arg->chars[i];
-        }
-    }
-
-    *dst++ = '\''; // Closing quote
-    *dst = '\0';
+    str_shell_quote_posix(escaped->chars, escaped_len + 1, arg->chars, arg->len);
 
     return escaped;
 #endif
@@ -767,8 +745,7 @@ String* format_cmd_args(String* cmd, Item args) {
             String* arg_str = fn_string(arg_item);
             if (arg_str && arg_str->len > 0) {
                 String* escaped = escape_shell_arg(arg_str);
-                strbuf_append_char(sb, ' ');
-                strbuf_append_str(sb, escaped->chars);
+                strbuf_append_all(sb, 2, " ", escaped->chars);
             }
         }
     }
@@ -801,8 +778,7 @@ String* format_cmd_args(String* cmd, Item args) {
             if (value_str && value_str->len > 0) {
                 if (!(value_item._type_id == LMD_TYPE_BOOL && value_item.bool_val == true)) {
                     String* escaped = escape_shell_arg(value_str);
-                    strbuf_append_char(sb, '=');
-                    strbuf_append_str(sb, escaped->chars);
+                    strbuf_append_all(sb, 2, "=", escaped->chars);
                 }
                 // else skip boolean true values (just add the flag)
             }
@@ -815,8 +791,7 @@ String* format_cmd_args(String* cmd, Item args) {
         String* arg_str = fn_string(args);
         if (arg_str && arg_str->len > 0) {
             String* escaped = escape_shell_arg(arg_str);
-            strbuf_append_char(sb, ' ');
-            strbuf_append_str(sb, escaped->chars);
+            strbuf_append_all(sb, 2, " ", escaped->chars);
         }
     }
 

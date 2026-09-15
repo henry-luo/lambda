@@ -2,6 +2,7 @@
 #include "html5_token.h"
 #include "../../../lib/log.h"
 #include "../../../lib/str.h"
+#include "../../../lib/string.h"
 #include "../../../lib/mem_grow.hpp"
 #include "../../io/mark_builder.hpp"
 #include "../../../lib/html_entities.h"
@@ -369,25 +370,14 @@ void html5_switch_tokenizer_state(Html5Parser* parser, Html5TokenizerState new_s
 
 // helper: create string from temp buffer
 static String* html5_create_string_from_temp_buffer(Html5Parser* parser) {
-    String* str = (String*)arena_alloc(parser->arena, sizeof(String) + parser->temp_buffer_len + 1);
-    str->len = parser->temp_buffer_len;
-    str->flags = 0;
-    memcpy(str->chars, parser->temp_buffer, parser->temp_buffer_len);
-    str->chars[parser->temp_buffer_len] = '\0';
-    return str;
+    return string_from_strview_arena(
+        strview_init(parser->temp_buffer, parser->temp_buffer_len), parser->arena);
 }
 
 // helper: create lowercase string from temp buffer (for tag names)
 static String* html5_create_lowercase_string_from_temp_buffer(Html5Parser* parser) {
-    String* str = (String*)arena_alloc(parser->arena, sizeof(String) + parser->temp_buffer_len + 1);
-    str->len = parser->temp_buffer_len;
-    str->flags = 0;
-    for (size_t i = 0; i < parser->temp_buffer_len; i++) {
-        char c = parser->temp_buffer[i];
-        if (c >= 'A' && c <= 'Z') c += 0x20;
-        str->chars[i] = c;
-    }
-    str->chars[parser->temp_buffer_len] = '\0';
+    String* str = html5_create_string_from_temp_buffer(parser);
+    if (str) str_lower_inplace(str->chars, str->len);
     return str;
 }
 
@@ -539,8 +529,7 @@ static void html5_save_last_start_tag(Html5Parser* parser, const char* name, siz
     if (parser->last_start_tag_name == nullptr || len > parser->last_start_tag_name_len) {
         parser->last_start_tag_name = (char*)arena_alloc(parser->arena, len + 1);
     }
-    memcpy(parser->last_start_tag_name, name, len);
-    parser->last_start_tag_name[len] = '\0';
+    str_copy(parser->last_start_tag_name, len + 1, name, len);
     parser->last_start_tag_name_len = len;
 }
 

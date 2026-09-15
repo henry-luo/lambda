@@ -1641,13 +1641,11 @@ Item fn_decimal(Item item) {
             return ItemError;
         }
         // decimal_from_string needs null-terminated string
-        char* null_term_str = (char*)mem_alloc(len + 1, MEM_CAT_EVAL);
+        char* null_term_str = mem_dup_n(chars, len, MEM_CAT_EVAL);
         if (!null_term_str) {
             log_debug("Failed to allocate string buffer");
             return ItemError;
         }
-        memcpy(null_term_str, chars, len);
-        null_term_str[len] = '\0';
         Item result = decimal_from_string(null_term_str);
         mem_free(null_term_str);
         return result;
@@ -1821,8 +1819,7 @@ extern "C" Item fn_symbol2(Item name_item, Item url_item) {
 
     sym->len = name_len;
     sym->ns = ns_target;
-    memcpy(sym->chars, name_str, name_len);
-    sym->chars[name_len] = '\0';
+    str_copy(sym->chars, name_len + 1, name_str, name_len);
 
 
     return (Item) { .item = y2it(sym) };
@@ -1866,13 +1863,11 @@ Item fn_float(Item item) {
         }
 
         // Create a null-terminated copy of the string
-        char* buf = (char*)mem_alloc(len + 1, MEM_CAT_EVAL);
+        char* buf = mem_dup_n(chars, len, MEM_CAT_EVAL);
         if (!buf) {
             log_debug("Failed to allocate buffer for string conversion");
             return ItemError;
         }
-        memcpy(buf, chars, len);
-        buf[len] = '\0';
 
         // Remove any commas from the string
         char* p = buf;

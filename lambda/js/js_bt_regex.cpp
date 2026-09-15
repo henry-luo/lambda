@@ -1123,13 +1123,14 @@ extern "C" int js_bt_named_index(JsBtRegex* bt, int i) {
 
 extern "C" int js_bt_exec(JsBtRegex* bt, const char* input, int input_len, int start_pos,
                           bool anchor_start, int* match_starts, int* match_ends, int max_groups) {
-    if (!bt || !bt->root) return 0;
+    if (!bt || !bt->root) return JS_BT_EXEC_NO_MATCH;
     int ng = bt->group_count;
-    // LR09-30: this used to `return 0` above 255 groups — reported as "no
-    // match", so a lookahead over a large pattern silently failed instead of
-    // falling back to anything. The capture arrays are sized from the pattern.
+    // LR09-30: matching must not collapse a capture-scratch allocation failure
+    // into a false result. The capture arrays are sized from the pattern.
     JsRegexScratch<int> cap_start_buf(ng + 1), cap_end_buf(ng + 1);
-    if (cap_start_buf.count < ng + 1 || cap_end_buf.count < ng + 1) return 0;
+    if (cap_start_buf.count < ng + 1 || cap_end_buf.count < ng + 1) {
+        return JS_BT_EXEC_ALLOCATION_FAILURE;
+    }
     int* cap_start = cap_start_buf.slots;
     int* cap_end = cap_end_buf.slots;
     MatchCtx ctx;
@@ -1155,10 +1156,13 @@ extern "C" int js_bt_exec(JsBtRegex* bt, const char* input, int input_len, int s
             cap_start[0] = sp; cap_end[0] = endpos;
             int n = ng + 1; if (n > max_groups) n = max_groups;
             for (int i = 0; i < n; i++) { match_starts[i] = cap_start[i]; match_ends[i] = cap_end[i]; }
-            return 1;
+            return JS_BT_EXEC_MATCH;
         }
-        if (ctx.overflow) { log_debug("js bt regex: step budget exhausted, bailing to no-match"); return 0; }
+        if (ctx.overflow) {
+            log_debug("js bt regex: step budget exhausted");
+            return JS_BT_EXEC_RESOURCE_EXHAUSTED;
+        }
         if (only_at_start) break;
     }
-    return 0;
+    return JS_BT_EXEC_NO_MATCH;
 }

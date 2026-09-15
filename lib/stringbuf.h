@@ -45,6 +45,7 @@ void stringbuf_append_str(StringBuf *sb, const char *str);
 void stringbuf_append_str_n(StringBuf *sb, const char *str, size_t n);
 void stringbuf_append_char(StringBuf *sb, char c);
 void stringbuf_append_char_n(StringBuf *sb, char c, size_t n);
+bool stringbuf_append_utf8(StringBuf *sb, uint32_t codepoint);
 void stringbuf_append_int(StringBuf *sb, int value);
 void stringbuf_append_long(StringBuf *sb, long value);
 void stringbuf_append_ulong(StringBuf *sb, unsigned long value);

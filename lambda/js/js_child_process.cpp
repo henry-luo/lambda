@@ -106,6 +106,14 @@ static void emit_shell_args_warning(void) {
     js_process_emit(make_string_item("warning"), warning);
 }
 
+static void append_posix_shell_quoted(char* out, int out_size, int* pos,
+                                      const char* text, size_t text_len) {
+    if (!out || !pos || *pos >= out_size - 1) return;
+    size_t available = (size_t)(out_size - *pos);
+    size_t required = str_shell_quote_posix(out + *pos, available, text, text_len);
+    *pos += (int)(required < available ? required : available - 1);
+}
+
 static bool append_shell_arg(char* out, int out_size, int* pos, Item arg) {
     if (get_type_id(arg) != LMD_TYPE_STRING) return false;
     String* s = it2s(arg);
@@ -115,21 +123,7 @@ static bool append_shell_arg(char* out, int out_size, int* pos, Item arg) {
         out[out_size - 1] = '\0';
         return true;
     }
-    out[(*pos)++] = '\'';
-    for (size_t i = 0; i < s->len && *pos < out_size - 1; i++) {
-        char ch = s->chars[i];
-        if (ch == '\'') {
-            const char* esc = "'\\''";
-            for (int j = 0; esc[j] && *pos < out_size - 1; j++) {
-                out[(*pos)++] = esc[j];
-            }
-        } else {
-            out[(*pos)++] = ch;
-        }
-    }
-    if (*pos < out_size - 1) {
-        out[(*pos)++] = '\'';
-    }
+    append_posix_shell_quoted(out, out_size, pos, s->chars, s->len);
     out[*pos < out_size ? *pos : out_size - 1] = '\0';
     return true;
 }
@@ -2264,8 +2258,7 @@ static Item normalize_spawn_request(Item rest_args, SpawnRequest* req) {
         return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", "The argument 'file' cannot be empty");
     }
     int cmd_len = (int)cmd->len < (int)sizeof(req->file) - 1 ? (int)cmd->len : (int)sizeof(req->file) - 1;
-    memcpy(req->file, cmd->chars, (size_t)cmd_len);
-    req->file[cmd_len] = '\0';
+    str_copy(req->file, sizeof(req->file), cmd->chars, cmd_len);
 
     Item second = argc64 > 1 ? js_elements_get_int(rest_args, 1) : make_js_undefined();
     Item third = argc64 > 2 ? js_elements_get_int(rest_args, 2) : make_js_undefined();
@@ -2325,12 +2318,8 @@ static char** build_envp(Item env_item, int* out_count) {
         if (get_type_id(value) != LMD_TYPE_STRING) continue;
         String* ks = it2s(key);
         String* vs = it2s(value);
-        size_t entry_len = ks->len + 1 + vs->len;
-        char* entry = (char*)mem_alloc(entry_len + 1, MEM_CAT_JS_RUNTIME);
-        memcpy(entry, ks->chars, ks->len);
-        entry[ks->len] = '=';
-        memcpy(entry + ks->len + 1, vs->chars, vs->len);
-        entry[entry_len] = '\0';
+        char* entry = mem_join3(ks->chars, ks->len, "=", 1, vs->chars, vs->len,
+                                MEM_CAT_JS_RUNTIME);
         envp[count++] = entry;
     }
     envp[count] = NULL;
@@ -2355,12 +2344,8 @@ static bool envp_key_matches(const char* entry, const char* key) {
 static char* make_env_entry(const char* key, const char* value) {
     size_t key_len = strlen(key);
     size_t value_len = strlen(value);
-    char* entry = (char*)mem_alloc(key_len + 1 + value_len + 1, MEM_CAT_JS_RUNTIME);
+    char* entry = mem_join3(key, key_len, "=", 1, value, value_len, MEM_CAT_JS_RUNTIME);
     if (!entry) return NULL;
-    memcpy(entry, key, key_len);
-    entry[key_len] = '=';
-    memcpy(entry + key_len + 1, value, value_len);
-    entry[key_len + 1 + value_len] = '\0';
     return entry;
 }
 
@@ -2458,9 +2443,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
                 return js_throw_invalid_arg_type("args", "string", arg);
             }
             String* s = it2s(arg);
-            char* copy = (char*)mem_alloc(s->len + 1, MEM_CAT_JS_RUNTIME);
-            memcpy(copy, s->chars, s->len);
-            copy[s->len] = '\0';
+            char* copy = mem_dup_n(s->chars, s->len, MEM_CAT_JS_RUNTIME);
             argv[arg_index++] = copy;
             js_array_push(spawnargs, arg);
         }
@@ -2614,8 +2597,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
     if (had_ipc_env) {
         int old_len = (int)strlen(old_ipc_env);
         if (old_len >= (int)sizeof(old_ipc_buf)) old_len = (int)sizeof(old_ipc_buf) - 1;
-        memcpy(old_ipc_buf, old_ipc_env, (size_t)old_len);
-        old_ipc_buf[old_len] = '\0';
+        str_copy(old_ipc_buf, sizeof(old_ipc_buf), old_ipc_env, old_len);
     }
     if (req.ipc) setenv("LAMBDA_JS_IPC", "1", 1);
     const char* old_ipc_fd_env = getenv("LAMBDA_JS_IPC_FD");
@@ -2624,8 +2606,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
     if (had_ipc_fd_env) {
         int old_len = (int)strlen(old_ipc_fd_env);
         if (old_len >= (int)sizeof(old_ipc_fd_buf)) old_len = (int)sizeof(old_ipc_fd_buf) - 1;
-        memcpy(old_ipc_fd_buf, old_ipc_fd_env, (size_t)old_len);
-        old_ipc_fd_buf[old_len] = '\0';
+        str_copy(old_ipc_fd_buf, sizeof(old_ipc_fd_buf), old_ipc_fd_env, old_len);
     }
     if (req.ipc) setenv("LAMBDA_JS_IPC_FD", ipc_fd_buf, 1);
 
@@ -2712,8 +2693,7 @@ static Item copy_required_file(Item file_item, char* out, int out_size) {
         return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", "The argument 'file' cannot be empty");
     }
     int len = (int)s->len < out_size - 1 ? (int)s->len : out_size - 1;
-    memcpy(out, s->chars, (size_t)len);
-    out[len] = '\0';
+    str_copy(out, out_size, s->chars, len);
     return js_status_ok();
 }
 
@@ -3039,17 +3019,7 @@ static void cp_append_env_assignment(char* cmd, int cmd_size, int* pos, const ch
     if (wrote < 0) return;
     *pos += wrote;
     String* s = it2s(value);
-    if (*pos < cmd_size - 1) cmd[(*pos)++] = '\'';
-    for (size_t i = 0; i < s->len && *pos < cmd_size - 1; i++) {
-        char ch = s->chars[i];
-        if (ch == '\'') {
-            const char* esc = "'\\''";
-            for (int j = 0; esc[j] && *pos < cmd_size - 1; j++) cmd[(*pos)++] = esc[j];
-        } else {
-            cmd[(*pos)++] = ch;
-        }
-    }
-    if (*pos < cmd_size - 1) cmd[(*pos)++] = '\'';
+    append_posix_shell_quoted(cmd, cmd_size, pos, s->chars, s->len);
     if (*pos < cmd_size - 1) cmd[(*pos)++] = ' ';
     cmd[*pos < cmd_size ? *pos : cmd_size - 1] = '\0';
 }
@@ -3068,17 +3038,7 @@ static void cp_append_env_assignment_value(char* cmd, int cmd_size, int* pos, It
         cmd[(*pos)++] = ch;
     }
     if (*pos < cmd_size - 1) cmd[(*pos)++] = '=';
-    if (*pos < cmd_size - 1) cmd[(*pos)++] = '\'';
-    for (size_t i = 0; i < vs->len && *pos < cmd_size - 1; i++) {
-        char ch = vs->chars[i];
-        if (ch == '\'') {
-            const char* esc = "'\\''";
-            for (int j = 0; esc[j] && *pos < cmd_size - 1; j++) cmd[(*pos)++] = esc[j];
-        } else {
-            cmd[(*pos)++] = ch;
-        }
-    }
-    if (*pos < cmd_size - 1) cmd[(*pos)++] = '\'';
+    append_posix_shell_quoted(cmd, cmd_size, pos, vs->chars, vs->len);
     if (*pos < cmd_size - 1) cmd[(*pos)++] = ' ';
     cmd[*pos < cmd_size ? *pos : cmd_size - 1] = '\0';
 }

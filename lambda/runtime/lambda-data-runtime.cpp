@@ -2821,8 +2821,7 @@ Item ui_merge_strings_to_arena(Arena* arena, String* prev, String* next) {
     merged->flags = 0;
     merged->is_ascii = prev->is_ascii && next->is_ascii;
     memcpy(merged->chars, prev->chars, prev->len);
-    memcpy(merged->chars + prev->len, next->chars, next->len);
-    merged->chars[new_len] = '\0';
+    str_copy(merged->chars + prev->len, next->len + 1, next->chars, next->len);
     return {.item = s2it(merged)};
 }
 

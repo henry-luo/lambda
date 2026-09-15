@@ -140,15 +140,8 @@ static void dom_run_form_submit_navigation(DomElement* form, DomElement* submitt
         size_t query_len = strlen(query);
         bool has_query = strchr(action, '?') != nullptr;
         size_t extra = query_len > 0 ? 1 : 0;
-        nav_url = (char*)mem_alloc(action_len + extra + query_len + 1, MEM_CAT_JS_RUNTIME);
-        memcpy(nav_url, action, action_len);
-        size_t pos = action_len;
-        if (query_len > 0) {
-            nav_url[pos++] = has_query ? '&' : '?';
-            memcpy(nav_url + pos, query, query_len);
-            pos += query_len;
-        }
-        nav_url[pos] = '\0';
+        nav_url = mem_join3(action, action_len, query_len > 0 ? (has_query ? "&" : "?") : "",
+                            extra, query, query_len, MEM_CAT_JS_RUNTIME);
         mem_free(query);
     } else {
         nav_url = mem_strdup(action, MEM_CAT_JS_RUNTIME);
@@ -721,8 +714,7 @@ static void event_handler_property_set_for_key(void* key, Item target,
     char stack_type[64];
     int type_len = property_name_len - 2;
     if (type_len <= 0 || type_len >= (int)sizeof(stack_type)) return;
-    memcpy(stack_type, property_name + 2, (size_t)type_len);
-    stack_type[type_len] = '\0';
+    str_copy(stack_type, sizeof(stack_type), property_name + 2, (size_t)type_len);
 
     if (owner_doc && node_ref.address && !dom_node_ref_validate(owner_doc, node_ref)) return;
     NodeListeners* listeners = find_listeners(key);

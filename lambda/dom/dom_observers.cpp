@@ -404,8 +404,8 @@ static Item js_mutation_observer_observe(Item target_item, Item options) {
             if (len >= sizeof(target->attribute_filter[0])) {
                 len = sizeof(target->attribute_filter[0]) - 1;
             }
-            memcpy(target->attribute_filter[target->attribute_filter_count], name, len);
-            target->attribute_filter[target->attribute_filter_count][len] = '\0';
+            str_copy(target->attribute_filter[target->attribute_filter_count],
+                     sizeof(target->attribute_filter[0]), name, len);
             target->attribute_filter_count++;
         }
         if (target->attribute_filter_count > 0) target->attributes = true;

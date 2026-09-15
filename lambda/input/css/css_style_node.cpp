@@ -262,10 +262,6 @@ bool css_declaration_can_clone_owned(const CssDeclaration* source) {
     return source && css_value_can_clone_owned(source->value);
 }
 
-static char* css_owned_strdup(Pool* pool, const char* source) {
-    return source ? pool_strdup(pool, source) : NULL;
-}
-
 static CssValue* css_value_clone_owned(const CssValue* source, Pool* pool);
 static void css_value_destroy_owned(CssValue* value, Pool* pool);
 
@@ -375,16 +371,16 @@ static CssValue* css_value_clone_owned(const CssValue* source, Pool* pool) {
 
     switch (source->type) {
         case CSS_VALUE_TYPE_STRING:
-            clone->data.string = css_owned_strdup(pool, source->data.string);
+            clone->data.string = pool_strdup(pool, source->data.string);
             if (source->data.string && !clone->data.string) goto clone_failed;
             break;
         case CSS_VALUE_TYPE_URL:
-            clone->data.url = css_owned_strdup(pool, source->data.url);
+            clone->data.url = pool_strdup(pool, source->data.url);
             if (source->data.url && !clone->data.url) goto clone_failed;
             break;
         case CSS_VALUE_TYPE_COLOR:
             if (source->data.color.type == CSS_COLOR_KEYWORD) {
-                clone->data.color.data.keyword = css_owned_strdup(
+                clone->data.color.data.keyword = pool_strdup(
                     pool, source->data.color.data.keyword);
                 if (source->data.color.data.keyword &&
                     !clone->data.color.data.keyword) goto clone_failed;
@@ -407,7 +403,7 @@ static CssValue* css_value_clone_owned(const CssValue* source, Pool* pool) {
             }
             break;
         case CSS_VALUE_TYPE_CUSTOM:
-            clone->data.custom_property.name = css_owned_strdup(
+            clone->data.custom_property.name = pool_strdup(
                 pool, source->data.custom_property.name);
             if (source->data.custom_property.name &&
                 !clone->data.custom_property.name) goto clone_failed;
@@ -429,7 +425,7 @@ static CssValue* css_value_clone_owned(const CssValue* source, Pool* pool) {
             CssFunction* function = (CssFunction*)pool_calloc(pool, sizeof(CssFunction));
             if (!function) goto clone_failed;
             clone->data.function = function;
-            function->name = css_owned_strdup(pool, source->data.function->name);
+            function->name = pool_strdup(pool, source->data.function->name);
             if (source->data.function->name && !function->name) goto clone_failed;
             function->arg_count = source->data.function->arg_count;
             function->args = css_value_array_clone_owned(
@@ -446,7 +442,7 @@ static CssValue* css_value_clone_owned(const CssValue* source, Pool* pool) {
             if (!ref) goto clone_failed;
             clone->data.var_ref = ref;
             *ref = *source->data.var_ref;
-            ref->name = css_owned_strdup(pool, source->data.var_ref->name);
+            ref->name = pool_strdup(pool, source->data.var_ref->name);
             ref->fallback = css_value_clone_owned(source->data.var_ref->fallback, pool);
             if ((source->data.var_ref->name && !ref->name) ||
                 (source->data.var_ref->fallback && !ref->fallback)) goto clone_failed;
@@ -458,7 +454,7 @@ static CssValue* css_value_clone_owned(const CssValue* source, Pool* pool) {
             if (!ref) goto clone_failed;
             clone->data.env_ref = ref;
             *ref = *source->data.env_ref;
-            ref->name = css_owned_strdup(pool, source->data.env_ref->name);
+            ref->name = pool_strdup(pool, source->data.env_ref->name);
             ref->fallback = css_value_clone_owned(source->data.env_ref->fallback, pool);
             if ((source->data.env_ref->name && !ref->name) ||
                 (source->data.env_ref->fallback && !ref->fallback)) goto clone_failed;
@@ -470,8 +466,8 @@ static CssValue* css_value_clone_owned(const CssValue* source, Pool* pool) {
             if (!ref) goto clone_failed;
             clone->data.attr_ref = ref;
             *ref = *source->data.attr_ref;
-            ref->name = css_owned_strdup(pool, source->data.attr_ref->name);
-            ref->type_or_unit = css_owned_strdup(
+            ref->name = pool_strdup(pool, source->data.attr_ref->name);
+            ref->type_or_unit = pool_strdup(
                 pool, source->data.attr_ref->type_or_unit);
             ref->fallback = css_value_clone_owned(source->data.attr_ref->fallback, pool);
             if ((source->data.attr_ref->name && !ref->name) ||
@@ -487,7 +483,7 @@ static CssValue* css_value_clone_owned(const CssValue* source, Pool* pool) {
             *mix = *source->data.color_mix;
             mix->color1 = css_value_clone_owned(source->data.color_mix->color1, pool);
             mix->color2 = css_value_clone_owned(source->data.color_mix->color2, pool);
-            mix->method = css_owned_strdup(pool, source->data.color_mix->method);
+            mix->method = pool_strdup(pool, source->data.color_mix->method);
             if ((source->data.color_mix->color1 && !mix->color1) ||
                 (source->data.color_mix->color2 && !mix->color2) ||
                 (source->data.color_mix->method && !mix->method)) goto clone_failed;
@@ -522,14 +518,12 @@ CssDeclaration* css_declaration_clone_owned(
     clone->value_text = NULL;
     clone->value = css_value_clone_owned(source->value, target_pool);
     if (source->value && !clone->value) goto declaration_clone_failed;
-    clone->source_file = css_owned_strdup(target_pool, source->source_file);
-    clone->property_name = css_owned_strdup(target_pool, source->property_name);
+    clone->source_file = pool_strdup(target_pool, source->source_file);
+    clone->property_name = pool_strdup(target_pool, source->property_name);
     if (source->value_text) {
-        char* value_text = (char*)pool_alloc(target_pool, source->value_text_len + 1u);
-        if (!value_text) goto declaration_clone_failed;
-        memcpy(value_text, source->value_text, source->value_text_len);
-        value_text[source->value_text_len] = '\0';
-        clone->value_text = value_text;
+        clone->value_text = pool_dup_n(target_pool, source->value_text,
+                                       source->value_text_len);
+        if (!clone->value_text) goto declaration_clone_failed;
     }
     if ((source->source_file && !clone->source_file) ||
         (source->property_name && !clone->property_name)) goto declaration_clone_failed;

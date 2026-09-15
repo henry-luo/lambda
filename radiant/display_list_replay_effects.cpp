@@ -22,17 +22,17 @@ static Bound dl_replay_clip_at_offset(const Bound* clip, const ImageSurface* sur
     return bound;
 }
 
-static void dl_replay_offset_clip_params(int clip_type, const float* src, float* dst,
-                                         float offset_x, float offset_y) {
-    if (!src || !dst) return;
-    memcpy(dst, src, 8 * sizeof(float));
+void dl_replay_offset_clip_params(int clip_type, const float* source, float* destination,
+                                  float offset_x, float offset_y) {
+    if (!source || !destination) return;
+    memcpy(destination, source, 8 * sizeof(float));
     switch ((ClipShapeType)clip_type) {
         case CLIP_SHAPE_CIRCLE:
         case CLIP_SHAPE_ELLIPSE:
         case CLIP_SHAPE_INSET:
         case CLIP_SHAPE_ROUNDED_RECT:
-            dst[0] -= offset_x;
-            dst[1] -= offset_y;
+            destination[0] -= offset_x;
+            destination[1] -= offset_y;
             break;
         default:
             break;

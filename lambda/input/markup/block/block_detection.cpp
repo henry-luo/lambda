@@ -23,7 +23,7 @@ static bool is_asciidoc_admonition(const char* line) {
     if (!line) return false;
 
     const char* p = line;
-    while (*p == ' ' || *p == '\t') p++;
+    p = str_skip_line_space(p);
 
     return (strncmp(p, "NOTE:", 5) == 0 ||
             strncmp(p, "TIP:", 4) == 0 ||
@@ -41,7 +41,7 @@ static bool is_asciidoc_definition_list(const char* line) {
     if (!line) return false;
 
     const char* p = line;
-    while (*p == ' ' || *p == '\t') p++;
+    p = str_skip_line_space(p);
 
     // look for :: that's not at the start
     while (*p && !(*p == ':' && *(p+1) == ':')) {
@@ -59,7 +59,7 @@ static bool is_asciidoc_attribute_block(const char* line) {
     if (!line) return false;
 
     const char* p = line;
-    while (*p == ' ' || *p == '\t') p++;
+    p = str_skip_line_space(p);
 
     if (*p != '[') return false;
 
@@ -258,7 +258,7 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
                         if (next && (*next == ' ' || *next == '\t')) {
                             // Check that next line isn't empty (just whitespace)
                             const char* np = next;
-                            while (*np == ' ' || *np == '\t') np++;
+                            np = str_skip_line_space(np);
                             if (*np && *np != '\n' && *np != '\r') {
                                 // Also ensure current line doesn't look like other block types
                                 // Not a list item (-, *, +, digit)
@@ -309,7 +309,7 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
             if (is_asciidoc_attribute_block(line)) {
                 // Check what kind of block follows
                 const char* p = line;
-                while (*p == ' ' || *p == '\t') p++;
+                p = str_skip_line_space(p);
                 p++; // skip [
 
                 if (strncmp(p, "source", 6) == 0) {

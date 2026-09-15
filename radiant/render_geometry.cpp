@@ -130,14 +130,9 @@ bool render_geometry_transform_matrix(const TransformProp* transform,
                                       float x, float y, float width, float height,
                                       RdtMatrix* out_matrix) {
     if (!transform || !transform->functions || !out_matrix) return false;
-    float origin_x = transform->origin_x_percent
-        ? x + width * transform->origin_x / 100.0f
-        : x + transform->origin_x;
-    float origin_y = transform->origin_y_percent
-        ? y + height * transform->origin_y / 100.0f
-        : y + transform->origin_y;
+    RdtLogicalPoint origin = radiant::transform_origin(transform, x, y, width, height);
     // Export backends must use the screen path's origin composition and preserve scale(0).
     *out_matrix = radiant::compute_transform_matrix(
-        transform->functions, width, height, origin_x, origin_y);
+        transform->functions, width, height, origin.x, origin.y);
     return !rdt_matrix_is_identity(out_matrix);
 }

@@ -311,9 +311,7 @@ static bool parse_sys_url(const char* url, char** category, char** subcategory, 
 
     // Extract category (before first slash)
     size_t cat_len = slash1 - path;
-    *category = (char*)mem_alloc(cat_len + 1, MEM_CAT_INPUT_OTHER);
-    strncpy(*category, path, cat_len);
-    (*category)[cat_len] = '\0';
+    *category = mem_strndup(path, cat_len, MEM_CAT_INPUT_OTHER);
 
     // Find second slash for item
     const char* slash2 = strchr(slash1 + 1, '/');
@@ -326,9 +324,7 @@ static bool parse_sys_url(const char* url, char** category, char** subcategory, 
 
     // Extract subcategory (between first and second slash)
     size_t subcat_len = slash2 - (slash1 + 1);
-    *subcategory = (char*)mem_alloc(subcat_len + 1, MEM_CAT_INPUT_OTHER);
-    strncpy(*subcategory, slash1 + 1, subcat_len);
-    (*subcategory)[subcat_len] = '\0';
+    *subcategory = mem_strndup(slash1 + 1, subcat_len, MEM_CAT_INPUT_OTHER);
 
     // Extract item (after second slash)
     *item = mem_strdup(slash2 + 1, MEM_CAT_INPUT_OTHER);

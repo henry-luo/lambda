@@ -14,6 +14,7 @@
 #endif
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/datetime.h"
+#include "../../lib/escape.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/mem_factory.h"
@@ -36,6 +37,7 @@ static bool lambda_parse_int_literal(const char* text, int64_t* out) {
 
 
 #include "../../lib/str.h"
+#include "../../lib/string.h"
 #include "../../lib/strview.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/file.h"
@@ -56,7 +58,7 @@ static StrView ast_node_source(Transpiler* tp, const AstNode* node) {
 // keep fallible literal source copies in one checked path.
 static char* ast_copy_source_text(Transpiler* tp, StrView source,
         SourceSpan diagnostic_span) {
-    char* copy = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
+    char* copy = mem_dup_n(source.str, source.length, MEM_CAT_AST);
     if (!copy) {
         record_semantic_error_span(tp, diagnostic_span, ERR_OUT_OF_MEMORY,
             "out of memory while reading literal source");
@@ -65,8 +67,6 @@ static char* ast_copy_source_text(Transpiler* tp, StrView source,
         tp->build_allocation_failed = true;
         return NULL;
     }
-    memcpy(copy, source.str, source.length);
-    copy[source.length] = '\0';
     return copy;
 }
 
@@ -301,8 +301,7 @@ static bool jube_extract_native_c_name(const char* native_signature, char* out, 
 
     size_t len = (size_t)(end - start);
     if (len >= out_size) len = out_size - 1;
-    memcpy(out, start, len);
-    out[len] = '\0';
+    str_copy(out, out_size, start, len);
     return true;
 }
 
@@ -2463,12 +2462,6 @@ static AstNode* build_namespace_symbol_from_parts(Transpiler* tp,
         NamespaceEntry* ns_entry) {
     if (!tp || !prefix || !field || !ns_entry) return NULL;
     size_t total_len = prefix->len + 1 + field->len;
-    char* qualified = (char*)pool_alloc(tp->pool, total_len + 1);
-    memcpy(qualified, prefix->chars, prefix->len);
-    qualified[prefix->len] = '.';
-    memcpy(qualified + prefix->len + 1, field->chars, field->len);
-    qualified[total_len] = '\0';
-
     TypeString* sym_type = (TypeString*)alloc_type(tp->pool, LMD_TYPE_SYMBOL,
         sizeof(TypeString));
     sym_type->is_const = 1;
@@ -2476,8 +2469,9 @@ static AstNode* build_namespace_symbol_from_parts(Transpiler* tp,
     Symbol* symbol = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + total_len + 1);
     symbol->ns = ns_entry->target;
     symbol->len = total_len;
-    memcpy(symbol->chars, qualified, total_len);
-    symbol->chars[total_len] = '\0';
+    str_copy(symbol->chars, total_len + 1, prefix->chars, prefix->len);
+    str_cat(symbol->chars, prefix->len, total_len + 1, ".", 1);
+    str_cat(symbol->chars, prefix->len + 1, total_len + 1, field->chars, field->len);
     sym_type->string = (String*)symbol;
     arraylist_append(tp->const_list, symbol);
     sym_type->const_index = tp->const_list->length - 1;
@@ -2511,8 +2505,7 @@ static const char* registered_jube_module_name(StrView* name) {
 #ifndef SIMPLE_SCHEMA_PARSER
     char module_name[128];
     if (!name || name->length >= sizeof(module_name)) return NULL;
-    memcpy(module_name, name->str, name->length);
-    module_name[name->length] = '\0';
+    str_copy(module_name, sizeof(module_name), name->str, name->length);
     jube_register_builtin_modules();
     const JubeModuleDef* module = jube_find_static_module(module_name);
     return module ? module->name : NULL;
@@ -3277,17 +3270,11 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
             // Allocate as Symbol (has ns field before chars)
             Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + content_len + 1);
             sym->ns = NULL;
-            memcpy(sym->chars, content_start, content_len);
-            sym->chars[content_len] = '\0';
+            str_copy(sym->chars, content_len + 1, content_start, content_len);
             sym->len = content_len;
             str = (String*)sym;  // store as String* in TypeString (const pool uses raw pointer)
         } else {
-            str = (String*)pool_alloc(tp->pool, sizeof(String) + content_len + 1);
-            memcpy(str->chars, content_start, content_len);
-            str->chars[content_len] = '\0';
-            str->len = content_len;
-            str->flags = 0;
-            str->is_ascii = str_is_ascii(str->chars, content_len) ? 1 : 0;
+            str = string_from_strview(strview_init(content_start, content_len), tp->pool);
         }
         str_type->string = str;
     }
@@ -3338,60 +3325,15 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
                 case 'u':
                     // Handle Unicode escape sequences: \uXXXX or \u{...}
                     if (i + 5 < content_len && content_start[i + 2] != '{') {
-                        // \uXXXX format (exactly 4 hex digits)
-                        char hex_digits[5] = {0};
-                        memcpy(hex_digits, content_start + i + 2, 4);
-                        char* endptr;
-                        uint32_t code_point = strtoul(hex_digits, &endptr, 16);
-                        if (endptr == hex_digits + 4) {
-                            // Check for surrogate pairs (used for characters > U+FFFF like emojis)
-                            // High surrogate: 0xD800-0xDBFF, Low surrogate: 0xDC00-0xDFFF
-                            if (code_point >= 0xD800 && code_point <= 0xDBFF) {
-                                // This is a high surrogate, look for low surrogate
-                                if (i + 11 < content_len &&
-                                    content_start[i + 6] == '\\' && content_start[i + 7] == 'u') {
-                                    char hex_low[5] = {0};
-                                    memcpy(hex_low, content_start + i + 8, 4);
-                                    char* endptr_low;
-                                    uint32_t low_surrogate = strtoul(hex_low, &endptr_low, 16);
-                                    if (endptr_low == hex_low + 4 &&
-                                        low_surrogate >= 0xDC00 && low_surrogate <= 0xDFFF) {
-                                        // Valid surrogate pair - combine into full codepoint
-                                        code_point = 0x10000 + ((code_point - 0xD800) << 10) + (low_surrogate - 0xDC00);
-                                        i += 6; // skip extra \uXXXX for low surrogate
-                                    } else {
-                                        // Not a valid low surrogate, output replacement char
-                                        code_point = 0xFFFD;
-                                    }
-                                } else {
-                                    // Lone high surrogate - output replacement character
-                                    code_point = 0xFFFD;
-                                }
-                            } else if (code_point >= 0xDC00 && code_point <= 0xDFFF) {
-                                // Lone low surrogate - output replacement character
-                                code_point = 0xFFFD;
-                            }
-
-                            // Convert Unicode code point to UTF-8
-                            if (code_point <= 0x7F) {
-                                stringbuf_append_char(str_buf, (char)code_point);
-                            } else if (code_point <= 0x7FF) {
-                                stringbuf_append_char(str_buf, 0xC0 | (code_point >> 6));
-                                stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
-                            } else if (code_point <= 0xFFFF) {
-                                stringbuf_append_char(str_buf, 0xE0 | (code_point >> 12));
-                                stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
-                                stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
-                            } else {
-                                // 4-byte UTF-8 encoding for code points > 0xFFFF (emojis, etc.)
-                                stringbuf_append_char(str_buf, 0xF0 | (code_point >> 18));
-                                stringbuf_append_char(str_buf, 0x80 | ((code_point >> 12) & 0x3F));
-                                stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
-                                stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
-                            }
-                            i += 5;  // skip \uXXXX
+                        uint32_t code_point = 0;
+                        size_t consumed = 0;
+                        if (escape_decode_utf16_escape(content_start + i + 2,
+                                (size_t)content_len - (size_t)i - 2, true,
+                                &code_point, &consumed)) {
+                            stringbuf_append_utf8(str_buf, code_point);
+                            i += (int)consumed + 1;  // skip \uXXXX and optional low surrogate
                         } else {
-                            log_error("Invalid Unicode escape: \\u%s", hex_digits);
+                            log_error("Invalid Unicode escape sequence");
                             stringbuf_append_char(str_buf, '\\');
                             stringbuf_append_char(str_buf, 'u');
                             i++;
@@ -3415,23 +3357,7 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
                             char* endptr;
                             uint32_t code_point = strtoul(hex_str, &endptr, 16);
                             if (endptr == hex_str + hex_source.length && code_point <= 0x10FFFF) {
-                                // Convert Unicode code point to UTF-8
-                                if (code_point <= 0x7F) {
-                                    stringbuf_append_char(str_buf, (char)code_point);
-                                } else if (code_point <= 0x7FF) {
-                                    stringbuf_append_char(str_buf, 0xC0 | (code_point >> 6));
-                                    stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
-                                } else if (code_point <= 0xFFFF) {
-                                    stringbuf_append_char(str_buf, 0xE0 | (code_point >> 12));
-                                    stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
-                                    stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
-                                } else {
-                                    // 4-byte UTF-8 encoding for code points > 0xFFFF
-                                    stringbuf_append_char(str_buf, 0xF0 | (code_point >> 18));
-                                    stringbuf_append_char(str_buf, 0x80 | ((code_point >> 12) & 0x3F));
-                                    stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
-                                    stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
-                                }
+                                stringbuf_append_utf8(str_buf, code_point);
                                 i = (hex_end - content_start);  // position at '}'
                             } else {
                                 log_error("Invalid Unicode escape: \\u{%s}", hex_str);
@@ -3483,8 +3409,7 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
             int slen = str->len;
             Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + slen + 1);
             sym->ns = NULL;
-            memcpy(sym->chars, str->chars, slen);
-            sym->chars[slen] = '\0';
+            str_copy(sym->chars, slen + 1, str->chars, slen);
             sym->len = slen;
             str = (String*)sym;  // store as String* in TypeString
         }
@@ -3637,10 +3562,8 @@ static Type* build_lit_imaginary_from_span(Transpiler* tp,
         SourceSpan span) {
     StrView source = source_span_text(tp, span);
     if (source.length < 2 || source.str[source.length - 1] != 'j') return &TYPE_ERROR;
-    char* coefficient = (char*)mem_alloc(source.length, MEM_CAT_AST);
+    char* coefficient = mem_dup_n(source.str, source.length - 1, MEM_CAT_AST);
     if (!coefficient) return &TYPE_ERROR;
-    memcpy(coefficient, source.str, source.length - 1);
-    coefficient[source.length - 1] = '\0';
 
     double imag = 0.0;
     if (strcmp(coefficient, "inf") == 0) imag = INFINITY;
@@ -6390,11 +6313,8 @@ static void push_qualified_name(Transpiler* tp, AstNode* node, AstImportNode* im
     String* name = binding_node_name(node);
     size_t name_len = name->len;
     size_t total_len = alias_len + 1 + name_len;  // alias.name
-    char* buf = (char*)pool_alloc(tp->pool, total_len + 1);
-    memcpy(buf, alias->chars, alias_len);
-    buf[alias_len] = '.';
-    memcpy(buf + alias_len + 1, name->chars, name_len);
-    buf[total_len] = '\0';
+    char* buf = pool_join3(tp->pool, alias->chars, alias_len, ".", 1,
+                           name->chars, name_len);
     StrView qualified = {buf, total_len};
     String* qualified_name = name_pool_create_strview(tp->name_pool, qualified);
 
@@ -10763,8 +10683,7 @@ static AstNode* build_module_import_from_parts(Transpiler* tp,
 #ifndef SIMPLE_SCHEMA_PARSER
     char module_buf[128];
     if (module.length < sizeof(module_buf)) {
-        memcpy(module_buf, module.str, module.length);
-        module_buf[module.length] = '\0';
+        str_copy(module_buf, sizeof(module_buf), module.str, module.length);
         jube_register_builtin_modules();
         const JubeModuleDef* jube = jube_find_static_module(module_buf);
         if (jube) {
@@ -10806,8 +10725,7 @@ static AstNode* build_module_import_from_parts(Transpiler* tp,
             StrBuf* fixed = strbuf_new();
             const char* home = g_lambda_home;
             if (home[0] == '.' && home[1] == '/') home += 2;
-            strbuf_append_str(fixed, "./");
-            strbuf_append_str(fixed, home);
+            strbuf_append_all(fixed, 2, "./", home);
             strbuf_append_str(fixed, slash);
             strbuf_free(path);
             path = fixed;

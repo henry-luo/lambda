@@ -2579,8 +2579,7 @@ static void sim_copy_line_at(const char* text, size_t offset, char* out, size_t 
 
     size_t copy_len = end > start ? end - start : 0;
     if (copy_len >= out_sz) copy_len = out_sz - 1;
-    memcpy(out, text + start, copy_len);
-    out[copy_len] = '\0';
+    str_copy(out, out_sz, text + start, copy_len);
 }
 
 static void assert_state_dump_impl(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {

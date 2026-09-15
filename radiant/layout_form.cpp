@@ -140,20 +140,13 @@ static bool form_control_has_specified_font(const ViewBlock* block) {
         style_tree_get_declaration(style, CSS_PROPERTY_FONT_VARIANT));
 }
 
-static bool form_control_declares_line_height(const ViewBlock* block) {
-    StyleTree* style = block ? block->specified_style : nullptr;
-    return style && (
-        style_tree_get_declaration(style, CSS_PROPERTY_LINE_HEIGHT) ||
-        style_tree_get_declaration(style, CSS_PROPERTY_FONT));
-}
-
 static float form_control_author_non_normal_line_height(LayoutContext* lycon,
                                                         ViewBlock* block,
                                                         FontProp* font) {
     if (!lycon || !block || !font || font->font_size <= 0.0f) return 0.0f;
     // Native controls keep the UA `line-height: normal` unless an author
     // font or line-height declaration participates in their own cascade.
-    if (!form_control_declares_line_height(block)) return 0.0f;
+    if (!layout_style_declares_line_height(block->specified_style)) return 0.0f;
     CssValue value = layout_cascaded_line_height(lycon, block);
     if (value.type == CSS_VALUE_TYPE_KEYWORD && value.data.keyword == CSS_VALUE_NORMAL) {
         return 0.0f;

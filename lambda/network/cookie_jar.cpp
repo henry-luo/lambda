@@ -53,12 +53,6 @@ extern "C" bool is_public_suffix(const char* domain);
 // Internal helpers
 // ============================================================================
 
-// Duplicate a string via mem_alloc
-static char* jar_strdup(const char* s) {
-    if (!s) return nullptr;
-    return mem_strdup(s, MEM_CAT_NETWORK);
-}
-
 // Free a cookie entry
 static void cookie_entry_free(CookieEntry* e) {
     if (!e) return;
@@ -138,24 +132,22 @@ static char* default_path_from_url(const char* url) {
     Url* parsed = parse_url(NULL, url);
     if (!parsed || !parsed->pathname) {
         if (parsed) url_destroy(parsed);
-        return jar_strdup("/");
+        return mem_strdup("/", MEM_CAT_NETWORK);
     }
     const char* path = parsed->pathname->chars;
     // if path is empty or doesn't start with '/', default = "/"
     if (!path[0] || path[0] != '/') {
         url_destroy(parsed);
-        return jar_strdup("/");
+        return mem_strdup("/", MEM_CAT_NETWORK);
     }
     // find last '/' and truncate
     const char* last_slash = strrchr(path, '/');
     if (last_slash == path) {
         url_destroy(parsed);
-        return jar_strdup("/");
+        return mem_strdup("/", MEM_CAT_NETWORK);
     }
     size_t len = (size_t)(last_slash - path);
-    char* result = (char*)mem_alloc(len + 1, MEM_CAT_NETWORK);
-    memcpy(result, path, len);
-    result[len] = '\0';
+    char* result = mem_dup_n(path, len, MEM_CAT_NETWORK);
     url_destroy(parsed);
     return result;
 }
@@ -166,7 +158,7 @@ static char* host_from_url(const char* url) {
     if (!parsed) return nullptr;
     char* host = nullptr;
     if (parsed->host) {
-        host = jar_strdup(parsed->host->chars);
+        host = mem_strdup(parsed->host->chars, MEM_CAT_NETWORK);
     }
     url_destroy(parsed);
     return host;
@@ -177,11 +169,11 @@ static char* path_from_url(const char* url) {
     Url* parsed = parse_url(NULL, url);
     if (!parsed || !parsed->pathname) {
         if (parsed) url_destroy(parsed);
-        return jar_strdup("/");
+        return mem_strdup("/", MEM_CAT_NETWORK);
     }
-    char* path = jar_strdup(parsed->pathname->chars);
+    char* path = mem_strdup(parsed->pathname->chars, MEM_CAT_NETWORK);
     url_destroy(parsed);
-    return (path && path[0]) ? path : jar_strdup("/");
+    return (path && path[0]) ? path : mem_strdup("/", MEM_CAT_NETWORK);
 }
 
 // Grow entries array if needed
@@ -224,9 +216,7 @@ static CookieEntry* parse_set_cookie(const char* header, const char* request_url
         val_end--;
 
     CookieEntry* entry = (CookieEntry*)mem_calloc(1, sizeof(CookieEntry), MEM_CAT_NETWORK);
-    entry->name = (char*)mem_alloc(name_len + 1, MEM_CAT_NETWORK);
-    memcpy(entry->name, p, name_len);
-    entry->name[name_len] = '\0';
+    entry->name = mem_dup_n(p, name_len, MEM_CAT_NETWORK);
 
     size_t val_len = (size_t)(val_end - val_start);
     // strip surrounding quotes from value if present
@@ -234,9 +224,7 @@ static CookieEntry* parse_set_cookie(const char* header, const char* request_url
         val_start++;
         val_len -= 2;
     }
-    entry->value = (char*)mem_alloc(val_len + 1, MEM_CAT_NETWORK);
-    memcpy(entry->value, val_start, val_len);
-    entry->value[val_len] = '\0';
+    entry->value = mem_dup_n(val_start, val_len, MEM_CAT_NETWORK);
 
     // default values
     entry->path = default_path_from_url(request_url);
@@ -288,16 +276,13 @@ static CookieEntry* parse_set_cookie(const char* header, const char* request_url
                 // store as ".domain" for subdomain matching
                 entry->domain = (char*)mem_alloc(attr_val_len + 2, MEM_CAT_NETWORK);
                 entry->domain[0] = '.';
-                memcpy(entry->domain + 1, d, attr_val_len);
-                entry->domain[attr_val_len + 1] = '\0';
+                str_copy(entry->domain + 1, attr_val_len + 1, d, attr_val_len);
                 str_lower_inplace(entry->domain, attr_val_len + 1);
             }
         } else if (str_ieq_const(attr_start, attr_len, "Path")) {
             if (attr_val_len > 0) {
                 mem_free(entry->path);
-                entry->path = (char*)mem_alloc(attr_val_len + 1, MEM_CAT_NETWORK);
-                memcpy(entry->path, attr_val, attr_val_len);
-                entry->path[attr_val_len] = '\0';
+                entry->path = mem_dup_n(attr_val, attr_val_len, MEM_CAT_NETWORK);
             }
         } else if (str_ieq_const(attr_start, attr_len, "Expires")) {
             if (attr_val_len > 0 && entry->expires == 0) {
@@ -305,8 +290,7 @@ static CookieEntry* parse_set_cookie(const char* header, const char* request_url
                 struct tm tm_val = {};
                 char attr_buf[128];
                 size_t copy_len = attr_val_len < sizeof(attr_buf) - 1 ? attr_val_len : sizeof(attr_buf) - 1;
-                memcpy(attr_buf, attr_val, copy_len);
-                attr_buf[copy_len] = '\0';
+                str_copy(attr_buf, sizeof(attr_buf), attr_val, copy_len);
                 if (strptime(attr_buf, "%a, %d %b %Y %H:%M:%S", &tm_val)) {
                     entry->expires = timegm(&tm_val);
                 }
@@ -315,8 +299,7 @@ static CookieEntry* parse_set_cookie(const char* header, const char* request_url
             if (attr_val_len > 0) {
                 char buf[32];
                 size_t copy_len = attr_val_len < sizeof(buf) - 1 ? attr_val_len : sizeof(buf) - 1;
-                memcpy(buf, attr_val, copy_len);
-                buf[copy_len] = '\0';
+                str_copy(buf, sizeof(buf), attr_val, copy_len);
                 long max_age = strtol(buf, nullptr, 10);
                 if (max_age <= 0) {
                     entry->expires = 1;  // expire immediately
@@ -353,7 +336,7 @@ CookieJar* cookie_jar_create(const char* storage_path) {
     jar->count = 0;
     jar->capacity = 0;
     pthread_mutex_init(&jar->lock, NULL);
-    jar->storage_path = storage_path ? jar_strdup(storage_path) : NULL;
+    jar->storage_path = storage_path ? mem_strdup(storage_path, MEM_CAT_NETWORK) : NULL;
 
     // load persistent cookies from file if available
     if (jar->storage_path) {
@@ -711,12 +694,12 @@ void cookie_jar_load(CookieJar* jar) {
         if (expires > 0 && expires <= now) continue;
 
         CookieEntry* e = (CookieEntry*)mem_calloc(1, sizeof(CookieEntry), MEM_CAT_NETWORK);
-        e->domain = jar_strdup(fields[0]);
-        e->path = jar_strdup(fields[1]);
+        e->domain = mem_strdup(fields[0], MEM_CAT_NETWORK);
+        e->path = mem_strdup(fields[1], MEM_CAT_NETWORK);
         e->secure = (fields[2][0] == '1');
         e->expires = expires;
-        e->name = jar_strdup(fields[4]);
-        e->value = jar_strdup(fields[5]);
+        e->name = mem_strdup(fields[4], MEM_CAT_NETWORK);
+        e->value = mem_strdup(fields[5], MEM_CAT_NETWORK);
         e->http_only = (field_count > 6 && fields[6][0] == '1');
         e->same_site = (field_count > 7) ? (SameSitePolicy)atoi(fields[7]) : SAME_SITE_LAX;
         e->creation_time = now;

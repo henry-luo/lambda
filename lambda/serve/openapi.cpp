@@ -6,6 +6,7 @@
 #include "openapi.hpp"
 #include "swagger_ui.hpp"
 #include "../../lib/log.h"
+#include "../../lib/escape.h"
 #include "../../lib/strbuf.h"
 #include <cstring>
 #include "../../lib/mem.h"
@@ -47,21 +48,9 @@ void openapi_invalidate(OpenApiContext *ctx) {
 
 static void json_append_string(StrBuf *buf, const char *key, const char *value) {
     if (!value) return;
-    strbuf_append_char(buf, '"');
-    strbuf_append_str(buf, key);
-    strbuf_append_str(buf, "\":\"");
-    // escape basic JSON chars
-    for (const char *p = value; *p; p++) {
-        switch (*p) {
-            case '"':  strbuf_append_str(buf, "\\\""); break;
-            case '\\': strbuf_append_str(buf, "\\\\"); break;
-            case '\n': strbuf_append_str(buf, "\\n");  break;
-            case '\r': strbuf_append_str(buf, "\\r");  break;
-            case '\t': strbuf_append_str(buf, "\\t");  break;
-            default:   strbuf_append_char(buf, *p);   break;
-        }
-    }
-    strbuf_append_char(buf, '"');
+    escape_append_json_string(buf, key, strlen(key), true, false);
+    strbuf_append_char(buf, ':');
+    escape_append_json_string(buf, value, strlen(value), true, false);
 }
 
 static const char* method_string(HttpMethod m) {
@@ -113,8 +102,7 @@ static void append_path_parameters(StrBuf *buf, const char *pattern, int *first)
             memcpy(name, name_start, name_len);
             name[name_len] = '\0';
 
-            strbuf_append_str(buf, "{\"name\":\"");
-            strbuf_append_str(buf, name);
+            strbuf_append_all(buf, 2, "{\"name\":\"", name);
             strbuf_append_str(buf, "\",\"in\":\"path\",\"required\":true,\"schema\":{\"type\":\"string\"}}");
 
             if (!*p) break;
@@ -217,8 +205,7 @@ const char* openapi_generate_spec(OpenApiContext *ctx) {
             method_first = 0;
 
             strbuf_append_char(buf, '"');
-            strbuf_append_str(buf, method_string(ep->method));
-            strbuf_append_str(buf, "\":{");
+            strbuf_append_all(buf, 2, method_string(ep->method), "\":{");
 
             // summary
             if (ep->meta.summary) {
@@ -282,15 +269,14 @@ const char* openapi_generate_spec(OpenApiContext *ctx) {
                 (ep->method == HTTP_POST || ep->method == HTTP_PUT || ep->method == HTTP_PATCH)) {
                 strbuf_append_str(buf, ",\"requestBody\":{\"required\":true,"
                     "\"content\":{\"application/json\":{\"schema\":");
-                strbuf_append_str(buf, ep->meta.request_schema);
-                strbuf_append_str(buf, "}}}");
+                strbuf_append_all(buf, 2, ep->meta.request_schema, "}}}");
             }
 
             // responses
             strbuf_append_str(buf, ",\"responses\":{\"200\":{\"description\":\"Success\"");
             if (ep->meta.response_schema) {
-                strbuf_append_str(buf, ",\"content\":{\"application/json\":{\"schema\":");
-                strbuf_append_str(buf, ep->meta.response_schema);
+                strbuf_append_all(buf, 2, ",\"content\":{\"application/json\":{\"schema\":",
+                                  ep->meta.response_schema);
                 strbuf_append_str(buf, "}}");
             }
             strbuf_append_str(buf, "}}");
@@ -304,9 +290,7 @@ const char* openapi_generate_spec(OpenApiContext *ctx) {
     strbuf_append_str(buf, "}}"); // close paths + root
 
     // cache result
-    size_t len = buf->length;
-    ctx->cached_spec = (char*)mem_alloc(len + 1, MEM_CAT_SERVE);
-    memcpy(ctx->cached_spec, buf->str, len + 1);
+    ctx->cached_spec = mem_strdup(buf->str, MEM_CAT_SERVE);
 
     strbuf_free(buf);
     return ctx->cached_spec;

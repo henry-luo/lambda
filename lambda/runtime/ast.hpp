@@ -578,8 +578,7 @@ static inline int64_t parse_int_literal_span(const char* source, SourceSpan span
     // Copy to null-terminated buffer
     char buf[128];
     if (len >= (int)sizeof(buf)) len = sizeof(buf) - 1;
-    memcpy(buf, text, len);
-    buf[len] = '\0';
+    str_copy(buf, sizeof(buf), text, len);
 
     // Handle hex (0x), octal (0o), binary (0b)
     if (len > 2 && buf[0] == '0') {

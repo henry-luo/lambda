@@ -218,8 +218,7 @@ static bool riv_parse_datetime(const char* value, int* year, int* month, int* da
     size_t date_length = (size_t)(separator - value);
     if (date_length >= 32) return false;
     char date[32];
-    memcpy(date, value, date_length);
-    date[date_length] = '\0';
+    str_copy(date, sizeof(date), value, date_length);
     return riv_parse_date(date, year, month, day) &&
            riv_parse_time(separator + 1, hour, minute, second, millisecond);
 }

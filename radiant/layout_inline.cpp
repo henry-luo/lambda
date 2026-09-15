@@ -387,13 +387,7 @@ static bool text_is_all_collapsible_space(DomText* text, ViewSpan* span) {
         white_space == CSS_VALUE_PRE_LINE ||
         white_space == 0;
     if (!collapse_spaces) return false;
-    for (size_t i = 0; i < text->length; i++) {
-        char c = text->text[i];
-        if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f') {
-            return false;
-        }
-    }
-    return true;
+    return str_all(text->text, text->length, str_is_html_space);
 }
 
 bool layout_inline_is_collapsed_whitespace_only(ViewSpan* span) {
@@ -2429,11 +2423,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     bool has_own_line_height = false;
     if (elmt->is_element()) {
         DomElement* dom_elmt = lam::dom_as<DOM_NODE_ELEMENT>(elmt);
-        if (dom_elmt->specified_style) {
-            has_own_line_height =
-                style_tree_get_declaration(dom_elmt->specified_style, CSS_PROPERTY_LINE_HEIGHT) != nullptr ||
-                style_tree_get_declaration(dom_elmt->specified_style, CSS_PROPERTY_FONT) != nullptr;
-        }
+        has_own_line_height = layout_style_declares_line_height(
+            dom_elmt->specified_style);
     }
     // <number> or 'normal'. CSS 2.1: number line-heights inherit the number (not
     bool font_size_changed = lycon->font.style && pa_font.style &&

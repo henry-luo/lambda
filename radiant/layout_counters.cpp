@@ -224,7 +224,7 @@ static void parse_counter_spec(const char* spec,
 
     while (*p && pair_count < max_pairs) {
         // Skip whitespace
-        while (*p && str_char_is_ascii_space(*p)) p++;
+        p = str_skip_ascii_space(p);
         if (!*p) break;
         // Parse name: read until whitespace (CSS <custom-ident> can contain hyphens, underscores, digits)
         const char* name_start = p;
@@ -235,13 +235,10 @@ static void parse_counter_spec(const char* spec,
         if (!str_char_is_alpha(name_start[0]) && name_start[0] != '_' && name_start[0] != '-') break;
 
         size_t name_len = p - name_start;
-        char* name = (char*)arena_alloc(arena, name_len + 1);
+        char* name = arena_dup_n(arena, name_start, name_len);
         if (!name) break;
-
-        memcpy(name, name_start, name_len);
-        name[name_len] = '\0';
         // Skip whitespace
-        while (*p && str_char_is_ascii_space(*p)) p++;
+        p = str_skip_ascii_space(p);
         // Parse optional integer value (sign must be followed by digit)
         int value = default_value;
         if (*p && (str_char_is_digit(*p) || ((*p == '-' || *p == '+') && *(p+1) && str_char_is_digit(*(p+1))))) {
@@ -630,8 +627,7 @@ static int format_bullet_counter(uint32_t style, char* buffer, size_t buffer_siz
         : style == CSS_VALUE_CIRCLE ? 1
         : style == CSS_VALUE_SQUARE ? 2 : -1;
     if (index < 0 || buffer_size < 4) return 0;
-    memcpy(buffer, bullets[index], 3);
-    buffer[3] = '\0';
+    str_copy(buffer, buffer_size, (const char*)bullets[index], 3);
     return 3;
 }
 

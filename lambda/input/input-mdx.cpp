@@ -27,8 +27,7 @@ static const char* extract_tag_name(const char* pos, const char* end, char* buff
     size_t len = 0;
     if (!jsx_scan_tag_name_after_lt(pos, end, &start, &len) || !start) return NULL;
     if (len >= buffer_size) len = buffer_size - 1;
-    memcpy(buffer, start, len);
-    buffer[len] = '\0';
+    str_copy(buffer, buffer_size, start, len);
     return len > 0 ? buffer : NULL;
 }
 
@@ -91,10 +90,8 @@ static Element* parse_jsx_component(InputContext& ctx, const char** pos, const c
 
     // Store the JSX content as text for now
     size_t jsx_len = jsx_end - jsx_start;
-    char* jsx_buffer = (char*)mem_alloc(jsx_len + 1, MEM_CAT_INPUT_MDX);
+    char* jsx_buffer = mem_strndup(jsx_start, jsx_len, MEM_CAT_INPUT_MDX);
     if (jsx_buffer) {
-        strncpy(jsx_buffer, jsx_start, jsx_len);
-        jsx_buffer[jsx_len] = '\0';
         String* jsx_content = builder.createString(jsx_buffer);
         Item jsx_item = {.item = s2it(jsx_content)};
         jsx_elem.attr("content", jsx_item);
@@ -134,10 +131,8 @@ static Element* parse_html_element(InputContext& ctx, const char** pos, const ch
 
     // Store the HTML content as text for now
     size_t html_len = html_end - html_start;
-    char* html_buffer = (char*)mem_alloc(html_len + 1, MEM_CAT_INPUT_MDX);
+    char* html_buffer = mem_strndup(html_start, html_len, MEM_CAT_INPUT_MDX);
     if (html_buffer) {
-        strncpy(html_buffer, html_start, html_len);
-        html_buffer[html_len] = '\0';
         String* html_content = builder.createString(html_buffer);
         Item html_item = {.item = s2it(html_content)};
         html_elem.attr("content", html_item);
@@ -187,11 +182,8 @@ static Element* parse_mdx_content(InputContext& ctx, const char* content) {
             // First, process any preceding markdown text
             if (pos > text_start) {
                 size_t text_len = pos - text_start;
-                char* text_buffer = (char*)mem_alloc(text_len + 1, MEM_CAT_INPUT_MDX);
+                char* text_buffer = mem_strndup(text_start, text_len, MEM_CAT_INPUT_MDX);
                 if (text_buffer) {
-                    strncpy(text_buffer, text_start, text_len);
-                    text_buffer[text_len] = '\0';
-
                     // Parse the text as markdown
                     Item markdown_item = input_markup(input, text_buffer);
                     if (markdown_item.item != ITEM_NULL && get_type_id(markdown_item) == LMD_TYPE_ELEMENT) {
@@ -223,11 +215,8 @@ static Element* parse_mdx_content(InputContext& ctx, const char* content) {
     // Process any remaining text
     if (pos > text_start) {
         size_t text_len = pos - text_start;
-        char* text_buffer = (char*)mem_alloc(text_len + 1, MEM_CAT_INPUT_MDX);
+        char* text_buffer = mem_strndup(text_start, text_len, MEM_CAT_INPUT_MDX);
         if (text_buffer) {
-            strncpy(text_buffer, text_start, text_len);
-            text_buffer[text_len] = '\0';
-
             // Parse the text as markdown
             Item markdown_item = input_markup(input, text_buffer);
             if (markdown_item.item != ITEM_NULL && get_type_id(markdown_item) == LMD_TYPE_ELEMENT) {

@@ -10,6 +10,7 @@
 #include "../../../lib/file.h"
 #include "../../../lib/mem.h"
 #include "../../../lib/path_str.h"
+#include "../../../lib/str.h"
 
 #include <cstring>
 #include <cstdio>
@@ -311,8 +312,7 @@ extern "C" Item js_path_resolve(Item args_item) {
     if (cwd) {
         int clen = (int)strlen(cwd);
         if (clen >= (int)sizeof(resolved)) clen = (int)sizeof(resolved) - 1;
-        memcpy(resolved, cwd, clen);
-        resolved[clen] = '\0';
+        str_copy(resolved, sizeof(resolved), cwd, clen);
         mem_free(cwd);
     }
 
@@ -429,8 +429,7 @@ extern "C" Item js_path_parse(Item path_item) {
     // Strip trailing slashes for parsing (Node.js behavior)
     // but preserve the original for dir computation on paths like /foo//bar.baz
     char stripped_buf[2048];
-    strncpy(stripped_buf, path, sizeof(stripped_buf) - 1);
-    stripped_buf[sizeof(stripped_buf) - 1] = '\0';
+    str_copy(stripped_buf, sizeof(stripped_buf), path, strlen(path));
     int slen = (int)strlen(stripped_buf);
     // strip trailing slashes, but don't strip the root slash itself
     while (slen > 1 && (stripped_buf[slen - 1] == '/' || stripped_buf[slen - 1] == '\\')) {

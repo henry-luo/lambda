@@ -35,6 +35,17 @@ static void css_font_face_clear_heap_src(CssFontFaceDescriptor* descriptor) {
     descriptor->src_count = 0;
 }
 
+static char* css_font_face_dup(Pool* pool, const char* text, size_t len) {
+    return pool ? pool_dup_n(pool, text, len) : mem_dup_n(text, len, MEM_CAT_INPUT_CSS);
+}
+
+static char* css_font_face_join3(Pool* pool, const char* first, size_t first_len,
+                                 const char* second, size_t second_len,
+                                 const char* third, size_t third_len) {
+    return pool ? pool_join3(pool, first, first_len, second, second_len, third, third_len) :
+        mem_join3(first, first_len, second, second_len, third, third_len, MEM_CAT_INPUT_CSS);
+}
+
 static void css_font_face_clear_heap_unicode_ranges(CssFontFaceDescriptor* descriptor) {
     if (!descriptor) return;
     if (descriptor->unicode_ranges) {
@@ -130,18 +141,7 @@ static char* trim_and_unquote(const char* str, size_t len, Pool* pool) {
         len -= 2;
     }
 
-    // Allocate and copy result
-    char* result;
-    if (pool) {
-        result = (char*)pool_alloc(pool, len + 1);
-    } else {
-        result = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_CSS);
-    }
-    if (result) {
-        memcpy(result, str, len);
-        result[len] = '\0';
-    }
-    return result;
+    return css_font_face_dup(pool, str, len);
 }
 
 // Helper: extract format from "format('truetype')" or "format(woff)"
@@ -154,7 +154,7 @@ static char* extract_format_value(const char* str, Pool* pool) {
     fmt_start += 7; // skip "format("
 
     // Skip whitespace
-    while (*fmt_start == ' ' || *fmt_start == '\t') fmt_start++;
+    fmt_start = str_skip_line_space(fmt_start);
 
     // Skip opening quote if present
     char quote_char = 0;
@@ -173,17 +173,7 @@ static char* extract_format_value(const char* str, Pool* pool) {
     size_t len = fmt_end - fmt_start;
     if (len == 0) return nullptr;
 
-    char* result;
-    if (pool) {
-        result = (char*)pool_alloc(pool, len + 1);
-    } else {
-        result = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_CSS);
-    }
-    if (result) {
-        memcpy(result, fmt_start, len);
-        result[len] = '\0';
-    }
-    return result;
+    return css_font_face_dup(pool, fmt_start, len);
 }
 
 // Helper: extract URL from "url( path )" format
@@ -200,7 +190,7 @@ static char* extract_url_value(const char* src_value, Pool* pool) {
     url_start += 4; // skip "url("
 
     // Skip whitespace after "url("
-    while (*url_start == ' ' || *url_start == '\t') url_start++;
+    url_start = str_skip_line_space(url_start);
 
     // Skip opening quote if present
     char quote_char = 0;
@@ -219,17 +209,7 @@ static char* extract_url_value(const char* src_value, Pool* pool) {
     }
 
     size_t len = url_end - url_start;
-    char* result;
-    if (pool) {
-        result = (char*)pool_alloc(pool, len + 1);
-    } else {
-        result = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_CSS);
-    }
-    if (result) {
-        memcpy(result, url_start, len);
-        result[len] = '\0';
-    }
-    return result;
+    return css_font_face_dup(pool, url_start, len);
 }
 
 // Parse all src entries from a src declaration value
@@ -325,16 +305,8 @@ static int parse_src_entries(const char* src_value, CssFontFaceSrc* entries, int
         size_t entry_len = entry_end - url_start;
         log_debug("[CSS FontFace] Entry string length: %zu", entry_len);
 
-        char* entry_str;
-        if (pool) {
-            entry_str = (char*)pool_alloc(pool, entry_len + 1);
-        } else {
-            entry_str = (char*)mem_alloc(entry_len + 1, MEM_CAT_INPUT_CSS);
-        }
+        char* entry_str = css_font_face_dup(pool, url_start, entry_len);
         if (!entry_str) break;
-
-        memcpy(entry_str, url_start, entry_len);
-        entry_str[entry_len] = '\0';
 
         // Extract URL and format from this entry
         entries[count].url = extract_url_value(entry_str, pool);
@@ -349,8 +321,7 @@ static int parse_src_entries(const char* src_value, CssFontFaceSrc* entries, int
             if (url_len > 60) {
                 snprintf(url_preview, sizeof(url_preview), "%.57s...", entries[count].url);
             } else {
-                strncpy(url_preview, entries[count].url, sizeof(url_preview) - 1);
-                url_preview[sizeof(url_preview) - 1] = '\0';
+                str_copy(url_preview, sizeof(url_preview), entries[count].url, url_len);
             }
             log_debug("[CSS FontFace] Parsed src entry %d: url='%s' (len=%zu), format='%s'",
                 count, url_preview, url_len, entries[count].format ? entries[count].format : "(none)");
@@ -407,18 +378,9 @@ char* css_resolve_font_url(const char* url, const char* base_path, Pool* pool) {
         if (scheme_end) {
             size_t scheme_len = (size_t)(scheme_end - base_path);
             size_t url_len = strlen(url);
-            size_t result_size = scheme_len + 1 + url_len + 1;
-            char* result;
-            if (pool) {
-                result = (char*)pool_alloc(pool, result_size);
-            } else {
-                result = (char*)mem_alloc(result_size, MEM_CAT_INPUT_CSS);
-            }
+            char* result = css_font_face_join3(pool, base_path, scheme_len, ":", 1,
+                                                url, url_len);
             if (!result) return nullptr;
-
-            memcpy(result, base_path, scheme_len);
-            result[scheme_len] = ':';
-            memcpy(result + scheme_len + 1, url, url_len + 1);
             log_debug("[CSS FontFace] Resolved protocol-relative font URL: %s", result);
             return result;
         }
@@ -432,17 +394,9 @@ char* css_resolve_font_url(const char* url, const char* base_path, Pool* pool) {
             const char* path_start = strchr(host_start, '/');
             size_t origin_len = path_start ? (size_t)(path_start - base_path) : strlen(base_path);
             size_t url_len = strlen(url);
-            size_t result_size = origin_len + url_len + 1;
-            char* result;
-            if (pool) {
-                result = (char*)pool_alloc(pool, result_size);
-            } else {
-                result = (char*)mem_alloc(result_size, MEM_CAT_INPUT_CSS);
-            }
+            char* result = pool ? pool_join2(pool, base_path, origin_len, url, url_len) :
+                mem_join2(base_path, origin_len, url, url_len, MEM_CAT_INPUT_CSS);
             if (!result) return nullptr;
-
-            memcpy(result, base_path, origin_len);
-            memcpy(result + origin_len, url, url_len + 1);
             log_debug("[CSS FontFace] Resolved root-relative font URL: %s", result);
             return result;
         }

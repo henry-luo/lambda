@@ -482,10 +482,8 @@ char* js_regexp_canonicalize_property_escapes(const char* pattern, int pattern_l
     int* out_len) {
     if (out_len) *out_len = pattern_len;
     if (!pattern || pattern_len < 0) return NULL;
-    char* result = (char*)mem_alloc((size_t)pattern_len + 1, MEM_CAT_JS_RUNTIME);
+    char* result = mem_dup_n(pattern, pattern_len, MEM_CAT_JS_RUNTIME);
     if (!result) return NULL;
-    memcpy(result, pattern, (size_t)pattern_len);
-    result[pattern_len] = '\0';
     int result_len = pattern_len;
 
     static const struct { const char* value; const char* canonical; } gc_aliases[] = {

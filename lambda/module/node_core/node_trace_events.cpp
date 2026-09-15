@@ -2,6 +2,8 @@
 #include "../../jube/jube_registry.h"
 #include "../../jube/jube_interface.h"
 #include "../../../lib/log.h"
+#include "../../../lib/escape.h"
+#include "../../../lib/str.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/uv_loop.h"
 
@@ -28,18 +30,13 @@ static void node_trace_copy_cstr(char* dst, int dst_size, const char* src, int s
     if (!src) src = "";
     if (src_len < 0) src_len = (int)strlen(src);
     if (src_len >= dst_size) src_len = dst_size - 1;
-    memcpy(dst, src, (size_t)src_len);
-    dst[src_len] = '\0';
+    str_copy(dst, dst_size, src, src_len);
 }
 
 static char* node_trace_copy_chars(const char* src, int src_len) {
-    if (!src) src = "";
+    if (!src) return mem_strdup("", MEM_CAT_SYSTEM);
     if (src_len < 0) src_len = (int)strlen(src);
-    char* copy = (char*)mem_alloc((size_t)src_len + 1, MEM_CAT_SYSTEM);
-    if (!copy) return NULL;
-    if (src_len > 0) memcpy(copy, src, (size_t)src_len);
-    copy[src_len] = '\0';
-    return copy;
+    return mem_dup_n(src, (size_t)src_len, MEM_CAT_SYSTEM);
 }
 
 static int node_trace_category_count(const NodeTraceState* state) {
@@ -98,8 +95,7 @@ static bool node_trace_copy_value_string(Item value, char* out, int out_size,
     const uint8_t* source = node_trace_host->value->string_bytes(value);
     if (!source && source_length > 0) return false;
     int copied = source_length >= (size_t)out_size ? out_size - 1 : (int)source_length;
-    if (copied > 0) memcpy(out, source, (size_t)copied);
-    out[copied] = '\0';
+    str_copy(out, out_size, (const char*)source, (size_t)copied);
     if (out_length) *out_length = copied;
     return true;
 }
@@ -254,28 +250,8 @@ static bool node_trace_is_category_enabled_cstr(const char* category) {
 }
 
 static void node_trace_append_json_string(StrBuf* sb, const char* chars) {
-    if (!chars) chars = "";
-    strbuf_append_char(sb, '"');
-    for (int i = 0; chars[i]; i++) {
-        unsigned char c = (unsigned char)chars[i];
-        switch (c) {
-            case '"': strbuf_append_str_n(sb, "\\\"", 2); break;
-            case '\\': strbuf_append_str_n(sb, "\\\\", 2); break;
-            case '\n': strbuf_append_str_n(sb, "\\n", 2); break;
-            case '\r': strbuf_append_str_n(sb, "\\r", 2); break;
-            case '\t': strbuf_append_str_n(sb, "\\t", 2); break;
-            default:
-                if (c < 0x20) {
-                    char escaped[8];
-                    snprintf(escaped, sizeof(escaped), "\\u%04x", c);
-                    strbuf_append_str_n(sb, escaped, 6);
-                } else {
-                    strbuf_append_char(sb, (char)c);
-                }
-                break;
-        }
-    }
-    strbuf_append_char(sb, '"');
+    const char* value = chars ? chars : "";
+    escape_append_json_string(sb, value, strlen(value), true, false);
 }
 
 static Item node_trace_get_property(Item object, const char* name) {

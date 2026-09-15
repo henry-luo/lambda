@@ -116,10 +116,8 @@ CssValue* css_value_create_keyword(Pool* pool, const char* keyword) {
     if (len >= 2 && ((keyword[0] == '\'' && keyword[len-1] == '\'') ||
                      (keyword[0] == '"' && keyword[len-1] == '"'))) {
         // Allocate space for unquoted string
-        unquoted = (char*)pool_alloc(pool, len - 1);
+        unquoted = pool_dup_n(pool, keyword + 1, len - 2);
         if (unquoted) {
-            memcpy(unquoted, keyword + 1, len - 2);
-            unquoted[len - 2] = '\0';
             keyword_to_lookup = unquoted;
         }
     }
@@ -134,9 +132,8 @@ CssValue* css_value_create_keyword(Pool* pool, const char* keyword) {
     } else {
         // Unknown keyword - store as custom property string
         value->type = CSS_VALUE_TYPE_CUSTOM;
-        char* keyword_copy = (char*)pool_alloc(pool, strlen(keyword_to_lookup) + 1);
+        char* keyword_copy = pool_strdup(pool, keyword_to_lookup);
         if (keyword_copy) {
-            str_copy(keyword_copy, strlen(keyword_to_lookup) + 1, keyword_to_lookup, strlen(keyword_to_lookup));
             value->data.custom_property.name = keyword_copy;
             value->data.custom_property.fallback = NULL;
         }
@@ -188,10 +185,8 @@ CssValue* css_value_create_string(Pool* pool, const char* string) {
     if (len >= 2 && ((string[0] == '\'' && string[len-1] == '\'') ||
                      (string[0] == '"' && string[len-1] == '"'))) {
         // Allocate space for unquoted string
-        char* unquoted = (char*)pool_alloc(pool, len - 1);
+        char* unquoted = pool_dup_n(pool, string + 1, len - 2);
         if (unquoted) {
-            memcpy(unquoted, string + 1, len - 2);
-            unquoted[len - 2] = '\0';
             value->data.string = unquoted;
         } else {
             value->data.string = pool_strdup(pool, string);
@@ -445,11 +440,9 @@ CssValue* css_parse_generic_function(CssPropertyValueParser* parser,
     const char* clean_function_name = function_name;
     size_t function_name_len = strlen(function_name);
     if (function_name_len > 0 && function_name[function_name_len - 1] == '(') {
-        char* clean_name = (char*)pool_calloc(parser->pool, function_name_len);
+        char* clean_name = pool_dup_n(parser->pool, function_name, function_name_len - 1);
         if (clean_name) {
             // function tokens include the opening paren; CssFunction::name must not.
-            memcpy(clean_name, function_name, function_name_len - 1);
-            clean_name[function_name_len - 1] = '\0';
             clean_function_name = clean_name;
         }
     }
@@ -854,10 +847,8 @@ void css_property_value_parser_add_error(CssPropertyValueParser* parser, const c
     if (parser->error_count >= parser->error_capacity) return;
 
     // Copy error message
-    size_t len = strlen(message);
-    char* error_copy = (char*)pool_alloc(parser->pool, len + 1);
+    char* error_copy = pool_strdup(parser->pool, message);
     if (error_copy) {
-        str_copy(error_copy, len + 1, message, len);
         parser->error_messages[parser->error_count++] = error_copy;
     }
 }

@@ -55,8 +55,7 @@ static Item make_buffer_content_string_item(const char* str, int len,
     // hashed and retained every byte in the name pool before this fast path.
     String* s = (String*)heap_alloc((int)alloc_size, LMD_TYPE_STRING);
     if (!s) return ItemNull;
-    if (len > 0) memcpy(s->chars, str, (size_t)len);
-    s->chars[len] = '\0';
+    str_copy(s->chars, (size_t)len + 1, str, (size_t)len);
     s->len = (uint32_t)len;
     s->flags = 0;
     s->is_ascii = ascii_known ? (is_ascii ? 1 : 0)

@@ -14,10 +14,10 @@
 #include "../../runtime/transpiler.hpp"
 #include "../../../lib/log.h"
 #include "../../../lib/arraylist.hpp"
+#include "../../../lib/escape.h"
 #include "../../../lib/str.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/strview.h"
-#include "../../../lib/utf.h"
 #include <cstring>
 #include <cstdio>
 #include "../../../lib/mem.h"
@@ -59,116 +59,11 @@ extern "C" void bash_getopts_pop_state(void) {
 // Shared escape sequence processor (used by echo -e, printf %b, $'...')
 // ============================================================================
 
-static bool process_escape_at(const char* src, int len, int* cursor,
-        StrBuf* out, bool preserve_unknown) {
-    int i = *cursor;
-    if (src[i] != '\\' || i + 1 >= len) {
-        strbuf_append_char(out, src[i]);
-        *cursor = i + 1;
-        return true;
-    }
-    char escape = src[i + 1];
-    i += 2;
-    switch (escape) {
-        case 'a': strbuf_append_char(out, '\a'); break;
-        case 'b': strbuf_append_char(out, '\b'); break;
-        case 'e': case 'E': strbuf_append_char(out, '\x1B'); break;
-        case 'f': strbuf_append_char(out, '\f'); break;
-        case 'n': strbuf_append_char(out, '\n'); break;
-        case 'r': strbuf_append_char(out, '\r'); break;
-        case 't': strbuf_append_char(out, '\t'); break;
-        case 'v': strbuf_append_char(out, '\v'); break;
-        case '\\': strbuf_append_char(out, '\\'); break;
-        case '\'': strbuf_append_char(out, '\''); break;
-        case '"': strbuf_append_char(out, '"'); break;
-        case 'c': *cursor = i; return false; // stop processing
-        case '0': {
-            // octal: \0NNN (up to 3 octal digits after the 0)
-            int val = 0;
-            for (int j = 0; j < 3 && i < len && src[i] >= '0' && src[i] <= '7'; j++) {
-                val = val * 8 + (src[i] - '0');
-                i++;
-            }
-            strbuf_append_char(out, (char)(val & 0xFF));
-            break;
-        }
-        case 'x': {
-            // hex: \xHH (1-2 hex digits)
-            int val = 0;
-            int count = 0;
-            while (count < 2 && i < len && isxdigit((unsigned char)src[i])) {
-                int d = src[i];
-                if (d >= '0' && d <= '9') val = val * 16 + (d - '0');
-                else if (d >= 'a' && d <= 'f') val = val * 16 + (d - 'a' + 10);
-                else if (d >= 'A' && d <= 'F') val = val * 16 + (d - 'A' + 10);
-                count++;
-            }
-            if (count > 0) {
-                strbuf_append_char(out, (char)(val & 0xFF));
-            } else {
-                strbuf_append_str(out, "\\x");
-            }
-            break;
-        }
-        case 'u': {
-            // unicode: \uHHHH (exactly 4 hex digits)
-            uint32_t val = 0;
-            int count = 0;
-            while (count < 4 && i < len && isxdigit((unsigned char)src[i])) {
-                int d = src[i];
-                if (d >= '0' && d <= '9') val = val * 16 + (d - '0');
-                else if (d >= 'a' && d <= 'f') val = val * 16 + (d - 'a' + 10);
-                else if (d >= 'A' && d <= 'F') val = val * 16 + (d - 'A' + 10);
-                count++;
-            }
-            if (count > 0) {
-                char utf8[4];
-                int n = utf8_encode(val, utf8);
-                strbuf_append_str_n(out, utf8, n);
-            } else {
-                strbuf_append_str(out, "\\u");
-            }
-            break;
-        }
-        case 'U': {
-            // unicode: \UHHHHHHHH (up to 8 hex digits)
-            uint32_t val = 0;
-            int count = 0;
-            while (count < 8 && i < len && isxdigit((unsigned char)src[i])) {
-                int d = src[i];
-                if (d >= '0' && d <= '9') val = val * 16 + (d - '0');
-                else if (d >= 'a' && d <= 'f') val = val * 16 + (d - 'a' + 10);
-                else if (d >= 'A' && d <= 'F') val = val * 16 + (d - 'A' + 10);
-                count++;
-            }
-            if (count > 0) {
-                char utf8[4];
-                int n = utf8_encode(val, utf8);
-                strbuf_append_str_n(out, utf8, n);
-            } else {
-                strbuf_append_str(out, "\\U");
-            }
-            break;
-        }
-        default:
-            // unknown escape: output backslash + char literally
-            if (preserve_unknown) strbuf_append_char(out, '\\');
-            strbuf_append_char(out, escape);
-            break;
-    }
-    *cursor = i;
-    return true;
-}
-
 // process escape sequences in a string, appending to out
 // supports: \a \b \e \f \n \r \t \v \\ \' \" \0NNN \xHH \uHHHH \UHHHHHHHH \c (stop)
 // returns false if \c was encountered (stop processing)
 static bool process_escape_sequences(const char* src, int len, StrBuf* out) {
-    int cursor = 0;
-    while (cursor < len) {
-        if (!process_escape_at(src, len, &cursor, out, true)) return false;
-    }
-    return true;
+    return escape_append_bash_ansi(out, src, (size_t)len, ESCAPE_BASH_ANSI_PRINTF);
 }
 
 // public API: process escape sequences in a Lambda string, return new string
@@ -537,8 +432,9 @@ static int printf_format_pass(String* fmt, Item* args, int argc, int arg_idx, St
                 break;
             }
         } else if (fmt->chars[i] == '\\' && i + 1 < (int)fmt->len) {
-            int cursor = i;
-            if (!process_escape_at(fmt->chars, (int)fmt->len, &cursor, out, true)) {
+            size_t cursor = (size_t)i;
+            if (!escape_append_bash_ansi_at(out, fmt->chars, fmt->len, &cursor,
+                    ESCAPE_BASH_ANSI_PRINTF)) {
                 return arg_idx;
             }
             i = cursor - 1; // the loop increment advances past the escape
@@ -1170,8 +1066,7 @@ extern "C" Item bash_builtin_caller(Item* args, int argc) {
         }
         char buf[64];
         int copy_len = arg->len < (int)sizeof(buf) - 1 ? arg->len : (int)sizeof(buf) - 1;
-        memcpy(buf, arg->chars, copy_len);
-        buf[copy_len] = '\0';
+        str_copy(buf, sizeof(buf), arg->chars, copy_len);
         char* end = NULL;
         long parsed = strtol(buf, &end, 10);
         if (!end || *end != '\0' || parsed < 0) {
@@ -1505,9 +1400,7 @@ extern "C" Item bash_builtin_grep(Item* args, int argc) {
                 // skip trailing empty line (input ends with \n)
                 if (i == (int)s->len && i == line_start) break;
                 int line_len = i - line_start;
-                char* line_buf = (char*)mem_alloc(line_len + 1, MEM_CAT_BASH_RUNTIME);
-                memcpy(line_buf, s->chars + line_start, line_len);
-                line_buf[line_len] = '\0';
+                char* line_buf = mem_dup_n(s->chars + line_start, line_len, MEM_CAT_BASH_RUNTIME);
 
                 bool matched = (regexec(&regex, line_buf, 0, NULL, 0) == 0);
                 if (flag_v) matched = !matched;
@@ -2164,8 +2057,7 @@ static bool bash_find_in_path(const char* name, int len, char* out_path, int out
     for (int i = 0; i < len; i++) {
         if (name[i] == '/') {
             if (len < out_size) {
-                memcpy(out_path, name, len);
-                out_path[len] = '\0';
+                str_copy(out_path, out_size, name, len);
                 return access(out_path, X_OK) == 0;
             }
             return false;
@@ -2181,8 +2073,7 @@ static bool bash_find_in_path(const char* name, int len, char* out_path, int out
         if (dir_len + 1 + len + 1 < out_size) {
             memcpy(out_path, p, dir_len);
             out_path[dir_len] = '/';
-            memcpy(out_path + dir_len + 1, name, len);
-            out_path[dir_len + 1 + len] = '\0';
+            str_copy(out_path + dir_len + 1, (size_t)len + 1, name, len);
             if (access(out_path, X_OK) == 0) return true;
         }
         p = *colon ? colon + 1 : colon;
@@ -2718,8 +2609,7 @@ extern "C" Item bash_builtin_pushd(Item* args, int argc) {
     // pushd dir: push current dir, cd to new dir
     char path[4096];
     int copy_len = arg->len < (int)sizeof(path) - 1 ? arg->len : (int)sizeof(path) - 1;
-    memcpy(path, arg->chars, copy_len);
-    path[copy_len] = '\0';
+    str_copy(path, sizeof(path), arg->chars, copy_len);
 
     // check if directory exists
     struct stat st;

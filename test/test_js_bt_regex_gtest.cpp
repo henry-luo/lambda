@@ -25,7 +25,7 @@ namespace {
 // integer match offsets have already been copied out, so the result is stable.
 struct BtResult {
     int compiled;            // 1 if js_bt_compile succeeded, 0 if it returned NULL
-    int matched;             // js_bt_exec return value (1 match, 0 no match)
+    int matched;             // JsBtExecResult
     int group_count;         // capturing groups (excluding group 0)
     int starts[32];
     int ends[32];
@@ -365,7 +365,7 @@ TEST(BtAntiDos, NestedQuantifierTerminates) {
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - t0).count();
     EXPECT_EQ(r.compiled, 1);
-    EXPECT_EQ(r.matched, 0);           // budget bails to "no match"
+    EXPECT_EQ(r.matched, JS_BT_EXEC_RESOURCE_EXHAUSTED);
     EXPECT_LT(ms, 5000) << "step budget did not bound runtime";
 }
 
@@ -376,7 +376,7 @@ TEST(BtAntiDos, AlternationExplosionTerminates) {
     auto r = run_bt("(a|a)+$", input.c_str(), F());
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - t0).count();
-    EXPECT_EQ(r.matched, 0);
+    EXPECT_EQ(r.matched, JS_BT_EXEC_RESOURCE_EXHAUSTED);
     EXPECT_LT(ms, 5000);
 }
 
@@ -387,7 +387,7 @@ TEST(BtAntiDos, NestedGroupExplosionTerminates) {
     auto r = run_bt("(a*)*c", input.c_str(), F());
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - t0).count();
-    EXPECT_EQ(r.matched, 0);
+    EXPECT_EQ(r.matched, JS_BT_EXEC_RESOURCE_EXHAUSTED);
     EXPECT_LT(ms, 5000);
 }
 

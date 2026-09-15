@@ -59,6 +59,39 @@ static void view_geometry_pane_scroll(ViewBlock* block, float* out_x,
     if (out_y) *out_y = y;
 }
 
+View* view_geometry_tree_root(View* view) {
+    while (view && view->parent) {
+        view = static_cast<View*>(view->parent);
+    }
+    return view;
+}
+
+// Walk to the topmost ancestor (no parent). Used to detect cross-root
+// boundary moves (DocumentFragment, sub-document via iframe) without
+// conflating a detached root with DomDocument::root.
+DomNode* view_geometry_dom_tree_root(DomNode* node) {
+    while (node && node->parent) node = node->parent;
+    return node;
+}
+
+/**
+ * §7 unification (U-0): walk a layout View up to the nearest DOM element node.
+ * Layout views are themselves DomNode-derived, but text/anonymous views map
+ * to their containing element for event-target and style purposes.
+ */
+// The default cap prevents malformed retained parent links from making
+// interactive paths unbounded.
+DomElement* view_geometry_nearest_dom_element(DomNode* node,
+                                              uint32_t maximum_steps) {
+    uint32_t steps = 0;
+    while (node && (maximum_steps == 0 || steps < maximum_steps)) {
+        if (node->is_element()) return lam::dom_require_element(node);
+        node = node->parent;
+        steps++;
+    }
+    return nullptr;
+}
+
 RdtLogicalPoint view_geometry_node_document_origin(View* view) {
     return view_geometry_map_chain(
         view, {0.0f, 0.0f}, false, 1.0f, 0.0f);

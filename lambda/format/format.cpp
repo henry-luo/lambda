@@ -4,6 +4,7 @@
 #include "../../lib/mem.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/str.h"
+#include "../../lib/string.h"
 #include "format-markup.h"
 #include "../core/lambda-decimal.hpp"
 #include "../core/mark_reader.hpp"
@@ -147,13 +148,7 @@ String* format_mark(Pool* pool, Item root_item) {
     StrBuf* sb = strbuf_new();
     if (!sb) return NULL;
     print_item(sb, root_item, 0, NULL);
-    String* result = (String*)pool_alloc(pool, sizeof(String) + sb->length + 1);
-    if (result) {
-        result->len = (uint32_t)sb->length;
-        result->flags = 0;
-        result->is_ascii = str_is_ascii(sb->str, sb->length) ? 1 : 0;
-        memcpy(result->chars, sb->str, sb->length + 1);
-    }
+    String* result = string_from_strview(strview_init(sb->str, sb->length), pool);
     strbuf_free(sb);
     return result;
 }

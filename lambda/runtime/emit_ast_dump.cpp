@@ -704,8 +704,9 @@ int emit_ast_dump_file(const char* script_path) {
     size_t directory_length = directory ? strlen(directory) : 0;
     bool needs_separator = directory_length > 0 &&
         directory[directory_length - 1] != '/' && directory[directory_length - 1] != '\\';
-    char* import_directory = (char*)mem_alloc(directory_length + (needs_separator ? 2 : 1),
-        MEM_CAT_TEMP);
+    char* import_directory = mem_join2(directory, directory_length,
+                                       needs_separator ? "/" : "", needs_separator ? 1 : 0,
+                                       MEM_CAT_TEMP);
     if (!import_directory) {
         if (directory) mem_free(directory);
         runtime_cleanup(&runtime);
@@ -713,9 +714,6 @@ int emit_ast_dump_file(const char* script_path) {
         mem_free(source);
         return 1;
     }
-    if (directory_length) memcpy(import_directory, directory, directory_length);
-    if (needs_separator) import_directory[directory_length++] = '/';
-    import_directory[directory_length] = '\0';
     if (directory) mem_free(directory);
 
     Transpiler tp;
