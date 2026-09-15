@@ -420,10 +420,15 @@ Using a param in float arithmetic does not by itself change an unannotated
 the operation result promotes. A physical `D` carrier is likewise not evidence
 that the binding's semantic type is float.
 
-The refusal documented at
-[:14576–14579](../lambda/runtime/transpile-mir.cpp:14576) ("we no longer
-SPECULATE INT here") may be revisited only after this separation and the slow
-path are green. Land the policy change as a separate, separately measured phase.
+**Implemented scalar first slice, opt-in (2026-09-15).**
+`LAMBDA_MIR_DF12_SPECULATIVE_LIFT=1` permits otherwise-untyped arithmetic-only
+body evidence to select `int` as a raw entry shape. It is not an inferred source
+contract: the existing exact `int` wrapper guard remains the sole proof of the
+raw ABI, and a float, other scalar, or dynamic non-match executes the complete
+boxed slow body. Direct float call-site evidence continues to select `float`
+before this fallback rule. The flag preserves the prior policy by default while
+the Result-suite cost is measured; broader shapes remain deferred. [S1.6,
+D3.3.2v2, D8.3.1v2]
 
 ### DF13 — LambdaJS adopts the same planning matrix
 
@@ -956,12 +961,12 @@ startup-time cost is not mistaken for a surprise later.
 | **P2** | **Complete.** Exact inferred-shape predicate | `int` and `float` checks never cross-admit |
 | **P3** | **Complete.** Inferred guard failure enters the complete boxed slow body; async/task/proc paths excluded | Source-relative dual-entry tests and forced-GC sweep pass |
 | **P4** | **Complete.** Direct calls prove raw preconditions or route to `_b`; plans control elision | MIR size ratchet rebaselined with checked fixtures |
-| **P5** | **Deferred intentionally.** Broader speculative body-only inference is a separately measured optimization, not needed for correct dual entries | Future Result-suite work |
+| **P5** | **Partially implemented, opt-in scalar slice.** Bare arithmetic may select `int`; an exact wrapper guard retains the complete boxed fallback | `df12_speculative_lift` tiers/forced-GC gate; broader shapes await Result-suite measurement |
 | **P6** | **Complete core.** LambdaJS guard, slow fallback, mismatched-call retention, and mixed native/`Item` signatures | Dedicated JS compiler/coercion/guard tests pass; JS keeps boxed entries |
 | **P7** | **Complete.** Opt-in edge-local exact-guard dispatch, bounded invariant `while` guard chains, and straight-line selection CSE call raw variants and fall back to `_b` | `tg8_guard_hoist`, `tg8_guard_cse`, and focused tier/GC gates |
 
-P5 is deliberately outside the completed Stage 1 semantic feature: it changes
-optimization policy, not the source-correct fast/slow behavior.
+P5 remains outside the completed Stage 1 semantic feature: its opt-in scalar
+slice changes optimization policy, not the source-correct fast/slow behavior.
 
 ---
 
@@ -979,6 +984,10 @@ optimization policy, not the source-correct fast/slow behavior.
   only with a forced-boxed/source reference; never call the unboxed entry outside
   its precondition. Include `int` for inferred `float`, `float` for inferred
   `int`, strings, null, errors, and `i64`/`u64` values above 2^53.
+- **DF12 scalar lift.** With `LAMBDA_MIR_DF12_SPECULATIVE_LIFT=1`, prove an
+  arithmetic-only parameter selects the `int` raw body for an exact `int`, while
+  static and dynamic floats take `_b`'s boxed slow body and retain the same
+  result on T0, JIT, and forced-GC JIT.
 - **Closed-world collapse (DF15).** Verify that one exact visible call shape
   omits `_b`, while a deferred or outside-shape caller retains it; adding a later
   caller through whole-unit recompilation must restore the slow body, not create

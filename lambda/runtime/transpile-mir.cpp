@@ -918,6 +918,14 @@ static bool mir_tg8_guard_hoist_enabled(void) {
         strcmp(value, "false") != 0 && strcmp(value, "FALSE") != 0;
 }
 
+// DF12 is an inference-policy experiment, not a source-level contract. Keep
+// it separately gated while result-suite measurements establish its cost.
+static bool mir_df12_speculative_lift_enabled(void) {
+    const char* value = getenv("LAMBDA_MIR_DF12_SPECULATIVE_LIFT");
+    return value && value[0] && strcmp(value, "0") != 0 &&
+        strcmp(value, "false") != 0 && strcmp(value, "FALSE") != 0;
+}
+
 static bool mir_binder_raw_guard_hoist_eligible(AstCallNode* call,
         AstFuncNode* callee, const NativeFuncInfo* parent) {
     if (!mir_tg8_guard_hoist_enabled() || !call || !callee || !parent ||
@@ -31673,6 +31681,14 @@ static TypeId resolve_inferred_type(FnParamEvidence* ctx, bool is_proc) {
                 !(ctx->evidence & INFER_FLOAT)) {
             return LMD_TYPE_INT;
         }
+    }
+    // DF12: bare arithmetic selects Lambda's default numeric raw shape only
+    // when explicitly enabled. This is not a type claim: `_b` exact-guards
+    // the raw entry and sends every non-int Item through the complete boxed
+    // body, preserving the source operation for float and other operands.
+    if (mir_df12_speculative_lift_enabled() &&
+            (ctx->evidence & INFER_ARITH_USE)) {
+        return LMD_TYPE_INT;
     }
     // Only weak arithmetic evidence (no int/float literal, no typed-array index) → keep ANY.
     // We no longer SPECULATE INT here: that guess truncated float args at the call boundary
