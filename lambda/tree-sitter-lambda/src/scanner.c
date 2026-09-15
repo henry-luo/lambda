@@ -207,13 +207,16 @@ static bool classify_start(TSLexer *lexer, bool element_scope) {
     return true;
 }
 
-// Emit a guarded operator token, consuming its lexeme. `reject_next` names a
-// character that turns the operator into a different, UNGUARDED token (`++`,
-// `**`, `<=`, `.?`): those can only ever continue an expression, so they are
-// free to open a line and must be left to the internal lexer.
-static bool emit_op(TSLexer *lexer, enum TokenType type, int32_t reject_next) {
+// Emit a guarded operator token, consuming its lexeme. A rejected following
+// character turns it into a different, unguarded token (`++`, `**`, `<=`,
+// `<:`, `.?`): the internal lexer owns that longer spelling.
+static bool emit_op(TSLexer *lexer, enum TokenType type, int32_t reject_first,
+        int32_t reject_second) {
     lexer->advance(lexer, false);
-    if (reject_next && lexer->lookahead == reject_next) { return false; }
+    if ((reject_first && lexer->lookahead == reject_first) ||
+            (reject_second && lexer->lookahead == reject_second)) {
+        return false;
+    }
     lexer->mark_end(lexer);
     lexer->result_symbol = type;
     return true;
@@ -337,22 +340,24 @@ bool tree_sitter_lambda_external_scanner_scan(
     if (!saw_newline) {
         switch (c) {
             case '+':
-                if (valid_symbols[BIN_PLUS]) { return emit_op(lexer, BIN_PLUS, '+'); }
+                if (valid_symbols[BIN_PLUS]) { return emit_op(lexer, BIN_PLUS, '+', 0); }
                 break;
             case '-':
-                if (valid_symbols[BIN_MINUS]) { return emit_op(lexer, BIN_MINUS, 0); }
+                if (valid_symbols[BIN_MINUS]) { return emit_op(lexer, BIN_MINUS, 0, 0); }
                 break;
             case '*':
-                if (valid_symbols[BIN_STAR]) { return emit_op(lexer, BIN_STAR, '*'); }
+                if (valid_symbols[BIN_STAR]) { return emit_op(lexer, BIN_STAR, '*', 0); }
                 break;
             case '<':
-                if (valid_symbols[BIN_LT]) { return emit_op(lexer, BIN_LT, '='); }
+                // `<:` is the ordinary grammar token for S11.1.4v2, never a
+                // guarded `<` followed by an orphaned colon.
+                if (valid_symbols[BIN_LT]) { return emit_op(lexer, BIN_LT, '=', ':'); }
                 break;
             case '(':
-                if (valid_symbols[CALL_LPAREN]) { return emit_op(lexer, CALL_LPAREN, 0); }
+                if (valid_symbols[CALL_LPAREN]) { return emit_op(lexer, CALL_LPAREN, 0, 0); }
                 break;
             case '[':
-                if (valid_symbols[INDEX_LBRACKET]) { return emit_op(lexer, INDEX_LBRACKET, 0); }
+                if (valid_symbols[INDEX_LBRACKET]) { return emit_op(lexer, INDEX_LBRACKET, 0, 0); }
                 break;
             case '^':
                 // §3.6: `^` is followed either by nothing (propagate) or by a

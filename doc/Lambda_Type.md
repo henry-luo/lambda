@@ -88,6 +88,39 @@ element_type(int[])         // int
 let types = [int, string, bool]
 ```
 
+### Type Parameters and Binders
+
+An explicit type parameter is an ordinary required `type` value. It scopes to
+later parameter annotations, the return annotation, and the body:
+
+```lambda
+fn pick(T: type, value: T) T => value
+fn selected(T: type) type => T
+
+pick(int, 1)       // 1
+selected(int)      // int
+```
+
+`as T` binds the narrowest type admitted at a parameter-contract site, then
+uses of `T` check against that selected type. The binder can appear inside a
+parameter type expression, so it may bind a map field or an array element:
+
+```lambda
+fn same(a: number as T, b: T) T => b
+fn field_value(row: {id: int as I}, value: I) I => value
+fn element_value(xs: (int as E)[], value: E) E => value
+
+same(1, 2)                 // 2
+field_value({id: 1}, 2)    // 2
+element_value([1], 2)      // 2
+```
+
+Repeated `as T` sites in one signature join compatible selections; a later
+reference never infers a type. The name is unavailable before its first site.
+Binders are restricted to `fn`/`pn` parameter contracts: a return annotation
+may refer to `T`, but cannot introduce `as T`; type bodies and schemas do not
+yet admit binders. [S11.4.8, D3.1.4]
+
 ### Type Inspection
 
 ```lambda
@@ -154,6 +187,23 @@ let value = expression_returning_any() ^ { ^ }
 let clean = expression_returning_any() ^ { default }
 // clean: any \ error — the failure path never reaches the binding
 ```
+
+### Subtype Test (`<:`)
+
+`<:` compares two type values. `A <: B` is true exactly when every value
+admitted by `A` is also admitted by `B`; it does not convert values or test a
+runtime value as `is` does.
+
+```lambda
+int <: number                     // true
+number <: int                     // false
+int <: (int | string)             // true
+{a: int, b: int} <: {a: int}      // true
+int[] <: number[]                 // true
+```
+
+Non-type operands are errors. Function type operands are also rejected until
+their parameter and result variance is specified. [S11.1.4v2, D3.2.5v2]
 
 The schema validator historically spells its catch-all *valid data* pattern as
 `any`; in validation position that pattern intentionally means
@@ -1191,8 +1241,9 @@ let empty: int[] = []          // Disambiguate empty array type
 // Recursive types need annotation
 type Node = {value: int, next: Node?}
 
-// Complex generics may need hints
-fn identity<T>(x: T) T => x    // Generic requires annotation
+// Relational parameter types use an explicit type parameter or binder
+fn identity(T: type, x: T) T => x
+fn same_number(x: number as T, y: T) T => y
 ```
 
 ---

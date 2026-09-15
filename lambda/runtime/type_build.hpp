@@ -46,6 +46,12 @@ AstBinaryNode* build_registered_binary_type_from_span(Transpiler* tp,
 AstNode* alloc_ast_node_from_span(Transpiler* tp, AstNodeType node_type,
         SourceSpan span, size_t size);
 
+// Construct the level-1 parameter-contract binder suffix (`bound as T`).
+// The builder owns scope registration because later parameter annotations must
+// resolve T before the surrounding parameter reduction completes.
+AstNode* build_binder_type_from_parts(Transpiler* tp, SourceSpan span,
+        AstNode* base, StrView name);
+
 // Evaluate a literal AST node to the Item it denotes (compile-time constants
 // only). Used for bracket-type positions and range bounds.
 bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out);

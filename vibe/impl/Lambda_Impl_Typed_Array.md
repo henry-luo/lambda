@@ -20,7 +20,7 @@
 - **Formal authority:** **S11.1.1v2** (homogeneous arrays and rank),
   **S11.4.1v3** (checked construction and mutation), **S7.7.2** (checked
   boundaries), **S7.10.6** (mutator errors), **S9.1.1–S9.2.2** (value/COW and
-  `var` borrowing), **D3.1.1v3** (the full `Type*` graph is authoritative),
+  `var` borrowing), **D3.1.1v4** (the full `Type*` graph is authoritative),
   **D3.2.4v3** (named-layout reification), and **D3.3.3v3** (a certificate is
   not inferred narrowing).
 

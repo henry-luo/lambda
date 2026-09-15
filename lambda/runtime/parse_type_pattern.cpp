@@ -50,6 +50,14 @@ void fail(Lexer* lx, const char* what) {
         "invalid type pattern");
 }
 
+void fail_code(Lexer* lx, LambdaErrorCode code, const char* what) {
+    if (lx->failed) return;
+    lx->failed = true;
+    size_t left = (size_t)(lx->end - lx->p);
+    log_error("type-pattern: %s at '%.*s'", what, (int)(left > 24 ? 24 : left), lx->p);
+    record_semantic_error_span(lx->tp, lx->origin, code, "%s", what);
+}
+
 void skip_space(Lexer* lx) {
     lambda_lex_skip_space(&lx->p, lx->end);
 }
@@ -116,6 +124,7 @@ bool word_is(StrView w, const char* s) {
 }
 
 AstNode* parse_union(Lexer* lx);
+AstNode* parse_binder(Lexer* lx);
 AstNode* parse_exclude(Lexer* lx);
 AstNode* parse_intersect(Lexer* lx);
 AstNode* parse_unary(Lexer* lx);
@@ -509,7 +518,7 @@ AstNode* parse_array_type(Lexer* lx) {
     if (!at(lx, ']')) {
         do {
             if (count >= 64) { fail(lx, "too many bracket-type positions"); return NULL; }
-            AstNode* item = parse_union(lx);
+        AstNode* item = parse_binder(lx);
             if (!item) { return NULL; }
             if (count) { items[count - 1]->next = item; }
             else { ast_node->item = item; }
@@ -596,7 +605,7 @@ AstNamedNode* parse_field(Lexer* lx) {
     if (!field.length) { fail(lx, "expected a field name"); return NULL; }
     bool field_optional = eat_optional_field_marker(lx);
     if (!eat(lx, ':')) { fail(lx, "expected ':' after a field name"); return NULL; }
-    AstNode* field_type = parse_union(lx);
+    AstNode* field_type = parse_binder(lx);
     if (!field_type) { return NULL; }
     if (field_optional) {
         field_type = make_optional_field_type(lx, field_type);
@@ -648,7 +657,7 @@ AstNode* parse_map_type(Lexer* lx) {
 
 // `(T)` groups (unwrapped, as build_list_type does); `(T, U)` is a tuple type.
 AstNode* parse_paren_type(Lexer* lx) {
-    AstNode* first = parse_union(lx);
+    AstNode* first = parse_binder(lx);
     if (!first) { return NULL; }
     if (eat(lx, ')')) { return first; }  // grouping — single element unwraps
 
@@ -663,7 +672,7 @@ AstNode* parse_paren_type(Lexer* lx) {
 
     AstNode* prev = first;
     while (eat(lx, ',')) {
-        AstNode* next = parse_union(lx);
+        AstNode* next = parse_binder(lx);
         if (!next) { return NULL; }
         prev->next = next;
         prev = next;
@@ -699,7 +708,7 @@ AstNode* parse_element_type(Lexer* lx) {
         bool field_optional = field.length ? eat_optional_field_marker(lx) : false;
         if (!field.length || !at(lx, ':')) { lx->p = save; break; }
         lx->p++;  // ':'
-        AstNode* field_type = parse_union(lx);
+        AstNode* field_type = parse_binder(lx);
         if (!field_type) { return NULL; }
         if (field_optional) {
             field_type = make_optional_field_type(lx, field_type);
@@ -736,7 +745,7 @@ AstNode* parse_element_type(Lexer* lx) {
         AstNode* prev = NULL;
         do {
             if (at(lx, '>')) { break; }
-            AstNode* item = parse_union(lx);
+            AstNode* item = parse_binder(lx);
             if (!item) { return NULL; }
             if (!prev) { content->item = item; }
             else { prev->next = item; }
@@ -772,7 +781,7 @@ AstNode* parse_fn_type(Lexer* lx) {
             param->kind = TYPE_KIND_PARAM;
             param->is_optional = eat(lx, '?');
             if (eat(lx, ':')) {
-                AstNode* declared = parse_union(lx);
+                AstNode* declared = parse_binder(lx);
                 if (!declared) { return NULL; }
                 apply_declared_param_type(lx->tp, param, declared->type);
             }
@@ -792,7 +801,7 @@ AstNode* parse_fn_type(Lexer* lx) {
     skip_space(lx);
     if (lx->p < lx->end && *lx->p != ',' && *lx->p != ')' && *lx->p != ']' &&
             *lx->p != '}' && *lx->p != '>' && *lx->p != '|' && *lx->p != '&') {
-        AstNode* returned = parse_union(lx);
+        AstNode* returned = parse_binder(lx);
         if (!returned) { return NULL; }
         set_fn_return_contract(fn_type, returned->type, true);
         fn_type->returned = returned->type;
@@ -854,11 +863,23 @@ AstNode* parse_primary(Lexer* lx) {
         return (AstNode*)node;
     }
 
+    NameEntry* entry = lookup_name(lx->tp, w);
+    if (entry && entry->is_binder && entry->binder) {
+        TypeBoundRef* ref = (TypeBoundRef*)alloc_type_kind(lx->tp->pool,
+            TYPE_KIND_BOUND_REF, sizeof(TypeBoundRef));
+        ref->slot = entry->binder_slot;
+        ref->bound = entry->binder->bound;
+        AstTypeNode* node = (AstTypeNode*)new_node(lx, AST_NODE_TYPE,
+            sizeof(AstTypeNode));
+        node->type = (Type*)ref;
+        return (AstNode*)node;
+    }
+
     // a name in type position is a reference to a declared type, shaped like
     // build_identifier's resolved path so the transpiler's alias handling works
     AstIdentNode* ident = (AstIdentNode*)new_node(lx, AST_NODE_IDENT, sizeof(AstIdentNode));
     ident->name = name_pool_create_strview(lx->tp->name_pool, w);
-    ident->entry = lookup_name(lx->tp, w);
+    ident->entry = entry;
     if (ident->entry && ident->entry->node && ident->entry->node->type) {
         AstNode* def = ident->entry->node;
         ident->type = def->type;
@@ -1062,6 +1083,25 @@ AstNode* parse_union(Lexer* lx) {
     return left;
 }
 
+// `as T` is the loosest type suffix: parse the complete union first, then
+// register its name before the next parameter annotation is reduced.  The
+// parser deliberately accepts the suffix only once; anything after T is
+// trailing input instead of silently acquiring a different precedence.
+AstNode* parse_binder(Lexer* lx) {
+    AstNode* base = parse_union(lx);
+    if (!base) return NULL;
+    skip_space(lx);
+    StrView keyword = peek_word(lx);
+    if (!word_is(keyword, "as")) return base;
+    lx->p += keyword.length;
+    StrView name = take_word(lx);
+    if (!name.length) {
+        fail(lx, "expected a binder name after 'as'");
+        return NULL;
+    }
+    return build_binder_type_from_parts(lx->tp, lx->origin, base, name);
+}
+
 // Declaration return types deliberately admit only named/base atoms plus one
 // occurrence suffix. Keeping that boundary explicit prevents a function body
 // `{...}` or a nested fn/map type from being swallowed by the scanner token.
@@ -1105,6 +1145,11 @@ AstNode* parse_return_type_pattern(Lexer* lx) {
         left = (AstNode*)build_registered_binary_type_from_span(lx->tp, lx->origin,
             left, right, left->type, right->type, op, {op_text, 1});
     }
+    skip_space(lx);
+    if (word_is(peek_word(lx), "as")) {
+        fail_code(lx, ERR_BINDER_IN_RETURN, "a binder is not allowed in a return type");
+        return NULL;
+    }
     return left;
 }
 
@@ -1142,7 +1187,7 @@ AstNode* parse_view_pattern(Lexer* lx) {
 AstNode* parse_type_pattern_text_span(Transpiler* tp, const char* begin,
         const char* end, SourceSpan span) {
     Lexer lx = {tp, begin, end, span, false};
-    AstNode* node = parse_union(&lx);
+    AstNode* node = parse_binder(&lx);
     if (!node || lx.failed) { return NULL; }
     skip_space(&lx);
     if (lx.p != lx.end) { fail(&lx, "trailing input"); return NULL; }
@@ -1180,6 +1225,19 @@ AstNode* parse_return_type_text_span(Transpiler* tp, const char* begin,
     if (lx.p != lx.end) { fail(&lx, "trailing return contract input"); return NULL; }
     return build_function_return_contract_node_from_span(tp, span,
         return_contract_type(ok), error_type, can_raise);
+}
+
+AstNode* parse_return_value_type_text_span(Transpiler* tp, const char* begin,
+        const char* end, SourceSpan span) {
+    Lexer lx = {tp, begin, end, span, false};
+    AstNode* node = parse_return_type_pattern(&lx);
+    if (!node || lx.failed) return NULL;
+    skip_space(&lx);
+    if (lx.p != lx.end) {
+        fail(&lx, "trailing return contract input");
+        return NULL;
+    }
+    return node;
 }
 
 AstNode* parse_view_pattern_text_span(Transpiler* tp, const char* begin,

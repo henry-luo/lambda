@@ -2756,6 +2756,97 @@ static bool validate_lambda_argument_limit(Transpiler* tp,
 
 static void direct_note_place_copy_var_borrow(SourceSpan span, AstNode* argument);
 
+static TypeBinder* static_contract_binder_site(Type* type, int depth = 0) {
+    if (!type || depth > 64 || type->type_id != LMD_TYPE_TYPE) return NULL;
+    if (type->kind == TYPE_KIND_BINDER) return (TypeBinder*)type;
+    if (type->kind == TYPE_KIND_UNARY) {
+        return static_contract_binder_site(((TypeUnary*)type)->operand, depth + 1);
+    }
+    if (type->kind == TYPE_KIND_CONSTRAINED) {
+        return static_contract_binder_site(((TypeConstrained*)type)->base, depth + 1);
+    }
+    return NULL;
+}
+
+static Type* static_contract_resolve_binder(Type* type, Type** env, int depth = 0) {
+    if (!type || depth > 64 || type->type_id != LMD_TYPE_TYPE) return type;
+    if (type->kind == TYPE_KIND_BINDER) return ((TypeBinder*)type)->bound;
+    if (type->kind == TYPE_KIND_BOUND_REF) {
+        TypeBoundRef* ref = (TypeBoundRef*)type;
+        return env && env[ref->slot] ? env[ref->slot] : ref->bound;
+    }
+    return type;
+}
+
+static Type* static_binder_argument_type(AstNode* argument, TypeBinder* binder) {
+    if (!argument || !argument->type || !binder) return NULL;
+    if (binder->bound == &TYPE_TYPE) {
+        if (!ast_is_explicit_type_value(argument)) return NULL;
+        return boundary_unwrap_type(argument->type);
+    }
+    return boundary_unwrap_type(argument->type);
+}
+
+static Type* static_binder_join(Type* left, Type* right) {
+    if (!left || !right) return NULL;
+    if (left == right) return left;
+    LambdaNumericKind left_kind = lambda_numeric_kind_from_type(left);
+    LambdaNumericKind right_kind = lambda_numeric_kind_from_type(right);
+    if (left_kind != LAMBDA_NUM_INVALID && right_kind != LAMBDA_NUM_INVALID) {
+        LambdaNumericKind joined = lambda_numeric_semantic_join(
+            lambda_numeric_enter_semantic_domain(left_kind),
+            lambda_numeric_enter_semantic_domain(right_kind));
+        return joined == LAMBDA_NUM_INVALID ? NULL : lambda_numeric_type_from_kind(joined);
+    }
+    if (lambda_type_contract_semantically_compatible(right, left)) return left;
+    if (lambda_type_contract_semantically_compatible(left, right)) return right;
+    return NULL;
+}
+
+static bool static_bind_argument(Type** env, bool* written, TypeBinder* binder,
+        AstNode* argument) {
+    if (!env || !written || !binder || binder->slot >= LAMBDA_MAX_FUNCTION_ARGS) {
+        return false;
+    }
+    Type* candidate = static_binder_argument_type(argument, binder);
+    if (!candidate) return false;
+    if (!written[binder->slot]) {
+        env[binder->slot] = candidate;
+        written[binder->slot] = true;
+        return true;
+    }
+    Type* joined = static_binder_join(env[binder->slot], candidate);
+    if (!joined) return false;
+    env[binder->slot] = joined;
+    return true;
+}
+
+bool lambda_ast_collect_static_binder_env(AstCallNode* call,
+        Type** env_out, uint16_t env_count) {
+    if (!call || !env_out || !call->function || !call->function->type ||
+            call->function->type->type_id != LMD_TYPE_FUNC) {
+        return false;
+    }
+    TypeFunc* func_type = (TypeFunc*)call->function->type;
+    if (!func_type->binder_count || func_type->binder_count > env_count ||
+            func_type->binder_count > LAMBDA_MAX_FUNCTION_ARGS) {
+        return false;
+    }
+    bool written[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    TypeParam* param = func_type->param;
+    AstNode* argument = call->argument;
+    for (; param && argument; param = param->next, argument = argument->next) {
+        TypeBinder* binder = param->binder ? param->binder :
+            static_contract_binder_site(parameter_boundary_type(param));
+        if (!binder) continue;
+        if (!static_bind_argument(env_out, written, binder, argument)) return false;
+    }
+    for (uint16_t i = 0; i < func_type->binder_count; i++) {
+        if (!written[i] || !env_out[i]) return false;
+    }
+    return true;
+}
+
 bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         SourceSpan diagnostic_span, int arg_count) {
     if (!call || !call->function || !call->function->type ||
@@ -2770,6 +2861,36 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
     NameEntry* var_arg_root_entries[64];
     int var_arg_root_count = 0;
     bool parameter_short_circuits_error = false;
+    Type* binder_env[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    bool binder_written[LAMBDA_MAX_FUNCTION_ARGS] = {};
+
+    // Resolve every binder site before checking references. This makes a
+    // same-name multi-site join independent of parameter order (TG13v2).
+    TypeParam* binder_param = func_type->param;
+    AstNode* binder_arg = call->argument;
+    int binder_index = 0;
+    for (; binder_param && binder_arg;
+            binder_param = binder_param->next, binder_arg = binder_arg->next,
+            binder_index++) {
+        TypeBinder* binder = binder_param->binder ? binder_param->binder :
+            static_contract_binder_site(parameter_boundary_type(binder_param));
+        if (!binder) continue;
+        if (!static_bind_argument(binder_env, binder_written, binder, binder_arg)) {
+            int binder_line = (int)lambda_source_span_start_point(tp->source,
+                diagnostic_span).row + 1;
+            record_type_error_code(tp, binder_line, ERR_ARGUMENT_TYPE_MISMATCH,
+                binder->bound == &TYPE_TYPE
+                    ? "argument %d must be an explicit type value"
+                    : "argument %d cannot establish binder '%.*s'",
+                binder_index + 1,
+                binder->name && binder->name->name ? (int)binder->name->name->len : 0,
+                binder->name && binder->name->name ? binder->name->name->chars : "");
+            if (!should_continue_transpiling(tp)) {
+                call->type = &TYPE_ERROR;
+                return false;
+            }
+        }
+    }
 
     // A statically resolved function cannot manufacture missing values. The
     // validator is shared by direct calls and start(pn, literal_args), keeping
@@ -2804,6 +2925,16 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
     }
 
     while (arg && expected_param) {
+        TypeBinder* binder_site = expected_param->binder ? expected_param->binder :
+            static_contract_binder_site(parameter_boundary_type(expected_param));
+        if (expected_param->binder && !ast_is_explicit_type_value(arg)) {
+            record_type_error_code(tp, line, ERR_ARGUMENT_TYPE_MISMATCH,
+                "argument %d must be an explicit type value", arg_index + 1);
+            if (!should_continue_transpiling(tp)) {
+                call->type = &TYPE_ERROR;
+                return false;
+            }
+        }
         if (expected_param->is_var_param) {
             AstIdentNode* root = compound_root_ident(arg);
             if (!root || !root->entry || !root->entry->is_mutable) {
@@ -2871,14 +3002,18 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
             }
         }
         Type* full_type = parameter_boundary_type(expected_param);
+        full_type = static_contract_resolve_binder(full_type, binder_env);
+        if (binder_site) full_type = binder_site->bound;
         if (expected_param->contract_type &&
                 !lambda_type_accepts_error(expected_param->contract_type) &&
                 lambda_type_accepts_error(arg->type)) {
             parameter_short_circuits_error = true;
         }
-        StaticBoundaryResult relation = lambda_type_accepts_error(arg->type)
-            ? static_parameter_boundary_relation(arg->type, full_type)
-            : static_boundary_relation(arg->type, full_type);
+        StaticBoundaryResult relation = expected_param->binder
+            ? STATIC_BOUNDARY_PROVEN
+            : (lambda_type_accepts_error(arg->type)
+                ? static_parameter_boundary_relation(arg->type, full_type)
+                : static_boundary_relation(arg->type, full_type));
         bool compatible = relation != STATIC_BOUNDARY_REJECTED;
         if (!compatible) compatible = typed_array_argument_compatible(arg, full_type);
         if (arg->type && !compatible) {
@@ -2897,6 +3032,16 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         arg = arg->next;
         expected_param = expected_param->next;
         arg_index++;
+    }
+    if (func_type->binder_count) {
+        Type* result_contract = function_success_result_type(func_type);
+        Type* resolved_result = static_contract_resolve_binder(result_contract,
+            binder_env);
+        if (resolved_result && resolved_result != result_contract) {
+            call->type = func_type->can_raise && func_type->error_type
+                ? lambda_type_union_normalized(tp->pool, resolved_result,
+                    func_type->error_type) : resolved_result;
+        }
     }
     if (parameter_short_circuits_error) {
         call->type = lambda_type_union_normalized(tp->pool, call->type, &TYPE_ERROR);
@@ -3038,6 +3183,13 @@ AstNode* build_identifier_from_span(Transpiler* tp, SourceSpan span) {
     else {
         log_debug("found identifier %.*s", (int)entry->name->len, entry->name->chars);
         ast_node->entry = entry;
+        if (entry->is_binder && entry->binder) {
+            // A binder read is a first-class runtime type value. Its contained
+            // type remains the written bound in type position (TG2/TG9), while
+            // expression position exposes the `type` carrier from the frame.
+            ast_node->type = &TYPE_TYPE;
+            return (AstNode*)ast_node;
+        }
         // CW24v2 phase 2: every resolved use of a place-copy binding counts as
         // a read; mutation notes compensate their own target-root read below.
         if (entry->is_place_copy && entry->place_copy_reads < UINT16_MAX) {
@@ -3984,6 +4136,7 @@ bool lambda_binary_operator_from_spelling(StrView op, Operator* op_out) {
     else if (strview_equal(&op, "&")) { *op_out = OPERATOR_INTERSECT; }
     else if (strview_equal(&op, "!")) { *op_out = OPERATOR_EXCLUDE; }
     else if (strview_equal(&op, "is")) { *op_out = OPERATOR_IS; }
+    else if (strview_equal(&op, "<:")) { *op_out = OPERATOR_SUBTYPE; }
     else if (strview_equal(&op, "in")) { *op_out = OPERATOR_IN; }
     else if (strview_equal(&op, "at")) { *op_out = OPERATOR_AT; }
     else { return false; }
@@ -4188,6 +4341,7 @@ static bool ast_is_explicit_type_value(AstNode* node) {
         AstIdentNode* ident = (AstIdentNode*)node;
         AstNode* declaration = ident->entry ? ident->entry->node : NULL;
         return declaration && (declaration->node_type == AST_NODE_TYPE_STAM ||
+            declaration->node_type == AST_NODE_OBJECT_TYPE ||
             (declaration->node_type == AST_NODE_VARIABLE_DECLARATOR &&
                 ((AstDeclaratorNode*)declaration)->is_type_definition) ||
             declaration->node_type == AST_NODE_STRING_PATTERN ||
@@ -4196,6 +4350,22 @@ static bool ast_is_explicit_type_value(AstNode* node) {
     default:
         return false;
     }
+}
+
+static bool ast_may_evaluate_to_type_value(AstNode* node) {
+    node = boundary_unwrap_primary(node);
+    if (!node) return false;
+    if (ast_is_explicit_type_value(node)) return true;
+    Type* type = node->type;
+    // A `type`-typed parameter/binder is checked at its call boundary. Open
+    // values defer this same check to fn_subtype at runtime (S11.1.4).
+    return type == &TYPE_TYPE || (type && type->type_id == LMD_TYPE_ANY);
+}
+
+static Type* ast_explicit_type_value_contract(AstNode* node) {
+    node = boundary_unwrap_primary(node);
+    if (!node || !ast_is_explicit_type_value(node)) return NULL;
+    return type_field_unwrap_simple_decl(node->type);
 }
 
 // `|`, `&` and `!` are all type-set operators when both operands are types.
@@ -8301,6 +8471,12 @@ static void direct_finalize_type_alias(Transpiler* tp, AstDeclaratorNode* alias)
 
 static AstNode* direct_constrained_type(Transpiler* tp, SourceSpan span,
         AstNode* base, AstNode* constraint) {
+    if (base && base->type && base->type->type_id == LMD_TYPE_TYPE &&
+            base->type->kind == TYPE_KIND_BINDER) {
+        record_semantic_error_span(tp, span, ERR_BINDER_TRAILING_THAT,
+            "a binder must follow the complete parameter contract");
+        return direct_type_error_from_span(tp, span);
+    }
     AstConstrainedTypeNode* node = (AstConstrainedTypeNode*)alloc_ast_node_from_span(
         tp, AST_NODE_CONSTRAINED_TYPE, span, sizeof(AstConstrainedTypeNode));
     node->base = base;
@@ -8315,6 +8491,111 @@ static AstNode* direct_constrained_type(Transpiler* tp, SourceSpan span,
     arraylist_append(tp->type_list, node->type);
     type->type_index = tp->type_list->length - 1;
     return (AstNode*)node;
+}
+
+static void direct_append_binder_name(Transpiler* tp, NameEntry* entry) {
+    if (!tp || !tp->current_scope || !entry) return;
+    if (!tp->current_scope->first) tp->current_scope->first = entry;
+    else tp->current_scope->last->next = entry;
+    tp->current_scope->last = entry;
+}
+
+typedef struct DirectBinderForwardRef {
+    String* name;
+    bool found;
+    int depth;
+} DirectBinderForwardRef;
+
+static void direct_find_forward_binder_ref(AstNode* node, AstNode* parent,
+        void* opaque) {
+    (void)parent;
+    DirectBinderForwardRef* search = (DirectBinderForwardRef*)opaque;
+    if (!node || !search || search->found || search->depth++ > 64) return;
+    if (node->node_type == AST_NODE_IDENT) {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        if (!ident->entry && ident->name && search->name &&
+                ident->name->len == search->name->len &&
+                memcmp(ident->name->chars, search->name->chars,
+                    ident->name->len) == 0) {
+            search->found = true;
+            return;
+        }
+    }
+    ast_visit_core_children(node, direct_find_forward_binder_ref, search);
+    search->depth--;
+}
+
+static bool direct_scope_has_forward_binder_ref(NameScope* scope, String* name) {
+    if (!scope || !name) return false;
+    for (NameEntry* entry = scope->first; entry; entry = entry->next) {
+        if (!entry->node || entry->node->node_type != AST_NODE_PARAM) continue;
+        TypeParam* parameter = (TypeParam*)entry->node->type;
+        if (!parameter || !parameter->type_expr) continue;
+        DirectBinderForwardRef search = {name, false, 0};
+        direct_find_forward_binder_ref(parameter->type_expr, NULL, &search);
+        if (search.found) return true;
+    }
+    return false;
+}
+
+AstNode* build_binder_type_from_parts(Transpiler* tp, SourceSpan span,
+        AstNode* base, StrView name) {
+    Type* bound = base && base->type ? unwrap_simple_type_type(base->type) : NULL;
+    if (!tp || !bound || !name.length) return direct_type_error_from_span(tp, span);
+
+    if (lookup_base_type_name(tp, name)) {
+        record_semantic_error_span(tp, span, ERR_BINDER_COLLISION,
+            "binder '%.*s' conflicts with a base type", (int)name.length, name.str);
+        return direct_type_error_from_span(tp, span);
+    }
+
+    String* pooled = name_pool_create_strview(tp->name_pool, name);
+    NameEntry* prior = lookup_name_in_current_scope(tp, pooled);
+    TypeBinder* canonical = NULL;
+    if (prior) {
+        if (!prior->is_binder || !prior->binder) {
+            record_semantic_error_span(tp, span, ERR_BINDER_COLLISION,
+                "binder '%.*s' conflicts with an existing name", (int)name.length,
+                name.str);
+            return direct_type_error_from_span(tp, span);
+        }
+        canonical = prior->binder;
+        if (!lambda_type_contract_semantically_compatible(canonical->bound, bound) ||
+                !lambda_type_contract_semantically_compatible(bound, canonical->bound)) {
+            record_semantic_error_span(tp, span, ERR_BINDER_BOUND_MISMATCH,
+                "binder sites for '%.*s' must share one bound", (int)name.length,
+                name.str);
+            return direct_type_error_from_span(tp, span);
+        }
+    }
+    if (!canonical && direct_scope_has_forward_binder_ref(tp->current_scope, pooled)) {
+        record_semantic_error_span(tp, span, ERR_BINDER_FORWARD_REF,
+            "binder '%.*s' must be introduced before it is referenced",
+            (int)name.length, name.str);
+        return direct_type_error_from_span(tp, span);
+    }
+
+    TypeBinder* binder = (TypeBinder*)alloc_type_kind(tp->pool,
+        TYPE_KIND_BINDER, sizeof(TypeBinder));
+    binder->bound = bound;
+    binder->slot = canonical ? canonical->slot : tp->current_scope->binder_count++;
+    binder->name = (Name*)pool_calloc(tp->pool, sizeof(Name));
+    binder->name->name = pooled;
+
+    if (!canonical) {
+        NameEntry* entry = (NameEntry*)pool_calloc(tp->pool, sizeof(NameEntry));
+        entry->name = pooled;
+        entry->scope = tp->current_scope;
+        entry->is_binder = true;
+        entry->binder_slot = binder->slot;
+        entry->binder = binder;
+        direct_append_binder_name(tp, entry);
+    }
+
+    AstNode* node = alloc_ast_node_from_span(tp, AST_NODE_TYPE, span,
+        sizeof(AstNode));
+    node->type = (Type*)binder;
+    return node;
 }
 
 static AstNode* direct_pattern_definition(Transpiler* tp,
@@ -8446,8 +8727,8 @@ static Type* direct_binary_result_type(Transpiler* tp, Operator op,
     Type* lt = left && left->type ? left->type : &TYPE_ANY;
     Type* rt = right && right->type ? right->type : &TYPE_ANY;
     if (op == OPERATOR_TO) return &TYPE_RANGE;
-    if (op == OPERATOR_EQ || op == OPERATOR_NE ||
-            op == OPERATOR_IS || op == OPERATOR_IN || op == OPERATOR_AT) {
+    if (op == OPERATOR_EQ || op == OPERATOR_NE || op == OPERATOR_IS ||
+            op == OPERATOR_SUBTYPE || op == OPERATOR_IN || op == OPERATOR_AT) {
         return &TYPE_BOOL;
     }
     if (op == OPERATOR_LT || op == OPERATOR_LE || op == OPERATOR_GT ||
@@ -8594,6 +8875,24 @@ AstNode* build_binary_node_from_parts(Transpiler* tp, SourceSpan span,
         // spelling check after the direct parser has already built both sides.
         record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
             "operator `or` cannot combine type values; use `|` to form a union type");
+        node->type = &TYPE_ERROR;
+        return (AstNode*)node;
+    }
+    if (node->op == OPERATOR_SUBTYPE &&
+            (!ast_may_evaluate_to_type_value(left) ||
+             !ast_may_evaluate_to_type_value(right))) {
+        record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
+            "operator `<:` requires type values");
+        node->type = &TYPE_ERROR;
+        return (AstNode*)node;
+    }
+    if (node->op == OPERATOR_SUBTYPE &&
+            ((ast_explicit_type_value_contract(left) &&
+              ast_explicit_type_value_contract(left)->type_id == LMD_TYPE_FUNC) ||
+             (ast_explicit_type_value_contract(right) &&
+              ast_explicit_type_value_contract(right)->type_id == LMD_TYPE_FUNC))) {
+        record_semantic_error_span(tp, span, ERR_INVALID_OPERATION,
+            "operator `<:` does not support function types until variance is specified");
         node->type = &TYPE_ERROR;
         return (AstNode*)node;
     }
@@ -9525,8 +9824,39 @@ AstNamedNode* build_param_from_parts(Transpiler* tp, SourceSpan span,
     param_type->is_optional = optional;
     param_type->is_var_param = is_var;
     param_type->default_value = default_value;
+    param_type->type_expr = type_expr;
     param->type = (Type*)param_type;
     lambda_ast_register_name(tp, param);
+    NameEntry* binder_entry = lookup_name_in_current_scope(tp, param->name);
+    if (declared == &TYPE_TYPE && binder_entry) {
+        // `T: type` is the explicit spelling of a binder site. Registering it
+        // on the ordinary parameter entry preserves source-order lookup while
+        // keeping T out of value-frame storage (D3.3.3v3).
+        TypeBinder* binder = (TypeBinder*)alloc_type_kind(tp->pool,
+            TYPE_KIND_BINDER, sizeof(TypeBinder));
+        binder->bound = &TYPE_TYPE;
+        binder->slot = tp->current_scope->binder_count++;
+        binder->name = (Name*)pool_calloc(tp->pool, sizeof(Name));
+        binder->name->name = param->name;
+        binder->parameter_name = param->name;
+        param_type->binder = binder;
+        binder_entry->is_binder = true;
+        binder_entry->binder_slot = binder->slot;
+        binder_entry->binder = binder;
+    }
+    if (declared && declared->type_id == LMD_TYPE_TYPE &&
+            declared->kind == TYPE_KIND_BINDER) {
+        TypeBinder* binder = (TypeBinder*)declared;
+        binder->parameter_name = param->name;
+        NameEntry* entry = lookup_name_in_current_scope(tp, binder->name->name);
+        if (entry && entry->is_binder && entry->binder &&
+                entry->binder->slot == binder->slot) {
+            // The first site owns diagnostics; later same-name sites retain
+            // their independent contract node but share the environment slot.
+            if (!entry->node) entry->node = (AstNode*)param;
+            if (!entry->binder->parameter_name) entry->binder->parameter_name = param->name;
+        }
+    }
     if (tp->current_scope && tp->current_scope->is_proc) {
         NameEntry* entry = lookup_name_in_current_scope(tp, param->name);
         if (entry) {
@@ -10551,6 +10881,58 @@ AstNode* build_function_from_parts(Transpiler* tp, SourceSpan span,
     return (AstNode*)fn;
 }
 
+static void direct_collect_binder_contracts(Type* type, TypeBinder** binders,
+        uint16_t binder_count, int depth = 0) {
+    if (!type || !binders || depth > 64) return;
+    if (type->type_id == LMD_TYPE_TYPE) {
+        switch (type->kind) {
+        case TYPE_KIND_BINDER: {
+            TypeBinder* binder = (TypeBinder*)type;
+            if (binder->slot < binder_count && !binders[binder->slot]) {
+                binders[binder->slot] = binder;
+            }
+            return;
+        }
+        case TYPE_KIND_UNARY:
+            direct_collect_binder_contracts(((TypeUnary*)type)->operand, binders,
+                binder_count, depth + 1);
+            return;
+        case TYPE_KIND_BINARY: {
+            TypeBinary* binary = (TypeBinary*)type;
+            direct_collect_binder_contracts(binary->left, binders, binder_count, depth + 1);
+            direct_collect_binder_contracts(binary->right, binders, binder_count, depth + 1);
+            return;
+        }
+        case TYPE_KIND_CONSTRAINED:
+            direct_collect_binder_contracts(((TypeConstrained*)type)->base, binders,
+                binder_count, depth + 1);
+            return;
+        case TYPE_KIND_PARAM: {
+            TypeParam* parameter = (TypeParam*)type;
+            if (parameter->binder && parameter->binder->slot < binder_count &&
+                    !binders[parameter->binder->slot]) {
+                binders[parameter->binder->slot] = parameter->binder;
+            }
+            direct_collect_binder_contracts(parameter->contract_type
+                ? parameter->contract_type : parameter->full_type, binders,
+                binder_count, depth + 1);
+            return;
+        }
+        default:
+            return;
+        }
+    }
+    if (type->type_id == LMD_TYPE_ARRAY) {
+        direct_collect_binder_contracts(((TypeArray*)type)->nested, binders,
+            binder_count, depth + 1);
+    } else if ((type->type_id == LMD_TYPE_MAP && type != &TYPE_MAP) ||
+            (type->type_id == LMD_TYPE_ELEMENT && type != &TYPE_ELMT)) {
+        for (ShapeEntry* field = ((TypeMap*)type)->shape; field; field = field->next) {
+            direct_collect_binder_contracts(field->type, binders, binder_count, depth + 1);
+        }
+    }
+}
+
 static AstNode* direct_complete_function(Transpiler* tp, SourceSpan span,
         AstFuncNode* fn, NameScope* function_scope, AstNode* params,
         AstNode* returned, AstNode* error_type, AstNode* body,
@@ -10576,6 +10958,10 @@ static AstNode* direct_complete_function(Transpiler* tp, SourceSpan span,
     function_type->param = NULL;
     function_type->param_count = 0;
     function_type->required_param_count = 0;
+    function_type->binder_count = function_scope->binder_count;
+    function_type->binders = function_type->binder_count
+        ? (TypeBinder**)pool_calloc(tp->pool,
+            sizeof(TypeBinder*) * function_type->binder_count) : NULL;
     for (AstNamedNode* param = (AstNamedNode*)params; param;
             param = (AstNamedNode*)param->next) {
         TypeParam* param_type = (TypeParam*)param->type;
@@ -10587,6 +10973,20 @@ static AstNode* direct_complete_function(Transpiler* tp, SourceSpan span,
         }
         function_type->param_count++;
         if (!param_type->is_optional) function_type->required_param_count++;
+        if (param_type->binder && param_type->binder->slot < function_type->binder_count) {
+            function_type->binders[param_type->binder->slot] = param_type->binder;
+        }
+        Type* contract = param_type->contract_type;
+        if (contract && contract->type_id == LMD_TYPE_TYPE &&
+                contract->kind == TYPE_KIND_BINDER) {
+            TypeBinder* binder = (TypeBinder*)contract;
+            if (binder->slot < function_type->binder_count &&
+                    !function_type->binders[binder->slot]) {
+                function_type->binders[binder->slot] = binder;
+            }
+        }
+        direct_collect_binder_contracts(contract, function_type->binders,
+            function_type->binder_count);
     }
     Type* returned_type = direct_function_contract(returned);
     Type* error = direct_function_contract(error_type);
@@ -11671,9 +12071,19 @@ static LambdaParseValue direct_ast_reduce(void* context,
             return direct_ast_value(direct_constrained_type(tp, reduction->span,
                 base, constraint));
         }
+        if ((reduction->flags & LAMBDA_REDUCTION_FLAG_ANNOTATION_BINDER) &&
+                reduction->child_count == 1) {
+            AstNode* base = direct_ast_node(reduction->children[0]);
+            return direct_ast_value(build_binder_type_from_parts(tp,
+                reduction->span, base,
+                direct_token_text(tp, reduction->secondary_token)));
+        }
         StrView source = source_span_text(tp, reduction->span);
-        AstNode* node = parse_type_pattern_text_span(tp, source.str,
-            source.str + source.length, reduction->span);
+        AstNode* node = (reduction->flags & LAMBDA_REDUCTION_FLAG_RETURN_TYPE)
+            ? parse_return_value_type_text_span(tp, source.str,
+                source.str + source.length, reduction->span)
+            : parse_type_pattern_text_span(tp, source.str,
+                source.str + source.length, reduction->span);
         if (!node) {
             // A rejected annotation still needs a concrete reduction value so
             // its enclosing declaration can report the semantic error without
@@ -11990,15 +12400,12 @@ static LambdaParseValue direct_ast_reduce(void* context,
         if (reduction->form == LAMBDA_REDUCTION_FORM_PARAMETER) {
             AstNode* type_node = NULL;
             AstNode* default_value = NULL;
-            for (uint32_t i = 0; i < reduction->child_count; i++) {
-                AstNode* child = direct_ast_node(reduction->children[i]);
-                // named aliases reduce as AST_NODE_IDENT, so node kind alone
-                // would silently drop a parameter's declared contract (D6.1.2).
-                if (child && ast_is_explicit_type_value(child)) {
-                    type_node = child;
-                } else {
-                    default_value = child;
-                }
+            if (reduction->flags & LAMBDA_REDUCTION_FLAG_TYPED) {
+                type_node = direct_ast_node(reduction->children[0]);
+                default_value = reduction->child_count > 1
+                    ? direct_ast_node(reduction->children[1]) : NULL;
+            } else if (reduction->child_count) {
+                default_value = direct_ast_node(reduction->children[0]);
             }
             return direct_ast_value((AstNode*)build_param_from_parts(tp,
                 reduction->span, direct_token_text(tp, reduction->detail_token),

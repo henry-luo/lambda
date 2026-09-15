@@ -1,0 +1,1 @@
+error[E234]: binder sites for 'T' must share one bound

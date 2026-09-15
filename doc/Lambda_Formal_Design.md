@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 6.1.2 (2026-09-14)
+**Spec version:** 7.0.0 (2026-09-15)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -492,17 +492,18 @@ that carries them.
 
 ### D3.1 First-class type values
 
-- **D3.1.1v3*** A type value is a `Type*` graph node under one compact
+- **D3.1.1v4*** A type value is a `Type*` graph node under one compact
   TypeId (`LMD_TYPE_TYPE`), discriminated by `Type.kind` (simple, unary,
-  binary, pattern, constrained, range, or parameter). Composite, pattern,
-  range, and constrained types share the tag rather than spending tag-budget
-  entries (D2.1.4). A range kind carries static bounds for inclusive
-  membership while preserving the value's storage domain; a pattern kind
-  carries its domain tag and compiled content matcher. The `Type*` graph is
-  the **semantic authority** for every contract the compiler carries
-  (D2.4.1); a TypeId alone is never a contract. In particular, `T[]` retains
-  its immediate element, leaf element, rank, and leaf carrier in that graph;
-  no array path may recover those facts from an erased array tag.
+  binary, pattern, constrained, range, parameter, binder, or bound-name
+  reference). Composite, pattern, range, constrained, and binder types share
+  the tag rather than spending tag-budget entries (D2.1.4). A range kind
+  carries static bounds for inclusive membership while preserving the value's
+  storage domain; a pattern kind carries its domain tag and compiled content
+  matcher. The `Type*` graph is the **semantic authority** for every contract
+  the compiler carries (D2.4.1); a TypeId alone is never a contract. In
+  particular, `T[]` retains its immediate element, leaf element, rank, and
+  leaf carrier in that graph; no array path may recover those facts from an
+  erased array tag.
   [S11.1.1v2, Lane §1, lambda-data.hpp]
 - **D3.1.2** Types compose as values (`|` union, `?`, `[]`, constraints)
   and compare **representationally** — normalized forms, not semantic
@@ -513,6 +514,15 @@ that carries them.
   `type(x)` yields the type value, `name(T)` its name; `match` arms and
   `is` dispatch through the same runtime membership operation (D3.2.1) —
   one classification machinery for the whole surface. [C9a, TE-6]
+- **D3.1.4** A type-binder site stores its written bound, name, and stable
+  signature-local slot; a bound-name reference stores that slot and a copied
+  bound, never a mutable back-pointer. `TypeFunc` owns the slot-ordered
+  canonical-site table. Every interpreter or MIR activation owns an exact
+  rooted environment for selected `Type*` values, and binder-carrying
+  parameters use the boxed entry boundary until a future specialization can
+  prove an equivalent direct path. Cached container certificates prove a
+  written contract only; they never skip the walk that publishes an
+  invocation's binder slot. [S11.4.8, D1.5, D3.3.3v3, D8.1.1v10]
 
 ### D3.2 The subtype foundation
 
@@ -555,6 +565,15 @@ that carries them.
   carrier is a `MapN*` lane only while an exact full-array certificate proves
   the named layout, rank, and leaf contract; `Map*` and the map TypeId alone
   are insufficient. [S11.1.1v2, Tune19 §11.5, Tune20 §T20-6a, OB16]
+- **D3.2.5v2** The surface spelling for the shared subtype relation is the
+  binary `<:` operator. It accepts two type values and returns `bool`; it is
+  not the magnitude operator `<` and does not perform value membership.
+  `fn_subtype` delegates to `lambda_type_contract_is_subtype`, the
+  conversion-free static value-set relation; it must not use declared-boundary
+  compatibility, which permits destination conversion. The relation includes
+  the nominal-base walk required by S11.3.1v2. Function-type operands are
+  rejected until their variance is ruled. [S1.7, S6.1.1, S11.1.4v2,
+  S11.3.1v2]
 
 ### D3.3 Inference
 
@@ -1555,13 +1574,19 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ### D8.3 Dual-function compiling
 
-- **D8.3.1** Plan-dependent entries: `<name>` unboxed + `<name>_b` boxed,
-  roles set per function by the planning matrix; exactly **one unboxed
-  version per function** (multi-version specialization is future work);
-  per-param partial specialization rejected. A declared, native-eligible
-  function has **no boxed slow body**; a slow body exists iff a param is
-  inference-specialized, unboxing is profitable, and the caller set is
-  open. [DF1–DF3]
+- **D8.3.1v2*** Plan-dependent entries comprise the boxed `<name>_b` boundary
+  and a **bounded set of immutable raw variants**. Every raw variant has one
+  complete exact semantic-shape key; dynamic selection reaches it only through
+  that key's exact guard, while a statically proven direct edge is the
+  equivalent proof. A multi-variant plan retains `_b` as its complete boxed
+  fallback; no variant is evicted, replaced, or selected from runtime feedback.
+  The compiler admits distinct qualifying keys in deterministic source order up
+  to its fixed implementation cap, then routes later, dynamic, partial, or
+  ineligible shapes to `_b`. Per-parameter partial specialization remains
+  rejected. D8.3.4 still permits the single closed-world raw-only case. A
+  declared, native-eligible function has **no boxed slow body**; a slow body
+  exists iff a param is inference-specialized, unboxing is profitable, and the
+  caller set is open. [S1.6, DF1–DF3]
 - **D8.3.2** **The check lives in the callee**: a site that cannot
   statically prove admission calls `_b`, and the callee does the one
   boundary operation — *one guard site, one correctness argument*.
@@ -1963,8 +1988,8 @@ slice; no formal semantic ruling or document semver changes.
 | D8.1.3v10 | Revised 2026-08-29: normal JavaScript and TypeScript source admission uses the first-party C lexer and hybrid recursive-descent/Pratt parser, reducing directly to the retained `JsAstNode` graph. The vendored JS/TS Tree-sitter grammar archives remain unchanged but link only into `lambda-cst` for differential acceptance checks; normal Lambda, runtime, test, and release targets do not link either archive. The LambdaJS AST tier includes the synchronous ES-module slice under the same Runtime/EvalContext/heap/event loop/module registry as Lambda. Registry-owned namespace placeholders, hoisted function declaration instantiation before dependency traversal, strict private slabs, live import reads, and registry propagation preserve the admitted default/named/namespace imports, default/named/namespace/non-ambiguous-star exports, named/star re-exports, `import.meta.url`, dynamic `import()`, and circular function imports without a JS-private module cache. Lambda `.ls` imports use that descriptor and their public boxed function values cross the common JS call kernel through the existing Lambda boxed dynamic-call ABI with retained `TypeFunc` metadata. The two languages retain their own semantic walkers and activation records; no second runtime, EvalContext, stack owner, heap, or module registry is created. Top-level await/async module evaluation, generators/async functions, ambiguous star exports, shared T0/T1 environments, continuations, and AUTO policy remain pending. `JS_EXECUTION_BACKEND=ast` remains explicit and fail-closed, and the default remains MIR. Status and focused gates: `vibe/jube/JS_Grammar_Parser.md`, `vibe/Lambda_Design_JS_Interpreter.md`, and `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
 | D8.2.1–D8.2.3 | The physical Lambda/JS foundation is substantially shared (`AstNodeType`, many layouts/aliases, `FnAnalysis`, and `MirEmitter`), but structural convergence is incomplete. P1a (2026-08-28) moved Lambda iterator `for` to `AST_NODE_FOR_EXPR`/`AstForNode`; P1b moved Lambda declarations to `AST_NODE_VARIABLE_DECLARATOR`/`AstDeclaratorNode`; P1c folded assignment/declaration-wrapper storage; P1d (2026-08-28) promotes condition loops to one `AST_NODE_LOOP`/`AstLoopControlNode {form, init, test, update, body}` and retires the old while/do/C-style tags, while iterator clauses use `AST_NODE_FOR_CLAUSE`. P1e (2026-08-29) retires the duplicated JavaScript core-child rows and leaves only extension layouts in `js_ast_children.cpp`; Python remains the later guest acceptance test. |
 | D8.2.4–D8.2.6 | P1–P4 establish the shared indexed compiler substrate described above. P5 (2026-08-30) completes the planned structural semantic-family consolidation: `MirValue` demand/profile lowering now owns shared sequence, condition, module-slot, destination, call/result, return/completion, function-publication, and module-finalization boundaries in Lambda and JS, while profile callbacks retain language semantics and boxed fallback. P6 moves shared context/owner binding, result publication, execution/current-file/module-state scopes, and active-module handles into `runtime-state`; the semantic walkers and their frames remain distinct under **D8.1.3v10**. The 2026-09-05 FunctionId follow-up retires `FnAnalysis::js_mir_backend`: JS MIR artifacts are reached only through the `func_entries_by_id` table keyed by the shared `FunctionId`; post-order storage remains a backend detail. The same closeout publishes the physical Lambda parse→build→bind graph and the full `MirValue` producer boundaries. Current verification is 4,098 Lambda/Input and 40,261 Test262 baseline cases, with Lambda 0.512534 and JS 0.690065 release compiler-time ratios. This is an implementation status for **D2.4.1–D2.4.3**, **D5.2.1v3**, **D5.3.4**, and **D8.2.6**, not a new ruling. Focused gates: `vibe/Lambda_Design_JS_Unified.md` P5–P6. **D8.2.5v2 (2026-09-11) is not implemented**: it reverses the fact-placement clause of D8.2.5, which had required per-node inferred/const facts in an ID-keyed side table. `AstNode.type` is confirmed as the effective-type authority and declared annotations already sit on the declaring node (`NameEntry`/param/declarator, ~164 readers), but `AstIndex::facts`/`AstNodeFacts` still exists. It is near-dead in practice — `declared_contract`, `inferred_type` and `representation` are initialized and never read; only const-fold `flags`/`folded_item` have a producer and a consumer. Retiring it, and rehoming folded values onto the node's own literal `TypeConst`, is the open work. Rationale and the superseded U30 text: `vibe/Lambda_Design_Unified_AST.md` §13; plan: `vibe/Lambda_Proposal_JS_Unify_P7.md` U-D. |
-| D8.3.1–D8.3.3 | Tune24 (2026-09-10) retains one native body while scalarizing eligible pure record construction into precise caller-owned field destinations. Read-only record parameters and linear string-output graphs use the same internal plan; `_b` admits boxed arguments and materializes public records. Eligibility excludes captures, arbitrary escaping graphs, and float/wide-payload fields. Gates: 5,309 Lambda/Input, 40,261 Test262; release MIR emission 98/98 and forced-GC 138/138. Scope and measurements: `vibe/impl/Lambda_Impl_Tune24.md`. |
-| D8.3.4 | DF16 guard hoisting decided, flag-gated, unimplemented (P7); DF12 speculative lifting deferred (P5); §10 multi-version specialization future; the size-gate threshold unset. Dual-func Stage 1 core (P0–P4, P6) complete. |
+| D8.3.1v2–D8.3.3 | **Binder TG8 direct-edge slice implemented 2026-09-15.** Eligible fixed-arity `fn` binder functions with exact scalar, normalized `array`/`map`/`range`, named/nominal map, or concrete element keys admit at most four immutable `__rawN` bodies in source order. `_b` shares one exact-key matcher: scalar tags, selected type-value identity, normalized container kinds, and descriptor-pointer identity for shape-bearing maps/elements. It retains the complete generic boxed fallback; later, partial, dynamic, capped, or ineligible keys consume no slot. A statically exact tag-safe local call selects its predeclared `__rawN` body directly; shape-bearing and other unproven edges retain `_b` unless D8.3.4's opt-in hoist applies. Closures, methods, `pn`/`var`, variadics, bare `element`, and may-await procedures remain excluded. Fixture: `test/lambda/type_binder_raw_variants.ls`. [S1.6, D8.3.1v2–D8.3.3] |
+| D8.3.4 | **DF16's first caller-side guard-hoist slice is implemented, opt-in, 2026-09-15.** `LAMBDA_MIR_TG8_HOIST_GUARDS=1` emits the very `_b` exact-key chain at an eligible local dynamic binder edge; a matching arm calls its immutable `__rawN`, and every miss calls `_b`. It excludes closures, methods, `pn`/`var`, variadics, optional/named/spread arguments, and may-await procedures. The fixed cap remains four (deterministic source order; no profile feedback); five release benchmark processes measured 0.25 s baseline versus 0.22 s enabled for `test/benchmark/tg8_guard_hoist.ls`. Loop-region lifting/CSE and DF12 speculative lifting remain deferred (P5/P7 follow-up). [S1.6, D8.3.1v2–D8.3.4, D8.4.1v2] |
 | D8.4.1v2 | ICs are retired in both lanes: the Lambda lane never had them; the LambdaJS per-site `JsLoadIC`/`JsStoreIC` machinery was deleted 2026-08-15 (IC_Retire IR1–IR8) and the LambdaJS carve-out in LC1 was closed 2026-09-09 (LC1v2). The replacement — compile-predicted literal/constructor shapes with an inline guard, an integer-index lane, and the shared kernel on a miss — is specified in `vibe/jube/JS_Tune10_Fast_Paths.md` (T10-1/T10-2) and is **not implemented**; Result38 measures LambdaJS at 4.35× QuickJS with the unspecialized kernel path. |
 | D8.4.2v2 | Core direct calls pass individual ABI operands. Internal shape-2 results use two MIR results and C-reachable entries use the context companion slot; the trailing scalar-home operand remains retired. Tune24 aggregate-construction plans carry precise record-field destinations as internal operands and return an Item completion. The numeric companion-return ABI is unchanged. |
 | D8.4.3v2 | Landed 2026-08-17 for Lambda, LambdaJS, Jube, and hosted execution boundaries: ordinary failures use explicit returned completions through each frame, while `LambdaRecoveryFrame` is restricted by the recovery-boundary gate to native-fault/test containment sites. The catalog and adapter audits retain the explicit Item/companion-lane contracts; see `vibe/Lambda_Design_Runtime_Error_Handling.md` §10–§12. |
