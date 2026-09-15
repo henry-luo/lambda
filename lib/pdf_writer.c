@@ -16,6 +16,7 @@
 #include "arena.h"
 #include "mem_factory.h"
 #include "log.h"
+#include "math_utils.h"
 #include <string.h>
 #include <math.h>
 
@@ -618,9 +619,7 @@ HPDF_ExtGState HPDF_CreateExtGState(HPDF_Doc doc) {
 }
 
 static float pdf_clamp_alpha(float alpha) {
-    if (alpha < 0.0f) return 0.0f;
-    if (alpha > 1.0f) return 1.0f;
-    return alpha;
+    return clamp_unit(alpha);
 }
 
 HPDF_STATUS HPDF_ExtGState_SetAlphaFill(HPDF_ExtGState ext_gstate, float alpha) {

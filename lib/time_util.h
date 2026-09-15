@@ -42,10 +42,30 @@ static inline double time_now_seconds(void) {
     return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
 
+// elapsed time between two nanosecond readings; backward readings yield zero.
+static inline uint64_t time_elapsed_ns(uint64_t start_ns, uint64_t end_ns) {
+    return end_ns >= start_ns ? end_ns - start_ns : 0;
+}
+
+// integral microseconds between two nanosecond readings.
+static inline uint64_t time_elapsed_us(uint64_t start_ns, uint64_t end_ns) {
+    return time_elapsed_ns(start_ns, end_ns) / 1000ULL;
+}
+
+// integral milliseconds between two nanosecond readings.
+static inline uint64_t time_elapsed_ms(uint64_t start_ns, uint64_t end_ns) {
+    return time_elapsed_ns(start_ns, end_ns) / 1000000ULL;
+}
+
+// fractional milliseconds between two nanosecond readings, for profiling.
+static inline double time_elapsed_ms_f(uint64_t start_ns, uint64_t end_ns) {
+    return (double)time_elapsed_ns(start_ns, end_ns) / 1000000.0;
+}
+
 // convenience: elapsed milliseconds since a previously captured time_now_ms()
 static inline uint64_t time_elapsed_ms_since(uint64_t start_ms) {
-    uint64_t now = time_now_ms();
-    return now > start_ms ? now - start_ms : 0;
+    uint64_t now_ms = time_now_ms();
+    return now_ms >= start_ms ? now_ms - start_ms : 0;
 }
 
 #ifdef __cplusplus

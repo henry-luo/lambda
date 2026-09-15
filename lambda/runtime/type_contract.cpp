@@ -9,7 +9,18 @@
 // type_field_unwrap_simple_decl (the three global meta-types are compact Type
 // values; it inspects `kind` only after excluding them).
 static inline Type* contract_unwrap_type(Type* type) {
-    return type_field_unwrap_simple_decl(type);
+    Type* unwrapped = type_field_unwrap_simple_decl(type);
+    if (unwrapped && unwrapped->type_id == LMD_TYPE_TYPE &&
+            unwrapped->kind == TYPE_KIND_BINDER) {
+        Type* bound = ((TypeBinder*)unwrapped)->bound;
+        return bound ? contract_unwrap_type(bound) : unwrapped;
+    }
+    if (unwrapped && unwrapped->type_id == LMD_TYPE_TYPE &&
+            unwrapped->kind == TYPE_KIND_BOUND_REF) {
+        Type* bound = ((TypeBoundRef*)unwrapped)->bound;
+        return bound ? contract_unwrap_type(bound) : unwrapped;
+    }
+    return unwrapped;
 }
 
 Type* lambda_type_nonnull_map_contract(Type* contract) {
@@ -344,6 +355,119 @@ static bool contract_semantics_compatible(const Type* candidate,
 
 bool lambda_type_contract_semantically_compatible(Type* candidate, Type* expected) {
     return contract_semantics_compatible(candidate, expected);
+}
+
+static bool contract_type_is_subtype(Type* candidate, Type* expected, int depth);
+
+static Type* contract_subtype_unwrap(Type* type) {
+    type = contract_unwrap_type(type);
+    if (type && type->type_id == LMD_TYPE_TYPE &&
+            !type_is_global_meta_type(type) && type->kind == TYPE_KIND_PARAM) {
+        TypeParam* parameter = (TypeParam*)type;
+        Type* contract = parameter->contract_type ? parameter->contract_type :
+            parameter->full_type;
+        return contract && contract != type ? contract_subtype_unwrap(contract) : type;
+    }
+    return type;
+}
+
+static bool contract_type_has_unary_op(const Type* type, Operator op) {
+    return type && type->type_id == LMD_TYPE_TYPE &&
+        !type_is_global_meta_type(type) && type->kind == TYPE_KIND_UNARY &&
+        ((const TypeUnary*)type)->op == op;
+}
+
+static bool contract_map_is_subtype(const TypeMap* candidate,
+        const TypeMap* expected, int depth) {
+    if (!candidate || !expected) return false;
+    for (ShapeEntry* expected_field = expected->shape; expected_field;
+            expected_field = expected_field->next) {
+        if (!expected_field->name || !expected_field->type) continue;
+        ShapeEntry* candidate_field = typemap_hash_lookup((TypeMap*)candidate,
+            expected_field->name->str, (int)expected_field->name->length);
+        if (!candidate_field || !contract_type_is_subtype(candidate_field->type,
+                expected_field->type, depth + 1)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool contract_type_is_subtype(Type* candidate, Type* expected, int depth) {
+    if (depth > 64) return false;
+    candidate = contract_subtype_unwrap(candidate);
+    expected = contract_subtype_unwrap(expected);
+    if (!candidate || !expected) return false;
+    if (candidate == expected) return true;
+    if (expected == &TYPE_ANY) return true;
+    if (candidate == &TYPE_ANY) return false;
+
+    if (lambda_type_is_union(candidate)) {
+        TypeBinary* union_type = (TypeBinary*)candidate;
+        return contract_type_is_subtype(union_type->left, expected, depth + 1) &&
+            contract_type_is_subtype(union_type->right, expected, depth + 1);
+    }
+    if (lambda_type_is_union(expected)) {
+        TypeBinary* union_type = (TypeBinary*)expected;
+        return contract_type_is_subtype(candidate, union_type->left, depth + 1) ||
+            contract_type_is_subtype(candidate, union_type->right, depth + 1);
+    }
+
+    if (contract_type_has_unary_op(candidate, OPERATOR_OPTIONAL)) {
+        TypeUnary* optional = (TypeUnary*)candidate;
+        return contract_type_is_subtype(optional->operand, expected, depth + 1) &&
+            contract_type_is_subtype(&TYPE_NULL, expected, depth + 1);
+    }
+    if (contract_type_has_unary_op(expected, OPERATOR_OPTIONAL)) {
+        TypeUnary* optional = (TypeUnary*)expected;
+        return contract_type_is_subtype(candidate, optional->operand, depth + 1) ||
+            candidate->type_id == LMD_TYPE_NULL;
+    }
+
+    if (contract_type_has_unary_op(expected, OPERATOR_ARRAY)) {
+        if (!contract_type_has_unary_op(candidate, OPERATOR_ARRAY)) return false;
+        return contract_type_is_subtype(((TypeUnary*)candidate)->operand,
+            ((TypeUnary*)expected)->operand, depth + 1);
+    }
+    if (contract_type_has_unary_op(candidate, OPERATOR_ARRAY)) {
+        return expected == &TYPE_ARRAY;
+    }
+
+    if (expected->is_literal || expected->is_const) return false;
+
+    if (expected == &TYPE_NUMBER) {
+        return lambda_numeric_kind_from_type(candidate) != LAMBDA_NUM_INVALID;
+    }
+    if (candidate == &TYPE_NUMBER) return false;
+    LambdaNumericKind candidate_numeric = lambda_numeric_kind_from_type(candidate);
+    LambdaNumericKind expected_numeric = lambda_numeric_kind_from_type(expected);
+    if (candidate_numeric != LAMBDA_NUM_INVALID || expected_numeric != LAMBDA_NUM_INVALID) {
+        return candidate_numeric != LAMBDA_NUM_INVALID &&
+            expected_numeric != LAMBDA_NUM_INVALID &&
+            lambda_numeric_kind_exactly_embeds(candidate_numeric, expected_numeric);
+    }
+
+    if (expected == &TYPE_OBJECT) return type_nominal_record(candidate) != NULL;
+    if (TypeNominal* expected_nominal = type_nominal_record(expected)) {
+        TypeNominal* candidate_nominal = type_nominal_record(candidate);
+        return candidate_nominal && lambda_nominal_derives_from(candidate_nominal,
+            expected_nominal);
+    }
+
+    bool candidate_map_like = candidate->type_id == LMD_TYPE_MAP ||
+        candidate->type_id == LMD_TYPE_ELEMENT;
+    bool expected_map_like = expected->type_id == LMD_TYPE_MAP ||
+        expected->type_id == LMD_TYPE_ELEMENT;
+    if (expected_map_like) {
+        return candidate_map_like && candidate->type_id == expected->type_id &&
+            contract_map_is_subtype((TypeMap*)candidate, (TypeMap*)expected, depth);
+    }
+
+    return candidate->type_id == expected->type_id;
+}
+
+bool lambda_type_contract_is_subtype(Type* candidate, Type* expected) {
+    return contract_type_is_subtype(candidate, expected, 0);
 }
 
 static Type* array_contract_unwrap(Type* type, int depth) {

@@ -11,6 +11,7 @@ typedef struct AstNode AstNode;
 typedef struct AstImportNode AstImportNode;
 typedef struct NameEntry NameEntry;
 typedef struct NameScope NameScope;
+typedef struct TypeBinder TypeBinder;
 typedef struct LangProfile LangProfile;
 struct hashmap;
 typedef struct _ArrayList ArrayList;
@@ -195,6 +196,7 @@ typedef enum Operator {
     OPERATOR_INTERSECT,
     OPERATOR_EXCLUDE,
     OPERATOR_IS,
+    OPERATOR_SUBTYPE,
     OPERATOR_IS_NAN,
     OPERATOR_IN,
     OPERATOR_AT,
@@ -301,6 +303,11 @@ struct NameEntry {
     bool is_mutable;
     bool is_var_param;
     bool is_parameter;
+    // Type-binder names are lexical type values, not storage bindings.  Their
+    // call-frame slot lives in TypeFunc::binders rather than FnFramePlan.
+    bool is_binder;
+    uint16_t binder_slot;
+    TypeBinder* binder;
     // CW29/S9.1.3: this plain `pn` parameter's
     // body writes through it, so both tiers snapshot it at entry -- one
     // share-mark in the callee prologue; the first write detaches a private
@@ -426,6 +433,9 @@ struct NameScope {
     // Switch case clauses share one lexical scope; their declarations never
     // receive an Annex B outer-var companion.
     bool is_switch_scope;
+    // Slots are assigned while parameter annotations are reduced left to
+    // right. The completed TypeFunc copies the canonical sites into its table.
+    uint16_t binder_count;
 };
 
 // What const value, if any, a node carries. The payload always lives in the

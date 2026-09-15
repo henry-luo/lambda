@@ -3429,9 +3429,7 @@ static float form_default_range_value(View* view, FormControlProp* form) {
     if (range_span == 0.0f) return 0.5f;
     float value = (float)str_to_double_default(value_attr, strlen(value_attr), form->range_min);
     float normalized = (value - form->range_min) / range_span;
-    if (normalized < 0.0f) return 0.0f;
-    if (normalized > 1.0f) return 1.0f;
-    return normalized;
+    return clamp_unit(normalized);
 }
 
 static ViewState* form_view_state_get(DocState* state, View* view) {
@@ -4793,9 +4791,7 @@ void form_control_set_range_value(DocState* state, View* view, float value) {
     FormControlProp* form = block->form;
     form->state_ref = state;
 
-    // Clamp to 0.0-1.0
-    if (value < 0.0f) value = 0.0f;
-    if (value > 1.0f) value = 1.0f;
+    value = clamp_unit(value);
 
     ViewState* view_state = form_view_state_get_or_create(state, view, form);
     float old_value = view_state ? view_state->data.form.range_value : form_default_range_value(view, form);

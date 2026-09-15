@@ -6,9 +6,9 @@
 #include "../lib/mem.h"
 #include "../lib/mem_factory.h"
 #include "../lib/mem_grow.hpp"
+#include "../lib/time_util.h"
 #include "../lib/uv_loop.h"
 #include "../lib/escape.h"
-#include <chrono>       // timing - acceptable for profiling
 #include <limits.h>
 #include <signal.h>
 #include <setjmp.h>
@@ -1537,14 +1537,13 @@ static void apply_load_css_cascade(DomDocument* dom_doc,
                                    Pool* pool,
                                    const char* phase) {
     if (!dom_doc || !dom_root || !pool || !css_engine) return;
-    using namespace std::chrono;
-    auto t_cascade_start = high_resolution_clock::now();
+    auto t_cascade_start = time_now_ns();
     layout_apply_css_stylesheets(
         dom_doc, dom_root, dom_doc->stylesheets, dom_doc->stylesheet_count,
         pool, css_engine);
     log_info("[TIMING] load: CSS cascade (%s): %.1fms",
              phase ? phase : "load",
-             duration<double, std::milli>(high_resolution_clock::now() - t_cascade_start).count());
+             time_elapsed_ms_f(t_cascade_start, time_now_ns()));
 }
 
 // check for a UTF-8 BOM.
@@ -1817,8 +1816,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     int viewport_width, int viewport_height, Pool* pool, const char* html_source,
     bool track_source_lines, bool execute_scripts, HtmlLoadPhaseTiming* timing,
     DocumentScriptPhaseTiming* script_timing, const DocumentJsHostConfig* js_host_config) {
-    using namespace std::chrono;
-    auto t_start = high_resolution_clock::now();
+    auto t_start = time_now_ns();
 
     log_mem_stage("load_html: enter");
 
@@ -1894,8 +1892,8 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         }
     }
 
-    auto t_read = high_resolution_clock::now();
-    log_info("[TIMING] load: read file: %.1fms", duration<double, std::milli>(t_read - t_start).count());
+    auto t_read = time_now_ns();
+    log_info("[TIMING] load: read file: %.1fms", time_elapsed_ms_f(t_start, t_read));
 
     // Create type string for HTML.
     String* type_str = string_from_strview_mem(strview_init("html", 4), MEM_CAT_LAYOUT);
@@ -1926,8 +1924,8 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     mem_free(type_str);
     if (html_content_owned) mem_free(html_content);  // only free what we allocated
 
-    auto t_parse = high_resolution_clock::now();
-    log_info("[TIMING] load: parse HTML: %.1fms", duration<double, std::milli>(t_parse - t_read).count());
+    auto t_parse = time_now_ns();
+    log_info("[TIMING] load: parse HTML: %.1fms", time_elapsed_ms_f(t_read, t_parse));
     log_mem_stage("load_html: html_parsed");
 
     if (!input) {
@@ -1938,8 +1936,8 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     mem_free(html_filepath);
     html_filepath = nullptr;
 
-    auto t_debug = high_resolution_clock::now();
-    log_info("[TIMING] load: debug output: %.1fms", duration<double, std::milli>(t_debug - t_parse).count());
+    auto t_debug = time_now_ns();
+    log_info("[TIMING] load: debug output: %.1fms", time_elapsed_ms_f(t_parse, t_debug));
 
     Element* html_root = get_html_root_element(input);
     if (!html_root) {
@@ -2021,7 +2019,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     }
     log_mem_stage("load_html: dom_built");
 
-    auto t_dom = high_resolution_clock::now();
+    auto t_dom = time_now_ns();
 
     // Initialize CSS engine
     CssEngine* css_engine = css_engine_create(pool);
@@ -2049,8 +2047,8 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         &inline_stylesheet_count);
     g_css_document_charset = nullptr; // reset after CSS collection
 
-    auto t_css_parse = high_resolution_clock::now();
-    log_info("[TIMING] load: parse CSS: %.1fms", duration<double, std::milli>(t_css_parse - t_dom).count());
+    auto t_css_parse = time_now_ns();
+    log_info("[TIMING] load: parse CSS: %.1fms", time_elapsed_ms_f(t_dom, t_css_parse));
     log_mem_stage("load_html: css_parsed");
 
     // Store stylesheets before scripts so getComputedStyle and @font-face share
@@ -2080,7 +2078,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
                                    external_stylesheet ? 1 : 0,
                                    inline_stylesheets, inline_stylesheet_count, pool);
     }
-    auto t_stylesheet_setup = timing ? high_resolution_clock::now() : t_css_parse;
+    auto t_stylesheet_setup = timing ? time_now_ns() : t_css_parse;
 
     // Step 2c: Apply inline style="" attributes BEFORE scripts
     // Inline style="" attributes from HTML are applied first as the baseline.
@@ -2091,7 +2089,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     log_mem_stage("load_html: before_inline_attrs");
     apply_inline_styles_to_tree(dom_root, pool);
     log_mem_stage("load_html: after_inline_attrs");
-    auto t_inline_style = timing ? high_resolution_clock::now() : t_stylesheet_setup;
+    auto t_inline_style = timing ? time_now_ns() : t_stylesheet_setup;
 
     dom_doc->root = dom_root;  // set root for CSSOM and JS DOM API access
 
@@ -2101,7 +2099,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     log_mem_stage("load_html: before_pre_script_cascade");
     apply_load_css_cascade(dom_doc, dom_root, css_engine, pool, "pre-script");
     log_mem_stage("load_html: pre_script_cascade_done");
-    auto t_initial_cascade = timing ? high_resolution_clock::now() : t_inline_style;
+    auto t_initial_cascade = timing ? time_now_ns() : t_inline_style;
     auto t_post_script = t_initial_cascade;
 
     if (execute_scripts) {
@@ -2112,7 +2110,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         log_mem_stage("load_html: before_scripts");
         execute_document_scripts_profiled(html_root, dom_doc, pool, html_url, script_timing);
         log_mem_stage("load_html: after_scripts");
-        auto t_script_exec = timing ? high_resolution_clock::now() : t_initial_cascade;
+        auto t_script_exec = timing ? time_now_ns() : t_initial_cascade;
 
         if (dom_doc->root != dom_root) {
             // DOM scripts may replace documentElement; use the committed DOM
@@ -2145,18 +2143,16 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         // Step 2e: Install inline event handler attributes into EventTarget slots.
         // Must happen after execute_document_scripts so function definitions are available.
         collect_and_compile_event_handlers(dom_doc);
-        t_post_script = timing ? high_resolution_clock::now() : t_script_exec;
+        t_post_script = timing ? time_now_ns() : t_script_exec;
 
         if (timing) {
-            timing->script_exec_ms += duration<double, std::milli>(
-                t_script_exec - t_initial_cascade).count();
-            timing->post_script_ms += duration<double, std::milli>(
-                t_post_script - t_script_exec).count();
+            timing->script_exec_ms += time_elapsed_ms_f(t_initial_cascade, t_script_exec);
+            timing->post_script_ms += time_elapsed_ms_f(t_script_exec, t_post_script);
         }
     }
 
     log_mem_stage("load_html: cascade_done");
-    auto t_final_cascade = timing ? high_resolution_clock::now() : t_post_script;
+    auto t_final_cascade = timing ? time_now_ns() : t_post_script;
 
     // Dump CSS computed values for testing/comparison (includes inheritance, before layout).
     // Skip the (potentially expensive) tree walk entirely when debug logs are disabled \u2014
@@ -2188,24 +2184,20 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     // If body has transform: scale(), apply it to the document's body_transform_scale
     // This can be used by the renderer to apply additional scaling
 
-    auto t_end = high_resolution_clock::now();
+    auto t_end = time_now_ns();
     if (timing) {
-        timing->loader_total_ms += duration<double, std::milli>(t_end - t_start).count();
-        timing->read_ms += duration<double, std::milli>(t_read - t_start).count();
-        timing->html_parse_ms += duration<double, std::milli>(t_parse - t_read).count();
-        timing->dom_build_ms += duration<double, std::milli>(t_dom - t_parse).count();
-        timing->css_parse_ms += duration<double, std::milli>(t_css_parse - t_dom).count();
-        timing->stylesheet_setup_ms += duration<double, std::milli>(
-            t_stylesheet_setup - t_css_parse).count();
-        timing->inline_style_ms += duration<double, std::milli>(
-            t_inline_style - t_stylesheet_setup).count();
-        timing->initial_cascade_ms += duration<double, std::milli>(
-            t_initial_cascade - t_inline_style).count();
-        timing->final_cascade_ms += duration<double, std::milli>(
-            t_final_cascade - t_post_script).count();
-        timing->finalize_ms += duration<double, std::milli>(t_end - t_final_cascade).count();
+        timing->loader_total_ms += time_elapsed_ms_f(t_start, t_end);
+        timing->read_ms += time_elapsed_ms_f(t_start, t_read);
+        timing->html_parse_ms += time_elapsed_ms_f(t_read, t_parse);
+        timing->dom_build_ms += time_elapsed_ms_f(t_parse, t_dom);
+        timing->css_parse_ms += time_elapsed_ms_f(t_dom, t_css_parse);
+        timing->stylesheet_setup_ms += time_elapsed_ms_f(t_css_parse, t_stylesheet_setup);
+        timing->inline_style_ms += time_elapsed_ms_f(t_stylesheet_setup, t_inline_style);
+        timing->initial_cascade_ms += time_elapsed_ms_f(t_inline_style, t_initial_cascade);
+        timing->final_cascade_ms += time_elapsed_ms_f(t_post_script, t_final_cascade);
+        timing->finalize_ms += time_elapsed_ms_f(t_final_cascade, t_end);
     }
-    log_info("[TIMING] load: total: %.1fms", duration<double, std::milli>(t_end - t_start).count());
+    log_info("[TIMING] load: total: %.1fms", time_elapsed_ms_f(t_start, t_end));
 
     return dom_doc;
 }
@@ -2496,7 +2488,7 @@ static char* escape_image_document_html_attr(const char* value) {
 static DomDocument* load_dom_backed_image_document(Url* image_url, int viewport_width,
                                                    int viewport_height, Pool* pool,
                                                    const char* log_prefix) {
-    auto total_start = std::chrono::high_resolution_clock::now();
+    auto total_start = time_now_ns();
 
     if (!image_url || !pool) {
         log_error("%s: invalid parameters", log_prefix ? log_prefix : "load_image_doc");
@@ -2556,10 +2548,10 @@ static DomDocument* load_dom_backed_image_document(Url* image_url, int viewport_
     mem_free(title_attr);
     if (image_filepath) mem_free(image_filepath);
 
-    auto total_end = std::chrono::high_resolution_clock::now();
+    auto total_end = time_now_ns();
     log_info("[TIMING] %s total: %.1fms",
              log_prefix ? log_prefix : "load_image_doc",
-             std::chrono::duration<double, std::milli>(total_end - total_start).count());
+             time_elapsed_ms_f(total_start, total_end));
     return doc;
 }
 
@@ -2701,18 +2693,18 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
     }
     log_info("[TIMING] Loading text document: %s", text_filepath);
 
-    auto step1_start = std::chrono::high_resolution_clock::now();
+    auto step1_start = time_now_ns();
     char* text_content = read_text_file(text_filepath);
     if (!text_content) {
         log_error("Failed to read text file: %s", text_filepath);
         return nullptr;
     }
     size_t content_len = strlen(text_content);
-    auto step1_end = std::chrono::high_resolution_clock::now();
+    auto step1_end = time_now_ns();
     log_info("[TIMING] Step 1 - Read text file: %.1fms (%zu bytes)",
-        std::chrono::duration<double, std::milli>(step1_end - step1_start).count(), content_len);
+        time_elapsed_ms_f(step1_start, step1_end), content_len);
 
-    auto step2_start = std::chrono::high_resolution_clock::now();
+    auto step2_start = time_now_ns();
 
     StrBuf* escaped_buf = strbuf_new_cap(content_len + 1);
     if (!escaped_buf) {
@@ -2730,11 +2722,11 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
         return nullptr;
     }
 
-    auto step2_end = std::chrono::high_resolution_clock::now();
+    auto step2_end = time_now_ns();
     log_info("[TIMING] Step 2 - Escape HTML: %.1fms",
-        std::chrono::duration<double, std::milli>(step2_end - step2_start).count());
+        time_elapsed_ms_f(step2_start, step2_end));
 
-    auto step3_start = std::chrono::high_resolution_clock::now();
+    auto step3_start = time_now_ns();
 
     const char* filename = file_path_basename(text_filepath);
 
@@ -2776,9 +2768,9 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
     snprintf(html_content, html_len, html_template, filename, escaped_content);
     mem_free(escaped_content);
 
-    auto step3_end = std::chrono::high_resolution_clock::now();
+    auto step3_end = time_now_ns();
     log_info("[TIMING] Step 3 - Build HTML: %.1fms",
-        std::chrono::duration<double, std::milli>(step3_end - step3_start).count());
+        time_elapsed_ms_f(step3_start, step3_end));
 
     DomDocument* document = load_lambda_html_doc(
         text_url, nullptr, viewport_width, viewport_height, pool,
@@ -2897,7 +2889,7 @@ static DomDocument* load_home_styled_source_doc(
 }
 
 DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool) {
-    auto total_start = std::chrono::high_resolution_clock::now();
+    auto total_start = time_now_ns();
 
     if (!markdown_url || !pool) {
         log_error("load_markdown_doc: invalid parameters");
@@ -2908,7 +2900,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     char* markdown_filepath = markdown_path_guard.path;
     log_info("[TIMING] Loading markdown document: %s", markdown_filepath);
 
-    auto step1_start = std::chrono::high_resolution_clock::now();
+    auto step1_start = time_now_ns();
     Input* input = read_layout_input_file(markdown_url, markdown_filepath,
                                           "markdown", "load_markdown_doc", "markdown");
     if (!input) {
@@ -2922,14 +2914,14 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
         return nullptr;
     }
 
-    auto step1_end = std::chrono::high_resolution_clock::now();
+    auto step1_end = time_now_ns();
     log_info("[TIMING] Step 1 - Parse markdown: %.1fms",
-        std::chrono::duration<double, std::milli>(step1_end - step1_start).count());
+        time_elapsed_ms_f(step1_start, step1_end));
 
     Runtime* markdown_math_runtime = nullptr;
 
     {
-        auto math_start = std::chrono::high_resolution_clock::now();
+        auto math_start = time_now_ns();
 
         struct MathInfo {
             Element* parent;
@@ -3076,13 +3068,13 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
         }
         arraylist_free(math_list);
 
-        auto math_end = std::chrono::high_resolution_clock::now();
+        auto math_end = time_now_ns();
         log_info("[TIMING] Step 1.5 - Math rendering: %.1fms",
-            std::chrono::duration<double, std::milli>(math_end - math_start).count());
+            time_elapsed_ms_f(math_start, math_end));
     }
 
     // Step 2: Create DomDocument, CSS engine, and build the DOM tree.
-    auto step2_start = std::chrono::high_resolution_clock::now();
+    auto step2_start = time_now_ns();
     DomElement* dom_root = nullptr;
     CssEngine* css_engine = nullptr;
     DomDocument* dom_doc = create_layout_css_document(
@@ -3091,21 +3083,21 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
         viewport_width, viewport_height, pool, &dom_root, &css_engine);
     if (!dom_doc) return nullptr;
 
-    auto step2_end = std::chrono::high_resolution_clock::now();
+    auto step2_end = time_now_ns();
     log_info("[TIMING] Step 2 - Build DOM tree: %.1fms",
-        std::chrono::duration<double, std::milli>(step2_end - step2_start).count());
+        time_elapsed_ms_f(step2_start, step2_end));
 
     // Step 3: Load the document stylesheet.
-    auto step3_start = std::chrono::high_resolution_clock::now();
+    auto step3_start = time_now_ns();
     CssStylesheet* markdown_stylesheet = load_home_stylesheet(
         css_engine, pool, "input/markdown.css", "Lambda Markdown", "markdown stylesheet", true);
     if (!markdown_stylesheet) {
         log_warn("Continuing without stylesheet - markdown will use browser defaults");
     }
 
-    auto step3_end = std::chrono::high_resolution_clock::now();
+    auto step3_end = time_now_ns();
     log_info("[TIMING] Step 3 - CSS parse: %.1fms",
-        std::chrono::duration<double, std::milli>(step3_end - step3_start).count());
+        time_elapsed_ms_f(step3_start, step3_end));
 
     // Step 4.5: Load math CSS and KaTeX font CSS for math rendering
     CssStylesheet* math_stylesheet = nullptr;
@@ -3118,13 +3110,13 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     }
 
     // Step 5: Apply CSS cascade to DOM tree
-    auto step4_start = std::chrono::high_resolution_clock::now();
+    auto step4_start = time_now_ns();
     CssStylesheet* markdown_stylesheets[3] = {
         markdown_stylesheet, math_stylesheet, katex_stylesheet};
     layout_apply_css_stylesheets(dom_doc, dom_root, markdown_stylesheets, 3, pool, css_engine);
-    auto step4_end = std::chrono::high_resolution_clock::now();
+    auto step4_end = time_now_ns();
     log_info("[TIMING] Step 4 - CSS cascade: %.1fms",
-        std::chrono::duration<double, std::milli>(step4_end - step4_start).count());
+        time_elapsed_ms_f(step4_start, step4_end));
 
     // Step 5.5: Apply inline style="" attributes (highest priority, after stylesheet cascade)
     apply_inline_styles_to_tree(dom_root, pool);
@@ -3135,9 +3127,9 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
 
     store_document_stylesheets(dom_doc, markdown_stylesheets, 3, nullptr, 0, pool);
 
-    auto total_end = std::chrono::high_resolution_clock::now();
+    auto total_end = time_now_ns();
     log_info("[TIMING] load_markdown_doc total: %.1fms",
-        std::chrono::duration<double, std::milli>(total_end - total_start).count());
+        time_elapsed_ms_f(total_start, total_end));
 
     return dom_doc;
 }
@@ -3280,8 +3272,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 }
 
 DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool) {
-    using namespace std::chrono;
-    auto total_start = high_resolution_clock::now();
+    auto total_start = time_now_ns();
 
     if (!xml_url || !pool) {
         log_error("load_xml_doc: invalid parameters");
@@ -3296,15 +3287,15 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     }
     log_info("[Lambda XML] Loading XML file: %s", xml_filepath);
 
-    auto t_read = high_resolution_clock::now();
+    auto t_read = time_now_ns();
     char* xml_content = read_text_file(xml_filepath);
     if (!xml_content) {
         log_error("[Lambda XML] Failed to read XML file: %s", xml_filepath);
         return nullptr;
     }
-    auto t_parse = high_resolution_clock::now();
+    auto t_parse = time_now_ns();
     log_info("[TIMING] load: read XML: %.1fms",
-             duration_cast<duration<double, std::milli>>(t_parse - t_read).count());
+             time_elapsed_ms_f(t_read, t_parse));
 
     Input* xml_input = Input::create(pool, xml_url);
     if (!xml_input) {
@@ -3327,9 +3318,9 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     }
 
     log_info("[Lambda XML] Found stylesheet: %s", xml_input->xml_stylesheet_href);
-    auto t_css_parse = high_resolution_clock::now();
+    auto t_css_parse = time_now_ns();
     log_info("[TIMING] load: parse XML: %.1fms",
-             duration_cast<duration<double, std::milli>>(t_css_parse - t_parse).count());
+             time_elapsed_ms_f(t_parse, t_css_parse));
 
     Element* document_wrapper = (Element*)xml_input->root.item;
     Element* xml_root = nullptr;
@@ -3372,9 +3363,9 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
         "Lambda XML", "XML stylesheet", true);
     if (!external_stylesheet) return nullptr;
 
-    auto t_dom = high_resolution_clock::now();
+    auto t_dom = time_now_ns();
     log_info("[TIMING] load: parse CSS: %.1fms",
-             duration_cast<duration<double, std::milli>>(t_dom - t_css_parse).count());
+             time_elapsed_ms_f(t_css_parse, t_dom));
 
     DomDocument* dom_doc = dom_document_create(xml_input);
     if (!dom_doc) {
@@ -3418,9 +3409,9 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     dom_doc->root = html_elem;
     dom_doc->html_root = xml_root;
 
-    auto t_cascade = high_resolution_clock::now();
+    auto t_cascade = time_now_ns();
     log_info("[TIMING] load: build DOM: %.1fms",
-             duration_cast<duration<double, std::milli>>(t_cascade - t_dom).count());
+             time_elapsed_ms_f(t_dom, t_cascade));
 
     CssStylesheet* xml_stylesheets[1] = {external_stylesheet};
     store_document_stylesheets(dom_doc, xml_stylesheets, 1, nullptr, 0, pool);
@@ -3429,11 +3420,11 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
 
     apply_inline_styles_to_tree(html_elem, pool);
 
-    auto t_complete = high_resolution_clock::now();
+    auto t_complete = time_now_ns();
     log_info("[TIMING] load: apply cascade: %.1fms",
-             duration_cast<duration<double, std::milli>>(t_complete - t_cascade).count());
+             time_elapsed_ms_f(t_cascade, t_complete));
     log_info("[TIMING] load: total: %.1fms",
-             duration_cast<duration<double, std::milli>>(t_complete - total_start).count());
+             time_elapsed_ms_f(total_start, t_complete));
 
     return dom_doc;
 }
@@ -3450,7 +3441,7 @@ static DomDocument* load_html_string_doc(const char* html_source, int viewport_w
 // evaluate a Lambda document and run it through the CSS/layout pipeline.
 DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_source,
                                            int viewport_width, int viewport_height, Pool* pool) {
-    auto total_start = std::chrono::high_resolution_clock::now();
+    auto total_start = time_now_ns();
 
     if (!script_url || !pool) {
         log_error("load_lambda_script_doc: invalid parameters");
@@ -3472,7 +3463,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     log_info("[Lambda Script] Loading Lambda script: %s", script_filepath);
 
     // Step 1: Initialize Runtime and evaluate the Lambda script
-    auto step1_start = std::chrono::high_resolution_clock::now();
+    auto step1_start = time_now_ns();
 
     Runtime* runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
     runtime_init(runtime);
@@ -3523,9 +3514,9 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         return nullptr;
     }
 
-    auto step1_end = std::chrono::high_resolution_clock::now();
+    auto step1_end = time_now_ns();
     log_info("[TIMING] Step 1 - Evaluate script: %.1fms",
-        std::chrono::duration<double, std::milli>(step1_end - step1_start).count());
+        time_elapsed_ms_f(step1_start, step1_end));
 
     TypeId result_type = get_type_id(script_output->root);
 
@@ -3617,9 +3608,9 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
             strbuf_free(result_str);
         }
 
-        auto step2_start = std::chrono::high_resolution_clock::now();
+        auto step2_start = time_now_ns();
         log_info("[TIMING] Step 2 - Wrap result: %.1fms",
-            std::chrono::duration<double, std::milli>(step2_start - step1_end).count());
+            time_elapsed_ms_f(step1_end, step2_start));
 
         MarkBuilder builder(result_input);
 
@@ -3635,20 +3626,20 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
 
         html_elem = html_item.element;
 
-        auto step3_end = std::chrono::high_resolution_clock::now();
+        auto step3_end = time_now_ns();
         log_info("[TIMING] Step 3 - Build HTML structure: %.1fms",
-            std::chrono::duration<double, std::milli>(step3_end - step2_start).count());
+            time_elapsed_ms_f(step2_start, step3_end));
 
         result_input->root = html_item;
     } else {
         result_input->root = {.element = html_elem};
 
-        auto step2_start = std::chrono::high_resolution_clock::now();
+        auto step2_start = time_now_ns();
         log_info("[TIMING] Step 2 - HTML document detected, skipping wrap: %.1fms",
-            std::chrono::duration<double, std::milli>(step2_start - step1_end).count());
+            time_elapsed_ms_f(step1_end, step2_start));
     }
 
-    auto step5_start = std::chrono::high_resolution_clock::now();
+    auto step5_start = time_now_ns();
     DomElement* dom_root = nullptr;
     CssEngine* css_engine = nullptr;
     DomDocument* dom_doc = create_layout_css_document(
@@ -3660,11 +3651,11 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         return nullptr;
     }
 
-    auto step5_end = std::chrono::high_resolution_clock::now();
+    auto step5_end = time_now_ns();
     log_info("[TIMING] Step 5 - Build DOM tree: %.1fms",
-        std::chrono::duration<double, std::milli>(step5_end - step5_start).count());
+        time_elapsed_ms_f(step5_start, step5_end));
 
-    auto step6_start = std::chrono::high_resolution_clock::now();
+    auto step6_start = time_now_ns();
     CssStylesheet* script_stylesheet = nullptr;
     int inline_stylesheet_count = 0;
     CssStylesheet** inline_stylesheets = nullptr;
@@ -3679,11 +3670,11 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
             html_elem, dom_root, css_engine, script_filepath, pool, &inline_stylesheet_count);
     }
 
-    auto step6_end = std::chrono::high_resolution_clock::now();
+    auto step6_end = time_now_ns();
     log_info("[TIMING] Step 6 - CSS parse: %.1fms",
-        std::chrono::duration<double, std::milli>(step6_end - step6_start).count());
+        time_elapsed_ms_f(step6_start, step6_end));
 
-    auto step7_start = std::chrono::high_resolution_clock::now();
+    auto step7_start = time_now_ns();
     CssStylesheet* script_stylesheets[1] = {script_stylesheet};
     int script_sheet_count = 0;
     CssStylesheet** all_script_stylesheets = layout_merge_css_sources(
@@ -3693,9 +3684,9 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     layout_apply_css_stylesheets(dom_doc, dom_root, all_script_stylesheets,
                                  script_sheet_count, pool, css_engine);
 
-    auto step7_end = std::chrono::high_resolution_clock::now();
+    auto step7_end = time_now_ns();
     log_info("[TIMING] Step 7 - CSS cascade: %.1fms",
-        std::chrono::duration<double, std::milli>(step7_end - step7_start).count());
+        time_elapsed_ms_f(step7_start, step7_end));
 
     populate_layout_document(dom_doc, dom_root, html_elem, HTML5, script_url, nullptr);
 
@@ -3716,9 +3707,9 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
 
     dom_doc->lambda_runtime = runtime;
 
-    auto total_end = std::chrono::high_resolution_clock::now();
+    auto total_end = time_now_ns();
     log_info("[TIMING] load_lambda_script_doc total: %.1fms",
-        std::chrono::duration<double, std::milli>(total_end - total_start).count());
+        time_elapsed_ms_f(total_start, total_end));
 
     log_notice("[Lambda Script] Script document loaded and styled");
     return dom_doc;
@@ -4002,8 +3993,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
     }
 
 
-    using namespace std::chrono;
-    auto t_start = high_resolution_clock::now();
+    auto t_start = time_now_ns();
 
     DocState* state = (DocState*)doc->state;
     LambdaFocusRestore focus_restore;
@@ -4022,7 +4012,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
         log_error("rebuild_lambda_doc: failed to rebuild DOM tree");
         return;
     }
-    auto t_dom = high_resolution_clock::now();
+    auto t_dom = time_now_ns();
 
     doc->root = new_root;
 
@@ -4045,10 +4035,10 @@ void rebuild_lambda_doc(UiContext* uicon) {
         doc, new_root, inline_sheets, inline_count, doc->document_pool, css_engine);
 
     apply_inline_styles_to_tree(new_root, doc->document_pool);
-    auto t_css = high_resolution_clock::now();
+    auto t_css = time_now_ns();
 
     layout_html_doc(uicon, doc, false);
-    auto t_layout = high_resolution_clock::now();
+    auto t_layout = time_now_ns();
 
     restore_lambda_focus(doc, state, had_focus, &focus_restore);
 
@@ -4062,13 +4052,13 @@ void rebuild_lambda_doc(UiContext* uicon) {
         doc_state_clear_reflow(state);  // layout already done by rebuild
         reflow_clear(state);          // discard stale pending reflow requests
     }
-    auto t_end = high_resolution_clock::now();
+    auto t_end = time_now_ns();
 
     log_info("[TIMING] rebuild: dom_build=%.2fms css_cascade=%.2fms layout=%.2fms total=%.2fms",
-        duration<double, std::milli>(t_dom - t_start).count(),
-        duration<double, std::milli>(t_css - t_dom).count(),
-        duration<double, std::milli>(t_layout - t_css).count(),
-        duration<double, std::milli>(t_end - t_start).count());
+        time_elapsed_ms_f(t_start, t_dom),
+        time_elapsed_ms_f(t_dom, t_css),
+        time_elapsed_ms_f(t_css, t_layout),
+        time_elapsed_ms_f(t_start, t_end));
 }
 
 void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results, int result_count) {
@@ -4118,8 +4108,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         return;
     }
 
-    using namespace std::chrono;
-    auto t_start = high_resolution_clock::now();
+    auto t_start = time_now_ns();
 
     DocState* state = (DocState*)doc->state;
     LambdaFocusRestore focus_restore;
@@ -4221,7 +4210,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
 
         apply_inline_styles_to_tree(new_dom, doc->document_pool);
     }
-    auto t_dom_css = high_resolution_clock::now();
+    auto t_dom_css = time_now_ns();
 
     if (doc->view_tree) {
         doc->incremental_layout = true;
@@ -4233,7 +4222,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     } else {
         layout_html_doc(uicon, doc, false);
     }
-    auto t_layout = high_resolution_clock::now();
+    auto t_layout = time_now_ns();
 
     if (state) {
         dirty_clear(&state->dirty_tracker);
@@ -4254,12 +4243,12 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     }
     bool has_selective = state && !state->dirty_tracker.full_repaint
                          && dirty_has_regions(&state->dirty_tracker);
-    auto t_end = high_resolution_clock::now();
+    auto t_end = time_now_ns();
 
     log_info("[TIMING] rebuild_incr: dom_patch=%.2fms layout=%.2fms total=%.2fms (subtrees=%d, selective=%s)",
-        duration<double, std::milli>(t_dom_css - t_start).count(),
-        duration<double, std::milli>(t_layout - t_dom_css).count(),
-        duration<double, std::milli>(t_end - t_start).count(),
+        time_elapsed_ms_f(t_start, t_dom_css),
+        time_elapsed_ms_f(t_dom_css, t_layout),
+        time_elapsed_ms_f(t_start, t_end),
         result_count,
         has_selective ? "yes" : "no");
 }
@@ -4653,7 +4642,7 @@ static bool layout_single_file(
     bool disable_animations = false,
     FILE* result_stream = nullptr
 ) {
-    auto total_start = std::chrono::high_resolution_clock::now();
+    auto total_start = time_now_ns();
     auto load_start = total_start;
     auto load_end = load_start;
     auto layout_start = load_start;
@@ -4778,13 +4767,13 @@ static bool layout_single_file(
         }
     }
     if (!doc) {
-        load_end = std::chrono::high_resolution_clock::now();
+        load_end = time_now_ns();
         js_mir_end_document_phase_timing(&document_js_timing);
         LayoutPhaseTiming timing = {};
         layout_phase_timing_set_load(
             &timing,
-            std::chrono::duration<double, std::milli>(load_end - total_start).count(),
-            std::chrono::duration<double, std::milli>(load_end - load_start).count(),
+            time_elapsed_ms_f(total_start, load_end),
+            time_elapsed_ms_f(load_start, load_end),
             &html_load_timing, &document_script_timing, &document_js_timing);
         write_layout_phase_timing(timing_file, input_file, false, &timing);
         log_error("Failed to load document: %s", input_file);
@@ -4793,7 +4782,7 @@ static bool layout_single_file(
         return false;
     }
 
-    load_end = std::chrono::high_resolution_clock::now();
+    load_end = time_now_ns();
     js_mir_end_document_phase_timing(&document_js_timing);
 
     ui_context->document = doc;
@@ -4829,7 +4818,7 @@ static bool layout_single_file(
     if (!doc->root && doc->view_tree && doc->view_tree->root) {
         log_info("[Layout] Document already has non-DOM view_tree (PDF/SVG/image), skipping CSS layout");
     } else {
-        auto event_layout_start = std::chrono::high_resolution_clock::now();
+        auto event_layout_start = time_now_ns();
         layout_start = event_layout_start;
         // A script geometry read can create a provisional DOM view tree before
         // font-face loading and post-script cascade; DOM documents still need
@@ -4838,14 +4827,13 @@ static bool layout_single_file(
         if (apply_initial_autofocus(doc, state)) {
             layout_html_doc(ui_context, doc, false);
         }
-        auto event_layout_end = std::chrono::high_resolution_clock::now();
+        auto event_layout_end = time_now_ns();
         layout_end = event_layout_end;
         layout_phase_ran = true;
         if (event_log) {
             char event_buf[1024];
             JsonWriter event_writer;
-            double duration_ms = std::chrono::duration<double, std::milli>(
-                event_layout_end - event_layout_start).count();
+            double duration_ms = time_elapsed_ms_f(event_layout_start, event_layout_end);
             event_state_log_begin_record(event_log, &event_writer,
                 event_buf, sizeof(event_buf), "layout.stats", layout_cascade_id);
             jw_key(&event_writer, "data");
@@ -4876,7 +4864,7 @@ static bool layout_single_file(
             set_combine_text_nodes(false);
         }
 
-        output_start = std::chrono::high_resolution_clock::now();
+        output_start = time_now_ns();
         ViewElement* root = lam::unsafe_view_element_storage(doc->view_tree->root);
         if (result_stream) {
             // The batch pipe carries only schema-v2 frames; never materialize a legacy file first.
@@ -4884,7 +4872,7 @@ static bool layout_single_file(
         } else {
             print_view_tree(root, doc->url, output_path);
         }
-        output_end = std::chrono::high_resolution_clock::now();
+        output_end = time_now_ns();
         output_phase_ran = true;
 
         if (is_pdf || is_svg) {
@@ -4893,18 +4881,18 @@ static bool layout_single_file(
     }
 
     {
-        auto total_end = std::chrono::high_resolution_clock::now();
+        auto total_end = time_now_ns();
         LayoutPhaseTiming timing = {};
         layout_phase_timing_set_load(
             &timing,
-            std::chrono::duration<double, std::milli>(total_end - total_start).count(),
-            std::chrono::duration<double, std::milli>(load_end - load_start).count(),
+            time_elapsed_ms_f(total_start, total_end),
+            time_elapsed_ms_f(load_start, load_end),
             &html_load_timing, &document_script_timing, &document_js_timing);
         timing.layout_ms = layout_phase_ran
-            ? std::chrono::duration<double, std::milli>(layout_end - layout_start).count()
+            ? time_elapsed_ms_f(layout_start, layout_end)
             : 0.0;
         timing.output_ms = output_phase_ran
-            ? std::chrono::duration<double, std::milli>(output_end - output_start).count()
+            ? time_elapsed_ms_f(output_start, output_end)
             : 0.0;
         write_layout_phase_timing(timing_file, input_file, success, &timing);
     }
@@ -5290,7 +5278,7 @@ int cmd_layout(int argc, char** argv) {
 
     int success_count = 0;
     int failure_count = 0;
-    auto batch_start = std::chrono::high_resolution_clock::now();
+    auto batch_start = time_now_ns();
 
     for (int i = 0; i < opts.input_file_count; i++) {
         const char* input_file = opts.input_files[i];
@@ -5366,8 +5354,8 @@ int cmd_layout(int argc, char** argv) {
         }
     }
 
-    auto batch_end = std::chrono::high_resolution_clock::now();
-    double total_time_ms = std::chrono::duration<double, std::milli>(batch_end - batch_start).count();
+    auto batch_end = time_now_ns();
+    double total_time_ms = time_elapsed_ms_f(batch_start, batch_end);
 
     if (!opts.stream_layout_results &&
             (opts.summary || (batch_mode && opts.input_file_count > 1))) {

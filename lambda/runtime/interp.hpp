@@ -91,6 +91,8 @@ struct InterpFrame {
     uint64_t*           callable_slot;
     Item*               env;         // closure capture env (NULL when not a closure)
     uint32_t            env_count;
+    Type**              binder_env;  // slot-indexed runtime type bindings
+    uint16_t            binder_count;
     const TypeMethod*   method;      // non-null for an interpreted bound object method
     uint64_t*           method_self; // separately rooted receiver slot for that method
     uint32_t            slot_count;

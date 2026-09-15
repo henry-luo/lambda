@@ -2,6 +2,7 @@
 #define MEMTRACK_NO_LOCATION_MACROS
 #include "memtrack.h"
 #include "log.h"
+#include "math_checked.hpp"
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
@@ -21,9 +22,6 @@ void arena_set_node_release_hook(void (*fn)(void*)) { g_arena_node_release = fn;
 // Free-list configuration
 #define ARENA_FREE_LIST_BINS 8
 #define ARENA_MIN_FREE_BLOCK_SIZE sizeof(ArenaFreeBlock)
-
-// Align up to the next multiple of alignment (must be power of 2)
-#define ALIGN_UP(n, alignment) (((n) + (alignment) - 1) & ~((alignment) - 1))
 
 // Minimum of two values
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -110,7 +108,8 @@ static inline int _arena_get_bin(size_t size) {
 }
 
 static inline size_t _arena_allocation_span(const Arena* arena, size_t size) {
-    size_t span = ALIGN_UP(size, arena->alignment);
+    size_t span = 0;
+    if (!math_size_align_up(size, arena->alignment, &span)) return 0;
     return span < ARENA_MIN_FREE_BLOCK_SIZE ? ARENA_MIN_FREE_BLOCK_SIZE : span;
 }
 
@@ -269,14 +268,13 @@ void* arena_alloc_aligned(Arena* arena, size_t size, size_t alignment) {
         return NULL;
     }
 
-    // Validate alignment (must be power of 2)
-    if (alignment == 0 || (alignment & (alignment - 1)) != 0) {
-        return NULL;
-    }
+    // Chunks are aligned to their flexible data member's 256-byte boundary.
+    if (alignment > alignof(ArenaChunk)) return NULL;
 
     // Calculate aligned size for proper accounting
     // Ensure minimum size so all blocks can participate in free-list (A1 fix)
-    size_t aligned_size = ALIGN_UP(size, alignment);
+    size_t aligned_size = 0;
+    if (!math_size_align_up(size, alignment, &aligned_size)) return NULL;
     if (aligned_size < ARENA_MIN_FREE_BLOCK_SIZE) aligned_size = ARENA_MIN_FREE_BLOCK_SIZE;
 
     // Try to allocate from free-list first (alignment-aware, A3 fix)
@@ -295,12 +293,11 @@ void* arena_alloc_aligned(Arena* arena, size_t size, size_t alignment) {
     // appending: restarting at the first chunk must not orphan its successors.
     for (;;) {
         // Calculate aligned position within the chunk.
-        uintptr_t data_start = (uintptr_t)&chunk->data[0];
-        uintptr_t current_pos = data_start + chunk->used;
-        uintptr_t aligned_pos = ALIGN_UP(current_pos, alignment);
-        size_t aligned_offset = aligned_pos - data_start;
+        size_t aligned_offset = 0;
+        if (!math_size_align_up(chunk->used, alignment, &aligned_offset)) return NULL;
 
-        if (aligned_offset + aligned_size <= chunk->capacity) {
+        if (aligned_offset <= chunk->capacity &&
+            aligned_size <= chunk->capacity - aligned_offset) {
             void* ptr = &chunk->data[aligned_offset];
             chunk->used = aligned_offset + aligned_size;
             arena->current = chunk;
@@ -629,6 +626,7 @@ void arena_free(Arena* arena, void* ptr, size_t size) {
     // the aligned allocation span. Freeing the raw size stranded tail padding
     // and made variable-sized DOM text churn grow linearly.
     size = _arena_allocation_span(arena, size);
+    if (size == 0) return;
 
     // Bump-back coalescing: if block is at the end of current chunk,
     // reclaim space directly instead of adding to free-list (A4 fix)
@@ -736,6 +734,7 @@ void* arena_realloc(Arena* arena, void* ptr, size_t old_size, size_t new_size) {
 
     size_t old_span = _arena_allocation_span(arena, old_size);
     size_t new_span = _arena_allocation_span(arena, new_size);
+    if (old_span == 0 || new_span == 0) return NULL;
 
     // Same allocator span -> no-op
     if (new_span == old_span) {

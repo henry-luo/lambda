@@ -30,7 +30,7 @@ small, zero-cost, C-ABI-safe header facilities that extend the existing design v
 | **A.** Unchecked allocation return, then immediate write | ❌ (only `ItemOrError` sketched as future work) | **New:** two-type model — `NonNull<T>` (infallible arena, §3.7) + `[[nodiscard]] checked_alloc` (fallible pool, §3.3), backed by the Memory-Context OOM loop |
 | **B.** Fixed buffer trusts a length computed elsewhere | ❌ | **New:** `lib/span.hpp` (`Span<T>` / `ByteCursor`) |
 | **C.** Pointer advance past end-of-input without recheck | ❌ | **New:** `lib/span.hpp` (`ByteCursor`) |
-| **D.** `int` for sizes/counts/indices feeding allocation | ❌ | **New:** `lib/checked_math.hpp` |
+| **D.** `int` for sizes/counts/indices feeding allocation | ❌ | **New:** `lib/math_checked.hpp` |
 | **E.** Raw pointer into a pool freed out from under it | ✅ `PersistentField`/`DomainOutlives` (compile-time) | **Extend:** generational `Handle<T>` for the runtime case + apply to Radiant registries |
 | (recursion / DoS, orthogonal) | ❌ | **New:** `lib/recursion_guard.hpp` |
 
@@ -212,7 +212,7 @@ Every facility below must:
 | `&[T]` / bounds-checked slice indexing | **`Span<T>` / `ByteCursor`** (`lib/span.hpp`, new) | partial — `StrView` is non-owning but unchecked | **C1, H1, H5**, M4, all parser OOB |
 | `try_reserve` → `Result` (fallible alloc) | **`[[nodiscard]] checked_alloc` / `try_*`** (`lib/checked_alloc.hpp`, §3.3) | only `ItemOrError` sketched | **H2, H3, H4, M5** |
 | Infallible alloc (abort-on-OOM, always a value) | **`NonNull<T>` from the arena + Memory-Context OOM loop** (§3.7) | factory landed; OOM loop = Stage 2 | **H2, H4, M5** (structural) |
-| `checked_mul` / overflow-is-an-error | **`checked_mul` / `checked_add`** (`lib/checked_math.hpp`, new) | no | **H3, H4, M2, M3**, arraylist/grid/pdf |
+| `checked_mul` / overflow-is-an-error | **`checked_mul` / `checked_add`** (`lib/math_checked.hpp`, new) | no | **H3, H4, M2, M3**, arraylist/grid/pdf |
 | Bounded recursion / stack probes | **`RecursionGuard` RAII** (`lib/recursion_guard.hpp`, new) | no | **C2**, CSS parser |
 | Lifetimes / regions (`'a` outlives) | **`PersistentField` + `DomainOutlives`** | ✅ landed ([Template](./Memory_Safety_Template.md) §1) | **C3** (compile-time half) |
 | `slotmap` / generational arena (`Weak`) | **`Handle<T>` = {index, generation}** (extend `ownership.hpp`, new) | no | **C3** (runtime half) |
@@ -328,14 +328,14 @@ test (same mechanism as `make check-int-cast`).
 > Both halves, and the Memory-Context-driven OOM strategy that backs the infallible guarantee, are
 > specified together in **§3.7**.
 
-### 3.4 New facility C — checked integer arithmetic (`lib/checked_math.hpp`)
+### 3.4 New facility C — checked integer arithmetic (`lib/math_checked.hpp`)
 
 **Closes pattern D (H3, H4, M2, M3 + the arraylist/grid/pdf latents).** Rust's `checked_mul`/`checked_add`
 return `None` on overflow; the C+ form returns `bool` and writes through an out-param, using compiler builtins
 so it's branch-cheap.
 
 ```cpp
-// lib/checked_math.hpp
+// lib/math_checked.hpp
 namespace lam {
 inline bool checked_mul(size_t a, size_t b, size_t* out) {
     return !__builtin_mul_overflow(a, b, out);     // gcc/clang; MSVC: _umul128 path
@@ -678,7 +678,7 @@ Ordered by **leverage per unit effort** (highest first), independent of the in-f
 
 | Phase | Work | Closes | Risk |
 |---|---|---|---|
-| **0** ✅ | Land `lib/span.hpp`, `lib/checked_alloc.hpp`, `lib/checked_math.hpp`, `lib/recursion_guard.hpp`, `NonNull<T>`+arena helpers in `ownership.hpp` + GTests. Header-only, no production changes. | — | None |
+| **0** ✅ | Land `lib/span.hpp`, `lib/checked_alloc.hpp`, `lib/math_checked.hpp`, `lib/recursion_guard.hpp`, `NonNull<T>`+arena helpers in `ownership.hpp` + GTests. Header-only, no production changes. | — | None |
 | **1** | Wire `ByteCursor` through `lambda/input/` `\u`/escape paths and `url_parser.c`. | **C1, H1, H5** | Low — localized |
 | **2** | Route allocation + size math in `lambda-mem.cpp`, `lambda-data*.cpp`, `display_list_storage.cpp`, `layout_grid/flex.cpp` through `checked_alloc`/`checked_mul`. Add `make check-alloc`. | **H2, H3, H4, M2, M3, M5** | Low–Med |
 | **3** | `RecursionGuard` in `build_expr` + CSS parser; reorder `_lambda_recovery_point` arming. | **C2** | Low |
@@ -693,7 +693,8 @@ machinery already validated on the Lambda side. Phase 6 is the durable backstop 
 
 **Phase 0 — landed and verified.** Header-only, no production call sites changed.
 
-- `lib/checked_math.hpp` — `checked_mul` / `checked_add` / `checked_mul_add` (builtin-overflow), `checked_narrow`.
+- `lib/math_checked.hpp` — C-compatible `math_checked_mul` / `math_checked_add` /
+  `math_checked_mul_add` plus C++ `checked_*` wrappers and `checked_narrow`.
 - `lib/span.hpp` — `Span<T>` (bounds-checked `operator[]`, non-aborting `get()`, clamped `subspan`, range-for, `unchecked()`); `ByteCursor` (`has`/`peek`/`advance`/`take`, peek-past-end returns 0).
 - `lib/checked_alloc.hpp` — `[[nodiscard]]` `checked_pool_array` / `checked_pool_sized` / `checked_realloc` (preserves `*slot` on failure) / `checked_malloc`.
 - `lib/recursion_guard.hpp` — `RecursionGuard` RAII (balanced depth counter on every exit).
@@ -744,7 +745,7 @@ behavior change for valid inputs.
   overflow, `checked_mul` the realloc size, and null-check the realloc (leaving the old buffer intact on OOM).
 - **M5 (lib)** — `lib/mempool.c`: null-check the mmap-chunk `malloc` and `munmap` the mapping on failure;
   `lib/datetime.c`: null-check the two `pool_calloc`+`strncpy` datetime-literal sites.
-- New header consumers: `checked_math.hpp` now included by `lambda-eval.cpp`, `lambda-data.cpp`,
+- New header consumers: `math_checked.hpp` now included by `lambda-eval.cpp`, `lambda-data.cpp`,
   `lambda-data-runtime.cpp`, `display_list_storage.cpp`.
 - Verified: **Lambda baseline 2942/2942**; deterministic radiant suites `test_ui_automation` 230,
   `test_page_load` 104, `test_radiant_view` 19, `test_fuzzy_crash` 24 — all 0 failures.
@@ -817,7 +818,7 @@ are failure-path/guard/clamp changes; valid-input layout geometry is unchanged.
   `mem_realloc` (overflow-checked), returning the lines collected so far.
 - **arraylist overflow** — `lib/arraylist.c`: guard the `_alloced * 2` doubling (enlarge) and the
   `newsize *= 2` loop (reserve, which could otherwise wrap to an infinite loop) against `int` overflow.
-- New header consumers: `checked_math.hpp` now also in `layout_grid.cpp`, `layout_flex.cpp`.
+- New header consumers: `math_checked.hpp` now also in `layout_grid.cpp`, `layout_flex.cpp`.
 - Verified: deterministic radiant suites `test_ui_automation` 230, `test_page_load` 104, `test_radiant_view`
   19, `test_fuzzy_crash` 24, `test_animation` 22 — all 0 failures; **Lambda baseline 2942/2942**.
 

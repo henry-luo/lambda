@@ -916,10 +916,7 @@ static void matrix_apply_point(const RdtMatrix* transform, float x, float y,
         *out_y = y;
         return;
     }
-    float w = transform->e31 * x + transform->e32 * y + transform->e33;
-    if (fabsf(w) < 0.000001f) w = 1.0f;
-    *out_x = (transform->e11 * x + transform->e12 * y + transform->e13) / w;
-    *out_y = (transform->e21 * x + transform->e22 * y + transform->e23) / w;
+    rdt_matrix_project_point(transform, x, y, out_x, out_y, 0.000001f);
 }
 
 // Replay a path's commands onto a ThorVG shape
@@ -997,7 +994,7 @@ static void path_replay_projective(RdtPath* p, Tvg_Paint shape, const RdtMatrix*
             case RdtPath::CMD_CIRCLE: {
                 const int segment_count = 24;
                 for (int j = 0; j < segment_count; j++) {
-                    float angle = ((float)j / (float)segment_count) * 2.0f * (float)M_PI;
+                    float angle = ((float)j / (float)segment_count) * math_tau_f();
                     float px = e->args[0] + cosf(angle) * e->args[2];
                     float py = e->args[1] + sinf(angle) * e->args[3];
                     matrix_apply_point(transform, px, py, &x, &y);

@@ -366,6 +366,24 @@ TEST(TypeContractMetadataTest, AstDumpPreservesSignatureAndEffectMetadata) {
     shell_result_free(&result);
 }
 
+TEST(TypeBinderTest, AstDumpPreservesBinderSitesAndDependentReferences) {
+    const char* args[] = {LAMBDA_EXE, "--emit-ast-dump",
+        "test/lambda/type_binder.ls", NULL};
+    ShellOptions options = {0};
+    options.timeout_ms = 10000;
+    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+
+    ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
+    ASSERT_NE(result.stdout_buf, nullptr);
+    // S11.4.8/D3.1.1v4: slots make binder sites and dependent uses distinct.
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(TypeBinder (name \"U\") (slot 0) (bound \"number\"))"), nullptr);
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(TypeBoundRef (slot 0) (bound \"number\"))"), nullptr);
+
+    shell_result_free(&result);
+}
+
 TEST(TypeInferenceStructuralTest, IP1OperatorsPublishPreciseTypes) {
     // IP1 [Type_Infer TIG5/TIG6/TIG11/TIG12/TIG16]: operators that previously
     // fell back to `any` now publish the type their operands prove.
@@ -1807,6 +1825,28 @@ TEST_F(NegativeScriptTest, SysFuncShadowNonCallableDoesNotFallBack) {
     EXPECT_EQ(result.output.find("3"), std::string::npos)
         << "a non-callable shadow must not fall back to the builtin\nOutput: "
         << result.output;
+}
+
+TEST_F(NegativeScriptTest, TypeBinderDiagnosticsRemainSpecific) {
+    // S11.4.8: these are semantic binder diagnostics, not generic parse errors.
+    ExpectErrorMessage("test/lambda/negative/semantic/type_binder_collision.ls",
+        "binder 'int' conflicts with a base type");
+    ExpectErrorMessage("test/lambda/negative/semantic/type_binder_bound_mismatch.ls",
+        "binder sites for 'T' must share one bound");
+    ExpectErrorMessage("test/lambda/negative/semantic/type_binder_forward_ref.ls",
+        "binder 'T' must be introduced before it is referenced");
+    ExpectErrorMessage("test/lambda/negative/semantic/type_binder_return.ls",
+        "a binder is not allowed in a return type");
+    ExpectErrorMessage("test/lambda/negative/semantic/type_binder_trailing_that.ls",
+        "a binder must follow the complete parameter contract");
+}
+
+TEST_F(NegativeScriptTest, TypeSubtypeDiagnosticsRemainSpecific) {
+    // S11.1.4: `<:` is a type relation, with function variance deferred by TGO14(b).
+    ExpectErrorMessage("test/lambda/negative/semantic/type_subtype_non_type.ls",
+        "operator `<:` requires type values");
+    ExpectErrorMessage("test/lambda/negative/semantic/type_subtype_function.ls",
+        "operator `<:` does not support function types until variance is specified");
 }
 
 //==============================================================================

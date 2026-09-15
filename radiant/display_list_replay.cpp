@@ -58,7 +58,7 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
     if (!dl_validate_or_log(dl, "dl_replay")) {
         return;
     }
-    log_debug("[DL_REPLAY] replaying %d items", dl->count);
+    log_debug("[DL_REPLAY] replaying %d items", dl->item_count());
 
     DisplayReplayDirtyClip dirty_clip = dl_replay_push_dirty_clip(vec, dirty_tracker, scale);
     const RenderBackendCaps* caps = render_backend_get_caps(vec);
@@ -71,8 +71,8 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
 
     rdt_vector_begin_batch(vec);
 
-    for (int i = 0; i < dl->count; i++) {
-        DisplayItem* item = &dl->items[i];
+    for (int i = 0; i < dl->item_count(); i++) {
+        DisplayItem* item = &dl->data()[i];
 
         if (dl_replay_skip_clean_item(&dirty_clip, item, &i)) {
             continue;

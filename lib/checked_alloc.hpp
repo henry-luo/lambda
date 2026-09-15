@@ -9,7 +9,7 @@
 #include <stdlib.h>   // realloc, free
 
 #include "mempool.h"  // Pool, pool_calloc
-#include "checked_math.hpp"
+#include "math_checked.hpp"
 
 namespace lam {
 

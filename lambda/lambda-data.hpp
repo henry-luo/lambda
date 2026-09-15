@@ -1012,6 +1012,25 @@ typedef struct TypeConstrained : Type {
     ConstraintFn constraint_fn; // compiled constraint check function
 } TypeConstrained;
 
+// A binder appears only in a function parameter contract.  `bound` is the
+// written contract; the call frame replaces `env[slot]` with the narrowest
+// admitted runtime type.  A second site for the same spelling shares `slot`.
+typedef struct TypeBinder : Type {
+    Type* bound;
+    Name* name;
+    String* parameter_name;
+    uint16_t slot;
+    int type_index;
+} TypeBinder;
+
+// A use of a preceding binder name.  No pointer back to TypeBinder is kept:
+// serialized/module-local contracts use the slot plus copied bound only.
+typedef struct TypeBoundRef : Type {
+    Type* bound;
+    uint16_t slot;
+    int type_index;
+} TypeBoundRef;
+
 typedef struct TypeParam : Type {
     struct TypeParam* next;
     bool is_optional;           // whether parameter is optional (? marker or default value)
@@ -1023,6 +1042,8 @@ typedef struct TypeParam : Type {
     // parameters use TYPE_ANY_NO_ERROR while explicit `any` uses TYPE_ANY.
     Type* contract_type;
     bool has_explicit_contract;
+    TypeBinder* binder;       // non-null for an explicit `T: type` parameter
+    struct AstNode* type_expr; // source contract, retained for binder ordering checks
 } TypeParam;
 
 typedef struct TypeFunc : Type {
@@ -1041,6 +1062,8 @@ typedef struct TypeFunc : Type {
     bool can_raise;             // true if function may raise errors (T^ or T^E)
     bool may_return_error;      // true if an Item-valued call may contain an ordinary error
     bool has_explicit_return_contract;
+    uint16_t binder_count;
+    TypeBinder** binders;       // canonical binder for each slot
 } TypeFunc;
 
 typedef struct TypeSysFunc : Type {

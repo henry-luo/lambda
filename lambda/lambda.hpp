@@ -24,6 +24,11 @@ enum TypeKind {
     // TypeParam keeps a compact carrier Type prefix plus its full source
     // contract. Mark it so identifier typing can safely recover that contract.
     TYPE_KIND_PARAM,
+    // A parameter-contract site that records the runtime type observed at
+    // entry (`number as T`).  Bound references carry only the stable slot so
+    // module-local Type graphs remain relocatable (D3.1.1v4).
+    TYPE_KIND_BINDER,
+    TYPE_KIND_BOUND_REF,
 };
 
 // Name - a qualified name with optional namespace

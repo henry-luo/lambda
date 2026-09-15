@@ -244,20 +244,13 @@ static void render_background_color(RenderContext* rdcon, ViewBlock* view, Color
 }
 
 /**
- * Convert angle in degrees to radians
- */
-static inline float deg_to_rad(float degrees) {
-    return degrees * M_PI / 180.0f;
-}
-
-/**
  * Calculate linear gradient start and end points from angle
  * CSS angle: 0deg = to top, 90deg = to right, 180deg = to bottom, 270deg = to left
  */
 static void calc_linear_gradient_points(float angle, Rect rect,
                                         float* x1, float* y1, float* x2, float* y2) {
     // Convert CSS angle to standard math angle (90deg offset)
-    float rad = deg_to_rad(angle - 90.0f);
+    float rad = math_degrees_to_radians(angle - 90.0f);
 
     float w = rect.width;
     float h = rect.height;
@@ -540,14 +533,14 @@ static void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGr
 
     float cx = w * gradient->cx;
     float cy = h * gradient->cy;
-    float from_rad = (gradient->from_angle - 90.0f) * (float)M_PI / 180.0f;
+    float from_rad = math_degrees_to_radians(gradient->from_angle - 90.0f);
 
     for (int py = 0; py < h; py++) {
         for (int px = 0; px < w; px++) {
             float dx = px - cx;
             float dy = py - cy;
             float angle = atan2f(dy, dx) - from_rad;
-            float position = fmodf((angle / (2.0f * (float)M_PI)) + 1.0f, 1.0f);
+            float position = math_wrap_positive_f(angle, math_tau_f()) / math_tau_f();
 
             Color color = get_gradient_color_at(gradient->stops, gradient->stop_count, position);
             pixels[py * w + px] = render_pixel_pack_abgr(

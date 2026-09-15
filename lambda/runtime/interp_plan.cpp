@@ -1003,7 +1003,8 @@ static bool interp_predicate_node_supported(AstNode* node) {
         case OPERATOR_JOIN: case OPERATOR_AND: case OPERATOR_OR:
         case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_LT: case OPERATOR_LE:
         case OPERATOR_GT: case OPERATOR_GE: case OPERATOR_TO:
-        case OPERATOR_IS: case OPERATOR_IS_NAN: case OPERATOR_IN: case OPERATOR_AT:
+        case OPERATOR_IS: case OPERATOR_SUBTYPE: case OPERATOR_IS_NAN:
+        case OPERATOR_IN: case OPERATOR_AT:
             return interp_predicate_children_supported(node);
         default:
             return false;
@@ -1130,6 +1131,11 @@ static bool plan_resolve_import(NameEntry* entry) {
 static void plan_assign_scope(PlanCtx* pc, NameScope* scope) {
     if (!scope) return;
     for (NameEntry* e = scope->first; e; e = e->next) {
+        if (e->is_binder && e->binder && e->binder->parameter_name != e->name) {
+            // `as T` has no value binding. The physical parameter owning its
+            // site receives its normal slot; T is read from binder_env (TG9).
+            continue;
+        }
         if (e->import) {
             // Imported names consume no slot in this module's slab.
             plan_resolve_import(e);

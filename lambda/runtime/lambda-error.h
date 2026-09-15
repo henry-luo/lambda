@@ -103,6 +103,11 @@ typedef enum LambdaErrorCode {
     ERR_INVALIDATED_BINDING = 231,     // read after a hidden cross-frame mutation
     ERR_PLACE_COPY_MUTATED = 232,     // S9.3.1/CW24: writes through a copy of a
                                       // member/index read never reach its container
+    ERR_BINDER_COLLISION = 233,       // `as T` conflicts with an in-scope name
+    ERR_BINDER_BOUND_MISMATCH = 234,  // repeated binder sites disagree on bound
+    ERR_BINDER_FORWARD_REF = 235,     // a binder name is used before its site
+    ERR_BINDER_IN_RETURN = 236,       // binders are not valid in return contracts
+    ERR_BINDER_TRAILING_THAT = 237,   // `that` follows an `as T` binder
     
     // -------------------------------------------------------------------------
     // 3xx - Runtime Errors

@@ -35,9 +35,9 @@ static void filter_grayscale(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
     float gray = 0.2126f * (*r) + 0.7152f * (*g) + 0.0722f * (*b);
 
     // Interpolate between original and grayscale
-    *r = clamp_byte((int)(*r + amount * (gray - *r) + 0.5f));
-    *g = clamp_byte((int)(*g + amount * (gray - *g) + 0.5f));
-    *b = clamp_byte((int)(*b + amount * (gray - *b) + 0.5f));
+    *r = clamp_byte_round(*r + amount * (gray - *r));
+    *g = clamp_byte_round(*g + amount * (gray - *g));
+    *b = clamp_byte_round(*b + amount * (gray - *b));
 }
 
 /**
@@ -48,9 +48,9 @@ static void filter_grayscale(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
 static void filter_brightness(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
     if (amount < 0) amount = 0;  // Clamp negative to 0
 
-    *r = clamp_byte((int)(*r * amount + 0.5f));
-    *g = clamp_byte((int)(*g * amount + 0.5f));
-    *b = clamp_byte((int)(*b * amount + 0.5f));
+    *r = clamp_byte_round(*r * amount);
+    *g = clamp_byte_round(*g * amount);
+    *b = clamp_byte_round(*b * amount);
 }
 
 /**
@@ -65,9 +65,9 @@ static void filter_contrast(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
     float gf = (*g / 255.0f - 0.5f) * amount + 0.5f;
     float bf = (*b / 255.0f - 0.5f) * amount + 0.5f;
 
-    *r = clamp_byte((int)(rf * 255.0f + 0.5f));
-    *g = clamp_byte((int)(gf * 255.0f + 0.5f));
-    *b = clamp_byte((int)(bf * 255.0f + 0.5f));
+    *r = clamp_byte_round(rf * 255.0f);
+    *g = clamp_byte_round(gf * 255.0f);
+    *b = clamp_byte_round(bf * 255.0f);
 }
 
 /**
@@ -87,9 +87,9 @@ static void filter_sepia(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
     float sb = 0.272f * rf + 0.534f * gf + 0.131f * bf;
 
     // Interpolate between original and sepia
-    *r = clamp_byte((int)(rf + amount * (sr - rf) + 0.5f));
-    *g = clamp_byte((int)(gf + amount * (sg - gf) + 0.5f));
-    *b = clamp_byte((int)(bf + amount * (sb - bf) + 0.5f));
+    *r = clamp_byte_round(rf + amount * (sr - rf));
+    *g = clamp_byte_round(gf + amount * (sg - gf));
+    *b = clamp_byte_round(bf + amount * (sb - bf));
 }
 
 static void filter_apply_rgb_matrix(uint8_t* r, uint8_t* g, uint8_t* b,
@@ -98,9 +98,9 @@ static void filter_apply_rgb_matrix(uint8_t* r, uint8_t* g, uint8_t* b,
     float new_r = matrix[0][0] * rf + matrix[0][1] * gf + matrix[0][2] * bf;
     float new_g = matrix[1][0] * rf + matrix[1][1] * gf + matrix[1][2] * bf;
     float new_b = matrix[2][0] * rf + matrix[2][1] * gf + matrix[2][2] * bf;
-    *r = clamp_byte((int)(new_r * 255.0f + 0.5f));
-    *g = clamp_byte((int)(new_g * 255.0f + 0.5f));
-    *b = clamp_byte((int)(new_b * 255.0f + 0.5f));
+    *r = clamp_byte_round(new_r * 255.0f);
+    *g = clamp_byte_round(new_g * 255.0f);
+    *b = clamp_byte_round(new_b * 255.0f);
 }
 
 /**
@@ -109,9 +109,8 @@ static void filter_apply_rgb_matrix(uint8_t* r, uint8_t* g, uint8_t* b,
  * Uses rotation in the RGB color space.
  */
 static void filter_hue_rotate(uint8_t* r, uint8_t* g, uint8_t* b, float angle) {
-    // Normalize angle to [0, 2π)
-    while (angle < 0) angle += 2.0f * M_PI;
-    while (angle >= 2.0f * M_PI) angle -= 2.0f * M_PI;
+    // normalize angle to [0, 2π).
+    angle = math_wrap_positive_f(angle, math_tau_f());
 
     float cos_a = cosf(angle);
     float sin_a = sinf(angle);
@@ -142,9 +141,9 @@ static void filter_invert(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
     if (amount == 0) return;
 
     // Interpolate between original and inverted
-    *r = clamp_byte((int)(*r + amount * (255 - 2 * (*r)) + 0.5f));
-    *g = clamp_byte((int)(*g + amount * (255 - 2 * (*g)) + 0.5f));
-    *b = clamp_byte((int)(*b + amount * (255 - 2 * (*b)) + 0.5f));
+    *r = clamp_byte_round(*r + amount * (255 - 2 * (*r)));
+    *g = clamp_byte_round(*g + amount * (255 - 2 * (*g)));
+    *b = clamp_byte_round(*b + amount * (255 - 2 * (*b)));
 }
 
 /**
@@ -172,7 +171,7 @@ static void filter_saturate(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
  */
 static void filter_opacity(uint8_t* a, float amount) {
     amount = clamp_unit(amount);
-    *a = clamp_byte((int)(*a * amount + 0.5f));
+    *a = clamp_byte_round(*a * amount);
 }
 
 typedef struct FilterPixelRegion {

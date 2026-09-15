@@ -7,17 +7,15 @@
 #include "../lib/binsearch.h"
 #include "../lib/font/font.h"
 #include "../lib/tagged.hpp"
+#include "../lib/time_util.h"
 #include "../lib/utf.h"
 
 #include "../lib/log.h"
-#include <chrono>
 
 #include <cctype>
 #include <cwctype>
 #include <stdint.h>
 #include <utf8proc.h>
-using namespace std::chrono;
-
 extern double g_text_layout_time;
 extern int64_t g_text_layout_count;
 
@@ -3825,7 +3823,7 @@ static void mark_line_non_space(Linebox* line) {
 }
 
 void layout_text(LayoutContext* lycon, DomNode *text_node) {
-    auto t_start = high_resolution_clock::now();
+    uint64_t t_start = time_now_ns();
 
 
     unsigned char* next_ch;  ViewText* text_view = null;
@@ -4961,7 +4959,6 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
 
 
-    auto t_end = high_resolution_clock::now();
-    g_text_layout_time += duration<double, std::milli>(t_end - t_start).count();
+    g_text_layout_time += time_elapsed_ms_f(t_start, time_now_ns());
     g_text_layout_count++;
 }

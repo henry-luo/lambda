@@ -15,6 +15,7 @@ corpus/edge_cases/strings.ls	functional-valid	success	direct	interp,jit	true
 @root/test/lambda/proc/proc1.ls	procedural-valid	success	run	interp,jit	true
 @root/test/lambda/proc/tune27_loop_accumulator.ls	auto-promotion	success	run	interp,jit,auto	true
 @root/test/lambda/import_vars.ls	module-root	success	direct	interp,jit	true
+@root/test/lambda/type_subtype_op.ls	functional-valid	success	direct	interp,jit	true
 @root/test/lambda/conc/message_fifo.ls	concurrency-scenario	success	run	interp,jit	true
 @root/test/lambda/proc/proc_binary_output.ls	resource-scenario	success	run	interp,jit	true
 @root/test/lambda/proc/cow_alias.ls	lifetime-scenario	success	run	interp,jit	true

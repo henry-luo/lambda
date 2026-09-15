@@ -109,6 +109,12 @@ AstNode* build_assignment_statement_from_parts(Transpiler* tp,
 bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         SourceSpan diagnostic_span, int arg_count);
 
+// Collects the invocation-local contracts selected by a statically typed call
+// to a binder-carrying function.  MIR uses this semantic result to form an
+// exact raw-variant key; validation remains responsible for diagnostics.
+bool lambda_ast_collect_static_binder_env(AstCallNode* call,
+        Type** env_out, uint16_t env_count);
+
 // Builds the ordinary unary semantic node after parsing has committed its
 // operator and operand. The special spread/type-negation forms intentionally
 // remain owned by their dedicated constructors.
@@ -138,6 +144,8 @@ AstNode* build_element_from_parts(Transpiler* tp, SourceSpan span,
 AstNamedNode* build_param_from_parts(Transpiler* tp, SourceSpan span,
         StrView name, AstNode* type_expr, AstNode* default_value,
         bool optional, bool is_var);
+AstNode* build_binder_type_from_parts(Transpiler* tp, SourceSpan span,
+        AstNode* base, StrView name);
 AstNode* build_function_from_parts(Transpiler* tp, SourceSpan span,
         StrView name, AstNode* params, AstNode* returned, AstNode* error_type,
         AstNode* body, bool is_proc, bool variadic, bool raised);

@@ -412,8 +412,7 @@ static bool pdf_image_pixels_are_opaque(const uint32_t* pixels,
 static void pdf_transform_point(const RdtMatrix* transform, float x, float y,
                                 float* out_x, float* out_y) {
     if (transform) {
-        *out_x = transform->e11 * x + transform->e12 * y + transform->e13;
-        *out_y = transform->e21 * x + transform->e22 * y + transform->e23;
+        rdt_matrix_transform_point(transform, x, y, out_x, out_y);
     } else {
         *out_x = x;
         *out_y = y;
@@ -700,8 +699,7 @@ static Color pdf_gradient_sample_stops(const RdtGradientStop* stops, int stop_co
         if (t > next->offset) continue;
         float span = next->offset - prev->offset;
         float local_t = span > 1e-6f ? (t - prev->offset) / span : 0.0f;
-        if (local_t < 0.0f) local_t = 0.0f;
-        if (local_t > 1.0f) local_t = 1.0f;
+        local_t = clamp_unit(local_t);
         out.r = (uint8_t)(prev->r + (next->r - prev->r) * local_t);
         out.g = (uint8_t)(prev->g + (next->g - prev->g) * local_t);
         out.b = (uint8_t)(prev->b + (next->b - prev->b) * local_t);
@@ -792,8 +790,7 @@ static bool pdf_raster_fallback_gradient(PdfRenderContext* ctx,
         for (int px = 0; px < surface_w; px++) {
             float x = left + ((float)px + 0.5f) * width / (float)surface_w;
             float t = position(paint, x, y);
-            if (t < 0.0f) t = 0.0f;
-            if (t > 1.0f) t = 1.0f;
+            t = clamp_unit(t);
             pixels[py * surface_w + px] =
                 pdf_gradient_sample_stops(stops, stop_count, t).c;
         }
@@ -979,8 +976,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             }
             state->opacity_stack[state->active_effect_depth++] = state->current_opacity;
             state->current_opacity *= p->opacity;
-            if (state->current_opacity < 0.0f) state->current_opacity = 0.0f;
-            if (state->current_opacity > 1.0f) state->current_opacity = 1.0f;
+            state->current_opacity = clamp_unit(state->current_opacity);
             if (HPDF_Page_GSave(ctx->current_page) != HPDF_OK) {
                 log_error("[PDF_PAINT_IR] failed to save PDF graphics state for opacity group");
                 return true;
@@ -1017,8 +1013,8 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
         return false;
     };
 
-    for (int i = 0; i < ctx->paint_list.count; i++) {
-        PaintCmd* cmd = &ctx->paint_list.cmds[i];
+    for (int i = 0; i < ctx->paint_list.item_count(); i++) {
+        PaintCmd* cmd = &ctx->paint_list.data()[i];
         state->command_count++;
         if (handle_transform_stack(cmd)) continue;
         if (handle_effect_stack(cmd)) continue;
@@ -1212,14 +1208,14 @@ static PaintCmd* pdf_effect_fallback_latest_cmd(PdfRenderContext* ctx,
                                                 int index,
                                                 PaintOp expected_op) {
     if (!ctx || !ctx->effect_fallback.active || !list || index < 0) return nullptr;
-    if (list->count != index + 1) return nullptr;
-    PaintCmd* cmd = &list->cmds[index];
+    if (list->item_count() != index + 1) return nullptr;
+    PaintCmd* cmd = &list->data()[index];
     return cmd->op == expected_op ? cmd : nullptr;
 }
 
 static bool pdf_paint_fill_path(PdfRenderContext* ctx, RdtPath* path, Color color) {
     PaintList* list = pdf_active_paint_list(ctx);
-    int index = list ? list->count : -1;
+    int index = list ? list->item_count() : -1;
     paint_fill_path(list, path, color, RDT_FILL_WINDING, nullptr);
     bool owns_path = false;
     PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index, PAINT_FILL_PATH);
@@ -1244,7 +1240,7 @@ static void pdf_paint_draw_image(PdfRenderContext* ctx, ImageSurface* img,
 static bool pdf_paint_stroke_path(PdfRenderContext* ctx, RdtPath* path,
                                   Color color, float width) {
     PaintList* list = pdf_active_paint_list(ctx);
-    int index = list ? list->count : -1;
+    int index = list ? list->item_count() : -1;
     paint_stroke_path(list, path, color, width,
                       RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0.0f, nullptr);
     bool owns_path = false;
@@ -1262,7 +1258,7 @@ static bool pdf_paint_fill_linear_gradient(PdfRenderContext* ctx,
                                            RdtGradientStop* stops) {
     if (!gradient) return false;
     PaintList* list = pdf_active_paint_list(ctx);
-    int index = list ? list->count : -1;
+    int index = list ? list->item_count() : -1;
     paint_fill_linear_gradient(list, gradient->path,
                                gradient->x1, gradient->y1,
                                gradient->x2, gradient->y2,
@@ -1285,7 +1281,7 @@ static bool pdf_paint_fill_radial_gradient(PdfRenderContext* ctx,
                                            RdtGradientStop* stops) {
     if (!gradient) return false;
     PaintList* list = pdf_active_paint_list(ctx);
-    int index = list ? list->count : -1;
+    int index = list ? list->item_count() : -1;
     paint_fill_radial_gradient(list, gradient->path,
                                gradient->cx, gradient->cy, gradient->r,
                                gradient->stops, gradient->stop_count,
@@ -1776,8 +1772,7 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
         return NULL;
     }
 
-    PdfRenderContext ctx;
-    memset(&ctx, 0, sizeof(PdfRenderContext));
+    PdfRenderContext ctx = {};
     pdf_paint_lowering_state_init(&ctx.paint_state);
 
     // Create PDF document

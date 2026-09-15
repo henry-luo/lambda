@@ -274,7 +274,7 @@ static void canvas_note_pixels_changed(CanvasEntry* entry) {
 }
 
 static Color canvas_effective_color(Color color, float global_alpha) {
-    color.a = (uint8_t)((float)color.a * global_alpha + 0.5f);
+    color.a = clamp_byte_round((float)color.a * global_alpha);
     return color;
 }
 
@@ -637,7 +637,7 @@ extern "C" bool radiant_canvas_arc(void* canvas_element, float x, float y,
                                       float end_angle, bool counter_clockwise) {
     CanvasEntry* entry = canvas_entry_for_element((DomElement*)canvas_element, true);
     if (!canvas_ensure_path(entry) || radius < 0.0f) return false;
-    const float two_pi = 6.28318530717958647692f;
+    const float two_pi = math_tau_f();
     float delta = end_angle - start_angle;
     if (!counter_clockwise) {
         while (delta < 0.0f) delta += two_pi;
@@ -655,7 +655,7 @@ extern "C" bool radiant_canvas_arc(void* canvas_element, float x, float y,
         entry->path_subpath_y = start_y;
         entry->path_has_subpath = true;
     }
-    int segments = (int)ceilf(fabsf(delta) / 1.57079632679489661923f); // INT_CAST_OK: arc uses at most four cubic quarters.
+    int segments = (int)ceilf(fabsf(delta) / (math_pi_f() * 0.5f)); // INT_CAST_OK: arc uses at most four cubic quarters.
     if (segments < 1) segments = 1;
     float step = delta / (float)segments;
     for (int index = 0; index < segments; index++) {
@@ -855,7 +855,7 @@ extern "C" bool radiant_canvas_fill_text(void* canvas_element, void* font_handle
     int saved_clip_depth = 0;
     int pushed_clips = canvas_push_clips(entry, &vector, &saved_clip_depth);
     // The glyph surface keeps text raster local; Rdt applies canvas transform and clips.
-    uint8_t opacity = (uint8_t)(entry->state.global_alpha * 255.0f + 0.5f);
+    uint8_t opacity = clamp_byte_round(entry->state.global_alpha * 255.0f);
     rdt_draw_image(&vector, (const uint32_t*)text_surface->pixels,
                    text_surface->width, text_surface->height,
                    text_surface->pitch / 4, 0.0f, 0.0f,

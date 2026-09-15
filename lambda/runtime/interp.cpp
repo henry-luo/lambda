@@ -136,11 +136,20 @@ public:
     InterpFrameGuard(InterpState* st, const AstFuncNode* fn, Script* module,
                      const FnFramePlan* plan, Item* env, uint32_t env_count,
                      const TypeMethod* method = NULL, Item method_self = ItemNull,
-                     Function* callable = NULL)
+                     Function* callable = NULL, const TypeFunc* signature = NULL)
             : frame_{}, roots_{}, mark_{}, ok_(false) {
         mark_ = lambda_side_stack_snapshot();
         size_t slots = plan && plan->planned ? plan->total_slots : 1;
-        size_t root_slots = slots + (callable ? 1 : 0) + (method ? 1 : 0);
+        uint16_t binder_count = signature ? signature->binder_count : 0;
+        if (binder_count > LAMBDA_MAX_FUNCTION_ARGS) {
+            log_error("interp-binder: signature has too many binder slots");
+            return;
+        }
+        // Binder types can be heap-owned type values. Reserve exact Item-shaped
+        // roots for their direct-pointer carriers rather than relying on the
+        // retired native-stack scan (D5, D3.3.3v3).
+        size_t root_slots = slots + (callable ? 1 : 0) + (method ? 1 : 0) +
+            binder_count;
         if (!lambda_root_frame_begin(&roots_, root_slots)) {
             // Fail closed through the armed recovery point rather than run
             // with non-rooting slots.
@@ -162,6 +171,17 @@ public:
         frame_.method = method;
         frame_.method_self = method ? roots_.slots + auxiliary_slot : NULL;
         if (frame_.method_self) *frame_.method_self = method_self.item;
+        auxiliary_slot += method ? 1 : 0;
+        frame_.binder_count = binder_count;
+        frame_.binder_env = binder_count
+            ? (Type**)(void*)(roots_.slots + auxiliary_slot) : NULL;
+        for (uint16_t index = 0; index < binder_count; index++) {
+            // NULL records that no binder site has supplied a concrete type.
+            // TypeBoundRef admits against its declared bound until this slot is
+            // written, so `int` as the first value is not mistaken for an
+            // already-bound `int` during a later numeric join (S4.2.2).
+            frame_.binder_env[index] = NULL;
+        }
         frame_.slot_count = (uint32_t)slots;
         uint32_t named = plan ? (uint32_t)plan->param_count + plan->local_count : 0;
         frame_.vargs_index = plan && plan->vargs_index != UINT16_MAX
@@ -646,8 +666,69 @@ static bool interp_declared_optional_array(Type* type) {
     return base && base->type_id == LMD_TYPE_ARRAY;
 }
 
+static bool interp_contract_has_binder(Type* type, bool include_refs, int depth = 0) {
+    if (!type || depth > 64) return false;
+    if (type->type_id == LMD_TYPE_TYPE) {
+        switch (type->kind) {
+        case TYPE_KIND_BINDER:
+            return true;
+        case TYPE_KIND_BOUND_REF:
+            return include_refs;
+        case TYPE_KIND_UNARY:
+            return interp_contract_has_binder(((TypeUnary*)type)->operand,
+                include_refs, depth + 1);
+        case TYPE_KIND_BINARY: {
+            TypeBinary* binary = (TypeBinary*)type;
+            return interp_contract_has_binder(binary->left, include_refs, depth + 1) ||
+                interp_contract_has_binder(binary->right, include_refs, depth + 1);
+        }
+        case TYPE_KIND_CONSTRAINED:
+            return interp_contract_has_binder(((TypeConstrained*)type)->base,
+                include_refs, depth + 1);
+        case TYPE_KIND_PARAM: {
+            TypeParam* parameter = (TypeParam*)type;
+            return parameter->binder || interp_contract_has_binder(
+                parameter->contract_type ? parameter->contract_type : parameter->full_type,
+                include_refs, depth + 1);
+        }
+        default:
+            return false;
+        }
+    }
+    if (type->type_id == LMD_TYPE_ARRAY) {
+        return interp_contract_has_binder(((TypeArray*)type)->nested,
+            include_refs, depth + 1);
+    }
+    if (type->type_id == LMD_TYPE_MAP || type->type_id == LMD_TYPE_ELEMENT) {
+        for (ShapeEntry* field = ((TypeMap*)type)->shape; field; field = field->next) {
+            if (interp_contract_has_binder(field->type, include_refs, depth + 1)) return true;
+        }
+    }
+    if (type->type_id == LMD_TYPE_FUNC) {
+        TypeFunc* function = (TypeFunc*)type;
+        for (TypeParam* parameter = function->param; parameter; parameter = parameter->next) {
+            if (parameter->binder || interp_contract_has_binder(
+                    parameter->contract_type ? parameter->contract_type : parameter->full_type,
+                    include_refs, depth + 1)) return true;
+        }
+        return interp_contract_has_binder(function->return_contract
+            ? function->return_contract : function->returned, include_refs, depth + 1);
+    }
+    return false;
+}
+
+static bool interp_type_uses_binder(Type* type) {
+    return interp_contract_has_binder(type, true);
+}
+
 static Item interp_coerce_declared_binding(InterpFrame* f, Item value,
         Type* declared_type, const char* boundary) {
+    if (f && interp_type_uses_binder(declared_type)) {
+        Scratch source_root(f);
+        source_root.set(value);
+        return lambda_type_check_env(source_root.get(), declared_type,
+            f->binder_env, boundary);
+    }
     value = interp_coerce_declared_array(f, value, declared_type, boundary);
     if (item_is_error(value)) return value;
     if (ast_declared_type_is_map(declared_type)) {
@@ -687,6 +768,21 @@ static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
     if (!parameter) return value;
     TypeParam* parameter_type = parameter->type &&
         parameter->type->kind == TYPE_KIND_PARAM ? (TypeParam*)parameter->type : NULL;
+    if (parameter_type && parameter_type->binder) {
+        Scratch source_root(f);
+        source_root.set(value);
+        return lambda_type_check_env(source_root.get(),
+            (Type*)parameter_type->binder, f ? f->binder_env : NULL,
+            boundary ? boundary : "type parameter binding");
+    }
+    Type* contract = parameter_type && parameter_type->contract_type
+        ? parameter_type->contract_type : parameter ? parameter->declared_type : NULL;
+    if (f && interp_type_uses_binder(contract)) {
+        Scratch source_root(f);
+        source_root.set(value);
+        return lambda_type_check_env(source_root.get(), contract, f->binder_env,
+            boundary ? boundary : "declared parameter binding");
+    }
     if (parameter_type && parameter_type->is_optional && value.item == ITEM_NULL) {
         // The optional-call adapter resolves an omitted argument to null before
         // this boundary; numeric admission must preserve that valid absence,
@@ -712,6 +808,15 @@ static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
     }
     return interp_coerce_declared_binding(f, value, parameter->declared_type,
         boundary ? boundary : "declared parameter binding");
+}
+
+static bool interp_parameter_is_binder_site(const AstNamedNode* parameter) {
+    TypeParam* parameter_type = parameter && parameter->type &&
+        parameter->type->kind == TYPE_KIND_PARAM ? (TypeParam*)parameter->type : NULL;
+    Type* contract = parameter_type && parameter_type->contract_type
+        ? parameter_type->contract_type : parameter ? parameter->declared_type : NULL;
+    return parameter_type && (parameter_type->binder ||
+        interp_contract_has_binder(contract, false));
 }
 
 static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
@@ -945,6 +1050,7 @@ static Item eval_binary(InterpFrame* f, AstBinaryNode* node) {
     case OPERATOR_INTERSECT: return fn_intersect(left, right);
     case OPERATOR_EXCLUDE:   return fn_exclude(left, right);
     case OPERATOR_IS:        return (Item){.item = b2it(fn_is(left, right))};
+    case OPERATOR_SUBTYPE:   return (Item){.item = b2it(fn_subtype(left, right))};
     // `expr is nan` lowers to a one-operand fn_is_nan call (transpile-mir.cpp);
     // the parsed `nan` on the right is a marker, not a compared value.
     case OPERATOR_IS_NAN:    return (Item){.item = b2it(fn_is_nan(left))};
@@ -1274,6 +1380,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
         AstNode* positional = node->argument;
         AstNamedNode* parameter = f->fn->param;
         bool fresh_parameter_rejection = false;
+        bool source_was_error[LAMBDA_MAX_FUNCTION_ARGS] = {};
         for (int i = 0; i < (int)params; i++) {
             AstNode* value_node = has_named_args ? resolved_args[i] : positional;
             if (!has_named_args && positional) positional = positional->next;
@@ -1288,22 +1395,28 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
             }
             if (interp_frame_pending(f)) return ItemNull;
             if (tail_handoff_candidate) handoff_words[i] = words[i];
-            if (parameter) {
+            source_was_error[i] = item_is_error((Item){.item = words[i]});
+            if (parameter) parameter = (AstNamedNode*)((AstNode*)parameter)->next;
+        }
+        if (f->binder_env) {
+            for (uint16_t slot = 0; slot < f->binder_count; slot++) {
+                f->binder_env[slot] = NULL;
+            }
+        }
+        for (int pass = 0; pass < 2; pass++) {
+            parameter = f->fn->param;
+            for (int i = 0; i < (int)params && parameter;
+                    i++, parameter = (AstNamedNode*)((AstNode*)parameter)->next) {
+                if (interp_parameter_is_binder_site(parameter) != (pass == 0)) continue;
                 Item source = (Item){.item = words[i]};
                 char boundary[192];
                 interp_format_parameter_boundary(boundary, sizeof(boundary),
                     f->fn, f->fn && f->fn->name ? f->fn->name->chars : NULL, i);
-                Item coerced = interp_coerce_parameter_binding(f,
-                    source, parameter, boundary);
+                Item coerced = interp_coerce_parameter_binding(f, source, parameter, boundary);
                 words[i] = coerced.item;
-                // An incoming ItemError is an expression value returned to the
-                // tail-call expression; only a failed non-error conversion
-                // has MIR's return-before-body boundary semantics.
                 fresh_parameter_rejection = fresh_parameter_rejection ||
-                    (!item_is_error(source) &&
-                     interp_parameter_rejects_error(parameter, coerced));
+                    (!source_was_error[i] && interp_parameter_rejects_error(parameter, coerced));
             }
-            if (parameter) parameter = (AstNamedNode*)((AstNode*)parameter)->next;
         }
         TypeFunc* current_signature = f->fn && ((AstNode*)f->fn)->type &&
                 ((AstNode*)f->fn)->type->type_id == LMD_TYPE_FUNC
@@ -4231,6 +4344,15 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         // An unresolved identifier is an error value, not null: MIR emits the
         // same ItemError carrier so a surrounding handler can recover it.
         if (!entry) return ItemError;
+        if (entry->is_binder && entry->binder) {
+            if (!f->binder_env || entry->binder_slot >= f->binder_count ||
+                    !f->binder_env[entry->binder_slot]) {
+                log_error("interp-binder: unresolved binder '%.*s'", entry->name
+                    ? (int)entry->name->len : 0, entry->name ? entry->name->chars : "");
+                return ItemError;
+            }
+            return lambda_type_value_from_contract(f->binder_env[entry->binder_slot]);
+        }
         // A name bound by `type T = …` is a compile-time binding: it denotes
         // the Type* its declaration built, not a slab slot (which a type
         // declaration never writes). Lowering makes the same distinction in
@@ -5167,7 +5289,8 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
     }
     {
         InterpFrameGuard guard(st, fn_node, module, &fn_node->analysis->frame_plan,
-            (Item*)fn->closure_env, fn->closure_field_count, fn->method, method_self, fn);
+            (Item*)fn->closure_env, fn->closure_field_count, fn->method, method_self, fn,
+            signature);
         if (!guard.valid()) { st->depth++; return ItemError; }
         InterpFrame* frame = guard.frame();
         uint16_t params = fn_node->analysis->frame_plan.param_count;
@@ -5178,6 +5301,7 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
         InterpVargsGuard vargs(frame, rest);
         if (is_variadic && !vargs.valid()) return ItemError;
         int index = 0;
+        bool source_was_error[LAMBDA_MAX_FUNCTION_ARGS] = {};
         for (AstNamedNode* p = fn_node->param; p && index < (int)params;
                 p = (AstNamedNode*)((AstNode*)p)->next, index++) {
             Item value = index < argc ? args[index] : (Item){.item = ITEM_MISSING_ARGUMENT};
@@ -5207,10 +5331,51 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
                 value = prepared;
                 source = prepared;
             }
+            source_was_error[index] = item_is_error(source);
+            frame->slots[index] = value.item;
+        }
+
+        // A binder site admits against its declared bound and writes the
+        // invocation-local environment. Complete all of those writes before
+        // checking references, so `T` observes the call's joined binding
+        // rather than the first parameter's incidental representation (S4.2.2).
+        for (AstNamedNode* p = fn_node->param, *next = NULL; p && index > 0;
+                p = next) {
+            next = (AstNamedNode*)((AstNode*)p)->next;
+            int parameter_index = 0;
+            for (AstNamedNode* before = fn_node->param; before != p;
+                    before = (AstNamedNode*)((AstNode*)before)->next) parameter_index++;
+            if (!interp_parameter_is_binder_site(p)) continue;
             char boundary[192];
             interp_format_parameter_boundary(boundary, sizeof(boundary), fn_node,
-                fn->name, index);
-            value = interp_coerce_parameter_binding(frame, value, p, boundary);
+                fn->name, parameter_index);
+            Item value = interp_coerce_parameter_binding(frame,
+                (Item){.item = frame->slots[parameter_index]}, p, boundary);
+            frame->slots[parameter_index] = value.item;
+            if (p->entry && p->entry->cow_param_mutated) {
+                cow_mark_shared(value);
+            }
+            if (interp_parameter_rejects_error(p, value)) {
+                interp_signal(frame, EvalSignal::RETURNED, value);
+                if (!source_was_error[parameter_index] && frame->caller) {
+                    interp_signal(frame->caller, EvalSignal::RETURNED, value);
+                }
+                break;
+            }
+        }
+
+        for (AstNamedNode* p = fn_node->param, *next = NULL; p && !interp_frame_pending(frame);
+                p = next) {
+            next = (AstNamedNode*)((AstNode*)p)->next;
+            int parameter_index = 0;
+            for (AstNamedNode* before = fn_node->param; before != p;
+                    before = (AstNamedNode*)((AstNode*)before)->next) parameter_index++;
+            if (interp_parameter_is_binder_site(p)) continue;
+            char boundary[192];
+            interp_format_parameter_boundary(boundary, sizeof(boundary), fn_node,
+                fn->name, parameter_index);
+            Item value = interp_coerce_parameter_binding(frame,
+                (Item){.item = frame->slots[parameter_index]}, p, boundary);
             // CW29/S9.1.3 (gated): a plain param the body writes is a snapshot
             // -- one share-mark; its first write detaches a private copy and
             // the caller's value is never touched. Non-mutating callees skip
@@ -5218,14 +5383,14 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             if (p->entry && p->entry->cow_param_mutated) {
                 cow_mark_shared(value);
             }
-            frame->slots[index] = value.item;
+            frame->slots[parameter_index] = value.item;
             if (interp_parameter_rejects_error(p, value)) {
                 // Direct MIR enters neither body for a rejected parameter.
                 // Only a fresh coercion failure exits the caller; an incoming
                 // error must stay at the call-expression boundary for `or`
                 // and handler recovery.
                 interp_signal(frame, EvalSignal::RETURNED, value);
-                if (!item_is_error(source) && frame->caller) interp_signal(frame->caller,
+                if (!source_was_error[parameter_index] && frame->caller) interp_signal(frame->caller,
                     EvalSignal::RETURNED, value);
                 break;
             }

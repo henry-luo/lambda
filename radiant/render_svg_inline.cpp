@@ -20,6 +20,7 @@
 #include "../lib/font/font_internal.h"
 #include "../lib/mempool.h"
 #include "../lib/mem_grow.hpp"
+#include "../lib/math_utils.h"
 #include "../lib/str.h"
 #include "../lib/file.h"
 #include "../lib/escape.h"
@@ -743,9 +744,9 @@ static Color parse_svg_color(const char* value) {
             if (sscanf(p, "%d,%d,%d,%f", &r, &g, &b, &a) >= 3 ||
                 sscanf(p, "%d %d %d / %f", &r, &g, &b, &a) >= 3 ||
                 sscanf(p, "%d %d %d", &r, &g, &b) == 3) {
-                c.r = (uint8_t)(r < 0 ? 0 : (r > 255 ? 255 : r));
-                c.g = (uint8_t)(g < 0 ? 0 : (g > 255 ? 255 : g));
-                c.b = (uint8_t)(b < 0 ? 0 : (b > 255 ? 255 : b));
+                c.r = clamp_byte(r);
+                c.g = clamp_byte(g);
+                c.b = clamp_byte(b);
                 c.a = (uint8_t)(a * 255);
             }
         }
@@ -887,7 +888,7 @@ bool svg_parse_transform(const char* transform_str, float matrix[6]) {
                 float values[3] = {};
                 size_t count = str_parse_float_list(p, ", \t\n\r\f\v", values, 3, &p);
                 float angle = values[0];
-                float rad = angle * 3.14159265f / 180.0f;
+                float rad = math_degrees_to_radians(angle);
                 float c_val = cosf(rad);
                 float s_val = sinf(rad);
                 local[0] = c_val; local[1] = s_val;
@@ -910,7 +911,7 @@ bool svg_parse_transform(const char* transform_str, float matrix[6]) {
                 float values[1] = {};
                 str_parse_float_list(p, ", \t\n\r\f\v", values, 1, &p);
                 float angle = values[0];
-                float rad = angle * 3.14159265f / 180.0f;
+                float rad = math_degrees_to_radians(angle);
                 local[2] = tanf(rad);
             }
         } else if (strncmp(p, "skewY", 5) == 0) {
@@ -921,7 +922,7 @@ bool svg_parse_transform(const char* transform_str, float matrix[6]) {
                 float values[1] = {};
                 str_parse_float_list(p, ", \t\n\r\f\v", values, 1, &p);
                 float angle = values[0];
-                float rad = angle * 3.14159265f / 180.0f;
+                float rad = math_degrees_to_radians(angle);
                 local[1] = tanf(rad);
             }
         } else if (strncmp(p, "matrix", 6) == 0) {
@@ -1389,8 +1390,7 @@ static void draw_gradient_fill(SvgInlineRenderContext* ctx, RdtPath* path, SvgGr
                                const RdtMatrix* transform, RdtFillRule fill_rule,
                                float opacity) {
     if (!path || !def || def->stop_count < 2) return;
-    if (opacity < 0.0f) opacity = 0.0f;
-    if (opacity > 1.0f) opacity = 1.0f;
+    opacity = clamp_unit(opacity);
 
     RdtGradientStop stops[SVG_MAX_GRAD_STOPS];
     for (int i = 0; i < def->stop_count; i++) {
@@ -1939,7 +1939,7 @@ static void arc_to_beziers(RdtPath* path, float x1, float y1,
     rx = fabsf(rx);
     ry = fabsf(ry);
 
-    float phi = x_rotation * (float)M_PI / 180.0f;
+    float phi = math_degrees_to_radians(x_rotation);
     float cos_phi = cosf(phi);
     float sin_phi = sinf(phi);
 
@@ -1991,11 +1991,11 @@ static void arc_to_beziers(RdtPath* path, float x1, float y1,
     float dtheta = angle_between((x1p - cxp) / rx, (y1p - cyp) / ry,
                                  (-x1p - cxp) / rx, (-y1p - cyp) / ry);
 
-    if (!sweep && dtheta > 0) dtheta -= 2.0f * (float)M_PI;
-    if (sweep && dtheta < 0)  dtheta += 2.0f * (float)M_PI;
+    if (!sweep && dtheta > 0) dtheta -= math_tau_f();
+    if (sweep && dtheta < 0)  dtheta += math_tau_f();
 
     // split arc into segments of at most PI/2 and approximate each with a cubic bezier
-    int n_segs = (int)ceilf(fabsf(dtheta) / ((float)M_PI / 2.0f));
+    int n_segs = (int)ceilf(fabsf(dtheta) / (math_pi_f() * 0.5f));
     if (n_segs < 1) n_segs = 1;
     float seg_angle = dtheta / (float)n_segs;
     // control point distance factor: (4/3) * tan(seg_angle / 4)
@@ -2437,7 +2437,7 @@ static void render_svg_path_marker_end(SvgInlineRenderContext* ctx, Element* ele
     float angle = atan2f(end.tangent_y, end.tangent_x);
     const char* orient = get_svg_attr(marker_elem, "orient");
     if (orient && strcmp(orient, "auto") != 0 && strcmp(orient, "auto-start-reverse") != 0) {
-        angle = parse_svg_length(orient, 0.0f) * (float)M_PI / 180.0f;
+        angle = math_degrees_to_radians(parse_svg_length(orient, 0.0f));
     }
 
     RdtMatrix translate = rdt_matrix_translate(end.x, end.y);
@@ -4126,8 +4126,7 @@ static void render_svg_group(SvgInlineRenderContext* ctx, Element* elem) {
     int op_x0 = 0, op_y0 = 0, op_w = 0, op_h = 0;
     if (opacity_attr) {
         group_op = strtof(opacity_attr, nullptr);
-        if (group_op < 0.0f) group_op = 0.0f;
-        if (group_op > 1.0f) group_op = 1.0f;
+        group_op = clamp_unit(group_op);
         if (group_op < 1.0f) {
             // use backdrop save/composite so overlapping children composite correctly
             // compute bounds in screen coords from either an explicit PDF Form
@@ -4393,8 +4392,7 @@ static float svg_mask_fill_alpha(SvgInlineRenderContext* ctx, Element* child,
                                                      fill_opacity_buf, sizeof(fill_opacity_buf));
     if (fill_opacity) alpha *= strtof(fill_opacity, nullptr);
 
-    if (alpha < 0.0f) alpha = 0.0f;
-    if (alpha > 1.0f) alpha = 1.0f;
+    alpha = clamp_unit(alpha);
     return alpha;
 }
 
@@ -4660,8 +4658,7 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
     if (initial_stroke_width >= 0.0f) {
         ctx.stroke_width = initial_stroke_width;
     }
-    if (initial_opacity < 0.0f) initial_opacity = 0.0f;
-    if (initial_opacity > 1.0f) initial_opacity = 1.0f;
+    initial_opacity = clamp_unit(initial_opacity);
     ctx.opacity = initial_opacity;
 
     // start with base transform (document position/scale)
@@ -4787,8 +4784,7 @@ void render_svg_build_subscene(PaintSvgSubscene* subscene,
     subscene->stroke_none = initial_stroke_none;
     subscene->stroke_width = initial_stroke_width;
     subscene->source_path = source_path;  // RETAINED_FIELD_OK: subscene-local field, not a retained DOM field
-    if (initial_opacity < 0.0f) initial_opacity = 0.0f;
-    if (initial_opacity > 1.0f) initial_opacity = 1.0f;
+    initial_opacity = clamp_unit(initial_opacity);
     subscene->opacity = initial_opacity;
     subscene->resource_generation = (uint64_t)(uintptr_t)svg_element;
 }

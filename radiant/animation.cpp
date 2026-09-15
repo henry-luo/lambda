@@ -125,8 +125,7 @@ static float timing_eval_steps(const TimingFunction* tf, float t) {
             step = floorf(t * (float)n) / (float)n;
             break;
     }
-    if (step < 0.0f) step = 0.0f;
-    if (step > 1.0f) step = 1.0f;
+    step = clamp_unit(step);
     return step;
 }
 

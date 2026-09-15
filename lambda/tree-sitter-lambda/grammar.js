@@ -121,6 +121,7 @@ function binary_rules($, in_element) {
     // exclusion) is unguarded: it can only continue.
     mk('!', 'set_exclude', 'left'),
     mk('is', 'is_in', 'left'),
+    mk('<:', 'is_in', 'left'),
     mk('in', 'is_in', 'left'),
     mk($._at, 'is_in', 'left'),
   ];
@@ -726,7 +727,7 @@ module.exports = grammar({
         optional(field('var', $.var_param_marker)),
         field('name', choice($.identifier, $.symbol)),
         optional(field('optional', '?')),
-        optional(seq(':', field('type', $._annotation_type))),
+        optional(seq(':', field('type', $._parameter_annotation_type))),
         optional(seq('=', field('default', $._expr))),
       ),
       field('variadic', $.variadic),
@@ -1032,13 +1033,14 @@ module.exports = grammar({
     )),
 
     list_type: $ => prec.dynamic(2, seq(
-      '(', seq($._type_pattern, repeat(seq(',', $._type_pattern))), ')',
+      '(', seq($._binder_capable_type,
+        repeat(seq(',', $._binder_capable_type))), ')',
     )),
-    array_type: $ => seq('[', comma_sep($._type_pattern), ']'),
+    array_type: $ => seq('[', comma_sep($._binder_capable_type), ']'),
     map_type_item: $ => seq(
       field('name', $._field_name),
       optional(field('optional', '?')),  // §7.22: optional FIELD, as in object types
-      ':', field('as', $._type_pattern),
+      ':', field('as', $._binder_capable_type),
     ),
     map_type: $ => seq('{',
       optional(seq($.map_type_item, repeat(seq(',', $.map_type_item)))), '}',
@@ -1049,10 +1051,11 @@ module.exports = grammar({
       // §7.22: `a?: T` marks the FIELD optional (it may be absent);
       // `a: T?` makes the VALUE nullable. The two are different claims.
       optional(field('optional', '?')),
-      ':', field('as', $._type_pattern),
+      ':', field('as', $._binder_capable_type),
       optional(seq('=', field('default', $._non_null_literal))),
     )),
-    content_type: $ => seq($._type_pattern, repeat(seq(',', $._type_pattern))),
+    content_type: $ => seq($._binder_capable_type,
+      repeat(seq(',', $._binder_capable_type))),
 
     // A namespace-qualified tag is legal in an element VALUE (S2.4.3v2), so an
     // element TYPE must admit one too — `type T = <soap.Fault …>`.
@@ -1106,6 +1109,23 @@ module.exports = grammar({
     binary_type: $ => choice(...type_operators($._type_pattern)),
 
     _type_pattern: $ => choice($.unary_type, $.binary_type, $.fn_type),
+
+    // A type binder is a parameter-boundary construct. Its base is a complete
+    // annotation (including a `that` refinement), so `as T` binds looser than
+    // type operators while declarations, schemas, and return contracts retain
+    // their ordinary type grammar (S4.2.2, D3.3.3v3).
+    _parameter_annotation_type: $ => choice($.binder_type, $._annotation_type),
+    // A level-1 binder can occur below an array, map, element, or tuple in a
+    // parameter annotation. The production parser still reserves that syntax
+    // outside parameter annotations (S4.2.2, D3.3.3v3).
+    _binder_capable_type: $ => choice($.binder_type, $._type_pattern),
+    // Base-type spellings are parsed here only so the direct binder builder
+    // can issue its dedicated collision diagnostic (S11.4.8).
+    _binder_name: $ => choice($.identifier,
+      alias($._base_type_kw, $.base_type), alias('type', $.base_type)),
+    binder_type: $ => prec.right(seq(
+      field('base', $._annotation_type), 'as', field('binder', $._binder_name),
+    )),
 
     _annotation_type: $ => choice($._type_pattern, $.constrained_type),
 

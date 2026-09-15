@@ -1,6 +1,6 @@
 #pragma once
 
-#include "checked_math.hpp"
+#include "math_checked.hpp"
 #include "grow_capacity.h"
 #include "mem_grow.h"
 #include "arena.h"

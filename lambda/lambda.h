@@ -2685,12 +2685,28 @@ extern "C" {
     Item fn_ge(Item a, Item b);
     Bool fn_not(Item a);
     Bool fn_is(Item a, Item b);
+    Bool fn_subtype(Item a, Item b);
     // Type-boundary primitives used by the MIR emitter. `lambda_type_check`
     // returns its input on success and a diagnostic-carrying Error Item on a
     // mismatch; no native lane may be entered before this succeeds.
     bool lambda_type_matches(Item value, Type* expected);
     Item lambda_type_error(Item actual, Type* expected, const char* boundary);
     Item lambda_type_check(Item value, Type* expected, const char* boundary);
+    // Env-aware form used only by binder-carrying function entries.  The
+    // legacy ABI remains a NULL-env wrapper for every existing boundary.
+    Item lambda_type_check_env(Item value, Type* expected, Type** env,
+        const char* boundary);
+    // Exact identity guard for a first-class type argument.  This is not
+    // subtyping: raw variants are selected only by their immutable key.
+    Bool lambda_type_value_is_exact(Item value, Type* expected);
+    // Exact semantic-type guard for a value binder. Container shapes compare
+    // their authoritative descriptor pointer; generic containers compare the
+    // same normalized kind reported by type(value).
+    Bool lambda_value_type_is_exact(Item value, Type* expected);
+    // Box a selected contract as a first-class `type` value. Binder frames
+    // retain the inner contract for admission; expression reads need this
+    // self-tagged wrapper (D3.1.1v4).
+    Item lambda_type_value_from_contract(Type* contract);
     // Admit an exact primitive ArrayNum, or reify an empty ordinary Array,
     // under a rank-one primitive T[] contract and install its certificate.
     // Other carriers retain the complete checked-boundary path.

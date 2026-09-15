@@ -3,6 +3,7 @@
 #define MEMTRACK_NO_LOCATION_MACROS
 #include "memtrack.h"
 #include "log.h"
+#include "math_checked.hpp"
 #include "str.h"
 
 #include <stddef.h>
@@ -150,29 +151,13 @@ void pool_set_node_release_hook(void (*fn)(void*)) {
     g_pool_node_release = fn;
 }
 
-static bool checked_add_size(size_t left, size_t right, size_t* out) {
-    if (right > SIZE_MAX - left) return false;
-    *out = left + right;
-    return true;
-}
-
-static bool round_up_size(size_t value, size_t quantum, size_t* out) {
-    if (quantum == 0) return false;
-    size_t remainder = value % quantum;
-    if (remainder == 0) {
-        *out = value;
-        return true;
-    }
-    return checked_add_size(value, quantum - remainder, out);
-}
-
-static size_t align_up_size(size_t value, size_t alignment) {
+static size_t pool_align_up(size_t value) {
     size_t result = 0;
-    return round_up_size(value, alignment, &result) ? result : 0;
+    return math_size_align_up(value, POOL_ALIGNMENT, &result) ? result : 0;
 }
 
 static size_t block_header_size(void) {
-    return align_up_size(sizeof(PoolBlock), POOL_ALIGNMENT);
+    return pool_align_up(sizeof(PoolBlock));
 }
 
 static size_t pool_page_size(void) {
@@ -225,8 +210,8 @@ static size_t pool_max_size(size_t left, size_t right) {
 
 static size_t pool_block_required_size(size_t requested) {
     size_t total = 0;
-    if (!checked_add_size(block_header_size(), requested, &total)) return 0;
-    return align_up_size(total, POOL_ALIGNMENT);
+    if (!math_checked_add(block_header_size(), requested, &total)) return 0;
+    return pool_align_up(total);
 }
 
 static bool pool_block_can_hold(size_t span, size_t required) {
@@ -453,7 +438,7 @@ static bool pool_commit_more(Pool* pool, PoolExtent* extent, size_t required) {
 
     size_t minimum = pool_max_size(POOL_VM_THRESHOLD, required);
     size_t commit_size = 0;
-    if (!round_up_size(minimum, pool_page_size(), &commit_size)) return false;
+    if (!math_size_round_up(minimum, pool_page_size(), &commit_size)) return false;
     size_t available = extent->reserved - extent->committed;
     if (commit_size > available) commit_size = available;
     if (commit_size == 0 || commit_size % pool_page_size() != 0) return false;
@@ -482,8 +467,8 @@ static PoolExtent* pool_create_extent(Pool* pool, size_t required) {
         size_t reserved = 0;
         size_t commit_size = 0;
         size_t minimum_commit = pool_max_size(POOL_VM_THRESHOLD, required);
-        if (!round_up_size(target, page, &reserved) ||
-            !round_up_size(minimum_commit, page, &commit_size)) {
+        if (!math_size_round_up(target, page, &reserved) ||
+            !math_size_round_up(minimum_commit, page, &commit_size)) {
             pool_meta_free(extent);
             return NULL;
         }
@@ -514,7 +499,7 @@ static PoolExtent* pool_create_extent(Pool* pool, size_t required) {
         extent->reserved = mem_vm_region_reserved_bytes(extent->vm_region);
         extent->committed = commit_size;
     } else {
-        size_t reserved = align_up_size(target, POOL_ALIGNMENT);
+        size_t reserved = pool_align_up(target);
         if (reserved == 0) {
             pool_meta_free(extent);
             return NULL;
@@ -585,8 +570,7 @@ static PoolBlock* pool_find_block(Pool* pool, void* ptr) {
 static void pool_split_block(Pool* pool, PoolBlock* block, size_t required) {
     if (!pool || !block || block->span <= required) return;
     size_t remainder_span = block->span - required;
-    size_t minimum_remainder = align_up_size(
-        block_header_size() + POOL_MIN_PAYLOAD, POOL_ALIGNMENT);
+    size_t minimum_remainder = pool_align_up(block_header_size() + POOL_MIN_PAYLOAD);
     if (remainder_span < minimum_remainder) return;
 
     PoolExtent* extent = block->extent;
@@ -783,8 +767,7 @@ static void pool_shrink_block(Pool* pool, PoolBlock* block, size_t required,
                               size_t new_size) {
     size_t old_span = block->span;
     size_t remainder_span = old_span - required;
-    size_t minimum_remainder = align_up_size(
-        block_header_size() + POOL_MIN_PAYLOAD, POOL_ALIGNMENT);
+    size_t minimum_remainder = pool_align_up(block_header_size() + POOL_MIN_PAYLOAD);
     if (remainder_span >= minimum_remainder) {
         PoolExtent* extent = block->extent;
         PoolBlock* remainder = (PoolBlock*)((uint8_t*)block + required);
@@ -814,8 +797,7 @@ static bool pool_grow_block_in_place(Pool* pool, PoolBlock* block,
     if (extent->last == next) extent->last = block;
 
     size_t remainder_span = combined - required;
-    size_t minimum_remainder = align_up_size(
-        block_header_size() + POOL_MIN_PAYLOAD, POOL_ALIGNMENT);
+    size_t minimum_remainder = pool_align_up(block_header_size() + POOL_MIN_PAYLOAD);
     if (remainder_span >= minimum_remainder) {
         PoolBlock* remainder = (PoolBlock*)((uint8_t*)block + required);
         pool_init_free_block(remainder, extent, remainder_span, required);
