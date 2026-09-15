@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 24.3.0 (2026-09-15)
+**Spec version:** 24.4.0 (2026-09-15)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1349,6 +1349,19 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   contract may *refer* to an established `T`, but may not introduce one.
   These rules are identical at every execution tier. [TG2–TG7, TG9, TG13v2,
   TG15–TG18, D3.1.4v2]
+- **S11.4.9** A system-function registry row may declare a **type relation**
+  from one call argument to its success result. The relation is instantiated
+  from the argument's inferred type and may preserve it, select its element
+  type, or construct an array over it. Source notation such as
+  `fn fill(n: int, value: as T) T[]` describes that relation, but does **not**
+  create an invocation binder, a body-scoped `T`, a runtime check, or a
+  specialization key: system functions have one native implementation.
+  Unknown inputs retain the row's open fallback; transforms may preserve only
+  the source families their runtime implementation actually preserves (for
+  example, range transforms materialize arrays). Error behavior remains the
+  row's independently declared effect. The relation can improve static
+  inference but cannot affect an accepted program's evaluation. [S11.4.8v2,
+  SI3v2, S17.2.1, D3.3.5]
 
 ---
 

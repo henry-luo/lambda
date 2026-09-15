@@ -279,6 +279,18 @@ static void emit_dump_type_field(const char* label, const Type* type) {
     printf(")");
 }
 
+static void emit_dump_type_element_field(const char* label, const Type* type) {
+    LambdaArrayContractInfo info = {};
+    if (!type || !lambda_array_contract_info((Type*)type, &info) ||
+            !info.immediate_element) {
+        return;
+    }
+    const char* name = type_contract_display_name(info.immediate_element);
+    printf(" (%s_element_type ", label);
+    emit_dump_escaped_string(name, (int)strlen(name));
+    printf(")");
+}
+
 static void emit_dump_value_effect_field(const Type* type) {
     if (!type) return;
     printf(" (value_may_error %s)", lambda_type_accepts_error((Type*)type)
@@ -377,6 +389,7 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             emit_dump_strview_field("op", bin->op_str);
             if (node->node_type == AST_NODE_BINARY) {
                 emit_dump_type_field("value_type", node->type);
+                emit_dump_type_element_field("value_type", node->type);
                 emit_dump_value_effect_field(node->type);
             }
             emit_lambda_dump_field(source, "left", bin->left, indent + 1);
@@ -568,6 +581,7 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
         case AST_NODE_CALL_EXPR: {
             AstCallNode* call = (AstCallNode*)node;
             emit_dump_type_field("value_type", node->type);
+            emit_dump_type_element_field("value_type", node->type);
             emit_dump_value_effect_field(node->type);
             emit_lambda_dump_field(source, "function", call->function, indent + 1);
             emit_lambda_dump_list(source, "argument", call->argument, indent + 1);

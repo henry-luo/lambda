@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 7.1.1 (2026-09-15)
+**Spec version:** 7.2.0 (2026-09-15)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -638,6 +638,16 @@ that carries them.
 - **D3.3.4** Representation always follows the **full inferred contract**
   (D2.4, D2.5): an unproven indexed read infers `T?`; flow-sensitive
   proofs may narrow privately but never change the public type.
+- **D3.3.5** **System-function result relations are declarative registry
+  metadata.** `SysFuncInfo` records a result kind and source-argument index;
+  the AST builder instantiates that relation from the complete call argument
+  list. The initial relation vocabulary is fixed result, same argument,
+  element of argument, array of argument, numeric/text family preservation,
+  and audited collection transforms. It replaces first-argument-only
+  inference without reparsing source-like signatures or allocating a
+  `TypeBinder`; a relation neither exposes a type name nor changes native
+  dispatch. A row must fall back to its declared open result whenever its
+  native operation cannot prove the relation. [S11.4.9, S17.2.1, D3.3.1v2]
 
 ### D3.4 Shapes
 

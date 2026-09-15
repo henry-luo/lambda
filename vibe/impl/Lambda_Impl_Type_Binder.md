@@ -435,6 +435,17 @@ and the gradual guarantee true (TG20v2). Direct native edges to
 binder-carrying functions become legal only for call sites whose every
 binder is exact; otherwise the boxed entry of TG-P1.4 stays.
 
+**TG-P3.5 System-function result relations (TG3b; IMPLEMENTED 2026-09-15).**
+`SysFuncInfo` now carries a result kind plus its source-argument index. The
+AST builder instantiates the relation from the complete call argument list,
+so `fill(n, value)` builds the static `value: as T -> T[]` result from argument
+one rather than treating every relation as argument zero. `slice`, both
+`sort` arities, `unique`, `take`, `drop`, and `reverse` use audited collection
+transforms; `replace` preserves its text family. This metadata is deliberately
+not a `TypeBinder`: system functions expose no `T`, make no runtime binder
+environment, and retain one native implementation. Ranges normalize to arrays
+where the runtime materializes them. [S11.4.9, D3.3.5, SI3v2]
+
 Gate: `--emit-ast-dump` asserts substituted result types on the fixtures;
 `test_lambda_opt_gtest` gains the elision witnesses; three tiers identical.
 

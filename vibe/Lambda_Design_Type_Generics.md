@@ -279,6 +279,18 @@ return-type, nested-type, or future-cast syntax. The parser elaborates it
 directly to the ordinary binder record; no separate runtime, inference, or
 specialization rule exists. [S4.2.2, S11.4.8v2, D3.3.3v3]
 
+#### TG3b — System functions declare result relations, not binders **[RATIFIED 2026-09-15]**
+
+A system-function row may be described with the same source-level relationship
+as a binder — for example `fill(n: int, value: as T) T[]` — but it does not
+introduce `T` into a body or allocate a runtime binder environment. The native
+system function has no Lambda body to specialize. Instead, registry metadata
+selects a call argument and instantiates an audited result pattern from its
+inferred type. `fill` constructs `T[]` from its value argument; collection
+transforms retain only source families the runtime retains, so a range result
+is an array rather than a fictitious range. This is static result propagation,
+not generic-function invocation. [S11.4.9, D3.3.5, SI3v2]
+
 #### TG4 — First-occurrence-binds; no unification **[RATIFIED 2026-08-08]**
 
 `as T` marks **the** binding site. Every other occurrence of `T` is a
