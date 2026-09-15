@@ -40,7 +40,7 @@ struct GridNodeScratch {
 
     GridNodeScratch(LayoutContext* context, ViewBlock* container, bool initialize)
         : lycon(context), data(nullptr), count(0) {
-        int capacity = layout_count_potential_items(container, false);
+        int capacity = layout_count_flattened_item_nodes(container, false);
         if (capacity > 0) {
             data = (DomNode**)scratch_calloc(
                 &lycon->scratch, (size_t)capacity * sizeof(DomNode*));

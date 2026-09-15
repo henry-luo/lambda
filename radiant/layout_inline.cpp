@@ -2429,11 +2429,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     bool has_own_line_height = false;
     if (elmt->is_element()) {
         DomElement* dom_elmt = lam::dom_as<DOM_NODE_ELEMENT>(elmt);
-        if (dom_elmt->specified_style) {
-            has_own_line_height =
-                style_tree_get_declaration(dom_elmt->specified_style, CSS_PROPERTY_LINE_HEIGHT) != nullptr ||
-                style_tree_get_declaration(dom_elmt->specified_style, CSS_PROPERTY_FONT) != nullptr;
-        }
+        has_own_line_height = layout_style_declares_line_height(
+            dom_elmt->specified_style);
     }
     // <number> or 'normal'. CSS 2.1: number line-heights inherit the number (not
     bool font_size_changed = lycon->font.style && pa_font.style &&

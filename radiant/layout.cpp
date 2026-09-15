@@ -262,19 +262,6 @@ bool layout_get_text_initial_letter_info(const DomNode* text_node,
     return layout_get_initial_letter_info(parent, out_info);
 }
 
-static DomElement* layout_positioned_containing_block(DomElement* elem) {
-    if (!elem) return nullptr;
-    for (DomNode* cur = elem->parent; cur; cur = cur->parent) {
-        if (!cur->is_element()) continue;
-        DomElement* ancestor = cur->as_element();
-        if (ancestor->position &&
-            ancestor->positionp()->position != CSS_VALUE_STATIC) {
-            return ancestor;
-        }
-    }
-    return nullptr;
-}
-
 static bool layout_ua_block_margin_em(NameId tag, float* top_em, float* bottom_em) {
     if (!top_em || !bottom_em) return false;
     struct UaMarginScale { NameId tag; float value; };
@@ -317,7 +304,9 @@ static float layout_scroll_document_coord(DomElement* elem, bool x_axis) {
         return value;
     }
     if (elem->position && elem->positionp()->position == CSS_VALUE_ABSOLUTE) {
-        DomElement* containing_block = layout_positioned_containing_block(elem);
+        // Match abspos layout's transform/containment-aware containing block.
+        ViewBlock* containing_block = find_positioned_containing_block(
+            lam::view_as_element(static_cast<View*>(elem)));
         if (containing_block) {
             value += x_axis ? containing_block->x : containing_block->y;
         }
@@ -1643,9 +1632,12 @@ static bool block_has_declared_line_height(ViewBlock* block) {
     DomNode* node = lam::view_dom_node(block);
     if (!node || !node->is_element()) return false;
     DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(node);
-    if (!elem || !elem->specified_style) return false;
-    return style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_LINE_HEIGHT) != nullptr ||
-           style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_FONT) != nullptr;
+    return elem && layout_style_declares_line_height(elem->specified_style);
+}
+
+bool layout_style_declares_line_height(StyleTree* style) {
+    return style && (style_tree_get_declaration(style, CSS_PROPERTY_LINE_HEIGHT) ||
+                     style_tree_get_declaration(style, CSS_PROPERTY_FONT));
 }
 
 CssValue layout_cascaded_line_height(LayoutContext* lycon, ViewBlock* block) {

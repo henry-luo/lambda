@@ -39,12 +39,92 @@ bool layout_element_has_direct_text_content(DomElement* element) {
     return false;
 }
 
-ViewBlock* layout_nearest_block_ancestor(ViewElement* view) {
-    ViewElement* current = view;
+ViewBlock* layout_nearest_block_ancestor(View* view) {
+    View* current = view;
     while (current && !current->is_block()) {
-        current = current->parent_view();
+        current = current->parent;
     }
     return (current && current->is_block()) ? lam::view_require_block(current) : nullptr;
+}
+
+static int layout_collect_flattened_item_children(
+        LayoutContext* lycon, ViewBlock* container, DomNode* first_child,
+        DomNode** nodes, int capacity, const LayoutFlattenedItemPolicy* policy,
+        bool allow_skipped_element) {
+    if (!container || !nodes || capacity <= 0) return 0;
+
+    int count = 0;
+    for (DomNode* child = first_child; child; child = child->next_sibling) {
+        if (child->is_text()) {
+            if (policy && policy->include_text &&
+                policy->include_text(child, container, policy->context) &&
+                count < capacity) {
+                nodes[count++] = child;
+            }
+            continue;
+        }
+        if (!child->is_element()) continue;
+
+        DomElement* element = child->as_element();
+        if (allow_skipped_element && policy && element == policy->skipped_element) continue;
+        if (policy && policy->reset_styles_resolved) {
+            element->set_styles_resolved(false);
+        }
+
+        DisplayValue display = resolve_display_value(child);
+        if (layout_display_is_none(display)) {
+            element->view_type = RDT_VIEW_NONE;
+            continue;
+        }
+        if (display.outer == CSS_VALUE_CONTENTS) {
+            if (policy && policy->initialize_contents) {
+                layout_init_display_contents_view(lycon, element);
+            }
+            int remaining = capacity - count;
+            if (remaining > 0) {
+                count += layout_collect_flattened_item_children(
+                    lycon, container, element->first_child, nodes + count,
+                    remaining, policy, false);
+            }
+            continue;
+        }
+        if (count < capacity) nodes[count++] = child;
+    }
+    return count;
+}
+
+int layout_collect_flattened_item_nodes(LayoutContext* lycon,
+                                        ViewBlock* container,
+                                        DomNode* first_child,
+                                        DomNode** nodes, int capacity,
+                                        const LayoutFlattenedItemPolicy* policy) {
+    return layout_collect_flattened_item_children(
+        lycon, container, first_child, nodes, capacity, policy, true);
+}
+
+static int layout_count_flattened_item_children(DomNode* first_child,
+                                                bool include_text) {
+    int count = 0;
+    for (DomNode* child = first_child; child; child = child->next_sibling) {
+        if (child->is_element()) {
+            DisplayValue display = resolve_display_value(child);
+            if (display.outer == CSS_VALUE_CONTENTS) {
+                count += layout_count_flattened_item_children(
+                    child->as_element()->first_child, include_text);
+            } else {
+                count++;
+            }
+        } else if (include_text) {
+            // Flex separator text can become an anonymous item after flattening.
+            count++;
+        }
+    }
+    return count;
+}
+
+int layout_count_flattened_item_nodes(ViewBlock* container, bool include_text) {
+    return layout_count_flattened_item_children(
+        container ? container->first_child : nullptr, include_text);
 }
 
 LayoutContainingBlock layout_containing_block_for_view(ViewBlock* block) {

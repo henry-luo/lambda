@@ -48,12 +48,6 @@ static float get_explicit_css_length(LayoutContext* lycon, ViewElement* elem,
     return !isnan(size) && size > 0.0f ? size : -1.0f;
 }
 
-static bool flex_element_has_declared_line_height(DomElement* elem) {
-    if (!elem || !elem->specified_style) return false;
-    return style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_LINE_HEIGHT) != nullptr ||
-           style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_FONT) != nullptr;
-}
-
 static float flex_font_line_height(LayoutContext* lycon, float fallback) {
     if (!lycon) return fallback;
     if (font_box_handle(&lycon->font)) return calc_normal_line_height(font_box_handle(&lycon->font));
@@ -67,7 +61,7 @@ float flex_resolve_inherited_line_height(LayoutContext* lycon, DomElement* targe
         ? target->fontp()->font_size : lycon->font.current_font_size;
 
     for (DomElement* elem = target; elem; ) {
-        bool has_declared_lh = flex_element_has_declared_line_height(elem);
+        bool has_declared_lh = layout_style_declares_line_height(elem->specified_style);
         const CssValue* resolved_value = nullptr;
         ViewBlock* view = lam::view_as_block(elem);
         if (has_declared_lh && view && view->blk && view->block_mut()->line_height) {

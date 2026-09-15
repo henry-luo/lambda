@@ -989,7 +989,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     }
     flex->has_definite_cross_size = has_definite_cross;
     // scratch allocations would break the mark/restore lifetime invariant.
-    int item_capacity = layout_count_potential_items(container, true);
+    int item_capacity = layout_count_flattened_item_nodes(container, true);
     flex->allocated_items = item_capacity;
     flex->allocated_lines = item_capacity;
     if (item_capacity > 0) {
@@ -1636,43 +1636,22 @@ static bool flex_contents_whitespace_is_text_separator(DomNode* text,
            flex_adjacent_flattened_text(text, container, true) != nullptr;
 }
 
+static bool flex_collect_flattened_text_item(DomNode* text,
+                                             ViewBlock* container, void*) {
+    return layout_text_node_has_content(text) ||
+        flex_contents_whitespace_is_text_separator(text, container);
+}
+
 static int collect_flex_item_nodes(LayoutContext* lycon, ViewBlock* container,
                                    DomNode* first_child, DomNode** nodes,
                                    int capacity, DomElement* rendered_legend) {
-    int count = 0;
-    for (DomNode* child = first_child; child; child = child->next_sibling) {
-        if (child->is_text()) {
-            bool text_has_content = layout_text_node_has_content(child);
-            bool text_is_separator = flex_contents_whitespace_is_text_separator(
-                child, container);
-            bool include_text = text_has_content || text_is_separator;
-            if (include_text && count < capacity) {
-                nodes[count++] = child;
-            }
-            continue;
-        }
-        if (!child->is_element()) continue;
-        if (child == static_cast<DomNode*>(rendered_legend)) continue;
-
-        DomElement* elem = child->as_element();
-        elem->set_styles_resolved(false);
-        DisplayValue display = resolve_display_value(child);
-        if (layout_display_is_none(display)) {
-            elem->view_type = RDT_VIEW_NONE;
-            continue;
-        }
-        if (display.outer == CSS_VALUE_CONTENTS) {
-            // CSS Display: preserve the boxless DOM node while its children
-            // participate in the containing flex formatting context.
-            layout_init_display_contents_view(lycon, elem);
-            count += collect_flex_item_nodes(
-                lycon, container, elem->first_child, nodes + count,
-                capacity - count, nullptr);
-        } else if (count < capacity) {
-            nodes[count++] = child;
-        }
-    }
-    return count;
+    LayoutFlattenedItemPolicy policy = {};
+    policy.include_text = flex_collect_flattened_text_item;
+    policy.skipped_element = rendered_legend;
+    policy.initialize_contents = true;
+    policy.reset_styles_resolved = true;
+    return layout_collect_flattened_item_nodes(
+        lycon, container, first_child, nodes, capacity, &policy);
 }
 
 IntrinsicSizes flex_measure_display_contents_intrinsic_widths(
@@ -1682,7 +1661,7 @@ IntrinsicSizes flex_measure_display_contents_intrinsic_widths(
     if (item_count) *item_count = 0;
     if (!lycon || !container || !contents) return sizes;
 
-    int capacity = layout_count_potential_items(container, true);
+    int capacity = layout_count_flattened_item_nodes(container, true);
     if (capacity <= 0) return sizes;
     DomNode** nodes = (DomNode**)scratch_calloc(
         &lycon->scratch, (size_t)capacity * sizeof(DomNode*));
