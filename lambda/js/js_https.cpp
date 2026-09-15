@@ -489,13 +489,6 @@ extern "C" Item js_https_Agent(Item options) {
     return agent;
 }
 
-static bool https_string_equals(Item item, const char* value) {
-    if (get_type_id(item) != LMD_TYPE_STRING || !value) return false;
-    String* s = it2s(item);
-    int len = (int)strlen(value);
-    return s && s->len == (size_t)len && memcmp(s->chars, value, (size_t)len) == 0;
-}
-
 static Item https_default_alpn_protocols(void) {
     static const char alpn[] = { 8, 'h', 't', 't', 'p', '/', '1', '.', '1' };
     return js_buffer_from_bytes(alpn, (int)sizeof(alpn));
@@ -504,7 +497,7 @@ static Item https_default_alpn_protocols(void) {
 static Item js_https_server_listeners(Item event_item) {
     Item self = js_get_this();
     Item result = js_array_new(0);
-    if (!https_string_equals(event_item, "request")) return result;
+    if (!js_string_equals(event_item, "request")) return result;
 
     Item listener = js_get_key_cstr(self, "__https_request_listener__");
     if (js_is_callable(listener)) js_array_push(result, listener);

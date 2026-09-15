@@ -1,6 +1,7 @@
 #include "view.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lib/log.h"
+#include "../lib/str.h"
 
 #include <assert.h>
 #include <math.h>
@@ -104,10 +105,7 @@ void radiant_set_cssom_used_value_sync(RadiantCssomUsedValueSync sync) {
 static bool copy_text(char* out, size_t out_size, const char* text) {
     if (!out || out_size == 0) return false;
     const char* value = text ? text : "";
-    size_t len = strlen(value);
-    if (len >= out_size) len = out_size - 1;
-    memcpy(out, value, len);
-    out[len] = '\0';
+    str_copy(out, out_size, value, strlen(value));
     return true;
 }
 

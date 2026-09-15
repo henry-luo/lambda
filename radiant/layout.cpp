@@ -7,8 +7,7 @@
 #include "radiant.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/str.h"
-
-#include <chrono>
+#include "../lib/time_util.h"
 
 extern "C" {
 #include "../lib/memtrack.h"
@@ -21,8 +20,6 @@ extern "C" {
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/dom/dom_observers.h"
-
-using namespace std::chrono;
 
 double g_style_resolve_time = 0;
 
@@ -1704,7 +1701,7 @@ void layout_setup_block_font_metrics(LayoutContext* lycon) {
 }
 
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
-    auto t_start = high_resolution_clock::now();
+    uint64_t t_start = time_now_ns();
 
     if (node && node->is_element()) {
         DomElement* dom_elem = node->as_element();
@@ -1724,8 +1721,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 }
                 layout_refresh_font_used_zoom(static_cast<View*>(dom_elem), lycon);
                 g_style_resolve_count++;
-                auto t_end = high_resolution_clock::now();
-                double elapsed_ms = duration<double, std::milli>(t_end - t_start).count();
+                double elapsed_ms = time_elapsed_ms_f(t_start, time_now_ns());
                 g_style_resolve_time += elapsed_ms;
                 radiant::layout_profiler_record_node(&lycon->profiler,
                     radiant::LAYOUT_PROFILE_STYLE, node, elapsed_ms);
@@ -1828,8 +1824,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
         }
     }
 
-    auto t_end = high_resolution_clock::now();
-    double elapsed_ms = duration<double, std::milli>(t_end - t_start).count();
+    double elapsed_ms = time_elapsed_ms_f(t_start, time_now_ns());
     g_style_resolve_time += elapsed_ms;
     g_style_resolve_count++;
     radiant::layout_profiler_record_node(&lycon->profiler,
@@ -4281,8 +4276,7 @@ static void layout_set_root_available_width(LayoutContext* lycon, ViewBlock* roo
 }
 
 void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
-    using namespace std::chrono;
-    auto t_start = high_resolution_clock::now();
+    uint64_t t_start = time_now_ns();
 
     lycon->elmt = elmt;
     lycon->root_font_size = lycon->font.current_font_size = -1;  // unresolved yet
@@ -4315,8 +4309,8 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     lycon->block.content_width = physical_width;
     lycon->block.float_right_edge = physical_width;
 
-    auto t_init = high_resolution_clock::now();
-    log_info("%s [TIMING] layout: context init: %.1fms", elmt->source_loc(), duration<double, std::milli>(t_init - t_start).count());
+    uint64_t t_init = time_now_ns();
+    log_info("%s [TIMING] layout: context init: %.1fms", elmt->source_loc(), time_elapsed_ms_f(t_start, t_init));
 
     dom_node_resolve_style(elmt, lycon);
 
@@ -4384,8 +4378,8 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         lycon->block.given_width = -1.0f;
     }
 
-    auto t_style = high_resolution_clock::now();
-    log_info("%s [TIMING] layout: root style resolve: %.1fms", elmt->source_loc(), duration<double, std::milli>(t_style - t_init).count());
+    uint64_t t_style = time_now_ns();
+    log_info("%s [TIMING] layout: root style resolve: %.1fms", elmt->source_loc(), time_elapsed_ms_f(t_init, t_style));
 
     if (html->font) {
         setup_font(lycon->ui_context, &lycon->font, html->font);
@@ -4656,8 +4650,8 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         line_break(lycon);
     }
 
-    auto t_body_find = high_resolution_clock::now();
-    log_info("%s [TIMING] layout: body find: %.1fms", elmt->source_loc(), duration<double, std::milli>(t_body_find - t_style).count());
+    uint64_t t_body_find = time_now_ns();
+    log_info("%s [TIMING] layout: body find: %.1fms", elmt->source_loc(), time_elapsed_ms_f(t_style, t_body_find));
 
     ViewBlock* body_view = nullptr;
     if (body_node) {
@@ -4674,8 +4668,8 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         }
     }
 
-    auto t_layout_block = high_resolution_clock::now();
-    log_info("%s [TIMING] layout: layout_block: %.1fms", elmt->source_loc(), duration<double, std::milli>(t_layout_block - t_body_find).count());
+    uint64_t t_layout_block = time_now_ns();
+    log_info("%s [TIMING] layout: layout_block: %.1fms", elmt->source_loc(), time_elapsed_ms_f(t_body_find, t_layout_block));
 
     finalize_block_flow(lycon, html, CSS_VALUE_BLOCK);
 
@@ -4885,8 +4879,8 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             content_height, physical_height, v_max);
     }
 
-    auto t_finalize = high_resolution_clock::now();
-    log_info("%s [TIMING] layout: finalize_block_flow: %.1fms", elmt->source_loc(), duration<double, std::milli>(t_finalize - t_layout_block).count());
+    uint64_t t_finalize = time_now_ns();
+    log_info("%s [TIMING] layout: finalize_block_flow: %.1fms", elmt->source_loc(), time_elapsed_ms_f(t_layout_block, t_finalize));
 }
 
 int detect_html_version_lambda_css(DomDocument* doc) {
@@ -5058,8 +5052,7 @@ extern "C" bool dom_engine_layout_active(DomDocument* doc) {
 }
 
 void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
-    using namespace std::chrono;
-    auto t_start = high_resolution_clock::now();
+    uint64_t t_start = time_now_ns();
 
     reset_layout_timing();
 
@@ -5123,7 +5116,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
 
     LayoutPassScope layout_scope(&lycon, doc, uicon);
 
-    auto t_init = high_resolution_clock::now();
+    uint64_t t_init = time_now_ns();
 
     layout_html_root(&lycon, root_node);
 
@@ -5153,8 +5146,8 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
         }
         layout_apply_sticky_positions(&lycon, static_cast<View*>(root_block));
     }
-    auto t_layout = high_resolution_clock::now();
-    double layout_ms = duration<double, std::milli>(t_layout - t_init).count();
+    uint64_t t_layout = time_now_ns();
+    double layout_ms = time_elapsed_ms_f(t_init, t_layout);
     log_info("[TIMING] layout_html_root: %.1fms", layout_ms);
     log_info("[LAYOUT_PROF] layout_html_root: %.1fms", layout_ms);
 
@@ -5173,10 +5166,10 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     }
     dom_observers_post_layout();
 
-    auto t_end = high_resolution_clock::now();
-    log_info("[TIMING] print_view_tree: %.1fms", duration<double, std::milli>(t_end - t_layout).count());
+    uint64_t t_end = time_now_ns();
+    log_info("[TIMING] print_view_tree: %.1fms", time_elapsed_ms_f(t_layout, t_end));
     log_layout_timing_summary();
-    log_info("[TIMING] layout_html_doc total: %.1fms", duration<double, std::milli>(t_end - t_start).count());
+    log_info("[TIMING] layout_html_doc total: %.1fms", time_elapsed_ms_f(t_start, t_end));
     if (!is_reflow && doc->view_tree && doc->view_tree->root) {
         if (reset_script_layout && doc->state) {
             state_store_prune_after_reflow((DocState*)doc->state);

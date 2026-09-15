@@ -32164,7 +32164,7 @@
   "lambda/runtime/lambda-number.hpp",
   "lambda/runtime/sys_func_registry.h",
   "lambda/runtime/type_contract.hpp",
-  "lib/checked_math.hpp",
+  "lib/math_checked.hpp",
   "lib/log.h",
   "lambda/core/lambda-decimal.cpp",
   "lambda/runtime/runtime-state.h",

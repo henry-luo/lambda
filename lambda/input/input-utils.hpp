@@ -48,17 +48,6 @@ Item parse_prefixed_integer_value(InputContext& ctx, const char* str, int base,
                                   const char** end_out, bool report_errors,
                                   bool force_long);
 
-static inline void skip_to_newline_raw(const char** p) {
-    while (**p && **p != '\n' && **p != '\r') {
-        (*p)++;
-    }
-    if (**p == '\r' && *(*p + 1) == '\n') {
-        (*p) += 2;
-    } else if (**p == '\n' || **p == '\r') {
-        (*p)++;
-    }
-}
-
 static inline void input_skip_to_eol(SourceTracker& tracker) {
     while (!tracker.atEnd() && tracker.current() != '\n') {
         tracker.advance();

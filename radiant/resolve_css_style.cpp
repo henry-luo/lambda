@@ -6,6 +6,7 @@
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/memtrack.h"
+#include "../lib/math_utils.h"
 #include "../lib/str.h"
 #include "../lib/tagged.hpp"
 #include <string.h>
@@ -93,8 +94,7 @@ static float resolve_filter_amount(const CssValue* value, bool clamp_unit_interv
         amount = (float)value->data.number.value;
     }
     if (clamp_unit_interval) {
-        if (amount > 1.0f) amount = 1.0f;
-        if (amount < 0.0f) amount = 0.0f;
+        amount = clamp_unit(amount);
     }
     return amount;
 }
@@ -108,7 +108,7 @@ static float resolve_filter_hue_angle(const CssValue* value) {
     } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
         degrees = (float)value->data.number.value;
     }
-    return degrees * ((float)M_PI / 180.0f);
+    return math_degrees_to_radians(degrees);
 }
 
 static FilterFunction* resolve_filter_function(LayoutContext* lycon,
@@ -205,7 +205,7 @@ static bool resolve_keyword_slot(const CssValue* value, SlotType* slot) {
 static float resolve_transform_angle(const CssValue* value) {
     if (!value) return 0.0f;
     if (value->type == CSS_VALUE_TYPE_NUMBER) {
-        return (float)value->data.number.value * (float)M_PI / 180.0f;
+        return math_degrees_to_radians((float)value->data.number.value);
     }
     if (value->type != CSS_VALUE_TYPE_LENGTH && value->type != CSS_VALUE_TYPE_ANGLE) {
         return 0.0f;
@@ -214,9 +214,9 @@ static float resolve_transform_angle(const CssValue* value) {
     float angle = (float)value->data.length.value;
     switch (value->data.length.unit) {
         case CSS_UNIT_RAD: return angle;
-        case CSS_UNIT_GRAD: return angle * (float)M_PI / 200.0f;
-        case CSS_UNIT_TURN: return angle * 2.0f * (float)M_PI;
-        default: return angle * (float)M_PI / 180.0f;
+        case CSS_UNIT_GRAD: return math_gradians_to_radians(angle);
+        case CSS_UNIT_TURN: return math_turns_to_radians(angle);
+        default: return math_degrees_to_radians(angle);
     }
 }
 
@@ -2105,33 +2105,7 @@ static bool parse_object_position_component(LayoutContext* lycon, const CssValue
 }
 
 static bool css_text_has_top_level_comma(const char* text, size_t len) {
-    if (!text) return false;
-    int paren_depth = 0;
-    char quote = '\0';
-    bool escaping = false;
-    for (size_t i = 0; i < len; i++) {
-        char ch = text[i];
-        if (quote) {
-            if (escaping) {
-                escaping = false;
-            } else if (ch == '\\') {
-                escaping = true;
-            } else if (ch == quote) {
-                quote = '\0';
-            }
-            continue;
-        }
-        if (ch == '\'' || ch == '"') {
-            quote = ch;
-        } else if (ch == '(') {
-            paren_depth++;
-        } else if (ch == ')') {
-            if (paren_depth > 0) paren_depth--;
-        } else if (ch == ',' && paren_depth == 0) {
-            return true;
-        }
-    }
-    return false;
+    return text && strn_scan_top_level(text, text + len, ",", '(', ')', "\"'", true) < text + len;
 }
 
 static void resolve_background_url_function(LayoutContext* lycon, const CssDeclaration* decl, const CssValue* value) {
@@ -2713,7 +2687,7 @@ static double resolve_color_component(const CssValue* v, bool is_alpha = false) 
 }
 
 static uint8_t css_color_byte(double value) {
-    return (uint8_t)(value < 0.0 ? 0.0 : (value > 255.0 ? 255.0 : value));
+    return (uint8_t)lib_math::clamp(value, 0.0, 255.0);
 }
 
 // CSS Color Level 4 §4.2.4: Convert HSL to RGB
@@ -2731,10 +2705,10 @@ static Color hsl_to_rgb(float h, float s, float l, float a) {
     else if (h < 300) { r1 = x; g1 = 0; b1 = c; }
     else              { r1 = c; g1 = 0; b1 = x; }
     Color result;
-    result.r = (uint8_t)((r1 + m) * 255.0f + 0.5f);
-    result.g = (uint8_t)((g1 + m) * 255.0f + 0.5f);
-    result.b = (uint8_t)((b1 + m) * 255.0f + 0.5f);
-    result.a = (uint8_t)(a * 255.0f + 0.5f);
+    result.r = clamp_byte_round((r1 + m) * 255.0f);
+    result.g = clamp_byte_round((g1 + m) * 255.0f);
+    result.b = clamp_byte_round((b1 + m) * 255.0f);
+    result.a = clamp_byte_round(a * 255.0f);
     return result;
 }
 
@@ -4680,8 +4654,7 @@ static void resolve_placeholder_pseudo_style(DomElement* dom_elem, LayoutContext
         } else if (value && value->type == CSS_VALUE_TYPE_PERCENTAGE) {
             opacity = (float)(value->data.percentage.value / 100.0);
         }
-        if (opacity < 0.0f) opacity = 0.0f;
-        if (opacity > 1.0f) opacity = 1.0f;
+        opacity = clamp_unit(opacity);
         form->placeholder_opacity = opacity;
         form->placeholder_has_opacity = 1;
     }
@@ -6443,7 +6416,7 @@ static void resolve_inline_visibility_opacity(LayoutContext* lycon, ViewSpan* sp
     else if (value->type == CSS_VALUE_TYPE_NUMBER) opacity =
         (float)value->data.number.value;
     else return;
-    span->in_line->opacity = opacity < 0.0f ? 0.0f : opacity > 1.0f ? 1.0f : opacity;
+    span->in_line->opacity = clamp_unit(opacity);
 }
 
 static void resolve_line_count_property(LayoutContext* lycon, ViewBlock* block,

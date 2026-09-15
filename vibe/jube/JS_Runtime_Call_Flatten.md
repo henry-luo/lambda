@@ -691,6 +691,34 @@ trampoline; `js_call` no longer appears on the hit path.
 | MIR-interpreter mode (`--mir-interp`) smoke and regressions | pass |
 | Forced GC with poisoned frees, `mir` and `ast` backends | output identical |
 
+**Release benchmark A/B (2026-09-15, MIR backend).**
+- Method: `run_paired_benchmarks.py --language js`, 11 alternating pairs, with
+  stdout identical on every pair.
+- Candidate: release build of the current tree (P1–P6 plus the single-call
+  JC18 shape).
+- Controls: a release build of `b88a0e808` (the same merged tree without call
+  flatten), and the cached `test/benchmark/exe/lambda-v45-714d448fb2`.
+
+| Row | vs `b88a0e808` | vs v45 |
+|---|---:|---:|
+| awfy/richards | 0.960 (11/11 wins) | 0.954 |
+| awfy/deltablue | 0.957 (11/11) | 0.953 |
+| awfy/json | 0.960 (11/11) | 0.955 |
+| awfy/towers | 0.965 (11/11) | 0.968 |
+| awfy/storage | 0.979 | 0.980 |
+| r7rs/tak, cpstak | 0.997–0.998 | 1.002–1.003 |
+| r7rs/fib, fibfp, ack (31-pair recheck) | 1.003–1.006 | 1.001–1.010 |
+| beng/binarytrees (31-pair recheck) | 1.016 | 0.998 |
+
+Ratios are candidate over control; below 1.0 is faster.
+- The dynamic-call-dense AWFY rows are 2–5% faster.
+- The r7rs and beng rows make only direct recursive calls, which call flatten
+  does not change. Their deltas are within ±1%, except binarytrees at +1.6%
+  against `b88a0e808`. That row is neutral against v45, so it is not
+  attributed to the call path.
+- This is well short of §3.4's 1.3–1.6× estimate for plain calls: in these
+  workloads, call-protocol cost is a small share of total time.
+
 **test262 after the upstream merge (`c4d850bf1`): 40,256/40,261, 5 regressions,
 attributed to the merge, not P4.**
 - The five tests are `built_ins_RegExp_S15_10_2_13_A1_T10`,

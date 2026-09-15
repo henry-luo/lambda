@@ -529,13 +529,6 @@ static Item js_readable_pipe_on_drain(Item env_item) {
     return make_js_undefined();
 }
 
-static bool js_stream_string_equals(Item item, const char* literal) {
-    if (get_type_id(item) != LMD_TYPE_STRING || !literal) return false;
-    String* str = it2s(item);
-    size_t len = strlen(literal);
-    return str->len == len && memcmp(str->chars, literal, len) == 0;
-}
-
 static bool js_stream_is_listener_record(Item value) {
     if (get_type_id(value) != LMD_TYPE_MAP) return false;
     Item fn = js_get_key_default(value, key_listener_fn);
@@ -1994,10 +1987,10 @@ extern "C" Item js_stream_on(Item self, Item event_item, Item listener) {
     js_array_push(arr, js_stream_make_listener_record(listener));
 
     // if adding 'data' listener to readable, start flowing mode
-    bool is_data_event = js_stream_string_equals(event_item, "data");
-    bool is_readable_event = js_stream_string_equals(event_item, "readable");
-    bool is_finish_event = js_stream_string_equals(event_item, "finish");
-    bool is_drain_event = js_stream_string_equals(event_item, "drain");
+    bool is_data_event = js_string_equals(event_item, "data");
+    bool is_readable_event = js_string_equals(event_item, "readable");
+    bool is_finish_event = js_string_equals(event_item, "finish");
+    bool is_drain_event = js_string_equals(event_item, "drain");
 
     if (is_readable_event) {
         Item state = js_get_key_default(self, key_readable_state);
@@ -2071,7 +2064,7 @@ extern "C" Item js_stream_off(Item self, Item event_item, Item listener) {
     } else {
         js_set_key_default(listeners_map, event_item, next);
     }
-    if (js_stream_string_equals(event_item, "readable") && js_array_length(next) == 0) {
+    if (js_string_equals(event_item, "readable") && js_array_length(next) == 0) {
         js_state_set_bool(js_get_key_default(self, key_readable_state), "readableListening", false);
     }
     return self;
@@ -2089,7 +2082,7 @@ extern "C" Item js_stream_removeAllListeners(Item self, Item event_item) {
     }
     if (get_type_id(event_item) != LMD_TYPE_STRING) return self;
     js_set_key_default(listeners_map, event_item, js_array_new(0));
-    if (js_stream_string_equals(event_item, "readable")) {
+    if (js_string_equals(event_item, "readable")) {
         js_state_set_bool(js_get_key_default(self, key_readable_state), "readableListening", false);
         js_stream_call_read_if_needed(self, make_js_undefined());
     }
@@ -5468,30 +5461,20 @@ static Item js_stream_canonical_encoding(Item encoding) {
     return make_string_item(lower, len);
 }
 
-static bool js_stream_encoding_equals(String* enc, const char* literal) {
-    if (!enc || !literal) return false;
-    int lit_len = (int)strlen(literal);
-    if ((int)enc->len != lit_len) return false;
-    for (int i = 0; i < lit_len; i++) {
-        if (js_stream_ascii_lower(enc->chars[i]) != literal[i]) return false;
-    }
-    return true;
-}
-
 static bool js_stream_is_valid_encoding(Item encoding) {
     if (get_type_id(encoding) != LMD_TYPE_STRING) return true;
     String* enc = it2s(encoding);
-    return js_stream_encoding_equals(enc, "utf8") ||
-           js_stream_encoding_equals(enc, "utf-8") ||
-           js_stream_encoding_equals(enc, "hex") ||
-           js_stream_encoding_equals(enc, "base64") ||
-           js_stream_encoding_equals(enc, "latin1") ||
-           js_stream_encoding_equals(enc, "binary") ||
-           js_stream_encoding_equals(enc, "ascii") ||
-           js_stream_encoding_equals(enc, "ucs2") ||
-           js_stream_encoding_equals(enc, "ucs-2") ||
-           js_stream_encoding_equals(enc, "utf16le") ||
-           js_stream_encoding_equals(enc, "utf-16le");
+    return enc && (str_ieq_const(enc->chars, enc->len, "utf8") ||
+                   str_ieq_const(enc->chars, enc->len, "utf-8") ||
+                   str_ieq_const(enc->chars, enc->len, "hex") ||
+                   str_ieq_const(enc->chars, enc->len, "base64") ||
+                   str_ieq_const(enc->chars, enc->len, "latin1") ||
+                   str_ieq_const(enc->chars, enc->len, "binary") ||
+                   str_ieq_const(enc->chars, enc->len, "ascii") ||
+                   str_ieq_const(enc->chars, enc->len, "ucs2") ||
+                   str_ieq_const(enc->chars, enc->len, "ucs-2") ||
+                   str_ieq_const(enc->chars, enc->len, "utf16le") ||
+                   str_ieq_const(enc->chars, enc->len, "utf-16le"));
 }
 
 static Item js_stream_unknown_encoding_label(Item encoding) {
@@ -7726,7 +7709,7 @@ static Item js_stream_finished_options_sync_callback(Item options, bool* out_syn
 
     JS_ARRAY_FOREACH(symbol, symbols) {
         JS_ASSIGN_OR_RETURN(description, js_symbol_get_description(symbol));
-        if (js_stream_string_equals(description, "kEosNodeSynchronousCallback")) {
+        if (js_string_equals(description, "kEosNodeSynchronousCallback")) {
             JS_ASSIGN_OR_RETURN(value, js_get_key_default(options, symbol));
             *out_sync = js_item_is_true(value);
             return js_status_ok();
@@ -8948,7 +8931,7 @@ static Item js_readable_to_web_get_reader(Item options) {
 
 static Item js_readable_toWeb(Item readable, Item options) {
     Item type = js_get_key_cstr(options, "type");
-    if (get_type_id(type) == LMD_TYPE_STRING && !js_stream_string_equals(type, "bytes")) {
+    if (get_type_id(type) == LMD_TYPE_STRING && !js_string_equals(type, "bytes")) {
         return js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
                                         "The property 'options.type' is invalid");
     }

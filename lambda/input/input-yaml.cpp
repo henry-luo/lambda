@@ -232,7 +232,7 @@ static int current_indent(YamlParser* p) {
 
 static void skip_line(YamlParser* p) {
     const char* current = p->src + p->pos;
-    skip_to_newline_raw(&current);
+    skip_to_newline(&current);
     advance_n(p, (int)(current - (p->src + p->pos)));
 }
 

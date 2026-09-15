@@ -30,9 +30,7 @@ float css_interpolate_float(float a, float b, float t) {
 
 static inline uint8_t lerp_u8(uint8_t a, uint8_t b, float t) {
     float v = (float)a + ((float)b - (float)a) * t;
-    if (v < 0.0f) v = 0.0f;
-    if (v > 255.0f) v = 255.0f;
-    return (uint8_t)(v + 0.5f);
+    return clamp_byte_round(v);
 }
 
 Color css_interpolate_color(Color a, Color b, float t) {
@@ -69,20 +67,20 @@ static float parse_transform_angle(const char** source) {
     }
     if (str_istarts_with_cstr(unit, "grad")) {
         *source = unit + 4;
-        return angle * (float)M_PI / 200.0f;
+        return math_gradians_to_radians(angle);
     }
     if (str_istarts_with_cstr(unit, "turn")) {
         *source = unit + 4;
-        return angle * 2.0f * (float)M_PI;
+        return math_turns_to_radians(angle);
     }
     if (str_istarts_with_cstr(unit, "deg")) {
         *source = unit + 3;
-        return angle * (float)M_PI / 180.0f;
+        return math_degrees_to_radians(angle);
     }
 
     // Preserve the legacy unitless interpretation while normalizing it to radians.
     *source = end;
-    return angle * (float)M_PI / 180.0f;
+    return math_degrees_to_radians(angle);
 }
 
 static const char* skip_css_balanced_block(const char* source) {
@@ -141,7 +139,7 @@ static bool parse_color_value(const char* val, Color* out) {
         out->b = (uint8_t)strtol(p, (char**)&p, 10); while (*p == ',' || isspace((unsigned char)*p)) p++;
         if (*p == ')') { out->a = 255; return true; }
         float a = strtof(p, (char**)&p);
-        out->a = (uint8_t)(a * 255.0f + 0.5f);
+        out->a = clamp_byte_round(a * 255.0f);
         return true;
     }
 
@@ -464,15 +462,10 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
 
             // parse property value (up to ';' or '}')
             const char* val_start = p;
-            // handle nested parens (for transform functions, rgb(), etc.)
-            int paren_depth = 0;
-            while (*p && (paren_depth > 0 || (*p != ';' && *p != '}'))) {
-                if (*p == '(') paren_depth++;
-                else if (*p == ')') paren_depth--;
-                p++;
-            }
-            const char* val_end = p;
-            while (val_end > val_start && isspace((unsigned char)*(val_end - 1))) val_end--;
+            p = str_scan_top_level(p, ";}", '(', ')', "\"'", true);
+            size_t val_len = (size_t)(p - val_start);
+            str_rtrim(&val_start, &val_len);
+            const char* val_end = val_start + val_len;
 
             char val_buf[256];
             size_t vlen = val_end - val_start;
@@ -1460,14 +1453,7 @@ bool css_animation_parse_timing_function_text(const char* value,
     if (str_istarts_with_cstr(p, "cubic-bezier(")) {
         p += 13;
         float values[4];
-        for (int i = 0; i < 4; i++) {
-            p = str_skip_ascii_space(p);
-            if (*p == ',') p = str_skip_ascii_space(p + 1);
-            char* end = nullptr;
-            values[i] = strtof(p, &end);
-            if (end == p) return false;
-            p = end;
-        }
+        if (str_parse_float_list(p, ", \t\n\r\f\v", values, 4, nullptr) != 4) return false;
         timing_cubic_bezier_init(out, values[0], values[1], values[2], values[3]);
         return true;
     }

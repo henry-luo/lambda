@@ -2288,18 +2288,6 @@ void event_sim_free(EventSimContext* ctx) {
     mem_free(ctx);
 }
 
-static int count_substring_occurrences(const char* haystack, const char* needle) {
-    if (!haystack || !needle || !needle[0]) return 0;
-    int count = 0;
-    size_t needle_len = strlen(needle);
-    const char* scan = haystack;
-    while ((scan = strstr(scan, needle)) != NULL) {
-        count++;
-        scan += needle_len;
-    }
-    return count;
-}
-
 static void assert_event_log_impl(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
     if (!ctx || !uicon || !ev) return;
     EventStateLog* event_log = uicon->event_log;
@@ -2323,7 +2311,8 @@ static void assert_event_log_impl(EventSimContext* ctx, UiContext* uicon, SimEve
         return;
     }
 
-    int actual = count_substring_occurrences(content, ev->assert_contains);
+    int actual = (int)str_count(content, strlen(content), ev->assert_contains,
+                                strlen(ev->assert_contains));
     int expected = ev->assert_count_expected;
     int min_count = ev->assert_count_min;
     int max_count = ev->assert_count_max;

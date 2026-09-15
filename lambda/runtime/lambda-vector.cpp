@@ -5,7 +5,7 @@
 #include "type_contract.hpp"
 #include "lambda-number-runtime.hpp"
 #include "lambda-error.h"
-#include "../../lib/checked_math.hpp"
+#include "../../lib/math_checked.hpp"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/sort.h"

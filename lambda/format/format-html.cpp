@@ -41,16 +41,6 @@ static void format_html_attr_value(HtmlContext& ctx, const ItemReader& value) {
     }
 }
 
-static bool html_name_equals(const char* name, size_t name_len, const char* literal) {
-    size_t literal_len = strlen(literal);
-    return name && name_len == literal_len && memcmp(name, literal, literal_len) == 0;
-}
-
-static bool html_name_starts_with(const char* name, size_t name_len, const char* literal) {
-    size_t literal_len = strlen(literal);
-    return name && name_len >= literal_len && memcmp(name, literal, literal_len) == 0;
-}
-
 static void html_write_reader_string_raw(HtmlContext& ctx, const ItemReader& item) {
     if (!item.isString()) return;
     String* str = item.asString();
@@ -94,7 +84,7 @@ static bool format_html_special_element(HtmlContext& ctx, const ElementReader& e
                                         const char* tag_name, size_t tag_len, int depth) {
     for (size_t i = 0; i < sizeof(HTML_SPECIAL_TAGS) / sizeof(HTML_SPECIAL_TAGS[0]); i++) {
         const HtmlSpecialTag& special = HTML_SPECIAL_TAGS[i];
-        if (!html_name_equals(tag_name, tag_len, special.name)) continue;
+        if (!str_eq_const(tag_name, tag_len, special.name)) continue;
 
         switch (special.kind) {
         case HTML_SPECIAL_DOCUMENT:
@@ -128,8 +118,8 @@ static bool format_html_special_element(HtmlContext& ctx, const ElementReader& e
         }
     }
 
-    if (html_name_starts_with(tag_name, tag_len, "!DOCTYPE") ||
-        html_name_starts_with(tag_name, tag_len, "!doctype")) {
+    if (str_starts_with_const(tag_name, tag_len, "!DOCTYPE") ||
+        str_starts_with_const(tag_name, tag_len, "!doctype")) {
         stringbuf_append_format(ctx.output(), "<!%.*s", (int)(tag_len - 1), tag_name + 1);
         ItemReader first_child = elem.childAt(0);
         if (first_child.isString()) {
@@ -140,7 +130,7 @@ static bool format_html_special_element(HtmlContext& ctx, const ElementReader& e
         return true;
     }
 
-    if (html_name_equals(tag_name, tag_len, "html")) {
+    if (str_eq_const(tag_name, tag_len, "html")) {
         ItemReader type_attr = elem.get_attr("type");
         if (type_attr.isString()) {
             String* type_str = type_attr.asString();

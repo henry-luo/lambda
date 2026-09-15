@@ -55,7 +55,7 @@ static inline uint8_t render_composite_blend_channel(uint8_t Cb_byte, uint8_t Cs
         default:                    result = Cs; break;
     }
     int value = (int)(result * 255.0f + 0.5f);
-    return (uint8_t)(value < 0 ? 0 : (value > 255 ? 255 : value));
+    return clamp_byte(value);
 }
 
 uint32_t render_composite_blend_pixel(uint32_t backdrop, uint32_t source, CssEnum blend_mode) {
@@ -86,12 +86,12 @@ uint32_t render_composite_blend_pixel(uint32_t backdrop, uint32_t source, CssEnu
         float Bb = render_composite_blend_channel(Cb_b, Cs_b, blend_mode) / 255.0f;
         float Co = (p * (Cs_b / 255.0f) + q * (Cb_b / 255.0f) + t * Bb) / ra;
         int value = (int)(Co * 255.0f + 0.5f);
-        return (uint8_t)(value < 0 ? 0 : (value > 255 ? 255 : value));
+        return clamp_byte(value);
     };
     uint8_t rr = blendch(br, sr);
     uint8_t rg = blendch(bg, sg);
     uint8_t rb = blendch(bb, sb);
-    uint8_t new_a = (uint8_t)(ra * 255.0f + 0.5f);
+    uint8_t new_a = clamp_byte_round(ra * 255.0f);
     return render_pixel_pack_abgr(rr, rg, rb, new_a);
 }
 
@@ -149,9 +149,7 @@ void render_composite_opacity(ImageSurface* surface, const uint32_t* backdrop,
                               int x0, int y0, int width, int height,
                               float opacity) {
     int opacity_i = (int)(opacity * 255.0f + 0.5f);
-    if (opacity_i < 0) opacity_i = 0;
-    if (opacity_i > 255) opacity_i = 255;
     render_composite_apply_region(surface, backdrop, x0, y0, width, height,
-                                  RENDER_COMPOSITE_REGION_OPACITY,
-                                  CSS_VALUE_NORMAL, (uint8_t)opacity_i);
+                                  RENDER_COMPOSITE_REGION_OPACITY, CSS_VALUE_NORMAL,
+                                  clamp_byte(opacity_i));
 }

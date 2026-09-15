@@ -142,27 +142,28 @@ static bool retained_dl_clone_item_payload(DisplayList* dst,
 }
 
 static void retained_dl_rollback(DisplayList* dl, int target_count) {
-    if (!dl || target_count < 0 || target_count > dl->count) return;
-    for (int i = target_count; i < dl->count; i++) {
-        dl_item_free_owned_payload(&dl->items[i]);
+    if (!dl || target_count < 0 || target_count > dl->item_count()) return;
+    int current_count = dl->item_count();
+    for (int i = target_count; i < current_count; i++) {
+        dl_item_free_owned_payload(&dl->data()[i]);
     }
-    dl->count = target_count;
+    dl->remove_range((size_t)target_count, (size_t)(current_count - target_count));
 }
 
 static bool retained_dl_copy_range(DisplayList* dst, const DisplayList* src,
                                    int start, int end) {
-    if (!dst || !src || start < 0 || end < start || end >= src->count) return false;
+    if (!dst || !src || start < 0 || end < start || end >= src->item_count()) return false;
 
-    int dest_start = dst->count;
+    int dest_start = dst->item_count();
     for (int i = start; i <= end; i++) {
         DisplayItem* out = dl_alloc_item(dst);
         if (!out) {
             retained_dl_rollback(dst, dest_start);
             return false;
         }
-        DisplayItem copy = src->items[i];
+        DisplayItem copy = src->data()[i];
         *out = copy;
-        if (!retained_dl_clone_item_payload(dst, out, &src->items[i], start, dest_start)) {
+        if (!retained_dl_clone_item_payload(dst, out, &src->data()[i], start, dest_start)) {
             retained_dl_rollback(dst, dest_start);
             return false;
         }
@@ -203,6 +204,7 @@ void RetainedDisplayListCache::destroy() {
         while (map.next(&iter, &entry)) {
             if (entry && entry->fragment) {
                 dl_destroy(&entry->fragment->list);
+                entry->fragment->~RetainedDisplayListFragment();
                 mem_free(entry->fragment);
             }
         }
@@ -271,6 +273,7 @@ static RetainedDisplayListFragment* retained_dl_fragment_get_or_create(
     RetainedDisplayListFragment* fragment =
         (RetainedDisplayListFragment*)mem_calloc(1, sizeof(RetainedDisplayListFragment), MEM_CAT_RENDER);
     if (!fragment) return nullptr;
+    new (fragment) RetainedDisplayListFragment();
 
     fragment->view_id = view_id;
     dl_init(&fragment->list, cache->arena);
@@ -280,6 +283,7 @@ static RetainedDisplayListFragment* retained_dl_fragment_get_or_create(
     cache->map.set(entry);
     if (cache->map.oom()) {
         dl_destroy(&fragment->list);
+        fragment->~RetainedDisplayListFragment();
         mem_free(fragment);
         return nullptr;
     }
@@ -288,9 +292,9 @@ static RetainedDisplayListFragment* retained_dl_fragment_get_or_create(
 
 static bool retained_dl_range_retainable(const DisplayList* source,
                                          int start, int end) {
-    if (!source || start < 0 || end < start || end >= source->count) return false;
+    if (!source || start < 0 || end < start || end >= source->item_count()) return false;
     for (int i = start; i <= end; i++) {
-        if (!dl_item_is_retainable_for_fragment(&source->items[i])) {
+        if (!dl_item_is_retainable_for_fragment(&source->data()[i])) {
             return false;
         }
     }
@@ -300,12 +304,12 @@ static bool retained_dl_range_retainable(const DisplayList* source,
 static void retained_dl_cache_store_marker(RetainedDisplayListCache* cache,
                                            const DisplayList* source,
                                            int begin_index) {
-    if (!cache || !source || begin_index < 0 || begin_index >= source->count) return;
+    if (!cache || !source || begin_index < 0 || begin_index >= source->item_count()) return;
 
-    const DisplayItem* begin = &source->items[begin_index];
+    const DisplayItem* begin = &source->data()[begin_index];
     if (begin->op != DL_BEGIN_ELEMENT) return;
     int end_index = begin->element_marker.matching_index;
-    if (end_index <= begin_index || end_index >= source->count) return;
+    if (end_index <= begin_index || end_index >= source->item_count()) return;
 
     uint32_t view_id = begin->element_marker.view_id;
     if (view_id == 0) return;
@@ -342,8 +346,8 @@ static void retained_dl_cache_store_marker(RetainedDisplayListCache* cache,
 void retained_dl_cache_capture(RetainedDisplayListCache* cache, const DisplayList* source) {
     if (!cache || !source) return;
 
-    for (int i = 0; i < source->count; i++) {
-        const DisplayItem* item = &source->items[i];
+    for (int i = 0; i < source->item_count(); i++) {
+        const DisplayItem* item = &source->data()[i];
         if (item->op != DL_BEGIN_ELEMENT || item->element_marker.matching_index <= i) {
             continue;
         }
@@ -356,7 +360,7 @@ const RetainedDisplayListFragment* retained_dl_cache_get(RetainedDisplayListCach
     if (!cache || !cache->map.initialized() || view_id == 0) return nullptr;
     RetainedDisplayListEntry query = { view_id, nullptr };
     RetainedDisplayListEntry* found = cache->map.get(query);
-    if (!found || !found->fragment || found->fragment->list.count <= 0) return nullptr;
+    if (!found || !found->fragment || found->fragment->list.item_count() <= 0) return nullptr;
     return found->fragment;
 }
 
@@ -372,7 +376,7 @@ Bound retained_dl_fragment_marker_bounds(const RetainedDisplayListFragment* frag
 
 int retained_dl_fragment_item_count(const RetainedDisplayListFragment* fragment) {
     if (!fragment) return 0;
-    return fragment->list.count;
+    return fragment->list.item_count();
 }
 
 static bool retained_dl_bounds_match(Bound cached, Bound current) {
@@ -411,8 +415,8 @@ bool retained_dl_fragment_resources_valid(const RetainedDisplayListFragment* fra
                                           uint64_t current_glyph_generation) {
     if (!fragment) return false;
     const DisplayList* list = &fragment->list;
-    for (int i = 0; i < list->count; i++) {
-        const DisplayItem* item = &list->items[i];
+    for (int i = 0; i < list->item_count(); i++) {
+        const DisplayItem* item = &list->data()[i];
         switch (item->op) {
             case DL_DRAW_IMAGE: {
                 if (item->draw_image.pixels && !retained_dl_surface_generation_current(
@@ -474,6 +478,6 @@ bool retained_dl_append_fragment_for_dirty(DisplayList* dst,
 
 bool retained_dl_append_fragment(DisplayList* dst,
                                  const RetainedDisplayListFragment* fragment) {
-    if (!dst || !fragment || fragment->list.count <= 0) return false;
-    return retained_dl_copy_range(dst, &fragment->list, 0, fragment->list.count - 1);
+    if (!dst || !fragment || fragment->list.item_count() <= 0) return false;
+    return retained_dl_copy_range(dst, &fragment->list, 0, fragment->list.item_count() - 1);
 }

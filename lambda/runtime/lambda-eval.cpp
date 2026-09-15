@@ -15,7 +15,7 @@
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/url.h"
-#include "../../lib/checked_math.hpp"
+#include "../../lib/math_checked.hpp"
 #include "../../lib/file.h"
 #include "../../lib/str.h"
 #include "../core/utf_string.h"

@@ -784,9 +784,7 @@ static Item js_interp_reference_key(const JsInterpReference* reference) {
 }
 
 static bool js_interp_name_equals(const String* name, const char* chars) {
-    if (!name || !chars) return false;
-    size_t length = strlen(chars);
-    return name->len == length && memcmp(name->chars, chars, length) == 0;
+    return name && str_eq_const(name->chars, name->len, chars);
 }
 
 static bool js_interp_member_uses_super(const JsMemberNode* member) {
@@ -804,8 +802,7 @@ static Item js_interp_property_key_value(Item value) {
 }
 
 static bool js_interp_name_matches(const String* left, const String* right) {
-    return left && right && left->len == right->len &&
-        memcmp(left->chars, right->chars, left->len) == 0;
+    return left && right && str_eq(left->chars, left->len, right->chars, right->len);
 }
 
 static JsInterpImportBinding* js_interp_import_binding(JsScript* script,

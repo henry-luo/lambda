@@ -1,8 +1,6 @@
 #include "source_tracker.hpp"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
-#include "../../lib/memtrack.h"
-#include "../../lib/mem_grow.hpp"
 #include <cstring>
 
 namespace lambda {
@@ -12,9 +10,7 @@ SourceTracker::SourceTracker(const char* source, size_t len)
     , source_len_(len)
     , current_(source)
     , location_(0, 1, 1)
-    , line_starts_(nullptr)
-    , line_cap_(0)
-    , line_count_(0)
+    , line_starts_(MEM_CAT_INPUT_OTHER, source_len_ / 40 + 16)
     , line_index_built_(false)
     , line_index_failed_(false)
     , extract_buf_(strbuf_new_cap(256))
@@ -24,27 +20,22 @@ SourceTracker::SourceTracker(const char* source, size_t len)
 
 SourceTracker::~SourceTracker() {
     strbuf_free(extract_buf_);
-    if (line_starts_) mem_free(line_starts_);
 }
 
 bool SourceTracker::pushLineStart(size_t offset) {
     if (line_index_failed_) return false;
-    if (line_count_ == line_cap_) {
-        if (!lam::mem_grow_array(&line_starts_, &line_cap_, line_count_ + 1,
-                                 source_len_ / 40 + 16, MEM_CAT_INPUT_OTHER)) {
-            log_error("SourceTracker: line index allocation failed at %zu lines", line_count_);
-            line_index_failed_ = true;
-            return false;
-        }
+    if (!line_starts_.append(offset)) {
+        log_error("SourceTracker: line index allocation failed at %zu lines", line_starts_.size());
+        line_index_failed_ = true;
+        return false;
     }
-    line_starts_[line_count_++] = offset;
     return true;
 }
 
 void SourceTracker::buildLineIndex() {
     if (line_index_built_) return;
 
-    line_count_ = 0;
+    line_starts_.clear();
     pushLineStart(0);
 
     for (size_t i = 0; i < source_len_; ++i) {
@@ -139,12 +130,12 @@ const char* SourceTracker::extractLine(size_t line_num) {
     // Build line index if needed
     buildLineIndex();
 
-    if (line_num > line_count_) return "";
+    if (line_num > line_starts_.size()) return "";
 
     size_t start = line_starts_[line_num - 1];
     size_t end = source_len_;
 
-    if (line_num < line_count_) {
+    if (line_num < line_starts_.size()) {
         end = line_starts_[line_num] - 1;  // Exclude the newline
     }
 
@@ -163,7 +154,7 @@ const char* SourceTracker::getContextLine() {
 void SourceTracker::reset() {
     current_ = source_;
     location_ = SourceLocation(0, 1, 1);
-    line_count_ = 0;
+    line_starts_.clear();
     pushLineStart(0);
     line_index_built_ = false;
 }

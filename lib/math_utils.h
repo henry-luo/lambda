@@ -74,8 +74,26 @@ static inline unsigned char clamp_byte(int v) {
     return (unsigned char)(v < 0 ? 0 : (v > 255 ? 255 : v));
 }
 
+// NaN maps to zero before the float-to-integer conversion.
+static inline unsigned char clamp_byte_round(float v) {
+    if (!(v > 0.0f)) return 0;
+    return v >= 254.5f ? 255 : (unsigned char)(v + 0.5f);
+}
+
 static inline float clamp_unit(float v) {
     return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+}
+
+static inline float math_degrees_to_radians(float degrees) {
+    return degrees * 3.14159265358979323846f / 180.0f;
+}
+
+static inline float math_gradians_to_radians(float gradians) {
+    return gradians * 3.14159265358979323846f / 200.0f;
+}
+
+static inline float math_turns_to_radians(float turns) {
+    return turns * 2.0f * 3.14159265358979323846f;
 }
 
 #endif

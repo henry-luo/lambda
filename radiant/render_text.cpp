@@ -5,10 +5,10 @@
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
+#include "../lib/time_util.h"
 #include "../lib/font/font.h"
 #include "../lib/utf.h"
 
-#include <chrono>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -285,12 +285,12 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 if (bytes <= 0) { scan++; }
                 else { scan += bytes; }
 
-                auto t1 = std::chrono::high_resolution_clock::now();
+                uint64_t t1 = time_now_ns();
                 FontStyleDesc _sd = font_style_desc_from_prop(rdcon->font.style);
                 LoadedGlyph* glyph = font_load_glyph(font_box_handle(&rdcon->font), &_sd, scan_codepoint, false);
-                auto t2 = std::chrono::high_resolution_clock::now();
+                uint64_t t2 = time_now_ns();
                 render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_GLYPH_LOAD,
-                    std::chrono::duration<double, std::milli>(t2 - t1).count());
+                    time_elapsed_ms_f(t1, t2));
                 if (glyph) {
                     natural_width += glyph->advance_x + rdcon->font.style->letter_spacing * s;  // already in physical pixels
                 } else {
@@ -395,11 +395,11 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                         // y = text_rect.y + rendering_ascender == init_ascender + lead_y  is correct.
                         float ascend;
                         {
-                            auto tfm1 = std::chrono::high_resolution_clock::now();
+                            uint64_t tfm1 = time_now_ns();
                             ascend = font_get_rendering_ascender(font_box_handle(&rdcon->font)) * rdcon->raster_scale;
-                            auto tfm2 = std::chrono::high_resolution_clock::now();
+                            uint64_t tfm2 = time_now_ns();
                             render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_FONT_METRICS,
-                                std::chrono::duration<double, std::milli>(tfm2 - tfm1).count());
+                                time_elapsed_ms_f(tfm1, tfm2));
                         }
                         if (has_selection && char_index <= 15) {
                         }
@@ -419,7 +419,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                             bitmap_debug_count++;
                         }
 
-                        auto t3 = std::chrono::high_resolution_clock::now();
+                        uint64_t t3 = time_now_ns();
 
                         // Render text-shadow glyphs BEFORE the main glyph
                         // Skip if blur pre-pass already rendered shadows
@@ -444,9 +444,9 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                         if (has_text_gradient) {
                             rdcon->color = glyph_saved_color;
                         }
-                        auto t4 = std::chrono::high_resolution_clock::now();
+                        uint64_t t4 = time_now_ns();
                         render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_GLYPH_DRAW,
-                            std::chrono::duration<double, std::milli>(t4 - t3).count());
+                            time_elapsed_ms_f(t3, t4));
                         // advance to the next position (include letter-spacing)
                         x += glyph->advance_x + rdcon->font.style->letter_spacing * s;
                     }
@@ -634,11 +634,11 @@ static bool render_text_paint_blurred_shadows(RenderContext* rdcon, unsigned cha
 
             float s_ascend;
             {
-                auto tfm1 = std::chrono::high_resolution_clock::now();
+                uint64_t tfm1 = time_now_ns();
                 s_ascend = font_get_rendering_ascender(font_box_handle(&rdcon->font)) * rdcon->raster_scale;
-                auto tfm2 = std::chrono::high_resolution_clock::now();
+                uint64_t tfm2 = time_now_ns();
                 render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_FONT_METRICS,
-                    std::chrono::duration<double, std::milli>(tfm2 - tfm1).count());
+                    time_elapsed_ms_f(tfm1, tfm2));
             }
 
             Color saved_color = rdcon->color;
@@ -685,7 +685,7 @@ static LoadedGlyph* render_text_load_glyph_for_paint(RenderContext* rdcon, uint3
         return nullptr;
     }
 
-    auto t1 = std::chrono::high_resolution_clock::now();
+    uint64_t t1 = time_now_ns();
     FontStyleDesc sd = font_style_desc_from_prop(rdcon->font.style);
     bool emoji_presentation = false;
     if (cursor < end) {
@@ -702,9 +702,9 @@ static LoadedGlyph* render_text_load_glyph_for_paint(RenderContext* rdcon, uint3
     LoadedGlyph* glyph = emoji_presentation
         ? font_load_glyph_emoji(font_box_handle(&rdcon->font), &sd, codepoint, true)
         : font_load_glyph(font_box_handle(&rdcon->font), &sd, codepoint, true);
-    auto t2 = std::chrono::high_resolution_clock::now();
+    uint64_t t2 = time_now_ns();
     render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_GLYPH_LOAD,
-        std::chrono::duration<double, std::milli>(t2 - t1).count());
+        time_elapsed_ms_f(t1, t2));
     return glyph;
 }
 

@@ -22,7 +22,7 @@
 #include "../../lib/log.h"
 #include "../../lib/uv_loop.h"
 #include "../../lib/mem.h"
-#include "../../lib/mem_grow.hpp"
+#include "../../lib/arraylist.hpp"
 #include "../../lib/base64.h"
 #include "../../lib/str.h"
 #include "../../lib/url.h"
@@ -113,13 +113,8 @@ static Item js_http_receiver(Item candidate, const char* marker) {
 }
 
 static bool http_header_name_equals(String* name, const char* text, int text_len) {
-    if (!name || (int)name->len != text_len) return false;
-    for (int i = 0; i < text_len; i++) {
-        char c = name->chars[i];
-        if (c >= 'A' && c <= 'Z') c = c + 32;
-        if (c != text[i]) return false;
-    }
-    return true;
+    return name && text && text_len >= 0 &&
+        str_ieq(name->chars, name->len, text, (size_t)text_len);
 }
 
 // =============================================================================
@@ -322,12 +317,6 @@ typedef struct HttpFieldSpan {
     int32_t value_len;
 } HttpFieldSpan;
 
-typedef struct HttpFieldList {
-    HttpFieldSpan* items;
-    int count;
-    int capacity;
-} HttpFieldList;
-
 // Parsed request head. Every span indexes `base`, so a head is valid only
 // while the connection buffer it was parsed from is neither shifted nor
 // reallocated: the server materializes the IncomingMessage and every header
@@ -338,8 +327,8 @@ typedef struct HttpRequestHead {
     char http_version[16];
     int  url_off;
     int  url_len;
-    HttpFieldList headers;
-    HttpFieldList trailers;
+    lam::ArrayList<HttpFieldSpan> headers{MEM_CAT_JS_RUNTIME, 16};
+    lam::ArrayList<HttpFieldSpan> trailers{MEM_CAT_JS_RUNTIME, 16};
     const char* body;
     int  body_len;
     int  content_length;
@@ -347,26 +336,8 @@ typedef struct HttpRequestHead {
     int  error_status;
 } HttpRequestHead;
 
-static bool http_field_list_push(HttpFieldList* list, HttpFieldSpan span) {
-    if (!list) return false;
-    if (list->count >= list->capacity &&
-            !lam::mem_grow_array(&list->items, &list->capacity,
-                                 list->count + 1, 16, MEM_CAT_JS_RUNTIME)) return false;
-    list->items[list->count++] = span;
-    return true;
-}
-
-static void http_field_list_release(HttpFieldList* list) {
-    if (!list) return;
-    if (list->items) mem_free(list->items);
-    list->items = NULL;
-    list->count = 0;
-    list->capacity = 0;
-}
-
-static void http_request_head_init(HttpRequestHead* req, const char* base) {
-    memset(req, 0, sizeof(*req));
-    req->base = base;
+static bool http_field_list_push(lam::ArrayList<HttpFieldSpan>* list, HttpFieldSpan span) {
+    return list && list->append(span);
 }
 
 // The lists keep their capacity across the pipelined requests of one read
@@ -377,8 +348,8 @@ static void http_request_head_reset(HttpRequestHead* req, const char* base) {
     req->http_version[0] = '\0';
     req->url_off = 0;
     req->url_len = 0;
-    req->headers.count = 0;
-    req->trailers.count = 0;
+    req->headers.clear();
+    req->trailers.clear();
     req->body = NULL;
     req->body_len = 0;
     req->content_length = 0;
@@ -386,10 +357,14 @@ static void http_request_head_reset(HttpRequestHead* req, const char* base) {
     req->error_status = 0;
 }
 
+static void http_request_head_init(HttpRequestHead* req, const char* base) {
+    http_request_head_reset(req, base);
+}
+
 static void http_request_head_release(HttpRequestHead* req) {
     if (!req) return;
-    http_field_list_release(&req->headers);
-    http_field_list_release(&req->trailers);
+    req->headers.release();
+    req->trailers.release();
 }
 
 static HttpFieldSpan http_field_span(const HttpRequestHead* req, const char* name,
@@ -419,8 +394,8 @@ static bool http_field_name_equals(const HttpRequestHead* req, const HttpFieldSp
 // `str` is NULL when absent. The view is not NUL-terminated.
 static StrView http_request_header(const HttpRequestHead* req, const char* lower_name) {
     if (!req || !lower_name) return strview_init(NULL, 0);
-    for (int i = 0; i < req->headers.count; i++) {
-        const HttpFieldSpan* span = &req->headers.items[i];
+    for (size_t i = 0; i < req->headers.size(); i++) {
+        const HttpFieldSpan* span = &req->headers[i];
         if (http_field_name_equals(req, span, lower_name)) {
             return strview_init(req->base + span->value_off, (size_t)span->value_len);
         }
@@ -646,8 +621,8 @@ static int parse_http_request(char* data, int data_len, HttpRequestHead* req, in
     int content_length = 0;
     bool chunked_body = false;
     bool has_content_length = false;
-    for (int i = 0; i < req->headers.count; i++) {
-        const HttpFieldSpan* span = &req->headers.items[i];
+    for (size_t i = 0; i < req->headers.size(); i++) {
+        const HttpFieldSpan* span = &req->headers[i];
         const char* value = data + span->value_off;
         if (http_field_name_equals(req, span, "transfer-encoding") &&
             http_header_has_token_n(value, span->value_len, "chunked")) {
@@ -682,7 +657,7 @@ static int parse_http_request(char* data, int data_len, HttpRequestHead* req, in
             return 0;
         }
         if (chunked_complete) {
-            req->trailers.count = 0;
+            req->trailers.clear();
             int emit_consumed = 0;
             bool emit_complete = false;
             int emit_len = http_decode_chunked_request_body(data + hdr_size, available, req,
@@ -2368,8 +2343,8 @@ static Item make_request_object(JsHttpConn* conn, HttpRequestHead* req) {
     // headers as lowercase-key object
     Item headers = http_new_header_object();
     Item raw_headers = js_array_new(0);
-    for (int i = 0; i < req->headers.count; i++) {
-        const HttpFieldSpan* span = &req->headers.items[i];
+    for (size_t i = 0; i < req->headers.size(); i++) {
+        const HttpFieldSpan* span = &req->headers[i];
         const char* name = req->base + span->name_off;
         const char* value = req->base + span->value_off;
         js_array_push(raw_headers, make_string_item(name, span->name_len));
@@ -2380,8 +2355,8 @@ static Item make_request_object(JsHttpConn* conn, HttpRequestHead* req) {
     js_set_key_cstr(msg, "rawHeaders", raw_headers);
     Item trailers = http_new_header_object();
     Item raw_trailers = js_array_new(0);
-    for (int i = 0; i < req->trailers.count; i++) {
-        const HttpFieldSpan* span = &req->trailers.items[i];
+    for (size_t i = 0; i < req->trailers.size(); i++) {
+        const HttpFieldSpan* span = &req->trailers[i];
         const char* name = req->base + span->name_off;
         const char* value = req->base + span->value_off;
         js_array_push(raw_trailers, make_string_item(name, span->name_len));

@@ -45,8 +45,8 @@ static inline bool render_paint_list_effect_groups_balanced(
         const PaintList* paint_list) {
     if (!paint_list) return false;
     int effect_depth = 0;
-    for (int i = 0; i < paint_list->count; i++) {
-        PaintOp op = paint_list->cmds[i].op;
+    for (int i = 0; i < paint_list->item_count(); i++) {
+        PaintOp op = paint_list->data()[i].op;
         if (paint_op_has_flags(op, PAINT_OP_FLAG_EFFECT_STACK | PAINT_OP_FLAG_STACK_PUSH)) {
             effect_depth++;
         } else if (paint_op_has_flags(op, PAINT_OP_FLAG_EFFECT_STACK | PAINT_OP_FLAG_STACK_POP)) {

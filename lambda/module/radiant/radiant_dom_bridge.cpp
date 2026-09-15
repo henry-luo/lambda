@@ -2749,13 +2749,6 @@ RADIANT_C_API Item radiant_dom_element_operation(Item elem_item,
     return dom_element_operation_impl(elem_item, operation, args, argc);
 }
 
-static bool radiant_dom_key_equals(Item key, const char* name, uint32_t name_len) {
-    if (get_type_id(key) != LMD_TYPE_STRING) return false;
-    String* str_key = it2s(key);
-    return str_key && str_key->len == name_len &&
-        strncmp(str_key->chars, name, name_len) == 0;
-}
-
 static Item radiant_dom_data_descriptor(Item value, bool writable,
                                         bool enumerable, bool configurable) {
     Item desc = radiant_host_api->value->new_object();
@@ -2957,14 +2950,14 @@ RADIANT_C_API int radiant_dom_foreign_document_get_property(Item object, Item ke
     if (!out) return 0;
     void* foreign_doc = dom_get_foreign_doc(object);
     if (foreign_doc && dom_doc_has_browsing_context(foreign_doc)) {
-        if (radiant_dom_key_equals(key, "defaultView", 11) ||
-            radiant_dom_key_equals(key, "document", 8) ||
-            radiant_dom_key_equals(key, "window", 6) ||
-            radiant_dom_key_equals(key, "self", 4)) {
+        if (js_string_equals(key, "defaultView") ||
+            js_string_equals(key, "document") ||
+            js_string_equals(key, "window") ||
+            js_string_equals(key, "self")) {
             *out = object;
             return 1;
         }
-        if (radiant_dom_key_equals(key, "getComputedStyle", 16)) {
+        if (js_string_equals(key, "getComputedStyle")) {
             // iframe contentWindow is modeled as a document wrapper; do not let
             // the main-window getComputedStyle binding leak into foreign docs.
             *out = jube_new_function(radiant_host_api->script,
@@ -3546,23 +3539,23 @@ RADIANT_C_API int radiant_dom_window_get_property(Item object, Item key, Item* o
     UiContext* uicon = (UiContext*)dom_get_ui_context();
     if (!uicon) return 0;
 
-    if (radiant_dom_key_equals(key, "innerWidth", 10)) {
+    if (js_string_equals(key, "innerWidth")) {
         *out = radiant_dom_window_dimension(uicon->viewport_width);
         return 1;
     }
-    if (radiant_dom_key_equals(key, "innerHeight", 11)) {
+    if (js_string_equals(key, "innerHeight")) {
         *out = radiant_dom_window_dimension(uicon->viewport_height);
         return 1;
     }
-    if (radiant_dom_key_equals(key, "outerWidth", 10)) {
+    if (js_string_equals(key, "outerWidth")) {
         *out = radiant_dom_window_dimension(uicon->window_width);
         return 1;
     }
-    if (radiant_dom_key_equals(key, "outerHeight", 11)) {
+    if (js_string_equals(key, "outerHeight")) {
         *out = radiant_dom_window_dimension(uicon->window_height);
         return 1;
     }
-    if (radiant_dom_key_equals(key, "devicePixelRatio", 16)) {
+    if (js_string_equals(key, "devicePixelRatio")) {
         *out = radiant_dom_window_dimension(uicon->device_scale > 0.0f ? uicon->device_scale : 1.0f);
         return 1;
     }
@@ -3572,17 +3565,17 @@ RADIANT_C_API int radiant_dom_window_get_property(Item object, Item key, Item* o
         : (doc ? doc->pending_viewport_scroll_x : 0.0f);
     float scroll_y = doc && doc->state ? doc->state->scroll_y
         : (doc ? doc->pending_viewport_scroll_y : 0.0f);
-    if (radiant_dom_key_equals(key, "scrollX", 7) ||
-        radiant_dom_key_equals(key, "pageXOffset", 11)) {
+    if (js_string_equals(key, "scrollX") ||
+        js_string_equals(key, "pageXOffset")) {
         *out = radiant_dom_window_dimension(scroll_x);
         return 1;
     }
-    if (radiant_dom_key_equals(key, "scrollY", 7) ||
-        radiant_dom_key_equals(key, "pageYOffset", 11)) {
+    if (js_string_equals(key, "scrollY") ||
+        js_string_equals(key, "pageYOffset")) {
         *out = radiant_dom_window_dimension(scroll_y);
         return 1;
     }
-    if (radiant_dom_key_equals(key, "screen", 6)) {
+    if (js_string_equals(key, "screen")) {
         // The active surface is the only screen available to embedded/headless
         // Radiant; deriving this object here keeps it synchronized with resize.
         Item screen = radiant_host_api->value->new_object();

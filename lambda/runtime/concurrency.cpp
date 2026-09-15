@@ -9,7 +9,7 @@
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/strbuf.h"
-#include "../../lib/intrusive_queue.h"
+#include "../../lib/queue.h"
 #include "../../lib/uv_loop.h"
 
 #include <assert.h>
@@ -151,12 +151,12 @@ struct LambdaTask {
     LambdaTask* next_scope_child;
     LambdaTaskObserver* observers;
     LambdaTask* next_all;
-    IntrusiveQueueNode run_link;
+    QueueNode run_link;
 };
 
 struct LambdaScheduler {
     LambdaTask* all_tasks;
-    IntrusiveQueue run_queue;
+    Queue run_queue;
     LambdaTask* current;
     uint64_t next_task_id;
     uint64_t event_sequence;
@@ -343,7 +343,7 @@ static void scheduler_enqueue(LambdaTask* task) {
     if (!task || task->state == LAMBDA_TASK_DONE || task->queued) return;
     task->state = LAMBDA_TASK_RUNNABLE;
     task->queued = true;
-    intrusive_queue_push(&task->scheduler->run_queue, &task->run_link);
+    queue_push(&task->scheduler->run_queue, &task->run_link);
     if (task->scheduler->wake_initialized) {
         if (!task->scheduler->wake_refed) {
             uv_ref((uv_handle_t*)&task->scheduler->wake);
@@ -362,9 +362,9 @@ static void scheduler_release_wake_if_idle(LambdaScheduler* scheduler) {
 }
 
 static LambdaTask* scheduler_dequeue(LambdaScheduler* scheduler) {
-    IntrusiveQueueNode* node = scheduler ? intrusive_queue_pop(&scheduler->run_queue) : NULL;
+    QueueNode* node = scheduler ? queue_pop(&scheduler->run_queue) : NULL;
     if (!node) return NULL;
-    LambdaTask* task = INTRUSIVE_QUEUE_CONTAINER_OF(node, LambdaTask, run_link);
+    LambdaTask* task = QUEUE_CONTAINER_OF(node, LambdaTask, run_link);
     task->queued = false;
     return task;
 }
@@ -634,7 +634,7 @@ extern "C" LambdaScheduler* lambda_scheduler_create(int mailbox_capacity) {
     LambdaScheduler* scheduler = (LambdaScheduler*)mem_calloc(
         1, sizeof(LambdaScheduler), MEM_CAT_EVAL);
     if (!scheduler) return NULL;
-    intrusive_queue_init(&scheduler->run_queue);
+    queue_init(&scheduler->run_queue);
     scheduler->mailbox_capacity = mailbox_capacity > 0
         ? mailbox_capacity : LAMBDA_MAILBOX_DEFAULT_CAPACITY;
     scheduler->next_task_id = 1;
@@ -853,9 +853,9 @@ extern "C" int lambda_scheduler_run_ready(LambdaScheduler* scheduler) {
     if (!scheduler || scheduler->draining) return 0;
     scheduler->draining = true;
     int ran = 0;
-    IntrusiveQueueNode* boundary = intrusive_queue_last(&scheduler->run_queue);
+    QueueNode* boundary = queue_last(&scheduler->run_queue);
     while (scheduler->run_queue.first) {
-        IntrusiveQueueNode* node = scheduler->run_queue.first;
+        QueueNode* node = scheduler->run_queue.first;
         ran += lambda_scheduler_run_one(scheduler);
         if (node == boundary) break;
     }

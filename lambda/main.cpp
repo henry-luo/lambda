@@ -160,18 +160,9 @@ extern DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename
     int viewport_width, int viewport_height, Pool* pool, const char* html_source,
     bool track_source_lines, bool execute_scripts);
 
-static char ascii_lower_char(char ch) {
-    return (ch >= 'A' && ch <= 'Z') ? (char)(ch + ('a' - 'A')) : ch;
-}
-
 static bool ascii_case_ext_equals(const char* ext, const char* end, const char* expected) {
     if (!ext || !end || !expected) return false;
-    size_t len = (size_t)(end - ext);
-    if (strlen(expected) != len) return false;
-    for (size_t i = 0; i < len; i++) {
-        if (ascii_lower_char(ext[i]) != ascii_lower_char(expected[i])) return false;
-    }
-    return true;
+    return str_ieq_const(ext, (size_t)(end - ext), expected);
 }
 
 static bool lambda_view_http_url_is_likely_html_document(const char* url) {

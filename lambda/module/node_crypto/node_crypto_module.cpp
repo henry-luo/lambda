@@ -139,7 +139,6 @@ static bool crypto_digest_compute_bits(int bits, const uint8_t* data,
                                        int offset, int length, uint8_t* out);
 static bool crypto_digest_compute_name(const char* alg, const uint8_t* data, int data_len,
                                        uint8_t* out, int* out_len);
-static bool crypto_string_equals(Item item, const char* expected);
 static Item crypto_throw_invalid_property_value(const char* prop, const char* expected);
 static Item crypto_item_to_integer(Item item, const char* name, int* out_value);
 #define make_string_item_crypto make_string_item
@@ -1936,9 +1935,9 @@ static Item crypto_sign_verify_options(Item key_item, CryptoSignVerifyOptions* o
 
     JS_ASSIGN_OR_RETURN(dsa_encoding_item, js_get_key_cstr(key_item, "dsaEncoding"));
     if (!crypto_item_is_undefined(dsa_encoding_item)) {
-        if (crypto_string_equals(dsa_encoding_item, "ieee-p1363")) {
+        if (js_string_equals(dsa_encoding_item, "ieee-p1363")) {
             out->dsa_ieee_p1363 = true;
-        } else if (!crypto_string_equals(dsa_encoding_item, "der")) {
+        } else if (!js_string_equals(dsa_encoding_item, "der")) {
             return crypto_throw_invalid_property_value("options.dsaEncoding",
                 "'der', 'ieee-p1363'");
         }
@@ -5259,9 +5258,9 @@ static Item crypto_asymmetric_export_options(Item options_item, bool is_private,
     }
 
     JS_ASSIGN_OR_RETURN(format_item, js_get_key_cstr(options_item, "format"));
-    if (crypto_string_equals(format_item, "pem")) {
+    if (js_string_equals(format_item, "pem")) {
         *out_format = CRYPTO_ASYM_EXPORT_PEM;
-    } else if (crypto_string_equals(format_item, "der")) {
+    } else if (js_string_equals(format_item, "der")) {
         *out_format = CRYPTO_ASYM_EXPORT_DER;
     } else {
         return crypto_throw_invalid_property_value("options.format", "'pem', 'der'");
@@ -5269,9 +5268,9 @@ static Item crypto_asymmetric_export_options(Item options_item, bool is_private,
 
     JS_ASSIGN_OR_RETURN(type_item, js_get_key_cstr(options_item, "type"));
     const char* expected_type = is_private ? "pkcs8" : "spki";
-    if (crypto_string_equals(type_item, "pkcs1")) {
+    if (js_string_equals(type_item, "pkcs1")) {
         *out_type = CRYPTO_ASYM_EXPORT_TYPE_PKCS1;
-    } else if (!crypto_string_equals(type_item, expected_type)) {
+    } else if (!js_string_equals(type_item, expected_type)) {
         return crypto_throw_invalid_property_value("options.type", is_private ? "'pkcs8'" : "'spki'");
     }
     return js_status_ok();
@@ -5987,13 +5986,6 @@ JS_FORWARD_ITEM(js_crypto_KeyObject, (void), js_throw_type_error, ("Illegal cons
 // generateKeySync/generateKey — symmetric secret key generation
 // ============================================================================
 
-static bool crypto_string_equals(Item item, const char* expected) {
-    if (get_type_id(item) != LMD_TYPE_STRING || !expected) return false;
-    String* s = it2s(item);
-    size_t len = strlen(expected);
-    return s && s->len == len && memcmp(s->chars, expected, len) == 0;
-}
-
 static Item crypto_throw_invalid_property_type(const char* prop, const char* expected) {
     return js_throw_type_error_codef("ERR_INVALID_ARG_TYPE", 
         "The \"%s\" property must be of type %s.", prop, expected);
@@ -6115,8 +6107,8 @@ extern "C" Item js_crypto_generateKeyPairSync(Item type_item, Item options_item)
     if (get_type_id(type_item) != LMD_TYPE_STRING) {
         return js_throw_invalid_arg_type("type", "string", type_item);
     }
-    bool is_rsa = crypto_string_equals(type_item, "rsa");
-    bool is_dsa = crypto_string_equals(type_item, "dsa");
+    bool is_rsa = js_string_equals(type_item, "rsa");
+    bool is_dsa = js_string_equals(type_item, "dsa");
     if (!is_rsa && !is_dsa) {
         return js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
             "The argument 'type' must be a supported key type");
@@ -6216,8 +6208,8 @@ extern "C" Item js_crypto_generateKeySync(Item type_item, Item options_item) {
         return js_throw_invalid_arg_type("type", "string", type_item);
     }
 
-    bool is_aes = crypto_string_equals(type_item, "aes");
-    bool is_hmac = crypto_string_equals(type_item, "hmac");
+    bool is_aes = js_string_equals(type_item, "aes");
+    bool is_hmac = js_string_equals(type_item, "hmac");
     if (!is_aes && !is_hmac) {
         return js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
             "The argument 'type' must be a supported key type");
@@ -7475,7 +7467,7 @@ static Item js_subtle_hmac_algorithm(Item alg_item, int key_len) {
 // subtle.importKey('raw', keyData, {name:'HMAC', hash}, extractable, usages)
 extern "C" Item js_subtle_importKey(Item format_item, Item key_data_item, Item alg_item,
                                     Item extractable_item, Item usages_item) {
-    if (!crypto_string_equals(format_item, "raw")) return js_promise_resolve(ItemNull);
+    if (!js_string_equals(format_item, "raw")) return js_promise_resolve(ItemNull);
 
     uint8_t* key = NULL;
     int key_len = 0;

@@ -20,6 +20,7 @@
 #include "../lib/font/font_internal.h"
 #include "../lib/mempool.h"
 #include "../lib/mem_grow.hpp"
+#include "../lib/math_utils.h"
 #include "../lib/str.h"
 #include "../lib/file.h"
 #include "../lib/escape.h"
@@ -381,10 +382,8 @@ struct SvgStyleRule {
 static void svg_copy_trim(char* dst, size_t dst_size, const char* start, const char* end) {
     if (!dst || dst_size == 0) return;
     if (!start || !end || end <= start) { dst[0] = '\0'; return; }
-    while (start < end && isspace((unsigned char)*start)) start++;
-    while (end > start && isspace((unsigned char)end[-1])) end--;
     size_t len = (size_t)(end - start);
-    if (len >= dst_size) len = dst_size - 1;
+    str_trim(&start, &len);
     str_copy(dst, dst_size, start, len);
 }
 
@@ -466,9 +465,7 @@ static const char* get_svg_style_rule_value(SvgInlineRenderContext* ctx, Element
 
 static bool svg_style_name_matches(const char* style, const char* name, size_t name_len) {
     if (strncmp(style, name, name_len) != 0) return false;
-    const char* p = style + name_len;
-    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
-    return *p == ':';
+    return *str_skip_ascii_space(style + name_len) == ':';
 }
 
 const char* svg_get_inline_style_property(const char* style, const char* name,
@@ -477,19 +474,19 @@ const char* svg_get_inline_style_property(const char* style, const char* name,
     size_t name_len = strlen(name);
     const char* p = style;
     while (*p) {
-        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == ';') p++;
+        p = str_skip_chars(p, " \t\n\r;");
         if (!*p) break;
         if (svg_style_name_matches(p, name, name_len)) {
             p += name_len;
-            while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+            p = str_skip_ascii_space(p);
             if (*p == ':') p++;
-            while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+            p = str_skip_ascii_space(p);
             const char* value_start = p;
-            while (*p && *p != ';') p++;
+            p = str_scan_top_level(p, ";", '(', ')', "\"'", true);
             svg_copy_trim(buffer, buffer_size, value_start, p);
             return buffer;
         }
-        while (*p && *p != ';') p++;
+        p = str_scan_top_level(p, ";", '(', ')', "\"'", true);
         if (*p == ';') p++;
     }
     return nullptr;
@@ -583,25 +580,8 @@ static SvgViewBox parse_svg_viewbox(const char* viewbox_attr) {
     SvgViewBox vb = {0, 0, 0, 0, false};
     if (!viewbox_attr || !*viewbox_attr) return vb;
 
-    // parse "min-x min-y width height"
-    // separators can be comma or whitespace
     float values[4];
-    int count = 0;
-    const char* p = viewbox_attr;
-
-    while (*p && count < 4) {
-        // skip whitespace and commas
-        while (*p && (str_char_is_ascii_space(*p) || *p == ',')) p++;
-        if (!*p) break;
-
-        char* end;
-        values[count] = strtof(p, &end);
-        if (end == p) break;  // parsing failed
-        count++;
-        p = end;
-    }
-
-    if (count == 4) {
+    if (str_parse_float_list(viewbox_attr, ", \t\n\r\f\v", values, 4, nullptr) == 4) {
         vb.min_x = values[0];
         vb.min_y = values[1];
         vb.width = values[2];
@@ -764,9 +744,9 @@ static Color parse_svg_color(const char* value) {
             if (sscanf(p, "%d,%d,%d,%f", &r, &g, &b, &a) >= 3 ||
                 sscanf(p, "%d %d %d / %f", &r, &g, &b, &a) >= 3 ||
                 sscanf(p, "%d %d %d", &r, &g, &b) == 3) {
-                c.r = (uint8_t)(r < 0 ? 0 : (r > 255 ? 255 : r));
-                c.g = (uint8_t)(g < 0 ? 0 : (g > 255 ? 255 : g));
-                c.b = (uint8_t)(b < 0 ? 0 : (b > 255 ? 255 : b));
+                c.r = clamp_byte(r);
+                c.g = clamp_byte(g);
+                c.b = clamp_byte(b);
                 c.a = (uint8_t)(a * 255);
             }
         }
@@ -885,49 +865,39 @@ bool svg_parse_transform(const char* transform_str, float matrix[6]) {
             while (*p && *p != '(') p++;
             if (*p == '(') {
                 p++;
-                float tx = 0, ty = 0;
-                tx = strtof(p, (char**)&p);
-                while (*p && (str_char_is_ascii_space(*p) || *p == ',')) p++;
-                if (*p && *p != ')') {
-                    ty = strtof(p, (char**)&p);
-                }
-                local[4] = tx;
-                local[5] = ty;
+                float values[2] = {};
+                str_parse_float_list(p, ", \t\n\r\f\v", values, 2, &p);
+                local[4] = values[0];
+                local[5] = values[1];
             }
         } else if (strncmp(p, "scale", 5) == 0) {
             p += 5;
             while (*p && *p != '(') p++;
             if (*p == '(') {
                 p++;
-                float sx = 1, sy = 1;
-                sx = strtof(p, (char**)&p);
-                while (*p && (str_char_is_ascii_space(*p) || *p == ',')) p++;
-                if (*p && *p != ')') {
-                    sy = strtof(p, (char**)&p);
-                } else {
-                    sy = sx;  // uniform scale
-                }
-                local[0] = sx;
-                local[3] = sy;
+                float values[2] = {};
+                size_t count = str_parse_float_list(p, ", \t\n\r\f\v", values, 2, &p);
+                local[0] = values[0];
+                local[3] = count > 1 ? values[1] : (*p && *p != ')' ? 0.0f : values[0]);
             }
         } else if (strncmp(p, "rotate", 6) == 0) {
             p += 6;
             while (*p && *p != '(') p++;
             if (*p == '(') {
                 p++;
-                float angle = strtof(p, (char**)&p);
-                float rad = angle * 3.14159265f / 180.0f;
+                float values[3] = {};
+                size_t count = str_parse_float_list(p, ", \t\n\r\f\v", values, 3, &p);
+                float angle = values[0];
+                float rad = math_degrees_to_radians(angle);
                 float c_val = cosf(rad);
                 float s_val = sinf(rad);
                 local[0] = c_val; local[1] = s_val;
                 local[2] = -s_val; local[3] = c_val;
 
                 // handle rotate(angle, cx, cy) with pivot point
-                while (*p && (str_char_is_ascii_space(*p) || *p == ',')) p++;
-                if (*p && *p != ')') {
-                    float cx = strtof(p, (char**)&p);
-                    while (*p && (str_char_is_ascii_space(*p) || *p == ',')) p++;
-                    float cy = strtof(p, (char**)&p);
+                if (count > 1 || (*p && *p != ')')) {
+                    float cx = values[1];
+                    float cy = values[2];
                     // rotate(angle, cx, cy) = translate(cx,cy) * rotate(angle) * translate(-cx,-cy)
                     local[4] = cx * (1.0f - c_val) + cy * s_val;
                     local[5] = -cx * s_val + cy * (1.0f - c_val);
@@ -938,8 +908,10 @@ bool svg_parse_transform(const char* transform_str, float matrix[6]) {
             while (*p && *p != '(') p++;
             if (*p == '(') {
                 p++;
-                float angle = strtof(p, (char**)&p);
-                float rad = angle * 3.14159265f / 180.0f;
+                float values[1] = {};
+                str_parse_float_list(p, ", \t\n\r\f\v", values, 1, &p);
+                float angle = values[0];
+                float rad = math_degrees_to_radians(angle);
                 local[2] = tanf(rad);
             }
         } else if (strncmp(p, "skewY", 5) == 0) {
@@ -947,8 +919,10 @@ bool svg_parse_transform(const char* transform_str, float matrix[6]) {
             while (*p && *p != '(') p++;
             if (*p == '(') {
                 p++;
-                float angle = strtof(p, (char**)&p);
-                float rad = angle * 3.14159265f / 180.0f;
+                float values[1] = {};
+                str_parse_float_list(p, ", \t\n\r\f\v", values, 1, &p);
+                float angle = values[0];
+                float rad = math_degrees_to_radians(angle);
                 local[1] = tanf(rad);
             }
         } else if (strncmp(p, "matrix", 6) == 0) {
@@ -956,10 +930,10 @@ bool svg_parse_transform(const char* transform_str, float matrix[6]) {
             while (*p && *p != '(') p++;
             if (*p == '(') {
                 p++;
-                for (int i = 0; i < 6 && *p; i++) {
-                    while (*p && (str_char_is_ascii_space(*p) || *p == ',')) p++;
-                    local[i] = strtof(p, (char**)&p);
-                }
+                float values[6] = {};
+                size_t count = str_parse_float_list(p, ", \t\n\r\f\v", values, 6, &p);
+                for (size_t i = 0; i < count; i++) local[i] = values[i];
+                if (*p) for (size_t i = count; i < 6; i++) local[i] = 0.0f;
             }
         } else {
             // unknown transform, skip to next
@@ -1218,15 +1192,8 @@ static RdtMatrix compose_element_transform(SvgInlineRenderContext* ctx, Element*
 
 static bool parse_pdf_bounds_attr(const char* value, float* x, float* y, float* w, float* h) {
     if (!value || !x || !y || !w || !h) return false;
-    char* end = nullptr;
     float vals[4];
-    const char* p = value;
-    for (int i = 0; i < 4; i++) {
-        while (*p && (isspace((unsigned char)*p) || *p == ',')) p++;
-        vals[i] = strtof(p, &end);
-        if (end == p) return false;
-        p = end;
-    }
+    if (str_parse_float_list(value, ", \t\n\r\f\v", vals, 4, nullptr) != 4) return false;
     if (vals[2] <= 0.0f || vals[3] <= 0.0f) return false;
     *x = vals[0];
     *y = vals[1];
@@ -1303,18 +1270,11 @@ static bool resolve_svg_solid_filter_tint(SvgInlineRenderContext* ctx, Element* 
 
 static bool parse_svg_std_deviation(const char* value, float* out_x, float* out_y) {
     if (!value || !out_x || !out_y) return false;
-    char* end = nullptr;
-    float x = strtof(value, &end);
-    if (end == value || x <= 0.0f) return false;
-    while (*end && (isspace((unsigned char)*end) || *end == ',')) end++;
-    float y = x;
-    if (*end) {
-        char* end_y = nullptr;
-        float parsed_y = strtof(end, &end_y);
-        if (end_y != end && parsed_y > 0.0f) y = parsed_y;
-    }
-    *out_x = x;
-    *out_y = y;
+    float values[2];
+    size_t count = str_parse_float_list(value, ", \t\n\r\f\v", values, 2, nullptr);
+    if (count == 0 || values[0] <= 0.0f) return false;
+    *out_x = values[0];
+    *out_y = count > 1 && values[1] > 0.0f ? values[1] : values[0];
     return true;
 }
 
@@ -1430,8 +1390,7 @@ static void draw_gradient_fill(SvgInlineRenderContext* ctx, RdtPath* path, SvgGr
                                const RdtMatrix* transform, RdtFillRule fill_rule,
                                float opacity) {
     if (!path || !def || def->stop_count < 2) return;
-    if (opacity < 0.0f) opacity = 0.0f;
-    if (opacity > 1.0f) opacity = 1.0f;
+    opacity = clamp_unit(opacity);
 
     RdtGradientStop stops[SVG_MAX_GRAD_STOPS];
     for (int i = 0; i < def->stop_count; i++) {
@@ -1679,12 +1638,9 @@ static void draw_svg_fill_stroke(SvgInlineRenderContext* ctx, RdtPath* path, Ele
         const char* dasharray = get_svg_attr_or_style(ctx, elem, "stroke-dasharray",
             dasharray_buf, sizeof(dasharray_buf));
         if (dasharray && strcmp(dasharray, "none") != 0) {
-            const char* p = dasharray;
-            while (*p && dash_count < 16) {
-                while (*p && (str_char_is_ascii_space(*p) || *p == ',')) p++;
-                if (!*p) break;
-                float dash = strtof(p, (char**)&p);
-                if (dash > 0.0f) dashes[dash_count++] = dash;
+            size_t count = str_parse_float_list(dasharray, ", \t\n\r\f\v", dashes, 16, nullptr);
+            for (size_t index = 0; index < count; index++) {
+                if (dashes[index] > 0.0f) dashes[dash_count++] = dashes[index];
             }
         }
         if (dash_count & 1) {
@@ -1721,20 +1677,10 @@ static bool parse_points_to_path(const char* points_str, RdtPath* path, bool clo
     bool first = true;
 
     while (*p) {
-        while (*p && (str_char_is_ascii_space(*p) || *p == ',')) p++;
-        if (!*p) break;
-
-        char* end;
-        x = strtof(p, &end);
-        if (end == p) break;
-        p = end;
-
-        while (*p && (str_char_is_ascii_space(*p) || *p == ',')) p++;
-        if (!*p) break;
-
-        y = strtof(p, &end);
-        if (end == p) break;
-        p = end;
+        float point[2];
+        if (str_parse_float_list(p, ", \t\n\r\f\v", point, 2, &p) != 2) break;
+        x = point[0];
+        y = point[1];
 
         if (first) {
             rdt_path_move_to(path, x, y);
@@ -1837,18 +1783,13 @@ static void render_svg_basic_shape(SvgInlineRenderContext* ctx, Element* elem) {
 // SVG Path Rendering
 // ============================================================================
 
-// helper functions for path parsing
-static void skip_wsp_comma(const char** p) {
-    while (**p && (str_char_is_ascii_space(**p) || **p == ',')) (*p)++;
-}
-
 static bool peek_number(const char* p) {
-    skip_wsp_comma(&p);
+    p = str_skip_chars(p, ", \t\n\r\f\v");
     return *p == '-' || *p == '+' || *p == '.' || str_char_is_digit(*p);
 }
 
 static float parse_number(const char** p) {
-    skip_wsp_comma(p);
+    *p = str_skip_chars(*p, ", \t\n\r\f\v");
     char* end;
     float val = strtof(*p, &end);
     if (end == *p) {
@@ -1861,7 +1802,7 @@ static float parse_number(const char** p) {
 }
 
 static int parse_flag(const char** p) {
-    skip_wsp_comma(p);
+    *p = str_skip_chars(*p, ", \t\n\r\f\v");
     int flag = 0;
     if (**p == '0' || **p == '1') {
         flag = **p - '0';
@@ -1887,24 +1828,24 @@ static bool svg_parse_simple_rect_path(const char* d, SvgSimpleRectPath* rect) {
     float xs[4] = {};
     float ys[4] = {};
 
-    skip_wsp_comma(&p);
+    p = str_skip_chars(p, ", \t\n\r\f\v");
     if (*p != 'M') return false;
     p++;
     xs[0] = parse_number(&p);
     ys[0] = parse_number(&p);
 
     for (size_t i = 1; i < 4; i++) {
-        skip_wsp_comma(&p);
+        p = str_skip_chars(p, ", \t\n\r\f\v");
         if (*p != 'L') return false;
         p++;
         xs[i] = parse_number(&p);
         ys[i] = parse_number(&p);
     }
 
-    skip_wsp_comma(&p);
+    p = str_skip_chars(p, ", \t\n\r\f\v");
     if (*p != 'Z') return false;
     p++;
-    skip_wsp_comma(&p);
+    p = str_skip_chars(p, ", \t\n\r\f\v");
     if (*p) return false;
 
     float min_x = xs[0], max_x = xs[0];
@@ -1998,7 +1939,7 @@ static void arc_to_beziers(RdtPath* path, float x1, float y1,
     rx = fabsf(rx);
     ry = fabsf(ry);
 
-    float phi = x_rotation * (float)M_PI / 180.0f;
+    float phi = math_degrees_to_radians(x_rotation);
     float cos_phi = cosf(phi);
     float sin_phi = sinf(phi);
 
@@ -2218,7 +2159,7 @@ static RdtPath* parse_svg_path_d(const char* d, SvgPathEndInfo* end_info = nullp
     const char* p = d;
 
     while (*p) {
-        skip_wsp_comma(&p);
+        p = str_skip_chars(p, ", \t\n\r\f\v");
         if (!*p) break;
 
         char cmd = *p;
@@ -2496,7 +2437,7 @@ static void render_svg_path_marker_end(SvgInlineRenderContext* ctx, Element* ele
     float angle = atan2f(end.tangent_y, end.tangent_x);
     const char* orient = get_svg_attr(marker_elem, "orient");
     if (orient && strcmp(orient, "auto") != 0 && strcmp(orient, "auto-start-reverse") != 0) {
-        angle = parse_svg_length(orient, 0.0f) * (float)M_PI / 180.0f;
+        angle = math_degrees_to_radians(parse_svg_length(orient, 0.0f));
     }
 
     RdtMatrix translate = rdt_matrix_translate(end.x, end.y);
@@ -2928,13 +2869,6 @@ static const char* resolve_svg_radiant_font_family(const char* font_family,
 }
 
 /**
- * Check if a string is only whitespace
- */
-static bool is_whitespace_only(const char* str, size_t len) {
-    return str_all(str, len, str_is_space);
-}
-
-/**
  * Trim leading and trailing whitespace from a string
  * Returns a newly allocated trimmed string, or nullptr if result is empty
  */
@@ -2960,7 +2894,7 @@ static const char* get_direct_text_content(Element* elem) {
             String* str = child.get_string();
             if (str && str->len > 0) {
                 // skip whitespace-only nodes
-                if (is_whitespace_only(str->chars, str->len)) continue;
+                if (str_all(str->chars, str->len, str_is_space)) continue;
                 return trim_whitespace(str->chars, str->len);
             }
         }
@@ -3519,7 +3453,7 @@ static void render_svg_text(SvgInlineRenderContext* ctx, Element* elem) {
             // direct text node
             String* str = child.get_string();
             if (str && str->len > 0) {
-                if (is_whitespace_only(str->chars, str->len)) {
+                if (str_all(str->chars, str->len, str_is_space)) {
                     // SVG spec: whitespace between tspans collapses to a single space
                     if (has_tspan) {
                         cur_x += measure_svg_text_width(" ", font_size, ctx->font_ctx, metrics_family, font_weight);
@@ -4192,8 +4126,7 @@ static void render_svg_group(SvgInlineRenderContext* ctx, Element* elem) {
     int op_x0 = 0, op_y0 = 0, op_w = 0, op_h = 0;
     if (opacity_attr) {
         group_op = strtof(opacity_attr, nullptr);
-        if (group_op < 0.0f) group_op = 0.0f;
-        if (group_op > 1.0f) group_op = 1.0f;
+        group_op = clamp_unit(group_op);
         if (group_op < 1.0f) {
             // use backdrop save/composite so overlapping children composite correctly
             // compute bounds in screen coords from either an explicit PDF Form
@@ -4459,8 +4392,7 @@ static float svg_mask_fill_alpha(SvgInlineRenderContext* ctx, Element* child,
                                                      fill_opacity_buf, sizeof(fill_opacity_buf));
     if (fill_opacity) alpha *= strtof(fill_opacity, nullptr);
 
-    if (alpha < 0.0f) alpha = 0.0f;
-    if (alpha > 1.0f) alpha = 1.0f;
+    alpha = clamp_unit(alpha);
     return alpha;
 }
 
@@ -4726,8 +4658,7 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
     if (initial_stroke_width >= 0.0f) {
         ctx.stroke_width = initial_stroke_width;
     }
-    if (initial_opacity < 0.0f) initial_opacity = 0.0f;
-    if (initial_opacity > 1.0f) initial_opacity = 1.0f;
+    initial_opacity = clamp_unit(initial_opacity);
     ctx.opacity = initial_opacity;
 
     // start with base transform (document position/scale)
@@ -4853,8 +4784,7 @@ void render_svg_build_subscene(PaintSvgSubscene* subscene,
     subscene->stroke_none = initial_stroke_none;
     subscene->stroke_width = initial_stroke_width;
     subscene->source_path = source_path;  // RETAINED_FIELD_OK: subscene-local field, not a retained DOM field
-    if (initial_opacity < 0.0f) initial_opacity = 0.0f;
-    if (initial_opacity > 1.0f) initial_opacity = 1.0f;
+    initial_opacity = clamp_unit(initial_opacity);
     subscene->opacity = initial_opacity;
     subscene->resource_generation = (uint64_t)(uintptr_t)svg_element;
 }
@@ -4867,8 +4797,7 @@ static void svg_subscene_indent(StrBuf* out, int indent_level) {
 
 static bool svg_subscene_attr_name_equals(ShapeEntry* field, const char* name) {
     return field && field->name && field->name->str && name &&
-           strlen(name) == field->name->length &&
-           strncmp(field->name->str, name, field->name->length) == 0;
+           str_eq_const(field->name->str, field->name->length, name);
 }
 
 static int svg_subscene_pdf_image_id_from_href(const char* href) {

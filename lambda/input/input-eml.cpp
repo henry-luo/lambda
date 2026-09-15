@@ -31,11 +31,6 @@ static String* parse_header_name(InputContext& ctx, const char **eml) {
     return NULL;
 }
 
-// Helper function to normalize header name to lowercase
-static void normalize_header_name(char* name) {
-    str_lower_inplace(name, strlen(name));
-}
-
 // Helper function to parse email addresses from a header value
 static String* extract_email_address(InputContext& ctx, const char* header_value) {
     if (!header_value) return NULL;
@@ -169,7 +164,7 @@ void parse_eml(Input* input, const char* eml_string) {
         }
 
         // Normalize header name to lowercase for consistency
-        normalize_header_name(header_name->chars);
+        str_lower_inplace(header_name->chars, header_name->len);
 
         // Store header in headers map
         Item value = {.item = s2it(header_value)};
