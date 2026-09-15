@@ -98,7 +98,7 @@ static const char* escape_find_rule(char c, const EscapeRule* rules, int rule_co
     return NULL;
 }
 
-char escape_decode_c_char(char c) {
+char escape_decode_js_char(char c) {
     switch (c) {
     case 'n': return '\n';
     case 't': return '\t';
@@ -107,12 +107,16 @@ char escape_decode_c_char(char c) {
     case '\'': return '\'';
     case '"': return '"';
     case '0': return '\0';
-    case 'a': return '\a';
     case 'b': return '\b';
     case 'f': return '\f';
     case 'v': return '\v';
     default: return c;
     }
+}
+
+char escape_decode_c_char(char c) {
+    // C, Python and Ruby add the BEL escape; JavaScript reads `\a` as `a`.
+    return c == 'a' ? '\a' : escape_decode_js_char(c);
 }
 
 bool escape_decode_utf16_escape(const char* s, size_t len, bool replacement,

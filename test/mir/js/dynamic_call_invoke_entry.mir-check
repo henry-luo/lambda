@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "JC18: a dynamic call site guards on callee layout (container pointer, JS-layout LMD_TYPE_FUNC, published invoke), calls the stored [[Call]] entry indirectly under js_call's proto, and keeps js_call as the observably identical miss arm.",
+  "description": "JC18: a dynamic call site guards on callee layout (container pointer, JS-layout LMD_TYPE_FUNC, published invoke), selects the stored [[Call]] entry or, on a miss, the observably identical js_call, and makes one indirect call under js_call's proto.",
   "checks": [
     {
       "in_func": "_js_callDyn_#_body",
@@ -8,9 +8,10 @@
         { "pattern": "ursh\t{{r:callee_tag}}, {{r:callee}}, 56" },
         { "pattern": "mov\t{{r}}, u8:({{r:callee}})" },
         { "pattern": "mov\t{{r}}, u8:3({{r:callee}})" },
-        { "pattern": "mov\t{{r:invoke}}, p:40({{r:callee}})" },
-        { "pattern": "call\tjs_call_p_r6_n1_a6, {{r:invoke}}, {{r}}, {{r:callee}}" },
-        { "pattern": "call\tjs_call_p_r6_n1_a6, js_call, {{r}}, {{r:callee}}" }
+        { "pattern": "mov\t{{r:target}}, p:40({{r:callee}})" },
+        { "pattern": ", {{r:target}}, 0" },
+        { "pattern": "mov\t{{r:target}}, js_call" },
+        { "pattern": "call\tjs_call_p_r6_n1_a6, {{r:target}}, {{r}}, {{r:callee}}" }
       ],
       "forbid": [
         "js_call_function_prerooted_args_into",

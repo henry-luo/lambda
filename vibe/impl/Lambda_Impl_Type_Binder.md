@@ -3,9 +3,10 @@
 - **Date:** 2026-09-15
 - **Status:** PLAN — nothing built. Phases TG-P0 … TG-P4 mirror the adoption
   order in the design doc §7; each phase is independently landable and gated.
-  No open design item blocks any phase (TGO1 closed by TG20, 2026-09-15).
-- **Design authority:** `vibe/Lambda_Design_Type_Generics.md` rev 7 (TG1–TG20,
-  TGO1–TGO13). This doc implements only *ratified* items and never resolves
+  TGO14(a), the spelling of the subtype test, blocks TG-P0.1 only; nothing
+  else is blocked (TGO1 closed by TG20, TGO3 closed by TG21, 2026-09-15).
+- **Design authority:** `vibe/Lambda_Design_Type_Generics.md` rev 7 (TG1–TG22 incl. TG13v2 join,
+  TGO1–TGO14). This doc implements only *ratified* items and never resolves
   an open design question in code — where an open item gates a slice, the
   interim disposition is stated and the slice stays inside it.
 - **Formal authority:** S1.6, S1.7, S4.2.2 (narrowest type); D2.4.1 (the
@@ -103,14 +104,15 @@ overwrites `lambda.exe` with the debug build and `make release` deletes
 **In scope (this plan):** TG2 explicit type parameters with dependent
 scoping; TG3/TG5 `as T` binders at any depth inside parameter annotations
 (level 1, TG10); TG6v2 direct bounds; TG7 dynamic tier fully, static tier as
-propagation + bound-typed bodies; TG9 `T` in body scope; TG13 duplicate-binder
-error; TG14v2 relations (they are existing `that` machinery); TG15/TG16
+propagation + bound-typed bodies; TG9 `T` in body scope; TG13v2 multi-site join; TG14v2 relations (they are existing `that` machinery); TG15/TG16
 precedence; TG17 scope/collision/return-position/`var` rules; TG18
 container/unbound rules; TG19 `<:`.
 
 **Out of scope (later plans):** TG10 level 2 and level 3 per-value binders
-in `type` bodies and schemas (need env threading through the validator and
-TGO9); TG8/TG-P4 specialization keyed on bound types; TG13's solver; TGO12
+in `type` bodies and schemas (TG22 defers them; they also need env threading
+through the validator and TGO9); the expression-position checked cast
+`x as T` (SO9) — but the parser work in TG-P2.1 must leave expression-position
+`as` untouched so that cast can land later without conflict; TG8/TG-P4 specialization keyed on bound types; any solver beyond the TG13v2 join; TGO12
 const-pool serialization of binder records across the module boundary
 (representation is kept relocatable now so that plan needs no rework);
 TGO10 catalog operations (`T.fields`, `T.element` — note §6.0 claims
@@ -160,7 +162,10 @@ it; nothing else ever writes a slot. Unbound is therefore not a state.
 
 ### TG-P0 — `<:` operator and dependent scoping
 
-**TG-P0.1 `<:` (TG19).**
+**TG-P0.1 subtype test (TG19).** Spelling is **open** (TGO14: `<:` or
+`extends`); the slice below is written for `<:` and must not start until
+TGO14(a) is ruled. TGO14(b) gates only function-type operands: until ruled,
+`fn_subtype` rejects function-type operands with a clear diagnostic.
 - Lexer: `<:` two-char token `LAMBDA_TOK_SUBTYPE` at the `<` arm
   (`lambda_lexer.c:621`); tree-sitter `grammar.js` `mk('<:', 'is_in', 'left')`
   beside `is`, then `make generate-grammar` (the `lambda-cst` verifier must
@@ -198,7 +203,9 @@ it; nothing else ever writes a slot. Unbound is therefore not a state.
   (TGO5 interim, TG18 "unbound behaves as the bound").
 - Fixture `test/lambda/type_param_dependent.ls`: `fn f(T: type, a: T) T`,
   `fn Pair(T: type) type => {a: T, b: T}`, `f(int, 1)` passes, `f(int, "x")`
-  fails at the boundary with the parameter's blame string.
+  fails at the boundary with the parameter's blame string, and `f(1)` is the
+  ordinary missing-required-argument error (TG21) — no inference path exists
+  for the explicit form, so the arity check needs no special case.
 
 Gate: baseline green; `--emit-ast-dump` shows `(TypeBoundRef slot 0)` on
 `a`'s contract; three tiers identical.
@@ -213,8 +220,19 @@ Gate: baseline green; `--emit-ast-dump` shows `(TypeBoundRef slot 0)` on
   entry `runtime_validate_value_against_type` (it recurses into element and
   field contracts, which is where nested binders live).
 - `TYPE_KIND_BINDER` arm: admit `value` against `binder->bound` (ordinary
-  path, TG6v2); on success `env[slot] = binder_narrowest_type(value, bound)`
-  and return the converted value. `TYPE_KIND_BOUND_REF` arm: admit against
+  path, TG6v2); on success fold the narrowest type into the slot:
+  `env[slot] = env_written[slot] ? binder_join(env[slot], narrowest) :
+  narrowest` (TG13v2 — a second syntactic site for the same name joins; the
+  fold is order independent). `binder_join` is the S4.4 promotion lattice
+  for numeric kinds (reuse the arithmetic result-kind selector so `+` and
+  the join can never disagree), nearest common `base` for nominal records,
+  identity otherwise (D3.4.2 structural for maps), and **never a union**;
+  no join is the "no common type for `a` (int) and `b` (string)" error.
+- **Two passes per signature** (TG13v2): the prologue walks every binder
+  site first, then every non-binder occurrence and every `that` predicate.
+  Same result as the interleaved walk for single-binder names, so the
+  interpreter and the JIT prologue both implement the two-pass order once
+  and never special-case. `TYPE_KIND_BOUND_REF` arm: admit against
   `env[slot]`; on failure produce the TG4 blame:
   "`b` must have the same type as `a` (int); got float" — the binder's
   parameter name comes from the binder table, so `TypeBinder` needs the
@@ -302,8 +320,9 @@ over the new fixtures for the env rooting.
   ref (left-to-right, TG14v2). The parser must reject a name that is a base
   type (`lookup_base_type_name`), an alias in scope, or a parameter of the
   signature (`ERR_BINDER_COLLISION`); a second `as T` in one signature is
-  `ERR_BINDER_DUPLICATE` with TG13's message; a ref to a name bound *later*
-  is `ERR_BINDER_FORWARD_REF`.
+  **legal** and joins (TG13v2) provided its bound is spelled identically —
+  `ERR_BINDER_BOUND_MISMATCH` otherwise ("binder sites for `T` must share
+  one bound"); a ref to a name bound *later* is `ERR_BINDER_FORWARD_REF`.
 - Return position: `parse_return_type_pattern` rejects `as` with
   `ERR_BINDER_IN_RETURN`.
 - Error codes: next free values in the semantic 2xx block of
@@ -342,20 +361,49 @@ timing of the same contract (TG7). Order dependence is preserved verbatim
 
 **TG-P3.3 Body checking.** `T` types as its bound inside the body (TGO5
 interim). Nothing else: no abstract once-for-all verification yet, no
-operation tables. TG20 (ratified 2026-09-15) fixes what the static tier
-binds: the argument expression's **static** type, never a narrowing the
-checker cannot see — so `let x: number = 1; max(x, 2.5)` substitutes
-`T := number` and passes statically, while `max(1, 2.5)` binds `int` and
-fails. TG-P3.1's substitution must therefore read the argument node's
-established static type (`get_effective_type`, TIG1 discipline), and the
-static blame text names the declaration it bound from; the dynamic blame
-text names the value (TG20 diagnostics).
+operation tables.
 
-**TG-P3.4 Elision.** Where TG-P3.1 proved a ref's substituted type equals the
-argument's static type, `mir_boundary_is_redundant` elides the callee check
-(TE-17). Direct native edges to binder-carrying functions become legal only
-for call sites whose substitution is complete; otherwise the boxed entry of
-TG-P1.4 stays.
+**TG-P3.3a Static binding evidence (TG20v2).** The substitution in TG-P3.1
+binds the **narrowest statically known** type of the argument expression:
+for an immutable `let`, the meet of the declared type and the initializer's
+static type — which needs the `NameEntry` to retain the initializer's
+established type beside the annotation (today an annotated identifier reads
+as its declared type; keep the declared type as the *contract* and add a
+`narrowed_type` used only by binder substitution and §2.1 narrowing);
+literals their literal type; parameters their declared contract; `var`
+bindings and container reads the declared contract. Read types through
+`get_effective_type` (TIG1 discipline). So `let x: number = 1; max(x, 2.5)`
+binds `T := int` and is a compile error, matching the dynamic verdict on
+`max(1, 2.5)`.
+
+**TG-P3.3c Per-call-site instantiation.** A provisional binding inside a
+body is resolved by re-typing the callee per concrete call (§2.2): `g(1)`
+under `fn g(x: number) => max(x, 2.5)` instantiates `g(int)`, binds
+`T := int` at the inner `max`, and is a compile error at the `g(1)` call
+with the instantiation named. Reuse the existing module-wide call-site
+inference (D8.1.1v9, `INFER_CALLSITE_*`) rather than a new walk — but
+**verify it runs on the strict static-check path, not only during JIT
+lowering**, and memoize per (callee, argument-type tuple) with the §2.2
+recursion cutoff (widen to the declared contract at the fixpoint). Only the
+residue — `any`-typed data, container/function-value flow, exported
+functions with unseen callers, the cutoff — stays provisional and keeps its
+runtime check.
+
+**TG-P3.3b Exact versus provisional.** Add `binder_static_binding_is_exact(Type*)`:
+true for concrete scalar kinds and certified typed arrays, false for
+`number`/`integer`/`any`, unions, optionals, open containers and nominal
+records. Provisional bindings still type-check what they can, but the
+static blame text says "bound to `number` from the declaration of `x`" and
+the exact one "bound to `int` from the initializer of `x`" / "from the value
+`1`".
+
+**TG-P3.4 Elision.** `mir_boundary_is_redundant` may elide a binder or ref
+check only when the static binding is **exact** (TG-P3.3b) and the argument's
+static type equals the substituted type (TE-17). A provisional binding never
+elides — the boxed entry's runtime oracle decides, which is what keeps TG7
+and the gradual guarantee true (TG20v2). Direct native edges to
+binder-carrying functions become legal only for call sites whose every
+binder is exact; otherwise the boxed entry of TG-P1.4 stays.
 
 Gate: `--emit-ast-dump` asserts substituted result types on the fixtures;
 `test_lambda_opt_gtest` gains the elision witnesses; three tiers identical.
@@ -399,21 +447,22 @@ priority.
 | `type_subtype_op.ls` | P0.1 | TG19 relation, reflexivity, nominal base, non-type operands |
 | `type_param_dependent.ls` | P0.2 | TG2 dependent scoping, `type`-returning fns |
 | `type_binder_scalar.ls` | P1 | TG4 order dependence, blame text |
+| `type_binder_join.ls` | P1 | TG13v2: `max(a: number as T, b: number as T)` symmetric, S4.4 kinds (`int`⊔`float`, `integer`⊔`float`=`decimal`, sized lanes), nominal base join, `(int, string)` no-join error, check site between two binder sites (two-pass) |
 | `type_binder_array.ls` | P1 | TG18 first-element-binds, empty → bound |
 | `type_binder_optional.ls` | P1 | TG18 `a?:`, `(X as T)?`, `X? as T` with `null` |
 | `type_binder_relation.ls` | P1 | TG14v2 `that (T <: U)`, oracle agreement with `type(~)` |
 | `proc/type_binder_var_param.ls` | P1.5 | TG17 bind-once under CW33 write-back |
-| `errors/type_binder_*.ls` | P2 | TG13 duplicate, TG14v2 forward ref, TG16 trailing `that`, TG17 collision / return position |
-| `type_binder_static.ls` (+ ast-dump) | P3 | call-site substitution, static mismatch, elision, TG20 `max(x, 2.5)` vs `max(1, 2.5)` across tiers |
+| `errors/type_binder_*.ls` | P2 | TG13v2 bound mismatch, TG14v2 forward ref, TG16 trailing `that`, TG17 collision / return position |
+| `type_binder_static.ls` (+ ast-dump) | P3 | call-site substitution, static mismatch, exact-only elision; TG20v2 quartet: `let x: number = 1; max(x, 2.5)` compile error; `fn g(x: number) => max(x, 2.5); g(1)` compile error at the call via instantiation; `g(1.0)` passes; `let d: any = ...; g(d)` runtime error — verdicts identical across tiers |
 
 ## 6. Open design items carried, and what each gates
 
 | Item | Gates | Interim in this plan |
 |---|---|---|
-| TGO3 elision of explicit `T: type` args | nothing | explicit always, Zig rule |
 | TGO5 abstract-body admissibility | TG-P3 precision | `T` types as its bound |
 | TGO6 exported-API annotation lint | nothing | convention only |
 | TGO8 formal-spec entries + doc text | adoption | doc half done in TG-P2.3 |
 | TGO9 level-2 re-bind under mutation | level 2 plan | out of scope |
 | TGO10 catalog ops (`T.element` unverified) | nothing here | verify before use |
 | TGO12 const-pool serialization | module boundary plan | slots not pointers (§2) |
+| TGO14 subtype-test spelling, fn-type variance, covariance argument | **TG-P0.1** (spelling), fn-type operands | none for (a); (b) fn types rejected until ruled |

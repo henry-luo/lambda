@@ -7,6 +7,7 @@
  * saved/restored on backtracking. RepeatMatcher implements the nullable-quantifier
  * "discard empty optional iteration" rule. A global step budget bounds runtime.
  */
+#include <climits>
 #include "js_bt_regex.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
@@ -627,8 +628,14 @@ static RxNode* parse_atom(Parser* ps) {
 static bool parse_brace_quant(Parser* ps, int* outmin, int* outmax) {
     int save = ps->pos;
     ps->pos++; // {
+    // A bound beyond INT_MAX is unreachable (no subject is that long), so it
+    // saturates like V8's kInfinity instead of overflowing the accumulator.
+    auto accumulate = [](int value, char digit) {
+        int d = digit - '0';
+        return value > (INT_MAX - d) / 10 ? INT_MAX : value * 10 + d;
+    };
     int lo = 0; bool has_lo = false;
-    while (ps->pos < ps->len && ps->p[ps->pos] >= '0' && ps->p[ps->pos] <= '9') { lo = lo*10 + (ps->p[ps->pos]-'0'); has_lo = true; ps->pos++; }
+    while (ps->pos < ps->len && ps->p[ps->pos] >= '0' && ps->p[ps->pos] <= '9') { lo = accumulate(lo, ps->p[ps->pos]); has_lo = true; ps->pos++; }
     if (!has_lo) { ps->pos = save; return false; }
     int hi;
     if (ps->pos < ps->len && ps->p[ps->pos] == '}') { hi = lo; ps->pos++; }
@@ -637,7 +644,7 @@ static bool parse_brace_quant(Parser* ps, int* outmin, int* outmax) {
         if (ps->pos < ps->len && ps->p[ps->pos] == '}') { hi = -1; ps->pos++; }
         else {
             int h = 0; bool has_hi = false;
-            while (ps->pos < ps->len && ps->p[ps->pos] >= '0' && ps->p[ps->pos] <= '9') { h = h*10 + (ps->p[ps->pos]-'0'); has_hi = true; ps->pos++; }
+            while (ps->pos < ps->len && ps->p[ps->pos] >= '0' && ps->p[ps->pos] <= '9') { h = accumulate(h, ps->p[ps->pos]); has_hi = true; ps->pos++; }
             if (!has_hi || ps->pos >= ps->len || ps->p[ps->pos] != '}') { ps->pos = save; return false; }
             ps->pos++; hi = h;
         }
@@ -892,7 +899,10 @@ static int bt_repeat_simple(MatchCtx& ctx, const RxNode* node, int pos, const Co
 }
 
 static int bt_repeat_inner(MatchCtx& ctx, const RxNode* node, int min, int max, int pos, const Cont* k, int dir) {
-    // reset captures of parens contained in the quantified child for this iteration
+    // Captures of parens inside the quantified child are cleared only for a
+    // new body iteration (RepeatMatcher step 4, state xr). The continuation
+    // keeps the incoming captures (steps 7 and 9, state x): clearing them
+    // before a lazy quantifier tried to stop lost the last iteration's capture.
     int lo = node->paren_lo, hi = node->paren_hi;
     int span = (hi >= lo) ? (hi - lo + 1) : 0;
     JsRegexScratch<int> saved_s_buf(span), saved_e_buf(span);
@@ -901,9 +911,11 @@ static int bt_repeat_inner(MatchCtx& ctx, const RxNode* node, int min, int max, 
     if (hi >= lo && saved_s_buf.count >= span && saved_e_buf.count >= span) {
         for (int g = lo; g <= hi && g <= ctx.ngroups; g++) {
             saved_s[nsaved] = ctx.cap_start[g]; saved_e[nsaved] = ctx.cap_end[g]; nsaved++;
-            ctx.cap_start[g] = -1; ctx.cap_end[g] = -1;
         }
     }
+    auto reset = [&]() {
+        for (int g = lo; g <= hi && g <= ctx.ngroups; g++) { ctx.cap_start[g] = -1; ctx.cap_end[g] = -1; }
+    };
     auto restore = [&]() {
         int idx = 0;
         for (int g = lo; g <= hi && g <= ctx.ngroups; g++) { ctx.cap_start[g] = saved_s[idx]; ctx.cap_end[g] = saved_e[idx]; idx++; }
@@ -912,11 +924,13 @@ static int bt_repeat_inner(MatchCtx& ctx, const RxNode* node, int min, int max, 
     d.rep_min = min; d.rep_max = max; d.rep_start = pos;
     int r;
     if (min != 0) {
+        reset();
         r = bt_match(ctx, node->child, pos, &d, dir);
         if (r < 0) restore();
         return r;
     }
     if (node->greedy) {
+        reset();
         r = bt_match(ctx, node->child, pos, &d, dir);
         if (r >= 0) return r;
         restore();
@@ -924,6 +938,7 @@ static int bt_repeat_inner(MatchCtx& ctx, const RxNode* node, int min, int max, 
     } else {
         r = bt_run(ctx, k, pos, dir);
         if (r >= 0) return r;
+        reset();
         r = bt_match(ctx, node->child, pos, &d, dir);
         if (r < 0) restore();
         return r;

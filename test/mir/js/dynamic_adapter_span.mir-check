@@ -6,7 +6,8 @@
       "in_func": "_js_invoke2_#_body",
       "expect_seq": [
         { "pattern": "add\t{{r}}, {{r}}, 0" },
-        { "pattern": "call\tjs_call_p_r6_n1_a6, js_call" }
+        { "pattern": "mov\t{{r:target}}, js_call" },
+        { "pattern": "call\tjs_call_p_r6_n1_a6, {{r:target}}" }
       ],
       "forbid": [
         "js_args_save",
@@ -17,7 +18,8 @@
     {
       "in_func": "_js_invokeMany_#_body",
       "expect_seq": [
-        { "pattern": "call\tjs_call_p_r6_n1_a6, js_call" }
+        { "pattern": "mov\t{{r:target}}, js_call" },
+        { "pattern": "call\tjs_call_p_r6_n1_a6, {{r:target}}" }
       ]
     }
   ]

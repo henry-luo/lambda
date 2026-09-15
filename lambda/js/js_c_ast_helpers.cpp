@@ -223,7 +223,8 @@ static String* js_c_decode_identifier_name(JsTranspiler* tp,
     return name_pool_create_len(tp->name_pool, decoded, (int)out);
 }
 
-#define js_decode_escape_char escape_decode_c_char
+// JavaScript has no `\a` escape; the shared C set would decode it to BEL.
+#define js_decode_escape_char escape_decode_js_char
 #define js_template_hex_char js_c_hex_char
 #define js_template_has_invalid_escape js_c_template_has_invalid_escape
 #define wtf8_encode utf8_encode_wtf8

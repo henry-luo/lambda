@@ -1,6 +1,6 @@
 # LambdaJS — MIR Lowering, Code Generation & Exceptions
 
-> **Last verified against tree:** 2026-09-15
+> **Last verified against tree:** 2026-09-15 *(§8 dynamic call-site entry re-verified after JC18; §9 argument-slot clearing re-verified)*
 
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the phase-2/3 lowering mechanics: how typed AST nodes become MIR instructions, the boxed-Item-by-default emission model and its native INT/FLOAT fast paths, boxing/unboxing tag arithmetic, condition lowering and the comparison `_raw` facades, short-circuit operators, constant folding and dead-branch elimination, call emission, the in-band Item exception model (JIT try/catch/finally, signal-based stack overflow), and dynamic code (`eval` / `Function`).
 >
@@ -152,10 +152,31 @@ Optional member calls use the same `Get -> Call` sequence after their nullish
 guards.  `jm_resolve_native_call` therefore rejects every member expression;
 only an exact lexical function binding may use a direct body call.
 
-The generic path builds a caller-owned argument span and delegates to
-`jm_call_function_into`, which donates a scalar result home and emits either
-`js_call_function_into` or `js_call_function_prerooted_args_into` according to
-the emitter's exact rooting provenance. Spread forms route through
+The generic path builds a caller-owned argument span in the function's
+argument frame slots and delegates to `jm_call_function_into`
+(`js_mir_calls_boxing_types.cpp`). That helper donates a scalar result home and
+emits one six-operand call shape, with the emitter's rooting provenance as the
+final literal operand:
+
+- **Target selection.** A layout guard runs first: the callee is a container
+  pointer (high byte 0, non-null) whose record has `type_id == LMD_TYPE_FUNC`,
+  `entry_abi == FN_ENTRY_ABI_JS_FUNCTION`, and a non-null `invoke`. If it
+  passes, the target register holds the callee's stored `[[Call]]` capability.
+  Otherwise `em_load_import_address` loads the address of `js_call`, the single
+  runtime entry, into the same register. `js_call` performs the same layout
+  split before entering the same `invoke`, so both targets are observably
+  identical.
+- **One call.** The site then makes a single indirect call
+  (`call js_call_p…, <target reg>, …`). It reuses the `js_call` import's proto
+  and audited metadata through `em_call_indirect_as`, so its safepoint, root and
+  exception bookkeeping are identical to a direct import call.
+
+The guard tests layout, not callee identity, and nothing is stored per site
+(**D8.4.1v2**). The guard costs ten instructions per site and adds no safepoint,
+root store or error-lane join; the call result is the ordinary carrier. For an ordinary callee `invoke` is the call
+kernel itself (`js_call_entry_generic`); the kernel then calls the callee's
+finalized body entry, which for compiled code is its MIR span entry (JS_05 §2).
+The shape is pinned by `test/mir/js/dynamic_call_invoke_entry.mir-check`. Spread forms route through
 `js_apply_function_into`. Dynamic construction uses
 `jm_construct_value_into`, whose six-operand runtime call carries the callee,
 argument span, argument count, explicit `newTarget`, result home, and the
@@ -164,9 +185,9 @@ handoff. Exact direct-body calls may temporarily install active `this` and
 `new.target` for their dynamic extent, restoring both on exit; this is active
 activation state rather than constructor-selection state.
 
-Every call site that can observe side effects is wrapped by the transient
-argument-stack save/restore discipline, closure-environment readback, and
-`jm_emit_error_lane_propagate_check` (§9). The standing MIR fixture
+Every call site that can observe side effects is wrapped by its argument
+frame-slot scope (cleared at expression completion and on error-lane exits),
+closure-environment readback, and `jm_emit_error_lane_propagate_check` (§9). The standing MIR fixture
 `test/mir/js/tune4_call_construct.mir-check` ratchets property `Get` before
 dynamic call and the explicit construct operand shape.
 
@@ -194,7 +215,9 @@ runtime calls whose catalog effect may set an error. `jm_emit_error_lane_test`
 branches on the high-byte ERROR tag of the latest Item result. It finds the
 topmost non-`yield_state_only` entry on `try_ctx_stack`: inside a try it emits
 `MIR_BT` to the catch/finally label; outside any try it emits `MIR_BT` to the
-per-function `func_error_lane_label`, which returns the error Item. This preserves
+per-function `func_error_lane_label`, which returns the error Item. Before the
+jump it zeroes every active argument frame-slot scope, because a throw during
+argument evaluation ends those calls' lifetimes (JS_03 §7). This preserves
 the original identity through nested calls, loops, and accessors.
 
 **Online lane proof.** `error_lane_track ∈ {UNKNOWN, CLEAN, SET, UNREACHABLE}`
@@ -210,8 +233,7 @@ state-machine compilation.
 `JsTryContext` recording the catch/finally/end labels, delayed-return
 registers, and a stable incoming-error register. After each statement in the
 try body it routes an ERROR-tagged result to catch/finally (`:5552`). The
-catch block restores the `with`-scope depth and transient argument-stack mark
-(a throw during argument evaluation can leave a half-built arg frame), then
+catch block restores the `with`-scope depth, then
 `js_error_lane_payload` supplies the thrown value to the catch parameter.
 Finally saves the in-flight Item, scopes a clean compiler proof for its body,
 and re-raises the

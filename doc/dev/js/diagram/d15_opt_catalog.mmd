@@ -2,7 +2,7 @@ flowchart TB
   ROOT["LambdaJS optimization catalog"]
 
   CALL["Call &amp; dispatch tier"]
-  C1["transient call-arg stack<br/>js_args_push / save / restore"]
+  C1["call-argument frame slots<br/>+ flattened call path (JC13-JC22)"]
   C2["const-bound static dispatch<br/>direct MIR call, no args buffer"]
   C3["direct method dispatch<br/>known class -> MIR_CALL"]
 

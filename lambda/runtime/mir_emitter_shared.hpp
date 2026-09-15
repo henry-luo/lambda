@@ -4089,6 +4089,20 @@ static inline void em_emit_destination_owned_call(MirEmitter* em,
     em_emit_unclassified_call(em, call_name, insn, true);
 }
 
+// Resolve (and declare on first use) the import `fn_name` with this signature.
+static inline MirImportEntry* em_resolve_import(MirEmitter* em,
+                                                const char* fn_name,
+                                                MIR_type_t ret_type,
+                                                int nargs,
+                                                MIR_type_t* arg_types,
+                                                bool include_signature) {
+    if (nargs < 0 || nargs > LAMBDA_MAX_FUNCTION_ARGS) return NULL;
+    MIR_var_t args[LAMBDA_MAX_FUNCTION_ARGS];
+    if (nargs > 0) mir_prepare_call_args(args, arg_types, nargs);
+    return em_ensure_import(em, fn_name, ret_type, nargs,
+        nargs ? args : NULL, 1, include_signature);
+}
+
 static inline MIR_reg_t em_call_with_args_policy(MirEmitter* em,
                                                   const char* fn_name,
                                                   MIR_type_t ret_type,
@@ -4098,11 +4112,8 @@ static inline MIR_reg_t em_call_with_args_policy(MirEmitter* em,
                                                   bool include_signature,
                                                   bool refresh_after_gc,
                                                   MIR_reg_t indirect_target = 0) {
-    if (nargs < 0 || nargs > LAMBDA_MAX_FUNCTION_ARGS) return 0;
-    MIR_var_t args[LAMBDA_MAX_FUNCTION_ARGS];
-    if (nargs > 0) mir_prepare_call_args(args, arg_types, nargs);
-    MirImportEntry* ie = em_ensure_import(em, fn_name, ret_type, nargs,
-        nargs ? args : NULL, 1, include_signature);
+    MirImportEntry* ie = em_resolve_import(em, fn_name, ret_type, nargs,
+        arg_types, include_signature);
     if (!ie) return 0;
     // Snapshot before ownership enforcement can resize the import hashmap.
     MirImportEntry resolved = *ie;
@@ -4215,6 +4226,23 @@ static inline MIR_reg_t em_call_indirect_as(MirEmitter* em,
                                             MIR_op_t* arg_ops) {
     return em_call_with_args_policy(em, signature_name, ret_type, nargs,
         arg_types, arg_ops, true, true, target);
+}
+
+// Load the code address of import `fn_name` into `dst`, so one
+// em_call_indirect_as under that signature can select between the import and a
+// stored entry with the same signature (a single call, safepoint and carrier).
+static inline bool em_load_import_address(MirEmitter* em,
+                                          const char* fn_name,
+                                          MIR_reg_t dst,
+                                          MIR_type_t ret_type,
+                                          int nargs,
+                                          MIR_type_t* arg_types) {
+    MirImportEntry* ie = em_resolve_import(em, fn_name, ret_type, nargs,
+        arg_types, true);
+    if (!ie) return false;
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, dst),
+        MIR_new_ref_op(em->ctx, ie->import)));
+    return true;
 }
 
 static inline MIR_reg_t em_call_terminal_with_args(MirEmitter* em,

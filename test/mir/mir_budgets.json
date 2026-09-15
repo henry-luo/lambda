@@ -168,13 +168,13 @@
       "name": "js_numeric_inference_call",
       "script": "test/mir/js/numeric_inference_call.js",
       "language": "js",
-      "description": "JS call-result binding: watches js_main's root-store traffic and merged Item error-tag branches. Tune4 re-baseline: console.log is an ordinary mutable property call through the per-callee entry instead of a name-selected MIR shortcut (D6.2.2v2). JS2 reviewed growth (D8.6.1): +66 instructions for the exact-shape/storage guards, native slot load and joined fallback; two root stores and one cold float-boxing safepoint. The profiling build adds four instructions for the existing named probe/hit/miss counters and their join; trace on/off retains identical MIR. JS2 tasks 3/4 reviewed growth (D8.6.1): +13 instructions for source-call depth accounting and its RangeError edge; one cold safepoint, no additional root stores. JS2 planning/lanes reviewed growth (D8.6.1): +7 against the recorded debug ceiling (+9 versus the current control artifact), for live NameId/reservation guards and shared bool/int/string loads; removes the activation shape-handle cache and adds no roots, root stores or safepoints. Release is four instructions smaller.",
+      "description": "JS call-result binding: watches js_main's root-store traffic and merged Item error-tag branches. Tune4 re-baseline: console.log is an ordinary mutable property call through the per-callee entry instead of a name-selected MIR shortcut (D6.2.2v2). JS2 reviewed growth (D8.6.1): +66 instructions for the exact-shape/storage guards, native slot load and joined fallback; two root stores and one cold float-boxing safepoint. The profiling build adds four instructions for the existing named probe/hit/miss counters and their join; trace on/off retains identical MIR. JS2 tasks 3/4 reviewed growth (D8.6.1): +13 instructions for source-call depth accounting and its RangeError edge; one cold safepoint, no additional root stores. JS2 planning/lanes reviewed growth (D8.6.1): +7 against the recorded debug ceiling (+9 versus the current control artifact), for live NameId/reservation guards and shared bool/int/string loads; removes the activation shape-handle cache and adds no roots, root stores or safepoints. Release is four instructions smaller. Call flatten P4 reviewed growth (JC18, D8.4.1v2): +10 instructions per dynamic call site for the inline callee-layout guard that selects the stored invoke entry or js_call before one indirect call; no additional safepoints or root stores. Retired public wrappers shrink module_insns elsewhere.",
       "budgets": {
         "default": {
-          "module_insns": 238,
+          "module_insns": 232,
           "functions": {
             "js_main": {
-              "insns": 177
+              "insns": 187
             }
           },
           "frames": [
@@ -194,7 +194,7 @@
       "name": "js_hoisted_modvar_write_through",
       "script": "test/mir/js/hoisted_modvar_write_through.js",
       "language": "js",
-      "description": "Nested closures over an IIFE scope: the shape most exposed to rooting bloat, including merged Item error-tag branches. Tune4 re-baseline: dynamic closure and console calls use rooted argument spans and per-callee entries; js_main itself shrank by two instructions (D6.2.2v2, D5.4.3). Darwin debug v3 also uses the profile-enabled numeric helper imports in the ordinary debug host. JS2 tasks 3/4 reviewed Darwin growth (D8.6.1): net +13 instructions for source-call depth accounting after removal of redundant scalar adoption; one cold RangeError safepoint in _js_anon1_#, no additional root stores.",
+      "description": "Nested closures over an IIFE scope: the shape most exposed to rooting bloat, including merged Item error-tag branches. Tune4 re-baseline: dynamic closure and console calls use rooted argument spans and per-callee entries; js_main itself shrank by two instructions (D6.2.2v2, D5.4.3). Darwin debug v3 also uses the profile-enabled numeric helper imports in the ordinary debug host. JS2 tasks 3/4 reviewed Darwin growth (D8.6.1): net +13 instructions for source-call depth accounting after removal of redundant scalar adoption; one cold RangeError safepoint in _js_anon1_#, no additional root stores. Call flatten P4 reviewed growth (JC18, D8.4.1v2): +10 instructions per dynamic call site for the inline callee-layout guard that selects the stored invoke entry or js_call before one indirect call; no additional safepoints or root stores. Retired public wrappers shrink module_insns elsewhere.",
       "budgets": {
         "default": {
           "module_insns": 507,
@@ -224,10 +224,10 @@
           ]
         },
         "darwin-debug-v3": {
-          "module_insns": 366,
+          "module_insns": 343,
           "functions": {
             "js_main": {
-              "insns": 72
+              "insns": 82
             }
           },
           "frames": [
@@ -289,10 +289,10 @@
       "name": "js_corpus_generator_basic",
       "script": "test/js/generator_basic.js",
       "language": "js",
-      "description": "Picked corpus script (generator/resume-heavy), including fixed call-argument slots, merged Item error-tag branches, and generator throw-resume markers. D4.6.1v2 re-baseline: fused active-module name resolution removes the intermediate NameId-to-Item MIR import boundary.",
+      "description": "Picked corpus script (generator/resume-heavy), including fixed call-argument slots, merged Item error-tag branches, and generator throw-resume markers. D4.6.1v2 re-baseline: fused active-module name resolution removes the intermediate NameId-to-Item MIR import boundary. Call flatten P4 reviewed growth (JC18, D8.4.1v2): +10 instructions per dynamic call site for the inline callee-layout guard that selects the stored invoke entry or js_call before one indirect call; no additional safepoints or root stores. Retired public wrappers shrink module_insns elsewhere.",
       "budgets": {
         "default": {
-          "module_insns": 4656
+          "module_insns": 4926
         }
       }
     },
@@ -414,7 +414,7 @@
       "name": "js_tune6_exact_collection",
       "script": "test/mir/js/tune6_exact_collection.js",
       "language": "js",
-      "description": "Tune6 C3 exact function/class storage beyond the former fixed caps and one bulk instance-metadata publication, plus Tune7's three explicit receiver-analysis init bits per finalized function. The exact private-member case resolves class-owned unique NameIds instead of encoding private identity in a spelling. Tune4 re-baseline: atomic GC-aware callable finalization and precise class-metadata publication increase root stores while reducing finalized instructions and safepoints; D1.3's shared JS property kernels add their required rooted carrier at this fixture (D5.4.3).",
+      "description": "Tune6 C3 exact function/class storage beyond the former fixed caps and one bulk instance-metadata publication, plus Tune7's three explicit receiver-analysis init bits per finalized function. The exact private-member case resolves class-owned unique NameIds instead of encoding private identity in a spelling. Tune4 re-baseline: atomic GC-aware callable finalization and precise class-metadata publication increase root stores while reducing finalized instructions and safepoints; D1.3's shared JS property kernels add their required rooted carrier at this fixture (D5.4.3). Call flatten P4 reviewed growth (JC18, D8.4.1v2): +10 instructions per dynamic call site for the inline callee-layout guard that selects the stored invoke entry or js_call before one indirect call; no additional safepoints or root stores. Retired public wrappers shrink module_insns elsewhere.",
       "budgets": {
         "linux-debug": {
           "module_insns": 14166,
@@ -438,13 +438,13 @@
           ]
         },
         "darwin-debug": {
-          "module_insns": 10068,
+          "module_insns": 9443,
           "functions": {
             "js_main": {
-              "insns": 4908
+              "insns": 4928
             },
             "Tune6ExactCollection_m128_128": {
-              "insns": 10
+              "insns": 5
             }
           },
           "frames": [

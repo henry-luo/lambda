@@ -5,6 +5,7 @@
 
 #include "cookie.hpp"
 #include "serve_utils.hpp"
+#include "../../lib/mem.h"
 #include <string.h>
 #include <stdio.h>
 

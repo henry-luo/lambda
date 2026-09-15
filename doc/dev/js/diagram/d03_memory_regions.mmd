@@ -2,7 +2,7 @@ flowchart TB
   subgraph EvalCtx["EvalContext (shared Lambda runtime)"]
     direction TB
     GC["GC heap (gc_heap_t)<br/>dual-zone non-moving mark-and-sweep"]
-    ROOTSTACK["Precise Item root side-stack<br/>scanned only to current watermark"]
+    ROOTSTACK["Precise Item root side-stack<br/>scanned only to current watermark<br/>(includes call-argument frame slots)"]
     NUMSTACK["Raw number side-stack<br/>activation/caller watermarks"]
     ARENA["Input.arena<br/>document-lifetime Mark values"]
     NP["Name pool<br/>interned String, identity-comparable"]
@@ -12,8 +12,7 @@ flowchart TB
   DATAZONE["Data zone (bump)<br/>variable-size buffers, Map.data"]
   NUMS["transient numeric payloads<br/>int64 / uint64 / out-of-band double"]
   MARK["static Mark graph<br/>containers / strings / DateTime"]
-  JSFN["JsFunction structs<br/>pool_calloc, not GC-collected"]
-  ARGS["Call-argument stack<br/>js_args_stack, 256K Items, malloc"]
+  JSFN["cached compiled JsFunction wrappers<br/>module-lifetime"]
   MODV["js_module_vars[2048]<br/>active_module_vars pointer"]
 
   GC --> OBJZONE
@@ -22,7 +21,5 @@ flowchart TB
   NUMSTACK --> NUMS
   ARENA --> MARK
   POOL --> JSFN
-  JSFN -. "env / module_vars / args reachable only via" .-> ROOTS["heap_register_gc_root_range"]
-  ARGS -. "registered once" .-> ROOTS
-  MODV -. "registered range" .-> ROOTS
+  MODV -. "registered range" .-> ROOTS["heap_register_gc_root_range"]
   ROOTS --> GC

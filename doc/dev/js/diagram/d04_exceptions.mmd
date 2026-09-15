@@ -9,12 +9,13 @@ flowchart TB
     P{"topmost non-yield try ctx?"}
     PT["MIR_BT to catch_label / finally_label"]
     PF["MIR_BT to func_error_lane_label<br/>(return ERROR Item from function)"]
+    CLR["before either jump:<br/>jm_clear_active_arg_frames"]
   end
 
   subgraph trycf["try / catch / finally lowering"]
-    PUSH["push JsTryContext on try_ctx_stack[16]:<br/>catch_label, finally_label, end_label,<br/>return_val_reg, has_return_reg"]
+    PUSH["push JsTryContext on try_ctx_stack (ArrayList):<br/>catch_label, finally_label, end_label,<br/>return_val_reg, has_return_reg"]
     TRY["try body: after each stmt,<br/>route returned ERROR Item to catch/finally"]
-    CATCH["catch: js_args_restore + js_with_restore,<br/>thrown = js_error_lane_payload,<br/>bind param, run body"]
+    CATCH["catch: js_with_restore_depth,<br/>thrown = js_error_lane_payload,<br/>bind param, run body"]
     FIN["finally: save routed ERROR Item,<br/>run body, re-throw saved lane<br/>unless body returned a new one"]
   end
 
@@ -25,8 +26,9 @@ flowchart TB
   end
 
   SV --> CK --> CL
-  P -->|inside try| PT
-  P -->|outside| PF
+  P --> CLR
+  CLR -->|inside try| PT
+  CLR -->|outside| PF
   PUSH --> TRY --> CATCH
   TRY --> FIN
   ARM --> SIG --> RNG --> SV

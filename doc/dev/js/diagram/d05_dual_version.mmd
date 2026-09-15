@@ -7,7 +7,7 @@ flowchart TB
   EMITINLINE["inline body at call site<br/>(jm_transpile_inline_native)"]
   EMITNATIVE["direct MIR_CALL to f_n<br/>native int/float args + result"]
   EMITBOXED["direct boxed call to f<br/>save/restore this + new.target"]
-  DYN["js_call_function / js_invoke_fn<br/>(closure env, arguments, dynamic this)"]
+  DYN["layout guard: call fn->invoke<br/>(miss: js_call) -> kernel -> span entry -> body"]
   CALL --> RESOLVE
   RESOLVE -->|no| DYN
   RESOLVE -->|yes| SHADOW

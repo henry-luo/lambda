@@ -6,7 +6,8 @@
       "in_func": "_js_callMember_#_body",
       "expect_seq": [
         { "pattern": "call\tjs_get_reference_p_r6_n1_a2, js_get_reference" },
-        { "pattern": "call\tjs_call_p_r6_n1_a6, js_call, {{r}}, {{r}}, %p0, {{r}}, 1, {{r}}, 1" }
+        { "pattern": "mov\t{{r:target}}, js_call" },
+        { "pattern": "call\tjs_call_p_r6_n1_a6, {{r:target}}, {{r}}, {{r}}, %p0, {{r}}, 1, {{r}}, 1" }
       ],
       "forbid": [
         "js_string_method",

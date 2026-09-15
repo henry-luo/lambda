@@ -250,8 +250,8 @@ ECMAScript `[[Call]]`, `[[Construct]]`, property access, bound functions, and
 | **JC10** | Function.prototype is represented by a real callable function value. Ordinary Maps are never made callable by sentinel properties or an own `.call` property. |
 | **JC11** | Phase-local compatibility adapters are allowed only while their corresponding old switch cases are deleted in the same phase. The completed runtime contains no legacy semantic fallback. |
 | **JC12** | This phase is net-negative in mechanisms and source size. Moving switch bodies to another file without replacing the dispatch model does not count as implementation. |
-| **JC13–JC19** | *(proposed, 2026-09-15)* Flatten the dynamic call chain from ten named functions to ≤4 hops: one kernel symbol, one per-callable span body entry, generated argument adaptation, retired register-operand public wrapper, root-once. See `JS_Runtime_Call_Flatten.md`. |
-| **JC20–JC22** | *(proposed, 2026-09-15)* AST interpreter call path: the AST activation borrows the kernel activation (no inner re-roots), and AST→AST calls take a guard-entered direct instance of the same kernel. See `JS_Runtime_Call_Flatten.md` §3.5. |
+| **JC13–JC19** | *(proposed, implemented 2026-09-15 in `8e9f49d9a`; not ratified)* Flatten the dynamic call chain from ten named functions to ≤4 hops: one kernel symbol, one per-callable span body entry, generated argument adaptation, retired register-operand public wrapper, root-once. See `JS_Runtime_Call_Flatten.md`. |
+| **JC20–JC22** | *(proposed, implemented 2026-09-15 in `8e9f49d9a`; not ratified)* AST interpreter call path: the AST activation borrows the kernel activation (no inner re-roots), and AST→AST calls take a guard-entered direct instance of the same kernel. See `JS_Runtime_Call_Flatten.md` §3.5. |
 
 ## 5. Target callable representation
 
@@ -351,11 +351,19 @@ js_call_function_into
 js_call_function_prerooted_args_into
           |
           v
-js_call_value(callee, this, args, argc, home, rooting_mode)
+js_call(callee, this, args, argc, home, args_prerooted)
           |
           v
 callee.fn->invoke(...)
 ```
+
+*Implemented form (JC13–JC22, 2026-09-15; `JS_Runtime_Call_Flatten.md`).* The
+three adapters are thin forwards that fix `js_call`'s two ownership operands.
+`js_call` is the single exported entry. For an ordinary function, `invoke` is
+`js_call_entry_generic`, one instance of the always-inline kernel
+`js_call_kernel`, which calls the callee's finalized body entry. Compiled call
+sites enter `invoke` directly behind a layout guard, with `js_call` as the miss
+arm (JC18). AST call sites enter `js_call_from_ast` (JC21).
 
 The existing `_into` and pre-rooted APIs must not be deleted merely to hit an
 API-count target; recent scalar-home and precise-rooting work made their

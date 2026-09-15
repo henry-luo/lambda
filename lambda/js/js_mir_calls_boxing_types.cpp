@@ -194,63 +194,48 @@ MIR_reg_t jm_call_function_into(JsMirTranspiler* mt, MIR_op_t func,
     // container pointer (high byte 0, non-null) whose record is a JS-layout
     // LMD_TYPE_FUNC with a published `invoke`. `invoke` has js_call's exact
     // signature, and js_call reaches that same entry after the same tests, so
-    // the miss arm is observably identical and no per-site state exists
-    // (D8.4.1v2, D6.2.2v2).
+    // the miss target is observably identical and no per-site state exists
+    // (D8.4.1v2, D6.2.2v2). The guard only selects the code address; one
+    // indirect call follows, so the site keeps one safepoint and one carrier.
     MIR_reg_t callee = ops[0].u.reg;
-    MIR_reg_t result = jm_new_reg(mt, "dyn_call", MIR_T_I64);
-    MIR_label_t generic = jm_new_label(mt);
-    MIR_label_t done = jm_new_label(mt);
+    MIR_label_t miss = jm_new_label(mt);
+    MIR_label_t call = jm_new_label(mt);
     MIR_reg_t tag = jm_new_reg(mt, "dyn_tag", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_URSH, MIR_new_reg_op(mt->ctx, tag),
         MIR_new_reg_op(mt->ctx, callee), MIR_new_int_op(mt->ctx, 56)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, generic),
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, miss),
         MIR_new_reg_op(mt->ctx, tag), MIR_new_int_op(mt->ctx, 0)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, generic),
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, miss),
         MIR_new_reg_op(mt->ctx, callee), MIR_new_int_op(mt->ctx, 0)));
     MIR_reg_t type_id = jm_new_reg(mt, "dyn_type", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, type_id),
         MIR_new_mem_op(mt->ctx, MIR_T_U8, (MIR_disp_t)offsetof(JsFunction, type_id),
             callee, 0, 1)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, generic),
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, miss),
         MIR_new_reg_op(mt->ctx, type_id), MIR_new_int_op(mt->ctx, LMD_TYPE_FUNC)));
     MIR_reg_t entry_abi = jm_new_reg(mt, "dyn_abi", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, entry_abi),
         MIR_new_mem_op(mt->ctx, MIR_T_U8, (MIR_disp_t)offsetof(JsFunction, entry_abi),
             callee, 0, 1)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, generic),
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, miss),
         MIR_new_reg_op(mt->ctx, entry_abi),
         MIR_new_int_op(mt->ctx, FN_ENTRY_ABI_JS_FUNCTION)));
-    MIR_reg_t invoke = jm_new_reg(mt, "dyn_invoke", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, invoke),
+    MIR_reg_t target = jm_new_reg(mt, "dyn_target", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, target),
         MIR_new_mem_op(mt->ctx, MIR_T_P, (MIR_disp_t)offsetof(JsFunction, invoke),
             callee, 0, 1)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, generic),
-        MIR_new_reg_op(mt->ctx, invoke), MIR_new_int_op(mt->ctx, 0)));
-    JsErrorLaneTrack branch_lane = jm_error_lane_state(mt);
-    MirValue branch_carrier = mt->func_em->last_call_result;
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, call),
+        MIR_new_reg_op(mt->ctx, target), MIR_new_int_op(mt->ctx, 0)));
+    // miss: every other callee shape keeps the one generic entry (JC13).
+    JsErrorLaneTrack lane = jm_error_lane_state(mt);
+    jm_emit_label_with_state(mt, miss, lane);
+    em_load_import_address(&mt->func_em->em, "js_call", target, MIR_T_I64, 6, types);
+    jm_emit_label_with_state(mt, call, lane);
 
     jm_preserve_error_lane_carrier(mt, "js_call", true);
-    MIR_reg_t entry_result = jm_publish_call_result(mt,
-        em_call_indirect_as(&mt->func_em->em, "js_call", invoke, MIR_T_I64, 6,
+    MIR_reg_t result = jm_publish_call_result(mt,
+        em_call_indirect_as(&mt->func_em->em, "js_call", target, MIR_T_I64, 6,
             types, ops), "js_call");
-    jm_emit_mov(mt, result, entry_result);
-    JsErrorLaneTrack entry_exit = jm_error_lane_state(mt);
-    jm_emit_jmp(mt, done);
-
-    // miss: every other callee shape keeps the one generic entry (JC13).
-    jm_emit_label_with_state(mt, generic, branch_lane);
-    mt->func_em->last_call_result = branch_carrier;
-    MIR_reg_t generic_result = jm_call_6(mt, "js_call", MIR_T_I64,
-        types[0], ops[0], types[1], ops[1], types[2], ops[2],
-        types[3], ops[3], types[4], ops[4], types[5], ops[5]);
-    jm_emit_mov(mt, result, generic_result);
-    JsErrorLaneTrack generic_exit = jm_error_lane_state(mt);
-
-    jm_emit_label_with_state(mt, done, jm_error_lane_merge(entry_exit, generic_exit));
-    // Both arms define the call result, so it is the only valid ERROR-lane
-    // carrier after the join (D8.4.3).
-    mt->func_em->last_call_result = em_value_for_rep(result, LMD_TYPE_ANY,
-        VALUE_REP_ITEM);
     // The callee writes scalar payloads directly into this logical home; bind
     // the returned Item so subsequent calls share the liveness-coloured slot.
     return jm_finish_scalar_result_home(mt, home, result);
