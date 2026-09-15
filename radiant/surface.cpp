@@ -929,6 +929,11 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
     raster_blit_surface_scaled(&ctx, src, src_rect, dst_rect, scale_mode, 255);
 }
 
+bool image_surface_is_dom_owned(const ImageSurface* img_surface) {
+    return img_surface && !img_surface->url && !img_surface->cache_owned &&
+        !img_surface->network_owned;
+}
+
 void image_surface_destroy(ImageSurface* img_surface) {
     if (img_surface) {
         if (img_surface->pixels) mem_free(img_surface->pixels);

@@ -400,13 +400,12 @@ void release_dom_owned_embed_images(DomElement* elem) {
         return;
     }
 
-    // Cached data URI SVGs have no URL, so ownership must come from the cache
-    // marker rather than URL presence to avoid freeing a borrowed cache surface.
-    if (elem->embedp()->img && !elem->embedp()->img->url && !elem->embedp()->img->cache_owned) {
+    // Detached DOM markup owns only uncached, non-network image surfaces.
+    if (image_surface_is_dom_owned(elem->embedp()->img)) {
         image_surface_destroy(elem->embedp()->img);
         elem->embed->img = nullptr;
     }
-    if (elem->embedp()->poster && !elem->embedp()->poster->url && !elem->embedp()->poster->cache_owned) {
+    if (image_surface_is_dom_owned(elem->embedp()->poster)) {
         image_surface_destroy(elem->embedp()->poster);
         elem->embed->poster = nullptr;
     }
@@ -902,11 +901,11 @@ void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block) {
     }
 }
 
-void alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span) {
-    // fi and gi remain exclusive because an element has only one parent formatting context.
-    if (span->parent_item_kind() != DomElement::PARENT_ITEM_GRID) {
-        span->ensure_grid_item(lycon->doc->view_tree);
-    }
+GridItemProp* alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span) {
+    if (!lycon || !span || !lycon->doc) return nullptr;
+    // Grid placement has no effect on a flex item; gi aliases its live fi slot.
+    if (span->parent_item_kind() == DomElement::PARENT_ITEM_FLEX) return nullptr;
+    return span->ensure_grid_item(lycon->doc->view_tree);
 }
 
 void view_pool_release_detached_subtree(DomNode* root) {

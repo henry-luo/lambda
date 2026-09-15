@@ -204,7 +204,8 @@ public:
      * @param child Child Item to insert
      * @return Updated element Item
      */
-    Item elmt_insert_child(Item element, int index, Item child);
+    Item elmt_insert_child(Item element, int index, Item child,
+                           bool preserve_dom_child = false);
     
     /**
      * Insert multiple children at index (batch operation)
@@ -233,6 +234,11 @@ public:
      */
     Item elmt_append_child(Item element, Item child) {
         return elmt_insert_child(element, -1, child);
+    }
+
+    // Preserve a verified DomElement wrapper when editing a detached document.
+    Item elmt_append_dom_child(Item element, Item child) {
+        return elmt_insert_child(element, -1, child, true);
     }
     
     /**

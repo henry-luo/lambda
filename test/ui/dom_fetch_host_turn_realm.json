@@ -1,0 +1,15 @@
+{
+  "name": "fetch callback retains its document JavaScript realm",
+  "html": "test/ui/dom_fetch_host_turn_realm.html",
+  "viewport": {"width": 480, "height": 180},
+  "events": [
+    {"type": "wait", "ms": 300},
+    {
+      "type": "assert_attribute",
+      "target": {"selector": "body"},
+      "attribute": "data-fetch-result",
+      "equals": "rejected",
+      "timeout": 2000
+    }
+  ]
+}

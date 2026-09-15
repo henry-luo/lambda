@@ -2634,7 +2634,7 @@ static void populate_layout_document(DomDocument* doc, DomElement* root,
     doc->html_root = html_root;
     doc->html_version = version;
     doc->url = url;
-    doc->view_tree = nullptr;
+    // Load-time geometry reads may already have committed a ViewTree.
     doc->state = nullptr;
     doc->lambda_runtime = runtime;
 }

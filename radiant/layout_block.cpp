@@ -7745,7 +7745,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             ImageSurface* loaded_img = block->embedp()->img ? block->embedp()->img :
                 load_image(lycon->ui_context, image_url);
             if (loaded_img) {
-                if (block->embedp()->img && block->embedp()->img != loaded_img && !block->embedp()->img->url) {
+                if (block->embedp()->img && block->embedp()->img != loaded_img &&
+                        image_surface_is_dom_owned(block->embedp()->img)) {
                     image_surface_destroy(block->embedp()->img);
                 }
                 block->embed->img = loaded_img;

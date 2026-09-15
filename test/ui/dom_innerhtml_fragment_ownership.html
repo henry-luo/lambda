@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>innerHTML fragment ownership</title>
+</head>
+<body>
+  <button id="replace">Replace children</button>
+  <div id="host"></div>
+  <p id="status" data-fragment-state="waiting">waiting</p>
+  <script>
+    const host = document.getElementById('host');
+    const status = document.getElementById('status');
+
+    document.getElementById('replace').addEventListener('click', () => {
+      host.innerHTML = "<a id='sizzle-probe'></a><select id='sizzle-probe-\r\\' msallowcapture=''><option selected=''></option></select>";
+      const complete = host.querySelectorAll('a').length === 1 &&
+        host.querySelectorAll('select').length === 1 &&
+        host.querySelectorAll('option').length === 1;
+      status.setAttribute('data-fragment-state', complete ? 'ok' : 'bad');
+    });
+  </script>
+</body>
+</html>
