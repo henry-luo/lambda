@@ -605,6 +605,7 @@ typedef struct ImageSurface {
     int max_render_width;  // maximum width for rendering the image
     Url* url;        // the resolved absolute URL of the image
     bool cache_owned;      // true when UiContext image_cache owns this surface
+    bool network_owned;    // true when a NetworkResource releases this surface
     char* source_path;     // local file path for lazy decode (NULL if already decoded or HTTP)
     unsigned char* source_data;  // in-memory data for lazy decode of HTTP images (NULL if file-based)
     size_t source_data_len;      // length of source_data
@@ -619,6 +620,7 @@ typedef struct ImageSurface {
 
 extern ImageSurface* image_surface_create(int pixel_width, int pixel_height);
 extern ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void* pixels);
+extern bool image_surface_is_dom_owned(const ImageSurface* img_surface);
 extern void image_surface_destroy(ImageSurface* img_surface);
 extern void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h);
 extern void image_surface_bump_generation(ImageSurface* img_surface);

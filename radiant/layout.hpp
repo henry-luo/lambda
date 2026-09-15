@@ -3686,7 +3686,7 @@ void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block);
 void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* block);
 void reset_flex_item_prop_for_style(LayoutContext* lycon, ViewSpan* block);
 void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block);
-void alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span);
+GridItemProp* alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span);
 PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* block);
 // Shared computed-property allocation keeps CSS and HTML hint resolution on
 // one boundary ownership path; divergent lazy allocation leaves partially

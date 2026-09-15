@@ -3746,9 +3746,8 @@ static Item jube_host_node_work_resource_value(void* session,
     const RuntimeResourceEntry* entry = runtime_resource_table_entry_owned(
         &js_runtime_state.resources, node_session, resource_id);
     if (!entry || root_index >= entry->root_count) return ItemNull;
-    Item* value = root_vector_at(&js_runtime_state.resources.owner_values,
-        entry->root_slot + root_index);
-    return value ? *value : ItemNull;
+    return runtime_resource_table_root_value(&js_runtime_state.resources, entry,
+        root_index);
 }
 
 static int jube_host_node_resolve_namespace(void* session, const char* specifier,

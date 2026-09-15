@@ -194,6 +194,9 @@ int runtime_resource_table_active_count_owned(const RuntimeResourceTable* table,
     void* lifecycle_owner);
 Item runtime_resource_table_value(RuntimeResourceTable* table,
                                   const RuntimeResourceEntry* entry);
+Item runtime_resource_table_root_value(RuntimeResourceTable* table,
+                                       const RuntimeResourceEntry* entry,
+                                       int root_index);
 void* runtime_resource_table_user_data(RuntimeResourceTable* table,
     uint32_t id);
 void* runtime_resource_table_user_data_owned(RuntimeResourceTable* table,

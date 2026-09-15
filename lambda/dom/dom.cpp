@@ -173,6 +173,16 @@ static Item dom_svg_create_transform_from_matrix(Item matrix);
 static RdtMatrix dom_svg_transform_from_element(DomElement* elem);
 DomElement* dom_find_element_by_id(DomElement* root, const char* id);
 
+static Html5Parser* dom_create_fragment_parser(DomDocument* doc) {
+    if (!doc || !doc->document_pool || !doc->input || !doc->input->arena) {
+        return nullptr;
+    }
+    // Fragment backing is inserted into the Mark tree, so keep it in the
+    // document Input arena rather than the separate DOM-wrapper arena.
+    return html5_fragment_parser_create(doc->document_pool, doc->input->arena,
+                                       doc->input);
+}
+
 static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
                                       bool notify_mutation);
 
@@ -2995,10 +3005,9 @@ static void append_iframe_srcdoc_to_document(DomElement* iframe,
     const char* srcdoc = iframe->get_attribute("srcdoc");
     if (!srcdoc || !*srcdoc) return;
     DomElement* body = dom_document_body_element(doc);
-    if (!body || !doc->document_pool || !doc->node_arena || !doc->input) return;
+    if (!body || !doc->node_arena) return;
 
-    Html5Parser* parser = html5_fragment_parser_create(
-        doc->document_pool, doc->node_arena, doc->input);
+    Html5Parser* parser = dom_create_fragment_parser(doc);
     if (!parser) return;
     html5_fragment_parse(parser, srcdoc);
     Element* body_elem = html5_fragment_get_body(parser);
@@ -5428,8 +5437,7 @@ static bool dom_parse_markup_into(DomElement* target, const char* html_str,
                                   bool notify_mutation) {
     DomDocument* doc = target ? target->doc : nullptr;
     if (!doc || !doc->input) return false;
-    Html5Parser* parser = html5_fragment_parser_create(
-        doc->document_pool, doc->node_arena, doc->input);
+    Html5Parser* parser = dom_create_fragment_parser(doc);
     if (!parser) return false;
     html5_fragment_parse(parser, html_str);
     Element* body_elem = html5_fragment_get_body(parser);
@@ -5535,8 +5543,7 @@ static DomElement* dom_parse_html_fragment(DomDocument* doc,
                                               const char* html_str) {
     if (!doc || !doc->input || !html_str) return nullptr;
 
-    Html5Parser* parser = html5_fragment_parser_create(
-        doc->document_pool, doc->node_arena, doc->input);
+    Html5Parser* parser = dom_create_fragment_parser(doc);
     if (!parser) return nullptr;
     html5_fragment_parse(parser, html_str);
     Element* body_elem = html5_fragment_get_body(parser);

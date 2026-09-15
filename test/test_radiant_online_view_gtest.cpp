@@ -794,6 +794,7 @@ static const char* online_view_first_runtime_error(const RadiantOnlineViewResult
         "Segmentation fault",
         "Assertion failed",
         "Fatal error",
+        "Failed to download HTML from URL",
         "Failed to load document",
         "failed to create resource manager",
         "view: network resource failures detected",

@@ -1,0 +1,13 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>fetch host turn realm</title></head>
+<body data-fetch-result="pending">
+<script>
+fetch("http://127.0.0.1:1/").then(function () {
+    document.body.setAttribute("data-fetch-result", "resolved");
+}).catch(function () {
+    document.body.setAttribute("data-fetch-result", "rejected");
+});
+</script>
+</body>
+</html>
