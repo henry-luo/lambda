@@ -4,6 +4,7 @@
 #include "js_test262_fast_paths.h"
 #include "js_props.h"
 #include "../runtime/mir_shape_candidates.hpp"
+#include "../input/input.hpp"
 #include "../../lib/lambda_alloca.h"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/mem_grow.hpp"
@@ -2322,10 +2323,12 @@ struct JsMirStaticShapeField {
 
 static TypeMap* jm_build_static_shape(JsMirTranspiler* mt,
         const JsMirStaticShapeField* fields, int field_count) {
-    if (!mt || !mt->tp || !mt->tp->pool || !fields || field_count <= 0 ||
-            field_count > 16) return NULL;
+    if (!mt || !fields || field_count <= 0 || field_count > 16 ||
+            !js_input || !js_input->pool) return NULL;
 
-    Pool* pool = mt->tp->pool;
+    // MIR embeds this shape address, so the recipe must outlive the disposable
+    // compiler AST and stay with the realm that owns the generated code (D8.5.1v3).
+    Pool* pool = js_input->pool;
     TypeMap* shape = (TypeMap*)alloc_type(pool, LMD_TYPE_MAP, sizeof(TypeMap));
     if (!shape) return NULL;
     ShapeEntry* previous = NULL;
@@ -2333,21 +2336,13 @@ static TypeMap* jm_build_static_shape(JsMirTranspiler* mt,
     for (int index = 0; index < field_count; index++) {
         const JsMirStaticShapeField* field = &fields[index];
         if (!field->name || !field->type_id) return NULL;
-        ShapeEntry* entry = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry));
-        StrView* name_view = (StrView*)pool_calloc(pool, sizeof(StrView));
-        if (!entry || !name_view) return NULL;
-        name_view->str = field->name->chars;
-        name_view->length = field->name->len;
-        entry->name = name_view;
-        entry->name_hash = typemap_name_hash(field->name->chars,
-            (int)field->name->len);
+        ShapeEntry* entry = alloc_shape_entry(pool, field->name,
+            field->type_id, previous);
+        if (!entry) return NULL;
+        // Parser-pool NameIds are not valid after its Script is released.
         entry->name_id = NAME_ID_NONE;
-        entry->key_kind = NAME_KEY_STRING;
-        shape_entry_set_type(entry, type_info[field->type_id].type);
         if (entry->storage.byte_size != sizeof(void*)) return NULL;
-        entry->byte_offset = byte_offset;
         if (!shape->shape) shape->shape = entry;
-        if (previous) previous->next = entry;
         previous = entry;
         byte_offset += entry->storage.byte_size;
     }
