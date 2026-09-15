@@ -5,7 +5,8 @@
     {
       "in_func": "js_main",
       "expect": [
-        "call\tjs_call_p_r6_n1_a6, js_call"
+        "mov\t{{r}}, js_call",
+        "call\tjs_call_p_r6_n1_a6, {{r}}"
       ]
     }
   ]

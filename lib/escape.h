@@ -37,6 +37,10 @@ typedef enum {
 /* Decode the shared single-byte C/Python/Ruby escape set. */
 char escape_decode_c_char(char c);
 
+/* Decode a JavaScript SingleEscapeCharacter (ES2024 12.9.4): the C set without
+ * `\a`. Any other character is a NonEscapeCharacter and decodes to itself. */
+char escape_decode_js_char(char c);
+
 /* Decode four UTF-16 escape digits and an immediately following low surrogate.
  * When replacement is set, lone surrogate code units become U+FFFD. */
 bool escape_decode_utf16_escape(const char* s, size_t len, bool replacement,

@@ -277,6 +277,7 @@ static Item node_process_chdir(Item directory) {
     const uint8_t* bytes = node_process_host->value->string_bytes(directory);
     char path[2048];
     size_t copy_length = length < sizeof(path) - 1 ? length : sizeof(path) - 1;
+    // host strings are UTF-8 byte arrays; str_copy takes char bytes
     str_copy(path, sizeof(path), (const char*)bytes, copy_length);
 #ifdef _WIN32
     int status = _chdir(path);

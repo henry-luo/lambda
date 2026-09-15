@@ -17133,9 +17133,13 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     // normalized character classes.
     JsRegexScannerAnalysis route_analysis = js_regex_scanner_analyze(
         effective_pattern, effective_pattern_len, compile_info.multiline);
-    if (route_analysis.reasons & (JS_REGEX_SCANNER_REASON_ALLOCATION_FAILURE |
-                                  JS_REGEX_SCANNER_REASON_UNSUPPORTED)) {
-        // A scanner failure must not certify the RE2 path for a pattern it could not classify.
+    // A scanner failure must not certify the RE2 path for a pattern it could
+    // not classify. An unsupported analysis (for example a quantifier bound
+    // beyond the scanner's int range) is a required backtracker route
+    // (JS_Regex.md §9.1); only a pattern that route cannot own is an error.
+    if ((route_analysis.reasons & JS_REGEX_SCANNER_REASON_ALLOCATION_FAILURE) ||
+            ((route_analysis.reasons & JS_REGEX_SCANNER_REASON_UNSUPPORTED) &&
+             special_property_kind != 0)) {
         return js_throw_range_error("RegExp routing analysis cannot classify pattern");
     }
     bool route_to_bt = (special_property_kind == 0) &&

@@ -1,17 +1,21 @@
 flowchart TB
-  A["call expression lowered"]
-  S["mark = js_args_save()<br/>(current bump top)"]
-  P["p = js_args_push(count)<br/>reserve zeroed slots"]
-  F["JIT fills p[0..count-1]<br/>(may nest calls, pushing more frames)"]
-  C["callee reads its frame"]
-  R["js_args_restore(mark)<br/>re-zero popped slots, len = mark"]
-  INV["invariant: slots in [len, cap) always zeroed<br/>GC marks whole [0, cap) range safely"]
-  OF{"len + count &gt; cap?"}
-  FB["js_alloc_env(count)<br/>standalone GC-rooted buffer<br/>(pathological depth)"]
+  A["call / new expression lowered"]
+  S["jm_begin_arg_stack_scope<br/>JsMirArgStackScope, saved arg_frame_depth"]
+  P["jm_build_args_array<br/>next arg_frame_depth slots at compile time<br/>(end of caller's side-root frame)"]
+  F["JIT fills slots<br/>(nested calls take higher slots)"]
+  PR{"jm_args_are_prerooted?"}
+  K1["js_call / invoke<br/>args_prerooted = 1: no re-root"]
+  K2["copying path (generators, suspending args)<br/>kernel roots one owned RootSpan"]
+  E["jm_end_arg_stack_scope<br/>zero slots, restore depth"]
+  X["error-lane exit<br/>jm_clear_active_arg_frames"]
+  N["C / native caller<br/>args_prerooted = 0: kernel RootSpan"]
+  AST["AST call site<br/>RootSpan, passed pre-rooted"]
 
-  A --> S --> P --> OF
-  OF -->|no| F
-  OF -->|yes| FB
-  F --> C --> R
-  P -.-> INV
-  R -.-> INV
+  A --> S --> P --> F --> PR
+  PR -->|yes| K1
+  PR -->|no| K2
+  K1 --> E
+  K2 --> E
+  F -.-> X
+  N -.-> K2
+  AST -.-> K1

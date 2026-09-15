@@ -2,11 +2,11 @@
 
 **Date**: 2026-09-15
 
-**Status**: PROPOSAL — not ratified. **P1–P3 implemented 2026-09-15
-(uncommitted working tree)**: span entry + finalized body entry (Appendix C),
+**Status**: PROPOSAL — not ratified; P1–P6 implemented. **P1–P3 implemented 2026-09-15**: span entry + finalized body entry (Appendix C),
 one kernel entry `js_call` (Appendix D), rooting dedup + kernel trims + O1–O5
-(Appendix E). P4 open (evidence-gated). **P5–P6 (AST interpreter, §3.5,
-JC20–JC22) implemented 2026-09-15 (uncommitted, Appendix F).** Measured against the working tree at `772ef7625`
+(Appendix E). **P4 (JC18 direct call-site entry) implemented 2026-09-15
+(Appendix G). P5–P6 (AST interpreter, §3.5, JC20–JC22) implemented 2026-09-15
+(Appendix F).** P1–P6 committed in `8e9f49d9a`. Measured against the working tree at `772ef7625`
 (debug configuration = `-O3` + frame pointers, `premake5.mac.lua:21`).
 
 **Scope**: the runtime path a JavaScript call takes from an emitted MIR call
@@ -626,3 +626,92 @@ call, so call-protocol flattening moves the total only a little.
 Forced GC with poisoned frees on **both** backends (`ast`, `mir`) produces
 identical output for the span smoke script, the for-await and async
 abrupt-parameter regressions, and `lib_fast_diff.js`.
+
+## Appendix G — P4 implementation record: JC18 direct call-site entry (2026-09-15)
+
+P4 was listed as evidence-gated on P0/P3 timing. It was implemented on request
+ahead of that evidence; the measurement below records the outcome.
+
+**Landed.**
+- `jm_call_function_into` (`js_mir_calls_boxing_types.cpp`) emits a layout
+  guard in front of every dynamic call whose callee is a register:
+  - `ursh tag, callee, 56; bne generic, tag, 0` (container pointer);
+  - `beq generic, callee, 0`;
+  - `u8:offsetof(JsFunction,type_id) == LMD_TYPE_FUNC`;
+  - `u8:offsetof(JsFunction,entry_abi) == FN_ENTRY_ABI_JS_FUNCTION`;
+  - `p:offsetof(JsFunction,invoke) != 0`.
+- The guard only selects the target. A pass leaves `invoke` in the target
+  register; a miss loads `js_call`'s address into it with
+  `em_load_import_address`. One indirect call with the six operands follows, so
+  the site keeps one safepoint and the call result is the ordinary error-lane
+  carrier (D8.4.3).
+  - The first version emitted two call arms (indirect `invoke`, direct
+    `js_call`) merged into one result register. `test-lambda-baseline`'s MIR
+    size ratchet showed that shape cost +13 instructions, an extra safepoint and
+    extra root stores per site. The single-call shape costs +10 instructions and
+    nothing else; the reviewed growth is recorded in `test/mir/mir_budgets.json`.
+- `em_call_indirect_as` (`mir_emitter_shared.hpp`) emits a call to a register
+  target under a named import's proto and audited metadata, so the indirect call
+  records the same safepoint, root publication and exception effects as the
+  `js_call` import call. `mir_new_call_with_target` factors the call-instruction
+  builder, and `em_call_with_args_policy` gained an optional `indirect_target`
+  (default 0; the Lambda lane is unchanged). `em_resolve_import` factors the
+  import lookup shared by the call builder and `em_load_import_address`.
+- Correctness argument: `JsCallEntry` has exactly `js_call`'s signature, and
+  `js_call` runs the same layout tests before entering the same `invoke`, so the
+  miss target is observably identical. The guard is a layout predicate, not callee
+  identity, and stores nothing per site, as D8.4.1v2 requires.
+- New fixture `test/mir/js/dynamic_call_invoke_entry.{js,mir-check}` pins the
+  guard loads, the `js_call` address load on a miss, and the single indirect
+  call on the target register.
+
+**Resulting chain** (compiled dynamic call to an ordinary function): call site →
+`js_call_entry_generic` [kernel] → span entry → body. That is three hops with no
+trampoline; `js_call` no longer appears on the hit path.
+
+**Measured.**
+- Stack per dynamic level is unchanged at 672 B (lldb, debug `-O3`), because
+  `js_call` was already a zero-byte tail jump.
+- Release A/B (interleaved ×3, `JS_EXECUTION_BACKEND=mir`,
+  `temp/aap/callloop_big.js`) against the pre-P4 release binary: 0.35–0.39 s
+  before vs 0.35 s after. No measurable change on this loop; the removed hop
+  was a single predictable tail branch.
+- As §3.4 anticipated, P4's value is structural (one fewer symbol on the hot
+  path), not throughput.
+
+**Gates.**
+
+| Gate | Result |
+|---|---|
+| JS MIR emission fixtures | 28/28 |
+| Forced-GC MIR sweep | 185/185 |
+| `test_js_gtest` | 489/489 |
+| `test_js_script_gtest` | 136/136 |
+| JS exception and callable censuses | clean |
+| MIR-interpreter mode (`--mir-interp`) smoke and regressions | pass |
+| Forced GC with poisoned frees, `mir` and `ast` backends | output identical |
+
+**test262 after the upstream merge (`c4d850bf1`): 40,256/40,261, 5 regressions,
+attributed to the merge, not P4.**
+- The five tests are `built_ins_RegExp_S15_10_2_13_A1_T10`,
+  `built_ins_RegExp_S15_10_2_8_A3_T17`, `built_ins_RegExp_quantifier_integer_limit`,
+  and `language_literals_string_S7_8_4_A4_2_T3` / `_T4`.
+- All five are synchronous tests absent from `mir_list.txt`, so they run in AST
+  batches, where the JC18 emitted guard is never used.
+- `quantifier_integer_limit` fails with `RegExp routing analysis cannot classify
+  pattern`, a message introduced by upstream `0c11c1cc9 JS regex backtrack fix`.
+- The same gate passed 40,261/40,261 on the P5/P6 tree immediately before the
+  merge.
+- Resolved: test262 is back to 40,261/40,261 with 0 regressions. There were three
+  root causes, none of them in the call path:
+  - `S7_8_4_A4_2_T3` / `_T4`: upstream `df2f03fe6` mapped the JS string escape
+    decoder to the C set, so `\a` decoded to BEL. The fix adds
+    `escape_decode_js_char`, the SingleEscapeCharacter set without `\a`.
+  - `quantifier_integer_limit`: `0c11c1cc9` threw when a pattern had unsupported
+    routing reasons. Those patterns now go to the backtracker, as JS_Regex.md §9.1
+    requires. `parse_brace_quant` saturates at `INT_MAX`, so `{2^53-1}` no longer
+    overflows.
+  - `S15_10_2_13_A1_T10`, `S15_10_2_8_A3_T17`: this was an existing backtracker
+    bug that the new routing exposed. `bt_repeat_inner` cleared captures before
+    the lazy continuation, which breaks RepeatMatcher steps 4, 7 and 9.
+  - Regression test: `test/js/regression_t262_escape_regex_router.js`.

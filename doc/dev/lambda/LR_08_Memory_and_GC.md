@@ -87,7 +87,7 @@ A cycle is **triggered** from two automatic sites, each paced by the same time b
 The root set is gathered at the top of `gc_collect` from four exact sources:
 
 1. **Registered root slots** — `uint64_t*` pointers to boxed Items: the first word of each two-word BSS module/global binding and `context->heap->result_root` (`lambda-mem.cpp:215`). The BSS companion is a raw destination-owned scalar payload and is deliberately outside the registered Item count. Roots are registered via `gc_register_root`/`gc_register_root_range`.
-2. **Registered root ranges** — persistent contiguous `Item[]` stores such as module variables and the JS argument stack, via `gc_register_root_range`.
+2. **Registered root ranges** — persistent contiguous `Item[]` stores such as module variables, via `gc_register_root_range`.
 3. **Execution root side-stack** — the live `[Context.side_root_base, Context.side_root_top)` slice supplied by `heap_gc_collect` as exact extra roots.
 4. **Other caller-supplied `extra_roots`** — passed through to `gc_collect`.
 

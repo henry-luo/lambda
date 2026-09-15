@@ -96,7 +96,7 @@ The set is organized in five parts. Read JS_01–JS_04 first for the engine; the
 
 | Doc | Covers |
 |---|---|
-| [JS_15 — Performance & Optimization](JS_15_Performance.md) | The optimization catalog (call-arg stack, const folding, native/dual versions, MapKind, shape pre-alloc, TA raw paths, registry reduction), interpreter-vs-JIT trade-offs, benchmark findings, open gaps. |
+| [JS_15 — Performance & Optimization](JS_15_Performance.md) | The optimization catalog (call-argument frame slots and the flattened call path, const folding, native/dual versions, MapKind, shape pre-alloc, TA raw paths, registry reduction), interpreter-vs-JIT trade-offs, benchmark findings, open gaps. |
 | [JS_16 — Testing & Conformance Infrastructure](JS_16_Testing.md) | The test262 batch runner, three-layer crash recovery, batch reset, baseline management, the async runner, the Node official-test harness, the GTest unit suites. |
 
 ---
