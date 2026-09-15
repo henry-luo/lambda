@@ -7,6 +7,7 @@ extern "C" {
 #include "../lib/mempool.h"
 #include "../lib/memtrack.h"
 #include "../lib/log.h"
+#include "../lib/time_util.h"
 }
 #include "../lambda/input/input.hpp"
 #include "../lambda/js/js_runtime.h"
@@ -14,7 +15,6 @@ extern "C" {
 #include <stdio.h>
 #include <string.h>
 #include <turbojpeg.h>
-#include <chrono>
 #ifndef _WIN32
 #include <sys/resource.h>
 #include <sys/time.h>
@@ -165,8 +165,7 @@ static bool render_png_resolve_auto_size(DomDocument* doc, float raster_scale,
 }
 
 int render_html_to_png(const char* html_file, const char* png_file, int viewport_width, int viewport_height, float output_scale, float device_scale) {
-    using namespace std::chrono;
-    auto t_start = high_resolution_clock::now();
+    uint64_t t_start = time_now_ns();
 
     RenderExportSession session;
     if (!render_export_session_begin_raster(&session, html_file,
@@ -229,8 +228,7 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
         }
     }
 
-    auto t_end = high_resolution_clock::now();
-    log_info("[TIMING] TOTAL: %.1fms", duration<double, std::milli>(t_end - t_start).count());
+    log_info("[TIMING] TOTAL: %.1fms", time_elapsed_ms_f(t_start, time_now_ns()));
     render_export_session_end(&session);
     return 0;
 }

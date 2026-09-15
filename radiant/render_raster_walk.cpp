@@ -3,9 +3,9 @@
 
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
+#include "../lib/time_util.h"
 #include "../lambda/input/css/dom_element.hpp"
 
-#include <chrono>
 #include <stdlib.h>
 
 static bool render_trace_enabled(void) {
@@ -23,11 +23,11 @@ typedef void (*RenderRasterBlockFn)(RenderContext*, ViewBlock*);
 static void render_raster_profile_block(RenderContext* rdcon, ViewBlock* block,
                                         RenderRasterBlockFn render,
                                         RenderProfileZone category) {
-    auto start = std::chrono::high_resolution_clock::now();
+    uint64_t start = time_now_ns();
     render(rdcon, block);
-    auto end = std::chrono::high_resolution_clock::now();
+    uint64_t end = time_now_ns();
     render_profiler_add_sample(rdcon->profiler, category,
-        std::chrono::duration<double, std::milli>(end - start).count());
+        time_elapsed_ms_f(start, end));
 }
 
 static void render_raster_retained_media(RenderContext* rdcon, ViewBlock* block,
@@ -129,11 +129,11 @@ static void render_raster_walk_inline(void* vctx, ViewSpan* span, float abs_x, f
         return;
     }
 
-    auto tiv1 = std::chrono::high_resolution_clock::now();
+    uint64_t tiv1 = time_now_ns();
     render_inline_view(rdcon, span);
-    auto tiv2 = std::chrono::high_resolution_clock::now();
+    uint64_t tiv2 = time_now_ns();
     render_profiler_add_time(rdcon->profiler, RENDER_PROFILE_INLINE,
-        std::chrono::duration<double, std::milli>(tiv2 - tiv1).count());
+        time_elapsed_ms_f(tiv1, tiv2));
 }
 
 static void render_raster_walk_text(void* vctx, ViewText* text, float abs_x, float abs_y,
@@ -142,11 +142,11 @@ static void render_raster_walk_text(void* vctx, ViewText* text, float abs_x, flo
     RenderContext* rdcon = (RenderContext*)vctx;
     if (!rdcon || !text) return;
     render_profiler_increment(rdcon->profiler, RENDER_PROFILE_DISPATCH);
-    auto tt1 = std::chrono::high_resolution_clock::now();
+    uint64_t tt1 = time_now_ns();
     render_text_view(rdcon, text);
-    auto tt2 = std::chrono::high_resolution_clock::now();
+    uint64_t tt2 = time_now_ns();
     render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_TEXT,
-        std::chrono::duration<double, std::milli>(tt2 - tt1).count());
+        time_elapsed_ms_f(tt1, tt2));
 }
 
 static void render_raster_walk_marker(void* vctx, ViewSpan* marker, float abs_x, float abs_y,
@@ -228,7 +228,7 @@ bool render_raster_custom_layout_children(RenderContext* rdcon, ViewBlock* block
 
 void render_children(RenderContext* rdcon, View* view) {
     if (!rdcon || !view) return;
-    auto trc_start = std::chrono::high_resolution_clock::now();
+    uint64_t trc_start = time_now_ns();
 
     RenderBackend backend;
     render_raster_backend_init(&backend, rdcon);
@@ -238,9 +238,9 @@ void render_children(RenderContext* rdcon, View* view) {
 
     render_walk_children(&backend, &walk_state, view);
 
-    auto trc_end = std::chrono::high_resolution_clock::now();
+    uint64_t trc_end = time_now_ns();
     render_profiler_add_time(rdcon->profiler, RENDER_PROFILE_CHILDREN,
-        std::chrono::duration<double, std::milli>(trc_end - trc_start).count());
+        time_elapsed_ms_f(trc_start, trc_end));
 }
 
 void render_raster_view_tree(RenderContext* rdcon, ViewTree* view_tree) {

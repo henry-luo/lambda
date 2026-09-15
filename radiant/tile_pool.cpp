@@ -12,7 +12,6 @@
 #include "../lib/checked_math.hpp"
 #include <string.h>
 #include <math.h>
-#include <chrono>
 #ifdef _WIN32
 #include <windows.h>
 static inline int get_cpu_count() {

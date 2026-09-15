@@ -46,3 +46,9 @@ TEST(TimeUtilTest, ElapsedSinceFutureClampsToZero) {
     EXPECT_EQ(time_elapsed_ms_since(future), 0u);
     EXPECT_DOUBLE_EQ(time_elapsed_ms_f(1000000, 3500000), 2.5);
 }
+
+TEST(TimeUtilTest, ElapsedUnitHelpersClampAndConvert) {
+    EXPECT_EQ(time_elapsed_ns(10, 5), 0u);
+    EXPECT_EQ(time_elapsed_us(1000, 4500), 3u);
+    EXPECT_EQ(time_elapsed_ms(1000000, 4500000), 3u);
+}

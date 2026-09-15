@@ -1,5 +1,5 @@
 #include "event.hpp"
-#include "../lib/intrusive_queue.h"
+#include "../lib/queue.h"
 #include "layout.hpp"
 #include "render.hpp"
 #include "view.hpp"
@@ -51,7 +51,7 @@ extern "C" Item js_data_transfer_new_read_only_with_strings(const char* text_pla
 extern Item js_make_number(double value);
 #include "../lib/hashmap.h"           // hashmap utilities used by DocState maps
 #include "../lib/memtrack.h"          // mem_free
-#include <chrono>       // timing for reactive event dispatch
+#include "../lib/time_util.h"
 #include <string.h>
 
 // thread-local eval context used by heap allocation functions
@@ -6535,12 +6535,9 @@ static bool dom_js_mark_selective_dirty(DocState* state,
 
 static bool post_html_handler_incremental_rebuild(
         EventContext* evcon, DomDocument* doc,
-        std::chrono::high_resolution_clock::time_point t_start,
-        std::chrono::high_resolution_clock::time_point t0,
+        uint64_t t_start, uint64_t t0,
         int mutations,
         const char** fallback_reason_out) {
-    using namespace std::chrono;
-
     const char* reason = nullptr;
     if (!dom_js_mutation_can_incremental(doc, &reason)) {
         log_info("html handler incremental: fallback=%s", reason ? reason : "unknown");
@@ -6579,7 +6576,7 @@ static bool post_html_handler_incremental_rebuild(
         }
     }
 
-    auto t1 = high_resolution_clock::now();
+    uint64_t t1 = time_now_ns();
 
     DocState* state = (DocState*)doc->state;
     if (state) {
@@ -6601,7 +6598,7 @@ static bool post_html_handler_incremental_rebuild(
                                     dom_js_clear_layout_dirty_visitor, nullptr);
     }
 
-    auto t2 = high_resolution_clock::now();
+    uint64_t t2 = time_now_ns();
 
     int dirty_rect_count = 0;
     bool selective_dirty = false;
@@ -6630,13 +6627,13 @@ static bool post_html_handler_incremental_rebuild(
     evcon->need_repaint = true;
     to_repaint();
 
-    auto t3 = high_resolution_clock::now();
+    uint64_t t3 = time_now_ns();
     log_info("[TIMING] html handler rebuild: mode=incremental cascade=%.2fms layout=%.2fms repaint_req=%.2fms "
              "total=%.2fms (mutations=%d records=%d repaint=%s dirty_rects=%d repaint_reason=%s)",
-             duration<double, std::milli>(t1 - t0).count(),
-             duration<double, std::milli>(t2 - t1).count(),
-             duration<double, std::milli>(t3 - t2).count(),
-             duration<double, std::milli>(t3 - t_start).count(),
+             time_elapsed_ms_f(t0, t1),
+             time_elapsed_ms_f(t1, t2),
+             time_elapsed_ms_f(t2, t3),
+             time_elapsed_ms_f(t_start, t3),
              mutations,
              doc->js.mutation_record_count,
              selective_dirty ? "dirty-rects" : "full",
@@ -6653,20 +6650,18 @@ static bool post_html_handler_incremental_rebuild(
 }
 
 static void post_html_handler_rebuild(EventContext* evcon,
-                                       std::chrono::high_resolution_clock::time_point t_start,
-                                       std::chrono::high_resolution_clock::time_point t_handler) {
-    using namespace std::chrono;
+                                       uint64_t t_start, uint64_t t_handler) {
     DomDocument* doc = event_context_target_document(evcon);
     if (!doc) return;
     int mutations = doc->js.mutation_count;
 
     if (mutations == 0) {
         log_info("[TIMING] html event handler: %.2fms (no DOM changes)",
-                 duration<double, std::milli>(t_handler - t_start).count());
+                 time_elapsed_ms_f(t_start, t_handler));
         return;
     }
 
-    auto t0 = high_resolution_clock::now();
+    uint64_t t0 = time_now_ns();
     dom_js_mutation_log_records(doc);
     // CSSOM needs a connected <style>'s sheet during this same script turn;
     // deferring text-tree changes until load completion loses dynamic keyframes.
@@ -6700,7 +6695,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
             doc, doc->root, doc->stylesheets, doc->stylesheet_count, pool, css_engine, matcher);
     }
 
-    auto t1 = high_resolution_clock::now();
+    uint64_t t1 = time_now_ns();
 
     DocState* state = (DocState*)doc->state;
 
@@ -6739,20 +6734,20 @@ static void post_html_handler_rebuild(EventContext* evcon,
         selection_refresh_presentation(state);
     }
 
-    auto t2 = high_resolution_clock::now();
+    uint64_t t2 = time_now_ns();
 
     // Request repaint
     evcon->need_repaint = true;
     to_repaint();
 
-    auto t3 = high_resolution_clock::now();
+    uint64_t t3 = time_now_ns();
 
     log_info("[TIMING] html handler rebuild: mode=retained_full_layout cascade=%.2fms layout=%.2fms repaint_req=%.2fms "
              "total=%.2fms (mutations=%d)",
-             duration<double, std::milli>(t1 - t0).count(),
-             duration<double, std::milli>(t2 - t1).count(),
-             duration<double, std::milli>(t3 - t2).count(),
-             duration<double, std::milli>(t3 - t_start).count(),
+             time_elapsed_ms_f(t0, t1),
+             time_elapsed_ms_f(t1, t2),
+             time_elapsed_ms_f(t2, t3),
+             time_elapsed_ms_f(t_start, t3),
              mutations);
     // Retained full layout is still a broad reconcile; keep the reason
     // test-visible so state-retention fixtures do not have to scrape log.txt.
@@ -6772,7 +6767,7 @@ void radiant_reconcile_dom_mutations(UiContext* uicon, DomDocument* doc) {
     EventContext evcon = {};
     evcon.ui_context = uicon;
     evcon.target_document = doc;
-    auto now = std::chrono::high_resolution_clock::now();
+    uint64_t now = time_now_ns();
     // Timers, promises, and observer callbacks run outside native dispatch but
     // their DOM changes require the identical recascade and retained relayout.
     post_html_handler_rebuild(&evcon, now, now);
@@ -6821,10 +6816,10 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
 }
 
 static void radiant_js_ctx_exit(JsCtxScope* s, EventContext* evcon,
-                                std::chrono::high_resolution_clock::time_point t_start)
+                                uint64_t t_start)
 {
     if (!s->active) return;
-    auto t_handler = std::chrono::high_resolution_clock::now();
+    uint64_t t_handler = time_now_ns();
     input_context = s->saved_input_ctx;
     post_html_handler_rebuild(evcon, t_start, t_handler);
     s->active = false;
@@ -6836,7 +6831,7 @@ static thread_local DomDocument* js_dispatch_batch_document = nullptr;
 struct JsDispatchScope {
     EventContext* evcon;
     JsCtxScope scope;
-    std::chrono::high_resolution_clock::time_point t_start;
+    uint64_t t_start;
     bool active;
     bool owns_batch;
     bool reuses_batch;
@@ -6865,7 +6860,7 @@ struct JsDispatchScope {
             return;
         }
         if (radiant_js_ctx_enter(&scope, evcon)) {
-            t_start = std::chrono::high_resolution_clock::now();
+            t_start = time_now_ns();
             active = true;
             owns_batch = true;
             js_dispatch_batch_depth = 1;
@@ -9352,7 +9347,7 @@ View* find_view(View* view, DomNode* node) {
 // Node references are pinned across that return boundary (D4.5.1v3).
 typedef struct RadiantNavigationRequest {
     // link is first so the queue core never needs DOM-aware request details.
-    IntrusiveQueueNode link;
+    QueueNode link;
     DomDocument* source_document;
     DomNodeRef source_ref;
     DomDocument* target_document;
@@ -9365,7 +9360,7 @@ typedef struct RadiantNavigationRequest {
 } RadiantNavigationRequest;
 
 typedef struct RadiantNavigationQueue {
-    IntrusiveQueue requests;
+    Queue requests;
 } RadiantNavigationQueue;
 
 static void navigation_request_destroy(RadiantNavigationRequest* request) {
@@ -9390,8 +9385,8 @@ static void navigation_request_destroy(RadiantNavigationRequest* request) {
 static void navigation_queue_destroy(void* data) {
     RadiantNavigationQueue* queue = (RadiantNavigationQueue*)data;
     if (!queue) return;
-    IntrusiveQueueNode* link = NULL;
-    while ((link = intrusive_queue_pop(&queue->requests))) {
+    QueueNode* link = NULL;
+    while ((link = queue_pop(&queue->requests))) {
         RadiantNavigationRequest* request = (RadiantNavigationRequest*)link;
         navigation_request_destroy(request);
     }
@@ -9470,13 +9465,13 @@ bool radiant_queue_navigation_request(DomElement* source, const char* url,
         navigation_request_destroy(request);
         return false;
     }
-    intrusive_queue_push(&queue->requests, &request->link);
+    queue_push(&queue->requests, &request->link);
     return true;
 }
 
 static RadiantNavigationRequest* navigation_queue_take(DomDocument* doc) {
     RadiantNavigationQueue* queue = navigation_queue_for_document(doc, false);
-    return queue ? (RadiantNavigationRequest*)intrusive_queue_pop(&queue->requests) : nullptr;
+    return queue ? (RadiantNavigationRequest*)queue_pop(&queue->requests) : nullptr;
 }
 
 static bool navigation_request_is_live(const RadiantNavigationRequest* request,

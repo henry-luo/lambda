@@ -6,7 +6,7 @@
 // keep it separate from queue depth so tp_wait_all is precise.
 
 #include "thread_pool.h"
-#include "intrusive_queue.h"
+#include "queue.h"
 #include "log.h"
 
 #include <pthread.h>
@@ -21,7 +21,7 @@
 
 typedef struct TpJob {
     // link is first so the generic FIFO can return its owning job directly.
-    IntrusiveQueueNode link;
+    QueueNode link;
     TpJobFn fn;
     void* arg;
 } TpJob;
@@ -29,7 +29,7 @@ typedef struct TpJob {
 struct ThreadPool {
     pthread_t* threads;
     int thread_count;
-    IntrusiveQueue queues[TP_PRIO_COUNT];
+    Queue queues[TP_PRIO_COUNT];
     size_t pending;       // queued but not yet picked up
     size_t active;        // picked up but not yet finished
     bool shutdown;
@@ -51,7 +51,7 @@ static int tp_detect_threads(void) {
 static TpJob* tp_dequeue_locked(ThreadPool* tp) {
     for (int p = TP_PRIO_COUNT - 1; p >= 0; --p) {
         if (tp->queues[p].first) {
-            TpJob* j = (TpJob*)intrusive_queue_pop(&tp->queues[p]);
+            TpJob* j = (TpJob*)queue_pop(&tp->queues[p]);
             tp->pending--;
             return j;
         }
@@ -154,7 +154,7 @@ bool tp_submit_priority(ThreadPool* tp, TpJobFn fn, void* arg, TpPriority priori
         free(job);
         return false;
     }
-    intrusive_queue_push(&tp->queues[priority], &job->link);
+    queue_push(&tp->queues[priority], &job->link);
     tp->pending++;
     pthread_cond_signal(&tp->work_available);
     pthread_mutex_unlock(&tp->mutex);
@@ -191,7 +191,7 @@ void tp_shutdown(ThreadPool* tp) {
     // drain any orphaned jobs (submitted after shutdown was set: should be none)
     for (int p = 0; p < TP_PRIO_COUNT; ++p) {
         TpJob* job = NULL;
-        while ((job = (TpJob*)intrusive_queue_pop(&tp->queues[p]))) free(job);
+        while ((job = (TpJob*)queue_pop(&tp->queues[p]))) free(job);
     }
     tp->pending = 0;
     pthread_mutex_unlock(&tp->mutex);
