@@ -554,8 +554,8 @@ struct JsMirTranspiler {
     // environment state for one lexical scope.
     ArrayList* var_scopes;
     // Compiler-local map from literal AST identity to an immutable TypeMap
-    // recipe. Entries own script-pool metadata; the list itself is discarded
-    // when this lowering pass ends.
+    // recipe. The plans are discarded with lowering; emitted shape recipes
+    // belong to the realm input because generated code retains their address.
     ArrayList* literal_shape_plans;
     int scope_depth;
     int var_hoist_depth;  // >=0: redirect jm_set_var to this depth for 'var' hoisting; -1 = normal
