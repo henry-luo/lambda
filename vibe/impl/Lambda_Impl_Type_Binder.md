@@ -10,10 +10,13 @@
   eligible binder-carrying functions collect bounded exact keys, emit immutable
   raw bodies, select them directly at statically exact tag-safe local
   edges, and dispatch through `_b` exact guards with the generic boxed body as
-  fallback. Plain array/map/range pointer variants are included; shape-identity
-  container variants are still pending. Phases mirror the
+  fallback. Plain array/map/range pointer variants and descriptor-identity
+  map/element variants are included; descriptor-exact literals call raw bodies
+  directly, while unproven base-shape values retain `_b`. The opt-in D8.3.4
+  loop slice hoists one bounded invariant guard chain outside a `while` loop.
+  Phases mirror the
   adoption order in the design doc §7 and remain independently gated.
-- **Design authority:** `vibe/Lambda_Design_Type_Generics.md` rev 14 (TG1–TG22 incl. TG13v2 join,
+- **Design authority:** `vibe/Lambda_Design_Type_Generics.md` rev 15 (TG1–TG22 incl. TG13v2 join,
   TGO1–TGO14). This doc implements only *ratified* items and never resolves
   an open design question in code — where an open item gates a slice, the
   interim disposition is stated and the slice stays inside it.
@@ -440,12 +443,20 @@ return contract, so function order cannot change that proof. Pointer lanes for
 arrays, maps, elements, and ranges retain a boxed source root until the direct
 call consumes the raw pointer. The shared exact-key matcher uses the normalized
 semantic container kind for plain `array`/`map`/`range`, and the authoritative
-descriptor pointer for named/nominal maps and concrete elements. Shape-bearing
-calls stay on `_b` unless the opt-in D8.3.4 hoist can prove the matcher at that
-local edge. `test/lambda/type_binder_raw_variants.ls` proves four distinct
+descriptor pointer for named/nominal maps and concrete elements. A literal
+whose AST carries that same descriptor calls its raw body directly; a declared
+base-shape value stays on `_b` unless the opt-in D8.3.4 hoist can prove the
+matcher at that local edge. `test/lambda/type_binder_raw_variants.ls` proves four distinct
 scalar keys, the boxed cap fallback, direct raw edges, container lanes,
 descriptor equality, and a derived-shape fallback agree across all tiers.
 [S1.6, D8.3.1v2–D8.3.4, D8.4.1v2]
+
+With `LAMBDA_MIR_TG8_HOIST_GUARDS=1`, a synchronous `while` whose sole eligible
+dynamic binder call has bounded raw keys and one unmodified identifier argument
+is lowered into raw and `_b` loop siblings. The shared exact-key chain runs once
+before entry; each matching arm prepares its raw argument once and calls its
+`__rawN` sibling on every trip, while the fallthrough sibling calls only `_b`.
+Straight-line CSE remains deferred. [S1.6, D8.3.4, D8.4.1v2]
 
 ## 4. Hazards and rules of engagement
 
@@ -486,6 +497,8 @@ descriptor equality, and a derived-shape fallback agree across all tiers.
 | `errors/type_binder_*.ls` | P2 | TG13v2 bound mismatch, TG14v2 forward ref, TG16 trailing `that`, TG17 collision / return position |
 | `type_binder_static.ls` (+ ast-dump) | P3 | call-site substitution, static mismatch, exact-only elision; TG20v2 quartet: `let x: number = 1; max(x, 2.5)` compile error; `fn g(x: number) => max(x, 2.5); g(1)` compile error at the call via instantiation; `g(1.0)` passes; `let d: any = ...; g(d)` runtime error — verdicts identical across tiers |
 | `type_binder_raw_variants.ls` | P4 | four source-order exact binder keys compile private raw bodies; the fifth distinct key takes `_b`'s boxed fallback |
+| `proc/tg8_loop_hoist.ls` | P4 / D8.3.4 | invariant dynamic binder call enters a one-guard raw or boxed loop sibling; forced-GC JIT agrees with T0 |
+| `proc/tg8_loop_multi_hoist.ls` | P4 / D8.3.4 | bounded exact-key chain enters `__raw0`, `__raw1`, or `_b` loop sibling; forced-GC JIT agrees with T0 |
 
 ## 6. Open design items carried, and what each gates
 

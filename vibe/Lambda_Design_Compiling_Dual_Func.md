@@ -8,7 +8,9 @@
 > functions, including statically proven direct raw edges, container-pointer
 > keys, and descriptor-identity-bearing map/element keys. `LAMBDA_MIR_TG8_HOIST_GUARDS=1`
 > enables the same guard chain at eligible dynamic local edges; a miss remains
-> the boxed `_b` path. Loop-region lifting/CSE remains follow-up work.
+> the boxed `_b` path. Its conservative loop-region case places one bounded,
+> invariant-identifier guard chain before raw and `_b` `while` siblings;
+> general CSE remains follow-up work.
 >
 > This supersedes the dual-version half of
 > [`Lambda_Box_Unbox.md`](Lambda_Box_Unbox.md) (C-transpiler era; the C path is
@@ -543,11 +545,16 @@ ordinary loop-invariance test, not a new analysis.
 default and emits this same predicate at an eligible fixed-arity local binder
 edge. Each matching arm calls the immutable raw variant, while every miss calls
 `_b`; the matcher is shared with `_b`, so no second guard definition exists.
-The current lowering is an edge-local guarded dispatch, not the canonical
-loop-region lift above. Five optimized release processes of
-`test/benchmark/tg8_guard_hoist.ls` measured 0.25 s with `_b` versus 0.22 s
+For a synchronous `while` with exactly one eligible dynamic call, one unmodified
+identifier argument, and no static direct proof, lowering emits bounded canonical
+raw and `_b` loop siblings: the shared guard chain runs once before entry, each
+matching arm prepares its raw argument once and calls its `__rawN` sibling, and
+the fallthrough sibling calls only `_b`. Other eligible calls retain edge-local
+dispatch. Five optimized release processes
+of `test/benchmark/tg8_guard_hoist.ls` measured 0.26 s with `_b` versus 0.18 s
 enabled. Before enabling it at a new site, prefer a static proof, which removes
-the guard entirely. [S1.6, D8.3.1v2–D8.3.4, D8.4.1v2]
+the guard entirely. Straight-line CSE remains deferred. [S1.6,
+D8.3.1v2–D8.3.4, D8.4.1v2]
 
 **Interaction with DF14.** Hoisting introduces a third syntactic path into the
 unboxed version, but not a third *semantic* one: the hoisted guard is the same
@@ -948,7 +955,7 @@ startup-time cost is not mistaken for a surprise later.
 | **P4** | **Complete.** Direct calls prove raw preconditions or route to `_b`; plans control elision | MIR size ratchet rebaselined with checked fixtures |
 | **P5** | **Deferred intentionally.** Broader speculative body-only inference is a separately measured optimization, not needed for correct dual entries | Future Result-suite work |
 | **P6** | **Complete core.** LambdaJS guard, slow fallback, mismatched-call retention, and mixed native/`Item` signatures | Dedicated JS compiler/coercion/guard tests pass; JS keeps boxed entries |
-| **P7** | **Partially complete.** Opt-in edge-local exact-guard dispatch calls raw variants and falls back to `_b`; loop-region lifting/CSE remains deferred | `tg8_guard_hoist` release evidence and focused tier/GC gates |
+| **P7** | **Partially complete.** Opt-in edge-local exact-guard dispatch plus a bounded invariant `while` guard chain call raw variants and fall back to `_b`; straight-line CSE remains deferred | `tg8_guard_hoist` release evidence and focused tier/GC gates |
 
 P5 and P7 are deliberately outside the completed Stage 1 semantic feature: they
 change optimization policy, not the source-correct fast/slow behavior.
