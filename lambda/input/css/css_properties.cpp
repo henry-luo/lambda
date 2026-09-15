@@ -1275,12 +1275,10 @@ static bool css_color_parse_component(const char** cursor, bool alpha,
     if (alpha) {
         if (percentage) value *= 0.01f;
         value = clamp_unit(value);
-        *out = (uint8_t)(value * 255.0f + 0.5f);
+        *out = clamp_byte_round(value * 255.0f);
     } else {
         if (percentage) value = value * 255.0f / 100.0f;
-        if (value < 0.0f) value = 0.0f;
-        if (value > 255.0f) value = 255.0f;
-        *out = (uint8_t)(value + 0.5f);
+        *out = clamp_byte_round(value);
     }
     *cursor = end;
     return true;

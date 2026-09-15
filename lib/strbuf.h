@@ -7,7 +7,6 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <inttypes.h>
 #include "strview.h"
 
 #ifdef __cplusplus
@@ -23,15 +22,6 @@ typedef struct StrBuf {
     size_t capacity;
 } StrBuf;
 #pragma clang diagnostic pop
-
-#ifndef ROUNDUP2POW
-  #define ROUNDUP2POW(x) _rndup2pow64(x)
-  static inline size_t _rndup2pow64(unsigned long long x) {
-    // long long >=64 bits guaranteed in C99
-    --x; x|=x>>1; x|=x>>2; x|=x>>4; x|=x>>8; x|=x>>16; x|=x>>32; ++x;
-    return x;
-  }
-#endif
 
 StrBuf* strbuf_new();
 StrBuf* strbuf_new_cap(size_t size);

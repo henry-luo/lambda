@@ -163,7 +163,7 @@ The `HASHMAP_DEFINE_*` macro family in `lib/hashmap_helpers.h` replaces the prop
 
 ### 2.6 Geometry / math helpers — ⏳ partial
 
-- ✅ `lib/math_utils.h` shipped — `lib_math::clamp/sign/lerp/abs_val/min_val/max_val` (C++ templates in `lib_math` namespace, opt-in via `using`) plus C-and-C++-compatible `LMB_*` macros (CLAMP/SIGN/LERP/ABS/MIN/MAX). Also `clamp_byte` (int → uint8), `clamp_unit` (float → [0,1]), and float degree-to-radian conversion. This keeps provider-neutral primitives in `lib` (D7.1.3).
+- ✅ `lib/math_utils.h` shipped — `lib_math::clamp/sign/lerp/abs_val/min_val/max_val` (C++ templates in `lib_math` namespace, opt-in via `using`) plus C-and-C++-compatible `LMB_*` macros (CLAMP/SIGN/LERP/ABS/MIN/MAX). Also byte saturation/rounding, unit clamping, and float angle-unit conversions. This keeps provider-neutral primitives in `lib` (D7.1.3).
 - ✅ Migrated:
   - [radiant/render_filter.cpp:34](../radiant/render_filter.cpp) — `clamp_01` now delegates to `clamp_unit`
   - [radiant/layout_containing_block.cpp:8](../radiant/layout_containing_block.cpp) — `clamp_non_negative` now uses `lib_math::max_val`

@@ -214,8 +214,8 @@ static float resolve_transform_angle(const CssValue* value) {
     float angle = (float)value->data.length.value;
     switch (value->data.length.unit) {
         case CSS_UNIT_RAD: return angle;
-        case CSS_UNIT_GRAD: return angle * (float)M_PI / 200.0f;
-        case CSS_UNIT_TURN: return angle * 2.0f * (float)M_PI;
+        case CSS_UNIT_GRAD: return math_gradians_to_radians(angle);
+        case CSS_UNIT_TURN: return math_turns_to_radians(angle);
         default: return math_degrees_to_radians(angle);
     }
 }
@@ -2705,10 +2705,10 @@ static Color hsl_to_rgb(float h, float s, float l, float a) {
     else if (h < 300) { r1 = x; g1 = 0; b1 = c; }
     else              { r1 = c; g1 = 0; b1 = x; }
     Color result;
-    result.r = (uint8_t)((r1 + m) * 255.0f + 0.5f);
-    result.g = (uint8_t)((g1 + m) * 255.0f + 0.5f);
-    result.b = (uint8_t)((b1 + m) * 255.0f + 0.5f);
-    result.a = (uint8_t)(a * 255.0f + 0.5f);
+    result.r = clamp_byte_round((r1 + m) * 255.0f);
+    result.g = clamp_byte_round((g1 + m) * 255.0f);
+    result.b = clamp_byte_round((b1 + m) * 255.0f);
+    result.a = clamp_byte_round(a * 255.0f);
     return result;
 }
 

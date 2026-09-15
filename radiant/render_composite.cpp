@@ -91,7 +91,7 @@ uint32_t render_composite_blend_pixel(uint32_t backdrop, uint32_t source, CssEnu
     uint8_t rr = blendch(br, sr);
     uint8_t rg = blendch(bg, sg);
     uint8_t rb = blendch(bb, sb);
-    uint8_t new_a = (uint8_t)(ra * 255.0f + 0.5f);
+    uint8_t new_a = clamp_byte_round(ra * 255.0f);
     return render_pixel_pack_abgr(rr, rg, rb, new_a);
 }
 

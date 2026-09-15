@@ -61,6 +61,14 @@ TEST(MathUtilsTest, ClampByte) {
     EXPECT_EQ(clamp_byte(1 << 20), 255u);
 }
 
+TEST(MathUtilsTest, ClampByteRound) {
+    EXPECT_EQ(clamp_byte_round(-0.5f), 0u);
+    EXPECT_EQ(clamp_byte_round(0.5f), 1u);
+    EXPECT_EQ(clamp_byte_round(254.5f), 255u);
+    EXPECT_EQ(clamp_byte_round(999.0f), 255u);
+    EXPECT_EQ(clamp_byte_round(NAN), 0u);
+}
+
 TEST(MathUtilsTest, ClampUnit) {
     EXPECT_FLOAT_EQ(clamp_unit(0.0f), 0.0f);
     EXPECT_FLOAT_EQ(clamp_unit(1.0f), 1.0f);
@@ -73,6 +81,8 @@ TEST(MathUtilsTest, ClampUnit) {
 
 TEST(MathUtilsTest, DegreeRadianConversions) {
     EXPECT_NEAR(math_degrees_to_radians(180.0f), 3.14159265f, 0.000001f);
+    EXPECT_NEAR(math_gradians_to_radians(200.0f), 3.14159265f, 0.000001f);
+    EXPECT_NEAR(math_turns_to_radians(0.5f), 3.14159265f, 0.000001f);
 }
 
 TEST(MathUtilsTest, MacroFormsWorkInCppToo) {

@@ -43,10 +43,8 @@ static Color form_text_color(ViewBlock* block, FormControlProp* form,
                          form->placeholder_color_a)
             : make_color(117, 117, 117);
         if (form && form->placeholder_has_opacity) {
-            float alpha = (float)text_color.a * form->placeholder_opacity;
-            if (alpha < 0.0f) alpha = 0.0f;
-            if (alpha > 255.0f) alpha = 255.0f;
-            text_color.a = (uint8_t)(alpha + 0.5f);
+            text_color.a = clamp_byte_round(
+                (float)text_color.a * form->placeholder_opacity);
         }
     } else if (block && block->in_line && block->inl()->has_color) {
         text_color.r = block->inl()->color.r;

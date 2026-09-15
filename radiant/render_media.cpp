@@ -33,7 +33,7 @@ static uint8_t render_media_content_opacity(ViewBlock* view) {
     float opacity = view->inl()->opacity;
     if (opacity >= 1.0f) return 255;
     if (opacity <= 0.0f) return 0;
-    return (uint8_t)(opacity * 255.0f + 0.5f);
+    return clamp_byte_round(opacity * 255.0f);
 }
 
 static float render_media_object_position_offset(float box_size, float rendered_size,

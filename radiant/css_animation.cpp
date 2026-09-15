@@ -30,9 +30,7 @@ float css_interpolate_float(float a, float b, float t) {
 
 static inline uint8_t lerp_u8(uint8_t a, uint8_t b, float t) {
     float v = (float)a + ((float)b - (float)a) * t;
-    if (v < 0.0f) v = 0.0f;
-    if (v > 255.0f) v = 255.0f;
-    return (uint8_t)(v + 0.5f);
+    return clamp_byte_round(v);
 }
 
 Color css_interpolate_color(Color a, Color b, float t) {
@@ -69,11 +67,11 @@ static float parse_transform_angle(const char** source) {
     }
     if (str_istarts_with_cstr(unit, "grad")) {
         *source = unit + 4;
-        return angle * (float)M_PI / 200.0f;
+        return math_gradians_to_radians(angle);
     }
     if (str_istarts_with_cstr(unit, "turn")) {
         *source = unit + 4;
-        return angle * 2.0f * (float)M_PI;
+        return math_turns_to_radians(angle);
     }
     if (str_istarts_with_cstr(unit, "deg")) {
         *source = unit + 3;
@@ -141,7 +139,7 @@ static bool parse_color_value(const char* val, Color* out) {
         out->b = (uint8_t)strtol(p, (char**)&p, 10); while (*p == ',' || isspace((unsigned char)*p)) p++;
         if (*p == ')') { out->a = 255; return true; }
         float a = strtof(p, (char**)&p);
-        out->a = (uint8_t)(a * 255.0f + 0.5f);
+        out->a = clamp_byte_round(a * 255.0f);
         return true;
     }
 
