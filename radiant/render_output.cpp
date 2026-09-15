@@ -375,34 +375,8 @@ RenderFrameScope::~RenderFrameScope() {
 }
 
 static uint32_t render_output_canvas_background(View* root_view) {
-    if (!root_view || root_view->view_type != RDT_VIEW_BLOCK) {
-        return 0xFFFFFFFF;
-    }
-
-    ViewBlock* html_block = lam::view_require_block(root_view);
-    bool html_has_bg = html_block->bound && html_block->boundary_mut()->background &&
-                       html_block->boundary()->background->color.a > 0;
-    if (html_has_bg) {
-        return html_block->boundary()->background->color.c;
-    }
-
-    View* child = html_block->first_child;
-    while (child) {
-        if (child->view_type == RDT_VIEW_BLOCK) {
-            ViewBlock* child_block = lam::view_require_block(child);
-            const char* name = child_block->node_name();
-            if (name && str_ieq_cstr(name, "body")) {
-                if (child_block->bound && child_block->boundary_mut()->background &&
-                    child_block->boundary()->background->color.a > 0) {
-                    return child_block->boundary()->background->color.c;
-                }
-                break;
-            }
-        }
-        child = static_cast<View*>(child->next_sibling);
-    }
-
-    return 0xFFFFFFFF;
+    Color background = render_document_canvas_background(root_view);
+    return background.a > 0 ? background.c : 0xFFFFFFFF;
 }
 
 static RenderOutputClearResult render_output_clear_surface(RenderContext* rdcon, ViewTree* view_tree,

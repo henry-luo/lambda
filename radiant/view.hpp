@@ -3738,6 +3738,10 @@ public:
 
 namespace radiant {
 
+// Resolves CSS transform-origin in the same document coordinate system as x/y.
+extern RdtLogicalPoint transform_origin(const TransformProp* transform,
+                                        float x, float y,
+                                        float width, float height);
 extern RdtMatrix compute_transform_matrix(TransformFunction* functions,
                                           float width, float height,
                                           float origin_x, float origin_y,

@@ -4,6 +4,18 @@
 
 namespace radiant {
 
+RdtLogicalPoint transform_origin(const TransformProp* transform,
+                                 float x, float y,
+                                 float width, float height) {
+    RdtLogicalPoint origin = {x, y};
+    if (!transform) return origin;
+    origin.x += transform->origin_x_percent
+        ? width * transform->origin_x / 100.0f : transform->origin_x;
+    origin.y += transform->origin_y_percent
+        ? height * transform->origin_y / 100.0f : transform->origin_y;
+    return origin;
+}
+
 static RdtMatrix4 matrix4_from_scale(float x, float y, float z) {
     RdtMatrix4 matrix = rdt_matrix4_identity();
     matrix.values[0] = x;

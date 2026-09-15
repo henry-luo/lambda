@@ -27,6 +27,49 @@ typedef struct RenderEffectRasterFallback {
     PaintList paint_list;
 } RenderEffectRasterFallback;
 
+static inline bool render_effect_group_needs_raster_fallback(
+        const PaintEffectGroup* group) {
+    return group &&
+           (group->has_clip || group->blend_mode != 0 || group->filter ||
+            group->backdrop || group->backdrop_filter ||
+            group->shadow || group->isolation);
+}
+
+static inline bool render_effect_group_needs_page_backdrop(
+        const PaintEffectGroup* group) {
+    return group &&
+           (group->blend_mode != 0 || group->backdrop || group->backdrop_filter);
+}
+
+static inline bool render_paint_list_effect_groups_balanced(
+        const PaintList* paint_list) {
+    if (!paint_list) return false;
+    int effect_depth = 0;
+    for (int i = 0; i < paint_list->count; i++) {
+        PaintOp op = paint_list->cmds[i].op;
+        if (paint_op_has_flags(op, PAINT_OP_FLAG_EFFECT_STACK | PAINT_OP_FLAG_STACK_PUSH)) {
+            effect_depth++;
+        } else if (paint_op_has_flags(op, PAINT_OP_FLAG_EFFECT_STACK | PAINT_OP_FLAG_STACK_POP)) {
+            effect_depth--;
+            if (effect_depth < 0) return false;
+        }
+    }
+    return effect_depth == 0;
+}
+
+static inline void render_effect_record_page_backdrop_paint_list(
+        bool page_backdrop_ready, DisplayList* page_backdrop,
+        const PaintList* paint_list, PaintGlyphRunRasterLowerFn glyph_lowerer) {
+    if (!page_backdrop_ready || !page_backdrop || !paint_list ||
+        paint_list_count(paint_list) <= 0 ||
+        !render_paint_list_effect_groups_balanced(paint_list)) {
+        return;
+    }
+    render_svg_inline_register_paint_ir_lowerers();
+    paint_ir_register_glyph_run_raster_lowerer(glyph_lowerer);
+    paint_ir_lower_raster(paint_list, page_backdrop);
+}
+
 static inline void render_effect_raster_begin(
         RenderEffectRasterFallback* fallback, const PaintEffectGroup* group,
         PaintGlyphRunRasterLowerFn lowerer) {

@@ -257,6 +257,56 @@ inline void place_definite_item(
     item.resolved_column = item.column.to_origin_zero(explicit_col_count);
 }
 
+// Definite-row and definite-column placement differ only in which axis has a
+// fixed span. Keep the occupancy search in one path so their fallback rules
+// cannot drift.
+inline void place_definite_axis_item(
+    CellOccupancyMatrix& matrix,
+    GridItemInfo& item,
+    AbsoluteAxis definite_axis,
+    uint16_t explicit_definite_count,
+    const char* axis_name
+) {
+    const GridPlacement& definite_placement = definite_axis == AbsoluteAxis::Vertical
+        ? item.row : item.column;
+    const GridPlacement& search_placement = definite_axis == AbsoluteAxis::Vertical
+        ? item.column : item.row;
+    LineSpan definite_span = definite_placement.to_origin_zero(explicit_definite_count);
+    uint16_t search_item_span = search_placement.get_span();
+    AbsoluteAxis search_axis = other_axis(definite_axis);
+    OriginZeroLine search_start = matrix.track_counts(search_axis).implicit_start_line();
+    constexpr int MAX_SEARCH_ITERATIONS = 10000;
+
+    for (int iterations = 0; iterations < MAX_SEARCH_ITERATIONS; iterations++) {
+        LineSpan search_span(search_start, search_start + search_item_span);
+        LineSpan column_span = definite_axis == AbsoluteAxis::Vertical
+            ? search_span : definite_span;
+        LineSpan row_span = definite_axis == AbsoluteAxis::Vertical
+            ? definite_span : search_span;
+        matrix.ensure_fits(AbsoluteAxis::Horizontal, column_span, row_span);
+
+        if (matrix.line_area_is_unoccupied(
+                AbsoluteAxis::Horizontal, column_span, row_span)) {
+            item.resolved_row = row_span;
+            item.resolved_column = column_span;
+            return;
+        }
+        search_start += 1;
+    }
+
+    log_warn("[RAD_CAP_GRID_AUTO_PLACE] exhausted definite-%s search after %d iterations; placing at grid end",
+             axis_name, MAX_SEARCH_ITERATIONS);
+    OriginZeroLine fallback_start = matrix.track_counts(search_axis).implicit_end_line();
+    LineSpan search_span(fallback_start, fallback_start + search_item_span);
+    LineSpan column_span = definite_axis == AbsoluteAxis::Vertical
+        ? search_span : definite_span;
+    LineSpan row_span = definite_axis == AbsoluteAxis::Vertical
+        ? definite_span : search_span;
+    matrix.ensure_fits(AbsoluteAxis::Horizontal, column_span, row_span);
+    item.resolved_row = row_span;
+    item.resolved_column = column_span;
+}
+
 /**
  * Place an item with definite row but indefinite column (CSS Grid spec step 2)
  *
@@ -273,41 +323,9 @@ inline void place_definite_row_item(
     uint16_t explicit_row_count,
     uint16_t explicit_col_count
 ) {
-    // Row is definite, column is indefinite
-    LineSpan row_span = item.row.to_origin_zero(explicit_row_count);
-    uint16_t column_item_span = item.column.get_span();
-
-    // Find first available column position in the specified row(s)
-    OriginZeroLine col_start = matrix.track_counts(AbsoluteAxis::Horizontal).implicit_start_line();
-    constexpr int MAX_SEARCH_ITERATIONS = 10000;
-    int iterations = 0;
-
-    while (iterations < MAX_SEARCH_ITERATIONS) {
-        LineSpan col_span(col_start, col_start + column_item_span);
-
-        // Ensure matrix can accommodate this position
-        matrix.ensure_fits(AbsoluteAxis::Horizontal, col_span, row_span);
-
-        if (matrix.line_area_is_unoccupied(AbsoluteAxis::Horizontal, col_span, row_span)) {
-            // Found a free space
-            item.resolved_row = row_span;
-            item.resolved_column = col_span;
-            return;
-        }
-
-        col_start += 1;
-        iterations++;
-    }
-
-    // Fallback: place at end of grid
-    log_warn("[RAD_CAP_GRID_AUTO_PLACE] exhausted definite-row search after %d iterations; placing at grid end",
-             MAX_SEARCH_ITERATIONS);
-    OriginZeroLine fallback_col = matrix.track_counts(AbsoluteAxis::Horizontal).implicit_end_line();
-    LineSpan col_span(fallback_col, fallback_col + column_item_span);
-    matrix.ensure_fits(AbsoluteAxis::Horizontal, col_span, row_span);
-
-    item.resolved_row = row_span;
-    item.resolved_column = col_span;
+    (void)auto_flow;
+    place_definite_axis_item(matrix, item, AbsoluteAxis::Vertical,
+                             explicit_row_count, "row");
 }
 
 /**
@@ -326,41 +344,9 @@ inline void place_definite_column_item(
     uint16_t explicit_row_count,
     uint16_t explicit_col_count
 ) {
-    // Column is definite, row is indefinite
-    LineSpan col_span = item.column.to_origin_zero(explicit_col_count);
-    uint16_t row_item_span = item.row.get_span();
-
-    // Find first available row position in the specified column(s)
-    OriginZeroLine row_start = matrix.track_counts(AbsoluteAxis::Vertical).implicit_start_line();
-    constexpr int MAX_SEARCH_ITERATIONS = 10000;
-    int iterations = 0;
-
-    while (iterations < MAX_SEARCH_ITERATIONS) {
-        LineSpan row_span(row_start, row_start + row_item_span);
-
-        // Ensure matrix can accommodate this position
-        matrix.ensure_fits(AbsoluteAxis::Horizontal, col_span, row_span);
-
-        if (matrix.line_area_is_unoccupied(AbsoluteAxis::Horizontal, col_span, row_span)) {
-            // Found a free space
-            item.resolved_row = row_span;
-            item.resolved_column = col_span;
-            return;
-        }
-
-        row_start += 1;
-        iterations++;
-    }
-
-    // Fallback: place at end of grid
-    log_warn("[RAD_CAP_GRID_AUTO_PLACE] exhausted definite-column search after %d iterations; placing at grid end",
-             MAX_SEARCH_ITERATIONS);
-    OriginZeroLine fallback_row = matrix.track_counts(AbsoluteAxis::Vertical).implicit_end_line();
-    LineSpan row_span(fallback_row, fallback_row + row_item_span);
-    matrix.ensure_fits(AbsoluteAxis::Horizontal, col_span, row_span);
-
-    item.resolved_row = row_span;
-    item.resolved_column = col_span;
+    (void)auto_flow;
+    place_definite_axis_item(matrix, item, AbsoluteAxis::Horizontal,
+                             explicit_col_count, "column");
 }
 
 /**

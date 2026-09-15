@@ -1793,31 +1793,38 @@ static bool is_in_non_selectable_subtree(const DomText* t) {
              : false;
 }
 
-static DomText* next_text_after_impl(DomNode* n) {
+static DomText* adjacent_text_impl(DomNode* n, bool previous) {
     if (!n) return nullptr;
-    // descend into right-siblings/their subtrees, then ascend
+    // Descend through the adjacent sibling subtree, then ascend when it has
+    // no further node in the requested document-order direction.
     DomNode* cur = n;
     while (cur) {
-        if (cur->next_sibling) {
-            DomNode* w = cur->next_sibling;
-            // descend leftmost
+        DomNode* sibling = previous ? cur->prev_sibling : cur->next_sibling;
+        if (sibling) {
+            DomNode* w = sibling;
             while (true) {
                 if (w->is_text()) return w->as_text();
                 if (w->is_element()) {
-                    DomNode* fc = w->as_element()->first_child;
-                    if (fc) { w = fc; continue; }
+                    DomNode* child = previous ? w->as_element()->last_child
+                                              : w->as_element()->first_child;
+                    if (child) { w = child; continue; }
                 }
-                // leaf non-text: try sibling
-                if (w->next_sibling) { w = w->next_sibling; continue; }
-                // back up
-                while (w && !w->next_sibling) w = w->parent;
+                DomNode* next = previous ? w->prev_sibling : w->next_sibling;
+                if (next) { w = next; continue; }
+                while (w && !(previous ? w->prev_sibling : w->next_sibling)) {
+                    w = w->parent;
+                }
                 if (!w) break;
-                w = w->next_sibling;
+                w = previous ? w->prev_sibling : w->next_sibling;
             }
         }
         cur = cur->parent;
     }
     return nullptr;
+}
+
+static DomText* next_text_after_impl(DomNode* n) {
+    return adjacent_text_impl(n, false);
 }
 
 static DomText* next_text_after(DomNode* n) {
@@ -1839,27 +1846,7 @@ DomText* dom_range_next_text_after_any(DomNode* n) {
 
 // Walk to the previous text node in document order preceding `n` (skipping `n`).
 static DomText* prev_text_before_impl(DomNode* n) {
-    if (!n) return nullptr;
-    DomNode* cur = n;
-    while (cur) {
-        if (cur->prev_sibling) {
-            DomNode* w = cur->prev_sibling;
-            // descend rightmost
-            while (true) {
-                if (w->is_text()) return w->as_text();
-                if (w->is_element()) {
-                    DomNode* lc = w->as_element()->last_child;
-                    if (lc) { w = lc; continue; }
-                }
-                if (w->prev_sibling) { w = w->prev_sibling; continue; }
-                while (w && !w->prev_sibling) w = w->parent;
-                if (!w) break;
-                w = w->prev_sibling;
-            }
-        }
-        cur = cur->parent;
-    }
-    return nullptr;
+    return adjacent_text_impl(n, true);
 }
 
 static DomText* prev_text_before(DomNode* n) {

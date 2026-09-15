@@ -1632,10 +1632,6 @@ static DomElement* rich_editable_from_target(View* target) {
     return editing_surface_is_rich(&surface) ? surface.owner : nullptr;
 }
 
-static bool dom_node_is_descendant_of(DomNode* node, DomNode* ancestor) {
-    return view_geometry_dom_is_descendant(node, ancestor);
-}
-
 static void collapse_active_text_control_selection_for_rich_target(DocState* state,
                                                                    View* target) {
     if (!state || !target) return;
@@ -1646,7 +1642,7 @@ static void collapse_active_text_control_selection_for_rich_target(DocState* sta
 
     DomNode* target_node = static_cast<DomNode*>(target);
     DomNode* text_control_node = static_cast<DomNode*>(elem);
-    if (dom_node_is_descendant_of(target_node, text_control_node)) return;
+    if (view_geometry_dom_is_descendant(target_node, text_control_node)) return;
 
     tc_ensure_init(elem);
     uint32_t end = elem->form ? elem->form->current_value_u16_len : 0;

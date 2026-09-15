@@ -396,24 +396,6 @@ static View* focus_validation_root(View* view) {
     return root;
 }
 
-static bool focus_path_contains(View* focused, View* candidate) {
-    View* node = focused;
-    while (node) {
-        if (node == candidate) return true;
-        node = static_cast<View*>(node->parent);
-    }
-    return false;
-}
-
-static bool view_path_contains(View* target, View* candidate) {
-    View* node = target;
-    while (node) {
-        if (node == candidate) return true;
-        node = static_cast<View*>(node->parent);
-    }
-    return false;
-}
-
 static bool view_has_document_root(View* view) {
     if (!view) return false;
     View* root = focus_validation_root(view);
@@ -483,7 +465,7 @@ static void validate_focus_node(DocState* state, View* node, View* focused,
     if (!state || !node) return;
 
     bool expected_focus = node == focused;
-    bool expected_within = focused && focus_path_contains(focused, node);
+    bool expected_within = focused && view_geometry_is_descendant(focused, node);
     bool expected_visible = expected_focus && state->focus && state->focus->focus_visible;
 
     bool store_focus = state_get_bool(state, node, STATE_FOCUS);
@@ -532,23 +514,25 @@ static void validate_focus_invariants(DocState* state,
     }
 }
 
-static void validate_hover_node(DocState* state, View* node, View* hovered,
-                                StateValidationReport* report,
-                                uint32_t* hover_count) {
+static void validate_ancestor_state_node(DocState* state, View* node, View* target,
+                                          const char* state_flag, const char* message,
+                                          StateValidationReport* report,
+                                          uint32_t* target_count) {
     if (!state || !node) return;
 
-    bool expected_hover = hovered && view_path_contains(hovered, node);
-    bool store_hover = state_get_bool(state, node, STATE_HOVER);
-    if (store_hover) (*hover_count)++;
-    if (store_hover != expected_hover) {
-        report_fail(report, ":hover ancestry chain is inconsistent");
+    bool expected = target && view_geometry_is_descendant(target, node);
+    bool stored = state_get_bool(state, node, state_flag);
+    if (stored) (*target_count)++;
+    if (stored != expected) {
+        report_fail(report, message);
     }
 
     if (node->is_element()) {
         DomElement* element = lam::dom_require_element(node);
         DomNode* child = element->first_child;
         while (child) {
-            validate_hover_node(state, static_cast<View*>(child), hovered, report, hover_count);
+            validate_ancestor_state_node(state, static_cast<View*>(child), target,
+                                          state_flag, message, report, target_count);
             child = child->next_sibling;
         }
     }
@@ -572,31 +556,11 @@ static void validate_hover_invariants(DocState* state,
     if (!root) return;
 
     uint32_t hover_count = 0;
-    validate_hover_node(state, root, hovered, report, &hover_count);
+    validate_ancestor_state_node(state, root, hovered, STATE_HOVER,
+                                  ":hover ancestry chain is inconsistent",
+                                  report, &hover_count);
     if (!hovered && hover_count != 0) {
         report_fail(report, "inactive hover document still has :hover target");
-    }
-}
-
-static void validate_active_node(DocState* state, View* node, View* active,
-                                 StateValidationReport* report,
-                                 uint32_t* active_count) {
-    if (!state || !node) return;
-
-    bool expected_active = active && view_path_contains(active, node);
-    bool store_active = state_get_bool(state, node, STATE_ACTIVE);
-    if (store_active) (*active_count)++;
-    if (store_active != expected_active) {
-        report_fail(report, ":active ancestry chain is inconsistent");
-    }
-
-    if (node->is_element()) {
-        DomElement* element = lam::dom_require_element(node);
-        DomNode* child = element->first_child;
-        while (child) {
-            validate_active_node(state, static_cast<View*>(child), active, report, active_count);
-            child = child->next_sibling;
-        }
     }
 }
 
@@ -618,7 +582,9 @@ static void validate_active_invariants(DocState* state,
     if (!root) return;
 
     uint32_t active_count = 0;
-    validate_active_node(state, root, active, report, &active_count);
+    validate_ancestor_state_node(state, root, active, STATE_ACTIVE,
+                                  ":active ancestry chain is inconsistent",
+                                  report, &active_count);
     if (!active && active_count != 0) {
         report_fail(report, "inactive document still has :active target");
     }

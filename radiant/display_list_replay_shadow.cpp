@@ -35,20 +35,6 @@ void dl_replay_shadow_clip_restore(DisplayReplayShadowClip* clip,
     dl_replay_shadow_clip_restore_at_offset(clip, surface, restore, 0.0f, 0.0f);
 }
 
-static void dl_offset_clip_params(int clip_type, float* params, float origin_x, float origin_y) {
-    switch ((ClipShapeType)clip_type) {
-        case CLIP_SHAPE_CIRCLE:
-        case CLIP_SHAPE_ELLIPSE:
-        case CLIP_SHAPE_INSET:
-        case CLIP_SHAPE_ROUNDED_RECT:
-            params[0] -= origin_x;
-            params[1] -= origin_y;
-            break;
-        default:
-            break;
-    }
-}
-
 void dl_replay_shadow_clip_restore_at_offset(DisplayReplayShadowClip* clip,
                                              ImageSurface* surface,
                                              const DlShadowClipRestore* restore,
@@ -56,8 +42,8 @@ void dl_replay_shadow_clip_restore_at_offset(DisplayReplayShadowClip* clip,
     if (!clip) return;
     if (clip->saved && surface && surface->pixels && restore && restore->exclude_type) {
         float params[8];
-        memcpy(params, restore->exclude_params, sizeof(params));
-        dl_offset_clip_params(restore->exclude_type, params, origin_x, origin_y);
+        dl_replay_offset_clip_params(restore->exclude_type, restore->exclude_params,
+                                     params, origin_x, origin_y);
         ClipShape ex = clip_shape_from_params(restore->exclude_type, params);
         surface_region_restore_masked(surface, clip->saved, &clip->region,
                                       &ex, restore->restore_inside);

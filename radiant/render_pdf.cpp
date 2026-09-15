@@ -91,18 +91,6 @@ static PaintList* pdf_active_paint_list(PdfRenderContext* ctx) {
     return ctx ? &ctx->paint_list : nullptr;
 }
 
-static bool pdf_effect_group_needs_raster_fallback(const PaintEffectGroup* group) {
-    return group &&
-           (group->has_clip || group->blend_mode != 0 || group->filter ||
-            group->backdrop || group->backdrop_filter ||
-            group->shadow || group->isolation);
-}
-
-static bool pdf_effect_group_needs_page_backdrop(const PaintEffectGroup* group) {
-    return group &&
-           (group->blend_mode != 0 || group->backdrop || group->backdrop_filter);
-}
-
 static bool pdf_effect_group_is_opacity_only(const RenderExportTargetCaps* caps,
                                              const PaintEffectGroup* group) {
     return group && caps && caps->opacity_groups &&
@@ -116,32 +104,12 @@ static bool pdf_effect_group_is_opacity_only(const RenderExportTargetCaps* caps,
            !group->isolation;
 }
 
-static bool pdf_paint_list_balanced_effect_groups(const PaintList* paint_list) {
-    if (!paint_list) return false;
-    int effect_depth = 0;
-    for (int i = 0; i < paint_list->count; i++) {
-        PaintOp op = paint_list->cmds[i].op;
-        if (paint_op_has_flags(op, PAINT_OP_FLAG_EFFECT_STACK | PAINT_OP_FLAG_STACK_PUSH)) {
-            effect_depth++;
-        } else if (paint_op_has_flags(op, PAINT_OP_FLAG_EFFECT_STACK | PAINT_OP_FLAG_STACK_POP)) {
-            effect_depth--;
-            if (effect_depth < 0) return false;
-        }
-    }
-    return effect_depth == 0;
-}
-
 static void pdf_record_page_backdrop_paint_list(PdfRenderContext* ctx,
                                                 const PaintList* paint_list) {
-    if (!ctx || !ctx->page_backdrop_ready || !paint_list || paint_list_count(paint_list) <= 0) {
-        return;
-    }
-    if (!pdf_paint_list_balanced_effect_groups(paint_list)) {
-        return;
-    }
-    render_svg_inline_register_paint_ir_lowerers();
-    paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
-    paint_ir_lower_raster(paint_list, &ctx->page_backdrop_dl);
+    if (!ctx) return;
+    render_effect_record_page_backdrop_paint_list(
+        ctx->page_backdrop_ready, &ctx->page_backdrop_dl, paint_list,
+        render_glyph_run_raster_lower);
 }
 
 // Helper function to get PDF font name from system font
@@ -212,6 +180,9 @@ static bool pdf_page_close_path(PdfRenderContext* ctx) {
     return HPDF_Page_ClosePath(ctx->current_page) == HPDF_OK;
 }
 
+static void pdf_transform_point(const RdtMatrix* transform, float x, float y,
+                                float* out_x, float* out_y);
+
 typedef struct PdfPathContext {
     PdfRenderContext* pdf;
     const RdtMatrix* transform;
@@ -229,20 +200,9 @@ static void pdf_path_set_current(PdfPathContext* ctx, float x, float y) {
     ctx->has_current = true;
 }
 
-static void pdf_path_transform_point(PdfPathContext* ctx, float x, float y,
-                                     float* out_x, float* out_y) {
-    if (ctx->transform) {
-        *out_x = ctx->transform->e11 * x + ctx->transform->e12 * y + ctx->transform->e13;
-        *out_y = ctx->transform->e21 * x + ctx->transform->e22 * y + ctx->transform->e23;
-    } else {
-        *out_x = x;
-        *out_y = y;
-    }
-}
-
 static bool pdf_path_move_to(PdfPathContext* ctx, float x, float y) {
     float tx = 0.0f, ty = 0.0f;
-    pdf_path_transform_point(ctx, x, y, &tx, &ty);
+    pdf_transform_point(ctx->transform, x, y, &tx, &ty);
     if (!pdf_page_move_to(ctx->pdf, tx, ty)) return false;
     pdf_path_set_current(ctx, x, y);
     ctx->subpath_x = x;
@@ -252,7 +212,7 @@ static bool pdf_path_move_to(PdfPathContext* ctx, float x, float y) {
 
 static bool pdf_path_line_to(PdfPathContext* ctx, float x, float y) {
     float tx = 0.0f, ty = 0.0f;
-    pdf_path_transform_point(ctx, x, y, &tx, &ty);
+    pdf_transform_point(ctx->transform, x, y, &tx, &ty);
     if (!pdf_page_line_to(ctx->pdf, tx, ty)) return false;
     pdf_path_set_current(ctx, x, y);
     return true;
@@ -264,9 +224,9 @@ static bool pdf_path_curve_to(PdfPathContext* ctx,
     float tx1 = 0.0f, ty1 = 0.0f;
     float tx2 = 0.0f, ty2 = 0.0f;
     float tx3 = 0.0f, ty3 = 0.0f;
-    pdf_path_transform_point(ctx, x1, y1, &tx1, &ty1);
-    pdf_path_transform_point(ctx, x2, y2, &tx2, &ty2);
-    pdf_path_transform_point(ctx, x3, y3, &tx3, &ty3);
+    pdf_transform_point(ctx->transform, x1, y1, &tx1, &ty1);
+    pdf_transform_point(ctx->transform, x2, y2, &tx2, &ty2);
+    pdf_transform_point(ctx->transform, x3, y3, &tx3, &ty3);
     if (!pdf_page_curve_to(ctx->pdf, tx1, ty1, tx2, ty2, tx3, ty3)) return false;
     pdf_path_set_current(ctx, x3, y3);
     return true;
@@ -580,7 +540,7 @@ static void pdf_finish_effect_raster_fallback(PdfRenderContext* ctx) {
     RenderEffectRasterImage image = {};
     bool ok = render_effect_rasterize_paint_list(
         &ctx->effect_fallback.paint_list,
-        pdf_effect_group_needs_page_backdrop(&ctx->effect_fallback.group)
+        render_effect_group_needs_page_backdrop(&ctx->effect_fallback.group)
             ? &ctx->page_backdrop_dl
             : nullptr,
         &ctx->effect_fallback.group.bounds,
@@ -1755,7 +1715,7 @@ static void pdf_cb_begin_effect_group(void* vctx, const PaintEffectGroup* group)
         ctx->effect_fallback.nested_depth++;
         return;
     }
-    if (pdf_effect_group_needs_raster_fallback(group)) {
+    if (render_effect_group_needs_raster_fallback(group)) {
         pdf_begin_effect_raster_fallback(ctx, group);
         return;
     }
