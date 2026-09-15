@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "description": "D2.4.3/D8.2.3: Number-proven JS binary operations use the shared F64 plan; an incomplete proof stays on the boxed semantic helper.",
+  "checks": [
+    {
+      "in_func": "_js_nativeNumberLoop_#_body",
+      "expect": [
+        "dadd",
+        "dlt",
+        "deq"
+      ],
+      "forbid": [
+        "call\tjs_add",
+        "call\tjs_compare",
+        "call\tjs_strict_equal"
+      ]
+    },
+    {
+      "in_func": "_js_partialNumber_#_body",
+      "expect": [
+        "call\tjs_add"
+      ]
+    }
+  ]
+}

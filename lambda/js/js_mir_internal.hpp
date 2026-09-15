@@ -90,6 +90,10 @@ typedef struct JsMirReference {
     JsMirReferenceKind kind;
     MIR_reg_t base_reg;
     MIR_reg_t key_reg;
+    // A proven numeric computed key has one evaluation: its scalar carrier
+    // feeds native elements while key_reg remains available to generic paths.
+    MIR_reg_t native_key_reg;
+    TypeId native_key_type;
     bool strict;
     bool uninitialized_this;
     bool is_private;
@@ -97,6 +101,9 @@ typedef struct JsMirReference {
     bool property_key_canonicalized;
     uint32_t named_key_index;
     NameId named_key_id;
+    // The resolved member syntax is retained only for a later post-evaluation
+    // physical-plan selection; base/key evaluation remains above this boundary.
+    JsMemberNode* member;
     int jube_slot;
     uint32_t jube_ordinal;
     uint8_t jube_kind;

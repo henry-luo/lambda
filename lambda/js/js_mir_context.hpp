@@ -394,6 +394,8 @@ struct JsClassEntry {
     int member_count;
     JsClassMethodEntry* constructor;     // points into members[].as.method or NULL
     JsClassEntry* superclass;            // resolved parent class entry or NULL
+    TypeMap* instance_shape;             // immutable public-field construction recipe
+    bool instance_shape_planned;         // prevents repeated negative shape scans
     bool has_self_extends;               // class x extends x {} — TDZ violation
     bool is_declaration;                 // true for class declarations, false for class expressions
     int inner_module_var_index;          // immutable class-name binding inside class scope
@@ -551,6 +553,10 @@ struct JsMirTranspiler {
     // Each map carries pass-local MIR registers, type, TDZ, root, and
     // environment state for one lexical scope.
     ArrayList* var_scopes;
+    // Compiler-local map from literal AST identity to an immutable TypeMap
+    // recipe. Entries own script-pool metadata; the list itself is discarded
+    // when this lowering pass ends.
+    ArrayList* literal_shape_plans;
     int scope_depth;
     int var_hoist_depth;  // >=0: redirect jm_set_var to this depth for 'var' hoisting; -1 = normal
     // Active generator/async local reservations, keyed by NameEntry*. These

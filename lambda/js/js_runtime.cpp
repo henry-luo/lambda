@@ -9,6 +9,7 @@
 #include "js_object_meta.h"
 #include "js_host_hooks.h"
 #include "js_regex_generated_properties.h"
+#include "js_regex_router_scanner.h"
 #include "js_state_guards.h"
 #include "js_well_known_names.h"
 #include "js_exec_profile.h"
@@ -298,6 +299,7 @@ extern "C" TypeMap* js_typemap_transition_for_type(Item obj, ShapeEntry* entry,
     NameId operation_name_id, TypeId value_type);
 Item js_map_shape_lookup_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 static void js_set_prototype_fresh(Item object, Item prototype);
+static bool js_class_instance_shape_is_admissible(TypeMap* shape);
 static bool js_array_sparse_get(Array* arr, int64_t index, Item* out_value);
 static bool js_array_companion_has_array_index_shape(Array* arr);
 extern "C" bool js_promise_vmap_is(Item value);
@@ -1032,6 +1034,7 @@ static JsCollectionData* js_get_collection_data(Item obj);
 
 // Create a new JS object as a Lambda Map (empty, using map_put for dynamic keys)
 extern "C" Item js_new_object_with_typemap(TypeMap* tm);
+extern "C" Item js_new_literal_object_with_typemap(TypeMap* tm);
 static int js_typemap_storage_capacity(TypeMap* tm) {
     if (!tm) return -1;
     int64_t data_size64 = tm->byte_size;
@@ -3443,7 +3446,10 @@ static Item js_construct_entry_class_function(Item callee, Item* args, int argc,
                 return result_root.get();
             }
         }
-        object_root.set(js_new_object());
+        TypeMap* instance_shape = class_fn
+            ? js_fn_class(class_fn)->instance_shape : NULL;
+        object_root.set(js_class_instance_shape_is_admissible(instance_shape)
+            ? js_new_literal_object_with_typemap(instance_shape) : js_new_object());
         // Subclass builtin detection: walk the prototype chain of instance_proto
         // to find if a builtin class (Array, etc.) is in the ancestor chain.
         // If so, create the appropriate backing object instead of a plain MAP.
@@ -3542,6 +3548,18 @@ extern "C" void js_set_class_constructor(Item class_function, Item constructor_b
     if (!klass) return;
     klass->constructor = constructor_body;
     js_function_root_item_if_needed(fn, &klass->constructor);
+}
+
+extern "C" void js_set_class_instance_shape(Item class_function,
+        TypeMap* shape) {
+    if (get_type_id(class_function) != LMD_TYPE_FUNC ||
+            !js_class_instance_shape_is_admissible(shape)) return;
+    JsFunction* fn = (JsFunction*)class_function.function;
+    if (!fn) return;
+    JsClassData* klass = js_fn_class_ensure(fn);
+    if (!klass) return;
+    // The recipe belongs to the retained compiler Input, never to this class.
+    klass->instance_shape = shape;
 }
 
 #define JS_SET_CLASS_ITEM(name, field) \
@@ -3784,6 +3802,48 @@ extern "C" Item js_new_object_with_typemap(TypeMap* tm) {
     // no unrooted instance or partially initialized header spans a safepoint.
     Map* m = map_alloc_for_type(tm, NULL, data_cap);
     return m ? (Item){.map = m} : js_new_object();
+}
+
+extern "C" Item js_new_literal_object_with_typemap(TypeMap* tm) {
+    Item object = js_new_object_with_typemap(tm);
+    if (get_type_id(object) != LMD_TYPE_MAP || !object.map || !tm ||
+            !tm->is_transition_shared_shape || tm->js_meta || tm->length <= 0 ||
+            tm->length > 16) {
+        return object;
+    }
+    int64_t offset = 0;
+    int count = 0;
+    for (ShapeEntry* entry = tm->shape; entry; entry = entry->next) {
+        if (entry->byte_offset != offset || entry->flags != 0 || entry->accessor ||
+                shape_entry_storage_size(entry) != (int)sizeof(void*) || count == 16) {
+            return object;
+        }
+        offset += sizeof(void*);
+        count++;
+    }
+    if (count != tm->length || offset > object.map->data_cap) return object;
+    map_ctor_set_reserved_mask(object.map, (uint16_t)((1u << count) - 1u));
+    return object;
+}
+
+static bool js_class_instance_shape_is_admissible(TypeMap* shape) {
+    if (!shape || !typemap_ptr_is_plausible(shape) ||
+            !shape->is_transition_shared_shape || shape->js_meta ||
+            shape->length <= 0 || shape->length > 16) {
+        return false;
+    }
+    int64_t offset = 0;
+    int count = 0;
+    for (ShapeEntry* entry = shape->shape; entry; entry = entry->next) {
+        if (entry->byte_offset != offset || entry->flags != 0 ||
+                entry->accessor || shape_entry_storage_size(entry) !=
+                    (int)sizeof(void*) || count == 16) {
+            return false;
+        }
+        offset += sizeof(void*);
+        count++;
+    }
+    return count == shape->length && offset == shape->byte_size;
 }
 
 // Forward declaration for prototype chain support
@@ -8340,9 +8400,40 @@ static int js_encode_utf16_unit_wtf8(char* buf, uint32_t code_unit) {
     return 3;
 }
 
+// Only the first registration needs to walk the realm root catalog. Once the
+// fixed cache range is registered for this heap, the ASCII hit path is direct.
+static inline bool js_ascii_substring_cache_is_ready(void) {
+    if (!js_active_runtime_state || !js_runtime_state.string_caches) return false;
+    RootVector* roots = &js_runtime_state.string_caches->roots;
+    uint64_t epoch = js_get_heap_epoch();
+    if (epoch != 0 && roots->heap_generation == epoch) return true;
+    return js_root_vector_ensure_registered(roots);
+}
+
+static inline Item js_ascii_substring_cache_lookup(const char* chars, int len,
+        uint32_t hash, bool cache_ready) {
+    if (!cache_ready) return ItemNull;
+    int slot = (int)(hash & (JS_ASCII_SUBSTRING_CACHE_CAPACITY - 1));
+    JsStringCacheState* caches = js_runtime_state.string_caches;
+    Item cached = caches->ascii_substrings[slot];
+    String* value = cached.item ? it2s(cached) : NULL;
+    bool hit = caches->ascii_substring_hashes[slot] == hash && value &&
+        value->is_ascii && value->len == len &&
+        memcmp(value->chars, chars, (size_t)len) == 0;
+    js_opt_trace_record(hit ? JS_OPT_ASCII_SUBSTRING_CACHE_HIT :
+        JS_OPT_ASCII_SUBSTRING_CACHE_MISS, JS_OPT_REASON_NONE,
+        JS_OPT_OUTCOME_TAKEN);
+    return hit ? cached : ItemNull;
+}
+
+static inline void js_ascii_substring_cache_store(Item value, uint32_t hash) {
+    int slot = (int)(hash & (JS_ASCII_SUBSTRING_CACHE_CAPACITY - 1));
+    JsStringCacheState* caches = js_runtime_state.string_caches;
+    caches->ascii_substrings[slot] = value;
+    caches->ascii_substring_hashes[slot] = hash;
+}
+
 // JS-aware substring: indices are UTF-16 code unit indices (not codepoints).
-// Handles negative indices like JS substring (clamp to 0) or slice (count from end).
-// use_slice_semantics: true = slice (negative counts from end), false = substring (clamp to 0).
 static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
     String* s = it2s(str_item);
     if (!s) return ItemEmptyString;
@@ -8362,13 +8453,29 @@ static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
             Item interned = js_intern_ascii_char((unsigned char)s->chars[start]);
             if (interned.item != ItemNull.item) return interned;
         }
+        bool cacheable = rlen >= 2 && rlen <= 32;
+        uint32_t cache_hash = cacheable
+            ? hash_djb2(s->chars + start, (size_t)rlen) : 0;
+        bool cache_ready = cacheable && js_ascii_substring_cache_is_ready();
+        if (cacheable) {
+            Item cached = js_ascii_substring_cache_lookup(s->chars + start,
+                (int)rlen, cache_hash, cache_ready);
+            if (cached.item != ItemNull.item) return cached;
+        }
+        // D5.3.3: a cache miss allocates; retain the source before copying
+        // from it so a collection cannot invalidate this borrowed payload.
+        RootFrame roots(1);
+        Rooted<Item> source_root(roots, str_item);
         String* result = (String*)heap_alloc(sizeof(String) + (int)rlen + 1, LMD_TYPE_STRING);
+        s = it2s(source_root.get());
         result->len = (int)rlen;
         result->flags = 0;
         result->is_ascii = 1;
         memcpy(result->chars, s->chars + start, (int)rlen);
         result->chars[rlen] = '\0';
-        return (Item){.item = s2it(result)};
+        Item result_item = (Item){.item = s2it(result)};
+        if (cache_ready) js_ascii_substring_cache_store(result_item, cache_hash);
+        return result_item;
     }
     StrBuf* buf = strbuf_new_cap((size_t)((end - start) * 4 + 1));
     int pos = 0;
@@ -8829,6 +8936,22 @@ extern "C" Item js_elements_get(Item array, Item index) {
     return js_array_get_index(array, idx, index, false);
 }
 
+extern "C" Item js_elements_get_number(Item array, double index) {
+    RootFrame roots(2);
+    Rooted<Item> array_root(roots, array);
+    Rooted<Item> key_root(roots, ItemNull);
+    // ES ToPropertyKey(-0) is "0". A bounded integral Number can therefore
+    // retain its F64 carrier until the element kernel consumes its index.
+    if (isfinite(index) && index >= 0.0 && floor(index) == index &&
+            index <= (double)0xFFFFFFFE) {
+        return js_elements_get_int(array_root.get(), (int64_t)index);
+    }
+    // Fractional, non-finite, and non-index Number keys remain observable
+    // named properties. Materialize only on this semantic fallback.
+    key_root.set(js_make_number(index));
+    return js_get_reference(array_root.get(), key_root.get());
+}
+
 // P10e: Fast array access with native int index (no js_get_number overhead)
 extern "C" Item js_string_get_int(Item str_item, int64_t index) {
     if (get_type_id(str_item) == LMD_TYPE_STRING && index >= 0) {
@@ -8861,7 +8984,13 @@ extern "C" Item js_elements_get_int(Item array, int64_t index) {
     }
     // fast path for typed arrays: avoid going through js_get_reference
     if (js_is_typed_array(array)) {
-        return js_typed_array_get(array, (Item){.item = i2it((int)index)});
+        if (index < (int64_t)INT32_MIN || index > (int64_t)INT32_MAX) {
+            // Typed-array storage uses a signed native offset. Preserve the
+            // canonical numeric-index/property distinction outside that ABI
+            // range instead of truncating a valid JavaScript integer key.
+            return js_get_reference(array, (Item){.item = i2it(index)});
+        }
+        return js_typed_array_get(array, (Item){.item = i2it(index)});
     }
     if (get_type_id(array) == LMD_TYPE_STRING && index >= 0) {
         return js_string_get_int(array, index);
@@ -16178,96 +16307,6 @@ static const char* js_regex_original_group_name(JsRegexData* rd, const char* re2
     return re2_name;
 }
 
-// Route patterns with JS-only matching semantics to the spec backtracker.
-// Every lookaround and backreference uses that engine so captures, retries,
-// and assertion position are evaluated by one implementation.
-// Direct RE2 retains patterns without assertions or backreferences, where its
-// capture layout is already ECMAScript-compatible after front-end normalization.
-// The scan is deliberately lexical: escaped delimiters and character classes
-// cannot make a pattern select the backtracking route accidentally.
-// This keeps routing independent of the validator and `/v` class rewriter.
-static bool js_regex_has_unescaped_anchor(const char* pattern, int pattern_len) {
-    bool in_class = false;
-    for (int i = 0; i < pattern_len; i++) {
-        char c = pattern[i];
-        if (c == '\\') {
-            if (i + 1 < pattern_len) i++;
-            continue;
-        }
-        if (c == '[') { in_class = true; continue; }
-        if (c == ']' && in_class) { in_class = false; continue; }
-        if (!in_class && (c == '^' || c == '$')) return true;
-    }
-    return false;
-}
-
-static bool js_regex_needs_backtrack(const char* pattern, int pattern_len, bool multiline) {
-    if (multiline && js_regex_has_unescaped_anchor(pattern, pattern_len)) return true;
-
-    if (pattern_len <= 0) return false;
-    struct JsRegexQuantifierFacts {
-        bool optional;
-        bool unbounded;
-    };
-    JsRegexScratch<JsRegexQuantifierFacts> group_facts_buf(pattern_len);
-    if (group_facts_buf.count != pattern_len) {
-        log_error("js-regex backtrack analysis: cannot retain group quantifier facts");
-        return true;
-    }
-    JsRegexQuantifierFacts* group_facts = group_facts_buf.slots;
-    bool in_class = false;
-    // group stack: per open group, track whether its body contains a bounded
-    // optional ('?') and whether it contains an unbounded quantifier ('*'/'+').
-    // A quantifier applied to a group that is optional but NOT unbounded is the
-    // nullable-discard shape RE2 mishandles (e.g. (a?b??)* ); route it. We must
-    // NOT route when the body is also unbounded (e.g. (.*\n?)* ) — that is the
-    // catastrophic-backtracking shape RE2 already handles correctly and linearly.
-    int grp_depth = 0;
-    for (int i = 0; i < pattern_len; i++) {
-        char c = pattern[i];
-        if (c == '\\') {
-            if (i + 1 >= pattern_len) return false;
-            char next = pattern[i + 1];
-            if (!in_class && next >= '1' && next <= '9') return true;   // numeric backref
-            if (!in_class && next == 'k') return true;                   // named backref \k<...>
-            i++;
-            continue;
-        }
-        if (c == '[') { in_class = true; continue; }
-        if (c == ']' && in_class) { in_class = false; continue; }
-        if (in_class) continue;
-        if (c == '(' && i + 2 < pattern_len && pattern[i + 1] == '?' &&
-            (pattern[i + 2] == '=' || pattern[i + 2] == '!' ||
-             (pattern[i + 2] == '<' && i + 3 < pattern_len &&
-              (pattern[i + 3] == '=' || pattern[i + 3] == '!')))) return true;
-        if (c == '(') {
-            if (grp_depth >= group_facts_buf.count) {
-                log_error("js-regex backtrack analysis: group depth exceeds capacity");
-                return true;
-            }
-            group_facts[grp_depth].optional = false;
-            group_facts[grp_depth].unbounded = false;
-            grp_depth++;
-        } else if (c == ')') {
-            if (grp_depth > 0) grp_depth--;
-            // a quantifier applied to an optional-but-not-unbounded group -> route
-            if (i + 1 < pattern_len && grp_depth < group_facts_buf.count) {
-                char q = pattern[i + 1];
-                if ((q == '*' || q == '+' || q == '{') &&
-                    group_facts[grp_depth].optional &&
-                    !group_facts[grp_depth].unbounded) return true;
-            }
-        } else if (grp_depth > 0 && grp_depth <= group_facts_buf.count &&
-                   !(i > 0 && pattern[i - 1] == '(')) {
-            // record bounded vs unbounded quantifiers in the innermost open group
-            // (skip the '?' of a (?: / (?= / (?<name> group marker via the guard).
-            if (c == '?') group_facts[grp_depth - 1].optional = true;
-            else if (c == '*' || c == '+') group_facts[grp_depth - 1].unbounded = true;
-        }
-    }
-    return false;
-}
-
 static Item js_try_fast_replace_non_whitespace(Item regex, Item str, Item replacement,
                                                JsRegexData* rd, bool replacement_is_func);
 static String* js_regex_escape_source(const char* source, int source_len);
@@ -17229,7 +17268,7 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     // class rewriter runs before this decision, so both paths consume its
     // normalized character classes.
     bool route_to_bt = (special_property_kind == 0) &&
-        js_regex_needs_backtrack(effective_pattern, effective_pattern_len,
+        js_regex_scanner_needs_backtrack(effective_pattern, effective_pattern_len,
             compile_info.multiline);
     const char* bt_pattern = effective_pattern;
     int bt_pattern_len = effective_pattern_len;
@@ -22057,6 +22096,13 @@ static Item js_string_coerce_receiver(Item* value) {
     return ItemNull;
 }
 
+static inline void js_profile_string_leaf(String* source,
+        JsOptEvent ascii_event, JsOptEvent unicode_event) {
+    if (!source) return;
+    js_opt_trace_record(source->is_ascii ? ascii_event : unicode_event,
+        JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+}
+
 static int64_t js_string_find_position(Item str, Item search, int64_t position,
         bool reverse, bool anchored) {
     RootFrame roots(2);
@@ -22135,6 +22181,8 @@ static Item js_string_search_intrinsic(Item str, JsStringIntrinsicOp operation,
         }
     }
     String* text = it2s(source.get());
+    js_profile_string_leaf(text, JS_OPT_STRING_SEARCH_ASCII,
+        JS_OPT_STRING_SEARCH_UNICODE);
     int64_t length = js_utf16_len(text->chars, (int)text->len, text->is_ascii);
     int64_t start = js_string_clamp_integer(position, length);
     if (suffix) {
@@ -22372,6 +22420,8 @@ static Item js_string_intrinsic_algorithm(Item str,
         if (lim == 0) return js_array_new(0);
         // JS edge case: empty string split
         String* sstr = it2s(str);
+        js_profile_string_leaf(sstr, JS_OPT_STRING_SPLIT_ASCII,
+            JS_OPT_STRING_SPLIT_UNICODE);
         if (!sstr || sstr->len == 0) {
             String* sep_s = it2s(sep);
             if (sep_s && sep_s->len == 0) {
@@ -22424,6 +22474,8 @@ static Item js_string_intrinsic_algorithm(Item str,
             operation == JS_STRING_INTRINSIC_SLICE) {
         if (argc < 1) return str;
         String* s = it2s(str);
+        js_profile_string_leaf(s, JS_OPT_STRING_SLICE_ASCII,
+            JS_OPT_STRING_SLICE_UNICODE);
         int64_t slen = s ? js_utf16_len(s->chars, (int)s->len, (bool)s->is_ascii) : 0;
         JS_ASSIGN_OR_RETURN(start_num, js_to_number(args[0]));
         double dstart = js_get_number(start_num);
@@ -22489,6 +22541,8 @@ static Item js_string_intrinsic_algorithm(Item str,
     }
     if (operation == JS_STRING_INTRINSIC_CHAR_AT) {
         String* s = it2s(str);
+        js_profile_string_leaf(s, JS_OPT_STRING_CHAR_ACCESS_ASCII,
+            JS_OPT_STRING_CHAR_ACCESS_UNICODE);
         double didx = 0.0;
         if (argc >= 1) {
             JS_ASSIGN_OR_RETURN(idx_num, js_to_number(args[0]));
@@ -22503,6 +22557,8 @@ static Item js_string_intrinsic_algorithm(Item str,
     }
     if (operation == JS_STRING_INTRINSIC_CHAR_CODE_AT) {
         String* s = it2s(str);
+        js_profile_string_leaf(s, JS_OPT_STRING_CHAR_ACCESS_ASCII,
+            JS_OPT_STRING_CHAR_ACCESS_UNICODE);
         double didx = 0;
         if (argc >= 1) {
             JS_ASSIGN_OR_RETURN(idx_num, js_to_number(args[0]));
@@ -22519,6 +22575,8 @@ static Item js_string_intrinsic_algorithm(Item str,
     if (operation == JS_STRING_INTRINSIC_CODE_POINT_AT) {
         if (argc < 1) return make_js_undefined();
         String* s = it2s(str);
+        js_profile_string_leaf(s, JS_OPT_STRING_CHAR_ACCESS_ASCII,
+            JS_OPT_STRING_CHAR_ACCESS_UNICODE);
         if (!s || s->len == 0) return make_js_undefined();
         JS_ASSIGN_OR_RETURN(idx_num, js_to_number(args[0]));
         double didx = js_get_number(idx_num);

@@ -1627,16 +1627,25 @@ extern "C" Item js_check_class_static_field_key(Item key_item) {
     return js_status_ok();
 }
 
-// Set the source text of a JsFunction for Function.prototype.toString
+// Store source on constructors that already materialized their callable code.
+extern "C" void js_set_function_source_known_code(Item fn_item,
+        Item source_item) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    if (get_type_id(source_item) != LMD_TYPE_STRING) return;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    if (!js_fn_is_js_layout(fn) || !fn->code) return;
+    AutoAssertNoGC no_gc;
+    fn->code->source_text = it2s(source_item);
+}
+
+// Set the source text of a JsFunction for Function.prototype.toString.
 extern "C" void js_set_function_source(Item fn_item, Item source_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     if (get_type_id(source_item) != LMD_TYPE_STRING) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
-    if (js_fn_is_js_layout(fn)) {
-        JsCallableCode* code = js_fn_code_ensure(fn);
-        if (code) {
-            code->source_text = it2s(source_item);
-            js_function_register_pool_pointer_roots(fn);
-        }
-    }
+    if (!js_fn_is_js_layout(fn)) return;
+    JsCallableCode* code = js_fn_code_ensure(fn);
+    if (!code) return;
+    code->source_text = it2s(source_item);
+    js_function_register_pool_pointer_roots(fn);
 }

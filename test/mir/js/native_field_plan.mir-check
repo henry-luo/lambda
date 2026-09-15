@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "description": "D1.3/D8.4.1v2: a literal recipe emits one exact-shape slot hit and one NameId semantic miss.",
+  "checks": [
+    {
+      "in_func": "_js_literalFields_#_body",
+      "expect": [
+        "call\tjs_new_literal_object_with_typemap",
+        "dmov",
+        "d:(",
+        "call\tjs_get_name_id"
+      ],
+      "forbid": [
+        "call\tjs_get_reference"
+      ]
+    },
+    {
+      "in_func": "_js_directStore_#_body",
+      "expect": [
+        "dmov\td:(",
+        "call\tjs_set_name_id"
+      ]
+    },
+    {
+      "in_func": "_js_returnedFields_#_body",
+      "expect": [
+        "dmov",
+        "d:(",
+        "call\tjs_get_name_id"
+      ]
+    },
+    {
+      "in_func": "_js_consumeDirectArgument_#_body",
+      "expect": [
+        "dmov",
+        "d:(",
+        "call\tjs_get_name_id"
+      ]
+    },
+    {
+      "in_func": "_js_typeTransitionFallback_#_body",
+      "expect": [
+        "call\tjs_set_name_id",
+        "call\tjs_get_name_id"
+      ]
+    },
+    {
+      "in_func": "_js_accessorFallback_#_body",
+      "expect": [
+        "call\tjs_get_name_id"
+      ]
+    },
+    {
+      "in_func": "ClassFieldPlan_read_#_body",
+      "expect": [
+        "dmov",
+        "d:8(",
+        "call\tjs_get_name_id"
+      ]
+    },
+    {
+      "in_func": "ClassFieldPlan_store_#_body",
+      "expect": [
+        "dmov\td:8(",
+        "call\tjs_set_name_id"
+      ]
+    },
+    {
+      "in_func": "js_main",
+      "expect": [
+        "call\tjs_set_class_instance_shape"
+      ]
+    }
+  ]
+}

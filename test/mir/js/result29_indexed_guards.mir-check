@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "description": "D1.3: indexed reads and writes use the shared runtime reference/property kernels.",
+  "description": "D1.3: Number-proven reads use the native-key element kernel while writes retain the shared Set completion kernel.",
   "checks": [
     {
       "in_func": "_js_indexedGuards_#_body",
       "expect": [
-        "call\tjs_get_reference",
+        "call\tjs_elements_get_number",
         "call\tjs_set"
       ]
     }

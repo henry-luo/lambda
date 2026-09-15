@@ -12277,7 +12277,6 @@ static MirValue emit_binary_value(MirTranspiler* mt, AstBinaryNode* bi,
         // This block only runs for pairs the int-only path above declined
         // (float involved, or a non-ADD/SUB/MUL operator), so every arm below
         // computes in the float lane.
-        const bool use_float = true;
         MIR_reg_t fl = emit_int_or_float_to_double(mt, left_value, left_tid);
         MIR_reg_t fr = emit_int_or_float_to_double(mt, right_value, right_tid);
         MIR_type_t rtype = MIR_T_D;
@@ -12323,78 +12322,21 @@ static MirValue emit_binary_value(MirTranspiler* mt, AstBinaryNode* bi,
                 VALUE_REP_ITEM);
         };
 
-        switch (bi->op) {
-        case OPERATOR_ADD: {
-            MIR_reg_t r = new_reg(mt, "add", rtype);
-            emit_insn(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DADD : MIR_ADD,
-                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-            return publish(r, VALUE_REP_F64);
+        MirNumericOpPlan numeric_plan;
+        if (em_numeric_op_plan(bi->op, &numeric_plan) &&
+                !numeric_plan.helper_name) {
+            MIR_reg_t r = new_reg(mt, numeric_plan.reg_name,
+                numeric_plan.is_comparison ? MIR_T_I64 : rtype);
+            emit_insn(mt, MIR_new_insn(mt->ctx, numeric_plan.f64_opcode,
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl),
+                MIR_new_reg_op(mt->ctx, fr)));
+            if (!numeric_plan.is_comparison) return publish(r, VALUE_REP_F64);
+            return float_ordered_relation ? publish_fcmp(r)
+                : publish(r, VALUE_REP_I64);
         }
-        case OPERATOR_SUB: {
-            MIR_reg_t r = new_reg(mt, "sub", rtype);
-            emit_insn(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DSUB : MIR_SUB,
-                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-            return publish(r, VALUE_REP_F64);
-        }
-        case OPERATOR_MUL: {
-            MIR_reg_t r = new_reg(mt, "mul", rtype);
-            emit_insn(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DMUL : MIR_MUL,
-                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-            return publish(r, VALUE_REP_F64);
-        }
-        case OPERATOR_DIV: {
-            // `/` on two ints still yields a float semantically; with the
-            // shared lane that is a type statement, not a conversion.
-            MIR_reg_t r = new_reg(mt, "div", MIR_T_D);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DDIV, MIR_new_reg_op(mt->ctx, r),
-                MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-            return publish(r, VALUE_REP_F64);
-        }
-        case OPERATOR_POW:
-            // POW has AST type ANY (not FLOAT/INT), so native handling would
-            // return MIR_T_D which conflicts with ANY expectation of boxed Item.
-            // Let all POW fall through to boxed runtime path.
-            break;
-        // Comparison operators
-        case OPERATOR_EQ: {
-            MIR_reg_t r = new_reg(mt, "eq", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DEQ : MIR_EQ,
-                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-            return publish(r, VALUE_REP_I64);
-        }
-        case OPERATOR_NE: {
-            MIR_reg_t r = new_reg(mt, "ne", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DNE : MIR_NE,
-                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-            return publish(r, VALUE_REP_I64);
-        }
-        case OPERATOR_LT: {
-            MIR_reg_t r = new_reg(mt, "lt", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DLT : MIR_LT,
-                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-            return publish_fcmp(r);
-        }
-        case OPERATOR_LE: {
-            MIR_reg_t r = new_reg(mt, "le", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DLE : MIR_LE,
-                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-            return publish_fcmp(r);
-        }
-        case OPERATOR_GT: {
-            MIR_reg_t r = new_reg(mt, "gt", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DGT : MIR_GT,
-                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-            return publish_fcmp(r);
-        }
-        case OPERATOR_GE: {
-            MIR_reg_t r = new_reg(mt, "ge", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DGE : MIR_GE,
-                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-            return publish_fcmp(r);
-        }
-        default:
-            break;  // fall through to boxed path
-        }
+        // POW has AST type ANY (not FLOAT/INT), so native handling would
+        // return MIR_T_D which conflicts with ANY expectation of boxed Item.
+        // Let POW and unplanned operations fall through to boxed runtime.
     }
 
     // Generic joins remain on fn_join. Only the assignment lowering below has

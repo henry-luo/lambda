@@ -2,8 +2,8 @@
  * str.c — Safe, convenient, high-performance C string library for Lambda.
  *
  * Implementation notes:
- * - SWAR (SIMD Within A Register) used for hot loops: byte-equality scans,
- *   ASCII checks, tolower/toupper transforms — all process 8 bytes per cycle.
+ * - SWAR (SIMD Within A Register) used for hot loops: byte-equality scans and
+ *   ASCII checks process 8 bytes per cycle; case transforms keep byte lanes independent.
  * - NULL inputs are treated as empty (length 0) — never crash.
  * - All outputs NUL-terminated where applicable.
  */
@@ -45,11 +45,6 @@ static inline uint64_t _load_u64(const void* p) {
     uint64_t v;
     memcpy(&v, p, 8);
     return v;
-}
-
-/* safe unaligned 64-bit store */
-static inline void _store_u64(void* p, uint64_t v) {
-    memcpy(p, &v, 8);
 }
 
 /* count trailing zeros (byte-index of first match) */
@@ -606,46 +601,21 @@ void str_transform(char* dst, const char* src, size_t len,
 
 void str_to_lower(char* dst, const char* src, size_t len) {
     if (!dst || !src || len == 0) return;
-    _ensure_luts();
-    /* SWAR fast path: use arithmetic trick for ASCII range.
-     * for each byte b in [A..Z] (0x41..0x5A), add 0x20 to get [a..z].
-     * detect bytes in [A..Z]: byte - 0x41 < 26 using unsigned arithmetic. */
-    size_t i = 0;
-    for (; i + 8 <= len; i += 8) {
-        uint64_t w = _load_u64(src + i);
-        /* find uppercase bytes: subtract 'A', check < 26 using SWAR */
-        uint64_t sub = w - _swar_broadcast(0x41);          /* byte - 'A' */
-        uint64_t above = w - _swar_broadcast(0x5B);        /* byte - 'Z' - 1 */
-        /* byte is in [A..Z] iff (byte-'A') didn't borrow AND (byte-'Z'-1) did borrow
-         * a borrow is indicated by the high bit being set */
-        uint64_t is_upper = (~sub & above) & 0x8080808080808080ULL;
-        /* create mask: 0x20 in each byte that is uppercase */
-        uint64_t mask = (is_upper >> 2) | (is_upper >> 5);
-        mask &= _swar_broadcast(0x20);
-        _store_u64(dst + i, w | mask);
-    }
-    /* scalar tail */
-    for (; i < len; i++) {
-        dst[i] = (char)_lut_lower[(unsigned char)src[i]];
+    // Keep range checks per byte: packed subtraction carries between lanes and
+    // misclassifies an 'A'/'a' following another ASCII character.
+    for (size_t i = 0; i < len; i++) {
+        unsigned char ch = (unsigned char)src[i];
+        dst[i] = (char)(ch + ((ch >= 'A' && ch <= 'Z') ? 0x20 : 0));
     }
 }
 
 void str_to_upper(char* dst, const char* src, size_t len) {
     if (!dst || !src || len == 0) return;
-    _ensure_luts();
-    /* SWAR fast path: detect [a..z], clear bit 0x20 */
-    size_t i = 0;
-    for (; i + 8 <= len; i += 8) {
-        uint64_t w = _load_u64(src + i);
-        uint64_t sub = w - _swar_broadcast(0x61);          /* byte - 'a' */
-        uint64_t above = w - _swar_broadcast(0x7B);        /* byte - 'z' - 1 */
-        uint64_t is_lower = (~sub & above) & 0x8080808080808080ULL;
-        uint64_t mask = (is_lower >> 2) | (is_lower >> 5);
-        mask &= _swar_broadcast(0x20);
-        _store_u64(dst + i, w & ~mask);
-    }
-    for (; i < len; i++) {
-        dst[i] = (char)_lut_upper[(unsigned char)src[i]];
+    // Keep range checks per byte: packed subtraction carries between lanes and
+    // misclassifies an 'A'/'a' following another ASCII character.
+    for (size_t i = 0; i < len; i++) {
+        unsigned char ch = (unsigned char)src[i];
+        dst[i] = (char)(ch - ((ch >= 'a' && ch <= 'z') ? 0x20 : 0));
     }
 }
 

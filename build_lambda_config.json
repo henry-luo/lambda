@@ -4924,6 +4924,22 @@
             "icon": "\ud83d\udd01"
           },
           {
+            "source": "test/test_js_regex_router_poc_gtest.cpp",
+            "name": "JS RegExp Router AST POC",
+            "dependencies": [
+              "lambda-rt"
+            ],
+            "additional_sources": [
+              "test/js_regex_router_poc.cpp"
+            ],
+            "binary": "test_js_regex_router_poc_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "icon": "\ud83e\udde9"
+          },
+          {
             "source": "test/test_js_coerce_gtest.cpp",
             "name": "JS Coercion Kernel Tests",
             "dependencies": [

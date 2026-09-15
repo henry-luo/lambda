@@ -1,4 +1,5 @@
 #include "js_runtime_internal.hpp"
+#include "js_exec_profile.h"
 #include "js_object_meta.h"
 #include "../core/lambda-decimal.hpp"
 #include "../../lib/str.h"
@@ -1287,6 +1288,9 @@ static inline Item js_try_concat_percent_hex(String* left, String* right) {
 
 static inline Item js_concat_strings_fast(String* left, String* right) {
     if (!left || !right) return ItemNull;
+    js_opt_trace_record(left->is_ascii && right->is_ascii
+            ? JS_OPT_STRING_CONCAT_ASCII : JS_OPT_STRING_CONCAT_UNICODE,
+        JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
     bool cache_rooted = js_string_concat_caches_ensure_roots();
     RootFrame roots(2);
     Rooted<Item> left_root(roots, (Item){.item = s2it(left)});

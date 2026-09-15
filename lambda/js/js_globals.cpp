@@ -13172,6 +13172,10 @@ extern "C" void js_globals_batch_reset() {
     memset(js_runtime_state.string_caches->test262_percent_hex, 0,
            sizeof(js_runtime_state.string_caches->test262_percent_hex));
     js_runtime_state.string_caches->test262_cached_percent_left = (Item){0};
+    memset(js_runtime_state.string_caches->ascii_substrings, 0,
+           sizeof(js_runtime_state.string_caches->ascii_substrings));
+    memset(js_runtime_state.string_caches->ascii_substring_hashes, 0,
+           sizeof(js_runtime_state.string_caches->ascii_substring_hashes));
     js_runtime_state.string_caches->last_four_byte_cp = 0;
     js_runtime_state.string_caches->last_four_byte_epoch = 0;
     js_runtime_state.string_caches->uri_last_four_byte_epoch = 0;
