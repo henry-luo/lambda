@@ -1129,7 +1129,11 @@ bool layout_element_has_in_flow_content(DomElement* element,
                                         LayoutTextContentPredicate text_predicate,
                                         LayoutElementContentPredicate element_predicate = nullptr);
 bool layout_element_has_direct_text_content(DomElement* element);
-ViewBlock* layout_nearest_block_ancestor(ViewElement* view);
+// Header-defined so dependency-light DOM/range targets share the same walk.
+inline ViewBlock* layout_nearest_block_ancestor(View* view) {
+    while (view && !view->is_block()) view = view->parent;
+    return view ? static_cast<ViewBlock*>(view) : nullptr;
+}
 bool layout_is_initial_containing_block(LayoutContext* lycon, ViewBlock* block);
 
 LayoutContainingBlock layout_containing_block_for_view(ViewBlock* block);
@@ -3898,32 +3902,25 @@ static inline bool layout_text_node_has_content(DomNode* node) {
     const char* text = (const char*)node->text_data();
     return text && !is_only_whitespace(text);
 }
-// Grid ignores text nodes while flex treats non-whitespace text as anonymous
-// items; one counter keeps both scratch-array bounds derived from the same walk.
-static inline int layout_count_potential_items(ViewBlock* container,
-                                                bool include_text) {
-    auto count_children = [&](auto&& self, DomNode* first_child) -> int {
-        int count = 0;
-        for (DomNode* child = first_child; child; child = child->next_sibling) {
-            if (child->is_element()) {
-                DisplayValue display = resolve_display_value(child);
-                if (display.outer == CSS_VALUE_CONTENTS) {
-                    count += self(self, child->as_element()->first_child);
-                } else {
-                    count++;
-                }
-            } else if (include_text) {
-                // Flex separator text can become an anonymous item after
-                // display:contents flattening, so reserve every text slot.
-                count++;
-            }
-        }
-        return count;
-    };
+// Grid and flex use the same display:contents flattening; policy selects their
+// distinct text participation and initialization requirements.
+typedef bool (*LayoutFlattenedTextItemPredicate)(DomNode* text,
+                                                 ViewBlock* container,
+                                                 void* context);
+typedef struct LayoutFlattenedItemPolicy {
+    LayoutFlattenedTextItemPredicate include_text;
+    void* context;
+    DomElement* skipped_element;
+    bool initialize_contents;
+    bool reset_styles_resolved;
+} LayoutFlattenedItemPolicy;
 
-    return count_children(count_children,
-        container ? container->first_child : nullptr);
-}
+int layout_collect_flattened_item_nodes(LayoutContext* lycon,
+                                        ViewBlock* container,
+                                        DomNode* first_child,
+                                        DomNode** nodes, int capacity,
+                                        const LayoutFlattenedItemPolicy* policy);
+int layout_count_flattened_item_nodes(ViewBlock* container, bool include_text);
 
 inline bool layout_dom_text_has_non_whitespace(DomText* text) {
     if (!text || !text->text || text->length == 0) return false;
@@ -4427,6 +4424,7 @@ inline bool layout_view_is_flex_item_box(View* view) {
 }
 float layout_resolve_line_height_value(LayoutContext* lycon, const CssValue* value,
                                        DomElement* owner, float target_font_size);
+bool layout_style_declares_line_height(StyleTree* style);
 float layout_measure_space_advance(LayoutContext* lycon, struct FontHandle* handle,
                                    FontProp* style);
 float layout_measure_glyph_advance(LayoutContext* lycon, struct FontHandle* handle,

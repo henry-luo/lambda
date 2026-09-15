@@ -511,13 +511,6 @@ static CssEnum effective_writing_mode_for_node(DomNode* node) {
     return CSS_VALUE_HORIZONTAL_TB;
 }
 
-static ViewBlock* nearest_block_ancestor(View* view) {
-    for (View* current = view; current; current = current->parent) {
-        if (current->is_block()) return lam::view_require_block(current);
-    }
-    return NULL;
-}
-
 static float vertical_text_cell_size(DomText* text) {
     if (text) {
         for (TextRect* rect = text->rect; rect; rect = rect->next) {
@@ -547,7 +540,7 @@ static bool vertical_writing_boundary_for_text(DomText* text, float vx,
     CssEnum mode = effective_writing_mode_for_node(static_cast<DomNode*>(text));
     if (!is_vertical_selection_writing_mode(mode)) return false;
 
-    ViewBlock* block = nearest_block_ancestor(static_cast<View*>(text));
+    ViewBlock* block = layout_nearest_block_ancestor(static_cast<View*>(text));
     if (!block || block->width <= 0.0f || block->height <= 0.0f) return false;
 
     RdtLogicalPoint box = view_geometry_local_to_block_viewport(

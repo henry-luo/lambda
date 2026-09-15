@@ -180,7 +180,7 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     }
     // Immediate children bound the pass-local grid item array; scratch arrays are
     // released by the container mark instead of individual heap frees.
-    int item_capacity = layout_count_potential_items(container, false);
+    int item_capacity = layout_count_flattened_item_nodes(container, false);
     grid->allocated_items = item_capacity;
     if (item_capacity > 0) {
         grid->grid_items = (ViewBlock**)scratch_calloc(&lycon->scratch,
@@ -571,32 +571,10 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
 int collect_grid_item_nodes(LayoutContext* lycon, ViewBlock* container,
                             DomNode* first_child, DomNode** nodes, int capacity,
                             bool initialize_contents) {
-    if (!container || !nodes || capacity <= 0) return 0;
-
-    int count = 0;
-    for (DomNode* child = first_child; child; child = child->next_sibling) {
-        if (!child->is_element()) continue;
-
-        DomElement* elem = child->as_element();
-        DisplayValue display = resolve_display_value(child);
-        if (layout_display_is_none(display)) {
-            elem->view_type = RDT_VIEW_NONE;
-            continue;
-        }
-        if (display.outer == CSS_VALUE_CONTENTS) {
-            // CSS Display 3: retain the DOM node as a boxless view while its
-            // descendants participate directly in the grid formatting context.
-            if (initialize_contents) {
-                layout_init_display_contents_view(lycon, elem);
-            }
-            count += collect_grid_item_nodes(
-                lycon, container, elem->first_child, nodes + count,
-                capacity - count, initialize_contents);
-            continue;
-        }
-        if (count < capacity) nodes[count++] = child;
-    }
-    return count;
+    LayoutFlattenedItemPolicy policy = {};
+    policy.initialize_contents = initialize_contents;
+    return layout_collect_flattened_item_nodes(
+        lycon, container, first_child, nodes, capacity, &policy);
 }
 
 // Collect grid items from the flattened container children.
@@ -619,7 +597,7 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
         if (layout_block_is_skipped_container_item(child)) {
             continue;
         }
-        // layout_count_potential_items supplies this scratch capacity; keep the
+        // The flattened-item counter supplies this scratch capacity; keep the
         // guard here because malformed DOM trees must not overrun the pass array.
         if (count >= grid_layout->allocated_items || !grid_layout->grid_items) {
             *items = nullptr;

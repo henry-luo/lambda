@@ -379,44 +379,11 @@ static bool same_view_position(View* a_view, int a_offset, View* b_view, int b_o
     return a_view == b_view && a_offset == b_offset;
 }
 
-static DomNode* boundary_root(const DomBoundary* boundary) {
-    if (!boundary || !boundary->node) return NULL;
-    DomNode* root = boundary->node;
-    while (root->parent) root = root->parent;
-    return root;
-}
-
 static uint32_t projection_view_offset_limit(View* view);
-
-static View* focus_validation_root(View* view) {
-    View* root = view;
-    while (root && root->parent) {
-        root = static_cast<View*>(root->parent);
-    }
-    return root;
-}
-
-static bool focus_path_contains(View* focused, View* candidate) {
-    View* node = focused;
-    while (node) {
-        if (node == candidate) return true;
-        node = static_cast<View*>(node->parent);
-    }
-    return false;
-}
-
-static bool view_path_contains(View* target, View* candidate) {
-    View* node = target;
-    while (node) {
-        if (node == candidate) return true;
-        node = static_cast<View*>(node->parent);
-    }
-    return false;
-}
 
 static bool view_has_document_root(View* view) {
     if (!view) return false;
-    View* root = focus_validation_root(view);
+    View* root = view_geometry_tree_root(view);
     return root != NULL;
 }
 
@@ -483,7 +450,7 @@ static void validate_focus_node(DocState* state, View* node, View* focused,
     if (!state || !node) return;
 
     bool expected_focus = node == focused;
-    bool expected_within = focused && focus_path_contains(focused, node);
+    bool expected_within = focused && view_geometry_is_descendant(focused, node);
     bool expected_visible = expected_focus && state->focus && state->focus->focus_visible;
 
     bool store_focus = state_get_bool(state, node, STATE_FOCUS);
@@ -519,7 +486,8 @@ static void validate_focus_invariants(DocState* state,
     if (focused && !view_has_document_root(focused)) {
         report_fail(report, "focused target is detached");
     }
-    View* root = focus_validation_root(focused ? focused : state->focus->previous);
+    View* root = view_geometry_tree_root(
+        focused ? focused : state->focus->previous);
     if (!root) return;
 
     uint32_t focus_count = 0;
@@ -532,23 +500,25 @@ static void validate_focus_invariants(DocState* state,
     }
 }
 
-static void validate_hover_node(DocState* state, View* node, View* hovered,
-                                StateValidationReport* report,
-                                uint32_t* hover_count) {
+static void validate_ancestor_state_node(DocState* state, View* node, View* target,
+                                          const char* state_flag, const char* message,
+                                          StateValidationReport* report,
+                                          uint32_t* target_count) {
     if (!state || !node) return;
 
-    bool expected_hover = hovered && view_path_contains(hovered, node);
-    bool store_hover = state_get_bool(state, node, STATE_HOVER);
-    if (store_hover) (*hover_count)++;
-    if (store_hover != expected_hover) {
-        report_fail(report, ":hover ancestry chain is inconsistent");
+    bool expected = target && view_geometry_is_descendant(target, node);
+    bool stored = state_get_bool(state, node, state_flag);
+    if (stored) (*target_count)++;
+    if (stored != expected) {
+        report_fail(report, message);
     }
 
     if (node->is_element()) {
         DomElement* element = lam::dom_require_element(node);
         DomNode* child = element->first_child;
         while (child) {
-            validate_hover_node(state, static_cast<View*>(child), hovered, report, hover_count);
+            validate_ancestor_state_node(state, static_cast<View*>(child), target,
+                                          state_flag, message, report, target_count);
             child = child->next_sibling;
         }
     }
@@ -568,35 +538,15 @@ static void validate_hover_invariants(DocState* state,
         DomDocument* doc = state->owner_store->document;
         root = doc->root ? static_cast<View*>(doc->root) : NULL;
     }
-    if (!root) root = focus_validation_root(hovered);
+    if (!root) root = view_geometry_tree_root(hovered);
     if (!root) return;
 
     uint32_t hover_count = 0;
-    validate_hover_node(state, root, hovered, report, &hover_count);
+    validate_ancestor_state_node(state, root, hovered, STATE_HOVER,
+                                  ":hover ancestry chain is inconsistent",
+                                  report, &hover_count);
     if (!hovered && hover_count != 0) {
         report_fail(report, "inactive hover document still has :hover target");
-    }
-}
-
-static void validate_active_node(DocState* state, View* node, View* active,
-                                 StateValidationReport* report,
-                                 uint32_t* active_count) {
-    if (!state || !node) return;
-
-    bool expected_active = active && view_path_contains(active, node);
-    bool store_active = state_get_bool(state, node, STATE_ACTIVE);
-    if (store_active) (*active_count)++;
-    if (store_active != expected_active) {
-        report_fail(report, ":active ancestry chain is inconsistent");
-    }
-
-    if (node->is_element()) {
-        DomElement* element = lam::dom_require_element(node);
-        DomNode* child = element->first_child;
-        while (child) {
-            validate_active_node(state, static_cast<View*>(child), active, report, active_count);
-            child = child->next_sibling;
-        }
     }
 }
 
@@ -614,11 +564,13 @@ static void validate_active_invariants(DocState* state,
         DomDocument* doc = state->owner_store->document;
         root = doc->root ? static_cast<View*>(doc->root) : NULL;
     }
-    if (!root) root = focus_validation_root(active);
+    if (!root) root = view_geometry_tree_root(active);
     if (!root) return;
 
     uint32_t active_count = 0;
-    validate_active_node(state, root, active, report, &active_count);
+    validate_ancestor_state_node(state, root, active, STATE_ACTIVE,
+                                  ":active ancestry chain is inconsistent",
+                                  report, &active_count);
     if (!active && active_count != 0) {
         report_fail(report, "inactive document still has :active target");
     }
@@ -818,10 +770,10 @@ static void validate_selection_invariants(DocState* state,
         report_fail(report, "DOM selection contains invalid boundary");
     }
 
-    DomNode* anchor_root = boundary_root(&anchor);
-    DomNode* focus_root = boundary_root(&focus);
-    DomNode* start_root = boundary_root(&range->start);
-    DomNode* end_root = boundary_root(&range->end);
+    DomNode* anchor_root = view_geometry_dom_tree_root(anchor.node);
+    DomNode* focus_root = view_geometry_dom_tree_root(focus.node);
+    DomNode* start_root = view_geometry_dom_tree_root(range->start.node);
+    DomNode* end_root = view_geometry_dom_tree_root(range->end.node);
     if (!anchor_root || !focus_root || !start_root || !end_root ||
         anchor_root != focus_root || anchor_root != start_root || anchor_root != end_root) {
         report_fail(report, "DOM selection endpoints are in incompatible roots");

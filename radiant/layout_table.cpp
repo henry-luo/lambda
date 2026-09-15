@@ -321,12 +321,9 @@ static float table_resolve_relative_width(LayoutContext* lycon, const CssValue* 
         return resolve_length_value(lycon, property, value);
     }
     if (value->type == CSS_VALUE_TYPE_CALC || value->type == CSS_VALUE_TYPE_FUNCTION) {
-        BlockContext percentage_base = {};
-        percentage_base.content_width = table_content_width;
-        BlockContext* saved_parent = lycon->block.parent;
-        lycon->block.parent = &percentage_base;
+        LayoutContainingBlockScope percentage_base(
+            lycon, LAYOUT_AXIS_X, table_content_width);
         float resolved = resolve_length_value(lycon, property, value);
-        lycon->block.parent = saved_parent;
         return isnan(resolved) ? 0.0f : resolved;
     }
     return 0.0f;

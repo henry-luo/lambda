@@ -32,20 +32,13 @@ RenderTransformScope render_state_push_transform(RenderContext* rdcon, ViewBlock
         return scope;
     }
 
-    float origin_x = block->transformp()->origin_x_percent
-        ? (block->transformp()->origin_x / 100.0f) * block->width
-        : block->transformp()->origin_x;
-    float origin_y = block->transformp()->origin_y_percent
-        ? (block->transformp()->origin_y / 100.0f) * block->height
-        : block->transformp()->origin_y;
-
     float elem_x = parent_block->x + block->x;
     float elem_y = parent_block->y + block->y;
-    origin_x += elem_x;
-    origin_y += elem_y;
+    RdtLogicalPoint origin = radiant::transform_origin(
+        block->transformp(), elem_x, elem_y, block->width, block->height);
 
     RdtMatrix next_transform = radiant::compute_transform_matrix(
-        block->transformp()->functions, block->width, block->height, origin_x, origin_y,
+        block->transformp()->functions, block->width, block->height, origin.x, origin.y,
         rdcon->perspective_distance, rdcon->perspective_origin_x, rdcon->perspective_origin_y);
 
     if (scope.previous_has_transform) {
@@ -57,7 +50,7 @@ RenderTransformScope render_state_push_transform(RenderContext* rdcon, ViewBlock
     scope.active = true;
 
     log_debug("[TRANSFORM] Element %s: transform active, origin=(%.1f,%.1f)",
-        block->node_name(), origin_x, origin_y);
+        block->node_name(), origin.x, origin.y);
     return scope;
 }
 

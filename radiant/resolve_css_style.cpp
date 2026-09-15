@@ -1445,11 +1445,7 @@ const char* css_select_font_shorthand_family(LayoutContext* lycon,
 // look up an inherited CSS custom property.
 static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var_name) {
     if (!lycon || !lycon->view || !var_name) return nullptr;
-    DomNode* current = lycon->view;
-    while (current && !current->is_element()) {
-        current = current->parent;
-    }
-    DomElement* element = current ? lam::dom_require<DOM_NODE_ELEMENT>(current) : nullptr;
+    DomElement* element = view_geometry_nearest_dom_element(lycon->view, 0);
     // Search up the DOM tree (CSS variables inherit)
     while (element) {
         // Check if this element has CSS variables

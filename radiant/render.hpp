@@ -1702,6 +1702,7 @@ bool render_block_viewport_misses(RenderContext* rdcon, ViewBlock* block);
 bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block);
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_embed_doc(RenderContext* rdcon, ViewBlock* block);
+Color render_document_canvas_background(View* root_view);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 void render_bound(RenderContext* rdcon, ViewBlock* view);
 void render_outline_deferred(RenderContext* rdcon, ViewBlock* view);
@@ -2116,6 +2117,8 @@ void dl_replay_shadow_clip_restore_at_offset(DisplayReplayShadowClip* clip,
 void dl_replay_shadow_clip_discard(DisplayReplayShadowClip* clip);
 
 // ===== display_list_replay_effects.hpp =====
+void dl_replay_offset_clip_params(int clip_type, const float* source, float* destination,
+                                  float offset_x, float offset_y);
 void dl_replay_apply_filter(ScratchArena* scratch,
                             ImageSurface* surface,
                             const RenderBackendCaps* caps,

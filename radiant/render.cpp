@@ -60,6 +60,30 @@ static bool inline_span_has_direct_text_fragment(ViewSpan* span) {
     return false;
 }
 
+Color render_document_canvas_background(View* root_view) {
+    Color background = {};
+    if (!root_view || root_view->view_type != RDT_VIEW_BLOCK) return background;
+
+    ViewBlock* html_block = lam::view_require_block(root_view);
+    if (html_block->bound && html_block->boundary_mut()->background &&
+        html_block->boundary()->background->color.a > 0) {
+        return html_block->boundary()->background->color;
+    }
+    for (View* child = html_block->first_child; child;
+         child = static_cast<View*>(child->next_sibling)) {
+        if (child->view_type != RDT_VIEW_BLOCK) continue;
+        ViewBlock* child_block = lam::view_require_block(child);
+        const char* name = child_block->node_name();
+        if (!name || !str_ieq_cstr(name, "body")) continue;
+        if (child_block->bound && child_block->boundary_mut()->background &&
+            child_block->boundary()->background->color.a > 0) {
+            return child_block->boundary()->background->color;
+        }
+        break;
+    }
+    return background;
+}
+
 void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
     BlockBlot pa_block = rdcon->block;
     if (block->bound) { render_bound(rdcon, block); }
@@ -120,30 +144,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                 // leaving white gaps below the body content).
                 if (root_block->tag_id != MARKUP_NAME_SVG &&
                     !(root_block->embed && root_block->embedp()->img)) {
-                    Color canvas_bg;
-                    canvas_bg.c = 0;
-                    bool html_has_bg = root_block->bound && root_block->boundary_mut()->background &&
-                                       root_block->boundary()->background->color.a > 0;
-                    if (html_has_bg) {
-                        canvas_bg = root_block->boundary()->background->color;
-                    } else {
-                        // walk html children for body bg
-                        View* c = root_block->first_child;
-                        while (c) {
-                            if (c->view_type == RDT_VIEW_BLOCK) {
-                                ViewBlock* cb = lam::view_require_block(c);
-                                const char* nm = cb->node_name();
-                                if (nm && str_ieq_cstr(nm, "body")) {
-                                    if (cb->bound && cb->boundary_mut()->background &&
-                                        cb->boundary()->background->color.a > 0) {
-                                        canvas_bg = cb->boundary()->background->color;
-                                    }
-                                    break;
-                                }
-                            }
-                            c = static_cast<View*>(c->next_sibling);
-                        }
-                    }
+                    Color canvas_bg = render_document_canvas_background(root_view);
                     if (canvas_bg.a > 0) {
                         // Fill the iframe content box computed above.
                         rc_fill_rect(rdcon, content_rect.x, content_rect.y,

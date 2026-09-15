@@ -41,106 +41,38 @@ using namespace grid;
 // Parsed syntax → canonical track sizing functions
 // ============================================================================
 
-/**
- * Convert old GridTrackSizeType to new MinTrackSizingFunction
- */
-inline MinTrackSizingFunction convert_to_min_sizing(GridTrackSize* old_size) {
-    if (!old_size) {
-        return MinTrackSizingFunction::Auto();
-    }
-
-    switch (old_size->type) {
-        case GRID_TRACK_SIZE_LENGTH:
-            return MinTrackSizingFunction::Length(static_cast<float>(old_size->value));
-
-        case GRID_TRACK_SIZE_PERCENTAGE:
-            // old_size->value is the percentage (e.g., 10 for 10%)
-            // MinTrackSizingFunction::Percent expects it as-is (resolve will divide by 100)
-            return MinTrackSizingFunction::Percent(static_cast<float>(old_size->value));
-
-        case GRID_TRACK_SIZE_MIN_CONTENT:
-            return MinTrackSizingFunction::MinContent();
-
-        case GRID_TRACK_SIZE_MAX_CONTENT:
-            return MinTrackSizingFunction::MaxContent();
-
-        case GRID_TRACK_SIZE_AUTO:
-            return MinTrackSizingFunction::Auto();
-
-        case GRID_TRACK_SIZE_FR:
-            // fr is not valid for min sizing - treat as auto
-            return MinTrackSizingFunction::Auto();
-
-        case GRID_TRACK_SIZE_FIT_CONTENT:
-            // CSS Grid §7.2.3.2: fit-content(N) = min(max-content, max(auto, N))
-            // The MIN sizing function is auto, not min-content.
-            // This distinction matters for scroll containers: auto min = 0,
-            // while min-content min would always use the text min-content width.
-            return MinTrackSizingFunction::Auto();
-
-        case GRID_TRACK_SIZE_MINMAX:
-            // Recurse on min_size
-            return convert_to_min_sizing(old_size->min_size);
-
-        default:
-            return MinTrackSizingFunction::Auto();
-    }
-}
-
-/**
- * Convert old GridTrackSizeType to new MaxTrackSizingFunction
- */
-inline MaxTrackSizingFunction convert_to_max_sizing(GridTrackSize* old_size) {
-    if (!old_size) {
-        return MaxTrackSizingFunction::Auto();
-    }
-
-    switch (old_size->type) {
-        case GRID_TRACK_SIZE_LENGTH:
-            return MaxTrackSizingFunction::Length(static_cast<float>(old_size->value));
-
-        case GRID_TRACK_SIZE_PERCENTAGE:
-            // old_size->value is the percentage (e.g., 20 for 20%)
-            // MaxTrackSizingFunction::Percent expects it as-is (resolve will divide by 100)
-            return MaxTrackSizingFunction::Percent(static_cast<float>(old_size->value));
-
-        case GRID_TRACK_SIZE_MIN_CONTENT:
-            return MaxTrackSizingFunction::MinContent();
-
-        case GRID_TRACK_SIZE_MAX_CONTENT:
-            return MaxTrackSizingFunction::MaxContent();
-
-        case GRID_TRACK_SIZE_AUTO:
-            return MaxTrackSizingFunction::Auto();
-
-        case GRID_TRACK_SIZE_FR:
-            // old_size->value stores the fr factor multiplied by 100 (e.g. 0.3fr → 30)
-            return MaxTrackSizingFunction::Fr(static_cast<float>(old_size->value) / 100.0f);
-
-        case GRID_TRACK_SIZE_FIT_CONTENT:
-            if (old_size->is_percentage) {
-                return MaxTrackSizingFunction::FitContentPercent(static_cast<float>(old_size->fit_content_limit));
-            } else {
-                return MaxTrackSizingFunction::FitContentPx(static_cast<float>(old_size->fit_content_limit));
-            }
-
-        case GRID_TRACK_SIZE_MINMAX:
-            // Recurse on max_size
-            return convert_to_max_sizing(old_size->max_size);
-
-        default:
-            return MaxTrackSizingFunction::Auto();
-    }
-}
-
-/**
- * Convert old GridTrackSize to new TrackSizingFunction
- */
+// Parsed tracks enter sizing only as a min/max pair, so convert that pair once.
 inline TrackSizingFunction convert_to_track_sizing(GridTrackSize* old_size) {
-    return TrackSizingFunction(
-        convert_to_min_sizing(old_size),
-        convert_to_max_sizing(old_size)
-    );
+    if (!old_size) return TrackSizingFunction::Auto();
+
+    switch (old_size->type) {
+        case GRID_TRACK_SIZE_LENGTH:
+            return TrackSizingFunction::Length(static_cast<float>(old_size->value));
+        case GRID_TRACK_SIZE_PERCENTAGE:
+            return TrackSizingFunction::Percent(static_cast<float>(old_size->value));
+        case GRID_TRACK_SIZE_MIN_CONTENT:
+            return TrackSizingFunction::MinContent();
+        case GRID_TRACK_SIZE_MAX_CONTENT:
+            return TrackSizingFunction::MaxContent();
+        case GRID_TRACK_SIZE_FR:
+            // The parser stores the fr factor scaled by 100.
+            return TrackSizingFunction::Fr(static_cast<float>(old_size->value) / 100.0f);
+        case GRID_TRACK_SIZE_FIT_CONTENT:
+            // CSS Grid §7.2.3.2 uses an auto minimum for fit-content().
+            return old_size->is_percentage
+                ? TrackSizingFunction::FitContentPercent(
+                    static_cast<float>(old_size->fit_content_limit))
+                : TrackSizingFunction::FitContent(
+                    static_cast<float>(old_size->fit_content_limit));
+        case GRID_TRACK_SIZE_MINMAX: {
+            TrackSizingFunction minimum = convert_to_track_sizing(old_size->min_size);
+            TrackSizingFunction maximum = convert_to_track_sizing(old_size->max_size);
+            return TrackSizingFunction(minimum.min, maximum.max);
+        }
+        case GRID_TRACK_SIZE_AUTO:
+        default:
+            return TrackSizingFunction::Auto();
+    }
 }
 
 /**
@@ -358,6 +290,47 @@ inline void apply_placement_to_item(ViewBlock* item, const GridItemInfo& info,
 // Integrated Placement Algorithm
 // ============================================================================
 
+// Resolve one placement axis. Rows and columns obey the same CSS Grid §8.3
+// negative-line rules, so a single implementation keeps their swaps and spans
+// consistent.
+inline void resolve_negative_lines_in_placement(GridPlacement* placement,
+                                                int total_track_count) {
+    if (!placement) return;
+    if (placement->has_negative_start && placement->has_negative_end) {
+        int resolved_start = resolve_negative_line(placement->start, total_track_count);
+        int resolved_end = resolve_negative_line(placement->end, total_track_count);
+        if (resolved_start > resolved_end) {
+            int temp = resolved_start;
+            resolved_start = resolved_end;
+            resolved_end = temp;
+        }
+        int span = resolved_end - resolved_start;
+        if (span < 1) span = 1;
+        placement->start = static_cast<int16_t>(resolved_start);
+        placement->end = static_cast<int16_t>(resolved_end);
+        placement->span = static_cast<uint16_t>(span);
+        placement->has_negative_start = false;
+        placement->has_negative_end = false;
+        placement->is_definite = true;
+    } else if (placement->has_negative_end && placement->start > 0) {
+        int resolved_end = resolve_negative_line(placement->end, total_track_count);
+        if (placement->start > resolved_end) {
+            int original_start = placement->start;
+            placement->start = static_cast<int16_t>(resolved_end);
+            placement->end = static_cast<int16_t>(original_start);
+            int span = original_start - resolved_end;
+            if (span < 1) span = 1;
+            placement->span = static_cast<uint16_t>(span);
+        } else {
+            int span = resolved_end - placement->start;
+            if (span < 1) span = 1;
+            placement->span = static_cast<uint16_t>(span);
+            placement->end = static_cast<int16_t>(resolved_end);
+        }
+        placement->has_negative_end = false;
+    }
+}
+
 /**
  * Resolve negative line numbers in item placements against the known grid size.
  * This should be called after the initial grid extent is determined from positive placements.
@@ -372,83 +345,8 @@ inline void resolve_negative_lines_in_items(
     int total_row_count)
 {
     for (auto& item : items) {
-        // Resolve column negative lines
-        if (item.column.has_negative_start && item.column.has_negative_end) {
-            // Both start and end are negative: "-N / -M"
-            int resolved_start = resolve_negative_line(item.column.start, total_col_count);
-            int resolved_end = resolve_negative_line(item.column.end, total_col_count);
-            // CSS Grid spec §8.3: if start > end, swap the two lines
-            if (resolved_start > resolved_end) {
-                int temp = resolved_start;
-                resolved_start = resolved_end;
-                resolved_end = temp;
-            }
-            int span = resolved_end - resolved_start;
-            if (span < 1) span = 1;
-            item.column.start = static_cast<int16_t>(resolved_start);
-            item.column.end = static_cast<int16_t>(resolved_end);
-            item.column.span = static_cast<uint16_t>(span);
-            item.column.has_negative_start = false;
-            item.column.has_negative_end = false;
-            item.column.is_definite = true;
-        } else if (item.column.has_negative_end && item.column.start > 0) {
-            // Only end is negative: "N / -M"
-            int resolved_end = resolve_negative_line(item.column.end, total_col_count);
-            // CSS Grid spec §8.3: if start > end, swap the two lines
-            if (item.column.start > resolved_end) {
-                int original_start = item.column.start;
-                item.column.start = static_cast<int16_t>(resolved_end);
-                item.column.end = static_cast<int16_t>(original_start);
-                int span = original_start - resolved_end;
-                if (span < 1) span = 1;
-                item.column.span = static_cast<uint16_t>(span);
-            } else {
-                int span = resolved_end - item.column.start;
-                if (span < 1) span = 1;
-                item.column.span = static_cast<uint16_t>(span);
-                item.column.end = static_cast<int16_t>(resolved_end);
-            }
-            item.column.has_negative_end = false;
-        }
-
-        // Resolve row negative lines
-        if (item.row.has_negative_start && item.row.has_negative_end) {
-            // Both start and end are negative: "-N / -M"
-            int resolved_start = resolve_negative_line(item.row.start, total_row_count);
-            int resolved_end = resolve_negative_line(item.row.end, total_row_count);
-            // CSS Grid spec §8.3: if start > end, swap the two lines
-            if (resolved_start > resolved_end) {
-                int temp = resolved_start;
-                resolved_start = resolved_end;
-                resolved_end = temp;
-            }
-            int span = resolved_end - resolved_start;
-            if (span < 1) span = 1;
-            item.row.start = static_cast<int16_t>(resolved_start);
-            item.row.end = static_cast<int16_t>(resolved_end);
-            item.row.span = static_cast<uint16_t>(span);
-            item.row.has_negative_start = false;
-            item.row.has_negative_end = false;
-            item.row.is_definite = true;
-        } else if (item.row.has_negative_end && item.row.start > 0) {
-            // Only end is negative: "N / -M"
-            int resolved_end = resolve_negative_line(item.row.end, total_row_count);
-            // CSS Grid spec §8.3: if start > end, swap the two lines
-            if (item.row.start > resolved_end) {
-                int original_start = item.row.start;
-                item.row.start = static_cast<int16_t>(resolved_end);
-                item.row.end = static_cast<int16_t>(original_start);
-                int span = original_start - resolved_end;
-                if (span < 1) span = 1;
-                item.row.span = static_cast<uint16_t>(span);
-            } else {
-                int span = resolved_end - item.row.start;
-                if (span < 1) span = 1;
-                item.row.span = static_cast<uint16_t>(span);
-                item.row.end = static_cast<int16_t>(resolved_end);
-            }
-            item.row.has_negative_end = false;
-        }
+        resolve_negative_lines_in_placement(&item.column, total_col_count);
+        resolve_negative_lines_in_placement(&item.row, total_row_count);
     }
 }
 

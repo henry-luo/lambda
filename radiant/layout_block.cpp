@@ -5424,13 +5424,6 @@ static void align_fieldset_vertical_content_to_legend(
         fieldset, rendered_legend, target_edge - content_edge, false);
 }
 
-static bool fieldset_contains_node(DomNode* ancestor, DomNode* node) {
-    for (DomNode* current = node; current; current = current->parent) {
-        if (current == ancestor) return true;
-    }
-    return false;
-}
-
 static DomNode* fieldset_first_flow_node(DomNode* first_child,
                                           DomElement* rendered_legend) {
     for (DomNode* child = first_child; child; child = child->next_sibling) {
@@ -5439,7 +5432,8 @@ static DomNode* fieldset_first_flow_node(DomNode* first_child,
             DisplayValue display = resolve_display_value(child);
             if (layout_display_is_none(display)) continue;
             if (display.outer == CSS_VALUE_CONTENTS &&
-                fieldset_contains_node(child, static_cast<DomNode*>(rendered_legend))) {
+                view_geometry_dom_is_descendant(
+                    static_cast<DomNode*>(rendered_legend), child)) {
                 DomNode* nested = fieldset_first_flow_node(
                     child->as_element()->first_child, rendered_legend);
                 if (nested) return nested;

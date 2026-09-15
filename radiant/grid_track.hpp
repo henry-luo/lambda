@@ -50,17 +50,42 @@ enum class SizingFunctionType : uint8_t {
     FitContentPercent = 7, // fit-content(%)
 };
 
+// The min and max forms share their fixed/intrinsic representation. The
+// specialized wrappers below only expose the values each CSS production allows.
+struct TrackSizingFunctionValue {
+    SizingFunctionType type;
+    float value;
+
+    constexpr TrackSizingFunctionValue(SizingFunctionType type = SizingFunctionType::Auto,
+                                       float value = 0.0f)
+        : type(type), value(value) {}
+
+    constexpr bool is_intrinsic() const {
+        return type == SizingFunctionType::Auto ||
+               type == SizingFunctionType::MinContent ||
+               type == SizingFunctionType::MaxContent;
+    }
+
+    float resolve(float container_size) const {
+        switch (type) {
+            case SizingFunctionType::Length:
+                return value;
+            case SizingFunctionType::Percent:
+                return container_size * (value / 100.0f);
+            default:
+                return -1.0f;
+        }
+    }
+};
+
 /**
  * MinTrackSizingFunction - minimum sizing function for a track
  *
  * Valid types: Auto, MinContent, MaxContent, Length, Percent
  * Note: Fr is NOT valid for min sizing
  */
-struct MinTrackSizingFunction {
-    SizingFunctionType type;
-    float value;  // For Length, Percent
-
-    constexpr MinTrackSizingFunction() : type(SizingFunctionType::Auto), value(0.0f) {}
+struct MinTrackSizingFunction : TrackSizingFunctionValue {
+    constexpr MinTrackSizingFunction() = default;
 
     // Factory methods
     static constexpr MinTrackSizingFunction Auto() {
@@ -80,38 +105,15 @@ struct MinTrackSizingFunction {
     }
 
     /**
-     * Returns true if the min track sizing function is intrinsic (MinContent, MaxContent, or Auto)
-     */
-    constexpr bool is_intrinsic() const {
-        return type == SizingFunctionType::Auto ||
-               type == SizingFunctionType::MinContent ||
-               type == SizingFunctionType::MaxContent;
-    }
-
-    /**
      * Returns true if the sizing function uses a percentage
      */
     constexpr bool uses_percentage() const {
         return type == SizingFunctionType::Percent;
     }
 
-    /**
-     * Resolve the min sizing function to a definite pixel value
-     * Returns -1 if the value needs content-based sizing
-     */
-    float resolve(float container_size) const {
-        switch (type) {
-            case SizingFunctionType::Length:
-                return value;
-            case SizingFunctionType::Percent:
-                return container_size * (value / 100.0f);
-            default:
-                return -1.0f;  // Needs content-based sizing
-        }
-    }
-
 private:
-    constexpr MinTrackSizingFunction(SizingFunctionType t, float v) : type(t), value(v) {}
+    constexpr MinTrackSizingFunction(SizingFunctionType type, float value)
+        : TrackSizingFunctionValue(type, value) {}
 };
 
 /**
@@ -119,11 +121,8 @@ private:
  *
  * Valid types: Auto, MinContent, MaxContent, Length, Percent, Fr, FitContentPx, FitContentPercent
  */
-struct MaxTrackSizingFunction {
-    SizingFunctionType type;
-    float value;  // For Length, Percent, Fr, FitContent
-
-    constexpr MaxTrackSizingFunction() : type(SizingFunctionType::Auto), value(0.0f) {}
+struct MaxTrackSizingFunction : TrackSizingFunctionValue {
+    constexpr MaxTrackSizingFunction() = default;
 
     // Factory methods
     static constexpr MaxTrackSizingFunction Auto() {
@@ -159,15 +158,6 @@ struct MaxTrackSizingFunction {
     }
 
     /**
-     * Returns true if the max track sizing function is intrinsic (MinContent, MaxContent, or Auto)
-     */
-    constexpr bool is_intrinsic() const {
-        return type == SizingFunctionType::Auto ||
-               type == SizingFunctionType::MinContent ||
-               type == SizingFunctionType::MaxContent;
-    }
-
-    /**
      * Returns true if the sizing function uses a percentage
      */
     constexpr bool uses_percentage() const {
@@ -196,23 +186,9 @@ struct MaxTrackSizingFunction {
         }
     }
 
-    /**
-     * Resolve the max sizing function to a definite pixel value
-     * Returns -1 if the value needs content-based sizing
-     */
-    float resolve(float container_size) const {
-        switch (type) {
-            case SizingFunctionType::Length:
-                return value;
-            case SizingFunctionType::Percent:
-                return container_size * (value / 100.0f);
-            default:
-                return -1.0f;  // Needs content-based or flex sizing
-        }
-    }
-
 private:
-    constexpr MaxTrackSizingFunction(SizingFunctionType t, float v) : type(t), value(v) {}
+    constexpr MaxTrackSizingFunction(SizingFunctionType type, float value)
+        : TrackSizingFunctionValue(type, value) {}
 };
 
 /**

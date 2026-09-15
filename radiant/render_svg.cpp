@@ -67,44 +67,12 @@ static PaintList* svg_active_paint_list(SvgRenderContext* ctx) {
     return ctx ? &ctx->paint_list : nullptr;
 }
 
-static bool svg_effect_group_needs_raster_fallback(const PaintEffectGroup* group) {
-    return group &&
-           (group->has_clip || group->blend_mode != 0 || group->filter ||
-            group->backdrop || group->backdrop_filter ||
-            group->shadow || group->isolation);
-}
-
-static bool svg_effect_group_needs_page_backdrop(const PaintEffectGroup* group) {
-    return group &&
-           (group->blend_mode != 0 || group->backdrop || group->backdrop_filter);
-}
-
-static bool svg_paint_list_balanced_effect_groups(const PaintList* paint_list) {
-    if (!paint_list) return false;
-    int effect_depth = 0;
-    for (int i = 0; i < paint_list->count; i++) {
-        PaintOp op = paint_list->cmds[i].op;
-        if (op == PAINT_BEGIN_EFFECT_GROUP) {
-            effect_depth++;
-        } else if (op == PAINT_END_EFFECT_GROUP) {
-            effect_depth--;
-            if (effect_depth < 0) return false;
-        }
-    }
-    return effect_depth == 0;
-}
-
 static void svg_record_page_backdrop_paint_list(SvgRenderContext* ctx,
                                                 const PaintList* paint_list) {
-    if (!ctx || !ctx->page_backdrop_ready || !paint_list || paint_list_count(paint_list) <= 0) {
-        return;
-    }
-    if (!svg_paint_list_balanced_effect_groups(paint_list)) {
-        return;
-    }
-    render_svg_inline_register_paint_ir_lowerers();
-    paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
-    paint_ir_lower_raster(paint_list, &ctx->page_backdrop_dl);
+    if (!ctx) return;
+    render_effect_record_page_backdrop_paint_list(
+        ctx->page_backdrop_ready, &ctx->page_backdrop_dl, paint_list,
+        render_glyph_run_raster_lower);
 }
 
 static void svg_lower_paint_list(SvgRenderContext* ctx) {
@@ -174,7 +142,7 @@ static void svg_finish_effect_raster_fallback(SvgRenderContext* ctx) {
     RenderEffectRasterImage image = {};
     bool ok = render_effect_rasterize_paint_list(
         &ctx->effect_fallback.paint_list,
-        svg_effect_group_needs_page_backdrop(&ctx->effect_fallback.group)
+        render_effect_group_needs_page_backdrop(&ctx->effect_fallback.group)
             ? &ctx->page_backdrop_dl
             : nullptr,
         &ctx->effect_fallback.group.bounds,
@@ -1111,7 +1079,7 @@ static void svg_cb_begin_effect_group(void* vctx, const PaintEffectGroup* group)
         ctx->effect_fallback.nested_depth++;
         return;
     }
-    if (svg_effect_group_needs_raster_fallback(group)) {
+    if (render_effect_group_needs_raster_fallback(group)) {
         svg_begin_effect_raster_fallback(ctx, group);
         return;
     }

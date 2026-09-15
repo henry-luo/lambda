@@ -296,8 +296,8 @@ static void canvas_pop_clips(RdtVector* vector, int pushed, int saved_clip_depth
     rdt_clip_restore_depth(saved_clip_depth);
 }
 
-static bool canvas_draw_path(CanvasEntry* entry, bool stroke) {
-    if (!entry || !entry->path || !entry->surface) return entry != nullptr;
+static bool canvas_draw_path_with(CanvasEntry* entry, RdtPath* path, bool stroke) {
+    if (!entry || !path || !entry->surface) return entry != nullptr;
     RdtVector vector = {};
     int stride = entry->surface->pitch / 4;
     rdt_vector_init(&vector, (uint32_t*)entry->surface->pixels,
@@ -305,14 +305,14 @@ static bool canvas_draw_path(CanvasEntry* entry, bool stroke) {
     int saved_clip_depth = 0;
     int pushed_clips = canvas_push_clips(entry, &vector, &saved_clip_depth);
     if (stroke) {
-        rdt_stroke_path(&vector, entry->path,
+        rdt_stroke_path(&vector, path,
                         canvas_effective_color(entry->state.stroke_color,
                                                entry->state.global_alpha),
                         entry->state.line_width, entry->state.line_cap,
                         entry->state.line_join,
                         nullptr, 0, 0.0f, &entry->state.transform);
     } else {
-        rdt_fill_path(&vector, entry->path,
+        rdt_fill_path(&vector, path,
                       canvas_effective_color(entry->state.fill_color,
                                              entry->state.global_alpha),
                       RDT_FILL_WINDING, &entry->state.transform);
@@ -321,6 +321,10 @@ static bool canvas_draw_path(CanvasEntry* entry, bool stroke) {
     rdt_vector_destroy(&vector);
     canvas_note_pixels_changed(entry);
     return true;
+}
+
+static bool canvas_draw_path(CanvasEntry* entry, bool stroke) {
+    return canvas_draw_path_with(entry, entry ? entry->path : nullptr, stroke);
 }
 
 static bool canvas_draw_rect(CanvasEntry* entry, float x, float y,
@@ -339,30 +343,9 @@ static bool canvas_draw_rect(CanvasEntry* entry, float x, float y,
     RdtPath* path = rdt_path_new();
     if (!path) return false;
     rdt_path_add_rect(path, x, y, width, height, 0.0f, 0.0f);
-    RdtVector vector = {};
-    int stride = entry->surface->pitch / 4;
-    rdt_vector_init(&vector, (uint32_t*)entry->surface->pixels,
-                    entry->surface->width, entry->surface->height, stride);
-    int saved_clip_depth = 0;
-    int pushed_clips = canvas_push_clips(entry, &vector, &saved_clip_depth);
-    if (stroke) {
-        rdt_stroke_path(&vector, path,
-                        canvas_effective_color(entry->state.stroke_color,
-                                               entry->state.global_alpha),
-                        entry->state.line_width, entry->state.line_cap,
-                        entry->state.line_join,
-                        nullptr, 0, 0.0f, &entry->state.transform);
-    } else {
-        rdt_fill_path(&vector, path,
-                      canvas_effective_color(entry->state.fill_color,
-                                             entry->state.global_alpha), RDT_FILL_WINDING,
-                      &entry->state.transform);
-    }
-    canvas_pop_clips(&vector, pushed_clips, saved_clip_depth);
-    rdt_vector_destroy(&vector);
+    bool drawn = canvas_draw_path_with(entry, path, stroke);
     rdt_path_free(path);
-    canvas_note_pixels_changed(entry);
-    return true;
+    return drawn;
 }
 
 static bool canvas_ensure_path(CanvasEntry* entry) {

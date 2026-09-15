@@ -316,11 +316,7 @@ static inline void svg_box_blur_region(SvgInlineRenderContext* ctx, int rx, int 
 }
 
 static void render_svg_element(SvgInlineRenderContext* ctx, Element* elem);
-static void render_svg_rect(SvgInlineRenderContext* ctx, Element* elem);
-static void render_svg_circle(SvgInlineRenderContext* ctx, Element* elem);
-static void render_svg_ellipse(SvgInlineRenderContext* ctx, Element* elem);
-static void render_svg_line(SvgInlineRenderContext* ctx, Element* elem);
-static void render_svg_polyline(SvgInlineRenderContext* ctx, Element* elem, bool close_path);
+static void render_svg_basic_shape(SvgInlineRenderContext* ctx, Element* elem);
 static void render_svg_path(SvgInlineRenderContext* ctx, Element* elem);
 static void render_svg_text(SvgInlineRenderContext* ctx, Element* elem);
 static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem);
@@ -1716,79 +1712,6 @@ static void draw_svg_fill_stroke(SvgInlineRenderContext* ctx, RdtPath* path, Ele
 // SVG Shape Renderers
 // ============================================================================
 
-static void render_svg_rect(SvgInlineRenderContext* ctx, Element* elem) {
-    float x = parse_svg_length(get_svg_attr(elem, "x"), 0);
-    float y = parse_svg_length(get_svg_attr(elem, "y"), 0);
-    float width = parse_svg_length(get_svg_attr(elem, "width"), 0);
-    float height = parse_svg_length(get_svg_attr(elem, "height"), 0);
-    float rx = parse_svg_length(get_svg_attr(elem, "rx"), 0);
-    float ry = parse_svg_length(get_svg_attr(elem, "ry"), rx);  // default to rx
-
-    if (width <= 0 || height <= 0) return;
-
-    RdtMatrix m = compose_element_transform(ctx, elem);
-    RdtPath* path = rdt_path_new();
-    rdt_path_add_rect(path, x, y, width, height, rx, ry);
-    draw_svg_fill_stroke(ctx, path, elem, &m, x, y, width, height);
-    rdt_path_free(path);
-
-}
-
-static void render_svg_circle(SvgInlineRenderContext* ctx, Element* elem) {
-    float cx = parse_svg_length(get_svg_attr(elem, "cx"), 0);
-    float cy = parse_svg_length(get_svg_attr(elem, "cy"), 0);
-    float r = parse_svg_length(get_svg_attr(elem, "r"), 0);
-
-    if (r <= 0) return;
-
-    RdtMatrix m = compose_element_transform(ctx, elem);
-    RdtPath* path = rdt_path_new();
-    rdt_path_add_circle(path, cx, cy, r, r);
-    draw_svg_fill_stroke(ctx, path, elem, &m, cx - r, cy - r, 2 * r, 2 * r);
-    rdt_path_free(path);
-
-}
-
-static void render_svg_ellipse(SvgInlineRenderContext* ctx, Element* elem) {
-    float cx = parse_svg_length(get_svg_attr(elem, "cx"), 0);
-    float cy = parse_svg_length(get_svg_attr(elem, "cy"), 0);
-    float rx = parse_svg_length(get_svg_attr(elem, "rx"), 0);
-    float ry = parse_svg_length(get_svg_attr(elem, "ry"), 0);
-
-    if (rx <= 0 || ry <= 0) return;
-
-    RdtMatrix m = compose_element_transform(ctx, elem);
-    RdtPath* path = rdt_path_new();
-    rdt_path_add_circle(path, cx, cy, rx, ry);
-    draw_svg_fill_stroke(ctx, path, elem, &m, cx - rx, cy - ry, 2 * rx, 2 * ry);
-    rdt_path_free(path);
-
-}
-
-static void render_svg_line(SvgInlineRenderContext* ctx, Element* elem) {
-    float x1 = parse_svg_length(get_svg_attr(elem, "x1"), 0);
-    float y1 = parse_svg_length(get_svg_attr(elem, "y1"), 0);
-    float x2 = parse_svg_length(get_svg_attr(elem, "x2"), 0);
-    float y2 = parse_svg_length(get_svg_attr(elem, "y2"), 0);
-
-    RdtMatrix m = compose_element_transform(ctx, elem);
-    RdtPath* path = rdt_path_new();
-    rdt_path_move_to(path, x1, y1);
-    rdt_path_line_to(path, x2, y2);
-
-    // lines have stroke only by default — ensure stroke is set
-    const char* stroke = get_svg_attr(elem, "stroke");
-    if (!stroke && ctx->stroke_none) {
-        // no inherited stroke and no explicit stroke: draw with default black
-        Color black = {}; black.a = 255;
-        svg_stroke_path(ctx, path, black, 1.0f, RDT_CAP_BUTT, RDT_JOIN_MITER,
-                        nullptr, 0, 0.0f, &m);
-    }
-    draw_svg_fill_stroke(ctx, path, elem, &m, 0, 0, 0, 0);
-    rdt_path_free(path);
-
-}
-
 // helper: parse points attribute for polyline/polygon into RdtPath
 static bool parse_points_to_path(const char* points_str, RdtPath* path, bool close_path) {
     if (!points_str || !path) return false;
@@ -1828,20 +1751,86 @@ static bool parse_points_to_path(const char* points_str, RdtPath* path, bool clo
     return !first;
 }
 
-static void render_svg_polyline(SvgInlineRenderContext* ctx, Element* elem, bool close_path) {
-    const char* points = get_svg_attr(elem, "points");
-    if (!points) return;
+struct SvgBasicShapeGeometry {
+    float x;
+    float y;
+    float width;
+    float height;
+    bool is_line;
+};
 
+// Appends the simple SVG primitives shared by normal painting, masks, and clips.
+static bool svg_append_basic_shape_path(Element* elem, RdtPath* path,
+                                        SvgBasicShapeGeometry* geometry = nullptr) {
+    if (!elem || !path) return false;
+    const char* tag = get_element_tag_name(elem);
+    if (!tag) return false;
+    SvgBasicShapeGeometry result = {};
+
+    if (strcmp(tag, "rect") == 0) {
+        float rx = parse_svg_length(get_svg_attr(elem, "rx"), 0.0f);
+        float ry = parse_svg_length(get_svg_attr(elem, "ry"), rx);
+        result.x = parse_svg_length(get_svg_attr(elem, "x"), 0.0f);
+        result.y = parse_svg_length(get_svg_attr(elem, "y"), 0.0f);
+        result.width = parse_svg_length(get_svg_attr(elem, "width"), 0.0f);
+        result.height = parse_svg_length(get_svg_attr(elem, "height"), 0.0f);
+        if (result.width <= 0.0f || result.height <= 0.0f) return false;
+        rdt_path_add_rect(path, result.x, result.y, result.width, result.height, rx, ry);
+    } else if (strcmp(tag, "circle") == 0 || strcmp(tag, "ellipse") == 0) {
+        float rx = parse_svg_length(get_svg_attr(elem, strcmp(tag, "circle") == 0 ? "r" : "rx"), 0.0f);
+        float ry = strcmp(tag, "circle") == 0 ? rx
+            : parse_svg_length(get_svg_attr(elem, "ry"), 0.0f);
+        if (rx <= 0.0f || ry <= 0.0f) return false;
+        float cx = parse_svg_length(get_svg_attr(elem, "cx"), 0.0f);
+        float cy = parse_svg_length(get_svg_attr(elem, "cy"), 0.0f);
+        result.x = cx - rx;
+        result.y = cy - ry;
+        result.width = 2.0f * rx;
+        result.height = 2.0f * ry;
+        rdt_path_add_circle(path, cx, cy, rx, ry);
+    } else if (strcmp(tag, "line") == 0) {
+        float x1 = parse_svg_length(get_svg_attr(elem, "x1"), 0.0f);
+        float y1 = parse_svg_length(get_svg_attr(elem, "y1"), 0.0f);
+        float x2 = parse_svg_length(get_svg_attr(elem, "x2"), 0.0f);
+        float y2 = parse_svg_length(get_svg_attr(elem, "y2"), 0.0f);
+        rdt_path_move_to(path, x1, y1);
+        rdt_path_line_to(path, x2, y2);
+        result.is_line = true;
+    } else if (strcmp(tag, "polygon") == 0 || strcmp(tag, "polyline") == 0) {
+        const char* points = get_svg_attr(elem, "points");
+        if (!points || !parse_points_to_path(points, path, strcmp(tag, "polygon") == 0)) {
+            return false;
+        }
+    } else {
+        return false;
+    }
+
+    if (geometry) *geometry = result;
+    return true;
+}
+
+static void render_svg_basic_shape(SvgInlineRenderContext* ctx, Element* elem) {
     RdtPath* path = rdt_path_new();
-    if (!parse_points_to_path(points, path, close_path)) {
-        rdt_path_free(path);
+    SvgBasicShapeGeometry geometry = {};
+    if (!path || !svg_append_basic_shape_path(elem, path, &geometry)) {
+        if (path) rdt_path_free(path);
         return;
     }
 
-    RdtMatrix m = compose_element_transform(ctx, elem);
-    draw_svg_fill_stroke(ctx, path, elem, &m, 0, 0, 0, 0);
+    RdtMatrix matrix = compose_element_transform(ctx, elem);
+    if (geometry.is_line) {
+        // lines have stroke only by default — ensure stroke is set
+        const char* stroke = get_svg_attr(elem, "stroke");
+        if (!stroke && ctx->stroke_none) {
+            // no inherited stroke and no explicit stroke: draw with default black
+            Color black = {}; black.a = 255;
+            svg_stroke_path(ctx, path, black, 1.0f, RDT_CAP_BUTT, RDT_JOIN_MITER,
+                            nullptr, 0, 0.0f, &matrix);
+        }
+    }
+    draw_svg_fill_stroke(ctx, path, elem, &matrix,
+                         geometry.x, geometry.y, geometry.width, geometry.height);
     rdt_path_free(path);
-
 }
 
 // ============================================================================
@@ -3441,6 +3430,34 @@ static void render_svg_text(SvgInlineRenderContext* ctx, Element* elem) {
         }
     };
 
+    // Direct text and tspans differ in inherited attributes, not glyph drawing.
+    auto draw_text_segment = [&](const char* text_content, float& segment_x,
+                                 float segment_y, float segment_font_size,
+                                 Color fill, bool use_radiant_glyphs) {
+        bool rendered_with_radiant = false;
+        if (use_radiant_glyphs) {
+            rendered_with_radiant = render_svg_text_with_radiant_glyphs(ctx, text_content,
+                metrics_family, segment_font_size, font_weight, font_slant, fill, &m,
+                segment_x, segment_y, text_length,
+                spacing_and_glyphs && !allow_embedded_font);
+        }
+        if (rendered_with_radiant) {
+            float width = text_length > 0.0f ? text_length :
+                measure_svg_text_width(text_content, segment_font_size, ctx->font_ctx,
+                                       metrics_family, font_weight);
+            segment_x += width;
+            return;
+        }
+        Tvg_Paint text = create_text_segment(text_content, segment_x, segment_y,
+                                             font_path, font_name, segment_font_size, fill);
+        if (text) {
+            float width = measure_svg_text_width(text_content, segment_font_size,
+                                                 ctx->font_ctx, metrics_family, font_weight);
+            draw_text_paint(text, segment_x, segment_y, segment_font_size);
+            segment_x += width;
+        }
+    };
+
     // if single text with no tspan, use simple rendering
     if (text_segments == 1 && !has_tspan) {
         const char* text_content = get_direct_text_content(elem);
@@ -3511,25 +3528,8 @@ static void render_svg_text(SvgInlineRenderContext* ctx, Element* elem) {
                 }
                 char* text_copy = trim_whitespace(str->chars, str->len);
                 if (text_copy) {
-                    bool rendered_with_radiant = false;
-                    if (!has_tspan && anchor_x == 0.0f) {
-                        rendered_with_radiant = render_svg_text_with_radiant_glyphs(ctx, text_copy,
-                            metrics_family, font_size, font_weight, font_slant, default_fill, &m,
-                            cur_x, cur_y, text_length, spacing_and_glyphs && !allow_embedded_font);
-                    }
-                    if (rendered_with_radiant) {
-                        float w = text_length > 0.0f ? text_length :
-                            measure_svg_text_width(text_copy, font_size, ctx->font_ctx, metrics_family, font_weight);
-                        cur_x += w;
-                    } else {
-                        Tvg_Paint text_obj = create_text_segment(text_copy, cur_x, cur_y,
-                                                                  font_path, font_name, font_size, default_fill);
-                        if (text_obj) {
-                            float w = measure_svg_text_width(text_copy, font_size, ctx->font_ctx, metrics_family, font_weight);
-                            draw_text_paint(text_obj, cur_x, cur_y, font_size);
-                            cur_x += w;
-                        }
-                    }
+                    draw_text_segment(text_copy, cur_x, cur_y, font_size, default_fill,
+                                      !has_tspan && anchor_x == 0.0f);
                     mem_free(text_copy);
                 }
             }
@@ -3570,25 +3570,8 @@ static void render_svg_text(SvgInlineRenderContext* ctx, Element* elem) {
                 // get text content
                 const char* text_content = get_direct_text_content(child_elem);
                 if (text_content && *text_content) {
-                    bool rendered_with_radiant = false;
-                    if (anchor_x == 0.0f) {
-                        rendered_with_radiant = render_svg_text_with_radiant_glyphs(ctx, text_content,
-                            metrics_family, tspan_font_size, font_weight, font_slant, fill, &m,
-                            cur_x, cur_y, text_length, spacing_and_glyphs && !allow_embedded_font);
-                    }
-                    if (rendered_with_radiant) {
-                        float w = text_length > 0.0f ? text_length :
-                            measure_svg_text_width(text_content, tspan_font_size, ctx->font_ctx, metrics_family, font_weight);
-                        cur_x += w;
-                    } else {
-                        Tvg_Paint text_obj = create_text_segment(text_content, cur_x, cur_y,
-                                                                  font_path, font_name, tspan_font_size, fill);
-                        if (text_obj) {
-                            float w = measure_svg_text_width(text_content, tspan_font_size, ctx->font_ctx, metrics_family, font_weight);
-                            draw_text_paint(text_obj, cur_x, cur_y, tspan_font_size);
-                            cur_x += w;
-                        }
-                    }
+                    draw_text_segment(text_content, cur_x, cur_y, tspan_font_size, fill,
+                                      anchor_x == 0.0f);
                     mem_free((void*)text_content);
                 }
             }
@@ -3941,53 +3924,12 @@ static RdtPath* build_path_from_svg_shape(Element* elem) {
     if (!elem) return nullptr;
     const char* tag = get_element_tag_name(elem);
     if (!tag) return nullptr;
+    if (strcmp(tag, "path") == 0) return parse_svg_path_d(get_svg_attr(elem, "d"));
+    if (strcmp(tag, "line") == 0) return nullptr;
 
     RdtPath* path = rdt_path_new();
-    bool has_geometry = false;
-
-    if (strcmp(tag, "rect") == 0) {
-        float x = parse_svg_length(get_svg_attr(elem, "x"), 0);
-        float y = parse_svg_length(get_svg_attr(elem, "y"), 0);
-        float w = parse_svg_length(get_svg_attr(elem, "width"), 0);
-        float h = parse_svg_length(get_svg_attr(elem, "height"), 0);
-        float rx = parse_svg_length(get_svg_attr(elem, "rx"), 0);
-        float ry = parse_svg_length(get_svg_attr(elem, "ry"), rx);
-        if (w > 0 && h > 0) {
-            rdt_path_add_rect(path, x, y, w, h, rx, ry);
-            has_geometry = true;
-        }
-    } else if (strcmp(tag, "circle") == 0) {
-        float cx = parse_svg_length(get_svg_attr(elem, "cx"), 0);
-        float cy = parse_svg_length(get_svg_attr(elem, "cy"), 0);
-        float r = parse_svg_length(get_svg_attr(elem, "r"), 0);
-        if (r > 0) {
-            rdt_path_add_circle(path, cx, cy, r, r);
-            has_geometry = true;
-        }
-    } else if (strcmp(tag, "ellipse") == 0) {
-        float cx = parse_svg_length(get_svg_attr(elem, "cx"), 0);
-        float cy = parse_svg_length(get_svg_attr(elem, "cy"), 0);
-        float rx = parse_svg_length(get_svg_attr(elem, "rx"), 0);
-        float ry = parse_svg_length(get_svg_attr(elem, "ry"), 0);
-        if (rx > 0 && ry > 0) {
-            rdt_path_add_circle(path, cx, cy, rx, ry);
-            has_geometry = true;
-        }
-    } else if (strcmp(tag, "polygon") == 0 || strcmp(tag, "polyline") == 0) {
-        const char* points = get_svg_attr(elem, "points");
-        if (points) {
-            has_geometry = parse_points_to_path(points, path, (strcmp(tag, "polygon") == 0));
-        }
-    } else if (strcmp(tag, "path") == 0) {
-        const char* d = get_svg_attr(elem, "d");
-        if (d) {
-            rdt_path_free(path);
-            return parse_svg_path_d(d);
-        }
-    }
-
-    if (!has_geometry) {
-        rdt_path_free(path);
+    if (!path || !svg_append_basic_shape_path(elem, path)) {
+        if (path) rdt_path_free(path);
         return nullptr;
     }
     return path;
@@ -4162,40 +4104,7 @@ static RdtPath* build_clip_path_from_def(Element* clip_elem) {
         const char* tag = get_element_tag_name(child);
         if (!tag) continue;
 
-        if (strcmp(tag, "rect") == 0) {
-            float x = parse_svg_length(get_svg_attr(child, "x"), 0);
-            float y = parse_svg_length(get_svg_attr(child, "y"), 0);
-            float w = parse_svg_length(get_svg_attr(child, "width"), 0);
-            float h = parse_svg_length(get_svg_attr(child, "height"), 0);
-            float rx = parse_svg_length(get_svg_attr(child, "rx"), 0);
-            float ry = parse_svg_length(get_svg_attr(child, "ry"), rx);
-            if (w > 0 && h > 0) {
-                rdt_path_add_rect(clip_path, x, y, w, h, rx, ry);
-                has_geometry = true;
-            }
-        } else if (strcmp(tag, "circle") == 0) {
-            float cx = parse_svg_length(get_svg_attr(child, "cx"), 0);
-            float cy = parse_svg_length(get_svg_attr(child, "cy"), 0);
-            float r = parse_svg_length(get_svg_attr(child, "r"), 0);
-            if (r > 0) {
-                rdt_path_add_circle(clip_path, cx, cy, r, r);
-                has_geometry = true;
-            }
-        } else if (strcmp(tag, "ellipse") == 0) {
-            float cx = parse_svg_length(get_svg_attr(child, "cx"), 0);
-            float cy = parse_svg_length(get_svg_attr(child, "cy"), 0);
-            float rx = parse_svg_length(get_svg_attr(child, "rx"), 0);
-            float ry = parse_svg_length(get_svg_attr(child, "ry"), 0);
-            if (rx > 0 && ry > 0) {
-                rdt_path_add_circle(clip_path, cx, cy, rx, ry);
-                has_geometry = true;
-            }
-        } else if (strcmp(tag, "polygon") == 0 || strcmp(tag, "polyline") == 0) {
-            const char* points = get_svg_attr(child, "points");
-            if (points) {
-                has_geometry = parse_points_to_path(points, clip_path, (strcmp(tag, "polygon") == 0)) || has_geometry;
-            }
-        } else if (strcmp(tag, "path") == 0) {
+        if (strcmp(tag, "path") == 0) {
             const char* d = get_svg_attr(child, "d");
             if (d) {
                 // parse path 'd' commands directly into clip_path
@@ -4213,6 +4122,9 @@ static RdtPath* build_clip_path_from_def(Element* clip_elem) {
                     return temp;
                 }
             }
+        } else if (strcmp(tag, "line") != 0 &&
+                   svg_append_basic_shape_path(child, clip_path)) {
+            has_geometry = true;
         }
     }
 
@@ -4648,18 +4560,10 @@ static void render_svg_element(SvgInlineRenderContext* ctx, Element* elem) {
         svg_push_clip(ctx, clip_path, &ctx->transform);
     }
 
-    if (strcmp(tag, "rect") == 0) {
-        render_svg_rect(ctx, elem);
-    } else if (strcmp(tag, "circle") == 0) {
-        render_svg_circle(ctx, elem);
-    } else if (strcmp(tag, "ellipse") == 0) {
-        render_svg_ellipse(ctx, elem);
-    } else if (strcmp(tag, "line") == 0) {
-        render_svg_line(ctx, elem);
-    } else if (strcmp(tag, "polyline") == 0) {
-        render_svg_polyline(ctx, elem, false);
-    } else if (strcmp(tag, "polygon") == 0) {
-        render_svg_polyline(ctx, elem, true);
+    if (strcmp(tag, "rect") == 0 || strcmp(tag, "circle") == 0 ||
+        strcmp(tag, "ellipse") == 0 || strcmp(tag, "line") == 0 ||
+        strcmp(tag, "polyline") == 0 || strcmp(tag, "polygon") == 0) {
+        render_svg_basic_shape(ctx, elem);
     } else if (strcmp(tag, "path") == 0) {
         render_svg_path(ctx, elem);
     } else if (strcmp(tag, "g") == 0) {

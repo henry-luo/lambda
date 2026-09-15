@@ -863,12 +863,12 @@
         {
           "file": "radiant/event.cpp",
           "start": "static bool post_html_handler_incremental_rebuild(",
-          "end": "static DomElement* radiant_view_to_dom_element("
+          "end": "static void post_html_handler_rebuild("
         },
         {
           "file": "radiant/event.cpp",
           "start": "static void post_html_handler_rebuild(",
-          "end": "static DomElement* radiant_view_to_dom_element(View* v) {"
+          "end": "// Internal: enter/exit the JS EvalContext that DOM event callbacks run under."
         },
         {
           "file": "radiant/event.cpp",
@@ -889,12 +889,12 @@
       "regions": [
         {
           "file": "radiant/resolve_css_style.cpp",
-          "start": "        if (str_ieq_const(func->name, strlen(func->name), \"rgb\") || str_ieq_const(func->name, strlen(func->name), \"rgba\")) {",
-          "end": "        else if (str_ieq_const(func->name, strlen(func->name), \"hsl\") || str_ieq_const(func->name, strlen(func->name), \"hsla\")) {"
+          "start": "        if (str_ieq_cstr(func->name, \"rgb\") || str_ieq_cstr(func->name, \"rgba\")) {",
+          "end": "        else if (str_ieq_cstr(func->name, \"hsl\") || str_ieq_cstr(func->name, \"hsla\")) {"
         },
         {
           "file": "radiant/resolve_css_style.cpp",
-          "start": "        else if (str_ieq_const(func->name, strlen(func->name), \"hsl\") || str_ieq_const(func->name, strlen(func->name), \"hsla\")) {",
+          "start": "        else if (str_ieq_cstr(func->name, \"hsl\") || str_ieq_cstr(func->name, \"hsla\")) {",
           "end": "// Get the CSS currentColor value for the element being styled."
         }
       ]

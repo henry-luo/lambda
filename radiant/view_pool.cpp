@@ -1229,15 +1229,11 @@ static bool get_transform_matrix_for_view(View* view, RdtMatrix* out_matrix) {
 
     float abs_x = 0.0f, abs_y = 0.0f;
     calculate_absolute_position(view, nullptr, &abs_x, &abs_y);
-    float origin_x = block->transformp()->origin_x_percent
-        ? abs_x + (block->transformp()->origin_x / 100.0f) * block->width
-        : abs_x + block->transformp()->origin_x;
-    float origin_y = block->transformp()->origin_y_percent
-        ? abs_y + (block->transformp()->origin_y / 100.0f) * block->height
-        : abs_y + block->transformp()->origin_y;
+    RdtLogicalPoint origin = radiant::transform_origin(
+        block->transformp(), abs_x, abs_y, block->width, block->height);
 
     *out_matrix = radiant::compute_transform_matrix(
-        block->transformp()->functions, block->width, block->height, origin_x, origin_y);
+        block->transformp()->functions, block->width, block->height, origin.x, origin.y);
     return true;
 }
 
@@ -2016,6 +2012,61 @@ static void append_element_classes_json(DomElement* elem, StrBuf* buf, int inden
     strbuf_append_str(buf, ",\n");
 }
 
+// All layout-tree view kinds serialize the same resolved FontProp contract.
+static void append_font_json(DomElement* elem, StrBuf* buf, int indent,
+                             bool include_defaults, bool include_style,
+                             bool include_decoration, bool trailing_comma) {
+    const FontProp* font = elem ? elem->fontp() : nullptr;
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "\"font\": {\n");
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    if (font && font->family) {
+        strbuf_append_format(buf, "\"family\": \"%s\",\n", font->family);
+    } else if (include_defaults) {
+        strbuf_append_str(buf, "\"family\": \"Times\",\n");
+    }
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    if (font && font->font_size > 0.0f) {
+        strbuf_append_format(buf, "\"size\": %g,\n", font->font_size);
+    } else if (include_defaults) {
+        strbuf_append_str(buf, "\"size\": 16,\n");
+    }
+    if (include_style) {
+        const char* style = "normal";
+        if (font) {
+            const CssEnumInfo* value = css_enum_info(font->font_style);
+            if (value) style = (const char*)value->name;
+        }
+        strbuf_append_char_n(buf, ' ', indent + 2);
+        strbuf_append_format(buf, "\"style\": \"%s\",\n", style);
+    }
+    const char* weight_terminator = include_decoration ? ",\n" : "\n";
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    if (font && font->font_weight_numeric > 0) {
+        strbuf_append_format(buf, "\"weight\": \"%d\"%s",
+                             font->font_weight_numeric, weight_terminator);
+    } else {
+        const char* weight = !include_defaults && font ? "normal" : "400";
+        if (font && font->font_weight) {
+            const CssEnumInfo* value = css_enum_info(font->font_weight);
+            weight = value ? (const char*)value->name : "normal";
+        }
+        strbuf_append_format(buf, "\"weight\": \"%s\"%s", weight,
+                             weight_terminator);
+    }
+    if (include_decoration) {
+        const char* decoration = "none";
+        if (font) {
+            const CssEnumInfo* value = css_enum_info(font->text_deco);
+            if (value) decoration = (const char*)value->name;
+        }
+        strbuf_append_char_n(buf, ' ', indent + 2);
+        strbuf_append_format(buf, "\"decoration\": \"%s\"\n", decoration);
+    }
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, trailing_comma ? "},\n" : "}");
+}
+
 static void print_non_rendered_table_marker_json(View* view, StrBuf* buf, int indent) {
     DomElement* elem = lam::dom_require_element(view);
     const char* tag_name = elem->node_name() ? elem->node_name() : "unknown";
@@ -2053,43 +2104,7 @@ static void print_non_rendered_table_marker_json(View* view, StrBuf* buf, int in
                              elem->inl()->color.c);
     }
 
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"font\": {\n");
-    strbuf_append_char_n(buf, ' ', indent + 6);
-    if (elem->font && elem->fontp()->family) {
-        strbuf_append_format(buf, "\"family\": \"%s\",\n", elem->fontp()->family);
-    } else {
-        strbuf_append_str(buf, "\"family\": \"Times\",\n");
-    }
-    strbuf_append_char_n(buf, ' ', indent + 6);
-    if (elem->font && elem->fontp()->font_size > 0.0f) {
-        strbuf_append_format(buf, "\"size\": %g,\n", elem->fontp()->font_size);
-    } else {
-        strbuf_append_str(buf, "\"size\": 16,\n");
-    }
-    strbuf_append_char_n(buf, ' ', indent + 6);
-    const char* style_str = "normal";
-    if (elem->font) {
-        auto style_val = css_enum_info(elem->fontp()->font_style);
-        if (style_val) style_str = (const char*)style_val->name;
-    }
-    strbuf_append_format(buf, "\"style\": \"%s\",\n", style_str);
-    strbuf_append_char_n(buf, ' ', indent + 6);
-    if (elem->font && elem->fontp()->font_weight_numeric > 0) {
-        char weight_buf[8];
-        snprintf(weight_buf, sizeof(weight_buf), "%d",
-                 elem->fontp()->font_weight_numeric);
-        strbuf_append_format(buf, "\"weight\": \"%s\"\n", weight_buf);
-    } else if (elem->font && elem->fontp()->font_weight) {
-        const char* weight_str = "normal";
-        auto weight_val = css_enum_info(elem->fontp()->font_weight);
-        if (weight_val) weight_str = (const char*)weight_val->name;
-        strbuf_append_format(buf, "\"weight\": \"%s\"\n", weight_str);
-    } else {
-        strbuf_append_str(buf, "\"weight\": \"400\"\n");
-    }
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "},\n");
+    append_font_json(elem, buf, indent + 4, true, true, false, true);
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"_cssPropertiesComplete\": true\n");
     append_json_after_object(buf, indent + 2, "children", "[]\n");
@@ -2311,9 +2326,10 @@ static bool is_unrendered_replaced_dom_child(View* child) {
     return parent->display.inner == RDT_DISPLAY_REPLACED;
 }
 
-// Helper to print children, skipping anonymous wrapper elements
-static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool* first_child) {
-    View* child = (lam::view_require_element(block))->first_child;
+// Block and inline layout-tree nodes share one filtered child serialization walk.
+static void print_json_children(ViewElement* parent, StrBuf* buf, int indent,
+                                bool inline_parent, bool* first_child) {
+    View* child = parent ? parent->first_child : nullptr;
     while (child) {
         if (child->view_type == RDT_VIEW_NONE) {
             if (is_non_rendered_table_marker(child)) {
@@ -2330,14 +2346,14 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool*
                 child = child->next_sibling;
                 continue;
             }
-            if (is_unrendered_replaced_dom_child(child)) {
+            if (!inline_parent && is_unrendered_replaced_dom_child(child)) {
                 if (!*first_child) strbuf_append_str(buf, ",\n");
                 *first_child = false;
                 print_unrendered_dom_json(child->as_element(), buf, indent, true);
                 child = child->next_sibling;
                 continue;
             }
-            if (child->is_element()) {
+            if (!inline_parent && child->is_element()) {
                 DomElement* elmt = lam::dom_require_element(child);
                 const char* tag = child->node_name();
                 if (elmt->display.outer == CSS_VALUE_NONE && !should_skip_non_rendered_dom_tag(tag)) {
@@ -2351,7 +2367,7 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool*
         }
 
         // Skip display:none elements - they don't participate in layout or rendering
-        if (child->is_element()) {
+        if (!inline_parent && child->is_element()) {
             DomElement* elmt = lam::dom_require_element(child);
             if (elmt->display.outer == CSS_VALUE_NONE) {
                 log_debug("JSON: Skipping display:none element %s", child->node_name());
@@ -2363,31 +2379,31 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool*
         // Skip pseudo-elements (::before, ::after, ::marker) - these are rendering artifacts not part of DOM
         const char* tag = child->node_name();
         if (tag && (strcmp(tag, "::before") == 0 || strcmp(tag, "::after") == 0 || strcmp(tag, "::marker") == 0)) {
-            log_debug("JSON: Skipping pseudo-element %s from serialized tree", tag);
+            log_debug("JSON: Skipping pseudo-element %s from child serialization", tag);
             child = child->next();
             continue;
         }
 
         // ::first-letter pseudo-element: unwrap the wrapper, output its text children directly
-        // Browsers don't expose ::first-letter as a DOM node in the view tree, so we flatten
-        // its children (text nodes) into the parent to match browser reference output.
         if (tag && strcmp(tag, "::first-letter") == 0) {
-            log_debug("JSON: Unwrapping ::first-letter pseudo-element, outputting children directly");
+            log_debug("JSON: Unwrapping ::first-letter pseudo-element in child serialization");
             child = print_first_letter_json(child, buf, indent, first_child);
             continue;
         }
 
         // Skip HTML comments - they don't participate in layout
         if (tag && (strcmp(tag, "#comment") == 0 || strcmp(tag, "!--") == 0)) {
-            log_debug("JSON: Skipping HTML comment node");
+            log_debug("JSON: Skipping HTML comment node from child serialization");
             child = child->next();
             continue;
         }
 
         // For anonymous elements, skip the wrapper but process its children
-        if (child->is_block() && is_anonymous_element(lam::view_require_block(child))) {
+        if (!inline_parent && child->is_block() &&
+            is_anonymous_element(lam::view_require_block(child))) {
             log_debug("JSON: Skipping anonymous element %s, processing its children", child->node_name());
-            print_children_json(lam::view_require_block(child), buf, indent, first_child);
+            print_json_children(lam::view_require_element(child), buf, indent,
+                                false, first_child);
             child = child->next();
             continue;
         }
@@ -2400,21 +2416,20 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool*
         if (!*first_child) { strbuf_append_str(buf, ",\n"); }
         *first_child = false;
 
-        if (child->is_block()) {
-            print_block_json(lam::view_require_block(child), buf, indent);
-        }
-        else if (child->view_type == RDT_VIEW_TEXT) {
-            // Use combined text printing to merge consecutive text nodes
-            View* last_text = print_combined_text_json(lam::view_require_text(child), buf, indent);
-            child = last_text;  // Skip to the last text node (loop will advance to next)
-        }
-        else if (child->view_type == RDT_VIEW_BR) {
+        if (child->view_type == RDT_VIEW_TEXT) {
+            if (inline_parent) {
+                print_text_json(lam::view_require_text(child), buf, indent);
+            } else {
+                // Block children merge adjacent text nodes in the reference tree.
+                child = print_combined_text_json(lam::view_require_text(child), buf, indent);
+            }
+        } else if (child->view_type == RDT_VIEW_BR) {
             print_br_json(child, buf, indent);
-        }
-        else if (child->view_type == RDT_VIEW_INLINE) {
+        } else if (child->view_type == RDT_VIEW_INLINE) {
             print_inline_json(lam::view_require_element(child), buf, indent);
-        }
-        else {
+        } else if (child->is_block()) {
+            print_block_json(lam::view_require_block(child), buf, indent);
+        } else {
             // Handle other view types
             strbuf_append_char_n(buf, ' ', indent);
             strbuf_append_str(buf, "{\n");
@@ -2824,50 +2839,8 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
         strbuf_append_str(buf, "},\n");
     }
 
-    // Font properties (output for all elements, use defaults if not set)
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"font\": {\n");
-    strbuf_append_char_n(buf, ' ', indent + 6);
-    if (block->font && block->fontp()->family) {
-        strbuf_append_format(buf, "\"family\": \"%s\",\n", block->fontp()->family);
-    } else {
-        // CSS default font-family (browser default is typically Times/serif)
-        strbuf_append_str(buf, "\"family\": \"Times\",\n");
-    }
-    strbuf_append_char_n(buf, ' ', indent + 6);
-    if (block->font && block->fontp()->font_size > 0) {
-        // computed font sizes retain fractional CSS-unit precision across display types.
-        strbuf_append_format(buf, "\"size\": %g,\n", block->fontp()->font_size);
-    } else {
-        // CSS default font-size is 16px (medium)
-        strbuf_append_str(buf, "\"size\": 16,\n");
-    }
-    strbuf_append_char_n(buf, ' ', indent + 6);
-    if (block->font && block->fontp()->font_style) {
-        const char* style_str = "normal";
-        auto style_val = css_enum_info(block->fontp()->font_style);
-        if (style_val) style_str = (const char*)style_val->name;
-        strbuf_append_format(buf, "\"style\": \"%s\",\n", style_str);
-    } else {
-        // CSS default font-style is normal
-        strbuf_append_str(buf, "\"style\": \"normal\",\n");
-    }
-    strbuf_append_char_n(buf, ' ', indent + 6);
-    if (block->font && block->fontp()->font_weight_numeric > 0) {
-        char weight_buf[8];
-        snprintf(weight_buf, sizeof(weight_buf), "%d", block->fontp()->font_weight_numeric);
-        strbuf_append_format(buf, "\"weight\": \"%s\"\n", weight_buf);
-    } else if (block->font && block->fontp()->font_weight) {
-        const char* weight_str = "normal";
-        auto weight_val = css_enum_info(block->fontp()->font_weight);
-        if (weight_val) weight_str = (const char*)weight_val->name;
-        strbuf_append_format(buf, "\"weight\": \"%s\"\n", weight_str);
-    } else {
-        // CSS default font-weight is 400 (normal)
-        strbuf_append_str(buf, "\"weight\": \"400\"\n");
-    }
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "},\n");
+    // Font properties are output for every element, using CSS initial values.
+    append_font_json(block, buf, indent + 4, true, true, false, true);
 
     // Inline properties (color, opacity, etc.)
     if (block->in_line) {
@@ -2923,7 +2896,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
     append_json_after_object(buf, indent + 2, "children", "[\n");
 
     bool first_child = true;
-    print_children_json(block, buf, indent + 4, &first_child);
+    print_json_children(block, buf, indent + 4, false, &first_child);
 
     strbuf_append_str(buf, "\n");
     strbuf_append_char_n(buf, ' ', indent + 2);
@@ -3530,130 +3503,18 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
         }
     }
 
-    // Add font properties if available
+    // Inline views omit inherited defaults when no local FontProp is present.
     if (span->font) {
         strbuf_append_str(buf, ",\n");
-        strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_str(buf, "\"font\": {\n");
-        strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"family\": \"%s\",\n", span->fontp()->family);
-        strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"size\": %g,\n", span->fontp()->font_size);
-        strbuf_append_char_n(buf, ' ', indent + 6);
-        if (!layout_json_is_compact_v2()) {
-            const char* style_str = "normal";
-            auto style_val = css_enum_info(span->fontp()->font_style);
-            if (style_val) style_str = (const char*)style_val->name;
-            strbuf_append_format(buf, "\"style\": \"%s\",\n", style_str);
-            strbuf_append_char_n(buf, ' ', indent + 6);
-        }
-        const char* weight_terminator = layout_json_is_compact_v2() ? "\n" : ",\n";
-        if (span->fontp()->font_weight_numeric > 0) {
-            char weight_buf[8];
-            snprintf(weight_buf, sizeof(weight_buf), "%d", span->fontp()->font_weight_numeric);
-            strbuf_append_format(buf, "\"weight\": \"%s\"%s", weight_buf, weight_terminator);
-        } else {
-            const char* weight_str = "normal";
-            auto weight_val = css_enum_info(span->fontp()->font_weight);
-            if (weight_val) weight_str = (const char*)weight_val->name;
-            strbuf_append_format(buf, "\"weight\": \"%s\"%s", weight_str, weight_terminator);
-        }
-        if (!layout_json_is_compact_v2()) {
-            strbuf_append_char_n(buf, ' ', indent + 6);
-            const char* deco_str = "none";
-            auto deco_val = css_enum_info(span->fontp()->text_deco);
-            if (deco_val) deco_str = (const char*)deco_val->name;
-            strbuf_append_format(buf, "\"decoration\": \"%s\"\n", deco_str);
-        }
-        strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_str(buf, "}");
+        bool verbose = !layout_json_is_compact_v2();
+        append_font_json(span, buf, indent + 4, false, verbose, verbose, false);
     }
 
     strbuf_append_str(buf, "\n");
     append_json_after_object(buf, indent + 2, "children", "[\n");
 
-    View* child = (lam::view_require_element(span))->first_child;
     bool first_child = true;
-    while (child) {
-        if (child->view_type == RDT_VIEW_NONE) {
-            if (is_non_rendered_table_marker(child)) {
-                if (!first_child) {
-                    strbuf_append_str(buf, ",\n");
-                }
-                first_child = false;
-                print_non_rendered_table_marker_json(child, buf, indent + 4);
-                child = child->next_sibling;
-                continue;
-            }
-            if (is_unrendered_shadow_dom_child(child)) {
-                if (!first_child) strbuf_append_str(buf, ",\n");
-                first_child = false;
-                print_unrendered_dom_json(child->as_element(), buf, indent + 4, false);
-                child = child->next_sibling;
-                continue;
-            }
-            child = child->next_sibling;
-            continue;  // skip the view
-        }
-
-        // Skip pseudo-elements (::before, ::after, ::marker) - these are rendering artifacts not part of DOM
-        const char* tag = child->node_name();
-        if (tag && (strcmp(tag, "::before") == 0 || strcmp(tag, "::after") == 0 || strcmp(tag, "::marker") == 0)) {
-            log_debug("JSON: Skipping pseudo-element %s from inline children", tag);
-            child = child->next();
-            continue;
-        }
-
-        if (tag && strcmp(tag, "::first-letter") == 0) {
-            log_debug("JSON: Unwrapping ::first-letter pseudo-element from inline children");
-            child = print_first_letter_json(child, buf, indent + 4, &first_child);
-            continue;
-        }
-
-        // Skip HTML comments - they don't participate in layout
-        if (tag && (strcmp(tag, "#comment") == 0 || strcmp(tag, "!--") == 0)) {
-            log_debug("JSON: Skipping HTML comment node from inline children");
-            child = child->next();
-            continue;
-        }
-
-        if (child->view_type == RDT_VIEW_TEXT && !text_has_visible_rect(lam::view_require_text(child))) {
-            child = child->next_sibling;
-            continue;
-        }
-
-        if (!first_child) {
-            strbuf_append_str(buf, ",\n");
-        }
-        first_child = false;
-
-        if (child->view_type == RDT_VIEW_TEXT) {
-            print_text_json(lam::view_require_text(child), buf, indent + 4);
-        }
-        else if (child->view_type == RDT_VIEW_BR) {
-            print_br_json(child, buf, indent + 4);
-        }
-        else if (child->view_type == RDT_VIEW_INLINE) {
-            // Nested inline elements
-            print_inline_json(lam::view_require_element(child), buf, indent + 4);
-        }
-        else if (child->is_block()) {
-            // Block inside inline (block-in-inline case per CSS 2.1 Section 9.2.1.1)
-            print_block_json(lam::view_require_block(child), buf, indent + 4);
-        } else {
-            // Handle other child types
-            strbuf_append_char_n(buf, ' ', indent + 4);
-            strbuf_append_str(buf, "{\n");
-            strbuf_append_char_n(buf, ' ', indent + 6);
-            strbuf_append_str(buf, "\"type\": ");
-            append_json_string(buf, child->view_name());
-            strbuf_append_str(buf, "\n");
-            strbuf_append_char_n(buf, ' ', indent + 4);
-            strbuf_append_str(buf, "}");
-        }
-
-        child = child->next();
-    }
+    print_json_children(span, buf, indent + 4, true, &first_child);
 
     strbuf_append_str(buf, "\n");
     strbuf_append_char_n(buf, ' ', indent + 2);

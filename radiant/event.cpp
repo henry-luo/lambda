@@ -1377,9 +1377,9 @@ void* radiant_document_element_from_point(DomDocument* doc, float x, float y) {
     event_context_init(&evcon, uicon, &hit_event);
     target_html_doc(&evcon, doc->view_tree);
     uicon->document = saved_document;
-    DomNode* node = static_cast<DomNode*>(evcon.target);
-    while (node && !node->is_element()) node = node->parent;
-    void* hit = node && node->is_element() ? (void*)node->as_element() : nullptr;
+    DomElement* element = view_geometry_nearest_dom_element(
+        static_cast<DomNode*>(evcon.target), 0);
+    void* hit = element;
     event_context_cleanup(&evcon);
     return hit;
 }
@@ -1632,10 +1632,6 @@ static DomElement* rich_editable_from_target(View* target) {
     return editing_surface_is_rich(&surface) ? surface.owner : nullptr;
 }
 
-static bool dom_node_is_descendant_of(DomNode* node, DomNode* ancestor) {
-    return view_geometry_dom_is_descendant(node, ancestor);
-}
-
 static void collapse_active_text_control_selection_for_rich_target(DocState* state,
                                                                    View* target) {
     if (!state || !target) return;
@@ -1646,7 +1642,7 @@ static void collapse_active_text_control_selection_for_rich_target(DocState* sta
 
     DomNode* target_node = static_cast<DomNode*>(target);
     DomNode* text_control_node = static_cast<DomNode*>(elem);
-    if (dom_node_is_descendant_of(target_node, text_control_node)) return;
+    if (view_geometry_dom_is_descendant(target_node, text_control_node)) return;
 
     tc_ensure_init(elem);
     uint32_t end = elem->form ? elem->form->current_value_u16_len : 0;
@@ -6657,8 +6653,6 @@ static bool post_html_handler_incremental_rebuild(
     return true;
 }
 
-static DomElement* radiant_view_to_dom_element(View* v);
-
 static void post_html_handler_rebuild(EventContext* evcon,
                                        std::chrono::high_resolution_clock::time_point t_start,
                                        std::chrono::high_resolution_clock::time_point t_handler) {
@@ -6783,24 +6777,6 @@ void radiant_reconcile_dom_mutations(UiContext* uicon, DomDocument* doc) {
     // Timers, promises, and observer callbacks run outside native dispatch but
     // their DOM changes require the identical recascade and retained relayout.
     post_html_handler_rebuild(&evcon, now, now);
-}
-
-/**
- * §7 unification (U-0): walk a layout View up to the nearest DOM element node.
- * Layout views are themselves DomNode-derived, but text/anonymous views map
- * to their containing element for event-target purposes.
- */
-static DomElement* radiant_view_to_dom_element(View* v) {
-    DomNode* node = static_cast<DomNode*>(v);
-    int depth = 0;
-    while (node && depth < 200) {
-        if (node->node_type == DOM_NODE_ELEMENT) {
-            return lam::dom_require_element(node);
-        }
-        node = node->parent;
-        depth++;
-    }
-    return nullptr;
 }
 
 // Internal: enter/exit the JS EvalContext that DOM event callbacks run under.
@@ -7360,7 +7336,7 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
         if (dispatched) *dispatched = handled;
         return read_prevented && evcon ? evcon->default_prevented : false;
     }
-    DomElement* dom_target = radiant_view_to_dom_element(target);
+    DomElement* dom_target = view_geometry_nearest_dom_element(target);
     if (!dom_target || !build_event) return false;
     JsDispatchScope dispatch_scope(evcon);
     DomDocument* target_doc = event_context_target_document(evcon);
@@ -7848,7 +7824,7 @@ static Item build_focus_event_item(void* userdata) {
     FocusEventBuildArgs* args = (FocusEventBuildArgs*)userdata;
     Item rel = ItemNull;
     if (args->related) {
-        DomElement* rel_el = radiant_view_to_dom_element(args->related);
+        DomElement* rel_el = view_geometry_nearest_dom_element(args->related);
         if (rel_el) rel = dom_wrap_element(rel_el);
     }
     return js_create_native_focus_event(args->type, rel);
@@ -7917,7 +7893,7 @@ extern "C" bool radiant_dispatch_event_sim_select_change(UiContext* uicon,
             event_context_cleanup(&evcon);
             return false;
         }
-        DomElement* dom_target = radiant_view_to_dom_element(target);
+        DomElement* dom_target = view_geometry_nearest_dom_element(target);
         if (!dom_target) {
             event_context_cleanup(&evcon);
             return false;
@@ -7942,7 +7918,7 @@ extern "C" bool js_dispatch_clipboard_event_to_element(Item target_item, const c
 static bool radiant_dispatch_clipboard_event(EventContext* evcon, View* target,
                                              const char* type)
 {
-    DomElement* dom_target = radiant_view_to_dom_element(target);
+    DomElement* dom_target = view_geometry_nearest_dom_element(target);
     if (!dom_target) return false;
     JsDispatchScope dispatch_scope(evcon);
     if (!dispatch_scope.active) return false;
@@ -7965,7 +7941,7 @@ extern "C" bool js_dispatch_drag_event_to_element(Item target_item,
 static bool radiant_dispatch_drag_event(EventContext* evcon, View* target,
                                         const char* type, double cx, double cy)
 {
-    DomElement* dom_target = radiant_view_to_dom_element(target);
+    DomElement* dom_target = view_geometry_nearest_dom_element(target);
     if (!dom_target) return false;
     JsDispatchScope dispatch_scope(evcon);
     if (!dispatch_scope.active) return false;
@@ -8511,8 +8487,7 @@ static View* find_checkbox_radio_input(View* target) {
         log_debug("find_checkbox_radio_input: label has for='%s'", for_attr);
         // Need to find input with matching id in the document
         // Walk from document root to find matching id
-        View* root = label_element;
-        while (root->parent) root = root->parent;
+        View* root = view_geometry_tree_root(label_element);
 
         // Simple DFS to find element with matching id
         View* search = root;
@@ -12157,11 +12132,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // template and silently declines, which is why arrow keys on a
                 // rich surface reached the "rich key fallback fenced" branch and
                 // did nothing.
-                View* caret_dispatch_target = caret_view;
-                while (caret_dispatch_target && !caret_dispatch_target->is_element()) {
-                    caret_dispatch_target =
-                        static_cast<View*>(static_cast<DomNode*>(caret_dispatch_target)->parent);
-                }
+                DomElement* caret_dispatch_element =
+                    view_geometry_nearest_dom_element(caret_view, 0);
+                View* caret_dispatch_target =
+                    static_cast<View*>(caret_dispatch_element);
                 if (caret_dispatch_target) {
                     radiant_dispatch_behavior_caret_key(&evcon, caret_dispatch_target,
                                                         &caret_key_intent);

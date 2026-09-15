@@ -1615,13 +1615,6 @@ static bool text_control_set_selection_from_byte_offsets(DocState* state,
     return true;
 }
 
-static DomNode* selection_sync_root_from_boundary(const DomBoundary* boundary) {
-    if (!boundary || !boundary->node) return NULL;
-    DomNode* root = boundary->node;
-    while (root->parent) root = root->parent;
-    return root;
-}
-
 static bool selection_sync_boundary_in_root(DomNode* root, const DomBoundary* boundary) {
     if (!root || !boundary || !boundary->node) return false;
     for (DomNode* cur = boundary->node; cur; cur = cur->parent) {
@@ -1660,7 +1653,8 @@ static bool selection_extend_dom_to_focus(DomSelection* selection,
     }
 
     DomBoundary anchor = dom_selection_anchor_boundary(selection);
-    DomNode* current_root = selection_sync_root_from_boundary(focus);
+    DomNode* current_root = focus
+        ? view_geometry_dom_tree_root(focus->node) : nullptr;
     if (current_root && !selection_sync_boundary_in_root(current_root, &anchor)) {
         DomBoundary rebound_anchor = anchor;
         if (!selection_sync_rebind_boundary(current_root, &anchor, &rebound_anchor)) {
@@ -3761,54 +3755,49 @@ void view_state_set_focused(DocState* state, View* view, bool focused) {
         "view_state_set_focused", true);
 }
 
-void doc_state_set_hover_target(DocState* state, View* target) {
+typedef void (*ViewStateTargetSetter)(DocState* state, View* view, bool value,
+                                      bool assert_after_mutation);
+
+// Hover and active targets share the same ancestor-state transaction.
+static void doc_state_set_interaction_target(DocState* state, View* target,
+                                             View** target_slot,
+                                             ViewStateTargetSetter set_state,
+                                             const char* transition_name,
+                                             const char* assertion_name) {
     if (!state) return;
-    View* old_target = state->hover_target;
+    View* old_target = *target_slot;
     if (old_target == target) return;
 
     View* node = old_target;
     while (node) {
-        view_state_set_hovered_internal(state, node, false, false);
+        set_state(state, node, false, false);
         node = static_cast<View*>(node->parent);
     }
 
     node = target;
     while (node) {
-        view_state_set_hovered_internal(state, node, true, false);
+        set_state(state, node, true, false);
         node = static_cast<View*>(node->parent);
     }
 
-    state->hover_target = target;
-    doc_state_log_view_target_transition(state, "hover.target", old_target, target);
+    *target_slot = target;
+    doc_state_log_view_target_transition(state, transition_name, old_target, target);
     state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
-    state_assert_after_mutation(state, "doc_state_set_hover_target");
+    state_assert_after_mutation(state, assertion_name);
+}
+
+void doc_state_set_hover_target(DocState* state, View* target) {
+    if (!state) return;
+    doc_state_set_interaction_target(state, target, &state->hover_target,
+        view_state_set_hovered_internal, "hover.target", "doc_state_set_hover_target");
 }
 
 void doc_state_set_active_target(DocState* state, View* target) {
     if (!state) return;
-    View* old_target = state->active_target;
-    if (old_target == target) return;
-
-    View* node = old_target;
-    while (node) {
-        view_state_set_active_internal(state, node, false, false);
-        node = static_cast<View*>(node->parent);
-    }
-
-    node = target;
-    while (node) {
-        view_state_set_active_internal(state, node, true, false);
-        node = static_cast<View*>(node->parent);
-    }
-
-    state->active_target = target;
-    doc_state_log_view_target_transition(state, "active.target", old_target, target);
-    state->is_dirty = true;
-    state->needs_repaint = true;
-    state->version++;
-    state_assert_after_mutation(state, "doc_state_set_active_target");
+    doc_state_set_interaction_target(state, target, &state->active_target,
+        view_state_set_active_internal, "active.target", "doc_state_set_active_target");
 }
 
 void doc_state_set_drag_state(DocState* state, View* target, bool dragging) {
@@ -5743,81 +5732,46 @@ static int get_view_content_length(View* view) {
     return 0;
 }
 
-/**
- * Find the first navigable view within a subtree (depth-first)
- */
-static View* find_first_navigable_in_subtree(View* root) {
+// Traversal direction changes both sibling order and whether the root precedes its children.
+static View* find_navigable_in_subtree(View* root, bool forward) {
     if (!root) return nullptr;
 
-    if (is_view_navigable(root)) return root;
+    if (forward && is_view_navigable(root)) return root;
 
     if (root->is_element()) {
         DomElement* elem = lam::dom_require_element(root);
         View* child = static_cast<View*>(elem->first_child);
+        if (!forward) {
+            while (child && child->next()) child = child->next();
+        }
         while (child) {
-            View* found = find_first_navigable_in_subtree(child);
+            View* found = find_navigable_in_subtree(child, forward);
             if (found) return found;
-            child = child->next();
+            child = forward ? child->next() : child->prev_placed_view();
         }
     }
 
-    return nullptr;
+    return !forward && is_view_navigable(root) ? root : nullptr;
 }
 
-/**
- * Find the last navigable view within a subtree (depth-first, rightmost)
- */
-static View* find_last_navigable_in_subtree(View* root) {
-    if (!root) return nullptr;
-
-    // First check children (rightmost first)
-    if (root->is_element()) {
-        DomElement* elem = lam::dom_require_element(root);
-        if (elem->first_child) {
-            // Find last child
-            View* child = static_cast<View*>(elem->first_child);
-            View* last_child = child;
-            while (child) {
-                last_child = child;
-                child = child->next();
-            }
-            // Search from last to first
-            while (last_child) {
-                View* found = find_last_navigable_in_subtree(last_child);
-                if (found) return found;
-                last_child = last_child->prev_placed_view();
-            }
-        }
-    }
-
-    if (is_view_navigable(root)) return root;
-
-    return nullptr;
-}
-
-/**
- * Find the next navigable view in document order (depth-first traversal)
- * Returns NULL if there is no next view
- */
-static View* find_next_navigable_view(View* current) {
+// Navigate depth-first in either document-order direction outside the current subtree.
+static View* find_adjacent_navigable_view(View* current, bool forward) {
     if (!current) return nullptr;
 
-    // First try next sibling and its subtree
-    View* next = current->next();
-    while (next) {
-        View* found = find_first_navigable_in_subtree(next);
+    View* sibling = forward ? current->next() : current->prev_placed_view();
+    while (sibling) {
+        View* found = find_navigable_in_subtree(sibling, forward);
         if (found) return found;
-        next = next->next();
+        sibling = forward ? sibling->next() : sibling->prev_placed_view();
     }
 
-    // No more siblings, go up to parent and try its next sibling
     View* parent = current->parent;
     while (parent) {
-        View* parent_next = parent->next();
-        while (parent_next) {
-            View* found = find_first_navigable_in_subtree(parent_next);
+        sibling = forward ? parent->next() : parent->prev_placed_view();
+        while (sibling) {
+            View* found = find_navigable_in_subtree(sibling, forward);
             if (found) return found;
-            parent_next = parent_next->next();
+            sibling = forward ? sibling->next() : sibling->prev_placed_view();
         }
         parent = parent->parent;
     }
@@ -5825,46 +5779,12 @@ static View* find_next_navigable_view(View* current) {
     return nullptr;
 }
 
-/**
- * Find the previous navigable view in document order
- * Returns NULL if there is no previous view
- */
+static View* find_next_navigable_view(View* current) {
+    return find_adjacent_navigable_view(current, true);
+}
+
 static View* find_prev_navigable_view(View* current) {
-    if (!current) return nullptr;
-
-    log_debug("find_prev_navigable_view: current=%p type=%d", current, current->view_type);
-
-    // First try previous sibling and its subtree (find last navigable)
-    View* prev = current->prev_placed_view();
-    while (prev) {
-        log_debug("  checking prev sibling=%p type=%d", prev, prev->view_type);
-        View* found = find_last_navigable_in_subtree(prev);
-        if (found) {
-            log_debug("  found=%p type=%d in sibling subtree", found, found->view_type);
-            return found;
-        }
-        prev = prev->prev_placed_view();
-    }
-
-    // No more siblings, go up to parent and try its previous sibling
-    View* parent = current->parent;
-    while (parent) {
-        log_debug("  going up to parent=%p type=%d", parent, parent->view_type);
-        View* parent_prev = parent->prev_placed_view();
-        while (parent_prev) {
-            log_debug("  checking parent's prev sibling=%p type=%d", parent_prev, parent_prev->view_type);
-            View* found = find_last_navigable_in_subtree(parent_prev);
-            if (found) {
-                log_debug("  found=%p type=%d in parent sibling subtree", found, found->view_type);
-                return found;
-            }
-            parent_prev = parent_prev->prev_placed_view();
-        }
-        parent = parent->parent;
-    }
-
-    log_debug("  no prev navigable view found");
-    return nullptr;
+    return find_adjacent_navigable_view(current, false);
 }
 
 int utf8_offset_by_chars(unsigned char* text_data, int current_offset, int delta) {
@@ -7057,6 +6977,55 @@ void state_store_selection_start_pointer(DocState* state, View* view, int char_o
     log_debug("selection_start: view=%p, offset=%d", view, char_offset);
 }
 
+// Both public extend forms use the same DOM/text-control selection transaction.
+static void state_store_selection_extend_internal(DocState* state, View* focus_view,
+                                                  int char_offset,
+                                                  const char* operation_name) {
+    DomSelection* selection = sync_ensure_selection(state);
+    if (!selection) return;
+    SelectionSnapshotFields snapshot = {};
+    selection_read_snapshot_fields(state, &snapshot);
+    bool was_selecting = state->editing.pointer_selecting;
+    if (!focus_view) {
+        focus_view = snapshot.focus_view ? snapshot.focus_view : snapshot.anchor_view;
+        if (!focus_view) focus_view = caret_get_view(state);
+    }
+    if (selection_is_text_control_view(focus_view)) {
+        int anchor_offset = snapshot.anchor_view == focus_view ?
+            snapshot.anchor_offset : snapshot.focus_offset;
+        if (!text_control_set_selection_from_byte_offsets(state, focus_view,
+                anchor_offset, char_offset, operation_name)) {
+            log_debug("%s: text-control extend rejected", operation_name);
+            return;
+        }
+        state->editing.pointer_selecting = was_selecting;
+        state->selection_layout_dirty = true;
+        state->needs_repaint = true;
+        selection_log_transition(state, "extend_text_control_selection",
+            snapshot.anchor_view, snapshot.anchor_offset, focus_view, char_offset);
+        log_debug("%s: text-control focus_view=%p, focus_offset=%d",
+            operation_name, focus_view, char_offset);
+        return;
+    }
+    DomBoundary focus = boundary_from_view_offset(focus_view, char_offset);
+    if (!focus.node) return;
+
+    const char* exc = NULL;
+    if (!selection_extend_dom_to_focus(selection, &focus, &exc)) {
+        log_debug("%s: extend rejected: %s", operation_name, exc ? exc : "?");
+        return;
+    }
+    state->editing.pointer_selecting = was_selecting;
+    state->selection_layout_dirty = true;
+    state->needs_repaint = true;
+    selection_log_transition(state, "extend_to_boundary",
+        snapshot.anchor_view, snapshot.anchor_offset,
+        focus_view, char_offset);
+
+    log_debug("%s: focus_view=%p, focus_offset=%d, anchor_view=%p, collapsed=%d",
+        operation_name, focus_view, char_offset, snapshot.anchor_view, snapshot.collapsed);
+}
+
 void state_store_selection_extend_to_offset(DocState* state, int char_offset) {
     if (!state) return;
 
@@ -7070,45 +7039,8 @@ void state_store_selection_extend_to_offset(DocState* state, int char_offset) {
         return;
     }
 
-    DomSelection* selection = sync_ensure_selection(state);
-    if (!selection) return;
-    SelectionSnapshotFields snapshot = {};
-    selection_read_snapshot_fields(state, &snapshot);
-    bool was_selecting = state->editing.pointer_selecting;
-    View* focus_view = snapshot.focus_view ? snapshot.focus_view : snapshot.anchor_view;
-    if (!focus_view) focus_view = caret_get_view(state);
-    if (selection_is_text_control_view(focus_view)) {
-        int anchor_offset = snapshot.anchor_view == focus_view ?
-            snapshot.anchor_offset : snapshot.focus_offset;
-        if (!text_control_set_selection_from_byte_offsets(state, focus_view,
-                anchor_offset, char_offset, "selection_extend")) {
-            log_debug("selection_extend: text-control extend rejected");
-            return;
-        }
-        state->editing.pointer_selecting = was_selecting;
-        state->selection_layout_dirty = true;
-        state->needs_repaint = true;
-        selection_log_transition(state, "extend_text_control_selection",
-            snapshot.anchor_view, snapshot.anchor_offset, focus_view, char_offset);
-        log_debug("selection_extend: text-control focus=%d", char_offset);
-        return;
-    }
-    DomBoundary focus = boundary_from_view_offset(focus_view, char_offset);
-    if (!focus.node) return;
-
-    const char* exc = NULL;
-    if (!selection_extend_dom_to_focus(selection, &focus, &exc)) {
-        log_debug("selection_extend: extend rejected: %s", exc ? exc : "?");
-        return;
-    }
-    state->editing.pointer_selecting = was_selecting;
-    state->selection_layout_dirty = true;
-    state->needs_repaint = true;
-    selection_log_transition(state, "extend_to_boundary",
-        snapshot.anchor_view, snapshot.anchor_offset,
-        focus_view, char_offset);
-
-    log_debug("selection_extend: focus=%d, collapsed=%d", char_offset, snapshot.collapsed);
+    state_store_selection_extend_internal(state, nullptr, char_offset,
+                                          "selection_extend");
 }
 
 void state_store_selection_extend_to_view(DocState* state, View* view, int char_offset) {
@@ -7124,47 +7056,8 @@ void state_store_selection_extend_to_view(DocState* state, View* view, int char_
         return;
     }
 
-    DomSelection* selection = sync_ensure_selection(state);
-    if (!selection) return;
-    SelectionSnapshotFields snapshot = {};
-    selection_read_snapshot_fields(state, &snapshot);
-    bool was_selecting = state->editing.pointer_selecting;
-
-    if (selection_is_text_control_view(view)) {
-        int anchor_offset = snapshot.anchor_view == view ?
-            snapshot.anchor_offset : snapshot.focus_offset;
-        if (!text_control_set_selection_from_byte_offsets(state, view,
-                anchor_offset, char_offset, "selection_extend_to_view")) {
-            log_debug("selection_extend_to_view: text-control extend rejected");
-            return;
-        }
-        state->editing.pointer_selecting = was_selecting;
-        state->selection_layout_dirty = true;
-        state->needs_repaint = true;
-        selection_log_transition(state, "extend_text_control_selection",
-            snapshot.anchor_view, snapshot.anchor_offset,
-            view, char_offset);
-        log_debug("selection_extend_to_view: text-control focus_view=%p, focus_offset=%d", view, char_offset);
-        return;
-    }
-
-    DomBoundary focus = boundary_from_view_offset(view, char_offset);
-    if (!focus.node) return;
-
-    const char* exc = NULL;
-    if (!selection_extend_dom_to_focus(selection, &focus, &exc)) {
-        log_debug("selection_extend_to_view: extend rejected: %s", exc ? exc : "?");
-        return;
-    }
-    state->editing.pointer_selecting = was_selecting;
-    state->selection_layout_dirty = true;
-    state->needs_repaint = true;
-    selection_log_transition(state, "extend_to_boundary",
-        snapshot.anchor_view, snapshot.anchor_offset,
-        view, char_offset);
-
-    log_debug("selection_extend_to_view: focus_view=%p, focus_offset=%d, anchor_view=%p, collapsed=%d",
-        view, char_offset, snapshot.anchor_view, snapshot.collapsed);
+    state_store_selection_extend_internal(state, view, char_offset,
+                                          "selection_extend_to_view");
 }
 
 void state_store_selection_set_view_offsets(DocState* state, View* view, int anchor_offset, int focus_offset) {
@@ -7679,14 +7572,6 @@ static void focus_set_within_chain(DocState* state, View* view, bool set) {
     }
 }
 
-static View* focus_pseudo_root(View* view) {
-    View* root = view;
-    while (root && root->parent) {
-        root = static_cast<View*>(root->parent);
-    }
-    return root;
-}
-
 static void focus_clear_pseudo_subtree(DocState* state, View* node) {
     if (!state || !node) return;
     focus_set_pseudo(state, node, STATE_FOCUS, PSEUDO_STATE_FOCUS, false);
@@ -7840,8 +7725,8 @@ static void focus_set_internal(DocState* state, View* view, bool from_keyboard,
     focus->from_mouse = !from_keyboard;
     focus->focus_visible = from_keyboard;  // :focus-visible only for keyboard
 
-    View* old_root = focus_pseudo_root(old_focus);
-    View* new_root = focus_pseudo_root(view);
+    View* old_root = view_geometry_tree_root(old_focus);
+    View* new_root = view_geometry_tree_root(view);
     if (old_root) {
         focus_clear_pseudo_subtree(state, old_root);
     }
@@ -8148,28 +8033,6 @@ static void append_close_tag_for_clipboard(StrBuf* sb, DomElement* element) {
     strbuf_append_char(sb, '>');
 }
 
-static DomText* first_text_descendant_for_clipboard(DomNode* node) {
-    if (!node) return NULL;
-    if (node->is_text()) return node->as_text();
-    if (node->is_element()) {
-        for (DomNode* child = node->as_element()->first_child; child; child = child->next_sibling) {
-            DomText* hit = first_text_descendant_for_clipboard(child);
-            if (hit) return hit;
-        }
-    }
-    return NULL;
-}
-
-static DomText* next_text_after_for_clipboard(DomNode* node) {
-    for (DomNode* n = node; n; n = n->parent) {
-        for (DomNode* sibling = n->next_sibling; sibling; sibling = sibling->next_sibling) {
-            DomText* hit = first_text_descendant_for_clipboard(sibling);
-            if (hit) return hit;
-        }
-    }
-    return NULL;
-}
-
 static DomNode* child_at_dom_offset(DomElement* element, uint32_t offset) {
     if (!element) return NULL;
     DomNode* child = element->first_child;
@@ -8184,12 +8047,12 @@ static DomText* first_text_in_range_for_clipboard(const DomRange* range) {
     if (start->is_element()) {
         DomNode* child = child_at_dom_offset(start->as_element(), range->start.offset);
         if (child) {
-            DomText* hit = first_text_descendant_for_clipboard(child);
+            DomText* hit = dom_range_edge_text(child, false);
             if (hit) return hit;
-            return next_text_after_for_clipboard(child);
+            return dom_range_next_text_after_any(child);
         }
     }
-    return next_text_after_for_clipboard(start);
+    return dom_range_next_text_after_any(start);
 }
 
 static bool boundary_before_or_equal(const DomBoundary* a, const DomBoundary* b) {
@@ -8252,7 +8115,7 @@ static char* extract_dom_range_to_arena(DomRange* range, Arena* arena,
             append_selected(sb, text, slice_start.offset, slice_end.offset);
         }
         if (!boundary_before_or_equal(&text_end, &range->end) || text_end.node == range->end.node) break;
-        text = next_text_after_for_clipboard(static_cast<DomNode*>(text));
+        text = dom_range_next_text_after_any(static_cast<DomNode*>(text));
     }
     char* result = sb->length > 0 ? arena_strdup(arena, sb->str) : NULL;
     strbuf_free(sb);
