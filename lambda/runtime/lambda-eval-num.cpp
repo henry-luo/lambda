@@ -1159,20 +1159,13 @@ static Item fn_numeric_rounding(Item item, NumericVectorUnaryOp vector_op,
     return ItemError;
 }
 
-Item fn_round(Item item) {
-    return fn_numeric_rounding(item, NUMERIC_VECTOR_ROUND, "round",
-        round, decimal_round);
-}
-
-Item fn_floor(Item item) {
-    return fn_numeric_rounding(item, NUMERIC_VECTOR_FLOOR, "floor",
-        floor, decimal_floor);
-}
-
-Item fn_ceil(Item item) {
-    return fn_numeric_rounding(item, NUMERIC_VECTOR_CEIL, "ceil",
-        ceil, decimal_ceil);
-}
+#define DEFINE_NUMERIC_ROUNDING(name, vector_op, rounding_op, decimal_op) \
+    Item fn_##name(Item item) { return fn_numeric_rounding(item, vector_op, \
+        #name, rounding_op, decimal_op); }
+DEFINE_NUMERIC_ROUNDING(round, NUMERIC_VECTOR_ROUND, round, decimal_round)
+DEFINE_NUMERIC_ROUNDING(floor, NUMERIC_VECTOR_FLOOR, floor, decimal_floor)
+DEFINE_NUMERIC_ROUNDING(ceil, NUMERIC_VECTOR_CEIL, ceil, decimal_ceil)
+#undef DEFINE_NUMERIC_ROUNDING
 
 static Item numeric_extreme_pair(Item left, Item right, bool minimum, bool* valid) {
     LambdaNumericComparison comparison = lambda_numeric_compare(left, right);

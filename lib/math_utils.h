@@ -10,6 +10,8 @@
 #ifndef LIB_MATH_UTILS_H
 #define LIB_MATH_UTILS_H
 
+#include <math.h>
+
 #ifdef __cplusplus
 
 namespace lib_math {
@@ -84,16 +86,42 @@ static inline float clamp_unit(float v) {
     return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
 }
 
+static inline float math_pi_f(void) {
+    return 3.14159265358979323846f;
+}
+
+static inline double math_pi_d(void) {
+    return 3.141592653589793238462643383279502884;
+}
+
+static inline float math_tau_f(void) {
+    return 2.0f * math_pi_f();
+}
+
 static inline float math_degrees_to_radians(float degrees) {
-    return degrees * 3.14159265358979323846f / 180.0f;
+    return degrees * math_pi_f() / 180.0f;
+}
+
+static inline double math_degrees_to_radians_d(double degrees) {
+    return degrees * math_pi_d() / 180.0;
+}
+
+static inline double math_radians_to_degrees_d(double radians) {
+    return radians * 180.0 / math_pi_d();
 }
 
 static inline float math_gradians_to_radians(float gradians) {
-    return gradians * 3.14159265358979323846f / 200.0f;
+    return gradians * math_pi_f() / 200.0f;
 }
 
 static inline float math_turns_to_radians(float turns) {
-    return turns * 2.0f * 3.14159265358979323846f;
+    return turns * math_tau_f();
+}
+
+// period must be finite and positive. A nonfinite value retains fmodf's NaN result.
+static inline float math_wrap_positive_f(float value, float period) {
+    float wrapped = fmodf(value, period);
+    return wrapped < 0.0f ? wrapped + period : wrapped;
 }
 
 #endif

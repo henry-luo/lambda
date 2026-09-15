@@ -11791,9 +11791,8 @@ static bool dom_svg_dash_is_on_at(const JsDomSvgPathHitContext* context,
         if (out_remaining) *out_remaining = 1.0e30f;
         return true;
     }
-    float position = fmodf(distance + context->stroke_dash_offset,
+    float position = math_wrap_positive_f(distance + context->stroke_dash_offset,
         context->stroke_dash_total);
-    if (position < 0.0f) position += context->stroke_dash_total;
     for (int index = 0; index < context->stroke_dash_count; index++) {
         float length = context->stroke_dash[index];
         if (position < length || index == context->stroke_dash_count - 1) {

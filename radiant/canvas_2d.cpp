@@ -637,7 +637,7 @@ extern "C" bool radiant_canvas_arc(void* canvas_element, float x, float y,
                                       float end_angle, bool counter_clockwise) {
     CanvasEntry* entry = canvas_entry_for_element((DomElement*)canvas_element, true);
     if (!canvas_ensure_path(entry) || radius < 0.0f) return false;
-    const float two_pi = 6.28318530717958647692f;
+    const float two_pi = math_tau_f();
     float delta = end_angle - start_angle;
     if (!counter_clockwise) {
         while (delta < 0.0f) delta += two_pi;
@@ -655,7 +655,7 @@ extern "C" bool radiant_canvas_arc(void* canvas_element, float x, float y,
         entry->path_subpath_y = start_y;
         entry->path_has_subpath = true;
     }
-    int segments = (int)ceilf(fabsf(delta) / 1.57079632679489661923f); // INT_CAST_OK: arc uses at most four cubic quarters.
+    int segments = (int)ceilf(fabsf(delta) / (math_pi_f() * 0.5f)); // INT_CAST_OK: arc uses at most four cubic quarters.
     if (segments < 1) segments = 1;
     float step = delta / (float)segments;
     for (int index = 0; index < segments; index++) {

@@ -40,6 +40,9 @@ TEST(CheckedMath, SizeRoundingAndAlignment) {
 
 TEST(CheckedMath, MulAddCombines) {
     size_t out = 0;
+    EXPECT_TRUE(math_checked_mul_add(sizeof(int), 10, 8, &out));
+    EXPECT_EQ(out, sizeof(int) * 10 + 8);
+    EXPECT_FALSE(math_checked_mul_add(SIZE_MAX, 2, 0, &out));
     EXPECT_TRUE(lam::checked_mul_add(sizeof(int), 10, 8, &out));
     EXPECT_EQ(out, sizeof(int) * 10 + 8);
     EXPECT_FALSE(lam::checked_mul_add(SIZE_MAX, 2, 0, &out));

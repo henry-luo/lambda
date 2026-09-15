@@ -374,12 +374,13 @@ static inline bool rdt_matrix_inverse(const RdtMatrix* matrix,
 
 static inline bool rdt_matrix_project_point(const RdtMatrix* matrix,
                                             float x, float y,
-                                            float* out_x, float* out_y) {
+                                            float* out_x, float* out_y,
+                                            float w_epsilon = 0.0001f) {
     if (!matrix || !out_x || !out_y) return false;
     float w = matrix->e31 * x + matrix->e32 * y + matrix->e33;
     // Existing visual-bounds callers treat an edge-on homogeneous point as
     // affine rather than emitting an unbounded box.
-    if (fabsf(w) < 0.0001f) w = 1.0f;
+    if (fabsf(w) < w_epsilon) w = 1.0f;
     *out_x = (matrix->e11 * x + matrix->e12 * y + matrix->e13) / w;
     *out_y = (matrix->e21 * x + matrix->e22 * y + matrix->e23) / w;
     return true;
