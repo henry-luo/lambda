@@ -29,6 +29,7 @@
 #include "dom_canvas.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
+#include "../../lib/math_utils.h"
 #include "../jube/jube_registry.h"
 #include "../runtime/gc/gc_heap.h"
 #include "../io/mark_builder.hpp"
@@ -11725,8 +11726,7 @@ static float dom_svg_point_segment_distance_sq(float point_x, float point_y,
     }
     float projection = ((point_x - start_x) * dx + (point_y - start_y) * dy) /
         length_sq;
-    if (projection < 0.0f) projection = 0.0f;
-    if (projection > 1.0f) projection = 1.0f;
+    projection = clamp_unit(projection);
     float closest_x = start_x + dx * projection;
     float closest_y = start_y + dy * projection;
     float px = point_x - closest_x;

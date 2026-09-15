@@ -1,5 +1,6 @@
 #include "render.hpp"
 #include "../lambda/input/css/css_value.hpp"
+#include "../lib/math_utils.h"
 #include <math.h>
 
 static bool boundary_has_radius(const BorderProp* border) {
@@ -282,7 +283,7 @@ bool render_paint_boundary_build_linear_gradient(ViewBlock* view, float x, float
     if (!boundary_prepare_gradient(view, x, y, gradient->stops, gradient->stop_count,
                                    stops, stop_capacity, &path, &stop_count)) return false;
 
-    float angle_rad = gradient->angle * (float)M_PI / 180.0f;
+    float angle_rad = math_degrees_to_radians(gradient->angle);
     float dx = sinf(angle_rad);
     float dy = -cosf(angle_rad);
     float half_w = view->width * 0.5f;

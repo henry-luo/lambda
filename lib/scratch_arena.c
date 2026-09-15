@@ -1,5 +1,6 @@
 #include "scratch_arena.h"
 #include "log.h"
+#include "math_checked.hpp"
 #include <string.h>
 
 // alignment for scratch allocations (matches ARENA_DEFAULT_ALIGNMENT)
@@ -52,8 +53,11 @@ void* scratch_alloc(ScratchArena* sa, size_t size) {
     }
 
     // round user size up to alignment so the next header is aligned
-    size_t aligned_size = (size + (SCRATCH_ALIGNMENT - 1)) & ~(SCRATCH_ALIGNMENT - 1);
-    size_t total_size = SCRATCH_HEADER_SIZE + aligned_size;
+    size_t aligned_size = 0;
+    size_t total_size = 0;
+    if (!math_size_align_up(size, SCRATCH_ALIGNMENT, &aligned_size) ||
+        aligned_size > UINT32_MAX ||
+        !math_checked_add(SCRATCH_HEADER_SIZE, aligned_size, &total_size)) return NULL;
 
     // allocate from backing arena (header + payload in one block)
     void* raw = arena_alloc_aligned(sa->arena, total_size, SCRATCH_ALIGNMENT);

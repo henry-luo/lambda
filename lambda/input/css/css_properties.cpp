@@ -9,6 +9,7 @@
 #include <ctype.h>
 #include <math.h>
 #include <stdlib.h>
+#include "../../../lib/math_utils.h"
 #include "../../../lib/str.h"
 
 // Forward declarations for validator functions
@@ -1273,8 +1274,7 @@ static bool css_color_parse_component(const char** cursor, bool alpha,
     if (percentage) end++;
     if (alpha) {
         if (percentage) value *= 0.01f;
-        if (value < 0.0f) value = 0.0f;
-        if (value > 1.0f) value = 1.0f;
+        value = clamp_unit(value);
         *out = (uint8_t)(value * 255.0f + 0.5f);
     } else {
         if (percentage) value = value * 255.0f / 100.0f;

@@ -78,4 +78,8 @@ static inline float clamp_unit(float v) {
     return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
 }
 
+static inline float math_degrees_to_radians(float degrees) {
+    return degrees * 3.14159265358979323846f / 180.0f;
+}
+
 #endif

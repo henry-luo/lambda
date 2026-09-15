@@ -77,12 +77,12 @@ static float parse_transform_angle(const char** source) {
     }
     if (str_istarts_with_cstr(unit, "deg")) {
         *source = unit + 3;
-        return angle * (float)M_PI / 180.0f;
+        return math_degrees_to_radians(angle);
     }
 
     // Preserve the legacy unitless interpretation while normalizing it to radians.
     *source = end;
-    return angle * (float)M_PI / 180.0f;
+    return math_degrees_to_radians(angle);
 }
 
 static const char* skip_css_balanced_block(const char* source) {

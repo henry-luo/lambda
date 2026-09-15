@@ -41,7 +41,7 @@ struct RadiantGradientLine {
 };
 
 inline RadiantGradientLine radiant_linear_gradient_line(Rect rect, float angle) {
-    float angle_rad = angle * (float)M_PI / 180.0f;
+    float angle_rad = math_degrees_to_radians(angle);
     float dx = sinf(angle_rad);
     float dy = -cosf(angle_rad);
     float half_w = rect.width * 0.5f;

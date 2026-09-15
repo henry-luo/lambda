@@ -71,6 +71,10 @@ TEST(MathUtilsTest, ClampUnit) {
     EXPECT_FLOAT_EQ(clamp_unit(1000.0f), 1.0f);
 }
 
+TEST(MathUtilsTest, DegreeRadianConversions) {
+    EXPECT_NEAR(math_degrees_to_radians(180.0f), 3.14159265f, 0.000001f);
+}
+
 TEST(MathUtilsTest, MacroFormsWorkInCppToo) {
     // these macros are exposed to both C and C++.
     EXPECT_EQ(LMB_CLAMP(5, 0, 10), 5);

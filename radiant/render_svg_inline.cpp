@@ -888,7 +888,7 @@ bool svg_parse_transform(const char* transform_str, float matrix[6]) {
                 float values[3] = {};
                 size_t count = str_parse_float_list(p, ", \t\n\r\f\v", values, 3, &p);
                 float angle = values[0];
-                float rad = angle * 3.14159265f / 180.0f;
+                float rad = math_degrees_to_radians(angle);
                 float c_val = cosf(rad);
                 float s_val = sinf(rad);
                 local[0] = c_val; local[1] = s_val;
@@ -911,7 +911,7 @@ bool svg_parse_transform(const char* transform_str, float matrix[6]) {
                 float values[1] = {};
                 str_parse_float_list(p, ", \t\n\r\f\v", values, 1, &p);
                 float angle = values[0];
-                float rad = angle * 3.14159265f / 180.0f;
+                float rad = math_degrees_to_radians(angle);
                 local[2] = tanf(rad);
             }
         } else if (strncmp(p, "skewY", 5) == 0) {
@@ -922,7 +922,7 @@ bool svg_parse_transform(const char* transform_str, float matrix[6]) {
                 float values[1] = {};
                 str_parse_float_list(p, ", \t\n\r\f\v", values, 1, &p);
                 float angle = values[0];
-                float rad = angle * 3.14159265f / 180.0f;
+                float rad = math_degrees_to_radians(angle);
                 local[1] = tanf(rad);
             }
         } else if (strncmp(p, "matrix", 6) == 0) {
@@ -1939,7 +1939,7 @@ static void arc_to_beziers(RdtPath* path, float x1, float y1,
     rx = fabsf(rx);
     ry = fabsf(ry);
 
-    float phi = x_rotation * (float)M_PI / 180.0f;
+    float phi = math_degrees_to_radians(x_rotation);
     float cos_phi = cosf(phi);
     float sin_phi = sinf(phi);
 
@@ -2437,7 +2437,7 @@ static void render_svg_path_marker_end(SvgInlineRenderContext* ctx, Element* ele
     float angle = atan2f(end.tangent_y, end.tangent_x);
     const char* orient = get_svg_attr(marker_elem, "orient");
     if (orient && strcmp(orient, "auto") != 0 && strcmp(orient, "auto-start-reverse") != 0) {
-        angle = parse_svg_length(orient, 0.0f) * (float)M_PI / 180.0f;
+        angle = math_degrees_to_radians(parse_svg_length(orient, 0.0f));
     }
 
     RdtMatrix translate = rdt_matrix_translate(end.x, end.y);
@@ -4126,8 +4126,7 @@ static void render_svg_group(SvgInlineRenderContext* ctx, Element* elem) {
     int op_x0 = 0, op_y0 = 0, op_w = 0, op_h = 0;
     if (opacity_attr) {
         group_op = strtof(opacity_attr, nullptr);
-        if (group_op < 0.0f) group_op = 0.0f;
-        if (group_op > 1.0f) group_op = 1.0f;
+        group_op = clamp_unit(group_op);
         if (group_op < 1.0f) {
             // use backdrop save/composite so overlapping children composite correctly
             // compute bounds in screen coords from either an explicit PDF Form
@@ -4393,8 +4392,7 @@ static float svg_mask_fill_alpha(SvgInlineRenderContext* ctx, Element* child,
                                                      fill_opacity_buf, sizeof(fill_opacity_buf));
     if (fill_opacity) alpha *= strtof(fill_opacity, nullptr);
 
-    if (alpha < 0.0f) alpha = 0.0f;
-    if (alpha > 1.0f) alpha = 1.0f;
+    alpha = clamp_unit(alpha);
     return alpha;
 }
 

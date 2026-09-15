@@ -700,8 +700,7 @@ static Color pdf_gradient_sample_stops(const RdtGradientStop* stops, int stop_co
         if (t > next->offset) continue;
         float span = next->offset - prev->offset;
         float local_t = span > 1e-6f ? (t - prev->offset) / span : 0.0f;
-        if (local_t < 0.0f) local_t = 0.0f;
-        if (local_t > 1.0f) local_t = 1.0f;
+        local_t = clamp_unit(local_t);
         out.r = (uint8_t)(prev->r + (next->r - prev->r) * local_t);
         out.g = (uint8_t)(prev->g + (next->g - prev->g) * local_t);
         out.b = (uint8_t)(prev->b + (next->b - prev->b) * local_t);
@@ -792,8 +791,7 @@ static bool pdf_raster_fallback_gradient(PdfRenderContext* ctx,
         for (int px = 0; px < surface_w; px++) {
             float x = left + ((float)px + 0.5f) * width / (float)surface_w;
             float t = position(paint, x, y);
-            if (t < 0.0f) t = 0.0f;
-            if (t > 1.0f) t = 1.0f;
+            t = clamp_unit(t);
             pixels[py * surface_w + px] =
                 pdf_gradient_sample_stops(stops, stop_count, t).c;
         }
@@ -979,8 +977,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             }
             state->opacity_stack[state->active_effect_depth++] = state->current_opacity;
             state->current_opacity *= p->opacity;
-            if (state->current_opacity < 0.0f) state->current_opacity = 0.0f;
-            if (state->current_opacity > 1.0f) state->current_opacity = 1.0f;
+            state->current_opacity = clamp_unit(state->current_opacity);
             if (HPDF_Page_GSave(ctx->current_page) != HPDF_OK) {
                 log_error("[PDF_PAINT_IR] failed to save PDF graphics state for opacity group");
                 return true;

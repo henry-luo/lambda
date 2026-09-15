@@ -149,9 +149,7 @@ void render_composite_opacity(ImageSurface* surface, const uint32_t* backdrop,
                               int x0, int y0, int width, int height,
                               float opacity) {
     int opacity_i = (int)(opacity * 255.0f + 0.5f);
-    if (opacity_i < 0) opacity_i = 0;
-    if (opacity_i > 255) opacity_i = 255;
     render_composite_apply_region(surface, backdrop, x0, y0, width, height,
-                                  RENDER_COMPOSITE_REGION_OPACITY,
-                                  CSS_VALUE_NORMAL, (uint8_t)opacity_i);
+                                  RENDER_COMPOSITE_REGION_OPACITY, CSS_VALUE_NORMAL,
+                                  clamp_byte(opacity_i));
 }

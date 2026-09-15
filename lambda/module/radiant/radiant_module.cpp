@@ -15,6 +15,7 @@
 #include "../../../lib/mem_context.h"
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/mempool.h"
+#include "../../../lib/math_utils.h"
 #include "../../../lib/str.h"
 #include "../../runtime/side_stack.h"
 #include "../../runtime/gc/gc_heap.h"
@@ -3112,8 +3113,7 @@ RADIANT_C_API Item fn_radiant_set_range_from_point(Item node_item, Item x_item, 
     if (!radiant_item_to_float(x_item, &point_x)) return (Item){.item = b2it(0)};
     (void)y_item;   // a horizontal slider's value depends on x alone
     float fraction = (point_x - origin.x - thumb / 2.0f) / track;
-    if (fraction < 0.0f) fraction = 0.0f;
-    if (fraction > 1.0f) fraction = 1.0f;
+    fraction = clamp_unit(fraction);
 
     double number = (double)f->range_min +
         (double)(f->range_max - f->range_min) * (double)fraction;

@@ -108,7 +108,7 @@ static float resolve_filter_hue_angle(const CssValue* value) {
     } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
         degrees = (float)value->data.number.value;
     }
-    return degrees * ((float)M_PI / 180.0f);
+    return math_degrees_to_radians(degrees);
 }
 
 static FilterFunction* resolve_filter_function(LayoutContext* lycon,
@@ -205,7 +205,7 @@ static bool resolve_keyword_slot(const CssValue* value, SlotType* slot) {
 static float resolve_transform_angle(const CssValue* value) {
     if (!value) return 0.0f;
     if (value->type == CSS_VALUE_TYPE_NUMBER) {
-        return (float)value->data.number.value * (float)M_PI / 180.0f;
+        return math_degrees_to_radians((float)value->data.number.value);
     }
     if (value->type != CSS_VALUE_TYPE_LENGTH && value->type != CSS_VALUE_TYPE_ANGLE) {
         return 0.0f;
@@ -216,7 +216,7 @@ static float resolve_transform_angle(const CssValue* value) {
         case CSS_UNIT_RAD: return angle;
         case CSS_UNIT_GRAD: return angle * (float)M_PI / 200.0f;
         case CSS_UNIT_TURN: return angle * 2.0f * (float)M_PI;
-        default: return angle * (float)M_PI / 180.0f;
+        default: return math_degrees_to_radians(angle);
     }
 }
 

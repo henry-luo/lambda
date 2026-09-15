@@ -35,6 +35,7 @@ TEST(CheckedMath, SizeRoundingAndAlignment) {
     EXPECT_EQ(out, 16u);
     EXPECT_FALSE(math_size_round_up(SIZE_MAX, 2, &out));
     EXPECT_FALSE(math_size_align_up(1, 3, &out));
+
 }
 
 TEST(CheckedMath, MulAddCombines) {
