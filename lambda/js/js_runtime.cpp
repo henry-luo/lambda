@@ -8383,23 +8383,6 @@ static int js_utf16_idx_to_byte(const char* chars, int str_len, int64_t utf16_id
     return pos;
 }
 
-static int js_encode_utf16_unit_wtf8(char* buf, uint32_t code_unit) {
-    code_unit &= 0xFFFF;
-    if (code_unit < 0x80) {
-        buf[0] = (char)code_unit;
-        return 1;
-    }
-    if (code_unit < 0x800) {
-        buf[0] = (char)(0xC0 | (code_unit >> 6));
-        buf[1] = (char)(0x80 | (code_unit & 0x3F));
-        return 2;
-    }
-    buf[0] = (char)(0xE0 | (code_unit >> 12));
-    buf[1] = (char)(0x80 | ((code_unit >> 6) & 0x3F));
-    buf[2] = (char)(0x80 | (code_unit & 0x3F));
-    return 3;
-}
-
 // Only the first registration needs to walk the realm root catalog. Once the
 // fixed cache range is registered for this heap, the ASCII hit path is direct.
 static inline bool js_ascii_substring_cache_is_ready(void) {
@@ -8494,11 +8477,11 @@ static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
             } else {
                 char out[3];
                 if (include_high) {
-                    int out_len = js_encode_utf16_unit_wtf8(out, units[0]);
+                    int out_len = (int)utf8_encode_wtf8(units[0], out);
                     strbuf_append_str_n(buf, out, (size_t)out_len);
                 }
                 if (include_low) {
-                    int out_len = js_encode_utf16_unit_wtf8(out, units[1]);
+                    int out_len = (int)utf8_encode_wtf8(units[1], out);
                     strbuf_append_str_n(buf, out, (size_t)out_len);
                 }
             }
@@ -8578,9 +8561,9 @@ static String* js_string_expand_utf16_subject(String* s) {
             uint16_t units[2];
             utf16_encode(cp, units);
             char out[3];
-            int out_len = js_encode_utf16_unit_wtf8(out, units[0]);
+            int out_len = (int)utf8_encode_wtf8(units[0], out);
             strbuf_append_str_n(buf, out, (size_t)out_len);
-            out_len = js_encode_utf16_unit_wtf8(out, units[1]);
+            out_len = (int)utf8_encode_wtf8(units[1], out);
             strbuf_append_str_n(buf, out, (size_t)out_len);
         } else {
             strbuf_append_str_n(buf, s->chars + byte_start, (size_t)bytes);

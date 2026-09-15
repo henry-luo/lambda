@@ -32,6 +32,9 @@ extern "C" {
  */
 size_t utf8_encode(uint32_t codepoint, char buf[4]);
 
+/** Encode a Unicode or UTF-16 surrogate code unit as WTF-8. */
+size_t utf8_encode_wtf8(uint32_t codepoint, char buf[4]);
+
 /**
  * Encode a Unicode codepoint as null-terminated UTF-8.
  * Same as utf8_encode() but appends '\0' after the encoded bytes.

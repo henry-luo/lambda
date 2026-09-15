@@ -14,6 +14,7 @@
 #endif
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/datetime.h"
+#include "../../lib/escape.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/mem_factory.h"
@@ -3324,44 +3325,15 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
                 case 'u':
                     // Handle Unicode escape sequences: \uXXXX or \u{...}
                     if (i + 5 < content_len && content_start[i + 2] != '{') {
-                        // \uXXXX format (exactly 4 hex digits)
-                        char hex_digits[5] = {0};
-                        memcpy(hex_digits, content_start + i + 2, 4);
-                        char* endptr;
-                        uint32_t code_point = strtoul(hex_digits, &endptr, 16);
-                        if (endptr == hex_digits + 4) {
-                            // Check for surrogate pairs (used for characters > U+FFFF like emojis)
-                            // High surrogate: 0xD800-0xDBFF, Low surrogate: 0xDC00-0xDFFF
-                            if (code_point >= 0xD800 && code_point <= 0xDBFF) {
-                                // This is a high surrogate, look for low surrogate
-                                if (i + 11 < content_len &&
-                                    content_start[i + 6] == '\\' && content_start[i + 7] == 'u') {
-                                    char hex_low[5] = {0};
-                                    memcpy(hex_low, content_start + i + 8, 4);
-                                    char* endptr_low;
-                                    uint32_t low_surrogate = strtoul(hex_low, &endptr_low, 16);
-                                    if (endptr_low == hex_low + 4 &&
-                                        low_surrogate >= 0xDC00 && low_surrogate <= 0xDFFF) {
-                                        // Valid surrogate pair - combine into full codepoint
-                                        code_point = 0x10000 + ((code_point - 0xD800) << 10) + (low_surrogate - 0xDC00);
-                                        i += 6; // skip extra \uXXXX for low surrogate
-                                    } else {
-                                        // Not a valid low surrogate, output replacement char
-                                        code_point = 0xFFFD;
-                                    }
-                                } else {
-                                    // Lone high surrogate - output replacement character
-                                    code_point = 0xFFFD;
-                                }
-                            } else if (code_point >= 0xDC00 && code_point <= 0xDFFF) {
-                                // Lone low surrogate - output replacement character
-                                code_point = 0xFFFD;
-                            }
-
+                        uint32_t code_point = 0;
+                        size_t consumed = 0;
+                        if (escape_decode_utf16_escape(content_start + i + 2,
+                                (size_t)content_len - (size_t)i - 2, true,
+                                &code_point, &consumed)) {
                             stringbuf_append_utf8(str_buf, code_point);
-                            i += 5;  // skip \uXXXX
+                            i += (int)consumed + 1;  // skip \uXXXX and optional low surrogate
                         } else {
-                            log_error("Invalid Unicode escape: \\u%s", hex_digits);
+                            log_error("Invalid Unicode escape sequence");
                             stringbuf_append_char(str_buf, '\\');
                             stringbuf_append_char(str_buf, 'u');
                             i++;

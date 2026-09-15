@@ -1308,6 +1308,15 @@ TEST_F(UtfCodecTest, EncodeRejectsSurrogates) {
     EXPECT_EQ(utf8_encode(0xDFFF, buf), 0u);  // low surrogate end
 }
 
+TEST_F(UtfCodecTest, EncodeWtf8Surrogate) {
+    char buf[4];
+    EXPECT_EQ(utf8_encode_wtf8(0xD800, buf), 3u);
+    EXPECT_EQ((unsigned char)buf[0], 0xEDu);
+    EXPECT_EQ((unsigned char)buf[1], 0xA0u);
+    EXPECT_EQ((unsigned char)buf[2], 0x80u);
+    EXPECT_EQ(utf8_encode_wtf8(0x110000, buf), 0u);
+}
+
 TEST_F(UtfCodecTest, EncodeRejectsOutOfRange) {
     char buf[4];
     EXPECT_EQ(utf8_encode(0x110000, buf), 0u);

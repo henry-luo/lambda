@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../../../lib/str.h"
-#include "../input-utils.hpp"
+#include "../../../lib/escape.h"
 #include "../line_counter.hpp"
 #include <assert.h>
 
@@ -161,68 +161,10 @@ UnicodeChar css_parse_unicode_char(const char* input, size_t max_length) {
     return result;
 }
 
-bool css_is_valid_unicode_escape(const char* input) {
-    if (!input || input[0] != '\\') return false;
-
-    // CSS Unicode escape: \HHHHH (1-6 hex digits)
-    const char* p = input + 1;
-    int hex_count = 0;
-
-    while (*p && css_is_hex_digit(*p) && hex_count < 6) {
-        p++;
-        hex_count++;
-    }
-
-    // Must have at least 1 hex digit
-    if (hex_count == 0) return false;
-
-    // Optional whitespace after hex digits
-    if (*p && css_is_whitespace_unicode(*p)) p++;
-
-    return true;
-}
-
 char* css_decode_unicode_escapes(const char* input, Pool* pool) {
     if (!input || !pool) return NULL;
-
-    size_t input_len = strlen(input);
-    char* result = (char*)pool_alloc(pool, input_len * 4 + 1); // Worst case for UTF-8
-    if (!result) return NULL;
-
-    size_t result_pos = 0;
-    const char* p = input;
-
-    while (*p) {
-        if (*p == '\\' && css_is_valid_unicode_escape(p)) {
-            // Parse Unicode escape
-            p++; // Skip backslash
-            uint32_t codepoint = 0;
-            int hex_count = 0;
-
-            while (*p && css_is_hex_digit(*p) && hex_count < 6) {
-                codepoint = (codepoint << 4) +
-                           (*p >= 'A' ? *p - 'A' + 10 :
-                            *p >= 'a' ? *p - 'a' + 10 : *p - '0');
-                p++;
-                hex_count++;
-            }
-
-            // Skip optional whitespace
-            if (*p && css_is_whitespace_unicode(*p)) p++;
-
-            // Convert codepoint to UTF-8
-            char utf8_buf[5];
-            int utf8_len = codepoint_to_utf8(codepoint, utf8_buf);
-            for (int j = 0; j < utf8_len; j++) {
-                result[result_pos++] = utf8_buf[j];
-            }
-        } else {
-            result[result_pos++] = *p++;
-        }
-    }
-
-    result[result_pos] = '\0';
-    return result;
+    return escape_css_unescape_pool(pool, input, strlen(input), false,
+        ESCAPE_CSS_EOF_PRESERVE, false, true);
 }
 
 // check if input[pos] starts a valid CSS escape sequence
@@ -688,90 +630,6 @@ void css_tokenizer_destroy(CSSTokenizer* tokenizer) {
     (void)tokenizer;
 }
 
-/**
- * Extract and store the token value as a null-terminated string
- * For STRING tokens, strips surrounding quotes
- */
-// unescape CSS escape sequences in a string
-// handles \XXXXXX (1-6 hex digits) and \X (single char escape)
-// returns unescaped string allocated from pool
-static char* css_unescape_string(const char* str, size_t len, Pool* pool) {
-    if (!str || len == 0 || !pool) {
-        char* empty = (char*)pool_alloc(pool, 1);
-        if (empty) empty[0] = '\0';
-        return empty;
-    }
-
-    // allocate buffer (escaped EOF can expand \<EOF> to 3-byte U+FFFD, so allow extra)
-    char* result = (char*)pool_alloc(pool, len * 3 + 1);
-    if (!result) return NULL;
-
-    size_t out_pos = 0;
-    size_t i = 0;
-
-    while (i < len) {
-        if (str[i] == '\\') {
-            if (i + 1 >= len) {
-                // backslash at end of string (escaped EOF) → U+FFFD
-                result[out_pos++] = (char)0xEF;
-                result[out_pos++] = (char)0xBF;
-                result[out_pos++] = (char)0xBD;
-                i++;
-            } else {
-                i++; // skip backslash
-
-                // check if next char is hex digit
-                if ((str[i] >= '0' && str[i] <= '9') ||
-                    (str[i] >= 'a' && str[i] <= 'f') ||
-                    (str[i] >= 'A' && str[i] <= 'F')) {
-
-                    // parse hex escape: \XXXXXX (1-6 hex digits)
-                    unsigned int codepoint = 0;
-                    int hex_count = 0;
-                    while (hex_count < 6 && i < len) {
-                        char c = str[i];
-                        if (c >= '0' && c <= '9') {
-                            codepoint = (codepoint << 4) | (c - '0');
-                        } else if (c >= 'a' && c <= 'f') {
-                            codepoint = (codepoint << 4) | (c - 'a' + 10);
-                        } else if (c >= 'A' && c <= 'F') {
-                            codepoint = (codepoint << 4) | (c - 'A' + 10);
-                        } else {
-                            break; // not a hex digit
-                        }
-                        i++;
-                        hex_count++;
-                    }
-
-                    // skip optional whitespace after hex escape
-                    if (i < len && (str[i] == ' ' || str[i] == '\t' || str[i] == '\n' || str[i] == '\r')) {
-                        i++;
-                    }
-
-                    // convert codepoint to UTF-8
-                    char utf8_buf[5];
-                    int utf8_len = codepoint_to_utf8(codepoint, utf8_buf);
-                    for (int j = 0; j < utf8_len; j++) {
-                        result[out_pos++] = utf8_buf[j];
-                    }
-                } else {
-                    // single character escape (e.g., \", \\, \n)
-                    // for CSS, backslash followed by non-hex char is just that char
-                    result[out_pos++] = str[i];
-                    i++;
-                }
-            }
-        } else {
-            // regular character
-            result[out_pos++] = str[i];
-            i++;
-        }
-    }
-
-    result[out_pos] = '\0';
-    return result;
-}
-
 static void css_token_set_value(CssToken* token, Pool* pool) {
     if (!token || !pool || !token->start) {
         return;
@@ -803,52 +661,10 @@ static void css_token_set_value(CssToken* token, Pool* pool) {
             size_t content_len = has_closing_quote ? token->length - 2 : token->length - 1;
 
             if (content_len > 0) {
-                // unescape CSS escape sequences
-                // for strings, \<EOF> means "do nothing" (drop backslash), not U+FFFD
-                const char* content = token->start + content_start;
-                char* result = (char*)pool_alloc(pool, content_len * 3 + 1);
-                if (result) {
-                    size_t out_pos = 0;
-                    size_t ci = 0;
-                    while (ci < content_len) {
-                        if (content[ci] == '\\') {
-                            if (ci + 1 >= content_len) {
-                                // \<EOF> in string: drop the backslash (per CSS spec §4.3.4)
-                                ci++;
-                            } else {
-                                ci++; // skip backslash
-                                if ((content[ci] >= '0' && content[ci] <= '9') ||
-                                    (content[ci] >= 'a' && content[ci] <= 'f') ||
-                                    (content[ci] >= 'A' && content[ci] <= 'F')) {
-                                    unsigned int codepoint = 0;
-                                    int hex_count = 0;
-                                    while (hex_count < 6 && ci < content_len) {
-                                        char c = content[ci];
-                                        if (c >= '0' && c <= '9') codepoint = (codepoint << 4) | (c - '0');
-                                        else if (c >= 'a' && c <= 'f') codepoint = (codepoint << 4) | (c - 'a' + 10);
-                                        else if (c >= 'A' && c <= 'F') codepoint = (codepoint << 4) | (c - 'A' + 10);
-                                        else break;
-                                        ci++;
-                                        hex_count++;
-                                    }
-                                    if (ci < content_len && (content[ci] == ' ' || content[ci] == '\t' ||
-                                        content[ci] == '\n' || content[ci] == '\r')) ci++;
-                                    char utf8_buf[5];
-                                    int utf8_len = codepoint_to_utf8(codepoint, utf8_buf);
-                                    for (int j = 0; j < utf8_len; j++) result[out_pos++] = utf8_buf[j];
-                                } else {
-                                    result[out_pos++] = content[ci];
-                                    ci++;
-                                }
-                            }
-                        } else {
-                            result[out_pos++] = content[ci];
-                            ci++;
-                        }
-                    }
-                    result[out_pos] = '\0';
-                    token->value = result;
-                }
+                // CSS strings drop a trailing escape while identifiers replace it.
+                token->value = escape_css_unescape_pool(pool,
+                    token->start + content_start, content_len, true,
+                    ESCAPE_CSS_EOF_DROP, false, false);
             } else {
                 char* value = (char*)pool_alloc(pool, 1);
                 if (value) value[0] = '\0';
@@ -864,7 +680,8 @@ static void css_token_set_value(CssToken* token, Pool* pool) {
         token->type == CSS_TOKEN_AT_KEYWORD || token->type == CSS_TOKEN_CUSTOM_PROPERTY ||
         token->type == CSS_TOKEN_FUNCTION || token->type == CSS_TOKEN_DIMENSION) {
         if (memchr(token->start, '\\', token->length)) {
-            token->value = css_unescape_string(token->start, token->length, pool);
+            token->value = escape_css_unescape_pool(pool, token->start,
+                token->length, true, ESCAPE_CSS_EOF_REPLACEMENT, false, false);
             return;
         }
     }

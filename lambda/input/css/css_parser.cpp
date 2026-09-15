@@ -17,6 +17,7 @@
 #include "../../../lib/log.h"
 #include "../../../lib/mem_grow.hpp"
 #include "../../../lib/str.h"
+#include "../../../lib/escape.h"
 #include "../../../lib/recursion_guard.hpp"
 #include <stdlib.h>
 #include <string.h>
@@ -37,73 +38,9 @@ static unsigned int css_parser_hex_value(char c) {
     return 0;
 }
 
-static int css_parser_append_utf8(char* out, unsigned int codepoint) {
-    if (codepoint == 0 || codepoint > 0x10FFFF ||
-        (codepoint >= 0xD800 && codepoint <= 0xDFFF)) {
-        codepoint = 0xFFFD;
-    }
-    if (codepoint <= 0x7F) {
-        out[0] = (char)codepoint;
-        return 1;
-    }
-    if (codepoint <= 0x7FF) {
-        out[0] = (char)(0xC0 | (codepoint >> 6));
-        out[1] = (char)(0x80 | (codepoint & 0x3F));
-        return 2;
-    }
-    if (codepoint <= 0xFFFF) {
-        out[0] = (char)(0xE0 | (codepoint >> 12));
-        out[1] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-        out[2] = (char)(0x80 | (codepoint & 0x3F));
-        return 3;
-    }
-    out[0] = (char)(0xF0 | (codepoint >> 18));
-    out[1] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
-    out[2] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-    out[3] = (char)(0x80 | (codepoint & 0x3F));
-    return 4;
-}
-
 static char* css_parser_unescape_url_component(const char* str, size_t len, Pool* pool) {
-    if (!pool) return NULL;
-    char* result = (char*)pool_calloc(pool, len * 4 + 1);
-    if (!result) return NULL;
-    if (!str || len == 0) {
-        result[0] = '\0';
-        return result;
-    }
-
-    size_t out_pos = 0;
-    size_t i = 0;
-    while (i < len) {
-        if (str[i] != '\\') {
-            result[out_pos++] = str[i++];
-            continue;
-        }
-        i++;
-        if (i >= len) {
-            out_pos += (size_t)css_parser_append_utf8(result + out_pos, 0xFFFD);
-            break;
-        }
-        if (css_parser_is_hex_digit(str[i])) {
-            unsigned int codepoint = 0;
-            int hex_count = 0;
-            while (i < len && hex_count < 6 && css_parser_is_hex_digit(str[i])) {
-                codepoint = (codepoint << 4) | css_parser_hex_value(str[i]);
-                i++;
-                hex_count++;
-            }
-            if (i < len && (str[i] == ' ' || str[i] == '\t' || str[i] == '\n' ||
-                            str[i] == '\r' || str[i] == '\f')) {
-                i++;
-            }
-            out_pos += (size_t)css_parser_append_utf8(result + out_pos, codepoint);
-        } else {
-            result[out_pos++] = str[i++];
-        }
-    }
-    result[out_pos] = '\0';
-    return result;
+    return escape_css_unescape_pool(pool, str, len, true,
+        ESCAPE_CSS_EOF_REPLACEMENT, true, true);
 }
 
 static const char* css_unicode_skip_ignorable(const char* p, const char* end) {

@@ -25,6 +25,7 @@
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/hashmap.h"
 #include "../../../lib/hashmap_typed.hpp"
+#include "../../../lib/escape.h"
 #include "../../../lib/str.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/file.h"
@@ -5310,98 +5311,10 @@ static const char* preprocess_ansi_c_string(const char* src, size_t src_len, Str
             size_t content_end = i;
             if (i < src_len) i++; // skip closing '
 
-            // process escape sequences in content
             StrBuf* processed = strbuf_new_cap(content_end - content_start + 1);
-            size_t p = content_start;
-            while (p < content_end) {
-                char c = src[p++];
-                if (c != '\\' || p >= content_end) {
-                    strbuf_append_char(processed, c);
-                    continue;
-                }
-                char esc = src[p++];
-                switch (esc) {
-                case 'a': strbuf_append_char(processed, '\a'); break;
-                case 'b': strbuf_append_char(processed, '\b'); break;
-                case 'e': case 'E': strbuf_append_char(processed, 27); break;
-                case 'f': strbuf_append_char(processed, '\f'); break;
-                case 'n': strbuf_append_char(processed, '\n'); break;
-                case 'r': strbuf_append_char(processed, '\r'); break;
-                case 't': strbuf_append_char(processed, '\t'); break;
-                case 'v': strbuf_append_char(processed, '\v'); break;
-                case '\\': strbuf_append_char(processed, '\\'); break;
-                case '\'': strbuf_append_char(processed, '\''); break;
-                case '"': strbuf_append_char(processed, '"'); break;
-                case 'c': {
-                    if (p < content_end) {
-                        unsigned char ctrl = (unsigned char)src[p++];
-                        strbuf_append_char(processed, (char)(ctrl ^ 0x40));
-                    }
-                    break;
-                }
-                case 'x': {
-                    int value = 0;
-                    bool have_digits = false;
-                    if (p < content_end && src[p] == '{') {
-                        p++;
-                        while (p < content_end && src[p] != '}') {
-                            char h = src[p]; int digit = -1;
-                            if (h >= '0' && h <= '9') digit = h - '0';
-                            else if (h >= 'a' && h <= 'f') digit = h - 'a' + 10;
-                            else if (h >= 'A' && h <= 'F') digit = h - 'A' + 10;
-                            else break;
-                            value = value * 16 + digit; have_digits = true; p++;
-                        }
-                        if (p < content_end && src[p] == '}') p++;
-                        if (!have_digits) {
-                            // \x{} with no digits: truncate rest of string (bash 5.x behavior)
-                            p = content_end;
-                            break;
-                        }
-                    } else {
-                        for (int j = 0; j < 2 && p < content_end; j++) {
-                            char h = src[p]; int digit = -1;
-                            if (h >= '0' && h <= '9') digit = h - '0';
-                            else if (h >= 'a' && h <= 'f') digit = h - 'a' + 10;
-                            else if (h >= 'A' && h <= 'F') digit = h - 'A' + 10;
-                            else break;
-                            value = value * 16 + digit; have_digits = true; p++;
-                        }
-                    }
-                    if (have_digits) strbuf_append_char(processed, (char)value);
-                    break;
-                }
-                case 'u': case 'U': {
-                    int max_digits = (esc == 'u') ? 4 : 8;
-                    int value = 0;
-                    bool have_digits = false;
-                    for (int j = 0; j < max_digits && p < content_end; j++) {
-                        char h = src[p]; int digit = -1;
-                        if (h >= '0' && h <= '9') digit = h - '0';
-                        else if (h >= 'a' && h <= 'f') digit = h - 'a' + 10;
-                        else if (h >= 'A' && h <= 'F') digit = h - 'A' + 10;
-                        else break;
-                        value = value * 16 + digit; have_digits = true; p++;
-                    }
-                    if (have_digits) strbuf_append_utf8(processed, (uint32_t)value);
-                    break;
-                }
-                case '0': case '1': case '2': case '3':
-                case '4': case '5': case '6': case '7': {
-                    int value = esc - '0';
-                    for (int j = 0; j < 2 && p < content_end && src[p] >= '0' && src[p] <= '7'; j++) {
-                        value = value * 8 + (src[p++] - '0');
-                    }
-                    strbuf_append_char(processed, (char)value);
-                    break;
-                }
-                default:
-                    // unknown escape: preserve backslash
-                    strbuf_append_char(processed, '\\');
-                    strbuf_append_char(processed, esc);
-                    break;
-                }
-            }
+            escape_append_bash_ansi(processed, src + content_start,
+                                    content_end - content_start,
+                                    ESCAPE_BASH_ANSI_LITERAL);
 
             // check if processed content contains NUL byte — if so, keep original
             // $'...' syntax since NUL in a C string would truncate downstream

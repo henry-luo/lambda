@@ -4,6 +4,7 @@
 #include "../../lib/mempool.h"
 #include "../../lib/mem.h"
 #include "../../lib/log.h"
+#include "../../lib/escape.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/utf.h"
 
@@ -105,50 +106,8 @@ JsOperator js_unary_operator_from_string(const char* op_str, size_t len) {
     return js_operator_from_string(op_str, len);
 }
 
-static char js_c_decode_escape_char(char c) {
-    switch (c) {
-    case 'n': return '\n';
-    case 't': return '\t';
-    case 'r': return '\r';
-    case '\\': return '\\';
-    case '\'': return '\'';
-    case '"': return '"';
-    case '0': return '\0';
-    case 'b': return '\b';
-    case 'f': return '\f';
-    case 'v': return '\v';
-    default: return c;
-    }
-}
-
 static bool js_c_hex_char(char c) {
     return str_hex_val(c) >= 0;
-}
-
-static size_t js_c_wtf8_encode(uint32_t cp, char* out) {
-    if (cp < 0x80) {
-        out[0] = (char)cp;
-        return 1;
-    }
-    if (cp < 0x800) {
-        out[0] = (char)(0xC0 | (cp >> 6));
-        out[1] = (char)(0x80 | (cp & 0x3F));
-        return 2;
-    }
-    if (cp < 0x10000) {
-        out[0] = (char)(0xE0 | (cp >> 12));
-        out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
-        out[2] = (char)(0x80 | (cp & 0x3F));
-        return 3;
-    }
-    if (cp <= 0x10FFFF) {
-        out[0] = (char)(0xF0 | (cp >> 18));
-        out[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
-        out[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
-        out[3] = (char)(0x80 | (cp & 0x3F));
-        return 4;
-    }
-    return 0;
 }
 
 static bool js_c_template_invalid_escape_at(const char* source, size_t length,
@@ -203,41 +162,14 @@ static size_t js_c_decode_unicode_escape(const char* source, size_t length,
         }
         if (digit_pos >= length || source[digit_pos] != '}') return 0;
         *cursor = digit_pos;
-        return js_c_wtf8_encode(codepoint, out);
+        return utf8_encode_wtf8(codepoint, out);
     }
-    if (pos + 4 >= length) return 0;
     uint32_t codepoint = 0;
-    for (size_t i = 1; i <= 4; i++) {
-        int digit = str_hex_val(source[pos + i]);
-        if (digit < 0) return 0;
-        codepoint = (codepoint << 4) | (uint32_t)digit;
-    }
-    *cursor = pos + 4;
-    // JavaScript string escapes combine a lead/trail surrogate pair into one
-    // code point; retaining the two UTF-16 code units separately changes
-    // matching and observable string length for supplementary characters.
-    if (codepoint >= 0xD800 && codepoint <= 0xDBFF &&
-            *cursor + 2 < length && source[*cursor + 1] == '\\' &&
-            source[*cursor + 2] == 'u' && *cursor + 6 < length) {
-        size_t trail = *cursor + 3;
-        uint32_t low = 0;
-        bool valid_low = true;
-        for (size_t i = 0; i < 4; i++) {
-            int digit = str_hex_val(source[trail + i]);
-            if (digit < 0) {
-                valid_low = false;
-                break;
-            }
-            low = (low << 4) | (uint32_t)digit;
-        }
-        if (valid_low && low >= 0xDC00 && low <= 0xDFFF) {
-            codepoint = 0x10000 + ((codepoint - 0xD800) << 10) +
-                (low - 0xDC00);
-            *cursor = trail + 3;
-            return utf8_encode(codepoint, out);
-        }
-    }
-    return js_c_wtf8_encode(codepoint, out);
+    size_t consumed = 0;
+    if (!escape_decode_utf16_escape(source + pos + 1, length - pos - 1,
+                                    false, &codepoint, &consumed)) return 0;
+    *cursor = pos + consumed;
+    return utf8_encode_wtf8(codepoint, out);
 }
 
 static bool js_c_is_octal_digit(char c) {
@@ -291,10 +223,10 @@ static String* js_c_decode_identifier_name(JsTranspiler* tp,
     return name_pool_create_len(tp->name_pool, decoded, (int)out);
 }
 
-#define js_decode_escape_char js_c_decode_escape_char
+#define js_decode_escape_char escape_decode_c_char
 #define js_template_hex_char js_c_hex_char
 #define js_template_has_invalid_escape js_c_template_has_invalid_escape
-#define wtf8_encode js_c_wtf8_encode
+#define wtf8_encode utf8_encode_wtf8
 #define js_decode_unicode_escape js_c_decode_unicode_escape
 #define utf8_encode utf8_encode
 #define js_is_octal_digit js_c_is_octal_digit

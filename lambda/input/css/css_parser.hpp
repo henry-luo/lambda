@@ -152,7 +152,6 @@ CssToken* css_tokenize(const char* input, size_t length, Pool* pool, size_t* tok
 
 // Unicode support functions
 UnicodeChar css_parse_unicode_char(const char* input, size_t max_length);
-bool css_is_valid_unicode_escape(const char* input);
 char* css_decode_unicode_escapes(const char* input, Pool* pool);
 
 // Character classification with Unicode support

@@ -2,6 +2,7 @@
 #include "../../../lambda-data.hpp"
 #include "../../../lib/log.h"
 #include "../../../lib/arena.h"
+#include "../../../lib/escape.h"
 #include <cstring>
 #include "../../../lib/mem.h"
 #include <cstdio>
@@ -233,21 +234,8 @@ static void py_bind_assignment_target(PyTranspiler* tp, PyAstNode* target) {
 // Decode a Python escape sequence, return number of chars consumed from input
 static int py_decode_escape(const char* src, size_t src_len, char* out) {
     if (src_len < 2 || src[0] != '\\') return 0;
-
-    switch (src[1]) {
-        case 'n':  *out = '\n'; return 2;
-        case 't':  *out = '\t'; return 2;
-        case 'r':  *out = '\r'; return 2;
-        case '\\': *out = '\\'; return 2;
-        case '\'': *out = '\''; return 2;
-        case '"':  *out = '"';  return 2;
-        case '0':  *out = '\0'; return 2;
-        case 'a':  *out = '\a'; return 2;
-        case 'b':  *out = '\b'; return 2;
-        case 'f':  *out = '\f'; return 2;
-        case 'v':  *out = '\v'; return 2;
-        default:   *out = src[1]; return 2;
-    }
+    *out = escape_decode_c_char(src[1]);
+    return 2;
 }
 
 PyAstNode* build_py_string(PyTranspiler* tp, TSNode string_node) {

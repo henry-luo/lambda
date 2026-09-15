@@ -9,6 +9,7 @@
 #include "input-utils.h"
 #include "input-context.hpp"
 #include "../../lib/strbuf.h"
+#include "../../lib/escape.h"
 
 namespace lambda {
 
@@ -99,30 +100,6 @@ static inline void input_skip_whitespace_and_comment_markers(SourceTracker& trac
     }
 }
 
-static inline int encode_codepoint_utf8(uint32_t codepoint, char out[5]) {
-    return codepoint_to_utf8(codepoint, out);
-}
-
-/**
- * Encode a codepoint as UTF-8 and append to a StringBuf.
- * Convenience wrapper around codepoint_to_utf8().
- */
-static inline void append_codepoint_utf8(StringBuf* sb, uint32_t codepoint) {
-    char buf[5];
-    int n = encode_codepoint_utf8(codepoint, buf);
-    if (n > 0) stringbuf_append_str_n(sb, buf, (size_t)n);
-}
-
-/**
- * Encode a codepoint as UTF-8 and append to a StrBuf (lib/strbuf.h).
- * Convenience wrapper around codepoint_to_utf8().
- */
-static inline void append_codepoint_utf8_strbuf(StrBuf* sb, uint32_t codepoint) {
-    char buf[5];
-    int n = encode_codepoint_utf8(codepoint, buf);
-    if (n > 0) strbuf_append_str_n(sb, buf, (size_t)n);
-}
-
 /**
  * Handle one JSON/properties escape sequence starting at @p *pos (which must
  * point at the char AFTER the leading backslash).
@@ -153,36 +130,15 @@ static inline int parse_escape_char(const char** pos, StringBuf* sb) {
         case 't':  stringbuf_append_char(sb, '\t'); (*pos)++; break;
         case 'u': {
             (*pos)++;  // skip 'u'
-            uint32_t cp = parse_hex_codepoint(pos, 4);
-            if (cp == 0xFFFFFFFF) {
+            uint32_t cp = 0;
+            size_t consumed = 0;
+            if (!escape_decode_utf16_escape(*pos, strlen(*pos), true, &cp, &consumed)) {
                 // not enough digits — output replacement char
-                stringbuf_append_char(sb, (char)0xEF);
-                stringbuf_append_char(sb, (char)0xBF);
-                stringbuf_append_char(sb, (char)0xBD);
+                stringbuf_append_utf8(sb, 0xFFFD);
                 break;
             }
-
-            if (cp >= 0xD800 && cp <= 0xDBFF) {
-                // high surrogate — look for low surrogate \uXXXX
-                const char* la = *pos;
-                if (la[0] == '\\' && la[1] == 'u' &&
-                    la[2] && la[3] && la[4] && la[5]) {
-                    const char* low_pos = la + 2;
-                    uint32_t lo = parse_hex_codepoint(&low_pos, 4);
-                    uint32_t combined = decode_surrogate_pair((uint16_t)cp, (uint16_t)lo);
-                    if (lo != 0xFFFFFFFF && combined != 0) {
-                        cp = combined;
-                        *pos = low_pos;
-                    } else {
-                        cp = 0xFFFD;
-                    }
-                } else {
-                    cp = 0xFFFD;
-                }
-            } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
-                cp = 0xFFFD;  // lone low surrogate
-            }
-            append_codepoint_utf8(sb, cp);
+            *pos += consumed;
+            stringbuf_append_utf8(sb, cp);
             break;
         }
         default:

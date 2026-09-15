@@ -107,24 +107,12 @@ static void append_mark_string_escape(StringBuf* sb, const char** mark) {
         case 'r': stringbuf_append_char(sb, '\r'); break;
         case 't': stringbuf_append_char(sb, '\t'); break;
         case 'u': {
-            const char* h = *mark + 1;
-            uint32_t codepoint = parse_hex_codepoint(&h, 4);
-            if (codepoint != 0xFFFFFFFF) {
-                if (codepoint >= 0xD800 && codepoint <= 0xDBFF && h[0] == '\\' && h[1] == 'u') {
-                    const char* low_pos = h + 2;
-                    uint32_t low = parse_hex_codepoint(&low_pos, 4);
-                    uint32_t combined = decode_surrogate_pair((uint16_t)codepoint, (uint16_t)low);
-                    if (low != 0xFFFFFFFF && combined != 0) {
-                        codepoint = combined;
-                        h = low_pos;
-                    } else {
-                        codepoint = 0xFFFD;
-                    }
-                } else if (codepoint >= 0xDC00 && codepoint <= 0xDFFF) {
-                    codepoint = 0xFFFD;
-                }
-                append_codepoint_utf8(sb, codepoint);
-                *mark = h - 1; // trailing ++ moves past the escape.
+            uint32_t codepoint = 0;
+            size_t consumed = 0;
+            if (escape_decode_utf16_escape(*mark + 1, strlen(*mark + 1), true,
+                                           &codepoint, &consumed)) {
+                stringbuf_append_utf8(sb, codepoint);
+                *mark += consumed; // trailing ++ moves past the escape.
             }
         } break;
         default: break; // invalid escape

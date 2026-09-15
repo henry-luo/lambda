@@ -6,6 +6,7 @@
 #include "bash_expand.h"
 #include "bash_runtime.h"
 #include "../../runtime/transpiler.hpp"
+#include "../../../lib/escape.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/log.h"
 #include "../../../lib/utf.h"
@@ -200,151 +201,12 @@ extern "C" Item bash_quote_remove(Item word) {
 // ANSI-C Escape Processing ($'...')
 // ========================================================================
 
-// parse up to max_digits hex digits from s, return char value
-static int parse_hex(const char* s, int max_digits, int* consumed) {
-    int val = 0;
-    int i = 0;
-    while (i < max_digits && s[i] && isxdigit((unsigned char)s[i])) {
-        val = val * 16;
-        char c = s[i];
-        if (c >= '0' && c <= '9') val += c - '0';
-        else if (c >= 'a' && c <= 'f') val += 10 + c - 'a';
-        else if (c >= 'A' && c <= 'F') val += 10 + c - 'A';
-        i++;
-    }
-    *consumed = i;
-    return val;
-}
-
-// parse up to max_digits octal digits from s, return char value
-static int parse_octal(const char* s, int max_digits, int* consumed) {
-    int val = 0;
-    int i = 0;
-    while (i < max_digits && s[i] >= '0' && s[i] <= '7') {
-        val = val * 8 + (s[i] - '0');
-        i++;
-    }
-    *consumed = i;
-    return val;
-}
-
 extern "C" Item bash_process_ansi_escapes(Item str) {
     const char* s = item_to_cstr(str);
     if (!s || !*s) return str;
 
-    int len = (int)strlen(s);
     StrBuf* buf = strbuf_new();
-
-    for (int i = 0; i < len; i++) {
-        if (s[i] != '\\') {
-            strbuf_append_char(buf, s[i]);
-            continue;
-        }
-
-        i++; // skip backslash
-        if (i >= len) {
-            strbuf_append_char(buf, '\\');
-            break;
-        }
-
-        switch (s[i]) {
-            case 'a': strbuf_append_char(buf, '\a'); break;
-            case 'b': strbuf_append_char(buf, '\b'); break;
-            case 'e': case 'E': strbuf_append_char(buf, '\x1B'); break;
-            case 'f': strbuf_append_char(buf, '\f'); break;
-            case 'n': strbuf_append_char(buf, '\n'); break;
-            case 'r': strbuf_append_char(buf, '\r'); break;
-            case 't': strbuf_append_char(buf, '\t'); break;
-            case 'v': strbuf_append_char(buf, '\v'); break;
-            case '\\': strbuf_append_char(buf, '\\'); break;
-            case '\'': strbuf_append_char(buf, '\''); break;
-            case '"': strbuf_append_char(buf, '"'); break;
-            case '?': strbuf_append_char(buf, '?'); break;
-
-            case '0': {
-                // \0NNN: octal (up to 3 digits after the 0)
-                int consumed = 0;
-                int val = parse_octal(s + i + 1, 3, &consumed);
-                strbuf_append_char(buf, (char)(val & 0xFF));
-                i += consumed;
-                break;
-            }
-
-            case '1': case '2': case '3':
-            case '4': case '5': case '6': case '7': {
-                // \NNN: octal (up to 3 digits including the first)
-                int consumed = 0;
-                int val = parse_octal(s + i, 3, &consumed);
-                strbuf_append_char(buf, (char)(val & 0xFF));
-                i += consumed - 1; // -1 because loop will advance past first digit
-                break;
-            }
-
-            case 'x': {
-                // \xHH: hex (1 or 2 digits)
-                int consumed = 0;
-                int val = parse_hex(s + i + 1, 2, &consumed);
-                if (consumed > 0) {
-                    strbuf_append_char(buf, (char)(val & 0xFF));
-                    i += consumed;
-                } else {
-                    strbuf_append_char(buf, '\\');
-                    strbuf_append_char(buf, 'x');
-                }
-                break;
-            }
-
-            case 'u': {
-                // \uHHHH: Unicode 4-digit hex
-                int consumed = 0;
-                int cp = parse_hex(s + i + 1, 4, &consumed);
-                if (consumed > 0) {
-                    char u8buf[4];
-                    int u8len = utf8_encode(cp, u8buf);
-                    strbuf_append_str_n(buf, u8buf, u8len);
-                    i += consumed;
-                } else {
-                    strbuf_append_char(buf, '\\');
-                    strbuf_append_char(buf, 'u');
-                }
-                break;
-            }
-
-            case 'U': {
-                // \UHHHHHHHH: Unicode 8-digit hex
-                int consumed = 0;
-                int cp = parse_hex(s + i + 1, 8, &consumed);
-                if (consumed > 0) {
-                    char u8buf[4];
-                    int u8len = utf8_encode(cp, u8buf);
-                    strbuf_append_str_n(buf, u8buf, u8len);
-                    i += consumed;
-                } else {
-                    strbuf_append_char(buf, '\\');
-                    strbuf_append_char(buf, 'U');
-                }
-                break;
-            }
-
-            case 'c': {
-                // \cX: control character (X & 0x1F)
-                if (i + 1 < len) {
-                    i++;
-                    strbuf_append_char(buf, (char)(s[i] & 0x1F));
-                } else {
-                    strbuf_append_char(buf, '\\');
-                    strbuf_append_char(buf, 'c');
-                }
-                break;
-            }
-
-            default:
-                // unknown escape: keep backslash + char
-                strbuf_append_char(buf, '\\');
-                strbuf_append_char(buf, s[i]);
-                break;
-        }
-    }
+    escape_append_bash_ansi(buf, s, strlen(s), ESCAPE_BASH_ANSI_RUNTIME);
 
     Item result = (Item){.item = s2it(heap_create_name(buf->str, (int)buf->length))};
     strbuf_free(buf);

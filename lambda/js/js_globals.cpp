@@ -4593,8 +4593,6 @@ Item js_numeric_prototype_algorithm(Item num,
 // String Methods (v5 additions)
 // =============================================================================
 
-static int encode_charcode_utf8(char* buf, int code);
-static int encode_codepoint_utf8(char* buf, int code);
 static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out);
 static Item js_uri_make_four_byte_string_from_cp(uint32_t cp);
 extern "C" int64_t js_string_last_four_byte_uri_escape_cp(Item str_item);
@@ -4716,20 +4714,7 @@ static Item js_from_char_code_to_uint16(Item code_item) {
 
 static Item js_string_from_char_code_uint16(int code) {
     char buf[5]; // max 4 bytes for UTF-8 + null
-    int len = 0;
-    if (code < 128) {
-        buf[0] = (char)code;
-        len = 1;
-    } else if (code < 0x800) {
-        buf[0] = (char)(0xC0 | (code >> 6));
-        buf[1] = (char)(0x80 | (code & 0x3F));
-        len = 2;
-    } else {
-        buf[0] = (char)(0xE0 | (code >> 12));
-        buf[1] = (char)(0x80 | ((code >> 6) & 0x3F));
-        buf[2] = (char)(0x80 | (code & 0x3F));
-        len = 3;
-    }
+    int len = (int)utf8_encode_wtf8((uint32_t)code, buf);
     buf[len] = '\0';
 
     Item result = js_make_small_string(buf, len, code < 128);
@@ -4771,10 +4756,10 @@ extern "C" Item js_string_fromCharCode2(Item first_item, Item second_item) {
             g_uri_last_four_byte_epoch == js_get_heap_epoch()) {
             return g_uri_last_four_byte_string;
         }
-        pos += encode_codepoint_utf8(buf + pos, (int)cp);
+        pos += (int)utf8_encode_wtf8(cp, buf + pos);
     } else {
-        pos += encode_charcode_utf8(buf + pos, first);
-        pos += encode_charcode_utf8(buf + pos, second);
+        pos += (int)utf8_encode_wtf8((uint32_t)first, buf + pos);
+        pos += (int)utf8_encode_wtf8((uint32_t)second, buf + pos);
     }
     return js_make_small_string(buf, pos, first < 128 && second < 128);
 }
@@ -4803,26 +4788,6 @@ extern "C" Item js_uri_decode_equals_from_char_code(Item str_item, Item first_it
     return js_strict_equal(decoded, expected);
 }
 
-// Helper: encode a UTF-16 code unit to UTF-8 into buf, return bytes written
-static int encode_charcode_utf8(char* buf, int code) {
-    code &= 0xFFFF; // truncate to 16-bit (JS fromCharCode uses UTF-16 code units)
-    if (code < 128) {
-        buf[0] = (char)code;
-        return 1;
-    } else if (code < 0x800) {
-        buf[0] = (char)(0xC0 | (code >> 6));
-        buf[1] = (char)(0x80 | (code & 0x3F));
-        return 2;
-    } else {
-        buf[0] = (char)(0xE0 | (code >> 12));
-        buf[1] = (char)(0x80 | ((code >> 6) & 0x3F));
-        buf[2] = (char)(0x80 | (code & 0x3F));
-        return 3;
-    }
-}
-
-static int encode_codepoint_utf8(char* buf, int code);
-
 static Item js_string_from_char_code_sequence(Item source, bool typed_array) {
     int len = typed_array ? js_typed_array_length(source) : source.array->length;
     if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
@@ -4850,12 +4815,12 @@ static Item js_string_from_char_code_sequence(Item source, bool typed_array) {
             int lo = (int)it2i(lo_value);
             uint32_t cp = utf16_decode_pair((uint16_t)code, (uint16_t)lo);
             if (cp != 0) {
-                pos += encode_codepoint_utf8(buf + pos, (int)cp);
+                pos += (int)utf8_encode_wtf8(cp, buf + pos);
                 i++; // skip the low surrogate
                 continue;
             }
         }
-        pos += encode_charcode_utf8(buf + pos, code);
+        pos += (int)utf8_encode_wtf8((uint32_t)code, buf + pos);
     }
     buf[pos] = '\0';
     Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
@@ -4873,30 +4838,6 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
     return js_string_from_char_code_sequence(arr_item, false);
 }
 
-// Helper: encode a full Unicode code point to UTF-8 (up to 4 bytes)
-static int encode_codepoint_utf8(char* buf, int code) {
-    if (code < 0 || code > 0x10FFFF) return 0;
-    if (code < 0x80) {
-        buf[0] = (char)code;
-        return 1;
-    } else if (code < 0x800) {
-        buf[0] = (char)(0xC0 | (code >> 6));
-        buf[1] = (char)(0x80 | (code & 0x3F));
-        return 2;
-    } else if (code < 0x10000) {
-        buf[0] = (char)(0xE0 | (code >> 12));
-        buf[1] = (char)(0x80 | ((code >> 6) & 0x3F));
-        buf[2] = (char)(0x80 | (code & 0x3F));
-        return 3;
-    } else {
-        buf[0] = (char)(0xF0 | (code >> 18));
-        buf[1] = (char)(0x80 | ((code >> 12) & 0x3F));
-        buf[2] = (char)(0x80 | ((code >> 6) & 0x3F));
-        buf[3] = (char)(0x80 | (code & 0x3F));
-        return 4;
-    }
-}
-
 // String.fromCodePoint(cp) — single code point
 extern "C" Item js_string_fromCodePoint(Item code_item) {
     JS_ASSIGN_OR_RETURN(num_item, js_to_number(code_item));
@@ -4906,7 +4847,7 @@ extern "C" Item js_string_fromCodePoint(Item code_item) {
     }
     int code = (int)code_num;
     char buf[5];
-    int len = encode_codepoint_utf8(buf, code);
+    int len = (int)utf8_encode_wtf8((uint32_t)code, buf);
     buf[len] = '\0';
     return (Item){.item = s2it(heap_strcpy(buf, len))};
 }
@@ -4930,7 +4871,7 @@ extern "C" Item js_string_fromCodePoint_array(Item arr_item) {
             return js_throw_range_error("Invalid code point");
         }
         int code = (int)code_num;
-        pos += encode_codepoint_utf8(buf + pos, code);
+        pos += (int)utf8_encode_wtf8((uint32_t)code, buf + pos);
     }
     buf[pos] = '\0';
     Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
@@ -4961,7 +4902,7 @@ static int64_t js_test262_build_string_count_range(Item range_item) {
 
 static int js_test262_build_string_append_cp(char* buf, int pos, int cp) {
     if (cp < 0 || cp > 0x10FFFF) return pos;
-    return pos + encode_codepoint_utf8(buf + pos, cp);
+    return pos + (int)utf8_encode_wtf8((uint32_t)cp, buf + pos);
 }
 
 // buildString(args) — test262 RegExp property-escape harness helper.

@@ -488,17 +488,17 @@ static Item parse_double_quoted(YamlParser* p) {
                     break;
                 case 'x': {
                     uint32_t val = yaml_parse_hex_codepoint(p, 2);
-                    if (val != 0xFFFFFFFF) append_codepoint_utf8_strbuf(sb, val);
+                    if (val != 0xFFFFFFFF) strbuf_append_utf8(sb, val);
                     break;
                 }
                 case 'u': {
                     uint32_t val = yaml_parse_hex_codepoint(p, 4);
-                    if (val != 0xFFFFFFFF) append_codepoint_utf8_strbuf(sb, val);
+                    if (val != 0xFFFFFFFF) strbuf_append_utf8(sb, val);
                     break;
                 }
                 case 'U': {
                     uint32_t val = yaml_parse_hex_codepoint(p, 8);
-                    if (val != 0xFFFFFFFF) append_codepoint_utf8_strbuf(sb, val);
+                    if (val != 0xFFFFFFFF) strbuf_append_utf8(sb, val);
                     break;
                 }
                 case '\n': {
