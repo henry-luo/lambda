@@ -477,17 +477,16 @@ readers rather than guessed ones.
 
 | Struct | Fields baked |
 |---|---|
-| `Context` | `pool`, the four side-stack top/limit pairs, `mir_companion_slot` |
+| `Context` | `pool`, the four side-stack top/limit pairs, `mir_companion_slot`, `stack_limit` |
 | `String` | `chars`, `len` |
-| `EvalContext` → `ContextCapsuleDirectory` → `ContextCapsuleSlot` | `capsule_directory`, `slots`, `capsule` — the indexed path to `CONTEXT_CAPSULE_JS_RUNTIME` |
-| `JsRuntimeState` → `JsExecutionState` | `execution`, `call_depth`, `call_stack_limit` |
 
-The capsule/execution path is new since the previous census: the call-depth
-guard (`jm_enter_source_invocation`,
-[`js_mir_calls_boxing_types.cpp`](../lambda/js/js_mir_calls_boxing_types.cpp#L114))
-increments and bounds-checks the JS call depth inline rather than through a
-helper call, and raises `RangeError` on overflow. It is the only JS realm-state
-offset generated code reads.
+The JS call guard (`jm_enter_source_invocation`,
+[`js_mir_calls_boxing_types.cpp`](../lambda/js/js_mir_calls_boxing_types.cpp#L115))
+compares the native stack pointer (`BSTART`) with `Context::stack_limit` inline
+and raises `RangeError` below it (JC23, `vibe/jube/JS_Runtime_Call_Flatten.md`
+§3.6). It replaced a `JsExecutionState` call-depth counter reached through the
+capsule directory, so generated code no longer reads any JS realm-state
+offset.
 
 ## 8. What generated MIR does not see
 
@@ -890,8 +889,8 @@ Three records named in the previous census are **gone**:
 `this`/`newTarget` state fields: a synchronous call has one ambient owner whose
 Item homes are either the context-owned base `RootVector` or one exact native
 `RootFrame`, so a nested call replaces one activation link instead of mutating
-parallel globals (`D5.1.1v2`, `D6.2.2v2`; JSCU28). `JsExecutionState` also
-carries the `call_depth` / `call_stack_limit` pair the JIT guard reads.
+parallel globals (`D5.1.1v2`, `D6.2.2v2`; JSCU28). The call-depth counter it
+used to carry was retired by JC23's native stack guard.
 
 The common invariant is that Item-bearing state uses explicit `RootVector` or
 carrier-specific GC trace hooks. POD counters, native handles, and cache
@@ -1049,7 +1048,7 @@ layout-specific access.
 | `JsEvalBridgeState` | JavaScript | Direct-eval binding journals and frame marks | helper |
 | `JsEvalLocalState` | JavaScript | Caller-local eval bindings and lexical keys | helper |
 | `JsCallActivation` | JavaScript | One synchronous call's ambient `this`/newTarget/args homes | helper |
-| `JsExecutionState` | JavaScript | Activation chain plus `call_depth`/`call_stack_limit` | direct / helper |
+| `JsExecutionState` | JavaScript | Activation chain | helper |
 | `JsCodeStore` | JavaScript | Context-owned MIR artifacts and source owners | helper |
 | `JsProcessState` | JavaScript | Process object, listeners, and IPC roots | helper |
 | `JsTest262AgentState` | JavaScript | Test262 agent object, callbacks, and reports | helper |

@@ -80,9 +80,20 @@ TEST(MathUtilsTest, ClampUnit) {
 }
 
 TEST(MathUtilsTest, DegreeRadianConversions) {
+    EXPECT_NEAR(math_pi_f(), 3.14159265f, 0.000001f);
+    EXPECT_NEAR(math_tau_f(), 6.28318531f, 0.000001f);
     EXPECT_NEAR(math_degrees_to_radians(180.0f), 3.14159265f, 0.000001f);
+    EXPECT_NEAR(math_degrees_to_radians_d(180.0), math_pi_d(), 0.000000000001);
+    EXPECT_NEAR(math_radians_to_degrees_d(math_pi_d()), 180.0, 0.000000000001);
     EXPECT_NEAR(math_gradians_to_radians(200.0f), 3.14159265f, 0.000001f);
     EXPECT_NEAR(math_turns_to_radians(0.5f), 3.14159265f, 0.000001f);
+}
+
+TEST(MathUtilsTest, WrapPositive) {
+    EXPECT_FLOAT_EQ(math_wrap_positive_f(0.0f, 360.0f), 0.0f);
+    EXPECT_FLOAT_EQ(math_wrap_positive_f(725.0f, 360.0f), 5.0f);
+    EXPECT_FLOAT_EQ(math_wrap_positive_f(-5.0f, 360.0f), 355.0f);
+    EXPECT_TRUE(isnan(math_wrap_positive_f(NAN, 360.0f)));
 }
 
 TEST(MathUtilsTest, MacroFormsWorkInCppToo) {

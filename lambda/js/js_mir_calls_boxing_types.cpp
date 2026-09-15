@@ -110,29 +110,18 @@ static MIR_reg_t jm_adopt_direct_scalar_result(JsMirTranspiler* mt,
     return adopted;
 }
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Winvalid-offsetof"
-static MirInvocationDepthPlan jm_enter_source_invocation(JsMirTranspiler* mt) {
-    MirEmitter* em = &mt->func_em->em;
-    // the capsule is context-owned for this synchronous call's whole extent.
-    MIR_reg_t state = em_load_at(em, em->frame.runtime,
-        offsetof(EvalContext, capsule_directory) + offsetof(ContextCapsuleDirectory, slots) +
-        CONTEXT_CAPSULE_JS_RUNTIME * sizeof(ContextCapsuleSlot) +
-        offsetof(ContextCapsuleSlot, capsule), MIR_T_I64, "js_call_owner");
-    MirInvocationDepthPlan plan = {state,
-        offsetof(JsRuntimeState, execution) + offsetof(JsExecutionState, call_depth),
-        offsetof(JsRuntimeState, execution) + offsetof(JsExecutionState, call_stack_limit)};
+// JC23: a source invocation checks the native stack before the call; there is
+// no counter, so nothing runs after the callee returns.
+static void jm_enter_source_invocation(JsMirTranspiler* mt) {
     MIR_label_t overflow = jm_new_label(mt), entered = jm_new_label(mt);
-    em_change_invocation_depth(em, plan, 1, overflow);
+    em_branch_if_stack_exhausted(&mt->func_em->em, overflow);
     jm_emit_jmp(mt, entered);
     jm_emit_label(mt, overflow);
     jm_call_1(mt, "js_throw_range_error", MIR_T_I64, MIR_T_P,
         MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)JS_CALL_STACK_EXCEEDED_MESSAGE));
     jm_emit_error_lane_propagate_check(mt);
     jm_emit_label_with_state(mt, entered, JS_ERROR_LANE_CLEAN);
-    return plan;
 }
-#pragma clang diagnostic pop
 
 MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
         int arg_count, MIR_reg_t* arg_regs, bool discard_result, bool source_invocation) {
@@ -154,13 +143,10 @@ MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
     MirCallOptions options = {true, false, 0};
     FnVariantAnalysis* body = fn_analysis_variant(jm_function_analysis(callee),
         FN_ENTRY_BOXED_BODY);
-    MirInvocationDepthPlan depth = source_invocation ? jm_enter_source_invocation(mt)
-        : MirInvocationDepthPlan{};
+    if (source_invocation) jm_enter_source_invocation(mt);
     MirCallResult direct = em_call_direct(&mt->func_em->em, callee->body_name,
         callee->body_func_item, body, arg_count, types, ops,
         &options);
-    // inline exit preserves a pending companion until the shared materializer.
-    if (source_invocation) em_change_invocation_depth(&mt->func_em->em, depth, -1);
     direct.normal = em_finish_direct_call_normal(&mt->func_em->em, direct,
         MIR_PENDING_REASON_UNKNOWN_CALL);
     MIR_reg_t result = jm_adopt_direct_scalar_result(mt, body, direct.normal);
@@ -309,12 +295,10 @@ MirCallResult jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee
     FnVariantAnalysis* native = fn_analysis_variant(jm_function_analysis(callee),
         FN_ENTRY_NATIVE_BODY);
     MirCallOptions options = {true, false, 0};
-    MirInvocationDepthPlan depth = source_invocation ? jm_enter_source_invocation(mt)
-        : MirInvocationDepthPlan{};
+    if (source_invocation) jm_enter_source_invocation(mt);
     MirCallResult direct = em_call_direct(&mt->func_em->em, callee->name,
         callee->native_func_item, native, arg_count, types, ops,
         &options);
-    if (source_invocation) em_change_invocation_depth(&mt->func_em->em, depth, -1);
     mt->func_em->last_call_result = {};
     return direct;
 }

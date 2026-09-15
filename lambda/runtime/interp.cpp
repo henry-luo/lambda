@@ -696,15 +696,23 @@ static bool interp_contract_has_binder(Type* type, bool include_refs, int depth 
         }
     }
     if (type->type_id == LMD_TYPE_ARRAY) {
+        // Generic `list` is a compact Type, unlike an inferred TypeArray.
+        // It cannot contain a binder and has no `nested` payload to inspect.
+        if (type == &TYPE_LIST || type == (Type*)&TYPE_ARRAY) return false;
         return interp_contract_has_binder(((TypeArray*)type)->nested,
             include_refs, depth + 1);
     }
     if (type->type_id == LMD_TYPE_MAP || type->type_id == LMD_TYPE_ELEMENT) {
+        // The generic container descriptors are compact Type prefixes. Casting
+        // one to TypeMap reads unrelated globals through `shape` (D3.3.3).
+        if (type == &TYPE_MAP || type == &TYPE_OBJECT || type == &TYPE_ELMT) return false;
         for (ShapeEntry* field = ((TypeMap*)type)->shape; field; field = field->next) {
             if (interp_contract_has_binder(field->type, include_refs, depth + 1)) return true;
         }
     }
     if (type->type_id == LMD_TYPE_FUNC) {
+        // `func` is likewise a compact generic Type rather than TypeFunc.
+        if (type == &TYPE_FUNC) return false;
         TypeFunc* function = (TypeFunc*)type;
         for (TypeParam* parameter = function->param; parameter; parameter = parameter->next) {
             if (parameter->binder || interp_contract_has_binder(

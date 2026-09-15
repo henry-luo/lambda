@@ -629,7 +629,6 @@ JsAstDefinition* js_script_ast_definition_ensure(JsScript* script,
     definition->script = script;
     definition->has_direct_eval = facts.has_direct_eval;
     definition->uses_arguments = facts.observations & JS_AST_OBSERVES_ARGUMENTS;
-    definition->tail_reuse_safe = facts.tail_reuse_safe;
     key.definition = definition;
     JsAstDefinitionMap::set(script->ast_definitions, key);
     if (JsAstDefinitionMap::oom(script->ast_definitions)) return NULL;

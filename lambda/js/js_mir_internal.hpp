@@ -343,6 +343,8 @@ void jm_emit_throw_completion(JsMirTranspiler* mt, MIR_reg_t value);
 void jm_emit_generator_throw_completion(JsMirTranspiler* mt, MIR_reg_t value);
 void jm_emit_error_lane_exit(JsMirTranspiler* mt);
 MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MirValue value);
+// A return must route through finally/iterator-close landings before leaving.
+bool jm_return_needs_completion_routing(JsMirTranspiler* mt);
 MIR_reg_t jm_emit_uext8(JsMirTranspiler* mt, MIR_reg_t r);
 struct hashmap* jm_var_scope_at(JsMirTranspiler* mt, int depth);
 bool jm_var_scope_set(JsMirTranspiler* mt, int depth, struct hashmap* scope);
@@ -643,9 +645,7 @@ JsFuncCollected* jm_find_collected_func_for_call(JsMirTranspiler* mt, JsCallNode
 JsFunctionNode* jm_resolve_direct_call_function(JsMirTranspiler* mt, JsCallNode* call,
         bool stable = false);
 JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call);
-bool jm_is_recursive_call(JsCallNode* call, JsFuncCollected* fc);
 bool jm_call_result_uses_native_register(JsMirTranspiler* mt, JsCallNode* call, JsFuncCollected* fc);
-bool jm_has_tail_call(JsMirTranspiler* mt, JsFuncCollected* fc);
 void jm_register_local_func(JsMirTranspiler* mt, const char* name, MIR_item_t func_item);
 const char* jm_make_fn_name(JsFunctionNode* fn, JsMirTranspiler* mt);
 const char* jm_get_param_name(JsAstNode* param_node, int index);

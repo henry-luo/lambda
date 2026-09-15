@@ -1,0 +1,7 @@
+caught 'boom at 3' in activation 3
+2 body2,finally2,finally1,finally0
+explode: true Maximum call stack size exceeded
+recover inside: true
+bounded: 500500 1000
+activations: 3 1|2|3 3,2,1,0
+strict this: true

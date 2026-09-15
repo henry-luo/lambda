@@ -1991,11 +1991,11 @@ static void arc_to_beziers(RdtPath* path, float x1, float y1,
     float dtheta = angle_between((x1p - cxp) / rx, (y1p - cyp) / ry,
                                  (-x1p - cxp) / rx, (-y1p - cyp) / ry);
 
-    if (!sweep && dtheta > 0) dtheta -= 2.0f * (float)M_PI;
-    if (sweep && dtheta < 0)  dtheta += 2.0f * (float)M_PI;
+    if (!sweep && dtheta > 0) dtheta -= math_tau_f();
+    if (sweep && dtheta < 0)  dtheta += math_tau_f();
 
     // split arc into segments of at most PI/2 and approximate each with a cubic bezier
-    int n_segs = (int)ceilf(fabsf(dtheta) / ((float)M_PI / 2.0f));
+    int n_segs = (int)ceilf(fabsf(dtheta) / (math_pi_f() * 0.5f));
     if (n_segs < 1) n_segs = 1;
     float seg_angle = dtheta / (float)n_segs;
     // control point distance factor: (4/3) * tan(seg_angle / 4)

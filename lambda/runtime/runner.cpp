@@ -1955,8 +1955,8 @@ void runner_setup_context(Runner* runner) {
     // Initialize stack overflow protection (once per thread)
     lambda_stack_init();
 
-    // Store stack_limit in context for fast access from JIT-compiled code
-    ctx->stack_limit = _lambda_stack_limit;
+    // one recoverable limit per thread, shared with the JS guards (JC23)
+    ctx->stack_limit = lambda_stack_recoverable_limit();
 
     ArrayList* next_type_list = runner->script->type_list;
     if (runtime_type_list(runner->runtime) && runtime_type_list(runner->runtime) != next_type_list &&

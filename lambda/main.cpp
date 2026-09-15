@@ -863,7 +863,7 @@ extern "C" {
     int js_node_test_pass_count(void);
     int js_node_test_fail_count(void);
     void js_promise_set_unhandled_rejections_mode(int64_t strict_mode);
-    void js_set_call_stack_limit(int64_t limit);
+    void js_set_stack_size_kb(int64_t kb);
 }
 
 // System includes for environment and string functions
@@ -2511,13 +2511,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 }
             }
             js_promise_set_unhandled_rejections_mode(unhandled_rejections_strict ? 1 : 0);
-            if (js_stack_size_kb > 0) {
-                // V8's --stack_size is in KB; the MIR bridge uses a logical JS
-                // call-depth guard, so scale conservatively before user code runs.
-                js_set_call_stack_limit(js_stack_size_kb * 2);
-            } else {
-                js_set_call_stack_limit(0);
-            }
+            // V8's --stack_size is in KB of native stack; it sets the native
+            // recursion budget before any context binds its limit (JC23).
+            js_set_stack_size_kb(js_stack_size_kb);
 
             // If --document is provided, load HTML and set up DOM context
             if (html_file) {

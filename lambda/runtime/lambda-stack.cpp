@@ -44,6 +44,10 @@ __thread uintptr_t _lambda_stack_base = 0;
 
 __thread volatile bool _lambda_stack_overflow_flag = false;
 
+// global-ok: I (CLI policy frozen before the first execution context binds its
+// limit; each context snapshots it into `Context::stack_limit`).
+static size_t _lambda_stack_budget = LAMBDA_STACK_DEFAULT_BUDGET;
+
 // Track whether signal handler has been installed (process-wide, only once)
 static volatile bool _signal_handler_installed = false;
 
@@ -370,6 +374,20 @@ void lambda_stack_cleanup(void) {
         _signal_handler_installed = false;
     }
 #endif
+}
+
+void lambda_stack_set_budget(size_t bytes) {
+    _lambda_stack_budget = bytes ? bytes : LAMBDA_STACK_DEFAULT_BUDGET;
+}
+
+uintptr_t lambda_stack_recoverable_limit(void) {
+    // bounds are per-thread; a context bound on a thread that never ran
+    // lambda_stack_init still needs a limit for its own stack
+    if (_lambda_stack_limit == 0) init_stack_bounds();
+    uintptr_t fault_floor = _lambda_stack_limit + LAMBDA_STACK_THROW_HEADROOM;
+    uintptr_t budget_limit = _lambda_stack_base > _lambda_stack_budget
+        ? _lambda_stack_base - _lambda_stack_budget : 0;
+    return budget_limit > fault_floor ? budget_limit : fault_floor;
 }
 
 extern "C" void lambda_stack_overflow_error(const char* func_name) {

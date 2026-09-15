@@ -42,6 +42,16 @@ extern __thread uintptr_t _lambda_stack_base;
 // Alternate signal stack size (64KB)
 #define LAMBDA_ALT_STACK_SIZE (64 * 1024)
 
+// JC23: room kept above the fault limit so a language-level stack-overflow
+// error (RangeError construction, stack capture, unwinding) never itself
+// reaches the guard page.
+#define LAMBDA_STACK_THROW_HEADROOM (256 * 1024)
+
+// JC23: default native budget for language-level recursion, measured from the
+// thread's stack base. A thread smaller than the budget is bounded by its own
+// fault limit plus the throw headroom instead.
+#define LAMBDA_STACK_DEFAULT_BUDGET (32 * 1024 * 1024)
+
 // ============================================================================
 // Signal-based recovery (Phase 2)
 // ============================================================================
@@ -73,10 +83,38 @@ void lambda_stack_cleanup(void);
  */
 void lambda_stack_overflow_error(const char* func_name);
 
+/**
+ * Set the process-wide native recursion budget in bytes (0 = default).
+ * CLI policy: call before the first execution context binds its limit.
+ */
+void lambda_stack_set_budget(size_t bytes);
+
+/**
+ * The current thread's recoverable stack limit (JC23): the lowest native stack
+ * address at which generated code and call kernels must still raise a
+ * catchable stack-overflow error. Store it in `Context::stack_limit` on the
+ * thread that executes the context.
+ */
+uintptr_t lambda_stack_recoverable_limit(void);
+
 // Native RootFrame constructors cannot return an error to their caller. A
 // reservation failure must leave through the armed execution recovery point
 // rather than continue with null, non-rooting slots.
 void lambda_root_frame_overflow_error(void);
+
+// Current native stack position; the stack-overflow guards compare it against
+// `Context::stack_limit` (JC23). The frame address is within one frame of SP,
+// which the limit's throw headroom absorbs. A hand-written register-template
+// asm read of SP is not used: it named no clobbered register, and inlined into
+// the always_inline call kernel it corrupted a live register in debug builds
+// (lib_mustache/lib_tabulator under test_js_gtest --full-mir).
+static inline uintptr_t lambda_stack_pointer(void) {
+#if defined(_MSC_VER)
+    return (uintptr_t)_AddressOfReturnAddress();
+#else
+    return (uintptr_t)__builtin_frame_address(0);
+#endif
+}
 
 /**
  * Get current stack usage in bytes.
@@ -85,25 +123,7 @@ void lambda_root_frame_overflow_error(void);
  * @return Number of bytes of stack currently in use
  */
 static inline size_t lambda_stack_usage(void) {
-    uintptr_t sp;
-
-#if defined(__x86_64__) || defined(_M_X64)
-    #if defined(_MSC_VER)
-        sp = (uintptr_t)_AddressOfReturnAddress();
-    #else
-        __asm__ volatile("mov %%rsp, %0" : "=r"(sp));
-    #endif
-#elif defined(__aarch64__) || defined(_M_ARM64)
-    #if defined(_MSC_VER)
-        sp = (uintptr_t)_AddressOfReturnAddress();
-    #else
-        __asm__ volatile("mov %0, sp" : "=r"(sp));
-    #endif
-#else
-    char stack_var;
-    sp = (uintptr_t)&stack_var;
-#endif
-
+    uintptr_t sp = lambda_stack_pointer();
     if (_lambda_stack_base == 0) return 0;
     return (size_t)(_lambda_stack_base - sp);
 }

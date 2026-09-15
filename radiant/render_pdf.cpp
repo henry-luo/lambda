@@ -412,8 +412,7 @@ static bool pdf_image_pixels_are_opaque(const uint32_t* pixels,
 static void pdf_transform_point(const RdtMatrix* transform, float x, float y,
                                 float* out_x, float* out_y) {
     if (transform) {
-        *out_x = transform->e11 * x + transform->e12 * y + transform->e13;
-        *out_y = transform->e21 * x + transform->e22 * y + transform->e23;
+        rdt_matrix_transform_point(transform, x, y, out_x, out_y);
     } else {
         *out_x = x;
         *out_y = y;

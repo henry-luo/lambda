@@ -457,9 +457,12 @@ size_t str_uint64_decimal_write(char* dst, uint64_t value);
 /** count decimal literal significand digits, ignoring leading zeroes and exponent. */
 int str_decimal_significant_digits(const char* value);
 
-/** hex encode [s, s+len) into dst. dst must have 2*len+1 bytes.
- *  returns dst. */
+/** hex encode [s, s+len) into dst with lowercase digits. dst must have
+ *  2*len+1 bytes. returns dst. */
 char* str_hex_encode(char* dst, const char* s, size_t len);
+
+/** as str_hex_encode, with uppercase digits (A-F). */
+char* str_hex_encode_upper(char* dst, const char* s, size_t len);
 
 /** hex decode [hex, hex+hex_len) into dst. returns bytes written. */
 size_t str_hex_decode(char* dst, const char* hex, size_t hex_len);

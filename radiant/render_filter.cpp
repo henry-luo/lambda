@@ -109,9 +109,8 @@ static void filter_apply_rgb_matrix(uint8_t* r, uint8_t* g, uint8_t* b,
  * Uses rotation in the RGB color space.
  */
 static void filter_hue_rotate(uint8_t* r, uint8_t* g, uint8_t* b, float angle) {
-    // Normalize angle to [0, 2π)
-    while (angle < 0) angle += 2.0f * M_PI;
-    while (angle >= 2.0f * M_PI) angle -= 2.0f * M_PI;
+    // normalize angle to [0, 2π).
+    angle = math_wrap_positive_f(angle, math_tau_f());
 
     float cos_a = cosf(angle);
     float sin_a = sinf(angle);

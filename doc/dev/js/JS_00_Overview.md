@@ -71,7 +71,7 @@ The set is organized in five parts. Read JS_01–JS_04 first for the engine; the
 
 | Doc | Covers |
 |---|---|
-| [JS_05 — Functions, Closures & Scope](JS_05_Functions_Closures.md) | `JsFunction`, native/boxed dual versions, parameter inference, capture analysis, the scope-environment model, `this`/`arguments`/`new.target`, TCO, inlining. |
+| [JS_05 — Functions, Closures & Scope](JS_05_Functions_Closures.md) | `JsFunction`, native/boxed dual versions, parameter inference, capture analysis, the scope-environment model, `this`/`arguments`/`new.target`, no-TCO call and native-return completions, inlining. |
 | [JS_06 — Objects, Properties & Prototypes](JS_06_Objects_Properties_Prototypes.md) | `Map`/`TypeMap`/`ShapeEntry`, the `JSPD_*` flag model, MapKind dispatch, get/set pipelines, `defineProperty`, the prototype chain, real intrinsic properties and observable member `Get -> Call`, symbol keys, shape pre-allocation. |
 | [JS_07 — Classes](JS_07_Classes.md) | Class collection, constructor compilation, prototype/static methods, inheritance & `super`, private members, computed keys, subclassable builtins, devirtualization. |
 | [JS_08 — Iterators, Generators & Destructuring](JS_08_Iterators_Generators.md) | The iterator protocol & done sentinel, fast-path iterators, for-of compilation with IteratorClose, generator state machines, destructuring & spread/rest. |

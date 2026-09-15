@@ -28,6 +28,12 @@ static inline bool math_checked_add(size_t a, size_t b, size_t* out) {
 #endif
 }
 
+// out = a * b + c, used for a fixed allocation header plus a variable tail.
+static inline bool math_checked_mul_add(size_t a, size_t b, size_t c, size_t* out) {
+    size_t product = 0;
+    return math_checked_mul(a, b, &product) && math_checked_add(product, c, out);
+}
+
 static inline bool math_size_is_power_of_two(size_t value) {
     return value != 0 && (value & (value - 1)) == 0;
 }
@@ -59,9 +65,7 @@ inline bool checked_add(size_t a, size_t b, size_t* out) {
 
 // out = a * b + c (the common "header + n*elem" allocation size); returns false on any overflow.
 inline bool checked_mul_add(size_t a, size_t b, size_t c, size_t* out) {
-    size_t prod;
-    if (!checked_mul(a, b, &prod)) return false;
-    return checked_add(prod, c, out);
+    return math_checked_mul_add(a, b, c, out);
 }
 
 // Narrow From -> To preserving value; returns false if the value does not round-trip.

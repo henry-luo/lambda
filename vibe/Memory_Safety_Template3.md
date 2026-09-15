@@ -693,7 +693,8 @@ machinery already validated on the Lambda side. Phase 6 is the durable backstop 
 
 **Phase 0 — landed and verified.** Header-only, no production call sites changed.
 
-- `lib/math_checked.hpp` — `checked_mul` / `checked_add` / `checked_mul_add` (builtin-overflow), `checked_narrow`.
+- `lib/math_checked.hpp` — C-compatible `math_checked_mul` / `math_checked_add` /
+  `math_checked_mul_add` plus C++ `checked_*` wrappers and `checked_narrow`.
 - `lib/span.hpp` — `Span<T>` (bounds-checked `operator[]`, non-aborting `get()`, clamped `subspan`, range-for, `unchecked()`); `ByteCursor` (`has`/`peek`/`advance`/`take`, peek-past-end returns 0).
 - `lib/checked_alloc.hpp` — `[[nodiscard]]` `checked_pool_array` / `checked_pool_sized` / `checked_realloc` (preserves `*slot` on failure) / `checked_malloc`.
 - `lib/recursion_guard.hpp` — `RecursionGuard` RAII (balanced depth counter on every exit).

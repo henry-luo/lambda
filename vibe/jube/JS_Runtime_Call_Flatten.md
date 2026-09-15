@@ -6,7 +6,10 @@
 one kernel entry `js_call` (Appendix D), rooting dedup + kernel trims + O1–O5
 (Appendix E). **P4 (JC18 direct call-site entry) implemented 2026-09-15
 (Appendix G). P5–P6 (AST interpreter, §3.5, JC20–JC22) implemented 2026-09-15
-(Appendix F).** P1–P6 committed in `8e9f49d9a`. Measured against the working tree at `772ef7625`
+(Appendix F).** P1–P6 committed in `8e9f49d9a`. **JC23 (native stack guard
+replaces the call-depth counter, §3.6) implemented 2026-09-15 (Appendix H).
+JC24 (no tail-call elimination on any backend, §3.7) implemented 2026-09-15
+(Appendix J).** Measured against the working tree at `772ef7625`
 (debug configuration = `-O3` + frame pointers, `premake5.mac.lua:21`).
 
 **Scope**: the runtime path a JavaScript call takes from an emitted MIR call
@@ -30,7 +33,8 @@ only).
 
 **Ledger series**: extends the callable area's `JC#` from
 `vibe/jube/JS_Runtime_Callable.md` §4 — **JC13–JC19** below, **JC20–JC22** for the
-AST interpreter (§3.5); no new series.
+AST interpreter (§3.5), **JC23** for the stack-overflow guard (§3.6), **JC24**
+for tail calls on every backend (§3.7); no new series.
 Prior design in this area: `vibe/impl/Lambda_Impl_Tune7_JS_Plain_Call
 (done).md` (call lanes, C1–C4) and `vibe/impl/Lambda_Impl_Tune_JS_Dynamic_Call
 (done).md` (DC1–DC7, per-callee entries). Both are inputs here; §2.4 records
@@ -259,9 +263,9 @@ path:
 
 | ID | Decision |
 |---|---|
-| **JC20** | **The AST activation borrows the kernel activation; no inner re-roots.** `js_interp_call_function` runs only under a call activation for its callee, pushed by a kernel instance (JC13 generic or JC21 direct). It opens no root for anything that activation or the callee already roots. **Callee:** rooted by the activation's callee home. **Non-arrow `this`:** the environment's `lexical_this` is seeded from the activation's `this` binding after the environment exists. A self-tail call publishes its next receiver into the activation's `this` home, because a reused activation *is* that call's activation. **Arrow `this`:** the lexical environment home, or else the callee payload's `lexical_this`. **`new.target`:** non-arrow → the activation's `new.target` home; arrow → the payload's `lexical_new_target`. **Home class:** the payload's `home_class` slot, or a shared null home when the callee has no payload. The only roots it keeps hold values it creates: the `arguments` object and the two self-tail argument arrays. `RootFrame(7)` → `RootFrame(3)`. Payload slots are stable (`malloc`/pool, not data-zone) and traced through the rooted callee, so they are valid homes for the activation's extent. |
-| **JC21** | **AST direct call = the kernel with proven facts, entered by a guard.** An AST call site with plain arguments (the existing rooted argument span, not construct, not `super`, not an intrinsic `eval`/`require`/`import`) calls `js_call_from_ast(callee, this, args, argc, result_home)` instead of `js_call_function_prerooted_args_into`. That entry evaluates one guard and, on a hit, runs `js_call_ast_direct`, a third `always_inline` instance of the *same* kernel source with a constant mode that folds away the steps the guard proves irrelevant. It then calls `js_interp_call_function` directly instead of `fn->body`. On a miss it tail-calls `js_call`, which is observably identical, so there is no per-site state and no cache (D8.4.1v2). **Guard:** callee is a JS-layout `JsFunction` with `body_kind == AST` and `invoke == js_call_entry_generic` (ordinary capability, not bound); flags exclude `GENERATOR`, `ASYNC`, `ASYNC_GEN`, `DERIVED_CTOR`, `USES_WITH`, `HAS_BOUND_THIS`, `TYPED_ARRAY_METHOD`; no eval-initializer context and no vm-stack source; no active `with` chain; callee module state is none or equals the active module state; callee home global equals the current global. **Kept on the hit path** (the kernel steps the guard does not prove): depth guard, call activation with its homes, sloppy `this` coercion, `new.target` install, private home-class install, `arguments` source span, and result adoption into the caller's home. **Folded away:** argument-span copy (the span is pre-rooted), callee-layout split, null-body check, module-state activation, realm swap, `with` relink, generator prototype, derived-constructor TDZ, vm-source push, body-entry dispatch, owner check, and pending-scalar resolve. |
-| **JC22** | **One kernel source, three instances; not an entry family.** The generic `[[Call]]` instance (`js_call_entry_generic`), the `[[Construct]]` body instance (`js_call_constructor_body`) and the AST direct instance (`js_call_ast_direct`) are compile-time instantiations of `js_call_kernel`, differing only in constant operands. JC19 stands: shape variation stays flag branches in one source, and adding call-protocol state still means editing one kernel. The mode operand may only *remove* a step whose precondition a guard proved, never add semantics. The self-tail-call reuse inside `js_interp_call_function` is unchanged. |
+| **JC20v2** | **The AST activation borrows the kernel activation; no inner re-roots.** `js_interp_call_function` runs only under a call activation for its callee, pushed by a kernel instance (JC13 generic or JC21 direct). It opens no root for anything that activation or the callee already roots. **Callee:** rooted by the activation's callee home. **Non-arrow `this`:** the environment's `lexical_this` is seeded from the activation's `this` binding after the environment exists. **Arrow `this`:** the lexical environment home, or else the callee payload's `lexical_this`. **`new.target`:** non-arrow → the activation's `new.target` home; arrow → the payload's `lexical_new_target`. **Home class:** the payload's `home_class` slot, or a shared null home when the callee has no payload. The only root it keeps holds the value it creates: the `arguments` object. `RootFrame(7)` → `RootFrame(1)`. A `return f()` to the running function is an ordinary call through the kernel; no activation is reused (JSI7, §3.5 v2 note below). Payload slots are stable (`malloc`/pool, not data-zone) and traced through the rooted callee, so they are valid homes for the activation's extent. |
+| **JC21** | **AST direct call = the kernel with proven facts, entered by a guard.** An AST call site with plain arguments (the existing rooted argument span, not construct, not `super`, not an intrinsic `eval`/`require`/`import`) calls `js_call_from_ast(callee, this, args, argc, result_home)` instead of `js_call_function_prerooted_args_into`. That entry evaluates one guard and, on a hit, runs `js_call_ast_direct`, a third `always_inline` instance of the *same* kernel source with a constant mode that folds away the steps the guard proves irrelevant. It then calls `js_interp_call_function` directly instead of `fn->body`. On a miss it tail-calls `js_call`, which is observably identical, so there is no per-site state and no cache (D8.4.1v2). **Guard:** callee is a JS-layout `JsFunction` with `body_kind == AST` and `invoke == js_call_entry_generic` (ordinary capability, not bound); flags exclude `GENERATOR`, `ASYNC`, `ASYNC_GEN`, `DERIVED_CTOR`, `USES_WITH`, `HAS_BOUND_THIS`, `TYPED_ARRAY_METHOD`; no eval-initializer context and no vm-stack source; no active `with` chain; callee module state is none or equals the active module state; callee home global equals the current global. **Kept on the hit path** (the kernel steps the guard does not prove): stack guard (JC23), call activation with its homes, sloppy `this` coercion, `new.target` install, private home-class install, `arguments` source span, and result adoption into the caller's home. **Folded away:** argument-span copy (the span is pre-rooted), callee-layout split, null-body check, module-state activation, realm swap, `with` relink, generator prototype, derived-constructor TDZ, vm-source push, body-entry dispatch, owner check, and pending-scalar resolve. |
+| **JC22v2** | **One kernel source, three instances; not an entry family.** The generic `[[Call]]` instance (`js_call_entry_generic`), the `[[Construct]]` body instance (`js_call_constructor_body`) and the AST direct instance (`js_call_ast_direct`) are compile-time instantiations of `js_call_kernel`, differing only in constant operands. JC19 stands: shape variation stays flag branches in one source, and adding call-protocol state still means editing one kernel. The mode operand may only *remove* a step whose precondition a guard proved, never add semantics. `js_interp_call_function` runs one activation per call; there is no self-tail-call reuse. |
 
 #### Expected effect
 
@@ -276,6 +280,107 @@ not call protocol, and is out of scope. Gates: the `JS_EXECUTION_BACKEND=ast`
 runs of `test_js_gtest` and the test262 baseline must show no new failures
 against the pre-change tree on that backend, plus a forced-GC run on it. The
 MIR backend gates are unchanged.
+
+**v2 (2026-09-15): self-tail activation reuse removed.** The interpreter used to
+turn `return f(args)` to the running function into a `JS_INTERP_TAIL_CALL`
+completion. The completion carried the argument list back to
+`js_interp_call_function`, which looped, and reused the environment when a
+fact walk judged it safe. That was an imported tail signal, which
+`vibe/Lambda_Design_JS_Interpreter.md` **JSI7** excludes, and the design had
+kept direct self-tail handoff KIV (its open item 7). It was also observable,
+because Node performs no tail-call elimination:
+
+- the completion passed straight through an enclosing `try`, so `catch` could
+  not observe the callee's throw;
+- `finally` ran *before* the callee body;
+- unbounded self-recursion grew no native stack, so the JC23 guard never raised
+  `RangeError` and the program looped forever. Node's
+  `test-stack-size-limit.js` hangs this way.
+
+Excluding `try` regions alone would still leave the last point. JC20v2 and
+JC22v2 therefore state one activation per call; the superseded wording is in
+Appendix S. Record: Appendix I.
+
+### 3.6 Stack-overflow guard (JC23)
+
+**Before.** JavaScript bounded recursion with a logical counter:
+`JsExecutionState::call_depth` compared against `call_stack_limit` (4096). There
+were two implementations of the check, and each call took exactly one of them:
+
+- a JIT direct source call (`jm_enter_source_invocation`) loaded the counter
+  through the context capsule directory, compared it with the limit, stored
+  `+1` before the call, and loaded, subtracted and stored again after it;
+- every other call (dynamic `js_call`, the JC18 `invoke` entry, construct, the
+  AST direct instance, calls from C++ builtins) ran `JsCallDepthGuard` in
+  `js_call_kernel`, which incremented on entry and decremented in its destructor.
+
+The cost was two memory writes per call plus an exit step, and a fault landing
+had to reset the counter. The count also ignored frame size: in the debug `-O3`
+build a MIR direct level is ≈92 B, a dynamic level ≈646 B and an AST level
+≈4.4 KB. So 4096 calls meant 0.4 MB on one path and 18 MB on another, and pure
+C++ recursion was not counted at all. `--stack-size` (V8 KB) was mapped to
+`kb × 2` calls, which was a guess.
+
+**Alternatives considered.**
+
+1. *No inline check; rely on the guard-page signal, as the Lambda JIT does.*
+   **Rejected.** The signal handler can only `siglongjmp` to an armed recovery
+   frame, and JS has one only at the execution boundary
+   (`js_mir_execute_compiled_entry`):
+   - JS `try` pushes no recovery frame, so `try { recurse() } catch {}` would
+     abort the script instead of catching `RangeError`;
+   - timers, microtasks, promise reactions and DOM listeners run with no armed
+     frame, so an overflow there kills the process;
+   - the jump skips C++ destructors (`JsCallActivationScope`, `RootFrame`),
+     which is undefined behaviour, and the checkpoint restores only side-stack
+     watermarks, not JS ambient state;
+   - `--stack-size` would stop having any meaning.
+2. *Signal, then a normal unwind* (HotSpot/CLR stack banging: a probe at function
+   entry faults in the guard zone, and the handler rewrites the saved PC to the
+   function's own throw edge). **Rejected.**
+   - The probe is still one memory read per call, so there is nothing to gain
+     over option 3.
+   - It needs a probe-PC table and per-OS, per-arch context editing.
+   - It cannot cover `js_call_kernel` or the C++ builtins, whose code we do not
+     generate, or the MIR interpreter (`--mir-interp`), which has no machine PC.
+   - Whether a redirected PC keeps register locations valid depends on MIR's
+     register allocator. That is vendored code we cannot patch (rule 16), so
+     the design would rest on an implementation detail.
+   - V8, SpiderMonkey and JSC all use explicit limit checks.
+3. *Explicit stack-pointer check against a byte limit.* **Adopted** (JC23).
+
+| ID | Ruling |
+|---|---|
+| **JC23** | **The JS stack guard compares the native stack pointer with a byte limit; there is no call counter.** **Sites:** the JIT direct source-call site (`jm_enter_source_invocation`, via the shared `em_branch_if_stack_exhausted`) and the one kernel source (`js_call_kernel`, hence every JC22 instance). Each call passes exactly one of them, as before, so recursion that alternates direct and dynamic calls meets one limit. **Check:** `sp < Context::stack_limit` → throw `RangeError: Maximum call stack size exceeded` through the ordinary error lane, so JS `try` catches it and callbacks outside `js_main` are safe. Nothing is written and there is no exit step. The JIT reads SP with one MIR `BSTART` (`mov rd, sp`, no alloca) prepended at the function head and shared by every guard in that function, which is exact because emitted functions allocate no stack after their head. Under the MIR interpreter the value is the interpreter's own frame on the same stack. C++ uses `lambda_stack_pointer()`. **Limit:** `lambda_stack_recoverable_limit()` = max(thread stack base − budget, fault limit + 256 KB throw headroom). The budget defaults to 32 MB (`LAMBDA_STACK_DEFAULT_BUDGET`), which keeps every path at or above the old 4096-call depth; a thread smaller than the budget is bounded by its own fault floor. `--stack-size=N` sets the budget to N × 32 MB / 984, so V8's default flag keeps the default budget and N× the flag gives N× the depth. **Owner:** `Context::stack_limit`, one field for all languages, written only from that one helper on the thread that binds the context: `js_runtime_state_init`, `runner_setup_context`, the interp worker, and `js_set_stack_size_kb` for an already-bound context. The Lambda and JS setters therefore cannot disagree. **Backstop:** the guard-page signal handler and recovery frames stay for native recursion that never passes a call guard (deep C++ builtins, parser recursion). When a limit fires is exempt from cross-tier equality (S7.11.4): the depth at which `RangeError` is thrown depends on frame sizes, so it differs between debug, release and ASan builds and between backends. |
+
+### 3.7 Tail calls (JC24)
+
+**Before.** Two backends eliminated self-tail calls in different ways:
+
+- the AST interpreter reused its activation through a `JS_INTERP_TAIL_CALL`
+  completion (removed by JC20v2/JC22v2, §3.5);
+- the MIR backend rewrote a native-eligible self-tail call into a jump back to
+  a loop label, capped at `tco_count ≤ 1000000`.
+
+Both were observable, and Node performs no tail-call elimination:
+
+- a self-tail call inside `try/finally` skipped every `finally`;
+- MIR's cap *returned 0* for deeper recursion instead of throwing, a wrong
+  answer;
+- neither backend grew native frames, so the JC23 guard could never raise
+  `RangeError`.
+
+**Alternatives considered.** Keeping the MIR rewrite for "provably invisible"
+cases was **rejected**. Excluding `try` regions fixes `finally`, but not
+termination. A loop grows no native frames, and matching the depth at which a
+real call raises `RangeError` would need a per-iteration stack charge or depth
+constant with no principled value, which is hardcoding. In the benchmark corpus
+the rewrite converted a single call (larceny/divrec), while eligible functions
+that never converted, such as r7rs `tak`, still paid the counter on every entry.
+
+| ID | Ruling |
+|---|---|
+| **JC24** | **A JS call is a call on every backend; there is no tail-call elimination.** Lowering never rewrites `return f(args)`, self-recursive or not, into a jump or an activation reuse. Unbounded recursion therefore ends at the JC23 guard with `RangeError`, at a depth set by frame size, which S7.11.4 leaves free to differ across backends and builds. **Corollary (native versions):** a `return` in a native-version body is a completion like any other. When it crosses a try/`using` completion context or an open for-of iterator (`jm_return_needs_completion_routing`), it boxes onto the Item lane and takes the shared iterator-close and delayed-completion path, and every native landing converts back through `jm_native_return_reg` (FLOAT and INT alike). Only a return with nothing to run first may `ret` its raw value directly. Any future tail-call elimination must be invisible, termination included, and needs its own ruling. |
 
 ## 4. Open items
 
@@ -296,7 +401,8 @@ MIR backend gates are unchanged.
 - **O5** — The JIT-inline depth guard (`jm_enter_source_invocation`) and the
   kernel's RAII guard are two implementations of one semantic; they share the
   counter, which is what matters, but the message and limit constants should
-  be one definition.
+  be one definition. *(Done in P3; the counter itself was retired by JC23 —
+  both sites now read one `Context::stack_limit`.)*
 
 ## 5. Risks
 
@@ -557,7 +663,8 @@ regression and the span smoke script. After the dead-helper deletion,
 
 **JC20 — no inner re-roots (`js_interp_call_function`).**
 - `RootFrame(7)` → `RootFrame(3)`. The remaining slots hold only the
-  `arguments` object and the two self-tail argument arrays.
+  `arguments` object and the two self-tail argument arrays. *(Later
+  `RootFrame(1)`: the self-tail reuse was removed, Appendix I.)*
 - The callee is rooted by the activation's callee home. A debug build logs
   `js-interp-call: entered without its callee's call activation` if a caller
   ever enters without one.
@@ -565,7 +672,8 @@ regression and the span smoke script. After the dead-helper deletion,
   `js_get_lexical_this_binding()` after the environment exists. The kernel has
   already bound and coerced the receiver.
 - A self-tail call writes its next receiver into the activation's `this` home
-  (`js_current_this`) instead of a private root.
+  (`js_current_this`) instead of a private root. *(Removed with the self-tail
+  reuse, Appendix I.)*
 - An arrow's frame `this` home is its lexical environment home, or else
   `&payload->ast->lexical_this`.
 - `new.target`: non-arrow → the activation's `new.target` home; arrow →
@@ -743,3 +851,190 @@ attributed to the merge, not P4.**
     bug that the new routing exposed. `bt_repeat_inner` cleared captures before
     the lazy continuation, which breaks RepeatMatcher steps 4, 7 and 9.
   - Regression test: `test/js/regression_t262_escape_regex_router.js`.
+
+## Appendix H — JC23 implementation record: native stack guard (2026-09-15)
+
+**Landed.**
+- `mir_emitter_shared.hpp`:
+  - `em_branch_if_stack_exhausted` replaces `MirInvocationDepthPlan` and
+    `em_change_invocation_depth`;
+  - the guard is `ublt overflow, sp, i64:offsetof(Context, stack_limit)(ctx)`;
+  - `sp` is one `BSTART` prepended at the function head and cached per
+    `func_item` (`MirEmitter::stack_ptr_reg`), like the bitcast scratch slot.
+- `jm_enter_source_invocation` (`js_mir_calls_boxing_types.cpp`) keeps its
+  overflow edge (`js_throw_range_error`, then error-lane propagation) and loses
+  its return value. `jm_call_direct_boxed` and `jm_call_direct_native` no longer
+  emit the post-call decrement.
+- `js_call_kernel`: `JsCallDepthGuard` is replaced by
+  `lambda_stack_pointer() < context->stack_limit`.
+- Retired:
+  - the `JsExecutionState` fields `call_depth` and `call_stack_limit`;
+  - `js_initial_call_stack_limit` and `js_set_call_stack_limit`;
+  - the `js_call_depth = 0` reset.
+
+  Generated code no longer reads any `JsRuntimeState` offset (the capsule
+  directory path is gone); the Node dylibs were rebuilt for the layout change.
+- `lambda-stack`:
+  - `lambda_stack_set_budget` and `lambda_stack_recoverable_limit` (JC23
+    limit formula);
+  - `LAMBDA_STACK_DEFAULT_BUDGET` = 32 MB, `LAMBDA_STACK_THROW_HEADROOM` =
+    256 KB;
+  - `lambda_stack_pointer()` factored out of `lambda_stack_usage()`.
+- `Context::stack_limit` setters: `js_runtime_state_init`,
+  `runner_setup_context`, the interp worker, and `js_set_stack_size_kb`
+  (`main.cpp`'s `--stack-size`).
+- Fixture `test/mir/js/native_completion_ownership.mir-check` now pins `bstart`
+  and `ublt` and forbids the `i32:` counter load.
+
+**Depth at which `RangeError` fires** (default budget; release, `probe1.js`).
+
+| Path | Before (pristine release) | After |
+|---|---:|---:|
+| MIR direct self-recursion | 4,094 | 349,449 |
+| MIR dynamic (`obj["m"]()`) | 4,093 | 56,666 |
+| MIR mixed direct/dynamic | 4,094 | 97,520 |
+| AST backend | ≤4,096 (limit; not probed) | 7,678 |
+| `--mir-interp` (debug) | ≤4,096 (limit; not probed) | 10,975–23,555 |
+
+Per level at a 1 MB budget (debug `-O3`): MIR direct ≈92 B, MIR dynamic ≈646 B,
+AST ≈4.4 KB. The budget was chosen so the largest frame (AST) still reaches at
+least the old 4096 calls.
+
+**SP read placement.** Release paired A/B on r7rs/ack (≈2.8 M direct calls):
+
+| Variant | ack ratio | Wins |
+|---|---:|---:|
+| `BSTART` at every call site | 1.095 | 8/31 |
+| constant in place of `BSTART` (diagnostic only) | 1.004 | 8/21 |
+| **one `BSTART` at the function head (landed)** | 1.030 | 7/21 |
+
+The emitted MIR is strictly smaller than the counter's (ack body: 76 locals
+instead of 82, three instructions per guard instead of eleven). The residue is
+therefore how mir-gen treats a function that contains `BSTART`, not the
+compare. It was not traced further into MIR (rule 16).
+
+**Release benchmark A/B (MIR backend).**
+- Control: a release build of `677c1c377` without this change.
+- Candidate: the landed head-`BSTART` shape.
+- Method: `run_paired_benchmarks.py --language js`; stdout identical on every
+  pair.
+
+| Row | Ratio | Wins |
+|---|---:|---:|
+| r7rs/fib | 0.981 | 21/21 |
+| r7rs/fibfp | 0.978 | 21/21 |
+| r7rs/ack | 1.030 | 7/21 |
+| r7rs/tak, cpstak | 1.029, 1.024 | 0/21 |
+| beng/binarytrees | 0.993 | 16/21 |
+| awfy (13 rows) | 0.989–1.013 | — |
+
+- Ratios are candidate over control; below 1.0 is faster.
+- tak and cpstak run in 0.31 and 0.61 ms, and differ by ≈10 µs. The
+  constant-in-place-of-`BSTART` diagnostic build showed the same +2.5%, so this
+  delta is not the SP read. It is not attributed further.
+
+**Gates.**
+
+| Gate | Result |
+|---|---|
+| test262 baseline (release) | 40,261/40,261, 0 regressions |
+| JS MIR emission fixtures | 28/28 |
+| `test_mir_emission_gtest` / `test_mir_ratchet_gtest` | 141/141 / 19/19 |
+| Forced-GC MIR sweep | 185/185 |
+| `test_js_gtest` / `test_js_script_gtest` | 490/490 / 136/136 |
+| JS exception and callable censuses | clean |
+| Overflow catchable on `mir`, `ast`, `--mir-interp`, in timers and microtasks, and under forced GC with poisoned frees | pass |
+| `--stack-size=2000` explode (`test-stack-size-limit`) | `RangeError`, exit 1 |
+| Node official stack/recursion/overflow subset (69 tests) | 32 pass / 37 fail, the identical set on the pre-change tree |
+
+**Found, not caused by JC23.** On the AST backend, `return f(n+1)` inside a
+`try` is taken as a self-tail call (`js_interp_prepare_self_tail_call`). No
+native stack grows, so neither the old counter nor the new guard ever fires,
+and `function rec(n){ try { return rec(n+1) } catch { return n } }` loops
+forever. A call inside `try` is not in tail position. *Resolved by JC20v2 and
+JC22v2: the reuse is removed (§3.5 v2 note, Appendix I).*
+
+## Appendix I — JC20v2/JC22v2 implementation record: AST self-tail reuse removed (2026-09-15)
+
+**Landed.**
+- `js_interp.cpp`:
+  - removed `js_interp_prepare_self_tail_call`, the `JS_INTERP_TAIL_CALL`
+    completion kind, `JsInterpCompletion::tail_arguments` and `tail_this`,
+    `JsInterpTailScratch`, `JsInterpFrame::tail_scratch`, and
+    `JsInterpEnvRoot::adopt_from`;
+  - `js_interp_call_function` runs one activation per call, with
+    `RootFrame(3)` → `RootFrame(1)`;
+  - `AST_NODE_RETURN_STAM` evaluates `return f()` as an ordinary call.
+- Removed the `tail_reuse_safe` fact: `JsAstFunctionFacts`,
+  `JsAstFunctionFactWalk::tail_active`, `JsAstDefinition::tail_reuse_safe`
+  and `js_fn_ast_tail_reuse_safe`. The `JsAstDefinition` layout changed, so the
+  Node dylibs were rebuilt.
+- Regression test: `test/js/regression_ast_self_tail_call.{js,txt}`, with the
+  expected output taken from Node. It covers:
+  - `catch` observing the callee's throw;
+  - `finally` order (innermost first);
+  - `RangeError` from unbounded tail recursion, caught outside and inside the
+    recursion;
+  - bounded tail recursion returning its value;
+  - a separate `arguments` object, rest list and closures per activation;
+  - a strict undefined receiver.
+
+**Before → after on AST** (debug), against Node:
+
+| Probe | Before | After (= Node) |
+|---|---|---|
+| `finally` order with `return f()` in `try` | `finally0,finally1,body2,finally2` | `body2,finally2,finally1,finally0` |
+| `function explode(n){ return explode(n+1) }` | loops forever | `RangeError` |
+| Node `test-stack-size-limit` (`--stack-size=2000 -e explode`) | hangs | `RangeError`, exit 1 |
+| `rec(n){ try { return rec(n+1) } catch { return n } }` | never terminates | returns |
+
+**Cost** (release, `JS_EXECUTION_BACKEND=ast`, paired ×11). Control: the same
+tree before this change.
+
+| Row | Ratio | Wins |
+|---|---:|---:|
+| synthetic `count(3000)` self-tail loop ×2000 | 5.42 | 0/11 |
+| r7rs/ack | 1.45 | 0/11 |
+| r7rs/tak, cpstak | 1.19, 1.11 | 0/11, 2/11 |
+| r7rs/fib, fibfp (non-tail) | 0.97, 0.98 | 8/11, 9/11 |
+
+A reused iteration cost ≈0.23 µs, and a real AST call costs ≈1.27 µs. That
+difference is the whole price of correctness, paid only by self-tail recursion
+on the AST backend. Keeping plain-tail reuse invisibly would take a design, not
+a patch:
+
+- a spec-accurate tail-position classifier (never inside `try`, iterator-closing
+  loops or `using` scopes);
+- a virtual stack charge per reused iteration, so unbounded recursion still ends
+  in `RangeError` at a comparable depth.
+
+That work stays under the interpreter design's open item 7.
+
+**Gates.**
+
+| Gate | Result |
+|---|---|
+| test262 baseline (release; synchronous tests run in AST batches) | 40,261/40,261, 0 regressions |
+| `test_js_gtest` (mixed mode; the new test runs on AST) | 491/491 |
+| `test_js_script_gtest` | 136/136 |
+| JS MIR emission fixtures / forced-GC MIR sweep | 28/28 / 185/185 |
+| JS exception and callable censuses | clean |
+| New test under `LAMBDA_GC_FORCE_EVERY=1` + `POISON_FREED=1`, AST | output identical |
+
+**Found, not fixed here.** The MIR loop rewrite of native-eligible self-tail
+calls has the same class of defect: a self-tail call inside `try/finally` skips
+every `finally`. `test/js/regression_ast_self_tail_call.js` therefore fails line
+2 under `test_js_gtest --full-mir`. It is tracked separately, together with the
+rewrite's silent `tco_count` cap (JS_05 known issue 5).
+
+## Appendix S — Superseded rulings
+
+- **JC20** (superseded by JC20v2, 2026-09-15): ~~A self-tail call publishes its
+  next receiver into the activation's `this` home, because a reused activation
+  *is* that call's activation.~~ ~~The only roots it keeps hold values it
+  creates: the `arguments` object and the two self-tail argument arrays.
+  `RootFrame(7)` → `RootFrame(3)`.~~ Replaced because the AST self-tail
+  activation reuse was removed (§3.5 v2 note).
+- **JC22** (superseded by JC22v2, 2026-09-15): ~~The self-tail-call reuse inside
+  `js_interp_call_function` is unchanged.~~ Replaced by: one activation per
+  call; no self-tail-call reuse.

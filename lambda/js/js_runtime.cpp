@@ -19,6 +19,7 @@
 #include "../module/node_core/node_trace_events.hpp"
 #include "../module/node_core/node_runtime_state.hpp"
 #include "../runtime/lambda-error.h"
+#include "../runtime/lambda-stack.h"
 #include "../runtime/lambda-root-frame.hpp"
 #include "../runtime/heap_api.h"
 #include "../runtime/runtime-state.h"
@@ -13545,29 +13546,20 @@ extern "C" Item js_super_apply_native(Item callee, Item this_val, Item args_arra
     return js_super_call_native(callee, this_val, args, argc);
 }
 
-#define js_call_stack_limit (js_runtime_state.execution.call_stack_limit)
+// V8's default --stack-size, in KB.
+static const int64_t JS_V8_DEFAULT_STACK_SIZE_KB = 984;
 
-// global-ok: I (CLI policy frozen before the first JS context is created).
-// The executable accepts --stack-size before there is an EvalContext to own
-// the value. Each context snapshots this default at creation and then keeps
-// its own semantic call limit.
-static int js_initial_call_stack_limit_value = 4096;
-
-extern "C" int js_initial_call_stack_limit(void) {
-    return js_initial_call_stack_limit_value;
-}
-
-extern "C" void js_set_call_stack_limit(int64_t limit) {
-    int normalized_limit = 4096;
-    if (limit <= 0) {
-        normalized_limit = 4096;
-    } else {
-        if (limit < 64) limit = 64;
-        if (limit > 65536) limit = 65536;
-        normalized_limit = (int)limit;
+extern "C" void js_set_stack_size_kb(int64_t kb) {
+    // JC23: V8 counts KB of its own frames. Scale against V8's default so the
+    // default flag keeps the default budget and N× the flag gives N× the depth.
+    if (kb > 0) {
+        if (kb < 16) kb = 16;
+        if (kb > 1024 * 1024) kb = 1024 * 1024;
     }
-    js_initial_call_stack_limit_value = normalized_limit;
-    if (js_active_runtime_state) js_call_stack_limit = normalized_limit;
+    lambda_stack_set_budget(kb > 0 ? (size_t)(kb *
+        (int64_t)LAMBDA_STACK_DEFAULT_BUDGET / JS_V8_DEFAULT_STACK_SIZE_KB) : 0);
+    // a context already bound on this thread snapshotted the old budget
+    if (context) context->stack_limit = lambda_stack_recoverable_limit();
 }
 
 
@@ -13764,12 +13756,6 @@ extern "C" Item js_construct_value(Item callee, Item* args, int arg_count,
     return js_throw_type_error("is not a constructor");
 }
 
-// Shared by the generic dispatcher and every specialized call entry: the
-// stack-overflow RangeError is semantics, so all call paths must advance the
-// same context-owned counter or deep recursion could escape the guard by
-// alternating paths.
-#define js_call_depth (js_runtime_state.execution.call_depth)
-
 static Item* js_call_activation_root_home(Rooted<Item>& rooted) {
     return (Item*)(void*)rooted.home();
 }
@@ -13829,16 +13815,11 @@ static void js_prepare_new_target_for_call(bool install_new_target,
 static inline __attribute__((always_inline)) Item js_call_kernel(Item func_item,
         Item this_val, Item* args, int arg_count, uint64_t* result_home,
         bool args_prerooted, Item construct_new_target, bool ast_direct) {
-    struct JsCallDepthGuard {
-        int* depth;
-        bool ok;
-        JsCallDepthGuard(int* depth_ptr, int depth_limit)
-            : depth(depth_ptr), ok(++(*depth_ptr) <= depth_limit) {}
-        ~JsCallDepthGuard() { --(*depth); }
-    } call_depth_guard(&js_call_depth, js_call_stack_limit);
-    if (!call_depth_guard.ok) {
-        // Node-compatible stack flags must trip the JS guard before discarded async
-        // recursion builds thousands of unhandled rejected promises.
+    // JC23: the same native stack guard as the JIT's direct call sites, so
+    // recursion alternating direct and dynamic calls meets one limit. The
+    // budget still trips before discarded async recursion builds thousands of
+    // unhandled rejected promises.
+    if (lambda_stack_pointer() < context->stack_limit) {
         return js_throw_range_error(JS_CALL_STACK_EXCEEDED_MESSAGE);
     }
     // keep the exact argument span rooted through nested callbacks and their
@@ -35483,5 +35464,4 @@ void js_deep_batch_reset() {
     }
     js_generator_callee_proto = (Item){0};
     js_current_private_home_class = (Item){0};
-    js_call_depth = 0;
 }

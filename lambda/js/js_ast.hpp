@@ -197,7 +197,6 @@ struct JsAstFunctionFacts {
     // A super() written inside a nested arrow. It binds `this` lexically for
     // this constructor, but at a program point no source-order scan can place.
     bool has_lexical_super_call = false;
-    bool tail_reuse_safe = false;
 };
 // Facts intentionally stop at each semantic function boundary, except that
 // arrows contribute their lexical observations to the enclosing function.

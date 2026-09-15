@@ -450,7 +450,7 @@ Item js_call_export_7_into(Function* function, Item a, Item b, Item c, Item d,
                            Item e, Item f, Item g, uint64_t* result_home);
 Item js_call_export_8_into(Function* function, Item a, Item b, Item c, Item d,
                            Item e, Item f, Item g, Item h, uint64_t* result_home);
-void js_set_call_stack_limit(int64_t limit);
+void js_set_stack_size_kb(int64_t kb);
 Item js_apply_function(Item func_item, Item this_val, Item args_array);
 Item js_apply_function_into(Item func_item, Item this_val, Item args_array,
                             uint64_t* result_home);
