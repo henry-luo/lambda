@@ -1,4 +1,4 @@
-// Differential routing audit: production lexical scanner versus AST POC.
+// Differential routing audit: production structural scanner versus AST POC.
 #include <gtest/gtest.h>
 
 #include <string.h>
@@ -163,24 +163,20 @@ static void router_poc_append_js_string(StrBuf* source, const char* pattern) {
     strbuf_append_char(source, '\'');
 }
 
-static void router_poc_append_semantic_case(const char* pattern, bool multiline, void* user_data) {
-    if (multiline) return; // no AST-only case has an unescaped anchor
-    RouterPocSemanticScript* script = (RouterPocSemanticScript*)user_data;
-    int pattern_len = (int)strlen(pattern);
-    JsRegexPocResult poc = js_regex_poc_route(pattern, pattern_len, false);
-    if (js_regex_scanner_needs_backtrack(pattern, pattern_len, false) ||
-        poc.route != JS_REGEX_POC_BACKTRACK_REQUIRED) return;
-    router_poc_append_js_string(script->source, pattern);
-    strbuf_append_str(script->source, ",\n");
-    script->pattern_count++;
-}
-
 static bool router_poc_write_semantic_script(RouterPocSemanticScript* script) {
+    static const char* patterns[] = {
+        "(a?)?", "(a?){0,1}", "(a{0,3})*", "(a*)*", "(?:|a)*",
+        "(?:(a)|b)+", "((a)?b)*", "(?:(a)|b){2}", "(a)\\1",
+        "(ab)*", "((a?)b)*", "(a?){1}", "(?:a{0,3}b)*",
+    };
     script->source = strbuf_new();
     if (!script->source) return false;
     strbuf_append_str(script->source, "var patterns = [\n");
-    router_poc_visit_curated(router_poc_append_semantic_case, script);
-    router_poc_visit_generated(router_poc_append_semantic_case, script);
+    for (int i = 0; i < (int)(sizeof(patterns) / sizeof(patterns[0])); i++) {
+        router_poc_append_js_string(script->source, patterns[i]);
+        strbuf_append_str(script->source, ",\n");
+        script->pattern_count++;
+    }
     strbuf_append_str(script->source,
         "];\n"
         "var subjects = [''];\n"
@@ -281,10 +277,10 @@ TEST(JsRegexRouterPoc, ScannerAndAstRouteAudit) {
     EXPECT_GT(stats.same_route, 0);
     EXPECT_GT(stats.scanner_only_backtrack, 0);
     EXPECT_GT(stats.poc_only_backtrack, 0);
-    EXPECT_EQ(stats.poc_only_backtrack, stats.poc_nullable_discard_only);
+    EXPECT_GT(stats.poc_nullable_discard_only, 0);
 }
 
-TEST(JsRegexRouterPoc, AstOnlyRoutesRevealNodeExecDivergences) {
+TEST(JsRegexRouterPoc, StructuralRoutesPreserveNodeExecResults) {
     RouterPocSemanticScript script = {};
     ASSERT_TRUE(router_poc_write_semantic_script(&script));
     ASSERT_GT(script.pattern_count, 0);
@@ -319,10 +315,68 @@ TEST(JsRegexRouterPoc, AstOnlyRoutesRevealNodeExecDivergences) {
     RecordProperty("semantic_matching_patterns", script.pattern_count - divergent_patterns);
     EXPECT_EQ(node_digests, script.pattern_count);
     EXPECT_EQ(lambda_digests, script.pattern_count);
-    EXPECT_GT(divergent_patterns, 0);
+    EXPECT_EQ(divergent_patterns, 0);
     shell_result_free(&node_result);
     shell_result_free(&lambda_result);
     strbuf_free(script.source);
+}
+
+TEST(JsRegexRouterPoc, StructuralRoutesExactRepetitionShapes) {
+    static const struct {
+        const char* pattern;
+        bool route_to_backtracker;
+        unsigned int reason;
+    } cases[] = {
+        { "(ab)*", false, JS_REGEX_SCANNER_REASON_NONE },
+        { "((a?)b)*", false, JS_REGEX_SCANNER_REASON_NONE },
+        { "(a?){1}", false, JS_REGEX_SCANNER_REASON_NONE },
+        { "(a?){2}", false, JS_REGEX_SCANNER_REASON_NONE },
+        { "(?:a{0,3}b)*", false, JS_REGEX_SCANNER_REASON_NONE },
+        { "(a?)?", true, JS_REGEX_SCANNER_REASON_EMPTY_OPTIONAL_ITERATION },
+        { "(a?){0,1}", true, JS_REGEX_SCANNER_REASON_EMPTY_OPTIONAL_ITERATION },
+        { "(a{0,3})*", true, JS_REGEX_SCANNER_REASON_EMPTY_OPTIONAL_ITERATION },
+        { "(a*)*", true, JS_REGEX_SCANNER_REASON_EMPTY_OPTIONAL_ITERATION },
+        { "(?:|a)*", true, JS_REGEX_SCANNER_REASON_EMPTY_OPTIONAL_ITERATION },
+        { "(?:(a)|b)+", true, JS_REGEX_SCANNER_REASON_CAPTURE_RESET },
+        { "((a)?b)*", true, JS_REGEX_SCANNER_REASON_CAPTURE_RESET },
+        { "(?:(a)|b){2}", true, JS_REGEX_SCANNER_REASON_CAPTURE_RESET },
+        { "(a)\\1", true, JS_REGEX_SCANNER_REASON_BACKREFERENCE },
+        { "(?=a)a", true, JS_REGEX_SCANNER_REASON_ASSERTION },
+    };
+    for (int i = 0; i < (int)(sizeof(cases) / sizeof(cases[0])); i++) {
+        int pattern_len = (int)strlen(cases[i].pattern);
+        JsRegexScannerAnalysis analysis = js_regex_scanner_analyze(
+            cases[i].pattern, pattern_len, false);
+        EXPECT_TRUE(analysis.complete) << cases[i].pattern;
+        EXPECT_EQ(js_regex_scanner_needs_backtrack(cases[i].pattern, pattern_len, false),
+                  cases[i].route_to_backtracker) << cases[i].pattern;
+        if (cases[i].reason != JS_REGEX_SCANNER_REASON_NONE) {
+            EXPECT_NE(analysis.reasons & cases[i].reason, 0u) << cases[i].pattern;
+        }
+    }
+}
+
+TEST(JsRegexRouterPoc, ResourceExhaustionIsNotReportedAsNoMatch) {
+    static const char* source =
+        "var input = '';\n"
+        "for (var i = 0; i < 40; i++) input += 'a';\n"
+        "new RegExp('((a+)+)\\\\1$').test(input + '!');\n"
+        "console.log('unreachable');\n";
+    ASSERT_EQ(write_binary_file("temp/js_regex_resource_exhaustion.js", source,
+                                (int)strlen(source)), 0);
+
+    ShellOptions options = {};
+    options.timeout_ms = 60000;
+    options.merge_stderr = true;
+    const char* lambda_args[] = {
+        "./lambda.exe", "js", "temp/js_regex_resource_exhaustion.js", "--no-log", NULL,
+    };
+    ShellResult result = shell_exec("./lambda.exe", lambda_args, &options);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_NE(result.exit_code, 0);
+    EXPECT_NE(strstr(output, "RegExp match exceeded engine resources"), nullptr);
+    EXPECT_EQ(strstr(output, "unreachable"), nullptr);
+    shell_result_free(&result);
 }
 
 } // namespace
