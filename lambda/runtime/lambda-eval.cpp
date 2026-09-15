@@ -1678,6 +1678,13 @@ bool lambda_type_matches(Item item, Type* expected) {
     if (!expected) return false;
     TypeId actual_id = get_type_id(item);
     if (actual_id == LMD_TYPE_ERROR) return lambda_type_accepts_error(expected);
+    // These contract tops share the compact TYPE_TYPE tag with first-class
+    // type values, but their pointer identity defines admission (D3.3.3v3).
+    if (type_is_any_without_error(expected) && type_is_any_without_null(expected)) {
+        return actual_id != LMD_TYPE_NULL;
+    }
+    if (type_is_any_without_error(expected)) return true;
+    if (type_is_any_without_null(expected)) return actual_id != LMD_TYPE_NULL;
     if (expected->type_id == LMD_TYPE_ANY) return true;
     // Literal aliases used to enter the pattern builder; compare their content directly now that literal-only forms are ordinary type values.
     if (expected->is_literal &&
@@ -1843,7 +1850,12 @@ static Type* binder_narrowest_type(Item value) {
             value.array && value.array->rep_cert) {
         return value.array->rep_cert->array_contract;
     }
-    return narrowest;
+    if (narrowest != &scratch) return narrowest;
+    // item_static_type_for_is uses caller scratch for ordinary scalars. A
+    // binder environment outlives this helper, so retain the canonical static
+    // contract instead of publishing that transient address (S4.2.2).
+    Type* canonical = type_info[narrowest->type_id].type;
+    return canonical ? canonical : &TYPE_ANY;
 }
 
 static Type* binder_join(Type* left, Type* right) {

@@ -1244,6 +1244,10 @@ type Node = {value: int, next: Node?}
 // Relational parameter types use an explicit type parameter or binder
 fn identity(T: type, x: T) T => x
 fn same_number(x: number as T, y: T) T => y
+
+// The ordinary non-error parameter domain can be bound without spelling it.
+// This is exactly `value: any ! error as T`.
+fn selected_type(value: as T) type => T
 ```
 
 ---

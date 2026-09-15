@@ -5,7 +5,9 @@
   portions of TG-P1–TG-P3 are landed: explicit `T: type`, `as T` at nested
   parameter-contract sites, slot environments in T0/MIR boxed entries,
   dependent body/return references, grammar differential coverage, and tier
-  regressions. TG-P0.1 is implemented under S11.1.4v2 / D3.2.5v2; TGO14(b)
+  regressions. The TG-P2.1a leading-binder shorthand is now specified:
+  `x: as T` in a function parameter elaborates to `x: any ! error as T`.
+  TG-P0.1 is implemented under S11.1.4v2 / D3.2.5v2; TGO14(b)
   still excludes function-type operands. TG-P4's D8.3.1v2 core is implemented:
   eligible binder-carrying functions collect bounded exact keys, emit immutable
   raw bodies, select them directly at statically exact tag-safe local
@@ -120,7 +122,8 @@ scoping; TG3/TG5 `as T` binders at any depth inside parameter annotations
 (level 1, TG10); TG6v2 direct bounds; TG7 dynamic tier fully, static tier as
 propagation + bound-typed bodies; TG9 `T` in body scope; TG13v2 multi-site join; TG14v2 relations (they are existing `that` machinery); TG15/TG16
 precedence; TG17 scope/collision/return-position/`var` rules; TG18
-container/unbound rules; TG19 `<:`.
+container/unbound rules; TG19 `<:`; and TG-P2.1a's parameter-only leading
+binder shorthand.
 
 **Out of scope (later plans):** TG10 level 2 and level 3 per-value binders
 in `type` bodies and schemas (TG22 defers them; they also need env threading
@@ -314,6 +317,19 @@ over the new fixtures for the env rooting.
 ### TG-P2 — Surface syntax: `as T` (TG3, TG5, TG15, TG16, TG17)
 
 **TG-P2.1 First-party parser.**
+- **Leading-binder shorthand (TG-P2.1a).** In a function parameter annotation
+  only, `x: as T` elaborates directly to the same binder node as
+  `x: any ! error as T`. It names the existing ordinary-parameter admission
+  domain, so an error stays outside the binder while every non-error value is
+  admitted and selects its narrowest type under S4.2.2 / S11.4.8v2. This first slice is
+  deliberately restricted to non-optional parameters; optional binder
+  completion remains TG17 work. It is an annotation-slot production, not a
+  general type atom: declarations, returns, schemas, nested type expressions,
+  and a future expression cast continue to reject leading `as T`. The AST
+  builder creates the existing
+  `TypeBinder{bound = TYPE_ANY_NO_ERROR}` directly rather than reparsing or
+  manufacturing source text, so the spelling has no distinct runtime or JIT
+  semantics (D3.3.3v3).
 - `parse_type_slot` (`lambda_parser.c:581`): after a complete type (at
   `need_atom == false`, nesting 0) accept `LAMBDA_TOK_AS` + identifier as a
   suffix and keep scanning (a following `|`/`&`/`!` after the name is an

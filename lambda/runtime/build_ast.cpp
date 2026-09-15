@@ -8075,12 +8075,18 @@ static AstNode* direct_member_field(Transpiler* tp, LambdaToken token) {
     return (AstNode*)field;
 }
 
-static AstNode* direct_base_type_from_span(Transpiler* tp, SourceSpan span) {
+static AstNode* direct_type_from_value(Transpiler* tp, SourceSpan span,
+        Type* type) {
     AstTypeNode* node = (AstTypeNode*)alloc_ast_node_from_span(tp, AST_NODE_TYPE,
         span, sizeof(AstTypeNode));
+    node->type = type;
+    return (AstNode*)node;
+}
+
+static AstNode* direct_base_type_from_span(Transpiler* tp, SourceSpan span) {
     StrView name = source_span_text(tp, span);
-    node->type = lookup_base_type_name(tp, name);
-    if (!node->type) {
+    Type* type = lookup_base_type_name(tp, name);
+    if (!type) {
         // Some conversion builtins (notably `int64`) share the lexer token
         // class used by type names. Resolve the callable spelling before
         // reporting an unknown type so expression-position aliases retain
@@ -8088,16 +8094,13 @@ static AstNode* direct_base_type_from_span(Transpiler* tp, SourceSpan span) {
         AstNode* builtin = build_identifier_from_span(tp, span);
         if (builtin && builtin->node_type == AST_NODE_SYS_FUNC) return builtin;
         record_unknown_base_type_span(tp, span, name);
-        node->type = (Type*)&LIT_TYPE_ERROR;
+        type = (Type*)&LIT_TYPE_ERROR;
     }
-    return (AstNode*)node;
+    return direct_type_from_value(tp, span, type);
 }
 
 static AstNode* direct_type_error_from_span(Transpiler* tp, SourceSpan span) {
-    AstTypeNode* node = (AstTypeNode*)alloc_ast_node_from_span(tp, AST_NODE_TYPE,
-        span, sizeof(AstTypeNode));
-    node->type = (Type*)&LIT_TYPE_ERROR;
-    return (AstNode*)node;
+    return direct_type_from_value(tp, span, (Type*)&LIT_TYPE_ERROR);
 }
 
 static AstNode* direct_append(AstNode* first, AstNode* item) {
@@ -12064,6 +12067,17 @@ static LambdaParseValue direct_ast_reduce(void* context,
         break;
     }
     case LAMBDA_REDUCE_TYPE_SLOT: {
+        if ((reduction->flags &
+                LAMBDA_REDUCTION_FLAG_ANNOTATION_IMPLICIT_BINDER) &&
+                reduction->child_count == 0) {
+            // `x: as T` is the ordinary non-error parameter domain with a
+            // binder, not a new leading type expression (S4.2.2, D3.3.3v3).
+            AstNode* base = direct_type_from_value(tp, reduction->span,
+                &TYPE_ANY_NO_ERROR);
+            return direct_ast_value(build_binder_type_from_parts(tp,
+                reduction->span, base,
+                direct_token_text(tp, reduction->secondary_token)));
+        }
         if ((reduction->flags & LAMBDA_REDUCTION_FLAG_ANNOTATION_CONSTRAINT) &&
                 reduction->child_count == 2) {
             AstNode* base = direct_ast_node(reduction->children[0]);

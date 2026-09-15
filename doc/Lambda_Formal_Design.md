@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 7.0.0 (2026-09-15)
+**Spec version:** 7.1.0 (2026-09-15)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -514,15 +514,18 @@ that carries them.
   `type(x)` yields the type value, `name(T)` its name; `match` arms and
   `is` dispatch through the same runtime membership operation (D3.2.1) —
   one classification machinery for the whole surface. [C9a, TE-6]
-- **D3.1.4** A type-binder site stores its written bound, name, and stable
+- **D3.1.4v2** A type-binder site stores its written bound, name, and stable
   signature-local slot; a bound-name reference stores that slot and a copied
-  bound, never a mutable back-pointer. `TypeFunc` owns the slot-ordered
-  canonical-site table. Every interpreter or MIR activation owns an exact
-  rooted environment for selected `Type*` values, and binder-carrying
-  parameters use the boxed entry boundary until a future specialization can
-  prove an equivalent direct path. Cached container certificates prove a
-  written contract only; they never skip the walk that publishes an
-  invocation's binder slot. [S11.4.8, D1.5, D3.3.3v3, D8.1.1v10]
+  bound, never a mutable back-pointer. The parameter-only source shorthand
+  `x: as T` elaborates to this same site with `TYPE_ANY_NO_ERROR` as its bound;
+  it adds no `TypeKind`, runtime rule, or specialization key. `TypeFunc` owns
+  the slot-ordered canonical-site table. Every interpreter or MIR activation
+  owns an exact rooted environment for selected `Type*` values, and
+  binder-carrying parameters use the boxed entry boundary until a future
+  specialization can prove an equivalent direct path. Cached container
+  certificates prove a written contract only; they never skip the walk that
+  publishes an invocation's binder slot. [S11.4.8v2, D1.5, D3.3.3v3,
+  D8.1.1v10]
 
 ### D3.2 The subtype foundation
 
