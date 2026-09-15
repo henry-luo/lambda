@@ -10,7 +10,7 @@
     {
       "in_func": "_js_nativeRec_#_n",
       "expect": ["call\t_js_nativeRec_", "call\tjs_throw_range_error", "i32:", "ret\t{{r}}, {{r}}"],
-      "forbid": ["js_native_throw", "js_call_function"]
+      "forbid": ["js_native_throw", "js_call_function", "call\tjs_call_p"]
     },
     {
       "in_func": "_js_boxedCaller_#_body",

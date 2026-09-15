@@ -301,6 +301,18 @@ static void jm_capture_routed_error_lane(JsMirTranspiler* mt, JsTryContext* cont
     jm_emit_mov(mt, context->incoming_error_lane_val_reg, fallback);
 }
 
+// `func_error_lane_label` is reached only by routes that found no enclosing
+// try context, and every such route publishes its carrier in
+// func_error_lane_value_reg (jm_capture_routed_error_lane). A landing pad must
+// read that register even when a try context is still open at its emission
+// point: an async body's implicit try is pushed after its parameter prologue,
+// so a prologue throw lands here while that context is active, and the
+// context-sensitive lookup below then returned the unrelated last call result.
+MIR_reg_t jm_emit_function_error_lane_carrier(JsMirTranspiler* mt) {
+    if (mt && mt->func_error_lane_value_reg) return mt->func_error_lane_value_reg;
+    return jm_emit_error_lane_return(mt);
+}
+
 MIR_reg_t jm_emit_error_lane_return(JsMirTranspiler* mt) {
     if (!mt) return 0;
     if (mt->try_ctx_depth == 0 && mt->func_error_lane_value_reg) {

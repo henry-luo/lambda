@@ -1,6 +1,6 @@
 # Lambda Design: Type Narrowing, Specialization, and Generics
 
-**Status**: DRAFT (rev 6, 2026-08-08; TG4 RATIFIED, TG10 expanded to three binder levels, TG12 terminology "Type Binder" RATIFIED, TG13 multi-binder unification road reserved, TG14 inter-binder relations via `that`, §6 type-computation catalog added → TGO10)
+**Status**: DRAFT (rev 7, 2026-09-15; TG20 two-tier binding RATIFIED, TGO1 CLOSED; TG18 container/unbound binding and TG19 `<:` operator RATIFIED, TGO4/TGO11/TGO13 CLOSED; TGO2 CLOSED — the binder keyword is `as`; TG5 RATIFIED; TG6v2 bound is a direct field of the binder record; TG14v2 inter-binder relations are ordinary `that` value predicates; TG15 `as` precedence; TG16 `that` before `as`; TG17 binder scope, return-position and `var` rules; TGO7 let/var binders confirmed out; TGO11–TGO13 added; Appendix S superseded rulings; Appendix I implementation notes. rev 6, 2026-08-08: TG4 RATIFIED, TG10 three binder levels, TG12 "Type Binder" RATIFIED, TG13 unification road reserved, TG14, §6 catalog → TGO10)
 **Ledger prefix**: `TG#` (decisions), `TGO#` (open issues)
 **Related**:
 - `doc/Lambda_Formal_Semantics.md` — S1.6 (representation invisible), S1.7 (one
@@ -260,7 +260,10 @@ fn f(T: type that (~ <: number), a: T, b: T) T   // T inferred from a, elided at
 The annotated type (`number`) is the **bound**; `T` names the argument's
 actual type. Call sites pass no type: `f(1, 2)`. One semantic core (TG2's
 type values) with two spellings; `as T` is the spelling application and
-library code will actually write.
+library code will actually write. The desugaring is **explanatory**: it
+fixes the meaning, not the enforcement mechanism — the bound is checked
+directly from the binder record (TG6v2), never by evaluating a `that`
+predicate. The keyword `as` is ratified (TGO2 closed 2026-09-15).
 
 #### TG4 — First-occurrence-binds; no unification **[RATIFIED 2026-08-08]**
 
@@ -288,11 +291,12 @@ Consequences accepted with the ruling:
   the same type as `a` (int); got float"), versus unification's
   silently-widened `T` surfacing downstream.
 
-#### TG5 — Binders compose inside type expressions
+#### TG5 — Binders compose inside type expressions **[RATIFIED 2026-09-15]**
 
 Top-level binding cannot express the flagship examples; the binder must be
 legal at any position within a type expression, binding that sub-position's
-type:
+type (a declaration-slot-only placement was considered and rejected the same
+day — see Appendix S; precedence inside the expression is TG15):
 
 ```lambda
 fn sum(xs: (number as T)[]) T          // T = element type, NOT the array type
@@ -303,12 +307,21 @@ fn keys(m: {(any as K): any}) K[]
 
 This is the main grammar + checker work in the feature.
 
-#### TG6 — Bounds are constraints on the type value
+#### TG6v2 — Bounds are checked directly from the binder record **[RATIFIED 2026-09-15]**
 
-The bound is the annotated type at the binder (`number as T` ⇒ `T <: number`),
-i.e. sugar for a `that` refinement on the `type` value (TG3's desugaring).
-Requires a subtype-test operator on type values (spelled `<:` provisionally) —
-independently useful, exposed as ordinary type-value API.
+The bound is the annotated type at the binder (`number as T` ⇒ `T <: number`).
+It is stored as a **direct field of the binder record** and enforced by the
+ordinary boundary admission of the value against that type — the same path a
+plain `a: number` takes — immediately before `T` is bound. The `that`-refinement
+reading in TG3 explains the meaning only; no predicate is evaluated for a
+bound. Rationale: constrained-type predicate enforcement at boundaries is
+itself unowned (SO9; today `runtime_boundary_unwrap_type` strips a constrained
+type to its base and `is` checks the base only), and a bound is a *type*, not
+an arbitrary predicate — routing it through predicates would make the feature
+depend on work it does not need and would leave bounds silently unenforced in
+the meantime. The subtype-test operator on type values (`<:`, spelled
+provisionally) is still required, by TG9 (`T` as a value) and by TG14v2's
+relations; it stays an independently useful type-value API.
 
 #### TG7 — Two tiers, one contract
 
@@ -436,41 +449,39 @@ reserved for unification, which is not yet supported") — the syntax must not
 be given any interim meaning, or the road closes. This subsumes the
 duplicate-binder half of TGO7.
 
-#### TG14 — Inter-binder relations: beyond equality, without a solver
+#### TG14v2 — Inter-binder relations are ordinary value predicates **[REVISED 2026-09-15]**
 
-Type relations richer than same-`T` equality are expressible by attaching a
-`that` clause to a binder, relating **distinct** bound type names:
-
-```lambda
-fn f(a: t as T, b: t as U that (T <: U)) U
-// T binds from a, U binds from b, THEN the relation T <: U is checked
-
-fn concat(xs: (any as T)[], ys: (any as U that (T <: U))[]) U[]
-// append arrays whose element types embed left-into-right
-```
-
-Crucially, **this needs none of TG13's solver machinery**. Binders bind
-independently, left to right (TG4 unchanged); an inter-binder `that` clause
-is evaluated *after* its operand names are bound — it is a **check on type
-values**, not a constraint to solve. It falls out of the existing decisions
-by pure desugaring (TG3 + TG2 dependent scoping + TG9 types-as-values):
+Type relations richer than same-`T` equality need no clause of their own.
+Because `T` is a real value in scope from its binder site rightward (TG9,
+TG17) and relations are **checks, not constraints to solve**, a relation is
+simply a `that` value predicate on a later slot that mentions the earlier
+bound name:
 
 ```lambda
-fn f(T: type, U: type that (T <: U), a: T, b: U) U
-//            ^ an ordinary constrained type parameter whose predicate
-//              references the earlier parameter T
+fn f(a: t as T, b: t that (T <: type(~)) as U) U
+// T binds from a; b's predicate is checked (T already bound); then U binds
+
+fn concat(xs: (any as T)[], ys: (any as U)[] that (T <: U)) U[]
+// U binds while the array type admits (binder nested in the base);
+// the trailing predicate then relates the two bound element types
 ```
 
-Consequences:
+Rules:
 
-- **Full predicate generality is already latent**: `that` takes arbitrary
-  expressions over type values, so relations like `that (T.element == U)` or
-  `that (U != null)` cost nothing extra semantically. Surface grammar work is
-  only: allow a `that` clause on the `as` binder form.
-- **Left-to-right only**: a binder's clause may reference names bound
-  *earlier* in the signature, never later — forward references would
-  reintroduce solving through the back door (TG13's territory). Same
-  scoping rule as TG2's dependent parameters.
+- **Spelling**: the predicate is the existing `that` clause, written **before**
+  `as` when both sit at the same level (TG16). No `that` follows a binder
+  name; the `b: t as U that (T <: U)` form of rev 6 is retired (Appendix S).
+- **Evaluation order**: a predicate may mention only names bound **at or
+  before** its evaluation point — binders of earlier parameters (left to
+  right, as in TG2's dependent scoping) and binders nested inside its own base
+  type (they bind while the base admits, before the predicate runs). Forward
+  references are a compile error; they would reintroduce solving through the
+  back door (TG13's territory).
+- **Generality**: `that` takes arbitrary expressions over type values, so
+  `that (T.element == U)` or `that (U != null)` cost nothing extra. Surface
+  grammar work is nil beyond TG6v2's `<:`.
+- **Oracle agreement**: `type(~)` in a predicate must answer the same type the
+  binder would bind — TGO13.
 - **Static tier is best-effort, dynamic tier is authoritative**: with
   relations as assumptions, abstract body checking enters bounded-
   quantification territory (F-sub), where full static reasoning is famously
@@ -479,45 +490,188 @@ Consequences:
   This "incomplete static, total dynamic" posture is the same one the rest
   of the enforcement design already takes (TE-17/TE-18).
 
-Adoption note: TG14's dynamic tier can ship with P1–P2 (it is just boundary
-checks over type values); its static-tier reasoning is open-ended and lands
-incrementally with P3.
+Adoption note: TG14v2's dynamic tier ships with P1–P2 (it is the existing
+`that` machinery over type values); its static-tier reasoning is open-ended
+and lands incrementally with P3.
+
+#### TG15 — `as` is the loosest operator in a type expression **[RATIFIED 2026-09-15]**
+
+Inside a type expression `as` binds looser than `that` (TG16), the set
+operators `|`, `&`, `!`, and every occurrence suffix (`?`, `+`, `*`, `[]`,
+`[n]`, `[n, m]`). Parentheses scope it. Consequently:
+
+| Spelling | `T` binds to |
+|---|---|
+| `number[] as T` | the array type |
+| `(number as T)[]` | the element type |
+| `int \| float as T` | the union |
+| `int that (~ > 0) as T` | the constrained type |
+| `(int as T) \| string` | the `int` arm only |
+
+Rationale: the binder is read as "this whole thing, as `T`", which is the
+natural English reading and matches the `for … as alias` use of the keyword;
+binding a sub-position is the deliberate, parenthesized choice. A binder
+therefore never needs its own precedence entry in the reference grammar — it
+is a suffix on a complete type expression or parenthesized group.
+
+#### TG16 — `that` precedes `as` **[RATIFIED 2026-09-15]**
+
+When a value constraint and a binder apply at the same level, the order is
+`type that (predicate) as Name`: `that` binds tighter than `as`, so
+`t that (P) as U` means `(t that (P)) as U`. Inside the predicate `~` is the
+**value** being admitted, exactly as in every other `that` clause (S1.7: one
+spelling, one meaning). A `that` after a binder name is a syntax error.
+TG14v2 relations use this same clause; nothing else is needed.
+
+#### TG17 — Binder scope, placement and lifetime **[RATIFIED 2026-09-15]**
+
+- **Scope**: a bound name is a function-local **immutable** binding, scoped
+  like a `let` in the body — visible from its binder site rightward through
+  the rest of the signature (later parameters, return contract) and
+  throughout the body. It is a real `type`-valued value there (TG9).
+- **Collisions**: a binder name must not shadow a base type, a type alias in
+  scope, or a parameter of the same signature (types and parameters share one
+  value namespace; `fn f(T: type, a: number as T)` is TG13's duplicate,
+  `a: number as int` is an error). Shadowing of enclosing-scope names follows
+  the ordinary `let` rule.
+- **Return position**: a binder in the return contract (`fn f() number as T`)
+  has no value source and is a compile error. Return positions are checks.
+- **`var` parameters**: `T` binds once, at entry, per call (TG10 level 1). A
+  body write that changes the parameter's type never re-binds `T`; the
+  CW33 home transport makes such writes caller-visible but not binder-visible.
+- **`let`/`var` binders** (`let a: number as N = …`): not supported. The same
+  power is `let N = type(a)` under TG9 with the oracle of TGO13, the checker
+  already knows a `let` initializer's static type (that is §2.1's job), and a
+  `var` form would reopen TGO9. Confirms the TGO7 residue.
+
+#### TG18 — Container binding and the unbound binder **[RATIFIED 2026-09-15]**
+
+- **Nested binders bind from the first element.** For `xs: (number as T)[]`
+  the **first element binds** `T`; every later element is a **check** against
+  it. This is TG4's first-occurrence rule applied inside the container — the
+  join-of-elements alternative was rejected for the same reason unification
+  was (silent widening, surprise at the use site). A typed carrier whose leaf
+  lane is already proven binds that lane without walking elements (D3.3.3v3
+  certificate); the observable answer is identical. Closes TGO4.
+- **An empty container leaves `T` unbound.**
+- **A binder site that admission never reaches stays unbound.** The
+  container rule is one instance of a general one: a binder nested under an
+  occurrence with zero instances, under an optional arm that absorbed `null`,
+  or under a union arm not taken (`(int as T) | string` given a string) is
+  never visited, so it binds nothing.
+- **The bound is the whole written type (TG15).** `a: number? as T` bounds
+  `T` by `number?`; a present `null` reaches the binder and binds
+  `T := null` (S4.2.2, TG4), after which `b: T` admits only `null`. An author
+  who wants the relation on the non-null arm writes `a: (number as T)?`:
+  `null` is absorbed by the `?` arm, the binder is not reached, `T` stays
+  unbound and behaves as `number`.
+- **Optional parameters and defaults.** `a?: number as T` is structurally
+  `a: (number as T)?` — the `?` marker on the name wraps the whole
+  annotation, binder included, and an **omitted** argument is filled with
+  `null` (`doc/Lambda_Func.md`), which the outer arm absorbs; so omission
+  leaves `T` unbound whether or not the runtime can tell omission from an
+  explicit `null`. A **fired default** (`a: number as T = 0`) likewise leaves
+  `T` unbound. Omission is spelled by trailing omission or a named argument
+  (`pick(b: 2)`); there is no positional hole syntax. Closes TGO11.
+- **Unbound means "the bound".** Wherever a binder ended up unbound, the
+  bound name behaves as its bound type — the full expression at the binder
+  site: later `T` positions in the signature admit against it, the return
+  contract checks against it, and in the body `T` evaluates to it (TG9).
+  `sum([])` under `fn sum(xs: (number as T)[]) T` therefore returns a
+  `number`; `pick(b: 2)` under `fn pick(a?: number? as T, b: T) T` checks
+  `b` and the result against `number?`. A binder with bound `any` that is
+  unbound is `any` — exactly what the signature promised without the binder.
+
+#### TG19 — `<:` is a type operator **[RATIFIED 2026-09-15]**
+
+`A <: B` is a new binary operator on type values, yielding `bool`. It holds
+when **every value `A` admits, `B` admits** — the existing declared-boundary
+admission relation lifted to type values, so it is implemented over the same
+contract-compatibility relation the checker already uses
+(`lambda_type_contract_semantically_compatible`), never as a second
+subtyping. Consequences: `int <: number`, `int <: int | string`,
+`{a: int, b: int} <: {a: int}` (structural, D3.4.2) hold; a nominal record
+relates to its base by its record pointer (S2.1.4); `T <: T` holds for
+every `T`. It is the operator TG6v2 names, TG14v2's predicates use, and TG9
+exposes to ordinary code. Closes the `<:` half of TGO13; the oracle half is
+closed by TG18 (containers) and S4.2.2 (scalars): `type()` must report the
+same answer the binder binds, or a dedicated oracle function must be exposed
+— the choice is an implementation detail recorded in Appendix I.
+
+#### TG20 — The static tier binds the expression's type, the dynamic tier binds the value's narrowest type **[RATIFIED 2026-09-15]**
+
+The two tiers of TG7 bind `T` from different evidence, and that is the
+ruling, not a defect:
+
+- **Static tier**: `T` binds to the **static type of the argument
+  expression** at the binder position — what the checker knows, which may be
+  a declared or inferred abstraction such as `number`.
+- **Dynamic tier**: `T` binds to the **narrowest runtime type of the value**
+  (S4.2.2), as TG18's oracle computes it.
+
+```lambda
+fn max(a: number as T, b: T) T => if (a > b) a else b
+
+let x: number = 1
+max(x, 2.5)     // static: T := number, b: number admits 2.5 — passes
+max(1, 2.5)     // dynamic (literals, or any-typed caller): T := int,
+                // b: int rejects 2.5 — fails with TG4's blame
+```
+
+Rationale: this is Lambda's declaration-versus-value story applied to
+binders. A declared `number` is a promise the author made and the static
+tier honours it as written; a bare value has only itself to offer and binds
+exactly what it is. The alternative — making the static tier also bind the
+narrowest type — would require the checker to prove value narrowness it
+cannot see (`x` above holds an int, but its declaration says `number`), and
+making the dynamic tier bind declared types would require values to carry
+declarations they do not have. Either direction invents information.
+
+Consequences accepted with the ruling:
+- A call's outcome can depend on the **caller's declarations**, not only on
+  the values passed — the same way every declared-boundary check in Lambda
+  already does (TE-17: a statically proven check is elided, so the dynamic
+  narrower check never runs for the proven call). This is not an S1.6
+  representation leak: declarations are visible language, representation is
+  not.
+- Authors who want value-exact relations regardless of caller declarations
+  spell the bound narrowly (`int as T`); authors who want declaration-level
+  relations declare their arguments. Binder placement (TG4) and bound choice
+  are both API decisions.
+- Diagnostics name the tier that bound `T` ("`T` bound to `number` from the
+  declaration of `x`" versus "`T` bound to `int` from the value `1`") so a
+  passing and a failing call with equal values are explainable. Closes TGO1.
 
 ### 4.3 Open issues
 
-- **TGO1 — Static/dynamic binding disagreement.** Dynamic-tier `T` binds to
-  the value's **narrowest** runtime type (S4.2.2 doctrine); static-tier `T`
-  binds to the expression's static type. Consequence: dynamic
-  `max(1, 2.5)` fails its `b: T` check while a static caller with
-  `number`-typed arguments passes. Defensible (declaration-vs-value story as
-  everywhere in Lambda) but must become a written ruling with examples.
-- **TGO2 — The `as` spelling violates S1.7.** Expression-position `as` is a
-  checked cast (consumes a type, can fail); annotation-position `as` is a
-  binder (produces a type name). Two concepts, one symbol. Shortlist:
-  keep `as` (SQL/import-alias reading), or `T <: number` binder-first form
-  (doubles as the bound syntax, TG6). Decide before implementation; the
-  grammar cost is identical.
+- **TGO1 — CLOSED 2026-09-15 by TG20**: static binds the expression's
+  static type, dynamic binds the value's narrowest type; the `max` example
+  and the accepted caller-declaration dependence are recorded there.
+- **TGO2 — CLOSED 2026-09-15: the binder keyword is `as`.** The S1.7
+  concern was latent, not live: no expression-position checked cast exists
+  (SO9 lists the `as`/`as?` cast surface as unowned). Consequence of the
+  ruling: if a checked cast is ever built it must take another spelling.
 - **TGO3 — Elision/inference for explicit `T: type` params.** Should
   `fn f(T: type, a: T)` allow `f(1)` when `T` is inferable? Zig says no
   (explicit always); TG3's binder makes it mostly moot. Deferred; hold the
   door open in the grammar.
-- **TGO4 — Nested-binder semantics under variance.** `xs: (number as T)[]`
-  with a dynamic heterogeneous `number[]`: does `T` bind to the array's
-  declared element type or the join of actual element types? Interacts with
-  D3.3.3 and TE-17 container acceptance. Needs the container chapter of the
-  narrowing design (§2.1) first.
+- **TGO4 — CLOSED 2026-09-15 by TG18**: the first element binds, later
+  elements check, an empty container leaves `T` unbound.
 - **TGO5 — Abstract-body admissibility.** Static-tier once-for-all checking
   needs a table of operations valid for `T <: bound` (e.g. `+` for
   `T <: number` — including poison behavior per S4.2). Define per-bound
-  operation sets rather than re-deriving per body.
+  operation sets rather than re-deriving per body. **Interim for P3's first
+  cut**: the checker types `T` as its bound inside the body. Sound because
+  `T` embeds in the bound; it forgoes only the relational precision that the
+  operation tables would add.
 - **TGO6 — Exported-API annotation discipline.** Inferred public signatures
   drift with body edits. For exported functions (D7 module surface), a lint
   requiring declared signatures — including binders where the contract is
   relational — instead of inferred ones. Convention vs. enforced: undecided.
-- **TGO7 — Binder scope edges.** The duplicate-binder question is now
-  settled by TG13: two `as T` in one signature is a compile error reserved
-  for future explicit unification. Remaining: binders in `var` declarations
-  and `let` patterns — out of scope for rev 1, note only.
+- **TGO7 — CLOSED.** The duplicate-binder half is settled by TG13 (two
+  `as T` in one signature is a compile error reserved for future explicit
+  unification); the `let`/`var` half is settled by TG17 (not supported,
+  2026-09-15).
 - **TGO8 — SO9/SO33 bookkeeping.** This doc claims the generics and
   flow-narrowing items from SO9; the aspirational `fn identity<T>` text
   flagged by SO33 should be replaced by TG2/TG3 forms in `doc/Lambda_Type.md`
@@ -539,6 +693,20 @@ incrementally with P3.
   identity is the presumptive answer). Separately: close the SO9
   implementation gap for binary `&`/`!` type operators, which the catalog
   assumes. Nothing in §6 is committed until this assessment.
+- **TGO11 — CLOSED 2026-09-15 by TG18**: an omitted argument or a fired
+  default leaves `T` unbound; unbound behaves as the bound.
+- **TGO12 — Binder records across the module/cache boundary.** The §4.1
+  point 3 motivation (opaque signatures for D7 modules and MIR cache L2/L3
+  artifacts) requires the binder record and bound-name references to
+  serialize through the const pool (CP). Constrains the representation to be
+  pointer-free/relocatable (slot indices, not `Type*` back-pointers). Later
+  phase, but decide before Appendix I's layout hardens.
+- **TGO13 — CLOSED 2026-09-15 by TG18/TG19**: the oracle is S4.2.2 for
+  scalars and first-element-binds for containers; `<:` is the admission
+  relation lifted to type values. Residue (implementation, Appendix I):
+  `type()` today collapses arrays to `array` and anonymous maps to `map`
+  (`fn_type`), so either it is aligned with the binder oracle or a dedicated
+  oracle function is exposed for TG14v2 predicates.
 
 ---
 
@@ -624,7 +792,7 @@ a checker.
 | optional / occurrence | `T?` `T*` `T+` `T[n]` `T[n,m]` | exists |
 | constraint | `T that (pred)` | exists |
 | array element type | `T.element` | exists (arrays) |
-| subtype test | `T1 <: T2` | **proposed** (TG6) |
+| subtype test | `T1 <: T2` | **ratified** (TG19), unimplemented |
 | type functions | `fn (T: type) type` | implied by TG2 |
 
 ### 6.1 Category A — Introspection (reading a type apart)
@@ -654,7 +822,7 @@ a checker.
 | # | Computation | TS spelling | Lambda today | Gap |
 |---|---|---|---|---|
 | C1 | equality | (structural, implicit) | `==` | exists. |
-| C2 | subtype / assignability | `extends` in constraints | `<:` (TG6) | proposed; required by TG6/TG14 regardless of this catalog. |
+| C2 | subtype / assignability | `extends` in constraints | `<:` (TG19) | ratified; required by TG6v2/TG14v2 and TG9 regardless of this catalog. |
 | C3 | conditional selection | `T extends X ? A : B` | `if` / `match` over type values (TG9) | **exists** — ordinary control flow replaces the entire conditional-types feature. |
 | C4 | union algebra / filtering | distributive conditionals, `Exclude` | `\|`, `!`, `&` + A5 | design exists; `&`/binary-`!` implementation gap (SO9). `Exclude<T,U>` = filter over `T.members` — needs A5. |
 | C5 | join / meet (least common supertype) | inference-internal | — | **missing; defer.** Only consumer today would be TG13's solver policy — decide there, not here. |
@@ -680,13 +848,15 @@ Three observations, ahead of the TGO10 assessment:
 
 ## 7. Adoption Order (sketch)
 
-1. **P0** — Subtype-test operator on type values (`<:`, TG6) + dependent
+1. **P0** — Subtype-test operator on type values (`<:`, TG19) + dependent
    parameter scoping for explicit `T: type` params (TG2). Small, independently
    useful, unblocks everything.
 2. **P1** — Dynamic tier: runtime binding + boundary contracts (TG7 dynamic
    half). Pure runtime work, no checker changes beyond scoping.
 3. **P2** — `as T` binder sugar incl. nested positions (TG3/TG5) — grammar +
-   desugaring.
+   desugaring, with TG15/TG16 precedence in both the reference grammar and
+   the first-party parser (the annotation token scanner and the type-pattern
+   text parser both need the keyword), TG17 scope/collision diagnostics.
 4. **P3** — Static tier: abstract body checking + relational propagation
    (TG7 static half; needs §2.1/§2.2 groundwork).
 5. **P4** — Specialization keying on static type values (TG8; rides the
@@ -694,3 +864,75 @@ Three observations, ahead of the TGO10 assessment:
 
 Flow-sensitive narrowing (§2.1) proceeds in parallel; it is the higher-
 leverage half of SO9 and this design compounds with it.
+
+---
+
+## Appendix S — Superseded rulings
+
+Struck-through wording is kept for the record only; the body states the
+current ruling.
+
+- ~~**TG6 (rev 1–6)** — Bounds are constraints on the type value: the bound is
+  sugar for a `that` refinement on the `type` value (TG3's desugaring),
+  enforced as a predicate.~~ Replaced by **TG6v2** (2026-09-15): the bound is
+  a direct field of the binder record, admitted like any declared type.
+- ~~**TG14 (rev 6)** — Inter-binder relations are a `that` clause attached
+  *after* the binder name: `fn f(a: t as T, b: t as U that (T <: U)) U`;
+  `fn concat(xs: (any as T)[], ys: (any as U that (T <: U))[]) U[]`.~~
+  Replaced by **TG14v2** (2026-09-15): relations are ordinary `that` value
+  predicates written before `as` (TG16); the post-name clause is a syntax
+  error.
+- ~~**Declaration-slot placement (proposed and withdrawn 2026-09-15)** — `as`
+  attaches only to a declaration slot (parameter, field, named fn-type
+  parameter) and is never part of a type expression, so `(T as b)[]` is
+  illegal and element relations would need type projections (`T.element`)
+  in annotation position.~~ Withdrawn the same day in favour of TG5 as
+  written plus the TG15 precedence rule; projections in annotation position
+  remain a TGO10 catalog question, not a binder requirement.
+- ~~**TGO2 (open)** — the `as` spelling violates S1.7; shortlist `as` vs a
+  `T <: number` binder-first form.~~ Closed 2026-09-15: `as`.
+
+## Appendix I — Implementation notes (proposal, not ratified)
+
+Kept brief per `doc/Doc_Convention.md` §4; the full plan is
+`vibe/impl/Lambda_Impl_Type_Binder.md` (phases TG-P0 … TG-P4).
+
+- **Representation** (D3.1.1v3 kinds): two new `TypeKind`s — a *binder*
+  (site: bound type, name, slot index within its signature, no predicate; the
+  bound is checked directly per TG6v2) and a *bound-name reference* (use:
+  slot index). An explicit `T: type` parameter (TG2) is a binder whose site is
+  the argument itself, so both spellings share one representation and TG3's
+  "sugar" is literal in the data. Slot indices, not back-pointers, so the
+  records can serialize (TGO12).
+- **Binding environment**: each signature carries a binder count; a call
+  frame owns `Type* env[count]`, every slot initialised to its **bound**
+  (TG18: unbound behaves as the bound, so no separate unbound state is
+  needed, and an `a?:` parameter's binder sits under the nullable wrapper
+  that `parameter_contract_for_declared` already adds, so a filled-in `null`
+  never reaches it). The runtime admitter (`lambda_type_check` /
+  `runtime_type_admit_value`) takes the env: at a binder site it admits the
+  value against the bound, then stores the narrowest type in the slot — for
+  a container, from the proven leaf lane or else from the first element,
+  leaving the slot untouched when empty; at a reference it admits against
+  the slot. The oracle should be one function shared with `type()` or
+  exposed beside it, so TG14v2 predicates agree with the binder (TGO13
+  residue). The three boundary
+  paths that already exist — the runtime check, the JIT parameter/return
+  boundary emitters, and the interpreter's parameter boundary — all thread
+  the same env (DF8: the check lives in the callee). The body reads a bound
+  name as a `type`-valued local (a register in the JIT, a frame slot in T0).
+- **Dependent scoping**: today a name in type position that resolves to a
+  `T: type` parameter yields the *meta-type* `type`, so `a: T` silently means
+  "`a` is a type value". The type-pattern parser's identifier path must
+  instead emit a bound-name reference to that parameter's slot.
+- **Lanes**: a parameter whose contract contains a binder or reference has no
+  static native lane; it stays a boxed Item exactly like an `any` parameter
+  under D8.1.1's satellite admission. Specialization keyed on the env is P4.
+- **Static tier** (P3): substitute known argument types into references in
+  the return contract at call sites; type `T` as its bound inside the body
+  (TGO5 interim).
+- **Diagnostics**: duplicate binder (TG13), forward reference (TG14v2),
+  collision / return-position binder (TG17), and the local blame message of
+  TG4 ("`b` must have the same type as `a` (int); got float").
+- **Fixtures**: `test/lambda/type_binder_*.ls` with `.txt` goldens, byte-
+  identical across the three tiers.

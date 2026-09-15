@@ -1,6 +1,6 @@
 # LambdaJS — Functions, Closures & Scope
 
-> **Last verified against tree:** 2026-08-12 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-08-12 *(initial stamp from git history; §2 span entry re-verified 2026-09-15)*
 
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers how a JS function becomes a runtime `JsFunction`, the dual native/boxed code emitted for each function, evidence-based parameter-type inference and native eligibility, the capture-analysis phases that decide which variables a closure needs, the scope-environment model that backs mutable capture, the `this`/`arguments`/`new.target` bindings, tail-call optimization, single-expression inlining, and the transient call-argument stack.
 >
@@ -25,7 +25,7 @@ The typed factories make publication intent explicit: `js_new_function_mir` / `j
 
 Each user function is potentially emitted **twice** by `jm_define_function` (`js_mir_function_class_lowering.cpp:292`):
 
-- a **boxed version** — name `<fname>`, signature `Item(Context*)` style with boxed `Item` params and result, handling the full dynamic ABI (closure env, `arguments`, dynamic `this`, exceptions);
+- a **boxed version** — the body `<fname>_body`, taking `Context*`, the closure env when the function captures, and one boxed `Item` per formal, returning a companion-lane pair (D5.2.1v3); it handles the full dynamic ABI (closure env, `arguments`, dynamic `this`, exceptions) and is the only direct-call target. Beside it `jm_emit_span_entry` emits the C-reachable **span entry** `<fname>`, with the `JsBodyEntry` shape `(callee, this, args, argc, result_home)`: it loads `Context` and the env from the callee, pads missing formals with `undefined`, packs a rest formal (`js_args_rest_array`), calls the body, and forwards a pending result's payload through `Context::mir_companion_slot`. The span entry is the function's finalized body entry (`JsFunction::body`), so the call kernel reaches the body in one hop;
 - a **native version** — name `<fname>_n` (`:319`), a flat `MIR_new_func_arr` whose params and return are unboxed `MIR_T_I64`/`MIR_T_D` (`:327`,`:332`). It exists only when the function is *native-eligible* ([§3](#3-parameter-type-inference--native-eligibility)): `has_native_version`, no captures, no non-simple params, `1 ≤ param_count ≤ 16`, and INT/FLOAT params and return (`:301`–`:313`). The native item is registered as a local func (`:338`) so direct call sites can target it.
 
 The native version skips the boxed entry's per-call overhead entirely; the call-site decision between the two is in [§7](#7-call-dispatch-native-vs-boxed-vs-dynamic).

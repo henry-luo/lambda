@@ -37,6 +37,14 @@ typedef Item (*JsConstructEntry)(Item fn_item, Item* args, int argc,
                                  Item new_target, uint64_t* result_home,
                                  bool args_prerooted);
 
+// JC14: the callee's executable body behind both kernels. It is selected once
+// at finalization from the body kind, native policy and compiled ABI, so the
+// kernel invokes it without re-deciding per call. It has exactly the shape of
+// a declared native body, so a span-policy native is its own body entry; a
+// compiled function's body entry is its MIR span entry. `args` is rooted by the
+// kernel for the whole call.
+typedef JsNativeCallBody JsBodyEntry;
+
 union JsNativeTarget {
     JsNativeP0 p0;
     JsNativeP1 p1;
@@ -209,6 +217,10 @@ struct JsFunction {
     // 1-byte group. The latch is not folded into `flags`: two construction
     // paths assign that word wholesale, which would clear it.
     uint8_t pool_pointer_roots_registered;
+
+    // JC14: finalized with `invoke`/`construct`. Appended so the offsets of the
+    // fields above, which generated code and hosted modules read, do not move.
+    JsBodyEntry body;
 };
 
 
@@ -397,7 +409,8 @@ static inline Item js_fn_home_class(const JsFunction* fn) {
 #define JS_FUNC_FLAG_ASYNC_GEN 64
 #define JS_FUNC_FLAG_ASYNC     128
 #define JS_FUNC_FLAG_DERIVED_CTOR 256
-#define JS_FUNC_FLAG_MIR_PUBLIC_ABI 512
+// 512 was JS_FUNC_FLAG_MIR_PUBLIC_ABI, retired with the register-operand
+// wrapper (JC16); leave the bit unassigned so cached flag words stay readable.
 #define JS_FUNC_FLAG_USES_WITH 1024
 #define JS_FUNC_FLAG_READS_THIS 2048
 #define JS_FUNC_FLAG_READS_NEW_TARGET 4096

@@ -554,6 +554,9 @@ MIR_reg_t jm_boxed_immediate_const(JsMirTranspiler* mt, uint64_t item,
         const char* prefix);
 MIR_reg_t jm_emit_item_error(JsMirTranspiler* mt);
 MIR_reg_t jm_emit_error_lane_return(JsMirTranspiler* mt);
+// The ERROR carrier at `func_error_lane_label`, independent of any try context
+// still open where the landing pad is emitted.
+MIR_reg_t jm_emit_function_error_lane_carrier(JsMirTranspiler* mt);
 MIR_reg_t jm_box_int_const(JsMirTranspiler* mt, int64_t value);
 void jm_arguments_writeback_param(JsMirTranspiler* mt, int param_index, MIR_reg_t val_reg);
 MIR_reg_t jm_box_int_reg(JsMirTranspiler* mt, MIR_reg_t val);

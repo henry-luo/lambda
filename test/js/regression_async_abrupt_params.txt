@@ -1,0 +1,17 @@
+arrow destructure, expression body: rejected TypeError
+arrow destructure, block body: rejected TypeError
+arrow default, expression body: rejected Error
+arrow default, block body: rejected Error
+arrow array pattern, expression body: rejected TypeError
+arrow closure, expression body: rejected TypeError
+arrow destructure, awaiting body: rejected TypeError
+arrow default, awaiting body: rejected Error
+function destructure: rejected TypeError
+function default: rejected Error
+function destructure, awaiting body: rejected TypeError
+function with arguments, awaiting body: rejected TypeError
+object method destructure: rejected TypeError
+class method default, awaiting body: rejected Error
+ok: 1 2
+generator destructure: sync throw TypeError
+async generator destructure: sync throw TypeError

@@ -86,9 +86,8 @@ extern Item js_get_lexical_this_binding(void);
 extern Item js_resolve_lexical_this(Item this_val);
 extern void js_mark_derived_constructor_func(Item fn_item);
 extern void js_set_function_home_class(Item fn_item, Item home_class);
-extern Item js_call_function_prerooted_args_into(Item func_item, Item this_val,
-                                                  Item* args, int arg_count,
-                                                  uint64_t* result_home);
+extern Item js_call(Item func_item, Item this_val, Item* args, int arg_count,
+                    uint64_t* result_home, bool args_prerooted);
 extern Item js_setImmediate_with_args(Item callback, Item args_array);
 
 // Symbol key check for typed array P9 guard (js_runtime.cpp)
@@ -2173,6 +2172,8 @@ JitImport jit_runtime_imports[] = {
     {"js_new_distinct_function_mir", FPTR(js_new_distinct_function_mir)},
     {"js_new_method_function_mir", FPTR(js_new_method_function_mir)},
     {"js_new_closure_mir", FPTR(js_new_closure_mir)},
+    // JC15: rest-formal packing for generated span entries.
+    {"js_args_rest_array", FPTR(js_args_rest_array)},
     {"js_alloc_env", FPTR(js_alloc_env)},
     {"js_env_rehome_scalars", FPTR(js_env_rehome_scalars), JIT_IMPORT_VOID_PRESERVES},
     // every result is an Error carrier, including allocation failure.
@@ -2427,13 +2428,16 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_EFFECT(0, JIT_ARG_MAY_WRITE_THROUGH) |
       JIT_ARG_EFFECT(1, JIT_ARG_PERSISTENT_STORE)}},
     {"js_set_function_home_class", FPTR(js_set_function_home_class), JIT_IMPORT_VOID_PRESERVES},
-    {"js_call_function_prerooted_args_into", FPTR(js_call_function_prerooted_args_into),
+    // JC13: the sole JIT dynamic-call entry; argument 5 is the rooted-span
+    // ownership operand, so the rooted and copying calls share one row.
+    {"js_call", FPTR(js_call),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR) |
-      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER),
+      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(5, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_RESULT_SCALAR_STABLE |
       JIT_IMPORT_ARGS_BORROWED_AUDITED,
       JIT_EXCEPTION_MAY_SET, 0}},

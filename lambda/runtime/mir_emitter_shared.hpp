@@ -1864,12 +1864,14 @@ static inline void mir_prepare_call_args(MIR_var_t* args,
         args[i].size = 0;
     }
 }
-static inline MIR_insn_t mir_new_call_with_args(MIR_context_t ctx,
-                                                MIR_item_t proto,
-                                                MIR_item_t import,
-                                                MIR_reg_t result,
-                                                int nargs,
-                                                MIR_op_t* arg_ops) {
+// A call through `target`, which is an item reference for a resolved import
+// or a register holding a code address for an indirect call.
+static inline MIR_insn_t mir_new_call_with_target(MIR_context_t ctx,
+                                                  MIR_item_t proto,
+                                                  MIR_op_t target,
+                                                  MIR_reg_t result,
+                                                  int nargs,
+                                                  MIR_op_t* arg_ops) {
     int op_count = (result ? 3 : 2) + nargs;
     // Dynamic sizing prevents many-parameter generated wrappers from overflow.
     MIR_op_t* ops = (MIR_op_t*)mem_alloc(
@@ -1881,7 +1883,7 @@ static inline MIR_insn_t mir_new_call_with_args(MIR_context_t ctx,
     }
     int oi = 0;
     ops[oi++] = MIR_new_ref_op(ctx, proto);
-    ops[oi++] = MIR_new_ref_op(ctx, import);
+    ops[oi++] = target;
     if (result) {
         ops[oi++] = MIR_new_reg_op(ctx, result);
     }
@@ -1891,6 +1893,16 @@ static inline MIR_insn_t mir_new_call_with_args(MIR_context_t ctx,
     MIR_insn_t call = MIR_new_insn_arr(ctx, MIR_CALL, oi, ops);
     mem_free(ops);
     return call;
+}
+
+static inline MIR_insn_t mir_new_call_with_args(MIR_context_t ctx,
+                                                MIR_item_t proto,
+                                                MIR_item_t import,
+                                                MIR_reg_t result,
+                                                int nargs,
+                                                MIR_op_t* arg_ops) {
+    return mir_new_call_with_target(ctx, proto, MIR_new_ref_op(ctx, import),
+        result, nargs, arg_ops);
 }
 
 static inline StrBuf* mir_build_import_key(const char* name,
@@ -4084,7 +4096,8 @@ static inline MIR_reg_t em_call_with_args_policy(MirEmitter* em,
                                                   MIR_type_t* arg_types,
                                                   MIR_op_t* arg_ops,
                                                   bool include_signature,
-                                                  bool refresh_after_gc) {
+                                                  bool refresh_after_gc,
+                                                  MIR_reg_t indirect_target = 0) {
     if (nargs < 0 || nargs > LAMBDA_MAX_FUNCTION_ARGS) return 0;
     MIR_var_t args[LAMBDA_MAX_FUNCTION_ARGS];
     if (nargs > 0) mir_prepare_call_args(args, arg_types, nargs);
@@ -4153,8 +4166,12 @@ static inline MIR_reg_t em_call_with_args_policy(MirEmitter* em,
         arg_types, arg_ops);
 
     MIR_reg_t res = em_new_reg(em, fn_name, ret_type);
-    MIR_insn_t call = mir_new_call_with_args(em->ctx, resolved.proto,
-        resolved.import, res, nargs, arg_ops);
+    // An indirect target shares the import's proto and audited metadata: the
+    // caller asserts the code address has exactly that signature and effects.
+    MIR_insn_t call = mir_new_call_with_target(em->ctx, resolved.proto,
+        indirect_target ? MIR_new_reg_op(em->ctx, indirect_target)
+                        : MIR_new_ref_op(em->ctx, resolved.import),
+        res, nargs, arg_ops);
     if (em->insert_after) {
         MIR_insert_insn_after(em->ctx, em->func_item, em->insert_after, call);
         em->insert_after = call;
@@ -4184,6 +4201,20 @@ static inline MIR_reg_t em_call_with_args(MirEmitter* em,
                                           bool include_signature) {
     return em_call_with_args_policy(em, fn_name, ret_type, nargs, arg_types,
         arg_ops, include_signature, true);
+}
+
+// Call the code address in `target` under `signature_name`'s import proto and
+// metadata, so safepoint, root and exception bookkeeping match a direct call to
+// that import exactly. `target` must have that import's C signature.
+static inline MIR_reg_t em_call_indirect_as(MirEmitter* em,
+                                            const char* signature_name,
+                                            MIR_reg_t target,
+                                            MIR_type_t ret_type,
+                                            int nargs,
+                                            MIR_type_t* arg_types,
+                                            MIR_op_t* arg_ops) {
+    return em_call_with_args_policy(em, signature_name, ret_type, nargs,
+        arg_types, arg_ops, true, true, target);
 }
 
 static inline MIR_reg_t em_call_terminal_with_args(MirEmitter* em,

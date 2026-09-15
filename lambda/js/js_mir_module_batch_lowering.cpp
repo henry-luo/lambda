@@ -3687,7 +3687,7 @@ static int js_mir_lower(void* opaque) {
     // Main error exit returns the routed D8.4.3 ERROR Item unchanged.
     if (mt->func_error_lane_label) {
         jm_emit_label(mt, mt->func_error_lane_label);
-        MIR_reg_t exc_ret = jm_emit_error_lane_return(mt);
+        MIR_reg_t exc_ret = jm_emit_function_error_lane_carrier(mt);
         jm_emit_ret(mt, exc_ret);
     }
 

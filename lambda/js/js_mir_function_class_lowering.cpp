@@ -1,4 +1,5 @@
 #include "js_mir_internal.hpp"
+#include "js_function.hpp"
 #include "js_exec_profile.h"
 #include "../../lib/lambda_alloca.h"
 #include "../../lib/mem_grow.hpp"
@@ -819,75 +820,152 @@ static void jm_seed_default_parameter_bindings(JsMirTranspiler* mt,
     }
 }
 
-static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
-        JsFuncCollected* fc, int param_count, bool has_captures) {
-    ScalarReturnClass scalar_return_mode = JM_JS_FACT(fc, boxed_return_scalar_class);
-    int call_param_count = param_count + (has_captures ? 1 : 0);
-    // P2.5: C-reachable wrappers publish lane 2 through Context.  A dynamic
-    // callback therefore needs no caller-donated number-stack address.
-    int total_params = call_param_count + 1;
-    MIR_var_t* params = total_params > 0
-        ? LAMBDA_ALLOCA(total_params, MIR_var_t) : NULL;
-    char** names = total_params > 0
-        ? LAMBDA_ALLOCA(total_params, char*) : NULL;
-    int pi = 0;
-    names[pi] = LAMBDA_ALLOCA(128, char);
-    snprintf(names[pi], 128, "%s", "ctx");
-    params[pi] = {MIR_T_P, names[pi], 0};
-    pi++;
-    if (has_captures) {
-        names[pi] = LAMBDA_ALLOCA(128, char);
-        snprintf(names[pi], 128, "%s", "_js.env");
-        params[pi] = {MIR_T_I64, names[pi], 0};
-        pi++;
-    }
-    JsAstNode* param = fc->node->params;
-    for (int i = 0; i < param_count; i++) {
-        names[pi] = LAMBDA_ALLOCA(128, char);
-        jm_get_backend_param_name(i, names[pi], 128);
-        params[pi] = {MIR_T_I64, names[pi], 0};
-        param = param ? param->next : NULL;
-        pi++;
-    }
-    int js_param_offset = has_captures ? 2 : 1;
-    for (int i = js_param_offset; i <= call_param_count; i++) {
-        for (int j = i + 1; j <= call_param_count; j++) {
-            if (strcmp(names[i], names[j]) != 0) continue;
-            char* renamed = LAMBDA_ALLOCA(128, char);
-            snprintf(renamed, 128, "%s__dup%d", names[i], i);
-            names[i] = renamed;
-            params[i].name = renamed;
-            break;
-        }
-    }
-    MIR_type_t return_type = MIR_T_I64;
-    MIR_item_t wrapper_item = MIR_new_func_arr(mt->ctx, fc->name, 1,
-        &return_type, total_params, params);
-    MIR_func_t wrapper_func = MIR_get_item_func(mt->ctx, wrapper_item);
-    fc->func_item = wrapper_item;
-    jm_register_local_func(mt, fc->name, wrapper_item);
-    mt->func_em->em.func_item = wrapper_item;
-    mt->func_em->em.func = wrapper_func;
-    jm_begin_function_frame(mt, return_type, true, scalar_return_mode,
-        MIR_reg(mt->ctx, "ctx", wrapper_func), true);
-    mt->func_em->em.frame.plan.entry_mode = MIR_ENTRY_CHECKED;
-    FnVariantAnalysis* public_variant = fn_analysis_variant(jm_function_analysis(fc),
-        FN_ENTRY_PUBLIC_WRAPPER);
-    em_plan_bind_return(&mt->func_em->em.frame.plan,
-        public_variant ? &public_variant->result : NULL, /*c_reachable=*/true);
-
-    MIR_reg_t* args = call_param_count > 0
-        ? LAMBDA_ALLOCA(call_param_count, MIR_reg_t) : NULL;
-    for (int i = 0; i < call_param_count; i++) {
-        args[i] = MIR_reg(mt->ctx, names[i + 1], wrapper_func);
-    }
-    MIR_reg_t result = jm_call_direct_boxed(mt, fc, call_param_count, args, false, false);
-    MIR_reg_t persistent = jm_new_reg(mt, "public_result", MIR_T_I64);
-    jm_emit_mov(mt, persistent, result);
-    jm_emit_ret(mt, persistent);
-    jm_finish_function_frame(mt, fc->name);
-    MIR_finish_func(mt->ctx);
+// The boxed body's lane-2 transport: a second MIR result when it may return a
+// pending wide scalar (D5.2.1v3). The body definition and its span entry must
+// agree on it, so both read it here.
+static FnCompanionTransport jm_boxed_body_companion(JsFuncCollected* fc) {
+    FnVariantAnalysis* body_variant = fn_analysis_variant(jm_function_analysis(fc),
+        FN_ENTRY_BOXED_BODY);
+    return body_variant ? body_variant->result.companion
+        : em_companion_transport(RETURN_SHAPE_ITEM_SCALAR, /*c_reachable=*/false);
 }
+
+// JC14-JC16: the span entry is a compiled function's only C-reachable entry
+// and its body entry, with the declared JsBodyEntry shape
+// (callee, this, args, argc, result_home). It adapts the actual list to the
+// formals in place -- a missing actual reads as undefined, a rest formal
+// receives the remaining actuals -- then calls the boxed body with individual
+// operands (D8.4.2v2) and tail-forwards a pending result, publishing its
+// payload in Context::mir_companion_slot for the C caller (D5.2.1v3).
+//
+// It owns no side-stack frame: the kernel keeps `args` rooted for the whole
+// call, the only allocation (rest packing) roots its own array, and the body
+// publishes its parameter roots and checks side-stack capacity on entry.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winvalid-offsetof"
+static void jm_emit_span_entry(JsMirTranspiler* mt, JsFuncCollected* fc,
+        int param_count, bool has_captures) {
+    MIR_context_t ctx = mt->ctx;
+    MirEmitter* em = &mt->func_em->em;
+    MIR_var_t entry_params[5] = {
+        {MIR_T_I64, "callee", 0},
+        {MIR_T_I64, "this_value", 0},
+        {MIR_T_P, "args", 0},
+        {MIR_T_I32, "argc", 0},
+        {MIR_T_P, "result_home", 0},
+    };
+    MIR_type_t return_type = MIR_T_I64;
+    MIR_item_t entry_item = MIR_new_func_arr(ctx, fc->name, 1, &return_type,
+        5, entry_params);
+    MIR_func_t entry_func = MIR_get_item_func(ctx, entry_item);
+    fc->func_item = entry_item;
+    jm_register_local_func(mt, fc->name, entry_item);
+    // the body's frame was finalized and disposed, so these instructions are
+    // appended as-is, outside any root or scalar-home bookkeeping.
+    em->func_item = entry_item;
+    em->func = entry_func;
+    MIR_reg_t callee = MIR_reg(ctx, "callee", entry_func);
+    MIR_reg_t args = MIR_reg(ctx, "args", entry_func);
+    MIR_reg_t argc = em_new_reg(em, "span_argc", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(ctx, MIR_EXT32, MIR_new_reg_op(ctx, argc),
+        MIR_new_reg_op(ctx, MIR_reg(ctx, "argc", entry_func))));
+
+    // The owning Context is the one the function was compiled against; the
+    // kernel has already verified it is current.
+    MIR_reg_t code = em_new_reg(em, "span_code", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, code),
+        MIR_new_mem_op(ctx, MIR_T_P, (MIR_disp_t)offsetof(JsFunction, code),
+            callee, 0, 1)));
+    MIR_reg_t runtime = em_new_reg(em, "span_ctx", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, runtime),
+        MIR_new_mem_op(ctx, MIR_T_P,
+            (MIR_disp_t)offsetof(JsCallableCode, runtime_context), code, 0, 1)));
+
+    int call_param_count = param_count + (has_captures ? 1 : 0);
+    MIR_type_t* types = LAMBDA_ALLOCA(call_param_count + 1, MIR_type_t);
+    MIR_op_t* ops = LAMBDA_ALLOCA(call_param_count + 1, MIR_op_t);
+    int oi = 0;
+    if (has_captures) {
+        MIR_reg_t env = em_new_reg(em, "span_env", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, env),
+            MIR_new_mem_op(ctx, MIR_T_P, (MIR_disp_t)offsetof(JsFunction, env),
+                callee, 0, 1)));
+        types[oi] = MIR_T_I64;
+        ops[oi++] = MIR_new_reg_op(ctx, env);
+    }
+    bool has_rest = JM_JS_FACT(fc, has_rest_param) && param_count > 0;
+    for (int i = 0; i < param_count; i++) {
+        MIR_reg_t formal = em_new_reg(em, "span_formal", MIR_T_I64);
+        if (has_rest && i == param_count - 1) {
+            // a raw import call: the frame-owned call helpers would attach
+            // root and scalar-home bookkeeping this entry does not have.
+            MIR_var_t rest_args[3] = {
+                {MIR_T_P, "a", 0}, {MIR_T_I64, "b", 0}, {MIR_T_I64, "c", 0}};
+            MirImportEntry* rest = em_ensure_import(em, "js_args_rest_array",
+                MIR_T_I64, 3, rest_args, 1, true);
+            MIR_op_t rest_ops[3] = {MIR_new_reg_op(ctx, args),
+                MIR_new_int_op(ctx, i), MIR_new_reg_op(ctx, argc)};
+            em_emit_insn(em, mir_new_call_with_args(ctx, rest->proto,
+                rest->import, formal, 3, rest_ops));
+        } else {
+            MIR_label_t missing = em_new_label(em);
+            em_emit_insn(em, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, formal),
+                MIR_new_uint_op(ctx, (uint64_t)ITEM_JS_UNDEFINED)));
+            em_emit_insn(em, MIR_new_insn(ctx, MIR_BLE, MIR_new_label_op(ctx, missing),
+                MIR_new_reg_op(ctx, argc), MIR_new_int_op(ctx, i)));
+            em_emit_insn(em, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, formal),
+                MIR_new_mem_op(ctx, MIR_T_I64, (MIR_disp_t)i * (MIR_disp_t)sizeof(Item),
+                    args, 0, 1)));
+            em_emit_insn(em, missing);
+        }
+        types[oi] = MIR_T_I64;
+        ops[oi++] = MIR_new_reg_op(ctx, formal);
+    }
+
+    // Call the body with the same physical signature it was defined with.
+    FnCompanionTransport companion = jm_boxed_body_companion(fc);
+    bool returns_pair = em_returns_result_pair(companion);
+    int body_nargs = 1 + call_param_count;
+    MIR_var_t* proto_args = LAMBDA_ALLOCA(body_nargs, MIR_var_t);
+    proto_args[0] = {MIR_T_P, "ctx", 0};
+    for (int i = 0; i < call_param_count; i++) proto_args[1 + i] = {types[i], "a", 0};
+    char proto_name[192];
+    snprintf(proto_name, sizeof(proto_name), "%s_sp", fc->body_name);
+    MIR_type_t result_types[2] = {MIR_T_I64, MIR_T_I64};
+    MIR_item_t proto = MIR_new_proto_arr(ctx, proto_name, returns_pair ? 2 : 1,
+        result_types, body_nargs, proto_args);
+    MIR_reg_t item = em_new_reg(em, "span_item", MIR_T_I64);
+    MIR_reg_t payload = returns_pair ? em_new_reg(em, "span_payload", MIR_T_I64) : 0;
+    int call_nops = 3 + (returns_pair ? 1 : 0) + body_nargs;
+    MIR_op_t* call_ops = LAMBDA_ALLOCA(call_nops, MIR_op_t);
+    int ci = 0;
+    call_ops[ci++] = MIR_new_ref_op(ctx, proto);
+    call_ops[ci++] = MIR_new_ref_op(ctx, fc->body_func_item);
+    call_ops[ci++] = MIR_new_reg_op(ctx, item);
+    if (returns_pair) call_ops[ci++] = MIR_new_reg_op(ctx, payload);
+    call_ops[ci++] = MIR_new_reg_op(ctx, runtime);
+    for (int i = 0; i < call_param_count; i++) call_ops[ci++] = ops[i];
+    em_emit_insn(em, MIR_new_insn_arr(ctx, MIR_CALL, (size_t)call_nops, call_ops));
+
+    if (returns_pair) {
+        // lane 2 is live only for a pending lane 1; the C side reads it from
+        // the Context slot (lambda_item_resolve_pending_slot).
+        MIR_label_t done = em_new_label(em);
+        MIR_reg_t tag = em_new_reg(em, "span_tag", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(ctx, MIR_AND, MIR_new_reg_op(ctx, tag),
+            MIR_new_reg_op(ctx, item), MIR_new_uint_op(ctx, ITEM_HIGH_BYTE_MASK)));
+        em_emit_insn(em, MIR_new_insn(ctx, MIR_BNE, MIR_new_label_op(ctx, done),
+            MIR_new_reg_op(ctx, tag), MIR_new_uint_op(ctx, ITEM_PENDING)));
+        em_emit_insn(em, MIR_new_insn(ctx, MIR_MOV,
+            MIR_new_mem_op(ctx, MIR_T_I64,
+                (MIR_disp_t)offsetof(Context, mir_companion_slot), runtime, 0, 1),
+            MIR_new_reg_op(ctx, payload)));
+        em_emit_insn(em, done);
+    }
+    em_emit_insn(em, MIR_new_ret_insn(ctx, 1, MIR_new_reg_op(ctx, item)));
+    MIR_finish_func(ctx);
+}
+#pragma clang diagnostic pop
 
 // JS parameter inference is a physical specialization, not a runtime type
 // contract.  The boxed entry must prove the exact Item shape before passing an
@@ -1396,7 +1474,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // Exception landing pad for native function (return 0/0.0 on exception)
         if (mt->func_error_lane_label) {
             jm_emit_label(mt, mt->func_error_lane_label);
-            jm_emit_native_throw_exit(mt, jm_emit_error_lane_return(mt));
+            jm_emit_native_throw_exit(mt, jm_emit_function_error_lane_carrier(mt));
         }
         jm_pop_scope(mt);
         jm_finish_function_frame(mt, native_name);
@@ -1666,7 +1744,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // Exception landing pad for generator state machine
         if (mt->func_error_lane_label) {
             jm_emit_label(mt, mt->func_error_lane_label);
-            MIR_reg_t exc_ret = jm_emit_error_lane_return(mt);
+            MIR_reg_t exc_ret = jm_emit_function_error_lane_carrier(mt);
             jm_emit_eval_local_pop_if_needed(mt);
             jm_emit_ret(mt, exc_ret);
         }
@@ -1735,6 +1813,22 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             MIR_label_t async_sm_catch_label = jm_emit_resumable_state_dispatch(
                 mt, await_count, true);
 
+            // Push the implicit try context before parameter instantiation. Its
+            // catch label is also this machine's function-level error label, so
+            // a default-parameter or binding throw routed before the push used
+            // the function-level carrier register while the shared landing pad
+            // read the try context's register, and the promise rejected with a
+            // stale value. An abrupt parameter instantiation rejects the async
+            // function's promise, exactly like a body throw.
+            if (JsTryContext* tc = jm_try_context_push(mt)) {
+                MIR_reg_t return_val_reg = jm_new_reg(mt, "_asm_ret", MIR_T_I64);
+                MIR_reg_t has_return_reg = jm_new_reg(mt, "_asm_has_ret", MIR_T_I64);
+                jm_try_context_setup(tc, async_sm_catch_label, 0, mt->gen_done_label,
+                    return_val_reg, has_return_reg, true, false, NULL, 0);
+                jm_emit_reg_op(mt, MIR_MOV, tc->return_val_reg, MIR_new_int_op(mt->ctx, 0));
+                jm_emit_reg_op(mt, MIR_MOV, tc->has_return_reg, MIR_new_int_op(mt->ctx, 0));
+            }
+
             // Load parameters from env.
             jm_emit_resumable_param_bindings(mt, fn, param_count, param_offset_sm);
 
@@ -1784,16 +1878,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             jm_init_block_tdz(mt, fn->body);
 
             jm_initialize_resumable_scope_env(mt, fc, "async");
-
-            // Push implicit try context for async exception handling
-            if (JsTryContext* tc = jm_try_context_push(mt)) {
-                MIR_reg_t return_val_reg = jm_new_reg(mt, "_asm_ret", MIR_T_I64);
-                MIR_reg_t has_return_reg = jm_new_reg(mt, "_asm_has_ret", MIR_T_I64);
-                jm_try_context_setup(tc, async_sm_catch_label, 0, mt->gen_done_label,
-                    return_val_reg, has_return_reg, true, false, NULL, 0);
-                jm_emit_reg_op(mt, MIR_MOV, tc->return_val_reg, MIR_new_int_op(mt->ctx, 0));
-                jm_emit_reg_op(mt, MIR_MOV, tc->has_return_reg, MIR_new_int_op(mt->ctx, 0));
-            }
 
             // Transpile async body with exception checking after each statement
             if (fn->body && fn->body->node_type == AST_NODE_BLOCK) {
@@ -1919,9 +2003,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     MIR_type_t ret_type = MIR_T_I64;
     FnVariantAnalysis* body_variant = fn_analysis_variant(jm_function_analysis(fc),
         FN_ENTRY_BOXED_BODY);
-    FnCompanionTransport body_companion = body_variant
-        ? body_variant->result.companion : em_companion_transport(
-            RETURN_SHAPE_ITEM_SCALAR, /*c_reachable=*/false);
+    FnCompanionTransport body_companion = jm_boxed_body_companion(fc);
     MIR_type_t return_types[2] = {ret_type, MIR_T_I64};
     MIR_item_t func_item = MIR_new_func_arr(mt->ctx, fc->body_name,
         em_return_nres(body_companion), return_types, total_params, params);
@@ -2164,7 +2246,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         jm_emit_ret(mt, gen_obj);
         if (mt->func_error_lane_label != 0) {
             jm_emit_label(mt, mt->func_error_lane_label);
-            MIR_reg_t exc_ret = jm_emit_error_lane_return(mt);
+            MIR_reg_t exc_ret = jm_emit_function_error_lane_carrier(mt);
             jm_emit_eval_local_pop_if_needed(mt);
             jm_emit_ret(mt, exc_ret);
         }
@@ -2197,6 +2279,18 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // Return the async function's promise
         MIR_reg_t promise = jm_callr_1(mt, "js_async_get_promise", MIR_T_I64, ctx_idx);
         jm_emit_ret(mt, promise);
+        // Parameter validation above (jm_initialize_resumable_env) routes a
+        // throw to the function-level exit. An async function rejects its own
+        // promise for an abrupt parameter instantiation, as the await-less
+        // lowering does; without this pad the route targeted an uninserted
+        // label and MIR linking crashed.
+        if (mt->func_error_lane_label != 0) {
+            jm_emit_label_with_state(mt, mt->func_error_lane_label, JS_ERROR_LANE_SET);
+            MIR_reg_t rejected = jm_emit_async_rejected_value(mt,
+                jm_emit_function_error_lane_carrier(mt));
+            jm_emit_eval_local_pop_if_needed(mt);
+            jm_emit_ret(mt, rejected);
+        }
         goto finish_boxed;
     }
 
@@ -2725,9 +2819,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     MIR_reg_t exc_ret;
                     if (fn->is_async) {
                         exc_ret = jm_emit_async_rejected_value(mt,
-                            jm_emit_error_lane_return(mt));
+                            jm_emit_function_error_lane_carrier(mt));
                     } else {
-                        exc_ret = jm_emit_error_lane_return(mt);
+                        exc_ret = jm_emit_function_error_lane_carrier(mt);
                     }
                     jm_emit_ret(mt, exc_ret);
                 }
@@ -2810,9 +2904,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         MIR_reg_t exc_ret;
         if (fn->is_async) {
             exc_ret = jm_emit_async_rejected_value(mt,
-                jm_emit_error_lane_return(mt));
+                jm_emit_function_error_lane_carrier(mt));
         } else {
-            exc_ret = jm_emit_error_lane_return(mt);
+            exc_ret = jm_emit_function_error_lane_carrier(mt);
         }
         jm_emit_eval_local_pop_if_needed(mt);
         jm_emit_ret(mt, exc_ret);
@@ -2823,7 +2917,7 @@ finish_boxed:
     jm_pop_scope(mt);
     jm_finish_function_frame(mt, fc->name);
     MIR_finish_func(mt->ctx);
-    jm_emit_public_function_wrapper(mt, fc, param_count, has_captures);
+    jm_emit_span_entry(mt, fc, param_count, has_captures);
 
     // Restore state
     mt->func_em->em.func_item = saved_item;
