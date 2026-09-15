@@ -54,11 +54,7 @@ extern "C" {
 // ============================================================================
 
 static char* err_strdup(const char* s) {
-    if (!s) return NULL;
-    size_t len = strlen(s) + 1;
-    char* copy = (char*)mem_alloc(len, MEM_CAT_SYSTEM);
-    if (copy) memcpy(copy, s, len);
-    return copy;
+    return s ? mem_strdup(s, MEM_CAT_SYSTEM) : NULL;
 }
 
 // ============================================================================
@@ -542,12 +538,7 @@ char* err_get_source_line(const char* source, uint32_t line_number) {
     
     // copy the line
     size_t len = line_end - line_start;
-    char* result = (char*)mem_alloc(len + 1, MEM_CAT_SYSTEM);
-    if (result) {
-        memcpy(result, line_start, len);
-        result[len] = '\0';
-    }
-    return result;
+    return mem_dup_n(line_start, len, MEM_CAT_SYSTEM);
 }
 
 // extract source context around the error location

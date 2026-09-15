@@ -304,9 +304,7 @@ const char* openapi_generate_spec(OpenApiContext *ctx) {
     strbuf_append_str(buf, "}}"); // close paths + root
 
     // cache result
-    size_t len = buf->length;
-    ctx->cached_spec = (char*)mem_alloc(len + 1, MEM_CAT_SERVE);
-    memcpy(ctx->cached_spec, buf->str, len + 1);
+    ctx->cached_spec = mem_strdup(buf->str, MEM_CAT_SERVE);
 
     strbuf_free(buf);
     return ctx->cached_spec;

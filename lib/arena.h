@@ -108,6 +108,11 @@ void* arena_alloc_aligned(Arena* arena, size_t size, size_t alignment);
 void* arena_calloc(Arena* arena, size_t size);
 
 /**
+ * Duplicate exactly len bytes in an arena and append a null terminator
+ */
+char* arena_dup_n(Arena* arena, const char* data, size_t len);
+
+/**
  * Duplicate a string in arena
  * @param arena Arena to allocate from
  * @param str String to duplicate (null-terminated)

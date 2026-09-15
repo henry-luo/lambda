@@ -20,6 +20,7 @@
 #include "../../../lib/log.h"
 #include "../../../lib/lambda_alloca.h"
 #include "../../../lib/hash.h"
+#include "../../../lib/str.h"
 #include "../../../lib/hashmap.h"
 #include "../../../lib/hashmap_typed.hpp"
 #include "../../../lib/strbuf.h"
@@ -1057,8 +1058,7 @@ extern "C" Item bash_expand_replace(Item val, Item pat, Item repl) {
     }
 
     // glob pattern: try longest match at each position
-    char* tmp = (char*)mem_alloc(slen + 1, MEM_CAT_BASH_RUNTIME);
-    memcpy(tmp, str, slen + 1);
+    char* tmp = mem_strdup(str, MEM_CAT_BASH_RUNTIME);
     for (size_t i = 0; i <= slen; i++) {
         // try longest match first at position i
         for (size_t end = slen; end >= i; end--) {
@@ -1114,8 +1114,7 @@ extern "C" Item bash_expand_replace_all(Item val, Item pat, Item repl) {
     }
 
     // glob pattern: try longest match at each position
-    char* tmp = (char*)mem_alloc(slen + 1, MEM_CAT_BASH_RUNTIME);
-    memcpy(tmp, str, slen + 1);
+    char* tmp = mem_strdup(str, MEM_CAT_BASH_RUNTIME);
     StrBuf* sb = strbuf_new_cap(slen + 64);
     size_t i = 0;
     while (i <= slen) {
@@ -1173,8 +1172,7 @@ extern "C" Item bash_expand_replace_prefix(Item val, Item pat, Item repl) {
     }
 
     // glob pattern: try longest match first at position 0
-    char* tmp = (char*)mem_alloc(slen + 1, MEM_CAT_BASH_RUNTIME);
-    memcpy(tmp, str, slen + 1);
+    char* tmp = mem_strdup(str, MEM_CAT_BASH_RUNTIME);
     for (size_t end = slen; ; end--) {
         char saved = tmp[end];
         tmp[end] = '\0';
@@ -1217,8 +1215,7 @@ extern "C" Item bash_expand_replace_suffix(Item val, Item pat, Item repl) {
     }
 
     // glob pattern: try longest match first starting from position 0
-    char* tmp = (char*)mem_alloc(slen + 1, MEM_CAT_BASH_RUNTIME);
-    memcpy(tmp, str, slen + 1);
+    char* tmp = mem_strdup(str, MEM_CAT_BASH_RUNTIME);
     for (size_t start = 0; start <= slen; start++) {
         if (bash_glob_match(tmp + start, pattern)) {
             StrBuf* sb = strbuf_new_cap(start + rlen + 1);
@@ -1646,8 +1643,7 @@ extern "C" Item bash_expand_tilde(Item word) {
         int digit_len = slash ? (int)(slash - num_start) : (int)strlen(num_start);
         char nbuf[32];
         if (digit_len >= (int)sizeof(nbuf)) digit_len = (int)sizeof(nbuf) - 1;
-        memcpy(nbuf, num_start, digit_len);
-        nbuf[digit_len] = '\0';
+        str_copy(nbuf, sizeof(nbuf), num_start, digit_len);
         int n = atoi(nbuf); // the N in ~-N (positive)
         extern Item bash_dirstack_total(void);
         extern Item bash_dirstack_get(Item index);
@@ -1678,8 +1674,7 @@ extern "C" Item bash_expand_tilde(Item word) {
         int nlen = slash ? (int)(slash - num_start) : (int)strlen(num_start);
         char nbuf[32];
         if (nlen >= (int)sizeof(nbuf)) nlen = (int)sizeof(nbuf) - 1;
-        memcpy(nbuf, num_start, nlen);
-        nbuf[nlen] = '\0';
+        str_copy(nbuf, sizeof(nbuf), num_start, nlen);
         int offset = atoi(nbuf);
         extern Item bash_dirstack_get(Item index);
         Item entry = bash_dirstack_get((Item){.item = i2it(offset)});
@@ -1695,8 +1690,7 @@ extern "C" Item bash_expand_tilde(Item word) {
         int nlen = slash ? (int)(slash - num_start) : (int)strlen(num_start);
         char nbuf[32];
         if (nlen >= (int)sizeof(nbuf)) nlen = (int)sizeof(nbuf) - 1;
-        memcpy(nbuf, num_start, nlen);
-        nbuf[nlen] = '\0';
+        str_copy(nbuf, sizeof(nbuf), num_start, nlen);
         int offset = atoi(nbuf);
         extern Item bash_dirstack_get(Item index);
         Item entry = bash_dirstack_get((Item){.item = i2it(offset)});
@@ -1711,8 +1705,7 @@ extern "C" Item bash_expand_tilde(Item word) {
         char username[256];
         int ulen = slash ? (int)(slash - suffix) : (int)strlen(suffix);
         if (ulen >= (int)sizeof(username)) ulen = (int)sizeof(username) - 1;
-        memcpy(username, suffix, ulen);
-        username[ulen] = '\0';
+        str_copy(username, sizeof(username), suffix, ulen);
         struct passwd* pw = getpwnam(username);
         if (pw) {
             home = pw->pw_dir;
@@ -1772,8 +1765,7 @@ static Item bash_expand_tilde_assign_impl(Item word, bool include_equals, bool a
             int seg_len = seg_end ? (int)(seg_end - p) : (int)strlen(p);
             char seg[1024];
             if (seg_len >= 1023) seg_len = 1022;
-            memcpy(seg, p, seg_len);
-            seg[seg_len] = '\0';
+            str_copy(seg, sizeof(seg), p, seg_len);
 
             Item seg_item = (Item){.item = s2it(heap_create_name(seg, seg_len))};
             Item expanded = bash_expand_tilde(seg_item);
@@ -1945,10 +1937,8 @@ static bool expand_brace_range(const char* inside, int ilen, const char* prefix,
     if (start_len <= 0 || start_len >= (int)sizeof(start_buf) ||
         after_dots <= 0 || after_dots >= (int)sizeof(end_buf))
         return false;
-    memcpy(start_buf, inside, start_len);
-    start_buf[start_len] = '\0';
-    memcpy(end_buf, dotdot + 2, after_dots);
-    end_buf[after_dots] = '\0';
+    str_copy(start_buf, sizeof(start_buf), inside, start_len);
+    str_copy(end_buf, sizeof(end_buf), dotdot + 2, after_dots);
 
     int step = 1;
     char* step_dot = strstr(end_buf, "..");
@@ -2874,12 +2864,10 @@ extern "C" void bash_set_cmd_env_var(Item name, Item value) {
 
     if (bash_prefix_env_depth < BASH_PREFIX_ENV_MAX) {
         BashPrefixEnvSave* save = &bash_prefix_env_stack[bash_prefix_env_depth++];
-        strncpy(save->name, n, sizeof(save->name) - 1);
-        save->name[sizeof(save->name) - 1] = '\0';
+        str_copy(save->name, sizeof(save->name), n, strlen(n));
         const char* old = getenv(n);
         if (old) {
-            strncpy(save->old_val, old, sizeof(save->old_val) - 1);
-            save->old_val[sizeof(save->old_val) - 1] = '\0';
+            str_copy(save->old_val, sizeof(save->old_val), old, strlen(old));
             save->was_set = true;
         } else {
             save->old_val[0] = '\0';
@@ -4333,8 +4321,7 @@ extern "C" void bash_array_init_word(Item arr, Item var_name, Item word) {
                 int idx_len = (int)(bracket_end - s - 1);
                 char idx_buf[32];
                 if (idx_len <= 0 || idx_len >= (int)sizeof(idx_buf)) return;
-                memcpy(idx_buf, s + 1, idx_len);
-                idx_buf[idx_len] = '\0';
+                str_copy(idx_buf, sizeof(idx_buf), s + 1, idx_len);
                 long long idx = atoll(idx_buf);
                 const char* val_str = bracket_end + (is_append_elem ? 3 : 2);
                 Item val_item = (Item){.item = s2it(heap_create_name(val_str))};
@@ -4730,14 +4717,12 @@ extern "C" void bash_set_script_name(Item name) {
     // store a permanent copy of the script name
     static char bash_script_name_buf[4096];
     int len = s->len < (int)sizeof(bash_script_name_buf) - 1 ? s->len : (int)sizeof(bash_script_name_buf) - 1;
-    memcpy(bash_script_name_buf, s->chars, len);
-    bash_script_name_buf[len] = '\0';
+    str_copy(bash_script_name_buf, sizeof(bash_script_name_buf), s->chars, len);
     bash_script_name = bash_script_name_buf;
     // set error script name only on first call (initial script name)
     if (bash_error_script_name[0] == '\0') {
         int elen = s->len < (int)sizeof(bash_error_script_name) - 1 ? s->len : (int)sizeof(bash_error_script_name) - 1;
-        memcpy(bash_error_script_name, s->chars, elen);
-        bash_error_script_name[elen] = '\0';
+        str_copy(bash_error_script_name, sizeof(bash_error_script_name), s->chars, elen);
     }
 }
 
@@ -4976,9 +4961,7 @@ extern "C" void bash_register_rt_func_with_source(const char* name, BashRtFuncPt
     entry.name_len = len;
     entry.ptr = ptr;
     if (source && source_len > 0) {
-        entry.source_text = (char*)mem_alloc(source_len + 1, MEM_CAT_BASH_RUNTIME);
-        memcpy(entry.source_text, source, source_len);
-        entry.source_text[source_len] = '\0';
+        entry.source_text = mem_dup_n(source, source_len, MEM_CAT_BASH_RUNTIME);
         entry.source_len = source_len;
     } else {
         entry.source_text = NULL;
@@ -5412,8 +5395,7 @@ extern "C" void bash_set_command(Item cmd_text) {
     String* s = it2s(cmd_text);
     if (s && s->len > 0) {
         int len = s->len < (int)sizeof(bash_current_command) - 1 ? s->len : (int)sizeof(bash_current_command) - 1;
-        memcpy(bash_current_command, s->chars, len);
-        bash_current_command[len] = '\0';
+        str_copy(bash_current_command, sizeof(bash_current_command), s->chars, len);
     }
 }
 
@@ -5697,9 +5679,7 @@ extern "C" void bash_trap_set(Item handler, Item signal_name) {
     }
 
     // store handler code (null-terminated copy)
-    bash_trap_handlers[idx] = (char*)mem_alloc(h->len + 1, MEM_CAT_BASH_RUNTIME);
-    memcpy(bash_trap_handlers[idx], h->chars, h->len);
-    bash_trap_handlers[idx][h->len] = '\0';
+    bash_trap_handlers[idx] = mem_dup_n(h->chars, h->len, MEM_CAT_BASH_RUNTIME);
 
     // install OS signal handler if needed
     int signum = bash_trap_idx_to_signum(idx);

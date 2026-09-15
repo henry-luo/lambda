@@ -485,11 +485,9 @@ void parse_viewport_content(const char* content, DomDocument* doc) {
         if (key_len > 0 && value_len > 0) {
             char key[64], value[64];
             size_t copy_len = (key_len < 63) ? key_len : 63;
-            strncpy(key, key_start, copy_len);
-            key[copy_len] = '\0';
+            str_copy(key, sizeof(key), key_start, copy_len);
             copy_len = (value_len < 63) ? value_len : 63;
-            strncpy(value, value_start, copy_len);
-            value[copy_len] = '\0';
+            str_copy(value, sizeof(value), value_start, copy_len);
 
 
             if (str_ieq_cstr(key, "initial-scale")) {
@@ -575,11 +573,7 @@ static char* find_refresh_url_in_content(const char* content) {
                 while (end > q && (end[-1] == ' ' || end[-1] == '\t')) end--;
                 size_t len = (size_t)(end - q);
                 if (len == 0) return nullptr;
-                char* out = (char*)mem_alloc(len + 1, MEM_CAT_DOM);
-                if (!out) return nullptr;
-                memcpy(out, q, len);
-                out[len] = '\0';
-                return out;
+                return mem_dup_n(q, len, MEM_CAT_DOM);
             }
         }
         while (*p && *p != ';') p++;
@@ -1164,10 +1158,9 @@ static void load_linked_stylesheet(Element* elem, CssEngine* engine, const char*
                 size_t utf16_at_charset_prelude_len = css_utf16_encoded_at_charset_prelude_len(css_content, css_len);
                 if (utf16_at_charset_prelude_len > 0 && utf16_at_charset_prelude_len < css_len) {
                     size_t stripped_len = css_len - utf16_at_charset_prelude_len;
-                    char* stripped_css = (char*)mem_alloc(stripped_len + 1, MEM_CAT_LAYOUT);
+                    char* stripped_css = mem_dup_n(css_content + utf16_at_charset_prelude_len,
+                            stripped_len, MEM_CAT_LAYOUT);
                     if (stripped_css) {
-                        memcpy(stripped_css, css_content + utf16_at_charset_prelude_len, stripped_len);
-                        stripped_css[stripped_len] = '\0';
                         mem_free(css_content);
                         css_content = stripped_css;
                         css_len = stripped_len;
@@ -1605,10 +1598,10 @@ const char* detect_html_charset(const char* html, size_t len) {
     while ((p = strstr(p, "charset")) != nullptr) {
         p += 7; // skip "charset"
         // skip optional whitespace and '='
-        while (*p == ' ' || *p == '\t') p++;
+        p = str_skip_line_space(p);
         if (*p != '=') continue;
         p++;
-        while (*p == ' ' || *p == '\t') p++;
+        p = str_skip_line_space(p);
         // skip optional quote
         if (*p == '"' || *p == '\'') p++;
 

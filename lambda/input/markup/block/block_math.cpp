@@ -62,7 +62,7 @@ Item parse_math_block(MarkupParser* parser, const char* line) {
     // Capture any content after $$ on the opening line
     if (*pos != '\0') {
         // skip leading whitespace after $$
-        while (*pos == ' ' || *pos == '\t') pos++;
+        pos = str_skip_line_space(pos);
         if (*pos != '\0') {
             stringbuf_append_str(sb, pos);
         }

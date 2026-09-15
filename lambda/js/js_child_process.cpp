@@ -2264,8 +2264,7 @@ static Item normalize_spawn_request(Item rest_args, SpawnRequest* req) {
         return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", "The argument 'file' cannot be empty");
     }
     int cmd_len = (int)cmd->len < (int)sizeof(req->file) - 1 ? (int)cmd->len : (int)sizeof(req->file) - 1;
-    memcpy(req->file, cmd->chars, (size_t)cmd_len);
-    req->file[cmd_len] = '\0';
+    str_copy(req->file, sizeof(req->file), cmd->chars, cmd_len);
 
     Item second = argc64 > 1 ? js_elements_get_int(rest_args, 1) : make_js_undefined();
     Item third = argc64 > 2 ? js_elements_get_int(rest_args, 2) : make_js_undefined();
@@ -2458,9 +2457,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
                 return js_throw_invalid_arg_type("args", "string", arg);
             }
             String* s = it2s(arg);
-            char* copy = (char*)mem_alloc(s->len + 1, MEM_CAT_JS_RUNTIME);
-            memcpy(copy, s->chars, s->len);
-            copy[s->len] = '\0';
+            char* copy = mem_dup_n(s->chars, s->len, MEM_CAT_JS_RUNTIME);
             argv[arg_index++] = copy;
             js_array_push(spawnargs, arg);
         }
@@ -2614,8 +2611,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
     if (had_ipc_env) {
         int old_len = (int)strlen(old_ipc_env);
         if (old_len >= (int)sizeof(old_ipc_buf)) old_len = (int)sizeof(old_ipc_buf) - 1;
-        memcpy(old_ipc_buf, old_ipc_env, (size_t)old_len);
-        old_ipc_buf[old_len] = '\0';
+        str_copy(old_ipc_buf, sizeof(old_ipc_buf), old_ipc_env, old_len);
     }
     if (req.ipc) setenv("LAMBDA_JS_IPC", "1", 1);
     const char* old_ipc_fd_env = getenv("LAMBDA_JS_IPC_FD");
@@ -2624,8 +2620,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
     if (had_ipc_fd_env) {
         int old_len = (int)strlen(old_ipc_fd_env);
         if (old_len >= (int)sizeof(old_ipc_fd_buf)) old_len = (int)sizeof(old_ipc_fd_buf) - 1;
-        memcpy(old_ipc_fd_buf, old_ipc_fd_env, (size_t)old_len);
-        old_ipc_fd_buf[old_len] = '\0';
+        str_copy(old_ipc_fd_buf, sizeof(old_ipc_fd_buf), old_ipc_fd_env, old_len);
     }
     if (req.ipc) setenv("LAMBDA_JS_IPC_FD", ipc_fd_buf, 1);
 
@@ -2712,8 +2707,7 @@ static Item copy_required_file(Item file_item, char* out, int out_size) {
         return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", "The argument 'file' cannot be empty");
     }
     int len = (int)s->len < out_size - 1 ? (int)s->len : out_size - 1;
-    memcpy(out, s->chars, (size_t)len);
-    out[len] = '\0';
+    str_copy(out, out_size, s->chars, len);
     return js_status_ok();
 }
 

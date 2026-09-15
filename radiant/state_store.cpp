@@ -1945,10 +1945,8 @@ void editing_composition_set_preedit(DocState* state, View* view,
     if (c->preedit_text) { mem_free(c->preedit_text); c->preedit_text = NULL; }
     c->preedit_len = 0;
     if (text && len) {
-        char* buf = (char*)mem_alloc((size_t)len + 1, MEM_CAT_DOM);
+        char* buf = mem_dup_n(text, len, MEM_CAT_DOM);
         if (!buf) return;
-        memcpy(buf, text, len);
-        buf[len] = '\0';
         c->preedit_text = buf;
         c->preedit_len = len;
     }
@@ -3591,12 +3589,9 @@ static bool form_view_state_replace_text_value(ViewState* view_state,
                                                 uint32_t value_len,
                                                 uint32_t value_u16_len) {
     if (!view_state) return false;
-    char* copy = (char*)mem_alloc((size_t)value_len + 1, MEM_CAT_DOM);
+    if (!value) value_len = 0;
+    char* copy = mem_dup_n(value ? value : "", value_len, MEM_CAT_DOM);
     if (!copy) return false;
-    if (value && value_len > 0) {
-        memcpy(copy, value, value_len);
-    }
-    copy[value_len] = '\0';
     if (view_state->data.form.current_value) {
         mem_free(view_state->data.form.current_value);
     }
@@ -8076,11 +8071,7 @@ View* focus_get_visible(DocState* state) {
 static char* arena_copy_cstr(Arena* arena, const char* text) {
     if (!arena || !text) return NULL;
     size_t len = strlen(text);
-    char* result = (char*)arena_alloc(arena, len + 1);
-    if (!result) return NULL;
-    memcpy(result, text, len);
-    result[len] = '\0';
-    return result;
+    return arena_dup_n(arena, text, len);
 }
 
 static void append_view_text_rects(StrBuf* sb, ViewText* text, bool escape_html) {
@@ -8367,11 +8358,7 @@ static char* extract_text_control_selection_to_arena(DocState* state,
     if (end_byte <= start_byte || end_byte > value_len) return NULL;
 
     uint32_t len = end_byte - start_byte;
-    char* result = (char*)arena_alloc(arena, len + 1);
-    if (!result) return NULL;
-    memcpy(result, value + start_byte, len);
-    result[len] = '\0';
-    return result;
+    return arena_dup_n(arena, value + start_byte, len);
 }
 
 char* state_store_extract_selection_text(DocState* state, Arena* arena) {

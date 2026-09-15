@@ -49,13 +49,7 @@ void serve_free(void *ptr) {
 }
 
 char* serve_strdup(const char *str) {
-    if (!str) return NULL;
-    size_t len = strlen(str);
-    char *dup = (char *)serve_malloc(len + 1);
-    if (dup) {
-        memcpy(dup, str, len + 1);
-    }
-    return dup;
+    return str ? mem_strdup(str, MEM_CAT_SERVE) : NULL;
 }
 
 // ============================================================================
@@ -92,7 +86,7 @@ char* serve_strtrim(char *str) {
     if (!str) return NULL;
 
     // trim leading
-    while (*str && isspace((unsigned char)*str)) str++;
+    str = (char*)str_skip_ascii_space(str);
 
     // trim trailing
     size_t len = strlen(str);

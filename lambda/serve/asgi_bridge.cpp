@@ -77,9 +77,7 @@ static char* build_request_message(uint64_t id, HttpRequest *req) {
 
     strbuf_append_str(buf, "}\n");
 
-    size_t len = buf->length;
-    char *result = (char*)mem_alloc(len + 1, MEM_CAT_SERVE);
-    memcpy(result, buf->str, len + 1);
+    char *result = mem_strdup(buf->str, MEM_CAT_SERVE);
     strbuf_free(buf);
 
     return result;

@@ -572,11 +572,8 @@ Item parse_emphasis(MarkupParser* parser, const char** text, const char* text_st
     }
 
     // Parse inner content (may contain more emphasis)
-    char* content = (char*)mem_alloc(content_len + 1, MEM_CAT_INPUT_MARKUP);
+    char* content = mem_strndup(content_start, content_len, MEM_CAT_INPUT_MARKUP);
     if (content) {
-        memcpy(content, content_start, content_len);
-        content[content_len] = '\0';
-
         Item inner = parse_inline_spans(parser, content);
         if (inner.item != ITEM_ERROR && inner.item != ITEM_UNDEFINED) {
             list_push((List*)elem, inner);

@@ -78,9 +78,7 @@ Input* input_from_directory_with_name_parent(const char* directory_path,
         
         // Copy segment
         size_t seg_len = p - seg_start;
-        char* segment = (char*)pool_alloc(pool, seg_len + 1);
-        memcpy(segment, seg_start, seg_len);
-        segment[seg_len] = '\0';
+        char* segment = pool_dup_n(pool, seg_start, seg_len);
         
         base_path = path_extend(pool, base_path, segment);
     }

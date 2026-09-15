@@ -87,13 +87,11 @@ Item parse_textile_definition_list(MarkupParser* parser, const char* line) {
 
         // Extract term (before :=)
         size_t term_len = sep - p;
-        char* term_text = (char*)mem_alloc(term_len + 1, MEM_CAT_INPUT_MARKUP);
+        char* term_text = mem_strndup(p, term_len, MEM_CAT_INPUT_MARKUP);
         if (!term_text) {
             parser->current_line++;
             continue;
         }
-        strncpy(term_text, p, term_len);
-        term_text[term_len] = '\0';
 
         // Trim trailing whitespace from term
         while (term_len > 0 && (term_text[term_len-1] == ' ' || term_text[term_len-1] == '\t')) {
@@ -168,8 +166,7 @@ Item parse_textile_footnote_def(MarkupParser* parser, const char* line) {
 
     char fn_num[16];
     if (num_len >= sizeof(fn_num)) num_len = sizeof(fn_num) - 1;
-    strncpy(fn_num, num_start, num_len);
-    fn_num[num_len] = '\0';
+    str_copy(fn_num, sizeof(fn_num), num_start, num_len);
 
     // Skip modifiers if present
     while (*p && *p != '.' && *p != '\n') p++;

@@ -89,9 +89,7 @@ static Path* path_alloc_op(Pool* pool, Path* base, LPathSegmentType type,
     path->authority_name = base->authority_name;
     path->int_value = int_value;
     if (name && len > 0 && type == LPATH_SEG_NORMAL) {
-        char* name_copy = (char*)pool_alloc(pool, len + 1);
-        memcpy(name_copy, name, len);
-        name_copy[len] = '\0';
+        char* name_copy = pool_dup_n(pool, name, len);
         path->name = name_copy;
     }
     return path;
@@ -196,9 +194,7 @@ Path* path_new_authority(Pool* pool, int scheme, const char* authority) {
     if (!root) return NULL;
     root->authority_kind = PATH_AUTHORITY_NAMED;
     size_t len = strlen(authority);
-    char* copy = (char*)pool_alloc(pool, len + 1);
-    memcpy(copy, authority, len);
-    copy[len] = '\0';
+    char* copy = pool_dup_n(pool, authority, len);
     root->authority_name = copy;
     return root;
 }

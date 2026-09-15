@@ -62,7 +62,7 @@ public:
                 info.valid = true;
 
                 // skip whitespace after =
-                while (*p == ' ' || *p == '\t') p++;
+                p = str_skip_line_space(p);
                 info.text_start = p;
 
                 // find end of line
@@ -106,7 +106,7 @@ public:
 
             // skip whitespace after marker
             p++;
-            while (*p == ' ' || *p == '\t') p++;
+            p = str_skip_line_space(p);
             info.text_start = p;
             info.valid = true;
         }
@@ -120,7 +120,7 @@ public:
 
             // skip whitespace after marker
             p++;
-            while (*p == ' ' || *p == '\t') p++;
+            p = str_skip_line_space(p);
             info.text_start = p;
             info.valid = true;
         }
@@ -133,7 +133,7 @@ public:
             info.marker_end = p + 1;
 
             p++;
-            while (*p == ' ' || *p == '\t') p++;
+            p = str_skip_line_space(p);
             info.text_start = p;
             info.valid = true;
         }
@@ -161,7 +161,7 @@ public:
                 info.fence_length = count;
 
                 // skip whitespace before info string
-                while (*p == ' ' || *p == '\t') p++;
+                p = str_skip_line_space(p);
 
                 // info string (language identifier)
                 info.info_string = p;
@@ -206,7 +206,7 @@ public:
         if (fence_len < open_info.fence_length) return false;
 
         // rest of line must be blank (only whitespace)
-        while (*p == ' ' || *p == '\t') p++;
+        p = str_skip_line_space(p);
         return (*p == '\0' || *p == '\r' || *p == '\n');
     }
 
@@ -264,7 +264,7 @@ public:
         const char* p = line;
 
         // skip leading whitespace
-        while (*p == ' ' || *p == '\t') p++;
+        p = str_skip_line_space(p);
 
         // single-line comment: //
         if (*p == '/' && *(p + 1) == '/') {

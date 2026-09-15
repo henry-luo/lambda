@@ -72,7 +72,7 @@ static ArrayList* parse_separator_alignments(const char* line) {
 
     while (*pos) {
         // Skip whitespace before cell
-        while (*pos == ' ' || *pos == '\t') pos++;
+        pos = str_skip_line_space(pos);
         
         if (!*pos || *pos == '\n' || *pos == '\r') break;
 
@@ -95,7 +95,7 @@ static ArrayList* parse_separator_alignments(const char* line) {
         }
         
         // Skip whitespace after cell
-        while (*pos == ' ' || *pos == '\t') pos++;
+        pos = str_skip_line_space(pos);
         
         // Determine alignment
         TableAlign align = TableAlign::NONE;
@@ -126,7 +126,7 @@ Item parse_table_cell_content(MarkupParser* parser, const char* text) {
 
     // Trim leading/trailing whitespace
     const char* start = text;
-    while (*start == ' ' || *start == '\t') start++;
+    start = str_skip_line_space(start);
 
     if (!*start) {
         return Item{.item = ITEM_UNDEFINED};
@@ -246,11 +246,8 @@ static Item parse_table_row_with_type(MarkupParser* parser, const char* line,
 
         // Extract cell content
         size_t cell_len = cell_end - cell_start;
-        char* cell_text = (char*)mem_alloc(cell_len + 1, MEM_CAT_INPUT_MARKUP);
+        char* cell_text = mem_dup_n(cell_start, cell_len, MEM_CAT_INPUT_MARKUP);
         if (!cell_text) break;
-
-        memcpy(cell_text, cell_start, cell_len);
-        cell_text[cell_len] = '\0';
 
         // Create table cell with specified type
         Element* cell = create_element(parser, cell_tag);
@@ -461,7 +458,7 @@ static Item parse_rst_simple_table(MarkupParser* parser, const char* line) {
  */
 static bool is_asciidoc_table_delimiter(const char* line) {
     const char* p = line;
-    while (*p == ' ' || *p == '\t') p++;
+    p = str_skip_line_space(p);
     return strncmp(p, "|===", 4) == 0;
 }
 

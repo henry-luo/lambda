@@ -138,11 +138,7 @@ static bool jube_index_from_key(Item key, int64_t* out) {
 static char* jube_strndup(const char* src, size_t len) {
     // Interface metadata outlives individual JS heaps and is released after
     // memtrack may change mode, so it cannot use a phase-bound tracked block.
-    char* copy = (char*)malloc(len + 1);
-    if (!copy) return NULL;
-    memcpy(copy, src, len);
-    copy[len] = '\0';
-    return copy;
+    return str_dup(src, len);
 }
 
 // snake_case -> camelCase; returns owned copy (identity copy when no '_')
@@ -1092,10 +1088,10 @@ static void jube_member_record_init(JubeMemberRecord* record,
 // the token TEXT: `fn(a: T, b: U) R^E`.
 static bool jube_text_is_fn_type(const char* text) {
     if (!text) return false;
-    while (*text == ' ' || *text == '\t') text++;
+    text = str_skip_line_space(text);
     if (text[0] != 'f' || text[1] != 'n') return false;
     const char* p = text + 2;
-    while (*p == ' ' || *p == '\t') p++;
+    p = str_skip_line_space(p);
     return *p == '(' || *p == '\0';
 }
 
@@ -1126,12 +1122,12 @@ static void jube_parse_fn_type_text(char* text, int* arity, bool* can_raise,
         *can_raise = true;
         *raise_marker = '\0';
     }
-    while (*rest == ' ' || *rest == '\t') rest++;
-    if (result_type_name && *rest) {
+    const char* result_start = str_skip_line_space(rest);
+    if (result_type_name && *result_start) {
         // trim trailing spaces
-        char* end = rest + strlen(rest);
-        while (end > rest && (end[-1] == ' ' || end[-1] == '\t')) end--;
-        *result_type_name = jube_strndup(rest, (size_t)(end - rest));
+        const char* end = result_start + strlen(result_start);
+        while (end > result_start && (end[-1] == ' ' || end[-1] == '\t')) end--;
+        *result_type_name = jube_strndup(result_start, (size_t)(end - result_start));
     }
     free(text);
 }

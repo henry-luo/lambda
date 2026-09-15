@@ -130,8 +130,7 @@ static PdfCsReadResult pdf_cs_read_number(MarkBuilder& builder, const char* p, c
     size_t len = (size_t)(q - p);
     char buf[128];
     if (len >= sizeof(buf)) len = sizeof(buf) - 1;
-    memcpy(buf, p, len);
-    buf[len] = '\0';
+    str_copy(buf, sizeof(buf), p, len);
     if (has_dot) return {builder.createFloat(strtod(buf, nullptr)), q, true};
     return {builder.createInt(strtoll(buf, nullptr, 10)), q, true};
 }

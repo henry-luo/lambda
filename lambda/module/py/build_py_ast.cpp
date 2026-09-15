@@ -119,11 +119,8 @@ static PyAstNode* build_py_integer(PyTranspiler* tp, TSNode int_node) {
     literal->bigint_literal_str = NULL;
 
     StrView source = py_node_source(tp, int_node);
-    char* temp_str = (char*)mem_alloc(source.length + 1, MEM_CAT_PY_RUNTIME);
+    char* temp_str = mem_dup_n(source.str, source.length, MEM_CAT_PY_RUNTIME);
     if (temp_str) {
-        memcpy(temp_str, source.str, source.length);
-        temp_str[source.length] = '\0';
-
         // handle hex, octal, binary prefixes — strtoll handles these correctly but
         // does not detect overflow for non-decimal bases; for bigint literals those
         // prefixes are unusual, so we only guard the base-10 path via errno.
@@ -163,10 +160,8 @@ static PyAstNode* build_py_float(PyTranspiler* tp, TSNode float_node) {
     literal->literal_type = PY_LITERAL_FLOAT;
 
     StrView source = py_node_source(tp, float_node);
-    char* temp_str = (char*)mem_alloc(source.length + 1, MEM_CAT_PY_RUNTIME);
+    char* temp_str = mem_dup_n(source.str, source.length, MEM_CAT_PY_RUNTIME);
     if (temp_str) {
-        memcpy(temp_str, source.str, source.length);
-        temp_str[source.length] = '\0';
         literal->value.float_value = strtod(temp_str, NULL);
         mem_free(temp_str);
     }
@@ -202,13 +197,7 @@ static PyAstNode* build_py_identifier(PyTranspiler* tp, TSNode id_node) {
     StrView source = py_node_source(tp, id_node);
     if (source.length == 0) return NULL;
 
-    char* temp_str = (char*)mem_alloc(source.length + 1, MEM_CAT_PY_RUNTIME);
-    if (!temp_str) return NULL;
-    memcpy(temp_str, source.str, source.length);
-    temp_str[source.length] = '\0';
-
-    id->name = name_pool_create_len(tp->name_pool, temp_str, source.length);
-    mem_free(temp_str);
+    id->name = name_pool_create_len(tp->name_pool, source.str, source.length);
     if (!id->name) return NULL;
 
     // scope lookup
@@ -1971,9 +1960,7 @@ static PyAstNode* build_py_pattern(PyTranspiler* tp, TSNode node) {
         if (nc >= 2) {
             TSNode alias_node = ts_node_named_child(node, nc - 1);
             StrView sv = py_node_source(tp, alias_node);
-            char* tmp = (char*)mem_alloc(sv.length + 1, MEM_CAT_PY_RUNTIME);
-            if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
-                p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); mem_free(tmp); }
+            p->name = name_pool_create_len(tp->name_pool, sv.str, sv.length);
         }
         return (PyAstNode*)p;
     }
@@ -1986,9 +1973,7 @@ static PyAstNode* build_py_pattern(PyTranspiler* tp, TSNode node) {
         if (nc >= 1) {
             TSNode attr = ts_node_named_child(node, 0);
             StrView sv = py_node_source(tp, attr);
-            char* tmp = (char*)mem_alloc(sv.length + 1, MEM_CAT_PY_RUNTIME);
-            if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
-                p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); mem_free(tmp); }
+            p->name = name_pool_create_len(tp->name_pool, sv.str, sv.length);
         }
         if (nc >= 2) {
             p->literal = build_py_pattern(tp, ts_node_named_child(node, 1));
@@ -2044,9 +2029,7 @@ static PyAstNode* build_py_pattern(PyTranspiler* tp, TSNode node) {
             // identifier node (could be "_" text)
             StrView sv = py_node_source(tp, child);
             if (!(sv.length == 1 && sv.str[0] == '_')) {
-                char* tmp = (char*)mem_alloc(sv.length + 1, MEM_CAT_PY_RUNTIME);
-                if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
-                    p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); mem_free(tmp); }
+                p->name = name_pool_create_len(tp->name_pool, sv.str, sv.length);
             }
         } else {
             // anonymous '_' child (not a named identifier)
@@ -2073,9 +2056,7 @@ static PyAstNode* build_py_pattern(PyTranspiler* tp, TSNode node) {
                     TSNode id = ts_node_named_child(child, 0);
                     StrView sv = py_node_source(tp, id);
                     if (!(sv.length == 1 && sv.str[0] == '_')) {
-                        char* tmp = (char*)mem_alloc(sv.length + 1, MEM_CAT_PY_RUNTIME);
-                        if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
-                            p->rest_name = name_pool_create_len(tp->name_pool, tmp, sv.length); mem_free(tmp); }
+                        p->rest_name = name_pool_create_len(tp->name_pool, sv.str, sv.length);
                     }
                 }
                 continue;
@@ -2109,9 +2090,7 @@ static PyAstNode* build_py_pattern(PyTranspiler* tp, TSNode node) {
         if (nc >= 1) {
             TSNode cls_name_node = ts_node_named_child(node, 0);
             StrView sv = py_node_source(tp, cls_name_node);
-            char* tmp = (char*)mem_alloc(sv.length + 1, MEM_CAT_PY_RUNTIME);
-            if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
-                p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); mem_free(tmp); }
+            p->name = name_pool_create_len(tp->name_pool, sv.str, sv.length);
         }
         PyAstNode* prev_pos = NULL;
         PyAstNode* prev_kw = NULL;
@@ -2160,17 +2139,13 @@ static PyAstNode* build_py_pattern(PyTranspiler* tp, TSNode node) {
                 return (PyAstNode*)alloc_pattern_node(tp, PY_PAT_WILDCARD, node);
             }
             PyPatternNode* p = alloc_pattern_node(tp, PY_PAT_CAPTURE, node);
-            char* tmp = (char*)mem_alloc(sv.length + 1, MEM_CAT_PY_RUNTIME);
-            if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
-                p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); mem_free(tmp); }
+            p->name = name_pool_create_len(tp->name_pool, sv.str, sv.length);
             return (PyAstNode*)p;
         } else {
             // dotted name like Status.OK → VALUE pattern
             PyPatternNode* p = alloc_pattern_node(tp, PY_PAT_VALUE, node);
             StrView sv = py_node_source(tp, node); // full dotted text "Status.OK"
-            char* tmp = (char*)mem_alloc(sv.length + 1, MEM_CAT_PY_RUNTIME);
-            if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
-                p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); mem_free(tmp); }
+            p->name = name_pool_create_len(tp->name_pool, sv.str, sv.length);
             return (PyAstNode*)p;
         }
     }
@@ -2182,9 +2157,7 @@ static PyAstNode* build_py_pattern(PyTranspiler* tp, TSNode node) {
             return (PyAstNode*)alloc_pattern_node(tp, PY_PAT_WILDCARD, node);
         }
         PyPatternNode* p = alloc_pattern_node(tp, PY_PAT_CAPTURE, node);
-        char* tmp = (char*)mem_alloc(sv.length + 1, MEM_CAT_PY_RUNTIME);
-        if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
-            p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); mem_free(tmp); }
+        p->name = name_pool_create_len(tp->name_pool, sv.str, sv.length);
         return (PyAstNode*)p;
     }
 

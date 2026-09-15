@@ -30,6 +30,7 @@
 #include "../../lib/memtrack.h"
 #include "../../lib/mem_grow.hpp"
 #include "../../lib/re2_glue.hpp"
+#include "../../lib/str.h"
 #include "../../lib/utf.h"
 #include <stdarg.h>
 #include "../dom/dom.h"
@@ -199,8 +200,7 @@ extern "C" const char* js_item_to_cstr(Item value, char* buf, int buf_size) {
     String* s = it2s(value);
     int len = (int)s->len;
     if (len >= buf_size) len = buf_size - 1;
-    memcpy(buf, s->chars, len);
-    buf[len] = '\0';
+    str_copy(buf, buf_size, s->chars, len);
     return buf;
 }
 
@@ -17722,15 +17722,12 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
                 char alias_buf[32];
                 int alias_len = snprintf(alias_buf, sizeof(alias_buf), "JsCap%d",
                     named_aliases.count() + 1);
-                char* re2_copy = (char*)pool_calloc(js_input->pool, alias_len + 1);
-                char* js_copy = (char*)pool_calloc(js_input->pool, name_len + 1);
+                char* re2_copy = pool_dup_n(js_input->pool, alias_buf, alias_len);
+                char* js_copy = pool_dup_n(js_input->pool,
+                    processed_pattern.c_str() + after, name_len);
                 if (!re2_copy || !js_copy) {
                     return js_throw_range_error("Cannot retain RegExp capture-name alias");
                 }
-                memcpy(re2_copy, alias_buf, alias_len);
-                re2_copy[alias_len] = '\0';
-                memcpy(js_copy, processed_pattern.c_str() + after, name_len);
-                js_copy[name_len] = '\0';
                 if (!named_aliases.append(re2_copy, alias_len, js_copy, name_len)) {
                     return js_throw_range_error("Cannot retain RegExp capture-name alias");
                 }
@@ -17821,8 +17818,8 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     char canonical_flags[sizeof(compile_info.canonical_flags)];
     // v89: store flags in canonical order dgimsuy (ES spec §22.2.5.4)
     {
-        memcpy(canonical_flags, compile_info.canonical_flags, compile_info.canonical_flags_len);
-        canonical_flags[compile_info.canonical_flags_len] = '\0';
+        str_copy(canonical_flags, sizeof(canonical_flags), compile_info.canonical_flags,
+            compile_info.canonical_flags_len);
         flags_len = compile_info.canonical_flags_len;
     }
     bool dot_all = opts.dot_nl();
@@ -25626,9 +25623,7 @@ extern "C" Item js_intl_segmenter_segment(Item text_item) {
         }
         Item entry = js_new_object();
         js_set_key_default(entry, idx_key, (Item){.item = i2it((int64_t)i)});
-        char* seg = (char*)pool_calloc(js_input->pool, j - i + 1);
-        memcpy(seg, s->chars + i, j - i);
-        seg[j - i] = '\0';
+        char* seg = pool_dup_n(js_input->pool, s->chars + i, j - i);
         js_set_key_default(entry, seg_key, js_name_item(seg, (size_t)(j - i)));
         js_set_key_default(entry, wordy_key, (Item){.item = b2it(is_word ? 1 : 0)});
         js_array_push(arr_item, entry);
@@ -33066,8 +33061,7 @@ static Item js_cluster_fork(Item fork_env) {
     if (had_ipc_ref) {
         int old_len = (int)strlen(old_ipc_ref);
         if (old_len >= (int)sizeof(old_ipc_ref_buf)) old_len = (int)sizeof(old_ipc_ref_buf) - 1;
-        memcpy(old_ipc_ref_buf, old_ipc_ref, (size_t)old_len);
-        old_ipc_ref_buf[old_len] = '\0';
+        str_copy(old_ipc_ref_buf, sizeof(old_ipc_ref_buf), old_ipc_ref, old_len);
     }
     // cluster workers use IPC as an internal readiness channel even without public message listeners.
     setenv("LAMBDA_JS_IPC_REF", "1", 1);
@@ -33195,8 +33189,7 @@ static void js_repl_eval_line(Item repl, const char* line, int len) {
         int path_len = len - 6;
         char path_buf[1024];
         if (path_len >= (int)sizeof(path_buf)) path_len = (int)sizeof(path_buf) - 1;
-        memcpy(path_buf, path, (size_t)path_len);
-        path_buf[path_len] = '\0';
+        str_copy(path_buf, sizeof(path_buf), path, path_len);
         FILE* fp = fopen(path_buf, "rb");
         if (fp) {
             fseek(fp, 0, SEEK_END);
@@ -34613,8 +34606,7 @@ static bool js_cc_get_string(Item value, char* out, int out_size) {
     String* s = it2s(value);
     int len = (int)s->len;
     if (len >= out_size) len = out_size - 1;
-    memcpy(out, s->chars, (size_t)len);
-    out[len] = '\0';
+    str_copy(out, out_size, s->chars, len);
     return true;
 }
 
@@ -35222,8 +35214,7 @@ extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
         if (get_type_id(enc_val) == LMD_TYPE_STRING) {
             String* s = it2s(enc_val);
             if (s && s->len > 0 && s->len < 32) {
-                memcpy(enc_buf, s->chars, s->len);
-                enc_buf[s->len] = '\0';
+                str_copy(enc_buf, sizeof(enc_buf), s->chars, s->len);
                 encoding = enc_buf;
             }
         }

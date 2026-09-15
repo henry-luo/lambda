@@ -5,6 +5,7 @@
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
+#include "../lib/str.h"
 #include <stdlib.h>
 #include <time.h>
 #include <cmath>  // for INFINITY
@@ -1782,9 +1783,9 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
             if (text_data && rect->length > 0) {
                 int copy_len = min((int)(sizeof(combined_content) - combined_len - 1), rect->length);
                 if (copy_len > 0) {
-                    strncpy(combined_content + combined_len, (char*)(text_data + rect->start_index), copy_len);
+                    str_copy(combined_content + combined_len, sizeof(combined_content) - combined_len,
+                             (char*)(text_data + rect->start_index), copy_len);
                     combined_len += copy_len;
-                    combined_content[combined_len] = '\0';
                 }
             }
 

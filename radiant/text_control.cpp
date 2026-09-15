@@ -165,21 +165,16 @@ static char* tc_initial_value(DomElement* elem, uint32_t* out_len) {
             attr_value = elem->get_attribute("value");
             if (attr_value) len = strlen(attr_value);
         }
-        char* out = (char*)mem_alloc(len + 1, MEM_CAT_DOM);
-        if (attr_value) memcpy(out, attr_value, len);
-        else if (sb->str) memcpy(out, sb->str, len);
-        out[len] = '\0';
+        const char* value = attr_value ? attr_value : (sb->str ? sb->str : "");
+        char* out = mem_dup_n(value, len, MEM_CAT_DOM);
         strbuf_free(sb);
         *out_len = (uint32_t)len;
         return out;
     }
     const char* v = elem->get_attribute("value");
     if (!v) v = "";
-    size_t len = strlen(v);
-    char* out = (char*)mem_alloc(len + 1, MEM_CAT_DOM);
-    memcpy(out, v, len);
-    out[len] = '\0';
-    *out_len = (uint32_t)len;
+    char* out = mem_strdup(v, MEM_CAT_DOM);
+    *out_len = (uint32_t)strlen(v);
     return out;
 }
 

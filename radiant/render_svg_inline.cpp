@@ -389,15 +389,14 @@ static void svg_copy_trim(char* dst, size_t dst_size, const char* start, const c
     while (end > start && isspace((unsigned char)end[-1])) end--;
     size_t len = (size_t)(end - start);
     if (len >= dst_size) len = dst_size - 1;
-    memcpy(dst, start, len);
-    dst[len] = '\0';
+    str_copy(dst, dst_size, start, len);
 }
 
 static bool svg_class_list_contains(const char* class_attr, const char* cls, size_t cls_len) {
     if (!class_attr || !cls || cls_len == 0) return false;
     const char* p = class_attr;
     while (*p) {
-        while (*p && isspace((unsigned char)*p)) p++;
+        p = str_skip_ascii_space(p);
         const char* start = p;
         while (*p && !isspace((unsigned char)*p)) p++;
         if ((size_t)(p - start) == cls_len && strncmp(start, cls, cls_len) == 0) return true;
@@ -546,7 +545,7 @@ static void parse_svg_style_text(SvgInlineRenderContext* ctx, const char* css) {
     if (!ctx || !css) return;
     const char* p = css;
     while (*p) {
-        while (*p && isspace((unsigned char)*p)) p++;
+        p = str_skip_ascii_space(p);
         const char* selector_start = p;
         while (*p && *p != '{') p++;
         if (*p != '{') break;
@@ -624,12 +623,12 @@ static SvgViewBox parse_svg_viewbox(const char* viewbox_attr) {
 static float parse_svg_length(const char* value, float default_value) {
     if (!value || !*value) return default_value;
 
-    char* end;
-    float num = strtof(value, &end);
-    if (end == value) return default_value;
+    char* parsed_end;
+    float num = strtof(value, &parsed_end);
+    if (parsed_end == value) return default_value;
 
     // skip whitespace after number
-    while (*end && str_char_is_ascii_space(*end)) end++;
+    const char* end = str_skip_ascii_space(parsed_end);
 
     // check for unit suffix
     if (*end == '\0') {
@@ -734,7 +733,7 @@ static Color parse_svg_color(const char* value) {
     if (!value || !*value) return c;
 
     // skip whitespace
-    while (*value && str_char_is_ascii_space(*value)) value++;
+    value = str_skip_ascii_space(value);
 
     // check for "none"
     if (strcmp(value, "none") == 0) {
@@ -880,7 +879,7 @@ bool svg_parse_transform(const char* transform_str, float matrix[6]) {
 
     while (*p) {
         // skip whitespace
-        while (*p && str_char_is_ascii_space(*p)) p++;
+        p = str_skip_ascii_space(p);
         if (!*p) break;
 
         float local[6] = {1, 0, 0, 1, 0, 0};
@@ -1085,10 +1084,10 @@ struct SvgDefTable {
 
 static float parse_svg_pct_or_num(const char* s, float fallback) {
     if (!s || !*s) return fallback;
-    char* end;
-    float v = strtof(s, &end);
-    if (end == s) return fallback;
-    while (*end && isspace((unsigned char)*end)) end++;
+    char* parsed_end;
+    float v = strtof(s, &parsed_end);
+    if (parsed_end == s) return fallback;
+    const char* end = str_skip_ascii_space(parsed_end);
     if (*end == '%') v /= 100.0f;
     return v;
 }
@@ -1282,8 +1281,7 @@ static bool parse_svg_url_id(const char* value, char* out_id, size_t out_id_size
     if (!id_end || id_end == id_start) return false;
     size_t id_len = (size_t)(id_end - id_start);
     if (id_len >= out_id_size) return false;
-    memcpy(out_id, id_start, id_len);
-    out_id[id_len] = '\0';
+    str_copy(out_id, out_id_size, id_start, id_len);
     return true;
 }
 
@@ -2583,7 +2581,7 @@ static char* resolve_font_via_database(FontContext* font_ctx, const char* family
     if (!font_ctx || !font_ctx->database || !family) return nullptr;
 
     FontDatabaseCriteria criteria = {};
-    strncpy(criteria.family_name, family, sizeof(criteria.family_name) - 1);
+    str_copy(criteria.family_name, sizeof(criteria.family_name), family, strlen(family));
     criteria.weight = weight;
     criteria.style = slant;
 
@@ -2595,10 +2593,7 @@ static char* resolve_font_via_database(FontContext* font_ctx, const char* family
         }
         if (out_font_name) *out_font_name = result.font->family_name;
         // return a mem_alloc'd copy so caller can mem_free() uniformly
-        size_t len = strlen(result.font->file_path);
-        char* path = (char*)mem_alloc(len + 1, MEM_CAT_RENDER);
-        if (path) memcpy(path, result.font->file_path, len + 1);
-        return path;
+        return mem_strdup(result.font->file_path, MEM_CAT_RENDER);
     }
     return nullptr;
 }
@@ -2770,8 +2765,7 @@ static void svg_font_name_from_path(char* out, size_t out_cap, const char* path)
     const char* ext = file_path_ext(path);
     size_t name_len = ext ? (size_t)(ext - base) : strlen(base);
     if (name_len >= out_cap) name_len = out_cap - 1;
-    memcpy(out, base, name_len);
-    out[name_len] = '\0';
+    str_copy(out, out_cap, base, name_len);
 }
 
 static char* resolve_svg_font_path(const char* font_family, const char** out_font_name,
@@ -2852,8 +2846,7 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
                 if (out_font_name) {
                     static char db_font_name[256];
                     if (dbname) {
-                        strncpy(db_font_name, dbname, sizeof(db_font_name) - 1);
-                        db_font_name[sizeof(db_font_name) - 1] = '\0';
+                        str_copy(db_font_name, sizeof(db_font_name), dbname, strlen(dbname));
                     } else {
                         svg_font_name_from_path(db_font_name, sizeof(db_font_name), p);
                     }
@@ -2898,13 +2891,12 @@ static const char* resolve_svg_radiant_font_family(const char* font_family,
     if (!font_family || !font_ctx) return fallback_family ? fallback_family : font_family;
 
     char family_list[512];
-    strncpy(family_list, font_family, sizeof(family_list) - 1);
-    family_list[sizeof(family_list) - 1] = '\0';
+    str_copy(family_list, sizeof(family_list), font_family, strlen(font_family));
 
     FontWeight fw = (weight >= 100 && weight <= 900) ? (FontWeight)weight : FONT_WEIGHT_NORMAL;
     char* cursor = family_list;
     while (cursor && *cursor) {
-        while (*cursor == ' ' || *cursor == '\t') cursor++;
+        cursor = (char*)str_skip_line_space(cursor);
         char quote = 0;
         if (*cursor == '"' || *cursor == '\'') { quote = *cursor; cursor++; }
 
@@ -2974,12 +2966,7 @@ static char* trim_whitespace(const char* str, size_t len) {
     if (end <= start) return nullptr;  // all whitespace
 
     size_t trimmed_len = end - start;
-    char* result = (char*)mem_alloc(trimmed_len + 1, MEM_CAT_RENDER);
-    if (!result) return nullptr;
-
-    memcpy(result, str + start, trimmed_len);
-    result[trimmed_len] = '\0';
-    return result;
+    return mem_dup_n(str + start, trimmed_len, MEM_CAT_RENDER);
 }
 
 /**
@@ -3654,7 +3641,7 @@ static bool svg_image_href_is_svg(const char* href) {
 
 static bool svg_preserve_aspect_none(const char* value) {
     if (!value) return false;
-    while (*value && isspace((unsigned char)*value)) value++;
+    value = str_skip_ascii_space(value);
     return strncmp(value, "none", 4) == 0 &&
            (value[4] == '\0' || isspace((unsigned char)value[4]));
 }
@@ -3706,11 +3693,7 @@ static char* svg_href_file_part(const char* href, const char** fragment_out) {
     const char* end = fragment ? fragment : href + strlen(href);
     if (fragment_out && fragment && fragment[1]) *fragment_out = fragment + 1;
     if (end == href) return mem_strdup("", MEM_CAT_RENDER);
-    char* out = (char*)mem_alloc((size_t)(end - href) + 1, MEM_CAT_RENDER);
-    if (!out) return nullptr;
-    memcpy(out, href, (size_t)(end - href));
-    out[end - href] = '\0';
-    return out;
+    return mem_dup_n(href, (size_t)(end - href), MEM_CAT_RENDER);
 }
 
 static char* svg_resolve_resource_path(SvgInlineRenderContext* ctx, const char* href_no_fragment) {
@@ -4268,8 +4251,7 @@ static RdtPath* resolve_svg_clip_path(SvgInlineRenderContext* ctx, Element* elem
     char id_buf[128];
     int id_len = (int)(id_end - id_start);
     if (id_len >= (int)sizeof(id_buf)) return nullptr;
-    memcpy(id_buf, id_start, id_len);
-    id_buf[id_len] = '\0';
+    str_copy(id_buf, sizeof(id_buf), id_start, id_len);
 
     if (!ctx->defs) return nullptr;
     Element* clip_elem = lookup_elem_def((SvgDefTable*)ctx->defs, id_buf);

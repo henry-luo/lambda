@@ -10,6 +10,7 @@
 #include "bash_errors.h"
 #include "../../lambda-data.hpp"
 #include "../../../lib/log.h"
+#include "../../../lib/str.h"
 
 #include <cstring>
 #include "../../../lib/mem.h"
@@ -90,8 +91,7 @@ static long long arith_get_var(const char* name, int name_len) {
     // look up variable value and coerce to integer
     char buf[256];
     int n = name_len < (int)sizeof(buf) - 1 ? name_len : (int)sizeof(buf) - 1;
-    memcpy(buf, name, n);
-    buf[n] = '\0';
+    str_copy(buf, sizeof(buf), name, n);
 
     Item name_item = (Item){.item = s2it(heap_create_name(buf))};
     Item val = bash_get_var(name_item);
@@ -101,8 +101,7 @@ static long long arith_get_var(const char* name, int name_len) {
 static void arith_set_var(const char* name, int name_len, long long value) {
     char buf[256];
     int n = name_len < (int)sizeof(buf) - 1 ? name_len : (int)sizeof(buf) - 1;
-    memcpy(buf, name, n);
-    buf[n] = '\0';
+    str_copy(buf, sizeof(buf), name, n);
 
     Item name_item = (Item){.item = s2it(heap_create_name(buf))};
     Item val_item = (Item){.item = i2it(value)};
@@ -190,8 +189,7 @@ static long long arith_primary(ArithParser* p) {
             char buf[128];
             int n = p->pos - val_start;
             if (n > (int)sizeof(buf) - 1) n = (int)sizeof(buf) - 1;
-            memcpy(buf, p->src + val_start, n);
-            buf[n] = '\0';
+            str_copy(buf, sizeof(buf), p->src + val_start, n);
             val = strtoll(buf, NULL, base <= 36 ? base : 36);
             return val;
         }

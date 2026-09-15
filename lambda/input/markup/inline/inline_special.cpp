@@ -162,11 +162,8 @@ Item parse_strikethrough(MarkupParser* parser, const char** text) {
     }
 
     // Parse inner content (may contain bold, italic, etc.)
-    char* content = (char*)mem_alloc(content_len + 1, MEM_CAT_INPUT_MARKUP);
+    char* content = mem_strndup(content_start, content_len, MEM_CAT_INPUT_MARKUP);
     if (content) {
-        memcpy(content, content_start, content_len);
-        content[content_len] = '\0';
-
         Item inner = parse_inline_spans(parser, content);
         if (inner.item != ITEM_ERROR && inner.item != ITEM_UNDEFINED) {
             list_push((List*)del_elem, inner);
@@ -215,11 +212,8 @@ Item parse_superscript(MarkupParser* parser, const char** text) {
     }
 
     // Create content string
-    char* content = (char*)mem_alloc(content_len + 1, MEM_CAT_INPUT_MARKUP);
+    char* content = mem_strndup(content_start, content_len, MEM_CAT_INPUT_MARKUP);
     if (content) {
-        strncpy(content, content_start, content_len);
-        content[content_len] = '\0';
-
         String* content_str = create_string(parser, content);
         if (content_str) {
             Item text_item = {.item = s2it(content_str)};
@@ -267,11 +261,8 @@ Item parse_subscript(MarkupParser* parser, const char** text) {
         return Item{.item = ITEM_ERROR};
     }
 
-    char* content = (char*)mem_alloc(content_len + 1, MEM_CAT_INPUT_MARKUP);
+    char* content = mem_strndup(content_start, content_len, MEM_CAT_INPUT_MARKUP);
     if (content) {
-        strncpy(content, content_start, content_len);
-        content[content_len] = '\0';
-
         String* content_str = create_string(parser, content);
         if (content_str) {
             Item text_item = {.item = s2it(content_str)};
@@ -313,12 +304,10 @@ Item parse_emoji_shortcode(MarkupParser* parser, const char** text) {
 
     // Extract shortcode name
     size_t name_len = pos - name_start;
-    char* shortcode_name = (char*)mem_alloc(name_len + 1, MEM_CAT_INPUT_MARKUP);
+    char* shortcode_name = mem_strndup(name_start, name_len, MEM_CAT_INPUT_MARKUP);
     if (!shortcode_name) {
         return Item{.item = ITEM_ERROR};
     }
-    strncpy(shortcode_name, name_start, name_len);
-    shortcode_name[name_len] = '\0';
 
     // Build full shortcode with colons for lookup
     char* full_shortcode = (char*)mem_alloc(name_len + 3, MEM_CAT_INPUT_MARKUP);
@@ -327,7 +316,7 @@ Item parse_emoji_shortcode(MarkupParser* parser, const char** text) {
         return Item{.item = ITEM_ERROR};
     }
     full_shortcode[0] = ':';
-    strncpy(full_shortcode + 1, shortcode_name, name_len);
+    str_copy(full_shortcode + 1, name_len + 2, shortcode_name, name_len);
     full_shortcode[name_len + 1] = ':';
     full_shortcode[name_len + 2] = '\0';
 
@@ -392,10 +381,8 @@ Item parse_footnote_reference(MarkupParser* parser, const char** text) {
 
     // Extract and add ID
     size_t id_len = pos - id_start;
-    char* id = (char*)mem_alloc(id_len + 1, MEM_CAT_INPUT_MARKUP);
+    char* id = mem_strndup(id_start, id_len, MEM_CAT_INPUT_MARKUP);
     if (id) {
-        strncpy(id, id_start, id_len);
-        id[id_len] = '\0';
         add_attribute_to_element(parser, ref, "ref", id);
         mem_free(id);
     }
@@ -436,10 +423,8 @@ Item parse_citation(MarkupParser* parser, const char** text) {
 
     // Extract citation key
     size_t key_len = pos - key_start;
-    char* key = (char*)mem_alloc(key_len + 1, MEM_CAT_INPUT_MARKUP);
+    char* key = mem_strndup(key_start, key_len, MEM_CAT_INPUT_MARKUP);
     if (key) {
-        strncpy(key, key_start, key_len);
-        key[key_len] = '\0';
         add_attribute_to_element(parser, citation, "key", key);
         mem_free(key);
     }
@@ -454,10 +439,8 @@ Item parse_citation(MarkupParser* parser, const char** text) {
 
         if (pos > info_start) {
             size_t info_len = pos - info_start;
-            char* info = (char*)mem_alloc(info_len + 1, MEM_CAT_INPUT_MARKUP);
+            char* info = mem_strndup(info_start, info_len, MEM_CAT_INPUT_MARKUP);
             if (info) {
-                strncpy(info, info_start, info_len);
-                info[info_len] = '\0';
                 add_attribute_to_element(parser, citation, "info", info);
                 mem_free(info);
             }
@@ -584,8 +567,7 @@ Item parse_entity_reference(MarkupParser* parser, const char** text) {
             const char* replacement = html_entity_lookup(name_start, name_len);
 
             if (replacement) {
-                strncpy(decoded, replacement, sizeof(decoded) - 1);
-                decoded[sizeof(decoded) - 1] = '\0';
+                str_copy(decoded, sizeof(decoded), replacement, strlen(replacement));
                 valid = true;
                 pos++; // Skip ;
             }

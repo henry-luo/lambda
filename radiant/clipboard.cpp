@@ -390,8 +390,7 @@ static char* strip_html_block(const char* src, const char* open, const char* clo
         }
         strbuf_append_char(sb, *p++);
     }
-    char* out = (char*)arena_alloc(arena, sb->length + 1);
-    if (out) { memcpy(out, sb->str, sb->length); out[sb->length] = '\0'; }
+    char* out = arena_dup_n(arena, sb->str, sb->length);
     strbuf_free(sb);
     return out;
 }
@@ -400,9 +399,7 @@ char* clipboard_store_sanitize(struct Arena* arena, const char* mime, const char
     if (!raw) return NULL;
     if (!mime || strcmp(mime, "text/html") != 0) {
         size_t n = strlen(raw);
-        char* out = (char*)arena_alloc(arena, n + 1);
-        if (out) { memcpy(out, raw, n); out[n] = '\0'; }
-        return out;
+        return arena_dup_n(arena, raw, n);
     }
     char* step1 = strip_html_block(raw, "<script", "</script>", arena);
     char* step2 = strip_html_block(step1 ? step1 : raw, "<style", "</style>", arena);

@@ -55,7 +55,7 @@ public:
                 info.valid = true;
 
                 // Skip whitespace after #
-                while (*p == ' ' || *p == '\t') p++;
+                p = str_skip_line_space(p);
                 info.text_start = p;
 
                 // Find end of line
@@ -142,7 +142,7 @@ public:
                 while (*ul == underline_char) ul++;
 
                 // Skip trailing whitespace
-                while (*ul == ' ' || *ul == '\t') ul++;
+                ul = str_skip_line_space(ul);
 
                 // Must end at end of line and have at least one character
                 if ((*ul == '\0' || *ul == '\r' || *ul == '\n') && ul > ul_start) {
@@ -194,7 +194,7 @@ public:
 
             // Skip whitespace after marker
             p++;
-            while (*p == ' ' || *p == '\t') p++;
+            p = str_skip_line_space(p);
             info.text_start = p;
 
             // Check for task list: [ ] or [x] or [X]
@@ -202,7 +202,7 @@ public:
                 info.is_task = true;
                 info.task_checked = (*(p+1) != ' ');
                 p += 3;
-                while (*p == ' ' || *p == '\t') p++;
+                p = str_skip_line_space(p);
                 info.text_start = p;
             }
 
@@ -227,7 +227,7 @@ public:
 
                 // Skip whitespace after marker
                 p++;
-                while (*p == ' ' || *p == '\t') p++;
+                p = str_skip_line_space(p);
                 info.text_start = p;
 
                 // Check for task list: [ ] or [x] or [X]
@@ -235,7 +235,7 @@ public:
                     info.is_task = true;
                     info.task_checked = (*(p+1) != ' ');
                     p += 3;
-                    while (*p == ' ' || *p == '\t') p++;
+                    p = str_skip_line_space(p);
                     info.text_start = p;
                 }
 
@@ -268,7 +268,7 @@ public:
                 info.fence_length = fence_len;
 
                 // Skip whitespace before info string
-                while (*p == ' ' || *p == '\t') p++;
+                p = str_skip_line_space(p);
 
                 // Info string (language identifier)
                 info.info_string = p;
@@ -317,7 +317,7 @@ public:
         if (fence_len < open_info.fence_length) return false;
 
         // Rest of line must be blank (only whitespace)
-        while (*p == ' ' || *p == '\t') p++;
+        p = str_skip_line_space(p);
         return (*p == '\0' || *p == '\r' || *p == '\n');
     }
 
@@ -356,18 +356,18 @@ public:
 
         // Check if next line is a separator row: | --- | --- |
         const char* p = next_line;
-        while (*p == ' ' || *p == '\t') p++;
+        p = str_skip_line_space(p);
 
         bool has_separator = false;
         while (*p && *p != '\r' && *p != '\n') {
             if (*p == '|') {
                 p++;
-                while (*p == ' ' || *p == '\t') p++;
+                p = str_skip_line_space(p);
                 if (*p == ':') p++;
                 if (*p == '-') {
                     while (*p == '-') p++;
                     if (*p == ':') p++;
-                    while (*p == ' ' || *p == '\t') p++;
+                    p = str_skip_line_space(p);
                     has_separator = true;
                 }
             } else if (*p == '-' || *p == ':') {

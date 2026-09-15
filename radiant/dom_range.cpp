@@ -2804,11 +2804,7 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
         }
     }
     size_t out_len = len - off;
-    char* out = (char*)mem_alloc(out_len + 1, MEM_CAT_DOM);
-    if (out) {
-        if (out_len > 0 && sb->str) memcpy(out, sb->str + off, out_len);
-        out[out_len] = '\0';
-    }
+    char* out = mem_dup_n(sb->str ? sb->str + off : "", out_len, MEM_CAT_DOM);
     strbuf_free(sb);
     return out;
 }

@@ -525,11 +525,9 @@ CssDeclaration* css_declaration_clone_owned(
     clone->source_file = css_owned_strdup(target_pool, source->source_file);
     clone->property_name = css_owned_strdup(target_pool, source->property_name);
     if (source->value_text) {
-        char* value_text = (char*)pool_alloc(target_pool, source->value_text_len + 1u);
-        if (!value_text) goto declaration_clone_failed;
-        memcpy(value_text, source->value_text, source->value_text_len);
-        value_text[source->value_text_len] = '\0';
-        clone->value_text = value_text;
+        clone->value_text = pool_dup_n(target_pool, source->value_text,
+                                       source->value_text_len);
+        if (!clone->value_text) goto declaration_clone_failed;
     }
     if ((source->source_file && !clone->source_file) ||
         (source->property_name && !clone->property_name)) goto declaration_clone_failed;

@@ -211,11 +211,7 @@ static void xhr_free_state(XhrState* xhr) {
 }
 
 static char* xhr_mem_strdup(const char* s) {
-    if (!s) return nullptr;
-    size_t len = strlen(s);
-    char* dup = (char*)mem_calloc(1, len + 1, MEM_CAT_JS_RUNTIME);
-    memcpy(dup, s, len);
-    return dup;
+    return s ? mem_strdup(s, MEM_CAT_JS_RUNTIME) : nullptr;
 }
 
 static void xhr_free_request_header_lines(char** lines, int count) {

@@ -868,13 +868,18 @@ void* pool_realloc(Pool* pool, void* ptr, size_t size) {
     return replacement;
 }
 
-char* pool_strdup(Pool* pool, const char* str) {
-    if (!pool || !str) return NULL;
-    size_t len = strlen(str);
-    if (len == SIZE_MAX) return NULL;
+char* pool_dup_n(Pool* pool, const char* data, size_t len) {
+    if (!pool || !data || len == SIZE_MAX) return NULL;
     char* dup = (char*)pool_alloc(pool, len + 1);
-    if (dup) memcpy(dup, str, len + 1);
+    if (dup) {
+        memcpy(dup, data, len);
+        dup[len] = '\0';
+    }
     return dup;
+}
+
+char* pool_strdup(Pool* pool, const char* str) {
+    return str ? pool_dup_n(pool, str, strlen(str)) : NULL;
 }
 
 void mempool_cleanup(void) {

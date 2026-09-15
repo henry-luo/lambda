@@ -560,18 +560,14 @@ static bool css_parse_selector_function(const CssToken* tokens, int* pos,
     const CssToken* token = &tokens[*pos];
     const char* name = token->value;
     if (!name && token->start && token->length > 0) {
-        char* name_buf = (char*)pool_calloc(pool, token->length + 1);
+        char* name_buf = pool_dup_n(pool, token->start, token->length);
         if (!name_buf) return false;
-        memcpy(name_buf, token->start, token->length);
-        name_buf[token->length] = '\0';
         name = name_buf;
     }
     size_t name_len = name ? strlen(name) : 0;
     if (name_len > 0 && name[name_len - 1] == '(') {
-        char* clean_name = (char*)pool_calloc(pool, name_len);
+        char* clean_name = pool_dup_n(pool, name, name_len - 1);
         if (!clean_name) return false;
-        memcpy(clean_name, name, name_len - 1);
-        clean_name[name_len - 1] = '\0';
         name = clean_name;
     }
 
@@ -996,10 +992,8 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
     if (func_name) {
         size_t func_len = strlen(func_name);
         if (func_len > 0 && func_name[func_len - 1] == '(') {
-            char* clean_name = (char*)pool_calloc(pool, func_len);
+            char* clean_name = pool_dup_n(pool, func_name, func_len - 1);
             if (clean_name) {
-                memcpy(clean_name, func_name, func_len - 1);
-                clean_name[func_len - 1] = '\0';
                 func_name = clean_name;
             }
         }
@@ -1248,10 +1242,8 @@ static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool) {
         case CSS_TOKEN_IDENT: {
             const char* token_val = token->value;
             if (!token_val && token->start && token->length > 0) {
-                char* buf = (char*)pool_calloc(pool, token->length + 1);
+                char* buf = pool_dup_n(pool, token->start, token->length);
                 if (buf) {
-                    memcpy(buf, token->start, token->length);
-                    buf[token->length] = '\0';
                     token_val = buf;
                 }
             }
@@ -1274,10 +1266,8 @@ static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool) {
             value->type = CSS_VALUE_TYPE_STRING;
             const char* str_val = token->value;
             if (!str_val && token->start && token->length > 0) {
-                char* buf = (char*)pool_calloc(pool, token->length + 1);
+                char* buf = pool_dup_n(pool, token->start, token->length);
                 if (buf) {
-                    memcpy(buf, token->start, token->length);
-                    buf[token->length] = '\0';
                     str_val = buf;
                 }
             }
@@ -1289,10 +1279,8 @@ static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool) {
             value->type = CSS_VALUE_TYPE_URL;
             const char* url_val = token->value;
             if (!url_val && token->start && token->length > 0) {
-                char* buf = (char*)pool_calloc(pool, token->length + 1);
+                char* buf = pool_dup_n(pool, token->start, token->length);
                 if (buf) {
-                    memcpy(buf, token->start, token->length);
-                    buf[token->length] = '\0';
                     url_val = buf;
                 }
             }
@@ -1355,10 +1343,8 @@ static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool) {
             value->type = CSS_VALUE_TYPE_CUSTOM;
             const char* token_val = token->value;
             if (!token_val && token->start && token->length > 0) {
-                char* buf = (char*)pool_calloc(pool, token->length + 1);
+                char* buf = pool_dup_n(pool, token->start, token->length);
                 if (buf) {
-                    memcpy(buf, token->start, token->length);
-                    buf[token->length] = '\0';
                     token_val = buf;
                 }
             }
@@ -1373,10 +1359,8 @@ static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool) {
             if (token->value) {
                 value->data.custom_property.name = pool_strdup(pool, token->value);
             } else if (token->start && token->length > 0) {
-                char* buf = (char*)pool_calloc(pool, token->length + 1);
+                char* buf = pool_dup_n(pool, token->start, token->length);
                 if (buf) {
-                    memcpy(buf, token->start, token->length);
-                    buf[token->length] = '\0';
                     value->data.custom_property.name = buf;
                 }
             }
@@ -1499,10 +1483,8 @@ static const char* css_parse_attribute_value(const CssToken* tokens, int* pos,
         if (value && (value[0] == '"' || value[0] == '\'')) {
             size_t len = strlen(value);
             if (len >= 2) {
-                char* value_buf = (char*)pool_calloc(pool, len - 1);
+                char* value_buf = pool_dup_n(pool, value + 1, len - 2);
                 if (value_buf) {
-                    memcpy(value_buf, value + 1, len - 2);
-                    value_buf[len - 2] = '\0';
                     value = value_buf;
                 }
             }
@@ -1800,10 +1782,8 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
         if (token->value) {
             selector->value = pool_strdup(pool, token->value);
         } else if (token->start && token->length > 0) {
-            char* value_buf = (char*)pool_calloc(pool, token->length + 1);
+            char* value_buf = pool_dup_n(pool, token->start, token->length);
             if (value_buf) {
-                memcpy(value_buf, token->start, token->length);
-                value_buf[token->length] = '\0';
                 selector->value = value_buf;
             }
         }
@@ -1819,10 +1799,8 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
             if (name_token->value) {
                 selector->value = pool_strdup(pool, name_token->value);
             } else if (name_token->start && name_token->length > 0) {
-                char* value_buf = (char*)pool_calloc(pool, name_token->length + 1);
+                char* value_buf = pool_dup_n(pool, name_token->start, name_token->length);
                 if (value_buf) {
-                    memcpy(value_buf, name_token->start, name_token->length);
-                    value_buf[name_token->length] = '\0';
                     selector->value = value_buf;
                 }
             }
@@ -1847,10 +1825,8 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
             // Hash token includes the #, skip it
             const char* start = token->start + 1;  // Skip '#'
             size_t length = token->length - 1;
-            char* value_buf = (char*)pool_calloc(pool, length + 1);
+            char* value_buf = pool_dup_n(pool, start, length);
             if (value_buf) {
-                memcpy(value_buf, start, length);
-                value_buf[length] = '\0';
                 selector->value = value_buf;
             }
         }
@@ -1952,10 +1928,8 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
             else if (pseudo_token->type == CSS_TOKEN_IDENT) {
                 const char* pseudo_name = pseudo_token->value;
                 if (!pseudo_name && pseudo_token->start && pseudo_token->length > 0) {
-                    char* name_buf = (char*)pool_calloc(pool, pseudo_token->length + 1);
+                    char* name_buf = pool_dup_n(pool, pseudo_token->start, pseudo_token->length);
                     if (name_buf) {
-                        memcpy(name_buf, pseudo_token->start, pseudo_token->length);
-                        name_buf[pseudo_token->length] = '\0';
                         pseudo_name = name_buf;
                     }
                 }
@@ -2389,10 +2363,8 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
             const char* raw_start = tokens[value_start].start;
             const char* raw_end = tokens[val_end].start + tokens[val_end].length;
             size_t raw_len = raw_end - raw_start;
-            char* raw_buf = (char*)pool_calloc(pool, raw_len + 1);
+            char* raw_buf = pool_dup_n(pool, raw_start, raw_len);
             if (raw_buf) {
-                memcpy(raw_buf, raw_start, raw_len);
-                raw_buf[raw_len] = '\0';
                 decl->value_text = raw_buf;
                 decl->value_text_len = raw_len;
             }
@@ -2940,10 +2912,8 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                             }
                             if (raw_start && raw_end && raw_end > raw_start) {
                                 size_t raw_len = (size_t)(raw_end - raw_start);
-                                char* url_buf = (char*)pool_calloc(pool, raw_len + 1);
+                                char* url_buf = pool_dup_n(pool, raw_start, raw_len);
                                 if (url_buf) {
-                                    memcpy(url_buf, raw_start, raw_len);
-                                    url_buf[raw_len] = '\0';
                                     import_url = url_buf;
                                 }
                             }

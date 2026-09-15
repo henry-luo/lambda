@@ -125,12 +125,7 @@ static void media_queries_clear(JsDomPlatformState* state) {
 }
 
 static char* platform_strdup(const char* value) {
-    const char* source = value ? value : "";
-    size_t len = strlen(source);
-    char* copy = (char*)mem_alloc(len + 1, MEM_CAT_JS_RUNTIME);
-    if (!copy) return nullptr;
-    memcpy(copy, source, len + 1);
-    return copy;
+    return mem_strdup(value ? value : "", MEM_CAT_JS_RUNTIME);
 }
 
 static const char* platform_string(Item value) {

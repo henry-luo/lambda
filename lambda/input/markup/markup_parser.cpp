@@ -157,10 +157,8 @@ void MarkupParser::splitLines(const char* content) {
             }
 
             // Allocate and copy line
-            char* line = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_MARKUP);
+            char* line = mem_dup_n(line_start, len, MEM_CAT_INPUT_MARKUP);
             if (line) {
-                memcpy(line, line_start, len);
-                line[len] = '\0';
                 lines[line_count++] = line;
             }
 
@@ -252,7 +250,7 @@ Item MarkupParser::parseContent(const char* content) {
                     int count = 0;
                     while (*pos == fence_char) { count++; pos++; }
                     // Skip trailing whitespace
-                    while (*pos == ' ' || *pos == '\t') pos++;
+                    pos = str_skip_line_space(pos);
                     if (count >= fence_length && (*pos == '\0' || *pos == '\n' || *pos == '\r')) {
                         in_fenced_code = false;
                     }
@@ -355,7 +353,7 @@ Item MarkupParser::parseContent(const char* content) {
 
             // Skip leading whitespace
             const char* p = line;
-            while (*p == ' ' || *p == '\t') p++;
+            p = str_skip_line_space(p);
 
             // Check for RST link definition: .. _label: URL
             if (strncmp(p, ".. _", 4) == 0) {
@@ -372,7 +370,7 @@ Item MarkupParser::parseContent(const char* content) {
                     p++; // skip :
 
                     // Skip whitespace
-                    while (*p == ' ' || *p == '\t') p++;
+                    p = str_skip_line_space(p);
 
                     // Get URL (rest of line)
                     const char* url_start = p;
@@ -628,11 +626,7 @@ char* MarkupParser::normalizeLabel(const char* label, size_t len) {
 
     char* out = nullptr;
     if (folded && folded_len > 0) {
-        out = (char*)mem_alloc((size_t)folded_len + 1, MEM_CAT_INPUT_MARKUP);
-        if (out) {
-            memcpy(out, folded, (size_t)folded_len);
-            out[folded_len] = '\0';
-        }
+        out = mem_dup_n(folded, (size_t)folded_len, MEM_CAT_INPUT_MARKUP);
     }
     if (folded) free_utf8proc_result(folded);
     return out;

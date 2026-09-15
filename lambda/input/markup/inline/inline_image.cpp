@@ -162,7 +162,7 @@ Item parse_image(MarkupParser* parser, const char** text) {
         const char* title_end = nullptr;
 
         // Skip leading whitespace
-        while (*pos == ' ' || *pos == '\t') pos++;
+        pos = str_skip_line_space(pos);
 
         // Check for angle-bracketed URL: <url>
         if (*pos == '<') {
@@ -186,7 +186,7 @@ Item parse_image(MarkupParser* parser, const char** text) {
             pos++; // Skip >
 
             // Skip whitespace after URL
-            while (*pos == ' ' || *pos == '\t') pos++;
+            pos = str_skip_line_space(pos);
 
             // Check for optional title
             if (*pos == '"' || *pos == '\'') {
@@ -208,7 +208,7 @@ Item parse_image(MarkupParser* parser, const char** text) {
             }
 
             // Skip trailing whitespace and expect )
-            while (*pos == ' ' || *pos == '\t') pos++;
+            pos = str_skip_line_space(pos);
             if (*pos != ')') {
                 return Item{.item = ITEM_UNDEFINED};
             }
@@ -279,10 +279,8 @@ Item parse_image(MarkupParser* parser, const char** text) {
         // Add src attribute
         if (src_end > src_start) {
             size_t src_len = src_end - src_start;
-            char* src = (char*)mem_alloc(src_len + 1, MEM_CAT_INPUT_MARKUP);
+            char* src = mem_strndup(src_start, src_len, MEM_CAT_INPUT_MARKUP);
             if (src) {
-                strncpy(src, src_start, src_len);
-                src[src_len] = '\0';
                 add_attribute_to_element(parser, img, "src", src);
                 mem_free(src);
             }
@@ -301,10 +299,8 @@ Item parse_image(MarkupParser* parser, const char** text) {
         // Add title attribute if present
         if (title_start && title_end && title_end > title_start) {
             size_t title_len = title_end - title_start;
-            char* title = (char*)mem_alloc(title_len + 1, MEM_CAT_INPUT_MARKUP);
+            char* title = mem_strndup(title_start, title_len, MEM_CAT_INPUT_MARKUP);
             if (title) {
-                strncpy(title, title_start, title_len);
-                title[title_len] = '\0';
                 add_attribute_to_element(parser, img, "title", title);
                 mem_free(title);
             }

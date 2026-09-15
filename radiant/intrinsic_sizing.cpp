@@ -2723,11 +2723,7 @@ static char* layout_first_srcset_candidate(const char* srcset) {
         }
         if (end > cursor) {
             size_t length = (size_t)(end - cursor);
-            char* candidate = (char*)mem_alloc(length + 1, MEM_CAT_LAYOUT);
-            if (!candidate) return nullptr;
-            memcpy(candidate, cursor, length);
-            candidate[length] = '\0';
-            return candidate;
+            return mem_dup_n(cursor, length, MEM_CAT_LAYOUT);
         }
         cursor = end;
     }

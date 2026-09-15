@@ -1563,9 +1563,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         new_script->directory = mem_strdup(runtime->import_base_dir, MEM_CAT_SYSTEM);
     } else if (last_slash) {
         int dir_len = (int)(last_slash - lookup_path + 1);
-        char* dir = (char*)mem_alloc(dir_len + 1, MEM_CAT_SYSTEM);
-        memcpy(dir, lookup_path, dir_len);
-        dir[dir_len] = '\0';
+        char* dir = mem_dup_n(lookup_path, dir_len, MEM_CAT_SYSTEM);
         new_script->directory = dir;
     } else {
         new_script->directory = mem_strdup("./", MEM_CAT_SYSTEM);

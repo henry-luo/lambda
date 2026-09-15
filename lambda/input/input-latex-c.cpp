@@ -9,6 +9,7 @@
 #include "input-parsers.h"
 #include "../io/mark_builder.hpp"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
 #include <ctype.h>
 #include <string.h>
 
@@ -763,8 +764,7 @@ private:
                 *command_end = end;
                 size_t command_len = strlen(full);
                 if (command_len >= command_capacity) command_len = command_capacity - 1;
-                memcpy(command, full, command_len);
-                command[command_len] = '\0';
+                str_copy(command, command_capacity, full, command_len);
                 return true;
             }
             cursor = end;
@@ -846,8 +846,7 @@ private:
         char env_name[96];
         size_t env_len = name_end - name_begin;
         if (env_len >= sizeof(env_name)) env_len = sizeof(env_name) - 1;
-        memcpy(env_name, source_ + name_begin, env_len);
-        env_name[env_len] = '\0';
+        str_copy(env_name, sizeof(env_name), source_ + name_begin, env_len);
         if (!is_supported_math_environment(env_name)) {
             // MathLive ignores an unknown opening environment, then lets the
             // following `\end{...}` take its ordinary error-recovery path.
@@ -1142,8 +1141,7 @@ private:
             char env[96];
             size_t env_len = end - begin;
             if (env_len >= sizeof(env)) env_len = sizeof(env) - 1;
-            memcpy(env, source_ + begin, env_len);
-            env[env_len] = '\0';
+            str_copy(env, sizeof(env), source_ + begin, env_len);
             return parse_environment(env);
         }
         if (strcmp(name, "end") == 0) return ItemNull;
@@ -1171,7 +1169,9 @@ private:
             strcmp(name, "quad") == 0 || strcmp(name, "qquad") == 0) return builder_.createSymbolItem(name);
         char tag[sizeof(name) + 2];
         memcpy(tag, name, strlen(name) + 1);
-        if (starred && strcmp(name, "newtheorem") == 0) strcat(tag, "*");
+        if (starred && strcmp(name, "newtheorem") == 0) {
+            str_cat(tag, strlen(tag), sizeof(tag), "*", sizeof("*") - 1);
+        }
         ElementBuilder elem = builder_.element(tag);
         bool macro_definition = strcmp(name, "newcommand") == 0 ||
             strcmp(name, "renewcommand") == 0 || strcmp(name, "providecommand") == 0 ||

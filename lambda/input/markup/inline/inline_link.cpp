@@ -147,11 +147,8 @@ static Item create_link_from_definition(MarkupParser* parser,
 
     // Parse link text content
     if (text_len > 0) {
-        char* text_copy = (char*)mem_alloc(text_len + 1, MEM_CAT_INPUT_MARKUP);
+        char* text_copy = mem_strndup(link_text, text_len, MEM_CAT_INPUT_MARKUP);
         if (text_copy) {
-            memcpy(text_copy, link_text, text_len);
-            text_copy[text_len] = '\0';
-
             Item inner_content = parse_inline_spans(parser, text_copy);
             if (inner_content.item != ITEM_ERROR && inner_content.item != ITEM_UNDEFINED) {
                 list_push((List*)link, inner_content);
@@ -247,7 +244,7 @@ static bool try_parse_inline_link_syntax(const char* start, const char** out_end
     int paren_depth = 1;
 
     // Skip leading whitespace in URL
-    while (*pos == ' ' || *pos == '\t') pos++;
+    pos = str_skip_line_space(pos);
 
     // Check for angle-bracketed URL: <url>
     if (*pos == '<') {
@@ -271,7 +268,7 @@ static bool try_parse_inline_link_syntax(const char* start, const char** out_end
         pos++; // Skip >
 
         // Skip whitespace after URL
-        while (*pos == ' ' || *pos == '\t') pos++;
+        pos = str_skip_line_space(pos);
 
         // Check for optional title
         if (*pos == '"' || *pos == '\'') {
@@ -294,7 +291,7 @@ static bool try_parse_inline_link_syntax(const char* start, const char** out_end
         }
 
         // Skip trailing whitespace and expect )
-        while (*pos == ' ' || *pos == '\t') pos++;
+        pos = str_skip_line_space(pos);
         if (*pos != ')') return false;
         pos++; // Skip )
     } else {
@@ -688,11 +685,8 @@ Item parse_link(MarkupParser* parser, const char** text) {
             // Parse link text content (can contain inline elements)
             if (text_end > text_start) {
                 size_t text_len = text_end - text_start;
-                char* link_text = (char*)mem_alloc(text_len + 1, MEM_CAT_INPUT_MARKUP);
+                char* link_text = mem_strndup(text_start, text_len, MEM_CAT_INPUT_MARKUP);
                 if (link_text) {
-                    strncpy(link_text, text_start, text_len);
-                    link_text[text_len] = '\0';
-
                     // Recursively parse inline content
                     Item inner_content = parse_inline_spans(parser, link_text);
                     if (inner_content.item != ITEM_ERROR && inner_content.item != ITEM_UNDEFINED) {

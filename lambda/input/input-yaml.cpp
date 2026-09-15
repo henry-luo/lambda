@@ -405,15 +405,12 @@ static Item make_scalar(YamlParser* p, const char* str, bool quoted) {
 
     char buf[256];
     if (slen >= sizeof(buf)) {
-        char* tmp = (char*)mem_alloc(slen + 1, MEM_CAT_INPUT_YAML);
-        memcpy(tmp, start, slen);
-        tmp[slen] = '\0';
+        char* tmp = mem_dup_n(start, slen, MEM_CAT_INPUT_YAML);
         Item result = p->ctx->builder.createStringItem(tmp);
         mem_free(tmp);
         return result;
     }
-    memcpy(buf, start, slen);
-    buf[slen] = '\0';
+    str_copy(buf, sizeof(buf), start, slen);
 
     if (strcmp(buf, ".inf") == 0 || strcmp(buf, ".Inf") == 0 || strcmp(buf, ".INF") == 0) {
         return p->ctx->builder.createFloat(1.0 / 0.0);

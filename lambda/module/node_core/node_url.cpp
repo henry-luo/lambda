@@ -308,13 +308,12 @@ static Item js_url_createObjectURL(Item blob) {
         node_url_host->node->roots->root_frame_end(&frame);
         return node_url_throw_type_error("Blob URL registry is exhausted");
     }
-    entry->id = (char*)mem_alloc((size_t)id_length + 1, MEM_CAT_SYSTEM);
+    entry->id = mem_dup_n(id, (size_t)id_length, MEM_CAT_SYSTEM);
     if (!entry->id) {
         mem_free(entry);
         node_url_host->node->roots->root_frame_end(&frame);
         return node_url_throw_type_error("Blob URL registry is exhausted");
     }
-    memcpy(entry->id, id, (size_t)id_length + 1);
     entry->blob = node_url_root_value(blob_root);
     if (!node_url_blob_url_entry_root(entry)) {
         node_url_blob_url_entry_destroy(entry, false);
@@ -541,14 +540,12 @@ static Item node_url_legacy_query(const char* search) {
     // legacy `hash`, never to the query dictionary.
     const char* fragment = strchr(text, '#');
     size_t text_length = fragment ? (size_t)(fragment - text) : strlen(text);
-    char* input = (char*)mem_alloc(text_length + 1, MEM_CAT_TEMP);
+    char* input = mem_dup_n(text, text_length, MEM_CAT_TEMP);
     if (!input) {
         node_url_host->node->roots->root_frame_end(&frame);
         return query;
     }
     // text may end at a fragment delimiter rather than its source terminator.
-    memcpy(input, text, text_length);
-    input[text_length] = '\0';
     char* pair = input;
     while (pair) {
         char* next = strchr(pair, '&');
@@ -1091,13 +1088,11 @@ static Item parse_query_entries(const char* qs, int qs_len) {
     // strtok_r/url_decode mutate in place, so the query needs its own copy —
     // but sized to the input. The previous 4096-byte stack buffer clamped
     // qs_len and silently dropped every parameter past the cut.
-    char* buf = (char*)mem_alloc((size_t)qs_len + 1, MEM_CAT_TEMP);
+    char* buf = mem_dup_n(qs, (size_t)qs_len, MEM_CAT_TEMP);
     if (!buf) {
         node_url_host->node->roots->root_frame_end(&frame);
         return entries;
     }
-    memcpy(buf, qs, (size_t)qs_len);
-    buf[qs_len] = '\0';
 
     // URL-decode a string in-place (application/x-www-form-urlencoded: '+' -> ' ')
     auto url_decode = [](char* s) { url_decode_inplace(s, true); };

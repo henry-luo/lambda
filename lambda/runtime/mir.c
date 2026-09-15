@@ -548,11 +548,7 @@ typedef struct {
 } DebugInfoList;
 
 static char* debug_info_strdup(const char* s) {
-    if (!s) return NULL;
-    size_t len = strlen(s) + 1;
-    char* copy = (char*)mem_alloc(len, MEM_CAT_EVAL);
-    if (copy) memcpy(copy, s, len);
-    return copy;
+    return s ? mem_strdup(s, MEM_CAT_EVAL) : NULL;
 }
 
 // Comparator for sorting FuncDebugInfo by address

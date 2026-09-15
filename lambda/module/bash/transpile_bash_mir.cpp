@@ -25,6 +25,7 @@
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/hashmap.h"
 #include "../../../lib/hashmap_typed.hpp"
+#include "../../../lib/str.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/file.h"
 #include <tree_sitter/tree-sitter-bash.h>
@@ -2503,8 +2504,7 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
                     BashMirUserFunc del_key;
                     memset(&del_key, 0, sizeof(del_key));
                     int copy = text_len < (int)(sizeof(del_key.name) - 1) ? text_len : (int)(sizeof(del_key.name) - 1);
-                    memcpy(del_key.name, text, copy);
-                    del_key.name[copy] = '\0';
+                    str_copy(del_key.name, sizeof(del_key.name), text, copy);
                     hashmap_delete(mt->user_funcs, &del_key);
                 }
                 arg = arg->next;
@@ -2553,8 +2553,7 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
                     // check name for compile-time assoc type
                     char name_buf[128];
                     int copy_len = name_len < 127 ? name_len : 127;
-                    memcpy(name_buf, text, copy_len);
-                    name_buf[copy_len] = '\0';
+                    str_copy(name_buf, sizeof(name_buf), text, copy_len);
                     const char* fn = bm_is_assoc_var(mt, name_buf)
                                      ? "bash_assoc_unset" : "bash_array_unset";
                     bm_emit_call_2(mt, fn, arr_val, idx_val);
@@ -4847,9 +4846,7 @@ extern "C" Item bash_eval_string(Item code) {
     }
 
     // make a null-terminated copy of the code
-    char* source_text = (char*)mem_alloc(s->len + 1, MEM_CAT_BASH_RUNTIME);
-    memcpy(source_text, s->chars, s->len);
-    source_text[s->len] = '\0';
+    char* source_text = mem_dup_n(s->chars, s->len, MEM_CAT_BASH_RUNTIME);
 
     log_debug("bash: eval: executing '%.*s'", s->len < 40 ? s->len : 40, s->chars);
 
@@ -4924,8 +4921,7 @@ extern "C" Item bash_eval_string(Item code) {
                         uint32_t end = ts_node_end_byte(ech);
                         if (end > start && (end - start) < 64) {
                             static char tok_buf[65];
-                            memcpy(tok_buf, tp->source + start, end - start);
-                            tok_buf[end - start] = '\0';
+                            str_copy(tok_buf, sizeof(tok_buf), tp->source + start, end - start);
                             bad_token = tok_buf;
                         }
                         err_line = ts_node_start_point(ech).row;
