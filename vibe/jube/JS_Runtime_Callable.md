@@ -250,6 +250,8 @@ ECMAScript `[[Call]]`, `[[Construct]]`, property access, bound functions, and
 | **JC10** | Function.prototype is represented by a real callable function value. Ordinary Maps are never made callable by sentinel properties or an own `.call` property. |
 | **JC11** | Phase-local compatibility adapters are allowed only while their corresponding old switch cases are deleted in the same phase. The completed runtime contains no legacy semantic fallback. |
 | **JC12** | This phase is net-negative in mechanisms and source size. Moving switch bodies to another file without replacing the dispatch model does not count as implementation. |
+| **JC13–JC19** | *(proposed, 2026-09-15)* Flatten the dynamic call chain from ten named functions to ≤4 hops: one kernel symbol, one per-callable span body entry, generated argument adaptation, retired register-operand public wrapper, root-once. See `JS_Runtime_Call_Flatten.md`. |
+| **JC20–JC22** | *(proposed, 2026-09-15)* AST interpreter call path: the AST activation borrows the kernel activation (no inner re-roots), and AST→AST calls take a guard-entered direct instance of the same kernel. See `JS_Runtime_Call_Flatten.md` §3.5. |
 
 ## 5. Target callable representation
 

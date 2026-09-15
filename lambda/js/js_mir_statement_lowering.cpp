@@ -2911,6 +2911,20 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
     // Leave its close to that pad so a failing return() can propagate without
     // re-entering the body's exception-only IteratorClose handler.
     bool defer_nearest_iterator_close = mt->for_of_depth > 0;
+    // An async for-of close awaits `return()`, which suspends the state
+    // machine; a raw register does not survive the resume, so the evaluated
+    // value rides a generator env slot across the closes. Without it the
+    // resumed return completed with whatever the register last held.
+    int return_value_spill = -1;
+    if (mt->in_generator && mt->gen_env_reg) {
+        for (int i = mt->loop_depth - 1; i >= 0; i--) {
+            JsLoopLabels* loop = jm_loop_label_at(mt, i);
+            if (loop && loop->iterator_to_close && loop->is_async_iterator) {
+                return_value_spill = jm_gen_spill_save(mt, val);
+                break;
+            }
+        }
+    }
     for (int i = mt->loop_depth - 1; i >= 0; i--) {
         JsLoopLabels* loop = jm_loop_label_at(mt, i);
         if (loop && loop->iterator_to_close) {
@@ -2929,6 +2943,7 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
             jm_emit_loop_iterator_close_checked(mt, loop);
         }
     }
+    if (return_value_spill >= 0) jm_gen_spill_load(mt, val, return_value_spill);
 
     // v15: In generator/async state machines, return [value, -1] to signal done.
     // If the return is inside a try/finally, delay it so the finally body runs

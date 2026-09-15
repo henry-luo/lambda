@@ -5,7 +5,7 @@
     {
       "in_func": "js_main",
       "expect": [
-        "call\tjs_call_function_prerooted_args_into"
+        "call\tjs_call_p_r6_n1_a6, js_call"
       ]
     }
   ]

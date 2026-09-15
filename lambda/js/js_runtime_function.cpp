@@ -167,6 +167,7 @@ void js_function_finalize_capabilities(JsFunction* fn) {
     // metadata mutation must re-finalize before the value is republished.
     fn->invoke = (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)
         ? js_call_entry_bound : js_call_entry_generic;
+    fn->body = js_function_select_body_entry(fn);
     fn->construct = NULL;
     bool syntax_forbids_construct = (fn->flags & (JS_FUNC_FLAG_ARROW |
         JS_FUNC_FLAG_METHOD | JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC |
@@ -1255,7 +1256,7 @@ static Item js_new_method_function_impl(void* func_ptr, int param_count,
         // Only compiled method wrappers carry an explicit Context*. Jube
         // trampolines and native interface callbacks use the ordinary ABI;
         // stamping those contextless callbacks shifted every call argument.
-        fn->flags |= JS_FUNC_FLAG_MIR_PUBLIC_ABI | JS_FUNC_FLAG_MIR_CONTEXT_ABI;
+        fn->flags |= JS_FUNC_FLAG_MIR_CONTEXT_ABI;
     }
     fn->env = NULL;
     fn->env_size = 0;
@@ -1420,7 +1421,6 @@ extern "C" void js_finalize_function(Item fn_item, const char* name_chars,
     if (init_flags & JS_FUNC_INIT_ASYNC) fn->flags |= JS_FUNC_FLAG_ASYNC;
     if (init_flags & JS_FUNC_INIT_ARROW) fn->flags |= JS_FUNC_FLAG_ARROW;
     if (init_flags & JS_FUNC_INIT_STRICT) fn->flags |= JS_FUNC_FLAG_STRICT;
-    if (init_flags & JS_FUNC_INIT_MIR_PUBLIC_ABI) fn->flags |= JS_FUNC_FLAG_MIR_PUBLIC_ABI;
     if (init_flags & JS_FUNC_INIT_USES_WITH) fn->flags |= JS_FUNC_FLAG_USES_WITH;
     if (init_flags & JS_FUNC_INIT_ANALYSIS_KNOWN) fn->flags |= JS_FUNC_FLAG_ANALYSIS_KNOWN;
     if (init_flags & JS_FUNC_INIT_READS_THIS) fn->flags |= JS_FUNC_FLAG_READS_THIS;

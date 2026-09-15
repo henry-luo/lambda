@@ -344,6 +344,8 @@ Item js_new_function_mir(void* func_ptr, int param_count);
 Item js_new_distinct_function_mir(void* func_ptr, int param_count);
 Item js_new_method_function_mir(void* func_ptr, int param_count);
 Item js_new_closure_mir(void* func_ptr, int param_count, Item* env, int env_size);
+// JC15: pack actuals [start, argc) into a rest array; `args` stays caller-rooted.
+Item js_args_rest_array(Item* args, int64_t start, int64_t argc);
 struct AstFuncNode;
 struct JsScript;
 struct JsInterpEnv;
@@ -384,9 +386,8 @@ enum {
     JS_FUNC_INIT_ASYNC = 1u << 2,
     JS_FUNC_INIT_ARROW = 1u << 3,
     JS_FUNC_INIT_STRICT = 1u << 4,
-    // Compiled wrappers use the Context companion-slot ABI. Native builtins
-    // retain their published signatures and do not set this marker.
-    JS_FUNC_INIT_MIR_PUBLIC_ABI = 1u << 5,
+    // 1u << 5 was MIR_PUBLIC_ABI, retired with the register-operand wrapper
+    // (JC16); CONTEXT_ABI alone now marks a compiled span entry.
     // The compiled body can leave a dynamic with scope on an early return.
     // Call dispatch must restore the caller's stack even when both endpoints
     // were empty on entry.
@@ -408,6 +409,17 @@ void js_mark_derived_constructor_func(Item fn_item);
 Item js_get_constructor(Item name_item);
 Item js_get_intrinsic_prototype_for_class(int class_id);
 Item js_get_typed_array_per_type_proto(int element_type);
+// O5: the one RangeError message for the call-depth guard, shared by the
+// kernel and the JIT's inline source-invocation guard (same counter/limit).
+#define JS_CALL_STACK_EXCEEDED_MESSAGE "Maximum call stack size exceeded"
+// JC13: the sole dynamic-call entry; the named adapters below only fix its
+// two ownership operands.
+Item js_call(Item func_item, Item this_val, Item* args, int arg_count,
+             uint64_t* result_home, bool args_prerooted);
+// JC21: an AST call site's entry for a pre-rooted argument span. It takes the
+// kernel's AST direct instance when the callee's facts allow, else js_call.
+Item js_call_from_ast(Item callee, Item this_val, Item* args, int arg_count,
+                      uint64_t* result_home);
 Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 Item js_call_accessor_getter(Item getter, Item receiver);
 Item js_call_function_into(Item func_item, Item this_val, Item* args,
@@ -1104,9 +1116,6 @@ Item js_promise_all(Item iterable);              // Promise.all([...])
 Item js_promise_with_resolvers(void);            // Promise.withResolvers()
 Item js_await_sync(Item value);                  // Phase 5: synchronous await unwrap
 Item js_await_sync_incremental(Item value);      // wait without draining unrelated jobs
-Item js_promise_async_function_start(void);
-Item js_promise_async_function_finish(Item promise, Item result,
-                                      int64_t had_exception);
 
 // Phase 6: Async state machine runtime
 Item js_async_prepare_await(Item value);

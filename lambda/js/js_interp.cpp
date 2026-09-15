@@ -2969,7 +2969,7 @@ static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
         result = construct
             ? js_construct_value(callee_root.get(), direct_arguments_items, plain_arg_count,
                 callee_root.get(), &call_result_home, true)
-            : js_call_function_prerooted_args_into(callee_root.get(), this_root.get(),
+            : js_call_from_ast(callee_root.get(), this_root.get(),
                 direct_arguments_items, plain_arg_count, &call_result_home);
     } else {
         result = construct
@@ -5622,19 +5622,35 @@ static bool js_interp_function_tail_reuse_safe(JsFunction* function) {
     return function && js_fn_ast_tail_reuse_safe(function);
 }
 
+// JC20: shared null [[HomeObject]] home for callees without a payload; the
+// frame only reads it.
+static uint64_t js_interp_no_home_class = ITEM_NULL_VAL;
+
 Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
         uint64_t* result_home) {
     if (!function || js_fn_body_kind(function) != JS_FUNCTION_BODY_AST ||
             !js_fn_ast_function(function) || !js_fn_ast_script(function)) return ItemError;
-    RootFrame roots(7);
-    Rooted<Item> function_root(roots, (Item){.function = (Function*)function});
-    uint64_t* lexical_this_home = (function->flags & JS_FUNC_FLAG_ARROW)
+    // JC20: this activation borrows the call activation a kernel instance
+    // pushed for `function` (generic body entry or the AST direct instance).
+    // That activation roots the callee and holds `this` and `new.target`; the
+    // callee payload roots an arrow's lexical bindings and the home class. Only
+    // values created here get roots of their own.
+#ifndef NDEBUG
+    if (js_pending_args_callee.item != (uint64_t)(uintptr_t)function) {
+        log_error("js-interp-call: entered without its callee's call activation");
+    }
+#endif
+    bool is_arrow = (function->flags & JS_FUNC_FLAG_ARROW) != 0;
+    JsAstBody* ast_body = (JsAstBody*)js_fn_ast(function);
+    JsCallActivation* activation = js_call_activation_current();
+    uint64_t* lexical_this_home = is_arrow
         ? js_interp_function_lexical_this_home(function) : NULL;
-    Rooted<Item> this_root(roots, (function->flags & JS_FUNC_FLAG_ARROW)
-        ? js_interp_function_lexical_this(function) : js_get_lexical_this_binding());
-    Rooted<Item> new_target_root(roots, (function->flags & JS_FUNC_FLAG_ARROW)
-        ? js_fn_ast(function)->lexical_new_target : js_get_new_target());
-    Rooted<Item> home_class_root(roots, js_fn_home_class(function));
+    uint64_t* new_target_home = is_arrow
+        ? &ast_body->lexical_new_target.item
+        : (uint64_t*)(void*)activation->items[JS_CALL_ACTIVATION_NEW_TARGET];
+    uint64_t* home_class_home = function->payload
+        ? &function->payload->home_class.item : &js_interp_no_home_class;
+    RootFrame roots(3);
     Rooted<Item> arguments_root(roots, ItemNull);
     Rooted<Item> tail_arguments_root(roots, ItemNull);
     Rooted<Item> tail_scratch_root(roots, ItemNull);
@@ -5667,7 +5683,8 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
         if (!env || (!reusing_tail_activation && !env_root.registered)) return ItemError;
         if (!(function->flags & JS_FUNC_FLAG_ARROW)) {
             env->has_lexical_this = 1;
-            env->lexical_this = this_root.get().item;
+            // the kernel bound and coerced this call's receiver before entry.
+            env->lexical_this = js_get_lexical_this_binding().item;
         }
         JsInterpEnv* body_env = body_needs_environment
             ? (reusing_tail_activation ? retained_body_env_root.env
@@ -5699,10 +5716,9 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
         JsInterpEvalLocalFrame eval_local(body_env ? body_env : env,
             js_fn_ast_has_direct_eval(function));
         uint64_t* frame_this_home = lexical_this_home ? lexical_this_home
-            : ((function->flags & JS_FUNC_FLAG_ARROW) ? this_root.home()
-                : &env->lexical_this);
+            : (is_arrow ? &ast_body->lexical_this.item : &env->lexical_this);
         JsInterpFrame frame = {js_fn_ast_script(function), env, frame_this_home,
-            new_target_root.home(), home_class_root.home(),
+            new_target_home, home_class_home,
             (function->flags & JS_FUNC_FLAG_STRICT) != 0, NULL, 0, function,
             false, &tail_scratch};
         if (body_env) frame.env = body_env;
@@ -5710,7 +5726,7 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
             js_fn_ast_function(function)->vars, false);
         if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
         initialized = js_interp_bind_named_function_expression_self(&frame,
-            function, function_root.get());
+            function, (Item){.function = (Function*)function});
         if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
         js_interp_prepare_parameter_tdz(&frame, js_fn_ast_function(function));
         int index = 0;
@@ -5750,7 +5766,10 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
         if (result.kind == JS_INTERP_TAIL_CALL) {
             tail_arguments_root.set(result.tail_arguments);
             if (get_type_id(tail_arguments_root.get()) != LMD_TYPE_ARRAY) return ItemError;
-            this_root.set(result.tail_this);
+            // A reused activation is the tail call's activation: its receiver
+            // lives in the activation's rooted `this` home. An arrow's tail
+            // receiver is its unchanged lexical binding.
+            if (!is_arrow) js_current_this = result.tail_this;
             call_arg_count = (int)js_array_length(tail_arguments_root.get());
             call_args = call_arg_count > 0 ? tail_arguments_root.get().array->items : NULL;
             if (reuse_tail_activation && !reusing_tail_activation) {

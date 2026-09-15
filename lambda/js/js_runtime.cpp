@@ -9663,121 +9663,55 @@ static Item js_promise_reject_with_constructor(Item constructor, Item reason);
 static Item js_promise_combinator_with_constructor(Item constructor, Item iterable, int kind);
 static Item js_promise_invoke_then(Item promise, Item on_fulfilled, Item on_rejected);
 static Item js_promise_with_resolvers_for_constructor(Item constructor);
-extern "C" Item js_promise_async_function_start(void);
-extern "C" Item js_promise_async_function_finish(Item promise, Item result, int64_t had_exception);
 extern "C" Item js_interp_resume_async(JsAsyncContextStateRecord* state, Item input);
-
-// Compiled JS wrappers use a fixed MIR signature, so the dynamic dispatcher
-// must materialize each supported arity as an exact C++ function-pointer type.
-// Library constructors routinely exceed the native-specialization limit of 16
-// formals; keep this broader boxed-call ABI separate from that optimization.
-enum { JS_MIR_CONTEXT_CALL_MAX_ARITY = 32 };
-
-#define JS_MIR_CALL_ARITIES_0_15(X) X(0) X(1) X(2) X(3) X(4) X(5) X(6) X(7) X(8) X(9) X(10) X(11) X(12) X(13) X(14) X(15)
-#define JS_MIR_CALL_ARITIES_0_32(X) X(0) X(1) X(2) X(3) X(4) X(5) X(6) X(7) X(8) X(9) X(10) X(11) X(12) X(13) X(14) X(15) X(16) X(17) X(18) X(19) X(20) X(21) X(22) X(23) X(24) X(25) X(26) X(27) X(28) X(29) X(30) X(31) X(32)
-
-template <size_t... Indices>
-struct JsMirCallArgSequence {};
-
-template <size_t Count, size_t... Indices>
-struct JsMirMakeCallArgSequence
-    : JsMirMakeCallArgSequence<Count - 1, Count - 1, Indices...> {};
-
-template <size_t... Indices>
-struct JsMirMakeCallArgSequence<0, Indices...> {
-    typedef JsMirCallArgSequence<Indices...> Type;
-};
-
-template <bool HasEnv, size_t... Indices>
-static Item js_invoke_mir_context_wrapper_impl(void* func_ptr, Context* runtime,
-        const Item* args, Item env,
-        JsMirCallArgSequence<Indices...>) {
-    if constexpr (HasEnv) {
-        typedef Item (*Fn)(Context*, Item, decltype((void)Indices, Item{})...);
-        return lambda_item_resolve_pending_slot(
-            ((Fn)func_ptr)(runtime, env, args[Indices]...));
-    }
-    typedef Item (*Fn)(Context*, decltype((void)Indices, Item{})...);
-    return lambda_item_resolve_pending_slot(
-        ((Fn)func_ptr)(runtime, args[Indices]...));
-}
-
-template <size_t Count, bool HasEnv>
-static Item js_invoke_mir_context_wrapper(void* func_ptr, Context* runtime,
-        const Item* args, Item env) {
-    return js_invoke_mir_context_wrapper_impl<HasEnv>(func_ptr, runtime,
-        args, env,
-        typename JsMirMakeCallArgSequence<Count>::Type());
-}
-
-template <bool HasEnv, size_t... Indices>
-static Item js_invoke_public_wrapper_impl(void* func_ptr, const Item* args,
-        Item env,
-        JsMirCallArgSequence<Indices...>) {
-    if constexpr (HasEnv) {
-        typedef Item (*Fn)(Item, decltype((void)Indices, Item{})...);
-        return lambda_item_resolve_pending_slot(
-            ((Fn)func_ptr)(env, args[Indices]...));
-    }
-    typedef Item (*Fn)(decltype((void)Indices, Item{})...);
-    return lambda_item_resolve_pending_slot(
-        ((Fn)func_ptr)(args[Indices]...));
-}
-
-template <size_t Count, bool HasEnv>
-static Item js_invoke_public_wrapper(void* func_ptr, const Item* args,
-        Item env) {
-    return js_invoke_public_wrapper_impl<HasEnv>(func_ptr, args, env,
-        typename JsMirMakeCallArgSequence<Count>::Type());
-}
-
-template <bool HasEnv>
-static Item js_invoke_mir_context_by_count(void* func_ptr, Context* runtime,
-        const Item* args, int count, Item env) {
-#define JS_MIR_CONTEXT_DISPATCH_CASE(n) \
-    case n: return js_invoke_mir_context_wrapper<n, HasEnv>(func_ptr, runtime, \
-        args, env);
-    switch (count) {
-    JS_MIR_CALL_ARITIES_0_32(JS_MIR_CONTEXT_DISPATCH_CASE)
-    default: return ItemError;
-    }
-#undef JS_MIR_CONTEXT_DISPATCH_CASE
-}
-
-template <bool HasEnv>
-static Item js_invoke_public_by_count(void* func_ptr, const Item* args,
-        int count, Item env) {
-#define JS_MIR_PUBLIC_DISPATCH_CASE(n) \
-    case n: return js_invoke_public_wrapper<n, HasEnv>(func_ptr, args, env);
-    switch (count) {
-    JS_MIR_CALL_ARITIES_0_15(JS_MIR_PUBLIC_DISPATCH_CASE)
-    default: return ItemError;
-    }
-#undef JS_MIR_PUBLIC_DISPATCH_CASE
-}
-
-// Keep source actuals separate from wrapper operands: `arguments` must retain
-// every original actual even when rest lowering replaces the final ABI operand.
-struct JsCallAdapterSpan {
-    Item* actual_items;
-    int actual_count;
-    Item* invoke_items;
-    int invoke_count;
-    RootSpan owned_roots;
-
-    JsCallAdapterSpan(Item* actual, int actual_argc, int required_argc,
-            bool needs_owned_span)
-        : actual_items(actual), actual_count(actual_argc), invoke_items(actual),
-          invoke_count(required_argc),
-          owned_roots(needs_owned_span ? (size_t)required_argc : 0) {
-        if (needs_owned_span) invoke_items = owned_roots.items();
-    }
-};
 
 static int js_invoke_formal_count(const JsFunction* fn) {
     return js_fn_param_count(fn) < 0 ? -js_fn_param_count(fn) : js_fn_param_count(fn);
 }
 JS_FORWARD_STATIC_EXPRESSION(bool, js_invoke_needs_adapter, (const JsFunction* fn, int arg_count), (js_fn_param_count(fn) < 0 || arg_count < js_invoke_formal_count(fn)))
+
+// JC15: pack the actuals from `start` on into a rest array. Shared by the C
+// body adapters and generated span entries; the caller keeps `args` rooted,
+// and the array is rooted here because each push may allocate.
+extern "C" Item js_args_rest_array(Item* args, int64_t start, int64_t argc) {
+    RootFrame roots(1);
+    Rooted<Item> rest(roots, js_array_new(0));
+    for (int64_t i = start; i < argc; i++) {
+        js_array_push(rest.get(), args[i]);
+    }
+    return rest.get();
+}
+
+// JC15: fixed/rest native bodies and hosted callbacks receive exactly their
+// formals. A missing actual reads as undefined and a rest formal receives the
+// remaining actuals; the source span stays unchanged because `arguments`
+// observes the original actual list. Compiled functions adapt in their
+// generated span entry instead.
+struct JsFormalArgs {
+    Item* items;
+    int count;
+    bool valid;
+    RootSpan owned_roots;
+
+    JsFormalArgs(const JsFunction* fn, Item* actual, int actual_count)
+        : items(actual), count(js_invoke_formal_count(fn)), valid(true),
+          owned_roots(js_invoke_needs_adapter(fn, actual_count)
+              ? (size_t)js_invoke_formal_count(fn) : 0) {
+        if (!js_invoke_needs_adapter(fn, actual_count)) return;
+        items = owned_roots.items();
+        valid = items != NULL;
+        if (!valid) return;
+        bool has_rest = js_fn_param_count(fn) < 0;
+        int regular_count = has_rest ? count - 1 : count;
+        for (int i = 0; i < regular_count; i++) {
+            items[i] = (i < actual_count && actual) ? actual[i] : make_js_undefined();
+        }
+        if (has_rest) {
+            items[regular_count] = js_args_rest_array(actual, regular_count,
+                actual_count);
+        }
+    }
+};
 
 #define JS_GLOBAL_UNARY_BODY JS_INTRINSIC_ARG1_BODY
 
@@ -9879,209 +9813,120 @@ Item js_intrinsic_global_print_body(Item callee, Item this_value, Item* args,
     return make_js_undefined();
 }
 
-static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
-        uint64_t* scalar_result_home) {
+extern Item js_interp_create_generator(JsFunction*, Item*, int);
+extern Item js_interp_call_function(JsFunction*, Item*, int, uint64_t*);
+extern Item js_interp_start_async_function(JsFunction*, Item*, int);
 
-    if (js_fn_body_kind(fn) == JS_FUNCTION_BODY_AST) {
-        if (fn->flags & JS_FUNC_FLAG_GENERATOR) {
-            extern Item js_interp_create_generator(JsFunction*, Item*, int);
-            return js_interp_create_generator(fn, args, arg_count);
-        }
-        extern Item js_interp_call_function(JsFunction*, Item*, int, uint64_t*);
-        return js_interp_call_function(fn, args, arg_count, scalar_result_home);
-    }
+// JC14 body entries. Each adapter owns only the ABI conversion its body shape
+// needs; js_function_select_body_entry chooses one per callee at finalization.
+static Item js_body_entry_ast(Item fn_item, Item this_val, Item* args,
+        int arg_count, uint64_t* result_home) {
+    (void)this_val;
+    return js_interp_call_function((JsFunction*)fn_item.function, args,
+        arg_count, result_home);
+}
 
-    if (js_fn_native(fn)->call && js_fn_native(fn)->policy == JS_NATIVE_CALL_BODY) {
-        return js_fn_native(fn)->call((Item){.function = (Function*)fn},
-            js_current_this, args, arg_count, scalar_result_home);
-    }
+static Item js_body_entry_ast_generator(Item fn_item, Item this_val, Item* args,
+        int arg_count, uint64_t* result_home) {
+    (void)this_val;
+    (void)result_home;
+    return js_interp_create_generator((JsFunction*)fn_item.function, args,
+        arg_count);
+}
 
-    if (js_fn_native(fn)->call && (js_fn_native(fn)->policy == JS_NATIVE_CALL_SPAN ||
-            js_fn_native(fn)->policy == JS_NATIVE_CALL_THIS_SPAN)) {
-        // Span callbacks declare ownership of the original actual list. They
-        // intentionally bypass fixed/rest adaptation, but still enter through
-        // the stored typed body selected by their factory.
-        return js_fn_native(fn)->call((Item){.function = (Function*)fn},
-            js_current_this, args, arg_count, scalar_result_home);
-    }
+static Item js_body_entry_ast_async(Item fn_item, Item this_val, Item* args,
+        int arg_count, uint64_t* result_home) {
+    (void)this_val;
+    (void)result_home;
+    return js_interp_start_async_function((JsFunction*)fn_item.function, args,
+        arg_count);
+}
 
+// A callable with neither a compiled nor a native body completes as a stub.
+static Item js_body_entry_absent(Item fn_item, Item this_val, Item* args,
+        int arg_count, uint64_t* result_home) {
+    (void)fn_item;
+    (void)this_val;
+    (void)args;
+    (void)arg_count;
+    (void)result_home;
+    return make_js_undefined();
+}
 
-    // Rest params: negative param_count signals last param is ...rest
-    bool has_rest = (js_fn_param_count(fn) < 0);
-    int real_param_count = js_invoke_formal_count(fn);
-    int dispatch_limit = (fn->flags & JS_FUNC_FLAG_MIR_CONTEXT_ABI)
-        ? JS_MIR_CONTEXT_CALL_MAX_ARITY
-        : LAMBDA_MAX_FUNCTION_ARGS - (fn->env ? 1 : 0);
-    if (real_param_count > dispatch_limit) {
-        log_error("js-invoke-fn: wrapper arity %d exceeds dispatch ABI %d",
-            real_param_count, dispatch_limit);
-        return ItemError;
-    }
+static Item js_body_entry_native_formals(Item fn_item, Item this_val, Item* args,
+        int arg_count, uint64_t* result_home) {
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    JsFormalArgs formals(fn, args, arg_count);
+    if (!formals.valid) return ItemError;
+    // The factory selected this exact adapter from the callback's declared
+    // type. Repeated calls never cast an opaque address by runtime arity.
+    return js_fn_native(fn)->call(fn_item, this_val, formals.items,
+        formals.count, result_home);
+}
 
-    bool needs_adapter = js_invoke_needs_adapter(fn, arg_count);
-    int effective_count = real_param_count;
-    JsCallAdapterSpan adapter(args, arg_count, effective_count, needs_adapter);
-    if (needs_adapter && !adapter.invoke_items) return ItemError;
-
-    if (has_rest) {
-        int regular_count = real_param_count - 1;  // params before rest
-        for (int i = 0; i < regular_count; i++) {
-            adapter.invoke_items[i] = (i < arg_count && args) ? args[i]
-                : make_js_undefined();
-        }
-        // Store the rest array in its root slot before pushes can allocate.
-        adapter.invoke_items[regular_count] = js_array_new(0);
-        int rest_len = (arg_count > regular_count) ? (arg_count - regular_count) : 0;
-        for (int i = 0; i < rest_len; i++) {
-            js_array_push(adapter.invoke_items[regular_count],
-                args[regular_count + i]);
-        }
-    } else if (arg_count < js_fn_param_count(fn)) {
-        for (int i = 0; i < effective_count; i++) {
-            adapter.invoke_items[i] = (i < arg_count && args) ? args[i]
-                : make_js_undefined();
-        }
-    }
-
-    // The source span stays immutable for `arguments`; only the wrapper sees
-    // the rooted adapter span after padding or rest transformation.
-    js_pending_call_args = adapter.actual_items;
-    js_pending_call_argc = adapter.actual_count;
-    Item* effective_args = adapter.invoke_items;
-
-    if (js_fn_native(fn)->call) {
-        // The factory selected this exact adapter from the callback's declared
-        // type. Repeated calls never cast an opaque address by runtime arity.
-        return js_fn_native(fn)->call((Item){.function = (Function*)fn},
-            js_current_this, effective_args, effective_count,
-            scalar_result_home);
-    }
-
-    // P0 safety: func_ptr must be a valid code address. NULL stub is handled
-    // below; very small non-NULL values indicate corruption (lib_marked.js
-    // ran into this — a JsFunction object survived its type check but
-    // func_ptr was 0x1b, causing an unrecoverable jump to that address).
-    // Treat <0x10000 (typical unmapped low range on macOS / Linux) as
-    // corrupt and return undefined rather than crash.
-    if (js_fn_func_ptr(fn) && (uintptr_t)js_fn_func_ptr(fn) < 0x10000) {
+// Hosted guests (Ruby blocks, Jube trampolines) publish register-operand
+// callbacks without a Context, so C spreads their formals within the native
+// ABI limit. Compiled JS functions never reach this adapter (JC16).
+static Item js_body_entry_hosted(Item fn_item, Item this_val, Item* args,
+        int arg_count, uint64_t* result_home) {
+    (void)this_val;
+    (void)result_home;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    void* func_ptr = js_fn_func_ptr(fn);
+    // P0 safety: very small non-NULL values indicate corruption (lib_marked.js
+    // ran into this — a JsFunction object survived its type check but its
+    // code address was 0x1b). Treat <0x10000 (the unmapped low range on macOS /
+    // Linux) as corrupt rather than jump there.
+    if ((uintptr_t)func_ptr < 0x10000) {
         static int p0_corrupt_log = 0;
         if (p0_corrupt_log < 3) {
-            log_error("js_invoke_fn: corrupt func_ptr=%p on fn=%p name=%.*s — returning undefined",
-                (void*)js_fn_func_ptr(fn), (void*)fn,
+            log_error("js-body-hosted: corrupt func_ptr=%p on fn=%p name=%.*s — returning undefined",
+                func_ptr, (void*)fn,
                 fn->name ? (int)fn->name->len : 6,
                 fn->name ? fn->name->chars : "(anon)");
             p0_corrupt_log++;
         }
         return make_js_undefined();
     }
-
-    // Compiled JS wrappers carry the context chosen when their function object
-    // was created. Dynamic dispatch is the one adaptation boundary; generated
-    // direct calls already carry this same pointer in a register.
-    if (fn->flags & JS_FUNC_FLAG_MIR_CONTEXT_ABI) {
-        if (!js_fn_runtime_context(fn)) {
-            log_error("js_invoke_fn: context wrapper missing context owner");
-            return ItemError;
-        }
-        if (!js_mir_owner_is_current(js_fn_runtime_context(fn), "js-invoke-fn")) {
-            return ItemError;
-        }
-        if (!js_fn_func_ptr(fn)) return make_js_undefined();
-        Context* runtime = js_fn_runtime_context(fn);
-        Item env = fn->env ? (Item){.item = (uint64_t)fn->env} : ItemNull;
-        return fn->env
-            ? js_invoke_mir_context_by_count<true>(js_fn_func_ptr(fn), runtime,
-                effective_args, effective_count, env)
-            : js_invoke_mir_context_by_count<false>(js_fn_func_ptr(fn), runtime,
-                effective_args, effective_count, ItemNull);
-    }
-
-    if (fn->flags & JS_FUNC_FLAG_MIR_PUBLIC_ABI) {
-        if (!js_fn_func_ptr(fn)) return make_js_undefined();
-        Item env = fn->env ? (Item){.item = (uint64_t)fn->env} : ItemNull;
-        return fn->env
-            ? js_invoke_public_by_count<true>(js_fn_func_ptr(fn), effective_args,
-                effective_count, env)
-            : js_invoke_public_by_count<false>(js_fn_func_ptr(fn), effective_args,
-                effective_count, ItemNull);
-    }
-
-    if (!js_fn_func_ptr(fn)) return make_js_undefined(); // stub function
-    int native_count = effective_count + (fn->env ? 1 : 0);
+    int native_count = js_invoke_formal_count(fn) + (fn->env ? 1 : 0);
     if (native_count > LAMBDA_MAX_FUNCTION_ARGS) {
-        log_error("js_invoke_fn: hosted callback arity %d exceeds native ABI limit %d",
+        log_error("js-body-hosted: callback arity %d exceeds native ABI limit %d",
             native_count, LAMBDA_MAX_FUNCTION_ARGS);
         return ItemError;
     }
+    JsFormalArgs formals(fn, args, arg_count);
+    if (!formals.valid) return ItemError;
     Item env_item = (Item){.item = (uint64_t)(uintptr_t)fn->env};
-    return lambda_hosted_item_invoke_by_count((void*)js_fn_func_ptr(fn),
-        effective_args, effective_count, fn->env != NULL, env_item);
+    return lambda_hosted_item_invoke_by_count(func_ptr, formals.items,
+        formals.count, fn->env != NULL, env_item);
 }
 
-#undef JS_MIR_CALL_ARITIES_0_15
-#undef JS_MIR_CALL_ARITIES_0_32
-
-static Item js_invoke_fn_raw_or_async(JsFunction* fn, Item* args, int arg_count,
-        uint64_t* scalar_result_home) {
-    bool legacy_async = (fn->flags & JS_FUNC_FLAG_ASYNC) &&
-        !(fn->flags & JS_FUNC_FLAG_GENERATOR);
-    if (!legacy_async) {
-        return js_invoke_fn_raw(fn, args, arg_count, scalar_result_home);
-    }
-
+JsBodyEntry js_function_select_body_entry(const JsFunction* fn) {
+    if (!fn) return js_body_entry_absent;
     if (js_fn_body_kind(fn) == JS_FUNCTION_BODY_AST) {
-        extern Item js_interp_start_async_function(JsFunction*, Item*, int);
-        return js_interp_start_async_function(fn, args, arg_count);
-    }
-
-    // Every compiled async body publishes its own result promise: a state
-    // machine returns its activation's, an await-less body returns
-    // js_async_wrap_return's. Minting a second one here and joining the two
-    // with a `.then` cost every async call an extra microtask tick.
-    Item result = js_invoke_fn_raw(fn, args, arg_count, scalar_result_home);
-    if (!item_is_error(result)) return result;
-    // A throw before the body could build its promise still has to surface as
-    // a rejected one, so the resource is created only on that path.
-    RootFrame async_roots(1);
-    Rooted<Item> async_promise_root(async_roots, js_promise_async_function_start());
-    return js_promise_async_function_finish(async_promise_root.get(), result, 1);
-}
-
-static Item js_invoke_fn_with_source(JsFunction* fn, Item* args, int arg_count,
-        uint64_t* scalar_result_home, bool args_prerooted) {
-    // Establish one exact source span for every non-prerooted entry. The
-    // wrapper, native callback, and `arguments` view must all borrow this same
-    // storage; per-item roots do not make the incoming Item* range movable.
-    RootSpan source_roots((args_prerooted || arg_count <= 0)
-        ? 0 : (size_t)arg_count);
-    Item* source_args = args;
-    if (!args_prerooted && arg_count > 0) {
-        source_args = source_roots.items();
-        if (!source_args) return ItemError;
-        for (int i = 0; i < arg_count; i++) {
-            source_args[i] = args ? args[i] : ItemNull;
+        if ((fn->flags & JS_FUNC_FLAG_ASYNC) && !(fn->flags & JS_FUNC_FLAG_GENERATOR)) {
+            return js_body_entry_ast_async;
         }
+        return (fn->flags & JS_FUNC_FLAG_GENERATOR)
+            ? js_body_entry_ast_generator : js_body_entry_ast;
     }
-    // `arguments` observes the original actual list even when every actual is
-    // extra to the formal list; the no-adapter path used to leave the previous
-    // call's pending span in place, so zero-formal class constructors saw an
-    // empty arguments object (D6.2.2v2).
-    js_pending_call_args = source_args;
-    js_pending_call_argc = arg_count;
-    if (!js_invoke_needs_adapter(fn, arg_count)) {
-        return js_invoke_fn_raw_or_async(fn, source_args, arg_count,
-            scalar_result_home);
+    const JsNativeCode* native = js_fn_native(fn);
+    if (native->call) {
+        // Span callbacks declare ownership of the original actual list and
+        // intentionally bypass fixed/rest adaptation.
+        bool takes_actuals = native->policy == JS_NATIVE_CALL_BODY ||
+            native->policy == JS_NATIVE_CALL_SPAN ||
+            native->policy == JS_NATIVE_CALL_THIS_SPAN;
+        return takes_actuals ? native->call : js_body_entry_native_formals;
     }
-
-    // Only the adapter can allocate before the wrapper begins. Root the
-    // function while default/rest lowering runs, and keep the source span
-    // immutable so `arguments` and eval retain the original actuals.
-    RootFrame invoke_roots(1);
-    Rooted<Item> fn_root(invoke_roots, (Item){.function = (Function*)fn});
-    fn = (JsFunction*)fn_root.get().function;
-    return js_invoke_fn_raw_or_async(fn, source_args, arg_count,
-        scalar_result_home);
+    void* func_ptr = js_fn_func_ptr(fn);
+    if (!func_ptr) return js_body_entry_absent;
+    // JC16: a compiled function's C-reachable entry is its MIR span entry,
+    // which already has the body-entry shape.
+    if (fn->flags & JS_FUNC_FLAG_MIR_CONTEXT_ABI) return (JsBodyEntry)func_ptr;
+    return js_body_entry_hosted;
 }
+
 
 // Forward declarations for builtin dispatch
 extern "C" Item js_string_raw(Item* args, int argc);
@@ -13579,13 +13424,6 @@ extern "C" Item js_check_class_prototype_parent(Item prototype) {
     return js_throw_type_error("Class extends value has invalid prototype property");
 }
 
-static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
-        int arg_count, uint64_t* result_home);
-static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args,
-        int arg_count, uint64_t* result_home, bool args_prerooted,
-        Item construct_new_target);
-static inline Item js_call_value(Item func_item, Item this_val, Item* args,
-        int arg_count, uint64_t* result_home, bool args_prerooted);
 
 
 // JSCU44: a `with` scope must not leak into a called function. The callee's
@@ -13738,28 +13576,6 @@ extern "C" int js_initial_call_stack_limit(void) {
     return js_initial_call_stack_limit_value;
 }
 
-static bool js_call_use_common_lane(JsFunction* fn) {
-    if (!fn || js_fn_home_class(fn).item == 0 ||
-        !(fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) || js_fn_native(fn)->call ||
-        (fn->flags & (JS_FUNC_FLAG_HAS_BOUND_THIS | JS_FUNC_FLAG_GENERATOR |
-            JS_FUNC_FLAG_ASYNC_GEN | JS_FUNC_FLAG_DERIVED_CTOR |
-            JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) ||
-        (fn->flags & JS_FUNC_FLAG_USES_WITH) || js_fn_eval_initializer_context(fn) ||
-        js_fn_eval_origin(fn)->source) {
-        // The former call-lane classifier also disabled this shortcut for
-        // derived constructors; preserve that invariant so super() still
-        // enters the TDZ/new.target setup owned by the generic dispatcher.
-        return false;
-    }
-    // Release measurements showed the generic ordinary flow is already
-    // cheaper than this shortcut; only the home-class install still wins.
-    // Recheck caller-dynamic facts at the edge: classifier metadata never
-    // authorizes skipping caller with-scope isolation.
-    return js_with_depth_active() == 0 &&
-        !(fn->flags & JS_FUNC_FLAG_USES_WITH) && !js_fn_eval_initializer_context(fn) &&
-        !js_function_has_vm_stack_source(fn);
-}
-
 extern "C" void js_set_call_stack_limit(int64_t limit) {
     int normalized_limit = 4096;
     if (limit <= 0) {
@@ -13773,16 +13589,6 @@ extern "C" void js_set_call_stack_limit(int64_t limit) {
     if (js_active_runtime_state) js_call_stack_limit = normalized_limit;
 }
 
-static Item js_finish_borrowed_scalar_result(Item result, bool uses_local_home) {
-    if (!uses_local_home) return result;
-    if (!lambda_item_uses_scalar_home(result)) return result;
-    // Legacy native callers do not pass a scalar destination, but a public MIR
-    // function may still return a frame-backed number after forcing GC. Copy it
-    // into the caller-owned number side stack before this dispatch frame dies.
-    uint64_t* caller_home = lambda_side_number_alloc();
-    if (!caller_home) return ItemError;
-    return lambda_item_adopt_scalar_home(result, caller_home);
-}
 
 extern "C" bool lambda_side_root_contains_span(const void* span, size_t item_count) {
     Context* runtime = (Context*)context;
@@ -13803,11 +13609,15 @@ extern "C" bool lambda_side_root_contains_span(const void* span, size_t item_cou
 // owned by the caller so its LIFO lifetime covers the complete nested callback.
 static bool js_prepare_owned_argument_span(Item*& args, int count,
         bool& args_prerooted, RootSpan& owned_roots, const char* label) {
+#ifndef NDEBUG
+    // O4: the emitter's arg-frame scope is the production provenance proof
+    // (jm_args_are_prerooted); this range check is a diagnostic of that proof.
     if (args_prerooted && count > 0 &&
         !lambda_side_root_contains_span(args, (size_t)count)) {
         log_error("%s: argument span is outside the live side-root range", label);
         return false;
     }
+#endif
     if (!args_prerooted && count > 0) {
         Item* source = args;
         Item* rooted = owned_roots.items();
@@ -13910,11 +13720,14 @@ Item js_construct_entry_bound(Item func_item, Item* args, int arg_count,
 
 Item js_call_entry_bound(Item func_item, Item this_val, Item* args,
         int arg_count, uint64_t* result_home, bool args_prerooted) {
+#ifndef NDEBUG
+    // O4: diagnostic of the caller's rooted-span provenance, as above.
     if (args_prerooted && arg_count > 0 &&
             !lambda_side_root_contains_span(args, (size_t)arg_count)) {
         log_error("js-call-bound: argument span is outside the live side-root range");
         return ItemError;
     }
+#endif
     JsFunction* fn = get_type_id(func_item) == LMD_TYPE_FUNC
         ? (JsFunction*)func_item.function : NULL;
     if (!fn) return js_throw_type_error("is not a function");
@@ -13939,7 +13752,7 @@ Item js_call_entry_bound(Item func_item, Item this_val, Item* args,
     }
     // Bound [[Call]] owns only argument/this adaptation; target selection and
     // every semantic body remain in the target's stored capability (D6.2.2v2).
-    return js_call_value(target_root.get(), this_root.get(), merged, total_argc,
+    return js_call(target_root.get(), this_root.get(), merged, total_argc,
         result_home, true);
 }
 
@@ -14025,9 +13838,16 @@ static void js_prepare_new_target_for_call(bool install_new_target,
     }
 }
 
-static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args,
-        int arg_count, uint64_t* result_home, bool args_prerooted,
-        Item construct_new_target) {
+// JC13/JC22: the one call kernel -- the sole semantic authority for [[Call]]
+// and the body half of [[Construct]]. It is always inlined into its three
+// entries, which differ only in constant operands: js_call_entry_generic (an
+// ordinary callee's stored `invoke` capability *is* the kernel),
+// js_call_constructor_body (explicit newTarget), and js_call_ast_direct.
+// `ast_direct` may only remove a step whose precondition
+// js_call_ast_direct_eligible proved; it never adds semantics (JC21).
+static inline __attribute__((always_inline)) Item js_call_kernel(Item func_item,
+        Item this_val, Item* args, int arg_count, uint64_t* result_home,
+        bool args_prerooted, Item construct_new_target, bool ast_direct) {
     struct JsCallDepthGuard {
         int* depth;
         bool ok;
@@ -14038,7 +13858,7 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     if (!call_depth_guard.ok) {
         // Node-compatible stack flags must trip the JS guard before discarded async
         // recursion builds thousands of unhandled rejected promises.
-        return js_throw_range_error("Maximum call stack size exceeded");
+        return js_throw_range_error(JS_CALL_STACK_EXCEEDED_MESSAGE);
     }
     // keep the exact argument span rooted through nested callbacks and their
     // collections; event listeners can re-enter the call kernel before return
@@ -14047,12 +13867,14 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         ? (size_t)arg_count : 0);
     if (!js_prepare_owned_argument_span(args, arg_count, args_prerooted,
             call_arg_roots, "js-call-prerooted")) return ItemError;
-    RootFrame call_roots(9);
-    Rooted<Item> func_root(call_roots, func_item);
+    // JC17: one frame of distinct homes. The activation's callee home is also
+    // the kernel's callee root, and an explicit newTarget is published into the
+    // activation's own home before the first allocation below, so neither needs
+    // a second slot. The super-`this` home stays for every activation: an arrow
+    // that runs super() inside a derived constructor publishes through its own
+    // activation as well as the constructor's (js_super_bind_this).
+    RootFrame call_roots(7);
     Rooted<Item> this_root(call_roots, this_val);
-    // Construct passes newTarget as an ordinary rooted operand. A zero value
-    // identifies [[Call]] and cannot alias a published JavaScript value.
-    Rooted<Item> construct_target_root(call_roots, construct_new_target);
     Rooted<Item> activation_this_root(call_roots, js_current_this);
     Rooted<Item> activation_new_target_root(call_roots, js_new_target);
     Rooted<Item> activation_generator_proto_root(call_roots, js_generator_callee_proto);
@@ -14066,9 +13888,9 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         js_pending_call_source_len, js_pending_args_is_strict);
     // Calls can allocate while resolving proxies, binding `this`, or invoking
     // callbacks; native locals are invisible to precise GC during that work.
-    func_item = func_root.get();
+    func_item = activation_callee_root.get();
     this_val = this_root.get();
-    if (get_type_id(func_item) != LMD_TYPE_FUNC) {
+    if (!ast_direct && get_type_id(func_item) != LMD_TYPE_FUNC) {
         // Proxy [[Call]] trap
         if (js_is_proxy(func_item) && js_proxy_has_callable_target(func_item)) {
             return js_proxy_trap_apply(func_item, this_val, args, arg_count);
@@ -14099,31 +13921,13 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     }
 
     JsFunction* fn = (JsFunction*)func_item.function;
-    LAMBDA_SCALAR_HOME(local_result_home);
-    bool uses_local_result_home = false;
-    uint64_t* invoke_result_home = result_home;
-    if ((fn->flags & JS_FUNC_FLAG_MIR_PUBLIC_ABI) &&
-            !(fn->flags & JS_FUNC_FLAG_MIR_CONTEXT_ABI) && !invoke_result_home) {
-        // Legacy native consumers can safely borrow a local home only for the
-        // duration of this call. A pointer-backed scalar is rejected below so
-        // it can never escape after this C frame returns.
-        // Context ABI wrappers publish lane 2 through the Context companion
-        // slot, so giving them this legacy fallback would only retain the
-        // retired generated-home ownership path.
-        invoke_result_home = &local_result_home;
-        uses_local_result_home = true;
-    }
 
-    if (!fn || (!js_fn_func_ptr(fn) && !js_fn_native(fn)->call &&
-            js_fn_body_kind(fn) != JS_FUNCTION_BODY_AST)) {
+    if (!ast_direct && (!fn || (!js_fn_func_ptr(fn) && !js_fn_native(fn)->call &&
+            js_fn_body_kind(fn) != JS_FUNCTION_BODY_AST))) {
         log_error("js_call_function: null function pointer");
         return ItemNull;
     }
 
-    // The common lane only removes setup proven irrelevant to this specific
-    // flow; this shared body remains the semantic authority for every
-    // ordinary call and force-generic keeps it directly differential-testable.
-    bool common_lane = js_call_use_common_lane(fn);
     bool analysis_known = (fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) != 0;
     bool derived_ctor_requested = (fn->flags & JS_FUNC_FLAG_DERIVED_CTOR) != 0;
     // `this` for an arrow comes exclusively from its closure environment; the
@@ -14139,11 +13943,14 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     // A construct protocol entry always scopes the explicit operand, even
     // when static body analysis found no source-level `new.target` read. A
     // nested ERROR/super call must restore the caller's active slot (D6.2.2v2).
-    bool install_new_target = construct_target_root.get().item != 0 ||
+    bool install_new_target = construct_new_target.item != 0 ||
         !analysis_known ||
         (fn->flags & JS_FUNC_FLAG_READS_NEW_TARGET) ||
         derived_ctor_requested;
 
+    // Publish newTarget into the activation's rooted home before this-binding
+    // coercion can allocate; no step between observes new.target.
+    js_prepare_new_target_for_call(install_new_target, construct_new_target);
     // Bind 'this' for the duration of this call
     bool prev_eval_initializer_context = js_eval_initializer_context;
     js_eval_initializer_context = prev_eval_initializer_context ||
@@ -14160,20 +13967,15 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         this_val = this_root.get();
         js_current_this = this_val;
     }
-    // `arguments.callee` and actual arguments belong to this activation, so a
-    // nested callback cannot overwrite its caller's view (D6.2.2v2; JSCU28).
-    js_pending_args_callee = func_item;
-    js_prepare_new_target_for_call(install_new_target,
-        construct_target_root.get());
     // Switch to callee's module vars if it belongs to a different module
     RuntimeModuleStateScope module_state(context);
-    if (js_fn_module_state_id(fn) != UINT32_MAX &&
+    if (!ast_direct && js_fn_module_state_id(fn) != UINT32_MAX &&
             !module_state.activate(js_fn_module_state_id(fn))) {
         return js_throw_type_error("function module state is unavailable");
     }
     Item prev_global = ItemNull;
-    Item caller_global = js_get_global_this();
-    bool switched_global = fn->home_global.item != 0 &&
+    Item caller_global = ast_direct ? ItemNull : js_get_global_this();
+    bool switched_global = !ast_direct && fn->home_global.item != 0 &&
         get_type_id(fn->home_global) == LMD_TYPE_MAP &&
         fn->home_global.item != caller_global.item;
     if (switched_global) prev_global = js_vm_swap_global_this(fn->home_global);
@@ -14182,16 +13984,17 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     // into a callee. Entering relinks one borrowed frame; the guard skips the
     // relink only when neither side has a with-scope at all.
     JsWithActivation with_activation;
-    if (js_runtime_state.with_head || (fn->flags & JS_FUNC_FLAG_USES_WITH) != 0) {
+    if (!ast_direct &&
+            (js_runtime_state.with_head || (fn->flags & JS_FUNC_FLAG_USES_WITH) != 0)) {
         const JsWithData* callee_with = js_fn_with(fn);
         with_activation.enter((Item*)callee_with->env, callee_with->depth);
     }
     // For generator functions: set up callee proto so js_generator_create uses fn.prototype
     // If fn.prototype is not an object, js_generator_create falls back to depth-2.
-    if (!common_lane && (fn->flags & JS_FUNC_FLAG_GENERATOR)) {
+    if (!ast_direct && (fn->flags & JS_FUNC_FLAG_GENERATOR)) {
         js_generator_callee_proto = js_get_name_key(func_item, "prototype", 9);
     }
-    bool derived_ctor_call = !common_lane && derived_ctor_requested;
+    bool derived_ctor_call = !ast_direct && derived_ctor_requested;
     if (derived_ctor_call) {
         js_super_this_binding_push(this_val);
         js_current_this = (Item){.item = ITEM_JS_TDZ};
@@ -14201,46 +14004,125 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         get_type_id(method_home_class) != LMD_TYPE_UNDEFINED) {
         js_current_private_home_class = method_home_class;
     }
-    bool pushed_vm_stack_source = !common_lane && js_function_push_vm_stack_source(fn);
-    Item result = js_invoke_fn_with_source(fn, args, arg_count, invoke_result_home,
-        args_prerooted);
+    bool pushed_vm_stack_source = !ast_direct && js_function_push_vm_stack_source(fn);
+    // Body entry (JC14). The prologue above already owns a rooted span for
+    // `args`, so the body, native callbacks and `arguments` all borrow it.
+    // `arguments` observes the original actual list even when every actual is
+    // extra to the formal list (D6.2.2v2).
+    js_pending_call_args = args;
+    js_pending_call_argc = arg_count;
+    Item result = ItemError;
+    if (ast_direct) {
+        // JC21: the guard proved an AST body, which never returns a pending
+        // scalar, so the body-entry dispatch and pending resolve fold away.
+        result = js_interp_call_function(fn, args, arg_count, result_home);
+    } else {
+#ifndef NDEBUG
+    // The body entry is a finalization product; a metadata writer that skipped
+    // re-finalization would otherwise run a stale body shape silently.
+    if (fn->body != js_function_select_body_entry(fn)) {
+        log_error("js-body-entry: stale body entry on fn=%p flags=0x%x name=%.*s",
+            (void*)fn, fn->flags, fn->name ? (int)fn->name->len : 6,
+            fn->name ? fn->name->chars : "(anon)");
+    }
+#endif
+    if (!fn->body) {
+        log_error("js-body-entry: function has no finalized body entry");
+    } else if ((fn->flags & JS_FUNC_FLAG_MIR_CONTEXT_ABI) &&
+            fn->body == (JsBodyEntry)js_fn_func_ptr(fn) &&
+            (js_fn_runtime_context(fn) != (Context*)context ||
+             js_runtime_state_for((EvalContext*)context) != js_active_runtime_state) &&
+            !js_mir_owner_is_current(js_fn_runtime_context(fn), "js-invoke-fn")) {
+        // O3: a compiled body runs on the Context that compiled it; a retained
+        // owner must never route a call onto another evaluator. The two
+        // thread-local compares are the whole check on the common path; the
+        // out-of-line form only runs to confirm and log a mismatch.
+    } else {
+        // D5.2.1v3: a span entry forwards a pending wide scalar with its
+        // payload in Context::mir_companion_slot; resolve it before native
+        // code sees the Item.
+        // O2: an async body owns its result promise, including rejection of a
+        // throw before its first statement, so the kernel adds no async step.
+        result = lambda_item_resolve_pending_slot(fn->body(func_item,
+            js_current_this, args, arg_count, result_home));
+    }
+    }
     if (pushed_vm_stack_source) js_eval_source_pop();
     if (derived_ctor_call) {
         result = js_super_this_binding_finish(result);
     }
     if (switched_global) js_vm_swap_global_this(prev_global);
     js_eval_initializer_context = prev_eval_initializer_context;
-    if (result_home && !uses_local_result_home &&
-            lambda_item_uses_scalar_home(result)) {
-        // D5.3: context-ABI MIR calls ignore the legacy result-home argument;
-        // adopt their transient scalar before the callee activation expires.
+    if (result_home && lambda_item_uses_scalar_home(result)) {
+        // D5.3: context-ABI MIR calls ignore the result-home argument; adopt
+        // their transient scalar before the callee activation expires.
         result = lambda_item_adopt_scalar_home(result, result_home);
     }
-    return js_finish_borrowed_scalar_result(result, uses_local_result_home);
+    return result;
 }
 
 // [[Construct]] enters the same executable body as [[Call]], but the explicit
-// newTarget operand is rooted and scoped by that body invocation. This helper
+// newTarget operand is rooted and scoped by that body invocation. This entry
 // is private to construct entries.
-JS_FORWARD_STATIC_ITEM(js_call_constructor_body,
-    (Item function, Item this_value, Item* args, int argc, Item new_target,
-        uint64_t* result_home, bool args_prerooted), js_call_function_impl_mode,
-    (function, this_value, args, argc, result_home, args_prerooted, new_target))
+static Item js_call_constructor_body(Item function, Item this_value,
+        Item* args, int argc, Item new_target, uint64_t* result_home,
+        bool args_prerooted) {
+    return js_call_kernel(function, this_value, args, argc, result_home,
+        args_prerooted, new_target, false);
+}
 
-// The generic dispatcher expressed as a call entry: the semantic authority for
-// every shape, and the entry every function starts with.
-JS_FORWARD_LOCAL_RETURN(Item, js_call_entry_generic,
-    (Item func_item, Item this_val, Item* args, int arg_count,
-        uint64_t* result_home, bool args_prerooted), js_call_function_impl_mode,
-    (func_item, this_val, args, arg_count, result_home, args_prerooted, (Item){0}))
+// The ordinary [[Call]] capability every non-bound function stores (JC13).
+Item js_call_entry_generic(Item func_item, Item this_val, Item* args,
+        int arg_count, uint64_t* result_home, bool args_prerooted) {
+    return js_call_kernel(func_item, this_val, args, arg_count, result_home,
+        args_prerooted, (Item){0}, false);
+}
 
-// The generic entry is the sole ordinary-call semantic authority. Tune7's
-// specialized templates duplicated its rooting, state switching, and restore
-// protocol while the release path did not benefit from the extra entry family.
-// Sole internal Call kernel. JavaScript functions own a JsFunction [[Call]]
-// entry; published Lambda functions retain their Core boxed ABI and cross this
-// boundary through its existing dynamic dispatcher.
-static inline Item js_call_value(Item func_item, Item this_val, Item* args,
+// JC21 guard: the facts that let an AST call site enter the kernel's direct
+// instance. Every excluded shape keeps its full kernel step on the generic
+// path, so a miss is observably identical to a hit (D8.4.1v2).
+static inline bool js_call_ast_direct_eligible(Item callee) {
+    if (get_type_id(callee) != LMD_TYPE_FUNC) return false;
+    JsFunction* fn = (JsFunction*)callee.function;
+    if (!fn || !js_fn_is_js_layout(fn) || fn->invoke != js_call_entry_generic ||
+            js_fn_body_kind(fn) != JS_FUNCTION_BODY_AST) return false;
+    if (fn->flags & (JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC |
+            JS_FUNC_FLAG_ASYNC_GEN | JS_FUNC_FLAG_DERIVED_CTOR |
+            JS_FUNC_FLAG_USES_WITH | JS_FUNC_FLAG_HAS_BOUND_THIS |
+            JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) return false;
+    if (js_fn_eval_initializer_context(fn) || js_function_has_vm_stack_source(fn) ||
+            js_runtime_state.with_head) return false;
+    uint32_t module_state_id = js_fn_module_state_id(fn);
+    if (module_state_id != UINT32_MAX &&
+            module_state_id != lambda_active_module_state_id()) return false;
+    return fn->home_global.item == 0 ||
+        get_type_id(fn->home_global) != LMD_TYPE_MAP ||
+        fn->home_global.item == js_get_global_this().item;
+}
+
+// JC21: the kernel instance for a guarded AST call site -- a pre-rooted
+// [[Call]] whose module, realm, `with` chain and body kind are already proven.
+static Item js_call_ast_direct(Item func_item, Item this_val, Item* args,
+        int arg_count, uint64_t* result_home) {
+    return js_call_kernel(func_item, this_val, args, arg_count, result_home,
+        true, (Item){0}, true);
+}
+
+extern "C" Item js_call_from_ast(Item callee, Item this_val, Item* args,
+        int arg_count, uint64_t* result_home) {
+    if (js_call_ast_direct_eligible(callee)) {
+        return js_call_ast_direct(callee, this_val, args, arg_count, result_home);
+    }
+    return js_call(callee, this_val, args, arg_count, result_home, true);
+}
+
+// JC13: the sole dynamic-call entry. It splits on the callee's layout, then
+// tail-enters the callee's stored [[Call]] capability; for an ordinary
+// function that capability is the kernel itself. Published Lambda functions
+// retain their Core boxed ABI and cross through its own dynamic dispatcher.
+// `result_home` and `args_prerooted` are the two ownership operands
+// (D6.2.2v2); they qualify the call, they do not select a different kernel.
+extern "C" Item js_call(Item func_item, Item this_val, Item* args,
         int arg_count, uint64_t* result_home, bool args_prerooted) {
     if (get_type_id(func_item) == LMD_TYPE_FUNC) {
         JsFunction* fn = (JsFunction*)func_item.function;
@@ -14260,16 +14142,19 @@ static inline Item js_call_value(Item func_item, Item this_val, Item* args,
                 args_prerooted);
         }
         if (js_fn_is_js_layout(fn)) {
-            log_error("js-call-value: published JavaScript function has no call entry");
+            log_error("js-call: published JavaScript function has no call entry");
             return ItemError;
         }
         return js_throw_type_error("value is not a callable JavaScript or Lambda function");
     }
-    return js_call_function_impl_mode(func_item, this_val, args, arg_count,
-        result_home, args_prerooted, (Item){0});
+    // A Proxy [[Call]] trap and the not-callable TypeError are kernel steps too.
+    return js_call_entry_generic(func_item, this_val, args, arg_count,
+        result_home, args_prerooted);
 }
-JS_FORWARD_STATIC_ITEM(js_call_function_impl, (Item func_item, Item this_val, Item* args,         int arg_count, uint64_t* result_home), js_call_value, (func_item, this_val, args, arg_count, result_home, false))
-JS_FORWARD_ITEM(js_call_function, (Item func_item, Item this_val, Item* args, int arg_count), js_call_function_impl, (func_item, this_val, args, arg_count, NULL))
+
+// Named ownership adapters kept for C callers and hosted modules; each only
+// fixes the two ownership operands of js_call.
+JS_FORWARD_ITEM(js_call_function, (Item func_item, Item this_val, Item* args, int arg_count), js_call, (func_item, this_val, args, arg_count, NULL, false))
 
 extern "C" Item js_call_function_into(Item func_item, Item this_val, Item* args,
         int arg_count, uint64_t* result_home) {
@@ -14279,8 +14164,7 @@ extern "C" Item js_call_function_into(Item func_item, Item this_val, Item* args,
         log_error("js_call_function_into: missing caller result home");
         return ItemError;
     }
-    Item result = js_call_function_impl(func_item, this_val, args, arg_count, result_home);
-    return result;
+    return js_call(func_item, this_val, args, arg_count, result_home, false);
 }
 
 extern "C" Item js_call_function_prerooted_args_into(Item func_item, Item this_val,
@@ -14289,9 +14173,7 @@ extern "C" Item js_call_function_prerooted_args_into(Item func_item, Item this_v
         log_error("js-call-prerooted: missing caller result home");
         return ItemError;
     }
-    Item result = js_call_value(func_item, this_val, args, arg_count,
-        result_home, true);
-    return result;
+    return js_call(func_item, this_val, args, arg_count, result_home, true);
 }
 
 extern "C" Item js_call_constructor_body_into(Item func_item, Item this_val,
@@ -14409,7 +14291,7 @@ static Item js_apply_function_impl(Item func_item, Item this_val, Item args_arra
         args = LAMBDA_ALLOCA(argc, Item);
         JS_ASSIGN_OR_RETURN(copy_status, js_array_like_copy_args(args_array, args, argc));
     }
-    return js_call_value(func_item, this_val, args, argc, result_home, false);
+    return js_call(func_item, this_val, args, argc, result_home, false);
 }
 JS_FORWARD_ITEM(js_apply_function, (Item func_item, Item this_val, Item args_array), js_apply_function_impl, (func_item, this_val, args_array, NULL))
 
@@ -14427,7 +14309,7 @@ Item js_intrinsic_function_call_body(Item callee, Item this_value, Item* args,
     Item call_this = argc > 0 && args ? args[0] : make_js_undefined();
     Item* call_args = argc > 1 && args ? args + 1 : NULL;
     int call_argc = argc > 1 ? argc - 1 : 0;
-    return js_call_value(this_value, call_this, call_args, call_argc,
+    return js_call(this_value, call_this, call_args, call_argc,
         result_home, false);
 }
 
@@ -29650,12 +29532,6 @@ static Item js_promise_microtask_run(Item handler, Item result, Item next_promis
     return ItemNull;
 }
 
-extern "C" Item js_promise_async_function_start(void) {
-    Item promise = js_promise_create_pending();
-    js_async_hooks_emit_before_resource(promise);
-    return promise;
-}
-
 // An await-less async body owns its result promise. It must be a *fresh*
 // promise even when the body returns one (`f() === Promise.resolve(v)` is
 // false), and resolving it with the returned value is what keeps the spec's
@@ -29670,30 +29546,6 @@ extern "C" Item js_async_wrap_return(Item value) {
     js_async_hooks_emit_before_resource(promise_root.get());
     js_async_hooks_emit_after_resource(promise_root.get());
     js_promise_resolve_with_value(js_get_promise(promise_root.get()), value_root.get());
-    return promise_root.get();
-}
-
-extern "C" Item js_promise_async_function_finish(Item promise, Item result, int64_t had_exception) {
-    RootFrame roots(3);
-    Rooted<Item> promise_root(roots, promise);
-    Rooted<Item> result_root(roots, result);
-    JsPromise* p = js_get_promise(promise_root.get());
-    js_async_hooks_emit_after_resource(promise_root.get());
-    if (!p) return result_root.get();
-
-    if (had_exception) {
-        if (item_is_error(result_root.get())) {
-            result_root.set(js_error_lane_payload(result_root.get()));
-        }
-        js_promise_settle(p, JS_PROMISE_REJECTED, result_root.get());
-        return promise_root.get();
-    }
-
-    // ResolvePromise gives both cases their spec timing: a plain value settles
-    // now, a returned promise/thenable is adopted through
-    // PromiseResolveThenableJob. Joining with `.then` here instead cost one
-    // tick where the spec prescribes two.
-    js_promise_resolve_with_value(p, result_root.get());
     return promise_root.get();
 }
 

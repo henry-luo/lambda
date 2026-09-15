@@ -53,6 +53,8 @@ char* js_skip_ecma_whitespace(char* start, char* end);
 extern "C" Item js_get_generator_shared_proto(bool is_async);
 extern "C" JsFunction* js_alloc_gc_function_object(void);
 void js_function_finalize_capabilities(JsFunction* fn);
+// JC14: the body entry finalization publishes for `fn`'s current metadata.
+JsBodyEntry js_function_select_body_entry(const JsFunction* fn);
 // The generic dispatcher in its call-entry form; the classifier's fallback
 // stamps this when no narrower finalized protocol covers the function.
 Item js_call_entry_generic(Item fn_item, Item this_val, Item* args, int argc,
