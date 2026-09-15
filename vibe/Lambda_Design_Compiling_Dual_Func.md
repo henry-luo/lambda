@@ -10,7 +10,8 @@
 > enables the same guard chain at eligible dynamic local edges; a miss remains
 > the boxed `_b` path. Its conservative loop-region case places one bounded,
 > invariant-identifier guard chain before raw and `_b` `while` siblings;
-> general CSE remains follow-up work.
+> straight-line CSE shares a prior exact-variant selection for the same
+> unmodified identifier in one content sequence.
 >
 > This supersedes the dual-version half of
 > [`Lambda_Box_Unbox.md`](Lambda_Box_Unbox.md) (C-transpiler era; the C path is
@@ -536,10 +537,10 @@ ordinary loop-invariance test, not a new analysis.
   — there is still exactly one definition of the predicate.
 - The failure edge is literally the DF8 path. The optimization can be disabled
   at any point and the program still compiles and runs.
-- It generalizes for free: two calls to native-param functions passing the *same*
-  value in straight-line code share one guard by ordinary CSE, provided the guard
-  is emitted as a plain expression rather than as an opaque intrinsic. Emit it
-  that way.
+- Two eligible calls passing the *same* unmodified identifier in one content
+  sequence share the first exact-key decision. The second call still executes;
+  it branches on the cached variant index (or boxed sentinel) rather than
+  re-emitting the guard chain.
 
 **Implemented first slice (D8.3.4).** `LAMBDA_MIR_TG8_HOIST_GUARDS=1` is off by
 default and emits this same predicate at an eligible fixed-arity local binder
@@ -552,8 +553,10 @@ matching arm prepares its raw argument once and calls its `__rawN` sibling, and
 the fallthrough sibling calls only `_b`. Other eligible calls retain edge-local
 dispatch. Five optimized release processes
 of `test/benchmark/tg8_guard_hoist.ls` measured 0.26 s with `_b` versus 0.18 s
-enabled. Before enabling it at a new site, prefer a static proof, which removes
-the guard entirely. Straight-line CSE remains deferred. [S1.6,
+enabled. Straight-line CSE is restricted to an identical direct binder callee
+and one identifier argument within a content sequence; content/control and
+side-effect boundaries clear the cached choice. Before enabling it at a new
+site, prefer a static proof, which removes the guard entirely. [S1.6,
 D8.3.1v2–D8.3.4, D8.4.1v2]
 
 **Interaction with DF14.** Hoisting introduces a third syntactic path into the
@@ -955,10 +958,10 @@ startup-time cost is not mistaken for a surprise later.
 | **P4** | **Complete.** Direct calls prove raw preconditions or route to `_b`; plans control elision | MIR size ratchet rebaselined with checked fixtures |
 | **P5** | **Deferred intentionally.** Broader speculative body-only inference is a separately measured optimization, not needed for correct dual entries | Future Result-suite work |
 | **P6** | **Complete core.** LambdaJS guard, slow fallback, mismatched-call retention, and mixed native/`Item` signatures | Dedicated JS compiler/coercion/guard tests pass; JS keeps boxed entries |
-| **P7** | **Partially complete.** Opt-in edge-local exact-guard dispatch plus a bounded invariant `while` guard chain call raw variants and fall back to `_b`; straight-line CSE remains deferred | `tg8_guard_hoist` release evidence and focused tier/GC gates |
+| **P7** | **Complete.** Opt-in edge-local exact-guard dispatch, bounded invariant `while` guard chains, and straight-line selection CSE call raw variants and fall back to `_b` | `tg8_guard_hoist`, `tg8_guard_cse`, and focused tier/GC gates |
 
-P5 and P7 are deliberately outside the completed Stage 1 semantic feature: they
-change optimization policy, not the source-correct fast/slow behavior.
+P5 is deliberately outside the completed Stage 1 semantic feature: it changes
+optimization policy, not the source-correct fast/slow behavior.
 
 ---
 

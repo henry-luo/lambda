@@ -215,6 +215,12 @@ struct MirTranspiler {
     uint8_t binder_raw_loop_hoist_variant;
     bool binder_raw_loop_hoist_fallback;
     int binder_raw_loop_hoist_depth;
+    // D8.3.4 straight-line CSE caches a guarded raw-variant selection only
+    // for one immutable identifier in one content sequence. It never caches
+    // a call result or reaches beyond a control-flow boundary.
+    AstFuncNode* binder_raw_guard_cse_fn;
+    NameEntry* binder_raw_guard_cse_binding;
+    MIR_reg_t binder_raw_guard_cse_choice;
     // T27-7: post-call typed-array layout reloads emitted so far, pruned by
     // liveness when their function is finalized (mir_prune_dead_layout_reloads)
     struct MirLayoutReload* layout_reloads;
@@ -606,6 +612,27 @@ struct MirBinderRawGuardHoist {
     bool active;
 };
 
+static void mir_binder_raw_guard_cse_clear(MirTranspiler* mt) {
+    if (!mt) return;
+    mt->binder_raw_guard_cse_fn = NULL;
+    mt->binder_raw_guard_cse_binding = NULL;
+    mt->binder_raw_guard_cse_choice = 0;
+}
+
+struct MirBinderRawGuardCseScope {
+    MirTranspiler* mt;
+
+    explicit MirBinderRawGuardCseScope(MirTranspiler* transpiler) : mt(transpiler) {
+        mir_binder_raw_guard_cse_clear(mt);
+    }
+
+    ~MirBinderRawGuardCseScope() {
+        // A nested control region can rebind or mutate an outer value; a
+        // straight-line decision may not survive that boundary (D8.3.4).
+        mir_binder_raw_guard_cse_clear(mt);
+    }
+};
+
 // Native function info: tracks parameter types and return type for functions
 // that have a dual native+boxed version (Phase 4 optimization).
 struct NativeFuncInfo {
@@ -649,7 +676,13 @@ static MIR_reg_t emit_binder_raw_variant_key_matches(MirTranspiler* mt,
         const MIR_reg_t* boxed_params, int param_count);
 static MirBinderRawGuardHoist emit_binder_raw_variant_guard_hoist(
         MirTranspiler* mt, AstFuncNode* fn_node, const NativeFuncInfo* parent,
-        const MIR_reg_t* boxed_params, int param_count);
+        const MIR_reg_t* boxed_params, int param_count, MIR_reg_t choice = 0);
+static NameEntry* mir_binder_raw_guard_cse_binding(AstCallNode* call);
+static bool mir_binder_raw_guard_cse_matches(MirTranspiler* mt,
+        AstCallNode* call, AstFuncNode* fn_node);
+static MirBinderRawGuardHoist emit_binder_raw_variant_guard_cse_dispatch(
+        MirTranspiler* mt, AstFuncNode* fn_node, const NativeFuncInfo* parent,
+        const MIR_reg_t* boxed_params, int param_count, MIR_reg_t choice);
 
 // Global variable entry (module-level let bindings stored in BSS)
 struct GlobalVarEntry {
@@ -13366,6 +13399,9 @@ static bool mir_branch_ends_in_return(AstNode* branch) {
 }
 
 static MirValue transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
+    // D8.3.4: branch execution may rebind the guarded identifier.
+    mir_binder_raw_guard_cse_clear(mt);
+
     // RC8: a folded `if` has a settled value, so neither arm is emitted and no
     // branch is needed. Checked before the flow scope opens, since there is no
     // control flow left to scope.
@@ -13568,6 +13604,9 @@ static void emit_match_pattern_test(MirTranspiler* mt, AstNode* pattern, MIR_reg
 }
 
 static MirValue transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
+    // D8.3.4: arm selection starts a separate control-flow region.
+    mir_binder_raw_guard_cse_clear(mt);
+
     MirFlowScope flow(mt);
     // TCO: scrutinee is NOT in tail position
     bool saved_tail = mt->in_tail_position;
@@ -14925,6 +14964,9 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
 
 static MirValue transpile_for(MirTranspiler* mt, AstForNode* for_node,
         bool result_demanded) {
+    // D8.3.4: an iterator body is a separate control-flow region.
+    mir_binder_raw_guard_cse_clear(mt);
+
     return mir_value_from_reg(mt, (AstNode*)for_node,
         emit_for_result(mt, for_node, result_demanded), VALUE_REP_ITEM,
         ((AstNode*)for_node)->type);
@@ -16775,6 +16817,9 @@ static MirValue mir_transpile_binder_raw_loop_hoist(MirTranspiler* mt,
 }
 
 static MirValue transpile_while(MirTranspiler* mt, AstWhileNode* while_node) {
+    // D8.3.4: a loop body can change a previously guarded binding.
+    mir_binder_raw_guard_cse_clear(mt);
+
     if (mt->loop_generic_arm_depth > 0) {
         MIR_reg_t result = transpile_while_core(mt, while_node, NULL, NULL, NULL);
         return mir_value_from_reg(mt, (AstNode*)while_node, result,
@@ -19074,6 +19119,7 @@ static bool transpile_content_decl_or_side_effect(MirTranspiler* mt,
         return true;
     }
     if (is_side_effect_stam(item->node_type)) {
+        mir_binder_raw_guard_cse_clear(mt);
         transpile_proc_side_effect(mt, item);
         return true;
     }
@@ -19091,6 +19137,7 @@ static MirValue transpile_content_items(MirTranspiler* mt, AstListNode* content,
         mt->in_tail_position = tail_position && item == last_value && !item->next;
         if (transpile_content_decl_or_side_effect(mt, item)) continue;
         if (is_proc_flow_side_effect_node(item, last_value)) {
+            mir_binder_raw_guard_cse_clear(mt);
             if (ast_for_discards_result(item)) {
                 emit_for_result(mt, (AstForNode*)item, false);
             } else {
@@ -19156,6 +19203,7 @@ static MirValue transpile_content_finish(MirTranspiler* mt, AstListNode* content
 
 static MirValue transpile_content_value(MirTranspiler* mt, AstListNode* list_node) {
     MirFlowScope flow(mt);
+    MirBinderRawGuardCseScope guard_cse_scope(mt);
     // Extend block-tail lowering for the proven string accumulator. Other
     // recursive result protocols retain their existing admission/entry path.
     bool tail_position = mt->in_tail_position && mt->tco_func &&
@@ -25389,6 +25437,13 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 fn_def = (AstFuncNode*)entry_node;
             }
 
+            // D8.3.4: only consecutive eligible calls to the same binder on
+            // the same immutable identifier may share a guard choice.
+            if (mt->binder_raw_guard_cse_choice &&
+                    !mir_binder_raw_guard_cse_matches(mt, call_node, fn_def)) {
+                mir_binder_raw_guard_cse_clear(mt);
+            }
+
             // The first admitted interval is an immediate scalar borrow of a
             // fresh recursive map graph.  The capability is installed only
             // while lowering that exact producer argument, then ended before
@@ -26313,6 +26368,26 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 }
             }
 
+            bool binder_raw_guard_cse_reuse = false;
+            bool binder_raw_guard_cse_record = false;
+            MIR_reg_t binder_raw_guard_cse_choice = 0;
+            if (binder_raw_guard_hoist_requested && binder_raw_guard_hoist_parent) {
+                NameEntry* cse_binding = mir_binder_raw_guard_cse_binding(call_node);
+                if (cse_binding) {
+                    if (mir_binder_raw_guard_cse_matches(mt, call_node, fn_def)) {
+                        binder_raw_guard_cse_reuse = true;
+                        binder_raw_guard_cse_choice = mt->binder_raw_guard_cse_choice;
+                    } else {
+                        binder_raw_guard_cse_choice = new_reg(mt, "tg8_cse_choice",
+                            MIR_T_I64);
+                        mt->binder_raw_guard_cse_fn = fn_def;
+                        mt->binder_raw_guard_cse_binding = cse_binding;
+                        mt->binder_raw_guard_cse_choice = binder_raw_guard_cse_choice;
+                        binder_raw_guard_cse_record = true;
+                    }
+                }
+            }
+
             MirBinderRawGuardHoist binder_raw_guard_hoist = {};
             if (binder_raw_guard_hoist_requested && binder_raw_guard_hoist_parent) {
                 MIR_reg_t boxed_params[LAMBDA_MAX_FUNCTION_ARGS] = {};
@@ -26326,12 +26401,30 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                         "tg8_hoist_arg");
                 }
                 if (rooted_params) {
-                    binder_raw_guard_hoist = emit_binder_raw_variant_guard_hoist(
-                        mt, fn_def, binder_raw_guard_hoist_parent, boxed_params,
-                        expected_params);
+                    binder_raw_guard_hoist = binder_raw_guard_cse_reuse
+                        ? emit_binder_raw_variant_guard_cse_dispatch(mt, fn_def,
+                            binder_raw_guard_hoist_parent, boxed_params,
+                            expected_params, binder_raw_guard_cse_choice)
+                        : emit_binder_raw_variant_guard_hoist(mt, fn_def,
+                            binder_raw_guard_hoist_parent, boxed_params,
+                            expected_params, binder_raw_guard_cse_choice);
                     if (binder_raw_guard_hoist.active) {
-                        log_debug("mir-tg8: hoisted exact guards for '%s'", fn_mangled);
+                        log_debug("mir-tg8: %s exact guards for '%s'",
+                            binder_raw_guard_cse_reuse ? "reused" : "hoisted",
+                            fn_mangled);
                     }
+                }
+            }
+            if (binder_raw_guard_cse_record) {
+                if (binder_raw_guard_hoist.active) {
+                    // Every guard miss reaches the ordinary `_b` call below.
+                    // Record that route once so a later identical call tests
+                    // only this selection, not the full exact-key chain.
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, binder_raw_guard_cse_choice),
+                        MIR_new_int_op(mt->ctx, 0)));
+                } else {
+                    mir_binder_raw_guard_cse_clear(mt);
                 }
             }
 
@@ -27587,6 +27680,9 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
 // ============================================================================
 
 static MIR_reg_t transpile_assign_stam_core(MirTranspiler* mt, AstAssignStamNode* assign) {
+    // D8.3.4: assignment invalidates every straight-line guard choice.
+    mir_binder_raw_guard_cse_clear(mt);
+
     MirVarEntry* var = mir_var_for_binding(mt, assign->target_entry);
     AstNode* assign_value = ast_unwrap_primary(assign->value);
     if (var && var->type_id == LMD_TYPE_STRING && var->env_offset < 0 &&
@@ -29090,6 +29186,9 @@ static MirValue transpile_index(MirTranspiler* mt, AstFieldNode* index) {
 }
 
 static MirValue transpile_handler(MirTranspiler* mt, AstHandlerNode* handler) {
+    // D8.3.4: recovery changes the active control-flow path.
+    mir_binder_raw_guard_cse_clear(mt);
+
     return mir_value_from_reg(mt, (AstNode*)handler,
         emit_handler_result(mt, handler), VALUE_REP_ITEM,
         ((AstNode*)handler)->type);
@@ -33032,6 +33131,53 @@ static MIR_reg_t emit_binder_raw_variant_key_matches(MirTranspiler* mt,
     return matches;
 }
 
+// Every TG8 caller-side route invokes the same immutable raw entry. Keep its
+// ABI preparation here so wrapper dispatch, edge hoisting, and CSE cannot
+// diverge on a pointer lane or a type-value key (D8.3.1v2–D8.3.4).
+static MirCallResult emit_binder_raw_variant_direct_call(MirTranspiler* mt,
+        AstFuncNode* fn_node, const MirRawVariantKey* key,
+        uint8_t variant_index, const MIR_reg_t* boxed_params, int param_count,
+        bool* out_emitted) {
+    MirCallResult direct = {};
+    if (out_emitted) *out_emitted = false;
+    if (!mt || !fn_node || !key || !boxed_params ||
+            key->param_count != param_count) return direct;
+
+    StrBuf* variant_name = strbuf_new_cap(64);
+    write_raw_variant_name(variant_name, fn_node, variant_index);
+    MIR_item_t variant_func = find_local_func(mt, variant_name->str);
+    LocalFuncEntry* variant_entry = find_local_func_entry(mt, variant_name->str);
+    const FnVariantAnalysis* variant_contract =
+        local_func_variant_for_call(variant_entry, variant_name->str);
+    if (!variant_func || !variant_contract) {
+        strbuf_free(variant_name);
+        return direct;
+    }
+
+    MIR_op_t args[LAMBDA_MAX_FUNCTION_ARGS];
+    MIR_type_t arg_types[LAMBDA_MAX_FUNCTION_ARGS];
+    for (uint16_t i = 0; i < key->param_count; i++) {
+        Type* contract = key->param_types[i];
+        TypeId type_id = contract ? contract->type_id : LMD_TYPE_ANY;
+        MIR_reg_t value = boxed_params[i];
+        if (type_id != LMD_TYPE_TYPE) {
+            value = emit_unbox_contract_lane(mt, value, type_id, contract);
+            arg_types[i] = type_to_mir(type_id);
+        } else {
+            arg_types[i] = MIR_T_I64;
+        }
+        args[i] = MIR_new_reg_op(mt->ctx, value);
+    }
+    MirCallOptions options = {true, false, 0};
+    direct = em_call_direct(&mt->em, variant_name->str, variant_func,
+        variant_contract, key->param_count, arg_types, args, &options);
+    direct.normal = em_finish_direct_call_normal(&mt->em, direct,
+        MIR_PENDING_REASON_INCOMPATIBLE_RETURN);
+    strbuf_free(variant_name);
+    if (out_emitted) *out_emitted = true;
+    return direct;
+}
+
 static void emit_binder_raw_variant_dispatch(MirTranspiler* mt,
         AstFuncNode* fn_node, NativeFuncInfo* nfi,
         const MIR_reg_t* prepared_params, int param_count) {
@@ -33046,38 +33192,14 @@ static void emit_binder_raw_variant_dispatch(MirTranspiler* mt,
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
             MIR_new_label_op(mt->ctx, fallback), MIR_new_reg_op(mt->ctx, matches)));
 
-        StrBuf* variant_name = strbuf_new_cap(64);
-        write_raw_variant_name(variant_name, fn_node, variant_index);
-        MIR_item_t variant_func = find_local_func(mt, variant_name->str);
-        LocalFuncEntry* variant_entry = find_local_func_entry(mt, variant_name->str);
-        const FnVariantAnalysis* variant_contract =
-            local_func_variant_for_call(variant_entry, variant_name->str);
-        if (!variant_func || !variant_contract) {
-            log_error("mir-tg8: missing raw adapter '%s'", variant_name->str);
+        bool emitted = false;
+        MirCallResult direct = emit_binder_raw_variant_direct_call(mt, fn_node,
+            key, variant_index, prepared_params, param_count, &emitted);
+        if (!emitted) {
+            log_error("mir-tg8: missing raw adapter for variant %u", variant_index);
             abort();
         }
-        MIR_op_t args[LAMBDA_MAX_FUNCTION_ARGS];
-        MIR_type_t arg_types[LAMBDA_MAX_FUNCTION_ARGS];
-        for (uint16_t i = 0; i < key->param_count; i++) {
-            Type* contract = key->param_types[i];
-            TypeId tid = contract ? contract->type_id : LMD_TYPE_ANY;
-            MIR_reg_t value = prepared_params[i];
-            if (tid != LMD_TYPE_TYPE) {
-                value = emit_unbox_contract_lane(mt, value, tid, contract);
-                arg_types[i] = type_to_mir(tid);
-            } else {
-                arg_types[i] = MIR_T_I64;
-            }
-            args[i] = MIR_new_reg_op(mt->ctx, value);
-        }
-        MirCallOptions options = {true, false, 0};
-        MirCallResult direct = em_call_direct(&mt->em, variant_name->str,
-            variant_func, variant_contract, key->param_count, arg_types, args,
-            &options);
-        direct.normal = em_finish_direct_call_normal(&mt->em, direct,
-            MIR_PENDING_REASON_INCOMPATIBLE_RETURN);
         emit_function_return(mt, MIR_new_reg_op(mt->ctx, direct.normal.reg));
-        strbuf_free(variant_name);
         emit_label(mt, fallback);
     }
 }
@@ -33086,7 +33208,7 @@ static void emit_binder_raw_variant_dispatch(MirTranspiler* mt,
 // `_b`'s chain, and every miss falls through to the ordinary public wrapper.
 static MirBinderRawGuardHoist emit_binder_raw_variant_guard_hoist(
         MirTranspiler* mt, AstFuncNode* fn_node, const NativeFuncInfo* parent,
-        const MIR_reg_t* boxed_params, int param_count) {
+        const MIR_reg_t* boxed_params, int param_count, MIR_reg_t choice) {
     MirBinderRawGuardHoist hoist = {};
     if (!mt || !fn_node || !parent || !boxed_params || !parent->raw_variant_count) {
         return hoist;
@@ -33097,52 +33219,83 @@ static MirBinderRawGuardHoist emit_binder_raw_variant_guard_hoist(
             variant_index++) {
         const MirRawVariantKey* key = &parent->raw_variants[variant_index];
         if (key->param_count != param_count) continue;
-        StrBuf* variant_name = strbuf_new_cap(64);
-        write_raw_variant_name(variant_name, fn_node, variant_index);
-        MIR_item_t variant_func = find_local_func(mt, variant_name->str);
-        LocalFuncEntry* variant_entry = find_local_func_entry(mt, variant_name->str);
-        const FnVariantAnalysis* variant_contract =
-            local_func_variant_for_call(variant_entry, variant_name->str);
-        if (!variant_func || !variant_contract) {
-            strbuf_free(variant_name);
-            continue;
-        }
-
         MIR_reg_t matches = emit_binder_raw_variant_key_matches(mt, fn_node,
             key, boxed_params, param_count);
         MIR_label_t fallback = new_label(mt);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
             MIR_new_label_op(mt->ctx, fallback), MIR_new_reg_op(mt->ctx, matches)));
-
-        MIR_op_t args[LAMBDA_MAX_FUNCTION_ARGS];
-        MIR_type_t arg_types[LAMBDA_MAX_FUNCTION_ARGS];
-        for (uint16_t i = 0; i < key->param_count; i++) {
-            Type* contract = key->param_types[i];
-            TypeId type_id = contract ? contract->type_id : LMD_TYPE_ANY;
-            MIR_reg_t value = boxed_params[i];
-            if (type_id != LMD_TYPE_TYPE) {
-                value = emit_unbox_contract_lane(mt, value, type_id, contract);
-                arg_types[i] = type_to_mir(type_id);
-            } else {
-                arg_types[i] = MIR_T_I64;
-            }
-            args[i] = MIR_new_reg_op(mt->ctx, value);
+        bool emitted = false;
+        MirCallResult direct = emit_binder_raw_variant_direct_call(mt, fn_node,
+            key, variant_index, boxed_params, param_count, &emitted);
+        if (!emitted) {
+            emit_label(mt, fallback);
+            continue;
         }
-        MirCallOptions options = {true, false, 0};
-        MirCallResult direct = em_call_direct(&mt->em, variant_name->str,
-            variant_func, variant_contract, key->param_count, arg_types, args,
-            &options);
-        direct.normal = em_finish_direct_call_normal(&mt->em, direct,
-            MIR_PENDING_REASON_INCOMPATIBLE_RETURN);
+        if (choice) {
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, choice),
+                MIR_new_int_op(mt->ctx, variant_index + 1)));
+        }
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, hoist.result), MIR_new_reg_op(mt->ctx, direct.normal.reg)));
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
             MIR_new_label_op(mt->ctx, hoist.done)));
         emit_label(mt, fallback);
         hoist.active = true;
-        strbuf_free(variant_name);
     }
     return hoist;
+}
+
+static NameEntry* mir_binder_raw_guard_cse_binding(AstCallNode* call) {
+    AstNode* argument = call ? ast_unwrap_primary(call->argument) : NULL;
+    if (!call || !call->argument || call->argument->next || !argument ||
+            argument->node_type != AST_NODE_IDENT) return NULL;
+    NameEntry* binding = ((AstIdentNode*)argument)->entry;
+    // The selection belongs to an immutable value, never a `var` place or
+    // in/out parameter that another statement could update (D8.3.4).
+    return binding && !binding->is_mutable && !binding->is_var_param
+        ? binding : NULL;
+}
+
+static bool mir_binder_raw_guard_cse_matches(MirTranspiler* mt,
+        AstCallNode* call, AstFuncNode* fn_node) {
+    return mt && mt->binder_raw_guard_cse_choice &&
+        mt->binder_raw_guard_cse_fn == fn_node &&
+        mt->binder_raw_guard_cse_binding ==
+            mir_binder_raw_guard_cse_binding(call);
+}
+
+// Reuse only the previous exact-key decision. Both source calls remain and
+// execute in order; this is guard CSE, never call-result CSE (D8.3.4, DF16).
+static MirBinderRawGuardHoist emit_binder_raw_variant_guard_cse_dispatch(
+        MirTranspiler* mt, AstFuncNode* fn_node, const NativeFuncInfo* parent,
+        const MIR_reg_t* boxed_params, int param_count, MIR_reg_t choice) {
+    MirBinderRawGuardHoist dispatch = {};
+    if (!mt || !fn_node || !parent || !boxed_params || !choice) return dispatch;
+    dispatch.result = new_reg(mt, "tg8_cse_result", MIR_T_I64);
+    dispatch.done = new_label(mt);
+    for (uint8_t variant_index = 0; variant_index < parent->raw_variant_count;
+            variant_index++) {
+        const MirRawVariantKey* key = &parent->raw_variants[variant_index];
+        if (key->param_count != param_count) continue;
+        MIR_label_t next = new_label(mt);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+            MIR_new_label_op(mt->ctx, next), MIR_new_reg_op(mt->ctx, choice),
+            MIR_new_int_op(mt->ctx, variant_index + 1)));
+        bool emitted = false;
+        MirCallResult direct = emit_binder_raw_variant_direct_call(mt, fn_node,
+            key, variant_index, boxed_params, param_count, &emitted);
+        if (emitted) {
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, dispatch.result),
+                MIR_new_reg_op(mt->ctx, direct.normal.reg)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                MIR_new_label_op(mt->ctx, dispatch.done)));
+            dispatch.active = true;
+        }
+        emit_label(mt, next);
+    }
+    return dispatch;
 }
 
 static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,

@@ -456,7 +456,11 @@ dynamic binder call has bounded raw keys and one unmodified identifier argument
 is lowered into raw and `_b` loop siblings. The shared exact-key chain runs once
 before entry; each matching arm prepares its raw argument once and calls its
 `__rawN` sibling on every trip, while the fallthrough sibling calls only `_b`.
-Straight-line CSE remains deferred. [S1.6, D8.3.4, D8.4.1v2]
+For repeated eligible calls to the same callee with the same identifier inside
+one content sequence, the first guard stores its selected raw index (or boxed
+sentinel); later calls branch on that choice without repeating the exact-key
+chain. The calls themselves still execute. Content/control and side-effect
+boundaries clear the choice. [S1.6, D8.3.4, D8.4.1v2]
 
 ## 4. Hazards and rules of engagement
 
@@ -499,6 +503,7 @@ Straight-line CSE remains deferred. [S1.6, D8.3.4, D8.4.1v2]
 | `type_binder_raw_variants.ls` | P4 | four source-order exact binder keys compile private raw bodies; the fifth distinct key takes `_b`'s boxed fallback |
 | `proc/tg8_loop_hoist.ls` | P4 / D8.3.4 | invariant dynamic binder call enters a one-guard raw or boxed loop sibling; forced-GC JIT agrees with T0 |
 | `proc/tg8_loop_multi_hoist.ls` | P4 / D8.3.4 | bounded exact-key chain enters `__raw0`, `__raw1`, or `_b` loop sibling; forced-GC JIT agrees with T0 |
+| `proc/tg8_guard_cse.ls` | P4 / D8.3.4 | repeated immutable-identifier call reuses raw-index or boxed choice; a `var` reassignment forces a new guard chain |
 
 ## 6. Open design items carried, and what each gates
 
