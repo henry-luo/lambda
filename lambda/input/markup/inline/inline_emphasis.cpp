@@ -16,6 +16,7 @@
 #include "inline_common.hpp"
 extern "C" {
 #include "../../../../lib/log.h"
+#include "../../../../lib/str.h"
 }
 #include <cstring>
 
@@ -312,42 +313,15 @@ static int find_all_runs(const char* text, const char* full_text, DelimRun* runs
             // Find matching ] and check if followed by ( or [
             const char* bracket_start = pos;
             const char* text_start = pos + 1;
-            pos++;
-            int bracket_depth = 1;
-            while (*pos && bracket_depth > 0) {
-                if (*pos == '\\' && *(pos + 1)) {
-                    pos += 2;
-                } else if (*pos == '[') {
-                    bracket_depth++;
-                    pos++;
-                } else if (*pos == ']') {
-                    bracket_depth--;
-                    pos++;
-                } else {
-                    pos++;
-                }
-            }
+            bool bracket_closed = false;
+            pos = str_scan_balanced(bracket_start, '[', ']', true, &bracket_closed);
             const char* text_end = pos - 1;  // points to the ]
             // Check if this is actually a link (followed by ( or [)
-            if (bracket_depth == 0 && (*pos == '(' || *pos == '[')) {
+            if (bracket_closed && (*pos == '(' || *pos == '[')) {
                 // This is a link - skip the link destination/reference too
                 char close_char = (*pos == '(') ? ')' : ']';
-                pos++;
-                int paren_depth = 1;
-                while (*pos && paren_depth > 0) {
-                    if (*pos == '\\' && *(pos + 1)) {
-                        pos += 2;
-                    } else if (*pos == close_char) {
-                        paren_depth--;
-                        pos++;
-                    } else if (*pos == '(' && close_char == ')') {
-                        paren_depth++;
-                        pos++;
-                    } else {
-                        pos++;
-                    }
-                }
-            } else if (bracket_depth == 0 && parser) {
+                pos = str_scan_balanced(pos, *pos, close_char, true, NULL);
+            } else if (bracket_closed && parser) {
                 // Check for shortcut reference link [text] where text matches a link definition
                 // text_start points after [, text_end points to ]
                 const LinkDefinition* def = parser->getLinkDefinition(text_start, text_end - text_start);

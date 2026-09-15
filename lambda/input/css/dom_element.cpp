@@ -55,18 +55,8 @@ static void dom_option_collect_normalized_text(DomNode* node, StrBuf* out,
     if (node->is_text()) {
         DomText* text = node->as_text();
         if (!text || !text->text) return;
-        for (size_t offset = 0; offset < text->length; offset++) {
-            char c = text->text[offset];
-            bool whitespace = c == ' ' || c == '\t' || c == '\n' ||
-                c == '\r' || c == '\f';
-            if (whitespace) {
-                if (!*previous_whitespace) strbuf_append_char(out, ' ');
-                *previous_whitespace = true;
-            } else {
-                strbuf_append_char(out, c);
-                *previous_whitespace = false;
-            }
-        }
+        *previous_whitespace = strbuf_append_collapsed_ascii_whitespace(
+            out, text->text, text->length, true, *previous_whitespace);
         return;
     }
     if (!node->is_element()) return;

@@ -4631,9 +4631,7 @@ static Item pm_resolve_py_import(const char* mod_name, int mod_len,
 
     if (rel_len > 0) {
         strbuf_append_char(base_path, '/');
-        for (int i = 0; i < rel_len; i++) {
-            strbuf_append_char(base_path, rel_name[i] == '.' ? '/' : rel_name[i]);
-        }
+        strbuf_append_replace_char_n(base_path, rel_name, (size_t)rel_len, '.', '/');
     }
 
     Item ns = ItemNull;
@@ -4699,9 +4697,7 @@ static Item pm_resolve_py_import(const char* mod_name, int mod_len,
         strbuf_append_str(entry_path, py_entry_script_dir);
         if (rel_len > 0) {
             strbuf_append_char(entry_path, '/');
-            for (int i = 0; i < rel_len; i++) {
-                strbuf_append_char(entry_path, rel_name[i] == '.' ? '/' : rel_name[i]);
-            }
+            strbuf_append_replace_char_n(entry_path, rel_name, (size_t)rel_len, '.', '/');
         }
         ns = pm_try_load_module(host_execution, entry_path->str);
         strbuf_free(entry_path);
@@ -5493,9 +5489,7 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             int rel_len = mod_len - dot_count;
             if (rel_len > 0) {
                 strbuf_append_char(pkg_dir, '/');
-                for (int i = 0; i < rel_len; i++) {
-                    strbuf_append_char(pkg_dir, rel_name[i] == '.' ? '/' : rel_name[i]);
-                }
+                strbuf_append_replace_char_n(pkg_dir, rel_name, (size_t)rel_len, '.', '/');
             }
         } else if (mod_len > 0) {
             // absolute import (e.g. "from mypkg import submod"):
@@ -5508,9 +5502,7 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                 strbuf_append_str(candidate_dir, ".");
             }
             strbuf_append_char(candidate_dir, '/');
-            for (int i = 0; i < mod_len; i++) {
-                strbuf_append_char(candidate_dir, mod_name[i] == '.' ? '/' : mod_name[i]);
-            }
+            strbuf_append_replace_char_n(candidate_dir, mod_name, (size_t)mod_len, '.', '/');
             // only use it as pkg_dir if it's a package (has __init__.py)
             StrBuf* init_check = strbuf_new();
             strbuf_append_format(init_check, "%s/__init__.py", candidate_dir->str);
@@ -5523,9 +5515,8 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                     strbuf_reset(init_check);
                     candidate_dir = strbuf_new();
                     strbuf_append_format(candidate_dir, "%s/", py_entry_script_dir);
-                    for (int i = 0; i < mod_len; i++) {
-                        strbuf_append_char(candidate_dir, mod_name[i] == '.' ? '/' : mod_name[i]);
-                    }
+                    strbuf_append_replace_char_n(candidate_dir, mod_name,
+                                                 (size_t)mod_len, '.', '/');
                     strbuf_append_format(init_check, "%s/__init__.py", candidate_dir->str);
                     if (pm_file_exists(init_check->str)) {
                         pkg_dir = candidate_dir;

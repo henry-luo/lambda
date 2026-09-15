@@ -240,20 +240,72 @@ void escape_append_json_to(void* out, const char* s, size_t len,
                               append_char, append_str);
 }
 
-void escape_append_js_quoted(StrBuf* out, const char* s, size_t len, char quote) {
-    if (!out || !s) return;
+void escape_append_quoted_to(void* out, const char* s, size_t len, char quote,
+                             EscapeQuotedOptions options,
+                             EscapeAppendCharFn append_char, EscapeAppendStrFn append_str) {
+    if (!out || !s || !append_char || !append_str) return;
     for (size_t i = 0; i < len; i++) {
         char ch = s[i];
-        if (ch == '\\') strbuf_append_str(out, "\\\\");
+        if (ch == '\\') append_str(out, "\\\\");
         else if (ch == quote) {
-            strbuf_append_char(out, '\\');
-            strbuf_append_char(out, quote);
+            append_char(out, '\\');
+            append_char(out, quote);
         }
-        else if (ch == '\n') strbuf_append_str(out, "\\n");
-        else if (ch == '\r') strbuf_append_str(out, "\\r");
-        else if (ch == '\t') strbuf_append_str(out, "\\t");
-        else strbuf_append_char(out, ch);
+        else if (ch == '\r' && (options & ESCAPE_QUOTED_DROP_CARRIAGE_RETURN)) continue;
+        else if (ch == '\b' && (options & ESCAPE_QUOTED_C_CONTROLS)) append_str(out, "\\b");
+        else if (ch == '\f' && (options & ESCAPE_QUOTED_C_CONTROLS)) append_str(out, "\\f");
+        else if (ch == '\n' && (options & ESCAPE_QUOTED_LINE_BREAKS)) append_str(out, "\\n");
+        else if (ch == '\r' && (options & ESCAPE_QUOTED_LINE_BREAKS)) append_str(out, "\\r");
+        else if (ch == '\t' && (options & ESCAPE_QUOTED_LINE_BREAKS)) append_str(out, "\\t");
+        else append_char(out, ch);
     }
+}
+
+void escape_append_js_quoted(StrBuf* out, const char* s, size_t len, char quote) {
+    escape_append_quoted_to(out, s, len, quote, ESCAPE_QUOTED_LINE_BREAKS,
+                            escape_append_char_strbuf, escape_append_str_strbuf);
+}
+
+void escape_append_c_quoted(StrBuf* out, const char* s, size_t len, char quote) {
+    escape_append_quoted_to(out, s, len, quote,
+        (EscapeQuotedOptions)(ESCAPE_QUOTED_LINE_BREAKS | ESCAPE_QUOTED_C_CONTROLS),
+        escape_append_char_strbuf, escape_append_str_strbuf);
+}
+
+void escape_append_stringbuf_quoted(StringBuf* out, const char* s, size_t len,
+                                    char quote, EscapeQuotedOptions options) {
+    escape_append_quoted_to(out, s, len, quote, options,
+                            escape_append_char_stringbuf, escape_append_str_stringbuf);
+}
+
+void escape_append_lambda_quoted_drop_cr(StrBuf* out, const char* s, size_t len,
+                                         char quote) {
+    escape_append_quoted_to(out, s, len, quote,
+        (EscapeQuotedOptions)(ESCAPE_QUOTED_LINE_BREAKS |
+                              ESCAPE_QUOTED_DROP_CARRIAGE_RETURN),
+        escape_append_char_strbuf, escape_append_str_strbuf);
+}
+
+static bool escape_is_js_identifier(const char* s, size_t len) {
+    if (!s || len == 0) return false;
+    char first = s[0];
+    if (!str_is_alpha(first) && first != '_' && first != '$') return false;
+    for (size_t i = 1; i < len; i++) {
+        char c = s[i];
+        if (!str_is_alnum(c) && c != '_' && c != '$') return false;
+    }
+    return true;
+}
+
+void escape_append_js_property_key(StrBuf* out, const char* s, size_t len) {
+    if (!out || !s) return;
+    if (escape_is_js_identifier(s, len)) {
+        strbuf_append_str_n(out, s, len);
+        return;
+    }
+    strbuf_append_char(out, '\'');
+    escape_append_js_quoted(out, s, len, '\'');
+    strbuf_append_char(out, '\'');
 }
 
 void escape_append_html_text(StrBuf* out, const char* s, size_t len) {
@@ -494,64 +546,49 @@ bool escape_append_bash_ansi(StrBuf* out, const char* s, size_t len,
     return true;
 }
 
-void escape_append(StrBuf* out, const char* s, size_t len,
-                   const EscapeRule* rules, int rule_count,
-                   EscapeCtrlMode ctrl_mode) {
-    if (!out || !s) return;
+static void escape_append_common(void* out, const char* s, size_t len,
+                                 const EscapeRule* rules, int rule_count,
+                                 EscapeCtrlMode ctrl_mode,
+                                 EscapeAppendCharFn append_char,
+                                 EscapeAppendStrFn append_str) {
+    if (!out || !s || !append_char || !append_str) return;
 
     char tmp[16];
     for (size_t i = 0; i < len; i++) {
         unsigned char c = (unsigned char)s[i];
         const char* replacement = rules ? escape_find_rule((char)c, rules, rule_count) : NULL;
         if (replacement) {
-            strbuf_append_str(out, replacement);
+            append_str(out, replacement);
             continue;
         }
 
         if (c < 0x20 && c != '\n' && c != '\r' && c != '\t') {
             if (ctrl_mode == ESCAPE_CTRL_JSON_UNICODE) {
                 snprintf(tmp, sizeof(tmp), "\\u%04x", c);
-                strbuf_append_str(out, tmp);
+                append_str(out, tmp);
             } else if (ctrl_mode == ESCAPE_CTRL_XML_NUMERIC) {
                 snprintf(tmp, sizeof(tmp), "&#x%02x;", c);
-                strbuf_append_str(out, tmp);
+                append_str(out, tmp);
             } else if (ctrl_mode != ESCAPE_CTRL_DROP) {
-                strbuf_append_char(out, (char)c);
+                append_char(out, (char)c);
             }
             continue;
         }
 
-        strbuf_append_char(out, (char)c);
+        append_char(out, (char)c);
     }
+}
+
+void escape_append(StrBuf* out, const char* s, size_t len,
+                   const EscapeRule* rules, int rule_count,
+                   EscapeCtrlMode ctrl_mode) {
+    escape_append_common(out, s, len, rules, rule_count, ctrl_mode,
+                         escape_append_char_strbuf, escape_append_str_strbuf);
 }
 
 void escape_append_stringbuf(StringBuf* out, const char* s, size_t len,
                              const EscapeRule* rules, int rule_count,
                              EscapeCtrlMode ctrl_mode) {
-    if (!out || !s) return;
-
-    char tmp[16];
-    for (size_t i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)s[i];
-        const char* replacement = rules ? escape_find_rule((char)c, rules, rule_count) : NULL;
-        if (replacement) {
-            stringbuf_append_str(out, replacement);
-            continue;
-        }
-
-        if (c < 0x20 && c != '\n' && c != '\r' && c != '\t') {
-            if (ctrl_mode == ESCAPE_CTRL_JSON_UNICODE) {
-                snprintf(tmp, sizeof(tmp), "\\u%04x", c);
-                stringbuf_append_str(out, tmp);
-            } else if (ctrl_mode == ESCAPE_CTRL_XML_NUMERIC) {
-                snprintf(tmp, sizeof(tmp), "&#x%02x;", c);
-                stringbuf_append_str(out, tmp);
-            } else if (ctrl_mode != ESCAPE_CTRL_DROP) {
-                stringbuf_append_char(out, (char)c);
-            }
-            continue;
-        }
-
-        stringbuf_append_char(out, (char)c);
-    }
+    escape_append_common(out, s, len, rules, rule_count, ctrl_mode,
+                         escape_append_char_stringbuf, escape_append_str_stringbuf);
 }

@@ -889,22 +889,12 @@ static Item py_str_split(String* s, Item* args, int argc) {
         String* sep = it2s(args[0]);
         if (sep->len == 0) return (Item){.array = result};
 
-        int64_t start = 0;
-        while (start <= s->len) {
-            // find next occurrence of sep
-            int64_t found = -1;
-            for (int64_t i = start; i <= s->len - sep->len; i++) {
-                if (memcmp(s->chars + i, sep->chars, sep->len) == 0) {
-                    found = i;
-                    break;
-                }
-            }
-            if (found < 0) {
-                array_push(result, (Item){.item = s2it(heap_strcpy(s->chars + start, s->len - start))});
-                break;
-            }
-            array_push(result, (Item){.item = s2it(heap_strcpy(s->chars + start, found - start))});
-            start = found + sep->len;
+        StrSplitIter split;
+        str_split_init(&split, s->chars, s->len, sep->chars, sep->len);
+        const char* part;
+        size_t part_len;
+        while (str_split_next(&split, &part, &part_len)) {
+            array_push(result, (Item){.item = s2it(heap_strcpy(part, part_len))});
         }
     }
 
@@ -960,59 +950,37 @@ static Item py_str_replace(String* s, Item* args, int argc) {
     String* new_str = it2s(args[1]);
     if (old_str->len == 0) return (Item){.item = s2it(s)};
 
-    // count occurrences
-    int count = 0;
-    for (int64_t i = 0; i <= s->len - old_str->len; i++) {
-        if (memcmp(s->chars + i, old_str->chars, old_str->len) == 0) count++;
+    if (str_find(s->chars, s->len, old_str->chars, old_str->len) == STR_NPOS) {
+        return (Item){.item = s2it(s)};
     }
-    if (count == 0) return (Item){.item = s2it(s)};
-
-    size_t new_len = s->len + (size_t)count * (new_str->len - old_str->len);
-    char* buf = (char*)mem_alloc(new_len + 1, MEM_CAT_PY_RUNTIME);
-    size_t pos = 0;
-    int64_t i = 0;
-    while (i < s->len) {
-        if (i <= s->len - old_str->len &&
-            memcmp(s->chars + i, old_str->chars, old_str->len) == 0) {
-            memcpy(buf + pos, new_str->chars, new_str->len);
-            pos += new_str->len;
-            i += old_str->len;
-        } else {
-            buf[pos++] = s->chars[i++];
-        }
-    }
-    buf[pos] = '\0';
-
-    Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
-    mem_free(buf);
+    size_t result_len = 0;
+    char* text = str_replace_all(s->chars, s->len, old_str->chars, old_str->len,
+                                 new_str->chars, new_str->len, &result_len);
+    if (!text) return (Item){.item = s2it(s)};
+    Item result = (Item){.item = s2it(heap_strcpy(text, result_len))};
+    free(text);
     return result;
 }
 
 static Item py_str_find(String* s, Item* args, int argc) {
     if (argc == 0 || get_type_id(args[0]) != LMD_TYPE_STRING) return (Item){.item = i2it(-1)};
     String* sub = it2s(args[0]);
-    if (sub->len > s->len) return (Item){.item = i2it(-1)};
-
-    for (int64_t i = 0; i <= s->len - sub->len; i++) {
-        if (memcmp(s->chars + i, sub->chars, sub->len) == 0) {
-            return (Item){.item = i2it(i)};
-        }
-    }
-    return (Item){.item = i2it(-1)};
+    size_t found = str_find(s->chars, s->len, sub->chars, sub->len);
+    return (Item){.item = i2it(found == STR_NPOS ? -1 : (int64_t)found)};
 }
 
 static Item py_str_startswith(String* s, Item* args, int argc) {
     if (argc == 0 || get_type_id(args[0]) != LMD_TYPE_STRING) return (Item){.item = ITEM_FALSE};
     String* prefix = it2s(args[0]);
-    if (prefix->len > s->len) return (Item){.item = ITEM_FALSE};
-    return (Item){.item = b2it(memcmp(s->chars, prefix->chars, prefix->len) == 0)};
+    return (Item){.item = b2it(str_starts_with(s->chars, s->len,
+                                                prefix->chars, prefix->len))};
 }
 
 static Item py_str_endswith(String* s, Item* args, int argc) {
     if (argc == 0 || get_type_id(args[0]) != LMD_TYPE_STRING) return (Item){.item = ITEM_FALSE};
     String* suffix = it2s(args[0]);
-    if (suffix->len > s->len) return (Item){.item = ITEM_FALSE};
-    return (Item){.item = b2it(memcmp(s->chars + s->len - suffix->len, suffix->chars, suffix->len) == 0)};
+    return (Item){.item = b2it(str_ends_with(s->chars, s->len,
+                                              suffix->chars, suffix->len))};
 }
 
 static Item py_str_count(String* s, Item* args, int argc) {
@@ -1020,14 +988,7 @@ static Item py_str_count(String* s, Item* args, int argc) {
     String* sub = it2s(args[0]);
     if (sub->len == 0 || sub->len > s->len) return (Item){.item = i2it(0)};
 
-    int64_t count = 0;
-    for (int64_t i = 0; i <= s->len - sub->len; i++) {
-        if (memcmp(s->chars + i, sub->chars, sub->len) == 0) {
-            count++;
-            i += sub->len - 1; // non-overlapping
-        }
-    }
-    return (Item){.item = i2it(count)};
+    return (Item){.item = i2it(str_count(s->chars, s->len, sub->chars, sub->len))};
 }
 
 static Item py_str_isdigit(String* s) {
@@ -1234,15 +1195,15 @@ extern "C" Item py_string_method(Item str_item, Item method_name, Item* args, in
                         int pad = width - flen;
                         if (align == '<') {
                             strbuf_append_str_n(sb, formatted, flen);
-                            for (int j = 0; j < pad; j++) strbuf_append_char(sb, fill);
+                            strbuf_append_char_n(sb, fill, (size_t)pad);
                         } else if (align == '^') {
                             int left_pad = pad / 2;
                             int right_pad = pad - left_pad;
-                            for (int j = 0; j < left_pad; j++) strbuf_append_char(sb, fill);
+                            strbuf_append_char_n(sb, fill, (size_t)left_pad);
                             strbuf_append_str_n(sb, formatted, flen);
-                            for (int j = 0; j < right_pad; j++) strbuf_append_char(sb, fill);
+                            strbuf_append_char_n(sb, fill, (size_t)right_pad);
                         } else { // '>'
-                            for (int j = 0; j < pad; j++) strbuf_append_char(sb, fill);
+                            strbuf_append_char_n(sb, fill, (size_t)pad);
                             strbuf_append_str_n(sb, formatted, flen);
                         }
                     } else {

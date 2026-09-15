@@ -9,6 +9,7 @@
 #include "../runtime/runtime-state.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../../lib/str.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/arraylist.h"
 #include <mpdecimal.h>  // only included here
@@ -87,13 +88,12 @@ void lambda_finite_double_to_shortest(double d, char* out, int out_size) {
     // to 21 snprintf/sscanf round trips per `a[i]` key conversion.
     if (d < 9007199254740992.0 && d == (double)(int64_t)d) {
         char buf[24];
-        int n = 0;
         uint64_t v = (uint64_t)(int64_t)d;
-        do { buf[n++] = (char)('0' + (int)(v % 10)); v /= 10; } while (v);
+        size_t length = str_uint64_decimal_write(buf, v);
         char* o = out;
         char* end = out + out_size - 1;
         if (neg && o < end) *o++ = '-';
-        while (n > 0 && o < end) *o++ = buf[--n];
+        for (size_t i = 0; i < length && o < end; i++) *o++ = buf[i];
         *o = '\0';
         return;
     }
@@ -470,35 +470,19 @@ static Item decimal_from_string_arena_with_context(const char* str, void* arena_
 // The Decimal struct lives in the arena; the mpd_t* is malloc'd by mpdecimal
 // (not GC-managed). Safe to use from input parsers where GC heap allocation
 // would cause the object to be collected before it can be traced.
-static int decimal_count_literal_significant_digits(const char* str);
 
 Item decimal_from_string_arena(const char* str, void* arena_ptr) {
-    DecimalKind storage_kind = decimal_count_literal_significant_digits(str) >
+    DecimalKind storage_kind = str_decimal_significant_digits(str) >
         DECIMAL_FIXED_PRECISION ? DECIMAL_EXTENDED : DECIMAL_FIXED;
     return decimal_from_string_arena_with_context(str, arena_ptr,
         decimal_fixed_context(), storage_kind);
-}
-
-static int decimal_count_literal_significant_digits(const char* str) {
-    bool seen_nonzero = false;
-    bool saw_digit = false;
-    int digits = 0;
-    for (const char* p = str; p && *p; p++) {
-        char ch = *p;
-        if (ch == 'e' || ch == 'E') break;
-        if (ch < '0' || ch > '9') continue;
-        saw_digit = true;
-        if (ch != '0') seen_nonzero = true;
-        if (seen_nonzero) digits++;
-    }
-    return saw_digit ? (digits > 0 ? digits : 1) : 0;
 }
 
 Item decimal_from_literal_string_arena(const char* str, void* arena_ptr, bool is_integer_literal) {
     if (!str || !arena_ptr) return ItemNull;
 
     bool needs_unlimited = is_integer_literal ||
-        decimal_count_literal_significant_digits(str) > DECIMAL_FIXED_PRECISION;
+        str_decimal_significant_digits(str) > DECIMAL_FIXED_PRECISION;
     mpd_context_t* ctx = needs_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
     DecimalKind storage_kind = is_integer_literal ? DECIMAL_BIGINT :
         (needs_unlimited ? DECIMAL_EXTENDED : DECIMAL_FIXED);

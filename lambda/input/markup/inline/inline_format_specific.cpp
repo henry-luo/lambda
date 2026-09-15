@@ -742,14 +742,9 @@ Item parse_asciidoc_link(MarkupParser* parser, const char** text) {
     const char* text_start = pos;
 
     // Find closing ]
-    int bracket_depth = 1;
-    while (*pos && bracket_depth > 0) {
-        if (*pos == '[') bracket_depth++;
-        else if (*pos == ']') bracket_depth--;
-        pos++;
-    }
-
-    if (bracket_depth != 0) {
+    bool bracket_closed = false;
+    pos = str_scan_balanced(pos - 1, '[', ']', false, &bracket_closed);
+    if (!bracket_closed) {
         return Item{.item = ITEM_UNDEFINED};
     }
 
@@ -820,14 +815,9 @@ Item parse_asciidoc_image(MarkupParser* parser, const char** text) {
     const char* attr_start = pos;
 
     // Find closing ]
-    int bracket_depth = 1;
-    while (*pos && bracket_depth > 0) {
-        if (*pos == '[') bracket_depth++;
-        else if (*pos == ']') bracket_depth--;
-        pos++;
-    }
-
-    if (bracket_depth != 0) {
+    bool bracket_closed = false;
+    pos = str_scan_balanced(pos - 1, '[', ']', false, &bracket_closed);
+    if (!bracket_closed) {
         return Item{.item = ITEM_UNDEFINED};
     }
 

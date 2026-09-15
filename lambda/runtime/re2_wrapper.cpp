@@ -13,6 +13,7 @@
 #endif
 #include "../../lib/re2_glue.hpp"
 #include "../../lib/log.h"
+#include "../../lib/escape.h"
 #include "../../lib/str.h"
 #include "../../lib/string.h"
 #include "../../lib/mempool.h"
@@ -381,19 +382,7 @@ void compile_pattern_to_regex(StrBuf* regex, AstNode* node) {
 
 static void render_pattern_literal(StrBuf* source, String* value) {
     strbuf_append_char(source, '"');
-    if (value) {
-        for (size_t i = 0; i < value->len; i++) {
-            unsigned char c = (unsigned char)value->chars[i];
-            switch (c) {
-            case '\\': strbuf_append_str(source, "\\\\"); break;
-            case '"': strbuf_append_str(source, "\\\""); break;
-            case '\n': strbuf_append_str(source, "\\n"); break;
-            case '\r': strbuf_append_str(source, "\\r"); break;
-            case '\t': strbuf_append_str(source, "\\t"); break;
-            default: strbuf_append_char(source, (char)c); break;
-            }
-        }
-    }
+    if (value) escape_append_js_quoted(source, value->chars, value->len, '"');
     strbuf_append_char(source, '"');
 }
 
@@ -665,32 +654,12 @@ bool compile_script_pattern_definitions(Pool* pool, ArrayList* type_list,
     return ok;
 }
 
-static bool append_literal_type_regex(StrBuf* regex, Type* type) {
-    if (!type) return false;
-    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_SIMPLE) {
-        type = ((TypeType*)type)->type;
-    }
-    if (!type) return false;
-    if (type->type_id == LMD_TYPE_STRING && type->is_literal) {
-        String* literal = ((TypeString*)type)->string;
-        if (!literal) return false;
-        escape_regex_literal(regex, literal);
-        return true;
-    }
-    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY) {
-        TypeBinary* binary = (TypeBinary*)type;
-        if (binary->op != OPERATOR_UNION) return false;
-        strbuf_append_str(regex, "(?:");
-        if (!append_literal_type_regex(regex, binary->left)) return false;
-        strbuf_append_char(regex, '|');
-        if (!append_literal_type_regex(regex, binary->right)) return false;
-        strbuf_append_char(regex, ')');
-        return true;
-    }
-    return false;
-}
+typedef enum {
+    LITERAL_TYPE_REGEX,
+    LITERAL_TYPE_SURFACE
+} LiteralTypeRender;
 
-static bool append_literal_type_surface(StrBuf* surface, Type* type) {
+static bool append_literal_type(StrBuf* output, Type* type, LiteralTypeRender render) {
     if (!type) return false;
     if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_SIMPLE) {
         type = ((TypeType*)type)->type;
@@ -699,17 +668,18 @@ static bool append_literal_type_surface(StrBuf* surface, Type* type) {
     if (type->type_id == LMD_TYPE_STRING && type->is_literal) {
         String* literal = ((TypeString*)type)->string;
         if (!literal) return false;
-        render_pattern_literal(surface, literal);
+        if (render == LITERAL_TYPE_REGEX) escape_regex_literal(output, literal);
+        else render_pattern_literal(output, literal);
         return true;
     }
     if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY) {
         TypeBinary* binary = (TypeBinary*)type;
         if (binary->op != OPERATOR_UNION) return false;
-        strbuf_append_char(surface, '(');
-        if (!append_literal_type_surface(surface, binary->left)) return false;
-        strbuf_append_str(surface, " | ");
-        if (!append_literal_type_surface(surface, binary->right)) return false;
-        strbuf_append_char(surface, ')');
+        strbuf_append_str(output, render == LITERAL_TYPE_REGEX ? "(?:" : "(");
+        if (!append_literal_type(output, binary->left, render)) return false;
+        strbuf_append_str(output, render == LITERAL_TYPE_REGEX ? "|" : " | ");
+        if (!append_literal_type(output, binary->right, render)) return false;
+        strbuf_append_char(output, ')');
         return true;
     }
     return false;
@@ -724,7 +694,7 @@ TypePattern* compile_literal_type_pattern(Pool* pool, Type* type, bool is_symbol
 
     StrBuf* regex = strbuf_new_cap(128);
     strbuf_append_char(regex, '^');
-    if (!append_literal_type_regex(regex, type)) {
+    if (!append_literal_type(regex, type, LITERAL_TYPE_REGEX)) {
         if (error_msg) *error_msg = "type is not a literal string union";
         strbuf_free(regex);
         return nullptr;
@@ -733,7 +703,7 @@ TypePattern* compile_literal_type_pattern(Pool* pool, Type* type, bool is_symbol
 
     StrBuf* surface = strbuf_new_cap(128);
     strbuf_append_str(surface, is_symbol ? "\\symbol(" : "\\(");
-    if (!append_literal_type_surface(surface, type)) {
+    if (!append_literal_type(surface, type, LITERAL_TYPE_SURFACE)) {
         if (error_msg) *error_msg = "type is not a literal string union";
         strbuf_free(regex);
         strbuf_free(surface);

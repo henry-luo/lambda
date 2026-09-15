@@ -4026,6 +4026,11 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
         if (name_len >= sizeof(var_name)) name_len = sizeof(var_name) - 1;
         str_copy(var_name, sizeof(var_name), name_start, name_len);
 
+        bool var_closed = false;
+        const char* var_end = str_scan_balanced(var_start + 3, '(', ')', false,
+                                                &var_closed);
+        if (var_closed) var_end--;
+
         // check for fallback
         const char* fallback = nullptr;
         size_t fallback_len = 0;
@@ -4034,27 +4039,13 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
             // skip whitespace
             p = str_skip_line_space(p);
             fallback = p;
-            // find matching closing paren, accounting for nested parens
-            int paren_depth = 1;
-            while (*p && paren_depth > 0) {
-                if (*p == '(') paren_depth++;
-                else if (*p == ')') { paren_depth--; if (paren_depth == 0) break; }
-                p++;
-            }
-            fallback_len = p - fallback;
+            fallback_len = (size_t)(var_end - fallback);
             // trim trailing whitespace from fallback
             while (fallback_len > 0 && (fallback[fallback_len-1] == ' ' || fallback[fallback_len-1] == '\t'))
                 fallback_len--;
-        } else {
-            // skip to closing paren
-            int paren_depth = 1;
-            while (*p && paren_depth > 0) {
-                if (*p == '(') paren_depth++;
-                else if (*p == ')') { paren_depth--; if (paren_depth == 0) break; }
-                p++;
-            }
         }
 
+        p = var_end;
         if (*p == ')') p++; // skip closing paren
 
         // resolve the variable

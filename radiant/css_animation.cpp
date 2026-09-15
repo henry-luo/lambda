@@ -87,16 +87,7 @@ static float parse_transform_angle(const char** source) {
 
 static const char* skip_css_balanced_block(const char* source) {
     if (!source) return source;
-    while (*source && *source != '{') source++;
-    if (*source != '{') return source;
-    int depth = 1;
-    source++;
-    while (*source && depth > 0) {
-        if (*source == '{') depth++;
-        else if (*source == '}') depth--;
-        source++;
-    }
-    return source;
+    return str_scan_balanced(str_scan_until_char(source, '{'), '{', '}', false, NULL);
 }
 
 static void parse_transform_translate_component(const char** source, float* length,

@@ -3011,16 +3011,8 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
                     strbuf_append_str(script, "math.render_inline(parse(\"");
                 }
 
-                // Escape: \ -> \\, " -> \", newline -> \n, tab -> \t
-                for (size_t k = 0; k < mi->source_len; k++) {
-                    char c = mi->source[k];
-                    if (c == '\\') strbuf_append_str(script, "\\\\");
-                    else if (c == '"') strbuf_append_str(script, "\\\"");
-                    else if (c == '\n') strbuf_append_str(script, "\\n");
-                    else if (c == '\t') strbuf_append_str(script, "\\t");
-                    else if (c == '\r') { /* skip */ }
-                    else strbuf_append_char(script, c);
-                }
+                escape_append_lambda_quoted_drop_cr(script, mi->source,
+                                                     mi->source_len, '"');
 
                 strbuf_append_str(script, "\", {type: \"math\"}))");
                 if (mi->is_display) {

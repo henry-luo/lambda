@@ -143,9 +143,7 @@ void ParseErrorList::formatError(const ParseError& error, size_t index, StrBuf* 
         size_t ctx_len = strlen(error.context_line);
         if (error.location.column > 0 && error.location.column <= ctx_len + 1) {
             strbuf_append_str(buf, "  ");
-            for (size_t i = 1; i < error.location.column; ++i) {
-                strbuf_append_char(buf, ' ');
-            }
+            strbuf_append_char_n(buf, ' ', error.location.column - 1);
             strbuf_append_str(buf, "^\n");
         }
     }

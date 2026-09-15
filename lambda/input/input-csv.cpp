@@ -1,6 +1,7 @@
 #include "input.hpp"
 #include "input-context.hpp"
 #include "../io/mark_builder.hpp"
+#include "../../lib/str.h"
 #include "../../lib/stringbuf.h"
 
 using namespace lambda;
@@ -74,10 +75,10 @@ String* parse_csv_field(InputContext* ctx, const char **csv, char separator, int
             ctx->addError("Unclosed quoted field at line %d, field %d", line_num, field_num);
         }
     } else {
-        while (**csv && **csv != separator && **csv != '\n' && **csv != '\r') {
-            stringbuf_append_char(sb, **csv);
-            (*csv)++;
-        }
+        const char stops[] = {separator, '\n', '\r', '\0'};
+        const char* field_end = str_scan_until_any(*csv, stops);
+        stringbuf_append_str_n(sb, *csv, (size_t)(field_end - *csv));
+        *csv = field_end;
     }
 
     if (sb->length > 0) {

@@ -489,33 +489,7 @@ char* MarkupParser::normalizeLabel(const char* label, size_t len) {
     char* temp = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_MARKUP);
     if (!temp) return nullptr;
 
-    size_t temp_pos = 0;
-    bool in_whitespace = true; // start true to skip leading whitespace
-
-    for (size_t i = 0; i < len; i++) {
-        char c = label[i];
-
-        // Check for whitespace (space, tab, newline)
-        bool is_ws = (c == ' ' || c == '\t' || c == '\n' || c == '\r');
-
-        if (is_ws) {
-            if (!in_whitespace) {
-                // collapse whitespace to single space
-                temp[temp_pos++] = ' ';
-            }
-            in_whitespace = true;
-        } else {
-            temp[temp_pos++] = c;
-            in_whitespace = false;
-        }
-    }
-
-    // trim trailing space
-    if (temp_pos > 0 && temp[temp_pos - 1] == ' ') {
-        temp_pos--;
-    }
-
-    temp[temp_pos] = '\0';
+    size_t temp_pos = str_collapse_ascii_whitespace(temp, len + 1, label, len, false);
 
     // Now apply Unicode case folding using utf8proc
     int folded_len = 0;

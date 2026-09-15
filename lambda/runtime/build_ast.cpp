@@ -3473,7 +3473,6 @@ static Type* build_lit_datetime_from_span(Transpiler* tp, SourceSpan span) {
 
 
 
-static int decimal_literal_significant_digits(const char* str);
 static bool n_literal_is_integer(const char* str);
 
 static bool track_decimal_constant(Transpiler* tp, Decimal* decimal) {
@@ -3616,7 +3615,7 @@ static Type* build_lit_decimal_from_span(Transpiler* tp, SourceSpan span) {
     item_type->decimal = decimal;
 
     bool needs_unlimited_decimal =
-        decimal_literal_significant_digits(num_str) > DECIMAL_FIXED_PRECISION;
+        str_decimal_significant_digits(num_str) > DECIMAL_FIXED_PRECISION;
     DecimalKind storage_kind = is_integer_literal ? DECIMAL_BIGINT :
         (needs_unlimited_decimal ? DECIMAL_EXTENDED : DECIMAL_FIXED);
 
@@ -3664,21 +3663,6 @@ static int parse_sized_int_suffix(const char* str, int len, NumSizedType* out_nu
         if (c1 == 'u' && c2 == '6' && c3 == '4') { *out_num_type = (NumSizedType)0xFE; return 3; } // u64 = UINT64
     }
     return -1;
-}
-
-static int decimal_literal_significant_digits(const char* str) {
-    bool seen_nonzero = false;
-    bool saw_digit = false;
-    int digits = 0;
-    for (const char* p = str; *p; p++) {
-        char ch = *p;
-        if (ch == 'e' || ch == 'E') break;
-        if (ch < '0' || ch > '9') continue;
-        saw_digit = true;
-        if (ch != '0') seen_nonzero = true;
-        if (seen_nonzero) digits++;
-    }
-    return saw_digit ? (digits > 0 ? digits : 1) : 0;
 }
 
 static bool n_literal_is_integer(const char* str) {
@@ -10654,9 +10638,7 @@ static bool append_shipped_package_module_path(StrBuf* path, StrView module) {
     size_t prefix_len = strlen(namespace_prefix);
     StrView physical = {module.str + prefix_len, module.length - prefix_len};
     strbuf_append_format(path, "%s/package/%s", g_lambda_home, source_prefix);
-    for (size_t i = 0; i < physical.length; i++) {
-        strbuf_append_char(path, physical.str[i] == '.' ? '/' : physical.str[i]);
-    }
+    strbuf_append_replace_char_n(path, physical.str, physical.length, '.', '/');
     return true;
 }
 

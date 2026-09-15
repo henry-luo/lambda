@@ -121,7 +121,7 @@ static const char* get_graph_property(const ElementReader& owner, const char* na
 // ============================================================================
 
 static void format_dot_indent(StringBuf* sb, int depth) {
-    for (int i = 0; i < depth; i++) stringbuf_append_str(sb, "    ");
+    if (depth > 0) stringbuf_append_char_n(sb, ' ', (size_t)depth * 4);
 }
 
 static void format_dot_value(StringBuf* sb, const char* value, const char* source_kind) {

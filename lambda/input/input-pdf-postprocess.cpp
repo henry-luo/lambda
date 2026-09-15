@@ -388,12 +388,11 @@ static bool parse_hex_token(const char** pp, const char* end,
     int hex_chars = 0;
     while (s < end && *s != '>') {
         char c = *s++;
-        int d;
-        if (c >= '0' && c <= '9') d = c - '0';
-        else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
-        else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
-        else if (str_is_space(c)) continue;
-        else return false;
+        int d = str_hex_val(c);
+        if (d < 0) {
+            if (str_is_space(c)) continue;
+            return false;
+        }
         if (hex_chars >= 8) return false;  // up to 32 bits
         v = (v << 4) | (uint32_t)d;
         hex_chars++;
@@ -485,12 +484,11 @@ static int parse_bfchar_dst(const char** pp, const char* end,
     uint32_t acc = 0;
     while (s < end && *s != '>') {
         char c = *s++;
-        int d;
-        if (c >= '0' && c <= '9') d = c - '0';
-        else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
-        else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
-        else if (str_is_space(c)) continue;
-        else return 0;
+        int d = str_hex_val(c);
+        if (d < 0) {
+            if (str_is_space(c)) continue;
+            return 0;
+        }
         acc = (acc << 4) | (uint32_t)d;
         hex_chars++;
         // Each unicode code point is 4 hex chars (UTF-16 BE). Surrogate
@@ -964,13 +962,6 @@ static bool osp_is_delim(char c) {
            c == '}' || c == '%';
 }
 
-static int osp_hex_value(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
-}
-
 static String* osp_make_string(Input* input, const char* data, size_t len) {
     return string_from_strview(strview_init(data, len), input->pool);
 }
@@ -984,8 +975,8 @@ static String* osp_parse_name(ObjStreamParser* p) {
     size_t len = 0;
     while (p->pos < p->end && !osp_is_delim(*p->pos)) {
         if (*p->pos == '#' && p->pos + 2 < p->end) {
-            int hi = osp_hex_value(p->pos[1]);
-            int lo = osp_hex_value(p->pos[2]);
+            int hi = str_hex_val(p->pos[1]);
+            int lo = str_hex_val(p->pos[2]);
             if (hi >= 0 && lo >= 0) {
                 buf[len++] = (char)((hi << 4) | lo);
                 p->pos += 3;
@@ -1046,7 +1037,7 @@ static String* osp_parse_hex_string(ObjStreamParser* p) {
     size_t len = 0;
     int hi = -1;
     while (p->pos < p->end && *p->pos != '>') {
-        int v = osp_hex_value(*p->pos++);
+        int v = str_hex_val(*p->pos++);
         if (v < 0) continue;
         if (hi < 0) {
             hi = v;

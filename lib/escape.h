@@ -27,6 +27,13 @@ typedef enum {
 typedef void (*EscapeAppendCharFn)(void* out, char c);
 typedef void (*EscapeAppendStrFn)(void* out, const char* s);
 
+typedef enum {
+    ESCAPE_QUOTED_NONE = 0,
+    ESCAPE_QUOTED_LINE_BREAKS = 1 << 0,
+    ESCAPE_QUOTED_C_CONTROLS = 1 << 1,
+    ESCAPE_QUOTED_DROP_CARRIAGE_RETURN = 1 << 2
+} EscapeQuotedOptions;
+
 /* Decode the shared single-byte C/Python/Ruby escape set. */
 char escape_decode_c_char(char c);
 
@@ -64,7 +71,18 @@ void escape_append_json_stringbuf(StringBuf* out, const char* s, size_t len,
 void escape_append_json_to(void* out, const char* s, size_t len,
                            bool quote, bool escape_utf8_surrogates,
                            EscapeAppendCharFn append_char, EscapeAppendStrFn append_str);
+/* Escape content for a chosen quote delimiter through a byte-output adapter. */
+void escape_append_quoted_to(void* out, const char* s, size_t len, char quote,
+                             EscapeQuotedOptions options,
+                             EscapeAppendCharFn append_char, EscapeAppendStrFn append_str);
 void escape_append_js_quoted(StrBuf* out, const char* s, size_t len, char quote);
+void escape_append_c_quoted(StrBuf* out, const char* s, size_t len, char quote);
+void escape_append_stringbuf_quoted(StringBuf* out, const char* s, size_t len,
+                                    char quote, EscapeQuotedOptions options);
+void escape_append_lambda_quoted_drop_cr(StrBuf* out, const char* s, size_t len,
+                                         char quote);
+/* Append an ASCII JavaScript property key, quoting non-identifiers. */
+void escape_append_js_property_key(StrBuf* out, const char* s, size_t len);
 void escape_append_html_text(StrBuf* out, const char* s, size_t len);
 void escape_append_xml_attr(StrBuf* out, const char* s, size_t len);
 /* Decode Bash ANSI-C escapes; an empty braced hex escape stops literal input. */

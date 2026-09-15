@@ -57,9 +57,7 @@ static void parse_code_span_item(MarkupParser* parser, Element* span,
         increment_element_content_length(span);
         return;
     }
-    for (int i = 0; i < opening_count; i++) {
-        stringbuf_append_char(sb, '`');
-    }
+    stringbuf_append_char_n(sb, '`', (size_t)opening_count);
     *pos = backtick_start + opening_count;
 }
 
@@ -88,15 +86,11 @@ static void parse_emphasis_item(MarkupParser* parser, Element* span, StringBuf* 
     } else {
         stringbuf_reset(sb);
         if (saved_buffer && saved_length > 0) {
-            for (size_t i = 0; i < saved_length; i++) {
-                stringbuf_append_char(sb, saved_buffer[i]);
-            }
+            stringbuf_append_str_n(sb, saved_buffer, saved_length);
         }
         if (copy_advanced_failure && try_pos > *pos) {
-            while (*pos < try_pos) {
-                stringbuf_append_char(sb, **pos);
-                (*pos)++;
-            }
+            stringbuf_append_str_n(sb, *pos, (size_t)(try_pos - *pos));
+            *pos = try_pos;
         } else {
             stringbuf_append_char(sb, **pos);
             (*pos)++;
@@ -507,9 +501,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                     stringbuf_reset(sb);
                 }
                 // Add all tildes as literal text
-                for (int i = 0; i < tilde_count; i++) {
-                    stringbuf_append_char(sb, '~');
-                }
+                stringbuf_append_char_n(sb, '~', (size_t)tilde_count);
                 pos += tilde_count;
                 continue;
             }
@@ -679,9 +671,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
             }
 
             // Not a hard break - add all the spaces to buffer
-            for (int i = 0; i < space_count; i++) {
-                stringbuf_append_char(sb, ' ');
-            }
+            stringbuf_append_char_n(sb, ' ', (size_t)space_count);
             continue;
         }
 

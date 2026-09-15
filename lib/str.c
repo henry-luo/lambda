@@ -558,6 +558,29 @@ void str_rtrim_chars(const char** s, size_t* len,
     *len = n;
 }
 
+size_t str_collapse_ascii_whitespace(char* dst, size_t dst_cap,
+                                     const char* s, size_t len,
+                                     bool include_form_feed) {
+    if (!dst || dst_cap == 0 || !s) return 0;
+
+    size_t out_len = 0;
+    bool previous_whitespace = true;
+    for (size_t i = 0; i < len && out_len + 1 < dst_cap; i++) {
+        char c = s[i];
+        bool whitespace = str_char_is_ascii_space(c) &&
+            (include_form_feed || c != '\f');
+        if (whitespace) {
+            if (!previous_whitespace) dst[out_len++] = ' ';
+        } else {
+            dst[out_len++] = c;
+        }
+        previous_whitespace = whitespace;
+    }
+    if (out_len > 0 && dst[out_len - 1] == ' ') out_len--;
+    dst[out_len] = '\0';
+    return out_len;
+}
+
 void str_trim_chars(const char** s, size_t* len,
                     const char* chars, size_t chars_len) {
     if (!s || !len || !*s || !chars || chars_len == 0) return;
@@ -1310,6 +1333,42 @@ int str_fmt(char* dst, size_t cap, const char* fmt, ...) {
     return n;
 }
 
+size_t str_uint64_decimal_len(uint64_t value) {
+    size_t length = 1;
+    while (value >= 10) {
+        value /= 10;
+        length++;
+    }
+    return length;
+}
+
+size_t str_uint64_decimal_write(char* dst, uint64_t value) {
+    size_t length = str_uint64_decimal_len(value);
+    if (!dst) return length;
+
+    char* cursor = dst + length;
+    do {
+        *--cursor = (char)('0' + value % 10);
+        value /= 10;
+    } while (value > 0);
+    return length;
+}
+
+int str_decimal_significant_digits(const char* value) {
+    bool seen_nonzero = false;
+    bool saw_digit = false;
+    int digits = 0;
+    for (const char* p = value; p && *p; p++) {
+        char c = *p;
+        if (c == 'e' || c == 'E') break;
+        if (!str_char_is_digit(c)) continue;
+        saw_digit = true;
+        if (c != '0') seen_nonzero = true;
+        if (seen_nonzero) digits++;
+    }
+    return saw_digit ? (digits > 0 ? digits : 1) : 0;
+}
+
 char* str_hex_encode(char* dst, const char* s, size_t len) {
     if (!dst || !s) return dst;
     for (size_t i = 0; i < len; i++) {
@@ -1420,6 +1479,43 @@ const char* strn_scan_to_line_end(const char* p, const char* end) {
     return p;
 }
 
+const char* strn_scan_quoted(const char* p, const char* end, char quote,
+                             bool skip_escaped, bool* closed) {
+    if (closed) *closed = false;
+    if (!p || p >= end || *p != quote) return p;
+    p++;
+    while (p < end) {
+        if (skip_escaped && *p == '\\' && p + 1 < end) {
+            p += 2;
+        } else if (*p == quote) {
+            if (closed) *closed = true;
+            return p + 1;
+        } else {
+            p++;
+        }
+    }
+    return p;
+}
+
+const char* strn_scan_balanced(const char* p, const char* end, char open, char close,
+                               bool skip_escaped, bool* closed) {
+    if (closed) *closed = false;
+    if (!p || !end || p >= end || *p != open) return p;
+    size_t depth = 0;
+    while (p < end) {
+        char ch = *p++;
+        if (skip_escaped && ch == '\\' && p < end) {
+            p++;
+        } else if (ch == open) {
+            depth++;
+        } else if (ch == close && --depth == 0) {
+            if (closed) *closed = true;
+            return p;
+        }
+    }
+    return p;
+}
+
 size_t strn_count_run(const char* p, const char* end, char marker) {
     if (!p || marker == '\0') return 0;
     size_t n = 0;
@@ -1468,6 +1564,25 @@ const char* str_scan_until_any(const char* p, const char* stops) {
 const char* str_scan_to_line_end(const char* p) {
     if (!p) return p;
     while (*p && *p != '\n' && *p != '\r') p++;
+    return p;
+}
+
+const char* str_scan_balanced(const char* p, char open, char close,
+                              bool skip_escaped, bool* closed) {
+    if (closed) *closed = false;
+    if (!p || *p != open) return p;
+    size_t depth = 0;
+    while (*p) {
+        char ch = *p++;
+        if (skip_escaped && ch == '\\' && *p) {
+            p++;
+        } else if (ch == open) {
+            depth++;
+        } else if (ch == close && --depth == 0) {
+            if (closed) *closed = true;
+            return p;
+        }
+    }
     return p;
 }
 

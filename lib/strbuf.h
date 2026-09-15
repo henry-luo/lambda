@@ -47,6 +47,13 @@ void strbuf_append_str_n(StrBuf *sb, const char *str, size_t n);
 void strbuf_append_char(StrBuf *sb, char c);
 // append character c n times
 void strbuf_append_char_n(StrBuf *sb, char c, size_t n);
+// append n bytes while replacing each occurrence of `from` with `to`
+void strbuf_append_replace_char_n(StrBuf* sb, const char* str, size_t n,
+                                  char from, char to);
+// append text with ASCII whitespace runs collapsed; returns trailing whitespace state
+bool strbuf_append_collapsed_ascii_whitespace(StrBuf* sb, const char* str,
+                                              size_t n, bool include_form_feed,
+                                              bool previous_whitespace);
 bool strbuf_append_utf8(StrBuf *sb, uint32_t codepoint);
 void strbuf_append_int(StrBuf *buf, int value);
 void strbuf_append_int64(StrBuf *buf, int64_t value);

@@ -41,7 +41,6 @@ static bool js_assert_is_real_regexp(Item value);
 static bool js_assert_is_buffer_value(Item value);
 static void js_assert_append_item_text(StrBuf* sb, Item value);
 static bool js_assert_has_own_property_key(Item object, Item key);
-static void js_assert_append_quoted_key(StrBuf* sb, String* key);
 static bool js_assert_same_property_key(Item left, Item right);
 static bool js_assert_is_plain_diff_object(Item value);
 static bool js_assert_is_arguments_value(Item value);
@@ -763,7 +762,7 @@ static bool js_assert_range_has_char(const char* chars, size_t len, char needle)
 }
 
 static void js_assert_append_spaces(StrBuf* sb, int count) {
-    for (int i = 0; i < count; i++) strbuf_append_char(sb, ' ');
+    if (count > 0) strbuf_append_char_n(sb, ' ', (size_t)count);
 }
 
 static void js_assert_append_long_multiline_string(StrBuf* sb, String* s,
@@ -1127,7 +1126,7 @@ static void js_assert_append_multiline_object_key(StrBuf* sb, Item key) {
         js_assert_append_inspected_value(sb, key);
         return;
     }
-    js_assert_append_quoted_key(sb, ks);
+    escape_append_js_property_key(sb, ks->chars, ks->len);
 }
 
 static bool js_assert_property_is_getter(Item owner, Item key) {
@@ -1899,26 +1898,6 @@ static bool js_assert_date_iso(Item value, StrBuf* sb) {
     return true;
 }
 
-static void js_assert_append_quoted_key(StrBuf* sb, String* key) {
-    if (!key) return;
-    bool identifier = key->len > 0 &&
-        ((key->chars[0] >= 'A' && key->chars[0] <= 'Z') ||
-         (key->chars[0] >= 'a' && key->chars[0] <= 'z') ||
-         key->chars[0] == '_' || key->chars[0] == '$');
-    for (size_t i = 1; identifier && i < key->len; i++) {
-        char ch = key->chars[i];
-        identifier = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
-            (ch >= '0' && ch <= '9') || ch == '_' || ch == '$';
-    }
-    if (identifier) {
-        strbuf_append_str_n(sb, key->chars, key->len);
-    } else {
-        strbuf_append_char(sb, '\'');
-        escape_append_js_quoted(sb, key->chars, key->len, '\'');
-        strbuf_append_char(sb, '\'');
-    }
-}
-
 static void js_assert_append_class_value_with_props(StrBuf* sb, Item value,
                                                     const char* sign, bool regexp) {
     strbuf_append_str(sb, sign);
@@ -1950,7 +1929,7 @@ static void js_assert_append_class_value_with_props(StrBuf* sb, Item value,
         if (js_assert_string_equals(key, "__time__")) continue;
         String* ks = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
         strbuf_append_all(sb, 2, sign, "  ");
-        js_assert_append_quoted_key(sb, ks);
+        if (ks) escape_append_js_property_key(sb, ks->chars, ks->len);
         strbuf_append_str(sb, ": ");
         js_assert_append_inspected_value(sb, js_get_key_default(value, key));
         emitted++;
@@ -2240,13 +2219,13 @@ static Item js_assert_deep_strict_error_message(Item actual, Item expected) {
         strbuf_append_str(sb, " {\n");
         if (actual_has) {
             strbuf_append_str(sb, "+   ");
-            js_assert_append_quoted_key(sb, ks);
+            escape_append_js_property_key(sb, ks->chars, ks->len);
             strbuf_append_str(sb, ": ");
             js_assert_append_inspected_value(sb, actual_value);
             strbuf_append_char(sb, '\n');
         }
         strbuf_append_str(sb, "-   ");
-        js_assert_append_quoted_key(sb, ks);
+        escape_append_js_property_key(sb, ks->chars, ks->len);
         strbuf_append_str(sb, ": ");
         js_assert_append_inspected_value(sb, expected_value);
         strbuf_append_str(sb, "\n  }\n");

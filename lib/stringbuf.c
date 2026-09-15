@@ -1,5 +1,6 @@
 #include "stringbuf.h"
 #include "str.h"
+#include "escape.h"
 #include "grow_capacity.h"
 #include "string.h"
 #include <string.h>
@@ -284,14 +285,7 @@ void stringbuf_vemit(StringBuf *sb, const char *fmt, va_list args) {
             // Use for JSON-style, DOT, and TOML string values.
             const char* s = va_arg(args, const char*);
             stringbuf_append_char(sb, '"');
-            if (s) {
-                while (*s) {
-                    if      (*s == '"')  { stringbuf_append_str(sb, "\\\""); }
-                    else if (*s == '\\') { stringbuf_append_str(sb, "\\\\"); }
-                    else                 { stringbuf_append_char(sb, *s); }
-                    s++;
-                }
-            }
+            if (s) escape_append_stringbuf_quoted(sb, s, strlen(s), '"', ESCAPE_QUOTED_NONE);
             stringbuf_append_char(sb, '"');
             break;
         }
@@ -299,16 +293,7 @@ void stringbuf_vemit(StringBuf *sb, const char *fmt, va_list args) {
             // %Q — bare-quoted Lambda String*: same as %q but for String*.
             String* s = va_arg(args, String*);
             stringbuf_append_char(sb, '"');
-            if (s && s->len > 0) {
-                const char* p2 = s->chars;
-                const char* end = p2 + s->len;
-                while (p2 < end) {
-                    if      (*p2 == '"')  { stringbuf_append_str(sb, "\\\""); }
-                    else if (*p2 == '\\') { stringbuf_append_str(sb, "\\\\"); }
-                    else                  { stringbuf_append_char(sb, *p2); }
-                    p2++;
-                }
-            }
+            if (s) escape_append_stringbuf_quoted(sb, s->chars, s->len, '"', ESCAPE_QUOTED_NONE);
             stringbuf_append_char(sb, '"');
             break;
         }
@@ -407,75 +392,14 @@ StringBuf* stringbuf_dup(const StringBuf *sb) {
     return new_sb;
 }
 
-/*
- * Integer to string functions adapted from strbuf.c
- */
-
-#define P01 10
-#define P02 100
-#define P03 1000
-#define P04 10000
-#define P05 100000
-#define P06 1000000
-#define P07 10000000
-#define P08 100000000
-#define P09 1000000000
-#define P10 10000000000
-#define P11 100000000000
-#define P12 1000000000000
-
-static inline size_t num_of_digits(unsigned long v) {
-  if(v < P01) return 1;
-  if(v < P02) return 2;
-  if(v < P03) return 3;
-  if(v < P12) {
-    if(v < P08) {
-      if(v < P06) {
-        if(v < P04) return 4;
-        return 5 + (v >= P05);
-      }
-      return 7 + (v >= P07);
-    }
-    if(v < P10) {
-      return 9 + (v >= P09);
-    }
-    return 11 + (v >= P11);
-  }
-  return 12 + num_of_digits(v / P12);
-}
-
 void stringbuf_append_ulong(StringBuf *sb, unsigned long value) {
     if (!sb) return;
-
-    static const char digits[201] =
-        "0001020304050607080910111213141516171819"
-        "2021222324252627282930313233343536373839"
-        "4041424344454647484950515253545556575859"
-        "6061626364656667686970717273747576777879"
-        "8081828384858687888990919293949596979899";
-
-    size_t num_digits = num_of_digits(value);
+    size_t length = str_uint64_decimal_len(value);
     size_t new_length;
-    if (!stringbuf_can_append(sb, num_digits, &new_length)) return;
+    if (!stringbuf_can_append(sb, length, &new_length)) return;
 
     if (!stringbuf_ensure_cap(sb, new_length + 1)) return;
-
-    size_t pos = num_digits - 1;
-    char *dst = sb->str->chars + sb->length;    while(value >= 100) {
-        size_t v = value % 100;
-        value /= 100;
-        dst[pos] = digits[v * 2 + 1];
-        dst[pos - 1] = digits[v * 2];
-        pos -= 2;
-    }
-
-    // Handle last 1-2 digits
-    if (value < 10) {
-        dst[pos] = '0' + value;
-    } else {
-        dst[pos] = digits[value * 2 + 1];
-        dst[pos - 1] = digits[value * 2];
-    }
+    str_uint64_decimal_write(sb->str->chars + sb->length, value);
 
     sb->length = new_length;
     sb->str->chars[sb->length] = '\0';
@@ -490,12 +414,13 @@ void stringbuf_append_long(StringBuf *sb, long value) {
     if (!sb) return;
 
     if (value < 0) {
-        // Check if adding the minus sign would cause overflow
         if (sb->length >= STRINGBUF_MAX_LENGTH) {
             return; // Silently fail to prevent corruption
         }
         stringbuf_append_char(sb, '-');
-        value = -value;
+        // Avoid negating LONG_MIN, which cannot be represented as a long.
+        stringbuf_append_ulong(sb, (unsigned long)(-(value + 1)) + 1);
+        return;
     }
     stringbuf_append_ulong(sb, value);
 }
