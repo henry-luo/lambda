@@ -1,6 +1,6 @@
 # Lambda Design: Type Narrowing, Specialization, and Generics
 
-**Status**: PARTIALLY IMPLEMENTED (rev 15, 2026-09-15; TG19 `<:` is implemented in the direct parser, interpreter, and MIR boxed entry; TGO14(a) is CLOSED: its spelling is `<:`; TGO14(c) is CLOSED by S9.2.1's value-semantics covariance ruling. TGO14(b) function-type variance remains open. TG2, TG3, TG5, TG6v2, TG7 boundary admission, TG9, TG13v2, TG15–TG18 are implemented across the interpreter and MIR boxed entry. TG8 has a fixed four-variant raw plan; `_b` retains its ordered exact guards and boxed fallback, including descriptor-pointer guards for named/nominal maps and concrete elements. Statically exact tag-safe local edges select raw bodies directly; `LAMBDA_MIR_TG8_HOIST_GUARDS=1` enables that guard chain at eligible dynamic local edges, selects one of the bounded raw siblings or the `_b` sibling for an invariant identifier call in a synchronous `while`, and shares a raw-index or boxed choice for repeated same-callee/same-identifier calls in one content sequence; every miss falls through to `_b`. rev 8: TG13v2 multiple binder sites for one name = JOIN over the S4.4 lattice + nominal base chain, never unions, two-pass bind-then-check, same bound at every site (single-binder TG4 asymmetry kept as the "dictating parameter" form); TG20v2 static binds the narrowest statically known type, exact bindings authoritative, abstract bindings never elide the runtime check (TG7 and the gradual guarantee hold); TG22 binders confined to `fn`/`pn` signatures for now (levels 2/3 deferred); TG19 relation ratified; expression-position cast `x as T` anticipated (TGO2 note); TG21 explicit type parameters are never elided, TGO3 CLOSED; TG20 two-tier binding RATIFIED, TGO1 CLOSED; TG18 container/unbound binding and TG19 `<:` operator RATIFIED, TGO4/TGO11/TGO13 CLOSED; TGO2 CLOSED — the binder keyword is `as`; TG5 RATIFIED; TG6v2 bound is a direct field of the binder record; TG14v2 inter-binder relations are ordinary `that` value predicates; TG15 `as` precedence; TG16 `that` before `as`; TG17 binder scope, return-position and `var` rules; TGO7 let/var binders confirmed out; TGO11–TGO13 added; Appendix S superseded rulings; Appendix I implementation notes. rev 6, 2026-08-08: TG4 RATIFIED, TG10 three binder levels, TG12 "Type Binder" RATIFIED, TG13 unification road reserved, TG14, §6 catalog → TGO10)
+**Status**: PARTIALLY IMPLEMENTED (rev 15, 2026-09-15; TG19 `<:` is implemented in the direct parser, interpreter, and MIR boxed entry; TGO14(a) is CLOSED: its spelling is `<:`; TGO14(c) is CLOSED by S9.2.1's value-semantics covariance ruling. TGO14(b) function-type variance remains open. TG2, TG3, TG3a's parameter-only `x: as T` shorthand, TG5, TG6v2, TG7 boundary admission, TG9, TG13v2, TG15–TG18 are implemented across the interpreter and MIR boxed entry. TG8 has a fixed four-variant raw plan; `_b` retains its ordered exact guards and boxed fallback, including descriptor-pointer guards for named/nominal maps and concrete elements. Statically exact tag-safe local edges select raw bodies directly; `LAMBDA_MIR_TG8_HOIST_GUARDS=1` enables that guard chain at eligible dynamic local edges, selects one of the bounded raw siblings or the `_b` sibling for an invariant identifier call in a synchronous `while`, and shares a raw-index or boxed choice for repeated same-callee/same-identifier calls in one content sequence; every miss falls through to `_b`. rev 8: TG13v2 multiple binder sites for one name = JOIN over the S4.4 lattice + nominal base chain, never unions, two-pass bind-then-check, same bound at every site (single-binder TG4 asymmetry kept as the "dictating parameter" form); TG20v2 static binds the narrowest statically known type, exact bindings authoritative, abstract bindings never elide the runtime check (TG7 and the gradual guarantee hold); TG22 binders confined to `fn`/`pn` signatures for now (levels 2/3 deferred); TG19 relation ratified; expression-position cast `x as T` anticipated (TGO2 note); TG21 explicit type parameters are never elided, TGO3 CLOSED; TG20 two-tier binding RATIFIED, TGO1 CLOSED; TG18 container/unbound binding and TG19 `<:` operator RATIFIED, TGO4/TGO11/TGO13 CLOSED; TGO2 CLOSED — the binder keyword is `as`; TG5 RATIFIED; TG6v2 bound is a direct field of the binder record; TG14v2 inter-binder relations are ordinary `that` value predicates; TG15 `as` precedence; TG16 `that` before `as`; TG17 binder scope, return-position and `var` rules; TGO7 let/var binders confirmed out; TGO11–TGO13 added; Appendix S superseded rulings; Appendix I implementation notes. rev 6, 2026-08-08: TG4 RATIFIED, TG10 three binder levels, TG12 "Type Binder" RATIFIED, TG13 unification road reserved, TG14, §6 catalog → TGO10)
 **Ledger prefix**: `TG#` (decisions), `TGO#` (open issues)
 **Related**:
 - `doc/Lambda_Formal_Semantics.md` — S1.6 (representation invisible), S1.7 (one
@@ -264,6 +264,32 @@ library code will actually write. The desugaring is **explanatory**: it
 fixes the meaning, not the enforcement mechanism — the bound is checked
 directly from the binder record (TG6v2), never by evaluating a `that`
 predicate. The keyword `as` is ratified (TGO2 closed 2026-09-15).
+
+#### TG3a — Leading `as T` means the ordinary parameter domain **[RATIFIED 2026-09-15]**
+
+When the bound would otherwise be the implicit parameter contract, a function
+parameter may write `x: as T`. It is exact sugar for `x: any ! error as T`:
+the binder sees every non-error argument and selects its narrowest type
+(S4.2.2), while an error remains outside the binder exactly as for an
+unannotated parameter. The leading spelling is admitted only immediately
+after `:` on a non-optional `fn`/`pn` parameter; optional binders retain their
+TG17 spelling until their unbound-frame completion is implemented. It is not
+a general type atom, and therefore does not alter declaration, schema,
+return-type, nested-type, or future-cast syntax. The parser elaborates it
+directly to the ordinary binder record; no separate runtime, inference, or
+specialization rule exists. [S4.2.2, S11.4.8v2, D3.3.3v3]
+
+#### TG3b — System functions declare result relations, not binders **[RATIFIED 2026-09-15]**
+
+A system-function row may be described with the same source-level relationship
+as a binder — for example `fill(n: int, value: as T) T[]` — but it does not
+introduce `T` into a body or allocate a runtime binder environment. The native
+system function has no Lambda body to specialize. Instead, registry metadata
+selects a call argument and instantiates an audited result pattern from its
+inferred type. `fill` constructs `T[]` from its value argument; collection
+transforms retain only source families the runtime retains, so a range result
+is an array rather than a fictitious range. This is static result propagation,
+not generic-function invocation. [S11.4.9, D3.3.5, SI3v2]
 
 #### TG4 — First-occurrence-binds; no unification **[RATIFIED 2026-08-08]**
 

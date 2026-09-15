@@ -34,7 +34,8 @@ pn make_variant(base: string[], side: string) string[] {
     lines
 }
 
-fn word_at(words: string[], index: int) string =>
+// S11.4.8v2/D8.3.1v2: direct split-result calls select the string-array raw variant.
+fn word_at(words: string[] as W, index: int) string =>
     if (index < len(words)) words[index] else ""
 
 pn merge_words(base_line: string, left_line: string, right_line: string) string {

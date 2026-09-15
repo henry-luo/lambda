@@ -238,6 +238,21 @@ TEST(InterpWalker, TypeBinderContractsAgreeAcrossAllTiers) {
     EXPECT_EQ(interp.exit_code, 0);
     EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
 
+    // S11.4.8v2/D3.1.4v2: leading `as T` shares the ordinary non-error
+    // boundary and binder representation in every tier.
+    const char* leading_path = "test/lambda/type_binder_leading.ls";
+    RunResult leading_default = run_script(leading_path, NULL);
+    RunResult leading_jit = run_script(leading_path, "jit");
+    RunResult leading_interp = run_script(leading_path, "interp");
+    EXPECT_EQ(trim_trailing(leading_default.stdout_text), "[int, string, float]");
+    EXPECT_EQ(trim_trailing(leading_default.stdout_text),
+        trim_trailing(leading_jit.stdout_text));
+    EXPECT_EQ(trim_trailing(leading_default.stdout_text),
+        trim_trailing(leading_interp.stdout_text));
+    EXPECT_EQ(leading_default.exit_code, 0);
+    EXPECT_EQ(leading_jit.exit_code, 0);
+    EXPECT_EQ(leading_interp.exit_code, 0);
+
     // D8.3.1v2: the fifth exact key crosses the bounded raw-variant cap;
     // direct scalar and shape-guarded container-pointer edges stay tier-identical.
     const char* raw_variant_path = "test/lambda/type_binder_raw_variants.ls";

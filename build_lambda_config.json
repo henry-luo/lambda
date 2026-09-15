@@ -34,6 +34,7 @@
     "lambda/format",
     "lambda/validator",
     "lambda/js",
+    "lambda/js/mvp",
     "lambda/dom",
     "lambda/dom/realm",
     "lambda/module/radiant",
@@ -640,6 +641,7 @@
       "lang": "c++17",
       "source_patterns": [
         "lambda/js/*.cpp",
+        "lambda/js/mvp/*.cpp",
         "lambda/dom/*.cpp",
         "lambda/dom/realm/*.cpp",
         "lambda/jube/*.cpp",
@@ -1165,6 +1167,7 @@
         "lambda/format",
         "lambda/validator",
         "lambda/js",
+        "lambda/js/mvp",
         "lambda/dom",
         "lambda/network",
         "lambda/serve"
@@ -4629,6 +4632,41 @@
               "gtest_main"
             ],
             "requires_lambda_exe": true,
+            "icon": "\ud83e\uddee"
+          },
+          {
+            "source": "test/test_js_mvp_gtest.cpp",
+            "name": "JS MVP Runtime Tests",
+            "dependencies": [
+              "lambda-rt",
+              "node-core",
+              "radiant"
+            ],
+            "binary": "test_js_mvp_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "macos": {
+              "libraries": [
+                "CoreFoundation",
+                "CoreServices",
+                "SystemConfiguration",
+                "Cocoa",
+                "IOKit",
+                "CoreVideo",
+                "AVFoundation",
+                "CoreMedia",
+                "GL",
+                "Foundation",
+                "CoreGraphics",
+                "Accelerate",
+                "CoreText",
+                "AppKit",
+                "Carbon",
+                "WebKit"
+              ]
+            },
             "icon": "\ud83e\uddee"
           },
           {
