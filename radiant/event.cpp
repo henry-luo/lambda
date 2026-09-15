@@ -1786,8 +1786,7 @@ public:
         }
         StrBuf* classes = strbuf_new_cap(64);
         for (int i = 0; i < element->class_count; i++) {
-            if (i > 0) strbuf_append_char(classes, ' ');
-            strbuf_append_str(classes, element->class_names[i]);
+            strbuf_append_all(classes, 2, i > 0 ? " " : "", element->class_names[i]);
         }
         put(name, classes->str);
         strbuf_free(classes);

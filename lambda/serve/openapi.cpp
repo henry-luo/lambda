@@ -102,8 +102,7 @@ static void append_path_parameters(StrBuf *buf, const char *pattern, int *first)
             memcpy(name, name_start, name_len);
             name[name_len] = '\0';
 
-            strbuf_append_str(buf, "{\"name\":\"");
-            strbuf_append_str(buf, name);
+            strbuf_append_all(buf, 2, "{\"name\":\"", name);
             strbuf_append_str(buf, "\",\"in\":\"path\",\"required\":true,\"schema\":{\"type\":\"string\"}}");
 
             if (!*p) break;
@@ -206,8 +205,7 @@ const char* openapi_generate_spec(OpenApiContext *ctx) {
             method_first = 0;
 
             strbuf_append_char(buf, '"');
-            strbuf_append_str(buf, method_string(ep->method));
-            strbuf_append_str(buf, "\":{");
+            strbuf_append_all(buf, 2, method_string(ep->method), "\":{");
 
             // summary
             if (ep->meta.summary) {
@@ -271,15 +269,14 @@ const char* openapi_generate_spec(OpenApiContext *ctx) {
                 (ep->method == HTTP_POST || ep->method == HTTP_PUT || ep->method == HTTP_PATCH)) {
                 strbuf_append_str(buf, ",\"requestBody\":{\"required\":true,"
                     "\"content\":{\"application/json\":{\"schema\":");
-                strbuf_append_str(buf, ep->meta.request_schema);
-                strbuf_append_str(buf, "}}}");
+                strbuf_append_all(buf, 2, ep->meta.request_schema, "}}}");
             }
 
             // responses
             strbuf_append_str(buf, ",\"responses\":{\"200\":{\"description\":\"Success\"");
             if (ep->meta.response_schema) {
-                strbuf_append_str(buf, ",\"content\":{\"application/json\":{\"schema\":");
-                strbuf_append_str(buf, ep->meta.response_schema);
+                strbuf_append_all(buf, 2, ",\"content\":{\"application/json\":{\"schema\":",
+                                  ep->meta.response_schema);
                 strbuf_append_str(buf, "}}");
             }
             strbuf_append_str(buf, "}}");

@@ -4906,8 +4906,7 @@ static void svg_subscene_serialize_element(StrBuf* out, Element* root,
     if (!tag) return;
 
     bool is_image = strcmp(tag, "image") == 0;
-    strbuf_append_char(out, '<');
-    strbuf_append_str(out, tag);
+    strbuf_append_all(out, 2, "<", tag);
 
     const Element* e = elem.element();
     if (e && e->type && e->data) {
@@ -4978,15 +4977,13 @@ static void svg_subscene_serialize_element(StrBuf* out, Element* root,
         }
     }
 
-    strbuf_append_str(out, "</");
-    strbuf_append_str(out, tag);
+    strbuf_append_all(out, 2, "</", tag);
     strbuf_append_char(out, '>');
 }
 
 static void svg_subscene_append_color_attr(StrBuf* out, const char* name, Color color) {
     strbuf_append_char(out, ' ');
-    strbuf_append_str(out, name);
-    strbuf_append_str(out, "=\"");
+    strbuf_append_all(out, 2, name, "=\"");
     if (color.a == 0) {
         strbuf_append_str(out, "transparent");
     } else if (color.a == 255) {

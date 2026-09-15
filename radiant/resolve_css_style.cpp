@@ -483,8 +483,7 @@ static void resolve_origin_list(LayoutContext* lycon, CssPropertyCode property,
 
 static void append_counter_text(StringBuf* buffer, const char* text) {
     if (!text) return;
-    if (buffer->length > 0) stringbuf_append_char(buffer, ' ');
-    stringbuf_append_str(buffer, text);
+    stringbuf_append_all(buffer, 2, buffer->length > 0 ? " " : "", text);
 }
 
 static void append_counter_value(StringBuf* buffer, const CssValue* value,

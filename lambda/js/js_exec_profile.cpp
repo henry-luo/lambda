@@ -116,8 +116,7 @@ void js_opt_trace_dump(void) {
     }
     strbuf_append_str(buf, " reasons=");
     for (int i = 0; i < JS_OPT_REASON_COUNT; i++) {
-        if (i != 0) strbuf_append_char(buf, ',');
-        strbuf_append_str(buf, g_js_opt_reason_names[i]);
+        strbuf_append_all(buf, 2, i != 0 ? "," : "", g_js_opt_reason_names[i]);
         strbuf_append_format(buf, "=%llu",
             (unsigned long long)g_js_opt_trace_reason_counts[i]);
     }

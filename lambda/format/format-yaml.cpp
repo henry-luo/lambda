@@ -288,15 +288,13 @@ String* format_yaml(Pool* pool, Item root_item) {
             }
         } else {
             // Single document array
-            stringbuf_append_str(ctx.output(), "---\n");
-            stringbuf_append_str(ctx.output(), "# yaml formatted output\n");
+            stringbuf_append_all(ctx.output(), 2, "---\n", "# yaml formatted output\n");
             format_item_reader(ctx, reader, 0);
             stringbuf_append_char(ctx.output(), '\n');
         }
     } else {
         // Single document
-        stringbuf_append_str(ctx.output(), "---\n");
-        stringbuf_append_str(ctx.output(), "# yaml formatted output\n");
+        stringbuf_append_all(ctx.output(), 2, "---\n", "# yaml formatted output\n");
         format_item_reader(ctx, reader, 0);
         stringbuf_append_char(ctx.output(), '\n');
     }

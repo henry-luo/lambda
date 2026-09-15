@@ -1,4 +1,5 @@
 #include "js_c_ast_helpers.hpp"
+#include "../../lib/string.h"
 #include "../ts/ts_ast.hpp"
 #include "../../lib/mempool.h"
 #include "../../lib/mem.h"
@@ -342,13 +343,8 @@ JsAstNode* build_js_literal_from_source(JsTranspiler* tp, const char* node_type,
             temp_str[j] = '\0';
             // For BigInt literals, store as string to preserve arbitrary precision
             if (literal->is_bigint) {
-                // allocate a String on the AST pool (heap_create_name may not be available yet)
-                String* s = (String*)pool_alloc(tp->pool, sizeof(String) + j + 1);
-                s->len = j;
-                s->flags = 0;
-                memcpy(s->chars, temp_str, j);
-                s->chars[j] = '\0';
-                literal->bigint_str = s;
+                // Copy the normalized literal into the AST pool.
+                literal->bigint_str = string_from_strview(strview_init(temp_str, j), tp->pool);
             }
             {
                 char* endptr;

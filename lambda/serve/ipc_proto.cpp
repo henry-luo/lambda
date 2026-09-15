@@ -29,8 +29,7 @@ char* ipc_build_request(HttpRequest* req, int request_id) {
     strbuf_append_str(buf, "{\"type\":\"request\",\"id\":");
     strbuf_append_int(buf, request_id);
 
-    strbuf_append_str(buf, ",\"method\":\"");
-    strbuf_append_str(buf, http_method_to_string(req->method));
+    strbuf_append_all(buf, 2, ",\"method\":\"", http_method_to_string(req->method));
     strbuf_append_char(buf, '"');
 
     strbuf_append_str(buf, ",\"path\":");

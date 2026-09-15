@@ -161,11 +161,7 @@ extern "C" Item js_https_agent_getName(Item options) {
     }
 
     StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, host);
-    strbuf_append_char(sb, ':');
-    strbuf_append_str(sb, port);
-    strbuf_append_char(sb, ':');
-    strbuf_append_str(sb, local_addr);
+    strbuf_append_all(sb, 5, host, ":", port, ":", local_addr);
 
     agent_key_segment(sb, options, "ca");
     agent_key_segment(sb, options, "cert");

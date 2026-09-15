@@ -4,28 +4,12 @@
 #include "str.h"
 #include "string.h"
 
-/* Simple string creation helper */
-String* create_string(Pool* pool, const char* str) {
-    if (!str || !pool) return NULL;
+typedef void* (*StringAllocFn)(void* owner, size_t size);
 
-    size_t len = strlen(str);
-    String* string = (String*)pool_calloc(pool, sizeof(String) + len + 1);
-    if (!string) return NULL;
-
-    string->len = (uint32_t)len;
-    string->flags = 0;
-    string->is_ascii = str_is_ascii(str, len) ? 1 : 0;
-    str_copy(string->chars, len + 1, str, len);
-
-    return string;
-}
-
-/* Create string from StrView */
-String* string_from_strview(StrView view, Pool* pool) {
-    if (!view.str || !pool) return NULL;
-    // Allow empty strings (length == 0)
-
-    String* string = (String*)pool_calloc(pool, sizeof(String) + view.length + 1);
+static String* string_from_strview_alloc(StrView view, void* owner, StringAllocFn allocator) {
+    if (!view.str || !owner || !allocator || view.length > UINT32_MAX ||
+        view.length > SIZE_MAX - sizeof(String) - 1) return NULL;
+    String* string = (String*)allocator(owner, sizeof(String) + view.length + 1);
     if (!string) return NULL;
 
     string->len = (uint32_t)view.length;
@@ -39,6 +23,41 @@ String* string_from_strview(StrView view, Pool* pool) {
     }
 
     return string;
+}
+
+static void* string_pool_alloc(void* owner, size_t size) {
+    return pool_calloc((Pool*)owner, size);
+}
+
+static void* string_arena_alloc(void* owner, size_t size) {
+    return arena_alloc((Arena*)owner, size);
+}
+
+typedef struct {
+    MemCategory category;
+} StringMemAllocator;
+
+static void* string_mem_alloc(void* owner, size_t size) {
+    return mem_alloc(size, ((StringMemAllocator*)owner)->category);
+}
+
+/* Simple string creation helper */
+String* create_string(Pool* pool, const char* str) {
+    return string_from_strview(strview_init(str, str ? strlen(str) : 0), pool);
+}
+
+/* Create string from StrView */
+String* string_from_strview(StrView view, Pool* pool) {
+    return string_from_strview_alloc(view, pool, string_pool_alloc);
+}
+
+String* string_from_strview_arena(StrView view, Arena* arena) {
+    return string_from_strview_alloc(view, arena, string_arena_alloc);
+}
+
+String* string_from_strview_mem(StrView view, MemCategory category) {
+    StringMemAllocator allocator = {category};
+    return string_from_strview_alloc(view, &allocator, string_mem_alloc);
 }
 
 /* Equality: two String* by content */

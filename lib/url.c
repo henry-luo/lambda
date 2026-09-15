@@ -682,8 +682,25 @@ int url_hex_to_int(char c) {
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
     return -1;
 }
-// keep backward-compatible static alias
-static int hex_to_int(char c) { return url_hex_to_int(c); }
+size_t url_decode_lenient_write(const char* str, size_t len, bool form, char* out) {
+    if (!str || !out) return 0;
+    size_t i = 0, j = 0;
+    while (i < len) {
+        char c = str[i];
+        if (c == '%' && i + 2 < len) {
+            int high = url_hex_to_int(str[i + 1]);
+            int low = url_hex_to_int(str[i + 2]);
+            if (high >= 0 && low >= 0) {
+                out[j++] = (char)((high << 4) | low);
+                i += 3;
+                continue;
+            }
+        }
+        out[j++] = form && c == '+' ? ' ' : c;
+        i++;
+    }
+    return j;
+}
 
 // URL decode a string (decode percent-encoded characters)
 static char* url_decode(const char* str) {
@@ -692,21 +709,8 @@ static char* url_decode(const char* str) {
     size_t len = strlen(str);
     char* decoded = mem_alloc(len + 1, MEM_CAT_TEMP);  // decoded string will be same size or smaller
     if (!decoded) return NULL;
-
-    size_t i = 0, j = 0;
-    while (i < len) {
-        if (str[i] == '%' && i + 2 < len) {
-            int high = hex_to_int(str[i + 1]);
-            int low = hex_to_int(str[i + 2]);
-            if (high >= 0 && low >= 0) {
-                decoded[j++] = (char)((high << 4) | low);
-                i += 3;
-                continue;
-            }
-        }
-        decoded[j++] = str[i++];
-    }
-    decoded[j] = '\0';
+    size_t decoded_len = url_decode_lenient_write(str, len, false, decoded);
+    decoded[decoded_len] = '\0';
     return decoded;
 }
 
@@ -1026,23 +1030,9 @@ char* url_decode_form(const char* str, size_t len, size_t* out_len) {
     if (!str) return NULL;
     char* decoded = mem_alloc(len + 1, MEM_CAT_TEMP);
     if (!decoded) return NULL;
-    size_t i = 0, j = 0;
-    while (i < len) {
-        char c = str[i];
-        if (c == '%' && i + 2 < len) {
-            int high = url_hex_to_int(str[i + 1]);
-            int low  = url_hex_to_int(str[i + 2]);
-            if (high >= 0 && low >= 0) {
-                decoded[j++] = (char)((high << 4) | low);
-                i += 3;
-                continue;
-            }
-        }
-        if (c == '+') { decoded[j++] = ' '; i++; }
-        else          { decoded[j++] = c;   i++; }
-    }
-    decoded[j] = '\0';
-    if (out_len) *out_len = j;
+    size_t decoded_len = url_decode_lenient_write(str, len, true, decoded);
+    decoded[decoded_len] = '\0';
+    if (out_len) *out_len = decoded_len;
     return decoded;
 }
 
@@ -1050,23 +1040,9 @@ char* url_decode_form(const char* str, size_t len, size_t* out_len) {
 // copied through). Decodes onto the same buffer; never grows. Returns new length.
 size_t url_decode_inplace(char* buf, bool form) {
     if (!buf) return 0;
-    char* src = buf;
-    char* dst = buf;
-    while (*src) {
-        if (*src == '%' && src[1] && src[2]) {
-            int hi = url_hex_to_int(src[1]);
-            int lo = url_hex_to_int(src[2]);
-            if (hi >= 0 && lo >= 0) {
-                *dst++ = (char)((hi << 4) | lo);
-                src += 3;
-                continue;
-            }
-        }
-        if (form && *src == '+') { *dst++ = ' '; src++; }
-        else                     { *dst++ = *src++; }
-    }
-    *dst = '\0';
-    return (size_t)(dst - buf);
+    size_t decoded_len = url_decode_lenient_write(buf, strlen(buf), form, buf);
+    buf[decoded_len] = '\0';
+    return decoded_len;
 }
 
 bool url_text_path_has_ext_ci(const char* href, const char* ext) {

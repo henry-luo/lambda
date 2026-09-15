@@ -102,8 +102,7 @@ static Item parse_rst_literal_block(MarkupParser* parser) {
     StringBuf* sb = parser->sb;
     stringbuf_reset(sb);
     for (int i = 0; i < code_lines->length; i++) {
-        if (i > 0) stringbuf_append_char(sb, '\n');
-        stringbuf_append_str(sb, (const char*)code_lines->data[i]);
+        stringbuf_append_all(sb, 2, i > 0 ? "\n" : "", (const char*)code_lines->data[i]);
     }
     arraylist_free(code_lines);
 
@@ -401,8 +400,7 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
             }
 
             // CommonMark: Add newline between lines (soft line break), not space
-            stringbuf_append_char(sb, '\n');
-            stringbuf_append_str(sb, content);
+            stringbuf_append_all(sb, 2, "\n", content);
             parser->current_line++;
         }
     }

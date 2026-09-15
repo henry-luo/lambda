@@ -79,37 +79,13 @@ static Item node_querystring_root_value(const uint64_t* slot) {
 static char* node_querystring_decode_or_copy(const char* text, size_t length,
                                              size_t* out_length);
 
-static int node_querystring_hex_value(unsigned char byte) {
-    if (byte >= '0' && byte <= '9') return byte - '0';
-    if (byte >= 'a' && byte <= 'f') return byte - 'a' + 10;
-    if (byte >= 'A' && byte <= 'F') return byte - 'A' + 10;
-    return -1;
-}
-
 static char* node_querystring_percent_decode(const char* text, size_t length,
                                              bool decode_spaces, size_t* out_length) {
     char* decoded = (char*)mem_alloc(length + 1, MEM_CAT_TEMP);
     if (!decoded) return NULL;
-    size_t write_index = 0;
-    for (size_t read_index = 0; read_index < length; read_index++) {
-        unsigned char byte = (unsigned char)text[read_index];
-        if (byte == '+' && decode_spaces) {
-            decoded[write_index++] = ' ';
-            continue;
-        }
-        if (byte == '%' && read_index + 2 < length) {
-            int high = node_querystring_hex_value((unsigned char)text[read_index + 1]);
-            int low = node_querystring_hex_value((unsigned char)text[read_index + 2]);
-            if (high >= 0 && low >= 0) {
-                decoded[write_index++] = (char)((high << 4) | low);
-                read_index += 2;
-                continue;
-            }
-        }
-        decoded[write_index++] = (char)byte;
-    }
-    decoded[write_index] = '\0';
-    if (out_length) *out_length = write_index;
+    size_t decoded_length = url_decode_lenient_write(text, length, decode_spaces, decoded);
+    decoded[decoded_length] = '\0';
+    if (out_length) *out_length = decoded_length;
     return decoded;
 }
 
@@ -398,24 +374,8 @@ extern "C" Item node_querystring_unescape_buffer(Item str_item, Item decode_spac
 
     bool decode_spaces = node_querystring_host->script->is_truthy(
         node_querystring_root_value(spaces_root));
-    size_t write_index = 0;
-    for (size_t read_index = 0; read_index < source_length; read_index++) {
-        unsigned char byte = (unsigned char)source[read_index];
-        if (byte == '+' && decode_spaces) {
-            output[write_index++] = ' ';
-            continue;
-        }
-        if (byte == '%' && read_index + 2 < source_length) {
-            int high = node_querystring_hex_value((unsigned char)source[read_index + 1]);
-            int low = node_querystring_hex_value((unsigned char)source[read_index + 2]);
-            if (high >= 0 && low >= 0) {
-                output[write_index++] = (uint8_t)((high << 4) | low);
-                read_index += 2;
-                continue;
-            }
-        }
-        output[write_index++] = byte;
-    }
+    size_t write_index = url_decode_lenient_write(source, source_length, decode_spaces,
+                                                   (char*)output);
 
     Item buffer = node_querystring_host->node->binary->buffer_from_bytes(output,
                                                                             (int)write_index);

@@ -129,11 +129,9 @@ void css_engine_set_viewport(CssEngine* engine, double width, double height) {
 void css_engine_set_color_scheme(CssEngine* engine, const char* scheme) {
     if (!engine || !scheme) return;
 
-    // Copy scheme string
-    size_t len = strlen(scheme);
-    char* scheme_copy = (char*)pool_alloc(engine->pool, len + 1);
+    // retain the scheme in the engine-owned pool
+    char* scheme_copy = pool_strdup(engine->pool, scheme);
     if (scheme_copy) {
-        str_copy(scheme_copy, len + 1, scheme, len);
         engine->context.color_scheme = scheme_copy;
     }
 }
@@ -161,10 +159,8 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
 
     // Set stylesheet metadata
     if (base_url) {
-        size_t url_len = strlen(base_url);
-        char* url_copy = (char*)pool_alloc(engine->pool, url_len + 1);
+        char* url_copy = pool_strdup(engine->pool, base_url);
         if (url_copy) {
-            str_copy(url_copy, url_len + 1, base_url, url_len);
             stylesheet->origin_url = url_copy;
         }
     }
@@ -650,9 +646,8 @@ static bool css_evaluate_supports_span(CssEngine* engine, CssConditionSpan span)
     css_condition_outer_parens(&span);
     span = css_condition_trim(span);
     if (span.length == 0) return false;
-    char* declaration = (char*)pool_alloc(engine->pool, span.length + 1);
+    char* declaration = pool_dup_n(engine->pool, span.start, span.length);
     if (!declaration) return false;
-    str_copy(declaration, span.length + 1, span.start, span.length);
     CssDeclaration* parsed = css_parse_declaration_text(
         declaration, span.length, engine->pool);
     return css_declaration_is_supported(parsed);
@@ -674,10 +669,8 @@ bool css_evaluate_media_query(CssEngine* engine, const char* media_query) {
 #endif
 
     // Make a copy we can modify
-    size_t len = strlen(media_query);
-    char* query = (char*)pool_alloc(engine->pool, len + 1);
+    char* query = pool_strdup(engine->pool, media_query);
     if (!query) return false;
-    str_copy(query, len + 1, media_query, len);
 
     // Handle comma-separated queries (OR logic)
     char* saveptr1;
@@ -716,9 +709,8 @@ bool css_evaluate_media_query(CssEngine* engine, const char* media_query) {
 
         // Split by 'and' (AND logic within a query)
         // Make another copy for tokenizing by 'and'
-        char* and_copy = (char*)pool_alloc(engine->pool, strlen(query_part) + 1);
+        char* and_copy = pool_strdup(engine->pool, query_part);
         if (!and_copy) return false;
-        str_copy(and_copy, strlen(query_part) + 1, query_part, strlen(query_part));
 
         // Replace " and " with null terminators to split
         char* condition = and_copy;

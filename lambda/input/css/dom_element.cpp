@@ -144,13 +144,7 @@ static String* dom_create_mutation_string(MarkBuilder* builder, const char* cont
     }
 
     // dom text mutations need a real empty string, while normal Lambda "" maps to null.
-    String* s = (String*)arena_alloc(builder->arena(), sizeof(String) + 1);
-    if (!s) return nullptr;
-    s->len = 0;
-    s->flags = 0;
-    s->is_ascii = 1;
-    s->chars[0] = '\0';
-    return s;
+    return string_from_strview_arena(strview_init("", 0), builder->arena());
 }
 
 // helper: extract a name string from a CssValue (works for counter names, attr names, etc.)
@@ -826,7 +820,6 @@ static void dom_element_attribute_did_set(DomElement* element,
         if (value[0] != '\0') {
             char* class_copy = pool_strdup(element->doc->document_pool, value);
             if (class_copy) {
-                str_copy(class_copy, strlen(value) + 1, value, strlen(value));
                 char* token = strtok(class_copy, " \t\n\r");
                 while (token) {
                     if (token[0] != '\0') {

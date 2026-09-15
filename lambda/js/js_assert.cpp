@@ -70,8 +70,8 @@ static Item assert_make_string_n(const char* str, size_t len) {
 // follows the "+ actual - expected" legend is what varies between diffs.
 static StrBuf* assert_deep_equal_diff(void) {
     StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
-    strbuf_append_str(sb, "+ actual - expected\n");
+    strbuf_append_all(sb, 2, "Expected values to be strictly deep-equal:\n",
+                      "+ actual - expected\n");
     return sb;
 }
 
@@ -169,11 +169,9 @@ static Item js_assert_date_checktag_message(Item actual, Item expected) {
     }
 
     StrBuf* sb = assert_deep_equal_diff();
-    strbuf_append_str(sb, "\n");
-    strbuf_append_str(sb, "+ ");
+    strbuf_append_all(sb, 2, "\n", "+ ");
     if (!js_assert_append_date_checktag_value(sb, actual)) return ItemNull;
-    strbuf_append_str(sb, "\n");
-    strbuf_append_str(sb, "- ");
+    strbuf_append_all(sb, 2, "\n", "- ");
     if (!js_assert_append_date_checktag_value(sb, expected)) return ItemNull;
     strbuf_append_str(sb, "\n");
     return assert_make_string_n(sb->str, sb->length);
@@ -214,8 +212,9 @@ static Item js_assert_throw_invalid_diff(Item diff) {
     String* s = get_type_id(diff) == LMD_TYPE_STRING ? it2s(diff) : NULL;
     const char* received = s ? s->chars : "";
     StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, "The property 'options.diff' must be one of: 'simple', 'full'. Received '");
-    strbuf_append_str(sb, received);
+    strbuf_append_all(sb, 2,
+                      "The property 'options.diff' must be one of: 'simple', 'full'. Received '",
+                      received);
     strbuf_append_str(sb, "'");
     Item result = js_throw_type_error_code(JS_ERR_INVALID_ARG_VALUE, sb->str);
     strbuf_free(sb);
@@ -503,8 +502,7 @@ static Item make_assertion_error_full_item(Item msg_item, Item actual, Item expe
                 strbuf_append_str_n(sb, ms->chars, ms->len);
             }
         }
-        strbuf_append_str(sb, "\n    at ");
-        strbuf_append_str(sb, op_str);
+        strbuf_append_all(sb, 2, "\n    at ", op_str);
         strbuf_append_str(sb, " (node:assert)");
         js_set_key_cstr(error, "stack", assert_make_string_n(sb->str, sb->length));
         strbuf_free(sb);
@@ -778,15 +776,14 @@ static void js_assert_append_long_multiline_string(StrBuf* sb, String* s,
     int segment_count = 0;
     while (start < s->len) {
         if (max_segments > 0 && segment_count >= max_segments) {
-            strbuf_append_str(sb, "\n");
-            strbuf_append_str(sb, ellipsis ? ellipsis : "...");
+            strbuf_append_all(sb, 2, "\n", ellipsis ? ellipsis : "...");
             return;
         }
         size_t end = start;
         while (end < s->len && s->chars[end] != '\n') end++;
         if (end < s->len && s->chars[end] == '\n') end++;
-        if (!first) strbuf_append_str(sb, "\n");
-        strbuf_append_str(sb, first ? first_prefix : next_prefix);
+        strbuf_append_all(sb, 2, first ? "" : "\n",
+                          first ? first_prefix : next_prefix);
         size_t segment_len = end - start;
         char quote = '\'';
         if (js_assert_range_has_char(s->chars + start, segment_len, '\'') &&
@@ -878,8 +875,8 @@ static Item js_assert_strict_equal_message(Item actual, Item expected) {
                 while (diff < avs->len && avs->chars[diff] == evs->chars[diff]) diff++;
                 if (diff > 0 && diff < avs->len) {
                     StrBuf* sb = strbuf_new();
-                    strbuf_append_str(sb, "Expected values to be strictly equal:\n");
-                    strbuf_append_str(sb, "+ actual - expected\n\n+ ");
+                    strbuf_append_all(sb, 2, "Expected values to be strictly equal:\n",
+                                      "+ actual - expected\n\n+ ");
                     js_assert_append_string_literal(sb, actual);
                     strbuf_append_str(sb, "\n- ");
                     js_assert_append_string_literal(sb, expected);
@@ -918,8 +915,7 @@ static Item js_assert_strict_equal_message(Item actual, Item expected) {
     if (js_assert_is_arguments_value(actual) && js_assert_is_plain_diff_object(expected)) {
         Item keys = js_object_keys(actual);
         int64_t len = js_array_length(keys);
-        strbuf_append_str(sb, "+ [Arguments] {\n");
-        strbuf_append_str(sb, "- {\n");
+        strbuf_append_all(sb, 2, "+ [Arguments] {\n", "- {\n");
         for (int64_t i = 0; i < len; i++) {
             Item key = js_elements_get_int(keys, i);
                 Item av = js_get_key_default(actual, key);
@@ -1035,8 +1031,7 @@ static void js_assert_append_not_deep_value(StrBuf* sb, Item value, int depth_le
         for (int64_t i = 0; i < limit; i++) {
             strbuf_append_str(sb, "  ");
             js_assert_append_not_deep_value(sb, js_elements_get_int(value, i), depth_left - 1);
-            if (i < len - 1) strbuf_append_char(sb, ',');
-            strbuf_append_char(sb, '\n');
+            strbuf_append_all(sb, 2, i < len - 1 ? "," : "", "\n");
         }
         if (limit < len) {
             // Node truncates long notDeep* renderings before the close bracket;
@@ -1060,8 +1055,8 @@ static Item js_assert_not_deep_equal_message(Item actual, Item expected, bool st
         js_assert_append_not_deep_value(sb, expected, 64);
         return assert_take_string(sb);
     }
-    strbuf_append_str(sb, "Expected \"actual\" not to be ");
-    strbuf_append_str(sb, strict ? "strictly deep-equal" : "loosely deep-equal");
+    strbuf_append_all(sb, 2, "Expected \"actual\" not to be ",
+                      strict ? "strictly deep-equal" : "loosely deep-equal");
     strbuf_append_str(sb, " to:\n\n");
     // notDeep* diagnostics need expanded arrays, while util.inspect's compact
     // default is one-line and fails Node's public AssertionError message shape.
@@ -1072,9 +1067,7 @@ static Item js_assert_not_deep_equal_message(Item actual, Item expected, bool st
 static Item js_assert_legacy_equal_message(Item actual, Item expected, const char* op) {
     StrBuf* sb = strbuf_new();
     js_assert_append_inspected_value(sb, actual);
-    strbuf_append_char(sb, ' ');
-    strbuf_append_str(sb, op);
-    strbuf_append_char(sb, ' ');
+    strbuf_append_all(sb, 3, " ", op, " ");
     js_assert_append_inspected_value(sb, expected);
     return assert_take_string(sb);
 }
@@ -1177,8 +1170,7 @@ static void js_assert_append_multiline_array(StrBuf* sb, Item value, int indent,
     }
     js_assert_append_line_prefix(sb, indent, sign);
     strbuf_append_char(sb, ']');
-    if (trailing_comma) strbuf_append_char(sb, ',');
-    strbuf_append_char(sb, '\n');
+    strbuf_append_all(sb, 2, trailing_comma ? "," : "", "\n");
 }
 
 static void js_assert_append_multiline_object(StrBuf* sb, Item value, int indent,
@@ -1190,8 +1182,7 @@ static void js_assert_append_multiline_object(StrBuf* sb, Item value, int indent
     js_assert_append_line_prefix(sb, indent, sign);
     bool self_cycle = js_assert_is_self_cycle_object(value);
     if (self_cycle) strbuf_append_str(sb, "<ref *1> ");
-    if (js_assert_is_arguments_value(value)) strbuf_append_str(sb, "[Arguments] ");
-    strbuf_append_str(sb, "{\n");
+    strbuf_append_all(sb, 2, js_assert_is_arguments_value(value) ? "[Arguments] " : "", "{\n");
     int64_t emitted = 0;
     for (int pass = 0; pass < (self_cycle ? 2 : 1); pass++) {
     for (int64_t i = 0; i < len; i++) {
@@ -1223,8 +1214,7 @@ static void js_assert_append_multiline_object(StrBuf* sb, Item value, int indent
                 js_assert_append_multiline_object_key(sb, child_key);
                 strbuf_append_str(sb, ": ");
                 js_assert_append_inspected_value(sb, js_get_key_default(child, child_key));
-                if (j < child_key_len - 1) strbuf_append_char(sb, ',');
-                strbuf_append_char(sb, '\n');
+                strbuf_append_all(sb, 2, j < child_key_len - 1 ? "," : "", "\n");
             }
             js_assert_append_line_prefix(sb, indent + 2, sign);
             strbuf_append_char(sb, '}');
@@ -1232,14 +1222,12 @@ static void js_assert_append_multiline_object(StrBuf* sb, Item value, int indent
             js_assert_append_property_value(sb, value, key, child);
         }
         emitted++;
-        if (emitted < visible_len) strbuf_append_char(sb, ',');
-        strbuf_append_char(sb, '\n');
+        strbuf_append_all(sb, 2, emitted < visible_len ? "," : "", "\n");
     }
     }
     js_assert_append_line_prefix(sb, indent, sign);
     strbuf_append_char(sb, '}');
-    if (trailing_comma) strbuf_append_char(sb, ',');
-    strbuf_append_char(sb, '\n');
+    strbuf_append_all(sb, 2, trailing_comma ? "," : "", "\n");
 }
 
 static void js_assert_append_multiline_value(StrBuf* sb, Item value, int indent,
@@ -1260,8 +1248,7 @@ static void js_assert_append_multiline_value(StrBuf* sb, Item value, int indent,
     }
     js_assert_append_line_prefix(sb, indent, sign);
     js_assert_append_inspected_value(sb, value);
-    if (trailing_comma) strbuf_append_char(sb, ',');
-    strbuf_append_char(sb, '\n');
+    strbuf_append_all(sb, 2, trailing_comma ? "," : "", "\n");
 }
 
 static bool js_assert_key_array_contains(Item keys, Item key) {
@@ -1442,8 +1429,7 @@ static void js_assert_append_array_diff_recursive(StrBuf* sb, Item actual, Item 
     js_assert_append_array_diff_full_contents(sb, actual, expected, indent + 2, 16, true);
     js_assert_append_spaces(sb, indent);
     strbuf_append_char(sb, ']');
-    if (trailing_comma) strbuf_append_char(sb, ',');
-    strbuf_append_char(sb, '\n');
+    strbuf_append_all(sb, 2, trailing_comma ? "," : "", "\n");
 }
 
 static void js_assert_append_array_diff_contents(StrBuf* sb, Item actual, Item expected,
@@ -1546,8 +1532,7 @@ static void js_assert_append_object_diff_recursive(StrBuf* sb, Item actual, Item
                                                    int indent, bool trailing_comma,
                                                    int depth_left) {
     js_assert_append_spaces(sb, indent);
-    if (js_assert_is_arguments_value(actual)) strbuf_append_str(sb, "[Arguments] ");
-    strbuf_append_str(sb, "{\n");
+    strbuf_append_all(sb, 2, js_assert_is_arguments_value(actual) ? "[Arguments] " : "", "{\n");
     Item actual_keys = js_object_keys(actual);
     Item expected_keys = js_object_keys(expected);
     int64_t actual_len = js_array_length(actual_keys);
@@ -1564,8 +1549,7 @@ static void js_assert_append_object_diff_recursive(StrBuf* sb, Item actual, Item
             js_assert_append_multiline_object_key(sb, key);
             strbuf_append_str(sb, ": ");
             js_assert_append_property_value(sb, actual, key, av);
-            if (has_more) strbuf_append_char(sb, ',');
-            strbuf_append_char(sb, '\n');
+            strbuf_append_all(sb, 2, has_more ? "," : "", "\n");
         } else if (has_expected && depth_left > 0 &&
                 js_assert_is_object_like_value(av) && js_assert_is_object_like_value(ev)) {
             js_assert_append_spaces(sb, indent + 2);
@@ -1579,8 +1563,7 @@ static void js_assert_append_object_diff_recursive(StrBuf* sb, Item actual, Item
                     indent + 4, depth_left - 1, false);
                 js_assert_append_spaces(sb, indent + 2);
                 strbuf_append_char(sb, ']');
-                if (has_more) strbuf_append_char(sb, ',');
-                strbuf_append_char(sb, '\n');
+                strbuf_append_all(sb, 2, has_more ? "," : "", "\n");
             } else {
                 if (js_assert_is_plain_diff_object(av) && js_assert_is_plain_diff_object(ev)) {
                     strbuf_append_str(sb, "{\n");
@@ -1608,14 +1591,12 @@ static void js_assert_append_object_diff_recursive(StrBuf* sb, Item actual, Item
                             } else {
                                 js_assert_append_property_value(sb, av, child_key, child_actual);
                             }
-                            if (j < nested_len - 1) strbuf_append_char(sb, ',');
-                            strbuf_append_char(sb, '\n');
+                            strbuf_append_all(sb, 2, j < nested_len - 1 ? "," : "", "\n");
                         }
                     }
                     js_assert_append_spaces(sb, indent + 2);
                     strbuf_append_char(sb, '}');
-                    if (has_more) strbuf_append_char(sb, ',');
-                    strbuf_append_char(sb, '\n');
+                    strbuf_append_all(sb, 2, has_more ? "," : "", "\n");
                 } else {
                     strbuf_append_char(sb, '\n');
                     js_assert_append_structural_diff(sb, av, ev, indent + 4, has_more, depth_left - 1);
@@ -1626,15 +1607,13 @@ static void js_assert_append_object_diff_recursive(StrBuf* sb, Item actual, Item
             js_assert_append_multiline_object_key(sb, key);
             strbuf_append_str(sb, ": ");
             js_assert_append_property_value(sb, actual, key, av);
-            if (has_more) strbuf_append_char(sb, ',');
-            strbuf_append_char(sb, '\n');
+            strbuf_append_all(sb, 2, has_more ? "," : "", "\n");
             if (has_expected) {
                 js_assert_append_line_prefix(sb, indent + 2, '-');
                 js_assert_append_multiline_object_key(sb, key);
                 strbuf_append_str(sb, ": ");
                 js_assert_append_property_value(sb, expected, key, ev);
-                if (has_more) strbuf_append_char(sb, ',');
-                strbuf_append_char(sb, '\n');
+                strbuf_append_all(sb, 2, has_more ? "," : "", "\n");
             }
         }
     }
@@ -1649,8 +1628,7 @@ static void js_assert_append_object_diff_recursive(StrBuf* sb, Item actual, Item
     }
     js_assert_append_spaces(sb, indent);
     strbuf_append_char(sb, '}');
-    if (trailing_comma) strbuf_append_char(sb, ',');
-    strbuf_append_char(sb, '\n');
+    strbuf_append_all(sb, 2, trailing_comma ? "," : "", "\n");
 }
 
 static void js_assert_append_structural_diff(StrBuf* sb, Item actual, Item expected,
@@ -1670,21 +1648,18 @@ static void js_assert_append_structural_diff(StrBuf* sb, Item actual, Item expec
             for (int64_t i = 0; i < common_len; i++) {
                 js_assert_append_spaces(sb, indent + 4);
                 js_assert_append_inspected_value(sb, js_elements_get_int(target, i));
-                if (i < expected_len - 1) strbuf_append_char(sb, ',');
-                strbuf_append_char(sb, '\n');
+                strbuf_append_all(sb, 2, i < expected_len - 1 ? "," : "", "\n");
             }
             js_assert_append_line_prefix(sb, indent, '+');
             strbuf_append_str(sb, "])");
-            if (trailing_comma) strbuf_append_char(sb, ',');
-            strbuf_append_char(sb, '\n');
+            strbuf_append_all(sb, 2, trailing_comma ? "," : "", "\n");
             for (int64_t i = common_len; i < expected_len; i++) {
                 js_assert_append_multiline_value(sb, js_elements_get_int(expected, i),
                     indent + 2, '-', i < expected_len - 1, depth_left - 1);
             }
             js_assert_append_line_prefix(sb, indent, '-');
             strbuf_append_char(sb, ']');
-            if (trailing_comma) strbuf_append_char(sb, ',');
-            strbuf_append_char(sb, '\n');
+            strbuf_append_all(sb, 2, trailing_comma ? "," : "", "\n");
             return;
         }
     }
@@ -1736,8 +1711,7 @@ static Item js_assert_deep_strict_array_message(Item actual, Item expected) {
             if (get_type_id(actual_value) == LMD_TYPE_ARRAY &&
                     get_type_id(expected_value) == LMD_TYPE_ARRAY) {
                 StrBuf* sb = assert_deep_equal_diff();
-                strbuf_append_str(sb, "... Skipped lines\n\n");
-                strbuf_append_str(sb, "  [\n");
+                strbuf_append_all(sb, 2, "... Skipped lines\n\n", "  [\n");
                 int64_t head_count = diff_index < 2 ? diff_index : 2;
                 for (int64_t i = 0; i < head_count; i++) {
                     js_assert_append_multiline_value(sb, js_elements_get_int(actual, i),
@@ -1750,8 +1724,7 @@ static Item js_assert_deep_strict_array_message(Item actual, Item expected) {
                 // Tail abbreviations protect the nested array invariant while
                 // avoiding a full prefix dump for late object mismatches.
                 js_assert_append_array_diff_contents(sb, actual_value, expected_value, 8, 16);
-                strbuf_append_str(sb, "      ]\n");
-                strbuf_append_str(sb, "    }\n");
+                strbuf_append_all(sb, 2, "      ]\n", "    }\n");
                 strbuf_append_str(sb, "  ]\n");
                 return assert_take_string(sb);
             }
@@ -1762,8 +1735,7 @@ static Item js_assert_deep_strict_array_message(Item actual, Item expected) {
         // Long array diffs preserve context near the changed tail; dumping all
         // shared elements makes the public assert message too noisy.
         StrBuf* sb = assert_deep_equal_diff();
-        strbuf_append_str(sb, "... Skipped lines\n\n");
-        strbuf_append_str(sb, "  [\n");
+        strbuf_append_all(sb, 2, "... Skipped lines\n\n", "  [\n");
         for (int64_t i = 0; i < 4 && i < actual_len; i++) {
             strbuf_append_str(sb, "    ");
             js_assert_append_inspected_value(sb, js_elements_get_int(actual, i));
@@ -1779,14 +1751,12 @@ static Item js_assert_deep_strict_array_message(Item actual, Item expected) {
         if (diff_index < actual_len) {
             strbuf_append_str(sb, "+   ");
             js_assert_append_inspected_value(sb, js_elements_get_int(actual, diff_index));
-            if (diff_index < actual_len - 1) strbuf_append_char(sb, ',');
-            strbuf_append_char(sb, '\n');
+            strbuf_append_all(sb, 2, diff_index < actual_len - 1 ? "," : "", "\n");
         }
         if (diff_index < expected_len) {
             strbuf_append_str(sb, "-   ");
             js_assert_append_inspected_value(sb, js_elements_get_int(expected, diff_index));
-            if (diff_index < expected_len - 1) strbuf_append_char(sb, ',');
-            strbuf_append_char(sb, '\n');
+            strbuf_append_all(sb, 2, diff_index < expected_len - 1 ? "," : "", "\n");
         }
         int64_t after = diff_index + 1;
         if (after < actual_len && after < expected_len) {
@@ -1819,13 +1789,11 @@ static void js_assert_append_typed_array_header(StrBuf* sb, Item value, const ch
     const char* type_name = js_typed_array_type_name(value);
     if (!type_name) type_name = "Uint8Array";
     if (js_assert_is_buffer_value(value)) {
-        strbuf_append_str(sb, sign);
-        strbuf_append_str(sb, "Buffer(");
+        strbuf_append_all(sb, 2, sign, "Buffer(");
         strbuf_append_int64(sb, js_typed_array_length(value));
         strbuf_append_str(sb, ") [Uint8Array] [\n");
     } else {
-        strbuf_append_str(sb, sign);
-        strbuf_append_str(sb, type_name);
+        strbuf_append_all(sb, 2, sign, type_name);
         strbuf_append_char(sb, '(');
         strbuf_append_int64(sb, js_typed_array_length(value));
         strbuf_append_str(sb, ") [\n");
@@ -1847,8 +1815,7 @@ static Item js_assert_deep_strict_typed_array_message(Item actual, Item expected
     int64_t expected_key_len = js_array_length(expected_keys);
     if (actual_key_len != expected_key_len) {
         StrBuf* prop = assert_deep_equal_diff();
-        strbuf_append_str(prop, "\n");
-        strbuf_append_str(prop, "  ");
+        strbuf_append_all(prop, 2, "\n", "  ");
         js_assert_append_typed_array_header(prop, actual, "");
         for (int i = 0; i < len; i++) {
             strbuf_append_str(prop, "    ");
@@ -1887,8 +1854,7 @@ static Item js_assert_deep_strict_typed_array_message(Item actual, Item expected
     for (int i = 0; i < len; i++) {
         strbuf_append_str(sb, "    ");
         js_assert_append_inspected_value(sb, js_typed_array_get(actual, (Item){.item = i2it(i)}));
-        if (i < len - 1) strbuf_append_char(sb, ',');
-        strbuf_append_char(sb, '\n');
+        strbuf_append_all(sb, 2, i < len - 1 ? "," : "", "\n");
     }
     strbuf_append_str(sb, "  ]\n");
     return assert_take_string(sb);
@@ -1961,8 +1927,7 @@ static void js_assert_append_class_value_with_props(StrBuf* sb, Item value,
     bool has_ctor = js_get_constructor_name(value, ctor_name, sizeof(ctor_name));
     bool custom_ctor = has_ctor && strcmp(ctor_name, default_name) != 0;
     if (custom_ctor) {
-        strbuf_append_str(sb, ctor_name);
-        strbuf_append_char(sb, ' ');
+        strbuf_append_all(sb, 2, ctor_name, " ");
     }
     if (regexp) js_assert_append_item_text(sb, js_to_string_val(value));
     else js_assert_date_iso(value, sb);
@@ -1984,17 +1949,14 @@ static void js_assert_append_class_value_with_props(StrBuf* sb, Item value,
         Item key = js_elements_get_int(keys, i);
         if (js_assert_string_equals(key, "__time__")) continue;
         String* ks = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
-        strbuf_append_str(sb, sign);
-        strbuf_append_str(sb, "  ");
+        strbuf_append_all(sb, 2, sign, "  ");
         js_assert_append_quoted_key(sb, ks);
         strbuf_append_str(sb, ": ");
         js_assert_append_inspected_value(sb, js_get_key_default(value, key));
         emitted++;
-        if (emitted < visible_len) strbuf_append_char(sb, ',');
-        strbuf_append_char(sb, '\n');
+        strbuf_append_all(sb, 2, emitted < visible_len ? "," : "", "\n");
     }
-    strbuf_append_str(sb, sign);
-    strbuf_append_str(sb, "}\n");
+    strbuf_append_all(sb, 2, sign, "}\n");
 }
 
 static Item js_assert_deep_strict_class_message(Item actual, Item expected, bool regexp) {
@@ -2083,8 +2045,7 @@ static Item js_assert_deep_strict_object_message(Item actual, Item expected) {
     const char* diff_sign = actual_len > expected_len ? "+   " : "-   ";
 
     StrBuf* sb = assert_deep_equal_diff();
-    strbuf_append_str(sb, "\n");
-    strbuf_append_str(sb, "  {\n");
+    strbuf_append_all(sb, 2, "\n", "  {\n");
     for (int64_t i = 0; i < js_array_length(base_keys); i++) {
         Item key = js_elements_get_int(base_keys, i);
         String* ks = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
@@ -2116,8 +2077,7 @@ static Item js_assert_deep_strict_url_message(Item actual, Item expected) {
         return ItemNull;
     }
     StrBuf* sb = assert_deep_equal_diff();
-    strbuf_append_str(sb, "\n");
-    strbuf_append_str(sb, "+ ");
+    strbuf_append_all(sb, 2, "\n", "+ ");
     js_assert_append_inspected_value(sb, js_get_key_cstr(actual, "href"));
     strbuf_append_str(sb, "\n- ");
     js_assert_append_inspected_value(sb, js_get_key_cstr(expected, "href"));
@@ -2174,8 +2134,7 @@ static void js_assert_append_error_label(StrBuf* sb, Item value) {
         if (!name) name = "Error";
         Item msg = js_get_key_cstr(value, "message");
         String* ms = get_type_id(msg) == LMD_TYPE_STRING ? it2s(msg) : NULL;
-        strbuf_append_char(sb, '[');
-        strbuf_append_str(sb, name);
+        strbuf_append_all(sb, 2, "[", name);
         if (ms && ms->len > 0) {
             strbuf_append_str(sb, ": ");
             strbuf_append_str_n(sb, ms->chars, ms->len);
@@ -2193,14 +2152,12 @@ static void js_assert_append_error_cause_value(StrBuf* sb, Item value, const cha
         if (len == 1) {
             Item key = js_elements_get_int(keys, 0);
             String* ks = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
-            strbuf_append_str(sb, "{\n");
-            strbuf_append_str(sb, prefix);
+            strbuf_append_all(sb, 2, "{\n", prefix);
             strbuf_append_str(sb, "  ");
             if (ks) strbuf_append_str_n(sb, ks->chars, ks->len);
             strbuf_append_str(sb, ": ");
             js_assert_append_inspected_value(sb, js_get_key_default(value, key));
-            strbuf_append_str(sb, "\n");
-            strbuf_append_str(sb, prefix);
+            strbuf_append_all(sb, 2, "\n", prefix);
             strbuf_append_str(sb, "}");
             return;
         }
@@ -2231,20 +2188,17 @@ static Item js_assert_deep_strict_error_message(Item actual, Item expected) {
         if (actual_has && expected_has) {
             strbuf_append_str(sb, "  ");
             js_assert_append_error_label(sb, actual);
-            strbuf_append_str(sb, " {\n+   [");
-            strbuf_append_str(sb, keys[i]);
+            strbuf_append_all(sb, 2, " {\n+   [", keys[i]);
             strbuf_append_str(sb, "]: ");
             js_assert_append_error_cause_value(sb, actual_value, "+   ");
-            strbuf_append_str(sb, "\n-   [");
-            strbuf_append_str(sb, keys[i]);
+            strbuf_append_all(sb, 2, "\n-   [", keys[i]);
             strbuf_append_str(sb, "]: ");
             js_assert_append_error_cause_value(sb, expected_value, "-   ");
             strbuf_append_str(sb, "\n  }\n");
         } else if (actual_has) {
             strbuf_append_str(sb, "+ ");
             js_assert_append_error_label(sb, actual);
-            strbuf_append_str(sb, " {\n+   [");
-            strbuf_append_str(sb, keys[i]);
+            strbuf_append_all(sb, 2, " {\n+   [", keys[i]);
             strbuf_append_str(sb, "]: ");
             js_assert_append_error_cause_value(sb, actual_value, "+   ");
             strbuf_append_str(sb, "\n+ }\n- ");
@@ -2255,8 +2209,7 @@ static Item js_assert_deep_strict_error_message(Item actual, Item expected) {
             js_assert_append_error_label(sb, actual);
             strbuf_append_str(sb, "\n- ");
             js_assert_append_error_label(sb, expected);
-            strbuf_append_str(sb, " {\n-   [");
-            strbuf_append_str(sb, keys[i]);
+            strbuf_append_all(sb, 2, " {\n-   [", keys[i]);
             strbuf_append_str(sb, "]: ");
             js_assert_append_error_cause_value(sb, expected_value, "-   ");
             strbuf_append_str(sb, "\n- }\n");
@@ -2282,8 +2235,7 @@ static Item js_assert_deep_strict_error_message(Item actual, Item expected) {
         if (!ks) continue;
 
         StrBuf* sb = assert_deep_equal_diff();
-        strbuf_append_str(sb, "\n");
-        strbuf_append_str(sb, "  ");
+        strbuf_append_all(sb, 2, "\n", "  ");
         js_assert_append_error_label(sb, actual);
         strbuf_append_str(sb, " {\n");
         if (actual_has) {
@@ -3077,8 +3029,7 @@ static Item js_assert_throw_object_pattern_mismatch(Item thrown, Item expected) 
         return js_throw_range_error("Cannot retain assert.throws comparison state");
     }
     StrBuf* sb = assert_deep_equal_diff();
-    strbuf_append_str(sb, "\n");
-    strbuf_append_str(sb, "  Comparison {\n");
+    strbuf_append_all(sb, 2, "\n", "  Comparison {\n");
     for (int i = 0; i < count; i++) {
         Item key = keys.at(i);
         if (get_type_id(key) != LMD_TYPE_STRING) continue;
@@ -3115,8 +3066,7 @@ static Item js_assert_throw_object_pattern_mismatch(Item thrown, Item expected) 
                 strbuf_append_str_n(sb, ks->chars, ks->len);
                 strbuf_append_str(sb, ": ");
                 js_assert_append_signed_comparison_value(sb, actual_val, "+     ");
-                if (j < count - 1) strbuf_append_char(sb, ',');
-                strbuf_append_char(sb, '\n');
+                strbuf_append_all(sb, 2, j < count - 1 ? "," : "", "\n");
             }
             for (int j = start; j < i; j++) {
                 Item key = keys.at(j);
@@ -3545,9 +3495,7 @@ static Item js_assert_match_default_message(Item string_val, Item regexp, const 
 static Item js_assert_match_compact_default_message(Item string_val, Item regexp, const char* op) {
     StrBuf* sb = strbuf_new();
     js_assert_append_inspected_value(sb, string_val);
-    strbuf_append_char(sb, ' ');
-    strbuf_append_str(sb, op);
-    strbuf_append_char(sb, ' ');
+    strbuf_append_all(sb, 3, " ", op, " ");
     js_assert_append_item_text(sb, regexp);
     return assert_take_string(sb);
 }
@@ -4295,18 +4243,15 @@ static bool js_assert_append_first_partial_object_diff(StrBuf* sb, Item actual, 
         String* ks = it2s(key);
         if (!ks) return false;
 
-        strbuf_append_str(sb, "  {\n");
-        strbuf_append_str(sb, "+   ");
+        strbuf_append_all(sb, 2, "  {\n", "+   ");
         strbuf_append_str_n(sb, ks->chars, ks->len);
         strbuf_append_str(sb, ": ");
         js_assert_append_inspected_value(sb, actual_value);
-        strbuf_append_str(sb, "\n");
-        strbuf_append_str(sb, "-   ");
+        strbuf_append_all(sb, 2, "\n", "-   ");
         strbuf_append_str_n(sb, ks->chars, ks->len);
         strbuf_append_str(sb, ": ");
         js_assert_append_inspected_value(sb, expected_value);
-        strbuf_append_str(sb, "\n");
-        strbuf_append_str(sb, "  }\n");
+        strbuf_append_all(sb, 2, "\n", "  }\n");
         return true;
     }
     return false;

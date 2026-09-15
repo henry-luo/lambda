@@ -798,12 +798,11 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
             continue;
         }
 
-        char* css_pool_copy = (char*)pool_alloc(pool, source.length + 1);
+        char* css_pool_copy = pool_dup_n(pool, source.data, source.length);
         if (!css_pool_copy) {
             mem_free(source.data);
             continue;
         }
-        str_copy(css_pool_copy, source.length + 1, source.data, source.length);
         mem_free(source.data);
 
         CssStylesheet* imported = parse_and_collect_stylesheet(
@@ -1227,9 +1226,8 @@ static void load_linked_stylesheet(Element* elem, CssEngine* engine, const char*
                     css_len -= 3;
                 }
 
-                char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
+                char* css_pool_copy = pool_dup_n(pool, css_data, css_len);
                 if (css_pool_copy) {
-                    str_copy(css_pool_copy, css_len + 1, css_data, css_len);
                     mem_free(css_content);
 
                     CssStylesheet* stylesheet = parse_and_collect_stylesheet(
@@ -1899,10 +1897,8 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     auto t_read = high_resolution_clock::now();
     log_info("[TIMING] load: read file: %.1fms", duration<double, std::milli>(t_read - t_start).count());
 
-    // Create type string for HTML
-    String* type_str = (String*)mem_alloc(sizeof(String) + 5, MEM_CAT_LAYOUT);
-    type_str->len = 4;
-    str_copy(type_str->chars, type_str->len + 1, "html", 4);
+    // Create type string for HTML.
+    String* type_str = string_from_strview_mem(strview_init("html", 4), MEM_CAT_LAYOUT);
 
     Input* input = nullptr;
     if (track_source_lines) {
@@ -2589,13 +2585,12 @@ struct LayoutTempPathGuard {
 static Input* parse_layout_source_as(char* content, Url* source_url,
                                      const char* type_name, const char* log_prefix) {
     size_t type_len = strlen(type_name);
-    String* type_str = (String*)mem_alloc(sizeof(String) + type_len + 1, MEM_CAT_LAYOUT);
+    String* type_str = string_from_strview_mem(
+        strview_init(type_name, type_len), MEM_CAT_LAYOUT);
     if (!type_str) {
         log_error("%s: failed to allocate type string", log_prefix);
         return nullptr;
     }
-    type_str->len = type_len;
-    str_copy(type_str->chars, type_str->len + 1, type_name, type_len);
     Input* input = input_from_source(content, source_url, type_str, nullptr);
     mem_free(type_str);
     return input;
@@ -2666,13 +2661,11 @@ static CssStylesheet* load_pool_backed_stylesheet(CssEngine* css_engine, Pool* p
     }
 
     size_t css_len = strlen(css_content);
-    char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
+    char* css_pool_copy = pool_dup_n(pool, css_content, css_len);
     if (!css_pool_copy) {
         mem_free(css_content);
         return nullptr;
     }
-
-    str_copy(css_pool_copy, css_len + 1, css_content, css_len);
     mem_free(css_content);
     CssStylesheet* stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
     if (!stylesheet && warn_missing) {
@@ -3033,8 +3026,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
                 if (mi->is_display) {
                     strbuf_append_str(script, ">");
                 }
-                if (i < math_list->length - 1) strbuf_append_str(script, ",");
-                strbuf_append_str(script, "\n");
+                strbuf_append_all(script, 2, i < math_list->length - 1 ? "," : "", "\n");
             }
 
             strbuf_append_str(script, "]\n");

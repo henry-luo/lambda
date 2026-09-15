@@ -196,9 +196,7 @@ static int emit_expr(QueryBuilder* qb, RdbTable* table, const RdbExpr* expr) {
                           expr->column_name, table->name);
                 return RDB_ERROR;
             }
-            strbuf_append_str(qb->sql, "\"");
-            strbuf_append_str(qb->sql, expr->column_name);
-            strbuf_append_str(qb->sql, "\"");
+            strbuf_append_all(qb->sql, 3, "\"", expr->column_name, "\"");
             return RDB_OK;
 
         case RDB_EXPR_COMPARE: {
@@ -249,9 +247,7 @@ static int emit_expr(QueryBuilder* qb, RdbTable* table, const RdbExpr* expr) {
                 strbuf_append_str(qb->sql, "(0)");
                 return RDB_OK;
             }
-            strbuf_append_str(qb->sql, "(\"");
-            strbuf_append_str(qb->sql, expr->in_expr.column_name);
-            strbuf_append_str(qb->sql, "\" IN (");
+            strbuf_append_all(qb->sql, 3, "(\"", expr->in_expr.column_name, "\" IN (");
             for (int i = 0; i < expr->in_expr.value_count; i++) {
                 if (i > 0) strbuf_append_str(qb->sql, ", ");
                 if (qb_add_param(qb, &expr->in_expr.values[i]) != RDB_OK) return RDB_ERROR;
@@ -265,9 +261,7 @@ static int emit_expr(QueryBuilder* qb, RdbTable* table, const RdbExpr* expr) {
                 log_error("rdb query: unknown column '%s' in IS NULL", expr->null_check.column_name);
                 return RDB_ERROR;
             }
-            strbuf_append_str(qb->sql, "(\"");
-            strbuf_append_str(qb->sql, expr->null_check.column_name);
-            strbuf_append_str(qb->sql, "\" IS NULL)");
+            strbuf_append_all(qb->sql, 3, "(\"", expr->null_check.column_name, "\" IS NULL)");
             return RDB_OK;
 
         case RDB_EXPR_IS_NOT_NULL:
@@ -275,9 +269,7 @@ static int emit_expr(QueryBuilder* qb, RdbTable* table, const RdbExpr* expr) {
                 log_error("rdb query: unknown column '%s' in IS NOT NULL", expr->null_check.column_name);
                 return RDB_ERROR;
             }
-            strbuf_append_str(qb->sql, "(\"");
-            strbuf_append_str(qb->sql, expr->null_check.column_name);
-            strbuf_append_str(qb->sql, "\" IS NOT NULL)");
+            strbuf_append_all(qb->sql, 3, "(\"", expr->null_check.column_name, "\" IS NOT NULL)");
             return RDB_OK;
 
         case RDB_EXPR_LIKE: {
@@ -285,9 +277,7 @@ static int emit_expr(QueryBuilder* qb, RdbTable* table, const RdbExpr* expr) {
                 log_error("rdb query: unknown column '%s' in LIKE", expr->like.column_name);
                 return RDB_ERROR;
             }
-            strbuf_append_str(qb->sql, "(\"");
-            strbuf_append_str(qb->sql, expr->like.column_name);
-            strbuf_append_str(qb->sql, "\" LIKE ");
+            strbuf_append_all(qb->sql, 3, "(\"", expr->like.column_name, "\" LIKE ");
 
             // build LIKE pattern with appropriate wildcards
             StrBuf* pat = strbuf_new();
@@ -320,8 +310,7 @@ static int emit_expr(QueryBuilder* qb, RdbTable* table, const RdbExpr* expr) {
             strbuf_free(pat);
 
             // add ESCAPE clause so our escaping of % and _ works
-            strbuf_append_str(qb->sql, " ESCAPE '\\'");
-            strbuf_append_str(qb->sql, ")");
+            strbuf_append_all(qb->sql, 2, " ESCAPE '\\'", ")");
             return RDB_OK;
         }
     }
@@ -351,9 +340,7 @@ int rdb_query_build(Pool* pool, RdbSchema* schema, const RdbQueryDesc* desc,
     qb.sql = strbuf_new();
 
     // SELECT * FROM "table"
-    strbuf_append_str(qb.sql, "SELECT * FROM \"");
-    strbuf_append_str(qb.sql, desc->table_name);
-    strbuf_append_str(qb.sql, "\"");
+    strbuf_append_all(qb.sql, 3, "SELECT * FROM \"", desc->table_name, "\"");
 
     // WHERE clause
     if (desc->where_expr) {
@@ -374,10 +361,8 @@ int rdb_query_build(Pool* pool, RdbSchema* schema, const RdbQueryDesc* desc,
                 strbuf_free(qb.sql);
                 return RDB_ERROR;
             }
-            strbuf_append_str(qb.sql, "\"");
-            strbuf_append_str(qb.sql, desc->order_by[i].column_name);
-            strbuf_append_str(qb.sql, "\"");
-            strbuf_append_str(qb.sql, desc->order_by[i].descending ? " DESC" : " ASC");
+            strbuf_append_all(qb.sql, 4, "\"", desc->order_by[i].column_name,
+                              "\"", desc->order_by[i].descending ? " DESC" : " ASC");
         }
     }
 

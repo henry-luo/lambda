@@ -153,8 +153,7 @@ static void format_two_arg_command(StringBuf* sb, ItemReader cmd,
     }
     stringbuf_append_str(sb, "{");
     if (!first.isNull()) format_item(sb, first, depth + 1);
-    stringbuf_append_str(sb, "}");
-    stringbuf_append_str(sb, "{");
+    stringbuf_append_all(sb, 2, "}", "{");
     if (!second.isNull()) format_item(sb, second, depth + 1);
     stringbuf_append_str(sb, "}");
 }
@@ -185,8 +184,7 @@ static void format_frac_like(StringBuf* sb, const ElementReader& elem, int depth
         }
         stringbuf_append_str(sb, "{");
         format_item(sb, numer, depth + 1);
-        stringbuf_append_str(sb, "}");
-        stringbuf_append_str(sb, "{");
+        stringbuf_append_all(sb, 2, "}", "{");
         format_item(sb, denom, depth + 1);
         stringbuf_append_str(sb, "}");
         return;
@@ -268,8 +266,7 @@ static void format_command(StringBuf* sb, const ElementReader& elem, int depth) 
     const char* name = name_attr.asString()->chars;
 
     // Emit backslash + command name
-    stringbuf_append_str(sb, "\\");
-    stringbuf_append_str(sb, name);
+    stringbuf_append_all(sb, 2, "\\", name);
 
     // If command has arg children, emit them in braces
     auto it = elem.children();
@@ -301,8 +298,7 @@ static void format_command(StringBuf* sb, const ElementReader& elem, int depth) 
 static void format_symbol_command(StringBuf* sb, const ElementReader& elem) {
     ItemReader name_attr = elem.get_attr("name");
     if (!name_attr.isNull() && name_attr.isString()) {
-        stringbuf_append_str(sb, "\\");
-        stringbuf_append_str(sb, name_attr.asString()->chars);
+        stringbuf_append_all(sb, 2, "\\", name_attr.asString()->chars);
     }
 }
 
@@ -338,8 +334,7 @@ static void format_accent(StringBuf* sb, const ElementReader& elem, int depth) {
     if (!cmd.isNull() && cmd.isString()) {
         const char* c = cmd.asString()->chars;
         // cmd should already have backslash from the converter
-        if (c[0] != '\\') stringbuf_append_str(sb, "\\");
-        stringbuf_append_str(sb, c[0] == '\\' ? c : c);
+        stringbuf_append_all(sb, 2, c[0] != '\\' ? "\\" : "", c);
     } else {
         stringbuf_append_str(sb, "\\hat");
     }
@@ -385,8 +380,7 @@ static void format_environment(StringBuf* sb, const ElementReader& elem, int dep
     stringbuf_append_str(sb, "}");
 
     if (!columns.isNull() && columns.isString()) {
-        stringbuf_append_str(sb, "{");
-        stringbuf_append_str(sb, columns.asString()->chars);
+        stringbuf_append_all(sb, 2, "{", columns.asString()->chars);
         stringbuf_append_str(sb, "}");
     }
 
@@ -485,9 +479,7 @@ static void format_overunder_command(StringBuf* sb, const ElementReader& elem, i
 
     stringbuf_append_str(sb, "{");
     if (!annotation.isNull()) format_item(sb, annotation, depth + 1);
-    stringbuf_append_str(sb, "}");
-
-    stringbuf_append_str(sb, "{");
+    stringbuf_append_all(sb, 2, "}", "{");
     if (!base.isNull()) format_item(sb, base, depth + 1);
     stringbuf_append_str(sb, "}");
 }
@@ -596,8 +588,7 @@ static void format_rule_command(StringBuf* sb, const ElementReader& elem, int de
     }
     stringbuf_append_str(sb, "{");
     if (!width.isNull()) format_item(sb, width, depth + 1);
-    stringbuf_append_str(sb, "}");
-    stringbuf_append_str(sb, "{");
+    stringbuf_append_all(sb, 2, "}", "{");
     if (!height.isNull()) format_item(sb, height, depth + 1);
     stringbuf_append_str(sb, "}");
 }

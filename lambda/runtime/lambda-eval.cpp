@@ -8375,8 +8375,7 @@ void cow_profile_dump(void) {
         "string_generic_joins"
     };
     for (int i = 0; i < STRING_BUILDER_COUNTER_COUNT; i++) {
-        strbuf_append_char(output, '\n');
-        strbuf_append_str(output, string_counters[i]);
+        strbuf_append_all(output, 2, "\n", string_counters[i]);
         strbuf_append_char(output, '\t');
         strbuf_append_uint64(output, g_cow_profile.string_builder[i]);
     }

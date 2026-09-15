@@ -141,9 +141,7 @@ static Item rdb_value_to_item(MarkBuilder& builder, RdbValue val, RdbType declar
 
 static Item rdb_fetch_table(MarkBuilder& builder, RdbConn* conn, RdbTable* tbl) {
     StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, "SELECT * FROM \"");
-    strbuf_append_str(sb, tbl->name);
-    strbuf_append_str(sb, "\"");
+    strbuf_append_all(sb, 3, "SELECT * FROM \"", tbl->name, "\"");
 
     RdbStmt* stmt = rdb_prepare(conn, sb->str);
     strbuf_free(sb);
@@ -235,9 +233,7 @@ static Item rdb_fetch_table_with_fks(MarkBuilder& builder, RdbConn* conn,
                                      RdbTable* tbl, RdbSchema* schema,
                                      Item* table_data, HashMap** pk_indexes) {
     StrBuf* sb = strbuf_new();
-    strbuf_append_str(sb, "SELECT * FROM \"");
-    strbuf_append_str(sb, tbl->name);
-    strbuf_append_str(sb, "\"");
+    strbuf_append_all(sb, 3, "SELECT * FROM \"", tbl->name, "\"");
 
     RdbStmt* stmt = rdb_prepare(conn, sb->str);
     strbuf_free(sb);
