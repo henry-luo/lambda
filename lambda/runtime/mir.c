@@ -547,10 +547,6 @@ typedef struct {
     size_t capacity;
 } DebugInfoList;
 
-static char* debug_info_strdup(const char* s) {
-    return s ? mem_strdup(s, MEM_CAT_EVAL) : NULL;
-}
-
 // Comparator for sorting FuncDebugInfo by address
 static int compare_debug_info(const void* a, const void* b) {
     FuncDebugInfo* fa = *(FuncDebugInfo**)a;
@@ -617,7 +613,7 @@ void* build_debug_info_table(void* mir_ctx, void* func_name_map) {
                 }
                 // Debug info outlives transient transpiler maps in LambdaJS, so
                 // own display names here instead of borrowing map/MIR strings.
-                info->lambda_func_name = debug_info_strdup(lambda_name);
+                info->lambda_func_name = lambda_name ? mem_strdup(lambda_name, MEM_CAT_EVAL) : NULL;
                 info->source_file = NULL;  // could be set from AST if available
                 info->source_line = 0;
 

@@ -8471,8 +8471,7 @@ static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
         result->len = (int)rlen;
         result->flags = 0;
         result->is_ascii = 1;
-        memcpy(result->chars, s->chars + start, (int)rlen);
-        result->chars[rlen] = '\0';
+        str_copy(result->chars, rlen + 1, s->chars + start, rlen);
         Item result_item = (Item){.item = s2it(result)};
         if (cache_ready) js_ascii_substring_cache_store(result_item, cache_hash);
         return result_item;
@@ -12973,8 +12972,7 @@ static Item js_intrinsic_regexp_operation(JsRegExpIntrinsicOp operation,
         buf[0] = '/';
         memcpy(buf + 1, src_str, src_len);
         buf[1 + src_len] = '/';
-        memcpy(buf + 2 + src_len, flg_str, flg_len);
-        buf[2 + src_len + flg_len] = '\0';
+        str_copy(buf + 2 + src_len, flg_len + 1, flg_str, flg_len);
         return js_name_item(buf, 2 + src_len + flg_len);
     }
 
@@ -14544,11 +14542,9 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this,
         ? it2s(target_name_root.get()) : NULL;
     if (target_name && target_name->len > 0) {
         int name_len = 6 + (int)target_name->len;
-        char* name_buf = (char*)mem_alloc((size_t)name_len + 1, MEM_CAT_JS_RUNTIME);
+        char* name_buf = mem_join2("bound ", 6, target_name->chars, target_name->len,
+                                   MEM_CAT_JS_RUNTIME);
         if (!name_buf) return ItemError;
-        memcpy(name_buf, "bound ", 6);
-        memcpy(name_buf + 6, target_name->chars, target_name->len);
-        name_buf[name_len] = '\0';
         String* bound_name = heap_create_name(name_buf, name_len);
         mem_free(name_buf);
         bound = (JsFunction*)bound_root.get().function;
@@ -33353,11 +33349,9 @@ static void js_repl_editor_data(Item repl, const char* data, int len) {
     Item old_item = js_get_key_default(repl, js_repl_key("__editor_buffer__"));
     int old_len = 0;
     const char* old = js_repl_cstr(old_item, &old_len);
-    char* combined = (char*)mem_alloc((size_t)old_len + (size_t)len + 1, MEM_CAT_JS_RUNTIME);
-    if (old_len > 0) memcpy(combined, old, (size_t)old_len);
-    if (len > 0) memcpy(combined + old_len, data, (size_t)len);
+    char* combined = mem_join2(old, (size_t)old_len, data, (size_t)len,
+                               MEM_CAT_JS_RUNTIME);
     int total = old_len + len;
-    combined[total] = '\0';
     js_repl_set_str(repl, "__editor_buffer__", combined);
     if (total > 0 && combined[total - 1] == '\n') {
         int prev_end = total - 1;
@@ -33474,11 +33468,8 @@ static Item js_repl_eval_callback(Item repl, Item err, Item result) {
     if (get_type_id(out) == LMD_TYPE_STRING) {
         String* s = it2s(out);
         if (s) {
-            char* line = (char*)mem_alloc((size_t)s->len + 2, MEM_CAT_JS_RUNTIME);
+            char* line = mem_join2(s->chars, s->len, "\n", 1, MEM_CAT_JS_RUNTIME);
             if (!line) return (Item){.item = ITEM_JS_UNDEFINED};
-            memcpy(line, s->chars, (size_t)s->len);
-            line[s->len] = '\n';
-            line[s->len + 1] = '\0';
             // Custom eval callbacks observe each rendered result as one write.
             js_repl_output(repl, line, (int)s->len + 1);
             mem_free(line);

@@ -707,6 +707,13 @@ TEST_F(StrBufTest, EscapeAppendJsonStringQuotesAndSurrogates) {
     strbuf_free(sb);
 }
 
+TEST_F(StrBufTest, EscapeAppendJsQuoted) {
+    StrBuf* sb = strbuf_new();
+    escape_append_js_quoted(sb, "'\\\"\n\r\t", 6, '\'');
+    EXPECT_STREQ(sb->str, "\\'\\\\\"\\n\\r\\t");
+    strbuf_free(sb);
+}
+
 TEST_F(StrBufTest, EscapeAppendXmlAttr) {
     StrBuf* sb = strbuf_new();
     const char* raw = "a&b <c> \"d\"";

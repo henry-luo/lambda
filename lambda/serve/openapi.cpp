@@ -6,6 +6,7 @@
 #include "openapi.hpp"
 #include "swagger_ui.hpp"
 #include "../../lib/log.h"
+#include "../../lib/escape.h"
 #include "../../lib/strbuf.h"
 #include <cstring>
 #include "../../lib/mem.h"
@@ -47,21 +48,9 @@ void openapi_invalidate(OpenApiContext *ctx) {
 
 static void json_append_string(StrBuf *buf, const char *key, const char *value) {
     if (!value) return;
-    strbuf_append_char(buf, '"');
-    strbuf_append_str(buf, key);
-    strbuf_append_str(buf, "\":\"");
-    // escape basic JSON chars
-    for (const char *p = value; *p; p++) {
-        switch (*p) {
-            case '"':  strbuf_append_str(buf, "\\\""); break;
-            case '\\': strbuf_append_str(buf, "\\\\"); break;
-            case '\n': strbuf_append_str(buf, "\\n");  break;
-            case '\r': strbuf_append_str(buf, "\\r");  break;
-            case '\t': strbuf_append_str(buf, "\\t");  break;
-            default:   strbuf_append_char(buf, *p);   break;
-        }
-    }
-    strbuf_append_char(buf, '"');
+    escape_append_json_string(buf, key, strlen(key), true, false);
+    strbuf_append_char(buf, ':');
+    escape_append_json_string(buf, value, strlen(value), true, false);
 }
 
 static const char* method_string(HttpMethod m) {

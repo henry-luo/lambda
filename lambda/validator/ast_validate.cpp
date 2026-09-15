@@ -322,10 +322,8 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
                     if (name_end > last_type_start) {
                         // Copy the type name
                         size_t name_len = name_end - last_type_start;
-                        char* extracted_name = (char*)pool_calloc(pool, name_len + 1);
+                        char* extracted_name = pool_dup_n(pool, last_type_start, name_len);
                         if (extracted_name) {
-                            memcpy(extracted_name, last_type_start, name_len);
-                            extracted_name[name_len] = '\0';
                             root_type = extracted_name;
                             log_info("Using last type definition as root: %s", root_type);
                         }

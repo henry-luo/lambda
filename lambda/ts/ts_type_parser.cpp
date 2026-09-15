@@ -3,6 +3,7 @@
 #include "ts_type_parser.hpp"
 #include "../js/js_c_ast_helpers.hpp"
 #include "../../lib/mempool.h"
+#include "../../lib/string.h"
 #include "../../lib/hashmap_typed.hpp"
 #include "../../lib/log.h"
 
@@ -18,15 +19,7 @@ struct TsDirectTypeParser {
     int pos;
 
     String* make_string(const char* source, int source_len) {
-        String* result = (String*)pool_alloc(tp->pool,
-            sizeof(String) + source_len + 1);
-        if (!result) return NULL;
-        result->len = source_len;
-        result->flags = 0;
-        result->is_ascii = 1;
-        memcpy(result->chars, source, source_len);
-        result->chars[source_len] = '\0';
-        return result;
+        return string_from_strview(strview_init(source, source_len), tp->pool);
     }
 
     Type* make_base(TypeId type_id) {
@@ -383,8 +376,7 @@ void ts_type_registry_add(JsTranspiler* tp, const char* name, Type* type) {
     memset(&entry, 0, sizeof(entry));
     size_t name_len = strlen(name);
     if (name_len >= sizeof(entry.name)) name_len = sizeof(entry.name) - 1;
-    memcpy(entry.name, name, name_len);
-    entry.name[name_len] = '\0';
+    str_copy(entry.name, sizeof(entry.name), name, name_len);
     entry.type = type;
     TsTypeRegistryMap::set(tp->type_registry, entry);
 }
@@ -394,8 +386,7 @@ Type* ts_type_registry_lookup(JsTranspiler* tp, const char* name) {
     memset(&query, 0, sizeof(query));
     size_t name_len = strlen(name);
     if (name_len >= sizeof(query.name)) name_len = sizeof(query.name) - 1;
-    memcpy(query.name, name, name_len);
-    query.name[name_len] = '\0';
+    str_copy(query.name, sizeof(query.name), name, name_len);
     const TsTypeRegistryEntry* found = TsTypeRegistryMap::get(tp->type_registry, query);
     return found ? found->type : NULL;
 }

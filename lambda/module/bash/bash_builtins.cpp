@@ -2177,8 +2177,7 @@ static bool bash_find_in_path(const char* name, int len, char* out_path, int out
         if (dir_len + 1 + len + 1 < out_size) {
             memcpy(out_path, p, dir_len);
             out_path[dir_len] = '/';
-            memcpy(out_path + dir_len + 1, name, len);
-            out_path[dir_len + 1 + len] = '\0';
+            str_copy(out_path + dir_len + 1, (size_t)len + 1, name, len);
             if (access(out_path, X_OK) == 0) return true;
         }
         p = *colon ? colon + 1 : colon;

@@ -39,6 +39,7 @@
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/mem_factory.h"
+#include "../../lib/escape.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mempool.h"
 #include "../../lib/mem_grow.hpp"
@@ -4732,14 +4733,7 @@ static bool dom_text_initial_offset(DomText* text, bool preserve_ws, uint32_t* o
 
     const char* chars = text->text;
     size_t len = text->length;
-    size_t first_visible = 0;
-    while (first_visible < len) {
-        unsigned char ch = (unsigned char)chars[first_visible];
-        if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r' && ch != '\f') {
-            break;
-        }
-        first_visible++;
-    }
+    size_t first_visible = str_span(chars, len, str_is_html_space);
     if (first_visible == len) return false;
     *out_offset = (uint32_t)utf8_to_utf16_length(chars, first_visible);
     return true;
@@ -5314,14 +5308,7 @@ static void collect_xml_attr_value(const char* value, StrBuf* sb) {
 }
 
 static void collect_xml_text_value(const char* value, size_t length, StrBuf* sb) {
-    if (!value || !sb) return;
-    for (size_t i = 0; i < length; i++) {
-        char ch = value[i];
-        if (ch == '&') strbuf_append_str(sb, "&amp;");
-        else if (ch == '<') strbuf_append_str(sb, "&lt;");
-        else if (ch == '>') strbuf_append_str(sb, "&gt;");
-        else strbuf_append_char(sb, ch);
-    }
+    escape_append_html_text(sb, value, length);
 }
 
 static void collect_xml_node(DomNode* node, StrBuf* sb) {
@@ -6762,14 +6749,9 @@ static Item js_text_control_set_range_text_for_elem(DomElement* elem,
     uint32_t prefix_len = start_u8;
     uint32_t suffix_len = f->current_value_len > end_u8 ? f->current_value_len - end_u8 : 0;
     uint32_t new_len = prefix_len + replacement_len + suffix_len;
-    char* new_value = (char*)mem_alloc((size_t)new_len + 1, MEM_CAT_JS_RUNTIME);
+    char* new_value = mem_join3(old_value, prefix_len, replacement, replacement_len,
+                                old_value + end_u8, suffix_len, MEM_CAT_JS_RUNTIME);
     if (!new_value) return make_js_undefined();
-    if (prefix_len > 0) memcpy(new_value, old_value, prefix_len);
-    if (replacement_len > 0) memcpy(new_value + prefix_len, replacement, replacement_len);
-    if (suffix_len > 0) {
-        memcpy(new_value + prefix_len + replacement_len, old_value + end_u8, suffix_len);
-    }
-    new_value[new_len] = '\0';
 
     uint32_t final_start = old_selection_start;
     uint32_t final_end = old_selection_end;
@@ -8340,9 +8322,9 @@ static Item _build_validity_state(DomElement* elem) {
                 // HTML pattern anchors the whole value (^(?:pattern)$)
                 // Build anchored pattern
                 size_t plen = strlen(pattern);
-                char* full_pattern = (char*)mem_alloc(plen + 8, MEM_CAT_JS_RUNTIME);
+                char* full_pattern = mem_join3("^(?:", 4, pattern, plen, ")$", 2,
+                                               MEM_CAT_JS_RUNTIME);
                 if (full_pattern) {
-                    snprintf(full_pattern, plen + 8, "^(?:%s)$", pattern);
                     Item re = js_create_regex(full_pattern, (int)strlen(full_pattern), "", 0);
                     mem_free(full_pattern);
                     Item val_item = js_name_item(val);
@@ -14055,13 +14037,9 @@ extern "C" Item dom_normalize_bridge(void* elem_ptr) {
                 uint32_t head_u16  = dom_text_utf16_length(text);
                 uint32_t tail_u16  = dom_text_utf16_length(next_text);
                 size_t new_len = text->length + next_text->length;
-                char* combined = (char*)pool_alloc(elem->doc->document_pool, new_len + 1);
+                char* combined = pool_join2(elem->doc->document_pool, text->text, text->length,
+                                            next_text->text, next_text->length);
                 if (!combined) break;
-                if (text->text && text->length > 0)
-                    memcpy(combined, text->text, text->length);
-                if (next_text->text && next_text->length > 0)
-                    memcpy(combined + text->length, next_text->text, next_text->length);
-                combined[new_len] = '\0';
                 String* s = dom_document_create_string(elem->doc, combined, new_len);
                 pool_free(elem->doc->document_pool, combined);
                 if (!s) break;

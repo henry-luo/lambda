@@ -149,12 +149,11 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
     // Make a local copy of the text since we use the shared parser->sb which
     // might be the source of the text pointer (e.g., when called from block_quote)
     size_t text_len = strlen(text);
-    char* text_copy = (char*)mem_alloc(text_len + 1, MEM_CAT_INPUT_MARKUP);
+    char* text_copy = mem_dup_n(text, text_len, MEM_CAT_INPUT_MARKUP);
     if (!text_copy) {
         String* content = create_string(parser, text);
         return Item{.item = s2it(content)};
     }
-    memcpy(text_copy, text, text_len + 1);
 
     // Get string buffer from parser context
     StringBuf* sb = parser->sb;

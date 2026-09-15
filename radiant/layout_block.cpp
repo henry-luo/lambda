@@ -1661,15 +1661,7 @@ static int find_first_letter_boundary(const unsigned char* text, int text_len) {
 }
 
 static bool is_text_all_whitespace(const unsigned char* data) {
-    if (!data) return true;
-    while (*data) {
-        unsigned char c = *data;
-        if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f') {
-            return false;
-        }
-        data++;
-    }
-    return true;
+    return !data || str_all((const char*)data, strlen((const char*)data), str_is_html_space);
 }
 
 static DomText* find_first_text_node(DomNode* node, bool* suppressed) {
@@ -1759,10 +1751,9 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
     }
     int preserved_prefix = preserves_space_advance ? ws_offset : 0;
     int first_letter_length = preserved_prefix + boundary;
-    char* fl_text = (char*)pool_calloc(pool, first_letter_length + 1);
+    char* fl_text = pool_dup_n(pool, (const char*)(preserves_space_advance ? text_data : p),
+                               first_letter_length);
     if (!fl_text) return;
-    memcpy(fl_text, preserves_space_advance ? text_data : p, first_letter_length);
-    fl_text[first_letter_length] = '\0';
     DomText* fl_text_node = lam::pool_alloc_dom_text(pool);
     if (!fl_text_node) return;
     fl_text_node->parent = fl_elem;
@@ -8723,13 +8714,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                         } else if (dom_child->is_text()) {
                             const unsigned char* text = lam::dom_require<DOM_NODE_TEXT>(dom_child)->text_data();
                             if (text) {
-                                bool all_ws = true;
-                                for (const unsigned char* p = text; *p; p++) {
-                                    unsigned char c = *p;
-                                    if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f') {
-                                        all_ws = false; break;
-                                    }
-                                }
+                                bool all_ws = str_all((const char*)text, strlen((const char*)text),
+                                                      str_is_html_space);
                                 if (!all_ws) break;  // real text content stops parent-child collapse
                             }
                         }

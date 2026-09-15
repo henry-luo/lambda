@@ -546,8 +546,8 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
             fn_node->name = (String*)pool_calloc(pool, sizeof(String) + shape->name->length + 1);
             fn_node->name->len = (uint32_t)shape->name->length;
             fn_node->name->is_ascii = 1;
-            memcpy(fn_node->name->chars, shape->name->str, shape->name->length);
-            fn_node->name->chars[shape->name->length] = '\0';
+            str_copy(fn_node->name->chars, shape->name->length + 1,
+                     shape->name->str, shape->name->length);
 
             // Create TypeFunc — all params as Item (boxed), public
             TypeFunc* fn_type = (TypeFunc*)pool_calloc(pool, sizeof(TypeFunc));
@@ -595,8 +595,8 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
             named->name = (String*)pool_calloc(pool, sizeof(String) + shape->name->length + 1);
             named->name->len = (uint32_t)shape->name->length;
             named->name->is_ascii = 1;
-            memcpy(named->name->chars, shape->name->str, shape->name->length);
-            named->name->chars[shape->name->length] = '\0';
+            str_copy(named->name->chars, shape->name->length + 1,
+                     shape->name->str, shape->name->length);
 
             AstIdentNode* id = (AstIdentNode*)pool_calloc(pool, sizeof(AstIdentNode));
             id->node_type = AST_NODE_IDENT;

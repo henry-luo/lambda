@@ -97,9 +97,6 @@ static const char* escape_find_rule(char c, const EscapeRule* rules, int rule_co
     return NULL;
 }
 
-typedef void (*EscapeAppendCharFn)(void* out, char c);
-typedef void (*EscapeAppendStrFn)(void* out, const char* s);
-
 static void escape_append_char_strbuf(void* out, char c) {
     strbuf_append_char((StrBuf*)out, c);
 }
@@ -180,6 +177,39 @@ void escape_append_json_stringbuf(StringBuf* out, const char* s, size_t len,
                                   bool quote, bool escape_utf8_surrogates) {
     escape_append_json_common(out, s, len, quote, escape_utf8_surrogates,
         escape_append_char_stringbuf, escape_append_str_stringbuf);
+}
+
+void escape_append_json_to(void* out, const char* s, size_t len,
+                           bool quote, bool escape_utf8_surrogates,
+                           EscapeAppendCharFn append_char, EscapeAppendStrFn append_str) {
+    escape_append_json_common(out, s, len, quote, escape_utf8_surrogates,
+                              append_char, append_str);
+}
+
+void escape_append_js_quoted(StrBuf* out, const char* s, size_t len, char quote) {
+    if (!out || !s) return;
+    for (size_t i = 0; i < len; i++) {
+        char ch = s[i];
+        if (ch == '\\') strbuf_append_str(out, "\\\\");
+        else if (ch == quote) {
+            strbuf_append_char(out, '\\');
+            strbuf_append_char(out, quote);
+        }
+        else if (ch == '\n') strbuf_append_str(out, "\\n");
+        else if (ch == '\r') strbuf_append_str(out, "\\r");
+        else if (ch == '\t') strbuf_append_str(out, "\\t");
+        else strbuf_append_char(out, ch);
+    }
+}
+
+void escape_append_html_text(StrBuf* out, const char* s, size_t len) {
+    escape_append(out, s, len, ESCAPE_RULES_HTML_TEXT, ESCAPE_RULES_HTML_TEXT_COUNT,
+                  ESCAPE_CTRL_NONE);
+}
+
+void escape_append_xml_attr(StrBuf* out, const char* s, size_t len) {
+    escape_append(out, s, len, ESCAPE_RULES_XML_ATTR, ESCAPE_RULES_XML_ATTR_COUNT,
+                  ESCAPE_CTRL_XML_NUMERIC);
 }
 
 void escape_append(StrBuf* out, const char* s, size_t len,

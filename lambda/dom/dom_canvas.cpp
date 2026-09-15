@@ -626,8 +626,7 @@ static FontHandle* parse_css_font_shorthand(const char* font_str, int len) {
     // work on a null-terminated copy
     char buf[512];
     if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
-    memcpy(buf, font_str, len);
-    buf[len] = '\0';
+    str_copy(buf, sizeof(buf), font_str, len);
 
     FontWeight weight = FONT_WEIGHT_NORMAL;
     FontSlant slant = FONT_SLANT_NORMAL;
@@ -709,8 +708,7 @@ static FontHandle* parse_css_font_shorthand(const char* font_str, int len) {
     const char* comma = strchr(family_start, ',');
     int fam_len = comma ? (int)(comma - family_start) : (int)strlen(family_start);
     if (fam_len >= (int)sizeof(family_buf)) fam_len = (int)sizeof(family_buf) - 1;
-    memcpy(family_buf, family_start, fam_len);
-    family_buf[fam_len] = '\0';
+    str_copy(family_buf, sizeof(family_buf), family_start, fam_len);
 
     // trim trailing whitespace
     while (fam_len > 0 && isspace((unsigned char)family_buf[fam_len - 1]))

@@ -5,6 +5,7 @@
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
+#include "../lib/escape.h"
 #include "../lib/str.h"
 #include <stdlib.h>
 #include <time.h>
@@ -1025,30 +1026,7 @@ void print_view_tree(ViewElement* view_root, Url* url, const char* output_path) 
 
 // escape a bounded JSON string without requiring a temporary null terminator
 static void append_json_string_n(StrBuf* buf, const char* str, size_t length) {
-    strbuf_append_char(buf, '"');
-    for (size_t i = 0; i < length; i++) {
-        unsigned char ch = (unsigned char)str[i];
-        switch (ch) {
-            case '"': strbuf_append_str(buf, "\\\""); break;
-            case '\\': strbuf_append_str(buf, "\\\\"); break;
-            case '\n': strbuf_append_str(buf, "\\n"); break;
-            case '\r': strbuf_append_str(buf, "\\r"); break;
-            case '\t': strbuf_append_str(buf, "\\t"); break;
-            case '\b': strbuf_append_str(buf, "\\b"); break;
-            case '\f': strbuf_append_str(buf, "\\f"); break;
-            default:
-                // Escape all other control characters (0x00-0x1F)
-                if (ch < 0x20) {
-                    char escape[8];
-                    snprintf(escape, sizeof(escape), "\\u%04x", (unsigned)ch);
-                    strbuf_append_str(buf, escape);
-                } else {
-                    strbuf_append_char(buf, ch);
-                }
-                break;
-        }
-    }
-    strbuf_append_char(buf, '"');
+    escape_append_json_string(buf, str, length, true, false);
 }
 
 // Helper function to escape JSON strings
@@ -3025,15 +3003,8 @@ static int text_json_leading_whitespace_start(ViewText* text, TextRect* rect) {
     }
     int start = max(rect->start_index, 0);
     unsigned char* data = text->text_data();
-    int cursor = 0;
-    while (cursor < start) {
-        unsigned char ch = data[cursor];
-        if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r' && ch != '\f') {
-            return start;
-        }
-        cursor++;
-    }
-    return cursor == start ? 0 : start;
+    return str_span((const char*)data, (size_t)start, str_is_html_space) == (size_t)start
+        ? 0 : start;
 }
 
 static bool text_json_is_collapsible_whitespace_node(DomNode* node) {
@@ -3047,13 +3018,7 @@ static bool text_json_is_collapsible_whitespace_node(DomNode* node) {
     DomText* text = node->as_text();
     unsigned char* data = text ? text->text_data() : nullptr;
     if (!text || !data || text->length == 0) return false;
-    for (size_t i = 0; i < text->length; i++) {
-        unsigned char ch = data[i];
-        if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r' && ch != '\f') {
-            return false;
-        }
-    }
-    return true;
+    return str_all((const char*)data, text->length, str_is_html_space);
 }
 
 static int text_json_preceding_whitespace(

@@ -627,8 +627,7 @@ static int format_bullet_counter(uint32_t style, char* buffer, size_t buffer_siz
         : style == CSS_VALUE_CIRCLE ? 1
         : style == CSS_VALUE_SQUARE ? 2 : -1;
     if (index < 0 || buffer_size < 4) return 0;
-    memcpy(buffer, bullets[index], 3);
-    buffer[3] = '\0';
+    str_copy(buffer, buffer_size, (const char*)bullets[index], 3);
     return 3;
 }
 

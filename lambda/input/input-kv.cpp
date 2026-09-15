@@ -16,6 +16,7 @@
 #include "input-utils.hpp"
 #include "source_tracker.hpp"
 #include "../../lib/str.h"
+#include "../../lib/string.h"
 
 extern "C" {
 #include "../../lib/log.h"
@@ -244,11 +245,8 @@ static void parse_kv_document(InputContext& ctx, const char* src, const KvConfig
         } else if (cfg->support_sections && !global_added) {
             // key-value before any section → "global" section
             global_added = true;
-            String* global_name = (String*)pool_calloc(input->pool, sizeof(String) + 7);
+            String* global_name = create_string(input->pool, "global");
             if (!global_name) { skip_to_newline(&current); continue; }
-            global_name->len = 6;
-            memcpy(global_name->chars, "global", 6);
-            global_name->chars[6] = '\0';
 
             Map* global_map = map_pooled(input->pool);
             if (global_map) {

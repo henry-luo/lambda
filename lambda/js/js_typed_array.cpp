@@ -870,11 +870,9 @@ static Item js_atomics_replace_wait_suffix(Item report_string, const char* statu
     if (suffix_len == 0) return report_string;
     int prefix_len = (int)report->len - suffix_len;
     int len = prefix_len + status_len;
-    char* buf = (char*)mem_alloc((size_t)len + 1, MEM_CAT_JS_RUNTIME);
+    char* buf = mem_join2(report->chars, (size_t)prefix_len, status, (size_t)status_len,
+                          MEM_CAT_JS_RUNTIME);
     if (!buf) return report_string;
-    memcpy(buf, report->chars, (size_t)prefix_len);
-    memcpy(buf + prefix_len, status, (size_t)status_len);
-    buf[len] = '\0';
     Item result = (Item){.item = s2it(heap_strcpy(buf, len))};
     mem_free(buf);
     return result;

@@ -3069,14 +3069,7 @@ static bool text_range_has_non_collapsed_content(ViewText* text,
     if (!ws_collapse_spaces(get_white_space_value(text))) return true;
 
     const char* start = text->text + rect->start_index;
-    const char* end = start + text_length;
-    for (const char* current = start; current < end; current++) {
-        char c = *current;
-        if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f') {
-            return true;
-        }
-    }
-    return false;
+    return !str_all(start, (size_t)text_length, str_is_html_space);
 }
 
 static float text_emphasis_line_extent(LayoutContext* lycon, ViewText* text,

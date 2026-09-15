@@ -2800,10 +2800,7 @@ extern "C" Item js_process_emitWarning(Item warning, Item type_item, Item code_i
     if (get_type_id(warning_message) == LMD_TYPE_STRING) {
         String* msg = it2s(warning_message);
         if (msg) {
-            char* line = (char*)mem_alloc(msg->len + 2, MEM_CAT_JS_RUNTIME);
-            memcpy(line, msg->chars, msg->len);
-            line[msg->len] = '\n';
-            line[msg->len + 1] = '\0';
+            char* line = mem_join2(msg->chars, msg->len, "\n", 1, MEM_CAT_JS_RUNTIME);
             Item line_item = (Item){.item = s2it(heap_strcpy(line, msg->len + 1))};
             mem_free(line);
 
@@ -4628,8 +4625,7 @@ static inline Item js_uri_make_four_byte_string(char* decoded) {
     result->len = 4;
     result->flags = 0;
     result->is_ascii = false;
-    memcpy(result->chars, decoded, 4);
-    result->chars[4] = '\0';
+    str_copy(result->chars, 5, decoded, 4);
     return (Item){.item = s2it(result)};
 }
 
@@ -4674,8 +4670,7 @@ static inline Item js_make_small_string(char* chars, int len, bool is_ascii) {
     result->len = len;
     result->flags = 0;
     result->is_ascii = is_ascii;
-    memcpy(result->chars, chars, len);
-    result->chars[len] = '\0';
+    str_copy(result->chars, len + 1, chars, len);
     return (Item){.item = s2it(result)};
 }
 
@@ -9787,10 +9782,8 @@ static Item js_test262_error_with_message(const char* prefix, Item message) {
     String* ms = (get_type_id(message) == LMD_TYPE_STRING) ? it2s(message) : NULL;
     int prefix_len = (int)strlen(prefix);
     int total = prefix_len + (ms ? (int)ms->len : 0);
-    char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
-    memcpy(buf, prefix, (size_t)prefix_len);
-    if (ms) memcpy(buf + prefix_len, ms->chars, ms->len);
-    buf[total] = '\0';
+    char* buf = mem_join2(prefix, (size_t)prefix_len, ms ? ms->chars : "",
+                          ms ? ms->len : 0, MEM_CAT_JS_RUNTIME);
     Item err_name = js_name_item("Test262Error");
     Item err_msg = js_name_item(buf, total);
     mem_free(buf);
@@ -9805,18 +9798,13 @@ static Item js_test262_error_with_values(Item left, const char* between,
     int total = (int)strlen(between) + (int)strlen(suffix) +
         (ls ? (int)ls->len : 0) + (rs ? (int)rs->len : 0) +
         (ms ? (int)ms->len : 0);
-    char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
-    int pos = 0;
-    if (ls) { memcpy(buf + pos, ls->chars, ls->len); pos += (int)ls->len; }
-    int len = (int)strlen(between);
-    memcpy(buf + pos, between, (size_t)len); pos += len;
-    if (rs) { memcpy(buf + pos, rs->chars, rs->len); pos += (int)rs->len; }
-    len = (int)strlen(suffix);
-    memcpy(buf + pos, suffix, (size_t)len); pos += len;
-    if (ms) { memcpy(buf + pos, ms->chars, ms->len); pos += (int)ms->len; }
-    buf[pos] = '\0';
+    const char* parts[] = {ls ? ls->chars : "", between, rs ? rs->chars : "", suffix,
+                           ms ? ms->chars : ""};
+    const size_t lengths[] = {ls ? ls->len : 0, strlen(between), rs ? rs->len : 0,
+                              strlen(suffix), ms ? ms->len : 0};
+    char* buf = mem_join_parts(parts, lengths, 5, MEM_CAT_JS_RUNTIME);
     Item err_name = js_name_item("Test262Error");
-    Item err_msg = js_name_item(buf, pos);
+    Item err_msg = js_name_item(buf, total);
     mem_free(buf);
     return js_new_error_with_name(err_name, err_msg);
 }
@@ -10359,10 +10347,7 @@ extern "C" Item js_assert_base(Item must_be_true, Item message) {
     int plen = (int)strlen(prefix);
     int vlen = vs ? (int)vs->len : 9;
     const char* vchars = vs ? vs->chars : "undefined";
-    char* buf = (char*)mem_alloc(plen + vlen + 1, MEM_CAT_JS_RUNTIME);
-    memcpy(buf, prefix, plen);
-    memcpy(buf + plen, vchars, vlen);
-    buf[plen + vlen] = '\0';
+    char* buf = mem_join2(prefix, plen, vchars, vlen, MEM_CAT_JS_RUNTIME);
     Item err_name = js_name_item("Test262Error");
     Item err_msg  = js_name_item(buf, plen + vlen);
     mem_free(buf);

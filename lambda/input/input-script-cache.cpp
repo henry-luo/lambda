@@ -98,11 +98,6 @@ static const char* cache_text(const char* value, const char* fallback) {
     return value ? value : fallback;
 }
 
-static char* cache_copy_text(const char* value) {
-    const char* text = value ? value : "";
-    return mem_strdup(text, MEM_CAT_CACHE_OTHER);
-}
-
 static uint64_t cache_text_hash(const char* value) {
     const char* text = value ? value : "";
     return hashmap_hash_xxhash3_cstr(text, 0, 0);
@@ -398,15 +393,15 @@ static bool cache_make_input(const InputScriptRequest* request,
     ScriptInput* input = (ScriptInput*)mem_calloc(1, sizeof(ScriptInput),
         MEM_CAT_CACHE_OTHER);
     if (!input) return false;
-    input->identity = cache_copy_text(request->identity);
+    input->identity = mem_strdup(cache_text(request->identity, ""), MEM_CAT_CACHE_OTHER);
     input->source = mem_dup_n(source ? source : "", source_length, MEM_CAT_CACHE_OTHER);
-    input->language = cache_copy_text(request->language);
-    input->profile = cache_copy_text(request->profile);
-    input->parser_abi = cache_copy_text(request->parser_abi);
-    input->parse_flags = cache_copy_text(request->parse_flags);
-    input->resolution_base = cache_copy_text(request->resolution_base);
-    input->backend = cache_copy_text(request->backend);
-    input->execution_mode = cache_copy_text(request->execution_mode);
+    input->language = mem_strdup(cache_text(request->language, ""), MEM_CAT_CACHE_OTHER);
+    input->profile = mem_strdup(cache_text(request->profile, ""), MEM_CAT_CACHE_OTHER);
+    input->parser_abi = mem_strdup(cache_text(request->parser_abi, ""), MEM_CAT_CACHE_OTHER);
+    input->parse_flags = mem_strdup(cache_text(request->parse_flags, ""), MEM_CAT_CACHE_OTHER);
+    input->resolution_base = mem_strdup(cache_text(request->resolution_base, ""), MEM_CAT_CACHE_OTHER);
+    input->backend = mem_strdup(cache_text(request->backend, ""), MEM_CAT_CACHE_OTHER);
+    input->execution_mode = mem_strdup(cache_text(request->execution_mode, ""), MEM_CAT_CACHE_OTHER);
     input->source_length = source_length;
     input->source_kind = request->source_kind;
     input->module_mode = request->module_mode;

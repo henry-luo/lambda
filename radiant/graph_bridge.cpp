@@ -6,36 +6,6 @@
 #include <cstdio>
 #include <cstring>
 
-static char* graph_bridge_escape_lambda_string(const char* value) {
-    if (!value) return nullptr;
-    size_t out_len = 0;
-    for (const char* cursor = value; *cursor; cursor++) {
-        char ch = *cursor;
-        out_len += (ch == '\\' || ch == '"' || ch == '\n' || ch == '\r' || ch == '\t') ? 2 : 1;
-    }
-
-    char* out = (char*)mem_alloc(out_len + 1, MEM_CAT_TEMP);
-    if (!out) return nullptr;
-    size_t pos = 0;
-    for (const char* cursor = value; *cursor; cursor++) {
-        char ch = *cursor;
-        if (ch == '\\' || ch == '"') {
-            out[pos++] = '\\';
-            out[pos++] = ch;
-        } else if (ch == '\n') {
-            out[pos++] = '\\'; out[pos++] = 'n';
-        } else if (ch == '\r') {
-            out[pos++] = '\\'; out[pos++] = 'r';
-        } else if (ch == '\t') {
-            out[pos++] = '\\'; out[pos++] = 't';
-        } else {
-            out[pos++] = ch;
-        }
-    }
-    out[pos] = '\0';
-    return out;
-}
-
 const char* graph_bridge_flavor_for_path(const char* graph_file) {
     const char* ext = file_path_ext(graph_file);
     if (ext && strcmp(ext, ".mmd") == 0) return "mermaid";
@@ -63,9 +33,9 @@ bool graph_bridge_path_is_graph(const char* graph_file) {
 
 char* build_graph_to_html_bridge_script(const char* graph_file, const char* theme_name,
                                         const char* view_key, const char* log_prefix) {
-    char* escaped_file = graph_bridge_escape_lambda_string(graph_file);
-    char* escaped_theme = theme_name ? graph_bridge_escape_lambda_string(theme_name) : nullptr;
-    char* escaped_view = view_key ? graph_bridge_escape_lambda_string(view_key) : nullptr;
+    char* escaped_file = mem_escape_lambda_literal(graph_file, MEM_CAT_TEMP);
+    char* escaped_theme = theme_name ? mem_escape_lambda_literal(theme_name, MEM_CAT_TEMP) : nullptr;
+    char* escaped_view = view_key ? mem_escape_lambda_literal(view_key, MEM_CAT_TEMP) : nullptr;
     if (!escaped_file || (theme_name && !escaped_theme) || (view_key && !escaped_view)) {
         if (escaped_file) mem_free(escaped_file);
         if (escaped_theme) mem_free(escaped_theme);

@@ -8,6 +8,7 @@
 #include "lib/log.h"
 #include "lib/str.h"
 #include <stdlib.h>
+#include "../../lib/string.h"
 
 using namespace lambda;
 
@@ -993,13 +994,9 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict, siz
     // Store stream data as a string (truncated for safety)
     String* data_key = ctx.builder.createString("data");
     if (data_key) {
-        String* stream_data;
-        stream_data = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + data_length + 1);
+        String* stream_data = string_from_strview(strview_init(*pdf, data_length),
+                                                  ctx.input()->pool);
         if (stream_data) {
-            memcpy(stream_data->chars, *pdf, data_length);
-            stream_data->chars[data_length] = '\0';
-            stream_data->len = data_length;
-
             Item data_item = {.item = s2it(stream_data)};
             ctx.builder.putToMap(lam::gc_borrow(stream_map), data_key, data_item);
 

@@ -3927,12 +3927,7 @@ static inline int layout_count_potential_items(ViewBlock* container,
 
 inline bool layout_dom_text_has_non_whitespace(DomText* text) {
     if (!text || !text->text || text->length == 0) return false;
-    for (size_t i = 0; i < text->length; i++) {
-        char c = text->text[i];
-        if (c != ' ' && c != '\t' && c != '\n' && c != '\r' &&
-            c != '\f' && c != '\v') return true;
-    }
-    return false;
+    return !str_all(text->text, text->length, str_is_space);
 }
 
 static inline bool layout_display_is_none(DisplayValue display) {

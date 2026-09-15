@@ -387,13 +387,7 @@ static bool text_is_all_collapsible_space(DomText* text, ViewSpan* span) {
         white_space == CSS_VALUE_PRE_LINE ||
         white_space == 0;
     if (!collapse_spaces) return false;
-    for (size_t i = 0; i < text->length; i++) {
-        char c = text->text[i];
-        if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f') {
-            return false;
-        }
-    }
-    return true;
+    return str_all(text->text, text->length, str_is_html_space);
 }
 
 bool layout_inline_is_collapsed_whitespace_only(ViewSpan* span) {

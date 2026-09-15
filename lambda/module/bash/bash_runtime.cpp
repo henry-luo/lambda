@@ -962,8 +962,7 @@ extern "C" Item bash_expand_trim_prefix(Item val, Item pat) {
     // try shortest prefix
     for (size_t i = 0; i <= slen; i++) {
         char tmp[512];
-        memcpy(tmp, str, i);
-        tmp[i] = '\0';
+        str_copy(tmp, sizeof(tmp), str, i);
         if (fnmatch(pattern, tmp, 0) == 0) {
             return bash_make_string(str + i, slen - i);
         }
@@ -980,8 +979,7 @@ extern "C" Item bash_expand_trim_prefix_long(Item val, Item pat) {
     // try longest prefix first
     for (size_t i = slen; i > 0; i--) {
         char tmp[512];
-        memcpy(tmp, str, i);
-        tmp[i] = '\0';
+        str_copy(tmp, sizeof(tmp), str, i);
         if (fnmatch(pattern, tmp, 0) == 0) {
             return bash_make_string(str + i, slen - i);
         }

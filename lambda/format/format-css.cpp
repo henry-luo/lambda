@@ -3,6 +3,7 @@
 #include "../input/css/css_formatter.hpp"
 #include "../input/css/css_style.hpp"
 #include "../../lib/stringbuf.h"
+#include "../../lib/string.h"
 #include <string.h>
 
 // Helper to check if item is a CssStylesheet (has 0xCC marker)
@@ -28,12 +29,8 @@ String* format_css(Pool *pool, Item item) {
                 const char* result_str = css_format_stylesheet(formatter, stylesheet);
                 if (result_str) {
                     size_t len = strlen(result_str);
-                    String* result = (String*)pool_alloc(pool, sizeof(String) + len + 1);
+                    String* result = string_from_strview(strview_init(result_str, len), pool);
                     if (result) {
-                        result->len = len;
-                        result->flags = 0;
-                        result->is_ascii = 1;  // CSS is ASCII
-                        memcpy(result->chars, result_str, len + 1);
                         css_formatter_destroy(formatter);
                         return result;
                     }
@@ -44,12 +41,5 @@ String* format_css(Pool *pool, Item item) {
     }
 
     // Return empty string for unsupported input
-    String* empty = (String*)pool_alloc(pool, sizeof(String) + 1);
-    if (empty) {
-        empty->len = 0;
-        empty->flags = 0;
-        empty->is_ascii = 1;
-        empty->chars[0] = '\0';
-    }
-    return empty;
+    return create_string(pool, "");
 }

@@ -980,10 +980,8 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
     // Get function name (strip trailing '(' if present)
     const char* func_name = tokens[*pos].value;
     if (!func_name && tokens[*pos].start && tokens[*pos].length > 0) {
-        char* name_buf = (char*)pool_calloc(pool, tokens[*pos].length + 1);
+        char* name_buf = pool_dup_n(pool, tokens[*pos].start, tokens[*pos].length);
         if (name_buf) {
-            memcpy(name_buf, tokens[*pos].start, tokens[*pos].length);
-            name_buf[tokens[*pos].length] = '\0';
             func_name = name_buf;
         }
     }
@@ -1492,10 +1490,8 @@ static const char* css_parse_attribute_value(const CssToken* tokens, int* pos,
             value = pool_strdup(pool, value);
         }
     } else if (!value && tokens[*pos].start && tokens[*pos].length > 0) {
-        char* value_buf = (char*)pool_calloc(pool, tokens[*pos].length + 1);
+        char* value_buf = pool_dup_n(pool, tokens[*pos].start, tokens[*pos].length);
         if (value_buf) {
-            memcpy(value_buf, tokens[*pos].start, tokens[*pos].length);
-            value_buf[tokens[*pos].length] = '\0';
             value = value_buf;
         }
     }
@@ -1859,10 +1855,8 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                 if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_IDENT) {
                     const char* elem_name = tokens[*pos].value;
                     if (!elem_name && tokens[*pos].start && tokens[*pos].length > 0) {
-                        char* name_buf = (char*)pool_calloc(pool, tokens[*pos].length + 1);
+                        char* name_buf = pool_dup_n(pool, tokens[*pos].start, tokens[*pos].length);
                         if (name_buf) {
-                            memcpy(name_buf, tokens[*pos].start, tokens[*pos].length);
-                            name_buf[tokens[*pos].length] = '\0';
                             elem_name = name_buf;
                         }
                     }
@@ -2079,14 +2073,12 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
             return NULL;
         }
 
-        const char* attr_name = tokens[*pos].value;
-        if (!attr_name && tokens[*pos].start && tokens[*pos].length > 0) {
-            char* name_buf = (char*)pool_calloc(pool, tokens[*pos].length + 1);
-            if (name_buf) {
-                memcpy(name_buf, tokens[*pos].start, tokens[*pos].length);
-                name_buf[tokens[*pos].length] = '\0';
-                attr_name = name_buf;
-            }
+    const char* attr_name = tokens[*pos].value;
+    if (!attr_name && tokens[*pos].start && tokens[*pos].length > 0) {
+        char* name_buf = pool_dup_n(pool, tokens[*pos].start, tokens[*pos].length);
+        if (name_buf) {
+            attr_name = name_buf;
+        }
         }
         (*pos)++;
 
@@ -2192,10 +2184,8 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
         property_name = tokens[*pos].value;
     } else if (tokens[*pos].start && tokens[*pos].length > 0) {
         // Create null-terminated string from start/length
-        char* name_buf = (char*)pool_calloc(pool, tokens[*pos].length + 1);
+        char* name_buf = pool_dup_n(pool, tokens[*pos].start, tokens[*pos].length);
         if (!name_buf) return NULL;
-        memcpy(name_buf, tokens[*pos].start, tokens[*pos].length);
-        name_buf[tokens[*pos].length] = '\0';
         property_name = name_buf;
     } else {
         log_debug("[CSS Parser] No property name in token");
@@ -3560,15 +3550,10 @@ CssDeclaration* css_parse_property_declaration(const char* property, size_t prop
                                                Pool* pool) {
     if (!property || property_length == 0 || !value || !pool) return NULL;
     const size_t max_size = (size_t)-1;
-    if (property_length > max_size - 3 || value_length > max_size - property_length - 3) return NULL;
+    if (property_length > max_size - 2 || value_length > max_size - property_length - 2) return NULL;
 
-    size_t length = property_length + value_length + 3;
-    char* text = (char*)pool_alloc(pool, length);
+    size_t length = property_length + value_length + 2;
+    char* text = pool_join3(pool, property, property_length, ": ", 2, value, value_length);
     if (!text) return NULL;
-    memcpy(text, property, property_length);
-    text[property_length] = ':';
-    text[property_length + 1] = ' ';
-    memcpy(text + property_length + 2, value, value_length);
-    text[length - 1] = '\0';
-    return css_parse_declaration_text(text, length - 1, pool);
+    return css_parse_declaration_text(text, length, pool);
 }

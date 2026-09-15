@@ -2652,14 +2652,7 @@ DomText* DomText::create_detached(String* native_string, DomDocument* doc) {
 
 String* dom_document_create_string(DomDocument* doc, const char* text, size_t len) {
     if (!doc || !doc->document_pool || (!text && len > 0)) return nullptr;
-    String* string = (String*)pool_alloc(doc->document_pool, sizeof(String) + len + 1);
-    if (!string) return nullptr;
-    string->len = (uint32_t)len;
-    string->flags = 0;
-    string->is_ascii = str_is_ascii(text ? text : "", len) ? 1 : 0;
-    if (len > 0) memcpy(string->chars, text, len);
-    string->chars[len] = '\0';
-    return string;
+    return string_from_strview(strview_init(text ? text : "", len), doc->document_pool);
 }
 
 bool dom_text_adopt_document_string(DomText* text_node, DomDocument* doc,
@@ -2696,8 +2689,7 @@ DomText* DomText::create_detached_copy(DomDocument* doc,
     text_node->node_flags |= DOM_NODE_FLAG_TEXT_REINSERTABLE;
     string->flags = 0;
     string->is_ascii = str_is_ascii(text ? text : "", len) ? 1 : 0;
-    if (len) memcpy(string->chars, text, len);
-    string->chars[len] = '\0';
+    str_copy(string->chars, len + 1, text, len);
     text_node->id = dom_document_alloc_node_id(doc);
     size_t primary_size = sizeof(DomText) + sizeof(String) + len + 1;
     if (!dom_node_registry_register(doc, text_node, primary_size, true)) return nullptr;

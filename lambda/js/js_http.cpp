@@ -2314,11 +2314,8 @@ static void http_request_headers_append(Item headers, const char* name, int name
         const char* sep = is_cookie ? "; " : ", ";
         int sep_len = (int)strlen(sep);
         int total = (int)es->len + sep_len + (int)is->len;
-        char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
-        memcpy(buf, es->chars, es->len);
-        memcpy(buf + es->len, sep, (size_t)sep_len);
-        memcpy(buf + es->len + sep_len, is->chars, is->len);
-        buf[total] = '\0';
+        char* buf = mem_join3(es->chars, es->len, sep, (size_t)sep_len,
+                              is->chars, is->len, MEM_CAT_JS_RUNTIME);
         js_set_key_default(headers, key, make_string_item(buf, total));
         mem_free(buf);
     } else {
@@ -4870,10 +4867,8 @@ static Item http_client_write_ex(Item self, Item data_item, Item encoding_item, 
     if (js_item_bytes(encoded_item, &chunk_data, &chunk_len)) {
         String* existing = it2s(body);
         int new_len = (int)existing->len + chunk_len;
-        char* buf = (char*)mem_alloc(new_len + 1, MEM_CAT_JS_RUNTIME);
-        memcpy(buf, existing->chars, existing->len);
-        if (chunk_len > 0) memcpy(buf + existing->len, chunk_data, (size_t)chunk_len);
-        buf[new_len] = '\0';
+        char* buf = mem_join2(existing->chars, existing->len, chunk_data,
+                              (size_t)chunk_len, MEM_CAT_JS_RUNTIME);
         js_set_key_cstr(self, "__req_body__", make_string_item(buf, new_len));
         mem_free(buf);
 

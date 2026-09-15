@@ -128,8 +128,7 @@ Symbol* MarkBuilder::createSymbol(const char* symbol, size_t len) {
     Symbol* sym = (Symbol*)arena_alloc(arena_, sizeof(Symbol) + len + 1);
     sym->len = len;
     sym->ns = nullptr;
-    memcpy(sym->chars, symbol, len);
-    sym->chars[len] = '\0';
+    str_copy(sym->chars, len + 1, symbol, len);
     return sym;
 }
 
@@ -154,8 +153,7 @@ String* MarkBuilder::createString(const char* str, size_t len) {
     s->len = len;
     s->flags = 0;
     s->is_ascii = str_is_ascii(str, len) ? 1 : 0;
-    memcpy(s->chars, str, len);
-    s->chars[len] = '\0';
+    str_copy(s->chars, len + 1, str, len);
     return s;
 }
 
@@ -191,8 +189,7 @@ String* MarkBuilder::createDomTextString(const char* str, size_t len) {
     String* s = dom_text_to_string(dt);
     s->flags = 0;
     s->is_ascii = str_is_ascii(str, len) ? 1 : 0;
-    memcpy(s->chars, str, len);
-    s->chars[len] = '\0';
+    str_copy(s->chars, len + 1, str, len);
     return s;
 }
 

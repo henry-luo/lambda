@@ -1335,12 +1335,9 @@ bool dom_text_replace_data_contents(DocState* st, DomText* t,
     size_t suffix_len = (t->length > u8_end) ? (t->length - u8_end) : 0;
     size_t new_len    = prefix + repl_bytes + suffix_len;
 
-    char* buf = (char*)mem_alloc(new_len + 1, MEM_CAT_TEMP);
+    char* buf = mem_join3(t->text, prefix, repl_chars, repl_bytes,
+                          t->text ? t->text + u8_end : NULL, suffix_len, MEM_CAT_TEMP);
     if (!buf) return false;
-    if (prefix)     memcpy(buf,                      t->text,         prefix);
-    if (repl_bytes) memcpy(buf + prefix,             repl_chars,      repl_bytes);
-    if (suffix_len) memcpy(buf + prefix + repl_bytes, t->text + u8_end, suffix_len);
-    buf[new_len] = '\0';
 
     DomDocument* doc = node_doc(static_cast<DomNode*>(t));
     String* s = dom_document_create_string(doc, buf, new_len);
@@ -1971,11 +1968,7 @@ static DomElement* nearest_block_ancestor_or_self(DomNode* n) {
 // True iff text node holds only ASCII whitespace.
 static bool text_is_ws_only(DomText* t) {
     if (!t || !t->text || t->length == 0) return false;
-    for (size_t i = 0; i < t->length; i++) {
-        unsigned char c = (unsigned char)t->text[i];
-        if (c != ' ' && c != '\n' && c != '\r' && c != '\t' && c != '\f') return false;
-    }
-    return true;
+    return str_all(t->text, t->length, str_is_html_space);
 }
 
 // Step to the previous node in document order.
@@ -4433,17 +4426,7 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
                 it = (dir > 0) ? next_text_after(static_cast<DomNode*>(it))
                                : prev_text_before(static_cast<DomNode*>(it));
                 if (!it) break;
-                bool ws_only = true;
-                if (it->text) {
-                    for (size_t i = 0; i < it->length; i++) {
-                        unsigned char c = (unsigned char)it->text[i];
-                        if (c != ' ' && c != '\n' && c != '\r' && c != '\t' && c != '\f') {
-                            ws_only = false; break;
-                        }
-                    }
-                } else {
-                    ws_only = false;
-                }
+                bool ws_only = it->text && str_all(it->text, it->length, str_is_html_space);
                 if (!ws_only) { target = it; break; }
             }
         } else {

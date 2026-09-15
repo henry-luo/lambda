@@ -312,8 +312,7 @@ extern "C" Item js_path_resolve(Item args_item) {
     if (cwd) {
         int clen = (int)strlen(cwd);
         if (clen >= (int)sizeof(resolved)) clen = (int)sizeof(resolved) - 1;
-        memcpy(resolved, cwd, clen);
-        resolved[clen] = '\0';
+        str_copy(resolved, sizeof(resolved), cwd, clen);
         mem_free(cwd);
     }
 

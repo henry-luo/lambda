@@ -219,14 +219,9 @@ bool te_replace_byte_range_no_events(DomElement* elem, DocState* state, void* ta
 
     // Build new buffer: old[0..start) + repl[0..repl_len) + old[end..old_len)
     uint32_t new_len = (old_len - (end - start)) + repl_len;
-    char* nbuf = (char*)mem_alloc((size_t)new_len + 1, MEM_CAT_TEMP);
+    char* nbuf = mem_join3(old_buf, start, repl, repl_len, old_buf ? old_buf + end : NULL,
+                           old_len - end, MEM_CAT_TEMP);
     if (!nbuf) return false;
-    if (start > 0)            memcpy(nbuf,             old_buf,           start);
-    if (repl_len > 0 && repl) memcpy(nbuf + start,     repl,              repl_len);
-    if (end < old_len)        memcpy(nbuf + start + repl_len,
-                                     old_buf + end,
-                                     old_len - end);
-    nbuf[new_len] = '\0';
 
     tc_set_value(elem, nbuf, new_len);
     mem_free(nbuf);

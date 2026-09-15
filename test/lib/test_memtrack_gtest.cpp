@@ -309,6 +309,17 @@ TEST_F(MemtrackTest, DupNPreservesExactBytes) {
     mem_free(duplicate);
 }
 
+TEST_F(MemtrackTest, JoinPreservesExactParts) {
+    const char middle[] = {'-', '\0'};
+    char* joined = mem_join3("alpha", 5, middle, sizeof(middle), "omega", 5,
+                             MEM_CAT_TEMP);
+
+    ASSERT_NE(joined, nullptr);
+    EXPECT_EQ(memcmp(joined, "alpha-\0omega", 12), 0);
+    EXPECT_EQ(joined[12], '\0');
+    mem_free(joined);
+}
+
 TEST_F(MemtrackTest, StrndupCopiesBoundedSlice) {
     const char source[] = {'a', 'b', 'c', 'd'};
     char* duplicate = mem_strndup(source, sizeof(source), MEM_CAT_TEMP);

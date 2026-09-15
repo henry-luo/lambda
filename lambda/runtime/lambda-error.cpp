@@ -50,14 +50,6 @@ extern "C" {
 // Note: MIR headers removed - build_debug_info_table is now in mir.c
 
 // ============================================================================
-// Helper: string duplication (portable replacement for strdup)
-// ============================================================================
-
-static char* err_strdup(const char* s) {
-    return s ? mem_strdup(s, MEM_CAT_SYSTEM) : NULL;
-}
-
-// ============================================================================
 // Error Code Name Lookup
 // ============================================================================
 
@@ -288,7 +280,7 @@ static LambdaError* err_init(LambdaError* error, LambdaErrorCode code, const cha
     error->js_properties_item = 0;
     error->js_class_id = 0;
     error->js_own_flags = 0;
-    error->message = message ? err_strdup(message) : err_strdup(err_code_message(code));
+    error->message = message ? mem_strdup(message, MEM_CAT_SYSTEM) : mem_strdup(err_code_message(code), MEM_CAT_SYSTEM);
     error->raw_stack_trace = NULL;
 
     if (location) {
@@ -454,7 +446,7 @@ void err_set_location(LambdaError* error, const char* file, uint32_t line, uint3
 void err_add_help(LambdaError* error, const char* help) {
     if (!error || !help) return;
     if (error->help) mem_free(error->help);
-    error->help = err_strdup(help);
+    error->help = mem_strdup(help, MEM_CAT_SYSTEM);
 }
 
 void err_set_cause(LambdaError* error, LambdaError* cause) {
@@ -729,7 +721,7 @@ StackFrame* err_capture_stack_trace(void* debug_info_list, int max_frames) {
                     StackFrame* frame = (StackFrame*)mem_calloc(1, sizeof(StackFrame), MEM_CAT_SYSTEM);
                     if (!frame) break;
                     
-                    frame->function_name = err_strdup(name);
+                    frame->function_name = mem_strdup(name, MEM_CAT_SYSTEM);
                     frame->location.file = NULL;
                     frame->location.line = 0;
                     frame->is_native = true;
@@ -843,7 +835,7 @@ StackFrame* err_materialize_raw_stack_trace(RawStackTrace* raw_trace) {
             if (is_lambda_sys_func && !is_error_machinery) {
                 StackFrame* frame = (StackFrame*)mem_calloc(1, sizeof(StackFrame), MEM_CAT_SYSTEM);
                 if (!frame) break;
-                frame->function_name = err_strdup(name);
+                frame->function_name = mem_strdup(name, MEM_CAT_SYSTEM);
                 frame->is_native = true;
                 *tail = frame;
                 tail = &frame->next;
@@ -867,7 +859,7 @@ void err_ensure_stack_trace(LambdaError* error) {
 // ============================================================================
 
 char* err_format(LambdaError* error) {
-    if (!error) return err_strdup("(null error)");
+    if (!error) return mem_strdup("(null error)", MEM_CAT_SYSTEM);
     err_ensure_stack_trace(error);
     
     char buffer[4096];
@@ -893,7 +885,7 @@ char* err_format(LambdaError* error) {
         pos += snprintf(buffer + pos, sizeof(buffer) - pos, "\n    = help: %s", error->help);
     }
     
-    return err_strdup(buffer);
+    return mem_strdup(buffer, MEM_CAT_SYSTEM);
 }
 
 char* err_format_with_context(LambdaError* error, int context_lines) {
@@ -905,7 +897,7 @@ char* err_format_with_context(LambdaError* error, int context_lines) {
 // difference, so one formatter serves both severities.
 char* err_format_with_context_labeled(LambdaError* error, int context_lines,
         const char* severity_label) {
-    if (!error) return err_strdup("(null error)");
+    if (!error) return mem_strdup("(null error)", MEM_CAT_SYSTEM);
 
     char buffer[8192];
     int pos = 0;
@@ -1024,7 +1016,7 @@ char* err_format_with_context_labeled(LambdaError* error, int context_lines,
         mem_free(cause_str);
     }
     
-    return err_strdup(buffer);
+    return mem_strdup(buffer, MEM_CAT_SYSTEM);
 }
 
 void err_print(LambdaError* error) {
@@ -1084,7 +1076,7 @@ static void json_escape_string(char* dest, size_t dest_size, const char* src) {
 }
 
 char* err_format_json(LambdaError* error) {
-    if (!error) return err_strdup("null");
+    if (!error) return mem_strdup("null", MEM_CAT_SYSTEM);
     err_ensure_stack_trace(error);
     
     char buffer[4096];
@@ -1147,16 +1139,16 @@ char* err_format_json(LambdaError* error) {
     
     pos += snprintf(buffer + pos, sizeof(buffer) - pos, "\n}");
     
-    return err_strdup(buffer);
+    return mem_strdup(buffer, MEM_CAT_SYSTEM);
 }
 
 char* err_format_json_array(LambdaError** errors, int count) {
-    if (!errors || count == 0) return err_strdup("{\"errors\": [], \"errorCount\": 0}");
+    if (!errors || count == 0) return mem_strdup("{\"errors\": [], \"errorCount\": 0}", MEM_CAT_SYSTEM);
     
     // estimate buffer size needed
     size_t buf_size = 256 + count * 2048;
     char* buffer = (char*)mem_alloc(buf_size, MEM_CAT_SYSTEM);
-    if (!buffer) return err_strdup("{\"errors\": [], \"errorCount\": 0, \"error\": \"out of memory\"}");
+    if (!buffer) return mem_strdup("{\"errors\": [], \"errorCount\": 0, \"error\": \"out of memory\"}", MEM_CAT_SYSTEM);
     
     int pos = 0;
     pos += snprintf(buffer + pos, buf_size - pos, "{\n  \"errors\": [\n");

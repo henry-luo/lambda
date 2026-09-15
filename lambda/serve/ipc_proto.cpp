@@ -6,6 +6,7 @@
 #include "http_request.hpp"
 #include "http_response.hpp"
 #include "../../lib/strbuf.h"
+#include "../../lib/escape.h"
 #include "../../lib/str.h"
 #include "../../lib/log.h"
 
@@ -17,16 +18,7 @@
 // ── JSON string escaping ──
 
 static void json_escape_str(StrBuf* buf, const char* s) {
-    strbuf_append_char(buf, '"');
-    for (const char* p = s; *p; p++) {
-        if (*p == '"')      strbuf_append_str(buf, "\\\"");
-        else if (*p == '\\') strbuf_append_str(buf, "\\\\");
-        else if (*p == '\n') strbuf_append_str(buf, "\\n");
-        else if (*p == '\r') strbuf_append_str(buf, "\\r");
-        else if (*p == '\t') strbuf_append_str(buf, "\\t");
-        else                 strbuf_append_char(buf, *p);
-    }
-    strbuf_append_char(buf, '"');
+    escape_append_json_string(buf, s ? s : "", s ? strlen(s) : 0, true, false);
 }
 
 // ── request serialization ──

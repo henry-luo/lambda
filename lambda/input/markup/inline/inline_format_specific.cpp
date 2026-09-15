@@ -930,11 +930,8 @@ Item parse_asciidoc_cross_reference(MarkupParser* parser, const char** text) {
 
     // Add href attribute with # prefix for internal link
     size_t anchor_len = anchor_end - anchor_start;
-    char* href = (char*)mem_alloc(anchor_len + 2, MEM_CAT_INPUT_MARKUP);  // +2 for # and \0
+    char* href = mem_join2("#", 1, anchor_start, anchor_len, MEM_CAT_INPUT_MARKUP);
     if (href) {
-        href[0] = '#';
-        memcpy(href + 1, anchor_start, anchor_len);
-        href[anchor_len + 1] = '\0';
         add_attribute_to_element(parser, anchor, "href", href);
         mem_free(href);
     }

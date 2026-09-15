@@ -1308,8 +1308,7 @@ static inline Item js_concat_strings_fast(String* left, String* right) {
     result->flags = 0;
     result->is_ascii = left->is_ascii && right->is_ascii;
     memcpy(result->chars, left->chars, left_len);
-    memcpy(result->chars + left_len, right->chars, right_len);
-    result->chars[result->len] = '\0';
+    str_copy(result->chars + left_len, right_len + 1, right->chars, right_len);
     Item result_item = (Item){.item = s2it(result)};
     uint32_t cp = 0;
     if (cache_rooted && result->len == 12 &&

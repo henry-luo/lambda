@@ -2460,12 +2460,6 @@ static AstNode* build_namespace_symbol_from_parts(Transpiler* tp,
         NamespaceEntry* ns_entry) {
     if (!tp || !prefix || !field || !ns_entry) return NULL;
     size_t total_len = prefix->len + 1 + field->len;
-    char* qualified = (char*)pool_alloc(tp->pool, total_len + 1);
-    memcpy(qualified, prefix->chars, prefix->len);
-    qualified[prefix->len] = '.';
-    memcpy(qualified + prefix->len + 1, field->chars, field->len);
-    qualified[total_len] = '\0';
-
     TypeString* sym_type = (TypeString*)alloc_type(tp->pool, LMD_TYPE_SYMBOL,
         sizeof(TypeString));
     sym_type->is_const = 1;
@@ -2473,8 +2467,9 @@ static AstNode* build_namespace_symbol_from_parts(Transpiler* tp,
     Symbol* symbol = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + total_len + 1);
     symbol->ns = ns_entry->target;
     symbol->len = total_len;
-    memcpy(symbol->chars, qualified, total_len);
-    symbol->chars[total_len] = '\0';
+    str_copy(symbol->chars, total_len + 1, prefix->chars, prefix->len);
+    str_cat(symbol->chars, prefix->len, total_len + 1, ".", 1);
+    str_cat(symbol->chars, prefix->len + 1, total_len + 1, field->chars, field->len);
     sym_type->string = (String*)symbol;
     arraylist_append(tp->const_list, symbol);
     sym_type->const_index = tp->const_list->length - 1;
@@ -3273,14 +3268,12 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
             // Allocate as Symbol (has ns field before chars)
             Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + content_len + 1);
             sym->ns = NULL;
-            memcpy(sym->chars, content_start, content_len);
-            sym->chars[content_len] = '\0';
+            str_copy(sym->chars, content_len + 1, content_start, content_len);
             sym->len = content_len;
             str = (String*)sym;  // store as String* in TypeString (const pool uses raw pointer)
         } else {
             str = (String*)pool_alloc(tp->pool, sizeof(String) + content_len + 1);
-            memcpy(str->chars, content_start, content_len);
-            str->chars[content_len] = '\0';
+            str_copy(str->chars, content_len + 1, content_start, content_len);
             str->len = content_len;
             str->flags = 0;
             str->is_ascii = str_is_ascii(str->chars, content_len) ? 1 : 0;
@@ -3479,8 +3472,7 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
             int slen = str->len;
             Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + slen + 1);
             sym->ns = NULL;
-            memcpy(sym->chars, str->chars, slen);
-            sym->chars[slen] = '\0';
+            str_copy(sym->chars, slen + 1, str->chars, slen);
             sym->len = slen;
             str = (String*)sym;  // store as String* in TypeString
         }
@@ -6384,11 +6376,8 @@ static void push_qualified_name(Transpiler* tp, AstNode* node, AstImportNode* im
     String* name = binding_node_name(node);
     size_t name_len = name->len;
     size_t total_len = alias_len + 1 + name_len;  // alias.name
-    char* buf = (char*)pool_alloc(tp->pool, total_len + 1);
-    memcpy(buf, alias->chars, alias_len);
-    buf[alias_len] = '.';
-    memcpy(buf + alias_len + 1, name->chars, name_len);
-    buf[total_len] = '\0';
+    char* buf = pool_join3(tp->pool, alias->chars, alias_len, ".", 1,
+                           name->chars, name_len);
     StrView qualified = {buf, total_len};
     String* qualified_name = name_pool_create_strview(tp->name_pool, qualified);
 

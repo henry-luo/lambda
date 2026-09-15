@@ -8,6 +8,7 @@
 #include "../lambda-data.hpp"
 #include "../../lib/arraylist.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/string.h"
 #include <string.h>
 #include <stdlib.h>
 #include <algorithm>
@@ -35,10 +36,7 @@ static void list_pooled_append(List* list, Item item) {
 // helper: build the single-item list used by each type mismatch hint
 static List* single_type_suggestion(Pool* pool, const char* text) {
     size_t len = strlen(text);
-    String* str = (String*)pool_calloc(pool, sizeof(String) + len + 1);
-    str->len = len;
-    memcpy(str->chars, text, len);
-    str->chars[len] = '\0';
+    String* str = string_from_strview(strview_init(text, len), pool);
     List* suggestions = list_pooled_with_capacity(pool, 2);
     list_pooled_append(suggestions, (Item){.item = s2it(str)});
     return suggestions;
@@ -172,10 +170,7 @@ List* generate_field_suggestions(const char* typo_field, TypeMap* map_type, Pool
     for (int i = 0; i < count; i++) {
         const char* text = suggestions[i].name;
         size_t len = strlen(text);
-        String* str = (String*)pool_calloc(pool, sizeof(String) + len + 1);
-        str->len = len;
-        memcpy(str->chars, text, len);
-        str->chars[len] = '\0';
+        String* str = string_from_strview(strview_init(text, len), pool);
         Item item = {.item = s2it(str)};
         list_pooled_append(result, item);
     }

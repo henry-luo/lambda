@@ -299,11 +299,8 @@ static const char* serialize_selector_text(CssRule* rule, Pool* pool) {
 
 static const char* copy_cssom_value_text(const char* value, Pool* pool) {
     if (!value || !pool) return "";
-    size_t len = strlen(value);
-    char* copy = (char*)pool_calloc(pool, len + 1);
+    char* copy = pool_strdup(pool, value);
     if (!copy) return "";
-    memcpy(copy, value, len);
-    copy[len] = '\0';
     return copy;
 }
 
@@ -599,9 +596,7 @@ extern "C" Item dom_cssom_rule_get_selector_text(Item rule_item) {
     if (rule->parent && sel_text && sel_text[0] != '\0') {
         // Always prepend '& ' for nested selectors
         size_t len = strlen(sel_text);
-        char* nested_text = (char*)pool_calloc(pool, len + 3);
-        memcpy(nested_text, "& ", 2);
-        memcpy(nested_text + 2, sel_text, len + 1);
+        char* nested_text = pool_join2(pool, "& ", 2, sel_text, len);
         return make_string_item(nested_text);
     }
     return make_string_item(sel_text);
@@ -1243,13 +1238,11 @@ static Item js_css_supports(Item* args, int argc) {
         // check if property is known (custom properties always pass). Keep the
         // complete JS string; CSS parsing is length-aware and must not truncate.
         size_t prop_len = prop_s->len;
-        char* prop_buf = (char*)pool_alloc(pool, prop_len + 1);
+        char* prop_buf = pool_dup_n(pool, prop_s->chars, prop_len);
         if (!prop_buf) {
             if (free_pool) mem_pool_destroy(pool);
             return (Item){.item = b2it(false)};
         }
-        memcpy(prop_buf, prop_s->chars, prop_len);
-        prop_buf[prop_len] = '\0';
 
         bool is_custom = (prop_len >= 2 && prop_buf[0] == '-' && prop_buf[1] == '-');
         if (!is_custom) {

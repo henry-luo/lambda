@@ -17,6 +17,7 @@
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
+#include "../../lib/escape.h"
 #include "../../lib/str.h"
 #include "../../lib/strbuf.h"
 
@@ -743,15 +744,7 @@ static void js_assert_append_string_literal(StrBuf* sb, Item value) {
         return;
     }
     strbuf_append_char(sb, '\'');
-    for (size_t i = 0; i < s->len; i++) {
-        char ch = s->chars[i];
-        if (ch == '\\') strbuf_append_str(sb, "\\\\");
-        else if (ch == '\'') strbuf_append_str(sb, "\\'");
-        else if (ch == '\n') strbuf_append_str(sb, "\\n");
-        else if (ch == '\r') strbuf_append_str(sb, "\\r");
-        else if (ch == '\t') strbuf_append_str(sb, "\\t");
-        else strbuf_append_char(sb, ch);
-    }
+    escape_append_js_quoted(sb, s->chars, s->len, '\'');
     strbuf_append_char(sb, '\'');
 }
 
@@ -769,22 +762,6 @@ static bool js_assert_range_has_char(const char* chars, size_t len, char needle)
         if (chars[i] == needle) return true;
     }
     return false;
-}
-
-static void js_assert_append_escaped_string_range(StrBuf* sb, const char* chars,
-                                                  size_t len, char quote) {
-    for (size_t i = 0; i < len; i++) {
-        char ch = chars[i];
-        if (ch == '\\') strbuf_append_str(sb, "\\\\");
-        else if (ch == quote) {
-            if (quote == '\'') strbuf_append_str(sb, "\\'");
-            else strbuf_append_str(sb, "\\\"");
-        }
-        else if (ch == '\n') strbuf_append_str(sb, "\\n");
-        else if (ch == '\r') strbuf_append_str(sb, "\\r");
-        else if (ch == '\t') strbuf_append_str(sb, "\\t");
-        else strbuf_append_char(sb, ch);
-    }
 }
 
 static void js_assert_append_spaces(StrBuf* sb, int count) {
@@ -819,7 +796,7 @@ static void js_assert_append_long_multiline_string(StrBuf* sb, String* s,
             quote = '"';
         }
         strbuf_append_char(sb, quote);
-        js_assert_append_escaped_string_range(sb, s->chars + start, segment_len, quote);
+        escape_append_js_quoted(sb, s->chars + start, segment_len, quote);
         strbuf_append_char(sb, quote);
         bool truncated_after_this = max_segments > 0 &&
             segment_count + 1 >= max_segments && end < s->len;
@@ -852,7 +829,7 @@ static void js_assert_append_deep_equal_value(StrBuf* sb, Item value) {
     }
     if (s && simple_diff && s->len > 512) {
         strbuf_append_char(sb, '\'');
-        js_assert_append_escaped_string_range(sb, s->chars, 508, '\'');
+    escape_append_js_quoted(sb, s->chars, 508, '\'');
         strbuf_append_str(sb, "...");
         return;
     }
@@ -1971,7 +1948,7 @@ static void js_assert_append_quoted_key(StrBuf* sb, String* key) {
         strbuf_append_str_n(sb, key->chars, key->len);
     } else {
         strbuf_append_char(sb, '\'');
-        js_assert_append_escaped_string_range(sb, key->chars, key->len, '\'');
+        escape_append_js_quoted(sb, key->chars, key->len, '\'');
         strbuf_append_char(sb, '\'');
     }
 }

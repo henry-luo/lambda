@@ -346,8 +346,7 @@ int router_mount(Router *parent, Router *child) {
     if (!new_prefix) return -1;
 
     if (plen > 0) memcpy(new_prefix, parent->prefix, plen);
-    if (clen > 0) memcpy(new_prefix + plen, child->prefix, clen);
-    new_prefix[plen + clen] = '\0';
+    str_copy(new_prefix + plen, clen + 1, child->prefix, clen);
 
     serve_free(child->prefix);
     child->prefix = new_prefix;

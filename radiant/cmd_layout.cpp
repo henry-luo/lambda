@@ -1590,8 +1590,7 @@ const char* detect_html_charset(const char* html, size_t len) {
     // only scan the first 1024 bytes (charset must appear early per HTML spec)
     size_t scan_len = len < 1024 ? len : 1024;
     char buf[1025];
-    memcpy(buf, html, scan_len);
-    buf[scan_len] = '\0';
+    str_copy(buf, sizeof(buf), html, scan_len);
 
     // look for <meta charset="...">
     const char* p = buf;
@@ -2233,42 +2232,8 @@ static DomDocument* load_lambda_html_doc_with_host_config(
                                          js_host_config);
 }
 
-static char* escape_pdf_bridge_lambda_string(const char* value) {
-    if (!value) return nullptr;
-    size_t out_len = 0;
-    for (const char* cursor = value; *cursor; cursor++) {
-        unsigned char ch = (unsigned char)*cursor;
-        if (ch == '\\' || ch == '"' || ch == '\n' || ch == '\r' || ch == '\t') {
-            out_len += 2;
-        } else {
-            out_len++;
-        }
-    }
-    char* out = (char*)mem_alloc(out_len + 1, MEM_CAT_LAYOUT);
-    if (!out) return nullptr;
-    size_t pos = 0;
-    for (const char* cursor = value; *cursor; cursor++) {
-        unsigned char ch = (unsigned char)*cursor;
-        if (ch == '\\') {
-            out[pos++] = '\\'; out[pos++] = '\\';
-        } else if (ch == '"') {
-            out[pos++] = '\\'; out[pos++] = '"';
-        } else if (ch == '\n') {
-            out[pos++] = '\\'; out[pos++] = 'n';
-        } else if (ch == '\r') {
-            out[pos++] = '\\'; out[pos++] = 'r';
-        } else if (ch == '\t') {
-            out[pos++] = '\\'; out[pos++] = 't';
-        } else {
-            out[pos++] = (char)ch;
-        }
-    }
-    out[pos] = '\0';
-    return out;
-}
-
 static char* build_pdf_view_bridge_script(const char* pdf_file, const char* opts_expr) {
-    char* escaped_pdf = escape_pdf_bridge_lambda_string(pdf_file);
+    char* escaped_pdf = mem_escape_lambda_literal(pdf_file, MEM_CAT_LAYOUT);
     if (!escaped_pdf) {
         log_error("[load_html_doc] PDF package: failed to escape input path");
         return nullptr;

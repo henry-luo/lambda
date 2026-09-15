@@ -221,6 +221,18 @@ void mem_free(void* ptr);
  */
 char* mem_dup_n(const char* data, size_t len, MemCategory category);
 
+/** join exact-length string parts in a tracked allocation. */
+char* mem_join_parts(const char* const* parts, const size_t* lengths, size_t count,
+                     MemCategory category);
+char* mem_join2(const char* first, size_t first_len,
+                const char* second, size_t second_len, MemCategory category);
+char* mem_join3(const char* first, size_t first_len,
+                const char* second, size_t second_len,
+                const char* third, size_t third_len, MemCategory category);
+
+/** escape a C string for use inside a double-quoted Lambda literal. */
+char* mem_escape_lambda_literal(const char* value, MemCategory category);
+
 /**
  * Duplicate string with tracking
  */
@@ -240,6 +252,16 @@ void* mem_calloc_loc(size_t count, size_t size, MemCategory category, int line);
 void* mem_realloc_loc(void* ptr, size_t new_size, MemCategory category, int line);
 void mem_free_loc(void* ptr, int line);
 char* mem_dup_n_loc(const char* data, size_t len, MemCategory category, int line);
+char* mem_join_parts_loc(const char* const* parts, const size_t* lengths, size_t count,
+                         MemCategory category, int line);
+char* mem_join2_loc(const char* first, size_t first_len,
+                    const char* second, size_t second_len,
+                    MemCategory category, int line);
+char* mem_join3_loc(const char* first, size_t first_len,
+                    const char* second, size_t second_len,
+                    const char* third, size_t third_len,
+                    MemCategory category, int line);
+char* mem_escape_lambda_literal_loc(const char* value, MemCategory category, int line);
 char* mem_strdup_loc(const char* str, MemCategory category, int line);
 char* mem_strndup_loc(const char* str, size_t max_len, MemCategory category, int line);
 
@@ -250,6 +272,14 @@ char* mem_strndup_loc(const char* str, size_t max_len, MemCategory category, int
 #define mem_realloc(ptr, size, cat)    mem_realloc_loc(ptr, size, cat, __LINE__)
 #define mem_free(ptr)                  mem_free_loc(ptr, __LINE__)
 #define mem_dup_n(data, len, cat)      mem_dup_n_loc(data, len, cat, __LINE__)
+#define mem_join_parts(parts, lengths, count, cat) \
+    mem_join_parts_loc(parts, lengths, count, cat, __LINE__)
+#define mem_join2(a, a_len, b, b_len, cat) \
+    mem_join2_loc(a, a_len, b, b_len, cat, __LINE__)
+#define mem_join3(a, a_len, b, b_len, c, c_len, cat) \
+    mem_join3_loc(a, a_len, b, b_len, c, c_len, cat, __LINE__)
+#define mem_escape_lambda_literal(value, cat) \
+    mem_escape_lambda_literal_loc(value, cat, __LINE__)
 #define mem_strdup(str, cat)           mem_strdup_loc(str, cat, __LINE__)
 #define mem_strndup(str, max_len, cat) mem_strndup_loc(str, max_len, cat, __LINE__)
 

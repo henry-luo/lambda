@@ -82,8 +82,7 @@ static Item parse_mark_suffixed_number(InputContext& ctx, const char* start, siz
         if (!number) return {.item = ITEM_ERROR};
         heap_buf = true;
     }
-    memcpy(number, start, len);
-    number[len] = '\0';
+    str_copy(number, heap_buf ? len + 1 : sizeof(stack_buf), start, len);
 
     // Mark suffixes share Lambda literal tier semantics; the old strtod path
     // rounded exact integer/decimal intent before the formatter could see it.

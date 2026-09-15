@@ -692,12 +692,7 @@ bool is_space(char c) {
 }
 
 bool is_only_whitespace(const char* str) {
-    if (!str) return true;
-    while (*str) {
-        if (!is_space(*str)) return false;
-        str++;
-    }
-    return true;
+    return !str || str_all(str, strlen(str), is_space);
 }
 
 static void layout_note_inline_atomic_wrap_opportunity(LayoutContext* lycon,
@@ -1509,8 +1504,7 @@ LayoutTextRun layout_prepare_text_run(const char* text, size_t length,
         run.length = 0;
         return run;
     }
-    memcpy(buffer, text + start, trimmed_length);
-    buffer[trimmed_length] = '\0';
+    str_copy(buffer, sizeof(buffer), text + start, trimmed_length);
     run.text = buffer;
     run.length = trimmed_length;
     return run;

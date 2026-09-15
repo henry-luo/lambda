@@ -136,8 +136,7 @@ static bool svg_find_root_attr(const char* svg, const char* tag_end, const char*
         if (attr_len == name_len && strncmp(attr_start, name, name_len) == 0) {
             size_t value_len = (size_t)(value_end - value_start);
             if (value_len >= out_cap) value_len = out_cap - 1;
-            memcpy(out, value_start, value_len);
-            out[value_len] = '\0';
+            str_copy(out, out_cap, value_start, value_len);
             return true;
         }
     }

@@ -115,10 +115,8 @@ static size_t header_callback(char* buffer, size_t size, size_t nitems, void* us
         while (len > 0 && (buffer[len - 1] == '\r' || buffer[len - 1] == '\n')) {
             len--;
         }
-        char* header_str = (char*)mem_alloc(len + 1, MEM_CAT_NETWORK);
+        char* header_str = mem_dup_n(buffer, len, MEM_CAT_NETWORK);
         if (!header_str) return total;
-        memcpy(header_str, buffer, len);
-        header_str[len] = '\0';
         cookie_jar_store(ctx->jar, ctx->request_url, header_str);
         mem_free(header_str);
     }

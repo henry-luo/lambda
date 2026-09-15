@@ -533,15 +533,13 @@ extern "C" Item js_qs_parse(Item str_item, Item sep_item, Item eq_item, Item opt
 
     // copy input to mutable buffer
     int len = (int)source_length;
-    char* input = (char*)mem_alloc(len + 1, MEM_CAT_JS_RUNTIME);
+    char* input = mem_dup_n(source, len, MEM_CAT_JS_RUNTIME);
     if (!input) {
         mem_free(source);
         node_querystring_host->node->roots->root_frame_end(&roots);
         return obj;
     }
-    memcpy(input, source, len);
     mem_free(source);
-    input[len] = '\0';
 
     // skip leading '?' if present
     char* p = input;

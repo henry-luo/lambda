@@ -956,14 +956,7 @@ static bool text_node_is_ascii_whitespace(DomNode* node) {
     if (!node || !node->is_text()) return false;
     const char* text = (const char*)node->text_data();
     if (!text) return true;
-    while (*text) {
-        unsigned char ch = (unsigned char)*text;
-        if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r' && ch != '\f') {
-            return false;
-        }
-        text++;
-    }
-    return true;
+    return str_all(text, strlen(text), str_is_html_space);
 }
 
 static bool text_node_has_intrinsic_table_content(DomNode* node) {
@@ -4986,15 +4979,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         // Skip whitespace-only text nodes
                         while (next && next->is_text()) {
                             const char* next_text = (const char*)next->text_data();
-                            bool all_ws = true;
-                            if (next_text) {
-                                for (const char* p = next_text; *p && all_ws; p++) {
-                                    unsigned char c = (unsigned char)*p;
-                                    if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f') {
-                                        all_ws = false;
-                                    }
-                                }
-                            }
+                            bool all_ws = str_all(next_text, next_text ? strlen(next_text) : 0,
+                                                  str_is_html_space);
                             if (!all_ws) break;
                             next = next->next_sibling;
                         }

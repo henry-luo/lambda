@@ -4,6 +4,7 @@
 #include "../../lib/mem_factory.h"
 #include "../../lib/file.h"
 #include "../../lib/shell.h"
+#include "../../lib/str.h"
 #include "../core/utf_string.h"
 #include "../format/format.h"
 #include "radiant_event_hook.h"
@@ -715,36 +716,14 @@ String* escape_shell_arg(String* arg) {
 
     return escaped;
 #else
-    // Use single quotes for safety and escape any single quotes in the string
-    size_t escaped_len = arg->len + 2; // Start with quotes
-    for (int i = 0; i < (int)arg->len; i++) {
-        if (arg->chars[i] == '\'') {
-            escaped_len += 3; // Replace ' with '\''
-        }
-    }
+    size_t escaped_len = str_shell_quote_posix(NULL, 0, arg->chars, arg->len);
 
     String* escaped = (String*)heap_alloc(sizeof(String) + escaped_len + 1, LMD_TYPE_STRING);
     escaped->len = escaped_len;
     escaped->flags = 0;
     escaped->is_ascii = 1;  // shell escaping produces ASCII
 
-    char* dst = escaped->chars;
-    *dst++ = '\''; // Opening quote
-
-    for (int i = 0; i < (int)arg->len; i++) {
-        if (arg->chars[i] == '\'') {
-            // Escape single quote: ' becomes '\''
-            *dst++ = '\'';
-            *dst++ = '\\';
-            *dst++ = '\'';
-            *dst++ = '\'';
-        } else {
-            *dst++ = arg->chars[i];
-        }
-    }
-
-    *dst++ = '\''; // Closing quote
-    *dst = '\0';
+    str_shell_quote_posix(escaped->chars, escaped_len + 1, arg->chars, arg->len);
 
     return escaped;
 #endif

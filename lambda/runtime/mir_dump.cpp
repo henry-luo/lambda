@@ -4,6 +4,7 @@
 #include "mir_dump.h"
 #include "../../lib/log.h"
 #include "../../lib/file_utils.h"
+#include "../../lib/str.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,10 +36,8 @@ static void mir_dump_ensure_parent_dir(const char* path) {
     }
     if (!last_sep || last_sep == path) return;
     size_t dir_len = (size_t)(last_sep - path);
-    char* dir = (char*)malloc(dir_len + 1);
+    char* dir = str_dup(path, dir_len);
     if (!dir) return;
-    memcpy(dir, path, dir_len);
-    dir[dir_len] = '\0';
     create_dir_recursive(dir);
     free(dir);
 }

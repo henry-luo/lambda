@@ -1817,6 +1817,14 @@ TEST_F(StrEscapeTest, JsonSpecials) {
     EXPECT_STREQ(buf, "\\\\\\t\\b\\f\\r");
 }
 
+TEST_F(StrEscapeTest, LambdaLiteral) {
+    const char* s = "\\\"\n\r\t";
+    char buf[16];
+    size_t written = str_escape(buf, s, 5, STR_ESC_LAMBDA);
+    buf[written] = '\0';
+    EXPECT_STREQ(buf, "\\\\\\\"\\n\\r\\t");
+}
+
 TEST_F(StrEscapeTest, XmlBasic) {
     const char* s = "<div class=\"main\">&</div>";
     size_t needed = str_escape_len(s, 25, STR_ESC_XML);
@@ -1853,6 +1861,13 @@ TEST_F(StrEscapeTest, SizingWithNull) {
 
 TEST_F(StrEscapeTest, NullInput) {
     EXPECT_EQ(str_escape_len(NULL, 0, STR_ESC_JSON), 0u);
+}
+
+TEST_F(StrEscapeTest, ShellQuotePosix) {
+    const char* source = "two ' words";
+    char buf[32];
+    EXPECT_EQ(str_shell_quote_posix(buf, sizeof(buf), source, strlen(source)), 16u);
+    EXPECT_STREQ(buf, "'two '\\'' words'");
 }
 
 /* ================================================================== *
@@ -1913,6 +1928,11 @@ TEST_F(StrSpanTest, Predicates) {
     EXPECT_TRUE(str_is_hex('a'));
     EXPECT_TRUE(str_is_hex('F'));
     EXPECT_FALSE(str_is_hex('g'));
+}
+
+TEST_F(StrSpanTest, HtmlSpaceExcludesVerticalTab) {
+    EXPECT_TRUE(str_is_html_space('\f'));
+    EXPECT_FALSE(str_is_html_space('\v'));
 }
 
 /* ================================================================== *

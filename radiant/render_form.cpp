@@ -550,16 +550,9 @@ static char* build_preedit_display_text(FormControlProp* form,
 
     uint32_t caret_in_preedit = utf8_byte_offset_for_codepoints(
         preedit, pre_len, pre_caret);
-    uint32_t display_len = start + pre_len + (value_len - end);
-    char* display = (char*)mem_alloc((size_t)display_len + 1, MEM_CAT_RENDER);
+    char* display = mem_join3(value, start, preedit, pre_len, value + end,
+                              value_len - end, MEM_CAT_RENDER);
     if (!display) return nullptr;
-
-    if (start > 0) memcpy(display, value, start);
-    memcpy(display + start, preedit, pre_len);
-    if (end < value_len) {
-        memcpy(display + start + pre_len, value + end, value_len - end);
-    }
-    display[display_len] = '\0';
 
     if (out_preedit_start) *out_preedit_start = start;
     if (out_preedit_end) *out_preedit_end = start + pre_len;

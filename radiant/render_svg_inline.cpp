@@ -2942,10 +2942,7 @@ static const char* resolve_svg_radiant_font_family(const char* font_family,
  * Check if a string is only whitespace
  */
 static bool is_whitespace_only(const char* str, size_t len) {
-    for (size_t i = 0; i < len; i++) {
-        if (!isspace((unsigned char)str[i])) return false;
-    }
-    return true;
+    return str_all(str, len, str_is_space);
 }
 
 /**
@@ -2954,19 +2951,8 @@ static bool is_whitespace_only(const char* str, size_t len) {
  */
 static char* trim_whitespace(const char* str, size_t len) {
     if (!str || len == 0) return nullptr;
-
-    // skip leading whitespace
-    size_t start = 0;
-    while (start < len && isspace((unsigned char)str[start])) start++;
-
-    // skip trailing whitespace
-    size_t end = len;
-    while (end > start && isspace((unsigned char)str[end - 1])) end--;
-
-    if (end <= start) return nullptr;  // all whitespace
-
-    size_t trimmed_len = end - start;
-    return mem_dup_n(str + start, trimmed_len, MEM_CAT_RENDER);
+    str_trim(&str, &len);
+    return len ? mem_dup_n(str, len, MEM_CAT_RENDER) : nullptr;
 }
 
 /**
@@ -4975,14 +4961,6 @@ static void svg_subscene_indent(StrBuf* out, int indent_level) {
     }
 }
 
-static void svg_subscene_escape_text(StrBuf* out, const char* s, size_t len) {
-    escape_append(out, s, len, ESCAPE_RULES_HTML_TEXT, ESCAPE_RULES_HTML_TEXT_COUNT, ESCAPE_CTRL_NONE);
-}
-
-static void svg_subscene_escape_attr(StrBuf* out, const char* s, size_t len) {
-    escape_append(out, s, len, ESCAPE_RULES_XML_ATTR, ESCAPE_RULES_XML_ATTR_COUNT, ESCAPE_CTRL_XML_NUMERIC);
-}
-
 static bool svg_subscene_attr_name_equals(ShapeEntry* field, const char* name) {
     return field && field->name && field->name->str && name &&
            strlen(name) == field->name->length &&
@@ -5014,7 +4992,7 @@ static void svg_subscene_serialize_image_href(StrBuf* out, Element* root,
     if (!href) return;
     const char* resolved = svg_subscene_resolve_image_href(root, href);
     strbuf_append_str(out, " href=\"");
-    svg_subscene_escape_attr(out, resolved, strlen(resolved));
+    escape_append_xml_attr(out, resolved, strlen(resolved));
     strbuf_append_char(out, '"');
 }
 
@@ -5051,7 +5029,7 @@ static void svg_subscene_serialize_element(StrBuf* out, Element* root,
                         strbuf_append_char(out, ' ');
                         strbuf_append_str_n(out, field->name->str, field->name->length);
                         strbuf_append_str(out, "=\"");
-                        svg_subscene_escape_attr(out, str->chars, str->len);
+                        escape_append_xml_attr(out, str->chars, str->len);
                         strbuf_append_char(out, '"');
                     }
                 } else if (ftype == LMD_TYPE_INT || ftype == LMD_TYPE_INT64 ||
@@ -5088,7 +5066,7 @@ static void svg_subscene_serialize_element(StrBuf* out, Element* root,
         if (child.isString()) {
             String* str = child.asString();
             if (str) {
-                svg_subscene_escape_text(out, str->chars, str->len);
+                escape_append_html_text(out, str->chars, str->len);
             }
         } else if (child.isElement()) {
             ElementReader child_elem(child.item());

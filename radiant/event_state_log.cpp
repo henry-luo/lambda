@@ -7,6 +7,7 @@
 #include "event.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include "../lib/escape.h"
 #include "../lib/str.h"
 #include "../lambda/input/css/dom_element.hpp"
 
@@ -94,32 +95,18 @@ void jw_obj_end(JsonWriter* w)   { jw_close(w, '}'); }
 void jw_arr_begin(JsonWriter* w) { jw_open(w, '['); }
 void jw_arr_end(JsonWriter* w)   { jw_close(w, ']'); }
 
+static void jw_escape_append_char(void* context, char c) {
+    jw_putc((JsonWriter*)context, c);
+}
+
+static void jw_escape_append_str(void* context, const char* s) {
+    jw_puts((JsonWriter*)context, s);
+}
+
 static void jw_write_escaped_str(JsonWriter* w, const char* s) {
-    jw_putc(w, '"');
-    if (s) {
-        for (const unsigned char* p = (const unsigned char*)s; *p && !w->overflow; p++) {
-            unsigned char c = *p;
-            switch (c) {
-                case '"':  jw_puts(w, "\\\""); break;
-                case '\\': jw_puts(w, "\\\\"); break;
-                case '\b': jw_puts(w, "\\b");  break;
-                case '\f': jw_puts(w, "\\f");  break;
-                case '\n': jw_puts(w, "\\n");  break;
-                case '\r': jw_puts(w, "\\r");  break;
-                case '\t': jw_puts(w, "\\t");  break;
-                default:
-                    if (c < 0x20) {
-                        char esc[8];
-                        snprintf(esc, sizeof(esc), "\\u%04x", c);
-                        jw_puts(w, esc);
-                    } else {
-                        jw_putc(w, (char)c);
-                    }
-                    break;
-            }
-        }
-    }
-    jw_putc(w, '"');
+    const char* value = s ? s : "";
+    escape_append_json_to(w, value, strlen(value), true, false,
+                          jw_escape_append_char, jw_escape_append_str);
 }
 
 void jw_key(JsonWriter* w, const char* key) {

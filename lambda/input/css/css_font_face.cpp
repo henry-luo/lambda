@@ -39,6 +39,13 @@ static char* css_font_face_dup(Pool* pool, const char* text, size_t len) {
     return pool ? pool_dup_n(pool, text, len) : mem_dup_n(text, len, MEM_CAT_INPUT_CSS);
 }
 
+static char* css_font_face_join3(Pool* pool, const char* first, size_t first_len,
+                                 const char* second, size_t second_len,
+                                 const char* third, size_t third_len) {
+    return pool ? pool_join3(pool, first, first_len, second, second_len, third, third_len) :
+        mem_join3(first, first_len, second, second_len, third, third_len, MEM_CAT_INPUT_CSS);
+}
+
 static void css_font_face_clear_heap_unicode_ranges(CssFontFaceDescriptor* descriptor) {
     if (!descriptor) return;
     if (descriptor->unicode_ranges) {
@@ -371,18 +378,9 @@ char* css_resolve_font_url(const char* url, const char* base_path, Pool* pool) {
         if (scheme_end) {
             size_t scheme_len = (size_t)(scheme_end - base_path);
             size_t url_len = strlen(url);
-            size_t result_size = scheme_len + 1 + url_len + 1;
-            char* result;
-            if (pool) {
-                result = (char*)pool_alloc(pool, result_size);
-            } else {
-                result = (char*)mem_alloc(result_size, MEM_CAT_INPUT_CSS);
-            }
+            char* result = css_font_face_join3(pool, base_path, scheme_len, ":", 1,
+                                                url, url_len);
             if (!result) return nullptr;
-
-            memcpy(result, base_path, scheme_len);
-            result[scheme_len] = ':';
-            memcpy(result + scheme_len + 1, url, url_len + 1);
             log_debug("[CSS FontFace] Resolved protocol-relative font URL: %s", result);
             return result;
         }
@@ -396,17 +394,9 @@ char* css_resolve_font_url(const char* url, const char* base_path, Pool* pool) {
             const char* path_start = strchr(host_start, '/');
             size_t origin_len = path_start ? (size_t)(path_start - base_path) : strlen(base_path);
             size_t url_len = strlen(url);
-            size_t result_size = origin_len + url_len + 1;
-            char* result;
-            if (pool) {
-                result = (char*)pool_alloc(pool, result_size);
-            } else {
-                result = (char*)mem_alloc(result_size, MEM_CAT_INPUT_CSS);
-            }
+            char* result = pool ? pool_join2(pool, base_path, origin_len, url, url_len) :
+                mem_join2(base_path, origin_len, url, url_len, MEM_CAT_INPUT_CSS);
             if (!result) return nullptr;
-
-            memcpy(result, base_path, origin_len);
-            memcpy(result + origin_len, url, url_len + 1);
             log_debug("[CSS FontFace] Resolved root-relative font URL: %s", result);
             return result;
         }

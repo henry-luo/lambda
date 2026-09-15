@@ -8,6 +8,7 @@
 #include "validator.hpp"
 #include "../lambda-data.hpp"
 #include "../../lib/stringbuf.h"
+#include "../../lib/escape.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/strview.h"
 #include <string.h>
@@ -239,14 +240,8 @@ String* generate_json_report(ValidationResult* result, Pool* pool) {
             // Message
             if (error->message) {
                 stringbuf_append_str(json, ",\n      \"message\": \"");
-                // Escape JSON string (simplified)
-                for (size_t i = 0; i < error->message->len; i++) {
-                    char c = error->message->chars[i];
-                    if (c == '"' || c == '\\') {
-                        stringbuf_append_char(json, '\\');
-                    }
-                    stringbuf_append_char(json, c);
-                }
+                escape_append_json_stringbuf(json, error->message->chars,
+                                             error->message->len, false, false);
                 stringbuf_append_str(json, "\"");
             }
 
@@ -278,7 +273,8 @@ String* generate_json_report(ValidationResult* result, Pool* pool) {
 
             if (warning->message) {
                 stringbuf_append_str(json, ",\n      \"message\": \"");
-                stringbuf_append_string(json, warning->message);
+                escape_append_json_stringbuf(json, warning->message->chars,
+                                             warning->message->len, false, false);
                 stringbuf_append_str(json, "\"");
             }
 

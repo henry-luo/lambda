@@ -694,8 +694,7 @@ Item parse_rst_image_directive(MarkupParser* parser, const char* line) {
             attr_name = "class";
         } else if (opt_name_len < 60) {
             // Use the option name as-is for other attributes
-            memcpy(attr_buf, opt_name_start, opt_name_len);
-            attr_buf[opt_name_len] = '\0';
+            str_copy(attr_buf, sizeof(attr_buf), opt_name_start, opt_name_len);
             attr_name = attr_buf;
         }
 

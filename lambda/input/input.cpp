@@ -47,8 +47,7 @@ ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntr
         shape_entry = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry) + sizeof(StrView) + str_copy_size);
         StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
         char* str_copy = (char*)nv + sizeof(StrView);
-        memcpy(str_copy, key->chars, key->len);
-        str_copy[key->len] = '\0';
+        ::str_copy(str_copy, str_copy_size, key->chars, key->len);
         nv->str = str_copy;  nv->length = key->len;
         shape_entry->name = nv;
         shape_entry->name_hash = property_key_requires_identity(key)

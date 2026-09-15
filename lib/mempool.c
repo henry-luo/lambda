@@ -3,6 +3,7 @@
 #define MEMTRACK_NO_LOCATION_MACROS
 #include "memtrack.h"
 #include "log.h"
+#include "str.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -876,6 +877,31 @@ char* pool_dup_n(Pool* pool, const char* data, size_t len) {
         dup[len] = '\0';
     }
     return dup;
+}
+
+static void* pool_join_alloc(void* context, size_t size) {
+    return pool_alloc((Pool*)context, size);
+}
+
+static char* pool_join_parts(Pool* pool, const char* const* parts,
+                             const size_t* lengths, size_t count) {
+    if (!pool) return NULL;
+    return str_join_parts_alloc(parts, lengths, count, pool_join_alloc, pool);
+}
+
+char* pool_join2(Pool* pool, const char* first, size_t first_len,
+                 const char* second, size_t second_len) {
+    const char* parts[] = {first, second};
+    const size_t lengths[] = {first_len, second_len};
+    return pool_join_parts(pool, parts, lengths, 2);
+}
+
+char* pool_join3(Pool* pool, const char* first, size_t first_len,
+                 const char* second, size_t second_len,
+                 const char* third, size_t third_len) {
+    const char* parts[] = {first, second, third};
+    const size_t lengths[] = {first_len, second_len, third_len};
+    return pool_join_parts(pool, parts, lengths, 3);
 }
 
 char* pool_strdup(Pool* pool, const char* str) {

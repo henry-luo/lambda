@@ -8065,15 +8065,6 @@ View* focus_get_visible(DocState* state) {
 #include "../lib/strbuf.h"
 #include <GLFW/glfw3.h>
 
-/**
- * Helper: recursively extract text from view tree
- */
-static char* arena_copy_cstr(Arena* arena, const char* text) {
-    if (!arena || !text) return NULL;
-    size_t len = strlen(text);
-    return arena_dup_n(arena, text, len);
-}
-
 static void append_view_text_rects(StrBuf* sb, ViewText* text, bool escape_html) {
     const char* text_data = (const char*)text->text_data();
     if (!text_data) return;
@@ -8116,20 +8107,9 @@ char* extract_text_from_view(View* view, Arena* arena) {
 
     StateStoreTextExtraction extraction = {view, sb};
     view_geometry_walk_tree(view, extract_text_visitor, &extraction);
-    char* result = sb->length > 0 ? arena_copy_cstr(arena, sb->str) : NULL;
+    char* result = sb->length > 0 ? arena_strdup(arena, sb->str) : NULL;
     strbuf_free(sb);
     return result;
-}
-
-static void append_html_escaped(StrBuf* sb, const char* text, size_t len) {
-    if (!sb || !text) return;
-    escape_append(sb, text, len, ESCAPE_RULES_HTML_TEXT,
-                  ESCAPE_RULES_HTML_TEXT_COUNT, ESCAPE_CTRL_NONE);
-}
-
-static void append_html_attr_escaped(StrBuf* sb, const char* text) {
-    if (!text) return;
-    append_html_escaped(sb, text, strlen(text));
 }
 
 static bool clipboard_inline_tag(const char* tag) {
@@ -8149,12 +8129,12 @@ static void append_open_tag_for_clipboard(StrBuf* sb, DomElement* element) {
         const char* title = (static_cast<DomNode*>(element))->get_attribute("title");
         if (href) {
             strbuf_append_str(sb, " href=\"");
-            append_html_attr_escaped(sb, href);
+            escape_append_html_text(sb, href, strlen(href));
             strbuf_append_char(sb, '"');
         }
         if (title) {
             strbuf_append_str(sb, " title=\"");
-            append_html_attr_escaped(sb, title);
+            escape_append_html_text(sb, title, strlen(title));
             strbuf_append_char(sb, '"');
         }
     }
@@ -8234,7 +8214,7 @@ static void append_selected_text_html(StrBuf* sb, DomText* text,
     uint32_t start_u8 = dom_text_utf16_to_utf8(text, start_u16);
     uint32_t end_u8 = dom_text_utf16_to_utf8(text, end_u16);
     if (end_u8 > start_u8 && end_u8 <= text->length) {
-        append_html_escaped(sb, text->text + start_u8, end_u8 - start_u8);
+        escape_append_html_text(sb, text->text + start_u8, end_u8 - start_u8);
     }
 
     for (int i = 0; i < wrapper_count; i++) append_close_tag_for_clipboard(sb, wrappers[i]);
@@ -8274,7 +8254,7 @@ static char* extract_dom_range_to_arena(DomRange* range, Arena* arena,
         if (!boundary_before_or_equal(&text_end, &range->end) || text_end.node == range->end.node) break;
         text = next_text_after_for_clipboard(static_cast<DomNode*>(text));
     }
-    char* result = sb->length > 0 ? arena_copy_cstr(arena, sb->str) : NULL;
+    char* result = sb->length > 0 ? arena_strdup(arena, sb->str) : NULL;
     strbuf_free(sb);
     return result;
 }
@@ -8322,7 +8302,7 @@ char* extract_html_from_view(View* view, Arena* arena) {
     if (!sb) return NULL;
 
     view_geometry_walk_tree(view, extract_html_visitor, sb);
-    char* result = sb->length > 0 ? arena_copy_cstr(arena, sb->str) : NULL;
+    char* result = sb->length > 0 ? arena_strdup(arena, sb->str) : NULL;
     strbuf_free(sb);
     return result;
 }

@@ -310,15 +310,12 @@ Item parse_emoji_shortcode(MarkupParser* parser, const char** text) {
     }
 
     // Build full shortcode with colons for lookup
-    char* full_shortcode = (char*)mem_alloc(name_len + 3, MEM_CAT_INPUT_MARKUP);
+    char* full_shortcode = mem_join3(":", 1, shortcode_name, name_len, ":", 1,
+                                     MEM_CAT_INPUT_MARKUP);
     if (!full_shortcode) {
         mem_free(shortcode_name);
         return Item{.item = ITEM_ERROR};
     }
-    full_shortcode[0] = ':';
-    str_copy(full_shortcode + 1, name_len + 2, shortcode_name, name_len);
-    full_shortcode[name_len + 1] = ':';
-    full_shortcode[name_len + 2] = '\0';
 
     // Look up emoji in table
     const char* emoji_char = nullptr;

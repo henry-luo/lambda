@@ -106,6 +106,14 @@ static void emit_shell_args_warning(void) {
     js_process_emit(make_string_item("warning"), warning);
 }
 
+static void append_posix_shell_quoted(char* out, int out_size, int* pos,
+                                      const char* text, size_t text_len) {
+    if (!out || !pos || *pos >= out_size - 1) return;
+    size_t available = (size_t)(out_size - *pos);
+    size_t required = str_shell_quote_posix(out + *pos, available, text, text_len);
+    *pos += (int)(required < available ? required : available - 1);
+}
+
 static bool append_shell_arg(char* out, int out_size, int* pos, Item arg) {
     if (get_type_id(arg) != LMD_TYPE_STRING) return false;
     String* s = it2s(arg);
@@ -115,21 +123,7 @@ static bool append_shell_arg(char* out, int out_size, int* pos, Item arg) {
         out[out_size - 1] = '\0';
         return true;
     }
-    out[(*pos)++] = '\'';
-    for (size_t i = 0; i < s->len && *pos < out_size - 1; i++) {
-        char ch = s->chars[i];
-        if (ch == '\'') {
-            const char* esc = "'\\''";
-            for (int j = 0; esc[j] && *pos < out_size - 1; j++) {
-                out[(*pos)++] = esc[j];
-            }
-        } else {
-            out[(*pos)++] = ch;
-        }
-    }
-    if (*pos < out_size - 1) {
-        out[(*pos)++] = '\'';
-    }
+    append_posix_shell_quoted(out, out_size, pos, s->chars, s->len);
     out[*pos < out_size ? *pos : out_size - 1] = '\0';
     return true;
 }
@@ -2324,12 +2318,8 @@ static char** build_envp(Item env_item, int* out_count) {
         if (get_type_id(value) != LMD_TYPE_STRING) continue;
         String* ks = it2s(key);
         String* vs = it2s(value);
-        size_t entry_len = ks->len + 1 + vs->len;
-        char* entry = (char*)mem_alloc(entry_len + 1, MEM_CAT_JS_RUNTIME);
-        memcpy(entry, ks->chars, ks->len);
-        entry[ks->len] = '=';
-        memcpy(entry + ks->len + 1, vs->chars, vs->len);
-        entry[entry_len] = '\0';
+        char* entry = mem_join3(ks->chars, ks->len, "=", 1, vs->chars, vs->len,
+                                MEM_CAT_JS_RUNTIME);
         envp[count++] = entry;
     }
     envp[count] = NULL;
@@ -2354,12 +2344,8 @@ static bool envp_key_matches(const char* entry, const char* key) {
 static char* make_env_entry(const char* key, const char* value) {
     size_t key_len = strlen(key);
     size_t value_len = strlen(value);
-    char* entry = (char*)mem_alloc(key_len + 1 + value_len + 1, MEM_CAT_JS_RUNTIME);
+    char* entry = mem_join3(key, key_len, "=", 1, value, value_len, MEM_CAT_JS_RUNTIME);
     if (!entry) return NULL;
-    memcpy(entry, key, key_len);
-    entry[key_len] = '=';
-    memcpy(entry + key_len + 1, value, value_len);
-    entry[key_len + 1 + value_len] = '\0';
     return entry;
 }
 
@@ -3033,17 +3019,7 @@ static void cp_append_env_assignment(char* cmd, int cmd_size, int* pos, const ch
     if (wrote < 0) return;
     *pos += wrote;
     String* s = it2s(value);
-    if (*pos < cmd_size - 1) cmd[(*pos)++] = '\'';
-    for (size_t i = 0; i < s->len && *pos < cmd_size - 1; i++) {
-        char ch = s->chars[i];
-        if (ch == '\'') {
-            const char* esc = "'\\''";
-            for (int j = 0; esc[j] && *pos < cmd_size - 1; j++) cmd[(*pos)++] = esc[j];
-        } else {
-            cmd[(*pos)++] = ch;
-        }
-    }
-    if (*pos < cmd_size - 1) cmd[(*pos)++] = '\'';
+    append_posix_shell_quoted(cmd, cmd_size, pos, s->chars, s->len);
     if (*pos < cmd_size - 1) cmd[(*pos)++] = ' ';
     cmd[*pos < cmd_size ? *pos : cmd_size - 1] = '\0';
 }
@@ -3062,17 +3038,7 @@ static void cp_append_env_assignment_value(char* cmd, int cmd_size, int* pos, It
         cmd[(*pos)++] = ch;
     }
     if (*pos < cmd_size - 1) cmd[(*pos)++] = '=';
-    if (*pos < cmd_size - 1) cmd[(*pos)++] = '\'';
-    for (size_t i = 0; i < vs->len && *pos < cmd_size - 1; i++) {
-        char ch = vs->chars[i];
-        if (ch == '\'') {
-            const char* esc = "'\\''";
-            for (int j = 0; esc[j] && *pos < cmd_size - 1; j++) cmd[(*pos)++] = esc[j];
-        } else {
-            cmd[(*pos)++] = ch;
-        }
-    }
-    if (*pos < cmd_size - 1) cmd[(*pos)++] = '\'';
+    append_posix_shell_quoted(cmd, cmd_size, pos, vs->chars, vs->len);
     if (*pos < cmd_size - 1) cmd[(*pos)++] = ' ';
     cmd[*pos < cmd_size ? *pos : cmd_size - 1] = '\0';
 }

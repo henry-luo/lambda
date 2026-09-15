@@ -16,6 +16,7 @@
 #include "../lambda.hpp"
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
+#include "../../lib/escape.h"
 #include "../../lib/file.h"
 #include "../../lib/mem.h"
 #include "../../lib/strbuf.h"
@@ -307,8 +308,6 @@ struct JsInspectContext {
 };
 
 static Item js_util_inspect_value(Item obj_item, JsInspectContext* ctx, int depth_left);
-static void js_util_inspect_append_escaped_char(StrBuf* sb, char ch);
-
 static Item js_util_inspect_make_string(StrBuf* sb) {
     Item result = make_string_item(sb->str ? sb->str : "", (int)sb->length);
     strbuf_free(sb);
@@ -439,15 +438,6 @@ static Item js_util_inspect_bigint(Item obj_item, JsInspectContext* ctx) {
     return js_util_inspect_make_string(sb);
 }
 
-static void js_util_inspect_append_escaped_char(StrBuf* sb, char ch) {
-    if (ch == '\\') strbuf_append_str(sb, "\\\\");
-    else if (ch == '\'') strbuf_append_str(sb, "\\'");
-    else if (ch == '\n') strbuf_append_str(sb, "\\n");
-    else if (ch == '\r') strbuf_append_str(sb, "\\r");
-    else if (ch == '\t') strbuf_append_str(sb, "\\t");
-    else strbuf_append_char(sb, ch);
-}
-
 static void js_util_inspect_append_assertion_string(StrBuf* sb, Item value, size_t long_limit) {
     String* s = get_type_id(value) == LMD_TYPE_STRING ? it2s(value) : NULL;
     if (s && s->len > 0) {
@@ -460,9 +450,7 @@ static void js_util_inspect_append_assertion_string(StrBuf* sb, Item value, size
                         // Very short repeated lines stay readable as one escaped
                         // literal in Node's AssertionError inspect output.
                         strbuf_append_char(sb, '\'');
-                        for (size_t k = 0; k <= i; k++) {
-                            js_util_inspect_append_escaped_char(sb, s->chars[k]);
-                        }
+                        escape_append_js_quoted(sb, s->chars, i + 1, '\'');
                         strbuf_append_str(sb, "...'");
                         return;
                     }
@@ -475,9 +463,7 @@ static void js_util_inspect_append_assertion_string(StrBuf* sb, Item value, size
                         if (s->chars[j] != '\n') continue;
                         if (line > 0) strbuf_append_str(sb, "    ");
                         strbuf_append_char(sb, '\'');
-                        for (size_t k = start; k <= j; k++) {
-                            js_util_inspect_append_escaped_char(sb, s->chars[k]);
-                        }
+                        escape_append_js_quoted(sb, s->chars + start, j - start + 1, '\'');
                         strbuf_append_str(sb, "' +\n");
                         start = j + 1;
                         line++;
@@ -500,9 +486,7 @@ static void js_util_inspect_append_assertion_string(StrBuf* sb, Item value, size
             limit = long_limit;
             append_ellipsis = true;
         }
-        for (size_t i = 0; i < limit; i++) {
-            js_util_inspect_append_escaped_char(sb, s->chars[i]);
-        }
+        escape_append_js_quoted(sb, s->chars, limit, '\'');
         if (append_ellipsis) strbuf_append_str(sb, "...");
     }
     strbuf_append_char(sb, '\'');
@@ -545,9 +529,7 @@ static void js_util_inspect_append_quoted_key(StrBuf* sb, String* key, bool hidd
         strbuf_append_str_n(sb, key->chars, key->len);
     } else {
         strbuf_append_char(sb, '\'');
-        for (size_t i = 0; i < key->len; i++) {
-            js_util_inspect_append_escaped_char(sb, key->chars[i]);
-        }
+        escape_append_js_quoted(sb, key->chars, key->len, '\'');
         strbuf_append_char(sb, '\'');
     }
     if (hidden) strbuf_append_char(sb, ']');

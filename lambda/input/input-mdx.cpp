@@ -27,8 +27,7 @@ static const char* extract_tag_name(const char* pos, const char* end, char* buff
     size_t len = 0;
     if (!jsx_scan_tag_name_after_lt(pos, end, &start, &len) || !start) return NULL;
     if (len >= buffer_size) len = buffer_size - 1;
-    memcpy(buffer, start, len);
-    buffer[len] = '\0';
+    str_copy(buffer, buffer_size, start, len);
     return len > 0 ? buffer : NULL;
 }
 

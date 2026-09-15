@@ -3,6 +3,7 @@
 #include "render.hpp"
 #include "../lib/log.h"
 #include "../lib/strview.h"
+#include "../lib/str.h"
 #include "../lib/arraylist.h"
 #include "../lib/arraylist.hpp"
 #include "../lib/utf.h"
@@ -6105,13 +6106,7 @@ static bool should_prevent_wrapping(ViewTableCell* cell) {
 }
 
 static bool is_all_whitespace(const char* text, size_t length) {
-    for (size_t i = 0; i < length; i++) {
-        unsigned char ch = (unsigned char)text[i];
-        if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r' && ch != '\f') {
-            return false;
-        }
-    }
-    return true;
+    return str_all(text, length, str_is_html_space);
 }
 
 static float table_cell_width_constraint_border_box(ViewTableCell* cell, float css_width,

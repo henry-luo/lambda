@@ -11,10 +11,6 @@ Item js_native_construct_via_call_body(Item callee, Item* args, int argc,
 JsModuleConstEntry* g_eval_preamble_entries = NULL;
 int g_eval_preamble_entry_count = 0;
 int g_eval_preamble_var_count = 0;
-static char* js_preamble_name_copy(const char* name) {
-    return name ? mem_strdup(name, MEM_CAT_JS_RUNTIME) : NULL;
-}
-
 bool js_preamble_entry_copy(const JsModuleConstEntry* source,
                             JsModuleConstEntry* target) {
     if (!source || !target) return false;
@@ -22,8 +18,9 @@ bool js_preamble_entry_copy(const JsModuleConstEntry* source,
     *target = *source;
     target->name = NULL;
     target->live_binding_specifier = NULL;
-    target->name = js_preamble_name_copy(source->name);
-    target->live_binding_specifier = js_preamble_name_copy(source->live_binding_specifier);
+    target->name = source->name ? mem_strdup(source->name, MEM_CAT_JS_RUNTIME) : NULL;
+    target->live_binding_specifier = source->live_binding_specifier
+        ? mem_strdup(source->live_binding_specifier, MEM_CAT_JS_RUNTIME) : NULL;
     if ((source->name && !target->name) ||
             (source->live_binding_specifier && !target->live_binding_specifier)) {
         mem_free((void*)target->name);
@@ -1632,17 +1629,14 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             const char* prefix = inherited_strict ? "\"use strict\";\nreturn (" : "return (";
             const char* suffix = "\n)";
             size_t plen = strlen(prefix), slen2 = strlen(suffix);
-            size_t total = plen + code_len + slen2 + 1;
-            char* body = (char*)mem_alloc(total, MEM_CAT_JS_RUNTIME);
+            size_t total = plen + code_len + slen2;
+            char* body = mem_join3(prefix, plen, code_str->chars, code_len, suffix, slen2,
+                                   MEM_CAT_JS_RUNTIME);
             if (!body) {
                 return ItemNull;
             }
-            memcpy(body, prefix, plen);
-            memcpy(body + plen, code_str->chars, code_len);
-            memcpy(body + plen + code_len, suffix, slen2);
-            body[total - 1] = '\0';
 
-            Item body_item = js_name_item(body, total - 1);
+            Item body_item = js_name_item(body, total);
             mem_free(body);
             fn_item = js_new_function_from_string_kind(&body_item, 1,
                 "function", "function anonymous", is_direct_eval);

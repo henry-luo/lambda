@@ -14,6 +14,7 @@
 #include "../../lib/re2_glue.hpp"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
+#include "../../lib/string.h"
 #include "../../lib/mempool.h"
 
 #include <re2/re2.h>
@@ -510,15 +511,7 @@ static void render_pattern_surface(StrBuf* source, AstNode* node) {
 }
 
 static String* pattern_pool_string(Pool* pool, const char* chars, size_t length) {
-    String* value = (String*)pool_calloc(pool, sizeof(String) + length + 1);
-    value->len = (uint32_t)length;
-    value->is_ascii = 1;
-    for (size_t i = 0; i < length; i++) {
-        value->chars[i] = chars[i];
-        if ((unsigned char)chars[i] >= 128) value->is_ascii = 0;
-    }
-    value->chars[length] = '\0';
-    return value;
+    return string_from_strview(strview_init(chars, length), pool);
 }
 
 // Compile Lambda pattern AST to RE2 regex
@@ -903,16 +896,7 @@ re2::RE2* pattern_get_unanchored(TypePattern* pattern) {
 
 // helper: create a heap-allocated String from a char* + len
 static String* make_heap_string(const char* src, size_t len) {
-    String* s = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
-    s->len = (uint32_t)len;
-    s->flags = 0;
-    s->is_ascii = 1;
-    for (size_t i = 0; i < len; i++) {
-        if ((unsigned char)src[i] >= 128) { s->is_ascii = 0; break; }
-    }
-    memcpy(s->chars, src, len);
-    s->chars[len] = '\0';
-    return s;
+    return heap_strcpy(src, len);
 }
 
 // helper: create a match map {value: string, index: int}
@@ -1117,8 +1101,7 @@ static String* make_heap_rooted_slice(Rooted<Item>& rooted_source, size_t offset
     for (size_t i = 0; i < len; i++) {
         if ((unsigned char)src[i] >= 128) { value->is_ascii = 0; break; }
     }
-    memcpy(value->chars, src, len);
-    value->chars[len] = '\0';
+    str_copy(value->chars, len + 1, src, len);
     return value;
 }
 

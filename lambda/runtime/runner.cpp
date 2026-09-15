@@ -223,11 +223,8 @@ void lambda_home_init(void) {
 char* lambda_home_path(const char* rel) {
     size_t home_len = strlen(g_lambda_home);
     size_t rel_len  = strlen(rel);
-    char* out = (char*)mem_alloc(home_len + 1 + rel_len + 1, MEM_CAT_SYSTEM);
+    char* out = mem_join3(g_lambda_home, home_len, "/", 1, rel, rel_len, MEM_CAT_SYSTEM);
     if (!out) return NULL;
-    memcpy(out, g_lambda_home, home_len);
-    out[home_len] = '/';
-    memcpy(out + home_len + 1, rel, rel_len + 1);
     return out;
 }
 
