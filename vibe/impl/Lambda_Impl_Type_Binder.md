@@ -1,20 +1,23 @@
 # Lambda Impl Plan: Type Binder (`as T`) and Type Parameters
 
-- **Date:** 2026-09-15
-- **Status:** PARTIALLY IMPLEMENTED (2026-09-15). TG-P0.2 and the binder
+- **Date:** 2026-09-16
+- **Status:** PARTIALLY IMPLEMENTED (2026-09-16). TG-P0.2 and the binder
   portions of TG-P1–TG-P3 are landed: explicit `T: type`, `as T` at nested
   parameter-contract sites, slot environments in T0/MIR boxed entries,
   dependent body/return references, grammar differential coverage, and tier
   regressions. The TG-P2.1a leading-binder shorthand is now specified:
   `x: as T` in a function parameter elaborates to `x: any ! error as T`.
   TG-P0.1 is implemented under S11.1.4v2 / D3.2.5v2; TGO14(b)
-  still excludes function-type operands. TG-P4's D8.3.1v2 core is implemented:
+  still excludes function-type operands. TG-P4's D8.3.1v2/D8.3.4v2 core is implemented:
   eligible binder-carrying functions collect bounded exact keys, emit immutable
   raw bodies, select them directly at statically exact tag-safe local
   edges, and dispatch through `_b` exact guards with the generic boxed body as
   fallback. Plain array/map/range pointer variants and descriptor-identity
   map/element variants are included; descriptor-exact literals call raw bodies
-  directly, while unproven base-shape values retain `_b`. The opt-in D8.3.4
+  directly, while unproven base-shape values retain `_b`. Fixed-arity task-free
+  synchronous `pn` functions with immutable parameters now share those direct
+  raw bodies; `var` parameters and task-context or may-await procedures remain
+  boxed. The opt-in D8.3.4v2
   loop slice hoists one bounded invariant guard chain outside a `while` loop.
   Phases mirror the
   adoption order in the design doc §7 and remain independently gated.
@@ -28,7 +31,7 @@
   (narrowing dies with binding; carrier certificates), D3.2.5v2 (`<:`
   implementation), D3.4.2 (structural
   shape identity), D6.2.1 (function values), D8.1.1v10 (tier admission),
-  D8.3.1v2 (bounded immutable raw variants).
+  D8.3.1v2/D8.3.4v2 (bounded immutable raw variants).
   TGO8: the `S#`/`D#` entries for the binder itself are written at adoption,
   not by this plan; `doc/Doc_Convention.md` §4 makes the vibe record
   normative until then.
@@ -451,7 +454,7 @@ Gate: `--emit-ast-dump` asserts substituted result types on the fixtures;
 
 ### TG-P4 — Specialization keyed on bound types (TG8)
 
-**Implemented under D8.3.1v2–D8.3.4.** Each raw variant key
+**Implemented under D8.3.1v2–D8.3.4v2.** Each raw variant key
 contains every exact argument semantic type and every selected binder-slot type
 identity. The implementation owns a fixed
 `LAMBDA_MIR_MAX_RAW_VARIANTS_PER_FUNCTION = 4` cap. During the deterministic
@@ -472,11 +475,20 @@ call consumes the raw pointer. The shared exact-key matcher uses the normalized
 semantic container kind for plain `array`/`map`/`range`, and the authoritative
 descriptor pointer for named/nominal maps and concrete elements. A literal
 whose AST carries that same descriptor calls its raw body directly; a declared
-base-shape value stays on `_b` unless the opt-in D8.3.4 hoist can prove the
+base-shape value stays on `_b` unless the opt-in D8.3.4v2 hoist can prove the
 matcher at that local edge. `test/lambda/type_binder_raw_variants.ls` proves four distinct
 scalar keys, the boxed cap fallback, direct raw edges, container lanes,
 descriptor equality, and a derived-shape fallback agree across all tiers.
-[S1.6, D8.3.1v2–D8.3.4, D8.4.1v2]
+[S1.6, D8.3.1v2–D8.3.4v2, D8.4.1v2]
+
+The direct-edge planner also admits a task-free synchronous `pn` when every
+parameter is immutable. The same exact key selects its `__rawN` body; a
+dynamic/capped key calls `_b`. The planner rejects `var` parameters and any
+procedure whose analysis reports `may_await` or `needs_task_context`, because
+those entries require caller-cell write-back or task-root setup that the raw
+ABI does not transport. Guard hoisting remains `fn`-only. Fixture
+`test/lambda/proc/type_binder_proc_raw.ls` covers integer and float keys, a
+procedural forward edge, and an `any` fallback. [S1.6, D8.3.4v2]
 
 With `LAMBDA_MIR_TG8_HOIST_GUARDS=1`, a synchronous `while` whose sole eligible
 dynamic binder call has bounded raw keys and one unmodified identifier argument
@@ -487,7 +499,7 @@ For repeated eligible calls to the same callee with the same identifier inside
 one content sequence, the first guard stores its selected raw index (or boxed
 sentinel); later calls branch on that choice without repeating the exact-key
 chain. The calls themselves still execute. Content/control and side-effect
-boundaries clear the choice. [S1.6, D8.3.4, D8.4.1v2]
+boundaries clear the choice. [S1.6, D8.3.4v2, D8.4.1v2]
 
 ## 4. Hazards and rules of engagement
 
@@ -528,9 +540,10 @@ boundaries clear the choice. [S1.6, D8.3.4, D8.4.1v2]
 | `errors/type_binder_*.ls` | P2 | TG13v2 bound mismatch, TG14v2 forward ref, TG16 trailing `that`, TG17 collision / return position |
 | `type_binder_static.ls` (+ ast-dump) | P3 | call-site substitution, static mismatch, exact-only elision; TG20v2 quartet: `let x: number = 1; max(x, 2.5)` compile error; `fn g(x: number) => max(x, 2.5); g(1)` compile error at the call via instantiation; `g(1.0)` passes; `let d: any = ...; g(d)` runtime error — verdicts identical across tiers |
 | `type_binder_raw_variants.ls` | P4 | four source-order exact binder keys compile private raw bodies; the fifth distinct key takes `_b`'s boxed fallback |
-| `proc/tg8_loop_hoist.ls` | P4 / D8.3.4 | invariant dynamic binder call enters a one-guard raw or boxed loop sibling; forced-GC JIT agrees with T0 |
-| `proc/tg8_loop_multi_hoist.ls` | P4 / D8.3.4 | bounded exact-key chain enters `__raw0`, `__raw1`, or `_b` loop sibling; forced-GC JIT agrees with T0 |
-| `proc/tg8_guard_cse.ls` | P4 / D8.3.4 | repeated immutable-identifier call reuses raw-index or boxed choice; a `var` reassignment forces a new guard chain |
+| `proc/type_binder_proc_raw.ls` | P4 / D8.3.4v2 | task-free `pn` direct edges select scalar raw variants; `any` retains `_b` |
+| `proc/tg8_loop_hoist.ls` | P4 / D8.3.4v2 | invariant dynamic binder call enters a one-guard raw or boxed loop sibling; forced-GC JIT agrees with T0 |
+| `proc/tg8_loop_multi_hoist.ls` | P4 / D8.3.4v2 | bounded exact-key chain enters `__raw0`, `__raw1`, or `_b` loop sibling; forced-GC JIT agrees with T0 |
+| `proc/tg8_guard_cse.ls` | P4 / D8.3.4v2 | repeated immutable-identifier call reuses raw-index or boxed choice; a `var` reassignment forces a new guard chain |
 
 ## 6. Open design items carried, and what each gates
 

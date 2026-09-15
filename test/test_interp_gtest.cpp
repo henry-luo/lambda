@@ -269,6 +269,22 @@ TEST(InterpWalker, TypeBinderContractsAgreeAcrossAllTiers) {
     EXPECT_EQ(raw_jit.exit_code, 0);
     EXPECT_EQ(raw_interp.exit_code, 0);
 
+    // D8.3.4v2: a task-free `pn` follows the same direct raw-edge proof as a
+    // `fn`, but keeps its boxed entry for the dynamic `any` call.
+    const char* proc_raw_variant_path = "test/lambda/proc/type_binder_proc_raw.ls";
+    RunResult proc_raw_default = run_script(proc_raw_variant_path, NULL, /*procedural=*/true);
+    RunResult proc_raw_jit = run_script(proc_raw_variant_path, "jit", /*procedural=*/true);
+    RunResult proc_raw_interp = run_script(proc_raw_variant_path, "interp", /*procedural=*/true);
+    EXPECT_EQ(trim_trailing(proc_raw_default.stdout_text), "[3, 2.5, 7, 9]");
+    EXPECT_EQ(trim_trailing(proc_raw_default.stdout_text),
+        trim_trailing(proc_raw_jit.stdout_text));
+    EXPECT_EQ(trim_trailing(proc_raw_default.stdout_text),
+        trim_trailing(proc_raw_interp.stdout_text));
+    EXPECT_EQ(proc_raw_default.exit_code, 0);
+    EXPECT_EQ(proc_raw_jit.exit_code, 0);
+    EXPECT_EQ(proc_raw_interp.exit_code, 0);
+    EXPECT_EQ(summary_field(proc_raw_interp.stderr_text, "fallback="), 0);
+
     // A caller can pre-admit this map without an environment. The callee must
     // still walk its nested binder and reject the mismatched dependent value.
     write_script("temp/interp_type_binder_nested.ls",
