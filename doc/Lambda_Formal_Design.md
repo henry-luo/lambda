@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 6.1.2 (2026-09-14)
+**Spec version:** 7.1.1 (2026-09-15)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -9,7 +9,7 @@ document — including the `vibe/` design records — or the implementation
 disagrees, this specification wins; the design records govern the history.
 Scope: the Lambda core runtime and Jube polyglot hosting. LambdaJS and
 Radiant get their own documents, but the cross-language runtime contracts
-explicitly named in D1.4v3 and D8.4.3v2 bind every language hosted on the
+explicitly named in D1.4v4 and D8.4.3v2 bind every language hosted on the
 Lambda runtime.
 
 **Ruling IDs.** Same convention as the semantics spec: section-path IDs
@@ -32,33 +32,44 @@ the decision records.
   Lambda's substrate** — no 100%-compat claim; a guest is a grammar + AST
   builder + LangProfile, and what the profile doesn't cover isn't
   supported. [JA4, J5, U1]
-- **D1.2 — One data model.** `Item` is the only value currency — across
-  languages, across the C ABI, across modules. Native structs cross as VMap
-  projections; system resources as integer rids (the fd model, not the
-  pointer model). [JA6]
-- **D1.3 — One core runtime.** One GC, one MIR JIT, one event loop per
-  context, one set of side stacks — guests **reuse contracts, not
-  implementation accidents**, and pay for reuse only below the semantic
-  boundary (no guest inherits another language's truthiness, coercion, or
-  object model). [Lang_Hosting P1–P10, C1–C10]
-- **D1.4v3 — Language failures return through every frame.** A fallible
-  function returns an explicit completion: normally one merged `Item`, its
-  success value or an ERROR-tagged error value; a proven native lane uses its
-  declared companion error lane (D5.2.1v3). Lambda errors, LambdaJS throws and
-  rejections, and every hosted language's exceptions propagate by normal
-  return through **each** generated and native caller. Every caller observes
-  and routes the failure before consuming the success result, and every
-  crossed activation runs its own cleanup/epilogue. No pending-exception side
-  channel, C++ exception, `setjmp`/`longjmp`, SEH unwind, signal jump, or guest
-  unwind implements a language failure or skips an intervening frame. The
-  sole temporary exception is an untyped native system/resource fault from
-  the closed S7.11.1 set: it may abandon frames through
-  `LambdaRecoveryFrame` under D2.8.2/D6.3.3, but that mechanism is never an
-  ordinary error or hosted-language exception path. [S7.4.3, S7.4.4,
-  S7.11.1–S7.11.4, Runtime_Error_Handling REH-D1–REH-D5, JA5, J3]
-- **D1.5 — Precise GC everywhere, forever.** Conservative native-stack
-  scanning is retired from every build and stays retired; a guest is
-  precise iff it emits through the shared rooting primitives. [CR1–CR8]
+- **D1.2v2* — Explicit guest ABI boundary.** `Item` is the only value
+  currency across Lambda, Jube, native modules, and every **host boundary**.
+  A separately versioned guest execution ABI may keep private values and
+  private object pointers while executing, but none may cross that boundary
+  or be reinterpreted as an `Item`; crossing requires an explicit owned
+  adapter. Native host structs cross as VMap projections and system resources
+  as integer rids. [JA6, JM22]
+- **D1.3v3* — Shared host substrate, private guest cores.** There is one
+  host MIR library and at most one event loop per host context. A guest first
+  reuses every applicable untyped-Lambda substrate component: source-admission
+  ownership, parser/AST and binding facts, MIR lifecycle and diagnostics,
+  memory-accounting categories, logging, build/test gates, and explicit
+  return/cleanup discipline. A guest may own a private value heap, root stack,
+  and semantic kernels only where its isolated ABI under D1.2v2 makes direct
+  reuse semantically invalid; each such boundary must be named and tested.
+  It may not acquire another host Runtime, event loop, allocator framework, or
+  Lambda-side stack owner. [Lang_Hosting P1–P10, C1–C10, JM22]
+- **D1.4v4* — Language failures return through every frame.** A fallible
+  function returns an explicit completion: Lambda's host ABI uses an `Item`
+  success/error carrier or a proven native companion error lane
+  (D5.2.1v3); a private guest ABI uses its own versioned completion until an
+  explicit boundary adapter returns to the host. In either ABI, errors,
+  throws, and rejections propagate by normal return through **each** caller,
+  which routes failure before consuming success and runs its cleanup/epilogue.
+  No pending-exception side channel, C++ exception, `setjmp`/`longjmp`, SEH
+  unwind, signal jump, or guest unwind implements a language failure or skips
+  an intervening frame. The sole temporary exception is an untyped native
+  system/resource fault from the closed S7.11.1 set: it may abandon frames
+  through `LambdaRecoveryFrame` under D2.8.2/D6.3.3, but that mechanism is
+  never an ordinary error or hosted-language exception path. [S7.4.3,
+  S7.4.4, S7.11.1–S7.11.4, Runtime_Error_Handling REH-D1–REH-D5, JA5, J3,
+  JM22]
+- **D1.5v2* — Precise GC everywhere, forever.** Conservative native-stack
+  scanning is retired from every build and stays retired. A guest is precise
+  only when either the shared rooting primitives or its D1.2v2 private root
+  interface enumerates every live guest reference, its collector traces all
+  guest edges, and forced-collection tests prove the contract. [CR1–CR8,
+  JM22]
 - **D1.6 — The legacy paths are frozen.** The C-text C2MIR back end
   (`transpile.cpp`) was permanently compatibility-only — no edits, no new
   features, no validation gates, exempt from every new protocol — and has
@@ -134,7 +145,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   exceptions move between activations only by explicit completion and normal
   return; each generated/native frame routes the failure and executes its own
   epilogue. `LambdaRecoveryFrame` is reserved for the native system-fault
-  carve-out, and faults never cross a thread boundary. [D1.4v3, D5.1.4,
+  carve-out, and faults never cross a thread boundary. [D1.4v4, D5.1.4,
   D6.3.3, D8.4.3v2]
 - **DI16 — Transactional initialization.** A half-initialized package or a
   failed module registration is never observable — init commits or rolls
@@ -397,7 +408,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   was a separate element-shaped kind; it is superseded, and the naming trap
   it warned about dissolves, because the language's `object` and what a JS
   program calls an object now name the same thing. What stays separate is
-  the **semantics** behind the record, per D1.3: a JS class resolves members
+  the **semantics** behind the record, per D1.3v3: a JS class resolves members
   through a prototype chain, a Lambda type through its method table; the
   nominal-record slot is the shared contract, its payload is per-language.
   Until phase 2 lands, the shipped state is the v2 one: `js_new_object`
@@ -405,7 +416,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   an inbound Lambda object is element-shaped and read through the kind-aware
   accessors, never punned to a `Map*`. Guest-owned map machinery with no
   Lambda analogue — the property extension table, iterator/proxy/sparse map
-  kinds, the `js_native_trace` hook — stays gated to `LMD_TYPE_MAP`. [D1.3,
+  kinds, the `js_native_trace` hook — stays gated to `LMD_TYPE_MAP`. [D1.3v3,
   D2.6.6v2, OB21]
 - **D2.6.10*** **Sealing at the representation level.** Because a nominal
   type does not change during evaluation (S2.1.4), the JIT may cache its
@@ -1088,7 +1099,7 @@ that carries them.
   snapshot at creation and are stored as `Item`s in the env, unboxed on
   access; assignment — including interior mutation — through a captured name
   is a compile error (semantics S9.1.4). State never lives inside a Lambda
-  function value. Under the guest-semantic boundary of **D1.3**, this does
+  function value. Under the guest-semantic boundary of **D1.3v3**, this does
   not prescribe capture semantics for a hosted profile: LambdaJS captures
   lexical bindings by reference through its own precisely traced environment
   records. [C4, Box_Unbox, JSI5]
@@ -1506,7 +1517,7 @@ loosely across the corpus — context disambiguates, and we live with it.
   state after the activation has escaped.
   The support admission runs after parse/bind/index but before declarations or
   user code; unsupported syntax raises a JS error in the prepared realm and
-  never replays through MIR. [D1.3, D1.5, D1.7, D5.4.1, D6.2.2v2, D6.2.3v2,
+  never replays through MIR. [D1.3v3, D1.5v2, D1.7, D5.4.1, D6.2.2v2, D6.2.3v2,
   D8.2.4, D8.4.1v2, D8.4.3v2, JSI1–JSI13]
 
 ### D8.2 Unified AST
@@ -1621,8 +1632,8 @@ loosely across the corpus — context disambiguates, and we live with it.
   completion before returning to host code. `LambdaError` is the shared ERROR
   carrier; its Map-compatible resting prologue is traced as a heap reference,
   and JS Error stack materialization may remain lazy. Native system faults are
-  outside this helper exception ABI and use only the D1.4v3 carve-out.
-  [S7.4.3, S7.4.4, D1.4v3, Runtime_Error_Handling REH-D3–REH-D12, JR3]
+  outside this helper exception ABI and use only the D1.4v4 carve-out.
+  [S7.4.3, S7.4.4, D1.4v4, Runtime_Error_Handling REH-D3–REH-D12, JR3]
 
 ### D8.5 MIR module cache
 
@@ -1697,7 +1708,28 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ## Appendix A — Implementation Footnotes
 
-Status of `*`-marked rulings as of 2026-09-13.
+Status of `*`-marked rulings as of 2026-09-15.
+
+**D1.2v2, D1.3v3, D1.4v4, and D1.5v2** remain partially implemented as of
+2026-09-15. The selected JS MVP profile implements D1.2v2/D1.3v3's private
+NaN-boxed `MvpValue` boundary, private mark-sweep heap and root frames,
+private strings/arrays/objects/functions, parser/AST-to-MIR numeric and generic
+slices, and an explicit CLI selector. It reuses parser/AST admission, the host
+MIR library, `memtrack` allocation categories, normal build/test substrate, and
+the untyped finite-double text primitive without reusing a JS coercion helper.
+The generic slice has captured environments and receiver handling, a
+class/prototype surface, and AST-backed construction for private compound
+literals. Its 63 canonical benchmark rows completed two fresh release sessions
+with three successful samples per engine/row: MVP / QuickJS was 0.695110x and
+0.691519x against QuickJS 2025-09-13 on Darwin arm64. The focused MVP suite
+passes both normally and with `MVP_GC_FORCE_EVERY=1`, providing the current
+D1.5v2 proof for private roots. The shared Lambda baseline passes 5,546/5,546
+and Test262 reports zero regressions against its 40,261-entry baseline. D1.4v4
+remains partial: runtime faults and
+uncaught benchmark verification throws terminate at the selected script
+boundary; general returned throw/catch/finally propagation and a Lambda/Jube
+value bridge remain future work. The precise profile scope, generated release
+report, and audit commands are `vibe/jube/JS_MVP_Runtime.md`.
 
 The D8.2.4–D8.2.6 implementation record now includes P3j, P4l, and the
 post-P6 binding/identity schedule work (2026-08-31):

@@ -58,6 +58,7 @@
 #include "js/js_interp.hpp"          // retained AST harness execution
 #include "js/js_exec_profile.h"      // profile flush on the batch _exit path
 #include "js/js_runtime_state.hpp"
+#include "js/mvp/mvp.h"
 #include "../lib/uv_loop.h"          // JS worker cleanup for libuv loop
 #include "../lib/time_util.h"
 #ifdef LAMBDA_BASH
@@ -113,6 +114,53 @@ static char* lambda_load_hosted_source_from_cache(const char* path,
         log_error("script-cache: failed to acquire hosted source %s", path);
     }
     return source;
+}
+
+static char* mvp_load_script_source_from_cache(const char* path, size_t* out_length) {
+    if (out_length) *out_length = 0;
+    if (!path || !path[0]) return NULL;
+
+    char* canonical = file_realpath(path);
+    const char* identity = canonical ? canonical : path;
+    InputScriptRequest request = {};
+    request.identity = identity;
+    request.source_kind = INPUT_SCRIPT_SOURCE_FILE;
+    request.language = "javascript";
+    request.profile = "js-mvp";
+    request.parser_abi = "js-c-ast-v1";
+    request.parse_flags = "script";
+    request.resolution_base = identity;
+    request.backend = "js-mvp-mir";
+    request.execution_mode = "script";
+    request.ast_abi = 1;
+    request.compiler_abi = 1;
+    request.optimize_level = 2;
+    request.module_mode = false;
+
+    char* source = input_script_cache_copy_file_source(
+        input_manager_global_script_cache(), &request, path, out_length);
+    if (canonical) mem_free(canonical);
+    if (!source) log_error("mvp-source-cache: failed to acquire %s", path);
+    return source;
+}
+
+static void mvp_cli_print_value(MvpValue value) {
+    if (mvp_value_is_number(value)) {
+        printf("%.17g\n", mvp_value_to_number(value));
+    } else if (mvp_value_is_string(value)) {
+        size_t length = 0;
+        const char* bytes = mvp_string_bytes(value, &length);
+        if (bytes && length) fwrite(bytes, 1, length, stdout);
+        fputc('\n', stdout);
+    } else if (mvp_value_is_undefined(value)) {
+        printf("undefined\n");
+    } else if (mvp_value_is_null(value)) {
+        printf("null\n");
+    } else if (mvp_value_is_boolean(value)) {
+        printf("%s\n", mvp_value_boolean(value) ? "true" : "false");
+    } else {
+        printf("[mvp value]\n");
+    }
 }
 
 static long js_batch_process_cpu_us(void) {
@@ -2400,6 +2448,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             bool eval_mode = false;
             bool print_eval_result = false;
             bool input_type_module = false;
+            bool mvp_runtime = false;
             bool unhandled_rejections_strict = false;
             bool tls_min_v13 = false;
             bool tls_max_v12 = false;
@@ -2414,6 +2463,17 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     force_interactive = true;
                 } else if (strcmp(argv[i], "--input-type=module") == 0) {
                     input_type_module = true;
+                } else if (strcmp(argv[i], "--runtime=mvp") == 0 ||
+                           strcmp(argv[i], "--js-runtime=mvp") == 0) {
+                    mvp_runtime = true;
+                } else if (strcmp(argv[i], "--runtime=legacy") == 0 ||
+                           strcmp(argv[i], "--js-runtime=legacy") == 0) {
+                    mvp_runtime = false;
+                } else if (strncmp(argv[i], "--runtime=", 10) == 0 ||
+                           strncmp(argv[i], "--js-runtime=", 13) == 0) {
+                    fputs("invalid value for --runtime\n", stderr);
+                    runtime_cleanup(&runtime);
+                    return lambda_main_finish(9);
                 } else if (strcmp(argv[i], "--unhandled-rejections=strict") == 0) {
                     unhandled_rejections_strict = true;
                 } else if (strcmp(argv[i], "--unhandled-rejections=none") == 0) {
@@ -2482,7 +2542,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             char* js_source = NULL;
             if (eval_mode) {
                 js_file = "[eval]";
-                if (print_eval_result) {
+                if (print_eval_result && !mvp_runtime) {
                     js_source_len = strlen(eval_source_arg) + 13;
                     js_source = (char*)mem_alloc(js_source_len + 1, MEM_CAT_SYSTEM);
                     snprintf(js_source, js_source_len + 1, "console.log(%s)", eval_source_arg);
@@ -2501,14 +2561,36 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 }
             } else {
                 if (!js_file) js_file = argv[2];  // fallback
-                js_source = js_load_script_source_from_cache(
-                    js_file, "js-cli", input_type_module ? "module" : "classic",
-                    input_type_module, &js_source_len);
+                js_source = mvp_runtime
+                    ? mvp_load_script_source_from_cache(js_file, &js_source_len)
+                    : js_load_script_source_from_cache(
+                        js_file, "js-cli", input_type_module ? "module" : "classic",
+                        input_type_module, &js_source_len);
                 if (!js_source) {
                     printf("Error: Could not read file '%s'\n", js_file);
                     runtime_cleanup(&runtime);
                     return lambda_main_finish(1);
                 }
+            }
+            if (mvp_runtime) {
+                if (input_type_module || html_file) {
+                    fputs("MVP runtime supports benchmark scripts only; modules and DOM are unavailable\n",
+                          stderr);
+                    mem_free(js_source);
+                    runtime_cleanup(&runtime);
+                    return lambda_main_finish(1);
+                }
+                MvpExecutionResult mvp_result = mvp_execute_source(js_source, js_source_len);
+                mem_free(js_source);
+                if (!mvp_result.ok) {
+                    fprintf(stderr, "MVP runtime error: %s\n", mvp_result.error);
+                    runtime_cleanup(&runtime);
+                    return lambda_main_finish(1);
+                }
+                if (print_eval_result) mvp_cli_print_value(mvp_result.value);
+                mvp_execution_result_destroy(&mvp_result);
+                runtime_cleanup(&runtime);
+                return lambda_main_finish(0);
             }
             js_promise_set_unhandled_rejections_mode(unhandled_rejections_strict ? 1 : 0);
             if (js_stack_size_kb > 0) {
@@ -2579,6 +2661,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) { i++; continue; }
                     if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--interactive") == 0) continue;
                     if (strcmp(argv[i], "--input-type=module") == 0) continue;
+                    if (strcmp(argv[i], "--runtime=mvp") == 0 ||
+                        strcmp(argv[i], "--runtime=legacy") == 0 ||
+                        strcmp(argv[i], "--js-runtime=mvp") == 0 ||
+                        strcmp(argv[i], "--js-runtime=legacy") == 0) continue;
                     if (strncmp(argv[i], "--stack_size=", 13) == 0 ||
                         strncmp(argv[i], "--stack-size=", 13) == 0) {
                         js_exec_argv_store[js_exec_argc_store++] = argv[i];
@@ -2614,6 +2700,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) { i++; continue; }
                     if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--interactive") == 0) continue;
                     if (strcmp(argv[i], "--input-type=module") == 0) continue;
+                    if (strcmp(argv[i], "--runtime=mvp") == 0 ||
+                        strcmp(argv[i], "--runtime=legacy") == 0 ||
+                        strcmp(argv[i], "--js-runtime=mvp") == 0 ||
+                        strcmp(argv[i], "--js-runtime=legacy") == 0) continue;
                     if (strncmp(argv[i], "--stack_size=", 13) == 0 ||
                         strncmp(argv[i], "--stack-size=", 13) == 0) {
                         continue;

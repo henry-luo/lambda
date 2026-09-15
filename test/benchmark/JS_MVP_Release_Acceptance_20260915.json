@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "manifest": "test/benchmark/js_mvp_manifest_v1.json",
+  "target_ratio": 0.8,
+  "sessions": [
+    {
+      "path": "temp/js_mvp_release_final_session1.json",
+      "started_at": "2026-09-15T21:09:01",
+      "finished_at": "2026-09-15T21:19:17",
+      "lambda_commit": "677c1c377481bb47aea8ab23edcde7e47fd387eb",
+      "lambda_exe_sha256": "11260c2c60d522efe0167c6df0f53d42e4781370b8ada3a5d0f74eac38dad0fb",
+      "quickjs_version": "2025-09-13",
+      "quickjs_exe_sha256": "2c8923f779fdfbad032d48f7f1f6442e4a99bbed619dd0182d3758acfc9d85e3",
+      "platform": "Darwin arm64",
+      "ratio": 0.6951100933132617
+    },
+    {
+      "path": "temp/js_mvp_release_final_session2.json",
+      "started_at": "2026-09-15T21:19:20",
+      "finished_at": "2026-09-15T21:29:28",
+      "lambda_commit": "677c1c377481bb47aea8ab23edcde7e47fd387eb",
+      "lambda_exe_sha256": "11260c2c60d522efe0167c6df0f53d42e4781370b8ada3a5d0f74eac38dad0fb",
+      "quickjs_version": "2025-09-13",
+      "quickjs_exe_sha256": "2c8923f779fdfbad032d48f7f1f6442e4a99bbed619dd0182d3758acfc9d85e3",
+      "platform": "Darwin arm64",
+      "ratio": 0.6915189925170786
+    }
+  ],
+  "accepted": true
+}

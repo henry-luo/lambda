@@ -3,6 +3,7 @@
 #include "lambda_typed.hpp"
 #include "../../lib/log.h"
 #include "../../lib/escape.h"
+#include "../../lib/hex.h"
 #include "../../lib/str.h"
 #include <math.h>
 #include <inttypes.h>  // for PRId64
@@ -21,7 +22,8 @@ static char* binary_literal_text(Binary* bin, size_t* text_len) {
     char* text = (char*)mem_alloc(len + 1, MEM_CAT_TEMP);
     if (!text) return NULL;
     text[0] = 'b'; text[1] = '\''; text[2] = '\\'; text[3] = 'x';
-    str_hex_encode(text + 4, (const char*)bytes, byte_len);
+    // Literal spelling is canonical uppercase, unlike lowercase digest text.
+    hex_encode_upper(bytes, byte_len, text + 4);
     text[len - 1] = '\'';
     text[len] = '\0';
     if (text_len) *text_len = len;
