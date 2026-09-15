@@ -7,8 +7,8 @@
 #include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
 #include "../lib/checked_math.hpp"
-#include "../lib/mem_grow.hpp"
 #include <string.h>
+#include <limits.h>
 
 #define DL_INITIAL_CAPACITY 2048
 #define DL_VALIDATE_ELEMENT_STACK_LIMIT 1024
@@ -34,14 +34,10 @@ bool dl_op_has_flags(DisplayOp op, uint32_t flags) {
 
 DisplayItem* dl_alloc_item(DisplayList* dl) {
     if (!dl) return nullptr;
-    if (dl->count >= dl->capacity) {
-        // keep list state intact on overflow/OOM so callers never see a half-grown buffer
-        if (!lam::mem_grow_array(&dl->items, &dl->capacity, dl->count + 1,
-                                 DL_INITIAL_CAPACITY, MEM_CAT_RENDER)) return nullptr;
-    }
-    DisplayItem* item = &dl->items[dl->count++];
-    memset(item, 0, sizeof(DisplayItem));
-    return item;
+    if (dl->capacity() == 0 && !dl->reserve(DL_INITIAL_CAPACITY)) return nullptr;
+    DisplayItem item = {};
+    if (!dl->append(item)) return nullptr;
+    return &dl->back();
 }
 
 RdtGradientStop* dl_copy_stops(DisplayList* dl, const RdtGradientStop* stops, int count) {
@@ -160,7 +156,7 @@ int dl_restore_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes,
 }
 
 void DisplayList::init(Arena* backing_arena) {
-    memset(this, 0, sizeof(DisplayList));
+    destroy();
     mem_scratch_init(NULL, &arena, backing_arena, MEM_ROLE_RENDER, "display_list.scratch");
 }
 
@@ -182,10 +178,10 @@ void dl_item_free_owned_payload(DisplayItem* item) {
 void DisplayList::clear() {
     DisplayList* dl = this;
 
-    for (int i = 0; i < dl->count; i++) {
-        dl_item_free_owned_payload(&dl->items[i]);
+    for (size_t i = 0; i < dl->size(); i++) {
+        dl_item_free_owned_payload(&dl->data()[i]);
     }
-    dl->count = 0;
+    lam::ArrayList<DisplayItem>::clear();
     Arena* backing_arena = dl->arena.arena;
     scratch_release(&dl->arena);
     if (backing_arena) {
@@ -198,21 +194,21 @@ void DisplayList::clear() {
 
 void DisplayList::destroy() {
     clear();
-    if (items) {
-        mem_free(items);
-        items = nullptr;
-    }
-    capacity = 0;
+    lam::ArrayList<DisplayItem>::release();
     scratch_release(&arena);
 }
 
 int DisplayList::item_count() const {
-    return count;
+    if (size() > (size_t)INT_MAX) {
+        log_error("display_list_item_count_overflow: count=%zu", size());
+        return INT_MAX;
+    }
+    return (int)size(); // INT_CAST_OK: DisplayList public count API is int.
 }
 
 bool DisplayList::contains_glyphs() const {
-    for (int i = 0; i < count; i++) {
-        if (items[i].op == DL_DRAW_GLYPH) return true;
+    for (size_t i = 0; i < size(); i++) {
+        if (data()[i].op == DL_DRAW_GLYPH) return true;
     }
     return false;
 }
@@ -296,11 +292,11 @@ bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result) {
     if (!dl) {
         return dl_validation_fail(result, -1, "display list is null", NULL);
     }
-    if (dl->count < 0 || dl->capacity < 0 || dl->count > dl->capacity) {
+    if (dl->size() > dl->capacity()) {
         return dl_validation_fail(result, -1, "display list count/capacity is invalid",
                                   NULL);
     }
-    if (dl->count > 0 && !dl->items) {
+    if (dl->size() > 0 && !dl->data()) {
         return dl_validation_fail(result, -1, "display list has items but no storage",
                                   NULL);
     }
@@ -311,8 +307,8 @@ bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result) {
         return dl_validation_fail(result, index, message, &stack);
     };
 
-    for (int i = 0; i < dl->count; i++) {
-        const DisplayItem* item = &dl->items[i];
+    for (int i = 0; i < dl->item_count(); i++) {
+        const DisplayItem* item = &dl->data()[i];
         auto fail = [&](const char* message) -> bool { return fail_at(i, message); };
         if (item->op < DL_FILL_RECT || item->op >= DL_OP_COUNT) {
             return fail("unknown display op");
@@ -476,9 +472,9 @@ bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result) {
                 break;
             case DL_BEGIN_ELEMENT: {
                 int match = item->element_marker.matching_index;
-                if (match <= i || match >= dl->count ||
-                    dl->items[match].op != DL_END_ELEMENT ||
-                    dl->items[match].element_marker.matching_index != i) {
+                if (match <= i || match >= dl->item_count() ||
+                    dl->data()[match].op != DL_END_ELEMENT ||
+                    dl->data()[match].element_marker.matching_index != i) {
                     return fail("element begin marker is not paired");
                 }
                 if (stack.element_depth >= DL_VALIDATE_ELEMENT_STACK_LIMIT) {
@@ -490,8 +486,8 @@ bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result) {
             case DL_END_ELEMENT: {
                 int match = item->element_marker.matching_index;
                 if (stack.element_depth <= 0 || match < 0 || match >= i ||
-                    dl->items[match].op != DL_BEGIN_ELEMENT ||
-                    dl->items[match].element_marker.matching_index != i ||
+                    dl->data()[match].op != DL_BEGIN_ELEMENT ||
+                    dl->data()[match].element_marker.matching_index != i ||
                     element_stack[stack.element_depth - 1] != match) {
                     return fail("element end marker is not paired");
                 }
@@ -502,16 +498,16 @@ bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result) {
     }
 
     if (stack.clip_depth != 0) {
-        return fail_at(dl->count, "clip stack is unbalanced");
+        return fail_at(dl->item_count(), "clip stack is unbalanced");
     }
     if (stack.backdrop_depth != 0) {
-        return fail_at(dl->count, "backdrop stack is unbalanced");
+        return fail_at(dl->item_count(), "backdrop stack is unbalanced");
     }
     if (stack.shadow_clip_depth != 0) {
-        return fail_at(dl->count, "shadow clip stack is unbalanced");
+        return fail_at(dl->item_count(), "shadow clip stack is unbalanced");
     }
     if (stack.element_depth != 0) {
-        return fail_at(dl->count, "element marker stack is unbalanced");
+        return fail_at(dl->item_count(), "element marker stack is unbalanced");
     }
 
     dl_validation_set(result, true, -1, "ok", 0, 0, 0, 0);
@@ -617,7 +613,7 @@ int dl_begin_element(DisplayList* dl, uint32_t view_id,
                      float x, float y, float w, float h) {
     DisplayItem* item = dl_alloc_item(dl);
     if (!item) return -1;
-    int index = dl->count - 1;
+    int index = dl->item_count() - 1;
     item->op = DL_BEGIN_ELEMENT;
     dl_set_item_rect_bounds(item, x, y, w, h);
     item->element_marker.view_id = view_id;
@@ -632,7 +628,7 @@ int dl_begin_element(DisplayList* dl, uint32_t view_id,
 void dl_end_element(DisplayList* dl, int begin_index) {
     DisplayItem* end = dl_alloc_item(dl);
     if (!end) return;
-    int end_index = dl->count - 1;
+    int end_index = dl->item_count() - 1;
     end->op = DL_END_ELEMENT;
     end->element_marker.view_id = 0;
     end->element_marker.matching_index = begin_index;
@@ -641,7 +637,7 @@ void dl_end_element(DisplayList* dl, int begin_index) {
         return;
     }
 
-    DisplayItem* begin = &dl->items[begin_index];
+    DisplayItem* begin = &dl->data()[begin_index];
     if (begin->op != DL_BEGIN_ELEMENT) {
         return;
     }
@@ -651,7 +647,7 @@ void dl_end_element(DisplayList* dl, int begin_index) {
     has_bounds = dl_union_item_bounds(&left, &top, &right, &bottom, begin, has_bounds);
     for (int i = begin_index + 1; i < end_index; i++) {
         has_bounds = dl_union_item_bounds(&left, &top, &right, &bottom,
-                                          &dl->items[i], has_bounds);
+                                          &dl->data()[i], has_bounds);
     }
     if (has_bounds) {
         dl_set_item_rect_bounds(begin, left, top, right - left, bottom - top);

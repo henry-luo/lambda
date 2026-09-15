@@ -346,8 +346,8 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
 
     rdt_vector_begin_batch(vec);
 
-    for (int i = 0; i < dl->count; i++) {
-        DisplayItem* item = &dl->items[i];
+    for (int i = 0; i < dl->item_count(); i++) {
+        DisplayItem* item = &dl->data()[i];
 
         // Cull draw work that doesn't intersect this tile; the skip path below
         // still preserves clip/backdrop stack state for ordered replay.
@@ -529,5 +529,5 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
     }
 
     log_debug("[DL_REPLAY_TILE] tile(%d,%d) %d/%d items drawn",
-              (int)(tile_x / tile_w), (int)(tile_y / tile_h), items_drawn, dl->count);
+              (int)(tile_x / tile_w), (int)(tile_y / tile_h), items_drawn, dl->item_count());
 }

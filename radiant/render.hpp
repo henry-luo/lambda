@@ -1,4 +1,5 @@
 #pragma once
+#include "../lib/arraylist.hpp"
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -377,8 +378,6 @@ RdtPicture* rdt_picture_take_tvg_paint(Tvg_Paint paint, float w, float h);
 // Decouples the recording pass (main thread walks the view tree) from the
 // rasterisation pass (replay through rdt_* calls, eventually per-tile).
 // ==========================================================================
-
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -706,11 +705,9 @@ typedef struct DisplayItem {
 // DisplayList — growable array of DisplayItem
 // ---------------------------------------------------------------------------
 
-typedef struct DisplayList {
-    DisplayItem* items;
-    int count;
-    int capacity;
+struct DisplayList : lam::ArrayList<DisplayItem> {
     ScratchArena arena;      // all variable-length data (paths, stops, dashes)
+    DisplayList() : ArrayList(MEM_CAT_RENDER, 0), arena{} {}
 #ifdef __cplusplus
     void init(Arena* backing_arena);
     void clear();
@@ -718,7 +715,7 @@ typedef struct DisplayList {
     int item_count() const;
     bool contains_glyphs() const;
 #endif
-} DisplayList;
+};
 
 typedef struct DisplayListValidationResult {
     bool valid;
@@ -1383,17 +1380,15 @@ typedef struct PaintCmd {
 // PaintList — growable array of PaintCmd (the recorded semantic IR)
 // ---------------------------------------------------------------------------
 
-typedef struct PaintList {
-    PaintCmd* cmds;
-    int count;
-    int capacity;
+struct PaintList : lam::ArrayList<PaintCmd> {
+    PaintList() : ArrayList(MEM_CAT_RENDER, 0) {}
 #ifdef __cplusplus
     void init(Arena* backing_arena);
     void clear();
     void destroy();
     int item_count() const;
 #endif
-} PaintList;
+};
 
 typedef struct PaintIrValidationResult {
     bool valid;

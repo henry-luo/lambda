@@ -56,8 +56,7 @@ public:
     }
 
     ~ArrayList() {
-        clear();
-        mem_free(data_);
+        release();
     }
 
     ArrayList(const ArrayList&) = delete;
@@ -207,6 +206,14 @@ public:
         count_ = 0;
     }
 
+    // Release element storage early while leaving this list reusable.
+    void release() {
+        clear();
+        mem_free(data_);
+        data_ = nullptr;
+        capacity_ = 0;
+    }
+
     template<typename Equal>
     long index_of(const T& value, Equal equal) const {
         for (size_t i = 0; i < count_; ++i) {
@@ -224,13 +231,15 @@ public:
         }
     }
 
-private:
+protected:
     static const size_t DEFAULT_CAPACITY = 16;
 
     T* data_;
     size_t count_;
     size_t capacity_;
     MemCategory category_;
+
+private:
 
     void bounds_check(size_t index) const {
         if (index < count_) {

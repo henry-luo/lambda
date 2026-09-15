@@ -98,13 +98,13 @@ TEST_F(RetainedDisplayListTest, CapturesAndAppendsMatchedElementFragment) {
     DisplayList replay = {};
     dl_init(&replay, arena);
     ASSERT_TRUE(retained_dl_append_fragment(&replay, fragment));
-    ASSERT_EQ(replay.count, 3);
-    EXPECT_EQ(replay.items[0].op, DL_BEGIN_ELEMENT);
-    EXPECT_EQ(replay.items[0].element_marker.matching_index, 2);
-    EXPECT_EQ(replay.items[1].op, DL_FILL_RECT);
-    EXPECT_FLOAT_EQ(replay.items[1].fill_rect.x, 12.0f);
-    EXPECT_EQ(replay.items[2].op, DL_END_ELEMENT);
-    EXPECT_EQ(replay.items[2].element_marker.matching_index, 0);
+    ASSERT_EQ(replay.size(), 3u);
+    EXPECT_EQ(replay.data()[0].op, DL_BEGIN_ELEMENT);
+    EXPECT_EQ(replay.data()[0].element_marker.matching_index, 2);
+    EXPECT_EQ(replay.data()[1].op, DL_FILL_RECT);
+    EXPECT_FLOAT_EQ(replay.data()[1].fill_rect.x, 12.0f);
+    EXPECT_EQ(replay.data()[2].op, DL_END_ELEMENT);
+    EXPECT_EQ(replay.data()[2].element_marker.matching_index, 0);
 
     dl_destroy(&replay);
     retained_dl_cache_destroy(cache);
@@ -200,8 +200,8 @@ TEST_F(RetainedDisplayListTest, AppendsRetainedFragmentForExternalDirtySource) {
     EXPECT_TRUE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, &contained_id));
-    EXPECT_EQ(replay.count, 3);
-    EXPECT_EQ(replay.items[1].op, DL_FILL_RECT);
+    EXPECT_EQ(replay.size(), 3u);
+    EXPECT_EQ(replay.data()[1].op, DL_FILL_RECT);
 
     dl_destroy(&replay);
     retained_dl_cache_destroy(cache);
@@ -232,7 +232,7 @@ TEST_F(RetainedDisplayListTest, AppendsRetainedFragmentWhenUnknownDirtyMissesVis
     EXPECT_TRUE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, nullptr));
-    EXPECT_EQ(replay.count, 3);
+    EXPECT_EQ(replay.size(), 3u);
 
     dl_destroy(&replay);
     retained_dl_cache_destroy(cache);
@@ -263,7 +263,7 @@ TEST_F(RetainedDisplayListTest, RejectsRetainedFragmentForUnknownIntersectingDir
     EXPECT_FALSE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, nullptr));
-    EXPECT_EQ(replay.count, 0);
+    EXPECT_EQ(replay.size(), 0u);
 
     dl_destroy(&replay);
     retained_dl_cache_destroy(cache);
@@ -295,7 +295,7 @@ TEST_F(RetainedDisplayListTest, RejectsRetainedFragmentForDirtySourceInsideSubtr
     EXPECT_FALSE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, &contained_id));
-    EXPECT_EQ(replay.count, 0);
+    EXPECT_EQ(replay.size(), 0u);
 
     dl_destroy(&replay);
     retained_dl_cache_destroy(cache);
@@ -326,7 +326,7 @@ TEST_F(RetainedDisplayListTest, RejectsRetainedFragmentWhenMarkerBoundsChanged) 
     EXPECT_FALSE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, moved_marker, &tracker, 1.0f,
         retained_test_contains_view_id, nullptr));
-    EXPECT_EQ(replay.count, 0);
+    EXPECT_EQ(replay.size(), 0u);
 
     dl_destroy(&replay);
     retained_dl_cache_destroy(cache);
@@ -358,7 +358,7 @@ TEST_F(RetainedDisplayListTest, RejectsRetainedFragmentDuringFullRepaint) {
     EXPECT_FALSE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, nullptr));
-    EXPECT_EQ(replay.count, 0);
+    EXPECT_EQ(replay.size(), 0u);
 
     dl_destroy(&replay);
     retained_dl_cache_destroy(cache);
@@ -390,7 +390,7 @@ TEST_F(RetainedDisplayListTest, AppliesDirtyScaleWhenTestingFragmentVisualBounds
     EXPECT_TRUE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 2.0f,
         retained_test_contains_view_id, &contained_id));
-    EXPECT_EQ(replay.count, 3);
+    EXPECT_EQ(replay.size(), 3u);
 
     dl_destroy(&replay);
     retained_dl_cache_destroy(cache);
@@ -424,7 +424,7 @@ TEST_F(RetainedDisplayListTest, ReusesWhenUnknownDirtyMissesAndExternalDirtyInte
     EXPECT_TRUE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, &contained_id));
-    EXPECT_EQ(replay.count, 3);
+    EXPECT_EQ(replay.size(), 3u);
 
     dl_destroy(&replay);
     retained_dl_cache_destroy(cache);
@@ -499,9 +499,9 @@ TEST_F(RetainedDisplayListTest, DeepCopiesRasterClipShapeStacksForRetainedReplay
     DisplayList replay = {};
     dl_init(&replay, arena);
     ASSERT_TRUE(retained_dl_append_fragment(&replay, fragment));
-    ASSERT_EQ(replay.count, 3);
-    ASSERT_EQ(replay.items[1].op, DL_FILL_SURFACE_RECT);
-    const DlClipShapeStack* copied = &replay.items[1].fill_surface_rect.clip_shapes;
+    ASSERT_EQ(replay.size(), 3u);
+    ASSERT_EQ(replay.data()[1].op, DL_FILL_SURFACE_RECT);
+    const DlClipShapeStack* copied = &replay.data()[1].fill_surface_rect.clip_shapes;
     EXPECT_EQ(copied->depth, 1);
     EXPECT_EQ(copied->type[0], CLIP_SHAPE_POLYGON);
     EXPECT_EQ(copied->polygon_count[0], 3);
@@ -542,8 +542,8 @@ TEST_F(RetainedDisplayListTest, AppendsTransformedVisualFragmentWithStableMarker
     EXPECT_TRUE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, &contained_id));
-    EXPECT_EQ(replay.count, 3);
-    EXPECT_FLOAT_EQ(replay.items[1].bounds[0], 100.0f);
+    EXPECT_EQ(replay.size(), 3u);
+    EXPECT_FLOAT_EQ(replay.data()[1].bounds[0], 100.0f);
 
     dl_destroy(&replay);
     retained_dl_cache_destroy(cache);
@@ -800,7 +800,7 @@ TEST_F(RetainedDisplayListTest, RejectsUnknownDirtyIntersectingOnlyEffectOverflo
     EXPECT_FALSE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, nullptr));
-    EXPECT_EQ(replay.count, 0);
+    EXPECT_EQ(replay.size(), 0u);
 
     dl_destroy(&replay);
     retained_dl_cache_destroy(cache);

@@ -9,11 +9,11 @@
 #include "render.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
-#include "../lib/mem_grow.hpp"
 #include "../lib/escape.h"
 #include "../lib/str.h"
 #include <math.h>
 #include <string.h>
+#include <limits.h>
 
 #define PAINT_LIST_INITIAL_CAPACITY 1024
 
@@ -36,7 +36,7 @@ void paint_ir_register_glyph_run_raster_lowerer(PaintGlyphRunRasterLowerFn lower
 // ---------------------------------------------------------------------------
 
 void PaintList::init(Arena* backing_arena) {
-    memset(this, 0, sizeof(PaintList));
+    destroy();
     (void)backing_arena;
 }
 
@@ -100,26 +100,25 @@ static void paint_cmd_free_owned_payload(PaintCmd* cmd) {
 }
 
 void PaintList::clear() {
-    for (int i = 0; i < count; i++) {
-        if (paint_op_has_flags(cmds[i].op, PAINT_OP_FLAG_OWNED_PAYLOAD)) {
-            paint_cmd_free_owned_payload(&cmds[i]);
+    for (size_t i = 0; i < size(); i++) {
+        if (paint_op_has_flags(data()[i].op, PAINT_OP_FLAG_OWNED_PAYLOAD)) {
+            paint_cmd_free_owned_payload(&data()[i]);
         }
     }
-    count = 0;
+    lam::ArrayList<PaintCmd>::clear();
 }
 
 void PaintList::destroy() {
     clear();
-    if (cmds) {
-        mem_free(cmds);
-        cmds = nullptr;
-    }
-    count = 0;
-    capacity = 0;
+    lam::ArrayList<PaintCmd>::release();
 }
 
 int PaintList::item_count() const {
-    return count;
+    if (size() > (size_t)INT_MAX) {
+        log_error("paint_list_item_count_overflow: count=%zu", size());
+        return INT_MAX;
+    }
+    return (int)size(); // INT_CAST_OK: PaintList public count API is int.
 }
 
 void paint_list_init(PaintList* pl, Arena* backing_arena) {
@@ -190,8 +189,8 @@ bool paint_op_has_flags(PaintOp op, unsigned flags) {
 
 bool paint_list_has_op_flags(const PaintList* pl, unsigned flags) {
     if (!pl) return false;
-    for (int i = 0; i < pl->count; i++) {
-        if (paint_op_has_flags(pl->cmds[i].op, flags)) return true;
+    for (int i = 0; i < pl->item_count(); i++) {
+        if (paint_op_has_flags(pl->data()[i].op, flags)) return true;
     }
     return false;
 }
@@ -287,8 +286,8 @@ bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
 
     PaintIrValidationStack stack = {};
 
-    for (int i = 0; i < pl->count; i++) {
-        const PaintCmd* cmd = &pl->cmds[i];
+    for (int i = 0; i < pl->item_count(); i++) {
+        const PaintCmd* cmd = &pl->data()[i];
         auto fail = [&](const char* message) -> bool {
             return paint_ir_validation_fail_at(result, i, message, &stack);
         };
@@ -508,7 +507,7 @@ bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
     }
 
     auto require_balanced = [&](int depth, const char* message) -> bool {
-        return depth == 0 || paint_ir_validation_fail_at(result, pl->count, message, &stack);
+        return depth == 0 || paint_ir_validation_fail_at(result, pl->item_count(), message, &stack);
     };
     if (!require_balanced(stack.clip_depth, "clip stack is unbalanced")) return false;
     if (!require_balanced(stack.backdrop_depth, "backdrop stack is unbalanced")) return false;
@@ -536,13 +535,10 @@ bool paint_ir_validate_or_log(const PaintList* pl, const char* context) {
 
 static PaintCmd* paint_alloc_cmd(PaintList* pl, PaintOp op) {
     if (!pl) return nullptr;
-    if (pl->count >= pl->capacity) {
-        // keep the PaintList unchanged if growth fails; callers already handle null commands
-        if (!lam::mem_grow_array(&pl->cmds, &pl->capacity, pl->count + 1,
-                                 PAINT_LIST_INITIAL_CAPACITY, MEM_CAT_RENDER)) return nullptr;
-    }
-    PaintCmd* cmd = &pl->cmds[pl->count++];
-    memset(cmd, 0, sizeof(PaintCmd));
+    if (pl->capacity() == 0 && !pl->reserve(PAINT_LIST_INITIAL_CAPACITY)) return nullptr;
+    PaintCmd empty = {};
+    if (!pl->append(empty)) return nullptr;
+    PaintCmd* cmd = &pl->back();
     cmd->op = op;
     return cmd;
 }
@@ -1062,8 +1058,8 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
     PaintIrRasterEffectFrame effect_stack[PAINT_IR_RASTER_EFFECT_STACK_MAX];
     int effect_depth = 0;
 
-    for (int i = 0; i < pl->count; i++) {
-        const PaintCmd* cmd = &pl->cmds[i];
+    for (int i = 0; i < pl->item_count(); i++) {
+        const PaintCmd* cmd = &pl->data()[i];
         if (paint_op_has_flags(cmd->op, PAINT_OP_FLAG_RASTER_NOOP)) {
             continue;
         }
@@ -1686,8 +1682,8 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
         return true;
     };
 
-    for (int i = 0; i < pl->count; i++) {
-        const PaintCmd* cmd = &pl->cmds[i];
+    for (int i = 0; i < pl->item_count(); i++) {
+        const PaintCmd* cmd = &pl->data()[i];
         active_stats->command_count++;
         if (skipped_effect_depth > 0 &&
             !paint_op_has_flags(cmd->op, PAINT_OP_FLAG_EFFECT_STACK)) {

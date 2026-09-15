@@ -1017,8 +1017,8 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
         return false;
     };
 
-    for (int i = 0; i < ctx->paint_list.count; i++) {
-        PaintCmd* cmd = &ctx->paint_list.cmds[i];
+    for (int i = 0; i < ctx->paint_list.item_count(); i++) {
+        PaintCmd* cmd = &ctx->paint_list.data()[i];
         state->command_count++;
         if (handle_transform_stack(cmd)) continue;
         if (handle_effect_stack(cmd)) continue;
@@ -1212,14 +1212,14 @@ static PaintCmd* pdf_effect_fallback_latest_cmd(PdfRenderContext* ctx,
                                                 int index,
                                                 PaintOp expected_op) {
     if (!ctx || !ctx->effect_fallback.active || !list || index < 0) return nullptr;
-    if (list->count != index + 1) return nullptr;
-    PaintCmd* cmd = &list->cmds[index];
+    if (list->item_count() != index + 1) return nullptr;
+    PaintCmd* cmd = &list->data()[index];
     return cmd->op == expected_op ? cmd : nullptr;
 }
 
 static bool pdf_paint_fill_path(PdfRenderContext* ctx, RdtPath* path, Color color) {
     PaintList* list = pdf_active_paint_list(ctx);
-    int index = list ? list->count : -1;
+    int index = list ? list->item_count() : -1;
     paint_fill_path(list, path, color, RDT_FILL_WINDING, nullptr);
     bool owns_path = false;
     PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index, PAINT_FILL_PATH);
@@ -1244,7 +1244,7 @@ static void pdf_paint_draw_image(PdfRenderContext* ctx, ImageSurface* img,
 static bool pdf_paint_stroke_path(PdfRenderContext* ctx, RdtPath* path,
                                   Color color, float width) {
     PaintList* list = pdf_active_paint_list(ctx);
-    int index = list ? list->count : -1;
+    int index = list ? list->item_count() : -1;
     paint_stroke_path(list, path, color, width,
                       RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0.0f, nullptr);
     bool owns_path = false;
@@ -1262,7 +1262,7 @@ static bool pdf_paint_fill_linear_gradient(PdfRenderContext* ctx,
                                            RdtGradientStop* stops) {
     if (!gradient) return false;
     PaintList* list = pdf_active_paint_list(ctx);
-    int index = list ? list->count : -1;
+    int index = list ? list->item_count() : -1;
     paint_fill_linear_gradient(list, gradient->path,
                                gradient->x1, gradient->y1,
                                gradient->x2, gradient->y2,
@@ -1285,7 +1285,7 @@ static bool pdf_paint_fill_radial_gradient(PdfRenderContext* ctx,
                                            RdtGradientStop* stops) {
     if (!gradient) return false;
     PaintList* list = pdf_active_paint_list(ctx);
-    int index = list ? list->count : -1;
+    int index = list ? list->item_count() : -1;
     paint_fill_radial_gradient(list, gradient->path,
                                gradient->cx, gradient->cy, gradient->r,
                                gradient->stops, gradient->stop_count,
@@ -1776,8 +1776,7 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
         return NULL;
     }
 
-    PdfRenderContext ctx;
-    memset(&ctx, 0, sizeof(PdfRenderContext));
+    PdfRenderContext ctx = {};
     pdf_paint_lowering_state_init(&ctx.paint_state);
 
     // Create PDF document

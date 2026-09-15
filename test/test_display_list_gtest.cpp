@@ -83,7 +83,7 @@ TEST_F(DisplayListTest, ClearKeepsReusableScratchRegistered) {
 
     dl_clear(&dl);
 
-    EXPECT_EQ(dl.count, 0);
+    EXPECT_EQ(dl.size(), 0u);
     EXPECT_EQ(scratch_live_count(&dl.arena), 0u);
     EXPECT_NE(dl.arena.mem_node, nullptr);
 }
@@ -96,22 +96,22 @@ TEST(PaintListTest, OwnershipPayloadsAreReleasedByClearAndDestroy) {
     ASSERT_NE(stops, nullptr);
     paint_fill_linear_gradient(&clear_list, nullptr, 0.0f, 0.0f, 10.0f, 10.0f,
                                stops, 2, RDT_FILL_WINDING, nullptr, nullptr);
-    ASSERT_EQ(clear_list.count, 1);
-    clear_list.cmds[0].fill_linear_gradient.owns_stops = true;
+    ASSERT_EQ(clear_list.size(), 1u);
+    clear_list.data()[0].fill_linear_gradient.owns_stops = true;
 
     PaintGlyphRun run = {};
     run.text = mem_strdup("owned glyph text", MEM_CAT_RENDER);
     ASSERT_NE(run.text, nullptr);
     run.owns_text = true;
     paint_glyph_run(&clear_list, &run);
-    ASSERT_EQ(clear_list.count, 2);
+    ASSERT_EQ(clear_list.size(), 2u);
 
     paint_list_clear(&clear_list);
-    EXPECT_EQ(clear_list.count, 0);
-    EXPECT_EQ(clear_list.cmds[0].fill_linear_gradient.stops, nullptr);
-    EXPECT_FALSE(clear_list.cmds[0].fill_linear_gradient.owns_stops);
-    EXPECT_EQ(clear_list.cmds[1].glyph_run.text, nullptr);
-    EXPECT_FALSE(clear_list.cmds[1].glyph_run.owns_text);
+    EXPECT_EQ(clear_list.size(), 0u);
+    EXPECT_EQ(clear_list.data()[0].fill_linear_gradient.stops, nullptr);
+    EXPECT_FALSE(clear_list.data()[0].fill_linear_gradient.owns_stops);
+    EXPECT_EQ(clear_list.data()[1].glyph_run.text, nullptr);
+    EXPECT_FALSE(clear_list.data()[1].glyph_run.owns_text);
     paint_list_destroy(&clear_list);
 
     PaintList destroy_list = {};
@@ -121,11 +121,11 @@ TEST(PaintListTest, OwnershipPayloadsAreReleasedByClearAndDestroy) {
     ASSERT_NE(destroy_run.text, nullptr);
     destroy_run.owns_text = true;
     paint_glyph_run(&destroy_list, &destroy_run);
-    ASSERT_EQ(destroy_list.count, 1);
+    ASSERT_EQ(destroy_list.size(), 1u);
     paint_list_destroy(&destroy_list);
-    EXPECT_EQ(destroy_list.cmds, nullptr);
-    EXPECT_EQ(destroy_list.count, 0);
-    EXPECT_EQ(destroy_list.capacity, 0);
+    EXPECT_EQ(destroy_list.data(), nullptr);
+    EXPECT_EQ(destroy_list.size(), 0u);
+    EXPECT_EQ(destroy_list.capacity(), 0u);
 }
 
 TEST_F(DisplayListTest, BoundsIntersectorPreservesReplayStateCommands) {
@@ -179,9 +179,9 @@ TEST_F(DisplayListTest, ElementMarkersKeepLayoutBoundsAndUseVisualUnionBounds) {
     dl_fill_rect(&dl, 100.0f, 200.0f, 5.0f, 6.0f, test_color(0xff112233));
     dl_end_element(&dl, begin);
 
-    ASSERT_EQ(dl.count, 3);
-    DisplayItem* start = &dl.items[0];
-    DisplayItem* end = &dl.items[2];
+    ASSERT_EQ(dl.size(), 3u);
+    DisplayItem* start = &dl.data()[0];
+    DisplayItem* end = &dl.data()[2];
 
     EXPECT_EQ(start->op, DL_BEGIN_ELEMENT);
     EXPECT_EQ(end->op, DL_END_ELEMENT);
@@ -211,8 +211,8 @@ TEST_F(DisplayListTest, FillPathBoundsUseTransformAndPadding) {
     RdtMatrix transform = rdt_matrix_translate(10.0f, 20.0f);
     dl_fill_path(&dl, path, test_color(0xff445566), RDT_FILL_WINDING, &transform);
 
-    ASSERT_EQ(dl.count, 1);
-    const DisplayItem* item = &dl.items[0];
+    ASSERT_EQ(dl.size(), 1u);
+    const DisplayItem* item = &dl.data()[0];
     EXPECT_EQ(item->op, DL_FILL_PATH);
     EXPECT_EQ(item->fill_path.path, path);
     EXPECT_TRUE(item->fill_path.has_transform);
@@ -233,8 +233,8 @@ TEST_F(DisplayListTest, StrokePathCopiesDashArrayIntoDisplayListArena) {
     dashes[0] = 20.0f;
     dashes[1] = 30.0f;
 
-    ASSERT_EQ(dl.count, 1);
-    const DisplayItem* item = &dl.items[0];
+    ASSERT_EQ(dl.size(), 1u);
+    const DisplayItem* item = &dl.data()[0];
     ASSERT_NE(item->stroke_path.dash_array, nullptr);
     EXPECT_NE(item->stroke_path.dash_array, dashes);
     EXPECT_FLOAT_EQ(item->stroke_path.dash_array[0], 2.0f);
@@ -258,8 +258,8 @@ TEST_F(DisplayListTest, LinearGradientCopiesStopsAndTracksPathBounds) {
                             stops, 2, RDT_FILL_EVEN_ODD, nullptr, nullptr);
     stops[0].r = 99;
 
-    ASSERT_EQ(dl.count, 1);
-    const DisplayItem* item = &dl.items[0];
+    ASSERT_EQ(dl.size(), 1u);
+    const DisplayItem* item = &dl.data()[0];
     ASSERT_NE(item->fill_linear_gradient.stops, nullptr);
     EXPECT_NE(item->fill_linear_gradient.stops, stops);
     EXPECT_EQ(item->fill_linear_gradient.stops[0].r, 10);
@@ -284,8 +284,8 @@ TEST_F(DisplayListTest, RadialGradientCopiesStopsAndTracksTransformedBounds) {
                             stops, 2, RDT_FILL_WINDING, &transform, nullptr);
     stops[1].a = 99;
 
-    ASSERT_EQ(dl.count, 1);
-    const DisplayItem* item = &dl.items[0];
+    ASSERT_EQ(dl.size(), 1u);
+    const DisplayItem* item = &dl.data()[0];
     EXPECT_EQ(item->op, DL_FILL_RADIAL_GRADIENT);
     ASSERT_NE(item->fill_radial_gradient.stops, nullptr);
     EXPECT_NE(item->fill_radial_gradient.stops, stops);
@@ -306,8 +306,8 @@ TEST_F(DisplayListTest, DrawImageStoresGenerationOpacityAndTransformedBounds) {
     dl_draw_image(&dl, pixels, 2, 2, 2, 10.0f, 20.0f, 30.0f, 40.0f,
                   123, &transform, &owner, owner.generation);
 
-    ASSERT_EQ(dl.count, 1);
-    const DisplayItem* item = &dl.items[0];
+    ASSERT_EQ(dl.size(), 1u);
+    const DisplayItem* item = &dl.data()[0];
     EXPECT_EQ(item->op, DL_DRAW_IMAGE);
     EXPECT_EQ(item->draw_image.pixels, pixels);
     EXPECT_EQ(item->draw_image.resource_owner, &owner);
@@ -332,8 +332,8 @@ TEST_F(DisplayListTest, DrawGlyphIntersectsRecordedBoundsWithClip) {
     dl_draw_glyph(&dl, &bitmap, 5, 6, test_color(0xff123456),
                   false, &clip, nullptr, 88);
 
-    ASSERT_EQ(dl.count, 1);
-    const DisplayItem* item = &dl.items[0];
+    ASSERT_EQ(dl.size(), 1u);
+    const DisplayItem* item = &dl.data()[0];
     EXPECT_EQ(item->op, DL_DRAW_GLYPH);
     EXPECT_EQ(item->draw_glyph.bitmap.buffer, glyph_pixels);
     EXPECT_EQ(item->draw_glyph.resource_generation, 88u);
@@ -379,8 +379,8 @@ TEST_F(DisplayListTest, DrawPictureUsesBackendSizeForBounds) {
 
     dl_draw_picture(&dl, picture, 200, nullptr);
 
-    ASSERT_EQ(dl.count, 1);
-    const DisplayItem* item = &dl.items[0];
+    ASSERT_EQ(dl.size(), 1u);
+    const DisplayItem* item = &dl.data()[0];
     EXPECT_EQ(item->op, DL_DRAW_PICTURE);
     EXPECT_EQ(item->draw_picture.picture, picture);
     EXPECT_EQ(item->draw_picture.opacity, 200);
@@ -399,18 +399,18 @@ TEST_F(DisplayListTest, ClipCommandsRecordPreciseBoundsButPopStaysStateful) {
     dl_push_clip(&dl, path, &transform);
     dl_pop_clip(&dl);
 
-    ASSERT_EQ(dl.count, 2);
-    EXPECT_EQ(dl.items[0].op, DL_PUSH_CLIP);
-    EXPECT_TRUE(dl.items[0].push_clip.has_transform);
-    EXPECT_FLOAT_EQ(dl.items[0].bounds[0], 1.0f);
-    EXPECT_FLOAT_EQ(dl.items[0].bounds[1], 7.0f);
-    EXPECT_FLOAT_EQ(dl.items[0].bounds[2], 12.0f);
-    EXPECT_FLOAT_EQ(dl.items[0].bounds[3], 14.0f);
-    EXPECT_TRUE(dl_item_intersects_rect(&dl.items[0], 2.0f, 8.0f, 1.0f, 1.0f));
-    EXPECT_FALSE(dl_item_intersects_rect(&dl.items[0], 40.0f, 40.0f, 1.0f, 1.0f));
+    ASSERT_EQ(dl.size(), 2u);
+    EXPECT_EQ(dl.data()[0].op, DL_PUSH_CLIP);
+    EXPECT_TRUE(dl.data()[0].push_clip.has_transform);
+    EXPECT_FLOAT_EQ(dl.data()[0].bounds[0], 1.0f);
+    EXPECT_FLOAT_EQ(dl.data()[0].bounds[1], 7.0f);
+    EXPECT_FLOAT_EQ(dl.data()[0].bounds[2], 12.0f);
+    EXPECT_FLOAT_EQ(dl.data()[0].bounds[3], 14.0f);
+    EXPECT_TRUE(dl_item_intersects_rect(&dl.data()[0], 2.0f, 8.0f, 1.0f, 1.0f));
+    EXPECT_FALSE(dl_item_intersects_rect(&dl.data()[0], 40.0f, 40.0f, 1.0f, 1.0f));
 
-    EXPECT_EQ(dl.items[1].op, DL_POP_CLIP);
-    EXPECT_TRUE(dl_item_intersects_rect(&dl.items[1], 40.0f, 40.0f, 1.0f, 1.0f));
+    EXPECT_EQ(dl.data()[1].op, DL_POP_CLIP);
+    EXPECT_TRUE(dl_item_intersects_rect(&dl.data()[1], 40.0f, 40.0f, 1.0f, 1.0f));
 }
 
 TEST_F(DisplayListTest, RasterCommandsStoreClipAndCopiedClipShapes) {
@@ -429,8 +429,8 @@ TEST_F(DisplayListTest, RasterCommandsStoreClipAndCopiedClipShapes) {
     vx[0] = 100.0f;
     vy[0] = 200.0f;
 
-    ASSERT_EQ(dl.count, 1);
-    const DisplayItem* item = &dl.items[0];
+    ASSERT_EQ(dl.size(), 1u);
+    const DisplayItem* item = &dl.data()[0];
     EXPECT_EQ(item->op, DL_FILL_SURFACE_RECT);
     EXPECT_FLOAT_EQ(item->bounds[0], 2.0f);
     EXPECT_FLOAT_EQ(item->bounds[1], 3.0f);
@@ -456,22 +456,22 @@ TEST_F(DisplayListTest, BlitAndExternalLayerCommandsStoreGenerations) {
     dl_video_placeholder(&dl, &src, 1.0f, 2.0f, 3.0f, 4.0f, 5, &clip, 18);
     dl_webview_layer_placeholder(&dl, &src, 2.0f, 3.0f, 4.0f, 5.0f, &clip, 19);
 
-    ASSERT_EQ(dl.count, 3);
-    EXPECT_EQ(dl.items[0].op, DL_BLIT_SURFACE_SCALED);
-    EXPECT_EQ(dl.items[0].blit_surface_scaled.src_surface, &src);
-    EXPECT_EQ(dl.items[0].blit_surface_scaled.src_generation, 17u);
-    EXPECT_EQ(dl.items[0].blit_surface_scaled.opacity, 77);
-    EXPECT_FLOAT_EQ(dl.items[0].bounds[0], 10.0f);
-    EXPECT_FLOAT_EQ(dl.items[0].bounds[1], 10.0f);
-    EXPECT_FLOAT_EQ(dl.items[0].bounds[2], 30.0f);
-    EXPECT_FLOAT_EQ(dl.items[0].bounds[3], 30.0f);
+    ASSERT_EQ(dl.size(), 3u);
+    EXPECT_EQ(dl.data()[0].op, DL_BLIT_SURFACE_SCALED);
+    EXPECT_EQ(dl.data()[0].blit_surface_scaled.src_surface, &src);
+    EXPECT_EQ(dl.data()[0].blit_surface_scaled.src_generation, 17u);
+    EXPECT_EQ(dl.data()[0].blit_surface_scaled.opacity, 77);
+    EXPECT_FLOAT_EQ(dl.data()[0].bounds[0], 10.0f);
+    EXPECT_FLOAT_EQ(dl.data()[0].bounds[1], 10.0f);
+    EXPECT_FLOAT_EQ(dl.data()[0].bounds[2], 30.0f);
+    EXPECT_FLOAT_EQ(dl.data()[0].bounds[3], 30.0f);
 
-    EXPECT_EQ(dl.items[1].op, DL_VIDEO_PLACEHOLDER);
-    EXPECT_EQ(dl.items[1].video_placeholder.video_generation, 18u);
-    EXPECT_EQ(dl.items[1].video_placeholder.object_fit, 5);
+    EXPECT_EQ(dl.data()[1].op, DL_VIDEO_PLACEHOLDER);
+    EXPECT_EQ(dl.data()[1].video_placeholder.video_generation, 18u);
+    EXPECT_EQ(dl.data()[1].video_placeholder.object_fit, 5);
 
-    EXPECT_EQ(dl.items[2].op, DL_WEBVIEW_LAYER_PLACEHOLDER);
-    EXPECT_EQ(dl.items[2].webview_layer_placeholder.surface_generation, 19u);
+    EXPECT_EQ(dl.data()[2].op, DL_WEBVIEW_LAYER_PLACEHOLDER);
+    EXPECT_EQ(dl.data()[2].webview_layer_placeholder.surface_generation, 19u);
 }
 
 TEST_F(DisplayListTest, EffectCommandsUseExpandedAndClippedBounds) {
@@ -482,24 +482,24 @@ TEST_F(DisplayListTest, EffectCommandsUseExpandedAndClippedBounds) {
                     1.0f, 2.0f, 3.0f, 4.0f, test_color(0xaa000000), 7.0f,
                     0, nullptr, 0, nullptr);
 
-    ASSERT_EQ(dl.count, 3);
-    EXPECT_EQ(dl.items[0].op, DL_APPLY_FILTER);
-    EXPECT_FLOAT_EQ(dl.items[0].bounds[0], 3.0f);
-    EXPECT_FLOAT_EQ(dl.items[0].bounds[1], 4.0f);
-    EXPECT_FLOAT_EQ(dl.items[0].bounds[2], 12.0f);
-    EXPECT_FLOAT_EQ(dl.items[0].bounds[3], 12.0f);
+    ASSERT_EQ(dl.size(), 3u);
+    EXPECT_EQ(dl.data()[0].op, DL_APPLY_FILTER);
+    EXPECT_FLOAT_EQ(dl.data()[0].bounds[0], 3.0f);
+    EXPECT_FLOAT_EQ(dl.data()[0].bounds[1], 4.0f);
+    EXPECT_FLOAT_EQ(dl.data()[0].bounds[2], 12.0f);
+    EXPECT_FLOAT_EQ(dl.data()[0].bounds[3], 12.0f);
 
-    EXPECT_EQ(dl.items[1].op, DL_BOX_BLUR_INSET);
-    EXPECT_FLOAT_EQ(dl.items[1].bounds[0], 5.0f);
-    EXPECT_FLOAT_EQ(dl.items[1].bounds[1], 15.0f);
-    EXPECT_FLOAT_EQ(dl.items[1].bounds[2], 40.0f);
-    EXPECT_FLOAT_EQ(dl.items[1].bounds[3], 50.0f);
+    EXPECT_EQ(dl.data()[1].op, DL_BOX_BLUR_INSET);
+    EXPECT_FLOAT_EQ(dl.data()[1].bounds[0], 5.0f);
+    EXPECT_FLOAT_EQ(dl.data()[1].bounds[1], 15.0f);
+    EXPECT_FLOAT_EQ(dl.data()[1].bounds[2], 40.0f);
+    EXPECT_FLOAT_EQ(dl.data()[1].bounds[3], 50.0f);
 
-    EXPECT_EQ(dl.items[2].op, DL_OUTER_SHADOW);
-    EXPECT_FLOAT_EQ(dl.items[2].bounds[0], 93.0f);
-    EXPECT_FLOAT_EQ(dl.items[2].bounds[1], 193.0f);
-    EXPECT_FLOAT_EQ(dl.items[2].bounds[2], 34.0f);
-    EXPECT_FLOAT_EQ(dl.items[2].bounds[3], 24.0f);
+    EXPECT_EQ(dl.data()[2].op, DL_OUTER_SHADOW);
+    EXPECT_FLOAT_EQ(dl.data()[2].bounds[0], 93.0f);
+    EXPECT_FLOAT_EQ(dl.data()[2].bounds[1], 193.0f);
+    EXPECT_FLOAT_EQ(dl.data()[2].bounds[2], 34.0f);
+    EXPECT_FLOAT_EQ(dl.data()[2].bounds[3], 24.0f);
 }
 
 TEST_F(DisplayListTest, ElementMarkerBoundsIncludeEffectOverflowForDirtyReplay) {
@@ -510,9 +510,9 @@ TEST_F(DisplayListTest, ElementMarkerBoundsIncludeEffectOverflowForDirtyReplay) 
                     0, nullptr, 0, nullptr);
     dl_end_element(&dl, begin);
 
-    ASSERT_EQ(dl.count, 3);
-    const DisplayItem* marker = &dl.items[0];
-    const DisplayItem* shadow = &dl.items[1];
+    ASSERT_EQ(dl.size(), 3u);
+    const DisplayItem* marker = &dl.data()[0];
+    const DisplayItem* shadow = &dl.data()[1];
     EXPECT_EQ(marker->op, DL_BEGIN_ELEMENT);
     EXPECT_EQ(shadow->op, DL_OUTER_SHADOW);
 
@@ -558,18 +558,18 @@ TEST_F(DisplayListTest, ClearRewindsScratchCopiesButKeepsCapacityForReuse) {
     dl_stroke_path(&dl, path, test_color(0xffffffff), 1.0f,
                    RDT_CAP_BUTT, RDT_JOIN_MITER, dashes, 1, 0.0f, nullptr);
 
-    ASSERT_EQ(dl.count, 1);
-    int capacity = dl.capacity;
-    ASSERT_GT(capacity, 0);
+    ASSERT_EQ(dl.size(), 1u);
+    size_t capacity = dl.capacity();
+    ASSERT_GT(capacity, 0u);
 
     dl_clear(&dl);
-    EXPECT_EQ(dl.count, 0);
-    EXPECT_EQ(dl.capacity, capacity);
+    EXPECT_EQ(dl.size(), 0u);
+    EXPECT_EQ(dl.capacity(), capacity);
 
     dl_fill_rect(&dl, 1.0f, 2.0f, 3.0f, 4.0f, test_color(0xff000000));
-    ASSERT_EQ(dl.count, 1);
-    EXPECT_EQ(dl.capacity, capacity);
-    EXPECT_EQ(dl.items[0].op, DL_FILL_RECT);
+    ASSERT_EQ(dl.size(), 1u);
+    EXPECT_EQ(dl.capacity(), capacity);
+    EXPECT_EQ(dl.data()[0].op, DL_FILL_RECT);
 }
 
 TEST_F(DisplayListTest, ValidateAcceptsBalancedReplayState) {
@@ -827,8 +827,8 @@ static void expect_item_eq(const DisplayItem& a, const DisplayItem& b) {
 }
 
 static void expect_lists_equal(const DisplayList& a, const DisplayList& b) {
-    ASSERT_EQ(a.count, b.count);
-    for (int i = 0; i < a.count; i++) expect_item_eq(a.items[i], b.items[i]);
+    ASSERT_EQ(a.size(), b.size());
+    for (size_t i = 0; i < a.size(); i++) expect_item_eq(a.data()[i], b.data()[i]);
 }
 
 TEST_F(PaintIrParityTest, FillRectMatchesDirect) {
@@ -1356,7 +1356,7 @@ TEST_F(PaintIrParityTest, GatewayRequiresPaintIrAndDisplayListTargets) {
     paint_record_fill_rect(&missing_paint, "gateway_missing_paint",
                            1.0f, 2.0f, 3.0f, 4.0f,
                            test_color(0xff010203));
-    EXPECT_EQ(lowered.count, 0);
+    EXPECT_EQ(lowered.size(), 0u);
 
     PaintRecordTarget missing_dl = {&pl, nullptr, "TEST_GATEWAY"};
     paint_record_fill_rect(&missing_dl, "gateway_missing_dl",
@@ -1459,10 +1459,10 @@ TEST_F(PaintIrParityTest, SharedBlockPaintDriverRecordsChildrenTime) {
 TEST_F(PaintIrParityTest, ClearRewindsCountForReuse) {
     paint_fill_rect(&pl, 0.0f, 0.0f, 1.0f, 1.0f, test_color(0xff000000));
     EXPECT_EQ(paint_list_count(&pl), 1);
-    int cap = pl.capacity;
+    size_t cap = pl.capacity();
     paint_list_clear(&pl);
     EXPECT_EQ(paint_list_count(&pl), 0);
-    EXPECT_EQ(pl.capacity, cap);
+    EXPECT_EQ(pl.capacity(), cap);
     paint_fill_rect(&pl, 0.0f, 0.0f, 2.0f, 2.0f, test_color(0xffffffff));
     EXPECT_EQ(paint_list_count(&pl), 1);
 }
@@ -1542,17 +1542,17 @@ TEST_F(PaintIrParityTest, SemanticBuildersValidateAndLowerEffectGroupRasterOps) 
     EXPECT_EQ(paint_list_count(&pl), 3);
 
     lower();
-    ASSERT_EQ(lowered.count, 4);
-    EXPECT_EQ(lowered.items[0].op, DL_SAVE_BACKDROP);
-    EXPECT_EQ(lowered.items[1].op, DL_SAVE_BACKDROP);
-    EXPECT_EQ(lowered.items[2].op, DL_COMPOSITE_OPACITY);
-    EXPECT_EQ(lowered.items[3].op, DL_APPLY_BLEND_MODE);
-    EXPECT_EQ(lowered.items[0].save_backdrop.x0, 1);
-    EXPECT_EQ(lowered.items[0].save_backdrop.y0, 2);
-    EXPECT_EQ(lowered.items[0].save_backdrop.w, 29);
-    EXPECT_EQ(lowered.items[0].save_backdrop.h, 38);
-    EXPECT_FLOAT_EQ(lowered.items[2].composite_opacity.opacity, 0.75f);
-    EXPECT_EQ(lowered.items[3].apply_blend_mode.blend_mode, 1);
+    ASSERT_EQ(lowered.size(), 4u);
+    EXPECT_EQ(lowered.data()[0].op, DL_SAVE_BACKDROP);
+    EXPECT_EQ(lowered.data()[1].op, DL_SAVE_BACKDROP);
+    EXPECT_EQ(lowered.data()[2].op, DL_COMPOSITE_OPACITY);
+    EXPECT_EQ(lowered.data()[3].op, DL_APPLY_BLEND_MODE);
+    EXPECT_EQ(lowered.data()[0].save_backdrop.x0, 1);
+    EXPECT_EQ(lowered.data()[0].save_backdrop.y0, 2);
+    EXPECT_EQ(lowered.data()[0].save_backdrop.w, 29);
+    EXPECT_EQ(lowered.data()[0].save_backdrop.h, 38);
+    EXPECT_FLOAT_EQ(lowered.data()[2].composite_opacity.opacity, 0.75f);
+    EXPECT_EQ(lowered.data()[3].apply_blend_mode.blend_mode, 1);
 
     StrBuf* out = strbuf_new();
     ASSERT_NE(out, nullptr);
@@ -1633,17 +1633,17 @@ TEST_F(PaintIrParityTest, SemanticEffectGroupLowersFilterAndBackdrop) {
     paint_end_effect_group(&pl);
 
     lower();
-    ASSERT_EQ(lowered.count, 4);
-    EXPECT_EQ(lowered.items[0].op, DL_SAVE_BACKDROP);
-    EXPECT_EQ(lowered.items[1].op, DL_FILL_RECT);
-    EXPECT_EQ(lowered.items[2].op, DL_APPLY_FILTER);
-    EXPECT_EQ(lowered.items[3].op, DL_COMPOSITE_OPACITY);
-    EXPECT_EQ(lowered.items[2].apply_filter.filter, &filter_token);
-    EXPECT_FLOAT_EQ(lowered.items[2].apply_filter.x, 4.0f);
-    EXPECT_FLOAT_EQ(lowered.items[2].apply_filter.y, 5.0f);
-    EXPECT_FLOAT_EQ(lowered.items[2].apply_filter.w, 20.0f);
-    EXPECT_FLOAT_EQ(lowered.items[2].apply_filter.h, 30.0f);
-    EXPECT_FLOAT_EQ(lowered.items[3].composite_opacity.opacity, 1.0f);
+    ASSERT_EQ(lowered.size(), 4u);
+    EXPECT_EQ(lowered.data()[0].op, DL_SAVE_BACKDROP);
+    EXPECT_EQ(lowered.data()[1].op, DL_FILL_RECT);
+    EXPECT_EQ(lowered.data()[2].op, DL_APPLY_FILTER);
+    EXPECT_EQ(lowered.data()[3].op, DL_COMPOSITE_OPACITY);
+    EXPECT_EQ(lowered.data()[2].apply_filter.filter, &filter_token);
+    EXPECT_FLOAT_EQ(lowered.data()[2].apply_filter.x, 4.0f);
+    EXPECT_FLOAT_EQ(lowered.data()[2].apply_filter.y, 5.0f);
+    EXPECT_FLOAT_EQ(lowered.data()[2].apply_filter.w, 20.0f);
+    EXPECT_FLOAT_EQ(lowered.data()[2].apply_filter.h, 30.0f);
+    EXPECT_FLOAT_EQ(lowered.data()[3].composite_opacity.opacity, 1.0f);
 }
 
 TEST_F(PaintIrParityTest, ValidateRejectsUnbalancedTransformStack) {
@@ -1661,7 +1661,7 @@ TEST_F(PaintIrParityTest, RasterLoweringRejectsInvalidPaintIr) {
 
     lower();
 
-    EXPECT_EQ(lowered.count, 0);
+    EXPECT_EQ(lowered.size(), 0u);
 }
 
 TEST_F(PaintIrParityTest, SvgLoweringRejectsInvalidPaintIr) {

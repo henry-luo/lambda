@@ -44,4 +44,5 @@ TEST(TimeUtilTest, ElapsedSinceReportsAtLeastDelay) {
 TEST(TimeUtilTest, ElapsedSinceFutureClampsToZero) {
     uint64_t future = time_now_ms() + 1000000;  // hopefully far enough ahead
     EXPECT_EQ(time_elapsed_ms_since(future), 0u);
+    EXPECT_DOUBLE_EQ(time_elapsed_ms_f(1000000, 3500000), 2.5);
 }

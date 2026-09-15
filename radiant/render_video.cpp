@@ -370,7 +370,7 @@ void render_video_frames(DisplayList* dl, ImageSurface* surface, DocState* rstat
     }
 
     int count = dl_item_count(dl);
-    DisplayItem* items = dl->items;
+    DisplayItem* items = dl->data();
 
     // cache video placements for video-only dirty optimisation
     int cached = 0;

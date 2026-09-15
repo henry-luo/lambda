@@ -4,6 +4,7 @@
 
 #include "parse_error.hpp"
 #include "../../lib/strbuf.h"
+#include "../../lib/arraylist.hpp"
 #include <cstdint>
 #include <cstddef>
 
@@ -23,9 +24,7 @@ private:
     // document (SCU16): a tracker never embeds a maximum-document table, so
     // `sizeof(SourceTracker)` is independent of the line count and an
     // InputContext can live on the stack.
-    size_t* line_starts_;       // memtrack-owned, capacity line_cap_
-    size_t line_cap_;           // allocated slots
-    size_t line_count_;         // Number of lines tracked
+    lam::ArrayList<size_t> line_starts_;
 
     // Track if we've built the line index
     bool line_index_built_;
