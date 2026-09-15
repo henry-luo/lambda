@@ -5,7 +5,8 @@
 #include "type_contract.hpp"
 #include "lambda-number-runtime.hpp"
 #include "lambda-error.h"
-#include "../../lib/checked_math.hpp"
+#include "../../lib/math_checked.hpp"
+#include "../../lib/math_utils.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/sort.h"
@@ -2118,54 +2119,36 @@ Item fn_pipe_call(Item collection, Item func_or_result) {
 }
 
 // sqrt(vec) - element-wise square root
-Item fn_math_sqrt(Item item) {
-    return fn_math_unary(item, sqrt, "fn_math_sqrt", fn_complex_sqrt);
-}
+#define DEFINE_MATH_UNARY(name, native, complex) \
+    Item name(Item item) { return fn_math_unary(item, native, #name, complex); }
+DEFINE_MATH_UNARY(fn_math_sqrt, sqrt, fn_complex_sqrt)
 
 // log(vec) - element-wise natural logarithm
-Item fn_math_log(Item item) {
-    return fn_math_unary(item, log, "fn_math_log", fn_complex_log);
-}
+DEFINE_MATH_UNARY(fn_math_log, log, fn_complex_log)
 
 // log10(vec) - element-wise base-10 logarithm
-Item fn_math_log10(Item item) {
-    return fn_math_unary(item, log10, "fn_math_log10", NULL);
-}
+DEFINE_MATH_UNARY(fn_math_log10, log10, NULL)
 
 // exp(vec) - element-wise exponential
-Item fn_math_exp(Item item) {
-    return fn_math_unary(item, exp, "fn_math_exp", fn_complex_exp);
-}
+DEFINE_MATH_UNARY(fn_math_exp, exp, fn_complex_exp)
 
 // sin(vec) - element-wise sine
-Item fn_math_sin(Item item) {
-    return fn_math_unary(item, sin, "fn_math_sin", fn_complex_sin);
-}
+DEFINE_MATH_UNARY(fn_math_sin, sin, fn_complex_sin)
 
 // cos(vec) - element-wise cosine
-Item fn_math_cos(Item item) {
-    return fn_math_unary(item, cos, "fn_math_cos", fn_complex_cos);
-}
+DEFINE_MATH_UNARY(fn_math_cos, cos, fn_complex_cos)
 
 // tan(vec) - element-wise tangent
-Item fn_math_tan(Item item) {
-    return fn_math_unary(item, tan, "fn_math_tan", fn_complex_tan);
-}
+DEFINE_MATH_UNARY(fn_math_tan, tan, fn_complex_tan)
 
 // asin(vec) - element-wise inverse sine
-Item fn_math_asin(Item item) {
-    return fn_math_unary(item, asin, "fn_math_asin", NULL);
-}
+DEFINE_MATH_UNARY(fn_math_asin, asin, NULL)
 
 // acos(vec) - element-wise inverse cosine
-Item fn_math_acos(Item item) {
-    return fn_math_unary(item, acos, "fn_math_acos", NULL);
-}
+DEFINE_MATH_UNARY(fn_math_acos, acos, NULL)
 
 // atan(vec) - element-wise inverse tangent
-Item fn_math_atan(Item item) {
-    return fn_math_unary(item, atan, "fn_math_atan", NULL);
-}
+DEFINE_MATH_UNARY(fn_math_atan, atan, NULL)
 
 // atan2(y, x) - two-argument inverse tangent
 Item fn_math_atan2(Item item_y, Item item_x) {
@@ -2182,49 +2165,31 @@ Item fn_math_atan2(Item item_y, Item item_x) {
 }
 
 // sinh(vec) - element-wise hyperbolic sine
-Item fn_math_sinh(Item item) {
-    return fn_math_unary(item, sinh, "fn_math_sinh", NULL);
-}
+DEFINE_MATH_UNARY(fn_math_sinh, sinh, NULL)
 
 // cosh(vec) - element-wise hyperbolic cosine
-Item fn_math_cosh(Item item) {
-    return fn_math_unary(item, cosh, "fn_math_cosh", NULL);
-}
+DEFINE_MATH_UNARY(fn_math_cosh, cosh, NULL)
 
 // tanh(vec) - element-wise hyperbolic tangent
-Item fn_math_tanh(Item item) {
-    return fn_math_unary(item, tanh, "fn_math_tanh", NULL);
-}
+DEFINE_MATH_UNARY(fn_math_tanh, tanh, NULL)
 
 // asinh(vec) - element-wise inverse hyperbolic sine
-Item fn_math_asinh(Item item) {
-    return fn_math_unary(item, asinh, "fn_math_asinh", NULL);
-}
+DEFINE_MATH_UNARY(fn_math_asinh, asinh, NULL)
 
 // acosh(vec) - element-wise inverse hyperbolic cosine
-Item fn_math_acosh(Item item) {
-    return fn_math_unary(item, acosh, "fn_math_acosh", NULL);
-}
+DEFINE_MATH_UNARY(fn_math_acosh, acosh, NULL)
 
 // atanh(vec) - element-wise inverse hyperbolic tangent
-Item fn_math_atanh(Item item) {
-    return fn_math_unary(item, atanh, "fn_math_atanh", NULL);
-}
+DEFINE_MATH_UNARY(fn_math_atanh, atanh, NULL)
 
 // exp2(vec) - element-wise base-2 exponential
-Item fn_math_exp2(Item item) {
-    return fn_math_unary(item, exp2, "fn_math_exp2", NULL);
-}
+DEFINE_MATH_UNARY(fn_math_exp2, exp2, NULL)
 
 // expm1(vec) - element-wise exp(x)-1
-Item fn_math_expm1(Item item) {
-    return fn_math_unary(item, expm1, "fn_math_expm1", NULL);
-}
+DEFINE_MATH_UNARY(fn_math_expm1, expm1, NULL)
 
 // log2(vec) - element-wise base-2 logarithm
-Item fn_math_log2(Item item) {
-    return fn_math_unary(item, log2, "fn_math_log2", NULL);
-}
+DEFINE_MATH_UNARY(fn_math_log2, log2, NULL)
 
 // pow(base, exp) - math module power function (delegates to fn_pow)
 Item fn_math_pow(Item item_a, Item item_b) {
@@ -2232,14 +2197,11 @@ Item fn_math_pow(Item item_a, Item item_b) {
 }
 
 // cbrt(vec) - element-wise cube root
-Item fn_math_cbrt(Item item) {
-    return fn_math_unary(item, cbrt, "fn_math_cbrt", NULL);
-}
+DEFINE_MATH_UNARY(fn_math_cbrt, cbrt, NULL)
 
 // trunc(vec) - element-wise truncation toward zero
-Item fn_trunc(Item item) {
-    return fn_math_unary(item, trunc, "fn_trunc", NULL);
-}
+DEFINE_MATH_UNARY(fn_trunc, trunc, NULL)
+#undef DEFINE_MATH_UNARY
 
 // item_to_bool: coerce an item to a boolean for any()/all() reductions
 // true: non-zero number, true bool, non-empty string
@@ -4930,8 +4892,7 @@ Item fn_rotate(Item img, Item deg_item) {
     if (ndim < 1) return ItemError;
     if (ndim != 2 && ndim != 3) { log_error("rotate: image must be 2-D or 3-D"); return ItemError; }
     int64_t H = shp[0], W = shp[1], C = (ndim == 3) ? shp[2] : 1;
-    const double PI = 3.14159265358979323846;
-    double th = item_to_double(deg_item) * PI / 180.0;
+    double th = math_degrees_to_radians_d(item_to_double(deg_item));
     double ct = cos(th), st = sin(th), cy = (double)(H - 1) / 2.0, cx = (double)(W - 1) / 2.0;
     return bilinear_gather(in, ndim, str, H, W, C, H, W, false,
         [ct, st, cy, cx](int64_t oi, int64_t oj, double* sy, double* sx) {

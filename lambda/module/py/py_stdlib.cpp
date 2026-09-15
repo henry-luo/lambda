@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstring>
 #include "../../../lib/mem.h"
+#include "../../../lib/math_utils.h"
 #include "../../../lib/time_util.h"
 #include <ctime>
 #ifndef _WIN32
@@ -159,22 +160,22 @@ static Item py_math_fmod(Item x, Item y) {
 // math.degrees(x)
 static Item py_math_degrees(Item x) {
     double v = (get_type_id(x) == LMD_TYPE_FLOAT) ? it2d(x) : (double)it2i(x);
-    return mk_float(v * (180.0 / M_PI));
+    return mk_float(math_radians_to_degrees_d(v));
 }
 
 // math.radians(x)
 static Item py_math_radians(Item x) {
     double v = (get_type_id(x) == LMD_TYPE_FLOAT) ? it2d(x) : (double)it2i(x);
-    return mk_float(v * (M_PI / 180.0));
+    return mk_float(math_degrees_to_radians_d(v));
 }
 
 extern "C" Item py_stdlib_math_init(void) {
     Item mod = py_dict_new();
 
     // constants
-    mod_set(mod, "pi",  mk_float(M_PI));
+    mod_set(mod, "pi",  mk_float(math_pi_d()));
     mod_set(mod, "e",   mk_float(M_E));
-    mod_set(mod, "tau", mk_float(2.0 * M_PI));
+    mod_set(mod, "tau", mk_float(2.0 * math_pi_d()));
     mod_set(mod, "inf", mk_float(INFINITY));
     mod_set(mod, "nan", mk_float(NAN));
 

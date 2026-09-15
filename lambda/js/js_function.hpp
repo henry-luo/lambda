@@ -119,7 +119,6 @@ struct JsAstDefinition {
     JsCallableCode* code;
     bool has_direct_eval;
     bool uses_arguments;
-    bool tail_reuse_safe;
 };
 
 // An AST-bodied closure retains source-level semantic state while using the
@@ -300,10 +299,6 @@ static inline bool js_fn_ast_has_direct_eval(const JsFunction* fn) {
 static inline bool js_fn_ast_uses_arguments(const JsFunction* fn) {
     const JsAstDefinition* definition = js_fn_ast_definition(fn);
     return definition && definition->uses_arguments;
-}
-static inline bool js_fn_ast_tail_reuse_safe(const JsFunction* fn) {
-    const JsAstDefinition* definition = js_fn_ast_definition(fn);
-    return definition && definition->tail_reuse_safe;
 }
 static inline const JsBoundData* js_fn_bound(const JsFunction* fn) {
     return JS_FN_PAYLOAD_READ(fn, bound);

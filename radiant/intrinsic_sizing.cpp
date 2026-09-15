@@ -22,10 +22,10 @@ static bool intrinsic_view_uses_border_box(ViewBlock* view, DomElement* element)
 #include "../lib/strbuf.h"
 #include "../lib/log.h"
 #include "../lib/tagged.hpp"
+#include "../lib/time_util.h"
 // str.h included via view.hpp
 #include <cmath>
 #include <cstring>
-#include <chrono>
 #include <utf8proc.h>
 
 IntrinsicFontScope::~IntrinsicFontScope() {
@@ -2990,7 +2990,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     }
     IntrinsicMeasureScope measure_scope(lycon, element);
 
-    auto t_measure_start = std::chrono::high_resolution_clock::now();
+    uint64_t t_measure_start = time_now_ns();
 
     // CRITICAL FIX: Set up font context for this element BEFORE measuring text children
     // This ensures text measurement uses the element's own font (e.g., monospace for <code>)
@@ -5979,8 +5979,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
     }
 
-    auto t_measure_end = std::chrono::high_resolution_clock::now();
-    double measure_ms = std::chrono::duration<double, std::milli>(t_measure_end - t_measure_start).count();
+    double measure_ms = time_elapsed_ms_f(t_measure_start, time_now_ns());
     if (measure_ms > 100.0) {
         log_warn("SLOW MEASURE: %s took %.0fms", element->source_loc(), measure_ms);
     }

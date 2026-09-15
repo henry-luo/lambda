@@ -119,7 +119,7 @@ A macro that in **all** build modes evaluates its condition and, on failure, `lo
 ### F7 — Hardening odds-and-ends (T3, T5, T6, N3, N4, N5, E6)
 - **T3:** `static_assert(sizeof(ViewBlock)==sizeof(ViewSpan))` etc. beside each `unsafe_*` helper — breaks the build when the punning premise fails.
 - **T6:** convert both cast-lint rules from hardcoded file lists to `radiant/**` glob + exclusions, and extend them to match `reinterpret_cast<(View|Dom)…>` (catches T3/T4 outside tagged.hpp).
-- **N3:** route surface/image sizing through `lib/checked_math.hpp` (`__builtin_mul_overflow`) + an explicit max-dimension clamp (~16384, browser-like); compute in `size_t`.
+- **N3:** route surface/image sizing through `lib/math_checked.hpp` (`__builtin_mul_overflow`) + an explicit max-dimension clamp (~16384, browser-like); compute in `size_t`.
 - **N4/N5:** adopt the lib `Str`/`StrBuf` tier in the selector builders (drop the `[256]`/`[512]` pair, detect truncation); add an ast-grep rule flagging `strncpy` not followed by explicit NUL-termination.
 - **Bounds accessors:** introduce `lam::span<T>` (§7.2, a permanent bounds-checked `lib/` view, `std::`-free per rule 3) and route the grid/flex/table/display-list hot accessors through it — the clamped-index need becomes one type instead of hand-rolled clamps.
 - **T5:** audit the `CssTempDecl` write path for mutation through the cast-away-const pointer.
@@ -179,7 +179,7 @@ Short answer: **no lint can replicate Rust's core guarantee** — the borrow che
 | Tagged-union safety | `enum` + exhaustive `match` | already solid (switch-on-tag verified, §2.4-unions); `-Wswitch`, `PAINT_OP_COUNT` asserts | compiler warns, doesn't force |
 | Bounds checking | slices, panics | clamped-index helpers (F7), fuzz + ASan | per-site adoption |
 | Data-race freedom | `Send`/`Sync` (compile-time) | architecture: single-threaded page thread, immutable display lists to workers, threading contract (F6), TSan | by design + dynamic, no static proof |
-| No integer/cast UB | checked by default | `checked_math.hpp`, finite-scrub choke point (F2), UBSan | opt-in |
+| No integer/cast UB | checked by default | `math_checked.hpp`, finite-scrub choke point (F2), UBSan | opt-in |
 
 ### 6.2 The four layers
 

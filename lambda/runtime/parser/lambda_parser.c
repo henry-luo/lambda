@@ -410,6 +410,13 @@ static bool token_is_identifier(LambdaTokenKind kind) {
     return kind == LAMBDA_TOK_IDENTIFIER;
 }
 
+// Let reserved type words reach the binder builder so it can report the
+// specific collision instead of a generic syntax error (S11.4.8).
+static bool token_is_binder_name_candidate(LambdaTokenKind kind) {
+    return kind == LAMBDA_TOK_IDENTIFIER || kind == LAMBDA_TOK_BASE_TYPE ||
+        kind == LAMBDA_TOK_TYPE;
+}
+
 // S16.10.2: data-name positions admit every keyword spelling. Both the key
 // and element-name predicates derive from this one set so a tag, an
 // attribute, and a map key can never drift apart as keywords are added.
@@ -577,7 +584,8 @@ static bool parser_extend_element_name(LambdaRdParser* parser, LambdaToken* name
     return true;
 }
 
-static LambdaParseValue parse_type_slot(LambdaRdParser* parser) {
+static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
+        bool allow_binder, uint32_t reduction_flags) {
     LambdaToken first = parser->current;
     if (!token_starts_type(first.kind)) {
         return parser_fail(parser, error_expected_type_pattern, LAMBDA_TOK_BASE_TYPE);
@@ -619,6 +627,20 @@ static LambdaParseValue parse_type_slot(LambdaRdParser* parser) {
             parser_advance(parser);
             continue;
         }
+        if (kind == LAMBDA_TOK_AS) {
+            if (!allow_binder) {
+                return parser_fail(parser,
+                    "a type binder is only allowed in a function parameter",
+                    LAMBDA_TOK_IDENTIFIER);
+            }
+            parser_advance(parser);
+            if (!token_is_binder_name_candidate(parser->current.kind)) {
+                return parser_fail(parser, "expected a binder name after 'as'",
+                    LAMBDA_TOK_IDENTIFIER);
+            }
+            parser_advance(parser);
+            continue;
+        }
         if (kind == LAMBDA_TOK_QUESTION || kind == LAMBDA_TOK_PLUS || kind == LAMBDA_TOK_STAR) {
             parser_advance(parser);
             continue;
@@ -638,12 +660,19 @@ static LambdaParseValue parse_type_slot(LambdaRdParser* parser) {
         return parser_fail(parser, error_expected_type_pattern_after_operator, LAMBDA_TOK_BASE_TYPE);
     }
     SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
-    return parser_reduce_token(parser, LAMBDA_REDUCE_TYPE_SLOT, LAMBDA_REDUCTION_FORM_TOKEN, span, first, NULL, 0);
+    return parser_reduce_tokens(parser, LAMBDA_REDUCE_TYPE_SLOT,
+        LAMBDA_REDUCTION_FORM_TOKEN, span, first, (LambdaToken){0},
+        reduction_flags, NULL, 0);
 }
 
-static bool parse_annotation_type_slot_value(LambdaRdParser* parser, LambdaParseValue* value_out) {
+static LambdaParseValue parse_type_slot(LambdaRdParser* parser) {
+    return parse_type_slot_mode(parser, false, 0);
+}
+
+static bool parse_annotation_type_slot_value_mode(LambdaRdParser* parser,
+        LambdaParseValue* value_out, bool allow_binder) {
     LambdaToken first = parser->current;
-    LambdaParseValue value = parse_type_slot(parser);
+    LambdaParseValue value = parse_type_slot_mode(parser, allow_binder, 0);
     if (!value) return false;
     if (parser_accept(parser, LAMBDA_TOK_TO)) {
         if (!parse_expression(parser, 0)) return false;
@@ -657,8 +686,30 @@ static bool parse_annotation_type_slot_value(LambdaRdParser* parser, LambdaParse
         SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
         value = parser_reduce_tokens(parser, LAMBDA_REDUCE_TYPE_SLOT, LAMBDA_REDUCTION_FORM_TOKEN, span, first, (LambdaToken){0}, LAMBDA_REDUCTION_FLAG_ANNOTATION_CONSTRAINT, children, 2);
     }
+    if (parser_accept(parser, LAMBDA_TOK_AS)) {
+        if (!allow_binder) {
+            return parser_fail(parser,
+                "a type binder is only allowed in a function parameter",
+                LAMBDA_TOK_IDENTIFIER);
+        }
+        LambdaToken binder_name;
+        if (!parser_take_name(parser, token_is_binder_name_candidate,
+                "expected a binder name after 'as'", &binder_name)) {
+            return false;
+        }
+        LambdaParseValue child = value;
+        SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+        value = parser_reduce_tokens(parser, LAMBDA_REDUCE_TYPE_SLOT,
+            LAMBDA_REDUCTION_FORM_TOKEN, span, first, binder_name,
+            LAMBDA_REDUCTION_FLAG_ANNOTATION_BINDER, &child, 1);
+    }
     if (value_out) *value_out = value;
     return true;
+}
+
+static bool parse_annotation_type_slot_value(LambdaRdParser* parser,
+        LambdaParseValue* value_out) {
+    return parse_annotation_type_slot_value_mode(parser, value_out, false);
 }
 
 static LambdaParseValue parse_primary_type_slot(LambdaRdParser* parser) {
@@ -879,13 +930,17 @@ typedef struct LambdaCallableSignature {
 static bool parser_parse_return_types(LambdaRdParser* parser, LambdaParseValue* values, uint32_t* count, bool* raised_out) {
     bool raised = false;
     if (token_starts_return_type(parser->current.kind)) {
-        LambdaParseValue returned = parse_type_slot(parser);
+        // Keep the complete return source intact so the type-pattern parser
+        // can issue its binder-specific semantic diagnostic (S4.2.2).
+        LambdaParseValue returned = parse_type_slot_mode(parser, true,
+            LAMBDA_REDUCTION_FLAG_RETURN_TYPE);
         if (!returned) return false;
         if (values && count) values[(*count)++] = returned;
         if (parser_accept(parser, LAMBDA_TOK_CARET)) {
             raised = true;
             if (token_starts_return_type(parser->current.kind)) {
-                LambdaParseValue error_type = parse_type_slot(parser);
+                LambdaParseValue error_type = parse_type_slot_mode(parser, true,
+                    LAMBDA_REDUCTION_FLAG_RETURN_TYPE);
                 if (!error_type) return false;
                 if (values && count) values[(*count)++] = error_type;
             }
@@ -912,7 +967,10 @@ static bool parse_parameter_items(LambdaRdParser* parser, bool allow_variadic, c
         if (!parser_take_name(parser, token_is_key, name_message, &name)) return false;
         bool optional = parser_accept(parser, LAMBDA_TOK_QUESTION);
         LambdaParseValue type_value = 0;
-        if (parser_accept(parser, LAMBDA_TOK_COLON) && !parse_annotation_type_slot_value(parser, &type_value)) return false;
+        if (parser_accept(parser, LAMBDA_TOK_COLON) &&
+                !parse_annotation_type_slot_value_mode(parser, &type_value, true)) {
+            return false;
+        }
         LambdaParseValue default_value = 0;
         if (parser_accept(parser, LAMBDA_TOK_EQ)) {
             if (!parser_parse_expression_value(parser, 0, &default_value)) return false;
@@ -923,7 +981,9 @@ static bool parse_parameter_items(LambdaRdParser* parser, bool allow_variadic, c
         if (type_value) parameter_children[child_count++] = type_value;
         if (default_value) parameter_children[child_count++] = default_value;
         LambdaParseValue parameter = parser_reduce_tokens(parser, LAMBDA_REDUCE_STATEMENT, LAMBDA_REDUCTION_FORM_PARAMETER, (SourceSpan){name.span.start_byte, parser->current.span.start_byte}, name, (LambdaToken){0}, (optional ? LAMBDA_REDUCTION_FLAG_OPTIONAL : 0u) |
-                (is_var ? LAMBDA_REDUCTION_FLAG_VAR : 0u), parameter_children, child_count);
+                (is_var ? LAMBDA_REDUCTION_FLAG_VAR : 0u) |
+                (type_value ? LAMBDA_REDUCTION_FLAG_TYPED : 0u),
+            parameter_children, child_count);
         parameters = parser_parameter_append(parser, (SourceSpan){name.span.start_byte, parser->current.span.start_byte}, parameters, parameter);
         if (!parser_accept(parser, LAMBDA_TOK_COMMA)) break;
     } while (true);
@@ -1417,7 +1477,8 @@ static const int infix_bp[LAMBDA_TOK_ELLIPSIS + 1] = {
     [LAMBDA_TOK_PIPE_FORWARD] = LAMBDA_BP_PIPE, [LAMBDA_TOK_THAT] = LAMBDA_BP_PIPE,
     [LAMBDA_TOK_OR] = LAMBDA_BP_OR, [LAMBDA_TOK_AND] = LAMBDA_BP_AND,
     [LAMBDA_TOK_IS] = LAMBDA_BP_MEMBERSHIP, [LAMBDA_TOK_IN] = LAMBDA_BP_MEMBERSHIP,
-    [LAMBDA_TOK_AT] = LAMBDA_BP_MEMBERSHIP, [LAMBDA_TOK_PIPE] = LAMBDA_BP_SET,
+    [LAMBDA_TOK_AT] = LAMBDA_BP_MEMBERSHIP, [LAMBDA_TOK_SUBTYPE] = LAMBDA_BP_MEMBERSHIP,
+    [LAMBDA_TOK_PIPE] = LAMBDA_BP_SET,
     [LAMBDA_TOK_AMPERSAND] = LAMBDA_BP_SET, [LAMBDA_TOK_BANG] = LAMBDA_BP_SET,
     [LAMBDA_TOK_TO] = LAMBDA_BP_SET, [LAMBDA_TOK_EQ_EQ] = LAMBDA_BP_EQUALITY,
     [LAMBDA_TOK_BANG_EQ] = LAMBDA_BP_EQUALITY, [LAMBDA_TOK_EQ_WORD] = LAMBDA_BP_EQUALITY,

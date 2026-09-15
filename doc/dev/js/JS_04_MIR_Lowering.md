@@ -1,6 +1,6 @@
 # LambdaJS — MIR Lowering, Code Generation & Exceptions
 
-> **Last verified against tree:** 2026-09-15 *(§8 dynamic call-site entry re-verified after JC18; §9 argument-slot clearing re-verified)*
+> **Last verified against tree:** 2026-09-15 *(§8 dynamic call-site entry re-verified after JC18; §9 argument-slot clearing re-verified; stack-overflow guard paragraph updated for JC23 — the signal-backstop paragraph after it was not re-verified)*
 
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the phase-2/3 lowering mechanics: how typed AST nodes become MIR instructions, the boxed-Item-by-default emission model and its native INT/FLOAT fast paths, boxing/unboxing tag arithmetic, condition lowering and the comparison `_raw` facades, short-circuit operators, constant folding and dead-branch elimination, call emission, the in-band Item exception model (JIT try/catch/finally, signal-based stack overflow), and dynamic code (`eval` / `Function`).
 >
@@ -245,7 +245,17 @@ protects nested-call error identity. `throw` and abrupt
 `with` scopes. `yield_state_only` contexts remain synthetic resume state and
 are skipped by throw/return routing.
 
-**Stack overflow** is the one case that *does* use signals (`lambda/lambda-stack.cpp`, shared with the Lambda runtime). `lambda_stack_init` installs a `SIGSEGV` handler on an alternate stack (`sigaltstack` + `SA_ONSTACK`, `:194`). The core pipeline arms a `sigsetjmp` recovery point and sets `_lambda_recovery_armed` only around the `js_main` call (`js_mir_entrypoints_require.cpp:798`–`:815`). On a fault the handler disambiguates a genuine stack overflow from other segfaults, and — only if armed — `siglongjmp`s back (`lambda-stack.cpp:177`–`:191`); the pipeline then converts the recovery into a normal JS exception via `js_throw_range_error("Maximum call stack size exceeded")` (`js_mir_entrypoints_require.cpp:810`). An unarmed overflow (e.g. during AST build) falls through to a clean default crash rather than jumping into a zero-initialized `jmp_buf`.
+**Stack overflow** has two layers. The language-level guard is an explicit
+check: every JIT direct source call (`jm_enter_source_invocation`) and every
+call-kernel instance (`js_call_kernel`) compares the native stack pointer with
+`Context::stack_limit` and throws a catchable `RangeError` through the error lane
+when it is below. The limit comes from `lambda_stack_recoverable_limit()`: a
+32 MB default budget from the thread's stack base (scaled by `--stack-size`),
+never lower than the fault limit plus 256 KB of throw headroom (JC23,
+`vibe/jube/JS_Runtime_Call_Flatten.md` §3.6). The signal layer below is the
+backstop for native recursion that never passes a call guard.
+
+The backstop is the one case that *does* use signals (`lambda/lambda-stack.cpp`, shared with the Lambda runtime). `lambda_stack_init` installs a `SIGSEGV` handler on an alternate stack (`sigaltstack` + `SA_ONSTACK`, `:194`). The core pipeline arms a `sigsetjmp` recovery point and sets `_lambda_recovery_armed` only around the `js_main` call (`js_mir_entrypoints_require.cpp:798`–`:815`). On a fault the handler disambiguates a genuine stack overflow from other segfaults, and — only if armed — `siglongjmp`s back (`lambda-stack.cpp:177`–`:191`); the pipeline then converts the recovery into a normal JS exception via `js_throw_range_error("Maximum call stack size exceeded")` (`js_mir_entrypoints_require.cpp:810`). An unarmed overflow (e.g. during AST build) falls through to a clean default crash rather than jumping into a zero-initialized `jmp_buf`.
 
 ---
 

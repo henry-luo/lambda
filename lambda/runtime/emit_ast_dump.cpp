@@ -255,9 +255,27 @@ static void emit_dump_strview_field(const char* label, StrView view) {
 
 static void emit_dump_type_field(const char* label, const Type* type) {
     if (!type) return;
-    const char* name = type_contract_display_name(type);
     printf(" (%s ", label);
-    emit_dump_escaped_string(name, (int)strlen(name));
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINDER) {
+        const TypeBinder* binder = (const TypeBinder*)type;
+        const char* name = binder->name && binder->name->name
+            ? binder->name->name->chars : "";
+        printf("(TypeBinder (name ");
+        emit_dump_escaped_string(name, (int)strlen(name));
+        printf(") (slot %u) (bound ", (unsigned)binder->slot);
+        const char* bound_name = type_contract_display_name(binder->bound);
+        emit_dump_escaped_string(bound_name, (int)strlen(bound_name));
+        printf("))");
+    } else if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BOUND_REF) {
+        const TypeBoundRef* ref = (const TypeBoundRef*)type;
+        printf("(TypeBoundRef (slot %u) (bound ", (unsigned)ref->slot);
+        const char* bound_name = type_contract_display_name(ref->bound);
+        emit_dump_escaped_string(bound_name, (int)strlen(bound_name));
+        printf("))");
+    } else {
+        const char* name = type_contract_display_name(type);
+        emit_dump_escaped_string(name, (int)strlen(name));
+    }
     printf(")");
 }
 

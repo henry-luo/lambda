@@ -609,11 +609,6 @@ struct JsMirTranspiler {
     JsAstNode* discarded_expression; // outer expression whose value is unobserved
 
     // TCO state
-    JsFuncCollected* tco_func;      // function being TCO'd (NULL if not active)
-    MIR_label_t tco_label;          // loop-back label for tail calls
-    MIR_reg_t tco_count_reg;        // iteration counter for overflow guard
-    bool in_tail_position;          // current expression is in tail position
-    bool tco_jumped;                // set when a tail call was converted to goto
 
     // P9: Variable widening from INT→FLOAT (pre-scan)
     struct hashmap* widen_to_float;  // set of variable names that should be FLOAT

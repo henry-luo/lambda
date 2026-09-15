@@ -1329,8 +1329,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
         return NULL;
     }
 
-    SvgRenderContext ctx;
-    memset(&ctx, 0, sizeof(SvgRenderContext));
+    SvgRenderContext ctx = {};
 
     ctx.svg_content = strbuf_new_cap(8192);
     ctx.indent_level = 0;

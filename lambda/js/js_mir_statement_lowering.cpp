@@ -2854,13 +2854,6 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
     if (mt->in_native_func && mt->current_fc) {
         TypeId ret_type = JM_JS_FACT(mt->current_fc, return_type);
 
-        // TCO: set tail position so recursive calls in the argument can be converted to goto
-        bool saved_tail = mt->in_tail_position;
-        if (mt->tco_func) {
-            mt->in_tail_position = true;
-            mt->tco_jumped = false;
-        }
-
         if (ret->argument) {
             TypeId expr_type = jm_get_effective_type(mt, ret->argument);
             if (jm_is_native_type(expr_type)) {
@@ -2886,21 +2879,18 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
             }
         }
 
-        mt->in_tail_position = saved_tail;
-
-        // If TCO converted the call to a goto, skip the ret — it's dead code
-        if (mt->tco_jumped) {
-            mt->tco_jumped = false;
+        if (!jm_return_needs_completion_routing(mt)) {
+            jm_emit_eval_local_pop_if_needed(mt);
+            jm_emit_with_unwind_to(mt, 0);
+            jm_emit_ret(mt, val);
             return;
         }
-
-        jm_emit_eval_local_pop_if_needed(mt);
-        jm_emit_with_unwind_to(mt, 0);
-        jm_emit_ret(mt, val);
-        return;
-    }
-
-    if (ret->argument) {
+        // A return that crosses a finally or an open iterator is a completion,
+        // not a raw exit: it must run those first. Box it onto the Item lane
+        // the shared routing below publishes; every native landing converts it
+        // back with jm_native_return_reg.
+        val = jm_box_native(mt, val, ret_type);
+    } else if (ret->argument) {
         val = jm_transpile_box_item(mt, ret->argument);
     } else {
         // v18: bare return produces undefined, not null
@@ -2972,7 +2962,7 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
 
     jm_emit_eval_local_pop_if_needed(mt);
     jm_emit_with_unwind_to(mt, 0);
-    jm_emit_ret(mt, val);
+    jm_emit_ret(mt, jm_native_return_reg(mt, jm_item_value(val)));
 }
 
 static bool jm_statement_is_using_decl(JsAstNode* stmt) {

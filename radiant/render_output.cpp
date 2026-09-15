@@ -8,7 +8,7 @@
 #include "../lib/memtrack.h"
 #include "../lib/file.h"
 #include "../lib/str.h"
-#include <chrono>
+#include "../lib/time_util.h"
 #include <pthread.h>
 #include <png.h>
 #include <setjmp.h>
@@ -335,6 +335,7 @@ static void render_output_init_context(RenderContext* rdcon, UiContext* uicon, V
     // Semantic paint IR target: routes the rc_* primitive gateway through the
     // PaintBuilder during recording (Phase C). Reused (cleared) per primitive.
     rdcon->paint_list = (PaintList*)mem_calloc(1, sizeof(PaintList), MEM_CAT_RENDER);
+    if (rdcon->paint_list) new (rdcon->paint_list) PaintList();
     paint_list_init(rdcon->paint_list, view_tree->scratch_arena);
     rdt_vector_init(&rdcon->vec, (uint32_t*)uicon->surface->pixels,
         uicon->surface->width, uicon->surface->height, uicon->surface->width);
@@ -351,6 +352,7 @@ static void render_output_init_context(RenderContext* rdcon, UiContext* uicon, V
 static void render_output_cleanup_context(RenderContext* rdcon) {
     if (rdcon->paint_list) {
         paint_list_destroy(rdcon->paint_list);
+        rdcon->paint_list->~PaintList();
         mem_free(rdcon->paint_list);
         rdcon->paint_list = nullptr;
     }
@@ -499,8 +501,7 @@ static void render_output_save_surface(ImageSurface* surface, const char* output
 
 static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_tree,
                                               RenderOutputTarget* target) {
-    using namespace std::chrono;
-    auto t_start = high_resolution_clock::now();
+    uint64_t t_start = time_now_ns();
 
     if (!uicon || !view_tree || !target) {
         log_error("render_output_render_raster_target: invalid render job");
@@ -521,16 +522,16 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
 
     retained_dl_cache_begin_frame(rdcon.retained_dl_cache);
 
-    auto t_init = high_resolution_clock::now();
+    uint64_t t_init = time_now_ns();
 
     render_output_render_view_tree(&rdcon, view_tree);
 
-    auto t_render = high_resolution_clock::now();
+    uint64_t t_render = time_now_ns();
     log_info("[TIMING] render_block_view (record): %.1fms, %d display list items",
-             duration<double, std::milli>(t_render - t_init).count(), dl_item_count(&display_list));
+             time_elapsed_ms_f(t_init, t_render), dl_item_count(&display_list));
     render_profiler_log(rdcon.profiler);
 
-    double render_ms = duration<double, std::milli>(t_render - t_init).count();
+    double render_ms = time_elapsed_ms_f(t_init, t_render);
     render_profiler_write_record_stderr(render_ms, uicon->surface->width,
         uicon->surface->height, dl_item_count(&display_list));
     render_profiler_write_counters_stderr(rdcon.profiler);
@@ -544,14 +545,14 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     }
     retained_dl_cache_capture(rdcon.retained_dl_cache, &display_list);
 
-    auto t_replay_start = high_resolution_clock::now();
+    uint64_t t_replay_start = time_now_ns();
 
     int item_count = dl_item_count(&display_list);
     RenderOutputReplayResult replay_result =
         render_output_replay_display_list(&rdcon, &display_list, canvas_bg, clear_result.replay_dirty);
 
-    auto t_replay_end = high_resolution_clock::now();
-    double replay_ms = duration<double, std::milli>(t_replay_end - t_replay_start).count();
+    uint64_t t_replay_end = time_now_ns();
+    double replay_ms = time_elapsed_ms_f(t_replay_start, t_replay_end);
     if (replay_result.tiled) {
         log_info("[TIMING] dl_replay_tiled: %.1fms (%d items, %d tiles, %d threads)",
                  replay_ms, item_count, replay_result.tile_count, replay_result.thread_count);
@@ -566,10 +567,10 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     DocState* rstate = uicon->document ? uicon->document->state : nullptr;
     render_video_frames(&display_list, rdcon.ui_context->surface, rstate, rdcon.ui_context);
 
-    auto t_sync = high_resolution_clock::now();
-    log_info("[TIMING] render complete: %.1fms", duration<double, std::milli>(t_sync - t_render).count());
+    uint64_t t_sync = time_now_ns();
+    log_info("[TIMING] render complete: %.1fms", time_elapsed_ms_f(t_render, t_sync));
     render_profiler_emit_event(rdcon.profiler, uicon, rstate, render_ms, replay_ms,
-        duration<double, std::milli>(t_sync - t_start).count(), item_count, selective,
+        time_elapsed_ms_f(t_start, t_sync), item_count, selective,
         replay_result.tiled, replay_result.tile_count, replay_result.thread_count);
     RenderPathTrace trace = {};
     trace.target = render_output_path_trace_target(target->kind);
@@ -597,18 +598,18 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
         render_output_save_surface(rdcon.ui_context->surface, target->output_file);
     }
 
-    auto t_save = high_resolution_clock::now();
+    uint64_t t_save = time_now_ns();
     if (target->output_file) {
-        log_info("[TIMING] save_to_file: %.1fms", duration<double, std::milli>(t_save - t_sync).count());
+        log_info("[TIMING] save_to_file: %.1fms", time_elapsed_ms_f(t_sync, t_save));
     }
 
     if (uicon->document && uicon->document->state) {
         doc_state_clear_render_flags(uicon->document->state);
     }
 
-    auto t_end = high_resolution_clock::now();
+    uint64_t t_end = time_now_ns();
     log_info("[TIMING] render_html_doc total: %.1fms%s",
-        duration<double, std::milli>(t_end - t_start).count(), selective ? " (selective)" : "");
+        time_elapsed_ms_f(t_start, t_end), selective ? " (selective)" : "");
     return 0;
 }
 
@@ -728,8 +729,7 @@ static void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree,
 static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
                                            const char* output_file,
                                            int total_width, int total_height) {
-    using namespace std::chrono;
-    auto t_start = high_resolution_clock::now();
+    uint64_t t_start = time_now_ns();
 
     // physical pixels per strip; overridable for parity testing against normal PNG.
     int TILE_H = 4096;
@@ -793,12 +793,12 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
     // is culled at record time; per-strip culling happens during replay.
     rdcon.block.clip = {0, 0, (float)total_width, (float)total_height};
 
-    auto t_record_start = high_resolution_clock::now();
+    uint64_t t_record_start = time_now_ns();
     render_output_render_view_tree(&rdcon, view_tree);
     rdcon.dl = nullptr;
-    auto t_record_end = high_resolution_clock::now();
+    uint64_t t_record_end = time_now_ns();
     log_info("[TIMING] render_output_render_tiled_png record: %.1fms, %d display list items",
-        duration<double, std::milli>(t_record_end - t_record_start).count(),
+        time_elapsed_ms_f(t_record_start, t_record_end),
         dl_item_count(&display_list));
     if (!dl_validate_or_log(&display_list, "render_output_tiled_png")) {
         image_surface_destroy(rec_surf);
@@ -875,9 +875,9 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
     png_destroy_write_struct(&png, &info);
     fclose(fp);
 
-    auto t_end = high_resolution_clock::now();
+    uint64_t t_end = time_now_ns();
     log_info("[TIMING] render_output_render_tiled_png total: %.1fms (%dx%d)",
-        duration<double, std::milli>(t_end - t_start).count(), total_width, total_height);
+        time_elapsed_ms_f(t_start, t_end), total_width, total_height);
 }
 
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file) {

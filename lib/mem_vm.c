@@ -1,6 +1,7 @@
 #include "mem_vm.h"
 #include "memtrack.h"
 #include "log.h"
+#include "math_checked.hpp"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -28,24 +29,6 @@ struct MemVmRegion {
     uint8_t* committed_pages;
     size_t page_count;
 };
-
-static bool is_power_of_two(size_t value) {
-    return value != 0 && (value & (value - 1)) == 0;
-}
-
-static bool checked_add_size(size_t left, size_t right, size_t* out) {
-    if (right > SIZE_MAX - left) return false;
-    *out = left + right;
-    return true;
-}
-
-static bool round_up_size(size_t value, size_t quantum, size_t* out) {
-    if (quantum == 0) return false;
-    size_t remainder = value % quantum;
-    return remainder == 0
-        ? (*out = value, true)
-        : checked_add_size(value, quantum - remainder, out);
-}
 
 size_t mem_vm_page_size(void) {
 #ifdef _WIN32
@@ -119,10 +102,10 @@ MemVmRegion* mem_vm_region_reserve(MemContext* context, MemNode* owner,
     if (alignment < page_size) alignment = page_size;
     // v1 maps one page-aligned extent; larger alignment requires a dedicated
     // over-reservation/trim protocol and is rejected instead of being false.
-    if (!is_power_of_two(alignment) || alignment > page_size) return NULL;
+    if (!math_size_is_power_of_two(alignment) || alignment > page_size) return NULL;
 
     size_t reserved = 0;
-    if (!round_up_size(size, page_size, &reserved)) return NULL;
+    if (!math_size_round_up(size, page_size, &reserved)) return NULL;
     MemVmRegion* region = (MemVmRegion*)mem_alloc(sizeof(MemVmRegion), MEM_CAT_SYSTEM);
     if (!region) return NULL;
 

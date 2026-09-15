@@ -10,16 +10,15 @@
 #include "../lib/str.h"
 #include "../lib/font/font.h"
 #include "../lib/tagged.hpp"
+#include "../lib/time_util.h"
 #include "../lambda/input/input.hpp"
 #include "../lambda/runtime/runtime-state.h"
 
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include <utf8proc.h>
-#include <chrono>
 #include <cfloat>
 #include <cstdlib>
-using namespace std::chrono;
 
 extern void adjust_text_bounds(ViewText* text);
 extern DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
@@ -1443,10 +1442,8 @@ static void layout_block_restore_parent_context(LayoutContext* lycon,
     lycon->line = line;
 }
 
-static double layout_block_record_elapsed(
-        high_resolution_clock::time_point start) {
-    double elapsed = duration<double, std::milli>(
-        high_resolution_clock::now() - start).count();
+static double layout_block_record_elapsed(uint64_t start) {
+    double elapsed = time_elapsed_ms_f(start, time_now_ns());
     g_block_layout_time += elapsed;
     g_block_layout_count++;
     return elapsed;
@@ -4839,11 +4836,10 @@ static void update_inline_multipass_width(LayoutContext* lycon, ViewBlock* block
 
 static void layout_empty_flex_or_grid(LayoutContext* lycon, ViewBlock* block,
                                       bool is_grid) {
-    auto start = high_resolution_clock::now();
+    uint64_t start = time_now_ns();
     if (is_grid) layout_grid_content(lycon, block);
     else layout_flex_content(lycon, block);
-    double elapsed = duration<double, std::milli>(
-        high_resolution_clock::now() - start).count();
+    double elapsed = time_elapsed_ms_f(start, time_now_ns());
     if (is_grid) g_grid_layout_time += elapsed;
     else g_flex_layout_time += elapsed;
     update_multipass_advance_y(lycon, block);
@@ -4852,10 +4848,10 @@ static void layout_empty_flex_or_grid(LayoutContext* lycon, ViewBlock* block,
 
 static void layout_table_block_content(LayoutContext* lycon, ViewBlock* block,
                                        bool empty) {
-    auto start = high_resolution_clock::now();
+    uint64_t start = time_now_ns();
     float margin_containing_width = lycon->block.content_width;
     layout_table_content(lycon, block, block->display);
-    g_table_layout_time += duration<double, std::milli>(high_resolution_clock::now() - start).count();
+    g_table_layout_time += time_elapsed_ms_f(start, time_now_ns());
     update_multipass_advance_y(lycon, block);
     finalize_block_flow(lycon, block, block->display.outer);
     if (!block->blk || block->block()->given_width < 0) {
@@ -5881,7 +5877,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 }
             }
             else if (block->display.inner == CSS_VALUE_FLEX) {
-                auto t_flex_start = high_resolution_clock::now();
+                uint64_t t_flex_start = time_now_ns();
                 DomElement* rendered_legend = find_fieldset_rendered_legend(block);
                 if (rendered_legend) {
                     fieldset_initialize_contents_ancestors(
@@ -5898,7 +5894,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                     }
                 }
                 layout_flex_content(lycon, block);
-                g_flex_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_flex_start).count();
+                g_flex_layout_time += time_elapsed_ms_f(t_flex_start, time_now_ns());
                 bool vertical_fieldset = layout_block_inline_axis_is_vertical(block);
                 bool vertical_rl_fieldset = layout_block_writing_mode(block) == WM_VERTICAL_RL;
                 if (rendered_legend) {
@@ -5970,9 +5966,9 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 return;
             }
             else if (block->display.inner == CSS_VALUE_GRID) {
-                auto t_grid_start = high_resolution_clock::now();
+                uint64_t t_grid_start = time_now_ns();
                 layout_grid_content(lycon, block);
-                g_grid_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_grid_start).count();
+                g_grid_layout_time += time_elapsed_ms_f(t_grid_start, time_now_ns());
                 update_multipass_advance_y(lycon, block);
                 // CSS Grid §12.1: For inline-grid with auto width, compute
                 update_inline_multipass_width(lycon, block, false);
@@ -9328,7 +9324,7 @@ float layout_block_last_in_flow_flex_baseline(ViewBlock* block) {
 
 void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     layout_block_count++;
-    auto t_block_start = high_resolution_clock::now();
+    uint64_t t_block_start = time_now_ns();
     log_enter();
     // CSS 2.2: Floats are removed from normal flow and don't cause line breaks
     bool is_float = false;

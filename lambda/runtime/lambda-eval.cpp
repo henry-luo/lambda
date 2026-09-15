@@ -15,7 +15,7 @@
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/url.h"
-#include "../../lib/checked_math.hpp"
+#include "../../lib/math_checked.hpp"
 #include "../../lib/file.h"
 #include "../../lib/str.h"
 #include "../core/utf_string.h"
@@ -1557,6 +1557,16 @@ static Type* runtime_boundary_unwrap_type(Type* type) {
         Type* base = ((TypeConstrained*)type)->base;
         if (base) return runtime_boundary_unwrap_type(base);
     }
+    if (type && type->type_id == LMD_TYPE_TYPE &&
+            type->kind == TYPE_KIND_BINDER) {
+        Type* bound = ((TypeBinder*)type)->bound;
+        if (bound) return runtime_boundary_unwrap_type(bound);
+    }
+    if (type && type->type_id == LMD_TYPE_TYPE &&
+            type->kind == TYPE_KIND_BOUND_REF) {
+        Type* bound = ((TypeBoundRef*)type)->bound;
+        if (bound) return runtime_boundary_unwrap_type(bound);
+    }
     return type;
 }
 
@@ -1586,9 +1596,68 @@ static bool runtime_validate_value_against_type(Item item, Type* expected,
     return result && result->valid;
 }
 
-static bool runtime_type_admit_value(Item value, Type* expected, Item* converted);
-static bool runtime_type_admit_array(Item value, Type* expected, Item* converted);
+static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
+    Item* converted);
+static bool runtime_type_admit_array_env(Item value, Type* expected, Type** env,
+    Item* converted);
+static bool runtime_type_admit_array(Item value, Type* expected, Item* converted) {
+    return runtime_type_admit_array_env(value, expected, NULL, converted);
+}
 static bool runtime_value_rep_proves_contract(Item value, Type* contract);
+
+// A binder below a container boundary must force the checked walk: a cached
+// array/map certificate proves the written bound but cannot publish this
+// invocation's Type* slot (S4.2.2, D3.3.3v3).
+static bool runtime_contract_uses_binder(Type* type, int depth = 0) {
+    if (!type || depth > 64) return false;
+    // Global contracts use only the compact Type prefix. They cannot contain a
+    // binder, and treating bare `map`/`func` as an extended descriptor reads
+    // arbitrary memory past that prefix.
+    if (is_global_simple_type(type)) return false;
+    if (type->type_id == LMD_TYPE_TYPE) {
+        switch (type->kind) {
+        case TYPE_KIND_BINDER:
+        case TYPE_KIND_BOUND_REF:
+            return true;
+        case TYPE_KIND_UNARY:
+            return runtime_contract_uses_binder(((TypeUnary*)type)->operand, depth + 1);
+        case TYPE_KIND_BINARY: {
+            TypeBinary* binary = (TypeBinary*)type;
+            return runtime_contract_uses_binder(binary->left, depth + 1) ||
+                runtime_contract_uses_binder(binary->right, depth + 1);
+        }
+        case TYPE_KIND_CONSTRAINED:
+            return runtime_contract_uses_binder(((TypeConstrained*)type)->base, depth + 1);
+        case TYPE_KIND_PARAM: {
+            TypeParam* parameter = (TypeParam*)type;
+            return parameter->binder || runtime_contract_uses_binder(
+                parameter->contract_type ? parameter->contract_type : parameter->full_type,
+                depth + 1);
+        }
+        default:
+            return false;
+        }
+    }
+    if (type->type_id == LMD_TYPE_ARRAY) {
+        return runtime_contract_uses_binder(((TypeArray*)type)->nested, depth + 1);
+    }
+    if (type->type_id == LMD_TYPE_MAP || type->type_id == LMD_TYPE_ELEMENT) {
+        for (ShapeEntry* field = ((TypeMap*)type)->shape; field; field = field->next) {
+            if (runtime_contract_uses_binder(field->type, depth + 1)) return true;
+        }
+    }
+    if (type->type_id == LMD_TYPE_FUNC) {
+        TypeFunc* function = (TypeFunc*)type;
+        for (TypeParam* parameter = function->param; parameter; parameter = parameter->next) {
+            if (parameter->binder || runtime_contract_uses_binder(
+                    parameter->contract_type ? parameter->contract_type : parameter->full_type,
+                    depth + 1)) return true;
+        }
+        return runtime_contract_uses_binder(function->return_contract
+            ? function->return_contract : function->returned, depth + 1);
+    }
+    return false;
+}
 
 static bool literal_type_matches_item(Type* expected, Item item) {
     if (!expected || !expected->is_literal ||
@@ -1760,7 +1829,59 @@ Item lambda_type_error(Item actual, Type* expected, const char* boundary) {
     return lambda_type_error_with_validation(actual, expected, boundary, NULL);
 }
 
-Item lambda_type_check(Item value, Type* expected, const char* boundary) {
+static Type* binder_narrowest_type(Item value) {
+    Type scratch = {};
+    Type* narrowest = item_static_type_for_is(value, &scratch);
+    if (!narrowest) return &TYPE_ANY;
+    LambdaNumericKind numeric = lambda_numeric_kind_from_type(narrowest);
+    if (numeric != LAMBDA_NUM_INVALID) return lambda_numeric_type_from_kind(numeric);
+    TypeId actual = get_type_id(value);
+    if (actual == LMD_TYPE_MAP && value.map && value.map->type) {
+        return (Type*)value.map->type;
+    }
+    if ((actual == LMD_TYPE_ARRAY || actual == LMD_TYPE_ARRAY_NUM) &&
+            value.array && value.array->rep_cert) {
+        return value.array->rep_cert->array_contract;
+    }
+    return narrowest;
+}
+
+static Type* binder_join(Type* left, Type* right) {
+    if (!left || !right) return NULL;
+    if (left == right) return left;
+    LambdaNumericKind left_kind = lambda_numeric_kind_from_type(left);
+    LambdaNumericKind right_kind = lambda_numeric_kind_from_type(right);
+    if (left_kind != LAMBDA_NUM_INVALID && right_kind != LAMBDA_NUM_INVALID) {
+        LambdaNumericKind joined = lambda_numeric_semantic_join(
+            lambda_numeric_enter_semantic_domain(left_kind),
+            lambda_numeric_enter_semantic_domain(right_kind));
+        return joined == LAMBDA_NUM_INVALID ? NULL : lambda_numeric_type_from_kind(joined);
+    }
+    // A nominal subtype pair joins at the already-written wider contract. The
+    // full nearest-base walk remains the record implementation's authority.
+    if (lambda_type_contract_semantically_compatible(right, left)) return left;
+    if (lambda_type_contract_semantically_compatible(left, right)) return right;
+    return NULL;
+}
+
+static bool runtime_type_admit_binder(Item value, TypeBinder* binder,
+        Type** env, Item* converted) {
+    if (!binder || !converted || !runtime_type_admit_value_env(value,
+            binder->bound, env, converted)) return false;
+    if (!env) return true;
+    Type* narrowest = binder_narrowest_type(*converted);
+    Type* prior = env[binder->slot];
+    // NULL is the per-invocation unbound marker. A reference resolves to its
+    // declared bound until the first binder site writes the concrete type,
+    // avoiding the bound==first-value ambiguity during numeric joins (S4.2.2).
+    Type* joined = prior ? binder_join(prior, narrowest) : narrowest;
+    if (!joined) return false;
+    env[binder->slot] = joined;
+    return true;
+}
+
+Item lambda_type_check_env(Item value, Type* expected, Type** env,
+        const char* boundary) {
     // Error-transparent contracts (`any`, `error`, or an explicit union) keep
     // an incoming error value.  Plain T short-circuits it unchanged so callers
     // retain the original diagnostic instead of receiving a misleading second
@@ -1768,7 +1889,7 @@ Item lambda_type_check(Item value, Type* expected, const char* boundary) {
     if (get_type_id(value) == LMD_TYPE_ERROR) return value;
 
     Item converted = ItemError;
-    if (runtime_type_admit_value(value, expected, &converted)) {
+    if (runtime_type_admit_value_env(value, expected, env, &converted)) {
         return converted;
     }
 
@@ -1784,6 +1905,45 @@ Item lambda_type_check(Item value, Type* expected, const char* boundary) {
         (void)runtime_validate_value_against_type(value, contract, &validation);
     }
     return lambda_type_error_with_validation(value, expected, boundary, validation);
+}
+
+Item lambda_type_check(Item value, Type* expected, const char* boundary) {
+    return lambda_type_check_env(value, expected, NULL, boundary);
+}
+
+Bool lambda_type_value_is_exact(Item value, Type* expected) {
+    if (!expected || get_type_id(value) != LMD_TYPE_TYPE) return BOOL_FALSE;
+    Type* actual = runtime_boundary_unwrap_type(value.type);
+    return actual == expected ? BOOL_TRUE : BOOL_FALSE;
+}
+
+Bool lambda_value_type_is_exact(Item value, Type* expected) {
+    expected = runtime_boundary_unwrap_type(expected);
+    if (!expected) return BOOL_FALSE;
+
+    TypeId actual_id = get_type_id(value);
+    if (expected->type_id == LMD_TYPE_MAP && expected != &TYPE_MAP) {
+        // Named and nominal map values preserve their descriptor through
+        // type(value), so identity of the authoritative instance shape is the
+        // exact semantic key (S2.1.1v3, D8.3.1v2).
+        return actual_id == LMD_TYPE_MAP &&
+            lambda_attr_shape(actual_id, value.map) == (TypeMap*)expected
+            ? BOOL_TRUE : BOOL_FALSE;
+    }
+    if (expected->type_id == LMD_TYPE_ELEMENT && expected != &TYPE_ELMT) {
+        // Every element type is shape-bearing; a generic element does not
+        // denote one exact binder result and is therefore never specialized.
+        return actual_id == LMD_TYPE_ELEMENT &&
+            lambda_attr_shape(actual_id, value.element) == (TypeMap*)expected
+            ? BOOL_TRUE : BOOL_FALSE;
+    }
+
+    actual_id = item_semantic_type_id(actual_id);
+    if (expected == &TYPE_ARRAY) {
+        return (actual_id == LMD_TYPE_ARRAY || actual_id == LMD_TYPE_ARRAY_NUM)
+            ? BOOL_TRUE : BOOL_FALSE;
+    }
+    return actual_id == expected->type_id ? BOOL_TRUE : BOOL_FALSE;
 }
 
 Bool fn_is(Item a, Item b) {
@@ -1931,6 +2091,22 @@ Bool fn_is(Item a, Item b) {
     default:
         return a_type_id == type_b->type->type_id ? BOOL_TRUE : BOOL_FALSE;
     }
+}
+
+Bool fn_subtype(Item a, Item b) {
+    if (get_type_id(a) != LMD_TYPE_TYPE || get_type_id(b) != LMD_TYPE_TYPE) {
+        return BOOL_ERROR;
+    }
+    Type* candidate = runtime_boundary_unwrap_type(a.type);
+    Type* expected = runtime_boundary_unwrap_type(b.type);
+    if (!candidate || !expected || candidate->type_id == LMD_TYPE_FUNC ||
+            expected->type_id == LMD_TYPE_FUNC) {
+        // TGO14(b): function-type variance is not yet ruled, so neither tier
+        // may silently invent a variance relation for function values.
+        return BOOL_ERROR;
+    }
+    return lambda_type_contract_is_subtype(candidate, expected)
+        ? BOOL_TRUE : BOOL_FALSE;
 }
 
 // IEEE NaN check: expr is nan
@@ -3971,6 +4147,16 @@ Type* fn_type(Item item) {
     return (Type*)type;
 }
 
+Item lambda_type_value_from_contract(Type* contract) {
+    if (!contract) return ItemError;
+    TypeType* value = (TypeType*)heap_calloc(sizeof(TypeType), LMD_TYPE_TYPE);
+    if (!value) return ItemError;
+    value->type_id = LMD_TYPE_TYPE;
+    value->kind = TYPE_KIND_SIMPLE;
+    value->type = contract;
+    return {.type = value};
+}
+
 static Symbol* fn_name_symbol_from_chars(const char* name, size_t len) {
     if (!name || len == 0) return nullptr;
     return heap_create_symbol(name, len);
@@ -4129,6 +4315,12 @@ static bool input_schema_collect_type(Type* type, NamePool* name_pool,
         case TYPE_KIND_CONSTRAINED:
             return input_schema_collect_type(((TypeConstrained*)type)->base,
                 name_pool, visited);
+        case TYPE_KIND_BINDER:
+            return input_schema_collect_type(((TypeBinder*)type)->bound,
+                name_pool, visited);
+        case TYPE_KIND_BOUND_REF:
+            return input_schema_collect_type(((TypeBoundRef*)type)->bound,
+                name_pool, visited);
         case TYPE_KIND_PARAM: {
             TypeParam* param = (TypeParam*)type;
             return input_schema_collect_type(param->full_type, name_pool, visited) &&
@@ -4147,6 +4339,12 @@ static bool input_schema_collect_type(Type* type, NamePool* name_pool,
         for (TypeParam* param = fn->param; param; param = param->next) {
             if (!input_schema_collect_type(param->full_type, name_pool, visited) ||
                     !input_schema_collect_type(param->contract_type, name_pool, visited)) return false;
+        }
+        for (uint16_t slot = 0; slot < fn->binder_count; slot++) {
+            TypeBinder* binder = fn->binders ? fn->binders[slot] : NULL;
+            if (binder && !input_schema_collect_type(binder->bound, name_pool, visited)) {
+                return false;
+            }
         }
     }
     return true;
@@ -10250,8 +10448,8 @@ static ShapeEntry* map_find_shape_entry(TypeMap* tm, const char* key_cstr, size_
     return NULL;
 }
 
-static bool runtime_type_admit_map(Item value, Type* expected, Item* converted,
-        bool relation_proven = false) {
+static bool runtime_type_admit_map_env(Item value, Type* expected, Type** env,
+        Item* converted, bool relation_proven = false) {
     if (get_type_id(value) != LMD_TYPE_MAP || !value.map || !expected ||
             expected->type_id != LMD_TYPE_MAP) {
         return false;
@@ -10291,8 +10489,8 @@ static bool runtime_type_admit_map(Item value, Type* expected, Item* converted,
 
         rooted_field.set(_map_read_field(candidate_field, candidate_map->data));
         Item field_converted = ItemNull;
-        if (!runtime_type_admit_value(rooted_field.get(), expected_field->type,
-                &field_converted)) {
+        if (!runtime_type_admit_value_env(rooted_field.get(), expected_field->type,
+                env, &field_converted)) {
             return false;
         }
         rooted_converted.set(field_converted);
@@ -10364,9 +10562,11 @@ static bool runtime_type_admit_map(Item value, Type* expected, Item* converted,
     return true;
 }
 
-static bool runtime_type_admit_array(Item value, Type* expected, Item* converted) {
+static bool runtime_type_admit_array_env(Item value, Type* expected, Type** env,
+        Item* converted) {
     Type* element_type = runtime_array_contract_element(expected);
     TypeId source_type = get_type_id(value);
+    bool binder_dependent = runtime_contract_uses_binder(expected);
     if (!element_type) {
         return false;
     }
@@ -10392,7 +10592,8 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
                 : (Item){.item = i2it(live_range->start + index)};
             rooted_element.set(source_element);
             Item admitted = ItemNull;
-            if (!runtime_type_admit_value(rooted_element.get(), element_type, &admitted)) {
+            if (!runtime_type_admit_value_env(rooted_element.get(), element_type,
+                    env, &admitted)) {
                 return false;
             }
             rooted_element.set(admitted);
@@ -10400,8 +10601,8 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
             array_set(materialized, materialized->length, rooted_element.get());
             materialized->length++;
         }
-        return runtime_type_admit_array({.array = rooted_materialized.get()},
-            expected, converted);
+        return runtime_type_admit_array_env({.array = rooted_materialized.get()},
+            expected, env, converted);
     }
     if (source_type != LMD_TYPE_ARRAY && source_type != LMD_TYPE_ARRAY_NUM &&
             source_type != LMD_TYPE_ELEMENT) {
@@ -10420,9 +10621,10 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
         Rooted<Item> rooted_value(roots, value);
         void* boxed = ensure_typed_array(rooted_value.get(), LMD_TYPE_ANY);
         if (!boxed) return false;
-        return runtime_type_admit_array({.array = (Array*)boxed}, expected, converted);
+        return runtime_type_admit_array_env({.array = (Array*)boxed}, expected, env,
+            converted);
     }
-    if (lambda_array_rep_proves(value, expected, true)) {
+    if (!binder_dependent && lambda_array_rep_proves(value, expected, true)) {
         *converted = value;
         return true;
     }
@@ -10432,7 +10634,8 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
     // element only reconstructs the proof that the carrier already provides.
     // Keep views, shaped arrays, nullable/refined contracts, and all lane
     // conversions on the checked path in the helper.
-    if (runtime_array_admit_primitive_contract(value, expected, converted)) return true;
+    if (!binder_dependent && runtime_array_admit_primitive_contract(value, expected,
+            converted)) return true;
 
     LambdaArrayContractInfo contract_info = {};
     ArrayNumElemType compact_type = ELEM_INT;
@@ -10445,7 +10648,7 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
     bool target_has_native_lane = lambda_type_layout_proves_contract(element_type) &&
         lambda_type_array_lane_storage_desc(element_type, &target_lane) &&
         array_native_lane_supported(&target_lane);
-    if (source_type == LMD_TYPE_ARRAY && value.array &&
+    if (!binder_dependent && source_type == LMD_TYPE_ARRAY && value.array &&
             !value.array->is_ndim && !value.array->is_view &&
             target_has_native_lane &&
             array_native_lane_matches_desc(value.array, &target_lane) &&
@@ -10476,7 +10679,8 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
         for (int64_t index = 0; index < rooted_value.get().array->length; index++) {
             rooted_element.set(item_at(rooted_value.get(), index));
             Item admitted = ItemNull;
-            if (!runtime_type_admit_value(rooted_element.get(), element_type, &admitted)) {
+            if (!runtime_type_admit_value_env(rooted_element.get(), element_type,
+                    env, &admitted)) {
                 return false;
             }
             if (admitted.item != rooted_element.get().item) {
@@ -10522,7 +10726,8 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
         for (int64_t index = 0; index < rooted_value.get().array_num->length; index++) {
             rooted_element.set(array_num_read_item(rooted_value.get().array_num, index));
             Item admitted = ItemNull;
-            if (!runtime_type_admit_value(rooted_element.get(), element_type, &admitted) ||
+            if (!runtime_type_admit_value_env(rooted_element.get(), element_type,
+                    env, &admitted) ||
                     get_type_id(admitted) != get_type_id(rooted_element.get())) {
                 return false;
             }
@@ -10549,7 +10754,7 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
     for (int64_t index = 0; index < length; index++) {
         rooted_element.set(item_at(rooted_candidate.get(), index));
         Item element_converted = ItemNull;
-        if (!runtime_type_admit_value(rooted_element.get(), element_type,
+        if (!runtime_type_admit_value_env(rooted_element.get(), element_type, env,
                 &element_converted)) {
             return false;
         }
@@ -10730,10 +10935,22 @@ static bool runtime_union_map_rep_proves_cached(TypeMap* candidate,
     return true;
 }
 
-static bool runtime_type_admit_value(Item value, Type* expected, Item* converted) {
+static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
+        Item* converted) {
     if (!converted) return false;
+    if (expected && expected->type_id == LMD_TYPE_TYPE &&
+            expected->kind == TYPE_KIND_BINDER) {
+        return runtime_type_admit_binder(value, (TypeBinder*)expected, env, converted);
+    }
+    if (expected && expected->type_id == LMD_TYPE_TYPE &&
+            expected->kind == TYPE_KIND_BOUND_REF) {
+        TypeBoundRef* ref = (TypeBoundRef*)expected;
+        Type* resolved = env && env[ref->slot] ? env[ref->slot] : ref->bound;
+        return resolved && runtime_type_admit_value_env(value, resolved, env, converted);
+    }
     expected = runtime_boundary_unwrap_type(expected);
     if (!expected) return false;
+    bool binder_dependent = runtime_contract_uses_binder(expected);
     // T27-4: `any` admits every non-error value unchanged (lambda_type_matches
     // answers true at once); the numeric, array and map probes below only
     // rediscovered that on every open leaf store, e.g. richards'
@@ -10749,7 +10966,7 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
     // Reuse the resolved, heap-local proof before decomposing a T[] contract.
     // The carrier check remains mandatory even when certificate identity hits.
     TypeId value_type = get_type_id(value);
-    if (value_type == LMD_TYPE_MAP && value.map &&
+    if (!binder_dependent && value_type == LMD_TYPE_MAP && value.map &&
             lambda_type_is_union(expected)) {
         TypeMap* candidate = (TypeMap*)value.map->type;
         if (candidate && typemap_ptr_is_plausible(candidate) &&
@@ -10758,7 +10975,8 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
             return true;
         }
     }
-    if ((value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_ARRAY_NUM) &&
+    if (!binder_dependent &&
+            (value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_ARRAY_NUM) &&
             value.array && value.array->rep_cert &&
             lambda_array_contract_canonical(expected)) {
         ArrayRepCert* target = runtime_array_rep_cert_intern(expected);
@@ -10785,7 +11003,7 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
     // record layout or accept a matching leaf lane at the wrong rank.
     LambdaArrayContractInfo array_info = {};
     if (lambda_array_contract_info(expected, &array_info)) {
-        return runtime_type_admit_array(value, expected, converted);
+        return runtime_type_admit_array_env(value, expected, env, converted);
     }
 
     // A trusted compiler-built map contract is an admission certificate only
@@ -10803,6 +11021,10 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
     if (get_type_id(value) == LMD_TYPE_MAP && expected_map_contract) {
         if (cow_profile_enabled()) g_cow_profile.map_admit_calls++;
         TypeMap* expected_map = (TypeMap*)expected_map_contract;
+        if (binder_dependent) {
+            return runtime_type_admit_map_env(value, expected_map_contract, env,
+                converted);
+        }
         TypeMap* candidate_map = value.map ? (TypeMap*)value.map->type : NULL;
         if (candidate_map && typemap_ptr_is_plausible(candidate_map)) {
             MapContractRelation relation = runtime_map_contract_relation_cached(
@@ -10834,15 +11056,15 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
                 // Route that conservative result through field admission rather
                 // than letting the generic validator accept a physically
                 // incompatible shape that direct MIR reads would misaddress.
-                return runtime_type_admit_map(value, expected_map_contract, converted,
-                    relation == MAP_CONTRACT_NEEDS_REIFICATION);
+                return runtime_type_admit_map_env(value, expected_map_contract, env,
+                    converted, relation == MAP_CONTRACT_NEEDS_REIFICATION);
             }
         }
     }
 
     // Preserve an already conforming union member rather than arbitrarily
     // re-representing it through an earlier union arm.
-    if (lambda_type_matches(value, expected)) {
+    if (!binder_dependent && lambda_type_matches(value, expected)) {
         *converted = value;
         return true;
     }
@@ -10850,8 +11072,8 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
     if (expected->type_id == LMD_TYPE_TYPE && expected->kind == TYPE_KIND_BINARY &&
             ((TypeBinary*)expected)->op == OPERATOR_UNION) {
         TypeBinary* union_type = (TypeBinary*)expected;
-        return runtime_type_admit_value(value, union_type->left, converted) ||
-            runtime_type_admit_value(value, union_type->right, converted);
+        return runtime_type_admit_value_env(value, union_type->left, env, converted) ||
+            runtime_type_admit_value_env(value, union_type->right, env, converted);
     }
 
     if (source_kind != LAMBDA_NUM_INVALID && target_kind != LAMBDA_NUM_INVALID) {
@@ -10862,7 +11084,7 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
     }
 
     if (expected->type_id == LMD_TYPE_MAP) {
-        return runtime_type_admit_map(value, expected, converted);
+        return runtime_type_admit_map_env(value, expected, env, converted);
     }
     return false;
 }

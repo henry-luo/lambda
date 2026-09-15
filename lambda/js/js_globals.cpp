@@ -41,6 +41,7 @@ extern "C" bool js_promise_vmap_is(Item value);
 #include "../jube/jube_registry.h"
 #include "../jube/jube_interface.h"
 #include "../../lib/base64.h"
+#include "../../lib/arraylist.hpp"
 #include "../../lib/escape.h"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/log.h"
@@ -11423,9 +11424,7 @@ static bool js_json_has_invalid_unicode_escape(const char* chars, size_t len) {
 }
 
 struct JsJsonSourceList {
-    Item* items;
-    int count;
-    int capacity;
+    lam::ArrayList<Item> items{MEM_CAT_JS_RUNTIME, 0};
 };
 
 struct JsJsonSourceEntry {
@@ -11436,11 +11435,11 @@ struct JsJsonSourceEntry {
 };
 
 struct JsJsonReviveState {
-    Item* sources;
-    int source_count;
-    JsJsonSourceEntry* entries;
-    int entry_count;
-    int entry_capacity;
+    const JsJsonSourceList* sources;
+    lam::ArrayList<JsJsonSourceEntry> entries{MEM_CAT_JS_RUNTIME, 0};
+
+    explicit JsJsonReviveState(const JsJsonSourceList* source_list)
+        : sources(source_list) {}
 };
 
 static void js_json_skip_ws(const char** p) {
@@ -11466,9 +11465,8 @@ static void js_json_scan_number_token(const char** p) {
 }
 
 static void js_json_source_list_add(JsJsonSourceList* list, const char* start, int len) {
-    if (!lam::mem_grow_array(&list->items, &list->capacity,
-            list->count + 1, 16, MEM_CAT_JS_RUNTIME)) return;
-    list->items[list->count++] = js_name_item(start, len);
+    if (!list) return;
+    (void)list->items.append(js_name_item(start, len));
 }
 
 static void js_json_collect_sources_value(const char** p, JsJsonSourceList* list, bool emit) {
@@ -11529,7 +11527,7 @@ static void js_json_collect_sources_value(const char** p, JsJsonSourceList* list
 }
 
 static JsJsonSourceList js_json_collect_sources(const char* chars) {
-    JsJsonSourceList list = {0};
+    JsJsonSourceList list;
     const char* p = chars;
     js_json_collect_sources_value(&p, &list, true);
     return list;
@@ -11543,13 +11541,8 @@ static bool js_json_value_has_source(Item value) {
 static void js_json_source_entry_add(JsJsonReviveState* state, Item holder, Item key,
         int source_index, Item original_value) {
     if (!state) return;
-    if (!lam::mem_grow_array(&state->entries, &state->entry_capacity,
-            state->entry_count + 1, 16, MEM_CAT_JS_RUNTIME)) return;
-    JsJsonSourceEntry* entry = &state->entries[state->entry_count++];
-    entry->holder_item = holder.item;
-    entry->key = key;
-    entry->source_index = source_index;
-    entry->original_value = original_value;
+    JsJsonSourceEntry entry = {holder.item, key, source_index, original_value};
+    (void)state->entries.append(entry);
 }
 
 static void js_json_build_source_entries(JsJsonReviveState* state, Item holder, Item key,
@@ -11575,7 +11568,8 @@ static void js_json_build_source_entries(JsJsonReviveState* state, Item holder, 
         }
         return;
     }
-    if (*source_index < state->source_count) {
+    if (state->sources && *source_index >= 0 &&
+            (size_t)*source_index < state->sources->items.size()) {
         js_json_source_entry_add(state, holder, key, *source_index, value);
     }
     (*source_index)++;
@@ -11628,13 +11622,15 @@ static Item js_json_make_reviver_context(JsJsonReviveState* state, Item holder, 
         Item value, bool has_source) {
     Item context = js_new_object();
     if (!has_source || !state) return context;
-    for (int i = 0; i < state->entry_count; i++) {
+    for (size_t i = 0; i < state->entries.size(); i++) {
         JsJsonSourceEntry* entry = &state->entries[i];
         if (entry->holder_item != holder.item) continue;
         if (!it2b(js_strict_equal(key, entry->key))) continue;
         if (!it2b(js_strict_equal(value, entry->original_value))) return context;
-        if (entry->source_index < 0 || entry->source_index >= state->source_count) return context;
-        js_set_name_key(context, "source", 6, state->sources[entry->source_index]);
+        if (!state->sources || entry->source_index < 0 ||
+                (size_t)entry->source_index >= state->sources->items.size()) return context;
+        js_set_name_key(context, "source", 6,
+                        state->sources->items[(size_t)entry->source_index]);
         return context;
     }
     return context;
@@ -11714,8 +11710,9 @@ extern "C" Item js_json_parse_full(Item str_item, Item reviver) {
     if (js_is_callable(reviver)) {
         JS_ASSIGN_OR_RETURN(str_val, js_to_string(str_item));
         String* s = it2s(str_val);
-        JsJsonSourceList sources = s ? js_json_collect_sources(s->chars) : (JsJsonSourceList){0};
-        JsJsonReviveState state = {sources.items, sources.count, NULL, 0, 0};
+        JsJsonSourceList sources;
+        if (s) sources = js_json_collect_sources(s->chars);
+        JsJsonReviveState state(&sources);
         // Create a wrapper object {"": result} as the root holder
         Item wrapper = js_new_object();
         Item empty_key = ItemEmptyString;
@@ -11723,8 +11720,6 @@ extern "C" Item js_json_parse_full(Item str_item, Item reviver) {
         int source_index = 0;
         js_json_build_source_entries(&state, wrapper, empty_key, result, &source_index);
         result = js_json_revive(wrapper, empty_key, reviver, &state);
-        if (state.entries) mem_free(state.entries);
-        if (sources.items) mem_free(sources.items);
     }
     return result;
 }

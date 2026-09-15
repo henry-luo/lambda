@@ -1,6 +1,6 @@
 # Lambda Design: Type Narrowing, Specialization, and Generics
 
-**Status**: DRAFT (rev 7, 2026-09-15; TG13v2 multiple binder sites for one name = JOIN over the S4.4 lattice + nominal base chain, never unions, two-pass bind-then-check, same bound at every site (single-binder TG4 asymmetry kept as the "dictating parameter" form); TG20v2 static binds the narrowest statically known type, exact bindings authoritative, abstract bindings never elide the runtime check (TG7 and the gradual guarantee hold); TG22 binders confined to `fn`/`pn` signatures for now (levels 2/3 deferred); TG19 relation ratified but its SPELLING reopened → TGO14 (`<:` vs `extends`, fn-type variance); expression-position cast `x as T` anticipated (TGO2 note); TG21 explicit type parameters are never elided, TGO3 CLOSED; TG20 two-tier binding RATIFIED, TGO1 CLOSED; TG18 container/unbound binding and TG19 `<:` operator RATIFIED, TGO4/TGO11/TGO13 CLOSED; TGO2 CLOSED — the binder keyword is `as`; TG5 RATIFIED; TG6v2 bound is a direct field of the binder record; TG14v2 inter-binder relations are ordinary `that` value predicates; TG15 `as` precedence; TG16 `that` before `as`; TG17 binder scope, return-position and `var` rules; TGO7 let/var binders confirmed out; TGO11–TGO13 added; Appendix S superseded rulings; Appendix I implementation notes. rev 6, 2026-08-08: TG4 RATIFIED, TG10 three binder levels, TG12 "Type Binder" RATIFIED, TG13 unification road reserved, TG14, §6 catalog → TGO10)
+**Status**: PARTIALLY IMPLEMENTED (rev 15, 2026-09-15; TG19 `<:` is implemented in the direct parser, interpreter, and MIR boxed entry; TGO14(a) is CLOSED: its spelling is `<:`; TGO14(c) is CLOSED by S9.2.1's value-semantics covariance ruling. TGO14(b) function-type variance remains open. TG2, TG3, TG5, TG6v2, TG7 boundary admission, TG9, TG13v2, TG15–TG18 are implemented across the interpreter and MIR boxed entry. TG8 has a fixed four-variant raw plan; `_b` retains its ordered exact guards and boxed fallback, including descriptor-pointer guards for named/nominal maps and concrete elements. Statically exact tag-safe local edges select raw bodies directly; `LAMBDA_MIR_TG8_HOIST_GUARDS=1` enables that guard chain at eligible dynamic local edges, selects one of the bounded raw siblings or the `_b` sibling for an invariant identifier call in a synchronous `while`, and shares a raw-index or boxed choice for repeated same-callee/same-identifier calls in one content sequence; every miss falls through to `_b`. rev 8: TG13v2 multiple binder sites for one name = JOIN over the S4.4 lattice + nominal base chain, never unions, two-pass bind-then-check, same bound at every site (single-binder TG4 asymmetry kept as the "dictating parameter" form); TG20v2 static binds the narrowest statically known type, exact bindings authoritative, abstract bindings never elide the runtime check (TG7 and the gradual guarantee hold); TG22 binders confined to `fn`/`pn` signatures for now (levels 2/3 deferred); TG19 relation ratified; expression-position cast `x as T` anticipated (TGO2 note); TG21 explicit type parameters are never elided, TGO3 CLOSED; TG20 two-tier binding RATIFIED, TGO1 CLOSED; TG18 container/unbound binding and TG19 `<:` operator RATIFIED, TGO4/TGO11/TGO13 CLOSED; TGO2 CLOSED — the binder keyword is `as`; TG5 RATIFIED; TG6v2 bound is a direct field of the binder record; TG14v2 inter-binder relations are ordinary `that` value predicates; TG15 `as` precedence; TG16 `that` before `as`; TG17 binder scope, return-position and `var` rules; TGO7 let/var binders confirmed out; TGO11–TGO13 added; Appendix S superseded rulings; Appendix I implementation notes. rev 6, 2026-08-08: TG4 RATIFIED, TG10 three binder levels, TG12 "Type Binder" RATIFIED, TG13 unification road reserved, TG14, §6 catalog → TGO10)
 **Ledger prefix**: `TG#` (decisions), `TGO#` (open issues)
 **Related**:
 - `doc/Lambda_Formal_Semantics.md` — S1.6 (representation invisible), S1.7 (one
@@ -322,8 +322,8 @@ itself unowned (SO9; today `runtime_boundary_unwrap_type` strips a constrained
 type to its base and `is` checks the base only), and a bound is a *type*, not
 an arbitrary predicate — routing it through predicates would make the feature
 depend on work it does not need and would leave bounds silently unenforced in
-the meantime. The subtype-test operator on type values (`<:`, spelled
-provisionally) is still required, by TG9 (`T` as a value) and by TG14v2's
+the meantime. The subtype-test operator on type values (`<:`) is still
+required, by TG9 (`T` as a value) and by TG14v2's
 relations; it stays an independently useful type-value API.
 
 #### TG7 — Two tiers, one contract
@@ -344,11 +344,21 @@ static/dynamic enforcement doctrine.
 
 #### TG8 — Specialization discipline
 
-Instantiation and specialization follow §2.3: boxed generic entry always
-exists (DF9); specializations are memoized by type identity; a statically
-known `type`-valued argument (a type literal or module-level type binding) is
-part of the specialization key — Zig's comptime tier as an optimization
+TG8 uses a boxed generic entry with immutable raw variants keyed by the exact
+argument-type tuple plus every selected binder-environment type identity. A
+statically known `type`-valued argument (a type literal or module-level type
+binding) is therefore part of the key — Zig's comptime tier as an optimization
 rather than a semantic. S1.6 makes all of it unobservable.
+
+**Bounded admission (D8.3.1v2).** The compiler walks qualifying direct call
+sites in source order, deduplicates exact keys, and admits the first four per
+function in the initial implementation. A key is never replaced or evicted;
+later, dynamic, partial, or ineligible calls use `_b`. `_b` checks variants in
+that same stable order using only exact semantic-shape guards, then runs the
+complete boxed source-equivalent body on a miss. The number four is an
+implementation cap chosen for predictable code size and is intentionally not a
+semantic limit; it may change only with measurements and updated implementation
+evidence. [S1.6, D8.3.1v2, D8.3.2–D8.3.3, D8.4.1v2]
 
 #### TG9 — `T` is a value in body scope
 
@@ -622,16 +632,15 @@ TG14v2 relations use this same clause; nothing else is needed.
   `b` and the result against `number?`. A binder with bound `any` that is
   unbound is `any` — exactly what the signature promised without the binder.
 
-#### TG19 — The subtype test is a type operator **[RELATION RATIFIED 2026-09-15; SPELLING OPEN — TGO14]**
+#### TG19 — The subtype test is a type operator **[IMPLEMENTED 2026-09-15; S11.1.4v2 / D3.2.5v2; `<:` spelling CLOSED by TGO14(a)]**
 
-`A <: B` (spelling provisional; `A extends B` is the alternative under
-consideration, TGO14) is a new binary operator on type values, yielding
-`bool`. It holds
-when **every value `A` admits, `B` admits** — the existing declared-boundary
-admission relation lifted to type values, so it is implemented over the same
-contract-compatibility relation the checker already uses
-(`lambda_type_contract_semantically_compatible`), never as a second
-subtyping. Consequences: `int <: number`, `int <: int | string`,
+`A <: B` is a binary operator on type values, yielding `bool`. It holds
+when **every value `A` admits, `B` admits** — the conversion-free static
+subtype relation, not declared-boundary compatibility. A boundary may convert
+a value into a destination lane; that conversion cannot make `number <: int`
+true. `fn_subtype` uses `lambda_type_contract_is_subtype`, whose recursion is
+the one implementation of this relation. Consequences: `int <: number`,
+`int <: int | string`,
 `{a: int, b: int} <: {a: int}` (structural, D3.4.2) hold; a nominal record
 relates to its base by its record pointer (S2.1.4); `T <: T` holds for
 every `T`. It is the operator TG6v2 names, TG14v2's predicates use, and TG9
@@ -807,17 +816,16 @@ a documentation matter rather than a parsing one.
   serialize through the const pool (CP). Constrains the representation to be
   pointer-free/relocatable (slot indices, not `Type*` back-pointers). Later
   phase, but decide before Appendix I's layout hardens.
-- **TGO14 — Subtype-test spelling and function-type variance.** (a) The
-  operator of TG19 is spelled `<:` provisionally; `extends` (TS/Java
-  reading) is the alternative. Decide before TG-P0.1 adds the token.
-  (b) TG19 defines the relation as admission lifted to types, which today
-  says nothing about **function types**. The norm is contravariant
-  parameters and covariant results; `lambda_type_contract_semantically_compatible`
-  does not implement it. Rule it, or exclude function types from `<:`
-  until ruled. (c) Record the reason Lambda needs **no variance
-  annotations** for containers: `int[] <: number[]` is sound only because
-  S1.4 value semantics remove aliased mutation, the classic array-covariance
-  hole. That argument belongs in the formal spec at adoption (TGO8).
+- **TGO14 — Function-type variance.**
+  **(a) CLOSED 2026-09-15 (USER):** the TG19 operator is spelled `<:`;
+  `extends` is not an alternative surface spelling. (b) TG19 defines the
+  relation as conversion-free value-set inclusion, which today says nothing
+  about **function types**. The norm is contravariant parameters and covariant
+  results; `lambda_type_contract_is_subtype` deliberately rejects them through
+  `fn_subtype` until a variance rule exists. **(c) CLOSED by S9.2.1:** Lambda
+  needs no container variance
+  annotations because value semantics remove aliased mutation, the classic
+  array-covariance hole.
 - **TGO13 — CLOSED 2026-09-15 by TG18/TG19**: the oracle is S4.2.2 for
   scalars and first-element-binds for containers; `<:` is the admission
   relation lifted to type values. Residue (implementation, Appendix I):
@@ -909,7 +917,7 @@ a checker.
 | optional / occurrence | `T?` `T*` `T+` `T[n]` `T[n,m]` | exists |
 | constraint | `T that (pred)` | exists |
 | array element type | `T.element` | exists (arrays) |
-| subtype test | `T1 <: T2` | **ratified** (TG19), unimplemented |
+| subtype test | `T1 <: T2` | **implemented** (TG19; S11.1.4v2) |
 | type functions | `fn (T: type) type` | implied by TG2 |
 
 ### 6.1 Category A — Introspection (reading a type apart)
@@ -939,7 +947,7 @@ a checker.
 | # | Computation | TS spelling | Lambda today | Gap |
 |---|---|---|---|---|
 | C1 | equality | (structural, implicit) | `==` | exists. |
-| C2 | subtype / assignability | `extends` in constraints | `<:` (TG19) | ratified; required by TG6v2/TG14v2 and TG9 regardless of this catalog. |
+| C2 | subtype / assignability | `extends` in constraints | `<:` (TG19) | implemented; required by TG6v2/TG14v2 and TG9 regardless of this catalog. |
 | C3 | conditional selection | `T extends X ? A : B` | `if` / `match` over type values (TG9) | **exists** — ordinary control flow replaces the entire conditional-types feature. |
 | C4 | union algebra / filtering | distributive conditionals, `Exclude` | `\|`, `!`, `&` + A5 | design exists; `&`/binary-`!` implementation gap (SO9). `Exclude<T,U>` = filter over `T.members` — needs A5. |
 | C5 | join / meet (least common supertype) | inference-internal | TG13v2 join: S4.4 lattice + nominal base chain, no unions | **decided for binders** by TG13v2; a general type-value `join` operation stays undecided (TGO10). |
@@ -1031,7 +1039,7 @@ current ruling.
 Kept brief per `doc/Doc_Convention.md` §4; the full plan is
 `vibe/impl/Lambda_Impl_Type_Binder.md` (phases TG-P0 … TG-P4).
 
-- **Representation** (D3.1.1v3 kinds): two new `TypeKind`s — a *binder*
+- **Representation** (D3.1.1v4 kinds): two new `TypeKind`s — a *binder*
   (site: bound type, name, slot index within its signature, no predicate; the
   bound is checked directly per TG6v2) and a *bound-name reference* (use:
   slot index). An explicit `T: type` parameter (TG2) is a binder whose site is

@@ -35,7 +35,6 @@ enum JsInterpCompletionKind : uint8_t {
     JS_INTERP_THROW,
     JS_INTERP_BREAK,
     JS_INTERP_CONTINUE,
-    JS_INTERP_TAIL_CALL,
     JS_INTERP_YIELD,
     JS_INTERP_AWAIT,
 };
@@ -45,19 +44,9 @@ struct JsInterpCompletion {
     Item value;
     const char* label;
     int label_len;
-    // A self-tail call is carried back to its AST activation without adding a
-    // native call frame. The argument array is immediately rooted by that
-    // activation before another allocation can occur.
-    Item tail_arguments = ItemNull;
-    Item tail_this = ItemNull;
     // A delegated yield parks the outer AST activation while the shared
     // generator runtime advances the delegated iterator.
     bool yield_delegate = false;
-};
-
-struct JsInterpTailScratch {
-    uint64_t* homes[2];
-    int next_index;
 };
 
 struct JsInterpFrame {
@@ -78,9 +67,6 @@ struct JsInterpFrame {
     // Parameter initializers have a distinct variable environment when the
     // formal list is non-simple; direct eval must not redeclare a parameter.
     bool in_parameter_initializer;
-    // Reused only by a self-tail call in this activation. Alternating roots
-    // preserve current wide scalar arguments while the next list is built.
-    JsInterpTailScratch* tail_scratch;
     // A generator replays its AST from the durable activation and turns the
     // next not-yet-observed yield into a completion for the shared iterator.
     int64_t* generator_yield_seen;
@@ -146,14 +132,6 @@ struct JsInterpEnvRoot {
         if (registered) heap_unregister_gc_object_root(env);
         env = replacement->env;
         registered = replacement->registered;
-        replacement->registered = false;
-    }
-    void adopt_from(JsInterpEnvRoot* replacement) {
-        if (!replacement) return;
-        if (registered) heap_unregister_gc_object_root(env);
-        env = replacement->env;
-        registered = replacement->registered;
-        replacement->env = NULL;
         replacement->registered = false;
     }
     JsInterpEnvRoot(const JsInterpEnvRoot&) = delete;
@@ -3903,8 +3881,7 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
             }
             // The shared generator runtime owns delegated next/throw/return
             // protocol. This completion only transfers its iterator there.
-            return {JS_INTERP_YIELD, iterator_root.get(), NULL, 0,
-                ItemNull, ItemNull, true};
+            return {JS_INTERP_YIELD, iterator_root.get(), NULL, 0, true};
         }
         if (yielded->argument) {
             if (!argument_ready) {
@@ -4904,100 +4881,6 @@ static JsInterpCompletion js_interp_exec_catch(JsInterpFrame* frame,
         : js_interp_normal(make_js_undefined());
 }
 
-static bool js_interp_prepare_self_tail_call(JsInterpFrame* frame,
-        JsCallNode* call, JsInterpCompletion* completion) {
-    if (!frame || !frame->active_function || !call || !completion ||
-            !call->function || call->function->node_type != AST_NODE_IDENT) {
-        return false;
-    }
-    if (js_interp_identifier_is((JsAstNode*)call->function, "super")) {
-        // SuperCall is a syntactically identifier-shaped call, but it is an
-        // activation capability rather than a lexical function binding.
-        // Evaluating it for self-tail-call detection would wrongly throw.
-        return false;
-    }
-    JsInterpCompletion callee = js_interp_eval(frame, (JsAstNode*)call->function);
-    if (callee.kind != JS_INTERP_NORMAL) {
-        *completion = callee;
-        return true;
-    }
-    if (get_type_id(callee.value) != LMD_TYPE_FUNC ||
-            callee.value.function != (Function*)frame->active_function) {
-        return false;
-    }
-    RootFrame roots(3);
-    uint64_t* scratch_home = NULL;
-    if (frame->tail_scratch) {
-        int index = frame->tail_scratch->next_index;
-        if (index >= 0 && index < 2) scratch_home = frame->tail_scratch->homes[index];
-    }
-    Item scratch = scratch_home ? (Item){.item = *scratch_home} : ItemNull;
-    Rooted<Item> arguments_root(roots, get_type_id(scratch) == LMD_TYPE_ARRAY
-        ? scratch : js_array_new(0));
-    Rooted<Item> value_root(roots, ItemNull);
-    Rooted<Item> spread_item_root(roots, ItemNull);
-    if (item_is_error(arguments_root.get())) {
-        *completion = js_interp_throw(arguments_root.get());
-        return true;
-    }
-    // This array is private to the activation. Wide scalar elements own tail
-    // storage in List::extra, so clear both logical portions before reuse;
-    // retaining only length made every full-width numeric tail argument grow
-    // the backing allocation indefinitely.
-    arguments_root.get().array->length = 0;
-    arguments_root.get().array->extra = 0;
-    if (scratch_home) {
-        *scratch_home = arguments_root.get().item;
-        frame->tail_scratch->next_index = (frame->tail_scratch->next_index + 1) % 2;
-    }
-    for (JsAstNode* arg = (JsAstNode*)call->arguments; arg;
-            arg = (JsAstNode*)arg->next) {
-        if (arg->node_type == AST_NODE_SPREAD) {
-            JsInterpCompletion source = js_interp_eval(frame,
-                (JsAstNode*)((JsSpreadElementNode*)arg)->argument);
-            if (source.kind != JS_INTERP_NORMAL) {
-                *completion = source;
-                return true;
-            }
-            value_root.set(js_iterable_to_array(source.value));
-            if (item_is_error(value_root.get())) {
-                *completion = js_interp_throw(value_root.get());
-                return true;
-            }
-            int64_t length = js_array_length(value_root.get());
-            for (int64_t index = 0; index < length; index++) {
-                spread_item_root.set(js_elements_get_int(value_root.get(), index));
-                if (item_is_error(spread_item_root.get())) {
-                    *completion = js_interp_throw(spread_item_root.get());
-                    return true;
-                }
-                Item pushed = js_array_push(arguments_root.get(), spread_item_root.get());
-                if (item_is_error(pushed)) {
-                    *completion = js_interp_throw(pushed);
-                    return true;
-                }
-            }
-            continue;
-        }
-        JsInterpCompletion value = js_interp_eval(frame, arg);
-        if (value.kind != JS_INTERP_NORMAL) {
-            *completion = value;
-            return true;
-        }
-        value_root.set(value.value);
-        Item pushed = js_array_push(arguments_root.get(), value_root.get());
-        if (item_is_error(pushed)) {
-            *completion = js_interp_throw(pushed);
-            return true;
-        }
-    }
-    *completion = {JS_INTERP_TAIL_CALL, make_js_undefined(), NULL, 0,
-        arguments_root.get(), (frame->active_function->flags & JS_FUNC_FLAG_ARROW)
-            ? js_interp_frame_this(frame)
-            : (frame->strict ? make_js_undefined() : js_get_global_this())};
-    return true;
-}
-
 static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) {
     if (!node) return js_interp_normal(make_js_undefined());
     switch (node->node_type) {
@@ -5366,11 +5249,11 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
     }
     case AST_NODE_RETURN_STAM: {
         JsReturnNode* returned = (JsReturnNode*)node;
-        if (returned->value && returned->value->node_type == AST_NODE_CALL_EXPR) {
-            JsInterpCompletion tail;
-            if (js_interp_prepare_self_tail_call(frame,
-                    (JsCallNode*)returned->value, &tail)) return tail;
-        }
+        // JSI7: `return f()` is an ordinary call. Node performs no tail-call
+        // elimination, and an activation reused in place of a real call is
+        // observable: an enclosing try/catch misses the callee's throw, its
+        // finally runs before the callee, and unbounded recursion never grows
+        // the native stack, so the JC23 guard never raises RangeError.
         JsInterpCompletion value = js_interp_eval(frame, (JsAstNode*)returned->value);
         return value.kind == JS_INTERP_NORMAL
             ? JsInterpCompletion{JS_INTERP_RETURN, value.value, NULL, 0} : value;
@@ -5615,10 +5498,6 @@ static Item js_interp_configure_function_metadata(Item function_item) {
     return function && js_fn_ast_definition(function) ? function_item : ItemError;
 }
 
-static bool js_interp_function_tail_reuse_safe(JsFunction* function) {
-    return function && js_fn_ast_tail_reuse_safe(function);
-}
-
 // JC20: shared null [[HomeObject]] home for callees without a payload; the
 // frame only reads it.
 static uint64_t js_interp_no_home_class = ITEM_NULL_VAL;
@@ -5647,10 +5526,8 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
         : (uint64_t*)(void*)activation->items[JS_CALL_ACTIVATION_NEW_TARGET];
     uint64_t* home_class_home = function->payload
         ? &function->payload->home_class.item : &js_interp_no_home_class;
-    RootFrame roots(3);
+    RootFrame roots(1);
     Rooted<Item> arguments_root(roots, ItemNull);
-    Rooted<Item> tail_arguments_root(roots, ItemNull);
-    Rooted<Item> tail_scratch_root(roots, ItemNull);
     JsBlockNode* body_block = js_fn_ast_function(function)->body &&
             js_fn_ast_function(function)->body->node_type == AST_NODE_BLOCK
         ? (JsBlockNode*)js_fn_ast_function(function)->body : NULL;
@@ -5662,132 +5539,100 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
     // Function declarations are hoisted into the function environment, yet
     // their closures must retain the function body's lexical environment so
     // a later same-body class/let binding remains visible when they run.
-    Item* call_args = args;
-    int call_arg_count = arg_count;
-    JsInterpTailScratch tail_scratch = {
-        {tail_arguments_root.home(), tail_scratch_root.home()}, 0};
-    // Reusing an activation removes the allocation/GC cost from a direct
-    // self-tail call. Keep this deliberately narrow: nested closures, eval,
-    // `arguments`, classes, and dynamic scopes can retain a prior activation.
-    bool reuse_tail_activation = js_interp_function_tail_reuse_safe(function);
-    bool reusing_tail_activation = false;
-    JsInterpEnvRoot retained_env_root;
-    JsInterpEnvRoot retained_body_env_root;
-    for (;;) {
-        JsInterpEnv* env = reusing_tail_activation ? retained_env_root.env
-            : js_interp_env_create(js_fn_ast_function(function)->vars, js_fn_ast(function)->env);
-        JsInterpEnvRoot env_root(reusing_tail_activation ? NULL : env);
-        if (!env || (!reusing_tail_activation && !env_root.registered)) return ItemError;
-        if (!(function->flags & JS_FUNC_FLAG_ARROW)) {
-            env->has_lexical_this = 1;
-            // the kernel bound and coerced this call's receiver before entry.
-            env->lexical_this = js_get_lexical_this_binding().item;
-        }
-        JsInterpEnv* body_env = body_needs_environment
-            ? (reusing_tail_activation ? retained_body_env_root.env
-                : js_interp_env_create(body_block->vars, env)) : NULL;
-        JsInterpEnvRoot body_env_root(reusing_tail_activation ? NULL : body_env);
-        if (body_needs_environment && (!body_env ||
-                (!reusing_tail_activation && !body_env_root.registered))) return ItemError;
-        if (!(function->flags & JS_FUNC_FLAG_ARROW) && js_fn_ast_uses_arguments(function) &&
-                !reusing_tail_activation) {
-            bool strict = (function->flags & JS_FUNC_FLAG_STRICT) != 0;
-            bool mapped = !strict && js_interp_function_has_simple_params(
-                js_fn_ast_function(function));
-            // Materialize before parameter defaults and keep it in the traced
-            // activation record. Later nested calls therefore cannot replace an
-            // AST function's lexical arguments binding through ambient state.
-            arguments_root.set(js_build_arguments_object_for_call(call_args,
-                call_arg_count, mapped ? 0 : 1,
-                (Item){.function = (Function*)function}));
-            if (item_is_error(arguments_root.get())) return arguments_root.get();
-            env->arguments_object = arguments_root.get().item;
-            env->function_node = (AstNode*)js_fn_ast_function(function);
-            env->arguments_are_mapped = mapped ? 1 : 0;
-        }
-        // Direct eval's function-scoped `var` declarations live in the shared
-        // EvalContext journal for this activation, including names absent from
-        // the static AST scope.
-        // A non-strict function body has its own lexical record. Direct eval
-        // must see it when rejecting conflicting var declarations.
-        JsInterpEvalLocalFrame eval_local(body_env ? body_env : env,
-            js_fn_ast_has_direct_eval(function));
-        uint64_t* frame_this_home = lexical_this_home ? lexical_this_home
-            : (is_arrow ? &ast_body->lexical_this.item : &env->lexical_this);
-        JsInterpFrame frame = {js_fn_ast_script(function), env, frame_this_home,
-            new_target_home, home_class_home,
-            (function->flags & JS_FUNC_FLAG_STRICT) != 0, NULL, 0, function,
-            false, &tail_scratch};
-        if (body_env) frame.env = body_env;
-        JsInterpCompletion initialized = js_interp_initialize_scope(&frame,
-            js_fn_ast_function(function)->vars, false);
-        if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
-        initialized = js_interp_bind_named_function_expression_self(&frame,
-            function, (Item){.function = (Function*)function});
-        if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
-        js_interp_prepare_parameter_tdz(&frame, js_fn_ast_function(function));
-        int index = 0;
-        for (JsAstNode* param = (JsAstNode*)js_fn_ast_function(function)->params; param;
-                param = (JsAstNode*)param->next) {
-            RootFrame param_roots(1);
-            Rooted<Item> value_root(param_roots, make_js_undefined());
-            if (param->node_type == AST_NODE_REST_ELEMENT) {
-                value_root.set(js_array_new(0));
-                if (item_is_error(value_root.get())) return value_root.get();
-                for (; index < call_arg_count; index++) {
-                    Item argument = call_args ? call_args[index] : make_js_undefined();
-                    Item pushed = js_array_push(value_root.get(), argument);
-                    if (item_is_error(pushed)) return pushed;
-                }
-            } else {
-                value_root.set(index < call_arg_count && call_args ? call_args[index]
-                    : make_js_undefined());
-                index++;
-            }
-            frame.in_parameter_initializer = true;
-            JsInterpCompletion bound = js_interp_bind_pattern(&frame, param,
-                value_root.get(), true);
-            frame.in_parameter_initializer = false;
-            if (bound.kind != JS_INTERP_NORMAL) return bound.value;
-        }
-        initialized = js_interp_initialize_function_declarations(&frame,
-            js_fn_ast_function(function)->vars);
-        if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
-        if (body_block) {
-            initialized = js_interp_initialize_scope(&frame, body_block->vars);
-            if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
-        }
-        JsInterpCompletion result = body_block
-            ? js_interp_exec_list(&frame, (JsAstNode*)body_block->statements)
-            : js_interp_eval(&frame, (JsAstNode*)js_fn_ast_function(function)->body);
-        if (result.kind == JS_INTERP_TAIL_CALL) {
-            tail_arguments_root.set(result.tail_arguments);
-            if (get_type_id(tail_arguments_root.get()) != LMD_TYPE_ARRAY) return ItemError;
-            // A reused activation is the tail call's activation: its receiver
-            // lives in the activation's rooted `this` home. An arrow's tail
-            // receiver is its unchanged lexical binding.
-            if (!is_arrow) js_current_this = result.tail_this;
-            call_arg_count = (int)js_array_length(tail_arguments_root.get());
-            call_args = call_arg_count > 0 ? tail_arguments_root.get().array->items : NULL;
-            if (reuse_tail_activation && !reusing_tail_activation) {
-                retained_env_root.adopt_from(&env_root);
-                if (body_needs_environment) retained_body_env_root.adopt_from(&body_env_root);
-                reusing_tail_activation = true;
-            }
-            continue;
-        }
-        if (result.kind == JS_INTERP_RETURN) return result.value;
-        // FunctionDeclaration and method bodies complete with undefined without a
-        // return. Preserve expression-bodied arrows and field-initializer thunks,
-        // whose normal completion is their callable result.
-        if (result.kind == JS_INTERP_NORMAL) {
-            return js_fn_ast_function(function)->body &&
-                    js_fn_ast_function(function)->body->node_type == AST_NODE_BLOCK
-                ? make_js_undefined() : result.value;
-        }
-        if (result.kind == JS_INTERP_THROW) return result.value;
-        return js_throw_syntax_error(js_make_string("illegal control flow"));
+    JsInterpEnv* env = js_interp_env_create(js_fn_ast_function(function)->vars,
+        js_fn_ast(function)->env);
+    JsInterpEnvRoot env_root(env);
+    if (!env || !env_root.registered) return ItemError;
+    if (!(function->flags & JS_FUNC_FLAG_ARROW)) {
+        env->has_lexical_this = 1;
+        // the kernel bound and coerced this call's receiver before entry.
+        env->lexical_this = js_get_lexical_this_binding().item;
     }
+    JsInterpEnv* body_env = body_needs_environment
+        ? js_interp_env_create(body_block->vars, env) : NULL;
+    JsInterpEnvRoot body_env_root(body_env);
+    if (body_needs_environment && (!body_env || !body_env_root.registered)) return ItemError;
+    if (!(function->flags & JS_FUNC_FLAG_ARROW) && js_fn_ast_uses_arguments(function)) {
+        bool strict = (function->flags & JS_FUNC_FLAG_STRICT) != 0;
+        bool mapped = !strict && js_interp_function_has_simple_params(
+            js_fn_ast_function(function));
+        // Materialize before parameter defaults and keep it in the traced
+        // activation record. Later nested calls therefore cannot replace an
+        // AST function's lexical arguments binding through ambient state.
+        arguments_root.set(js_build_arguments_object_for_call(args,
+            arg_count, mapped ? 0 : 1,
+            (Item){.function = (Function*)function}));
+        if (item_is_error(arguments_root.get())) return arguments_root.get();
+        env->arguments_object = arguments_root.get().item;
+        env->function_node = (AstNode*)js_fn_ast_function(function);
+        env->arguments_are_mapped = mapped ? 1 : 0;
+    }
+    // Direct eval's function-scoped `var` declarations live in the shared
+    // EvalContext journal for this activation, including names absent from
+    // the static AST scope.
+    // A non-strict function body has its own lexical record. Direct eval
+    // must see it when rejecting conflicting var declarations.
+    JsInterpEvalLocalFrame eval_local(body_env ? body_env : env,
+        js_fn_ast_has_direct_eval(function));
+    uint64_t* frame_this_home = lexical_this_home ? lexical_this_home
+        : (is_arrow ? &ast_body->lexical_this.item : &env->lexical_this);
+    JsInterpFrame frame = {js_fn_ast_script(function), env, frame_this_home,
+        new_target_home, home_class_home,
+        (function->flags & JS_FUNC_FLAG_STRICT) != 0, NULL, 0, function,
+        false};
+    if (body_env) frame.env = body_env;
+    JsInterpCompletion initialized = js_interp_initialize_scope(&frame,
+        js_fn_ast_function(function)->vars, false);
+    if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
+    initialized = js_interp_bind_named_function_expression_self(&frame,
+        function, (Item){.function = (Function*)function});
+    if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
+    js_interp_prepare_parameter_tdz(&frame, js_fn_ast_function(function));
+    int index = 0;
+    for (JsAstNode* param = (JsAstNode*)js_fn_ast_function(function)->params; param;
+            param = (JsAstNode*)param->next) {
+        RootFrame param_roots(1);
+        Rooted<Item> value_root(param_roots, make_js_undefined());
+        if (param->node_type == AST_NODE_REST_ELEMENT) {
+            value_root.set(js_array_new(0));
+            if (item_is_error(value_root.get())) return value_root.get();
+            for (; index < arg_count; index++) {
+                Item argument = args ? args[index] : make_js_undefined();
+                Item pushed = js_array_push(value_root.get(), argument);
+                if (item_is_error(pushed)) return pushed;
+            }
+        } else {
+            value_root.set(index < arg_count && args ? args[index]
+                : make_js_undefined());
+            index++;
+        }
+        frame.in_parameter_initializer = true;
+        JsInterpCompletion bound = js_interp_bind_pattern(&frame, param,
+            value_root.get(), true);
+        frame.in_parameter_initializer = false;
+        if (bound.kind != JS_INTERP_NORMAL) return bound.value;
+    }
+    initialized = js_interp_initialize_function_declarations(&frame,
+        js_fn_ast_function(function)->vars);
+    if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
+    if (body_block) {
+        initialized = js_interp_initialize_scope(&frame, body_block->vars);
+        if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
+    }
+    JsInterpCompletion result = body_block
+        ? js_interp_exec_list(&frame, (JsAstNode*)body_block->statements)
+        : js_interp_eval(&frame, (JsAstNode*)js_fn_ast_function(function)->body);
+    if (result.kind == JS_INTERP_RETURN) return result.value;
+    // FunctionDeclaration and method bodies complete with undefined without a
+    // return. Preserve expression-bodied arrows and field-initializer thunks,
+    // whose normal completion is their callable result.
+    if (result.kind == JS_INTERP_NORMAL) {
+        return js_fn_ast_function(function)->body &&
+                js_fn_ast_function(function)->body->node_type == AST_NODE_BLOCK
+            ? make_js_undefined() : result.value;
+    }
+    if (result.kind == JS_INTERP_THROW) return result.value;
+    return js_throw_syntax_error(js_make_string("illegal control flow"));
 }
 
 Item js_interp_start_async_function(JsFunction* function, Item* args,
@@ -6246,7 +6091,7 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
     }
     JsInterpFrame frame = {script, NULL, this_root.home(), new_target_root.home(),
         home_class_root.home(),
-        script->strict_mode, NULL, 0, NULL, false, NULL};
+        script->strict_mode, NULL, 0, NULL, false};
     if (!script->is_es_module || !script->es_module_scope_initialized) {
         JsInterpCompletion initialized = js_interp_initialize_scope(&frame,
             script->global_scope);
@@ -6487,7 +6332,7 @@ static Item js_interp_instantiate_es_module(Runtime* runtime, JsScript* script) 
     Rooted<Item> new_target_root(roots, js_get_new_target());
     Rooted<Item> home_class_root(roots, ItemNull);
     JsInterpFrame frame = {script, NULL, this_root.home(), new_target_root.home(),
-        home_class_root.home(), true, NULL, 0, NULL, false, NULL};
+        home_class_root.home(), true, NULL, 0, NULL, false};
     JsInterpCompletion initialized = js_interp_initialize_scope(&frame,
         script->global_scope);
     if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;

@@ -6233,66 +6233,6 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
                     if (pi != JM_PARAM_COUNT(fc)) all_args_match = false;
 
                     if (all_args_match) {
-                        // TCO: if this is a tail-recursive call, convert to goto
-                        if (mt->tco_func && mt->in_tail_position &&
-                            jm_is_recursive_call(call, mt->tco_func)) {
-                            log_debug("js-mir TCO: tail call to %s — converting to goto", fc->name);
-
-                            // Clear tail position for arg evaluation (inner calls are NOT tail)
-                            bool saved_tail = mt->in_tail_position;
-                            mt->in_tail_position = false;
-
-                            // Phase 1: Evaluate all arguments into temp registers
-                            MIR_reg_t* temps = LAMBDA_ALLOCA(JM_PARAM_COUNT(fc),
-                                MIR_reg_t);
-                            JsAstNode* arg = call->arguments;
-                            for (int i = 0; i < JM_PARAM_COUNT(fc); i++) {
-                                if (arg) {
-                                    temps[i] = jm_transpile_as_native(mt, arg,
-                                        jm_param_type(fc, i));
-                                    arg = arg->next;
-                                } else {
-                                    MIR_type_t mt2 = (jm_param_type(fc, i) == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
-                                    temps[i] = jm_new_reg(mt, "tz", mt2);
-                                    if (mt2 == MIR_T_D) {
-                                        jm_emit_reg_op(mt, MIR_DMOV, temps[i], MIR_new_double_op(mt->ctx, 0.0));
-                                    } else {
-                                        jm_emit_reg_op(mt, MIR_MOV, temps[i], MIR_new_int_op(mt->ctx, 0));
-                                    }
-                                }
-                            }
-                            jm_transpile_discard_call_args(mt, arg);
-
-                            // Phase 2: Assign temps → parameter registers
-                            JsAstNode* pnode = mt->tco_func->node->params;
-                            for (int i = 0; i < JM_PARAM_COUNT(fc); i++) {
-                                char pname[32];
-                                jm_get_backend_param_name(i, pname, sizeof(pname));
-                                MIR_reg_t preg = MIR_reg(mt->ctx, pname, mt->func_em->em.func);
-                                MIR_type_t mtype = (jm_param_type(fc, i) == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
-                                MIR_insn_code_t mov = (mtype == MIR_T_D) ? MIR_DMOV : MIR_MOV;
-                                jm_emit(mt, MIR_new_insn(mt->ctx, mov,
-                                    MIR_new_reg_op(mt->ctx, preg),
-                                    MIR_new_reg_op(mt->ctx, temps[i])));
-                                pnode = pnode ? pnode->next : NULL;
-                            }
-
-                            mt->in_tail_position = saved_tail;
-
-                            // Jump back to function start
-                            jm_emit_jmp(mt, mt->tco_label);
-                            mt->tco_jumped = true;
-
-                            // Return dummy register (unreachable code)
-                            MIR_type_t native_ret = (JM_JS_FACT(fc, return_type) == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
-                            MIR_reg_t dummy = jm_new_reg(mt, "tco_d", native_ret);
-                            if (native_ret == MIR_T_D) {
-                                jm_emit_reg_op(mt, MIR_DMOV, dummy, MIR_new_double_op(mt->ctx, 0.0));
-                            } else {
-                                jm_emit_reg_op(mt, MIR_MOV, dummy, MIR_new_int_op(mt->ctx, 0));
-                            }
-                            return jm_emit_call_native_value(mt, call, fc, dummy);
-                        }
 
                         MIR_reg_t* native_args = LAMBDA_ALLOCA(
                             JM_PARAM_COUNT(fc), MIR_reg_t);

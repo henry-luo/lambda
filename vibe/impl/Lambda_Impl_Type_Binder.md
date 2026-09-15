@@ -1,18 +1,32 @@
 # Lambda Impl Plan: Type Binder (`as T`) and Type Parameters
 
 - **Date:** 2026-09-15
-- **Status:** PLAN — nothing built. Phases TG-P0 … TG-P4 mirror the adoption
-  order in the design doc §7; each phase is independently landable and gated.
-  TGO14(a), the spelling of the subtype test, blocks TG-P0.1 only; nothing
-  else is blocked (TGO1 closed by TG20, TGO3 closed by TG21, 2026-09-15).
-- **Design authority:** `vibe/Lambda_Design_Type_Generics.md` rev 7 (TG1–TG22 incl. TG13v2 join,
+- **Status:** PARTIALLY IMPLEMENTED (2026-09-15). TG-P0.2 and the binder
+  portions of TG-P1–TG-P3 are landed: explicit `T: type`, `as T` at nested
+  parameter-contract sites, slot environments in T0/MIR boxed entries,
+  dependent body/return references, grammar differential coverage, and tier
+  regressions. TG-P0.1 is implemented under S11.1.4v2 / D3.2.5v2; TGO14(b)
+  still excludes function-type operands. TG-P4's D8.3.1v2 core is implemented:
+  eligible binder-carrying functions collect bounded exact keys, emit immutable
+  raw bodies, select them directly at statically exact tag-safe local
+  edges, and dispatch through `_b` exact guards with the generic boxed body as
+  fallback. Plain array/map/range pointer variants and descriptor-identity
+  map/element variants are included; descriptor-exact literals call raw bodies
+  directly, while unproven base-shape values retain `_b`. The opt-in D8.3.4
+  loop slice hoists one bounded invariant guard chain outside a `while` loop.
+  Phases mirror the
+  adoption order in the design doc §7 and remain independently gated.
+- **Design authority:** `vibe/Lambda_Design_Type_Generics.md` rev 15 (TG1–TG22 incl. TG13v2 join,
   TGO1–TGO14). This doc implements only *ratified* items and never resolves
   an open design question in code — where an open item gates a slice, the
   interim disposition is stated and the slice stays inside it.
-- **Formal authority:** S1.6, S1.7, S4.2.2 (narrowest type); D2.4.1 (the
-  `Type*` graph is the contract), D3.1.1v3 (type-value kinds), D3.3.3v3
-  (narrowing dies with binding; carrier certificates), D3.4.2 (structural
-  shape identity), D6.2.1 (function values), D8.1.1v10 (tier admission).
+- **Formal authority:** S1.6, S1.7, S4.2.2 (narrowest type), S11.1.4v2
+  (`<:`); D2.4.1 (the
+  `Type*` graph is the contract), D3.1.1v4 (type-value kinds), D3.3.3v3
+  (narrowing dies with binding; carrier certificates), D3.2.5v2 (`<:`
+  implementation), D3.4.2 (structural
+  shape identity), D6.2.1 (function values), D8.1.1v10 (tier admission),
+  D8.3.1v2 (bounded immutable raw variants).
   TGO8: the `S#`/`D#` entries for the binder itself are written at adoption,
   not by this plan; `doc/Doc_Convention.md` §4 makes the vibe record
   normative until then.
@@ -112,7 +126,7 @@ container/unbound rules; TG19 `<:`.
 in `type` bodies and schemas (TG22 defers them; they also need env threading
 through the validator and TGO9); the expression-position checked cast
 `x as T` (SO9) — but the parser work in TG-P2.1 must leave expression-position
-`as` untouched so that cast can land later without conflict; TG8/TG-P4 specialization keyed on bound types; any solver beyond the TG13v2 join; TGO12
+`as` untouched so that cast can land later without conflict; any solver beyond the TG13v2 join; TGO12
 const-pool serialization of binder records across the module boundary
 (representation is kept relocatable now so that plan needs no rework);
 TGO10 catalog operations (`T.fields`, `T.element` — note §6.0 claims
@@ -120,7 +134,7 @@ TGO10 catalog operations (`T.fields`, `T.element` — note §6.0 claims
 
 ## 2. Representation (TG-P0.3, shared by every phase)
 
-Two new `TypeKind`s, both under `LMD_TYPE_TYPE` per D3.1.1v3:
+Two new `TypeKind`s, both under `LMD_TYPE_TYPE` per D3.1.1v4:
 
 ```c
 // binder SITE: `bound as name` — TG6v2 bound is a direct field, no predicate
@@ -162,10 +176,9 @@ it; nothing else ever writes a slot. Unbound is therefore not a state.
 
 ### TG-P0 — `<:` operator and dependent scoping
 
-**TG-P0.1 subtype test (TG19).** Spelling is **open** (TGO14: `<:` or
-`extends`); the slice below is written for `<:` and must not start until
-TGO14(a) is ruled. TGO14(b) gates only function-type operands: until ruled,
-`fn_subtype` rejects function-type operands with a clear diagnostic.
+**TG-P0.1 subtype test (TG19; IMPLEMENTED 2026-09-15).** TGO14(a) ratifies the `<:` spelling. TGO14(b)
+gates only function-type operands: until ruled, `fn_subtype` rejects
+function-type operands with a clear diagnostic.
 - Lexer: `<:` two-char token `LAMBDA_TOK_SUBTYPE` at the `<` arm
   (`lambda_lexer.c:621`); tree-sitter `grammar.js` `mk('<:', 'is_in', 'left')`
   beside `is`, then `make generate-grammar` (the `lambda-cst` verifier must
@@ -176,12 +189,13 @@ TGO14(a) is ruled. TGO14(b) gates only function-type operands: until ruled,
   `ast_is_explicit_type_value`), result `bool`, else the existing operand
   type error.
 - Runtime: `Bool fn_subtype(Item a, Item b)` in `lambda-eval.cpp` beside
-  `fn_is`: unwrap both through `runtime_boundary_unwrap_type`, then
-  `lambda_type_contract_semantically_compatible(a, b)`
-  (`type_contract.cpp:345`) — the admission relation lifted to types, TG19 —
-  plus the nominal-base walk (`TypeNominal::base`, S2.1.4) which the
-  contract relation does not do today. `T <: T` must hold for every `T`;
-  add a pointer-equality short-circuit first.
+  `fn_is`: unwrap both through `runtime_boundary_unwrap_type`, then call
+  `lambda_type_contract_is_subtype(a, b)` (`type_contract.cpp`). This is the
+  conversion-free value-set relation required by S11.1.4v2; it separately
+  handles exact numeric embedding, unions, structural fields, covariant arrays,
+  and nominal bases. It intentionally does not reuse
+  `lambda_type_contract_semantically_compatible`, whose boundary conversion
+  policy would make `number <: int` true. `T <: T` short-circuits by identity.
 - Interp `eval_binary` case and MIR emission as a `fn_subtype` call (same
   pattern as `OPERATOR_IS`, `interp.cpp:947`, `transpile-mir.cpp:5658`).
 - Fixture `test/lambda/type_subtype_op.ls` + `.txt`: numeric tower, unions,
@@ -410,11 +424,43 @@ Gate: `--emit-ast-dump` asserts substituted result types on the fixtures;
 
 ### TG-P4 — Specialization keyed on bound types (TG8)
 
-Deferred. Prerequisite reading before starting: the satellite cluster notes
-(D8.1.1v9/v10) and the "never re-derive an admission per call" lesson cited
-in TG8. Key = argument-type tuple **plus** env; boxed entry remains the
-always-correct fallback; cap per function. No design gap blocks it, only
-priority.
+**Implemented under D8.3.1v2–D8.3.4.** Each raw variant key
+contains every exact argument semantic type and every selected binder-slot type
+identity. The implementation owns a fixed
+`LAMBDA_MIR_MAX_RAW_VARIANTS_PER_FUNCTION = 4` cap. During the deterministic
+call-site collection pass, it deduplicates qualifying keys and admits the first
+four in lexical source order; it never evicts, recompiles from runtime feedback,
+or lets a partial/abstract key consume a slot. A rejected key remains a normal
+boxed call.
+
+Lowering emits private `name__raw0` … `name__raw3` bodies only for admitted
+keys. `name_b` is retained for every multi-variant function and runs the same
+ordered exact-guard chain; a miss executes the existing complete boxed body.
+The raw body preloads its selected immutable binder environment and performs no
+new dynamic binding. A statically exact local call selects its predeclared raw
+symbol directly; the forward declaration carries the same immutable key and
+return contract, so function order cannot change that proof. Pointer lanes for
+arrays, maps, elements, and ranges retain a boxed source root until the direct
+call consumes the raw pointer. The shared exact-key matcher uses the normalized
+semantic container kind for plain `array`/`map`/`range`, and the authoritative
+descriptor pointer for named/nominal maps and concrete elements. A literal
+whose AST carries that same descriptor calls its raw body directly; a declared
+base-shape value stays on `_b` unless the opt-in D8.3.4 hoist can prove the
+matcher at that local edge. `test/lambda/type_binder_raw_variants.ls` proves four distinct
+scalar keys, the boxed cap fallback, direct raw edges, container lanes,
+descriptor equality, and a derived-shape fallback agree across all tiers.
+[S1.6, D8.3.1v2–D8.3.4, D8.4.1v2]
+
+With `LAMBDA_MIR_TG8_HOIST_GUARDS=1`, a synchronous `while` whose sole eligible
+dynamic binder call has bounded raw keys and one unmodified identifier argument
+is lowered into raw and `_b` loop siblings. The shared exact-key chain runs once
+before entry; each matching arm prepares its raw argument once and calls its
+`__rawN` sibling on every trip, while the fallthrough sibling calls only `_b`.
+For repeated eligible calls to the same callee with the same identifier inside
+one content sequence, the first guard stores its selected raw index (or boxed
+sentinel); later calls branch on that choice without repeating the exact-key
+chain. The calls themselves still execute. Content/control and side-effect
+boundaries clear the choice. [S1.6, D8.3.4, D8.4.1v2]
 
 ## 4. Hazards and rules of engagement
 
@@ -444,7 +490,7 @@ priority.
 
 | Fixture | Phase | Proves |
 |---|---|---|
-| `type_subtype_op.ls` | P0.1 | TG19 relation, reflexivity, nominal base, non-type operands |
+| `type_subtype_op.ls` | P0.1 | TG19 relation: numeric direction, unions, structural records, covariant arrays, nominal base, reflexivity; negatives prove non-type/function diagnostics |
 | `type_param_dependent.ls` | P0.2 | TG2 dependent scoping, `type`-returning fns |
 | `type_binder_scalar.ls` | P1 | TG4 order dependence, blame text |
 | `type_binder_join.ls` | P1 | TG13v2: `max(a: number as T, b: number as T)` symmetric, S4.4 kinds (`int`⊔`float`, `integer`⊔`float`=`decimal`, sized lanes), nominal base join, `(int, string)` no-join error, check site between two binder sites (two-pass) |
@@ -454,6 +500,10 @@ priority.
 | `proc/type_binder_var_param.ls` | P1.5 | TG17 bind-once under CW33 write-back |
 | `errors/type_binder_*.ls` | P2 | TG13v2 bound mismatch, TG14v2 forward ref, TG16 trailing `that`, TG17 collision / return position |
 | `type_binder_static.ls` (+ ast-dump) | P3 | call-site substitution, static mismatch, exact-only elision; TG20v2 quartet: `let x: number = 1; max(x, 2.5)` compile error; `fn g(x: number) => max(x, 2.5); g(1)` compile error at the call via instantiation; `g(1.0)` passes; `let d: any = ...; g(d)` runtime error — verdicts identical across tiers |
+| `type_binder_raw_variants.ls` | P4 | four source-order exact binder keys compile private raw bodies; the fifth distinct key takes `_b`'s boxed fallback |
+| `proc/tg8_loop_hoist.ls` | P4 / D8.3.4 | invariant dynamic binder call enters a one-guard raw or boxed loop sibling; forced-GC JIT agrees with T0 |
+| `proc/tg8_loop_multi_hoist.ls` | P4 / D8.3.4 | bounded exact-key chain enters `__raw0`, `__raw1`, or `_b` loop sibling; forced-GC JIT agrees with T0 |
+| `proc/tg8_guard_cse.ls` | P4 / D8.3.4 | repeated immutable-identifier call reuses raw-index or boxed choice; a `var` reassignment forces a new guard chain |
 
 ## 6. Open design items carried, and what each gates
 
@@ -465,4 +515,4 @@ priority.
 | TGO9 level-2 re-bind under mutation | level 2 plan | out of scope |
 | TGO10 catalog ops (`T.element` unverified) | nothing here | verify before use |
 | TGO12 const-pool serialization | module boundary plan | slots not pointers (§2) |
-| TGO14 subtype-test spelling, fn-type variance, covariance argument | **TG-P0.1** (spelling), fn-type operands | none for (a); (b) fn types rejected until ruled |
+| TGO14(b) function-type variance | fn-type operands | `<:` is decided; fn types rejected until ruled |

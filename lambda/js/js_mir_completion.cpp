@@ -532,10 +532,23 @@ bool jm_emit_delayed_return_completion(JsMirTranspiler* mt, MIR_reg_t value,
 
 MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MirValue value) {
     if (!mt || !mt->in_native_func || !mt->current_fc) return value.reg;
-    if (JM_JS_FACT(mt->current_fc, return_type) != LMD_TYPE_FLOAT) return value.reg;
     // Delayed completions publish an Item lane. Requesting the native return
     // carrier from its descriptor avoids recovering that fact from MIR.
-    return em_require_rep(&mt->func_em->em, value, VALUE_REP_F64).reg;
+    if (JM_JS_FACT(mt->current_fc, return_type) == LMD_TYPE_FLOAT) {
+        return em_require_rep(&mt->func_em->em, value, VALUE_REP_F64).reg;
+    }
+    // An INT native body returns a raw int64, never the tagged Item.
+    return jm_emit_unbox_int(mt, value.reg);
+}
+
+bool jm_return_needs_completion_routing(JsMirTranspiler* mt) {
+    if (!mt) return false;
+    if (jm_find_completion_context(mt, JS_MIR_COMPLETION_RETURN)) return true;
+    for (int i = mt->loop_depth - 1; i >= 0; i--) {
+        JsLoopLabels* loop = jm_loop_label_at(mt, i);
+        if (loop && loop->iterator_to_close) return true;
+    }
+    return false;
 }
 
 // native errors share the planned companion lane and ownership epilogue (D8.4.3v2).

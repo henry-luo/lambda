@@ -1,16 +1,16 @@
 #include "font_resource_faces.h"
 #include "../../lib/mem.h"
 #include "../../lib/str.h"
-#include "../../lib/intrusive_queue.h"
+#include "../../lib/queue.h"
 
 typedef struct FontResourceFaceNode {
     // link is first so this domain record can stay allocation/lifecycle-owned here.
-    IntrusiveQueueNode link;
+    QueueNode link;
     CssFontFaceDescriptor* descriptor;
 } FontResourceFaceNode;
 
 struct FontResourceFaceList {
-    IntrusiveQueue queue;
+    Queue queue;
 };
 
 static CssFontFaceDescriptor* clone_font_resource_face(
@@ -40,7 +40,7 @@ static bool font_resource_faces_match(const CssFontFaceDescriptor* left,
 bool font_resource_face_list_add_unique(FontResourceFaceList** list,
                                         const CssFontFaceDescriptor* descriptor) {
     if (!list || !descriptor) return false;
-    for (IntrusiveQueueNode* link = *list ? (*list)->queue.first : NULL;
+    for (QueueNode* link = *list ? (*list)->queue.first : NULL;
          link; link = link->next) {
         FontResourceFaceNode* node = (FontResourceFaceNode*)link;
         if (font_resource_faces_match(node->descriptor, descriptor)) return false;
@@ -67,7 +67,7 @@ bool font_resource_face_list_add_unique(FontResourceFaceList** list,
     }
 
     // One variable-font URL may implement several CSS faces; URL dedup must retain each descriptor.
-    intrusive_queue_push(&(*list)->queue, &node->link);
+    queue_push(&(*list)->queue, &node->link);
     return true;
 }
 
@@ -79,7 +79,7 @@ void font_resource_face_list_for_each(const FontResourceFaceList* list,
                                       FontResourceFaceVisitor visitor,
                                       void* user_data) {
     if (!list || !visitor) return;
-    for (IntrusiveQueueNode* link = list->queue.first; link; link = link->next) {
+    for (QueueNode* link = list->queue.first; link; link = link->next) {
         const FontResourceFaceNode* node = (const FontResourceFaceNode*)link;
         visitor(node->descriptor, user_data);
     }
@@ -87,8 +87,8 @@ void font_resource_face_list_for_each(const FontResourceFaceList* list,
 
 void font_resource_face_list_destroy(FontResourceFaceList* list) {
     if (!list) return;
-    IntrusiveQueueNode* link = NULL;
-    while ((link = intrusive_queue_pop(&list->queue))) {
+    QueueNode* link = NULL;
+    while ((link = queue_pop(&list->queue))) {
         FontResourceFaceNode* node = (FontResourceFaceNode*)link;
         css_font_face_descriptor_free(node->descriptor);
         mem_free(node);

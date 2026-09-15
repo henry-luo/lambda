@@ -1,8 +1,6 @@
 // test/lib/test_arraylist_gtest.cpp - tests for lib/arraylist
 // Focused on the accessor API added on top of the upstream library.
 #include <gtest/gtest.h>
-#include <cstring>
-#include <vector>
 
 extern "C" {
 #include "../../lib/arraylist.h"
@@ -10,9 +8,9 @@ extern "C" {
 
 namespace {
 
-ArrayList* build_list(const std::vector<void*>& items) {
+ArrayList* build_list(void* const* items, int item_count) {
     ArrayList* l = arraylist_new(4);
-    for (void* p : items) arraylist_append(l, p);
+    for (int i = 0; i < item_count; ++i) arraylist_append(l, items[i]);
     return l;
 }
 
@@ -20,7 +18,8 @@ ArrayList* build_list(const std::vector<void*>& items) {
 
 TEST(ArrayListTest, GetSetSize) {
     int a = 1, b = 2, c = 3;
-    ArrayList* l = build_list({&a, &b, &c});
+    void* items[] = {&a, &b, &c};
+    ArrayList* l = build_list(items, 3);
     EXPECT_EQ(arraylist_size(l), 3);
     EXPECT_EQ(arraylist_length(l), 3);
     EXPECT_EQ(arraylist_get(l, 0), &a);
@@ -35,7 +34,8 @@ TEST(ArrayListTest, GetSetSize) {
 
 TEST(ArrayListTest, FrontBack) {
     int a = 1, b = 2, c = 3;
-    ArrayList* l = build_list({&a, &b, &c});
+    void* items[] = {&a, &b, &c};
+    ArrayList* l = build_list(items, 3);
     EXPECT_EQ(arraylist_front(l), &a);
     EXPECT_EQ(arraylist_back(l), &c);
     arraylist_free(l);
@@ -43,7 +43,8 @@ TEST(ArrayListTest, FrontBack) {
 
 TEST(ArrayListTest, PopReturnsLastAndShrinks) {
     int a = 1, b = 2, c = 3;
-    ArrayList* l = build_list({&a, &b, &c});
+    void* items[] = {&a, &b, &c};
+    ArrayList* l = build_list(items, 3);
     EXPECT_EQ(arraylist_pop(l), &c);
     EXPECT_EQ(arraylist_size(l), 2);
     EXPECT_EQ(arraylist_pop(l), &b);
@@ -55,7 +56,8 @@ TEST(ArrayListTest, PopReturnsLastAndShrinks) {
 
 TEST(ArrayListTest, PopFrontReturnsFirstAndShifts) {
     int a = 1, b = 2, c = 3;
-    ArrayList* l = build_list({&a, &b, &c});
+    void* items[] = {&a, &b, &c};
+    ArrayList* l = build_list(items, 3);
     EXPECT_EQ(arraylist_pop_front(l), &a);
     EXPECT_EQ(arraylist_size(l), 2);
     EXPECT_EQ(arraylist_get(l, 0), &b);
@@ -80,13 +82,15 @@ TEST(ArrayListTest, ReserveGrowsCapacity) {
 
 TEST(ArrayListTest, ForeachIteratesInOrder) {
     int a = 1, b = 2, c = 3;
-    ArrayList* l = build_list({&a, &b, &c});
+    void* items[] = {&a, &b, &c};
+    ArrayList* l = build_list(items, 3);
 
-    std::vector<int*> seen;
+    int* seen[3] = {};
+    int seen_count = 0;
     ARRAYLIST_FOREACH(l, int*, p) {
-        seen.push_back(p);
+        seen[seen_count++] = p;
     }
-    ASSERT_EQ(seen.size(), 3u);
+    ASSERT_EQ(seen_count, 3);
     EXPECT_EQ(seen[0], &a);
     EXPECT_EQ(seen[1], &b);
     EXPECT_EQ(seen[2], &c);

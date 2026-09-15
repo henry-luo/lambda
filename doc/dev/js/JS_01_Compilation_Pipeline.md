@@ -123,7 +123,7 @@ LambdaJS can link a module either to native code (`MIR_set_gen_interface`) or to
 - **Opt-downgrade fallback** — if still JIT and opt ≥ 2 and insns > 100k, `MIR_gen_set_optimize_level(ctx, 0)`.
 - **Lazy** — `JS_LAZY_MIR≠0` selects `MIR_set_lazy_gen_interface`; its optimization-level caveats and measurements are recorded in [JS_15](JS_15_Performance.md).
 
-**"Link-interface interp" vs "pure interp":** size/document-driven interpretation leaves `g_mir_interp_mode = 0`, so `jit_init` still calls `MIR_gen_init` and only the `MIR_link` *interface* differs. Pure interpreter (`g_mir_interp_mode≠0`) skips `MIR_gen_init` entirely. The rationale (link cost dominates for large/cold modules; the interpreter sidesteps codegen) is covered with measurements in [JS_15 — Performance](JS_15_Performance.md). The interpreter has **no tail-call optimization**, a deliberate correctness divergence from the JIT.
+**"Link-interface interp" vs "pure interp":** size/document-driven interpretation leaves `g_mir_interp_mode = 0`, so `jit_init` still calls `MIR_gen_init` and only the `MIR_link` *interface* differs. Pure interpreter (`g_mir_interp_mode≠0`) skips `MIR_gen_init` entirely. The rationale (link cost dominates for large/cold modules; the interpreter sidesteps codegen) is covered with measurements in [JS_15 — Performance](JS_15_Performance.md). No backend performs tail-call optimization (JC24), so interpreter and JIT differ only in how deep recursion can go before the JC23 stack guard raises `RangeError`.
 
 ---
 

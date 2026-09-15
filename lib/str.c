@@ -1396,15 +1396,27 @@ int str_decimal_significant_digits(const char* value) {
     return saw_digit ? (digits > 0 ? digits : 1) : 0;
 }
 
-char* str_hex_encode(char* dst, const char* s, size_t len) {
+static const char _hex_chars_upper[] = "0123456789ABCDEF";
+
+// one encoder loop for both digit spellings
+static char* str_hex_encode_digits(char* dst, const char* s, size_t len,
+                                   const char* digits) {
     if (!dst || !s) return dst;
     for (size_t i = 0; i < len; i++) {
         unsigned char c = (unsigned char)s[i];
-        dst[i * 2]     = _hex_chars[c >> 4];
-        dst[i * 2 + 1] = _hex_chars[c & 0xF];
+        dst[i * 2]     = digits[c >> 4];
+        dst[i * 2 + 1] = digits[c & 0xF];
     }
     dst[len * 2] = '\0';
     return dst;
+}
+
+char* str_hex_encode(char* dst, const char* s, size_t len) {
+    return str_hex_encode_digits(dst, s, len, _hex_chars);
+}
+
+char* str_hex_encode_upper(char* dst, const char* s, size_t len) {
+    return str_hex_encode_digits(dst, s, len, _hex_chars_upper);
 }
 
 size_t str_hex_decode(char* dst, const char* hex, size_t hex_len) {

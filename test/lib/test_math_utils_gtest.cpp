@@ -61,6 +61,14 @@ TEST(MathUtilsTest, ClampByte) {
     EXPECT_EQ(clamp_byte(1 << 20), 255u);
 }
 
+TEST(MathUtilsTest, ClampByteRound) {
+    EXPECT_EQ(clamp_byte_round(-0.5f), 0u);
+    EXPECT_EQ(clamp_byte_round(0.5f), 1u);
+    EXPECT_EQ(clamp_byte_round(254.5f), 255u);
+    EXPECT_EQ(clamp_byte_round(999.0f), 255u);
+    EXPECT_EQ(clamp_byte_round(NAN), 0u);
+}
+
 TEST(MathUtilsTest, ClampUnit) {
     EXPECT_FLOAT_EQ(clamp_unit(0.0f), 0.0f);
     EXPECT_FLOAT_EQ(clamp_unit(1.0f), 1.0f);
@@ -69,6 +77,23 @@ TEST(MathUtilsTest, ClampUnit) {
     EXPECT_FLOAT_EQ(clamp_unit(1.1f), 1.0f);
     EXPECT_FLOAT_EQ(clamp_unit(-1000.0f), 0.0f);
     EXPECT_FLOAT_EQ(clamp_unit(1000.0f), 1.0f);
+}
+
+TEST(MathUtilsTest, DegreeRadianConversions) {
+    EXPECT_NEAR(math_pi_f(), 3.14159265f, 0.000001f);
+    EXPECT_NEAR(math_tau_f(), 6.28318531f, 0.000001f);
+    EXPECT_NEAR(math_degrees_to_radians(180.0f), 3.14159265f, 0.000001f);
+    EXPECT_NEAR(math_degrees_to_radians_d(180.0), math_pi_d(), 0.000000000001);
+    EXPECT_NEAR(math_radians_to_degrees_d(math_pi_d()), 180.0, 0.000000000001);
+    EXPECT_NEAR(math_gradians_to_radians(200.0f), 3.14159265f, 0.000001f);
+    EXPECT_NEAR(math_turns_to_radians(0.5f), 3.14159265f, 0.000001f);
+}
+
+TEST(MathUtilsTest, WrapPositive) {
+    EXPECT_FLOAT_EQ(math_wrap_positive_f(0.0f, 360.0f), 0.0f);
+    EXPECT_FLOAT_EQ(math_wrap_positive_f(725.0f, 360.0f), 5.0f);
+    EXPECT_FLOAT_EQ(math_wrap_positive_f(-5.0f, 360.0f), 355.0f);
+    EXPECT_TRUE(isnan(math_wrap_positive_f(NAN, 360.0f)));
 }
 
 TEST(MathUtilsTest, MacroFormsWorkInCppToo) {

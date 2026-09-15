@@ -4,10 +4,10 @@
 
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
+#include "../lib/time_util.h"
 #include "../lib/font/font.h"
 #include "../lambda/input/css/dom_element.hpp"
 
-#include <chrono>
 #include <stdlib.h>
 
 #define DEBUG_RENDER_BLOCK 0
@@ -362,7 +362,7 @@ typedef struct RenderBlockPhase {
 
 typedef struct RenderBlockChildrenPhase {
     RenderClipScope overflow_clip_scope;
-    std::chrono::high_resolution_clock::time_point start_time;
+    uint64_t start_time;
     bool has_children;
 } RenderBlockChildrenPhase;
 
@@ -416,11 +416,11 @@ static bool render_block_empty_cell_hides_bound(ViewBlock* block) {
 
 static void render_block_setup_font(RenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block || !block->font) return;
-    auto t1 = std::chrono::high_resolution_clock::now();
+    uint64_t t1 = time_now_ns();
     setup_font(rdcon->ui_context, &rdcon->font, block->font);
-    auto t2 = std::chrono::high_resolution_clock::now();
+    uint64_t t2 = time_now_ns();
     render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_SETUP_FONT,
-        std::chrono::duration<double, std::milli>(t2 - t1).count());
+        time_elapsed_ms_f(t1, t2));
 }
 
 static RenderBlockPhase render_block_begin_phase(RenderContext* rdcon, ViewBlock* block) {
@@ -449,11 +449,11 @@ static void render_block_paint_self(RenderContext* rdcon, ViewBlock* block,
 
     if (!phase->self_hidden && block->bound &&
         !render_block_empty_cell_hides_bound(block)) {
-        auto tb1 = std::chrono::high_resolution_clock::now();
+        uint64_t tb1 = time_now_ns();
         render_bound(rdcon, block);
-        auto tb2 = std::chrono::high_resolution_clock::now();
+        uint64_t tb2 = time_now_ns();
         render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_BOUND,
-            std::chrono::duration<double, std::milli>(tb2 - tb1).count());
+            time_elapsed_ms_f(tb1, tb2));
     }
 
     if (block->vector_path() && block->vector_path()->segments) {
@@ -520,7 +520,7 @@ static void render_block_deferred_child_outlines(RenderContext* rdcon, ViewBlock
 static RenderBlockChildrenPhase render_block_begin_children_phase(RenderContext* rdcon,
                                                                   ViewBlock* block) {
     RenderBlockChildrenPhase phase = {};
-    phase.start_time = std::chrono::high_resolution_clock::now();
+    phase.start_time = time_now_ns();
     View* view = block ? block->first_child : nullptr;
     phase.has_children = view != nullptr || (block && block->custom_layout_paint_prop());
     if (!phase.has_children) {
@@ -559,18 +559,17 @@ static double render_block_finish_children_phase(RenderContext* rdcon, ViewBlock
 
     if (phase->has_children) {
         if (phase->overflow_clip_scope.active) {
-            auto toc1 = std::chrono::high_resolution_clock::now();
+            uint64_t toc1 = time_now_ns();
             render_clip_pop_scope(rdcon, &phase->overflow_clip_scope);
-            auto toc2 = std::chrono::high_resolution_clock::now();
+            uint64_t toc2 = time_now_ns();
             render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_OVERFLOW_CLIP,
-                std::chrono::duration<double, std::milli>(toc2 - toc1).count());
+                time_elapsed_ms_f(toc1, toc2));
         }
 
         render_block_deferred_child_outlines(rdcon, block);
     }
 
-    auto end_time = std::chrono::high_resolution_clock::now();
-    return std::chrono::duration<double, std::milli>(end_time - phase->start_time).count();
+    return time_elapsed_ms_f(phase->start_time, time_now_ns());
 }
 
 static double render_block_paint_children_phase(RenderContext* rdcon, ViewBlock* block) {
@@ -594,11 +593,11 @@ static void render_block_finish_phase(RenderContext* rdcon, ViewBlock* block,
     render_effect_group_finish(&phase->effect_group, block, &rdcon->block.clip);
 
     if (phase->css_clip_scope.active) {
-        auto tc1 = std::chrono::high_resolution_clock::now();
+        uint64_t tc1 = time_now_ns();
         render_clip_pop_scope(rdcon, &phase->css_clip_scope);
-        auto tc2 = std::chrono::high_resolution_clock::now();
+        uint64_t tc2 = time_now_ns();
         render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_CLIP,
-            std::chrono::duration<double, std::milli>(tc2 - tc1).count());
+            time_elapsed_ms_f(tc1, tc2));
     }
 
     render_state_pop_transform(&phase->transform_scope);
@@ -663,16 +662,15 @@ static RenderBlockPaintResult render_block_run_paint_pipeline(RenderContext* rdc
 
 static void render_block_finish_profile(RenderContext* rdcon,
                                         RenderBlockPaintResult* result,
-                                        std::chrono::high_resolution_clock::time_point start_time) {
+                                        uint64_t start_time) {
     if (!rdcon || !result || !result->painted) return;
-    auto rbv_end = std::chrono::high_resolution_clock::now();
-    double this_total = std::chrono::duration<double, std::milli>(rbv_end - start_time).count();
+    double this_total = time_elapsed_ms_f(start_time, time_now_ns());
     render_profiler_add_time(rdcon->profiler, RENDER_PROFILE_BLOCK_SELF,
                              this_total - result->children_time);
 }
 
 void render_block_view(RenderContext* rdcon, ViewBlock* block) {
-    auto rbv_start = std::chrono::high_resolution_clock::now();
+    uint64_t rbv_start = time_now_ns();
     render_profiler_increment(rdcon->profiler, RENDER_PROFILE_BLOCK);
 
     if (render_block_skip_paint(rdcon, block)) return;

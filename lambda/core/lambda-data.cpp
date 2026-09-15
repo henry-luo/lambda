@@ -8,7 +8,7 @@
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
 #include "../../lib/memtrack.h"
-#include "../../lib/checked_math.hpp"
+#include "../../lib/math_checked.hpp"
 #include "../../lib/arena.h"  // for arena_owns() and arena_realloc()
 
 extern __thread EvalContext* context;

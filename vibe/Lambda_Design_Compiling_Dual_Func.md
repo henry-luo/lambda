@@ -3,8 +3,15 @@
 > **Status: IMPLEMENTED — Stage 1 core.** Lambda and LambdaJS now use the
 > source-authoritative dual-entry plan described here: declared boundary
 > admission, inferred fast/slow entries, and closed-world entry elision are
-> implemented. Guard hoisting, lazy slow-body generation, and multi-version
-> specialization remain deliberately future work.
+> implemented. Lazy slow-body generation remains future work.
+> Stage 2 implements bounded exact raw variants for eligible binder-carrying
+> functions, including statically proven direct raw edges, container-pointer
+> keys, and descriptor-identity-bearing map/element keys. `LAMBDA_MIR_TG8_HOIST_GUARDS=1`
+> enables the same guard chain at eligible dynamic local edges; a miss remains
+> the boxed `_b` path. Its conservative loop-region case places one bounded,
+> invariant-identifier guard chain before raw and `_b` `while` siblings;
+> straight-line CSE shares a prior exact-variant selection for the same
+> unmodified identifier in one content sequence.
 >
 > This supersedes the dual-version half of
 > [`Lambda_Box_Unbox.md`](Lambda_Box_Unbox.md) (C-transpiler era; the C path is
@@ -26,16 +33,18 @@ contracts, or their absence, determine which calls are legal and what the body
 means. Neither generated entry is intrinsically authoritative: each is an
 implementation of some part of the source function's domain.
 
-An eligible function may have these two entries:
+An eligible function has a boxed boundary and zero or more private raw entries:
 
 | Version | ABI | Role |
 |---|---|---|
-| **Unboxed** (`<name>`) | native MIR carriers for qualifying params; return ABI chosen independently | declared main body or inferred specialization |
+| **Raw** (`<name>__rawN`) | native MIR carriers for one exact key; return ABI chosen independently | declared main body or one inferred specialization |
 | **Boxed** (`<name>_b`) | all-`Item` params, `Item` return | public checker/trampoline, or inferred dispatcher plus complete slow body |
 
-Exactly **one** unboxed version per function is allowed in this design.
-Multi-version specialization (one version per observed argument shape) is
-future work — see §10.
+The raw set is bounded, immutable, and selected only by exact guards at a
+dynamic boundary. Stage 2 implements deterministic bounded admission for
+eligible binder-carrying functions (§10); the current direct-call lowering
+routes through that same callee guard chain. A future direct-edge elision may
+reuse its exact proof without changing the variant set.
 
 ### 1.1 Typed and untyped functions are different cases
 
@@ -411,10 +420,15 @@ Using a param in float arithmetic does not by itself change an unannotated
 the operation result promotes. A physical `D` carrier is likewise not evidence
 that the binding's semantic type is float.
 
-The refusal documented at
-[:14576–14579](../lambda/runtime/transpile-mir.cpp:14576) ("we no longer
-SPECULATE INT here") may be revisited only after this separation and the slow
-path are green. Land the policy change as a separate, separately measured phase.
+**Implemented scalar first slice, opt-in (2026-09-15).**
+`LAMBDA_MIR_DF12_SPECULATIVE_LIFT=1` permits otherwise-untyped arithmetic-only
+body evidence to select `int` as a raw entry shape. It is not an inferred source
+contract: the existing exact `int` wrapper guard remains the sole proof of the
+raw ABI, and a float, other scalar, or dynamic non-match executes the complete
+boxed slow body. Direct float call-site evidence continues to select `float`
+before this fallback rule. The flag preserves the prior policy by default while
+the Result-suite cost is measured; broader shapes remain deferred. [S1.6,
+D3.3.2v2, D8.3.1v2]
 
 ### DF13 — LambdaJS adopts the same planning matrix
 
@@ -528,16 +542,27 @@ ordinary loop-invariance test, not a new analysis.
   — there is still exactly one definition of the predicate.
 - The failure edge is literally the DF8 path. The optimization can be disabled
   at any point and the program still compiles and runs.
-- It generalizes for free: two calls to native-param functions passing the *same*
-  value in straight-line code share one guard by ordinary CSE, provided the guard
-  is emitted as a plain expression rather than as an opaque intrinsic. Emit it
-  that way.
+- Two eligible calls passing the *same* unmodified identifier in one content
+  sequence share the first exact-key decision. The second call still executes;
+  it branches on the cached variant index (or boxed sentinel) rather than
+  re-emitting the guard chain.
 
-**Gating.** Off by default until P7; each enablement justified by benchmark, not
-by inspection. Before reaching for it on a given site, check whether better
-inference would make the argument statically typed instead — that removes the
-guard entirely rather than relocating it, and is strictly better whenever it is
-available.
+**Implemented first slice (D8.3.4).** `LAMBDA_MIR_TG8_HOIST_GUARDS=1` is off by
+default and emits this same predicate at an eligible fixed-arity local binder
+edge. Each matching arm calls the immutable raw variant, while every miss calls
+`_b`; the matcher is shared with `_b`, so no second guard definition exists.
+For a synchronous `while` with exactly one eligible dynamic call, one unmodified
+identifier argument, and no static direct proof, lowering emits bounded canonical
+raw and `_b` loop siblings: the shared guard chain runs once before entry, each
+matching arm prepares its raw argument once and calls its `__rawN` sibling, and
+the fallthrough sibling calls only `_b`. Other eligible calls retain edge-local
+dispatch. Five optimized release processes
+of `test/benchmark/tg8_guard_hoist.ls` measured 0.26 s with `_b` versus 0.18 s
+enabled. Straight-line CSE is restricted to an identical direct binder callee
+and one identifier argument within a content sequence; content/control and
+side-effect boundaries clear the cached choice. Before enabling it at a new
+site, prefer a static proof, which removes the guard entirely. [S1.6,
+D8.3.1v2–D8.3.4, D8.4.1v2]
 
 **Interaction with DF14.** Hoisting introduces a third syntactic path into the
 unboxed version, but not a third *semantic* one: the hoisted guard is the same
@@ -936,12 +961,12 @@ startup-time cost is not mistaken for a surprise later.
 | **P2** | **Complete.** Exact inferred-shape predicate | `int` and `float` checks never cross-admit |
 | **P3** | **Complete.** Inferred guard failure enters the complete boxed slow body; async/task/proc paths excluded | Source-relative dual-entry tests and forced-GC sweep pass |
 | **P4** | **Complete.** Direct calls prove raw preconditions or route to `_b`; plans control elision | MIR size ratchet rebaselined with checked fixtures |
-| **P5** | **Deferred intentionally.** Broader speculative body-only inference is a separately measured optimization, not needed for correct dual entries | Future Result-suite work |
+| **P5** | **Partially implemented, opt-in scalar slice.** Bare arithmetic may select `int`; an exact wrapper guard retains the complete boxed fallback | `df12_speculative_lift` tiers/forced-GC gate; broader shapes await Result-suite measurement |
 | **P6** | **Complete core.** LambdaJS guard, slow fallback, mismatched-call retention, and mixed native/`Item` signatures | Dedicated JS compiler/coercion/guard tests pass; JS keeps boxed entries |
-| **P7** | **Future optimization.** DF16 guard hoisting remains off and unimplemented | Requires a separate benchmark justification |
+| **P7** | **Complete.** Opt-in edge-local exact-guard dispatch, bounded invariant `while` guard chains, and straight-line selection CSE call raw variants and fall back to `_b` | `tg8_guard_hoist`, `tg8_guard_cse`, and focused tier/GC gates |
 
-P5 and P7 are deliberately outside the completed Stage 1 semantic feature: they
-change optimization policy, not the source-correct fast/slow behavior.
+P5 remains outside the completed Stage 1 semantic feature: its opt-in scalar
+slice changes optimization policy, not the source-correct fast/slow behavior.
 
 ---
 
@@ -959,6 +984,10 @@ change optimization policy, not the source-correct fast/slow behavior.
   only with a forced-boxed/source reference; never call the unboxed entry outside
   its precondition. Include `int` for inferred `float`, `float` for inferred
   `int`, strings, null, errors, and `i64`/`u64` values above 2^53.
+- **DF12 scalar lift.** With `LAMBDA_MIR_DF12_SPECULATIVE_LIFT=1`, prove an
+  arithmetic-only parameter selects the `int` raw body for an exact `int`, while
+  static and dynamic floats take `_b`'s boxed slow body and retain the same
+  result on T0, JIT, and forced-GC JIT.
 - **Closed-world collapse (DF15).** Verify that one exact visible call shape
   omits `_b`, while a deferred or outside-shape caller retains it; adding a later
   caller through whole-unit recompilation must restore the slow body, not create
@@ -984,7 +1013,6 @@ change optimization policy, not the source-correct fast/slow behavior.
 
 ## 9. What this does not do
 
-- No multi-version specialization (one unboxed version only).
 - No bespoke per-call-site checks. DF16 guard *hoisting* is accepted but is P7,
   flag-gated, and never emits a predicate other than DF5's.
 - No runtime type feedback / OSR / tiering.
@@ -993,15 +1021,35 @@ change optimization policy, not the source-correct fast/slow behavior.
 
 ---
 
-## 10. Future: multiple unboxed versions
+## 10. Stage 2: bounded multiple raw versions
 
-Once DF9 is enforced and O6 gives a failure signal, the natural extension is N
-unboxed versions keyed by observed argument shape, with the boxed entry
-dispatching through a small guard chain. The prerequisites are all in this
-design: an exact semantic-shape guard (DF5), a source-equivalent complete slow
-body (DF4), and a source-relative correctness invariant for every specialization
-(DF9). Union-typed params become the first candidate: `int | string` would get
-one `int` version and one `string` version instead of staying boxed.
+D8.3.1v2 authorizes a bounded set of immutable raw variants, not profiling- or
+feedback-driven specialization. The implemented binder slice uses a cap of four
+variants per source function. During compile-time call-site collection, direct
+calls are visited in lexical source order; the compiler forms the complete exact
+semantic-shape key (including binder-slot type identities), deduplicates it,
+and admits the first four eligible keys. The cap is applied before lowering: a
+later key, an abstract/partial key, or a dynamic call never triggers
+compilation, replacement, eviction, or a cache.
+
+Each admitted key has a stable private symbol `name__rawN`. The boxed `name_b`
+entry evaluates the exact guards in that same `N` order, calls the matching raw
+body, and runs its complete boxed source-equivalent body when none match. A
+statically exact local edge selects that predeclared raw symbol directly, so it
+does not repeat the `_b` guard chain; unproven edges still enter `_b`.
+Eligible keys require a fixed-arity, non-closure/non-method/non-variadic `fn`
+signature and either native scalar lanes, normalized `array`/`map`/`range`
+pointer lanes, or a named/nominal map or concrete-element descriptor key. The
+shared guard compares the latter by authoritative descriptor pointer. Static
+direct raw calls remain limited to tag-safe keys; shape-bearing or otherwise
+unproven calls use `_b` or, when the D8.3.4 flag is enabled, its identical
+caller-side guard chain. [S1.6, D8.3.1v2–D8.3.4]
+
+The cap bounds both code size and dispatch length: at most four guards and four
+private bodies per function. It is a compiler-policy constant rather than a
+language promise; adjusting it requires profiling evidence and a revised
+implementation record, while the immutable exact-guard/fallback rules remain
+fixed. [S1.6, D8.3.1v2–D8.3.3, D8.4.1v2]
 
 ---
 
