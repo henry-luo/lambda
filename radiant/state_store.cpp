@@ -1615,13 +1615,6 @@ static bool text_control_set_selection_from_byte_offsets(DocState* state,
     return true;
 }
 
-static DomNode* selection_sync_root_from_boundary(const DomBoundary* boundary) {
-    if (!boundary || !boundary->node) return NULL;
-    DomNode* root = boundary->node;
-    while (root->parent) root = root->parent;
-    return root;
-}
-
 static bool selection_sync_boundary_in_root(DomNode* root, const DomBoundary* boundary) {
     if (!root || !boundary || !boundary->node) return false;
     for (DomNode* cur = boundary->node; cur; cur = cur->parent) {
@@ -1660,7 +1653,8 @@ static bool selection_extend_dom_to_focus(DomSelection* selection,
     }
 
     DomBoundary anchor = dom_selection_anchor_boundary(selection);
-    DomNode* current_root = selection_sync_root_from_boundary(focus);
+    DomNode* current_root = focus
+        ? view_geometry_dom_tree_root(focus->node) : nullptr;
     if (current_root && !selection_sync_boundary_in_root(current_root, &anchor)) {
         DomBoundary rebound_anchor = anchor;
         if (!selection_sync_rebind_boundary(current_root, &anchor, &rebound_anchor)) {
@@ -7578,14 +7572,6 @@ static void focus_set_within_chain(DocState* state, View* view, bool set) {
     }
 }
 
-static View* focus_pseudo_root(View* view) {
-    View* root = view;
-    while (root && root->parent) {
-        root = static_cast<View*>(root->parent);
-    }
-    return root;
-}
-
 static void focus_clear_pseudo_subtree(DocState* state, View* node) {
     if (!state || !node) return;
     focus_set_pseudo(state, node, STATE_FOCUS, PSEUDO_STATE_FOCUS, false);
@@ -7739,8 +7725,8 @@ static void focus_set_internal(DocState* state, View* view, bool from_keyboard,
     focus->from_mouse = !from_keyboard;
     focus->focus_visible = from_keyboard;  // :focus-visible only for keyboard
 
-    View* old_root = focus_pseudo_root(old_focus);
-    View* new_root = focus_pseudo_root(view);
+    View* old_root = view_geometry_tree_root(old_focus);
+    View* new_root = view_geometry_tree_root(view);
     if (old_root) {
         focus_clear_pseudo_subtree(state, old_root);
     }

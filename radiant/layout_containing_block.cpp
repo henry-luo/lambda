@@ -39,14 +39,6 @@ bool layout_element_has_direct_text_content(DomElement* element) {
     return false;
 }
 
-ViewBlock* layout_nearest_block_ancestor(View* view) {
-    View* current = view;
-    while (current && !current->is_block()) {
-        current = current->parent;
-    }
-    return (current && current->is_block()) ? lam::view_require_block(current) : nullptr;
-}
-
 static int layout_collect_flattened_item_children(
         LayoutContext* lycon, ViewBlock* container, DomNode* first_child,
         DomNode** nodes, int capacity, const LayoutFlattenedItemPolicy* policy,

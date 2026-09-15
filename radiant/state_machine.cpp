@@ -379,26 +379,11 @@ static bool same_view_position(View* a_view, int a_offset, View* b_view, int b_o
     return a_view == b_view && a_offset == b_offset;
 }
 
-static DomNode* boundary_root(const DomBoundary* boundary) {
-    if (!boundary || !boundary->node) return NULL;
-    DomNode* root = boundary->node;
-    while (root->parent) root = root->parent;
-    return root;
-}
-
 static uint32_t projection_view_offset_limit(View* view);
-
-static View* focus_validation_root(View* view) {
-    View* root = view;
-    while (root && root->parent) {
-        root = static_cast<View*>(root->parent);
-    }
-    return root;
-}
 
 static bool view_has_document_root(View* view) {
     if (!view) return false;
-    View* root = focus_validation_root(view);
+    View* root = view_geometry_tree_root(view);
     return root != NULL;
 }
 
@@ -501,7 +486,8 @@ static void validate_focus_invariants(DocState* state,
     if (focused && !view_has_document_root(focused)) {
         report_fail(report, "focused target is detached");
     }
-    View* root = focus_validation_root(focused ? focused : state->focus->previous);
+    View* root = view_geometry_tree_root(
+        focused ? focused : state->focus->previous);
     if (!root) return;
 
     uint32_t focus_count = 0;
@@ -552,7 +538,7 @@ static void validate_hover_invariants(DocState* state,
         DomDocument* doc = state->owner_store->document;
         root = doc->root ? static_cast<View*>(doc->root) : NULL;
     }
-    if (!root) root = focus_validation_root(hovered);
+    if (!root) root = view_geometry_tree_root(hovered);
     if (!root) return;
 
     uint32_t hover_count = 0;
@@ -578,7 +564,7 @@ static void validate_active_invariants(DocState* state,
         DomDocument* doc = state->owner_store->document;
         root = doc->root ? static_cast<View*>(doc->root) : NULL;
     }
-    if (!root) root = focus_validation_root(active);
+    if (!root) root = view_geometry_tree_root(active);
     if (!root) return;
 
     uint32_t active_count = 0;
@@ -784,10 +770,10 @@ static void validate_selection_invariants(DocState* state,
         report_fail(report, "DOM selection contains invalid boundary");
     }
 
-    DomNode* anchor_root = boundary_root(&anchor);
-    DomNode* focus_root = boundary_root(&focus);
-    DomNode* start_root = boundary_root(&range->start);
-    DomNode* end_root = boundary_root(&range->end);
+    DomNode* anchor_root = view_geometry_dom_tree_root(anchor.node);
+    DomNode* focus_root = view_geometry_dom_tree_root(focus.node);
+    DomNode* start_root = view_geometry_dom_tree_root(range->start.node);
+    DomNode* end_root = view_geometry_dom_tree_root(range->end.node);
     if (!anchor_root || !focus_root || !start_root || !end_root ||
         anchor_root != focus_root || anchor_root != start_root || anchor_root != end_root) {
         report_fail(report, "DOM selection endpoints are in incompatible roots");

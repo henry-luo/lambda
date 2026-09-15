@@ -2198,6 +2198,11 @@ typedef struct ViewGeometryTextHit {
     float local_x;
 } ViewGeometryTextHit;
 
+View* view_geometry_tree_root(View* view);
+DomNode* view_geometry_dom_tree_root(DomNode* node);
+// A zero maximum_steps deliberately permits an unbounded DOM-only walk.
+DomElement* view_geometry_nearest_dom_element(
+    DomNode* node, uint32_t maximum_steps = 200);
 RdtLogicalPoint view_geometry_node_document_origin(View* view);
 // Sum view origins up to (but excluding) an ancestor. Formatting contexts
 // that ignore inline wrappers use blocks_only for the shared coordinate walk.

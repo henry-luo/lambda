@@ -85,11 +85,7 @@ float flex_resolve_inherited_line_height(LayoutContext* lycon, DomElement* targe
                 lycon, resolved_value, elem, target_font_size);
         }
 
-        DomNode* parent = elem->parent;
-        while (parent && !parent->is_element()) {
-            parent = parent->parent;
-        }
-        elem = parent ? lam::dom_require<DOM_NODE_ELEMENT>(parent) : nullptr;
+        elem = view_geometry_nearest_dom_element(elem->parent, 0);
     }
 
     return 0;

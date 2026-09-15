@@ -1129,7 +1129,11 @@ bool layout_element_has_in_flow_content(DomElement* element,
                                         LayoutTextContentPredicate text_predicate,
                                         LayoutElementContentPredicate element_predicate = nullptr);
 bool layout_element_has_direct_text_content(DomElement* element);
-ViewBlock* layout_nearest_block_ancestor(View* view);
+// Header-defined so dependency-light DOM/range targets share the same walk.
+inline ViewBlock* layout_nearest_block_ancestor(View* view) {
+    while (view && !view->is_block()) view = view->parent;
+    return view ? static_cast<ViewBlock*>(view) : nullptr;
+}
 bool layout_is_initial_containing_block(LayoutContext* lycon, ViewBlock* block);
 
 LayoutContainingBlock layout_containing_block_for_view(ViewBlock* block);

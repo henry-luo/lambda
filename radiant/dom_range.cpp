@@ -315,14 +315,6 @@ void dom_range_invalidate_layout(DomRange* range) {
 // Range invariants & boundary setters
 // ============================================================================
 
-// Walk to the topmost ancestor (no parent). Used to detect cross-root
-// boundary moves (DocumentFragment, sub-document via iframe).
-static DomNode* range_root_of(DomNode* n) {
-    if (!n) return nullptr;
-    while (n->parent) n = n->parent;
-    return n;
-}
-
 // After a Range boundary mutation, if the Range is the active range of an
 // owning DomSelection AND its new root differs from the document root the
 // selection was associated with when the range was added, drop it from the
@@ -333,7 +325,7 @@ static void range_check_cross_root_drop(DomRange* r) {
     DomSelection* s = dom_range_state_selection(r->state);
     if (!s || s->range_count == 0 || s->ranges[0] != r) return;
     if (!s->associated_doc_root) return;
-    DomNode* now_root = range_root_of(r->start.node);
+    DomNode* now_root = view_geometry_dom_tree_root(r->start.node);
     if (now_root != s->associated_doc_root) {
         log_debug("dom_range: dropping range from selection (root changed)");
         // Hold a temp ref so removal doesn't free the range mid-mutation.
@@ -729,7 +721,7 @@ void dom_selection_add_range(DomSelection* s, DomRange* range) {
     // Snapshot the document root for cross-root drop detection (§ Range
     // mutators check this against any future boundary moves).
     if (range->start.node) {
-        s->associated_doc_root = range_root_of(range->start.node);
+        s->associated_doc_root = view_geometry_dom_tree_root(range->start.node);
     }
     sync_anchor_focus(s, /*forward=*/true);
 }
@@ -4173,7 +4165,7 @@ static bool line_stop_list_move(DomBoundary focus,
     if (!focus.node || !out) return false;
     DomElement* root = host;
     if (!root) {
-        DomNode* doc_root = range_root_of(focus.node);
+        DomNode* doc_root = view_geometry_dom_tree_root(focus.node);
         root = doc_root && doc_root->is_element() ? doc_root->as_element() : nullptr;
     }
     if (!root) return false;
@@ -4217,7 +4209,7 @@ DomBoundary dom_boundary_move(DomBoundary b, DomModGranularity gran, int32_t cou
     int32_t n = (count > 0) ? count : -count;
 
     if (gran == DOM_MOD_DOCUMENT) {
-        DomNode* r = range_root_of(b.node);
+        DomNode* r = view_geometry_dom_tree_root(b.node);
         if (dir > 0) {
             DomNode* tail = last_in_subtree(r);
             if (tail && tail->is_text()) return DomBoundary{ tail, dom_text_utf16_length(tail->as_text()) };
