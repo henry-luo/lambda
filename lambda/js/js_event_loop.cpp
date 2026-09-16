@@ -33,7 +33,6 @@ extern "C" Item js_async_hooks_enter_resource(Item resource);
 extern "C" void js_async_hooks_restore_resource(Item previous);
 extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_len);
 extern "C" void js_async_hooks_emit_destroy_resource(Item resource);
-extern "C" Item js_util_promisify_custom_symbol(void);
 extern "C" Item js_als_capture_context(void);
 extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg);
 extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_val, Item* args, int argc);
@@ -1372,12 +1371,6 @@ JS_FORWARD_ITEM(js_setTimeout_promise, (Item delay, Item value, Item options), j
 extern "C" Item js_setTimeout_promisified(Item delay, Item value) {
     Item undef = (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
     return js_setTimeout_promise(delay, value, undef);
-}
-
-extern "C" void js_timer_install_promisify_custom(Item fn_item) {
-    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
-    Item custom_fn = js_new_native_function(js_setTimeout_promisified);
-    js_set_key_default(fn_item, js_util_promisify_custom_symbol(), custom_fn);
 }
 
 extern "C" Item js_setImmediate_promise(Item value, Item options) {

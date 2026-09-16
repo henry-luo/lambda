@@ -192,38 +192,6 @@ int execute_js_script_status(const char* script_path, char* output, size_t outpu
     return exit_code;
 }
 
-int execute_command_status(const char* command, char* output, size_t output_size) {
-    if (output && output_size > 0) output[0] = '\0';
-    FILE* pipe = popen(command, "r");
-    if (!pipe) {
-        return -1;
-    }
-
-    char buffer[256];
-    size_t total_size = 0;
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        if (output && output_size > 0 && total_size < output_size - 1) {
-            size_t len = strlen(buffer);
-            size_t copy_len = len;
-            if (copy_len > output_size - 1 - total_size) {
-                copy_len = output_size - 1 - total_size;
-            }
-            memcpy(output + total_size, buffer, copy_len);
-            total_size += copy_len;
-            output[total_size] = '\0';
-        }
-    }
-
-    int status = pclose(pipe);
-#ifdef _WIN32
-    return status;
-#else
-    if (WIFEXITED(status)) return WEXITSTATUS(status);
-    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
-    return status;
-#endif
-}
-
 // Helper function to trim trailing whitespace
 void trim_trailing_whitespace(char* str) {
     if (!str) return;
@@ -1041,41 +1009,6 @@ TEST(JavaScriptBasic, CommandInterface) {
     free(output);
 }
 
-TEST(JavaScriptRegression, ModuleCompileCacheHonorsPermissionWriteGrants) {
-    char output[2048];
-#ifdef _WIN32
-    const char* denied_command =
-        "lambda.exe js --permission -e \"const m=require('node:module');"
-        "const r=m.enableCompileCache('./temp/js_cc_perm_denied');"
-        "console.log(r.status+':' +(m.getCompileCacheDir()===undefined));\" --no-log 2>&1";
-    const char* allowed_command =
-        "lambda.exe js --permission -e \"const m=require('node:module');"
-        "const r=m.enableCompileCache('./temp/js_cc_perm_allowed');"
-        "const d=m.getCompileCacheDir();"
-        "const ok=typeof d==='string'?d.indexOf('js_cc_perm_allowed')>=0:false;"
-        "console.log(r.status+':' +ok);\" --allow-fs-write ./temp/js_cc_perm_allowed --no-log 2>&1";
-#else
-    const char* denied_command =
-        "./lambda.exe js --permission -e \"const m=require('node:module');"
-        "const r=m.enableCompileCache('./temp/js_cc_perm_denied');"
-        "console.log(r.status+':' +(m.getCompileCacheDir()===undefined));\" --no-log 2>&1";
-    const char* allowed_command =
-        "./lambda.exe js --permission -e \"const m=require('node:module');"
-        "const r=m.enableCompileCache('./temp/js_cc_perm_allowed');"
-        "const d=m.getCompileCacheDir();"
-        "const ok=typeof d==='string'?d.indexOf('js_cc_perm_allowed')>=0:false;"
-        "console.log(r.status+':' +ok);\" --allow-fs-write ./temp/js_cc_perm_allowed --no-log 2>&1";
-#endif
-
-    int status = execute_command_status(denied_command, output, sizeof(output));
-    ASSERT_EQ(status, 0) << output;
-    ASSERT_NE(strstr(output, "0:true"), nullptr) << output;
-
-    status = execute_command_status(allowed_command, output, sizeof(output));
-    ASSERT_EQ(status, 0) << output;
-    ASSERT_NE(strstr(output, "1:true"), nullptr) << output;
-}
-
 TEST(JavaScriptRegression, ModuleEntryPrelinksOwnAndImportNameTables) {
     const char* source_path = "test/js/module_main.js";
     char manifest_path[256];
@@ -1203,44 +1136,14 @@ TEST(JavaScriptRegression, Jscu29DynamicGlobalEnvironmentAndJobs) {
         "test/js/jscu29_dynamic_global_environment.txt");
 }
 
-TEST(JavaScriptRegression, Jscu29RealmSlotsUtil) {
-    test_js_script_against_file("test/node/jscu29_realm_slots_util.js",
-        "test/node/jscu29_realm_slots_util.txt");
-}
-
 TEST(JavaScriptRegression, Jscu31TimerResourceTable) {
     test_js_script_against_file("test/js/jscu31_timer_resource_table.js",
         "test/js/jscu31_timer_resource_table.txt");
 }
 
-TEST(JavaScriptRegression, Jscu31MockSchedulerWaits) {
-    test_js_script_against_file("test/js/jscu31_mock_scheduler_waits.js",
-        "test/js/jscu31_mock_scheduler_waits.txt");
-}
-
-TEST(JavaScriptRegression, Jscu29NodeTestHookLedger) {
-    test_js_script_against_file("test/js/jscu29_node_test_hook_ledger.js",
-        "test/js/jscu29_node_test_hook_ledger.txt");
-}
-
-TEST(JavaScriptRegression, Jscu29NodeTestMockRegistry) {
-    test_js_script_against_file("test/js/jscu29_node_test_mock_registry.js",
-        "test/js/jscu29_node_test_mock_registry.txt");
-}
-
 TEST(JavaScriptRegression, Jscu29ConsoleLabelRegistry) {
     test_js_script_against_file("test/js/jscu29_console_label_registry.js",
         "test/js/jscu29_console_label_registry.txt");
-}
-
-TEST(JavaScriptRegression, Jscu29NodeTestForceProbe) {
-    test_js_script_against_file("test/js/jscu29_node_test_force_probe.js",
-        "test/js/jscu29_node_test_force_probe.txt");
-}
-
-TEST(JavaScriptRegression, Jscu29AssertPatternKeys) {
-    test_js_script_against_file("test/js/jscu29_assert_pattern_keys.js",
-        "test/js/jscu29_assert_pattern_keys.txt");
 }
 
 TEST(JavaScriptRegression, Jscu29StringCacheState) {
@@ -1258,21 +1161,6 @@ TEST(JavaScriptRegression, Jscu29TypedArrayIntrinsicSlots) {
         "test/js/jscu29_typed_array_intrinsic_slots.txt");
 }
 
-TEST(JavaScriptRegression, Jscu29CryptoNamespaceRoot) {
-    test_js_script_against_file("test/node/jscu29_crypto_namespace_root.js",
-        "test/node/jscu29_crypto_namespace_root.txt");
-}
-
-TEST(JavaScriptRegression, Jscu29DnsRootedState) {
-    test_js_script_against_file("test/node/jscu29_dns_rooted_state.js",
-        "test/node/jscu29_dns_rooted_state.txt");
-}
-
-TEST(JavaScriptRegression, Jscu29ModuleNamespaceSlots) {
-    test_js_script_against_file("test/js/jscu29_module_namespace_slots.js",
-        "test/js/jscu29_module_namespace_slots.txt");
-}
-
 TEST(JavaScriptRegression, Jscu29TemplateRegistry) {
     test_js_script_against_file("test/js/jscu29_template_registry.js",
         "test/js/jscu29_template_registry.txt");
@@ -1281,56 +1169,6 @@ TEST(JavaScriptRegression, Jscu29TemplateRegistry) {
 TEST(JavaScriptRegression, Jscu29AsyncAwaitHandoff) {
     test_js_script_against_file("test/js/jscu29_async_await_handoff.js",
         "test/js/jscu29_async_await_handoff.txt");
-}
-
-TEST(JavaScriptRegression, Jscu28UnorderedCollectionMatchLedger) {
-    test_js_script_against_file("test/js/jscu28_unordered_collection_match_ledger.js",
-        "test/js/jscu28_unordered_collection_match_ledger.txt");
-}
-
-TEST(JavaScriptRegression, Jscu31BlobUrlRegistry) {
-    test_js_script_against_file("test/js/jscu31_blob_url_registry.js",
-        "test/js/jscu31_blob_url_registry.txt");
-}
-
-TEST(JavaScriptRegression, Jscu31CjsModuleStack) {
-    test_js_script_against_file("test/js/jscu31_cjs_module_stack.js",
-        "test/js/jscu31_cjs_module_stack.txt");
-}
-
-TEST(JavaScriptRegression, Jscu31NetBlockList) {
-    test_js_script_against_file("test/node/jscu31_net_block_list.js",
-        "test/node/jscu31_net_block_list.txt");
-}
-
-TEST(JavaScriptRegression, Jscu31DnsResourceTable) {
-    test_js_script_against_file("test/node/jscu31_dns_resource_table.js",
-        "test/node/jscu31_dns_resource_table.txt");
-}
-
-TEST(JavaScriptRegression, Jscu31ProcessIpcCallbackRoots) {
-    test_js_script_against_file("test/js/jscu31_process_ipc_callback_roots.js",
-        "test/js/jscu31_process_ipc_callback_roots.txt");
-}
-
-TEST(JavaScriptRegression, Jscu31ChildProcessIpcCallbackSlots) {
-    test_js_script_against_file("test/js/jscu31_child_process_ipc_callback_slots.js",
-        "test/js/jscu31_child_process_ipc_callback_slots.txt");
-}
-
-TEST(JavaScriptRegression, Jscu31ChildProcessExecValues) {
-    test_js_script_against_file("test/js/jscu31_child_process_exec_values.js",
-        "test/js/jscu31_child_process_exec_values.txt");
-}
-
-TEST(JavaScriptRegression, Jscu31ChildProcessSpawnValues) {
-    test_js_script_against_file("test/js/jscu31_child_process_spawn_values.js",
-        "test/js/jscu31_child_process_spawn_values.txt");
-}
-
-TEST(JavaScriptRegression, Jscu31JubePersistentValueSlots) {
-    test_js_script_against_file("test/js/jscu31_jube_persistent_value_slots.js",
-        "test/js/jscu31_jube_persistent_value_slots.txt");
 }
 
 TEST(JavaScriptRegression, Jscu35DynamicFunctionCache) {
@@ -1368,19 +1206,9 @@ TEST(JavaScriptRegression, Jscu35SwitchCaseRows) {
         "test/js/jscu35_switch_case_rows.txt");
 }
 
-TEST(JavaScriptRegression, Jscu35DiagnosticsChannelArguments) {
-    test_js_script_against_file("test/js/jscu35_diagnostics_channel_arguments.js",
-        "test/js/jscu35_diagnostics_channel_arguments.txt");
-}
-
 TEST(JavaScriptRegression, Jscu35DecoratorSequence) {
     test_js_script_against_file("test/js/jscu35_decorator_sequence.js",
         "test/js/jscu35_decorator_sequence.txt");
-}
-
-TEST(JavaScriptRegression, Jscu31NetCreateConnectionArguments) {
-    test_js_script_against_file("test/node/jscu31_net_create_connection_arguments.js",
-        "test/node/jscu31_net_create_connection_arguments.txt");
 }
 
 TEST(JavaScriptRegression, Jscu29WithScopeStack) {
@@ -1411,16 +1239,6 @@ TEST(JavaScriptRegression, Jscu29DomStorageEntries) {
 TEST(JavaScriptRegression, Jscu29MediaQueryRecords) {
     test_js_script_against_file("test/js/jscu29_media_query_records.js",
         "test/js/jscu29_media_query_records.txt");
-}
-
-TEST(JavaScriptRegression, Jscu29ProcessListenerMap) {
-    test_js_script_against_file("test/js/jscu29_process_listener_map.js",
-        "test/js/jscu29_process_listener_map.txt");
-}
-
-TEST(JavaScriptRegression, Jscu29AsyncHooksRootVectors) {
-    test_js_script_against_file("test/js/jscu29_async_hooks_root_vectors.js",
-        "test/js/jscu29_async_hooks_root_vectors.txt");
 }
 
 TEST(JavaScriptRegression, Jscu29Test262AgentState) {

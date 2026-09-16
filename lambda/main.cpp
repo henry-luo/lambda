@@ -905,11 +905,6 @@ extern "C" {
     void js_process_emit_exit(int code);
     int js_process_current_exit_code(void);
     Item js_process_set_exitCode(Item code_item);
-    void js_node_test_reset(void);
-    void js_node_test_reset_counts(void);
-    int js_node_test_total_count(void);
-    int js_node_test_pass_count(void);
-    int js_node_test_fail_count(void);
     void js_promise_set_unhandled_rejections_mode(int64_t strict_mode);
     void js_set_stack_size_kb(int64_t kb);
 }
@@ -2050,8 +2045,6 @@ static int node_runner_run_file(const char* exe_path, const char* file,
     Runtime runtime;
     runtime_init(&runtime);
     lambda_stack_init();
-    js_node_test_reset();
-    js_node_test_reset_counts();
 
     const char* js_argv_store[2];
     js_argv_store[0] = exe_path;
@@ -2083,10 +2076,7 @@ static int node_runner_run_file(const char* exe_path, const char* file,
         else exit_code = js_process_current_exit_code();
         mem_free(js_source);
     }
-    *total += js_node_test_total_count();
-    *pass += js_node_test_pass_count();
-    *fail += js_node_test_fail_count();
-    if (exit_code != 0 && js_node_test_fail_count() == 0) (*fail)++;
+    if (exit_code != 0) (*fail)++;
 
     runtime_cleanup(&runtime);
     return exit_code;

@@ -1,4 +1,4 @@
-// @document dom2_library_probe.html
+// @document ../js/dom2_library_probe.html
 (0, eval)(require('fs').readFileSync('test/js/micromodal.min.js', 'utf8'));
 
 var trigger = document.getElementById('modal-trigger');
