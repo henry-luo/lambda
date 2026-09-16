@@ -1,6 +1,11 @@
 # Lambda Design: Type Narrowing, Specialization, and Generics
 
-**Status**: PARTIALLY IMPLEMENTED (rev 15, 2026-09-15; TG19 `<:` is implemented in the direct parser, interpreter, and MIR boxed entry; TGO14(a) is CLOSED: its spelling is `<:`; TGO14(c) is CLOSED by S9.2.1's value-semantics covariance ruling. TGO14(b) function-type variance remains open. TG2, TG3, TG3a's parameter-only `x: as T` shorthand, TG5, TG6v2, TG7 boundary admission, TG9, TG13v2, TG15–TG18 are implemented across the interpreter and MIR boxed entry. TG8 has a fixed four-variant raw plan; `_b` retains its ordered exact guards and boxed fallback, including descriptor-pointer guards for named/nominal maps and concrete elements. Statically exact tag-safe local edges select raw bodies directly; `LAMBDA_MIR_TG8_HOIST_GUARDS=1` enables that guard chain at eligible dynamic local edges, selects one of the bounded raw siblings or the `_b` sibling for an invariant identifier call in a synchronous `while`, and shares a raw-index or boxed choice for repeated same-callee/same-identifier calls in one content sequence; every miss falls through to `_b`. rev 8: TG13v2 multiple binder sites for one name = JOIN over the S4.4 lattice + nominal base chain, never unions, two-pass bind-then-check, same bound at every site (single-binder TG4 asymmetry kept as the "dictating parameter" form); TG20v2 static binds the narrowest statically known type, exact bindings authoritative, abstract bindings never elide the runtime check (TG7 and the gradual guarantee hold); TG22 binders confined to `fn`/`pn` signatures for now (levels 2/3 deferred); TG19 relation ratified; expression-position cast `x as T` anticipated (TGO2 note); TG21 explicit type parameters are never elided, TGO3 CLOSED; TG20 two-tier binding RATIFIED, TGO1 CLOSED; TG18 container/unbound binding and TG19 `<:` operator RATIFIED, TGO4/TGO11/TGO13 CLOSED; TGO2 CLOSED — the binder keyword is `as`; TG5 RATIFIED; TG6v2 bound is a direct field of the binder record; TG14v2 inter-binder relations are ordinary `that` value predicates; TG15 `as` precedence; TG16 `that` before `as`; TG17 binder scope, return-position and `var` rules; TGO7 let/var binders confirmed out; TGO11–TGO13 added; Appendix S superseded rulings; Appendix I implementation notes. rev 6, 2026-08-08: TG4 RATIFIED, TG10 three binder levels, TG12 "Type Binder" RATIFIED, TG13 unification road reserved, TG14, §6 catalog → TGO10)
+**Status**: PARTIALLY IMPLEMENTED (rev 16, 2026-09-16; TG19 `<:` is implemented in the direct parser, interpreter, and MIR boxed entry; TGO14(a) is CLOSED: its spelling is `<:`; TGO14(c) is CLOSED by S9.2.1's value-semantics covariance ruling. TGO14(b) function-type variance remains open. TG2, TG3, TG3a's parameter-only `x: as T` shorthand, TG5, TG6v2, TG7 boundary admission, TG9, TG13v2, TG15–TG18 are implemented across the interpreter and MIR boxed entry. TG8 has a fixed four-variant raw plan; `_b` retains its ordered exact guards and boxed fallback, including descriptor-pointer guards for named/nominal maps and concrete elements. Statically exact tag-safe local edges select raw bodies directly; `LAMBDA_MIR_TG8_HOIST_GUARDS=1` enables that guard chain at eligible dynamic local edges, selects one of the bounded raw siblings or the `_b` sibling for an invariant identifier call in a synchronous `while`, and shares a raw-index or boxed choice for repeated same-callee/same-identifier calls in one content sequence; every miss falls through to `_b`. rev 8: TG13v2 multiple binder sites for one name = JOIN over the S4.4 lattice + nominal base chain, never unions, two-pass bind-then-check, same bound at every site (single-binder TG4 asymmetry kept as the "dictating parameter" form); TG20v2 static binds the narrowest statically known type, exact bindings authoritative, abstract bindings never elide the runtime check (TG7 and the gradual guarantee hold); TG22 binders confined to `fn`/`pn` signatures for now (levels 2/3 deferred); TG19 relation ratified; expression-position cast `x as T` anticipated (TGO2 note); TG21 explicit type parameters are never elided, TGO3 CLOSED; TG20 two-tier binding RATIFIED, TGO1 CLOSED; TG18 container/unbound binding and TG19 `<:` operator RATIFIED, TGO4/TGO11/TGO13 CLOSED; TGO2 CLOSED — the binder keyword is `as`; TG5 RATIFIED; TG6v2 bound is a direct field of the binder record; TG14v2 inter-binder relations are ordinary `that` value predicates; TG15 `as` precedence; TG16 `that` before `as`; TG17 binder scope, return-position and `var` rules; TGO7 let/var binders confirmed out; TGO11–TGO13 added; Appendix S superseded rulings; Appendix I implementation notes. rev 6, 2026-08-08: TG4 RATIFIED, TG10 three binder levels, TG12 "Type Binder" RATIFIED, TG13 unification road reserved, TG14, §6 catalog → TGO10)
+**Revision 16 (2026-09-16).** D8.3.4v2 admits fixed-arity task-free
+synchronous `pn` binder functions with immutable parameters to TG8's direct
+raw variants. `var` parameters and procedures that may await or require a task
+context remain boxed; D8.3.4v2 guard hoisting remains `fn`-only.
+
 **Ledger prefix**: `TG#` (decisions), `TGO#` (open issues)
 **Related**:
 - `doc/Lambda_Formal_Semantics.md` — S1.6 (representation invisible), S1.7 (one
@@ -376,7 +381,7 @@ statically known `type`-valued argument (a type literal or module-level type
 binding) is therefore part of the key — Zig's comptime tier as an optimization
 rather than a semantic. S1.6 makes all of it unobservable.
 
-**Bounded admission (D8.3.1v2).** The compiler walks qualifying direct call
+**Bounded admission (D8.3.1v2, D8.3.4v2).** The compiler walks qualifying direct call
 sites in source order, deduplicates exact keys, and admits the first four per
 function in the initial implementation. A key is never replaced or evicted;
 later, dynamic, partial, or ineligible calls use `_b`. `_b` checks variants in
@@ -384,7 +389,10 @@ that same stable order using only exact semantic-shape guards, then runs the
 complete boxed source-equivalent body on a miss. The number four is an
 implementation cap chosen for predictable code size and is intentionally not a
 semantic limit; it may change only with measurements and updated implementation
-evidence. [S1.6, D8.3.1v2, D8.3.2–D8.3.3, D8.4.1v2]
+evidence. Fixed-arity task-free synchronous `pn` functions with immutable
+parameters participate at statically exact edges only; `var` parameters,
+procedures that may await or require a task context, and all guard hoists stay
+boxed. [S1.6, D8.3.1v2–D8.3.4v2, D8.4.1v2]
 
 #### TG9 — `T` is a value in body scope
 
