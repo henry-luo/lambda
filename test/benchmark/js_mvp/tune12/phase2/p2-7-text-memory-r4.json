@@ -1,0 +1,67 @@
+{
+  "text": {
+    "microdiff": {
+      "category": "data-diff",
+      "mir": null,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 151.3,
+      "mvpjs": null,
+      "quickjs": null,
+      "nodejs": null,
+      "python": null,
+      "_raw_bytes": {
+        "mir": null,
+        "c2mir": null,
+        "go": null,
+        "lambdajs": 158646272,
+        "mvpjs": null,
+        "quickjs": null,
+        "nodejs": null,
+        "python": null
+      }
+    },
+    "hyphen": {
+      "category": "hyphenation",
+      "mir": null,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 1481.94,
+      "mvpjs": null,
+      "quickjs": null,
+      "nodejs": null,
+      "python": null,
+      "_raw_bytes": {
+        "mir": null,
+        "c2mir": null,
+        "go": null,
+        "lambdajs": 1553924096,
+        "mvpjs": null,
+        "quickjs": null,
+        "nodejs": null,
+        "python": null
+      }
+    },
+    "prettier_ast": {
+      "category": "formatting",
+      "mir": null,
+      "c2mir": null,
+      "go": null,
+      "lambdajs": 1389.09,
+      "mvpjs": null,
+      "quickjs": null,
+      "nodejs": null,
+      "python": null,
+      "_raw_bytes": {
+        "mir": null,
+        "c2mir": null,
+        "go": null,
+        "lambdajs": 1456570368,
+        "mvpjs": null,
+        "quickjs": null,
+        "nodejs": null,
+        "python": null
+      }
+    }
+  }
+}

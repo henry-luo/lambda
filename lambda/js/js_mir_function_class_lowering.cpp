@@ -1325,8 +1325,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             param_node = param_node ? param_node->next : NULL;
         }
 
-        MIR_type_t native_ret_type = JM_JS_FACT(fc, native_return_kind) == NATIVE_RETURN_FLOAT
-            ? MIR_T_D : MIR_T_I64;
+        MIR_type_t native_ret_type = JM_JS_FACT(fc, native_return_kind) ==
+            NATIVE_RETURN_FLOAT ? MIR_T_D : MIR_T_I64;
         FnVariantAnalysis* native_variant = fn_analysis_variant(jm_function_analysis(fc),
             FN_ENTRY_NATIVE_BODY);
         MIR_type_t native_results[2] = {native_ret_type, MIR_T_I64};
@@ -1411,18 +1411,25 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 JsAstNode* s = blk->statements;
                 while (s) { jm_transpile_statement(mt, s); s = s->next; }
             } else {
-                // Expression body (arrow function): return native value
-                MIR_reg_t val = jm_transpile_as_native(mt, fn->body,
-                    JM_JS_FACT(fc, return_type));
+                // Item-return entries keep a boxed completion but can still
+                // use native locals while evaluating their expression body.
+                MIR_reg_t val = JM_JS_FACT(fc, native_return_kind) ==
+                    NATIVE_RETURN_ITEM ? jm_transpile_box_item(mt, fn->body) :
+                    jm_transpile_as_native(mt, fn->body,
+                        JM_JS_FACT(fc, return_type));
                 jm_emit_ret(mt, val);
                 goto finish_native;
             }
         }
 
-        // Implicit return 0 (native)
+        // Native numeric entries use zero; an Item-return entry follows the
+        // JavaScript implicit-return rule without converting it to Number.
         {
             MIR_reg_t zero = jm_new_reg(mt, "ret0", native_ret_type);
-            if (native_ret_type == MIR_T_D) {
+            if (JM_JS_FACT(fc, native_return_kind) == NATIVE_RETURN_ITEM) {
+                jm_emit_reg_op(mt, MIR_MOV, zero,
+                    MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED));
+            } else if (native_ret_type == MIR_T_D) {
                 jm_emit_reg_op(mt, MIR_DMOV, zero, MIR_new_double_op(mt->ctx, 0.0));
             } else {
                 jm_emit_reg_op(mt, MIR_MOV, zero, MIR_new_int_op(mt->ctx, 0));
@@ -1457,7 +1464,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
         log_debug("js-mir P4: generated native version %s (params: %d, ret: %s)",
             native_name, param_count,
-            JM_JS_FACT(fc, return_type) == LMD_TYPE_INT ? "INT" : "FLOAT");
+            JM_JS_FACT(fc, native_return_kind) == NATIVE_RETURN_ITEM ? "ITEM" :
+                JM_JS_FACT(fc, return_type) == LMD_TYPE_INT ? "INT" : "FLOAT");
     }
 
     // --- v15: Generate generator state machine function if is_generator ---
@@ -2105,7 +2113,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         MirCallResult native_call = jm_call_direct_native(mt, fc,
             param_count, native_args, false);
         MIR_reg_t native_result = jm_finish_native_call(mt, native_call);
-        MIR_reg_t boxed_result = jm_box_native(mt, native_result, JM_JS_FACT(fc, return_type));
+        MIR_reg_t boxed_result = JM_JS_FACT(fc, native_return_kind) ==
+            NATIVE_RETURN_ITEM ? native_result : jm_box_native(mt, native_result,
+                JM_JS_FACT(fc, return_type));
         if (fn->is_async && !fn->is_generator) {
             // The fast path returns the body's value directly, but an async
             // function still owes its caller its own result promise — the

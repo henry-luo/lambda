@@ -1,0 +1,2 @@
+typed:8
+ordinary:3

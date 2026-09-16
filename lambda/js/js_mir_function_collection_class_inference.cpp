@@ -87,7 +87,8 @@ bool jm_call_result_uses_native_register(JsMirTranspiler* mt, JsCallNode* call, 
     // through the boxed entry, whose slow lane can return any JavaScript value.
     // Reporting the inferred raw return here would make its caller unbox an
     // already boxed string/object result.
-    return JM_JS_FACT(fc, native_return_kind) != NATIVE_RETURN_NONE && fc->native_func_item &&
+    return JM_JS_FACT(fc, native_return_kind) != NATIVE_RETURN_NONE &&
+        JM_JS_FACT(fc, native_return_kind) != NATIVE_RETURN_ITEM && fc->native_func_item &&
         jm_resolve_native_call(mt, call) == fc;
 }
 
@@ -761,6 +762,38 @@ static bool jm_infer_is_non_numeric_literal(JsAstNode* node) {
         lit->literal_type == AST_LITERAL_NULL || lit->literal_type == AST_LITERAL_BOOLEAN;
 }
 
+static bool jm_infer_identifier_has_numeric_literal_initializer(JsAstNode* node,
+        bool* is_float) {
+    if (is_float) *is_float = false;
+    if (!node || node->node_type != AST_NODE_IDENT) return false;
+    NameEntry* entry = ((JsIdentifierNode*)node)->entry;
+    if (!entry || !entry->node) return false;
+    JsAstNode* definition = (JsAstNode*)entry->node;
+    JsVariableDeclaratorNode* declaration = NULL;
+    if (definition->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+        declaration = (JsVariableDeclaratorNode*)definition;
+    } else if (definition->node_type == AST_NODE_VAR_STAM) {
+        JsVariableDeclarationNode* statement =
+            (JsVariableDeclarationNode*)definition;
+        for (JsAstNode* item = statement->declarations; item; item = item->next) {
+            if (item->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
+            JsVariableDeclaratorNode* candidate =
+                (JsVariableDeclaratorNode*)item;
+            if (candidate->entry == entry || (candidate->id &&
+                    candidate->id->node_type == AST_NODE_IDENT &&
+                    ((JsIdentifierNode*)candidate->id)->entry == entry)) {
+                declaration = candidate;
+                break;
+            }
+        }
+    }
+    if (!declaration || !declaration->init) return false;
+    if (jm_infer_is_int_literal(declaration->init)) return true;
+    if (!jm_infer_is_float_literal(declaration->init)) return false;
+    if (is_float) *is_float = true;
+    return true;
+}
+
 // Consume one indexed node. Child expressions are visited independently by
 // AstIndex, so inference no longer needs a second recursive tree walk.
 static void jm_infer_indexed_node(JsMirTranspiler* mt, JsAstNode* node,
@@ -794,15 +827,31 @@ static void jm_infer_indexed_node(JsMirTranspiler* mt, JsAstNode* node,
             if (ri >= 0) evidence[ri].int_evidence++;
         }
         if (comparison) {
+            bool left_float = false;
+            bool right_float = false;
+            bool left_numeric_local =
+                jm_infer_identifier_has_numeric_literal_initializer(bin->left,
+                    &left_float);
+            bool right_numeric_local =
+                jm_infer_identifier_has_numeric_literal_initializer(bin->right,
+                    &right_float);
             if (li >= 0 && jm_infer_is_non_numeric_literal(bin->right)) evidence[li].compared_with_non_numeric = true;
             if (ri >= 0 && jm_infer_is_non_numeric_literal(bin->left)) evidence[ri].compared_with_non_numeric = true;
             if (li >= 0 && !jm_infer_is_non_numeric_literal(bin->right)) {
                 if (jm_infer_is_int_literal(bin->right)) evidence[li].int_evidence++;
                 else if (jm_infer_is_float_literal(bin->right)) evidence[li].float_evidence++;
+                else if (right_numeric_local) {
+                    if (right_float) evidence[li].float_evidence++;
+                    else evidence[li].int_evidence++;
+                }
             }
             if (ri >= 0 && !jm_infer_is_non_numeric_literal(bin->left)) {
                 if (jm_infer_is_int_literal(bin->left)) evidence[ri].int_evidence++;
                 else if (jm_infer_is_float_literal(bin->left)) evidence[ri].float_evidence++;
+                else if (left_numeric_local) {
+                    if (left_float) evidence[ri].float_evidence++;
+                    else evidence[ri].int_evidence++;
+                }
             }
         }
         if (bin->op == OPERATOR_JS_NULLISH_COALESCE && li >= 0)
@@ -1576,6 +1625,31 @@ static void jm_numeric_return_collect_candidate(JmNumericReturnContext* context)
     candidate->valid = candidate->valid && has_return;
 }
 
+static bool jm_function_has_numeric_local_facts(JsMirTranspiler* mt,
+        JsFuncCollected* fc) {
+    if (!mt || !fc || !mt->tp) return false;
+    AstIndex* index = &mt->tp->ast_index;
+    for (uint32_t node_id = 0; node_id < index->count; node_id++) {
+        if (index->owner_functions[node_id] != fc->function_id ||
+                !index->nodes[node_id] || index->nodes[node_id]->node_type !=
+                AST_NODE_VARIABLE_DECLARATOR) {
+            continue;
+        }
+        JsVariableDeclaratorNode* declarator =
+            (JsVariableDeclaratorNode*)index->nodes[node_id];
+        if (!declarator->id || declarator->id->node_type != AST_NODE_IDENT) continue;
+        JmNumericReturnCandidate candidate = {};
+        candidate.valid = true;
+        JmNumericReturnContext context = {mt, fc, &candidate};
+        if (jm_numeric_return_binding_fact(&context,
+                ((JsIdentifierNode*)declarator->id)->entry) ==
+                JM_NUMERIC_RETURN_NUMBER && candidate.valid) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void jm_infer_native_numeric_returns(JsMirTranspiler* mt) {
     if (!mt || mt->func_count <= 0) return;
     JmNumericReturnCandidate* candidates = (JmNumericReturnCandidate*)mem_calloc(
@@ -1587,6 +1661,7 @@ void jm_infer_native_numeric_returns(JsMirTranspiler* mt) {
     for (int index = 0; index < mt->func_count; index++) {
         JsFuncCollected* fc = &mt->func_entries[index];
         JM_JS_FACT(fc, native_numeric_proven) = false;
+        JM_JS_FACT(fc, has_numeric_local_facts) = false;
         JmNumericReturnContext context = {mt, fc, &candidates[index]};
         jm_numeric_return_collect_candidate(&context);
     }
@@ -1652,6 +1727,8 @@ void jm_infer_native_numeric_returns(JsMirTranspiler* mt) {
     for (int index = 0; index < mt->func_count; index++) {
         JsFuncCollected* fc = &mt->func_entries[index];
         JM_JS_FACT(fc, native_numeric_proven) = candidates[index].proven;
+        JM_JS_FACT(fc, has_numeric_local_facts) =
+            jm_function_has_numeric_local_facts(mt, fc);
         if (candidates[index].proven) {
             JM_JS_FACT(fc, return_type) = LMD_TYPE_FLOAT;
             log_debug("js-mir T12-2: native Number return proven for %s",
@@ -1661,9 +1738,12 @@ void jm_infer_native_numeric_returns(JsMirTranspiler* mt) {
     mem_free(candidates);
 }
 
-void jm_populate_native_number_binding_facts(JsMirTranspiler* mt,
-        JsFuncCollected* fc, FnVariantAnalysis* native) {
-    if (!mt || !fc || !native || !JM_JS_FACT(fc, native_numeric_proven)) return;
+void jm_populate_numeric_binding_facts(JsMirTranspiler* mt,
+        JsFuncCollected* fc, FnVariantAnalysis* body) {
+    // Local Number representation belongs to the source body, not to its
+    // return ABI. A boxed or undefined completion can still contain a wholly
+    // numeric local region (D3.3.2v2).
+    if (!mt || !fc || !body) return;
     AstIndex* index = &mt->tp->ast_index;
     int capacity = 0;
     for (uint32_t node_id = 0; node_id < index->count; node_id++) {
@@ -1674,10 +1754,10 @@ void jm_populate_native_number_binding_facts(JsMirTranspiler* mt,
         }
     }
     if (capacity == 0) return;
-    native->bindings = (FnBindingAnalysis*)pool_calloc(mt->tp->pool,
-        sizeof(*native->bindings) * (size_t)capacity);
-    if (!native->bindings) {
-        log_error("js-mir T12-2: native binding facts allocation failed for %s",
+    body->bindings = (FnBindingAnalysis*)pool_calloc(mt->tp->pool,
+        sizeof(*body->bindings) * (size_t)capacity);
+    if (!body->bindings) {
+        log_error("js-mir T12-P2-3: numeric binding facts allocation failed for %s",
             fc->name);
         return;
     }
@@ -1698,20 +1778,32 @@ void jm_populate_native_number_binding_facts(JsMirTranspiler* mt,
                 JM_NUMERIC_RETURN_NUMBER || !candidate.valid) {
             continue;
         }
-        FnBindingAnalysis* fact = &native->bindings[native->binding_count++];
+        FnBindingAnalysis* fact = &body->bindings[body->binding_count++];
         *fact = {identifier->entry, LMD_TYPE_FLOAT, VALUE_REP_F64,
             JIT_VALUE_NON_GC_SCALAR, BINDING_STORAGE_REGISTER, 0};
     }
 }
 
-TypeId jm_native_number_binding_type(JsMirTranspiler* mt, NameEntry* binding) {
+TypeId jm_numeric_binding_type(JsMirTranspiler* mt, NameEntry* binding) {
     if (!mt || !mt->current_fc || !binding) return LMD_TYPE_ANY;
-    FnVariantAnalysis* native = fn_analysis_variant(
-        jm_function_analysis(mt->current_fc), FN_ENTRY_NATIVE_BODY);
-    if (!native) return LMD_TYPE_ANY;
-    for (int index = 0; index < native->binding_count; index++) {
-        if (native->bindings[index].name == binding) {
-            return native->bindings[index].semantic_type;
+    FnAnalysis* analysis = jm_function_analysis(mt->current_fc);
+    FnVariantAnalysis* body = fn_analysis_variant(analysis,
+        mt->in_native_func ? FN_ENTRY_NATIVE_BODY : FN_ENTRY_BOXED_BODY);
+    if (body) {
+        for (int index = 0; index < body->binding_count; index++) {
+            if (body->bindings[index].name == binding) {
+                return body->bindings[index].semantic_type;
+            }
+        }
+    }
+    // Native entries share the source body's identity proof. Do not duplicate
+    // the fact table merely because the entry's return representation differs.
+    if (mt->in_native_func) {
+        body = fn_analysis_variant(analysis, FN_ENTRY_BOXED_BODY);
+        for (int index = 0; body && index < body->binding_count; index++) {
+            if (body->bindings[index].name == binding) {
+                return body->bindings[index].semantic_type;
+            }
         }
     }
     return LMD_TYPE_ANY;

@@ -690,9 +690,9 @@ void jm_infer_param_types(JsMirTranspiler* mt, JsFuncCollected* fc);
 bool jm_add_chain_has_string(JsAstNode* expr);
 void jm_infer_return_type(JsMirTranspiler* mt, JsFuncCollected* fc);
 void jm_infer_native_numeric_returns(JsMirTranspiler* mt);
-void jm_populate_native_number_binding_facts(JsMirTranspiler* mt,
-    JsFuncCollected* fc, FnVariantAnalysis* native);
-TypeId jm_native_number_binding_type(JsMirTranspiler* mt, NameEntry* binding);
+void jm_populate_numeric_binding_facts(JsMirTranspiler* mt,
+    JsFuncCollected* fc, FnVariantAnalysis* body);
+TypeId jm_numeric_binding_type(JsMirTranspiler* mt, NameEntry* binding);
 ScalarReturnClass jm_infer_boxed_return_scalar_class(JsMirTranspiler* mt,
     JsFuncCollected* fc);
 void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,

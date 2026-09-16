@@ -91,6 +91,7 @@ LAMBDA_BASELINE_TEST_PROJECTS := \
 	test_js_test262_gtest \
 	test_compiler_pass_gtest \
 	test_js_bt_regex_gtest \
+	test_js_regex_router_poc_gtest \
 	test_js_coerce_gtest \
 	test_lambda_std_gtest \
 	test_ts_gtest
@@ -822,6 +823,9 @@ build-release:
 	@$(MAKE) build-release-compile
 
 build-release-compile: $(RE2_LIB) $(MIR_LIB)
+	@# debug and release share lambda.exe; force the release relink when a
+	@# newer debug-profile host would otherwise satisfy the target timestamp.
+	@rm -f lambda.exe
 	@echo "Building release version using Premake build system..."
 	@echo "Optimizations: LTO, dead code elimination, symbol visibility, stripped logging"
 	$(call toolchain_verify)

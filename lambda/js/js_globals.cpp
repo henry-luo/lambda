@@ -17051,20 +17051,52 @@ static void js_intrinsic_invalidate_class(int class_id, Item key) {
     }
 }
 
+static bool js_intrinsic_cached_prototype_matches(Item object,
+        int class_id) {
+    Item* prototype = js_intrinsic_prototype_slot_existing(class_id);
+    return prototype && prototype->item != 0 &&
+        prototype->item == object.item;
+}
+
+static bool js_intrinsic_invalidate_cached_prototype(Item object, Item key) {
+    JsClass class_id = js_class_id(object);
+    if (class_id <= JS_CLASS_NONE || class_id >= JS_CLASS__COUNT) return false;
+    if (!js_intrinsic_cached_prototype_matches(object, class_id)) return false;
+    js_intrinsic_invalidate_class((int)class_id, key);
+    // The guarded Array hole path includes Object.prototype. Its mutation
+    // therefore also invalidates Array's clean-chain fact.
+    if (class_id == JS_CLASS_OBJECT) {
+        js_intrinsic_invalidate_class((int)JS_CLASS_ARRAY, key);
+    }
+    return true;
+}
+
+static bool js_intrinsic_invalidate_unknown_prototype(Item object, Item key) {
+    // Input-built Maps without JS class metadata are not common runtime
+    // receivers. Retain the complete identity scan for them rather than
+    // treating an absent class tag as proof that no intrinsic can observe it.
+    if (get_type_id(object) != LMD_TYPE_MAP ||
+            js_class_id(object) != JS_CLASS_NONE) return false;
+    for (int class_id = (int)JS_CLASS_NONE + 1;
+         class_id < (int)JS_CLASS__COUNT; class_id++) {
+        if (!js_intrinsic_cached_prototype_matches(object, class_id)) continue;
+        js_intrinsic_invalidate_class(class_id, key);
+        return true;
+    }
+    return false;
+}
+
 extern "C" void js_intrinsic_note_property_mutation(Item object, Item key) {
-    js_intrinsic_state_ensure_epoch();
     // Lazy intrinsic construction uses ordinary property writers; treating
     // those bootstrap stores as user tampering permanently disabled pristine paths.
     if (js_intrinsic_state.initialization_depth > 0) return;
-    bool invalidated = false;
-    for (int class_id = (int)JS_CLASS_NONE + 1;
-         class_id < (int)JS_CLASS__COUNT; class_id++) {
-        Item* proto_slot = js_intrinsic_prototype_slot_existing(class_id);
-        if (proto_slot && proto_slot->item == object.item) {
-            js_intrinsic_invalidate_class(class_id, key);
-            invalidated = true;
-        }
-    }
+    // Ordinary writes only need to compare against the one intrinsic prototype
+    // selected by their immutable class metadata. The legacy all-class scan is
+    // retained solely for classless Input Maps, whose representation does not
+    // carry a safe class proof.
+    js_intrinsic_state_ensure_epoch();
+    bool invalidated = js_intrinsic_invalidate_cached_prototype(object, key) ||
+        js_intrinsic_invalidate_unknown_prototype(object, key);
     if (!invalidated && get_type_id(object) == LMD_TYPE_MAP &&
         js_class_id(object) == JS_CLASS_ARRAY) {
         if (js_map_own_flag(
@@ -17073,18 +17105,8 @@ extern "C" void js_intrinsic_note_property_mutation(Item object, Item key) {
         }
     }
 
-    // The guarded Array hole path includes Object.prototype. Its mutation
-    // therefore invalidates the Array epoch even though the object has the
-    // Object class; otherwise a newly inherited numeric property is hidden by
-    // a stale clean-chain fact.
-    if (!invalidated && get_type_id(object) == LMD_TYPE_MAP) {
-        Item object_proto = js_get_intrinsic_prototype_for_class(JS_CLASS_OBJECT);
-        if (object_proto.item == object.item) {
-            js_intrinsic_invalidate_class((int)JS_CLASS_ARRAY, key);
-        }
-    }
-
     if (!js_string_equals(key, "prototype")) return;
+    if (get_type_id(object) != LMD_TYPE_FUNC) return;
     for (int ctor_id = 0; ctor_id < JS_CTOR_MAX; ctor_id++) {
         if (js_constructor_cache_at(ctor_id).item == 0 ||
             js_constructor_cache_at(ctor_id).item != object.item) {

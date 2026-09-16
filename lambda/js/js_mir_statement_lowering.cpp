@@ -376,10 +376,9 @@ static bool jm_mutable_native_var_needs_boxing(JsMirTranspiler* mt,
     if (!mt || !decl || !id || !id->name) return false;
     if (decl->kind == JS_VAR_CONST) return false;
     if (!jm_is_native_type(native_type)) return false;
-    if (mt->in_native_func && jm_native_number_binding_type(mt, id->entry) ==
-            native_type) {
-        // T12-2 already joined every write to this resolved binding. Reusing
-        // that function-owned fact keeps the native accumulator unboxed.
+    if (jm_numeric_binding_type(mt, id->entry) == native_type) {
+        // The shared source-body fact joined every write to this binding, so
+        // both boxed and native entries can retain its numeric register.
         return false;
     }
     if (!mt->current_fc || !mt->current_fc->node || !mt->current_fc->node->body) return false;
@@ -811,9 +810,8 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         }
                     }
 
-                    TypeId native_binding_type = mt->in_native_func
-                        ? jm_native_number_binding_type(mt, id->entry)
-                        : LMD_TYPE_ANY;
+                    TypeId native_binding_type = jm_numeric_binding_type(mt,
+                        id->entry);
                     if (native_binding_type == LMD_TYPE_FLOAT ||
                             native_binding_type == LMD_TYPE_INT) {
                         init_type = native_binding_type;
@@ -2873,8 +2871,13 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
     // Phase 4: In native function, return native value directly
     if (mt->in_native_func && mt->current_fc) {
         TypeId ret_type = JM_JS_FACT(mt->current_fc, return_type);
+        bool item_return = JM_JS_FACT(mt->current_fc, native_return_kind) ==
+            NATIVE_RETURN_ITEM;
 
-        if (ret->argument) {
+        if (item_return) {
+            val = ret->argument ? jm_transpile_box_item(mt, ret->argument) :
+                jm_emit_undefined(mt);
+        } else if (ret->argument) {
             TypeId expr_type = jm_get_effective_type(mt, ret->argument);
             if (jm_is_native_type(expr_type)) {
                 // Expression already returns native — convert to target type
@@ -2909,7 +2912,7 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
         // not a raw exit: it must run those first. Box it onto the Item lane
         // the shared routing below publishes; every native landing converts it
         // back with jm_native_return_reg.
-        val = jm_box_native(mt, val, ret_type);
+        if (!item_return) val = jm_box_native(mt, val, ret_type);
     } else if (ret->argument) {
         val = jm_transpile_box_item(mt, ret->argument);
     } else {

@@ -4762,6 +4762,10 @@ extern "C" Item js_get_window_event_global_value(void);
 extern "C" int radiant_dom_window_get_property(Item object, Item key, Item* out);
 
 static bool js_get_host_dynamic_property(Item object, Item key, Item* out) {
+    // The only host-backed reads in this kernel belong to the realm's Window
+    // object, which is always an ordinary Map. Arrays and scalar receivers
+    // cannot acquire those hooks, so avoid preparing realm state for them.
+    if (get_type_id(object) != LMD_TYPE_MAP) return false;
     if (js_is_window_event_global_property(object, key)) {
         if (out) *out = js_get_window_event_global_value();
         return true;
@@ -4773,6 +4777,27 @@ static bool js_get_host_dynamic_property(Item object, Item key, Item* out) {
         return true;
     }
     return false;
+}
+
+static bool js_try_get_array_length_name_no_gc(Item object, Item key,
+        Item* out) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+    String* name = it2s(key);
+    if (!name || name->len != 6 || memcmp(name->chars, "length", 6) != 0) {
+        return false;
+    }
+    TypeId type = get_type_id(object);
+    if (type != LMD_TYPE_ARRAY && !js_is_ordinary_numeric_array(object)) {
+        return false;
+    }
+    Array* array = object.array;
+    // Content arrays can carry a companion length property. Let the complete
+    // property kernel observe that descriptor rather than reading storage.
+    if (!array || (array->is_content == 1 && js_array_has_props(array))) {
+        return false;
+    }
+    if (out) *out = (Item){.item = i2it(array->length)};
+    return true;
 }
 
 static bool js_intrinsic_uses_catalog_prototype(const char* name, int len) {
@@ -4877,6 +4902,10 @@ extern "C" Item js_get_key_core(Item object, Item key,
     if (js_key_is_symbol(key) && !proxy_key) {
         key = js_symbol_to_key(key);
         key_root.set(key);
+    }
+    Item array_length = ItemNull;
+    if (js_try_get_array_length_name_no_gc(object, key, &array_length)) {
+        return array_length;
     }
     Item host_value = ItemNull;
     // Browser globals are live host state; stored preamble placeholders only
@@ -8287,6 +8316,11 @@ extern "C" Item js_get_name_id(Item object, NameId name_id) {
         return ItemNull;
     }
     Item key_item = (Item){.item = s2it(key)};
+    Item array_length = ItemNull;
+    if (js_try_get_array_length_name_no_gc(object, key_item, &array_length)) {
+        js_named_fast_profile_hit();
+        return array_length;
+    }
     Item host_value = ItemNull;
     // host-backed names are live state; the placeholder shape must never win.
     if (js_get_host_dynamic_property(object, key_item, &host_value)) {

@@ -253,6 +253,11 @@ enum {
     JIT_IMPORT_RESULT_CALLER_OWNED = 1u << 7,
     // total raw scalar function: no memory reads/writes or observable completion.
     JIT_IMPORT_PURE_SCALAR_CALL = 1u << 8,
+    // An immutable scalar observation may be moved across a structured loop
+    // after its boxed receiver is proven loop-invariant. Unlike a pure leaf,
+    // it may read immutable object metadata but cannot collect, re-enter, or
+    // observe a mutable property/value state.
+    JIT_IMPORT_LOOP_STABLE_SCALAR = 1u << 9,
 };
 
 // result representation does not weaken collection, reentry or completion effects.
