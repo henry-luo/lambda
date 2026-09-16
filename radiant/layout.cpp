@@ -3910,10 +3910,10 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     }
 
     lycon->node_count++;
-    if (lycon->node_count > MAX_LAYOUT_NODES) {
-        if (lycon->node_count == MAX_LAYOUT_NODES + 1) {
-            log_error("layout_flow_node: max node count %d exceeded, skipping remaining nodes",
-                      MAX_LAYOUT_NODES);
+    if (lycon->node_count > lycon->node_limit) {
+        if (lycon->node_count == lycon->node_limit + 1) {
+            log_error("layout_flow_node: node visit budget %d exceeded, skipping remaining nodes",
+                      lycon->node_limit);
         }
         return;
     }
@@ -4902,6 +4902,28 @@ void reset_styles_resolved(DomDocument* doc) {
                                 reset_styles_resolved_visitor, nullptr);
 }
 
+static bool layout_count_dom_node_visitor(DomNode*, void* data) {
+    int* count = (int*)data;
+    if (!count) return false;
+    if (*count >= INT_MAX / MAX_LAYOUT_NODE_VISITS_PER_DOM_NODE) return false;
+    (*count)++;
+    return true;
+}
+
+static int layout_node_visit_budget(DomDocument* doc) {
+    int document_node_count = 0;
+    if (doc && doc->root) {
+        view_geometry_walk_dom_tree(static_cast<DomNode*>(doc->root),
+                                    layout_count_dom_node_visitor,
+                                    &document_node_count);
+    }
+    if (document_node_count <= MAX_LAYOUT_NODES /
+            MAX_LAYOUT_NODE_VISITS_PER_DOM_NODE) {
+        return MAX_LAYOUT_NODES;
+    }
+    return document_node_count * MAX_LAYOUT_NODE_VISITS_PER_DOM_NODE;
+}
+
 void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     memset(lycon, 0, sizeof(LayoutContext));
     lycon->doc = doc;  lycon->ui_context = uicon;
@@ -4911,6 +4933,7 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     lycon->run_mode = radiant::RunMode::PerformLayout;
     lycon->sizing_mode = radiant::SizingMode::InherentSize;
     lycon->defer_sticky_positioning = true;
+    lycon->node_limit = layout_node_visit_budget(doc);
 
     lycon->width = uicon->viewport_width > 0 ? uicon->viewport_width : 1200;
     lycon->height = uicon->viewport_height > 0 ? uicon->viewport_height : 800;

@@ -63,6 +63,7 @@ void dom_node_schedule_detached(DomDocument* doc, DomNode* root);
 void dom_node_cancel_detached(DomDocument* doc, DomNode* root);
 void dom_js_mutation_records_reset(DomDocument* doc);
 size_t dom_retire_sweep(DomDocument* doc);
+void dom_lifecycle_release_unattached_form_props(DomDocument* doc);
 void dom_lifecycle_get_stats(DomDocument* doc, DomLifecycleStats* out);
 
 #endif

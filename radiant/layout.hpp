@@ -105,6 +105,9 @@ float layout_text_overflow_ellipsis_width(struct FontHandle* font_handle,
 constexpr int MAX_LAYOUT_DEPTH = 300;
 
 constexpr int MAX_LAYOUT_NODES = 50000;
+// CSS Tables 3 may lay out one cell's descendants in a first-row pass and two
+// final-height passes, so the visit guard scales with the document tree.
+constexpr int MAX_LAYOUT_NODE_VISITS_PER_DOM_NODE = 3;
 constexpr int MAX_FLEX_DEPTH = 16;
 constexpr int MAX_GRID_DEPTH = 4;
 constexpr int MAX_IFRAME_DEPTH = 3;
@@ -589,9 +592,12 @@ struct CacheEntry {
 struct LayoutCache {
     CacheEntry final_layout;
     CacheEntry measure_entries[LAYOUT_CACHE_SIZE];
-    float intrinsic_min_content_width;
-    float intrinsic_max_content_width;
-    uint32_t intrinsic_measurement_generation;
+    // Intrinsic percentage terms resolve differently with an indefinite parent;
+    // retain one contribution for each basis within the current pass.
+    float intrinsic_min_content_width[2];
+    float intrinsic_max_content_width[2];
+    uint32_t intrinsic_measurement_generation[2];
+    uint8_t intrinsic_measurement_valid_mask;
     bool is_empty;
     uint32_t generation;
 };
@@ -601,7 +607,9 @@ inline void layout_cache_init(LayoutCache* cache, uint32_t generation = 0) {
     for (int i = 0; i < LAYOUT_CACHE_SIZE; i++) {
         cache->measure_entries[i].valid = false;
     }
-    cache->intrinsic_measurement_generation = 0;
+    cache->intrinsic_measurement_generation[0] = 0;
+    cache->intrinsic_measurement_generation[1] = 0;
+    cache->intrinsic_measurement_valid_mask = 0;
     cache->is_empty = true;
     cache->generation = generation;
 }
@@ -3219,8 +3227,9 @@ typedef struct LayoutContext {
     // CSS Tables 3 §3.10.2 first cell-content layout uses special handling for
     // direct percentage-height descendants while row heights are provisional.
     bool table_cell_first_row_layout;
-    // Total node count guard against pathological layouts (fuzzer-found timeouts)
+    // Total node visit guard against pathological layouts (fuzzer-found timeouts).
     int node_count;
+    int node_limit;
     // CSS Align 3 abspos sizing can temporarily provide an auto-axis size from
     // the flex static-position rectangle before the child is laid out.
     bool abspos_static_size_override_x;

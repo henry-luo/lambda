@@ -22,9 +22,17 @@ TEST(RadiantOnlineViewTest, SkippedOnWindows) {
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "../radiant/script_timeout.hpp"
+
 #define LAMBDA_EXE "./lambda.exe"
-#define ONLINE_VIEW_DEFAULT_TIMEOUT_SECONDS 90
+#define ONLINE_VIEW_CLEANUP_GRACE_SECONDS 30
+#define ONLINE_VIEW_DEFAULT_TIMEOUT_SECONDS \
+    (RADIANT_SCRIPT_EXEC_TIMEOUT_MAX_SECONDS + ONLINE_VIEW_CLEANUP_GRACE_SECONDS)
 #define ONLINE_VIEW_OUTPUT_LIMIT (1024 * 1024)
+
+static_assert(ONLINE_VIEW_DEFAULT_TIMEOUT_SECONDS >
+                  RADIANT_SCRIPT_EXEC_TIMEOUT_MAX_SECONDS,
+              "online parent timeout must outlive the script watchdog");
 
 struct RadiantOnlineViewCase {
     const char* label;
@@ -601,7 +609,8 @@ static int online_view_timeout_seconds() {
         int parsed = atoi(env);
         if (parsed > 0) return parsed;
     }
-    return ONLINE_VIEW_DEFAULT_TIMEOUT_SECONDS;
+    return radiant_script_exec_timeout_ceiling_seconds() +
+        ONLINE_VIEW_CLEANUP_GRACE_SECONDS;
 }
 
 static int online_view_exit_code(int status) {
@@ -808,6 +817,10 @@ static const char* online_view_first_runtime_error(const RadiantOnlineViewResult
         "script_runner: failed to download external script",
         "execute_document_scripts: JS execution timed out",
         "execute_document_scripts: recovered from crash",
+        "execute_document_scripts: post-dom exception",
+        "execute_document_scripts: post-dom script task failed",
+        "layout_flow_node: node visit budget",
+        "stack cleanup: sigaltstack",
         "js-mir: unsupported",
         "memtrack: LEAK",
         "Uncaught"

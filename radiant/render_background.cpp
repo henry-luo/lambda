@@ -516,20 +516,20 @@ static Color get_gradient_color_at(GradientStop* stops, int stop_count, float po
  * ThorVG doesn't support conic gradients directly, so we render pixel-by-pixel
  */
 static void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGradient* gradient, Rect rect) {
-    if (!gradient || gradient->stop_count < 2) {
+    if (!rdcon || !rdcon->dl || !gradient || gradient->stop_count < 2) {
         return;
-    }
-
-
-    for (int i = 0; i < gradient->stop_count; i++) {
     }
 
     int w = (int)(rect.width + 0.5f);
     int h = (int)(rect.height + 0.5f);
     if (w <= 0 || h <= 0) return;
 
-    // Render gradient pixels to a temporary buffer
-    uint32_t* pixels = (uint32_t*)mem_calloc(w * h, sizeof(uint32_t), MEM_CAT_RENDER);
+    size_t pixel_bytes = (size_t)w * (size_t)h * sizeof(uint32_t);
+    // Display-list replay borrows image pixels after recording completes, so
+    // this generated image must outlive the local gradient paint operation.
+    uint32_t* pixels = (uint32_t*)scratch_alloc(&rdcon->dl->arena, pixel_bytes);
+    if (!pixels) return;
+    memset(pixels, 0, pixel_bytes);
 
     float cx = w * gradient->cx;
     float cy = h * gradient->cy;
@@ -566,8 +566,6 @@ static void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGr
         rc_pop_clip(rdcon);
         rdt_path_free(clip_path);
     }
-
-    mem_free(pixels);
 }
 
 /**

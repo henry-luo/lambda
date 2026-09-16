@@ -35,6 +35,7 @@ typedef struct DomNodeRegistry {
 
 // DOM-only unit targets do not link the Radiant view teardown implementation.
 __attribute__((weak)) void view_tree_release_retired_subtree(ViewTree*, DomNode*) {}
+__attribute__((weak)) void view_pool_release_detached_form_props(DomNode*) {}
 __attribute__((weak)) void dom_range_refresh_lifecycle_pins(DomDocument*) {}
 extern "C" __attribute__((weak)) void dom_expando_attachment_changed(
     DomDocument*, DomNode*, bool) {}
@@ -458,6 +459,23 @@ size_t dom_retire_sweep(DomDocument* doc) {
         record = next;
     }
     return retired;
+}
+
+void dom_lifecycle_release_unattached_form_props(DomDocument* doc) {
+    DomNodeRegistry* registry = dom_registry(doc);
+    if (!registry) return;
+    for (DomNodeRecord* record = registry->all_records; record;
+         record = record->all_next) {
+        DomNode* root = record->address;
+        if (record->state == DOM_NODE_RETIRED || !root ||
+                root == (DomNode*)doc->root || root->parent) {
+            continue;
+        }
+        // A script may create a form control without ever linking it into the
+        // DOM, so normal detached-candidate retirement never releases its
+        // heap prop before the document arena is discarded.
+        view_pool_release_detached_form_props(root);
+    }
 }
 
 void dom_lifecycle_get_stats(DomDocument* doc, DomLifecycleStats* out) {

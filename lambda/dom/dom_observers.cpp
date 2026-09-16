@@ -370,7 +370,11 @@ static Item js_mutation_observer_observe(Item target_item, Item options) {
     bool character_data = observer_option_bool(options, "characterData");
     bool attribute_old_value = observer_option_bool(options, "attributeOldValue");
     bool character_data_old_value = observer_option_bool(options, "characterDataOldValue");
+    Item filter = dom_realm_get(options, observer_key("attributeFilter"));
     if (attribute_old_value) attributes = true;
+    // DOM Standard: supplying a filter requests attribute records even when
+    // the attributes option itself was omitted.
+    if (get_type_id(filter) == LMD_TYPE_ARRAY) attributes = true;
     if (character_data_old_value) character_data = true;
     if (!child_list && !attributes && !character_data) {
         return dom_realm_throw_type_error("MutationObserver options must enable a mutation type");
@@ -394,7 +398,6 @@ static Item js_mutation_observer_observe(Item target_item, Item options) {
     target->attribute_old_value = attribute_old_value;
     target->character_data_old_value = character_data_old_value;
     target->attribute_filter_count = 0;
-    Item filter = dom_realm_get(options, observer_key("attributeFilter"));
     if (get_type_id(filter) == LMD_TYPE_ARRAY) {
         int64_t count = js_array_length(filter);
         for (int64_t i = 0; i < count && target->attribute_filter_count < 8; i++) {

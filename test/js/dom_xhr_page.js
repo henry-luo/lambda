@@ -1,6 +1,7 @@
 console.log(typeof XMLHttpRequest);
 var xhr = new XMLHttpRequest();
-xhr.open('GET', 'dom_xhr_page_payload.json');
+var requestUrl = new URL('dom_xhr_page_payload.json', document.URL);
+xhr.open('GET', requestUrl);
 console.log(typeof xhr.overrideMimeType);
 console.log(typeof xhr.upload, typeof xhr.upload.addEventListener);
 xhr.overrideMimeType('application/json');

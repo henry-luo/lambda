@@ -2693,6 +2693,7 @@ void view_tree_commit_inline_prop(ViewTree* tree, DomElement* element,
 
 void release_dom_owned_embed_images(DomElement* elem);
 void view_tree_release_retired_subtree(ViewTree* tree, DomNode* root);
+void view_pool_release_detached_form_props(DomNode* root);
 
 // Forward declaration for DocState (full definition in state_store.hpp)
 struct DocState;
@@ -3278,7 +3279,7 @@ void form_control_prop_init(FormControlProp* f);
 
 // Release owned heap pointers (custom_validity_msg, value_at_focus). Clears
 // the borrowed current_value cache but does not free it or `f` itself.
-void form_control_prop_release(FormControlProp* f);
+void form_control_prop_release(DomElement* elem, FormControlProp* f);
 
 // Release a form-control property attached to a DOM element. This is used by
 // both layout-owned views and JS-created detached nodes.

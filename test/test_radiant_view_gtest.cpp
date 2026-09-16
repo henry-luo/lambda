@@ -24,6 +24,8 @@ struct RadiantViewCase {
     const char* test_name;
     const char* label;
     const char* path;
+    const char* event_path;
+    bool requires_clean_memtrack;
 };
 
 struct RadiantViewCaseResult {
@@ -33,6 +35,7 @@ struct RadiantViewCaseResult {
     bool has_render_prof;
     bool has_peak_footprint;
     bool has_view_completed;
+    bool has_clean_memtrack;
     int exit_code;
     char message[512];
 };
@@ -53,6 +56,13 @@ static const RadiantViewCase g_radiant_view_cases[] = {
     {"RadiantViewTest.LoadsLambdaReportAsHeadlessView", "lambda_report", "test/lambda/complex_iot_report_html.ls"},
     {"RadiantViewTest.LoadsLambdaChartDashboardAsHeadlessView", "lambda_chart_dashboard", "test/lambda/chart/chart_dashboard.ls"},
     {"RadiantViewTest.LoadsPdfAsHeadlessView", "pdf", "test/input/raw_commands_test.pdf"},
+    {"RadiantViewTest.ReleasesDetachedScriptTextControl", "detached_script_text_control",
+     "test/html/js_detached_text_control.html",
+     "test/html/js_detached_text_control_events.json", true},
+    {"RadiantViewTest.PreservesDocumentUrlAcrossScriptFormSubmit", "script_form_submit_url_ownership",
+     "test/html/js_form_submit_url_ownership.html", nullptr, true},
+    {"RadiantViewTest.LaysOutDenseCollapsedTable", "dense_collapsed_table",
+     "test/html/dense_collapsed_table.html", nullptr, true},
 };
 
 static const size_t g_radiant_view_case_count =
@@ -120,6 +130,13 @@ static void test_radiant_view_run_case(size_t index) {
         result->executed = true;
         return;
     }
+    if (view_case->event_path && !test_radiant_view_file_readable(view_case->event_path)) {
+        result->missing_path = true;
+        snprintf(result->message, sizeof(result->message),
+                 "event file is not readable: %s", view_case->event_path);
+        result->executed = true;
+        return;
+    }
     test_radiant_view_ensure_temp_dir();
 
     char log_path[256];
@@ -137,11 +154,20 @@ static void test_radiant_view_run_case(size_t index) {
     args[arg_count++] = "./lambda.exe";
     args[arg_count++] = "view";
     args[arg_count++] = view_case->path;
+    if (view_case->event_path) {
+        args[arg_count++] = "--event-file";
+        args[arg_count++] = view_case->event_path;
+    }
     args[arg_count++] = "--headless";
     args[arg_count++] = "--no-log";
     args[arg_count] = nullptr;
 
+    const ShellEnvEntry memtrack_env[] = {
+        {"VIEW_MEM_STAGES", "1"},
+        {NULL, NULL},
+    };
     ShellOptions options = {0};
+    if (view_case->requires_clean_memtrack) options.env = memtrack_env;
     options.merge_stderr = true;
     // system() serialized worker-thread launches on macOS; direct argv spawning
     // preserves the parallel work queue and avoids shell quoting entirely.
@@ -159,6 +185,8 @@ static void test_radiant_view_run_case(size_t index) {
     result->has_render_prof = strstr(output, "[RENDER_PROF]") != nullptr;
     result->has_peak_footprint = strstr(output, "[PEAK_FOOTPRINT]") != nullptr;
     result->has_view_completed = strstr(output, "view command completed") != nullptr;
+    result->has_clean_memtrack = !view_case->requires_clean_memtrack ||
+        strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0") != nullptr;
     if (result->exit_code != 0) {
         snprintf(result->message, sizeof(result->message),
                  "lambda view exited with code %d; see %s",
@@ -167,6 +195,9 @@ static void test_radiant_view_run_case(size_t index) {
                result->has_peak_footprint || result->has_view_completed) {
         snprintf(result->message, sizeof(result->message),
                  "--no-log output leaked into %s", log_path);
+    } else if (!result->has_clean_memtrack) {
+        snprintf(result->message, sizeof(result->message),
+                 "process retained allocations; see %s", log_path);
     } else {
         snprintf(result->message, sizeof(result->message), "ok");
     }
@@ -190,6 +221,7 @@ static void test_radiant_view_expect_case(size_t index) {
     EXPECT_FALSE(result->has_render_prof) << view_case->path;
     EXPECT_FALSE(result->has_peak_footprint) << view_case->path;
     EXPECT_FALSE(result->has_view_completed) << view_case->path;
+    EXPECT_TRUE(result->has_clean_memtrack) << view_case->path << ": " << result->message;
 }
 
 TEST(RadiantViewTest, LoadsPngAsHeadlessView) {
@@ -250,6 +282,18 @@ TEST(RadiantViewTest, LoadsLambdaChartDashboardAsHeadlessView) {
 
 TEST(RadiantViewTest, LoadsPdfAsHeadlessView) {
     test_radiant_view_expect_case(14);
+}
+
+TEST(RadiantViewTest, ReleasesDetachedScriptTextControl) {
+    test_radiant_view_expect_case(15);
+}
+
+TEST(RadiantViewTest, PreservesDocumentUrlAcrossScriptFormSubmit) {
+    test_radiant_view_expect_case(16);
+}
+
+TEST(RadiantViewTest, LaysOutDenseCollapsedTable) {
+    test_radiant_view_expect_case(17);
 }
 
 TEST(RadiantViewTest, PromotesCachedPngDecodeFromThumbnailToFullSize) {
