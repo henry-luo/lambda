@@ -212,6 +212,9 @@ int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
 
 extern"C" {
 MIR_context_t jit_init(unsigned int optimize_level);
+// Hosted profiles that select native MIR must not inherit the process-wide
+// interpreter diagnostic mode used by other compilation paths.
+MIR_context_t jit_init_native(unsigned int optimize_level);
 void* jit_gen_func(MIR_context_t ctx, const char *func_name);
 size_t jit_release_generated_ir(MIR_context_t ctx);
 MIR_item_t find_import(MIR_context_t ctx, const char *mod_name);

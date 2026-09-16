@@ -145,7 +145,14 @@ static inline int em_hoist_loop_scalar_calls(MirEmitter* em,
                 // so relocation also preserves the emitter's call-record identity.
                 DLIST_REMOVE(MIR_insn_t, em->func->insns, insn);
                 MIR_insert_insn_before(em->ctx, em->func_item, first, insn);
-                count += insn->code == MIR_CALL;
+                if (insn->code == MIR_CALL) {
+                    count++;
+                    if (em->note_loop_invariant_call && insn->nops > 1 &&
+                            insn->ops[1].mode == MIR_OP_REF) {
+                        em->note_loop_invariant_call(em->call_owner,
+                            MIR_item_name(em->ctx, insn->ops[1].u.ref));
+                    }
+                }
                 break;
             }
         }

@@ -174,7 +174,7 @@ void heap_gc_destroy_external_payload(void* obj, uint16_t type_tag) {
         Array* array = (Array*)obj;
         // Array item buffers live outside the GC zones, so sweep must release
         // them before their dead owners can accumulate across a hot runtime.
-        if (array->items && js_array_runtime_items_release(array->items)) {
+        if (array->items && js_array_runtime_items_release(array)) {
             array->items = NULL;
             array->capacity = 0;
         }
@@ -1397,7 +1397,7 @@ static void gc_finalize_all_objects(gc_heap_t *gc) {
         }
         else if (tag == LMD_TYPE_ARRAY) {
             Array *arr = (Array*)obj;
-            if (arr->items && js_array_runtime_items_release(arr->items)) {
+            if (arr->items && js_array_runtime_items_release(arr)) {
                 arr->items = NULL;
                 arr->capacity = 0;
             }

@@ -15,14 +15,7 @@ extern "C" Item js_process_emit_before_exit(int code);
 extern "C" void js_process_emit_exit(int code);
 extern MIR_error_func_t g_batch_mir_error_handler;
 extern unsigned int g_js_mir_optimize_level;
-extern int g_js_force_document_interp;
 #define JM_LARGE_FUNC_INSN_THRESHOLD 10000
-#define JM_LARGE_MODULE_INSN_THRESHOLD MIR_LARGE_MODULE_INSN_THRESHOLD
-// Tune6: in a document/Radiant context (cold vendor JS), use the MIR interpreter
-// for modules above this (moderate) insn count — see Transpile_Js_Tune6_AST.md §0.2d.
-#define JM_RADIANT_INTERP_INSN_THRESHOLD MIR_RADIANT_INTERP_INSN_THRESHOLD
-#define JM_RADIANT_AST_NODE_THRESHOLD MIR_RADIANT_AST_NODE_THRESHOLD
-extern "C" int g_mir_interp_mode;
 extern "C" void ensure_jit_imports_initialized(void);
 
 bool jm_float_const_is_inline(double value);
@@ -198,7 +191,7 @@ JsMirTranspiler* js_mir_open_compile_unit(
     bool compact_storage,
     const char* log_prefix, bool install_error_handler, MIR_context_t* out_ctx);
 typedef Item (*JsMirMainFunc)(Context*);
-JsMirMainFunc js_mir_link_main(MIR_context_t ctx, bool use_interp,
+JsMirMainFunc js_mir_link_main(MIR_context_t ctx,
         void (*gen_interface)(MIR_context_t, MIR_item_t));
 Item js_mir_execute_compiled_entry(void* entry_func);
 void jm_destroy_mir_transpiler(JsMirTranspiler* mt);

@@ -50,6 +50,11 @@ static const char* kEventNames[JS_OPT_EVENT_COUNT] = {
     "array_set_guard_fail",
     "array_own_element_get_hit",
     "array_own_element_get_fallback",
+    "array_reduce_dense_element",
+    "array_reduce_prerooted_args",
+    "array_runtime_items_install",
+    "array_runtime_items_release",
+    "array_gc_items_alloc",
     "dynamic_function_fastpath",
     "dynamic_function_cache_hit",
     "dynamic_function_cache_miss",
@@ -69,14 +74,34 @@ static const char* kEventNames[JS_OPT_EVENT_COUNT] = {
     "named_fast_probe",
     "named_fast_hit",
     "named_fast_miss",
+    "named_fast_string_length",
+    "named_fast_data_descriptor",
+    "named_fast_no_receiver_string",
+    "named_fast_no_receiver_function",
+    "named_fast_no_receiver_other",
+    "named_fast_function_data",
     "runtime_number_head_hit",
     "runtime_number_head_fallback",
+    "runtime_string_concat_head",
     "mir_number_admitted",
     "mir_number_fallback",
     "mir_native_index_admitted",
     "mir_native_index_fallback",
     "mir_dense_index_admitted",
+    "mir_packed_strict_equal",
+    "mir_loop_stable_name_id",
+    "mir_light_call",
+    "mir_light_direct_activation",
+    "bound_call_forward_args",
+    "mir_deferred_function_finalize",
+    "mir_lazy_function_metadata",
+    "ordinary_number_store",
+    "typed_number_store",
+    "typed_number_read",
+    "own_enumerability_inspect",
     "mir_literal_field_admitted",
+    "static_numeric_array_initializer",
+    "static_object_initializer",
     "string_search_ascii",
     "string_search_unicode",
     "string_split_ascii",
@@ -681,6 +706,22 @@ TEST(JsOpt, RegexShortCaptureUsesFreshWrapper) {
     expect_trace_off_same("regex_short_capture", source, output);
 }
 
+TEST(JsOpt, RegexTestUsesCompiledPatternAfterPublicMetadataOverride) {
+    const char* source =
+        "var regex = /x/;\n"
+        "Object.defineProperty(regex, 'source', { value: '^\\\\p{Script=Han}+$', configurable: true });\n"
+        "Object.defineProperty(regex, 'flags', { value: 'u', configurable: true });\n"
+        "if (!regex.test('x') || regex.test('漢'))\n"
+        "  throw new Error('RegExp test read mutable public metadata');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("regexp_compiled_metadata", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    expect_trace_off_same("regexp_compiled_metadata", source, output);
+}
+
 TEST(JsOpt, BuiltinRegexBulkPathsKeepProtocolOverrides) {
     const char* source =
         "var words = 'one 22 two'.match(new RegExp('[a-z]+', 'g'));\n"
@@ -763,6 +804,32 @@ TEST(JsOpt, RuntimeOwnDenseElementHeadsPreserveFallbackSemantics) {
     EXPECT_GT(trace.events[JS_OPT_ARRAY_OWN_ELEMENT_GET_FALLBACK][2], 0u);
     EXPECT_GT(trace.events[JS_OPT_ARRAY_SET_FAST_HIT][1], 0u);
     expect_trace_off_same("runtime_own_dense_element", source, output, "ast");
+}
+
+TEST(JsOpt, DenseReduceRevalidatesAfterCallbackMutation) {
+    const char* source =
+        "var values = [1, 2, 3];\n"
+        "var total = values.reduce(function(acc, value, index, source) {\n"
+        "  if (index === 0) delete source[1];\n"
+        "  return acc + value;\n"
+        "}, 0);\n"
+        "var getter_calls = 0; var accessor = [1, 2];\n"
+        "Object.defineProperty(accessor, '1', { get: function() {\n"
+        "  getter_calls++; return 4; }, configurable: true });\n"
+        "var accessor_total = accessor.reduce(function(acc, value) {\n"
+        "  return acc + value;\n"
+        "}, 0);\n"
+        "if (total !== 4 || accessor_total !== 5 || getter_calls !== 1) "
+        "throw new Error('reduce dense leaf changed semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture_mode_backend("dense_reduce_revalidation", source,
+        true, "ast", &trace, output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_ARRAY_REDUCE_DENSE_ELEMENT][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_ARRAY_REDUCE_PREROOTED_ARGS][1], 0u);
+    expect_trace_off_same("dense_reduce_revalidation", source, output, "ast");
 }
 
 TEST(JsOpt, MirNumberPlanUsesF64AndKeepsPartialFactsBoxed) {
@@ -923,7 +990,14 @@ TEST(JsOpt, StringLeavesProfileAsciiAndUnicode) {
         "  ascii.charCodeAt(0) + (ascii + 'z').length;\n"
         "value += unicode.indexOf('😀') + unicode.split(',').length + unicode.slice(1).length +\n"
         "  unicode.charCodeAt(1) + (unicode + 'z').length;\n"
-        "if (!(value > 0)) throw new Error('string leaf profile changed semantics');\n"
+        "var escaped = '%' + 'F'; escaped = escaped + '0'; escaped = escaped + '%';\n"
+        "escaped = escaped + '9'; escaped = escaped + 'F'; escaped = escaped + '%';\n"
+        "escaped = escaped + '9'; escaped = escaped + '9'; escaped = escaped + '%';\n"
+        "escaped = escaped + '8'; escaped = escaped + '2';\n"
+        "var decoded = decodeURIComponent(escaped);\n"
+        "if (!(value > 0) || decoded.length !== 2 || decoded.charCodeAt(0) !== 55357 ||\n"
+        "    decoded.charCodeAt(1) !== 56898)\n"
+        "  throw new Error('string leaf profile changed semantics');\n"
         "console.log('OPT_OK');\n";
     TraceResult trace;
     char output[4096];
@@ -1018,7 +1092,7 @@ TEST(JsOpt, Result29TypedArrayUsesSharedReferenceSemantics) {
     // leaf; a non-typed receiver still uses the shared generic Set fallback.
     EXPECT_NE(strstr(mir, "js_get_reference"), nullptr);
     EXPECT_NE(strstr(mir, "js_set"), nullptr);
-    EXPECT_NE(strstr(mir, "js_typed_array_set_numeric_key"), nullptr);
+    EXPECT_NE(strstr(mir, "js_typed_array_set_number_if_kind"), nullptr);
     EXPECT_EQ(strstr(mir, "js_typed_array_matches_type"), nullptr);
     free(mir);
     expect_trace_off_same("result29_typed_array_guard", source, output);
@@ -1041,6 +1115,288 @@ TEST(JsOpt, Result29TypedArrayGuardRejectsShadowedConstructor) {
     // D6.2.2v2: a builtin-looking identifier is not a capability fact when
     // the lexical binding can be shadowed; semantics must remain generic.
     expect_trace_off_same("result29_shadowed_typed_array", source, output);
+}
+
+TEST(JsOpt, OrdinaryEnumerationInspectsDescriptorsWithoutMaterializingThem) {
+    const char* source =
+        "var proto = { inherited: 7 };\n"
+        "var object = Object.create(proto); object.own = 1;\n"
+        "Object.defineProperty(object, 'hidden', { value: 2, enumerable: false });\n"
+        "var objectKeys = []; for (var key in object) objectKeys.push(key);\n"
+        "var values = Object.values(object).join(',');\n"
+        "var array = [3, 4]; array.extra = 5;\n"
+        "Object.defineProperty(array, '1', { enumerable: false });\n"
+        "var arrayKeys = []; for (var index in array) arrayKeys.push(index);\n"
+        "var arrayValues = Object.values(array).join(',');\n"
+        "if (objectKeys.join(',') !== 'own,inherited' || values !== '1' ||\n"
+        "    arrayKeys.join(',') !== '0,extra' || arrayValues !== '3,5')\n"
+        "  throw new Error('ordinary enumeration changed semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("ordinary_enumeration_inspect", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_OWN_ENUMERABILITY_INSPECT][1], 0u);
+    expect_trace_off_same("ordinary_enumeration_inspect", source, output);
+}
+
+TEST(JsOpt, StaticNumericArrayLiteralUsesCompactInitializer) {
+    const char* source =
+        "var first = [0, 1.5, 2, 3];\n"
+        "var second = [0, 1.5, 2, 3];\n"
+        "var nested = [[4, 5, 6], [7, 8, 9]];\n"
+        "first[1] = 11; nested[0][0] = 12;\n"
+        "if (second[1] !== 1.5 || nested[1][2] !== 9 ||\n"
+        "    first.join(',') !== '0,11,2,3' || nested[0][0] !== 12)\n"
+        "  throw new Error('static numeric array literal changed identity');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("static_numeric_array_literal", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_STATIC_NUMERIC_ARRAY_INITIALIZER][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_ARRAY_GC_ITEMS_ALLOC][1], 0u);
+    EXPECT_EQ(trace.events[JS_OPT_ARRAY_RUNTIME_ITEMS_INSTALL][1], 0u);
+
+    char* mir = read_fixture_mir("static_numeric_array_literal");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "js_array_new_from_static_items"), nullptr);
+    free(mir);
+    expect_trace_off_same("static_numeric_array_literal", source, output);
+}
+
+TEST(JsOpt, StaticPrimitiveObjectLiteralUsesCompactInitializer) {
+    const char* source =
+        "var first = { number: 1.5, label: 'first', enabled: true, absent: null, number: 2 };\n"
+        "var second = { number: 1.5, label: 'first', enabled: true, absent: null, number: 2 };\n"
+        "first.number = 9; first.label = 'changed'; first.extra = 7;\n"
+        "var descriptor = Object.getOwnPropertyDescriptor(second, 'number');\n"
+        "if (second.number !== 2 || second.label !== 'first' || !second.enabled ||\n"
+        "    second.absent !== null || Object.keys(second).join(',') !==\n"
+        "    'number,label,enabled,absent' || !descriptor.writable ||\n"
+        "    !descriptor.enumerable || !descriptor.configurable || first === second)\n"
+        "  throw new Error('static object literal changed identity or properties');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("static_primitive_object_literal", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_STATIC_OBJECT_INITIALIZER][1], 0u);
+
+    char* mir = read_fixture_mir("static_primitive_object_literal");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "js_object_new_from_static_properties"), nullptr);
+    free(mir);
+    expect_trace_off_same("static_primitive_object_literal", source, output);
+}
+
+TEST(JsOpt, ConstructorAssignedFieldsUseGuardedLayout) {
+    const char* source =
+        "class ConstructorAssignedPlan {\n"
+        "  constructor() { this.x = 6.5; this.label = 'constructor'; }\n"
+        "  read() { return this.x + ':' + this.label; }\n"
+        "  store() { this.x = 8.5; return this.x; }\n"
+        "}\n"
+        "var point = new ConstructorAssignedPlan();\n"
+        "if (Object.keys(point).join(',') !== 'x,label' ||\n"
+        "    point.read() !== '6.5:constructor' || point.store() !== 8.5)\n"
+        "  throw new Error('constructor layout changed source-order properties');\n"
+        "Object.defineProperty(point, 'x', { get: function() { return 'escaped'; }, configurable: true });\n"
+        "if (point.read() !== 'escaped:constructor')\n"
+        "  throw new Error('constructor layout skipped accessor fallback');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("constructor_assigned_fields", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_MIR_LITERAL_FIELD_ADMITTED][1], 0u);
+
+    char* mir = read_fixture_mir("constructor_assigned_fields");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "js_set_class_instance_shape"), nullptr);
+    EXPECT_NE(strstr(mir, "js_set_name_id"), nullptr);
+    free(mir);
+    expect_trace_off_same("constructor_assigned_fields", source, output);
+}
+
+TEST(JsOpt, LoopStableModuleNameIdSurvivesNestedEval) {
+    const char* source =
+        "function nameIdLoop(receiver) {\n"
+        "  var total = 0;\n"
+        "  for (let index = 0; index < 8; index += 1)\n"
+        "    total += receiver.tune13ModuleNameField;\n"
+        "  return total;\n"
+        "}\n"
+        "var getterCalls = 0; var receiver = {};\n"
+        "Object.defineProperty(receiver, 'tune13ModuleNameField', {\n"
+        "  get: function() {\n"
+        "    getterCalls += 1;\n"
+        "    if (getterCalls === 4) eval('var tune13NestedEval = 1');\n"
+        "    return 2;\n"
+        "  }, configurable: true });\n"
+        "if (nameIdLoop(receiver) !== 16 || getterCalls !== 8)\n"
+        "  throw new Error('loop name id changed nested-eval property access');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("loop_stable_module_name_id", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_MIR_LOOP_STABLE_NAME_ID][1], 0u);
+
+    char* mir = read_fixture_mir("loop_stable_module_name_id");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "lambda_active_module_name_id"), nullptr);
+    free(mir);
+    expect_trace_off_same("loop_stable_module_name_id", source, output);
+}
+
+TEST(JsOpt, MirLightCallKeepsDynamicFunctionSemantics) {
+    const char* source =
+        "function plus(left, right) { return left + right; }\n"
+        "function receiverValue() { return this.marker; }\n"
+        "function argumentValue() { return arguments[0]; }\n"
+        "var invoke = plus; var total = 0;\n"
+        "for (var index = 0; index < 24; index += 1) total = invoke(total, index);\n"
+        "var receiver = { marker: 17 }; var readReceiver = receiverValue;\n"
+        "var readArgument = argumentValue;\n"
+        "if (total !== 276 || readReceiver.call(receiver) !== 17 ||\n"
+        "    readArgument(23) !== 23)\n"
+        "  throw new Error('light call changed dynamic function semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("mir_light_call", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_MIR_LIGHT_CALL][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_MIR_LIGHT_DIRECT_ACTIVATION][1], 0u);
+
+    char* mir = read_fixture_mir("mir_light_call");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "js_call"), nullptr);
+    free(mir);
+    expect_trace_off_same("mir_light_call", source, output);
+}
+
+TEST(JsOpt, ReceiverOnlyBoundCallForwardsRootedArguments) {
+    const char* source =
+        "function add(left, right) { return this.base + left + right; }\n"
+        "var bound = add.bind({ base: 3 });\n"
+        "var rebound = bound.bind({ base: 99 });\n"
+        "var withPrefix = add.bind({ base: 3 }, 4);\n"
+        "if (bound(5, 6) !== 14 || rebound(1, 2) !== 6 || withPrefix(5) !== 12)\n"
+        "  throw new Error('bound call forwarding changed semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("bound_call_forward_args", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_BOUND_CALL_FORWARD_ARGS][1], 0u);
+    expect_trace_off_same("bound_call_forward_args", source, output);
+}
+
+TEST(JsOpt, PackedNumberStoreKeepsNativeWriteAndAccessorMiss) {
+    const char* source =
+        "function updateNumbers(values) {\n"
+        "  for (let index = 0; index < values.length; index += 1)\n"
+        "    values[index] = values[index] + 0.5;\n"
+        "  return values[0] + values[1] + values[2];\n"
+        "}\n"
+        "var values = [1.5, 2.5, 3.5];\n"
+        "if (updateNumbers(values) !== 9)\n"
+        "  throw new Error('packed Number store changed direct update');\n"
+        "var observed = '';\n"
+        "Object.defineProperty(values, '1', {\n"
+        "  get: function() { observed += 'g'; return 9.5; },\n"
+        "  set: function(value) { observed += 's' + value; }, configurable: true });\n"
+        "updateNumbers(values);\n"
+        "if (observed !== 'gs10g' || values[0] !== 2.5 || values[2] !== 4.5)\n"
+        "  throw new Error('packed Number store skipped accessor miss');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("packed_number_store", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_ORDINARY_NUMBER_STORE][1], 0u);
+
+    char* mir = read_fixture_mir("packed_number_store");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "js_array_set_existing_number_no_gc"), nullptr);
+    free(mir);
+    expect_trace_off_same("packed_number_store", source, output);
+}
+
+TEST(JsOpt, PackedNumericStrictEqualityKeepsDirectNumberLoads) {
+    const char* source =
+        "function equalCount(left, right) {\n"
+        "  var hits = 0;\n"
+        "  for (let index = 0; index < left.length; index += 1) {\n"
+        "    if (left[index] === right[index]) hits += 1;\n"
+        "  }\n"
+        "  return hits;\n"
+        "}\n"
+        "var left = [1, 2, NaN, -0];\n"
+        "var right = [1, 9, NaN, 0];\n"
+        "if (equalCount(left, right) !== 2) throw new Error('numeric strict equality changed');\n"
+        "var getterCalls = 0;\n"
+        "Object.defineProperty(left, '1', { get: function() { getterCalls += 1; return 9; }, configurable: true });\n"
+        "if (equalCount(left, right) !== 3 || getterCalls !== 1)\n"
+        "  throw new Error('packed strict equality skipped generic miss');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("packed_numeric_strict_equality", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_MIR_DENSE_INDEX_ADMITTED][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_MIR_PACKED_STRICT_EQUAL][1], 0u);
+
+    char* mir = read_fixture_mir("packed_numeric_strict_equality");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "js_strict_equal"), nullptr);
+    free(mir);
+    expect_trace_off_same("packed_numeric_strict_equality", source, output);
+}
+
+static char* make_large_static_numeric_array_source() {
+    const int length = 10001;
+    const char* prefix = "var values = [";
+    const char* suffix = "];\n"
+        "if (values.length !== 10001 || values[0] !== 1 || values[10000] !== 1) "
+        "throw new Error('large compact initializer changed values');\n"
+        "console.log('OPT_OK');\n";
+    size_t capacity = strlen(prefix) + (size_t)length * 2 + strlen(suffix) + 1;
+    char* source = (char*)malloc(capacity);
+    if (!source) return NULL;
+    char* out = source;
+    memcpy(out, prefix, strlen(prefix));
+    out += strlen(prefix);
+    for (int index = 0; index < length; index++) {
+        *out++ = '1';
+        if (index + 1 < length) *out++ = ',';
+    }
+    memcpy(out, suffix, strlen(suffix) + 1);
+    return source;
+}
+
+TEST(JsOpt, StaticNumericArrayLiteralInitializesSparseLengthArray) {
+    char* source = make_large_static_numeric_array_source();
+    ASSERT_NE(source, nullptr);
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("static_numeric_array_sparse_length", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_STATIC_NUMERIC_ARRAY_INITIALIZER][1], 0u);
+    expect_trace_off_same("static_numeric_array_sparse_length", source, output);
+    free(source);
 }
 
 TEST(JsOpt, Result29DenseFillPreservesHoles) {
@@ -1151,6 +1507,70 @@ TEST(JsOpt, NamedLoadStoreUsesTierBPath) {
     expect_trace_off_same("named_fast_path", source, output);
 }
 
+TEST(JsOpt, NamedDataDescriptorReadSkipsOnlyIrrelevantAttributes) {
+    const char* source =
+        "function read(object) { return object.hidden + object.fixed; }\n"
+        "function readGetter(object) { return object.getter; }\n"
+        "var object = {}; var getterCalls = 0;\n"
+        "Object.defineProperty(object, 'hidden', { value: 7, enumerable: false });\n"
+        "Object.defineProperty(object, 'fixed', { value: 8, writable: false, configurable: false });\n"
+        "Object.defineProperty(object, 'getter', { get: function() { getterCalls += 1; return 9; } });\n"
+        "if (read(object) !== 15 || readGetter(object) !== 9 || getterCalls !== 1)\n"
+        "  throw new Error('descriptor read changed semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("named_data_descriptor_read", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_NAMED_FAST_DATA_DESCRIPTOR][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_NAMED_FAST_MISS][2], 0u);
+    expect_trace_off_same("named_data_descriptor_read", source, output);
+}
+
+TEST(JsOpt, DynamicPropertyKeyKeepsOneCanonicalNameThroughPrototypeGet) {
+    const char* source =
+        "function read(object, suffix) { return object['com' + suffix]; }\n"
+        "var getterCalls = 0;\n"
+        "var prototype = {};\n"
+        "Object.defineProperty(prototype, 'computed', { get: function() {\n"
+        "  getterCalls += 1; return 17; }, configurable: true });\n"
+        "var child = Object.create(prototype);\n"
+        "if (read(child, 'puted') !== 17 || getterCalls !== 1)\n"
+        "  throw new Error('dynamic property key changed inherited Get');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("dynamic_property_key_prototype_get", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+
+    char* mir = read_fixture_mir("dynamic_property_key_prototype_get");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "call\tjs_get_reference"), nullptr);
+    free(mir);
+    expect_trace_off_same("dynamic_property_key_prototype_get", source, output);
+}
+
+TEST(JsOpt, NamedFunctionDataReadPreservesStrictPoisonPills) {
+    const char* source =
+        "function target(left, right) { return left + right; }\n"
+        "function strictTarget() { 'use strict'; }\n"
+        "function readMetadata(fn) { return fn.name + ':' + fn.length; }\n"
+        "function readCaller(fn) { try { return fn.caller; } catch (error) { return error.name; } }\n"
+        "if (readMetadata(target) !== 'target:2' || readCaller(strictTarget) !== 'TypeError')\n"
+        "  throw new Error('function metadata read changed semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("named_function_data_read", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_NAMED_FAST_FUNCTION_DATA][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_NAMED_FAST_MISS][2], 0u);
+    expect_trace_off_same("named_function_data_read", source, output);
+}
+
 TEST(JsOpt, ArrayLengthNameUsesOwnNoGcHead) {
     const char* source =
         "function direct(values) { return values.length; }\n"
@@ -1172,6 +1592,120 @@ TEST(JsOpt, ArrayLengthNameUsesOwnNoGcHead) {
     EXPECT_NE(strstr(mir, "call\tjs_get_reference"), nullptr);
     free(mir);
     expect_trace_off_same("array_length_name_head", source, output);
+}
+
+TEST(JsOpt, PrimitiveStringLengthUsesOwnNoGcHead) {
+    const char* source =
+        "function direct(text) { return text.length; }\n"
+        "function computed(text) { return text['length']; }\n"
+        "var astral = String.fromCodePoint(0x1f642);\n"
+        "if (direct('abc') !== 3 || direct(astral) !== 2 ||\n"
+        "    computed('four') !== 4 || direct(new String('abc')) !== 3)\n"
+        "  throw new Error('string length changed');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("primitive_string_length_name_head", source,
+                            &trace, output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_NAMED_FAST_STRING_LENGTH][1], 0u);
+
+    char* mir = read_fixture_mir("primitive_string_length_name_head");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "call\tjs_get_name_id"), nullptr);
+    free(mir);
+    expect_trace_off_same("primitive_string_length_name_head", source,
+                          output);
+}
+
+TEST(JsOpt, PrimitiveStringConcatAvoidsGenericAddSetup) {
+    const char* source =
+        "function concat(left, right) { return left + right; }\n"
+        "var coercions = 0;\n"
+        "var object = { toString: function() { coercions += 1; return 'object'; } };\n"
+        "if (concat('left', 'right') !== 'leftright' ||\n"
+        "    concat('prefix:', object) !== 'prefix:object' || coercions !== 1)\n"
+        "  throw new Error('string concat changed coercion semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("primitive_string_concat_head", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_RUNTIME_STRING_CONCAT_HEAD][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_RUNTIME_NUMBER_HEAD_FALLBACK][2], 0u);
+
+    char* mir = read_fixture_mir("primitive_string_concat_head");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "call\tjs_add"), nullptr);
+    free(mir);
+    expect_trace_off_same("primitive_string_concat_head", source, output);
+}
+
+TEST(JsOpt, DeferredMirFunctionPublicationKeepsFinalMetadata) {
+    const char* source =
+        "function make(prefix) {\n"
+        "  return function(first, second) { return prefix + first + second; };\n"
+        "}\n"
+        "var first = make('a');\n"
+        "var second = make('b');\n"
+        "var desc = Object.getOwnPropertyDescriptor(first, 'length');\n"
+        "if (first('1', '2') !== 'a12' || second('3', '4') !== 'b34' ||\n"
+        "    first.length !== 2 || !desc || desc.value !== 2 ||\n"
+        "    desc.writable || desc.enumerable || !desc.configurable)\n"
+        "  throw new Error('deferred function metadata changed');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("deferred_mir_function_metadata", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GE(trace.events[JS_OPT_MIR_DEFERRED_FUNCTION_FINALIZE][1], 3u);
+    EXPECT_GE(trace.events[JS_OPT_MIR_LAZY_FUNCTION_METADATA][1], 3u);
+    expect_trace_off_same("deferred_mir_function_metadata", source, output);
+}
+
+TEST(JsOpt, LazyMirFunctionMetadataPreservesReflectionAndDeletion) {
+    const char* source =
+        "function sample(first, second) { return first + second; }\n"
+        "if (!Object.hasOwn(sample, 'name') || !Object.hasOwn(sample, 'length') ||\n"
+        "    sample.name !== 'sample' || sample.length !== 2)\n"
+        "  throw new Error('lazy function metadata read changed');\n"
+        "var names = Object.getOwnPropertyNames(sample);\n"
+        "if (names.indexOf('length') < 0 || names.indexOf('name') < 0 ||\n"
+        "    names.indexOf('length') > names.indexOf('name'))\n"
+        "  throw new Error('lazy function metadata key order changed');\n"
+        "var descriptor = Object.getOwnPropertyDescriptor(sample, 'name');\n"
+        "if (!descriptor || descriptor.value !== 'sample' || descriptor.writable ||\n"
+        "    descriptor.enumerable || !descriptor.configurable || !delete sample.name ||\n"
+        "    Object.hasOwn(sample, 'name') || sample.name !== '')\n"
+        "  throw new Error('lazy function metadata descriptor changed');\n"
+        "function prototypeFirst() {}\n"
+        "prototypeFirst.prototype; prototypeFirst.extra = 1;\n"
+        "var prototypeNames = Object.getOwnPropertyNames(prototypeFirst);\n"
+        "if (!(prototypeNames.indexOf('length') < prototypeNames.indexOf('name') &&\n"
+        "      prototypeNames.indexOf('name') < prototypeNames.indexOf('prototype') &&\n"
+        "      prototypeNames.indexOf('prototype') < prototypeNames.indexOf('extra')))\n"
+        "  throw new Error('lazy prototype key order changed');\n"
+        "function definedFirst() {}\n"
+        "Object.defineProperty(definedFirst, 'extra', { value: 1 });\n"
+        "var definedNames = Object.getOwnPropertyNames(definedFirst);\n"
+        "if (!(definedNames.indexOf('length') < definedNames.indexOf('name') &&\n"
+        "      definedNames.indexOf('name') < definedNames.indexOf('extra') &&\n"
+        "      definedNames.indexOf('extra') < definedNames.indexOf('prototype')))\n"
+        "  throw new Error('lazy define key order changed');\n"
+        "function deletedFirst() {}\n"
+        "if (!delete deletedFirst.name || Object.hasOwn(deletedFirst, 'name') ||\n"
+        "    deletedFirst.name !== '')\n"
+        "  throw new Error('lazy metadata delete changed');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("lazy_mir_function_metadata", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_MIR_LAZY_FUNCTION_METADATA][1], 0u);
+    expect_trace_off_same("lazy_mir_function_metadata", source, output);
 }
 
 TEST(JsOpt, NumericLocalFactsSurviveBoxedAndVoidReturns) {
@@ -1242,11 +1776,13 @@ TEST(JsOpt, TypedArrayStoresUseGuardedNumericKeyLeaf) {
     expect_ok_output(output);
     EXPECT_NE(strstr(output, "typed:1:4:0.5:3.5"), nullptr) << output;
     EXPECT_NE(strstr(output, "fallback:7"), nullptr) << output;
+    EXPECT_GT(trace.events[JS_OPT_TYPED_NUMBER_STORE][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_TYPED_NUMBER_STORE][2], 0u);
 
     char* mir = read_fixture_mir("typed_array_store_leaf");
     ASSERT_NE(mir, nullptr);
-    EXPECT_NE(strstr(mir, "js_typed_array_set_numeric_key"), nullptr);
-    EXPECT_NE(strstr(mir, "js_typed_array_current_data_ptr"), nullptr);
+    EXPECT_NE(strstr(mir, "js_typed_array_set_number_if_kind"), nullptr);
+    EXPECT_NE(strstr(mir, "js_typed_array_data_at_if_kind"), nullptr);
     free(mir);
     expect_trace_off_same("typed_array_store_leaf", source, output);
 }
@@ -1286,13 +1822,14 @@ TEST(JsOpt, TypedArrayParameterUsesGuardedPhysicalAccess) {
     EXPECT_NE(strstr(output, "product:16"), nullptr) << output;
     EXPECT_NE(strstr(output, "wrong-kind:4"), nullptr) << output;
     EXPECT_NE(strstr(output, "fallback:5"), nullptr) << output;
+    EXPECT_GT(trace.events[JS_OPT_TYPED_NUMBER_READ][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_TYPED_NUMBER_READ][2], 0u);
 
     char* mir = read_fixture_mir("typed_array_parameter_access");
     ASSERT_NE(mir, nullptr);
     // The direct caller nominates Float64Array, but the generated function
     // still guards the runtime receiver before taking its physical load path.
-    EXPECT_NE(strstr(mir, "js_typed_array_element_type"), nullptr);
-    EXPECT_NE(strstr(mir, "js_typed_array_current_data_ptr"), nullptr);
+    EXPECT_NE(strstr(mir, "js_typed_array_data_at_if_kind"), nullptr);
     EXPECT_NE(strstr(mir, "dmul"), nullptr);
     free(mir);
     expect_trace_off_same("typed_array_parameter_access", source, output);

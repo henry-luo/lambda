@@ -9,6 +9,7 @@
 #include "js_object_meta.h"
 #include "js_coerce.h"
 #include "js_event_loop.h"
+#include "js_exec_profile.h"
 #include "../core/binary.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
@@ -2308,6 +2309,61 @@ extern "C" Item js_typed_array_set_numeric_key(Item ta_item,
         is_negative_zero, value);
 }
 
+extern "C" bool js_typed_array_set_number_if_kind(Item ta_item,
+        double numeric_index, int expected_type, double value) {
+    if (!js_is_typed_array(ta_item)) {
+        js_opt_trace_record(JS_OPT_TYPED_NUMBER_STORE, JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_FALLBACK);
+        return false;
+    }
+
+    JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
+    if (!ta) {
+        js_opt_trace_record(JS_OPT_TYPED_NUMBER_STORE, JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_FALLBACK);
+        return false;
+    }
+    js_typed_array_refresh_arraynum_view(ta);
+    if ((int)ta->element_type != expected_type ||
+            ta->element_type == JS_TYPED_BIGINT64 ||
+            ta->element_type == JS_TYPED_BIGUINT64) {
+        js_opt_trace_record(JS_OPT_TYPED_NUMBER_STORE, JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_FALLBACK);
+        return false;
+    }
+
+    // This is the Number-only portion of IntegerIndexedElementSet. The
+    // caller has already evaluated a proven primitive Number, so no coercion
+    // is observable here. An invalid canonical numeric index is still a
+    // completed integer-indexed write that leaves the receiver unchanged.
+    bool is_negative_zero = numeric_index == 0.0 && signbit(numeric_index);
+    if (is_negative_zero || !isfinite(numeric_index) ||
+            floor(numeric_index) != numeric_index || numeric_index < 0.0 ||
+            numeric_index > (double)INT32_MAX) {
+        js_opt_trace_record(JS_OPT_TYPED_NUMBER_STORE, JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_TAKEN);
+        return true;
+    }
+
+    int index = (int)numeric_index;
+    if (index >= js_typed_array_current_length(ta)) {
+        js_opt_trace_record(JS_OPT_TYPED_NUMBER_STORE, JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_TAKEN);
+        return true;
+    }
+    void* data = js_typed_array_prepare_write(ta);
+    if (!data) {
+        js_opt_trace_record(JS_OPT_TYPED_NUMBER_STORE, JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_TAKEN);
+        return true;
+    }
+    js_typed_array_store_number_direct(ta->element_type, (char*)data, index,
+        value);
+    js_opt_trace_record(JS_OPT_TYPED_NUMBER_STORE, JS_OPT_REASON_NONE,
+        JS_OPT_OUTCOME_TAKEN);
+    return true;
+}
+
 extern "C" int js_typed_array_length(Item ta_item) {
     if (!js_is_typed_array(ta_item)) return 0;
     Map* m = ta_item.map;
@@ -2334,6 +2390,33 @@ extern "C" void* js_typed_array_current_data_ptr(Item ta_item) {
     JsTypedArray* ta = js_get_typed_array_ptr(m);
     js_typed_array_refresh_arraynum_view(ta);
     return js_typed_array_current_data(ta);
+}
+
+extern "C" void* js_typed_array_data_at_if_kind(Item ta_item,
+        int expected_type, int64_t index) {
+    if (index < 0 || !js_is_typed_array(ta_item)) {
+        js_opt_trace_record(JS_OPT_TYPED_NUMBER_READ, JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_FALLBACK);
+        return NULL;
+    }
+    JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
+    if (!ta || (int)ta->element_type != expected_type) {
+        js_opt_trace_record(JS_OPT_TYPED_NUMBER_READ, JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_FALLBACK);
+        return NULL;
+    }
+    // Refresh once before both the live-length check and pointer borrow. No
+    // guest code or safepoint follows this leaf before the generated load.
+    js_typed_array_refresh_arraynum_view(ta);
+    if (index >= js_typed_array_current_length(ta)) {
+        js_opt_trace_record(JS_OPT_TYPED_NUMBER_READ, JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_FALLBACK);
+        return NULL;
+    }
+    void* data = js_typed_array_current_data(ta);
+    js_opt_trace_record(JS_OPT_TYPED_NUMBER_READ, JS_OPT_REASON_NONE,
+        data ? JS_OPT_OUTCOME_TAKEN : JS_OPT_OUTCOME_FALLBACK);
+    return data;
 }
 
 extern "C" bool js_item_bytes(Item item, const char** data, int* len) {

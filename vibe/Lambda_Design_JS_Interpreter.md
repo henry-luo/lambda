@@ -4,6 +4,15 @@
 
 **Status:** PROPOSED — architecture and staged implementation plan; no implementation is claimed by this document.
 
+**Execution-policy revision (USER, 2026-09-16):** **D8.1.3v11 / JSI16v2**
+requires native execution whenever LambdaJS selects MIR. MIR interpretation is
+retired for JS, including diagnostic and size-based selection. This decision is
+ratified; removal of the existing runtime paths is planned in
+[JS Tune13](jube/JS_Tune13.md). The other staged architecture below remains
+subject to its implementation gates; the formal spec and
+[implementation record](impl/Lambda_Impl_JS_Interpreter.md) describe the already
+landed AST slice.
+
 **Scope:** LambdaJS execution inside the shared Lambda runtime, including page-level coexistence with Lambda behavior/app code. This document specializes the interpreter direction established by **AI21**, the shared-AST rules **D8.2.1–D8.2.5**, and the accepted DOM-state decisions **ES10–ES13**. It does not change either language's observable semantics, does not extend C2MIR, and does not introduce a bytecode VM.
 
 **Formal authority:** **D1.1–D1.10**, **D4.1.1v2**, **D4.1.4v4**, **D4.5.1v3**, **D4.6.1v2–D4.6.2v2**, **D5.1.1–D5.1.4**, **D5.3.2–D5.3.4**, **D5.4.1–D5.4.4**, **D6.2.1–D6.2.4**, **D6.3.1**, **D7.2.1**, **D8.1.1v5**, **D8.2.1–D8.2.6**, **D8.4.1v2**, **D8.4.3v2**, and **D8.6.1–D8.6.4v2** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specification wins on disagreement.
@@ -39,7 +48,10 @@ source
        -> eager whole-script MIR only when explicitly selected or fail-closed policy requires it
 ```
 
-MIR-interp remains a backend diagnostic. It is not the JavaScript AST tier because it still pays complete AST-to-MIR lowering.
+The AST walker is the JavaScript interpreter. Selecting MIR means executing
+generated native code, whether eagerly generated or reached through an admitted
+native lazy-generation entry. There is no LambdaJS MIR-interpreter execution
+mode, including for diagnostics or large/cold modules (**D8.1.3v11**).
 
 ### 1.1 Why this is a separate walker
 
@@ -217,9 +229,16 @@ Until heapified interpreter continuations land, generator/async/top-level-await 
 
 `jit_init()`, MIR lowering, linking, and code publication occur only inside the selected T1 path. T0 page execution does not create an empty MIR context as an ownership token.
 
-### JSI16 — MIR-interp is a backend diagnostic
+### JSI16v2 — Selected LambdaJS MIR executes native code
 
-MIR-interp may execute an already-produced artifact for differential/backend work. It is not the AST tier and does not satisfy a zero-lowering T0 gate.
+Under **D8.1.3v11** (USER, 2026-09-16), the AST walker is LambdaJS's interpreter;
+selected MIR units execute generated native code. Source/module size, document
+context, optimization level, diagnostic switches, and inherited global state
+cannot select MIR interpretation or silently reroute a selected MIR unit to AST.
+Native compilation failure is reported without replay. Existing AST admission
+and any future explicit AUTO policy are separate from MIR execution mode.
+Other language profiles' MIR-interpreter support is unchanged. Rationale,
+selection inventory, and implementation gates are in [JS Tune13](jube/JS_Tune13.md).
 
 ### JSI17 — Admission uses semantic facts
 
@@ -1013,7 +1032,10 @@ promotion_count
 
 The support scan examines semantic facts, not only node kinds. A syntactically ordinary function may still be rejected for direct eval, an unsupported class dependency, module/suspension behavior, or a missing binding plan.
 
-Rejected AUTO scripts enter the existing eager/MIR-interp policy before declaration instantiation. Forced `interp` reports a deterministic unsupported-tier error rather than silently compiling, except where the test harness explicitly requests counted comparison fallback.
+In the proposed AUTO tier, rejected scripts enter eager native MIR before
+declaration instantiation. AUTO itself remains unimplemented under **D8.1.3v11**.
+Forced AST interpretation reports a deterministic unsupported-tier error rather
+than silently compiling; differential tests select each backend explicitly.
 
 ### 9.3 Promotion point
 
@@ -1135,7 +1157,7 @@ that entry before the Script's pool is released. It therefore survives a
 excluded from reuse because their one-time link/evaluation state belongs to the
 canonical module registry. This is a local derived cache under **D1.7**, with
 the single shared `Runtime`/`EvalContext` ownership required by
-**D8.1.3v10** and **D5.4.1**.
+**D8.1.3v11** and **D5.4.1**.
 
 `jit_init()` moves wholly inside the T1 branch. This is the point of the feature: a successful T0 run creates no MIR context and performs no MIR lowering/link. Runtime/context/heap initialization is not T1 work and is shared with Lambda.
 
@@ -1269,7 +1291,12 @@ Vendor sources, C2MIR, generated `parser.c`, generated Lua, and `log.conf` remai
 8. Extract function collection, strict/direct-eval/with facts, bindings, module slots, capture inputs, class facts, and property-name discovery from MIR lifetime.
 9. Make MIR consume the new persistent facts with unchanged output, then rename the narrowed JS capsule to `JsRealmState`.
 
-**Gate:** eager MIR and MIR-interp baselines remain identical; a page with page JS plus the Lambda dom package proves one owner for runtime/context/heap/registry/module IDs and tears down once; `fn->analysis` and every source/name pointer remain valid through event-loop drain and batch reuse; **D8.6.4v2** timing/LOC diagnostics are recorded.
+**Gate:** eager native MIR behavior remains identical, and the admitted AST slice
+matches its native reference; a page with page JS plus the Lambda dom package
+proves one owner for runtime/context/heap/registry/module IDs and tears down once;
+`fn->analysis` and every source/name pointer remain valid through event-loop drain
+and batch reuse; **D8.6.4v2** timing/LOC diagnostics are recorded. MIR interpretation
+is not a JS test tier under **D8.1.3v11**.
 
 ### P2 — Restricted synchronous vertical slice
 
@@ -1313,7 +1340,9 @@ Add:
 2. Validate every T0/T1/native call and construct crossing over the shared environment ABI.
 3. Implement per-definition boxed satellites and promotion publication.
 4. Add AUTO counters and hot-function tests.
-5. Demote size-based MIR-interp selection to a backend diagnostic for admitted scripts.
+5. Preserve the native-only MIR contract across promotion and retained artifacts;
+   size-based and diagnostic MIR interpretation are removed by JS Tune13 rather
+   than deferred to this promotion phase (**D8.1.3v11**).
 
 **Gate:** full JS T0/T1/native and Lambda↔JS call matrix passes under forced GC; closure mutation, per-iteration cells, direct eval, class constructors, bound/proxy calls, and error identity remain exact across tier and language crossings.
 
@@ -1475,9 +1504,12 @@ The principal metric is total cold turnaround for run-once work. Hot arithmetic 
 
 Rejected. Common node shapes do not share coercion, containers, references, closures, truthiness, or completions. Repeated language branches would obscure **D1.3** and make accidental semantic reuse likely.
 
-### 15.2 Keep MIR-interp as the only non-native tier
+### 15.2 Keep MIR interpretation as a LambdaJS tier
 
-Rejected as the product solution. It remains valuable for backend diagnostics but still pays whole-module MIR analysis, emission, and link—the cold cost T0 is intended to remove.
+Rejected, including as a diagnostic or large-module mode (**D8.1.3v11**). It still
+pays AST-to-MIR lowering and provides no native execution benefit. AST handles
+interpretation; native compiler costs must be improved directly. Existing
+MIR-interpreter support for other language profiles is outside this decision.
 
 ### 15.3 Introduce bytecode
 
@@ -1579,7 +1611,7 @@ These questions do not reopen the decisions above:
 | **JSI13** | Suspension remains compiled until heapified interpreter continuations land | proposed |
 | **JSI14** | `func_ptr == NULL` never selects AST semantics; function body kind is explicit | proposed |
 | **JSI15** | `jit_init()` and MIR lowering occur only inside the selected T1 path | proposed |
-| **JSI16** | MIR-interp remains a backend diagnostic, not the AST tier | proposed / AI19 alignment |
+| **JSI16v2** | Selected LambdaJS MIR executes native code; AST is the interpreter | ratified USER 2026-09-16 / D8.1.3v11; implementation pending JS Tune13 |
 | **JSI17** | T0 support is semantic-fact-aware and decided before declaration instantiation | proposed |
 | **JSI18** | Promotion happens only at function entry; no general OSR | proposed / D8.1.1v5 alignment |
 | **JSI19** | Static property names are discovered and sealed from `JsScript` plans before realm work | proposed |
@@ -1613,4 +1645,31 @@ This proposal becomes implementation authority only when the following documenta
 6. update `JS_01`, `JS_04`, `JS_05`, `JS_08`, `JS_09`, and `JS_16` as each implementation phase actually lands;
 7. create an implementation status record under `vibe/impl/` before code work claims a completed phase.
 
-Until then, landed page paths already share substantial `Runtime`/`EvalContext`/heap infrastructure under ES12, but JavaScript execution remains parse → shared AST → whole-module MIR → MIR JIT/interpreter and there is no common T0 activation service or retained `JsScript`. This document is a proposal rather than a statement that the integrated interpreter is shipped.
+The original adoption baseline predates the explicit AST backend and retained
+`JsScript` now recorded in **D8.1.3v11**. This document's broader mixed-tier/AUTO
+architecture is still not a claim of full implementation. The new native-only
+MIR contract is ratified but its remaining runtime selection paths are removed
+by JS Tune13; consult the formal implementation footnote and the linked
+implementation record for landed coverage.
+
+## Appendix S — Superseded execution-policy rulings
+
+### S1 — JSI16 and the prior D8.1.3v10 backend clause
+
+Superseded by **D8.1.3v11 / JSI16v2**, USER 2026-09-16. Historical text:
+
+> ~~MIR-interp may execute an already-produced artifact for differential/backend
+> work. It is not the AST tier and does not satisfy a zero-lowering T0 gate.~~
+
+The former formal backend clause was:
+
+> ~~The unset backend remains the established MIR policy until the mixed-tier,
+> suspension, and performance gates are complete.~~
+
+The previous working plan also sent rejected AUTO scripts to the eager/MIR-interp
+policy, retained MIR-interp as a differential baseline, and deferred size-based
+mode retirement to promotion work. Those directions no longer govern JS.
+The user chose the already available AST interpreter for interpretation and
+native execution for every selected MIR unit. This removes the whole-module
+interpreter cliff rather than retuning its threshold. Cold compilation cost is
+addressed by the compiler/helper work in JS Tune13, not an interpreter fallback.

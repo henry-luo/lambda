@@ -103,9 +103,11 @@ Item js_mir_execute_compiled_entry(void* entry_func) {
     return runtime_publish_result(context, result);
 }
 
-JsMirMainFunc js_mir_link_main(MIR_context_t ctx, bool use_interp,
+JsMirMainFunc js_mir_link_main(MIR_context_t ctx,
         void (*gen_interface)(MIR_context_t, MIR_item_t)) {
-    MIR_link(ctx, use_interp ? MIR_set_interp_interface : gen_interface, import_resolver);
+    // D8.1.3v11: the AST walker is LambdaJS's interpreter; a JS MIR unit
+    // always links to generated native code.
+    MIR_link(ctx, gen_interface, import_resolver);
     return (JsMirMainFunc)find_func(ctx, (char*)"js_main");
 }
 
@@ -423,7 +425,7 @@ Item js_mir_compile_unit_fail(MIR_context_t ctx,
         // MIR_gen_init allocates a separate generator arena; MIR_finish does
         // not release it, so pair teardown with the context's init mode.
         jit_cleanup_mode(ctx,
-            mir_gen_initialized < 0 ? !g_mir_interp_mode : mir_gen_initialized);
+            mir_gen_initialized < 0 ? 1 : mir_gen_initialized);
     }
     jm_clear_active_js_transpile(tp, NULL, NULL);
     js_transpiler_destroy(tp);
@@ -475,7 +477,9 @@ JsMirTranspiler* js_mir_open_compile_unit(
         const char* log_prefix, bool install_error_handler,
         MIR_context_t* out_ctx) {
     if (!out_ctx) return NULL;
-    *out_ctx = jit_init(optimize_level);
+    // Never inherit g_mir_interp_mode: JS MIR is native even when another
+    // language compilation path enabled MIR's interpreter diagnostic mode.
+    *out_ctx = jit_init_native(optimize_level);
     if (!*out_ctx) {
         log_error("%s: MIR context init failed", log_prefix ? log_prefix : "js-mir");
         return NULL;
@@ -724,18 +728,6 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         js_source_len += (size_t)off;
     }
 
-    // Check env var for interpreter mode (once, as fallback for CLI --mir-interp)
-    static bool interp_checked = false;
-    if (!interp_checked) {
-        if (!g_mir_interp_mode && mir_explicit_interpreter_requested()) {
-            g_mir_interp_mode = 1;
-        }
-        if (g_mir_interp_mode) {
-            log_info("js-mir: INTERPRETER MODE enabled");
-        }
-        interp_checked = true;
-    }
-
     JsCommonAstBuild ast_cache_build = {};
     if (js_ast_interpreter_requested()) {
         JsScript* cached = js_common_ast_cache_lookup(runtime, js_source, js_source_len,
@@ -825,17 +817,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
             runtime, NULL, true);
     }
 
-    bool document_ast_too_large = runtime && runtime->dom_doc != NULL &&
-        g_mir_interp_mode == 0 && mir_large_interp_enabled() &&
-        tp->ast_index.count > JM_RADIANT_AST_NODE_THRESHOLD;
-    if (js_ast_interpreter_requested() || document_ast_too_large) {
-        if (document_ast_too_large) {
-            // MIR's interpreter stores this activation's virtual registers in
-            // alloca memory; its AST size predicts that native-stack overflow.
-            // Keep later scripts in this realm on the same closure ABI.
-            runtime->js_ast_backend = true;
-            log_info("js-mir: document AST (%u nodes) uses AST executor", tp->ast_index.count);
-        }
+    if (js_ast_interpreter_requested()) {
         // nested eval compiles through the same counters; retain this source's
         // record and separate realm construction from AST execution.
         JsMirPhaseTiming timing = g_last_js_mir_phase_timing;
@@ -844,7 +826,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         Item result = js_mir_execute_ast_script(runtime, tp, owned_source,
             js_source, js_source_len, filename, result_home,
             test262_native_harness,
-            js_ast_interpreter_requested() ? &ast_cache_build : NULL);
+            &ast_cache_build);
         timing.realm_us = (long)(js_realm_init_time_us() - realm_start);
         timing.execute_us = js_mir_phase_now_us() - phase_start - timing.realm_us;
         timing.total_us = js_mir_phase_now_us() - phase_total_start;
@@ -875,20 +857,6 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     Input* js_input = Input::create(context->pool);
     js_runtime_set_input(js_input);
 
-    bool use_mir_interp_for_script = g_mir_interp_mode != 0;
-    bool auto_interp_for_large_source = false;
-    int saved_mir_interp_mode = g_mir_interp_mode;
-    if (!use_mir_interp_for_script && g_js_mir_optimize_level == 0 &&
-        mir_large_interp_enabled() &&
-        js_source_len >= mir_large_source_interp_threshold()) {
-        g_mir_interp_mode = 1;
-        use_mir_interp_for_script = true;
-        auto_interp_for_large_source = true;
-        log_info("js-mir: large source (%zu bytes) uses MIR interpreter at opt=0", js_source_len);
-    }
-    if (auto_interp_for_large_source) {
-        g_mir_interp_mode = saved_mir_interp_mode;
-    }
     MIR_context_t ctx = NULL;
 
     JsMirTranspiler* mt = js_mir_open_compile_unit(tp, filename, "js_script", false,
@@ -958,51 +926,20 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
             runtime, js_context, reusing_context);
     }
 
-    // Link and generate
-    // Count finalized executable MIR instructions (drives the interpreter
-    // policy and the AST-tuning volume gate). Labels are structural and must
-    // match the MT7 artifact counter used by test_mir_ratchet_gtest.
+    // Count finalized executable MIR instructions for diagnostics and the AST
+    // tuning volume gate. Labels are structural and must match the MT7 artifact
+    // counter used by test_mir_ratchet_gtest.
     uint64_t total_functions = 0;
     uint64_t total_insns = 0;
     mir_count_module_volume(ctx, NULL, &total_functions, &total_insns);
     js_mir_volume_counters_set((long)total_functions, (long)total_insns);
-    // Tune6 (see vibe/jube/Transpile_Js_Tune6_AST.md §0.2a–§0.2d): the dominant JS
-    // startup cost is eager per-function MIR_gen during MIR_link. For large modules
-    // opt=0 JIT ≈ opt=2 JIT (link is codegen-emit-bound, not optimizer-bound), so
-    // the old ">100k → opt=0" downgrade was a near-no-op. The genuinely fast path
-    // for large *cold* code is the MIR interpreter, which skips codegen entirely.
-    //
-    // Policy: prefer the interpreter when the module is very large (any context) OR
-    // when running in a document/Radiant context (cold vendor JS) above a moderate
-    // size. Keep the JIT for compute-heavy standalone JS. The generator stays
-    // initialized (g_mir_interp_mode is left 0), so jit_init/jit_cleanup remain
-    // paired — only the MIR_link interface differs. Disable with LAMBDA_JS_LARGE_INTERP=0.
-    unsigned int effective_opt = g_js_mir_optimize_level;
-    bool document_context = (runtime && runtime->dom_doc != NULL);
-    if (!use_mir_interp_for_script && mir_large_interp_enabled() &&
-        (total_insns > JM_LARGE_MODULE_INSN_THRESHOLD ||
-         (document_context && (g_js_force_document_interp ||
-                               total_insns > JM_RADIANT_INTERP_INSN_THRESHOLD)))) {
-        use_mir_interp_for_script = true;
-        log_info("js-mir: %s module (%lu insns)%s → MIR interpreter (skip JIT codegen)",
-                 total_insns > JM_LARGE_MODULE_INSN_THRESHOLD ? "large" : "cold-document",
-                 total_insns, document_context ? " [document]" : "");
-    }
-    // Fallback: if we still JIT a very large module (interpreter disabled), downgrade
-    // opt to avoid MIR's super-linear opt passes on huge functions.
-    if (!use_mir_interp_for_script && effective_opt >= 2 &&
-        total_insns > JM_LARGE_MODULE_INSN_THRESHOLD) {
-        log_info("js-mir: large module (%lu insns) → opt=0 (was %u)", total_insns, effective_opt);
-        MIR_gen_set_optimize_level(ctx, 0);
-        effective_opt = 0;
-    }
     // Tune6: JS_LAZY_MIR=1 selects MIR's native per-function lazy codegen
     // (MIR_set_lazy_gen_interface) instead of eager generation. Lazy gen installs
     // a wrapper thunk on func_item->addr and runs MIR_gen on first call, then
     // redirects the thunk to the real code. This defers the dominant per-function
     // codegen cost out of the link phase to first call. ABI-compatible: both the
     // direct-call (MIR_new_ref_op(func_item)) and indirect (js_call_function)
-    // paths use func_item->addr. Does not affect the interp path.
+    // paths use func_item->addr.
     static int js_lazy_mir_cached = -1;
     if (js_lazy_mir_cached < 0) {
         const char* lazy_env = getenv("JS_LAZY_MIR");
@@ -1018,17 +955,11 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         js_lazy_mir_cached ? MIR_set_lazy_gen_interface : MIR_set_gen_interface;
 
     phase_start = js_mir_phase_now_us();
-    JsMirMainFunc linked_main = js_mir_link_main(ctx,
-        use_mir_interp_for_script, gen_interface);
+    JsMirMainFunc linked_main = js_mir_link_main(ctx, gen_interface);
     g_last_js_mir_phase_timing.link_us = js_mir_phase_now_us() - phase_start;
     log_mem_stage("js-core: mir_linked");
     void* js_debug_info = jm_build_js_debug_info(mt, filename);
     context->debug_info = (ArrayList*)js_debug_info;
-    // Restore opt level if we changed it
-    if (effective_opt != g_js_mir_optimize_level) {
-        MIR_gen_set_optimize_level(ctx, g_js_mir_optimize_level);
-    }
-
     // Find js_main
     JsMirMainFunc js_main = linked_main;
 
@@ -1198,7 +1129,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         }
     } else {
         g_active_mir_ctx = NULL;
-        jit_cleanup_mode(ctx, !g_mir_interp_mode);
+        jit_cleanup_mode(ctx, 1);
     }
     if (js_debug_info) {
         free_debug_info_table(js_debug_info);

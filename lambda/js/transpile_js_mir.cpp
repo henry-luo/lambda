@@ -24,10 +24,8 @@ MIR_error_func_t g_batch_mir_error_handler = NULL;
 // Set from CLI (e.g., --opt-level=0). Preamble always uses its own level.
 unsigned int g_js_mir_optimize_level = 2;
 
-// Tune6: when set (by document-rendering CLI commands layout/render/view), JS in a
-// document context links via the MIR interpreter regardless of size — but with the
-// JIT generator still initialized (g_mir_interp_mode stays 0), i.e. the link-
-// interface interp path, not pure-interp. See Transpile_Js_Tune6_AST.md §0.2.
+// The Lambda Direct compiler still owns this legacy document policy. LambdaJS
+// no longer reads it: D8.1.3v11 requires selected JS MIR to execute native code.
 int g_js_force_document_interp = 0;
 
 // keep the newer CLI --diagnose switch linkable after rolling the JS runtime
@@ -46,9 +44,6 @@ extern "C" int js_is_diagnose_enabled(void) {
 // Adaptive gen interface: large functions (>N insns) compile at opt=1 to avoid
 // O(n²) SSA/GVN cost, while small functions get full optimization.
 // Threshold: 10K MIR insns → functions above this use opt=1.
-
-// POC: MIR interpreter mode — set from mir.c
-extern "C" int g_mir_interp_mode;
 
 extern "C" {
     void ensure_jit_imports_initialized(void);

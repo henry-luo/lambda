@@ -302,6 +302,17 @@ extern "C" JsShapeSlotStatus js_own_shape_slot_status_key_ex(Item object, Item k
         NAME_ID_NONE, true, out_slot, out_se, out_borrowed);
 }
 
+extern "C" bool js_canonicalize_property_string(Item key, Item* out_key) {
+    if (out_key) *out_key = key;
+    if (get_type_id(key) != LMD_TYPE_STRING) return true;
+    String* string_key = it2s(key);
+    if (!string_key || property_key_id(string_key) != NAME_ID_NONE) return true;
+    NameRef canonical_key = heap_create_name(string_key->chars, string_key->len);
+    if (!canonical_key) return false;
+    if (out_key) *out_key = (Item){.item = s2it(canonical_key)};
+    return true;
+}
+
 extern "C" JsOwnGetStatus js_ordinary_get_own_ex(Item object, Item key,
         Item Receiver, Item* out_value, bool* out_borrowed) {
     JS_ROOTS(roots, object_root, object, key_root, key, receiver_root, Receiver);
@@ -316,13 +327,8 @@ extern "C" JsOwnGetStatus js_ordinary_get_own_ex(Item object, Item key,
     // canonicalization allocates and may collect, so keep all incoming values
     // rooted across it.
     TypeId kt = key._type_id;
-    if (kt == LMD_TYPE_STRING) {
-        String* string_key = it2s(key);
-        if (string_key && property_key_id(string_key) == NAME_ID_NONE) {
-            NameRef canonical_key = heap_create_name(string_key->chars, string_key->len);
-            if (!canonical_key) return JS_OWN_NOT_FOUND;
-            key = (Item){.item = s2it(canonical_key)};
-        }
+    if (kt == LMD_TYPE_STRING && !js_canonicalize_property_string(key, &key)) {
+        return JS_OWN_NOT_FOUND;
     }
     // String and symbol keys use the central shape/slot status helper so MAP
     // storage, FUNC properties_map storage, and ARRAY companion-map storage

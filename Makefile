@@ -1087,6 +1087,8 @@ verify-jube-package: package-jube
 verify-node-profile-packages: package-node-reduced package-minimal
 	@cmp -s release-node-reduced/lambda release-minimal/lambda
 	@cd release-node-reduced && ./lambda js -e "console.log(require('path').join('a', 'b'))" --no-log | rg -x "a/b"
+	# The first process global read must activate the enabled node-core image.
+	@cd release-node-reduced && ./lambda js -e "console.log(typeof process.hrtime.bigint())" --no-log | rg -x "bigint"
 	@mkdir -p temp/node-minimal-package-check
 	@cd release-minimal && ./lambda js -e "console.log(1 + 1)" --no-log | rg -x "2"
 	@cd release-minimal && ./lambda js -e "console.log(typeof Buffer)" --no-log | rg -x "undefined"

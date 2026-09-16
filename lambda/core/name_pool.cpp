@@ -159,6 +159,48 @@ static String* find_string_by_content(NamePool* pool, const char* content, size_
     return found ? found->name : nullptr;
 }
 
+// Search one identity scope without consulting the generated catalog. The
+// caller controls catalog precedence so repeated dynamic-key lookups do not
+// reclassify the same spelling at every parent/segment boundary.
+static String* name_pool_lookup_local_strview(NamePool* pool, StrView name) {
+    if (!pool) return nullptr;
+    String* result = find_string_by_content(pool, name.str, name.length);
+    if (result) return result;
+
+    NamePool* root = pool->identity_root ? pool->identity_root : pool;
+    if (root->id_mode == NAME_POOL_STATIC && root->segments &&
+            pool->id_mode == NAME_POOL_STATIC) {
+        uint16_t end = root->next_static_pool;
+        if (end > 0x8000u) end = 0x8000u;
+        for (uint16_t number = 3; number < end; number++) {
+            NamePool* segment = root->segments[number];
+            if (!segment || segment == pool) continue;
+            result = find_string_by_content(segment, name.str, name.length);
+            if (result) return result;
+        }
+    }
+    if (root->id_mode == NAME_POOL_STATIC && root->segments &&
+            pool->id_mode == NAME_POOL_DYNAMIC) {
+        uint32_t end = root->next_dynamic_pool ? root->next_dynamic_pool : 0x10000u;
+        for (uint32_t number = 0x8000u; number < end; number++) {
+            NamePool* segment = root->segments[number];
+            if (!segment || segment == pool) continue;
+            result = find_string_by_content(segment, name.str, name.length);
+            if (result) return result;
+        }
+    }
+    return NULL;
+}
+
+static String* name_pool_lookup_strview_without_catalog(NamePool* pool,
+        StrView name) {
+    if (!pool) return nullptr;
+    String* result = name_pool_lookup_local_strview(pool, name);
+    if (result) return result;
+    return pool->parent ? name_pool_lookup_strview_without_catalog(pool->parent,
+        name) : NULL;
+}
+
 static bool name_pool_ensure_record_capacity(NamePool* pool, uint16_t ordinal) {
     if (!pool || !pool->identity_root || ordinal == 0) return false;
     if (pool->record_count >= pool->record_capacity) {
@@ -464,7 +506,8 @@ String* name_pool_create_strview(NamePool* pool, StrView name) {
 
     // 1. Try in parent pool first
     if (pool->parent) {
-        String* parent_result = name_pool_lookup_strview(pool->parent, name);
+        String* parent_result = name_pool_lookup_strview_without_catalog(
+            pool->parent, name);
         if (parent_result) {
             return parent_result;
         }
@@ -473,7 +516,7 @@ String* name_pool_create_strview(NamePool* pool, StrView name) {
     // 2. Allocation can spill into an overflow segment. Search the complete
     // identity scope before assigning another NameId for the same spelling
     // (D4.6.1v2).
-    String* existing = name_pool_lookup_strview(pool, name);
+    String* existing = name_pool_lookup_local_strview(pool, name);
     if (existing) {
         return existing;
     }
@@ -528,38 +571,8 @@ String* name_pool_lookup_len(NamePool* pool, const char* name, size_t len) {
 
 String* name_pool_lookup_strview(NamePool* pool, StrView name) {
     if (!pool) return nullptr;
-    // 1. Try to find in current pool first
-    String* result = find_string_by_content(pool, name.str, name.length);
+    String* result = name_pool_lookup_strview_without_catalog(pool, name);
     if (result) return result;
-
-    NamePool* root = pool->identity_root ? pool->identity_root : pool;
-    if (root->id_mode == NAME_POOL_STATIC && root->segments &&
-            pool->id_mode == NAME_POOL_STATIC) {
-        uint16_t end = root->next_static_pool;
-        if (end > 0x8000u) end = 0x8000u;
-        for (uint16_t number = 3; number < end; number++) {
-            NamePool* segment = root->segments[number];
-            if (!segment || segment == pool) continue;
-            result = find_string_by_content(segment, name.str, name.length);
-            if (result) return result;
-        }
-    }
-    if (root->id_mode == NAME_POOL_STATIC && root->segments &&
-            pool->id_mode == NAME_POOL_DYNAMIC) {
-        uint32_t end = root->next_dynamic_pool ? root->next_dynamic_pool : 0x10000u;
-        for (uint32_t number = 0x8000u; number < end; number++) {
-            NamePool* segment = root->segments[number];
-            if (!segment || segment == pool) continue;
-            result = find_string_by_content(segment, name.str, name.length);
-            if (result) return result;
-        }
-    }
-
-    // 2. Try parent pools
-    if (pool->parent) {
-        String* parent_result = name_pool_lookup_strview(pool->parent, name);
-        if (parent_result) return parent_result;
-    }
     // The catalog is an internal fallback, not a visible parent: Input keeps
     // parent == NULL while predefined names still resolve process-globally.
     return find_well_known_name(name);

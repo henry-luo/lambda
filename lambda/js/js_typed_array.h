@@ -163,6 +163,10 @@ Item js_typed_array_set(Item ta, Item index, Item value);
 Item js_typed_array_set_numeric(Item ta, double index, bool is_negative_zero,
                                 Item value);
 Item js_typed_array_set_numeric_key(Item ta, double index, Item value);
+// Completes only a proven Number write to the selected ordinary typed-array
+// kind. A false result leaves the caller to perform the complete JS Set.
+bool js_typed_array_set_number_if_kind(Item ta, double index,
+                                       int expected_type, double value);
 int  js_typed_array_length(Item ta);
 int  js_typed_array_element_type(Item ta);
 int  js_typed_array_byte_length(Item ta);
@@ -174,6 +178,10 @@ Item js_typed_array_fill(Item ta, Item value, int start, int end,
 bool js_is_typed_array(Item val);
 JsTypedArray* js_get_typed_array_ptr(Map* m);
 void* js_typed_array_current_data_ptr(Item ta_item);
+// Returns a current data pointer only after validating the receiver, exact
+// element kind, and live bounds for one immediate physical read.
+void* js_typed_array_data_at_if_kind(Item ta_item, int expected_type,
+                                     int64_t index);
 void* js_typed_array_prepare_write_ptr(Item ta_item);
 bool js_item_bytes(Item item, const char** data, int* len);
 Item js_typed_array_subarray(Item ta, int start, int end, bool end_is_default);

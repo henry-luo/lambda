@@ -151,6 +151,11 @@ Map* js_obj_underlying_map(Item object);
 extern const char JS_INTERNAL_PROTO_KEY[];
 extern const int JS_INTERNAL_PROTO_KEY_LEN;
 
+// Intern an id-less String key in the current name domain. Callers retain the
+// incoming key across this collecting operation; false reports allocation
+// failure without changing the key.
+bool js_canonicalize_property_string(Item key, Item* out_key);
+
 // Mark a shape entry deleted, optionally materializing a shadowable slot.
 bool js_shape_mark_deleted_own(Item object, const char* name, int name_len,
                                bool create_if_missing);

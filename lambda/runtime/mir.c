@@ -274,10 +274,11 @@ void *import_resolver(const char *name) {
     return NULL;
 }
 
-MIR_context_t jit_init(unsigned int optimize_level) {
+static MIR_context_t jit_init_mode(unsigned int optimize_level,
+                                   int generator_initialized) {
     init_func_map();  // build O(1) import resolution hashmap
     MIR_context_t ctx = MIR_init();
-    if (g_mir_interp_mode) {
+    if (!generator_initialized) {
         log_info("MIR INTERPRETER mode (JIT compilation skipped)");
     } else {
         MIR_gen_init(ctx); // init the JIT generator
@@ -302,6 +303,14 @@ MIR_context_t jit_init(unsigned int optimize_level) {
         }
     }
     return ctx;
+}
+
+MIR_context_t jit_init(unsigned int optimize_level) {
+    return jit_init_mode(optimize_level, !g_mir_interp_mode);
+}
+
+MIR_context_t jit_init_native(unsigned int optimize_level) {
+    return jit_init_mode(optimize_level, 1);
 }
 
 void print_module_item(MIR_item_t mitem) {
