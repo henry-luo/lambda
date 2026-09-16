@@ -68,6 +68,9 @@
     "lib/font/font_config.c",
     "lambda/runtime/http_module.cpp"
   ],
+  "release_exclude_source_files": [
+    "lambda/js/mvp/*.cpp"
+  ],
   "defines": [
     "SQLITE_THREADSAFE=0",
     "SQLITE_OMIT_LOAD_EXTENSION",
@@ -652,6 +655,9 @@
       "exclude_patterns": [
         "lambda/runtime/http_module_stub.cpp",
         "lambda/runtime/headless_stubs.cpp"
+      ],
+      "release_exclude_patterns": [
+        "lambda/js/mvp/*.cpp"
       ],
       "source_files": [
         "lambda/module/node_core/node_events.cpp",
