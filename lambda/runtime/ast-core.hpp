@@ -1395,6 +1395,9 @@ typedef struct FnAnalysis {
     bool js_has_immediate_parent_env_link;
     int js_immediate_parent_env_link_slot;
     bool js_parent_env_link_uses_grandparent;
+    // T12-2: a Number return is admitted only after binding-identity analysis
+    // proves every reachable return expression under the guarded entry shape.
+    bool js_native_numeric_proven;
     NativeReturnKind js_native_return_kind;
     TypeId js_return_type;
     ScalarReturnClass js_boxed_return_scalar_class;

@@ -2307,6 +2307,12 @@ extern "C" int js_typed_array_length(Item ta_item) {
     return js_typed_array_current_length(ta);
 }
 
+extern "C" int js_typed_array_element_type(Item ta_item) {
+    if (!js_is_typed_array(ta_item)) return -1;
+    JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
+    return ta ? (int)ta->element_type : -1;
+}
+
 // Js54 P3: live data pointer for the typed array's element storage.
 // Used by the MIR JIT inline indexed get/set paths so resizable-buffer-backed
 // views resolve the current handle storage after resize changes its generation

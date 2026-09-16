@@ -2,7 +2,7 @@
 
 **Version:** 1.0.0  
 **Date:** 2026-09-16  
-**Status:** investigation and implementation proposal; no runtime changes in this study.  
+**Status:** historical investigation; its proposal was implemented as Tune12 on 2026-09-16.
 **Source baseline:** `f72f7552b027d01829a874ece9a8a591206db722`; the runtime sources match HEAD. MVP sources are the restored v1, before the abandoned Item-alignment experiment.
 
 ## 1. Recommendation
@@ -17,6 +17,27 @@ Use MVP as a model for **how little work a common operation needs**, then establ
 This is an evolution of the current full engine, including Tune10/11. It requires no second value universe, replacement collector, MVP-to-Item bridge, or copied set of JS semantic helpers.
 
 Authority: **S1.11** requires LambdaJS to retain ECMAScript semantics; **D1.3v3** permits shared physical infrastructure with language-specific admission; **D2.4.1–D2.4.3** separate representation from coercion; **D3.3.2v2** says inference selects an implementation, not a source contract. **D8.4.1v2** allows immutable predicted specialization and a semantic fallback, and prohibits mutable inline caches. This proposal changes no formal ruling.
+
+### 1.1 Implementation outcome (Tune12)
+
+Tune12 implemented the recommended hash-to-order-node collection storage,
+bounded Number-native return admission, minimal native frames, guarded Number
+and own-element heads, parameter/numeric/typed-array access lowering,
+ordinary-field carriers, verified existing callable entries, and admitted bulk
+RegExp match/replace. It keeps the full semantic continuation for every
+unproved case under **S1.11**, **D5.3.2–D5.3.5**, **D6.2.2v2**, and
+**D8.4.1v2–D8.4.3v2**.
+
+The exact-release, interleaved 63-row comparison has equal output in all 189
+paired executions and a candidate/control geometric mean of **0.680706x**.
+The frozen guarded [control matrix](../../test/benchmark/js_mvp/tune12/control.json)
+independently validates all 63 rows at **5.082332x** LambdaJS/QuickJS; the
+complete fresh [candidate matrix](../../test/benchmark/js_mvp/tune12/final.json)
+is valid for all 63 rows at **3.481106x**. The proposed 0.80x full-runtime
+milestone is therefore not met. The implementation and its residuals are recorded in
+[JS Tune12](JS_Tune12.md); the raw [paired A/B](../../test/benchmark/js_mvp/tune12/final_paired.json),
+[RSS capture](../../test/benchmark/js_mvp/tune12/final_memory.json) are kept
+separately from this historical study.
 
 ## 2. Evidence and measurement limits
 

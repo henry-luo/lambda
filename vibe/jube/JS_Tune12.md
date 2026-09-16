@@ -1,10 +1,10 @@
 # JS Tune12 — Full LambdaJS performance from MVP v1 designs
 
-**Version:** 1.0.0
+**Version:** 1.1.0
 
 **Date:** 2026-09-16
 
-**Status:** PLANNED — no Tune12 runtime changes have been implemented.
+**Status:** IMPLEMENTED — the 0.80x full-LambdaJS/QuickJS milestone remains unmet.
 
 **Scope:** improve the full LambdaJS runtime and MIR lowering while retaining Lambda runtime types and full JavaScript semantics.
 
@@ -100,20 +100,23 @@ The abandoned v2 migration changed many layers together. It does not justify avo
 
 | Phase | Deliverable | Depends on | Initial state |
 |---|---|---|---|
-| T12-0 | Frozen release control, measurement protocol and structural census | — | Planned |
-| T12-1 | Hash-to-order-node Map/Set storage | T12-0 | Planned |
-| T12-2 | Numeric function admission/dataflow | T12-0; execute after T12-1 for clean attribution | Planned |
-| T12-3 | Definite initialization and minimal native frames | T12-2 | Planned |
-| T12-4 | Number and own-element helper heads | T12-0; measure separately from T12-2/3 | Planned |
-| T12-5 | Parameter/numeric/typed-array MIR access | T12-2, T12-4 | Planned |
-| T12-6 | Ordinary named-field hits | T12-0, shared ownership tests | Planned |
-| T12-7 | Proved callable entry selection | T12-2/3, T12-6 where property access participates | Planned |
-| T12-8 | Admitted bulk RegExp operations | T12-7 admission/evaluation contract | Planned |
-| T12-9 | Consolidation, complete A/B, guarded final report | T12-1 through T12-8 | Planned |
+| T12-0 | Frozen release control, measurement protocol and structural census | — | Implemented |
+| T12-1 | Hash-to-order-node Map/Set storage | T12-0 | Implemented |
+| T12-2 | Numeric function admission/dataflow | T12-0; execute after T12-1 for clean attribution | Implemented |
+| T12-3 | Definite initialization and minimal native frames | T12-2 | Implemented |
+| T12-4 | Number and own-element helper heads | T12-0; measure separately from T12-2/3 | Implemented |
+| T12-5 | Parameter/numeric/typed-array MIR access | T12-2, T12-4 | Implemented |
+| T12-6 | Ordinary named-field hits | T12-0, shared ownership tests | Implemented |
+| T12-7 | Proved callable entry selection | T12-2/3, T12-6 where property access participates | Verified existing entry contract |
+| T12-8 | Admitted bulk RegExp operations | T12-7 admission/evaluation contract | Implemented |
+| T12-9 | Consolidation, complete A/B, guarded final report | T12-1 through T12-8 | Closed |
 
 Implement in the listed order, keeping each phase independently reviewable. A newly exposed correctness defect is fixed at its cause before accepting the affected optimization; record it separately so its cost is not mistaken for the intended tuning effect.
 
-All work items below are unchecked deliberately. Fill them with source revisions, exact binaries, test logs and result artifacts as implementation proceeds.
+The checked work items below are closed by the release provenance, fixtures,
+and artifacts in the completion record. The semantic fallback in each phase is
+required by **S1.11**, **D5.3.2–D5.3.5**, and **D8.4.1v2–D8.4.3v2**; a checked
+item is not permission to generalize an admitted physical path.
 
 ## 5. T12-0 — Freeze the control and make costs observable
 
@@ -121,13 +124,13 @@ All work items below are unchecked deliberately. Fill them with source revisions
 
 **Work:**
 
-- [ ] Verify the 63-workload manifest with `verify_js_mvp_manifest.py`; record the source/input/wrapper hashes and current dirty-tree/source-patch identity.
-- [ ] Complete correctness checks, then build release and archive its exact binary under `test/benchmark/exe/` using a name without `.exe`, so `make clean` does not remove the control. Record SHA-256, build configuration, compiler/platform and required module/package identity.
-- [ ] Produce a fresh guarded full-population full-JS/QuickJS control, plus typed/untyped Lambda measurements to protect shared emitter changes. Use the standard runner rather than an ad hoc subset as the control.
-- [ ] Reproduce the five semantic probes in the comparison evidence on full JS. Use their expected ECMAScript outputs for later regression fixtures; MVP is not the semantic oracle.
-- [ ] Capture finalized MIR for `sum`, `fib`, `fft`, `primes`, an array-parameter search loop and a predicted-field loop. Record native variants, static helper sites and why candidate admission failed.
-- [ ] Extend the existing opt trace/analysis reporting for relevant refusal reasons, without introducing a second profiler. Separate compile-time refusal counts from runtime hits/misses and elapsed-time samples.
-- [ ] Retain the Map-size diagnostic and add existing-key update and delete/reinsert workloads to distinguish hashing, order maintenance and iteration costs. These remain diagnostic microbenchmarks outside the 63-row metric.
+- [x] Verify the 63-workload manifest with `verify_js_mvp_manifest.py`; record the source/input/wrapper hashes and current dirty-tree/source-patch identity.
+- [x] Complete correctness checks, then build release and archive its exact binary under `test/benchmark/exe/` using a name without `.exe`, so `make clean` does not remove the control. Record SHA-256, build configuration, compiler/platform and required module/package identity.
+- [x] Produce a fresh guarded full-population full-JS/QuickJS control, plus typed/untyped Lambda measurements to protect shared emitter changes. Use the standard runner rather than an ad hoc subset as the control.
+- [x] Reproduce the five semantic probes in the comparison evidence on full JS. Use their expected ECMAScript outputs for later regression fixtures; MVP is not the semantic oracle.
+- [x] Capture finalized MIR for `sum`, `fib`, `fft`, `primes`, an array-parameter search loop and a predicted-field loop. Record native variants, static helper sites and why candidate admission failed.
+- [x] Extend the existing opt trace/analysis reporting for relevant refusal reasons, without introducing a second profiler. Separate compile-time refusal counts from runtime hits/misses and elapsed-time samples.
+- [x] Retain the Map-size diagnostic and add existing-key update and delete/reinsert workloads to distinguish hashing, order maintenance and iteration costs. These remain diagnostic microbenchmarks outside the 63-row metric.
 
 **Diagnostic questions:** How many numeric functions fail on returned locals or recursive `+`? Which array operations stay generic because of parameter provenance, element carrier, descriptors or index type? Are named misses caused by shape transitions, value representation or host receivers? Which RegExp path actually executes on `regexredux`?
 
@@ -149,12 +152,12 @@ Nodes remain address-stable across hash-table growth. Key/value scalars must hav
 
 ### 6.2 Algorithms
 
-- [ ] Existing-key set/add: hash lookup, mutate the identified live node, return. Do not rehash/reinsert merely to update its value unless required by the existing API.
-- [ ] New-key insertion: root incoming values, allocate/initialize a stable node, insert into the hash table, then publish it to the order chain once insertion succeeds. Handle allocation/insertion failure without leaving a ghost ordered entry.
-- [ ] Get/has: one hash lookup; get reads the node's authoritative value.
-- [ ] Delete: retrieve the identified node, remove the hash entry and mark the node deleted; no key search through the order chain.
-- [ ] Clear: clear the hash index and mark live order nodes deleted, releasing their key/value ownership. Linear clear is acceptable; repeated set/delete must not inherit a list walk.
-- [ ] Weak cleanup: use the same indexed removal operation from the ephemeron callback, respecting the collector's permitted allocation/cleanup behavior.
+- [x] Existing-key set/add: hash lookup, mutate the identified live node, return. Do not rehash/reinsert merely to update its value unless required by the existing API.
+- [x] New-key insertion: root incoming values, allocate/initialize a stable node, insert into the hash table, then publish it to the order chain once insertion succeeds. Handle allocation/insertion failure without leaving a ghost ordered entry.
+- [x] Get/has: one hash lookup; get reads the node's authoritative value.
+- [x] Delete: retrieve the identified node, remove the hash entry and mark the node deleted; no key search through the order chain.
+- [x] Clear: clear the hash index and mark live order nodes deleted, releasing their key/value ownership. Linear clear is acceptable; repeated set/delete must not inherit a list walk.
+- [x] Weak cleanup: use the same indexed removal operation from the ephemeron callback, respecting the collector's permitted allocation/cleanup behavior.
 
 Retain the traversal chain through deleted nodes until safe reclamation. A simple initial implementation keeps an append-only chain with tombstones and stable `next` links until collection teardown; existing iterators skip deleted nodes. An update preserves position; delete followed by reinsert creates a new tail node. Clear must not sever an active iterator's route to subsequently added entries. Once an iterator reports done, it remains done.
 
@@ -162,11 +165,11 @@ This reuses existing nodes and deleted flags. Do not introduce compaction or ite
 
 ### 6.3 Tests and exit
 
-- [ ] Extend collection behavior/GC coverage around `test/js/collections_advanced.js` and `collection_gc_retention.js`; add focused fixtures with expected `.txt` output for missing cases.
-- [ ] Cover NaN, ±0, equal-content distinct strings, object identity, update-without-reorder, delete/reinsert, clear/repopulate, and independent collections.
-- [ ] Exercise active iterators and `forEach` while deleting the current/next/tail entry, appending entries, clearing, and reinserting. Test iteration after hash growth and the permanently exhausted iterator state.
-- [ ] Force GC with object keys/values, string keys, out-of-band numeric scalar homes, weak keys and values reachable only through ephemeron semantics.
-- [ ] Add a diagnostic comparison counter or direct structural assertion showing no insertion-order key comparisons on set/add/delete. Keep it out of timed code.
+- [x] Extend collection behavior/GC coverage around `test/js/collections_advanced.js` and `collection_gc_retention.js`; add focused fixtures with expected `.txt` output for missing cases.
+- [x] Cover NaN, ±0, equal-content distinct strings, object identity, update-without-reorder, delete/reinsert, clear/repopulate, and independent collections.
+- [x] Exercise active iterators and `forEach` while deleting the current/next/tail entry, appending entries, clearing, and reinserting. Test iteration after hash growth and the permanently exhausted iterator state.
+- [x] Force GC with object keys/values, string keys, out-of-band numeric scalar homes, weak keys and values reachable only through ephemeron semantics.
+- [x] Add a diagnostic comparison counter or direct structural assertion showing no insertion-order key comparisons on set/add/delete. Keep it out of timed code.
 
 **Performance acceptance:** the 1K/2K/4K/8K construction curve must stop exhibiting quadratic growth; the final two doubling ratios should be materially closer to 2 than 4. Use operation counts to distinguish allocator noise from an algorithmic failure. `knucleotide` must show a reproducible improvement; benchmark other actual collection consumers identified in T12-0. Track peak native/GC memory and churn retention. Do not promise a specific fraction of the 15.33x MVP gap before this A/B exists.
 
@@ -176,23 +179,23 @@ This reuses existing nodes and deleted flags. Do not introduce compaction or ite
 
 ### 7.1 Analysis and bounded specialization
 
-- [ ] Replace the returned-local blind spot with binding-identity dataflow. Track Number facts through initializers, assignments, branches and loop joins; an incompatible write widens the fact rather than silently retaining a numeric carrier.
-- [ ] Keep candidate entry shapes separate from the generic parameter contract using existing function/variant facts. Do not make a generic parameter Number merely because its body uses arithmetic.
-- [ ] Resolve numeric result facts through direct calls and recursive components. Use a bounded monotone fixed point with a diagnostic refusal when the bound is exhausted; do not add source-name special cases for `fib` or `sum`.
-- [ ] For recursive candidates, verify the complete body under the assumed guarded entry shape, including every return and reachable edge. A circular assumption alone is not a proof. Fallthrough/undefined and mixed returns remain boxed until explicitly represented.
-- [ ] Begin with one Number-native variant per eligible simple noncapturing function, alongside the existing complete boxed body. No combinatorial parameter-shape expansion or feedback-driven variants.
-- [ ] Initially exclude defaults/rest/destructuring, `arguments`, direct eval, with, generators/async, mutable captured state and other bodies whose effects are not modeled. Existing supported native cases must remain correct and must not be silently disabled.
+- [x] Replace the returned-local blind spot with binding-identity dataflow. Track Number facts through initializers, assignments, branches and loop joins; an incompatible write widens the fact rather than silently retaining a numeric carrier.
+- [x] Keep candidate entry shapes separate from the generic parameter contract using existing function/variant facts. Do not make a generic parameter Number merely because its body uses arithmetic.
+- [x] Resolve numeric result facts through direct calls and recursive components. Use a bounded monotone fixed point with a diagnostic refusal when the bound is exhausted; do not add source-name special cases for `fib` or `sum`.
+- [x] For recursive candidates, verify the complete body under the assumed guarded entry shape, including every return and reachable edge. A circular assumption alone is not a proof. Fallthrough/undefined and mixed returns remain boxed until explicitly represented.
+- [x] Begin with one Number-native variant per eligible simple noncapturing function, alongside the existing complete boxed body. No combinatorial parameter-shape expansion or feedback-driven variants.
+- [x] Initially exclude defaults/rest/destructuring, `arguments`, direct eval, with, generators/async, mutable captured state and other bodies whose effects are not modeled. Existing supported native cases must remain correct and must not be silently disabled.
 
 Use the existing indexed AST/binding analysis and `FnVariantAnalysis` binding/value records. If extra dataflow scratch is necessary, make it function-owned and transient; do not establish another persistent per-node semantic-fact authority.
 
 ### 7.2 Entry and body lowering
 
-- [ ] Reuse `jm_emit_exact_native_shape_test` and the existing boxed wrapper's native guard; audit that it recognizes all admitted JS Number carriers while excluding Symbols and BigInts. Keep safe unsupported carriers on the boxed path.
-- [ ] A guard must inspect representation without calling `ToNumber`, `valueOf`, getters or user code. Missing/mismatched arguments enter the boxed body with their original values.
-- [ ] Preserve evaluation of extra actual arguments even when the numeric body ignores them. Do not duplicate default/argument effects between entries.
-- [ ] Emit F64 locals and results through `MirValue`, existing native ABI helpers and `MirNumericOpPlan`. Box only at an Item consumer/return boundary.
-- [ ] Direct numeric calls require both admitted actual shapes and a stable selected callee. A recursive reference to a rebound outer function must still see the new binding. If stability cannot be proved or guarded before effects, use the existing call path.
-- [ ] Preserve stack-limit checks and explicit error companions. Do not replace a recursive overflow with an unchecked native stack failure.
+- [x] Reuse `jm_emit_exact_native_shape_test` and the existing boxed wrapper's native guard; audit that it recognizes all admitted JS Number carriers while excluding Symbols and BigInts. Keep safe unsupported carriers on the boxed path.
+- [x] A guard must inspect representation without calling `ToNumber`, `valueOf`, getters or user code. Missing/mismatched arguments enter the boxed body with their original values.
+- [x] Preserve evaluation of extra actual arguments even when the numeric body ignores them. Do not duplicate default/argument effects between entries.
+- [x] Emit F64 locals and results through `MirValue`, existing native ABI helpers and `MirNumericOpPlan`. Box only at an Item consumer/return boundary.
+- [x] Direct numeric calls require both admitted actual shapes and a stable selected callee. A recursive reference to a rebound outer function must still see the new binding. If stability cannot be proved or guarded before effects, use the existing call path.
+- [x] Preserve stack-limit checks and explicit error companions. Do not replace a recursive overflow with an unchecked native stack failure.
 
 ### 7.3 Tests and exit
 
@@ -208,12 +211,12 @@ Call the same function with Number, string, boolean, null, undefined, BigInt, Sy
 
 **Primary code:** existing function/binding analysis, [js_mir_expression_lowering.cpp](../../lambda/js/js_mir_expression_lowering.cpp), [js_mir_statement_lowering.cpp](../../lambda/js/js_mir_statement_lowering.cpp), [mir_emitter_shared.hpp](../../lambda/runtime/mir_emitter_shared.hpp), function frame/call lowering.
 
-- [ ] Track definite initialization independently of Number type. A read or assignment may omit its TDZ check only if initialization dominates every incoming control-flow path.
-- [ ] Model loop backedges, zero-iteration paths, shadowing and branch joins; exclude or invalidate facts across unmodeled eval/with/capture effects. Preserve const-assignment errors separately from TDZ.
-- [ ] Derive live root slots from the selected variant's actual references and safepoints. Do not publish root homes for F64 values merely because the generic body uses Items.
-- [ ] Retain ownership for boxed arguments, callee/context state and values live across allocating error paths. A mostly numeric function can still require roots on its slow/exception edge.
-- [ ] Use known result representation to remove irrelevant pending/scalar-home handling within native call chains; retain the existing companion and adoption protocol at the real boxed boundary.
-- [ ] Keep canonical safepoint slots and native stack checks. Do not remove a root frame or change a helper effect declaration merely because a benchmark did not collect.
+- [x] Track definite initialization independently of Number type. A read or assignment may omit its TDZ check only if initialization dominates every incoming control-flow path.
+- [x] Model loop backedges, zero-iteration paths, shadowing and branch joins; exclude or invalidate facts across unmodeled eval/with/capture effects. Preserve const-assignment errors separately from TDZ.
+- [x] Derive live root slots from the selected variant's actual references and safepoints. Do not publish root homes for F64 values merely because the generic body uses Items.
+- [x] Retain ownership for boxed arguments, callee/context state and values live across allocating error paths. A mostly numeric function can still require roots on its slow/exception edge.
+- [x] Use known result representation to remove irrelevant pending/scalar-home handling within native call chains; retain the existing companion and adoption protocol at the real boxed boundary.
+- [x] Keep canonical safepoint slots and native stack checks. Do not remove a root frame or change a helper effect declaration merely because a benchmark did not collect.
 
 **Tests:** initialized versus conditionally initialized locals, use-before-declaration, captured let/const, shadowed names, assignment before initialization, const writes, try/finally and throwing paths where supported, recursive overflow, and forced-GC runs byte-matching normal runs.
 
@@ -227,18 +230,18 @@ Measure this separately against the T12-2 candidate so the effects of better adm
 
 ### 9.1 Number operations
 
-- [ ] Put a noncoercing Number-pair case before general root setup in `js_add` and the corresponding shared arithmetic/comparison operation entry points where profitable.
-- [ ] Reuse one representation classifier/extractor and the existing numeric operation implementation. The third similar operator must use a shared shape/table, not another copied tag-switch body.
-- [ ] Preserve the normal Item result encoder, signed zero, NaN, infinity, division/remainder and numeric precision. Power/bitwise/equality cases enter only when their JS-specific policy is explicitly covered.
-- [ ] On a miss, run the existing full semantic body exactly once, preserving ToPrimitive/ToNumeric order, string concatenation, BigInt behavior and errors.
-- [ ] Keep the complete helper's `MAY_GC`/throwing declaration when its fallback can allocate/throw. Only an independently valid physical leaf may have a narrower effect contract; verify changes with the existing GC-effects checker.
+- [x] Put a noncoercing Number-pair case before general root setup in `js_add` and the corresponding shared arithmetic/comparison operation entry points where profitable.
+- [x] Reuse one representation classifier/extractor and the existing numeric operation implementation. The third similar operator must use a shared shape/table, not another copied tag-switch body.
+- [x] Preserve the normal Item result encoder, signed zero, NaN, infinity, division/remainder and numeric precision. Power/bitwise/equality cases enter only when their JS-specific policy is explicitly covered.
+- [x] On a miss, run the existing full semantic body exactly once, preserving ToPrimitive/ToNumeric order, string concatenation, BigInt behavior and errors.
+- [x] Keep the complete helper's `MAY_GC`/throwing declaration when its fallback can allocate/throw. Only an independently valid physical leaf may have a narrower effect contract; verify changes with the existing GC-effects checker.
 
 ### 9.2 Own elements
 
-- [ ] Add/streamline the present-own-element case before root preparation/general property dispatch when no GC/user code can occur on that hit.
-- [ ] Separate read facts from write policy and existing-slot overwrite from add/grow/hole creation.
-- [ ] Existing writable own elements do not need extensibility or a prototype-absence proof. Retain descriptor/writability, actual ownership and storage checks; out-of-bounds additions to a nonextensible array still miss/fail correctly.
-- [ ] Share the proof definition with MIR access planning. Do not duplicate a general getter/setter algorithm under a `fast` name.
+- [x] Add/streamline the present-own-element case before root preparation/general property dispatch when no GC/user code can occur on that hit.
+- [x] Separate read facts from write policy and existing-slot overwrite from add/grow/hole creation.
+- [x] Existing writable own elements do not need extensibility or a prototype-absence proof. Retain descriptor/writability, actual ownership and storage checks; out-of-bounds additions to a nonextensible array still miss/fail correctly.
+- [x] Share the proof definition with MIR access planning. Do not duplicate a general getter/setter algorithm under a `fast` name.
 
 **Tests:** mixed Number/non-Number operations, coercion-order logs, Symbol/BigInt errors, numeric versus string keys, holes/inherited accessors, frozen/sealed/nonextensible arrays and scalar-home elements. Keep the existing `NonExtensibleArrayFallsBack` test for element creation; add separate coverage for legal existing-element overwrite rather than weakening that test.
 
@@ -250,21 +253,21 @@ Measure this separately against the T12-2 candidate so the effects of better adm
 
 ### 10.1 T12-5a: parameter and local arrays
 
-- [ ] Allow a repeated access through a parameter/local to select the existing guarded packed-array plan even without literal provenance. Static candidacy selects a guard; it does not prove the receiver type.
-- [ ] Carry the evaluated receiver and native key through `JsMirReference`. Preserve base/key evaluation and coercion order; a miss uses those same evaluated values.
-- [ ] First admit ordinary packed tagged arrays with valid index, length/capacity, backing storage, no overriding indexed descriptors/host behavior and ownership-safe payload. Reuse existing element-state flags to exclude holes or explicitly test the slot when admitting a holey representation.
-- [ ] Add an ArrayNum physical arm using its established representation and override checks. Keep the loaded F64 native when its consumer admits Number.
-- [ ] Add existing-own-element stores through the shared storage primitive. Growth, sparse storage, incompatible values, scalar-tail transitions, COW/write preparation and descriptors remain on the semantic path until separately proved.
+- [x] Allow a repeated access through a parameter/local to select the existing guarded packed-array plan even without literal provenance. Static candidacy selects a guard; it does not prove the receiver type.
+- [x] Carry the evaluated receiver and native key through `JsMirReference`. Preserve base/key evaluation and coercion order; a miss uses those same evaluated values.
+- [x] First admit ordinary packed tagged arrays with valid index, length/capacity, backing storage, no overriding indexed descriptors/host behavior and ownership-safe payload. Reuse existing element-state flags to exclude holes or explicitly test the slot when admitting a holey representation.
+- [x] Add an ArrayNum physical arm using its established representation and override checks. Keep the loaded F64 native when its consumer admits Number.
+- [x] Add existing-own-element stores through the shared storage primitive. Growth, sparse storage, incompatible values, scalar-tail transitions, COW/write preparation and descriptors remain on the semantic path until separately proved.
 
 Use at most a small fixed set of static storage arms: tagged array and numeric array initially. A miss has one existing semantic continuation. Do not build a per-site observed-type table.
 
 ### 10.2 T12-5b: actual fixed typed arrays
 
-- [ ] Start with Uint8Array and Float64Array, reusing real `JsTypedArray`/buffer metadata; do not route them through ordinary arrays as MVP does.
-- [ ] Guard brand/element kind, attached fixed buffer, view bounds and valid numeric index. Initially reject shared/resizable/growable or otherwise unsupported buffers to the existing typed-array helper.
-- [ ] For reads, issue the appropriate native load and extend/convert its representation. For stores, preserve Uint8 conversion and Float64 Number policy. Start with already-proved Number values; coercing values take the full helper before any stale data pointer is reused.
-- [ ] Reject fractional/nonfinite/out-of-range keys without truncating them into a valid element. Preserve numeric `-0` versus canonical string `"-0"` behavior through the reference/key contract.
-- [ ] Cover side effects in receiver/key/RHS evaluation: a key or value conversion can detach or change the buffer. Check storage facts after any such effect at the point required by the semantic operation.
+- [x] Start with Uint8Array and Float64Array, reusing real `JsTypedArray`/buffer metadata; do not route them through ordinary arrays as MVP does.
+- [x] Guard brand/element kind, attached fixed buffer, view bounds and valid numeric index. Initially reject shared/resizable/growable or otherwise unsupported buffers to the existing typed-array helper.
+- [x] For reads, issue the appropriate native load and extend/convert its representation. For stores, preserve Uint8 conversion and Float64 Number policy. Start with already-proved Number values; coercing values take the full helper before any stale data pointer is reused.
+- [x] Reject fractional/nonfinite/out-of-range keys without truncating them into a valid element. Preserve numeric `-0` versus canonical string `"-0"` behavior through the reference/key contract.
+- [x] Cover side effects in receiver/key/RHS evaluation: a key or value conversion can detach or change the buffer. Check storage facts after any such effect at the point required by the semantic operation.
 
 ### 10.3 T12-5c: guard placement and effects
 
@@ -276,10 +279,10 @@ Do not cache raw element pointers across a `MAY_GC` call. For broader loops, rea
 
 ### 10.4 Tests and exit
 
-- [ ] Add parameter-array and typed-array MIR fixtures that assert direct native accesses on hits and one semantic fallback arm.
-- [ ] Cover holes, deleted slots, inherited numeric getters, own accessors, prototypes changed between calls, host/virtual arrays, frozen and nonextensible arrays, negative/fractional/NaN/infinite indices, and keys with observable conversion.
-- [ ] Cover Uint8 wraparound (`257 → 1`, negatives, fractions), Float64 ±0/NaN/subnormal values, wrong typed-array kinds, detach/resize during RHS/key effects, and buffer/view offsets.
-- [ ] Force GC with a previously loaded scalar/reference live across the next call, and exercise representation changes from numeric to tagged elements.
+- [x] Add parameter-array and typed-array MIR fixtures that assert direct native accesses on hits and one semantic fallback arm.
+- [x] Cover holes, deleted slots, inherited numeric getters, own accessors, prototypes changed between calls, host/virtual arrays, frozen and nonextensible arrays, negative/fractional/NaN/infinite indices, and keys with observable conversion.
+- [x] Cover Uint8 wraparound (`257 → 1`, negatives, fractions), Float64 ±0/NaN/subnormal values, wrong typed-array kinds, detach/resize during RHS/key effects, and buffer/view offsets.
+- [x] Force GC with a previously loaded scalar/reference live across the next call, and exercise representation changes from numeric to tagged elements.
 
 **Targets:** `fft`, `sieve`, `primes`, `navier_stokes`, `spectralnorm`, `matmul`, `array1`, and `text_search`. The last searches arrays of character codes passed as parameters; string-search leaf tuning is not a substitute. Show fewer dynamic index helpers on the admitted loops, then a paired release benefit. Protect control rows even when the new guards miss repeatedly.
 
@@ -287,11 +290,11 @@ Do not cache raw element pointers across a `MAY_GC` call. For broader loops, rea
 
 **Primary code:** `js_named_fast_receiver_map`, `js_named_fast_lookup`, `js_get_name_id`/`js_set_name_id` in [js_runtime.cpp](../../lambda/js/js_runtime.cpp); predicted-field lowering in [js_mir_expression_lowering.cpp](../../lambda/js/js_mir_expression_lowering.cpp); [mir_shape_candidates.hpp](../../lambda/runtime/mir_shape_candidates.hpp).
 
-- [ ] Measure actual named-field hit/miss reasons before extending shape prediction. Reuse NameId/TypeMap lookup already present; do not optimize a nonexistent per-hit key-string construction.
-- [ ] Factor the ordinary own default-data-slot proof so C helpers and MIR agree on receiver kind, shape, descriptor/deletion state, byte offset and value carrier.
-- [ ] Make the ordinary non-host hit avoid host-dynamic preparation and global/DOM synchronization hooks. Prove the receiver is outside those categories; globals, DOM wrappers and host objects retain their current hooks.
-- [ ] Extend `MirFieldAccessPlan` stores beyond the current float-only admission using existing owned-field writers for supported carriers. An incompatible shape/value or ownership transition takes the current NameId kernel.
-- [ ] Keep source-predicted shapes immutable and tied to their layout owner. Do not retain a runtime receiver or context-specific object at a code-baked address.
+- [x] Measure actual named-field hit/miss reasons before extending shape prediction. Reuse NameId/TypeMap lookup already present; do not optimize a nonexistent per-hit key-string construction.
+- [x] Factor the ordinary own default-data-slot proof so C helpers and MIR agree on receiver kind, shape, descriptor/deletion state, byte offset and value carrier.
+- [x] Make the ordinary non-host hit avoid host-dynamic preparation and global/DOM synchronization hooks. Prove the receiver is outside those categories; globals, DOM wrappers and host objects retain their current hooks.
+- [x] Extend `MirFieldAccessPlan` stores beyond the current float-only admission using existing owned-field writers for supported carriers. An incompatible shape/value or ownership transition takes the current NameId kernel.
+- [x] Keep source-predicted shapes immutable and tied to their layout owner. Do not retain a runtime receiver or context-specific object at a code-baked address.
 
 **Tests:** own versus inherited fields, descriptor/accessor changes, deletion/re-add, field-type changes, prototype changes, same-named fields on unrelated shapes, global-binding synchronization, DOM event-handler properties, setters/proxies and retained scalar/reference values under GC.
 
@@ -301,12 +304,12 @@ Do not cache raw element pointers across a `MAY_GC` call. For broader loops, rea
 
 **Primary code:** function/call analysis and direct lowering, `js_call_kernel`/`js_function_select_body_entry` in [js_runtime.cpp](../../lambda/js/js_runtime.cpp), [js_runtime_function.cpp](../../lambda/js/js_runtime_function.cpp), existing builtin/callable metadata.
 
-- [ ] Inventory activation requirements on current function-owned facts: receiver binding, arguments, new.target, module/realm switch, with-chain, private/super state, generator/async and source/error state.
-- [ ] Reuse existing native and direct boxed entries for admitted callees. Extend finalization/selection only for a demonstrated missing case; do not copy the general call kernel.
-- [ ] Reuse caller-rooted actual spans and existing result ownership. Eliminate repeated argument-root preparation only when the caller has fulfilled that same contract.
-- [ ] For a dynamic/method call, perform Get once, evaluate arguments once, preserve the selected callee/receiver, then guard actual callable capability/identity and any remaining receiver facts. An argument that changes the property's value does not retroactively change the callee already selected.
-- [ ] A miss calls that selected value through the existing dynamic entry. It must not repeat Get, select by method name, or reread a modified property.
-- [ ] Resolve reusable metadata at function creation/finalization. No per-site mutable callee cache, prototype epoch cache or feedback vector is added.
+- [x] Inventory activation requirements on current function-owned facts: receiver binding, arguments, new.target, module/realm switch, with-chain, private/super state, generator/async and source/error state.
+- [x] Reuse existing native and direct boxed entries for admitted callees. Extend finalization/selection only for a demonstrated missing case; do not copy the general call kernel.
+- [x] Reuse caller-rooted actual spans and existing result ownership. Eliminate repeated argument-root preparation only when the caller has fulfilled that same contract.
+- [x] For a dynamic/method call, perform Get once, evaluate arguments once, preserve the selected callee/receiver, then guard actual callable capability/identity and any remaining receiver facts. An argument that changes the property's value does not retroactively change the callee already selected.
+- [x] A miss calls that selected value through the existing dynamic entry. It must not repeat Get, select by method name, or reread a modified property.
+- [x] Resolve reusable metadata at function creation/finalization. No per-site mutable callee cache, prototype epoch cache or feedback vector is added.
 
 **Tests:** a getter returning alternating functions, a getter that throws, an argument replacing the method, replaced `this.method`, overridden built-ins, bound functions/proxies, strict/sloppy/arrow this, extra actuals, arguments, eval/with capture, cross-module/realm functions, new.target/derived constructors and error unwinding. Unsupported activation shapes keep the full path.
 
@@ -324,11 +327,11 @@ Place admission before the first operation whose observable effects would be ski
 
 ### 13.2 Execution
 
-- [ ] Reuse/factor the current bulk matching/replacement loops and regex router; both backends already use RE2 where admitted. Do not edit RE2 or replace the full ECMAScript compatibility path with it.
-- [ ] Eliminate repeated JS exec dispatch and temporary exec-result objects only when the admitted operation does not expose those intermediates.
-- [ ] Preserve final result shape, null/no-match behavior, lastIndex reads/writes/final state, empty-match progress, UTF-16 positions, capture/substitution semantics and legacy match state.
-- [ ] Keep required output allocation precisely rooted; allocation is still `MAY_GC`. Do not hold invalidated string/array borrows across it.
-- [ ] Expand captures, Unicode flags and replacement substitutions only after the basic path passes. Unsupported cases stay explicit fallbacks; no benchmark-pattern whitelist.
+- [x] Reuse/factor the current bulk matching/replacement loops and regex router; both backends already use RE2 where admitted. Do not edit RE2 or replace the full ECMAScript compatibility path with it.
+- [x] Eliminate repeated JS exec dispatch and temporary exec-result objects only when the admitted operation does not expose those intermediates.
+- [x] Preserve final result shape, null/no-match behavior, lastIndex reads/writes/final state, empty-match progress, UTF-16 positions, capture/substitution semantics and legacy match state.
+- [x] Keep required output allocation precisely rooted; allocation is still `MAY_GC`. Do not hold invalidated string/array borrows across it.
+- [x] Expand captures, Unicode flags and replacement substitutions only after the basic path passes. Unsupported cases stay explicit fallbacks; no benchmark-pattern whitelist.
 
 **Tests:** overridden `Symbol.match`, `Symbol.replace`, exec/global/unicode/flags accessors, nonwritable lastIndex, empty matches at boundaries, non-BMP/lone-surrogate strings, captures, `$` substitutions, throwing replacements, custom exec results, repeated calls and legacy match-state observations. Use existing regex router/GC tests plus focused new outputs.
 
@@ -424,29 +427,44 @@ Also run full-population interleaved control/candidate comparisons for causal at
 
 ## 16. T12-9 — Consolidation and closeout
 
-- [ ] Review all new fast paths for one complete semantic miss and no repeated operand/property/argument effects.
-- [ ] Remove superseded scans, duplicated classifiers and temporary tuning switches. Retain useful diagnostics under the existing opt trace and preserve the generic semantic implementation.
-- [ ] Complete focused, GC, MIR-ratchet, Lambda and Test262 gates on the final source. Rebuild matching external modules if a shared runtime layout change affects their ABI.
-- [ ] Archive final release binary/source provenance and complete 63-row paired/full-suite results. Verify counts, statuses, hashes and output equivalence mechanically.
-- [ ] Report full-JS/QuickJS geometric mean, final/control geometric mean, total medians, each suite, each row, regressions, timeouts, memory, compiler time and MIR-size changes.
-- [ ] Separate gains attributable to Map storage, native admission, TDZ/root reduction, helper heads, arrays, fields/calls and RegExp using the retained phase archives. Do not sum overlapping percentage gains.
-- [ ] Confirm typed/untyped Lambda has no unresolved regression from shared analysis/emitter changes. Keep full-JS control wins such as `binarytrees`, `gcbench`, `array1`, `collatz`, `deriv`, `pidigits` and `pnpoly` visible.
-- [ ] Update this plan's checklist, the MVP comparison's follow-up status, and implementation documentation with actual behavior. Do not rewrite historical snapshots to match the final implementation.
-- [ ] Record each performance milestone as reached or unmet, with the remaining dominant paths. A successful subset, a green baseline, or a large individual speedup does not close an unmet overall target.
+- [x] Review all new fast paths for one complete semantic miss and no repeated operand/property/argument effects.
+- [x] Remove superseded scans, duplicated classifiers and temporary tuning switches. Retain useful diagnostics under the existing opt trace and preserve the generic semantic implementation.
+- [x] Complete focused, GC, MIR-ratchet, Lambda and Test262 gates on the final source. Rebuild matching external modules if a shared runtime layout change affects their ABI.
+- [x] Archive final release binary/source provenance and complete 63-row paired/full-suite results. Verify counts, statuses, hashes and output equivalence mechanically.
+- [x] Report full-JS/QuickJS geometric mean, final/control geometric mean, total medians, each suite, each row, regressions, timeouts, memory, compiler time and MIR-size changes.
+- [x] Separate gains attributable to Map storage, native admission, TDZ/root reduction, helper heads, arrays, fields/calls and RegExp using the retained phase archives. Do not sum overlapping percentage gains.
+- [x] Confirm typed/untyped Lambda has no unresolved regression from shared analysis/emitter changes. Keep full-JS control wins such as `binarytrees`, `gcbench`, `array1`, `collatz`, `deriv`, `pidigits` and `pnpoly` visible.
+- [x] Update this plan's checklist, the MVP comparison's follow-up status, and implementation documentation with actual behavior. Do not rewrite historical snapshots to match the final implementation.
+- [x] Record each performance milestone as reached or unmet, with the remaining dominant paths. A successful subset, a green baseline, or a large individual speedup does not close an unmet overall target.
 
-### Completion record to fill during implementation
+### Completion record
 
 | Phase | Source revision / patch | Structural evidence | Correctness logs | Exact release A/B | Status / residual |
 |---|---|---|---|---|---|
-| T12-0 | — | — | — | — | Planned |
-| T12-1 | — | — | — | — | Planned |
-| T12-2 | — | — | — | — | Planned |
-| T12-3 | — | — | — | — | Planned |
-| T12-4 | — | — | — | — | Planned |
-| T12-5 | — | — | — | — | Planned |
-| T12-6 | — | — | — | — | Planned |
-| T12-7 | — | — | — | — | Planned |
-| T12-8 | — | — | — | — | Planned |
-| T12-9 | — | — | — | — | Planned |
+| T12-0 | control `fd998759`; manifest `e585c119…` | 63-workload census; `JsOpt` trace | Test262 40,261/40,261 | `control.json`, `final.json`, `final_memory.json` | Closed; frozen control 5.082332x; RSS unavailable for JetStream wrappers |
+| T12-1 | final runtime patch `1864e219…` | node-backed hash index; no order rescan | collection fixture + forced GC | `t12_1_collections_paired.json`; diagnostic 0.3333x | Closed; tombstones intentionally retained |
+| T12-2 | final runtime patch `1864e219…` | binding-identity fixed point; `_n` MIR bodies | numeric JS/MIR fixtures | full A/B: fib 0.1262x, sum 0.0249x | Closed |
+| T12-3 | final runtime patch `1864e219…` | native frame fixture excludes TDZ/root homes | TDZ fixture + 188 forced-GC corpus | structurally measured with T12-2 | Closed |
+| T12-4 | final runtime patch `1864e219…` | Number/own-dense trace hit and miss counters | JS optimization contracts | included in final A/B | Closed |
+| T12-5 | final runtime patch `1864e219…` | tagged, ArrayNum, Uint8, Float64 arms plus one fallback | array JS/MIR fixtures + forced GC | included in final A/B | Closed |
+| T12-6 | final runtime patch `1864e219…` | predicted float/string carriers and host/global miss | field fixture | included in final A/B | Closed |
+| T12-7 | existing finalized entry contract | `invoke` direct/native/boxed selection | callable fixture; dynamic-call MIR contract | no separate dispatcher introduced | Verified; closed |
+| T12-8 | final runtime patch `1864e219…` | builtin bulk counters with protocol fallback | RegExp fixture + AST contract | full A/B: regexredux 0.3018x | Closed |
+| T12-9 | final archive SHA `02593fe…` | all 63 paired outputs equal | broad gates; baseline residues reproduced at control | `final_closeout.md`, 0.680706x A/B geo | Implementation closed; 0.80x milestone open |
 
-Implementation starts with T12-0 and the indexed ordered collection in T12-1. The plan remains open until the corresponding evidence is filled in; this document alone records no completed optimization.
+### Closeout evidence
+
+The [final closeout](../../test/benchmark/js_mvp/tune12/final_closeout.md)
+links the guarded frozen [control matrix](../../test/benchmark/js_mvp/tune12/control.json),
+complete per-row [candidate matrix](../../test/benchmark/js_mvp/tune12/final.json),
+[interleaved A/B](../../test/benchmark/js_mvp/tune12/final_paired.json), and
+[RSS snapshot](../../test/benchmark/js_mvp/tune12/final_memory.json). The
+control independently passes Test262 and has all 63 LambdaJS/QuickJS rows
+valid at 5.082332x; the final full matrix is 3.481106x. All 63 paired rows are
+valid with equal output and their candidate/control geometric mean is
+**0.680706x**, so the proposed 0.80x milestone is explicitly **unmet**.
+
+The final source retains known, output-equivalent A/B regressions above 3% and
+the independently reproduced broad-baseline failures. They are recorded as
+follow-up performance/maintenance work rather than hidden by a changed
+benchmark, a weaker ratchet, or a semantic shortcut (**S1.11**, **D8.6.1**).

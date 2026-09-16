@@ -163,6 +163,7 @@ Item js_typed_array_set(Item ta, Item index, Item value);
 Item js_typed_array_set_numeric(Item ta, double index, bool is_negative_zero,
                                 Item value);
 int  js_typed_array_length(Item ta);
+int  js_typed_array_element_type(Item ta);
 int  js_typed_array_byte_length(Item ta);
 int  js_typed_array_byte_offset(Item ta);
 bool js_typed_array_is_out_of_bounds_item(Item ta);

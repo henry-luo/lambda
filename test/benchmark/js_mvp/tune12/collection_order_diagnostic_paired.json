@@ -1,0 +1,258 @@
+{
+  "_metadata": {
+    "schema_version": 3,
+    "started_at": "2026-09-16T14:43:41",
+    "platform": "Darwin arm64",
+    "control": {
+      "path": "/Users/henryluo/Projects/lambda/test/benchmark/exe/lambda-tune12-control-fd998759",
+      "sha256": "4f158287b8f342ef703b946a47507d18dcfedf89748eaaf50cc9c9bc30aef972"
+    },
+    "candidate": {
+      "path": "/Users/henryluo/Projects/lambda/test/benchmark/exe/lambda-tune12-final-1864e219659a",
+      "sha256": "02593fe504c5030a04e536e2afe738da62cb9c9d9253b258e8a23db55e9201c6"
+    },
+    "git_commit": "fd99875910e47cd5647d3510fecfba8bbf393520",
+    "power_state": "Now drawing from 'AC Power'",
+    "suite_filters": [],
+    "bench_filters": [],
+    "variants": [
+      "source_pair"
+    ],
+    "language": "js",
+    "tier": "jit",
+    "pairs": 7,
+    "paired_uncertainty": {
+      "method": "paired_bootstrap_ratio_of_medians",
+      "confidence": 0.95,
+      "tail": "one_sided_upper",
+      "resamples": 10000,
+      "seed": 260026
+    },
+    "timeout_s": 180,
+    "command": "test/benchmark/run_paired_benchmarks.py --language js --control test/benchmark/exe/lambda-tune12-control-fd998759 --candidate test/benchmark/exe/lambda-tune12-final-1864e219659a --source-pair test/benchmark/js_mvp/tune12/collection_order_diagnostic.js test/benchmark/js_mvp/tune12/collection_order_diagnostic.js --pairs 7 --timeout 180 --output test/benchmark/js_mvp/tune12/collection_order_diagnostic_paired.json",
+    "finished_at": "2026-09-16T14:43:47"
+  },
+  "rows": [
+    {
+      "suite": "source_pair",
+      "name": "pair_1",
+      "variant": "source_pair",
+      "control_script": "/Users/henryluo/Projects/lambda/test/benchmark/js_mvp/tune12/collection_order_diagnostic.js",
+      "candidate_script": "/Users/henryluo/Projects/lambda/test/benchmark/js_mvp/tune12/collection_order_diagnostic.js",
+      "expected_stdout_text": null,
+      "control_source": {
+        "path": "/Users/henryluo/Projects/lambda/test/benchmark/js_mvp/tune12/collection_order_diagnostic.js",
+        "sha256": "062b3a24748930f2ef6e1e8bfd766adcf98a60abdba7d8e10e11f3336eed278e",
+        "source_root": "/Users/henryluo/Projects/lambda/test/benchmark/js_mvp/tune12",
+        "source_tree_sha256": "6a6f8aa7979ac1d6be083f33eee4716c5f76ba81c9d338e1aacf5e28ac6be48a"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/lambda/test/benchmark/js_mvp/tune12/collection_order_diagnostic.js",
+        "sha256": "062b3a24748930f2ef6e1e8bfd766adcf98a60abdba7d8e10e11f3336eed278e",
+        "source_root": "/Users/henryluo/Projects/lambda/test/benchmark/js_mvp/tune12",
+        "source_tree_sha256": "6a6f8aa7979ac1d6be083f33eee4716c5f76ba81c9d338e1aacf5e28ac6be48a"
+      },
+      "pairs_requested": 7,
+      "pairs_valid": 7,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 3.0,
+        "status_counts": {
+          "ok": 7
+        },
+        "successful_samples": 7
+      },
+      "candidate": {
+        "median_exec_ms": 1.0,
+        "status_counts": {
+          "ok": 7
+        },
+        "successful_samples": 7
+      },
+      "candidate_over_control_median_ratio": 0.3333333333333333,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.3333333333333333
+      },
+      "candidate_wins": 7,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 795.912,
+            "exec_ms": 3.0,
+            "returncode": 0,
+            "stdout_sha256": "100eb33e16fcce5fee52d9d7fe749795add6740a63bae505ee80a3653ca98854",
+            "stderr_sha256": "93975c73c465780440bc373439db8b757961262d8931e84a5013ba61d677561b",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 114.568083,
+            "exec_ms": 1.0,
+            "returncode": 0,
+            "stdout_sha256": "100eb33e16fcce5fee52d9d7fe749795add6740a63bae505ee80a3653ca98854",
+            "stderr_sha256": "81e94fe3b4a1c2c36461d304a3cfb22031cbd297d9bb25b82fb06b9e3e6d3432",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        },
+        {
+          "pair_index": 2,
+          "order": "candidate,control",
+          "control": {
+            "status": "ok",
+            "wall_ms": 717.591167,
+            "exec_ms": 2.0,
+            "returncode": 0,
+            "stdout_sha256": "100eb33e16fcce5fee52d9d7fe749795add6740a63bae505ee80a3653ca98854",
+            "stderr_sha256": "fdcb260ef74677707ef039757814f84303d89c23a12012ebbcbf07a2599568a6",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 106.445,
+            "exec_ms": 1.0,
+            "returncode": 0,
+            "stdout_sha256": "100eb33e16fcce5fee52d9d7fe749795add6740a63bae505ee80a3653ca98854",
+            "stderr_sha256": "81e94fe3b4a1c2c36461d304a3cfb22031cbd297d9bb25b82fb06b9e3e6d3432",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        },
+        {
+          "pair_index": 3,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 808.083042,
+            "exec_ms": 3.0,
+            "returncode": 0,
+            "stdout_sha256": "100eb33e16fcce5fee52d9d7fe749795add6740a63bae505ee80a3653ca98854",
+            "stderr_sha256": "191490d52556246a6bde69bdd49564c9d08d68f9e1b2db46df4908f141a8246e",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 115.463583,
+            "exec_ms": 0.0,
+            "returncode": 0,
+            "stdout_sha256": "100eb33e16fcce5fee52d9d7fe749795add6740a63bae505ee80a3653ca98854",
+            "stderr_sha256": "191490d52556246a6bde69bdd49564c9d08d68f9e1b2db46df4908f141a8246e",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        },
+        {
+          "pair_index": 4,
+          "order": "candidate,control",
+          "control": {
+            "status": "ok",
+            "wall_ms": 764.742542,
+            "exec_ms": 3.0,
+            "returncode": 0,
+            "stdout_sha256": "100eb33e16fcce5fee52d9d7fe749795add6740a63bae505ee80a3653ca98854",
+            "stderr_sha256": "9661ae7f4231d5e89bf4686dbcfe5ef47c0745fa018867ac094287571e556959",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 114.655833,
+            "exec_ms": 1.0,
+            "returncode": 0,
+            "stdout_sha256": "100eb33e16fcce5fee52d9d7fe749795add6740a63bae505ee80a3653ca98854",
+            "stderr_sha256": "57d6051b34ed966e6f7492936f391c8bd13121626316db884c962c800bf8a129",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        },
+        {
+          "pair_index": 5,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 792.538917,
+            "exec_ms": 3.0,
+            "returncode": 0,
+            "stdout_sha256": "100eb33e16fcce5fee52d9d7fe749795add6740a63bae505ee80a3653ca98854",
+            "stderr_sha256": "323a9fe4a5490ce3c71e749c375f28d030d0c517d0d12ff487ad646e3789b9ab",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 111.064958,
+            "exec_ms": 1.0,
+            "returncode": 0,
+            "stdout_sha256": "100eb33e16fcce5fee52d9d7fe749795add6740a63bae505ee80a3653ca98854",
+            "stderr_sha256": "69178324e651285afdbf6f2c63c6fa0266a79e2d468b5669bb90301b56b1e3a4",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        },
+        {
+          "pair_index": 6,
+          "order": "candidate,control",
+          "control": {
+            "status": "ok",
+            "wall_ms": 805.753667,
+            "exec_ms": 3.0,
+            "returncode": 0,
+            "stdout_sha256": "100eb33e16fcce5fee52d9d7fe749795add6740a63bae505ee80a3653ca98854",
+            "stderr_sha256": "e0b1a35c9c49d3a8831702ed8b2614552261eab94d07dc90f2a7f4f1a17349f1",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 113.978125,
+            "exec_ms": 0.0,
+            "returncode": 0,
+            "stdout_sha256": "100eb33e16fcce5fee52d9d7fe749795add6740a63bae505ee80a3653ca98854",
+            "stderr_sha256": "69178324e651285afdbf6f2c63c6fa0266a79e2d468b5669bb90301b56b1e3a4",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        },
+        {
+          "pair_index": 7,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 760.493916,
+            "exec_ms": 3.0,
+            "returncode": 0,
+            "stdout_sha256": "100eb33e16fcce5fee52d9d7fe749795add6740a63bae505ee80a3653ca98854",
+            "stderr_sha256": "a5673806fd596eeac0ae44479f8aecf69bffbfb3584a44d133cf7503a3b6ef56",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 111.229959,
+            "exec_ms": 1.0,
+            "returncode": 0,
+            "stdout_sha256": "100eb33e16fcce5fee52d9d7fe749795add6740a63bae505ee80a3653ca98854",
+            "stderr_sha256": "050dc9f508ca04c63d45105c1201a71acc02992f5955f1e90478a495d0214f49",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    }
+  ]
+}

@@ -312,6 +312,12 @@ Item js_elements_set(Item array, Item index, Item value);
 Item js_elements_get_int(Item array, int64_t index);
 Item js_elements_get_number(Item array, double index);
 Item js_elements_set_int(Item array, int64_t index, Item value);
+// T12-4: physical own-element heads used before the allocating property
+// kernels. They accept only a present ordinary dense slot and cannot allocate.
+bool js_array_try_get_existing_own_dense_no_gc(Item array, int64_t index,
+                                               Item* out_value);
+bool js_array_try_set_existing_own_dense_no_gc(Item array, int64_t index,
+                                               Item value);
 // Returns a boolean Set completion for the narrow ordinary-array index fast
 // path, or ItemNull when descriptor/prototype/exotic checks require fallback.
 Item js_elements_set_int_completion(Item array, int64_t index, Item value);

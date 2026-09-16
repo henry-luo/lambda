@@ -388,7 +388,26 @@ typedef enum JsNumericBinaryOp {
     JS_NUMERIC_UNSIGNED_RIGHT_SHIFT,
 } JsNumericBinaryOp;
 
-static Item js_numeric_binary(Item left, Item right, JsNumericBinaryOp op) {
+// The noncoercing Number pair is a leaf: it runs before root setup, while all
+// non-Number cases continue through the existing conversion/error kernel.
+static bool js_numeric_number_pair(Item left, Item right, JsNumericBinaryOp op,
+        Item* out) {
+    if (!out || js_is_symbol(left) || js_is_symbol(right) ||
+            !js_number_like_type(get_type_id(left)) ||
+            !js_number_like_type(get_type_id(right))) return false;
+    double l = js_get_number(left);
+    double r = js_get_number(right);
+    switch (op) {
+    case JS_NUMERIC_ADD: *out = js_make_number(l + r); return true;
+    case JS_NUMERIC_SUBTRACT: *out = js_make_number(l - r); return true;
+    case JS_NUMERIC_MULTIPLY: *out = js_make_number(l * r); return true;
+    case JS_NUMERIC_DIVIDE: *out = js_make_number(l / r); return true;
+    case JS_NUMERIC_MODULO: *out = js_make_number(fmod(l, r)); return true;
+    default: return false;
+    }
+}
+
+static Item js_numeric_binary_slow(Item left, Item right, JsNumericBinaryOp op) {
     bool to_numeric = op >= JS_NUMERIC_BITWISE_AND;
     if (to_numeric) {
         JS_ASSIGN_OR_RETURN(left_numeric, js_to_numeric(left));
@@ -477,6 +496,18 @@ static Item js_numeric_binary(Item left, Item right, JsNumericBinaryOp op) {
         break;
     }
     return js_make_number(NAN);
+}
+
+static Item js_numeric_binary(Item left, Item right, JsNumericBinaryOp op) {
+    Item result = ItemNull;
+    if (js_numeric_number_pair(left, right, op, &result)) {
+        js_opt_trace_record(JS_OPT_RUNTIME_NUMBER_HEAD_HIT, JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_TAKEN);
+        return result;
+    }
+    js_opt_trace_record(JS_OPT_RUNTIME_NUMBER_HEAD_FALLBACK, JS_OPT_REASON_NONE,
+        JS_OPT_OUTCOME_FALLBACK);
+    return js_numeric_binary_slow(left, right, op);
 }
 
 // ES spec §7.1.12.1 Number::toString
@@ -1322,6 +1353,14 @@ static inline Item js_concat_strings_fast(String* left, String* right) {
 JS_FORWARD_ITEM(js_string_concat, (Item left, Item right), js_concat_strings_fast, (it2s(left), it2s(right)))
 
 extern "C" Item js_add(Item left, Item right) {
+    Item number_result = ItemNull;
+    if (js_numeric_number_pair(left, right, JS_NUMERIC_ADD, &number_result)) {
+        js_opt_trace_record(JS_OPT_RUNTIME_NUMBER_HEAD_HIT, JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_TAKEN);
+        return number_result;
+    }
+    js_opt_trace_record(JS_OPT_RUNTIME_NUMBER_HEAD_FALLBACK, JS_OPT_REASON_NONE,
+        JS_OPT_OUTCOME_FALLBACK);
     JS_ROOTS(roots,
         left_root, left,
         right_root, right,
@@ -1370,7 +1409,8 @@ extern "C" Item js_add(Item left, Item right) {
             it2s(right_string_root.get()));
     }
 
-    return js_numeric_binary(left_root.get(), right_root.get(), JS_NUMERIC_ADD);
+    return js_numeric_binary_slow(left_root.get(), right_root.get(),
+        JS_NUMERIC_ADD);
 }
 
 #define JS_DEFINE_NUMERIC_BINARY(name, op) \
