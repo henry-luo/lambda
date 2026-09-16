@@ -758,9 +758,10 @@ At minimum, implementation tests must cover:
 
 ## 13. Decision ledger
 
-> **Series continues:** PTH30–PTH41 (the `reference` type, the postfix `@`
-> force step, `ref(v)` address-of, symbol forcing) are proposed in
-> [`Lambda_Design_Reference.md`](Lambda_Design_Reference.md) §9; PTH-O2–PTH-O5
+> **Series continues:** PTH30–PTH58 (the `reference` type, the postfix `#`
+> force step and fragment sugar, `&expr` address-of, `===`, document-node
+> identity, the `put` write-through statement, `temp.` documents, the `~key` respell of `~#`) are proposed in
+> [`Lambda_Design_Reference.md`](Lambda_Design_Reference.md) §9; PTH-O2–PTH-O12
 > live in its §10.
 
 | ID | Decision |

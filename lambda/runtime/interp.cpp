@@ -841,8 +841,13 @@ static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
     // read value so the first write DETACHES -- a real S9.1.2 snapshot --
     // instead of aliasing a child a fresh literal never captured. All T0
     // declaration paths funnel through this bind. Mark-only: cannot allocate.
+    // CW24v3 / D4.4.6: also mark when the PLACE may be written while the
+    // copy is alive -- the copy is then a second holder whether or not it is
+    // ever written itself.
     if (named->entry && named->entry->is_place_copy &&
-            named->entry->place_copy_mutated && !named->entry->cow_borrow_lowered) {
+            (named->entry->place_copy_mutated ||
+             named->entry->place_copy_place_written) &&
+            !named->entry->cow_borrow_lowered) {
         // CW34: a borrowed handle was already decided by cow_bind_rmw_handle
         cow_mark_shared(bound);
     }

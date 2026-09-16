@@ -10074,6 +10074,13 @@ typedef struct CowParamEffectScan {
     NameEntry* entry;
     bool retained;
     bool var_may_publish;
+    // CW24v3: a place copy escapes only when the copy ITSELF -- the bare name,
+    // not a member/index read of it -- is returned, stored, rebound, passed or
+    // captured. The CW29 sweep matches by ROOT (`print(p.n)` counts as passing
+    // `p`), which is right for a parameter's write-through question and wrong
+    // here: it made every read-and-return helper mark, the exact cost D4.4.6
+    // keeps free.
+    bool bare_only;
 } CowParamEffectScan;
 
 static void cow_param_note_alias(CowParamEffectScan* scan) {
@@ -10088,6 +10095,13 @@ static bool cow_param_expr_uses_entry(AstNode* expr, NameEntry* entry) {
     return ident && ident->entry == entry;
 }
 
+static bool cow_param_scan_matches(const CowParamEffectScan* scan, AstNode* expr) {
+    if (!scan->bare_only) return cow_param_expr_uses_entry(expr, scan->entry);
+    AstNode* bare = ast_unwrap_primary(expr);
+    return bare && bare->node_type == AST_NODE_IDENT &&
+        ((AstIdentNode*)bare)->entry == scan->entry;
+}
+
 static bool cow_param_nested_function_uses_entry(AstNode* node, void* data) {
     CowParamEffectScan* scan = (CowParamEffectScan*)data;
     if (!scan || node->node_type != AST_NODE_IDENT) return scan != NULL;
@@ -10100,7 +10114,7 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
     if (!scan || !node) return false;
     switch (node->node_type) {
     case AST_NODE_VARIABLE_DECLARATOR:
-        if (cow_param_expr_uses_entry(((AstDeclaratorNode*)node)->init, scan->entry)) {
+        if (cow_param_scan_matches(scan, ((AstDeclaratorNode*)node)->init)) {
             cow_param_note_alias(scan);
         }
         break;
@@ -10108,7 +10122,7 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
         AstAssignStamNode* assign = (AstAssignStamNode*)node;
         if (assign->target_entry == scan->entry) {
             scan->var_may_publish = true;
-        } else if (cow_param_expr_uses_entry(assign->value, scan->entry)) {
+        } else if (cow_param_scan_matches(scan, assign->value)) {
             cow_param_note_alias(scan);
         }
         break;
@@ -10118,15 +10132,31 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
         AstCompoundAssignNode* assign = (AstCompoundAssignNode*)node;
         AstIdentNode* owner = ast_compound_root_ident(assign->object);
         if (owner && owner->entry != scan->entry &&
-                cow_param_expr_uses_entry(assign->value, scan->entry)) {
+                cow_param_scan_matches(scan, assign->value)) {
             cow_param_note_alias(scan);
         }
         break;
     }
     case AST_NODE_CALL_EXPR: {
         AstCallNode* call = (AstCallNode*)node;
+        // CW24v3: a system function that is not a procedure and returns a
+        // scalar cannot retain an argument -- `len(keys)` hands the array to
+        // nothing that outlives the call. Counting it as an escape marked every
+        // `let keys = tree.keys` in cd2's find and copied the array on the
+        // following put (+37k copies). The registry row carries both facts.
+        // Only the bare-name (place-copy) question uses this: the CW29
+        // parameter sweep keeps its unknown-callee conservatism.
+        AstNode* callee = ast_unwrap_primary(call->function);
+        SysFuncInfo* sys = callee && callee->node_type == AST_NODE_SYS_FUNC
+            ? ((AstSysFuncNode*)callee)->fn_info : NULL;
+        bool pure_scalar_sys = scan->bare_only && sys && !sys->is_proc &&
+            sys->return_type && sys->return_type->type_id != LMD_TYPE_ANY &&
+            !ast_type_needs_mutable_clone(sys->return_type->type_id) &&
+            sys->return_type->type_id != LMD_TYPE_TYPE &&
+            sys->return_type->type_id != LMD_TYPE_FUNC;
+        if (pure_scalar_sys) break;
         for (AstNode* arg = call->argument; arg; arg = arg->next) {
-            if (cow_param_expr_uses_entry(arg, scan->entry)) {
+            if (cow_param_scan_matches(scan, arg)) {
                 // The callee's effect can be unknown at this function's
                 // completion (including forward and dynamic targets).
                 cow_param_note_alias(scan);
@@ -10142,7 +10172,7 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
     case AST_NODE_CONTENT: {
         AstArrayNode* values = (AstArrayNode*)node;
         for (AstNode* item = values->item; item; item = item->next) {
-            if (cow_param_expr_uses_entry(item, scan->entry)) {
+            if (cow_param_scan_matches(scan, item)) {
                 cow_param_note_alias(scan);
                 break;
             }
@@ -10150,13 +10180,13 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
         break;
     }
     case AST_NODE_KEY_EXPR:
-        if (cow_param_expr_uses_entry(((AstNamedNode*)node)->as, scan->entry)) {
+        if (cow_param_scan_matches(scan, ((AstNamedNode*)node)->as)) {
             cow_param_note_alias(scan);
         }
         break;
     case AST_NODE_RETURN_STAM:
-        scan->retained = scan->retained || cow_param_expr_uses_entry(
-            ((AstReturnNode*)node)->value, scan->entry);
+        scan->retained = scan->retained || cow_param_scan_matches(scan,
+            ((AstReturnNode*)node)->value);
         break;
     case AST_NODE_FUNC:
     case AST_NODE_FUNC_EXPR:
@@ -10172,8 +10202,9 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
     return true;
 }
 
-static CowParamEffectScan ast_body_cow_param_effects(AstNode* body, NameEntry* entry) {
-    CowParamEffectScan scan = {entry, false, false};
+static CowParamEffectScan ast_body_cow_param_effects(AstNode* body, NameEntry* entry,
+        bool bare_only = false) {
+    CowParamEffectScan scan = {entry, false, false, bare_only};
     walk_lambda_ast(body, cow_param_retention_scan_node, &scan, false);
     return scan;
 }
@@ -10783,6 +10814,94 @@ static void lambda_ast_lower_rmw_borrows(AstFuncNode* fn) {
     if (!fn || ((AstNode*)fn)->node_type != AST_NODE_PROC || !fn->body) return;
     // the body carrier itself is a statement-list node; discover through it
     rmw_discover_chain(fn->body);
+}
+
+// CW24v3 / D4.4.6: decide, per place-copy binding, whether the PLACE may be
+// written while the copy is alive. The live range is the statement list from
+// the bind to the last top-level statement of that list naming the copy; a
+// nested use makes its whole enclosing top-level statement part of the range.
+// "May be written" is the CW30 gate (`ast_body_may_write_entry`), which counts
+// a write through the root or any path prefix, an unknown callee and a `var`
+// pass as writes; "escapes" is the CW29 retention scan over the whole body,
+// conservative in the same direction. A miss here is a semantic bug, a false
+// hit is one share-mark (D4.4.1), so every unknown shape falls to "written".
+static void place_copy_decide_list(AstNode* head, AstNode* fn_body);
+
+static void place_copy_decide_declaration(AstNode* stmt_node, AstDeclaratorNode* named,
+        AstNode* fn_body) {
+    NameEntry* entry = named->entry;
+    if (!entry || !entry->is_place_copy || entry->place_copy_range_decided) return;
+    entry->place_copy_range_decided = true;
+    AstIdentNode* root_ident = named->init ? compound_root_ident(named->init) : NULL;
+    NameEntry* root = root_ident ? root_ident->entry : NULL;
+    if (!root) { entry->place_copy_place_written = true; return; }
+    AstNode* last_use = NULL;
+    for (AstNode* n = stmt_node->next; n; n = n->next) {
+        if (rmw_subtree_uses_entry(unwrap_primary_node(n), entry)) last_use = n;
+    }
+    bool written = last_use && ast_body_may_write_entry(stmt_node->next, root,
+        true, last_use->next);
+    bool escaped = ast_body_cow_param_effects(fn_body, entry, true).retained;
+    if (written || escaped) entry->place_copy_place_written = true;
+}
+
+static void place_copy_decide_list(AstNode* head, AstNode* fn_body) {
+    for (AstNode* node = head; node; node = node->next) {
+        AstNode* stmt = unwrap_primary_node(node);
+        if (!stmt) continue;
+        switch (stmt->node_type) {
+        case AST_NODE_VAR_STAM: case AST_NODE_LET_STAM: {
+            for (AstNode* d = ((AstVarDeclNode*)stmt)->declarations; d; d = d->next) {
+                if (d->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+                    place_copy_decide_declaration(node, (AstDeclaratorNode*)d, fn_body);
+                }
+            }
+            break;
+        }
+        case AST_NODE_IF_EXPR:
+            place_copy_decide_list(((AstIfNode*)stmt)->then, fn_body);
+            place_copy_decide_list(((AstIfNode*)stmt)->otherwise, fn_body);
+            break;
+        case AST_NODE_BLOCK:
+            place_copy_decide_list(((AstBlockNode*)stmt)->statements, fn_body);
+            break;
+        case AST_NODE_CONTENT: case AST_NODE_SEQ:
+            place_copy_decide_list(((AstArrayNode*)stmt)->item, fn_body);
+            break;
+        case AST_NODE_LIST:
+            place_copy_decide_list(((AstListNode*)stmt)->item, fn_body);
+            break;
+        case AST_NODE_LOOP:
+            place_copy_decide_list(((AstLoopControlNode*)stmt)->body, fn_body);
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+// Any place copy the precise walk never reached (declared under a construct it
+// does not descend, e.g. a `for` body or a `match` arm) is decided
+// conservatively from the whole body.
+static bool place_copy_decide_fallback_cb(AstNode* node, void* data) {
+    AstNode* fn_body = (AstNode*)data;
+    if (node->node_type != AST_NODE_VARIABLE_DECLARATOR) return true;
+    AstDeclaratorNode* named = (AstDeclaratorNode*)node;
+    NameEntry* entry = named->entry;
+    if (!entry || !entry->is_place_copy || entry->place_copy_range_decided) return true;
+    entry->place_copy_range_decided = true;
+    AstIdentNode* root_ident = named->init ? compound_root_ident(named->init) : NULL;
+    NameEntry* root = root_ident ? root_ident->entry : NULL;
+    entry->place_copy_place_written = !root ||
+        ast_body_may_write_entry(fn_body, root, true) ||
+        ast_body_cow_param_effects(fn_body, entry, true).retained;
+    return true;
+}
+
+static void lambda_ast_note_place_copy_place_writes(AstFuncNode* fn) {
+    if (!fn || !fn->body) return;
+    place_copy_decide_list(fn->body, fn->body);
+    walk_lambda_ast(fn->body, place_copy_decide_fallback_cb, fn->body, false);
 }
 
 // Pending CW24 candidates for the function currently being built. A mutation
@@ -11840,6 +11959,7 @@ static LambdaParseValue direct_ast_reduce(void* context,
             // excuse a place-copy mutation has now been seen.
             lambda_ast_flush_place_copy_diagnostics(tp);
             if (fn) lambda_ast_note_param_cow_effects(tp, fn);  // CW29 sweep
+            if (fn) lambda_ast_note_place_copy_place_writes(fn);  // CW24v3
             if (fn) lambda_ast_lower_rmw_borrows(fn);  // CW34
             return 0;
         }
@@ -12530,6 +12650,19 @@ static LambdaParseValue direct_ast_reduce(void* context,
                 AST_NODE_LET_STAM, reduction->span, sizeof(AstLetNode));
             let->declare = child0;
             let->type = child0->type;
+            // CW24v3 / D4.4.6: a `let` bound from a mutable root's place is a
+            // place copy as much as a `var` is -- it cannot be written through,
+            // but the PLACE can be, and the copy must not see that. Only the
+            // `var` path recorded the fact, which is why `let old = r.kid`
+            // never marked. The CW24 mutation diagnostic cannot fire on a
+            // `let` (the write is rejected as immutable first).
+            for (AstNode* declaration = child0; declaration;
+                    declaration = declaration->next) {
+                if (declaration->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
+                AstDeclaratorNode* named = (AstDeclaratorNode*)declaration;
+                if (!named->entry) named->entry = lookup_name_in_current_scope(tp, named->name);
+                if (named->entry) lambda_ast_mark_place_copy(named);
+            }
             return direct_ast_value((AstNode*)let);
         }
         if (child0) return direct_ast_value(child0);

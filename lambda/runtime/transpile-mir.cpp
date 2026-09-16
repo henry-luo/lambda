@@ -7144,14 +7144,43 @@ static MIR_reg_t emit_module_property_key_load(MirTranspiler* mt, uint32_t index
     // module-wide while virtual registers are function-local (D4.6.1v2-D4.6.2v2).
     MIR_reg_t state = emit_module_state(mt);
     uint32_t state_index = index;
-    if (mt->satellite_target || mt->interp_module_owner) {
+    bool satellite_keys = mt->satellite_target || mt->interp_module_owner;
+    if (satellite_keys) {
         if (index > UINT32_MAX - mt->satellite_property_key_base) return 0;
         state_index += mt->satellite_property_key_base;
     }
     mt->em.insert_after = mt->module_state_tail;
-    MIR_reg_t result = emit_call_2(mt, "lambda_module_name_id_at", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, state),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)state_index));
+    MIR_reg_t result = 0;
+    if (!satellite_keys) {
+        // T28-4: for the module's own code the key table is linked from
+        // exactly this transpiler's key list, and the link fails loudly if the
+        // sealed count changes (runtime-state.cpp), so `state_index` is in
+        // range and the table is non-null by construction. The call only ever
+        // did two loads; a recursive procedure paid it once per key per
+        // invocation (prettier's print_node: 13 keys). The table pointer is
+        // read fresh here, back-to-back with its use, because a satellite link
+        // may reallocate it (lambda_module_state_append_property_keys).
+        // Satellites keep the checked call: their index is offset by a base
+        // that a later append establishes.
+        // The load below is emitted as a 32-bit read; keep it tied to NameId.
+        static_assert(sizeof(NameId) == 4, "inline key load reads NameId as u32");
+        MIR_reg_t keys = new_reg(mt, "property_keys", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, keys),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                (MIR_disp_t)offsetof(LambdaModuleState, property_keys),
+                state, 0, 1)));
+        result = new_reg(mt, "static_name_id", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, result),
+            MIR_new_mem_op(mt->ctx, MIR_T_U32,
+                (MIR_disp_t)state_index * (MIR_disp_t)sizeof(NameId),
+                keys, 0, 1)));
+    } else {
+        result = emit_call_2(mt, "lambda_module_name_id_at", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, state),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)state_index));
+    }
     MIR_insn_t inserted_tail = mt->em.insert_after;
     mt->em.insert_after = 0;
     if (!result) return 0;
@@ -18221,9 +18250,12 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 // must mark the read value so its first write DETACHES -- a
                 // real S9.1.2 snapshot -- instead of aliasing a child a fresh
                 // literal never captured. Same tier rule as T0's bind path.
+                // CW24v3 / D4.4.6: a place that may be written while the copy
+                // is alive marks too, same rule as the T0 bind path.
                 if (!cow_binding && !borrow_bound &&
                         asn->entry && asn->entry->is_place_copy &&
-                        asn->entry->place_copy_mutated &&
+                        (asn->entry->place_copy_mutated ||
+                         asn->entry->place_copy_place_written) &&
                         ast_type_needs_mutable_clone(var_tid)) {
                     // a scalar place copy (`var mi: int = stack[d]`) has
                     // nothing to snapshot; marking it only boxed the binding
@@ -18245,6 +18277,23 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     var_tid = LMD_TYPE_ANY;
                     expr_tid = LMD_TYPE_ANY;
                     if (cow_source) cow_source->cow_marked = true;
+                    // CW24v3 / D4.4.6: a place copy (`old = r.kid`) shares the
+                    // root's CHILD, not the root. This tier picks the store form
+                    // at compile time from the root's facts, so an untyped
+                    // `r.kid.n = 7` after the bind still chose the raw
+                    // `fn_map_set` arm, which never reads the child's share
+                    // bit; the interpreter's path setter does. Record on the
+                    // root that its children may be shared, which is exactly
+                    // the fact a later detach records, so nested stores through
+                    // it take the rebuilding path helper (D4.4.1).
+                    if (asn->entry && asn->entry->is_place_copy) {
+                        AstIdentNode* place_root = ast_compound_root_ident(asn->init);
+                        MirVarEntry* root_var = place_root && place_root->entry
+                            ? mir_var_for_binding(mt, place_root->entry) : NULL;
+                        if (root_var && mir_root_may_need_cow(root_var)) {
+                            root_var->cow_children_may_be_shared = true;
+                        }
+                    }
                 }
 
                 TypeId inferred_array_num_elem = LMD_TYPE_ANY;

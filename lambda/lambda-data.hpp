@@ -1397,3 +1397,15 @@ Type* alloc_type_kind(Pool* pool, uint8_t kind, size_t size);
 Type* alloc_type(Pool* pool, TypeId type, size_t size);
 Type* alloc_type_kind(Pool* pool, uint8_t kind, size_t size);
 #endif
+
+// T28-4: has any type binder or bound reference ever been allocated in this
+// process? Every such node is created through alloc_type_kind, so while this
+// is false no contract can reach one, and a walk that asks "does this contract
+// use a binder?" is answered without walking. Monotonic: it never resets.
+#ifdef __cplusplus
+extern "C" {
+#endif
+bool lambda_binder_types_exist(void);
+#ifdef __cplusplus
+}
+#endif
