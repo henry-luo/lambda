@@ -1,0 +1,543 @@
+{
+  "schema_version": 1,
+  "status": "diagnostic comparison, not an acceptance run or isolated optimization A/B",
+  "date": "2026-09-16",
+  "commit": "f72f7552b027d01829a874ece9a8a591206db722",
+  "binary_sha256": "b86b42f976f3d7ecce3907e4db2bd732c71a83d9a6377757a96964e69a8d7961",
+  "build_command": "make release",
+  "runtime_sources_match_HEAD": true,
+  "benchmark_artifact": "JS_MVP_Full_Comparison_20260916.json",
+  "benchmark_note": "Three runs per row and engine; runner order mvpjs,lambdajs,quickjs; no Test262 rerun. Some diagnostic subprocess logs contain sigaltstack restore failed cleanup messages; processes completed and benchmark runner marked all samples ok.",
+  "mir_command_template": "LAMBDA_MIR_DUMP_PATH=<absolute path under ./temp/> ./lambda.exe js <canonical benchmark source>",
+  "probe_command_template": "./lambda.exe js [--runtime=mvp] <probe source>",
+  "semantic_probes": {
+    "array_hole": {
+      "full": {
+        "code": 0,
+        "stdout": "99\n",
+        "stderr": "11:03:08 [NOTE] any_census: total=21 open_param=15 js_call=1 js_member=5 (js)\n11:03:08 [ERR!] stack cleanup: sigaltstack restore failed\n11:03:08 [ERR!] stack cleanup: sigaltstack restore failed\n11:03:08 [NOTE] script-cache: summary entries=1 source_lookups=1 source_hits=0 source_misses=1 ast_hits=0 ast_misses=0 mir_hits=0 mir_misses=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained_source=72 retained_ast=0 retained_mir=0 peak=72\n11:03:08 [NOTE] script-cache: shutdown entries=1 source_lookups=1 source_hits=0 source_misses=1 ast_hits=0 mir_hits=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained=72 peak=72\n"
+      },
+      "mvp": {
+        "code": 1,
+        "stdout": "",
+        "stderr": "11:03:08 [NOTE] any_census: total=17 open_param=11 js_call=1 js_member=5 (js)\nMVP runtime error: MVP runtime execution failed: MVP member read prototype on undefined is unsupported\n11:03:08 [ERR!] stack cleanup: sigaltstack restore failed\n11:03:08 [NOTE] script-cache: summary entries=1 source_lookups=1 source_hits=0 source_misses=1 ast_hits=0 ast_misses=0 mir_hits=0 mir_misses=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained_source=72 retained_ast=0 retained_mir=0 peak=72\n11:03:08 [NOTE] script-cache: shutdown entries=1 source_lookups=1 source_hits=0 source_misses=1 ast_hits=0 mir_hits=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained=72 peak=72\n"
+      },
+      "source": "Array.prototype[0] = 99;\nconst a = [];\na.length = 1;\nconsole.log(a[0]);\n"
+    },
+    "builtin_replaced": {
+      "full": {
+        "code": 0,
+        "stdout": "99\n",
+        "stderr": "11:03:08 [NOTE] any_census: total=20 open_param=15 js_call=2 js_member=3 (js)\n11:03:08 [ERR!] stack cleanup: sigaltstack restore failed\n11:03:08 [ERR!] stack cleanup: sigaltstack restore failed\n11:03:08 [NOTE] script-cache: summary entries=1 source_lookups=1 source_hits=0 source_misses=1 ast_hits=0 ast_misses=0 mir_hits=0 mir_misses=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained_source=66 retained_ast=0 retained_mir=0 peak=66\n11:03:08 [NOTE] script-cache: shutdown entries=1 source_lookups=1 source_hits=0 source_misses=1 ast_hits=0 mir_hits=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained=66 peak=66\n"
+      },
+      "mvp": {
+        "code": 1,
+        "stdout": "",
+        "stderr": "11:03:08 [NOTE] any_census: total=16 open_param=11 js_call=2 js_member=3 (js)\nMVP runtime error: MVP runtime execution failed: MVP member write abs on undefined is unsupported\n11:03:08 [ERR!] stack cleanup: sigaltstack restore failed\n11:03:08 [NOTE] script-cache: summary entries=1 source_lookups=1 source_hits=0 source_misses=1 ast_hits=0 ast_misses=0 mir_hits=0 mir_misses=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained_source=66 retained_ast=0 retained_mir=0 peak=66\n11:03:08 [NOTE] script-cache: shutdown entries=1 source_lookups=1 source_hits=0 source_misses=1 ast_hits=0 mir_hits=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained=66 peak=66\n"
+      },
+      "source": "Math.abs = function(x) { return 99; };\nconsole.log(Math.abs(-2));\n"
+    },
+    "method_replaced": {
+      "full": {
+        "code": 0,
+        "stdout": "99\n",
+        "stderr": "11:03:08 [NOTE] any_census: total=29 open_param=21 js_call=4 js_member=4 (js)\n11:03:08 [ERR!] stack cleanup: sigaltstack restore failed\n11:03:08 [ERR!] stack cleanup: sigaltstack restore failed\n11:03:08 [NOTE] script-cache: summary entries=1 source_lookups=1 source_hits=0 source_misses=1 ast_hits=0 ast_misses=0 mir_hits=0 mir_misses=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained_source=143 retained_ast=0 retained_mir=0 peak=143\n11:03:08 [NOTE] script-cache: shutdown entries=1 source_lookups=1 source_hits=0 source_misses=1 ast_hits=0 mir_hits=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained=143 peak=143\n"
+      },
+      "mvp": {
+        "code": 0,
+        "stdout": "1\n",
+        "stderr": "11:03:08 [NOTE] any_census: total=25 open_param=17 js_call=4 js_member=4 (js)\n11:03:08 [ERR!] stack cleanup: sigaltstack restore failed\n11:03:08 [NOTE] script-cache: summary entries=1 source_lookups=1 source_hits=0 source_misses=1 ast_hits=0 ast_misses=0 mir_hits=0 mir_misses=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained_source=143 retained_ast=0 retained_mir=0 peak=143\n11:03:08 [NOTE] script-cache: shutdown entries=1 source_lookups=1 source_hits=0 source_misses=1 ast_hits=0 mir_hits=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained=143 peak=143\n"
+      },
+      "source": "class C { value() { return 1; } run() { return this.value(); } }\nconst c = new C();\nc.value = function() { return 99; };\nconsole.log(c.run());\n"
+    },
+    "numeric_string": {
+      "full": {
+        "code": 0,
+        "stdout": "21\n",
+        "stderr": "11:03:08 [NOTE] any_census: total=17 open_param=12 js_binary=2 js_call=2 js_member=1 (js)\n11:03:08 [ERR!] stack cleanup: sigaltstack restore failed\n11:03:08 [ERR!] stack cleanup: sigaltstack restore failed\n11:03:08 [NOTE] script-cache: summary entries=1 source_lookups=1 source_hits=0 source_misses=1 ast_hits=0 ast_misses=0 mir_hits=0 mir_misses=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained_source=59 retained_ast=0 retained_mir=0 peak=59\n11:03:08 [NOTE] script-cache: shutdown entries=1 source_lookups=1 source_hits=0 source_misses=1 ast_hits=0 mir_hits=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained=59 peak=59\n"
+      },
+      "mvp": {
+        "code": 0,
+        "stdout": "3\n",
+        "stderr": "11:03:08 [NOTE] any_census: total=13 open_param=8 js_binary=2 js_call=2 js_member=1 (js)\n11:03:08 [ERR!] stack cleanup: sigaltstack restore failed\n11:03:08 [NOTE] script-cache: summary entries=1 source_lookups=1 source_hits=0 source_misses=1 ast_hits=0 ast_misses=0 mir_hits=0 mir_misses=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained_source=59 retained_ast=0 retained_mir=0 peak=59\n11:03:08 [NOTE] script-cache: shutdown entries=1 source_lookups=1 source_hits=0 source_misses=1 ast_hits=0 mir_hits=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained=59 peak=59\n"
+      },
+      "source": "function add1(x) { return x + 1; }\nconsole.log(add1(\"2\"));\n"
+    },
+    "typed_array": {
+      "full": {
+        "code": 0,
+        "stdout": "1\n",
+        "stderr": "11:04:39 [NOTE] any_census: total=18 open_param=13 js_call=2 js_member=3 (js)\n11:04:39 [ERR!] stack cleanup: sigaltstack restore failed\n11:04:39 [ERR!] stack cleanup: sigaltstack restore failed\n11:04:39 [NOTE] script-cache: summary entries=1 source_lookups=1 source_hits=0 source_misses=1 ast_hits=0 ast_misses=0 mir_hits=0 mir_misses=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained_source=60 retained_ast=0 retained_mir=0 peak=60\n11:04:39 [NOTE] script-cache: shutdown entries=1 source_lookups=1 source_hits=0 source_misses=1 ast_hits=0 mir_hits=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained=60 peak=60\n"
+      },
+      "mvp": {
+        "code": 0,
+        "stdout": "257\n",
+        "stderr": "11:04:39 [NOTE] any_census: total=14 open_param=9 js_call=2 js_member=3 (js)\n11:04:39 [ERR!] stack cleanup: sigaltstack restore failed\n11:04:39 [NOTE] script-cache: summary entries=1 source_lookups=1 source_hits=0 source_misses=1 ast_hits=0 ast_misses=0 mir_hits=0 mir_misses=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained_source=60 retained_ast=0 retained_mir=0 peak=60\n11:04:39 [NOTE] script-cache: shutdown entries=1 source_lookups=1 source_hits=0 source_misses=1 ast_hits=0 mir_hits=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained=60 peak=60\n"
+      },
+      "source": "const a = new Uint8Array(1);\na[0] = 257;\nconsole.log(a[0]);\n"
+    }
+  },
+  "full_js_finalized_mir": {
+    "fib": {
+      "sha256": "5edb7f54edcb9a626128c3030a6a536f904638255e9f68022a88524192e4fd4f",
+      "functions": [
+        {
+          "name": "_js_fib_247_body",
+          "static_call_sites": {
+            "js_cmp_raw": 1,
+            "js_subtract": 2,
+            "js_throw_range_error": 2,
+            "_js_fib_247_body": 2,
+            "lambda_item_resolve_pending": 2,
+            "js_add": 1,
+            "lambda_item_adopt_scalar_home": 1,
+            "lambda_side_stack_ensure_for": 1,
+            "lambda_stack_overflow_error": 1
+          },
+          "mir": "_js_fib_247_body:\tfunc\ti64, i64, p:ctx, i64:%p0\n\tlocal\ti64:%r0, i64:%r1, i64:%r2, i64:%r3, i64:%r4, i64:%r5, i64:%r6, i64:%r7\n\tlocal\ti64:%r8, i64:%r9, i64:%ra, i64:%rb, i64:%rc, i64:%rd, i64:%re, i64:%rf\n\tlocal\ti64:%r10, i64:%r11, i64:%r12, i64:%r13, i64:%r14, i64:%r15, i64:%r16, i64:%r17\n\tlocal\ti64:%r18, i64:%r19, i64:%r1a, i64:%r1b, i64:%r1c, i64:%r1d, i64:%r1e, i64:%r1f\n\tlocal\ti64:%r20, i64:%r21, i64:%r22, i64:%r23, i64:%r24, i64:%r25, i64:%r26, i64:%r27\n\tlocal\ti64:%r28, i64:%r29, i64:%r2a, i64:%r2b, i64:%r2c, i64:%r2d, i64:%r2e, i64:%r2f\n\tlocal\ti64:%r30, i64:%r31, i64:%r32, i64:%r33, i64:%r34, i64:%r35, i64:%r36, i64:%r37\n\tlocal\ti64:%r38\n\n# 2 args, 57 locals, 0 globals\n\tbstart\t%r8\n\tmov\t%r31, 0\nL22:\n\tmov\t%r0, i64:80(ctx)\n\tmov\t%r2, i64:112(ctx)\n\tadd\t%r32, %r2, 8\n\tmov\t%r33, i64:120(ctx)\n\tugt\t%r34, %r32, %r33\n\tbt\tL21, %r34\n\tadd\t%r1, %r0, 24\n\tmov\t%r35, i64:88(ctx)\n\tugt\t%r36, %r1, %r35\n\tbt\tL21, %r36\n\tmov\ti64:112(ctx), %r32\nL1:\n\tmov\t%r4, 4611686018427387904\n\tmov\ti64:(%r0), %p0\n\tmov\ti64:8(%r0), %r4\n\tmov\ti64:80(ctx), %r1\n\tcall\tjs_cmp_raw_p_r6_n1_a3, js_cmp_raw, %r5, 0, %p0, %r4\n\tbf\tL3, %r5\n\tmov\t%r3, %p0\n\tjmp\tL2\n\tjmp\tL4\nL3:\nL4:\n\tmov\t%r6, 4607182418800017408\n\tmov\ti64:8(%r0), %r6\n\tmov\t%r2f, i64:80(ctx)\n\teq\t%r30, %r2f, %r0\n\tbf\tL19, %r30\n\tmov\ti64:80(ctx), %r1\nL19:\n\tcall\tjs_subtract_p_r6_n1_a2, js_subtract, %r7, %p0, %r6\n\tmov\t%r9, i64:56(ctx)\n\tublt\tL6, %r8, %r9\n\tjmp\tL7\nL6:\n\tcall\tjs_throw_range_error_p_r6_n1_a1, js_throw_range_error, %ra, 4386298206\n\tmov\t%rb, %ra\n\tjmp\tL5\nL7:\n\tmov\ti64:8(%r0), %r7\n\tcall\t_js_fib_247_body_dp0, _js_fib_247_body, %rc, %rd, ctx, %r7\n\tmov\t%re, %rc\n\tand\t%rf, %rc, 18374686479671623680\n\tbne\tL8, %rf, 2161727821137838080\n\tcall\tlambda_item_resolve_pending_p_r6_n1_a2, lambda_item_resolve_pending, %r10, %rc, %rd\n\tmov\t%re, %r10\nL8:\n\tursh\t%r11, %re, 56\n\teq\t%r12, %r11, 27\n\tbf\tL9, %r12\n\tmov\t%rb, %re\n\tjmp\tL5\nL9:\n\tmov\t%r13, 4611686018427387904\n\tmov\ti64:8(%r0), %re\n\tmov\ti64:16(%r0), %r13\n\tcall\tjs_subtract_p_r6_n1_a2, js_subtract, %r14, %p0, %r13\n\tmov\t%r15, i64:56(ctx)\n\tublt\tL10, %r8, %r15\n\tjmp\tL11\nL10:\n\tcall\tjs_throw_range_error_p_r6_n1_a1, js_throw_range_error, %r16, 4386298206\n\tmov\t%rb, %r16\n\tjmp\tL5\nL11:\n\tmov\ti64:16(%r0), %r14\n\tcall\t_js_fib_247_body_dp1, _js_fib_247_body, %r17, %r18, ctx, %r14\n\tmov\t%r19, %r17\n\tand\t%r1a, %r17, 18374686479671623680\n\tbne\tL12, %r1a, 2161727821137838080\n\tcall\tlambda_item_resolve_pending_p_r6_n1_a2, lambda_item_resolve_pending, %r1b, %r17, %r18\n\tmov\t%r19, %r1b\nL12:\n\tursh\t%r1c, %r19, 56\n\teq\t%r1d, %r1c, 27\n\tbf\tL13, %r1d\n\tmov\t%rb, %r19\n\tjmp\tL5\nL13:\n\tadd\t%r1e, %r2, 0\n\tmov\t%r1f, i64:112(ctx)\n\tmov\ti64:16(%r0), %r19\n\tcall\tjs_add_p_r6_n1_a2, js_add, %r20, %re, %r19\n\tursh\t%r21, %r20, 56\n\teq\t%r22, %r21, 8\n\tbf\tL15, %r22\n\tand\t%r23, %r20, 6917529027641081856\n\tbt\tL15, %r23\n\teq\t%r24, %r20, 576460752303423488\n\tbt\tL15, %r24\n\teq\t%r25, %r20, 576460752303423489\n\tbt\tL15, %r25\n\tjmp\tL14\nL15:\n\tmov\t%r26, %r20\n\tjmp\tL16\nL14:\n\tcall\tlambda_item_adopt_scalar_home_p_r6_n1_a2, lambda_item_adopt_scalar_home, %r27, %r20, %r1e\n\tmov\t%r26, %r27\nL16:\n\tmov\ti64:112(ctx), %r1f\n\tmov\t%r3, %r26\n\tjmp\tL2\n\tmov\t%r28, 144115188075855872\n\tmov\t%r3, %r28\n\tjmp\tL2\nL5:\n\tmov\t%r3, %rb\n\tjmp\tL2\nL2:\n\tmov\t%r29, %r3\n\tmov\t%r2a, 0\n\tursh\t%r2b, %r3, 56\n\tsub\t%r2c, %r2b, 6\n\tubgt\tL17, %r2c, 2\n\tubgt\tL18, %r2c, 1\n\tand\t%r2d, %r3, 72057594037927935\n\tmov\t%r2a, i64:(%r2d)\n\tor\t%r29, %r2c, 2161727821137838080\n\tjmp\tL17\nL18:\n\tand\t%r2e, %r3, 72057594037927935\n\tuble\tL17, %r2e, 1\n\tmov\t%r2a, i64:(%r2e)\n\tmov\t%r29, 2161727821137838082\nL17:\n\tmov\ti64:112(ctx), %r2\n\tmov\ti64:80(ctx), %r0\n\tret\t%r29, %r2a\nL21:\n\tne\t%r37, %r31, 0\n\tbt\tL20, %r37\n\tmov\t%r31, 1\n\tcall\tlambda_side_stack_ensure_for_p, lambda_side_stack_ensure_for, %r38, ctx, 3, 1\n\tbf\tL20, %r38\n\tjmp\tL22\nL20:\n\tcall\tlambda_stack_overflow_error_p_r6_n0_a1, lambda_stack_overflow_error, 4386312626\n\tret\t72057594037927936, 0\n\tendfunc"
+        },
+        {
+          "name": "_js_fib_247",
+          "static_call_sites": {
+            "_js_fib_247_body": 1
+          },
+          "mir": null
+        },
+        {
+          "name": "_js_main_329_body",
+          "static_call_sites": {
+            "lambda_active_module_name_item": 11,
+            "js_get_global_property_reference": 6,
+            "lambda_active_module_name_id": 5,
+            "js_get_name_id": 5,
+            "lambda_item_adopt_scalar_home": 7,
+            "js_require_object_coercible": 5,
+            "js_get_reference": 5,
+            "%r65": 1,
+            "js_throw_range_error": 1,
+            "_js_fib_247_body": 1,
+            "lambda_item_resolve_pending": 1,
+            "%r92": 1,
+            "js_eq_raw": 1,
+            "lambda_unit_const_at": 5,
+            "%rb7": 1,
+            "js_add": 2,
+            "js_string_concat": 2,
+            "%re7": 1,
+            "js_subtract": 1,
+            "%r113": 1,
+            "js_divide": 1,
+            "%r12b": 1,
+            "lambda_side_stack_ensure_for": 1,
+            "lambda_stack_overflow_error": 1
+          },
+          "mir": null
+        },
+        {
+          "name": "_js_main_329",
+          "static_call_sites": {
+            "_js_main_329_body": 1
+          },
+          "mir": null
+        },
+        {
+          "name": "js_main",
+          "static_call_sites": {
+            "js_init_module_vars_undefined_bulk": 1,
+            "js_set_strict_mode": 1,
+            "js_new_function_mir": 2,
+            "js_finalize_function": 2,
+            "lambda_active_module_var_store": 4,
+            "lambda_active_module_name_item": 4,
+            "js_define_global_property_v": 4,
+            "lambda_unit_const_at": 3,
+            "js_set_global_var_property_fast": 2,
+            "js_throw_range_error": 1,
+            "_js_main_329_body": 1,
+            "lambda_side_stack_ensure_for": 1,
+            "lambda_stack_overflow_error": 1
+          },
+          "mir": null
+        }
+      ]
+    },
+    "sum": {
+      "sha256": "1f422dfcea63d74846e0e7367823c63a8a1483fe195f52b6a139779da834bae6",
+      "functions": [
+        {
+          "name": "_js_run_254_body",
+          "static_call_sites": {
+            "js_cmp_raw": 1,
+            "js_throw_value": 1,
+            "js_check_tdz": 2,
+            "js_add": 1,
+            "lambda_item_adopt_scalar_home": 1,
+            "js_subtract": 1,
+            "lambda_side_stack_ensure_for": 1,
+            "lambda_stack_overflow_error": 1
+          },
+          "mir": "_js_run_254_body:\tfunc\ti64, i64, p:ctx, i64:%p0\n\tlocal\ti64:%r0, i64:%r1, i64:%r2, i64:%r3, i64:%r4, i64:%r5, i64:%r6, i64:%r7\n\tlocal\ti64:%r8, i64:%r9, i64:%ra, i64:%rb, i64:%rc, i64:%rd, i64:%re, i64:%rf\n\tlocal\ti64:%r10, i64:%r11, i64:%r12, i64:%r13, i64:%r14, i64:%r15, i64:%r16, i64:%r17\n\tlocal\ti64:%r18, i64:%r19, i64:%r1a, i64:%r1b, i64:%r1c, i64:%r1d, i64:%r1e, i64:%r1f\n\tlocal\ti64:%r20, i64:%r21, i64:%r22, i64:%r23, i64:%r24, i64:%r25, i64:%r26, i64:%r27\n\tlocal\ti64:%r28, i64:%r29, i64:%r2a, i64:%r2b, i64:%r2c, i64:%r2d, i64:%r2e, i64:%r2f\n\tlocal\ti64:%r30, i64:%r31, i64:%r32, i64:%r33, i64:%r34, i64:%r35, i64:%r36, i64:%r37\n\n# 2 args, 56 locals, 0 globals\n\tmov\t%r30, 0\nL19:\n\tmov\t%r0, i64:80(ctx)\n\tmov\t%r2, i64:112(ctx)\n\tadd\t%r31, %r2, 8\n\tmov\t%r32, i64:120(ctx)\n\tugt\t%r33, %r31, %r32\n\tbt\tL18, %r33\n\tadd\t%r1, %r0, 24\n\tmov\t%r34, i64:88(ctx)\n\tugt\t%r35, %r1, %r34\n\tbt\tL18, %r35\n\tmov\ti64:112(ctx), %r31\nL1:\n\tmov\t%r4, 144115188075855873\n\tmov\t%r5, 144115188075855873\n\tmov\t%r6, %p0\n\tmov\t%r8, 576460752303423488\n\tmov\t%r7, %r8\nL4:\n\tmov\t%r9, 576460752303423488\n\tmov\ti64:(%r0), %r6\n\tmov\ti64:8(%r0), %r7\n\tmov\ti64:16(%r0), %r9\n\tmov\t%r2e, i64:80(ctx)\n\teq\t%r2f, %r2e, %r0\n\tbf\tL16, %r2f\n\tmov\ti64:80(ctx), %r1\nL16:\n\tcall\tjs_cmp_raw_p_r6_n1_a3, js_cmp_raw, %ra, 3, %r6, %r9\n\tmov\t%rb, 0\n\tbf\tL6, %rb\n\tmov\t%rc, 72057594037927936\n\tmov\ti64:16(%r0), %rc\n\tcall\tjs_throw_value_p_r6_n1_a1, js_throw_value, %rd, %rc\n\tmov\t%re, %rd\n\tjmp\tL3\nL6:\n\tbf\tL5, %ra\n\tmov\t%rf, 154\n\tmov\ti64:16(%r0), %rf\n\tcall\tjs_check_tdz_p_r6_n1_a3, js_check_tdz, %r10, %r7, %rf, 1\n\tursh\t%r11, %r10, 56\n\teq\t%r12, %r11, 27\n\tbf\tL7, %r12\n\tmov\t%re, %r10\n\tjmp\tL3\nL7:\n\tadd\t%r13, %r2, 0\n\tmov\t%r14, i64:112(ctx)\n\tcall\tjs_add_p_r6_n1_a2, js_add, %r15, %r7, %r6\n\tursh\t%r16, %r15, 56\n\teq\t%r17, %r16, 8\n\tbf\tL9, %r17\n\tand\t%r18, %r15, 6917529027641081856\n\tbt\tL9, %r18\n\teq\t%r19, %r15, 576460752303423488\n\tbt\tL9, %r19\n\teq\t%r1a, %r15, 576460752303423489\n\tbt\tL9, %r1a\n\tjmp\tL8\nL9:\n\tmov\t%r1b, %r15\n\tjmp\tL10\nL8:\n\tcall\tlambda_item_adopt_scalar_home_p_r6_n1_a2, lambda_item_adopt_scalar_home, %r1c, %r15, %r13\n\tmov\t%r1b, %r1c\nL10:\n\tmov\ti64:112(ctx), %r14\n\tmov\t%r7, %r1b\n\tursh\t%r1d, %r1b, 56\n\teq\t%r1e, %r1d, 27\n\tbf\tL11, %r1e\n\tmov\t%re, %r1b\n\tjmp\tL3\nL11:\n\tmov\t%r1f, 97\n\tmov\ti64:8(%r0), %r7\n\tmov\ti64:16(%r0), %r1f\n\tcall\tjs_check_tdz_p_r6_n1_a3, js_check_tdz, %r20, %r6, %r1f, 1\n\tursh\t%r21, %r20, 56\n\teq\t%r22, %r21, 27\n\tbf\tL12, %r22\n\tmov\t%re, %r20\n\tjmp\tL3\nL12:\n\tmov\t%r23, 4607182418800017408\n\tmov\ti64:16(%r0), %r23\n\tcall\tjs_subtract_p_r6_n1_a2, js_subtract, %r24, %r6, %r23\n\tmov\t%r6, %r24\n\tursh\t%r25, %r24, 56\n\teq\t%r26, %r25, 27\n\tbf\tL13, %r26\n\tmov\t%re, %r24\n\tjmp\tL3\nL13:\n\tjmp\tL4\nL5:\n\tmov\t%r3, %r7\n\tjmp\tL2\n\tmov\t%r27, 144115188075855872\n\tmov\t%r3, %r27\n\tjmp\tL2\nL3:\n\tmov\t%r3, %re\n\tjmp\tL2\nL2:\n\tmov\t%r28, %r3\n\tmov\t%r29, 0\n\tursh\t%r2a, %r3, 56\n\tsub\t%r2b, %r2a, 6\n\tubgt\tL14, %r2b, 2\n\tubgt\tL15, %r2b, 1\n\tand\t%r2c, %r3, 72057594037927935\n\tmov\t%r29, i64:(%r2c)\n\tor\t%r28, %r2b, 2161727821137838080\n\tjmp\tL14\nL15:\n\tand\t%r2d, %r3, 72057594037927935\n\tuble\tL14, %r2d, 1\n\tmov\t%r29, i64:(%r2d)\n\tmov\t%r28, 2161727821137838082\nL14:\n\tmov\ti64:112(ctx), %r2\n\tmov\ti64:80(ctx), %r0\n\tret\t%r28, %r29\nL18:\n\tne\t%r36, %r30, 0\n\tbt\tL17, %r36\n\tmov\t%r30, 1\n\tcall\tlambda_side_stack_ensure_for_p, lambda_side_stack_ensure_for, %r37, ctx, 3, 1\n\tbf\tL17, %r37\n\tjmp\tL19\nL17:\n\tcall\tlambda_stack_overflow_error_p_r6_n0_a1, lambda_stack_overflow_error, 4359950770\n\tret\t72057594037927936, 0\n\tendfunc"
+        },
+        {
+          "name": "_js_run_254",
+          "static_call_sites": {
+            "_js_run_254_body": 1
+          },
+          "mir": null
+        },
+        {
+          "name": "_js_main_384_body",
+          "static_call_sites": {
+            "lambda_active_module_name_item": 11,
+            "js_get_global_property_reference": 6,
+            "lambda_active_module_name_id": 6,
+            "js_get_name_id": 5,
+            "lambda_item_adopt_scalar_home": 7,
+            "js_require_object_coercible": 5,
+            "js_get_reference": 5,
+            "%r64": 1,
+            "push_d": 2,
+            "js_throw_value": 2,
+            "js_check_tdz": 1,
+            "js_throw_range_error": 1,
+            "_js_run_254_body": 1,
+            "lambda_item_resolve_pending": 1,
+            "js_to_numeric": 1,
+            "js_increment": 1,
+            "js_to_number": 1,
+            "it2d": 1,
+            "%rb5": 1,
+            "js_eq_raw": 1,
+            "lambda_unit_const_at": 5,
+            "%rda": 1,
+            "js_add": 2,
+            "js_string_concat": 2,
+            "%r10a": 1,
+            "js_subtract": 1,
+            "%r136": 1,
+            "js_divide": 1,
+            "%r14e": 1,
+            "lambda_side_stack_ensure_for": 1,
+            "lambda_stack_overflow_error": 1
+          },
+          "mir": null
+        },
+        {
+          "name": "_js_main_384",
+          "static_call_sites": {
+            "_js_main_384_body": 1
+          },
+          "mir": null
+        },
+        {
+          "name": "js_main",
+          "static_call_sites": {
+            "js_init_module_vars_undefined_bulk": 1,
+            "js_set_strict_mode": 1,
+            "js_new_function_mir": 2,
+            "js_finalize_function": 2,
+            "lambda_active_module_var_store": 4,
+            "lambda_active_module_name_item": 4,
+            "js_define_global_property_v": 4,
+            "lambda_unit_const_at": 3,
+            "js_set_global_var_property_fast": 2,
+            "js_throw_range_error": 1,
+            "_js_main_384_body": 1,
+            "lambda_side_stack_ensure_for": 1,
+            "lambda_stack_overflow_error": 1
+          },
+          "mir": null
+        }
+      ]
+    },
+    "primes": {
+      "sha256": "0eac0ca42198775fe5df8943f0beb59ce45cb4f97f02e1a238115ed1a5a00167",
+      "functions": [
+        {
+          "name": "_js_sieve_267_body",
+          "static_call_sites": {
+            "lambda_active_module_name_item": 2,
+            "js_get_global_property_reference": 1,
+            "js_add": 2,
+            "lambda_item_adopt_scalar_home": 2,
+            "js_construct_value": 1,
+            "js_require_object_coercible": 1,
+            "js_get_reference": 1,
+            "%r2d": 1,
+            "push_d": 16,
+            "js_to_property_key": 3,
+            "js_property_lane_for_canonical_key": 3,
+            "js_set": 3,
+            "js_assignment_set_result": 3,
+            "js_cmp_raw": 1,
+            "js_throw_value": 8,
+            "js_elements_get_number": 2,
+            "js_is_truthy": 2,
+            "it2d": 6,
+            "lambda_active_module_name_id": 1,
+            "js_check_tdz": 1,
+            "js_to_numeric": 3,
+            "js_increment": 3,
+            "js_to_number": 3,
+            "lambda_side_stack_ensure_for": 1,
+            "lambda_stack_overflow_error": 1
+          },
+          "mir": null
+        },
+        {
+          "name": "_js_sieve_267",
+          "static_call_sites": {
+            "_js_sieve_267_body": 1
+          },
+          "mir": null
+        },
+        {
+          "name": "_js_main_688_body",
+          "static_call_sites": {
+            "lambda_active_module_name_item": 11,
+            "js_get_global_property_reference": 6,
+            "lambda_active_module_name_id": 5,
+            "js_get_name_id": 5,
+            "lambda_item_adopt_scalar_home": 8,
+            "js_require_object_coercible": 5,
+            "js_get_reference": 5,
+            "%r147": 1,
+            "js_throw_range_error": 1,
+            "_js_sieve_267_body": 1,
+            "lambda_item_resolve_pending": 1,
+            "%r174": 1,
+            "js_eq_raw": 1,
+            "lambda_unit_const_at": 6,
+            "js_add": 3,
+            "js_string_concat": 3,
+            "%r1a7": 1,
+            "%r1d7": 1,
+            "js_subtract": 1,
+            "%r203": 1,
+            "js_divide": 1,
+            "%r21b": 1,
+            "lambda_side_stack_ensure_for": 1,
+            "lambda_stack_overflow_error": 1
+          },
+          "mir": null
+        },
+        {
+          "name": "_js_main_688",
+          "static_call_sites": {
+            "_js_main_688_body": 1
+          },
+          "mir": null
+        },
+        {
+          "name": "js_main",
+          "static_call_sites": {
+            "js_init_module_vars_undefined_bulk": 1,
+            "js_set_strict_mode": 1,
+            "js_new_function_mir": 2,
+            "js_finalize_function": 2,
+            "lambda_active_module_var_store": 4,
+            "lambda_active_module_name_item": 4,
+            "js_define_global_property_v": 4,
+            "lambda_unit_const_at": 3,
+            "js_set_global_var_property_fast": 2,
+            "js_throw_range_error": 1,
+            "_js_main_688_body": 1,
+            "lambda_side_stack_ensure_for": 1,
+            "lambda_stack_overflow_error": 1
+          },
+          "mir": null
+        }
+      ]
+    },
+    "fft": {
+      "sha256": "96d88d94dc8c720019ef30c08d22226e4614dade8888e3fb582b3a80fbf9d02a",
+      "functions": [
+        {
+          "name": "_js_four1_346_body",
+          "static_call_sites": {
+            "push_d": 21,
+            "js_throw_value": 14,
+            "js_cmp_raw": 4,
+            "js_elements_get_number": 2,
+            "js_get_reference": 12,
+            "js_to_property_key": 8,
+            "js_property_lane_for_canonical_key": 8,
+            "js_set": 8,
+            "js_assignment_set_result": 8,
+            "lambda_active_module_name_id": 11,
+            "js_check_tdz": 11,
+            "js_add": 18,
+            "lambda_item_adopt_scalar_home": 18,
+            "js_right_shift": 2,
+            "js_compare": 2,
+            "js_is_truthy": 1,
+            "js_subtract": 5,
+            "lambda_active_module_var_at": 1,
+            "js_resolve_unresolved_binding": 1,
+            "it2d": 2,
+            "lambda_active_module_name_item": 4,
+            "js_get_global_property_reference": 2,
+            "js_require_object_coercible": 2,
+            "%r113": 1,
+            "js_unary_minus": 1,
+            "js_multiply": 10,
+            "%r143": 1,
+            "lambda_side_stack_ensure_for": 1,
+            "lambda_stack_overflow_error": 1
+          },
+          "mir": null
+        },
+        {
+          "name": "_js_four1_346",
+          "static_call_sites": {
+            "_js_four1_346_body": 1
+          },
+          "mir": null
+        },
+        {
+          "name": "_js_main_1826_body",
+          "static_call_sites": {
+            "lambda_active_module_name_item": 12,
+            "js_get_global_property_reference": 7,
+            "lambda_active_module_name_id": 5,
+            "js_get_name_id": 5,
+            "lambda_item_adopt_scalar_home": 7,
+            "js_require_object_coercible": 5,
+            "js_get_reference": 5,
+            "%r2ed": 1,
+            "js_construct_value": 1,
+            "js_throw_range_error": 1,
+            "_js_four1_346_body": 1,
+            "js_elements_get_number": 1,
+            "%r327": 1,
+            "js_eq_raw": 1,
+            "lambda_unit_const_at": 5,
+            "%r34b": 1,
+            "js_add": 2,
+            "js_string_concat": 2,
+            "%r37b": 1,
+            "js_subtract": 1,
+            "%r3a7": 1,
+            "js_divide": 1,
+            "%r3bf": 1,
+            "lambda_side_stack_ensure_for": 1,
+            "lambda_stack_overflow_error": 1
+          },
+          "mir": null
+        },
+        {
+          "name": "_js_main_1826",
+          "static_call_sites": {
+            "_js_main_1826_body": 1
+          },
+          "mir": null
+        },
+        {
+          "name": "js_main",
+          "static_call_sites": {
+            "lambda_active_module_name_item": 5,
+            "js_evalscript_check_global_lex_decl": 1,
+            "js_global_lexical_declare": 1,
+            "lambda_active_module_var_store": 6,
+            "js_init_module_vars_undefined_bulk": 1,
+            "js_set_strict_mode": 1,
+            "js_new_function_mir": 2,
+            "js_finalize_function": 2,
+            "js_define_global_property_v": 4,
+            "lambda_unit_const_at": 3,
+            "js_set_global_var_property_fast": 2,
+            "push_d": 2,
+            "js_throw_value": 1,
+            "js_throw_range_error": 1,
+            "_js_main_1826_body": 1,
+            "lambda_side_stack_ensure_for": 1,
+            "lambda_stack_overflow_error": 1
+          },
+          "mir": null
+        }
+      ]
+    }
+  },
+  "map_scaling": {
+    "description": "Diagnostic only: four Map constructions per run, distinct numeric keys; three isolated runs per engine and size, alternating order. Not in the 63-workload metric.",
+    "source_template": "function fill(n) {\n    const m = new Map();\n    for (let i = 0; i < n; i++) m.set(i, i);\n    return m.size;\n}\nfunction main() {\n    const start = process.hrtime.bigint();\n    let total = 0;\n    for (let r = 0; r < 4; r++) total += fill(SIZE);\n    const elapsed = Number(process.hrtime.bigint() - start) / 1e6;\n    console.log(total);\n    console.log(\"__TIMING__:\" + elapsed);\n}\nmain();\n",
+    "rows": [
+      {
+        "size": 1000,
+        "samples": {
+          "full": [
+            11.074459,
+            12.3035,
+            12.033833
+          ],
+          "mvp": [
+            0.66,
+            0.657,
+            0.71
+          ]
+        },
+        "median_ms": {
+          "full": 12.033833,
+          "mvp": 0.66
+        }
+      },
+      {
+        "size": 2000,
+        "samples": {
+          "full": [
+            44.144833,
+            42.229084,
+            43.31325
+          ],
+          "mvp": [
+            2.05,
+            1.489,
+            1.362
+          ]
+        },
+        "median_ms": {
+          "full": 43.31325,
+          "mvp": 1.489
+        }
+      },
+      {
+        "size": 4000,
+        "samples": {
+          "full": [
+            166.894208,
+            173.787125,
+            176.890333
+          ],
+          "mvp": [
+            3.444,
+            4.092,
+            3.223
+          ]
+        },
+        "median_ms": {
+          "full": 173.787125,
+          "mvp": 3.444
+        }
+      },
+      {
+        "size": 8000,
+        "samples": {
+          "full": [
+            674.095958,
+            687.220292,
+            716.283333
+          ],
+          "mvp": [
+            7.764,
+            5.85,
+            8.156
+          ]
+        },
+        "median_ms": {
+          "full": 687.220292,
+          "mvp": 7.764
+        }
+      }
+    ]
+  }
+}
