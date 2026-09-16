@@ -3956,6 +3956,7 @@ static Item js_get_proto_key() {
 
 // Forward declaration for builtin method lookup (extern — used by js_globals.cpp too)
 extern "C" Item js_get_typed_array_base_proto();
+extern "C" Item js_get_buffer_prototype(void);
 Item js_iterator_prototype_for_object(Item object);
 
 extern "C" Item js_call_accessor_getter(Item getter, Item receiver) {
@@ -4024,6 +4025,18 @@ static bool js_property_ops_property_get(Item object, Item key, Item receiver,
                 return true;
             }
             if (js_property_ops_get_own(object, key, object, true, out_result)) return true;
+            JsTypedArray* ta = js_get_typed_array_ptr(object.map);
+            if (ta && ta->element_type == JS_TYPED_UINT8 && ta->is_buffer) {
+                Item buf_proto = js_get_buffer_prototype();
+                if (buf_proto.item != ITEM_NULL) {
+                    Item result = js_get_key_core(buf_proto, key, receiver);
+                    if (item_is_error(result) ||
+                        get_type_id(result) != LMD_TYPE_UNDEFINED) {
+                        *out_result = result;
+                        return true;
+                    }
+                }
+            }
             Item ta_proto = js_get_prototype(object);
             if (ta_proto.item == ITEM_NULL) {
                 ta_proto = js_get_typed_array_base_proto();

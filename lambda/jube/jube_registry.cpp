@@ -739,6 +739,7 @@ static int jube_host_node_resolve_namespace(void* session, const char* specifier
                                             Item* out_namespace);
 static int jube_host_node_resolve_host_namespace(void* session, const char* specifier,
                                                  Item* out_namespace);
+extern "C" Item js_get_buffer_namespace(void);
 extern "C" int js_permission_has_net(void);
 extern "C" int js_permission_enabled(void);
 extern "C" Item js_process_permission_has(Item scope, Item resource);
@@ -3590,10 +3591,10 @@ static int jube_host_node_resolve_host_namespace(void* session, const char* spec
         const char* specifier;
         JubeHostNamespaceFactory factory;
     } JubeHostNamespaceEntry;
-    // URL backs the standard URL and URLSearchParams globals. All other Node
-    // compatibility namespaces are unavailable until their implementation is
-    // rebuilt behind a deliberate host boundary.
+    // URL and Buffer remain host-owned during their staged extraction. Their
+    // public Node exposure is still controlled by node-core's Jube descriptor.
     static const JubeHostNamespaceEntry entries[] = {
+        {"buffer", js_get_buffer_namespace},
         {"url", node_url_namespace},
     };
     for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]); i++) {

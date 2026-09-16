@@ -26,6 +26,7 @@ extern "C" void js_xhr_reset(void);
 extern void jm_compile_recovery_state_destroy_context(JsRuntimeState* state);
 struct JsGeneratorStateRecord;
 void js_interp_generator_clear_continuations(JsGeneratorStateRecord* state);
+extern "C" void js_reset_buffer_module(void);
 
 static void js_reset_cached_realm_objects(void) {
     // Cached realm objects all point into the batch heap and must be invalidated together.
@@ -48,6 +49,8 @@ static void js_reset_cached_realm_objects(void) {
 }
 
 static void js_reset_core_module_caches(void) {
+    // Buffer's realm slots hold host-owned namespace values across Jube resets.
+    js_reset_buffer_module();
     js_fetch_reset();
     js_history_reset();
 }
