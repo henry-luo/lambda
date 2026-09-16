@@ -20,7 +20,8 @@ static inline bool em_loop_pure_call(MirEmitter* em, MIR_insn_t insn) {
     bool found = em->lookup_import_metadata
         ? em->lookup_import_metadata(name, &effects)
         : jit_import_get_metadata(name, &effects);
-    return found && (effects.flags & JIT_IMPORT_PURE_SCALAR_CALL) &&
+    return found && (effects.flags & (JIT_IMPORT_PURE_SCALAR_CALL |
+            JIT_IMPORT_LOOP_STABLE_SCALAR)) &&
         effects.gc_effect == JIT_EFFECT_NO_GC && effects.reentry_effect == JIT_REENTRY_NO &&
         effects.exception_effect == JIT_EXCEPTION_PRESERVES &&
         effects.ret_class == JIT_VALUE_NON_GC_SCALAR &&
@@ -42,8 +43,9 @@ static inline bool em_loop_scalar_instruction(MIR_insn_t insn) {
 }
 
 // The structured loop's only external entry is the fallthrough before `first`.
-// Move only the scalar dependency slice of audited pure calls. GC and alias
-// writes elsewhere cannot invalidate these values; memory witnesses stay local.
+// Move only the scalar dependency slice of audited pure or immutable-observation
+// calls. GC and alias writes elsewhere cannot invalidate these values; mutable
+// memory witnesses stay local.
 static inline int em_hoist_loop_scalar_calls(MirEmitter* em,
         MIR_label_t first, MIR_label_t end, const ArrayList* initialized = NULL) {
     if (!em || !first || !end) return 0;

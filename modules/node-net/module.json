@@ -8,9 +8,7 @@
   "provides": [
     "net",
     "internal/net",
-    "internal/js_stream_socket",
-    "dns",
-    "dns/promises"
+    "internal/js_stream_socket"
   ],
   "dependencies": [
     "node-core"

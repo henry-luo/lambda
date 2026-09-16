@@ -1,10 +1,10 @@
 # JS Tune12 — Full LambdaJS performance from MVP v1 designs
 
-**Version:** 1.1.0
+**Version:** 1.2.0
 
 **Date:** 2026-09-16
 
-**Status:** IMPLEMENTED — the 0.80x full-LambdaJS/QuickJS milestone remains unmet.
+**Status:** PHASE 1 IMPLEMENTED; PHASE 2 PLANNED — the 0.80x full-LambdaJS/QuickJS milestone remains unmet.
 
 **Scope:** improve the full LambdaJS runtime and MIR lowering while retaining Lambda runtime types and full JavaScript semantics.
 
@@ -16,7 +16,7 @@ This is the implementation plan for [Full LambdaJS performance: lessons from MVP
 
 Make common full-JS operations perform the same small amount of physical work that makes MVP fast, after establishing the guards and ownership required by full JavaScript. Prioritize unnecessary algorithms and missed specialization before broad runtime restructuring.
 
-The implementation order is:
+The Phase 1 implementation order was:
 
 1. Eliminate Map/Set insertion-order rescans.
 2. Extend existing native numeric variants to local accumulators and recursive numeric results.
@@ -27,17 +27,26 @@ The implementation order is:
 7. Admit bulk RegExp operations through the existing semantic entry points.
 8. Validate the complete standard workload population and publish the residuals.
 
+Phase 2 (§17–§27) follows the measured residuals: remove irrelevant property
+bookkeeping, specialize complete numeric/array loops, then address object/call
+costs and separately profiled allocation, compilation and built-in work. Its
+unchecked work packages are not covered by the Phase 1 completion record.
+
 Track three outcomes separately:
 
 | Outcome | Required evidence |
 |---|---|
-| Implementation complete | Every T12 phase below has its code, structural evidence, correctness gates and measurement record; deliberately excluded cases retain a tested semantic fallback |
+| Implementation complete | Every work package in the declared phase has its code, structural evidence, correctness gates and measurement record; deliberately excluded cases retain a tested semantic fallback; Phase 1 completion does not close Phase 2 |
 | Tuning successful | Exact-release A/B demonstrates a full-population improvement, with no unresolved material regressions or correctness failures |
 | Performance milestone reached | A complete fresh 63-row matrix meets the stated full-JS/QuickJS milestone; a subset or estimated speedup cannot substitute |
 
 Proposed performance milestones are **full LambdaJS / QuickJS geometric mean ≤0.80x**, followed by the earlier discussion's **≤0.30x** stretch objective. These are proposed full-engine targets, not measurements or promised results. The user's earlier 0.80x acceptance applied to MVP; this plan does not retroactively change that acceptance contract. If these targets remain unmet, report the actual result and leave the performance milestone open even when the listed implementation is complete.
 
 From historical Result45's 2.588162x, these milestones would require approximately 3.24x and 8.63x improvement respectively. They cannot be forecast from the measured MVP gaps because MVP makes additional semantic assumptions. Per-row reporting remains mandatory; there is no requirement that every row beat QuickJS.
+
+The Phase 1 final matrix is now 3.481106x against its recorded QuickJS binary;
+reaching 0.80x from that observation would require approximately 4.35x further
+geometric-mean improvement. This is arithmetic, not a Phase 2 speedup forecast.
 
 ## 2. Authority and constraints
 
@@ -62,7 +71,7 @@ Do not import MVP's semantics: its numeric wrapper coerces `add1("2")` to `3`; a
 
 Do not modify benchmark sources/inputs, replace algorithms with recognized answers, weaken Test262, edit vendor code, or rewrite unrelated runtime modules. Use C++17 and existing `lib/` containers. Promote a required existing `static` helper rather than copying it. Scratch output belongs under `temp/`; accepted evidence belongs in the benchmark archive.
 
-## 3. Evidence carried into the plan
+## 3. Evidence carried into Phase 1
 
 ### 3.1 Observations, not attribution estimates
 
@@ -96,7 +105,7 @@ Historical full-population figures remain [Result45](../../test/benchmark/Overal
 
 The abandoned v2 migration changed many layers together. It does not justify avoiding Item in full JS. Tune12 isolates each proposed change so its benefit and cost can be measured independently.
 
-## 4. Work breakdown and dependencies
+## 4. Phase 1 work breakdown and dependencies
 
 | Phase | Deliverable | Depends on | Initial state |
 |---|---|---|---|
@@ -113,7 +122,7 @@ The abandoned v2 migration changed many layers together. It does not justify avo
 
 Implement in the listed order, keeping each phase independently reviewable. A newly exposed correctness defect is fixed at its cause before accepting the affected optimization; record it separately so its cost is not mistaken for the intended tuning effect.
 
-The checked work items below are closed by the release provenance, fixtures,
+The checked Phase 1 work items below are closed by the release provenance, fixtures,
 and artifacts in the completion record. The semantic fallback in each phase is
 required by **S1.11**, **D5.3.2–D5.3.5**, and **D8.4.1v2–D8.4.3v2**; a checked
 item is not permission to generalize an admitted physical path.
@@ -437,7 +446,7 @@ Also run full-population interleaved control/candidate comparisons for causal at
 - [x] Update this plan's checklist, the MVP comparison's follow-up status, and implementation documentation with actual behavior. Do not rewrite historical snapshots to match the final implementation.
 - [x] Record each performance milestone as reached or unmet, with the remaining dominant paths. A successful subset, a green baseline, or a large individual speedup does not close an unmet overall target.
 
-### Completion record
+### Phase 1 completion record
 
 | Phase | Source revision / patch | Structural evidence | Correctness logs | Exact release A/B | Status / residual |
 |---|---|---|---|---|---|
@@ -468,3 +477,489 @@ The final source retains known, output-equivalent A/B regressions above 3% and
 the independently reproduced broad-baseline failures. They are recorded as
 follow-up performance/maintenance work rather than hidden by a changed
 benchmark, a weaker ratchet, or a semantic shortcut (**S1.11**, **D8.6.1**).
+
+## 17. Phase 2 — Close the measured hot-path coverage gaps
+
+**Planning date:** 2026-09-16. **Closeout date:** 2026-09-16. **State:**
+implemented; the Phase 2 causal target improved, but the 0.80x QuickJS
+milestone remains unmet. This is an extension of the existing implementation
+plan, not a new semantic or dispatch ruling.
+All constraints in §2 and validation rules in §15 remain in force. In
+particular, **S1.11**, **D2.4.1–D2.4.3**, **D3.3.2v2**, **D5.3.2–D5.3.5**, and
+**D8.4.1v2–D8.4.3v2** govern the work below.
+
+### 17.1 What Phase 1 achieved, and what it did not
+
+The accepted interleaved comparison is 0.680706x candidate/control in geometric
+mean, but 194,782.414 / 212,889.908 ms in total medians: 31.9% less geometric-mean
+time versus only 8.5% less total time. Numeric admission produced approximately
+40x wins on `sum`/`sumfp`, 8–11x on `fib`/`fibfp`, and the complete change improved
+`knucleotide` about 7.1x and `regexredux` about 3.3x. These overlapping effects
+must not be summed or attributed to an individual phase without its own A/B.
+
+The [Phase 1 final matrix](../../test/benchmark/js_mvp/tune12/final.json)
+identifies the elapsed-time priorities:
+
+| Workload | Full-JS execution (ms) | Full JS / QuickJS | Share of full-JS total |
+|---|---:|---:|---:|
+| `text_search` | 96,100.986 | 6.52x | 49.37% |
+| `havlak` | 19,269.777 | 10.35x | 9.90% |
+| `log_pipeline` | 15,138.452 | 3.28x | 7.78% |
+| `three_way_merge` | 14,606.329 | 4.97x | 7.50% |
+
+These four rows account for about 74.5% of elapsed execution time. Halving
+`text_search` alone would reduce the total by about 24.7%; this illustrates
+priority, not an expected optimization result. Separately track large ratio
+outliers such as `primes`, FFT and `microdiff`: total milliseconds and the
+equal-log-weight score answer different questions.
+
+The post-closeout diagnostic used the exact Phase 1 release
+`lambda-tune12-final-1864e219659a`, SHA-256
+`02593fe504c5030a04e536e2afe738da62cb9c9d9253b258e8a23db55e9201c6`.
+Its three-sample, 11-row refresh measured full/MVP ratios of 1.003x for `sum`,
+23.237x for FFT, 19.758x for `primes`, 10.261x for `microdiff`, and 16.884x for
+`regexredux`. This is a diagnostic subset, not a new acceptance matrix or a
+full-population MVP claim. Historical QuickJS ratios cannot be subtracted:
+MVP acceptance used QuickJS 2025-09-13, whereas Phase 1 used 2026-06-04.
+
+### 17.2 Diagnosed costs and limits of the evidence
+
+| Observation | Root cause or remaining question | Phase 2 response |
+|---|---|---|
+| `text_search` searches arrays of character codes; repeated `.length` reads reach `js_get_name_id` → `js_get_reference` → `js_get_key_core` | Host/window checks precede ordinary array handling and can repeat on fallback | Ordinary receiver admission and direct length access, then native numeric-array consumers |
+| Its five-second sample has about 23% self-samples in global/window helpers, 16% in the three generic read entries, and 13% in Number extraction/boxing helpers | Several layers of dispatch and representation work remain per loop iteration | Remove demonstrated work at the corresponding layer; do not treat percentages as independent guaranteed speedups |
+| Havlak's five-second capture attributes about 17% inclusive active-worker samples to `js_intrinsic_note_property_mutation` | Generic writes scan intrinsic-prototype slots even for unrelated ordinary receivers | Receiver-owned relevance metadata or an existing rooted identity facility, not a per-site cache |
+| FFT's `four1` has no native numeric variant; its MIR body contains 155 static call sites | Numeric-local planning remains coupled to a Number-return variant; its typed-array parameter also misses typed-read candidacy | Separate local representation planning from function return ABI and admit guarded parameter receivers |
+| `primes` has guarded typed reads but generic typed stores and no native sieve variant | Narrow entry inference, repeated metadata helpers and incomplete load/arithmetic/store specialization | Extend guarded entry evidence and implement an end-to-end native typed-array loop |
+| Phase 1 median RSS is 45.9 MiB versus QuickJS's 2.22 MiB | RSS alone cannot distinguish live data, retained compiler/runtime state, native allocation or collection cost | Separate allocation/retention and compiler profiles before choosing a fix |
+
+The CPU samples exclude the sleeping main thread from their denominators.
+Havlak's capture includes startup; neither capture is a whole-run profile.
+Static MIR call-site counts are not execution counts. Do not infer that GC,
+RE2 or MIR machine-code generation is the dominant runtime cost from these
+observations. Havlak and JetStream `hash-map` use custom JS collections; their
+remaining costs are not evidence that the built-in Map order-node fix failed.
+
+Diagnostic files currently live under `temp/tune12_analysis/`:
+`focused_current.json`, `text_search.sample`, `havlak.sample`, and
+`text_search.mir`/`fft.mir`/`primes.mir`. They are local scratch, not durable
+acceptance evidence. T12-P2-0 must reproduce/archive the relevant observations
+with commands, hashes, sample windows and calculation method before relying
+on them in the Phase 2 closeout.
+
+The checked Phase 1 items establish their tested slices, not full coverage of
+these loops. In particular, T12-5's array work must not be counted again as
+complete native typed-array stores or native load-to-consumer propagation:
+those are explicit Phase 2 deliverables below. Likewise, a helper fast head
+does not by itself eliminate a caller's safepoint/root preparation.
+
+## 18. Phase 2 work breakdown and ordering
+
+Use `T12-P2-*` identifiers to distinguish these packages from Phase 1's
+`T12-2` numeric work. The checkboxes below preserve the initial plan; §28 is
+the authoritative implementation/closeout record. Archive each integrated
+package separately; a table of combined final effects cannot replace phase
+attribution.
+
+| Package | Deliverable | Dependencies | Main target / protection |
+|---|---|---|---|
+| T12-P2-0 | Exact controls, regression triage and actual-hot-loop census | Phase 1 archive | All 63 rows; current-tree versus archived-release distinction |
+| T12-P2-1 | Ordinary read admission, host rejection and array length | P2-0 | `text_search`; globals, DOM and proxy correctness |
+| T12-P2-2 | Constant-cost rejection of irrelevant intrinsic mutations | P2-0 | `havlak`, class/object writes; prototype invalidation |
+| T12-P2-3 | Native local/loop facts independent of Number return | P2-0 | FFT, `primes`, search loops; `sum`, `fib`, mixed calls |
+| T12-P2-4 | Complete native array/typed-array access pipeline | P2-1, P2-3 | FFT, `primes`, `text_search`; holes, coercion, detach |
+| T12-P2-5 | Effect-bounded guard/length reuse in loops | P2-3, P2-4 | Repeated array loops; aliasing and precise ownership |
+| T12-P2-6 | Measured ordinary-field and callable-entry coverage | P2-1, P2-2; reuse P2-3/4 facts | `havlak`, `microdiff`, `cd`, custom hash maps; `gcbench` |
+| T12-P2-7 | Profile-gated allocation, compilation and RegExp residuals | P2-0; repeat census after P2-1–6 | `hyphen`, `prettier_ast`, `regexredux`, high-RSS rows |
+| T12-P2-8 | Regression resolution and full-population closeout | P2-0–7 | Correctness, both timing metrics, memory and MIR size |
+
+Implement P2-1 and P2-2 first so their runtime-only benefits are measurable
+before compiler changes. Separate P2-3, P2-4 and P2-5 revisions: better
+inference, physical access and guard reuse must not be one opaque patch.
+Within a package, use reviewable substeps rather than an all-or-nothing
+rewrite. Preserve the existing shared helper/emitter ownership boundaries
+(**D1.3v3**, **D8.2.3**).
+
+## 19. T12-P2-0 — Freeze controls and turn observations into contracts
+
+**Primary tools:** the manifest verifier, standard and paired benchmark
+runners from §15, existing `JsOpt` diagnostics, finalized MIR capture and
+platform CPU sampling. Do not introduce another benchmark/profiler framework.
+
+- [ ] Retain the exact Phase 1 final archive and its original evidence unchanged. Build/archive the actual Phase 2 starting tree after correctness checks; record commit plus dirty patch, release configuration, binary hash, QuickJS/MVP identity, modules, power/profile settings and manifest/input hashes. A merged/current build is not interchangeable with the archived Phase 1 binary.
+- [ ] Measure any starting-tree delta against Phase 1 separately. Use the exact new starting release as the causal Phase 2 control; retain Phase 1 as the historical anchor. Store accepted new artifacts under `test/benchmark/js_mvp/tune12/phase2/`, with unique package/revision names; use `temp/` for exploration.
+- [ ] Reproduce the `text_search` and Havlak profiles in execution windows, retaining startup separately. Record thread denominators and inclusive versus self counts. Capture FFT, sieve and search-loop MIR from the same release used for timing.
+- [ ] Record per target: selected function variant, native/boxed locals, property/length calls, typed/ordinary read and store arms, per-iteration metadata calls, root/safepoint work, and the actual admission/refusal reason. Distinguish emission, runtime hit/miss counts and CPU samples.
+- [ ] Recheck Phase 1 regressions with at least 11 interleaved pairs: `nqueens`, `cpstak`, `base64`, `levenshtein`, `pidigits`, `json_gen`, `splay`, `quicksort`, and `paraffins`. Retain uncertain cases as uncertain; three samples do not establish a cause. Reproduce correctness/baseline residues on the actual control rather than inheriting old failure counts.
+- [ ] Freeze target, miss-heavy and neutral controls for each package before timing it. Include Phase 1 wins (`sum`, `sumfp`, `fib`, `fibfp`, `knucleotide`, `regexredux`, `collatz`) and full-runtime strengths (`binarytrees`, `gcbench`).
+
+**Exit:** exact controls are runnable and identified; the full-population
+baseline has valid statuses/output evidence; the hot-loop census and inherited
+regression disposition are archived. A failure, missing timing or unresolved
+crash remains visible and cannot be converted into a survivor-only score.
+
+## 20. T12-P2-1 — Ordinary reads before host/global machinery
+
+**Primary code:** `js_get_name_id`, `js_get_reference`, `js_get_key_core`,
+`js_get_host_dynamic_property` and the array-length branch in
+[js_runtime.cpp](../../lambda/js/js_runtime.cpp);
+`js_is_window_event_global_property` in
+[js_globals.cpp](../../lambda/js/js_globals.cpp); realm/global accessors in
+[js_runtime_state.cpp](../../lambda/js/js_runtime_state.cpp); named access
+lowering in [js_mir_expression_lowering.cpp](../../lambda/js/js_mir_expression_lowering.cpp).
+
+- [ ] Classify impossible host receivers before resolving window/global slots. Begin with representations whose identity cannot be a global/window/host receiver. An ordinary-looking Map shape or a familiar property spelling alone is not that proof; preserve genuine globals, proxies, DOM wrappers and host-backed placeholders.
+- [ ] Factor/reuse a noncoercing ordinary-receiver admission shared by the named fast head and its semantic kernel. On a slow continuation, avoid repeating a completed host probe only when the continuation carries a valid operation-local proof and no intervening effect can invalidate it. Never use a caller-controlled unchecked skip flag.
+- [ ] Add a static-`NameId` ordinary-array `length` head and corresponding MIR plan. Use the existing physical length and storage proof. Content containers, companion overrides or other unsupported representations keep their established path; proxy reads must still execute traps. Do not re-create a key string or convert a canonical name on a successful head.
+- [ ] Read already-published realm/global state without repeated initialization only where construction/epoch/lifetime invariants permit it. Preserve unbound-runtime behavior, lazy initialization, heap replacement and multiple realm identities; retain precise rooted storage (**D5.4.2–D5.4.4**).
+- [ ] Keep an admitted length value native for an admitted numeric consumer through `MirValue`; boxed consumers still receive a valid Item. Guard failure reuses the original receiver/key and executes the semantic operation once (**D2.4**, **D8.4.1v2**).
+
+**Tests:** ordinary/tagged/numeric arrays; empty and sparse arrays; proxy
+arrays; content/companion properties; length mutation and descriptor changes;
+inherited names; live window metrics/event state; global-binding mirrors;
+unbound DOM/native entry; separate runtime/heap lifetimes. Reuse §11's host
+fixtures and exercise shared helpers through both MIR and AST backends.
+
+**Structural exit:** admitted array-length reads perform neither host/global
+lookup nor string-name parsing. Unsupported receivers have one correct
+continuation, with no repeated observable Get. Do not declare the complete
+helper `NO_GC` because its head is cheap: only a separately valid physical leaf
+may have that contract (**D5.3.2**, **D8.4.3v2**).
+
+**Measurement:** runtime-head and MIR-length changes get separate checkpoints.
+Show reduced host/global/name work in `text_search`, then paired release
+improvement; retain miss-heavy host/proxy controls. This package does not
+claim loop-hoisting benefits reserved for P2-5.
+
+## 21. T12-P2-2 — Make intrinsic mutation relevance cheap
+
+**Primary code:** `js_intrinsic_note_property_mutation`,
+`js_intrinsic_note_prototype_mutation`, intrinsic publication/invalidation in
+[js_globals.cpp](../../lambda/js/js_globals.cpp), mutation entry points in
+[js_runtime.cpp](../../lambda/js/js_runtime.cpp), and existing realm-slot
+ownership in [js_runtime_state.cpp](../../lambda/js/js_runtime_state.cpp).
+
+- [ ] Inventory every observer and mutation route before changing the scan: ordinary assignment, define/delete, prototype changes, builtin construction, constructor `prototype` replacement and Object.prototype's effect on inherited array indices. Keep a root-cause fixture for each route affected.
+- [ ] Reuse existing receiver metadata for a constant-cost negative test if it can represent intrinsic relevance. If it cannot, add the smallest runtime-owned identity marker/index with explicit publication, invalidation and teardown; do not add a per-callsite cache or an unrooted object-pointer table. Document why existing metadata is insufficient before adding a field.
+- [ ] Mark/register actual intrinsic identities when they are published, and dispatch relevant mutations only to the affected existing invalidation logic. Account for an identity shared by multiple intrinsic roles; constructor names, user-visible `__is_proto__` properties and ordinary class tags are not identity proofs.
+- [ ] Preserve bootstrap suppression without suppressing later user mutation. Preserve Object.prototype-driven array invalidation, constructor replacement, lazy intrinsic creation, realm separation and heap/reset epochs. Newly published and replaced identities must not leave stale positive or false-negative membership.
+- [ ] Converge all mutation consumers on the same classifier; remove the superseded class-wide scan from ordinary unrelated writes. Keep metadata precisely owned and do not add hot-path locks/atomics (**D5.3.3–D5.3.5**, **D5.4.4**, **D8.4.1v2**).
+
+**Tests:** mutation of each affected intrinsic category versus unrelated
+instances, Object.prototype numeric accessors, Array.prototype iterator
+changes, constructor prototype replacement, delete/redefine, repeated lazy
+initialization, multiple realms and forced GC/heap replacement. Inherited
+array behavior and builtin protocol guards must observe the mutation.
+
+**Exit:** an unrelated ordinary write performs no intrinsic-class traversal
+and no realm-slot scan. Diagnostic operation counts stay independent of the
+number of initialized intrinsic classes; real relevant mutations still
+invalidate correctly. Confirm a paired Havlak/class-write win and resample
+the old scan; do not attribute every realm-slot sample to this function.
+
+## 22. T12-P2-3 — Native locals without a Number-return requirement
+
+**Primary code:** `jm_infer_indexed_node`, numeric return analysis and
+`jm_populate_native_number_binding_facts` in
+[js_mir_function_collection_class_inference.cpp](../../lambda/js/js_mir_function_collection_class_inference.cpp);
+eligibility in [js_mir_module_batch_lowering.cpp](../../lambda/js/js_mir_module_batch_lowering.cpp);
+function/statement lowering and existing `FnVariantAnalysis`/`MirValue` carriers.
+
+- [ ] Separate entry candidates, body-local Number facts, result/completion facts and ABI selection. A boxed or `undefined` result must not prevent independently proven local arithmetic from using F64. Keep generic parameter types unchanged (**D3.3.2v2**); do not just relax the native-return check and reuse an incompatible ABI.
+- [ ] Extend existing binding-identity dataflow through initializers, aliases, assignments, branches and loop joins. Carry integer-range facts only where separately proved; JS Number induction is not an unchecked machine-integer contract. Model zero iterations, break/continue, rebinding, mixed writes and exceptional exits conservatively.
+- [ ] Broaden static candidate evidence for parameters used with numeric locals/expressions, including the sieve's limit comparisons. Arithmetic syntax, a literal callsite or the source name may select a guarded candidate but never authorize coercion or become a generic Number proof. Bound propagation/variant growth and retain a diagnostic refusal reason.
+- [ ] First support numeric local regions in existing boxed bodies and simple guarded entries with boxed object/array parameters plus native scalar parameters. Add an explicit supported result route for `undefined`/boxed completion only where existing entry conventions can carry it; preserve strict/sloppy receiver, stack-limit, exception and handler behavior.
+- [ ] Reuse `MirNumericOpPlan` for arithmetic/comparisons and transport native values across admitted direct edges. Materialize valid Items at genuine generic consumers or merges. An unproved operation uses its complete semantic helper with already evaluated operands; no mid-function restart or replay is allowed.
+- [ ] Apply definite initialization and shared-emitter root liveness to the selected representation, not the generic source variable. Reference parameters and values live on error/slow edges remain rooted even when numeric locals need no homes (**D2.4**, **D5.3.2–D5.3.5**).
+
+**Tests:** a void-return mutating numeric loop, a boxed-return function with a
+numeric inner loop, local-dependent parameter comparisons, branch/loop type
+changes, fractional/negative/NaN/infinite limits, signed zero, overflow and
+large Numbers, string `+`, BigInt/Symbol/coercing arguments, omitted/extra
+arguments, recursion, throw/finally and forced-GC slow exits. Preserve §7's
+negative numeric-wrapper probes.
+
+**Structural exit:** benchmark-equivalent FFT/sieve/search numeric regions
+show native induction/arithmetic where proven; a nonnumeric function result
+is not the refusal reason for those locals. At this checkpoint unresolved
+element reads may still prevent native downstream arithmetic; record those
+edges for P2-4 rather than claiming the whole loop is specialized. Retain
+`sum`/`fib`'s established native bodies and bound MIR/compile-time growth.
+
+## 23. T12-P2-4 — Native load, arithmetic and store as one pipeline
+
+**Primary code:** `JsMirReference`, `jm_fixed_typed_array_receiver_kind`,
+`jm_emit_fixed_typed_array_read`, `jm_emit_packed_array_read` and store lowering
+in [js_mir_expression_lowering.cpp](../../lambda/js/js_mir_expression_lowering.cpp);
+typed view/storage helpers in [js_typed_array.cpp](../../lambda/js/js_typed_array.cpp);
+existing owned element stores and shared emitter physical operations.
+
+### 23.1 Receiver admission and read carriers
+
+- [ ] Admit repeated local/parameter array accesses without requiring a `new TypedArray` initializer. Static call/body facts may select a bounded guard plan; actual representation, brand and storage determine the hit. Wrong receivers retain one generic continuation. Begin with the existing tagged/ArrayNum/Uint8/Float64 cases, not an unbounded receiver-type dispatch chain.
+- [ ] Reuse one typed-view validation contract for element kind, attached fixed buffer, offset, current bounds and data. Remove redundant per-access type/length/data helper layering by factoring the existing validation or sharing physical loads after a valid guard; do not copy private typed-array layout logic into a second semantic implementation.
+- [ ] Preserve the loaded carrier through the numeric consumer: native F64 from Float64/ArrayNum and appropriately extended Uint8 values. A tagged-array load needs an actual Number guard before numeric arithmetic. A non-Number hit or property miss must preserve its original value and JS coercion order; never re-read an accessor to recover a native value.
+- [ ] Represent mixed hit/miss results explicitly with `MirValue` and existing merge/consumer machinery. Do not box immediately on every successful native read just because the slow arm returns Item. At a genuine boxed boundary, use the established encoder/home ownership (**D2.4.1–D2.4.3**).
+
+### 23.2 Stores and observable ordering
+
+- [ ] Add real existing-element Uint8Array and Float64Array store arms, rather than feeding them through `js_elements_set_int_completion`'s ordinary-array miss. Start with already-proven Number RHS values and attached fixed, nonshared storage. Reuse existing conversion policy: Uint8 modulo conversion is not clamping or an unchecked C integer cast; Float64 preserves ±0, NaN and infinities.
+- [ ] Preserve receiver/key/RHS evaluation, key conversion and typed-array numeric conversion in their ECMAScript order. Coercing RHS/key cases use the full helper; reacquire storage after any potentially detaching/resizing effect. Do not return early on an invalid index if doing so skips required conversion effects.
+- [ ] Cover numeric `-0` versus string `"-0"`, fractional/nonfinite/out-of-range keys, view offsets, wrong element brands and incompatible values. Shared/resizable/growable or other unproved buffers remain explicit fallbacks; growth and representation-changing ordinary stores retain their owned storage primitive.
+- [ ] Converge scalar read/write validation with live helper consumers where physical work is identical. Do not introduce a private array format, public ABI, raw pointer surviving a `MAY_GC` call, or separate JS GC policy (**D5.3**, **D8.2.3**).
+
+**Tests:** extend §10.4's semantic cases with parameter-supplied typed arrays,
+aliases, local rebinding, mixed tagged elements, detached/wrong-brand misses,
+Uint8 wraparound/NaN/infinity/fraction conversion, Float64 special values,
+descriptor/prototype changes and side-effect ordering. Add `.js`/expected
+`.txt` and MIR fixtures for the complete read–compute–write shape.
+
+**Structural exit:** the admitted FFT loop has native Float64 loads,
+arithmetic and stores through a parameter; the admitted prime-sieve inner
+store no longer calls generic `js_set`/property-key conversion. Search-loop
+Number consumers avoid repeated extraction/boxing on their admitted path.
+Assertions scope the hot arm, leaving legitimate fallback helpers intact.
+Capture actual canonical benchmark MIR as well as small fixtures; runtime
+hit/refusal evidence must explain any remaining generic hot edge.
+
+**Measurement:** paired FFT, `primes`, `text_search`, `matmul`,
+`navier_stokes` and ordinary-array controls. Keep parameter admission,
+carrier propagation and typed stores as separate measured substeps where
+possible; do not claim a small load-only fixture closes this package.
+
+## 24. T12-P2-5 — Reuse guards only within proved effect boundaries
+
+**Primary code:** existing function/loop effect analysis, reference/access
+plans, statement lowering and shared emitter root/liveness facilities.
+
+- [ ] Identify repeated pure receiver/length/storage predicates within an existing control-flow region. Start with simple synchronous loops whose receiver identity is stable and whose admitted body has no user callback, relevant alias mutation, storage growth, detach/resize or `MAY_GC` borrow boundary.
+- [ ] Separate reusable representation/brand facts from mutable length, backing storage and element-value facts. A stable binding alone proves none of the latter. Preserve per-access bounds and tagged-element checks unless an explicit range/value proof subsumes them; arbitrary `a[i]` still needs its normal semantics.
+- [ ] Select a guarded loop sibling before its first effect, using already evaluated operands; failure enters the unchanged generic loop from the same initial state. Bound duplication and reuse existing planning. No mid-loop restart/deoptimization or replay of earlier stores/calls is introduced.
+- [ ] Invalidate/reacquire facts at every relevant mutation, call or exceptional edge; unsupported loops retain per-access guards. Raw backing pointers never survive an invalidating boundary. If safe reacquisition cannot be expressed without replay, refuse that region rather than inventing a continuation engine.
+- [ ] Let the shared emitter remove now-unneeded root stores only from verified effect/liveness facts. General helpers retain their real GC/completion contracts even when a particular hit is nonallocating (**D5.3.2–D5.3.5**, **D8.4.3v2**).
+
+**Tests:** alias mutation of length/storage, callbacks/getters between accesses,
+representation transitions, prototype changes, buffer detachment, collection
+and throwing slow paths, nested loops and early exits. Prove both the reused
+guard case and refusal/invalidation cases with structural and behavior tests.
+
+**Exit:** admitted loops perform demonstrably fewer repeated guards/metadata
+calls, and paired timings beat the P2-4 checkpoint without new miss-heavy or
+MIR-size regressions. If a region's proof cannot be established, name that
+exact residual; do not mark it optimized because its per-access path works.
+
+## 25. T12-P2-6 — Object fields and calls selected by actual evidence
+
+**Primary code:** `js_named_fast_lookup`, property kernels, predicted-field
+planning/`MirFieldAccessPlan`, callable finalization, `js_call_entry_generic`
+and the direct body/native entry selection already described in §11–§12.
+
+- [ ] Resample Havlak, `microdiff`, `cd`, custom hash maps and relevant text pipelines after P2-1/2. Separate own-field lookup, prototype/method lookup, mutation, actual call setup and allocation. Inclusive samples below a call wrapper do not establish that the wrapper itself consumes that time.
+- [ ] Extend immutable literal/constructor shape predictions only for measured missing cases. Reuse shared ordinary-slot admission and owned-field storage; preserve type transitions, deletion, descriptors, proxy/host state and inherited reads. Mutable per-site receiver/key caches remain prohibited (**D8.4.1v2**).
+- [ ] Carry usable field representations into existing numeric/access plans rather than loading a field directly only to box/unbox it immediately. Calls or writes that can change the shape/value end the relevant proof.
+- [ ] For measured call-entry overhead, use existing finalized callable capabilities to choose the smallest valid entry. Preserve receiver binding, module/realm, arguments, super/private/new.target, recursion limits and explicit completions; unproved activation requirements keep the existing dynamic entry (**D6.2.2v2**, **D8.4.2v2–D8.4.3v2**).
+- [ ] Preserve Get-before-arguments ordering and guard the selected callable, not a later property reread. Reuse caller-owned arguments only under the existing rooting contract. Do not duplicate the call kernel or count an already-existing direct call as a Phase 2 improvement.
+
+**Tests/exit:** reuse §11–§12's adversarial field/method cases, including a
+getter returning a different function, an argument replacing a method,
+rebound constructors, cross-realm callees and forced-GC retained values.
+Each accepted change needs a measured hot site, simpler finalized MIR or
+runtime operation counts, and an isolated paired win. Protect `binarytrees`
+and `gcbench`; stop extending a prediction when guard cost outweighs its hits.
+
+## 26. T12-P2-7 — Profile allocation, compilation and built-in residuals
+
+This package requires a census, not speculative changes to every subsystem.
+Implementation is limited to diagnosed causes in the existing runtime and
+compiler; a missing diagnosis is reported as open, not replaced by GC tuning,
+vendor patches or a new backend.
+
+- [ ] Split execution, parse/build/lower/JIT, startup/module setup and teardown where the current measurement facilities permit. End-to-end minus execution is only aggregate nonexecution time, not automatically compilation. Record source size, MIR instruction/variant counts and compiler allocation beside timings.
+- [ ] For `hyphen`, `prettier_ast`, `microdiff`, Havlak and other high-RSS rows, distinguish live guest data, side roots/scalar homes, native payloads, retained AST/MIR/cache state and transient high-water marks. Measure GC CPU/collection counts before treating GC as the bottleneck; preserve `gcbench` as a control.
+- [ ] Where profiles confirm repeated whole-function analysis scans or unnecessary duplicate variants, reuse the existing AstIndex/function-owned transient analysis and bounded variant policy. Do not create a second persistent semantic fact authority or remove required fallback bodies just to reduce MIR size (**D2.4.1**, **D3.3.2v2**, **D8.6.1**).
+- [ ] Where allocation/retention is demonstrated, shorten the actual owner lifetime or remove an unnecessary intermediate using existing owned storage. Verify normal/error/teardown paths and long-lived roots. Do not tune collection thresholds merely to improve a short benchmark, retain unbounded tombstones/cache data silently, or restore native-stack scanning (**D5.3**).
+- [ ] Profile `regexredux` separately: builtin-protocol admission/misses, matcher routing, UTF-16 conversion, exec-result materialization, replacement output and allocation. Extend §13's existing bulk path only for an identified cost, retaining lastIndex, custom exec/accessor, capture and replacement semantics. Do not edit RE2 or whitelist benchmark patterns.
+- [ ] Record a disposition for each investigated category: diagnosed and fixed with A/B, disproved by measurements, or a precisely bounded unresolved follow-up. Scope a new implementation substep before changing code; absence of evidence does not authorize a runtime redesign.
+
+**Exit:** archived profiles distinguish execution from compilation and live
+memory from retained capacity. Every landed optimization has its own
+correctness/ownership test and paired evidence; unresolved categories remain
+visible in the final performance assessment. A lower RSS number alone is not
+proof of faster execution or correct lifetime management.
+
+## 27. T12-P2-8 — Acceptance, regression resolution and closeout
+
+### 27.1 Measurement contract
+
+Apply §15 with new Phase 2 artifact names; never overwrite Phase 1 records.
+Use the existing paired runner's raw samples and 95% bootstrap statistics,
+with at least 11 alternating pairs for package targets, inherited regressions
+and new suspicious rows. Increase samples only to resolve declared
+uncertainty; do not rerun until a favorable median appears. For expensive
+rows, budget the longer run rather than silently changing input size or
+substituting a synthetic loop for canonical acceptance.
+
+Archive each package candidate, compare it both to its immediate predecessor
+for attribution and to the fixed Phase 2 control for cumulative drift, and
+retain normalized output equality. Diagnostic counters and sampling are off
+in timing runs. Short-row repetition diagnostics remain outside the 63-row
+metric; a partial MVP refresh remains explicitly a subset.
+
+The final run includes all 63 canonical rows, at least three samples per
+engine through the guarded standard workflow, and full-population interleaved
+control/candidate evidence. Recheck material regressions with the stronger
+sampling above. Report both geometric mean and total medians against the
+same recorded binaries, plus execution/end-to-end timing, available RSS,
+compiler costs and MIR growth. The 57-row memory runner's unsupported
+JetStream cells remain unavailable, not fabricated.
+
+### 27.2 Correctness and structural gates
+
+- [ ] Add or extend focused `test/js` cases with expected `.txt` output and finalized MIR `.js`/`.mir-check` fixtures for each new admission and miss. Assert hot-arm helper absence/presence by semantic symbols, not register numbers, pointer values or a whole-module ban on legitimate fallback calls (**D8.6.2**).
+- [ ] Run the JS optimization and MIR-emission suites, effect checker, relevant runtime/DOM tests, forced-GC poisoning corpus, MIR ratchet, Lambda baseline and Test262 using current populations. Changes to shared helpers additionally receive AST-backend coverage; shared emitter changes protect typed and untyped Lambda. If Radiant code changes, run its required baseline too.
+- [ ] Fix every new failure/crash/timeout at its cause. Reproduce inherited failures on the exact control and report them distinctly; do not weaken harnesses, skip failing Test262 entries, raise ratchet budgets to absorb accidental expansion, or claim a green baseline with known failures.
+- [ ] Audit new metadata fields and access plans for realm/heap lifetime, publication, completion handling and precise ownership. Preserve original evaluation order and one semantic continuation, with no mutable per-site ICs or code-baked context pointers.
+- [ ] Resolve confirmed Phase 2 regressions and re-evaluate the inherited Phase 1 list. A reproducible regression above 3% triggers root-cause investigation; smaller systematic regressions also count. Use available isolated revisions to attribute causes; do not invent Phase 1 attribution where no archive exists.
+
+### 27.3 Completion policy and record
+
+**Implementation complete** means P2-0–6's explicit structural/correctness
+deliverables are demonstrated in actual target paths, P2-7's census and
+diagnosed substeps have honest dispositions, and P2-8's evidence is complete.
+A checked helper fixture does not close an unoptimized canonical hot loop.
+Any deliberately excluded case must identify its safe fallback and remaining
+cost; an unresolved promised deliverable stays unchecked.
+
+**Tuning successful** additionally requires credible full-population
+improvement in both geometric-mean execution time and total-median time,
+no unresolved material performance regressions, and no new correctness
+failures. An inherited regression left unresolved remains a stated obstacle
+to the overall Tune12 tuning-success claim, even if Phase 2 improves its own
+control. Memory/compiler regressions are reported and investigated rather
+than hidden behind runtime gains.
+
+**Milestone reached** still means a complete fresh full-JS/QuickJS geometric
+mean at or below 0.80x (§1). Do not promise this from the sample percentages,
+MVP ratios or a twofold `text_search` scenario. If unmet, publish the actual
+ratio and next dominant paths without changing the denominator or relabeling
+implementation completion as performance acceptance.
+
+Populate the record with links to durable evidence, not estimated gains:
+
+| Package | Source / exact binary | Hot-path change and residual | Correctness / GC / MIR | Paired target, miss and control results | Status |
+|---|---|---|---|---|---|
+| T12-P2-0 | P2 control, SHA 4f1582…ef972 | Exact control and census | Source hashes/output equality archived | [63 x 11 final pairs](../../test/benchmark/js_mvp/tune12/phase2/p2-final-full-paired-release.json) | Complete |
+| T12-P2-1 | js_runtime.cpp | Array length/host rejection | JsOpt head test; semantic fallback retained | Cumulative final matrix | Complete |
+| T12-P2-2 | js_globals.cpp | O(1) mutation relevance | Intrinsic mutation expected-output case | Cumulative Havlak 0.7933x | Complete |
+| T12-P2-3 | JS MIR analysis/lowering | Numeric locals with Item ABI | JsOpt boxed/void-return case | [r1](../../test/benchmark/js_mvp/tune12/phase2/p2-3-numeric-r1.json), final | Complete |
+| T12-P2-4 | JS MIR typed access/runtime | Guarded typed load/compute/store | JsOpt + typed pipeline expected-output case | [r2](../../test/benchmark/js_mvp/tune12/phase2/p2-4-fft-r2.json), FFT 0.2337x | Complete |
+| T12-P2-5 | MIR invariant metadata | Immutable element kind only | Existing bounds/data fallbacks remain | [r4](../../test/benchmark/js_mvp/tune12/phase2/p2-5-loop-kind-r4.json), uncertain isolated result | Complete, bounded |
+| T12-P2-6 | Existing field/call plans | Safe refusal for mutable field/call sites | No mutable IC introduced | Final Havlak/control evidence | Complete by refusal |
+| T12-P2-7 | Final release census | RSS/GC/cache diagnosis only | No unsupported GC change | [final RSS](../../test/benchmark/js_mvp/tune12/phase2/p2-7-text-memory-final.json) | Complete, residual open |
+| T12-P2-8 | Makefile/tests/evidence | Release integrity and full closeout | Baseline 5,593/5,593; full Test262 40,263/40,263 | [standard snapshot](../../test/benchmark/js_mvp/tune12/phase2/Overall_Phase2.md) | Complete |
+
+## 28. Phase 2 implementation closeout
+
+Phase 2 is implemented under **S1.11**, **D2.4**, **D3.3.2v2**, **D5.3** and
+**D8.4.1v2–D8.4.3v2**. No formal semantic or design ruling changed: this
+section records implementation and evidence, while §§17–27 preserve the
+planning contract.
+
+### 28.1 Exact controls, release integrity and final causal result
+
+The Phase 2 starting release is
+test/benchmark/exe/lambda-tune12-p2-control, SHA-256
+4f158287b8f342ef703b946a47507d18dcfedf89748eaaf50cc9c9bc30aef972,
+from commit 763269c4fbc6df4ccecd5e7a0991dcebc20f0a4a. The full causal
+candidate is lambda-tune12-p2-final-release, SHA-256
+f6d61644742644d792ff7fd83cb5bdaac7d57ada3ca903740638b297ec739e5c;
+the clean standard-workflow release is lambda-tune12-p2-final-standard,
+SHA-256 467920b3a9180623c2512dfab99d8327098c2864287dcfed934af9fea25fb957.
+
+The first final-pair attempt exposed a build-system root cause: debug and
+release configurations both emit lambda.exe; unlike the debug target, the
+release recipe did not force a relink. A newer debug host could therefore
+satisfy the release target timestamp. build-release-compile now removes that
+shared target before invoking the release configuration. The repaired path was
+exercised after a debug baseline and rejected the debug marker before the
+standard timing run. This is necessary for **S1.11**, not a benchmark
+optimization.
+
+[The paired artifact](../../test/benchmark/js_mvp/tune12/phase2/p2-final-full-paired-release.json)
+has 63 canonical JS rows, 11 alternating pairs per row, AC-power metadata,
+source-tree hashes, 10,000-resample paired-bootstrap intervals and equal
+normalized output in all 693 pairs. Its candidate/control geometric mean is
+**0.562698x**. Sums of the per-row medians are 211,935.173 ms control and
+140,040.846 ms candidate, or **0.660772x**. Phase 2 implementation is
+complete and both aggregate metrics improved. The stricter tuning-success
+claim remains unearned: hyphen (1.0562x) and crypto_sha1 (1.0704x) are
+investigated, visible residual regressions rather than hidden exclusions.
+
+### 28.2 Implemented packages and deliberate residuals
+
+| Package | Implemented target path | Evidence and remaining limit | Status |
+|---|---|---|---|
+| T12-P2-0 | Archived starting/final release controls; full workload/source identity, power and output evidence | 63 x 11 causal matrix; inherited regression controls all retained | Complete |
+| T12-P2-1 | Early non-MAP host rejection and no-GC own array length head in js_get_key_core/js_get_name_id | JsOpt ArrayLengthNameUsesOwnNoGcHead; unsupported/proxy/companion cases keep one semantic continuation | Complete |
+| T12-P2-2 | O(1) intrinsic-prototype relevance classifier with class tag then rooted identity fallback | Object/Array/Object.prototype and constructor-prototype mutation tests; unrelated writes no longer scan intrinsic slots | Complete |
+| T12-P2-3 | Local numeric facts now survive boxed/void returns; native Item return ABI carries proven F64/I64 locals safely | NumericLocalFactsSurviveBoxedAndVoidReturns; r1 checkpoint and cumulative sum, fib, FFT and primes results | Complete |
+| T12-P2-4 | Guarded Uint8/Float64 stores plus parameter receiver facts; raw typed loads propagate to numeric consumers | P2 fixtures exercise correct and wrong-receiver continuations; FFT 0.2337x, primes 0.0565x cumulative | Complete |
+| T12-P2-5 | Loop invariant pass hoists only immutable typed-element-kind observation | Length/data remain per access because detach/resize can change them; r4 short-row result is explicitly uncertain, final matrix is cumulative | Complete, bounded |
+| T12-P2-6 | Resampled field/call sites and kept existing guarded generic paths where shapes/capabilities are mutable | Havlak uses constructor-owned mutable fields and dynamic method capability; no unsafe mutable IC or duplicated call kernel was added | Complete by evidence-based refusal |
+| T12-P2-7 | Release RSS and GC/cache census, with no speculative collector change | hyphen one 0.767 ms collection and 118,507 B retained source do not explain its 1.45 GiB RSS | Complete, residual open |
+| T12-P2-8 | Full release gates, paired and standard snapshots, MIR check update and baseline-build repair | Details in §§28.3–28.5 and phase2 evidence directory | Complete |
+
+The intermediate checkpoints remain durable:
+[P2-3 numeric r1](../../test/benchmark/js_mvp/tune12/phase2/p2-3-numeric-r1.json),
+[P2-4 FFT r2](../../test/benchmark/js_mvp/tune12/phase2/p2-4-fft-r2.json),
+[P2-4 consumer r3](../../test/benchmark/js_mvp/tune12/phase2/p2-4-load-consumer-r3.json),
+and [P2-5 kind r4](../../test/benchmark/js_mvp/tune12/phase2/p2-5-loop-kind-r4.json).
+They are package attribution aids, not substitutes for the final matrix.
+
+### 28.3 Final release/QuickJS position
+
+The guarded standard workflow rebuilt release, verified no profiling symbols,
+ran Test262 baseline 40,261/40,261, then collected three samples on all 63
+LambdaJS/QuickJS rows. Its complete
+[JSON](../../test/benchmark/js_mvp/tune12/phase2/final_phase2.json) and
+[report](../../test/benchmark/js_mvp/tune12/phase2/Overall_Phase2.md) show
+LambdaJS/QuickJS **2.936473x** geometric mean, 140,572.512 / 42,451.320 ms
+total medians, and 11 LambdaJS wins. This improves Phase 1's 3.481106x but
+does not meet the 0.80x milestone.
+
+The largest remaining gaps are string/Unicode and dynamic-object costs:
+hyphen, microdiff, revcomp, nqueens, towers, richards and deltablue. The four
+original elapsed-time priorities all improved against the Phase 2 control:
+text_search 0.5118x (one-sided 95% upper 0.5127), Havlak 0.7933x (0.7951),
+three_way_merge 0.8634x (0.8681) and log_pipeline 0.9331x (0.9439). hyphen
+remains a visible 1.0562x causal residual; it is not relabeled as a win.
+
+### 28.4 Memory and compiler/GC disposition
+
+The final release RSS census is
+[p2-7-text-memory-final.json](../../test/benchmark/js_mvp/tune12/phase2/p2-7-text-memory-final.json):
+microdiff 151 MiB, hyphen 1.45 GiB and prettier_ast 1.36 GiB, unchanged from
+the prior checkpoint. The 57-row memory runner still lacks its unsupported
+JetStream cells; they are not fabricated. A diagnostic LAMBDA_GC_STATS=1
+Hyphen run recorded one 0.767 ms collection and 118,507 B retained script
+source. The data do not establish GC CPU, compiler-cache retention or a
+specific owner as the high-RSS cause, so Phase 2 intentionally makes no
+threshold, cache or GC-scanning change (**D5.3**).
+
+### 28.5 Correctness, structural and release gates
+
+The final source passes make test-lambda-baseline, 5,593/5,593; this includes
+31/31 JS MIR-emission and 4/4 JS Regex-router tests. The initial baseline
+failure updated shared_loop_effects.mir-check from a stale boxed js_add
+expectation to the actual proven native dadd while retaining the required
+boxed bitwise coercion. The missing Regex-router executable was a focused
+baseline build-list omission; its project is now built by
+LAMBDA_BASELINE_TEST_PROJECTS, rather than omitted from the runner.
+
+Additional gates passed: JS optimizer 31/31; forced-GC/MIR corpus 189/189;
+MIR ratchet 19/19; exception-catalog and callable-catalog censuses clean; and
+full Test262 40,263/40,263 fully passing with zero baseline regressions (two
+pre-existing baseline improvements). The new JS expected-output cases cover
+intrinsic mutation and typed read/compute/write fallback. These guards preserve
+evaluation order, the one generic continuation, exact roots and error
+propagation required by **D2.4**, **D5.3** and **D8.4.1v2–D8.4.3v2**.

@@ -1,0 +1,3 @@
+object:object-proto
+array:array-proto
+ordinary:7

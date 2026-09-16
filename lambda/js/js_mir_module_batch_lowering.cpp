@@ -2774,6 +2774,9 @@ static int js_mir_analyze_and_plan(void* opaque) {
         // `let x = f(...)` to propagate f's return type into x's variable type.
         // Native specialization cannot use duplicate MIR param names, and arrow
         // block bodies still need boxed statement-completion return handling.
+        bool numeric_return = JM_JS_FACT(fc, native_numeric_proven) &&
+            (JM_JS_FACT(fc, return_type) == LMD_TYPE_INT ||
+             JM_JS_FACT(fc, return_type) == LMD_TYPE_FLOAT);
         bool eligible = (JM_CAPTURE_COUNT(fc) == 0 && JM_PARAM_COUNT(fc) > 0 &&
                          !JM_JS_FACT(fc, uses_arguments) &&
                          !JM_JS_FACT(fc, has_direct_eval) &&
@@ -2783,8 +2786,8 @@ static int js_mir_analyze_and_plan(void* opaque) {
                          !(fc->node->is_arrow && fc->node->body &&
                            fc->node->body->node_type == AST_NODE_BLOCK) &&
                          !JM_JS_FACT(fc, has_non_simple_params) &&
-                         JM_JS_FACT(fc, native_numeric_proven) &&
-                         (JM_JS_FACT(fc, return_type) == LMD_TYPE_INT || JM_JS_FACT(fc, return_type) == LMD_TYPE_FLOAT));
+                         (numeric_return || JM_JS_FACT(fc,
+                             has_numeric_local_facts)));
         bool has_native_param = false;
         if (eligible) {
             for (int j = 0; j < JM_PARAM_COUNT(fc); j++) {
@@ -2801,11 +2804,14 @@ static int js_mir_analyze_and_plan(void* opaque) {
         }
         if (!has_native_param) eligible = false;
         JM_JS_FACT(fc, native_return_kind) = !eligible ? NATIVE_RETURN_NONE :
-            JM_JS_FACT(fc, return_type) == LMD_TYPE_FLOAT ? NATIVE_RETURN_FLOAT : NATIVE_RETURN_INT;
+            numeric_return ? (JM_JS_FACT(fc, return_type) == LMD_TYPE_FLOAT
+                ? NATIVE_RETURN_FLOAT : NATIVE_RETURN_INT) : NATIVE_RETURN_ITEM;
         if (eligible) {
-            log_debug("js-mir P1/P4: %s eligible for native version (params: %d, ret: %s)",
+            log_debug("js-mir T12-P2-3: %s eligible for native version (params: %d, ret: %s)",
                 fc->name, JM_PARAM_COUNT(fc),
-                JM_JS_FACT(fc, return_type) == LMD_TYPE_INT ? "INT" : "FLOAT");
+                JM_JS_FACT(fc, native_return_kind) == NATIVE_RETURN_ITEM ?
+                    "ITEM" : JM_JS_FACT(fc, return_type) == LMD_TYPE_INT ?
+                        "INT" : "FLOAT");
         }
     }
 
@@ -2885,15 +2891,19 @@ static int js_mir_analyze_and_plan(void* opaque) {
             }
         }
 
+        jm_populate_numeric_binding_facts(mt, fc, body);
+
         if (JM_JS_FACT(fc, native_return_kind) != NATIVE_RETURN_NONE) {
             FnVariantAnalysis* native =
                 &analysis->variants[analysis->variant_count++];
             memset(native, 0, sizeof(*native));
             native->entry = {FN_ENTRY_NATIVE_BODY, true, false, false, false};
             native->effects = body->effects;
-            native->result.normal = {JM_JS_FACT(fc, return_type),
-                JM_JS_FACT(fc, native_return_kind) == NATIVE_RETURN_FLOAT
-                    ? VALUE_REP_F64 : VALUE_REP_I64,
+            native->result.normal = {JM_JS_FACT(fc, native_return_kind) ==
+                    NATIVE_RETURN_ITEM ? LMD_TYPE_ANY : JM_JS_FACT(fc, return_type),
+                JM_JS_FACT(fc, native_return_kind) == NATIVE_RETURN_ITEM
+                    ? VALUE_REP_ITEM : JM_JS_FACT(fc, native_return_kind) ==
+                        NATIVE_RETURN_FLOAT ? VALUE_REP_F64 : VALUE_REP_I64,
                 SCALAR_RETURN_NONE};
             // native normal and error lanes use Lambda's published return ABI.
             native->result.shape = em_return_shape(true, true, SCALAR_RETURN_NONE);
@@ -2912,7 +2922,6 @@ static int js_mir_analyze_and_plan(void* opaque) {
                     native->params[p] = {param_type, rep, 0};
                 }
             }
-            jm_populate_native_number_binding_facts(mt, fc, native);
         }
         if ((fc->node->is_async || fc->node->is_generator) &&
                 analysis->variant_count < 4) {

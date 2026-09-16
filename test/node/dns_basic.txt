@@ -1,2 +1,0 @@
-lookupSync type: string
-lookupSync is string: true

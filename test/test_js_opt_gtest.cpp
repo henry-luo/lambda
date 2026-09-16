@@ -1014,12 +1014,12 @@ TEST(JsOpt, Result29TypedArrayUsesSharedReferenceSemantics) {
 
     char* mir = read_fixture_mir("result29_typed_array_guard");
     ASSERT_NE(mir, nullptr);
-    // D1.3: typed-array elements share the generic property kernels; the
-    // runtime, rather than a duplicated compiler lane, owns their semantics.
+    // D1.3: the guarded setter delegates typed-index semantics to one runtime
+    // leaf; a non-typed receiver still uses the shared generic Set fallback.
     EXPECT_NE(strstr(mir, "js_get_reference"), nullptr);
     EXPECT_NE(strstr(mir, "js_set"), nullptr);
+    EXPECT_NE(strstr(mir, "js_typed_array_set_numeric_key"), nullptr);
     EXPECT_EQ(strstr(mir, "js_typed_array_matches_type"), nullptr);
-    EXPECT_EQ(strstr(mir, "js_typed_array_set"), nullptr);
     free(mir);
     expect_trace_off_same("result29_typed_array_guard", source, output);
 }
@@ -1149,6 +1149,153 @@ TEST(JsOpt, NamedLoadStoreUsesTierBPath) {
     EXPECT_NE(strstr(mir, "js_set_name_id"), nullptr);
     free(mir);
     expect_trace_off_same("named_fast_path", source, output);
+}
+
+TEST(JsOpt, ArrayLengthNameUsesOwnNoGcHead) {
+    const char* source =
+        "function direct(values) { return values.length; }\n"
+        "function computed(values) { return values['length']; }\n"
+        "function content() { return arguments.length; }\n"
+        "if (direct([1, 2, 3]) !== 3 || computed([4, 5]) !== 2 ||\n"
+        "    content(6, 7, 8, 9) !== 4) throw new Error('array length changed');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("array_length_name_head", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_NAMED_FAST_HIT][1], 0u);
+
+    char* mir = read_fixture_mir("array_length_name_head");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "call\tjs_get_name_id"), nullptr);
+    EXPECT_NE(strstr(mir, "call\tjs_get_reference"), nullptr);
+    free(mir);
+    expect_trace_off_same("array_length_name_head", source, output);
+}
+
+TEST(JsOpt, NumericLocalFactsSurviveBoxedAndVoidReturns) {
+    const char* source =
+        "function boxed(limit) {\n"
+        "  let total = 0;\n"
+        "  for (let i = 0; i < limit; i++) total += i * 0.5;\n"
+        "  return { total: total };\n"
+        "}\n"
+        "function voidLoop(limit) {\n"
+        "  let total = 0;\n"
+        "  for (let i = 0; i < limit; i++) total += i * 0.5;\n"
+        "  console.log('void:' + total);\n"
+        "}\n"
+        "function mixed(flag) {\n"
+        "  let total = 0;\n"
+        "  if (flag) total = 'x';\n"
+        "  total += 1;\n"
+        "  return total;\n"
+        "}\n"
+        "console.log('boxed:' + boxed(4).total);\n"
+        "voidLoop(4);\n"
+        "console.log('mixed:' + mixed(false) + ',' + mixed(true));\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("numeric_locals_boxed_void", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_NE(strstr(output, "boxed:3"), nullptr) << output;
+    EXPECT_NE(strstr(output, "void:3"), nullptr) << output;
+    EXPECT_NE(strstr(output, "mixed:1,x1"), nullptr) << output;
+
+    char* mir = read_fixture_mir("numeric_locals_boxed_void");
+    ASSERT_NE(mir, nullptr);
+    // Both functions have boxed public completions; native arithmetic in the
+    // body proves local facts are independent of their return ABI.
+    EXPECT_NE(strstr(mir, "dadd"), nullptr);
+    free(mir);
+    expect_trace_off_same("numeric_locals_boxed_void", source, output);
+}
+
+TEST(JsOpt, TypedArrayStoresUseGuardedNumericKeyLeaf) {
+    const char* source =
+        "function fill() {\n"
+        "  let bytes = new Uint8Array(4);\n"
+        "  let floats = new Float64Array(4);\n"
+        "  for (let i = 0; i < 4; i++) {\n"
+        "    bytes[i] = i + 1;\n"
+        "    floats[i] = i + 0.5;\n"
+        "  }\n"
+        "  bytes[-0] = 9;\n"
+        "  return bytes[0] + ':' + bytes[3] + ':' + floats[0] + ':' + floats[3];\n"
+        "}\n"
+        "function reassigned() {\n"
+        "  let data = new Uint8Array(1);\n"
+        "  data = [0];\n"
+        "  data[0] = 7;\n"
+        "  return data[0];\n"
+        "}\n"
+        "console.log('typed:' + fill());\n"
+        "console.log('fallback:' + reassigned());\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("typed_array_store_leaf", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_NE(strstr(output, "typed:1:4:0.5:3.5"), nullptr) << output;
+    EXPECT_NE(strstr(output, "fallback:7"), nullptr) << output;
+
+    char* mir = read_fixture_mir("typed_array_store_leaf");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "js_typed_array_set_numeric_key"), nullptr);
+    EXPECT_NE(strstr(mir, "js_typed_array_current_data_ptr"), nullptr);
+    free(mir);
+    expect_trace_off_same("typed_array_store_leaf", source, output);
+}
+
+TEST(JsOpt, TypedArrayParameterUsesGuardedPhysicalAccess) {
+    const char* source =
+        "function transform(data, limit) {\n"
+        "  let total = 0;\n"
+        "  for (let i = 0; i < limit; i++) {\n"
+        "    data[i] = data[i] + 0.5;\n"
+        "    total += data[i];\n"
+        "  }\n"
+        "  return total;\n"
+        "}\n"
+        "function multiply(data, limit) {\n"
+        "  let scale = 2;\n"
+        "  let total = 0;\n"
+        "  for (let i = 0; i < limit; i++) total += scale * data[i];\n"
+        "  return total;\n"
+        "}\n"
+        "let data = new Float64Array(4);\n"
+        "for (let i = 0; i < 4; i++) data[i] = i;\n"
+        "console.log('sum:' + transform(data, 4));\n"
+        "console.log('product:' + multiply(data, 4));\n"
+        "let indirectMultiply = multiply;\n"
+        "console.log('wrong-kind:' + indirectMultiply([2], 1));\n"
+        "data = [3];\n"
+        "data[0] += 2;\n"
+        "console.log('fallback:' + data[0]);\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("typed_array_parameter_access", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_NE(strstr(output, "sum:8"), nullptr) << output;
+    EXPECT_NE(strstr(output, "product:16"), nullptr) << output;
+    EXPECT_NE(strstr(output, "wrong-kind:4"), nullptr) << output;
+    EXPECT_NE(strstr(output, "fallback:5"), nullptr) << output;
+
+    char* mir = read_fixture_mir("typed_array_parameter_access");
+    ASSERT_NE(mir, nullptr);
+    // The direct caller nominates Float64Array, but the generated function
+    // still guards the runtime receiver before taking its physical load path.
+    EXPECT_NE(strstr(mir, "js_typed_array_element_type"), nullptr);
+    EXPECT_NE(strstr(mir, "js_typed_array_current_data_ptr"), nullptr);
+    EXPECT_NE(strstr(mir, "dmul"), nullptr);
+    free(mir);
+    expect_trace_off_same("typed_array_parameter_access", source, output);
 }
 
 TEST(JsOpt, MirLogicalJoinPublishesMergedCarrier) {

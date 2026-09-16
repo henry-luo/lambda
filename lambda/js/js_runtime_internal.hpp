@@ -102,11 +102,6 @@ extern TypeMap EmptyMap;
 extern "C" bool js_func_is_builtin_ctor(Item fn);
 extern "C" bool js_function_has_own_prototype(Item fn);
 extern "C" Item js_elements_get_custom_proto(Item arr);
-extern "C" void js_child_process_reset();
-extern "C" void js_fs_reset();
-extern "C" void js_util_reset();
-
-
 Item _map_read_field(ShapeEntry* field, void* map_data);
 Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found);
 

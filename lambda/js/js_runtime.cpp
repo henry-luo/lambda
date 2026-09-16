@@ -5,7 +5,6 @@
  * All functions are callable from MIR JIT compiled code.
  */
 #include "js_runtime_internal.hpp"
-#include "js_node_common.hpp"
 #include "js_object_meta.h"
 #include "js_host_hooks.h"
 #include "js_regex_generated_properties.h"
@@ -241,14 +240,12 @@ extern "C" Item js_object_set_prototype_of(Item obj, Item proto);
 extern "C" bool js_resolve_lazy_global(Item object, Item key, Item* out_value);
 extern "C" int js_intrinsic_initialization_begin_for_constructor(Item constructor);
 extern "C" void js_intrinsic_initialization_end_for_constructor(int active);
-extern "C" Item js_util_custom_promisify_args_symbol(void);
 extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
                                              Item filename_item,
                                              int64_t line_offset,
                                              int64_t column_offset);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" Item js_process_emit2(Item event_name, Item arg1, Item arg2);
-extern "C" Item js_cp_fork(Item rest_args);
 extern "C" Item push_d(double dval);
 extern "C" double it2d(Item item);
 
@@ -293,9 +290,6 @@ static Item js_invoke_mir_state(void* func_ptr, JsSuspendedActivation* activatio
 extern "C" Item js_new_async_function_from_string(Item* args, int argc);
 extern "C" Item js_new_generator_function_from_string(Item* args, int argc, int is_async);
 extern "C" void js_intrinsic_note_prototype_mutation(Item object);
-extern "C" Item js_get_fs_namespace(void);
-extern "C" Item js_get_fs_promises_namespace(void);
-extern "C" Item js_get_internal_fs_promises_namespace(void);
 extern "C" TypeMap* js_typemap_transition_for_type(Item obj, ShapeEntry* entry,
     NameId operation_name_id, TypeId value_type);
 Item js_map_shape_lookup_ext(Map* m, const char* key_str, int key_len, bool* out_found);
@@ -4768,6 +4762,10 @@ extern "C" Item js_get_window_event_global_value(void);
 extern "C" int radiant_dom_window_get_property(Item object, Item key, Item* out);
 
 static bool js_get_host_dynamic_property(Item object, Item key, Item* out) {
+    // The only host-backed reads in this kernel belong to the realm's Window
+    // object, which is always an ordinary Map. Arrays and scalar receivers
+    // cannot acquire those hooks, so avoid preparing realm state for them.
+    if (get_type_id(object) != LMD_TYPE_MAP) return false;
     if (js_is_window_event_global_property(object, key)) {
         if (out) *out = js_get_window_event_global_value();
         return true;
@@ -4779,6 +4777,27 @@ static bool js_get_host_dynamic_property(Item object, Item key, Item* out) {
         return true;
     }
     return false;
+}
+
+static bool js_try_get_array_length_name_no_gc(Item object, Item key,
+        Item* out) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+    String* name = it2s(key);
+    if (!name || name->len != 6 || memcmp(name->chars, "length", 6) != 0) {
+        return false;
+    }
+    TypeId type = get_type_id(object);
+    if (type != LMD_TYPE_ARRAY && !js_is_ordinary_numeric_array(object)) {
+        return false;
+    }
+    Array* array = object.array;
+    // Content arrays can carry a companion length property. Let the complete
+    // property kernel observe that descriptor rather than reading storage.
+    if (!array || (array->is_content == 1 && js_array_has_props(array))) {
+        return false;
+    }
+    if (out) *out = (Item){.item = i2it(array->length)};
+    return true;
 }
 
 static bool js_intrinsic_uses_catalog_prototype(const char* name, int len) {
@@ -4883,6 +4902,10 @@ extern "C" Item js_get_key_core(Item object, Item key,
     if (js_key_is_symbol(key) && !proxy_key) {
         key = js_symbol_to_key(key);
         key_root.set(key);
+    }
+    Item array_length = ItemNull;
+    if (js_try_get_array_length_name_no_gc(object, key, &array_length)) {
+        return array_length;
     }
     Item host_value = ItemNull;
     // Browser globals are live host state; stored preamble placeholders only
@@ -8293,6 +8316,11 @@ extern "C" Item js_get_name_id(Item object, NameId name_id) {
         return ItemNull;
     }
     Item key_item = (Item){.item = s2it(key)};
+    Item array_length = ItemNull;
+    if (js_try_get_array_length_name_no_gc(object, key_item, &array_length)) {
+        js_named_fast_profile_hit();
+        return array_length;
+    }
     Item host_value = ItemNull;
     // host-backed names are live state; the placeholder shape must never win.
     if (js_get_host_dynamic_property(object, key_item, &host_value)) {
@@ -33356,7 +33384,9 @@ static Item js_cluster_fork(Item fork_env) {
     }
     // cluster workers use IPC as an internal readiness channel even without public message listeners.
     setenv("LAMBDA_JS_IPC_REF", "1", 1);
-    Item child = js_cp_fork(rest);
+    // The Node cluster namespace is no longer published while its process
+    // implementation is absent, so no child-process backend may be selected.
+    Item child = js_new_object();
     if (had_ipc_ref) setenv("LAMBDA_JS_IPC_REF", old_ipc_ref_buf, 1);
     else unsetenv("LAMBDA_JS_IPC_REF");
     js_set_key_default(child, js_cluster_key("id"), (Item){.item = i2it(worker_id)});
@@ -33536,12 +33566,17 @@ static void js_repl_eval_line(Item repl, const char* line, int len) {
     js_repl_prompt(repl);
 }
 
+static bool js_runtime_is_object_like(Item value) {
+    TypeId type = get_type_id(value);
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_VMAP || type == LMD_TYPE_ELEMENT;
+}
+
 static void js_repl_editor_finish(Item repl, Item event) {
     Item buf_item = js_get_key_default(repl, js_repl_key("__editor_buffer__"));
     int len = 0;
     js_repl_cstr(buf_item, &len);
-    bool ctrl_c = js_node_is_object_like(event) && len == 0, ctrl_d = false;
-    if (js_node_is_object_like(event)) {
+    bool ctrl_c = js_runtime_is_object_like(event) && len == 0, ctrl_d = false;
+    if (js_runtime_is_object_like(event)) {
         Item name = js_get_key_default(event, js_repl_key("name"));
         if (get_type_id(name) == LMD_TYPE_STRING) {
             String* ns = it2s(name);
@@ -33567,7 +33602,7 @@ static void js_repl_editor_finish(Item repl, Item event) {
 static Item js_repl_close(void);
 
 static bool js_repl_event_is_ctrl_key(Item event, char key_char) {
-    if (!js_node_is_object_like(event)) return false;
+    if (!js_runtime_is_object_like(event)) return false;
     if (js_get_key_default(event, js_repl_key("ctrl")).item != ITEM_TRUE) return false;
     Item name = js_get_key_default(event, js_repl_key("name"));
     if (get_type_id(name) != LMD_TYPE_STRING) return false;
@@ -33744,15 +33779,15 @@ static Item js_repl_create_context(Item opts, bool old_signature) {
 
 static Item js_repl_start(Item opts, Item old_stream, Item old_eval) {
     Item this_item = js_get_this();
-    Item this_start = js_node_is_object_like(this_item) ?
+    Item this_start = js_runtime_is_object_like(this_item) ?
         js_get_key_default(this_item, js_repl_key("start")) : ItemNull;
     Item global = js_get_global_this();
     // destructured repl.start() is called with globalThis; only constructor
     // receivers may be reused as the REPL instance.
     Item repl = (this_item.item != global.item &&
-        js_node_is_object_like(this_item) && !js_is_callable(this_start)) ?
+        js_runtime_is_object_like(this_item) && !js_is_callable(this_start)) ?
         this_item : js_new_object();
-    bool old_signature = !js_node_is_object_like(opts);
+    bool old_signature = !js_runtime_is_object_like(opts);
     Item input = old_signature ? old_stream : js_get_key_default(opts, js_repl_key("input"));
     Item output = old_signature ? old_stream : js_get_key_default(opts, js_repl_key("output"));
     Item prompt = old_signature ? opts : js_get_key_default(opts, js_repl_key("prompt"));
@@ -33783,7 +33818,7 @@ static Item js_repl_start(Item opts, Item old_stream, Item old_eval) {
     js_runtime_set_native_key(repl, js_repl_key("close"), js_repl_close);
     js_runtime_set_native_key(repl, js_repl_key("once"), js_repl_once);
     js_runtime_set_native_key(repl, js_repl_key("on"), js_repl_once);
-    if (js_node_is_object_like(input)) {
+    if (js_runtime_is_object_like(input)) {
         Item on_fn = js_get_key_default(input, js_repl_key("on"));
         if (js_is_callable(on_fn)) {
             Item data_args[2] = { repl, js_name_item("data", 4) };
@@ -34732,8 +34767,7 @@ static Item js_node_binding_os_constants(void) {
 }
 
 static Item js_node_binding_constants(void) {
-    Item fs_ns = js_get_fs_namespace();
-    Item fs_constants = js_get_key_default(fs_ns, js_node_binding_key("constants"));
+    Item fs_constants = js_object_create(ItemNull);
 
     Item constants = js_object_create(ItemNull);
     js_node_binding_set(constants, "crypto", js_object_create(ItemNull));
@@ -34828,11 +34862,6 @@ extern "C" Item js_internal_binding(Item name) {
         return *namespace_item;
     }
 
-    if (s->len == 2 && memcmp(s->chars, "fs", 2) == 0) {
-        extern Item js_get_internal_fs_binding_namespace(void);
-        return js_get_internal_fs_binding_namespace();
-    }
-
     if (s->len == 12 && memcmp(s->chars, "trace_events", 12) == 0) {
         return node_trace_events_internal_binding();
     }
@@ -34844,13 +34873,6 @@ extern "C" Item js_internal_binding(Item name) {
         js_set_key_cstr(cfg, "hasCrypto", (Item){.item = ITEM_TRUE});
         js_set_key_cstr(cfg, "fipsMode", (Item){.item = ITEM_FALSE});
         return cfg;
-    }
-
-    if (s->len == 4 && memcmp(s->chars, "util", 4) == 0) {
-        Item util_binding = js_new_object();
-        extern Item js_util_getCallSites(Item frame_count_item);
-        js_set_native_key(util_binding, js_name_item("getCallSites", 12), js_util_getCallSites);
-        return util_binding;
     }
 
     // default: return empty object
@@ -35267,7 +35289,6 @@ static void js_populate_internal_crypto_util_namespace(Item namespace_item) {
 }
 
 static void js_populate_internal_util_namespace(Item namespace_item) {
-    js_set_key_cstr(namespace_item, "customPromisifyArgs", js_util_custom_promisify_args_symbol());
 }
 
 static void js_populate_internal_util_inspect_namespace(Item namespace_item) {

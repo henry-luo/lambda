@@ -1354,11 +1354,13 @@ typedef struct FnPromotionCell {
     uint8_t loop_bodied;
 } FnPromotionCell;
 
-// Native JS bodies expose only numeric return lanes; other results stay boxed.
+// Native JS bodies can either expose a numeric lane or retain an Item result
+// while still using independently proven numeric locals.
 enum NativeReturnKind : uint8_t {
     NATIVE_RETURN_NONE = 0,
     NATIVE_RETURN_INT,
     NATIVE_RETURN_FLOAT,
+    NATIVE_RETURN_ITEM,
 };
 
 typedef struct FnAnalysis {
@@ -1407,6 +1409,7 @@ typedef struct FnAnalysis {
     // T12-2: a Number return is admitted only after binding-identity analysis
     // proves every reachable return expression under the guarded entry shape.
     bool js_native_numeric_proven;
+    bool js_has_numeric_local_facts;
     NativeReturnKind js_native_return_kind;
     TypeId js_return_type;
     ScalarReturnClass js_boxed_return_scalar_class;

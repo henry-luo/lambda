@@ -534,6 +534,9 @@ MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MirValue value) {
     if (!mt || !mt->in_native_func || !mt->current_fc) return value.reg;
     // Delayed completions publish an Item lane. Requesting the native return
     // carrier from its descriptor avoids recovering that fact from MIR.
+    if (JM_JS_FACT(mt->current_fc, native_return_kind) == NATIVE_RETURN_ITEM) {
+        return em_require_rep(&mt->func_em->em, value, VALUE_REP_ITEM).reg;
+    }
     if (JM_JS_FACT(mt->current_fc, return_type) == LMD_TYPE_FLOAT) {
         return em_require_rep(&mt->func_em->em, value, VALUE_REP_F64).reg;
     }
