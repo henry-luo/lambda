@@ -56,6 +56,15 @@ AstNode* build_binder_type_from_parts(Transpiler* tp, SourceSpan span,
 // only). Used for bracket-type positions and range bounds.
 bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out);
 
+// The `-1` / `(((2.5)))` shape: PRIMARY wrappers, at most one leading sign,
+// then the literal token itself. Returns that token (a childless PRIMARY when
+// the source really is a literal) and reports whether a `-` was consumed; NULL
+// when the chain lands on anything computed. One authority for a walk that had
+// started to accumulate copies (rule 13) -- callers pair it with
+// `ast_static_literal_item` and apply the sign themselves, because the numeric
+// kinds each caller admits differ.
+AstNode* ast_signed_literal_operand(AstNode* node, bool* negated);
+
 // True when a pattern body is nothing but literals (and unions of them). Such
 // an island is an ordinary literal union rather than a compiled pattern.
 bool pattern_ast_literal_set(AstNode* node);
