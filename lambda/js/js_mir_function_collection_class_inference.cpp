@@ -714,6 +714,7 @@ static bool jm_indexed_expr_has_bigint_literal(JsMirTranspiler* mt,
 typedef struct JmParamInferenceBinding {
     NameEntry* entry;
     int param_index;
+    bool is_alias;
 } JmParamInferenceBinding;
 
 static int jm_infer_find_param(JsAstNode* node,
@@ -725,6 +726,16 @@ static int jm_infer_find_param(JsAstNode* node,
         if (bindings[i].entry == id->entry) return bindings[i].param_index;
     }
     return -1;
+}
+
+static bool jm_infer_param_binding_is_alias(JsAstNode* node,
+        const JmParamInferenceBinding bindings[], int binding_count) {
+    if (!node || node->node_type != AST_NODE_IDENT) return false;
+    NameEntry* entry = ((JsIdentifierNode*)node)->entry;
+    for (int i = 0; entry && i < binding_count; i++) {
+        if (bindings[i].entry == entry) return bindings[i].is_alias;
+    }
+    return false;
 }
 
 static bool jm_infer_is_int_literal(JsAstNode* node) {
@@ -841,7 +852,13 @@ static void jm_infer_indexed_node(JsMirTranspiler* mt, JsAstNode* node,
         JsAssignmentNode* assignment = (JsAssignmentNode*)node;
         int left = jm_infer_find_param(assignment->left, bindings, binding_count);
         if (assignment->op == OPERATOR_ASSIGN) {
-            if (left >= 0) evidence[left].param_reassigned = true;
+            // A local alias can be a numeric loop cursor without changing the
+            // guarded parameter's entry value. Only the formal itself revokes
+            // its Number entry shape.
+            if (left >= 0 && !jm_infer_param_binding_is_alias(assignment->left,
+                    bindings, binding_count)) {
+                evidence[left].param_reassigned = true;
+            }
             break;
         }
         bool compound_arith = assignment->op == OPERATOR_JS_ADD_ASSIGN || assignment->op == OPERATOR_JS_SUB_ASSIGN ||
@@ -982,7 +999,7 @@ void jm_infer_param_types(JsMirTranspiler* mt, JsFuncCollected* fc) {
     JsAstNode* p = fn->params;
     for (int i = 0; i < pc && p; i++, p = p->next) {
         JsIdentifierNode* binding = js_ast_parameter_binding_identifier(p);
-        inference_bindings[i] = {binding ? binding->entry : NULL, i};
+        inference_bindings[i] = {binding ? binding->entry : NULL, i, false};
     }
     int inference_binding_count = pc;
 
@@ -1017,7 +1034,8 @@ void jm_infer_param_types(JsMirTranspiler* mt, JsFuncCollected* fc) {
             int param_index = jm_infer_find_param(alias->init, inference_bindings, pc);
             JsIdentifierNode* alias_id = (JsIdentifierNode*)alias->id;
             if (param_index < 0 || !alias_id->entry) continue;
-            inference_bindings[inference_binding_count++] = {alias_id->entry, param_index};
+            inference_bindings[inference_binding_count++] = {alias_id->entry,
+                param_index, true};
         }
     }
 
@@ -1082,7 +1100,7 @@ bool jm_add_chain_has_string(JsAstNode* expr) {
 
 // Classify one return node. The indexed owner filter below excludes nested
 // functions, so this helper has no recursive AST traversal of its own.
-static void jm_collect_return_type(JsMirTranspiler* mt, JsAstNode* node, const char* self_name,
+static void jm_collect_return_type(JsMirTranspiler* mt, JsAstNode* node,
         JsFuncCollected* fc, TypeId* collected, int* count, int max_count) {
     if (!node || node->node_type != AST_NODE_RETURN_STAM ||
             !count || *count >= max_count) return;
@@ -1107,7 +1125,9 @@ static void jm_collect_return_type(JsMirTranspiler* mt, JsAstNode* node, const c
         JsAstNode* param = fc && fc->node ? fc->node->params : NULL;
         for (int pi = 0; param && fc && pi < JM_PARAM_COUNT(fc);
                 pi++, param = param->next) {
-            if (jm_js_name_equal(id->name, jm_param_binding_name(param))) {
+            JsIdentifierNode* parameter_id =
+                js_ast_parameter_binding_identifier(param);
+            if (id->entry && parameter_id && id->entry == parameter_id->entry) {
                 TypeId param_type = jm_param_type(fc, pi);
                 if (param_type == LMD_TYPE_INT || param_type == LMD_TYPE_FLOAT) t = param_type;
                 break;
@@ -1128,12 +1148,6 @@ static void jm_collect_return_type(JsMirTranspiler* mt, JsAstNode* node, const c
             t = jm_indexed_expr_has_bigint_literal(mt, expr) ? LMD_TYPE_ANY : LMD_TYPE_FLOAT;
             break;
         default: break;
-        }
-    } else if (expr->node_type == AST_NODE_CALL_EXPR) {
-        JsCallNode* call = (JsCallNode*)expr;
-        if (self_name && call->callee && call->callee->node_type == AST_NODE_IDENT) {
-            const char* cn = jm_var_name(((JsIdentifierNode*)call->callee)->name);
-            if (strncmp(cn, self_name, strlen(self_name)) == 0) t = LMD_TYPE_FLOAT;
         }
     }
     collected[(*count)++] = t;
@@ -1162,11 +1176,6 @@ void jm_infer_return_type(JsMirTranspiler* mt, JsFuncCollected* fc) {
         return;
     }
 
-    const char* self_name = NULL;
-    if (fn->name) {
-        self_name = jm_var_name(fn->name);
-    }
-
     // For expression-body arrow functions: infer from the expression directly
     if (fn->body && fn->body->node_type != AST_NODE_BLOCK) {
         // Arrow function with expression body
@@ -1185,7 +1194,6 @@ void jm_infer_return_type(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
     TypeId collected[32];
     int count = 0;
-    const char* return_self_name = self_name && self_name[0] ? self_name : NULL;
     if (mt && mt->tp) {
         AstIndex* index = &mt->tp->ast_index;
         AstNodeId fn_node_id = ast_index_find(index, (AstNode*)fn);
@@ -1193,7 +1201,7 @@ void jm_infer_return_type(JsMirTranspiler* mt, JsFuncCollected* fc) {
             ? AST_FUNCTION_ID_INVALID : index->owner_functions[fn_node_id];
         for (uint32_t i = 0; i < index->count && count < 32; i++) {
             if (index->owner_functions[i] != function_id) continue;
-            jm_collect_return_type(mt, index->nodes[i], return_self_name, fc,
+            jm_collect_return_type(mt, index->nodes[i], fc,
                 collected, &count, 32);
         }
     }
@@ -1234,6 +1242,479 @@ void jm_infer_return_type(JsMirTranspiler* mt, JsFuncCollected* fc) {
     log_debug("js-mir P4: inferred return type for %s: %s", fc->name,
         JM_JS_FACT(fc, return_type) == LMD_TYPE_INT ? "INT" :
         JM_JS_FACT(fc, return_type) == LMD_TYPE_FLOAT ? "FLOAT" : "ANY");
+}
+
+// T12-2 keeps this proof local to return inference. It recognizes only Number
+// expressions that a guarded native entry can reproduce without coercion.
+enum JmNumericReturnFact {
+    JM_NUMERIC_RETURN_INVALID = 0,
+    JM_NUMERIC_RETURN_NUMBER,
+    JM_NUMERIC_RETURN_PENDING,
+};
+
+enum {
+    JM_NUMERIC_RETURN_MAX_BINDINGS = 32,
+    JM_NUMERIC_RETURN_MAX_DEPENDENCIES = 32,
+    JM_NUMERIC_RETURN_MAX_FIXPOINT_PASSES = 64,
+};
+
+struct JmNumericReturnCandidate {
+    bool valid;
+    bool has_number_base;
+    bool proven;
+    JsFuncCollected* dependencies[JM_NUMERIC_RETURN_MAX_DEPENDENCIES];
+    int dependency_count;
+};
+
+struct JmNumericReturnContext {
+    JsMirTranspiler* mt;
+    JsFuncCollected* fc;
+    JmNumericReturnCandidate* candidate;
+    NameEntry* active_bindings[JM_NUMERIC_RETURN_MAX_BINDINGS];
+    JmNumericReturnFact active_facts[JM_NUMERIC_RETURN_MAX_BINDINGS];
+    int active_count;
+};
+
+static bool jm_numeric_return_is_number(JmNumericReturnFact fact) {
+    return fact == JM_NUMERIC_RETURN_NUMBER || fact == JM_NUMERIC_RETURN_PENDING;
+}
+
+static JmNumericReturnFact jm_numeric_return_merge(JmNumericReturnFact left,
+        JmNumericReturnFact right) {
+    if (left == JM_NUMERIC_RETURN_INVALID || right == JM_NUMERIC_RETURN_INVALID) {
+        return JM_NUMERIC_RETURN_INVALID;
+    }
+    return left == JM_NUMERIC_RETURN_PENDING || right == JM_NUMERIC_RETURN_PENDING
+        ? JM_NUMERIC_RETURN_PENDING : JM_NUMERIC_RETURN_NUMBER;
+}
+
+static bool jm_numeric_return_is_arithmetic_operator(Operator op) {
+    switch (op) {
+    case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL:
+    case OPERATOR_DIV: case OPERATOR_MOD: case OPERATOR_JS_EXP:
+    case OPERATOR_JS_BIT_AND: case OPERATOR_JS_BIT_OR:
+    case OPERATOR_JS_BIT_XOR: case OPERATOR_JS_LSHIFT:
+    case OPERATOR_JS_RSHIFT: case OPERATOR_JS_URSHIFT:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool jm_numeric_return_is_compound_operator(Operator op) {
+    switch (op) {
+    case OPERATOR_JS_ADD_ASSIGN: case OPERATOR_JS_SUB_ASSIGN:
+    case OPERATOR_JS_MUL_ASSIGN: case OPERATOR_JS_DIV_ASSIGN:
+    case OPERATOR_JS_MOD_ASSIGN: case OPERATOR_JS_EXP_ASSIGN:
+    case OPERATOR_JS_BIT_AND_ASSIGN: case OPERATOR_JS_BIT_OR_ASSIGN:
+    case OPERATOR_JS_BIT_XOR_ASSIGN: case OPERATOR_JS_LSHIFT_ASSIGN:
+    case OPERATOR_JS_RSHIFT_ASSIGN: case OPERATOR_JS_URSHIFT_ASSIGN:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static void jm_numeric_return_add_dependency(JmNumericReturnContext* context,
+        JsFuncCollected* dependency) {
+    if (!context || !context->candidate || !dependency) return;
+    JmNumericReturnCandidate* candidate = context->candidate;
+    for (int i = 0; i < candidate->dependency_count; i++) {
+        if (candidate->dependencies[i] == dependency) return;
+    }
+    if (candidate->dependency_count >= JM_NUMERIC_RETURN_MAX_DEPENDENCIES) {
+        candidate->valid = false;
+        log_debug("js-mir T12-2: native return refused for %s: dependency bound exhausted",
+            context->fc ? context->fc->name : "(unknown)");
+        return;
+    }
+    candidate->dependencies[candidate->dependency_count++] = dependency;
+}
+
+static JsVariableDeclaratorNode* jm_numeric_return_binding_declarator(
+        NameEntry* binding) {
+    if (!binding || !binding->node) return NULL;
+    JsAstNode* definition = (JsAstNode*)binding->node;
+    if (definition->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+        return (JsVariableDeclaratorNode*)definition;
+    }
+    if (definition->node_type != AST_NODE_VAR_STAM) return NULL;
+    JsVariableDeclarationNode* declaration =
+        (JsVariableDeclarationNode*)definition;
+    for (JsAstNode* item = declaration->declarations; item; item = item->next) {
+        if (item->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
+        JsVariableDeclaratorNode* declarator = (JsVariableDeclaratorNode*)item;
+        if (declarator->entry == binding) return declarator;
+        if (declarator->id && declarator->id->node_type == AST_NODE_IDENT &&
+                ((JsIdentifierNode*)declarator->id)->entry == binding) {
+            return declarator;
+        }
+    }
+    return NULL;
+}
+
+static JmNumericReturnFact jm_numeric_return_expression(
+        JmNumericReturnContext* context, JsAstNode* expression);
+
+static JmNumericReturnFact jm_numeric_return_parameter_fact(
+        JsFuncCollected* fc, NameEntry* binding) {
+    if (!fc || !binding) return JM_NUMERIC_RETURN_INVALID;
+    JsAstNode* parameter = fc->node ? fc->node->params : NULL;
+    for (int index = 0; parameter && index < JM_PARAM_COUNT(fc);
+            index++, parameter = parameter->next) {
+        JsIdentifierNode* parameter_id =
+            js_ast_parameter_binding_identifier(parameter);
+        if (!parameter_id || parameter_id->entry != binding) continue;
+        TypeId type = jm_param_type(fc, index);
+        return type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT
+            ? JM_NUMERIC_RETURN_NUMBER : JM_NUMERIC_RETURN_INVALID;
+    }
+    return JM_NUMERIC_RETURN_INVALID;
+}
+
+static JmNumericReturnFact jm_numeric_return_binding_fact(
+        JmNumericReturnContext* context, NameEntry* binding) {
+    if (!context || !context->fc || !binding) return JM_NUMERIC_RETURN_INVALID;
+    JmNumericReturnFact parameter = jm_numeric_return_parameter_fact(context->fc,
+        binding);
+    if (parameter != JM_NUMERIC_RETURN_INVALID || binding->is_parameter) {
+        return parameter;
+    }
+    if (!jm_entry_is_owned_by_function(context->fc->node, binding)) {
+        return JM_NUMERIC_RETURN_INVALID;
+    }
+    for (int i = context->active_count - 1; i >= 0; i--) {
+        if (context->active_bindings[i] == binding) return context->active_facts[i];
+    }
+    if (context->active_count >= JM_NUMERIC_RETURN_MAX_BINDINGS) {
+        context->candidate->valid = false;
+        log_debug("js-mir T12-2: native return refused for %s: binding bound exhausted",
+            context->fc->name);
+        return JM_NUMERIC_RETURN_INVALID;
+    }
+    JsVariableDeclaratorNode* declarator =
+        jm_numeric_return_binding_declarator(binding);
+    if (!declarator || !declarator->init) return JM_NUMERIC_RETURN_INVALID;
+
+    int active_index = context->active_count++;
+    context->active_bindings[active_index] = binding;
+    context->active_facts[active_index] = JM_NUMERIC_RETURN_INVALID;
+    JmNumericReturnFact fact = jm_numeric_return_expression(context,
+        declarator->init);
+    context->active_facts[active_index] = fact;
+    if (!jm_numeric_return_is_number(fact)) {
+        context->active_count--;
+        return JM_NUMERIC_RETURN_INVALID;
+    }
+
+    AstIndex* index = context->mt && context->mt->tp
+        ? &context->mt->tp->ast_index : NULL;
+    if (!index) {
+        context->active_count--;
+        return JM_NUMERIC_RETURN_INVALID;
+    }
+    // Every direct write must preserve Number. This is the conservative join
+    // across branches and loop backedges; a non-Number write widens the fact.
+    for (uint32_t node_id = 0; node_id < index->count; node_id++) {
+        if (index->owner_functions[node_id] != context->fc->function_id) continue;
+        JsAstNode* node = (JsAstNode*)index->nodes[node_id];
+        if (!node) continue;
+        if (node->node_type == AST_NODE_ASSIGN) {
+            JsAssignmentNode* assignment = (JsAssignmentNode*)node;
+            if (!assignment->left || assignment->left->node_type != AST_NODE_IDENT ||
+                    ((JsIdentifierNode*)assignment->left)->entry != binding) continue;
+            if (binding->is_const) {
+                fact = JM_NUMERIC_RETURN_INVALID;
+                break;
+            }
+            JmNumericReturnFact written = jm_numeric_return_expression(context,
+                assignment->right);
+            if (assignment->op == OPERATOR_ASSIGN) {
+                fact = written;
+            } else if (jm_numeric_return_is_compound_operator(assignment->op) &&
+                    jm_numeric_return_is_number(fact) &&
+                    jm_numeric_return_is_number(written)) {
+                fact = jm_numeric_return_merge(fact, written);
+            } else {
+                fact = JM_NUMERIC_RETURN_INVALID;
+            }
+        } else if (node->node_type == AST_NODE_UNARY) {
+            JsUnaryNode* unary = (JsUnaryNode*)node;
+            if (!unary->operand || unary->operand->node_type != AST_NODE_IDENT ||
+                    ((JsIdentifierNode*)unary->operand)->entry != binding) continue;
+            if (binding->is_const || (unary->op != OPERATOR_JS_INCREMENT &&
+                    unary->op != OPERATOR_JS_DECREMENT)) {
+                fact = JM_NUMERIC_RETURN_INVALID;
+            }
+        }
+        context->active_facts[active_index] = fact;
+        if (!jm_numeric_return_is_number(fact)) break;
+    }
+    context->active_count--;
+    return fact;
+}
+
+static JmNumericReturnFact jm_numeric_return_direct_call(
+        JmNumericReturnContext* context, JsCallNode* call) {
+    if (!context || !call) return JM_NUMERIC_RETURN_INVALID;
+    JsFunctionNode* function = jm_resolve_direct_call_function(context->mt, call,
+        true);
+    JsFuncCollected* callee = function
+        ? jm_find_collected_func(context->mt, function) : NULL;
+    if (!callee || JM_JS_FACT(callee, is_reassigned) || callee->node->is_async ||
+            callee->node->is_generator) {
+        return JM_NUMERIC_RETURN_INVALID;
+    }
+    int argument_count = 0;
+    for (JsAstNode* argument = call->arguments; argument; argument = argument->next) {
+        if (!jm_numeric_return_is_number(jm_numeric_return_expression(context,
+                argument))) {
+            return JM_NUMERIC_RETURN_INVALID;
+        }
+        argument_count++;
+    }
+    if (argument_count != JM_PARAM_COUNT(callee)) return JM_NUMERIC_RETURN_INVALID;
+    for (int index = 0; index < JM_PARAM_COUNT(callee); index++) {
+        TypeId parameter_type = jm_param_type(callee, index);
+        if (parameter_type != LMD_TYPE_INT && parameter_type != LMD_TYPE_FLOAT) {
+            return JM_NUMERIC_RETURN_INVALID;
+        }
+    }
+    jm_numeric_return_add_dependency(context, callee);
+    return context->candidate->valid ? JM_NUMERIC_RETURN_PENDING
+        : JM_NUMERIC_RETURN_INVALID;
+}
+
+static JmNumericReturnFact jm_numeric_return_expression(
+        JmNumericReturnContext* context, JsAstNode* expression) {
+    if (!context || !expression) return JM_NUMERIC_RETURN_INVALID;
+    switch (expression->node_type) {
+    case AST_NODE_LITERAL: {
+        JsLiteralNode* literal = (JsLiteralNode*)expression;
+        return literal->literal_type == AST_LITERAL_NUMBER && !literal->is_bigint
+            ? JM_NUMERIC_RETURN_NUMBER : JM_NUMERIC_RETURN_INVALID;
+    }
+    case AST_NODE_IDENT:
+        return jm_numeric_return_binding_fact(context,
+            ((JsIdentifierNode*)expression)->entry);
+    case AST_NODE_BINARY: {
+        JsBinaryNode* binary = (JsBinaryNode*)expression;
+        if (!jm_numeric_return_is_arithmetic_operator(binary->op)) {
+            return JM_NUMERIC_RETURN_INVALID;
+        }
+        return jm_numeric_return_merge(jm_numeric_return_expression(context,
+                binary->left), jm_numeric_return_expression(context, binary->right));
+    }
+    case AST_NODE_UNARY: {
+        JsUnaryNode* unary = (JsUnaryNode*)expression;
+        switch (unary->op) {
+        case OPERATOR_POS: case OPERATOR_NEG: case OPERATOR_JS_BIT_NOT:
+        case OPERATOR_JS_INCREMENT: case OPERATOR_JS_DECREMENT:
+            return jm_numeric_return_expression(context, unary->operand);
+        default:
+            return JM_NUMERIC_RETURN_INVALID;
+        }
+    }
+    case AST_NODE_ASSIGN: {
+        JsAssignmentNode* assignment = (JsAssignmentNode*)expression;
+        if (assignment->op == OPERATOR_ASSIGN) {
+            return jm_numeric_return_expression(context, assignment->right);
+        }
+        if (!jm_numeric_return_is_compound_operator(assignment->op) ||
+                !assignment->left || assignment->left->node_type != AST_NODE_IDENT) {
+            return JM_NUMERIC_RETURN_INVALID;
+        }
+        return jm_numeric_return_merge(jm_numeric_return_binding_fact(context,
+                ((JsIdentifierNode*)assignment->left)->entry),
+            jm_numeric_return_expression(context, assignment->right));
+    }
+    case AST_NODE_CONDITIONAL_EXPR: {
+        JsConditionalNode* conditional = (JsConditionalNode*)expression;
+        return jm_numeric_return_merge(jm_numeric_return_expression(context,
+                conditional->consequent), jm_numeric_return_expression(context,
+                conditional->alternate));
+    }
+    case AST_NODE_SEQ: {
+        JsSequenceNode* sequence = (JsSequenceNode*)expression;
+        JsAstNode* last = sequence->expressions;
+        if (!last) return JM_NUMERIC_RETURN_INVALID;
+        while (last->next) last = last->next;
+        return jm_numeric_return_expression(context, last);
+    }
+    case AST_NODE_CALL_EXPR:
+        return jm_numeric_return_direct_call(context, (JsCallNode*)expression);
+    default:
+        return JM_NUMERIC_RETURN_INVALID;
+    }
+}
+
+static void jm_numeric_return_collect_candidate(JmNumericReturnContext* context) {
+    if (!context || !context->mt || !context->fc || !context->candidate) return;
+    JmNumericReturnCandidate* candidate = context->candidate;
+    candidate->valid = true;
+    JsFunctionNode* function = context->fc->node;
+    if (function->body && function->body->node_type != AST_NODE_BLOCK) {
+        JmNumericReturnFact fact = jm_numeric_return_expression(context,
+            function->body);
+        candidate->has_number_base = fact == JM_NUMERIC_RETURN_NUMBER;
+        candidate->valid = jm_numeric_return_is_number(fact) && candidate->valid;
+        return;
+    }
+    AstIndex* index = &context->mt->tp->ast_index;
+    bool has_return = false;
+    for (uint32_t node_id = 0; node_id < index->count; node_id++) {
+        if (index->owner_functions[node_id] != context->fc->function_id ||
+                index->nodes[node_id]->node_type != AST_NODE_RETURN_STAM) continue;
+        has_return = true;
+        JsReturnNode* returned = (JsReturnNode*)index->nodes[node_id];
+        JmNumericReturnFact fact = returned->argument
+            ? jm_numeric_return_expression(context, returned->argument)
+            : JM_NUMERIC_RETURN_INVALID;
+        if (!jm_numeric_return_is_number(fact)) candidate->valid = false;
+        if (fact == JM_NUMERIC_RETURN_NUMBER) candidate->has_number_base = true;
+    }
+    candidate->valid = candidate->valid && has_return;
+}
+
+void jm_infer_native_numeric_returns(JsMirTranspiler* mt) {
+    if (!mt || mt->func_count <= 0) return;
+    JmNumericReturnCandidate* candidates = (JmNumericReturnCandidate*)mem_calloc(
+        (size_t)mt->func_count, sizeof(*candidates), MEM_CAT_TEMP);
+    if (!candidates) {
+        log_error("js-mir T12-2: native return analysis allocation failed");
+        return;
+    }
+    for (int index = 0; index < mt->func_count; index++) {
+        JsFuncCollected* fc = &mt->func_entries[index];
+        JM_JS_FACT(fc, native_numeric_proven) = false;
+        JmNumericReturnContext context = {mt, fc, &candidates[index]};
+        jm_numeric_return_collect_candidate(&context);
+    }
+
+    int bound = mt->func_count < JM_NUMERIC_RETURN_MAX_FIXPOINT_PASSES
+        ? mt->func_count : JM_NUMERIC_RETURN_MAX_FIXPOINT_PASSES;
+    bool changed = false;
+    int pass = 0;
+    for (; pass < bound; pass++) {
+        changed = false;
+        for (int index = 0; index < mt->func_count; index++) {
+            JmNumericReturnCandidate* candidate = &candidates[index];
+            if (!candidate->valid) continue;
+            for (int dependency = 0; dependency < candidate->dependency_count;
+                    dependency++) {
+                int dependency_index = (int)(candidate->dependencies[dependency] -
+                    mt->func_entries);
+                if (dependency_index < 0 || dependency_index >= mt->func_count ||
+                        !candidates[dependency_index].valid) {
+                    candidate->valid = false;
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        if (!changed) break;
+    }
+    if (changed) {
+        log_debug("js-mir T12-2: native return refusal: dependency fixed-point bound exhausted");
+        for (int index = 0; index < mt->func_count; index++) candidates[index].valid = false;
+    }
+
+    for (pass = 0; pass < bound; pass++) {
+        changed = false;
+        for (int index = 0; index < mt->func_count; index++) {
+            JmNumericReturnCandidate* candidate = &candidates[index];
+            if (!candidate->valid || candidate->proven) continue;
+            bool ready = candidate->has_number_base;
+            if (!ready && candidate->dependency_count > 0) {
+                ready = true;
+                for (int dependency = 0; dependency < candidate->dependency_count;
+                        dependency++) {
+                    int dependency_index = (int)(candidate->dependencies[dependency] -
+                        mt->func_entries);
+                    if (dependency_index < 0 || dependency_index >= mt->func_count ||
+                            !candidates[dependency_index].proven) {
+                        ready = false;
+                        break;
+                    }
+                }
+            }
+            if (ready) {
+                candidate->proven = true;
+                changed = true;
+            }
+        }
+        if (!changed) break;
+    }
+    if (changed) {
+        log_debug("js-mir T12-2: native return refusal: proof fixed-point bound exhausted");
+        for (int index = 0; index < mt->func_count; index++) candidates[index].proven = false;
+    }
+    for (int index = 0; index < mt->func_count; index++) {
+        JsFuncCollected* fc = &mt->func_entries[index];
+        JM_JS_FACT(fc, native_numeric_proven) = candidates[index].proven;
+        if (candidates[index].proven) {
+            JM_JS_FACT(fc, return_type) = LMD_TYPE_FLOAT;
+            log_debug("js-mir T12-2: native Number return proven for %s",
+                fc->name);
+        }
+    }
+    mem_free(candidates);
+}
+
+void jm_populate_native_number_binding_facts(JsMirTranspiler* mt,
+        JsFuncCollected* fc, FnVariantAnalysis* native) {
+    if (!mt || !fc || !native || !JM_JS_FACT(fc, native_numeric_proven)) return;
+    AstIndex* index = &mt->tp->ast_index;
+    int capacity = 0;
+    for (uint32_t node_id = 0; node_id < index->count; node_id++) {
+        if (index->owner_functions[node_id] == fc->function_id &&
+                index->nodes[node_id] &&
+                index->nodes[node_id]->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+            capacity++;
+        }
+    }
+    if (capacity == 0) return;
+    native->bindings = (FnBindingAnalysis*)pool_calloc(mt->tp->pool,
+        sizeof(*native->bindings) * (size_t)capacity);
+    if (!native->bindings) {
+        log_error("js-mir T12-2: native binding facts allocation failed for %s",
+            fc->name);
+        return;
+    }
+    for (uint32_t node_id = 0; node_id < index->count; node_id++) {
+        if (index->owner_functions[node_id] != fc->function_id ||
+                !index->nodes[node_id] || index->nodes[node_id]->node_type !=
+                AST_NODE_VARIABLE_DECLARATOR) {
+            continue;
+        }
+        JsVariableDeclaratorNode* declarator =
+            (JsVariableDeclaratorNode*)index->nodes[node_id];
+        if (!declarator->id || declarator->id->node_type != AST_NODE_IDENT) continue;
+        JsIdentifierNode* identifier = (JsIdentifierNode*)declarator->id;
+        JmNumericReturnCandidate candidate = {};
+        candidate.valid = true;
+        JmNumericReturnContext context = {mt, fc, &candidate};
+        if (jm_numeric_return_binding_fact(&context, identifier->entry) !=
+                JM_NUMERIC_RETURN_NUMBER || !candidate.valid) {
+            continue;
+        }
+        FnBindingAnalysis* fact = &native->bindings[native->binding_count++];
+        *fact = {identifier->entry, LMD_TYPE_FLOAT, VALUE_REP_F64,
+            JIT_VALUE_NON_GC_SCALAR, BINDING_STORAGE_REGISTER, 0};
+    }
+}
+
+TypeId jm_native_number_binding_type(JsMirTranspiler* mt, NameEntry* binding) {
+    if (!mt || !mt->current_fc || !binding) return LMD_TYPE_ANY;
+    FnVariantAnalysis* native = fn_analysis_variant(
+        jm_function_analysis(mt->current_fc), FN_ENTRY_NATIVE_BODY);
+    if (!native) return LMD_TYPE_ANY;
+    for (int index = 0; index < native->binding_count; index++) {
+        if (native->bindings[index].name == binding) {
+            return native->bindings[index].semantic_type;
+        }
+    }
+    return LMD_TYPE_ANY;
 }
 
 // Return expressions whose values always fit directly in Item bits or are

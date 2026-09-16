@@ -2303,6 +2303,7 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"js_elements_set_int", FPTR(js_elements_set_int)},
+    {"js_elements_set_int_completion", FPTR(js_elements_set_int_completion)},
     {"js_get_this", FPTR(js_get_this)},
     {"js_get_lexical_this_binding", FPTR(js_get_lexical_this_binding)},
     {"js_resolve_lexical_this", FPTR(js_resolve_lexical_this)},
@@ -2557,6 +2558,11 @@ JitImport jit_runtime_imports[] = {
     {"js_typed_array_get", FPTR(js_typed_array_get)},
     {"js_typed_array_set", FPTR(js_typed_array_set)},
     {"js_typed_array_length", FPTR(js_typed_array_length), JIT_IMPORT_RAW_SCALAR_PRESERVES},
+    // T12-5: the direct MIR load acquires the backing pointer immediately and
+    // never carries it across another import. Keep imports conservatively
+    // MAY_GC until the shared import audit admits a stricter contract.
+    {"js_typed_array_element_type", FPTR(js_typed_array_element_type),
+     JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_is_typed_array", FPTR(js_is_typed_array), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_get_typed_array_ptr", FPTR(js_get_typed_array_ptr)},
     {"js_typed_array_current_data_ptr", FPTR(js_typed_array_current_data_ptr)},

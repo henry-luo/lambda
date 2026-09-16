@@ -1,0 +1,10 @@
+equal:string,nan,zero,object,4
+update:a,b,3
+reinsert:b,a,4
+iterator:a,c,d,true
+clear:b,true
+exhausted:true,true
+foreach:a,c,e,e
+growth:256,333,k0,k10
+independent:2,1,a,b,a
+scalar-homes:9007199254740991,true

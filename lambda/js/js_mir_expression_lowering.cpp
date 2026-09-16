@@ -28,6 +28,10 @@ static MIR_reg_t jm_emit_predicted_literal_field_store(JsMirTranspiler* mt,
         const JsMirReference* ref, MIR_reg_t value);
 static MIR_reg_t jm_emit_packed_array_read(JsMirTranspiler* mt,
         JsMemberNode* member, MIR_reg_t receiver, MIR_reg_t key);
+static MIR_reg_t jm_emit_fixed_typed_array_read(JsMirTranspiler* mt,
+        JsMemberNode* member, MIR_reg_t receiver, MIR_reg_t key);
+static MIR_reg_t jm_emit_existing_array_store(JsMirTranspiler* mt,
+        const JsMirReference* ref, MIR_reg_t value);
 static MIR_reg_t jm_emit_reference_key(JsMirTranspiler* mt,
         const JsMirReference* ref);
 static void jm_emit_compile_profile(JsMirTranspiler* mt, JsOptEvent event,
@@ -426,35 +430,78 @@ static JsFuncCollected* jm_find_direct_function_decl_for_identifier(
     return jm_find_collected_func(mt, (JsFunctionNode*)definition);
 }
 
+static AstNodeId jm_enclosing_binding_block(const AstIndex* index,
+        AstNodeId binding_id) {
+    for (AstNodeId current = binding_id; current != AST_NODE_ID_INVALID;
+            current = ast_index_parent_id(index, current)) {
+        AstNode* node = current < index->count ? index->nodes[current] : NULL;
+        if (node && node->node_type == AST_NODE_BLOCK) return current;
+    }
+    return AST_NODE_ID_INVALID;
+}
+
+static AstNodeId jm_direct_block_statement(const AstIndex* index,
+        AstNodeId block_id, AstNodeId node_id) {
+    while (node_id != AST_NODE_ID_INVALID) {
+        if (ast_index_parent_id(index, node_id) == block_id) return node_id;
+        node_id = ast_index_parent_id(index, node_id);
+    }
+    return AST_NODE_ID_INVALID;
+}
+
 static bool jm_binding_statement_precedes_reference(JsMirTranspiler* mt,
         JsMirVarEntry* var, JsIdentifierNode* id) {
     if (!mt || !var || !id || var->from_env || mt->with_depth > 0 ||
             (mt->current_fc && JM_JS_FACT(mt->current_fc, has_direct_eval)) ||
-            var->binding_end == 0) {
+            !var->binding || var->binding != id->entry) {
         return false;
     }
-    JsBlockNode* block = NULL;
-    if (mt->current_fc && mt->current_fc->node &&
-            mt->current_fc->node->body &&
-            mt->current_fc->node->body->node_type == AST_NODE_BLOCK) {
-        block = (JsBlockNode*)mt->current_fc->node->body;
+    AstIndex* index = mt->tp ? &mt->tp->ast_index : NULL;
+    if (!index || !var->binding->node) return false;
+
+    AstNodeId binding_id = ast_index_find(index, var->binding->node);
+    AstNodeId reference_id = ast_index_find(index, (AstNode*)id);
+    AstNodeId function_id = mt->current_fc && mt->current_fc->node
+        ? ast_index_find(index, (AstNode*)mt->current_fc->node)
+        : AST_NODE_ID_INVALID;
+    if (binding_id == AST_NODE_ID_INVALID ||
+            reference_id == AST_NODE_ID_INVALID) return false;
+    if (function_id == AST_NODE_ID_INVALID || !index->owner_functions ||
+            index->owner_functions[binding_id] != index->owner_functions[function_id] ||
+            index->owner_functions[reference_id] != index->owner_functions[function_id]) {
+        return false;
     }
-    if (!block) return false;
+
+    AstNodeId block_id = jm_enclosing_binding_block(index, binding_id);
+    if (block_id == AST_NODE_ID_INVALID || !index->nodes[block_id] ||
+            index->nodes[block_id]->node_type != AST_NODE_BLOCK) return false;
+    AstNodeId binding_statement = jm_direct_block_statement(index, block_id,
+        binding_id);
+    AstNodeId reference_statement = ast_index_node_descends(index, reference_id,
+        block_id) ? jm_direct_block_statement(index, block_id, reference_id)
+        : AST_NODE_ID_INVALID;
+    if (binding_statement == AST_NODE_ID_INVALID ||
+            reference_statement == AST_NODE_ID_INVALID ||
+            !index->nodes[binding_statement] ||
+            index->nodes[binding_statement]->node_type != AST_NODE_VAR_STAM) {
+        return false;
+    }
+
     int binding_index = -1;
     int reference_index = -1;
-    int index = 0;
-    for (JsAstNode* stmt = block->statements; stmt; stmt = stmt->next, index++) {
-        uint32_t start = stmt->source_span.start_byte;
-        uint32_t end = stmt->source_span.end_byte;
-        if (start <= var->binding_start && var->binding_end <= end) {
-            binding_index = index;
+    int statement_index = 0;
+    JsBlockNode* block = (JsBlockNode*)index->nodes[block_id];
+    for (JsAstNode* statement = block->statements; statement;
+            statement = statement->next, statement_index++) {
+        if ((AstNode*)statement == index->nodes[binding_statement]) {
+            binding_index = statement_index;
         }
-        if (start <= id->source_span.start_byte && id->source_span.end_byte <= end) {
-            reference_index = index;
+        if ((AstNode*)statement == index->nodes[reference_statement]) {
+            reference_index = statement_index;
         }
     }
-    // A preceding declaration in the same statement block dominates every
-    // later statement; switch clauses and closures never enter this proof.
+    // Binding identity and enclosing-block statement order prove initialization
+    // on every path reaching a later statement without optional source spans.
     return binding_index >= 0 && reference_index > binding_index;
 }
 
@@ -1300,6 +1347,9 @@ MIR_reg_t jm_emit_get_value(JsMirTranspiler* mt, const JsMirReference* ref) {
                     MIR_new_reg_op(mt->ctx, numeric_key),
                     MIR_new_reg_op(mt->ctx, ref->native_key_reg)));
             }
+            MIR_reg_t typed = jm_emit_fixed_typed_array_read(mt, ref->member,
+                ref->base_reg, numeric_key);
+            if (typed) return typed;
             MIR_reg_t dense = jm_emit_packed_array_read(mt, ref->member,
                 ref->base_reg, numeric_key);
             if (dense) return dense;
@@ -1395,15 +1445,20 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
                         MIR_T_I64, MIR_new_int_op(mt->ctx, ref->strict ? 1 : 0));
                 }
             } else {
-                MIR_reg_t key = jm_emit_reference_key(mt, ref);
-                MIR_reg_t lane = jm_callr_1(mt, "js_property_lane_for_canonical_key", MIR_T_I64, key);
-                result = jm_callr_5(mt, "js_set", MIR_T_I64, ref->base_reg, lane, key, value, ref->base_reg);
-                result = jm_call_5(mt, "js_assignment_set_result", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, ref->strict ? 1 : 0),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg));
+                result = jm_emit_existing_array_store(mt, ref, value);
+                if (!result) {
+                    MIR_reg_t key = jm_emit_reference_key(mt, ref);
+                    MIR_reg_t lane = jm_callr_1(mt,
+                        "js_property_lane_for_canonical_key", MIR_T_I64, key);
+                    result = jm_callr_5(mt, "js_set", MIR_T_I64,
+                        ref->base_reg, lane, key, value, ref->base_reg);
+                    result = jm_call_5(mt, "js_assignment_set_result", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, ref->strict ? 1 : 0),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg));
+                }
             }
         }
         break;
@@ -2168,6 +2223,25 @@ static bool jm_array_literal_member_targets(JsMemberNode* member,
     return member && array && jm_array_literal_receiver(member->object) == array;
 }
 
+static bool jm_array_local_member_targets(JsMemberNode* member,
+        NameEntry* binding) {
+    if (!member || !binding || !member->object ||
+            member->object->node_type != AST_NODE_IDENT) return false;
+    JsIdentifierNode* identifier = (JsIdentifierNode*)member->object;
+    return identifier->entry == binding;
+}
+
+static NameEntry* jm_array_local_receiver_binding(JsMemberNode* member) {
+    if (!member || !member->object ||
+            member->object->node_type != AST_NODE_IDENT) return NULL;
+    JsIdentifierNode* identifier = (JsIdentifierNode*)member->object;
+    NameEntry* binding = identifier->entry;
+    if (!binding) return NULL;
+    if (binding->is_parameter) return binding;
+    return binding->node && binding->node->node_type ==
+        AST_NODE_VARIABLE_DECLARATOR ? binding : NULL;
+}
+
 static bool jm_array_literal_access_is_loop_hot(JsMirTranspiler* mt,
         JsMemberNode* member) {
     if (!mt || !mt->tp || !member) return false;
@@ -2190,7 +2264,8 @@ static bool jm_array_literal_access_is_loop_hot(JsMirTranspiler* mt,
 static bool jm_is_array_literal_candidate(JsMirTranspiler* mt,
         JsMemberNode* member) {
     JsArrayNode* array = member ? jm_array_literal_receiver(member->object) : NULL;
-    if (!mt || !mt->tp || !array) return false;
+    NameEntry* binding = array ? NULL : jm_array_local_receiver_binding(member);
+    if (!mt || !mt->tp || (!array && !binding)) return false;
     if (jm_array_literal_access_is_loop_hot(mt, member)) return true;
 
     AstIndex* index = &mt->tp->ast_index;
@@ -2201,15 +2276,113 @@ static bool jm_is_array_literal_candidate(JsMirTranspiler* mt,
         JsMemberNode* access = (JsMemberNode*)node;
         TypeId key_type = access->computed
             ? jm_get_effective_type(mt, access->property) : LMD_TYPE_ANY;
-        if (!jm_array_literal_member_targets(access, array) ||
+        if (!(array ? jm_array_literal_member_targets(access, array) :
+                jm_array_local_member_targets(access, binding)) ||
                 (key_type != LMD_TYPE_INT && key_type != LMD_TYPE_FLOAT)) {
             continue;
         }
         static_accesses++;
     }
-    // A one-off literal index is cheaper through the compact Number kernel;
-    // reserve the physical packed guard for repeated accesses or loop bodies.
+    // A one-off index is cheaper through the compact Number kernel. Local and
+    // parameter bindings remain runtime-guarded candidates, never a receiver
+    // type proof, so aliases and later rebinding retain the same miss path.
     return static_accesses >= 2;
+}
+
+static int jm_fixed_typed_array_receiver_kind(JsMemberNode* member) {
+    if (!member || !member->object ||
+            member->object->node_type != AST_NODE_IDENT) return -1;
+    JsIdentifierNode* identifier = (JsIdentifierNode*)member->object;
+    if (!identifier->entry || !identifier->entry->node ||
+            identifier->entry->node->node_type != AST_NODE_VARIABLE_DECLARATOR) {
+        return -1;
+    }
+    JsVariableDeclaratorNode* declaration =
+        (JsVariableDeclaratorNode*)identifier->entry->node;
+    if (!declaration->init || declaration->init->node_type != AST_NODE_NEW_EXPR) {
+        return -1;
+    }
+    JsCallNode* construct = (JsCallNode*)declaration->init;
+    if (!construct->callee || construct->callee->node_type != AST_NODE_IDENT) {
+        return -1;
+    }
+    String* name = ((JsIdentifierNode*)construct->callee)->name;
+    if (!name) return -1;
+    if (name->len == 10 && memcmp(name->chars, "Uint8Array", 10) == 0) {
+        return JS_TYPED_UINT8;
+    }
+    if (name->len == 12 && memcmp(name->chars, "Float64Array", 12) == 0) {
+        return JS_TYPED_FLOAT64;
+    }
+    return -1;
+}
+
+static MIR_reg_t jm_emit_existing_array_store(JsMirTranspiler* mt,
+        const JsMirReference* ref, MIR_reg_t value) {
+    if (!mt || !ref || !ref->member || !ref->computed_key ||
+            ref->native_key_reg == 0 ||
+            (ref->native_key_type != LMD_TYPE_INT &&
+             ref->native_key_type != LMD_TYPE_FLOAT) ||
+            !jm_is_array_literal_candidate(mt, ref->member)) {
+        return 0;
+    }
+
+    // Completion owns descriptor/prototype/exotic policy. A true completion
+    // is an already-present own writable element; the one miss materializes
+    // the same evaluated key for the existing ordinary Set continuation.
+    MIR_reg_t result = jm_new_reg(mt, "dense_store", MIR_T_I64);
+    MIR_label_t miss = jm_new_label(mt);
+    MIR_label_t done = jm_new_label(mt);
+    MIR_reg_t index = ref->native_key_reg;
+    if (ref->native_key_type == LMD_TYPE_FLOAT) {
+        MIR_reg_t lower = jm_new_reg(mt, "store_key_lower", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DGE,
+            MIR_new_reg_op(mt->ctx, lower),
+            MIR_new_reg_op(mt->ctx, ref->native_key_reg),
+            MIR_new_double_op(mt->ctx, 0.0)));
+        jm_emit_branch(mt, MIR_BF, miss, lower);
+        MIR_reg_t upper = jm_new_reg(mt, "store_key_upper", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DLE,
+            MIR_new_reg_op(mt->ctx, upper),
+            MIR_new_reg_op(mt->ctx, ref->native_key_reg),
+            MIR_new_double_op(mt->ctx, 4294967294.0)));
+        jm_emit_branch(mt, MIR_BF, miss, upper);
+        index = jm_emit_double_to_int(mt, ref->native_key_reg);
+        MIR_reg_t roundtrip = jm_new_reg(mt, "store_key_roundtrip", MIR_T_D);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
+            MIR_new_reg_op(mt->ctx, roundtrip), MIR_new_reg_op(mt->ctx, index)));
+        MIR_reg_t integral = jm_new_reg(mt, "store_key_integral", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DEQ,
+            MIR_new_reg_op(mt->ctx, integral),
+            MIR_new_reg_op(mt->ctx, ref->native_key_reg),
+            MIR_new_reg_op(mt->ctx, roundtrip)));
+        jm_emit_branch(mt, MIR_BF, miss, integral);
+    }
+    MIR_reg_t completion = jm_callr_3(mt, "js_elements_set_int_completion",
+        MIR_T_I64, ref->base_reg, index, value);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+        MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, completion),
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+    jm_emit_mov(mt, result, value);
+    jm_emit_jmp(mt, done);
+
+    jm_emit_label(mt, miss);
+    MIR_reg_t key = jm_emit_reference_key(mt, ref);
+    MIR_reg_t lane = jm_callr_1(mt, "js_property_lane_for_canonical_key",
+        MIR_T_I64, key);
+    MIR_reg_t set_result = jm_callr_5(mt, "js_set", MIR_T_I64,
+        ref->base_reg, lane, key, value, ref->base_reg);
+    MIR_reg_t assigned = jm_call_5(mt, "js_assignment_set_result", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, set_result),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, ref->strict ? 1 : 0),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg));
+    jm_emit_mov(mt, result, assigned);
+    jm_emit_label(mt, done);
+    jm_emit_compile_profile(mt, JS_OPT_MIR_DENSE_INDEX_ADMITTED,
+        JS_OPT_OUTCOME_TAKEN);
+    return result;
 }
 
 static JsObjectNode* jm_direct_call_literal_return(JsMirTranspiler* mt,
@@ -2747,27 +2920,49 @@ static MIR_reg_t jm_emit_predicted_literal_field_store(JsMirTranspiler* mt,
     String* name = NULL;
     MirFieldAccessPlan plan = {};
     if (!jm_plan_predicted_literal_field(mt, ref->member, &name, &plan) ||
-            plan.static_field->type->type_id != LMD_TYPE_FLOAT) {
+            (plan.static_field->type->type_id != LMD_TYPE_FLOAT &&
+             plan.static_field->type->type_id != LMD_TYPE_STRING)) {
         return 0;
     }
 
-    // Float slots can take only the self-tagged IEEE Item arm directly. A
-    // tagged zero, pointer, or incompatible value takes js_set_name_id, where
-    // the existing shape/descriptor transition policy remains authoritative.
+    // Float and String slots have distinct self-contained physical carriers.
+    // Any other Item form takes js_set_name_id, where the existing
+    // shape/descriptor transition policy remains authoritative.
     MIR_reg_t result = jm_new_reg(mt, "literal_store", MIR_T_I64);
     MIR_label_t miss = jm_new_label(mt);
     MIR_label_t done = jm_new_label(mt);
     MIR_reg_t data = jm_emit_predicted_literal_field_data_guard(mt,
         ref->base_reg, &plan, miss);
     if (!data) return 0;
-    MIR_reg_t inline_bits = jm_new_reg(mt, "literal_store_bits", MIR_T_I64);
-    jm_emit_reg_binary_op(mt, MIR_AND, inline_bits, value,
-        MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
-        MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, inline_bits),
-        MIR_new_int_op(mt->ctx, 0)));
-    MIR_reg_t native_value = em_emit_bits_double(&mt->func_em->em, value);
-    em_store_at(&mt->func_em->em, data, plan.byte_offset, MIR_T_D, native_value);
+    if (plan.static_field->type->type_id == LMD_TYPE_FLOAT) {
+        MIR_reg_t inline_bits = jm_new_reg(mt, "literal_store_bits", MIR_T_I64);
+        jm_emit_reg_binary_op(mt, MIR_AND, inline_bits, value,
+            MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+            MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, inline_bits),
+            MIR_new_int_op(mt->ctx, 0)));
+        MIR_reg_t native_value = em_emit_bits_double(&mt->func_em->em, value);
+        em_store_at(&mt->func_em->em, data, plan.byte_offset, MIR_T_D,
+            native_value);
+    } else {
+        MIR_reg_t value_tag = jm_new_reg(mt, "literal_store_string_tag",
+            MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_URSH,
+            MIR_new_reg_op(mt->ctx, value_tag), MIR_new_reg_op(mt->ctx, value),
+            MIR_new_int_op(mt->ctx, 56)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+            MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, value_tag),
+            MIR_new_int_op(mt->ctx, LMD_TYPE_STRING)));
+        MIR_reg_t string_ptr = jm_new_reg(mt, "literal_store_string_ptr",
+            MIR_T_I64);
+        jm_emit_reg_binary_op(mt, MIR_AND, string_ptr, value,
+            MIR_new_uint_op(mt->ctx, UINT64_C(0x00ffffffffffffff)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+            MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, string_ptr),
+            MIR_new_int_op(mt->ctx, 0)));
+        em_store_at(&mt->func_em->em, data, plan.byte_offset, MIR_T_I64,
+            string_ptr);
+    }
     jm_emit_mov(mt, result, value);
     jm_emit_jmp(mt, done);
 
@@ -2781,6 +2976,86 @@ static MIR_reg_t jm_emit_predicted_literal_field_store(JsMirTranspiler* mt,
     jm_emit_mov(mt, result, fallback);
     jm_emit_label(mt, done);
     jm_emit_compile_profile(mt, JS_OPT_MIR_LITERAL_FIELD_ADMITTED,
+        JS_OPT_OUTCOME_TAKEN);
+    return result;
+}
+
+static MIR_reg_t jm_emit_fixed_typed_array_read(JsMirTranspiler* mt,
+        JsMemberNode* member, MIR_reg_t receiver, MIR_reg_t key) {
+    int element_type = jm_fixed_typed_array_receiver_kind(member);
+    if (!mt || element_type < 0 || !member || !member->computed) return 0;
+
+    // The declaration selects only the element-kind arm. The receiver remains
+    // fully runtime-guarded, and the current backing pointer is acquired only
+    // after bounds validation so no raw buffer borrow crosses a call (D8.4.1v2).
+    MIR_reg_t result = jm_new_reg(mt, "typed_read", MIR_T_I64);
+    MIR_label_t miss = jm_new_label(mt);
+    MIR_label_t done = jm_new_label(mt);
+    MirEmitter* emitter = &mt->func_em->em;
+
+    MIR_reg_t lower = jm_new_reg(mt, "typed_key_lower", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DGE,
+        MIR_new_reg_op(mt->ctx, lower), MIR_new_reg_op(mt->ctx, key),
+        MIR_new_double_op(mt->ctx, 0.0)));
+    jm_emit_branch(mt, MIR_BF, miss, lower);
+    MIR_reg_t upper = jm_new_reg(mt, "typed_key_upper", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DLE,
+        MIR_new_reg_op(mt->ctx, upper), MIR_new_reg_op(mt->ctx, key),
+        MIR_new_double_op(mt->ctx, 4294967294.0)));
+    jm_emit_branch(mt, MIR_BF, miss, upper);
+    MIR_reg_t index = jm_emit_double_to_int(mt, key);
+    MIR_reg_t roundtrip = jm_new_reg(mt, "typed_key_roundtrip", MIR_T_D);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
+        MIR_new_reg_op(mt->ctx, roundtrip), MIR_new_reg_op(mt->ctx, index)));
+    MIR_reg_t integral = jm_new_reg(mt, "typed_key_integral", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DEQ,
+        MIR_new_reg_op(mt->ctx, integral), MIR_new_reg_op(mt->ctx, key),
+        MIR_new_reg_op(mt->ctx, roundtrip)));
+    jm_emit_branch(mt, MIR_BF, miss, integral);
+
+    MIR_reg_t typed = em_guard_container(emitter, receiver, LMD_TYPE_MAP, miss);
+    MIR_reg_t map_kind = em_load_at(emitter, typed,
+        LAMBDA_GC_OFF_CONTAINER_MAP_KIND, MIR_T_U8, "typed_map_kind");
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+        MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, map_kind),
+        MIR_new_int_op(mt->ctx, MAP_KIND_TYPED_ARRAY)));
+    MIR_reg_t actual_type = jm_callr_1(mt, "js_typed_array_element_type",
+        MIR_T_I64, receiver);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+        MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, actual_type),
+        MIR_new_int_op(mt->ctx, element_type)));
+    MIR_reg_t length = jm_callr_1(mt, "js_typed_array_length", MIR_T_I64,
+        receiver);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BGE,
+        MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, index),
+        MIR_new_reg_op(mt->ctx, length)));
+    MIR_reg_t data = jm_callr_1(mt, "js_typed_array_current_data_ptr", MIR_T_I64,
+        receiver);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+        MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, data),
+        MIR_new_int_op(mt->ctx, 0)));
+    if (element_type == JS_TYPED_UINT8) {
+        MIR_reg_t address = em_element_address(emitter, data, index, 1);
+        MIR_reg_t loaded = em_load_at(emitter, address, 0, MIR_T_U8,
+            "typed_uint8");
+        jm_emit_mov(mt, result, jm_box_native(mt, loaded, LMD_TYPE_INT));
+    } else {
+        MIR_reg_t address = em_element_address(emitter, data, index,
+            (int)sizeof(double));
+        MIR_reg_t loaded = em_load_at(emitter, address, 0, MIR_T_D,
+            "typed_float64");
+        jm_emit_mov(mt, result, jm_box_native(mt, loaded, LMD_TYPE_FLOAT));
+    }
+    jm_emit_jmp(mt, done);
+
+    jm_emit_label(mt, miss);
+    MIR_reg_t fallback = jm_call_2(mt, "js_elements_get_number", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, receiver),
+        MIR_T_D, MIR_new_reg_op(mt->ctx, key));
+    jm_emit_error_lane_propagate_check(mt);
+    jm_emit_mov(mt, result, fallback);
+    jm_emit_label(mt, done);
+    jm_emit_compile_profile(mt, JS_OPT_MIR_DENSE_INDEX_ADMITTED,
         JS_OPT_OUTCOME_TAKEN);
     return result;
 }
@@ -2822,7 +3097,24 @@ static MIR_reg_t jm_emit_packed_array_read(JsMirTranspiler* mt,
     jm_emit_branch(mt, MIR_BF, miss, integral);
 
     MirEmitter* emitter = &mt->func_em->em;
-    MIR_reg_t array = em_guard_container(emitter, receiver, LMD_TYPE_ARRAY, miss);
+    // The source candidate chooses this small pair of physical arms, not the
+    // receiver representation.  Split it after one raw-container proof so a
+    // numeric ArrayNum does not pay a tagged-array miss before its own guard.
+    MIR_reg_t array = em_guard_container(emitter, receiver,
+        LMD_TYPE_RAW_POINTER, miss);
+    MIR_reg_t array_type = em_load_at(emitter, array,
+        LAMBDA_GC_OFF_CONTAINER_TYPE_ID, MIR_T_U8, "dense_array_type");
+    MIR_label_t tagged = jm_new_label(mt);
+    MIR_label_t numeric = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+        MIR_new_label_op(mt->ctx, tagged), MIR_new_reg_op(mt->ctx, array_type),
+        MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+        MIR_new_label_op(mt->ctx, numeric), MIR_new_reg_op(mt->ctx, array_type),
+        MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_NUM)));
+    jm_emit_jmp(mt, miss);
+
+    jm_emit_label(mt, tagged);
     MIR_reg_t content = em_load_at(emitter, array, LAMBDA_GC_OFF_CONTAINER_FLAGS,
         MIR_T_U8, "dense_content");
     jm_emit_reg_binary_op(mt, MIR_AND, content, content,
@@ -2867,6 +3159,75 @@ static MIR_reg_t jm_emit_packed_array_read(JsMirTranspiler* mt,
     MIR_reg_t address = em_element_address(emitter, items, index, (int)sizeof(Item));
     MIR_reg_t loaded = em_load_at(emitter, address, 0, MIR_T_I64, "dense_loaded");
     jm_emit_mov(mt, result, loaded);
+    jm_emit_jmp(mt, done);
+
+    jm_emit_label(mt, numeric);
+    MIR_reg_t numeric_content = em_load_at(emitter, array,
+        LAMBDA_GC_OFF_CONTAINER_FLAGS, MIR_T_U8, "numeric_content");
+    jm_emit_reg_binary_op(mt, MIR_AND, numeric_content, numeric_content,
+        MIR_new_int_op(mt->ctx, 1));
+    jm_emit_branch(mt, MIR_BT, miss, numeric_content);
+    MIR_reg_t numeric_flags = em_load_at(emitter, array,
+        LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS, MIR_T_U8, "numeric_flags");
+    MIR_reg_t numeric_layout = jm_new_reg(mt, "numeric_layout", MIR_T_I64);
+    jm_emit_reg_binary_op(mt, MIR_AND, numeric_layout, numeric_flags,
+        MIR_new_int_op(mt->ctx, 0x03));
+    jm_emit_branch(mt, MIR_BT, miss, numeric_layout);
+    MIR_reg_t numeric_elements = jm_new_reg(mt, "numeric_elements", MIR_T_I64);
+    jm_emit_reg_binary_op(mt, MIR_AND, numeric_elements, numeric_flags,
+        MIR_new_int_op(mt->ctx, JS_ELEMENTS_STATE_MASK));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+        MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, numeric_elements),
+        MIR_new_int_op(mt->ctx, JS_ELEMENTS_PACKED_NUMERIC)));
+    MIR_reg_t numeric_attr_type = em_load_at(emitter, array,
+        LAMBDA_GC_OFF_MAP_TYPE, MIR_T_I64, "numeric_attr_type");
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+        MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, numeric_attr_type),
+        MIR_new_int_op(mt->ctx, 0)));
+    MIR_reg_t numeric_length = em_load_at(emitter, array,
+        LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "numeric_length");
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BGE,
+        MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, index),
+        MIR_new_reg_op(mt->ctx, numeric_length)));
+    MIR_reg_t numeric_capacity = em_load_at(emitter, array,
+        LAMBDA_GC_OFF_LIST_CAPACITY, MIR_T_I64, "numeric_capacity");
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BGE,
+        MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, index),
+        MIR_new_reg_op(mt->ctx, numeric_capacity)));
+    MIR_reg_t numeric_items = em_load_at(emitter, array,
+        LAMBDA_GC_OFF_LIST_ITEMS, MIR_T_I64, "numeric_items");
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+        MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, numeric_items),
+        MIR_new_int_op(mt->ctx, 0)));
+    MIR_reg_t element_type = em_load_at(emitter, array,
+        LAMBDA_GC_OFF_CONTAINER_MAP_KIND, MIR_T_U8, "numeric_element_type");
+    MIR_label_t numeric_integer = jm_new_label(mt);
+    MIR_label_t numeric_float = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+        MIR_new_label_op(mt->ctx, numeric_integer), MIR_new_reg_op(mt->ctx, element_type),
+        MIR_new_int_op(mt->ctx, ELEM_INT)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+        MIR_new_label_op(mt->ctx, numeric_integer), MIR_new_reg_op(mt->ctx, element_type),
+        MIR_new_int_op(mt->ctx, ELEM_INT64)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+        MIR_new_label_op(mt->ctx, numeric_float), MIR_new_reg_op(mt->ctx, element_type),
+        MIR_new_int_op(mt->ctx, ELEM_FLOAT64)));
+    jm_emit_jmp(mt, miss);
+
+    jm_emit_label(mt, numeric_integer);
+    MIR_reg_t numeric_i64_address = em_element_address(emitter, numeric_items,
+        index, (int)sizeof(int64_t));
+    MIR_reg_t numeric_i64 = em_load_at(emitter, numeric_i64_address, 0,
+        MIR_T_I64, "numeric_i64");
+    jm_emit_mov(mt, result, jm_box_native(mt, numeric_i64, LMD_TYPE_INT));
+    jm_emit_jmp(mt, done);
+
+    jm_emit_label(mt, numeric_float);
+    MIR_reg_t numeric_f64_address = em_element_address(emitter, numeric_items,
+        index, (int)sizeof(double));
+    MIR_reg_t numeric_f64 = em_load_at(emitter, numeric_f64_address, 0,
+        MIR_T_D, "numeric_f64");
+    jm_emit_mov(mt, result, jm_box_native(mt, numeric_f64, LMD_TYPE_FLOAT));
     jm_emit_jmp(mt, done);
 
     jm_emit_label(mt, miss);

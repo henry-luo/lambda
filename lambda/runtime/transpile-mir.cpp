@@ -11405,6 +11405,30 @@ static bool mir_literal_mul_overflows_i64(MirTranspiler* mt, AstBinaryNode* bi) 
     return product > (long double)INT64_MAX || product < (long double)INT64_MIN;
 }
 
+// The settled word a folded node names in this unit's const pool. Read at
+// compile time so a self-contained value can be baked as an immediate; its
+// address is never emitted (DI14, RC4). One accessor so the interval oracle and
+// the emitter cannot disagree about what a node's folded value is (rule 13).
+static bool mir_const_folded_item(MirTranspiler* mt, AstNode* node, Item* out,
+        AstNode** evaluated_out) {
+    if (!mt || !node || !out || !mt->const_list) return false;
+    AstNode* evaluated = ast_unwrap_primary(node);
+    // A bare literal is a childless PRIMARY, which `ast_unwrap_primary` reports
+    // as NULL; such a node folds in place, so fall back to the node itself.
+    if (!evaluated) evaluated = node;
+    if (evaluated->const_kind != AST_CONST_FOLDED ||
+            evaluated->const_index >= (uint32_t)mt->const_list->length) {
+        return false;
+    }
+    const uint64_t* slot = (const uint64_t*)arraylist_get(mt->const_list,
+        (int)evaluated->const_index);
+    if (!slot) return false;
+    out->item = *slot;
+    if (!lambda_item_is_self_contained(out->item)) return false;
+    if (evaluated_out) *evaluated_out = evaluated;
+    return true;
+}
+
 static bool mir_int_lane_interval(MirTranspiler* mt, AstNode* node,
     int64_t* lower, int64_t* upper) {
     if (!node || !lower || !upper) return false;
@@ -11414,6 +11438,20 @@ static bool mir_int_lane_interval(MirTranspiler* mt, AstNode* node,
         if (literal < INT53_MIN || literal > INT53_MAX) return false;
         *lower = literal;
         *upper = literal;
+        return true;
+    }
+    // T28-6: a folded constant is as known as a spelled literal. A module
+    // `let K = 1` read is an immediate after T28-1, so the band test on
+    // `k == K` -- two instructions per evaluation for a value the compiler
+    // holds -- is dead (D2.2.2, S4.1.2 is about the semantics, not where the
+    // test sits).
+    Item folded = {.item = 0};
+    if (mir_const_folded_item(mt, original, &folded, NULL) &&
+            get_type_id(folded) == LMD_TYPE_INT) {
+        int64_t value = lambda_int_item_to_i64(folded);
+        if (value < INT53_MIN || value > INT53_MAX) return false;
+        *lower = value;
+        *upper = value;
         return true;
     }
     node = ast_unwrap_primary(original);
@@ -20624,6 +20662,30 @@ static bool mir_shape_layout_is_addressable(TypeMap* map_type) {
 // data points to packed struct where each field is 8-byte aligned.
 // Returns native value for scalars (INT/FLOAT/BOOL/STRING) or tagged Item for containers.
 // obj_boxed: pre-computed tagged Item for the object (avoids double-evaluation).
+// T28: is this receiver expression provably non-null, so a field read needs no
+// receiver-null arm? A NAMED binding whose declared contract is a non-optional
+// record is: its declaration or parameter boundary admitted the value and a
+// rebind must re-admit it (D3.2.4v3, S9.1.2), so null was never admissible.
+//
+// Deliberately limited to a named binding. An arbitrary expression of
+// non-optional record type is NOT safe: a container field whose packed slot is
+// empty is reconstructed as `ItemNull` by the very function below, so `a.b.c`
+// can meet a null `a.b` whose static type says otherwise. That residue is what
+// the old `skip_null_guard = false` hardcode was defending, and it stays
+// guarded.
+static bool mir_receiver_binding_non_null(AstNode* object) {
+    AstNode* node = ast_unwrap_primary(object);
+    if (!node || node->node_type != AST_NODE_IDENT) return false;
+    NameEntry* entry = ((AstIdentNode*)node)->entry;
+    if (!entry || !entry->has_type_annotation || !entry->declared_type) return false;
+    if (entry->type_widened) return false;   // reassignment lost the contract
+    Type* declared = entry->declared_type;
+    if (lambda_type_accepts_null(declared)) return false;
+    // The declared contract must itself be the non-optional record: a wrapper
+    // that merely *contains* one (an optional, a union) is not a proof.
+    return lambda_type_nonnull_map_contract(declared) == declared;
+}
+
 // skip_null_guard: when true, omit the null check branch (caller guarantees non-null).
 // D2.6.6: the packed attribute buffer sits at a DIFFERENT offset in the two
 // shapes — `Map::data` at 16, and `Element::data` at 48, which an object shares
@@ -21551,7 +21613,12 @@ static MirValue emit_member_value(MirTranspiler* mt, AstFieldNode* field_node) {
                     log_debug("mir: direct field read: %.*s (type=%d offset=%lld)",
                         (int)ident->name->len, ident->name->chars,
                         storage_type, (long long)se->byte_offset);
-                    bool skip_null_guard = false; // typed variables can still hold null
+                    // T28: a named binding with a non-optional record contract
+                    // cannot hold null, so drop the receiver arm -- a branch,
+                    // two labels and a sentinel materialization per read, and
+                    // the block split that came with them.
+                    bool skip_null_guard =
+                        mir_receiver_binding_non_null(field_node->object);
                     ValueRep rep = field_is_container ? VALUE_REP_ITEM
                         : lambda_canonical_rep_for_type_id(storage_type);
                     return publish(emit_mir_direct_field_read(mt, boxed_obj, se,
@@ -29101,20 +29168,15 @@ static AstNode* mir_navigation_direct_parent(AstNode* node) {
 // [vibe/Lambda_Design_Runtime_Const.md RC8]
 static bool mir_emit_const_folded_value(MirTranspiler* mt, AstNode* node,
         ValueRep required, MirValue* out) {
-    if (!mt || !node || !node->type || !out || !mt->const_list) return false;
-    AstNode* evaluated = ast_unwrap_primary(node);
-    if (!evaluated || !evaluated->type) return false;
-    if (evaluated->const_kind != AST_CONST_FOLDED) return false;
-    if (evaluated->const_index >= (uint32_t)mt->const_list->length) return false;
-    // The pool slot is read *here*, at compile time, so a self-contained value
-    // can be baked as an immediate. Its address is never emitted (DI14).
-    const uint64_t* slot = (const uint64_t*)arraylist_get(mt->const_list,
-        (int)evaluated->const_index);
-    if (!slot) return false;
-    Item value = {.item = *slot};
-    // the producer already admitted only self-contained words; re-check here
-    // because a baked operand must never be a pointer (DI14, RC4).
-    if (!lambda_item_is_self_contained(value.item)) return false;
+    if (!mt || !node || !node->type || !out) return false;
+    // Shared accessor: the slot read and the self-contained re-check live in
+    // one place so this emitter and the interval oracle cannot disagree.
+    Item value = {.item = 0};
+    AstNode* evaluated = NULL;
+    if (!mir_const_folded_item(mt, node, &value, &evaluated) || !evaluated ||
+            !evaluated->type) {
+        return false;
+    }
 
     TypeId tid = get_type_id(value);
     // an Item demand takes the tagged word unchanged -- it already is the value.
@@ -36253,9 +36315,23 @@ static bool mir_callsite_exact_raw_key(AstCallNode* call, AstFuncNode* callee,
             index++, argument = argument ? argument->next : NULL,
             parameter = parameter ? parameter->next : NULL) {
         if (!argument || !parameter || argument->node_type == AST_NODE_NAMED_ARG ||
-                argument->node_type == AST_NODE_SPREAD || parameter->is_optional ||
-                parameter->is_var_param) {
+                argument->node_type == AST_NODE_SPREAD || parameter->is_optional) {
             return false;
+        }
+        // D8.3.4v3 (O11v2): a `var` position is admitted when it travels in the
+        // SAME carrier on both edges, so the CW33 home transport the ordinary
+        // argument loop already emits applies unchanged and the borrow's
+        // write-back is literally the boxed path's (D8.1.1v10, S9.1.2/S9.1.3).
+        // A position whose contract would take a raw scalar lane is exactly
+        // O11's original hazard -- a raw carrier replacing the caller-owned
+        // location -- and is not yet transported, so it still routes to `_b`.
+        if (parameter->is_var_param) {
+            TypeId lane = LMD_TYPE_ANY;
+            if (mir_contract_native_scalar_type(parameter->contract_type
+                    ? parameter->contract_type : (Type*)parameter, &lane) ||
+                    is_native_param_type_id(parameter->type_id)) {
+                return false;
+            }
         }
         TypeBinder* binder = parameter->binder;
         if (binder && binder->bound == &TYPE_TYPE) {

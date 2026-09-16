@@ -1,6 +1,6 @@
 # LambdaJS — Performance & Optimization
 
-> **Last verified against tree:** 2026-09-15 *(§2.1 call-argument slots and call flatten re-verified)*
+> **Last verified against tree:** 2026-09-16
 
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document is the cross-cutting performance catalog. It records the optimizations that exist in the engine today (each grounded in code with a `file:line` anchor), summarizes the benchmark findings from the development tuning logs, and points to the sibling doc that *owns* each mechanism in full detail. It does not re-derive any mechanism — for the how, follow the link.
 >
@@ -85,6 +85,20 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   [JS Tune11](../../../vibe/jube/JS_Tune11.md). *Measured:* the same-source
   11-pair A/B gives `spectralnorm` 0.5048x, `matmul` 0.5546x, and `array1`
   0.5785x candidate/control, with exact output on every pair.
+- **Tune12 bounded Number-return admission.**
+  `jm_infer_native_numeric_returns` and
+  `jm_populate_native_number_binding_facts`
+  (`js_mir_function_collection_class_inference.cpp`) prove a complete simple
+  function under its Number-native entry shape with bounded,
+  binding-identity fixed-point dataflow. Returned accumulators, direct
+  recursive components, assignments, and branch joins remain F64 only when
+  every reachable return is proved Number; other calls retain the complete
+  boxed body. Native local stores use those binding facts, and an actual
+  closure capture triggers the existing boxing path lazily. The guard performs
+  no `ToNumber`, excluding Symbols and BigInts as required by **S1.11**,
+  **D2.4.1–D2.4.3**, **D3.3.2v2**, and **D8.4.1v2–D8.4.3v2**. *Measured
+  (Tune12 final):* 3-pair A/B gives `fib` 0.1262x, `sum` 0.0249x, and
+  `sumfp` 0.0244x, with equal output on every pair.
 - **1-character ASCII interning.** A single-byte ASCII result of `str[i]` / `charAt` is returned from a process-wide 128-entry pool `g_ascii_char_pool` via `js_intern_ascii_char` (`js_globals.cpp:4356`, `:4394`), used by the string-index fast path (`js_runtime.cpp:6410`), instead of allocating a fresh `String`. Strings are immutable so reference identity is unobservable, making interning behaviorally identical. *Owner:* [JS_10 — Built-ins](JS_10_Builtins.md). *Measured (Tune1 §7.2.B):* 2M `str[i]` calls −14%, 2M of a hex-format helper −12%; the only piece of that round's string-alloc proposals that survived verification (the multi-operand concat fusion and an inliner widening were both reverted).
 - **ASCII substring reuse and leaf profiling.** Search, split, slice,
   character-access, and concat record distinct ASCII/Unicode trace events.
@@ -113,11 +127,37 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   replaces ≈20 function calls per step (two hash lookups, a name allocation,
   and a full property set) with ≈2. *Owner:* [JS_08 — Iterators & Generators](JS_08_Iterators_Generators.md). *Measured (Js28):* ≈10× fewer calls per `for-of` step and +56 baseline test262 passes.
 - **Dense-array write & sparse-hole fill.** A non-strict or strict indexed write to an existing own dense slot of a plain array short-circuits via `js_array_fast_own_dense_set` (`js_runtime.cpp:5048`) before any accessor / prototype / typed-array work — correct because an own writable data property is written directly per `OrdinarySet` (Tune5 §2). Gap fill on a sparse write writes the deleted-sentinel hole, not `undefined` (`js_runtime.cpp:7199`, `:7323`), so array methods skip holes instead of materializing a million `undefined` slots. *Owner:* [JS_06 §6](JS_06_Objects_Properties_Prototypes.md). *Measured:* Tune5 restored sieve from a ≈350× write-path regression (≈114× recovery) once the per-write `snprintf` + prototype walk was bypassed; Js28's hole fill cut `Array.prototype.every`/`some` and `Object.isFrozen` on sparse arrays from ≈3 s to single-digit milliseconds.
+- **Tune12 collection order nodes and ordinary physical heads.**
+  `JsCollectionEntry` points to its stable `JsCollectionOrderNode`
+  (`js_runtime.cpp`), making the hash index the sole key lookup for
+  set/add/get/has/delete while the node remains the single key/value owner
+  through iterator tombstones. `js_add` first recognizes a noncoercing Number
+  pair. `js_array_try_get_existing_own_dense_no_gc` and
+  `js_array_try_set_existing_own_dense_no_gc` admit only existing plain dense
+  own slots without numeric descriptor overlays. Parameter/local MIR
+  references add matching guarded tagged-array, ArrayNum, Uint8Array, and
+  Float64Array arms, each with one existing semantic continuation. This
+  shares only physical work, retains precisely rooted fallback state, and
+  leaves descriptor, host, coercion, and growth cases in the full kernel
+  (**S1.11**, **D1.3v3**, **D5.3.2–D5.3.5**, **D8.4.1v2**). *Measured
+  (Tune12):* `knucleotide` is 0.1400x control; direct 8K-key update/reinsert
+  probes fall from 132/259 ms to 4/7 ms.
 
 ### 2.4 Runtime builtin tier
 
 - **TypedArray ArrayNum bulk paths.** Same-type bulk copy uses the shared ArrayNum byte kernels and cross-type conversion hoists element policy out of the loop — `js_typed_array_try_raw_set_same_type`, `js_typed_array_raw_copy_same_type`, and `js_typed_array_raw_copy_reversed`. The former private env-gated raw family is retired; detach/out-of-bounds is validated once where no user code can run between check and access, and callback methods revalidate at the spec points. *Owner:* [JS_12 — TypedArrays](JS_12_TypedArrays.md). *Measured (earlier Tune4 T4-P2, unrelated to callable Tune4):* compliance suites were neutral, while large bulk workloads improved materially.
 - **Regex property-walk cursor.** `js_regexp_test_property_all` (`js_runtime.cpp:15653`) threads a resumable range cursor (`js_regex_sorted_range_contains_cursor`, `:12656`) through the generated-property walk for `^\p{X}+$` / `^\P{X}+$` forms; near-monotonic input advances the cursor in O(1), collapsing a per-code-point binary search to near-linear. The cursor is engaged only for the generated gc/script/scx/binary kinds (`:15674`); other kinds keep the flat binary search. *Owner:* [JS_11 — RegExp](JS_11_RegExp.md). *Measured (Tune3 §2.5, kept):* the generated-property test cluster (439 tests) fell 61.84 s → 37.67 s (−39%) on a quiet machine, with zero flipped exit codes across 583 property tests.
+- **Tune12 admitted bulk RegExp match/replace.**
+  `js_regexp_symbol_match` and `js_regexp_symbol_replace` (`js_runtime.cpp`)
+  select a bulk RE2 loop only for primitive ASCII input, an ordinary global
+  RegExp with builtin `exec`, writable own `lastIndex`, no captures, and a
+  supported primitive replacement. The loop still publishes match state,
+  resets `lastIndex`, advances empty matches, and allocates results under
+  roots; captures, Unicode, callback replacements, descriptor changes, and
+  symbol/exec overrides take the existing protocol. Bulk admission therefore
+  does not skip observable dispatch or replay it on a miss (**S1.11**,
+  **D5.3.2–D5.3.5**, **D6.2.2v2**). *Measured (Tune12):* `regexredux` is
+  0.3018x control in the 3-pair full-runtime A/B.
 - **Sys-func registry reduction.** The JIT import table in `sys_func_registry.c` currently holds 476 `js_*` entries (down from a peak past 547). Tune8 removed entries that telemetry confirmed were never emitted by any lowering file and were never folded into a dispatcher (the C functions stay linked; only the `{"name", FPTR(name)}` rows go), plus inverse-pair folds (`js_ne_raw` → `js_eq_raw` + an inline `MIR_XOR`). A smaller import table means shorter `import_cache` probe chains during JIT compile. *Owner:* [JS_04 §8](JS_04_MIR_Lowering.md), [JS_10](JS_10_Builtins.md). *Measured (Tune8):* −91 entries from the telemetry pass alone moved aggregate test262 per-test wall-clock −7.24% versus the same-HEAD baseline, at 0 regressions; the win is in compile time, not run time. MIR cannot inline through native-C imports (`process_inlines` only inlines `MIR_func_item`s), so a wide single dispatcher would pay its `switch` on every call — which is why hot entries (`js_property_set`, `js_property_get`, `js_add`) deliberately stay direct.
 
 ---

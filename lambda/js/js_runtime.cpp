@@ -996,11 +996,17 @@ static Item js_compute_callback_this(JsFunction* fn, Item thisArg_item) {
 #define JS_COLLECTION_SET 1
 
 struct JsCollectionOrderNode {
-    Item key;
-    Item value;
+    // slots[0..1] own the observable key/value. The matching tail slots hold
+    // wide scalar payloads so entries never borrow a caller's number frame.
+    Item slots[4];
     JsCollectionOrderNode* next;
-    JsCollectionOrderNode* prev;
     bool deleted;
+};
+
+enum JsCollectionNodeSlot {
+    JS_COLLECTION_NODE_KEY = 0,
+    JS_COLLECTION_NODE_VALUE = 1,
+    JS_COLLECTION_NODE_ITEM_COUNT = 2,
 };
 
 struct JsCollectionData {
@@ -1020,6 +1026,10 @@ struct JsCollectionMap {
 };
 
 static JsCollectionData* js_get_collection_data(Item obj);
+static Item js_collection_node_raw_item(const JsCollectionOrderNode* node,
+    JsCollectionNodeSlot slot);
+static Item js_collection_node_read_item(JsCollectionOrderNode* node,
+    JsCollectionNodeSlot slot);
 
 
 
@@ -6301,7 +6311,8 @@ static bool js_array_companion_has_array_index_shape(Array* arr) {
 // This is intentionally narrower than js_elements_get_int(): it only handles the
 // plain own-slot case and lets holes, sparse entries, accessors, arguments, and
 // prototype numeric lookups use the semantic path.
-static inline bool js_array_fast_own_dense_get(Item object, int64_t index, Item* out) {
+extern "C" bool js_array_try_get_existing_own_dense_no_gc(Item object,
+        int64_t index, Item* out) {
     if (get_type_id(object) != LMD_TYPE_ARRAY || !out) return false;
     Array* arr = object.array;
     if (!arr || arr->is_content == 1) return false;
@@ -6309,6 +6320,8 @@ static inline bool js_array_fast_own_dense_get(Item object, int64_t index, Item*
     Item value = arr->items[index];
     if (value.item == JS_DELETED_SENTINEL_VAL) return false;
     if (js_array_companion_has_numeric_slot(arr, index)) return false;
+    js_opt_trace_record(JS_OPT_ARRAY_OWN_ELEMENT_GET_HIT,
+        JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
     *out = value;
     return true;
 }
@@ -7759,9 +7772,11 @@ extern "C" Item js_get_reference(Item object, Item key) {
             // Live DOM collections must refresh before dense array fast reads;
             // otherwise optimized member access can observe stale option slots.
             Item dense_value = ItemNull;
-            if (js_array_fast_own_dense_get(object, idx, &dense_value)) {
+            if (js_array_try_get_existing_own_dense_no_gc(object, idx, &dense_value)) {
                 return dense_value;
             }
+            js_opt_trace_record(JS_OPT_ARRAY_OWN_ELEMENT_GET_FALLBACK,
+                JS_OPT_REASON_HOLE_OR_SPARSE, JS_OPT_OUTCOME_FALLBACK);
         }
     }
 
@@ -8292,13 +8307,13 @@ extern "C" Item js_set_name_id(Item object, NameId name_id,
             NULL, NULL, &reason) &&
             js_named_fast_store_can_write_same_slot(entry, value) &&
             js_named_fast_store_same_slot(entry, map->data, value)) {
-        // Raw writes are valid only after the shared admission kernel has
-        // proved a live default data slot; these hooks preserve observable
-        // global bindings and DOM event-handler updates on the hit path.
-        js_sync_global_var_module_binding(object,
-            (Item){.item = s2it(key)}, value);
-        js_note_event_handler_property_set(object, key->chars,
-            (int)key->len, value);
+        // The shared admission rejects host-dynamic receivers, so this direct
+        // ordinary-slot hit needs no DOM/global preparation. The sole
+        // remaining observer is the real global object binding mirror.
+        if (js_is_global_this_object_value(object)) {
+            js_sync_global_var_module_binding(object,
+                (Item){.item = s2it(key)}, value);
+        }
         js_named_fast_profile_hit();
         return value;
     }
@@ -9231,7 +9246,7 @@ static Item js_elements_set_int_mode(Item array, int64_t index, Item value,
 }
 JS_FORWARD_ITEM(js_elements_set_int, (Item array, int64_t index, Item value), js_elements_set_int_mode, (array, index, value, false, false))
 
-static bool js_array_set_existing_dense_no_gc(Item array, int64_t index,
+extern "C" bool js_array_try_set_existing_own_dense_no_gc(Item array, int64_t index,
         Item value) {
     if (get_type_id(array) != LMD_TYPE_ARRAY || index < 0 ||
             index > 0xFFFFFFFELL || lambda_item_uses_scalar_home(value)) {
@@ -9239,15 +9254,15 @@ static bool js_array_set_existing_dense_no_gc(Item array, int64_t index,
     }
     Array* arr = array.array;
     if (!arr || arr->is_content == 1 || arr->extra != 0 ||
-            !js_is_extensible(array) ||
-            js_array_companion_has_array_index_shape(arr) ||
-            js_array_proto_index_guard_is_dirty(array) ||
             index >= arr->length || index >= js_array_dense_capacity(arr) ||
-            arr->items[index].item == JS_DELETED_SENTINEL_VAL) {
+            arr->items[index].item == JS_DELETED_SENTINEL_VAL ||
+            (js_array_has_props(arr) &&
+                js_array_companion_has_numeric_slot(arr, index))) {
         return false;
     }
-    // These guards exclude growth and scalar-home adoption, so the owned
-    // write cannot allocate or re-enter while holding the raw Array pointer.
+    // These guards exclude descriptor overlays, growth and scalar-home
+    // adoption, so the owned write cannot allocate or re-enter while holding
+    // the raw Array pointer.
     AutoAssertNoGC no_gc;
     js_array_store_owned(arr, index, value);
     js_opt_trace_record(JS_OPT_ARRAY_SET_FAST_HIT,
@@ -9274,7 +9289,7 @@ extern "C" Item js_elements_set_int_completion(Item array, int64_t index,
         }
         return ItemNull;
     }
-    if (js_array_set_existing_dense_no_gc(array, index, value)) {
+    if (js_array_try_set_existing_own_dense_no_gc(array, index, value)) {
         return (Item){.item = b2it(true)};
     }
     if (get_type_id(array) != LMD_TYPE_ARRAY || index < 0 ||
@@ -12296,19 +12311,23 @@ Item js_intrinsic_collection_iterator_next_body(Item callee,
         if (mode == 2) {
             // entries: [key, value] for Map; [value, value] for Set
             Item pair = js_array_new(2);
+            Item key = js_collection_node_read_item(node,
+                JS_COLLECTION_NODE_KEY);
             if (coll_type == JS_COLLECTION_SET) {
-                js_elements_set_int(pair, 0, node->key);
-                js_elements_set_int(pair, 1, node->key);
+                js_elements_set_int(pair, 0, key);
+                js_elements_set_int(pair, 1, key);
             } else {
-                js_elements_set_int(pair, 0, node->key);
-                js_elements_set_int(pair, 1, node->value);
+                js_elements_set_int(pair, 0, key);
+                js_elements_set_int(pair, 1, js_collection_node_read_item(node,
+                    JS_COLLECTION_NODE_VALUE));
             }
             val = pair;
         } else if (mode == 1) {
-            val = node->key; // keys
+            val = js_collection_node_read_item(node, JS_COLLECTION_NODE_KEY);
         } else {
-            // values: for Set, key IS the value; for Map, node->value
-            val = (coll_type == JS_COLLECTION_SET) ? node->key : node->value;
+            // values: for Set, key IS the value; for Map, node's value
+            val = js_collection_node_read_item(node, coll_type == JS_COLLECTION_SET
+                ? JS_COLLECTION_NODE_KEY : JS_COLLECTION_NODE_VALUE);
         }
         // advance to next node
         js_set_key_cstr(this_val, "__last_node__", (Item){.item = i2it((int64_t)(uintptr_t)node)});
@@ -16208,84 +16227,95 @@ static void js_regex_publish_instance_shape(Item obj) {
 
 static void js_regex_initialize_own_property(Item obj, Item key, Item value,
         bool uses_cached_shape) {
+    // Construction publishes no observable receiver until all standard own
+    // fields exist. Direct storage avoids treating those fields as user
+    // overrides of RegExp.prototype's virtual accessors (D6.2.2v2).
     if (uses_cached_shape) {
-        // The cached RegExp shape already fixes the property descriptors.  The
-        // object is not observable until construction completes, so initialize
-        // the matching slot directly instead of treating its non-writable
-        // public descriptor as a user assignment.
         fn_map_set(obj, key, value);
         return;
     }
-    js_set_key_default(obj, key, value);
+    js_define_own_key_storage(obj, key, value);
 }
 
 static void js_regex_set_cached_property(Item obj, const char* key, int key_len,
         Item value, bool writable, bool configurable, bool dynamic_instance,
         bool uses_cached_shape) {
-    Item key_item = js_name_item(key, key_len);
+    RootFrame roots(2);
+    Rooted<Item> object_root(roots, obj);
+    Rooted<Item> key_root(roots, js_name_item(key, key_len));
     if (dynamic_instance) {
-        js_regex_initialize_own_property(obj, key_item, value, uses_cached_shape);
+        js_regex_initialize_own_property(object_root.get(), key_root.get(), value,
+            uses_cached_shape);
     } else {
-        js_regex_put_fresh(obj, key, key_len, value);
+        js_regex_put_fresh(object_root.get(), key, key_len, value);
     }
     if (dynamic_instance && uses_cached_shape) return;
     // The cached-literal path used to create the visible descriptors lazily,
     // so every eval rebuilt a private shape.  Dynamic literals share the same
     // spec descriptors as the general RegExp constructor before publication.
-    if (dynamic_instance && !writable) js_mark_non_writable(obj, key_item);
-    js_mark_non_enumerable(obj, key_item);
-    if (!configurable) js_mark_non_configurable(obj, key_item);
+    if (dynamic_instance && !writable) {
+        js_mark_non_writable(object_root.get(), key_root.get());
+    }
+    js_mark_non_enumerable(object_root.get(), key_root.get());
+    if (!configurable) js_mark_non_configurable(object_root.get(), key_root.get());
 }
 
 static Item js_regex_build_object(JsRegexData* rd, bool dynamic_instance,
         const char* source, int source_len, const char* canonical_flags,
         int flags_len, bool dot_all, bool has_unicode_sets) {
-    RootFrame roots(2);
+    RootFrame roots(4);
     bool uses_cached_shape = false;
     Rooted<Item> regex_obj_root(roots,
         js_new_regexp_instance(dynamic_instance, &uses_cached_shape));
-    Item regex_obj = regex_obj_root.get();
-    ((JsRegExpMapCarrier*)regex_obj.map)->payload = rd;
-    Item source_val = (Item){.item = s2it(js_regex_escape_source(source, source_len))};
-    Item flags_val = js_name_item(canonical_flags, flags_len);
-    js_regex_set_cached_property(regex_obj, "source", 6, source_val, false, true,
+    ((JsRegExpMapCarrier*)regex_obj_root.get().map)->payload = rd;
+    // Property construction can collect; retain the receiver and both values
+    // instead of reusing a stale pre-collection map address (D5.3).
+    Rooted<Item> source_root(roots, (Item){.item = s2it(js_regex_escape_source(
+        source, source_len))});
+    Rooted<Item> flags_root(roots, js_name_item(canonical_flags, flags_len));
+    js_regex_set_cached_property(regex_obj_root.get(), "source", 6,
+        source_root.get(), false, true,
         dynamic_instance, uses_cached_shape);
-    js_regex_set_cached_property(regex_obj, "flags", 5, flags_val, false, true,
+    js_regex_set_cached_property(regex_obj_root.get(), "flags", 5,
+        flags_root.get(), false, true,
         dynamic_instance, uses_cached_shape);
-    js_regex_set_cached_property(regex_obj, "global", 6,
+    js_regex_set_cached_property(regex_obj_root.get(), "global", 6,
         (Item){.item = b2it(rd->global ? BOOL_TRUE : BOOL_FALSE)}, false, true,
         dynamic_instance, uses_cached_shape);
-    js_regex_set_cached_property(regex_obj, "ignoreCase", 10,
+    js_regex_set_cached_property(regex_obj_root.get(), "ignoreCase", 10,
         (Item){.item = b2it(rd->ignore_case ? BOOL_TRUE : BOOL_FALSE)}, false, true,
         dynamic_instance, uses_cached_shape);
-    js_regex_set_cached_property(regex_obj, "multiline", 9,
+    js_regex_set_cached_property(regex_obj_root.get(), "multiline", 9,
         (Item){.item = b2it(rd->multiline ? BOOL_TRUE : BOOL_FALSE)}, false, true,
         dynamic_instance, uses_cached_shape);
-    js_regex_set_cached_property(regex_obj, "dotAll", 6,
+    js_regex_set_cached_property(regex_obj_root.get(), "dotAll", 6,
         (Item){.item = b2it(dot_all ? BOOL_TRUE : BOOL_FALSE)}, false, true,
         dynamic_instance, uses_cached_shape);
     // Per ES §22.2.5.6: .unicode is true only when the `u` flag was set.
     // /v sets .unicodeSets but NOT .unicode.
     bool js_unicode = rd->unicode && !has_unicode_sets;
-    js_regex_set_cached_property(regex_obj, "unicode", 7,
+    js_regex_set_cached_property(regex_obj_root.get(), "unicode", 7,
         (Item){.item = b2it(js_unicode ? BOOL_TRUE : BOOL_FALSE)}, false, true,
         dynamic_instance, uses_cached_shape);
-    js_regex_set_cached_property(regex_obj, "unicodeSets", 11,
+    js_regex_set_cached_property(regex_obj_root.get(), "unicodeSets", 11,
         (Item){.item = b2it(has_unicode_sets ? BOOL_TRUE : BOOL_FALSE)}, false, true,
         dynamic_instance, uses_cached_shape);
-    js_regex_set_cached_property(regex_obj, "sticky", 6,
+    js_regex_set_cached_property(regex_obj_root.get(), "sticky", 6,
         (Item){.item = b2it(rd->sticky ? BOOL_TRUE : BOOL_FALSE)}, false, true,
         dynamic_instance, uses_cached_shape);
     // Per ES §22.2.3.1 RegExpAlloc: lastIndex is writable, non-enumerable,
     // and non-configurable.
-    js_regex_set_cached_property(regex_obj, "lastIndex", 9, (Item){.item = i2it(0)},
+    js_regex_set_cached_property(regex_obj_root.get(), "lastIndex", 9,
+        (Item){.item = i2it(0)},
         true, false, dynamic_instance, uses_cached_shape);
     Rooted<Item> regexp_proto_root(roots, js_get_regexp_prototype());
     Item regexp_proto = regexp_proto_root.get();
     if (regexp_proto.item != ItemNull.item) {
-        js_set_prototype(regex_obj, regexp_proto);
+        js_set_prototype(regex_obj_root.get(), regexp_proto);
     }
-    if (dynamic_instance && !uses_cached_shape) js_regex_publish_instance_shape(regex_obj);
+    if (dynamic_instance && !uses_cached_shape) {
+        js_regex_publish_instance_shape(regex_obj_root.get());
+    }
     return regex_obj_root.get();
 }
 
@@ -18632,6 +18662,174 @@ static Item js_apply_replacement_from_items(StrBuf* buf, const char* repl, int r
     return ItemNull;
 }
 
+// The bulk path admits only facts whose ordinary Get/RegExpExec operations
+// cannot call user code.  A raw own lookup proves the actual inherited exec
+// capability without invoking a getter; every mutation/alternate receiver
+// keeps the protocol loop below (S1.11, D6.2.2v2).
+static bool js_regexp_builtin_bulk_eligible(Item regex, JsRegexData** out_rd) {
+    if (out_rd) *out_rd = NULL;
+    if (get_type_id(regex) != LMD_TYPE_MAP || !regex.map) return false;
+    JsRegexData* rd = js_get_regex_data(regex);
+    if (!rd || ((JsRegExpMapCarrier*)regex.map)->virtual_property_overrides != 0) {
+        return false;
+    }
+    bool own_exec = false;
+    js_map_shape_lookup_ext(regex.map, "exec", 4, &own_exec);
+    if (own_exec) return false;
+    RootFrame roots(2);
+    Rooted<Item> regex_root(roots, regex);
+    Rooted<Item> proto_root(roots, js_get_prototype(regex_root.get()));
+    if (get_type_id(proto_root.get()) != LMD_TYPE_MAP || !proto_root.get().map) {
+        return false;
+    }
+    bool found_exec = false;
+    Item exec = js_map_shape_lookup_ext(proto_root.get().map, "exec", 4,
+        &found_exec);
+    Item builtin_exec = js_intrinsic_binding_get(
+        JS_BUILTIN_OWNER_REGEXP_PROTOTYPE_METHOD, "exec", 4);
+    if (!found_exec || exec.item != builtin_exec.item) return false;
+    ShapeEntry* last_index = js_find_shape_entry(regex_root.get(), "lastIndex", 9);
+    if (!last_index || jspd_is_accessor(last_index) ||
+            !js_props_query_writable(regex_root.get().map, last_index,
+                "lastIndex", 9)) {
+        return false;
+    }
+    if (out_rd) *out_rd = js_get_regex_data(regex_root.get());
+    return out_rd && *out_rd;
+}
+
+static Item js_try_builtin_regexp_match_bulk(Item regex, Item str,
+        bool* out_admitted) {
+    if (out_admitted) *out_admitted = false;
+    JsRegexData* rd = NULL;
+    if (!js_regexp_builtin_bulk_eligible(regex, &rd)) return ItemNull;
+    if (!rd->global || rd->unicode || rd->needs_utf16_subject || rd->has_indices ||
+            js_regex_num_groups(rd) != 1 || get_type_id(str) != LMD_TYPE_STRING) {
+        return ItemNull;
+    }
+    RootFrame roots(3);
+    Rooted<Item> regex_root(roots, regex);
+    Rooted<Item> str_root(roots, str);
+    Rooted<Item> results_root(roots, js_array_new(0));
+    if (item_is_error(results_root.get())) return results_root.get();
+    String* input = it2s(str_root.get());
+    if (!input || !input->is_ascii) return ItemNull;
+    if (out_admitted) *out_admitted = true;
+
+    Item last_index_key = js_name_item("lastIndex", 9);
+    Item set_status = js_regex_set_lastindex_strict(regex_root.get(),
+        last_index_key, 0);
+    if (item_is_error(set_status)) return set_status;
+    JsRegexScratch<re2::StringPiece> matches_buf(1);
+    if (matches_buf.count != 1 || !matches_buf.slots) return ItemError;
+    int position = 0;
+    int match_count = 0;
+    for (int safety = 0; safety < 1000000 && position <= (int)input->len;
+            safety++) {
+        re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START :
+            re2::RE2::UNANCHORED;
+        JsRegexMatchResult match = js_regex_match_internal(rd, input->chars,
+            (int)input->len, position, anchor, matches_buf.slots, 1);
+        if (match == JS_REGEX_MATCH_RESOURCE_ERROR) {
+            return js_throw_range_error("RegExp match exceeded engine resources");
+        }
+        if (match != JS_REGEX_MATCH_FOUND) break;
+        int start = (int)(matches_buf.slots[0].data() - input->chars);
+        int match_len = (int)matches_buf.slots[0].size();
+        int end = start + match_len;
+        js_regexp_update_last_match(input, matches_buf.slots, 1);
+        Item matched = js_str_substring_utf16(str_root.get(), start, end);
+        if (item_is_error(matched)) return matched;
+        Item pushed = js_array_push(results_root.get(), matched);
+        if (item_is_error(pushed)) return pushed;
+        match_count++;
+        position = end + (match_len == 0 ? 1 : 0);
+    }
+    set_status = js_regex_set_lastindex_strict(regex_root.get(), last_index_key,
+        0);
+    if (item_is_error(set_status)) return set_status;
+    return match_count == 0 ? ItemNull : results_root.get();
+}
+
+static Item js_try_builtin_regexp_replace_bulk(Item regex, Item str,
+        Item replacement, bool* out_admitted) {
+    if (out_admitted) *out_admitted = false;
+    JsRegexData* rd = NULL;
+    if (!js_regexp_builtin_bulk_eligible(regex, &rd) || !rd->global ||
+            rd->unicode || rd->needs_utf16_subject || rd->has_indices ||
+            js_regex_num_groups(rd) != 1 || get_type_id(str) != LMD_TYPE_STRING ||
+            get_type_id(replacement) != LMD_TYPE_STRING) {
+        return ItemNull;
+    }
+    RootFrame roots(3);
+    Rooted<Item> regex_root(roots, regex);
+    Rooted<Item> str_root(roots, str);
+    Rooted<Item> replacement_root(roots, replacement);
+    String* input = it2s(str_root.get());
+    String* repl = it2s(replacement_root.get());
+    if (!input || !input->is_ascii || !repl) return ItemNull;
+    if (out_admitted) *out_admitted = true;
+
+    Item last_index_key = js_name_item("lastIndex", 9);
+    Item set_status = js_regex_set_lastindex_strict(regex_root.get(),
+        last_index_key, 0);
+    if (item_is_error(set_status)) return set_status;
+    JsRegexScratch<re2::StringPiece> matches_buf(1);
+    if (matches_buf.count != 1 || !matches_buf.slots) return ItemError;
+    StrBuf* output = strbuf_new();
+    if (!output) return ItemError;
+    int position = 0;
+    int copy_position = 0;
+    bool found_match = false;
+    for (int safety = 0; safety < 1000000 && position <= (int)input->len;
+            safety++) {
+        re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START :
+            re2::RE2::UNANCHORED;
+        JsRegexMatchResult match = js_regex_match_internal(rd, input->chars,
+            (int)input->len, position, anchor, matches_buf.slots, 1);
+        if (match == JS_REGEX_MATCH_RESOURCE_ERROR) {
+            strbuf_free(output);
+            return js_throw_range_error("RegExp match exceeded engine resources");
+        }
+        if (match != JS_REGEX_MATCH_FOUND) break;
+        int start = (int)(matches_buf.slots[0].data() - input->chars);
+        int match_len = (int)matches_buf.slots[0].size();
+        if (start > copy_position) {
+            strbuf_append_str_n(output, input->chars + copy_position,
+                start - copy_position);
+        }
+        Item replacement_status = js_apply_replacement_from_items(output,
+            repl->chars, (int)repl->len, input->chars, (int)input->len, start,
+            matches_buf.slots[0].data(), match_len, NULL, 0,
+            make_js_undefined());
+        if (item_is_error(replacement_status)) {
+            strbuf_free(output);
+            return replacement_status;
+        }
+        js_regexp_update_last_match(input, matches_buf.slots, 1);
+        found_match = true;
+        copy_position = start + match_len;
+        position = start + match_len + (match_len == 0 ? 1 : 0);
+    }
+    if (!found_match) {
+        strbuf_free(output);
+        set_status = js_regex_set_lastindex_strict(regex_root.get(),
+            last_index_key, 0);
+        return item_is_error(set_status) ? set_status : str_root.get();
+    }
+    if (copy_position <= (int)input->len) {
+        strbuf_append_str_n(output, input->chars + copy_position,
+            (int)input->len - copy_position);
+    }
+    set_status = js_regex_set_lastindex_strict(regex_root.get(), last_index_key,
+        0);
+    if (item_is_error(set_status)) {
+        strbuf_free(output);
+        return set_status;
+    }
+    return js_strbuf_take_item(output);
+}
+
 // RegExp.prototype[@@match](string) — ES spec §22.2.5.6 (ES2021)
 // Reads flags via Get(rx,"flags") so that dynamic property overrides (e.g. rx.global=undefined)
 // take effect through the flags accessor, and errors from a custom flags getter propagate.
@@ -18641,6 +18839,15 @@ static Item js_regexp_symbol_match(Item this_val, Item arg0) {
         return js_throw_type_error("RegExp.prototype[@@match] called on incompatible receiver");
     // Step 3: S = ToString(string)
     JS_ASSIGN_OR_RETURN(str, (get_type_id(arg0) == LMD_TYPE_STRING) ? arg0 : js_to_string(arg0));
+    bool bulk_admitted = false;
+    Item bulk = js_try_builtin_regexp_match_bulk(this_val, str, &bulk_admitted);
+    if (bulk_admitted) {
+        js_opt_trace_record(JS_OPT_REGEX_BULK_MATCH_HIT, JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_TAKEN);
+        return bulk;
+    }
+    js_opt_trace_record(JS_OPT_REGEX_BULK_MATCH_FALLBACK, JS_OPT_REASON_NONE,
+        JS_OPT_OUTCOME_FALLBACK);
     // Steps 4-5: get flags for error propagation, then read global directly (coerce-global.js)
     JS_ASSIGN_OR_RETURN(flags_val, js_string_matchall_get_flags(this_val));
     JS_ASSIGN_OR_RETURN(flags_string, js_to_string(flags_val));
@@ -18736,6 +18943,16 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
         JS_ASSIGN_OR_RETURN_INTO(replacement, js_to_string(replacement_root.get()));
         replacement_root.set(replacement);
     }
+    bool bulk_admitted = false;
+    Item bulk = js_try_builtin_regexp_replace_bulk(regex_root.get(), str_root.get(),
+        replacement_root.get(), &bulk_admitted);
+    if (bulk_admitted) {
+        js_opt_trace_record(JS_OPT_REGEX_BULK_REPLACE_HIT, JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_TAKEN);
+        return bulk;
+    }
+    js_opt_trace_record(JS_OPT_REGEX_BULK_REPLACE_FALLBACK, JS_OPT_REASON_NONE,
+        JS_OPT_OUTCOME_FALLBACK);
     JsRegexData* fast_rd = js_get_regex_data(regex_root.get());
     // Js55 P10b: js_regex_exec returns match.index in UTF-16 code units whenever
     // the input string has non-ASCII bytes (see `code_unit_indices` at
@@ -19249,15 +19466,41 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
 // =============================================================================
 
 struct JsCollectionEntry {
-    Item key;
-    Item value;
+    // The order node is the sole owner of a collection entry. Hash buckets
+    // merely index that stable node, which avoids a second mutable key/value
+    // copy and an insertion-order scan after every hash operation.
+    JsCollectionOrderNode* node;
 };
 
 // Insertion-order node and data structs moved to forward declaration section above
 
+static Item js_collection_node_raw_item(const JsCollectionOrderNode* node,
+        JsCollectionNodeSlot slot) {
+    return node ? node->slots[slot] : ItemNull;
+}
+
+static Item js_collection_node_read_item(JsCollectionOrderNode* node,
+        JsCollectionNodeSlot slot) {
+    return node ? owned_item_slot_read(node->slots,
+        JS_COLLECTION_NODE_ITEM_COUNT, slot, false) : ItemNull;
+}
+
+static void js_collection_node_store_item(JsCollectionOrderNode* node,
+        JsCollectionNodeSlot slot, Item value) {
+    if (!node) return;
+    owned_item_slot_store(node->slots, JS_COLLECTION_NODE_ITEM_COUNT, slot,
+        value);
+}
+
+static void js_collection_node_clear_items(JsCollectionOrderNode* node) {
+    js_collection_node_store_item(node, JS_COLLECTION_NODE_KEY, ItemNull);
+    js_collection_node_store_item(node, JS_COLLECTION_NODE_VALUE, ItemNull);
+}
+
 static uint64_t js_collection_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     const JsCollectionEntry* e = (const JsCollectionEntry*)item;
-    Item k = e->key;
+    Item k = js_collection_node_raw_item(e ? e->node : NULL,
+        JS_COLLECTION_NODE_KEY);
     TypeId tid = get_type_id(k);
     if (tid == LMD_TYPE_STRING) {
         String* s = it2s(k);
@@ -19283,7 +19526,10 @@ static uint64_t js_collection_hash(const void *item, uint64_t seed0, uint64_t se
 static int js_collection_compare(const void *a, const void *b, void *udata) {
     const JsCollectionEntry* ea = (const JsCollectionEntry*)a;
     const JsCollectionEntry* eb = (const JsCollectionEntry*)b;
-    Item ka = ea->key, kb = eb->key;
+    Item ka = js_collection_node_raw_item(ea ? ea->node : NULL,
+        JS_COLLECTION_NODE_KEY);
+    Item kb = js_collection_node_raw_item(eb ? eb->node : NULL,
+        JS_COLLECTION_NODE_KEY);
     TypeId ta = get_type_id(ka), tb = get_type_id(kb);
     // SameValueZero: handle numeric type coercion (-0 == +0, NaN == NaN)
     // Normalize numeric types for comparison
@@ -19392,46 +19638,45 @@ static void js_collection_link_prototype(Item obj, const char* ctor_name, int ct
 }
 
 // Helper: add or update an entry in the insertion-order list
-static void js_collection_order_upsert(JsCollectionData* cd, Item key, Item value) {
-    // Check if key already exists in the order list
-    JsCollectionOrderNode* node = cd->order_head;
-    while (node) {
-        JsCollectionEntry ea = {.key = node->key};
-        JsCollectionEntry eb = {.key = key};
-        if (js_collection_compare(&ea, &eb, NULL) == 0) {
-            // Key exists — update value in-place (preserves insertion order)
-            node->value = value;
-            return;
-        }
-        node = node->next;
-    }
-    // New entry — append to tail
-    JsCollectionOrderNode* n = (JsCollectionOrderNode*)pool_calloc(js_input->pool, sizeof(JsCollectionOrderNode));
-    n->key = key;
-    n->value = value;
-    n->next = NULL;
-    n->prev = cd->order_tail;
-    if (cd->order_tail) cd->order_tail->next = n;
-    else cd->order_head = n;
-    cd->order_tail = n;
+static JsCollectionOrderNode* js_collection_find_node(JsCollectionData* cd,
+        Item key) {
+    if (!cd || !cd->hmap) return NULL;
+    JsCollectionOrderNode probe_node = {};
+    probe_node.slots[JS_COLLECTION_NODE_KEY] = key;
+    JsCollectionEntry probe = {.node = &probe_node};
+    const JsCollectionEntry* found = (const JsCollectionEntry*)hashmap_get(
+        cd->hmap, &probe);
+    return found ? found->node : NULL;
 }
 
-// Helper: remove an entry from the insertion-order list
-static void js_collection_order_remove(JsCollectionData* cd, Item key) {
-    JsCollectionOrderNode* node = cd->order_head;
-    while (node) {
-        JsCollectionEntry ea = {.key = node->key};
-        JsCollectionEntry eb = {.key = key};
-        if (js_collection_compare(&ea, &eb, NULL) == 0) {
-            node->deleted = true;
-            if (node->prev) node->prev->next = node->next;
-            else cd->order_head = node->next;
-            if (node->next) node->next->prev = node->prev;
-            else cd->order_tail = node->prev;
-            return;
-        }
-        node = node->next;
+static bool js_collection_insert_node(JsCollectionData* cd, Item key,
+        Item value) {
+    if (!cd || !cd->hmap || !js_input || !js_input->pool) return false;
+    JsCollectionOrderNode* node = (JsCollectionOrderNode*)pool_calloc(
+        js_input->pool, sizeof(JsCollectionOrderNode));
+    if (!node) return false;
+    js_collection_node_store_item(node, JS_COLLECTION_NODE_KEY, key);
+    js_collection_node_store_item(node, JS_COLLECTION_NODE_VALUE, value);
+    JsCollectionEntry entry = {.node = node};
+    hashmap_set(cd->hmap, &entry);
+    if (hashmap_oom(cd->hmap)) {
+        // An unpublished node is not traced; do not link a ghost entry when
+        // native hash allocation fails.
+        js_collection_node_clear_items(node);
+        return false;
     }
+    if (cd->order_tail) cd->order_tail->next = node;
+    else cd->order_head = node;
+    cd->order_tail = node;
+    return true;
+}
+
+static void js_collection_remove_node(JsCollectionOrderNode* node) {
+    if (!node || node->deleted) return;
+    // Keep next links for live iterators and forEach. Deleted nodes are
+    // tombstones until collection teardown, but release their payload now.
+    node->deleted = true;
+    js_collection_node_clear_items(node);
 }
 
 extern "C" void js_collection_map_heap_destroy(Map* map, gc_native_seen_t* seen_native) {
@@ -19449,9 +19694,11 @@ static void js_collection_weak_entry_clear(uint64_t key_item, void* context) {
     JsCollectionData* cd = (JsCollectionData*)context;
     if (!cd || !cd->hmap || key_item == 0) return;
     Item key = (Item){.item = key_item};
-    JsCollectionEntry probe = {.key = key};
-    hashmap_delete(cd->hmap, &probe);
-    js_collection_order_remove(cd, key);
+    JsCollectionOrderNode* node = js_collection_find_node(cd, key);
+    if (!node) return;
+    JsCollectionEntry entry = {.node = node};
+    hashmap_delete(cd->hmap, &entry);
+    js_collection_remove_node(node);
 }
 
 extern "C" void js_collection_map_gc_trace(Map* map, gc_heap_t* gc) {
@@ -19463,10 +19710,12 @@ extern "C" void js_collection_map_gc_trace(Map* map, gc_heap_t* gc) {
             if (node->deleted) continue;
             // A weak value is retained only after its key is independently
             // reachable; dead keys are removed before sweep can reuse identity.
-            if (!gc_register_ephemeron(gc, &node->key.item, &node->value.item,
+            if (!gc_register_ephemeron(gc,
+                                       &node->slots[JS_COLLECTION_NODE_KEY].item,
+                                       &node->slots[JS_COLLECTION_NODE_VALUE].item,
                                        js_collection_weak_entry_clear, cd)) {
-                gc_mark_item(gc, node->key.item);
-                gc_mark_item(gc, node->value.item);
+                gc_mark_item(gc, node->slots[JS_COLLECTION_NODE_KEY].item);
+                gc_mark_item(gc, node->slots[JS_COLLECTION_NODE_VALUE].item);
             }
         }
         return;
@@ -19476,8 +19725,8 @@ extern "C" void js_collection_map_gc_trace(Map* map, gc_heap_t* gc) {
     // the managed Map payload scan cannot see.
     for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
         if (node->deleted) continue;
-        gc_mark_item(gc, node->key.item);
-        gc_mark_item(gc, node->value.item);
+        gc_mark_item(gc, node->slots[JS_COLLECTION_NODE_KEY].item);
+        gc_mark_item(gc, node->slots[JS_COLLECTION_NODE_VALUE].item);
     }
 }
 
@@ -19614,47 +19863,53 @@ extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item ar
             if (cd->is_weak && !js_can_be_held_weakly(arg1)) {
                 return js_throw_type_error("Invalid value used as weak collection key");
             }
-            JsCollectionEntry entry;
             Item key = js_collection_canonical_key(arg1);
+            Item value = ItemNull;
             if (cd->type == JS_COLLECTION_SET) {
-                entry.key = key;
-                entry.value = (Item){.item = b2it(BOOL_TRUE)};
+                value = (Item){.item = b2it(BOOL_TRUE)};
             } else {
-                entry.key = key;
-                entry.value = arg2;
+                value = arg2;
             }
-            hashmap_set(cd->hmap, &entry);
+            JsCollectionOrderNode* node = js_collection_find_node(cd, key);
+            if (node) {
+                // SameValueZero lookup identified the live node. Updating it
+                // leaves its insertion position and every iterator route intact.
+                js_collection_node_store_item(node, JS_COLLECTION_NODE_VALUE,
+                    value);
+            } else if (!js_collection_insert_node(cd, key, value)) {
+                return js_throw_range_error("Out of memory while adding collection entry");
+            }
             if (cd->is_weak && cd->type == JS_COLLECTION_MAP &&
                 js_async_hooks_is_gc_tracker(arg2) &&
                 !js_is_process_object_value(arg1)) {
                 js_async_hooks_queue_destroy(arg2);
             }
-            // Maintain insertion-order list
-            js_collection_order_upsert(cd, entry.key, entry.value);
             return obj; // return collection for chaining
         }
         case 1: { // get(key) — Map only
-            JsCollectionEntry probe = {.key = js_collection_canonical_key(arg1)};
-            const JsCollectionEntry* found = (const JsCollectionEntry*)hashmap_get(cd->hmap, &probe);
-            if (found) return found->value;
+            JsCollectionOrderNode* node = js_collection_find_node(cd,
+                js_collection_canonical_key(arg1));
+            if (node) return js_collection_node_read_item(node,
+                JS_COLLECTION_NODE_VALUE);
             return make_js_undefined();
         }
         case 2: { // has(key)
-            JsCollectionEntry probe = {.key = js_collection_canonical_key(arg1)};
-            const JsCollectionEntry* found = (const JsCollectionEntry*)hashmap_get(cd->hmap, &probe);
-            return (Item){.item = b2it(found ? BOOL_TRUE : BOOL_FALSE)};
+            return (Item){.item = b2it(js_collection_find_node(cd,
+                js_collection_canonical_key(arg1)) ? BOOL_TRUE : BOOL_FALSE)};
         }
         case 3: { // delete(key)
             Item key = js_collection_canonical_key(arg1);
-            JsCollectionEntry probe = {.key = key};
-            const JsCollectionEntry* found = (const JsCollectionEntry*)hashmap_delete(cd->hmap, &probe);
-            js_collection_order_remove(cd, key);
-            return (Item){.item = b2it(found ? BOOL_TRUE : BOOL_FALSE)};
+            JsCollectionOrderNode* node = js_collection_find_node(cd, key);
+            if (!node) return (Item){.item = ITEM_FALSE};
+            JsCollectionEntry entry = {.node = node};
+            hashmap_delete(cd->hmap, &entry);
+            js_collection_remove_node(node);
+            return (Item){.item = ITEM_TRUE};
         }
         case 4: { // clear()
             JsCollectionOrderNode* node = cd->order_head;
             while (node) {
-                node->deleted = true;
+                js_collection_remove_node(node);
                 node = node->next;
             }
             hashmap_clear(cd->hmap, false);
@@ -19674,11 +19929,17 @@ extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item ar
                 }
                 if (cd->type == JS_COLLECTION_SET) {
                     // callback(value, value, set)
-                    Item args[3] = {node->key, node->key, obj};
+                    Item key = js_collection_node_read_item(node,
+                        JS_COLLECTION_NODE_KEY);
+                    Item args[3] = {key, key, obj};
                     JS_ASSIGN_OR_RETURN(callback_result, js_call_function(arg1, this_arg, args, 3));
                 } else {
                     // callback(value, key, map)
-                    Item args[3] = {node->value, node->key, obj};
+                    Item args[3] = {
+                        js_collection_node_read_item(node,
+                            JS_COLLECTION_NODE_VALUE),
+                        js_collection_node_read_item(node,
+                            JS_COLLECTION_NODE_KEY), obj};
                     JS_ASSIGN_OR_RETURN(callback_result, js_call_function(arg1, this_arg, args, 3));
                 }
                 node = node->next;
@@ -20694,8 +20955,8 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                 };
 
                 auto set_contains_key = [](JsCollectionData* set_cd, Item key) -> bool {
-                    JsCollectionEntry probe = {.key = js_collection_canonical_key(key)};
-                    return hashmap_get(set_cd->hmap, &probe) != NULL;
+                    return js_collection_find_node(set_cd,
+                        js_collection_canonical_key(key)) != NULL;
                 };
 
                 auto set_record_keys_iterator = [](JsSetRecordLocal* rec) -> Item {
@@ -20710,7 +20971,9 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                 auto copy_set_to_result = [](Item result, JsCollectionData* source_cd) -> Item {
                     for (JsCollectionOrderNode* node = source_cd->order_head; node; node = node->next) {
                         if (!node->deleted) {
-                            JS_ASSIGN_OR_RETURN(add_result, js_collection_method(result, 0, node->key, ItemNull));
+                            JS_ASSIGN_OR_RETURN(add_result, js_collection_method(result, 0,
+                                js_collection_node_raw_item(node,
+                                    JS_COLLECTION_NODE_KEY), ItemNull));
                         }
                     }
                     return ItemNull;
@@ -20791,9 +21054,13 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                     if (this_size <= rec.size) {
                         for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
                             if (node->deleted) continue;
-                            JS_ASSIGN_OR_RETURN(has_result, set_record_has(&rec, node->key));
+                            JS_ASSIGN_OR_RETURN(has_result, set_record_has(&rec,
+                                js_collection_node_raw_item(node,
+                                    JS_COLLECTION_NODE_KEY)));
                             if (js_is_truthy(has_result)) {
-                                JS_ASSIGN_OR_RETURN(add_result, js_collection_method(result, 0, node->key, ItemNull));
+                                JS_ASSIGN_OR_RETURN(add_result, js_collection_method(result, 0,
+                                    js_collection_node_raw_item(node,
+                                        JS_COLLECTION_NODE_KEY), ItemNull));
                             }
                         }
                     } else {
@@ -20820,9 +21087,13 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                     if (this_size <= rec.size) {
                         for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
                             if (node->deleted) continue;
-                            JS_ASSIGN_OR_RETURN(has_result, set_record_has(&rec, node->key));
+                            JS_ASSIGN_OR_RETURN(has_result, set_record_has(&rec,
+                                js_collection_node_raw_item(node,
+                                    JS_COLLECTION_NODE_KEY)));
                             if (!js_is_truthy(has_result)) {
-                                JS_ASSIGN_OR_RETURN(add_result, js_collection_method(result, 0, node->key, ItemNull));
+                                JS_ASSIGN_OR_RETURN(add_result, js_collection_method(result, 0,
+                                    js_collection_node_raw_item(node,
+                                        JS_COLLECTION_NODE_KEY), ItemNull));
                             }
                         }
                     } else {
@@ -20849,7 +21120,9 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                     if (this_size > rec.size) return (Item){.item = ITEM_FALSE};
                     for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
                         if (node->deleted) continue;
-                        JS_ASSIGN_OR_RETURN(has_result, set_record_has(&rec, node->key));
+                        JS_ASSIGN_OR_RETURN(has_result, set_record_has(&rec,
+                            js_collection_node_raw_item(node,
+                                JS_COLLECTION_NODE_KEY)));
                         if (!js_is_truthy(has_result)) return (Item){.item = ITEM_FALSE};
                     }
                     return (Item){.item = ITEM_TRUE};
@@ -20883,7 +21156,9 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                     if (this_size <= rec.size) {
                         for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
                             if (node->deleted) continue;
-                            JS_ASSIGN_OR_RETURN(has_result, set_record_has(&rec, node->key));
+                            JS_ASSIGN_OR_RETURN(has_result, set_record_has(&rec,
+                                js_collection_node_raw_item(node,
+                                    JS_COLLECTION_NODE_KEY)));
                             if (js_is_truthy(has_result)) return (Item){.item = ITEM_FALSE};
                         }
                     } else {
@@ -28823,9 +29098,17 @@ extern "C" Item js_iterable_to_array(Item iterable) {
             if (cd->type == JS_COLLECTION_MAP) {
                 // Map: array of [key, value] pairs
                 while (node) {
+                    if (node->deleted) {
+                        node = node->next;
+                        continue;
+                    }
                     temp_root.set(js_array_new(2));
-                    JS_ASSIGN_OR_RETURN(set_result, js_elements_set_int(temp_root.get(), 0, node->key));
-                    JS_ASSIGN_OR_RETURN_INTO(set_result, js_elements_set_int(temp_root.get(), 1, node->value));
+                    JS_ASSIGN_OR_RETURN(set_result, js_elements_set_int(
+                        temp_root.get(), 0, js_collection_node_raw_item(node,
+                            JS_COLLECTION_NODE_KEY)));
+                    JS_ASSIGN_OR_RETURN_INTO(set_result, js_elements_set_int(
+                        temp_root.get(), 1, js_collection_node_raw_item(node,
+                            JS_COLLECTION_NODE_VALUE)));
                     JS_ASSIGN_OR_RETURN_INTO(set_result, js_elements_set_int(array_root.get(), idx, temp_root.get()));
                     idx++;
                     node = node->next;
@@ -28833,7 +29116,13 @@ extern "C" Item js_iterable_to_array(Item iterable) {
             } else {
                 // Set: array of values
                 while (node) {
-                    JS_ASSIGN_OR_RETURN(set_result, js_elements_set_int(array_root.get(), idx, node->key));
+                    if (node->deleted) {
+                        node = node->next;
+                        continue;
+                    }
+                    JS_ASSIGN_OR_RETURN(set_result, js_elements_set_int(
+                        array_root.get(), idx, js_collection_node_raw_item(node,
+                            JS_COLLECTION_NODE_KEY)));
                     idx++;
                     node = node->next;
                 }

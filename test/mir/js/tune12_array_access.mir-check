@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "description": "D8.4.1v2: local/parameter array receivers use the guarded packed tagged arm and retain one js_elements_get_number miss continuation.",
+  "checks": [
+    {
+      "in_func": "_js_repeated_first_#_body",
+      "expect": [
+        "u8:2(",
+        "call\tjs_elements_get_number"
+      ]
+    },
+    {
+      "in_func": "_js_local_typed_total_#_body",
+      "expect": [
+        "call\tjs_typed_array_element_type",
+        "call\tjs_typed_array_current_data_ptr"
+      ],
+      "forbid": [
+        "call\tjs_typed_array_get"
+      ]
+    },
+    {
+      "in_func": "_js_overwrite_existing_#_body",
+      "expect": [
+        "call\tjs_elements_set_int_completion",
+        "call\tjs_set"
+      ]
+    }
+  ]
+}

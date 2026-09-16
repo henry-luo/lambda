@@ -593,3 +593,210 @@ are a re-proof the callee already owns. Hoisting that proof to the first use
 in the function (invalidated by a write to the field or a call that may retain
 the root) is obligation 6 applied to a declared parameter and is the next
 concrete slice.
+
+
+### 9.3 D8.3.4v3 — `var` positions admitted to raw variants (LANDED, subset)
+
+The user ruled on 2026-09-16 that `var` parameters and methods leave the
+boxed-only exclusion list. Spec revised in place (D8.3.4v3, formal design
+8.1.0); deliberation recorded as O11v2 in
+`vibe/Lambda_Design_Compiling_Dual_Func.md`.
+
+**What shipped.** `mir_callsite_exact_raw_key` no longer rejects a `var`
+position outright. It admits one whose value travels in the *same carrier on
+both edges* -- records, maps and arrays, which are boxed Items either way -- so
+the CW33 home transport the ordinary argument loop already emits applies
+unchanged and the borrow's write-back is literally the `_b` path's
+(D8.1.1v10). A `var` position whose contract would take a raw scalar lane is
+still refused: that is O11's original hazard, a raw carrier replacing the
+caller-owned location, and it has no transport yet.
+
+**Evidence.** `test/lambda/proc/type_binder_var_record_raw.ls` gives
+`pn bump(var c: Counter, step: number as T) T` two exact keys. Before the
+change the emitter produced no raw body for it; after, `_bump__raw0` and
+`_bump__raw1` are emitted and selected. Output is byte-identical on interp,
+jit and auto, and under `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1` on
+all three. Emission 142/142, ratchet 19/19, and the 229 binder/`cow_var`/proc
+tests pass.
+
+**Two things the ruling does not by itself unlock.**
+
+- **Methods are the larger half.** A method call builds a closure rather than a
+  direct edge, so the call-site collector never records it
+  (`mir_ident_local_func` resolves an identifier callee; a method callee is a
+  member expression). Admitting methods means statically resolving the target
+  from the receiver's type and emitting a direct edge -- new work, not a lifted
+  check. Recorded as ruled-but-unimplemented.
+- **The benchmark rows still need binder-free keys.** Raw variants are planned
+  only when `signature->binder_count` is non-zero, and no benchmark uses a
+  binder.
+
+### 9.4 Why raw variants are the wrong lever for the widest rows
+
+A raw variant's value is that its key *tells the body what the argument's exact
+type is*. deltablue's hot procedures declare their parameters
+(`pn c_choose_method(var w: World, cid: int, mark: int)`), so the body already
+knows every type statically. The key adds nothing there. That part stands.
+
+**But the follow-on claim in the first revision of this section was wrong, and
+the measurement that refutes it is below.** It asserted that the per-access cost
+is `emit_array_rep_cert_guard` re-emitted at every access to `w.cons`, and that
+hoisting that proof was the next lever. The count it rested on came from
+grepping a mask constant out of a MIR dump without checking which emitter
+produced it. A census settles it instead (§9.6).
+
+### 9.5 T28-6 — a folded constant is proven in band (LANDED)
+
+`mir_int_lane_interval` knew a *spelled* literal's value but not a *folded*
+one, so after T28-1 made `K_EDIT` an immediate, `k == K_EDIT` still paid the
+two-instruction int53 band test on both operands. The oracle now reads the
+settled const-pool word through one shared accessor, `mir_const_folded_item`,
+which `mir_emit_const_folded_value` was rewritten to use as well so the two
+cannot disagree about a node's folded value (rule 13).
+
+Measured against a control built from the same HEAD (`temp/t28/lambda-t28-v3.exe`):
+
+| | control | T28-6 |
+|---|---:|---:|
+| `c_choose_method` instructions | 3340 | 3334 |
+| band-test pairs in it | 16 | 14 |
+| deltablue2 module instructions | 35,546 | 35,342 |
+
+deltablue2 output identical.
+
+**Corpus and timing.** 152 benchmark scripts byte-identical against the
+same-HEAD control; the 3 that differ are the `ls_micro` rows that print their
+own elapsed times, and their computed results are equal.
+
+Per-row timing is **not resolvable on this host** and the static counts are the
+honest signal. deltablue2 read 1.078 at 7 runs and 1.043 at 11 runs with the
+control first, then **1.018 the other way** with the order reversed -- i.e. each
+binary looks slower when it runs second, so the difference is ordering drift,
+not the change. Two unrelated `test_js_mvp_gtest.exe` processes were still
+spinning at 100% CPU throughout. T28-6 strictly removes instructions (6 in
+`c_choose_method`, 204 module-wide, two band-test pairs) and cannot cost time;
+re-measure the row on a quiet host before recording any figure for it.
+
+## 10. State at the end of this round
+
+| Item | State |
+|---|---|
+| T28-1 module-constant fold | landed, committed, pinned by `tune28_module_const_fold` |
+| T28-6 folded constants proven in band | landed, working tree |
+| D8.3.4v3 `var` positions in raw variants | landed (same-carrier subset), working tree, fixture `type_binder_var_record_raw` |
+| D8.3.4v3 methods | **ruled, not implemented** -- needs static receiver resolution and a direct edge, because a method call builds a closure today |
+| binder-free raw keys | not started; permitted by D8.3.1v2, but raw variants replace the conventional native body, so code size needs care |
+| **certificate-proof hoist (obligation 6)** | **not started; this is the next lever for the widest rows** and needs no ruling |
+| T28-3/4/5/7/8 | not started |
+
+Gates at the end of the round: `test_lambda_gtest` 922/922, MIR emission
+142/142, ratchet 19/19, binder/`cow_*`/proc subset 229/229, forced-GC stress
+green on the new fixture across all three tiers.
+
+
+### 9.6 Certificate-proof hoist: implemented, measured, REVERTED
+
+**What was built.** A reuse cache inside `emit_array_rep_cert_guard`, so all
+eleven call sites would share one invalidation argument. Two facts had to hold
+for reuse: the earlier proof must still dominate, answered by a barrier counter
+added to the shared emitter that ticks on a call (which may replace the
+container) and on a label (a join a jump can enter); and the register must still
+hold the proven pointer, enforced by retiring any cached entry whose register an
+instruction redefines.
+
+**It fired zero times, and the reason is structural.** A guarded access does not
+prove and continue: it proves, zeroes a flag on the miss arm, and joins. So each
+access emits its own labels and advances the barrier, and the next access always
+sees a stale generation. More importantly the proof genuinely does **not** hold
+after that join -- control reaches it from the miss arm too -- so the proof is
+carried in the flag, not by dominance. A correct version would therefore be CSE
+on the guard *flag* (copy the previous flag), never elision of the guard, since
+eliding would assert the proof on the miss path.
+
+**The census says do not build that either.** Counters on the guard emitter,
+reported after lowering (the first attempt reported from the const-fold pass,
+which runs *before* lowering, and printed zeros):
+
+| Row | guard sites | repeat same (func, reg, contract) |
+|---|---:|---:|
+| awfy/deltablue2 | 197 | 3 |
+| awfy/havlak2 | 0 | 0 |
+| jetstream/cube3d2 | 0 | 0 |
+| jetstream/splay2 | 0 | 0 |
+| jetstream/hashmap2 | 10 | 0 |
+| beng/nbody2 | 28 | 22 |
+
+Three of the four widest rows emit **no** array certificate guard at all, so it
+is not their cost. deltablue emits 197 with an upper bound of 3 reuses, about
+1.5%. Only nbody2 shows real repetition, and it is already near C2MIR parity.
+
+**Disposition.** The cache and the emitter's barrier counter are reverted:
+inert code around a correctness-critical guard is a liability, and the premise
+that motivated it is refuted. What survives is the census method and the ruling
+that a flag CSE, not a guard elision, is the only sound shape if this is ever
+revisited.
+
+**What this leaves as the open question for the widest rows.** The verified
+per-function counts for `c_choose_method` are the ones this plan should reason
+from, not the grep that produced §9.4's first version: 64 tag dispatches, 38
+unbox calls, 57 lane re-boxings, 16 `item_at` miss arms, 123 null-sentinel
+materializations, 12 `lambda_map_path_set_checked_fixed` calls and 14 int53 band
+pairs, in 3,334 instructions. Attributing *those* to specific emitters, one at a
+time and with a census rather than a grep, is the next step.
+
+
+### 9.7 Null-sentinel simplification: drop the receiver arm on a proven binding (LANDED)
+
+**What the sentinels were.** The largest single count in `c_choose_method` was
+123 materializations of `ItemNull`. Reading one field of a record emits two
+null-absorption arms: one for a null *receiver* (`null.f` is `null`) and one for
+an empty packed *slot*. Each ends in materializing the null value, which is why
+the count ran to roughly twice the 113 pointer-mask strips in the same body.
+`skip_null_guard` controls the receiver arm only; the empty-slot arm is separate
+and is untouched here.
+
+**Why the receiver arm was always emitted.** It was hardcoded
+(`bool skip_null_guard = false; // typed variables can still hold null`) even
+though the receiver's static type was a declared, non-optional record that the
+call boundary had already admitted. Tune27's M7 recorded this residue and did
+not close it.
+
+**The proof, and its deliberate limit.** `mir_receiver_binding_non_null` admits
+only a **named binding** whose declared contract is a non-optional record: its
+declaration or parameter boundary admitted the value and a rebind must re-admit
+it (D3.2.4v3, S9.1.2), so null was never admissible. It refuses a binding whose
+contract was widened by reassignment, and a declared type that merely *contains*
+a record (an optional, a union) rather than being one.
+
+It is **not** extended to an arbitrary expression of non-optional record type,
+and that restraint is the safety argument: a container field whose packed slot
+is empty is reconstructed as `ItemNull` by `emit_mir_direct_field_read` itself,
+so `a.b.c` can meet a null `a.b` whose static type says otherwise. That is the
+case the old hardcode was defending and it stays guarded.
+
+**Measured** (control `temp/t28/lambda-t28-v6.exe`, same HEAD):
+
+| | control | after |
+|---|---:|---:|
+| `c_choose_method` instructions | 3,334 | 3,254 |
+| `ItemNull` materializations in it | 123 | 107 |
+| deltablue2 module instructions | 35,342 | 34,657 |
+
+Each removed arm is a branch, a sentinel materialization, a jump and two
+labels -- and the labels were splitting otherwise straight-line code, which is
+why the saving (80 instructions in the body, 685 module-wide) exceeds the 16
+sentinels the count alone suggests. deltablue2 output identical.
+
+**Gates.** `null_safe_member`, `agg_null_absence`, `oob_read_null`,
+`cow_var_nullable_record`, `cow_var_nullable_record_typed_handle`,
+`guarded_store_null_slot_retag` and `type_binder_var_record_raw` byte-identical
+on interp/jit/auto; three of them re-run under `LAMBDA_GC_FORCE_EVERY=1
+LAMBDA_GC_POISON_FREED=1` on all three tiers. A probe
+(`temp/t28/nullprobe.ls`) covering the two excluded shapes -- a chained read
+through a declared non-optional field, and a genuinely nullable receiver behind
+a test -- matches the control exactly. MIR emission 142/142, ratchet 19/19.
+
+Kept on the user's instruction that a clear simplification is worth landing on
+its own terms: it removes work the compiler can prove is unnecessary, and the
+emission reduction matters independently because MIR's generator is super-linear
+in function size (M6).

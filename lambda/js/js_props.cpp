@@ -4,6 +4,7 @@
 
 #include "js_props.h"
 #include "js_runtime.h"
+#include "js_exec_profile.h"
 #include "js_property_attrs.h"
 #include "js_function.hpp"
 #include "js_state_guards.h"
@@ -1243,6 +1244,19 @@ static Item js_property_lane_bridge_key_or_error(JsPropertyLane lane,
 
 extern "C" Item js_get(Item target, JsPropertyLane lane, Item observable_key,
                         Item receiver) {
+    // T12-4: this exact physical own-slot read is independent of property-key
+    // coercion and cannot collect, so prove it before constructing Rooted items.
+    if (js_is_js_array(target) &&
+            (receiver.item == ItemNull.item || receiver.item == target.item) &&
+            js_property_lane_is_index(lane)) {
+        Item value = ItemNull;
+        if (js_array_try_get_existing_own_dense_no_gc(target,
+                (int64_t)js_property_lane_payload(lane), &value)) {
+            return value;
+        }
+        js_opt_trace_record(JS_OPT_ARRAY_OWN_ELEMENT_GET_FALLBACK,
+            JS_OPT_REASON_HOLE_OR_SPARSE, JS_OPT_OUTCOME_FALLBACK);
+    }
     RootFrame roots(3);
     Rooted<Item> target_root(roots, target);
     Rooted<Item> key_root(roots,
@@ -1276,6 +1290,15 @@ extern "C" Item js_get(Item target, JsPropertyLane lane, Item observable_key,
 
 extern "C" Item js_set(Item target, JsPropertyLane lane, Item observable_key,
                         Item value, Item receiver) {
+    // A present ordinary own data element neither consults its prototype nor
+    // tests extensibility. Keep scalar-home writes on the rooted slow path.
+    if (js_is_js_array(target) &&
+            (receiver.item == ItemNull.item || receiver.item == target.item) &&
+            js_property_lane_is_index(lane) &&
+            js_array_try_set_existing_own_dense_no_gc(target,
+                (int64_t)js_property_lane_payload(lane), value)) {
+        return (Item){.item = b2it(true)};
+    }
     RootFrame roots(4);
     Rooted<Item> target_root(roots, target);
     Rooted<Item> key_root(roots,
