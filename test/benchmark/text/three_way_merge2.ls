@@ -34,7 +34,8 @@ pn make_variant(base: string[], side: string) string[] {
     lines
 }
 
-fn word_at(words: string[], index: int) string =>
+// S11.4.8v2/D8.3.1v2: direct split-result calls select the string-array raw variant.
+fn word_at(words: string[] as W, index: int) string =>
     if (index < len(words)) words[index] else ""
 
 pn merge_words(base_line: string, left_line: string, right_line: string) string {
@@ -68,7 +69,8 @@ pn merge_words(base_line: string, left_line: string, right_line: string) string 
     join(words, " ")
 }
 
-pn merge_lines(base_lines: string[], left_lines: string[], right_lines: string[]) string {
+// S11.4.8v2/D8.3.4v2: direct typed document arrays select a task-free pn raw body.
+pn merge_lines(base_lines: string[] as B, left_lines: string[], right_lines: string[]) string {
     var merged: array = []
     var index = 0
     while (index < len(base_lines)) {

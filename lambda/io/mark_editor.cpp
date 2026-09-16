@@ -1128,7 +1128,8 @@ Item MarkEditor::elmt_delete_attr(Item element, String* attr_name) {
     return container_delete_attr(element, attr_name);
 }
 
-Item MarkEditor::elmt_insert_child(Item element, int index, Item child) {
+Item MarkEditor::elmt_insert_child(Item element, int index, Item child,
+                                   bool preserve_dom_child) {
     if (!element.element || element.element->type_id != LMD_TYPE_ELEMENT) {
         log_error("elmt_insert_child: not an element");
         return ItemError;
@@ -1146,8 +1147,12 @@ Item MarkEditor::elmt_insert_child(Item element, int index, Item child) {
     }
 
     // Ensure child is in target arena (deep copy if external)
-    if (!builder_->is_in_arena(child) &&
-        !(ui_mode_ && mark_editor_should_preserve_ui_dom_child(child))) {
+    bool child_in_arena = builder_->is_in_arena(child);
+    // Detached DOM documents can use a non-UI Input while retaining live
+    // DomElement wrappers, which must not be copied into plain Mark storage.
+    bool preserve_ui_dom_child = (ui_mode_ || preserve_dom_child) &&
+        mark_editor_should_preserve_ui_dom_child(child);
+    if (!child_in_arena && !preserve_ui_dom_child) {
         log_debug("elmt_insert_child: child not in arena, deep copying");
         child = builder_->deep_copy(child);
     }

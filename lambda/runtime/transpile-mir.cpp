@@ -36195,17 +36195,32 @@ static bool mir_raw_variant_key_equal(const MirRawVariantKey* left,
     return true;
 }
 
+static bool mir_binder_raw_variant_callee_eligible(AstFuncNode* callee,
+        TypeFunc* signature) {
+    if (!callee || !signature || !signature->binder_count ||
+            signature->binder_count > LAMBDA_MAX_FUNCTION_ARGS ||
+            signature->is_variadic || signature->param_count <= 0 ||
+            signature->param_count > LAMBDA_MAX_FUNCTION_ARGS ||
+            callee->captures) {
+        return false;
+    }
+    AstNode* callee_as = (AstNode*)callee;
+    // A task-rooted procedure changes its entry protocol even without an
+    // explicit await, so only ordinary synchronous pn bodies may share TG8's
+    // direct raw ABI. `var` formals remain rejected per call below.
+    if (callee_as->node_type != AST_NODE_PROC) return true;
+    // A missing effect analysis cannot prove the task-free raw entry protocol.
+    return callee->analysis && !callee->analysis->may_await &&
+        !callee->analysis->needs_task_context;
+}
+
 static bool mir_callsite_exact_raw_key(AstCallNode* call, AstFuncNode* callee,
         MirRawVariantKey* key) {
     if (!call || !callee || !key) return false;
     AstNode* callee_as = (AstNode*)callee;
     TypeFunc* signature = callee_as->type && callee_as->type->type_id == LMD_TYPE_FUNC
         ? (TypeFunc*)callee_as->type : NULL;
-    if (!signature || !signature->binder_count ||
-            signature->binder_count > LAMBDA_MAX_FUNCTION_ARGS ||
-            signature->is_variadic || signature->param_count <= 0 ||
-            signature->param_count > LAMBDA_MAX_FUNCTION_ARGS ||
-            callee->captures || callee_as->node_type == AST_NODE_PROC) {
+    if (!mir_binder_raw_variant_callee_eligible(callee, signature)) {
         return false;
     }
 
@@ -36531,7 +36546,10 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                             name_buf->str, fwd_ret_tid);
                     }
                     // P4-3.4: Also enable native version when return type alone is native
-                    if (!has_native) {
+                    // A binder signature keeps its generic entry boxed. A
+                    // return-only native prepass would overwrite the TG8
+                    // variant table that was just registered above.
+                    if (!has_native && (!ft || !ft->binder_count)) {
                         TypeId fwd_ret_tid = infer_return_type(mt, fn_node);
                         if (mir_is_native_scalar_value_type(fwd_ret_tid)) {
                             NativeFuncInfo nfi;

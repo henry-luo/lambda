@@ -46,16 +46,17 @@ typedef struct SysFuncArgDesc {
     ValueRep required_rep;
 } SysFuncArgDesc;
 
-// How a system function's success type is computed [Type_Infer TI4].
+// How a system function's success type is computed [S11.4.9, D3.3.5].
 // The zero value must stay FIXED so an unaudited row keeps today's behavior
 // (its declared `success_type`/`return_type`) rather than silently deriving
-// something from an argument it was never checked against.
+// something from an argument it was never checked against. `result_arg_index`
+// selects the source argument for every argument-derived relation.
 typedef enum SysFuncResultKind {
     SYS_RESULT_FIXED = 0,       // use success_type/return_type as written
-    SYS_RESULT_SAME_AS_ARG0,    // result carries arg0's type (abs, sort, reverse)
-    SYS_RESULT_ELEM_OF_ARG0,    // result is arg0's element type (min1, max1)
-    SYS_RESULT_ARRAY_OF_ARG0_ELEM, // array over arg0's element type (unique)
-    SYS_RESULT_ARG0_NUMERIC,    // arg0's numeric carrier, else the fixed type (sum, avg)
+    SYS_RESULT_SAME_AS_ARGUMENT, // result carries the selected argument's type
+    SYS_RESULT_ELEM_OF_ARGUMENT, // result is the selected argument's element type
+    SYS_RESULT_ARRAY_OF_ARGUMENT_ELEM, // array over the selected element type
+    SYS_RESULT_ARGUMENT_NUMERIC, // selected argument's numeric carrier, else fixed
     // Real-scalar transcendental: `float` ONLY when arg0 is a proven real
     // numeric scalar. These rows are polymorphic — math.sqrt also accepts
     // complex and vector arguments and returns those shapes — so an
@@ -66,11 +67,19 @@ typedef enum SysFuncResultKind {
     // string and a symbol yields a symbol. Anything else keeps the row's open
     // type — these rows accept only text, so a non-text argument is a runtime
     // error whose type must not be guessed from the argument (SI14).
-    SYS_RESULT_TEXT_SAME_AS_ARG0,
+    SYS_RESULT_TEXT_SAME_AS_ARGUMENT,
     // split has two distinct result families. A proven text/null source
     // succeeds with ordinary String parts; ArrayNum and open sources retain
     // the row's generic array success contract.
     SYS_RESULT_TEXT_SPLIT,
+    // Wrap the selected argument's inferred type as an array element type.
+    // This is the registry form of `value: as T -> T[]` (S11.4.9).
+    SYS_RESULT_ARRAY_OF_ARGUMENT,
+    // Collection transforms retain text and array contracts, but normalize a
+    // range to the generic array that the runtime materializes.
+    SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT,
+    // A slice additionally retains a binary source as binary.
+    SYS_RESULT_SLICE_OF_ARGUMENT,
 } SysFuncResultKind;
 
 // System function metadata + JIT import pointer
@@ -98,10 +107,11 @@ typedef struct SysFuncInfo {
     // ordinary ItemError values that callers may contain with `or`.
     Type* success_type;
     bool may_return_error;
-    // How the success type is derived from the call site [Type_Infer TI4].
-    // A fixed `success_type` answers most rows; the element-preserving ops
-    // need the first argument, which only the AST builder can see.
+    // How the success type is derived from the call site (S11.4.9).
+    // A fixed `success_type` answers most rows; relational rows select one
+    // argument by `result_arg_index`, which only the AST builder can see.
     SysFuncResultKind result_kind;
+    int result_arg_index;
 } SysFuncInfo;
 
 // Variadic rows currently use the universal Item ABI. A fixed row's descriptor

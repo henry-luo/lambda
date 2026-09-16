@@ -2731,6 +2731,37 @@ static inline bool em_root_call_may_collect(MIR_insn_t insn,
     return true;
 }
 
+static inline void em_root_reload_live_values_after_call(MirEmitter* em,
+        MIR_insn_t call, const MirRootCandidate* candidates,
+        int candidate_count, const int* candidate_slots,
+        const uint64_t* live_after, const uint64_t* definitions) {
+    if (!em || !call || !candidates || !candidate_slots || !live_after ||
+            !definitions) return;
+    MIR_insn_t after = call;
+    for (int ci = 0; ci < candidate_count; ci++) {
+        uint64_t bit = UINT64_C(1) << (ci & 63);
+        if ((live_after[ci >> 6] & bit) == 0 ||
+                (definitions[ci >> 6] & bit) != 0 ||
+                candidate_slots[ci] < 0) {
+            continue;
+        }
+        MIR_reg_t reg = candidates[ci].reg;
+        MIR_type_t type = MIR_reg_type(em->ctx, reg, em->func);
+        if (!mir_gc_value_needs_root(candidates[ci].value_class, type)) continue;
+        if (type != MIR_T_P) type = MIR_T_I64;
+        // A MAY_GC call may move an Item and clobber an ABI argument register.
+        // The side-root slot is the canonical post-safepoint value (D5.3.1).
+        MIR_insn_t reload = MIR_new_insn(em->ctx, MIR_MOV,
+            MIR_new_reg_op(em->ctx, reg),
+            MIR_new_mem_op(em->ctx, type,
+                (MIR_disp_t)candidate_slots[ci] *
+                    (MIR_disp_t)sizeof(uint64_t),
+                em->frame.root_base, 0, 1));
+        MIR_insert_insn_after(em->ctx, em->func_item, after, reload);
+        after = reload;
+    }
+}
+
 static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         MIR_reg_t frame_base, MIR_insn_t anchor,
         bool oracle_stores_present, int oracle_slot_count,
@@ -2922,6 +2953,8 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         (size_t)instruction_count * (size_t)word_count;
     uint64_t* instruction_live_in = (uint64_t*)mem_alloc(
         instruction_word_count * sizeof(uint64_t), MEM_CAT_TEMP);
+    uint64_t* instruction_live_out = (uint64_t*)mem_alloc(
+        instruction_word_count * sizeof(uint64_t), MEM_CAT_TEMP);
     uint8_t* candidate_defined = (uint8_t*)mem_alloc(
         (size_t)candidate_count * sizeof(uint8_t), MEM_CAT_TEMP);
     int max_home_id = 0;
@@ -2941,12 +2974,14 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         (size_t)candidate_count * sizeof(int), MEM_CAT_TEMP);
     int* set_candidates = (int*)mem_alloc(
         (size_t)candidate_count * sizeof(int), MEM_CAT_TEMP);
-    if (!instruction_live_in || !candidate_defined || !home_to_slot ||
+    if (!instruction_live_in || !instruction_live_out || !candidate_defined || !home_to_slot ||
             !candidate_slots || !set_candidates) {
         log_error("mir-semantic-root-write-back: publication allocation failed");
         abort();
     }
     memset(instruction_live_in, 0,
+        instruction_word_count * sizeof(uint64_t));
+    memset(instruction_live_out, 0,
         instruction_word_count * sizeof(uint64_t));
     memset(candidate_defined, 0,
         (size_t)candidate_count * sizeof(uint8_t));
@@ -2960,6 +2995,9 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
             live_out + (size_t)bi * (size_t)word_count,
             (size_t)word_count * sizeof(uint64_t));
         for (int i = blocks[bi].end - 1; i >= blocks[bi].start; i--) {
+            memcpy(instruction_live_out +
+                    (size_t)i * (size_t)word_count,
+                scratch_in, (size_t)word_count * sizeof(uint64_t));
             memset(insn_uses, 0, (size_t)word_count * sizeof(uint64_t));
             memset(insn_definitions, 0,
                 (size_t)word_count * sizeof(uint64_t));
@@ -3327,6 +3365,17 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
                     }
                     publication_mode = 0;
                 }
+                memset(insn_uses, 0,
+                    (size_t)word_count * sizeof(uint64_t));
+                memset(insn_definitions, 0,
+                    (size_t)word_count * sizeof(uint64_t));
+                em_collect_root_candidate_bits(em->ctx, current,
+                    reg_to_candidate, reg_map_count, insn_uses,
+                    insn_definitions);
+                em_root_reload_live_values_after_call(em, current,
+                    root_candidates, candidate_count, candidate_slots,
+                    instruction_live_out + (size_t)i * (size_t)word_count,
+                    insn_definitions);
             }
             memset(insn_uses, 0, (size_t)word_count * sizeof(uint64_t));
             memset(insn_definitions, 0,
@@ -3370,7 +3419,8 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
     mem_free(block_uses); mem_free(block_definitions);
     mem_free(live_in); mem_free(live_out);
     mem_free(scratch_out); mem_free(scratch_in);
-    mem_free(instruction_live_in); mem_free(candidate_defined);
+    mem_free(instruction_live_in); mem_free(instruction_live_out);
+    mem_free(candidate_defined);
     mem_free(home_to_slot); mem_free(candidate_slots); mem_free(set_candidates);
     mem_free(interference); mem_free(used_colors);
     mem_free(candidate_obligated);

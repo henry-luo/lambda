@@ -670,8 +670,33 @@ static LambdaParseValue parse_type_slot(LambdaRdParser* parser) {
 }
 
 static bool parse_annotation_type_slot_value_mode(LambdaRdParser* parser,
-        LambdaParseValue* value_out, bool allow_binder) {
+        LambdaParseValue* value_out, bool allow_binder,
+        bool allow_leading_binder) {
     LambdaToken first = parser->current;
+    if (parser_accept(parser, LAMBDA_TOK_AS)) {
+        if (!allow_binder) {
+            return parser_fail(parser,
+                "a type binder is only allowed in a function parameter",
+                LAMBDA_TOK_IDENTIFIER);
+        }
+        if (!allow_leading_binder) {
+            return parser_fail(parser,
+                "a leading type binder requires a non-optional function parameter",
+                LAMBDA_TOK_BASE_TYPE);
+        }
+        LambdaToken binder_name;
+        if (!parser_take_name(parser, token_is_binder_name_candidate,
+                "expected a binder name after 'as'", &binder_name)) {
+            return false;
+        }
+        SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+        LambdaParseValue value = parser_reduce_tokens(parser,
+            LAMBDA_REDUCE_TYPE_SLOT, LAMBDA_REDUCTION_FORM_TOKEN, span, first,
+            binder_name, LAMBDA_REDUCTION_FLAG_ANNOTATION_IMPLICIT_BINDER,
+            NULL, 0);
+        if (value_out) *value_out = value;
+        return true;
+    }
     LambdaParseValue value = parse_type_slot_mode(parser, allow_binder, 0);
     if (!value) return false;
     if (parser_accept(parser, LAMBDA_TOK_TO)) {
@@ -709,7 +734,7 @@ static bool parse_annotation_type_slot_value_mode(LambdaRdParser* parser,
 
 static bool parse_annotation_type_slot_value(LambdaRdParser* parser,
         LambdaParseValue* value_out) {
-    return parse_annotation_type_slot_value_mode(parser, value_out, false);
+    return parse_annotation_type_slot_value_mode(parser, value_out, false, false);
 }
 
 static LambdaParseValue parse_primary_type_slot(LambdaRdParser* parser) {
@@ -968,7 +993,8 @@ static bool parse_parameter_items(LambdaRdParser* parser, bool allow_variadic, c
         bool optional = parser_accept(parser, LAMBDA_TOK_QUESTION);
         LambdaParseValue type_value = 0;
         if (parser_accept(parser, LAMBDA_TOK_COLON) &&
-                !parse_annotation_type_slot_value_mode(parser, &type_value, true)) {
+                !parse_annotation_type_slot_value_mode(parser, &type_value, true,
+                    !optional)) {
             return false;
         }
         LambdaParseValue default_value = 0;

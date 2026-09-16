@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>foreign fragment history restore</title>
+</head>
+<body>
+  <div id="history-host">
+    <button id="snapshot-button" type="button">snapshot control</button>
+    <div id="restored-target">swapped</div>
+  </div>
+  <script>
+    const parsed = new DOMParser().parseFromString(
+      '<body><template class="internal-htmx-wrapper">\n  <button id="snapshot-button" type="button">snapshot control</button>\n  <div id="restored-target">initial</div>\n  <script src="../../js/htmx.min.js"><\\/script>\n  <script>window.detachedFragmentScript = true;<\\/script>\n</template></body>',
+      'text/html');
+    const fragment = parsed.querySelector('template').content;
+    Array.from(fragment.querySelectorAll('script')).forEach(function (script) {
+      const activated = document.createElement('script');
+      Array.from(script.attributes).forEach(function (attribute) {
+        activated.setAttribute(attribute.name, attribute.value);
+      });
+      activated.textContent = script.textContent;
+      activated.async = false;
+      script.parentNode.insertBefore(activated, script);
+      script.remove();
+    });
+    const host = document.getElementById('history-host');
+    let oldChild = host.firstChild;
+    while (fragment.childNodes.length > 0) {
+      const nextNode = fragment.firstChild;
+      if (nextNode.nodeType !== Node.TEXT_NODE &&
+          nextNode.nodeType !== Node.COMMENT_NODE) {
+        nextNode.classList.add('htmx-added');
+      }
+      host.insertBefore(nextNode, oldChild);
+    }
+    while (oldChild) {
+      const nextChild = oldChild.nextSibling;
+      oldChild.remove();
+      oldChild = nextChild;
+    }
+  </script>
+</body>
+</html>

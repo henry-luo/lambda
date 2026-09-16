@@ -2877,6 +2877,26 @@
     }
   },
   {
+    "type": "leading_binder_type",
+    "named": true,
+    "fields": {
+      "binder": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "base_type",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "let_expr",
     "named": true,
     "fields": {
@@ -3939,6 +3959,10 @@
           },
           {
             "type": "fn_type",
+            "named": true
+          },
+          {
+            "type": "leading_binder_type",
             "named": true
           },
           {

@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 7.1.1 (2026-09-15)
+**Spec version:** 8.0.0 (2026-09-16)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -525,15 +525,18 @@ that carries them.
   `type(x)` yields the type value, `name(T)` its name; `match` arms and
   `is` dispatch through the same runtime membership operation (D3.2.1) —
   one classification machinery for the whole surface. [C9a, TE-6]
-- **D3.1.4** A type-binder site stores its written bound, name, and stable
+- **D3.1.4v2** A type-binder site stores its written bound, name, and stable
   signature-local slot; a bound-name reference stores that slot and a copied
-  bound, never a mutable back-pointer. `TypeFunc` owns the slot-ordered
-  canonical-site table. Every interpreter or MIR activation owns an exact
-  rooted environment for selected `Type*` values, and binder-carrying
-  parameters use the boxed entry boundary until a future specialization can
-  prove an equivalent direct path. Cached container certificates prove a
-  written contract only; they never skip the walk that publishes an
-  invocation's binder slot. [S11.4.8, D1.5, D3.3.3v3, D8.1.1v10]
+  bound, never a mutable back-pointer. The parameter-only source shorthand
+  `x: as T` elaborates to this same site with `TYPE_ANY_NO_ERROR` as its bound;
+  it adds no `TypeKind`, runtime rule, or specialization key. `TypeFunc` owns
+  the slot-ordered canonical-site table. Every interpreter or MIR activation
+  owns an exact rooted environment for selected `Type*` values, and
+  binder-carrying parameters use the boxed entry boundary until a future
+  specialization can prove an equivalent direct path. Cached container
+  certificates prove a written contract only; they never skip the walk that
+  publishes an invocation's binder slot. [S11.4.8v2, D1.5, D3.3.3v3,
+  D8.1.1v10]
 
 ### D3.2 The subtype foundation
 
@@ -635,6 +638,16 @@ that carries them.
 - **D3.3.4** Representation always follows the **full inferred contract**
   (D2.4, D2.5): an unproven indexed read infers `T?`; flow-sensitive
   proofs may narrow privately but never change the public type.
+- **D3.3.5** **System-function result relations are declarative registry
+  metadata.** `SysFuncInfo` records a result kind and source-argument index;
+  the AST builder instantiates that relation from the complete call argument
+  list. The initial relation vocabulary is fixed result, same argument,
+  element of argument, array of argument, numeric/text family preservation,
+  and audited collection transforms. It replaces first-argument-only
+  inference without reparsing source-like signatures or allocating a
+  `TypeBinder`; a relation neither exposes a type name nor changes native
+  dispatch. A row must fall back to its declared open result whenever its
+  native operation cannot prove the relation. [S11.4.9, S17.2.1, D3.3.1v2]
 
 ### D3.4 Shapes
 
@@ -1125,7 +1138,7 @@ that carries them.
 - **D6.2.4** The closure env is precisely traced (`closure_field_count`);
   wide scalars live in the env's tail region (SF18). Closures are
   **boxed-only** in the dual-func plan — the most valuable future
-  relaxation (§D8.3.4). [GC2 §8, DF11]
+  relaxation (§D8.3.4v2). [GC2 §8, DF11]
 
 ### D6.3 Concurrency runtime
 
@@ -1210,7 +1223,7 @@ loosely across the corpus — context disambiguates, and we live with it.
   effectful even though the bindings are immutable. Package state lives
   in per-context slabs, never at code-baked addresses (D5.4.3). [RG14, U2]
 - **D7.2.2** Imports resolve to the **boxed `_b` symbol** of exported
-  functions (export ⇒ boxed entry mandatory, D8.3.4); package
+  functions (export ⇒ boxed entry mandatory, D8.3.4v2); package
   initialization is a **transaction barrier** — a failed init rolls back,
   and a module with half-established top-level state must never become
   importable (semantics S7.7.6). [DF15, ER-D2]
@@ -1594,7 +1607,7 @@ loosely across the corpus — context disambiguates, and we live with it.
   The compiler admits distinct qualifying keys in deterministic source order up
   to its fixed implementation cap, then routes later, dynamic, partial, or
   ineligible shapes to `_b`. Per-parameter partial specialization remains
-  rejected. D8.3.4 still permits the single closed-world raw-only case. A
+  rejected. D8.3.4v2 still permits the single closed-world raw-only case. A
   declared, native-eligible function has **no boxed slow body**; a slow body
   exists iff a param is inference-specialized, unboxing is profitable, and the
   caller set is open. [S1.6, DF1–DF3]
@@ -1609,12 +1622,15 @@ loosely across the corpus — context disambiguates, and we live with it.
   never reach the unboxed entry; the unboxed entry has exactly **two**
   proof-producing paths (statically-proven site, or `_b`) — *any third
   path is a bug, not a slow path*. [DF9, DF14]
-- **D8.3.4** **Visibility decides which versions exist**: exported ⇒ `_b`
+- **D8.3.4v2** **Visibility decides which versions exist**: exported ⇒ `_b`
   mandatory; non-exported with one exact visible call shape ⇒ unboxed
   only, no guard, no slow body. Caller-side guards are accepted **only as
   guard hoisting** (same predicate, failure edge lands on the `_b` path,
-  flag-gated, benchmark-justified).* Boxed-only exclusions: closures,
-  methods, variadics, `pn`/`var` params, may-await procs. [DF15, DF16, DF11]
+  flag-gated, benchmark-justified).* A fixed-arity, task-free synchronous
+  `pn` with immutable parameters may admit D8.3.1 raw variants at a direct
+  exact edge; it retains `_b`, and it is not guard-hoist eligible. Boxed-only
+  exclusions are closures, methods, variadics, `var` parameters, and
+  procedures that may await or require a task context. [DF15, DF16, DF11]
 - **D8.3.5** Numeric admission at implicit boundaries is one rule (static
   whole-domain embedding admits + normalizes; dynamic admits iff lossless;
   admission ≠ cast); entry-shape inference and body inference are separate
@@ -2020,8 +2036,8 @@ slice; no formal semantic ruling or document semver changes.
 | D8.1.3v10 | Revised 2026-08-29: normal JavaScript and TypeScript source admission uses the first-party C lexer and hybrid recursive-descent/Pratt parser, reducing directly to the retained `JsAstNode` graph. The vendored JS/TS Tree-sitter grammar archives remain unchanged but link only into `lambda-cst` for differential acceptance checks; normal Lambda, runtime, test, and release targets do not link either archive. The LambdaJS AST tier includes the synchronous ES-module slice under the same Runtime/EvalContext/heap/event loop/module registry as Lambda. Registry-owned namespace placeholders, hoisted function declaration instantiation before dependency traversal, strict private slabs, live import reads, and registry propagation preserve the admitted default/named/namespace imports, default/named/namespace/non-ambiguous-star exports, named/star re-exports, `import.meta.url`, dynamic `import()`, and circular function imports without a JS-private module cache. Lambda `.ls` imports use that descriptor and their public boxed function values cross the common JS call kernel through the existing Lambda boxed dynamic-call ABI with retained `TypeFunc` metadata. The two languages retain their own semantic walkers and activation records; no second runtime, EvalContext, stack owner, heap, or module registry is created. Top-level await/async module evaluation, generators/async functions, ambiguous star exports, shared T0/T1 environments, continuations, and AUTO policy remain pending. `JS_EXECUTION_BACKEND=ast` remains explicit and fail-closed, and the default remains MIR. Status and focused gates: `vibe/jube/JS_Grammar_Parser.md`, `vibe/Lambda_Design_JS_Interpreter.md`, and `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
 | D8.2.1–D8.2.3 | The physical Lambda/JS foundation is substantially shared (`AstNodeType`, many layouts/aliases, `FnAnalysis`, and `MirEmitter`), but structural convergence is incomplete. P1a (2026-08-28) moved Lambda iterator `for` to `AST_NODE_FOR_EXPR`/`AstForNode`; P1b moved Lambda declarations to `AST_NODE_VARIABLE_DECLARATOR`/`AstDeclaratorNode`; P1c folded assignment/declaration-wrapper storage; P1d (2026-08-28) promotes condition loops to one `AST_NODE_LOOP`/`AstLoopControlNode {form, init, test, update, body}` and retires the old while/do/C-style tags, while iterator clauses use `AST_NODE_FOR_CLAUSE`. P1e (2026-08-29) retires the duplicated JavaScript core-child rows and leaves only extension layouts in `js_ast_children.cpp`; Python remains the later guest acceptance test. |
 | D8.2.4–D8.2.6 | P1–P4 establish the shared indexed compiler substrate described above. P5 (2026-08-30) completes the planned structural semantic-family consolidation: `MirValue` demand/profile lowering now owns shared sequence, condition, module-slot, destination, call/result, return/completion, function-publication, and module-finalization boundaries in Lambda and JS, while profile callbacks retain language semantics and boxed fallback. P6 moves shared context/owner binding, result publication, execution/current-file/module-state scopes, and active-module handles into `runtime-state`; the semantic walkers and their frames remain distinct under **D8.1.3v10**. The 2026-09-05 FunctionId follow-up retires `FnAnalysis::js_mir_backend`: JS MIR artifacts are reached only through the `func_entries_by_id` table keyed by the shared `FunctionId`; post-order storage remains a backend detail. The same closeout publishes the physical Lambda parse→build→bind graph and the full `MirValue` producer boundaries. Current verification is 4,098 Lambda/Input and 40,261 Test262 baseline cases, with Lambda 0.512534 and JS 0.690065 release compiler-time ratios. This is an implementation status for **D2.4.1–D2.4.3**, **D5.2.1v3**, **D5.3.4**, and **D8.2.6**, not a new ruling. Focused gates: `vibe/Lambda_Design_JS_Unified.md` P5–P6. **D8.2.5v2 (2026-09-11) is not implemented**: it reverses the fact-placement clause of D8.2.5, which had required per-node inferred/const facts in an ID-keyed side table. `AstNode.type` is confirmed as the effective-type authority and declared annotations already sit on the declaring node (`NameEntry`/param/declarator, ~164 readers), but `AstIndex::facts`/`AstNodeFacts` still exists. It is near-dead in practice — `declared_contract`, `inferred_type` and `representation` are initialized and never read; only const-fold `flags`/`folded_item` have a producer and a consumer. Retiring it, and rehoming folded values onto the node's own literal `TypeConst`, is the open work. Rationale and the superseded U30 text: `vibe/Lambda_Design_Unified_AST.md` §13; plan: `vibe/Lambda_Proposal_JS_Unify_P7.md` U-D. |
-| D8.3.1v2–D8.3.3 | **Binder TG8 direct-edge slice implemented 2026-09-15.** Eligible fixed-arity `fn` binder functions with exact scalar, normalized `array`/`map`/`range`, named/nominal map, or concrete element keys admit at most four immutable `__rawN` bodies in source order. `_b` shares one exact-key matcher: scalar tags, selected type-value identity, normalized container kinds, and descriptor-pointer identity for shape-bearing maps/elements. It retains the complete generic boxed fallback; later, partial, dynamic, capped, or ineligible keys consume no slot. A statically exact local call selects its predeclared `__rawN` body directly; a shape literal is exact when its AST descriptor is the raw key, while declared base-shape and other unproven edges retain `_b` unless D8.3.4's opt-in hoist applies. Closures, methods, `pn`/`var`, variadics, bare `element`, and may-await procedures remain excluded. Fixture: `test/lambda/type_binder_raw_variants.ls`. [S1.6, D8.3.1v2–D8.3.3] |
-| D8.3.4 | **DF16's caller-side guard-hoist slice is implemented, opt-in, 2026-09-15.** `LAMBDA_MIR_TG8_HOIST_GUARDS=1` emits the very `_b` exact-key chain at an eligible local dynamic binder edge; a matching arm calls its immutable `__rawN`, and every miss calls `_b`. Its conservative loop-region case requires bounded raw keys, one unmodified identifier argument, and exactly one eligible dynamic call in a synchronous `while`; it evaluates that shared chain once, prepares the selected raw argument once, then enters its direct-`__rawN` sibling or an `_b`-only fallthrough sibling. Its straight-line CSE case shares a raw-index or boxed selection only between repeated eligible calls to the same callee with the same immutable identifier in one content sequence; both calls remain, while control, assignment, or an intervening different call clears the choice. It excludes closures, methods, `pn`/`var`, variadics, optional/named/spread arguments, mutable source identifiers, and may-await procedures. The fixed cap remains four (deterministic source order; no profile feedback); five release benchmark processes measured 0.26 s baseline versus 0.18 s enabled for `test/benchmark/tg8_guard_hoist.ls`. **DF12's scalar first slice is also opt-in:** `LAMBDA_MIR_DF12_SPECULATIVE_LIFT=1` lets bare arithmetic body evidence select an `int` raw shape; the exact wrapper guard admits only `int` and every mismatch runs the complete boxed slow body. Direct float evidence remains `float`; broader speculative shapes await Result-suite measurement. [S1.6, D3.3.2v2, D8.3.1v2–D8.3.4, D8.4.1v2] |
+| D8.3.1v2–D8.3.3, D8.3.4v2 | **Binder TG8 direct-edge procedure slice implemented 2026-09-16.** Eligible fixed-arity `fn` and task-free synchronous `pn` binder functions with immutable parameters and exact scalar, normalized `array`/`map`/`range`, named/nominal map, or concrete element keys admit at most four immutable `__rawN` bodies in source order. `_b` shares one exact-key matcher: scalar tags, selected type-value identity, normalized container kinds, and descriptor-pointer identity for shape-bearing maps/elements. It retains the complete generic boxed fallback; later, partial, dynamic, capped, or ineligible keys consume no slot. A statically exact local call selects its predeclared `__rawN` body directly; a shape literal is exact when its AST descriptor is the raw key, while declared base-shape and other unproven edges retain `_b`. `var` parameters, task-context procedures, and may-await procedures retain `_b`. Fixtures: `test/lambda/type_binder_raw_variants.ls`, `test/lambda/proc/type_binder_proc_raw.ls`. [S1.6, D8.3.1v2–D8.3.4v2] |
+| D8.3.4v2 | **DF16's caller-side guard-hoist slice is implemented, opt-in, 2026-09-15.** `LAMBDA_MIR_TG8_HOIST_GUARDS=1` emits the very `_b` exact-key chain at an eligible local dynamic binder edge; a matching arm calls its immutable `__rawN`, and every miss calls `_b`. Its conservative loop-region case requires bounded raw keys, one unmodified identifier argument, and exactly one eligible dynamic call in a synchronous `while`; it evaluates that shared chain once, prepares the selected raw argument once, then enters its direct-`__rawN` sibling or an `_b`-only fallthrough sibling. Its straight-line CSE case shares a raw-index or boxed selection only between repeated eligible calls to the same callee with the same immutable identifier in one content sequence; both calls remain, while control, assignment, or an intervening different call clears the choice. It excludes closures, methods, `pn`/`var`, variadics, optional/named/spread arguments, mutable source identifiers, and may-await procedures. The fixed cap remains four (deterministic source order; no profile feedback); five release benchmark processes measured 0.26 s baseline versus 0.18 s enabled for `test/benchmark/tg8_guard_hoist.ls`. **DF12's scalar first slice is also opt-in:** `LAMBDA_MIR_DF12_SPECULATIVE_LIFT=1` lets bare arithmetic body evidence select an `int` raw shape; the exact wrapper guard admits only `int` and every mismatch runs the complete boxed slow body. Direct float evidence remains `float`; broader speculative shapes await Result-suite measurement. [S1.6, D3.3.2v2, D8.3.1v2–D8.3.4v2, D8.4.1v2] |
 | D8.4.1v2 | ICs are retired in both lanes: the Lambda lane never had them; the LambdaJS per-site `JsLoadIC`/`JsStoreIC` machinery was deleted 2026-08-15 (IC_Retire IR1–IR8) and the LambdaJS carve-out in LC1 was closed 2026-09-09 (LC1v2). The replacement — compile-predicted literal/constructor shapes with an inline guard, an integer-index lane, and the shared kernel on a miss — is specified in `vibe/jube/JS_Tune10_Fast_Paths.md` (T10-1/T10-2) and is **not implemented**; Result38 measures LambdaJS at 4.35× QuickJS with the unspecialized kernel path. |
 | D8.4.2v2 | Core direct calls pass individual ABI operands. Internal shape-2 results use two MIR results and C-reachable entries use the context companion slot; the trailing scalar-home operand remains retired. Tune24 aggregate-construction plans carry precise record-field destinations as internal operands and return an Item completion. The numeric companion-return ABI is unchanged. |
 | D8.4.3v2 | Landed 2026-08-17 for Lambda, LambdaJS, Jube, and hosted execution boundaries: ordinary failures use explicit returned completions through each frame, while `LambdaRecoveryFrame` is restricted by the recovery-boundary gate to native-fault/test containment sites. The catalog and adapter audits retain the explicit Item/companion-lane contracts; see `vibe/Lambda_Design_Runtime_Error_Handling.md` §10–§12. |

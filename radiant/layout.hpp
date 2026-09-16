@@ -3471,6 +3471,7 @@ bool is_table_internal_display(CssEnum display);
 bool layout_element_contains_table_internal(DomElement* element);
 bool layout_element_is_anonymous_table_fixup(const struct DomElement* element);
 bool layout_view_uses_table_grid_coordinates(View* view);
+void layout_detach_layout_only_node(struct DomNode* node);
 void layout_unwrap_anonymous_table_fixups_for_dom_mutation(struct DomElement* parent);
 void layout_unwrap_all_anonymous_table_fixups_for_dom_mutation(struct DomElement* root);
 
@@ -3686,7 +3687,7 @@ void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block);
 void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* block);
 void reset_flex_item_prop_for_style(LayoutContext* lycon, ViewSpan* block);
 void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block);
-void alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span);
+GridItemProp* alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span);
 PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* block);
 // Shared computed-property allocation keeps CSS and HTML hint resolution on
 // one boundary ownership path; divergent lazy allocation leaves partially
@@ -3725,6 +3726,8 @@ void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_befo
 void layout_materialize_pseudo_content(LayoutContext* lycon, ViewBlock* block,
                                        bool include_marker = false,
                                        bool create_first_letter = false);
+void layout_detach_first_letter_pseudo_content_for_layout_reset(struct DomElement* root);
+void layout_detach_materialized_pseudo_content_for_layout_reset(struct DomElement* root);
 void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
                                                 DomElement* pseudo_element);
 void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,

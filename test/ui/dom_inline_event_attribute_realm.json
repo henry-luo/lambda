@@ -1,0 +1,11 @@
+{
+  "name": "inline form handlers retain their JavaScript realm input",
+  "html": "test/ui/dom_inline_event_attribute_realm.html",
+  "viewport": {"width": 480, "height": 180},
+  "events": [
+    {"type": "click", "target": {"selector": "#field"}},
+    {"type": "type", "target": {"selector": "#field"}, "text": "x"},
+    {"type": "assert_value", "target": {"selector": "#field"}, "equals": "x"},
+    {"type": "assert_attribute", "target": {"selector": "body"}, "attribute": "data-inline-handler", "equals": "ran"}
+  ]
+}
