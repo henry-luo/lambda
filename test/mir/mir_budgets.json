@@ -517,13 +517,13 @@
       "name": "lambda_corpus_prettier_ast",
       "script": "test/benchmark/text/prettier_ast2.ls",
       "language": "lambda",
-      "description": "Tune27 G9: the largest text-row image (79 members); print_node is its widest body.",
+      "description": "Tune27 G9: the largest text-row image (79 members); print_node is its widest body. Tune28 T28-4 (2026-09-16): +13 per print_node and +49 module-wide are intended -- each lambda_module_name_id_at call became two loads (property_keys table + u32 key), a cheaper function by work done.",
       "budgets": {
         "default": {
-          "module_insns": 16327,
+          "module_insns": 16376,
           "functions": {
             "_print_node_#": {
-              "insns": 4059
+              "insns": 4072
             }
           }
         }

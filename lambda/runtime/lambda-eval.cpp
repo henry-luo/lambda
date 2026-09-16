@@ -1610,6 +1610,12 @@ static bool runtime_value_rep_proves_contract(Item value, Type* contract);
 // invocation's Type* slot (S4.2.2, D3.3.3v3).
 static bool runtime_contract_uses_binder(Type* type, int depth = 0) {
     if (!type || depth > 64) return false;
+    // T28-4: this walk runs at the top of EVERY admission and recurses into
+    // every map field and array element type. For a recursive union such as
+    // prettier's `Doc` it re-walks the whole contract on each of millions of
+    // crossings, only to answer `false` because the program has no binders.
+    // Nothing can reach a binder that was never allocated.
+    if (!lambda_binder_types_exist()) return false;
     // Global contracts use only the compact Type prefix. They cannot contain a
     // binder, and treating bare `map`/`func` as an extended descriptor reads
     // arbitrary memory past that prefix.
@@ -6270,18 +6276,49 @@ static String* split_heap_string_slice(Rooted<Item>& rooted_source, size_t offse
     return part;
 }
 
+// T28-5 (N5): the one literal-separator scan kernel. Returns the index of the
+// leftmost occurrence of `separator` starting at or after `from`, or SIZE_MAX.
+// `memchr` locates the separator's first byte -- libc vectorizes it -- so each
+// candidate costs one `memcmp` over the remaining bytes, and a one-byte
+// separator costs none. The byte-at-a-time loops this replaces called `memcmp`
+// at EVERY position, so splitting on a single character paid a library call
+// per source byte, and paid it twice (the count pass, then the split pass):
+// on three_way_merge that was a quarter of the whole run.
+// Leftmost-first like the loops it replaces; callers step past a match by
+// `separator_len`, which keeps matches non-overlapping.
+static size_t split_literal_find(const char* chars, size_t chars_len,
+        size_t from, const char* separator, size_t separator_len) {
+    if (!chars || !separator || separator_len == 0 ||
+            separator_len > chars_len) {
+        return SIZE_MAX;
+    }
+    size_t last = chars_len - separator_len;   // last index a match may start at
+    const unsigned char first = (unsigned char)separator[0];
+    while (from <= last) {
+        const char* hit = (const char*)memchr(chars + from, first,
+            last - from + 1);
+        if (!hit) return SIZE_MAX;
+        size_t at = (size_t)(hit - chars);
+        if (separator_len == 1 ||
+                memcmp(hit + 1, separator + 1, separator_len - 1) == 0) {
+            return at;
+        }
+        from = at + 1;
+    }
+    return SIZE_MAX;
+}
+
 static int64_t split_literal_match_count(const char* chars, size_t chars_len,
         const char* separator, size_t separator_len) {
     if (!chars || !separator || separator_len == 0) return 0;
     int64_t count = 0;
     size_t pos = 0;
-    while (pos + separator_len <= chars_len) {
-        if (memcmp(chars + pos, separator, separator_len) == 0) {
-            count++;
-            pos += separator_len;
-        } else {
-            pos++;
-        }
+    for (;;) {
+        size_t at = split_literal_find(chars, chars_len, pos, separator,
+            separator_len);
+        if (at == SIZE_MAX) break;
+        count++;
+        pos = at + separator_len;
     }
     return count;
 }
@@ -6486,21 +6523,19 @@ Item fn_split(Item str_item, Item sep_item) {
     size_t start = 0;
     size_t p = 0;
 
-    while (p + sep_len <= str_len) {
+    for (;;) {
+        // The slice and the push below allocate and may relocate the backing
+        // bytes, so the pointers are re-read every round and the scan is kept
+        // in indices.
         const char* str_chars = rooted_str.get().get_chars();
         const char* sep_chars = rooted_sep.get().get_chars();
-        if (memcmp(str_chars + p, sep_chars, sep_len) == 0) {
-            // found separator
-            size_t part_len = p - start;
-            String* part = split_heap_string_slice(rooted_str, start, part_len,
-                source_is_ascii);
-            array_push((Array*)rooted_result.get(), {.item = s2it(part)});
-
-            p += sep_len;
-            start = p;
-        } else {
-            p++;
-        }
+        size_t at = split_literal_find(str_chars, str_len, p, sep_chars, sep_len);
+        if (at == SIZE_MAX) break;
+        String* part = split_heap_string_slice(rooted_str, start, at - start,
+            source_is_ascii);
+        array_push((Array*)rooted_result.get(), {.item = s2it(part)});
+        p = at + sep_len;
+        start = p;
     }
 
     // add the last part
@@ -6600,26 +6635,24 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     size_t start = 0;
     size_t p = 0;
 
-    while (p + sep_len <= str_len) {
+    for (;;) {
+        // re-read after every allocating round, as in fn_split
         const char* str_chars = rooted_str.get().get_chars();
         const char* sep_chars = rooted_sep.get().get_chars();
-        if (memcmp(str_chars + p, sep_chars, sep_len) == 0) {
-            // push part before separator
-            size_t part_len = p - start;
-            String* part = split_heap_string_slice(rooted_str, start, part_len,
-                source_is_ascii);
-            array_push((Array*)rooted_result.get(), {.item = s2it(part)});
+        size_t at = split_literal_find(str_chars, str_len, p, sep_chars, sep_len);
+        if (at == SIZE_MAX) break;
+        // push part before separator
+        String* part = split_heap_string_slice(rooted_str, start, at - start,
+            source_is_ascii);
+        array_push((Array*)rooted_result.get(), {.item = s2it(part)});
 
-            // push the delimiter
-            String* delim = split_heap_string_slice(rooted_sep, 0, sep_len,
-                separator_is_ascii);
-            array_push((Array*)rooted_result.get(), {.item = s2it(delim)});
+        // push the delimiter
+        String* delim = split_heap_string_slice(rooted_sep, 0, sep_len,
+            separator_is_ascii);
+        array_push((Array*)rooted_result.get(), {.item = s2it(delim)});
 
-            p += sep_len;
-            start = p;
-        } else {
-            p++;
-        }
+        p = at + sep_len;
+        start = p;
     }
 
     // add the last part
@@ -10962,6 +10995,18 @@ static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
     }
     expected = runtime_boundary_unwrap_type(expected);
     if (!expected) return false;
+    // T28-5: a string value against the bare `string` contract is admitted
+    // unchanged. `&TYPE_STRING` is the global singleton, which cannot carry a
+    // literal, pattern or `that` refinement, and no probe below converts a
+    // string -- so the only other way out is the fallback further down, which
+    // answers `lambda_type_matches` true and returns the value as is. Counted
+    // at that fallback: 32.9M calls on three_way_merge and 33.3M on
+    // log_pipeline, every one of them a `string` contract, each descending the
+    // whole ladder for a tag compare.
+    if (expected == &TYPE_STRING && get_type_id(value) == LMD_TYPE_STRING) {
+        *converted = value;
+        return true;
+    }
     bool binder_dependent = runtime_contract_uses_binder(expected);
     // T27-4: `any` admits every non-error value unchanged (lambda_type_matches
     // answers true at once); the numeric, array and map probes below only

@@ -372,6 +372,15 @@ struct NameEntry {
     // borrow -- read-and-return helpers (rbt_get) must not share-mark the
     // stored value they hand out.
     bool place_copy_mutated;
+    // CW24v3 / D4.4.6: the PLACE may be written while this copy is alive --
+    // a write through the root (or a path prefix) between the bind and the
+    // copy's last use, a `var` pass of the root in that range, or the copy
+    // escaping the function. The copy is then a real second holder and the
+    // bind must share-mark, whether or not the copy itself is ever written.
+    // Gating on `place_copy_mutated` alone let `let old = r.kid; r.kid.n = 7`
+    // show the write through `old` (S9.1.2). Decided once at FUNCTION_END.
+    bool place_copy_place_written;
+    bool place_copy_range_decided;   // the precise list walk reached this bind
     // The place's root name, kept only to name it in that diagnostic.
     String* place_copy_root;
     // Read-modify-WRITE-BACK (`p = w.pkts[i]` ... `w.pkts[i] = p`) is the
