@@ -5625,11 +5625,44 @@ static bool interp_const_init_value(Transpiler* tp, AstNode* init, Item* out) {
     // node a literal-valued type: `floor(2.7)` inherits its argument's literal
     // float type, whose payload is 2.7 -- the argument, not the result. Asking
     // it about a non-literal node therefore returns a confidently wrong value.
-    if (!value || value->node_type != AST_NODE_PRIMARY ||
-            ((AstPrimaryNode*)value)->expr) {
+    // T28-1: a bare literal is a PRIMARY chain ending in a CHILDLESS primary --
+    // the token itself -- for which `ast_unwrap_primary` returns NULL. Testing
+    // its result made this arm unreachable for every literal initializer, so
+    // `let K = 1` never folded on any tier and each use stayed a boxed module
+    // slab read. Walk the wrapper chain directly and require that landing.
+    bool negated = false;
+    AstNode* literal = ast_signed_literal_operand(init, &negated);
+    if (!literal || literal->node_type != AST_NODE_PRIMARY) return false;
+    if (!ast_static_literal_item(tp, literal, out)) return false;
+    if (!negated) return true;
+    // A signed literal is folded here rather than by the expression arm so it
+    // also settles without a heap. Only the two kinds whose negation is exact
+    // and allocation-free are admitted; every other kind declines to fold.
+    switch (get_type_id(*out)) {
+    case LMD_TYPE_INT: {
+        int64_t value = lambda_int_item_to_i64(*out);
+        if (value == INT64_MIN) return false;
+        out->item = i2it(-value);
+        return get_type_id(*out) == LMD_TYPE_INT;
+    }
+    case LMD_TYPE_FLOAT: {
+        // Pack the negated double inline (the self-tagged encoding); the
+        // residue that only a boxed double could represent declines, because
+        // this arm must not allocate -- it runs before the heap exists.
+        double value = -out->get_double();
+        uint64_t bits = 0;
+        memcpy(&bits, &value, sizeof(bits));
+        if (value == 0.0) {
+            out->item = ITEM_FLOAT_P0 | ((bits >> 63) ? UINT64_C(1) : UINT64_C(0));
+            return true;
+        }
+        if (!(bits & ITEM_DBL_MASK)) return false;
+        out->item = bits;
+        return true;
+    }
+    default:
         return false;
     }
-    return ast_static_literal_item(tp, init, out);
 }
 
 // RC3: the declarator a name is bound by, when that binding is immutable and
@@ -5750,11 +5783,18 @@ bool interp_const_fold_script(Transpiler* tp) {
     // while `context` itself is live. Folding `type(42)` there reached
     // heap_calloc and faulted on `context->heap->gc`. Declining the pass keeps
     // the attempt inert, which is what RC14 requires of every fold failure.
+    // T28-1: only *evaluation* needs the heap. A const binding's read is
+    // settled by copying its initializer's already-materialized value (RC3.3,
+    // the IDENT arm below) -- it runs no frame and allocates nothing, so it is
+    // valid with or without a heap. Declining the whole pass when the heap was
+    // absent left every module `let K = <literal>` a boxed slab read with a tag
+    // dispatch plus an unbox call at each use on the eager path (deltablue's
+    // `c_choose_method`: 70 dispatches and 44 calls for constants alone).
     if (!tp || !tp->ast_index.nodes || !tp->const_list ||
-            !context || !context->heap || !context->heap->gc ||
             !interp_const_fold_enabled()) {
         return true;
     }
+    bool can_evaluate = context && context->heap && context->heap->gc;
 
     // The pass owns a throwaway frame rather than borrowing a runtime frame:
     // every intermediate is rooted while helpers run, and its side-stack
@@ -5772,7 +5812,9 @@ bool interp_const_fold_script(Transpiler* tp) {
     st.depth_limit = 1;
     st.depth = 1;
     InterpState* saved_state = g_interp_state;
-    g_interp_state = &st;
+    // Without a heap no frame is ever opened, so the CONST state is not
+    // installed either: nothing may observe an evaluation mode that cannot run.
+    if (can_evaluate) g_interp_state = &st;
 
     // RC11: fold each node once. A retained unit re-enters this pass through a
     // fresh manager, and the REPL appends to the same index, so resume at the
@@ -5785,12 +5827,27 @@ bool interp_const_fold_script(Transpiler* tp) {
         AstNode* node = tp->ast_index.nodes[id];
         if (!node || node->node_type == AST_NODE_PRIMARY ||
                 !interp_const_node_supported(node)) continue;
+        // A heap-less pass leaves the watermark behind, so a later full pass
+        // revisits these nodes; a settled fact is never republished (a second
+        // intern would hand the node a different pool slot for one value).
+        if (node->const_kind != AST_CONST_NONE) continue;
 
         // RC3.3: a const binding's read is settled by copying its initializer's
         // value, not by evaluating anything. The initializer's own value is
         // either a materialized literal or a fact published earlier in this
         // walk -- declarations precede their uses in index order.
         if (node->node_type == AST_NODE_IDENT) {
+            // T28-1: fold a binding copy only where the read would otherwise
+            // leave the frame. A module binding is a boxed slab load plus a tag
+            // dispatch at every use; a function-local `let` is already a live
+            // register, so trading its reuse for a fresh immediate per use only
+            // adds instructions (cube3d's `run_cube` grew one `mov` per repeated
+            // local constant). `global_vars` is the module scope itself, which
+            // is the exact question -- scope kind alone does not answer it.
+            NameEntry* read = ((AstIdentNode*)node)->entry;
+            NameScope* module_scope = tp->ast_root
+                ? ((AstScript*)tp->ast_root)->global_vars : NULL;
+            if (!read || !module_scope || read->scope != module_scope) continue;
             AstDeclaratorNode* declarator = interp_const_binding_decl(node);
             Item bound = ItemNull;
             if (!declarator || !declarator->init ||
@@ -5805,6 +5862,8 @@ bool interp_const_fold_script(Transpiler* tp) {
             continue;
         }
 
+        // Expression folding is the arm RC7 built the heap requirement for.
+        if (!can_evaluate) continue;
         st.mode_fuel = interp_const_fuel_budget();
         st.mode_exhausted = false;
         st.mode_rejected = false;
@@ -5832,7 +5891,9 @@ bool interp_const_fold_script(Transpiler* tp) {
             interp_publish_folded_item(tp, node, result);
         }
     }
-    tp->ast_index.const_folded_count = tp->ast_index.count;
+    // Only a pass that could evaluate settles the watermark; a heap-less pass
+    // folded the binding copies alone and must let a later full pass return.
+    if (can_evaluate) tp->ast_index.const_folded_count = tp->ast_index.count;
     g_interp_state = saved_state;
     return true;
 }

@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "description": "Tune28 T28-1 (RC3.3, D2.4.1): a module-scope `let` bound to a literal folds to an immediate at every read. The int constants appear as `mov r, 3` / `mov r, -1` and the float as a double immediate, and `scan` performs no module-slab load for them -- no `lambda_module_state_for_unit` prologue call, no `ursh r, r, 56` tag dispatch and no `lambda_item_to_int_lane_c` unbox on a constant read. Two defects made this unreachable before: `interp_const_init_value` tested `ast_unwrap_primary(init)`, which is NULL for a bare literal (the childless PRIMARY *is* the token), so `ast_static_literal_item` was dead code and no literal binding folded on any tier; and the whole fold pass declined when `context->heap` was absent, which is the eager path every Part-1 benchmark pins. The signed form settles in the same binding-copy arm, so it needs no heap either. The fold is deliberately module-scope only -- a function-local `let` is already a live register, and folding it traded that reuse for a fresh immediate per use (cube3d's `run_cube` grew by exactly that).",
+  "checks": [
+    {
+      "in_func": "_scan_#",
+      "expect": [
+        "mov\t{{r}}, 3",
+        "mov\t{{r}}, -1"
+      ],
+      "forbid": [
+        "call\tlambda_module_state_for_unit_p, lambda_module_state_for_unit",
+        "call\tlambda_item_to_int_lane_c_p, lambda_item_to_int_lane_c"
+      ]
+    }
+  ]
+}

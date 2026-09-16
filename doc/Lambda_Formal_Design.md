@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 7.0.0 (2026-09-15)
+**Spec version:** 7.1.0 (2026-09-16)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -831,23 +831,25 @@ that carries them.
 - **D4.4.3** All copy paths precisely root source/replacement/owner chain
   and reload after possible GC; forced-GC stress is a permanent gate.
   Exclusivity checks and view-borrow confinement are Stage 2.* [CW20]
-- **D4.4.4v2** A read-modify-write place copy — `var l = root.path`, written
-  through, stored back to the same path in the same statement list, dead
-  afterwards, with the root otherwise unobserved in between except through a
-  **sibling member** (`root.g…` read, or written with a value that does not
-  name the handle, where `g` is not the handle's first member segment) — is
-  bound as a **borrow** of its place (no share-mark; the store-back stores the pointer
-  it holds and skips capture) when every container on the spine from the
-  root to the leaf's parent is unshared at the bind; a shared, static or
-  immortal link keeps the snapshot bind. The root must be a `var` local or
-  `var` parameter. The static shape is decided once for both tiers; the
-  spine test is a runtime byte test. A `return` inside the region needs the
-  store-back immediately before it unless it precedes every use of the handle
-  and no loop of the region encloses it. Observably identical under P6 (a
-  sibling slot is a different slot, and an alias between slots is
-  share-marked by the store that published it); an error exit leaves the
-  partial writes visible through the root, as for a `var` parameter.
-  [CW34; v2 2026-09-14]
+- **D4.4.4v3** A place handle — `var h = root.path` on a `var` local or
+  `var` parameter root — **may be bound as a borrow of its place** (no
+  share-mark; a store-back to the same path stores the pointer it holds and
+  skips capture) whenever the sharing stays **unobservable under S9.1.2**:
+  `let`/`var` hold values, never aliases, and no program can distinguish the
+  borrow from the snapshot bind. That invariant is the ruling. **Which paths,
+  which writes through the handle, where the store-backs sit, nested handles,
+  and rebinding of the handle are implementation details**, chosen for the
+  best performance and recorded in the COW design record, under three fixed
+  conditions: the static shape is decided once for both tiers; the bind runs
+  the runtime spine test (every container from the root to the leaf's parent
+  unshared at the bind; a shared, static or immortal link keeps the snapshot
+  bind); and on every path that writes through the handle, the handle is
+  either stored back to its path before its next use, or share-marked at the
+  point the invariant would otherwise be at risk. An error exit leaves partial
+  writes visible through the root, as for a `var` parameter. The v2 shape —
+  same statement list, sibling-member access, early return before every use —
+  is the implemented subset; v3 admits store-backs inside branches and nested
+  handles (CW36). [CW34; v2 2026-09-14; v3 2026-09-16]
 - **D4.4.5** A **move-out** place copy — `var h = root.path` whose place is
   overwritten by an unconditional store `root.path = e` (`e` not naming `h`)
   later in the same statement list, where every statement in between is a
@@ -1963,6 +1965,7 @@ slice; no formal semantic ruling or document semver changes.
 | D4.5.1v3 | Radiant and Lambda keep distinct policies over memtrack/VM ownership; legacy Pool/Arena backend wording is superseded; v3 records batch-only arena lifetime (two variants, D4.1.4). |
 | D4.4.3 | COW Stage 1 landed 2026-07-23; Stage 2 (exclusivity faces, view confinement, module-`var` rule, snapshot iteration) deferred, designed. |
 | D4.4.5 | Decided 2026-09-14 (CW35, `vibe/Lambda_Design_Runtime_COW.md` §11.12): move-out binds (`var left = node.left; …; node.left = branch; left.right = node`) borrow their place; static rule in `build_ast` (`rmw_moves_out`), runtime spine test shared with CW34. Fixture `test/lambda/proc/cow_move_out_bind.ls`. JetStream splay does not benefit yet: its `splay_node` binds store back inside `if` branches, so the rotations receive already-shared roots and keep the snapshot bind. |
+| D4.4.4v3 | Revised 2026-09-16 (v3, user ruling): the borrow is admitted wherever it is unobservable under S9.1.2; path shape, handle writes, store-back placement, nested handles and handle rebinds are implementation details (CW36, `vibe/Lambda_Design_Runtime_COW.md` §11.13), fixed only by the tier-shared static decision, the runtime spine test, and store-back-or-mark on every writing path. Motivation: JetStream splay `splay_node` stores back inside `if` branches — 826k map copies and 32% GC per run under v2. Not yet implemented; plan `vibe/impl/Lambda_Impl_Tune28.md` T28-8. |
 | D4.4.4v2 | Revised 2026-09-14 (v2, Tune27 §10.12): sibling-member access to the root and a return that precedes every use of the handle are admitted inside the region; cd's table put (`var keys = t.keys; var vals = t.vals; …; t.keys = keys; t.vals = vals`) now borrows both handles — 2,000 → 2 array copies per 1,000 puts. Fixture `test/lambda/proc/cow_rmw_sibling_borrow.ls`. Decided 2026-09-06 (CW34, `vibe/Lambda_Design_Runtime_COW.md` §11.11): read-modify-write handle borrows — tier-shared static shape in `build_ast`, runtime spine test `cow_bind_rmw_handle`; havlak's array copies 205k → 41k per run. Fixtures `test/lambda/proc/cow_rmw_borrow.ls`, `test/mir/lambda/cw34_rmw_borrow`. |
 | D4.6 | Name identity is a PROPOSAL (rev 5): W1/W2 integer schemes can start now; W4 stage 3 blocked on the MIR-cache reconciliation (NI §8). |
 | D4.7 | Const pool / MarkPack is a DRAFT (rev 4): baked-pointer census verified against emitters 2026-07-31; phases CP-P0..P4 not started. |

@@ -1110,8 +1110,8 @@ static bool ast_called_function_signature_ready(AstNode* function) {
     return ((AstFuncNode*)declaration)->body != NULL;
 }
 
-static bool ast_constant_integer_value(Transpiler* tp, AstNode* node, int64_t* out) {
-    bool negate = false;
+AstNode* ast_signed_literal_operand(AstNode* node, bool* negated) {
+    if (negated) *negated = false;
     while (node && node->node_type == AST_NODE_PRIMARY) {
         AstPrimaryNode* primary = (AstPrimaryNode*)node;
         if (!primary->expr) break;
@@ -1120,10 +1120,16 @@ static bool ast_constant_integer_value(Transpiler* tp, AstNode* node, int64_t* o
     if (node && node->node_type == AST_NODE_UNARY) {
         AstUnaryNode* unary = (AstUnaryNode*)node;
         if (unary->op == OPERATOR_NEG || unary->op == OPERATOR_POS) {
-            negate = (unary->op == OPERATOR_NEG);
+            if (negated) *negated = (unary->op == OPERATOR_NEG);
             node = unary->operand;
         }
     }
+    return node;
+}
+
+static bool ast_constant_integer_value(Transpiler* tp, AstNode* node, int64_t* out) {
+    bool negate = false;
+    node = ast_signed_literal_operand(node, &negate);
     Item item;
     if (!ast_static_literal_item(tp, node, &item)) return false;
     TypeId type_id = get_type_id(item);
