@@ -2186,6 +2186,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
 
     if (elmt->tag() == MARKUP_NAME_BR) {
+        if (lycon->line.is_line_start) {
+            // BR uses its own fast path but still occupies the float-constrained line.
+            update_line_for_bfc_floats(lycon);
+        }
         View* br_view = set_view(lycon, RDT_VIEW_BR, elmt);
         br_view->inline_line_number = lycon->block.line_number;
         if (lycon->block.direction == CSS_VALUE_RTL) {

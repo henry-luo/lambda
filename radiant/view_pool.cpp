@@ -579,14 +579,21 @@ static_assert(sizeof(TRANSFORM_PROP_DEFAULT) == sizeof(TransformProp), "transfor
 static_assert(sizeof(FILTER_PROP_DEFAULT) == sizeof(FilterProp), "filter reset metadata drift");
 static_assert(sizeof(MULTICOL_PROP_DEFAULT) == sizeof(MultiColumnProp), "multicol reset metadata drift");
 
-static bool view_teardown_pseudo_is_reachable(DomElement* owner, DomElement* generated) {
-    if (!owner || !generated) return false;
-    for (DomNode* child = owner->first_child; child; child = child->next_sibling) {
+static bool view_teardown_subtree_has_node(DomElement* root, DomElement* generated) {
+    if (!root || !generated) return false;
+    for (DomNode* child = root->first_child; child; child = child->next_sibling) {
         if (dom_subtree_contains_node(child, static_cast<DomNode*>(generated))) {
             return true;
         }
     }
     return false;
+}
+
+static bool view_teardown_pseudo_is_reachable(DomElement* owner, DomElement* generated) {
+    if (!owner || !generated) return false;
+    if (view_teardown_subtree_has_node(owner, generated)) return true;
+    // Host generated content is materialized in the rendered shadow tree.
+    return view_teardown_subtree_has_node(owner->shadow_root_element(), generated);
 }
 
 static void view_teardown_visit_pseudo(ViewTree* tree,
@@ -750,6 +757,12 @@ static void view_teardown_visit_node(ViewTree* tree,
 
             view_teardown_visit_pseudo(tree, elem, pseudo, flags);
             view_teardown_visit_node(tree, first_child, child_flags, true);
+            DomElement* shadow_root = elem->shadow_root_element();
+            if (shadow_root) {
+                // Shadow descendants own the same view-pool epoch as their host.
+                view_teardown_visit_node(tree, static_cast<DomNode*>(shadow_root),
+                                         child_flags, false);
+            }
             view_teardown_apply_table(tree, elem, flags);
             if (flags & (VIEW_TEARDOWN_CLEAR_POINTERS | VIEW_TEARDOWN_RESET_IN_PLACE)) {
                 view_teardown_clear_element_scalars(elem);

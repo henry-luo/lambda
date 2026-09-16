@@ -1,0 +1,9 @@
+{
+  "name": "foreign parsed fragment moves before removing history content",
+  "html": "test/ui/dom/foreign_fragment_history_restore.html",
+  "viewport": {"width": 640, "height": 480},
+  "events": [
+    {"type": "wait", "ms": 120},
+    {"type": "assert_text", "target": {"selector": "#restored-target"}, "equals": "initial"}
+  ]
+}

@@ -3817,7 +3817,7 @@ static void append_child_to_element(DomElement* parent, DomElement* child) {
     append_detached_table_node(parent, static_cast<DomNode*>(child));
 }
 
-static void detach_table_node(DomNode* node) {
+void layout_detach_layout_only_node(DomNode* node) {
     if (!node) return;
     DomElement* old_parent = lam::dom_as<DOM_NODE_ELEMENT>(node->parent);
     if (old_parent) {
@@ -3839,7 +3839,7 @@ static void detach_table_node(DomNode* node) {
 
 static void reparent_node(DomNode* node, DomElement* new_parent) {
     if (!node || !new_parent) return;
-    detach_table_node(node);
+    layout_detach_layout_only_node(node);
     append_detached_table_node(new_parent, node);
 }
 
@@ -3848,7 +3848,7 @@ static void insert_node_before(DomElement* parent, DomNode* new_node, DomNode* r
 static void reparent_node_before(DomNode* node, DomElement* new_parent,
                                  DomNode* before) {
     if (!node || !new_parent) return;
-    detach_table_node(node);
+    layout_detach_layout_only_node(node);
     insert_node_before(new_parent, node, before);
 }
 
@@ -4092,6 +4092,19 @@ static bool table_fixup_is_outer_anonymous_table(DomElement* element) {
         strcmp(element->tag_name, "::anon-table") == 0;
 }
 
+static DomNode* table_first_fixup_source_node(DomElement* fixup) {
+    if (!fixup) return nullptr;
+    for (DomNode* child = fixup->first_child; child; child = child->next_sibling) {
+        if (child->is_element() && child->as_element()->is_table_fixup()) {
+            DomNode* source = table_first_fixup_source_node(child->as_element());
+            if (source) return source;
+            continue;
+        }
+        return child;
+    }
+    return nullptr;
+}
+
 static void unwrap_anonymous_table_fixup(DomElement* fixup, DomElement* parent,
                                          DomNode* before) {
     if (!fixup || !parent) return;
@@ -4106,7 +4119,7 @@ static void unwrap_anonymous_table_fixup(DomElement* fixup, DomElement* parent,
         }
     }
     arraylist_free(children);
-    detach_table_node(static_cast<DomNode*>(fixup));
+    layout_detach_layout_only_node(static_cast<DomNode*>(fixup));
     // Fixup nodes are view-pool owned. Once their authored children have been
     // restored, retire the empty wrapper in the same layout ownership epoch.
     if (fixup->doc && fixup->doc->view_tree) {
@@ -4117,12 +4130,23 @@ static void unwrap_anonymous_table_fixup(DomElement* fixup, DomElement* parent,
 
 void layout_unwrap_anonymous_table_fixups_for_dom_mutation(DomElement* parent) {
     if (!parent) return;
+    bool saw_outer_table_run = false;
     for (DomNode* child = parent->first_child; child; ) {
         DomNode* next = child->next_sibling;
         if (child->is_element() && child->as_element()->is_table_fixup()) {
+            DomElement* fixup = child->as_element();
+            if (table_fixup_is_outer_anonymous_table(fixup)) {
+                if (saw_outer_table_run) {
+                    // An earlier layout pass had a distinct source run here;
+                    // retain that boundary while the wrappers are rebuilt.
+                    DomNode* source = table_first_fixup_source_node(fixup);
+                    if (source) source->set_table_fixup_run_boundary(true);
+                }
+                saw_outer_table_run = true;
+            }
             // Anonymous table boxes are layout-only and cannot become DOM
             // mutation state; reflow recreates CSS Tables 3 §2.2 fixups.
-            unwrap_anonymous_table_fixup(child->as_element(), parent, next);
+            unwrap_anonymous_table_fixup(fixup, parent, next);
         }
         child = next;
     }
@@ -4136,6 +4160,10 @@ void layout_unwrap_all_anonymous_table_fixups_for_dom_mutation(DomElement* root)
             layout_unwrap_all_anonymous_table_fixups_for_dom_mutation(
                 lam::dom_require_element(child));
         }
+    }
+    if (root->shadow_root_element()) {
+        layout_unwrap_all_anonymous_table_fixups_for_dom_mutation(
+            root->shadow_root_element());
     }
 }
 
@@ -7576,6 +7604,12 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
         DomNode* run_end = child;
         while (run_end->next_sibling) {
             DomNode* next = run_end->next_sibling;
+            if (next->has_table_fixup_run_boundary()) {
+                // A script removed the authored separator after a provisional
+                // pass; recreate each previously distinct anonymous table run.
+                next->set_table_fixup_run_boundary(false);
+                break;
+            }
             if (next->is_element()) {
                 if (table_child_requires_anonymous_fixup(next)) {
                     run_end = next;

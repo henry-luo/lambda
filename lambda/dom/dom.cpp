@@ -10300,8 +10300,11 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             return value;
         }
 
-        bool layout_pending = elem->doc && elem->doc->state &&
-            ((DocState*)elem->doc->state)->lifecycle != DOC_LIFECYCLE_COMMITTED;
+        // A geometry read during initial scripts can build a provisional pane
+        // before the document owns a DocState; retain the requested offset
+        // until the final layout establishes its scroll range.
+        bool layout_pending = elem->doc && (!elem->doc->state ||
+            ((DocState*)elem->doc->state)->lifecycle != DOC_LIFECYCLE_COMMITTED);
         bool vertical_rl_signed_scroll = !is_vertical && scroll_value < 0.0f &&
             layout_element_writing_mode(elem) == WM_VERTICAL_RL;
         const FlexProp* flex = elem->embedp()->flex;

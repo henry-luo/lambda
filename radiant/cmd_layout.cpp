@@ -2636,6 +2636,25 @@ static void populate_layout_document(DomDocument* doc, DomElement* root,
     doc->url = url;
     // Load-time geometry reads may already have committed a ViewTree.
     doc->state = nullptr;
+    if (doc->page_kind == DOM_PAGE_KIND_HTML && doc->view_tree && doc->view_tree->root) {
+        // The snapshot used pre-script styles; retained used values such as
+        // collapsed zoomed margins cannot seed the post-script layout epoch.
+        // Table wrappers must retire while their view-pool props are still live.
+        if (doc->root && doc->root->is_element()) {
+            layout_unwrap_all_anonymous_table_fixups_for_dom_mutation(
+                doc->root->as_element());
+            layout_detach_first_letter_pseudo_content_for_layout_reset(
+                doc->root->as_element());
+        }
+        view_pool_destroy(doc->view_tree);
+        if (doc->root && doc->root->is_element()) {
+            // View teardown needs the complete rendered tree; generated DOM-only
+            // boxes are removed only after its layout resources are gone.
+            layout_detach_materialized_pseudo_content_for_layout_reset(
+                doc->root->as_element());
+        }
+        doc->view_tree->init();
+    }
     doc->lambda_runtime = runtime;
 }
 
