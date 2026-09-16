@@ -115,7 +115,7 @@ function boyerMooreSearch(text, pattern, start) {
 }
 
 let checksum = 0;
-const t0 = process.hrtime.bigint();
+const t0 = performance.now();
 for (let round = 0; round < SEARCH_ROUNDS; round += 1) {
   for (let index = 0; index < patterns.length; index += 1) {
     const start = (round * 17 + index * 13) % 97;
@@ -129,8 +129,8 @@ for (let round = 0; round < SEARCH_ROUNDS; round += 1) {
       (checksum + (naive + 2) * (index + 3) + (round + 1) * 7) % MODULUS;
   }
 }
-const t1 = process.hrtime.bigint();
+const t1 = performance.now();
 
 if (checksum !== 91395120) throw new Error("unexpected text_search checksum");
 process.stdout.write("text_search: CHECKSUM:" + checksum + "\n");
-process.stdout.write("__TIMING__:" + Number(t1 - t0) / 1e6 + "\n");
+process.stdout.write("__TIMING__:" + (t1 - t0) + "\n");

@@ -52,7 +52,7 @@ function printCount(seq, kmer) {
 const text = fs.readFileSync(INPUT_PATH, 'utf-8');
 const seq = extractThree(text);
 
-const __t0 = process.hrtime.bigint();
+const __t0 = performance.now();
 printFrequencies(seq, 1);
 printFrequencies(seq, 2);
 printCount(seq, "GGT");
@@ -60,5 +60,5 @@ printCount(seq, "GGTA");
 printCount(seq, "GGTATT");
 printCount(seq, "GGTATTTTAATT");
 printCount(seq, "GGTATTTTAATTTATAGT");
-const __t1 = process.hrtime.bigint();
-process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
+const __t1 = performance.now();
+process.stdout.write("__TIMING__:" + (__t1 - __t0) + "\n");

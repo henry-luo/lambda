@@ -1421,8 +1421,8 @@ class CD extends Benchmark {
 
 // --- timing harness ---
 const bench = new CD();
-const __t0 = process.hrtime.bigint();
+const __t0 = performance.now();
 const ok = bench.innerBenchmarkLoop(100);
-const __t1 = process.hrtime.bigint();
+const __t1 = performance.now();
 process.stdout.write("CD: " + (ok ? "PASS" : "FAIL") + "\n");
-process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
+process.stdout.write("__TIMING__:" + (__t1 - __t0) + "\n");

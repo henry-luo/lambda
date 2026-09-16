@@ -77,14 +77,14 @@ function mergeLines(baseLines, leftLines, rightLines) {
 }
 
 let checksum = 0;
-const t0 = process.hrtime.bigint();
+const t0 = performance.now();
 for (let round = 0; round < MERGE_ROUNDS; round += 1) {
   const merged = mergeLines(base, left, right);
   checksum =
     (checksum + merged.length * 31 + merged.charCodeAt((round * 37) % merged.length)) % MODULUS;
 }
-const t1 = process.hrtime.bigint();
+const t1 = performance.now();
 
 if (checksum !== 342313356) throw new Error("unexpected three_way_merge checksum");
 process.stdout.write("three_way_merge: CHECKSUM:" + checksum + "\n");
-process.stdout.write("__TIMING__:" + Number(t1 - t0) / 1e6 + "\n");
+process.stdout.write("__TIMING__:" + (t1 - t0) + "\n");

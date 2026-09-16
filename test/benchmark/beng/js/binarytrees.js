@@ -13,7 +13,7 @@ function check(node) {
     return 1 + check(node.left) + check(node.right);
 }
 
-const __t0 = process.hrtime.bigint();
+const __t0 = performance.now();
 
 const maxDepth = Math.max(6, N);
 const stretchDepth = maxDepth + 1;
@@ -32,5 +32,5 @@ for (let depth = 4; depth <= maxDepth; depth += 2) {
 
 console.log(`long lived tree of depth ${maxDepth}\t check: ${check(longLivedTree)}`);
 
-const __t1 = process.hrtime.bigint();
-process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
+const __t1 = performance.now();
+process.stdout.write("__TIMING__:" + (__t1 - __t0) + "\n");
