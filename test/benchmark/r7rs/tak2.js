@@ -11,16 +11,16 @@ function tak(x, y, z) {
 }
 
 function main() {
-    const __t0 = process.hrtime.bigint();
+    const __t0 = performance.now();
     const result = tak(18, 12, 6);
-    const __t1 = process.hrtime.bigint();
+    const __t1 = performance.now();
 
     if (result === 7) {
         process.stdout.write("tak: PASS\n");
     } else {
         process.stdout.write("tak: FAIL result=" + result + "\n");
     }
-    process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
+    process.stdout.write("__TIMING__:" + (__t1 - __t0) + "\n");
 }
 
 main();

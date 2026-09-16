@@ -372,6 +372,15 @@ struct NameEntry {
     // borrow -- read-and-return helpers (rbt_get) must not share-mark the
     // stored value they hand out.
     bool place_copy_mutated;
+    // CW24v3 / D4.4.6: the PLACE may be written while this copy is alive --
+    // a write through the root (or a path prefix) between the bind and the
+    // copy's last use, a `var` pass of the root in that range, or the copy
+    // escaping the function. The copy is then a real second holder and the
+    // bind must share-mark, whether or not the copy itself is ever written.
+    // Gating on `place_copy_mutated` alone let `let old = r.kid; r.kid.n = 7`
+    // show the write through `old` (S9.1.2). Decided once at FUNCTION_END.
+    bool place_copy_place_written;
+    bool place_copy_range_decided;   // the precise list walk reached this bind
     // The place's root name, kept only to name it in that diagnostic.
     String* place_copy_root;
     // Read-modify-WRITE-BACK (`p = w.pkts[i]` ... `w.pkts[i] = p`) is the
@@ -390,6 +399,12 @@ struct NameEntry {
     // store-back skips its capture mark (the handle is dead there). Decided
     // once at FUNCTION_END (lambda_ast_lower_rmw_borrows).
     bool cow_borrow_lowered;
+    // T28-7: a local bound to `fill(N, v)` or an N-item scalar array literal,
+    // never rebound, resized (push/splice) or passed where a callee could
+    // resize it, holds an array of exactly `fixed_array_length` elements
+    // everywhere it is visible. Decided once at script finalize.
+    bool has_fixed_array_length;
+    int64_t fixed_array_length;
     // When this name was hung into the scope by an import, the module that
     // actually declares it. `slot` is then an index into *that* module's slab,
     // not this one's — the two modules' plan passes number their globals
@@ -855,6 +870,16 @@ static inline bool ast_is_direct_numeric_mask_assignment(AstNode* node) {
 // `(expr)` wrappers carry no semantics; every consumer wants the inner node.
 static inline AstNode* ast_unwrap_primary(AstNode* node) {
     while (node && node->node_type == AST_NODE_PRIMARY) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    return node;
+}
+
+// Like ast_unwrap_primary, but a primary that carries its value itself (a
+// literal: `expr` is NULL) is returned instead of NULL.
+static inline AstNode* ast_unwrap_primary_to_leaf(AstNode* node) {
+    while (node && node->node_type == AST_NODE_PRIMARY &&
+            ((AstPrimaryNode*)node)->expr) {
         node = ((AstPrimaryNode*)node)->expr;
     }
     return node;

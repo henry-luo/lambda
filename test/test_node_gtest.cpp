@@ -182,7 +182,6 @@ static std::vector<FeatureModule> g_feature_modules = {
     {"buffer",         "buffer",          true,  nullptr},
     {"child_process",  "child-process",   true,  nullptr},
     {"crypto",         "crypto",          true,  nullptr},
-    {"dns",            "dns",             true,  nullptr},
     {"events",         "events",          true,  nullptr},
     {"events",         "event",           true,  nullptr},  // test-event-emitter-*
     {"fs",             "fs",              true,  nullptr},
@@ -376,6 +375,7 @@ static std::vector<FeatureModule> g_feature_modules = {
     // --- Unsupported modules (disabled by default) ---
     {"cluster",        "cluster",         true, ""},
     {"dgram",          "dgram",           false, "UDP sockets not implemented"},
+    {"dns",            "dns",             false, "DNS module removed from node-net"},
     {"domain",         "domain",          true,  nullptr},  // enabled: some tests pass
     {"http2",          "http2",           false, "HTTP/2 not implemented"},
     {"inspector",      "inspector",       true,  nullptr},

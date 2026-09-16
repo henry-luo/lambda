@@ -16,6 +16,7 @@
 #include "../js/js_runtime_state.hpp"
 #include "../js/js_typed_array.h"
 #include "../js/js_state_guards.h"
+#include "../js/js_fs_service.h"
 #include "jube_node_zlib_codec.hpp"
 #include "../js/js_runtime.h"
 #include "../module/node_core/node_events.hpp"
@@ -740,6 +741,8 @@ static int jube_host_node_resolve_namespace(void* session, const char* specifier
 static int jube_host_node_resolve_host_namespace(void* session, const char* specifier,
                                                  Item* out_namespace);
 extern "C" Item js_get_buffer_namespace(void);
+extern "C" Item js_get_node_module_namespace(void);
+extern "C" Item js_get_util_namespace(void);
 extern "C" int js_permission_has_net(void);
 extern "C" int js_permission_enabled(void);
 extern "C" Item js_process_permission_has(Item scope, Item resource);
@@ -1176,7 +1179,6 @@ static void jube_host_dom_notify_mutation(int kind, void* target, void* parent) 
     dom_notify_mutation((DomJsMutationKind)kind, target, parent);
 }
 
-
 static const JubeHostGcAPI jube_host_gc_api = {
     heap_register_gc_root,
     heap_unregister_gc_root,
@@ -1304,6 +1306,29 @@ static const JubeHostNodeZlibAPI jube_host_node_zlib_api = {
     jube_host_node_zlib_stream_free,
 };
 
+static const JubeHostFilesystemAPI jube_host_filesystem_api = {
+    JUBE_HOST_SERVICE_API_VERSION,
+    sizeof(JubeHostFilesystemAPI),
+    js_node_fs_read_write,
+    js_node_fs_read_write_release,
+    js_node_fs_copy_file,
+    js_node_fs_path_operation,
+    js_node_fs_string_operation,
+    js_node_fs_string_operation_release,
+    js_node_fs_directory_read,
+    js_node_fs_directory_read_release,
+    js_node_fs_descriptor_operation,
+    js_node_fs_metadata_operation,
+    js_node_fs_statfs_operation,
+};
+
+static const JubeHostStreamAPI jube_host_node_stream_api = {
+    JUBE_HOST_SERVICE_API_VERSION,
+    sizeof(JubeHostStreamAPI),
+    js_node_fs_read_stream_new,
+    js_node_fs_write_stream_new,
+};
+
 static const JubeHostNodeAPI jube_host_node_api = {
     JUBE_HOST_SERVICE_API_VERSION,
     sizeof(JubeHostNodeAPI),
@@ -1316,10 +1341,10 @@ static const JubeHostNodeAPI jube_host_node_api = {
     &jube_host_node_events_api,
     &jube_host_node_worker_api,
     &jube_host_node_permission_api,
-    NULL,
+    &jube_host_node_stream_api,
     NULL,
     &jube_host_node_zlib_api,
-    NULL,
+    &jube_host_filesystem_api,
 };
 
 static const JubeHostValueAPI jube_host_value_api = {
@@ -3651,11 +3676,13 @@ static int jube_host_node_resolve_host_namespace(void* session, const char* spec
         const char* specifier;
         JubeHostNamespaceFactory factory;
     } JubeHostNamespaceEntry;
-    // URL and Buffer remain host-owned during their staged extraction. Their
-    // public Node exposure is still controlled by node-core's Jube descriptor.
+    // Runtime primitives stay host-owned while node-core's descriptors control
+    // their public Node exposure.
     static const JubeHostNamespaceEntry entries[] = {
         {"buffer", js_get_buffer_namespace},
+        {"module", js_get_node_module_namespace},
         {"url", node_url_namespace},
+        {"util", js_get_util_namespace},
     };
     for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]); i++) {
         if (strcmp(specifier, entries[i].specifier) == 0) {

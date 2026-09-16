@@ -41,16 +41,16 @@ function test(n) {
 }
 
 function main() {
-    const __t0 = process.hrtime.bigint();
+    const __t0 = performance.now();
     const result = test(75);
-    const __t1 = process.hrtime.bigint();
+    const __t1 = performance.now();
 
     if (result === 5) {
         process.stdout.write("mbrot: PASS\n");
     } else {
         process.stdout.write("mbrot: FAIL result=" + result + "\n");
     }
-    process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
+    process.stdout.write("__TIMING__:" + (__t1 - __t0) + "\n");
 }
 
 main();

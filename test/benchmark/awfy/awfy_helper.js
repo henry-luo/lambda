@@ -9,7 +9,7 @@ function runAWFY(name, mod, innerIterations, numIterations) {
     if (innerIterations === undefined) innerIterations = 1;
     if (numIterations === undefined) numIterations = 1;
     const bench = mod.newInstance();
-    const __t0 = process.hrtime.bigint();
+    const __t0 = performance.now();
     let ok = true;
     for (let i = 0; i < numIterations; i++) {
         if (!bench.innerBenchmarkLoop(innerIterations)) {
@@ -17,14 +17,14 @@ function runAWFY(name, mod, innerIterations, numIterations) {
             break;
         }
     }
-    const __t1 = process.hrtime.bigint();
+    const __t1 = performance.now();
 
     if (ok) {
         process.stdout.write(name + ": PASS\n");
     } else {
         process.stdout.write(name + ": FAIL\n");
     }
-    process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
+    process.stdout.write("__TIMING__:" + (__t1 - __t0) + "\n");
 }
 
 exports.runAWFY = runAWFY;

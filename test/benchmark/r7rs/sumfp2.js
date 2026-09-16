@@ -13,9 +13,9 @@ function run(n) {
 }
 
 function main() {
-    const __t0 = process.hrtime.bigint();
+    const __t0 = performance.now();
     const result = run(100000.0);
-    const __t1 = process.hrtime.bigint();
+    const __t1 = performance.now();
 
     const expected = 5000050000.0;
     if (Math.abs(result - expected) < 1.0) {
@@ -23,7 +23,7 @@ function main() {
     } else {
         process.stdout.write("sumfp: FAIL result=" + result + "\n");
     }
-    process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
+    process.stdout.write("__TIMING__:" + (__t1 - __t0) + "\n");
 }
 
 main();

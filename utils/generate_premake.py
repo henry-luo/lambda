@@ -194,6 +194,7 @@ class PremakeGenerator:
         configured = {target.get('name'): target for target in targets if target.get('name')}
         inherited_keys = (
             'source_files', 'sources', 'source_patterns', 'exclude_patterns',
+            'release_exclude_patterns',
             'objcxx_source_files', 'libraries', 'macos', 'linux', 'windows',
             'defines', 'include',
         )
@@ -1300,6 +1301,22 @@ class PremakeGenerator:
                 self.premake_content.append(f'        "{exclude_pattern}",')
             self.premake_content.extend([
                 '    }',
+                '    '
+            ])
+
+        # Keep debug-only source groups available to debug-family builds while
+        # removing them from optimized host configurations.
+        release_exclude_patterns = list(lib.get('release_exclude_patterns', []))
+        if release_exclude_patterns:
+            self.premake_content.extend([
+                '    filter "configurations:release or release_profile"',
+                '        removefiles {',
+            ])
+            for release_exclude_pattern in release_exclude_patterns:
+                self.premake_content.append(f'            "{release_exclude_pattern}",')
+            self.premake_content.extend([
+                '        }',
+                '    filter {}',
                 '    '
             ])
 
@@ -3397,6 +3414,20 @@ class PremakeGenerator:
             '    }',
             '    ',
         ])
+
+        release_exclude_files = self.config.get('release_exclude_source_files', [])
+        if release_exclude_files:
+            self.premake_content.extend([
+                '    filter "configurations:release or release_profile"',
+                '        removefiles {',
+            ])
+            for release_exclude_file in release_exclude_files:
+                self.premake_content.append(f'            "{release_exclude_file}",')
+            self.premake_content.extend([
+                '        }',
+                '    filter {}',
+                '    ',
+            ])
 
         # Add include directories using consolidated includes
         all_includes = []

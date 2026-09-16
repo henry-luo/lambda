@@ -35,19 +35,19 @@ function benchmark() {
 }
 
 function main() {
-    const __t0 = process.hrtime.bigint();
+    const __t0 = performance.now();
     let result = 0;
     for (let iter = 0; iter < 10; iter++) {
         result = benchmark();
     }
-    const __t1 = process.hrtime.bigint();
+    const __t1 = performance.now();
     process.stdout.write("json_gen: length=" + result + "\n");
     if (result > 0) {
         process.stdout.write("json_gen: PASS\n");
     } else {
         process.stdout.write("json_gen: FAIL\n");
     }
-    process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
+    process.stdout.write("__TIMING__:" + (__t1 - __t0) + "\n");
 }
 
 main();

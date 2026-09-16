@@ -575,7 +575,7 @@ tree-sitter-libs: tree-sitter-jube-libs
 	test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui view-ui native-gui-ui editable-unit editable-ui editable-editor-e2e test-editable test-wpt-contenteditable test-chromium-contenteditable audit-editable-ownership editable-package-disabled test-editable-ua-focused editable-form-regressions test-editable-ua drawing-editor-e2e test-drawing check-error-recovery \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
 	    build-graph-structurizr-test test-graph-structurizr \
-	    node-baseline node-regression-gate node-full node-update-baseline node-official-report test-jube-node-net-crypto-dynamic test-mathlive
+	    node-baseline node-regression-gate node-full node-update-baseline node-official-report test-mathlive
 
 # Help target - shows available commands
 help:
@@ -1081,7 +1081,7 @@ verify-jube-package: package-jube
 	@cd release-standard && ./lambda js -e "console.log(require('zlib').crc32(Buffer.from('jube')))" --no-log | rg -x "1308032562"
 	@cd release-standard && ./lambda js -e "console.log(require('buffer').Buffer === Buffer)" --no-log | rg -x "true"
 	@cd release-standard && ./lambda js -e "console.log(require('fs').existsSync('../test/node/jube_fs_exists_registry.txt'))" --no-log | rg -x "true"
-	@cd release-standard && ./lambda js -e "console.log(require('net').isIP('127.0.0.1'), typeof require('dns').lookup)" --no-log | rg -x "4 function"
+	@cd release-standard && ./lambda js -e "console.log(require('net').isIP('127.0.0.1'))" --no-log | rg -x "4"
 	@cd release-jube && ./lambda py ../test/py/test_py_basic.py --no-log >/dev/null
 
 verify-node-profile-packages: package-node-reduced package-minimal
@@ -1304,10 +1304,6 @@ test-jube-node-core-leaves: build
 	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_process_registry.js --no-log | diff -u test/node/jube_process_registry.txt -
 	@./lambda.exe js test/node/jube_net_resource_registry.js --no-log | diff -u test/node/jube_net_resource_registry.txt -
 	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_net_resource_registry.js --no-log | diff -u test/node/jube_net_resource_registry.txt -
-	@./lambda.exe js test/node/jube_net_ip_registry.js --no-log | diff -u test/node/jube_net_ip_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_net_ip_registry.js --no-log | diff -u test/node/jube_net_ip_registry.txt -
-	@./lambda.exe js test/node/jube_host_namespace_registry.js --no-log | diff -u test/node/jube_host_namespace_registry.txt -
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_host_namespace_registry.js --no-log | diff -u test/node/jube_host_namespace_registry.txt -
 	@./lambda.exe js test/node/jube_cluster_online_hook.js --no-log | diff -u test/node/jube_cluster_online_hook.txt -
 	@./lambda.exe js test/node/jube_console_formatter_hook.js --no-log | diff -u test/node/jube_console_formatter_hook.txt -
 	@JUBE_MODULE_PATH=./temp/no-node-profile ./lambda.exe js test/node/jube_console_minimal_formatter.js --no-log | diff -u test/node/jube_console_minimal_formatter.txt -
@@ -1370,10 +1366,6 @@ test-jube-node-core-dynamic: build-node-core build-node-fs build-node-net
 	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_host_globals_registry.js --no-log | diff -u test/node/jube_host_globals_registry.txt -
 	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_process_registry.js --no-log | diff -u test/node/jube_process_registry.txt -
 	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_process_registry.js --no-log | diff -u test/node/jube_process_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_net_ip_registry.js --no-log | diff -u test/node/jube_net_ip_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_net_ip_registry.js --no-log | diff -u test/node/jube_net_ip_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_host_namespace_registry.js --no-log | diff -u test/node/jube_host_namespace_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-core-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_host_namespace_registry.js --no-log | diff -u test/node/jube_host_namespace_registry.txt -
 	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_cluster_online_hook.js --no-log | diff -u test/node/jube_cluster_online_hook.txt -
 	@JUBE_MODULE_PATH=./temp/node-core-dynamic ./lambda.exe js test/node/jube_console_formatter_hook.js --no-log | diff -u test/node/jube_console_formatter_hook.txt -
 
@@ -1403,18 +1395,6 @@ test-jube-node-zlib-parity: build-node-zlib build-node-core
 	@cp modules/node-zlib/node-zlib.dylib modules/node-zlib/node-zlib.so modules/node-zlib/node-zlib.dll temp/node-zlib-dynamic/node-zlib/ 2>/dev/null || true
 	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic ./lambda.exe js test/node/jube_zlib_parity_registry.js --no-log > temp/node-zlib-dynamic/dynamic.out
 	@diff -u test/node/jube_zlib_parity_registry.txt temp/node-zlib-dynamic/dynamic.out
-
-# N6 leaf delivery proof: DNS remains owned by node-net and crypto resolves
-# through its own node-crypto image; neither namespace is a node-core fallback.
-test-jube-node-net-crypto-dynamic: build-node-net build-node-crypto build-node-core
-	@mkdir -p temp/node-net-crypto-dynamic/node-core temp/node-net-crypto-dynamic/node-net temp/node-net-crypto-dynamic/node-crypto
-	@cp modules/node-core/module.json temp/node-net-crypto-dynamic/node-core/module.json
-	@cp modules/node-core/node-core.dylib modules/node-core/node-core.so modules/node-core/node-core.dll temp/node-net-crypto-dynamic/node-core/ 2>/dev/null || true
-	@cp modules/node-net/module.json temp/node-net-crypto-dynamic/node-net/module.json
-	@cp modules/node-net/node-net.dylib modules/node-net/node-net.so modules/node-net/node-net.dll temp/node-net-crypto-dynamic/node-net/ 2>/dev/null || true
-	@cp modules/node-crypto/module.json temp/node-net-crypto-dynamic/node-crypto/module.json
-	@cp modules/node-crypto/node-crypto.dylib modules/node-crypto/node-crypto.so modules/node-crypto/node-crypto.dll temp/node-net-crypto-dynamic/node-crypto/ 2>/dev/null || true
-	@JUBE_MODULE_PATH=./temp/node-net-crypto-dynamic ./lambda.exe js test/node/jube_node_net_crypto_dynamic.js --no-log | diff -u test/node/jube_node_net_crypto_dynamic.txt -
 
 release-jube: package-jube
 	@ln -sfn lambda release-jube/lambda-jube
@@ -1828,9 +1808,6 @@ node-shim:
 		if [ ! -f ref/node/test/common/wpt.js.orig ]; then \
 			cp ref/node/test/common/wpt.js ref/node/test/common/wpt.js.orig; \
 		fi; \
-		if [ ! -f ref/node/test/common/dns.js.orig ]; then \
-			cp ref/node/test/common/dns.js ref/node/test/common/dns.js.orig; \
-		fi; \
 		if [ ! -f ref/node/test/common/crypto.js.orig ]; then \
 			cp ref/node/test/common/crypto.js ref/node/test/common/crypto.js.orig; \
 		fi; \
@@ -1839,7 +1816,6 @@ node-shim:
 		cp lambda/js/test_shim/fixtures.js ref/node/test/common/fixtures.js; \
 		cp lambda/js/test_shim/internet.js ref/node/test/common/internet.js; \
 		cp lambda/js/test_shim/wpt.js ref/node/test/common/wpt.js; \
-		cp lambda/js/test_shim/dns.js ref/node/test/common/dns.js; \
 		cp lambda/js/test_shim/crypto.js ref/node/test/common/crypto.js; \
 		cp lambda/js/test_shim/package.json ref/node/test/common/package.json; \
 		echo "Shims installed."; \
@@ -1860,9 +1836,6 @@ node-shim-restore:
 		fi; \
 		if [ -f ref/node/test/common/wpt.js.orig ]; then \
 			mv ref/node/test/common/wpt.js.orig ref/node/test/common/wpt.js; \
-		fi; \
-		if [ -f ref/node/test/common/dns.js.orig ]; then \
-			mv ref/node/test/common/dns.js.orig ref/node/test/common/dns.js; \
 		fi; \
 		if [ -f ref/node/test/common/crypto.js.orig ]; then \
 			mv ref/node/test/common/crypto.js.orig ref/node/test/common/crypto.js; \

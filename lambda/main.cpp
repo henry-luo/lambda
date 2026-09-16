@@ -58,7 +58,10 @@
 #include "js/js_interp.hpp"          // retained AST harness execution
 #include "js/js_exec_profile.h"      // profile flush on the batch _exit path
 #include "js/js_runtime_state.hpp"
+#ifndef NDEBUG
+// the experimental MVP CLI is a debug-build feature and is absent from release hosts.
 #include "js/mvp/mvp.h"
+#endif
 #include "../lib/uv_loop.h"          // JS worker cleanup for libuv loop
 #include "../lib/time_util.h"
 #ifdef LAMBDA_BASH
@@ -116,6 +119,7 @@ static char* lambda_load_hosted_source_from_cache(const char* path,
     return source;
 }
 
+#ifndef NDEBUG
 static char* mvp_load_script_source_from_cache(const char* path, size_t* out_length) {
     if (out_length) *out_length = 0;
     if (!path || !path[0]) return NULL;
@@ -162,6 +166,7 @@ static void mvp_cli_print_value(MvpValue value) {
         printf("[mvp value]\n");
     }
 }
+#endif
 
 static long js_batch_process_cpu_us(void) {
 #ifdef _WIN32
@@ -2459,7 +2464,13 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     input_type_module = true;
                 } else if (strcmp(argv[i], "--runtime=mvp") == 0 ||
                            strcmp(argv[i], "--js-runtime=mvp") == 0) {
+#ifdef NDEBUG
+                    fputs("MVP runtime is available only in debug builds\n", stderr);
+                    runtime_cleanup(&runtime);
+                    return lambda_main_finish(9);
+#else
                     mvp_runtime = true;
+#endif
                 } else if (strcmp(argv[i], "--runtime=legacy") == 0 ||
                            strcmp(argv[i], "--js-runtime=legacy") == 0) {
                     mvp_runtime = false;
@@ -2553,17 +2564,24 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 }
             } else {
                 if (!js_file) js_file = argv[2];  // fallback
+#ifndef NDEBUG
                 js_source = mvp_runtime
                     ? mvp_load_script_source_from_cache(js_file, &js_source_len)
                     : js_load_script_source_from_cache(
                         js_file, "js-cli", input_type_module ? "module" : "classic",
                         input_type_module, &js_source_len);
+#else
+                js_source = js_load_script_source_from_cache(
+                    js_file, "js-cli", input_type_module ? "module" : "classic",
+                    input_type_module, &js_source_len);
+#endif
                 if (!js_source) {
                     printf("Error: Could not read file '%s'\n", js_file);
                     runtime_cleanup(&runtime);
                     return lambda_main_finish(1);
                 }
             }
+#ifndef NDEBUG
             if (mvp_runtime) {
                 if (input_type_module || html_file) {
                     fputs("MVP runtime supports benchmark scripts only; modules and DOM are unavailable\n",
@@ -2584,6 +2602,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 runtime_cleanup(&runtime);
                 return lambda_main_finish(0);
             }
+#endif
             js_promise_set_unhandled_rejections_mode(unhandled_rejections_strict ? 1 : 0);
             // V8's --stack_size is in KB of native stack; it sets the native
             // recursion budget before any context binds its limit (JC23).

@@ -424,12 +424,12 @@ function printProgram(program) {
   return renderDoc(concat(join(hardline, program.body.map(printStatement)), hardline));
 }
 
-const __t0 = process.hrtime.bigint();
+const __t0 = performance.now();
 let formatted = "";
 for (let iteration = 0; iteration < ITERATIONS; iteration += 1) {
   formatted = printProgram(ast);
 }
-const __t1 = process.hrtime.bigint();
+const __t1 = performance.now();
 
 let checksum = 0;
 for (let index = 0; index < formatted.length; index += 1) {
@@ -438,4 +438,4 @@ for (let index = 0; index < formatted.length; index += 1) {
 process.stdout.write(formatted);
 process.stdout.write("prettier_ast: " +
   (checksum === 56483873 ? "CHECKSUM:" + checksum : "FAIL checksum=" + checksum) + "\n");
-process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
+process.stdout.write("__TIMING__:" + (__t1 - __t0) + "\n");

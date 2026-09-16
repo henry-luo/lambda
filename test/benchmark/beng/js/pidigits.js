@@ -11,7 +11,7 @@ function idiv(a, b) {
     return d;
 }
 
-const __t0 = process.hrtime.bigint();
+const __t0 = performance.now();
 let q = 1n, r = 0n, s = 0n, t = 1n, k = 0n;
 let i = 0;
 let digits = '';
@@ -54,5 +54,5 @@ if (digits.length > 0) {
     const pad = ' '.repeat(10 - digits.length);
     console.log(`${digits}${pad}\t:${i}`);
 }
-const __t1 = process.hrtime.bigint();
-process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
+const __t1 = performance.now();
+process.stdout.write("__TIMING__:" + (__t1 - __t0) + "\n");

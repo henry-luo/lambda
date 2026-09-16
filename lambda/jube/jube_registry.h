@@ -124,6 +124,7 @@ typedef enum JubeNodeModuleStateSlot {
     JUBE_NODE_MODULE_STATE_PERF_HOOKS,
     JUBE_NODE_MODULE_STATE_PATH,
     JUBE_NODE_MODULE_STATE_CORE,
+    JUBE_NODE_MODULE_STATE_FS,
 } JubeNodeModuleStateSlot;
 
 // Node compatibility modules register private native records under opaque

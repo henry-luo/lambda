@@ -1178,7 +1178,7 @@ var fast_diff_pairs = [
 
 var fast_diff_checksum = 0;
 var fast_diff_rounds = 256;
-var fast_diff_t0 = process.hrtime.bigint();
+var fast_diff_t0 = performance.now();
 for (var fast_diff_round = 0; fast_diff_round < fast_diff_rounds; fast_diff_round++) {
   for (var fast_diff_index = 0; fast_diff_index < fast_diff_pairs.length; fast_diff_index++) {
     var fast_diff_result = fast_diff(
@@ -1198,12 +1198,12 @@ for (var fast_diff_round = 0; fast_diff_round < fast_diff_rounds; fast_diff_roun
     }
   }
 }
-var fast_diff_t1 = process.hrtime.bigint();
+var fast_diff_t1 = performance.now();
 if (fast_diff_checksum === 0) {
   throw new Error("fast-diff benchmark produced an empty checksum");
 }
 console.log("CHECKSUM:" + fast_diff_checksum);
 console.log(
   "__TIMING__:" +
-    (Number(fast_diff_t1 - fast_diff_t0) / 1000000).toFixed(3)
+    ((fast_diff_t1 - fast_diff_t0)).toFixed(3)
 );

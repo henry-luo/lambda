@@ -38,7 +38,7 @@ function isSorted(arr, n) {
 }
 
 function main() {
-    const __t0 = process.hrtime.bigint();
+    const __t0 = performance.now();
     const size = 5000;
     const arr = new Int32Array(size);
 
@@ -49,14 +49,14 @@ function main() {
     }
 
     quicksort(arr, 0, size - 1);
-    const __t1 = process.hrtime.bigint();
+    const __t1 = performance.now();
 
     if (isSorted(arr, size)) {
         process.stdout.write("quicksort: PASS\n");
     } else {
         process.stdout.write("quicksort: FAIL\n");
     }
-    process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
+    process.stdout.write("__TIMING__:" + (__t1 - __t0) + "\n");
 }
 
 main();

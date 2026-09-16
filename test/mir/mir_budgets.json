@@ -6,7 +6,7 @@
       "name": "lambda_scalar_home_donation",
       "script": "test/mir/lambda/scalar_home_donation.ls",
       "language": "lambda",
-      "description": "v2 caller-donated home and v3 companion transports. The v3 public-slot wrapper must not induce a caller scalar-home allocation; the main frame is ratcheted at zero.",
+      "description": "v2 caller-donated home and v3 companion transports. The v3 public-slot wrapper must not induce a caller scalar-home allocation; the main frame is ratcheted at zero. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal).",
       "budgets": {
         "default": {
           "module_insns": 251,
@@ -39,13 +39,13 @@
           ]
         },
         "darwin-debug-v3": {
-          "module_insns": 189,
+          "module_insns": 186,
           "functions": {
             "_twice_#": {
-              "insns": 62
+              "insns": 61
             },
             "main": {
-              "insns": 41
+              "insns": 40
             }
           },
           "frames": [
@@ -74,7 +74,7 @@
       "name": "lambda_scalar_home_tail_forward",
       "script": "test/mir/lambda/scalar_home_tail_forward.ls",
       "language": "lambda",
-      "description": "v2 tail-home forwarding and v3 pair forwarding, including the recursive body's root reservation and v5 i64 int arithmetic admission. T22's S5.1.2 poison-correct int comparison adds the reviewed slow conversion edge for the recursive `n <= 0` condition while reducing the frame's roots and safepoints. The v3 caller frame owns no scalar home.",
+      "description": "v2 tail-home forwarding and v3 pair forwarding, including the recursive body's root reservation and v5 i64 int arithmetic admission. T22's S5.1.2 poison-correct int comparison adds the reviewed slow conversion edge for the recursive `n <= 0` condition while reducing the frame's roots and safepoints. The v3 caller frame owns no scalar home. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal).",
       "budgets": {
         "default": {
           "module_insns": 252,
@@ -107,13 +107,13 @@
           ]
         },
         "darwin-debug-v3": {
-          "module_insns": 201,
+          "module_insns": 198,
           "functions": {
             "_accumulate_#": {
-              "insns": 86
+              "insns": 85
             },
             "main": {
-              "insns": 41
+              "insns": 40
             }
           },
           "frames": [
@@ -142,13 +142,13 @@
       "name": "lambda_sized_int_boxing",
       "script": "test/mir/lambda/sized_int_boxing.ls",
       "language": "lambda",
-      "description": "Boundary i64/u64 boxing cost through the number-stack boxers.",
+      "description": "Boundary i64/u64 boxing cost through the number-stack boxers. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal).",
       "budgets": {
         "default": {
-          "module_insns": 49,
+          "module_insns": 48,
           "functions": {
             "main": {
-              "insns": 49
+              "insns": 48
             }
           },
           "frames": [
@@ -256,10 +256,10 @@
       "name": "lambda_corpus_closure",
       "script": "test/lambda/closure.ls",
       "language": "lambda",
-      "description": "Picked closure-heavy corpus script, including reviewed Phase 3 public-wrapper dispatch guards and clean-return firewalls.",
+      "description": "Picked closure-heavy corpus script, including reviewed Phase 3 public-wrapper dispatch guards and clean-return firewalls. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal).",
       "budgets": {
         "default": {
-          "module_insns": 2285
+          "module_insns": 2252
         }
       }
     },
@@ -267,10 +267,10 @@
       "name": "lambda_corpus_array_float",
       "script": "test/lambda/array_float.ls",
       "language": "lambda",
-      "description": "Picked corpus script (array-heavy), whole-module total only. v5 re-baseline: int array elements use the i64 lane and box only at an Item boundary; two uext8 instructions normalize C bool results used by is-null checks. Growth 2026-09-13 (+3): the const-fold pass now declines when `context->heap` is absent. The eager pipeline compiles before runner_setup_context()/heap_init(), so folding there evaluated with no GC heap and faulted in heap_calloc on an allocating fold (`type(42)`); RC14 requires a fold attempt to be inert, so the pass stands down and these three folded constants are emitted as ordinary computations. Restoring them means giving the compile pipeline an allocation-capable context, not re-enabling the unguarded pass. Re-baseline 2026-09-13 (+10 net, Tune27 T27-7/T27-9): float literals evaluate every member first, then allocate once and store directly into the packed buffer, removing all 47 `array_float_set` calls (and the post-call typed-array layout reload each one carried) for a few more plain instructions; the fused band branches recover part of that. Growth 2026-09-14 (+8, Tune27 §10.11): a non-proven typed index read now tests that its receiver Item is a container pointer before the header probes; a read through a null or out-of-bounds record yields a null T[] link (S7.1.3v2), which the old guard dereferenced at address 0 (typed_path_store SIGSEGV on the JIT tier). Four such reads here, two instructions each.",
+      "description": "Picked corpus script (array-heavy), whole-module total only. v5 re-baseline: int array elements use the i64 lane and box only at an Item boundary; two uext8 instructions normalize C bool results used by is-null checks. Growth 2026-09-13 (+3): the const-fold pass now declines when `context->heap` is absent. The eager pipeline compiles before runner_setup_context()/heap_init(), so folding there evaluated with no GC heap and faulted in heap_calloc on an allocating fold (`type(42)`); RC14 requires a fold attempt to be inert, so the pass stands down and these three folded constants are emitted as ordinary computations. Restoring them means giving the compile pipeline an allocation-capable context, not re-enabling the unguarded pass. Re-baseline 2026-09-13 (+10 net, Tune27 T27-7/T27-9): float literals evaluate every member first, then allocate once and store directly into the packed buffer, removing all 47 `array_float_set` calls (and the post-call typed-array layout reload each one carried) for a few more plain instructions; the fused band branches recover part of that. Growth 2026-09-14 (+8, Tune27 \u00a710.11): a non-proven typed index read now tests that its receiver Item is a container pointer before the header probes; a read through a null or out-of-bounds record yields a null T[] link (S7.1.3v2), which the old guard dereferenced at address 0 (typed_path_store SIGSEGV on the JIT tier). Four such reads here, two instructions each. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal).",
       "budgets": {
         "default": {
-          "module_insns": 1971
+          "module_insns": 1958
         }
       }
     },
@@ -311,13 +311,13 @@
       "name": "lambda_cow_nested_store",
       "script": "test/mir/lambda/cow_nested_store.ls",
       "language": "lambda",
-      "description": "Stage-1 nested COW relinking: the reviewed register/root-slot path has no heap path-array construction. T22 adds the bounded fixed-spine direct-store guards before retaining the generic reinstall fallback (D4.4.4, D5.1.1v2). T23 adds five instructions to propagate a failed cow_prepare_write before publishing the replacement (D5.3.4).",
+      "description": "Stage-1 nested COW relinking: the reviewed register/root-slot path has no heap path-array construction. T22 adds the bounded fixed-spine direct-store guards before retaining the generic reinstall fallback (D4.4.4, D5.1.1v2). T23 adds five instructions to propagate a failed cow_prepare_write before publishing the replacement (D5.3.4). Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal).",
       "budgets": {
         "default": {
           "module_insns": 155
         },
         "darwin-debug-v3": {
-          "module_insns": 165
+          "module_insns": 162
         }
       }
     },
@@ -325,16 +325,16 @@
       "name": "lambda_tune4_typed_array_guard",
       "script": "test/mir/lambda/typed_array_guard.ls",
       "language": "lambda",
-      "description": "Re-baseline 2026-09-14 (+10 module, Tune27 T27-9): a literal-bounded loop whose dense scan proves a typed-array root now takes the finite plan (entry guard + generic sibling) like a binding-bounded one; the literal bound needs no range guard or fact of its own. Typed numeric-array load guards plus the Tune13 in-place procedure-parameter write guard and checked representation fallback. v5 re-baseline: native int values use the i64 lane and each arithmetic site admits its result to the int53 band. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument. Re-baseline 2026-09-12: `dense_int_sum`/`dense_int_linear_sum` now emit each finite-induction loop twice -- a fast arm under the entry-range guard plus the generic sibling (D2.2.2, D8.3.1, transpile_while). Gross growth was +112; a loop nested in a cold arm now lowers once instead of splitting again, which returns 60 of it (4 body copies -> 3 here, and linear rather than 2^depth in nesting), for a reviewed net +52. Re-baseline 2026-09-13 (-20 module, Tune27 T27-9): the int fast arm now also band-tests an operand the result cannot exonerate (two sentinels wrap into the band, and a sentinel times zero is 0 -- S4.1.2 indeterminate forms that must give nan), but branch-only band guards are one add plus one fused compare-and-branch instead of GE/LE/AND/BF, a net shrink. Re-baseline 2026-09-14 (-19 module): literal system-call arguments fold to constant Items at the ABI boundary again.",
+      "description": "Re-baseline 2026-09-14 (+10 module, Tune27 T27-9): a literal-bounded loop whose dense scan proves a typed-array root now takes the finite plan (entry guard + generic sibling) like a binding-bounded one; the literal bound needs no range guard or fact of its own. Typed numeric-array load guards plus the Tune13 in-place procedure-parameter write guard and checked representation fallback. v5 re-baseline: native int values use the i64 lane and each arithmetic site admits its result to the int53 band. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument. Re-baseline 2026-09-12: `dense_int_sum`/`dense_int_linear_sum` now emit each finite-induction loop twice -- a fast arm under the entry-range guard plus the generic sibling (D2.2.2, D8.3.1, transpile_while). Gross growth was +112; a loop nested in a cold arm now lowers once instead of splitting again, which returns 60 of it (4 body copies -> 3 here, and linear rather than 2^depth in nesting), for a reviewed net +52. Re-baseline 2026-09-13 (-20 module, Tune27 T27-9): the int fast arm now also band-tests an operand the result cannot exonerate (two sentinels wrap into the band, and a sentinel times zero is 0 -- S4.1.2 indeterminate forms that must give nan), but branch-only band guards are one add plus one fused compare-and-branch instead of GE/LE/AND/BF, a net shrink. Re-baseline 2026-09-14 (-19 module): literal system-call arguments fold to constant Items at the ABI boundary again. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal).",
       "budgets": {
         "default": {
-          "module_insns": 1203,
+          "module_insns": 1172,
           "functions": {
             "_guarded_load_#": {
-              "insns": 57
+              "insns": 55
             },
             "_guarded_store_#": {
-              "insns": 119
+              "insns": 104
             }
           },
           "frames": [
@@ -362,16 +362,16 @@
       "name": "lambda_tune4_callsite_inference",
       "script": "test/mir/lambda/callsite_inference.ls",
       "language": "lambda",
-      "description": "Tune4 M2 closed-call parameter narrowing plus the escaped-callee generic guardrail, v5 i64 int admission, and reviewed Phase 3 return-firewall growth. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument. Re-baseline 2026-09-13 (-6 module, -3 in each gap function, Tune27 T27-9): the `hi - lo` fast arm now also band-tests one operand, because two int sentinels can wrap into the band (S4.1.2 requires nan for inf - inf); branch-only band guards became one add plus one fused compare-and-branch, a net shrink.",
+      "description": "Tune4 M2 closed-call parameter narrowing plus the escaped-callee generic guardrail, v5 i64 int admission, and reviewed Phase 3 return-firewall growth. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument. Re-baseline 2026-09-13 (-6 module, -3 in each gap function, Tune27 T27-9): the `hi - lo` fast arm now also band-tests one operand, because two int sentinels can wrap into the band (S4.1.2 requires nan for inf - inf); branch-only band guards became one add plus one fused compare-and-branch, a net shrink. Growth 2026-09-16 (+8 module, Tune28 T28-8): the CW29 write oracle now looks inside `return`, so `return f(a, b)` through a function value counts as a possible write of `a`/`b` (an unknown callee may write in place) and apply2 snapshots them at entry, as a bare `f(a, b)` statement already did (S9.1.3). Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal).",
       "budgets": {
         "default": {
-          "module_insns": 589,
+          "module_insns": 588,
           "functions": {
             "_closed_gap_#": {
-              "insns": 62
+              "insns": 61
             },
             "_open_gap_#": {
-              "insns": 62
+              "insns": 61
             }
           },
           "frames": [
@@ -485,13 +485,13 @@
       "name": "lambda_corpus_cube3d",
       "script": "test/benchmark/jetstream/cube3d2.ls",
       "language": "lambda",
-      "description": "Tune27 G9 (M6): emission size of the widest typed benchmark body. run_cube went 36,161 (Result43) -> 20,499 (packed float literals, dead layout-reload pruning) -> 15,850 (contract proofs reused, literals admitted by construction, static array lengths) -> the recorded value (literal-bounded loops with a proven root take the finite plan). The 10,000 target of G9 is not met; this probe makes any regrowth visible. Re-baseline 2026-09-14 (-238 module / -154 run_cube): sys-call arguments request their ABI rep at production, so fill(4, 0.0)'s literal is the folded constant Item again (the r47 release count).",
+      "description": "Tune27 G9 (M6): emission size of the widest typed benchmark body. run_cube went 36,161 (Result43) -> 20,499 (packed float literals, dead layout-reload pruning) -> 15,850 (contract proofs reused, literals admitted by construction, static array lengths) -> the recorded value (literal-bounded loops with a proven root take the finite plan). The 10,000 target of G9 is not met; this probe makes any regrowth visible. Re-baseline 2026-09-14 (-238 module / -154 run_cube): sys-call arguments request their ABI rep at production, so fill(4, 0.0)'s literal is the folded constant Item again (the r47 release count). Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal).",
       "budgets": {
         "default": {
-          "module_insns": 22528,
+          "module_insns": 14487,
           "functions": {
             "_run_cube_#": {
-              "insns": 17329
+              "insns": 9655
             }
           }
         }
@@ -501,13 +501,13 @@
       "name": "lambda_corpus_deltablue",
       "script": "test/benchmark/jetstream/deltablue2.ls",
       "language": "lambda",
-      "description": "Tune27 G9: the 41-member typed deltablue image; its auto-tier wall is ~80% compile, so module size is the cost users see.",
+      "description": "Tune27 G9: the 41-member typed deltablue image; its auto-tier wall is ~80% compile, so module size is the cost users see. Re-baseline 2026-09-16 (-176 module, -29 choose_method, Tune28 \u00a79.7): a record receiver whose binding is proven non-null no longer emits the null-sentinel arm of the field-read guard. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal).",
       "budgets": {
         "default": {
-          "module_insns": 9005,
+          "module_insns": 8475,
           "functions": {
             "_constraint_choose_method_#": {
-              "insns": 1852
+              "insns": 1563
             }
           }
         }
@@ -517,13 +517,13 @@
       "name": "lambda_corpus_prettier_ast",
       "script": "test/benchmark/text/prettier_ast2.ls",
       "language": "lambda",
-      "description": "Tune27 G9: the largest text-row image (79 members); print_node is its widest body.",
+      "description": "Tune27 G9: the largest text-row image (79 members); print_node is its widest body. Tune28 T28-4 (2026-09-16): +13 per print_node and +49 module-wide are intended -- each lambda_module_name_id_at call became two loads (property_keys table + u32 key), a cheaper function by work done. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal).",
       "budgets": {
         "default": {
-          "module_insns": 16327,
+          "module_insns": 16268,
           "functions": {
             "_print_node_#": {
-              "insns": 4059
+              "insns": 4061
             }
           }
         }

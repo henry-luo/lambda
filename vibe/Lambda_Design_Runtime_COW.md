@@ -1204,7 +1204,7 @@ alias left by `m.a = x; m.b = x` (fixed the same day, §11.11 v2 note), and a
 rotation), on clean `713a80c2a` as well. The "own ruling" this paragraph
 asked for is §11.13.
 
-### 11.13 CW36 — store-backs anywhere the borrow is unobservable (RATIFIED 2026-09-16, user; NOT IMPLEMENTED)
+### 11.13 CW36 — store-backs anywhere the borrow is unobservable (RATIFIED 2026-09-16, user; IMPLEMENTED 2026-09-16, T28-8)
 
 **The ruling (D4.4.4v3).** The user's ruling, verbatim in substance: the
 store-back can be allowed as long as it does not break the overall value
@@ -1272,6 +1272,48 @@ non-final store-back followed by a write through the handle (must copy);
 byte-identical on interp/jit/auto and against the pre-CW36 build, with the
 copy counts pinned in the `LambdaOptCow` census. Expected on splay2: map
 copies 826k → near zero and the 32% GC share with them (§3.3 of Tune28).
+
+**As implemented (T28-8, `vibe/impl/Lambda_Impl_Tune28.md` §9.16).** The
+walk (`rmw_branch_local`, `build_ast.cpp`) runs where the straight-line
+CW34/CW35 rules decline. It carries two facts per path: LIVE (the handle may
+still hold the unmarked leaf) and DIRTY (it may have written that leaf without
+storing it back). The root may be observed only when the path is not DIRTY and,
+if LIVE, no write through the handle can follow; a return or the end of the
+bind's list refuses on DIRTY; a store-back clears both and is final only when
+nothing after it names the handle. `if` arms join by union; loops that name
+the handle refuse; a plain rebind of the handle refuses, `h = p(h)` with `h`
+at a `var` position counts as a write. A mutated place copy bound from the
+handle counts as a write at its bind. Three facts it depends on had to be
+fixed first:
+
+1. **`var` passes to a callee without a published signature were never
+   recorded.** A procedure calling itself, or one defined later, skips
+   build-time argument validation, so splay's `branch` (passed to
+   `splay_node`) and `splay`'s `root` were not "mutated" and never became
+   candidates. `place_copy_var_call_cb` records them from the callee's
+   parameter nodes, and the CW24v3/CW34/CW36 decisions moved from
+   FUNCTION_END to `lambda_ast_finalize_script`, where every signature exists.
+2. **The write oracle missed declarations.** `ast_body_may_write_entry` did
+   not descend into `var`/`let` initializers, returns, blocks or several
+   composites, so `let old = r.kid; var z = mutate(r)` printed the new value
+   (a D4.4.6 conformance bug, also reachable through the JIT's read-only
+   alias check).
+3. **The write oracle over-counted.** Seeing declarations exposed two old
+   over-approximations that cost cd2/havlak2/deltablue2 up to +30% copies:
+   every system function counted as a writer (`len(keys)`), and so did every
+   plain `pn` parameter ("until CW29 lands" -- it has). A non-procedure
+   system function is pure; a known plain parameter's writes are local
+   (S9.1.3). A callee whose parameter list is not built yet stays a writer.
+
+**Result.** splay2 map copies 825,642 → 682,847; havlak2 arrays 35,130 →
+29,926 and maps 58,612 → 48,174; deltablue2 number arrays 67,420 → 38,880;
+cd2 and richards2 unchanged. The "near zero" expectation was wrong: the
+residue is the rotations' `left.right = node`, which stores the caller's
+`var` root into a child. That store must capture, because the caller's
+variable still holds the same object until `node = rotate_right(node)`
+overwrites it. Removing it needs a call-site convention ("this call's result
+overwrites the `var` argument's home, so the callee may move the argument"),
+which is a new shape outside CW36.
 
 ## 12. Settled decisions and residual risks
 

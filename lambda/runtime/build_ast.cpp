@@ -1040,11 +1040,7 @@ static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* p
 
 bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out) {
     if (!tp || !node || !out) return false;
-    while (node && node->node_type == AST_NODE_PRIMARY) {
-        AstPrimaryNode* primary = (AstPrimaryNode*)node;
-        if (!primary->expr) break;
-        node = primary->expr;
-    }
+    node = ast_unwrap_primary_to_leaf(node);
     if (!node || !node->type || !node->type->is_literal) return false;
 
     if (static_literal_item_from_type(node->type, out)) return true;
@@ -1142,11 +1138,7 @@ static bool ast_static_numeric_literal_is_zero(Transpiler* tp, AstNode* node) {
 }
 
 static Type* ast_called_type_target(AstNode* function) {
-    while (function && function->node_type == AST_NODE_PRIMARY) {
-        AstPrimaryNode* primary = (AstPrimaryNode*)function;
-        if (!primary->expr) break;
-        function = primary->expr;
-    }
+    function = ast_unwrap_primary_to_leaf(function);
     if (!function || !function->type) return NULL;
     // Built-in annotations (`i32`, `u64`, ...) are represented directly by
     // AST_NODE_TYPE with their target type.  Named type values retain the
@@ -1160,11 +1152,7 @@ static Type* ast_called_type_target(AstNode* function) {
 }
 
 static bool ast_called_function_signature_ready(AstNode* function) {
-    while (function && function->node_type == AST_NODE_PRIMARY) {
-        AstPrimaryNode* primary = (AstPrimaryNode*)function;
-        if (!primary->expr) break;
-        function = primary->expr;
-    }
+    function = ast_unwrap_primary_to_leaf(function);
     if (!function || function->node_type != AST_NODE_IDENT) return true;
     AstIdentNode* ident = (AstIdentNode*)function;
     AstNode* declaration = ident->entry ? ident->entry->node : NULL;
@@ -1177,11 +1165,7 @@ static bool ast_called_function_signature_ready(AstNode* function) {
 
 AstNode* ast_signed_literal_operand(AstNode* node, bool* negated) {
     if (negated) *negated = false;
-    while (node && node->node_type == AST_NODE_PRIMARY) {
-        AstPrimaryNode* primary = (AstPrimaryNode*)node;
-        if (!primary->expr) break;
-        node = primary->expr;
-    }
+    node = ast_unwrap_primary_to_leaf(node);
     if (node && node->node_type == AST_NODE_UNARY) {
         AstUnaryNode* unary = (AstUnaryNode*)node;
         if (unary->op == OPERATOR_NEG || unary->op == OPERATOR_POS) {
@@ -6777,9 +6761,29 @@ void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
         break;
     }
     case AST_NODE_LOOP: {
+        // every clause of the one loop tag (D8.2.2) can hold a call or a write
         AstLoopControlNode* loop = (AstLoopControlNode*)node;
-        walk_lambda_ast(loop->cond, visitor, data, descend_functions);
+        walk_lambda_ast(loop->init, visitor, data, descend_functions);
+        walk_lambda_ast(loop->cond, visitor, data, descend_functions);  // `test` aliases it
+        walk_lambda_ast(loop->update, visitor, data, descend_functions);
         walk_lambda_ast(loop->body, visitor, data, descend_functions);
+        break;
+    }
+    case AST_NODE_BLOCK:
+        for (AstNode* stmt = ((AstBlockNode*)node)->statements; stmt; stmt = stmt->next) {
+            walk_lambda_ast(stmt, visitor, data, descend_functions);
+        }
+        break;
+    case AST_NODE_SEQ:
+        for (AstNode* item = ((AstArrayNode*)node)->item; item; item = item->next) {
+            walk_lambda_ast(item, visitor, data, descend_functions);
+        }
+        break;
+    case AST_NODE_CONDITIONAL_EXPR: {
+        AstIfNode* branch = (AstIfNode*)node;
+        walk_lambda_ast(branch->cond, visitor, data, descend_functions);
+        walk_lambda_ast(branch->then, visitor, data, descend_functions);
+        walk_lambda_ast(branch->otherwise, visitor, data, descend_functions);
         break;
     }
     case AST_NODE_FOR_EXPR: {
@@ -7660,6 +7664,154 @@ static bool reject_proc_method_value(AstNode* node, void* data) {
     return false;
 }
 
+static void lambda_ast_note_place_copy_place_writes(AstFuncNode* fn);
+static void lambda_ast_lower_rmw_borrows(AstFuncNode* fn);
+
+// CW24v3 / CW34 / CW36: the place-copy and handle-borrow decisions read the
+// `var` flags of every callee, and a procedure defined later in the module has
+// none at its caller's FUNCTION_END. Decide them here, once the whole script
+// is built and bound.
+static void lambda_ast_note_fixed_array_lengths(Transpiler* tp, AstFuncNode* fn);
+
+static void lambda_ast_decide_cow_borrows(Transpiler* tp, AstScript* script) {
+    ArrayList* functions = arraylist_new(8);
+    if (!functions) return;
+    walk_lambda_ast((AstNode*)script, direct_bind_collect_function, functions, true);
+    for (int i = 0; i < functions->length; i++) {
+        AstFuncNode* fn = (AstFuncNode*)functions->data[i];
+        lambda_ast_note_place_copy_place_writes(fn);
+        lambda_ast_lower_rmw_borrows(fn);
+        lambda_ast_note_fixed_array_lengths(tp, fn);
+    }
+    arraylist_free(functions);
+}
+
+// T28-7: fixed-length array locals. An index store never grows an array
+// (fn_array_set raises past the end), so only a rebind, push/splice, or a
+// callee that may resize its argument (a `var` parameter, an unknown callee,
+// a method receiver) can change a local's length. The initializer fixes it:
+// `fill(N, v)` with a constant N, or an array literal of N scalar-typed items
+// (no spread, nothing a builder could flatten).
+typedef struct FixedArrayScan {
+    Transpiler* tp;
+    NameEntry* candidates[32];
+    int count;
+} FixedArrayScan;
+
+static bool fixed_array_scalar_item(AstNode* item) {
+    AstNode* leaf = ast_unwrap_primary_to_leaf(item);
+    if (!leaf || leaf->node_type == AST_NODE_SPREAD || !leaf->type) return false;
+    switch (leaf->type->type_id) {
+    case LMD_TYPE_INT: case LMD_TYPE_INT64: case LMD_TYPE_FLOAT:
+    case LMD_TYPE_BOOL: case LMD_TYPE_NUM_SIZED:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool fixed_array_init_length(Transpiler* tp, AstNode* init, int64_t* out) {
+    AstNode* value = ast_unwrap_primary(init);
+    if (!value) return false;
+    if (value->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)value;
+        AstNode* callee = ast_unwrap_primary(call->function);
+        SysFuncInfo* info = callee && callee->node_type == AST_NODE_SYS_FUNC
+            ? ((AstSysFuncNode*)callee)->fn_info : NULL;
+        int64_t count = 0;
+        if (!info || info->fn != SYSFUNC_FILL || !call->argument ||
+                !call->argument->next || call->argument->next->next ||
+                !ast_constant_integer_value(tp, call->argument, &count) ||
+                count < 0 || count > INT32_MAX) return false;
+        *out = count;
+        return true;
+    }
+    if (value->node_type == AST_NODE_ARRAY) {
+        int64_t count = 0;
+        for (AstNode* item = ((AstArrayNode*)value)->item; item; item = item->next) {
+            if (!fixed_array_scalar_item(item)) return false;
+            count++;
+        }
+        *out = count;
+        return true;
+    }
+    return false;
+}
+
+static void fixed_array_drop(FixedArrayScan* scan, NameEntry* entry) {
+    for (int i = 0; i < scan->count; i++) {
+        if (scan->candidates[i] == entry) entry->has_fixed_array_length = false;
+    }
+}
+
+static bool fixed_array_collect_cb(AstNode* node, void* data) {
+    FixedArrayScan* scan = (FixedArrayScan*)data;
+    if (node->node_type != AST_NODE_VARIABLE_DECLARATOR) return true;
+    AstDeclaratorNode* named = (AstDeclaratorNode*)node;
+    NameEntry* entry = named->entry;
+    int64_t length = 0;
+    if (!entry || entry->is_parameter || scan->count >= 32 ||
+            !fixed_array_init_length(scan->tp, named->init, &length)) return true;
+    entry->has_fixed_array_length = true;
+    entry->fixed_array_length = length;
+    scan->candidates[scan->count++] = entry;
+    return true;
+}
+
+static bool fixed_array_invalidate_cb(AstNode* node, void* data) {
+    FixedArrayScan* scan = (FixedArrayScan*)data;
+    if (node->node_type == AST_NODE_ASSIGN_STAM) {
+        fixed_array_drop(scan, ((AstAssignStamNode*)node)->target_entry);
+        return true;
+    }
+    if (node->node_type == AST_NODE_PIPE) {
+        // `a |> push(x)`-style injection hides the receiver from the call
+        AstIdentNode* root = ast_compound_root_ident(((AstBinaryNode*)node)->left);
+        if (root) fixed_array_drop(scan, root->entry);
+        return true;
+    }
+    if (node->node_type != AST_NODE_CALL_EXPR) return true;
+    AstCallNode* call = (AstCallNode*)node;
+    AstNode* callee = ast_unwrap_primary(call->function);
+    if (callee && (callee->node_type == AST_NODE_MEMBER_EXPR ||
+            callee->node_type == AST_NODE_INDEX_EXPR)) {
+        AstIdentNode* receiver = ast_compound_root_ident(callee);
+        if (receiver) fixed_array_drop(scan, receiver->entry);
+    }
+    SysFuncInfo* sys = callee && callee->node_type == AST_NODE_SYS_FUNC
+        ? ((AstSysFuncNode*)callee)->fn_info : NULL;
+    AstFuncNode* target = NULL;
+    if (callee && callee->node_type == AST_NODE_IDENT) {
+        NameEntry* callee_entry = ((AstIdentNode*)callee)->entry;
+        AstNode* declaration = callee_entry ? callee_entry->node : NULL;
+        if (declaration && (declaration->node_type == AST_NODE_FUNC ||
+                declaration->node_type == AST_NODE_PROC ||
+                declaration->node_type == AST_NODE_FUNC_EXPR)) {
+            target = (AstFuncNode*)declaration;
+        }
+    }
+    AstNamedNode* param = target ? target->param : NULL;
+    for (AstNode* arg = call->argument; arg; arg = arg->next) {
+        AstIdentNode* root = ast_compound_root_ident(arg);
+        TypeParam* pt = param ? (TypeParam*)((AstNode*)param)->type : NULL;
+        // a pure builtin and a known plain parameter cannot resize (S9.1.3)
+        bool keeps_length = (sys && !sys->is_proc) ||
+            (target && pt && !pt->is_var_param);
+        if (root && !keeps_length) fixed_array_drop(scan, root->entry);
+        if (param) param = (AstNamedNode*)((AstNode*)param)->next;
+    }
+    return true;
+}
+
+static void lambda_ast_note_fixed_array_lengths(Transpiler* tp, AstFuncNode* fn) {
+    if (!fn || !fn->body) return;
+    FixedArrayScan scan = {tp, {}, 0};
+    walk_lambda_ast(fn->body, fixed_array_collect_cb, &scan, false);
+    if (!scan.count) return;
+    // nested functions see the binding too, so their calls count
+    walk_lambda_ast(fn->body, fixed_array_invalidate_cb, &scan, true);
+}
+
 bool lambda_ast_finalize_script(Transpiler* tp, AstScript* script) {
     if (!tp || !script || tp->error_count != 0) return false;
     // A pn member is bound by the runtime member lane so calls can lower it,
@@ -7673,6 +7825,7 @@ bool lambda_ast_finalize_script(Transpiler* tp, AstScript* script) {
     // both parser front ends share this final pass. Direct AST construction
     // used to skip it, leaving suspend-capable procedures without their
     // resumable task state machine (D6.1.2).
+    if (tp->error_count == 0) lambda_ast_decide_cow_borrows(tp, script);
     if (tp->error_count == 0) analyze_lambda_concurrency(tp, script);
     return tp->error_count == 0;
 }
@@ -10074,6 +10227,13 @@ typedef struct CowParamEffectScan {
     NameEntry* entry;
     bool retained;
     bool var_may_publish;
+    // CW24v3: a place copy escapes only when the copy ITSELF -- the bare name,
+    // not a member/index read of it -- is returned, stored, rebound, passed or
+    // captured. The CW29 sweep matches by ROOT (`print(p.n)` counts as passing
+    // `p`), which is right for a parameter's write-through question and wrong
+    // here: it made every read-and-return helper mark, the exact cost D4.4.6
+    // keeps free.
+    bool bare_only;
 } CowParamEffectScan;
 
 static void cow_param_note_alias(CowParamEffectScan* scan) {
@@ -10088,6 +10248,13 @@ static bool cow_param_expr_uses_entry(AstNode* expr, NameEntry* entry) {
     return ident && ident->entry == entry;
 }
 
+static bool cow_param_scan_matches(const CowParamEffectScan* scan, AstNode* expr) {
+    if (!scan->bare_only) return cow_param_expr_uses_entry(expr, scan->entry);
+    AstNode* bare = ast_unwrap_primary(expr);
+    return bare && bare->node_type == AST_NODE_IDENT &&
+        ((AstIdentNode*)bare)->entry == scan->entry;
+}
+
 static bool cow_param_nested_function_uses_entry(AstNode* node, void* data) {
     CowParamEffectScan* scan = (CowParamEffectScan*)data;
     if (!scan || node->node_type != AST_NODE_IDENT) return scan != NULL;
@@ -10100,7 +10267,7 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
     if (!scan || !node) return false;
     switch (node->node_type) {
     case AST_NODE_VARIABLE_DECLARATOR:
-        if (cow_param_expr_uses_entry(((AstDeclaratorNode*)node)->init, scan->entry)) {
+        if (cow_param_scan_matches(scan, ((AstDeclaratorNode*)node)->init)) {
             cow_param_note_alias(scan);
         }
         break;
@@ -10108,7 +10275,7 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
         AstAssignStamNode* assign = (AstAssignStamNode*)node;
         if (assign->target_entry == scan->entry) {
             scan->var_may_publish = true;
-        } else if (cow_param_expr_uses_entry(assign->value, scan->entry)) {
+        } else if (cow_param_scan_matches(scan, assign->value)) {
             cow_param_note_alias(scan);
         }
         break;
@@ -10118,15 +10285,31 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
         AstCompoundAssignNode* assign = (AstCompoundAssignNode*)node;
         AstIdentNode* owner = ast_compound_root_ident(assign->object);
         if (owner && owner->entry != scan->entry &&
-                cow_param_expr_uses_entry(assign->value, scan->entry)) {
+                cow_param_scan_matches(scan, assign->value)) {
             cow_param_note_alias(scan);
         }
         break;
     }
     case AST_NODE_CALL_EXPR: {
         AstCallNode* call = (AstCallNode*)node;
+        // CW24v3: a system function that is not a procedure and returns a
+        // scalar cannot retain an argument -- `len(keys)` hands the array to
+        // nothing that outlives the call. Counting it as an escape marked every
+        // `let keys = tree.keys` in cd2's find and copied the array on the
+        // following put (+37k copies). The registry row carries both facts.
+        // Only the bare-name (place-copy) question uses this: the CW29
+        // parameter sweep keeps its unknown-callee conservatism.
+        AstNode* callee = ast_unwrap_primary(call->function);
+        SysFuncInfo* sys = callee && callee->node_type == AST_NODE_SYS_FUNC
+            ? ((AstSysFuncNode*)callee)->fn_info : NULL;
+        bool pure_scalar_sys = scan->bare_only && sys && !sys->is_proc &&
+            sys->return_type && sys->return_type->type_id != LMD_TYPE_ANY &&
+            !ast_type_needs_mutable_clone(sys->return_type->type_id) &&
+            sys->return_type->type_id != LMD_TYPE_TYPE &&
+            sys->return_type->type_id != LMD_TYPE_FUNC;
+        if (pure_scalar_sys) break;
         for (AstNode* arg = call->argument; arg; arg = arg->next) {
-            if (cow_param_expr_uses_entry(arg, scan->entry)) {
+            if (cow_param_scan_matches(scan, arg)) {
                 // The callee's effect can be unknown at this function's
                 // completion (including forward and dynamic targets).
                 cow_param_note_alias(scan);
@@ -10142,7 +10325,7 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
     case AST_NODE_CONTENT: {
         AstArrayNode* values = (AstArrayNode*)node;
         for (AstNode* item = values->item; item; item = item->next) {
-            if (cow_param_expr_uses_entry(item, scan->entry)) {
+            if (cow_param_scan_matches(scan, item)) {
                 cow_param_note_alias(scan);
                 break;
             }
@@ -10150,13 +10333,13 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
         break;
     }
     case AST_NODE_KEY_EXPR:
-        if (cow_param_expr_uses_entry(((AstNamedNode*)node)->as, scan->entry)) {
+        if (cow_param_scan_matches(scan, ((AstNamedNode*)node)->as)) {
             cow_param_note_alias(scan);
         }
         break;
     case AST_NODE_RETURN_STAM:
-        scan->retained = scan->retained || cow_param_expr_uses_entry(
-            ((AstReturnNode*)node)->value, scan->entry);
+        scan->retained = scan->retained || cow_param_scan_matches(scan,
+            ((AstReturnNode*)node)->value);
         break;
     case AST_NODE_FUNC:
     case AST_NODE_FUNC_EXPR:
@@ -10172,8 +10355,9 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
     return true;
 }
 
-static CowParamEffectScan ast_body_cow_param_effects(AstNode* body, NameEntry* entry) {
-    CowParamEffectScan scan = {entry, false, false};
+static CowParamEffectScan ast_body_cow_param_effects(AstNode* body, NameEntry* entry,
+        bool bare_only = false) {
+    CowParamEffectScan scan = {entry, false, false, bare_only};
     walk_lambda_ast(body, cow_param_retention_scan_node, &scan, false);
     return scan;
 }
@@ -10257,6 +10441,9 @@ typedef struct RmwBorrowCtx {
     int loop_depth;
     // the handle has been named by an earlier statement of the region
     bool handle_named;
+    // CW36: the root may be observed here -- the handle can no longer write
+    // the borrowed leaf in place (rmw_branch_local)
+    bool root_free;
     bool bad;
 } RmwBorrowCtx;
 
@@ -10431,7 +10618,7 @@ static void rmw_expr_cb(AstNode* child, AstNode* parent, void* opaque) {
     }
     switch (child->node_type) {
     case AST_NODE_IDENT:
-        if (((AstIdentNode*)child)->entry == c->root) c->bad = true;
+        if (((AstIdentNode*)child)->entry == c->root && !c->root_free) c->bad = true;
         return;
     case AST_NODE_FUNC: case AST_NODE_PROC: case AST_NODE_FUNC_EXPR:
     case AST_NODE_ARROW_FUNC: case AST_NODE_HANDLER_EXPR:
@@ -10452,7 +10639,8 @@ static void rmw_expr_cb(AstNode* child, AstNode* parent, void* opaque) {
         break;
     case AST_NODE_ASSIGN_STAM: {
         NameEntry* target = ((AstAssignStamNode*)child)->target_entry;
-        if (target && (target == c->root || rmw_is_key_ident(c, target))) {
+        if (target && ((target == c->root && !c->root_free) ||
+                rmw_is_key_ident(c, target))) {
             c->bad = true;
             return;
         }
@@ -10673,6 +10861,312 @@ static bool rmw_moves_out(AstNode* stmt_node, RmwBorrowCtx* c) {
     return false;
 }
 
+// CW36 / D4.4.4v3: store-backs inside branches. When no store-back follows
+// the bind in its own list (splay's `var left = node.left` written and stored
+// back inside sibling `if`s), the region is walked path by path with two
+// facts per path:
+//   LIVE  -- the handle may still hold the borrowed leaf unmarked, so the
+//            root may be observed only if the handle can no longer write it;
+//   DIRTY -- the handle may have written that leaf in place without storing
+//            it back, so the root may not be observed and the path may not
+//            leave the region (return, or the end of the bind's list).
+// A store-back clears both. It is FINAL when nothing after it names the
+// handle; a final store-back skips capture (cow_borrow_release), a non-final
+// one keeps the ordinary capture, whose share-mark makes every later write
+// through the handle or the root copy (condition 4). Loops that name the
+// handle, plain rebinds of the handle and every other mention of it outside
+// a read, a write through it or a `var` argument refuse the bind.
+enum { RMW_LIVE = 1, RMW_DIRTY = 2, RMW_UNREACHABLE = 4 };
+
+typedef struct RmwCont {
+    const struct RmwCont* parent;
+    AstNode* rest;   // the statements after the current one in its list
+} RmwCont;
+
+static int rmw_state_join(int a, int b) {
+    if (a & RMW_UNREACHABLE) return b;
+    if (b & RMW_UNREACHABLE) return a;
+    return a | b;
+}
+
+// a declaration inside `top` binding a mutated place copy of the handle's
+// path: that copy may itself borrow, writing the handle's leaf in place
+typedef struct RmwNestedScan {
+    AstNode* top;
+    const NameEntry* handle;
+    bool found;
+} RmwNestedScan;
+
+static void rmw_nested_handle_cb(AstNode* child, AstNode* parent, void* opaque) {
+    RmwNestedScan* scan = (RmwNestedScan*)opaque;
+    if (scan->found || !child) return;
+    if (parent == scan->top && child == scan->top->next) return;
+    if (child->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+        AstDeclaratorNode* named = (AstDeclaratorNode*)child;
+        AstIdentNode* root = compound_root_ident(named->init);
+        if (root && root->entry == scan->handle && named->entry &&
+                named->entry->is_place_copy && named->entry->place_copy_mutated) {
+            scan->found = true;
+            return;
+        }
+    }
+    ast_visit_core_children(child, rmw_nested_handle_cb, opaque);
+}
+
+static bool rmw_stmt_writes_handle(AstNode* node, RmwBorrowCtx* c) {
+    if (!node) return false;
+    if (ast_body_may_write_entry(node, c->handle, true, node->next)) return true;
+    RmwNestedScan scan = {node, c->handle, false};
+    rmw_nested_handle_cb(node, NULL, &scan);
+    return scan.found;
+}
+
+static bool rmw_cont_names_handle(const RmwCont* k, RmwBorrowCtx* c) {
+    for (; k; k = k->parent) {
+        for (AstNode* n = k->rest; n; n = n->next) {
+            if (rmw_subtree_uses_entry(n, c->handle)) return true;
+        }
+    }
+    return false;
+}
+
+static bool rmw_cont_writes_handle(const RmwCont* k, RmwBorrowCtx* c) {
+    for (; k; k = k->parent) {
+        for (AstNode* n = k->rest; n; n = n->next) {
+            if (rmw_stmt_writes_handle(n, c)) return true;
+        }
+    }
+    return false;
+}
+
+// the `var` parameter flags of a statically known procedure callee, walked in
+// step with the call's arguments
+static AstNamedNode* rmw_callee_params(AstCallNode* call) {
+    AstFuncNode* callee = direct_pn_callee(call);
+    return callee ? callee->param : NULL;
+}
+
+// Is every mention of the handle in `top` one the walk models? Reads through
+// it, writes through it, and a bare `var` argument of a known procedure are;
+// a bare mention anywhere else could alias or rebind the leaf.
+typedef struct RmwUseScan {
+    AstNode* top;
+    RmwBorrowCtx* c;
+    bool bad;
+} RmwUseScan;
+
+static void rmw_use_scan(AstNode* node, RmwUseScan* scan);
+
+static void rmw_use_cb(AstNode* child, AstNode* parent, void* opaque) {
+    RmwUseScan* scan = (RmwUseScan*)opaque;
+    if (scan->bad || !child) return;
+    if (parent == scan->top && child == scan->top->next) return;
+    const NameEntry* handle = scan->c->handle;
+    switch (child->node_type) {
+    case AST_NODE_IDENT:
+        if (((AstIdentNode*)child)->entry == handle) scan->bad = true;
+        return;
+    case AST_NODE_MEMBER_EXPR: case AST_NODE_INDEX_EXPR: {
+        AstFieldNode* field = (AstFieldNode*)child;
+        AstNode* object = unwrap_primary_node(field->object);
+        if (object && object->node_type == AST_NODE_IDENT &&
+                ((AstIdentNode*)object)->entry == handle) {
+            if (child->node_type == AST_NODE_INDEX_EXPR) rmw_use_scan(field->field, scan);
+            return;
+        }
+        break;
+    }
+    case AST_NODE_INDEX_ASSIGN_STAM: case AST_NODE_MEMBER_ASSIGN_STAM: {
+        AstAssignNode* as = (AstAssignNode*)child;
+        AstCowPath target = {};
+        if (ast_collect_cow_path(&target, as->object) && target.root &&
+                target.root->node_type == AST_NODE_IDENT &&
+                ((AstIdentNode*)target.root)->entry == handle) {
+            // a write through the handle: only its keys and value remain
+            for (int i = 0; i < target.count; i++) {
+                if (!target.is_member[i]) rmw_use_scan(target.segment[i], scan);
+            }
+            if (child->node_type == AST_NODE_INDEX_ASSIGN_STAM) rmw_use_scan(as->key, scan);
+            rmw_use_scan(as->value, scan);
+            return;
+        }
+        break;
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)child;
+        AstNamedNode* param = rmw_callee_params(call);
+        for (AstNode* arg = call->argument; arg; arg = arg->next) {
+            AstNode* bare = unwrap_primary_node(arg);
+            TypeParam* pt = param ? (TypeParam*)((AstNode*)param)->type : NULL;
+            bool var_handle = bare && bare->node_type == AST_NODE_IDENT &&
+                ((AstIdentNode*)bare)->entry == handle && pt && pt->is_var_param;
+            if (!var_handle) rmw_use_scan(arg, scan);
+            if (param) param = (AstNamedNode*)((AstNode*)param)->next;
+        }
+        rmw_use_scan(call->function, scan);
+        return;
+    }
+    case AST_NODE_ASSIGN_STAM: {
+        AstAssignStamNode* as = (AstAssignStamNode*)child;
+        if (as->target_entry != handle) break;
+        // only `h = p(..., h, ...)` with h at a `var` position: the callee
+        // wrote through the handle's home and the result is what it holds
+        AstNode* value = unwrap_primary_node(as->value);
+        AstCallNode* call = value && value->node_type == AST_NODE_CALL_EXPR
+            ? (AstCallNode*)value : NULL;
+        AstNamedNode* param = call ? rmw_callee_params(call) : NULL;
+        bool passes_home = false;
+        for (AstNode* arg = call ? call->argument : NULL; arg && param;
+                arg = arg->next, param = (AstNamedNode*)((AstNode*)param)->next) {
+            AstNode* bare = unwrap_primary_node(arg);
+            TypeParam* pt = (TypeParam*)((AstNode*)param)->type;
+            if (bare && bare->node_type == AST_NODE_IDENT &&
+                    ((AstIdentNode*)bare)->entry == handle && pt && pt->is_var_param) {
+                passes_home = true;
+            }
+        }
+        if (!passes_home) {
+            scan->bad = true;
+            return;
+        }
+        rmw_use_scan(as->value, scan);
+        return;
+    }
+    default:
+        break;
+    }
+    ast_visit_core_children(child, rmw_use_cb, opaque);
+}
+
+static void rmw_use_scan(AstNode* node, RmwUseScan* scan) {
+    if (!node || scan->bad) return;
+    AstNode* saved = scan->top;
+    scan->top = node;
+    rmw_use_cb(node, NULL, scan);
+    scan->top = saved;
+}
+
+static bool rmw_handle_uses_modelled(AstNode* node, RmwBorrowCtx* c) {
+    RmwUseScan scan = {node, c, false};
+    rmw_use_scan(node, &scan);
+    return !scan.bad;
+}
+
+static int rmw_walk_chain(AstNode* head, int state, const RmwCont* k, RmwBorrowCtx* c);
+
+// an ordinary statement or expression: model its handle uses, check it with
+// the root observable only where no in-place write can follow, then record
+// whether it wrote through the handle
+static int rmw_walk_plain(AstNode* node, AstNode* stmt, int state, const RmwCont* k,
+        RmwBorrowCtx* c) {
+    if (!rmw_handle_uses_modelled(stmt, c)) {
+        c->bad = true;
+        return state;
+    }
+    bool writes = rmw_stmt_writes_handle(node, c);
+    c->root_free = !(state & RMW_DIRTY) &&
+        !((state & RMW_LIVE) && (writes || rmw_cont_writes_handle(k, c)));
+    rmw_check_expr(stmt, c);
+    c->root_free = false;
+    if (writes && (state & RMW_LIVE)) state |= RMW_DIRTY;
+    return state;
+}
+
+static int rmw_walk_stmt(AstNode* node, int state, const RmwCont* k, RmwBorrowCtx* c) {
+    AstNode* stmt = unwrap_primary_node(node);
+    if (!stmt || c->bad || (state & RMW_UNREACHABLE)) return state;
+    if (rmw_is_storeback(stmt, c)) {
+        if (c->storeback_count >= RMW_MAX_STOREBACKS) {
+            c->bad = true;
+            return state;
+        }
+        if (!rmw_cont_names_handle(k, c)) {
+            c->storebacks[c->storeback_count++] = (AstAssignNode*)stmt;
+        }
+        return 0;
+    }
+    switch (stmt->node_type) {
+    case AST_NODE_RETURN_STAM: {
+        if (state & RMW_DIRTY) {
+            c->bad = true;
+            return state;
+        }
+        AstNode* value = ((AstReturnNode*)stmt)->value;
+        if (value) {
+            if ((state & RMW_LIVE) && rmw_subtree_uses_entry(value, c->handle)) {
+                c->bad = true;
+                return state;
+            }
+            // nothing runs after the return, so the root is observable
+            rmw_walk_plain(value, value, 0, NULL, c);
+        }
+        return RMW_UNREACHABLE;
+    }
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* ifn = (AstIfNode*)stmt;
+        if (!rmw_handle_uses_modelled(ifn->cond, c)) {
+            c->bad = true;
+            return state;
+        }
+        bool writes = rmw_stmt_writes_handle(node, c);
+        c->root_free = !(state & RMW_DIRTY) &&
+            !((state & RMW_LIVE) && (writes || rmw_cont_writes_handle(k, c)));
+        rmw_check_expr(ifn->cond, c);
+        c->root_free = false;
+        if (c->bad) return state;
+        if (rmw_stmt_writes_handle(ifn->cond, c) && (state & RMW_LIVE)) state |= RMW_DIRTY;
+        int then_state = rmw_walk_chain(ifn->then, state, k, c);
+        int else_state = ifn->otherwise ? rmw_walk_chain(ifn->otherwise, state, k, c) : state;
+        return rmw_state_join(then_state, else_state);
+    }
+    case AST_NODE_BLOCK:
+        return rmw_walk_chain(((AstBlockNode*)stmt)->statements, state, k, c);
+    case AST_NODE_CONTENT: case AST_NODE_SEQ:
+        return rmw_walk_chain(((AstArrayNode*)stmt)->item, state, k, c);
+    case AST_NODE_LIST:
+        return rmw_walk_chain(((AstListNode*)stmt)->item, state, k, c);
+    case AST_NODE_LOOP: case AST_NODE_FOR_EXPR:
+    case AST_NODE_FOR_OF_STAM: case AST_NODE_FOR_IN_STAM:
+        // a loop would need a fixpoint; one that names the handle refuses
+        if (rmw_subtree_uses_entry(stmt, c->handle)) {
+            c->bad = true;
+            return state;
+        }
+        return rmw_walk_plain(node, stmt, state, k, c);
+    default:
+        return rmw_walk_plain(node, stmt, state, k, c);
+    }
+}
+
+static int rmw_walk_chain(AstNode* head, int state, const RmwCont* k, RmwBorrowCtx* c) {
+    for (AstNode* node = head; node && !c->bad; node = node->next) {
+        RmwCont here = {k, node->next};
+        state = rmw_walk_stmt(node, state, &here, c);
+    }
+    return state;
+}
+
+static bool rmw_branch_local(AstNode* stmt_node, RmwBorrowCtx* c) {
+    c->storeback_count = 0;
+    c->bad = false;
+    RmwCont region = {NULL, NULL};
+    int state = rmw_walk_chain(stmt_node->next, RMW_LIVE, &region, c);
+    // the bind's list ends the handle's scope: nothing may be left unstored
+    return !c->bad && !(state & RMW_DIRTY);
+}
+
+static void rmw_try_branch_local(AstNode* stmt_node, RmwBorrowCtx* c) {
+    // the straight-line attempt may have left keys and marks behind; the
+    // walk re-derives everything it needs from the region
+    c->loop_depth = 0;
+    c->handle_named = false;
+    if (!rmw_branch_local(stmt_node, c)) return;
+    c->handle->cow_borrow_lowered = true;
+    for (int i = 0; i < c->storeback_count; i++) {
+        c->storebacks[i]->cow_borrow_release = true;
+    }
+}
+
 static void rmw_try_candidate(AstNode* stmt_node) {
     AstVarDeclNode* decl = (AstVarDeclNode*)unwrap_primary_node(stmt_node);
     if (!decl || decl->node_type != AST_NODE_VAR_STAM) return;
@@ -10726,7 +11220,11 @@ static void rmw_try_candidate(AstNode* stmt_node) {
         if (rmw_is_storeback(n, &c)) last = n;
     }
     if (!last) {
-        if (rmw_moves_out(stmt_node, &c)) handle->cow_borrow_lowered = true;
+        if (rmw_moves_out(stmt_node, &c)) {
+            handle->cow_borrow_lowered = true;
+            return;
+        }
+        rmw_try_branch_local(stmt_node, &c);
         return;
     }
     AstNode* prev = stmt_node;
@@ -10736,10 +11234,16 @@ static void rmw_try_candidate(AstNode* stmt_node) {
             c.handle_named = true;
         }
     }
-    if (c.bad || c.storeback_count >= RMW_MAX_STOREBACKS) return;
-    c.storebacks[c.storeback_count++] = (AstAssignNode*)unwrap_primary_node(last);
-    for (AstNode* n = last->next; n; n = n->next) {
-        if (rmw_subtree_uses_entry(n, handle)) return;
+    bool straight = !c.bad && c.storeback_count < RMW_MAX_STOREBACKS;
+    if (straight) {
+        c.storebacks[c.storeback_count++] = (AstAssignNode*)unwrap_primary_node(last);
+        for (AstNode* n = last->next; n && straight; n = n->next) {
+            if (rmw_subtree_uses_entry(n, handle)) straight = false;
+        }
+    }
+    if (!straight) {
+        rmw_try_branch_local(stmt_node, &c);
+        return;
     }
     handle->cow_borrow_lowered = true;
     for (int i = 0; i < c.storeback_count; i++) {
@@ -10783,6 +11287,118 @@ static void lambda_ast_lower_rmw_borrows(AstFuncNode* fn) {
     if (!fn || ((AstNode*)fn)->node_type != AST_NODE_PROC || !fn->body) return;
     // the body carrier itself is a statement-list node; discover through it
     rmw_discover_chain(fn->body);
+}
+
+// CW24v3 / D4.4.6: decide, per place-copy binding, whether the PLACE may be
+// written while the copy is alive. The live range is the statement list from
+// the bind to the last top-level statement of that list naming the copy; a
+// nested use makes its whole enclosing top-level statement part of the range.
+// "May be written" is the CW30 gate (`ast_body_may_write_entry`), which counts
+// a write through the root or any path prefix, an unknown callee and a `var`
+// pass as writes; "escapes" is the CW29 retention scan over the whole body,
+// conservative in the same direction. A miss here is a semantic bug, a false
+// hit is one share-mark (D4.4.1), so every unknown shape falls to "written".
+static void place_copy_decide_list(AstNode* head, AstNode* fn_body);
+
+static void place_copy_decide_declaration(AstNode* stmt_node, AstDeclaratorNode* named,
+        AstNode* fn_body) {
+    NameEntry* entry = named->entry;
+    if (!entry || !entry->is_place_copy || entry->place_copy_range_decided) return;
+    entry->place_copy_range_decided = true;
+    AstIdentNode* root_ident = named->init ? compound_root_ident(named->init) : NULL;
+    NameEntry* root = root_ident ? root_ident->entry : NULL;
+    if (!root) { entry->place_copy_place_written = true; return; }
+    AstNode* last_use = NULL;
+    for (AstNode* n = stmt_node->next; n; n = n->next) {
+        if (rmw_subtree_uses_entry(unwrap_primary_node(n), entry)) last_use = n;
+    }
+    bool written = last_use && ast_body_may_write_entry(stmt_node->next, root,
+        true, last_use->next);
+    bool escaped = ast_body_cow_param_effects(fn_body, entry, true).retained;
+    if (written || escaped) entry->place_copy_place_written = true;
+}
+
+static void place_copy_decide_list(AstNode* head, AstNode* fn_body) {
+    for (AstNode* node = head; node; node = node->next) {
+        AstNode* stmt = unwrap_primary_node(node);
+        if (!stmt) continue;
+        switch (stmt->node_type) {
+        case AST_NODE_VAR_STAM: case AST_NODE_LET_STAM: {
+            for (AstNode* d = ((AstVarDeclNode*)stmt)->declarations; d; d = d->next) {
+                if (d->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+                    place_copy_decide_declaration(node, (AstDeclaratorNode*)d, fn_body);
+                }
+            }
+            break;
+        }
+        case AST_NODE_IF_EXPR:
+            place_copy_decide_list(((AstIfNode*)stmt)->then, fn_body);
+            place_copy_decide_list(((AstIfNode*)stmt)->otherwise, fn_body);
+            break;
+        case AST_NODE_BLOCK:
+            place_copy_decide_list(((AstBlockNode*)stmt)->statements, fn_body);
+            break;
+        case AST_NODE_CONTENT: case AST_NODE_SEQ:
+            place_copy_decide_list(((AstArrayNode*)stmt)->item, fn_body);
+            break;
+        case AST_NODE_LIST:
+            place_copy_decide_list(((AstListNode*)stmt)->item, fn_body);
+            break;
+        case AST_NODE_LOOP:
+            place_copy_decide_list(((AstLoopControlNode*)stmt)->body, fn_body);
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+// Any place copy the precise walk never reached (declared under a construct it
+// does not descend, e.g. a `for` body or a `match` arm) is decided
+// conservatively from the whole body.
+static bool place_copy_decide_fallback_cb(AstNode* node, void* data) {
+    AstNode* fn_body = (AstNode*)data;
+    if (node->node_type != AST_NODE_VARIABLE_DECLARATOR) return true;
+    AstDeclaratorNode* named = (AstDeclaratorNode*)node;
+    NameEntry* entry = named->entry;
+    if (!entry || !entry->is_place_copy || entry->place_copy_range_decided) return true;
+    entry->place_copy_range_decided = true;
+    AstIdentNode* root_ident = named->init ? compound_root_ident(named->init) : NULL;
+    NameEntry* root = root_ident ? root_ident->entry : NULL;
+    entry->place_copy_place_written = !root ||
+        ast_body_may_write_entry(fn_body, root, true) ||
+        ast_body_cow_param_effects(fn_body, entry, true).retained;
+    return true;
+}
+
+// A call whose callee signature was not published when the call was built --
+// a procedure calling itself, or one defined later in the module -- skips
+// build-time argument validation, so its `var` positions never recorded the
+// place copies they write through. Record them once every signature exists,
+// from the callee's own parameter nodes. Only the durable fact is set: the
+// CW24 diagnostic queue is left as the build-time path left it.
+static bool place_copy_var_call_cb(AstNode* node, void* data) {
+    (void)data;
+    if (node->node_type != AST_NODE_CALL_EXPR) return true;
+    AstCallNode* call = (AstCallNode*)node;
+    AstNamedNode* param = rmw_callee_params(call);
+    for (AstNode* arg = call->argument; arg && param;
+            arg = arg->next, param = (AstNamedNode*)((AstNode*)param)->next) {
+        TypeParam* pt = (TypeParam*)((AstNode*)param)->type;
+        if (!pt || !pt->is_var_param) continue;
+        AstIdentNode* root = compound_root_ident(arg);
+        if (root && root->entry && root->entry->is_place_copy) {
+            root->entry->place_copy_mutated = true;
+        }
+    }
+    return true;
+}
+
+static void lambda_ast_note_place_copy_place_writes(AstFuncNode* fn) {
+    if (!fn || !fn->body) return;
+    walk_lambda_ast(fn->body, place_copy_var_call_cb, NULL, false);
+    place_copy_decide_list(fn->body, fn->body);
+    walk_lambda_ast(fn->body, place_copy_decide_fallback_cb, fn->body, false);
 }
 
 // Pending CW24 candidates for the function currently being built. A mutation
@@ -11840,7 +12456,6 @@ static LambdaParseValue direct_ast_reduce(void* context,
             // excuse a place-copy mutation has now been seen.
             lambda_ast_flush_place_copy_diagnostics(tp);
             if (fn) lambda_ast_note_param_cow_effects(tp, fn);  // CW29 sweep
-            if (fn) lambda_ast_lower_rmw_borrows(fn);  // CW34
             return 0;
         }
     }
@@ -12530,6 +13145,19 @@ static LambdaParseValue direct_ast_reduce(void* context,
                 AST_NODE_LET_STAM, reduction->span, sizeof(AstLetNode));
             let->declare = child0;
             let->type = child0->type;
+            // CW24v3 / D4.4.6: a `let` bound from a mutable root's place is a
+            // place copy as much as a `var` is -- it cannot be written through,
+            // but the PLACE can be, and the copy must not see that. Only the
+            // `var` path recorded the fact, which is why `let old = r.kid`
+            // never marked. The CW24 mutation diagnostic cannot fire on a
+            // `let` (the write is rejected as immutable first).
+            for (AstNode* declaration = child0; declaration;
+                    declaration = declaration->next) {
+                if (declaration->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
+                AstDeclaratorNode* named = (AstDeclaratorNode*)declaration;
+                if (!named->entry) named->entry = lookup_name_in_current_scope(tp, named->name);
+                if (named->entry) lambda_ast_mark_place_copy(named);
+            }
             return direct_ast_value((AstNode*)let);
         }
         if (child0) return direct_ast_value(child0);

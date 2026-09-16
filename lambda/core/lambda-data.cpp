@@ -10,6 +10,7 @@
 #include "../../lib/memtrack.h"
 #include "../../lib/math_checked.hpp"
 #include "../../lib/arena.h"  // for arena_owns() and arena_realloc()
+#include "../../lib/atomic.h"
 
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
@@ -340,10 +341,26 @@ Type* alloc_type(Pool* pool, TypeId type, size_t size) {
     return t;
 }
 
+// T28-4: set once, the first time a binder-bearing node exists. Atomic because
+// scripts may build their type graphs on different threads; the transition is
+// monotonic (0 -> 1) so a racing reader can only see an older `false` for a
+// node that is not yet reachable from any published contract.
+static atomic_int32 g_lambda_binder_types_created = {0};
+
+bool lambda_binder_types_exist(void) {
+    return atomic_load32(&g_lambda_binder_types_created) != 0;
+}
+
 // allocate a Type with type_id = LMD_TYPE_TYPE and a specific TypeKind
 Type* alloc_type_kind(Pool* pool, uint8_t kind, size_t size) {
     Type* t = alloc_type(pool, LMD_TYPE_TYPE, size);
     t->kind = kind;
+    // The one creation point for binder sites and bound references
+    // (build_ast.cpp, parse_type_pattern.cpp): record that the cheap
+    // "no binder anywhere" answer is no longer available.
+    if (kind == TYPE_KIND_BINDER || kind == TYPE_KIND_BOUND_REF) {
+        atomic_store32(&g_lambda_binder_types_created, 1);
+    }
     return t;
 }
 

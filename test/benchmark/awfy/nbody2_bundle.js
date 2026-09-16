@@ -235,9 +235,9 @@ class NBody extends Benchmark {
 
 // --- timing harness ---
 const bench = new NBody();
-const __t0 = process.hrtime.bigint();
+const __t0 = performance.now();
 // Synchronized with JetStream: 36000 total advance steps
 const ok = bench.innerBenchmarkLoop(36000);
-const __t1 = process.hrtime.bigint();
+const __t1 = performance.now();
 process.stdout.write("NBody: " + (ok ? "PASS" : "FAIL") + "\n");
-process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
+process.stdout.write("__TIMING__:" + (__t1 - __t0) + "\n");

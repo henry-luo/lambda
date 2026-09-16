@@ -71,7 +71,9 @@ For the BENG suite, the convention is simpler: `binarytrees.ls` and `js/binarytr
 
 ### QuickJS wrapper
 
-QuickJS lacks `process.hrtime.bigint()` and `console.log`. The runner auto-generates wrappers under `temp/` with:
+QuickJS has no Node.js `process` or `console` globals by default. The runner
+auto-generates wrappers under `temp/`; benchmark timing uses QuickJS's native
+global `performance.now()`:
 
 ```javascript
 import * as std from 'std';
@@ -79,9 +81,6 @@ if (typeof process === 'undefined') {
     globalThis.process = {
         stdout: { write: function(s) { std.out.puts(s); std.out.flush(); } },
         argv: ['-', '-'],
-        hrtime: { bigint: function() {
-            return BigInt(Math.round(performance.now() * 1e6));
-        } },
         exit: function(code) { std.exit(code); }
     };
 }
@@ -135,15 +134,16 @@ pn main() {
 ### JavaScript pattern (`.js`)
 
 ```javascript
-const __t0 = process.hrtime.bigint();
+const __t0 = performance.now();
 
 // ... benchmark computation ...
 
-const __t1 = process.hrtime.bigint();
-process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
+const __t1 = performance.now();
+process.stdout.write("__TIMING__:" + (__t1 - __t0) + "\n");
 ```
 
-`process.hrtime.bigint()` returns nanoseconds. Divide by 1e6 for milliseconds.
+`performance.now()` returns monotonic milliseconds in LambdaJS, Node.js, and
+QuickJS, so no runtime-specific conversion is needed.
 
 ### Timing placement rules
 
@@ -170,7 +170,7 @@ process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
 ### 4.2 JavaScript equivalent
 
 1. Translate the same algorithm to idiomatic JavaScript.
-2. Add `process.hrtime.bigint()` timing around the computation.
+2. Add `performance.now()` timing around the computation.
 3. Print `__TIMING__:<ms>\n` via `process.stdout.write()`.
 4. Save as `<name>2.js` (or `js/<name>.js` for BENG).
 

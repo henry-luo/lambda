@@ -116,15 +116,15 @@ function processLogs(lines) {
 }
 
 let checksum = 0;
-const t0 = process.hrtime.bigint();
+const t0 = performance.now();
 for (let round = 0; round < LOG_ROUNDS; round += 1) {
   const result = processLogs(logs);
   checksum =
     (checksum + result.accepted * 31 + result.rejected * 17 +
       result.groups.api.totalLatency + result.groups.worker.totalBytes + round) % MODULUS;
 }
-const t1 = process.hrtime.bigint();
+const t1 = performance.now();
 
 if (checksum !== 292634526) throw new Error("unexpected log_pipeline checksum");
 process.stdout.write("log_pipeline: CHECKSUM:" + checksum + "\n");
-process.stdout.write("__TIMING__:" + Number(t1 - t0) / 1e6 + "\n");
+process.stdout.write("__TIMING__:" + (t1 - t0) + "\n");
