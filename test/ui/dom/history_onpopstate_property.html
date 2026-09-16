@@ -1,0 +1,20 @@
+<!doctype html>
+<body>
+  <button id="history-push" type="button">push</button>
+  <button id="history-back" type="button">back</button>
+  <p id="history-status">initial</p>
+  <script>
+    const status = document.getElementById('history-status');
+    history.replaceState({ htmx: true, page: 'initial' }, '', '?initial');
+    document.getElementById('history-push').addEventListener('click', function () {
+      history.pushState({ htmx: true, page: 'pushed' }, '', '?pushed');
+      status.textContent = 'pushed';
+    });
+    window.onpopstate = function (event) {
+      status.textContent = event.state.htmx ? event.state.page : 'missing-htmx-state';
+    };
+    document.getElementById('history-back').addEventListener('click', function () {
+      history.back();
+    });
+  </script>
+</body>

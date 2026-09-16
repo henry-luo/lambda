@@ -385,10 +385,14 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "fn_set", NULL, NULL, NULL, false, 0},  // variadic, unimplemented
 
     {SYSFUNC_SLICE, "slice", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_slice2", FPTR(fn_slice2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_slice2", FPTR(fn_slice2), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* result */ SYS_RESULT_SLICE_OF_ARGUMENT},
 
     {SYSFUNC_SLICE, "slice", 3, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_slice3", FPTR(fn_slice3), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_slice3", FPTR(fn_slice3), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* result */ SYS_RESULT_SLICE_OF_ARGUMENT},
 
     {SYSFUNC_VIEW, "subview", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_subview", FPTR(fn_subview), NULL, NULL, false, 0},
@@ -504,7 +508,7 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_MIN1, "min", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_min1", FPTR(fn_min1), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_ELEM_OF_ARG0},
+     /* result */ SYS_RESULT_ELEM_OF_ARGUMENT},
 
     {SYSFUNC_MIN2, "min", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_min2", FPTR(fn_min2), "fn_min2_u", NPTR(fn_min2_u), true, 2},
@@ -512,7 +516,7 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_MAX1, "max", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_max1", FPTR(fn_max1), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_ELEM_OF_ARG0},
+     /* result */ SYS_RESULT_ELEM_OF_ARGUMENT},
 
     {SYSFUNC_MAX2, "max", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_max2", FPTR(fn_max2), "fn_max2_u", NPTR(fn_max2_u), true, 2},
@@ -536,32 +540,32 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_ABS, "abs", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_abs", FPTR(fn_abs), "fabs", NPTR(fabs), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_ARG0_NUMERIC},
+     /* result */ SYS_RESULT_ARGUMENT_NUMERIC},
 
     {SYSFUNC_ROUND, "round", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_round", FPTR(fn_round), "round", NPTR(round), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_ARG0_NUMERIC},
+     /* result */ SYS_RESULT_ARGUMENT_NUMERIC},
 
     {SYSFUNC_FLOOR, "floor", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_floor", FPTR(fn_floor), "floor", NPTR(floor), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_ARG0_NUMERIC},
+     /* result */ SYS_RESULT_ARGUMENT_NUMERIC},
 
     {SYSFUNC_CEIL, "ceil", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_ceil", FPTR(fn_ceil), "ceil", NPTR(ceil), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_ARG0_NUMERIC},
+     /* result */ SYS_RESULT_ARGUMENT_NUMERIC},
 
     {SYSFUNC_TRUNC, "trunc", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_trunc", FPTR(fn_trunc), "trunc", NPTR(trunc), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_ARG0_NUMERIC},
+     /* result */ SYS_RESULT_ARGUMENT_NUMERIC},
 
     {SYSFUNC_SIGN, "sign", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_sign", FPTR(fn_sign), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_ARG0_NUMERIC},
+     /* result */ SYS_RESULT_ARGUMENT_NUMERIC},
 
     {SYSFUNC_CLIP, "clip", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_clip", FPTR(fn_clip), NULL, NULL, false, 0},
@@ -611,27 +615,27 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_TRIM, "trim", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_trim", FPTR(fn_trim), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_TEXT_SAME_AS_ARG0},
+     /* result */ SYS_RESULT_TEXT_SAME_AS_ARGUMENT},
 
     {SYSFUNC_TRIM_START, "trim_start", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_trim_start", FPTR(fn_trim_start), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_TEXT_SAME_AS_ARG0},
+     /* result */ SYS_RESULT_TEXT_SAME_AS_ARGUMENT},
 
     {SYSFUNC_TRIM_END, "trim_end", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_trim_end", FPTR(fn_trim_end), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_TEXT_SAME_AS_ARG0},
+     /* result */ SYS_RESULT_TEXT_SAME_AS_ARGUMENT},
 
     {SYSFUNC_LOWER, "lower", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_lower", FPTR(fn_lower), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_TEXT_SAME_AS_ARG0},
+     /* result */ SYS_RESULT_TEXT_SAME_AS_ARGUMENT},
 
     {SYSFUNC_UPPER, "upper", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_upper", FPTR(fn_upper), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_TEXT_SAME_AS_ARG0},
+     /* result */ SYS_RESULT_TEXT_SAME_AS_ARGUMENT},
 
     {SYSFUNC_URL_RESOLVE, "url_resolve", 2, &TYPE_STRING, false, false, false, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_url_resolve", FPTR(fn_url_resolve), NULL, NULL, false, 0},
@@ -650,10 +654,14 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "fn_join2", FPTR(fn_join2), NULL, NULL, false, 0},
 
     {SYSFUNC_REPLACE, "replace", 3, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false,
-     C_RET_ITEM, NULL, "fn_replace3", FPTR(fn_replace), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_replace3", FPTR(fn_replace), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* result */ SYS_RESULT_TEXT_SAME_AS_ARGUMENT},
 
     {SYSFUNC_REPLACE4, "replace", 4, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false,
-     C_RET_ITEM, NULL, "fn_replace4", FPTR(fn_replace4), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_replace4", FPTR(fn_replace4), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* result */ SYS_RESULT_TEXT_SAME_AS_ARGUMENT},
 
     {SYSFUNC_FIND, "find", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_find2", FPTR(fn_find2), NULL, NULL, false, 0},
@@ -695,7 +703,10 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "fn_argmax", FPTR(fn_argmax), NULL, NULL, false, 0},
 
     {SYSFUNC_FILL, "fill", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_fill", FPTR(fn_fill), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_fill", FPTR(fn_fill), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* result */ SYS_RESULT_ARRAY_OF_ARGUMENT,
+     /* result_arg_index */ 1},
 
     {SYSFUNC_DOT, "math_dot", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_math_dot", FPTR(fn_math_dot), NULL, NULL, false, 0,
@@ -880,30 +891,32 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_REVERSE, "reverse", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_reverse", FPTR(fn_reverse), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_SAME_AS_ARG0},
+     /* result */ SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT},
 
     {SYSFUNC_SORT, "sort", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_sort1", FPTR(fn_sort1), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_SAME_AS_ARG0},
+     /* result */ SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT},
 
     {SYSFUNC_SORT2, "sort", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_sort2", FPTR(fn_sort2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_sort2", FPTR(fn_sort2), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* result */ SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT},
 
     {SYSFUNC_UNIQUE, "unique", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_unique", FPTR(fn_unique), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_SAME_AS_ARG0},
+     /* result */ SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT},
 
     {SYSFUNC_TAKE, "take", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_take", FPTR(fn_take), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_SAME_AS_ARG0},
+     /* result */ SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT},
 
     {SYSFUNC_DROP, "drop", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_drop", FPTR(fn_drop), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_SAME_AS_ARG0},
+     /* result */ SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT},
 
     {SYSFUNC_ZIP, "zip", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_zip", FPTR(fn_zip), NULL, NULL, false, 0},

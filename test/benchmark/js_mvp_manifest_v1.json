@@ -1,0 +1,925 @@
+{
+  "schema": 2,
+  "workloads": [
+    {
+      "id": "r7rs/fib",
+      "source": "test/benchmark/r7rs/fib2.js",
+      "sha256": "881fe53970b8a96113377c7e1f2580a1fdcb665522af075039ec38dd10f86820",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "r7rs/fibfp",
+      "source": "test/benchmark/r7rs/fibfp2.js",
+      "sha256": "093463831a90c7a78dee9c35a6195884c94cacc7fb15d75e9cd906ed0dcba714",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "r7rs/tak",
+      "source": "test/benchmark/r7rs/tak2.js",
+      "sha256": "4ca0054d1df9d4fbf9af14b97d5260ec07c32c8abf1d230c08c8f4e4301d5f09",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "r7rs/cpstak",
+      "source": "test/benchmark/r7rs/cpstak2.js",
+      "sha256": "5fd6748ab32c14d755885abf53c245732bb5662860ffd94c8fbc10d1eb3b72f6",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "r7rs/sum",
+      "source": "test/benchmark/r7rs/sum2.js",
+      "sha256": "14b1780a234dc2cbf636ed6ef9b0f2620a13d85004c52b8c8bbde440ebd6b1eb",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "r7rs/sumfp",
+      "source": "test/benchmark/r7rs/sumfp2.js",
+      "sha256": "c61676945f834595d2400ff798f83a3f30c89c4e3d63b3535b0302b656d7ae0c",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "r7rs/nqueens",
+      "source": "test/benchmark/r7rs/nqueens2.js",
+      "sha256": "52119766f827b996ca444ca296556b96ee9fe18843b2d753e5818fb2ceb0c3db",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "r7rs/fft",
+      "source": "test/benchmark/r7rs/fft2.js",
+      "sha256": "6c492ba5cabe3e4e99a49d66457228f1f21959e8980dd2f98a7fa154b6022049",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "r7rs/mbrot",
+      "source": "test/benchmark/r7rs/mbrot2.js",
+      "sha256": "1ec75cf8953e4e2b8ef5bd185e55ba984981fb0e656d56162455f9d066adf8d8",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "r7rs/ack",
+      "source": "test/benchmark/r7rs/ack2.js",
+      "sha256": "c48051b6679ef389a12045df17516f702a37dd5b31fc5dad68dad4fc5386aa4f",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "awfy/sieve",
+      "source": "test/benchmark/awfy/sieve2_bundle.js",
+      "sha256": "31b98e3cbef91a4a26ba53708e9b2bdb20c42297d95516d3d319dcdb78ee102c",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "awfy/permute",
+      "source": "test/benchmark/awfy/permute2_bundle.js",
+      "sha256": "e11c814e9de0ef3727e49ba62856e22093c256a49ebaa2ce824d34dd44b19bb1",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "awfy/queens",
+      "source": "test/benchmark/awfy/queens2_bundle.js",
+      "sha256": "b8d50a22ca098f4275352fffea3490fe0851468937a7f489b75b57ad5250ae97",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "awfy/towers",
+      "source": "test/benchmark/awfy/towers2_bundle.js",
+      "sha256": "27493306b4ca327e542d1ae2539b5206a64638cc031c416b2e470c6f0e8d1d5b",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "awfy/bounce",
+      "source": "test/benchmark/awfy/bounce2_bundle.js",
+      "sha256": "cf53073309b38b797ec03c7d28db25837c7dfc61a98258ba44dbfcfbc721a68e",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "awfy/list",
+      "source": "test/benchmark/awfy/list2_bundle.js",
+      "sha256": "43ac270599271ac7fd8041349c5e5b9abcba772ed8c57d3f723d28e0c2056239",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "awfy/storage",
+      "source": "test/benchmark/awfy/storage2_bundle.js",
+      "sha256": "75cbfca692a2555daac5ff24769c490da660b14dd9a0f0025dfd9107b80b2293",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "awfy/mandelbrot",
+      "source": "test/benchmark/awfy/mandelbrot2_bundle.js",
+      "sha256": "e833cf9c1481c37fba112e3545c3e7d3ab83868384719c3a2de9130f50055af3",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "awfy/nbody",
+      "source": "test/benchmark/awfy/nbody2_bundle.js",
+      "sha256": "96c183ba062e186d82af2ace35f9e3c04093e3499d5f92b6f990df84fb113b59",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "awfy/richards",
+      "source": "test/benchmark/awfy/richards2_bundle.js",
+      "sha256": "ea1ddcd1873eb0199f2479eeddc7d83c09cf1de184c20723d551b699ba376dcd",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "awfy/json",
+      "source": "test/benchmark/awfy/json2_bundle.js",
+      "sha256": "c416ac165b3c67dea7c5bacf8a166718384350e18389b29f3cc7261e20692a0e",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "awfy/deltablue",
+      "source": "test/benchmark/awfy/deltablue2_bundle.js",
+      "sha256": "d9a38092a9642144309583126325298825afe4cfc7bec7e6b8427f25d651ea4d",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "awfy/havlak",
+      "source": "test/benchmark/awfy/havlak2_bundle.js",
+      "sha256": "8280e6fa6ee76b3d132a37ca818b8ddf6b608b9a503b278c5a7e27c21865311a",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "awfy/cd",
+      "source": "test/benchmark/awfy/cd2_bundle.js",
+      "sha256": "f37a0ca3fc2393a90a3bd8d9604c44acd726b324a0f3e1f3c10f2c75c934d951",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "beng/binarytrees",
+      "source": "test/benchmark/beng/js/binarytrees.js",
+      "sha256": "5398f1ebd5332914438f61d9d82a9e7143d7f1794f035a0d0ecb3a17094852e6",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "beng/fannkuch",
+      "source": "test/benchmark/beng/js/fannkuch.js",
+      "sha256": "53ae3954f3e41bcc5474c4421ca8f4a6ea299a79d67496e49dc92b8a1ba9c8c1",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "beng/fasta",
+      "source": "test/benchmark/beng/js/fasta.js",
+      "sha256": "8a0693aff25c428f38929c103ca4c4e68e50ce536b3eb6cc9fc3b9a655a2d150",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "beng/knucleotide",
+      "source": "test/benchmark/beng/js/knucleotide.js",
+      "sha256": "476059e87669c7467c863ce81dc372322c5a9671df6331849305cb10270bfcf4",
+      "inputs": [
+        {
+          "path": "test/benchmark/beng/input/fasta_1000.txt",
+          "sha256": "5c0db740b477346ad3ac079cdd14496f6f43ee9a4629cc2657ca604015bfd852"
+        }
+      ],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "beng/pidigits",
+      "source": "test/benchmark/beng/js/pidigits.js",
+      "sha256": "1cefc266a7cd59c93d7061d5224c2dcb5f47644f1ce6aa993ef6258a65d38bac",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "beng/regexredux",
+      "source": "test/benchmark/beng/js/regexredux.js",
+      "sha256": "12289cb22c8644314605ee9657474938e614e1740cbf40556dc2ecb6622ade77",
+      "inputs": [
+        {
+          "path": "test/benchmark/beng/input/fasta_1000.txt",
+          "sha256": "5c0db740b477346ad3ac079cdd14496f6f43ee9a4629cc2657ca604015bfd852"
+        }
+      ],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "beng/revcomp",
+      "source": "test/benchmark/beng/js/revcomp.js",
+      "sha256": "10a8008cba92c2292a83bcc670b7340fdd80639efe00d1b0ca7cadd20114c7c9",
+      "inputs": [
+        {
+          "path": "test/benchmark/beng/input/fasta_1000.txt",
+          "sha256": "5c0db740b477346ad3ac079cdd14496f6f43ee9a4629cc2657ca604015bfd852"
+        }
+      ],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "beng/spectralnorm",
+      "source": "test/benchmark/beng/js/spectralnorm.js",
+      "sha256": "13a75c828ba8e84186a23f01ced7b9e57b44463709f655d5ea2a5eecd7b35eb5",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "kostya/brainfuck",
+      "source": "test/benchmark/kostya/brainfuck.js",
+      "sha256": "6b6ea539a931fbf2513e77098e1c0fae485b487c04a04c0fd4394e76784a0e93",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "kostya/matmul",
+      "source": "test/benchmark/kostya/matmul.js",
+      "sha256": "4d3b942f27ee38f9275a3cc4a96c5afca32615311ff4194fa41fab1b8a588f31",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "kostya/primes",
+      "source": "test/benchmark/kostya/primes.js",
+      "sha256": "2eb0e67c23fbb02e568940b16c351450720fb4f70f7f9f4ef02cfb1f7630f66f",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "kostya/base64",
+      "source": "test/benchmark/kostya/base64.js",
+      "sha256": "b636ddbd2d87e524e04f3a67b23188c451b2ea700c039cf5b0114444d48501b5",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "kostya/levenshtein",
+      "source": "test/benchmark/kostya/levenshtein.js",
+      "sha256": "2e73c3fe8e177a385d8e65945eaef717d4acd305d0234b1559b242f9fc2b727f",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "kostya/json_gen",
+      "source": "test/benchmark/kostya/json_gen.js",
+      "sha256": "8c02e76806b9d11db48ae4eecf6ecb2696ad72b4fdf0c4b3ff75b11e8cfbc61a",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "kostya/collatz",
+      "source": "test/benchmark/kostya/collatz.js",
+      "sha256": "5a16ef351540ecf98936d1db30fbd285e4291c2fac6c5c91b597d39d1bb95520",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "larceny/triangl",
+      "source": "test/benchmark/larceny/triangl.js",
+      "sha256": "604d2628ec9596596837a2489617d4bcfa6627038f29f8e96bc8d52e506f8883",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "larceny/array1",
+      "source": "test/benchmark/larceny/array1.js",
+      "sha256": "c8cac0a64e5e0ce2995ed204e660137fcc369d73268764ade2d42108d9011132",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "larceny/deriv",
+      "source": "test/benchmark/larceny/deriv.js",
+      "sha256": "edd7e33d9d0db7dc38ef8309b37b535a237a0c73d99b4590dc7b663bdedd675d",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "larceny/diviter",
+      "source": "test/benchmark/larceny/diviter.js",
+      "sha256": "798e1c78cce27543043c1854414c88c9ce916aae53c300cad0b29938ff95acc9",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "larceny/divrec",
+      "source": "test/benchmark/larceny/divrec.js",
+      "sha256": "42ae38594556a37cdacf8e943563754d5a487c50db88512fa28272e322605e07",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "larceny/gcbench",
+      "source": "test/benchmark/larceny/gcbench.js",
+      "sha256": "1de64388a2a795b843b0966dfe4226b94c1543faf1d1b3095a124172496f4ab5",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "larceny/paraffins",
+      "source": "test/benchmark/larceny/paraffins.js",
+      "sha256": "326a1664c752e127909e77a1ca32e962ac8881b1651cb2a6c005a6d0339f72ec",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "larceny/pnpoly",
+      "source": "test/benchmark/larceny/pnpoly.js",
+      "sha256": "82ec8841fed371a7808270e84a78522c616b6045a886fb7b54e74b3dc8206cc9",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "larceny/puzzle",
+      "source": "test/benchmark/larceny/puzzle.js",
+      "sha256": "1fc1a55f8b133f428cf1fd5c2c4a09af425244b865d9cba104a5fc5f2686a310",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "larceny/quicksort",
+      "source": "test/benchmark/larceny/quicksort.js",
+      "sha256": "1f422e396771603bad70d4e491c01e41e131839bea4733e1dbc93b6997a9db74",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "larceny/ray",
+      "source": "test/benchmark/larceny/ray.js",
+      "sha256": "3e3f71c9e65b3297c46698b997d52bb034b383d3deb9d095313a9a3771863eb3",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "text/fast_diff",
+      "source": "test/benchmark/text/fast_diff.js",
+      "sha256": "18ecdcf97ab1a8df78d1acb2f048f10d37afae892262dc5710347656af9f3797",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "text/microdiff",
+      "source": "test/benchmark/text/microdiff.js",
+      "sha256": "918fe6a521372f63c9a4045e4de6f162fd50a810deafcc8ae938174a3795e51d",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "text/hyphen",
+      "source": "test/benchmark/text/hyphen.js",
+      "sha256": "0b2b2ffc1eca6c77743abcc7c6dd0fa6f404f41cd4ceb0a1c004c9051103b416",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "text/prettier_ast",
+      "source": "test/benchmark/text/prettier_ast.js",
+      "sha256": "76319ba2c162fc7318cb6796053d7dcbeec2610b25f7a44efcd22109b54db7eb",
+      "inputs": [
+        {
+          "path": "test/benchmark/text/prettier_ast.json",
+          "sha256": "8763a65fd667fc2d513860f42fffa39a51ce74650fcb83567e83e00cfd3b1cf1"
+        }
+      ],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "text/text_search",
+      "source": "test/benchmark/text/text_search.js",
+      "sha256": "1e5ea9f5b894948788eb840b89051f5e412643c6e56c38df44a3b1c4e13c09d2",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "text/three_way_merge",
+      "source": "test/benchmark/text/three_way_merge.js",
+      "sha256": "0b4b6aa17f6df4867a01390cc56fa4345c75f9ab51daa142861f9cffd94901c5",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "text/log_pipeline",
+      "source": "test/benchmark/text/log_pipeline.js",
+      "sha256": "c89103b6832ec50d6610f7d1eed290ca684d8fa8af7f43de0780ad6275a800fb",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "direct_script",
+        "strict_mode": "source_preserved",
+        "timed_region": "source-defined __TIMING__ payload"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "jetstream/cube3d",
+      "source": "test/benchmark/jetstream/3d-cube.js",
+      "sha256": "b3e46da521d5a04dafe7676cbec38fbfe24178c03de41b20ee835a5c727c4ca1",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "jetstream_run_iteration",
+        "strict_mode": "source_preserved",
+        "run_expression": "run()",
+        "repeat_count": 8,
+        "timed_region": "source-defined runIteration payload",
+        "canonical_sha256": "cb6a27852f3a48ccecc4da2fa2bb3570527c661865cba8aa131ce765bac89171"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "jetstream/navier_stokes",
+      "source": "test/benchmark/jetstream/navier-stokes.js",
+      "sha256": "24ff01d4efb18f994786659b04bdf79d74821461c99e9d8c29c2ea0081ff161c",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "jetstream_run_iteration",
+        "strict_mode": "source_preserved",
+        "run_expression": "runNavierStokes()",
+        "repeat_count": 1,
+        "timed_region": "source-defined runIteration payload",
+        "canonical_sha256": "4941f0a8acfc4c4aa5214f33d6cd42667050632254924f521f400a0e11fc968b"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "jetstream/splay",
+      "source": "test/benchmark/jetstream/splay.js",
+      "sha256": "3ac49277a4ebf21a2d352acf019ed6536c15b53300d3b884784b8dcd58273b37",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "jetstream_run_iteration",
+        "strict_mode": "source_preserved",
+        "run_expression": "SplayRun()",
+        "repeat_count": 50,
+        "timed_region": "source-defined runIteration payload",
+        "canonical_sha256": "ec7548917fc3f022661317677434585266c54fc792548ff637bb8418319cee08"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "jetstream/hashmap",
+      "source": "test/benchmark/jetstream/hash-map.js",
+      "sha256": "2a8807fb02f4f35fd741994ccec18c72fd211ef2cff94278317cf4c07c63d8a0",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "jetstream_run_iteration",
+        "strict_mode": "source_preserved",
+        "run_expression": "run()",
+        "repeat_count": 1,
+        "timed_region": "source-defined runIteration payload",
+        "canonical_sha256": "6703d7d85426651cfbd96ca110ee6946ba1e2d38622c832b6d07c646a2742e3a"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "jetstream/crypto_sha1",
+      "source": "test/benchmark/jetstream/crypto-sha1.js",
+      "sha256": "40373456ed4f3ad965df265b6b671d36f42a91d0b6e14d1a534dd76e5ec0a60e",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "jetstream_run_iteration",
+        "strict_mode": "source_preserved",
+        "run_expression": "run()",
+        "repeat_count": 25,
+        "timed_region": "source-defined runIteration payload",
+        "canonical_sha256": "4f0ab3eb2faa8411b5ed548a54ab583cd328dd9d80256b50db4c08d3b4a27cbd"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    },
+    {
+      "id": "jetstream/raytrace3d",
+      "source": "test/benchmark/jetstream/3d-raytrace.js",
+      "sha256": "b11273b2e298b2ce04c3a443f18c9195addf40950f9aec86e8a640fa253871b9",
+      "inputs": [],
+      "arguments": [],
+      "working_directory": ".",
+      "wrapper": {
+        "kind": "jetstream_run_iteration",
+        "strict_mode": "source_preserved",
+        "run_expression": "run()",
+        "repeat_count": 8,
+        "timed_region": "source-defined runIteration payload",
+        "canonical_sha256": "b80ea569522ee9f18a6b44ae8479d8c5a580e1b64956ca945911f12552d2b674"
+      },
+      "correctness_oracle": "source PASS/FAIL marker and zero exit status"
+    }
+  ]
+}

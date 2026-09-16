@@ -400,13 +400,12 @@ void release_dom_owned_embed_images(DomElement* elem) {
         return;
     }
 
-    // Cached data URI SVGs have no URL, so ownership must come from the cache
-    // marker rather than URL presence to avoid freeing a borrowed cache surface.
-    if (elem->embedp()->img && !elem->embedp()->img->url && !elem->embedp()->img->cache_owned) {
+    // Detached DOM markup owns only uncached, non-network image surfaces.
+    if (image_surface_is_dom_owned(elem->embedp()->img)) {
         image_surface_destroy(elem->embedp()->img);
         elem->embed->img = nullptr;
     }
-    if (elem->embedp()->poster && !elem->embedp()->poster->url && !elem->embedp()->poster->cache_owned) {
+    if (image_surface_is_dom_owned(elem->embedp()->poster)) {
         image_surface_destroy(elem->embedp()->poster);
         elem->embed->poster = nullptr;
     }
@@ -580,14 +579,21 @@ static_assert(sizeof(TRANSFORM_PROP_DEFAULT) == sizeof(TransformProp), "transfor
 static_assert(sizeof(FILTER_PROP_DEFAULT) == sizeof(FilterProp), "filter reset metadata drift");
 static_assert(sizeof(MULTICOL_PROP_DEFAULT) == sizeof(MultiColumnProp), "multicol reset metadata drift");
 
-static bool view_teardown_pseudo_is_reachable(DomElement* owner, DomElement* generated) {
-    if (!owner || !generated) return false;
-    for (DomNode* child = owner->first_child; child; child = child->next_sibling) {
+static bool view_teardown_subtree_has_node(DomElement* root, DomElement* generated) {
+    if (!root || !generated) return false;
+    for (DomNode* child = root->first_child; child; child = child->next_sibling) {
         if (dom_subtree_contains_node(child, static_cast<DomNode*>(generated))) {
             return true;
         }
     }
     return false;
+}
+
+static bool view_teardown_pseudo_is_reachable(DomElement* owner, DomElement* generated) {
+    if (!owner || !generated) return false;
+    if (view_teardown_subtree_has_node(owner, generated)) return true;
+    // Host generated content is materialized in the rendered shadow tree.
+    return view_teardown_subtree_has_node(owner->shadow_root_element(), generated);
 }
 
 static void view_teardown_visit_pseudo(ViewTree* tree,
@@ -751,6 +757,12 @@ static void view_teardown_visit_node(ViewTree* tree,
 
             view_teardown_visit_pseudo(tree, elem, pseudo, flags);
             view_teardown_visit_node(tree, first_child, child_flags, true);
+            DomElement* shadow_root = elem->shadow_root_element();
+            if (shadow_root) {
+                // Shadow descendants own the same view-pool epoch as their host.
+                view_teardown_visit_node(tree, static_cast<DomNode*>(shadow_root),
+                                         child_flags, false);
+            }
             view_teardown_apply_table(tree, elem, flags);
             if (flags & (VIEW_TEARDOWN_CLEAR_POINTERS | VIEW_TEARDOWN_RESET_IN_PLACE)) {
                 view_teardown_clear_element_scalars(elem);
@@ -902,11 +914,11 @@ void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block) {
     }
 }
 
-void alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span) {
-    // fi and gi remain exclusive because an element has only one parent formatting context.
-    if (span->parent_item_kind() != DomElement::PARENT_ITEM_GRID) {
-        span->ensure_grid_item(lycon->doc->view_tree);
-    }
+GridItemProp* alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span) {
+    if (!lycon || !span || !lycon->doc) return nullptr;
+    // Grid placement has no effect on a flex item; gi aliases its live fi slot.
+    if (span->parent_item_kind() == DomElement::PARENT_ITEM_FLEX) return nullptr;
+    return span->ensure_grid_item(lycon->doc->view_tree);
 }
 
 void view_pool_release_detached_subtree(DomNode* root) {

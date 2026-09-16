@@ -49,6 +49,7 @@ enum DomNodeFlag : uint8_t {
     DOM_NODE_FLAG_TEXT_SYMBOL = 1u << 0,
     DOM_NODE_FLAG_TEXT_OWNS_STRING = 1u << 1,
     DOM_NODE_FLAG_TEXT_REINSERTABLE = 1u << 2,
+    DOM_NODE_FLAG_TABLE_FIXUP_RUN_BOUNDARY = 1u << 3,
 };
 
 typedef enum {
@@ -139,6 +140,16 @@ struct DomNode {
 
     inline const DomComment* as_comment() const {
         return is_comment() ? ((const DomComment*)this) : nullptr;
+    }
+
+    // Preserves authored table-run partitions through a provisional reflow reset.
+    inline bool has_table_fixup_run_boundary() const {
+        return (node_flags & DOM_NODE_FLAG_TABLE_FIXUP_RUN_BOUNDARY) != 0;
+    }
+
+    inline void set_table_fixup_run_boundary(bool value) {
+        if (value) node_flags |= DOM_NODE_FLAG_TABLE_FIXUP_RUN_BOUNDARY;
+        else node_flags &= ~DOM_NODE_FLAG_TABLE_FIXUP_RUN_BOUNDARY;
     }
 
     // static helper for tag name to ID conversion

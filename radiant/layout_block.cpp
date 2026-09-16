@@ -5159,14 +5159,25 @@ void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
 void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before) {
     if (!parent || !pseudo) return;
     for (DomNode* c = parent->first_child; c; c = c->next_sibling) {
+        if (c == static_cast<DomNode*>(pseudo)) {
+            // A DOM child replacement can unlink a generated node, then retain
+            // its pseudo record for incremental layout. Reinsertion restores
+            // the direct-child ownership required by later reset/teardown.
+            pseudo->parent = parent;
+            if (!pseudo->next_sibling) parent->last_child = pseudo;
+            return;
+        }
         if (dom_subtree_contains_node(c, static_cast<DomNode*>(pseudo))) return;
     }
+    pseudo->parent = parent;
     if (is_before) {
         DomNode* old_first = parent->first_child;
         pseudo->next_sibling = old_first;
         pseudo->prev_sibling = nullptr;
         if (old_first) {
             old_first->prev_sibling = pseudo;
+        } else {
+            parent->last_child = pseudo;
         }
         parent->first_child = pseudo;
     } else {
@@ -5183,6 +5194,7 @@ void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_befo
             pseudo->prev_sibling = last;
             pseudo->next_sibling = nullptr;
         }
+        parent->last_child = pseudo;
     }
 }
 
@@ -5200,9 +5212,90 @@ static void remove_pseudo_from_dom(DomElement* parent, DomElement* pseudo) {
         else parent->first_child = next;
         if (next) next->prev_sibling = previous;
         if (parent->last_child == child) parent->last_child = previous;
+        child->parent = nullptr;
         child->prev_sibling = nullptr;
         child->next_sibling = nullptr;
         return;
+    }
+}
+
+static bool layout_node_is_generated_pseudo_content(DomNode* node) {
+    if (!node || !node->is_element()) return false;
+    const char* tag_name = node->as_element()->tag_name;
+    return tag_name && strncmp(tag_name, "::", 2) == 0 &&
+        strncmp(tag_name, "::anon-", 7) != 0;
+}
+
+static void layout_restore_first_letter_source_text(DomElement* pseudo) {
+    if (!pseudo || !pseudo->tag_name ||
+        strcmp(pseudo->tag_name, "::first-letter") != 0) {
+        return;
+    }
+    DomNode* continuation = pseudo->next_sibling;
+    if (!continuation || !continuation->is_text()) return;
+    DomText* text = continuation->as_text();
+    if (!text || !text->native_string) return;
+    // ::first-letter advances its continuation into the backing string;
+    // resetting the layout epoch must restore the authored text before retrying.
+    text->text = text->native_string->chars;
+    text->length = text->native_string->len;
+}
+
+void layout_detach_first_letter_pseudo_content_for_layout_reset(DomElement* root) {
+    if (!root) return;
+    for (DomNode* child = root->first_child; child; ) {
+        DomNode* next = child->next_sibling;
+        if (child->is_element() && child->as_element()->tag_name &&
+            strcmp(child->as_element()->tag_name, "::first-letter") == 0) {
+            // First-letter nodes live in the view pool, so restore and unlink
+            // their split before that pool releases the node storage.
+            layout_restore_first_letter_source_text(child->as_element());
+            remove_pseudo_from_dom(root, child->as_element());
+        } else if (child->is_element()) {
+            layout_detach_first_letter_pseudo_content_for_layout_reset(
+                child->as_element());
+        }
+        child = next;
+    }
+    if (root->shadow_root_element()) {
+        layout_detach_first_letter_pseudo_content_for_layout_reset(
+            root->shadow_root_element());
+    }
+}
+
+void layout_detach_materialized_pseudo_content_for_layout_reset(DomElement* root) {
+    if (!root) return;
+    PseudoContentProp* pseudo = root->pseudo;
+    if (pseudo) {
+        // Generated boxes belong to the discarded view-pool epoch, never to the DOM.
+        DomElement* rendered_parent = root->shadow_root_element()
+            ? root->shadow_root_element() : root;
+        if (layout_node_is_generated_pseudo_content(static_cast<DomNode*>(pseudo->before))) {
+            remove_pseudo_from_dom(rendered_parent, pseudo->before);
+        }
+        if (layout_node_is_generated_pseudo_content(static_cast<DomNode*>(pseudo->after))) {
+            remove_pseudo_from_dom(rendered_parent, pseudo->after);
+        }
+        if (layout_node_is_generated_pseudo_content(static_cast<DomNode*>(pseudo->marker))) {
+            remove_pseudo_from_dom(root, pseudo->marker);
+        }
+    }
+    for (DomNode* child = root->first_child; child; ) {
+        DomNode* next = child->next_sibling;
+        if (layout_node_is_generated_pseudo_content(child)) {
+            // A geometry flush can supersede the owner's pseudo record before reset.
+            layout_restore_first_letter_source_text(child->as_element());
+            remove_pseudo_from_dom(root, child->as_element());
+        } else if (child->is_element()) {
+            layout_detach_materialized_pseudo_content_for_layout_reset(
+                child->as_element());
+        }
+        child = next;
+    }
+    DomElement* shadow_root = root->shadow_root_element();
+    if (shadow_root) {
+        // Host pseudo boxes and shadow descendants share the discarded layout epoch.
+        layout_detach_materialized_pseudo_content_for_layout_reset(shadow_root);
     }
 }
 
@@ -5219,6 +5312,9 @@ static void insert_pseudo_into_rendered_tree(DomElement* element,
     // sequence, but must stay out of light-DOM slot assignment.
     remove_pseudo_from_dom(element, pseudo);
     insert_pseudo_into_dom(shadow_root, pseudo, is_before);
+    // Physical placement is in the shadow tree, while the host remains the
+    // pseudo's CSS inheritance and counter owner.
+    pseudo->parent = element;
 }
 
 void layout_materialize_pseudo_content(LayoutContext* lycon, ViewBlock* block,
@@ -7745,7 +7841,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             ImageSurface* loaded_img = block->embedp()->img ? block->embedp()->img :
                 load_image(lycon->ui_context, image_url);
             if (loaded_img) {
-                if (block->embedp()->img && block->embedp()->img != loaded_img && !block->embedp()->img->url) {
+                if (block->embedp()->img && block->embedp()->img != loaded_img &&
+                        image_surface_is_dom_owned(block->embedp()->img)) {
                     image_surface_destroy(block->embedp()->img);
                 }
                 block->embed->img = loaded_img;

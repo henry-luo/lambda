@@ -1,0 +1,12 @@
+{
+  "name": "innerHTML fragment uses document Mark ownership",
+  "html": "test/ui/dom_innerhtml_fragment_ownership.html",
+  "viewport": {"width": 640, "height": 320},
+  "events": [
+    {"type": "click", "target": {"selector": "#replace"}},
+    {"type": "assert_count", "target": {"selector": "#host a"}, "equals": 1},
+    {"type": "assert_count", "target": {"selector": "#host select"}, "equals": 1},
+    {"type": "assert_count", "target": {"selector": "#host option"}, "equals": 1},
+    {"type": "assert_attribute", "target": {"selector": "#status"}, "attribute": "data-fragment-state", "equals": "ok"}
+  ]
+}

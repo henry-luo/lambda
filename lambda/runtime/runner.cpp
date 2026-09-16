@@ -2624,6 +2624,11 @@ void runtime_cleanup(Runtime* runtime) {
         render_map_destroy();
         tmpl_state_destroy();
 
+        if (js_runtime_state_for(cleanup_context)) {
+            // Cancel host tasks while their roots and native owners are still
+            // valid; scheduler teardown only drains their inert completions.
+            runtime_resource_table_clear(&js_runtime_state.resources);
+        }
         if (runtime_scheduler(runtime)) {
             cleanup_context->scheduler = runtime_scheduler(runtime);
             lambda_scheduler_destroy(runtime_scheduler(runtime));

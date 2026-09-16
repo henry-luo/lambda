@@ -794,6 +794,11 @@ slice(nums, 1, 1)      // typed numeric []
 | `fill(n, value)` | Vector of n copies | `fill(3, 5)` | `[5, 5, 5]` |
 | `range(start, end, step)` | Range with step | `range(0, 10, 2)` | `[0, 2, 4, 6, 8]` |
 
+For static inference, `fill` has the conceptual relationship
+`fn fill(n: int, value: as T) T[]`: the result's element contract comes from
+`value`, not from the count. This describes result propagation only; it does
+not expose a binder name or change `fill`'s native execution. [S11.4.9]
+
 ### Reduction
 
 | Function | Description | Example | Result |

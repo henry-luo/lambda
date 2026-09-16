@@ -306,8 +306,15 @@ extern "C" const RuntimeResourceEntry* runtime_resource_table_entry_at(
 
 extern "C" Item runtime_resource_table_value(RuntimeResourceTable* table,
         const RuntimeResourceEntry* entry) {
-    if (!table || !entry) return ItemNull;
-    Item* value = root_vector_at(&table->owner_values, entry->root_slot);
+    return runtime_resource_table_root_value(table, entry, 0);
+}
+
+extern "C" Item runtime_resource_table_root_value(RuntimeResourceTable* table,
+        const RuntimeResourceEntry* entry, int root_index) {
+    if (!table || !entry || root_index < 0 || root_index >= entry->root_count) {
+        return ItemNull;
+    }
+    Item* value = root_vector_at(&table->owner_values, entry->root_slot + root_index);
     return value ? *value : ItemNull;
 }
 

@@ -9894,6 +9894,10 @@
       "members": [
         {
           "type": "SYMBOL",
+          "name": "leading_binder_type"
+        },
+        {
+          "type": "SYMBOL",
           "name": "binder_type"
         },
         {
@@ -9956,6 +9960,27 @@
               "name": "_annotation_type"
             }
           },
+          {
+            "type": "STRING",
+            "value": "as"
+          },
+          {
+            "type": "FIELD",
+            "name": "binder",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_binder_name"
+            }
+          }
+        ]
+      }
+    },
+    "leading_binder_type": {
+      "type": "PREC_RIGHT",
+      "value": 0,
+      "content": {
+        "type": "SEQ",
+        "members": [
           {
             "type": "STRING",
             "value": "as"

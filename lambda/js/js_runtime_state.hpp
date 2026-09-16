@@ -1098,6 +1098,8 @@ static inline void js_call_activation_pop(JsCallActivation* activation) {
 bool js_runtime_state_init(EvalContext* context);
 bool js_runtime_state_thread_matches(const EvalContext* context);
 bool js_runtime_state_shutdown(EvalContext* context);
+bool js_runtime_state_ensure_input(EvalContext* context);
+bool js_runtime_context_enter_turn(Runtime* runtime, EvalContext* context);
 void js_runtime_state_release_heap_resources(void);
 void js_runtime_state_destroy_context(void);
 extern "C" bool js_promise_initial_unhandled_rejections_strict(void);

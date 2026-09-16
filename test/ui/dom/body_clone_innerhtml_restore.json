@@ -1,0 +1,8 @@
+{
+  "name": "deep body clone snapshot restores through innerHTML",
+  "html": "test/ui/dom/body_clone_innerhtml_restore.html",
+  "viewport": {"width": 640, "height": 480},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#snapshot-target"}, "equals": "initial"}
+  ]
+}

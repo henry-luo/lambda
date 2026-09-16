@@ -366,6 +366,43 @@ TEST(TypeContractMetadataTest, AstDumpPreservesSignatureAndEffectMetadata) {
     shell_result_free(&result);
 }
 
+TEST(TypeContractMetadataTest, SysFuncRelationsInstantiateSelectedArguments) {
+    const char* args[] = {LAMBDA_EXE, "--emit-ast-dump",
+        "test/lambda/sysfunc_type_relations.ls", NULL};
+    ShellOptions options = {0};
+    options.timeout_ms = 10000;
+    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+
+    ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
+    ASSERT_NE(result.stdout_buf, nullptr);
+    // S11.4.9/D3.3.5: fill binds from argument 1, and its collection/text
+    // consumers retain that relation rather than falling back to `any`.
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(value_type_element_type \"int\")"), nullptr);
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(value_type_element_type \"string\")"), nullptr);
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(AST_NODE_SYS_FUNC (name \"fill\")"), nullptr);
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(AST_NODE_CALL_EXPR (value_type \"any\") (value_may_error true)\n"
+        "                (function\n"
+        "                  (AST_NODE_SYS_FUNC (name \"fill\")"), nullptr);
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(AST_NODE_SYS_FUNC (name \"slice\")"), nullptr);
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(AST_NODE_SYS_FUNC (name \"sort\")"), nullptr);
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(AST_NODE_CALL_EXPR (value_type \"array\") (value_may_error false)\n"
+        "                    (function\n"
+        "                      (AST_NODE_SYS_FUNC (name \"take\")"), nullptr);
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(AST_NODE_CALL_EXPR (value_type \"string\") (value_may_error false)\n"
+        "                    (function\n"
+        "                      (AST_NODE_SYS_FUNC (name \"replace\")"), nullptr);
+
+    shell_result_free(&result);
+}
+
 TEST(TypeBinderTest, AstDumpPreservesBinderSitesAndDependentReferences) {
     const char* args[] = {LAMBDA_EXE, "--emit-ast-dump",
         "test/lambda/type_binder.ls", NULL};

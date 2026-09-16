@@ -1032,8 +1032,8 @@ static bool css_grid_line_value(const CssValue* value, int* line,
 
 static void resolve_grid_axis_shorthand(LayoutContext* lycon, ViewSpan* span,
                                         const CssValue* value, bool is_row) {
-    alloc_grid_item_prop(lycon, span);
-    GridItemProp* item = span->gi;
+    GridItemProp* item = alloc_grid_item_prop(lycon, span);
+    if (!item) return;
     CssGridAxisSlots axis = css_grid_axis_slots(item, is_row);
     if (value->type == CSS_VALUE_TYPE_NUMBER) {
         int line = (int)value->data.number.value; // INT_CAST_OK: grid lines are discrete indices.
@@ -1114,8 +1114,8 @@ static void resolve_grid_axis_shorthand(LayoutContext* lycon, ViewSpan* span,
 static void resolve_grid_line_longhand(LayoutContext* lycon, ViewSpan* span,
                                        const CssValue* value, bool is_row,
                                        bool is_end) {
-    alloc_grid_item_prop(lycon, span);
-    GridItemProp* item = span->gi;
+    GridItemProp* item = alloc_grid_item_prop(lycon, span);
+    if (!item) return;
     CssGridAxisSlots axis = css_grid_axis_slots(item, is_row);
     int* line = is_end ? axis.end : axis.start;
     const char** line_name = is_end ? axis.end_name : axis.start_name;
@@ -8111,19 +8111,20 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             break;
         }
         case CSS_PROPERTY_GRID_AREA: {
-            alloc_grid_item_prop(lycon, span);
+            GridItemProp* item = alloc_grid_item_prop(lycon, span);
+            if (!item) break;
             if (value->type == CSS_VALUE_TYPE_STRING) {
-                replace_view_pool_layout_string(lycon, &span->gi->grid_area, value->data.string);
+                replace_view_pool_layout_string(lycon, &item->grid_area, value->data.string);
             }
             else if (value->type == CSS_VALUE_TYPE_CUSTOM) {
                 if (value->data.custom_property.name) {
-                    replace_view_pool_layout_string(lycon, &span->gi->grid_area, value->data.custom_property.name);
+                    replace_view_pool_layout_string(lycon, &item->grid_area, value->data.custom_property.name);
                 }
             }
             else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* name = css_enum_info(value->data.keyword)->name;
                 if (value->data.keyword != CSS_VALUE_AUTO) {
-                    replace_view_pool_layout_string(lycon, &span->gi->grid_area, name);
+                    replace_view_pool_layout_string(lycon, &item->grid_area, name);
                 }
             }
             else if (value->type == CSS_VALUE_TYPE_LIST) {
@@ -8135,18 +8136,18 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                         components[component_count++] = value->data.list.values[i];
                     }
                 }
-                int* lines[] = {&span->gi->grid_row_start,
-                                &span->gi->grid_column_start,
-                                &span->gi->grid_row_end,
-                                &span->gi->grid_column_end};
-                bool* has_lines[] = {&span->gi->has_explicit_grid_row_start,
-                                     &span->gi->has_explicit_grid_column_start,
-                                     &span->gi->has_explicit_grid_row_end,
-                                     &span->gi->has_explicit_grid_column_end};
-                bool* line_spans[] = {&span->gi->grid_row_start_is_span,
-                                      &span->gi->grid_column_start_is_span,
-                                      &span->gi->grid_row_end_is_span,
-                                      &span->gi->grid_column_end_is_span};
+                int* lines[] = {&item->grid_row_start,
+                                &item->grid_column_start,
+                                &item->grid_row_end,
+                                &item->grid_column_end};
+                bool* has_lines[] = {&item->has_explicit_grid_row_start,
+                                     &item->has_explicit_grid_column_start,
+                                     &item->has_explicit_grid_row_end,
+                                     &item->has_explicit_grid_column_end};
+                bool* line_spans[] = {&item->grid_row_start_is_span,
+                                      &item->grid_column_start_is_span,
+                                      &item->grid_row_end_is_span,
+                                      &item->grid_column_end_is_span};
                 for (int i = 0; i < component_count; i++) {
                     css_grid_line_value(components[i], lines[i], has_lines[i],
                                         line_spans[i]);

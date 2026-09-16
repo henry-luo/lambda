@@ -1,0 +1,9 @@
+{
+  "name": "sessionStorage survives a deferred document timer",
+  "html": "test/ui/dom/session_storage_timer_realm.html",
+  "viewport": {"width": 640, "height": 480},
+  "events": [
+    {"type": "wait", "ms": 20},
+    {"type": "assert_text", "target": {"selector": "#storage-status"}, "equals": "retained"}
+  ]
+}

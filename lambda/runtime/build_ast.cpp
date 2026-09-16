@@ -743,8 +743,49 @@ static Type* function_call_result_type(Transpiler* tp, TypeFunc* function) {
 static Type* known_array_element_type(Type* type);
 static bool is_magnitude_numeric_type(TypeId type_id);
 
+static AstNode* sys_func_argument_at(AstNode* arguments, int index) {
+    for (AstNode* argument = arguments; argument; argument = argument->next) {
+        if (index-- == 0) return argument;
+    }
+    return NULL;
+}
+
+static Type* sys_func_result_type_without_literal(Transpiler* tp, Type* type) {
+    if (!type || type->type_id == LMD_TYPE_ANY) return NULL;
+    if (type->is_literal || type->is_const) {
+        return alloc_type(tp->pool, type->type_id, sizeof(Type));
+    }
+    return type;
+}
+
+static Type* sys_func_collection_result_type(Transpiler* tp, Type* source,
+        bool preserve_binary, bool preserve_null) {
+    Type* result = sys_func_result_type_without_literal(tp, source);
+    if (!result) return NULL;
+    if (result->type_id == LMD_TYPE_ARRAY ||
+            result->type_id == LMD_TYPE_ARRAY_NUM ||
+            result->type_id == LMD_TYPE_STRING ||
+            result->type_id == LMD_TYPE_SYMBOL ||
+            (preserve_binary && result->type_id == LMD_TYPE_BINARY) ||
+            (preserve_null && result->type_id == LMD_TYPE_NULL)) {
+        return result;
+    }
+    // Range transforms materialize an array; retaining range here would make
+    // downstream calls infer a lazy carrier the runtime no longer returns.
+    return (Type*)&TYPE_ARRAY;
+}
+
+static Type* sys_func_array_of_argument_type(Transpiler* tp, Type* element) {
+    if (!element) return NULL;
+    TypeArray* out = (TypeArray*)alloc_type(tp->pool, LMD_TYPE_ARRAY,
+        sizeof(TypeArray));
+    out->nested = element;
+    out->type_index = -1;
+    return (Type*)out;
+}
+
 static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
-        AstNode* first_arg) {
+        AstNode* arguments) {
     Type* success = info && info->success_type ? info->success_type :
         info ? info->return_type : NULL;
     if (!info) return success ? success : &TYPE_ANY;
@@ -757,41 +798,41 @@ static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
             success ? success : (Type*)&TYPE_INT);
     }
 
-    if (!first_arg || !first_arg->type) return success ? success : &TYPE_ANY;
+    AstNode* selected_argument = sys_func_argument_at(arguments,
+        info->result_arg_index);
+    if (!selected_argument || !selected_argument->type) {
+        return success ? success : &TYPE_ANY;
+    }
 
-    // Element-preserving and carrier-preserving rows derive their success type
-    // from the first argument [TI4]. This replaced a per-function switch: at
-    // the third near-identical case the shape belongs in the registry, not in
-    // a growing list of SYSFUNC_ labels here.
-    Type* arg0 = first_arg->type;
+    // Relational rows instantiate a declared result pattern from one selected
+    // call argument. The registry owns the relation, so adding a third shape
+    // cannot grow another SYSFUNC-specific inference switch (S11.4.9).
+    Type* source = selected_argument->type;
     switch (info->result_kind) {
-    case SYS_RESULT_SAME_AS_ARG0:
+    case SYS_RESULT_SAME_AS_ARGUMENT:
         // A proven concrete argument keeps its carrier through the operation;
         // an open argument leaves the registry's declared type in force.
         // Literal-ness must NOT ride along: `slice("hello", 2)` is not the
         // literal `"hello"`, and handing back the literal type let consumers
         // treat the runtime result as a compile-time constant (observed as a
         // raw String* printed as a number, and `inf`, in slice_two_arg).
-        if (arg0->type_id != LMD_TYPE_ANY) {
-            if (arg0->is_literal || arg0->is_const) {
-                return alloc_type(tp->pool, arg0->type_id, sizeof(Type));
-            }
-            return arg0;
+        if (Type* result = sys_func_result_type_without_literal(tp, source)) {
+            return result;
         }
         break;
-    case SYS_RESULT_ARG0_NUMERIC:
-        if (lambda_numeric_kind_from_type(arg0) != LAMBDA_NUM_INVALID) return arg0;
+    case SYS_RESULT_ARGUMENT_NUMERIC:
+        if (lambda_numeric_kind_from_type(source) != LAMBDA_NUM_INVALID) return source;
         break;
-    case SYS_RESULT_TEXT_SAME_AS_ARG0:
-        if (arg0->type_id == LMD_TYPE_STRING || arg0->type_id == LMD_TYPE_SYMBOL) {
-            return arg0;
+    case SYS_RESULT_TEXT_SAME_AS_ARGUMENT:
+        if (source->type_id == LMD_TYPE_STRING || source->type_id == LMD_TYPE_SYMBOL) {
+            return sys_func_result_type_without_literal(tp, source);
         }
         break;
     case SYS_RESULT_TEXT_SPLIT:
         // fn_split/fn_split3 build String parts on their text and null-source
         // paths. ArrayNum and open sources retain the generic array contract.
-        if (arg0->type_id == LMD_TYPE_STRING || arg0->type_id == LMD_TYPE_SYMBOL ||
-                arg0->type_id == LMD_TYPE_NULL) {
+        if (source->type_id == LMD_TYPE_STRING || source->type_id == LMD_TYPE_SYMBOL ||
+                source->type_id == LMD_TYPE_NULL) {
             TypeArray* out = (TypeArray*)alloc_type(tp->pool, LMD_TYPE_ARRAY,
                 sizeof(TypeArray));
             out->nested = &TYPE_STRING;
@@ -802,27 +843,40 @@ static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
     case SYS_RESULT_REAL_TO_FLOAT:
         // Complex and vector arguments keep the row's open type: these builtins
         // are polymorphic and return the argument's own shape for them.
-        if (arg0->type_id != LMD_TYPE_COMPLEX &&
-                is_magnitude_numeric_type(arg0->type_id)) {
+        if (source->type_id != LMD_TYPE_COMPLEX &&
+                is_magnitude_numeric_type(source->type_id)) {
             return &TYPE_FLOAT;
         }
         break;
-    case SYS_RESULT_ELEM_OF_ARG0: {
-        Type* elem = known_array_element_type(arg0);
-        if (elem && elem != arg0 && elem->type_id != LMD_TYPE_ANY) return elem;
+    case SYS_RESULT_ELEM_OF_ARGUMENT: {
+        Type* elem = known_array_element_type(source);
+        if (elem && elem != source && elem->type_id != LMD_TYPE_ANY) return elem;
         break;
     }
-    case SYS_RESULT_ARRAY_OF_ARG0_ELEM: {
-        Type* elem = known_array_element_type(arg0);
+    case SYS_RESULT_ARRAY_OF_ARGUMENT_ELEM: {
+        Type* elem = known_array_element_type(source);
         if (elem && elem->type_id != LMD_TYPE_ANY) {
-            TypeArray* out = (TypeArray*)alloc_type(tp->pool, LMD_TYPE_ARRAY,
-                sizeof(TypeArray));
-            out->nested = elem;
-            out->type_index = -1;
-            return (Type*)out;
+            return sys_func_array_of_argument_type(tp, elem);
         }
         break;
     }
+    case SYS_RESULT_ARRAY_OF_ARGUMENT:
+        // An open source cannot instantiate a concrete `T[]` relation; keep
+        // the row's open result as required by S11.4.9.
+        if (source->type_id != LMD_TYPE_ANY) {
+            if (Type* result = sys_func_array_of_argument_type(tp, source)) return result;
+        }
+        break;
+    case SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT:
+        if (Type* result = sys_func_collection_result_type(tp, source, false, false)) {
+            return result;
+        }
+        break;
+    case SYS_RESULT_SLICE_OF_ARGUMENT:
+        if (Type* result = sys_func_collection_result_type(tp, source, true, true)) {
+            return result;
+        }
+        break;
     case SYS_RESULT_FIXED:
     default:
         break;
@@ -831,9 +885,9 @@ static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
 }
 
 static Type* sys_func_call_result_type(Transpiler* tp, SysFuncInfo* info,
-        bool may_return_error, AstNode* first_arg) {
+        bool may_return_error, AstNode* arguments) {
     if (!info) return set_type_any(tp, ANY_ERROR_RECOVERY);
-    Type* success = sys_func_success_result_type(tp, info, first_arg);
+    Type* success = sys_func_success_result_type(tp, info, arguments);
     // A row with no precise success type is the TIG4 gap, not a property of
     // the call site — census it here so IP2's row sweep has a metric.
     if (success == &TYPE_ANY) set_type_any(tp, ANY_SYSFUNC_ROW);
@@ -8081,12 +8135,18 @@ static AstNode* direct_member_field(Transpiler* tp, LambdaToken token) {
     return (AstNode*)field;
 }
 
-static AstNode* direct_base_type_from_span(Transpiler* tp, SourceSpan span) {
+static AstNode* direct_type_from_value(Transpiler* tp, SourceSpan span,
+        Type* type) {
     AstTypeNode* node = (AstTypeNode*)alloc_ast_node_from_span(tp, AST_NODE_TYPE,
         span, sizeof(AstTypeNode));
+    node->type = type;
+    return (AstNode*)node;
+}
+
+static AstNode* direct_base_type_from_span(Transpiler* tp, SourceSpan span) {
     StrView name = source_span_text(tp, span);
-    node->type = lookup_base_type_name(tp, name);
-    if (!node->type) {
+    Type* type = lookup_base_type_name(tp, name);
+    if (!type) {
         // Some conversion builtins (notably `int64`) share the lexer token
         // class used by type names. Resolve the callable spelling before
         // reporting an unknown type so expression-position aliases retain
@@ -8094,16 +8154,13 @@ static AstNode* direct_base_type_from_span(Transpiler* tp, SourceSpan span) {
         AstNode* builtin = build_identifier_from_span(tp, span);
         if (builtin && builtin->node_type == AST_NODE_SYS_FUNC) return builtin;
         record_unknown_base_type_span(tp, span, name);
-        node->type = (Type*)&LIT_TYPE_ERROR;
+        type = (Type*)&LIT_TYPE_ERROR;
     }
-    return (AstNode*)node;
+    return direct_type_from_value(tp, span, type);
 }
 
 static AstNode* direct_type_error_from_span(Transpiler* tp, SourceSpan span) {
-    AstTypeNode* node = (AstTypeNode*)alloc_ast_node_from_span(tp, AST_NODE_TYPE,
-        span, sizeof(AstTypeNode));
-    node->type = (Type*)&LIT_TYPE_ERROR;
-    return (AstNode*)node;
+    return direct_type_from_value(tp, span, (Type*)&LIT_TYPE_ERROR);
 }
 
 static AstNode* direct_append(AstNode* first, AstNode* item) {
@@ -12070,6 +12127,17 @@ static LambdaParseValue direct_ast_reduce(void* context,
         break;
     }
     case LAMBDA_REDUCE_TYPE_SLOT: {
+        if ((reduction->flags &
+                LAMBDA_REDUCTION_FLAG_ANNOTATION_IMPLICIT_BINDER) &&
+                reduction->child_count == 0) {
+            // `x: as T` is the ordinary non-error parameter domain with a
+            // binder, not a new leading type expression (S4.2.2, D3.3.3v3).
+            AstNode* base = direct_type_from_value(tp, reduction->span,
+                &TYPE_ANY_NO_ERROR);
+            return direct_ast_value(build_binder_type_from_parts(tp,
+                reduction->span, base,
+                direct_token_text(tp, reduction->secondary_token)));
+        }
         if ((reduction->flags & LAMBDA_REDUCTION_FLAG_ANNOTATION_CONSTRAINT) &&
                 reduction->child_count == 2) {
             AstNode* base = direct_ast_node(reduction->children[0]);

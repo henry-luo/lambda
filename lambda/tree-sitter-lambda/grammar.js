@@ -1114,7 +1114,8 @@ module.exports = grammar({
     // annotation (including a `that` refinement), so `as T` binds looser than
     // type operators while declarations, schemas, and return contracts retain
     // their ordinary type grammar (S4.2.2, D3.3.3v3).
-    _parameter_annotation_type: $ => choice($.binder_type, $._annotation_type),
+    _parameter_annotation_type: $ => choice($.leading_binder_type,
+      $.binder_type, $._annotation_type),
     // A level-1 binder can occur below an array, map, element, or tuple in a
     // parameter annotation. The production parser still reserves that syntax
     // outside parameter annotations (S4.2.2, D3.3.3v3).
@@ -1125,6 +1126,9 @@ module.exports = grammar({
       alias($._base_type_kw, $.base_type), alias('type', $.base_type)),
     binder_type: $ => prec.right(seq(
       field('base', $._annotation_type), 'as', field('binder', $._binder_name),
+    )),
+    leading_binder_type: $ => prec.right(seq(
+      'as', field('binder', $._binder_name),
     )),
 
     _annotation_type: $ => choice($._type_pattern, $.constrained_type),

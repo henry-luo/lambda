@@ -85,6 +85,10 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
         input_context = saved_input_ctx;
         return false;
     }
+    if (!js_runtime_state_ensure_input(pump_ctx)) {
+        input_context = saved_input_ctx;
+        return false;
+    }
     dom_set_document(doc);
     // A native handler can enqueue a Promise callback after inserting its DOM
     // (Popper and virtual-list libraries do this). Commit that insertion before

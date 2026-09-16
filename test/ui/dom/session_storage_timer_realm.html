@@ -1,0 +1,11 @@
+<!doctype html>
+<body>
+  <p id="storage-status">pending</p>
+  <script>
+    sessionStorage.setItem('timer-realm', 'retained');
+    setTimeout(function () {
+      document.getElementById('storage-status').textContent =
+        sessionStorage.getItem('timer-realm');
+    }, 0);
+  </script>
+</body>

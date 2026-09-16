@@ -203,10 +203,30 @@ bool dom_node_registry_transfer(DomDocument* source, DomDocument* destination,
         log_error("DOM_LIFECYCLE_TRANSFER: source record is stale for node %p", (void*)node);
         return false;
     }
-    if (!dom_node_registry_register_owned(destination, node,
-            source_record->primary_arena, destination_id, source_record->type,
-            source_record->primary_size, source_record->recyclable,
-            source_record->backing_source)) {
+    DomNodeRecord* destination_record = dom_record_find(dom_registry(destination), node);
+    if (destination_record && destination_record->state != DOM_NODE_RETIRED &&
+        destination_record->id != node->id) {
+        for (int reason = 0; reason < DOM_NODE_PIN_REASON_COUNT; reason++) {
+            if (destination_record->pins[reason] != 0) {
+                log_error("DOM_LIFECYCLE_TRANSFER: destination retains pin %d for node %p",
+                          reason, (void*)node);
+                return false;
+            }
+        }
+        // A node may return to a document after an intermediate foreign-fragment
+        // adoption. Its old destination record is an unpinned ownership epoch.
+        destination_record->id = destination_id;
+        destination_record->primary_arena = source_record->primary_arena;
+        destination_record->type = source_record->type;
+        destination_record->state = DOM_NODE_LIVE;
+        destination_record->recyclable = source_record->recyclable;
+        destination_record->candidate = false;
+        destination_record->primary_size = source_record->primary_size;
+        destination_record->backing_source = source_record->backing_source;
+    } else if (!dom_node_registry_register_owned(destination, node,
+                   source_record->primary_arena, destination_id, source_record->type,
+                   source_record->primary_size, source_record->recyclable,
+                   source_record->backing_source)) {
         return false;
     }
     // The source registry may still own wrapper/expando pins that must unpin

@@ -2229,9 +2229,9 @@ bool DomElement::append_child(DomElement* child) {
     Element* child_backing = dom_element_to_element(child);
     log_debug("dom_element_append_child: appending to Lambda tree (length before=%lld)", parent_backing->length);
 
-    // Append to Lambda tree using MarkEditor
+    // Preserve this live wrapper even when its detached document is non-UI.
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
-    Item result = editor.elmt_append_child(
+    Item result = editor.elmt_append_dom_child(
         {.element = parent_backing},
         {.element = child_backing}
     );

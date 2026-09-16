@@ -28,6 +28,7 @@ Usage examples:
 
 import argparse
 import datetime
+import hashlib
 import json
 import math
 import os
@@ -35,6 +36,7 @@ import platform
 import re
 import shlex
 import signal
+import shutil
 import subprocess
 import sys
 import time
@@ -87,7 +89,7 @@ MIR_VS_C_CSV_PATH = "temp/mir_vs_c_bench.csv"
 
 IS_MACOS = platform.system() == "Darwin"
 
-ALL_ENGINES = ["mir", "c2mir", "go", "lambdajs", "quickjs", "nodejs", "python"]
+ALL_ENGINES = ["mir", "c2mir", "go", "lambdajs", "mvpjs", "quickjs", "nodejs", "python"]
 
 # Native statically-typed reference ports. They are not alternative Lambda
 # execution paths — they bound what a fully typed Lambda program could reach on
@@ -108,7 +110,7 @@ GO_BUILD_DIR = go_ports.DEFAULT_BUILD_DIR
 WRONG_OUTPUT_ROWS = {}
 ENGINE_LABELS = {
     "mir": "MIR-U", "mir_typed": "MIR-T", "c2mir": "C2MIR", "go": "Go",
-    "lambdajs": "LambdaJS", "quickjs": "QuickJS", "nodejs": "Node.js", "python": "Python",
+    "lambdajs": "LambdaJS", "mvpjs": "JS MVP", "quickjs": "QuickJS", "nodejs": "Node.js", "python": "Python",
 }
 
 # ============================================================
@@ -434,6 +436,20 @@ def expected_node_version():
     return os.environ.get(NODE_VERSION_ENV) or PINNED_NODE_VERSION
 
 
+def executable_sha256(path):
+    """Record an executable identity before timing, outside every timed process."""
+    if not path or not os.path.isfile(path):
+        return None
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        while True:
+            block = stream.read(1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def require_pinned_node_version(engines, mode):
     """Abort the run unless the Node.js on PATH matches the pinned version.
 
@@ -466,6 +482,7 @@ def require_pinned_node_version(engines, mode):
 def build_run_metadata(mode, engines, num_runs, timeout_s, results_output, fresh, suite_filters,
                        bench_filters, suite_cooldown_s=DEFAULT_SUITE_COOLDOWN_S):
     exe_size = os.path.getsize(LAMBDA_EXE) if os.path.exists(LAMBDA_EXE) else None
+    quickjs_path = shutil.which(QJS_EXE)
     archive_size = os.environ.get("LAMBDA_BENCH_ARCHIVE_SIZE_BYTES")
     try:
         archive_size = int(archive_size) if archive_size is not None else None
@@ -505,6 +522,7 @@ def build_run_metadata(mode, engines, num_runs, timeout_s, results_output, fresh
         "platform": f"{platform.system()} {platform.machine()}",
         "lambda_exe": LAMBDA_EXE,
         "lambda_exe_size_bytes": exe_size,
+        "lambda_exe_sha256": executable_sha256(LAMBDA_EXE),
         "lambda_archive": os.environ.get("LAMBDA_BENCH_ARCHIVE"),
         "lambda_archive_size_bytes": archive_size,
         "lambda_archive_sha256": os.environ.get("LAMBDA_BENCH_ARCHIVE_SHA256"),
@@ -514,6 +532,8 @@ def build_run_metadata(mode, engines, num_runs, timeout_s, results_output, fresh
         "node_version_pinned": expected_node_version(),
         "python_version": get_command_output([PYTHON_EXE, "--version"]),
         "quickjs_version": quickjs_version,
+        "quickjs_exe": quickjs_path,
+        "quickjs_exe_sha256": executable_sha256(quickjs_path),
         "profile_check": os.environ.get("LAMBDA_BENCH_PROFILE_CHECK", "not_recorded"),
         "log_dir": os.environ.get("LAMBDA_BENCH_LOG_DIR"),
     }
@@ -593,6 +613,11 @@ def lambda_run_cmd(script_path, tier):
     return f"{prefix}{LAMBDA_EXE} run {script_path}"
 
 
+def mvpjs_run_cmd(script_path):
+    """Run a source script through the independent JS MVP selector."""
+    return f"{LAMBDA_EXE} js --runtime=mvp {script_path}"
+
+
 def qjs_run_cmd(wrapper):
     return f"{QJS_EXE} --stack-size {QJS_STACK_SIZE} --std -m {wrapper}"
 
@@ -634,6 +659,25 @@ def make_jetstream_node_wrapper(bench_name, js_path):
         f.write(f"for (var _i = 0; _i < {run_count}; _i++) {{ {run_expr}; }}\n")
         f.write("var _t1 = performance.now();\n")
         f.write('console.log("__TIMING__:" + (_t1 - _t0).toFixed(3));\n')
+    return wrapper
+
+
+def make_jetstream_mvpjs_wrapper(bench_name, js_path):
+    """Create a strict-source-preserving wrapper for one MVP JetStream payload."""
+    detected = _detect_jetstream_run_function(js_path)
+    if detected is None:
+        return None
+    run_expr, run_count = detected
+    os.makedirs("temp", exist_ok=True)
+    wrapper = os.path.join("temp", f"_mvpjs_jetstream_{bench_name}.js")
+    with open(js_path) as stream:
+        code = stream.read()
+    with open(wrapper, "w") as stream:
+        stream.write(code)
+        stream.write("\nvar _mvp_t0 = process.hrtime.bigint();\n")
+        stream.write(f"for (var _mvp_i = 0; _mvp_i < {run_count}; _mvp_i++) {{ {run_expr}; }}\n")
+        stream.write("var _mvp_t1 = process.hrtime.bigint();\n")
+        stream.write('process.stdout.write("__TIMING__:" + Number(_mvp_t1 - _mvp_t0) / 1e6 + "\\n");\n')
     return wrapper
 
 
@@ -1093,6 +1137,21 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
         bundle_path = js_path.replace("2.js", "2_bundle.js") if js_path else None
         standalone_js = bundle_path if (suite == "awfy" and bundle_path and os.path.exists(bundle_path)) else js_path
 
+        # --- Independent JS MVP ---
+        if "mvpjs" in engines:
+            if standalone_js and os.path.exists(standalone_js):
+                print(f"  JS MVP   ", end="", flush=True)
+                w, e, ok, status, detail = time_run_benchmark(
+                    mvpjs_run_cmd(standalone_js), num_runs, timeout_s)
+                record_time_result(results, row, suite, name, "mvpjs", w, e, ok, status, detail,
+                                   e2e_engine="mvpjs_e2e")
+                print(f" {fmt_ms(e if e is not None else w)}")
+            else:
+                results[suite][name]["mvpjs"] = None
+                row["mvpjs"] = None
+                record_status(results, suite, name, "mvpjs", "missing_file")
+                print("  JS MVP    ---")
+
         # --- LambdaJS ---
         if "lambdajs" in engines:
             if standalone_js and os.path.exists(standalone_js):
@@ -1155,6 +1214,23 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
                 print(f"  Python    ---")
     else:
         # JetStream suite
+        if "mvpjs" in engines:
+            mvpjs_js = JETSTREAM_NODE.get(name)
+            wrapper = make_jetstream_mvpjs_wrapper(name, mvpjs_js) if mvpjs_js and \
+                os.path.exists(mvpjs_js) else None
+            if wrapper:
+                print(f"  JS MVP   ", end="", flush=True)
+                w, e, ok, status, detail = time_run_benchmark(mvpjs_run_cmd(wrapper),
+                    num_runs, timeout_s)
+                record_time_result(results, row, suite, name, "mvpjs", w, e, ok, status, detail,
+                                   e2e_engine="mvpjs_e2e")
+                print(f" {fmt_ms(e if e is not None else w)}")
+            else:
+                results[suite][name]["mvpjs"] = None
+                row["mvpjs"] = None
+                record_status(results, suite, name, "mvpjs", "wrapper_unavailable")
+                print("  JS MVP    ---")
+
         if "lambdajs" in engines:
             ljs_js = JETSTREAM_LJS.get(name)
             if ljs_js and os.path.exists(ljs_js):
@@ -1975,7 +2051,9 @@ Examples:
     })
 
     # Build benchmark list
-    benchmarks = build_benchmark_list(suite_filters, bench_filters)
+    benchmarks = build_benchmark_list(
+        suite_filters, bench_filters,
+        include_text=not suite_filters or match_filter("text", suite_filters))
 
     if not benchmarks:
         print("No benchmarks match the given filters.")

@@ -682,6 +682,56 @@ bool js_runtime_state_shutdown(EvalContext* runtime_context) {
     return true;
 }
 
+bool js_runtime_state_ensure_input(EvalContext* runtime_context) {
+    if (!js_runtime_state_thread_matches(runtime_context)) {
+        log_error("js-runtime-input: context is not the active JS owner");
+        return false;
+    }
+    if (js_input && js_input->pool) return true;
+    if (!runtime_context->pool) {
+        log_error("js-runtime-input: active context has no allocation pool");
+        return false;
+    }
+    Input* input = Input::create(runtime_context->pool);
+    if (!input) {
+        log_error("js-runtime-input: failed to create host-turn Input");
+        return false;
+    }
+    // Host callbacks can allocate outside source compilation, so retain an
+    // Input owner for the bound document realm.
+    js_runtime_set_input(input);
+    return true;
+}
+
+bool js_runtime_context_enter_turn(Runtime* runtime, EvalContext* runtime_context) {
+    if (!runtime || !runtime_context) {
+        log_error("js-runtime-turn: missing retained runtime context");
+        return false;
+    }
+    if (context && context != runtime_context) {
+        EvalContext* previous = context;
+        if (previous->execution_depth != 0) {
+            log_error("js-runtime-turn: cannot switch while execution is active");
+            return false;
+        }
+        if (js_runtime_state_thread_matches(previous) &&
+                !js_runtime_state_shutdown(previous)) {
+            log_error("js-runtime-turn: failed to release outgoing JS context");
+            return false;
+        }
+        if (!eval_context_shutdown(previous)) {
+            log_error("js-runtime-turn: failed to release outgoing context");
+            return false;
+        }
+    }
+    if (!runtime_context_bind_retained(runtime, runtime_context) ||
+            !js_runtime_state_init(runtime_context)) {
+        log_error("js-runtime-turn: failed to bind retained document runtime");
+        return false;
+    }
+    return js_runtime_state_ensure_input(runtime_context);
+}
+
 void js_runtime_state_release_heap_resources(void) {
     EvalContext* runtime_context = context;
     JsRuntimeState* state = js_runtime_state_for(runtime_context);

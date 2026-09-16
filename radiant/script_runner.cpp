@@ -261,6 +261,37 @@ typedef struct JsScriptTask {
     int document_order;
 } JsScriptTask;
 
+typedef struct EventHandlerAttribute {
+    const char* attr_name;   // HTML attribute: "onclick", "onmouseover", etc.
+    const char* event_type;  // event type: "click", "mouseover", etc.
+} EventHandlerAttribute;
+
+static const EventHandlerAttribute EVENT_HANDLER_ATTRS[] = {
+    {"onclick",      "click"},
+    {"ondblclick",   "dblclick"},
+    {"onmousedown",  "mousedown"},
+    {"onmouseup",    "mouseup"},
+    {"onmouseover",  "mouseover"},
+    {"onmouseout",   "mouseout"},
+    {"onmousemove",  "mousemove"},
+    {"onkeydown",    "keydown"},
+    {"onkeyup",      "keyup"},
+    {"onfocus",      "focus"},
+    // focusin/focusout bubble, unlike focus/blur, and need distinct IDL slots.
+    {"onfocusin",    "focusin"},
+    {"onblur",       "blur"},
+    {"onfocusout",   "focusout"},
+    {"onchange",     "change"},
+    {"oninput",      "input"},
+    // textarea onselect must use the retained handler context; the generic
+    // event-attribute fallback can otherwise expose a stale pre-reconcile fn.
+    {"onselect",     "select"},
+    {"onsubmit",     "submit"},
+    {"onreset",      "reset"},
+    {"onscroll",     "scroll"},
+    {nullptr,           nullptr}
+};
+
 typedef struct JsScriptTaskCollection {
     ArrayList* scripts;
     ArrayList* onload_handlers;
@@ -270,6 +301,7 @@ typedef struct JsScriptTaskCollection {
     int external_scripts;
     int skipped_scripts;
     int onload_handlers_count;
+    int inline_event_handler_count;
     int async_ready_scripts;
     int defer_scripts;
     int load_blocking_scripts;
@@ -772,6 +804,16 @@ static bool element_has_attr_ci(Element* elem, const char* attr_name) {
     return elem->has_attr(attr_name);
 }
 
+static int element_inline_event_handler_count(Element* elem) {
+    int count = 0;
+    for (int i = 0; EVENT_HANDLER_ATTRS[i].attr_name; i++) {
+        const char* value = extract_element_attribute(elem,
+            EVENT_HANDLER_ATTRS[i].attr_name, nullptr);
+        if (value && value[0]) count++;
+    }
+    return count;
+}
+
 static bool script_runner_module_scripts_enabled() {
     // DOM3 ships the bounded browser module pipeline. Keeping this behind an
     // environment switch made identical documents execute differently across
@@ -1172,6 +1214,9 @@ static void append_browser_document_preamble(StrBuf* script_buf) {
 
 static bool script_task_collection_has_executable_tasks(JsScriptTaskCollection* collection) {
     if (!collection) return false;
+    // Inline event attributes are executable JavaScript even without a script
+    // element, so they need the document realm before wrapper initialization.
+    if (collection->inline_event_handler_count > 0) return true;
     for (int i = 0; i < collection->scripts->length; i++) {
         JsScriptTask* task = (JsScriptTask*)arraylist_get(collection->scripts, i);
         if (script_task_is_executable(task)) {
@@ -1233,11 +1278,12 @@ static int failed_external_scripts = 0;
 static void log_script_task_diagnostics(JsScriptTaskCollection* collection) {
     if (!collection) return;
 
-    log_debug("script_runner_tasks: scripts=%d inline=%d external=%d loaded=%d failed=%d skipped=%d onload=%d async_ready=%d defer=%d load_blocking=%d bytes inline=%zu external=%zu onload=%zu",
+    log_debug("script_runner_tasks: scripts=%d inline=%d external=%d loaded=%d failed=%d skipped=%d onload=%d event_attrs=%d async_ready=%d defer=%d load_blocking=%d bytes inline=%zu external=%zu onload=%zu",
         collection->total_script_elements, collection->inline_scripts,
         collection->external_scripts, loaded_external_scripts,
         failed_external_scripts, collection->skipped_scripts,
-        collection->onload_handlers_count, collection->async_ready_scripts,
+        collection->onload_handlers_count, collection->inline_event_handler_count,
+        collection->async_ready_scripts,
         collection->defer_scripts, collection->load_blocking_scripts,
         collection->inline_source_bytes,
         collection->external_source_bytes, collection->onload_source_bytes);
@@ -1292,6 +1338,8 @@ static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* col
                   MAX_LAYOUT_DEPTH);
         return;
     }
+
+    collection->inline_event_handler_count += element_inline_event_handler_count(elem);
 
     // check for <body onload="...">
     if (is_body_element(elem)) {
@@ -2467,36 +2515,6 @@ extern "C" bool script_runner_js_batch_cleanup_unsafe(void) {
 // ============================================================================
 // Phase 2: Event handler collection and compilation
 // ============================================================================
-
-// Event handler attribute names (without "on" prefix for event_type)
-static const struct {
-    const char* attr_name;   // HTML attribute: "onclick", "onmouseover", etc.
-    const char* event_type;  // event type: "click", "mouseover", etc.
-} EVENT_HANDLER_ATTRS[] = {
-    {"onclick",      "click"},
-    {"ondblclick",   "dblclick"},
-    {"onmousedown",  "mousedown"},
-    {"onmouseup",    "mouseup"},
-    {"onmouseover",  "mouseover"},
-    {"onmouseout",   "mouseout"},
-    {"onmousemove",  "mousemove"},
-    {"onkeydown",    "keydown"},
-    {"onkeyup",      "keyup"},
-    {"onfocus",      "focus"},
-    // focusin/focusout bubble, unlike focus/blur, and need distinct IDL slots.
-    {"onfocusin",    "focusin"},
-    {"onblur",       "blur"},
-    {"onfocusout",   "focusout"},
-    {"onchange",     "change"},
-    {"oninput",      "input"},
-    // textarea onselect must use the retained handler context; the generic
-    // event-attribute fallback can otherwise expose a stale pre-reconcile fn.
-    {"onselect",     "select"},
-    {"onsubmit",     "submit"},
-    {"onreset",      "reset"},
-    {"onscroll",     "scroll"},
-    {nullptr,        nullptr}
-};
 
 typedef struct InlineHandlerInstallEntry {
     DomElement* element;

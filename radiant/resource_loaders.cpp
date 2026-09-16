@@ -328,8 +328,9 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
 
     // Async-loaded images are owned by the NetworkResource so teardown does not
     // depend on which DOM/view embed survives reflow.
+    img_surface->network_owned = !res->image_surface_borrowed;
     if (img_element->embed->img && img_element->embed->img != img_surface &&
-            !img_element->embed->img->url && !res->image_surface_borrowed) {
+            image_surface_is_dom_owned(img_element->embed->img)) {
         image_surface_destroy(img_element->embed->img);
     }
     img_element->embed->img = img_surface;
@@ -369,7 +370,7 @@ static void release_network_image(NetworkResource* res) {
     if (surface && !res->image_surface_borrowed) image_surface_destroy(surface);
     if (!surface && res->owner_element && res->owner_element->embed) {
         EmbedProp* embed = res->owner_element->embed;
-        if (embed->img && !embed->img->url) {
+        if (image_surface_is_dom_owned(embed->img)) {
             image_surface_destroy(embed->img);
             embed->img = nullptr;
         }

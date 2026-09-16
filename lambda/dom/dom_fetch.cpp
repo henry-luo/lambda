@@ -6,11 +6,13 @@
  * Returns a Promise<Response> matching the web fetch() API.
  */
 #include "../js/js_runtime.h"
+#include "dom.h"
 #include "realm/dom_realm.h"
 #include "../js/js_runtime_state.hpp"
 #include "../js/js_event_loop.h"
 #include "../jube/jube_node_permission.h"
 #include "../lambda-data.hpp"
+#include "../runtime/async.h"
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
@@ -69,6 +71,13 @@ typedef struct JsFetchWork {
     // promise resolve/reject functions (main thread only)
     Item resolve_fn;
     Item reject_fn;
+
+    // The completion is a host task for this exact retained document realm.
+    Runtime* owner_runtime;
+    EvalContext* owner_context;
+    void* owner_document;
+    uint32_t resource_id;
+    bool queued;
 } JsFetchWork;
 
 // Response bodies, relative-path policy, and the executor handoff are realm
@@ -160,6 +169,27 @@ static size_t fetch_write_cb(char* ptr, size_t size, size_t nmemb, void* userdat
     JsFetchWork* fw = (JsFetchWork*)userdata;
     size_t bytes = size * nmemb;
     return byte_builder_append(&fw->response, ptr, bytes) ? bytes : 0;
+}
+
+static void fetch_work_destroy(JsFetchWork* fw) {
+    if (!fw) return;
+    if (fw->method) mem_free(fw->method);
+    if (fw->body) mem_free(fw->body);
+    if (fw->req_headers) curl_slist_free_all(fw->req_headers);
+    byte_builder_destroy(&fw->response);
+    mem_free(fw);
+}
+
+static void fetch_resource_close(void* user) {
+    JsFetchWork* fw = (JsFetchWork*)user;
+    if (!fw) return;
+    // The table releases script roots before cancellation; libuv retains the
+    // native work record until it delivers the completion callback.
+    fw->resource_id = 0;
+    fw->owner_runtime = NULL;
+    fw->owner_context = NULL;
+    fw->owner_document = NULL;
+    if (fw->queued) (void)uv_cancel((uv_req_t*)&fw->work);
 }
 
 // =============================================================================
@@ -369,29 +399,55 @@ static Item build_response_object(JsFetchWork* fw) {
 
 static void fetch_after_work_cb(uv_work_t* req, int status) {
     JsFetchWork* fw = (JsFetchWork*)req->data;
+    if (!fw) return;
+    fw->queued = false;
+
+    // Teardown cancelled this request, so the old document realm and its
+    // precise callback roots are gone. Only release the native work tail.
+    if (fw->resource_id == 0 || !fw->owner_runtime || !fw->owner_context) {
+        fetch_work_destroy(fw);
+        return;
+    }
+    if (!js_runtime_context_enter_turn(fw->owner_runtime, fw->owner_context)) {
+        log_error("fetch: could not enter the originating document runtime");
+        fetch_work_destroy(fw);
+        return;
+    }
+    dom_set_document(fw->owner_document);
+
+    const RuntimeResourceEntry* entry = runtime_resource_table_entry_owned(
+        &js_runtime_state.resources, fw->owner_context, fw->resource_id);
+    if (!entry) {
+        fetch_work_destroy(fw);
+        return;
+    }
+    RootFrame roots(2);
+    Rooted<Item> resolve_root(roots, runtime_resource_table_root_value(
+        &js_runtime_state.resources, entry, 1));
+    Rooted<Item> reject_root(roots, runtime_resource_table_root_value(
+        &js_runtime_state.resources, entry, 2));
 
     if (status != 0 || fw->curl_error != 0) {
         // network error
         const char* msg = fw->error_msg[0] ? fw->error_msg : "fetch failed";
         Item error = dom_realm_new_error_named(make_string_item("TypeError"), make_string_item(msg));
         Item args[1] = {error};
-        dom_realm_call(fw->reject_fn, ItemNull, args, 1);
+        dom_realm_call(reject_root.get(), ItemNull, args, 1);
     } else {
         // success — build Response object and resolve
         Item response = build_response_object(fw);
         Item args[1] = {response};
-        dom_realm_call(fw->resolve_fn, ItemNull, args, 1);
+        dom_realm_call(resolve_root.get(), ItemNull, args, 1);
     }
 
     // flush microtasks after resolving the promise
     dom_realm_microtask_flush();
 
-    // cleanup
-    if (fw->method) mem_free(fw->method);
-    if (fw->body) mem_free(fw->body);
-    if (fw->req_headers) curl_slist_free_all(fw->req_headers);
-    byte_builder_destroy(&fw->response);
-    mem_free(fw);
+    uint32_t resource_id = fw->resource_id;
+    fw->resource_id = 0;
+    runtime_resource_table_remove_owned(&js_runtime_state.resources,
+        fw->owner_context, resource_id);
+    fetch_work_destroy(fw);
 }
 
 // =============================================================================
@@ -607,20 +663,45 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
     Item promise = dom_realm_promise_new(executor);
     pending_fetch_work = NULL;
 
+    RootFrame roots(3);
+    Rooted<Item> promise_root(roots, promise);
+    Rooted<Item> resolve_root(roots, fw->resolve_fn);
+    Rooted<Item> reject_root(roots, fw->reject_fn);
+    fw->owner_runtime = context ? context->runtime : NULL;
+    fw->owner_context = context;
+    fw->owner_document = dom_get_document();
+    const RuntimeResourceDescriptor* descriptor =
+        runtime_resource_descriptor_from_legacy_name("HTTPClientRequest");
+    Item root_values[] = {promise_root.get(), resolve_root.get(), reject_root.get()};
+    fw->resource_id = fw->owner_runtime && fw->owner_context && descriptor
+        ? runtime_resource_table_add_root_span_owned(&js_runtime_state.resources,
+            fw->owner_context, root_values, 3, descriptor, fetch_resource_close, fw, false)
+        : 0;
+    if (fw->resource_id == 0) {
+        Item args[1] = {dom_realm_new_error(make_string_item(
+            "fetch: failed to retain request callbacks"))};
+        dom_realm_call(reject_root.get(), ItemNull, args, 1);
+        fetch_work_destroy(fw);
+        return promise_root.get();
+    }
+    fw->resolve_fn = ItemNull;
+    fw->reject_fn = ItemNull;
+
     // queue work on thread pool
     int r = uv_queue_work(loop, &fw->work, fetch_work_cb, fetch_after_work_cb);
     if (r != 0) {
         Item args[1] = {dom_realm_new_error(make_string_item("fetch: failed to queue work"))};
-        dom_realm_call(fw->reject_fn, ItemNull, args, 1);
-        // fw will be freed by after_work_cb if queued; since it wasn't, free now
-        if (fw->method) mem_free(fw->method);
-        if (fw->body) mem_free(fw->body);
-        if (fw->req_headers) curl_slist_free_all(fw->req_headers);
-        byte_builder_destroy(&fw->response);
-        mem_free(fw);
+        dom_realm_call(reject_root.get(), ItemNull, args, 1);
+        uint32_t resource_id = fw->resource_id;
+        fw->resource_id = 0;
+        runtime_resource_table_remove_owned(&js_runtime_state.resources,
+            fw->owner_context, resource_id);
+        fetch_work_destroy(fw);
+    } else {
+        fw->queued = true;
     }
 
-    return promise;
+    return promise_root.get();
 }
 
 // =============================================================================

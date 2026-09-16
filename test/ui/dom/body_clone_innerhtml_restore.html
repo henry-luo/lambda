@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>body clone snapshot</title>
+</head>
+<body>
+  <button id="snapshot-button" type="button">snapshot control</button>
+  <div id="snapshot-target">initial</div>
+  <script>
+    const snapshot = document.body.cloneNode(true).innerHTML;
+    document.getElementById('snapshot-target').textContent = 'swapped';
+    document.body.innerHTML = snapshot;
+  </script>
+</body>
+</html>
