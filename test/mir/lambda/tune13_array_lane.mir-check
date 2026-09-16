@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "S7.1.3v2: typed cold stores retain the checked error boundary. Tune13 typed array stores retain native indexed arithmetic and type-preserving builtin results.",
+  "description": "S7.1.3v2: typed cold stores retain the checked error boundary. Tune13 typed array stores retain native indexed arithmetic and type-preserving builtin results. 2026-09-17 (T28-7): the indices are parameters; literal indices into these fixed-length locals are proven in bounds and have neither a checked store nor an index multiply (tune28_fixed_length_index).",
   "checks": [
     {
       "in_func": "_tune13_store_#",
