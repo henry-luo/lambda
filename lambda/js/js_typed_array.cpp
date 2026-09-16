@@ -2299,6 +2299,15 @@ extern "C" Item js_typed_array_set_numeric(Item ta_item, double numeric_index,
         is_negative_zero, value);
 }
 
+extern "C" Item js_typed_array_set_numeric_key(Item ta_item,
+        double numeric_index, Item value) {
+    // A raw MIR Number preserves -0, while the existing typed-array setter
+    // needs that canonical-index distinction as an explicit argument.
+    bool is_negative_zero = numeric_index == 0.0 && signbit(numeric_index);
+    return js_typed_array_set_numeric_impl(ta_item, numeric_index,
+        is_negative_zero, value);
+}
+
 extern "C" int js_typed_array_length(Item ta_item) {
     if (!js_is_typed_array(ta_item)) return 0;
     Map* m = ta_item.map;

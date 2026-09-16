@@ -102,6 +102,7 @@ extern Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
 extern Item js_increment(Item value);
 extern Item js_decrement(Item value);
 extern Item js_number_function(Item value);
+extern Item js_typed_array_set_numeric_key(Item ta, double index, Item value);
 // BigInt creation (lambda-decimal.cpp)
 extern Item bigint_from_int64(int64_t val);
 extern Item bigint_from_string(const char* str, int len);
@@ -2558,12 +2559,18 @@ JitImport jit_runtime_imports[] = {
     // typed arrays
     {"js_typed_array_get", FPTR(js_typed_array_get)},
     {"js_typed_array_set", FPTR(js_typed_array_set)},
+    {"js_typed_array_set_numeric_key", FPTR(js_typed_array_set_numeric_key)},
     {"js_typed_array_length", FPTR(js_typed_array_length), JIT_IMPORT_RAW_SCALAR_PRESERVES},
-    // T12-5: the direct MIR load acquires the backing pointer immediately and
-    // never carries it across another import. Keep imports conservatively
-    // MAY_GC until the shared import audit admits a stricter contract.
+    // T12-5: length and backing storage stay per-access because resize/detach
+    // can change both. Element kind is fixed for a typed-array identity, so
+    // only that scalar observation may cross an effect-bounded loop.
     {"js_typed_array_element_type", FPTR(js_typed_array_element_type),
-     JIT_IMPORT_RAW_SCALAR_PRESERVES},
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED |
+      JIT_IMPORT_LOOP_STABLE_SCALAR,
+      JIT_EXCEPTION_PRESERVES, 0}},
     {"js_is_typed_array", FPTR(js_is_typed_array), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_get_typed_array_ptr", FPTR(js_get_typed_array_ptr)},
     {"js_typed_array_current_data_ptr", FPTR(js_typed_array_current_data_ptr)},
@@ -3520,6 +3527,10 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_int_lane_add_slow", "lambda_int_lane_sub_slow", "lambda_int_lane_mul_slow",
         "lambda_int_lane_divmod_slow", "int2it_lane",
         "js_is_truthy", "js_is_nullish", "js_is_object_value",
+        // Typed-array element kind is fixed by construction. This leaf only
+        // reads the rooted receiver's immutable view descriptor; detached or
+        // resized storage changes length/data, never the element kind.
+        "js_typed_array_element_type",
         "js_async_iterator_close_needs_await",
         "fn_min2_u",
         "fn_max2_u",
