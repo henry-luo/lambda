@@ -266,7 +266,6 @@ if (typeof process === 'undefined') {
     globalThis.process = {
         stdout: { write: function(s) { std.out.puts(s); std.out.flush(); } },
         argv: ['-', '-'],
-        hrtime: { bigint: function() { return BigInt(Math.round(performance.now() * 1e6)); } },
         exit: function(code) { std.exit(code); }
     };
 }
@@ -674,10 +673,10 @@ def make_jetstream_mvpjs_wrapper(bench_name, js_path):
         code = stream.read()
     with open(wrapper, "w") as stream:
         stream.write(code)
-        stream.write("\nvar _mvp_t0 = process.hrtime.bigint();\n")
+        stream.write("\nvar _mvp_t0 = performance.now();\n")
         stream.write(f"for (var _mvp_i = 0; _mvp_i < {run_count}; _mvp_i++) {{ {run_expr}; }}\n")
-        stream.write("var _mvp_t1 = process.hrtime.bigint();\n")
-        stream.write('process.stdout.write("__TIMING__:" + Number(_mvp_t1 - _mvp_t0) / 1e6 + "\\n");\n')
+        stream.write("var _mvp_t1 = performance.now();\n")
+        stream.write('process.stdout.write("__TIMING__:" + (_mvp_t1 - _mvp_t0) + "\\n");\n')
     return wrapper
 
 
@@ -1441,7 +1440,7 @@ def mem_make_awfy_python_cmd(bench_name):
     return f"cd {py_dir} && {PYTHON_EXE} harness.py {class_name} {num_iter} {inner}"
 
 
-def mem_run_single(b, engines, num_runs, timeout_s, results):
+def mem_run_single(b, engines, num_runs, timeout_s, results, include_typed=False):
     """Run one benchmark across selected engines in MEMORY mode. Updates results dict."""
     suite = b["suite"]
     name = b["name"]
@@ -1460,11 +1459,27 @@ def mem_run_single(b, engines, num_runs, timeout_s, results):
 
     # --- MIR Direct ---
     if "mir" in engines and ls_path:
-        print(f"  MIR      ", end="", flush=True)
-        peak, ok = mem_measure_n(f"{LAMBDA_EXE} run {ls_path}", num_runs, timeout_s)
-        results[suite][name]["mir"] = peak
-        row["mir"] = peak
-        print(f" peak={fmt_mem(peak)}" if ok else " failed")
+        untyped_path, typed_path = mir_script_variants(b)
+
+        def measure_mir_variant(key, label, script_path):
+            print(f"  {label:<8}", end="", flush=True)
+            peak, ok = mem_measure_n(f"{LAMBDA_EXE} run {script_path}", num_runs, timeout_s)
+            results[suite][name][key] = peak
+            row[key] = peak
+            print(f" peak={fmt_mem(peak)}" if ok else " failed")
+
+        # Keep the historical memory-mode default (the registry path) unless
+        # --typed explicitly requests a two-column Lambda comparison.
+        if include_typed:
+            measure_mir_variant("mir", "MIR-U", untyped_path)
+            if typed_path is None:
+                results[suite][name]["mir_typed"] = None
+                row["mir_typed"] = None
+                print("  MIR-T    --- (typed script unavailable)")
+            else:
+                measure_mir_variant("mir_typed", "MIR-T", typed_path)
+        else:
+            measure_mir_variant("mir", "MIR", ls_path)
 
     # --- Native reference ports ---
     # These peaks include the toolchain's own footprint (c2m holds the C
@@ -1519,9 +1534,12 @@ def mem_run_single(b, engines, num_runs, timeout_s, results):
 
         # --- Node.js ---
         if "nodejs" in engines:
-            if js_path and os.path.exists(js_path):
+            # Use the checked-in AWFY bundle when the optional reference tree is
+            # absent; it contains the same official workload without require().
+            node_js = standalone_js if suite == "awfy" and standalone_js and os.path.exists(standalone_js) else js_path
+            if node_js and os.path.exists(node_js):
                 print(f"  Node.js  ", end="", flush=True)
-                peak, ok = mem_measure_n(f"{NODE_EXE} {js_path}", num_runs, timeout_s)
+                peak, ok = mem_measure_n(f"{NODE_EXE} {node_js}", num_runs, timeout_s)
                 results[suite][name]["nodejs"] = peak
                 row["nodejs"] = peak
                 print(f" peak={fmt_mem(peak)}" if ok else " failed")
@@ -1589,7 +1607,8 @@ def mem_run_single(b, engines, num_runs, timeout_s, results):
     return row
 
 
-def run_memory_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_path):
+def run_memory_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_path,
+                    metadata, include_typed=False):
     """Execute MEMORY mode: measure peak RSS across engines."""
     results = {}
 
@@ -1608,7 +1627,7 @@ def run_memory_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_pa
             print(f"    SKIPPED (file not found: {b['ls_path']})")
             continue
 
-        row = mem_run_single(b, engines, num_runs, timeout_s, results)
+        row = mem_run_single(b, engines, num_runs, timeout_s, results, include_typed)
         summary.append((b["suite"], b["name"], row))
 
     # Summary table
@@ -1616,8 +1635,11 @@ def run_memory_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_pa
     print(f"MEMORY SUMMARY (peak RSS, median of {num_runs} run{'s' if num_runs > 1 else ''})")
     print(f"{'=' * 100}")
 
+    display_engines = list(engines)
+    if include_typed and "mir" in display_engines:
+        display_engines.insert(display_engines.index("mir") + 1, "mir_typed")
     hdr = f"  {'Suite/Bench':24s}"
-    for eng in engines:
+    for eng in display_engines:
         hdr += f" {ENGINE_LABELS[eng]:>10s}"
     hdr += f" {'MIR/Node':>10s} {'MIR/Py':>10s}"
     print(hdr)
@@ -1626,7 +1648,7 @@ def run_memory_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_pa
     all_mir_node, all_mir_py = [], []
     for suite, name, row in summary:
         line = f"  {suite + '/' + name:24s}"
-        for eng in engines:
+        for eng in display_engines:
             val = row.get(eng)
             line += f" {fmt_mem(val):>10s}"
         mir_val = row.get("mir")
@@ -1660,16 +1682,16 @@ def run_memory_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_pa
     print(f"PER-ENGINE AVERAGE PEAK MEMORY (across measured benchmarks)")
     print(f"{'=' * 80}")
 
-    engine_totals = {eng: [] for eng in engines}
+    engine_totals = {eng: [] for eng in display_engines}
     for _, _, row in summary:
-        for eng in engines:
+        for eng in display_engines:
             val = row.get(eng)
             if val is not None:
                 engine_totals[eng].append(val)
 
     print(f"\n{'Engine':12s} {'Count':>6s} {'Average':>12s} {'Median':>12s} {'Min':>12s} {'Max':>12s}")
     print("-" * 70)
-    for eng in engines:
+    for eng in display_engines:
         vals = engine_totals[eng]
         if not vals:
             print(f"{ENGINE_LABELS[eng]:12s} {'0':>6s} {'---':>12s} {'---':>12s} {'---':>12s} {'---':>12s}")
@@ -1683,17 +1705,26 @@ def run_memory_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_pa
 
     # Save JSON
     if not no_save:
-        json_results = {}
+        json_results = {"_metadata": dict(metadata)}
+        json_results["_metadata"]["typed_variants"] = include_typed
+        json_results["_metadata"]["mir_key_source"] = (
+            "untyped <bench>.ls and typed <bench>2.ls" if include_typed
+            else "registry path (normally typed <bench>2.ls)"
+        )
+        finish_run_metadata(json_results)
         for suite_name in results:
             json_results[suite_name] = {}
             for bench_name in results[suite_name]:
                 data = results[suite_name][bench_name]
                 json_results[suite_name][bench_name] = {"category": data.get("category", "")}
-                for eng in ALL_ENGINES:
+                result_engines = list(ALL_ENGINES)
+                if include_typed and "mir_typed" not in result_engines:
+                    result_engines.insert(result_engines.index("mir") + 1, "mir_typed")
+                for eng in result_engines:
                     val = data.get(eng)
                     json_results[suite_name][bench_name][eng] = fmt_mem_mb(val)
                 json_results[suite_name][bench_name]["_raw_bytes"] = {
-                    eng: data.get(eng) for eng in ALL_ENGINES
+                    eng: data.get(eng) for eng in result_engines
                 }
         with open(output_path, "w") as f:
             json.dump(json_results, f, indent=2, default=str)
@@ -2142,7 +2173,9 @@ Examples:
         run_time_mode(benchmarks, engines, num_runs, timeout_s, args.no_save, results_output,
                       args.fresh, metadata, args.typed, args.cooldown)
     elif mode == "memory":
-        run_memory_mode(benchmarks, engines, num_runs, timeout_s, args.no_save, results_output)
+        metadata["typed_variants"] = args.typed
+        run_memory_mode(benchmarks, engines, num_runs, timeout_s, args.no_save, results_output,
+                        metadata, args.typed)
     elif mode == "mir-vs-c":
         run_mirc_mode(benchmarks, num_runs, timeout_s, args.no_save, args.typed)
 

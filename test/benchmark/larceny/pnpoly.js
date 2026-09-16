@@ -19,7 +19,7 @@ function pnpoly(xs, ys, n, testx, testy) {
 }
 
 function main() {
-    const __t0 = process.hrtime.bigint();
+    const __t0 = performance.now();
     const xs = [0.0, 1.0, 1.0, 0.0, 0.0,
                 1.0, -0.5, -1.0, -1.0, -2.0,
                 -2.5, -2.0, -1.5, -0.5, 0.5,
@@ -42,10 +42,10 @@ function main() {
             total++;
         }
     }
-    const __t1 = process.hrtime.bigint();
+    const __t1 = performance.now();
     process.stdout.write("pnpoly: total=" + total + " inside=" + count + "\n");
     process.stdout.write("pnpoly: DONE\n");
-    process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
+    process.stdout.write("__TIMING__:" + (__t1 - __t0) + "\n");
 }
 
 main();

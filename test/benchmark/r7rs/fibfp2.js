@@ -8,16 +8,16 @@ function fibfp(n) {
 }
 
 function main() {
-    const __t0 = process.hrtime.bigint();
+    const __t0 = performance.now();
     const result = fibfp(27.0);
-    const __t1 = process.hrtime.bigint();
+    const __t1 = performance.now();
 
     if (result === 196418.0) {
         process.stdout.write("fibfp: PASS\n");
     } else {
         process.stdout.write("fibfp: FAIL result=" + result + "\n");
     }
-    process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
+    process.stdout.write("__TIMING__:" + (__t1 - __t0) + "\n");
 }
 
 main();

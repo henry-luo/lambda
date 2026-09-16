@@ -33,6 +33,18 @@
 static const JubeHostAPI* node_fs_host = NULL;
 static void* node_fs_session = NULL;
 
+struct NodeFsSessionState {
+    JubePersistentValueSlots cache_values;
+    Item cache_items[2];
+};
+
+static NodeFsSessionState* node_fs_state(void) {
+    return (NodeFsSessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_FS);
+}
+
+#define node_fs_cached_namespace (node_fs_state()->cache_items[0])
+#define node_fs_cached_promises_namespace (node_fs_state()->cache_items[1])
+
 typedef enum NodeFsMode {
     NODE_FS_MODE_READ,
     NODE_FS_MODE_WRITE,
@@ -2907,10 +2919,21 @@ static Item node_fs_to_unix_timestamp(Item value) {
 }
 
 static Item node_fs_create_stream(Item path, Item options, bool readable) {
+    if (!node_fs_host || !node_fs_host->node || !node_fs_host->node->streams ||
+            !node_fs_host->node->streams->file_read_stream_new ||
+            !node_fs_host->node->streams->file_write_stream_new) {
+        return node_fs_sync_error("stream", ENOSYS);
+    }
     JubeRootFrame frame = {};
     Item values[2] = {path, options};
     uint64_t* roots[2] = {};
     if (!node_fs_root_arguments(&frame, roots, values, 2)) return ItemNull;
+    char* checked_path = NULL;
+    if (!node_fs_copy_path(node_fs_root_value(roots[0]), &checked_path, !readable)) {
+        node_fs_host->node->roots->root_frame_end(&frame);
+        return ItemNull;
+    }
+    free(checked_path);
     Item result = readable ?
         node_fs_host->node->streams->file_read_stream_new(node_fs_root_value(roots[0]),
                                                            node_fs_root_value(roots[1])) :
@@ -3109,14 +3132,13 @@ static Item node_fs_statfs_export(Item path, Item options_or_callback, Item call
     return node_fs_stat_callback_complete(actual_callback, result, false);
 }
 
+static Item node_fs_promises_namespace(void);
+
 static Item node_fs_namespace(void) {
-    if (!node_fs_host || !node_fs_session || !node_fs_host->node || !node_fs_host->node->runtime ||
-            !node_fs_host->node->runtime->resolve_host_namespace) return ItemNull;
-    Item namespace_item = ItemNull;
-    if (node_fs_host->node->runtime->resolve_host_namespace(node_fs_session, "fs",
-                                                            &namespace_item) != 0) {
-        return ItemNull;
-    }
+    NodeFsSessionState* state = node_fs_state();
+    if (!node_fs_host || !node_fs_session || !state ||
+            !jube_persistent_value_slots_attached(&state->cache_values)) return ItemNull;
+    if (node_fs_cached_namespace.item != 0) return node_fs_cached_namespace;
     JubeRootFrame frame = {};
     if (!node_fs_roots_begin(&frame, 1)) return ItemNull;
     uint64_t* namespace_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
@@ -3124,9 +3146,10 @@ static Item node_fs_namespace(void) {
         node_fs_host->node->roots->root_frame_end(&frame);
         return ItemNull;
     }
-    *namespace_root = namespace_item.item;
-    // Each method allocation can compact the heap; retain the borrowed host
-    // namespace until every module-owned replacement property is published.
+    node_fs_cached_namespace = node_fs_host->script->object_create(ItemNull);
+    *namespace_root = node_fs_cached_namespace.item;
+    // Publish the rooted namespace before allocating methods so every request
+    // observes the same CommonJS export identity.
     node_fs_set_method(node_fs_root_value(namespace_root), "readFile", node_fs_read_file, 3);
     node_fs_set_method(node_fs_root_value(namespace_root), "writeFile", node_fs_write_file, 4);
     node_fs_set_method(node_fs_root_value(namespace_root), "appendFile", node_fs_append_file, 4);
@@ -3205,27 +3228,32 @@ static Item node_fs_namespace(void) {
     node_fs_set_method(node_fs_root_value(namespace_root), "opendirSync", node_fs_opendir_sync, 2);
     node_fs_set_method(node_fs_root_value(namespace_root), "readlinkSync", node_fs_readlink_sync, 2);
     node_fs_set_method(node_fs_root_value(namespace_root), "_toUnixTimestamp", node_fs_to_unix_timestamp, 1);
-    node_fs_set_method(node_fs_root_value(namespace_root), "createReadStream", node_fs_create_read_stream, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "ReadStream", node_fs_create_read_stream, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "createWriteStream", node_fs_create_write_stream, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "WriteStream", node_fs_create_write_stream, 2);
+    if (node_fs_host->node->streams && node_fs_host->node->streams->file_read_stream_new &&
+            node_fs_host->node->streams->file_write_stream_new) {
+        node_fs_set_method(node_fs_root_value(namespace_root), "createReadStream", node_fs_create_read_stream, 2);
+        node_fs_set_method(node_fs_root_value(namespace_root), "ReadStream", node_fs_create_read_stream, 2);
+        node_fs_set_method(node_fs_root_value(namespace_root), "createWriteStream", node_fs_create_write_stream, 2);
+        node_fs_set_method(node_fs_root_value(namespace_root), "WriteStream", node_fs_create_write_stream, 2);
+    }
     node_fs_set_method(node_fs_root_value(namespace_root), "chownSync", node_fs_chown_sync_export, 3);
     node_fs_set_method(node_fs_root_value(namespace_root), "lchownSync", node_fs_lchown_sync, 3);
     node_fs_set_method(node_fs_root_value(namespace_root), "fchownSync", node_fs_fchown_sync, 3);
     node_fs_set_method(node_fs_root_value(namespace_root), "lchmodSync", node_fs_lchmod_sync, 2);
+    Item promises = node_fs_promises_namespace();
+    node_fs_set_property(node_fs_root_value(namespace_root), "promises", promises);
+    node_fs_set_property(node_fs_root_value(namespace_root), "default",
+                         node_fs_root_value(namespace_root));
     Item result = node_fs_root_value(namespace_root);
+    node_fs_cached_namespace = result;
     node_fs_host->node->roots->root_frame_end(&frame);
     return result;
 }
 
 static Item node_fs_promises_namespace(void) {
-    if (!node_fs_host || !node_fs_session || !node_fs_host->node || !node_fs_host->node->runtime ||
-            !node_fs_host->node->runtime->resolve_host_namespace) return ItemNull;
-    Item namespace_item = ItemNull;
-    if (node_fs_host->node->runtime->resolve_host_namespace(node_fs_session, "fs/promises",
-                                                            &namespace_item) != 0) {
-        return ItemNull;
-    }
+    NodeFsSessionState* state = node_fs_state();
+    if (!node_fs_host || !node_fs_session || !state ||
+            !jube_persistent_value_slots_attached(&state->cache_values)) return ItemNull;
+    if (node_fs_cached_promises_namespace.item != 0) return node_fs_cached_promises_namespace;
     JubeRootFrame frame = {};
     if (!node_fs_roots_begin(&frame, 1)) return ItemNull;
     uint64_t* namespace_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
@@ -3233,9 +3261,8 @@ static Item node_fs_promises_namespace(void) {
         node_fs_host->node->roots->root_frame_end(&frame);
         return ItemNull;
     }
-    *namespace_root = namespace_item.item;
-    // Promise wrapper allocation has the same moving-heap requirement as the
-    // callback namespace: never reuse an unrooted borrowed namespace Item.
+    node_fs_cached_promises_namespace = node_fs_host->script->object_create(ItemNull);
+    *namespace_root = node_fs_cached_promises_namespace.item;
     node_fs_set_method(node_fs_root_value(namespace_root), "readFile", node_fs_promises_read_file, 2);
     node_fs_set_method(node_fs_root_value(namespace_root), "writeFile", node_fs_promises_write_file, 3);
     node_fs_set_method(node_fs_root_value(namespace_root), "appendFile", node_fs_promises_append_file, 3);
@@ -3256,7 +3283,10 @@ static Item node_fs_promises_namespace(void) {
     node_fs_set_method(node_fs_root_value(namespace_root), "rename", node_fs_promises_rename, 2);
     node_fs_set_method(node_fs_root_value(namespace_root), "readdir", node_fs_promises_readdir, 2);
     node_fs_set_method(node_fs_root_value(namespace_root), "open", node_fs_promises_open, 3);
+    node_fs_set_property(node_fs_root_value(namespace_root), "default",
+                         node_fs_root_value(namespace_root));
     Item result = node_fs_root_value(namespace_root);
+    node_fs_cached_promises_namespace = result;
     node_fs_host->node->roots->root_frame_end(&frame);
     return result;
 }
@@ -3285,9 +3315,7 @@ static int node_fs_init(const JubeHostAPI* host) {
     if (!host || !host->node || !host->node->runtime || !host->node->roots || !host->node->async_ops ||
             !host->node->events || !host->node->permission || !host->node->filesystem ||
             !host->value || !host->script ||
-            !host->node->streams || !host->node->streams->file_read_stream_new ||
-            !host->node->streams->file_write_stream_new ||
-            !host->node->runtime->resolve_host_namespace || !host->node->roots->persistent_root_register ||
+            !host->node->roots->persistent_root_register ||
             !host->node->events->domain_current || !host->node->events->domain_call ||
             !host->node->permission->has_fs_read || !host->node->permission->has_fs_write ||
             !host->node->permission->check_fs_read || !host->node->permission->check_fs_write ||
@@ -3320,11 +3348,18 @@ static void node_fs_runtime_attach(void* session) {
     if (!node_fs_host || !node_fs_host->node || !node_fs_host->node->runtime ||
             !node_fs_host->node->runtime->session_is_live ||
             !node_fs_host->node->runtime->session_is_live(session)) return;
+    NodeFsSessionState* state = (NodeFsSessionState*)jube_node_session_module_state_get(
+        session, JUBE_NODE_MODULE_STATE_FS, sizeof(NodeFsSessionState));
+    if (!state || jube_persistent_value_slots_attach(&state->cache_values, session,
+            node_fs_host->node->roots, state->cache_items, 2) != 0) return;
     node_fs_session = session;
 }
 
 static void node_fs_runtime_reset(void* session) {
-    (void)session;
+    NodeFsSessionState* state = node_fs_state();
+    if (state && session == state->cache_values.session) {
+        jube_persistent_value_slots_reset(&state->cache_values);
+    }
 }
 
 static void node_fs_runtime_detach(void* session) {
@@ -3335,6 +3370,10 @@ static void node_fs_runtime_detach(void* session) {
                 node_fs_host->node->async_ops->work_cancel) {
             node_fs_host->node->async_ops->work_cancel(session, request->resource_id);
         }
+    }
+    NodeFsSessionState* state = node_fs_state();
+    if (state && session == state->cache_values.session) {
+        jube_persistent_value_slots_detach(&state->cache_values);
     }
     node_fs_session = NULL;
 }

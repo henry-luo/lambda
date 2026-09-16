@@ -8,7 +8,7 @@ const INPUT_PATH = process.argv[2] || "test/benchmark/beng/input/fasta_1000.txt"
 let text = fs.readFileSync(INPUT_PATH, 'utf-8');
 const originalLen = text.length;
 
-const __t0 = process.hrtime.bigint();
+const __t0 = performance.now();
 // Remove FASTA headers and newlines
 text = text.replace(/>[^\n]*\n/g, '');
 text = text.replace(/\n/g, '');
@@ -65,9 +65,9 @@ for (const [re, repl] of substitutions) {
     result = result.replace(re, repl);
 }
 
-const __t1 = process.hrtime.bigint();
+const __t1 = performance.now();
 console.log('');
 console.log(originalLen);
 console.log(cleanLen);
 console.log(result.length);
-process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
+process.stdout.write("__TIMING__:" + (__t1 - __t0) + "\n");

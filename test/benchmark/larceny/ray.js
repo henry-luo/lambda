@@ -17,7 +17,7 @@ function sphereIntersect(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
 }
 
 function main() {
-    const __t0 = process.hrtime.bigint();
+    const __t0 = performance.now();
     const sx = [0.0, -2.0, 2.0, 0.0];
     const sy = [0.0, 0.0, 0.0, 2.0];
     const sz = [5.0, 5.0, 5.0, 5.0];
@@ -42,7 +42,7 @@ function main() {
             if (minT < 999999.0) hits++;
         }
     }
-    const __t1 = process.hrtime.bigint();
+    const __t1 = performance.now();
 
     process.stdout.write("ray: hits=" + hits + "\n");
     if (hits > 0 && hits < 10000) {
@@ -50,7 +50,7 @@ function main() {
     } else {
         process.stdout.write("ray: FAIL\n");
     }
-    process.stdout.write("__TIMING__:" + Number(__t1 - __t0) / 1e6 + "\n");
+    process.stdout.write("__TIMING__:" + (__t1 - __t0) + "\n");
 }
 
 main();

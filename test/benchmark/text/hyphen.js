@@ -4588,7 +4588,7 @@ for (var hyphen_case_index = 0; hyphen_case_index < hyphen_cases.length; hyphen_
 
 var hyphen_checksum = 0;
 var hyphen_rounds = 32;
-var hyphen_t0 = process.hrtime.bigint();
+var hyphen_t0 = performance.now();
 for (var hyphen_round = 0; hyphen_round < hyphen_rounds; hyphen_round++) {
   var hyphenate = createHyphenator(hyphenation_patterns, {
     hyphenChar: "-",
@@ -4605,12 +4605,12 @@ for (var hyphen_round = 0; hyphen_round < hyphen_rounds; hyphen_round++) {
     }
   }
 }
-var hyphen_t1 = process.hrtime.bigint();
+var hyphen_t1 = performance.now();
 if (hyphen_checksum !== 1183296) {
   throw new Error("hyphen benchmark checksum mismatch: " + hyphen_checksum);
 }
 console.log("CHECKSUM:" + hyphen_checksum);
 console.log(
   "__TIMING__:" +
-    (Number(hyphen_t1 - hyphen_t0) / 1000000).toFixed(3)
+    ((hyphen_t1 - hyphen_t0)).toFixed(3)
 );

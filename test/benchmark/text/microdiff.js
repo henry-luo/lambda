@@ -110,7 +110,7 @@ for (var microdiff_pair_index = 0; microdiff_pair_index < 4; microdiff_pair_inde
 
 var microdiff_checksum = 0;
 var microdiff_rounds = 512;
-var microdiff_t0 = process.hrtime.bigint();
+var microdiff_t0 = performance.now();
 for (var microdiff_round = 0; microdiff_round < microdiff_rounds; microdiff_round++) {
   for (var microdiff_index = 0; microdiff_index < microdiff_pairs.length; microdiff_index++) {
     var microdiff_result = microdiff(
@@ -129,12 +129,12 @@ for (var microdiff_round = 0; microdiff_round < microdiff_rounds; microdiff_roun
     }
   }
 }
-var microdiff_t1 = process.hrtime.bigint();
+var microdiff_t1 = performance.now();
 if (microdiff_checksum !== 3278848) {
   throw new Error("microdiff benchmark checksum mismatch: " + microdiff_checksum);
 }
 console.log("CHECKSUM:" + microdiff_checksum);
 console.log(
   "__TIMING__:" +
-    (Number(microdiff_t1 - microdiff_t0) / 1000000).toFixed(3)
+    ((microdiff_t1 - microdiff_t0)).toFixed(3)
 );
