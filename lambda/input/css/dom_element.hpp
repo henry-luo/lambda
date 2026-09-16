@@ -1197,6 +1197,10 @@ static_assert(offsetof(DomElement, elmt) % 8 == 0,
  */
 DomDocument* dom_document_create(Input* input);
 
+// Adopt a replacement URL while preserving the current carrier address for
+// Input and loader aliases that remain valid for the document lifetime.
+bool dom_document_replace_url(DomDocument* document, Url* replacement);
+
 /**
  * Destroy a DomDocument and all its nodes
  * @param document Document to destroy

@@ -2985,6 +2985,113 @@ static ViewBlock* find_rowgroup_for_row(ViewTable* table, int target_row,
 
 typedef lam::ArrayOwnedList<CollapsedBorder, lam::LayoutSessionDomain> CollapsedBorderList;
 
+static ViewTableRow* table_row_at_index(ViewTable* table, int target_row);
+static ViewTableCell* find_cell_at(ViewTable* table, int target_row, int target_col);
+
+// Collapsed-border resolution touches every edge in the table grid.  Keep its
+// structural lookups local to this pass so large row groups do not rescan the
+// full flattened table for each edge.
+struct TableCollapsedBorderLookup {
+    ViewTableRow** rows;
+    ViewBlock** row_groups;
+    ViewTableCell** cells;
+    int row_count;
+    int column_count;
+    bool ready;
+};
+
+static void table_collapsed_border_lookup_destroy(LayoutContext* lycon,
+                                                  TableCollapsedBorderLookup* lookup) {
+    if (!lycon || !lookup) return;
+    scratch_free(&lycon->scratch, lookup->cells);
+    scratch_free(&lycon->scratch, lookup->row_groups);
+    scratch_free(&lycon->scratch, lookup->rows);
+    lookup->cells = nullptr;
+    lookup->row_groups = nullptr;
+    lookup->rows = nullptr;
+    lookup->ready = false;
+}
+
+static TableCollapsedBorderLookup table_collapsed_border_lookup_create(
+    LayoutContext* lycon, ViewTable* table, const TableMetadata* meta) {
+    TableCollapsedBorderLookup lookup = {nullptr, nullptr, nullptr, 0, 0, false};
+    if (!lycon || !table || !meta || meta->row_count <= 0 || meta->column_count <= 0) {
+        return lookup;
+    }
+
+    lookup.row_count = meta->row_count;
+    lookup.column_count = meta->column_count;
+    size_t cell_count = (size_t)lookup.row_count * (size_t)lookup.column_count;
+    lookup.rows = (ViewTableRow**)scratch_calloc(
+        &lycon->scratch, (size_t)lookup.row_count * sizeof(ViewTableRow*));
+    lookup.row_groups = (ViewBlock**)scratch_calloc(
+        &lycon->scratch, (size_t)lookup.row_count * sizeof(ViewBlock*));
+    lookup.cells = (ViewTableCell**)scratch_calloc(
+        &lycon->scratch, cell_count * sizeof(ViewTableCell*));
+    if (!lookup.rows || !lookup.row_groups || !lookup.cells) {
+        log_error("table_collapsed_border_lookup_alloc_failed: rows=%d columns=%d",
+                  lookup.row_count, lookup.column_count);
+        table_collapsed_border_lookup_destroy(lycon, &lookup);
+        return lookup;
+    }
+
+    int row_index = 0;
+    for (ViewTableRow* row = table->first_row(); row && row_index < lookup.row_count;
+         row = table->next_row(row), row_index++) {
+        lookup.rows[row_index] = row;
+        ViewBlock* group = row->parent_row_group();
+        if (group && group->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
+            lookup.row_groups[row_index] = group;
+        }
+        row->each_cell( [&](ViewTableCell* cell) {
+            if (!cell || !cell->td) return;
+            int row_start = cell->td->row_index;
+            int row_end = row_start + cell->td->row_span;
+            int col_start = cell->td->col_index;
+            int col_end = col_start + cell->td->col_span;
+            if (row_start < 0) row_start = 0;
+            if (col_start < 0) col_start = 0;
+            if (row_end > lookup.row_count) row_end = lookup.row_count;
+            if (col_end > lookup.column_count) col_end = lookup.column_count;
+            for (int cell_row = row_start; cell_row < row_end; cell_row++) {
+                for (int cell_col = col_start; cell_col < col_end; cell_col++) {
+                    size_t index = (size_t)cell_row * (size_t)lookup.column_count +
+                        (size_t)cell_col;
+                    if (!lookup.cells[index]) lookup.cells[index] = cell;
+                }
+            }
+        });
+    }
+    lookup.ready = true;
+    return lookup;
+}
+
+static ViewTableRow* table_collapsed_border_row(const TableCollapsedBorderLookup* lookup,
+                                                ViewTable* table, int row) {
+    if (lookup && lookup->ready && row >= 0 && row < lookup->row_count) {
+        return lookup->rows[row];
+    }
+    return table_row_at_index(table, row);
+}
+
+static ViewTableCell* table_collapsed_border_cell(const TableCollapsedBorderLookup* lookup,
+                                                  ViewTable* table, int row, int col) {
+    if (lookup && lookup->ready && row >= 0 && row < lookup->row_count &&
+        col >= 0 && col < lookup->column_count) {
+        size_t index = (size_t)row * (size_t)lookup->column_count + (size_t)col;
+        return lookup->cells[index];
+    }
+    return find_cell_at(table, row, col);
+}
+
+static ViewBlock* table_collapsed_border_row_group(const TableCollapsedBorderLookup* lookup,
+                                                   ViewTable* table, int row) {
+    if (lookup && lookup->ready && row >= 0 && row < lookup->row_count) {
+        return lookup->row_groups[row];
+    }
+    return find_rowgroup_for_row(table, row, nullptr, nullptr);
+}
+
 static void append_collapsed_border_candidate(CollapsedBorderList& candidates,
                                               const CollapsedBorder& value) {
     lam::SessionPtr<CollapsedBorder> border = lam::session_make<CollapsedBorder>(MEM_CAT_LAYOUT);
@@ -3095,6 +3202,7 @@ static ViewTableCell* find_cell_at(ViewTable* table, int target_row, int target_
 }
 
 static void apply_collapsed_border_pair(LayoutContext* lycon, ViewTable* table,
+                                        const TableCollapsedBorderLookup* lookup,
                                         CollapsedBorderList& candidates,
                                         const LayoutTableAxis& axis, int row, int col) {
     if (candidates.size() == 0) return;
@@ -3103,14 +3211,14 @@ static void apply_collapsed_border_pair(LayoutContext* lycon, ViewTable* table,
         winner = select_winning_border(winner, *candidates[i]);
     }
     if (axis.has_previous(row, col)) {
-        ViewTableCell* previous = find_cell_at(
-            table, axis.previous_row(row, col), axis.previous_col(row, col));
+        ViewTableCell* previous = table_collapsed_border_cell(
+            lookup, table, axis.previous_row(row, col), axis.previous_col(row, col));
         if (previous) {
             apply_collapsed_border_to_cell(lycon, previous, winner, axis.previous_side());
         }
     }
     if (axis.has_next(row, col)) {
-        ViewTableCell* next = find_cell_at(table, row, col);
+        ViewTableCell* next = table_collapsed_border_cell(lookup, table, row, col);
         if (next) {
             apply_collapsed_border_to_cell(lycon, next, winner, axis.next_side());
         }
@@ -3129,6 +3237,7 @@ static CollapsedBorder* table_cell_resolved_border(ViewTableCell* cell, int side
 }
 
 static void table_update_collapsed_edge(ViewTable* table, TableMetadata* meta,
+                                        const TableCollapsedBorderLookup* lookup,
                                         bool horizontal, bool start) {
     LayoutTableAxis axis(meta, horizontal);
     int fixed = axis.fixed_index(start);
@@ -3137,7 +3246,8 @@ static void table_update_collapsed_edge(ViewTable* table, TableMetadata* meta,
     for (int index = 0; index < axis.slot_count; index++) {
         int row = axis.row(fixed, index);
         int col = axis.col(fixed, index);
-        CollapsedBorder* border = table_cell_resolved_border(find_cell_at(table, row, col), side);
+        CollapsedBorder* border = table_cell_resolved_border(
+            table_collapsed_border_cell(lookup, table, row, col), side);
         if (border && border->width > *max_width) *max_width = border->width;
     }
 }
@@ -3171,6 +3281,7 @@ static void for_each_table_row_cell_slot(ViewTableRow* row, Fn fn) {
 }
 
 static void collect_collapsed_border_candidates(ViewTable* table,
+                                                const TableCollapsedBorderLookup* lookup,
                                                 const LayoutTableAxis& axis, int row, int col,
                                                 CollapsedBorderList& candidates) {
     int edge = axis.edge(row, col);
@@ -3180,32 +3291,35 @@ static void collect_collapsed_border_candidates(ViewTable* table,
         append_collapsed_border_candidate(candidates,
             table_view_border(table, axis.table_side(true)));
     } else {
-        table_append_border(candidates, find_cell_at(
-            table, axis.previous_row(row, col), axis.previous_col(row, col)),
+        table_append_border(candidates, table_collapsed_border_cell(
+            lookup, table, axis.previous_row(row, col), axis.previous_col(row, col)),
             axis.previous_side());
     }
     if (at_end) {
         append_collapsed_border_candidate(candidates,
             table_view_border(table, axis.table_side(false)));
     } else {
-        table_append_border(candidates, find_cell_at(table, row, col), axis.next_side());
+        table_append_border(candidates, table_collapsed_border_cell(lookup, table, row, col),
+                            axis.next_side());
     }
     if (axis.horizontal) {
         if (!at_start) {
-            table_append_border(candidates, table_row_at_index(table, row - 1), 2, true);
+            table_append_border(candidates, table_collapsed_border_row(lookup, table, row - 1),
+                                2, true);
         }
         if (!at_end) {
-            table_append_border(candidates, table_row_at_index(table, row), 0, true);
+            table_append_border(candidates, table_collapsed_border_row(lookup, table, row),
+                                0, true);
         }
         if (!at_end) {
-            int first = -1, last = -1;
-            ViewBlock* group = find_rowgroup_for_row(table, row, &first, &last);
-            if (group && row == first) table_append_border(candidates, group, 0, true);
+            ViewBlock* group = table_collapsed_border_row_group(lookup, table, row);
+            ViewBlock* previous_group = table_collapsed_border_row_group(lookup, table, row - 1);
+            if (group && group != previous_group) table_append_border(candidates, group, 0, true);
         }
         if (!at_start) {
-            int first = -1, last = -1;
-            ViewBlock* group = find_rowgroup_for_row(table, row - 1, &first, &last);
-            if (group && row - 1 == last) table_append_border(candidates, group, 2, true);
+            ViewBlock* group = table_collapsed_border_row_group(lookup, table, row - 1);
+            ViewBlock* next_group = table_collapsed_border_row_group(lookup, table, row);
+            if (group && group != next_group) table_append_border(candidates, group, 2, true);
         }
         if (at_start || at_end) {
             int side = at_start ? 0 : 2;
@@ -3216,9 +3330,8 @@ static void collect_collapsed_border_candidates(ViewTable* table,
     }
     if (at_start || at_end) {
         int side = at_start ? 3 : 1;
-        table_append_border(candidates, table_row_at_index(table, row), side, true);
-        int first = -1, last = -1;
-        ViewBlock* group = find_rowgroup_for_row(table, row, &first, &last);
+        table_append_border(candidates, table_collapsed_border_row(lookup, table, row), side, true);
+        ViewBlock* group = table_collapsed_border_row_group(lookup, table, row);
         table_append_border(candidates, group, side, true);
     }
     if (!at_start) {
@@ -3241,6 +3354,7 @@ static void collect_collapsed_border_candidates(ViewTable* table,
 
 static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, TableMetadata* meta) {
     if (!table || !meta || !table->tb->border_collapse) return;
+    TableCollapsedBorderLookup lookup = table_collapsed_border_lookup_create(lycon, table, meta);
     auto resolve_axis = [&](bool horizontal) {
         LayoutTableAxis axis(meta, horizontal);
         for (int edge = 0; edge <= axis.edge_count; edge++) {
@@ -3249,18 +3363,19 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                 int col = axis.col(edge, slot);
                 CollapsedBorderList candidates(MEM_CAT_LAYOUT, 4);
                 collect_collapsed_border_candidates(
-                    table, axis, row, col, candidates);
+                    table, &lookup, axis, row, col, candidates);
                 apply_collapsed_border_pair(
-                    lycon, table, candidates, axis, row, col);
+                    lycon, table, &lookup, candidates, axis, row, col);
             }
         }
     };
     resolve_axis(true);
     resolve_axis(false);
-    table_update_collapsed_edge(table, meta, true, true);
-    table_update_collapsed_edge(table, meta, true, false);
-    table_update_collapsed_edge(table, meta, false, true);
-    table_update_collapsed_edge(table, meta, false, false);
+    table_update_collapsed_edge(table, meta, &lookup, true, true);
+    table_update_collapsed_edge(table, meta, &lookup, true, false);
+    table_update_collapsed_edge(table, meta, &lookup, false, true);
+    table_update_collapsed_edge(table, meta, &lookup, false, false);
+    table_collapsed_border_lookup_destroy(lycon, &lookup);
 
 }
 

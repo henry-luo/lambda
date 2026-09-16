@@ -144,6 +144,9 @@ static bool js_c_template_has_invalid_escape(const char* source, size_t length) 
     if (!source) return false;
     for (size_t pos = 0; pos < length; pos++) {
         if (js_c_template_invalid_escape_at(source, length, pos)) return true;
+        // The next byte belongs to this escape.  Revisiting it would treat
+        // `\\\\1` as a legacy octal escape instead of a backslash plus `1`.
+        if (source[pos] == '\\' && pos + 1 < length) pos++;
     }
     return false;
 }

@@ -15,6 +15,7 @@
 #include "../lib/memtrack.h"
 
 #include "radiant.hpp"
+#include "script_timeout.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_interp.hpp"
@@ -90,9 +91,6 @@ static volatile sig_atomic_t js_exec_timed_out = 0;
 
 // Per-document script timeout: covers parse/transpile plus execution.
 static struct sigaction js_exec_old_prof;
-#define JS_EXEC_TIMEOUT_BASE_SECONDS 5
-#define JS_EXEC_TIMEOUT_MAX_SECONDS 120
-#define JS_EXEC_TIMEOUT_ENV_MAX_SECONDS 600
 static void js_exec_timeout_handler(int sig) {
     if (js_exec_guarded) {
         js_exec_timed_out = 1;
@@ -128,27 +126,6 @@ static void js_exec_crash_handler(int sig, siginfo_t* info, void* ctx) {
         signal(sig, SIG_DFL);
         raise(sig);
     }
-}
-
-static int js_exec_timeout_seconds(size_t source_len) {
-    const char* env = getenv("LAMBDA_JS_EXEC_TIMEOUT_SECONDS");
-    if (env && env[0]) {
-        char* end = nullptr;
-        long parsed = strtol(env, &end, 10);
-        if (end != env && parsed > 0) {
-            if (parsed > JS_EXEC_TIMEOUT_ENV_MAX_SECONDS) return JS_EXEC_TIMEOUT_ENV_MAX_SECONDS;
-            return (int)parsed;
-        }
-    }
-
-    int seconds = JS_EXEC_TIMEOUT_BASE_SECONDS;
-    if (source_len > 8192) {
-        // the watchdog covers parse/transpile as well as execution; generated
-        // WPT fixture helpers can be small in bytes but expensive in MIR work.
-        seconds += (int)((source_len + 16383) / 16384) * JS_EXEC_TIMEOUT_BASE_SECONDS;
-    }
-    if (seconds > JS_EXEC_TIMEOUT_MAX_SECONDS) seconds = JS_EXEC_TIMEOUT_MAX_SECONDS;
-    return seconds;
 }
 
 static void js_exec_watchdog_arm(int timeout_seconds) {
@@ -2310,8 +2287,8 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 
     js_exec_timed_out = 0;
     js_exec_guarded = 1;
-    int timeout_seconds = js_exec_timeout_seconds(watchdog_source_len);
-    if (timeout_seconds > JS_EXEC_TIMEOUT_BASE_SECONDS) {
+    int timeout_seconds = radiant_script_exec_timeout_seconds(watchdog_source_len);
+    if (timeout_seconds > RADIANT_SCRIPT_EXEC_TIMEOUT_BASE_SECONDS) {
         log_info("script_runner_timeout: source %zu bytes gets %ds watchdog",
                  watchdog_source_len, timeout_seconds);
     }

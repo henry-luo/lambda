@@ -743,7 +743,12 @@ static Type* function_call_result_type(Transpiler* tp, TypeFunc* function) {
 static Type* known_array_element_type(Type* type);
 static bool is_magnitude_numeric_type(TypeId type_id);
 
-static AstNode* sys_func_argument_at(AstNode* arguments, int index) {
+static AstNode* sys_func_argument_at(AstNode* arguments, AstNode* injected_argument,
+        int index) {
+    if (injected_argument) {
+        if (index == 0) return injected_argument;
+        index--;
+    }
     for (AstNode* argument = arguments; argument; argument = argument->next) {
         if (index-- == 0) return argument;
     }
@@ -760,7 +765,9 @@ static Type* sys_func_result_type_without_literal(Transpiler* tp, Type* type) {
 
 static Type* sys_func_collection_result_type(Transpiler* tp, Type* source,
         bool preserve_binary, bool preserve_null) {
-    Type* result = sys_func_result_type_without_literal(tp, source);
+    bool source_nullable = false;
+    Type* source_base = lambda_type_nullable_lane_base(source, &source_nullable);
+    Type* result = sys_func_result_type_without_literal(tp, source_base);
     if (!result) return NULL;
     if (result->type_id == LMD_TYPE_ARRAY ||
             result->type_id == LMD_TYPE_ARRAY_NUM ||
@@ -768,7 +775,10 @@ static Type* sys_func_collection_result_type(Transpiler* tp, Type* source,
             result->type_id == LMD_TYPE_SYMBOL ||
             (preserve_binary && result->type_id == LMD_TYPE_BINARY) ||
             (preserve_null && result->type_id == LMD_TYPE_NULL)) {
-        return result;
+        // slice(null, ...) is null, so a nullable source keeps that absence
+        // in the result instead of falling through to the generic array type.
+        return preserve_null && source_nullable
+            ? lambda_type_nullable_normalized(tp->pool, result) : result;
     }
     // Range transforms materialize an array; retaining range here would make
     // downstream calls infer a lazy carrier the runtime no longer returns.
@@ -785,7 +795,7 @@ static Type* sys_func_array_of_argument_type(Transpiler* tp, Type* element) {
 }
 
 static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
-        AstNode* arguments) {
+        AstNode* arguments, AstNode* injected_argument) {
     Type* success = info && info->success_type ? info->success_type :
         info ? info->return_type : NULL;
     if (!info) return success ? success : &TYPE_ANY;
@@ -798,7 +808,7 @@ static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
             success ? success : (Type*)&TYPE_INT);
     }
 
-    AstNode* selected_argument = sys_func_argument_at(arguments,
+    AstNode* selected_argument = sys_func_argument_at(arguments, injected_argument,
         info->result_arg_index);
     if (!selected_argument || !selected_argument->type) {
         return success ? success : &TYPE_ANY;
@@ -885,9 +895,9 @@ static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
 }
 
 static Type* sys_func_call_result_type(Transpiler* tp, SysFuncInfo* info,
-        bool may_return_error, AstNode* arguments) {
+        bool may_return_error, AstNode* arguments, AstNode* injected_argument) {
     if (!info) return set_type_any(tp, ANY_ERROR_RECOVERY);
-    Type* success = sys_func_success_result_type(tp, info, arguments);
+    Type* success = sys_func_success_result_type(tp, info, arguments, injected_argument);
     // A row with no precise success type is the TIG4 gap, not a property of
     // the call site — census it here so IP2's row sweep has a metric.
     if (success == &TYPE_ANY) set_type_any(tp, ANY_SYSFUNC_ROW);
@@ -918,10 +928,11 @@ static bool sys_conversion_has_error_free_numeric_input(Type* type) {
     }
 }
 
-static bool sys_split_text_call_cannot_return_error(AstNode* arguments) {
-    AstNode* source = arguments;
-    AstNode* separator = source ? source->next : NULL;
-    AstNode* keep = separator ? separator->next : NULL;
+static bool sys_split_text_call_cannot_return_error(AstNode* arguments,
+        AstNode* injected_argument) {
+    AstNode* source = sys_func_argument_at(arguments, injected_argument, 0);
+    AstNode* separator = sys_func_argument_at(arguments, injected_argument, 1);
+    AstNode* keep = sys_func_argument_at(arguments, injected_argument, 2);
     if (!source || !separator || !source->type || !separator->type ||
             lambda_type_accepts_error(source->type) ||
             lambda_type_accepts_error(separator->type) ||
@@ -937,9 +948,9 @@ static bool sys_split_text_call_cannot_return_error(AstNode* arguments) {
 }
 
 static bool sys_func_call_may_return_error(Transpiler* tp, SysFuncInfo* info,
-        AstNode* arguments) {
+        AstNode* arguments, AstNode* injected_argument) {
     if (!info || !info->may_return_error) return false;
-    AstNode* first_arg = arguments;
+    AstNode* first_arg = sys_func_argument_at(arguments, injected_argument, 0);
     if (!first_arg || !first_arg->type) return true;
     if (sys_conversion_literal_is_error_free(tp, info, first_arg)) return false;
 
@@ -963,7 +974,7 @@ static bool sys_func_call_may_return_error(Transpiler* tp, SysFuncInfo* info,
         return first_arg->type->type_id != LMD_TYPE_BINARY;
     case SYSFUNC_SPLIT:
     case SYSFUNC_SPLIT3:
-        return !sys_split_text_call_cannot_return_error(arguments);
+        return !sys_split_text_call_cannot_return_error(arguments, injected_argument);
     default:
         return true;
     }
@@ -1164,8 +1175,8 @@ static bool ast_called_function_signature_ready(AstNode* function) {
     return ((AstFuncNode*)declaration)->body != NULL;
 }
 
-static bool ast_constant_integer_value(Transpiler* tp, AstNode* node, int64_t* out) {
-    bool negate = false;
+AstNode* ast_signed_literal_operand(AstNode* node, bool* negated) {
+    if (negated) *negated = false;
     while (node && node->node_type == AST_NODE_PRIMARY) {
         AstPrimaryNode* primary = (AstPrimaryNode*)node;
         if (!primary->expr) break;
@@ -1174,10 +1185,16 @@ static bool ast_constant_integer_value(Transpiler* tp, AstNode* node, int64_t* o
     if (node && node->node_type == AST_NODE_UNARY) {
         AstUnaryNode* unary = (AstUnaryNode*)node;
         if (unary->op == OPERATOR_NEG || unary->op == OPERATOR_POS) {
-            negate = (unary->op == OPERATOR_NEG);
+            if (negated) *negated = (unary->op == OPERATOR_NEG);
             node = unary->operand;
         }
     }
+    return node;
+}
+
+static bool ast_constant_integer_value(Transpiler* tp, AstNode* node, int64_t* out) {
+    bool negate = false;
+    node = ast_signed_literal_operand(node, &negate);
     Item item;
     if (!ast_static_literal_item(tp, node, &item)) return false;
     TypeId type_id = get_type_id(item);
@@ -8898,6 +8915,26 @@ static AstNode* direct_promote_bare_pipe_sysfunc(Transpiler* tp,
     return call;
 }
 
+static Type* direct_pipe_call_result_type(Transpiler* tp, AstNode* source,
+        AstNode* right) {
+    AstNode* target = ast_unwrap_primary(right);
+    if (!target || target->node_type != AST_NODE_CALL_EXPR) return NULL;
+    AstCallNode* call = (AstCallNode*)target;
+    if (!call->pipe_inject) return NULL;
+    AstNode* callee = ast_unwrap_primary(call->function);
+    if (!callee || callee->node_type != AST_NODE_SYS_FUNC) return NULL;
+    SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
+    if (!info) return NULL;
+
+    // The piped source is call argument zero at runtime but is intentionally
+    // absent from the parsed argument list. Give the registry relation that
+    // virtual argument so it preserves source-dependent result contracts.
+    call->type = sys_func_call_result_type(tp, info,
+        sys_func_call_may_return_error(tp, info, call->argument, source),
+        call->argument, source);
+    return call->type;
+}
+
 AstNode* build_binary_node_from_parts(Transpiler* tp, SourceSpan span,
         StrView op_spelling, AstNode* left, AstNode* right) {
     AstBinaryNode* node = (AstBinaryNode*)alloc_ast_node_from_span(tp,
@@ -9028,6 +9065,11 @@ AstNode* build_binary_node_from_parts(Transpiler* tp, SourceSpan span,
         }
     }
     node->type = direct_binary_result_type(tp, node->op, left, right);
+    if (node->op == OPERATOR_PIPE) {
+        if (Type* result = direct_pipe_call_result_type(tp, left, right)) {
+            node->type = result;
+        }
+    }
     if (is_elementwise_comparison_op(node->op) &&
             ((left && is_array_family_type_id(left->type ? left->type->type_id : LMD_TYPE_ANY)) ||
              (right && is_array_family_type_id(right->type ? right->type->type_id : LMD_TYPE_ANY)))) {
@@ -9587,7 +9629,8 @@ AstNode* build_call_node_from_parts(Transpiler* tp, SourceSpan span,
         call->can_raise = info->can_raise;
         call->pipe_inject = tp->pipe_inject_args > 0 && !method_call;
         call->type = sys_func_call_result_type(tp, info,
-            sys_func_call_may_return_error(tp, info, call->argument), call->argument);
+            sys_func_call_may_return_error(tp, info, call->argument, NULL),
+            call->argument, NULL);
         Type* bitwise_type = infer_bitwise_call_type(info->fn,
             call->argument, call->argument ? call->argument->next : NULL);
         if (bitwise_type) {

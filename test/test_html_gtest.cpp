@@ -300,6 +300,35 @@ TEST_F(HtmlParserTest, BasicParsingSimpleDiv) {
     EXPECT_TRUE(strview_equal(&type->name, "div"));
 }
 
+TEST_F(HtmlParserTest, UiModeKeepsDenseRegistryMarkupStorageBounded) {
+    const int registry_rows = 768;
+    const size_t max_parser_pool_bytes = 64u * 1024u * 1024u;
+    StringBuf* source = stringbuf_new(pool);
+    ASSERT_NE(source, nullptr);
+    stringbuf_append_str(source, "<html><body><table>");
+    for (int row = 0; row < registry_rows; row++) {
+        stringbuf_append_str(source,
+            "<tr><td><div><span><a href=\"/registry/entry\">entry</a></span></div>"
+            "<br><a href=\"/registry/reference\">reference</a></td></tr>");
+    }
+    stringbuf_append_str(source, "</table></body></html>");
+
+    PoolStats before = {};
+    pool_get_detailed_stats(pool, &before);
+    Input* input = Input::create(pool);
+    ASSERT_NE(input, nullptr);
+    input->ui_mode = true;
+    Element* document = html5_parse(input, source->str->chars);
+    ASSERT_NE(document, nullptr);
+
+    ArenaStats arena = {};
+    arena_get_stats(input->arena, &arena);
+    PoolStats after = {};
+    pool_get_detailed_stats(pool, &after);
+    EXPECT_LT(arena.committed_bytes, max_parser_pool_bytes);
+    EXPECT_LT(after.live_bytes - before.live_bytes, max_parser_pool_bytes);
+}
+
 TEST_F(HtmlParserTest, MismatchedHeadingEndTagClosesOpenHeading) {
     Item result = parseHtml5Document("<div><h2>Why B-School?</h1><p>Intro</p></div>");
 

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Emission-size budgets (MT7). 0% slack: any probe that emits MORE than a recorded threshold fails test-lambda-baseline. Landing intended growth means reviewing the emission diff and lifting the number here in the SAME commit, so the growth is visible in review. A probe that emits LESS passes and prints the tightened values; committing them is the manual re-baseline. This file is never written by the test. Profiles are looked up as <platform>-<config>, then <platform>, then default -- a platform that legitimately emits differently (Windows commits side-stack pages in the prologue) gets its own explicit entry rather than silent slack. Instruction counts come from the finalized MIR artifact; frame shape comes from LAMBDA_MIR_LOG_FRAME_SLOTS telemetry, whose function names are a separate namespace (LambdaJS reports several emitted functions under one debug name), which is why 'functions' and 'frames' are addressed separately.",
+  "description": "Emission-size budgets (MT7). 0% slack: any probe that emits MORE than a recorded threshold fails test-lambda-baseline. Landing intended growth means reviewing the emission diff and lifting the number here in the SAME commit, so the growth is visible in review. A probe that emits LESS passes and prints the tightened values; committing them is the manual re-baseline. This file is never written by the test. Profiles are looked up as <platform>-<config>, then <platform>, then default -- a platform that legitimately emits differently (Windows commits side-stack pages in the prologue) gets its own explicit entry rather than silent slack. Instruction counts come from the finalized MIR artifact; frame shape comes from LAMBDA_MIR_LOG_FRAME_SLOTS telemetry, whose function names are a separate namespace (LambdaJS reports several emitted functions under one debug name), which is why 'functions' and 'frames' are addressed separately. Re-baseline 2026-09-16: these cells record the finalized post-merge type-binding and JS MVP output, including the independently observed deltablue shrink; the snapshot is an exact ratchet, not causal tuning attribution.",
   "probes": [
     {
       "name": "lambda_scalar_home_donation",
@@ -107,7 +107,7 @@
           ]
         },
         "darwin-debug-v3": {
-          "module_insns": 200,
+          "module_insns": 201,
           "functions": {
             "_accumulate_#": {
               "insns": 86
@@ -145,10 +145,10 @@
       "description": "Boundary i64/u64 boxing cost through the number-stack boxers.",
       "budgets": {
         "default": {
-          "module_insns": 45,
+          "module_insns": 49,
           "functions": {
             "main": {
-              "insns": 45
+              "insns": 49
             }
           },
           "frames": [
@@ -171,10 +171,10 @@
       "description": "JS call-result binding: watches js_main's root-store traffic and merged Item error-tag branches. Tune4 re-baseline: console.log is an ordinary mutable property call through the per-callee entry instead of a name-selected MIR shortcut (D6.2.2v2). JS2 reviewed growth (D8.6.1): +66 instructions for the exact-shape/storage guards, native slot load and joined fallback; two root stores and one cold float-boxing safepoint. The profiling build adds four instructions for the existing named probe/hit/miss counters and their join; trace on/off retains identical MIR. JS2 tasks 3/4 reviewed growth (D8.6.1): +13 instructions for source-call depth accounting and its RangeError edge; one cold safepoint, no additional root stores. JS2 planning/lanes reviewed growth (D8.6.1): +7 against the recorded debug ceiling (+9 versus the current control artifact), for live NameId/reservation guards and shared bool/int/string loads; removes the activation shape-handle cache and adds no roots, root stores or safepoints. Release is four instructions smaller. Call flatten P4 reviewed growth (JC18, D8.4.1v2): +10 instructions per dynamic call site for the inline callee-layout guard that selects the stored invoke entry or js_call before one indirect call; no additional safepoints or root stores. Retired public wrappers shrink module_insns elsewhere.",
       "budgets": {
         "default": {
-          "module_insns": 232,
+          "module_insns": 244,
           "functions": {
             "js_main": {
-              "insns": 187
+              "insns": 197
             }
           },
           "frames": [
@@ -224,10 +224,10 @@
           ]
         },
         "darwin-debug-v3": {
-          "module_insns": 343,
+          "module_insns": 345,
           "functions": {
             "js_main": {
-              "insns": 82
+              "insns": 87
             }
           },
           "frames": [
@@ -259,7 +259,7 @@
       "description": "Picked closure-heavy corpus script, including reviewed Phase 3 public-wrapper dispatch guards and clean-return firewalls.",
       "budgets": {
         "default": {
-          "module_insns": 1979
+          "module_insns": 2285
         }
       }
     },
@@ -270,7 +270,7 @@
       "description": "Picked corpus script (array-heavy), whole-module total only. v5 re-baseline: int array elements use the i64 lane and box only at an Item boundary; two uext8 instructions normalize C bool results used by is-null checks. Growth 2026-09-13 (+3): the const-fold pass now declines when `context->heap` is absent. The eager pipeline compiles before runner_setup_context()/heap_init(), so folding there evaluated with no GC heap and faulted in heap_calloc on an allocating fold (`type(42)`); RC14 requires a fold attempt to be inert, so the pass stands down and these three folded constants are emitted as ordinary computations. Restoring them means giving the compile pipeline an allocation-capable context, not re-enabling the unguarded pass. Re-baseline 2026-09-13 (+10 net, Tune27 T27-7/T27-9): float literals evaluate every member first, then allocate once and store directly into the packed buffer, removing all 47 `array_float_set` calls (and the post-call typed-array layout reload each one carried) for a few more plain instructions; the fused band branches recover part of that. Growth 2026-09-14 (+8, Tune27 §10.11): a non-proven typed index read now tests that its receiver Item is a container pointer before the header probes; a read through a null or out-of-bounds record yields a null T[] link (S7.1.3v2), which the old guard dereferenced at address 0 (typed_path_store SIGSEGV on the JIT tier). Four such reads here, two instructions each.",
       "budgets": {
         "default": {
-          "module_insns": 1419
+          "module_insns": 1971
         }
       }
     },
@@ -281,7 +281,7 @@
       "description": "Picked corpus script (array/callback-heavy), including fixed call-argument slots and merged Item error-tag branches in each generated root frame. D4.6.1v2 re-baseline: fused active-module name resolution removes the intermediate NameId-to-Item MIR import boundary.",
       "budgets": {
         "default": {
-          "module_insns": 3145
+          "module_insns": 3200
         }
       }
     },
@@ -292,7 +292,7 @@
       "description": "Picked corpus script (generator/resume-heavy), including fixed call-argument slots, merged Item error-tag branches, and generator throw-resume markers. D4.6.1v2 re-baseline: fused active-module name resolution removes the intermediate NameId-to-Item MIR import boundary. Call flatten P4 reviewed growth (JC18, D8.4.1v2): +10 instructions per dynamic call site for the inline callee-layout guard that selects the stored invoke entry or js_call before one indirect call; no additional safepoints or root stores. Retired public wrappers shrink module_insns elsewhere.",
       "budgets": {
         "default": {
-          "module_insns": 4926
+          "module_insns": 6033
         }
       }
     },
@@ -303,7 +303,7 @@
       "description": "The rooting-bloat sentinel: the GC-rooting regression script, which is the committed stand-in for the historical frameReview probe whose emission grew 58 -> 440 instructions under shadow-copy rooting. Its bound includes nested, throwing fixed argument-root extents, merged Item error-tag branches, and generator throw-resume markers. Tune4 re-baseline: 64 former name/receiver-selected calls now perform observable property Get plus per-callee dispatch with precise argument roots (D6.2.2v2, D5.4.3). JS2 reviewed growth (D8.6.1): +307 instructions above the recorded budget for guarded field/index access with the existing rooted fallback kernels. The profiling build adds 24 instructions for the existing named probe/hit/miss counters and their joins.",
       "budgets": {
         "default": {
-          "module_insns": 7213
+          "module_insns": 8807
         }
       }
     },
@@ -317,7 +317,7 @@
           "module_insns": 155
         },
         "darwin-debug-v3": {
-          "module_insns": 144
+          "module_insns": 165
         }
       }
     },
@@ -328,13 +328,13 @@
       "description": "Re-baseline 2026-09-14 (+10 module, Tune27 T27-9): a literal-bounded loop whose dense scan proves a typed-array root now takes the finite plan (entry guard + generic sibling) like a binding-bounded one; the literal bound needs no range guard or fact of its own. Typed numeric-array load guards plus the Tune13 in-place procedure-parameter write guard and checked representation fallback. v5 re-baseline: native int values use the i64 lane and each arithmetic site admits its result to the int53 band. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument. Re-baseline 2026-09-12: `dense_int_sum`/`dense_int_linear_sum` now emit each finite-induction loop twice -- a fast arm under the entry-range guard plus the generic sibling (D2.2.2, D8.3.1, transpile_while). Gross growth was +112; a loop nested in a cold arm now lowers once instead of splitting again, which returns 60 of it (4 body copies -> 3 here, and linear rather than 2^depth in nesting), for a reviewed net +52. Re-baseline 2026-09-13 (-20 module, Tune27 T27-9): the int fast arm now also band-tests an operand the result cannot exonerate (two sentinels wrap into the band, and a sentinel times zero is 0 -- S4.1.2 indeterminate forms that must give nan), but branch-only band guards are one add plus one fused compare-and-branch instead of GE/LE/AND/BF, a net shrink. Re-baseline 2026-09-14 (-19 module): literal system-call arguments fold to constant Items at the ABI boundary again.",
       "budgets": {
         "default": {
-          "module_insns": 1161,
+          "module_insns": 1203,
           "functions": {
             "_guarded_load_#": {
               "insns": 57
             },
             "_guarded_store_#": {
-              "insns": 113
+              "insns": 119
             }
           },
           "frames": [
@@ -365,7 +365,7 @@
       "description": "Tune4 M2 closed-call parameter narrowing plus the escaped-callee generic guardrail, v5 i64 int admission, and reviewed Phase 3 return-firewall growth. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument. Re-baseline 2026-09-13 (-6 module, -3 in each gap function, Tune27 T27-9): the `hi - lo` fast arm now also band-tests one operand, because two int sentinels can wrap into the band (S4.1.2 requires nan for inf - inf); branch-only band guards became one add plus one fused compare-and-branch, a net shrink.",
       "budgets": {
         "default": {
-          "module_insns": 586,
+          "module_insns": 589,
           "functions": {
             "_closed_gap_#": {
               "insns": 62
@@ -438,10 +438,10 @@
           ]
         },
         "darwin-debug": {
-          "module_insns": 9443,
+          "module_insns": 16490,
           "functions": {
             "js_main": {
-              "insns": 4928
+              "insns": 11975
             },
             "Tune6ExactCollection_m128_128": {
               "insns": 5
@@ -488,10 +488,10 @@
       "description": "Tune27 G9 (M6): emission size of the widest typed benchmark body. run_cube went 36,161 (Result43) -> 20,499 (packed float literals, dead layout-reload pruning) -> 15,850 (contract proofs reused, literals admitted by construction, static array lengths) -> the recorded value (literal-bounded loops with a proven root take the finite plan). The 10,000 target of G9 is not met; this probe makes any regrowth visible. Re-baseline 2026-09-14 (-238 module / -154 run_cube): sys-call arguments request their ABI rep at production, so fill(4, 0.0)'s literal is the folded constant Item again (the r47 release count).",
       "budgets": {
         "default": {
-          "module_insns": 20569,
+          "module_insns": 22528,
           "functions": {
             "_run_cube_#": {
-              "insns": 15514
+              "insns": 17329
             }
           }
         }
@@ -504,10 +504,10 @@
       "description": "Tune27 G9: the 41-member typed deltablue image; its auto-tier wall is ~80% compile, so module size is the cost users see.",
       "budgets": {
         "default": {
-          "module_insns": 9233,
+          "module_insns": 9005,
           "functions": {
             "_constraint_choose_method_#": {
-              "insns": 1878
+              "insns": 1852
             }
           }
         }
@@ -520,10 +520,10 @@
       "description": "Tune27 G9: the largest text-row image (79 members); print_node is its widest body.",
       "budgets": {
         "default": {
-          "module_insns": 14909,
+          "module_insns": 16327,
           "functions": {
             "_print_node_#": {
-              "insns": 3649
+              "insns": 4059
             }
           }
         }

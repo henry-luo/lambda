@@ -1201,7 +1201,77 @@ while writing the fixtures: `push` on a place (`push(m.a, v)`) ignored an
 alias left by `m.a = x; m.b = x` (fixed the same day, §11.11 v2 note), and a
 `let before = b` snapshot of a typed optional record is mutated by a later
 `var`-parameter call on `b` (JIT for a simple setter, both tiers for a
-rotation), on clean `713a80c2a` as well.
+rotation), on clean `713a80c2a` as well. The "own ruling" this paragraph
+asked for is §11.13.
+
+### 11.13 CW36 — store-backs anywhere the borrow is unobservable (RATIFIED 2026-09-16, user; NOT IMPLEMENTED)
+
+**The ruling (D4.4.4v3).** The user's ruling, verbatim in substance: the
+store-back can be allowed as long as it does not break the overall value
+semantics design — `let`/`var` hold values, not aliases (S9.1.2). Which path,
+what the handle may modify in place, and where it stores back are not core
+design; they are implementation details to be chosen for the best
+performance. CW34/CW35's straight-line shapes are therefore the *implemented
+subset* of one invariant, not the boundary of the licence.
+
+**The invariant, stated so it can be checked.** A handle `h` bound from
+`root.path` is a borrow iff no execution can observe a difference from the
+snapshot bind. Under the monotonic share bit (D4.4.1) that reduces to:
+
+1. the spine from the root to the leaf's parent is unshared at the bind
+   (runtime spine test, unchanged);
+2. between the bind and a store-back, nothing reads the place `root.path`
+   other than through `h` — a sibling-member read of the root is fine
+   (D4.4.4v2), a read of the same path is not;
+3. on every path where `h` was written through, the pointer `h` holds is
+   stored back to `root.path` before `h`'s next use or the frame's end; and
+4. after a store-back on a path where `h` stays live, the stored pointer is
+   **share-marked** (the store-back keeps its ordinary capture instead of
+   skipping it), so any later write through `h` or through the root copies as
+   today. Condition 4 is what lets the static shape ignore syntactic liveness
+   across mutually exclusive branches without a dataflow proof: writes before
+   the store-back are in place, writes after it are value-semantic by the
+   existing mechanism.
+
+**The shape splay needs (the first implementation target).** `splay_node`
+binds `var left: N? = node.left`, then in two sibling `if` blocks writes
+through `left` (`left.left = branch`), rebinds it through a `var`-param call
+(`left = rotate_left(left)`), stores back (`node.left = left`), and in one
+block rebinds the root (`node = rotate_right(node)`) while `left` is still
+syntactically live in the next block. Under the invariant:
+
+- **Branch-local store-back** is admitted: each writing branch stores back
+  before its end; the non-writing path (`key == left.key`) needs none.
+- **Nested handles** (`var branch = left.left` from the borrowed `left`)
+  are admitted; the inner spine test runs through the outer handle's leaf.
+- **Rebinding the handle by a borrowing call** keeps the borrow: the callee
+  received the place through the CW33 home and the store-back stores
+  whatever `h` holds (D4.4.4v2 already says this for the pointer).
+- **A root rebind after the store-back** ends the region for that path; the
+  later block's uses of `left` see a share-marked pointer (condition 4) and
+  behave exactly as today. The dynamically dead cross-branch path is not a
+  concern for the analysis.
+- **Recursion** (`branch = splay_node(branch, key)`) passes the nested handle
+  as a `var` argument; exclusivity (S9.1.3) is the existing writer-vs-writer
+  check and is unaffected.
+
+**Implementation sketch (T28-8).** Tier-shared static shape in `build_ast.cpp`
+beside `rmw_sibling_place`/`rmw_moves_out`: walk the handle's scope as a
+structured region (statement lists nested through `if`/`match` arms; loops and
+`start` still refuse), classify each arm as *non-writing*, *writing +
+stored-back*, or *writing + not stored back* (refuse the whole bind), and mark
+a store-back as *final* when the handle has no later use on that arm and
+*non-final* otherwise. Lowering: a final store-back skips capture (today's
+borrow store-back); a non-final one is an ordinary store (capture +
+share-mark). Runtime: `cow_bind_rmw_handle` unchanged; nested binds pass the
+outer handle's leaf as their root. Fixture
+`test/lambda/proc/cow_rmw_branch_store_back.ls`: a splay-shaped rotation with
+both branches, the `key ==` path, a second holder of the subtree taken before
+the call (must still see the pre-image), an error exit inside a branch, and a
+non-final store-back followed by a write through the handle (must copy);
+byte-identical on interp/jit/auto and against the pre-CW36 build, with the
+copy counts pinned in the `LambdaOptCow` census. Expected on splay2: map
+copies 826k → near zero and the 32% GC share with them (§3.3 of Tune28).
 
 ## 12. Settled decisions and residual risks
 

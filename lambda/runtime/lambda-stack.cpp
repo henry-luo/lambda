@@ -273,6 +273,19 @@ static void install_signal_handler(void) {
 
 #endif // __APPLE__ || __linux__
 
+#if defined(__APPLE__) || defined(__linux__)
+static bool lambda_stack_disable_alt_stack(void) {
+    stack_t disabled;
+    memset(&disabled, 0, sizeof(disabled));
+    // Darwin checks ss_size before SS_DISABLE even though the descriptor is
+    // disabled; retain the allocated stack's valid bounds for that check.
+    disabled.ss_sp = _lambda_alt_stack_mem;
+    disabled.ss_size = LAMBDA_ALT_STACK_SIZE;
+    disabled.ss_flags = SS_DISABLE;
+    return sigaltstack(&disabled, NULL) == 0;
+}
+#endif
+
 // ============================================================================
 // SEH handler (Windows)
 // ============================================================================
@@ -350,15 +363,14 @@ void lambda_stack_cleanup(void) {
 #endif
 
     if (_lambda_alt_stack_mem) {
-        if (_lambda_alt_stack_previous_valid) {
+        bool restore_disabled_stack = _lambda_alt_stack_previous_valid &&
+            (_lambda_alt_stack_previous.ss_flags & SS_DISABLE) != 0;
+        if (_lambda_alt_stack_previous_valid && !restore_disabled_stack) {
             if (sigaltstack(&_lambda_alt_stack_previous, NULL) != 0) {
                 log_error("stack cleanup: sigaltstack restore failed");
             }
         } else {
-            stack_t disabled;
-            memset(&disabled, 0, sizeof(disabled));
-            disabled.ss_flags = SS_DISABLE;
-            if (sigaltstack(&disabled, NULL) != 0) {
+            if (!lambda_stack_disable_alt_stack()) {
                 log_error("stack cleanup: sigaltstack disable failed");
             }
         }

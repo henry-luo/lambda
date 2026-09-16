@@ -76,19 +76,17 @@ void form_control_prop_init(FormControlProp* f) {
     f->caret_on = 1;
 }
 
-void form_control_prop_release(FormControlProp* f) {
+void form_control_prop_release(DomElement* elem, FormControlProp* f) {
     if (!f) return;
-    // Both release paths funnel through here. The state store may still name
-    // this control as the open dropdown owner: its DocState pointer survives
-    // the release while this prop does not, leaving the overlay pointing at a
-    // control that no longer exists and tripping the dropdown invariant on the
-    // next validation. Close it at the one moment the control really goes away
-    // (ESO28).
-    if (f->state_ref && f->state_ref->open_dropdown) {
-        View* owner = f->state_ref->open_dropdown;
+    // Both release paths funnel through here. A live state store may still name
+    // this control as its open dropdown owner, so only dereference the borrowed
+    // state_ref while it remains this document's active state (ESO28).
+    DocState* state = f->state_ref;
+    if (state && elem && elem->doc && elem->doc->state == state && state->open_dropdown) {
+        View* owner = state->open_dropdown;
         DomElement* owner_elem = owner->is_element() ? owner->as_element() : nullptr;
         if (owner_elem && owner_elem->form == f) {
-            doc_state_close_dropdown(f->state_ref, owner);
+            doc_state_close_dropdown(state, owner);
         }
     }
     // current_value is borrowed from ViewState; the StateStore releases it.
@@ -99,6 +97,7 @@ void form_control_prop_release(FormControlProp* f) {
     if (f->value == cached_value) f->value = nullptr;
     if (f->custom_validity_msg) { mem_free(f->custom_validity_msg); f->custom_validity_msg = nullptr; }
     if (f->value_at_focus) { mem_free(f->value_at_focus); f->value_at_focus = nullptr; }
+    f->state_ref = nullptr;
 }
 
 FormControlProp* tc_get_or_create_form(DomElement* elem) {
@@ -141,7 +140,7 @@ void form_control_release_prop(DomElement* elem) {
         font_prop_release_handle(form->placeholder_font);
         form->placeholder_font = nullptr;
     }
-    form_control_prop_release(form);
+    form_control_prop_release(elem, form);
     if (form->heap_allocated) {
         mem_free(form);
     }

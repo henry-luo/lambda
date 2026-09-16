@@ -139,6 +139,14 @@ static void xhr_set_int(Item obj, const char* key, int value) {
     dom_realm_set(obj, k, v);
 }
 
+static const char* xhr_url_to_cstr(Item value) {
+    if (get_type_id(value) == LMD_TYPE_MAP && js_class_id(value) == JS_CLASS_URL) {
+        Item href = js_get_key_cstr(value, "href");
+        if (get_type_id(href) == LMD_TYPE_STRING) return fn_to_cstr(href);
+    }
+    return fn_to_cstr(value);
+}
+
 static Item js_xhr_get_status(void) {
     XhrState* xhr = xhr_state_from_this();
     return xhr ? (Item){.item = i2it((int64_t)xhr->status)} : (Item){.item = i2it(0)};
@@ -427,7 +435,7 @@ extern "C" Item js_xhr_open(Item method_arg, Item url_arg, Item async_arg) {
     if (!xhr) return make_js_undef();
 
     const char* method = fn_to_cstr(method_arg);
-    const char* url = fn_to_cstr(url_arg);
+    const char* url = xhr_url_to_cstr(url_arg);
 
     if (!method || !url) {
         log_error("xhr: open() requires method and url");

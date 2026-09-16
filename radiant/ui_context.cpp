@@ -15,6 +15,7 @@
 #include "../lib/tagged.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/css/dom_element.hpp"  // For dom_document_destroy
+#include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/runtime/runtime-state.h"
@@ -375,18 +376,6 @@ extern "C" void radiant_state_request_repaint(DocState* state) {
     }
 }
 
-static void destroy_form_props_in_dom(DomNode* node) {
-    if (!node || !node->is_element()) return;
-    DomElement* elem = node->as_element();
-    DomNode* child = elem->first_child;
-    while (child) {
-        destroy_form_props_in_dom(child);
-        child = child->next_sibling;
-    }
-
-    form_control_release_prop(elem);
-}
-
 static void destroy_dom_owned_embed_images(DomNode* node) {
     if (!node || !node->is_element()) return;
     DomElement* elem = node->as_element();
@@ -454,10 +443,15 @@ void free_document(DomDocument* doc) {
     // can be destroyed only after the document has detached those references.
     script_runner_cleanup_js_state(doc);
 
+    // JS mutation records can retain detached controls with heap-owned props.
+    // Their state owner is gone, but the view tree still releases those props.
+    dom_js_mutation_records_reset(doc);
+    dom_lifecycle_release_unattached_form_props(doc);
+
     destroy_dom_owned_embed_images((DomNode*)doc->root);
 
     if (!doc->view_tree) {
-        destroy_form_props_in_dom((DomNode*)doc->root);
+        view_pool_release_detached_form_props((DomNode*)doc->root);
     }
 
     if (doc->view_tree) {

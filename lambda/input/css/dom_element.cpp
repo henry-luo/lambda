@@ -223,6 +223,21 @@ void dom_document_destroy(DomDocument* document) {
     mem_free(document);
 }
 
+bool dom_document_replace_url(DomDocument* document, Url* replacement) {
+    if (!document || !replacement) return false;
+    if (!document->url) {
+        document->url = replacement;
+        return true;
+    }
+    // Input and the loader can retain document->url across navigation, so
+    // exchange owned fields instead of invalidating their carrier pointer.
+    Url previous = *document->url;
+    *document->url = *replacement;
+    *replacement = previous;
+    url_destroy(replacement);
+    return true;
+}
+
 void DomDocument::destroy() {
     float ext_rate = services.element_count
         ? 100.0f * (float)services.ext_allocations / (float)services.element_count

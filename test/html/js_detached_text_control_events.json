@@ -1,0 +1,7 @@
+{
+  "name": "detached script text control teardown",
+  "viewport": {"width": 320, "height": 200},
+  "events": [
+    {"type": "wait", "ms": 1}
+  ]
+}

@@ -25719,9 +25719,9 @@ extern "C" Item js_get_css_object_value() {
 // Intl namespace — compact English-locale support plus Intl.Segmenter.
 //
 // The runtime ships no CLDR/ICU database, so its locale data currently has one
-// canonical entry (`en`). NumberFormat still exposes ECMA-402's feature probe
-// and default decimal formatter rather than leaving consumers with a missing
-// constructor. Segmenter remains the editor's ASCII-oriented word helper.
+// canonical entry (`en`). NumberFormat and Collator still expose the useful
+// default formatting and natural-order comparison surface. Segmenter remains
+// the editor's ASCII-oriented word helper.
 // =============================================================================
 static bool js_intl_number_format_is_available_locale(Item locale) {
     if (get_type_id(locale) != LMD_TYPE_STRING) return false;
@@ -25731,7 +25731,7 @@ static bool js_intl_number_format_is_available_locale(Item locale) {
         (value->chars[1] == 'n' || value->chars[1] == 'N');
 }
 
-static Item js_intl_number_format_supported_locales_of(Item* args, int argc) {
+static Item js_intl_supported_locales_of(Item* args, int argc) {
     RootFrame roots(3);
     Rooted<Item> locales_root(roots,
         argc > 0 && args ? args[0] : make_js_undefined());
@@ -25794,6 +25794,85 @@ static Item js_intl_number_format_call_body(Item callee, Item /*this_value*/,
     // Intl.NumberFormat() is specified to initialize a formatter as well.
     return js_intl_number_format_construct_body(callee, args, argc, callee,
         result_home);
+}
+
+static unsigned char js_intl_collator_fold_ascii(unsigned char value) {
+    return value >= 'A' && value <= 'Z'
+        ? (unsigned char)(value - 'A' + 'a') : value;
+}
+
+static int js_intl_collator_compare_strings(const String* left,
+        const String* right) {
+    int64_t left_index = 0;
+    int64_t right_index = 0;
+    int64_t left_length = left ? left->len : 0;
+    int64_t right_length = right ? right->len : 0;
+    while (left_index < left_length && right_index < right_length) {
+        unsigned char left_byte = (unsigned char)left->chars[left_index];
+        unsigned char right_byte = (unsigned char)right->chars[right_index];
+        if (left_byte >= '0' && left_byte <= '9' &&
+                right_byte >= '0' && right_byte <= '9') {
+            int64_t left_run_start = left_index;
+            int64_t right_run_start = right_index;
+            while (left_index < left_length && left->chars[left_index] >= '0' &&
+                    left->chars[left_index] <= '9') left_index++;
+            while (right_index < right_length && right->chars[right_index] >= '0' &&
+                    right->chars[right_index] <= '9') right_index++;
+            int64_t left_significant = left_run_start;
+            int64_t right_significant = right_run_start;
+            while (left_significant < left_index &&
+                    left->chars[left_significant] == '0') left_significant++;
+            while (right_significant < right_index &&
+                    right->chars[right_significant] == '0') right_significant++;
+            int64_t left_digits = left_index - left_significant;
+            int64_t right_digits = right_index - right_significant;
+            if (left_digits != right_digits) return left_digits < right_digits ? -1 : 1;
+            for (int64_t index = 0; index < left_digits; index++) {
+                unsigned char left_digit = (unsigned char)left->chars[left_significant + index];
+                unsigned char right_digit = (unsigned char)right->chars[right_significant + index];
+                if (left_digit != right_digit) return left_digit < right_digit ? -1 : 1;
+            }
+            if (left_index - left_run_start != right_index - right_run_start) {
+                return left_index - left_run_start < right_index - right_run_start ? -1 : 1;
+            }
+            continue;
+        }
+        left_byte = js_intl_collator_fold_ascii(left_byte);
+        right_byte = js_intl_collator_fold_ascii(right_byte);
+        if (left_byte != right_byte) return left_byte < right_byte ? -1 : 1;
+        left_index++;
+        right_index++;
+    }
+    if (left_index == left_length && right_index == right_length) return 0;
+    return left_index == left_length ? -1 : 1;
+}
+
+static Item js_intl_collator_compare(Item /*this_value*/, Item* args, int argc) {
+    RootFrame roots(2);
+    Rooted<Item> left_root(roots, argc > 0 && args ? args[0] : make_js_undefined());
+    Rooted<Item> right_root(roots, argc > 1 && args ? args[1] : make_js_undefined());
+    Item left_string = js_to_string(left_root.get());
+    if (item_is_error(left_string)) return left_string;
+    left_root.set(left_string);
+    Item right_string = js_to_string(right_root.get());
+    if (item_is_error(right_string)) return right_string;
+    right_root.set(right_string);
+    return (Item){.item = i2it((int64_t)js_intl_collator_compare_strings(
+        it2s(left_root.get()), it2s(right_root.get())))};
+}
+
+static Item js_intl_collator_construct_body(Item /*callee*/, Item* /*args*/,
+        int /*argc*/, Item new_target, uint64_t* result_home) {
+    JS_ROOTS(roots, target_root, new_target, result_root, js_new_object());
+    Item result = js_apply_constructed_default_prototype(result_root.get(),
+        target_root.get(), JS_CLASS_OBJECT);
+    if (result_home) *result_home = result.item;
+    return result;
+}
+
+static Item js_intl_collator_call_body(Item callee, Item /*this_value*/,
+        Item* args, int argc, uint64_t* result_home) {
+    return js_intl_collator_construct_body(callee, args, argc, callee, result_home);
 }
 
 static inline bool js_intl_segmenter_is_word_byte(unsigned char c) {
@@ -25862,7 +25941,7 @@ extern "C" void js_reset_intl_object() { js_intl_object = (Item){.item = ITEM_NU
 extern "C" Item js_get_intl_object_value() {
     if (!js_namespace_cache_is_empty(js_intl_object)) return js_intl_object;
     js_realm_intrinsic_slots_ensure_roots();
-    RootFrame roots(8);
+    RootFrame roots(11);
     Rooted<Item> intl_root(roots, js_object_create(ItemNull));
     Rooted<Item> segmenter_ctor_root(roots,
         js_new_native_body_constructor(js_intrinsic_ctor_requires_new_call_body,
@@ -25877,7 +25956,13 @@ extern "C" Item js_get_intl_object_value() {
     Rooted<Item> number_format_method_root(roots,
         js_new_native_this_span_function(js_intl_number_format_format));
     Rooted<Item> supported_locales_root(roots,
-        js_new_native_span_function(js_intl_number_format_supported_locales_of));
+        js_new_native_span_function(js_intl_supported_locales_of));
+    Rooted<Item> collator_ctor_root(roots,
+        js_new_native_body_constructor(js_intl_collator_call_body,
+            js_intl_collator_construct_body, 0));
+    Rooted<Item> collator_proto_root(roots, js_new_object());
+    Rooted<Item> collator_method_root(roots,
+        js_new_native_this_span_function(js_intl_collator_compare));
     js_set_function_name(segmenter_ctor_root.get(), js_name_item("Segmenter"));
     js_set_key_cstr(segmenter_proto_root.get(), "constructor", segmenter_ctor_root.get());
     js_set_key_cstr(segmenter_proto_root.get(), "segment", segmenter_method_root.get());
@@ -25894,9 +25979,17 @@ extern "C" Item js_get_intl_object_value() {
         number_format_proto_root.get());
     js_set_key_cstr(number_format_ctor_root.get(), "supportedLocalesOf",
         supported_locales_root.get());
+    js_set_function_name(collator_ctor_root.get(), js_name_item("Collator"));
+    js_set_key_cstr(collator_proto_root.get(), "constructor", collator_ctor_root.get());
+    js_set_key_cstr(collator_proto_root.get(), "compare", collator_method_root.get());
+    js_initialize_native_constructor_prototype(collator_ctor_root.get(),
+        collator_proto_root.get());
+    js_set_key_cstr(collator_ctor_root.get(), "supportedLocalesOf",
+        supported_locales_root.get());
     js_intl_object = intl_root.get();
     js_set_key_cstr(intl_root.get(), "Segmenter", segmenter_ctor_root.get());
     js_set_key_cstr(intl_root.get(), "NumberFormat", number_format_ctor_root.get());
+    js_set_key_cstr(intl_root.get(), "Collator", collator_ctor_root.get());
     js_namespace_set_to_string_tag(intl_root.get(), "Intl", 4);
     return intl_root.get();
 }

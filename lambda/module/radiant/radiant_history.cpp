@@ -136,18 +136,10 @@ static Url* history_resolve_url(DomDocument* document, const char* url_text) {
 
 static bool history_apply_document_url(DomDocument* document, const Url* url) {
     Url* copy = history_copy_url(url);
-    if (!document || !copy) return false;
-    if (!document->url) {
-        document->url = copy;
-        return true;
-    }
-    // The loader and Input retain this Url address while scripts run, so swap
-    // owned contents in place instead of leaving those aliases dangling.
-    Url previous = *document->url;
-    *document->url = *copy;
-    *copy = previous;
+    if (!copy) return false;
+    if (dom_document_replace_url(document, copy)) return true;
     url_destroy(copy);
-    return true;
+    return false;
 }
 
 static void history_truncate_forward(RadiantHistoryState* history) {

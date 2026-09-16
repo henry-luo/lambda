@@ -75,6 +75,7 @@ LAMBDA_BASELINE_TEST_PROJECTS := \
 	test_mir_ratchet_gtest \
 	test_mir_emission_gtest \
 	test_js_mir_emission_gtest \
+	test_js_mvp_gtest \
 	test_item_repr_gtest \
 	test_lambda_typed \
 	test_scalar_compare_gtest \

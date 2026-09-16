@@ -1998,6 +1998,9 @@ typedef enum DomCollectionVArrayKind {
     DOM_VARRAY_LOOKUP_NAME,
     DOM_VARRAY_SELECT_OPTIONS,
     DOM_VARRAY_SELECT_SELECTED_OPTIONS,
+    DOM_VARRAY_DIRECT_TAG,
+    DOM_VARRAY_TABLE_ROWS,
+    DOM_VARRAY_TABLE_ROW_CELLS,
     DOM_VARRAY_ATTRIBUTES,
     DOM_VARRAY_CLASS_LIST,
 } DomCollectionVArrayKind;
@@ -2040,6 +2043,9 @@ static bool dom_collection_varray_matches(DomElement* elem,
         const char* name = elem->get_attribute("name");
         return name && query && strcmp(name, query) == 0;
     }
+    case DOM_VARRAY_DIRECT_TAG:
+        return elem->tag_name && query &&
+            str_icmp_cstr(elem->tag_name, query) == 0;
     default:
         return false;
     }
@@ -2135,6 +2141,45 @@ static Item dom_collection_attribute_item(DomElement* owner, const char* name) {
     return result.get();
 }
 
+static DomElement* dom_collection_direct_rows_at(DomElement* parent,
+        int64_t target, int64_t* seen) {
+    if (!parent || !seen) return nullptr;
+    for (DomNode* child = dom_first_script_visible_child(parent); child;
+         child = dom_next_script_visible_sibling(child)) {
+        if (!child->is_element() || !_is_tag(child->as_element(), "tr")) continue;
+        if (*seen == target) return child->as_element();
+        (*seen)++;
+    }
+    return nullptr;
+}
+
+static DomElement* dom_collection_table_rows_at(DomElement* table,
+        int64_t target, int64_t* seen) {
+    if (!table || !seen) return nullptr;
+    // HTMLTableElement.rows groups header rows first and footer rows last,
+    // independently of where a parser placed those section elements.
+    for (int phase = 0; phase < 4; phase++) {
+        for (DomNode* child = dom_first_script_visible_child(table); child;
+             child = dom_next_script_visible_sibling(child)) {
+            if (!child->is_element()) continue;
+            DomElement* section = child->as_element();
+            bool direct_row = phase == 1 && _is_tag(section, "tr");
+            bool section_rows = (phase == 0 && _is_tag(section, "thead")) ||
+                (phase == 2 && _is_tag(section, "tbody")) ||
+                (phase == 3 && _is_tag(section, "tfoot"));
+            if (direct_row) {
+                if (*seen == target) return section;
+                (*seen)++;
+            } else if (section_rows) {
+                DomElement* found = dom_collection_direct_rows_at(
+                    section, target, seen);
+                if (found) return found;
+            }
+        }
+    }
+    return nullptr;
+}
+
 static DomNode* dom_collection_varray_walk(void* data, int64_t target,
                                            int64_t* out_count) {
     DomCollectionVArray* collection = (DomCollectionVArray*)data;
@@ -2142,16 +2187,28 @@ static DomNode* dom_collection_varray_walk(void* data, int64_t target,
     if (!collection || !owner) return nullptr;
     int64_t seen = 0;
     if (collection->kind == DOM_VARRAY_CHILD_NODES ||
-            collection->kind == DOM_VARRAY_ELEMENT_CHILDREN) {
+            collection->kind == DOM_VARRAY_ELEMENT_CHILDREN ||
+            collection->kind == DOM_VARRAY_DIRECT_TAG ||
+            collection->kind == DOM_VARRAY_TABLE_ROW_CELLS) {
         for (DomNode* child = dom_first_script_visible_child(owner); child;
              child = dom_next_script_visible_sibling(child)) {
-            if (collection->kind == DOM_VARRAY_ELEMENT_CHILDREN &&
+            if (collection->kind != DOM_VARRAY_CHILD_NODES &&
                     !child->is_element()) continue;
+            if (collection->kind == DOM_VARRAY_DIRECT_TAG &&
+                    !dom_collection_varray_matches(child->as_element(), collection)) continue;
+            if (collection->kind == DOM_VARRAY_TABLE_ROW_CELLS &&
+                    !_is_tag(child->as_element(), "td") &&
+                    !_is_tag(child->as_element(), "th")) continue;
             if (seen == target) return child;
             seen++;
         }
         if (out_count) *out_count = seen;
         return nullptr;
+    }
+    if (collection->kind == DOM_VARRAY_TABLE_ROWS) {
+        DomElement* found = dom_collection_table_rows_at(owner, target, &seen);
+        if (out_count) *out_count = seen;
+        return found;
     }
     if (collection->kind == DOM_VARRAY_SELECT_OPTIONS ||
             collection->kind == DOM_VARRAY_SELECT_SELECTED_OPTIONS) {
@@ -2387,6 +2444,34 @@ static Item dom_collection_varray_new(Item owner,
         return ItemNull;
     }
     return result;
+}
+
+static Item dom_live_table_collection(DomElement* elem,
+        DomCollectionVArrayKind kind) {
+    if (!elem) return ItemNull;
+    Item owner = dom_wrap_element((void*)elem);
+    return dom_collection_varray_new(owner, kind, ItemNull, false,
+        radiant_dom_html_collection_host_type());
+}
+
+static Item dom_live_direct_tag_collection(DomElement* elem, const char* tag) {
+    if (!elem || !tag) return ItemNull;
+    RootFrame roots(2);
+    Rooted<Item> owner(roots, dom_wrap_element((void*)elem));
+    Rooted<Item> query(roots, js_name_item(tag));
+    return dom_collection_varray_new(owner.get(), DOM_VARRAY_DIRECT_TAG,
+        query.get(), false, radiant_dom_html_collection_host_type());
+}
+
+static Item dom_table_first_section(DomElement* table, const char* tag) {
+    if (!table || !tag) return ItemNull;
+    for (DomNode* child = dom_first_script_visible_child(table); child;
+         child = dom_next_script_visible_sibling(child)) {
+        if (child->is_element() && _is_tag(child->as_element(), tag)) {
+            return dom_wrap_element(child->as_element());
+        }
+    }
+    return ItemNull;
 }
 
 static Item dom_text_replace_data_method(DomText* text_node, Item offset_arg,
@@ -3454,9 +3539,9 @@ extern "C" bool dom_navigate_submit_target(const char* target_name, const char* 
     }
 
     if (!target_name || !target_name[0] || strcmp(target_name, "_self") == 0) {
-        if (doc->url) url_destroy(doc->url);
-        doc->url = resolved;
-        return true;
+        if (dom_document_replace_url(doc, resolved)) return true;
+        url_destroy(resolved);
+        return false;
     }
 
     if (!doc->root) {
@@ -3477,8 +3562,10 @@ extern "C" bool dom_navigate_submit_target(const char* target_name, const char* 
         return false;
     }
 
-    if (frame_doc->url) url_destroy(frame_doc->url);
-    frame_doc->url = resolved;
+    if (!dom_document_replace_url(frame_doc, resolved)) {
+        url_destroy(resolved);
+        return false;
+    }
     _schedule_iframe_load(iframe);
     return true;
 }
@@ -6094,6 +6181,7 @@ static bool dom_form_named_getter_reserved_name(const char* prop);
     X(AUTOCORRECT,               "autocorrect") \
     X(AUTOFOCUS,                 "autofocus") \
     X(BODY,                      "body") \
+    X(CELLS,                     "cells") \
     X(CHARACTER_SET,             "characterSet") \
     X(CHARSET,                   "charset") \
     X(CHECKED,                   "checked") \
@@ -6216,6 +6304,9 @@ static bool dom_form_named_getter_reserved_name(const char* prop);
     X(STEP,                      "step") \
     X(STYLE,                     "style") \
     X(STYLE_SHEETS,              "styleSheets") \
+    X(T_BODIES,                  "tBodies") \
+    X(T_FOOT,                    "tFoot") \
+    X(T_HEAD,                    "tHead") \
     X(TAB_INDEX,                 "tabIndex") \
     X(TAG_NAME,                  "tagName") \
     X(TARGET,                    "target") \
@@ -6287,6 +6378,16 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
     // documentElement — the root <html> element
     if (prop_id == JS_DOM_PROP_DOCUMENT_ELEMENT) {
         return root ? dom_wrap_element(root) : ItemNull;
+    }
+
+    // Document implements ParentNode too.  Bootstrap loaders commonly append
+    // deferred scripts through document.lastElementChild (the html element).
+    if (prop_id == JS_DOM_PROP_FIRST_ELEMENT_CHILD ||
+            prop_id == JS_DOM_PROP_LAST_ELEMENT_CHILD) {
+        return root ? dom_wrap_element(root) : ItemNull;
+    }
+    if (prop_id == JS_DOM_PROP_CHILD_ELEMENT_COUNT) {
+        return (Item){.item = i2it(root ? 1 : 0)};
     }
 
     // body — the <body> element
@@ -9353,6 +9454,26 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // children (live element-only VArray)
     if (prop_id == JS_DOM_PROP_CHILDREN) return dom_fp_children(elem_item);
+
+    // HTML table collections are live and preserve the table-row ordering
+    // required by table sorting and filtering scripts.
+    if (_is_tag(elem, "table")) {
+        if (prop_id == JS_DOM_PROP_T_BODIES) {
+            return dom_live_direct_tag_collection(elem, "tbody");
+        }
+        if (prop_id == JS_DOM_PROP_T_HEAD) return dom_table_first_section(elem, "thead");
+        if (prop_id == JS_DOM_PROP_T_FOOT) return dom_table_first_section(elem, "tfoot");
+        if (prop_id == JS_DOM_PROP_ROWS) {
+            return dom_live_table_collection(elem, DOM_VARRAY_TABLE_ROWS);
+        }
+    }
+    if ((_is_tag(elem, "thead") || _is_tag(elem, "tbody") || _is_tag(elem, "tfoot")) &&
+            prop_id == JS_DOM_PROP_ROWS) {
+        return dom_live_direct_tag_collection(elem, "tr");
+    }
+    if (_is_tag(elem, "tr") && prop_id == JS_DOM_PROP_CELLS) {
+        return dom_live_table_collection(elem, DOM_VARRAY_TABLE_ROW_CELLS);
+    }
 
     // parentElement
     if (prop_id == JS_DOM_PROP_PARENT_ELEMENT) return dom_fp_parent_element(elem_item);

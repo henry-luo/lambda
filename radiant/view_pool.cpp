@@ -444,7 +444,7 @@ static void release_form_prop(DomElement* elem, ViewTree*) {
         font_prop_release_handle(form->placeholder_font);
         form->placeholder_font = nullptr;
     }
-    form_control_prop_release(form);
+    form_control_prop_release(elem, form);
     if (form->heap_allocated) {
         mem_free(form);
         elem->form = nullptr;
@@ -930,6 +930,19 @@ void view_pool_release_detached_subtree(DomNode* root) {
     view_teardown_visit_node(nullptr, root,
         VIEW_TEARDOWN_RELEASE_EXTERNAL | VIEW_TEARDOWN_CLEAR_POINTERS,
         false);
+}
+
+static void view_pool_release_detached_form_props_walk(DomNode* node) {
+    if (!node || !node->is_element()) return;
+    DomElement* elem = node->as_element();
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        view_pool_release_detached_form_props_walk(child);
+    }
+    form_control_release_prop(elem);
+}
+
+void view_pool_release_detached_form_props(DomNode* root) {
+    view_pool_release_detached_form_props_walk(root);
 }
 
 void view_tree_release_retired_subtree(ViewTree* tree, DomNode* root) {
