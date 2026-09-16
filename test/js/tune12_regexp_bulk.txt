@@ -1,0 +1,9 @@
+match:one,two
+replace:[one] 22 [two]
+empty:3:||
+empty-replace:-a-b-
+custom:null:1
+symbol:symbol-match:a,symbol-replace:a:x
+capture:<a>b<a>
+callback:AbA:2
+last-index:TypeError

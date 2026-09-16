@@ -1433,23 +1433,41 @@ static int js_mir_analyze_and_plan(void* opaque) {
         }
     }
 
-    // Detect function declarations that self-reassign (Babel _typeof pattern etc.).
-    // Only mark a function as reassigned if its OWN body contains an assignment
-    // to its own name. This avoids false positives from unrelated short-named
-    // variables across webpack modules.
+    // Detect writes through each resolved function binding before native-call
+    // admission. A recursive body must observe a later outer rebinding rather
+    // than retaining its original entry address.
     {
         for (int fi = 0; fi < mt->func_count; fi++) {
             JsFunctionNode* fn = mt->func_entries[fi].node;
             if (!fn || !fn->name || !fn->body) continue;
-            struct hashmap* self_assigned = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-                jm_name_hash, jm_binding_cmp, NULL, NULL);
-            jm_collect_indexed_func_assignments(mt, fn->body, self_assigned);
-            if (jm_binding_set_has(self_assigned, fn->entry)) {
+            bool binding_written = false;
+            AstIndex* index = &mt->tp->ast_index;
+            for (uint32_t node_id = 0; node_id < index->count; node_id++) {
+                JsAstNode* node = (JsAstNode*)index->nodes[node_id];
+                if (!node) continue;
+                if (node->node_type == AST_NODE_ASSIGN) {
+                    JsAssignmentNode* assignment = (JsAssignmentNode*)node;
+                    if (assignment->left && assignment->left->node_type == AST_NODE_IDENT &&
+                            ((JsIdentifierNode*)assignment->left)->entry == fn->entry) {
+                        binding_written = true;
+                        break;
+                    }
+                } else if (node->node_type == AST_NODE_UNARY) {
+                    JsUnaryNode* unary = (JsUnaryNode*)node;
+                    if ((unary->op == OPERATOR_JS_INCREMENT ||
+                            unary->op == OPERATOR_JS_DECREMENT) && unary->operand &&
+                            unary->operand->node_type == AST_NODE_IDENT &&
+                            ((JsIdentifierNode*)unary->operand)->entry == fn->entry) {
+                        binding_written = true;
+                        break;
+                    }
+                }
+            }
+            if (binding_written) {
                 JM_JS_FACT(&mt->func_entries[fi], is_reassigned) = true;
-                log_debug("js-mir: function '%.*s' is self-reassigned — skipping direct call optimization",
+                log_debug("js-mir: function '%.*s' binding is reassigned — skipping direct call optimization",
                     (int)fn->name->len, fn->name->chars);
             }
-            hashmap_free(self_assigned);
         }
     }
 
@@ -2739,11 +2757,17 @@ static int js_mir_analyze_and_plan(void* opaque) {
             fc->name, parent_env_link_slot, parent_fc->name);
     }
 
-    // Phase 1.75: Infer parameter and return types for each function
+    // Phase 1.75: infer source contracts before Number-only admission. The
+    // bounded return pass below consumes resolved bindings, not spellings.
     for (int i = 0; i < mt->func_count; i++) {
         JsFuncCollected* fc = &mt->func_entries[i];
         jm_infer_param_types(mt, fc);
         jm_infer_return_type(mt, fc);
+    }
+    jm_infer_native_numeric_returns(mt);
+
+    for (int i = 0; i < mt->func_count; i++) {
+        JsFuncCollected* fc = &mt->func_entries[i];
         // P1: Compute native eligibility here (Phase 1.75) rather than lazily in jm_define_function.
         // This lets jm_resolve_native_call() see the selected native ABI
         // when transpiling earlier functions that call later-defined native functions, enabling
@@ -2752,10 +2776,14 @@ static int js_mir_analyze_and_plan(void* opaque) {
         // block bodies still need boxed statement-completion return handling.
         bool eligible = (JM_CAPTURE_COUNT(fc) == 0 && JM_PARAM_COUNT(fc) > 0 &&
                          !JM_JS_FACT(fc, uses_arguments) &&
+                         !JM_JS_FACT(fc, has_direct_eval) &&
+                         !JM_JS_FACT(fc, uses_with) &&
+                         !fc->node->is_async && !fc->node->is_generator &&
                          !JM_JS_FACT(fc, has_duplicate_param_names) &&
                          !(fc->node->is_arrow && fc->node->body &&
                            fc->node->body->node_type == AST_NODE_BLOCK) &&
                          !JM_JS_FACT(fc, has_non_simple_params) &&
+                         JM_JS_FACT(fc, native_numeric_proven) &&
                          (JM_JS_FACT(fc, return_type) == LMD_TYPE_INT || JM_JS_FACT(fc, return_type) == LMD_TYPE_FLOAT));
         bool has_native_param = false;
         if (eligible) {
@@ -2884,6 +2912,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
                     native->params[p] = {param_type, rep, 0};
                 }
             }
+            jm_populate_native_number_binding_facts(mt, fc, native);
         }
         if ((fc->node->is_async || fc->node->is_generator) &&
                 analysis->variant_count < 4) {

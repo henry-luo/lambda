@@ -1,0 +1,6 @@
+packed:1,3
+typed:5
+fallback:inherited,undefined
+total:6
+local-typed:4
+overwrite:15

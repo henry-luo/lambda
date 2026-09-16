@@ -128,7 +128,7 @@ static JsMirVarEntry* jm_find_nearest_catch_param_var(JsMirTranspiler* mt, const
 void jm_write_last_closure_capture_if_matching(JsMirTranspiler* mt,
         NameEntry* binding, MIR_reg_t val_reg, TypeId type_id) {
     if (!mt || !binding) return;
-    MIR_reg_t val = jm_is_native_type(type_id) ? jm_box_native(mt, val_reg, type_id) : val_reg;
+    MIR_reg_t val = 0;
     MIR_reg_t last_env = 0;
     int last_slot = -1;
     if (mt->last_closure.has_env && mt->last_closure.env_reg != 0) {
@@ -142,6 +142,10 @@ void jm_write_last_closure_capture_if_matching(JsMirTranspiler* mt,
                 JsMirVarEntry* var = jm_find_var_by_binding(mt, binding);
                 if (!jm_resolve_transitive_capture_env(var, &target_env, &slot)) continue;
             }
+            // Native locals need an Item home only when this declaration
+            // actually reaches a captured environment slot.
+            if (!val) val = jm_is_native_type(type_id)
+                ? jm_box_native(mt, val_reg, type_id) : val_reg;
             jm_emit_store_i64(mt, slot * (int)sizeof(uint64_t), target_env, val);
             last_env = target_env;
             last_slot = slot;
@@ -159,6 +163,8 @@ void jm_write_last_closure_capture_if_matching(JsMirTranspiler* mt,
         // slot. Redirecting the TDZ initializer to the source cell leaves
         // that copied slot at ItemTdz after the lexical declaration runs.
         if (target_env == last_env && slot == last_slot) continue;
+        if (!val) val = jm_is_native_type(type_id)
+            ? jm_box_native(mt, val_reg, type_id) : val_reg;
         jm_emit_store_i64(mt, slot * (int)sizeof(uint64_t), target_env, val);
     }
 }
@@ -370,6 +376,12 @@ static bool jm_mutable_native_var_needs_boxing(JsMirTranspiler* mt,
     if (!mt || !decl || !id || !id->name) return false;
     if (decl->kind == JS_VAR_CONST) return false;
     if (!jm_is_native_type(native_type)) return false;
+    if (mt->in_native_func && jm_native_number_binding_type(mt, id->entry) ==
+            native_type) {
+        // T12-2 already joined every write to this resolved binding. Reusing
+        // that function-owned fact keeps the native accumulator unboxed.
+        return false;
+    }
     if (!mt->current_fc || !mt->current_fc->node || !mt->current_fc->node->body) return false;
     AstIndex* index = &mt->tp->ast_index;
     AstNodeId root_id = ast_index_find(index,
@@ -797,6 +809,14 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             log_debug("var-decl P3.4: '%s' annotation type overrides inference", vname);
                             init_type = ann_type;
                         }
+                    }
+
+                    TypeId native_binding_type = mt->in_native_func
+                        ? jm_native_number_binding_type(mt, id->entry)
+                        : LMD_TYPE_ANY;
+                    if (native_binding_type == LMD_TYPE_FLOAT ||
+                            native_binding_type == LMD_TYPE_INT) {
+                        init_type = native_binding_type;
                     }
 
                     // v15: In generators, force boxed types for consistent env save/load

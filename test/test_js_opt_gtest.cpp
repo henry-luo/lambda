@@ -42,8 +42,14 @@ static const char* kEventNames[JS_OPT_EVENT_COUNT] = {
     "regex_fresh_wrapper",
     "regex_keyless_reject",
     "regex_cache_invalidate",
+    "regex_bulk_match_hit",
+    "regex_bulk_match_fallback",
+    "regex_bulk_replace_hit",
+    "regex_bulk_replace_fallback",
     "array_set_fast_hit",
     "array_set_guard_fail",
+    "array_own_element_get_hit",
+    "array_own_element_get_fallback",
     "dynamic_function_fastpath",
     "dynamic_function_cache_hit",
     "dynamic_function_cache_miss",
@@ -63,6 +69,8 @@ static const char* kEventNames[JS_OPT_EVENT_COUNT] = {
     "named_fast_probe",
     "named_fast_hit",
     "named_fast_miss",
+    "runtime_number_head_hit",
+    "runtime_number_head_fallback",
     "mir_number_admitted",
     "mir_number_fallback",
     "mir_native_index_admitted",
@@ -182,10 +190,13 @@ static char* canonicalize_mir(const char* input) {
                 "lambda_stack_overflow_error,");
             bool is_stack_guard_pointer = stack_guard &&
                 (!line_end || stack_guard < line_end);
-            // MIR pointer operands have host-dependent decimal widths. Normalize
-            // the known stack-guard pointer and legacy ten-digit form while
-            // retaining language constants (including tagged 64-bit literals).
-            if (is_stack_guard_pointer || (digits == 10 && value >= 4300000000ULL)) {
+            // MIR pointer operands have host-dependent decimal widths. Literal
+            // shapes now commonly sit above the old ten-digit range, while
+            // tagged language values remain well above the user-space pointer
+            // address range on supported hosts.
+            bool is_user_pointer = value >= 4300000000ULL &&
+                value < 17592186044416ULL;
+            if (is_stack_guard_pointer || is_user_pointer) {
                 const char* token = "<ptr>";
                 memcpy(output + out, token, 5);
                 out += 5;
@@ -295,8 +306,10 @@ static const char* opt_executable() {
 #endif
 }
 
-static bool run_fixture_mode(const char* name, const char* source, bool trace_enabled,
-                             TraceResult* trace, char* output, size_t output_size) {
+static bool run_fixture_mode_backend(const char* name, const char* source,
+                                     bool trace_enabled, const char* backend,
+                                     TraceResult* trace, char* output,
+                                     size_t output_size) {
     ensure_opt_dir();
     char script_path[512];
     char trace_path[512];
@@ -315,15 +328,15 @@ static bool run_fixture_mode(const char* name, const char* source, bool trace_en
     // this child so the finalized artifact is available for the differential
     // contract below; the child writes diagnostics to its normal log sink.
     const char* args[] = {executable, "js", script_path, NULL};
-    ShellEnvEntry env[] = {
-        // Keep the compilation profile mode identical in both runs. The
-        // differential toggles only contract tracing; changing the profiler
-        // mode would legitimately enable/disable unrelated MIR probes.
-        {"JS_OPT_TRACE", trace_enabled ? "1" : "0"},
-        {"JS_OPT_TRACE_OUT", trace_path},
-        {"LAMBDA_MIR_DUMP_PATH", mir_path},
-        {NULL, NULL}
-    };
+    ShellEnvEntry env[5] = {};
+    int env_count = 0;
+    if (backend) env[env_count++] = {"JS_EXECUTION_BACKEND", backend};
+    // Keep the compilation profile mode identical in both runs. The
+    // differential toggles only contract tracing; changing the profiler
+    // mode would legitimately enable/disable unrelated MIR probes.
+    env[env_count++] = {"JS_OPT_TRACE", trace_enabled ? "1" : "0"};
+    env[env_count++] = {"JS_OPT_TRACE_OUT", trace_path};
+    env[env_count++] = {"LAMBDA_MIR_DUMP_PATH", mir_path};
     ShellOptions options = {};
     options.env = env;
     options.timeout_ms = 30000;
@@ -372,21 +385,32 @@ static bool run_fixture_mode(const char* name, const char* source, bool trace_en
     return parsed;
 }
 
+static bool run_fixture_mode(const char* name, const char* source, bool trace_enabled,
+                             TraceResult* trace, char* output, size_t output_size) {
+    return run_fixture_mode_backend(name, source, trace_enabled, NULL, trace,
+        output, output_size);
+}
+
 static bool run_fixture(const char* name, const char* source, TraceResult* trace,
                         char* output, size_t output_size) {
     return run_fixture_mode(name, source, true, trace, output, output_size);
 }
 
 static void expect_trace_off_same(const char* name, const char* source,
-                                  const char* trace_output) {
+                                  const char* trace_output,
+                                  const char* backend = NULL) {
     char output[4096];
-    ASSERT_TRUE(run_fixture_mode(name, source, false, NULL, output, sizeof(output)));
+    ASSERT_TRUE(run_fixture_mode_backend(name, source, false, backend, NULL,
+        output, sizeof(output)));
     char normalized_trace_output[4096];
     char normalized_output[4096];
     normalize_child_output(trace_output, normalized_trace_output,
         sizeof(normalized_trace_output));
     normalize_child_output(output, normalized_output, sizeof(normalized_output));
     EXPECT_STREQ(normalized_trace_output, normalized_output);
+
+    // The AST backend shares runtime helpers but has no finalized MIR artifact.
+    if (backend && strcmp(backend, "ast") == 0) return;
 
     char mir_path[512];
     char mir_off_path[512];
@@ -657,6 +681,30 @@ TEST(JsOpt, RegexShortCaptureUsesFreshWrapper) {
     expect_trace_off_same("regex_short_capture", source, output);
 }
 
+TEST(JsOpt, BuiltinRegexBulkPathsKeepProtocolOverrides) {
+    const char* source =
+        "var words = 'one 22 two'.match(new RegExp('[a-z]+', 'g'));\n"
+        "var replaced = 'one 22 two'.replace(new RegExp('[a-z]+', 'g'), '[$&]');\n"
+        "function customExec(value) { return null; }\n"
+        "var custom = new RegExp('a', 'g'); custom.exec = customExec;\n"
+        "var customResult = 'a'.match(custom);\n"
+        "var frozen = new RegExp('a', 'g');\n"
+        "Object.defineProperty(frozen, 'lastIndex', { writable: false });\n"
+        "var caught = false; try { 'a'.match(frozen); } catch (error) { caught = error.name === 'TypeError'; }\n"
+        "if (words.join(',') !== 'one,two' || replaced !== '[one] 22 [two]' ||\n"
+        "    customResult !== null || !caught) throw new Error('bulk regexp changed protocol');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture_mode_backend("regexp_bulk_protocol", source, true,
+        "ast", &trace, output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_REGEX_BULK_MATCH_HIT][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_REGEX_BULK_REPLACE_HIT][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_REGEX_BULK_MATCH_FALLBACK][2], 1u);
+    expect_trace_off_same("regexp_bulk_protocol", source, output, "ast");
+}
+
 TEST(JsOpt, DenseArrayStoreTakesFastPath) {
     const char* source =
         // A tagged element array reaches the fused Set kernel; an empty
@@ -670,6 +718,51 @@ TEST(JsOpt, DenseArrayStoreTakesFastPath) {
     expect_ok_output(output);
     EXPECT_GT(trace.events[JS_OPT_ARRAY_SET_FAST_HIT][1], 0u);
     expect_trace_off_same("array_dense_store", source, output);
+}
+
+TEST(JsOpt, RuntimeNumberHeadKeepsCoercingCasesOnSlowPath) {
+    const char* source =
+        "function operate(a, b, op) {\n"
+        "  if (op === 0) return a + b;\n"
+        "  if (op === 1) return a - b;\n"
+        "  if (op === 2) return a * b;\n"
+        "  return a / b;\n"
+        "}\n"
+        "var calls = 0;\n"
+        "var coercing = { valueOf: function() { calls++; return 4; } };\n"
+        "if (operate(1.5, 2.5, 0) !== 4 || operate(9, 2, 1) !== 7 ||\n"
+        "    operate(3, 4, 2) !== 12 || operate(9, 2, 3) !== 4.5 ||\n"
+        "    operate('x', 2, 0) !== 'x2' || operate(coercing, 1, 0) !== 5 ||\n"
+        "    calls !== 1) throw new Error('runtime number head changed semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture_mode_backend("runtime_number_head", source, true,
+        "ast", &trace, output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_RUNTIME_NUMBER_HEAD_HIT][1], 3u);
+    EXPECT_GT(trace.events[JS_OPT_RUNTIME_NUMBER_HEAD_FALLBACK][2], 1u);
+    expect_trace_off_same("runtime_number_head", source, output, "ast");
+}
+
+TEST(JsOpt, RuntimeOwnDenseElementHeadsPreserveFallbackSemantics) {
+    const char* source =
+        "var values = [1, 'two']; Object.preventExtensions(values);\n"
+        "values[0] = 3;\n"
+        "var hole = new Array(1); Object.prototype[0] = 'prototype';\n"
+        "var inherited = hole[0]; delete Object.prototype[0];\n"
+        "if (values[0] !== 3 || inherited !== 'prototype') "
+        "throw new Error('own dense element head changed semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture_mode_backend("runtime_own_dense_element", source,
+        true, "ast", &trace, output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_ARRAY_OWN_ELEMENT_GET_HIT][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_ARRAY_OWN_ELEMENT_GET_FALLBACK][2], 0u);
+    EXPECT_GT(trace.events[JS_OPT_ARRAY_SET_FAST_HIT][1], 0u);
+    expect_trace_off_same("runtime_own_dense_element", source, output, "ast");
 }
 
 TEST(JsOpt, MirNumberPlanUsesF64AndKeepsPartialFactsBoxed) {
