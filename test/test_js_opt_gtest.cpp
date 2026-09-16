@@ -182,10 +182,11 @@ static char* canonicalize_mir(const char* input) {
                 "lambda_stack_overflow_error,");
             bool is_stack_guard_pointer = stack_guard &&
                 (!line_end || stack_guard < line_end);
-            // MIR pointer operands have host-dependent decimal widths. Normalize
-            // the known stack-guard pointer and legacy ten-digit form while
-            // retaining language constants (including tagged 64-bit literals).
-            if (is_stack_guard_pointer || (digits == 10 && value >= 4300000000ULL)) {
+            // MIR pointer operands are host-address values, so their decimal
+            // width varies with ASLR. Tagged language literals remain above
+            // this address range and must stay observable in the contract.
+            if (is_stack_guard_pointer || (value >= 4300000000ULL &&
+                    value < 1000000000000ULL)) {
                 const char* token = "<ptr>";
                 memcpy(output + out, token, 5);
                 out += 5;
