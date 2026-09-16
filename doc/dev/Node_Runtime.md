@@ -102,7 +102,6 @@ Sub-paths are also handled where applicable:
 | `querystring` | `js_querystring.cpp` | `parse`, `stringify`, `escape`, `unescape`, `decode` (alias), `encode` (alias) |
 | `assert` | `js_assert.cpp` | `ok`, `equal`, `notEqual`, `strictEqual`, `notStrictEqual`, `deepStrictEqual`, `notDeepStrictEqual`, `throws`, `doesNotThrow`, `rejects`, `doesNotReject`, `match`, `doesNotMatch`, `fail`, `ifError`, `assert/strict` (same as assert) |
 | `zlib` | `lambda/module/node_zlib/node_zlib_module.cpp` + host Jube codec provider | `gzipSync`, `gunzipSync`, `deflateSync`, `inflateSync`, `createGzip`, `createGunzip` |
-| `dns` | `lambda/module/node_net/node_dns_module.cpp` | `lookup`, `resolve`, `resolve4` |
 | `readline` | `js_readline.cpp` | `createInterface` |
 | `string_decoder` | `js_string_decoder.cpp` | `StringDecoder` |
 
@@ -444,7 +443,6 @@ When running a package binary (like `npx`):
 | `js_querystring.cpp` | ~460 | Query string parsing |
 | `js_assert.cpp` | ~1,200 | Assertion library |
 | `node_zlib_module.cpp` + `jube_node_zlib_codec.cpp` | ~1,580 | Compression |
-| `lambda/module/node_net/node_dns_module.cpp` | moved | DNS resolution |
 | `js_readline.cpp` | ~130 | Readline interface |
 | `js_string_decoder.cpp` | ~150 | String decoder |
 

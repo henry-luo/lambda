@@ -347,13 +347,12 @@
     },
     {
       "name": "node-net",
-      "description": "External Node net and dns Jube module",
+      "description": "External Node net Jube module",
       "defines": [
         "LAMBDA_NODE_NET_DYNAMIC_MODULE"
       ],
       "source_files": [
-        "lambda/module/node_net/node_net_module.cpp",
-        "lambda/module/node_net/node_dns_module.cpp"
+        "lambda/module/node_net/node_net_module.cpp"
       ]
     },
     {

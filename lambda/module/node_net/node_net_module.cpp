@@ -1,13 +1,9 @@
-// node_net_module.cpp -- Node net/dns namespace ownership during stream migration.
+// node_net_module.cpp -- Node net namespace ownership during stream migration.
 #include "../../jube/jube.h"
 #include "../../jube/jube_registry.h"
 
 #include <cstring>
 #include <climits>
-
-extern "C" Item js_get_dns_namespace(void);
-extern "C" Item js_get_dns_promises_namespace(void);
-extern "C" void js_dns_reset(void);
 
 static const JubeHostAPI* node_net_host = NULL;
 static void* node_net_session = NULL;
@@ -569,76 +565,8 @@ static Item node_net_internal_namespace(void) {
     return result;
 }
 
-static Item node_net_dns_lookup_sync(Item hostname) {
-    if (!node_net_host || !node_net_host->node || !node_net_host->node->network ||
-            !node_net_host->node->network->lookup_sync || !node_net_host->node->roots ||
-            !node_net_host->node->roots->root_frame_begin ||
-            !node_net_host->node->roots->root_frame_take_slot ||
-            !node_net_host->node->roots->root_frame_end || !node_net_host->value ||
-            !node_net_host->value->kind || !node_net_host->value->string_bytes ||
-            !node_net_host->value->string_length || !node_net_host->value->string_from_utf8_n ||
-            node_net_host->value->kind(hostname) != JUBE_VALUE_STRING) return ItemNull;
-    JubeRootFrame frame = {};
-    if (!node_net_host->node->roots->root_frame_begin(&frame, 1)) return ItemNull;
-    uint64_t* hostname_root = node_net_host->node->roots->root_frame_take_slot(&frame);
-    if (!hostname_root) {
-        node_net_host->node->roots->root_frame_end(&frame);
-        return ItemNull;
-    }
-    *hostname_root = hostname.item;
-    size_t hostname_length = node_net_host->value->string_length(node_net_root_value(hostname_root));
-    const uint8_t* hostname_bytes = node_net_host->value->string_bytes(node_net_root_value(hostname_root));
-    if (!hostname_bytes || hostname_length == 0 || hostname_length >= 256) {
-        node_net_host->node->roots->root_frame_end(&frame);
-        return ItemNull;
-    }
-    char hostname_buffer[256];
-    memcpy(hostname_buffer, hostname_bytes, hostname_length);
-    hostname_buffer[hostname_length] = '\0';
-
-    char address[64] = {};
-    if (!node_net_host->node->network->lookup_sync(hostname_buffer, address, sizeof(address))) {
-        node_net_host->node->roots->root_frame_end(&frame);
-        return ItemNull;
-    }
-    Item output = address[0] ? node_net_host->value->string_from_utf8_n(address, strlen(address)) : ItemNull;
-    node_net_host->node->roots->root_frame_end(&frame);
-    return output;
-}
-
-static Item node_net_install_dns_helpers(Item namespace_item) {
-    if (!node_net_host || !node_net_host->node || !node_net_host->node->roots ||
-            !node_net_host->node->roots->root_frame_begin ||
-            !node_net_host->node->roots->root_frame_take_slot ||
-            !node_net_host->node->roots->root_frame_end) return namespace_item;
-    JubeRootFrame frame = {};
-    if (!node_net_host->node->roots->root_frame_begin(&frame, 3)) return namespace_item;
-    uint64_t* namespace_root = node_net_host->node->roots->root_frame_take_slot(&frame);
-    uint64_t* key_root = node_net_host->node->roots->root_frame_take_slot(&frame);
-    uint64_t* function_root = node_net_host->node->roots->root_frame_take_slot(&frame);
-    if (!namespace_root || !key_root || !function_root) {
-        node_net_host->node->roots->root_frame_end(&frame);
-        return namespace_item;
-    }
-    *namespace_root = namespace_item.item;
-    // lookupSync has no loop state: keeping its resolver implementation here
-    // removes this real DNS operation from the host adapter without exposing uv.
-    node_net_set_method(namespace_root, key_root, function_root, "lookupSync",
-        node_net_dns_lookup_sync, 1);
-    Item result = node_net_root_value(namespace_root);
-    node_net_host->node->roots->root_frame_end(&frame);
-    return result;
-}
 static Item node_net_internal_socket_namespace(void) {
     return node_net_host_namespace("internal/js_stream_socket");
-}
-static Item node_net_dns_namespace(void) {
-    // DNS is a leaf of this image now; resolving the public name through the
-    // host namespace table would route the module back into its retired owner.
-    return node_net_install_dns_helpers(js_get_dns_namespace());
-}
-static Item node_net_dns_promises_namespace(void) {
-    return js_get_dns_promises_namespace();
 }
 
 static const char* const node_net_specifiers[] = { "net" };
@@ -646,15 +574,10 @@ static const char* const node_net_internal_specifiers[] = { "internal/net" };
 static const char* const node_net_internal_socket_specifiers[] = {
     "internal/js_stream_socket",
 };
-static const char* const node_net_dns_specifiers[] = { "dns" };
-static const char* const node_net_dns_promises_specifiers[] = { "dns/promises" };
-
 static const JubeNamespaceDef node_net_namespaces[] = {
     {node_net_specifiers, 1, node_net_namespace, NULL, 0},
     {node_net_internal_specifiers, 1, node_net_internal_namespace, NULL, 0},
     {node_net_internal_socket_specifiers, 1, node_net_internal_socket_namespace, NULL, 0},
-    {node_net_dns_specifiers, 1, node_net_dns_namespace, NULL, 0},
-    {node_net_dns_promises_specifiers, 1, node_net_dns_promises_namespace, NULL, 0},
 };
 
 static const JubeModuleRequirements node_net_requirements = {
@@ -688,7 +611,7 @@ static int node_net_init(const JubeHostAPI* host) {
             !host->node->network->default_auto_select_family_timeout_set ||
             !host->node->network->permission_has_net ||
             !host->node->network->permission_make_net_error || !host->node->network->ip_family ||
-            !host->node->network->lookup_sync || !host->node->error ||
+            !host->node->error ||
             !host->node->error->throw_type_error_code || !host->node->error->throw_range_error_code ||
             !host->node->error->throw_error_code || !host->node->error->throw_network_error ||
             !host->node->streams || !host->node->streams->tcp_create ||
@@ -711,10 +634,6 @@ static void node_net_runtime_attach(void* session) {
     node_net_session = session;
 }
 
-static void node_net_runtime_reset(void* session) {
-    if (session == node_net_session) js_dns_reset();
-}
-
 static void node_net_runtime_detach(void* session) {
     if (session == node_net_session) node_net_session = NULL;
 }
@@ -724,13 +643,13 @@ static const JubeModuleDef node_net_module = {
     sizeof(JubeModuleDef),
     "node-net",
     "0.1.0",
-    "Node net and dns namespace module",
+    "Node net namespace module",
     NULL,
     0,
     NULL,
     0,
     node_net_namespaces,
-    5,
+    3,
     node_net_init,
     node_net_shutdown,
     NULL,
@@ -743,7 +662,7 @@ static const JubeModuleDef node_net_module = {
     NULL,
     0,
     node_net_runtime_attach,
-    node_net_runtime_reset,
+    NULL,
     node_net_runtime_detach,
     node_net_dependencies,
     1,
