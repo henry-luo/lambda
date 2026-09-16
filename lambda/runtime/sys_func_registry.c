@@ -207,7 +207,6 @@ extern bool target_equal(Target* a, Target* b);
 #include "../js/js_typed_array.h"
 #include "../js/js_event_loop.h"
 #include "../dom/dom_xhr.h"
-extern Item js_buffer_construct(Item arg, Item encoding);
 // Tune8 §2.5: js_array_indexOf_int fast path retired (0 telemetry emissions);
 // arr.indexOf(int) flows through the generic array method dispatcher now.
 extern Item js_string_concat(Item left, Item right);
@@ -2578,8 +2577,6 @@ JitImport jit_runtime_imports[] = {
     {"js_typed_array_construct", FPTR(js_typed_array_construct)},
     {"js_arraybuffer_construct_resizable", FPTR(js_arraybuffer_construct_resizable)},
     {"js_arraybuffer_is_view", FPTR(js_arraybuffer_is_view_item)},
-    // Buffer constructor
-    {"js_buffer_construct", FPTR(js_buffer_construct)},
     {"js_dataview_new", FPTR(js_dataview_new)},
     // SharedArrayBuffer
     {"js_sharedarraybuffer_construct_with_options", FPTR(js_sharedarraybuffer_construct_with_options)},

@@ -2466,3 +2466,4 @@ extern "C" void js_reset_buffer_module(void) {
     if (namespace_slot) *namespace_slot = (Item){0};
     if (prototype_slot) *prototype_slot = (Item){0};
 }
+

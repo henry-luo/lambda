@@ -26,16 +26,7 @@ extern "C" void js_xhr_reset(void);
 extern void jm_compile_recovery_state_destroy_context(JsRuntimeState* state);
 struct JsGeneratorStateRecord;
 void js_interp_generator_clear_continuations(JsGeneratorStateRecord* state);
-
 extern "C" void js_reset_buffer_module(void);
-extern "C" void js_readline_reset(void);
-extern "C" void js_stream_reset(void);
-extern "C" void js_net_reset(void);
-extern "C" void js_tls_reset(void);
-extern "C" void js_http_reset(void);
-extern "C" void js_https_reset(void);
-extern "C" void js_assert_reset(void);
-extern "C" void js_node_test_reset(void);
 
 static void js_reset_cached_realm_objects(void) {
     // Cached realm objects all point into the batch heap and must be invalidated together.
@@ -58,25 +49,13 @@ static void js_reset_cached_realm_objects(void) {
 }
 
 static void js_reset_core_module_caches(void) {
-    js_child_process_reset();
-    js_fs_reset();
-    js_util_reset();
+    // Buffer's realm slots hold host-owned namespace values across Jube resets.
     js_reset_buffer_module();
-    js_readline_reset();
-    js_stream_reset();
-    js_net_reset();
-    js_tls_reset();
-    js_http_reset();
-    js_https_reset();
     js_fetch_reset();
     js_history_reset();
-    js_assert_reset();
-    js_node_test_reset();
 }
 extern "C" void dom_window_dialog_reset(void);
 extern "C" void js_fetch_apply_bootstrap_base_path(void);
-extern "C" void js_tls_destroy_context(JsRuntimeState* state);
-extern "C" void js_net_destroy_context(JsRuntimeState* state);
 extern "C" void js_atomics_destroy_context(JsRuntimeState* state);
 extern "C" void js_dynfunc_cache_destroy_context(JsRuntimeState* state);
 static void js_release_input_resources(void);
@@ -412,17 +391,12 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
     state->global_environment = NULL;
     state->event_loop = NULL;
     state->async_hooks = NULL;
-    if (state->readline) {
-        js_readline_state_destroy(state->readline);
-        mem_free(state->readline);
-    }
     if (state->string_caches) mem_free(state->string_caches);
     if (state->assert) {
         root_vector_destroy(&state->assert->instances);
         root_vector_destroy(&state->assert->node_test_values);
         root_vector_destroy(&state->assert->node_test_hooks.before_each);
         root_vector_destroy(&state->assert->node_test_hooks.after_each);
-        js_assert_mock_registry_destroy(&state->assert->mocks);
         mem_free(state->assert);
     }
     if (state->intrinsics) mem_free(state->intrinsics);
@@ -775,8 +749,6 @@ void js_runtime_state_destroy_context(void) {
     // JSCU18: the DOM/web capsules leave through the directory's own walk
     // instead of eight hand-maintained calls.
     context_capsule_destroy_all(runtime_context);
-    js_tls_destroy_context(state);
-    js_net_destroy_context(state);
     js_atomics_destroy_context(state);
     js_dynfunc_cache_destroy_context(state);
     jm_compile_recovery_state_destroy_context(state);
@@ -1636,7 +1608,6 @@ extern "C" Item js_throw_const_assign(NameId name_id, int name_len) {
 // forward declaration for js_batch_reset (defined near the module runtime)
 // forward declaration for array custom prototype check
 // forward declarations for module namespace cache resets
-extern "C" void js_fs_runtime_detach();
 extern "C" void js_iterator_proto_cache_reset(void);
 extern "C" void js_dynfunc_cache_reset(void);
 extern "C" void js_cjs_metadata_reset(void);
@@ -1662,7 +1633,6 @@ static void js_batch_reset_runtime_caches(const char* reason, bool full_reset) {
     // %ThrowTypeError%/parseFloat object and break realm identity (D6.2.2v2).
     if (full_reset) js_builtin_cache_reset();
     if (full_reset) js_proto_snapshot_invalidate();
-    js_fs_runtime_detach();
     jube_modules_runtime_reset();
     jube_modules_runtime_detach();
     js_globals_batch_reset();

@@ -16,8 +16,6 @@
 #include "../js/js_runtime_state.hpp"
 #include "../js/js_typed_array.h"
 #include "../js/js_state_guards.h"
-#include "../js/js_fs_service.h"
-#include "../js/js_network_service.h"
 #include "jube_node_zlib_codec.hpp"
 #include "../js/js_runtime.h"
 #include "../module/node_core/node_events.hpp"
@@ -741,48 +739,7 @@ static int jube_host_node_resolve_namespace(void* session, const char* specifier
                                             Item* out_namespace);
 static int jube_host_node_resolve_host_namespace(void* session, const char* specifier,
                                                  Item* out_namespace);
-extern "C" Item js_get_fs_namespace(void);
-extern "C" Item js_get_fs_promises_namespace(void);
-extern "C" Item js_get_internal_fs_promises_namespace(void);
-extern "C" Item js_get_internal_fs_utils_namespace(void);
-extern "C" Item js_get_child_process_namespace(void);
-extern "C" Item js_get_net_namespace(void);
-extern "C" Item js_get_internal_js_stream_socket_constructor(void);
-extern "C" Item js_get_tls_namespace(void);
-extern "C" Item js_get_http_namespace(void);
-extern "C" Item js_get_https_namespace(void);
-extern "C" Item js_get_internal_errors_namespace(void);
-extern "C" Item js_get_internal_assert_myers_diff_namespace(void);
-extern "C" Item js_get_internal_async_hooks_namespace(void);
-extern "C" Item js_get_internal_async_context_frame_namespace(void);
-extern "C" Item js_get_internal_stream_add_abort_signal_namespace(void);
-extern "C" Item js_get_internal_stream_end_of_stream_namespace(void);
-extern "C" Item js_get_internal_stream_state_namespace(void);
-extern "C" Item js_get_internal_crypto_util_namespace(void);
-extern "C" Item js_get_internal_util_namespace(void);
-extern "C" Item js_get_internal_util_inspect_namespace(void);
-extern "C" Item js_get_internal_repl_namespace(void);
-extern "C" Item js_get_internal_test_binding_namespace(void);
-extern "C" Item js_get_node_module_namespace(void);
-extern "C" Item js_get_async_hooks_namespace(void);
-extern "C" Item js_get_domain_namespace(void);
-extern "C" Item js_get_cluster_namespace(void);
-extern "C" Item js_get_readline_namespace(void);
-extern "C" Item js_get_readline_promises_namespace(void);
-extern "C" Item js_get_node_test_namespace(void);
 extern "C" Item js_get_buffer_namespace(void);
-extern "C" Item js_get_util_namespace(void);
-extern "C" Item js_get_assert_namespace(void);
-extern "C" Item js_get_stream_namespace(void);
-extern "C" Item js_get_stream_promises_namespace(void);
-extern "C" Item js_get_stream_web_namespace(void);
-extern "C" Item js_get_stream_iter_namespace(void);
-extern "C" Item js_get_repl_namespace(void);
-extern "C" Item js_get_diagnostics_channel_namespace(void);
-extern "C" bool js_net_default_auto_select_family_get(void);
-extern "C" void js_net_default_auto_select_family_set(bool enabled);
-extern "C" int js_net_default_auto_select_family_timeout_get(void);
-extern "C" bool js_net_default_auto_select_family_timeout_set(int timeout_ms);
 extern "C" int js_permission_has_net(void);
 extern "C" int js_permission_enabled(void);
 extern "C" Item js_process_permission_has(Item scope, Item resource);
@@ -799,9 +756,6 @@ static Item jube_host_node_throw_error_code(void* session, const char* code,
                                             const char* message);
 static Item jube_host_node_throw_network_error(void* session, int status, const char* syscall,
                                                const char* address, int port);
-static bool jube_host_node_network_permission_has_net(void);
-static Item jube_host_node_network_permission_make_error(void* session, const char* syscall,
-                                                          const char* resource);
 extern "C" Item js_node_throw_system_error(const char* syscall, int error_number);
 extern "C" Item js_throw_error_with_code(const char* code, const char* message);
 static int jube_host_node_work_submit(void* session, JubeAsyncWorkCallback work,
@@ -834,11 +788,6 @@ static bool jube_host_node_zlib_stream_init(enum JubeNodeZlibCodecMode mode, int
 static bool jube_host_node_zlib_stream_run(void* state, const uint8_t* data, int length,
                                            int flush, JubeNodeZlibResult* out_result);
 static void jube_host_node_zlib_stream_free(void* state);
-static Item jube_host_node_transform_new(Item options);
-static Item jube_host_node_transform_prototype(void);
-static Item jube_host_node_readable_push(Item stream, Item chunk);
-static void jube_host_node_flush_data_if_flowing(Item stream);
-static void jube_host_node_transform_flush_drained(Item stream);
 static uint8_t* jube_host_node_buffer_prepare_write(Item value);
 static bool jube_host_node_is_buffer(Item value);
 static int jube_host_node_describe_binary_view(Item value, JubeBinaryView* out_view);
@@ -908,11 +857,6 @@ extern "C" Item js_throw_type_error_code(const char* code, const char* message);
 extern "C" Item js_throw_range_error_code(const char* code, const char* message);
 extern "C" Item js_throw_uri_error_code(const char* code, const char* message);
 extern "C" Item js_throw_value(Item error);
-extern "C" Item js_transform_new(Item opts);
-extern "C" Item js_get_stream_transform_prototype(void);
-extern "C" Item js_readable_push(Item self, Item chunk);
-extern "C" void js_stream_flush_data_if_flowing(Item self);
-extern "C" void js_stream_transform_flush_drained(Item self);
 extern "C" Item js_reflect_own_keys(Item obj);
 extern "C" Item js_object_keys(Item obj);
 extern "C" Item js_reflect_delete_property(Item obj, Item key);
@@ -1169,46 +1113,11 @@ extern "C" Item js_setTimeout(Item callback, Item delay);
 extern "C" void js_clearTimeout(Item timer);
 extern "C" void js_clearInterval(Item timer);
 extern "C" Item js_setImmediate(Item callback);
-extern "C" void js_timer_install_promisify_custom(Item function);
-extern "C" Item js_fs_createReadStream(Item path, Item options);
-extern "C" Item js_fs_createWriteStream(Item path, Item options);
-extern "C" Item js_util_promisify_custom_symbol(void);
-extern "C" Item js_util_custom_promisify_args_symbol(void);
 
 static void jube_host_dom_notify_mutation(int kind, void* target, void* parent) {
     dom_notify_mutation((DomJsMutationKind)kind, target, parent);
 }
 
-
-static void jube_host_node_function_install_promisify_custom(Item function,
-        JubeNativeFunctionSpec spec) {
-    Item custom = jube_host_script_new_function(spec);
-    js_set_key_default(function, js_util_promisify_custom_symbol(), custom);
-}
-
-static void jube_host_node_function_install_promisify_args(Item function, const char* first,
-                                                            const char* second) {
-    if (!first) return;
-    JubeRootFrame frame = {};
-    if (!jube_host_opaque_root_frame_begin(&frame, 3)) return;
-    uint64_t* function_root = jube_host_opaque_root_frame_take_slot(&frame);
-    uint64_t* names_root = jube_host_opaque_root_frame_take_slot(&frame);
-    uint64_t* symbol_root = jube_host_opaque_root_frame_take_slot(&frame);
-    if (!function_root || !names_root || !symbol_root) {
-        jube_host_opaque_root_frame_end(&frame);
-        return;
-    }
-    *function_root = function.item;
-    Item names = js_array_new(0);
-    *names_root = names.item;
-    js_array_push((Item){.item = *names_root}, js_make_string_len(first, (int)strlen(first)));
-    if (second) js_array_push((Item){.item = *names_root}, js_make_string_len(second, (int)strlen(second)));
-    Item symbol = js_util_custom_promisify_args_symbol();
-    *symbol_root = symbol.item;
-    js_set_key_default((Item){.item = *function_root}, (Item){.item = *symbol_root},
-                    (Item){.item = *names_root});
-    jube_host_opaque_root_frame_end(&frame);
-}
 
 static const JubeHostGcAPI jube_host_gc_api = {
     heap_register_gc_root,
@@ -1269,9 +1178,9 @@ static const JubeHostAsyncAPI jube_host_node_async_api = {
     js_clearTimeout,
     js_clearInterval,
     js_setImmediate,
-    js_timer_install_promisify_custom,
-    jube_host_node_function_install_promisify_custom,
-    jube_host_node_function_install_promisify_args,
+    NULL,
+    NULL,
+    NULL,
     jube_host_node_next_tick_callback,
     jube_host_node_work_submit_root_span,
     jube_host_node_work_resource_value,
@@ -1326,39 +1235,6 @@ static const JubeHostWorkerAPI jube_host_node_worker_api = {
     js_worker_is_marked_as_untransferable,
 };
 
-static const JubeHostStreamAPI jube_host_node_stream_api = {
-    JUBE_HOST_SERVICE_API_VERSION,
-    sizeof(JubeHostStreamAPI),
-    js_fs_createReadStream,
-    js_fs_createWriteStream,
-    js_node_stream_tcp_create,
-    js_node_stream_tcp_bind,
-    js_node_stream_tcp_address,
-    js_node_stream_tcp_fd,
-    js_node_stream_tcp_adopt_fd,
-    js_node_stream_resource_close,
-    js_node_stream_resource_ref,
-    js_node_stream_resource_is_live,
-    jube_host_node_transform_new,
-    jube_host_node_transform_prototype,
-    jube_host_node_readable_push,
-    jube_host_node_flush_data_if_flowing,
-    jube_host_node_transform_flush_drained,
-};
-
-static const JubeHostNetworkAPI jube_host_node_network_api = {
-    JUBE_HOST_SERVICE_API_VERSION,
-    sizeof(JubeHostNetworkAPI),
-    js_net_default_auto_select_family_get,
-    js_net_default_auto_select_family_set,
-    js_net_default_auto_select_family_timeout_get,
-    js_net_default_auto_select_family_timeout_set,
-    jube_host_node_network_permission_has_net,
-    jube_host_node_network_permission_make_error,
-    js_node_network_ip_family,
-    js_node_network_lookup_sync,
-};
-
 static const JubeHostNodeZlibAPI jube_host_node_zlib_api = {
     JUBE_HOST_SERVICE_API_VERSION,
     sizeof(JubeHostNodeZlibAPI),
@@ -1368,22 +1244,6 @@ static const JubeHostNodeZlibAPI jube_host_node_zlib_api = {
     jube_host_node_zlib_stream_init,
     jube_host_node_zlib_stream_run,
     jube_host_node_zlib_stream_free,
-};
-
-static const JubeHostFilesystemAPI jube_host_filesystem_api = {
-    JUBE_HOST_SERVICE_API_VERSION,
-    sizeof(JubeHostFilesystemAPI),
-    js_node_fs_read_write,
-    js_node_fs_read_write_release,
-    js_node_fs_copy_file,
-    js_node_fs_path_operation,
-    js_node_fs_string_operation,
-    js_node_fs_string_operation_release,
-    js_node_fs_directory_read,
-    js_node_fs_directory_read_release,
-    js_node_fs_descriptor_operation,
-    js_node_fs_metadata_operation,
-    js_node_fs_statfs_operation,
 };
 
 static const JubeHostNodeAPI jube_host_node_api = {
@@ -1398,10 +1258,10 @@ static const JubeHostNodeAPI jube_host_node_api = {
     &jube_host_node_events_api,
     &jube_host_node_worker_api,
     &jube_host_node_permission_api,
-    &jube_host_node_stream_api,
-    &jube_host_node_network_api,
+    NULL,
+    NULL,
     &jube_host_node_zlib_api,
-    &jube_host_filesystem_api,
+    NULL,
 };
 
 static const JubeHostValueAPI jube_host_value_api = {
@@ -3521,29 +3381,6 @@ static void jube_host_node_zlib_stream_free(void* state) {
     node_zlib_stream_free(state);
 }
 
-static Item jube_host_node_transform_new(Item options) {
-    return js_transform_new(options);
-}
-
-static Item jube_host_node_transform_prototype(void) {
-    // initialize the host stream prototypes before handing the opaque parent
-    // to a leaf module; the module must not resolve a host namespace itself.
-    (void)js_get_stream_namespace();
-    return js_get_stream_transform_prototype();
-}
-
-static Item jube_host_node_readable_push(Item stream, Item chunk) {
-    return js_readable_push(stream, chunk);
-}
-
-static void jube_host_node_flush_data_if_flowing(Item stream) {
-    js_stream_flush_data_if_flowing(stream);
-}
-
-static void jube_host_node_transform_flush_drained(Item stream) {
-    js_stream_transform_flush_drained(stream);
-}
-
 static Item jube_host_node_throw_system_error(void* session, const char* syscall,
                                               int error_number) {
     if (!jube_host_node_session_is_live(session) || !syscall) return ItemNull;
@@ -3583,18 +3420,6 @@ static Item jube_host_node_throw_network_error(void* session, int status, const 
         js_set_key_default(error, js_make_string_len("port", 4), (Item){.item = i2it(port)});
     }
     return js_throw_value(error);
-}
-
-static bool jube_host_node_network_permission_has_net(void) {
-    return js_permission_has_net() != 0;
-}
-
-static Item jube_host_node_network_permission_make_error(void* session, const char* syscall,
-                                                          const char* resource) {
-    if (!jube_host_node_session_is_live(session) || !syscall) return ItemNull;
-    // The permission helper constructs the Node-visible ERR_ACCESS_DENIED
-    // object without throwing, so async DNS can deliver it on its callback turn.
-    return js_permission_make_net_error(syscall, resource);
 }
 
 static Item jube_host_node_emit_callback(Item env_item) {
@@ -3766,56 +3591,11 @@ static int jube_host_node_resolve_host_namespace(void* session, const char* spec
         const char* specifier;
         JubeHostNamespaceFactory factory;
     } JubeHostNamespaceEntry;
-    // The table is the single host-resident compatibility boundary. Jube
-    // descriptors, rather than js_runtime's legacy dispatcher, decide which
-    // profiles expose these names while their implementations migrate.
+    // URL and Buffer remain host-owned during their staged extraction. Their
+    // public Node exposure is still controlled by node-core's Jube descriptor.
     static const JubeHostNamespaceEntry entries[] = {
-        {"events", node_events_namespace},
-        {"fs", js_get_fs_namespace},
-        {"fs/promises", js_get_fs_promises_namespace},
-        {"internal/fs/promises", js_get_internal_fs_promises_namespace},
-        {"internal/fs/utils", js_get_internal_fs_utils_namespace},
-        {"child_process", js_get_child_process_namespace},
-        {"net", js_get_net_namespace},
-        {"internal/js_stream_socket", js_get_internal_js_stream_socket_constructor},
-        {"tls", js_get_tls_namespace},
-        {"http", js_get_http_namespace},
-        {"_http_agent", js_get_http_namespace},
-        {"_http_common", js_get_http_namespace},
-        {"_http_server", js_get_http_namespace},
-        {"_http_outgoing", js_get_http_namespace},
-        {"https", js_get_https_namespace},
-        {"internal/errors", js_get_internal_errors_namespace},
-        {"internal/assert/myers_diff", js_get_internal_assert_myers_diff_namespace},
-        {"internal/async_hooks", js_get_internal_async_hooks_namespace},
-        {"internal/async_context_frame", js_get_internal_async_context_frame_namespace},
-        {"internal/streams/add-abort-signal", js_get_internal_stream_add_abort_signal_namespace},
-        {"internal/streams/end-of-stream", js_get_internal_stream_end_of_stream_namespace},
-        {"internal/streams/state", js_get_internal_stream_state_namespace},
-        {"internal/crypto/util", js_get_internal_crypto_util_namespace},
-        {"internal/util", js_get_internal_util_namespace},
-        {"internal/util/inspect", js_get_internal_util_inspect_namespace},
-        {"internal/repl", js_get_internal_repl_namespace},
-        {"internal/test/binding", js_get_internal_test_binding_namespace},
         {"buffer", js_get_buffer_namespace},
-        {"util", js_get_util_namespace},
         {"url", node_url_namespace},
-        {"assert", js_get_assert_namespace},
-        {"stream", js_get_stream_namespace},
-        {"stream/consumers", js_get_stream_namespace},
-        {"stream/promises", js_get_stream_promises_namespace},
-        {"stream/web", js_get_stream_web_namespace},
-        {"stream/iter", js_get_stream_iter_namespace},
-        {"repl", js_get_repl_namespace},
-        {"diagnostics_channel", js_get_diagnostics_channel_namespace},
-        {"module", js_get_node_module_namespace},
-        {"async_hooks", js_get_async_hooks_namespace},
-        {"trace_events", node_trace_events_namespace},
-        {"domain", js_get_domain_namespace},
-        {"cluster", js_get_cluster_namespace},
-        {"readline", js_get_readline_namespace},
-        {"readline/promises", js_get_readline_promises_namespace},
-        {"test", js_get_node_test_namespace},
     };
     for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]); i++) {
         if (strcmp(specifier, entries[i].specifier) == 0) {

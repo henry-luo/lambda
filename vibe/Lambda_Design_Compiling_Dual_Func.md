@@ -401,6 +401,10 @@ task-context procs, and typed-array (`ARRAY_NUM`) params get boxed-only. Closure
 are the most valuable relaxation (captures are Items regardless of the param
 ABI); deferred to keep Stage 1 measurable.
 
+**Superseded in part by O11v2 / D8.3.4v3 (2026-09-16):** methods and `var`
+parameters are no longer boxed-only for raw variants. Closures, variadics and
+may-await/task-context procedures remain.
+
 ### DF12 — Inference may become speculative
 
 This is the payoff for an open/mixed untyped function. With DF4's complete slow
@@ -907,6 +911,57 @@ native scalar destroys the write-back.
 The raw-native gate now rejects every `pn`/`var` parameter. This preserves
 borrow/write-back semantics and prevents a raw carrier from replacing a caller
 owned `Item` location.
+
+### O11v2 — `var` params and methods are admitted to raw variants — **RULED 2026-09-16 (user)**
+
+O11's conclusion was right for the mechanism that existed when it was written:
+a raw **scalar** carrier has no connection back to the caller's storage, so a
+borrowed position lowered that way loses its write-back. Two things changed
+since.
+
+- **CW33 / D8.1.1v10 built the transport.** Every publishable `var` position
+  now consumes a home cell in the callee prologue and publishes its final value
+  through that cell in the epilogue, and `_b` already forwards the cell it
+  consumed to the body it calls. The write-back is a property of the home, not
+  of the argument's representation, so an edge that carries the home preserves
+  it whatever form the value travels in.
+- **D8.3.3 fixed the proof discipline.** A raw body has exactly two
+  proof-producing paths, a statically exact edge or `_b`. Methods were excluded
+  because dispatch decides the target; under D8.3.3 a method is eligible only
+  where the receiver's exact shape is *proven* at the edge, which is the same
+  condition every other raw argument already meets. That is not a dispatch
+  guess and it does not add a third path.
+
+**The ruling (D8.3.4v3).** `var` parameters and methods leave the boxed-only
+exclusion list. A raw variant may take a `var` position when the edge carries
+that position's CW33 home exactly as `_b` does, and may take a method receiver
+when its exact shape is proven at the edge. Closures, variadics and
+may-await/task-context procedures remain excluded.
+
+**Obligations the implementation must meet.** These are the content of the
+ruling, not commentary on it:
+
+1. The home is consumed in the prologue and published in the epilogue, for
+   every `var` position on the raw edge, exactly as the boxed path does
+   (D8.1.1v10). A raw position that cannot carry its home is not eligible.
+2. S9.1.2 and S9.1.3 are unchanged: the borrow's observable writes, the
+   writer-vs-writer exclusivity check, and the plain-parameter snapshot all
+   behave as before. The snapshot is a separate mechanism and is not touched.
+3. A pointer lane retains a boxed source root for the duration of the call
+   (D8.3.1v2), so a raw record or array pointer is never the GC's only view.
+4. D8.3.3 holds: no third path into a raw body, and `_b` keeps the complete
+   source-equivalent boxed fallback.
+5. Per-position eligibility, not per-function: a signature with one ineligible
+   position routes that call to `_b` rather than disabling the others.
+
+**Why it is worth doing.** Every one of the twelve widest typed rows against
+C2MIR passes its records as `var` positions on `pn` procedures — deltablue2 has
+49 procedures and 80 `var` positions, havlak2 57 and 64, splay2 19 and 30,
+cube3d2 15 and 52 — so under v2 none of them could reach a raw variant at all.
+`c_choose_method`'s census is the shape of the cost: the world record arrives
+tagged and is unwrapped on entry, and the layout of its array fields is
+re-proven at every access (20 layout-kind guards paired with 20 certificate
+guards), with 123 null arms and 12 path-setter calls beside them.
 
 ### O12 — Late callers vs. `escaped` — **RESOLVED, see DF17**
 

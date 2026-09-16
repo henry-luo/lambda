@@ -58,7 +58,6 @@ extern "C" Item js_proxy_trap_set_with_receiver(Item proxy, Item key, Item value
 extern "C" Item radiant_dom_window_add_event_listener(Item type, Item callback, Item opts);
 extern "C" Item radiant_dom_window_remove_event_listener(Item type, Item callback, Item opts);
 extern "C" Item radiant_dom_window_dispatch_event(Item event_item);
-extern "C" Item js_internal_binding(Item name);
 extern "C" void js_async_hooks_after_gc(void);
 extern "C" Item js_global_url_search_params_new(Item init);
 extern "C" void js_intrinsic_note_prototype_mutation(Item object);
@@ -86,23 +85,30 @@ static Item js_get_jube_crypto_namespace(void) {
     return ItemNull;
 }
 
+static Item js_get_profiled_buffer_namespace(void) {
+    // Buffer remains host-owned until node-core finishes its staged extraction.
+    // The module-set gate keeps it absent from the minimal JS profile.
+    return jube_node_core_module_enabled() ? js_get_buffer_namespace() : ItemNull;
+}
+
 struct JsLazyGlobalSpec {
     const char* name;
     size_t name_length;
     JsLazyGlobalBuilder build;
+    bool requires_node_core;
 };
 
 static const JsLazyGlobalSpec js_lazy_host_globals[] = {
-    {"process", 7, js_get_process_object_value},
-    {"Buffer", 6, js_get_buffer_namespace},
-    {"crypto", 6, js_get_jube_crypto_namespace},
-    {"Math", 4, js_get_math_object_value},
-    {"JSON", 4, js_get_json_object_value},
-    {"Intl", 4, js_get_intl_object_value},
-    {"Reflect", 7, js_get_reflect_object_value},
-    {"Atomics", 7, js_get_atomics_object_value},
-    {"console", 7, js_get_console_object_value},
-    {"CSS", 3, js_get_css_object_value},
+    {"process", 7, js_get_process_object_value, false},
+    {"Buffer", 6, js_get_profiled_buffer_namespace, true},
+    {"crypto", 6, js_get_jube_crypto_namespace, false},
+    {"Math", 4, js_get_math_object_value, false},
+    {"JSON", 4, js_get_json_object_value, false},
+    {"Intl", 4, js_get_intl_object_value, false},
+    {"Reflect", 7, js_get_reflect_object_value, false},
+    {"Atomics", 7, js_get_atomics_object_value, false},
+    {"console", 7, js_get_console_object_value, false},
+    {"CSS", 3, js_get_css_object_value, false},
 };
 
 static Item js_publish_lazy_global(Item object, Item key, Item value) {
@@ -120,6 +126,7 @@ static void js_install_lazy_host_globals(Item global) {
             i < sizeof(js_lazy_host_globals) / sizeof(js_lazy_host_globals[0]);
             i++) {
         const JsLazyGlobalSpec* spec = &js_lazy_host_globals[i];
+        if (spec->requires_node_core && !jube_node_core_module_enabled()) continue;
         Item key = (Item){.item = s2it(
             heap_create_name(spec->name, spec->name_length))};
         js_set_key_default(global, key,
@@ -2721,11 +2728,6 @@ extern "C" Item js_process_binding(Item name) {
         js_set_key_cstr(cfg, "hasCrypto", (Item){.item = ITEM_TRUE});
         js_set_key_cstr(cfg, "fipsMode", (Item){.item = ITEM_FALSE});
         return cfg;
-    }
-    if ((s->len == 2 && memcmp(s->chars, "uv", 2) == 0) ||
-        (s->len == 9 && memcmp(s->chars, "constants", 9) == 0) ||
-        (s->len == 10 && memcmp(s->chars, "cares_wrap", 10) == 0)) {
-        return js_internal_binding(name);
     }
     return js_new_object();
 }
@@ -14038,10 +14040,6 @@ extern "C" Item js_get_global_this() {
             Item name_item = js_name_item(spec->name, spec->len);
             Item fn = js_get_global_builtin_fn_by_id(
                 (Item){.item = i2it(spec->id)});
-            if (spec->flags & JS_BUILTIN_GLOBAL_TIMER_PROMISIFY) {
-                extern void js_timer_install_promisify_custom(Item fn_item);
-                js_timer_install_promisify_custom(fn);
-            }
             js_set_key_default(js_global_this_obj, name_item, fn);
         }
 
@@ -14146,17 +14144,6 @@ extern "C" Item js_get_global_this() {
             js_mark_non_enumerable(decoder_proto.get(), decode_key.get());
             js_set_key_cstr(js_global_this_obj, "TextEncoder", encoder_ctor.get());
             js_set_key_cstr(js_global_this_obj, "TextDecoder", decoder_ctor.get());
-        }
-
-        // Web Streams constructors as globals
-        {
-            extern Item js_transform_stream_new(Item transformer);
-            js_install_native_constructor(js_global_this_obj, "ReadableStream",
-                js_readable_stream_new);
-            js_install_native_constructor(js_global_this_obj, "WritableStream",
-                js_writable_stream_new);
-            js_install_native_constructor(js_global_this_obj, "TransformStream",
-                js_transform_stream_new);
         }
 
         // globalThis.performance shares the document clock used by rAF/events.
