@@ -92,7 +92,7 @@ Item node_constants_namespace(void) {
     if (!node_constants_host || !node_constants_session) return ItemNull;
     Item fs_namespace = ItemNull;
     Item os_namespace = ItemNull;
-    if (node_constants_host->node->runtime->resolve_host_namespace(node_constants_session, "fs",
+    if (node_constants_host->node->runtime->resolve_namespace(node_constants_session, "fs",
             &fs_namespace) != 0 || node_constants_host->node->runtime->resolve_namespace(
             node_constants_session, "os", &os_namespace) != 0) return ItemNull;
 
