@@ -59,9 +59,7 @@ typedef struct JsArrayBuffer {
 static inline const uint8_t* js_arraybuffer_data_const(const JsArrayBuffer* ab) {
     return ab ? byte_buffer_data_const(&ab->handle) : NULL;
 }
-static inline uint8_t* js_arraybuffer_prepare_write(JsArrayBuffer* ab) {
-    return ab ? byte_buffer_prepare_write(&ab->handle) : NULL;
-}
+uint8_t* js_arraybuffer_prepare_write(JsArrayBuffer* ab);
 static inline int js_arraybuffer_length(const JsArrayBuffer* ab) {
     return ab ? (int)ab->handle.byte_length : 0;
 }
@@ -198,6 +196,7 @@ Item js_arraybuffer_construct_resizable(Item length_arg, Item options_arg);
 Item js_arraybuffer_construct_resizable_target(Item length_arg,
     Item options_arg, Item new_target);
 Item js_arraybuffer_wrap(JsArrayBuffer* ab);
+void js_arraybuffer_destroy(JsArrayBuffer* ab);
 bool js_is_arraybuffer(Item val);
 JsArrayBuffer* js_get_arraybuffer_ptr_item(Item val);
 int  js_arraybuffer_byte_length(Item val);

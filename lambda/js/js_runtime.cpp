@@ -1114,6 +1114,73 @@ extern "C" Item js_object_new_from_static_properties(
     return object_root.get();
 }
 
+static Item js_static_literal_materialize(const JsStaticLiteralRecipe* recipe) {
+    if (!recipe) return ItemError;
+    switch ((JsStaticLiteralKind)recipe->kind) {
+    case JS_STATIC_LITERAL_IMMEDIATE:
+        return (Item){.item = recipe->immediate};
+    case JS_STATIC_LITERAL_STRING: {
+        if (!recipe->string_chars || recipe->string_len < 0) return ItemError;
+        Item string = js_make_string_len(recipe->string_chars, recipe->string_len);
+        return get_type_id(string) == LMD_TYPE_STRING ? string : ItemError;
+    }
+    case JS_STATIC_LITERAL_ARRAY: {
+        if (recipe->length < 0 || (recipe->length > 0 && !recipe->children)) {
+            return ItemError;
+        }
+        RootFrame roots(2);
+        Rooted<Item> array_root(roots, js_array_new(recipe->length));
+        Rooted<Item> value_root(roots, ItemNull);
+        if (!roots.valid() || get_type_id(array_root.get()) != LMD_TYPE_ARRAY) {
+            return ItemError;
+        }
+        for (int index = 0; index < recipe->length; index++) {
+            const JsStaticLiteralRecipe* child = &recipe->children[index];
+            if ((JsStaticLiteralKind)child->kind == JS_STATIC_LITERAL_HOLE) continue;
+            value_root.set(js_static_literal_materialize(child));
+            if (item_is_error(value_root.get())) return value_root.get();
+            Item result = js_array_define_dense_element_direct(array_root.get(),
+                (int64_t)index, value_root.get());
+            if (item_is_error(result)) return result;
+        }
+        return array_root.get();
+    }
+    case JS_STATIC_LITERAL_OBJECT: {
+        if (recipe->length < 0 || (recipe->length > 0 && !recipe->children)) {
+            return ItemError;
+        }
+        RootFrame roots(3);
+        Rooted<Item> object_root(roots, js_new_object());
+        Rooted<Item> key_root(roots, ItemNull);
+        Rooted<Item> value_root(roots, ItemNull);
+        if (!roots.valid() || get_type_id(object_root.get()) != LMD_TYPE_MAP) {
+            return ItemError;
+        }
+        for (int index = 0; index < recipe->length; index++) {
+            const JsStaticLiteralRecipe* property = &recipe->children[index];
+            if (!property->key_chars || property->key_len < 0) return ItemError;
+            key_root.set(js_make_string_len(property->key_chars, property->key_len));
+            if (get_type_id(key_root.get()) != LMD_TYPE_STRING) return ItemError;
+            value_root.set(js_static_literal_materialize(property));
+            if (item_is_error(value_root.get())) return value_root.get();
+            Item result = js_create_data_property(object_root.get(), key_root.get(),
+                value_root.get());
+            if (item_is_error(result)) return result;
+        }
+        return object_root.get();
+    }
+    case JS_STATIC_LITERAL_HOLE:
+        return ItemError;
+    }
+    return ItemError;
+}
+
+extern "C" Item js_static_literal_from_recipe(const JsStaticLiteralRecipe* recipe) {
+    // D8.5.1v3: recipe storage belongs to the sealed code image; this call
+    // creates the distinct mutable graph required by each literal evaluation.
+    return js_static_literal_materialize(recipe);
+}
+
 static TypeMap* js_object_type_for_class_impl(int class_id) {
     js_object_metadata_initialize();
     if (!js_input || !js_input->pool || class_id <= JS_CLASS_NONE ||

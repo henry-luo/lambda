@@ -249,6 +249,17 @@ gc_tune_stats_t gc_heap_get_tune_stats(const gc_heap_t* gc) {
     return gc ? gc->tune : empty;
 }
 
+gc_external_stats_t gc_heap_get_external_stats(const gc_heap_t* gc) {
+    gc_external_stats_t empty;
+    memset(&empty, 0, sizeof(empty));
+    return gc ? gc->external : empty;
+}
+
+static int gc_external_kind_index(int kind) {
+    return kind >= 0 && kind < GC_EXTERNAL_KIND_COUNT
+        ? kind : GC_EXTERNAL_KIND_OTHER;
+}
+
 static void gc_dump_tune_stats(const gc_heap_t* gc) {
     if (!gc || !getenv("LAMBDA_GC_STATS")) return;
     const gc_tune_stats_t* t = &gc->tune;
@@ -258,7 +269,9 @@ static void gc_dump_tune_stats(const gc_heap_t* gc) {
         "gc-tune-stats: large_adds=%llu add_probes=%llu (%.2f/add) "
         "removes=%llu finds=%llu find_probes=%llu (%.2f/find) rehashes=%llu "
         "peak_large=%zu live_large=%zu | mark_collections=%llu mark_ms=%.3f "
-        "collections=%zu data_threshold=%zu object_threshold=%zu\n",
+        "collections=%zu data_threshold=%zu object_threshold=%zu "
+        "full_data_compactions=%llu full_data_released=%zu "
+        "external_live=%zu external_peak=%zu external_since=%zu external_collections=%llu\n",
         (unsigned long long)t->large_add_calls,
         (unsigned long long)t->large_add_probes,
         t->large_add_calls ? (double)t->large_add_probes / (double)t->large_add_calls : 0.0,
@@ -270,7 +283,12 @@ static void gc_dump_tune_stats(const gc_heap_t* gc) {
         t->large_peak_count, gc->large_objects.count,
         (unsigned long long)t->mark_collections,
         (double)t->mark_nanos / 1.0e6,
-        gc->collections, gc->gc_threshold, gc->object_threshold);
+        gc->collections, gc->gc_threshold, gc->object_threshold,
+        (unsigned long long)t->full_data_compactions,
+        t->full_data_bytes_released,
+        gc->external.live_bytes, gc->external.peak_bytes,
+        gc->external.bytes_since_collection,
+        (unsigned long long)gc->external.pressure_collections);
 }
 
 // ============================================================================
@@ -708,6 +726,57 @@ static void gc_heap_rebase_data_threshold(gc_heap_t* gc, uint64_t start_ns,
                   (unsigned long long)(mutator / 1000));
         gc->gc_threshold = paced;
     }
+}
+
+void gc_external_preflight(gc_heap_t* gc, size_t bytes, int kind) {
+    if (!gc || bytes == 0 || gc->collecting || gc->defer_collection_depth > 0 ||
+            !gc->collect_callback) {
+        return;
+    }
+    (void)gc_external_kind_index(kind);
+    size_t since = gc->external.bytes_since_collection;
+    bool overflow = bytes > SIZE_MAX - since;
+    if (!overflow && since + bytes < GC_EXTERNAL_PRESSURE_THRESHOLD) return;
+
+    log_debug("gc-external-pressure: since=%zu request=%zu live=%zu threshold=%zu",
+              since, bytes, gc->external.live_bytes, (size_t)GC_EXTERNAL_PRESSURE_THRESHOLD);
+    gc->external.pressure_collections++;
+    gc->collect_callback();
+}
+
+void gc_external_record_alloc(gc_heap_t* gc, size_t bytes, int kind) {
+    if (!gc || bytes == 0) return;
+    int index = gc_external_kind_index(kind);
+    if (bytes > SIZE_MAX - gc->external.live_bytes ||
+            bytes > SIZE_MAX - gc->external.live_by_kind[index] ||
+            bytes > SIZE_MAX - gc->external.bytes_since_collection) {
+        log_error("gc-external-accounting: overflow bytes=%zu kind=%d", bytes, kind);
+        return;
+    }
+    gc->external.live_bytes += bytes;
+    gc->external.live_by_kind[index] += bytes;
+    gc->external.bytes_since_collection += bytes;
+    gc->external.allocation_count++;
+    if (gc->external.live_bytes > gc->external.peak_bytes) {
+        gc->external.peak_bytes = gc->external.live_bytes;
+    }
+    if (gc->external.live_by_kind[index] > gc->external.peak_by_kind[index]) {
+        gc->external.peak_by_kind[index] = gc->external.live_by_kind[index];
+    }
+}
+
+void gc_external_record_release(gc_heap_t* gc, size_t bytes, int kind) {
+    if (!gc || bytes == 0) return;
+    int index = gc_external_kind_index(kind);
+    if (bytes > gc->external.live_bytes || bytes > gc->external.live_by_kind[index]) {
+        log_error("gc-external-accounting: release exceeds live bytes=%zu kind=%d", bytes, kind);
+        gc->external.live_bytes = 0;
+        gc->external.live_by_kind[index] = 0;
+        return;
+    }
+    gc->external.live_bytes -= bytes;
+    gc->external.live_by_kind[index] -= bytes;
+    gc->external.release_count++;
 }
 
 static void gc_heap_maybe_collect_object_pressure(gc_heap_t* gc, const char* site) {
@@ -2316,6 +2385,62 @@ static void gc_compact_data(gc_heap_t* gc) {
     log_debug("gc_compact_data: compacted %zu data buffers to tenured", compacted);
 }
 
+// Evacuate marked nursery and tenured data directly into one fresh zone once
+// tenured storage has grown beyond two mature nursery blocks. Reusing the
+// normal compactor with each source in turn preserves D4.3.1: every surviving
+// buffer receives exactly one owner-slot fixup in this collection.
+static int gc_full_compact_tenured_data(gc_heap_t* gc,
+        size_t* nursery_survivor_bytes) {
+    if (nursery_survivor_bytes) *nursery_survivor_bytes = 0;
+    if (!gc || !gc->data_zone || !gc->tenured_data) return 0;
+    gc_data_zone_t* old_tenured = gc->tenured_data;
+    size_t old_used = gc_data_zone_used(old_tenured);
+    if (old_used < GC_TENURED_FULL_COMPACT_THRESHOLD) return 0;
+
+    gc_data_zone_t* nursery = gc->data_zone;
+    size_t nursery_used = gc_data_zone_used(nursery);
+    if (nursery_used > SIZE_MAX - old_used) {
+        log_error("gc-full-data-compact: source size overflow");
+        return 0;
+    }
+
+    // Every source allocation was 16-byte aligned, and the existing compactor
+    // copies each live allocation at its original size. One preallocated block
+    // sized to both source zones makes the evacuation allocation-free after
+    // publication begins: a failed VM reservation leaves both zones untouched.
+    gc_data_zone_t* fresh_tenured = gc_data_zone_create(gc->vm_context, NULL,
+        old_used + nursery_used);
+    if (!fresh_tenured) {
+        log_error("gc-full-data-compact: could not reserve %zu bytes",
+            old_used + nursery_used);
+        return 0;
+    }
+
+    gc->tenured_data = fresh_tenured;
+    // The nursery pass runs first, while data_zone still names the nursery.
+    // Its retained byte count is the adaptive-pacing input for this cycle.
+    gc_compact_data(gc);
+    if (nursery_survivor_bytes) {
+        *nursery_survivor_bytes = gc_data_zone_used(fresh_tenured);
+    }
+
+    // Reuse the same owner walk for old tenured data. Buffers moved in the
+    // nursery pass are already outside this source, so aliases stay idempotent.
+    gc->data_zone = old_tenured;
+    gc_compact_data(gc);
+    gc->data_zone = nursery;
+
+    // Both source passes are idempotent for repeated base/view visits, so the
+    // fresh zone contains each retained buffer once and the old VM extents can
+    // be returned after every marked owner has been fixed up.
+    gc_data_zone_destroy(old_tenured);
+    gc->tune.full_data_compactions++;
+    gc->tune.full_data_bytes_released += old_used;
+    log_debug("gc-full-data-compact: released=%zu retained=%zu", old_used,
+        gc_data_zone_used(fresh_tenured));
+    return 1;
+}
+
 // ---- Sweep Phase ----
 
 // Finalize a dead object's sub-allocations that are NOT in the data zone
@@ -2562,9 +2687,16 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     size_t nursery_used_before = gc_data_zone_used(gc->data_zone);
     size_t tenured_before = gc_data_zone_used(gc->tenured_data);
 
-    // Phase 2: Compact — copy surviving data zone buffers to tenured
+    // Phase 2: Compact — a mature tenured zone evacuates both source zones
+    // directly to fresh storage; otherwise promote the nursery as usual.
     uint64_t gc_compact_token = GC_PROFILE_ENTER("gc_compact_data");
-    gc_compact_data(gc);
+    size_t survived_this_cycle = 0;
+    if (!gc_full_compact_tenured_data(gc, &survived_this_cycle)) {
+        gc_compact_data(gc);
+        size_t tenured_after_promotion = gc_data_zone_used(gc->tenured_data);
+        survived_this_cycle = tenured_after_promotion >= tenured_before
+            ? tenured_after_promotion - tenured_before : 0;
+    }
     GC_PROFILE_LEAVE("gc_compact_data", gc_compact_token);
 
     // Phase 3: Sweep — free dead objects, return to free lists
@@ -2578,13 +2710,15 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     GC_PROFILE_LEAVE("gc_data_zone_reset", gc_reset_token);
 
     gc->collections++;
+    // All external bytes allocated before this completed sweep have had the
+    // same collection opportunity as zone allocations; only new payloads add
+    // pressure toward the next legal MAY_GC boundary.
+    gc->external.bytes_since_collection = 0;
     gc->collecting = 0;
 
     // Adaptive threshold: measure how much nursery data survived compaction.
     // If collection freed very little nursery data, it was unproductive and
     // caused cache thrashing for no benefit — grow threshold to delay next GC.
-    size_t tenured_after = gc_data_zone_used(gc->tenured_data);
-    size_t survived_this_cycle = tenured_after - tenured_before;
     size_t freed_this_cycle = (nursery_used_before > survived_this_cycle)
                             ? (nursery_used_before - survived_this_cycle) : 0;
     if (nursery_used_before > 0) {

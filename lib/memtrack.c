@@ -29,14 +29,11 @@
 // Guard byte patterns for buffer overflow detection
 #define GUARD_BYTE_HEAD     0xDE
 
-// Inline header for STATS mode — stores size, category and source line for mem_free
-#define MEMTRACK_STATS_MAGIC  0xBEEF
-
+// Inline header for counters-only STATS mode. It lets the matching mem_free()
+// recover the accounting delta without a process-wide allocation registry.
 typedef struct MemAllocHeader {
-    size_t size;            // user-requested size
-    uint16_t category;      // MemCategory
-    uint16_t magic;         // MEMTRACK_STATS_MAGIC — validates tracked allocation
-    int line;               // allocation source line
+    size_t size;
+    uint16_t category;
 } MemAllocHeader;
 // exactly 16 bytes, so the STATS-mode user pointer stays 16-aligned. The
 // former trailing `reserved` field padded this to 24 and silently broke the
@@ -53,10 +50,6 @@ _Static_assert(sizeof(MemAllocHeader) % 16 == 0,
 
 // Maximum snapshots
 #define MAX_SNAPSHOTS 16
-
-// Maximum aggregate allocation-site stats tracked in STATS mode
-#define MAX_LINE_STATS 4096
-#define MAX_LINE_STATS_REPORT 100
 
 // ============================================================================
 // Category Names
@@ -131,16 +124,6 @@ typedef struct SnapshotEntry {
     MemtrackStats stats;
 } SnapshotEntry;
 
-// Aggregate allocation-site stats for STATS mode
-typedef struct MemtrackLineStats {
-    bool used;
-    MemCategory category;
-    int line;
-    size_t current_bytes;
-    size_t current_count;
-    size_t total_allocs;
-} MemtrackLineStats;
-
 // Global tracker state
 typedef struct MemtrackState {
     MemtrackMode mode;
@@ -148,11 +131,8 @@ typedef struct MemtrackState {
 
     // Statistics (always maintained)
     MemtrackStats stats;
-    MemtrackLineStats line_stats[MAX_LINE_STATS];
-    size_t line_stats_overflow_count;
-    size_t line_stats_overflow_bytes;
-
-    // Lock for thread safety
+    // Lock protects DEBUG's allocation registry and lifecycle transitions.
+    // STATS counters use atomic increments and never take it on hot paths.
     pthread_mutex_t lock;
 
     // Allocation registry (debug mode only)
@@ -289,110 +269,78 @@ static MemPressureLevel compute_pressure_level(size_t current_bytes) {
     return MEM_PRESSURE_NONE;
 }
 
+static size_t memtrack_stat_load(const size_t* value) {
+    return __atomic_load_n(value, __ATOMIC_RELAXED);
+}
+
+static size_t memtrack_stat_add(size_t* value, size_t amount) {
+    return __atomic_add_fetch(value, amount, __ATOMIC_RELAXED);
+}
+
+static void memtrack_stat_sub(size_t* value, size_t amount) {
+    (void)__atomic_sub_fetch(value, amount, __ATOMIC_RELAXED);
+}
+
+static void memtrack_stat_update_peak(size_t* peak, size_t current) {
+    size_t observed = memtrack_stat_load(peak);
+    while (current > observed && !__atomic_compare_exchange_n(peak, &observed,
+            current, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+    }
+}
+
 static void update_category_stats_alloc(MemCategory cat, size_t size) {
     MemtrackCategoryStats* cs = &g_memtrack.stats.categories[cat];
-    cs->current_bytes += size;
-    cs->current_count++;
-    cs->total_allocs++;
-    cs->total_bytes_alloc += size;
-
-    if (cs->current_bytes > cs->peak_bytes) {
-        cs->peak_bytes = cs->current_bytes;
-    }
-    if (cs->current_count > cs->peak_count) {
-        cs->peak_count = cs->current_count;
-    }
+    size_t current_bytes = memtrack_stat_add(&cs->current_bytes, size);
+    size_t current_count = memtrack_stat_add(&cs->current_count, 1);
+    (void)memtrack_stat_add(&cs->total_allocs, 1);
+    (void)memtrack_stat_add(&cs->total_bytes_alloc, size);
+    memtrack_stat_update_peak(&cs->peak_bytes, current_bytes);
+    memtrack_stat_update_peak(&cs->peak_count, current_count);
 }
 
 static void update_category_stats_free(MemCategory cat, size_t size) {
     MemtrackCategoryStats* cs = &g_memtrack.stats.categories[cat];
-    cs->current_bytes -= size;
-    cs->current_count--;
-    cs->total_frees++;
+    memtrack_stat_sub(&cs->current_bytes, size);
+    memtrack_stat_sub(&cs->current_count, 1);
+    (void)memtrack_stat_add(&cs->total_frees, 1);
 }
 
 static void update_global_stats_alloc(size_t size) {
-    g_memtrack.stats.current_bytes += size;
-    g_memtrack.stats.current_count++;
-    g_memtrack.stats.total_allocs++;
-
-    if (g_memtrack.stats.current_bytes > g_memtrack.stats.peak_bytes) {
-        g_memtrack.stats.peak_bytes = g_memtrack.stats.current_bytes;
-    }
-    if (g_memtrack.stats.current_count > g_memtrack.stats.peak_count) {
-        g_memtrack.stats.peak_count = g_memtrack.stats.current_count;
-    }
+    size_t current_bytes = memtrack_stat_add(&g_memtrack.stats.current_bytes, size);
+    size_t current_count = memtrack_stat_add(&g_memtrack.stats.current_count, 1);
+    (void)memtrack_stat_add(&g_memtrack.stats.total_allocs, 1);
+    memtrack_stat_update_peak(&g_memtrack.stats.peak_bytes, current_bytes);
+    memtrack_stat_update_peak(&g_memtrack.stats.peak_count, current_count);
 }
 
 static void update_global_stats_free(size_t size) {
-    g_memtrack.stats.current_bytes -= size;
-    g_memtrack.stats.current_count--;
-    g_memtrack.stats.total_frees++;
+    memtrack_stat_sub(&g_memtrack.stats.current_bytes, size);
+    memtrack_stat_sub(&g_memtrack.stats.current_count, 1);
+    (void)memtrack_stat_add(&g_memtrack.stats.total_frees, 1);
 }
 
-static size_t line_stats_hash(MemCategory category, int line) {
-    uint32_t hash = (uint32_t)line;
-    hash ^= (uint32_t)category * 16777619u;
-    hash *= 2166136261u;
-    return (size_t)(hash % MAX_LINE_STATS);
-}
-
-static MemtrackLineStats* find_line_stats_slot(MemCategory category, int line, bool create) {
-    if (line <= 0) {
-        return NULL;
-    }
-
-    size_t index = line_stats_hash(category, line);
-    for (size_t probe = 0; probe < MAX_LINE_STATS; probe++) {
-        MemtrackLineStats* slot = &g_memtrack.line_stats[(index + probe) % MAX_LINE_STATS];
-        if (!slot->used) {
-            if (!create) {
-                return NULL;
-            }
-            slot->used = true;
-            slot->category = category;
-            slot->line = line;
-            return slot;
-        }
-        if (slot->category == category && slot->line == line) {
-            return slot;
-        }
-    }
-    return NULL;
-}
-
-static void update_line_stats_alloc(MemCategory category, size_t size, int line) {
-    MemtrackLineStats* slot = find_line_stats_slot(category, line, true);
-    if (!slot) {
-        g_memtrack.line_stats_overflow_count++;
-        g_memtrack.line_stats_overflow_bytes += size;
-        return;
-    }
-    slot->current_bytes += size;
-    slot->current_count++;
-    slot->total_allocs++;
-}
-
-static void update_line_stats_free(MemCategory category, size_t size, int line) {
-    MemtrackLineStats* slot = find_line_stats_slot(category, line, false);
-    if (!slot) {
-        if (g_memtrack.line_stats_overflow_count > 0) {
-            g_memtrack.line_stats_overflow_count--;
-        }
-        if (g_memtrack.line_stats_overflow_bytes >= size) {
-            g_memtrack.line_stats_overflow_bytes -= size;
-        } else {
-            g_memtrack.line_stats_overflow_bytes = 0;
-        }
-        return;
-    }
-    if (slot->current_count > 0) {
-        slot->current_count--;
-    }
-    if (slot->current_bytes >= size) {
-        slot->current_bytes -= size;
-    } else {
-        slot->current_bytes = 0;
+static void memtrack_stats_snapshot(MemtrackStats* out) {
+    if (!out) return;
+    memset(out, 0, sizeof(*out));
+    out->current_bytes = memtrack_stat_load(&g_memtrack.stats.current_bytes);
+    out->current_count = memtrack_stat_load(&g_memtrack.stats.current_count);
+    out->peak_bytes = memtrack_stat_load(&g_memtrack.stats.peak_bytes);
+    out->peak_count = memtrack_stat_load(&g_memtrack.stats.peak_count);
+    out->total_allocs = memtrack_stat_load(&g_memtrack.stats.total_allocs);
+    out->total_frees = memtrack_stat_load(&g_memtrack.stats.total_frees);
+    out->guard_violations = memtrack_stat_load(&g_memtrack.stats.guard_violations);
+    out->double_frees = memtrack_stat_load(&g_memtrack.stats.double_frees);
+    out->invalid_frees = memtrack_stat_load(&g_memtrack.stats.invalid_frees);
+    for (int i = 0; i < MEM_CAT_COUNT; i++) {
+        MemtrackCategoryStats* source = &g_memtrack.stats.categories[i];
+        MemtrackCategoryStats* destination = &out->categories[i];
+        destination->current_bytes = memtrack_stat_load(&source->current_bytes);
+        destination->current_count = memtrack_stat_load(&source->current_count);
+        destination->peak_bytes = memtrack_stat_load(&source->peak_bytes);
+        destination->peak_count = memtrack_stat_load(&source->peak_count);
+        destination->total_allocs = memtrack_stat_load(&source->total_allocs);
+        destination->total_frees = memtrack_stat_load(&source->total_frees);
+        destination->total_bytes_alloc = memtrack_stat_load(&source->total_bytes_alloc);
     }
 }
 
@@ -447,7 +395,7 @@ bool memtrack_init(MemtrackMode mode) {
     g_memtrack.hard_limit = 512 * 1024 * 1024;      // 512 MB
     g_memtrack.critical_limit = 768 * 1024 * 1024;  // 768 MB
 
-    if (mode != MEMTRACK_MODE_OFF) {
+    if (mode == MEMTRACK_MODE_DEBUG) {
         g_memtrack.alloc_map = create_alloc_map();
         if (!g_memtrack.alloc_map) {
             memtrack_report_error("memtrack: failed to create allocation map");
@@ -463,38 +411,6 @@ bool memtrack_init(MemtrackMode mode) {
     return true;
 }
 
-static void memtrack_log_live_line_stats(void) {
-    size_t shown = 0;
-    size_t hidden = 0;
-
-    for (int category = 0; category < MEM_CAT_COUNT; category++) {
-        for (size_t i = 0; i < MAX_LINE_STATS; i++) {
-            MemtrackLineStats* slot = &g_memtrack.line_stats[i];
-            if (!slot->used || slot->current_count == 0 ||
-                    slot->category != (MemCategory)category) {
-                continue;
-            }
-            if (shown < MAX_LINE_STATS_REPORT) {
-                memtrack_report_error("memtrack:     %s line %d: %zu allocs, %zu bytes",
-                        memtrack_category_names[slot->category], slot->line,
-                        slot->current_count, slot->current_bytes);
-                shown++;
-            } else {
-                hidden++;
-            }
-        }
-    }
-
-    if (g_memtrack.line_stats_overflow_count > 0) {
-        memtrack_report_error("memtrack:     unknown line: %zu allocs, %zu bytes",
-                g_memtrack.line_stats_overflow_count,
-                g_memtrack.line_stats_overflow_bytes);
-    }
-    if (hidden > 0) {
-        memtrack_report_error("memtrack:     ... %zu more allocation line(s)", hidden);
-    }
-}
-
 size_t memtrack_shutdown(void) {
     if (!g_memtrack.initialized) {
         return 0;
@@ -507,14 +423,14 @@ size_t memtrack_shutdown(void) {
     if (g_memtrack.mode == MEMTRACK_MODE_DEBUG && g_memtrack.alloc_map) {
         leak_count = hashmap_count(g_memtrack.alloc_map);
     } else if (g_memtrack.mode == MEMTRACK_MODE_STATS) {
-        leak_count = g_memtrack.stats.current_count;
+        leak_count = memtrack_stat_load(&g_memtrack.stats.current_count);
     }
 
     // Capture stats while holding lock
-    size_t peak_bytes = g_memtrack.stats.peak_bytes;
-    size_t total_allocs = g_memtrack.stats.total_allocs;
-    size_t current_bytes = g_memtrack.stats.current_bytes;
-    size_t current_count = g_memtrack.stats.current_count;
+    size_t peak_bytes = memtrack_stat_load(&g_memtrack.stats.peak_bytes);
+    size_t total_allocs = memtrack_stat_load(&g_memtrack.stats.total_allocs);
+    size_t current_bytes = memtrack_stat_load(&g_memtrack.stats.current_bytes);
+    size_t current_count = memtrack_stat_load(&g_memtrack.stats.current_count);
     int32_t pool_count = g_memtrack.pool_count;
     int32_t arena_count = g_memtrack.arena_count;
 
@@ -534,13 +450,13 @@ size_t memtrack_shutdown(void) {
         // log per-category breakdown
         for (int i = 0; i < MEM_CAT_COUNT; i++) {
             MemtrackCategoryStats* cs = &g_memtrack.stats.categories[i];
-            if (cs->current_count > 0) {
+            size_t category_count = memtrack_stat_load(&cs->current_count);
+            if (category_count > 0) {
                 memtrack_report_error("memtrack:   %s: %zu allocs, %zu bytes",
-                         memtrack_category_names[i], cs->current_count, cs->current_bytes);
+                         memtrack_category_names[i], category_count,
+                         memtrack_stat_load(&cs->current_bytes));
             }
         }
-        memtrack_report_error("memtrack:   allocation sites:");
-        memtrack_log_live_line_stats();
     }
 
     if (pool_count > 0) {
@@ -579,8 +495,11 @@ MemtrackMode memtrack_get_mode(void) {
 void memtrack_set_mode(MemtrackMode mode) {
     lock_tracker();
 
-    if (g_memtrack.alloc_map && hashmap_count(g_memtrack.alloc_map) > 0 &&
-        mode != g_memtrack.mode) {
+    bool debug_allocations_live = g_memtrack.alloc_map &&
+        hashmap_count(g_memtrack.alloc_map) > 0;
+    bool stats_allocations_live = g_memtrack.mode == MEMTRACK_MODE_STATS &&
+        memtrack_stat_load(&g_memtrack.stats.current_count) > 0;
+    if ((debug_allocations_live || stats_allocations_live) && mode != g_memtrack.mode) {
         // Allocation representation (raw, guarded, or header-backed) is a
         // lifetime invariant; changing it with live blocks would make free
         // interpret a block using the wrong representation.
@@ -589,9 +508,7 @@ void memtrack_set_mode(MemtrackMode mode) {
         return;
     }
 
-    // Any tracked mode needs the live registry so invalid frees never inspect
-    // memory before an arbitrary caller pointer.
-    if (mode != MEMTRACK_MODE_OFF && !g_memtrack.alloc_map) {
+    if (mode == MEMTRACK_MODE_DEBUG && !g_memtrack.alloc_map) {
         g_memtrack.alloc_map = create_alloc_map();
     }
 
@@ -616,6 +533,20 @@ void* mem_alloc_loc(size_t size, MemCategory category, int line)
         return malloc(size);
     }
 
+    if (g_memtrack.mode == MEMTRACK_MODE_STATS) {
+        size_t real_size = 0;
+        if (!math_checked_add(sizeof(MemAllocHeader), size, &real_size)) {
+            return NULL;
+        }
+        MemAllocHeader* header = (MemAllocHeader*)malloc(real_size);
+        if (!header) return NULL;
+        header->size = size;
+        header->category = (uint16_t)category;
+        update_category_stats_alloc(category, size);
+        update_global_stats_alloc(size);
+        return (void*)(header + 1);
+    }
+
     void* user_ptr = NULL;
     void* real_ptr = NULL;
     size_t real_size = size;
@@ -636,19 +567,6 @@ void* mem_alloc_loc(size_t size, MemCategory category, int line)
         // Fill user memory with pattern (helps detect use of uninitialized)
         user_ptr = (char*)real_ptr + GUARD_SIZE;
         memset(user_ptr, FILL_BYTE_ALLOC, size);
-    } else {
-        // STATS mode: prepend MemAllocHeader so mem_free can recover size/category
-        if (!math_checked_add(sizeof(MemAllocHeader), size, &real_size)) {
-            return NULL;
-        }
-        real_ptr = malloc(real_size);
-        if (!real_ptr) return NULL;
-        MemAllocHeader* hdr = (MemAllocHeader*)real_ptr;
-        hdr->size = size;
-        hdr->category = (uint16_t)category;
-        hdr->magic = MEMTRACK_STATS_MAGIC;
-        hdr->line = line;
-        user_ptr = (void*)(hdr + 1);
     }
 
     lock_tracker();
@@ -663,8 +581,6 @@ void* mem_alloc_loc(size_t size, MemCategory category, int line)
         .line = line
     };
 
-    // The registry is authoritative in both tracked modes. In particular,
-    // STATS mode must not read a header before an arbitrary invalid pointer.
     if (!g_memtrack.alloc_map) {
         unlock_tracker();
         free(real_ptr);
@@ -680,10 +596,6 @@ void* mem_alloc_loc(size_t size, MemCategory category, int line)
     // Update stats
     update_category_stats_alloc(category, size);
     update_global_stats_alloc(size);
-    if (g_memtrack.mode == MEMTRACK_MODE_STATS) {
-        update_line_stats_alloc(category, size, line);
-    }
-
     unlock_tracker();
 
     return user_ptr;
@@ -740,8 +652,18 @@ void* mem_realloc_loc(void* ptr, size_t new_size, MemCategory category, int line
         return realloc(ptr, new_size);
     }
 
-    // Use the same transactional path in STATS and DEBUG. In particular, a
-    // failed growth preserves the old allocation and its diagnostics.
+    if (g_memtrack.mode == MEMTRACK_MODE_STATS) {
+        MemAllocHeader* header = ((MemAllocHeader*)ptr) - 1;
+        size_t old_size = header->size;
+        void* replacement = mem_alloc_loc(new_size, category, line);
+        if (!replacement) return NULL;
+        memcpy(replacement, ptr, old_size < new_size ? old_size : new_size);
+        mem_free_loc(ptr, line);
+        return replacement;
+    }
+
+    // DEBUG mode uses the registry for transactional growth. A failed growth
+    // preserves the old allocation and its diagnostics.
     size_t old_size = 0;
 
     lock_tracker();
@@ -787,43 +709,28 @@ void mem_free_loc(void* ptr, int line)
         return;
     }
 
+    if (g_memtrack.mode == MEMTRACK_MODE_STATS) {
+        MemAllocHeader* header = ((MemAllocHeader*)ptr) - 1;
+        MemCategory category = normalize_category((MemCategory)header->category);
+        size_t size = header->size;
+        update_category_stats_free(category, size);
+        update_global_stats_free(size);
+        free(header);
+        return;
+    }
+
     lock_tracker();
 
     AllocInfo key = {.ptr = ptr};
     const AllocInfo* info = g_memtrack.alloc_map
         ? (const AllocInfo*)hashmap_get(g_memtrack.alloc_map, &key) : NULL;
     if (!info) {
-        g_memtrack.stats.invalid_frees++;
+        (void)memtrack_stat_add(&g_memtrack.stats.invalid_frees, 1);
         if (line > 0) {
             memtrack_report_error("memtrack: invalid free at line %d - pointer %p not tracked", line, ptr);
         } else {
             memtrack_report_error("memtrack: invalid free - pointer %p not tracked", ptr);
         }
-        unlock_tracker();
-        return;
-    }
-
-    if (g_memtrack.mode == MEMTRACK_MODE_STATS) {
-        // Stats allocations carry their owning base in the inline header. The
-        // registry validates the user pointer, but its copy is not the
-        // representation used to recover the malloc base.
-        MemAllocHeader* hdr = ((MemAllocHeader*)ptr) - 1;
-        if (hdr->magic != MEMTRACK_STATS_MAGIC) {
-            g_memtrack.stats.invalid_frees++;
-            memtrack_report_error("memtrack: stats-mode free of invalid pointer %p",
-                                  ptr);
-            unlock_tracker();
-            return;
-        }
-        MemCategory category = (MemCategory)hdr->category;
-        size_t size = hdr->size;
-        int alloc_line = hdr->line;
-        update_category_stats_free(category, size);
-        update_global_stats_free(size);
-        update_line_stats_free(category, size, alloc_line);
-        hashmap_delete(g_memtrack.alloc_map, &key);
-        hdr->magic = 0;
-        free(hdr);
         unlock_tracker();
         return;
     }
@@ -835,7 +742,7 @@ void mem_free_loc(void* ptr, int line)
                                           GUARD_SIZE, GUARD_BYTE_TAIL);
 
         if (!head_ok || !tail_ok) {
-            g_memtrack.stats.guard_violations++;
+            (void)memtrack_stat_add(&g_memtrack.stats.guard_violations, 1);
             memtrack_report_error("memtrack: buffer overflow detected for allocation %p "
                      "(alloc line %d, size=%zu, category=%s)",
                      ptr, info->line, info->size,
@@ -847,10 +754,6 @@ void mem_free_loc(void* ptr, int line)
 
     update_category_stats_free(info->category, info->size);
     update_global_stats_free(info->size);
-    if (g_memtrack.mode == MEMTRACK_MODE_STATS) {
-        update_line_stats_free(info->category, info->size, info->line);
-    }
-
     void* real_ptr = info->real_ptr;
     hashmap_delete(g_memtrack.alloc_map, &key);
     free(real_ptr);
@@ -962,24 +865,26 @@ char* mem_strndup(const char* str, size_t max_len, MemCategory category) {
 // ============================================================================
 
 void memtrack_get_stats(MemtrackStats* stats) {
-    lock_tracker();
-    memcpy(stats, &g_memtrack.stats, sizeof(MemtrackStats));
+    memtrack_stats_snapshot(stats);
     if (stats->current_count == 0) {
-        // live-byte telemetry must follow the live-allocation invariant; the
-        // debug allocation map is authoritative when every allocation is gone.
         stats->current_bytes = 0;
     }
-    unlock_tracker();
 }
 
 void memtrack_get_category_stats(MemCategory category, MemtrackCategoryStats* stats) {
-    lock_tracker();
-    memcpy(stats, &g_memtrack.stats.categories[category], sizeof(MemtrackCategoryStats));
+    if (!stats) return;
+    category = normalize_category(category);
+    MemtrackCategoryStats* source = &g_memtrack.stats.categories[category];
+    stats->current_bytes = memtrack_stat_load(&source->current_bytes);
+    stats->current_count = memtrack_stat_load(&source->current_count);
+    stats->peak_bytes = memtrack_stat_load(&source->peak_bytes);
+    stats->peak_count = memtrack_stat_load(&source->peak_count);
+    stats->total_allocs = memtrack_stat_load(&source->total_allocs);
+    stats->total_frees = memtrack_stat_load(&source->total_frees);
+    stats->total_bytes_alloc = memtrack_stat_load(&source->total_bytes_alloc);
     if (stats->current_count == 0) {
-        // keep per-category live bytes consistent with no live allocations.
         stats->current_bytes = 0;
     }
-    unlock_tracker();
 }
 
 bool memtrack_get_alloc_info(void* ptr, size_t* out_size, MemCategory* out_category) {
@@ -1009,15 +914,16 @@ bool memtrack_is_allocated(void* ptr) {
 }
 
 size_t memtrack_get_current_usage(void) {
-    return g_memtrack.stats.current_bytes;
+    return memtrack_stat_load(&g_memtrack.stats.current_bytes);
 }
 
 size_t memtrack_get_peak_usage(void) {
-    return g_memtrack.stats.peak_bytes;
+    return memtrack_stat_load(&g_memtrack.stats.peak_bytes);
 }
 
 size_t memtrack_get_category_usage(MemCategory category) {
-    return g_memtrack.stats.categories[category].current_bytes;
+    category = normalize_category(category);
+    return memtrack_stat_load(&g_memtrack.stats.categories[category].current_bytes);
 }
 
 // ============================================================================
@@ -1047,26 +953,26 @@ void memtrack_set_limits(size_t soft_limit, size_t hard_limit, size_t critical_l
 }
 
 MemPressureLevel memtrack_get_pressure_level(void) {
-    return compute_pressure_level(g_memtrack.stats.current_bytes);
+    return compute_pressure_level(memtrack_get_current_usage());
 }
 
 size_t memtrack_trigger_pressure(MemPressureLevel level) {
-    size_t freed_before = g_memtrack.stats.current_bytes;
+    size_t freed_before = memtrack_get_current_usage();
     mem_context_request_reclaim(NULL, level, 0);
 
-    return freed_before - g_memtrack.stats.current_bytes;
+    return freed_before - memtrack_get_current_usage();
 }
 
 size_t memtrack_request_free(size_t bytes_needed) {
-    size_t freed_before = g_memtrack.stats.current_bytes;
+    size_t freed_before = memtrack_get_current_usage();
     mem_context_request_reclaim(NULL, MEM_PRESSURE_MEDIUM, bytes_needed);
 
-    size_t freed = freed_before - g_memtrack.stats.current_bytes;
+    size_t freed = freed_before - memtrack_get_current_usage();
 
     // If not enough freed, escalate
     if (freed < bytes_needed) {
         mem_context_request_reclaim(NULL, MEM_PRESSURE_HIGH, bytes_needed - freed);
-        freed = freed_before - g_memtrack.stats.current_bytes;
+        freed = freed_before - memtrack_get_current_usage();
     }
 
     return freed;
@@ -1077,19 +983,20 @@ size_t memtrack_request_free(size_t bytes_needed) {
 // ============================================================================
 
 void memtrack_log_usage(void) {
-    lock_tracker();
+    MemtrackStats stats;
+    memtrack_stats_snapshot(&stats);
 
     log_info("memtrack: === Memory Usage Report ===");
     log_info("memtrack: Current: %zu bytes (%zu allocs)",
-             g_memtrack.stats.current_bytes, g_memtrack.stats.current_count);
+             stats.current_bytes, stats.current_count);
     log_info("memtrack: Peak: %zu bytes (%zu allocs)",
-             g_memtrack.stats.peak_bytes, g_memtrack.stats.peak_count);
+             stats.peak_bytes, stats.peak_count);
     log_info("memtrack: Total: %zu allocs, %zu frees",
-             g_memtrack.stats.total_allocs, g_memtrack.stats.total_frees);
+             stats.total_allocs, stats.total_frees);
 
     log_info("memtrack: --- By Category ---");
     for (int i = 0; i < MEM_CAT_COUNT; i++) {
-        MemtrackCategoryStats* cs = &g_memtrack.stats.categories[i];
+        MemtrackCategoryStats* cs = &stats.categories[i];
         if (cs->current_bytes > 0 || cs->total_allocs > 0) {
             log_info("memtrack: %-15s: %10zu bytes (%zu allocs), peak: %zu",
                     memtrack_category_names[i], cs->current_bytes,
@@ -1097,7 +1004,6 @@ void memtrack_log_usage(void) {
         }
     }
 
-    unlock_tracker();
 }
 
 // Callback for iterating allocations
@@ -1208,7 +1114,7 @@ uint32_t memtrack_snapshot(void) {
             SnapshotEntry* snap = &g_memtrack.snapshots[i];
             snap->handle = g_memtrack.next_snapshot_handle++;
             snap->active = true;
-            memcpy(&snap->stats, &g_memtrack.stats, sizeof(MemtrackStats));
+            memtrack_stats_snapshot(&snap->stats);
 
             unlock_tracker();
             return snap->handle;
@@ -1238,18 +1144,20 @@ void memtrack_compare_snapshot(uint32_t snapshot_handle) {
         return;
     }
 
-    int64_t bytes_diff = (int64_t)g_memtrack.stats.current_bytes - (int64_t)snap->stats.current_bytes;
-    int64_t count_diff = (int64_t)g_memtrack.stats.current_count - (int64_t)snap->stats.current_count;
+    MemtrackStats current;
+    memtrack_stats_snapshot(&current);
+    int64_t bytes_diff = (int64_t)current.current_bytes - (int64_t)snap->stats.current_bytes;
+    int64_t count_diff = (int64_t)current.current_count - (int64_t)snap->stats.current_count;
 
     log_info("memtrack: === Snapshot Comparison ===");
     log_info("memtrack: Bytes: %+lld (%zu -> %zu)",
-             bytes_diff, snap->stats.current_bytes, g_memtrack.stats.current_bytes);
+             bytes_diff, snap->stats.current_bytes, current.current_bytes);
     log_info("memtrack: Allocs: %+lld (%zu -> %zu)",
-             count_diff, snap->stats.current_count, g_memtrack.stats.current_count);
+             count_diff, snap->stats.current_count, current.current_count);
 
     log_info("memtrack: --- Category Changes ---");
     for (int i = 0; i < MEM_CAT_COUNT; i++) {
-        int64_t cat_diff = (int64_t)g_memtrack.stats.categories[i].current_bytes -
+        int64_t cat_diff = (int64_t)current.categories[i].current_bytes -
                           (int64_t)snap->stats.categories[i].current_bytes;
         if (cat_diff != 0) {
             log_info("memtrack: %-15s: %+lld bytes", memtrack_category_names[i], cat_diff);

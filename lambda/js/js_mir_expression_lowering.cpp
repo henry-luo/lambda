@@ -7737,6 +7737,137 @@ static char* jm_static_literal_copy(JsMirTranspiler* mt, String* source) {
     return copy;
 }
 
+static bool jm_static_literal_recipe_set_literal(JsMirTranspiler* mt,
+        JsLiteralNode* literal, JsStaticLiteralRecipe* recipe) {
+    if (!mt || !literal || !recipe) return false;
+    switch (literal->literal_type) {
+    case AST_LITERAL_NUMBER: {
+        if (literal->is_bigint ||
+                !jm_float_const_is_inline(literal->value.number_value)) {
+            return false;
+        }
+        double value = literal->value.number_value;
+        uint64_t bits;
+        __builtin_memcpy(&bits, &value, sizeof(bits));
+        recipe->kind = JS_STATIC_LITERAL_IMMEDIATE;
+        recipe->immediate = value == 0.0
+            ? ITEM_FLOAT_P0 | (bits >> 63) : bits;
+        return true;
+    }
+    case AST_LITERAL_STRING:
+        if (!literal->value.string_value) return false;
+        recipe->string_chars = jm_static_literal_copy(mt,
+            literal->value.string_value);
+        if (!recipe->string_chars) return false;
+        recipe->string_len = (int)literal->value.string_value->len;
+        recipe->kind = JS_STATIC_LITERAL_STRING;
+        return true;
+    case AST_LITERAL_BOOLEAN:
+        recipe->kind = JS_STATIC_LITERAL_IMMEDIATE;
+        recipe->immediate = literal->value.boolean_value ? ITEM_TRUE : ITEM_FALSE;
+        return true;
+    case AST_LITERAL_NULL:
+        recipe->kind = JS_STATIC_LITERAL_IMMEDIATE;
+        recipe->immediate = ITEM_NULL;
+        return true;
+    case AST_LITERAL_UNDEFINED:
+        recipe->kind = JS_STATIC_LITERAL_IMMEDIATE;
+        recipe->immediate = ITEM_JS_UNDEFINED;
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool jm_static_literal_recipe_set_node(JsMirTranspiler* mt,
+        JsAstNode* node, JsStaticLiteralRecipe* recipe) {
+    if (!mt || !node || !recipe || !js_input || !js_input->pool) return false;
+    if (node->node_type == AST_NODE_LITERAL) {
+        return jm_static_literal_recipe_set_literal(mt, (JsLiteralNode*)node, recipe);
+    }
+    if (node->node_type == AST_NODE_ARRAY) {
+        JsArrayNode* array = (JsArrayNode*)node;
+        if (array->length < 0) return false;
+        recipe->kind = JS_STATIC_LITERAL_ARRAY;
+        recipe->length = array->length;
+        if (array->length == 0) return true;
+        JsStaticLiteralRecipe* children = (JsStaticLiteralRecipe*)pool_calloc(
+            js_input->pool, (size_t)array->length * sizeof(JsStaticLiteralRecipe));
+        if (!children) return false;
+        int index = 0;
+        for (JsAstNode* element = array->elements; element; element = element->next) {
+            if (index >= array->length) return false;
+            if (element->node_type == AST_NODE_NULL) {
+                children[index].kind = JS_STATIC_LITERAL_HOLE;
+            } else if (!jm_static_literal_recipe_set_node(mt, element,
+                    &children[index])) {
+                return false;
+            }
+            index++;
+        }
+        if (index != array->length) return false;
+        recipe->children = children;
+        return true;
+    }
+    if (node->node_type == AST_NODE_MAP) {
+        JsObjectNode* object = (JsObjectNode*)node;
+        int count = 0;
+        for (JsAstNode* property_node = object->properties; property_node;
+                property_node = property_node->next) {
+            if (property_node->node_type != AST_NODE_PROPERTY || count == INT_MAX) {
+                return false;
+            }
+            JsPropertyNode* property = (JsPropertyNode*)property_node;
+            String* name = jm_literal_property_name(property);
+            if (!name || (name->len == 9 && memcmp(name->chars, "__proto__", 9) == 0) ||
+                    !property->value) {
+                return false;
+            }
+            count++;
+        }
+        recipe->kind = JS_STATIC_LITERAL_OBJECT;
+        recipe->length = count;
+        if (count == 0) return true;
+        JsStaticLiteralRecipe* children = (JsStaticLiteralRecipe*)pool_calloc(
+            js_input->pool, (size_t)count * sizeof(JsStaticLiteralRecipe));
+        if (!children) return false;
+        int index = 0;
+        for (JsAstNode* property_node = object->properties; property_node;
+                property_node = property_node->next, index++) {
+            JsPropertyNode* property = (JsPropertyNode*)property_node;
+            String* name = jm_literal_property_name(property);
+            children[index].key_chars = jm_static_literal_copy(mt, name);
+            children[index].key_len = (int)name->len;
+            if (!children[index].key_chars || !jm_static_literal_recipe_set_node(mt,
+                    property->value, &children[index])) {
+                return false;
+            }
+        }
+        recipe->children = children;
+        return true;
+    }
+    return false;
+}
+
+static JsStaticLiteralRecipe* jm_static_composite_literal_recipe(
+        JsMirTranspiler* mt, JsAstNode* node) {
+    if (!mt || !node || !js_input || !js_input->pool) return NULL;
+    JsStaticLiteralRecipe* recipe = (JsStaticLiteralRecipe*)pool_calloc(
+        js_input->pool, sizeof(JsStaticLiteralRecipe));
+    if (!recipe || !jm_static_literal_recipe_set_node(mt, node, recipe)) return NULL;
+    if ((recipe->kind != JS_STATIC_LITERAL_ARRAY &&
+            recipe->kind != JS_STATIC_LITERAL_OBJECT) || !recipe->children) {
+        return NULL;
+    }
+    for (int index = 0; index < recipe->length; index++) {
+        JsStaticLiteralKind kind = (JsStaticLiteralKind)recipe->children[index].kind;
+        if (kind == JS_STATIC_LITERAL_ARRAY || kind == JS_STATIC_LITERAL_OBJECT) {
+            return recipe;
+        }
+    }
+    return NULL;
+}
+
 static JsStaticObjectProperty* jm_static_primitive_object_properties(
         JsMirTranspiler* mt, JsObjectNode* object, int* out_length) {
     if (out_length) *out_length = 0;
@@ -7797,10 +7928,16 @@ static MirValue jm_emit_array_value(JsMirTranspiler* mt,
     MIR_reg_t array;
     Item* static_items = has_spread
         ? NULL : jm_static_inline_number_array_items(mt, arr);
+    JsStaticLiteralRecipe* static_recipe = static_items || has_spread ? NULL
+        : jm_static_composite_literal_recipe(mt, (JsAstNode*)arr);
     if (static_items) {
         array = jm_call_2(mt, "js_array_new_from_static_items", MIR_T_I64,
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)static_items),
             MIR_T_I64, MIR_new_int_op(mt->ctx, arr->length));
+    } else if (static_recipe) {
+        array = jm_call_1(mt, "js_static_literal_from_recipe", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)static_recipe));
+        jm_emit_error_lane_propagate_check(mt);
     } else if (has_spread) {
         // Use empty array + push for arrays with spread
         array = jm_call_1(mt, "js_array_new", MIR_T_I64,
@@ -7927,6 +8064,15 @@ static MirValue jm_emit_object_value(JsMirTranspiler* mt,
             MIR_T_I64, MIR_new_int_op(mt->ctx,
                 (int64_t)(uintptr_t)static_properties),
             MIR_T_I64, MIR_new_int_op(mt->ctx, static_property_count));
+        jm_emit_error_lane_propagate_check(mt);
+        return jm_expression_value(mt, (JsAstNode*)obj, object, LMD_TYPE_MAP,
+            VALUE_REP_ITEM);
+    }
+    JsStaticLiteralRecipe* static_recipe = jm_static_composite_literal_recipe(mt,
+        (JsAstNode*)obj);
+    if (static_recipe) {
+        MIR_reg_t object = jm_call_1(mt, "js_static_literal_from_recipe", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)static_recipe));
         jm_emit_error_lane_propagate_check(mt);
         return jm_expression_value(mt, (JsAstNode*)obj, object, LMD_TYPE_MAP,
             VALUE_REP_ITEM);

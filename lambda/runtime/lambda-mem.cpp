@@ -267,8 +267,7 @@ static void js_native_map_gc_trace(void* data, gc_heap_t* gc) {
 
 static void gc_finalize_arraybuffer(JsArrayBuffer* ab, gc_native_seen_t* seen_native) {
     if (!ab || gc_native_seen_seen_or_add(seen_native, ab)) return;
-    byte_buffer_destroy(&ab->handle);
-    mem_free(ab);
+    js_arraybuffer_destroy(ab);
 }
 
 static void gc_finalize_typed_array(JsTypedArray* ta, gc_native_seen_t* seen_native) {
@@ -614,6 +613,21 @@ extern "C" void heap_gc_collect(void) {
     // Side-stack virtual reservations are cheap; return untouched committed
     // pages after a collection so transient recursion does not set the RSS floor.
     lambda_side_stack_decommit_unused();
+}
+
+extern "C" void* heap_gc_external_preflight(size_t bytes, int kind) {
+    if (!context || !context->heap || !context->heap->gc) return NULL;
+    gc_heap_t* gc = context->heap->gc;
+    gc_external_preflight(gc, bytes, kind);
+    return gc;
+}
+
+extern "C" void heap_gc_external_record_alloc(void* owner, size_t bytes, int kind) {
+    gc_external_record_alloc((gc_heap_t*)owner, bytes, kind);
+}
+
+extern "C" void heap_gc_external_record_release(void* owner, size_t bytes, int kind) {
+    gc_external_record_release((gc_heap_t*)owner, bytes, kind);
 }
 
 // register an external root slot (e.g., BSS global address)

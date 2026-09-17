@@ -262,6 +262,28 @@ typedef struct JsStaticObjectProperty {
 
 Item js_object_new_from_static_properties(const JsStaticObjectProperty* properties,
     int length);
+// A recursive compiler-owned literal recipe. It represents only side-effect-free
+// literal syntax, while every invocation materializes a fresh JS value graph.
+typedef enum JsStaticLiteralKind {
+    JS_STATIC_LITERAL_IMMEDIATE = 0,
+    JS_STATIC_LITERAL_STRING,
+    JS_STATIC_LITERAL_ARRAY,
+    JS_STATIC_LITERAL_OBJECT,
+    JS_STATIC_LITERAL_HOLE
+} JsStaticLiteralKind;
+
+typedef struct JsStaticLiteralRecipe {
+    const char* key_chars;
+    const char* string_chars;
+    const struct JsStaticLiteralRecipe* children;
+    uint64_t immediate;
+    int key_len;
+    int string_len;
+    int length;
+    uint8_t kind;
+} JsStaticLiteralRecipe;
+
+Item js_static_literal_from_recipe(const JsStaticLiteralRecipe* recipe);
 // An array's companion property map is created on first use — index accessors,
 // non-index keys and attribute bits all live there. Callers that are about to
 // write must go through this; a bare js_array_props() read can be NULL.

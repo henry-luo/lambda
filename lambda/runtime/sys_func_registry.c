@@ -83,6 +83,9 @@ extern Item js_array_new_from_static_items(const Item* items, int length);
 struct JsStaticObjectProperty;
 extern Item js_object_new_from_static_properties(
     const struct JsStaticObjectProperty* properties, int length);
+struct JsStaticLiteralRecipe;
+extern Item js_static_literal_from_recipe(
+    const struct JsStaticLiteralRecipe* recipe);
 extern Item js_super_bind_this(Item this_val, Item construct_result);
 extern Item js_get_super_this_value(void);
 extern Item js_get_super_constructor_from_receiver(Item receiver, Item fallback_ctor);
@@ -2165,6 +2168,12 @@ JitImport jit_runtime_imports[] = {
       JIT_EXCEPTION_PRESERVES,
       JIT_ARG_EFFECT(0, JIT_ARG_BORROWED) |
       JIT_ARG_EFFECT(1, JIT_ARG_BORROWED)}},
+    {"js_static_literal_from_recipe", FPTR(js_static_literal_from_recipe),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER),
+      JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      JIT_EXCEPTION_PRESERVES,
+      JIT_ARG_EFFECT(0, JIT_ARG_BORROWED)}},
     {"js_get_reference", FPTR(js_get_reference)},
     {"js_get_name_id", FPTR(js_get_name_id),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM}},

@@ -135,6 +135,31 @@ int  gc_native_seen_seen_or_add(gc_native_seen_t* seen, void* ptr);
 // grow the object zone without reaching a data-zone allocation safepoint.
 #define GC_OBJECT_HEAP_THRESHOLD (GC_DATA_ZONE_BLOCK_SIZE * 4)
 
+// Native payloads owned by GC-traced wrappers are not in either GC zone. Keep
+// their pressure explicit so a stream of dead ArrayBuffers cannot wait for an
+// unrelated object or data allocation before reaching a collection boundary.
+#define GC_EXTERNAL_PRESSURE_THRESHOLD GC_DATA_ZONE_THRESHOLD
+#define GC_TENURED_FULL_COMPACT_THRESHOLD (GC_DATA_ZONE_BLOCK_SIZE * 2)
+#define GC_EXTERNAL_KIND_COUNT 4
+
+typedef enum gc_external_kind {
+    GC_EXTERNAL_KIND_ARRAYBUFFER = 0,
+    GC_EXTERNAL_KIND_JS_DENSE_ARRAY = 1,
+    GC_EXTERNAL_KIND_BINARY = 2,
+    GC_EXTERNAL_KIND_OTHER = 3
+} gc_external_kind_t;
+
+typedef struct gc_external_stats {
+    size_t live_bytes;
+    size_t peak_bytes;
+    size_t bytes_since_collection;
+    size_t live_by_kind[GC_EXTERNAL_KIND_COUNT];
+    size_t peak_by_kind[GC_EXTERNAL_KIND_COUNT];
+    uint64_t allocation_count;
+    uint64_t release_count;
+    uint64_t pressure_collections;
+} gc_external_stats_t;
+
 // Initial registered root slot capacity; grows dynamically as needed.
 #define GC_ROOT_SLOTS_INITIAL 256
 
@@ -187,6 +212,8 @@ typedef struct gc_tune_stats {
     size_t   large_peak_count;      // peak live large-object count
     uint64_t mark_collections;      // collections whose mark phase was timed
     uint64_t mark_nanos;            // cumulative mark-phase wall time (ns)
+    uint64_t full_data_compactions; // successful tenured-zone evacuations
+    size_t   full_data_bytes_released; // retired tenured bytes returned to VM
 } gc_tune_stats_t;
 
 /**
@@ -333,12 +360,24 @@ typedef struct gc_heap {
     void* mem_node;                 // MemContext registration node (NULL if untracked)
 
     gc_tune_stats_t tune;           // performance counters (see gc_tune_stats_t)
+    gc_external_stats_t external;   // native payload pressure (not a liveness registry)
 } gc_heap_t;
 
 /**
  * Snapshot the tuning counters for this heap. Safe to call at any time.
  */
 gc_tune_stats_t gc_heap_get_tune_stats(const gc_heap_t* gc);
+
+// Snapshot counters for native payloads whose lifetime is owned by a
+// GC-traced wrapper. These counters never determine reachability.
+gc_external_stats_t gc_heap_get_external_stats(const gc_heap_t* gc);
+
+// A caller invokes preflight before a legal MAY_GC native allocation, then
+// records the successfully allocated payload. Release follows the physical
+// payload lifetime and never starts a collection. `kind` is gc_external_kind_t.
+void gc_external_preflight(gc_heap_t* gc, size_t bytes, int kind);
+void gc_external_record_alloc(gc_heap_t* gc, size_t bytes, int kind);
+void gc_external_record_release(gc_heap_t* gc, size_t bytes, int kind);
 
 /**
  * Create a new GC heap with VM-owned zones and direct memtrack metadata.

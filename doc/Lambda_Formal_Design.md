@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 9.0.0 (2026-09-16)
+**Spec version:** 9.0.1 (2026-09-17)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -797,18 +797,22 @@ that carries them.
   rewind of published data — requires exclusivity (`ref_count == 1`,
   debug-checked). Immortal storage (D4.1.2) is the limiting case: a
   permanent reference. [Mem_Heap §1.4; MP-17]
-- **D4.2.5v2*** Allocation tracking is a **diagnostic, never the mechanism**:
+- **D4.2.5v3*** Allocation tracking is a **diagnostic, never the mechanism**:
   release builds default `memtrack` OFF; STATS is counters-only;
   allocation-level registry records are DEBUG-exclusive — no tracked mode
   may impose a per-allocation global lock on release hot paths, and the
   Pool hot path is registry-free and mutex-free (fixed-header recovery,
   boundary tags, and free-list links owned by the Pool). Pool extent
   reservation/commit and teardown may enter the VM/context slow path, but
-  per-block operations do not. Roadmap: the raw surface splits into
+  per-block operations do not. **Outside the memory-management implementations
+  under `lib/`, application code MUST NEVER call libc `malloc`, `calloc`,
+  `realloc`, or `free` directly. It MUST use the corresponding hardened
+  `memtrack` API (`mem_alloc`, `mem_calloc`, `mem_realloc`, `mem_free`) or an
+  owning GC/Arena/Pool API; direct libc allocation is confined to implementing
+  those memory-management APIs in `lib/`.** The raw surface splits into
   `stack_alloc`/`stack_free`
   (function-scoped LIFO temporaries on a thread-confined sidecar stack)
-  plus manager-internal use — free-floating `malloc`/`calloc`/`free`
-  disappears from application code, enforced by source audit.
+  plus manager-internal use; the source audit enforces the prohibition.
   [Mem_Heap §2.1, §2.4, §5.2; MP-13, MP-14, MP-18, MP-21]
 
 ### D4.3 Garbage collection
@@ -2038,7 +2042,7 @@ slice; no formal semantic ruling or document semver changes.
 | D4.1.5 | String-builder two-case model matches the code (`StrBuf` standalone; `StringBuf` owner-backed, pool-backed `realloc` growth). The arena-backed tail-growth variant does not exist yet — it needs the `arena_mark`/`arena_rewind` promotion of D4.1.4 (Mem_Heap R6). Formatters are the first consumer (already structurally ready: destination pool passed in, scratch on a separate pool, no destination allocations during the walk); parsers follow, subject to the tail-ownership hazard. NamePool/ShapePool still take a `Pool*` — conversion is Mem_Heap R4b. |
 | D4.2.3 | MemContext graph exists; the every-arena/pool context-binding audit (Mem_Heap R6) has not run. |
 | D4.2.4 | Ref-counting not implemented; shared-allocator census (Mem_Heap §15 Q7) pending. |
-| D4.2.5v2 | R1a landed 2026-08-10 (release default `MEMTRACK_MODE_OFF`, measured: primes2 825→155 ms). R3a removed the historical Pool side index, and R7 landed the Pool-owned boundary-tag/free-list hot path with no global mutex or registry call on block operations. STATS counters-only (R2), the `stack_alloc` split (MP-18), and independent release-performance evidence remain pending. |
+| D4.2.5v3 | R1a landed 2026-08-10 (release default `MEMTRACK_MODE_OFF`, measured: primes2 825→155 ms). R3a removed the historical Pool side index, and R7 landed the Pool-owned boundary-tag/free-list hot path with no global mutex or registry call on block operations. The 2026-09-17 revision makes the application-level ban on direct libc allocation explicit; STATS counters-only (R2), the `stack_alloc` split (MP-18), and independent release-performance evidence remain pending. |
 | D4.3.2v2 | GC size classes and data-zone policy are retained; backing storage is owned by MemVmRegion and released by the owning GC heap. |
 | D4.3.4 | Decided 2026-09-07: `gc_trace_shape_field` marks a `null`-typed lane's word conservatively (`gc_mark_possible_item`). Found through DO30: the auto tier's fast splay figure came from collections that freed the linked right subtrees (17k of 420k objects traced); reproduced deterministically on every tier with `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`; pin `test/mir/lambda/gc_splay_null_lane` under the forced-collection stress sweep. The companion robustness fix keeps `fn_map_set`'s same-width retag from typing a shared literal shape's field as `error`. |
 | D4.5.1v3 | Radiant and Lambda keep distinct policies over memtrack/VM ownership; legacy Pool/Arena backend wording is superseded; v3 records batch-only arena lifetime (two variants, D4.1.4). |

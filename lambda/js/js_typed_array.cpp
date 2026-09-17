@@ -1208,15 +1208,58 @@ extern "C" const char* js_typed_array_type_name(Item val) {
 
 static JsArrayBuffer* js_get_arraybuffer_ptr(Map* m);
 
-static JsArrayBuffer* js_arraybuffer_alloc(int byte_length) {
+// The charge follows the refcounted allocation, not its ArrayBuffer wrapper:
+// Binary snapshots may retain a buffer after JS detaches or finalizes it.
+static void js_arraybuffer_release_owned_storage(void* data, size_t capacity,
+        void* context) {
+    heap_gc_external_record_release(context, capacity,
+        HEAP_GC_EXTERNAL_ARRAYBUFFER);
+    mem_free(data);
+}
+
+static void js_arraybuffer_charge_new_storage(ByteStorage* storage, void* owner) {
+    if (!storage) return;
+    storage->release_data = js_arraybuffer_release_owned_storage;
+    storage->release_context = owner;
+    heap_gc_external_record_alloc(owner, storage->capacity,
+        HEAP_GC_EXTERNAL_ARRAYBUFFER);
+}
+
+uint8_t* js_arraybuffer_prepare_write(JsArrayBuffer* ab) {
+    if (!ab) return NULL;
+    ByteStorage* previous = ab->handle.storage;
+    uint8_t* data = byte_buffer_prepare_write(&ab->handle);
+    if (data && ab->handle.storage != previous) {
+        // COW callers hold only the native handle here, so this post-allocation
+        // charge must not collect. The next rooted allocation preflight pays
+        // the pressure debt before another external allocation is made.
+        void* owner = heap_gc_external_preflight(0, HEAP_GC_EXTERNAL_ARRAYBUFFER);
+        js_arraybuffer_charge_new_storage(ab->handle.storage, owner);
+    }
+    return data;
+}
+
+static JsArrayBuffer* js_arraybuffer_alloc_with_options(int byte_length,
+        int max_byte_length, uint32_t flags) {
+    if (byte_length < 0 || max_byte_length < byte_length) return NULL;
+    // This is a MAY_GC construction boundary: no JS value exists yet, so the
+    // preflight may collect without leaving an unrooted guest value behind.
+    void* external_owner = heap_gc_external_preflight((size_t)byte_length,
+        HEAP_GC_EXTERNAL_ARRAYBUFFER);
     JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
     if (!ab) return NULL;
-    if (!byte_buffer_init(&ab->handle, (size_t)byte_length, (size_t)byte_length,
-            BYTE_BUFFER_FLAG_NONE, MEM_CAT_JS_RUNTIME)) {
+    if (!byte_buffer_init(&ab->handle, (size_t)byte_length, (size_t)max_byte_length,
+            flags, MEM_CAT_JS_RUNTIME)) {
         mem_free(ab);
         return NULL;
     }
+    js_arraybuffer_charge_new_storage(ab->handle.storage, external_owner);
     return ab;
+}
+
+static JsArrayBuffer* js_arraybuffer_alloc(int byte_length) {
+    return js_arraybuffer_alloc_with_options(byte_length, byte_length,
+        BYTE_BUFFER_FLAG_NONE);
 }
 
 static JsArrayBuffer* js_arraybuffer_alloc_storage(ByteStorage* storage,
@@ -1231,6 +1274,13 @@ static JsArrayBuffer* js_arraybuffer_alloc_storage(ByteStorage* storage,
     }
     return ab;
 }
+
+extern "C" void js_arraybuffer_destroy(JsArrayBuffer* ab) {
+    if (!ab) return;
+    byte_buffer_destroy(&ab->handle);
+    mem_free(ab);
+}
+
 
 static void js_arraybuffer_link_prototype(Item buffer_item, bool is_shared) {
     RootFrame roots(3);
@@ -1277,8 +1327,9 @@ extern "C" Item js_arraybuffer_new(int byte_length) {
     if (byte_length < 0) byte_length = 0;
     JsArrayBuffer* ab = js_arraybuffer_alloc(byte_length);
     if (!ab) return ItemError;
-
-    return js_arraybuffer_wrap_item(ab);
+    Item result = js_arraybuffer_wrap_item(ab);
+    if (!js_is_arraybuffer(result)) js_arraybuffer_destroy(ab);
+    return result;
 }
 
 // ArrayBuffer constructor from JS: new ArrayBuffer(length)
@@ -1328,28 +1379,14 @@ static Item js_arraybuffer_allocate_constructed(
         return js_throw_range_error(shared
             ? "Invalid shared array buffer maxByteLength" : "Invalid array buffer maxByteLength");
     }
-    JsArrayBuffer* ab;
-    if (shared) {
-        ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
-        if (ab) {
-            uint32_t flags = BYTE_BUFFER_FLAG_SHARED;
-            if (options->resizable) flags |= BYTE_BUFFER_FLAG_RESIZABLE;
-            if (!byte_buffer_init(&ab->handle, (size_t)options->byte_length,
-                    (size_t)options->max_byte_length, flags, MEM_CAT_JS_RUNTIME)) {
-                mem_free(ab);
-                ab = NULL;
-            }
-        }
-    } else {
-        ab = js_arraybuffer_alloc((int)options->byte_length);
-    }
+    uint32_t flags = shared ? BYTE_BUFFER_FLAG_SHARED : BYTE_BUFFER_FLAG_NONE;
+    if (options->resizable) flags |= BYTE_BUFFER_FLAG_RESIZABLE;
+    JsArrayBuffer* ab = js_arraybuffer_alloc_with_options((int)options->byte_length,
+        (int)options->max_byte_length, flags);
     if (!ab) return ItemError;
     Item result = js_arraybuffer_wrap_item_with_prototype(
         ab, prototype, use_provided_prototype);
-    if (!shared && js_is_arraybuffer(result)) {
-        ab->handle.max_byte_length = (size_t)options->max_byte_length;
-        if (options->resizable) ab->handle.flags |= BYTE_BUFFER_FLAG_RESIZABLE;
-    }
+    if (!js_is_arraybuffer(result)) js_arraybuffer_destroy(ab);
     return result;
 }
 
@@ -1447,7 +1484,9 @@ extern "C" Item js_arraybuffer_resize(Item val, Item new_length_item) {
     if (!js_is_arraybuffer(val) || js_is_sharedarraybuffer(val)) {
         return js_throw_type_error("ArrayBuffer.prototype.resize requires a resizable ArrayBuffer receiver");
     }
-    JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
+    RootFrame roots(1);
+    Rooted<Item> buffer_root(roots, val);
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr(buffer_root.get().map);
     // Js54 P6: spec §25.1.5.2 has just one detach check, AFTER ToIntegerOrInfinity.
     // If the buffer is already detached at entry, the coercion still runs (and
     // can have side effects); we throw afterwards. Test:
@@ -1456,9 +1495,19 @@ extern "C" Item js_arraybuffer_resize(Item val, Item new_length_item) {
     if (!js_arraybuffer_resizable(ab)) return js_throw_type_error("ArrayBuffer is not resizable");
     int new_length = 0;
     JS_ASSIGN_OR_RETURN(validation, js_to_index_int(new_length_item, &new_length, "Invalid array buffer length"));
+    ab = js_get_arraybuffer_ptr(buffer_root.get().map);
+    if (!ab) return js_throw_type_error("ArrayBuffer is detached");
     if (js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
     if (new_length > js_arraybuffer_max_length(ab)) return js_throw_range_error("Invalid array buffer length");
+    void* external_owner = heap_gc_external_preflight((size_t)new_length,
+        HEAP_GC_EXTERNAL_ARRAYBUFFER);
+    ab = js_get_arraybuffer_ptr(buffer_root.get().map);
+    if (!ab || js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
+    ByteStorage* previous = ab->handle.storage;
     if (!byte_buffer_resize(&ab->handle, (size_t)new_length)) return ItemError;
+    if (ab->handle.storage != previous) {
+        js_arraybuffer_charge_new_storage(ab->handle.storage, external_owner);
+    }
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
@@ -1472,7 +1521,9 @@ static Item js_arraybuffer_transfer_impl(Item val, Item new_length_item, int arg
     if (!js_is_arraybuffer(val) || js_is_sharedarraybuffer(val)) {
         return js_throw_type_error("ArrayBuffer.prototype.transfer requires a non-shared ArrayBuffer receiver");
     }
-    JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
+    RootFrame roots(1);
+    Rooted<Item> buffer_root(roots, val);
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr(buffer_root.get().map);
     if (!ab) return js_throw_type_error("ArrayBuffer is detached");
     // Per spec: validate detached AFTER coercing newLength so the valueOf side
     // effect runs first when applicable.
@@ -1482,8 +1533,9 @@ static Item js_arraybuffer_transfer_impl(Item val, Item new_length_item, int arg
         new_length = js_arraybuffer_length(ab);
     } else {
         JS_ASSIGN_OR_RETURN(validation, js_to_index_int(new_length_item, &new_length, "Invalid array buffer length"));
-        if (js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
     }
+    ab = js_get_arraybuffer_ptr(buffer_root.get().map);
+    if (!ab || js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
 
     // Determine resizable / maxByteLength for the new buffer.
     bool new_resizable;
@@ -1499,6 +1551,11 @@ static Item js_arraybuffer_transfer_impl(Item val, Item new_length_item, int arg
         return js_throw_range_error("Invalid array buffer length");
     }
 
+    void* external_owner = heap_gc_external_preflight((size_t)new_length,
+        HEAP_GC_EXTERNAL_ARRAYBUFFER);
+    ab = js_get_arraybuffer_ptr(buffer_root.get().map);
+    if (!ab || js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
+
     JsArrayBuffer* nab = (JsArrayBuffer*)mem_calloc(1, sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
     if (!nab) return ItemError;
     if (!byte_buffer_transfer(&ab->handle, &nab->handle, (size_t)new_length,
@@ -1506,12 +1563,12 @@ static Item js_arraybuffer_transfer_impl(Item val, Item new_length_item, int arg
         mem_free(nab);
         return ItemError;
     }
+    js_arraybuffer_charge_new_storage(nab->handle.storage, external_owner);
     // The stable source handle is detached by transfer, so all extant views
     // invalidate through its generation instead of retaining a freed pointer.
     Item result = js_arraybuffer_wrap(nab);
     if (!js_is_arraybuffer(result)) {
-        byte_buffer_destroy(&nab->handle);
-        mem_free(nab);
+        js_arraybuffer_destroy(nab);
     }
     return result;
 }
@@ -1657,7 +1714,9 @@ extern "C" bool js_is_sharedarraybuffer(Item val) {
 extern "C" Item js_sharedarraybuffer_operation(Item sab,
         JsSharedArrayBufferOperation operation, Item* args, int argc) {
     if (!js_is_sharedarraybuffer(sab)) return js_throw_type_error("SharedArrayBuffer method requires a SharedArrayBuffer receiver");
-    JsArrayBuffer* ab = js_get_arraybuffer_ptr(sab.map);
+    RootFrame roots(1);
+    Rooted<Item> buffer_root(roots, sab);
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr(buffer_root.get().map);
     if (!ab) return ItemNull;
 
     // slice(begin, end)
@@ -1681,7 +1740,11 @@ extern "C" Item js_sharedarraybuffer_operation(Item sab,
         if (end < begin) end = begin;
         int new_len = end - begin;
 
-        return js_arraybuffer_slice_species(sab, ab, begin, new_len, true);
+        ab = js_get_arraybuffer_ptr(buffer_root.get().map);
+        if (!ab || js_arraybuffer_detached(ab)) {
+            return js_throw_type_error("SharedArrayBuffer is detached");
+        }
+        return js_arraybuffer_slice_species(buffer_root.get(), ab, begin, new_len, true);
     }
 
     if (operation == JS_SHARED_ARRAY_BUFFER_GROW) {
@@ -1689,13 +1752,24 @@ extern "C" Item js_sharedarraybuffer_operation(Item sab,
         Item new_length_item = argc > 0 ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
         int new_length = 0;
         JS_ASSIGN_OR_RETURN(validation, js_to_index_int(new_length_item, &new_length, "Invalid shared array buffer length"));
+        ab = js_get_arraybuffer_ptr(buffer_root.get().map);
+        if (!ab || js_arraybuffer_detached(ab)) {
+            return js_throw_type_error("SharedArrayBuffer is detached");
+        }
         int current_length = js_arraybuffer_length(ab);
         if (new_length < current_length || new_length > js_arraybuffer_max_length(ab)) {
             return js_throw_range_error("Invalid shared array buffer length");
         }
-        if (new_length != current_length &&
-            !byte_buffer_resize(&ab->handle, (size_t)new_length)) {
-            return ItemError;
+        if (new_length != current_length) {
+            void* external_owner = heap_gc_external_preflight((size_t)new_length,
+                HEAP_GC_EXTERNAL_ARRAYBUFFER);
+            ab = js_get_arraybuffer_ptr(buffer_root.get().map);
+            if (!ab || js_arraybuffer_detached(ab)) return js_throw_type_error("SharedArrayBuffer is detached");
+            ByteStorage* previous = ab->handle.storage;
+            if (!byte_buffer_resize(&ab->handle, (size_t)new_length)) return ItemError;
+            if (ab->handle.storage != previous) {
+                js_arraybuffer_charge_new_storage(ab->handle.storage, external_owner);
+            }
         }
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
@@ -1751,10 +1825,14 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
     int elem_size = js_typed_array_element_size(arr_type);
     int byte_length = length * elem_size;
     JsArrayBuffer* ab = js_arraybuffer_alloc(byte_length);
+    if (!ab) return ItemError;
     RootFrame roots(3);
     Rooted<Item> buffer_root(roots, js_arraybuffer_wrap(ab));
     Rooted<Item> view_root(roots, ItemNull);
-    if (!js_is_arraybuffer(buffer_root.get())) return ItemNull;
+    if (!js_is_arraybuffer(buffer_root.get())) {
+        js_arraybuffer_destroy(ab);
+        return ItemNull;
+    }
     Rooted<Item> carrier_root(roots, js_typed_array_alloc_carrier(
         arr_type, buffer_root.get(), false));
     if (!js_is_typed_array(carrier_root.get())) return ItemNull;
@@ -1802,8 +1880,7 @@ extern "C" Item js_typed_array_from_binary(Binary* bin) {
         if (!ab) return ItemError;
         Item buffer_item = js_arraybuffer_wrap(ab);
         if (!js_is_arraybuffer(buffer_item)) {
-            byte_buffer_destroy(&ab->handle);
-            mem_free(ab);
+            js_arraybuffer_destroy(ab);
             return ItemError;
         }
         // Binary retains the allocation while the stable handle is the sole
