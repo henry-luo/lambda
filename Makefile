@@ -564,7 +564,7 @@ tree-sitter-libs: tree-sitter-jube-libs
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 test-js-parser-diff generate-names debug release rebuild lambda-cst \
 	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-crypto build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-crypto release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-doc-code check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-crypto build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-crypto release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-doc-code check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
 	    build-debug build-release build-debug-asan build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-jube-libs tree-sitter-cst-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
@@ -1121,6 +1121,9 @@ test-hosted-python-architecture-checker:
 test-node-module-architecture-checker:
 	@python3 utils/test_node_module_architecture_checker.py
 	@python3 utils/check_node_module_architecture.py --require-module-binary
+
+test-premake-generator:
+	@python3 utils/test_premake_generator.py
 
 # Node module coverage must stay independent from JavaScript runtime coverage.
 .PHONY: test-js-node-test-separation
@@ -3362,7 +3365,7 @@ check-module-boundary:
 	@echo "✅ module-boundary validation completed (Class-F ratcheted deferment)"
 
 # The aggregate test build includes hosted Python, which links the shared parser runtime.
-build-test: build-lambda-data build-windows-host-import $(TREE_SITTER_LIB) generate-tree-sitter-python-parser
+build-test: build-lambda-data build-windows-host-import $(TREE_SITTER_LIB) generate-tree-sitter-python-parser test-premake-generator
 	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "Building tests using Premake5..."; fi
 	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "Building configurations..."; fi
 	@mkdir -p build/premake

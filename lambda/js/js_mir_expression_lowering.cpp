@@ -156,6 +156,15 @@ static void jm_emit_assignment_var_writeback(JsMirTranspiler* mt,
         jm_write_last_closure_capture_if_matching(mt, var->binding, value,
             var->type_id);
     }
+    if (mt->module_consts && jm_current_function_is_iife_body(mt)) {
+        JsModuleConstEntry* mc = jm_find_module_const_by_binding(mt,
+            var->binding);
+        if (mc && mc->const_type == MCONST_MODVAR && mc->is_iife_var) {
+            // Direct-IIFE references load this live slot, so assignments through
+            // a retained local mirror must update it before the next reference.
+            jm_store_module_var(mt, (uint32_t)mc->int_val, value);
+        }
+    }
     int api = jm_arguments_param_index(mt, vname, var);
     if (api >= 0) jm_arguments_writeback_param(mt, api, value);
 }

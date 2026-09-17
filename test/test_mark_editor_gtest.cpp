@@ -265,6 +265,22 @@ TEST_F(MarkEditorTest, ElementDeleteAttribute) {
     ASSERT_TRUE(updated.element->has_attr("class"));
 }
 
+TEST_F(MarkEditorTest, ElementDeleteOnlyAttributeUsesEmptyShape) {
+    MarkBuilder builder(input);
+    Item div = builder.element("div")
+        .attr("id", "main")
+        .final();
+    input->root = div;
+
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    Item updated = editor.elmt_delete_attr(div, "id");
+
+    ASSERT_NE(updated.element, nullptr);
+    ASSERT_FALSE(updated.element->has_attr("id"));
+    // No attribute chain is the valid representation after the last deletion.
+    ASSERT_EQ(((TypeElmt*)updated.element->type)->shape, nullptr);
+}
+
 TEST_F(MarkEditorTest, ElementInsertChild) {
     MarkBuilder builder(input);
     Item div = builder.element("div")

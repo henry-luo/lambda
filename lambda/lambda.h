@@ -1633,6 +1633,16 @@ void lambda_function_set_type(Function* fn, void* fn_type);
 // Memory allocation for closure environments
 typedef struct Context Context;
 
+// Scoped GC guards are lexical in normal execution, but recovery landings
+// must restore the depths recorded before a non-local jump bypasses them.
+typedef struct LambdaGcScopeCheckpoint {
+    void* heap;
+    int defer_collection_depth;
+#ifndef NDEBUG
+    int no_gc_scope_depth;
+#endif
+} LambdaGcScopeCheckpoint;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -1654,6 +1664,8 @@ void heap_no_gc_scope_begin(void);
 void heap_no_gc_scope_end(void);
 void heap_gc_defer_collection_begin(void);
 void heap_gc_defer_collection_end(void);
+LambdaGcScopeCheckpoint lambda_gc_scope_checkpoint_capture(void);
+bool lambda_gc_scope_checkpoint_restore(const LambdaGcScopeCheckpoint* checkpoint);
 // String creation for name pooling
 String* heap_create_name(const char* name);
 // String creation for runtime strings

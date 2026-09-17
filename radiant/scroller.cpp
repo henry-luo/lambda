@@ -260,8 +260,11 @@ void scroll_apply_pending_element_scroll(ViewBlock* block) {
 
     scroll_state_set_position_for_view(state, static_cast<View*>(block),
         block->scroll()->pane, target_x, target_y, false);
-    elem->set_has_pending_element_scroll_x(false);
-    elem->set_has_pending_element_scroll_y(false);
+    if (state) {
+        // A state-backed pane now owns the scroll position across pool resets.
+        elem->set_has_pending_element_scroll_x(false);
+        elem->set_has_pending_element_scroll_y(false);
+    }
 }
 
 bool scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp) {

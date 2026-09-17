@@ -322,8 +322,10 @@ static InputScriptRequest js_module_mir_request(const char* source,
     request.identity = filename ? filename : "<module>";
     request.source = source ? source : "";
     request.source_length = source ? source_len : 0;
-    request.source_kind = filename && filename[0] != '<'
-        ? INPUT_SCRIPT_SOURCE_FILE : INPUT_SCRIPT_SOURCE_INLINE;
+    request.source_kind = js_path_is_http_url(filename)
+        ? INPUT_SCRIPT_SOURCE_URL
+        : (filename && filename[0] != '<'
+            ? INPUT_SCRIPT_SOURCE_FILE : INPUT_SCRIPT_SOURCE_INLINE);
     request.language = "javascript";
     request.profile = "js-mir-module";
     request.parser_abi = "js-direct-parser-v1";

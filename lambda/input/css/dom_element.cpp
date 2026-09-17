@@ -3496,6 +3496,14 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
         : DomElement::create(doc, tag_name, elem);
     if (!dom_elem) return nullptr;
 
+    // The HTML tree builder creates a direct form child while in table mode
+    // solely to retain the form-owner pointer. Chromium keeps that node out of
+    // the rendering tree unless an author display rule makes it renderable.
+    if (doc->page_kind == DOM_PAGE_KIND_HTML && parent &&
+            str_ieq_cstr(tag_name, "form") && parent->tag() == MARKUP_NAME_TABLE) {
+        dom_elem->set_parser_inserted_table_form(true);
+    }
+
     // populate element-to-DOM map if available (for incremental rebuild)
     if (doc->element_dom_map) {
         element_dom_map_insert(doc->element_dom_map, elem, dom_elem);

@@ -10,6 +10,7 @@
 #include "../lambda/js/js_property_attrs.h"
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_runtime_state.hpp"
+#include "../lambda/js/js_mir_internal.hpp"
 #include "../lambda/runtime/sys_func_registry.h"
 #include "../lambda/input/input-script-cache.h"
 #include "../lambda/mir/mir.h"
@@ -17,6 +18,27 @@
 
 #include <pthread.h>
 #include <sched.h>
+
+TEST(JsModuleResolution, ResolvesHttpModuleSpecifiersAsUrls) {
+    char resolved[256];
+    const char* base = "https://docs.example.test/vite/assets/main.js";
+
+    jm_resolve_module_path(base, "./chunk.js", 10, resolved, sizeof(resolved));
+    EXPECT_STREQ(resolved, "https://docs.example.test/vite/assets/chunk.js");
+
+    jm_resolve_module_path(base, "../shared.js", 12, resolved, sizeof(resolved));
+    EXPECT_STREQ(resolved, "https://docs.example.test/vite/shared.js");
+
+    jm_resolve_module_path(base, "/vite/assets/root.js", 20, resolved, sizeof(resolved));
+    EXPECT_STREQ(resolved, "https://docs.example.test/vite/assets/root.js");
+}
+
+TEST(JsModuleResolution, ClassifiesHttpModuleSourcesForUrlCacheEntries) {
+    EXPECT_TRUE(js_path_is_http_url("https://docs.example.test/vite/main.js"));
+    EXPECT_TRUE(js_path_is_http_url("http://docs.example.test/vite/main.js"));
+    EXPECT_FALSE(js_path_is_http_url("/vite/main.js"));
+    EXPECT_FALSE(js_path_is_http_url("main.js"));
+}
 
 TEST(JsCallableDefinitions, SharesAstDefinitionWithoutSharingCaptures) {
     Runtime runtime = {};
@@ -400,6 +422,24 @@ TEST(JsInterpreter, ReusesCommonAstCacheAcrossFreshRuntimes) {
     EXPECT_EQ(after.ast_builds, before.ast_builds + 1);
     EXPECT_EQ(after.ast_hits, before.ast_hits + 1);
     EXPECT_EQ(after.module_hits, before.module_hits + 1);
+}
+
+TEST(JsJubeRuntime, DropsPrototypeRootsAcrossFreshRuntimes) {
+    const char source[] = "hostobjDemo.create(40).bump(2);";
+
+    Runtime first_runtime = {};
+    runtime_init(&first_runtime);
+    Item first = js_interp_execute_source(&first_runtime, source, sizeof(source) - 1,
+        "jube-prototype-first.js", NULL);
+    ASSERT_FALSE(item_is_error(first));
+    runtime_cleanup(&first_runtime);
+
+    Runtime second_runtime = {};
+    runtime_init(&second_runtime);
+    Item second = js_interp_execute_source(&second_runtime, source, sizeof(source) - 1,
+        "jube-prototype-second.js", NULL);
+    ASSERT_FALSE(item_is_error(second));
+    runtime_cleanup(&second_runtime);
 }
 
 struct JsCommonAstBuildWaiter {

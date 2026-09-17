@@ -398,6 +398,12 @@ static void layout_resolve_pending_scroll_into_view(LayoutContext* lycon,
         }
         if (scroll_x < 0.0f) scroll_x = 0.0f;
         if (scroll_y < 0.0f) scroll_y = 0.0f;
+        // The script-time provisional view pool has no persistent DocState.
+        // Keep the DOM request until the final layout has a state-backed pane.
+        scroll_container->set_pending_scroll_x(scroll_x);
+        scroll_container->set_pending_scroll_y(scroll_y);
+        scroll_container->set_has_pending_element_scroll_x(true);
+        scroll_container->set_has_pending_element_scroll_y(true);
         DocState* state = doc->state;
         scroll_state_set_position_for_view(state, static_cast<View*>(scroll_container),
             scroll_container->scroll()->pane, scroll_x, scroll_y, false);

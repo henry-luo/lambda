@@ -85,6 +85,17 @@ typedef void (*gc_collect_callback_t)(void);
  * this hook remains data-first for the generic runtime/test bridge.
  */
 typedef struct gc_heap gc_heap_t;  // forward declaration for function pointer types
+
+// A non-local recovery resumes outside the C++ scopes that temporarily defer
+// collection or assert a no-GC section. Preserve their entry depths so the
+// landing can restore the enclosing execution boundary exactly.
+typedef struct gc_scope_checkpoint {
+    gc_heap_t* heap;
+    int defer_collection_depth;
+#ifndef NDEBUG
+    int no_gc_scope_depth;
+#endif
+} gc_scope_checkpoint_t;
 typedef void (*gc_vmap_trace_fn)(void* data, gc_heap_t* gc);
 
 /**
@@ -364,6 +375,30 @@ typedef struct gc_heap {
     gc_tune_stats_t tune;           // performance counters (see gc_tune_stats_t)
     gc_external_stats_t external;   // native payload pressure (not a liveness registry)
 } gc_heap_t;
+
+static inline gc_scope_checkpoint_t gc_scope_checkpoint_capture(gc_heap_t* gc) {
+    gc_scope_checkpoint_t checkpoint = {0};
+    if (!gc) return checkpoint;
+    checkpoint.heap = gc;
+    checkpoint.defer_collection_depth = gc->defer_collection_depth;
+#ifndef NDEBUG
+    checkpoint.no_gc_scope_depth = gc->no_gc_scope_depth;
+#endif
+    return checkpoint;
+}
+
+static inline bool gc_scope_checkpoint_restore(
+        gc_heap_t* gc, const gc_scope_checkpoint_t* checkpoint) {
+    if (!checkpoint || !checkpoint->heap) return true;
+    if (!gc || gc != checkpoint->heap) return false;
+    // A non-local landing skipped scope destructors, so restore the depths
+    // captured at the boundary before its cleanup path can allocate.
+    gc->defer_collection_depth = checkpoint->defer_collection_depth;
+#ifndef NDEBUG
+    gc->no_gc_scope_depth = checkpoint->no_gc_scope_depth;
+#endif
+    return true;
+}
 
 /**
  * Snapshot the tuning counters for this heap. Safe to call at any time.

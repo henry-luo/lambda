@@ -500,10 +500,6 @@ static void reset_layout_cache(DomElement* elem, ViewTree* tree) {
     radiant::layout_cache_init(elem->layout_cache, tree ? tree->layout_generation : 0);
 }
 
-static bool view_element_uses_marker_prop(DomElement* elem) {
-    return elem && elem->tag_name && strcmp(elem->tag_name, "::marker") == 0;
-}
-
 static void reset_block_or_marker_prop(DomElement* elem, ViewTree*) {
     if (!elem || !elem->blk) return;
     if (view_element_uses_marker_prop(elem)) {

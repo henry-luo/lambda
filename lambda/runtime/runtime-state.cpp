@@ -3,6 +3,7 @@
 #include "transpiler.hpp"
 #include "heap_api.h"
 #include "side_stack.h"
+#include "gc/gc_heap.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/log.h"
 #include "../../lib/arraylist.h"
@@ -10,6 +11,35 @@
 
 // The runtime layer owns the active evaluator for runners and fixtures.
 __thread EvalContext* context = nullptr;
+
+extern "C" LambdaGcScopeCheckpoint lambda_gc_scope_checkpoint_capture(void) {
+    LambdaGcScopeCheckpoint checkpoint = {};
+    if (!context || !context->heap || !context->heap->gc) return checkpoint;
+    gc_scope_checkpoint_t gc_checkpoint = gc_scope_checkpoint_capture(context->heap->gc);
+    checkpoint.heap = gc_checkpoint.heap;
+    checkpoint.defer_collection_depth = gc_checkpoint.defer_collection_depth;
+#ifndef NDEBUG
+    checkpoint.no_gc_scope_depth = gc_checkpoint.no_gc_scope_depth;
+#endif
+    return checkpoint;
+}
+
+extern "C" bool lambda_gc_scope_checkpoint_restore(
+        const LambdaGcScopeCheckpoint* checkpoint) {
+    if (!checkpoint || !checkpoint->heap) return true;
+    if (!context || !context->heap || !context->heap->gc ||
+            checkpoint->heap != context->heap->gc) {
+        log_error("gc-scope-checkpoint: active heap changed during recovery");
+        return false;
+    }
+    gc_scope_checkpoint_t gc_checkpoint = {};
+    gc_checkpoint.heap = (gc_heap_t*)checkpoint->heap;
+    gc_checkpoint.defer_collection_depth = checkpoint->defer_collection_depth;
+#ifndef NDEBUG
+    gc_checkpoint.no_gc_scope_depth = checkpoint->no_gc_scope_depth;
+#endif
+    return gc_scope_checkpoint_restore(context->heap->gc, &gc_checkpoint);
+}
 
 typedef struct ModuleUnitIndexEntry {
     uint32_t unit_id;

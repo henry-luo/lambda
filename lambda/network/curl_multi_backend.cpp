@@ -2,6 +2,7 @@
 // Dedicated curl multi network thread for Radiant HTTP resource transfers.
 
 #include "curl_multi_backend.h"
+#include "http_client.h"
 #include "network_resource_manager.h"
 #include "cookie_jar.h"
 #include "enhanced_file_cache.h"
@@ -276,7 +277,7 @@ static bool configure_transfer(CurlMultiTransfer* transfer) {
     curl_easy_setopt(easy, CURLOPT_CONNECTTIMEOUT_MS, 5000L);
     curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(easy, CURLOPT_MAXREDIRS, 5L);
-    curl_easy_setopt(easy, CURLOPT_USERAGENT, "Radiant/1.0 Lambda-Script");
+    curl_easy_setopt(easy, CURLOPT_USERAGENT, RADIANT_HTTP_CLIENT_USER_AGENT);
     curl_easy_setopt(easy, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(easy, CURLOPT_SSL_VERIFYHOST, 2L);
     curl_easy_setopt(easy, CURLOPT_ACCEPT_ENCODING, "gzip, deflate");

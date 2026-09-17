@@ -12,9 +12,9 @@
 #define MIR_LARGE_MODULE_INSN_THRESHOLD 100000ULL
 #define MIR_RADIANT_INTERP_INSN_THRESHOLD 20000ULL
 // MIR's interpreter allocates every virtual register of an activation on the
-// native stack. Keep document scripts above this structural size in the AST
-// executor, whose activation storage is heap-owned.
-#define MIR_RADIANT_AST_NODE_THRESHOLD 50000U
+// native stack. Minified document bundles can lower to roughly seventeen MIR
+// instructions per AST node, so keep them below the unsafe activation size.
+#define MIR_RADIANT_AST_NODE_THRESHOLD 25000U
 #define MIR_LARGE_SOURCE_INTERP_BYTES_DEFAULT 15000U
 
 static inline bool mir_large_interp_enabled(void) {

@@ -52,6 +52,8 @@ void heap_no_gc_scope_begin(void);
 void heap_no_gc_scope_end(void);
 void heap_gc_defer_collection_begin(void);
 void heap_gc_defer_collection_end(void);
+LambdaGcScopeCheckpoint lambda_gc_scope_checkpoint_capture(void);
+bool lambda_gc_scope_checkpoint_restore(const LambdaGcScopeCheckpoint* checkpoint);
 
 // Native payloads owned by GC-traced wrappers use these counters for pressure
 // only. The opaque owner is valid until that wrapper's finalizer releases it.

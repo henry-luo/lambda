@@ -30,6 +30,11 @@ typedef Item (*JsNativeSpan)(Item*, int);
 typedef Item (*JsNativeThisSpan)(Item, Item*, int);
 typedef Item (*JsNativeCallBody)(Item, Item, Item*, int, uint64_t*);
 typedef Item (*JsNativeConstructBody)(Item, Item*, int, Item, uint64_t*);
+typedef void (*JsDocumentSourceLoadObserver)(size_t source_length);
+
+// Radiant registers this only while a document watchdog is active. Module
+// loading reports recursively acquired source so its budget covers the graph.
+void js_set_document_source_load_observer(JsDocumentSourceLoadObserver observer);
 
 void js_map_promote_descriptor_kind(Map* m);
 

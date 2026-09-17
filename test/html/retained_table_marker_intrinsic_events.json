@@ -1,0 +1,7 @@
+{
+  "name": "retained table marker intrinsic sizing",
+  "viewport": {"width": 480, "height": 240},
+  "events": [
+    {"type": "wait", "ms": 20}
+  ]
+}

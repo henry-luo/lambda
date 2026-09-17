@@ -795,7 +795,7 @@ static void js_runtime_state_visit_root_vectors(JsRuntimeState* state,
         "stream keys, prototypes, and namespaces", data);
     visit(&state->clipboard, &state->clipboard.blob_prototype, 7,
         "clipboard prototypes and drag session", data);
-    visit(&state->dom, &state->dom.implementation, 4,
+    visit(&state->dom, &state->dom.implementation, 5,
         "DOM singleton wrappers", data);
     if (state->string_caches) {
         visit(state->string_caches,

@@ -139,14 +139,6 @@ static void xhr_set_int(Item obj, const char* key, int value) {
     dom_realm_set(obj, k, v);
 }
 
-static const char* xhr_url_to_cstr(Item value) {
-    if (get_type_id(value) == LMD_TYPE_MAP && js_class_id(value) == JS_CLASS_URL) {
-        Item href = js_get_key_cstr(value, "href");
-        if (get_type_id(href) == LMD_TYPE_STRING) return fn_to_cstr(href);
-    }
-    return fn_to_cstr(value);
-}
-
 static Item js_xhr_get_status(void) {
     XhrState* xhr = xhr_state_from_this();
     return xhr ? (Item){.item = i2it((int64_t)xhr->status)} : (Item){.item = i2it(0)};
@@ -236,28 +228,28 @@ extern "C" void js_xhr_set_base_url(const char* base_url) {
     }
 }
 
-static char* xhr_resolve_url(const char* url) {
+extern "C" char* dom_resolve_network_url(const char* url, const char* base_url) {
     if (!url || !url[0]) return nullptr;
     if (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0) {
         return mem_strdup(url, MEM_CAT_JS_RUNTIME);
     }
-    if (!_xhr_base_url || !_xhr_base_url[0]) {
+    if (!base_url || !base_url[0]) {
         return mem_strdup(url, MEM_CAT_JS_RUNTIME);
     }
 
     if (url[0] == '/' && url[1] == '/') {
-        const char* scheme_end = strstr(_xhr_base_url, "://");
+        const char* scheme_end = strstr(base_url, "://");
         if (!scheme_end) return mem_strdup(url, MEM_CAT_JS_RUNTIME);
-        size_t scheme_len = (size_t)(scheme_end - _xhr_base_url);
+        size_t scheme_len = (size_t)(scheme_end - base_url);
         size_t url_len = strlen(url);
-        char* out = mem_join3(_xhr_base_url, scheme_len, ":", 1, url, url_len,
+        char* out = mem_join3(base_url, scheme_len, ":", 1, url, url_len,
                               MEM_CAT_JS_RUNTIME);
         if (!out) return nullptr;
         return out;
     }
 
     if (url[0] == '/') {
-        const char* scheme_end = strstr(_xhr_base_url, "://");
+        const char* scheme_end = strstr(base_url, "://");
         if (!scheme_end) return mem_strdup(url, MEM_CAT_JS_RUNTIME);
         const char* host_start = scheme_end + 3;
         const char* host_end = host_start;
@@ -267,16 +259,16 @@ static char* xhr_resolve_url(const char* url) {
         if (host_end == host_start) {
             return mem_strdup(url, MEM_CAT_JS_RUNTIME);
         }
-        size_t origin_len = (size_t)(host_end - _xhr_base_url);
+        size_t origin_len = (size_t)(host_end - base_url);
         size_t url_len = strlen(url);
-        char* out = mem_join2(_xhr_base_url, origin_len, url, url_len, MEM_CAT_JS_RUNTIME);
+        char* out = mem_join2(base_url, origin_len, url, url_len, MEM_CAT_JS_RUNTIME);
         if (!out) {
             return nullptr;
         }
         return out;
     }
 
-    Url* base = url_parse(_xhr_base_url);
+    Url* base = url_parse(base_url);
     if (!base || !base->is_valid) {
         if (base) url_destroy(base);
         return mem_strdup(url, MEM_CAT_JS_RUNTIME);
@@ -434,8 +426,16 @@ extern "C" Item js_xhr_open(Item method_arg, Item url_arg, Item async_arg) {
     XhrState* xhr = xhr_state_from_this();
     if (!xhr) return make_js_undef();
 
-    const char* method = fn_to_cstr(method_arg);
-    const char* url = xhr_url_to_cstr(url_arg);
+    // Web IDL converts XMLHttpRequest.open arguments with JavaScript ToString;
+    // path-segment coercion would skip an object's custom toString method.
+    RootFrame roots(2);
+    Rooted<Item> method_text_root(roots, js_to_string(method_arg));
+    Rooted<Item> url_text_root(roots, js_to_string(url_arg));
+    if (item_is_error(method_text_root.get())) return method_text_root.get();
+    if (item_is_error(url_text_root.get())) return url_text_root.get();
+
+    const char* method = fn_to_cstr(method_text_root.get());
+    const char* url = fn_to_cstr(url_text_root.get());
 
     if (!method || !url) {
         log_error("xhr: open() requires method and url");
@@ -461,7 +461,7 @@ extern "C" Item js_xhr_open(Item method_arg, Item url_arg, Item async_arg) {
     xhr->req_header_count = 0;
 
     xhr->method = mem_strdup(method, MEM_CAT_JS_RUNTIME);
-    xhr->url = xhr_resolve_url(url);
+    xhr->url = dom_resolve_network_url(url, _xhr_base_url);
     TypeId async_type = get_type_id(async_arg);
     bool async_argument_omitted = async_type == LMD_TYPE_UNDEFINED ||
         async_type == LMD_TYPE_NULL;

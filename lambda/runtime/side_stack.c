@@ -188,6 +188,7 @@ LambdaRecoveryCheckpoint lambda_recovery_checkpoint_capture_for(
     if (runtime_context) {
         checkpoint.mir_return_lane = runtime_context->mir_return_lane;
         checkpoint.mir_bitcast_scratch = runtime_context->mir_bitcast_scratch;
+        checkpoint.gc_scope = lambda_gc_scope_checkpoint_capture();
     }
     checkpoint.active = runtime_context != NULL;
     return checkpoint;
@@ -210,6 +211,9 @@ void lambda_recovery_checkpoint_restore_for(
     }
     // A non-local jump can skip any number of nested generated/native frames;
     // restore both allocation regions before the landing path may allocate.
+    if (!lambda_gc_scope_checkpoint_restore(&checkpoint->gc_scope)) {
+        log_error("recovery-checkpoint: GC scope owner changed");
+    }
     lambda_side_stack_restore_for(runtime_context, checkpoint->side_stack);
     runtime_context->mir_return_lane = checkpoint->mir_return_lane;
     runtime_context->mir_bitcast_scratch = checkpoint->mir_bitcast_scratch;

@@ -23,6 +23,10 @@ void js_xhr_reset(void);
 // Set document URL used to resolve browser-relative XHR URLs.
 void js_xhr_set_base_url(const char* base_url);
 
+// Resolve a network request URL against an HTTP document URL. The caller owns
+// the returned MEM_CAT_JS_RUNTIME string.
+char* dom_resolve_network_url(const char* url, const char* base_url);
+
 // XHR methods (called via js_new_function on XHR objects)
 Item js_xhr_open(Item method_arg, Item url_arg, Item async_arg);
 Item js_xhr_set_request_header(Item name_arg, Item value_arg);

@@ -7,7 +7,9 @@
  */
 #include "../js/js_runtime.h"
 #include "dom.h"
+#include "dom_xhr.h"
 #include "realm/dom_realm.h"
+#include "../input/css/dom_element.hpp"
 #include "../js/js_runtime_state.hpp"
 #include "../js/js_event_loop.h"
 #include "../jube/jube_node_permission.h"
@@ -528,6 +530,25 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
     const char* url = js_item_to_cstr(url_item, url_buf, sizeof(url_buf));
     if (!url) {
         return dom_realm_promise_reject(dom_realm_new_error_named(make_string_item("TypeError"), make_string_item("fetch: invalid URL")));
+    }
+
+    // Browser fetch resolves a relative request against the active document,
+    // not the process working directory used by file-backed test documents.
+    char resolved_url[2048];
+    DomDocument* document = (DomDocument*)dom_get_document();
+    const char* document_url = document && document->url
+        ? url_get_href(document->url) : nullptr;
+    if (document_url && (strncmp(document_url, "http://", 7) == 0 ||
+                         strncmp(document_url, "https://", 8) == 0)) {
+        char* absolute_url = dom_resolve_network_url(url, document_url);
+        if (!absolute_url || strlen(absolute_url) >= sizeof(resolved_url)) {
+            if (absolute_url) mem_free(absolute_url);
+            return dom_realm_promise_reject(dom_realm_new_error_named(
+                make_string_item("TypeError"), make_string_item("fetch: invalid URL")));
+        }
+        snprintf(resolved_url, sizeof(resolved_url), "%s", absolute_url);
+        mem_free(absolute_url);
+        url = resolved_url;
     }
 
     // ---- Local-file fast path -------------------------------------------------

@@ -778,6 +778,16 @@ extern "C" Item js_to_string(Item value) {
         return js_to_string(prim);
     }
     default:
+        // Virtual DOM values are JavaScript objects too. Their host-provided
+        // stringifier must participate in ToPrimitive rather than falling
+        // straight through to Object's diagnostic tag.
+        if (js_is_object_value(value)) {
+            JS_ASSIGN_OR_RETURN(prim, js_to_primitive(value, JS_HINT_STRING));
+            if (js_is_object_value(prim)) {
+                return js_throw_type_error("Cannot convert object to primitive value");
+            }
+            return js_to_string(prim);
+        }
         return js_make_string("[object Object]");
     }
 }

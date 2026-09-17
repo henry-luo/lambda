@@ -113,6 +113,9 @@ struct DomJsRuntime {
     double virtual_clock_ms;
     double post_load_settle_ms;
     bool redirect_stdout_to_stderr;
+    // Set only while a classic script is evaluated, matching HTML's
+    // document.currentScript lifetime.
+    DomElement* current_script;
 
     DomJsRuntime() : mir_ctx(nullptr), preamble_state(nullptr), runtime(nullptr),
         doc_node(nullptr), mutation_count(0), mutation_sequence(0), mutation_kind_mask(0),
@@ -123,7 +126,7 @@ struct DomJsRuntime {
         auto_close_event_loop(false),
         virtual_clock_enabled(false), virtual_clock_ms(0.0),
         post_load_settle_ms(0.0),
-        redirect_stdout_to_stderr(false) {}
+        redirect_stdout_to_stderr(false), current_script(nullptr) {}
 };
 
 // tier-1: document-owned semantic zoom and raster-output scale inputs
@@ -336,6 +339,10 @@ struct DomDocument {
     // realm happens to be active when native input resolves its host (D7.2.5).
     bool design_mode;
 
+    // The legacy document.domain override relaxes same-origin checks without
+    // mutating the document URL's hostname.
+    const char* document_domain;
+
     // Constructor
     DomDocument() : input(nullptr), document_pool(nullptr), node_arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -361,7 +368,7 @@ struct DomDocument {
                     mutation_epoch(0), page_kind(DOM_PAGE_KIND_UNKNOWN), js_has_dom_realm(false),
                     js_realm_released_after_load(false), dom_package_loaded(false),
                     owns_script_runtime(false), behavior_init_pending(false),
-                    design_mode(false) {}
+                    design_mode(false), document_domain(nullptr) {}
 
     bool init(Input* input);
     void destroy();
@@ -514,6 +521,9 @@ enum DomElementFlag : uint32_t {
     ELMT_FLAG_SPECIFIED_STYLE_BORROWED = 1u << 21,
     // CSS Tables fixup boxes carry generated display roles rather than authored style.
     ELMT_FLAG_TABLE_FIXUP = 1u << 22,
+    // HTML's "in table" form insertion creates a DOM node only for form-owner
+    // resolution; it is not a rendered form box unless CSS authoring overrides it.
+    ELMT_FLAG_PARSER_INSERTED_TABLE_FORM = 1u << 27,
 };
 
 static_assert((ELMT_FLAG_INLINE_PROP_SHARED & ((1u << 17) - 1u)) == 0,
@@ -745,6 +755,12 @@ struct DomElement : DomNode {
     void set_synthetic(bool value) { set_flag(ELMT_FLAG_SYNTHETIC, value); }
     bool is_table_fixup() const { return flag(ELMT_FLAG_TABLE_FIXUP); }
     void set_table_fixup(bool value) { set_flag(ELMT_FLAG_TABLE_FIXUP, value); }
+    bool is_parser_inserted_table_form() const {
+        return flag(ELMT_FLAG_PARSER_INSERTED_TABLE_FORM);
+    }
+    void set_parser_inserted_table_form(bool value) {
+        set_flag(ELMT_FLAG_PARSER_INSERTED_TABLE_FORM, value);
+    }
     bool inline_prop_shared() const { return flag(ELMT_FLAG_INLINE_PROP_SHARED); }
     void mark_inline_prop_owned() { set_flag(ELMT_FLAG_INLINE_PROP_SHARED, false); }
     void mark_inline_prop_shared() { set_flag(ELMT_FLAG_INLINE_PROP_SHARED, true); }
@@ -1114,6 +1130,20 @@ inline Element* dom_element_render_source(DomElement* de) {
 }
 inline const Element* dom_element_render_source(const DomElement* de) {
     return dom_element_render_source(const_cast<DomElement*>(de));
+}
+
+// Resolve a parsed/template Element to its live DOM wrapper. The lifecycle
+// registry preserves source identity even when a DomElement owns a copied one.
+inline DomElement* dom_find_element_for_source(DomElement* root,
+                                               const Element* source) {
+    if (!root || !source) return nullptr;
+    if (dom_element_render_source(root) == source) return root;
+    for (DomNode* child = root->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        DomElement* found = dom_find_element_for_source(child->as_element(), source);
+        if (found) return found;
+    }
+    return nullptr;
 }
 
 // DomElement* ↔ DomNode*: same address (DomNode is at offset 0 via inheritance)

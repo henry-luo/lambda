@@ -75,7 +75,7 @@ static bool domain_eq(const char* a, const char* b) {
 //   2. All of: the domain string is a suffix of the string,
 //      the last character preceding the suffix is '.', and
 //      the string is not an IP address.
-static bool domain_matches(const char* request_host, const char* cookie_domain) {
+bool cookie_domain_matches(const char* request_host, const char* cookie_domain) {
     if (!request_host || !cookie_domain) return false;
 
     // strip leading dot from cookie domain for matching
@@ -400,7 +400,7 @@ void cookie_jar_store(CookieJar* jar, const char* request_url,
     // RFC 6265 §5.3 step 6: verify domain matches request host
     char* req_host = host_from_url(request_url);
     if (req_host && entry->domain) {
-        if (!domain_matches(req_host, entry->domain)) {
+        if (!cookie_domain_matches(req_host, entry->domain)) {
             log_debug("cookie_jar: rejecting cookie — domain '%s' doesn't match host '%s'",
                       entry->domain, req_host);
             mem_free(req_host);
@@ -489,7 +489,7 @@ char* cookie_jar_build_request_header(CookieJar* jar, const char* request_url,
         // secure check
         if (e->secure && !is_secure) continue;
         // domain match
-        if (!domain_matches(req_host, e->domain)) continue;
+        if (!cookie_domain_matches(req_host, e->domain)) continue;
         // path match
         if (!path_matches(req_path, e->path)) continue;
 
@@ -513,7 +513,7 @@ char* cookie_jar_build_request_header(CookieJar* jar, const char* request_url,
         CookieEntry* e = jar->entries[i];
         if (e->expires > 0 && e->expires <= now) continue;
         if (e->secure && !is_secure) continue;
-        if (!domain_matches(req_host, e->domain)) continue;
+        if (!cookie_domain_matches(req_host, e->domain)) continue;
         if (!path_matches(req_path, e->path)) continue;
 
         if (written > 0) {
