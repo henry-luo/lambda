@@ -3050,19 +3050,19 @@ static int jube_host_node_describe_binary_view(Item value, JubeBinaryView* out_v
     }
     if (js_is_typed_array(value)) {
         JsTypedArray* typed_array = js_get_typed_array_ptr(value.map);
-        if (!typed_array || !typed_array->buffer || js_arraybuffer_detached(typed_array->buffer)) {
+        if (!typed_array || !typed_array->base.buffer || js_arraybuffer_detached(typed_array->base.buffer)) {
             return JUBE_BINARY_VIEW_DETACHED;
         }
         int byte_length = js_typed_array_byte_length(value);
         int byte_offset = js_typed_array_byte_offset(value);
-        int backing_length = js_arraybuffer_length(typed_array->buffer);
+        int backing_length = js_arraybuffer_length(typed_array->base.buffer);
         if (byte_length < 0 || byte_offset < 0 || byte_offset > backing_length ||
                 byte_length > backing_length - byte_offset) {
             return JUBE_BINARY_VIEW_OUT_OF_BOUNDS;
         }
-        out_view->array_buffer = typed_array->buffer_item
-            ? (Item){.item = typed_array->buffer_item}
-            : js_arraybuffer_wrap(typed_array->buffer);
+        out_view->array_buffer = typed_array->base.buffer_item
+            ? (Item){.item = typed_array->base.buffer_item}
+            : js_arraybuffer_wrap(typed_array->base.buffer);
         if (!js_is_arraybuffer(out_view->array_buffer)) return JUBE_BINARY_VIEW_OUT_OF_BOUNDS;
         out_view->byte_offset = byte_offset;
         out_view->byte_length = byte_length;

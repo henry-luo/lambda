@@ -244,8 +244,8 @@ static void js_native_map_gc_trace(void* data, gc_heap_t* gc) {
     if (map->type_id != LMD_TYPE_MAP) return;
     if (map->map_kind == MAP_KIND_TYPED_ARRAY) {
         JsTypedArray* ta = gc_typed_array_from_map(map);
-        if (ta && ta->buffer_item) {
-            gc_mark_item(gc, ta->buffer_item);
+        if (ta && ta->base.buffer_item) {
+            gc_mark_item(gc, ta->base.buffer_item);
         }
         if (ta && ta->view) {
             gc_mark_object_ptr(gc, ta->view);

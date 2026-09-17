@@ -3856,7 +3856,7 @@ extern "C" Item js_typed_array_species_create(Item exemplar, int length) {
         return js_throw_type_error("species constructor did not return a TypedArray");
     }
     JsTypedArray* rta = js_get_typed_array_ptr(result.map);
-    if (rta && rta->buffer && js_arraybuffer_detached(rta->buffer)) {
+    if (rta && rta->base.buffer && js_arraybuffer_detached(rta->base.buffer)) {
         return js_throw_type_error("species constructor returned a detached TypedArray");
     }
     if (rta && js_typed_array_length(result) < length) {
@@ -3909,7 +3909,7 @@ extern "C" Item js_typed_array_species_create_from_buffer(Item exemplar, Item bu
         return js_throw_type_error("species constructor did not return a TypedArray");
     }
     JsTypedArray* rta = js_get_typed_array_ptr(result.map);
-    if (rta && rta->buffer && js_arraybuffer_detached(rta->buffer)) {
+    if (rta && rta->base.buffer && js_arraybuffer_detached(rta->base.buffer)) {
         return js_throw_type_error("species constructor returned a detached TypedArray");
     }
     return result;
@@ -4122,16 +4122,16 @@ static bool js_property_ops_property_get(Item object, Item key, Item receiver,
                     *out_result = make_js_undefined();
                     return true;
                 }
-                if (ta->buffer_item) {
-                    *out_result = (Item){.item = ta->buffer_item};
+                if (ta->base.buffer_item) {
+                    *out_result = (Item){.item = ta->base.buffer_item};
                     return true;
                 }
-                if (!ta->buffer) {
+                if (!ta->base.buffer) {
                     *out_result = make_js_undefined();
                     return true;
                 }
-                Item wrapped = js_arraybuffer_wrap(ta->buffer);
-                ta->buffer_item = wrapped.item;
+                Item wrapped = js_arraybuffer_wrap(ta->base.buffer);
+                ta->base.buffer_item = wrapped.item;
                 *out_result = wrapped;
                 return true;
             }
@@ -10938,9 +10938,9 @@ static Item js_intrinsic_typed_array_accessor(JsTypedArrayAccessorOp op,
     if (!typed_array) return ItemNull;
     switch (op) {
     case JS_TYPED_ARRAY_ACCESSOR_BUFFER:
-        return typed_array->buffer_item
-            ? (Item){.item = typed_array->buffer_item}
-            : js_arraybuffer_wrap(typed_array->buffer);
+        return typed_array->base.buffer_item
+            ? (Item){.item = typed_array->base.buffer_item}
+            : js_arraybuffer_wrap(typed_array->base.buffer);
     case JS_TYPED_ARRAY_ACCESSOR_BYTE_LENGTH:
         return (Item){.item = i2it(js_typed_array_byte_length(this_value))};
     case JS_TYPED_ARRAY_ACCESSOR_BYTE_OFFSET:
@@ -20663,7 +20663,7 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 bool is_subarray_method =
                     operation == JS_TYPED_ARRAY_INTRINSIC_SUBARRAY;
-                if (!is_subarray_method && ta && ta->buffer && js_arraybuffer_detached(ta->buffer)) {
+                if (!is_subarray_method && ta && ta->base.buffer && js_arraybuffer_detached(ta->base.buffer)) {
                     return js_throw_type_error("Cannot perform %TypedArray%.prototype method on a detached ArrayBuffer");
                 }
             }
@@ -21005,8 +21005,8 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
             }
             if (operation == JS_ARRAY_INTRINSIC_REVERSE) {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (!array_semantics && ta && ta->buffer) {
-                    if (js_arraybuffer_detached(ta->buffer)) {
+                if (!array_semantics && ta && ta->base.buffer) {
+                    if (js_arraybuffer_detached(ta->base.buffer)) {
                         return js_throw_type_error("Cannot perform %TypedArray%.prototype.reverse on a detached ArrayBuffer");
                     }
                     if (js_typed_array_is_out_of_bounds_item(obj)) {
@@ -21026,8 +21026,8 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
             if (operation == JS_ARRAY_INTRINSIC_COPY_WITHIN) {
                 // copyWithin(target, start, end?)
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (!array_semantics && ta && ta->buffer) {
-                    if (js_arraybuffer_detached(ta->buffer)) {
+                if (!array_semantics && ta && ta->base.buffer) {
+                    if (js_arraybuffer_detached(ta->base.buffer)) {
                         return js_throw_type_error("Cannot perform %TypedArray%.prototype.copyWithin on a detached ArrayBuffer");
                     }
                     if (js_typed_array_is_out_of_bounds_item(obj)) {
@@ -21071,8 +21071,8 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                     d_end = d_end >= 0 ? floor(d_end) : ceil(d_end);
                 }
 
-                if (!array_semantics && ta && ta->buffer) {
-                    if (js_arraybuffer_detached(ta->buffer)) {
+                if (!array_semantics && ta && ta->base.buffer) {
+                    if (js_arraybuffer_detached(ta->base.buffer)) {
                         return js_throw_type_error("Cannot perform %TypedArray%.prototype.copyWithin on a detached ArrayBuffer");
                     }
                     if (js_typed_array_is_out_of_bounds_item(obj)) {

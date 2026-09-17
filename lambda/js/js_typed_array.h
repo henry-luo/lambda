@@ -107,16 +107,9 @@ static inline bool js_arraybuffer_view_is_out_of_bounds(const JsArrayBufferView*
 typedef JsArrayBufferView JsDataView;
 
 typedef struct JsTypedArray {
-    union {
-        JsArrayBufferView base;
-        struct {
-            JsArrayBuffer* buffer;
-            uint64_t buffer_item;
-            int byte_offset;
-            int byte_length;
-            bool length_tracking;
-        };
-    };
+    // Typed arrays extend the one view contract; no anonymous field overlay
+    // may become a second source of buffer ownership or bounds facts.
+    JsArrayBufferView base;
     JsTypedArrayType element_type;   // typed-array element kind
     bool is_buffer;                  // true only for Node Buffer instances backed by Uint8Array storage
     ArrayNum* view;                  // ArrayNum descriptor over the same non-moving byte storage

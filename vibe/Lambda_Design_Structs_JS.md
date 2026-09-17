@@ -1,11 +1,12 @@
 # Lambda Design: LambdaJS Struct Authority
 
 > **Last census/source audit:** 2026-09-17, tree `409e18857` plus the completed
-> JSCU45–JSCU50 working-tree changes below.
-> **Status.** The initial consolidation and §20 follow-up are implemented.
+> JSCU45–JSCU51 working-tree changes below.
+> **Status.** The initial consolidation and §20 follow-up are implemented;
+> §21 records the proposed Phase 3 work after the completed TypedArray cleanup.
 > Appendix B distinguishes current evidence from the historical measurements.
-> The clean refreshed `js-rt` census has **464 definitions: 328 structs,
-> 5 classes, 5 unions and 126 enums**, including the separate MVP runtime;
+> The clean refreshed `js-rt` census has **462 definitions: 327 structs,
+> 5 classes, 4 unions and 126 enums**, including the separate MVP runtime;
 > all 547 configured translation units parsed.
 >
 > **Scope.** The single design record for LambdaJS data-structure ownership:
@@ -16,7 +17,8 @@
 >
 > **Ledger.** `JSCU1–JSCU8` (census and rules) stay in
 > [`Lambda_Proposal_JS_Struct_Clean_Up.md`](Lambda_Proposal_JS_Struct_Clean_Up.md).
-> This document owns **JSCU9–JSCU50**, including their completed §20 work, and
+> This document owns **JSCU9–JSCU55**, including completed §20 and JSCU51 work,
+> plus the proposed §21 Phase 3, and
 > **JSCUO1–JSCUO9** (including resolved items).
 >
 > **Authority.** **D1.2v2**, **D1.3v3**, **D1.5v2**, **D1.8–D1.9**,
@@ -2164,9 +2166,9 @@ continues under JSCU27–JSCU35 and can proceed independently.
 
 **Status: implemented, 2026-09-17; JSCU45–JSCU50.** This round completed the
 remaining direct reuse, common runtime-carrier, shared-analysis and JS-family
-merges. A full qualified census at **2026-09-17T05:56:27Z** reports **279 named
-main-runtime struct/class definitions** (286 struct/class rows, including
-anonymous compatibility records) and **464 `js-rt` definitions**. Its largest
+merges. A full qualified census at **2026-09-17T06:45:46Z** reports **279 named
+main-runtime struct/class definitions** (285 struct/class rows, including
+anonymous compatibility records) and **462 `js-rt` definitions**. Its largest
 concentrations remain `js_runtime_state.hpp`, `js_runtime.cpp`,
 `js_mir_context.hpp`, `js_globals.cpp`, and `js_interp.cpp`; those counts are
 review prompts, not automatic deletion targets.
@@ -2343,7 +2345,7 @@ They can precede the larger callable migration.
 | Current records | Proposed reuse | Net named-definition reduction across the repository |
 |---|---|---:|
 | ~~`JsArrayBuffer { ByteBufferHandle handle; }`~~ | **Landed 2026-09-17:** direct `ByteBufferHandle` typedef; JS API functions and the Map carrier retain the language boundary | 1 |
-| ~~`JsDataView` containing only `JsArrayBufferView` and compatibility aliases~~ | **Landed 2026-09-17:** direct `JsArrayBufferView` typedef; its JS API and Map carrier remain unchanged. TypedArray's source-compatibility overlay is separate follow-up work | 1 |
+| ~~`JsDataView` containing only `JsArrayBufferView` and TypedArray's anonymous compatibility overlay~~ | **Landed 2026-09-17:** DataView is a direct alias; **JSCU51 landed 2026-09-17:** TypedArray stores one named `JsArrayBufferView base` and all view accesses use it | 2 |
 | ~~`JsRootedState { RootVector roots; }`~~ | **Landed 2026-09-17:** its 12 state owners extend `RootVector` directly; their fixed Item spans still bind through the same root-vector visitor | 1 |
 | ~~Regex `PtrVec` and its private grow helper~~ | **Landed 2026-09-17:** parser-local `ArrayList` owns pointer ordering/growth; the Pool still owns every AST node and allocation failure returns the existing compile fallback | 1 |
 | ~~Identical `JsCommonAstBuild` / `JsCommonMirBuild`~~ | **Landed 2026-09-17:** Lambda-owned `InputScriptBuildScope`, with one claim/reset/complete path and the existing `InputScriptBuildKind` | 1 |
@@ -2435,10 +2437,11 @@ homes; share property-lane rules, not these phase-specific carriers.
    retains its separately measured private ABI.
 
 The two candidate tables account for **17 named-record retirements** in their
-bounded families (7 direct-reuse, 10 variant-merging). The final total is not
-the candidate arithmetic: explicit shared carriers, enums and anonymous
-variant payloads are reported too. The same configured `js-rt` population is
-**466 → 464** definitions; main LambdaJS is **405 → 403** despite the finished
+bounded families (7 direct-reuse, 10 variant-merging). JSCU51 additionally
+retires two anonymous overlay definitions. The final total is not the candidate
+arithmetic: explicit shared carriers, enums and anonymous variant payloads are
+reported too. The same configured `js-rt` population is **466 → 462**
+definitions; main LambdaJS is **405 → 401** despite the finished
 typed-analysis/support declarations. This is an
 honest reduction in JS-specific duplicates, not a claim that raw total count
 alone measures runtime cost or that a definition was hidden by relocation.
@@ -2463,6 +2466,87 @@ suspension/finally/IteratorClose; duplicate-key/order/accessor behavior;
 buffer alias/detach/resize; symbol descriptions beyond 128 bytes; and heap
 replacement. The relevant focused Lambda/JS and precise forced-GC tests pass;
 this work does not alter the Test262 harness.
+
+## 21. Phase 3 proposal — callable artifacts and realm services
+
+**Status: JSCU51 implemented; JSCU52–JSCU55 proposed, 2026-09-17.** Phase 3
+continues only where a shared owner removes a real translation or lifecycle
+duplicate. It does not merge records merely because they have pointer-shaped
+fields, and it does not turn the private MVP ABI into an implicit `Item` ABI.
+
+### 21.1 JSCU51 — one physical ArrayBuffer-view base
+
+**Landed.** `JsTypedArray` now contains a named `JsArrayBufferView base`; the
+anonymous union that re-declared `buffer`, `buffer_item`, byte offset, byte
+length and length-tracking is gone. TypedArray allocation, detach, resize,
+Atomics, GC tracing, Jube binary projection and DOM clipboard paths all read
+the same `base` fields as the DataView contract. The carrier size is unchanged;
+the retirement removes an anonymous compatibility record and its false second
+ownership surface. This follows D2.6.1v3/D2.6.4v3: byte ownership and view
+bounds are shared, while TypedArray element coercion and DataView endianness
+remain language operations.
+
+### 21.2 JSCU52 — split callable artifact from realm instantiation
+
+`JsCallableCode` is the next material interop target. Its current 64-byte
+record combines immutable definition facts with realm/module facts:
+`runtime_context`, `module_state_id`, intern-table membership and reference
+counting cannot belong to a reusable definition artifact. Establish a
+Lambda-owned immutable callable-artifact carrier for the facts proven stable
+across function values, then retain a JS realm-instantiation record for
+context-bound compiled entry ownership and weak-cache membership. `JsFunction`
+keeps its observable properties, call/construct capabilities, environment and
+optional semantic payloads.
+
+Before changing layout, build a producer/consumer matrix for every
+`JsCallableCode` field across MIR code interning, Script-owned AST definitions,
+dynamic functions, finalization and Jube invocation. Classify each field as
+artifact, realm/module instantiation or value state from its lifetime—not its
+name. Move one class at a time behind accessors, preserve the first-eight-byte
+`FunctionHeader` ABI, and delete the old access path only after the tracer and
+weak-table owner agree. This is D6.2.1–D6.2.3v2's definition/value distinction;
+it must not embed a Lambda `Function` inside `JsFunction` or erase JS
+`[[Call]]`/`[[Construct]]` differences.
+
+### 21.3 JSCU53 — promote only real realm services to common capsules
+
+Audit `JsRuntimeState` by lifecycle: realm-global binding, JS-only semantic
+service, host resource, or reusable runtime service. Migrate only a service
+with both a second Lambda/Jube/DOM consumer and an existing shared owner such
+as `ContextCapsuleDirectory`, `RuntimeResourceTable` or `RuntimeJobQueue`.
+For each candidate, move allocation, precise tracing, teardown and rebinding
+together; ratchet `sizeof(JsRuntimeState)` after deletion. Do not add a generic
+`RuntimeState` directory or move a JS-only cache merely to reduce a field
+count. This enforces D5.4.2–D5.4.4 and D7.4.1v2.
+
+### 21.4 JSCU54 — prove compiler mirrors redundant before retirement
+
+`JsMirBindingRef`, `JsMirLiteralShapePlan` and `JsMirStaticShapeField` are not
+current deletions. The binding row still bridges cross-AST preambles using a
+resolved `NameEntry`, defining node and persistent name fallback; the literal
+rows build a source recipe before `MirConstructionPlan` can describe its
+resolved `TypeMap`. First give the shared core an actual second consumer for
+each missing fact. Only then delete fields recoverable from the canonical owner
+or replace the transient plan with a shared plan. Moving these JS-only rows to
+`lambda/runtime` would violate D8.2.3; persistent facts also remain governed
+by D8.2.4–D8.2.6.
+
+### 21.5 JSCU55 — explicit MVP retirement decision
+
+MVP is a separately compiled, debug-only `--runtime=mvp` benchmark runtime,
+not dead compatibility code. It carries its own value/heap/root ABI, dedicated
+tests and benchmark corpus. A product decision may retire it in favor of the
+shared-Item LambdaJS runtime; if authorized, first replace its benchmark role
+and CLI mode, then delete the private runtime as one removal with its tests and
+evidence. Do not piecemeal cast or translate its values at an interop boundary.
+D1.2v2/D1.3v3 permit the private ABI but do not make it interchangeable with
+`Item`.
+
+**Phase 3 acceptance.** Every extracted carrier needs two real clients, one
+owner for allocation/trace/finalization and a before/after census. JSCU52 also
+requires AST and MIR closure, constructor, dynamic-function, forced-GC and
+Jube-host gates; JSCU53 requires repeated realm create/destroy and resource
+teardown checks. No Phase 3 item is complete on a renamed struct alone.
 
 ## Appendix A — Implementation notes (brief)
 
@@ -2503,7 +2587,7 @@ this work does not alter the Test262 harness.
 ## Appendix B — Implementation status and history (brief)
 
 This appendix records source evidence, not new conformance rulings. The final
-2026-09-17 refresh ran the census after every JSCU45–JSCU50 source change and
+2026-09-17 refresh ran the census after every JSCU45–JSCU51 source change and
 ran focused ownership/behavioral gates. It did not rerun historical broad
 performance benchmarks.
 
@@ -2511,27 +2595,27 @@ performance benchmarks.
 
 Command: `make struct-census ARGS=--full`, with the unchanged
 `utils/struct_census.config.json`, macOS C++17/debug preprocessing, at tree
-`409e18857` plus the working-tree JSCU45–JSCU50 changes. Generated at
-**2026-09-17T05:56:27Z**. Reports:
+`409e18857` plus the working-tree JSCU45–JSCU51 changes. Generated at
+**2026-09-17T06:45:46Z**. Reports:
 [`struct_census.csv`](meta/ds/struct_census.csv) and
 [`struct_census.json`](meta/ds/struct_census.json).
 
-**547 TUs, 2,981 definitions** across the configured source trees. The prior
+**547 TUs, 2,979 definitions** across the configured source trees. The prior
 checked-in report had 2,917 definitions and 492 `js-rt` definitions. Current
-`js-rt` is **464**, a net decrease of 28; that is not a claim that 28 runtime
+`js-rt` is **462**, a net decrease of 30; that is not a claim that 30 runtime
 concepts were eliminated.
 
 | Census population | Structs | Classes | Unions | Enums | All definitions |
 |---|---:|---:|---:|---:|---:|
-| Main LambdaJS, excluding parser and MVP | 281 | 5 | 5 | 112 | 403 |
+| Main LambdaJS, excluding parser and MVP | 280 | 5 | 4 | 112 | 401 |
 | JS parser | 9 | 0 | 0 | 10 | 19 |
 | Private-value MVP | 34 | 0 | 0 | 3 | 37 |
 | TypeScript | 4 | 0 | 0 | 1 | 5 |
-| **`js-rt` total** | **328** | **5** | **5** | **126** | **464** |
+| **`js-rt` total** | **327** | **5** | **4** | **126** | **462** |
 
 Main LambdaJS previously contributed 468 definitions (344 structs), while the
 prior report contained no MVP rows. For named struct/class definitions, the
-current main-runtime population is **279 named definitions** (286 struct/class
+current main-runtime population is **279 named definitions** (285 struct/class
 rows including anonymous compatibility records), and the complete JS/TS
 population is **325 named definitions**. The former `js_make_iter_result`
 linkage conflict is fixed, so all configured translation units are represented.
@@ -2587,7 +2671,7 @@ analysis; a large size alone is not proof of a duplicate struct.
 | JSCU32(A); JSCU46 | `GcEnvironmentStorage` plus `gc_environment_calloc` make raw Item/tail and `JsInterpEnv` layout kinds explicit. Common descriptor access/copy/visitor operations replace duplicate tracing; lexical policy is a JS extension |
 | JSCU33(A); JSCU46 | MIR code interning and Script-owned AST definition/code sharing exist. `FunctionHeader` is the common callable carrier and initialization/ABI operation; definition/property tails remain intentionally distinct under D6.2.1–D6.2.3v2 |
 | JSCU33(B) | `JsAccessorCell` is distinct GC descriptor metadata under D3.4.8 |
-| JSCU34 | DataView directly reuses `JsArrayBufferView`; TypedArray still retains its anonymous source-compatibility overlay |
+| JSCU34; JSCU51 | DataView is a direct `JsArrayBufferView` alias and TypedArray embeds the same named `base`; the anonymous source-compatibility overlay is retired |
 | JSCU35; JSCU49 | Shared name cache/cursor, dynamic closure checkpoint and one flat ordered `JsClassMember` exist; the three named member payload layouts are retired |
 | JSCU44 | per-activation `with` chain; `JsWithScopeState` deleted |
 | JSCU47 | `jm_get_effective_type` consumes AST-published contracts; full return contracts are joined on `FnAnalysis` and compact native return lanes project from that owner |
@@ -2609,6 +2693,9 @@ analysis; a large size alone is not proof of a duplicate struct.
 - **JSCU45–JSCU50 (§20)** are complete. Their deliberate boundaries (private
   MVP ABI, JS readiness/microtask policy, callable property tails and payload-
   specific `Map` extensions) are not residual duplicate representations.
+- **JSCU52–JSCU55 (§21)** are proposed. Their acceptance is intentionally
+  lifetime- and client-evidence based; no current Phase 3 design statement is
+  an implementation-completion claim.
 
 ### Census at ratification (2026-09-07, superseded)
 

@@ -122,7 +122,7 @@ static bool blob_part_has_shared_backing(Item part) {
     }
     if (js_is_typed_array(part)) {
         JsTypedArray* ta = js_get_typed_array_ptr(part.map);
-        if (ta && js_arraybuffer_shared(ta->buffer)) return true;
+        if (ta && js_arraybuffer_shared(ta->base.buffer)) return true;
     }
     if (js_is_dataview(part)) {
         JsDataView* dv = js_get_dataview_ptr(part);

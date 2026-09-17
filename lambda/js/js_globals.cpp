@@ -10872,7 +10872,7 @@ static Item js_object_set_integrity(Item obj, bool frozen) {
     // backed TA detection via js_is_typed_array + the buffer handle flags.
     if (frozen && js_is_typed_array(object_root.get())) {
         JsTypedArray* ta = js_get_typed_array_ptr(object_root.get().map);
-        if (ta && js_arraybuffer_resizable(ta->buffer)) {
+        if (ta && js_arraybuffer_resizable(ta->base.buffer)) {
             return js_throw_type_error("Cannot freeze a TypedArray backed by a resizable ArrayBuffer");
         }
     }
@@ -17817,26 +17817,26 @@ JS_FORWARD_STATIC_EXPRESSION(bool, js_web_stream_item_is_true, (Item item),
 static bool js_readable_stream_view_is_detached(Item view) {
     if (!js_is_typed_array(view)) return true;
     JsTypedArray* ta = js_get_typed_array_ptr(view.map);
-    return !ta || !ta->buffer || js_arraybuffer_detached(ta->buffer) ||
+    return !ta || !ta->base.buffer || js_arraybuffer_detached(ta->base.buffer) ||
            js_typed_array_is_out_of_bounds_item(view);
 }
 
 static void js_readable_stream_detach_byob_view(Item view) {
     if (!js_is_typed_array(view)) return;
     JsTypedArray* ta = js_get_typed_array_ptr(view.map);
-    if (!ta || !ta->buffer || js_arraybuffer_detached(ta->buffer)) return;
-    if (ta->buffer_item) {
-        js_arraybuffer_detach((Item){.item = ta->buffer_item});
+    if (!ta || !ta->base.buffer || js_arraybuffer_detached(ta->base.buffer)) return;
+    if (ta->base.buffer_item) {
+        js_arraybuffer_detach((Item){.item = ta->base.buffer_item});
     } else {
-        byte_buffer_detach(ta->buffer);
+        byte_buffer_detach(ta->base.buffer);
     }
 }
 
 static int js_readable_stream_view_buffer_length(Item view) {
     if (!js_is_typed_array(view)) return -1;
     JsTypedArray* ta = js_get_typed_array_ptr(view.map);
-    if (!ta || !ta->buffer || js_arraybuffer_detached(ta->buffer)) return -1;
-    return js_arraybuffer_length(ta->buffer);
+    if (!ta || !ta->base.buffer || js_arraybuffer_detached(ta->base.buffer)) return -1;
+    return js_arraybuffer_length(ta->base.buffer);
 }
 
 static Item js_readable_stream_byob_respond_with_new_view(Item env_item, Item view) {

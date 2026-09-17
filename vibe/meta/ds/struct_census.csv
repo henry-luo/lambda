@@ -395,11 +395,9 @@ js-rt,enum,JsTypedArrayType,4,4,12,lambda/js/js_typed_array.h,20
 js-rt,struct,JsTypedArraySpec,24,8,8,lambda/js/js_typed_array.h,35
 js-rt,struct,JsArrayBufferView,32,8,5,lambda/js/js_typed_array.h,81
 js-rt,struct,JsTypedArray,48,8,4,lambda/js/js_typed_array.h,109
-js-rt,union,(anonymous),32,8,2,lambda/js/js_typed_array.h,110
-js-rt,struct,(anonymous),32,8,5,lambda/js/js_typed_array.h,112
-js-rt,enum,JsAtomicsOp,4,4,9,lambda/js/js_typed_array.h,125
-js-rt,enum,JsSharedArrayBufferOperation,4,4,2,lambda/js/js_typed_array.h,205
-js-rt,enum,JsDataViewOperation,4,4,20,lambda/js/js_typed_array.h,234
+js-rt,enum,JsAtomicsOp,4,4,9,lambda/js/js_typed_array.h,118
+js-rt,enum,JsSharedArrayBufferOperation,4,4,2,lambda/js/js_typed_array.h,198
+js-rt,enum,JsDataViewOperation,4,4,20,lambda/js/js_typed_array.h,227
 js-rt,struct,JsTypedArrayMapCarrier,80,8,2,lambda/js/js_typed_array_carrier.hpp,7
 js-rt,enum,JsNameId,4,4,20,lambda/js/js_well_known_names.h,5
 js-rt,struct,MvpValue,8,8,1,lambda/js/mvp/mvp.h,8
