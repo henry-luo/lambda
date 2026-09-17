@@ -1024,6 +1024,10 @@ LAMBDA_STATIC_ASSERT(offsetof(Container, reserved_state) == 7,
 // which was visible to Object.keys and is still visible to
 // Object.getOwnPropertyNames — engine bookkeeping must not be a user property.
 #define CONTAINER_STATE_STRICT_ARGUMENTS ((uint8_t)(1u << 0))
+// A JS dense-array buffer allocated outside the GC data zones carries an
+// intrusive lifetime record. This bit makes finalization owner-directed;
+// it must never be set on a native-lane array.
+#define CONTAINER_STATE_JS_RUNTIME_ITEMS ((uint8_t)(1u << 1))
 
 static inline bool container_is_strict_arguments(const Container* c) {
     return c && (c->reserved_state & CONTAINER_STATE_STRICT_ARGUMENTS) != 0;

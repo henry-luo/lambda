@@ -4,6 +4,7 @@
 #include "../../lib/hashmap_typed.hpp"
 #include <limits.h>
 #include <stdarg.h>
+#include <string.h>
 
 __thread NamePool* g_js_mir_name_pool_override = NULL;
 
@@ -326,6 +327,17 @@ static void jm_note_call_error_lane(void* owner, JitExceptionEffect effect) {
     jm_error_lane_note_call(mt, effect);
 }
 
+static void jm_note_loop_invariant_call(void* owner, const char* name) {
+    (void)owner;
+    // Only module-name resolution has the D7.2.1 slab-restoration proof.
+    // Keep the profile precise rather than treating arbitrary scalar leaves as
+    // equivalent evidence for name-flow tuning.
+    if (name && strcmp(name, "lambda_active_module_name_id") == 0) {
+        js_opt_trace_record(JS_OPT_MIR_LOOP_STABLE_NAME_ID,
+            JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+    }
+}
+
 JsMirTranspiler* jm_create_mir_transpiler(
     JsTranspiler* tp, MIR_context_t ctx, const char* filename, bool is_module,
     int import_capacity, int local_func_capacity, int var_scope_capacity,
@@ -355,6 +367,7 @@ JsMirTranspiler* jm_create_mir_transpiler(
     mt->func_em->em.call_owner = mt;
     mt->func_em->em.root_call_value = js_call_root_value;
     mt->func_em->em.note_call_exception = jm_note_call_error_lane;
+    mt->func_em->em.note_loop_invariant_call = jm_note_loop_invariant_call;
     mt->func_em->em.convert_rep = jm_convert_rep;
     mt->func_em->em.lower_value = jm_profile_lower_value;
     mt->func_em->em.emit_condition = jm_profile_emit_condition;

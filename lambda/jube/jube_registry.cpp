@@ -1116,59 +1116,68 @@ extern "C" Item js_setTimeout(Item callback, Item delay);
 extern "C" void js_clearTimeout(Item timer);
 extern "C" void js_clearInterval(Item timer);
 extern "C" Item js_setImmediate(Item callback);
-extern "C" Item js_setTimeout_promisified(Item delay, Item value);
+extern "C" void js_timer_install_promisify_custom(Item function);
 
-static void jube_host_dom_notify_mutation(int kind, void* target, void* parent) {
-    dom_notify_mutation((DomJsMutationKind)kind, target, parent);
-}
-
-static Item jube_host_node_promisify_symbol(void) {
-    const char* name = "nodejs.util.promisify.custom";
-    return js_symbol_for(js_make_string_len(name, (int)strlen(name)));
-}
-
-static Item jube_host_node_promisify_args_symbol(void) {
-    const char* name = "nodejs.util.promisify.customArgs";
-    return js_symbol_for(js_make_string_len(name, (int)strlen(name)));
-}
-
-static void jube_host_node_timer_install_promisify_custom(Item function) {
-    if (get_type_id(function) != LMD_TYPE_FUNC) return;
-    RootFrame roots(3);
-    Rooted<Item> function_root(roots, function);
-    Rooted<Item> symbol_root(roots, jube_host_node_promisify_symbol());
-    Rooted<Item> custom_root(roots, js_new_native_function(js_setTimeout_promisified));
-    if (get_type_id(custom_root.get()) != LMD_TYPE_FUNC) return;
-    js_set_key_default(function_root.get(), symbol_root.get(), custom_root.get());
+static Item jube_host_node_promisify_symbol(const char* name) {
+    return js_symbol_for(js_name_item(name, strlen(name)));
 }
 
 static void jube_host_node_function_install_promisify_custom(Item function,
         JubeNativeFunctionSpec spec) {
-    if (get_type_id(function) != LMD_TYPE_FUNC) return;
-    RootFrame roots(3);
-    Rooted<Item> function_root(roots, function);
-    Rooted<Item> symbol_root(roots, jube_host_node_promisify_symbol());
-    Rooted<Item> custom_root(roots, jube_host_script_new_function(spec));
-    if (get_type_id(custom_root.get()) != LMD_TYPE_FUNC) return;
-    js_set_key_default(function_root.get(), symbol_root.get(), custom_root.get());
+    JubeRootFrame frame = {};
+    if (!jube_host_opaque_root_frame_begin(&frame, 3)) return;
+    uint64_t* function_root = jube_host_opaque_root_frame_take_slot(&frame);
+    uint64_t* symbol_root = jube_host_opaque_root_frame_take_slot(&frame);
+    uint64_t* custom_root = jube_host_opaque_root_frame_take_slot(&frame);
+    if (!function_root || !symbol_root || !custom_root) {
+        jube_host_opaque_root_frame_end(&frame);
+        return;
+    }
+    *function_root = function.item;
+    Item symbol = jube_host_node_promisify_symbol("nodejs.util.promisify.custom");
+    *symbol_root = symbol.item;
+    Item custom = jube_host_script_new_function(spec);
+    *custom_root = custom.item;
+    // The module supplies behavior while the host owns shared symbol identity.
+    js_set_key_default((Item){.item = *function_root}, (Item){.item = *symbol_root},
+        (Item){.item = *custom_root});
+    jube_host_opaque_root_frame_end(&frame);
 }
 
 static void jube_host_node_function_install_promisify_args(Item function, const char* first,
                                                             const char* second) {
-    if (get_type_id(function) != LMD_TYPE_FUNC || !first) return;
-    RootFrame roots(5);
-    Rooted<Item> function_root(roots, function);
-    Rooted<Item> names_root(roots, js_array_new(0));
-    Rooted<Item> symbol_root(roots, jube_host_node_promisify_args_symbol());
-    Rooted<Item> first_root(roots, js_make_string_len(first, (int)strlen(first)));
-    js_array_push(names_root.get(), first_root.get());
-    if (second) {
-        Rooted<Item> second_root(roots, js_make_string_len(second, (int)strlen(second)));
-        js_array_push(names_root.get(), second_root.get());
+    if (!first) return;
+    JubeRootFrame frame = {};
+    if (!jube_host_opaque_root_frame_begin(&frame, 4)) return;
+    uint64_t* function_root = jube_host_opaque_root_frame_take_slot(&frame);
+    uint64_t* symbol_root = jube_host_opaque_root_frame_take_slot(&frame);
+    uint64_t* names_root = jube_host_opaque_root_frame_take_slot(&frame);
+    uint64_t* name_root = jube_host_opaque_root_frame_take_slot(&frame);
+    if (!function_root || !symbol_root || !names_root || !name_root) {
+        jube_host_opaque_root_frame_end(&frame);
+        return;
     }
-    js_set_key_default(function_root.get(), symbol_root.get(), names_root.get());
+    *function_root = function.item;
+    Item symbol = jube_host_node_promisify_symbol("nodejs.util.promisify.customArgs");
+    *symbol_root = symbol.item;
+    Item names = js_array_new(0);
+    *names_root = names.item;
+    Item name = js_make_string_len(first, (int)strlen(first));
+    *name_root = name.item;
+    js_array_push((Item){.item = *names_root}, (Item){.item = *name_root});
+    if (second) {
+        name = js_make_string_len(second, (int)strlen(second));
+        *name_root = name.item;
+        js_array_push((Item){.item = *names_root}, (Item){.item = *name_root});
+    }
+    js_set_key_default((Item){.item = *function_root}, (Item){.item = *symbol_root},
+        (Item){.item = *names_root});
+    jube_host_opaque_root_frame_end(&frame);
 }
 
+static void jube_host_dom_notify_mutation(int kind, void* target, void* parent) {
+    dom_notify_mutation((DomJsMutationKind)kind, target, parent);
+}
 
 static const JubeHostGcAPI jube_host_gc_api = {
     heap_register_gc_root,
@@ -1229,7 +1238,7 @@ static const JubeHostAsyncAPI jube_host_node_async_api = {
     js_clearTimeout,
     js_clearInterval,
     js_setImmediate,
-    jube_host_node_timer_install_promisify_custom,
+    js_timer_install_promisify_custom,
     jube_host_node_function_install_promisify_custom,
     jube_host_node_function_install_promisify_args,
     jube_host_node_next_tick_callback,
@@ -2976,7 +2985,9 @@ static Item jube_host_node_session_global_this(void* session) {
 
 static Item jube_host_node_session_process(void* session) {
     if (!jube_host_node_session_is_live(session)) return ItemNull;
-    return js_get_global_property((Item){.item = s2it(heap_create_name("process", 7))});
+    // node-core attaches while the lazy global is being resolved; bypass it to
+    // preserve the host-owned process identity without recursive activation.
+    return js_get_process_object_value();
 }
 
 static Item jube_host_node_current_this(void* session) {

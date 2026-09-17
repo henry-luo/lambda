@@ -862,22 +862,18 @@ extern void lambda_repl_cleanup();
 
 // MIR interpreter mode (from mir.c)
 extern "C" int g_mir_interp_mode;
-// Tune6: force document JS to the link-interface interpreter (generator stays init)
+// Legacy document policy used by Lambda Direct; LambdaJS ignores it under
+// D8.1.3v11 and always links selected MIR natively.
 extern int g_js_force_document_interp;
 
-// Tune6: cold-document rendering commands (layout/render/view) default page JS to
-// the MIR interpreter. Vendor scripts in these documents are cold (run once at
-// load), so skipping JIT codegen cuts JS compile work ~2-2.6x with negligible
-// runtime cost — see vibe/jube/Transpile_Js_Tune6_AST.md §0.2. Uses the link-
-// interface interp path (JIT generator stays initialized) rather than pure-interp,
-// since pure-interp diverges from the JIT on some interactive JS. Escape hatch:
-// LAMBDA_JS_LARGE_INTERP=0 keeps the JIT (JS-heavy interactive pages / A/B timing).
+// Retain the existing Lambda Direct document policy without letting it select a
+// JavaScript backend. LambdaJS has an explicit AST interpreter and native MIR.
 static void default_render_cmd_to_interp(void) {
     const char* env = getenv("LAMBDA_JS_LARGE_INTERP");
     bool enabled = !env || !env[0] || (strcmp(env, "0") != 0 && strcmp(env, "false") != 0);
     if (enabled) {
         g_js_force_document_interp = 1;
-        log_debug("render command: defaulting document JS to MIR interpreter (cold vendor JS)");
+        log_debug("render command: enabled legacy document MIR policy for Lambda Direct");
     }
 }
 
@@ -2426,6 +2422,14 @@ static int lambda_main_impl(int argc, char *argv[]) {
             return lambda_main_finish(0);
         }
 
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "--mir-interp") == 0) {
+                fputs("--mir-interp is unavailable for LambdaJS; use the AST backend or native MIR execution\n", stderr);
+                runtime_cleanup(&runtime);
+                return lambda_main_finish(9);
+            }
+        }
+
         JsDocumentSession js_document_session;
         js_document_session_init(&js_document_session);
 
@@ -2511,8 +2515,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     print_eval_result = true;
                     eval_option_index = i;
                     eval_source_arg = argv[++i];
-                } else if (strcmp(argv[i], "--mir-interp") == 0) {
-                    g_mir_interp_mode = 1;
                 } else if (strcmp(argv[i], "--diagnose") == 0) {
                     js_set_diagnose_enabled(1);
                     log_warn("js-diagnose: single JS diagnose mode enabled");
@@ -4392,6 +4394,14 @@ static int lambda_main_impl(int argc, char *argv[]) {
             log_disable_all();
         }
 
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "--mir-interp") == 0) {
+                fputs("--mir-interp is unavailable for LambdaJS; use the AST backend or native MIR execution\n", stderr);
+                runtime_cleanup(&runtime);
+                return lambda_main_finish(9);
+            }
+        }
+
         int batch_timeout = 10; // default per-script timeout in seconds
         const char* compiler_timing_env = getenv("LAMBDA_COMPILER_TIMING");
         bool compiler_timing = compiler_timing_env && compiler_timing_env[0] &&
@@ -4409,8 +4419,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
             } else if (strncmp(argv[i], "--opt-level=", 12) == 0) {
                 int level = atoi(argv[i] + 12);
                 if (level >= 0 && level <= 3) g_js_mir_optimize_level = (unsigned int)level;
-            } else if (strcmp(argv[i], "--mir-interp") == 0) {
-                g_mir_interp_mode = 1;
             } else if (strcmp(argv[i], "--diagnose") == 0) {
                 js_set_diagnose_enabled(1);
                 log_warn("js-diagnose: js-test-batch diagnose mode enabled");

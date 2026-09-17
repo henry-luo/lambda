@@ -412,6 +412,11 @@ static inline Item js_fn_home_class(const JsFunction* fn) {
 #define JS_FUNC_FLAG_ANALYSIS_KNOWN 8192
 #define JS_FUNC_FLAG_MIR_CONTEXT_ABI 16384
 #define JS_FUNC_FLAG_CLASS_CONSTRUCTOR 32768
+#define JS_FUNC_FLAG_USES_ARGUMENTS 65536
+#define JS_FUNC_FLAG_DIRECT_EVAL 131072
+// Compiler-created functions publish their ordinary name/length descriptors
+// only when an observable property operation reaches them.
+#define JS_FUNC_FLAG_LAZY_METADATA 262144
 
 #define JS_FUNC_POOL_POINTER_ROOTS_REGISTERED 1
 #define JS_FUNC_FLAG_DATA_VIEW_ACCESSOR JS_FUNC_FLAG_METHOD

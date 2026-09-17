@@ -138,14 +138,16 @@ NameRef well_known_name_ref(NameId id);
 static inline NameClassification name_classify_ordinary(const char* bytes, size_t length) {
     NameClassification result = {0, NAME_ARRAY_INDEX_NONE, 0, 1};
     if (!bytes) return result;
-    result.hash = hash_fnv1a_32(bytes, length);
-    if (result.hash == 0) result.hash = 1;
 
+    // Catalog probing and dynamic-name publication both need these facts. Keep
+    // their byte walk fused so canonical NameId routing does not rescan a key.
+    uint32_t hash = 0x811c9dc5u;
     uint64_t index = 0;
     bool array_index = length > 0 && length <= 10 &&
         !(length > 1 && bytes[0] == '0');
     for (size_t i = 0; i < length; i++) {
         unsigned char c = (unsigned char)bytes[i];
+        hash = (hash ^ c) * 0x01000193u;
         if (c >= 128) result.is_ascii = 0;
         if (!array_index || c < '0' || c > '9') {
             array_index = false;
@@ -154,6 +156,7 @@ static inline NameClassification name_classify_ordinary(const char* bytes, size_
         index = index * 10 + (uint64_t)(c - '0');
         if (index > 0xFFFFFFFEULL) array_index = false;
     }
+    result.hash = hash ? hash : 1;
     if (array_index) result.array_index = (uint32_t)index;
     return result;
 }

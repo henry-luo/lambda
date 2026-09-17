@@ -175,6 +175,10 @@ TEST_P(MirGcStressTest, MatchesUnstressedRunUnderForcedGc) {
     std::vector<StressMode> modes = stress_modes();
     for (size_t m = 0; m < modes.size(); m++) {
         const StressMode& mode = modes[m];
+        // D8.1.3v11 retires MIR interpretation for LambdaJS. Its two native
+        // forced-GC schedules remain the JS oracle; keep interpreter coverage
+        // for the other MIR guests that still select that backend.
+        if (mode.mir_interp && script.language == mir_check::LANG_JS) continue;
         mir_check::ProcessSpec spec = base;
         spec.mir_interp = mode.mir_interp;
         spec.env = mode.env;

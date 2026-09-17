@@ -91,6 +91,18 @@ static Item js_get_profiled_buffer_namespace(void) {
     return jube_node_core_module_enabled() ? js_get_buffer_namespace() : ItemNull;
 }
 
+static Item js_get_profiled_process_object(void) {
+    if (!jube_node_core_module_enabled()) return js_get_process_object_value();
+    Item process_namespace = ItemNull;
+    // node-core extends the host-owned process object during its runtime attach.
+    // Resolve its public namespace before publishing the lazy global so callers
+    // cannot observe the unextended process surface in an enabled profile.
+    if (jube_specifier_resolve("process", &process_namespace) == JUBE_SPECIFIER_RESOLVED) {
+        return process_namespace;
+    }
+    return js_get_process_object_value();
+}
+
 struct JsLazyGlobalSpec {
     const char* name;
     size_t name_length;
@@ -99,7 +111,7 @@ struct JsLazyGlobalSpec {
 };
 
 static const JsLazyGlobalSpec js_lazy_host_globals[] = {
-    {"process", 7, js_get_process_object_value, false},
+    {"process", 7, js_get_profiled_process_object, false},
     {"Buffer", 6, js_get_profiled_buffer_namespace, true},
     {"crypto", 6, js_get_jube_crypto_namespace, false},
     {"Math", 4, js_get_math_object_value, false},
@@ -7265,6 +7277,17 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                 return js_property_descriptor_from_pd(&pd);
             }
         }
+        if (js_function_materialize_lazy_metadata_property(
+                object_root.get(), name_root.get())) {
+            obj = object_root.get();
+            name = name_root.get();
+            name_str = it2s(name);
+            JsPropertyDescriptor pd = {};
+            if (name_str && js_get_own_property_descriptor(obj,
+                    name_str->chars, (int)name_str->len, &pd)) {
+                return js_property_descriptor_from_pd(&pd);
+            }
+        }
         if (name_str->len == 9 && strncmp(name_str->chars, "prototype", 9) == 0) {
             if (!js_function_has_own_prototype(obj)) return make_js_undefined();
             JS_ASSIGN_OR_RETURN(materialized, js_get_key_default(obj, name));
@@ -7839,6 +7862,14 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
     name_root.set(name);
     obj = object_root.get();
     descriptor = descriptor_root.get();
+    if (get_type_id(obj) == LMD_TYPE_FUNC) {
+        // DefineOwnProperty can create a user field without passing through
+        // ordinary Set; preserve function metadata's creation order first.
+        js_function_materialize_all_lazy_metadata_properties(object_root.get());
+        obj = object_root.get();
+        name = name_root.get();
+        descriptor = descriptor_root.get();
+    }
     bool regexp_virtual_define = false;
     String* regexp_define_name = NULL;
     if (get_type_id(obj) == LMD_TYPE_MAP && js_class_id(obj) == JS_CLASS_REGEXP &&
@@ -8256,8 +8287,14 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     }
     if (type == LMD_TYPE_FUNC) {
         JsFuncProps* fn_props = (JsFuncProps*)object.function;
-        if (js_function_has_own_prototype(object)) {
-            JS_ASSIGN_OR_RETURN(materialized, js_get_name_key(object, "prototype", 9));
+        js_function_materialize_all_lazy_metadata_properties(
+            object_root.get());
+        fn_props = (JsFuncProps*)object_root.get().function;
+        // Reflection observes the ordinary length/name descriptors before the
+        // lazily created constructor prototype, preserving their key order.
+        if (js_function_has_own_prototype(object_root.get())) {
+            JS_ASSIGN_OR_RETURN(materialized, js_get_name_key(
+                object_root.get(), "prototype", 9));
         }
         // D6.2.2v2: FUNC OwnPropertyKeys is the ordinary key order of its
         // backing shape; length, name, prototype, statics, and user fields do
@@ -8986,21 +9023,95 @@ extern "C" Item js_for_in_keys(Item object) {
     return result_root.get();
 }
 
-// True when the POD descriptor kernel can speak for this object/key pair.
-// It reads plain shape storage only, and reports `false` both for "absent" and
-// for "cannot describe" (array dense slots, unmaterialized FUNC prototype,
-// string-exotic indices) — so callers may only trust a `true` return. Classes
-// whose object-form descriptor overrides shape storage are excluded: String
-// wrappers synthesize length/indices from __primitiveValue__, RegExp suppresses
-// virtual flag properties, Error overrides `stack`'s enumerability, and
-// `__proto__` is not an own property at all.
-static bool js_pod_descriptor_applies(Item object, Item key) {
-    if (get_type_id(object) != LMD_TYPE_MAP) return false;
-    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+typedef enum JsOwnEnumerability {
+    JS_OWN_ENUMERABILITY_UNSUPPORTED,
+    JS_OWN_ENUMERABILITY_ABSENT,
+    JS_OWN_ENUMERABILITY_PRESENT,
+} JsOwnEnumerability;
+
+// Reads the same companion/shape authority used by descriptor construction,
+// but avoids creating a descriptor object when callers only need one bit.
+// Arrays are admitted only when their dense storage is ordinary; arguments,
+// numeric arrays, proxies, and class-specific virtual properties retain the
+// complete descriptor path below.
+static JsOwnEnumerability js_own_enumerability_inspect(Item object, Item key,
+        bool* out_enumerable) {
+    if (out_enumerable) *out_enumerable = false;
+    if (get_type_id(key) != LMD_TYPE_STRING || js_is_proxy(object)) {
+        return JS_OWN_ENUMERABILITY_UNSUPPORTED;
+    }
+    String* name = it2s(key);
+    if (!name || name->len > (uint32_t)INT_MAX) {
+        return JS_OWN_ENUMERABILITY_UNSUPPORTED;
+    }
+
+    TypeId type = get_type_id(object);
+    if (type == LMD_TYPE_ARRAY && !js_is_arguments_exotic_array(object)) {
+        if (name->len == 6 && memcmp(name->chars, "length", 6) == 0) {
+            return JS_OWN_ENUMERABILITY_PRESENT;
+        }
+        uint32_t index = 0;
+        Array* array = object.array;
+        if (js_property_key_to_array_index(key, &index)) {
+            // A non-dense index can be sparse or companion-owned. Let the
+            // complete descriptor path distinguish those observable cases.
+            if (!array || (int64_t)index >= array->length ||
+                    (int64_t)index >= container_dense_capacity(array) ||
+                    !array->items ||
+                    array->items[index].item == JS_DELETED_SENTINEL_VAL) {
+                return JS_OWN_ENUMERABILITY_UNSUPPORTED;
+            }
+            ShapeEntry* entry = js_find_shape_entry(object, name->chars,
+                (int)name->len);
+            // An accessor can shadow a dense index, so its public descriptor
+            // must remain the authority for the enumerability decision.
+            if (entry && jspd_is_accessor(entry)) {
+                return JS_OWN_ENUMERABILITY_UNSUPPORTED;
+            }
+            if (out_enumerable) {
+                *out_enumerable = js_props_query_enumerable(
+                    js_array_props(array), entry, name->chars, (int)name->len);
+            }
+            return JS_OWN_ENUMERABILITY_PRESENT;
+        }
+
+        if (!array || !js_array_has_props(array)) {
+            return JS_OWN_ENUMERABILITY_ABSENT;
+        }
+        Item props = (Item){.map = js_array_props(array)};
+        ShapeEntry* entry = NULL;
+        JsShapeSlotStatus status = js_own_shape_slot_status(props,
+            name->chars, (int)name->len, NULL, &entry);
+        if (status == JS_SHAPE_SLOT_ACCESSOR) {
+            return JS_OWN_ENUMERABILITY_UNSUPPORTED;
+        }
+        if (status != JS_SHAPE_SLOT_DATA) {
+            return JS_OWN_ENUMERABILITY_ABSENT;
+        }
+        if (out_enumerable) {
+            *out_enumerable = js_props_query_enumerable(
+                props.map, entry, name->chars, (int)name->len);
+        }
+        return JS_OWN_ENUMERABILITY_PRESENT;
+    }
+
+    if (type != LMD_TYPE_MAP) return JS_OWN_ENUMERABILITY_UNSUPPORTED;
     JsClass cls = js_class_id(object);
-    if (cls == JS_CLASS_STRING || cls == JS_CLASS_ERROR || cls == JS_CLASS_REGEXP) return false;
-    String* ks = it2s(key);
-    return !(ks->len == 9 && memcmp(ks->chars, "__proto__", 9) == 0);
+    if (cls == JS_CLASS_STRING || cls == JS_CLASS_ERROR ||
+            cls == JS_CLASS_REGEXP || cls == JS_CLASS_TYPED_ARRAY ||
+            (name->len == 9 && memcmp(name->chars, "__proto__", 9) == 0)) {
+        return JS_OWN_ENUMERABILITY_UNSUPPORTED;
+    }
+    JsPropertyDescriptor descriptor = {};
+    if (!js_get_own_property_descriptor(object, name->chars,
+            (int)name->len, &descriptor)) {
+        return JS_OWN_ENUMERABILITY_ABSENT;
+    }
+    if (out_enumerable) {
+        *out_enumerable = (descriptor.flags & JS_PD_HAS_ENUMERABLE)
+            ? (descriptor.flags & JS_PD_ENUMERABLE) != 0 : true;
+    }
+    return JS_OWN_ENUMERABILITY_PRESENT;
 }
 
 extern "C" bool js_for_in_key_is_live(Item object, Item key) {
@@ -9035,18 +9146,25 @@ extern "C" bool js_for_in_key_is_live(Item object, Item key) {
             !is_virtual_container_type_id(current_type)) {
             break;
         }
-        // Shape-flag shortcut: allocating a descriptor Map per prototype level
-        // to read one bit dominated for-in (measured ~1.8us/key vs 455ns for
-        // Object.keys). Only a definite `true` from the POD kernel is usable.
-        if (js_pod_descriptor_applies(current_root.get(), key_root.get())) {
-            String* ks = it2s(key_root.get());
-            JsPropertyDescriptor pd;
-            if (js_get_own_property_descriptor(current_root.get(), ks->chars,
-                    (int)ks->len, &pd)) {
-                return (pd.flags & JS_PD_HAS_ENUMERABLE)
-                    ? (pd.flags & JS_PD_ENUMERABLE) != 0 : true;
-            }
+        // Inspect ordinary shape/companion storage before materializing a JS
+        // descriptor Map. An absent own key must continue to the prototype.
+        bool enumerable = false;
+        JsOwnEnumerability inspection = js_own_enumerability_inspect(
+            current_root.get(), key_root.get(), &enumerable);
+        if (inspection == JS_OWN_ENUMERABILITY_PRESENT) {
+            js_opt_trace_record(JS_OPT_OWN_ENUMERABILITY_INSPECT,
+                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+            return enumerable;
         }
+        if (inspection == JS_OWN_ENUMERABILITY_ABSENT) {
+            js_opt_trace_record(JS_OPT_OWN_ENUMERABILITY_INSPECT,
+                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+            current_root.set(js_get_prototype(current_root.get()));
+            depth++;
+            continue;
+        }
+        js_opt_trace_record(JS_OPT_OWN_ENUMERABILITY_INSPECT,
+            JS_OPT_REASON_NONE, JS_OPT_OUTCOME_FALLBACK);
         desc_root.set(js_object_get_own_property_descriptor(
             current_root.get(), key_root.get()));
         if (item_is_error(desc_root.get())) return false;
@@ -9137,21 +9255,20 @@ static Item js_object_collect_enumerable_own(Item object, bool entries) {
     for (int i = 0; i < len; i++) {
         Item key = js_elements_get(keys, (Item){.item = i2it(i)});
         if (js_key_is_symbol_c(key)) continue;
-        // Shape-flag shortcut, same rationale as for-in above: this ran once
-        // per key and dominated Object.values/entries.
-        bool pod_enumerable = false, pod_answered = false;
-        if (js_pod_descriptor_applies(object, key)) {
-            String* ks = it2s(key);
-            JsPropertyDescriptor pd;
-            if (js_get_own_property_descriptor(object, ks->chars, (int)ks->len, &pd)) {
-                pod_answered = true;
-                pod_enumerable = (pd.flags & JS_PD_HAS_ENUMERABLE)
-                    ? (pd.flags & JS_PD_ENUMERABLE) != 0 : true;
-            }
-        }
-        if (pod_answered) {
-            if (!pod_enumerable) continue;
+        bool enumerable = false;
+        JsOwnEnumerability inspection = js_own_enumerability_inspect(object,
+            key, &enumerable);
+        if (inspection == JS_OWN_ENUMERABILITY_PRESENT) {
+            js_opt_trace_record(JS_OPT_OWN_ENUMERABILITY_INSPECT,
+                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+            if (!enumerable) continue;
+        } else if (inspection == JS_OWN_ENUMERABILITY_ABSENT) {
+            js_opt_trace_record(JS_OPT_OWN_ENUMERABILITY_INSPECT,
+                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+            continue;
         } else {
+            js_opt_trace_record(JS_OPT_OWN_ENUMERABILITY_INSPECT,
+                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_FALLBACK);
             JS_ASSIGN_OR_RETURN(desc, js_object_get_own_property_descriptor(object, key));
             if (get_type_id(desc) != LMD_TYPE_MAP) continue;
             bool en_found = false;
@@ -9199,7 +9316,11 @@ static Item js_object_values_or_entries(Item object, bool entries) {
     if (type == LMD_TYPE_STRING) {
         return js_object_collect_string_own(object, entries);
     }
-    if (type != LMD_TYPE_MAP && (!entries || type != LMD_TYPE_FUNC))
+    // Arrays expose ordinary own keys through Reflect.ownKeys just like Maps;
+    // returning early here skipped Object.values(array) before its descriptors
+    // could be inspected.
+    if (type != LMD_TYPE_MAP && !js_is_js_array(object) &&
+            type != LMD_TYPE_FUNC)
         return js_array_new(0);
     return js_object_collect_enumerable_own(object, entries);
 }
@@ -10622,6 +10743,9 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
                 fn->properties_map, "prototype", 9, NULL, NULL);
             return (Item){.item = b2it(status == JS_SHAPE_SLOT_DATA ||
                 status == JS_SHAPE_SLOT_ACCESSOR)};
+        }
+        if (!identity_key && js_function_has_lazy_metadata_property(obj, k)) {
+            return (Item){.item = b2it(true)};
         }
         return (Item){.item = b2it(false)};
     }
@@ -12315,6 +12439,12 @@ static Item js_delete_string_exotic_property(Item obj, Item key,
 
 static Item js_delete_function_property(Item obj, Item key) {
     JsFuncProps* fn = (JsFuncProps*)obj.function;
+    if (fn && (fn->flags & JS_FUNC_FLAG_LAZY_METADATA) != 0) {
+        // A tombstone can later be re-added, so it needs the same prefix as an
+        // eagerly finalized function before it changes ordinary key order.
+        js_function_materialize_all_lazy_metadata_properties(obj);
+        fn = (JsFuncProps*)obj.function;
+    }
     // Ensure properties_map exists
     if (fn->properties_map.item == 0) {
         fn->properties_map = js_new_object();

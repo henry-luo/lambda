@@ -831,6 +831,8 @@ void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
     if (JM_JS_FACT(fc, is_strict)) flags |= JS_FUNC_INIT_STRICT;
     if (JM_JS_FACT(fc, uses_with)) flags |= JS_FUNC_INIT_USES_WITH;
     flags |= JS_FUNC_INIT_ANALYSIS_KNOWN;
+    if (JM_JS_FACT(fc, uses_arguments)) flags |= JS_FUNC_INIT_USES_ARGUMENTS;
+    if (JM_JS_FACT(fc, has_direct_eval)) flags |= JS_FUNC_INIT_DIRECT_EVAL;
     if (JM_JS_FACT(fc, observes_this)) flags |= JS_FUNC_INIT_READS_THIS;
     if (JM_JS_FACT(fc, observes_new_target)) flags |= JS_FUNC_INIT_READS_NEW_TARGET;
     if (JM_JS_FACT(fc, is_class_field_initializer)) {

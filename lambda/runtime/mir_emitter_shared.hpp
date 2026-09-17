@@ -500,6 +500,9 @@ struct MirEmitter {
     int label_counter;            // monotonic label/proto-id source
     struct hashmap* import_cache; // name -> import (proto+import) memo
     void (*note_mir_call)(const char* name); // optional per-language call telemetry hook
+    // Optional front-end telemetry for a call moved out of a structured loop.
+    // The common optimizer owns the move; a profile can classify its own imports.
+    void (*note_loop_invariant_call)(void* owner, const char* name);
     void* call_owner;
     // RV14: may this front-end skip rehoming a helper's wide result? Lambda v3
     // proves helper results stay in its active extent. LambdaJS keeps the
@@ -2949,12 +2952,31 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         }
     }
 
-    size_t instruction_word_count =
-        (size_t)instruction_count * (size_t)word_count;
-    uint64_t* instruction_live_in = (uint64_t*)mem_alloc(
-        instruction_word_count * sizeof(uint64_t), MEM_CAT_TEMP);
-    uint64_t* instruction_live_out = (uint64_t*)mem_alloc(
-        instruction_word_count * sizeof(uint64_t), MEM_CAT_TEMP);
+    // Only collecting calls consume instruction-granular liveness: root
+    // publication needs the values live before the call and reload needs those
+    // live after it. Keep those exact snapshots without retaining two dense
+    // instruction-by-candidate matrices for every non-call instruction.
+    int* call_liveness_by_instruction = (int*)mem_alloc(
+        (size_t)instruction_count * sizeof(int), MEM_CAT_TEMP);
+    if (!call_liveness_by_instruction) {
+        log_error("mir-semantic-root-write-back: call liveness allocation failed");
+        abort();
+    }
+    int collecting_call_count = 0;
+    for (int i = 0; i < instruction_count; i++) {
+        call_liveness_by_instruction[i] = -1;
+        MIR_insn_t current = instructions[i];
+        if (MIR_call_code_p(current->code) &&
+                em_root_call_may_collect(current, call_sites, call_site_count)) {
+            call_liveness_by_instruction[i] = collecting_call_count++;
+        }
+    }
+    size_t call_liveness_word_count =
+        (size_t)collecting_call_count * (size_t)word_count;
+    uint64_t* call_live_in = collecting_call_count > 0 ? (uint64_t*)mem_alloc(
+        call_liveness_word_count * sizeof(uint64_t), MEM_CAT_TEMP) : NULL;
+    uint64_t* call_live_out = collecting_call_count > 0 ? (uint64_t*)mem_alloc(
+        call_liveness_word_count * sizeof(uint64_t), MEM_CAT_TEMP) : NULL;
     uint8_t* candidate_defined = (uint8_t*)mem_alloc(
         (size_t)candidate_count * sizeof(uint8_t), MEM_CAT_TEMP);
     int max_home_id = 0;
@@ -2974,30 +2996,31 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         (size_t)candidate_count * sizeof(int), MEM_CAT_TEMP);
     int* set_candidates = (int*)mem_alloc(
         (size_t)candidate_count * sizeof(int), MEM_CAT_TEMP);
-    if (!instruction_live_in || !instruction_live_out || !candidate_defined || !home_to_slot ||
-            !candidate_slots || !set_candidates) {
+    if ((collecting_call_count > 0 && (!call_live_in || !call_live_out)) ||
+            !candidate_defined || !home_to_slot || !candidate_slots ||
+            !set_candidates) {
         log_error("mir-semantic-root-write-back: publication allocation failed");
         abort();
     }
-    memset(instruction_live_in, 0,
-        instruction_word_count * sizeof(uint64_t));
-    memset(instruction_live_out, 0,
-        instruction_word_count * sizeof(uint64_t));
     memset(candidate_defined, 0,
         (size_t)candidate_count * sizeof(uint8_t));
     for (int home = 0; home < home_map_count; home++) home_to_slot[home] = -1;
     for (int ci = 0; ci < candidate_count; ci++) candidate_slots[ci] = -1;
 
-    // Materialize exact per-instruction live-in sets once. Safepoint
-    // publication and dirty-state transfer consume the same solved CFG facts.
+    // Materialize exact liveness only at collecting calls. The solved block
+    // facts still drive the reverse scan, so non-call instructions retain the
+    // same definitions, uses, branch and exceptional-edge treatment.
     for (int bi = block_count - 1; bi >= 0; bi--) {
         memcpy(scratch_in,
             live_out + (size_t)bi * (size_t)word_count,
             (size_t)word_count * sizeof(uint64_t));
         for (int i = blocks[bi].end - 1; i >= blocks[bi].start; i--) {
-            memcpy(instruction_live_out +
-                    (size_t)i * (size_t)word_count,
-                scratch_in, (size_t)word_count * sizeof(uint64_t));
+            int call_liveness = call_liveness_by_instruction[i];
+            if (call_liveness >= 0) {
+                memcpy(call_live_out + (size_t)call_liveness *
+                        (size_t)word_count, scratch_in,
+                    (size_t)word_count * sizeof(uint64_t));
+            }
             memset(insn_uses, 0, (size_t)word_count * sizeof(uint64_t));
             memset(insn_definitions, 0,
                 (size_t)word_count * sizeof(uint64_t));
@@ -3007,9 +3030,11 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
                 scratch_in[word] = (scratch_in[word] &
                     ~insn_definitions[word]) | insn_uses[word];
             }
-            memcpy(instruction_live_in +
-                    (size_t)i * (size_t)word_count,
-                scratch_in, (size_t)word_count * sizeof(uint64_t));
+            if (call_liveness >= 0) {
+                memcpy(call_live_in + (size_t)call_liveness *
+                        (size_t)word_count, scratch_in,
+                    (size_t)word_count * sizeof(uint64_t));
+            }
             int definition_count = em_root_collect_set_candidates(insn_definitions,
                 word_count, candidate_count, set_candidates);
             for (int di = 0; di < definition_count; di++) {
@@ -3025,12 +3050,10 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         // homes around them instead of preserving the old oversized frame.
         int next_slot = 0;
         for (int i = 0; i < instruction_count; i++) {
-            MIR_insn_t current = instructions[i];
-            if (!MIR_call_code_p(current->code) ||
-                    !em_root_call_may_collect(current, call_sites,
-                        call_site_count)) continue;
-            const uint64_t* live = instruction_live_in +
-                (size_t)i * (size_t)word_count;
+            int call_liveness = call_liveness_by_instruction[i];
+            if (call_liveness < 0) continue;
+            const uint64_t* live = call_live_in +
+                (size_t)call_liveness * (size_t)word_count;
             int live_count = em_root_collect_set_candidates(live, word_count,
                 candidate_count, set_candidates);
             for (int li = 0; li < live_count; li++) {
@@ -3057,12 +3080,10 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         }
     } else {
         for (int i = 0; i < instruction_count; i++) {
-            MIR_insn_t current = instructions[i];
-            if (!MIR_call_code_p(current->code) ||
-                    !em_root_call_may_collect(current, call_sites,
-                        call_site_count)) continue;
-            const uint64_t* live = instruction_live_in +
-                (size_t)i * (size_t)word_count;
+            int call_liveness = call_liveness_by_instruction[i];
+            if (call_liveness < 0) continue;
+            const uint64_t* live = call_live_in +
+                (size_t)call_liveness * (size_t)word_count;
             int live_count = em_root_collect_set_candidates(live, word_count,
                 candidate_count, set_candidates);
             for (int li = 0; li < live_count; li++) {
@@ -3103,12 +3124,10 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
     // a stable reusable slot, so an unchanged temporary remains current across
     // repeated calls instead of being republished at each one.
     for (int i = 0; i < instruction_count; i++) {
-        MIR_insn_t current = instructions[i];
-        if (!MIR_call_code_p(current->code) ||
-                !em_root_call_may_collect(current, call_sites,
-                    call_site_count)) continue;
-        const uint64_t* live = instruction_live_in +
-            (size_t)i * (size_t)word_count;
+        int call_liveness = call_liveness_by_instruction[i];
+        if (call_liveness < 0) continue;
+        const uint64_t* live = call_live_in +
+            (size_t)call_liveness * (size_t)word_count;
         int live_count = em_root_collect_set_candidates(live, word_count,
             candidate_count, set_candidates);
         int scratch_live_count = 0;
@@ -3206,11 +3225,10 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
             (size_t)bi * (size_t)dirty_word_count;
         for (int i = blocks[bi].start; i < blocks[bi].end; i++) {
             MIR_insn_t current = instructions[i];
-            if (MIR_call_code_p(current->code) &&
-                    em_root_call_may_collect(current, call_sites,
-                        call_site_count)) {
-                const uint64_t* live = instruction_live_in +
-                    (size_t)i * (size_t)word_count;
+            int call_liveness = call_liveness_by_instruction[i];
+            if (call_liveness >= 0) {
+                const uint64_t* live = call_live_in +
+                    (size_t)call_liveness * (size_t)word_count;
                 int live_count = em_root_collect_set_candidates(live, word_count,
                     candidate_count, set_candidates);
                 for (int li = 0; li < live_count; li++) {
@@ -3323,11 +3341,10 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
             (size_t)dirty_word_count * sizeof(uint64_t));
         for (int i = blocks[bi].start; i < blocks[bi].end; i++) {
             MIR_insn_t current = instructions[i];
-            if (MIR_call_code_p(current->code) &&
-                    em_root_call_may_collect(current, call_sites,
-                        call_site_count)) {
-                const uint64_t* live = instruction_live_in +
-                    (size_t)i * (size_t)word_count;
+            int call_liveness = call_liveness_by_instruction[i];
+            if (call_liveness >= 0) {
+                const uint64_t* live = call_live_in +
+                    (size_t)call_liveness * (size_t)word_count;
                 int live_count = em_root_collect_set_candidates(live, word_count,
                     candidate_count, set_candidates);
                 for (int li = 0; li < live_count; li++) {
@@ -3374,7 +3391,8 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
                     insn_definitions);
                 em_root_reload_live_values_after_call(em, current,
                     root_candidates, candidate_count, candidate_slots,
-                    instruction_live_out + (size_t)i * (size_t)word_count,
+                    call_live_out + (size_t)call_liveness *
+                        (size_t)word_count,
                     insn_definitions);
             }
             memset(insn_uses, 0, (size_t)word_count * sizeof(uint64_t));
@@ -3419,7 +3437,8 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
     mem_free(block_uses); mem_free(block_definitions);
     mem_free(live_in); mem_free(live_out);
     mem_free(scratch_out); mem_free(scratch_in);
-    mem_free(instruction_live_in); mem_free(instruction_live_out);
+    mem_free(call_liveness_by_instruction);
+    mem_free(call_live_in); mem_free(call_live_out);
     mem_free(candidate_defined);
     mem_free(home_to_slot); mem_free(candidate_slots); mem_free(set_candidates);
     mem_free(interference); mem_free(used_colors);

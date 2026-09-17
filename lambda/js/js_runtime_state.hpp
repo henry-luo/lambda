@@ -949,6 +949,8 @@ struct JsAsyncAwaitState : JsRootedState {
     Item resolved_value = {};
 };
 
+struct JsArrayRuntimeItemsHeader;
+
 struct JsRuntimeState {
     JsReadlineState* readline = NULL;
     JsRealmSlots realm_slots = {};
@@ -978,9 +980,9 @@ struct JsRuntimeState {
     JsClusterState cluster = {};
     JsAsyncLocalStorageState* async_local_storage = NULL;
     JsPerformanceState performance = {};
-    // Native buffer ownership and tagged-template identity are realm-local
-    // caches. Their pointer lookups remain ordinary context-local accesses.
-    HashMap* array_runtime_items = NULL;
+    // Native dense-array buffers form a realm-local intrusive ownership list;
+    // tagged-template identity uses its own registry below.
+    JsArrayRuntimeItemsHeader* array_runtime_items = NULL;
     JsTemplateRegistry template_registry = {};
     JsPrototypeSnapshotState* prototype_snapshot_state = NULL;
     void* regex_compile_cache = NULL;

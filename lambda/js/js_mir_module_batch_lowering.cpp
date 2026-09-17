@@ -859,8 +859,7 @@ void jm_cleanup_deferred_mir() {
         if (!artifact) continue;
         // Deferred eval units use the same JIT generator as ordinary units;
         // finishing only MIR leaves the generator arena and native code live.
-        jit_cleanup_mode((MIR_context_t)artifact->mir_context,
-            !g_mir_interp_mode);
+        jit_cleanup_mode((MIR_context_t)artifact->mir_context, 1);
         if (artifact->source_owner) mem_free(artifact->source_owner);
     }
     js_code_store_clear_rows(store);
@@ -3244,7 +3243,7 @@ static int js_mir_lower(void* opaque) {
                     if (JM_JS_FACT(fc, has_rest_param)) pc = -pc;  // negative signals rest params
                     const char* vname = jm_var_name(fn->name);
                     MIR_reg_t var_reg = jm_new_reg(mt, vname, MIR_T_I64);
-                    MIR_reg_t fn_item = jm_call_2(mt, "js_new_function_mir", MIR_T_I64,
+                    MIR_reg_t fn_item = jm_call_2(mt, "js_new_function_mir_pending", MIR_T_I64,
                         MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, pc));
                     // Keep hoisted declarations on the same atomic metadata path as
@@ -3397,7 +3396,7 @@ static int js_mir_lower(void* opaque) {
                             }
                         }
                     }
-                    MIR_reg_t fn_item = jm_call_4(mt, "js_new_closure_mir", MIR_T_I64,
+                    MIR_reg_t fn_item = jm_call_4(mt, "js_new_closure_mir_pending", MIR_T_I64,
                         MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, pc),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, env),
@@ -4272,8 +4271,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         return (Item){.item = ITEM_ERROR};
     }
 
-    JsMirMainFunc js_main = js_mir_link_main(ctx, g_mir_interp_mode,
-        MIR_set_gen_interface);
+    JsMirMainFunc js_main = js_mir_link_main(ctx, MIR_set_gen_interface);
 
     if (!js_main) {
         log_error("js-mir: module: failed to find js_main for '%s'", filename);

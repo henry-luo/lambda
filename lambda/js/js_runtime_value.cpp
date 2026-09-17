@@ -1283,8 +1283,23 @@ extern "C" void js_string_remember_four_byte_uri_escape_cp(Item str_item, int64_
     g_last_four_byte_uri_escape_epoch = js_get_heap_epoch();
 }
 
-static inline Item js_try_concat_percent_hex(String* left, String* right) {
-    bool cache_rooted = js_string_concat_caches_ensure_roots();
+// The URI cache affects only `%X`/`%XX` growth or a complete 12-byte escaped
+// code point. Keep its root registration out of ordinary string concatenation.
+static bool js_concat_may_use_uri_escape_cache(const String* left,
+        const String* right) {
+    if (!left || !right || !left->is_ascii || !right->is_ascii) return false;
+    if (right->len == 1 && left->len >= 1 && left->chars[0] == '%' &&
+            (left->len == 1 || left->len == 2)) {
+        return true;
+    }
+    int64_t total_len = (int64_t)left->len + (int64_t)right->len;
+    return total_len == 12 &&
+        ((left->len > 0 && left->chars[0] == '%') ||
+         (right->len > 0 && right->chars[0] == '%'));
+}
+
+static inline Item js_try_concat_percent_hex(String* left, String* right,
+        bool cache_rooted) {
     if (!left->is_ascii || !right->is_ascii || right->len != 1) return ItemNull;
     char right_ch = right->chars[0];
     int right_value = str_hex_val(right_ch);
@@ -1322,13 +1337,16 @@ static inline Item js_concat_strings_fast(String* left, String* right) {
     js_opt_trace_record(left->is_ascii && right->is_ascii
             ? JS_OPT_STRING_CONCAT_ASCII : JS_OPT_STRING_CONCAT_UNICODE,
         JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
-    bool cache_rooted = js_string_concat_caches_ensure_roots();
+    bool uri_cache_candidate = js_concat_may_use_uri_escape_cache(left, right);
+    bool cache_rooted = uri_cache_candidate &&
+        js_string_concat_caches_ensure_roots();
     RootFrame roots(2);
     Rooted<Item> left_root(roots, (Item){.item = s2it(left)});
     Rooted<Item> right_root(roots, (Item){.item = s2it(right)});
     int64_t left_len = left->len;
     int64_t right_len = right->len;
-    Item percent_hex = js_try_concat_percent_hex(left, right);
+    Item percent_hex = uri_cache_candidate
+        ? js_try_concat_percent_hex(left, right, cache_rooted) : ItemNull;
     if (percent_hex.item != ItemNull.item) return percent_hex;
     String* result = (String*)heap_alloc(sizeof(String) + left_len + right_len + 1, LMD_TYPE_STRING);
     // D5.4.3: result allocation may collect both borrowed operands; reload
@@ -1342,7 +1360,7 @@ static inline Item js_concat_strings_fast(String* left, String* right) {
     str_copy(result->chars + left_len, right_len + 1, right->chars, right_len);
     Item result_item = (Item){.item = s2it(result)};
     uint32_t cp = 0;
-    if (cache_rooted && result->len == 12 &&
+    if (uri_cache_candidate && cache_rooted && result->len == 12 &&
             js_percent_escape_four_byte_cp(result, &cp)) {
         g_last_four_byte_uri_escape_string = result_item;
         g_last_four_byte_uri_escape_cp = cp;
@@ -1358,6 +1376,14 @@ extern "C" Item js_add(Item left, Item right) {
         js_opt_trace_record(JS_OPT_RUNTIME_NUMBER_HEAD_HIT, JS_OPT_REASON_NONE,
             JS_OPT_OUTCOME_TAKEN);
         return number_result;
+    }
+    if (get_type_id(left) == LMD_TYPE_STRING &&
+            get_type_id(right) == LMD_TYPE_STRING) {
+        // Primitive strings need no ToPrimitive. The concat leaf roots both
+        // operands around allocation, so this avoids a redundant outer frame.
+        js_opt_trace_record(JS_OPT_RUNTIME_STRING_CONCAT_HEAD,
+            JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+        return js_concat_strings_fast(it2s(left), it2s(right));
     }
     js_opt_trace_record(JS_OPT_RUNTIME_NUMBER_HEAD_FALLBACK, JS_OPT_REASON_NONE,
         JS_OPT_OUTCOME_FALLBACK);
