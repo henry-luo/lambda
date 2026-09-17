@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 9.0.0 (2026-09-16)
+**Spec version:** 9.1.0 (2026-09-17)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -556,7 +556,7 @@ that carries them.
   (declaration on the binding node, inference beside it): an annotation is
   a contract (semantics S11.4.1); inference is never a binding contract
   and may never override what it proved. [TE-1, TE §8.1]
-- **D3.2.4v3** **A crossing into a named map contract is a reification, not
+- **D3.2.4v4*** **A crossing into a named map contract is a reification, not
   merely a check.** A named contract fixes a *physical* packed layout —
   per-field `byte_offset` and storage class — and the emitter's direct
   field access indexes by that layout. So a boundary may be elided only
@@ -578,7 +578,15 @@ that carries them.
   malformed Item. The same rule holds at every rank of `N[]`: the native
   carrier is a `MapN*` lane only while an exact full-array certificate proves
   the named layout, rank, and leaf contract; `Map*` and the map TypeId alone
-  are insufficient. [S11.1.1v2, Tune19 §11.5, Tune20 §T20-6a, OB16]
+  are insufficient. **Corollary (v4): the proof is transitive through a
+  verified carrier.** An element read from a certified `T[]`, or a field read
+  from an admitted record, *carries* `T`'s declared-prefix layout proof,
+  because every write into a certified carrier admits its value before
+  publishing (S11.4.1v3). A reader that holds the carrier's proof therefore
+  accesses the element or field by offset with no per-access shape-identity
+  compare and no certificate re-check; the proof lasts as long as the
+  carrier's verification does (D3.2.6). [S11.1.1v2, Tune19 §11.5, Tune20
+  §T20-6a, OB16; v4 2026-09-17, user]
 - **D3.2.5v2** The surface spelling for the shared subtype relation is the
   binary `<:` operator. It accepts two type values and returns `bool`; it is
   not the magnitude operator `<` and does not perform value membership.
@@ -588,6 +596,21 @@ that carries them.
   the nominal-base walk required by S11.3.1v2. Function-type operands are
   rejected until their variance is ruled. [S1.7, S6.1.1, S11.1.4v2,
   S11.3.1v2]
+- **D3.2.6*** **Verified once, valid while unchanged; a required field is
+  a required field.** A declared type — on `let`/`var`, a parameter, a
+  return, or a nominal binding of an element — is verified at the crossing,
+  and the verification remains valid as long as the data is not changed
+  (S11.4.10). Under a nominal contract every required field is present in
+  an admitted value; the container stays **open** beyond the declared prefix
+  (S11.4.6, S2.1.4). **Native lanes store exactly the declared layout — that
+  is the ABI**, for every lane implementation. Consequently a reader holding
+  a verified contract reads a required field by offset with no presence
+  test and no empty-slot arm, and a reader of a `T[]` lane reads `T`'s
+  carrier with no slot test. Structural composition is unconstrained — an
+  element may carry any attributes and content, including errors — and only
+  the nominal binding verifies. Host-built values (language interop) are
+  outside this rule until they cross a boundary that admits them. [TE-19,
+  S11.4.10; 2026-09-17, user]
 
 ### D3.3 Inference
 
@@ -855,27 +878,40 @@ that carries them.
 - **D4.4.3** All copy paths precisely root source/replacement/owner chain
   and reload after possible GC; forced-GC stress is a permanent gate.
   Exclusivity checks and view-borrow confinement are Stage 2.* [CW20]
-- **D4.4.4v3** A place handle — `var h = root.path` on a `var` local or
-  `var` parameter root — **may be bound as a borrow of its place** (no
+- **D4.4.4v4*** A place handle — `var h = root.path` on a `var` local or
+  `var` parameter root, **or the compiler's own handle for a path spelled
+  repeatedly in one body** — **may be bound as a borrow of its place** (no
   share-mark; a store-back to the same path stores the pointer it holds and
   skips capture) whenever the sharing stays **unobservable under S9.1.2**:
   `let`/`var` hold values, never aliases, and no program can distinguish the
-  borrow from the snapshot bind. That invariant is the ruling. **Which paths,
-  which writes through the handle, where the store-backs sit, nested handles,
-  and rebinding of the handle are implementation details**, chosen for the
-  best performance and recorded in the COW design record, under three fixed
-  conditions: the static shape is decided once for both tiers; the bind runs
-  the runtime spine test (every container from the root to the leaf's parent
-  unshared at the bind; a shared, static or immortal link keeps the snapshot
-  bind); and on every path that writes through the handle, the handle is
-  either stored back to its path before its next use, or share-marked at the
-  point the invariant would otherwise be at risk. An error exit leaves partial
-  writes visible through the root, as for a `var` parameter. Implemented
-  shapes: the v2 straight-line shape (same statement list, sibling-member
-  access, early return before every use) and, where it declines, a
-  path-by-path walk admitting store-backs inside `if` arms, nested handles and
-  `var`-call rebinds of the handle (CW36). [CW34; v2 2026-09-14; v3
-  2026-09-16]
+  borrow from the snapshot bind. That invariant is the ruling. A handle
+  carries **facts about its place** — identity (the object header, stable
+  under D4.3.1), layout and presence (D3.2.4v4, D3.2.6), and uniqueness
+  (the spine test, and S9.2.2's un-share of a shared leaf at a writing
+  bind) — and **the facts hold exactly as long as the place and its
+  ownership are unchanged**: any event that may replace the place or a
+  prefix of its path, reorder a prefix container, hand the root or a prefix
+  to a writer, or re-share the spine ends the facts it can affect, and the
+  next use re-establishes them. Data-zone pointers (packed fields, array
+  buffers) are never facts: they are reloaded after any allocation point
+  (D4.3.1 compacts the data zone). **Which paths, which writes through the
+  handle, where the store-backs sit, nested handles, rebinding of the handle,
+  and the concrete invalidation table are implementation details**, chosen
+  for the best performance and recorded in the COW design record (CW36,
+  CW37 with its appendix table), under three fixed conditions: the static
+  shape is decided once for both tiers; the bind runs the runtime spine test
+  (every container from the root to the leaf's parent unshared at the bind;
+  a shared, static or immortal link keeps the snapshot bind); and on every
+  path that writes through the handle, the handle is either stored back to
+  its path before its next use, or share-marked at the point the invariant
+  would otherwise be at risk. An error exit leaves partial writes visible
+  through the root, as for a `var` parameter. Implemented shapes: the v2
+  straight-line shape (same statement list, sibling-member access, early
+  return before every use) and, where it declines, a path-by-path walk
+  admitting store-backs inside `if` arms, nested handles and `var`-call
+  rebinds of the handle (CW36). Synthesized handles and carried facts are
+  ruled, not implemented (CW37). [CW34; v2 2026-09-14; v3 2026-09-16; v4
+  2026-09-17]
 - **D4.4.6** A **place copy** (`let`/`var h = root.path`, root mutable) is
   share-marked at its bind iff **the place may be written while the copy is
   alive**, decided statically per binding: a write through the root, or any
@@ -2044,6 +2080,9 @@ slice; no formal semantic ruling or document semver changes.
 | D4.5.1v3 | Radiant and Lambda keep distinct policies over memtrack/VM ownership; legacy Pool/Arena backend wording is superseded; v3 records batch-only arena lifetime (two variants, D4.1.4). |
 | D4.4.3 | COW Stage 1 landed 2026-07-23; Stage 2 (exclusivity faces, view confinement, module-`var` rule, snapshot iteration) deferred, designed. |
 | D4.4.5 | Decided 2026-09-14 (CW35, `vibe/Lambda_Design_Runtime_COW.md` §11.12): move-out binds (`var left = node.left; …; node.left = branch; left.right = node`) borrow their place; static rule in `build_ast` (`rmw_moves_out`), runtime spine test shared with CW34. Fixture `test/lambda/proc/cow_move_out_bind.ls`. JetStream splay does not benefit yet: its `splay_node` binds store back inside `if` branches, so the rotations receive already-shared roots and keep the snapshot bind. |
+| D4.4.4v4 | Ruled 2026-09-17 (user). **Implemented (partial scope) 2026-09-17 (Tune29 T29-1, `vibe/impl/Lambda_Impl_Tune29.md` §12):** synthesized handles for record places spelled repeatedly on declared `var` roots, planned once in `build_ast` and ignored by T0; writing binds un-share through `cow_place_leaf_fixed`. Deltablue2 hot functions −35% instructions, −5% time; roots with a CW34 named borrow and `for` statements are excluded. Originally recorded as not implemented (CW37, `vibe/Lambda_Design_Runtime_COW.md` §11.14 + Appendix D). Motivation: the typed lane re-navigates `w.cons[cid]` on every access — ~38 MIR instructions per field read and ~42 per field write against one in the c2m port, the whole deltablue/havlak/richards/splay/cd family (`vibe/impl/Lambda_Impl_Tune29.md`; evidence `temp/r46/`). The star stays: named borrows, `for` loops and non-record places are still outside the implemented scope. **2026-09-17 (Tune29 §20):** a named handle may also be passed as a plain argument to a procedure that keeps no root; MIR joins its may-be-shared binding facts at control-flow merges (LR12-17). |
+| D3.2.4v4 | Corollary ruled 2026-09-17 (user). **Partially implemented 2026-09-17 (T29-2 §11.5):** typed path stores compare no shape pointer at any step below a declared root. The certificate guard is still re-run per access (deltablue2 `c_choose_method`), because the carrier `w.cons` may change between accesses; removing it needs D4.4.4v4's handles (T29-1). **2026-09-17 (Tune29 §20.2):** a `T[]` declaration initialized from an admitted record's field admits any container inline and checks only null. |
+| D3.2.6 | Ruled 2026-09-17 (user). **Partially implemented 2026-09-17 (Tune29 T29-2, `vibe/impl/Lambda_Impl_Tune29.md` §11.3–§11.5):** required container fields of a trusted record are read with no empty-slot arm, a member read through such a field needs no receiver null test, and typed path stores test only contracts that admit null. The audit of Lambda-side writers found and fixed one hole: the JIT accepted `null` in a required field of a contract-constructed literal (the field proof mistook a declaration wrapper for an optional). Residue: `bool[]` has no native lane (admission still walks elements, T29-5); host-built values are unaudited by design. |
 | D4.4.4v3 | Revised 2026-09-16 (v3, user ruling): the borrow is admitted wherever it is unobservable under S9.1.2; path shape, handle writes, store-back placement, nested handles and handle rebinds are implementation details (CW36, `vibe/Lambda_Design_Runtime_COW.md` §11.13), fixed only by the tier-shared static decision, the runtime spine test, and store-back-or-mark on every writing path. Motivation: JetStream splay `splay_node` stores back inside `if` branches — 826k map copies and 32% GC per run under v2. **Implemented 2026-09-16 (T28-8, `vibe/impl/Lambda_Impl_Tune28.md` §9.16):** `rmw_branch_local` in `build_ast.cpp` tracks per path whether the handle may still hold the unmarked leaf and whether it wrote it unstored; a store-back is final (skips capture) only when nothing after it names the handle; loops naming the handle and plain handle rebinds refuse. The decision now runs in `lambda_ast_finalize_script`, after every procedure signature exists, so a `var` pass to a procedure defined later counts as a write. splay2 map copies 826k→683k; the residue is rotation stores of the caller's `var` root (a call-site move convention, not a store-back shape). |
 | D4.4.4v2 | Revised 2026-09-14 (v2, Tune27 §10.12): sibling-member access to the root and a return that precedes every use of the handle are admitted inside the region; cd's table put (`var keys = t.keys; var vals = t.vals; …; t.keys = keys; t.vals = vals`) now borrows both handles — 2,000 → 2 array copies per 1,000 puts. Fixture `test/lambda/proc/cow_rmw_sibling_borrow.ls`. Decided 2026-09-06 (CW34, `vibe/Lambda_Design_Runtime_COW.md` §11.11): read-modify-write handle borrows — tier-shared static shape in `build_ast`, runtime spine test `cow_bind_rmw_handle`; havlak's array copies 205k → 41k per run. Fixtures `test/lambda/proc/cow_rmw_borrow.ls`, `test/mir/lambda/cw34_rmw_borrow`. |
 | D4.6 | Name identity is a PROPOSAL (rev 5): W1/W2 integer schemes can start now; W4 stage 3 blocked on the MIR-cache reconciliation (NI §8). |
@@ -2307,12 +2346,12 @@ Numbered `DO#` (design-open); each links to its record.
 | D2.5–D2.6 | Nullable §1–§10; CW16; LR09-R2/R3; OB1–OB2, OB4, OB6, OB10, OB13–OB22 | `Lambda_Design_Compiling_Nullable.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Issue_Ledger.md`, `Lambda_Type_Object.md` |
 | D2.7 | SG1–SG8 | `Lambda_Design_Scalar_GC_Invariant.md` |
 | D2.8 | TE-15/TE-17/TE-18; IEH I1–I4 | `Lambda_Design_Type_Enforcement.md`, `vibe/impl/Lambda_Impl_Error_Handling (done).md` |
-| D3.1–D3.3 | C8.5-4, C9a; TE-1/TE-6/TE-10/TE-13; DF12/DF13; B7; Lane §1 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Compiling_Dual_Func.md` |
+| D3.1–D3.3 | C8.5-4, C9a; TE-1/TE-6/TE-10/TE-13/TE-19; DF12/DF13; B7; Lane §1 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Compiling_Dual_Func.md` |
 | D3.4 | Shape_Pool §1–§8; Transpiler DD1–DD4; NI10/NI13; Nullable §6; TE §6 B7b; JSCU33 | `Lambda_Shape_Pool.md`, `Lambda_Transpiler.md`, `Lambda_Design_Name_Identity.md`, `Lambda_Design_Structs_JS.md` |
 | D4.1 | GC1 §2.10.4; CW8; SF16; CR8; Mem_Heap §1 (MP-12, MP-15) | `Lambda_Garbage_Collector.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Stack_Rooting.md`, `Lambda_Design_Mem_Heap.md` |
 | D4.2 | Memory_Context stages; Mem_Heap §1.3–§1.4, §2, §9 (MP-13, MP-14, MP-16–MP-18) | `vibe/Memory_Context.md`, `Lambda_Design_Mem_Heap.md` |
 | D4.3 | GC2 §4–§12 | `Lambda_Garbage_Collector2.md` |
-| D4.4 | CW1–CW21 | `Lambda_Design_Runtime_COW.md` |
+| D4.4 | CW1–CW21, CW34–CW37 | `Lambda_Design_Runtime_COW.md` |
 | D4.5 | Memory_Model §5–§7 | `Lambda_Design_Memory_Model.md` |
 | D4.6 | NI1–NI16, W1–W6 | `Lambda_Design_Name_Identity.md` |
 | D4.7 | CP1–CP26 | `Lambda_Design_Const_Pool.md` |

@@ -1,0 +1,12 @@
+nested=1008 caller=8
+flat=2008 caller=8
+untyped=2008 caller=8
+stored=207 caller=7
+returned=2 caller=3
+reassigned=208 caller=8
+local_reassigned=208
+array=109 caller=9
+chained=111 caller=11
+handle=2091 caller=9,1
+unshared=3 caller=3,3
+

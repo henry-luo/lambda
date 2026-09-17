@@ -2765,6 +2765,81 @@ static inline void em_root_reload_live_values_after_call(MirEmitter* em,
     }
 }
 
+// T29-7b: a pinned root home keeps its explicit memory operands, so its slot
+// could not move and the frame spanned the highest pinned home however sparse
+// the pins were (deltablue2: 1,250 slots across 99 functions). Pinned homes are
+// reached only as `frame_base + disp` -- a memory operand or an address `add`
+// -- so they can be renumbered densely by rewriting those operands. Returns
+// false, leaving the layout unchanged, when any frame reference is not such a
+// pinned slot or the base escapes in another way.
+static inline bool em_root_frame_ref_slot(const MIR_insn_t insn, size_t nop,
+        MIR_reg_t frame_base, int64_t* slot) {
+    const MIR_op_t* op = &insn->ops[nop];
+    if (op->mode == MIR_OP_MEM && op->u.mem.base == frame_base) {
+        if (op->u.mem.index != 0 || op->u.mem.disp < 0 ||
+                op->u.mem.disp % (MIR_disp_t)sizeof(uint64_t) != 0) return false;
+        *slot = op->u.mem.disp / (MIR_disp_t)sizeof(uint64_t);
+        return true;
+    }
+    if (insn->code == MIR_ADD && nop > 0 && op->mode == MIR_OP_REG &&
+            op->u.reg == frame_base) {
+        const MIR_op_t* other = &insn->ops[nop == 1 ? 2 : 1];
+        if (other->mode != MIR_OP_INT) return false;
+        if (other->u.i < 0 || other->u.i % (int64_t)sizeof(uint64_t) != 0) return false;
+        *slot = other->u.i / (int64_t)sizeof(uint64_t);
+        return true;
+    }
+    return false;
+}
+
+static inline bool em_root_frame_refs_compactable(MirEmitter* em,
+        MIR_reg_t frame_base, size_t root_top_offset,
+        const uint8_t* preserved_homes, int preserved_home_count) {
+    for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, em->func->insns); insn;
+            insn = DLIST_NEXT(MIR_insn_t, insn)) {
+        for (size_t nop = 0; nop < insn->nops; nop++) {
+            const MIR_op_t* op = &insn->ops[nop];
+            bool mem_ref = op->mode == MIR_OP_MEM && (op->u.mem.base == frame_base ||
+                op->u.mem.index == frame_base);
+            bool reg_ref = op->mode == MIR_OP_REG && op->u.reg == frame_base;
+            if (!mem_ref && !reg_ref) continue;
+            int64_t slot = 0;
+            if (em_root_frame_ref_slot(insn, nop, frame_base, &slot)) {
+                if (slot + 1 >= preserved_home_count ||
+                        !preserved_homes[slot + 1]) return false;
+                continue;
+            }
+            if (!reg_ref) return false;
+            // the frame's own watermark store (the exit's pop)
+            if (insn->code == MIR_MOV && nop == 1 &&
+                    insn->ops[0].mode == MIR_OP_MEM &&
+                    insn->ops[0].u.mem.index == 0 &&
+                    insn->ops[0].u.mem.disp == (MIR_disp_t)root_top_offset) continue;
+            return false;
+        }
+    }
+    return true;
+}
+
+static inline void em_root_frame_refs_remap(MirEmitter* em, MIR_reg_t frame_base,
+        const int* physical_to_dense, int physical_count) {
+    for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, em->func->insns); insn;
+            insn = DLIST_NEXT(MIR_insn_t, insn)) {
+        for (size_t nop = 0; nop < insn->nops; nop++) {
+            int64_t slot = 0;
+            if (!em_root_frame_ref_slot(insn, nop, frame_base, &slot) ||
+                    slot >= physical_count || physical_to_dense[slot] < 0) continue;
+            int64_t disp = (int64_t)physical_to_dense[slot] * (int64_t)sizeof(uint64_t);
+            MIR_op_t* op = &insn->ops[nop];
+            if (op->mode == MIR_OP_MEM) {
+                op->u.mem.disp = (MIR_disp_t)disp;
+            } else {
+                insn->ops[nop == 1 ? 2 : 1].u.i = disp;
+            }
+        }
+    }
+}
+
 static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         MIR_reg_t frame_base, MIR_insn_t anchor,
         bool oracle_stores_present, int oracle_slot_count,
@@ -3044,7 +3119,46 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
     }
 
     int stable_slot_count = 0;
-    if (pin_semantic_home_slots) {
+    // T29-7b: pinned homes renumbered densely (em_root_frame_refs_compactable)
+    int* pinned_to_dense = NULL;
+    int pinned_dense_count = 0;
+    if (pin_semantic_home_slots && preserved_oracle_homes &&
+            em->frame.fixed_root_slots == 0 &&
+            em_root_frame_refs_compactable(em, frame_base,
+                offsetof(Context, side_root_top), preserved_oracle_homes,
+                preserved_oracle_home_count)) {
+        pinned_to_dense = (int*)mem_alloc((size_t)preserved_oracle_home_count *
+            sizeof(int), MEM_CAT_TEMP);
+        if (!pinned_to_dense) {
+            log_error("mir-semantic-root-write-back: pinned remap allocation failed");
+            abort();
+        }
+        for (int home = 1; home < preserved_oracle_home_count; home++) {
+            pinned_to_dense[home - 1] = preserved_oracle_homes[home]
+                ? pinned_dense_count++ : -1;
+        }
+    }
+    if (pin_semantic_home_slots && pinned_to_dense) {
+        // Pinned homes occupy the dense prefix; every other stable home
+        // follows them without gaps.
+        int next_slot = pinned_dense_count;
+        for (int i = 0; i < instruction_count; i++) {
+            int call_liveness = call_liveness_by_instruction[i];
+            if (call_liveness < 0) continue;
+            const uint64_t* live = call_live_in +
+                (size_t)call_liveness * (size_t)word_count;
+            int live_count = em_root_collect_set_candidates(live, word_count,
+                candidate_count, set_candidates);
+            for (int li = 0; li < live_count; li++) {
+                int ci = set_candidates[li];
+                int home_id = root_candidates[ci].home_id;
+                if (home_id <= 0 || home_id >= home_map_count ||
+                        home_to_slot[home_id] >= 0) continue;
+                home_to_slot[home_id] = next_slot++;
+            }
+        }
+        stable_slot_count = next_slot;
+    } else if (pin_semantic_home_slots) {
         // Lambda MIR-Direct may still read selected root homes as value-merge
         // memory. Reserve only those physical offsets, then compact optimized
         // homes around them instead of preserving the old oversized frame.
@@ -3332,6 +3446,12 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         }
         insn = next;
     }
+    if (pinned_to_dense) {
+        // the retained explicit operands move with their homes; stores added
+        // below already use the dense numbering
+        em_root_frame_refs_remap(em, frame_base, pinned_to_dense,
+            preserved_oracle_home_count - 1);
+    }
 
     int inserted_stores = retained_oracle_store_count;
     for (int bi = 0; bi < block_count; bi++) {
@@ -3447,6 +3567,7 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
     mem_free(dirty_preserve); mem_free(dirty_generate);
     mem_free(successors);
     mem_free(publication_frontier);
+    if (pinned_to_dense) mem_free(pinned_to_dense);
     return true;
 }
 

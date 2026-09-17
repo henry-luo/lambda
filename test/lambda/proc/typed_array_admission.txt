@@ -1,0 +1,13 @@
+ivec=[3, 4] len=2 at=4
+fvec=[1.5]
+bvec=[true]
+svec=["x"]
+mvec=[[1, 2]]
+ovec=0
+fresh=1,0
+decl=[7] type=array
+copy=[5, 6] orig=[5]
+sum=11
+ws=[2.5]
+ns=["b"] orig=0
+

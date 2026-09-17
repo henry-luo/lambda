@@ -1,0 +1,19 @@
+alias=140
+replace=277
+grow=204
+rebind=202
+root_var=11001
+root_plain=4
+key=102
+sibling=9
+copy=2052
+shared=1081
+shared_leaf=2032
+local=104
+loop_kept=8
+loop_killed=3
+arms_t=113
+arms_f=100
+absent=[null, null],[null, null]
+caller=1,2
+

@@ -2179,6 +2179,33 @@ three shapes the rule does not reach directly. TE-18 has no open items.
 
 ---
 
+### TE-19 — Verified once, valid while unchanged; a required field is a required field (decided 2026-09-17, user)
+
+**The ruling (S11.4.10, D3.2.6).** A declared type — on `let`/`var`, a parameter, a return,
+or a nominal binding of an element — is verified at the crossing, and the verification
+remains valid as long as the data is not changed. Under a nominal contract every required
+field is present in an admitted value; the container stays open beyond the declared prefix
+(S11.4.6). Native lanes store exactly the declared layout — that is the ABI, for every lane
+implementation. A value that does not fulfil its nominal binding surfaces as an **error
+value at the binding site** (the soft form of S11.4.2) and the binding is not established.
+
+**Structural vs. nominal.** The user separated the two cases that had kept the emitter
+conservative. Structurally, `<elmt …>` may be composed with any attributes and content,
+and `<elmt … error>` may even carry errors in them; nothing is verified. Once that element
+is bound to a nominal type, the nominal type is binding and is always verified. Host-built
+values (language interop) are outside TE-19 until they cross a boundary that admits them.
+
+**What it retires.** The hardcoded assumption that a declared non-optional field of an
+admitted record may hold an empty packed slot ("partially built records, host-built maps",
+`vibe/impl/Lambda_Impl_Tune28.md` §9.17), which put a zero-word test and a null arm on every
+field read; and the per-access shape-identity compare and certificate re-check on elements
+of a certified `T[]` (D3.2.4v4's corollary: the proof is transitive through a verified
+carrier). Both are measured at ~38–42 MIR instructions per record access in the typed lane
+against one in the c2m port (`temp/r46/`, deltablue2 `c_choose_method`).
+
+**Spec linkage.** TE-19 → S11.4.10, D3.2.6, D3.2.4v4; handle-carried facts → D4.4.4v4 /
+CW37 (`Lambda_Design_Runtime_COW.md` §11.14). Not implemented; the proposal is Tune29.
+
 ## 8. Phasing
 
 Each phase gates on `make test-lambda-baseline` and `make test262-baseline` at 100% plus new

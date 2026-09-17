@@ -8972,6 +8972,11 @@ Type* lambda_map_path_contract_step(Type* current, Item key, bool* open_leaf) {
     // indexed write below it cannot invalidate the declared outer record;
     // the COW walker still checks the entire path before the leaf store
     // (D3.2.4v3, S7.1.3v2).
+    if (current->type_id == LMD_TYPE_ANY) {
+        // an `any` step is open the same way: nothing below it is declared
+        *open_leaf = true;
+        return &TYPE_ANY;
+    }
     if (current == &TYPE_ARRAY && lambda_item_to_int64_exact(key, &array_index)) {
         *open_leaf = true;
         return &TYPE_ANY;
@@ -9279,17 +9284,19 @@ Item lambda_map_set_checked_inplace(Item owner, Item key, Item value, Type* expe
     return lambda_map_set_checked_impl(owner, key, value, expected, boundary, true);
 }
 
-Item lambda_map_path_set_checked(Item owner, Item path, Item value, Type* expected,
-        const char* boundary) {
+// The contract-generic body of the nested checked setters. `contract` is the
+// unwrapped root contract: a record, or an array whose path steps through a
+// record (`bag[0].size = v` on `Box[]`, LR12-13). Every step resolves through
+// lambda_map_path_contract_step, which walks both kinds (D3.2.4v3).
+static Item runtime_container_path_set_checked(Item owner, Item path, Item value,
+        Type* contract, const char* boundary) {
     // Nested annotated writes validate the proposed root, not merely the final
-    // slot. Start from a detached top-level map so a failed post-state check
-    // cannot mutate the old root or a snapshot that still observes it.
-    Type* contract = runtime_boundary_unwrap_type(expected);
-    if (!contract || contract->type_id != LMD_TYPE_MAP) {
-        return lambda_type_error(value, expected, boundary);
-    }
+    // slot. Start from a detached top-level container so a failed post-state
+    // check cannot mutate the old root or a snapshot that still observes it.
     Type* leaf_contract = runtime_map_path_leaf_contract(contract, path);
-    if (leaf_contract && runtime_map_rep_proves_contract(owner, contract)) {
+    // a certified array root proves its element layouts as a record does its
+    // fields, so either kind takes the leaf-only admission (D3.2.4v4)
+    if (leaf_contract && runtime_value_rep_proves_contract(owner, contract)) {
         return runtime_map_path_write_proven(owner, path, 0, NULL, value,
             leaf_contract, boundary, false);
     }
@@ -9315,19 +9322,15 @@ Item lambda_map_path_set_checked(Item owner, Item path, Item value, Type* expect
 // caller would never see the swap. Check the pre-state conforms (the same
 // contract lambda_map_set_checked_inplace relies on for the flat store), write
 // in place, then re-check the post-state.
-Item lambda_map_path_set_checked_inplace(Item owner, Item path, Item value,
-        Type* expected, const char* boundary) {
-    Type* contract = runtime_boundary_unwrap_type(expected);
-    if (!contract || contract->type_id != LMD_TYPE_MAP) {
-        return lambda_type_error(value, expected, boundary);
-    }
+static Item runtime_container_path_set_checked_inplace(Item owner, Item path,
+        Item value, Type* contract, const char* boundary) {
     RootFrame roots(6);
     Rooted<Item> rooted_owner(roots, owner);
     Rooted<Item> rooted_path(roots, path);
     Rooted<Item> rooted_value(roots, value);
     Type* leaf_contract = runtime_map_path_leaf_contract(contract, rooted_path.get());
     if (leaf_contract &&
-            runtime_map_rep_proves_contract(rooted_owner.get(), contract)) {
+            runtime_value_rep_proves_contract(rooted_owner.get(), contract)) {
         return runtime_map_path_write_proven(rooted_owner.get(), rooted_path.get(),
             0, NULL, rooted_value.get(), leaf_contract, boundary, true);
     }
@@ -9362,6 +9365,25 @@ Item lambda_map_path_set_checked_inplace(Item owner, Item path, Item value,
         rooted_leaf.get());
     if (get_type_id(write_result) == LMD_TYPE_ERROR) return write_result;
     return rooted_owner.get();
+}
+
+Item lambda_map_path_set_checked(Item owner, Item path, Item value, Type* expected,
+        const char* boundary) {
+    Type* contract = runtime_boundary_unwrap_type(expected);
+    if (!contract || contract->type_id != LMD_TYPE_MAP) {
+        return lambda_type_error(value, expected, boundary);
+    }
+    return runtime_container_path_set_checked(owner, path, value, contract, boundary);
+}
+
+Item lambda_map_path_set_checked_inplace(Item owner, Item path, Item value,
+        Type* expected, const char* boundary) {
+    Type* contract = runtime_boundary_unwrap_type(expected);
+    if (!contract || contract->type_id != LMD_TYPE_MAP) {
+        return lambda_type_error(value, expected, boundary);
+    }
+    return runtime_container_path_set_checked_inplace(owner, path, value, contract,
+        boundary);
 }
 
 // T27-4: the fixed-descriptor twin of the two checked path setters above, for
@@ -9449,13 +9471,31 @@ static ArrayRepCert* runtime_array_rep_cert_intern(Type* contract) {
 // ArrayNum to later borrowed-write boundaries (D3.3.3v3, S9.2.2).
 static bool runtime_array_admit_primitive_contract(Item value, Type* expected,
         Item* converted) {
-    if (!lambda_array_num_representation_proves_primitive_contract(value, expected)) {
-        return false;
-    }
+    if (get_type_id(value) != LMD_TYPE_ARRAY_NUM || !value.array_num) return false;
+    // T29-5: intern first -- a warm boundary hits the pointer cache -- and let
+    // the certificate's resolved lane and rank decide, instead of re-deriving
+    // them from the contract on every fill (nqueens2's per-call admissions)
     ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
-    if (!cert) return false;
+    if (!cert || !lambda_array_num_matches_cert(value, cert)) return false;
     lambda_array_install_rep_cert(value, cert);
     *converted = value;
+    return true;
+}
+
+// The empty array reified straight into `expected`'s certified numeric lane.
+// Returns false when the contract has no numeric lane (the caller admits the
+// generic empty array through the full check); a lane that fails to certify
+// leaves *admitted null.
+static bool runtime_array_new_empty_numeric(Type* expected, Item* admitted) {
+    *admitted = ItemNull;
+    Type* element_type = runtime_array_contract_element(expected);
+    ArrayNumElemType element = ELEM_INT;
+    if (!element_type || !lambda_array_num_elem_type_for_contract(element_type, &element)) {
+        return false;
+    }
+    ArrayNum* reified = array_num_new(element, 0);
+    Item reified_value = {.array_num = reified};
+    if (reified) runtime_array_admit_primitive_contract(reified_value, expected, admitted);
     return true;
 }
 
@@ -9468,21 +9508,26 @@ Item lambda_array_admit_numeric_contract(Item value, Type* expected,
         return admitted;
     }
 
-    Type* element_type = runtime_array_contract_element(expected);
-    ArrayNumElemType element = ELEM_INT;
     if (get_type_id(value) == LMD_TYPE_ARRAY && value.array &&
-            value.array->length == 0 && !value.array->is_view && element_type &&
-            lambda_array_num_elem_type_for_contract(element_type, &element)) {
-        ArrayNum* reified = array_num_new(element, 0);
-        if (!reified) return lambda_type_error(value, expected, boundary);
-        Item reified_value = {.array_num = reified};
-        if (runtime_array_admit_primitive_contract(reified_value, expected, &admitted)) {
-            return admitted;
-        }
-        return lambda_type_error(value, expected, boundary);
+            value.array->length == 0 && !value.array->is_view &&
+            runtime_array_new_empty_numeric(expected, &admitted)) {
+        return admitted.item != ITEM_NULL ? admitted
+            : lambda_type_error(value, expected, boundary);
     }
 
     return lambda_type_check(value, expected, boundary);
+}
+
+// Tune29 §19.1 item 2: `[]` crossing a primitive T[] boundary (`return []`
+// from `pn vec_new() int[]`, `var keys: int[] = []`) allocated a generic
+// array and then ran the admission ladder to replace it. Build the certified
+// ArrayNum directly; any other contract admits the literal as before.
+Item lambda_array_empty_for_contract(Type* expected, const char* boundary) {
+    Item admitted = ItemNull;
+    if (runtime_array_new_empty_numeric(expected, &admitted) &&
+            admitted.item != ITEM_NULL) return admitted;
+    Array* empty = array();
+    return lambda_type_check({.array = empty}, expected, boundary);
 }
 
 static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value, Type* expected,
@@ -9670,6 +9715,21 @@ static Item lambda_array_path_set_checked_impl(Item owner, Item path, Item value
         // leaf at its full coordinate instead (D3.3.3v3, S7.1.3v2, S9.2.2).
         return lambda_array_set_nd_checked_impl(owner, (int)path_length, indices,
             value, expected, boundary, publish_in_place);
+    }
+
+    // A path that leaves the array spine for a record field has no
+    // index-only walk below; the contract-generic setter resolves each step
+    // and validates the rebuilt root (LR12-13, D3.2.4v3).
+    for (int64_t depth = 0; depth < path_length; depth++) {
+        int64_t ignored = 0;
+        if (!lambda_item_to_int64_exact(item_at(path, depth), &ignored)) {
+            Type* contract = runtime_boundary_unwrap_type(expected);
+            return publish_in_place
+                ? runtime_container_path_set_checked_inplace(owner, path, value,
+                    contract, boundary)
+                : runtime_container_path_set_checked(owner, path, value,
+                    contract, boundary);
+        }
     }
 
     RootFrame roots(6);
@@ -10142,6 +10202,49 @@ Item cow_place_leaf_fixed(Item owner, int64_t count, Item key0, Item key1,
 // are still detached and reinstalled either way; only the root is left alone.
 // `path` selects the dynamic descriptor; a NULL path takes `fixed_count` rooted
 // keys instead, the same two ABI shapes cow_path_borrow_impl accepts (T27-4).
+// T29-5: an index path whose owner is a packed N-D ArrayNum (a comprehension
+// of equal numeric rows builds one) stores the leaf at its full coordinate.
+// The per-link walk materialized a row view per store through fn_index only
+// to write through it into the same buffer -- an allocation per write. The
+// owner must already be prepared (unique, or a caller-detached `var` root).
+// Anything this does not cover -- a rank mismatch, a view, an out-of-range
+// coordinate, a value outside the lane -- returns false with no effect, and
+// the caller's per-link walk keeps its semantics and diagnostics.
+static bool cow_packed_index_store(Item owner, int64_t count, const Item* keys,
+        Item value) {
+    if (get_type_id(owner) != LMD_TYPE_ARRAY_NUM || count < 2 ||
+            count > LAMBDA_ARRAY_NUM_MAX_NDIM) return false;
+    ArrayNum* arr = owner.array_num;
+    if (!arr || !arr->is_ndim || arr->is_view || arr->is_static) return false;
+    ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)arr->extra;
+    if (!shape || shape->ndim != count || shape->base) return false;
+    int64_t* dims = array_num_shape_dims(shape);
+    int64_t* strides = array_num_shape_strides(shape);
+    int64_t offset = 0;
+    for (int64_t axis = 0; axis < count; axis++) {
+        int64_t index = 0;
+        if (!lambda_item_to_int64_exact(keys[axis], &index) || index < 0 ||
+                index >= dims[axis]) return false;
+        offset += index * strides[axis];
+    }
+    // the same certificate rule as fn_array_set: keep the proof only when the
+    // stored value proves the certified leaf element
+    ArrayRepCert* prior_cert = arr->rep_cert;
+    LambdaArrayContractInfo info = {};
+    bool preserve_cert = prior_cert && prior_cert->array_contract &&
+        lambda_array_contract_info(prior_cert->array_contract, &info) &&
+        info.leaf_element && runtime_value_rep_proves_contract(value, info.leaf_element);
+    if (!array_num_store_admitted(arr, offset, value)) return false;
+    if (!preserve_cert) lambda_array_clear_rep_cert(owner);
+    return true;
+}
+
+int64_t cow_path_set_packed_index(Item owner, int64_t count, Item key0, Item key1,
+        Item key2, Item value) {
+    Item keys[3] = {key0, key1, key2};
+    return count <= 3 && cow_packed_index_store(owner, count, keys, value) ? 1 : 0;
+}
+
 static Item cow_path_set_impl(Item owner, Item path, int64_t fixed_count,
         const Item* fixed_keys, Item value, bool publish_in_place) {
     bool dynamic_path = get_type_id(path) != LMD_TYPE_NULL;
@@ -10176,6 +10279,20 @@ static Item cow_path_set_impl(Item owner, Item path, int64_t fixed_count,
     // The top-level replacement survives every child detach; returning an
     // unrooted local here used a pre-compaction address for nested writes.
     rooted_replacement.set(rooted_current.get());
+    if (count >= 2 && count <= LAMBDA_ARRAY_NUM_MAX_NDIM &&
+            get_type_id(rooted_current.get()) == LMD_TYPE_ARRAY_NUM) {
+        // T29-5: a packed N-D owner takes the whole coordinate at once
+        Item packed_keys[LAMBDA_ARRAY_NUM_MAX_NDIM];
+        for (int64_t i = 0; i < count; i++) {
+            packed_keys[i] = dynamic_path ? item_at(rooted_path.get(), i)
+                : i == 0 ? rooted_key0.get() : i == 1 ? rooted_key1.get()
+                : rooted_key2.get();
+        }
+        if (cow_packed_index_store(rooted_current.get(), count, packed_keys,
+                rooted_value.get())) {
+            return rooted_replacement.get();
+        }
+    }
 
     for (int64_t i = 0; i < count; i++) {
         if (dynamic_path) {

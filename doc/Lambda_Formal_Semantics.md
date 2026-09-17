@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 24.4.0 (2026-09-15)
+**Spec version:** 24.5.0 (2026-09-17)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1362,6 +1362,18 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   row's independently declared effect. The relation can improve static
   inference but cannot affect an accepted program's evaluation. [S11.4.8v2,
   SI3v2, S17.2.1, D3.3.5]
+- **S11.4.10*** **Verified at the crossing, valid while unchanged.** A
+  declared type — on `let`/`var`, a parameter, a return, or a nominal binding
+  of an element — is verified when the value crosses it, and the verification
+  remains valid as long as the data is not changed. Under a nominal contract a
+  required field is a required field: it is always present in an admitted
+  value, while the container stays open beyond the declared prefix (S11.4.6).
+  Structural composition is free — `<elmt …>` may carry any attributes and
+  content, including errors (S7.8) — and only the nominal binding verifies.
+  A value that does not fulfil its nominal binding **surfaces as an error
+  value at the binding site** (the soft form of S11.4.2); the binding is not
+  established. Host-built values are outside this rule until they cross a
+  boundary that admits them. [TE-19, D3.2.6; 2026-09-17, user]
 
 ---
 
@@ -2110,6 +2122,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S11.4.3 | `any \ error` has no working surface spelling (the `!` exclusion operator is broken for general types); it exists as the unwritten default only. |
 | S11.4.5 | Landed check implements the superseded type-directional reject: an ANY-held `3.0` into an `int` boundary errors instead of admitting as `3`. Round-2 deliverable #1. |
 | S11.4.6 | Constrained-type `is`/`fn_is`/validator divergence open; base-only interim is the shipped behavior. |
+| S11.4.10 | Ruled 2026-09-17 (user). The boundary check and error-value surfacing exist; the "valid while unchanged" half is not exploited: the typed lane re-verifies presence and layout on every access (D3.2.6, D3.2.4v4 footnotes). |
 | S12.4.1–S12.4.3 | Resource model R1–R5 designed, not implemented. |
 | S13.1.3v2 | Task mode and the ordinary `start(target, args, options)` call surface are implemented (2026-08-19). Thread/process modes are recognized and rejected as not implemented; process remains first, thread gated on the isolate-state audit and open item O-D. |
 | S13.4.1, S13.4.2 | Pairwise reductions decided, not implemented (sequenced before concurrency work); stream parallelism pending with streams. |

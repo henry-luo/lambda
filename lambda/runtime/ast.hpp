@@ -106,6 +106,33 @@ static inline AstFuncNode* ast_direct_call_function(AstCallNode* call) {
     return (AstFuncNode*)node;
 }
 
+// LR12-11 (S9.1.2): a direct call whose callee may return (part of) a
+// parameter hands back an object its caller may still hold. Both tiers
+// share-mark such a result at the call site, so a write on either side detaches.
+static inline bool ast_call_may_return_argument(AstNode* expr) {
+    AstNode* node = ast_unwrap_primary(expr);
+    if (!node || node->node_type != AST_NODE_CALL_EXPR) return false;
+    AstFuncNode* callee = ast_direct_call_function((AstCallNode*)node);
+    for (AstNamedNode* param = callee ? callee->param : NULL; param;
+            param = (AstNamedNode*)((AstNode*)param)->next) {
+        if (param->entry && param->entry->cow_param_returned) return true;
+    }
+    return false;
+}
+
+// ...and whether that object may be an argument's own root rather than a part
+// of it: only then is the argument root itself shared by the result mark.
+static inline bool ast_call_may_return_argument_root(AstNode* expr) {
+    AstNode* node = ast_unwrap_primary(expr);
+    if (!node || node->node_type != AST_NODE_CALL_EXPR) return false;
+    AstFuncNode* callee = ast_direct_call_function((AstCallNode*)node);
+    for (AstNamedNode* param = callee ? callee->param : NULL; param;
+            param = (AstNamedNode*)((AstNode*)param)->next) {
+        if (param->entry && param->entry->cow_param_root_returned) return true;
+    }
+    return false;
+}
+
 static inline bool ast_call_has_named_args(const AstCallNode* call) {
     for (AstNode* arg = call ? call->argument : NULL; arg; arg = arg->next) {
         if (arg->node_type == AST_NODE_NAMED_ARG) return true;

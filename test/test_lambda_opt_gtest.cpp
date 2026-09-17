@@ -393,7 +393,9 @@ TEST(LambdaOptCow, RmwSiblingHandlesBorrowWithoutCopies) {
 }
 
 // D4.4.5 move-out binds (splay rotations): 83 map copies, down from 123, on
-// both tiers; every rotation in the 40-iteration loop borrows.
+// both tiers; every rotation in the 40-iteration loop borrows. LR12-11 adds 42
+// share marks, no copies: a rotation returns part of its `var` parameter, so
+// the call site marks the result (164 -> 206).
 TEST(LambdaOptCow, MoveOutBindsBorrow) {
     static const char* const tiers[] = {"jit", "interp"};
     for (int t = 0; t < 2; t++) {
@@ -401,7 +403,7 @@ TEST(LambdaOptCow, MoveOutBindsBorrow) {
             fixture_source("test/lambda/proc/cow_move_out_bind.ls"), true);
         ASSERT_TRUE(run.ok) << tiers[t];
         EXPECT_EQ(run.profile.get("map_shared_copies"), 83u) << tiers[t];
-        EXPECT_EQ(run.profile.get("map_share_marks"), 164u) << tiers[t];
+        EXPECT_EQ(run.profile.get("map_share_marks"), 206u) << tiers[t];
     }
 }
 

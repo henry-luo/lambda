@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "description": "T29-2 (D3.2.4v4, D3.2.6): a typed path store through a declared record and a certified record array compares no shape pointer at any step (only the certificate's three compares remain) and tests only the certificate and the optional element for null; an undeclared root takes the generic setter.",
+  "checks": [
+    {
+      "in_func": "_set_cell_#",
+      "expect": [
+        "call\tlambda_map_path_set_checked_fixed"
+      ],
+      "count": {
+        "beq\t": 2,
+        "bne\t": 3
+      },
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r}}, u8:4({{r}})"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:64({{r}})"
+        },
+        {
+          "pattern": "mov\ti64:({{r}}), "
+        },
+        {
+          "pattern": "call\tlambda_map_path_set_checked_fixed"
+        }
+      ]
+    },
+    {
+      "in_func": "_set_inferred_#",
+      "expect": [
+        "call\tfn_map_set"
+      ]
+    }
+  ]
+}

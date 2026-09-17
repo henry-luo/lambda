@@ -106,6 +106,13 @@ struct InterpFrame {
     // signal on the frame rather than in every return type lets it propagate
     // through `eval_expr` unchanged, since a content block is an expression.
     EvalSignal          signal;
+    // bit i: `var` parameter slot i has a caller home or legacy entry, so a
+    // replaced root reaches the caller at return (CW33)
+    uint32_t            var_publish_mask;
+    // bit i: this activation has share-marked its `var` parameter slot i (an
+    // alias bind or a captured store value) -- the T0 twin of MIR's
+    // compile-time `cow_marked`; a re-borrow of that slot prepares first
+    uint32_t            var_marked_mask;
     InterpFrame*        caller;
     const AstNode*      cur;         // currently evaluating node (backtrace/step)
 };

@@ -1,0 +1,6 @@
+grid=21 2
+local=708 snapshot=50 cube=36
+mixed=2
+copy=9 base=2
+flags=1
+

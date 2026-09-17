@@ -1970,10 +1970,18 @@ JitImport jit_runtime_imports[] = {
     {"lambda_array_set_nd_checked_inplace", FPTR(lambda_array_set_nd_checked_inplace)},
     {"fn_mutable_value", FPTR(fn_mutable_value)},
     {"fn_map_set", FPTR(fn_map_set)},
-    {"cow_mark_shared", FPTR(cow_mark_shared)},
+    // Tune29 §19.1 effect audit: both set one COW bit on a container header
+    // and return their argument; they neither allocate nor re-enter.
+    {"cow_mark_shared", FPTR(cow_mark_shared),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"array_num_set_cow_idx", FPTR(array_num_set_cow_idx)},
     {"index_assign_cow", FPTR(index_assign_cow)},
-    {"cow_capture_value", FPTR(cow_capture_value)},
+    {"cow_capture_value", FPTR(cow_capture_value),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"cow_bind_var", FPTR(cow_bind_var)},
     {"cow_bind_rmw_handle", FPTR(cow_bind_rmw_handle)},
     {"cow_prepare_write", FPTR(cow_prepare_write)},
@@ -1981,6 +1989,7 @@ JitImport jit_runtime_imports[] = {
     {"member_set_cow", FPTR(member_set_cow)},
     {"map_set_cow", FPTR(map_set_cow)},
     {"cow_path_set_raw", FPTR(cow_path_set_raw)},
+    {"cow_path_set_packed_index", FPTR(cow_path_set_packed_index)},
     {"cow_path_set", FPTR(cow_path_set)},
     {"cow_path_borrow", FPTR(cow_path_borrow)},
     {"cow_path_borrow_fixed", FPTR(cow_path_borrow_fixed)},
@@ -2014,6 +2023,7 @@ JitImport jit_runtime_imports[] = {
     {"lambda_value_type_is_exact", FPTR(lambda_value_type_is_exact)},
     {"lambda_type_value_from_contract", FPTR(lambda_type_value_from_contract)},
     {"lambda_array_admit_numeric_contract", FPTR(lambda_array_admit_numeric_contract)},
+    {"lambda_array_empty_for_contract", FPTR(lambda_array_empty_for_contract)},
     {"lambda_map_set_checked", FPTR(lambda_map_set_checked)},
     {"lambda_map_set_checked_inplace", FPTR(lambda_map_set_checked_inplace)},
     {"lambda_map_path_set_checked", FPTR(lambda_map_path_set_checked)},
@@ -3643,6 +3653,8 @@ bool jit_import_validate_no_gc_allowlist(void) {
         // rooting exactly the values the probe exists to catch as unrooted.
         // Emitted only under LAMBDA_ROOT_WITNESS, so release MIR has none.
         "lambda_jit_root_witness",
+        // COW share-mark: one header bit, returns the argument (Tune29 §19.1)
+        "cow_mark_shared", "cow_capture_value",
     };
     const int audited_count = (int)(sizeof(audited) / sizeof(audited[0]));
     int no_gc_count = 0;

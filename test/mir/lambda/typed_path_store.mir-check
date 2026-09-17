@@ -1,27 +1,45 @@
 {
   "schema_version": 1,
-  "description": "Typed runtime-index stores use guarded packed loads and direct integer/array-pointer stores before the cold checked store; typed append enforces its binding contract. Tune27 T27-4: a cold arm of up to three keys takes the fixed-key checked setter and allocates no path descriptor.",
+  "description": "Typed runtime-index stores use guarded packed loads and direct integer/array-pointer stores before the cold checked store; typed append enforces its binding contract. Tune27 T27-4: a cold arm of up to three keys takes the fixed-key checked setter and allocates no path descriptor. T29-2 (D3.2.4v4, D3.2.6): a declared record root carries its layout, so the store loads no shape word; `_bump_` keeps only the certificate compares of its read and its store (3 + 3) and the read's optional-element null test. Tune29 §18 adds one inline int tag test ahead of the store value's checked admission.",
   "checks": [
     {
       "in_func": "_bump_#",
       "expect_seq": [
-        { "pattern": "mov\t{{r}}, u8:4({{r}})" },
-        { "pattern": "mov\t{{r}}, i64:8({{r}})" },
-        { "pattern": "mov\t{{r}}, i64:16({{r}})" },
-        { "pattern": "mov\ti64:({{r}}), {{r}}" },
-        { "pattern": "call\tlambda_map_path_set_checked_fixed" }
+        {
+          "pattern": "mov\t{{r}}, u8:4({{r}})"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:16({{r}})"
+        },
+        {
+          "pattern": "mov\ti64:({{r}}), {{r}}"
+        },
+        {
+          "pattern": "call\tlambda_map_path_set_checked_fixed"
+        }
       ],
       "forbid": [
         "call\tarray_plain_p, array_plain"
-      ]
+      ],
+      "count": {
+        "bne\t": 8
+      }
     },
     {
       "in_func": "_append_#",
       "expect_seq": [
-        { "pattern": "call\tlambda_array_push_checked" },
-        { "pattern": "mov\t{{r}}, u8:4({{r}})" },
-        { "pattern": "mov\ti64:8({{r}}), {{r}}" },
-        { "pattern": "call\tlambda_map_path_set_checked_fixed" }
+        {
+          "pattern": "call\tlambda_array_push_checked"
+        },
+        {
+          "pattern": "mov\t{{r}}, u8:4({{r}})"
+        },
+        {
+          "pattern": "mov\ti64:8({{r}}), {{r}}"
+        },
+        {
+          "pattern": "call\tlambda_map_path_set_checked_fixed"
+        }
       ],
       "forbid": [
         "call\tarray_plain_p, array_plain"

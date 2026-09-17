@@ -43,8 +43,11 @@ let FN_DEVICE  = 3
 
 let NONE = -1            // the handle-store spelling of a null pointer
 
-// The three stores are open growable carriers under D2.4.1; their values have
+// The three stores are growable carriers under D2.4.1; their values have
 // stable named layouts and all references between records are integer handles.
+// `tasks` and `pkts` are typed stores (the C port's `Tcb*`/`Packet*` tables);
+// `datas` holds four different record kinds (the C port's `void *handle`), so it
+// stays an open array -- a union element would stay boxed (D2.5.3).
 type Packet = {link: int, identity: int, pkind: int, datum: int, data: int[]}
 type TaskControlBlock = {link: int, identity: int, priority: int, input: int,
     pp: bool, tw: bool, th: bool, fn_id: int}
@@ -53,7 +56,7 @@ type WorkerData = {destination: int, wcount: int}
 type HandlerData = {work_in: int, device_in: int}
 type DeviceData = {pending: int}
 type World = {qpc: int, hc: int, ct: int, cti: int, tl: int, np: int,
-    tasks: array, datas: array, pkts: array}
+    tasks: TaskControlBlock?[], datas: array, pkts: Packet?[]}
 
 // --- Packet: owned by w.pkts, addressed by slot id ---
 

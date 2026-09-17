@@ -53,26 +53,59 @@ func ack(m, n int) int {
 	return ack(m-1, ack(m, n-1))
 }
 
-func nqueensCount(rows *[8]int, column int) int {
-	if column == 8 {
+// nqueensOK and nqueensSolve port r7rs/nqueens2.ls: the Scheme candidate-list
+// search that builds fresh candidate and rest lists on every call. An earlier
+// port used a fixed board with no allocation, so it timed a different
+// algorithm (Tune29 P0). placed is shared across frames, as in nqueens2.js.
+func nqueensOK(row, dist int, placed []int, placedLen int) int {
+	if dist > placedLen {
 		return 1
 	}
-	total := 0
-	for row := 0; row < 8; row++ {
-		valid := true
-		for previous := 0; previous < column; previous++ {
-			delta := column - previous
-			if rows[previous] == row || rows[previous]+delta == row || rows[previous]-delta == row {
-				valid = false
-				break
-			}
-		}
-		if valid {
-			rows[column] = row
-			total += nqueensCount(rows, column+1)
-		}
+	p := placed[placedLen-dist]
+	if p == row+dist || p == row-dist {
+		return 0
 	}
-	return total
+	return nqueensOK(row, dist+1, placed, placedLen)
+}
+
+func nqueensSolve(candidates []int, candLen int, rest []int, restLen int, placed []int, placedLen int) int {
+	if candLen == 0 {
+		if restLen == 0 {
+			return 1
+		}
+		return 0
+	}
+	row := candidates[0]
+	count := 0
+	if nqueensOK(row, 1, placed, placedLen) == 1 {
+		newCands := make([]int, candLen-1+restLen)
+		ni := 0
+		for ci := 1; ci < candLen; ci++ {
+			newCands[ni] = candidates[ci]
+			ni++
+		}
+		for ri := 0; ri < restLen; ri++ {
+			newCands[ni] = rest[ri]
+			ni++
+		}
+		placed[placedLen] = row
+		count += nqueensSolve(newCands, ni, make([]int, 1), 0, placed, placedLen+1)
+	}
+	newRest := make([]int, restLen+1)
+	copy(newRest, rest[:restLen])
+	newRest[restLen] = row
+	newCands2 := make([]int, candLen-1)
+	copy(newCands2, candidates[1:candLen])
+	count += nqueensSolve(newCands2, candLen-1, newRest, restLen+1, placed, placedLen)
+	return count
+}
+
+func nqueens(n int) int {
+	candidates := make([]int, n)
+	for i := range candidates {
+		candidates[i] = i + 1
+	}
+	return nqueensSolve(candidates, n, make([]int, 1), 0, make([]int, n), 0)
 }
 
 func four1(data []float64) {
@@ -159,8 +192,7 @@ func runR7RS(name string) bool {
 		fmt.Printf("sumfp: %s\n", pass(ok))
 		return ok
 	case "nqueens":
-		var rows [8]int
-		value := nqueensCount(&rows, 0)
+		value := nqueens(8)
 		fmt.Printf("nqueens: %s\n", pass(value == 92))
 		return value == 92
 	case "fft":

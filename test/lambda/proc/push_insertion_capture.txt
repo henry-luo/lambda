@@ -1,0 +1,12 @@
+local=105
+param=105 caller=5
+place=207 caller=2
+untyped=104
+via_var=109 caller=9 bag=1
+literal=6
+fresh=6
+named=603
+rejected=true size=3
+stored=false size=4
+moved=7 loop=711 fresh=712 after=71 closure=71 twice=71
+

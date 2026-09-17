@@ -23,10 +23,14 @@ let NP = 4
 let NC = 5
 
 type Arr = {l0: array, sz: int}
-// Typed numeric arrays are fixed-size; these stores must stay growable.
-// Their element contracts are enforced at the RbtTable API (D2.4.1).
-type RbtTable = {keys: array, vals: array}
+// Keys are always ints (rbt_put takes `key: int`), so the key column is a
+// typed int[] -- growable through push like any array -- and lookups compare
+// native ints. Values stay open: callers store ints and entry arrays.
+type RbtTable = {keys: int[], vals: array}
 type Vec3 = float[]
+// the C port's `Motion` struct: call sign plus the segment's two endpoints
+type Motion = {cs: int, p1x: float, p1y: float, p1z: float,
+    p2x: float, p2y: float, p2z: float}
 
 // =====================================================
 // Helpers
@@ -143,7 +147,7 @@ pn vec_size(v: array) int {
 // (D3.3.1v2). The CD workload needs ordered iteration only, not tree balancing.
 
 pn rbt_new() RbtTable {
-    var keys = vec_new()
+    var keys: int[] = []
     var vals = vec_new()
     var table: RbtTable = {keys: keys, vals: vals}
     return table
@@ -387,21 +391,20 @@ pn recurse_draw(voxel_map: RbtTable, seen_tree: RbtTable, vx: int, vy: int,
 // =====================================================
 // findIntersection between two motions
 // =====================================================
-pn find_intersection(m1: array, m2: array) any {
-    // Motion: [cs, p1x, p1y, p1z, p2x, p2y, p2z]
-    var i1x = m1[1]
-    var i1y = m1[2]
-    var i1z = m1[3]
-    var i2x = m2[1]
-    var i2y = m2[2]
-    var i2z = m2[3]
+pn find_intersection(m1: Motion, m2: Motion) any {
+    var i1x = m1.p1x
+    var i1y = m1.p1y
+    var i1z = m1.p1z
+    var i2x = m2.p1x
+    var i2y = m2.p1y
+    var i2z = m2.p1z
 
-    var v1x = m1[4] - i1x
-    var v1y = m1[5] - i1y
-    var v1z = m1[6] - i1z
-    var v2x = m2[4] - i2x
-    var v2y = m2[5] - i2y
-    var v2z = m2[6] - i2z
+    var v1x = m1.p2x - i1x
+    var v1y = m1.p2y - i1y
+    var v1z = m1.p2z - i1z
+    var v2x = m2.p2x - i2x
+    var v2y = m2.p2y - i2y
+    var v2z = m2.p2z - i2z
 
     var radius = PROXIMITY_RADIUS
     var dvx = v2x - v1x
@@ -488,11 +491,11 @@ pn find_intersection(m1: array, m2: array) any {
 }
 
 // =====================================================
-// Motion: array [cs, p1x, p1y, p1z, p2x, p2y, p2z]
+// Motion
 // =====================================================
 pn motion_new(cs: int, p1x: float, p1y: float, p1z: float,
-        p2x: float, p2y: float, p2z: float) array {
-    return [cs, p1x, p1y, p1z, p2x, p2y, p2z]
+        p2x: float, p2y: float, p2z: float) Motion {
+    return {cs: cs, p1x: p1x, p1y: p1y, p1z: p1z, p2x: p2x, p2y: p2y, p2z: p2z}
 }
 
 // =====================================================
@@ -568,11 +571,11 @@ pn handle_new_frame(var stateTree: RbtTable, frame: array) int {
     var vxy: array = [0.0, 0.0]
     var mi = 0
     while (mi < motionsSz) {
-        var mot = vec_at(motions, mi)
-        var mp1x = mot[1]
-        var mp1y = mot[2]
-        var mp2x = mot[4]
-        var mp2y = mot[5]
+        var mot: Motion = vec_at(motions, mi)
+        var mp1x = mot.p1x
+        var mp1y = mot.p1y
+        var mp2x = mot.p2x
+        var mp2y = mot.p2y
         voxel_hash_xy(mp1x, mp1y, vxy)
         var vvx = vxy[0]
         var vvy = vxy[1]

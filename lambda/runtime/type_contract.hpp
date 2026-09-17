@@ -66,6 +66,8 @@ bool lambda_array_contract_compatible(Type* candidate, Type* expected,
 // carrier, so they deliberately return false.
 bool lambda_array_num_elem_type_for_contract(Type* element,
     ArrayNumElemType* out_type);
+// An owned ArrayNum whose lane and shape rank match an interned certificate.
+bool lambda_array_num_matches_cert(Item value, const ArrayRepCert* cert);
 // An owned ArrayNum with the exact scalar lane and shape rank already decodes
 // every leaf as the complete non-nullable primitive contract. Views,
 // nullable/refined contracts, and representation changes remain deferred to
