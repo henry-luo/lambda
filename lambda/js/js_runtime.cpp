@@ -18070,9 +18070,10 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
         btflags.dot_all = compile_info.dot_all;
         btflags.unicode = has_unicode;
         btflags.sticky = compile_info.sticky;
-        // Shared preprocessing resolves Annex B decimal escapes before either
-        // matcher sees them, while retaining valid backreferences for this path.
-        bt = js_bt_compile(processed_pattern.c_str(), (int)processed_pattern.size(),
+        // `processed_pattern` contains RE2-only rewrites such as expanding
+        // `\s` through `\p{Z}`. Keep the backtracker on the normalized
+        // ECMAScript pattern, whose parser owns those syntax forms directly.
+        bt = js_bt_compile(effective_pattern, effective_pattern_len,
             btflags, js_input->pool);
         if (!bt) {
             // A required backtracking pattern cannot fall through to RE2, which changes its captures.
