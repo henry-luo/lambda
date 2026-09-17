@@ -101,8 +101,8 @@ js-rt,struct,JsFunctionSnapshot,56,8,4,lambda/js/js_globals.cpp,16149
 js-rt,struct,JsPrototypeFunctionSnapshot,96,8,2,lambda/js/js_globals.cpp,16156
 js-rt,struct,JsPrototypeSnapshotState,11496,8,13,lambda/js/js_globals.cpp,16161
 js-rt,enum,JsSymbolRecordKind,1,1,3,lambda/js/js_globals.cpp,17246
-js-rt,struct,JsSymbolRecord,24,8,4,lambda/js/js_globals.cpp,17254
-js-rt,struct,JsWellKnownSymbolSpec,16,8,3,lambda/js/js_globals.cpp,17340
+js-rt,struct,JsSymbolRecord,24,8,3,lambda/js/js_globals.cpp,17256
+js-rt,struct,JsWellKnownSymbolSpec,16,8,3,lambda/js/js_globals.cpp,17345
 js-rt,enum,JsInterpCompletionKind,1,1,7,lambda/js/js_interp.cpp,32
 js-rt,struct,JsInterpCompletion,32,8,5,lambda/js/js_interp.cpp,42
 js-rt,struct,JsInterpFrame,192,8,24,lambda/js/js_interp.cpp,52
@@ -293,8 +293,8 @@ js-rt,struct,JsMirPhaseTiming,88,8,11,lambda/js/js_runtime.h,942
 js-rt,struct,JsMirVolumeCounters,16,8,2,lambda/js/js_runtime.h,973
 js-rt,struct,JsProxyData,32,8,6,lambda/js/js_runtime.h,1227
 js-rt,struct,JsBuiltinOwnerBinding,32,8,6,lambda/js/js_runtime_builtin_registry.cpp,380
-js-rt,struct,JsCallableCodeEntry,32,8,4,lambda/js/js_runtime_function.cpp,418
-js-rt,enum,JsFunctionCacheKind,1,1,2,lambda/js/js_runtime_function.cpp,638
+js-rt,struct,JsCallableCodeEntry,32,8,4,lambda/js/js_runtime_function.cpp,417
+js-rt,enum,JsFunctionCacheKind,1,1,2,lambda/js/js_runtime_function.cpp,637
 js-rt,enum,JsNumericPrototypeOp,4,4,6,lambda/js/js_runtime_internal.hpp,154
 js-rt,struct,JsErrorTextParts,32,8,4,lambda/js/js_runtime_state.cpp,1231
 js-rt,class,JsModuleNamespaceScope,16,8,2,lambda/js/js_runtime_state.hpp,38

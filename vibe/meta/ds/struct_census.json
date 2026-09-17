@@ -1,6 +1,6 @@
 {
  "version": 1,
- "generated": "2026-09-17T10:34:11+00:00",
+ "generated": "2026-09-17T11:13:02+00:00",
  "config_sig": "61bd2e2e94dd5144c0180f6df0e3a1668c190500",
  "source_dirs": [
   "lambda",
@@ -1155,10 +1155,10 @@
    "kind": "struct",
    "module": "js-rt",
    "file": "lambda/js/js_globals.cpp",
-   "line": 17254,
+   "line": 17256,
    "size": 24,
    "align": 8,
-   "members": 4
+   "members": 3
   },
   {
    "usr": "c:@S@JsWellKnownSymbolSpec",
@@ -1166,7 +1166,7 @@
    "kind": "struct",
    "module": "js-rt",
    "file": "lambda/js/js_globals.cpp",
-   "line": 17340,
+   "line": 17345,
    "size": 16,
    "align": 8,
    "members": 3
@@ -3267,7 +3267,7 @@
    "kind": "struct",
    "module": "js-rt",
    "file": "lambda/js/js_runtime_function.cpp",
-   "line": 418,
+   "line": 417,
    "size": 32,
    "align": 8,
    "members": 4
@@ -3278,7 +3278,7 @@
    "kind": "enum",
    "module": "js-rt",
    "file": "lambda/js/js_runtime_function.cpp",
-   "line": 638,
+   "line": 637,
    "size": 1,
    "align": 1,
    "members": 2
@@ -106268,7 +106268,7 @@
    ]
   },
   "lambda/js/js_globals.cpp": {
-   "sig": "4ee2e1304caab93c6579d288201f2518dc446e88",
+   "sig": "7aeaf14af1c3c08af9fd8492a26a378b0c9f70dc",
    "deps": [
     38,
     16,
@@ -122696,7 +122696,7 @@
    ]
   },
   "lambda/js/js_runtime_function.cpp": {
-   "sig": "b0c7d2bad130bec51efa7b6666eac2f045c7243c",
+   "sig": "cf359fd4f3e5c945dd57e97eff42ee20f9ca713e",
    "deps": [
     38,
     16,

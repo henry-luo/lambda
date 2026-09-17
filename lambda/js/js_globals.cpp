@@ -17244,19 +17244,24 @@ extern "C" void js_intrinsic_note_prototype_mutation(Item object) {
 #include "../../lib/hashmap_typed.hpp"
 
 enum JsSymbolRecordKind : uint8_t {
+    // Symbol() still owns a unique NameRef; only its description is absent.
+    JS_SYMBOL_RECORD_UNIQUE_UNDESCRIBED,
     JS_SYMBOL_RECORD_UNIQUE,
     JS_SYMBOL_RECORD_REGISTERED,
-    JS_SYMBOL_RECORD_WELL_KNOWN,
 };
 
 // Dynamic symbols retain one pool-owned spelling record. A unique record's
 // spelling is diagnostic only; a registered record's spelling is its key.
+// Well-known symbols use the static specification table and have no record.
 struct JsSymbolRecord {
     NameRef text;
     uint64_t id;
     JsSymbolRecordKind kind;
-    bool has_description;
 };
+
+static inline bool js_symbol_record_has_description(const JsSymbolRecord& record) {
+    return record.kind != JS_SYMBOL_RECORD_UNIQUE_UNDESCRIBED;
+}
 
 static const char* js_symbol_record_chars(const JsSymbolRecord& record) {
     return record.text ? record.text->chars : "";
@@ -17465,7 +17470,9 @@ extern "C" Item js_symbol_create(Item description) {
     if (name_ref_id(text) == NAME_ID_NONE) {
         return js_throw_type_error("failed to allocate symbol property key");
     }
-    JsSymbolRecord record = {text, id, JS_SYMBOL_RECORD_UNIQUE, has_description};
+    JsSymbolRecordKind kind = has_description ? JS_SYMBOL_RECORD_UNIQUE :
+        JS_SYMBOL_RECORD_UNIQUE_UNDESCRIBED;
+    JsSymbolRecord record = {text, id, kind};
     JsSymbolIdMap::set(js_symbol_desc_registry, record);
 
     return sym;
@@ -17491,7 +17498,7 @@ extern "C" Item js_symbol_for(Item key) {
     if (name_ref_id(text) == NAME_ID_NONE) {
         return js_throw_type_error("failed to allocate registry symbol property key");
     }
-    JsSymbolRecord record = {text, js_symbol_next_id++, JS_SYMBOL_RECORD_REGISTERED, true};
+    JsSymbolRecord record = {text, js_symbol_next_id++, JS_SYMBOL_RECORD_REGISTERED};
     JsSymbolTextMap::set(js_symbol_registry, record);
     return js_make_symbol_item(record.id);
 }
@@ -17555,7 +17562,7 @@ extern "C" Item js_symbol_to_string(Item sym) {
         JsSymbolRecord lookup = {};
         lookup.id = id;
         JsSymbolRecord* found = JsSymbolIdMap::get(js_symbol_desc_registry, lookup);
-        if (found && found->has_description) {
+        if (found && js_symbol_record_has_description(*found)) {
             return js_symbol_render(found->text);
         }
     }
@@ -17593,7 +17600,7 @@ extern "C" Item js_symbol_get_description(Item sym) {
         lookup.id = id;
         JsSymbolRecord* found = JsSymbolIdMap::get(js_symbol_desc_registry, lookup);
         if (found) {
-            if (!found->has_description) return make_js_undefined();
+            if (!js_symbol_record_has_description(*found)) return make_js_undefined();
             return js_name_item(found->text->chars, found->text->len);
         }
     }

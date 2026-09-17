@@ -2395,7 +2395,7 @@ discriminator before introducing another.
 | ~~`JsClassMethodEntry`, `JsStaticFieldEntry`, `JsInstanceFieldEntry`~~ | **Landed 2026-09-17:** direct flat `JsClassMember` row with its existing kind; common traversal/key planning consumes the row | Method/accessor/static-field/instance-field/static-block evaluation and order | 3 |
 | ~~Four interpreter continuation records~~ | **Landed 2026-09-17:** `JsInterpContinuation` with loop/list/try/array-binding kind, shared allocation, attachment, tracing and release | Resume phase, IteratorClose, pending completion and lexical environment | 3 |
 | ~~`JsInterpImportBinding` / `JsInterpExportBinding`~~ | **Landed 2026-09-17:** one `JsInterpModuleBinding` row with import/export kind, namespace flag and star flag; script state, allocation and traversal use the common type directly | Live binding cells, namespace behavior, star ambiguity and TDZ | 1 |
-| ~~`JsSymbolEntry` / `JsSymbolDesc`~~ | **Landed 2026-09-17:** `JsSymbolRecord` holds a length-aware `NameRef`, ID and unique/registered/well-known kind; both indexes point to it | `Symbol()` freshness, absent versus empty description, `Symbol.for` identity and registry lifetime | 1 |
+| ~~`JsSymbolEntry` / `JsSymbolDesc`~~ | **Landed 2026-09-17, revised:** three-field `JsSymbolRecord` holds a length-aware `NameRef`, ID and unique-undescribed/unique/registered kind; both indexes point to it. Well-known Symbols use the static specification table | `Symbol()` freshness, absent versus empty description, `Symbol.for` identity and registry lifetime | 1 |
 
 For continuations, eliminate the four independent ownership/tracing walks
 without forcing a new universal evaluator. A maximum-sized union is acceptable
@@ -2629,7 +2629,7 @@ performance benchmarks.
 Command: `make struct-census ARGS=--full`, with the unchanged
 `utils/struct_census.config.json`, macOS C++17/debug preprocessing, at tree
 `b085bbb18` plus the working-tree JSCU45–JSCU56 changes. Generated at
-**2026-09-17T10:34:11Z**. Reports:
+**2026-09-17T11:13:02Z**. Reports:
 [`struct_census.csv`](meta/ds/struct_census.csv) and
 [`struct_census.json`](meta/ds/struct_census.json).
 

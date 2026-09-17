@@ -2885,16 +2885,16 @@ TEST(JsInterpreter, PreservesLongSymbolKeysAndDescriptions) {
         "var prefix = 'x'.repeat(127); var first_key = prefix + 'a'; "
         "var second_key = prefix + 'b'; var first = Symbol.for(first_key); "
         "var second = Symbol.for(second_key); var described = Symbol(prefix + 'c'); "
-        "var empty = Symbol(''); var absent = Symbol(); "
+        "var empty = Symbol(''); var absent = Symbol(); var undefined_desc = Symbol(undefined); "
         "[first !== second, Symbol.keyFor(first) === first_key, "
         "Symbol.keyFor(second) === second_key, described.description === prefix + 'c', "
         "described.toString() === 'Symbol(' + prefix + 'c)', empty.description === '', "
-        "absent.description === undefined];";
+        "absent.description === undefined, undefined_desc.description === undefined];";
     Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
         "long-symbol-records.js", NULL);
 
     ASSERT_FALSE(item_is_error(result));
-    for (int index = 0; index < 7; index++) {
+    for (int index = 0; index < 8; index++) {
         EXPECT_EQ(js_elements_get_int(result, index).item, b2it(true))
             << "long symbol record result index " << index;
     }
