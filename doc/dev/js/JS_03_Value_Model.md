@@ -1,10 +1,10 @@
 # LambdaJS — Value Model, Memory & GC Interop
 
-> **Last verified against tree:** 2026-09-14 *(including D3.4.8 accessor-cell ownership; §7 call-argument spans re-verified 2026-09-15)*
+> **Last verified against tree:** 2026-09-17
 
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers how a JavaScript value is represented at runtime: the `Item` tagged-value layout, the JS type ↔ Lambda `TypeId` mapping, the `undefined`/`null`/TDZ/deleted sentinels, the BigInt and Symbol-key encodings, the GC heap + side-stack memory model, `JsFunction`/closure-env ownership, call-argument spans, module-variable storage, the `JsRuntimeState` capsule, and which Lambda subsystems LambdaJS reuses.
 >
-> **Primary sources:** `lambda/lambda.h` / `lambda.hpp` (`Item`, `Container`, `Map`, `TypeId`, packing macros), `lambda/lambda-data.hpp` (`TypeMap`/`ShapeEntry`), `lambda/js/js_runtime.h` (`ITEM_JS_UNDEFINED`/`ITEM_JS_TDZ`/`JS_SYMBOL_BASE`/`JS_DELETED_SENTINEL_VAL`), `lambda/js/js_runtime_internal.hpp` (`js_is_symbol`/`js_is_bigint`/`js_symbol_to_key`/`JsFunction`), `lambda/js/js_runtime_value.cpp` (`js_typeof`/`js_make_number`/conversions), `lambda/js/js_coerce.cpp` (`js_to_primitive`), `lambda/js/js_runtime_state.{hpp,cpp}` (`JsRuntimeState`, module vars, batch reset), `lambda/js/js_runtime_function.cpp` (`JsFunction` allocation), `lambda/js/js_mir_context.hpp` (`JsMirArgStackScope`), `lambda/lambda-mem.cpp` (`heap_calloc`/`heap_alloc`/GC roots), `lambda/lambda-decimal.cpp` (BigInt).
+> **Primary sources:** `lambda/lambda.h` / `lambda.hpp` (`Item`, `Symbol`, `Container`, `Map`, `TypeId`, packing macros), `lambda/lambda-data.hpp` (`TypeMap`/`ShapeEntry`), `lambda/js/js_runtime.h` (`ITEM_JS_UNDEFINED`/`ITEM_JS_TDZ`/`JS_DELETED_SENTINEL_VAL`), `lambda/js/js_runtime_internal.hpp` (`js_is_symbol`/`js_is_bigint`/`js_symbol_to_key`/`JsFunction`), `lambda/js/js_globals.cpp` (JS Symbol allocation and indexes), `lambda/js/js_runtime_value.cpp` (`js_typeof`/`js_make_number`/conversions), `lambda/js/js_coerce.cpp` (`js_to_primitive`), `lambda/js/js_runtime_state.{hpp,cpp}` (`JsRuntimeState`, module vars, batch reset), `lambda/js/js_runtime_function.cpp` (`JsFunction` allocation), `lambda/js/js_mir_context.hpp` (`JsMirArgStackScope`), `lambda/lambda-mem.cpp` (`heap_calloc`/`heap_alloc`/GC roots), `lambda/lambda-decimal.cpp` (BigInt).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against symbol names.
 
 ---
@@ -45,21 +45,21 @@ The JS language types are a projection of the Lambda `EnumTypeId` enum (`lambda.
 | number (sized) | `LMD_TYPE_NUM_SIZED` | `"number"` | typed-array element reads. |
 | bigint | `LMD_TYPE_DECIMAL` | `"bigint"` | `Decimal` with `unlimited == DECIMAL_BIGINT` ([§4](#4-symbol-as-property-key-encoding)). |
 | string | `LMD_TYPE_STRING` | `"string"` | heap `String`. |
-| symbol | `LMD_TYPE_INT` (negative) **or** `LMD_TYPE_SYMBOL` | `"symbol"` | well-known symbols are negative ints ([§4](#4-symbol-as-property-key-encoding)). |
+| symbol | `LMD_TYPE_SYMBOL` | `"symbol"` | one core `Symbol`; `kind` distinguishes Lambda textual and JS variants ([§4](#4-symbol-as-property-key--bigint-encoding)). |
 | function | `LMD_TYPE_FUNC` | `"function"` | a `JsFunction` ([§6](#6-memory-model-gc-heap-side-stacks-pool)). |
 | object / array / Proxy / class ctor | `LMD_TYPE_MAP`, `LMD_TYPE_ARRAY`, `LMD_TYPE_ELEMENT` | `"object"`/`"function"` | `js_typeof` follows callable capability for Proxies and `JsFunction` class constructors; class metadata does not grant callability. **A JS object is a `Map`, never an `LMD_TYPE_OBJECT`** in the shipped runtime — that kind is Lambda's nominal `type T { … }` and is inbound-only (D2.6.9v2). Ruled forward (D2.6.9v3): when the object TypeId retires, a JS object becomes a *nominal* Lambda map, i.e. a Lambda object ([JS_06](JS_06_Objects_Properties_Prototypes.md)). |
 
-A value tagged `LMD_TYPE_INT` can be a Lambda safe-band integer crossing the membrane or a negative encoded JS Symbol. `js_typeof` calls the Symbol predicate to distinguish them. `js_make_number` does not participate in that ambiguity because it always emits `LMD_TYPE_FLOAT`.
+A value tagged `LMD_TYPE_INT` is always an integer. A hosted JavaScript Symbol is a pointer-backed `LMD_TYPE_SYMBOL`; `js_typeof` additionally checks `Symbol.kind` so a Lambda textual symbol does not acquire JS semantics. `js_make_number` always emits `LMD_TYPE_FLOAT`.
 
 ---
 
 ## 4. Symbol-as-property-key & BigInt encoding
 
-These two encodings are easy to confuse because both reuse an existing Lambda `TypeId` rather than adding one.
+Both values reuse core Lambda structures rather than carrying a parallel JS record.
 
-**Symbol** — a JS Symbol is encoded as a **negative `LMD_TYPE_INT`**: the value `≤ -(JS_SYMBOL_BASE)`, where `JS_SYMBOL_BASE = 1LL << 40` (`js_runtime.h:699`). The base is deliberately beyond the int32 range so a bitwise-op result can never be misread as a symbol. `js_key_is_symbol` (`js_runtime_internal.hpp:658`) and `js_is_symbol` (`:620`) both test `it2i(key) <= -(int64_t)JS_SYMBOL_BASE`; the symbol id is recovered as `-(value + JS_SYMBOL_BASE)`. For **property storage**, a symbol key is canonicalized to an interned `__sym_N` string by `js_symbol_to_key` (`:663`) — `N` is the decimal id, and well-known symbols use fixed ids (`Symbol.iterator` is `__sym_1`, `Symbol.toPrimitive` is `__sym_2`, `Symbol.toStringTag` is `__sym_4`; the `__sym_2` key is also hard-coded in `js_to_primitive`, `js_coerce.cpp:22`). The full property-key side — how `__sym_N` keys store, enumerate-filter and reverse-map — is owned by [JS_06 — Objects, Properties & Prototypes](JS_06_Objects_Properties_Prototypes.md); here we only fix the *value* encoding and the `js_to_property_key` entry (`js_runtime_state.cpp:98`), which routes symbols through `js_symbol_to_key` and everything else through ToPrimitive(string) + ToString.
+**Symbol** — a JS Symbol is a pointer-backed `LMD_TYPE_SYMBOL` whose core `Symbol` allocation owns `len`, `kind`, `chars[]`, and a temporary `name_id`. `SYMBOL_JS_UNIQUE_UNDESCRIBED` separates `Symbol()` from `Symbol("")`; unique, registered, and well-known kinds all retain their required value identity. Pointer equality is JavaScript value equality, `Symbol.for` indexes text to the one registered `Symbol*`, and well-known symbols are one cached `Symbol*` each. At the **property** boundary only, `js_symbol_to_key` resolves the temporary `NameId` to the existing NamePool route, so shapes and enumeration stay on their established property identity without making the `NameId` JS value identity. `chars[]`, not a `NameRef`, is owned by the Symbol. This is the value/property distinction required by **D4.6.1v3**; the full property-key side is owned by [JS_06 — Objects, Properties & Prototypes](JS_06_Objects_Properties_Prototypes.md).
 
-**BigInt** — a JS BigInt is **not** a packed integer. It reuses `LMD_TYPE_DECIMAL`: a heap `Decimal` whose `dec_val` is an `mpd_t*` (libmpdec arbitrary-precision) and whose `unlimited` field is set to the `DECIMAL_BIGINT` marker (`lambda.h:755`). `bigint_push_result` (`lambda-decimal.cpp:963`) allocates the `Decimal` with `heap_alloc` and tags it `LMD_TYPE_DECIMAL`; `js_is_bigint` (`js_runtime_internal.hpp:626`) is simply `get_type_id(v) == LMD_TYPE_DECIMAL`. There is **no** int56 fast path for small BigInts — even `0n` and `1n` are full `mpd_t` allocations (`bigint_from_int64`, `lambda-decimal.cpp:983`). Mixing a BigInt with a non-BigInt operand throws TypeError (`js_check_bigint_arithmetic`, `js_runtime_internal.hpp:630`), matching the spec. (The "56-bit / negative-int" wording sometimes attached to BigInt actually describes the Symbol encoding above; the BigInt path is arbitrary-precision via libmpdec.)
+**BigInt** — a JS BigInt is **not** a packed integer. It reuses `LMD_TYPE_DECIMAL`: a heap `Decimal` whose `dec_val` is an `mpd_t*` (libmpdec arbitrary-precision) and whose `unlimited` field is set to the `DECIMAL_BIGINT` marker (`lambda.h:755`). `bigint_push_result` (`lambda-decimal.cpp:963`) allocates the `Decimal` with `heap_alloc` and tags it `LMD_TYPE_DECIMAL`; `js_is_bigint` (`js_runtime_internal.hpp:626`) is simply `get_type_id(v) == LMD_TYPE_DECIMAL`. There is **no** int56 fast path for small BigInts — even `0n` and `1n` are full `mpd_t` allocations (`bigint_from_int64`, `lambda-decimal.cpp:983`). Mixing a BigInt with a non-BigInt operand throws TypeError (`js_check_bigint_arithmetic`, `js_runtime_internal.hpp:630`), matching the spec.
 
 ---
 
@@ -147,7 +147,7 @@ The **batch reset** path supports the test262 runner, which reuses one process a
 
 LambdaJS is an embedding, so much of the runtime is borrowed wholesale:
 
-- **Name pool** — property keys, identifiers and short interned strings go through `heap_create_name` (`lambda-mem.cpp:458`), which interns into `context->name_pool` so the same name always returns the same `String*` (pointer-identity comparison for keys). Symbol storage keys (`__sym_N`) and the engine-internal marker keys all live here.
+- **Name pool** — property keys, identifiers and short interned strings go through `heap_create_name` (`lambda-mem.cpp:458`), which interns into `context->name_pool` so the same name always returns the same `String*` (pointer-identity comparison for keys). A JS Symbol's temporary property `NameId` resolves here; its owned spelling remains in `Symbol::chars[]`.
 - **Mempool** — `js_input->pool` backs cached compiled-function wrappers and per-module var arrays ([§6](#6-memory-model-gc-heap-side-stacks-pool), [§8](#8-module-variable-storage)).
 - **GC heap & side stacks** — shared `gc_heap_t` plus the precise root/raw-number side stacks ([§6](#6-memory-model-gc-heap-side-stacks-pool)); generated Lambda and JS use the same frame emitter primitives.
 - **Input parsers** — `JSON.parse` does not have its own parser; `js_json_parse` (`js_globals.cpp:12129`) calls Lambda's `parse_json_to_item_strict(js_input, …)` (`:175`), reusing the shared `lambda/input/` JSON parser and building ordinary Lambda `Map`/`Array`/`Item` values.
@@ -157,12 +157,11 @@ LambdaJS is an embedding, so much of the runtime is borrowed wholesale:
 
 ## Known Issues & Future Improvements
 
-1. **Symbol/Lambda-int share `LMD_TYPE_INT`.** A negative int beyond `-JS_SYMBOL_BASE` *is* a Symbol, so consumers of Lambda integer Items crossing into JS must distinguish the range. `js_make_number` no longer needs a special case because JS Numbers always use `LMD_TYPE_FLOAT`. A dedicated packed Symbol tag would remove the remaining overlap, at the cost of a new enum slot.
-2. **No small-BigInt fast path.** Every BigInt — including `0n`/`1n` and loop counters — is a full `mpd_t` heap allocation (`lambda-decimal.cpp:963`,`983`). An inline-int56 representation for small magnitudes (à la V8's SMI-BigInt) would cut allocation pressure in BigInt-heavy code; today the type is always boxed.
-3. **Cached compiled wrappers remain module-lifetime.** The cacheable `js_new_function` path keeps pooled wrappers because the function cache embeds their addresses. Uncached method/`with` wrappers, closures, and bound functions are GC-owned, but repeatedly compiling distinct modules still retains cached wrappers until module teardown.
-4. **Module-var ceiling is a hard 2048.** `JS_MAX_MODULE_VARS` (`js_runtime_state.hpp:21`) is fixed; `js_set_module_var` silently drops out-of-range indices (`cpp:124`). A module with >2048 top-level bindings would lose writes rather than grow.
-5. **Sentinel values still exist.** `JS_DELETED_SENTINEL_VAL` no longer reuses the INT tag, but it remains a raw non-value `Item` in dense arrays; `ITEM_JS_TDZ` still reuses the UNDEFINED tag. Code that scans dense array items must preserve hole checks. The deleted-sentinel cleanup boundary is tracked in detail in [JS_06](JS_06_Objects_Properties_Prototypes.md).
-6. **Batch reset is a long manual fan-out.** `js_batch_reset` (`js_runtime_state.cpp:271`) hand-enumerates ~30 per-subsystem reset calls; a new stateful module that forgets to register a reset leaks across test262 cases. `js_assert_batch_runtime_state_clear` catches only the capsule fields, not module-private statics.
+1. **No small-BigInt fast path.** Every BigInt — including `0n`/`1n` and loop counters — is a full `mpd_t` heap allocation (`lambda-decimal.cpp:963`,`983`). An inline-int56 representation for small magnitudes (à la V8's SMI-BigInt) would cut allocation pressure in BigInt-heavy code; today the type is always boxed.
+2. **Cached compiled wrappers remain module-lifetime.** The cacheable `js_new_function` path keeps pooled wrappers because the function cache embeds their addresses. Uncached method/`with` wrappers, closures, and bound functions are GC-owned, but repeatedly compiling distinct modules still retains cached wrappers until module teardown.
+3. **Module-var ceiling is a hard 2048.** `JS_MAX_MODULE_VARS` (`js_runtime_state.hpp:21`) is fixed; `js_set_module_var` silently drops out-of-range indices (`cpp:124`). A module with >2048 top-level bindings would lose writes rather than grow.
+4. **Sentinel values still exist.** `JS_DELETED_SENTINEL_VAL` no longer reuses the INT tag, but it remains a raw non-value `Item` in dense arrays; `ITEM_JS_TDZ` still reuses the UNDEFINED tag. Code that scans dense array items must preserve hole checks. The deleted-sentinel cleanup boundary is tracked in detail in [JS_06](JS_06_Objects_Properties_Prototypes.md).
+5. **Batch reset is a long manual fan-out.** `js_batch_reset` (`js_runtime_state.cpp:271`) hand-enumerates ~30 per-subsystem reset calls; a new stateful module that forgets to register a reset leaks across test262 cases. `js_assert_batch_runtime_state_clear` catches only the capsule fields, not module-private statics.
 
 ---
 
@@ -172,7 +171,7 @@ LambdaJS is an embedding, so much of the runtime is borrowed wholesale:
 |---|---|
 | `lambda/lambda.h`, `lambda/lambda.hpp` | `Item` union + bitfields, `Container`/`Map`, `EnumTypeId`, packing macros (`i2it`/`d2it`/`s2it`/…), sentinel macros. |
 | `lambda/lambda-data.hpp` | `TypeMap`/`ShapeEntry`/`JsAccessorCell` (shape owned by JS_06). |
-| `lambda/js/js_runtime.h` | `ITEM_JS_UNDEFINED`/`ITEM_JS_TDZ`, `JS_SYMBOL_BASE`, `JS_DELETED_SENTINEL_VAL`, `JS_ITER_DONE_SENTINEL`, the `js_call` dynamic-call entry. |
+| `lambda/js/js_runtime.h` | `ITEM_JS_UNDEFINED`/`ITEM_JS_TDZ`, `JS_DELETED_SENTINEL_VAL`, `JS_ITER_DONE_SENTINEL`, the `js_call` dynamic-call entry. |
 | `lambda/js/js_runtime_internal.hpp` | `js_is_symbol`/`js_is_bigint`/`js_key_is_symbol`/`js_symbol_to_key`, `JsFunction` struct, `make_js_undefined`. |
 | `lambda/js/js_runtime_value.cpp` | `js_typeof`, `js_make_number`, `js_to_string`/`js_to_boolean`/`js_to_numeric`, BigInt arithmetic dispatch. |
 | `lambda/js/js_coerce.{h,cpp}` | `js_to_primitive` (ToPrimitive / OrdinaryToPrimitive). |
@@ -185,7 +184,7 @@ LambdaJS is an embedding, so much of the runtime is borrowed wholesale:
 ## Appendix B — Related documents
 
 - [JS_05 — Functions & Closures](JS_05_Functions_Closures.md) — closure-environment structure backed by `js_alloc_env`.
-- [JS_06 — Objects, Properties & Prototypes](JS_06_Objects_Properties_Prototypes.md) — `Map`/`TypeMap`/`ShapeEntry` shape, `MapKind`, property attributes, deleted-slot mechanics, `__sym_N` property keys.
+- [JS_06 — Objects, Properties & Prototypes](JS_06_Objects_Properties_Prototypes.md) — `Map`/`TypeMap`/`ShapeEntry` shape, `MapKind`, property attributes, deleted-slot mechanics, and Symbol property routing.
 - [JS_01 — Compilation Pipeline](JS_01_Compilation_Pipeline.md) / [JS_04 — MIR Lowering & Code Generation](JS_04_MIR_Lowering.md) — module-var index assignment and JIT boxing.
 - [JS_08 — Iterators & Generators](JS_08_Iterators_Generators.md) — `JS_ITER_DONE_SENTINEL`.
 - [JS_13 — Web Platform: DOM, CSSOM, Events & Fetch](JS_13_Web_DOM.md) / [JS_14 — Node Compatibility](JS_14_Node_Compat.md) — reused URL / module infrastructure.

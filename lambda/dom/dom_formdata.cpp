@@ -182,12 +182,11 @@ static Item fd_coerce_value(Item v) {
     if (t == LMD_TYPE_UNDEFINED)   return make_str("undefined");
     if (t == LMD_TYPE_MAP)         return v;  // Blob/File: pass through as-is
     if (t == LMD_TYPE_BOOL)   return (v.item & 0xFF) ? make_str("true") : make_str("false");
+    if (t == LMD_TYPE_SYMBOL) {
+        return dom_realm_throw_type_error("Cannot convert a Symbol value to a string");
+    }
     if (t == LMD_TYPE_INT) {
         int64_t iv = it2i(v);
-        // symbols are encoded as large negative ints — throw TypeError
-        if (iv <= -(int64_t)(1LL << 40)) {
-            return dom_realm_throw_type_error("Cannot convert a Symbol value to a string");
-        }
         char buf[32];
         snprintf(buf, sizeof(buf), "%" PRId64, iv);
         return make_str(buf);

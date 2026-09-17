@@ -994,6 +994,7 @@ Symbol* heap_create_symbol(const char* symbol, size_t len) {
     }
     Symbol* sym = (Symbol*)heap_alloc(sizeof(Symbol) + len + 1, LMD_TYPE_SYMBOL);
     sym->len = len;
+    sym->kind = SYMBOL_LAMBDA_NAME;
     sym->ns = nullptr;
     str_copy(sym->chars, len + 1, symbol, len);
     return sym;

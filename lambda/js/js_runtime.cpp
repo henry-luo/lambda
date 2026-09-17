@@ -3315,8 +3315,7 @@ Item js_intrinsic_ctor_string_call_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
     if (argc == 0 || !args) return ItemEmptyString;
     Item value = args[0];
-    if (get_type_id(value) == LMD_TYPE_INT &&
-            it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
+    if (js_key_is_symbol(value)) {
         return js_symbol_to_string(value);
     }
     return js_to_string(value);
@@ -6955,17 +6954,21 @@ static bool js_dataset_set_via_api(Item dataset, Item key, Item value) {
     return true;
 }
 
+static bool js_is_internal_runtime_name(String* key) {
+    return key && property_key_kind(key) == NAME_KEY_STRING && key->len >= 2 &&
+        key->chars[0] == '_' && key->chars[1] == '_';
+}
+
 static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
                                 bool bypass_accessor_dispatch, bool strict) {
     // OffscreenCanvas / CanvasRenderingContext2D property intercept (ctx.font = "...")
     if (js_canvas_property_set_intercept(object, key, value))
         return value;
     Map* m = object.map;
-    // JS semantics: non-string keys are coerced to strings (ToPropertyKey)
+    // JS Symbols become their transitional NameId route only at the property
+    // boundary; their value identity remains the core Symbol pointer.
     TypeId kt = get_type_id(key);
-    if (kt == LMD_TYPE_INT && js_key_is_symbol(key)) {
-        // Map storage indexes Symbols by their NamePool record; treating the
-        // compact public id as a number would publish a different string key.
+    if (js_key_is_symbol(key)) {
         JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
     } else if (kt == LMD_TYPE_INT || kt == LMD_TYPE_FLOAT) {
         char buf[64];
@@ -7070,8 +7073,7 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
             // skip writes to internal properties (needed for freeze itself)
             if (get_type_id(key) == LMD_TYPE_STRING) {
                 String* sk = it2s(key);
-                bool internal_non_symbol = sk && sk->len >= 2 && sk->chars[0] == '_' && sk->chars[1] == '_' &&
-                    !(sk->len > 6 && strncmp(sk->chars, "__sym_", 6) == 0);
+                bool internal_non_symbol = js_is_internal_runtime_name(sk);
                 bool own_accessor_property = false;
                 if (!internal_non_symbol && sk) {
                     ShapeEntry* shape_entry = property_key_id(sk) != NAME_ID_NONE
@@ -7246,7 +7248,6 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
         String* str_key = NULL;
         TypeId key_type = get_type_id(key);
         if (key_type == LMD_TYPE_STRING) str_key = it2s(key);
-        else if (key_type == LMD_TYPE_SYMBOL) str_key = it2s(key);
         if (str_key) {
             bool identity_key = property_key_id(str_key) != NAME_ID_NONE;
             ShapeEntry* found_entry = identity_key
@@ -7268,8 +7269,7 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
                     : js_own_shape_slot_status(object, str_key->chars, (int)str_key->len, NULL, NULL);
                 if (m->data) {
                     if (slot_status == JS_SHAPE_SLOT_DELETED) {
-                        bool internal_non_symbol = str_key->len >= 2 && str_key->chars[0] == '_' && str_key->chars[1] == '_' &&
-                            !(str_key->len > 6 && strncmp(str_key->chars, "__sym_", 6) == 0);
+                        bool internal_non_symbol = js_is_internal_runtime_name(str_key);
                         if (!internal_non_symbol && !js_is_extensible(object)) {
                             JS_RETURN_IF_ERROR(js_property_error_if_strict(strict,
                                 "add property", str_key->chars, (int)str_key->len));
@@ -7302,8 +7302,7 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
                 return js_throw_type_error("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
             }
             // skip internal properties (__ prefix)
-            bool internal_non_symbol = sk && sk->len >= 2 && sk->chars[0] == '_' && sk->chars[1] == '_' &&
-                !(sk->len > 6 && strncmp(sk->chars, "__sym_", 6) == 0);
+            bool internal_non_symbol = js_is_internal_runtime_name(sk);
             if (!internal_non_symbol) {
                 if (js_map_own_flag(m, "__non_extensible__", 17, false)) {
                     JS_RETURN_IF_ERROR(js_property_error_if_strict(strict,
@@ -7323,7 +7322,6 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
         String* str_key = NULL;
         TypeId key_type = get_type_id(key);
         if (key_type == LMD_TYPE_STRING) str_key = it2s(key);
-        else if (key_type == LMD_TYPE_SYMBOL) str_key = it2s(key);
         if (str_key) {
             NameRef canonical_key = key_type == LMD_TYPE_STRING &&
                 property_key_id(str_key) != NAME_ID_NONE ? str_key :
@@ -7344,8 +7342,7 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
     } else {
         // Name the key: a caller with no realm cannot tell which write it was
         // from the message alone, and there can be several on one path.
-        const char* key_name = get_type_id(key) == LMD_TYPE_STRING || get_type_id(key) == LMD_TYPE_SYMBOL
-            ? fn_to_cstr(key) : NULL;
+        const char* key_name = get_type_id(key) == LMD_TYPE_STRING ? fn_to_cstr(key) : NULL;
         log_error("js_set_key_default: no js_input context for map_put (key=%s, object type=%d)",
                   key_name ? key_name : "<non-string>", (int)get_type_id(object));
     }
@@ -10374,8 +10371,8 @@ static Item js_has_property_status(Item obj, Item key) {
     if (get_type_id(obj) == LMD_TYPE_STRING) {
         String* s = it2s(obj);
         if (!s) return (Item){.item = ITEM_FALSE};
-        // Stage A1: ToPropertyKey per spec — Symbol keys must coerce to __sym_N
-        // not throw, so the subsequent length/index probe sees a real string.
+        // Stage A1: ToPropertyKey routes a Symbol through its NameId rather
+        // than throwing, so the subsequent length/index probe sees a string.
         JS_ASSIGN_OR_RETURN(k, js_to_property_key(key));
         String* ks = it2s(k);
         if (!ks) return (Item){.item = ITEM_FALSE};
@@ -11172,8 +11169,7 @@ JS_BIGINT_AS_N_BODY(js_intrinsic_bigint_as_uint_n_body, js_bigint_as_uint_n)
 #undef JS_BIGINT_AS_N_BODY
 
 static Item js_intrinsic_symbol_value(Item this_value, const char* error) {
-    if (get_type_id(this_value) == LMD_TYPE_INT &&
-        it2i(this_value) <= -(int64_t)JS_SYMBOL_BASE) {
+    if (js_key_is_symbol(this_value)) {
         return this_value;
     }
     if (get_type_id(this_value) == LMD_TYPE_MAP &&
@@ -11182,8 +11178,7 @@ static Item js_intrinsic_symbol_value(Item this_value, const char* error) {
             .item = s2it(heap_create_name("__primitiveValue__", 18))
         };
         JS_ASSIGN_OR_RETURN(primitive, js_get_key_default(this_value, key));
-        if (get_type_id(primitive) == LMD_TYPE_INT &&
-            it2i(primitive) <= -(int64_t)JS_SYMBOL_BASE) {
+        if (js_key_is_symbol(primitive)) {
             return primitive;
         }
     }
@@ -11716,9 +11711,8 @@ static Item js_intrinsic_object_static_primitive(JsObjectStaticOp op,
     if (op == JS_OBJECT_STATIC_GET_PROTOTYPE_OF) {
         const char* constructor_name = NULL;
         int constructor_len = 0;
-        // Symbols share the tagged-int carrier with Numbers. Classifying by
-        // TypeId first returned Number.prototype and split primitive Symbol
-        // identity from its wrapper's Symbol.prototype.
+        // Symbols are pointer-backed values, so they select Symbol.prototype
+        // before the numeric primitive branch.
         if (js_is_symbol(value)) {
             constructor_name = "Symbol";
             constructor_len = 6;
@@ -12478,8 +12472,7 @@ Item js_intrinsic_atomics_pause_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
     if (argc > 0 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED) {
         TypeId type = get_type_id(args[0]);
-        if (type == LMD_TYPE_INT &&
-            it2i(args[0]) > -(int64_t)JS_SYMBOL_BASE) {
+        if (type == LMD_TYPE_INT) {
             return make_js_undefined();
         }
         if (type == LMD_TYPE_FLOAT) {
@@ -20012,7 +20005,7 @@ static bool js_can_be_held_weakly(Item key) {
         // All virtual carriers are ECMAScript objects and follow the same rule.
         return true;
     }
-    if (kt == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE) {
+    if (js_key_is_symbol(key)) {
         Item registered_key = js_symbol_key_for(key);
         return get_type_id(registered_key) == LMD_TYPE_UNDEFINED;
     }
@@ -20424,9 +20417,7 @@ static int js_typed_array_scan_search(Item obj, Item search_value, int start,
 }
 
 static Item js_typed_array_parse_from_index(Item value, int length, bool reverse, int* out) {
-    TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_SYMBOL ||
-        (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE)) {
+    if (js_is_symbol(value)) {
         return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
     JS_ASSIGN_OR_RETURN(number, js_to_number(value));
@@ -20678,9 +20669,7 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                 double d_start = 0;
                 if (argc > 1) {
                     Item start_arg = args[1];
-                    TypeId start_type = get_type_id(start_arg);
-                    if (start_type == LMD_TYPE_SYMBOL ||
-                        (start_type == LMD_TYPE_INT && it2i(start_arg) <= -(int64_t)JS_SYMBOL_BASE)) {
+                    if (js_is_symbol(start_arg)) {
                         return js_throw_type_error("Cannot convert a Symbol value to a number");
                     }
                     JS_ASSIGN_OR_RETURN(start_num, js_to_number(start_arg));
@@ -20692,9 +20681,7 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                 double d_end = (double)len;
                 if (argc > 2 && args[2].item != ITEM_JS_UNDEFINED) {
                     Item end_arg = args[2];
-                    TypeId end_type = get_type_id(end_arg);
-                    if (end_type == LMD_TYPE_SYMBOL ||
-                        (end_type == LMD_TYPE_INT && it2i(end_arg) <= -(int64_t)JS_SYMBOL_BASE)) {
+                    if (js_is_symbol(end_arg)) {
                         return js_throw_type_error("Cannot convert a Symbol value to a number");
                     }
                     JS_ASSIGN_OR_RETURN(end_num, js_to_number(end_arg));
@@ -21134,9 +21121,7 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                 }
                 int len = js_typed_array_length(obj);
                 Item index_arg = argc > 0 ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
-                TypeId index_type = get_type_id(index_arg);
-                if (index_type == LMD_TYPE_SYMBOL ||
-                    (index_type == LMD_TYPE_INT && it2i(index_arg) <= -(int64_t)JS_SYMBOL_BASE)) {
+                if (js_is_symbol(index_arg)) {
                     return js_throw_type_error("Cannot convert a Symbol value to a number");
                 }
                 JS_ASSIGN_OR_RETURN(index_num, js_to_number(index_arg));
@@ -25844,7 +25829,7 @@ static Item js_array_intrinsic_algorithm_impl(Item arr,
         arr = receiver_root.get();
         const int64_t MAX_SAFE_LEN = 9007199254740991LL; // 2^53 - 1
         Item spread_key = js_well_known_symbol_key(12);
-        Item spread_symbol = (Item){.item = i2it(-(int64_t)(12 + JS_SYMBOL_BASE))};
+        Item spread_symbol = js_symbol_well_known(js_name_item("isConcatSpreadable", 18));
         Item len_key = js_name_item("length", 6);
 
         auto is_concat_spreadable = [&](Item item, bool* out_spreadable) -> Item {
@@ -26335,8 +26320,7 @@ static inline bool js_intl_segmenter_is_word_byte(unsigned char c) {
 
 extern "C" Item js_intl_segmenter_segment(Item text_item) {
     Item arr_item = js_array_new(0);
-    if (get_type_id(text_item) != LMD_TYPE_STRING &&
-        get_type_id(text_item) != LMD_TYPE_SYMBOL) {
+    if (get_type_id(text_item) != LMD_TYPE_STRING) {
         return arr_item;
     }
     String* s = it2s(text_item);
@@ -27444,7 +27428,7 @@ extern "C" Item js_new_number_wrapper(Item arg) {
 
 // ES spec: new Number(arg) — checks symbol before creating wrapper
 extern "C" Item js_new_number_checked(Item arg) {
-    if (get_type_id(arg) == LMD_TYPE_INT && it2i(arg) <= -(int64_t)JS_SYMBOL_BASE) {
+    if (js_is_symbol(arg)) {
         return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
     // BigInt → Number conversion (ES2020: ToNumeric then BigInt::numberValue)
@@ -27493,8 +27477,7 @@ extern "C" Item js_to_object(Item value) {
         type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT ||
         is_virtual_container_type_id(type)) return value;
     if (type == LMD_TYPE_BOOL) return js_new_boolean_wrapper(value);
-    // Symbol wrapper must be checked before number (symbols are encoded as negative ints)
-    if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
+    if (js_key_is_symbol(value)) {
         return js_new_primitive_wrapper_value(value, JS_CLASS_SYMBOL, "Symbol", 6);
     }
     if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) return js_new_number_wrapper(value);
@@ -29070,9 +29053,9 @@ Item js_check_array_sym_iterator() {
     Item array_proto = js_get_intrinsic_prototype_for_class(JS_CLASS_ARRAY);
     if (get_type_id(array_proto) != LMD_TYPE_MAP) return ItemNull;
     Item sym_iter = ItemNull;
-    String* symbol_key = it2s(js_well_known_symbol_key(1));
-    JsShapeSlotStatus status = symbol_key
-        ? js_own_shape_slot_status_name_id(array_proto, property_key_id(symbol_key),
+    NameId symbol_name_id = js_symbol_name_id(js_well_known_symbol_key(1));
+    JsShapeSlotStatus status = symbol_name_id != NAME_ID_NONE
+        ? js_own_shape_slot_status_name_id(array_proto, symbol_name_id,
             &sym_iter, NULL)
         : JS_SHAPE_SLOT_ABSENT;
     if (status == JS_SHAPE_SLOT_ABSENT) return ItemNull;  // not present on Array.prototype — use default
@@ -32576,8 +32559,7 @@ static Item js_dc_channel_entry_part(Item entries, int64_t index, int64_t part) 
 }
 
 static bool js_dc_is_symbol(Item value) {
-    return get_type_id(value) == LMD_TYPE_SYMBOL ||
-           (get_type_id(value) == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE);
+    return js_is_symbol(value);
 }
 
 static Item js_dc_throw_invalid_arg_type(const char* message) {

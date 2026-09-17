@@ -33,7 +33,7 @@ Arrays, strings, and typed arrays get a lightweight iterator with **no public `n
 
 The fixed-layout helper is used wherever the payload layout matters; generic prototype/property APIs see a valid TypeMap and therefore do not dereference `Map.data` as iterator state. Stepping reads the trailing `JsIterData` directly: the array iterator re-reads the live observable length each step via `js_array_iterator_source_length`, the string iterator advances by a full UTF-8 code point with WTF-8/CESU-8 surrogate-pair combining, and the typed-array iterator checks out-of-bounds detach before each read.
 
-`js_get_iterator_impl` (`js_runtime.cpp:27565`) chooses the fast path only when it is safe: for arrays it first consults `js_check_array_sym_iterator` (`:27520`, gated by `g_array_sym_iter_ever_set`) and `js_array_iterator_next_is_default` (`:27411`) — if user code overrode `Array.prototype[Symbol.iterator]` or `%ArrayIteratorPrototype%.next`, it falls back to a property-based array iterator object or calls the user `@@iterator`. Maps/Sets dispatch through `JsCollectionData` to the proper collection-iterator builtin; plain objects and elements look up `__sym_1` (the interned key for `Symbol.iterator`, see JS_06 §9) or a bare `next` method. `js_get_iterator` caches the resolved `next` method as `__iter_next__`; `js_get_iterator_lazy` (`:27718`) skips that caching and is used by destructuring.
+`js_get_iterator_impl` (`js_runtime.cpp:27565`) chooses the fast path only when it is safe: for arrays it first consults `js_check_array_sym_iterator` (`:27520`, gated by `g_array_sym_iter_ever_set`) and `js_array_iterator_next_is_default` (`:27411`) — if user code overrode `Array.prototype[Symbol.iterator]` or `%ArrayIteratorPrototype%.next`, it falls back to a property-based array iterator object or calls the user `@@iterator`. Maps/Sets dispatch through `JsCollectionData` to the proper collection-iterator builtin; plain objects and elements look up the cached direct `Symbol.iterator` value through the JS Symbol property route (see JS_06 §9) or a bare `next` method. `js_get_iterator` caches the resolved `next` method as `__iter_next__`; `js_get_iterator_lazy` (`:27718`) skips that caching and is used by destructuring.
 
 ---
 
@@ -130,7 +130,7 @@ Inside an async-generator body, `await` is lowered as a *second kind of yield po
 
 - [JS_03 — Value Model, Memory & GC Interop](JS_03_Value_Model.md) — `Map`, `map_kind`, `Item` encoding behind iterator objects and generator results.
 - [JS_05 — Functions & Closures](JS_05_Functions_Closures.md) — env/closure capture that generator state machines build on.
-- [JS_06 — Objects, Properties & Prototypes](JS_06_Objects_Properties_Prototypes.md) — `MAP_KIND_*` dispatch, `Symbol.iterator` as the `__sym_1` key, prototype walk for iterator prototypes.
+- [JS_06 — Objects, Properties & Prototypes](JS_06_Objects_Properties_Prototypes.md) — `MAP_KIND_*` dispatch, `Symbol.iterator` property routing, prototype walk for iterator prototypes.
 - [JS_07 — Classes](JS_07_Classes.md) — generator/async-generator methods on classes.
 - [JS_09 — Async, Promises & Modules](JS_09_Async_Modules.md) — `await` suspension, the microtask loop, async-iterator stepping, `for await`.
 - [JS_10 — Standard Built-in Library](JS_10_Builtins.md) — `Symbol.iterator`/`Symbol.asyncIterator`, Map/Set iterators, the iterator-prototype builtins.

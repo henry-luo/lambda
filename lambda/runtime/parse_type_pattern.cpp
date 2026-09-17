@@ -191,6 +191,7 @@ Type* parse_string_literal_type(Lexer* lx, char quote) {
     char* dst;
     if (quote == '\'') {
         Symbol* sym = (Symbol*)pool_calloc(lx->tp->pool, sizeof(Symbol) + len + 1);
+        sym->kind = SYMBOL_LAMBDA_NAME;
         sym->ns = NULL;
         sym->len = (uint32_t)len;
         str = (String*)sym;

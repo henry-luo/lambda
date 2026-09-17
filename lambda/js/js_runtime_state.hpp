@@ -619,9 +619,10 @@ struct JsRuntimeOperationState {
     // RegExp instances share one fixed own-property layout.  It belongs to the
     // active Input pool and is cleared with the other regex pool-backed caches.
     void* regex_instance_shape = NULL;
-    uint64_t next_symbol_id = 100;
+    // Both maps borrow one core Symbol allocation per entry; their ownership
+    // remains the active realm Input/NamePool until batch reset.
     HashMap* symbol_registry = NULL;
-    HashMap* symbol_description_registry = NULL;
+    HashMap* symbol_name_index = NULL;
 };
 
 struct JsAsyncHooksState : RootVector {

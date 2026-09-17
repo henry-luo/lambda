@@ -77,8 +77,9 @@ static inline int js_utf8_next_codepoint(const char* s, int len, int* index) {
     (*index)++;
     return c;
 }
-// Converts a well-known Symbol numeric ID to its generated realm-local ref.
-// Internal runtime code uses this instead of diagnostic "__sym_N" spellings.
+// Maps a well-known Symbol catalog selector to its stable NameId compatibility
+// record, or to the cached core Symbol value. Property storage converts the
+// latter only at the NameId boundary; callers otherwise retain JS identity.
 NameId js_well_known_symbol_name_id(int64_t symbol_id);
 Item js_well_known_symbol_key(int64_t symbol_id);
 bool js_is_callable(Item value);
@@ -1076,9 +1077,9 @@ Item js_readable_stream_new(Item underlying_source);
 Item js_writable_stream_new(Item underlying_sink);
 
 // Symbol API
-// Symbol items are encoded as negative ints: -(id + JS_SYMBOL_BASE).
-// Base must be beyond int32 range to avoid collision with bitwise op results.
-#define JS_SYMBOL_BASE (1LL << 40)
+// JS Symbols use the core pointer-backed LMD_TYPE_SYMBOL representation.
+// SYMBOL_JS_* kinds retain JS identity while SYMBOL_LAMBDA_NAME stays a
+// separate Lambda textual-symbol contract.
 
 Item js_symbol_create(Item description);
 Item js_symbol_for(Item key);

@@ -2391,7 +2391,8 @@ static VirtualOpStatus materialized_element_attr_get(Element* element, Item key,
     const char* chars = key.get_chars();
     uint32_t length = key.get_len();
     Symbol* symbol = get_type_id(key) == LMD_TYPE_SYMBOL ? key.get_safe_symbol() : NULL;
-    Target* ns = symbol ? symbol->ns : NULL;
+    if (symbol && !symbol_is_lambda_name(symbol)) return VIRTUAL_OP_MISSING;
+    Target* ns = symbol_lambda_namespace(symbol);
     FOR_EACH_MAP_FIELD((TypeMap*)element->type, field) {
         if (!field->name || field->name->length != length ||
                 !target_equal(field->ns, ns)) continue;
@@ -2772,13 +2773,15 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth, EqualityMode mode) 
         return result ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_SYMBOL) {
-        // for symbols, also compare namespace
         Symbol* sym_a = (Symbol*)a_item.symbol_ptr;
         Symbol* sym_b = (Symbol*)b_item.symbol_ptr;
+        if (sym_a == sym_b) return BOOL_TRUE;
+        if (!sym_a || !sym_b || symbol_has_js_identity(sym_a) ||
+                symbol_has_js_identity(sym_b)) return BOOL_FALSE;
         if (sym_a->len != sym_b->len) return BOOL_FALSE;
         if (strncmp(sym_a->chars, sym_b->chars, sym_a->len) != 0) return BOOL_FALSE;
-        // compare namespaces - both NULL or same URL
-        return target_equal(sym_a->ns, sym_b->ns) ? BOOL_TRUE : BOOL_FALSE;
+        return target_equal(symbol_lambda_namespace(sym_a),
+            symbol_lambda_namespace(sym_b)) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_RAW_POINTER) {
         // both are container/pointer types - resolve actual type_id
@@ -2895,9 +2898,11 @@ Bool fn_str_eq_ptr(String* a, String* b) {
 Bool fn_sym_eq_ptr(Symbol* a, Symbol* b) {
     if (a == b) return BOOL_TRUE;
     if (!a || !b) return BOOL_FALSE;
+    if (symbol_has_js_identity(a) || symbol_has_js_identity(b)) return BOOL_FALSE;
     if (a->len != b->len) return BOOL_FALSE;
     if (a->len > 0 && strncmp(a->chars, b->chars, a->len) != 0) return BOOL_FALSE;
-    return target_equal(a->ns, b->ns) ? BOOL_TRUE : BOOL_FALSE;
+    return target_equal(symbol_lambda_namespace(a),
+        symbol_lambda_namespace(b)) ? BOOL_TRUE : BOOL_FALSE;
 }
 
 // 3-states comparison (public entry point)
@@ -3079,10 +3084,13 @@ static int target_total_cmp(Target* a, Target* b) {
 }
 
 static int element_attr_key_cmp(Item a, Item b) {
-    Target* a_ns = get_type_id(a) == LMD_TYPE_SYMBOL && a.get_safe_symbol()
-        ? a.get_safe_symbol()->ns : NULL;
-    Target* b_ns = get_type_id(b) == LMD_TYPE_SYMBOL && b.get_safe_symbol()
-        ? b.get_safe_symbol()->ns : NULL;
+    Symbol* a_symbol = get_type_id(a) == LMD_TYPE_SYMBOL ? a.get_safe_symbol() : NULL;
+    Symbol* b_symbol = get_type_id(b) == LMD_TYPE_SYMBOL ? b.get_safe_symbol() : NULL;
+    if (symbol_has_js_identity(a_symbol) || symbol_has_js_identity(b_symbol)) {
+        return a_symbol == b_symbol ? 0 : (a_symbol > b_symbol ? 1 : -1);
+    }
+    Target* a_ns = symbol_lambda_namespace(a_symbol);
+    Target* b_ns = symbol_lambda_namespace(b_symbol);
     int ns_cmp = target_total_cmp(a_ns, b_ns);
     if (ns_cmp) return ns_cmp;
     if (!is_text_type_id(get_type_id(a)) || !is_text_type_id(get_type_id(b))) {
@@ -3243,7 +3251,15 @@ int total_cmp(Item a_item, Item b_item) {
     if (a_tid == LMD_TYPE_SYMBOL) {
         Symbol* sym_a = a_item.get_symbol();
         Symbol* sym_b = b_item.get_symbol();
-        int ns_cmp = (sym_a->ns > sym_b->ns) - (sym_a->ns < sym_b->ns);
+        bool a_js_identity = symbol_has_js_identity(sym_a);
+        bool b_js_identity = symbol_has_js_identity(sym_b);
+        if (a_js_identity || b_js_identity) {
+            if (a_js_identity != b_js_identity) return a_js_identity ? 1 : -1;
+            return (sym_a > sym_b) - (sym_a < sym_b);
+        }
+        Target* a_ns = symbol_lambda_namespace(sym_a);
+        Target* b_ns = symbol_lambda_namespace(sym_b);
+        int ns_cmp = (a_ns > b_ns) - (a_ns < b_ns);
         if (ns_cmp != 0) return ns_cmp;
         return total_byte_cmp(a_item, b_item);
     }

@@ -930,8 +930,8 @@ static Item js_define_property_apply_validated_descriptor(Item obj, Item name,
 static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descriptor) {
     JS_RETURN_IF_ERROR(js_require_object_type(obj, "defineProperty"));
     if (obj.item == 0) return obj;
-    // v18m: coerce property name to property key (ES2020 §7.1.14 ToPropertyKey)
-    // Symbols stay as internal __sym_N keys; others coerced to string.
+    // v18m: coerce property name to property key (ES2020 §7.1.14 ToPropertyKey).
+    // A Symbol takes its transitional NameId property route; others coerce to string.
     TypeId name_type = get_type_id(name);
     if (name_type != LMD_TYPE_STRING) {
         name = js_to_property_key(name);
@@ -1900,11 +1900,11 @@ extern "C" Item js_date_new_from(Item value) {
             // Non-Date object: ToPrimitive(value, default) per ES spec §21.4.2.
             // J39-1b: route through unified js_to_primitive (ES §7.1.1).
             JS_ASSIGN_OR_RETURN(prim, js_to_primitive(value_root.get(), JS_HINT_DEFAULT));
-            TypeId pt = get_type_id(prim);
             // Symbol results → throw TypeError
-            if ((pt == LMD_TYPE_INT && it2i(prim) <= -(int64_t)JS_SYMBOL_BASE) || pt == LMD_TYPE_SYMBOL) {
+            if (js_is_symbol(prim)) {
                 return js_throw_type_error("Cannot convert a Symbol value to a number");
             }
+            TypeId pt = get_type_id(prim);
             // Dispatch on ToPrimitive result type
             if (pt == LMD_TYPE_STRING) {
                 // Re-enter Date constructor with the string
@@ -2259,7 +2259,7 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
     if (method_id >= 40) {
         if (method_id == 51) { // setYear — Annex B
             // ES spec: ToNumber(symbol) throws TypeError
-            if (get_type_id(arg0) == LMD_TYPE_INT && it2i(arg0) <= -(int64_t)JS_SYMBOL_BASE) {
+            if (js_is_symbol(arg0)) {
                 return js_throw_type_error("Cannot convert a Symbol value to a number");
             }
             double y = NAN;
@@ -4000,7 +4000,7 @@ extern "C" Item js_parseFloat(Item str_item) {
 
 static Item js_prepare_number_predicate(Item value, Item* number) {
     // ES numeric predicates reject Symbols before invoking ToNumber.
-    if (get_type_id(value) == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
+    if (js_is_symbol(value)) {
         return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
     *number = js_to_number(value);
@@ -5674,6 +5674,8 @@ extern "C" Item js_in(Item key, Item object) {
         && type != LMD_TYPE_ELEMENT && !is_virtual_container_type_id(type)) {
         return js_throw_type_error("Cannot use 'in' operator to search for a property in a non-object");
     }
+    Item observable_symbol_key = key;
+    bool has_symbol_key = js_key_is_symbol(key);
     if (get_type_id(key) == LMD_TYPE_STRING &&
         property_key_requires_identity(it2s(key)) &&
         property_key_kind(it2s(key)) == NAME_KEY_PRIVATE) {
@@ -5710,11 +5712,11 @@ extern "C" Item js_in(Item key, Item object) {
                 return (Item){.item = b2it(true)};
             }
         }
-        return js_in_prototype_chain(object, key);
+        return js_in_prototype_chain(object,
+            has_symbol_key ? observable_symbol_key : key);
     }
-    // Symbol values arrive as compact runtime ids, while property storage uses
-    // their canonical NamePool records.  Convert before ordinary lookup so
-    // `symbol in object` cannot fall back to diagnostic spelling.
+    // Ordinary storage uses the NameId compatibility route. Preserve the
+    // direct Symbol for a Proxy reached later on the prototype chain.
     Item exotic_result = ItemNull;
     if (js_dispatch_property_op(JS_EXOTIC_HAS_PROPERTY, object, 0, key,
             object, ItemNull, ItemNull, false, &exotic_result)) return exotic_result;
@@ -5764,7 +5766,8 @@ extern "C" Item js_in(Item key, Item object) {
             // 3. walk the heterogeneous prototype chain without invoking
             // getters. %Function.prototype% is a FUNC carrier, so a MAP-only
             // loop made class constructors fail ordinary HasProperty.
-            return js_in_prototype_chain(object, key);
+            return js_in_prototype_chain(object,
+                has_symbol_key ? observable_symbol_key : key);
         } else {
             // non-string key: fall back to map_get
             Item result = map_get(object.map, key);
@@ -6008,7 +6011,7 @@ extern "C" Item js_get_prototype_of(Item object) {
     if (ot == LMD_TYPE_STRING) {
         return js_get_intrinsic_prototype_for_class(JS_CLASS_STRING);
     }
-    if (ot == LMD_TYPE_INT && it2i(object) <= -(int64_t)JS_SYMBOL_BASE) {
+    if (js_is_symbol(object)) {
         return js_get_intrinsic_prototype_for_class(JS_CLASS_SYMBOL);
     }
     if (ot == LMD_TYPE_INT || ot == LMD_TYPE_FLOAT) {
@@ -9237,7 +9240,7 @@ extern "C" Item js_object_get_own_property_symbols(Item object) {
 
 extern "C" Item js_to_string_val(Item value) {
     // String(Symbol()) is allowed — explicit conversion (ES spec 19.1.1)
-    if (get_type_id(value) == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
+    if (js_key_is_symbol(value)) {
         return js_symbol_to_string(value);
     }
     return js_to_string(value);
@@ -9433,8 +9436,8 @@ static Item js_group_by_object_find(Item result, Item key) {
 JS_FORWARD_STATIC_ITEM(js_group_by_object_put, (Item result, Item key, Item group),
     js_set_key_default, (result, key, group))
 
-// Stage A1: ToPropertyKey per spec — a Symbol returned by the callback must
-// yield a property key (__sym_N), not throw via js_to_string.
+// Stage A1: ToPropertyKey per spec — a Symbol returned by the callback takes
+// its NameId property route rather than throwing via js_to_string.
 static Item js_group_by_object_key(Item raw_key) {
     JS_ASSIGN_OR_RETURN(key, js_to_property_key(raw_key));
     return get_type_id(key) == LMD_TYPE_STRING ? key : ItemNull;
@@ -11083,7 +11086,6 @@ extern "C" Item js_object_is_extensible(Item obj) {
 extern "C" Item js_number_is_integer(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_INT) {
-        if (it2i(value) <= -(int64_t)JS_SYMBOL_BASE) return (Item){.item = b2it(false)};
         return (Item){.item = b2it(true)};
     }
     if (type == LMD_TYPE_FLOAT) {
@@ -11096,7 +11098,6 @@ extern "C" Item js_number_is_integer(Item value) {
 extern "C" Item js_number_is_finite(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_INT) {
-        if (it2i(value) <= -(int64_t)JS_SYMBOL_BASE) return (Item){.item = b2it(false)};
         return (Item){.item = b2it(true)};
     }
     if (type == LMD_TYPE_FLOAT) {
@@ -11117,7 +11118,6 @@ extern "C" Item js_number_is_nan(Item value) {
 extern "C" Item js_number_is_safe_integer(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_INT) {
-        if (it2i(value) <= -(int64_t)JS_SYMBOL_BASE) return (Item){.item = b2it(false)};
         int64_t v = it2i(value);
         return (Item){.item = b2it(v >= -9007199254740991LL && v <= 9007199254740991LL)};
     }
@@ -11858,7 +11858,7 @@ extern "C" Item js_json_parse_full(Item str_item, Item reviver) {
 // Circular reference detection for JSON.stringify
 #define JSON_STRINGIFY_MAX_DEPTH 1024
 
-// Forward declaration: check if an Item is a JS Symbol (encoded as negative int)
+// Forward declaration: check whether an Item is a hosted pointer-backed JS Symbol.
 static bool js_is_symbol_item(Item item);
 
 static Item js_stringify_value(StrBuf* sb, Item value, Item replacer, Item replacer_array,
@@ -12619,7 +12619,7 @@ static Item js_delete_array_property(Item obj, Item key, bool strict) {
     if (js_array_has_props(arr)) {
         Map* pm = js_array_props(arr);
         Item pm_item = (Item){.map = pm};
-        // Stage A1: ToPropertyKey so Symbol keys (__sym_N) and FLOAT keys
+        // Stage A1: ToPropertyKey so Symbol NameId routes and FLOAT keys
         // are canonicalized identically to define-property time.
         Item k = js_to_property_key(key);
         if (get_type_id(k) == LMD_TYPE_STRING) {
@@ -14561,6 +14561,10 @@ extern "C" void js_with_activation_leave(JsWithFrame* saved_head) {
 
 JS_FORWARD_EXPRESSION(int64_t, js_with_depth_active, (void), js_with_stack_depth > 0 ? 1 : 0)
 
+static Item js_with_unscopables_symbol(void) {
+    return js_symbol_well_known(js_name_item("unscopables", 11));
+}
+
 // Check with-scope stack for a property (most recent scope first)
 static Item js_with_scope_lookup(Item key, bool* found, bool strict_get) {
     *found = false;
@@ -14574,7 +14578,7 @@ static Item js_with_scope_lookup(Item key, bool* found, bool strict_get) {
             }
             if (it2b(in_result)) {
                 // ES2023 9.1.1.2.1 step 6-9: check @@unscopables
-                Item unscopables_sym = (Item){.item = i2it(-(int64_t)(11 + JS_SYMBOL_BASE))}; // Symbol.unscopables
+                Item unscopables_sym = js_with_unscopables_symbol();
                 Item unscopables = js_get_key_default(scope_obj, unscopables_sym);
                 if (item_is_error(unscopables)) {
                     *found = true;
@@ -14641,7 +14645,7 @@ extern "C" Item js_get_last_with_binding_base_or_undefined(Item key) {
 static Item js_with_binding_is_visible(Item key, Item scope_obj) {
     JS_ASSIGN_OR_RETURN(in_result, js_in(key, scope_obj));
     if (!it2b(in_result)) return (Item){.item = b2it(false)};
-    Item unscopables_sym = (Item){.item = i2it(-(int64_t)(11 + JS_SYMBOL_BASE))};
+    Item unscopables_sym = js_with_unscopables_symbol();
     JS_ASSIGN_OR_RETURN(unscopables, js_get_key_default(scope_obj, unscopables_sym));
     if (get_type_id(unscopables) == LMD_TYPE_MAP) {
         JS_ASSIGN_OR_RETURN(blocked, js_get_key_default(unscopables, key));
@@ -14957,7 +14961,7 @@ static Item js_set_global_property_impl(Item key, Item value, bool strict) {
                 }
                 JS_ASSIGN_OR_RETURN(in_result, js_in(key, scope_obj));
                 if (it2b(in_result)) {
-                    Item unscopables_sym = (Item){.item = i2it(-(int64_t)(11 + JS_SYMBOL_BASE))};
+                    Item unscopables_sym = js_with_unscopables_symbol();
                     JS_ASSIGN_OR_RETURN(unscopables, js_get_key_default(scope_obj, unscopables_sym));
                     if (get_type_id(unscopables) == LMD_TYPE_MAP) {
                         JS_ASSIGN_OR_RETURN(blocked, js_get_key_default(unscopables, key));
@@ -17154,7 +17158,9 @@ static void js_intrinsic_invalidate_class(int class_id, Item key) {
         js_intrinsic_next_mutation_version();
     if (class_id != (int)JS_CLASS_ARRAY) return;
 
-    if (key.item == js_well_known_symbol_key(1).item) {
+    NameId key_name_id = js_key_is_symbol(key) ? js_symbol_name_id(key)
+        : (get_type_id(key) == LMD_TYPE_STRING ? property_key_id(it2s(key)) : NAME_ID_NONE);
+    if (key_name_id == js_well_known_symbol_name_id(1)) {
         g_array_sym_iter_ever_set = 1;
     }
 }
@@ -17241,51 +17247,51 @@ extern "C" void js_intrinsic_note_prototype_mutation(Item object) {
 // =============================================================================
 
 #include "../../lib/hashmap.h"
-#include "../../lib/hashmap_typed.hpp"
 
-enum JsSymbolRecordKind : uint8_t {
-    // Symbol() still owns a unique NameRef; only its description is absent.
-    JS_SYMBOL_RECORD_UNIQUE_UNDESCRIBED,
-    JS_SYMBOL_RECORD_UNIQUE,
-    JS_SYMBOL_RECORD_REGISTERED,
-};
-
-// Dynamic symbols retain one pool-owned spelling record. A unique record's
-// spelling is diagnostic only; a registered record's spelling is its key.
-// Well-known symbols use the static specification table and have no record.
-struct JsSymbolRecord {
-    NameRef text;
-    uint64_t id;
-    JsSymbolRecordKind kind;
-};
-
-static inline bool js_symbol_record_has_description(const JsSymbolRecord& record) {
-    return record.kind != JS_SYMBOL_RECORD_UNIQUE_UNDESCRIBED;
-}
-
-static const char* js_symbol_record_chars(const JsSymbolRecord& record) {
-    return record.text ? record.text->chars : "";
-}
-
-static uint32_t js_symbol_record_length(const JsSymbolRecord& record) {
-    return record.text ? record.text->len : 0;
-}
-
-#define js_symbol_next_id (js_runtime_state.operations.next_symbol_id)
 #define js_symbol_registry (js_runtime_state.operations.symbol_registry)
+#define js_symbol_name_index (js_runtime_state.operations.symbol_name_index)
 
-#define js_symbol_desc_registry (js_runtime_state.operations.symbol_description_registry)
+// Indexes are access paths to core Symbols, never a second JS-owned record.
+static Symbol* js_symbol_index_entry(const void* entry) {
+    return entry ? *(Symbol* const*)entry : NULL;
+}
 
-typedef TypedHashMap<JsSymbolRecord,
-    HashMapIntegralMemberKeyOps<JsSymbolRecord, &JsSymbolRecord::id>> JsSymbolIdMap;
+static uint64_t js_symbol_name_index_hash(const void* entry,
+        uint64_t seed0, uint64_t seed1) {
+    Symbol* symbol = js_symbol_index_entry(entry);
+    NameId name_id = symbol ? symbol->name_id : NAME_ID_NONE;
+    return hashmap_hash_bytes(&name_id, sizeof(name_id), seed0, seed1);
+}
 
-typedef TypedHashMap<JsSymbolRecord,
-    HashMapLenStrKeyOps<JsSymbolRecord, js_symbol_record_chars,
-        js_symbol_record_length>> JsSymbolTextMap;
+static int js_symbol_name_index_compare(const void* first, const void* second,
+        void* udata) {
+    (void)udata;
+    Symbol* first_symbol = js_symbol_index_entry(first);
+    Symbol* second_symbol = js_symbol_index_entry(second);
+    return first_symbol && second_symbol &&
+        first_symbol->name_id == second_symbol->name_id ? 0 : 1;
+}
 
-static void js_symbol_id_index_init() {
-    if (!js_symbol_desc_registry) {
-        js_symbol_desc_registry = JsSymbolIdMap::create(16);
+static uint64_t js_symbol_text_index_hash(const void* entry,
+        uint64_t seed0, uint64_t seed1) {
+    Symbol* symbol = js_symbol_index_entry(entry);
+    return symbol ? hashmap_hash_lenstr(symbol->chars, symbol->len, seed0, seed1) : 0;
+}
+
+static int js_symbol_text_index_compare(const void* first, const void* second,
+        void* udata) {
+    (void)udata;
+    Symbol* first_symbol = js_symbol_index_entry(first);
+    Symbol* second_symbol = js_symbol_index_entry(second);
+    if (!first_symbol || !second_symbol) return 1;
+    return hashmap_compare_lenstr(first_symbol->chars, first_symbol->len,
+        second_symbol->chars, second_symbol->len);
+}
+
+static void js_symbol_name_index_init() {
+    if (!js_symbol_name_index) {
+        js_symbol_name_index = hashmap_new(sizeof(Symbol*), 16, 0, 0,
+            js_symbol_name_index_hash, js_symbol_name_index_compare, NULL, NULL);
     }
 }
 
@@ -17308,39 +17314,37 @@ static void js_symbol_id_index_init() {
 
 static void js_symbol_text_index_init() {
     if (!js_symbol_registry) {
-        js_symbol_registry = JsSymbolTextMap::create(16);
+        js_symbol_registry = hashmap_new(sizeof(Symbol*), 16, 0, 0,
+            js_symbol_text_index_hash, js_symbol_text_index_compare, NULL, NULL);
     }
 }
 
 extern "C" void js_symbol_registry_batch_reset(void) {
     if (!js_active_runtime_state) return;
-    // Dynamic Symbol records own unique NamePool keys, so a realm reset must
-    // discard both registries before their backing pool is released.
+    // Indexes borrow Symbols and NamePool records from the active realm Input.
+    // Drop them before that Input releases either owner.
     if (js_symbol_registry) {
-        JsSymbolTextMap::destroy(js_symbol_registry);
+        hashmap_free(js_symbol_registry);
         js_symbol_registry = NULL;
     }
-    if (js_symbol_desc_registry) {
-        JsSymbolIdMap::destroy(js_symbol_desc_registry);
-        js_symbol_desc_registry = NULL;
+    if (js_symbol_name_index) {
+        hashmap_free(js_symbol_name_index);
+        js_symbol_name_index = NULL;
     }
-    js_symbol_next_id = 100;
 }
 
-// create Item encoding for a symbol: use LMD_TYPE_INT with a high-bit marker
-// symbol items are encoded as negative ints that won't collide with normal ints
-// encode as an int with a special range: -(id + JS_SYMBOL_BASE)
-JS_FORWARD_STATIC_EXPRESSION(Item, js_make_symbol_item, (uint64_t id),
-    (Item){.item = i2it(-(int64_t)(id + JS_SYMBOL_BASE))})
+JS_FORWARD_STATIC_EXPRESSION(Item, js_make_symbol_item, (Symbol* symbol),
+    (Item){.item = y2it(symbol)})
 
 static bool js_is_symbol_item(Item item) {
-    if (get_type_id(item) != LMD_TYPE_INT) return false;
-    int64_t v = it2i(item);
-    return v <= -(int64_t)JS_SYMBOL_BASE;
+    if (get_type_id(item) != LMD_TYPE_SYMBOL) return false;
+    Symbol* symbol = item.get_safe_symbol();
+    return symbol && symbol->kind != SYMBOL_LAMBDA_NAME;
 }
 
-JS_FORWARD_STATIC_EXPRESSION(uint64_t, js_symbol_item_id, (Item item),
-    (uint64_t)(-(it2i(item) + (int64_t)JS_SYMBOL_BASE)))
+static Symbol* js_symbol_item_ptr(Item item) {
+    return js_is_symbol_item(item) ? item.get_safe_symbol() : NULL;
+}
 
 struct JsWellKnownSymbolSpec {
     const char* name;
@@ -17371,61 +17375,95 @@ static const JsWellKnownSymbolSpec* js_well_known_symbol_spec(uint64_t id) {
     return &js_well_known_symbol_specs[id - JS_SYMBOL_ID_ITERATOR];
 }
 
+static Symbol* js_symbol_alloc(SymbolKind kind, NameId name_id,
+        const char* chars, uint32_t len) {
+    if (!js_input || !js_input->pool || (len > 0 && !chars)) return NULL;
+    Symbol* symbol = (Symbol*)pool_calloc(js_input->pool, sizeof(Symbol) + len + 1);
+    if (!symbol) return NULL;
+    symbol->len = len;
+    symbol->kind = kind;
+    symbol->name_id = name_id;
+    if (len > 0) memcpy(symbol->chars, chars, len);
+    symbol->chars[len] = '\0';
+    return symbol;
+}
+
+static NameId js_symbol_create_name_id(const char* chars, uint32_t len) {
+    NameRef name = context && context->name_pool
+        ? name_pool_create_unique_symbol(context->name_pool, {chars, len}) : NULL;
+    return name_ref_id(name);
+}
+
+static Symbol* js_symbol_lookup_name_id(NameId name_id) {
+    if (name_id == NAME_ID_NONE || !js_symbol_name_index) return NULL;
+    Symbol lookup = {};
+    lookup.name_id = name_id;
+    Symbol* lookup_ptr = &lookup;
+    const Symbol* const* found = (const Symbol* const*)hashmap_get(
+        js_symbol_name_index, &lookup_ptr);
+    return found ? (Symbol*)*found : NULL;
+}
+
+static bool js_symbol_index(Symbol* symbol) {
+    if (!symbol || symbol->name_id == NAME_ID_NONE) return false;
+    js_symbol_name_index_init();
+    if (!js_symbol_name_index) return false;
+    const Symbol* const* existing = (const Symbol* const*)hashmap_get(
+        js_symbol_name_index, &symbol);
+    if (existing) return *existing == symbol;
+    // hashmap_set returns NULL when it inserts a new entry; only its OOM flag
+    // distinguishes that successful insertion from allocation failure.
+    (void)hashmap_set(js_symbol_name_index, &symbol);
+    return !hashmap_oom(js_symbol_name_index);
+}
+
+static bool js_symbol_registry_index(Symbol* symbol) {
+    if (!symbol || !js_symbol_registry) return false;
+    const Symbol* const* existing = (const Symbol* const*)hashmap_get(
+        js_symbol_registry, &symbol);
+    if (existing) return *existing == symbol;
+    (void)hashmap_set(js_symbol_registry, &symbol);
+    return !hashmap_oom(js_symbol_registry);
+}
+
+static Symbol* js_well_known_symbol(uint64_t id) {
+    const JsWellKnownSymbolSpec* spec = js_well_known_symbol_spec(id);
+    NameId name_id = spec ? js_well_known_symbol_name_id((int64_t)id) : NAME_ID_NONE;
+    if (!spec || name_id == NAME_ID_NONE) return NULL;
+    Symbol* symbol = js_symbol_lookup_name_id(name_id);
+    if (symbol) return symbol;
+
+    char chars[64];
+    int len = snprintf(chars, sizeof(chars), "Symbol.%s", spec->name);
+    if (len < 0 || len >= (int)sizeof(chars)) return NULL;
+    symbol = js_symbol_alloc(SYMBOL_JS_WELL_KNOWN, name_id, chars, (uint32_t)len);
+    return js_symbol_index(symbol) ? symbol : NULL;
+}
+
+extern "C" Item js_well_known_symbol_key(int64_t symbol_id) {
+    if (!js_active_runtime_state) return ItemNull;
+    Symbol* symbol = js_well_known_symbol((uint64_t)symbol_id);
+    return symbol ? js_make_symbol_item(symbol) : ItemNull;
+}
+
 extern "C" NameId js_symbol_name_id(Item sym) {
-    if (!js_is_symbol_item(sym)) return NAME_ID_NONE;
-    if (!js_runtime_state_for(context)) return NAME_ID_NONE;
-    uint64_t id = js_symbol_item_id(sym);
-    NameId well_known = js_well_known_symbol_name_id((int64_t)id);
-    if (well_known != NAME_ID_NONE) return well_known;
-    if (js_symbol_desc_registry) {
-        JsSymbolRecord lookup = {};
-        lookup.id = id;
-        JsSymbolRecord* found = JsSymbolIdMap::get(js_symbol_desc_registry, lookup);
-        if (found) return name_ref_id(found->text);
-    }
-    if (js_symbol_registry) {
-        size_t iter = 0;
-        void* entry = NULL;
-        while (hashmap_iter(js_symbol_registry, &iter, &entry)) {
-            JsSymbolRecord* found = (JsSymbolRecord*)entry;
-            if (found->id == id) return name_ref_id(found->text);
-        }
-    }
-    return NAME_ID_NONE;
+    Symbol* symbol = js_symbol_item_ptr(sym);
+    return symbol ? symbol->name_id : NAME_ID_NONE;
 }
 
 static bool js_name_id_to_symbol(NameId name_id, Item* out_symbol) {
     if (name_id == NAME_ID_NONE || !out_symbol) return false;
-    for (uint64_t id = JS_SYMBOL_ID_ITERATOR; id <= JS_SYMBOL_ID_DISPOSE; id++) {
-        Item symbol = js_make_symbol_item(id);
-        if (js_symbol_name_id(symbol) == name_id) {
-            *out_symbol = symbol;
-            return true;
+    Symbol* symbol = js_symbol_lookup_name_id(name_id);
+    if (!symbol) {
+        for (uint64_t id = JS_SYMBOL_ID_ITERATOR; id <= JS_SYMBOL_ID_DISPOSE; id++) {
+            if (js_well_known_symbol_name_id((int64_t)id) != name_id) continue;
+            symbol = js_well_known_symbol(id);
+            break;
         }
     }
-    if (js_symbol_desc_registry) {
-        size_t iter = 0;
-        void* raw = NULL;
-        while (hashmap_iter(js_symbol_desc_registry, &iter, &raw)) {
-            JsSymbolRecord* entry = (JsSymbolRecord*)raw;
-            if (name_ref_id(entry->text) == name_id) {
-                *out_symbol = js_make_symbol_item(entry->id);
-                return true;
-            }
-        }
-    }
-    if (js_symbol_registry) {
-        size_t iter = 0;
-        void* raw = NULL;
-        while (hashmap_iter(js_symbol_registry, &iter, &raw)) {
-            JsSymbolRecord* entry = (JsSymbolRecord*)raw;
-            if (name_ref_id(entry->text) == name_id) {
-                *out_symbol = js_make_symbol_item(entry->id);
-                return true;
-            }
-        }
-    }
-    return false;
+    if (!symbol) return false;
+    *out_symbol = js_make_symbol_item(symbol);
+    return true;
 }
 
 // Populate Symbol constructor with well-known symbol properties
@@ -17436,7 +17474,7 @@ static void js_populate_symbol_ctor(Item fn_item) {
             sizeof(js_well_known_symbol_specs[0]); i++) {
         const JsWellKnownSymbolSpec* spec = &js_well_known_symbol_specs[i];
         Item key = js_name_item(spec->name, spec->name_len);
-        Item value = js_make_symbol_item(spec->symbol_id);
+        Item value = js_make_symbol_item(js_well_known_symbol(spec->symbol_id));
         js_func_init_property(fn_item, key, value);
         js_mark_non_enumerable(fn_item, key);
         js_mark_non_writable(fn_item, key);
@@ -17454,28 +17492,22 @@ extern "C" Item js_symbol_create(Item description) {
         // user-thrown value and leave a registry entry behind.
         if (item_is_error(string_root.get())) return string_root.get();
     }
-    uint64_t id = js_symbol_next_id++;
-    Item sym = js_make_symbol_item(id);
-
-    // Unique symbols own a NamePool identity even when their description is
-    // absent, so a property key never aliases a string spelling.
-    js_symbol_id_index_init();
     bool has_description = description_root.get().item != ITEM_NULL &&
         description_root.get().item != ITEM_JS_UNDEFINED;
     String* description_text = has_description ? it2s(string_root.get()) : NULL;
-    NameRef text = context && context->name_pool
-        ? name_pool_create_unique_symbol(context->name_pool, {description_text
-            ? description_text->chars : "", description_text ? description_text->len : 0})
-        : NULL;
-    if (name_ref_id(text) == NAME_ID_NONE) {
+    const char* chars = description_text ? description_text->chars : "";
+    uint32_t len = description_text ? description_text->len : 0;
+    NameId name_id = js_symbol_create_name_id(chars, len);
+    if (name_id == NAME_ID_NONE) {
         return js_throw_type_error("failed to allocate symbol property key");
     }
-    JsSymbolRecordKind kind = has_description ? JS_SYMBOL_RECORD_UNIQUE :
-        JS_SYMBOL_RECORD_UNIQUE_UNDESCRIBED;
-    JsSymbolRecord record = {text, id, kind};
-    JsSymbolIdMap::set(js_symbol_desc_registry, record);
-
-    return sym;
+    SymbolKind kind = has_description ? SYMBOL_JS_UNIQUE :
+        SYMBOL_JS_UNIQUE_UNDESCRIBED;
+    Symbol* symbol = js_symbol_alloc(kind, name_id, chars, len);
+    if (!js_symbol_index(symbol)) {
+        return js_throw_type_error("failed to allocate symbol value");
+    }
+    return js_make_symbol_item(symbol);
 }
 
 extern "C" Item js_symbol_for(Item key) {
@@ -17485,48 +17517,55 @@ extern "C" Item js_symbol_for(Item key) {
     String* s = it2s(string_root.get());
     if (!s) return js_symbol_create(key_root.get());
 
-    JsSymbolRecord lookup = {};
-    lookup.text = s;
-
-    JsSymbolRecord* found = JsSymbolTextMap::get(js_symbol_registry, lookup);
-    if (found) return js_make_symbol_item(found->id);
+    size_t iter = 0;
+    void* raw = NULL;
+    while (hashmap_iter(js_symbol_registry, &iter, &raw)) {
+        Symbol* symbol = *(Symbol**)raw;
+        if (symbol && hashmap_compare_lenstr(symbol->chars, symbol->len,
+                s->chars, s->len) == 0) {
+            return js_make_symbol_item(symbol);
+        }
+    }
 
     // Registered keys preserve every byte; truncation would merge distinct
     // Symbol.for keys and violate their process-wide identity contract.
-    NameRef text = context && context->name_pool
-        ? name_pool_create_unique_symbol(context->name_pool, {s->chars, s->len}) : NULL;
-    if (name_ref_id(text) == NAME_ID_NONE) {
+    NameId name_id = js_symbol_create_name_id(s->chars, s->len);
+    if (name_id == NAME_ID_NONE) {
         return js_throw_type_error("failed to allocate registry symbol property key");
     }
-    JsSymbolRecord record = {text, js_symbol_next_id++, JS_SYMBOL_RECORD_REGISTERED};
-    JsSymbolTextMap::set(js_symbol_registry, record);
-    return js_make_symbol_item(record.id);
+    Symbol* symbol = js_symbol_alloc(SYMBOL_JS_REGISTERED, name_id,
+        s->chars, s->len);
+    if (!js_symbol_index(symbol) || !js_symbol_registry_index(symbol)) {
+        return js_throw_type_error("failed to allocate registry symbol value");
+    }
+    return js_make_symbol_item(symbol);
 }
 
 extern "C" Item js_symbol_key_for(Item sym) {
     if (!js_is_symbol_item(sym))
         return js_throw_type_error("Symbol.keyFor requires a Symbol argument");
     js_symbol_text_index_init();
-    uint64_t id = js_symbol_item_id(sym);
-
-    // linear scan — symbol registry is small
+    Symbol* symbol = js_symbol_item_ptr(sym);
+    // linear scan — the registry is small and entries directly own no record.
     size_t iter = 0;
     void* entry;
     while (hashmap_iter(js_symbol_registry, &iter, &entry)) {
-        JsSymbolRecord* e = (JsSymbolRecord*)entry;
-        if (e->id == id) {
-            return js_name_item(e->text->chars, e->text->len);
+        Symbol* registered = *(Symbol**)entry;
+        if (registered == symbol) {
+            return js_name_item(registered->chars, registered->len);
         }
     }
     return make_js_undefined();  // not in global registry → undefined per spec
 }
 
-static Item js_symbol_render(String* text) {
-    if (!text) return js_name_item("Symbol()", 8);
-    StrBuf* buffer = strbuf_new_cap((size_t)text->len + 8);
+static Item js_symbol_render(const Symbol* symbol) {
+    if (!symbol || symbol->kind == SYMBOL_JS_UNIQUE_UNDESCRIBED) {
+        return js_name_item("Symbol()", 8);
+    }
+    StrBuf* buffer = strbuf_new_cap((size_t)symbol->len + 8);
     if (!buffer) return ItemError;
     strbuf_append_str(buffer, "Symbol(");
-    strbuf_append_str_n(buffer, text->chars, text->len);
+    strbuf_append_str_n(buffer, symbol->chars, symbol->len);
     strbuf_append_char(buffer, ')');
     return js_strbuf_take_item(buffer);
 }
@@ -17535,77 +17574,17 @@ extern "C" Item js_symbol_to_string(Item sym) {
     if (!js_is_symbol_item(sym)) {
         return js_name_item("Symbol()", 8);
     }
-    // check global registry for description
-    uint64_t id = js_symbol_item_id(sym);
-
-    const JsWellKnownSymbolSpec* spec = js_well_known_symbol_spec(id);
-    if (spec) {
-        char buf[160];
-        snprintf(buf, sizeof(buf), "Symbol(Symbol.%s)", spec->name);
-        return js_name_item(buf, strlen(buf));
-    }
-
-    // check registry
-    if (js_symbol_registry) {
-        size_t iter = 0;
-        void* entry;
-        while (hashmap_iter(js_symbol_registry, &iter, &entry)) {
-            JsSymbolRecord* e = (JsSymbolRecord*)entry;
-            if (e->id == id) {
-                return js_symbol_render(e->text);
-            }
-        }
-    }
-
-    // check description registry
-    if (js_symbol_desc_registry) {
-        JsSymbolRecord lookup = {};
-        lookup.id = id;
-        JsSymbolRecord* found = JsSymbolIdMap::get(js_symbol_desc_registry, lookup);
-        if (found && js_symbol_record_has_description(*found)) {
-            return js_symbol_render(found->text);
-        }
-    }
-
-    return js_name_item("Symbol()", 8);
+    return js_symbol_render(js_symbol_item_ptr(sym));
 }
 
 // Return the description of a symbol, or undefined if none
 extern "C" Item js_symbol_get_description(Item sym) {
     if (!js_is_symbol_item(sym)) return make_js_undefined();
-    uint64_t id = js_symbol_item_id(sym);
-
-    const JsWellKnownSymbolSpec* spec = js_well_known_symbol_spec(id);
-    if (spec) {
-        char buf[128];
-        snprintf(buf, sizeof(buf), "Symbol.%s", spec->name);
-        return js_name_item(buf, strlen(buf));
+    Symbol* symbol = js_symbol_item_ptr(sym);
+    if (!symbol || symbol->kind == SYMBOL_JS_UNIQUE_UNDESCRIBED) {
+        return make_js_undefined();
     }
-
-    // check Symbol.for() registry
-    if (js_symbol_registry) {
-        size_t iter = 0;
-        void* entry;
-        while (hashmap_iter(js_symbol_registry, &iter, &entry)) {
-            JsSymbolRecord* e = (JsSymbolRecord*)entry;
-        if (e->id == id) {
-            return js_name_item(e->text->chars, e->text->len);
-            }
-        }
-    }
-
-    // check description registry
-    if (js_symbol_desc_registry) {
-        JsSymbolRecord lookup = {};
-        lookup.id = id;
-        JsSymbolRecord* found = JsSymbolIdMap::get(js_symbol_desc_registry, lookup);
-        if (found) {
-            if (!js_symbol_record_has_description(*found)) return make_js_undefined();
-            return js_name_item(found->text->chars, found->text->len);
-        }
-    }
-
-    return make_js_undefined();
+    return js_name_item(symbol->chars, symbol->len);
 }
 
 // Return a well-known symbol by its property name on the Symbol constructor.
@@ -17624,9 +17603,9 @@ extern "C" Item js_symbol_well_known(Item name) {
         for (size_t i = 0; i < sizeof(js_well_known_symbol_specs) /
                 sizeof(js_well_known_symbol_specs[0]); i++) {
             const JsWellKnownSymbolSpec* spec = &js_well_known_symbol_specs[i];
-            if (s->len == spec->name_len && strncmp(s->chars, spec->name,
+            if (s->len == (uint32_t)spec->name_len && strncmp(s->chars, spec->name,
                     spec->name_len) == 0) {
-                return js_make_symbol_item(spec->symbol_id);
+                return js_make_symbol_item(js_well_known_symbol(spec->symbol_id));
             }
         }
     }

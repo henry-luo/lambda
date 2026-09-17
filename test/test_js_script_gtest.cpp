@@ -2902,6 +2902,70 @@ TEST(JsInterpreter, PreservesLongSymbolKeysAndDescriptions) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, UsesCoreSymbolsForJsValueIdentity) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var absent = Symbol(); var empty = Symbol(''); "
+        "var registered = Symbol.for('registry'); var local = Symbol('registry'); "
+        "var o = {}; o[absent] = 1; o[empty] = 2; "
+        "var seen = null; var has_seen = null; var proxy = new Proxy({}, { "
+        "get: function(target, key) { seen = key; return 0; }, "
+        "has: function(target, key) { has_seen = key; return true; } }); "
+        "proxy[absent]; "
+        "if (registered !== Symbol.for('registry') || local === registered || "
+        "Symbol.iterator !== Symbol.iterator || seen !== absent || "
+        "!(absent in Object.create(proxy)) || has_seen !== absent || "
+        "o[absent] !== 1 || o[empty] !== 2 || !(absent in o) || "
+        "Object.getOwnPropertySymbols(o).length !== 2) throw new Error(); "
+        "[absent, empty, registered, local, Symbol.iterator];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "core-symbol-identity.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    Item absent_item = js_elements_get_int(result, 0);
+    Item empty_item = js_elements_get_int(result, 1);
+    Item registered_item = js_elements_get_int(result, 2);
+    Item local_item = js_elements_get_int(result, 3);
+    Item iterator_item = js_elements_get_int(result, 4);
+    ASSERT_EQ(get_type_id(absent_item), LMD_TYPE_SYMBOL);
+    ASSERT_EQ(get_type_id(empty_item), LMD_TYPE_SYMBOL);
+    ASSERT_EQ(get_type_id(registered_item), LMD_TYPE_SYMBOL);
+    ASSERT_EQ(get_type_id(local_item), LMD_TYPE_SYMBOL);
+    ASSERT_EQ(get_type_id(iterator_item), LMD_TYPE_SYMBOL);
+
+    Symbol* absent = absent_item.get_safe_symbol();
+    Symbol* empty = empty_item.get_safe_symbol();
+    Symbol* registered = registered_item.get_safe_symbol();
+    Symbol* local = local_item.get_safe_symbol();
+    Symbol* iterator = iterator_item.get_safe_symbol();
+    ASSERT_NE(absent, nullptr);
+    ASSERT_NE(empty, nullptr);
+    ASSERT_NE(registered, nullptr);
+    ASSERT_NE(local, nullptr);
+    ASSERT_NE(iterator, nullptr);
+    Item cached_iterator = js_well_known_symbol_key(1);
+    ASSERT_EQ(get_type_id(cached_iterator), LMD_TYPE_SYMBOL);
+    EXPECT_EQ(cached_iterator.item, iterator_item.item);
+    EXPECT_NE(absent, empty);
+    EXPECT_NE(registered, local);
+    EXPECT_EQ(absent->kind, SYMBOL_JS_UNIQUE_UNDESCRIBED);
+    EXPECT_EQ(empty->kind, SYMBOL_JS_UNIQUE);
+    EXPECT_EQ(registered->kind, SYMBOL_JS_REGISTERED);
+    EXPECT_EQ(local->kind, SYMBOL_JS_UNIQUE);
+    EXPECT_EQ(iterator->kind, SYMBOL_JS_WELL_KNOWN);
+    EXPECT_EQ(absent->len, 0u);
+    EXPECT_EQ(empty->len, 0u);
+    EXPECT_STREQ(registered->chars, "registry");
+    EXPECT_STREQ(local->chars, "registry");
+    EXPECT_STREQ(iterator->chars, "Symbol.iterator");
+    EXPECT_NE(absent->name_id, NAME_ID_NONE);
+    EXPECT_NE(iterator->name_id, NAME_ID_NONE);
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, DefinesClassAccessorsThroughTheSharedPropertyKernel) {
     Runtime runtime = {};
     runtime_init(&runtime);

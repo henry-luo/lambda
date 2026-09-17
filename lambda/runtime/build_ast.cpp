@@ -2522,6 +2522,7 @@ static AstNode* build_namespace_symbol_from_parts(Transpiler* tp,
     sym_type->is_const = 1;
     sym_type->is_literal = 1;
     Symbol* symbol = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + total_len + 1);
+    symbol->kind = SYMBOL_LAMBDA_NAME;
     symbol->ns = ns_entry->target;
     symbol->len = total_len;
     str_copy(symbol->chars, total_len + 1, prefix->chars, prefix->len);
@@ -3476,6 +3477,7 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
         if (is_symbol) {
             // Allocate as Symbol (has ns field before chars)
             Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + content_len + 1);
+            sym->kind = SYMBOL_LAMBDA_NAME;
             sym->ns = NULL;
             str_copy(sym->chars, content_len + 1, content_start, content_len);
             sym->len = content_len;
@@ -3615,6 +3617,7 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
         if (is_symbol) {
             int slen = str->len;
             Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + slen + 1);
+            sym->kind = SYMBOL_LAMBDA_NAME;
             sym->ns = NULL;
             str_copy(sym->chars, slen + 1, str->chars, slen);
             sym->len = slen;

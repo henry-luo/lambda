@@ -133,6 +133,14 @@ enum EnumTypeId {
 };
 typedef uint8_t TypeId;
 
+// Name identity is used by the core property path and by the temporary JS
+// Symbol compatibility arm below. The full NamePool API remains in
+// core/name_identity.h.
+#ifndef LAMBDA_NAME_ID_DEFINED
+#define LAMBDA_NAME_ID_DEFINED
+typedef uint32_t NameId;
+#endif
+
 // Pointer-backed semantic values keep their raw pointer carrier when nullable;
 // zero is the lane spelling of null. Numeric/wide scalar tags are deliberately
 // excluded because their pointer payloads have distinct ownership rules.
@@ -891,11 +899,40 @@ LAMBDA_STATIC_ASSERT(offsetof(String, chars) == 5, "String chars ABI must remain
 
 typedef struct Target Target;  // forward declaration for Symbol.ns
 
+typedef uint8_t SymbolKind;
+enum SymbolKindValue {
+    SYMBOL_LAMBDA_NAME = 0,
+    SYMBOL_JS_UNIQUE_UNDESCRIBED,
+    SYMBOL_JS_UNIQUE,
+    SYMBOL_JS_REGISTERED,
+    SYMBOL_JS_WELL_KNOWN,
+};
+
 typedef struct Symbol {
-    uint32_t len;       // symbol name length
-    Target* ns;         // namespace target (NULL for unqualified symbols)
-    char chars[];       // symbol name characters
+    uint32_t len;       // symbol spelling or JS description length
+    SymbolKind kind;    // Lambda textual name or JS Symbol semantic variant
+    uint8_t reserved[3];
+    union {
+        Target* ns;      // active for SYMBOL_LAMBDA_NAME
+        NameId name_id;  // active for JS kinds during property-path migration
+    };
+    char chars[];       // symbol spelling or JS description/registry key
 } Symbol;
+LAMBDA_STATIC_ASSERT(sizeof(Symbol) == 16, "Symbol header ABI must remain 16 bytes");
+LAMBDA_STATIC_ASSERT(offsetof(Symbol, chars) == 16, "Symbol chars ABI must remain byte 16");
+
+static inline bool symbol_is_lambda_name(const Symbol* symbol) {
+    return symbol && symbol->kind == SYMBOL_LAMBDA_NAME;
+}
+
+static inline bool symbol_has_js_identity(const Symbol* symbol) {
+    return symbol && symbol->kind != SYMBOL_LAMBDA_NAME;
+}
+
+static inline Target* symbol_lambda_namespace(const Symbol* symbol) {
+    return symbol_is_lambda_name(symbol) ? symbol->ns : NULL;
+}
+
 enum BinaryFlags {
     BINARY_FLAG_NONE = 0,
     BINARY_FLAG_INLINE = 1u << 0,
@@ -2046,8 +2083,8 @@ static inline double lambda_float_lane_to_double(uint64_t bits) {
 // FLOAT -- it is the decoder dispatch, and every site that reads an Item
 // relies on it to pick the right lane. The C16 ruling that `type(nan) == int`
 // is a SURFACE claim, applied in fn_type()/item_static_type_for_is() only.
-// Conflating the two routes nan into integer decoders (LambdaJS alone has 423
-// such sites, e.g. js_is_symbol()'s `it2i(v) <= -JS_SYMBOL_BASE`).
+// Conflating the two routes nan into integer decoders (LambdaJS has many
+// number-coercion call sites, while hosted JS Symbols are pointer-backed).
 static inline bool lambda_item_is_merged_poison(uint64_t bits) {
     return (bits & ITEM_DBL_MASK) && LAMBDA_ITEM_IS_IEEE_SPECIAL(bits);
 }

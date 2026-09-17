@@ -45,7 +45,8 @@ static inline Item js_props_undefined() {
 }
 
 JS_FORWARD_STATIC_EXPRESSION(bool, js_props_key_is_symbol, (Item key),
-    get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE)
+    get_type_id(key) == LMD_TYPE_SYMBOL && key.get_safe_symbol() &&
+        key.get_safe_symbol()->kind != SYMBOL_LAMBDA_NAME)
 
 extern "C" bool js_descriptor_is_enumerable(Item desc) {
     if (get_type_id(desc) != LMD_TYPE_MAP) return false;
@@ -277,7 +278,11 @@ extern "C" JsShapeSlotStatus js_own_shape_slot_status_key_ex(Item object, Item k
         Item* out_slot, ShapeEntry** out_se, bool* out_borrowed) {
     if (out_borrowed) *out_borrowed = false;
     TypeId type = get_type_id(key);
-    if (type != LMD_TYPE_STRING && type != LMD_TYPE_SYMBOL) {
+    if (js_props_key_is_symbol(key)) {
+        return js_own_shape_slot_status_name_id(object, js_symbol_name_id(key),
+            out_slot, out_se);
+    }
+    if (type != LMD_TYPE_STRING) {
         if (out_slot) *out_slot = ItemNull;
         if (out_se) *out_se = NULL;
         return JS_SHAPE_SLOT_ABSENT;
@@ -330,12 +335,13 @@ extern "C" JsOwnGetStatus js_ordinary_get_own_ex(Item object, Item key,
     if (kt == LMD_TYPE_STRING && !js_canonicalize_property_string(key, &key)) {
         return JS_OWN_NOT_FOUND;
     }
-    // String and symbol keys use the central shape/slot status helper so MAP
+    // String and JS Symbol keys use the central shape/slot status helper so MAP
     // storage, FUNC properties_map storage, and ARRAY companion-map storage
     // share the same deleted/accessor rules.
-    if (kt == LMD_TYPE_STRING || kt == LMD_TYPE_SYMBOL) {
-        const char* kc = key.get_chars();
-        int kl = (int)key.get_len();
+    if (kt == LMD_TYPE_STRING || js_props_key_is_symbol(key)) {
+        String* string_key = kt == LMD_TYPE_STRING ? it2s(key) : NULL;
+        const char* kc = string_key ? string_key->chars : NULL;
+        int kl = string_key ? (int)string_key->len : 0;
         Item slot = ItemNull;
         ShapeEntry* se = NULL;
         JsShapeSlotStatus status = js_own_shape_slot_status_key_ex(object, key,
@@ -353,7 +359,7 @@ extern "C" JsOwnGetStatus js_ordinary_get_own_ex(Item object, Item key,
             // Setter-only accessor:
             //  - private field (#x): TypeError per ES §PrivateFieldGet.
             //  - public         : returns undefined per ES §9.1.8.1.
-            String* property_key = it2s(key);
+            String* property_key = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
             if (property_key && property_key_requires_identity(property_key) &&
                 property_key_kind(property_key) == NAME_KEY_PRIVATE) {
                 char msg[256];

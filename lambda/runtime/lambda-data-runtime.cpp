@@ -1886,6 +1886,9 @@ uint64_t lambda_item_hash(Item key, uint64_t seed0, uint64_t seed1) {
     }
     case LMD_TYPE_SYMBOL: {
         Symbol* s = key.get_safe_symbol();
+        if (symbol_has_js_identity(s)) {
+            return hashmap_hash_bytes(&s, sizeof(s), seed0, seed1);
+        }
         if (s) return hashmap_hash_bytes(s->chars, s->len, seed0, seed1);
         return hashmap_hash_bytes(&key.item, sizeof(uint64_t), seed0, seed1);
     }
@@ -1928,7 +1931,10 @@ int lambda_item_compare(Item a, Item b) {
         Symbol* sb = b.get_safe_symbol();
         if (sa == sb) return 0;
         if (!sa || !sb) return 1;
+        if (symbol_has_js_identity(sa) || symbol_has_js_identity(sb)) return 1;
         if (sa->len != sb->len) return 1;
+        if (!target_equal(symbol_lambda_namespace(sa),
+                symbol_lambda_namespace(sb))) return 1;
         return memcmp(sa->chars, sb->chars, sa->len);
     }
     case LMD_TYPE_ARRAY: {

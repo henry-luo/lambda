@@ -109,14 +109,19 @@ static Item vmap_invalid_key_error() {
 }
 
 static int vmap_compare_name_keys(Item a, Item b) {
+    Symbol* symbol_a = get_type_id(a) == LMD_TYPE_SYMBOL ? a.get_symbol() : NULL;
+    Symbol* symbol_b = get_type_id(b) == LMD_TYPE_SYMBOL ? b.get_symbol() : NULL;
+    if (symbol_has_js_identity(symbol_a) || symbol_has_js_identity(symbol_b)) {
+        return symbol_a == symbol_b ? 0 : 1;
+    }
     const char* chars_a = a.get_chars();
     const char* chars_b = b.get_chars();
     uint32_t len_a = a.get_len();
     uint32_t len_b = b.get_len();
     if (!chars_a || !chars_b || len_a != len_b) return 1;
     if (len_a > 0 && memcmp(chars_a, chars_b, len_a) != 0) return 1;
-    Target* ns_a = get_type_id(a) == LMD_TYPE_SYMBOL ? a.get_symbol()->ns : NULL;
-    Target* ns_b = get_type_id(b) == LMD_TYPE_SYMBOL ? b.get_symbol()->ns : NULL;
+    Target* ns_a = symbol_lambda_namespace(symbol_a);
+    Target* ns_b = symbol_lambda_namespace(symbol_b);
     return target_equal(ns_a, ns_b) ? 0 : 1;
 }
 

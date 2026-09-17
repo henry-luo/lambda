@@ -1,6 +1,6 @@
 flowchart TB
   K["js_property_get(object, key)"]
-  SYM["symbol key to __sym_N<br/>js_symbol_to_key"]
+  SYM["direct Symbol to NameId property route<br/>js_symbol_to_key"]
   T{"type_id?"}
   EX{"map_kind != PLAIN?"}
   EXO["js_try_exotic_property_get<br/>TypedArray / DOM / Proxy / ..."]

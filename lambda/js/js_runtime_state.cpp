@@ -612,7 +612,6 @@ bool js_runtime_state_init(EvalContext* runtime_context) {
         runtime_job_queue_init(&state->promises.unhandled_queue,
             &state->promises.unhandled_storage);
         state->event_loop->next_id = 1;
-        state->operations.next_symbol_id = 100;
         state->string_caches->last_from_char_code_cp = -1;
         state->string_caches->ascii_chars_epoch = ~0ULL;
         state->stream.default_byte_hwm = 16 * 1024;
@@ -765,8 +764,8 @@ void js_runtime_state_destroy_context(void) {
     if (state->operations.symbol_registry) {
         hashmap_free(state->operations.symbol_registry);
     }
-    if (state->operations.symbol_description_registry) {
-        hashmap_free(state->operations.symbol_description_registry);
+    if (state->operations.symbol_name_index) {
+        hashmap_free(state->operations.symbol_name_index);
     }
     // Promise carriers are GC-owned; context teardown only drops queue and
     // async owners before the heap itself is released.
@@ -1413,14 +1412,6 @@ extern "C" NameId js_well_known_symbol_name_id(int64_t symbol_id) {
     case 15: return JS_SYMBOL_DISPOSE;
     default: return NAME_ID_NONE;
     }
-}
-
-extern "C" Item js_well_known_symbol_key(int64_t symbol_id) {
-    if (!js_active_runtime_state) return ItemNull;
-    NameId key_id = js_well_known_symbol_name_id(symbol_id);
-    if (key_id == NAME_ID_NONE) return ItemNull;
-    NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL, key_id);
-    return key ? (Item){.item = s2it(key)} : ItemNull;
 }
 
 // ES2020 §7.1.14 ToPropertyKey(argument)

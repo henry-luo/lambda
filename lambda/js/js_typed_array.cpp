@@ -63,12 +63,10 @@ static Item js_dataview_to_bigint_value(Item value, Item* out_bigint) {
     }
 
     if (value_type == LMD_TYPE_INT) {
-        int64_t int_value = it2i(value);
-        if (int_value <= -(int64_t)JS_SYMBOL_BASE) {
-            return js_throw_type_error("Cannot convert a Symbol value to a BigInt");
-        } else {
-            return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
-        }
+        return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
+    }
+    if (value_type == LMD_TYPE_SYMBOL) {
+        return js_throw_type_error("Cannot convert a Symbol value to a BigInt");
     }
     if (value_type == LMD_TYPE_FLOAT || value_type == LMD_TYPE_NULL || value.item == ITEM_JS_UNDEFINED) {
         return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
@@ -93,8 +91,7 @@ static Item js_dataview_to_index(Item value, int* out_index) {
         return js_status_ok();
     }
     TypeId value_type = get_type_id(value);
-    if (value_type == LMD_TYPE_SYMBOL ||
-        (value_type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE)) {
+    if (value_type == LMD_TYPE_SYMBOL) {
         return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
     JS_ASSIGN_OR_RETURN(num, js_to_number(value));
@@ -114,8 +111,7 @@ static Item js_dataview_to_index(Item value, int* out_index) {
 
 static Item js_dataview_to_number_value(Item value, double* out_number) {
     TypeId value_type = get_type_id(value);
-    if (value_type == LMD_TYPE_SYMBOL ||
-        (value_type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE)) {
+    if (value_type == LMD_TYPE_SYMBOL) {
         return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
     JS_ASSIGN_OR_RETURN(num, js_to_number(value));
@@ -441,8 +437,7 @@ static Item js_to_index_i64(Item value, int64_t* out_index,
         *out_index = 0;
         return js_status_ok();
     }
-    if (type == LMD_TYPE_SYMBOL ||
-        (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE)) {
+    if (type == LMD_TYPE_SYMBOL) {
         return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
     JS_ASSIGN_OR_RETURN(num, js_to_number(value));
@@ -852,7 +847,7 @@ static int js_atomics_record_waiter(JsArrayBuffer* buffer, int index, int agent_
 }
 
 static bool js_atomics_report_has_wait_suffix(Item report_string) {
-    if (get_type_id(report_string) != LMD_TYPE_STRING && get_type_id(report_string) != LMD_TYPE_SYMBOL) return false;
+    if (get_type_id(report_string) != LMD_TYPE_STRING) return false;
     String* report = it2s(report_string);
     if (!report) return false;
     if (report->len >= 2 && memcmp(report->chars + report->len - 2, "ok", 2) == 0) return true;
@@ -2185,10 +2180,8 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
         return result;
     }
 
-    // Symbol/BigInt cannot be converted to number (ES spec: ToIndex → ToNumber throws)
-    // JS symbols are encoded as negative ints (LMD_TYPE_INT with value <= -(1LL << 40))
-    if (arg_type == LMD_TYPE_SYMBOL || 
-        (arg_type == LMD_TYPE_INT && it2i(arg) <= -(int64_t)(1LL << 40))) {
+    // Symbol/BigInt cannot be converted to number (ES spec: ToIndex → ToNumber throws).
+    if (arg_type == LMD_TYPE_SYMBOL) {
         return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
 
@@ -2307,11 +2300,7 @@ static Item js_typed_array_set_numeric_impl(Item ta_item, double numeric_index,
         } else {
             // ToBigInt rejects Number/null/undefined per spec
             if (vt == LMD_TYPE_INT) {
-                int64_t iv = it2i(value);
-                if (iv > -(int64_t)JS_SYMBOL_BASE) {
-                    return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
-                }
-                // Symbol → handled by ctor (throws)
+                return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
             } else if (vt == LMD_TYPE_FLOAT) {
                 return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
             } else if (vt == LMD_TYPE_NULL || value.item == ITEM_JS_UNDEFINED) {
@@ -2338,11 +2327,7 @@ static Item js_typed_array_set_numeric_impl(Item ta_item, double numeric_index,
     if (value.item == ITEM_JS_UNDEFINED) {
         num_val = NAN;
     } else if (vtype == LMD_TYPE_INT) {
-        // Check for Symbol (encoded as negative int <= -JS_SYMBOL_BASE)
         int64_t iv = it2i(value);
-        if (iv <= -(int64_t)JS_SYMBOL_BASE) {
-            return js_throw_type_error("Cannot convert a Symbol value to a number");
-        }
         num_val = (double)iv;
     } else if (vtype == LMD_TYPE_FLOAT) {
         num_val = it2d(value);

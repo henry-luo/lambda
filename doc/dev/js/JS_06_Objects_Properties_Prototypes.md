@@ -1,6 +1,6 @@
 # LambdaJS — Objects, Properties & Prototypes
 
-> **Last verified against tree:** 2026-09-14 *(including virtual accessor descriptors under D3.4.8)*
+> **Last verified against tree:** 2026-09-17
 
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers how JS objects are represented (Lambda `Map` + `TypeMap` shape), how property attributes are stored, the `[[Get]]`/`[[Set]]` dispatch pipelines, `Object.defineProperty`, the prototype chain, realm-local intrinsic properties, symbol-keyed properties, and constructor shape pre-allocation.
 >
@@ -85,7 +85,7 @@ is documented in [JS_12 TypedArrays](JS_12_TypedArrays.md), [JS_13 Web DOM](JS_1
 
 <img alt="Property get dispatch" src="diagram/property_get_dispatch.svg" width="720">
 
-1. **Key normalization** — symbol keys become `__sym_N` strings via `js_symbol_to_key` (except on a Proxy, where symbols stay raw); private-field `__private_` keys on a non-private host throw TypeError.
+1. **Key normalization** — a JS Symbol keeps its pointer identity at observable boundaries (including Proxy traps); ordinary storage routes its temporary `NameId` through `js_symbol_to_key`. Private-field keys on a non-private host throw TypeError.
 2. **MAP branch** (`:3422`):
    - typed-array meta (`BYTES_PER_ELEMENT`) proto walk (depth cap 16);
    - **metadata gate** → the `JsPropertyOps` get callback, if present;
@@ -149,13 +149,19 @@ The catalog is the single construction-time source of target and binding metadat
 
 ## 9. Symbol-as-property-key
 
-A JS Symbol is a **negative INT**: `LMD_TYPE_INT` with value `≤ -(JS_SYMBOL_BASE)`, `JS_SYMBOL_BASE = 1LL << 40` (`js_runtime.h:699`); `js_key_is_symbol` tests this. For storage/lookup, `js_symbol_to_key` (`js_runtime_internal.hpp:663`) maps a symbol to an interned `__sym_N` string (N = decimal id). Well-known symbols use fixed ids (`Symbol.iterator` = `__sym_1`, `toPrimitive` = `__sym_2`, `hasInstance` = `__sym_3`, `toStringTag` = `__sym_4`, …). `js_to_property_key` (`js_runtime_state.cpp:98`) canonicalizes any key.
+A JS Symbol is a pointer-backed `LMD_TYPE_SYMBOL`. `js_key_is_symbol` admits
+only `SYMBOL_JS_*` kinds; a Lambda textual symbol remains a separate contract.
+For ordinary storage/lookup, `js_symbol_to_key` resolves the Symbol's temporary
+`NameId` to the existing NamePool property route. The original `Symbol*` is
+retained for Proxy/reflection boundaries, and `Object.getOwnPropertySymbols`
+recovers it through the per-realm `NameId → Symbol*` index. Thus `NameId` is
+property identity while the pointer is JS value identity, as required by
+**D4.6.1v3**.
 
-Enumeration filters symbol encodings and exact owner-defined engine keys;
-private names are recognized by NamePool private identity. Spelling prefixes
-such as `__brand_` or `__if_` are not semantic classifiers, so user properties
-with those spellings remain ordinary properties. `Object.getOwnPropertySymbols`
-reverses the symbol encoding (`js_internal_symbol_name_to_symbol`).
+Enumeration filters identity-kind Symbol properties and exact owner-defined
+engine keys; private names are recognized by NamePool private identity.
+Spelling prefixes such as `__brand_` or `__if_` are not semantic classifiers,
+so user properties with those spellings remain ordinary properties.
 
 ---
 

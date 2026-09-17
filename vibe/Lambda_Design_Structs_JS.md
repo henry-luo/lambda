@@ -1,12 +1,14 @@
 # Lambda Design: LambdaJS Struct Authority
 
 > **Last census/source audit:** 2026-09-17, tree `b085bbb18` plus the completed
-> JSCU45–JSCU56 working-tree changes below.
+> JSCU45–JSCU57 working-tree changes below.
 > **Status.** The initial consolidation, §20 follow-up and §21 Phase 3 are
 > implemented after the completed TypedArray cleanup and callable-base follow-up.
+> **JSCU57 is complete:** LambdaJS uses the core `Symbol` carrier directly;
+> `NameId` is retained only for the temporary property-key compatibility route.
 > Appendix B distinguishes current evidence from the historical measurements.
-> The clean refreshed `js-rt` census has **459 definitions: 324 structs,
-> 5 classes, 4 unions and 126 enums**; all 547 configured translation units
+> The clean refreshed `js-rt` census has **457 definitions: 324 structs,
+> 5 classes, 3 unions and 125 enums**; all 547 configured translation units
 > parsed. The private MVP runtime is preserved as a debug-only POC, including
 > its tests, benchmark evidence and design records; its private ABI is not a
 > Lambda interop path.
@@ -19,19 +21,20 @@
 >
 > **Ledger.** `JSCU1–JSCU8` (census and rules) stay in
 > [`Lambda_Proposal_JS_Struct_Clean_Up.md`](Lambda_Proposal_JS_Struct_Clean_Up.md).
-> This document owns **JSCU9–JSCU56**, including completed §20 and §21 work,
+> This document owns **JSCU9–JSCU57**, including completed §20 and §21 work,
 > and
 > **JSCUO1–JSCUO9** (including resolved items).
 >
 > **Authority.** **D1.2v2**, **D1.3v3**, **D1.5v2**, **D1.8–D1.9**,
 > **D2.4.1–D2.4.3**, **D2.6.1v3**, **D2.6.6v2**,
-> **D3.3.2v2**, **D3.3.3v3**, **D3.3.4**, **D3.4.1–D3.4.8**, **D4.6.1v2**, **D5.1–D5.4**,
+> **D3.3.2v2**, **D3.3.3v3**, **D3.3.4**, **D3.4.1–D3.4.8**, **D4.6.1v3**, **D5.1–D5.4**,
 > **D6.2.1–D6.2.3v2**, **D7.4.1v2**, **D8.2.3–D8.2.6**, **D8.3.1–D8.3.4**,
 > **D8.4.1v2–D8.4.3v2**, **D8.6.1–D8.6.4v2**. These rulings implement existing
-> contracts; none revises a language ruling, authorizes a new value layout, or
-> changes a formal-spec ratchet. **D8.2.5v2** governs fact placement; §9 has
-> been corrected to match it. Cite `D#` first per CLAUDE.md rule 17; a `JSCU`
-> id only for a point no `D#` covers.
+> contracts. **JSCU57 lands the shared `Symbol` representation:** it retains
+> the current JS `NameId` property route only as compatibility under
+> **D4.6.1v3**. **D8.2.5v2**
+> governs fact placement; §9 has been corrected to match it. Cite `D#` first
+> per CLAUDE.md rule 17; a `JSCU` id only for a point no `D#` covers.
 >
 > **Reading order.** §1–§5 are the four structures that carry the most weight
 > plus two banked fixes. §8 is the one-concept-one-structure rule and its
@@ -1697,7 +1700,7 @@ the destination owner; JS preserves object identity. Those policies cannot be
 hidden inside a universal `set` function. Physical storage and scalar rehoming
 can still be shared once the destination is established.
 
-Named keys remain `NameId`s (**D3.4.4v2**, **D4.6.1v2**). Recipe field order and
+Named keys remain `NameId`s (**D3.4.4v2**, **D4.6.1v3**). Recipe field order and
 `slot_entries` accelerate lookup but do not replace the normative shape chain.
 The initial implementation needs one guarded candidate and one fallback, with
 no mutable per-site state, code patching, feedback vector or method cache
@@ -2200,7 +2203,7 @@ not erase an actual semantic boundary. A Lambda value snapshot and a mutable
 JS alias may still require an explicit ownership operation; JS accessors and
 proxies still require their property protocol. A plain shared `Map*` does not
 authorize calling a raw Lambda field load on a JS accessor (D3.4.8), and a
-JS `Symbol()` is not Lambda's textual `Symbol` (D4.6.1v2; S2.4.3v3).
+JS `Symbol()` is not Lambda's textual `Symbol` (D4.6.1v3; S2.4.3v3).
 
 There is also a second JS runtime in the census: **MVP contributes 34 structs
 and 3 enums**. `MvpValue`, `MvpHeap`, `MvpRootFrame`, `MvpString`, `MvpArray`,
@@ -2395,7 +2398,7 @@ discriminator before introducing another.
 | ~~`JsClassMethodEntry`, `JsStaticFieldEntry`, `JsInstanceFieldEntry`~~ | **Landed 2026-09-17:** direct flat `JsClassMember` row with its existing kind; common traversal/key planning consumes the row | Method/accessor/static-field/instance-field/static-block evaluation and order | 3 |
 | ~~Four interpreter continuation records~~ | **Landed 2026-09-17:** `JsInterpContinuation` with loop/list/try/array-binding kind, shared allocation, attachment, tracing and release | Resume phase, IteratorClose, pending completion and lexical environment | 3 |
 | ~~`JsInterpImportBinding` / `JsInterpExportBinding`~~ | **Landed 2026-09-17:** one `JsInterpModuleBinding` row with import/export kind, namespace flag and star flag; script state, allocation and traversal use the common type directly | Live binding cells, namespace behavior, star ambiguity and TDZ | 1 |
-| ~~`JsSymbolEntry` / `JsSymbolDesc`~~ | **Landed 2026-09-17, revised:** three-field `JsSymbolRecord` holds a length-aware `NameRef`, ID and unique-undescribed/unique/registered kind; both indexes point to it. Well-known Symbols use the static specification table | `Symbol()` freshness, absent versus empty description, `Symbol.for` identity and registry lifetime | 1 |
+| ~~`JsSymbolEntry` / `JsSymbolDesc` / `JsSymbolRecord`~~ | **Landed 2026-09-17:** one core `Symbol`, carried as an `LMD_TYPE_SYMBOL` Item. Its `kind` selects Lambda textual or JS unique-undescribed/unique/registered/well-known behavior; the union retains `ns` for Lambda and `name_id` for JS compatibility. JS spelling lives in `Symbol::chars[]`; indexes point directly to `Symbol*` | `Symbol()` freshness, absent versus empty description, `Symbol.for` identity, existing `NameId` property routing and registry lifetime | 1 |
 
 For continuations, eliminate the four independent ownership/tracing walks
 without forcing a new universal evaluator. A maximum-sized union is acceptable
@@ -2410,11 +2413,62 @@ prototype storage, while all three former records share their property-map
 snapshot operations. No discriminator is needed because the static owner
 already determines whether prototype state exists.
 
-For symbols, reuse `name_pool_create_unique_symbol`/`NameRef` and
-`name_pool_create_len`; never content-intern fresh identity symbols. Multiple
-lookup indexes are justified access paths, not multiple copies of the owned
-symbol record (D4.6.1v2). Changing the JS symbol Item encoding is a separate
-ABI matter and receives no deletion credit here.
+### 20.5.1 JSCU57 — One core Symbol carrier
+
+JS Symbols move from the reserved negative-`int` encoding to pointer-backed
+`LMD_TYPE_SYMBOL` Items. `Symbol` owns its spelling directly; it has no
+`NameRef` field and no JS numeric identity field:
+
+```cpp
+typedef uint8_t SymbolKind;
+
+enum {
+    SYMBOL_LAMBDA_NAME = 0,
+    SYMBOL_JS_UNIQUE_UNDESCRIBED,
+    SYMBOL_JS_UNIQUE,
+    SYMBOL_JS_REGISTERED,
+    SYMBOL_JS_WELL_KNOWN,
+};
+
+struct Symbol {
+    uint32_t len;
+    SymbolKind kind;
+    uint8_t reserved[3];
+    union {
+        Target* ns;      // Lambda textual-symbol namespace
+        NameId name_id;  // temporary JS property-key compatibility
+    };
+    char chars[];
+};
+```
+
+`kind` occupies the existing alignment gap, so the `Symbol` header remains
+16 bytes. `SYMBOL_LAMBDA_NAME` retains the existing `ns` and content contract.
+For every JS kind, `ns` is inactive, `chars[]` stores the description or
+registry spelling, and `name_id` preserves the current shape/property path.
+The `NameRef` used to mint that `NameId` is construction-only; it is not an
+edge owned by `Symbol`.
+
+The pointer is the identity of a JS Symbol value. Thus `Symbol()` and
+`Symbol("")` each allocate a distinct core `Symbol`, even though both have
+`len == 0`; their kinds retain absent versus empty description. `Symbol.for`
+uses a content index whose value is `Symbol*`, and each well-known Symbol has
+one cached `Symbol*`. There is no `JsSymbolRecord`, no `next_symbol_id`, and no
+numeric `Item` encoding. A `NameId` remains only as the temporary property-key
+compatibility route; it is not the JS Symbol's value identity.
+
+Shared helpers must take `kind`, not merely `LMD_TYPE_SYMBOL`: Lambda textual
+symbols retain their solid-name and content rules (S2.2.2, S2.4.3v3), while JS
+kinds use pointer identity for JS equality, hashing and property-key recovery.
+D4.6.1v3 distinguishes JS pointer value identity from the retained `NameId`
+property identity. The migration must update the common hash/equality and MIR
+symbol paths as one operation, rather than introduce a second JS-only
+comparison helper.
+
+The retained `NameId` keeps existing shapes, transitions and enumeration on
+their current compatibility route. Future work may determine whether Lambda
+textual symbols also carry an identity; that decision is explicitly out of
+scope for JSCU57.
 
 Do **not** union independent optional function capabilities: a bound/class/AST/
 eval-origin payload combination can coexist. Similarly, `JsPropertyDescriptor`
@@ -2620,7 +2674,7 @@ alone.
 ## Appendix B — Implementation status and history (brief)
 
 This appendix records source evidence, not new conformance rulings. The final
-2026-09-17 refresh ran the census after every JSCU45–JSCU56 source change and
+2026-09-17 refresh ran the census after every JSCU45–JSCU57 source change and
 ran focused ownership/behavioral gates. It did not rerun historical broad
 performance benchmarks.
 
@@ -2628,14 +2682,16 @@ performance benchmarks.
 
 Command: `make struct-census ARGS=--full`, with the unchanged
 `utils/struct_census.config.json`, macOS C++17/debug preprocessing, at tree
-`b085bbb18` plus the working-tree JSCU45–JSCU56 changes. Generated at
-**2026-09-17T11:13:02Z**. Reports:
+`b085bbb18` plus the working-tree JSCU45–JSCU57 changes. Generated at
+**2026-09-17T13:41:59Z**. Reports:
 [`struct_census.csv`](meta/ds/struct_census.csv) and
 [`struct_census.json`](meta/ds/struct_census.json).
 
 **547 TUs, 2,973 definitions** span the configured source trees. The Phase 3
 baseline was 547 TUs, 2,979 definitions and 462 `js-rt` definitions; current
-`js-rt` is **459**. The restored MVP POC contributes 37 private rows relative
+`js-rt` is **457**. JSCU57 removes the JS-owned `JsSymbolRecord` and its kind
+enum; direct core `Symbol` indexes use generic `HashMap` callbacks rather than
+introducing JS map-policy structs. The restored MVP POC contributes 37 private rows relative
 to the retirement snapshot, while direct-field cleanup plus direct `Function`
 reuse removes the callable wrappers/header records. That restoration preserves
 future experimental value; it is not a claim that its private concepts are
@@ -2643,10 +2699,10 @@ shared LambdaJS types.
 
 | Census population | Structs | Classes | Unions | Enums | All definitions |
 |---|---:|---:|---:|---:|---:|
-| Main LambdaJS, excluding parser and TypeScript | 311 | 5 | 4 | 115 | 435 |
+| Main LambdaJS, excluding parser and TypeScript | 311 | 5 | 3 | 114 | 433 |
 | JS parser | 9 | 0 | 0 | 10 | 19 |
 | TypeScript | 4 | 0 | 0 | 1 | 5 |
-| **`js-rt` total** | **324** | **5** | **4** | **126** | **459** |
+| **`js-rt` total** | **324** | **5** | **3** | **125** | **457** |
 
 The phase removes `CallableArtifact`, `JsCallableArtifact`, `JsCallableRealm`,
 `JsAstDefinition` and `FunctionHeader`; it makes `JsFunction : Function`, keeps
@@ -2668,10 +2724,11 @@ instance counts and lazy allocation make that interpretation invalid.
 
 | Structure | Prior recorded value | Current | What the measurement means |
 |---|---:|---:|---|
-| `JsRuntimeState` | 3,176 B | **3,088 B** | Resource service left JS semantic state for its shared context capsule |
+| `JsRuntimeState` | 3,176 B | **3,080 B** | Resource service left JS semantic state for its shared context capsule; direct symbol indexes replace the numeric-ID registry |
 | `JsExecutionState` | 232 B | **224 B** | Call activation owner, not the whole realm footprint |
 | `JsFunction` | 88 B | **160 B** | Directly extends the 72 B Lambda `Function`; the object uses the 256 B GC slot until a tail field can be semantically unified |
 | `Function` | 72 B | **72 B** | Lambda callable keeps direct definition and module fields |
+| `Symbol` | 16 B | **16 B** | Core carrier: Lambda uses `ns`; JS uses `kind`, `name_id` compatibility and trailing spelling |
 | `JsCallableCode` + `JsAstDefinition` | 64 B + 32 B | **80 B** | One Script-owned JS code record replaces the duplicate AST definition row without nested wrappers |
 | `GcEnvironmentStorage` | — | **56 B** | Stack descriptor shared by raw capture and JS lexical allocation/clone/trace paths |
 | `DurableActivation` | — | **32 B** | Shared base of Lambda and JS suspended activations; scheduler/Promise facts remain tails |
@@ -2711,11 +2768,12 @@ analysis; a large size alone is not proof of a duplicate struct.
 | JSCU44 | per-activation `with` chain; `JsWithScopeState` deleted |
 | JSCU47 | `jm_get_effective_type` consumes AST-published contracts; full return contracts are joined on `FnAnalysis` and compact native return lanes project from that owner |
 | JSCU48 | `JsCommonAstBuild`, `JsCommonMirBuild`, `JsRootedState`, regex `PtrVec`, `RxRange`, `CodePointRange` and physical `JsRegexRange` are retired. `InputScriptBuildScope`, byte/view direct aliases, direct `RootVector` bases, `ArrayList`, and `CodePointInterval` provide the shared replacements |
-| JSCU49 | Callable snapshots/`JsCtor`, import/export plans, three class member payload rows, four continuation records and the symbol entry/description pair are retired. The replacement records use direct common bases or explicit kinds and shared lifecycle operations |
+| JSCU49 | Callable snapshots/`JsCtor`, import/export plans, three class member payload rows and four continuation records are retired. The replacement records use direct common bases or explicit kinds and shared lifecycle operations |
 | JSCU50 | Clean full census, source-level retirement checks, shared-operation evidence and focused behavior/forced-GC gates are recorded in §20 and this appendix |
 | JSCU54 | `JsMirBindingRef`, `JsMirLiteralShapePlan` and `JsMirStaticShapeField` remain JS lowering facts: no second client can recover their pre-resolution data from core plans |
 | JSCU55 (revised) | The MVP source/runtime, tests, selector, benchmark engine and private acceptance artifacts are preserved as a debug-only private-ABI POC; no `MvpValue`–`Item` bridge or shared owner is claimed |
 | JSCU56 | `JsFunction : Function` replaces `FunctionHeader`; `Function` marks its inherited tail Lambda-specific, and each later tail merge requires matching ownership, GC and call contracts |
+| JSCU57 | Core `Symbol` is the direct `LMD_TYPE_SYMBOL` carrier for JS values; `JsSymbolRecord`, the negative-int encoding and numeric identity are retired together, while the union's JS `NameId` preserves the existing property route pending the later Lambda-name decision |
 
 ### Outstanding or only partly implemented
 
@@ -2728,7 +2786,7 @@ analysis; a large size alone is not proof of a duplicate struct.
   lowerings. JS native completion code also uses the shared emitter's error
   return register. These are landed pieces, not evidence that all acceptance
   gates in §17 have passed. Appendix C remains the dependency sketch.
-- **JSCU45–JSCU56 (§20–§21)** are complete. Their deliberate boundaries (JS
+- **JSCU45–JSCU57 (§20–§21)** are complete. Their deliberate boundaries (JS
   readiness/microtask policy, callable property tails, JS-only lowering facts,
   payload-specific `Map` extensions and the preserved private MVP POC) are not
   residual duplicate representations.
@@ -2819,7 +2877,7 @@ under `vibe/impl` after the proposal is taken up.
 | [Owned closure storage](../lambda/runtime/lambda-mem.cpp) | `heap_calloc_closure_env` through `gc_environment_calloc` |
 | [Durable activation](../lambda/runtime/durable_activation.hpp) | shared kind/state/slot-extent carrier for Lambda and JS suspension |
 | [Type operations](../lambda/runtime/type_contract.hpp) | Full-contract joins, canonical representation and lane descriptors |
-| [Callable snapshots and symbols](../lambda/js/js_globals.cpp) | `JsFunctionSnapshot`, `JsPrototypeFunctionSnapshot`, `JsSymbolRecord` |
+| [Callable snapshots and symbols](../lambda/js/js_globals.cpp) | `JsFunctionSnapshot`, `JsPrototypeFunctionSnapshot`; JSCU57 uses core `Symbol` directly and routes property compatibility through `NameId` |
 | [JS continuations](../lambda/js/js_interp.cpp) | tagged `JsInterpContinuation` and shared tracing/release paths |
 | [Shared bytes](../lib/byte_storage.h) | `ByteStorage`, `ByteBufferHandle`, `ByteSpan` and ownership operations |
 

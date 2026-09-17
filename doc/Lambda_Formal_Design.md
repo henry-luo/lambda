@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 9.0.1 (2026-09-17)
+**Spec version:** 9.1.0 (2026-09-17)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -917,14 +917,18 @@ that carries them.
 
 ### D4.6 Name identity
 
-- **D4.6.1v2** One semantic property identity is a `NameId`, never a
+- **D4.6.1v3** One semantic **property** identity is a `NameId`, never a
   `String*` address. `NameId = [pool16][ordinal16]`; `NAME_ID_NONE` is the
   id-less Input seam, and `SectionNameId = [slot16][offset16]` remains a
   location rather than identity. Generated ordinary names retain catalog
   IDs. The existing NamePool owns resolution; pointer equality is not a
-  property, shape, transition, IC, Symbol, or private-name comparison.
-  Observable strings may be materialized at Proxy/reflection boundaries.
-  [NI1–NI4, NI16]
+  property, shape, transition, IC, Lambda textual-symbol, or private-name
+  comparison. A hosted JS `Symbol` is the single explicit exception at the
+  **value** layer: its pointer is JS value identity, while its `name_id`
+  remains the property identity on the existing shape/transition route. It
+  never becomes a Lambda `NameKey`, and its diagnostic spelling is never its
+  property identity. Observable strings may be materialized at
+  Proxy/reflection boundaries. [NI1–NI4, NI16, JSCU57]
 - **D4.6.2v2** Evolve NamePool, don't replace it (first definer wins and
   parent-first lookup). One identity scope has a sealed static root and one
   owner-thread dynamic child: static segment numbers occupy the lower pool16
@@ -1687,7 +1691,7 @@ loosely across the corpus — context disambiguates, and we live with it.
   the sanctioned speed-up is **compile-predicted specialization with an
   inline guard and the shared kernel on a miss** — for LambdaJS, per-site
   literal and constructor shapes, integer-index lanes, and static `NameId`s
-  (D3.4.4v2, D4.6.1v2), the same physical routes the Lambda lane uses. A JS
+  (D3.4.4v2, D4.6.1v3), the same physical routes the Lambda lane uses. A JS
   fast path is admissible only when a miss is observationally identical to
   the kernel result. [LC1v2]
 - **D8.4.2v2*** Core direct calls pass individual ABI operands (`Context*`,

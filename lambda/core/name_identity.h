@@ -11,7 +11,10 @@
 // A NameId identifies a generated or identity-scope NamePool record. The
 // upper 16 bits select the owning segment and the lower 16 bits select its
 // append-only ordinal; zero is reserved for the id-less Input seam.
+#ifndef LAMBDA_NAME_ID_DEFINED
+#define LAMBDA_NAME_ID_DEFINED
 typedef uint32_t NameId;
+#endif
 typedef uint32_t SectionNameId;
 typedef String* NameRef;
 
