@@ -18,6 +18,8 @@
 #ifndef GC_HEAP_H
 #define GC_HEAP_H
 
+#include "../gc_environment.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -612,22 +614,15 @@ static inline gc_header_t* gc_get_header(void* ptr) {
     return ((gc_header_t*)ptr) - 1;
 }
 
-static inline int gc_environment_is_interpreter(const gc_header_t* header) {
+static inline GcEnvironmentLayoutKind gc_environment_layout_kind(
+        const gc_header_t* header) {
     return header && header->type_tag == GC_TYPE_ENVIRONMENT &&
-        (header->gc_flags & GC_FLAG_ENV_INTERP) != 0;
+        (header->gc_flags & GC_FLAG_ENV_INTERP) != 0
+        ? GC_ENVIRONMENT_LAYOUT_LEXICAL : GC_ENVIRONMENT_LAYOUT_ITEM_SLOTS;
 }
 
-static inline int gc_environment_is_item_slots(const gc_header_t* header) {
-    return header && header->type_tag == GC_TYPE_ENVIRONMENT &&
-        !gc_environment_is_interpreter(header);
-}
-
-static inline void gc_environment_set_interpreter(void* environment) {
-    gc_header_t* header = gc_get_header(environment);
-    if (header && header->type_tag == GC_TYPE_ENVIRONMENT) {
-        header->gc_flags |= GC_FLAG_ENV_INTERP;
-    }
-}
+void* gc_environment_calloc(gc_heap_t* gc, size_t size,
+                            GcEnvironmentLayoutKind layout_kind);
 
 #ifdef __cplusplus
 }

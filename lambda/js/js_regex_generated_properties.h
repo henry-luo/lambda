@@ -1,17 +1,15 @@
 #pragma once
 
 #include <stdint.h>
+#include "../core/codepoint_interval.h"
 
 enum {
     JS_REGEX_PROP_GENERATED_BASE = 1000
 };
 
-struct JsRegexRange {
-    int first;
-    int last;
-};
-
-bool js_regex_sorted_range_contains(const JsRegexRange* ranges, int count, int cp);
+bool js_regex_sorted_range_contains(const CodePointInterval* ranges, int count, int cp);
+// Kept only for the legacy hand-written property tables; it is the shared type.
+using JsRegexRange = CodePointInterval;
 int js_regex_generated_property_lookup_kind(const char* name, int name_len);
 int js_regex_generated_property_canonicalize_kind(int kind);
 bool js_regex_generated_property_kind_contains(int kind, int cp);

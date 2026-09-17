@@ -1358,6 +1358,52 @@ void input_script_cache_complete_build(InputScriptLease* lease,
     pthread_mutex_unlock(&cache->mutex);
 }
 
+void input_script_build_scope_reset(InputScriptBuildScope* build) {
+    if (!build) return;
+    memset(build, 0, sizeof(*build));
+    build->state = INPUT_SCRIPT_BUILD_BYPASS;
+}
+
+InputScriptBuildClaim input_script_build_scope_begin(InputScriptBuildScope* build,
+        InputScriptCache* cache, const InputScriptRequest* request,
+        InputScriptBuildKind kind) {
+    if (!build) return INPUT_SCRIPT_BUILD_BYPASS;
+    input_script_build_scope_reset(build);
+    build->kind = kind;
+    if (!cache || !request ||
+            (kind != INPUT_SCRIPT_BUILD_AST && kind != INPUT_SCRIPT_BUILD_MIR)) {
+        return build->state;
+    }
+    InputCacheScope* scope = input_script_cache_open_scope(cache);
+    if (!scope) return build->state;
+    InputScriptLease* lease = input_script_cache_acquire(scope, request);
+    if (!lease) {
+        input_script_cache_close_scope(scope);
+        return build->state;
+    }
+    build->state = input_script_cache_claim_build(lease, kind);
+    if (build->state == INPUT_SCRIPT_BUILD_OWNER) {
+        build->scope = scope;
+        build->lease = lease;
+        return build->state;
+    }
+    // A non-owner owns no outstanding transition. Its lookup obtains a fresh
+    // lease after the publishing owner releases this cache scope.
+    input_script_cache_close_scope(scope);
+    return build->state;
+}
+
+void input_script_build_scope_complete(InputScriptBuildScope* build,
+        bool published, bool poison) {
+    if (!build) return;
+    if (build->state == INPUT_SCRIPT_BUILD_OWNER && build->lease) {
+        input_script_cache_complete_build(build->lease, build->kind,
+            published, poison);
+    }
+    if (build->scope) input_script_cache_close_scope(build->scope);
+    input_script_build_scope_reset(build);
+}
+
 bool input_script_cache_get_ast(InputScriptLease* lease, void** out_ast) {
     if (out_ast) *out_ast = NULL;
     if (!lease || lease->released || !lease->cache || !lease->input) return false;

@@ -824,8 +824,7 @@ Item fn_to(Item item_a, Item item_b) {
 
 Function* to_fn(fn_ptr ptr) {
     Function *fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
-    fn->type_id = LMD_TYPE_FUNC;
-    fn->entry_abi = FN_ENTRY_ABI_UNKNOWN;
+    function_header_init((FunctionHeader*)fn, LMD_TYPE_FUNC, FN_ENTRY_ABI_UNKNOWN);
     fn->ptr = ptr;
     fn->closure_env = NULL;
     return fn;
@@ -834,8 +833,7 @@ Function* to_fn(fn_ptr ptr) {
 // Create function with arity info
 Function* to_fn_n(fn_ptr ptr, int arity) {
     Function *fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
-    fn->type_id = LMD_TYPE_FUNC;
-    fn->entry_abi = FN_ENTRY_ABI_UNKNOWN;
+    function_header_init((FunctionHeader*)fn, LMD_TYPE_FUNC, FN_ENTRY_ABI_UNKNOWN);
     fn->arity = (uint8_t)arity;
     fn->ptr = ptr;
     fn->closure_env = NULL;
@@ -846,8 +844,7 @@ Function* to_fn_n(fn_ptr ptr, int arity) {
 // Create function with arity and name for stack traces
 Function* to_fn_named(fn_ptr ptr, int arity, const char* name) {
     Function *fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
-    fn->type_id = LMD_TYPE_FUNC;
-    fn->entry_abi = FN_ENTRY_ABI_UNKNOWN;
+    function_header_init((FunctionHeader*)fn, LMD_TYPE_FUNC, FN_ENTRY_ABI_UNKNOWN);
     fn->arity = (uint8_t)arity;
     fn->ptr = ptr;
     fn->closure_env = NULL;
@@ -907,8 +904,7 @@ void lambda_function_set_type(Function* fn, void* fn_type) {
 // Create a closure with captured environment
 Function* to_closure(fn_ptr ptr, int arity, void* env) {
     Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
-    fn->type_id = LMD_TYPE_FUNC;
-    fn->entry_abi = FN_ENTRY_ABI_UNKNOWN;
+    function_header_init((FunctionHeader*)fn, LMD_TYPE_FUNC, FN_ENTRY_ABI_UNKNOWN);
     fn->fn_type = NULL;
     fn->arity = (uint8_t)arity;
     fn->closure_field_count = 0;  // caller sets after creation if env has Item fields
@@ -921,8 +917,7 @@ Function* to_closure(fn_ptr ptr, int arity, void* env) {
 // Create a closure with captured environment and name for stack traces
 Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name) {
     Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
-    fn->type_id = LMD_TYPE_FUNC;
-    fn->entry_abi = FN_ENTRY_ABI_UNKNOWN;
+    function_header_init((FunctionHeader*)fn, LMD_TYPE_FUNC, FN_ENTRY_ABI_UNKNOWN);
     fn->fn_type = NULL;
     fn->arity = (uint8_t)arity;
     fn->closure_field_count = 0;  // caller sets after creation if env has Item fields

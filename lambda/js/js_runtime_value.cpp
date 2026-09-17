@@ -1235,7 +1235,7 @@ extern "C" uint64_t js_get_heap_epoch();
 
 static bool js_string_concat_caches_ensure_roots(void) {
     return js_active_runtime_state && js_root_vector_ensure_registered(
-        &js_runtime_state.string_caches->roots);
+        js_runtime_state.string_caches);
 }
 
 static bool js_percent_escape_four_byte_cp(String* s, uint32_t* cp_out) {

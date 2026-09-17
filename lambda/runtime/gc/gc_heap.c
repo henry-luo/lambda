@@ -888,6 +888,21 @@ void* gc_heap_calloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
     return ptr;
 }
 
+void* gc_environment_calloc(gc_heap_t* gc, size_t size,
+        GcEnvironmentLayoutKind layout_kind) {
+    if (!gc || (layout_kind != GC_ENVIRONMENT_LAYOUT_ITEM_SLOTS &&
+            layout_kind != GC_ENVIRONMENT_LAYOUT_LEXICAL)) return NULL;
+    void* environment = gc_heap_calloc(gc, size, GC_TYPE_ENVIRONMENT);
+    gc_header_t* header = gc_get_header(environment);
+    if (!header) return NULL;
+    if (layout_kind == GC_ENVIRONMENT_LAYOUT_LEXICAL) {
+        header->gc_flags |= GC_FLAG_ENV_INTERP;
+    } else {
+        header->gc_flags &= (uint8_t)~GC_FLAG_ENV_INTERP;
+    }
+    return environment;
+}
+
 void* gc_heap_calloc_class(gc_heap_t* gc, size_t size, uint16_t type_tag, int cls) {
     gc_reject_scalar_object_allocation(type_tag, "gc_heap_calloc_class");
     gc_assert_allocation_allowed(gc, "gc_heap_calloc_class");
@@ -1733,6 +1748,14 @@ static int64_t gc_packed_data_allocation_size(void* type_ptr, int data_cap) {
     return type_ptr ? *(int64_t*)((uint8_t*)type_ptr + LAMBDA_GC_OFF_TYPE_MAP_BYTE_SIZE) : 0;
 }
 
+static void gc_environment_trace_item(void* context, uint64_t item) {
+    gc_mark_item((gc_heap_t*)context, item);
+}
+
+static void gc_environment_trace_object(void* context, void* object) {
+    gc_mark_object_ptr((gc_heap_t*)context, object);
+}
+
 // trace outgoing Item pointers from a type-aware object
 // This is the core tracing logic that knows Lambda's struct layouts.
 static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
@@ -1741,26 +1764,20 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
 
     switch (tag) {
     case GC_TYPE_ENVIRONMENT_: {
-        if (gc_environment_is_interpreter(header)) {
+        GcEnvironmentStorage storage;
+        if (gc_environment_layout_kind(header) == GC_ENVIRONMENT_LAYOUT_LEXICAL) {
             JsInterpEnv* env = (JsInterpEnv*)obj;
-            if (env->outer) gc_mark_object_ptr(gc, env->outer);
-            gc_mark_item(gc, env->arguments_object);
-            gc_mark_item(gc, env->private_home_class);
-            gc_mark_item(gc, env->private_bindings);
-            gc_mark_item(gc, env->eval_bindings);
-            gc_mark_item(gc, env->lexical_this);
-            for (uint32_t i = 0; i < env->slot_count; i++) {
-                gc_mark_item(gc, env->slots[i]);
-            }
-            break;
+            js_interp_env_storage(env, &storage);
+        } else {
+            // Raw closure environments keep Item slots at byte zero; their
+            // scalar tail is paired storage and must stay unscanned.
+            uint32_t count = (uint32_t)(header->alloc_size / (2 * sizeof(uint64_t)));
+            Item* items = (Item*)obj;
+            gc_environment_storage_init(&storage, GC_ENVIRONMENT_LAYOUT_ITEM_SLOTS,
+                items, (uint64_t*)(items + count), count, NULL, NULL, 0);
         }
-        // Closure environments are raw Item arrays. The GC header owns their
-        // exact byte length, so captured values need no user-visible header.
-        uint64_t* items = (uint64_t*)obj;
-        // The second half is raw scalar-tail storage owned by the first-half
-        // Item slots; tracing it as Items would retain arbitrary bit patterns.
-        size_t count = header->alloc_size / (2 * sizeof(uint64_t));
-        for (size_t i = 0; i < count; i++) gc_mark_item(gc, items[i]);
+        gc_environment_storage_visit(&storage, gc, gc_environment_trace_object,
+            gc_environment_trace_item);
         break;
     }
     case GC_TYPE_JS_ACCESSOR: {

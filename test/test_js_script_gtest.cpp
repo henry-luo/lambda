@@ -365,7 +365,7 @@ struct JsCommonAstBuildWaiter {
     const char* source;
     size_t source_length;
     const char* reference;
-    JsCommonAstBuild build;
+    InputScriptBuildScope build;
 };
 
 static void* js_common_ast_build_waiter_main(void* opaque) {
@@ -387,9 +387,10 @@ TEST(JsInterpreter, SingleFlightsCommonAstTemplateBuild) {
         ++cache_generation);
     const char source[] = "var answer = 21 * 2; answer;";
 
-    JsCommonAstBuild owner = {};
+    InputScriptBuildScope owner = {};
     ASSERT_EQ(js_common_ast_cache_begin_build(&owner, source,
         sizeof(source) - 1, reference, false, false), INPUT_SCRIPT_BUILD_OWNER);
+    EXPECT_EQ(owner.kind, INPUT_SCRIPT_BUILD_AST);
 
     JsCommonAstBuildWaiter waiter = {source, sizeof(source) - 1, reference, {}};
     pthread_t worker = {};
@@ -430,6 +431,7 @@ TEST(JsInterpreter, SingleFlightsCommonAstTemplateBuild) {
     EXPECT_TRUE(wait_observed);
     EXPECT_TRUE(published);
     EXPECT_EQ(waiter.build.state, INPUT_SCRIPT_BUILD_READY);
+    EXPECT_EQ(waiter.build.kind, INPUT_SCRIPT_BUILD_AST);
     js_common_ast_cache_complete_build(&waiter.build, false, false);
     runtime_cleanup(&runtime);
 
@@ -445,7 +447,7 @@ struct JsCommonMirBuildWaiter {
     const char* source;
     size_t source_length;
     const char* reference;
-    JsCommonMirBuild build;
+    InputScriptBuildScope build;
 };
 
 static void* js_common_mir_build_waiter_main(void* opaque) {
@@ -475,9 +477,10 @@ TEST(JsInterpreter, SingleFlightsCommonMirLeaseBuild) {
         ++cache_generation);
     const char source[] = "var cachedAnswer = 42;";
 
-    JsCommonMirBuild owner = {};
+    InputScriptBuildScope owner = {};
     ASSERT_EQ(js_mir_lease_session_begin_build(session, true, source,
         sizeof(source) - 1, reference, NULL, &owner), INPUT_SCRIPT_BUILD_OWNER);
+    EXPECT_EQ(owner.kind, INPUT_SCRIPT_BUILD_MIR);
 
     JsCommonMirBuildWaiter waiter = {false, session, source,
         sizeof(source) - 1, reference, {}};
@@ -515,6 +518,7 @@ TEST(JsInterpreter, SingleFlightsCommonMirLeaseBuild) {
     EXPECT_TRUE(wait_observed);
     EXPECT_TRUE(published);
     EXPECT_EQ(waiter.build.state, INPUT_SCRIPT_BUILD_READY);
+    EXPECT_EQ(waiter.build.kind, INPUT_SCRIPT_BUILD_MIR);
     js_mir_lease_session_complete_build(&waiter.build, false, false);
     js_mir_lease_session_close(session);
     runtime_cleanup(&runtime);
@@ -537,9 +541,10 @@ TEST(JsInterpreter, SingleFlightsClosedModuleMirBuild) {
         ++cache_generation);
     const char source[] = "export const answer = 42;";
 
-    JsCommonMirBuild owner = {};
+    InputScriptBuildScope owner = {};
     ASSERT_EQ(js_module_mir_cache_begin_build(source, sizeof(source) - 1,
         reference, &owner), INPUT_SCRIPT_BUILD_OWNER);
+    EXPECT_EQ(owner.kind, INPUT_SCRIPT_BUILD_MIR);
 
     JsCommonMirBuildWaiter waiter = {true, NULL, source,
         sizeof(source) - 1, reference, {}};
@@ -2826,6 +2831,31 @@ TEST(JsInterpreter, InitializesComputedSymbolClassFields) {
     ASSERT_FALSE(item_is_error(result));
     for (int index = 0; index < 10; index++) {
         EXPECT_EQ(js_elements_get_int(result, index).item, b2it(true));
+    }
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PreservesLongSymbolKeysAndDescriptions) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var prefix = 'x'.repeat(127); var first_key = prefix + 'a'; "
+        "var second_key = prefix + 'b'; var first = Symbol.for(first_key); "
+        "var second = Symbol.for(second_key); var described = Symbol(prefix + 'c'); "
+        "var empty = Symbol(''); var absent = Symbol(); "
+        "[first !== second, Symbol.keyFor(first) === first_key, "
+        "Symbol.keyFor(second) === second_key, described.description === prefix + 'c', "
+        "described.toString() === 'Symbol(' + prefix + 'c)', empty.description === '', "
+        "absent.description === undefined];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "long-symbol-records.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    for (int index = 0; index < 7; index++) {
+        EXPECT_EQ(js_elements_get_int(result, index).item, b2it(true))
+            << "long symbol record result index " << index;
     }
 
     runtime_cleanup(&runtime);

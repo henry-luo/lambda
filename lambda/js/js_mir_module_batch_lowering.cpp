@@ -1823,7 +1823,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
         for (int member_index = 0; member_index < ce->member_count; member_index++) {
             JsClassMember* member = &ce->members[member_index];
             if (member->kind != JS_CLASS_MEMBER_STATIC_FIELD) continue;
-            JsStaticFieldEntry* sf = &member->as.static_field;
+            JsClassMember* sf = member;
             if (sf->name && ce->name) {
                 sf->module_var_index = mt->module_var_count;
                 // Register as module const for ClassName.fieldName access pattern
@@ -1844,7 +1844,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
         for (int member_index = 0; member_index < ce->member_count; member_index++) {
             JsClassMember* member = &ce->members[member_index];
             if (member->kind != JS_CLASS_MEMBER_STATIC_FIELD) continue;
-            JsStaticFieldEntry* sf = &member->as.static_field;
+            JsClassMember* sf = member;
             if (sf->computed && sf->key_expr) {
                 sf->key_module_var_index = mt->module_var_count++;
                 log_debug("js-mir: static field computed key slot class=%.*s field=%d module_var[%d]",
@@ -1855,7 +1855,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
         for (int member_index = 0; member_index < ce->member_count; member_index++) {
             JsClassMember* member = &ce->members[member_index];
             if (member->kind != JS_CLASS_MEMBER_INSTANCE_FIELD) continue;
-            JsInstanceFieldEntry* inf = &member->as.instance_field;
+            JsClassMember* inf = member;
             if (inf->computed && inf->key_expr) {
                 inf->key_module_var_index = mt->module_var_count++;
                 log_debug("js-mir: instance field computed key slot class=%.*s field=%d module_var[%d]",
@@ -1877,7 +1877,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
             ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "",
             method_count, (void*)ce->constructor);
         for (int member_index = 0; member_index < ce->member_count; member_index++) {
-            JsClassMethodEntry* me = jm_class_member_method(ce, member_index);
+            JsClassMember* me = jm_class_member_method(ce, member_index);
             if (!me) continue;
             log_debug("js-mir:   member[%d]: '%.*s' static=%d ctor=%d",
                 member_index, me->name ? (int)me->name->len : 0, me->name ? me->name->chars : "(null)",
@@ -3837,7 +3837,7 @@ static void jm_finish_module_transpile(JsTranspiler* tp, JsMirTranspiler* mt,
 
 class JsModuleMirBuildScope {
 public:
-    JsCommonMirBuild build = {};
+    InputScriptBuildScope build = {};
     bool published = false;
 
     ~JsModuleMirBuildScope() {

@@ -273,7 +273,7 @@ static void jube_node_session_state_clear(NodeRuntimeSession* session) {
         session->commonjs_compile_cache = NULL;
     }
     if (session->diagnostics_channels) {
-        root_vector_unbind_external(&session->diagnostics_channels->roots);
+        root_vector_unbind_external(session->diagnostics_channels);
         mem_free(session->diagnostics_channels);
         session->diagnostics_channels = NULL;
     }
@@ -3735,7 +3735,8 @@ static int jube_host_data_closure_env_item_count(void* session, void* environmen
         return 0;
     }
     gc_header_t* header = gc_get_header(environment);
-    if (!gc_environment_is_item_slots(header) || header->alloc_size == 0) return 0;
+    if (gc_environment_layout_kind(header) != GC_ENVIRONMENT_LAYOUT_ITEM_SLOTS ||
+            header->alloc_size == 0) return 0;
     return (int)(header->alloc_size / (2 * sizeof(Item)));
 }
 
@@ -3793,8 +3794,7 @@ static Item jube_host_data_function_new(void* session, void* function_ptr, int p
     }
     Function* function = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     if (!function) return ItemNull;
-    function->type_id = LMD_TYPE_FUNC;
-    function->entry_abi = FN_ENTRY_ABI_FOREIGN;
+    function_header_init((FunctionHeader*)function, LMD_TYPE_FUNC, FN_ENTRY_ABI_FOREIGN);
     function->ptr = (fn_ptr)function_ptr;
     function->arity = (uint8_t)param_count;
     return (Item){.function = function};
@@ -5905,7 +5905,7 @@ JsDiagnosticsChannelState* jube_node_diagnostics_channel_state(void* session) {
             (JsDiagnosticsChannelState*)mem_calloc(1, sizeof(JsDiagnosticsChannelState),
                 MEM_CAT_SYSTEM);
         if (!state) return NULL;
-        root_vector_bind_external(&state->roots, (Context*)context,
+        root_vector_bind_external(state, (Context*)context,
             &state->namespace_object, 9, "diagnostics channel state");
         state->namespace_epoch = UINT64_MAX;
         node_session->diagnostics_channels = state;

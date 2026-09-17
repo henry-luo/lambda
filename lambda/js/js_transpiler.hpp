@@ -16,41 +16,30 @@ typedef struct JsTranspiler JsTranspiler;
 typedef NameScope JsScope;
 struct hashmap;
 
-// An AST owner keeps this claim across parsing and publication. Waiters close
-// their temporary scope in begin and re-enter ordinary lookup on READY.
-typedef struct JsCommonAstBuild {
-    InputCacheScope* scope;
-    InputScriptLease* lease;
-    InputScriptBuildClaim state;
-} JsCommonAstBuild;
-
 // Import/export plans retain only AST/name-pool data. The actual namespace
 // Items stay rooted by the single runtime module registry.
-typedef struct JsInterpImportBinding {
+typedef enum JsInterpModuleBindingKind {
+    JS_INTERP_MODULE_BINDING_IMPORT,
+    JS_INTERP_MODULE_BINDING_EXPORT,
+} JsInterpModuleBindingKind;
+
+typedef struct JsInterpModuleBinding {
     String* local_name;
     String* source;
     String* export_name;
     // Direct scope attaches the source binding after parsing. The AST tier
-    // uses it before ordinary environment lookup so imports remain live.
+    // uses it before ordinary environment lookup so imports remain live; it
+    // is NULL for export plans.
     NameEntry* entry;
-    bool namespace_import;
-    struct JsInterpImportBinding* next;
-} JsInterpImportBinding;
-
-typedef struct JsInterpExportBinding {
-    String* local_name;
-    String* export_name;
-    // Non-null for `export { local as exported } from source` and export-star
-    // entries; source writes propagate through the same module registry.
-    String* source;
+    JsInterpModuleBindingKind kind;
     // `export * as ns from source` exposes source's namespace object itself,
     // rather than one of its named live bindings.
-    bool namespace_export;
+    bool namespace_binding;
     // Star entries are synthesized only after the target namespace has been
     // linked. This distinguishes them from explicit named re-exports.
     bool star_export;
-    struct JsInterpExportBinding* next;
-} JsInterpExportBinding;
+    struct JsInterpModuleBinding* next;
+} JsInterpModuleBinding;
 
 struct JsAstDefinition;
 
@@ -98,8 +87,8 @@ struct JsScript : Script {
     bool es_module_scope_initialized;
     bool strict_js;                 // true = reject TS syntax (pure JS mode)
     struct hashmap* type_registry; // TS name → Type* facts for this JS/TS unit
-    JsInterpImportBinding* interp_imports;
-    JsInterpExportBinding* interp_exports;
+    JsInterpModuleBinding* interp_imports;
+    JsInterpModuleBinding* interp_exports;
     // A common AST template never receives execution-local synthetic nodes or
     // callable facts. Reused instances retain those in this overlay.
     Pool* ast_overlay_pool;
@@ -192,10 +181,10 @@ JsScript* js_script_adopt_transpiler(JsTranspiler* tp, Runtime* runtime,
 JsScript* js_common_ast_cache_lookup(Runtime* runtime, const char* source,
                                      size_t source_length, const char* reference,
                                      bool strict, bool typescript_profile);
-InputScriptBuildClaim js_common_ast_cache_begin_build(JsCommonAstBuild* build,
+InputScriptBuildClaim js_common_ast_cache_begin_build(InputScriptBuildScope* build,
     const char* source, size_t source_length, const char* reference,
     bool strict, bool typescript_profile);
-void js_common_ast_cache_complete_build(JsCommonAstBuild* build,
+void js_common_ast_cache_complete_build(InputScriptBuildScope* build,
     bool published, bool poison);
 bool js_common_ast_cache_admit(Runtime* runtime, JsScript* script, const char* source,
                                size_t source_length, const char* reference,
@@ -265,14 +254,6 @@ struct JsMirLeaseSessionStats {
     size_t retained_metadata_bytes;
 };
 
-// A MIR owner retains this only through compile-and-publication. The adapter
-// transfers its scope to the execution owner after a successful publication.
-struct JsCommonMirBuild {
-    InputCacheScope* scope;
-    InputScriptLease* lease;
-    InputScriptBuildClaim state;
-};
-
 JsMirLeaseSession* js_mir_lease_session_create(void);
 void js_mir_lease_session_close(JsMirLeaseSession* session);
 const JsPreambleState* js_mir_lease_session_lookup(
@@ -286,11 +267,11 @@ const JsPreambleState* js_mir_lease_session_adopt(
 InputScriptBuildClaim js_mir_lease_session_begin_build(
     JsMirLeaseSession* session, bool preamble_mode,
     const char* source, size_t source_len, const char* filename,
-    const JsPreambleState* preamble, JsCommonMirBuild* build);
+    const JsPreambleState* preamble, InputScriptBuildScope* build);
 const JsPreambleState* js_mir_lease_session_adopt_build(
-    JsMirLeaseSession* session, JsCommonMirBuild* build,
+    JsMirLeaseSession* session, InputScriptBuildScope* build,
     JsPreambleState* compiled_state);
-void js_mir_lease_session_complete_build(JsCommonMirBuild* build,
+void js_mir_lease_session_complete_build(InputScriptBuildScope* build,
     bool published, bool poison);
 void js_mir_lease_session_record_instantiation(JsMirLeaseSession* session);
 
@@ -303,11 +284,11 @@ const JsModuleMirArtifact* js_module_mir_cache_adopt(const char* source,
     size_t source_len, const char* filename, JsModuleMirArtifact* compiled,
     struct InputCacheScope** out_scope);
 InputScriptBuildClaim js_module_mir_cache_begin_build(const char* source,
-    size_t source_len, const char* filename, JsCommonMirBuild* build);
+    size_t source_len, const char* filename, InputScriptBuildScope* build);
 const JsModuleMirArtifact* js_module_mir_cache_adopt_build(
-    JsCommonMirBuild* build, JsModuleMirArtifact* compiled,
+    InputScriptBuildScope* build, JsModuleMirArtifact* compiled,
     struct InputCacheScope** out_scope);
-void js_module_mir_cache_complete_build(JsCommonMirBuild* build,
+void js_module_mir_cache_complete_build(InputScriptBuildScope* build,
     bool published, bool poison);
 // Link exact module source generations so a changed static dependency retires
 // every importer before its cached MIR can be reused (D8.5.1v2).

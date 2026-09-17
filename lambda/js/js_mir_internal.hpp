@@ -721,7 +721,7 @@ int jm_capture_env_slot(FnCapture* capture, int dense_slot);
 void jm_emit_class_static_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
     MIR_reg_t key, MIR_reg_t value, bool private_brand);
 void jm_emit_class_static_named_field(JsMirTranspiler* mt, MIR_reg_t cls_obj,
-    JsStaticFieldEntry* sf, MIR_reg_t value);
+    JsClassMember* sf, MIR_reg_t value);
 MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item);
 MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr);
 // JS side of the shared structural lowering hooks installed on MirEmitter.
@@ -739,7 +739,7 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node);
 void jm_scope_env_reload_vars(JsMirTranspiler* mt);
 void jm_env_reload_shared_captures(JsMirTranspiler* mt);
 void jm_emit_error_lane_propagate_check(JsMirTranspiler* mt);
-void jm_emit_class_static_field(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce, JsStaticFieldEntry* sf);
+void jm_emit_class_static_field(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce, JsClassMember* sf);
 void jm_emit_class_static_block(JsMirTranspiler* mt, MIR_reg_t cls_obj,
     JsClassEntry* ce, JsAstNode* block);
 void jm_emit_class_static_initializers(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce,

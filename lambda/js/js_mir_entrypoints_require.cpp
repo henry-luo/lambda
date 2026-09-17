@@ -166,7 +166,7 @@ static Item js_mir_execute_retained_ast_script(Runtime* runtime, JsScript* scrip
 static Item js_mir_execute_ast_script(Runtime* runtime, JsTranspiler* tp,
         char* owned_source, const char* js_source, size_t js_source_len,
         const char* filename, uint64_t* result_home, bool test262_native_harness,
-        JsCommonAstBuild* cache_build) {
+        InputScriptBuildScope* cache_build) {
     // The AST tier owns the retained JsScript, but uses the same source parse,
     // early-error pass, Runtime catalog, and EvalContext setup as MIR lowering.
     jm_clear_active_js_transpile(tp, NULL, NULL);
@@ -728,7 +728,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         js_source_len += (size_t)off;
     }
 
-    JsCommonAstBuild ast_cache_build = {};
+    InputScriptBuildScope ast_cache_build = {};
     if (js_ast_interpreter_requested()) {
         JsScript* cached = js_common_ast_cache_lookup(runtime, js_source, js_source_len,
             filename, typescript_profile, typescript_profile);

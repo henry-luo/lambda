@@ -406,8 +406,8 @@ static bool jm_collect_indexed_class_members(JsMirTranspiler* mt,
                 if (entry->member_count >= entry->member_capacity) return false;
                 JsClassMember* class_member = &entry->members[entry->member_count++];
                 class_member->kind = JS_CLASS_MEMBER_STATIC_FIELD;
-                JsStaticFieldEntry* static_field =
-                    &class_member->as.static_field;
+                JsClassMember* static_field =
+                    class_member;
                 static_field->computed = field->computed;
                 static_field->key_expr = field->key;
                 // D6.2.2v2: retain literal member spellings for initialization.
@@ -426,8 +426,8 @@ static bool jm_collect_indexed_class_members(JsMirTranspiler* mt,
                 if (entry->member_count >= entry->member_capacity) return false;
                 JsClassMember* class_member = &entry->members[entry->member_count++];
                 class_member->kind = JS_CLASS_MEMBER_INSTANCE_FIELD;
-                JsInstanceFieldEntry* instance_field =
-                    &class_member->as.instance_field;
+                JsClassMember* instance_field =
+                    class_member;
                 instance_field->computed = field->computed;
                 instance_field->key_expr = field->key;
                 instance_field->name = !field->computed
@@ -451,7 +451,7 @@ static bool jm_collect_indexed_class_members(JsMirTranspiler* mt,
                 if (entry->member_count >= entry->member_capacity) return false;
                 JsClassMember* class_member = &entry->members[entry->member_count++];
                 class_member->kind = JS_CLASS_MEMBER_STATIC_BLOCK;
-                class_member->as.static_block = block->body;
+                class_member->static_block = block->body;
                 log_debug("js-mir: class '%.*s' static block #%d",
                     class_node->name ? (int)class_node->name->len : 5,
                     class_node->name ? class_node->name->chars : "anon?",
@@ -477,7 +477,7 @@ static bool jm_collect_indexed_class_members(JsMirTranspiler* mt,
 
         JsClassMember* class_member = &entry->members[entry->member_count++];
         class_member->kind = JS_CLASS_MEMBER_METHOD;
-        JsClassMethodEntry* method_entry = &class_member->as.method;
+        JsClassMember* method_entry = class_member;
         method_entry->name = method_name;
         method_entry->fc = collected;
         method_entry->param_count = ast_linked_node_count(
@@ -1149,148 +1149,125 @@ bool jm_add_chain_has_string(JsAstNode* expr) {
 
 // Classify one return node. The indexed owner filter below excludes nested
 // functions, so this helper has no recursive AST traversal of its own.
-static void jm_collect_return_type(JsMirTranspiler* mt, JsAstNode* node,
-        JsFuncCollected* fc, TypeId* collected, int* count, int max_count) {
-    if (!node || node->node_type != AST_NODE_RETURN_STAM ||
-            !count || *count >= max_count) return;
-    JsReturnNode* ret = (JsReturnNode*)node;
-    if (!ret->argument) {
-        collected[(*count)++] = LMD_TYPE_NULL;
-        return;
+static Type* jm_type_from_effective_id(TypeId type_id) {
+    switch (type_id) {
+    case LMD_TYPE_INT: return &TYPE_INT;
+    case LMD_TYPE_FLOAT: return &TYPE_FLOAT;
+    case LMD_TYPE_BOOL: return &TYPE_BOOL;
+    case LMD_TYPE_STRING: return &TYPE_STRING;
+    case LMD_TYPE_NULL: return &TYPE_NULL;
+    case LMD_TYPE_DECIMAL: return &TYPE_DECIMAL;
+    default: return &TYPE_ANY;
     }
-    JsAstNode* expr = ret->argument;
-    TypeId t = LMD_TYPE_ANY;
-    if (expr->node_type == AST_NODE_LITERAL) {
-        JsLiteralNode* lit = (JsLiteralNode*)expr;
-        if (lit->literal_type == AST_LITERAL_NUMBER) {
-            t = lit->is_bigint ? LMD_TYPE_DECIMAL : LMD_TYPE_FLOAT;
-        } else if (lit->literal_type == AST_LITERAL_BOOLEAN) {
-            t = LMD_TYPE_BOOL;
-        } else if (lit->literal_type == AST_LITERAL_STRING) {
-            t = LMD_TYPE_STRING;
-        }
-    } else if (expr->node_type == AST_NODE_IDENT) {
-        JsIdentifierNode* id = (JsIdentifierNode*)expr;
-        JsAstNode* param = fc && fc->node ? fc->node->params : NULL;
-        for (int pi = 0; param && fc && pi < JM_PARAM_COUNT(fc);
-                pi++, param = param->next) {
-            JsIdentifierNode* parameter_id =
-                js_ast_parameter_binding_identifier(param);
-            if (id->entry && parameter_id && id->entry == parameter_id->entry) {
-                TypeId param_type = jm_param_type(fc, pi);
-                if (param_type == LMD_TYPE_INT || param_type == LMD_TYPE_FLOAT) t = param_type;
-                break;
+}
+
+static Type* jm_return_expression_contract(JsMirTranspiler* mt,
+        JsFuncCollected* fc, JsAstNode* expression) {
+    if (!expression) return &TYPE_NULL;
+    if (expression->type && expression->type->type_id != LMD_TYPE_ANY) {
+        return expression->type;
+    }
+    if (expression->node_type == AST_NODE_IDENT && fc && fc->node) {
+        JsIdentifierNode* identifier = (JsIdentifierNode*)expression;
+        JsAstNode* param = fc->node->params;
+        for (int index = 0; param && index < JM_PARAM_COUNT(fc);
+                index++, param = param->next) {
+            JsIdentifierNode* binding = js_ast_parameter_binding_identifier(param);
+            if (identifier->entry && binding && identifier->entry == binding->entry) {
+                return jm_type_from_effective_id(jm_param_type(fc, index));
             }
         }
-    } else if (expr->node_type == AST_NODE_BINARY) {
-        JsBinaryNode* bin = (JsBinaryNode*)expr;
-        switch (bin->op) {
-        case OPERATOR_LT: case OPERATOR_LE: case OPERATOR_GT: case OPERATOR_GE:
-        case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_JS_STRICT_EQ: case OPERATOR_JS_STRICT_NE:
-            t = LMD_TYPE_BOOL; break;
-        case OPERATOR_ADD:
-            if (!jm_indexed_expr_has_bigint_literal(mt, expr) &&
-                    (jm_add_chain_has_string(bin->left) || jm_add_chain_has_string(bin->right)))
-                t = LMD_TYPE_STRING;
-            break;
-        case OPERATOR_SUB: case OPERATOR_MUL: case OPERATOR_MOD: case OPERATOR_DIV: case OPERATOR_JS_EXP:
-            t = jm_indexed_expr_has_bigint_literal(mt, expr) ? LMD_TYPE_ANY : LMD_TYPE_FLOAT;
-            break;
-        default: break;
-        }
     }
-    collected[(*count)++] = t;
+    return jm_type_from_effective_id(jm_get_effective_type(mt, expression));
+}
+
+// Return contracts are joined through Lambda type operations. The native TypeId
+// is derived afterwards, so no JS-only TypeId join becomes a second authority.
+static void jm_collect_return_contract(JsMirTranspiler* mt, JsAstNode* node,
+        JsFuncCollected* fc, Type** collected, int* count, int max_count) {
+    if (!node || node->node_type != AST_NODE_RETURN_STAM ||
+            !count || *count >= max_count) return;
+    JsReturnNode* returned = (JsReturnNode*)node;
+    collected[(*count)++] = jm_return_expression_contract(mt, fc,
+        returned->argument);
+}
+
+static TypeId jm_native_return_type_from_contract(Type* contract) {
+    if (!contract) return LMD_TYPE_ANY;
+    switch (contract->type_id) {
+    case LMD_TYPE_INT:
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_BOOL:
+    case LMD_TYPE_STRING:
+    case LMD_TYPE_NULL:
+        return contract->type_id;
+    default:
+        return LMD_TYPE_ANY;
+    }
+}
+
+static void jm_publish_return_contract(JsFuncCollected* fc, Type* contract) {
+    FnAnalysis* analysis = jm_function_analysis(fc);
+    analysis->js_return_contract = contract ? contract : &TYPE_ANY;
+    analysis->js_return_type = jm_native_return_type_from_contract(
+        analysis->js_return_contract);
 }
 
 void jm_infer_return_type(JsMirTranspiler* mt, JsFuncCollected* fc) {
+    if (!fc || !fc->node) return;
     JsFunctionNode* fn = fc->node;
-    JM_JS_FACT(fc, return_type) = LMD_TYPE_ANY;
+    jm_publish_return_contract(fc, &TYPE_ANY);
 
-    // Phase 3.4: check for explicit TS return type annotation
+    // A declared contract is already a shared Type owner. It remains visible
+    // even if it cannot select a raw JS native lane (D8.2.4-D8.2.6).
     if (fn->declared_return_type) {
-        TypeId declared = fn->declared_return_type->type_id;
-        if (declared == LMD_TYPE_FLOAT || declared == LMD_TYPE_INT ||
-                declared == LMD_TYPE_STRING || declared == LMD_TYPE_BOOL) {
-            JM_JS_FACT(fc, return_type) = declared;
-            log_debug("js-mir P3.4: annotation-based return type for %s: %s",
-                fn->name ? fn->name->chars : "(anon)",
-                JM_JS_FACT(fc, return_type) == LMD_TYPE_INT ? "INT" : JM_JS_FACT(fc, return_type) == LMD_TYPE_FLOAT ? "FLOAT" : "ANY");
-            return;
-        }
-    }
-
-    if (jm_indexed_expr_has_bigint_literal(mt, fn->body)) {
-        JM_JS_FACT(fc, return_type) = LMD_TYPE_ANY;
-        log_debug("js-mir P4: boxed return for %s because body uses BigInt literals", fc->name);
+        jm_publish_return_contract(fc, fn->declared_return_type);
+        log_debug("js-mir return contract: annotation for %s", fc->name);
         return;
     }
 
-    // For expression-body arrow functions: infer from the expression directly
     if (fn->body && fn->body->node_type != AST_NODE_BLOCK) {
-        // Arrow function with expression body
-        if (fn->body->node_type == AST_NODE_LITERAL) {
-            JsLiteralNode* lit = (JsLiteralNode*)fn->body;
-            if (lit->literal_type == AST_LITERAL_NUMBER) {
-                if (lit->is_bigint) {
-                    JM_JS_FACT(fc, return_type) = LMD_TYPE_DECIMAL;
-                    return;
-                }
-                JM_JS_FACT(fc, return_type) = LMD_TYPE_FLOAT;
-            }
-        }
+        jm_publish_return_contract(fc, jm_return_expression_contract(mt, fc,
+            fn->body));
         return;
     }
 
-    TypeId collected[32];
+    Type* collected[32] = {};
     int count = 0;
     if (mt && mt->tp) {
         AstIndex* index = &mt->tp->ast_index;
-        AstNodeId fn_node_id = ast_index_find(index, (AstNode*)fn);
-        AstFunctionId function_id = fn_node_id == AST_NODE_ID_INVALID
-            ? AST_FUNCTION_ID_INVALID : index->owner_functions[fn_node_id];
-        for (uint32_t i = 0; i < index->count && count < 32; i++) {
-            if (index->owner_functions[i] != function_id) continue;
-            jm_collect_return_type(mt, index->nodes[i], fc,
-                collected, &count, 32);
+        AstNodeId function_node_id = ast_index_find(index, (AstNode*)fn);
+        AstFunctionId function_id = function_node_id == AST_NODE_ID_INVALID
+            ? AST_FUNCTION_ID_INVALID : index->owner_functions[function_node_id];
+        for (uint32_t index_id = 0; index_id < index->count && count < 32;
+                index_id++) {
+            if (index->owner_functions[index_id] != function_id) continue;
+            jm_collect_return_contract(mt, index->nodes[index_id], fc, collected,
+                &count, 32);
         }
     }
 
     if (count == 0) {
-        JM_JS_FACT(fc, return_type) = LMD_TYPE_NULL; // no return statements → returns undefined
+        jm_publish_return_contract(fc, &TYPE_NULL);
         return;
     }
 
-    // Unify: all concrete types must agree. If ANY is present (unresolvable
-    // expressions like function calls), the return type must stay ANY —
-    // we can't assume what the call returns at runtime.
-    TypeId unified = LMD_TYPE_ANY;
-    bool has_concrete = false;
-    bool has_any = false;
-    for (int i = 0; i < count; i++) {
-        if (collected[i] == LMD_TYPE_ANY) { has_any = true; continue; }
-        if (collected[i] == LMD_TYPE_NULL) continue; // undefined returns are compatible
-        if (!has_concrete) {
-            unified = collected[i];
-            has_concrete = true;
-        } else if (collected[i] != unified) {
-            // Conflicting types
-            if ((unified == LMD_TYPE_INT && collected[i] == LMD_TYPE_FLOAT) ||
-                (unified == LMD_TYPE_FLOAT && collected[i] == LMD_TYPE_INT)) {
-                unified = LMD_TYPE_FLOAT; // int + float → float
-            } else {
-                JM_JS_FACT(fc, return_type) = LMD_TYPE_ANY;
-                return;
-            }
+    Type* joined = NULL;
+    Pool* pool = mt && mt->tp ? mt->tp->pool : NULL;
+    for (int index = 0; index < count; index++) {
+        Type* next = collected[index] ? collected[index] : &TYPE_ANY;
+        if (!joined) {
+            joined = next;
+        } else if (joined->type_id == LMD_TYPE_ANY ||
+                next->type_id == LMD_TYPE_ANY || !pool) {
+            joined = &TYPE_ANY;
+        } else {
+            joined = lambda_type_union_normalized(pool, joined, next);
+            if (!joined) joined = &TYPE_ANY;
         }
     }
-
-    if (has_concrete && !has_any) {
-        JM_JS_FACT(fc, return_type) = unified;
-    }
-
-    log_debug("js-mir P4: inferred return type for %s: %s", fc->name,
-        JM_JS_FACT(fc, return_type) == LMD_TYPE_INT ? "INT" :
-        JM_JS_FACT(fc, return_type) == LMD_TYPE_FLOAT ? "FLOAT" : "ANY");
+    jm_publish_return_contract(fc, joined);
+    log_debug("js-mir return contract: inferred %s", fc->name);
 }
 
 // T12-2 keeps this proof local to return inference. It recognizes only Number

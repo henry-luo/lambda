@@ -786,39 +786,39 @@ typedef void (*JsRuntimeRootVectorVisitor)(RootVector* roots, Item* slots,
 static void js_runtime_state_visit_root_vectors(JsRuntimeState* state,
         JsRuntimeRootVectorVisitor visit, void* data) {
     if (!state || !visit) return;
-    visit(&state->stream.roots, &state->stream.namespace_object, 45,
+    visit(&state->stream, &state->stream.namespace_object, 45,
         "stream keys, prototypes, and namespaces", data);
-    visit(&state->clipboard.roots, &state->clipboard.blob_prototype, 7,
+    visit(&state->clipboard, &state->clipboard.blob_prototype, 7,
         "clipboard prototypes and drag session", data);
-    visit(&state->dom.roots, &state->dom.implementation, 4,
+    visit(&state->dom, &state->dom.implementation, 4,
         "DOM singleton wrappers", data);
     if (state->string_caches) {
-        visit(&state->string_caches->roots,
+        visit(state->string_caches,
             &state->string_caches->last_four_byte_escape,
             662 + JS_ASCII_SUBSTRING_CACHE_CAPACITY,
             "realm string caches", data);
     }
     if (state->assert) {
-        visit(&state->assert->roots, &state->assert->namespace_object, 5,
+        visit(state->assert, &state->assert->namespace_object, 5,
             "assert namespaces and cached keys", data);
     }
     if (state->test262_agent) {
-        visit(&state->test262_agent->roots, &state->test262_agent->object, 1,
+        visit(state->test262_agent, &state->test262_agent->object, 1,
             "Test262 agent object", data);
     }
     if (state->process) {
-        visit(&state->process->roots, &state->process->argv, 5,
+        visit(state->process, &state->process->argv, 5,
             "process realm state", data);
     }
-    visit(&state->promises.roots, &state->promises.unhandled_storage, 3,
+    visit(&state->promises, &state->promises.unhandled_storage, 3,
         "Promise unhandled queue and domain state", data);
-    visit(&state->cluster.roots, &state->cluster.primary_options, 1,
+    visit(&state->cluster, &state->cluster.primary_options, 1,
         "cluster primary options", data);
     // the retired throw slot must not leave the following runtime IDs in the root span.
-    visit(&state->async_await.roots, &state->async_await.resolved_value, 1,
+    visit(&state->async_await, &state->async_await.resolved_value, 1,
         "async await result handoff", data);
     if (state->async_hooks) {
-        visit(&state->async_hooks->roots, &state->async_hooks->root_resource, 2,
+        visit(state->async_hooks, &state->async_hooks->root_resource, 2,
             "async hooks current resources", data);
     }
     visit(&state->event_loop_queue_roots, state->event_loop->queue_storage, 3,
@@ -962,7 +962,7 @@ static void js_runtime_state_clear_root_vector(RootVector* roots, Item*,
     bool retain_cluster_primary_options = options_data &&
         *(const bool*)options_data;
     if (retain_cluster_primary_options &&
-            roots == &js_runtime_state.cluster.roots) {
+            roots == &js_runtime_state.cluster) {
         return;
     }
     root_vector_clear_external(roots);

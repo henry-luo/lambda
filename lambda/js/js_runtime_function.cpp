@@ -33,8 +33,7 @@ extern "C" JsFunction* js_alloc_gc_function_object(void) {
     JsFunction* fn = (JsFunction*)heap_calloc_class(
         sizeof(JsFunction), LMD_TYPE_FUNC, JS_FUNCTION_SIZE_CLASS);
     if (!fn) return NULL;
-    fn->type_id = LMD_TYPE_FUNC;
-    fn->entry_abi = FN_ENTRY_ABI_JS_FUNCTION;
+    js_function_init_header(fn);
     return fn;
 }
 
@@ -759,10 +758,9 @@ static JsFunction* js_alloc_function_storage(bool gc_backed) {
 }
 
 static void js_function_init_common(JsFunction* fn) {
-    fn->type_id = LMD_TYPE_FUNC;
-    // D6.2.2v2: every callable wrapper uses the canonical layout marker;
-    // legacy arity/target decoding otherwise silently drops compiled args.
-    fn->entry_abi = FN_ENTRY_ABI_JS_FUNCTION;
+    // D6.2.2v2: every callable wrapper has the shared layout marker before
+    // any JS-only capability or property state is published.
+    js_function_init_header(fn);
     fn->prototype = ItemNull;
 }
 
@@ -1531,7 +1529,8 @@ extern "C" void js_env_rehome_scalars(Item* env) {
     if (!env || !context || !context->heap || !context->heap->gc ||
             !gc_is_managed(context->heap->gc, env)) return;
     gc_header_t* header = gc_get_header(env);
-    if (!gc_environment_is_item_slots(header) || header->alloc_size == 0) return;
+    if (gc_environment_layout_kind(header) != GC_ENVIRONMENT_LAYOUT_ITEM_SLOTS ||
+            header->alloc_size == 0) return;
     int64_t count = (int64_t)(header->alloc_size / (2 * sizeof(Item)));
     // Generator environments mix boxed Items with raw state/spill words. Only
     // tagged pointers into the active number stack are valid scalar Items;

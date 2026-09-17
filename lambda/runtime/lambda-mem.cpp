@@ -804,7 +804,8 @@ extern "C" void* heap_calloc_closure_env(size_t size) {
     if (size > SIZE_MAX / 2) return NULL;
     // Closure slots own a parallel scalar tail so captured wide numbers never
     // retain pointers into a completed invocation's number frame.
-    return gc_heap_calloc(context->heap->gc, size * 2, GC_TYPE_ENVIRONMENT);
+    return gc_environment_calloc(context->heap->gc, size * 2,
+        GC_ENVIRONMENT_LAYOUT_ITEM_SLOTS);
 }
 
 // Specialized allocator for JIT: uses bump-pointer fast path with pre-computed

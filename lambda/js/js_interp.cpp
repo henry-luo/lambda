@@ -82,9 +82,9 @@ struct JsInterpFrame {
     int64_t async_await_skip;
     Item async_resume_input;
     Item async_await_values;
-    struct JsInterpGeneratorListContinuation** async_list_continuations;
-    struct JsInterpGeneratorLoopContinuation** async_loop_continuations;
-    struct JsInterpTryContinuation** async_try_continuations;
+    JsInterpContinuation** async_list_continuations;
+    JsInterpContinuation** async_loop_continuations;
+    JsInterpContinuation** async_try_continuations;
     JsGeneratorStateRecord* generator_state;
 };
 
@@ -149,25 +149,11 @@ enum JsInterpLoopResumePhase : uint8_t {
     JS_LOOP_RESUME_FOR_AWAIT_CLOSE,
 };
 
-struct JsInterpGeneratorLoopContinuation {
-    JsAstNode* loop;
-    JsInterpEnv* env;
-    Item iterator;
-    Item for_in_object;
-    // An awaited `next()` result survives until its `value` await resumes.
-    Item iteration_result;
-    // Async IteratorClose resumes after `return()` settles with the original
-    // completion still intact, because a source throw has priority over close.
-    Item close_completion_value;
-    const char* close_completion_label;
-    int close_completion_label_len;
-    uint8_t close_completion_kind;
-    // Ledger position at the suspended loop phase. A bare loop body has no
-    // list cursor to restore it, so the loop carries its replay position.
-    int64_t body_start_ledger;
-    uint8_t resume_phase;
-    bool is_for_of;
-    struct JsInterpGeneratorLoopContinuation* next;
+enum JsInterpContinuationKind : uint8_t {
+    JS_INTERP_CONTINUATION_LOOP,
+    JS_INTERP_CONTINUATION_TRY,
+    JS_INTERP_CONTINUATION_LIST,
+    JS_INTERP_CONTINUATION_ARRAY_BINDING,
 };
 
 // Where a suspended try statement must re-enter. A suspension in the *block*
@@ -179,64 +165,66 @@ enum JsInterpTryResumePhase : uint8_t {
     JS_TRY_RESUME_FINALLY,
 };
 
-struct JsInterpTryContinuation {
-    JsAstNode* node;
-    // The catch parameter's own record, so a closure created in the handler
-    // keeps its identity across the suspension.
-    JsInterpEnv* catch_env;
-    // CATCH: the thrown value the handler was entered with.
-    // FINALLY: the value of the block/catch completion the finalizer carries.
-    Item completion_value;
-    const char* label;
-    int label_len;
-    // Ledger position when the resumed clause began.
-    int64_t ledger;
-    uint8_t completion_kind;
-    uint8_t resume_phase;
-    struct JsInterpTryContinuation* next;
-};
+// All suspension records share allocation, linking, and GC ownership. The
+// discriminator selects compact storage for exactly one suspension payload.
+struct JsInterpContinuation {
+    JsInterpContinuationKind kind;
+    JsInterpContinuation* next;
 
-// Generators and async functions share one suspension model: replay the body
-// from a durable activation, satisfy already-observed yields/awaits from a
-// ledger, and keep a statement cursor per enclosing list so completed
-// statements are not re-executed. Only the resume *signal* differs.
-struct JsInterpGeneratorListContinuation {
-    JsAstNode* statements;
-    JsAstNode* next_statement;
-    JsInterpEnv* env;
-    // Yield/await ledger position at the point where `next_statement` begins.
-    int64_t yield_count_before_next_statement;
-    // A nested yield must re-enter its containing statement with the replay
-    // ledger, while a terminal yield can continue at the following statement.
-    // Await cursors always replay: an await never owns its statement's
-    // completion the way a terminal `yield expr;` does.
-    bool replay_current_statement;
-    // Only the innermost list observes a resumed throw or return. Outer
-    // cursors merely restore the structural path to that list.
-    bool receives_resume_input;
-    struct JsInterpGeneratorListContinuation* next;
-};
-
-struct JsInterpGeneratorArrayBindingContinuation {
-    JsAstNode* pattern;
-    JsAstNode* element;
-    Item iterator;
-    Item value;
-    Item reference_object;
-    Item reference_key;
-    JsPropertyLane reference_lane;
-    bool iterator_done;
-    bool value_ready;
-    bool has_reference;
-    bool reference_super_property;
-    bool reference_key_deferred;
-    struct JsInterpGeneratorArrayBindingContinuation* next;
+    union {
+        struct {
+            JsAstNode* loop;
+            JsInterpEnv* env;
+            Item iterator;
+            Item for_in_object;
+            Item iteration_result;
+            Item close_completion_value;
+            const char* close_completion_label;
+            int close_completion_label_len;
+            int64_t body_start_ledger;
+            uint8_t close_completion_kind;
+            uint8_t resume_phase;
+            bool is_for_of;
+        } loop;
+        struct {
+            JsAstNode* node;
+            JsInterpEnv* catch_env;
+            Item completion_value;
+            const char* label;
+            int label_len;
+            int64_t ledger;
+            uint8_t completion_kind;
+            uint8_t resume_phase;
+        } tried;
+        struct {
+            JsAstNode* statements;
+            JsAstNode* next_statement;
+            JsInterpEnv* env;
+            int64_t yield_count_before_next_statement;
+            bool replay_current_statement;
+            bool receives_resume_input;
+        } list;
+        struct {
+            JsAstNode* pattern;
+            JsAstNode* element;
+            Item iterator;
+            Item value;
+            Item reference_object;
+            Item reference_key;
+            JsPropertyLane reference_lane;
+            bool iterator_done;
+            bool value_ready;
+            bool has_reference;
+            bool reference_super_property;
+            bool reference_key_deferred;
+        } array_binding;
+    } payload;
 };
 
 // The suspension records live on the generator or the async context, whichever
 // owns this activation. Both walkers reach them through these two accessors so
 // the cursor logic exists once.
-static JsInterpGeneratorListContinuation** js_interp_list_head(
+static JsInterpContinuation** js_interp_list_head(
         JsInterpFrame* frame) {
     if (!frame) return NULL;
     if (frame->generator_state) return &frame->generator_state->ast_list_continuation;
@@ -263,47 +251,55 @@ static void js_interp_advance_ledger(JsInterpFrame* frame, int64_t position) {
     if (seen && *seen < position) *seen = position;
 }
 
-static void js_interp_list_pop(JsInterpGeneratorListContinuation** head) {
+static JsInterpContinuation* js_interp_continuation_new(
+        JsInterpContinuationKind kind) {
+    JsInterpContinuation* continuation = (JsInterpContinuation*)mem_calloc(1,
+        sizeof(*continuation), MEM_CAT_JS_RUNTIME);
+    if (continuation) continuation->kind = kind;
+    return continuation;
+}
+
+static void js_interp_continuation_pop(JsInterpContinuation** head) {
     if (!head || !*head) return;
-    JsInterpGeneratorListContinuation* removed = *head;
+    JsInterpContinuation* removed = *head;
     *head = removed->next;
     mem_free(removed);
 }
 
-static JsInterpGeneratorListContinuation* js_interp_list_find(
-        JsInterpGeneratorListContinuation* list, JsAstNode* statements) {
+static void js_interp_continuation_clear(JsInterpContinuation** head) {
+    if (!head) return;
+    while (*head) js_interp_continuation_pop(head);
+}
+
+static JsInterpContinuation* js_interp_list_find(
+        JsInterpContinuation* list, JsAstNode* statements) {
     for (; list; list = list->next) {
-        if (list->statements == statements) return list;
+        if (list->payload.list.statements == statements) return list;
     }
     return NULL;
 }
 
-static void js_interp_list_clear(JsInterpGeneratorListContinuation** head) {
-    if (!head) return;
-    while (*head) js_interp_list_pop(head);
-}
-
-static JsInterpTryContinuation** js_interp_try_head(JsInterpFrame* frame) {
+static JsInterpContinuation** js_interp_try_head(JsInterpFrame* frame) {
     if (!frame) return NULL;
     if (frame->generator_state) return &frame->generator_state->ast_try_continuations;
     return frame->async_try_continuations;
 }
 
-static JsInterpTryContinuation* js_interp_find_try(JsInterpFrame* frame,
+static JsInterpContinuation* js_interp_find_try(JsInterpFrame* frame,
         JsAstNode* node) {
-    JsInterpTryContinuation** head = js_interp_try_head(frame);
-    for (JsInterpTryContinuation* current = head ? *head : NULL; current;
+    JsInterpContinuation** head = js_interp_try_head(frame);
+    for (JsInterpContinuation* current = head ? *head : NULL; current;
             current = current->next) {
-        if (current->node == node) return current;
+        if (current->payload.tried.node == node) return current;
     }
     return NULL;
 }
 
 static void js_interp_remove_try(JsInterpFrame* frame, JsAstNode* node) {
-    JsInterpTryContinuation** link = js_interp_try_head(frame);
+    JsInterpContinuation** link = js_interp_try_head(frame);
     while (link && *link) {
-        if ((*link)->node == node) {
-            JsInterpTryContinuation* removed = *link;
+        if ((*link)->payload.tried.node == node) {
+            JsInterpContinuation* removed = *link;
             *link = removed->next;
             mem_free(removed);
             return;
@@ -312,77 +308,62 @@ static void js_interp_remove_try(JsInterpFrame* frame, JsAstNode* node) {
     }
 }
 
-static void js_interp_try_clear(JsInterpTryContinuation** head) {
-    if (!head) return;
-    while (*head) {
-        JsInterpTryContinuation* removed = *head;
-        *head = removed->next;
-        mem_free(removed);
-    }
-}
-
-static void js_interp_try_trace(JsInterpTryContinuation* list, gc_heap_t* gc) {
+static void js_interp_continuation_trace(JsInterpContinuation* list,
+        gc_heap_t* gc) {
     for (; list; list = list->next) {
-        gc_mark_item(gc, list->completion_value.item);
-        if (list->catch_env) gc_mark_object_ptr(gc, list->catch_env);
+        switch (list->kind) {
+        case JS_INTERP_CONTINUATION_LOOP:
+            gc_mark_item(gc, list->payload.loop.iterator.item);
+            gc_mark_item(gc, list->payload.loop.for_in_object.item);
+            gc_mark_item(gc, list->payload.loop.iteration_result.item);
+            gc_mark_item(gc, list->payload.loop.close_completion_value.item);
+            if (list->payload.loop.env) gc_mark_object_ptr(gc, list->payload.loop.env);
+            break;
+        case JS_INTERP_CONTINUATION_TRY:
+            gc_mark_item(gc, list->payload.tried.completion_value.item);
+            if (list->payload.tried.catch_env) {
+                gc_mark_object_ptr(gc, list->payload.tried.catch_env);
+            }
+            break;
+        case JS_INTERP_CONTINUATION_LIST:
+            if (list->payload.list.env) gc_mark_object_ptr(gc, list->payload.list.env);
+            break;
+        case JS_INTERP_CONTINUATION_ARRAY_BINDING:
+            gc_mark_item(gc, list->payload.array_binding.iterator.item);
+            gc_mark_item(gc, list->payload.array_binding.value.item);
+            if (list->payload.array_binding.has_reference) {
+                gc_mark_item(gc, list->payload.array_binding.reference_object.item);
+                gc_mark_item(gc, list->payload.array_binding.reference_key.item);
+            }
+            break;
+        }
     }
 }
 
 void js_interp_generator_clear_continuations(JsGeneratorStateRecord* state) {
     if (!state) return;
-    JsInterpGeneratorLoopContinuation* loop = state->ast_loop_continuations;
-    while (loop) {
-        JsInterpGeneratorLoopContinuation* next = loop->next;
-        mem_free(loop);
-        loop = next;
-    }
-    state->ast_loop_continuations = NULL;
-    js_interp_list_clear(&state->ast_list_continuation);
-    js_interp_try_clear(&state->ast_try_continuations);
-    JsInterpGeneratorArrayBindingContinuation* array =
-        state->ast_array_binding_continuations;
-    while (array) {
-        JsInterpGeneratorArrayBindingContinuation* next = array->next;
-        mem_free(array);
-        array = next;
-    }
-    state->ast_array_binding_continuations = NULL;
+    js_interp_continuation_clear(&state->ast_loop_continuations);
+    js_interp_continuation_clear(&state->ast_list_continuation);
+    js_interp_continuation_clear(&state->ast_try_continuations);
+    js_interp_continuation_clear(&state->ast_array_binding_continuations);
 }
 
 void js_interp_generator_trace_continuations(JsGeneratorStateRecord* state,
         gc_heap_t* gc) {
     if (!state || !gc) return;
-    for (JsInterpGeneratorLoopContinuation* loop = state->ast_loop_continuations;
-            loop; loop = loop->next) {
-        gc_mark_item(gc, loop->iterator.item);
-        gc_mark_item(gc, loop->for_in_object.item);
-        gc_mark_item(gc, loop->iteration_result.item);
-        gc_mark_item(gc, loop->close_completion_value.item);
-        if (loop->env) gc_mark_object_ptr(gc, loop->env);
-    }
-    for (JsInterpGeneratorListContinuation* list = state->ast_list_continuation;
-            list; list = list->next) {
-        if (list->env) gc_mark_object_ptr(gc, list->env);
-    }
-    js_interp_try_trace(state->ast_try_continuations, gc);
-    for (JsInterpGeneratorArrayBindingContinuation* array =
-            state->ast_array_binding_continuations; array; array = array->next) {
-        gc_mark_item(gc, array->iterator.item);
-        gc_mark_item(gc, array->value.item);
-        if (array->has_reference) {
-            gc_mark_item(gc, array->reference_object.item);
-            gc_mark_item(gc, array->reference_key.item);
-        }
-    }
+    js_interp_continuation_trace(state->ast_loop_continuations, gc);
+    js_interp_continuation_trace(state->ast_list_continuation, gc);
+    js_interp_continuation_trace(state->ast_try_continuations, gc);
+    js_interp_continuation_trace(state->ast_array_binding_continuations, gc);
 }
 
-static JsInterpGeneratorArrayBindingContinuation*
+static JsInterpContinuation*
 js_interp_generator_find_array_binding(JsInterpFrame* frame, JsAstNode* pattern) {
     JsGeneratorStateRecord* state = frame ? frame->generator_state : NULL;
     if (!state) return NULL;
-    for (JsInterpGeneratorArrayBindingContinuation* current =
+    for (JsInterpContinuation* current =
             state->ast_array_binding_continuations; current; current = current->next) {
-        if (current->pattern == pattern) return current;
+        if (current->payload.array_binding.pattern == pattern) return current;
     }
     return NULL;
 }
@@ -392,35 +373,36 @@ static bool js_interp_generator_suspend_array_binding(JsInterpFrame* frame,
         Item value, bool value_ready, const JsInterpReference* reference) {
     JsGeneratorStateRecord* state = frame ? frame->generator_state : NULL;
     if (!state) return false;
-    JsInterpGeneratorArrayBindingContinuation* continuation =
+    JsInterpContinuation* continuation =
         js_interp_generator_find_array_binding(frame, pattern);
     if (!continuation) {
-        continuation = (JsInterpGeneratorArrayBindingContinuation*)mem_calloc(1,
-            sizeof(*continuation), MEM_CAT_JS_RUNTIME);
+        continuation = js_interp_continuation_new(
+            JS_INTERP_CONTINUATION_ARRAY_BINDING);
         if (!continuation) return false;
-        continuation->pattern = pattern;
+        continuation->payload.array_binding.pattern = pattern;
         continuation->next = state->ast_array_binding_continuations;
         state->ast_array_binding_continuations = continuation;
     }
-    continuation->element = element;
-    continuation->iterator = iterator;
-    continuation->iterator_done = iterator_done;
-    continuation->value = value;
-    continuation->value_ready = value_ready;
-    continuation->has_reference = reference && reference->property;
-    if (continuation->has_reference) {
-        continuation->reference_object = reference->object_home
+    continuation->payload.array_binding.element = element;
+    continuation->payload.array_binding.iterator = iterator;
+    continuation->payload.array_binding.iterator_done = iterator_done;
+    continuation->payload.array_binding.value = value;
+    continuation->payload.array_binding.value_ready = value_ready;
+    continuation->payload.array_binding.has_reference = reference && reference->property;
+    if (continuation->payload.array_binding.has_reference) {
+        continuation->payload.array_binding.reference_object = reference->object_home
             ? (Item){.item = *reference->object_home} : ItemNull;
-        continuation->reference_key = reference->key_home
+        continuation->payload.array_binding.reference_key = reference->key_home
             ? (Item){.item = *reference->key_home} : ItemNull;
-        continuation->reference_lane = reference->property_lane;
-        continuation->reference_super_property = reference->super_property;
-        continuation->reference_key_deferred = reference->property_key_deferred;
+        continuation->payload.array_binding.reference_lane = reference->property_lane;
+        continuation->payload.array_binding.reference_super_property = reference->super_property;
+        continuation->payload.array_binding.reference_key_deferred =
+            reference->property_key_deferred;
     } else {
-        continuation->reference_object = ItemNull;
-        continuation->reference_key = ItemNull;
-        continuation->reference_super_property = false;
-        continuation->reference_key_deferred = false;
+        continuation->payload.array_binding.reference_object = ItemNull;
+        continuation->payload.array_binding.reference_key = ItemNull;
+        continuation->payload.array_binding.reference_super_property = false;
+        continuation->payload.array_binding.reference_key_deferred = false;
     }
     return true;
 }
@@ -429,11 +411,11 @@ static void js_interp_generator_clear_array_binding(JsInterpFrame* frame,
         JsAstNode* pattern) {
     JsGeneratorStateRecord* state = frame ? frame->generator_state : NULL;
     if (!state) return;
-    JsInterpGeneratorArrayBindingContinuation** link =
+    JsInterpContinuation** link =
         &state->ast_array_binding_continuations;
     while (*link) {
-        if ((*link)->pattern == pattern) {
-            JsInterpGeneratorArrayBindingContinuation* removed = *link;
+        if ((*link)->payload.array_binding.pattern == pattern) {
+            JsInterpContinuation* removed = *link;
             *link = removed->next;
             mem_free(removed);
             return;
@@ -442,58 +424,59 @@ static void js_interp_generator_clear_array_binding(JsInterpFrame* frame,
     }
 }
 
-static JsInterpGeneratorLoopContinuation* js_interp_generator_find_loop(
+static JsInterpContinuation* js_interp_generator_find_loop(
         JsInterpFrame* frame, JsAstNode* loop) {
     JsGeneratorStateRecord* state = frame ? frame->generator_state : NULL;
-    JsInterpGeneratorLoopContinuation* list = NULL;
+    JsInterpContinuation* list = NULL;
     if (state) {
         list = state->ast_loop_continuations;
     } else if (frame && frame->async_loop_continuations) {
         list = *frame->async_loop_continuations;
     }
-    for (JsInterpGeneratorLoopContinuation* current = list;
+    for (JsInterpContinuation* current = list;
             current; current = current->next) {
-        if (current->loop == loop) return current;
+        if (current->payload.loop.loop == loop) return current;
     }
     return NULL;
 }
 
 static bool js_interp_set_loop_close_completion(JsInterpFrame* frame,
         JsAstNode* loop, const JsInterpCompletion& completion) {
-    JsInterpGeneratorLoopContinuation* continuation =
+    JsInterpContinuation* continuation =
         js_interp_generator_find_loop(frame, loop);
     if (!continuation) return false;
-    continuation->close_completion_value = completion.value;
-    continuation->close_completion_label = completion.label;
-    continuation->close_completion_label_len = completion.label_len;
-    continuation->close_completion_kind = (uint8_t)completion.kind;
+    continuation->payload.loop.close_completion_value = completion.value;
+    continuation->payload.loop.close_completion_label = completion.label;
+    continuation->payload.loop.close_completion_label_len = completion.label_len;
+    continuation->payload.loop.close_completion_kind = (uint8_t)completion.kind;
     return true;
 }
 
 // A terminal yield/await has a list cursor even outside a loop. Requiring a
 // loop continuation here replays prior statements on every resume.
-static JsInterpGeneratorListContinuation* js_interp_list_resume(
+static JsInterpContinuation* js_interp_list_resume(
         JsInterpFrame* frame, JsAstNode* statements) {
-    JsInterpGeneratorListContinuation** head = js_interp_list_head(frame);
-    return head && *head && (*head)->statements == statements ? *head : NULL;
+    JsInterpContinuation** head = js_interp_list_head(frame);
+    return head && *head && (*head)->payload.list.statements == statements ? *head : NULL;
 }
 
 static JsInterpEnv* js_interp_list_resume_env(JsInterpFrame* frame,
         JsAstNode* statements) {
-    JsInterpGeneratorListContinuation* resume = js_interp_list_resume(frame, statements);
-    return resume ? resume->env : NULL;
+    JsInterpContinuation* resume = js_interp_list_resume(frame, statements);
+    return resume ? resume->payload.list.env : NULL;
 }
 
 static bool js_interp_generator_list_throw_requires_replay(
         JsGeneratorStateRecord* state) {
     if (!state) return false;
-    for (JsInterpGeneratorListContinuation* current = state->ast_list_continuation;
+    for (JsInterpContinuation* current = state->ast_list_continuation;
             current; current = current->next) {
         // A throw caught by a nested try can suspend again in its handler.
         // List cursors do not retain try/catch selection, so replaying the
         // owning try is required to keep later next() calls in that handler.
-        if (current->replay_current_statement && current->next_statement &&
-                current->next_statement->node_type == AST_NODE_TRY_STAM) {
+        if (current->payload.list.replay_current_statement &&
+                current->payload.list.next_statement &&
+                current->payload.list.next_statement->node_type == AST_NODE_TRY_STAM) {
             return true;
         }
     }
@@ -503,13 +486,13 @@ static bool js_interp_generator_list_throw_requires_replay(
 static void js_interp_generator_remove_loop(JsInterpFrame* frame,
         JsAstNode* loop) {
     JsGeneratorStateRecord* state = frame ? frame->generator_state : NULL;
-    JsInterpGeneratorLoopContinuation** link = state
+    JsInterpContinuation** link = state
         ? &state->ast_loop_continuations
         : (frame ? frame->async_loop_continuations : NULL);
     if (!link) return;
     while (*link) {
-        if ((*link)->loop == loop) {
-            JsInterpGeneratorLoopContinuation* removed = *link;
+        if ((*link)->payload.loop.loop == loop) {
+            JsInterpContinuation* removed = *link;
             *link = removed->next;
             mem_free(removed);
             return;
@@ -524,21 +507,20 @@ static bool js_interp_generator_suspend_loop(JsInterpFrame* frame,
         int64_t body_start_ledger) {
     JsGeneratorStateRecord* state = frame ? frame->generator_state : NULL;
     if (!state) return true;
-    JsInterpGeneratorLoopContinuation* existing = js_interp_generator_find_loop(frame,
+    JsInterpContinuation* existing = js_interp_generator_find_loop(frame,
         loop);
     if (existing) return true;
-    JsInterpGeneratorLoopContinuation* continuation =
-        (JsInterpGeneratorLoopContinuation*)mem_calloc(1, sizeof(*continuation),
-            MEM_CAT_JS_RUNTIME);
+    JsInterpContinuation* continuation = js_interp_continuation_new(
+        JS_INTERP_CONTINUATION_LOOP);
     if (!continuation) return false;
-    continuation->loop = loop;
-    continuation->env = env;
-    continuation->iterator = iterator;
-    continuation->for_in_object = for_in_object;
-    continuation->iteration_result = iteration_result;
-    continuation->is_for_of = is_for_of;
-    continuation->body_start_ledger = body_start_ledger;
-    continuation->resume_phase = resume_phase;
+    continuation->payload.loop.loop = loop;
+    continuation->payload.loop.env = env;
+    continuation->payload.loop.iterator = iterator;
+    continuation->payload.loop.for_in_object = for_in_object;
+    continuation->payload.loop.iteration_result = iteration_result;
+    continuation->payload.loop.is_for_of = is_for_of;
+    continuation->payload.loop.body_start_ledger = body_start_ledger;
+    continuation->payload.loop.resume_phase = resume_phase;
     continuation->next = state->ast_loop_continuations;
     state->ast_loop_continuations = continuation;
     return true;
@@ -550,18 +532,17 @@ static bool js_interp_async_suspend_loop(JsInterpFrame* frame,
         int64_t body_start_ledger) {
     if (!frame || !frame->async_loop_continuations) return false;
     if (js_interp_generator_find_loop(frame, loop)) return true;
-    JsInterpGeneratorLoopContinuation* continuation =
-        (JsInterpGeneratorLoopContinuation*)mem_calloc(1, sizeof(*continuation),
-            MEM_CAT_JS_RUNTIME);
+    JsInterpContinuation* continuation = js_interp_continuation_new(
+        JS_INTERP_CONTINUATION_LOOP);
     if (!continuation) return false;
-    continuation->loop = loop;
-    continuation->env = env;
-    continuation->iterator = iterator;
-    continuation->for_in_object = for_in_object;
-    continuation->iteration_result = iteration_result;
-    continuation->is_for_of = is_for_of;
-    continuation->body_start_ledger = body_start_ledger;
-    continuation->resume_phase = resume_phase;
+    continuation->payload.loop.loop = loop;
+    continuation->payload.loop.env = env;
+    continuation->payload.loop.iterator = iterator;
+    continuation->payload.loop.for_in_object = for_in_object;
+    continuation->payload.loop.iteration_result = iteration_result;
+    continuation->payload.loop.is_for_of = is_for_of;
+    continuation->payload.loop.body_start_ledger = body_start_ledger;
+    continuation->payload.loop.resume_phase = resume_phase;
     // The owning JsAsyncContextStateRecord traces every continuation edge in
     // js_interp_async_trace_continuations. Do not add a second direct-root
     // protocol for these same values.
@@ -580,20 +561,20 @@ static bool js_interp_completion_suspends(const JsInterpCompletion& completion) 
 static bool js_interp_suspend_try(JsInterpFrame* frame, JsAstNode* node,
         uint8_t resume_phase, int64_t ledger, JsInterpEnv* catch_env,
         const JsInterpCompletion& carried) {
-    JsInterpTryContinuation** head = js_interp_try_head(frame);
+    JsInterpContinuation** head = js_interp_try_head(frame);
     if (!head) return true;
     if (js_interp_find_try(frame, node)) return true;
-    JsInterpTryContinuation* continuation = (JsInterpTryContinuation*)mem_calloc(1,
-        sizeof(*continuation), MEM_CAT_JS_RUNTIME);
+    JsInterpContinuation* continuation = js_interp_continuation_new(
+        JS_INTERP_CONTINUATION_TRY);
     if (!continuation) return false;
-    continuation->node = node;
-    continuation->catch_env = catch_env;
-    continuation->completion_value = carried.value;
-    continuation->label = carried.label;
-    continuation->label_len = carried.label_len;
-    continuation->completion_kind = (uint8_t)carried.kind;
-    continuation->resume_phase = resume_phase;
-    continuation->ledger = ledger;
+    continuation->payload.tried.node = node;
+    continuation->payload.tried.catch_env = catch_env;
+    continuation->payload.tried.completion_value = carried.value;
+    continuation->payload.tried.label = carried.label;
+    continuation->payload.tried.label_len = carried.label_len;
+    continuation->payload.tried.completion_kind = (uint8_t)carried.kind;
+    continuation->payload.tried.resume_phase = resume_phase;
+    continuation->payload.tried.ledger = ledger;
     continuation->next = *head;
     *head = continuation;
     return true;
@@ -619,44 +600,22 @@ static bool js_interp_suspend_loop(JsInterpFrame* frame,
         iteration_result, is_for_of, resume_phase, body_start_ledger);
 }
 
-static void js_interp_async_clear_loops(
-        JsInterpGeneratorLoopContinuation** continuations) {
-    if (!continuations) return;
-    JsInterpGeneratorLoopContinuation* current = *continuations;
-    while (current) {
-        JsInterpGeneratorLoopContinuation* next = current->next;
-        mem_free(current);
-        current = next;
-    }
-    *continuations = NULL;
-}
-
 // JSCU10: an async frame is precisely traced through its GC carrier, so its
 // suspended for-await-of loop continuations (iterator + env) must be marked.
 // The old context-wide table pinned only the record's Item fields, never these.
 void js_interp_async_trace_continuations(JsAsyncContextStateRecord* state,
         gc_heap_t* gc) {
     if (!state || !gc) return;
-    for (JsInterpGeneratorLoopContinuation* loop = state->ast_loop_continuations;
-            loop; loop = loop->next) {
-        gc_mark_item(gc, loop->iterator.item);
-        gc_mark_item(gc, loop->for_in_object.item);
-        gc_mark_item(gc, loop->iteration_result.item);
-        gc_mark_item(gc, loop->close_completion_value.item);
-        if (loop->env) gc_mark_object_ptr(gc, loop->env);
-    }
-    for (JsInterpGeneratorListContinuation* list = state->ast_list_continuation;
-            list; list = list->next) {
-        if (list->env) gc_mark_object_ptr(gc, list->env);
-    }
-    js_interp_try_trace(state->ast_try_continuations, gc);
+    js_interp_continuation_trace(state->ast_loop_continuations, gc);
+    js_interp_continuation_trace(state->ast_list_continuation, gc);
+    js_interp_continuation_trace(state->ast_try_continuations, gc);
 }
 
 void js_interp_async_clear_continuations(JsAsyncContextStateRecord* state) {
     if (!state) return;
-    js_interp_async_clear_loops(&state->ast_loop_continuations);
-    js_interp_list_clear(&state->ast_list_continuation);
-    js_interp_try_clear(&state->ast_try_continuations);
+    js_interp_continuation_clear(&state->ast_loop_continuations);
+    js_interp_continuation_clear(&state->ast_list_continuation);
+    js_interp_continuation_clear(&state->ast_try_continuations);
 }
 
 static JsInterpCompletion js_interp_normal(Item value) {
@@ -783,9 +742,9 @@ static bool js_interp_name_matches(const String* left, const String* right) {
     return left && right && str_eq(left->chars, left->len, right->chars, right->len);
 }
 
-static JsInterpImportBinding* js_interp_import_binding(JsScript* script,
+static JsInterpModuleBinding* js_interp_import_binding(JsScript* script,
         NameEntry* entry, String* local_name) {
-    for (JsInterpImportBinding* binding = script ? script->interp_imports : NULL;
+    for (JsInterpModuleBinding* binding = script ? script->interp_imports : NULL;
             binding; binding = binding->next) {
         if (entry && binding->entry == entry) return binding;
         if (js_interp_name_matches(binding->local_name, local_name)) return binding;
@@ -793,12 +752,12 @@ static JsInterpImportBinding* js_interp_import_binding(JsScript* script,
     return NULL;
 }
 
-static JsInterpExportBinding* js_interp_add_reexport_binding(JsScript* script,
+static JsInterpModuleBinding* js_interp_add_reexport_binding(JsScript* script,
         String* local_name, String* export_name, String* source) {
     if (!script || !js_script_execution_pool(script) ||
             !js_script_execution_name_pool(script) || !local_name ||
             !export_name || !source) return NULL;
-    for (JsInterpExportBinding* binding = script->interp_exports; binding;
+    for (JsInterpModuleBinding* binding = script->interp_exports; binding;
             binding = binding->next) {
         if (binding->source && js_interp_name_matches(binding->source, source) &&
                 js_interp_name_matches(binding->local_name, local_name) &&
@@ -808,8 +767,8 @@ static JsInterpExportBinding* js_interp_add_reexport_binding(JsScript* script,
     }
     Pool* overlay_pool = js_script_execution_pool(script);
     NamePool* overlay_names = js_script_execution_name_pool(script);
-    JsInterpExportBinding* binding = (JsInterpExportBinding*)pool_calloc(overlay_pool,
-        sizeof(JsInterpExportBinding));
+    JsInterpModuleBinding* binding = (JsInterpModuleBinding*)pool_calloc(overlay_pool,
+        sizeof(JsInterpModuleBinding));
     if (!binding) return NULL;
     binding->local_name = name_pool_create_len(overlay_names, local_name->chars,
         local_name->len);
@@ -817,6 +776,7 @@ static JsInterpExportBinding* js_interp_add_reexport_binding(JsScript* script,
         export_name->len);
     binding->source = name_pool_create_len(overlay_names, source->chars, source->len);
     if (!binding->local_name || !binding->export_name || !binding->source) return NULL;
+    binding->kind = JS_INTERP_MODULE_BINDING_EXPORT;
     binding->star_export = true;
     binding->next = script->interp_exports;
     script->interp_exports = binding;
@@ -824,7 +784,7 @@ static JsInterpExportBinding* js_interp_add_reexport_binding(JsScript* script,
 }
 
 static bool js_interp_has_explicit_export(JsScript* script, String* export_name) {
-    for (JsInterpExportBinding* binding = script ? script->interp_exports : NULL;
+    for (JsInterpModuleBinding* binding = script ? script->interp_exports : NULL;
             binding; binding = binding->next) {
         if (!binding->star_export && js_interp_name_matches(binding->export_name,
                 export_name)) return true;
@@ -854,7 +814,7 @@ static void js_interp_propagate_reexports(Runtime* runtime, const char* source_r
                 !candidate->reference) continue;
         ModuleDescriptor* module = module_get_for_runtime(runtime, candidate->reference);
         if (!module) continue;
-        for (JsInterpExportBinding* binding = candidate->interp_exports;
+        for (JsInterpModuleBinding* binding = candidate->interp_exports;
                 binding; binding = binding->next) {
             if (!binding->source || !js_interp_name_matches(binding->local_name, source_name)) {
                 continue;
@@ -879,7 +839,7 @@ static Item js_interp_read_module_export(Runtime* runtime, const char* reference
         return js_throw_reference_error(js_make_string("imported module is unavailable"));
     }
     JsScript* source_script = js_interp_script_for_reference(runtime, reference);
-    for (JsInterpExportBinding* binding = source_script
+    for (JsInterpModuleBinding* binding = source_script
             ? source_script->interp_exports : NULL; binding; binding = binding->next) {
         if (!binding->source || !js_interp_name_matches(binding->export_name, export_name)) {
             continue;
@@ -887,7 +847,7 @@ static Item js_interp_read_module_export(Runtime* runtime, const char* reference
         char resolved[512];
         jm_resolve_module_path(reference, binding->source->chars,
             (int)binding->source->len, resolved, (int)sizeof(resolved));
-        if (binding->namespace_export) return js_module_get(js_make_string(resolved));
+        if (binding->namespace_binding) return js_module_get(js_make_string(resolved));
         return js_interp_read_module_export(runtime, resolved, binding->local_name,
             depth + 1);
     }
@@ -900,7 +860,7 @@ static Item js_interp_read_module_export(Runtime* runtime, const char* reference
 }
 
 static Item js_interp_read_import_binding(JsScript* script,
-        JsInterpImportBinding* binding) {
+        JsInterpModuleBinding* binding) {
     if (!script || !binding) return ItemError;
     char resolved[512];
     jm_resolve_module_path(script->reference, binding->source->chars,
@@ -909,7 +869,7 @@ static Item js_interp_read_import_binding(JsScript* script,
     if (get_type_id(namespace_obj) == LMD_TYPE_NULL) {
         return js_throw_reference_error(js_make_string("imported module is unavailable"));
     }
-    return binding->namespace_import ? namespace_obj : js_interp_read_module_export(
+    return binding->namespace_binding ? namespace_obj : js_interp_read_module_export(
         context ? context->runtime : NULL, resolved, binding->export_name, 0);
 }
 
@@ -920,7 +880,7 @@ static void js_interp_publish_export_bindings(JsInterpFrame* frame,
         frame->script->reference);
     if (!module) return;
     Item namespace_obj = module->namespace_obj;
-    for (JsInterpExportBinding* binding = frame->script->interp_exports;
+    for (JsInterpModuleBinding* binding = frame->script->interp_exports;
             binding; binding = binding->next) {
         if (!binding->source && js_interp_name_matches(binding->local_name, local_name)) {
             js_set_key_default(namespace_obj, js_interp_name_key(binding->export_name), value);
@@ -972,10 +932,9 @@ static JsInterpEnv* js_interp_env_create(NameScope* scope, JsInterpEnv* outer) {
     // caller's float home across a GC or async suspension.
     size_t words = count > 0 ? (size_t)count * 2 : 1;
     size_t size = offsetof(JsInterpEnv, slots) + words * sizeof(uint64_t);
-    JsInterpEnv* env = (JsInterpEnv*)gc_heap_calloc(context->heap->gc, size,
-        GC_TYPE_ENVIRONMENT);
+    JsInterpEnv* env = (JsInterpEnv*)gc_environment_calloc(context->heap->gc,
+        size, GC_ENVIRONMENT_LAYOUT_LEXICAL);
     if (!env) return NULL;
-    gc_environment_set_interpreter(env);
     env->outer = outer;
     env->scope = scope;
     env->slot_count = (uint32_t)count;
@@ -994,9 +953,11 @@ static JsInterpEnv* js_interp_env_clone(JsInterpEnv* source) {
     copy->function_node = source->function_node;
     copy->arguments_are_mapped = source->arguments_are_mapped;
     copy->has_lexical_this = source->has_lexical_this;
-    if (copy->slot_count) {
-        memcpy(copy->slots, source->slots,
-            (size_t)copy->slot_count * 2 * sizeof(uint64_t));
+    GcEnvironmentStorage source_storage, copy_storage;
+    js_interp_env_storage(source, &source_storage);
+    js_interp_env_storage(copy, &copy_storage);
+    if (!gc_environment_storage_copy_owned_slots(&copy_storage, &source_storage)) {
+        return NULL;
     }
     return copy;
 }
@@ -1423,7 +1384,7 @@ static Item js_interp_read_binding(JsInterpFrame* frame, NameEntry* entry,
         // are built, after an earlier identifier node captured no static entry.
         entry = js_interp_find_binding(frame, unresolved_name);
     }
-    JsInterpImportBinding* imported = js_interp_import_binding(frame->script,
+    JsInterpModuleBinding* imported = js_interp_import_binding(frame->script,
         entry, unresolved_name);
     if (imported) return js_interp_read_import_binding(frame->script, imported);
     if (!entry) {
@@ -1445,8 +1406,7 @@ static Item js_interp_read_binding(JsInterpFrame* frame, NameEntry* entry,
         if (!env || entry->slot < 0 || (uint32_t)entry->slot >= env->slot_count) {
             return ItemError;
         }
-        value = owned_item_slot_read((Item*)(void*)env->slots, env->slot_count,
-            entry->slot, false);
+        value = js_interp_env_slot_read(env, entry->slot, false);
     }
     if (value.item == ITEM_JS_TDZ) return js_interp_tdz_error(entry->name);
     return js_interp_read_arguments_param(frame, entry, value);
@@ -1547,8 +1507,7 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
     if (!env || entry->slot < 0 || (uint32_t)entry->slot >= env->slot_count) {
         return ItemError;
     }
-    current = owned_item_slot_read((Item*)(void*)env->slots, env->slot_count,
-        entry->slot, false);
+    current = js_interp_env_slot_read(env, entry->slot, false);
     if (!initialize && current.item == ITEM_JS_TDZ) {
         return js_interp_tdz_error(entry->name);
     }
@@ -1561,8 +1520,7 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
         return js_throw_const_assign(entry->name ? name_ref_id(entry->name) : NAME_ID_NONE,
             entry->name ? (int)entry->name->len : 0);
     }
-    owned_item_slot_store((Item*)(void*)env->slots, env->slot_count, entry->slot,
-        value);
+    js_interp_env_slot_store(env, entry->slot, value);
     Item written = js_interp_write_arguments_param(frame, entry, value);
     if (item_is_error(written)) return written;
     js_interp_publish_export_bindings(frame, entry->name, value);
@@ -1606,8 +1564,7 @@ static Item js_interp_new_function(JsInterpFrame* frame,
         NameEntry* self = name_scope->first;
         if (!self || !self->is_function_name_binding || self->slot < 0 ||
                 (uint32_t)self->slot >= name_env->slot_count) return ItemError;
-        owned_item_slot_store((Item*)(void*)name_env->slots, name_env->slot_count,
-            self->slot, result_root.get());
+        js_interp_env_slot_store(name_env, self->slot, result_root.get());
     }
     result_root.set(js_interp_configure_function_metadata(result_root.get()));
     if (!item_is_error(result_root.get())) {
@@ -2398,8 +2355,7 @@ static Item js_interp_binding_raw_value(JsInterpFrame* frame, NameEntry* entry) 
     if (!env || entry->slot < 0 || (uint32_t)entry->slot >= env->slot_count) {
         return ItemError;
     }
-    return owned_item_slot_read((Item*)(void*)env->slots, env->slot_count,
-        entry->slot, false);
+    return js_interp_env_slot_read(env, entry->slot, false);
 }
 
 static void js_interp_eval_bind_scope(JsInterpFrame* frame, NameScope* scope,
@@ -3111,8 +3067,8 @@ static void js_interp_set_parameter_pattern_tdz(JsInterpFrame* frame,
             : js_interp_find_binding(frame, identifier->name);
         JsInterpEnv* env = entry ? js_interp_find_env(frame->env, entry->scope) : NULL;
         if (env && entry->slot >= 0 && (uint32_t)entry->slot < env->slot_count) {
-            owned_item_slot_store((Item*)(void*)env->slots, env->slot_count,
-                entry->slot, (Item){.item = ITEM_JS_TDZ});
+            js_interp_env_slot_store(env, entry->slot,
+                (Item){.item = ITEM_JS_TDZ});
         }
         return;
     }
@@ -3270,21 +3226,21 @@ static JsInterpCompletion js_interp_bind_pattern(JsInterpFrame* frame,
         Rooted<Item> value_root(roots, ItemNull);
         Rooted<Item> reference_object_root(roots, ItemNull);
         Rooted<Item> reference_key_root(roots, ItemNull);
-        JsInterpGeneratorArrayBindingContinuation* resume =
+        JsInterpContinuation* resume =
             js_interp_generator_find_array_binding(frame, pattern);
         // Binding patterns consume iterators one entry at a time. Materializing
         // first both starts generators too eagerly and misses IteratorClose.
         if (resume) {
-            iterator_root.set(resume->iterator);
+            iterator_root.set(resume->payload.array_binding.iterator);
         } else {
             iterator_root.set(js_get_iterator_lazy(source_root.get()));
             if (item_is_error(iterator_root.get())) return js_interp_throw(iterator_root.get());
         }
-        bool iterator_done = resume ? resume->iterator_done : false;
+        bool iterator_done = resume ? resume->payload.array_binding.iterator_done : false;
         bool skipping_to_resume = resume != NULL;
         for (JsAstNode* element = (JsAstNode*)array->elements; element;
                 element = (JsAstNode*)element->next) {
-            if (skipping_to_resume && element != resume->element) continue;
+            if (skipping_to_resume && element != resume->payload.array_binding.element) continue;
             bool resumed_element = skipping_to_resume;
             skipping_to_resume = false;
             if (element->node_type == AST_NODE_NULL) {
@@ -3302,17 +3258,17 @@ static JsInterpCompletion js_interp_bind_pattern(JsInterpFrame* frame,
                 JsSpreadElementNode* rest = (JsSpreadElementNode*)element;
                 JsInterpReference reference = {};
                 bool has_reference = false;
-                if (resumed_element && resume->value_ready) {
-                    value_root.set(resume->value);
-                    if (resume->has_reference) {
-                        reference_object_root.set(resume->reference_object);
-                        reference_key_root.set(resume->reference_key);
+                if (resumed_element && resume->payload.array_binding.value_ready) {
+                    value_root.set(resume->payload.array_binding.value);
+                    if (resume->payload.array_binding.has_reference) {
+                        reference_object_root.set(resume->payload.array_binding.reference_object);
+                        reference_key_root.set(resume->payload.array_binding.reference_key);
                         reference.object_home = reference_object_root.home();
                         reference.key_home = reference_key_root.home();
                         reference.property = true;
-                        reference.super_property = resume->reference_super_property;
-                        reference.property_lane = resume->reference_lane;
-                        reference.property_key_deferred = resume->reference_key_deferred;
+                        reference.super_property = resume->payload.array_binding.reference_super_property;
+                        reference.property_lane = resume->payload.array_binding.reference_lane;
+                        reference.property_key_deferred = resume->payload.array_binding.reference_key_deferred;
                         has_reference = true;
                     }
                 } else {
@@ -3342,17 +3298,17 @@ static JsInterpCompletion js_interp_bind_pattern(JsInterpFrame* frame,
             }
             JsInterpReference reference = {};
             bool has_reference = false;
-            if (resumed_element && resume->value_ready) {
-                value_root.set(resume->value);
-                if (resume->has_reference) {
-                    reference_object_root.set(resume->reference_object);
-                    reference_key_root.set(resume->reference_key);
+            if (resumed_element && resume->payload.array_binding.value_ready) {
+                value_root.set(resume->payload.array_binding.value);
+                if (resume->payload.array_binding.has_reference) {
+                    reference_object_root.set(resume->payload.array_binding.reference_object);
+                    reference_key_root.set(resume->payload.array_binding.reference_key);
                     reference.object_home = reference_object_root.home();
                     reference.key_home = reference_key_root.home();
                     reference.property = true;
-                    reference.super_property = resume->reference_super_property;
-                    reference.property_lane = resume->reference_lane;
-                    reference.property_key_deferred = resume->reference_key_deferred;
+                    reference.super_property = resume->payload.array_binding.reference_super_property;
+                    reference.property_lane = resume->payload.array_binding.reference_lane;
+                    reference.property_key_deferred = resume->payload.array_binding.reference_key_deferred;
                     has_reference = true;
                 }
             } else {
@@ -3372,7 +3328,7 @@ static JsInterpCompletion js_interp_bind_pattern(JsInterpFrame* frame,
                     }
                 }
             }
-            if (resumed_element && !resume->value_ready) {
+            if (resumed_element && !resume->payload.array_binding.value_ready) {
                 // A reference target yielded before IteratorStep. Its resumed
                 // evaluation above now owns the first iterator advancement.
                 has_reference = reference.property;
@@ -4193,33 +4149,33 @@ static bool js_interp_terminal_yield_statement(JsAstNode* node) {
 static void js_interp_generator_clear_list_continuation(
         JsGeneratorStateRecord* state) {
     if (!state) return;
-    js_interp_list_pop(&state->ast_list_continuation);
+    js_interp_continuation_pop(&state->ast_list_continuation);
 }
 
 static void js_interp_generator_clear_nested_list_continuations(
         JsGeneratorStateRecord* state) {
     if (!state || !state->ast_list_continuation) return;
-    js_interp_list_clear(&state->ast_list_continuation->next);
+            js_interp_continuation_clear(&state->ast_list_continuation->next);
 }
 
 static JsInterpCompletion js_interp_exec_list(JsInterpFrame* frame, JsAstNode* node) {
     JsInterpCompletion result = js_interp_normal(make_js_undefined());
     JsAstNode* start = node;
-    JsInterpGeneratorListContinuation** head = js_interp_list_head(frame);
+    JsInterpContinuation** head = js_interp_list_head(frame);
     int64_t* seen = js_interp_suspend_seen(frame);
-    JsInterpGeneratorListContinuation* resume = js_interp_list_resume(frame, node);
+    JsInterpContinuation* resume = js_interp_list_resume(frame, node);
     if (resume) {
         // Only a generator carries an injected throw/return through its cursor;
         // an async resume delivers its value through the await ledger instead.
-        bool receives_resume_input = resume->receives_resume_input &&
+        bool receives_resume_input = resume->payload.list.receives_resume_input &&
             frame->generator_state != NULL;
         Item input = frame->generator_resume_input;
-        start = resume->next_statement;
+        start = resume->payload.list.next_statement;
         bool replay_abrupt = receives_resume_input &&
-            resume->replay_current_statement &&
+            resume->payload.list.replay_current_statement &&
             (js_gen_is_throw_signal(input) || js_gen_is_return_signal(input));
-        js_interp_advance_ledger(frame, resume->yield_count_before_next_statement);
-        js_interp_list_pop(head);
+        js_interp_advance_ledger(frame, resume->payload.list.yield_count_before_next_statement);
+        js_interp_continuation_pop(head);
         if (receives_resume_input && !replay_abrupt) {
             JsInterpCompletion resumed = js_interp_resume_completion(input);
             if (resumed.kind != JS_INTERP_NORMAL) return resumed;
@@ -4233,21 +4189,20 @@ static JsInterpCompletion js_interp_exec_list(JsInterpFrame* frame, JsAstNode* n
             (result.kind == JS_INTERP_AWAIT && frame && !frame->generator_state &&
                 head);
         if (suspended && !js_interp_list_find(*head, node)) {
-            JsInterpGeneratorListContinuation* continuation =
-                (JsInterpGeneratorListContinuation*)mem_calloc(1,
-                    sizeof(*continuation), MEM_CAT_JS_RUNTIME);
+            JsInterpContinuation* continuation = js_interp_continuation_new(
+                JS_INTERP_CONTINUATION_LIST);
             if (!continuation) return js_interp_throw(ItemError);
-            continuation->statements = node;
-            continuation->replay_current_statement =
+            continuation->payload.list.statements = node;
+            continuation->payload.list.replay_current_statement =
                 result.kind == JS_INTERP_AWAIT ||
                 !js_interp_terminal_yield_statement(current);
-            continuation->next_statement = continuation->replay_current_statement
+            continuation->payload.list.next_statement = continuation->payload.list.replay_current_statement
                 ? current : (JsAstNode*)current->next;
-            continuation->env = frame->env;
-            continuation->yield_count_before_next_statement =
-                continuation->replay_current_statement ? count_before_current
+            continuation->payload.list.env = frame->env;
+            continuation->payload.list.yield_count_before_next_statement =
+                continuation->payload.list.replay_current_statement ? count_before_current
                 : (seen ? *seen : 0);
-            continuation->receives_resume_input = *head == NULL;
+            continuation->payload.list.receives_resume_input = *head == NULL;
             continuation->next = *head;
             *head = continuation;
         }
@@ -4480,10 +4435,10 @@ static JsInterpCompletion js_interp_exec_for_of(JsInterpFrame* frame,
     Rooted<Item> for_in_object_root(roots, ItemNull);
     Rooted<Item> iteration_result_root(roots, ItemNull);
     Rooted<Item> close_completion_root(roots, ItemNull);
-    JsInterpGeneratorLoopContinuation* resume = js_interp_generator_find_loop(frame,
+    JsInterpContinuation* resume = js_interp_generator_find_loop(frame,
         (JsAstNode*)loop);
-    if (resume) js_interp_advance_ledger(frame, resume->body_start_ledger);
-    JsInterpEnv* env = resume ? resume->env : NULL;
+    if (resume) js_interp_advance_ledger(frame, resume->payload.loop.body_start_ledger);
+    JsInterpEnv* env = resume ? resume->payload.loop.env : NULL;
     if (!resume) {
         if (loop->init) {
             JsInterpCompletion initial = js_interp_eval(frame, (JsAstNode*)loop->init);
@@ -4520,28 +4475,28 @@ static JsInterpCompletion js_interp_exec_for_of(JsInterpFrame* frame,
             : js_get_iterator(source_root.get()));
         if (item_is_error(iterator_root.get())) return js_interp_throw(iterator_root.get());
     } else {
-        iterator_root.set(resume->iterator);
-        for_in_object_root.set(resume->for_in_object);
-        iteration_result_root.set(resume->iteration_result);
-        close_completion_root.set(resume->close_completion_value);
+        iterator_root.set(resume->payload.loop.iterator);
+        for_in_object_root.set(resume->payload.loop.for_in_object);
+        iteration_result_root.set(resume->payload.loop.iteration_result);
+        close_completion_root.set(resume->payload.loop.close_completion_value);
     }
     bool has_per_iteration_lexical = js_interp_loop_needs_per_iteration_env(
         loop->vars, (JsAstNode*)loop->init, (JsAstNode*)loop->right,
         (JsAstNode*)loop->left,
         (JsAstNode*)loop->body);
 
-    bool resume_body = resume && resume->resume_phase == JS_LOOP_RESUME_BODY;
+    bool resume_body = resume && resume->payload.loop.resume_phase == JS_LOOP_RESUME_BODY;
     bool resume_for_await_step = resume &&
-        resume->resume_phase == JS_LOOP_RESUME_FOR_AWAIT_STEP;
+        resume->payload.loop.resume_phase == JS_LOOP_RESUME_FOR_AWAIT_STEP;
     bool resume_for_await_value = resume &&
-        resume->resume_phase == JS_LOOP_RESUME_FOR_AWAIT_VALUE;
+        resume->payload.loop.resume_phase == JS_LOOP_RESUME_FOR_AWAIT_VALUE;
     bool resume_for_await_close = resume &&
-        resume->resume_phase == JS_LOOP_RESUME_FOR_AWAIT_CLOSE;
+        resume->payload.loop.resume_phase == JS_LOOP_RESUME_FOR_AWAIT_CLOSE;
     if (resume_for_await_close) {
         JsInterpCompletion carried = {
-            (JsInterpCompletionKind)resume->close_completion_kind,
-            close_completion_root.get(), resume->close_completion_label,
-            resume->close_completion_label_len,
+            (JsInterpCompletionKind)resume->payload.loop.close_completion_kind,
+            close_completion_root.get(), resume->payload.loop.close_completion_label,
+            resume->payload.loop.close_completion_label_len,
         };
         JsInterpCompletion close = js_interp_await_value(frame, make_js_undefined());
         if (js_interp_completion_suspends(close)) return close;
@@ -4960,10 +4915,10 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
         // A suspension can land in any of the three loop phases. Resuming at
         // the wrong one re-runs completed iterations (test/update) or skips
         // the update entirely, so the phase travels with the continuation.
-        JsInterpGeneratorLoopContinuation* resume = js_interp_generator_find_loop(frame,
+        JsInterpContinuation* resume = js_interp_generator_find_loop(frame,
             (JsAstNode*)loop);
-        if (resume) js_interp_advance_ledger(frame, resume->body_start_ledger);
-        uint8_t resume_phase = resume ? resume->resume_phase : JS_LOOP_RESUME_TEST;
+        if (resume) js_interp_advance_ledger(frame, resume->payload.loop.body_start_ledger);
+        uint8_t resume_phase = resume ? resume->payload.loop.resume_phase : JS_LOOP_RESUME_TEST;
         if (loop->form == LOOP_FORM_WHILE) {
             bool resume_body = resume && resume_phase == JS_LOOP_RESUME_BODY;
             for (;;) {
@@ -5054,7 +5009,7 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
             }
         }
         {
-        JsInterpEnv* env = resume ? resume->env
+        JsInterpEnv* env = resume ? resume->payload.loop.env
             : js_interp_env_create(loop->vars, frame ? frame->env : NULL);
         JsInterpEnvRoot env_root(env);
         if (!env || !env_root.registered) return js_interp_throw(ItemError);
@@ -5184,24 +5139,24 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
         RootFrame roots(2);
         Rooted<Item> completion_root(roots, ItemNull);
         Rooted<Item> thrown_root(roots, ItemNull);
-        JsInterpTryContinuation* resume = js_interp_find_try(frame, node);
-        if (resume) js_interp_advance_ledger(frame, resume->ledger);
+        JsInterpContinuation* resume = js_interp_find_try(frame, node);
+        if (resume) js_interp_advance_ledger(frame, resume->payload.tried.ledger);
         JsInterpCompletion completion = js_interp_normal(make_js_undefined());
-        JsInterpEnv* catch_env = resume ? resume->catch_env : NULL;
+        JsInterpEnv* catch_env = resume ? resume->payload.tried.catch_env : NULL;
         bool entering_finalizer = resume &&
-            resume->resume_phase == JS_TRY_RESUME_FINALLY;
+            resume->payload.tried.resume_phase == JS_TRY_RESUME_FINALLY;
         // The block already ran on the suspending pass; only its completion
         // survives, so re-entry starts at the clause that suspended.
         if (entering_finalizer) {
-            completion = {(JsInterpCompletionKind)resume->completion_kind,
-                resume->completion_value, resume->label, resume->label_len};
+            completion = {(JsInterpCompletionKind)resume->payload.tried.completion_kind,
+                resume->payload.tried.completion_value, resume->payload.tried.label, resume->payload.tried.label_len};
             completion_root.set(completion.value);
             js_interp_remove_try(frame, node);
         } else {
             int64_t catch_ledger;
             if (resume) {
-                thrown_root.set(resume->completion_value);
-                catch_ledger = resume->ledger;
+                thrown_root.set(resume->payload.tried.completion_value);
+                catch_ledger = resume->payload.tried.ledger;
                 js_interp_remove_try(frame, node);
             } else {
                 completion = js_interp_exec(frame, (JsAstNode*)tried->block);
@@ -5848,11 +5803,11 @@ extern "C" Item js_interp_resume_generator(Item generator,
     // List continuations form an outer-to-inner stack. Resume at the function
     // body first so its structural path reaches the suspended inner statement.
     bool resuming_list = state->ast_list_continuation &&
-        state->ast_list_continuation->statements == (JsAstNode*)body->statements;
+        state->ast_list_continuation->payload.list.statements == (JsAstNode*)body->statements;
     bool replaying_suspended_statement = resuming_list &&
-        state->ast_list_continuation->replay_current_statement;
+        state->ast_list_continuation->payload.list.replay_current_statement;
     int64_t resumed_yield_count = resuming_list && state->ast_pending_resume_yield > 0
-        ? state->ast_list_continuation->yield_count_before_next_statement : 0;
+        ? state->ast_list_continuation->payload.list.yield_count_before_next_statement : 0;
     if (resuming_list && js_gen_is_throw_signal(input_root.get()) &&
             js_interp_generator_list_throw_requires_replay(state)) {
         // Replay only injected throws through their owning try. Return signals
@@ -6017,9 +5972,9 @@ extern "C" Item js_interp_resume_async(JsAsyncContextStateRecord* state,
         state->ast_replay_skip++;
         return js_interp_async_state_result(result.value, state->ast_replay_skip);
     }
-    js_interp_async_clear_loops(&state->ast_loop_continuations);
-    js_interp_list_clear(&state->ast_list_continuation);
-    js_interp_try_clear(&state->ast_try_continuations);
+    js_interp_continuation_clear(&state->ast_loop_continuations);
+    js_interp_continuation_clear(&state->ast_list_continuation);
+    js_interp_continuation_clear(&state->ast_try_continuations);
     if (result.kind == JS_INTERP_RETURN) return js_interp_async_state_result(result.value, -1);
     if (result.kind == JS_INTERP_NORMAL) {
         // A concise body is an expression, not a statement list: its normal
@@ -6112,7 +6067,7 @@ JsScript* js_interp_prepare_script(Runtime* runtime, const char* source,
     JsScript* cached = js_common_ast_cache_lookup(runtime, source, source_length,
         filename ? filename : "<inline-js>", strict, false);
     if (cached) return cached;
-    JsCommonAstBuild cache_build = {};
+    InputScriptBuildScope cache_build = {};
     InputScriptBuildClaim claim = js_common_ast_cache_begin_build(&cache_build,
         source, source_length, filename ? filename : "<inline-js>", strict, false);
     if (claim == INPUT_SCRIPT_BUILD_READY) {

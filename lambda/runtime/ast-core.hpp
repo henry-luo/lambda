@@ -1427,6 +1427,9 @@ typedef struct FnAnalysis {
     bool js_native_numeric_proven;
     bool js_has_numeric_local_facts;
     NativeReturnKind js_native_return_kind;
+    // Profile inference keeps its full result contract on the shared function
+    // owner; the compact TypeId below is only its native-lane projection.
+    Type* js_return_contract;
     TypeId js_return_type;
     ScalarReturnClass js_boxed_return_scalar_class;
     int js_formal_length;

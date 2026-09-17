@@ -2131,7 +2131,7 @@ JS_FORWARD_STATIC_EXPRESSION(bool*, js_process_exit_requested_slot, (void),
 #define js_process_ipc_write_callbacks (js_process_state->ipc_write_callbacks)
 #define js_process_ipc_lines (js_process_state->ipc_lines)
 JS_FORWARD_STATIC_EXPRESSION(bool, js_process_ensure_roots, (void),
-    (js_process_state && js_root_vector_ensure_registered(&js_process_state->roots)))
+    (js_process_state && js_root_vector_ensure_registered(js_process_state)))
 
 // root-range cleanup clears expired realm cache slots to zero, while an
 // explicit realm reset uses ItemNull; neither value is a JS object.
@@ -4617,7 +4617,7 @@ extern "C" uint64_t js_get_heap_epoch();
 
 static bool js_global_string_caches_ensure_roots(void) {
     if (!js_active_runtime_state) return false;
-    RootVector* roots = &js_runtime_state.string_caches->roots;
+    RootVector* roots = js_runtime_state.string_caches;
     return js_root_vector_ensure_registered(roots);
 }
 
@@ -15883,9 +15883,8 @@ extern "C" Item js_get_global_builtin_fn_by_id(Item global_id_item) {
     // D6.2.2v2: publish the catalog-selected direct capability before the
     // function becomes observable; global IDs no longer select behavior at call time.
     JsFunctionLayout* fn = (JsFunctionLayout*)pool_calloc(js_input->pool, sizeof(JsFunctionLayout));
+    js_function_init_header(fn);
     js_function_init_native_module_scope(fn);
-    fn->type_id = LMD_TYPE_FUNC;
-    fn->entry_abi = FN_ENTRY_ABI_JS_FUNCTION;
     JsCallableCode* code = js_fn_code_ensure(fn);
     if (!code) return ItemError;
     code->func_ptr = NULL;
@@ -16000,7 +15999,7 @@ extern "C" void js_intrinsic_state_teardown() {
 void js_ctor_cache_reset() {
     // If snapshot is valid, the harness preamble has already cached references to
     // the constructor Items in its module-vars. Zeroing the cache would force
-    // re-creation of NEW JsCtor objects on next access, breaking identity with
+    // re-creation of new JsFunction objects on next access, breaking identity with
     // the harness-cached references. Skip the reset; snapshot/restore handles state.
     if (js_proto_snapshot_is_valid()) return;
     if (!js_realm_intrinsic_slots_ensure_roots()) return;
@@ -16107,8 +16106,6 @@ Item js_intrinsic_ctor_placeholder_call_body(Item callee, Item this_value,
 #undef JS_DEFINE_HOST_CTOR_BODY_1
 #undef JS_DEFINE_HOST_CTOR_BODY_0
 
-using JsCtor = JsFunction;
-
 // Reset constructor prototype objects between batch tests.
 //
 // Strategy: snapshot+restore (preserves Map* identity across batch tests).
@@ -16147,35 +16144,24 @@ struct MapSnapshot {
     uint8_t  flags;      // packed Map flags at the snapshot boundary
 };
 
-struct CtorSnapshot {
-    JsCtor* ctor;
-    Item    prototype;        // Item value (preserved)
-    Item    properties_map;   // Item value (preserved)
-    MapSnapshot proto_map;    // contents snapshot of prototype Map (if it is a Map)
-    MapSnapshot props_map;    // contents snapshot of properties_map Map (if it is a Map)
-    bool    valid;
-};
-
-struct GlobalBuiltinFunctionSnapshot {
+// Global catalog functions only need their own property map. Constructors and
+// intrinsic methods extend this compact common carrier with prototype state.
+struct JsFunctionSnapshot {
     JsFunction* function;
     Item        properties_map;   // Item value (preserved)
     MapSnapshot props_map;        // contents snapshot of properties_map Map
     bool        valid;
 };
 
-struct IntrinsicFunctionSnapshot {
-    JsFunction* function;
+struct JsPrototypeFunctionSnapshot : JsFunctionSnapshot {
     Item        prototype;        // Item value (preserved)
-    Item        properties_map;   // Item value (preserved)
     MapSnapshot proto_map;        // contents snapshot of function.prototype
-    MapSnapshot props_map;        // contents snapshot of function properties
-    bool        valid;
 };
 
 struct JsPrototypeSnapshotState {
-    CtorSnapshot ctor_snapshots[JS_CTOR_MAX] = {};
-    GlobalBuiltinFunctionSnapshot global_builtin_fn_snapshots[JS_BUILTIN_GLOBAL_MAX] = {};
-    IntrinsicFunctionSnapshot* intrinsic_function_snapshots = NULL;
+    JsPrototypeFunctionSnapshot ctor_snapshots[JS_CTOR_MAX] = {};
+    JsFunctionSnapshot global_builtin_fn_snapshots[JS_BUILTIN_GLOBAL_MAX] = {};
+    JsPrototypeFunctionSnapshot* intrinsic_function_snapshots = NULL;
     int intrinsic_function_snapshot_count = 0;
     int intrinsic_function_snapshot_capacity = 0;
     MapSnapshot typed_array_base_proto_snap = {};
@@ -16239,7 +16225,7 @@ static void js_proto_snapshot_visit_intrinsic_function_root_slots(
         JsPrototypeSnapshotState* state, JsSnapshotRootSlotOp op) {
     if (!state || !op) return;
     for (int i = 0; i < state->intrinsic_function_snapshot_capacity; i++) {
-        IntrinsicFunctionSnapshot* snap =
+        JsPrototypeFunctionSnapshot* snap =
             &state->intrinsic_function_snapshots[i];
         op(&snap->prototype.item);
         op(&snap->properties_map.item);
@@ -16399,6 +16385,68 @@ static void js_proto_restore_map(const MapSnapshot* snap) {
     }
 }
 
+static void js_proto_snapshot_clear_function(JsFunctionSnapshot* snap) {
+    if (!snap) return;
+    snap->function = NULL;
+    snap->properties_map = (Item){0};
+    snap->valid = false;
+    js_proto_snapshot_clear_map(&snap->props_map);
+}
+
+static void js_proto_snapshot_capture_function(JsFunctionSnapshot* snap,
+        JsFunction* function) {
+    if (!snap || !function) return;
+    snap->function = function;
+    snap->properties_map = function->properties_map;
+    snap->valid = true;
+    if (get_type_id(function->properties_map) == LMD_TYPE_MAP) {
+        js_proto_snapshot_map(&snap->props_map, function->properties_map.map);
+    }
+}
+
+static void js_proto_snapshot_restore_function(const JsFunctionSnapshot* snap) {
+    if (!snap || !snap->valid || !snap->function) return;
+    snap->function->properties_map = snap->properties_map;
+    if (snap->props_map.m) js_proto_restore_map(&snap->props_map);
+}
+
+static void js_proto_snapshot_clear_prototype_function(
+        JsPrototypeFunctionSnapshot* snap) {
+    if (!snap) return;
+    js_proto_snapshot_clear_function(snap);
+    snap->prototype = (Item){0};
+    js_proto_snapshot_clear_map(&snap->proto_map);
+}
+
+static void js_proto_snapshot_capture_prototype_function(
+        JsPrototypeFunctionSnapshot* snap, JsFunction* function) {
+    if (!snap || !function) return;
+    js_proto_snapshot_capture_function(snap, function);
+    snap->prototype = function->prototype;
+    if (get_type_id(function->prototype) == LMD_TYPE_MAP) {
+        js_proto_snapshot_map(&snap->proto_map, function->prototype.map);
+    } else if (get_type_id(function->prototype) == LMD_TYPE_FUNC) {
+        // %Function.prototype% is callable; its observable own state lives in
+        // the function properties map rather than in a standalone Map.
+        JsFunction* prototype_function =
+            (JsFunction*)function->prototype.function;
+        if (prototype_function &&
+                get_type_id(prototype_function->properties_map) == LMD_TYPE_MAP) {
+            js_proto_snapshot_map(&snap->proto_map,
+                prototype_function->properties_map.map);
+        }
+    }
+}
+
+static void js_proto_snapshot_restore_prototype_function(
+        const JsPrototypeFunctionSnapshot* snap) {
+    if (!snap || !snap->valid || !snap->function) return;
+    snap->function->prototype = snap->prototype;
+    snap->function->properties_map = snap->properties_map;
+    if (snap->proto_map.m) js_proto_restore_map(&snap->proto_map);
+    if (snap->props_map.m) js_proto_restore_map(&snap->props_map);
+}
+
 typedef void (*JsSnapshotMapVisitor)(MapSnapshot* snap, void* data);
 
 static void js_proto_snapshot_visit_intrinsic_source_maps(
@@ -16432,14 +16480,9 @@ static void js_proto_snapshot_clear_intrinsic_function_snapshots(
         JsPrototypeSnapshotState* state) {
     if (!state) return;
     for (int i = 0; i < state->intrinsic_function_snapshot_capacity; i++) {
-        IntrinsicFunctionSnapshot* snap =
+        JsPrototypeFunctionSnapshot* snap =
             &state->intrinsic_function_snapshots[i];
-        snap->function = NULL;
-        snap->prototype = (Item){0};
-        snap->properties_map = (Item){0};
-        snap->valid = false;
-        js_proto_snapshot_clear_map(&snap->proto_map);
-        js_proto_snapshot_clear_map(&snap->props_map);
+        js_proto_snapshot_clear_prototype_function(snap);
     }
     state->intrinsic_function_snapshot_count = 0;
 }
@@ -16449,9 +16492,9 @@ static bool js_proto_snapshot_reserve_intrinsic_functions(
     if (!state || capacity <= state->intrinsic_function_snapshot_capacity) {
         return true;
     }
-    IntrinsicFunctionSnapshot* snapshots =
-        (IntrinsicFunctionSnapshot*)mem_calloc((size_t)capacity,
-            sizeof(IntrinsicFunctionSnapshot), MEM_CAT_JS_RUNTIME);
+    JsPrototypeFunctionSnapshot* snapshots =
+        (JsPrototypeFunctionSnapshot*)mem_calloc((size_t)capacity,
+            sizeof(JsPrototypeFunctionSnapshot), MEM_CAT_JS_RUNTIME);
     if (!snapshots) {
         log_error("prototype-snapshot: failed to reserve intrinsic function snapshots");
         return false;
@@ -16489,7 +16532,7 @@ static void js_proto_snapshot_add_intrinsic_function(
 
     RootFrame roots(1);
     Rooted<Item> function_root(roots, function_item);
-    IntrinsicFunctionSnapshot* snap =
+    JsPrototypeFunctionSnapshot* snap =
         &state->intrinsic_function_snapshots[
             state->intrinsic_function_snapshot_count++];
     JsFunction* function = (JsFunction*)function_root.get().function;
@@ -16497,23 +16540,7 @@ static void js_proto_snapshot_add_intrinsic_function(
         state->intrinsic_function_snapshot_count--;
         return;
     }
-    snap->prototype = function->prototype;
-    snap->properties_map = function->properties_map;
-    snap->valid = true;
-    if (get_type_id(function->prototype) == LMD_TYPE_MAP) {
-        js_proto_snapshot_map(&snap->proto_map, function->prototype.map);
-    } else if (get_type_id(function->prototype) == LMD_TYPE_FUNC) {
-        JsFunction* prototype_function =
-            (JsFunction*)function->prototype.function;
-        if (prototype_function &&
-                get_type_id(prototype_function->properties_map) == LMD_TYPE_MAP) {
-            js_proto_snapshot_map(&snap->proto_map,
-                prototype_function->properties_map.map);
-        }
-    }
-    if (get_type_id(function->properties_map) == LMD_TYPE_MAP) {
-        js_proto_snapshot_map(&snap->props_map, function->properties_map.map);
-    }
+    js_proto_snapshot_capture_prototype_function(snap, function);
     // Built-in method functions remain reachable through a pristine prototype
     // map. Their own descriptor maps must also reset, or a prior test's
     // `delete method.length` leaks into the next hot-batch realm (D6.2.2v2).
@@ -16564,7 +16591,7 @@ extern "C" bool js_proto_snapshot_requires_typemap_detach(Item object) {
     Map* map = js_obj_underlying_map(object);
     if (!map) return false;
     for (int i = 0; i < JS_CTOR_MAX; i++) {
-        const CtorSnapshot* snap = &state->ctor_snapshots[i];
+        const JsPrototypeFunctionSnapshot* snap = &state->ctor_snapshots[i];
         if (snap->valid &&
                 (js_proto_snapshot_map_requires_typemap_detach(&snap->proto_map, map) ||
                  js_proto_snapshot_map_requires_typemap_detach(&snap->props_map, map))) {
@@ -16572,7 +16599,7 @@ extern "C" bool js_proto_snapshot_requires_typemap_detach(Item object) {
         }
     }
     for (int i = 0; i < JS_BUILTIN_GLOBAL_MAX; i++) {
-        const GlobalBuiltinFunctionSnapshot* snap =
+        const JsFunctionSnapshot* snap =
             &state->global_builtin_fn_snapshots[i];
         if (snap->valid &&
                 js_proto_snapshot_map_requires_typemap_detach(&snap->props_map, map)) {
@@ -16580,7 +16607,7 @@ extern "C" bool js_proto_snapshot_requires_typemap_detach(Item object) {
         }
     }
     for (int i = 0; i < state->intrinsic_function_snapshot_count; i++) {
-        const IntrinsicFunctionSnapshot* snap =
+        const JsPrototypeFunctionSnapshot* snap =
             &state->intrinsic_function_snapshots[i];
         if (snap->valid &&
                 (js_proto_snapshot_map_requires_typemap_detach(&snap->proto_map, map) ||
@@ -16607,52 +16634,22 @@ static void js_proto_snapshot_take_locked() {
     js_proto_snapshot_clear_intrinsic_function_snapshots(
         js_proto_snapshot_state());
     for (int i = 0; i < JS_CTOR_MAX; i++) {
-        CtorSnapshot* s = &js_ctor_snapshots[i];
-        s->valid = false;
-        js_proto_snapshot_clear_map(&s->proto_map);
-        js_proto_snapshot_clear_map(&s->props_map);
+        JsPrototypeFunctionSnapshot* s = &js_ctor_snapshots[i];
+        js_proto_snapshot_clear_prototype_function(s);
         Item ci = js_constructor_cache_at(i);
         if (ci.item == 0 || ci.item == ItemNull.item) continue;
-        JsCtor* ctor = (JsCtor*)ci.function;
+        JsFunction* ctor = (JsFunction*)ci.function;
         if (!ctor) continue;
-        s->ctor = ctor;
-        s->prototype = ctor->prototype;
-        s->properties_map = ctor->properties_map;
-        s->valid = true;
-        if (ctor->prototype.item != 0 && get_type_id(ctor->prototype) == LMD_TYPE_MAP) {
-            js_proto_snapshot_map(&s->proto_map, ctor->prototype.map);
-        } else if (ctor->prototype.item != 0 &&
-                get_type_id(ctor->prototype) == LMD_TYPE_FUNC) {
-            // %Function.prototype% is a callable object. Its observable own
-            // state lives in the function properties map, so snapshot that
-            // backing map just as ordinary intrinsic prototype maps.
-            JsFunction* prototype_function =
-                (JsFunction*)ctor->prototype.function;
-            if (prototype_function &&
-                    get_type_id(prototype_function->properties_map) ==
-                        LMD_TYPE_MAP) {
-                js_proto_snapshot_map(&s->proto_map,
-                    prototype_function->properties_map.map);
-            }
-        }
-        if (ctor->properties_map.item != 0 && get_type_id(ctor->properties_map) == LMD_TYPE_MAP) {
-            js_proto_snapshot_map(&s->props_map, ctor->properties_map.map);
-        }
+        js_proto_snapshot_capture_prototype_function(s, ctor);
     }
     for (int i = 0; i < JS_BUILTIN_GLOBAL_MAX; i++) {
-        GlobalBuiltinFunctionSnapshot* s = &js_global_builtin_fn_snapshots[i];
-        s->valid = false;
-        js_proto_snapshot_clear_map(&s->props_map);
+        JsFunctionSnapshot* s = &js_global_builtin_fn_snapshots[i];
+        js_proto_snapshot_clear_function(s);
         Item function_item = global_builtin_fn_cache_at(i);
         if (get_type_id(function_item) != LMD_TYPE_FUNC) continue;
         JsFunction* function = (JsFunction*)function_item.function;
         if (!function) continue;
-        s->function = function;
-        s->properties_map = function->properties_map;
-        s->valid = true;
-        if (get_type_id(function->properties_map) == LMD_TYPE_MAP) {
-            js_proto_snapshot_map(&s->props_map, function->properties_map.map);
-        }
+        js_proto_snapshot_capture_function(s, function);
     }
     // %TypedArray% intrinsic + its prototype + per-type prototypes
     js_typed_array_base_snap = js_typed_array_base;
@@ -16675,31 +16672,21 @@ static void js_proto_snapshot_take_locked() {
 
 static void js_proto_snapshot_restore_locked() {
     for (int i = 0; i < JS_CTOR_MAX; i++) {
-        CtorSnapshot* s = &js_ctor_snapshots[i];
-        if (!s->valid) continue;
-        JsCtor* ctor = s->ctor;
-        ctor->prototype = s->prototype;
-        ctor->properties_map = s->properties_map;
-        if (s->proto_map.m) js_proto_restore_map(&s->proto_map);
-        if (s->props_map.m) js_proto_restore_map(&s->props_map);
+        JsPrototypeFunctionSnapshot* s = &js_ctor_snapshots[i];
+        js_proto_snapshot_restore_prototype_function(s);
     }
     for (int i = 0; i < JS_BUILTIN_GLOBAL_MAX; i++) {
-        GlobalBuiltinFunctionSnapshot* s = &js_global_builtin_fn_snapshots[i];
-        if (!s->valid || !s->function) continue;
+        JsFunctionSnapshot* s = &js_global_builtin_fn_snapshots[i];
         // Global catalog functions survive hot reset for identity. Their own
         // maps must therefore be restored too: a test-local delete of
         // encodeURI.length otherwise poisons the next test (D6.2.2v2).
-        s->function->properties_map = s->properties_map;
-        if (s->props_map.m) js_proto_restore_map(&s->props_map);
+        js_proto_snapshot_restore_function(s);
     }
     JsPrototypeSnapshotState* state = js_proto_snapshot_state();
     for (int i = 0; state && i < state->intrinsic_function_snapshot_count; i++) {
-        IntrinsicFunctionSnapshot* s = &state->intrinsic_function_snapshots[i];
-        if (!s->valid || !s->function) continue;
-        s->function->prototype = s->prototype;
-        s->function->properties_map = s->properties_map;
-        if (s->proto_map.m) js_proto_restore_map(&s->proto_map);
-        if (s->props_map.m) js_proto_restore_map(&s->props_map);
+        JsPrototypeFunctionSnapshot* s =
+            &state->intrinsic_function_snapshots[i];
+        js_proto_snapshot_restore_prototype_function(s);
     }
     js_typed_array_base = js_typed_array_base_snap;
     js_typed_array_base_proto = js_typed_array_base_proto_item_snap;
@@ -16739,17 +16726,10 @@ extern "C" void js_proto_snapshot_invalidate() {
     js_proto_snapshot_valid = false;
     js_intrinsic_proto_cache_reset();
     for (int i = 0; i < JS_CTOR_MAX; i++) {
-        js_ctor_snapshots[i].valid = false;
-        js_ctor_snapshots[i].prototype = (Item){0};
-        js_ctor_snapshots[i].properties_map = (Item){0};
-        js_proto_snapshot_clear_map(&js_ctor_snapshots[i].proto_map);
-        js_proto_snapshot_clear_map(&js_ctor_snapshots[i].props_map);
+        js_proto_snapshot_clear_prototype_function(&js_ctor_snapshots[i]);
     }
     for (int i = 0; i < JS_BUILTIN_GLOBAL_MAX; i++) {
-        js_global_builtin_fn_snapshots[i].valid = false;
-        js_global_builtin_fn_snapshots[i].properties_map = (Item){0};
-        js_proto_snapshot_clear_map(
-            &js_global_builtin_fn_snapshots[i].props_map);
+        js_proto_snapshot_clear_function(&js_global_builtin_fn_snapshots[i]);
     }
     js_proto_snapshot_clear_intrinsic_function_snapshots(
         js_proto_snapshot_state());
@@ -16775,8 +16755,7 @@ extern "C" Item js_get_typed_array_base() {
     if (js_typed_array_base.item != 0) return js_typed_array_base;
     // Create the %TypedArray% intrinsic function object
     JsFunctionLayout* fn = (JsFunctionLayout*)pool_calloc(js_input->pool, sizeof(JsFunctionLayout));
-    fn->type_id = LMD_TYPE_FUNC;
-    fn->entry_abi = FN_ENTRY_ABI_JS_FUNCTION;
+    js_function_init_header(fn);
     JsCallableCode* code = js_fn_code_ensure(fn);
     if (!code) return ItemError;
     code->func_ptr = (void*)js_ctor_placeholder;
@@ -16995,9 +16974,8 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
     js_intrinsic_state.initialization_depth++;
     // Allocate directly because intrinsic constructor identity is binding-owned;
     // the shared placeholder body is not a valid cache identity.
-    JsCtor* fn = (JsCtor*)pool_calloc(js_input->pool, sizeof(JsCtor));
-    fn->type_id = LMD_TYPE_FUNC;
-    fn->entry_abi = FN_ENTRY_ABI_JS_FUNCTION;
+    JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+    js_function_init_header(fn);
     JsCallableCode* code = js_fn_code_ensure(fn);
     if (!code) return ItemError;
     const JsIntrinsicTargetSpec* target =
@@ -17051,7 +17029,7 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
         }
         // .constructor on prototype points back to the function.
         js_set_name_key(proto_root.get(), "constructor", 11, fn_item);
-        JsCtor* event_ctor = (JsCtor*)fn_item.function;
+        JsFunction* event_ctor = (JsFunction*)fn_item.function;
         event_ctor->prototype = proto_root.get();
         // Constructors are pool-owned and invisible to precise GC; their
         // lazily built Event prototype therefore needs an explicit root slot.
@@ -17101,7 +17079,7 @@ static bool js_intrinsic_proto_ctor_name_for_class(JsClass cls, const char** out
 
 static Item js_get_constructor_intrinsic_prototype(Item ctor) {
     if (get_type_id(ctor) != LMD_TYPE_FUNC) return ItemNull;
-    JsCtor* fn = (JsCtor*)ctor.function;
+    JsFunction* fn = (JsFunction*)ctor.function;
     if (fn && (get_type_id(fn->prototype) == LMD_TYPE_MAP ||
             get_type_id(fn->prototype) == LMD_TYPE_FUNC)) return fn->prototype;
     Item proto = js_get_name_id(ctor, JS_NAME_PROTOTYPE);
@@ -17265,32 +17243,44 @@ extern "C" void js_intrinsic_note_prototype_mutation(Item object) {
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_typed.hpp"
 
-// symbol registry entry for Symbol.for() / Symbol.keyFor()
-struct JsSymbolEntry {
-    char key[128];
-    uint64_t symbol_id;
-    NameId name_id;
+enum JsSymbolRecordKind : uint8_t {
+    JS_SYMBOL_RECORD_UNIQUE,
+    JS_SYMBOL_RECORD_REGISTERED,
+    JS_SYMBOL_RECORD_WELL_KNOWN,
 };
+
+// Dynamic symbols retain one pool-owned spelling record. A unique record's
+// spelling is diagnostic only; a registered record's spelling is its key.
+struct JsSymbolRecord {
+    NameRef text;
+    uint64_t id;
+    JsSymbolRecordKind kind;
+    bool has_description;
+};
+
+static const char* js_symbol_record_chars(const JsSymbolRecord& record) {
+    return record.text ? record.text->chars : "";
+}
+
+static uint32_t js_symbol_record_length(const JsSymbolRecord& record) {
+    return record.text ? record.text->len : 0;
+}
 
 #define js_symbol_next_id (js_runtime_state.operations.next_symbol_id)
-#define js_symbol_registry (js_runtime_state.operations.symbol_registry)  // string key -> JsSymbolEntry
-
-// symbol description registry: maps symbol_id -> description string
-struct JsSymbolDesc {
-    uint64_t symbol_id;
-    char desc[128];
-    int desc_len;    // -1 means no description (Symbol() with no arg)
-    NameId name_id;
-};
+#define js_symbol_registry (js_runtime_state.operations.symbol_registry)
 
 #define js_symbol_desc_registry (js_runtime_state.operations.symbol_description_registry)
 
-typedef TypedHashMap<JsSymbolDesc,
-    HashMapIntegralMemberKeyOps<JsSymbolDesc, &JsSymbolDesc::symbol_id>> JsSymbolDescMap;
+typedef TypedHashMap<JsSymbolRecord,
+    HashMapIntegralMemberKeyOps<JsSymbolRecord, &JsSymbolRecord::id>> JsSymbolIdMap;
 
-static void js_symbol_desc_init() {
+typedef TypedHashMap<JsSymbolRecord,
+    HashMapLenStrKeyOps<JsSymbolRecord, js_symbol_record_chars,
+        js_symbol_record_length>> JsSymbolTextMap;
+
+static void js_symbol_id_index_init() {
     if (!js_symbol_desc_registry) {
-        js_symbol_desc_registry = JsSymbolDescMap::create(16);
+        js_symbol_desc_registry = JsSymbolIdMap::create(16);
     }
 }
 
@@ -17311,12 +17301,9 @@ static void js_symbol_desc_init() {
 #define JS_SYMBOL_ID_ASYNC_DISPOSE 14
 #define JS_SYMBOL_ID_DISPOSE       15
 
-typedef TypedHashMap<JsSymbolEntry,
-    HashMapCStrMemberKeyOps<JsSymbolEntry, &JsSymbolEntry::key>> JsSymbolEntryMap;
-
-static void js_symbol_init_registry() {
+static void js_symbol_text_index_init() {
     if (!js_symbol_registry) {
-        js_symbol_registry = JsSymbolEntryMap::create(16);
+        js_symbol_registry = JsSymbolTextMap::create(16);
     }
 }
 
@@ -17325,11 +17312,11 @@ extern "C" void js_symbol_registry_batch_reset(void) {
     // Dynamic Symbol records own unique NamePool keys, so a realm reset must
     // discard both registries before their backing pool is released.
     if (js_symbol_registry) {
-        JsSymbolEntryMap::destroy(js_symbol_registry);
+        JsSymbolTextMap::destroy(js_symbol_registry);
         js_symbol_registry = NULL;
     }
     if (js_symbol_desc_registry) {
-        JsSymbolDescMap::destroy(js_symbol_desc_registry);
+        JsSymbolIdMap::destroy(js_symbol_desc_registry);
         js_symbol_desc_registry = NULL;
     }
     js_symbol_next_id = 100;
@@ -17386,17 +17373,17 @@ extern "C" NameId js_symbol_name_id(Item sym) {
     NameId well_known = js_well_known_symbol_name_id((int64_t)id);
     if (well_known != NAME_ID_NONE) return well_known;
     if (js_symbol_desc_registry) {
-        JsSymbolDesc lookup = {};
-        lookup.symbol_id = id;
-        JsSymbolDesc* found = JsSymbolDescMap::get(js_symbol_desc_registry, lookup);
-        if (found) return found->name_id;
+        JsSymbolRecord lookup = {};
+        lookup.id = id;
+        JsSymbolRecord* found = JsSymbolIdMap::get(js_symbol_desc_registry, lookup);
+        if (found) return name_ref_id(found->text);
     }
     if (js_symbol_registry) {
         size_t iter = 0;
         void* entry = NULL;
         while (hashmap_iter(js_symbol_registry, &iter, &entry)) {
-            JsSymbolEntry* found = (JsSymbolEntry*)entry;
-            if (found->symbol_id == id) return found->name_id;
+            JsSymbolRecord* found = (JsSymbolRecord*)entry;
+            if (found->id == id) return name_ref_id(found->text);
         }
     }
     return NAME_ID_NONE;
@@ -17415,9 +17402,9 @@ static bool js_name_id_to_symbol(NameId name_id, Item* out_symbol) {
         size_t iter = 0;
         void* raw = NULL;
         while (hashmap_iter(js_symbol_desc_registry, &iter, &raw)) {
-            JsSymbolDesc* entry = (JsSymbolDesc*)raw;
-            if (entry->name_id == name_id) {
-                *out_symbol = js_make_symbol_item(entry->symbol_id);
+            JsSymbolRecord* entry = (JsSymbolRecord*)raw;
+            if (name_ref_id(entry->text) == name_id) {
+                *out_symbol = js_make_symbol_item(entry->id);
                 return true;
             }
         }
@@ -17426,9 +17413,9 @@ static bool js_name_id_to_symbol(NameId name_id, Item* out_symbol) {
         size_t iter = 0;
         void* raw = NULL;
         while (hashmap_iter(js_symbol_registry, &iter, &raw)) {
-            JsSymbolEntry* entry = (JsSymbolEntry*)raw;
-            if (entry->name_id == name_id) {
-                *out_symbol = js_make_symbol_item(entry->symbol_id);
+            JsSymbolRecord* entry = (JsSymbolRecord*)raw;
+            if (name_ref_id(entry->text) == name_id) {
+                *out_symbol = js_make_symbol_item(entry->id);
                 return true;
             }
         }
@@ -17465,33 +17452,21 @@ extern "C" Item js_symbol_create(Item description) {
     uint64_t id = js_symbol_next_id++;
     Item sym = js_make_symbol_item(id);
 
-    // store description for Symbol.prototype.description
-    js_symbol_desc_init();
-    JsSymbolDesc entry;
-    entry.symbol_id = id;
-    if (description.item == ITEM_NULL || description.item == ITEM_JS_UNDEFINED) {
-        entry.desc[0] = '\0';
-        entry.desc_len = -1;  // no description
-    } else {
-        String* s = it2s(string_root.get());
-        if (s) {
-            int len = s->len < 127 ? (int)s->len : 127;
-            str_copy(entry.desc, sizeof(entry.desc), s->chars, len);
-            entry.desc_len = len;
-        } else {
-            entry.desc[0] = '\0';
-            entry.desc_len = -1;
-        }
-    }
-    String* name_record = context && context->name_pool
-        ? name_pool_create_unique_symbol(context->name_pool, {entry.desc,
-            entry.desc_len >= 0 ? (size_t)entry.desc_len : 0})
+    // Unique symbols own a NamePool identity even when their description is
+    // absent, so a property key never aliases a string spelling.
+    js_symbol_id_index_init();
+    bool has_description = description_root.get().item != ITEM_NULL &&
+        description_root.get().item != ITEM_JS_UNDEFINED;
+    String* description_text = has_description ? it2s(string_root.get()) : NULL;
+    NameRef text = context && context->name_pool
+        ? name_pool_create_unique_symbol(context->name_pool, {description_text
+            ? description_text->chars : "", description_text ? description_text->len : 0})
         : NULL;
-    entry.name_id = name_ref_id(name_record);
-    if (entry.name_id == NAME_ID_NONE) {
+    if (name_ref_id(text) == NAME_ID_NONE) {
         return js_throw_type_error("failed to allocate symbol property key");
     }
-    JsSymbolDescMap::set(js_symbol_desc_registry, entry);
+    JsSymbolRecord record = {text, id, JS_SYMBOL_RECORD_UNIQUE, has_description};
+    JsSymbolIdMap::set(js_symbol_desc_registry, record);
 
     return sym;
 }
@@ -17499,46 +17474,54 @@ extern "C" Item js_symbol_create(Item description) {
 extern "C" Item js_symbol_for(Item key) {
     JS_ROOTS(roots, key_root, key, string_root, js_to_string(key_root.get()));
     if (item_is_error(string_root.get())) return string_root.get();
-    js_symbol_init_registry();
+    js_symbol_text_index_init();
     String* s = it2s(string_root.get());
     if (!s) return js_symbol_create(key_root.get());
 
-    JsSymbolEntry lookup;
-    int klen = s->len < 127 ? (int)s->len : 127;
-    str_copy(lookup.key, sizeof(lookup.key), s->chars, klen);
+    JsSymbolRecord lookup = {};
+    lookup.text = s;
 
-    JsSymbolEntry* found = JsSymbolEntryMap::get(js_symbol_registry, lookup);
-    if (found) return js_make_symbol_item(found->symbol_id);
+    JsSymbolRecord* found = JsSymbolTextMap::get(js_symbol_registry, lookup);
+    if (found) return js_make_symbol_item(found->id);
 
-    // create new entry
-    lookup.symbol_id = js_symbol_next_id++;
-    String* name_record = context && context->name_pool
-        ? name_pool_create_unique_symbol(context->name_pool, {lookup.key, (size_t)klen})
-        : NULL;
-    lookup.name_id = name_ref_id(name_record);
-    if (lookup.name_id == NAME_ID_NONE) {
+    // Registered keys preserve every byte; truncation would merge distinct
+    // Symbol.for keys and violate their process-wide identity contract.
+    NameRef text = context && context->name_pool
+        ? name_pool_create_unique_symbol(context->name_pool, {s->chars, s->len}) : NULL;
+    if (name_ref_id(text) == NAME_ID_NONE) {
         return js_throw_type_error("failed to allocate registry symbol property key");
     }
-    JsSymbolEntryMap::set(js_symbol_registry, lookup);
-    return js_make_symbol_item(lookup.symbol_id);
+    JsSymbolRecord record = {text, js_symbol_next_id++, JS_SYMBOL_RECORD_REGISTERED, true};
+    JsSymbolTextMap::set(js_symbol_registry, record);
+    return js_make_symbol_item(record.id);
 }
 
 extern "C" Item js_symbol_key_for(Item sym) {
     if (!js_is_symbol_item(sym))
         return js_throw_type_error("Symbol.keyFor requires a Symbol argument");
-    js_symbol_init_registry();
+    js_symbol_text_index_init();
     uint64_t id = js_symbol_item_id(sym);
 
     // linear scan — symbol registry is small
     size_t iter = 0;
     void* entry;
     while (hashmap_iter(js_symbol_registry, &iter, &entry)) {
-        JsSymbolEntry* e = (JsSymbolEntry*)entry;
-        if (e->symbol_id == id) {
-            return js_name_item(e->key, strlen(e->key));
+        JsSymbolRecord* e = (JsSymbolRecord*)entry;
+        if (e->id == id) {
+            return js_name_item(e->text->chars, e->text->len);
         }
     }
     return make_js_undefined();  // not in global registry → undefined per spec
+}
+
+static Item js_symbol_render(String* text) {
+    if (!text) return js_name_item("Symbol()", 8);
+    StrBuf* buffer = strbuf_new_cap((size_t)text->len + 8);
+    if (!buffer) return ItemError;
+    strbuf_append_str(buffer, "Symbol(");
+    strbuf_append_str_n(buffer, text->chars, text->len);
+    strbuf_append_char(buffer, ')');
+    return js_strbuf_take_item(buffer);
 }
 
 extern "C" Item js_symbol_to_string(Item sym) {
@@ -17560,24 +17543,20 @@ extern "C" Item js_symbol_to_string(Item sym) {
         size_t iter = 0;
         void* entry;
         while (hashmap_iter(js_symbol_registry, &iter, &entry)) {
-            JsSymbolEntry* e = (JsSymbolEntry*)entry;
-            if (e->symbol_id == id) {
-                char buf[160];
-                snprintf(buf, sizeof(buf), "Symbol(%s)", e->key);
-                return js_name_item(buf, strlen(buf));
+            JsSymbolRecord* e = (JsSymbolRecord*)entry;
+            if (e->id == id) {
+                return js_symbol_render(e->text);
             }
         }
     }
 
     // check description registry
     if (js_symbol_desc_registry) {
-        JsSymbolDesc lookup;
-        lookup.symbol_id = id;
-        JsSymbolDesc* found = JsSymbolDescMap::get(js_symbol_desc_registry, lookup);
-        if (found && found->desc_len >= 0) {
-            char buf[160];
-            snprintf(buf, sizeof(buf), "Symbol(%s)", found->desc);
-            return js_name_item(buf, strlen(buf));
+        JsSymbolRecord lookup = {};
+        lookup.id = id;
+        JsSymbolRecord* found = JsSymbolIdMap::get(js_symbol_desc_registry, lookup);
+        if (found && found->has_description) {
+            return js_symbol_render(found->text);
         }
     }
 
@@ -17601,21 +17580,21 @@ extern "C" Item js_symbol_get_description(Item sym) {
         size_t iter = 0;
         void* entry;
         while (hashmap_iter(js_symbol_registry, &iter, &entry)) {
-            JsSymbolEntry* e = (JsSymbolEntry*)entry;
-            if (e->symbol_id == id) {
-                return js_name_item(e->key, strlen(e->key));
+            JsSymbolRecord* e = (JsSymbolRecord*)entry;
+        if (e->id == id) {
+            return js_name_item(e->text->chars, e->text->len);
             }
         }
     }
 
     // check description registry
     if (js_symbol_desc_registry) {
-        JsSymbolDesc lookup;
-        lookup.symbol_id = id;
-        JsSymbolDesc* found = JsSymbolDescMap::get(js_symbol_desc_registry, lookup);
+        JsSymbolRecord lookup = {};
+        lookup.id = id;
+        JsSymbolRecord* found = JsSymbolIdMap::get(js_symbol_desc_registry, lookup);
         if (found) {
-            if (found->desc_len < 0) return make_js_undefined();  // Symbol() with no arg
-            return js_name_item(found->desc, found->desc_len);
+            if (!found->has_description) return make_js_undefined();
+            return js_name_item(found->text->chars, found->text->len);
         }
     }
 
@@ -17849,7 +17828,7 @@ static void js_readable_stream_detach_byob_view(Item view) {
     if (ta->buffer_item) {
         js_arraybuffer_detach((Item){.item = ta->buffer_item});
     } else {
-        byte_buffer_detach(&ta->buffer->handle);
+        byte_buffer_detach(ta->buffer);
     }
 }
 

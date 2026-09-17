@@ -122,7 +122,6 @@ typedef struct JsRegExpMapCarrier JsRegExpMapCarrier;
 static JsRegexData* js_get_regex_data(Item obj);
 static void js_regexp_transfer_payload(Item destination, Item source);
 static Item js_get_regexp_prototype();
-static Item js_make_iter_result(Item value, bool done);
 
 // Native publishers retain one overload per ABI arity because this header is
 // also consumed by MIR-facing C-compatible declarations.
@@ -8676,7 +8675,7 @@ static int js_utf16_idx_to_byte(const char* chars, int str_len, int64_t utf16_id
 // fixed cache range is registered for this heap, the ASCII hit path is direct.
 static inline bool js_ascii_substring_cache_is_ready(void) {
     if (!js_active_runtime_state || !js_runtime_state.string_caches) return false;
-    RootVector* roots = &js_runtime_state.string_caches->roots;
+    RootVector* roots = js_runtime_state.string_caches;
     uint64_t epoch = js_get_heap_epoch();
     if (epoch != 0 && roots->heap_generation == epoch) return true;
     return js_root_vector_ensure_registered(roots);
@@ -15463,8 +15462,9 @@ static int js_regex_property_kind_from_name(const char* name, int name_len) {
 }
 
 static bool js_regex_range_contains(const JsRegexRange* ranges, int count, int cp) {
+    if (cp < 0) return false;
     for (int i = 0; i < count; i++) {
-        if (cp >= ranges[i].first && cp <= ranges[i].last) return true;
+        if (codepoint_interval_contains(&ranges[i], (uint32_t)cp)) return true;
     }
     return false;
 }
@@ -26640,7 +26640,7 @@ static Item js_262_eval_script(Item code) {
 
 static Item js_262_agent_start(Item code) {
     if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
-    js_root_vector_ensure_registered(&js_runtime_state.test262_agent->roots);
+    js_root_vector_ensure_registered(js_runtime_state.test262_agent);
     RootFrame roots(1);
     Rooted<Item> code_root(roots, code);
     int64_t slot = root_vector_count(&js_262_agent_callbacks);
@@ -26655,7 +26655,7 @@ static Item js_262_agent_start(Item code) {
 
 static Item js_262_agent_receive_broadcast(Item callback) {
     if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
-    js_root_vector_ensure_registered(&js_runtime_state.test262_agent->roots);
+    js_root_vector_ensure_registered(js_runtime_state.test262_agent);
     if (js_262_agent_current_slot < 0 || js_262_agent_current_slot >=
             root_vector_count(&js_262_agent_callbacks)) {
         return make_js_undefined();
@@ -26671,7 +26671,7 @@ static Item js_262_agent_receive_broadcast(Item callback) {
 
 static Item js_262_agent_broadcast(Item value) {
     if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
-    js_root_vector_ensure_registered(&js_runtime_state.test262_agent->roots);
+    js_root_vector_ensure_registered(js_runtime_state.test262_agent);
     int64_t callback_count = root_vector_count(&js_262_agent_callbacks);
     for (int64_t i = 0; i < callback_count; i++) {
         Item callback = js_262_agent_callback_at(i);
@@ -26688,7 +26688,7 @@ static Item js_262_agent_broadcast(Item value) {
 
 static Item js_262_agent_report(Item value) {
     if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
-    js_root_vector_ensure_registered(&js_runtime_state.test262_agent->roots);
+    js_root_vector_ensure_registered(js_runtime_state.test262_agent);
     JS_ASSIGN_OR_RETURN(report, js_to_string(value));
     int waiter_id = js_atomics_report_waiter_for_agent(
         js_262_agent_current_slot, report);
@@ -26698,7 +26698,7 @@ static Item js_262_agent_report(Item value) {
 
 static Item js_262_agent_get_report() {
     if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
-    js_root_vector_ensure_registered(&js_runtime_state.test262_agent->roots);
+    js_root_vector_ensure_registered(js_runtime_state.test262_agent);
     if (!js_262_agent_report_rows_ensure() || !js_262_agent_report_rows ||
             js_262_agent_report_rows->length == 0) return ItemNull;
     int ready_offset = -1;
@@ -26739,7 +26739,7 @@ static Item js_262_agent_sleep(Item ms) {
 
 static Item js_262_get_agent_object() {
     if (!js_test262_agent_state_ensure(&js_runtime_state)) return ItemError;
-    js_root_vector_ensure_registered(&js_runtime_state.test262_agent->roots);
+    js_root_vector_ensure_registered(js_runtime_state.test262_agent);
     if (!js_namespace_cache_is_empty(js_262_agent_object)) return js_262_agent_object;
     js_262_agent_object = js_new_object();
 #define JS_262_AGENT_METHODS(M) \
@@ -27898,10 +27898,16 @@ extern "C" Item js_object_rest(Item src, Item* exclude_keys, int exclude_count) 
 // [value, next_state] where next_state == -1 means done.
 using JsGenerator = JsGeneratorStateRecord;
 
+static void js_suspended_activation_trace_environment(void* context,
+        void* environment) {
+    gc_mark_object_ptr((gc_heap_t*)context, environment);
+}
+
 static void js_suspended_activation_gc_trace(
         const JsSuspendedActivation* activation, gc_heap_t* gc) {
     if (!activation || !gc) return;
-    if (activation->env) gc_mark_object_ptr(gc, activation->env);
+    durable_activation_visit_environment(activation, gc,
+        js_suspended_activation_trace_environment);
     if (activation->with_env) gc_mark_object_ptr(gc, activation->with_env);
     gc_mark_item(gc, activation->ast_function.item);
     gc_mark_item(gc, activation->ast_arguments.item);
@@ -28146,7 +28152,7 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
     carrier->base.data_cap = 0;
     obj_root.set((Item){.map = &carrier->base});
     JsGenerator* gen = &carrier->state;
-    gen->type_id = LMD_TYPE_MAP;
+    durable_activation_init(gen, LMD_TYPE_MAP, DURABLE_ACTIVATION_JS_GENERATOR);
     gen->runtime_context = runtime;
     gen->state_fn = func_ptr;
     js_env_rehome_scalars(env);
@@ -30432,7 +30438,7 @@ static void js_promise_schedule_unhandled_check(JsPromise* p) {
     Rooted<Item> promise_root(roots, js_promise_to_item(p));
     p = js_get_promise(promise_root.get());
     if (!p) return;
-    if (!js_root_vector_ensure_registered(&js_runtime_state.promises.roots)) {
+    if (!js_root_vector_ensure_registered(&js_runtime_state.promises)) {
         log_error("js-promise: unhandled queue root registration failed");
         return;
     }
@@ -31403,7 +31409,7 @@ extern "C" void js_async_frame_map_heap_destroy(Map* map) {
 // check. Its exact owner replaces the last direct async root registration.
 static bool js_async_ensure_scratch_root() {
     return js_active_runtime_state &&
-        js_root_vector_ensure_registered(&js_runtime_state.async_await.roots);
+        js_root_vector_ensure_registered(&js_runtime_state.async_await);
 }
 
 // Prepare an awaited value for the generated suspension continuation.
@@ -31554,6 +31560,7 @@ static Item js_async_context_create_current(void* fn_ptr, Item* env,
     Item frame_item = (Item){.map = &carrier->base};
     JS_ROOTS(create_roots, frame_root, frame_item);
     JsAsyncContext* ctx = &carrier->state;
+    durable_activation_init(ctx, LMD_TYPE_MAP, DURABLE_ACTIVATION_JS_ASYNC);
     ctx->runtime_context = runtime;
     ctx->state_fn = fn_ptr;
     js_env_rehome_scalars(env);
@@ -32749,7 +32756,7 @@ static Item js_dc_emit_deferred_error(void) {
 }
 
 static void js_dc_defer_transform_error(Item error) {
-    js_root_vector_ensure_registered(&js_dc_state.roots);
+    js_root_vector_ensure_registered(&js_dc_state);
     RootFrame roots(1);
     Rooted<Item> error_root(roots, error);
     Item errors = js_dc_deferred_error_entries();
@@ -32901,7 +32908,7 @@ static Item js_dc_channel_withStoreScope(Item message) {
 
 // dc.channel(name) — create or return existing channel
 static Item js_dc_channel_factory(Item name) {
-    js_root_vector_ensure_registered(&js_dc_state.roots);
+    js_root_vector_ensure_registered(&js_dc_state);
     RootFrame roots(4);
     Rooted<Item> name_root(roots, name);
     if (get_type_id(name) != LMD_TYPE_STRING && !js_dc_is_symbol(name)) {
@@ -33825,7 +33832,7 @@ static Item js_cluster_setup_primary(Item options) {
     RootFrame roots(1);
     Rooted<Item> options_root(roots, options);
     if (!roots.valid() ||
-            !js_root_vector_ensure_registered(&js_runtime_state.cluster.roots)) {
+            !js_root_vector_ensure_registered(&js_runtime_state.cluster)) {
         return ItemError;
     }
     js_cluster_primary_options = options_root.get();
@@ -34499,7 +34506,7 @@ static void js_async_hooks_stamp_id_symbols(Item resource, int64_t async_id, int
 static Item js_async_hooks_ensure_root_resource(void) {
     if (!js_async_hooks_state) return ItemError;
     if (js_async_hooks_root_resource.item == 0) {
-        js_root_vector_ensure_registered(&js_async_hooks_state->roots);
+        js_root_vector_ensure_registered(js_async_hooks_state);
         js_async_hooks_root_resource = js_new_object();
     }
     return js_async_hooks_root_resource;
@@ -35586,7 +35593,7 @@ extern "C" Item js_get_node_module_namespace(void) {
 
 extern "C" Item js_get_domain_namespace(void) {
     if (js_domain_namespace.item == 0) {
-        if (!js_root_vector_ensure_registered(&js_runtime_state.promises.roots)) {
+        if (!js_root_vector_ensure_registered(&js_runtime_state.promises)) {
             return ItemError;
         }
         js_domain_namespace = js_new_object();
@@ -35654,7 +35661,7 @@ extern "C" Item js_get_diagnostics_channel_namespace(void) {
         return state->namespace_object;
     }
     state->namespace_epoch = js_heap_epoch;
-    if (!js_root_vector_ensure_registered(&state->roots)) return ItemError;
+    if (!js_root_vector_ensure_registered(state)) return ItemError;
     state->namespace_object = js_new_object();
     Item diagnostics_namespace = state->namespace_object;
     js_dc_channel_proto = js_new_object();

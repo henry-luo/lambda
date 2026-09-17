@@ -50,30 +50,29 @@ int js_typed_array_element_size(JsTypedArrayType type);
 const char* js_typed_array_type_name_from_type(JsTypedArrayType type);
 bool js_typed_array_is_integer_type(JsTypedArrayType type);
 
-// ArrayBuffer identity stays stable while its handle replaces storage on
-// resize, detach, transfer, and copy-on-write.
-typedef struct JsArrayBuffer {
-    ByteBufferHandle handle;
-} JsArrayBuffer;
+// ArrayBuffer identity stays stable while this shared handle replaces storage
+// on resize, detach, transfer, and copy-on-write. JS owns the Map carrier;
+// ByteBufferHandle owns the native buffer state directly.
+typedef ByteBufferHandle JsArrayBuffer;
 
 static inline const uint8_t* js_arraybuffer_data_const(const JsArrayBuffer* ab) {
-    return ab ? byte_buffer_data_const(&ab->handle) : NULL;
+    return ab ? byte_buffer_data_const(ab) : NULL;
 }
 uint8_t* js_arraybuffer_prepare_write(JsArrayBuffer* ab);
 static inline int js_arraybuffer_length(const JsArrayBuffer* ab) {
-    return ab ? (int)ab->handle.byte_length : 0;
+    return ab ? (int)ab->byte_length : 0;
 }
 static inline int js_arraybuffer_max_length(const JsArrayBuffer* ab) {
-    return ab ? (int)ab->handle.max_byte_length : 0;
+    return ab ? (int)ab->max_byte_length : 0;
 }
 static inline bool js_arraybuffer_detached(const JsArrayBuffer* ab) {
-    return !ab || byte_buffer_is_detached(&ab->handle);
+    return !ab || byte_buffer_is_detached(ab);
 }
 static inline bool js_arraybuffer_shared(const JsArrayBuffer* ab) {
-    return ab && byte_buffer_is_shared(&ab->handle);
+    return ab && byte_buffer_is_shared(ab);
 }
 static inline bool js_arraybuffer_resizable(const JsArrayBuffer* ab) {
-    return ab && byte_buffer_is_resizable(&ab->handle);
+    return ab && byte_buffer_is_resizable(ab);
 }
 
 // The one authority for every ArrayBuffer view. DataView and TypedArray keep
@@ -103,20 +102,9 @@ static inline bool js_arraybuffer_view_is_out_of_bounds(const JsArrayBufferView*
     return !view->length_tracking && available < view->byte_length;
 }
 
-// Legacy member spellings are an overlay, not a second stored record. They
-// keep host modules source-compatible while their reads move to `base`.
-typedef struct JsDataView {
-    union {
-        JsArrayBufferView base;
-        struct {
-            JsArrayBuffer* buffer;
-            uint64_t buffer_item;
-            int byte_offset;
-            int byte_length;
-            bool length_tracking;
-        };
-    };
-} JsDataView;
+// DataView has no native facts beyond the common buffer-view contract. Keep
+// its JS API name as a direct alias so its carrier stores one shared record.
+typedef JsArrayBufferView JsDataView;
 
 typedef struct JsTypedArray {
     union {

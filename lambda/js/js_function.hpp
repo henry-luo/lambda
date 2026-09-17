@@ -192,11 +192,7 @@ struct JsFunction {
     // (a resumable layout reserves 161 before the first capture), so its size
     // stays the `env_size` int below. Only `type_id` and `entry_abi` are
     // contractual (see JSCUO6).
-    TypeId  type_id;
-    uint8_t arity;                 // reserved: JS arity lives in JsCallableCode
-    uint8_t closure_field_count;   // reserved: JS uses env_size, which is wider
-    uint8_t entry_abi;             // FunctionEntryAbi — the layout discriminator
-    uint32_t flags;
+    LAMBDA_FUNCTION_HEADER_FIELDS; // FunctionHeader at offset zero
 
     // 8-byte group
     Item* env;
@@ -330,8 +326,8 @@ void js_callable_code_table_destroy(HashMap* table);
 // language. Reading it is safe on either layout: `entry_abi` sits at offset 3
 // in both, and a Lambda `Function` never carries a hosted value.
 static inline bool js_fn_is_js_layout(const void* callable) {
-    return callable &&
-        ((const JsFunction*)callable)->entry_abi == FN_ENTRY_ABI_JS_FUNCTION;
+    return function_header_has_abi((const FunctionHeader*)callable,
+        FN_ENTRY_ABI_JS_FUNCTION);
 }
 
 // JSCUO6 -- inventory of what actually depends on this layout, so a field can
@@ -369,6 +365,11 @@ static_assert(offsetof(JsFunction, flags) == offsetof(Function, flags),
               "the shared callable prefix must agree field for field");
 static_assert(offsetof(JsFunction, type_id) < offsetof(JsFunction, code),
               "the discrimination prefix must precede every other field");
+
+static inline void js_function_init_header(JsFunction* fn) {
+    function_header_init((FunctionHeader*)fn, LMD_TYPE_FUNC,
+        FN_ENTRY_ABI_JS_FUNCTION);
+}
 
 static inline void js_function_init_native_module_scope(JsFunction* fn) {
     if (!fn) return;

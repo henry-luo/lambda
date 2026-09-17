@@ -203,9 +203,9 @@ bool jm_class_or_ancestor_has_private_members(JsClassEntry* ce) {
     for (JsClassEntry* current = ce; current; current = current->superclass) {
         for (int i = 0; i < current->member_count; i++) {
             JsClassMember* member = &current->members[i];
-            String* name = member->kind == JS_CLASS_MEMBER_METHOD ? member->as.method.name
-                : member->kind == JS_CLASS_MEMBER_STATIC_FIELD ? member->as.static_field.name
-                : member->kind == JS_CLASS_MEMBER_INSTANCE_FIELD ? member->as.instance_field.name
+            String* name = member->kind == JS_CLASS_MEMBER_METHOD ? member->name
+                : member->kind == JS_CLASS_MEMBER_STATIC_FIELD ? member->name
+                : member->kind == JS_CLASS_MEMBER_INSTANCE_FIELD ? member->name
                 : NULL;
             if (jm_is_private_name(name)) return true;
         }
@@ -311,13 +311,13 @@ void jm_emit_set_function_home_class(JsMirTranspiler* mt, MIR_reg_t fn_item,
 }
 
 static bool jm_private_static_method_brand_seen(JsClassEntry* ce, int member_index) {
-    JsClassMethodEntry* method = jm_class_member_method(ce, member_index);
+    JsClassMember* method = jm_class_member_method(ce, member_index);
     if (!method || !method->is_static || method->is_constructor || !method->name ||
         !jm_is_private_name(method->name)) {
         return false;
     }
     for (int previous_index = 0; previous_index < member_index; previous_index++) {
-        JsClassMethodEntry* previous = jm_class_member_method(ce, previous_index);
+        JsClassMember* previous = jm_class_member_method(ce, previous_index);
         if (!previous) continue;
         if (!previous->is_static || previous->is_constructor || !previous->name ||
             !jm_is_private_name(previous->name)) {
@@ -333,7 +333,7 @@ static bool jm_private_static_method_brand_seen(JsClassEntry* ce, int member_ind
 }
 
 static MIR_reg_t jm_emit_computed_method_key(JsMirTranspiler* mt,
-        JsClassMethodEntry* method, const JsMirClassMethodInstallPolicy* policy,
+        JsClassMember* method, const JsMirClassMethodInstallPolicy* policy,
         MIR_reg_t function_item) {
     int destination_spill = -1;
     int home_class_spill = -1;
@@ -375,7 +375,7 @@ bool jm_emit_class_method_install(JsMirTranspiler* mt,
         policy->member_index >= policy->owner_class->member_count) {
         return false;
     }
-    JsClassMethodEntry* method = jm_class_member_method(policy->owner_class,
+    JsClassMember* method = jm_class_member_method(policy->owner_class,
         policy->member_index);
     if (!method) return false;
     bool needs_static = policy->mode != JS_MIR_CLASS_METHOD_OWN_INSTANCE;
@@ -455,7 +455,7 @@ bool jm_emit_class_method_install(JsMirTranspiler* mt,
 void jm_emit_class_constructor_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
         JsClassEntry* ce, bool set_home_class) {
     if (!mt || !cls_obj || !ce) return;
-    JsClassMethodEntry* constructor = ce->constructor;
+    JsClassMember* constructor = ce->constructor;
     // An implicit derived constructor is `constructor(...args) { super(...args); }`.
     // Reusing a parent's body changes its HomeObject, so a nested super() resolves
     // from the child instead of the body-owning class. Leave it absent for the

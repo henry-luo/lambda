@@ -143,45 +143,23 @@ JsScript* js_common_ast_cache_lookup(Runtime* runtime, const char* source,
     return instance;
 }
 
-InputScriptBuildClaim js_common_ast_cache_begin_build(JsCommonAstBuild* build,
+InputScriptBuildClaim js_common_ast_cache_begin_build(InputScriptBuildScope* build,
         const char* source, size_t source_length, const char* reference,
         bool strict, bool typescript_profile) {
-    if (!build) return INPUT_SCRIPT_BUILD_BYPASS;
-    memset(build, 0, sizeof(*build));
-    build->state = INPUT_SCRIPT_BUILD_BYPASS;
     InputScriptCache* cache = input_manager_global_script_cache();
-    if (!source || !input_script_cache_ast_enabled(cache)) return build->state;
-    InputCacheScope* scope = input_script_cache_open_scope(cache);
-    if (!scope) return build->state;
+    if (!source || !input_script_cache_ast_enabled(cache)) {
+        input_script_build_scope_reset(build);
+        return build ? build->state : INPUT_SCRIPT_BUILD_BYPASS;
+    }
     InputScriptRequest request = js_common_ast_cache_request(source,
         source_length, reference, strict, typescript_profile);
-    InputScriptLease* lease = input_script_cache_acquire(scope, &request);
-    if (!lease) {
-        input_script_cache_close_scope(scope);
-        return build->state;
-    }
-    build->state = input_script_cache_claim_build(lease, INPUT_SCRIPT_BUILD_AST);
-    if (build->state == INPUT_SCRIPT_BUILD_OWNER) {
-        build->scope = scope;
-        build->lease = lease;
-        return build->state;
-    }
-    // A non-owner has no outstanding build transition. Its ordinary lookup
-    // takes a fresh lease after the publishing owner has completed.
-    input_script_cache_close_scope(scope);
-    return build->state;
+    return input_script_build_scope_begin(build, cache, &request,
+        INPUT_SCRIPT_BUILD_AST);
 }
 
-void js_common_ast_cache_complete_build(JsCommonAstBuild* build,
+void js_common_ast_cache_complete_build(InputScriptBuildScope* build,
         bool published, bool poison) {
-    if (!build) return;
-    if (build->state == INPUT_SCRIPT_BUILD_OWNER && build->lease) {
-        input_script_cache_complete_build(build->lease, INPUT_SCRIPT_BUILD_AST,
-            published, poison);
-    }
-    if (build->scope) input_script_cache_close_scope(build->scope);
-    memset(build, 0, sizeof(*build));
-    build->state = INPUT_SCRIPT_BUILD_BYPASS;
+    input_script_build_scope_complete(build, published, poison);
 }
 
 bool js_common_ast_cache_admit(Runtime* runtime, JsScript* script, const char* source,
@@ -411,13 +389,14 @@ NameEntry* js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVa
 void js_record_interp_import(JsTranspiler* tp, String* local,
         String* source, String* export_name, bool namespace_import) {
     if (!tp || !local || !source || (!namespace_import && !export_name)) return;
-    JsInterpImportBinding* binding = (JsInterpImportBinding*)pool_calloc(tp->pool,
-        sizeof(JsInterpImportBinding));
+    JsInterpModuleBinding* binding = (JsInterpModuleBinding*)pool_calloc(tp->pool,
+        sizeof(JsInterpModuleBinding));
     if (!binding) return;
     binding->local_name = local;
     binding->source = source;
     binding->export_name = export_name;
-    binding->namespace_import = namespace_import;
+    binding->kind = JS_INTERP_MODULE_BINDING_IMPORT;
+    binding->namespace_binding = namespace_import;
     binding->next = tp->interp_imports;
     tp->interp_imports = binding;
 }
@@ -426,13 +405,14 @@ void js_record_interp_export(JsTranspiler* tp, String* local,
         String* export_name, String* source, bool namespace_export,
         bool star_export) {
     if (!tp || !local || !export_name) return;
-    JsInterpExportBinding* binding = (JsInterpExportBinding*)pool_calloc(tp->pool,
-        sizeof(JsInterpExportBinding));
+    JsInterpModuleBinding* binding = (JsInterpModuleBinding*)pool_calloc(tp->pool,
+        sizeof(JsInterpModuleBinding));
     if (!binding) return;
     binding->local_name = local;
     binding->export_name = export_name;
     binding->source = source;
-    binding->namespace_export = namespace_export;
+    binding->kind = JS_INTERP_MODULE_BINDING_EXPORT;
+    binding->namespace_binding = namespace_export;
     binding->star_export = star_export;
     binding->next = tp->interp_exports;
     tp->interp_exports = binding;

@@ -1443,6 +1443,53 @@ enum {
     FN_ENTRY_ABI_JS_FUNCTION = FN_ENTRY_ABI_HOSTED_FIRST,
 };
 
+// The first eight bytes of every callable value are one ABI carrier. Lambda
+// and hosted runtimes can share initialization and capability discrimination
+// without pretending their definition and property tails are interchangeable.
+#define LAMBDA_FUNCTION_HEADER_FIELDS \
+    TypeId type_id; \
+    uint8_t arity; \
+    uint8_t closure_field_count; \
+    FunctionEntryAbi entry_abi; \
+    union { \
+        uint32_t flags; \
+        struct { \
+            uint32_t reserved_bit_ret_item : 1; \
+            uint32_t has_kwargs : 1; \
+            uint32_t is_generator : 1; \
+            uint32_t is_coroutine : 1; \
+            uint32_t is_system_function_ref : 1; \
+            uint32_t requires_scalar_result_home : 1; \
+            uint32_t requires_runtime_context : 1; \
+            uint32_t mir_public_return_shape : 2; \
+            uint32_t reserved_flags : 23; \
+        }; \
+    }
+
+struct FunctionHeader {
+    LAMBDA_FUNCTION_HEADER_FIELDS;
+};
+typedef struct FunctionHeader FunctionHeader;
+
+LAMBDA_STATIC_ASSERT(sizeof(FunctionHeader) == 8,
+                     "FunctionHeader must preserve the callable ABI prefix");
+
+static inline void function_header_init(FunctionHeader* header, TypeId type_id,
+                                        FunctionEntryAbi entry_abi) {
+    if (!header) return;
+    header->type_id = type_id;
+    header->arity = 0;
+    header->closure_field_count = 0;
+    header->entry_abi = entry_abi;
+    header->flags = 0;
+}
+
+static inline bool function_header_has_abi(const FunctionHeader* header,
+                                           FunctionEntryAbi entry_abi) {
+    return header && header->type_id == LMD_TYPE_FUNC &&
+        header->entry_abi == entry_abi;
+}
+
 // RVO13: public boxed entries publish their post-call companion contract so
 // dynamic dispatch can skip slot resolution for proven shape-1 results.
 enum {
@@ -1455,27 +1502,7 @@ enum {
 // Function as first-class value
 // Supports both direct function references and closures
 struct Function {
-    uint8_t type_id;
-    uint8_t arity;               // number of parameters (0-255)
-    uint8_t closure_field_count;  // number of Item fields in closure_env (0 if not a closure)
-    FunctionEntryAbi entry_abi;  // FunctionEntryAbi; checked before ptr dispatch
-    union {
-        uint32_t flags;          // whole-word initialization/copy only
-        struct {
-            // Retired with the aggregate return record (SCU17). The bit stays
-            // reserved so the positions generated code bakes in for the
-            // fields below hold.
-            uint32_t reserved_bit_ret_item : 1;
-            uint32_t has_kwargs : 1;
-            uint32_t is_generator : 1;
-            uint32_t is_coroutine : 1;
-            uint32_t is_system_function_ref : 1;
-            uint32_t requires_scalar_result_home : 1;
-            uint32_t requires_runtime_context : 1;
-            uint32_t mir_public_return_shape : 2;
-            uint32_t reserved_flags : 23;
-        };
-    };
+    LAMBDA_FUNCTION_HEADER_FIELDS; // FunctionHeader at offset zero
     void* fn_type;        // fn type definition (TypeFunc*)
     fn_ptr ptr;           // native function pointer
     void* closure_env;    // closure environment (NULL if no captures)

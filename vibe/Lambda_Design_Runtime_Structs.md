@@ -865,8 +865,8 @@ capsules (JSCU17).
 
 The JS-specific state records directly relevant to MIR/helper boundaries are:
 
-`JsRootedState` (the one `RootVector` root-owner base every capsule state
-derives from), `JsNamespaceState`, `JsRealmSlots`, `JsGlobalEnvironment`,
+`RootVector` (directly extended by rooted JS state owners), `JsNamespaceState`,
+`JsRealmSlots`, `JsGlobalEnvironment`,
 `JsRealmIntrinsicSlots`, `JsIntrinsicState`, `JsWithScopeState`,
 `JsEventLoopQueueState`, `JsEventLoopTimerState`, `JsPromiseRuntimeState`,
 `JsModuleRuntimeState`, `JsAsyncHooksState`, `JsAsyncLocalStorageState`,
@@ -875,11 +875,13 @@ derives from), `JsNamespaceState`, `JsRealmSlots`, `JsGlobalEnvironment`,
 `JsProcessState`, and `JsTest262AgentState`. The complete ownership record is in
 [`js_runtime_state.hpp`](../lambda/js/js_runtime_state.hpp#L993).
 
-Three records named in the previous census are **gone**:
+Four records named in the previous census are **gone**:
 
-- `JsRootRange` — every capsule now roots through `JsRootedState::roots`, a
-  `RootVector` that also supports fixed contiguous spans, so there is one root
-  carrier (`D5.3`).
+- `JsRootRange` — every rooted capsule state now directly extends `RootVector`,
+  which also supports fixed contiguous spans, so there is one root carrier
+  (`D5.3`).
+- `JsRootedState` — its one `RootVector` member was a pure wrapper; the twelve
+  state owners now use the Lambda root carrier directly.
 - `JsIteratorState` — iterator/generator prototype roots moved into
   `JsIntrinsicState::prototype_roots`, indexed by `JsClassId`.
 - `JsVmRuntimeState` — the VM namespace became a `JsModuleRuntimeSlot` and its
@@ -1029,7 +1031,6 @@ layout-specific access.
 | `JsGeneratorMapCarrier` | JavaScript | `Map` prefix owning generator state | helper |
 | `JsAsyncContextStateRecord` | JavaScript | Suspended async state, promise, module id, and `this` | helper |
 | `JsAsyncFrameCarrier` | JavaScript | `Map` prefix owning an async activation | helper |
-| `JsRootedState` | JavaScript | Common `RootVector` root owner for JS state capsules | helper |
 | `JsNamespaceState` | JavaScript | Rooted namespace-object state | helper |
 | `JsRealmSlots` | JavaScript | Fixed realm singleton/cache Item slots | helper |
 | `JsGlobalEnvironment` | JavaScript | The one dynamic realm binding table | helper |

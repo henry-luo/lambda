@@ -1227,14 +1227,14 @@ static void js_arraybuffer_charge_new_storage(ByteStorage* storage, void* owner)
 
 uint8_t* js_arraybuffer_prepare_write(JsArrayBuffer* ab) {
     if (!ab) return NULL;
-    ByteStorage* previous = ab->handle.storage;
-    uint8_t* data = byte_buffer_prepare_write(&ab->handle);
-    if (data && ab->handle.storage != previous) {
+    ByteStorage* previous = ab->storage;
+    uint8_t* data = byte_buffer_prepare_write(ab);
+    if (data && ab->storage != previous) {
         // COW callers hold only the native handle here, so this post-allocation
         // charge must not collect. The next rooted allocation preflight pays
         // the pressure debt before another external allocation is made.
         void* owner = heap_gc_external_preflight(0, HEAP_GC_EXTERNAL_ARRAYBUFFER);
-        js_arraybuffer_charge_new_storage(ab->handle.storage, owner);
+        js_arraybuffer_charge_new_storage(ab->storage, owner);
     }
     return data;
 }
@@ -1248,12 +1248,12 @@ static JsArrayBuffer* js_arraybuffer_alloc_with_options(int byte_length,
         HEAP_GC_EXTERNAL_ARRAYBUFFER);
     JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
     if (!ab) return NULL;
-    if (!byte_buffer_init(&ab->handle, (size_t)byte_length, (size_t)max_byte_length,
+    if (!byte_buffer_init(ab, (size_t)byte_length, (size_t)max_byte_length,
             flags, MEM_CAT_JS_RUNTIME)) {
         mem_free(ab);
         return NULL;
     }
-    js_arraybuffer_charge_new_storage(ab->handle.storage, external_owner);
+    js_arraybuffer_charge_new_storage(ab->storage, external_owner);
     return ab;
 }
 
@@ -1267,7 +1267,7 @@ static JsArrayBuffer* js_arraybuffer_alloc_storage(ByteStorage* storage,
     if (!storage || byte_length > INT_MAX) return NULL;
     JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
     if (!ab) return NULL;
-    if (!byte_buffer_init_storage(&ab->handle, storage, storage_offset, byte_length,
+    if (!byte_buffer_init_storage(ab, storage, storage_offset, byte_length,
             byte_length, BYTE_BUFFER_FLAG_NONE, MEM_CAT_JS_RUNTIME)) {
         mem_free(ab);
         return NULL;
@@ -1277,7 +1277,7 @@ static JsArrayBuffer* js_arraybuffer_alloc_storage(ByteStorage* storage,
 
 extern "C" void js_arraybuffer_destroy(JsArrayBuffer* ab) {
     if (!ab) return;
-    byte_buffer_destroy(&ab->handle);
+    byte_buffer_destroy(ab);
     mem_free(ab);
 }
 
@@ -1503,10 +1503,10 @@ extern "C" Item js_arraybuffer_resize(Item val, Item new_length_item) {
         HEAP_GC_EXTERNAL_ARRAYBUFFER);
     ab = js_get_arraybuffer_ptr(buffer_root.get().map);
     if (!ab || js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
-    ByteStorage* previous = ab->handle.storage;
-    if (!byte_buffer_resize(&ab->handle, (size_t)new_length)) return ItemError;
-    if (ab->handle.storage != previous) {
-        js_arraybuffer_charge_new_storage(ab->handle.storage, external_owner);
+    ByteStorage* previous = ab->storage;
+    if (!byte_buffer_resize(ab, (size_t)new_length)) return ItemError;
+    if (ab->storage != previous) {
+        js_arraybuffer_charge_new_storage(ab->storage, external_owner);
     }
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
@@ -1558,12 +1558,12 @@ static Item js_arraybuffer_transfer_impl(Item val, Item new_length_item, int arg
 
     JsArrayBuffer* nab = (JsArrayBuffer*)mem_calloc(1, sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
     if (!nab) return ItemError;
-    if (!byte_buffer_transfer(&ab->handle, &nab->handle, (size_t)new_length,
+    if (!byte_buffer_transfer(ab, nab, (size_t)new_length,
             to_fixed_length)) {
         mem_free(nab);
         return ItemError;
     }
-    js_arraybuffer_charge_new_storage(nab->handle.storage, external_owner);
+    js_arraybuffer_charge_new_storage(nab->storage, external_owner);
     // The stable source handle is detached by transfer, so all extant views
     // invalidate through its generation instead of retaining a freed pointer.
     Item result = js_arraybuffer_wrap(nab);
@@ -1689,7 +1689,7 @@ extern "C" void js_arraybuffer_detach(Item val) {
     if (!js_is_arraybuffer(val)) return;
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
     if (!ab) return;
-    byte_buffer_detach(&ab->handle);
+    byte_buffer_detach(ab);
 }
 
 // Check if an ArrayBuffer is detached
@@ -1765,10 +1765,10 @@ extern "C" Item js_sharedarraybuffer_operation(Item sab,
                 HEAP_GC_EXTERNAL_ARRAYBUFFER);
             ab = js_get_arraybuffer_ptr(buffer_root.get().map);
             if (!ab || js_arraybuffer_detached(ab)) return js_throw_type_error("SharedArrayBuffer is detached");
-            ByteStorage* previous = ab->handle.storage;
-            if (!byte_buffer_resize(&ab->handle, (size_t)new_length)) return ItemError;
-            if (ab->handle.storage != previous) {
-                js_arraybuffer_charge_new_storage(ab->handle.storage, external_owner);
+            ByteStorage* previous = ab->storage;
+            if (!byte_buffer_resize(ab, (size_t)new_length)) return ItemError;
+            if (ab->storage != previous) {
+                js_arraybuffer_charge_new_storage(ab->storage, external_owner);
             }
         }
         return (Item){.item = ITEM_JS_UNDEFINED};
@@ -1838,7 +1838,7 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
     if (!js_is_typed_array(carrier_root.get())) return ItemNull;
     ab = js_get_arraybuffer_ptr(buffer_root.get().map);
     view_root.set((Item){.array_num = array_num_new_buffer_view(
-        (Container*)buffer_root.get().map, &ab->handle,
+        (Container*)buffer_root.get().map, ab,
         js_typed_array_elem_type(arr_type), 0, length, true)});
     if (get_type_id(view_root.get()) != LMD_TYPE_ARRAY_NUM) return ItemNull;
     // D5.3.3: the view allocation can collect before the typed-array carrier
@@ -1908,7 +1908,7 @@ extern "C" Item binary_from_typed_array(JsTypedArray* ta) {
     if (byte_length == 0) return ItemNull;
     void* data = js_typed_array_current_data(ta);
     if (!data) return ItemError;
-    ByteBufferHandle* handle = ta->buffer ? &ta->buffer->handle : NULL;
+    ByteBufferHandle* handle = ta->buffer;
     Binary* bin = NULL;
     if (handle && handle->storage && !byte_buffer_is_shared(handle)) {
         size_t view_offset = (size_t)js_typed_array_current_byte_offset(ta);
@@ -1927,18 +1927,18 @@ extern "C" Item binary_from_typed_array(JsTypedArray* ta) {
 }
 
 extern "C" Item binary_from_dataview(JsDataView* dv) {
-    if (!dv || !dv->base.buffer || js_arraybuffer_view_is_out_of_bounds(&dv->base)) {
+    if (!dv || !dv->buffer || js_arraybuffer_view_is_out_of_bounds(dv)) {
         return ItemError;
     }
-    int byte_length = js_arraybuffer_view_current_byte_length(&dv->base);
+    int byte_length = js_arraybuffer_view_current_byte_length(dv);
     if (byte_length == 0) return ItemNull;
-    const char* data = (const char*)js_arraybuffer_data_const(dv->base.buffer) +
-        dv->base.byte_offset;
-    ByteBufferHandle* handle = &dv->base.buffer->handle;
+    const char* data = (const char*)js_arraybuffer_data_const(dv->buffer) +
+        dv->byte_offset;
+    ByteBufferHandle* handle = dv->buffer;
     Binary* bin = NULL;
     if (!byte_buffer_is_shared(handle) && handle->storage) {
         bin = heap_binary_from_storage(handle->storage,
-            handle->storage_offset + (size_t)dv->base.byte_offset,
+            handle->storage_offset + (size_t)dv->byte_offset,
             (size_t)byte_length, str_is_ascii(data, (size_t)byte_length));
     } else {
         // DataView over SharedArrayBuffer must also snapshot mutable bytes.
@@ -2003,7 +2003,7 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
     ab = js_get_arraybuffer_ptr(buffer_root.get().map);
     if (!ab) return ItemNull;
     view_root.set((Item){.array_num = array_num_new_buffer_view(
-        (Container*)buffer_root.get().map, &ab->handle,
+        (Container*)buffer_root.get().map, ab,
         js_typed_array_elem_type(arr_type), byte_offset, length, true)});
     if (get_type_id(view_root.get()) != LMD_TYPE_ARRAY_NUM) return ItemNull;
     // D5.3.3: refresh every interior pointer from its exact root after the
@@ -2934,11 +2934,11 @@ static Item js_dataview_create(Item buffer, Item offset_item, Item length_item,
     buffer = buffer_root.get();
     ab = js_get_arraybuffer_ptr(buffer.map);
     if (!ab) return ItemNull;
-    dv->base.buffer = ab;
-    dv->base.byte_offset = byte_offset;
-    dv->base.byte_length = byte_length;
-    dv->base.buffer_item = buffer.item;
-    dv->base.length_tracking = length_tracking;
+    dv->buffer = ab;
+    dv->byte_offset = byte_offset;
+    dv->byte_length = byte_length;
+    dv->buffer_item = buffer.item;
+    dv->length_tracking = length_tracking;
 
     Map* m = &carrier->base;
     m->type_id = LMD_TYPE_MAP;
@@ -2962,14 +2962,14 @@ JS_FORWARD_ITEM(js_dataview_construct, (Item buffer, Item offset_item,         I
 // buffers. For non-length-tracking views the stored byte_length is authoritative;
 // for length-tracking views we re-derive from the buffer's current size.
 static inline int dv_current_byte_length(JsDataView* dv) {
-    return dv ? js_arraybuffer_view_current_byte_length(&dv->base) : 0;
+    return dv ? js_arraybuffer_view_current_byte_length(dv) : 0;
 }
 
 // Js54 P2: a DataView is out-of-bounds when the buffer is detached, or when the
 // recorded view window no longer fits (resize shrank the buffer below
 // byte_offset + byte_length, or below byte_offset for length-tracking views).
 static inline bool dv_is_out_of_bounds(JsDataView* dv) {
-    return dv && js_arraybuffer_view_is_out_of_bounds(&dv->base);
+    return dv && js_arraybuffer_view_is_out_of_bounds(dv);
 }
 
 // Js54 P2: throws TypeError if the DataView is detached or out-of-bounds.

@@ -1662,7 +1662,7 @@ MIR_reg_t jm_build_closure_for_method(JsMirTranspiler* mt, JsFuncCollected* fc, 
 }
 
 static MIR_reg_t jm_emit_class_static_field_value(JsMirTranspiler* mt,
-        MIR_reg_t cls_obj, JsClassEntry* ce, JsStaticFieldEntry* sf) {
+        MIR_reg_t cls_obj, JsClassEntry* ce, JsClassMember* sf) {
     MIR_reg_t previous_private_home = 0;
     if (sf->initializer && cls_obj && jm_class_or_ancestor_has_private_members(ce)) {
         previous_private_home = jm_callr_1(mt, "js_private_home_class_enter", MIR_T_I64, cls_obj);
@@ -1676,7 +1676,7 @@ static MIR_reg_t jm_emit_class_static_field_value(JsMirTranspiler* mt,
     return val;
 }
 
-void jm_emit_class_static_field(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce, JsStaticFieldEntry* sf) {
+void jm_emit_class_static_field(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce, JsClassMember* sf) {
     if (!mt || !sf) return;
     if (sf->computed && sf->key_expr) {
         MIR_reg_t key;
@@ -1762,10 +1762,10 @@ static void jm_emit_class_static_source_order(JsMirTranspiler* mt, MIR_reg_t cls
         JsClassMember* member = &ce->members[member_index];
         if (member->kind == JS_CLASS_MEMBER_STATIC_FIELD) {
             jm_emit_class_static_field(mt, cls_obj, ce,
-                &member->as.static_field);
+                member);
         } else if (member->kind == JS_CLASS_MEMBER_STATIC_BLOCK) {
             jm_emit_class_static_block(mt, cls_obj, ce,
-                member->as.static_block);
+                member->static_block);
         }
     }
 }
@@ -1969,7 +1969,7 @@ void jm_emit_class_setup(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* c
 static bool jm_class_member_keys_can_suspend(JsMirTranspiler* mt, JsClassEntry* ce) {
     if (!ce) return false;
     for (int i = 0; i < ce->member_count; i++) {
-        JsClassMethodEntry* method = jm_class_member_method(ce, i);
+        JsClassMember* method = jm_class_member_method(ce, i);
         if (method && method->key_expr && jm_can_suspend(mt, method->key_expr)) {
             return true;
         }
