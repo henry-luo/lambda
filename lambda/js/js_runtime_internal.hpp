@@ -244,4 +244,12 @@ static inline Item js_symbol_to_key(Item sym) {
     return ItemNull;
 }
 
+// Ordinary shapes retain NameId-backed keys while a JavaScript Symbol stays a
+// direct Symbol value at every ECMAScript-observable boundary.  Call this only
+// immediately before shape/slot storage or lookup; Proxy traps and
+// ToPropertyKey must retain the original Symbol.
+static inline Item js_property_storage_key(Item key) {
+    return js_key_is_symbol(key) ? js_symbol_to_key(key) : key;
+}
+
 #endif
