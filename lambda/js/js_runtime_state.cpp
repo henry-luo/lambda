@@ -370,7 +370,6 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
         js_event_loop_state_destroy(state->event_loop);
         mem_free(state->event_loop);
     }
-    runtime_resource_table_destroy(&state->resources);
     if (state->console.labels) {
         for (int i = 0; i < state->console.labels->length; i++) {
             JsConsoleLabel* label = (JsConsoleLabel*)arraylist_get(
@@ -552,8 +551,11 @@ static bool js_runtime_state_alloc_records(JsRuntimeState* state) {
         js_runtime_state_free_records(state);
         return false;
     }
-    runtime_resource_table_init(&state->resources, context,
-        "JS runtime resources");
+    if (!runtime_resource_table_context_ensure((EvalContext*)context)) {
+        log_error("js-runtime-state: failed to initialize resource service");
+        js_runtime_state_free_records(state);
+        return false;
+    }
     js_realm_slots_init(&state->realm_slots, (Context*)context);
     root_vector_init(&state->regexp_last_match.values, (Context*)context,
         "JS RegExp last match");
@@ -583,6 +585,10 @@ bool js_runtime_state_init(EvalContext* runtime_context) {
         }
         if (!js_runtime_state_alloc_records(state)) {
             context_capsule_drop(runtime_context, CONTEXT_CAPSULE_JS_RUNTIME);
+            // The resource service is established during record allocation,
+            // before this runtime state becomes usable by another client.
+            context_capsule_drop(runtime_context,
+                CONTEXT_CAPSULE_RUNTIME_RESOURCES);
             return false;
         }
         state->heap_epoch = 1;

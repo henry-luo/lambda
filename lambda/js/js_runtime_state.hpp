@@ -977,9 +977,6 @@ struct JsRuntimeState {
     bool strict_mode = false;
     JsEvalState eval = {};
     JsEventLoopState* event_loop = NULL;   // JSCU16: allocated with the realm, not embedded
-    // The sole generation-checked native-resource registry for this context.
-    // Timer and Node/Jube records use distinct lifecycle-owner keys within it.
-    RuntimeResourceTable resources = {};
     // JSCU44: the `with` chain is two facts, not a subsystem. The head is the
     // innermost frame (NULL = no with-scope in scope); the flag says whether the
     // head frame's trailing memo cells hold a live binding. Scope objects live
@@ -1053,6 +1050,10 @@ struct JsRuntimeState {
 extern __thread JsRuntimeState* js_active_runtime_state;
 static inline JsRuntimeState* js_runtime_state_for(EvalContext* owner) {
     return owner ? (JsRuntimeState*)context_capsule(owner, CONTEXT_CAPSULE_JS_RUNTIME) : NULL;
+}
+
+static inline RuntimeResourceTable* js_runtime_resource_table(void) {
+    return runtime_resource_table_context(context);
 }
 
 static inline JsCallActivation* js_call_activation_current(void) {

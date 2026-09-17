@@ -41,8 +41,6 @@ typedef struct JsInterpModuleBinding {
     struct JsInterpModuleBinding* next;
 } JsInterpModuleBinding;
 
-struct JsAstDefinition;
-
 // JavaScript variable declaration types
 typedef enum JsVarKind {
     JS_VAR_VAR,     // var - function scoped
@@ -94,7 +92,7 @@ struct JsScript : Script {
     Pool* ast_overlay_pool;
     NamePool* ast_overlay_name_pool;
     bool ast_index_overlay;
-    HashMap* ast_definitions;
+    HashMap* ast_callables;
     HashMap* field_initializers;
 };
 

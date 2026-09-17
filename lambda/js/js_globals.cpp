@@ -3141,7 +3141,7 @@ static void js_process_ipc_resource_close(void* user);
 
 JS_FORWARD_STATIC_EXPRESSION(uv_pipe_t*, js_process_ipc_pipe_ptr, (void),
     (js_process_state && js_process_state->ipc_resource_id != 0)
-        ? (uv_pipe_t*)runtime_resource_table_user_data(&js_runtime_state.resources,
+        ? (uv_pipe_t*)runtime_resource_table_user_data(js_runtime_resource_table(),
             js_process_state->ipc_resource_id) : NULL)
 #define js_process_ipc_pipe (*js_process_ipc_pipe_ptr())
 
@@ -3217,7 +3217,7 @@ static void js_process_ipc_close_cb(uv_handle_t* handle) {
     if (js_process_state && js_process_state->ipc_resource_id != 0) {
         uint32_t resource_id = js_process_state->ipc_resource_id;
         js_process_state->ipc_resource_id = 0;
-        runtime_resource_table_forget_owned(&js_runtime_state.resources,
+        runtime_resource_table_forget_owned(js_runtime_resource_table(),
             js_process_state, resource_id);
     }
     js_process_ipc_exit(&scope);
@@ -3442,7 +3442,7 @@ static void js_process_ipc_init_from_env(void) {
     const RuntimeResourceDescriptor* descriptor =
         runtime_resource_descriptor_from_legacy_name("ProcessIpc");
     js_process_state->ipc_resource_id = runtime_resource_table_add_owned(
-        &js_runtime_state.resources, js_process_state, js_process_object,
+        js_runtime_resource_table(), js_process_state, js_process_object,
         descriptor, js_process_ipc_resource_close, pipe, true);
     if (js_process_state->ipc_resource_id == 0) {
         mem_free(pipe);
@@ -3453,7 +3453,7 @@ static void js_process_ipc_init_from_env(void) {
         log_error("process_ipc: failed to allocate message framer");
         uint32_t resource_id = js_process_state->ipc_resource_id;
         js_process_state->ipc_resource_id = 0;
-        runtime_resource_table_forget_owned(&js_runtime_state.resources,
+        runtime_resource_table_forget_owned(js_runtime_resource_table(),
             js_process_state, resource_id);
         mem_free(pipe);
         return;
@@ -3465,7 +3465,7 @@ static void js_process_ipc_init_from_env(void) {
         log_error("process_ipc: failed to open fd %d: %s", fd, uv_strerror(r));
         uint32_t resource_id = js_process_state->ipc_resource_id;
         js_process_state->ipc_resource_id = 0;
-        runtime_resource_table_forget_owned(&js_runtime_state.resources,
+        runtime_resource_table_forget_owned(js_runtime_resource_table(),
             js_process_state, resource_id);
         line_framer_destroy(&js_process_ipc_lines);
         mem_free(pipe);
@@ -15883,7 +15883,7 @@ extern "C" Item js_get_global_builtin_fn_by_id(Item global_id_item) {
     // D6.2.2v2: publish the catalog-selected direct capability before the
     // function becomes observable; global IDs no longer select behavior at call time.
     JsFunctionLayout* fn = (JsFunctionLayout*)pool_calloc(js_input->pool, sizeof(JsFunctionLayout));
-    js_function_init_header(fn);
+    js_function_init_abi(fn);
     js_function_init_native_module_scope(fn);
     JsCallableCode* code = js_fn_code_ensure(fn);
     if (!code) return ItemError;
@@ -16755,7 +16755,7 @@ extern "C" Item js_get_typed_array_base() {
     if (js_typed_array_base.item != 0) return js_typed_array_base;
     // Create the %TypedArray% intrinsic function object
     JsFunctionLayout* fn = (JsFunctionLayout*)pool_calloc(js_input->pool, sizeof(JsFunctionLayout));
-    js_function_init_header(fn);
+    js_function_init_abi(fn);
     JsCallableCode* code = js_fn_code_ensure(fn);
     if (!code) return ItemError;
     code->func_ptr = (void*)js_ctor_placeholder;
@@ -16975,7 +16975,7 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
     // Allocate directly because intrinsic constructor identity is binding-owned;
     // the shared placeholder body is not a valid cache identity.
     JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
-    js_function_init_header(fn);
+    js_function_init_abi(fn);
     JsCallableCode* code = js_fn_code_ensure(fn);
     if (!code) return ItemError;
     const JsIntrinsicTargetSpec* target =

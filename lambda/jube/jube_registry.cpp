@@ -3572,7 +3572,7 @@ static void jube_host_node_work_complete(uv_work_t* request, int status) {
     if (job->resource_id != 0 && session && js_active_runtime_state) {
         uint32_t resource_id = job->resource_id;
         job->resource_id = 0;
-        runtime_resource_table_remove_owned(&js_runtime_state.resources, session,
+        runtime_resource_table_remove_owned(js_runtime_resource_table(), session,
             resource_id);
     }
     if (job->destroy) job->destroy(job->user);
@@ -3615,7 +3615,7 @@ static int jube_host_node_work_submit_root_span(void* session, int resource_kind
     job->user = user;
     job->request.data = job;
     job->resource_id = runtime_resource_table_add_root_span_owned(
-        &js_runtime_state.resources, node_session, root_values, root_count,
+        js_runtime_resource_table(), node_session, root_values, root_count,
         descriptor, jube_host_node_work_resource_close, job, false);
     if (job->resource_id == 0) {
         mem_free(job);
@@ -3626,7 +3626,7 @@ static int jube_host_node_work_submit_root_span(void* session, int resource_kind
     if (status != 0) {
         uint32_t resource_id = job->resource_id;
         job->resource_id = 0;
-        runtime_resource_table_remove_owned(&js_runtime_state.resources,
+        runtime_resource_table_remove_owned(js_runtime_resource_table(),
             node_session, resource_id);
         mem_free(job);
         return status;
@@ -3643,7 +3643,7 @@ static int jube_host_node_work_cancel(void* session, uint32_t request_id) {
         return -1;
     }
     const RuntimeResourceEntry* entry = runtime_resource_table_entry_owned(
-        &js_runtime_state.resources, node_session, request_id);
+        js_runtime_resource_table(), node_session, request_id);
     JubeNodeAsyncWork* job = entry ? (JubeNodeAsyncWork*)entry->close_user : NULL;
     return job && job->queued ? uv_cancel((uv_req_t*)&job->request) : -1;
 }
@@ -3654,9 +3654,9 @@ static Item jube_host_node_work_resource_value(void* session,
     if (!jube_host_node_session_is_live(session) || resource_id == 0 ||
             root_index < 0 || !js_active_runtime_state) return ItemNull;
     const RuntimeResourceEntry* entry = runtime_resource_table_entry_owned(
-        &js_runtime_state.resources, node_session, resource_id);
+        js_runtime_resource_table(), node_session, resource_id);
     if (!entry || root_index >= entry->root_count) return ItemNull;
-    return runtime_resource_table_root_value(&js_runtime_state.resources, entry,
+    return runtime_resource_table_root_value(js_runtime_resource_table(), entry,
         root_index);
 }
 
@@ -3794,7 +3794,7 @@ static Item jube_host_data_function_new(void* session, void* function_ptr, int p
     }
     Function* function = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     if (!function) return ItemNull;
-    function_header_init((FunctionHeader*)function, LMD_TYPE_FUNC, FN_ENTRY_ABI_FOREIGN);
+    function_init_abi(function, LMD_TYPE_FUNC, FN_ENTRY_ABI_FOREIGN);
     function->ptr = (fn_ptr)function_ptr;
     function->arity = (uint8_t)param_count;
     return (Item){.function = function};
@@ -5791,7 +5791,7 @@ static void jube_node_resource_cleanup(NodeRuntimeSession* session) {
             !js_active_runtime_state) return;
     // The context table stays alive for timers and other hosts; Node detach
     // releases only rows whose lifecycle key is this retiring session.
-    runtime_resource_table_clear_owned(&js_runtime_state.resources, session);
+    runtime_resource_table_clear_owned(js_runtime_resource_table(), session);
 }
 
 static uint32_t jube_node_resource_add_impl(void* session_handle, Item value, const char* kind,
@@ -5805,7 +5805,7 @@ static uint32_t jube_node_resource_add_impl(void* session_handle, Item value, co
         log_error("jube-resource: unregistered resource descriptor %s", kind);
         return 0;
     }
-    return runtime_resource_table_add_owned(&js_runtime_state.resources, session,
+    return runtime_resource_table_add_owned(js_runtime_resource_table(), session,
         value, descriptor, close_callback, close_user, is_handle);
 }
 
@@ -5827,7 +5827,7 @@ void jube_node_resource_close_kind(void* session_handle, const char* kind_prefix
     // Dynamic Node modules link this legacy bridge by name. Keep the ABI
     // narrow while translating it once to the table's typed close group.
     if (strcmp(kind_prefix, "crypto.") == 0) {
-        runtime_resource_table_close_group_owned(&js_runtime_state.resources,
+        runtime_resource_table_close_group_owned(js_runtime_resource_table(),
             session, RUNTIME_RESOURCE_GROUP_CRYPTO);
     }
 }
@@ -5839,7 +5839,7 @@ uint32_t jube_node_resource_add(Item value, const char* kind) {
 void jube_node_resource_remove_for_session(void* session_handle, uint32_t resource_id) {
     NodeRuntimeSession* session = (NodeRuntimeSession*)session_handle;
     if (session != jube_active_node_runtime_session) return;
-    runtime_resource_table_remove_owned(&js_runtime_state.resources, session,
+    runtime_resource_table_remove_owned(js_runtime_resource_table(), session,
         resource_id);
 }
 
@@ -5850,7 +5850,7 @@ void jube_node_resource_remove(uint32_t resource_id) {
 void* jube_node_resource_user_data_for_session(void* session_handle, uint32_t resource_id) {
     NodeRuntimeSession* session = (NodeRuntimeSession*)session_handle;
     if (session != jube_active_node_runtime_session) return NULL;
-    return runtime_resource_table_user_data_owned(&js_runtime_state.resources,
+    return runtime_resource_table_user_data_owned(js_runtime_resource_table(),
         session, resource_id);
 }
 
@@ -5937,14 +5937,14 @@ JsCryptoNativeState* jube_node_crypto_native_state(void* session) {
 void jube_node_resource_clear(void) {
     NodeRuntimeSession* session = jube_active_node_runtime_session;
     if (session && js_active_runtime_state) {
-        runtime_resource_table_clear_owned(&js_runtime_state.resources, session);
+        runtime_resource_table_clear_owned(js_runtime_resource_table(), session);
     }
 }
 
 bool jube_node_resource_contains(uint32_t resource_id) {
     NodeRuntimeSession* session = jube_active_node_runtime_session;
     return session && js_active_runtime_state &&
-        runtime_resource_table_entry_owned(&js_runtime_state.resources, session,
+        runtime_resource_table_entry_owned(js_runtime_resource_table(), session,
             resource_id);
 }
 
@@ -5952,11 +5952,11 @@ Item jube_node_resource_active_handles(void) {
     Item handles = js_array_new(0);
     NodeRuntimeSession* session = jube_active_node_runtime_session;
     if (!session) return handles;
-    for (int i = 0; i < runtime_resource_table_slot_count(&js_runtime_state.resources); i++) {
+    for (int i = 0; i < runtime_resource_table_slot_count(js_runtime_resource_table()); i++) {
         const RuntimeResourceEntry* entry = runtime_resource_table_entry_at(
-            &js_runtime_state.resources, i);
+            js_runtime_resource_table(), i);
         if (entry && entry->lifecycle_owner == session && entry->is_handle) {
-            js_array_push(handles, runtime_resource_table_value(&js_runtime_state.resources, entry));
+            js_array_push(handles, runtime_resource_table_value(js_runtime_resource_table(), entry));
         }
     }
     return handles;
@@ -5966,9 +5966,9 @@ Item jube_node_resource_active_resources_info(void) {
     Item resources = js_array_new(0);
     NodeRuntimeSession* session = jube_active_node_runtime_session;
     if (!session) return resources;
-    for (int i = 0; i < runtime_resource_table_slot_count(&js_runtime_state.resources); i++) {
+    for (int i = 0; i < runtime_resource_table_slot_count(js_runtime_resource_table()); i++) {
         const RuntimeResourceEntry* entry = runtime_resource_table_entry_at(
-            &js_runtime_state.resources, i);
+            js_runtime_resource_table(), i);
         if (!entry || entry->lifecycle_owner != session || !entry->is_handle ||
                 !entry->descriptor) continue;
         const char* name = entry->descriptor->display_name;

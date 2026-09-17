@@ -195,20 +195,21 @@ MIR_reg_t jm_call_function_into(JsMirTranspiler* mt, MIR_op_t func,
         MIR_new_reg_op(mt->ctx, callee), MIR_new_int_op(mt->ctx, 0)));
     MIR_reg_t type_id = jm_new_reg(mt, "dyn_type", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, type_id),
-        MIR_new_mem_op(mt->ctx, MIR_T_U8, (MIR_disp_t)offsetof(JsFunction, type_id),
+        MIR_new_mem_op(mt->ctx, MIR_T_U8, (MIR_disp_t)offsetof(Function, type_id),
             callee, 0, 1)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, miss),
         MIR_new_reg_op(mt->ctx, type_id), MIR_new_int_op(mt->ctx, LMD_TYPE_FUNC)));
     MIR_reg_t entry_abi = jm_new_reg(mt, "dyn_abi", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, entry_abi),
-        MIR_new_mem_op(mt->ctx, MIR_T_U8, (MIR_disp_t)offsetof(JsFunction, entry_abi),
+        MIR_new_mem_op(mt->ctx, MIR_T_U8, (MIR_disp_t)offsetof(Function, entry_abi),
             callee, 0, 1)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, miss),
         MIR_new_reg_op(mt->ctx, entry_abi),
         MIR_new_int_op(mt->ctx, FN_ENTRY_ABI_JS_FUNCTION)));
     MIR_reg_t target = jm_new_reg(mt, "dyn_target", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, target),
-        MIR_new_mem_op(mt->ctx, MIR_T_P, (MIR_disp_t)offsetof(JsFunction, invoke),
+        MIR_new_mem_op(mt->ctx, MIR_T_P,
+            (MIR_disp_t)js_function_offset(&JsFunction::invoke),
             callee, 0, 1)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, call),
         MIR_new_reg_op(mt->ctx, target), MIR_new_int_op(mt->ctx, 0)));
@@ -1046,7 +1047,8 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         JsMemberNode* member = (JsMemberNode*)node;
         Type* object_type = member->object ? member->object->type : NULL;
         if (!member->computed && object_type &&
-                object_type->type_id == LMD_TYPE_MAP && member->property &&
+                object_type->type_id == LMD_TYPE_MAP &&
+                lambda_type_is_concrete_attr_shape(object_type) && member->property &&
                 member->property->node_type == AST_NODE_IDENT) {
             JsIdentifierNode* property = (JsIdentifierNode*)member->property;
             for (ShapeEntry* field = ((TypeMap*)object_type)->shape; field;

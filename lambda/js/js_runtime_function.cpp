@@ -18,22 +18,19 @@ extern __thread EvalContext* context;
 
 // JSCUO9: the class index selects a slot from gc_object_zone.c's table
 // (16, 32, 48, 64, 96, 128, 256, 384), so this constant, not sizeof, is what
-// the allocator honours. It was 7 — the 384 B slot — which the record needed
-// at 328 B when item 4 began but not afterwards: every shrink down to 216 B
-// kept handing out 384 B slots. Class 5 is the 128 B slot, and the record now
-// measures exactly 128, so a function value occupies a third of what it did.
-// Keep this constant and the assert below moving together.
-#define JS_FUNCTION_SIZE_CLASS 5
-static_assert(sizeof(JsFunction) <= 128,
+// the allocator honours. JsFunction now physically inherits Function's
+// Lambda-specific tail; the shared object measures 160 B and therefore needs
+// the 256 B slot. Keep this constant and the assert below moving together.
+#define JS_FUNCTION_SIZE_CLASS 6
+static_assert(sizeof(JsFunction) <= 256,
               "JsFunction must fit its GC object-zone size class");
 
 extern "C" JsFunction* js_alloc_gc_function_object(void) {
-    // Source-class capabilities extend the callable carrier beyond the old
-    // 256-byte class; keep the GC allocation class explicit with the layout.
+    // Keep the GC allocation class explicit with the inherited record layout.
     JsFunction* fn = (JsFunction*)heap_calloc_class(
         sizeof(JsFunction), LMD_TYPE_FUNC, JS_FUNCTION_SIZE_CLASS);
     if (!fn) return NULL;
-    js_function_init_header(fn);
+    js_function_init_abi(fn);
     return fn;
 }
 
@@ -409,6 +406,7 @@ JsCallableCode* js_fn_code_ensure(JsFunction* fn) {
     if (!fn->code) {
         fn->code = (JsCallableCode*)js_fn_payload_calloc(fn, sizeof(JsCallableCode));
         if (!fn->code) return NULL;
+        js_callable_code_init_definition(fn->code, NULL, NULL, 0);
         fn->code->module_state_id = UINT32_MAX;
         fn->code->formal_length = -1;
         fn->code->body_kind = JS_FUNCTION_BODY_CODE;
@@ -451,9 +449,9 @@ static JsCallableCode* js_callable_code_prepare_unique(JsFunction* fn,
     if (fn && fn->code && fn->code->interned) js_callable_code_detach(fn);
     JsCallableCode* code = js_fn_code_ensure(fn);
     if (!code) return NULL;
+    js_callable_code_init_definition(code, NULL, NULL, param_count);
     code->func_ptr = func_ptr;
     code->runtime_context = runtime_context;
-    code->param_count = param_count;
     code->module_state_id = module_state_id;
     code->formal_length = -1;
     code->body_kind = JS_FUNCTION_BODY_CODE;
@@ -760,7 +758,7 @@ static JsFunction* js_alloc_function_storage(bool gc_backed) {
 static void js_function_init_common(JsFunction* fn) {
     // D6.2.2v2: every callable wrapper has the shared layout marker before
     // any JS-only capability or property state is published.
-    js_function_init_header(fn);
+    js_function_init_abi(fn);
     fn->prototype = ItemNull;
 }
 
@@ -821,11 +819,10 @@ extern "C" Item js_new_interpreted_function(AstFuncNode* function,
     js_function_init_common(fn);
     JsAstBody* ast = js_fn_ast_ensure(fn);
     if (!ast) return ItemError;
-    ast->definition = js_script_ast_definition_ensure(script, function);
-    if (!ast->definition) return ItemError;
-    JsCallableCode* code = js_script_ast_definition_code_ensure(ast->definition,
+    JsCallableCode* code = js_script_ast_callable_ensure(script, function,
         param_count, lambda_active_module_state_id());
     if (!code) return ItemError;
+    ast->definition = code;
     // definition metadata is installed directly, with no per-value temporary.
     fn->code = code;
     ast->env = environment;

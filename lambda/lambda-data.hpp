@@ -1153,6 +1153,16 @@ extern Type TYPE_ANY_NO_ERROR;
 extern Type TYPE_ANY_NO_NULL;
 extern Type TYPE_ANY_NO_ERROR_OR_NULL;
 
+// D2.6.6v2: the generic map/element/object descriptors are compact `Type`
+// singletons.  Only a concrete descriptor can be read as its extended
+// TypeMap shape; keeping the discriminator here prevents each language front
+// end from duplicating that ABI boundary.
+static inline bool lambda_type_is_concrete_attr_shape(const Type* type) {
+    if (!type || (type->type_id != LMD_TYPE_MAP &&
+            type->type_id != LMD_TYPE_ELEMENT)) return false;
+    return type != &TYPE_MAP && type != &TYPE_ELMT && type != &TYPE_OBJECT;
+}
+
 // These three values use LMD_TYPE_TYPE as a compact semantic category, not a
 // TypeType payload. Callers must test this before reading extended Type fields.
 static inline bool type_is_global_meta_type(const Type* type) {

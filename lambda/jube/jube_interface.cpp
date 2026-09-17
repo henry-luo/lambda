@@ -372,7 +372,7 @@ static Item jube_member_lambda_method_item(Item receiver, JubeMemberRecord* rec)
     fn = rooted_fn.get();
     env[0] = rooted_receiver.get();
     env[1] = (Item){.item = (uint64_t)(uintptr_t)rec};
-    function_header_init((FunctionHeader*)fn, LMD_TYPE_FUNC, FN_ENTRY_ABI_HOST_ADAPTER);
+    function_init_abi(fn, LMD_TYPE_FUNC, FN_ENTRY_ABI_HOST_ADAPTER);
     fn->arity = (uint8_t)arity;
     fn->fn_type = NULL;
     fn->ptr = (fn_ptr)s_jube_lambda_method_tramps[arity];

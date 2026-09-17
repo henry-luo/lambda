@@ -96,7 +96,7 @@ static JsScript* js_common_ast_cache_clone(Runtime* runtime,
     // Module declaration instantiation belongs to this fresh execution even
     // though the parse-time module shape itself is shared.
     instance->es_module_scope_initialized = false;
-    instance->ast_definitions = NULL;
+    instance->ast_callables = NULL;
     instance->field_initializers = NULL;
     runtime_register_script(runtime, (Script*)instance);
     return instance;
@@ -499,9 +499,9 @@ static void js_script_destroy_extension(Script* base_script) {
         hashmap_free(script->type_registry);
         script->type_registry = NULL;
     }
-    if (script->ast_definitions) {
-        hashmap_free(script->ast_definitions);
-        script->ast_definitions = NULL;
+    if (script->ast_callables) {
+        hashmap_free(script->ast_callables);
+        script->ast_callables = NULL;
     }
     if (script->field_initializers) {
         hashmap_free(script->field_initializers);
@@ -574,20 +574,22 @@ JsFunctionNode* js_script_field_initializer_ensure(JsScript* script,
     return JsFieldInitializerMap::oom(script->field_initializers) ? NULL : function;
 }
 
-struct JsAstDefinitionEntry {
+struct JsAstCallableEntry {
     AstFunctionId function_id;
-    JsAstDefinition* definition;
+    JsCallableCode* code;
 };
-typedef TypedHashMap<JsAstDefinitionEntry,
-    HashMapIntegralMemberKeyOps<JsAstDefinitionEntry, &JsAstDefinitionEntry::function_id>>
-    JsAstDefinitionMap;
+typedef TypedHashMap<JsAstCallableEntry,
+    HashMapIntegralMemberKeyOps<JsAstCallableEntry, &JsAstCallableEntry::function_id>>
+    JsAstCallableMap;
 
-JsAstDefinition* js_script_ast_definition_ensure(JsScript* script,
-        AstFuncNode* function) {
+// The Script pool owns one canonical code artifact for each indexed AST
+// function. Closures retain that artifact rather than a parallel definition row.
+JsCallableCode* js_script_ast_callable_ensure(JsScript* script,
+        AstFuncNode* function, int param_count, uint32_t module_state_id) {
     if (!script || !script->pool || !function) return NULL;
-    if (!script->ast_definitions) {
-        script->ast_definitions = JsAstDefinitionMap::create(8);
-        if (!script->ast_definitions) return NULL;
+    if (!script->ast_callables) {
+        script->ast_callables = JsAstCallableMap::create(8);
+        if (!script->ast_callables) return NULL;
     }
     AstNodeId node_id = ast_index_find(&script->ast_index, (AstNode*)function);
     AstFunctionId function_id = node_id != AST_NODE_ID_INVALID
@@ -597,41 +599,26 @@ JsAstDefinition* js_script_ast_definition_ensure(JsScript* script,
         log_error("js-definition: function is missing its indexed identity");
         return NULL;
     }
-    JsAstDefinitionEntry key = {function_id, NULL};
-    const JsAstDefinitionEntry* found = JsAstDefinitionMap::get(script->ast_definitions, key);
-    if (found) return found->definition;
-    JsAstDefinition* definition = (JsAstDefinition*)pool_calloc(
-        js_script_execution_pool(script), sizeof(JsAstDefinition));
-    if (!definition) return NULL;
+    JsAstCallableEntry key = {function_id, NULL};
+    const JsAstCallableEntry* found = JsAstCallableMap::get(script->ast_callables, key);
+    if (found) return found->code;
+    JsCallableCode* code = (JsCallableCode*)pool_calloc(
+        js_script_execution_pool(script), sizeof(JsCallableCode));
+    if (!code) return NULL;
     JsAstFunctionFacts facts = js_ast_collect_function_facts(
         (JsAstNode*)function->params, (JsAstNode*)function->body);
-    definition->function = function;
-    definition->script = script;
-    definition->has_direct_eval = facts.has_direct_eval;
-    definition->uses_arguments = facts.observations & JS_AST_OBSERVES_ARGUMENTS;
-    key.definition = definition;
-    JsAstDefinitionMap::set(script->ast_definitions, key);
-    if (JsAstDefinitionMap::oom(script->ast_definitions)) return NULL;
-    return definition;
-}
-
-// AST code is owned by the retained Script pool, not by any one closure. The
-// definition row is the identity boundary; every AST function value points at
-// the same immutable code record while the Script remains live (D8.1.3v10,
-// D6.2.1; JSCU33(A)).
-JsCallableCode* js_script_ast_definition_code_ensure(
-        JsAstDefinition* definition, int param_count, uint32_t module_state_id) {
-    if (!definition || !definition->script || !definition->script->pool) return NULL;
-    if (definition->code) return definition->code;
-    JsCallableCode* code = (JsCallableCode*)pool_calloc(
-        js_script_execution_pool(definition->script), sizeof(JsCallableCode));
-    if (!code) return NULL;
-    code->param_count = param_count;
+    js_callable_code_init_definition(code, function, (Script*)script,
+        param_count);
     code->formal_length = (int16_t)param_count;
     code->module_state_id = module_state_id;
     code->body_kind = JS_FUNCTION_BODY_AST;
+    code->has_direct_eval = facts.has_direct_eval;
+    code->uses_arguments = facts.observations &
+        JS_AST_OBSERVES_ARGUMENTS;
     code->definition_owned = true;
-    definition->code = code;
+    key.code = code;
+    JsAstCallableMap::set(script->ast_callables, key);
+    if (JsAstCallableMap::oom(script->ast_callables)) return NULL;
     return code;
 }
 

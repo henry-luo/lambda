@@ -874,7 +874,8 @@ static void jm_emit_span_entry(JsMirTranspiler* mt, JsFuncCollected* fc,
     // kernel has already verified it is current.
     MIR_reg_t code = em_new_reg(em, "span_code", MIR_T_I64);
     em_emit_insn(em, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, code),
-        MIR_new_mem_op(ctx, MIR_T_P, (MIR_disp_t)offsetof(JsFunction, code),
+        MIR_new_mem_op(ctx, MIR_T_P,
+            (MIR_disp_t)js_function_offset(&JsFunction::code),
             callee, 0, 1)));
     MIR_reg_t runtime = em_new_reg(em, "span_ctx", MIR_T_I64);
     em_emit_insn(em, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, runtime),
@@ -888,7 +889,8 @@ static void jm_emit_span_entry(JsMirTranspiler* mt, JsFuncCollected* fc,
     if (has_captures) {
         MIR_reg_t env = em_new_reg(em, "span_env", MIR_T_I64);
         em_emit_insn(em, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, env),
-            MIR_new_mem_op(ctx, MIR_T_P, (MIR_disp_t)offsetof(JsFunction, env),
+            MIR_new_mem_op(ctx, MIR_T_P,
+                (MIR_disp_t)js_function_offset(&JsFunction::env),
                 callee, 0, 1)));
         types[oi] = MIR_T_I64;
         ops[oi++] = MIR_new_reg_op(ctx, env);

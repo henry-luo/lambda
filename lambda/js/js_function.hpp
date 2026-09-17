@@ -10,13 +10,10 @@ struct JsFunction;
 struct AstFuncNode;
 struct JsScript;
 struct JsInterpEnv;
-struct JsAstDefinition;
 struct JsCallableCode;
 
-JsAstDefinition* js_script_ast_definition_ensure(JsScript* script,
-                                                 AstFuncNode* function);
-JsCallableCode* js_script_ast_definition_code_ensure(
-    JsAstDefinition* definition, int param_count, uint32_t module_state_id);
+JsCallableCode* js_script_ast_callable_ensure(JsScript* script,
+    AstFuncNode* function, int param_count, uint32_t module_state_id);
 
 enum JsFunctionBodyKind : uint8_t {
     JS_FUNCTION_BODY_CODE = 0,
@@ -110,22 +107,11 @@ struct JsNativeCode {
     uint8_t               policy;
 };
 
-// Immutable AST definition facts are owned by JsScript and shared by every
-// closure made for the same AstFuncNode. The per-value body retains only its
-// closure environment and lexical Item homes (D6.2.1; JSCU33(A)).
-struct JsAstDefinition {
-    AstFuncNode* function;
-    JsScript* script;
-    JsCallableCode* code;
-    bool has_direct_eval;
-    bool uses_arguments;
-};
-
 // An AST-bodied closure retains source-level semantic state while using the
-// ordinary JS call kernel. The definition pointer is non-owning; the Script
-// retains the definition rows until its AST function values are gone.
+// ordinary JS call kernel. The code pointer is non-owning; the Script owns its
+// definition artifact until its AST function values are gone.
 struct JsAstBody {
-    JsAstDefinition* definition;
+    JsCallableCode* definition;
     JsInterpEnv* env;
     Item lexical_this;
     Item lexical_new_target;
@@ -139,30 +125,49 @@ struct JsEvalOrigin {
     int64_t column_offset;
 };
 
-// JSCU33(A): immutable definition-site facts have one owner shared by the
-// callable value and any wrappers materialized from that definition. Mutable
-// value state (prototype, properties, bound/class payload and finalized
-// capabilities) remains on JsFunction itself.
+// One JS code record is shared by AST closures and MIR-interned values. Keep
+// definition facts and realm code facts directly on that owner: neither has an
+// independent allocation or identity (D6.2.1, D8.2.3; JSCU52).
 struct JsCallableCode {
-    void* func_ptr;
+    // 8-byte group
+    const void* definition;
+    struct Script* definition_module;
     String* source_text;
+    void* func_ptr;
     Context* runtime_context;
+    // a weak realm table is detached before its owner is destroyed.
+    HashMap* intern_table;
+
+    // 4-byte group
     int param_count;
     int catalog_id;
     uint32_t module_state_id;
+    uint32_t intern_refcount;
+
+    // compact definition and realm flags
     int16_t formal_length;
     uint8_t intrinsic_class;
     uint8_t typed_array_element_type_plus_one;
     bool eval_initializer_context;
     uint8_t body_kind;
-    uint32_t intern_refcount;
-    bool interned;
-    // AST definition records live in their retained Script pool; their code
-    // pointer is shared by every closure made from that definition.
+    bool has_direct_eval;
+    bool uses_arguments;
+    // Script-pool code is shared by all closures from one AST definition and
+    // must not be reclaimed when one GC function value dies.
     bool definition_owned;
-    // a weak realm table is detached before its owner is destroyed.
-    HashMap* intern_table;
+    // A compiled JS entry is valid only in the realm that compiled it.
+    bool interned;
 };
+
+static inline void js_callable_code_init_definition(JsCallableCode* code,
+                                                     const void* definition,
+                                                     struct Script* definition_module,
+                                                     int param_count) {
+    if (!code) return;
+    code->definition = definition;
+    code->definition_module = definition_module;
+    code->param_count = param_count;
+}
 
 // JSCUO8: one payload word on the value, not six. A value that needs none
 // carries a single null pointer; a value that needs any carries one container
@@ -179,21 +184,19 @@ struct JsFunctionPayload {
     JsEvalOrigin* eval_origin;
 };
 
-struct JsFunction {
+struct JsFunction : Function {
     // JSCUO9: fields are grouped by alignment. The previous source order left
     // 30 B of interior padding — six 4- and 1-byte fields each sitting in an
     // 8-byte hole — which is what kept the record in the 256 B GC size class.
     //
-    // The first eight bytes are laid out to match Lambda's `Function` prefix
-    // field for field, so the two records that share LMD_TYPE_FUNC can
-    // eventually share one header (§4). Two of those bytes are reserved rather
-    // than used: JS keeps its arity in the shared `JsCallableCode` definition,
+    // Function is the first non-virtual base, so JS and Lambda use the same
+    // callable record. Its tail remains Lambda-specific until a later audit
+    // proves a JS field has the same ownership and GC contract. Two base bytes
+    // are reserved rather than used: JS keeps its arity in `JsCallableCode`,
     // not on the value, and a JS closure environment can exceed 255 slots
     // (a resumable layout reserves 161 before the first capture), so its size
     // stays the `env_size` int below. Only `type_id` and `entry_abi` are
     // contractual (see JSCUO6).
-    LAMBDA_FUNCTION_HEADER_FIELDS; // FunctionHeader at offset zero
-
     // 8-byte group
     Item* env;
     Item prototype;
@@ -228,9 +231,7 @@ inline const JsClassData js_fn_class_absent{};
 inline const JsWithData js_fn_with_absent{};
 
 inline const JsEvalOrigin js_fn_eval_origin_absent{};
-inline const JsCallableCode js_fn_code_absent{
-    NULL, NULL, NULL, 0, 0, UINT32_MAX, -1, 0, 0, false,
-    JS_FUNCTION_BODY_CODE, 0, false, false, NULL};
+inline const JsCallableCode js_fn_code_absent{};
 
 #define JS_FN_PAYLOAD_READ(fn, field) \
     ((fn) && (fn)->payload && (fn)->payload->field ? (fn)->payload->field \
@@ -252,10 +253,10 @@ static inline int js_fn_param_count(const JsFunction* fn) {
     return js_fn_code(fn)->param_count;
 }
 static inline uint32_t js_fn_module_state_id(const JsFunction* fn) {
-    return js_fn_code(fn)->module_state_id;
+    return fn && fn->code ? fn->code->module_state_id : UINT32_MAX;
 }
 static inline int16_t js_fn_formal_length(const JsFunction* fn) {
-    return js_fn_code(fn)->formal_length;
+    return fn && fn->code ? fn->code->formal_length : -1;
 }
 static inline uint8_t js_fn_intrinsic_class(const JsFunction* fn) {
     return js_fn_code(fn)->intrinsic_class;
@@ -267,7 +268,8 @@ static inline bool js_fn_eval_initializer_context(const JsFunction* fn) {
     return js_fn_code(fn)->eval_initializer_context;
 }
 static inline uint8_t js_fn_body_kind(const JsFunction* fn) {
-    return js_fn_code(fn)->body_kind;
+    return fn && fn->code ? fn->code->body_kind :
+        JS_FUNCTION_BODY_CODE;
 }
 
 static inline const JsNativeCode* js_fn_native(const JsFunction* fn) {
@@ -276,24 +278,24 @@ static inline const JsNativeCode* js_fn_native(const JsFunction* fn) {
 static inline const JsAstBody* js_fn_ast(const JsFunction* fn) {
     return JS_FN_PAYLOAD_READ(fn, ast);
 }
-static inline const JsAstDefinition* js_fn_ast_definition(const JsFunction* fn) {
+static inline const JsCallableCode* js_fn_ast_definition(const JsFunction* fn) {
     const JsAstBody* ast = js_fn_ast(fn);
     return ast && ast->definition ? ast->definition : NULL;
 }
 static inline AstFuncNode* js_fn_ast_function(const JsFunction* fn) {
-    const JsAstDefinition* definition = js_fn_ast_definition(fn);
-    return definition ? definition->function : NULL;
+    const JsCallableCode* definition = js_fn_ast_definition(fn);
+    return definition ? (AstFuncNode*)definition->definition : NULL;
 }
 static inline JsScript* js_fn_ast_script(const JsFunction* fn) {
-    const JsAstDefinition* definition = js_fn_ast_definition(fn);
-    return definition ? definition->script : NULL;
+    const JsCallableCode* definition = js_fn_ast_definition(fn);
+    return definition ? (JsScript*)definition->definition_module : NULL;
 }
 static inline bool js_fn_ast_has_direct_eval(const JsFunction* fn) {
-    const JsAstDefinition* definition = js_fn_ast_definition(fn);
+    const JsCallableCode* definition = js_fn_ast_definition(fn);
     return definition && definition->has_direct_eval;
 }
 static inline bool js_fn_ast_uses_arguments(const JsFunction* fn) {
-    const JsAstDefinition* definition = js_fn_ast_definition(fn);
+    const JsCallableCode* definition = js_fn_ast_definition(fn);
     return definition && definition->uses_arguments;
 }
 static inline const JsBoundData* js_fn_bound(const JsFunction* fn) {
@@ -323,10 +325,11 @@ void js_callable_code_release(JsCallableCode* code);
 void js_callable_code_table_destroy(HashMap* table);
 
 // A callable Item holds this record when its entry ABI names a hosted
-// language. Reading it is safe on either layout: `entry_abi` sits at offset 3
-// in both, and a Lambda `Function` never carries a hosted value.
+// language. Reading it is safe on either layout: the Function base supplies
+// `entry_abi` at offset 3, and a Lambda `Function` never carries a hosted
+// value.
 static inline bool js_fn_is_js_layout(const void* callable) {
-    return function_header_has_abi((const FunctionHeader*)callable,
+    return function_has_abi((const Function*)callable,
         FN_ENTRY_ABI_JS_FUNCTION);
 }
 
@@ -354,20 +357,23 @@ static inline bool js_fn_is_js_layout(const void* callable) {
 // change. JSCUO9 took that route: `bound_this_store` moved into JsBoundData
 // (only a bound function has a bound receiver) and the remaining fields are
 // ordered by alignment, so neither pin survives. Only the two discrimination
-// offsets below are contractual.
-static_assert(offsetof(JsFunction, type_id) == 0,
-              "JsFunction type tag must sit where every Item consumer reads it");
-static_assert(offsetof(JsFunction, entry_abi) == 3,
-              "JsFunction layout discriminator is read before any field access");
-static_assert(offsetof(JsFunction, entry_abi) == offsetof(Function, entry_abi),
-              "the discriminator must sit at one offset in both callable layouts");
-static_assert(offsetof(JsFunction, flags) == offsetof(Function, flags),
-              "the shared callable prefix must agree field for field");
-static_assert(offsetof(JsFunction, type_id) < offsetof(JsFunction, code),
-              "the discrimination prefix must precede every other field");
+// offsets below are contractual. JsFunction has a data-bearing Function base,
+// so it is intentionally not standard-layout and `offsetof(JsFunction, ...)`
+// is not valid C++17. Generated JS code obtains tail offsets through the helper
+// below; the common ABI remains directly pinned on Function.
+static_assert(offsetof(Function, type_id) == 0,
+              "Function type tag must sit where every Item consumer reads it");
+static_assert(offsetof(Function, entry_abi) == 3,
+              "Function layout discriminator is read before any field access");
 
-static inline void js_function_init_header(JsFunction* fn) {
-    function_header_init((FunctionHeader*)fn, LMD_TYPE_FUNC,
+template <typename Field>
+static inline size_t js_function_offset(Field JsFunction::*field) {
+    JsFunction layout;
+    return (size_t)((const char*)&(layout.*field) - (const char*)&layout);
+}
+
+static inline void js_function_init_abi(JsFunction* fn) {
+    function_init_abi((Function*)fn, LMD_TYPE_FUNC,
         FN_ENTRY_ABI_JS_FUNCTION);
 }
 

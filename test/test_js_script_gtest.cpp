@@ -36,8 +36,15 @@ TEST(JsCallableDefinitions, SharesAstDefinitionWithoutSharingCaptures) {
     JsFunction* a = (JsFunction*)first.function;
     JsFunction* b = (JsFunction*)second.function;
     EXPECT_NE(a, b);
+    EXPECT_EQ((void*)a, (void*)static_cast<Function*>(a));
+    EXPECT_TRUE(function_has_abi(static_cast<Function*>(a),
+        FN_ENTRY_ABI_JS_FUNCTION));
     EXPECT_EQ(a->code, b->code);
     EXPECT_EQ(js_fn_ast_definition(a), js_fn_ast_definition(b));
+    EXPECT_EQ(a->code->definition, js_fn_ast_definition(a)->definition);
+    EXPECT_EQ(a->code->definition_module,
+        js_fn_ast_definition(a)->definition_module);
+    EXPECT_EQ(a->code->param_count, js_fn_param_count(a));
     EXPECT_NE(js_fn_ast(a)->env, js_fn_ast(b)->env);
     EXPECT_EQ(js_call_function(first, ItemNull, NULL, 0).item, flt2it(1.0).item);
     EXPECT_EQ(js_call_function(second, ItemNull, NULL, 0).item, flt2it(2.0).item);
@@ -76,6 +83,40 @@ TEST(JsCallableDefinitions, LiveMirValuesSurviveWeakTableTeardown) {
         EXPECT_EQ(a->code->intern_table, nullptr);
         EXPECT_EQ(js_fn_param_count(a), 1);
     }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsRuntimeResources, SharesOneContextCapsuleAcrossHostOwners) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] = "0;";
+    ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, source,
+        sizeof(source) - 1, "resource-capsule.js", NULL)));
+
+    EvalContext* owner = runtime.eval_context;
+    ASSERT_NE(owner, nullptr);
+    RuntimeResourceTable* resources = js_runtime_resource_table();
+    ASSERT_NE(resources, nullptr);
+    EXPECT_EQ(resources, context_capsule(owner,
+        CONTEXT_CAPSULE_RUNTIME_RESOURCES));
+
+    {
+        RootFrame roots(1);
+        Rooted<Item> resource_owner(roots, js_new_object());
+        const RuntimeResourceDescriptor* descriptor =
+            runtime_resource_descriptor_from_legacy_name("timer");
+        ASSERT_NE(descriptor, nullptr);
+        uint32_t id = runtime_resource_table_add(resources, resource_owner.get(),
+            descriptor, NULL, NULL, true);
+        ASSERT_NE(id, 0u);
+        EXPECT_EQ(runtime_resource_table_active_count(resources), 1);
+        EXPECT_EQ(runtime_resource_table_value(resources,
+            runtime_resource_table_entry(resources, id)).item,
+            resource_owner.get().item);
+        runtime_resource_table_remove(resources, id);
+        EXPECT_EQ(runtime_resource_table_active_count(resources), 0);
+    }
+
     runtime_cleanup(&runtime);
 }
 

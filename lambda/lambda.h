@@ -1443,53 +1443,6 @@ enum {
     FN_ENTRY_ABI_JS_FUNCTION = FN_ENTRY_ABI_HOSTED_FIRST,
 };
 
-// The first eight bytes of every callable value are one ABI carrier. Lambda
-// and hosted runtimes can share initialization and capability discrimination
-// without pretending their definition and property tails are interchangeable.
-#define LAMBDA_FUNCTION_HEADER_FIELDS \
-    TypeId type_id; \
-    uint8_t arity; \
-    uint8_t closure_field_count; \
-    FunctionEntryAbi entry_abi; \
-    union { \
-        uint32_t flags; \
-        struct { \
-            uint32_t reserved_bit_ret_item : 1; \
-            uint32_t has_kwargs : 1; \
-            uint32_t is_generator : 1; \
-            uint32_t is_coroutine : 1; \
-            uint32_t is_system_function_ref : 1; \
-            uint32_t requires_scalar_result_home : 1; \
-            uint32_t requires_runtime_context : 1; \
-            uint32_t mir_public_return_shape : 2; \
-            uint32_t reserved_flags : 23; \
-        }; \
-    }
-
-struct FunctionHeader {
-    LAMBDA_FUNCTION_HEADER_FIELDS;
-};
-typedef struct FunctionHeader FunctionHeader;
-
-LAMBDA_STATIC_ASSERT(sizeof(FunctionHeader) == 8,
-                     "FunctionHeader must preserve the callable ABI prefix");
-
-static inline void function_header_init(FunctionHeader* header, TypeId type_id,
-                                        FunctionEntryAbi entry_abi) {
-    if (!header) return;
-    header->type_id = type_id;
-    header->arity = 0;
-    header->closure_field_count = 0;
-    header->entry_abi = entry_abi;
-    header->flags = 0;
-}
-
-static inline bool function_header_has_abi(const FunctionHeader* header,
-                                           FunctionEntryAbi entry_abi) {
-    return header && header->type_id == LMD_TYPE_FUNC &&
-        header->entry_abi == entry_abi;
-}
-
 // RVO13: public boxed entries publish their post-call companion contract so
 // dynamic dispatch can skip slot resolution for proven shape-1 results.
 enum {
@@ -1502,7 +1455,30 @@ enum {
 // Function as first-class value
 // Supports both direct function references and closures
 struct Function {
-    LAMBDA_FUNCTION_HEADER_FIELDS; // FunctionHeader at offset zero
+    // common callable ABI, inherited by JsFunction. Generated code and GC read
+    // type_id at byte 0, closure_field_count at byte 2, and entry_abi at byte 3.
+    TypeId type_id;
+    uint8_t arity;
+    uint8_t closure_field_count;
+    FunctionEntryAbi entry_abi;
+    union {
+        uint32_t flags;
+        struct {
+            uint32_t reserved_bit_ret_item : 1;
+            uint32_t has_kwargs : 1;
+            uint32_t is_generator : 1;
+            uint32_t is_coroutine : 1;
+            uint32_t is_system_function_ref : 1;
+            uint32_t requires_scalar_result_home : 1;
+            uint32_t requires_runtime_context : 1;
+            uint32_t mir_public_return_shape : 2;
+            uint32_t reserved_flags : 23;
+        };
+    };
+
+    // Lambda-specific tail. JsFunction inherits this storage today; future
+    // tail unification must prove matching ownership, GC and call semantics
+    // before reusing any field rather than treating same-shaped fields alike.
     void* fn_type;        // fn type definition (TypeFunc*)
     fn_ptr ptr;           // native function pointer
     void* closure_env;    // closure environment (NULL if no captures)
@@ -1510,7 +1486,7 @@ struct Function {
     struct Context* runtime_context; // owner passed through generated calls
     // Trailing only: generated code pokes type_id at offset 0 and
     // closure_field_count at offset 2, so no field may shift.
-    // AST definition site (AstFuncNode*) — the T0 body plus, with `module`,
+    // AST definition site (AstFuncNode*) — the T0 body plus, with `def_module`,
     // the (module, node) identity D6.2.1/S5.5.1 already require. NULL for
     // natively-compiled and foreign entries.
     const void* def;
@@ -1529,6 +1505,22 @@ LAMBDA_STATIC_ASSERT(offsetof(Function, closure_field_count) ==
                      "Function closure count must match the GC ABI");
 LAMBDA_STATIC_ASSERT(offsetof(Function, closure_env) == LAMBDA_GC_OFF_FUNCTION_CLOSURE_ENV,
                      "Function closure environment must match the GC ABI");
+
+static inline void function_init_abi(Function* function, TypeId type_id,
+                                     FunctionEntryAbi entry_abi) {
+    if (!function) return;
+    function->type_id = type_id;
+    function->arity = 0;
+    function->closure_field_count = 0;
+    function->entry_abi = entry_abi;
+    function->flags = 0;
+}
+
+static inline bool function_has_abi(const Function* function,
+                                    FunctionEntryAbi entry_abi) {
+    return function && function->type_id == LMD_TYPE_FUNC &&
+        function->entry_abi == entry_abi;
+}
 
 // Dynamic function invocation for first-class functions
 Item fn_call(Function* fn, List* args);
