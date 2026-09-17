@@ -7939,7 +7939,8 @@ extern "C" void js_func_init_property(Item fn_item, Item key, Item value) {
         // This is the internal [[DefineOwnProperty]] initialization path. A
         // normal [[Set]] would reject updates to the non-writable name/length
         // descriptors while SetFunctionName/Length is still publishing them.
-        key = key_root.get();
+        key = js_property_storage_key(key_root.get());
+        key_root.set(key);
         value = value_root.get();
         String* key_string = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
         bool identity_key = key_string && property_key_requires_identity(key_string);
@@ -16150,9 +16151,42 @@ static bool js_regex_special_property_contains(int kind, int cp) {
 
 static bool js_regex_match_special_property(int special_kind, const char* input, int input_len,
                                             int start_pos, re2::StringPiece* matches, int num_groups) {
-    if (start_pos != 0 || input_len <= 0) return false;
-    bool negate = special_kind < 0;
-    int kind = negate ? -special_kind : special_kind;
+    if (!input || input_len <= 0 || start_pos < 0 || start_pos > input_len) {
+        return false;
+    }
+    bool search_mode = false;
+    int raw_kind = special_kind;
+    if (raw_kind >= JS_REGEX_PROP_SEARCH_MODE) {
+        search_mode = true;
+        raw_kind -= JS_REGEX_PROP_SEARCH_MODE;
+    } else if (raw_kind <= -JS_REGEX_PROP_SEARCH_MODE) {
+        search_mode = true;
+        raw_kind += JS_REGEX_PROP_SEARCH_MODE;
+    }
+    bool negate = raw_kind < 0;
+    int kind = negate ? -raw_kind : raw_kind;
+
+    if (search_mode) {
+        // A bare property/class escape searches from lastIndex.  Its boolean
+        // fast path already has this behavior; exec must retain the matched
+        // code-point span for the shared RegExp protocol.
+        int pos = start_pos;
+        while (pos < input_len) {
+            int candidate = pos;
+            int cp = js_regex_decode_utf8_permissive(input, input_len, &pos);
+            bool contains = js_regex_special_property_contains(kind, cp);
+            if (negate ? !contains : contains) {
+                if (num_groups > 0) {
+                    matches[0] = re2::StringPiece(input + candidate,
+                        pos - candidate);
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    if (start_pos != 0) return false;
     int pos = 0;
     while (pos < input_len) {
         int cp = js_regex_decode_utf8_permissive(input, input_len, &pos);
@@ -27509,6 +27543,9 @@ extern "C" Item js_to_object(Item value) {
 static void js_mark_property_flag(Item object, Item name, uint32_t flag) {
     TypeId tid = get_type_id(object);
     if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_FUNC && tid != LMD_TYPE_ARRAY) return;
+    // Attribute storage is the ordinary shape/slot boundary.  Symbols stay
+    // direct at observable operations, then use their NameId-backed key here.
+    name = js_property_storage_key(name);
     if (get_type_id(name) != LMD_TYPE_STRING) return;
     String* str = it2s(name);
     if (property_key_requires_identity(str)) {

@@ -1701,6 +1701,9 @@ static void js_set_function_name_from_property_key_impl(Item fn_item, Item key_i
                                                         int64_t prefix_kind,
                                                         bool only_if_anonymous) {
     Item prop_key = js_to_property_key(key_item);
+    // Function-name display consumes a Symbol's diagnostic spelling; it is
+    // not a property lookup and therefore does not expose the storage key.
+    prop_key = js_property_storage_key(prop_key);
     if (get_type_id(prop_key) != LMD_TYPE_STRING) return;
     String* key = it2s(prop_key);
     if (!key) return;

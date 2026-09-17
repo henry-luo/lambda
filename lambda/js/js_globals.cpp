@@ -930,12 +930,17 @@ static Item js_define_property_apply_validated_descriptor(Item obj, Item name,
 static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descriptor) {
     JS_RETURN_IF_ERROR(js_require_object_type(obj, "defineProperty"));
     if (obj.item == 0) return obj;
-    // v18m: coerce property name to property key (ES2020 §7.1.14 ToPropertyKey).
-    // A Symbol takes its transitional NameId property route; others coerce to string.
+    // Convert at the ECMAScript boundary, then lower only this ordinary
+    // descriptor application to the NameId-backed shape key.
     TypeId name_type = get_type_id(name);
     if (name_type != LMD_TYPE_STRING) {
-        name = js_to_property_key(name);
+        JS_ASSIGN_OR_RETURN_INTO(name, js_to_property_key(name));
     }
+    Item storage_name = js_property_storage_key(name);
+    if (storage_name.item == ItemNull.item && js_key_is_symbol(name)) {
+        return ItemError;
+    }
+    name = storage_name;
 
     bool is_arguments_exotic = js_is_arguments_exotic_array(obj);
     JS_ASSIGN_OR_RETURN(array_validation, js_define_property_validate_array_exotic(
@@ -5694,6 +5699,11 @@ extern "C" Item js_in(Item key, Item object) {
         }
     }
     JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
+    Item storage_key = js_property_storage_key(key);
+    if (storage_key.item == ItemNull.item && js_key_is_symbol(key)) {
+        return ItemError;
+    }
+    key = storage_key;
     if (js_is_resting_error(object)) {
         // Error instances keep user-defined own properties in a side map; the
         // carrier Map is not an ordinary shape table, so probing it directly
@@ -7185,14 +7195,17 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     obj = object_root.get();
     name = name_root.get();
 
-    // Property reflection preserves Symbol identity; ToString would turn it
-    // into a user-visible spelling and merge it with an ordinary string key.
-    // Object.getOwnPropertyDescriptor performs ToPropertyKey before ordinary
-    // lookup, but exotic hooks must see the original key identity (S#7.1.19).
+    // Property reflection preserves Symbol identity through ToPropertyKey and
+    // both exotic hooks. Ordinary descriptor storage lowers it only after
+    // those observable boundaries.
     Item name_str_item = js_to_property_key(name);
-    name_root.set(name_str_item);
     if (item_is_error(name_str_item)) return name_str_item;
-    if (get_type_id(name_str_item) != LMD_TYPE_STRING) return ItemNull;
+    Item storage_name = js_property_storage_key(name_str_item);
+    if (storage_name.item == ItemNull.item && js_key_is_symbol(name_str_item)) {
+        return ItemError;
+    }
+    name_root.set(storage_name);
+    if (get_type_id(storage_name) != LMD_TYPE_STRING) return ItemNull;
     // ToPropertyKey may collect; reload both operands from their exact roots
     // before any exotic-object hook observes them (D5.1.1).
     obj = object_root.get();
@@ -7204,7 +7217,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     // coerced string key rather than the raw input (which may be an object
     // whose toString returns the actual key — see test
     // built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-2-42).
-    name = name_str_item;
+    name = name_root.get();
 
     {
         Item proxy_result = ItemNull;
@@ -9427,7 +9440,7 @@ static Item js_group_by_kernel(Item items, Item callback, Item result,
 }
 
 static Item js_group_by_object_find(Item result, Item key) {
-    String* ks = it2s(key);
+    String* ks = it2s(js_property_storage_key(key));
     if (!ks) return ItemNull;
     bool found = false;
     Item group = js_map_shape_lookup_ext(result.map, ks->chars, (int)ks->len, &found);
@@ -9436,11 +9449,12 @@ static Item js_group_by_object_find(Item result, Item key) {
 JS_FORWARD_STATIC_ITEM(js_group_by_object_put, (Item result, Item key, Item group),
     js_set_key_default, (result, key, group))
 
-// Stage A1: ToPropertyKey per spec — a Symbol returned by the callback takes
-// its NameId property route rather than throwing via js_to_string.
+// Object.groupBy preserves a Symbol returned from ToPropertyKey until the
+// ordinary object lookup/store boundary.
 static Item js_group_by_object_key(Item raw_key) {
     JS_ASSIGN_OR_RETURN(key, js_to_property_key(raw_key));
-    return get_type_id(key) == LMD_TYPE_STRING ? key : ItemNull;
+    return (get_type_id(key) == LMD_TYPE_STRING || js_key_is_symbol(key))
+        ? key : ItemNull;
 }
 
 extern "C" Item js_object_group_by(Item items, Item callback) {
@@ -10608,6 +10622,11 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
         if (js_dispatch_property_op(JS_EXOTIC_HAS_OWN, obj, 0, key, obj,
                 ItemNull, ItemNull, false, &exotic_result)) return exotic_result;
     }
+    Item storage_key = js_property_storage_key(key);
+    if (storage_key.item == ItemNull.item && js_key_is_symbol(key)) {
+        return (Item){.item = b2it(false)};
+    }
+    key = storage_key;
     if (js_is_resting_error(obj)) {
         if (get_type_id(key) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
         String* error_key = it2s(key);
@@ -12330,6 +12349,7 @@ static Item js_delete_map_property(Item obj, Item key, bool strict) {
     // created by the corresponding get/set/defineProperty path.
     JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
     js_intrinsic_note_property_mutation(obj, key);
+    key = js_property_storage_key(key);
     // v16: Frozen objects reject property deletion
     {
         Map* m = obj.map;
@@ -12450,7 +12470,7 @@ static Item js_delete_function_property(Item obj, Item key) {
         fn->properties_map = js_new_object();
         js_function_root_item_if_needed(fn, &fn->properties_map);
     }
-    Item prop_key = js_to_property_key(key);
+    Item prop_key = js_property_storage_key(js_to_property_key(key));
     if (get_type_id(prop_key) == LMD_TYPE_STRING) {
         String* prototype_key = it2s(prop_key);
         if (prototype_key && prototype_key->len == 9 &&
@@ -12502,7 +12522,8 @@ static Item js_delete_function_property(Item obj, Item key) {
 
 static Item js_delete_array_property(Item obj, Item key, bool strict) {
     Array* arr = obj.array;
-    Item property_key = js_to_property_key(key);
+    Item property_key = js_property_storage_key(js_to_property_key(key));
+    key = property_key;
     if (get_type_id(property_key) == LMD_TYPE_STRING) {
         String* identity_key = it2s(property_key);
         if (identity_key && property_key_requires_identity(identity_key)) {
@@ -12548,7 +12569,7 @@ static Item js_delete_array_property(Item obj, Item key, bool strict) {
         // Check companion-map ShapeEntry flags before deleting.
         if (js_array_has_props(arr)) {
             // Stage A1: ToPropertyKey — uniform stringification.
-            Item k_str = js_to_property_key(key);
+            Item k_str = js_property_storage_key(js_to_property_key(key));
             if (get_type_id(k_str) == LMD_TYPE_STRING) {
                 String* ks = it2s(k_str);
                 if (ks) {
@@ -12584,7 +12605,7 @@ static Item js_delete_array_property(Item obj, Item key, bool strict) {
         // longer treated as an own property after delete.
         if (js_array_has_props(arr)) {
             // Stage A1: ToPropertyKey — uniform stringification.
-            Item k_str = js_to_property_key(key);
+            Item k_str = js_property_storage_key(js_to_property_key(key));
             if (get_type_id(k_str) == LMD_TYPE_STRING) {
                 String* ks = it2s(k_str);
                 if (ks && ks->len > 0 && ks->len < 200) {
@@ -12621,7 +12642,7 @@ static Item js_delete_array_property(Item obj, Item key, bool strict) {
         Item pm_item = (Item){.map = pm};
         // Stage A1: ToPropertyKey so Symbol NameId routes and FLOAT keys
         // are canonicalized identically to define-property time.
-        Item k = js_to_property_key(key);
+        Item k = js_property_storage_key(js_to_property_key(key));
         if (get_type_id(k) == LMD_TYPE_STRING) {
             String* ks = it2s(k);
             if (ks && ks->len > 0 && ks->len < 200) {

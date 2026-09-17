@@ -1415,8 +1415,10 @@ extern "C" NameId js_well_known_symbol_name_id(int64_t symbol_id) {
 }
 
 // ES2020 §7.1.14 ToPropertyKey(argument)
-// ToPrimitive(string hint), then Symbols → their unique NameRecord key,
-// strings → as-is, others → ToString.
+// ToPrimitive(string hint), then Symbols remain Symbols, strings remain
+// strings, and every other primitive goes through ToString.  Ordinary
+// property storage lowers hosted Symbols to their compatibility NameId only at
+// the shape/slot boundary.
 static Item js_canonical_property_string(Item value) {
     if (get_type_id(value) != LMD_TYPE_STRING) return value;
     String* string_value = it2s(value);
@@ -1433,7 +1435,7 @@ static Item js_canonical_property_string(Item value) {
 
 extern "C" Item js_to_property_key(Item key) {
     if (js_key_is_symbol(key)) {
-        return js_symbol_to_key(key);
+        return key;
     }
     TypeId kt = get_type_id(key);
     if (kt == LMD_TYPE_STRING) {
@@ -1446,7 +1448,7 @@ extern "C" Item js_to_property_key(Item key) {
         return js_canonical_property_string(js_name_item("undefined", 9));
     if (kt == LMD_TYPE_MAP || kt == LMD_TYPE_ARRAY || kt == LMD_TYPE_ELEMENT || kt == LMD_TYPE_FUNC) {
         JS_ASSIGN_OR_RETURN_INTO(key, js_to_primitive(key, JS_HINT_STRING));
-        if (js_key_is_symbol(key)) return js_symbol_to_key(key);
+        if (js_key_is_symbol(key)) return key;
         kt = get_type_id(key);
         if (kt == LMD_TYPE_STRING) {
             return js_canonical_property_string(key);

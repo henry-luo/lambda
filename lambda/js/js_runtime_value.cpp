@@ -157,9 +157,6 @@ extern "C" Item js_to_number(Item value) {
     }
 
     case LMD_TYPE_INT:
-        if (js_is_symbol(value)) {
-            return js_throw_type_error("Cannot convert a Symbol value to a number");
-        }
         return js_make_number((double)it2i(value));
     case LMD_TYPE_FLOAT:
         return value;
@@ -295,6 +292,9 @@ extern "C" Item js_to_number(Item value) {
     case LMD_TYPE_INT64:
     case LMD_TYPE_UINT64:
         return js_throw_type_error("Cannot convert a BigInt value to a number");
+
+    case LMD_TYPE_SYMBOL:
+        return js_throw_type_error("Cannot convert a Symbol value to a number");
 
     default:
         // J39-1b: route object operands through the unified js_to_primitive

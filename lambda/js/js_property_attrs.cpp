@@ -4,6 +4,7 @@
  */
 
 #include "js_property_attrs.h"
+#include "js_runtime_internal.hpp"
 
 extern "C" bool js_proto_snapshot_requires_typemap_detach(Item obj);
 #include "js_props.h"
@@ -618,7 +619,8 @@ static Map* js_accessor_ensure_property_map(Item obj) {
 
 static Item js_store_virtual_accessor_pair(Item obj, Item name,
                                             JsAccessorPair* pair, uint8_t attrs) {
-    String* key = it2s(name);
+    Item storage_name = js_property_storage_key(name);
+    String* key = it2s(storage_name);
     if (!key || !pair || pair->layout_magic != JS_ACCESSOR_CELL_LAYOUT_MAGIC) {
         return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
             "invalid virtual accessor descriptor");
@@ -676,18 +678,12 @@ static Item js_store_virtual_accessor_pair(Item obj, Item name,
 // JsAccessorPair directly, so no property read can surface a cell as a value.
 extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
                                            Item setter, uint8_t attrs) {
-    if (get_type_id(name) != LMD_TYPE_STRING) return;
+    if (get_type_id(name) != LMD_TYPE_STRING && !js_key_is_symbol(name)) return;
     JS_ROOTS(roots,
         obj_root, obj,
         name_root, name,
         getter_root, getter,
         setter_root, setter);
-
-    String* ns = it2s(name_root.get());
-    if (!ns || ns->len == 0) return;
-
-    int nl = (int)ns->len;
-    if (nl > 248) return; // defensive bound retained for the transition helpers.
 
     if (!js_accessor_ensure_property_map(obj_root.get())) {
         log_error("js-accessor: native property map allocation failed");
@@ -766,10 +762,16 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
     name = name_root.get();
     fn = fn_root.get();
     // AST class/object evaluation enters this shared chokepoint directly,
-    // unlike MIR's wrapper. Canonicalize here so computed Symbols retain their
-    // internal identity record instead of being silently ignored.
+    // unlike MIR's wrapper. Canonicalize the observable property key first,
+    // then lower a hosted Symbol only for this ordinary shape update.
     JS_ASSIGN_OR_RETURN(key_result, js_to_property_key(name));
     name_root.set(key_result);
+    Item storage_name = js_property_storage_key(name_root.get());
+    if (storage_name.item == ItemNull.item && js_key_is_symbol(name_root.get())) {
+        return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
+            "Symbol property key has no storage NameId");
+    }
+    name_root.set(storage_name);
     name = name_root.get();
     if (get_type_id(name) != LMD_TYPE_STRING) return js_status_ok();
     String* ns = it2s(name);
